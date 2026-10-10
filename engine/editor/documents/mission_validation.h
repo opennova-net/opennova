@@ -28,7 +28,7 @@ std::vector<Diagnostic> validate_mission_file(const DocumentBase &document);
 // (mission_validation.cpp, static_asserted into this order).
 enum class MissionFinding {
 	RewriteDiffers,
-	InvalidInput, // the events' runs the chains cannot hold (mission.invalid_input, blocks the save)
+	InvalidInput, // a record two events' runs share, or one no run holds (mission.invalid_input, blocks the save)
 	EventOrder,
 	SsnDuplicate,
 	SsnUnscanned, // an SSN only rows of pools its lookup does not scan carry (an alive test's marker)
@@ -51,6 +51,7 @@ enum class MissionFinding {
 	Unserializable, // what the document holds that no save writes: a path's stop naming no waypoint marker, one
 	                // of path 0, a marker two stops name (D-MIS-6; blocks the save)
 	PathRebuilt,    // paths whose records name other stops than their markers carry: a save lays them out again
+	RunsPastTable,  // an event's run past its table, read unbounded by the game (gates; blocks the save)
 	kCount
 };
 const FindingCodeRow &finding_code(MissionFinding code);

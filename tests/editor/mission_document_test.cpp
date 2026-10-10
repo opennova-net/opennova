@@ -888,6 +888,24 @@ int test_parse_findings() {
 		TEST_EXPECT(findings[0].row_id != 0 && findings[0].record_kind == k(MissionKind::Event) &&
 		            document->row(findings[0].row_id) && findings[0].record == "Event 2");
 		TEST_EXPECT(!document->serialize().ok());
+		// The game reads the runs as written, the shared record resolved in both: listed, a closed mission packed as
+		// stored (it gates only an open one with unsaved edits, which a blocked mission never holds).
+		TEST_EXPECT(!findings[0].row()->gates_build &&
+		            findings[0].message.find("resolving the record in both") != std::string::npos);
+	}
+	// A run past its table: the game reads it with no bound, and the zone resolvers write in place there. Its own
+	// code, which gates, saying what the game does.
+	{
+		bms::File past = file;
+		past.events[1].trigger_count = int32_t(past.triggers.size()) + 3;
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(past, out, message));
+		std::unique_ptr<Document> document = open(out, "past.bms");
+		TEST_EXPECT(document && document->blocked());
+		const std::vector<Diagnostic> findings = type.validate_file(*document);
+		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.runs_past_table" &&
+		            findings[0].severity == DiagnosticSeverity::Error && findings[0].row()->blocks_save &&
+		            findings[0].row()->gates_build && findings[0].row()->game_refusal);
 	}
 	// Bytes the writer writes otherwise (two zero bytes inside the loadout chunk's length, as the
 	// shipped missions with a damaged chunk hold): noted by the section, Save writes the chunk as the

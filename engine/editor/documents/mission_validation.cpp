@@ -40,7 +40,9 @@ constexpr const char *kRewriteRuns = "with each event's triggers and actions whe
 
 constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::RewriteDiffers, { "mission.rewrite_differs", FindingFix::Rewrite, kRewriteSections } },
-	{ MissionFinding::InvalidInput, { "mission.invalid_input", FindingFix::None, nullptr, true } },
+	// A record two events' runs share or one no run holds: the game reads each run as written, the first resolved
+	// twice, the second never read (unwritable_code: a closed mission packs as stored, its Save refused).
+	{ MissionFinding::InvalidInput, unwritable_code("mission.invalid_input") },
 	{ MissionFinding::EventOrder, { "mission.event_order", FindingFix::Rewrite, kRewriteRuns } },
 	// A record no lookup finds by its SSN or its zone id: an id of its own (DI-11, Diagnostic::planned).
 	{ MissionFinding::SsnDuplicate, { "mission.ssn_duplicate", FindingFix::EditRecord } },
@@ -71,6 +73,13 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	// A path whose record names other stops than its waypoint markers carry, read (D-MIS-6): a save lays the
 	// record out from the markers, changing the route the game walks; a warning, nothing to fix.
 	{ MissionFinding::PathRebuilt, listed_code("mission.path_rebuilt") },
+	// An event's run reaching past its table: read with no bound, the game's state corrupted. It gates.
+	{ MissionFinding::RunsPastTable,
+	  game_stops_code("mission.runs_past_table",
+	                  "an event's trigger or action run past its table is read with no bound: its chain evaluates and "
+	                  "dispatches records from past the table's allocation, and the zone resolvers rewrite words in "
+	                  "place there [orig: EventTrigger_LoadAllData @ 0x453ff9, @ 0x45400a; "
+	                  "EventTrigger_ResolveZoneTriggerRefs @ 0x453095]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MissionFinding::kCount),
               "every MissionFinding has exactly one row");
@@ -83,7 +92,7 @@ static_assert(finding_rows_well_formed(kFindingRows), "every row of the table ta
 // the route the game walks (a warning); a rewrite that differs and a layout the writer lays out again are
 // what Save does (an info each).
 DiagnosticSeverity source_severity(MissionFinding code) {
-	if (code == MissionFinding::InvalidInput) return DiagnosticSeverity::Error;
+	if (code == MissionFinding::InvalidInput || code == MissionFinding::RunsPastTable) return DiagnosticSeverity::Error;
 	return code == MissionFinding::PathRebuilt ? DiagnosticSeverity::Warning : DiagnosticSeverity::Info;
 }
 

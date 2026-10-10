@@ -435,9 +435,15 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		const std::string what = layout == RunLayout::OutOfRange ? "an event's " + table + "s run past the " + table + " table"
 		                         : layout == RunLayout::Shared  ? "a " + table + " lies in two events' runs"
 		                                                        : "a " + table + " lies in no event's run";
-		note(MissionFinding::InvalidInput, true,
+		const bool past = layout == RunLayout::OutOfRange;
+		note(past ? MissionFinding::RunsPastTable : MissionFinding::InvalidInput, true,
 		     "The mission's events cannot be edited: " + what +
-		             " (the game reads each event's run by its first index and its count).");
+		             " (the game reads each event's run by its first index and its count)." +
+		             (past ? std::string()
+		                   : std::string(" The game reads each run as written, ") +
+		                             (layout == RunLayout::Shared ? "resolving the record in both"
+		                                                          : "never reading the record no run holds") +
+		                             " [orig: EventTrigger_LoadAllData @ 0x453eb0]: a build packs the mission as it stands."));
 		if (report.event >= 0) {
 			const size_t first_event_row = 1 + file.items.size() + file.buildings.size() + file.markers.size() +
 			                               file.organics.size() + size_t(bms::kWaypointRecordCount) +

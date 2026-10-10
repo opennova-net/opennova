@@ -933,7 +933,9 @@ bool TerrainDocument::accept_step(const EditStep &, const StagedRows &staged, St
 namespace {
 
 constexpr FindingCodeEntry<TerrainFinding> kFindingEntries[] = {
-	{ TerrainFinding::InvalidInput, { "terrain.invalid_input", FindingFix::None, nullptr, true } },
+	// A line the record cannot hold: the game reads it on (unwritable_code: a closed file packs as stored, its
+	// Save refused).
+	{ TerrainFinding::InvalidInput, unwritable_code("terrain.invalid_input") },
 	{ TerrainFinding::IgnoredInput, { "terrain.ignored_input", FindingFix::Rewrite, "with each line as the game reads it" } },
 	// The gate's refusal aborts the mission's load [orig: Game_StartMission @ 0x524780..0x52479F, @ 0x524B30]: it
 	// gates the build.
@@ -968,7 +970,10 @@ std::vector<Diagnostic> validate_terrain_file(const DocumentBase &document) {
 	const auto *terrain = dynamic_cast<const TerrainDocument *>(&document);
 	if (!terrain) return findings;
 	source_issue_findings(*terrain, finding_code(TerrainFinding::InvalidInput), finding_code(TerrainFinding::IgnoredInput),
-	                      findings);
+	                      findings, nullptr,
+	                      "The game reads the line and goes on [orig: Terrain_ParseConfigCallback @ 0x60f814..0x60f843; "
+	                      "Environment_LoadTimeOfDayConfig @ 0x57dbcc; Terrain_LoadEnvironmentConfig @ 0x61096d]: a build "
+	                      "packs the file as it stands, and a save is refused while the line stands.");
 	if (document.blocked()) return findings;
 	const TerrainRow *row = terrain->terrain_row();
 	if (!row) return findings;

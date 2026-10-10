@@ -193,7 +193,9 @@ const ReferenceKindRow &reference_row(ReferenceKind kind);
 // error of a listed code whose subject names the game's refusal: a reference (missing, or naming a
 // file of another kind) of a kind the game refuses when the name loads nothing
 // (ReferenceKindRow::gates_when_missing), a required file the project lacks whose manifest row is
-// the game's refusal to boot (RES_FATAL). Any other listed error blocks nothing.
+// the game's refusal to boot (RES_FATAL); and an error of a row whose file does not serialize
+// (blocks_save), which gates where the build must write the file (the overload over ShippedFiles). Any
+// other listed error blocks nothing.
 bool blocks_build(const Diagnostic &d);
 bool diagnostics_block_build(const std::vector<Diagnostic> &items);
 
@@ -227,7 +229,9 @@ struct ShippedFiles {
 	bool has(const std::string &asset) const;
 };
 // blocks_build over the base (above) and the shipped files: a blocks_save row's error about a file
-// `shipped` has blocks nothing. Null `shipped`: every such error gates.
+// `shipped` has blocks nothing; a listed blocks_save row's (unwritable_code: the game reads the file on)
+// gates only about a file `shipped` holds unsaved (a closed file packs as stored). Null `shipped`: every
+// gating row's such error gates, no listed one's.
 bool blocks_build(const Diagnostic &d, const BaseNames *base, const ShippedFiles *shipped);
 bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNames *base, const ShippedFiles *shipped);
 // The kind a token names; false for none.

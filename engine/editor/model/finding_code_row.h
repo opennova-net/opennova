@@ -130,7 +130,8 @@ enum class FindingProblem { None, Info, Warning };
 // the wire's `code`); `fixes` what Problems offers; `rewrite_does` a Rewrite's words, what writing
 // the file again does ("with every line ending CR LF"), set exactly on a Rewrite row;
 // `blocks_save` that the finding says the file does not serialize (its Save is refused, so no
-// Rewrite is offered for the file); `place` where Problems takes it; `group` the group it shows
+// Rewrite is offered for the file; such a row that is listed gates only where the build must write the
+// file, an open document with unsaved edits, unwritable_code); `place` where Problems takes it; `group` the group it shows
 // under; `source` what made it, when not its group's own part; `problem`, on a render check's row
 // alone, whether a finding of it is a Problems row and at what severity; `gates_build` whether an
 // error of the code, among the rows a build reads, refuses the build (blocks_build,
@@ -139,7 +140,9 @@ enum class FindingProblem { None, Info, Warning };
 // citing the original's refusal, and where the editor cannot vouch for what it packs (a file it
 // cannot read or write, a name the archives cannot store; a file it cannot write gates only where the
 // build must write it, not over the game's own bytes packed as stored: graph/reference_kinds.h
-// ShippedFiles, S16). Every other code is listed (false): its
+// ShippedFiles, S16; and a file the game reads on whose input the editor's model cannot carry gates only
+// as an open document with unsaved edits, a closed one packed as stored: unwritable_code, S23). Every
+// other code is listed (false): its
 // findings are shown, counted and fixable and refuse nothing. A listed code whose subject names the
 // witness gates where it does: a missing reference of a kind whose row cites the game's refusal
 // (ReferenceKindRow::gates_when_missing), a missing required file whose manifest row is the game's
@@ -168,6 +171,30 @@ constexpr FindingCodeRow listed_code(const char *token, FindingFix fixes = Findi
 	row.fixes = fixes;
 	row.rewrite_does = rewrite_does;
 	row.gates_build = false;
+	return row;
+}
+
+// A document type's row of a code whose finding says the file does not serialize where the game reads the file
+// on (the audit's EDITOR-INTEGRITY: input the editor's model cannot carry, the game's reader reading past it):
+// its Save is refused, while a build packs a closed file as stored and lists the finding; it gates only where
+// the build must write the file, an open document with unsaved edits (blocks_build over ShippedFiles,
+// graph/reference_kinds.h; ADR 0046 S23).
+constexpr FindingCodeRow unwritable_code(const char *token) {
+	FindingCodeRow row;
+	row.token = token;
+	row.blocks_save = true;
+	row.gates_build = false;
+	return row;
+}
+
+// A document type's row of a code whose finding is input the game's own reader stops at or corrupts its state
+// over (the audit's ABORT-FILE), which the editor's model cannot carry either: its Save is refused and a build
+// is, saying what the game does (`refusal`, cited: project_build/build_plan.h's blocker_reason).
+constexpr FindingCodeRow game_stops_code(const char *token, const char *refusal) {
+	FindingCodeRow row;
+	row.token = token;
+	row.blocks_save = true;
+	row.game_refusal = refusal;
 	return row;
 }
 
@@ -225,9 +252,6 @@ constexpr bool finding_entries_well_formed(const FindingCodeEntry<Code> (&entrie
 		if (static_cast<size_t>(entries[i].code) != i || !row.token || !*row.token) return false;
 		if ((row.fixes == FindingFix::Rewrite) != (row.rewrite_does != nullptr)) return false;
 		if (row.blocks_save && row.fixes == FindingFix::Rewrite) return false;
-		// A file that does not serialize cannot be packed as the editor holds it: it gates, but over
-		// the game's own bytes held unedited, which the build packs as stored (ShippedFiles, S16).
-		if (row.blocks_save && !row.gates_build) return false;
 		// The game's refusal is said only on a row whose errors refuse a build.
 		if (row.game_refusal && !row.gates_build) return false;
 		for (size_t j = 0; j < i; ++j)
