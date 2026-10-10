@@ -104,6 +104,7 @@ enum class EditorRequestKind {
 	DeleteFolder,
 	UndoFile,
 	RedoFile,
+	EmptyTrash,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
 	PickFile,

@@ -56,9 +56,11 @@ Placement place(const AssetEntry &asset, const BuildTarget &target) {
 // game's archives, or an expansion's, ADR 0046 S16).
 bool own_finding(const AssetEntry &asset, const BuildTarget &target, Diagnostic &out) {
 	if (asset.kind == AssetKind::Archive) {
-		out = make_finding(CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Error,
-		                   asset.logical_name + " is an archive; the build packs the project's files itself, so "
-		                                        "unpack it into the project or remove it.",
+		// Left out, not refused: the build can write every other file, and the game mounts only its boot
+		// table's archives by name, never one packed inside another (vfs-pff-mount-re.md D-VFS-2).
+		out = make_finding(CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Warning,
+		                   asset.logical_name + " is an archive: the game never mounts one packed inside another, so "
+		                                        "the build leaves it out. Unpack it into the project to ship its files.",
 		                   asset.relative_path);
 		return true;
 	}
@@ -335,8 +337,6 @@ std::string blocker_words(const Diagnostic &d) {
 	// The plan's own refusals, in its words: what the file is and why it does not pack.
 	const size_t slash = d.asset.find_last_of('/');
 	const std::string name = slash == std::string::npos ? d.asset : d.asset.substr(slash + 1);
-	if (d.row() == &finding_code(CoreFinding::BuildArchiveInProject))
-		return name + " is an archive in the project: the build packs the project's files itself";
 	if (d.row() == &finding_code(CoreFinding::BuildNameUnstorable))
 		return name + "'s name is too long for an archive";
 	return clause(d.message);
