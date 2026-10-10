@@ -223,6 +223,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::get_attach_label_selected);
 	ClassDB::bind_method(D_METHOD("get_attach_label_text", "index"),
 			&HudOverlay::get_attach_label_text);
+	ClassDB::bind_method(D_METHOD("get_scoreboard_header_text"), &HudOverlay::get_scoreboard_header_text);
 	ClassDB::bind_method(D_METHOD("get_attach_label_position", "index"),
 			&HudOverlay::get_attach_label_position);
 	ClassDB::bind_method(D_METHOD("set_friendly_tags", "shown", "camera_xform",
@@ -1054,6 +1055,14 @@ void HudOverlay::set_scoreboard_board(bool p_shown, int p_frame_counter, const R
 	sb.header_text = text.header;
 	sb.flag_carrier_label = text.flag_carrier_label;
 	queue_redraw();
+}
+
+PackedStringArray HudOverlay::get_scoreboard_header_text() const {
+	const opennova::hud::HudScoreboardState &sb = state_.scoreboard;
+	PackedStringArray out;
+	for (const std::string *text : { &sb.title, &sb.game_type_label, &sb.players_line, &sb.spectators_line, &sb.footer })
+		out.push_back(opennova::to_gd(*text));
+	return out;
 }
 
 void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame,

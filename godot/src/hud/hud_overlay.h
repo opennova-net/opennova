@@ -266,6 +266,9 @@ public:
 	int get_attach_label_count() const;
 	int get_attach_label_selected() const;
 	String get_attach_label_text(int p_index) const;
+	// The Tab board's header strings as the overlay holds them to draw (a read seam for the tests): the title, the
+	// game type's rung, the players' and the spectators' lines and the paging hint, as the board's entry composed them.
+	PackedStringArray get_scoreboard_header_text() const;
 	Vector2 get_attach_label_position(int p_index) const;
 	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
 	// (Simulation::fill_friendly_tags) lifted, projected through the play
