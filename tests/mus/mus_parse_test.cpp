@@ -82,7 +82,8 @@ static int test_open_synth_gamemus(void) {
     CHECK(s->code_size > 0 && s->code != NULL, "bytecode present");
     for (uint32_t i = 0; i < s->section_count; ++i)
         CHECK(s->sections[i].code_offset < s->code_size, "section offset inside the bytecode");
-    CHECK(s->sections[0].code_offset == 0, "the entry section starts the bytecode");
+    CHECK(s->sections[0].code_offset == 1 && s->code[0] == 0x00,
+          "the entry section starts after MDEdit's leading nop, as the shipped scripts' do");
     /* The editor debug export table carries the authored labels. */
     CHECK(strcmp(s->sections[0].name, "Begin") == 0, "sec[0] name Begin");
     CHECK(strcmp(s->sections[7].name, "Multiplayerstart") == 0, "sec[7] name Multiplayerstart");
@@ -182,7 +183,8 @@ static int find_section_over(const char *path, uint32_t win_index, uint32_t win_
 
 static int test_find_section_synth(void) {
     /* The compiler interns sections in first-mention order: Begin, Testmission
-       (forward-referenced from Begin), Missionnull, Missionwin, Win000, ... */
+       (forward-referenced from Begin), then the MessageHandler's table's Missionnull,
+       Missionwin and Missionlose, then Win000, ... */
     MusFile mf;
     CHECK(mus_open(&mf, SYNTH_GAMEMUS) == 0, "open");
     uint32_t win_index = 0, win_offset = 0;
@@ -192,7 +194,7 @@ static int test_find_section_synth(void) {
             win_offset = mf.scripts[0].sections[i].code_offset;
         }
     mus_close(&mf);
-    CHECK(win_index == 4, "Win000 is the fifth interned section");
+    CHECK(win_index == 5, "Win000 is the sixth interned section");
     return find_section_over(SYNTH_GAMEMUS, win_index, win_offset);
 }
 

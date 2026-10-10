@@ -106,10 +106,10 @@ func test_stopped_playback_releases_its_bank_after_the_mixer_drains() -> void:
 # The SP round-end tail's end track reaches the loaded script through the
 # director's signal_end_track (the engine's mus_vm_signal: the MessageHandler
 # restart frame MusicCtx_SelectEndTrack steps). The seam reports the engine's
-# codes: -1 with no script loaded, -2 when the loaded script carries no handler
-# (the compiled synth fixture: mus_compile emits none; retail gamemus.bin
-# dispatches 1 -> Missionwin, 2 -> Missionlose, pinned by the mus_vm ctest),
-# and the frame runs on a stopped VM as well as a running one.
+# codes: -1 with no script loaded, 0 when the loaded script's MessageHandler
+# runs the frame (the minted synth fixture carries gamemus's: 1 -> Missionwin,
+# 2 -> Missionlose; a handler-less script's -2 is the mus_vm ctest's), and the
+# frame runs on a stopped VM as well as a running one.
 func test_signal_end_track_reports_the_restart_frame_codes() -> void:
 	var dir := MusicDirector.new()
 	dir.auto_start = false
@@ -122,12 +122,15 @@ func test_signal_end_track_reports_the_restart_frame_codes() -> void:
 	assert_eq(dir.vm_state(), 1, "RUNNING after start")
 	var sections: Array = []
 	dir.section_entered.connect(func(name): sections.append(String(name)))
-	assert_eq(dir.signal_end_track(2), -2, "the handler-less fixture refuses the frame")
-	assert_eq(sections.size(), 0, "no handler, no section transition")
-	assert_eq(dir.vm_state(), 1, "the refused frame leaves the VM running")
+	assert_eq(dir.signal_end_track(2), 0, "the fixture's MessageHandler takes the frame")
+	assert_true(not sections.is_empty() and sections[0] == "Missionlose",
+			"value 2 enters Missionlose at once (which goes on to its sting)")
+	assert_eq(dir.vm_state(), 1, "the frame leaves the VM running")
 	dir.stop()
-	assert_eq(dir.signal_end_track(1), -2,
+	var before := sections.size()
+	assert_eq(dir.signal_end_track(1), 0,
 			"a stopped VM with a loaded script still takes the frame (the handler decides)")
+	assert_true(sections.size() > before and sections[before] == "Missionwin", "value 1 enters Missionwin")
 	assert_eq(dir.vm_state(), 0, "the frame never restarts the embedder state")
 
 

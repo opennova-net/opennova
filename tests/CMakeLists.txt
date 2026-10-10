@@ -874,7 +874,8 @@ opennova_add_gated_test(sbf_jo_install_sweep COMMAND sbf_jo_install_sweep_test)
 
 # MUS tests. fixtures/mus/synth_{gamemus,menumus}.bin and the decompile golden
 # golden_synth_gamemus.mus.txt: two authored programs through mus_compile +
-# mus_encode_file; the shipped jo_gamemus.bin / jo_menumus.bin and their golden
+# mus_encode_file; the shipped jo_gamemus.bin / jo_menumus.bin (their text pinned by
+# mus_decompile's retail leg and compiled back byte for byte, no golden of them)
 # are each fixture test's OPENNOVA_JO_ASSETS reference leg.
 add_executable(synth_mus_gen_test fixtures/synth_mus_gen.cpp)
 target_link_libraries(synth_mus_gen_test PRIVATE opennova_formats)
@@ -968,11 +969,11 @@ target_link_libraries(mus_vm_fixes_test PRIVATE opennova_formats)
 target_include_directories(mus_vm_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mus_vm_fixes COMMAND mus_vm_fixes_test)
 
-# Write-path parity: the canonical re-encoded form is a byte-stable fixed point
-# (byte-identity to the ORIGINAL .bin is impossible because debug info is not
-# reproduced). See the test file header.
+# Write-path parity: a program decompiled to its MUS text, compiled and encoded again is its own bytes (the
+# compiler writes MDEdit's layout): the minted pair in core; the reference pair and every music script the
+# install's archives hold (base and each expansion) as the retail leg. See the test file header.
 add_executable(mus_encode_idempotence_test mus/mus_encode_idempotence_test.cpp)
-target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_formats)
+target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mus_encode_idempotence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_encode_idempotence_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")

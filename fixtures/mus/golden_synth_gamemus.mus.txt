@@ -25,28 +25,30 @@ declsection Begin
 declsection Testmission
 declsection Missionnull
 declsection Missionwin
+declsection Missionlose
 declsection Win000
 declsection Lose000
-declsection Missionlose
 declsection Multiplayerstart
 
-
+#line 4
 section Begin
 {
 SV(200)
 enter Testmission
 }
-
+handler MessageHandler(msgtype, source)
+{
+FB()
+on (msgtype) enter Missionnull Missionwin Missionlose
+}
 section Missionnull
 {
 enter Missionnull
 }
-
 section Missionwin
 {
 on (Var02) enter Win000 Lose000 Missionnull
 }
-
 section Win000
 {
 play sound_2
@@ -54,12 +56,10 @@ play sound_3
 play sound_4
 enter Missionnull
 }
-
 section Missionlose
 {
 enter Lose000
 }
-
 section Lose000
 {
 play sound_5
@@ -67,7 +67,6 @@ play sound_6
 FB()
 enter Missionnull
 }
-
 section Testmission
 {
 if ((Var01 != 0))
@@ -79,7 +78,6 @@ else
     enter Multiplayerstart
 }
 }
-
 section Multiplayerstart
 {
 play sound_0

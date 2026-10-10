@@ -119,11 +119,10 @@ static size_t oracle_index(const std::vector<OracleInst> &insts, uint32_t offset
     return i;
 }
 
-/* Compare `a` (the original) with `b` (its recompile): 0 when the same program; `conflated`
-   counts the frame setups (0x38) the text wrote as section transitions (0x3B), which
-   D-MUS-14 records; any other difference is reported and fails. */
-static int same_program(const MusScript &a, const MusScript &b, int &conflated) {
-    conflated = 0;
+/* Compare `a` (the original) with `b` (its recompile): 1 when the same program, instruction for
+   instruction (a function's frame setup 0x38 too: D-MUS-14 closed, the text's `handler`); any
+   difference is reported and fails. */
+static int same_program(const MusScript &a, const MusScript &b) {
     std::vector<OracleInst> ia, ib;
     CHECK(oracle_decode(a.code, a.code_size, ia), "decode the original's bytecode");
     CHECK(oracle_decode(b.code, b.code_size, ib), "decode the recompile's bytecode");
@@ -133,10 +132,6 @@ static int same_program(const MusScript &a, const MusScript &b, int &conflated) 
     for (size_t i = 0; i < ia.size(); ++i) {
         const OracleInst &x = ia[i], &y = ib[i];
         bool same = x.op == y.op && x.value == y.value && x.operand == y.operand;
-        if (x.op == 0x38 && y.op == 0x3B && x.operand == y.operand) {
-            ++conflated;
-            same = true;
-        }
         if (x.branch && y.branch && x.op == y.op)
             same = oracle_index(ia, x.value) == oracle_index(ib, y.value);
         if (x.op == 0x35 && y.op == 0x35 && x.operand.size() == y.operand.size() && x.operand.size() >= 4) {
@@ -173,9 +168,6 @@ static int same_program(const MusScript &a, const MusScript &b, int &conflated) 
     }
     return 1;
 }
-
-/* What the programs' comparisons found, for the report: the frame setups D-MUS-14 records. */
-static int g_conflated = 0;
 
 static int entry_roundtrip(const char *path) {
     MusFile mf;
@@ -244,9 +236,7 @@ static int entry_roundtrip_file(MusFile &mf, bool same_text) {
         }
         free(again);
         CHECK(same, "the recompiled program decompiles to the original's text");
-        int conflated = 0;
-        CHECK(same_program(*orig, recomp, conflated), "the recompiled program is the original's");
-        g_conflated += conflated;
+        CHECK(same_program(*orig, recomp), "the recompiled program is the original's");
     }
 
     free(text);
@@ -327,8 +317,6 @@ int main(int argc, char **argv) {
     }
     if (retail::install().empty()) retail::skip_leg("OPENNOVA_JO_DIR (the expansions' music programs)");
     else expansion_programs();
-    /* D-MUS-14: the frame setups (0x38) the text writes as section transitions (0x3B). */
-    printf("frame setups written as transitions: %d\n", g_conflated);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

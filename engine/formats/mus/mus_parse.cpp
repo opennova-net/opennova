@@ -42,30 +42,39 @@ static uint32_t smallest_after(uint32_t lo, const uint32_t *cands, size_t n,
     return best;
 }
 
-/* MDEdit-authored MUS files carry an editor debug section: 256-byte source
-   path, a 0x50-byte header (entry_size at +0, section_count at +8, var_count
-   at +0x10), then `section_count` section-name entries followed by
-   `var_count` variable-name entries. Each entry is `entry_size` bytes
-   (typically 48): 4-byte code/byte offset at +0, 32-byte ASCII name at +0x10.
-   The runtime relocates this region but never reads it; only MDEdit and the
-   decompiler care.
+/* MDEdit-authored MUS files carry an editor debug section at MU01 + `string_section_offset`: the 256-byte
+   source path, then a 0x50-byte header of five tables, each a chunk-relative offset and a count after the
+   entry size (+0 entry size, 48; +4/+8 the sections, +0xC/+0x10 the globals, +0x14/+0x18 the functions'
+   parameters, +0x1C/+0x20 the functions, +0x24/+0x28 the lines; the rest zero), then the tables themselves.
+   A section's, a global's and a parameter's entry: its offset at +0 (a section's bytecode-relative, a
+   global's its byte in the globals area, a parameter's its frame offset) and its 32-byte name at +0x10; a
+   function's: its start at +0 and its end at +8 (bytecode-relative), its name at +0x10; a line's: 8 bytes,
+   the instruction's bytecode-relative offset and the source line. The runtime relocates this region but
+   never reads it; only MDEdit and the decompiler care. A file of an older header (no table offsets) has its
+   section and global entries one after the other past the header. */
+static uint32_t rd32(const uint8_t *p) {
+    uint32_t v;
+    memcpy(&v, p, 4);
+    return v;
+}
 
-   The IDA witness puts this region at MU01 + `string_section_offset`. The
-   pre-repo Python decompiler reads the same data via the chunk's
-   +0x38 field; we follow that lead because it round-trips with the Python
-   golden. */
+static void copy_name(char *dst, size_t cap, const uint8_t *src, size_t max) {
+    if (max > cap - 1) max = cap - 1;
+    size_t k = 0;
+    while (k < max && src[k] != 0) ++k;
+    memcpy(dst, src, k);
+    dst[k] = 0;
+}
+
 static void parse_debug_export(const uint8_t *data, size_t size,
                                uint32_t chunk_off,
                                const MusChunkHeader *ch,
                                MusScript *out) {
-    /* Source-path slot is the first 256 bytes of the debug region. */
     if (ch->string_section_offset == 0) return;
     uint64_t base64 = (uint64_t)chunk_off + ch->string_section_offset;
     if (base64 + 256 > size) return;
     uint32_t base = (uint32_t)base64;
-    /* The path slot can have leading nulls before the actual ASCII (witnessed
-       in jo_gamemus.bin: 4 NULs then "C:\nc\..."). Skip leading NULs and copy
-       up to the first NUL after that. */
+    /* The path slot: tolerate leading NULs, copy up to the first NUL after them. */
     uint32_t start = base;
     while (start < base + 256 && data[start] == 0) ++start;
     uint32_t copy_end = start;
@@ -75,64 +84,79 @@ static void parse_debug_export(const uint8_t *data, size_t size,
     memcpy(out->source_path, data + start, copy_len);
     out->source_path[copy_len] = 0;
 
-    /* Header at base+256 (Python: `entry_size at +0, section_entry_count at +8,
-       var_entry_count at +0x10`). Bound everything; bail if anything is past
-       the file end. */
     uint32_t hdr = base + 256;
-    if ((uint64_t)hdr + 0x14 > size) return;
-    uint32_t entry_size, section_entry_count, var_entry_count;
-    memcpy(&entry_size, data + hdr + 0x00, 4);
-    memcpy(&section_entry_count, data + hdr + 0x08, 4);
-    memcpy(&var_entry_count, data + hdr + 0x10, 4);
+    if ((uint64_t)hdr + 0x50 > size) return;
+    uint32_t entry_size = rd32(data + hdr);
     if (entry_size == 0) entry_size = 48;
-    if (entry_size > 256) return;            /* sanity */
-    if (section_entry_count > 1024) return;
-    if (var_entry_count > 1024) return;
+    if (entry_size < 0x10 || entry_size > 256) return;
+    const uint32_t section_count = rd32(data + hdr + 0x08), var_count = rd32(data + hdr + 0x10);
+    const uint32_t local_count = rd32(data + hdr + 0x18), function_count = rd32(data + hdr + 0x20);
+    const uint32_t line_count = rd32(data + hdr + 0x28);
+    if (section_count > 1024 || var_count > 1024 || local_count > 1024 || function_count > 1024 ||
+        line_count > (1u << 20))
+        return;
+    /* Each table where its offset says, else (an older header) right after the one before. */
+    uint64_t next = (uint64_t)hdr + 0x50;
+    const auto table_at = [&](uint32_t field, uint64_t count, uint64_t stride) -> uint64_t {
+        const uint32_t rel = rd32(data + hdr + field);
+        const uint64_t at = rel ? (uint64_t)chunk_off + rel : next;
+        next = at + count * stride;
+        return next <= size ? at : 0;
+    };
+    const uint64_t sections_at = table_at(0x04, section_count, entry_size);
+    const uint64_t vars_at = table_at(0x0C, var_count, entry_size);
+    const uint64_t locals_at = local_count ? table_at(0x14, local_count, entry_size) : 0;
+    const uint64_t functions_at = function_count ? table_at(0x1C, function_count, entry_size) : 0;
+    const uint64_t lines_at = line_count ? table_at(0x24, line_count, 8) : 0;
+    const size_t name_max = entry_size - 0x10;
 
-    uint32_t entries_start = hdr + 0x50;
-
-    /* Section-name entries first. Override the synthesized "Section_N" names
-       set by the caller with the editor labels. */
-    uint32_t name_count = section_entry_count < out->section_count
-                          ? section_entry_count : out->section_count;
-    for (uint32_t i = 0; i < name_count; ++i) {
-        uint32_t pos = entries_start + i * entry_size;
-        if ((uint64_t)pos + entry_size > size) break;
-        /* Field +0x00 is the code offset; we already have it from the section
-           table. Field +0x10 is a 32-byte ASCII name. */
-        const uint8_t *name_p = data + pos + 0x10;
-        size_t max = entry_size > 0x10 ? (size_t)(entry_size - 0x10) : 0;
-        if (max > MUS_SECTION_NAME_SIZE - 1) max = MUS_SECTION_NAME_SIZE - 1;
-        size_t k = 0;
-        while (k < max && name_p[k] != 0) { ++k; }
-        if (k > 0) {
-            memcpy(out->sections[i].name, name_p, k);
-            out->sections[i].name[k] = 0;
+    /* Section-name entries, by the section table's order: the editor's labels over the "Section_N" ones. */
+    if (sections_at) {
+        const uint32_t named = section_count < out->section_count ? section_count : out->section_count;
+        for (uint32_t i = 0; i < named; ++i) {
+            const uint8_t *e = data + sections_at + (uint64_t)i * entry_size;
+            if (e[0x10] != 0) copy_name(out->sections[i].name, MUS_SECTION_NAME_SIZE, e + 0x10, name_max);
         }
     }
-
-    /* Variable entries follow, one per declared global (named global). */
-    if (var_entry_count > 0) {
-        uint32_t vars_start = entries_start + section_entry_count * entry_size;
-        out->variables = (MusVariable *)calloc(var_entry_count, sizeof(MusVariable));
+    /* Globals, one per declared global (Var00..Var15 and the user's). */
+    if (vars_at && var_count > 0) {
+        out->variables = (MusVariable *)calloc(var_count, sizeof(MusVariable));
         if (!out->variables) return;
-        out->variable_count = var_entry_count;
-        for (uint32_t i = 0; i < var_entry_count; ++i) {
-            uint32_t pos = vars_start + i * entry_size;
-            if ((uint64_t)pos + entry_size > size) {
-                out->variable_count = i;
-                break;
-            }
-            uint32_t off;
-            memcpy(&off, data + pos + 0x00, 4);
-            out->variables[i].byte_offset = off;
-            const uint8_t *name_p = data + pos + 0x10;
-            size_t max = entry_size > 0x10 ? (size_t)(entry_size - 0x10) : 0;
-            if (max > MUS_INTRINSIC_NAME_SIZE - 1) max = MUS_INTRINSIC_NAME_SIZE - 1;
-            size_t k = 0;
-            while (k < max && name_p[k] != 0) { ++k; }
-            memcpy(out->variables[i].name, name_p, k);
-            out->variables[i].name[k] = 0;
+        out->variable_count = var_count;
+        for (uint32_t i = 0; i < var_count; ++i) {
+            const uint8_t *e = data + vars_at + (uint64_t)i * entry_size;
+            out->variables[i].byte_offset = rd32(e);
+            copy_name(out->variables[i].name, MUS_INTRINSIC_NAME_SIZE, e + 0x10, name_max);
+        }
+    }
+    if (locals_at) {
+        out->locals = (MusLocal *)calloc(local_count, sizeof(MusLocal));
+        if (!out->locals) return;
+        out->local_count = local_count;
+        for (uint32_t i = 0; i < local_count; ++i) {
+            const uint8_t *e = data + locals_at + (uint64_t)i * entry_size;
+            out->locals[i].frame_offset = rd32(e);
+            copy_name(out->locals[i].name, MUS_SECTION_NAME_SIZE, e + 0x10, name_max);
+        }
+    }
+    if (functions_at) {
+        out->functions = (MusFunction *)calloc(function_count, sizeof(MusFunction));
+        if (!out->functions) return;
+        out->function_count = function_count;
+        for (uint32_t i = 0; i < function_count; ++i) {
+            const uint8_t *e = data + functions_at + (uint64_t)i * entry_size;
+            out->functions[i].start = rd32(e);
+            out->functions[i].end = rd32(e + 8);
+            copy_name(out->functions[i].name, MUS_SECTION_NAME_SIZE, e + 0x10, name_max);
+        }
+    }
+    if (lines_at) {
+        out->lines = (MusLine *)calloc(line_count, sizeof(MusLine));
+        if (!out->lines) return;
+        out->line_count = line_count;
+        for (uint32_t i = 0; i < line_count; ++i) {
+            out->lines[i].code_offset = rd32(data + lines_at + 8ull * i);
+            out->lines[i].line = rd32(data + lines_at + 8ull * i + 4);
         }
     }
 }
@@ -345,9 +369,7 @@ void mus_close(MusFile *file) {
     if (!file) return;
     if (file->scripts) {
         for (uint32_t i = 0; i < file->header.chunk_count; ++i) {
-            free(file->scripts[i].code);
-            free(file->scripts[i].sections);
-            free(file->scripts[i].variables);
+            mus_script_free(&file->scripts[i]);
         }
         free(file->scripts);
         file->scripts = NULL;

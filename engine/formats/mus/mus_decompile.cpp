@@ -8,9 +8,9 @@
    stack-based expression reconstruction, recognises if/if_else/while
    control-flow patterns, decodes the embedded `tablexec` jump table, and
    synthesises `bind sound_N "sound_N"` aesthetic for the play opcodes
-   (since the runtime carries no bind table). Our C++ port preserves that output verbatim so
-   `tests/mus/mus_decompile_test.cpp` can compare byte-for-byte against the
-   committed golden in `fixtures/mus/golden_jo_gamemus.mus.txt`.
+   (since the runtime carries no bind table). The minted gamescript's text is
+   pinned byte for byte (`fixtures/mus/golden_synth_gamemus.mus.txt`), and every
+   shipped script's text compiles back to its own bytes (mus_encode_idempotence).
 
    The opcode table below was transcribed from the Python `OPCODES = {...}`
    dict at line 23. The IDA witness [orig: 65-entry dispatch table @ 0x84F220, see
@@ -21,7 +21,15 @@
    This file is the whole decompiler: the bytecode decoder (the opcode table,
    Instruction, disassemble), the pure rendering helpers (name resolution,
    control-flow analysis, and stack-based expression reconstruction), and the
-   linear text-emission machinery (Buf + decompile_block). */
+   linear text-emission machinery (Buf + decompile_block).
+
+   Beyond the Python reference, the text carries what MDEdit's layout needs for the compiler to write the
+   script's own bytes again (mus_compile.cpp): a function (`handler NAME(params) { ... }`, its frame setup
+   0x38 and its parameters by their debug names; a 0x38 anywhere else `frame N`), the user globals the debug
+   table declares, and the line table: each statement, `else`, section-closing brace and function header is put
+   on the line the table names for its first instruction (blank lines before it, a `#line N` directive where the
+   text has run past). The leading nop and the nops padding the code to four bytes are the layout's, not
+   statements; any other nop prints as `nop`. */
 
 #include <formats/mus/mus.h>
 
@@ -30,6 +38,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <string>
+#include <vector>
 
 namespace opennova::mus {
 
@@ -230,7 +241,23 @@ static void resolve_global_into(char *out, size_t cap, int idx,
     snprintf(out, cap, "g_%d", idx);
 }
 
-static void resolve_local_into(char *out, size_t cap, int idx) {
+/* The function a body belongs to: its name and its parameters' names by frame offset. */
+struct FunctionView {
+    char     name[MUS_SECTION_NAME_SIZE];
+    uint32_t start = 0, end = 0;
+    int      params = 0;                     /* its frame setup's count, up to 255 */
+    std::vector<std::string> param_names;    /* one per parameter */
+    std::vector<uint32_t>    param_offsets;
+};
+
+static void resolve_local_into(char *out, size_t cap, int idx, const FunctionView *fn = NULL) {
+    if (fn) {
+        for (int k = 0; k < fn->params; ++k)
+            if ((int)fn->param_offsets[(size_t)k] == idx) {
+                snprintf(out, cap, "%s", fn->param_names[(size_t)k].c_str());
+                return;
+            }
+    }
     snprintf(out, cap, "l_%d", idx);
 }
 
@@ -454,7 +481,8 @@ static int is_expr_end_op(const char *m) {
 }
 
 static void reconstruct_expression(const Instruction *insts, int start, int end_excl,
-                                   const MusScript *script, char *out, size_t out_cap) {
+                                   const MusScript *script, char *out, size_t out_cap,
+                                   const FunctionView *fn = NULL) {
     Stack stk{};
     out[0] = 0;
     char tmp[256];
@@ -477,7 +505,7 @@ static void reconstruct_expression(const Instruction *insts, int start, int end_
         } else if (strcmp(m, "push_l") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
             char name[64];
-            resolve_local_into(name, sizeof(name), idx);
+            resolve_local_into(name, sizeof(name), idx, fn);
             stk_push(&stk, name);
         } else if (strcmp(m, "push_me") == 0) {
             stk_push(&stk, "Me");
@@ -531,7 +559,7 @@ static void reconstruct_expression(const Instruction *insts, int start, int end_
             /* Expression ended; keep stack as-is, return what's on top. */
             snprintf(out, out_cap, "%s", stk_peek(&stk));
             return;
-        } else if (is_expr_end_op(m)) {
+        } else if (is_expr_end_op(m) || strcmp(m, "tablexec") == 0) {
             snprintf(out, out_cap, "%s", stk_peek(&stk));
             return;
         } else {
@@ -611,6 +639,7 @@ struct Buf {
     size_t   cap;
     size_t   used;
     int      failed;  /* the program nests past kMaxNesting: it does not decompile */
+    uint32_t line = 1; /* the line the next character goes on */
 };
 
 /* How deep ifs nest before the decompile gives up (the recursion's bound: a crafted
@@ -621,6 +650,7 @@ constexpr int kMaxNesting = 64;
 static void buf_putc(Buf *b, char c) {
     if (b->p && b->used + 1 < b->cap) b->p[b->used] = c;
     ++b->used;
+    if (c == '\n') ++b->line;
 }
 static void buf_puts(Buf *b, const char *s) {
     while (*s) buf_putc(b, *s++);
@@ -633,6 +663,32 @@ static void buf_printf(Buf *b, const char *fmt, ...) {
     va_end(ap);
     if (n < 0) return;
     for (int i = 0; i < n && i < (int)sizeof(tmp); ++i) buf_putc(b, tmp[i]);
+}
+
+/* The line the script's line table names for the instruction at `offset`, 0 for none. */
+static uint32_t table_line(const MusScript *script, uint32_t offset) {
+    uint32_t lo = 0, hi = script->line_count;
+    while (lo < hi) {
+        const uint32_t mid = lo + (hi - lo) / 2;
+        if (script->lines[mid].code_offset < offset) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo < script->line_count && script->lines[lo].code_offset == offset ? script->lines[lo].line : 0;
+}
+
+/* Put the next line, `before` lines ahead of the one written for `offset`, where the line table says: blank
+   lines up to it, or a `#line` directive where the text has run past it (the compiler numbers lines alike). */
+static void place(Buf *b, const MusScript *script, uint32_t offset, uint32_t before = 0) {
+    const uint32_t line = table_line(script, offset);
+    if (line == 0 || line <= before) return;
+    const uint32_t want = line - before;
+    if (want == b->line) return;
+    if (want > b->line) {
+        while (b->line < want) buf_putc(b, '\n');
+        return;
+    }
+    buf_printf(b, "#line %u\n", want);
+    b->line = want;
 }
 
 /* ---- High-level decompile (matches Python `generate_mus_source_with_labels`) ---- */
@@ -649,7 +705,9 @@ static void decompile_block(Buf *out,
                             int suppress_entries,    /* recursive bodies don't emit "section X" */
                             int indent,
                             const char *const *sbf_names,
-                            uint32_t sbf_name_count);
+                            uint32_t sbf_name_count,
+                            const FunctionView *fn,  /* the function a body belongs to, or NULL */
+                            const FunctionView *functions, int function_count);
 
 /* Resolve a branch/call code-offset target to its section name, else the
    "@XXXX" fallback (Python: entry_points.get(target, f"@{target:04X}")). A body
@@ -675,7 +733,9 @@ static void decompile_block(Buf *out,
                             int suppress_entries,
                             int indent,
                             const char *const *sbf_names,
-                            uint32_t sbf_name_count) {
+                            uint32_t sbf_name_count,
+                            const FunctionView *fn,
+                            const FunctionView *functions, int function_count) {
     char buf256[256];
     char fallback[64];
 
@@ -694,11 +754,31 @@ static void decompile_block(Buf *out,
         if (!suppress_entries) {
             for (uint32_t s = 0; s < script->section_count; ++s) {
                 if (script->sections[s].code_offset == inst->offset) {
-                    buf_putc(out, '\n');
+                    if (script->line_count == 0) buf_putc(out, '\n');
+                    place(out, script, inst->offset, 2);
                     buf_printf(out, "section %s\n", script->sections[s].name);
                     buf_puts(out, "{\n");
                     break;
                 }
+            }
+            /* A function: its header (its frame setup's line), its body, its brace. */
+            const FunctionView *function = NULL;
+            for (int k = 0; k < function_count; ++k)
+                if (functions[k].start == inst->offset && inst->opcode == MUS_OP_ENTER) function = &functions[k];
+            if (function) {
+                if (script->line_count == 0) buf_putc(out, '\n');
+                place(out, script, inst->offset);
+                buf_printf(out, "handler %s(", function->name);
+                for (int k = 0; k < function->params; ++k)
+                    buf_printf(out, "%s%s", k ? ", " : "", function->param_names[(size_t)k].c_str());
+                buf_puts(out, ")\n{\n");
+                int body_end = i + 1;
+                while (body_end < end_idx && insts[body_end].offset < function->end) ++body_end;
+                decompile_block(out, insts, i + 1, body_end, script, cf, /*suppress_entries=*/1, indent,
+                                sbf_names, sbf_name_count, function, functions, function_count);
+                buf_puts(out, "}\n");
+                i = body_end;
+                continue;
             }
         }
 
@@ -722,8 +802,9 @@ static void decompile_block(Buf *out,
         if (block && block->type == CF_TYPE_IF) {
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr));
+            reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn);
             if (!expr[0]) snprintf(expr, sizeof(expr), "condition");
+            place(out, script, insts[es].offset);
             emit_indent(out, indent);
             buf_printf(out, "if (%s)\n", expr);
             emit_indent(out, indent);
@@ -740,7 +821,7 @@ static void decompile_block(Buf *out,
                 if (body_end_idx < 0) body_end_idx = end_idx;
                 decompile_block(out, insts, body_begin, body_end_idx, script, cf,
                                 /*suppress_entries=*/1, indent + 1,
-                                sbf_names, sbf_name_count);
+                                sbf_names, sbf_name_count, fn, functions, function_count);
             }
             emit_indent(out, indent);
             buf_puts(out, "}\n");
@@ -751,8 +832,9 @@ static void decompile_block(Buf *out,
         if (block && block->type == CF_TYPE_IF_ELSE) {
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr));
+            reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn);
             if (!expr[0]) snprintf(expr, sizeof(expr), "condition");
+            place(out, script, insts[es].offset);
             emit_indent(out, indent);
             buf_printf(out, "if (%s)\n", expr);
             emit_indent(out, indent);
@@ -772,10 +854,11 @@ static void decompile_block(Buf *out,
                 if (if_end < 0) if_end = end_idx;
                 decompile_block(out, insts, if_begin, if_end, script, cf,
                                 /*suppress_entries=*/1, indent + 1,
-                                sbf_names, sbf_name_count);
+                                sbf_names, sbf_name_count, fn, functions, function_count);
             }
             emit_indent(out, indent);
             buf_puts(out, "}\n");
+            place(out, script, block->body_end);
             emit_indent(out, indent);
             buf_puts(out, "else\n");
             emit_indent(out, indent);
@@ -789,7 +872,7 @@ static void decompile_block(Buf *out,
                 if (el_end < 0) el_end = end_idx;
                 decompile_block(out, insts, el_begin, el_end, script, cf,
                                 /*suppress_entries=*/1, indent + 1,
-                                sbf_names, sbf_name_count);
+                                sbf_names, sbf_name_count, fn, functions, function_count);
             }
             emit_indent(out, indent);
             buf_puts(out, "}\n");
@@ -815,8 +898,9 @@ static void decompile_block(Buf *out,
             int es = find_expr_start(insts, end_idx, i);
             if (es < i) {
                 char expr[256];
-                reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr));
+                reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn);
                 if (expr[0]) {
+                    place(out, script, insts[es].offset);
                     emit_indent(out, indent);
                     buf_printf(out, "%s\n", expr);
                 }
@@ -828,17 +912,19 @@ static void decompile_block(Buf *out,
                                 script->variables, script->variable_count);
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr));
+            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
+            place(out, script, insts[es < i ? es : i].offset);
             emit_indent(out, indent);
             if (expr[0]) buf_printf(out, "%s = %s\n", buf256, expr);
             else         buf_printf(out, "%s = ?\n", buf256);
         }
         else if (strcmp(m, "pop_l") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            resolve_local_into(buf256, sizeof(buf256), idx);
+            resolve_local_into(buf256, sizeof(buf256), idx, fn);
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr));
+            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
+            place(out, script, insts[es < i ? es : i].offset);
             emit_indent(out, indent);
             if (expr[0]) buf_printf(out, "%s = %s\n", buf256, expr);
             else         buf_printf(out, "%s = ?\n", buf256);
@@ -847,12 +933,14 @@ static void decompile_block(Buf *out,
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
             resolve_global_into(buf256, sizeof(buf256), idx,
                                 script->variables, script->variable_count);
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "%s++\n", buf256);
         }
         else if (strcmp(m, "inc_l") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            resolve_local_into(buf256, sizeof(buf256), idx);
+            resolve_local_into(buf256, sizeof(buf256), idx, fn);
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "%s++\n", buf256);
         }
@@ -860,12 +948,14 @@ static void decompile_block(Buf *out,
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
             resolve_global_into(buf256, sizeof(buf256), idx,
                                 script->variables, script->variable_count);
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "%s--\n", buf256);
         }
         else if (strcmp(m, "dec_l") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            resolve_local_into(buf256, sizeof(buf256), idx);
+            resolve_local_into(buf256, sizeof(buf256), idx, fn);
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "%s--\n", buf256);
         }
@@ -875,6 +965,7 @@ static void decompile_block(Buf *out,
             char fb[32];
             const char *target_name = resolve_branch_target(
                 script, target, suppress_entries, fb, sizeof(fb));
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "goto %s\n", target_name);
         }
@@ -885,7 +976,7 @@ static void decompile_block(Buf *out,
             int target = (inst->operand_count > 0) ? inst->operands[0] : 0;
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr));
+            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
             char fb[32];
             const char *target_name = resolve_branch_target(
                 script, target, suppress_entries, fb, sizeof(fb));
@@ -896,19 +987,27 @@ static void decompile_block(Buf *out,
             int target = (inst->operand_count > 0) ? inst->operands[0] : 0;
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr));
+            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
             char fb[32];
             const char *target_name = resolve_branch_target(
                 script, target, suppress_entries, fb, sizeof(fb));
             emit_indent(out, indent);
             buf_printf(out, "// if (%s) goto %s\n", expr, target_name);
         }
-        else if (strcmp(m, "setstate") == 0 || strcmp(m, "enter") == 0) {
+        else if (strcmp(m, "setstate") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
             const char *name = resolve_section_idx(idx, script, fallback,
                                                    sizeof(fallback));
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "enter %s\n", name);
+        }
+        else if (strcmp(m, "enter") == 0) {
+            /* A frame setup at no function's start (D-MUS-14: the Python reference printed it as a section's
+               enter, which compiles to setstate). */
+            place(out, script, inst->offset);
+            emit_indent(out, indent);
+            buf_printf(out, "frame %d\n", inst->operand_count > 0 ? inst->operands[0] : 0);
         }
         else if (strcmp(m, "play") == 0 || strcmp(m, "playw") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
@@ -917,25 +1016,42 @@ static void decompile_block(Buf *out,
                               pname, sizeof(pname));
             char ptok[72];
             format_play_token(pname, ptok, sizeof(ptok));
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "play %s\n", ptok);
         }
         else if (strcmp(m, "return") == 0) {
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_puts(out, "return\n");
         }
         else if (strcmp(m, "yield") == 0) {
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_puts(out, "yield\n");
         }
         else if (strcmp(m, "done") == 0) {
+            place(out, script, inst->offset);
             buf_puts(out, "}\n");
         }
         else if (strcmp(m, "nop") == 0) {
-            /* skip */
+            /* MDEdit's leading nop and its padding are the layout's (the compiler writes them); any other a
+               statement. */
+            const int padding = inst->offset == 0 || (script->code_size % 4 == 0 && inst->offset + 4 > script->code_size &&
+                                                       [&] {
+                                                           for (int k = i; k < end_idx; ++k)
+                                                               if (insts[k].opcode != 0) return false;
+                                                           return true;
+                                                       }());
+            if (!padding) {
+                place(out, script, inst->offset);
+                emit_indent(out, indent);
+                buf_puts(out, "nop\n");
+            }
         }
         else if (strcmp(m, "callvl") == 0) {
             int func = (inst->operand_count > 0) ? inst->operands[0] : 0;
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "call func_%d\n", func);
         }
@@ -944,6 +1060,7 @@ static void decompile_block(Buf *out,
             char fb[32];
             const char *target_name = resolve_branch_target(
                 script, target, suppress_entries, fb, sizeof(fb));
+            place(out, script, inst->offset);
             emit_indent(out, indent);
             buf_printf(out, "call %s\n", target_name);
         }
@@ -953,8 +1070,9 @@ static void decompile_block(Buf *out,
             int inner_op    = inst->operand_count > 1 ? inst->operands[1] : 0;
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr));
+            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
             if (!expr[0]) snprintf(expr, sizeof(expr), "condition");
+            place(out, script, insts[es < i ? es : i].offset);
 
             /* The header's +1 byte names the table's action for the text; the VM never
                reads it [orig: AudioVM_Op_TableExec @ 0x672BB0 reads +0 count @ 0x672BBC,
@@ -1132,6 +1250,19 @@ static int decompile_into_buf(const MusScript *script,
         buf_putc(&b, '\n');
     }
 
+    /* The user globals the debug table declares (offset 64 and on) count as used: each is declared. */
+    for (uint32_t v = 0; v < script->variable_count; ++v) {
+        const int g = (int)script->variables[v].byte_offset;
+        if (g < 64) continue;
+        int seen = 0;
+        for (int k = 0; k < n_globals; ++k) if (globals_used[k] == g) { seen = 1; break; }
+        if (!seen && n_globals < (int)(sizeof(globals_used)/sizeof(globals_used[0]))) {
+            int at = n_globals++;
+            while (at > 0 && globals_used[at - 1] > g) { globals_used[at] = globals_used[at - 1]; --at; }
+            globals_used[at] = g;
+        }
+    }
+
     /* Global variables comment block */
     if (n_globals > 0) {
         buf_puts(&b, "// Global variables\n");
@@ -1181,12 +1312,52 @@ static int decompile_into_buf(const MusScript *script,
         buf_putc(&b, '\n');
     }
 
+    /* The functions: the debug table's, else the chunk's MessageHandler entry where it is a frame setup at no
+       section's start (a stripped file), its body to the next section. Each parameter by its debug name
+       (`Function::name` at its frame offset), else argN. */
+    /* As many functions as the script has, each with as many parameters as its frame setup counts (a byte: up
+       to 255); a parameter its debug table names nothing (or an empty name) is argN. */
+    std::vector<FunctionView> function_list;
+    const auto add_function = [&](const char *name, uint32_t start, uint32_t end) {
+        if (start >= script->code_size || script->code[start] != MUS_OP_ENTER) return;
+        function_list.emplace_back();
+        FunctionView &f = function_list.back();
+        snprintf(f.name, sizeof(f.name), "%s", name);
+        f.start = start;
+        f.end = end;
+        f.params = start + 1 < script->code_size ? script->code[start + 1] : 0;
+        const uint32_t base = script->locals_frame_offset ? script->locals_frame_offset : MUS_DEFAULT_LOCALS_BASE;
+        const size_t own = strlen(f.name);
+        for (int k = 0; k < f.params; ++k) {
+            const uint32_t offset = base + 4u * (uint32_t)k;
+            std::string named = "arg" + std::to_string(k + 1);
+            for (uint32_t l = 0; l < script->local_count; ++l)
+                if (script->locals[l].frame_offset == offset &&
+                    strncmp(script->locals[l].name, f.name, own) == 0 && script->locals[l].name[own] == ':' &&
+                    script->locals[l].name[own + 1] == ':' && script->locals[l].name[own + 2] != 0)
+                    named = script->locals[l].name + own + 2;
+            f.param_offsets.push_back(offset);
+            f.param_names.push_back(named);
+        }
+    };
+    for (uint32_t k = 0; k < script->function_count; ++k)
+        add_function(script->functions[k].name, script->functions[k].start, script->functions[k].end);
+    if (script->function_count == 0 && script->has_message_handler && !is_section_entry(script, script->message_handler_offset)) {
+        uint32_t end = script->code_size;
+        for (uint32_t k = 0; k < script->section_count; ++k)
+            if (script->sections[k].code_offset > script->message_handler_offset && script->sections[k].code_offset < end)
+                end = script->sections[k].code_offset;
+        add_function("MessageHandler", script->message_handler_offset, end);
+    }
+    const FunctionView *functions = function_list.empty() ? NULL : function_list.data();
+    const int function_count = (int)function_list.size();
+
     /* ---- Section bodies ---- */
     CFMap cf{};
     if (n_insts > 0) {
         if (analyze_control_flow(insts, n_insts, script, &cf) != 0) b.failed = 1;
         else decompile_block(&b, insts, 0, n_insts, script, &cf, /*suppress_entries=*/0, 0,
-                             sbf_names, sbf_name_count);
+                             sbf_names, sbf_name_count, NULL, functions, function_count);
     }
 
     cf_free(&cf);

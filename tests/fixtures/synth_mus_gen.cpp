@@ -5,8 +5,8 @@
 // mus_encode_file (the SCR0/MU01 container with the canonical eleven intrinsic
 // names and the editor debug export table, so section names and the source
 // path reload as authored). No retail program is carried: the shipped
-// jo_gamemus.bin / jo_menumus.bin and their decompile golden are the
-// reference-tree legs of the mus ctests (docs/asset-gated-tests.md).
+// jo_gamemus.bin / jo_menumus.bin are the reference-tree legs of the mus ctests
+// (docs/asset-gated-tests.md), their text pinned by mus_decompile's retail leg.
 //
 //  * gamescript has the shipped gamemus SHAPE: eight sections in the same
 //    order (Begin, Missionnull, Missionwin, Win000, Missionlose, Lose000,
@@ -14,7 +14,8 @@
 //    if/else that routes a fresh start into Multiplayerstart and an active
 //    mission into the silent Missionnull self-loop, an on-switch, a method
 //    call, and play runs over sound_0..sound_6 (inside the thirteen-entry
-//    synth_gamemus.sbf).
+//    synth_gamemus.sbf); and its MessageHandler function, the chunk's +0x40
+//    entry, between Begin and Missionnull where the shipped one stands.
 //  * menuscript is a Var02-dispatched attract/idle/browse/ambient state
 //    machine: every branch loops through setstate, so the VM never runs off
 //    the end.
@@ -54,6 +55,11 @@ const char *const kGameSource =
 	"{\n"
 	"  SV(200)\n"
 	"  enter Testmission\n"
+	"}\n"
+	"handler MessageHandler(msgtype, source)\n"
+	"{\n"
+	"  FB()\n"
+	"  on (msgtype) enter Missionnull Missionwin Missionlose\n"
 	"}\n"
 	"section Missionnull\n"
 	"{\n"
@@ -207,7 +213,20 @@ bool build(const Program &p, std::vector<uint8_t> &bytes, std::string &err) {
 	                      std::strstr(s.source_path, "synth_") != nullptr &&
 	                      std::strcmp(back.intrinsic_names[0], "GEcho") == 0 &&
 	                      std::strcmp(back.intrinsic_names[10], "TStop") == 0;
+	// MDEdit's layout: the leading nop the main entry and (no MessageHandler function) the +0x40 entry point at; the
+	// gamescript's MessageHandler, its two parameters and its frame setup; a line per statement.
+	const bool handler = std::strcmp(p.name, "gamescript") == 0;
+	const bool layout_ok = s.code_size % 4 == 0 && s.code[0] == 0x00 && s.has_message_handler && s.line_count > 0 &&
+	                       (handler ? s.function_count == 1 && s.local_count == 2 &&
+	                                          std::strcmp(s.functions[0].name, "MessageHandler") == 0 &&
+	                                          s.message_handler_offset == s.functions[0].start &&
+	                                          s.code[s.functions[0].start] == MUS_OP_ENTER && s.locals_size == 0x28
+	                                : s.function_count == 0 && s.message_handler_offset == 0 && s.locals_size == 0);
 	mus_close(&back);
+	if (!layout_ok) {
+		err = std::string(p.file) + ": the program is not in MDEdit's layout";
+		return false;
+	}
 	if (!shape_ok) {
 		err = std::string(p.file) + ": the reloaded program lost an authored name";
 		return false;
