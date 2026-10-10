@@ -114,6 +114,28 @@ typedef struct MusVariable {
     uint32_t byte_offset;                 /* offset within globals area */
 } MusVariable;
 
+/* MDEdit's debug tables beyond the sections and the globals (the editor's; the runtime relocates the region and
+   reads none of it): a function's parameter (`Function::name`, its frame offset: base + 4k), a function (its code
+   from its `enter` to the end of its body, bytecode-relative) and a line (an instruction's bytecode-relative offset
+   and the line of the source text that wrote it). Witnessed in the shipped scripts: gamemus.bin's MessageHandler
+   (`MessageHandler::msgtype` at 0x20, `::source` at 0x24, code 0x09..0x1B) and every program's line table, each
+   increasing in offset and in line. */
+typedef struct MusLocal {
+    char     name[MUS_SECTION_NAME_SIZE];
+    uint32_t frame_offset;
+} MusLocal;
+
+typedef struct MusFunction {
+    char     name[MUS_SECTION_NAME_SIZE];
+    uint32_t start;   /* its `enter` (0x38) */
+    uint32_t end;     /* past its body's last instruction */
+} MusFunction;
+
+typedef struct MusLine {
+    uint32_t code_offset;
+    uint32_t line;
+} MusLine;
+
 typedef struct MusScript {
     char        name[MUS_NAME_SIZE];
     uint8_t    *code;
@@ -130,8 +152,9 @@ typedef struct MusScript {
     uint32_t    locals_frame_offset;
     /* The MessageHandler entry (bytecode-relative PC) the restart frame jumps
        to, from the chunk's +0x40 pointer; has_message_handler is 0 when the
-       chunk carries none (the compiler never emits one; retail's shipped
-       chunks both carry one). [orig: sub_672E50 @ 0x672e95..0x672ec1] */
+       chunk carries none. MDEdit always writes one, and so does the compiler:
+       its MessageHandler function's frame setup (gamemus.bin 0x09), else the
+       code's leading nop (menumus.bin 0). [orig: sub_672E50 @ 0x672e95..0x672ec1] */
     uint32_t    message_handler_offset;
     int         has_message_handler;
 
@@ -141,6 +164,12 @@ typedef struct MusScript {
     char         source_path[MUS_SOURCE_PATH_SIZE];
     MusVariable *variables;               /* named globals (offset >= 0 ok) */
     uint32_t     variable_count;
+    MusLocal    *locals;                  /* the functions' parameters */
+    uint32_t     local_count;
+    MusFunction *functions;
+    uint32_t     function_count;
+    MusLine     *lines;                   /* in code order */
+    uint32_t     line_count;
     /* File-level intrinsic-method names, copied here so the decompiler can
        work on a single MusScript pointer per the spec API. */
     char         intrinsic_names[MUS_INTRINSIC_NAMES][MUS_INTRINSIC_NAME_SIZE];
@@ -181,15 +210,17 @@ const MusSection *mus_find_section(const MusScript *s, const char *name);
 /* Two-pass decompile to MUS source text. Pass `out=NULL, out_capacity=0` to
    query required size (excluding trailing NUL); call again with a buffer at
    least that large to write. Returns bytes written on success, negative on
-   error. The output is line-for-line compatible with the reference Python
-   decompiler this port was built from (see mus_decompile.cpp).
+   error. The text is the tool's own authoring syntax (the game reads only the
+   binary), built on the reference Python decompiler this port started from
+   (see mus_decompile.cpp), and mus_compile writes it back to the program's own
+   bytes in MDEdit's layout: a function as `handler NAME(params) { ... }`, the
+   debug table's user globals declared, and each statement on the line MDEdit's
+   line table names (blank lines before it, `#line N` where the text runs past).
 
-   The C++ port preserves the Python decompiler's quirks: section bodies are
-   bracketed by entry-point labels and `done` opcodes (so a section that ends
-   without `done` leaks code into the next section's outer scope), the leading
-   "// Decompiled from <path>" line is dropped (we have no filename context),
-   and `bind sound_N "sound_N"` is synthesised aesthetic since the runtime
-   carries no bind table.
+   From the Python decompiler: section bodies are bracketed by entry-point labels
+   and `done` opcodes (so a section that ends without `done` leaks code into the
+   next section's outer scope), and `bind sound_N "sound_N"` is synthesised
+   aesthetic since the runtime carries no bind table.
 
    A malformed program does not decompile (negative): an instruction cut short by
    the code's end, a branch (goto, brfalse, brtrue, callv) into an instruction or past
@@ -211,7 +242,7 @@ int mus_decompile_with_names(const MusScript *script,
 /* Compile MUS source text into a MusScript. The script's malloc'd buffers
    (`code`, `sections`, `variables`) are owned by the caller and freed with
    `mus_script_free`. On success returns 0; on error returns negative and
-   populates *err_line/*err_col/*err_msg with diagnostic info (the err_msg
+   populates err_line, err_col and err_msg with diagnostic info (the err_msg
    pointer is to a static string, do not free). */
 int mus_compile(const char *text, MusScript *out_script,
                 int *err_line, int *err_col, const char **err_msg);

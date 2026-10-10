@@ -15,19 +15,34 @@
    inverse opcode table is derived by walking the decompiler's `kOps[256]`
    in reverse and cross-checking the engine's observed opcode dispatch.
 
+   The text form is the tool's own authoring syntax (the game reads only the binary). The bytes it writes are
+   MDEdit's layout, witnessed in every shipped script (gamemus.bin, menumus.bin and jox01's GJox01.bin and
+   MJox01.bin): a nop at the code's start (the bytecode's first byte, where the chunk's main entry and, with no
+   MessageHandler function, its +0x40 handler pointer both point), the code padded with nops to four bytes, and
+   the editor debug section MDEdit writes beside it (the source path, the sections, the globals Var00..Var15 and
+   the user's, the functions and their parameters, and a line table: each statement's first instruction, an
+   `else`'s jump, a section's closing `done` and a function's frame setup with the line of the text that wrote
+   it). A shipped script decompiled and compiled again is its own bytes; the decompiler puts each statement on
+   the line the table names (blank lines before it, or a `#line N` directive where the text runs past).
+
    Grammar (informal; matches what the decompiler emits):
 
        script_file := comment* 'script' IDENT bind_decl* global_decl*
-                       declsection_decl* section_block*
+                       declsection_decl* (section_block | handler_block)*
        bind_decl       := 'bind' IDENT STRING                  // aesthetic only
-       global_decl     := 'global' IDENT IDENT                 // aesthetic only
-       declsection_decl:= 'declsection' IDENT                  // aesthetic only
+       global_decl     := 'global' IDENT IDENT                 // a user global: the next 4 bytes from 64
+       declsection_decl:= 'declsection' IDENT                  // the section table's order
        section_block   := 'section' IDENT '{' stmt* '}' stmt*
+       handler_block   := 'handler' IDENT '(' [IDENT {',' IDENT}] ')' '{' stmt* '}'
+                          // a function: `enter N` (0x38, its N parameters banked at the frame base 0x20 + 4k),
+                          // then its body, no `done`; one named MessageHandler is the chunk's +0x40 entry
+       '#line' N           // the next line is line N (the line table's numbering)
 
        stmt := 'play' IDENT
              | 'enter' IDENT
              | 'goto' IDENT
              | 'return' | 'yield' | 'nop'
+             | 'frame' NUMBER                                    // 0x38 outside a function's start
              | 'call' IDENT
              | 'if' '(' expr ')' '{' stmt* '}' [ 'else' '{' stmt* '}' ]
              | 'on' '(' expr ')' ('enter'|'play'|'goto') IDENT*  // tablexec
@@ -108,6 +123,8 @@ enum class Tok {
     KwCall,
     KwDone,
     KwMe,
+    KwHandler,
+    KwFrame,
 };
 
 struct Lexer {
@@ -120,11 +137,14 @@ struct Lexer {
     Tok         cur_kind;
     char        cur_text[256];
     int32_t     cur_int;
+    int         cur_line = 1;   /* the line the current token is on */
 
     void advance();
 };
 
-/* Skip whitespace and `// ...` line comments. Returns true if at EOF. */
+/* Skip whitespace and `// ...` line comments, and take a `#line N` directive: the line after it is line N
+   (the line table's numbering, which the decompiler writes where its text runs past a table's line). Returns
+   true if at EOF. */
 static bool skip_ws(Lexer *L) {
     while (L->pos < L->len) {
         char c = L->src[L->pos];
@@ -132,6 +152,22 @@ static bool skip_ws(Lexer *L) {
             ++L->pos; ++L->col;
         } else if (c == '\n') {
             ++L->pos; ++L->line; L->col = 1;
+        } else if (c == '#' && L->len - L->pos >= 5 && strncmp(L->src + L->pos, "#line", 5) == 0) {
+            size_t q = L->pos + 5;
+            while (q < L->len && (L->src[q] == ' ' || L->src[q] == '\t')) ++q;
+            int n = 0;
+            bool digits = false;
+            while (q < L->len && L->src[q] >= '0' && L->src[q] <= '9') {
+                if (n < 100000000) n = n * 10 + (L->src[q] - '0');
+                digits = true;
+                ++q;
+            }
+            while (L->pos < L->len && L->src[L->pos] != '\n') { ++L->pos; ++L->col; }
+            if (L->pos < L->len) {
+                ++L->pos;
+                L->line = digits ? n : L->line + 1;
+                L->col = 1;
+            }
         } else if (c == '/' && L->pos + 1 < L->len && L->src[L->pos + 1] == '/') {
             while (L->pos < L->len && L->src[L->pos] != '\n') {
                 ++L->pos; ++L->col;
@@ -156,8 +192,10 @@ void Lexer::advance() {
     cur_int = 0;
     if (skip_ws(this)) {
         cur_kind = Tok::Eof;
+        cur_line = line;
         return;
     }
+    cur_line = line;
     char c = src[pos];
     char c2 = (pos + 1 < len) ? src[pos + 1] : 0;
 
@@ -266,6 +304,8 @@ void Lexer::advance() {
         else if (strcmp(cur_text, "call")        == 0) cur_kind = Tok::KwCall;
         else if (strcmp(cur_text, "done")        == 0) cur_kind = Tok::KwDone;
         else if (strcmp(cur_text, "Me")          == 0) cur_kind = Tok::KwMe;
+        else if (strcmp(cur_text, "handler")     == 0) cur_kind = Tok::KwHandler;
+        else if (strcmp(cur_text, "frame")       == 0) cur_kind = Tok::KwFrame;
         else                                            cur_kind = Tok::Ident;
         return;
     }
@@ -508,9 +548,33 @@ struct Compiler {
     size_t       bind_cap;
     size_t       bind_count;
 
+    /* MDEdit's debug tables the text makes (mus.h): the functions, their parameters, the line table. */
+    MusFunction *functions = NULL;
+    size_t       function_count = 0, function_cap = 0;
+    MusLocal    *locals = NULL;
+    size_t       local_count = 0, local_cap = 0;
+    MusLine     *lines = NULL;
+    size_t       line_count = 0, line_cap = 0;
+    /* The function whose body is being compiled (-1 outside one): its parameters are its locals. */
+    int          current_function = -1;
+    size_t       current_locals_from = 0;
+
     Compiler() : sections(NULL), section_cap(0), section_count(0),
                  variables(NULL), variable_cap(0), variable_count(0),
                  binds(NULL), bind_cap(0), bind_count(0) {}
+
+    /* The line table: an instruction's offset and the line that wrote it, once per offset (the table rises in
+       both). */
+    void mark_line(uint32_t offset, int line) {
+        if (line_count > 0 && lines[line_count - 1].code_offset >= offset) return;
+        if (line_count >= line_cap) {
+            line_cap = line_cap ? line_cap * 2 : 64;
+            lines = (MusLine *)realloc(lines, line_cap * sizeof(MusLine));
+        }
+        lines[line_count].code_offset = offset;
+        lines[line_count].line = (uint32_t)(line > 0 ? line : 0);
+        ++line_count;
+    }
 
     /* Find/intern a section by name; returns its index in `sections`. */
     int section_find_or_create(const char *name) {
@@ -601,9 +665,19 @@ struct Compiler {
        @ 0x6727B0 `movzx` of one byte], so an offset past 255 is refused rather than
        wrapped to another global. -1 with `err` set. */
     /* A local's index as an operand: one byte, as a global's [orig:
-       AudioVM_Op_PushLocal @ 0x6727D0]. -1 when `name` is no local; -2 with `err`
-       set when it is one past 255. */
+       AudioVM_Op_PushLocal @ 0x6727D0]. A parameter of the function being compiled is its frame offset; else
+       `l_N`. -1 when `name` is no local; -2 with `err` set when it is one past 255. */
     int local_operand(const char *name, const char **err) {
+        if (current_function >= 0) {
+            const char *own = functions[current_function].name;
+            const size_t own_len = strlen(own);
+            for (size_t i = current_locals_from; i < local_count; ++i) {
+                const char *full = locals[i].name;
+                if (strncmp(full, own, own_len) == 0 && full[own_len] == ':' && full[own_len + 1] == ':' &&
+                    strcmp(full + own_len + 2, name) == 0)
+                    return (int)locals[i].frame_offset;
+            }
+        }
         const int l = parse_l_index(name);
         if (l > 255) {
             *err = "local variable out of range (indices 0..255)";
@@ -746,7 +820,9 @@ struct Compiler {
 
     int parse_top_decl(const char **err);
     int parse_section_body(const char **err, bool inside_section);
+    int parse_handler(const char **err);
     int parse_stmt(const char **err);
+    int parse_stmt_at(const char **err);
 
     int finalize(const char **err);
     int parse_script(const char **err);
@@ -852,7 +928,25 @@ int Compiler::parse_expr(const char **err) {
     return -1;
 }
 
+/* A statement, its first instruction marked in the line table with the line of its first token. */
 int Compiler::parse_stmt(const char **err) {
+    mark_line((uint32_t)emit.used, lex.cur_line);
+    return parse_stmt_at(err);
+}
+
+int Compiler::parse_stmt_at(const char **err) {
+    /* frame N: the frame setup outside a function's start [orig: AudioVM_Op_Enter @ 0x672C20]. */
+    if (lex.cur_kind == Tok::KwFrame) {
+        lex.advance();
+        if (lex.cur_kind != Tok::Number || lex.cur_int > 255) {
+            *err = "expected an argument count (0..255) after 'frame'";
+            return -1;
+        }
+        emit.byte((uint8_t)MUS_OP_ENTER);
+        emit.byte((uint8_t)lex.cur_int);
+        lex.advance();
+        return 0;
+    }
     /* play <sound_N | bound-name | "bound name"> */
     if (lex.cur_kind == Tok::KwPlay) {
         lex.advance();
@@ -1001,6 +1095,8 @@ int Compiler::parse_stmt(const char **err) {
         }
         lex.advance();
         if (lex.cur_kind == Tok::KwElse) {
+            /* The jump past the else is the else's line. */
+            mark_line((uint32_t)emit.used, lex.cur_line);
             lex.advance();
             if (lex.cur_kind != Tok::LBrace) {
                 *err = "expected '{' after else";
@@ -1226,7 +1322,8 @@ int Compiler::parse_stmt(const char **err) {
 int Compiler::parse_section_body(const char **err, bool inside_section) {
     while (lex.cur_kind != Tok::Eof) {
         if (lex.cur_kind == Tok::RBrace && inside_section) {
-            /* '}' closes a section: emit done and consume. */
+            /* '}' closes a section: emit done (its line the brace's) and consume. */
+            mark_line((uint32_t)emit.used, lex.cur_line);
             emit.byte((uint8_t)MUS_OP_DONE);
             lex.advance();
             return 0;
@@ -1238,6 +1335,74 @@ int Compiler::parse_section_body(const char **err, bool inside_section) {
         *err = "unexpected EOF inside section body";
         return -1;
     }
+    return 0;
+}
+
+/* `handler NAME(p, ...) { body }`: a function. Its frame setup `enter N` (0x38) banks its N arguments at the
+   frame base + 4k [orig: AudioVM_Op_Enter @ 0x672C20, the base instance[+0x3C]], each parameter a local of that
+   frame offset (`NAME::p` in the debug table); its body follows, closed by nothing (MDEdit's MessageHandler ends
+   on its table's last entry: gamemus.bin 0x09..0x1B). The frame setup is the header's line. */
+int Compiler::parse_handler(const char **err) {
+    const int header_line = lex.cur_line;
+    lex.advance();
+    if (lex.cur_kind != Tok::Ident) {
+        *err = "expected a function name after 'handler'";
+        return -1;
+    }
+    if (function_count >= function_cap) {
+        function_cap = function_cap ? function_cap * 2 : 4;
+        functions = (MusFunction *)realloc(functions, function_cap * sizeof(MusFunction));
+    }
+    MusFunction &fn = functions[function_count];
+    memset(&fn, 0, sizeof(fn));
+    strncpy(fn.name, lex.cur_text, sizeof(fn.name) - 1);
+    fn.start = (uint32_t)emit.used;
+    current_function = (int)function_count++;
+    current_locals_from = local_count;
+    lex.advance();
+    if (lex.cur_kind != Tok::LParen) {
+        *err = "expected '(' after the function's name";
+        return -1;
+    }
+    lex.advance();
+    int params = 0;
+    while (lex.cur_kind == Tok::Ident) {
+        if (local_count >= local_cap) {
+            local_cap = local_cap ? local_cap * 2 : 4;
+            locals = (MusLocal *)realloc(locals, local_cap * sizeof(MusLocal));
+        }
+        MusLocal &local = locals[local_count++];
+        memset(&local, 0, sizeof(local));
+        snprintf(local.name, sizeof(local.name), "%s::%s", functions[current_function].name, lex.cur_text);
+        local.frame_offset = (uint32_t)(MUS_DEFAULT_LOCALS_BASE + 4 * params);
+        ++params;
+        lex.advance();
+        if (lex.cur_kind == Tok::Comma) lex.advance();
+    }
+    if (lex.cur_kind != Tok::RParen || params > 255) {
+        *err = "expected ')' to close the function's parameters";
+        return -1;
+    }
+    lex.advance();
+    if (lex.cur_kind != Tok::LBrace) {
+        *err = "expected '{' to open the function's body";
+        return -1;
+    }
+    lex.advance();
+    mark_line((uint32_t)emit.used, header_line);
+    emit.byte((uint8_t)MUS_OP_ENTER);
+    emit.byte((uint8_t)params);
+    while (lex.cur_kind != Tok::RBrace && lex.cur_kind != Tok::Eof) {
+        int rc = parse_stmt(err);
+        if (rc != 0) return rc;
+    }
+    if (lex.cur_kind != Tok::RBrace) {
+        *err = "expected '}' to close the function's body";
+        return -1;
+    }
+    lex.advance();
+    functions[current_function].end = (uint32_t)emit.used;
+    current_function = -1;
     return 0;
 }
 
@@ -1300,6 +1465,7 @@ int Compiler::parse_top_decl(const char **err) {
         lex.advance();
         return 0;
     }
+    if (lex.cur_kind == Tok::KwHandler) return parse_handler(err);
     /* `section NAME { body }` */
     if (lex.cur_kind == Tok::KwSection) {
         lex.advance();
@@ -1342,6 +1508,9 @@ int Compiler::finalize(const char **err) {
         emit.patch_u32(p.patch_offset, sections[found].code_offset);
     }
 
+    /* MDEdit pads the code with nops to four bytes (gamemus.bin 129 -> 132, menumus.bin 3122 -> 3124). */
+    while (emit.used % 4 != 0) emit.byte(0x00);
+
     /* Allocate output buffers. */
     out.code_size = (uint32_t)emit.used;
     if (out.code_size > 0) {
@@ -1361,11 +1530,32 @@ int Compiler::finalize(const char **err) {
         }
     }
 
-    if (variable_count > 0) {
-        out.variables = (MusVariable *)calloc(variable_count, sizeof(MusVariable));
-        if (!out.variables) { *err = "OOM"; return -1; }
-        out.variable_count = (uint32_t)variable_count;
-        memcpy(out.variables, variables, variable_count * sizeof(MusVariable));
+    /* The globals as MDEdit lists them: its sixteen Var00..Var15 at 0..60, then the user's. */
+    out.variables = (MusVariable *)calloc(16 + variable_count, sizeof(MusVariable));
+    if (!out.variables) { *err = "OOM"; return -1; }
+    out.variable_count = (uint32_t)(16 + variable_count);
+    for (uint32_t k = 0; k < 16; ++k) {
+        snprintf(out.variables[k].name, MUS_INTRINSIC_NAME_SIZE, "Var%02u", k);
+        out.variables[k].byte_offset = 4 * k;
+    }
+    if (variable_count > 0) memcpy(out.variables + 16, variables, variable_count * sizeof(MusVariable));
+    if (local_count > 0) {
+        out.locals = (MusLocal *)calloc(local_count, sizeof(MusLocal));
+        if (!out.locals) { *err = "OOM"; return -1; }
+        memcpy(out.locals, locals, local_count * sizeof(MusLocal));
+        out.local_count = (uint32_t)local_count;
+    }
+    if (function_count > 0) {
+        out.functions = (MusFunction *)calloc(function_count, sizeof(MusFunction));
+        if (!out.functions) { *err = "OOM"; return -1; }
+        memcpy(out.functions, functions, function_count * sizeof(MusFunction));
+        out.function_count = (uint32_t)function_count;
+    }
+    if (line_count > 0) {
+        out.lines = (MusLine *)calloc(line_count, sizeof(MusLine));
+        if (!out.lines) { *err = "OOM"; return -1; }
+        memcpy(out.lines, lines, line_count * sizeof(MusLine));
+        out.line_count = (uint32_t)line_count;
     }
 
     /* MDEdit pre-defines globals area = 64 bytes (Var00..Var15); user globals
@@ -1376,13 +1566,25 @@ int Compiler::finalize(const char **err) {
         if (end > gsize) gsize = end;
     }
     out.globals_size = gsize;
-    out.locals_size = 0x28;       /* match the JO fixture default */
+    /* The locals area: the frame base and the most parameters a function banks (gamemus.bin 0x28: 0x20 and
+       MessageHandler's two), none with no function (menumus.bin 0). */
+    uint32_t lsize = 0;
+    for (size_t i = 0; i < local_count; ++i) {
+        const uint32_t end = locals[i].frame_offset + 4;
+        if (end > lsize) lsize = end;
+    }
+    out.locals_size = lsize;
     out.locals_frame_offset = MUS_DEFAULT_LOCALS_BASE;   /* `enter` frame base; JO/MDEdit witness */
     out.entry_section_index = 0;
-    /* The source language declares no MessageHandler; the restart frame's
-       +0x40 entry only ever comes from a parsed chunk. */
+    /* The +0x40 MessageHandler entry: the function of that name, else the code's start, its leading nop
+       (gamemus.bin 0x09, menumus.bin 0) [orig: sub_672E50 @ 0x672eba jumps there]. */
     out.message_handler_offset = 0;
-    out.has_message_handler = 0;
+    out.has_message_handler = 1;
+    for (size_t i = 0; i < function_count; ++i)
+        if (strcmp(functions[i].name, "MessageHandler") == 0) {
+            out.message_handler_offset = functions[i].start;
+            break;
+        }
 
     /* Populate intrinsic names with the canonical 11. */
     for (int i = 0; i < MUS_INTRINSIC_NAMES; ++i) {
@@ -1410,6 +1612,8 @@ int Compiler::parse_script(const char **err) {
     out.name[MUS_NAME_SIZE - 1] = 0;
     lex.advance();
 
+    /* MDEdit's leading nop: the code's start, the chunk's main entry. */
+    emit.byte(0x00);
     while (lex.cur_kind != Tok::Eof) {
         int rc = parse_top_decl(err);
         if (rc != 0) return rc;
@@ -1464,6 +1668,9 @@ int mus_compile(const char *text, MusScript *out_script,
     free(c.sections);
     free(c.variables);
     free(c.binds);
+    free(c.functions);
+    free(c.locals);
+    free(c.lines);
     if (rc != 0) {
         if (err_msg)  *err_msg  = local_err ? local_err : "compile error";
         if (err_line) *err_line = c.lex.line;
@@ -1480,12 +1687,21 @@ void mus_script_free(MusScript *s) {
     free(s->code);
     free(s->sections);
     free(s->variables);
+    free(s->locals);
+    free(s->functions);
+    free(s->lines);
     s->code = NULL;
     s->sections = NULL;
     s->variables = NULL;
+    s->locals = NULL;
+    s->functions = NULL;
+    s->lines = NULL;
     s->code_size = 0;
     s->section_count = 0;
     s->variable_count = 0;
+    s->local_count = 0;
+    s->function_count = 0;
+    s->line_count = 0;
 }
 
 void mus_free(void *p) { free(p); }
@@ -1513,6 +1729,32 @@ static void buf_append_zero(uint8_t **buf, size_t *cap, size_t *used, size_t n) 
     *used += n;
 }
 
+/* Zeros to the next multiple of 16 of the file offset (MDEdit's string section and the name resolve table). */
+static void buf_align16(uint8_t **buf, size_t *cap, size_t *used) {
+    buf_append_zero(buf, cap, used, (16 - *used % 16) % 16);
+}
+
+static void put32(uint8_t *at, uint32_t v) { memcpy(at, &v, 4); }
+
+/* One 48-byte debug entry: a value at +0 (and +8), a 32-byte name at +0x10. */
+static void debug_entry(uint8_t **buf, size_t *cap, size_t *used, uint32_t first, uint32_t third, const char *name) {
+    uint8_t entry[48];
+    memset(entry, 0, sizeof(entry));
+    put32(entry + 0x00, first);
+    put32(entry + 0x08, third);
+    const size_t nlen = strnlen(name, 31);
+    memcpy(entry + 0x10, name, nlen);
+    buf_append(buf, cap, used, entry, sizeof(entry));
+}
+
+/* The SCR0 file in MDEdit's layout, witnessed in every shipped script: the 44-byte header and the chunk pointer
+   table; each MU01 chunk's 0x48-byte header and 0x20 bytes of zeros, its section table (chunk-relative entry PCs)
+   and its code; zeros to 16, then the editor debug section: the 256-byte source path, a 0x50-byte header of the
+   five tables' entry size, offsets and counts, the sections' (bytecode-relative entries), the globals', the
+   parameters' and the functions' 48-byte entries and the 8-byte lines; zeros to 16, the intrinsic names'
+   resolve table (zeros the loader fills) and their length-prefixed strings. The runtime reads the header, the
+   section table, the code and the names [orig: AudioVM_LoadScriptFile @ 0x672D20, AudioVM_FixupPointers @
+   0x672470]; MDEdit's reader the rest. */
 int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
                                uint8_t **out_buf, size_t *out_size) {
     if (!scripts || !out_buf || !out_size) return -1;
@@ -1520,13 +1762,11 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
     uint8_t *buf = NULL;
     size_t   cap = 0, used = 0;
 
-    /* Reserve the file header (44 bytes) and chunk pointer table. */
     buf_append_zero(&buf, &cap, &used, sizeof(MusFileHeader));
     size_t chunk_table_offset = used;
     buf_append_zero(&buf, &cap, &used, (size_t)script_count * 4);
 
-    /* Per-chunk offsets we'll backpatch later. */
-    uint32_t *chunk_offs = (uint32_t *)calloc(script_count, sizeof(uint32_t));
+    uint32_t *chunk_offs = (uint32_t *)calloc(script_count ? script_count : 1, sizeof(uint32_t));
     if (!chunk_offs) { free(buf); return -2; }
 
     for (uint32_t i = 0; i < script_count; ++i) {
@@ -1534,176 +1774,108 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         if (!s) { free(buf); free(chunk_offs); return -3; }
 
         chunk_offs[i] = (uint32_t)used;
+        const size_t chunk_hdr_at = used;
+        buf_append_zero(&buf, &cap, &used, sizeof(MusChunkHeader) + 0x20);
 
-        /* Chunk header: write zeros, fill in fields after we know offsets. */
-        size_t chunk_hdr_at = used;
-        buf_append_zero(&buf, &cap, &used, sizeof(MusChunkHeader));
+        const size_t sec_tab_at = used;
+        buf_append_zero(&buf, &cap, &used, (size_t)s->section_count * 4);
+        const size_t bc_at = used;
+        const uint32_t bc_rel = (uint32_t)(bc_at - chunk_hdr_at);
+        if (s->code && s->code_size > 0) buf_append(&buf, &cap, &used, s->code, s->code_size);
+        for (uint32_t k = 0; k < s->section_count; ++k) put32(buf + sec_tab_at + 4 * k, bc_rel + s->sections[k].code_offset);
+        const size_t debug_info_at = used;
 
-        /* Section table immediately after chunk header. Stored as
-           chunk-relative offsets; we'll fill them in after we know
-           bytecode_offset (so we can shift bytecode-relative -> chunk-relative). */
-        size_t   sec_tab_off_in_chunk = used - chunk_hdr_at;
-        uint32_t *sec_tab_slots = NULL;
-        if (s->section_count > 0) {
-            sec_tab_slots = (uint32_t *)calloc(s->section_count, sizeof(uint32_t));
-            if (!sec_tab_slots) { free(buf); free(chunk_offs); return -4; }
+        /* The editor debug section. */
+        buf_align16(&buf, &cap, &used);
+        const size_t str_at = used;
+        buf_append_zero(&buf, &cap, &used, 256);
+        size_t plen = strnlen(s->source_path, 255);
+        memcpy(buf + str_at, s->source_path, plen);
+        const size_t hdr_at = used;
+        buf_append_zero(&buf, &cap, &used, 0x50);
+        const auto rel = [&](size_t at) { return (uint32_t)(at - chunk_hdr_at); };
+        const size_t sections_at = used;
+        for (uint32_t k = 0; k < s->section_count; ++k)
+            debug_entry(&buf, &cap, &used, s->sections[k].code_offset, 0, s->sections[k].name);
+        const size_t vars_at = used;
+        for (uint32_t k = 0; k < s->variable_count; ++k)
+            debug_entry(&buf, &cap, &used, s->variables[k].byte_offset, 0, s->variables[k].name);
+        const size_t locals_at = used;
+        for (uint32_t k = 0; k < s->local_count; ++k)
+            debug_entry(&buf, &cap, &used, s->locals[k].frame_offset, 0, s->locals[k].name);
+        const size_t functions_at = used;
+        for (uint32_t k = 0; k < s->function_count; ++k)
+            debug_entry(&buf, &cap, &used, s->functions[k].start, s->functions[k].end, s->functions[k].name);
+        const size_t lines_at = used;
+        for (uint32_t k = 0; k < s->line_count; ++k) {
+            uint8_t pair[8];
+            put32(pair, s->lines[k].code_offset);
+            put32(pair + 4, s->lines[k].line);
+            buf_append(&buf, &cap, &used, pair, sizeof(pair));
         }
-        size_t sec_tab_at = used;
-        buf_append_zero(&buf, &cap, &used,
-                        (size_t)s->section_count * sizeof(uint32_t));
+        uint8_t *h = buf + hdr_at;
+        put32(h + 0x00, 48);
+        put32(h + 0x04, rel(sections_at));
+        put32(h + 0x08, s->section_count);
+        put32(h + 0x0C, rel(vars_at));
+        put32(h + 0x10, s->variable_count);
+        put32(h + 0x14, rel(locals_at));
+        put32(h + 0x18, s->local_count);
+        put32(h + 0x1C, rel(functions_at));
+        put32(h + 0x20, s->function_count);
+        put32(h + 0x24, rel(lines_at));
+        put32(h + 0x28, s->line_count);
 
-        /* Bytecode follows. */
-        size_t bc_at = used;
-        size_t bc_off_in_chunk = bc_at - chunk_hdr_at;
-        if (s->code && s->code_size > 0) {
-            buf_append(&buf, &cap, &used, s->code, s->code_size);
-        }
-
-        /* Now we know the bytecode chunk-relative offset; populate the
-           section-table slots (they store chunk-relative entry-PC offsets
-           = bytecode_offset + bytecode-relative section.code_offset). */
-        for (uint32_t k = 0; k < s->section_count; ++k) {
-            uint32_t chunk_rel = (uint32_t)bc_off_in_chunk + s->sections[k].code_offset;
-            uint32_t bytes[1] = { chunk_rel };
-            memcpy(buf + sec_tab_at + k * 4, bytes, 4);
-        }
-        free(sec_tab_slots);
-
-        /* Optional editor debug section: source path + section name table +
-           variable name table. Emit it whenever author-facing names exist;
-           otherwise a freshly compiled script would reload with synthetic
-           Section_N labels even though the source named its sections. */
-        size_t str_section_at = 0;
-        size_t debug_info_at  = 0;
-        bool   emit_debug     = (s->source_path[0] != 0)
-                             || (s->section_count > 0)
-                             || (s->variable_count > 0);
-        if (emit_debug) {
-            /* debug_info_offset is editor-only and the runtime never reads
-               it. The original engine relocates it but we set it to point
-               just before the string section (matches BHD layout). */
-            debug_info_at = used;
-            /* The original keeps a small debug-info area of zeros; we emit
-               nothing here (debug_info_count=0). */
-            str_section_at = used;
-            const uint32_t SRC_PATH_BYTES = 256;
-            buf_append_zero(&buf, &cap, &used, SRC_PATH_BYTES);
-            /* Copy source path into the slot (the parser tolerates leading
-               zeros, but we just write the path at offset 0). */
-            size_t plen = strlen(s->source_path);
-            if (plen >= SRC_PATH_BYTES) plen = SRC_PATH_BYTES - 1;
-            memcpy(buf + str_section_at, s->source_path, plen);
-
-            /* Header (0x50 bytes): entry_size at +0, section_count at +8,
-               var_count at +0x10. */
-            uint8_t hdr[0x50];
-            memset(hdr, 0, sizeof(hdr));
-            uint32_t entry_size = 48;
-            uint32_t sc = s->section_count;
-            uint32_t vc = s->variable_count;
-            memcpy(hdr + 0x00, &entry_size, 4);
-            memcpy(hdr + 0x08, &sc, 4);
-            memcpy(hdr + 0x10, &vc, 4);
-            buf_append(&buf, &cap, &used, hdr, sizeof(hdr));
-            /* Section entries: 4-byte code_offset (chunk-relative) at +0,
-               32-byte name at +0x10. */
-            for (uint32_t k = 0; k < s->section_count; ++k) {
-                uint8_t entry[48];
-                memset(entry, 0, sizeof(entry));
-                uint32_t off = (uint32_t)bc_off_in_chunk
-                             + s->sections[k].code_offset;
-                memcpy(entry + 0x00, &off, 4);
-                size_t nlen = strnlen(s->sections[k].name, 32);
-                memcpy(entry + 0x10, s->sections[k].name, nlen);
-                buf_append(&buf, &cap, &used, entry, sizeof(entry));
-            }
-            /* Variable entries. */
-            for (uint32_t k = 0; k < s->variable_count; ++k) {
-                uint8_t entry[48];
-                memset(entry, 0, sizeof(entry));
-                memcpy(entry + 0x00, &s->variables[k].byte_offset, 4);
-                size_t nlen = strnlen(s->variables[k].name,
-                                      MUS_INTRINSIC_NAME_SIZE);
-                if (nlen > 31) nlen = 31;
-                memcpy(entry + 0x10, s->variables[k].name, nlen);
-                buf_append(&buf, &cap, &used, entry, sizeof(entry));
-            }
-        }
-
-        /* Now backpatch the chunk header. */
         MusChunkHeader ch;
         memset(&ch, 0, sizeof(ch));
         ch.tag                  = MUS_CHUNK_TAG_MU01;
         ch.version              = 0x00000100;
-        size_t nlen = strnlen(s->name, MUS_NAME_SIZE);
-        memcpy(ch.name, s->name, nlen);
+        memcpy(ch.name, s->name, strnlen(s->name, MUS_NAME_SIZE));
         ch.globals_size         = s->globals_size ? s->globals_size : 64;
         ch.locals_size          = s->locals_size;
-        ch.bytecode_offset      = (uint32_t)bc_off_in_chunk;
-        ch.section_table_offset = (uint32_t)sec_tab_off_in_chunk;
+        ch.bytecode_offset      = bc_rel;
+        ch.section_table_offset = rel(sec_tab_at);
         ch.section_count        = s->section_count;
         ch.entry_section_index  = s->entry_section_index;
-        /* +0x40 MessageHandler pointer (chunk-relative, like the section
-           entries) when the script carries one; +0x44 = the bytecode start,
-           the value both shipped chunks carry (gamemus 0x88, menumus 0x94).
-           [orig: AudioVM_FixupPointers @ 0x672495/@ 0x6724a1] */
-        ch.message_handler_offset = s->has_message_handler
-            ? (uint32_t)bc_off_in_chunk + s->message_handler_offset
-            : 0;
-        ch.main_entry_offset    = (uint32_t)bc_off_in_chunk;
-        if (emit_debug) {
-            ch.debug_info_offset    = (uint32_t)(debug_info_at - chunk_hdr_at);
-            ch.debug_info_count     = 0;
-            ch.string_section_offset= (uint32_t)(str_section_at - chunk_hdr_at);
-            /* +0x3C doubles as the `enter` frame base (instance[+0x3C]); preserve
-               a parsed value, default 0x20 (the JO/MDEdit witness). */
-            ch.string_section_size  = s->locals_frame_offset ? s->locals_frame_offset
-                                                             : MUS_DEFAULT_LOCALS_BASE;
-        } else {
-            /* No debug section: still set debug_info_offset to the end of
-               the bytecode region so the parser's smallest_after() heuristic
-               can bound the bytecode. The parser only walks debug data when
-               debug_info_count > 0, which we keep at zero. */
-            ch.debug_info_offset    = (uint32_t)(used - chunk_hdr_at);
-            ch.debug_info_count     = 0;
-        }
+        ch.debug_info_offset    = rel(debug_info_at);
+        ch.debug_info_count     = 0;
+        ch.string_section_offset = rel(str_at);
+        /* +0x3C doubles as the `enter` frame base (instance[+0x3C]); 0x20 in every MDEdit file. */
+        ch.string_section_size  = s->locals_frame_offset ? s->locals_frame_offset : MUS_DEFAULT_LOCALS_BASE;
+        /* +0x40 the MessageHandler entry, +0x44 the code's start [orig: AudioVM_FixupPointers @ 0x672495 /
+           @ 0x6724a1]. */
+        ch.message_handler_offset = s->has_message_handler ? bc_rel + s->message_handler_offset : 0;
+        ch.main_entry_offset    = bc_rel;
         memcpy(buf + chunk_hdr_at, &ch, sizeof(ch));
     }
 
-    /* File-level intrinsic-name resolve table + strings blob. The table is
-       11 uint32 zero-filled slots populated at load by the engine; we just
-       reserve the space. The strings blob holds the canonical 11 names as
-       Pascal-style length-prefixed strings (length includes itself). */
+    /* The intrinsic names' resolve table (11 slots the loader fills) and their strings, each its length (the
+       byte, the name, its NUL) then the name. */
+    buf_align16(&buf, &cap, &used);
     size_t resolve_at = used;
     buf_append_zero(&buf, &cap, &used, MUS_INTRINSIC_NAMES * 4);
     size_t strings_at = used;
     for (int i = 0; i < MUS_INTRINSIC_NAMES; ++i) {
         const char *name = kIntrinsicNames[i];
         size_t nlen = strlen(name);
-        uint8_t L = (uint8_t)(nlen + 2);   /* 1-byte length + name + NUL */
-        if (L < 2) L = 2;
+        uint8_t L = (uint8_t)(nlen + 2);
         buf_append(&buf, &cap, &used, &L, 1);
         buf_append(&buf, &cap, &used, name, nlen);
         uint8_t z = 0;
         buf_append(&buf, &cap, &used, &z, 1);
     }
 
-    /* Patch the file header. */
-    MusFileHeader h;
-    memset(&h, 0, sizeof(h));
-    h.magic                     = MUS_MAGIC_SCR0;
-    h.version                   = 0x00000100;
-    h.chunk_count               = script_count;
-    h.chunk_table_offset        = (uint32_t)chunk_table_offset;
-    h.name_count                = MUS_INTRINSIC_NAMES;
-    h.name_strings_blob_offset  = (uint32_t)strings_at;
-    h.name_resolve_table_offset = (uint32_t)resolve_at;
-    memcpy(buf, &h, sizeof(h));
-
-    /* Patch the chunk pointer table. */
-    for (uint32_t i = 0; i < script_count; ++i) {
-        memcpy(buf + chunk_table_offset + i * 4, &chunk_offs[i], 4);
-    }
+    MusFileHeader fh;
+    memset(&fh, 0, sizeof(fh));
+    fh.magic                     = MUS_MAGIC_SCR0;
+    fh.version                   = 0x00000100;
+    fh.chunk_count               = script_count;
+    fh.chunk_table_offset        = (uint32_t)chunk_table_offset;
+    fh.name_count                = MUS_INTRINSIC_NAMES;
+    fh.name_strings_blob_offset  = (uint32_t)strings_at;
+    fh.name_resolve_table_offset = (uint32_t)resolve_at;
+    memcpy(buf, &fh, sizeof(fh));
+    for (uint32_t i = 0; i < script_count; ++i) memcpy(buf + chunk_table_offset + i * 4, &chunk_offs[i], 4);
     free(chunk_offs);
 
     *out_buf = buf;

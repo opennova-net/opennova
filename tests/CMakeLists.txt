@@ -938,11 +938,11 @@ target_link_libraries(mus_vm_fixes_test PRIVATE opennova_formats)
 target_include_directories(mus_vm_fixes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mus_vm_fixes COMMAND mus_vm_fixes_test)
 
-# Write-path parity: the canonical re-encoded form is a byte-stable fixed point
-# (byte-identity to the ORIGINAL .bin is impossible because debug info is not
-# reproduced). See the test file header.
+# Write-path parity: a program decompiled to its MUS text, compiled and encoded again is its own bytes (the
+# compiler writes MDEdit's layout): the minted pair in core; the reference pair and every music script the
+# install's archives hold (base and each expansion) as the retail leg. See the test file header.
 add_executable(mus_encode_idempotence_test mus/mus_encode_idempotence_test.cpp)
-target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_formats)
+target_link_libraries(mus_encode_idempotence_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mus_encode_idempotence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_encode_idempotence_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")

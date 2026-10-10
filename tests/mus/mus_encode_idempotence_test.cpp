@@ -1,38 +1,25 @@
-/* Write-path parity invariant for canonical MUS re-encoding.
+/* Write-path parity for MUS: a program decompiled to its MUS text, compiled and encoded again is its own bytes.
 
-   This pins what is actually achievable when a format tool rewrites a script,
-   and documents what is NOT.
-
-   NOT achievable: byte-identity to the ORIGINAL shipped .bin. The shipped
-   SCR0/MU01 files carry debug info the runtime decode path does
-   not capture and mus_encode_file does not reproduce -- the section-name
-   blob, the 256-byte source path and the string section (MusChunkHeader
-   fields debug_info_offset / string_section_offset; see mus.h); the +0x40
-   MessageHandler pointer survives a parse but the compiler never emits one,
-   so a recompiled chunk carries 0 there. So encode(compile(decompile(original))) is a
-   smaller, canonical form (e.g. jo_gamemus 2521 -> ~1121 bytes), first
-   diverging around offset 20 (the chunk-table / debug-info region). A gate
-   worded "recompile == original file bytes" would therefore FAIL and
-   reject every valid rewrite -- do not word it that way.
-
-   ACHIEVABLE: the re-encoded canonical form is a byte-stable FIXED POINT.
-   Define canonical(b) = encode(compile(decompile(open(b)))). Then
-   canonical(original) == canonical(canonical(original)) byte-for-byte. This
-   is the writer invariant: a no-op decompile/compile/encode cycle must
-   reproduce the canonical bytes exactly. The minted synth_{gamemus,menumus}.bin
-   (already the canonical form, so canonical(minted) == minted as well) run
-   unconditionally; the shipped pair from the reference fixture set
-   (OPENNOVA_JO_ASSETS) is the retail leg.
-
-   The decompiler emitter must never change (its golden text round-trip is
-   byte-exact); this test exercises the compile+encode side only. */
+   The text form is the tool's own authoring syntax (the game reads only the binary); the compiler writes MDEdit's
+   layout (mus_compile.cpp: the leading nop, the code padded to four bytes, the editor debug section with its
+   sections, globals, functions, their parameters and the line table, the alignment and the name table), and the
+   decompiler puts each statement on the line the table names. So encode(compile(decompile(x))) == x byte for
+   byte: the minted pair (synth_{gamemus,menumus}.bin, the encoder's own output; the gamescript carries a
+   MessageHandler function) in core; the reference fixture set's shipped pair (OPENNOVA_JO_ASSETS) and every
+   music script the install's archives hold, base and each installed expansion's (OPENNOVA_JO_DIR: gamemus.bin,
+   menumus.bin, jox01's GJox01.bin and MJox01.bin), as the retail legs. And the text is a fixed point: the
+   recompiled program decompiles to the same text. */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <formats/mus/mus.h>
 
+#include <algorithm>
 #include <string>
+#include <vector>
+
+#include <base/vfs/vfs.h>
+#include <formats/mus/mus.h>
 
 #include "common/retail_paths.h"
 
@@ -51,126 +38,119 @@ static int passed = 0, failed = 0;
 
 static std::string g_retail_gamemus, g_retail_menumus;
 
-/* canonical(script) = encode_file(compile(decompile(script))). Allocates
-   *out via mus_encode_file (release with mus_free). Returns 1 on success. */
-static int canonical_from_script(const MusScript *s, uint8_t **out, size_t *out_size) {
-    int needed = mus_decompile(s, NULL, 0);
-    if (needed <= 0) return 0;
-    char *text = (char *)malloc((size_t)needed + 1);
-    if (!text) return 0;
-    if (mus_decompile(s, text, (size_t)needed + 1) != needed) { free(text); return 0; }
-    text[needed] = 0;
+static bool decompile(const MusScript &s, std::string &text) {
+    const int needed = mus_decompile(&s, NULL, 0);
+    if (needed <= 0) return false;
+    text.assign((size_t)needed + 1, '\0');
+    if (mus_decompile(&s, &text[0], text.size()) != needed) return false;
+    text.resize((size_t)needed);
+    return true;
+}
 
+/* The bytes' program through its MUS text and back, `text` its decompile. 1 when the bytes come back. */
+static int assert_text_roundtrip(const std::vector<uint8_t> &bytes, const std::string &what) {
+    MusFile mf;
+    CHECK(mus_open_memory(&mf, bytes.data(), bytes.size()) == 0, "open the program");
+    std::string text;
+    const bool decompiled = decompile(mf.scripts[0], text);
+    mus_close(&mf);
+    CHECK(decompiled, "decompile the program");
     MusScript recomp = {};
     const char *err = NULL;
     int err_line = 0, err_col = 0;
-    int rc = mus_compile(text, &recomp, &err_line, &err_col, &err);
-    free(text);
-    if (rc != 0) {
-        fprintf(stderr, "  compile error at line %d col %d: %s\n",
-                err_line, err_col, err ? err : "(null)");
+    if (mus_compile(text.c_str(), &recomp, &err_line, &err_col, &err) != 0) {
+        fprintf(stderr, "  %s: compile error at %d:%d: %s\n", what.c_str(), err_line, err_col, err ? err : "?");
         return 0;
     }
     const MusScript *arr[1] = { &recomp };
-    rc = mus_encode_file(arr, 1, out, out_size);
+    uint8_t *out = NULL;
+    size_t n = 0;
+    const int rc = mus_encode_file(arr, 1, &out, &n);
     mus_script_free(&recomp);
-    return rc == 0;
+    CHECK(rc == 0, "encode the recompiled program");
+    std::vector<uint8_t> again(out, out + n);
+    mus_free(out);
+    if (again != bytes) {
+        size_t i = 0;
+        while (i < again.size() && i < bytes.size() && again[i] == bytes[i]) ++i;
+        fprintf(stderr, "  %s: %zu bytes, recompiled %zu, first difference at %zu\n", what.c_str(), bytes.size(),
+                again.size(), i);
+    }
+    CHECK(again == bytes, "the program's MUS text compiles back to its own bytes");
+    /* The text is a fixed point. */
+    MusFile back;
+    CHECK(mus_open_memory(&back, again.data(), again.size()) == 0, "open the recompiled program");
+    std::string text2;
+    const bool ok = decompile(back.scripts[0], text2);
+    mus_close(&back);
+    CHECK(ok && text2 == text, "the recompiled program decompiles to the same text");
+    printf("\n  %s: %zu bytes, through its text byte for byte\n", what.c_str(), bytes.size());
+    return 1;
 }
 
-/* The shared assertion: canonical(original) is a byte-stable fixed point. */
-static int assert_fixed_point(const char *path) {
-    MusFile mf;
-    CHECK(mus_open(&mf, path) == 0, "open original");
+static int roundtrip_file(const char *path) {
+    FILE *f = fopen(path, "rb");
+    CHECK(f != NULL, "open the file");
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<uint8_t> bytes((size_t)(n > 0 ? n : 0));
+    const bool read = fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+    fclose(f);
+    CHECK(read, "read the file");
+    return assert_text_roundtrip(bytes, path);
+}
 
-    uint8_t *lap1 = NULL; size_t n1 = 0;
-    CHECK(canonical_from_script(&mf.scripts[0], &lap1, &n1), "lap1 = canonical(original)");
-    CHECK(n1 > 0, "lap1 non-empty");
+static int test_synth_gamemus(void) { return roundtrip_file(MUS_FIXTURE_DIR "/synth_gamemus.bin"); }
+static int test_synth_menumus(void) { return roundtrip_file(MUS_FIXTURE_DIR "/synth_menumus.bin"); }
+static int test_reference_gamemus(void) { return roundtrip_file(g_retail_gamemus.c_str()); }
+static int test_reference_menumus(void) { return roundtrip_file(g_retail_menumus.c_str()); }
 
-    /* Re-open the canonical bytes and canonicalize again. */
-    MusFile mf2;
-    CHECK(mus_open_memory(&mf2, lap1, n1) == 0, "open lap1 bytes");
-    uint8_t *lap2 = NULL; size_t n2 = 0;
-    CHECK(canonical_from_script(&mf2.scripts[0], &lap2, &n2), "lap2 = canonical(lap1)");
-
-    if (n1 != n2 || memcmp(lap1, lap2, n1) != 0) {
-        fprintf(stderr, "  lap1 (%zu bytes) and lap2 (%zu bytes) differ\n", n1, n2);
-        size_t lim = n1 < n2 ? n1 : n2;
-        for (size_t i = 0; i < lim; ++i) {
-            if (lap1[i] != lap2[i]) {
-                fprintf(stderr, "  first byte diff at offset %zu: %02x vs %02x\n",
-                        i, lap1[i], lap2[i]);
-                break;
-            }
+/* Every SCR0 program the install's archives hold, base and each installed expansion's. */
+static int test_install_scripts(void) {
+    const std::string install = retail::install();
+    std::vector<std::string> mounts{std::string()};
+    for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
+    size_t programs = 0;
+    std::vector<std::string> seen;
+    for (const std::string &expansion : mounts) {
+        opennova::Vfs vfs;
+        CHECK(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed), "mount the install");
+        for (const auto &location : vfs.list_files()) {
+            const std::string &name = location.logical_name;
+            if (name.size() < 4 || retail::lower_ascii(name.substr(name.size() - 4)) != ".bin") continue;
+            std::vector<uint8_t> bytes;
+            if (!vfs.read_file(name, bytes) || mus_validate(bytes.data(), bytes.size()) != 0) continue;
+            const std::string key = retail::lower_ascii(name);
+            if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
+            seen.push_back(key);
+            if (!assert_text_roundtrip(bytes, name + (expansion.empty() ? std::string() : " (" + expansion + ")")))
+                return 0;
+            ++programs;
         }
     }
-    CHECK(n1 == n2, "canonical form is size-stable (lap1 == lap2)");
-    CHECK(memcmp(lap1, lap2, n1) == 0, "canonical form is a byte-stable fixed point");
-
-    /* Informational: document the shrink vs the original (not a gate). */
-    fprintf(stderr, "  [info] %s: canonical %zu bytes (a shipped original is larger; "
-            "editor debug-info region is not reproduced)\n", path, n1);
-
-    mus_free(lap1);
-    mus_free(lap2);
-    mus_close(&mf2);
-    mus_close(&mf);
+    CHECK(programs >= 2, "the install holds its music scripts");
+    printf("\n  %zu shipped music scripts, each through its text byte for byte\n", programs);
     return 1;
-}
-
-/* The minted programs are the encoder's own output, so they are ALREADY the
-   canonical form: canonical(minted) reproduces the committed bytes. */
-static int assert_minted_is_canonical(const char *path) {
-    FILE *f = fopen(path, "rb");
-    CHECK(f != NULL, "open minted");
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    uint8_t *committed = (uint8_t *)malloc((size_t)n);
-    CHECK(committed != NULL && fread(committed, 1, (size_t)n, f) == (size_t)n, "read minted");
-    fclose(f);
-
-    MusFile mf;
-    CHECK(mus_open_memory(&mf, committed, (size_t)n) == 0, "open minted bytes");
-    uint8_t *lap = NULL; size_t lap_n = 0;
-    CHECK(canonical_from_script(&mf.scripts[0], &lap, &lap_n), "canonical(minted)");
-    CHECK(lap_n == (size_t)n && memcmp(lap, committed, lap_n) == 0,
-          "the minted program is its own canonical form");
-    mus_free(lap);
-    mus_close(&mf);
-    free(committed);
-    return 1;
-}
-
-static int test_synth_gamemus_fixed_point(void) {
-    return assert_fixed_point(MUS_FIXTURE_DIR "/synth_gamemus.bin")
-        && assert_minted_is_canonical(MUS_FIXTURE_DIR "/synth_gamemus.bin");
-}
-
-static int test_synth_menumus_fixed_point(void) {
-    return assert_fixed_point(MUS_FIXTURE_DIR "/synth_menumus.bin")
-        && assert_minted_is_canonical(MUS_FIXTURE_DIR "/synth_menumus.bin");
-}
-
-static int test_gamemus_fixed_point(void) {
-    return assert_fixed_point(g_retail_gamemus.c_str());
-}
-
-static int test_menumus_fixed_point(void) {
-    return assert_fixed_point(g_retail_menumus.c_str());
 }
 
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
-    RUN_TEST(test_synth_gamemus_fixed_point);
-    RUN_TEST(test_synth_menumus_fixed_point);
+    RUN_TEST(test_synth_gamemus);
+    RUN_TEST(test_synth_menumus);
 
     g_retail_gamemus = retail::reference_fixture("mus/jo_gamemus.bin");
     g_retail_menumus = retail::reference_fixture("mus/jo_menumus.bin");
     if (g_retail_gamemus.empty() || g_retail_menumus.empty()) {
         retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/mus/jo_{gamemus,menumus}.bin (the shipped programs)");
     } else {
-        RUN_TEST(test_gamemus_fixed_point);
-        RUN_TEST(test_menumus_fixed_point);
+        RUN_TEST(test_reference_gamemus);
+        RUN_TEST(test_reference_menumus);
+    }
+    if (retail::install().empty()) {
+        retail::skip_leg("OPENNOVA_JO_DIR (every music script the install's archives hold)");
+    } else {
+        RUN_TEST(test_install_scripts);
     }
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
