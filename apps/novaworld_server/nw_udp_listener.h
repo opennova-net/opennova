@@ -170,12 +170,18 @@ public:
 	// a reply: one reliable record on the connection's sequencing, retained until the client's
 	// ACK covers it, so the client's ordered receive and a 0x44 recover a lost one (the
 	// send-interval leg makes a gap visible when nothing follows). A connection replaced or
-	// dropped before the drain loses the push. Thread-safe; nothing is sent from the caller.
+	// dropped, or no longer hosting, by the drain loses the push. Thread-safe; nothing is sent
+	// from the caller.
 	// ServerCommand: one Cmd param carrying `cmd` verbatim (compose it with server_command_text).
 	HostPushResult push_server_command(uint32_t rid, const std::string &cmd);
-	// ServerStopHosting: MsgCode / MsgParam1 / MsgParam2. Once it is sent the connection leaves
-	// the browser (LobbySession::end_hosting): a stock host drops to verified and sends no
-	// ClientStopHosting [orig: CNapiGameSession_HandleServerMessage @0x4d1c50].
+	// ServerStopHosting: MsgCode / MsgParam1 / MsgParam2, the sysop punt from the host's side. A
+	// stock host drops to verified with no ClientStopHosting [orig:
+	// CNapiGameSession_HandleServerMessage @0x4d1c50 — state 4, the word to 1], and in a
+	// NovaWorld match its next 62-frame block's NovaWorld exit ends the match for everyone, sends
+	// the host to the main menu and resets its NWU session [orig: Game_ProcessMainFrame
+	// @0x52654f..0x52657c, g_MissionExitReason = 12; the router @0x568552 -> @0x5686cb..0x5686fe].
+	// Once the record went out framed the connection also leaves the browser
+	// (LobbySession::end_hosting).
 	HostPushResult push_stop_hosting(uint32_t rid, int msg_code, int msg_param1 = 0,
 	                                 int msg_param2 = 0);
 

@@ -66,6 +66,37 @@ std::string next_pcid() {
 	return pcid;
 }
 
+// A ServerCommand arg the admin route refuses: one holding a control byte (below 0x20, or 0x7F).
+// The stock reader carries such a byte faithfully inside quotes (String_TokenizeQuotedToArray
+// copies a quoted run as it is), so server_command_text, the reader's exact inverse, composes it.
+// The harm is on the host: SetServerName / SetServerMsg save the token into game.cfg unescaped
+// (Game_SaveConfig @0x54C490, `game_name = "%s"\n`; ours engine/formats/gamecfg/game_cfg_write.cpp),
+// so a CR or LF injects a line into a third party's config, and the chat verbs relay the byte to
+// every player. So it is the service's own input rule at its edge, not a reader rule.
+bool has_control_byte(std::string_view s) {
+	return std::any_of(s.begin(), s.end(), [](char c) {
+		const auto byte = static_cast<unsigned char>(c);
+		return byte < 0x20 || byte == 0x7F;
+	});
+}
+
+// `s` for a log line: a control byte as \xNN, so no admin input can forge a line.
+std::string loggable(std::string_view s) {
+	std::string out;
+	out.reserve(s.size());
+	for (const char c : s) {
+		const auto byte = static_cast<unsigned char>(c);
+		if (byte < 0x20 || byte == 0x7F) {
+			char escaped[8];
+			std::snprintf(escaped, sizeof(escaped), "\\x%02X", static_cast<unsigned>(byte));
+			out += escaped;
+		} else {
+			out.push_back(c);
+		}
+	}
+	return out;
+}
+
 std::string read_file_text(const std::filesystem::path &p) {
 	std::ifstream in(p, std::ios::binary);
 	std::ostringstream os;
@@ -618,7 +649,8 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	//    "args": ["..."]}
 	// composed through server_command_text, so a line the host's reader would
 	// drop (a verb/target pairing, too few args, a quote or NUL, past 511
-	// characters) is a 400 with its reason.
+	// characters) is a 400 with its reason; so is an arg with a control byte
+	// (has_control_byte, the service's own input rule).
 	CROW_ROUTE(app, "/api/admin/hosts/<uint>/command").methods("POST"_method)(
 	    [this, admin_authorized, json_error, push_reply](const crow::request &req, uint64_t rid) {
 		if (!admin_authorized(req)) {
@@ -656,6 +688,11 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 					return json_error(400, "invalid_command", "\"args\" is a list of strings");
 				}
 				args.emplace_back(arg.s());
+				if (has_control_byte(args.back())) {
+					return json_error(400, "invalid_command",
+					                  "an arg holds a control byte (below 0x20, or 0x7F), which a "
+					                  "stock host would carry into its game.cfg or its chat");
+				}
 			}
 		}
 		const char *refusal = nullptr;
@@ -669,7 +706,7 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		const uint32_t rid32 = rid <= UINT32_MAX ? static_cast<uint32_t>(rid) : 0u;
 		const HostPushResult result = nw_udp_->push_server_command(rid32, cmd);
 		std::printf("[http] POST /api/admin/hosts/%llu/command '%s' -> %s\n",
-		            static_cast<unsigned long long>(rid), cmd.c_str(),
+		            static_cast<unsigned long long>(rid), loggable(cmd).c_str(),
 		            host_push_result_name(result));
 		crow::json::wvalue out;
 		out["statement"] = "ServerCommand";
@@ -679,8 +716,11 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 
 	// POST /api/admin/hosts/<rid>/stop — a ServerStopHosting with MsgCode 7,
 	// NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT (SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
-	// which code the retail service sent is unwitnessed). Once it is sent the
-	// server leaves the browser. No body.
+	// which code the retail service sent is unwitnessed): the sysop punt. A stock
+	// host in a NovaWorld match ends that match for everyone within 62 frames,
+	// goes to the main menu and resets its NovaWorld session
+	// (NwUdpListener::push_stop_hosting; the record's "The exit"); the server
+	// leaves the browser as the statement goes out. No body.
 	CROW_ROUTE(app, "/api/admin/hosts/<uint>/stop").methods("POST"_method)(
 	    [this, admin_authorized, json_error, push_reply](const crow::request &req, uint64_t rid) {
 		if (!admin_authorized(req)) {

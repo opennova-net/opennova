@@ -198,11 +198,12 @@ std::optional<ProtocolMessage> lobby_record(NapiMessage statement) {
 // ClientAuth.ck (per protocol_message.h's NapiNPProtocol_HandleSessionPacket witness); using
 // ClientHello.ci made retail TOSS our reply with code [4] — confirmed via _connectlog.txt
 // 2026-04-27. No records builds one header-only packet. `what` names the per-packet log line
-// (null: none).
+// (null: none). True when every record went out framed: false when the pool (CS field 11)
+// refused one, one failed to encode, or a packet failed to frame.
 // [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430 — the ACK-only packet when the queue is
 //  empty @0x62847e..0x62848c, the per-packet send stamp @0x628605; NapiNPMessage_SplitAtLength
 //  @0x628350]
-void send_lobby_records(opennova::net::Socket &socket, const opennova::net::Endpoint &to,
+bool send_lobby_records(opennova::net::Socket &socket, const opennova::net::Endpoint &to,
                         LobbyConnState &state, std::string_view server_scrk,
                         const std::vector<ProtocolMessage> &records, const char *what) {
 	const std::string label = opennova::net::endpoint_to_string(to);
@@ -210,6 +211,7 @@ void send_lobby_records(opennova::net::Socket &socket, const opennova::net::Endp
 			packet_ceiling_bytes(state.cs.max_packet_bytes),
 			max_packets_per_build(state.cs.max_packets_per_tick),
 			OutgoingOverflow::DropRefused);
+	bool all_framed = !plan.overflow && !plan.encode_failed && plan.unbuilt.empty();
 	if (plan.overflow) {
 		std::fprintf(stderr, "[nwudp] %s — reply pool full (NP.C:MSGCRE, %u records)\n",
 		             label.c_str(), plan.overflow_count);
@@ -224,6 +226,7 @@ void send_lobby_records(opennova::net::Socket &socket, const opennova::net::Endp
 		                          SessionCrypto{server_scrk, {}, state.client_ck},
 		                          packet_records, body_out)) {
 			std::fprintf(stderr, "[nwudp] %s — frame_session_packet failed\n", label.c_str());
+			all_framed = false;
 			break;
 		}
 		state.last_framed_send_ms = now_ms();
@@ -235,6 +238,7 @@ void send_lobby_records(opennova::net::Socket &socket, const opennova::net::Endp
 		                                 std::move(body_out));
 		opennova::net::udp_send_to(socket, to, packet.data(), packet.size());
 	}
+	return all_framed;
 }
 
 } // namespace
@@ -488,7 +492,8 @@ HostPushResult NwUdpListener::queue_host_push(uint32_t rid, NapiMessage statemen
 }
 
 // Each push goes out as its own send build, in queue order, on the connection the RID resolved
-// to; one replaced (a fresh 0x42 mints a new SK) or dropped since is skipped.
+// to; one replaced (a fresh 0x42 mints a new SK) or dropped since is skipped, and so is one that
+// stopped hosting since, as the queue would have refused it (NotHosted).
 void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);
 	if (host_pushes_.empty()) return;
@@ -504,6 +509,11 @@ void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
 			continue;
 		}
 		LobbyConnState &state = it->second;
+		if (!state.lobby.hosting) {
+			std::printf("[nwudp] PUSH %s to %s dropped: the connection no longer hosts\n",
+			            name.c_str(), addr.c_str());
+			continue;
+		}
 		std::optional<ProtocolMessage> record = lobby_record(std::move(push.statement));
 		if (!record) {
 			std::fprintf(stderr, "[nwudp] PUSH %s to %s failed to encode\n", name.c_str(),
@@ -512,28 +522,39 @@ void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
 		}
 		std::vector<ProtocolMessage> records;
 		records.push_back(std::move(*record));
-		send_lobby_records(socket, opennova::net::NetDatagramSocket::to_endpoint(push.peer), state,
-		                   state.server_scrk, records, "push");
-		std::printf("[nwudp] PUSH %s -> %s rid=%u\n", name.c_str(), addr.c_str(), state.lobby.rid);
-		if (push.ends_hosting && state.lobby.hosting) {
-			lobby_session_.end_hosting(state.lobby, "ServerStopHosting");
+		// The stop leaves the browser only once its record went out framed: a refused (the pool
+		// full) or unframed one leaves the hosting as it was.
+		const bool sent = send_lobby_records(
+				socket, opennova::net::NetDatagramSocket::to_endpoint(push.peer), state,
+				state.server_scrk, records, "push");
+		if (!sent) {
+			std::fprintf(stderr, "[nwudp] PUSH %s to %s was not framed\n", name.c_str(),
+			             addr.c_str());
+			continue;
 		}
+		std::printf("[nwudp] PUSH %s -> %s rid=%u\n", name.c_str(), addr.c_str(), state.lobby.rid);
+		if (push.ends_hosting) lobby_session_.end_hosting(state.lobby, "ServerStopHosting");
 	}
 }
 
-// PumpSendIntervals' ACTIVE leg on the service's end of each lobby connection: reliable records
-// still retained (not yet ACKed) and more than CS field 5 since the connection's last framed
-// packet -> a build with nothing queued, one header-only packet. Its fresh sequence shows the
-// client a gap below it when the packet before was lost, and the client's receive batch asks for
-// the gap with a 0x44, which the resend leg answers from the retained records. A reply always has
-// the client's next statement behind it to surface a loss; a push may have nothing, and without
-// this leg a lost one would wait for the host's next refresh. Policy: the retail service's own
-// pump is unwitnessed, so this runs the leg of the NAPI connection template the 0x82 advertises
-// (the NOVAWORLDUDP template, the same list in both directions: field 5 = 1000 ms). Only the
-// ACTIVE leg runs here; the EMPTY keepalive (field 4) and the timed missing-sequence leg (field
-// 6, off in the template) do not.
-// [orig: CNapiNPConnection_PumpSendIntervals @0x628fd0 — the active leg @0x628ff1..0x629017,
-//  the build @0x62906f..0x629089; CNapiGameSession_InitNPConnection @0x4d3e1f (the template)]
+// PumpSendIntervals' ACTIVE leg on the service's end of each lobby connection, as the NAPI server
+// role runs it: reliable records still retained (not yet ACKed) and more than CS field 5 since the
+// connection's last framed packet -> a build with nothing queued, one header-only packet, and
+// again every interval while the records stay unACKed. Its fresh sequence shows the client a gap
+// below it when the packet before was lost, and the client's receive batch asks for the gap with
+// a 0x44, which the resend leg answers from the retained records. A header-only packet draws no
+// ACK from a stock client, so if the client's ACK itself is lost the leg sends one packet per
+// interval (1000 ms) until the client's next packet carries the ACK (its EMPTY keepalive, field 4,
+// every 60 s) or the connection is reaped (field 0, 240 s). A reply always has the client's next
+// statement behind it to surface a loss; a push may have nothing, and without this leg a lost one
+// would wait for the host's next refresh. The ACTIVE leg alone runs here: the server role's EMPTY
+// keepalive (field 4) is skipped, a deliberate divergence (D-NET-393: the service answers every
+// inbound SESSION packet, so a live client's own keepalive already draws a packet back), and the
+// timed missing-sequence leg is off in the template (field 6 = -1).
+// [orig: CNapiNPConnection_PumpStateMachine @0x6292e0 case 1 (the server-side connection) ->
+//  CNapiNPConnection_PumpSendIntervals @0x62933f, the in-match host's port D-NET-256;
+//  PumpSendIntervals @0x628fd0 — the active leg @0x628ff1..0x629017, the build
+//  @0x62906f..0x629089; CNapiGameSession_InitNPConnection @0x4d3e1f (the template)]
 void NwUdpListener::pump_send_intervals(opennova::net::Socket &socket) {
 	const uint64_t now = now_ms();
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);

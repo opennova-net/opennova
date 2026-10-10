@@ -178,8 +178,9 @@ inline constexpr char NWEC_UNKNOWN_TAG[] = "CVUNKNOWN";
 // The menutxt key the punt notification substitutes the MsgCode into ("[[$]]").
 // [orig: CNapiGameSession_HandlePuntNotification @0x4d20b0]
 inline constexpr char MENUTXT_PUNTED_FROM_NOVAWORLD[] = "ERR_PUNTEDFROMNOVAWORLD";
-// The MsgCode the service's admin stop sends in its ServerStopHosting: the table's row 7,
-// NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT, the one key that names a NovaWorld operator's action.
+// The MsgCode the service's admin stop sends in its ServerStopHosting: the table's row whose code
+// is 7 (zero-based index 6), NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT, the one key that names a
+// NovaWorld operator's action.
 // Policy: no capture shows which code the retail service sent (the record's "ServerCommand"
 // section, the service side). [orig: the {code, key} table dword_7CB960 / off_7CB964 that
 // CNapiGameSession_HandleServerMessage @0x4d1c50 walks @0x4d1d62..0x4d1ddc]

@@ -651,6 +651,12 @@ int test_admin_host_push(Harness &h) {
 		{"{\"verb\":\"TextChatPlayer\",\"target\":\"ByName\",\"args\":[\"Some Guy\"]}", "token-count gate"},
 		{"{\"verb\":\"TextChatServer\",\"args\":[\"say \\\"hi\\\"\"]}", "double quote"},
 		{"{\"verb\":\"Cycle\",\"args\":[3]}", "list of strings"},
+		// Control bytes: the stock reader would carry them inside quotes, and a host would save
+		// a LF into game.cfg as a line of its own (the service's input rule, not the composer's).
+		{"{\"verb\":\"SetServerName\",\"args\":[\"Evil\\nmpreset = \\\"1\\\"\"]}", "control byte"},
+		{"{\"verb\":\"SetServerMsg\",\"args\":[\"a\\rb\"]}", "control byte"},
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"tab\\there\"]}", "control byte"},
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"del\\u007f\"]}", "control byte"},
 	};
 	for (const Refused &r : refused) {
 		reply = command("1", r.body);

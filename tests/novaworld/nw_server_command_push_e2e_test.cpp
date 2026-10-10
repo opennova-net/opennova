@@ -6,13 +6,13 @@
 // @0x4d22f0 / CNapiGameSession_HandleServerMessage @0x4d1c50]. The service frames each push as a
 // reliable record exactly as it frames a reply, so the connection's ordered receive and its 0x44
 // recover a lost one; the service's ACTIVE send-interval leg (CS field 5, 1000 ms) sends a
-// header-only packet while the record is unACKed, whose fresh sequence shows the client the gap
-// [orig: CNapiNPConnection_PumpSendIntervals @0x628fd0, the active leg @0x628ff1..0x629017].
-// This drives a ClientSession (the host's NWU session) against the listener: the RID resolves only
-// once hosting, a pushed SetServerName lands as the session's Command notice, a pushed
-// TextChatServer whose first packet is lost lands after the 0x44 under the same sequence, and a
-// pushed ServerStopHosting lands as the StopHosting notice (the sysop-punt key) and takes the row
-// out of the browser.
+// header-only packet each interval while the record is unACKed, whose fresh sequence shows the
+// client the gap [orig: CNapiNPConnection_PumpSendIntervals @0x628fd0, the active leg
+// @0x628ff1..0x629017]. This drives a ClientSession (the host's NWU session) against the listener:
+// the RID resolves only once hosting, a pushed SetServerName lands as the session's Command notice
+// and once ACKed draws nothing more, a pushed TextChatServer whose first packet is lost lands
+// after the 0x44 under the same sequence, and a pushed ServerStopHosting lands as the StopHosting
+// notice (the sysop-punt key) and takes the row out of the browser.
 
 #include "nw_udp_listener.h"
 #include "server_config.h"
@@ -208,6 +208,19 @@ int main() {
 			               renamed->command.args == std::vector<std::string>{"Pushed Name"},
 			       "the host's reader sees SetServerName with its one arg");
 		}
+
+		// --- once the push is ACKed the service has nothing retained, so the send-interval leg
+		// stays quiet: the idle verified session hears nothing for well past one interval. The
+		// session's ACK went out with the notice's pass; the service answers that packet once.
+		service(300, nullptr, [] { return false; });
+		int heard = 0;
+		service(1600,
+		        [&](const Seen &) {
+			        ++heard;
+			        return false;
+		        },
+		        [] { return false; });
+		expect(heard == 0, "an ACKed push draws no further packet within 1.6 s");
 
 		// --- a push whose first packet is lost: the send-interval leg's header-only packet shows
 		// the gap, the client's 0x44 asks for it, and the records come back under the same

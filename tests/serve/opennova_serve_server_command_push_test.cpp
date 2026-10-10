@@ -127,12 +127,12 @@ int main() {
 		return std::nullopt;
 	};
 	std::optional<LobbyState> listed;
-	for (int f = 0; f < 300 && !listed; ++f) {
-		CHECK(server.frame(kFrame));
-		std::this_thread::sleep_for(2ms);
-		listed = row("Serve Push");
-	}
-	CHECK(listed.has_value());
+	CHECK(frame_until(
+			[&] {
+				listed = row("Serve Push");
+				return listed.has_value();
+			},
+			10s));
 	if (!listed) return 1;
 	const uint32_t rid = listed->rid;
 	CHECK(rid != 0);
