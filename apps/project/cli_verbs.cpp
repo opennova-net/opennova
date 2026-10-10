@@ -51,10 +51,12 @@ struct CliOption {
 	bool repeats = false;
 };
 
-// An argument a verb takes by its place, as a missing one is said ("a project directory").
+// An argument a verb takes by its place, as a missing one is said ("a project directory"); `many`, one or
+// more (every argument from its place on but the ones its row takes after it).
 struct CliPositional {
 	const char *words = "";
 	bool required = true;
+	bool many = false;
 };
 
 // The options every verb takes: the project's game install, and the answer as JSON.
@@ -925,11 +927,10 @@ int answer_code(Cli &cli, const JsonValue &answer) {
 	return 1;
 }
 
-// A project file moved to a folder of the project under its own name (move_asset, DI-03), as Files'
-// Move to folder moves it, the operation run to its end: the request's answer (--json), else where it
-// went, its findings on the error stream; exit 1 when it was refused or did not finish.
-int run_move(Cli &cli, const CliVerbRow &, const CliArgs &args) {
-	const EditorRequest request = editor::request::move_asset(args.positional[1], args.positional[2]);
+// A request a chore verb makes, sent as the editor MCP sends it: the request's answer (--json), else the
+// status line it left ("Moved items.def to defs/."; a refusal's "The move was refused."), its findings on
+// the error stream; exit 1 when it was refused or did not finish.
+int send_chore(Cli &cli, const EditorRequest &request) {
 	const JsonValue answer = send_json(cli, editor::editor_request_to_json(request));
 	const int code = answer_code(cli, answer);
 	if (cli.json) {
@@ -937,9 +938,60 @@ int run_move(Cli &cli, const CliVerbRow &, const CliArgs &args) {
 		return code;
 	}
 	print_findings(cli.err, at(answer, "outcome"));
-	// The status line the move left ("Moved items.def to defs/."; a refusal's "The move was refused.").
 	std::fprintf(cli.out, "%s\n", cli.session.view().activity.status.c_str());
 	return code;
+}
+
+// The files a verb names from its second argument on, `after` of the last left out (mv's folder).
+std::vector<std::string> named_files(const CliArgs &args, size_t after = 0) {
+	return std::vector<std::string>(args.positional.begin() + 1, args.positional.end() - long(after));
+}
+
+// Files' chores (DI-25), each a request of the session's and one step of its file history (which ends with
+// the run; the trash keeps what a delete put there).
+int run_remove(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	std::vector<std::string> files = named_files(args);
+	const std::string first = files.front();
+	files.erase(files.begin());
+	return send_chore(cli, editor::request::delete_asset(first, args.has("--force"), args.has("--alone"), files));
+}
+int run_copy(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	std::vector<std::string> files = named_files(args);
+	const std::string first = files.front();
+	files.erase(files.begin());
+	return send_chore(cli, editor::request::duplicate_asset(first, args.value("--as"), args.has("--alone"), files));
+}
+int run_make_folder(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	return send_chore(cli, editor::request::new_folder(args.positional[1]));
+}
+int run_rename_folder(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	return send_chore(cli, editor::request::rename_folder(args.positional[1], args.positional[2]));
+}
+int run_remove_folder(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	return send_chore(cli, editor::request::delete_folder(args.positional[1], args.has("--all"), args.has("--force")));
+}
+int run_empty_trash(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	return send_chore(cli, editor::request::empty_trash(args.has("--force")));
+}
+// --as names one copy.
+bool check_copy(const CliArgs &args, std::string &why) {
+	if (args.has("--as") && args.positional.size() > 2) {
+		why = "cp --as names one copy: give one file";
+		return false;
+	}
+	return true;
+}
+
+// Project files moved to a folder of the project under their own names (move_asset, DI-03), as Files'
+// Move to folder moves them: one file as an operation run to its end, several together as one step of the
+// file history (DI-25). The request's answer (--json), else where they went, its findings on the error
+// stream; exit 1 when it was refused or did not finish.
+int run_move(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	std::vector<std::string> files = named_files(args, 1);
+	const std::string first = files.front();
+	files.erase(files.begin());
+	return send_chore(cli, files.empty() ? editor::request::move_asset(first, args.positional.back())
+	                                     : editor::request::move_assets(first, files, args.positional.back()));
 }
 
 // The documents with unsaved edits when the run ends: their edits end with it, said on the error
@@ -1168,12 +1220,21 @@ constexpr K kNewTerrainRequests[] = { K::OpenProject, K::ApplyProjectSettings, K
 constexpr K kBuildRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Build };
 constexpr K kExportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Export };
 constexpr K kMoveRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::MoveAsset };
+constexpr K kRemoveRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::DeleteAsset };
+constexpr K kCopyRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::DuplicateAsset };
+constexpr K kMakeFolderRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::NewFolder };
+constexpr K kRenameFolderRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::RenameFolder };
+constexpr K kRemoveFolderRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::DeleteFolder };
+constexpr K kEmptyTrashRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::EmptyTrash };
 
 constexpr CliPositional kDir[] = { { "a project directory" } };
 constexpr CliPositional kImportArgs[] = { { "a project directory" }, { "a source file", false } };
 constexpr CliPositional kNewTerrainArgs[] = { { "a project directory" }, { "the terrain's name" } };
 constexpr CliPositional kRequestArgs[] = { { "a project directory" }, { "a request as JSON" } };
-constexpr CliPositional kMoveArgs[] = { { "a project directory" }, { "a project file" }, { "a folder of the project" } };
+constexpr CliPositional kMoveArgs[] = { { "a project directory" }, { "a project file", true, true }, { "a folder of the project" } };
+constexpr CliPositional kFilesArgs[] = { { "a project directory" }, { "a project file", true, true } };
+constexpr CliPositional kFolderArgs[] = { { "a project directory" }, { "a folder of the project" } };
+constexpr CliPositional kRenameFolderArgs[] = { { "a project directory" }, { "a folder of the project" }, { "its new name" } };
 constexpr CliPositional kQueryArgs[] = { { "a project directory" }, { "a query's name" }, { "its args as JSON", false } };
 
 constexpr CliOption kNewOptions[] = { { "--title", "a text" },
@@ -1195,6 +1256,10 @@ constexpr CliOption kNewTerrainOptions[] = { { "--heightmap", "an image" }, { "-
 	                                         { "--foliage", "definitions" }, { "--top", "world units" },
 	                                         { "--water", "world units" },  { "--layout", "island or tiled" } };
 constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" } };
+constexpr CliOption kRemoveOptions[] = { { "--force" }, { "--alone" } };
+constexpr CliOption kCopyOptions[] = { { "--as", "a file name" }, { "--alone" } };
+constexpr CliOption kRemoveFolderOptions[] = { { "--all" }, { "--force" } };
+constexpr CliOption kEmptyTrashOptions[] = { { "--force" } };
 
 using V = CliVerb;
 
@@ -1298,11 +1363,53 @@ constexpr VerbRow kRows[] = {
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")
 	        .row,
-	Verb(V::Move, "mv", "<dir> <file> <folder>", kMoveRequests, kMoveArgs, run_move,
-	     "move a project file to a folder of the project (\"\" or / its top level, made when it is\n"
-	     "not there) under its own name, as Files' Move to folder does: no reference is rewritten,\n"
-	     "the game finding a file by its name alone; an import source takes its record (--json:\n"
-	     "the move_asset request's answer, as the request verb prints it)")
+	Verb(V::Move, "mv", "<dir> <file>... <folder>", kMoveRequests, kMoveArgs, run_move,
+	     "move project files to a folder of the project (\"\" or / its top level, made when it is\n"
+	     "not there) under their own names, as Files' Move to folder does: no reference is rewritten,\n"
+	     "the game finding a file by its name alone; an import source takes its record, a mission\n"
+	     "the companions beside it; several go together, one already there staying (--json: the\n"
+	     "move_asset request's answer, as the request verb prints it)")
+	        .answers_with(CliAnswer::Request)
+	        .row,
+	Verb(V::Remove, "rm", "<dir> <file>... [--force] [--alone]", kRemoveRequests, kFilesArgs, run_remove,
+	     "delete project files to the project's trash (.opennova/trash/), as Files' Delete... does:\n"
+	     "a mission with its companions, an import source with its record and its outputs (--alone:\n"
+	     "its outputs kept as files of the project); refused while anything names them, unless\n"
+	     "--force leaves those uses naming nothing (--json: the delete_asset request's answer)")
+	        .takes(kRemoveOptions)
+	        .answers_with(CliAnswer::Request)
+	        .row,
+	Verb(V::Copy, "cp", "<dir> <file>... [--as <name>] [--alone]", kCopyRequests, kFilesArgs, run_copy,
+	     "duplicate project files beside themselves under the names the project's rules give (--as:\n"
+	     "the one copy's name), as Files' Duplicate does: a mission with its companions, an import\n"
+	     "source with its record unless --alone (--json: the duplicate_asset request's answer)")
+	        .takes(kCopyOptions)
+	        .checked_by(check_copy)
+	        .answers_with(CliAnswer::Request)
+	        .row,
+	Verb(V::MakeFolder, "mkdir", "<dir> <folder>", kMakeFolderRequests, kFolderArgs, run_make_folder,
+	     "make a folder of the project, its folders on the way too (--json: the new_folder\n"
+	     "request's answer)")
+	        .answers_with(CliAnswer::Request)
+	        .row,
+	Verb(V::RenameFolder, "rename-folder", "<dir> <folder> <name>", kRenameFolderRequests, kRenameFolderArgs,
+	     run_rename_folder,
+	     "rename a folder of the project, each file in it moved as mv moves one: no reference is\n"
+	     "rewritten (--json: the rename_folder request's answer)")
+	        .answers_with(CliAnswer::Request)
+	        .row,
+	Verb(V::RemoveFolder, "rmdir", "<dir> <folder> [--all] [--force]", kRemoveFolderRequests, kFolderArgs,
+	     run_remove_folder,
+	     "delete a folder of the project: an empty one, or with --all whole to the project's trash\n"
+	     "with every file it holds, as rm deletes each (--force over the uses naming them) (--json:\n"
+	     "the delete_folder request's answer)")
+	        .takes(kRemoveFolderOptions)
+	        .answers_with(CliAnswer::Request)
+	        .row,
+	Verb(V::EmptyTrash, "empty-trash", "<dir> --force", kEmptyTrashRequests, kDir, run_empty_trash,
+	     "remove for good what the project's trash (.opennova/trash/) holds, only with --force\n"
+	     "(--json: the empty_trash request's answer)")
+	        .takes(kEmptyTrashOptions)
 	        .answers_with(CliAnswer::Request)
 	        .row,
 	Verb(V::Request, "request", "<dir> <json>", kReadRequests, kRequestArgs, run_request,
@@ -1352,6 +1459,14 @@ constexpr bool verbs_named() {
 		if (!same_text(row.positionals[0].words, "a project directory") || !row.positionals[0].required) return false;
 		for (size_t p = 1; p < row.positional_count; ++p)
 			if (row.positionals[p].required && !row.positionals[p - 1].required) return false;
+		// One argument of many at most, and one that is required: the arguments after it are counted from the end.
+		size_t many = 0;
+		for (size_t p = 0; p < row.positional_count; ++p)
+			if (row.positionals[p].many) {
+				++many;
+				if (!row.positionals[p].required) return false;
+			}
+		if (many > 1) return false;
 	}
 	return true;
 }
@@ -1423,7 +1538,9 @@ bool parse_args(const VerbRow &row, int argc, const char *const *argv, CliArgs &
 		// An argument that starts with a dash is an option, the verb's or unknown: a mistyped one
 		// never becomes a folder (new -x makes no ./-x).
 		if (arg.empty() || arg[0] != '-') {
-			if (out.positional.size() >= row.positional_count) {
+			const bool many = std::any_of(row.positionals, row.positionals + row.positional_count,
+			                              [](const CliPositional &p) { return p.many; });
+			if (out.positional.size() >= row.positional_count && !many) {
 				why = verb + " takes no more arguments: " + arg;
 				return false;
 			}
