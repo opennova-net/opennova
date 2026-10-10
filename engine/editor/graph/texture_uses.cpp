@@ -367,7 +367,10 @@ JsonValue texture_use_json(const TextureUse &use) {
 
 TextureBudget texture_use_budget(const TextureUse &use, const TextureHeader &header) {
 	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
-	if (!use.known() || use.fixed || use.served.empty() || !texture_role_budget_loader(use.role, loader)) return TextureBudget();
+	if (!use.known() || use.served.empty() || !texture_role_has_budget(use.role)) return TextureBudget();
+	// A role no model row loads (S23 C): its loader's own budget.
+	if (!texture_role_budget_loader(use.role, loader)) return texture_role_budget(header, basename_of(use.served), use.role);
+	if (use.fixed) return TextureBudget();
 	return texture_budget(header, basename_of(use.served), loader, use.context.slot);
 }
 
