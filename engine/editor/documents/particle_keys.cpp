@@ -95,17 +95,18 @@ void layout_at(const std::string &text, const ParticleKeyBlock &block, const std
 std::vector<ParticleKeyBlock> particle_key_blocks(const TextDocument &document) {
 	std::vector<ParticleKeyBlock> out;
 	particle::ParticleFile file;
+	particle::ParticlePlaces places;
 	particle::ParseError error;
 	const std::string &text = document.text();
-	if (!particle::load_particles_from_buffer(text.data(), text.size(), file, error)) return out;
-	for (const particle::BlockPlace &place : file.block_places) {
+	if (!particle::load_particles_with_places(text.data(), text.size(), file, places, error)) return out;
+	for (const particle::BlockPlace &place : places.blocks) {
 		ParticleKeyBlock block;
 		block.kind = place.kind;
 		block.index = place.index;
 		block.first_line = size_t(place.first_line);
 		block.last_line = size_t(place.last_line);
 		block.close_offset = place.close_offset;
-		for (const particle::KeyPlace &key : file.key_places) {
+		for (const particle::KeyPlace &key : places.keys) {
 			if (key.block != place.kind || key.index != place.index) continue;
 			ParticleKeyField field;
 			field.key = key.key;
@@ -148,13 +149,22 @@ std::string particle_key_words(const KeyRow &row) {
 	case KeyValueKind::Curve: words = "a table's id, then reverse, inverse or both"; break;
 	case KeyValueKind::Graphic: words = "a texture, then its blend mode"; break;
 	case KeyValueKind::Members: words = "the effect's particles, by id, ',' between"; break;
-	case KeyValueKind::TableRow: words = "eight bytes, each 0 to 255"; break;
+	case KeyValueKind::TableRow:
+		words = "the table's next row, eight bytes, each 0 to 255 (the game takes any key holding a 't' as the next "
+		        "row in order, its number aside; OpenNova reads tl1 to tl32 by number, D-PTL-32)";
+		break;
 	}
-	if (row.clamped)
+	if (row.clamped && row.port_bound)
+		words += ", which OpenNova takes as " + std::to_string(row.min) + " to " + std::to_string(row.max) +
+		         " (its own bound, " + row.port_bound + "; the game keeps the number as written)";
+	else if (row.clamped)
 		words += row.max == 0x7FFFFFFF ? ", which the game takes as at least " + std::to_string(row.min)
 		                               : ", which the game takes as " + std::to_string(row.min) + " to " +
 		                                         std::to_string(row.max);
-	if (!row.read) words += "; the game's reader has no case for it (only its writer writes it)";
+	if (!row.read)
+		words += row.block == particle::BlockKind::Handles
+		                 ? "; the game never reads it (the block's header ends its read of the file)"
+		                 : "; the game's reader has no case for it (only its writer writes it)";
 	return words;
 }
 
@@ -181,7 +191,9 @@ bool particle_key_value_ok(const KeyRow &row, const std::string &value, std::str
 			return false;
 		}
 		if (row.clamped && (n < row.min || n > row.max)) {
-			why = "the game reads " + trimmed + " as " + std::to_string(std::clamp(n, row.min, row.max));
+			why = (row.port_bound ? "OpenNova reads " : "the game reads ") + trimmed + " as " +
+			      std::to_string(std::clamp(n, row.min, row.max)) +
+			      (row.port_bound ? std::string(" (its own bound, ") + row.port_bound + ")" : std::string());
 			return false;
 		}
 		return true;
@@ -258,14 +270,15 @@ bool particle_key_edit(const TextDocument &document, const ParticleKeyBlock &blo
 	}
 	// A key the block lacks: its line before the block's closing brace.
 	particle::ParticleFile file;
+	particle::ParticlePlaces places;
 	particle::ParseError error;
 	const std::string &text = document.text();
-	if (!particle::load_particles_from_buffer(text.data(), text.size(), file, error)) {
+	if (!particle::load_particles_with_places(text.data(), text.size(), file, places, error)) {
 		why = "the game's reader stops in the text";
 		return false;
 	}
 	std::string indent, eol;
-	layout_at(text, block, file.key_places, indent, eol);
+	layout_at(text, block, places.keys, indent, eol);
 	out = TextDocument::replace(document.span_at(block.close_offset, 0), indent + key + " = " + written + ";" + eol);
 	return true;
 }
