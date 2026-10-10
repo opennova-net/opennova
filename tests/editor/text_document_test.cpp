@@ -1149,10 +1149,10 @@ static int test_text_readers() {
 			findings_of("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n", "Avatars.def", AssetKind::AvatarDefs);
 	TEST_EXPECT(avatars.size() == 1 && avatars[0].code() == "text.reader" && avatars[0].severity == DiagnosticSeverity::Warning &&
 	            avatars[0].line == 4 && avatars[0].message.find("Duplicate nationality") != std::string::npos);
-	// The score table's reader: a statement it does not know.
+	// The score table's reader reads past a statement it does not know, as the game does (master's #987,
+	// formats/score): no finding.
 	const std::vector<Diagnostic> scores = findings_of("VERSION 1\nNONSENSE 2\n", "score.ini", AssetKind::Score);
-	TEST_EXPECT(scores.size() == 1 && scores[0].code() == "text.reader" && scores[0].severity == DiagnosticSeverity::Warning &&
-	            scores[0].message.find("score table") != std::string::npos);
+	TEST_EXPECT(scores.empty());
 	// Kinds whose reader refuses nothing, or that the editor models no reader of.
 	TEST_EXPECT(findings_of("primary_ammo 5\n", "tank.aip", AssetKind::AiProfile).empty());
 	TEST_EXPECT(texts_held);

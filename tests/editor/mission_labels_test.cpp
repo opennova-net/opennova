@@ -518,7 +518,7 @@ int test_text_key_picks() {
 	// the game, picked by the section's keys of its form by their strings (0 forms one too), worded by its
 	// string, 15 characters of it kept; its key an edge of the mission's, which its Go to reaches.
 	const NodeAddress marker = row_at(*document, MissionKind::Marker, 0);
-	const NodeAddress other = row_at(*document, MissionKind::Marker, 1);
+	const NodeAddress other = row_at(*document, MissionKind::Marker, 4); // the location marker: no waypoint
 	Edit waypoint;
 	waypoint.address = marker;
 	waypoint.field = "item";
