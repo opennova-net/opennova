@@ -15,11 +15,14 @@
 #include <string.h>
 
 #include <algorithm>
+#include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
 #include <base/vfs/vfs.h>
 #include <formats/mus/mus.h>
+#include <formats/sbf/sbf.h>
 
 #include "common/retail_paths.h"
 
@@ -153,6 +156,90 @@ static int test_install_scripts(void) {
     return 1;
 }
 
+/* A file of `dir` by its name without case (the install's own spelling), "" for none. */
+static std::string file_in(const std::string &dir, const std::string &name) {
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
+        if (entry.is_regular_file() &&
+                retail::lower_ascii(entry.path().filename().string()) == retail::lower_ascii(name))
+            return entry.path().string();
+    return std::string();
+}
+
+/* Every shipped script's plays (mus_compile_plays over its MUS text) against the bank it plays from
+   (mus_bank_name, a loose file beside the install's archives, an expansion's in its folder): every play's index
+   below the bank's count of streams. One past would play the bank's first stream's data in its place [orig:
+   AudioVM_StartSound @ 0x671FF0 -> sub_671BC0 @ 0x671BC4..0x671BCC, an index past the entries made 0], which no
+   shipped script does. The counts are pinned. */
+static int test_install_plays(void) {
+    const std::string install = retail::install();
+    std::vector<std::string> mounts{std::string()};
+    for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
+    /* A script's plays and its bank's streams, as measured. */
+    const std::map<std::string, std::pair<size_t, uint32_t>> pinned = {
+        {"gamemus.bin", {32, 13}}, {"menumus.bin", {191, 47}}, {"gjox01.bin", {32, 13}}, {"mjox01.bin", {884, 317}}};
+    std::vector<std::string> seen;
+    for (const std::string &expansion : mounts) {
+        opennova::Vfs vfs;
+        CHECK(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed), "mount the install");
+        std::vector<std::string> scripts{"gamemus.bin", "menumus.bin"};
+        if (!expansion.empty()) scripts = {"g" + expansion + ".bin", "m" + expansion + ".bin"};
+        for (const std::string &script : scripts) {
+            const std::string key = retail::lower_ascii(script);
+            if (std::find(seen.begin(), seen.end(), key) != seen.end()) continue;
+            seen.push_back(key);
+            std::vector<uint8_t> bytes;
+            CHECK(vfs.read_file(script, bytes), "read a music script the game opens");
+            MusFile mf;
+            CHECK(mus_open_memory(&mf, bytes.data(), bytes.size()) == 0, "open the script");
+            std::string text;
+            const bool decompiled = decompile(mf.scripts[0], text);
+            mus_close(&mf);
+            CHECK(decompiled, "decompile the script");
+            MusScript compiled = {};
+            std::vector<MusPlayUse> plays;
+            int line = 0, col = 0;
+            const char *err = NULL;
+            CHECK(mus_compile_plays(text.c_str(), &compiled, &plays, &line, &col, &err) == 0, "compile its text");
+            mus_script_free(&compiled);
+            /* The bank: the base game's beside the archives, an expansion's in its folder. */
+            const std::string bank_name = mus_bank_name(script);
+            const std::string dir = expansion.empty() ? install : install + "/expansion/" + expansion;
+            const std::string bank_path = file_in(dir, bank_name);
+            CHECK(!bank_path.empty(), "the script's bank beside it");
+            FILE *f = fopen(bank_path.c_str(), "rb");
+            CHECK(f != NULL, "open the bank");
+            std::vector<uint8_t> bank;
+            fseek(f, 0, SEEK_END);
+            bank.resize((size_t)ftell(f));
+            fseek(f, 0, SEEK_SET);
+            const bool bank_read = fread(bank.data(), 1, bank.size(), f) == bank.size();
+            fclose(f);
+            CHECK(bank_read, "read the bank");
+            opennova::sbf::SbfArchive arc = {};
+            CHECK(opennova::sbf::sbf_open_memory(&arc, bank.data(), bank.size()) == 0, "open the bank");
+            const uint32_t streams = arc.header.entry_count;
+            opennova::sbf::sbf_close(&arc);
+            uint32_t highest = 0;
+            for (const MusPlayUse &play : plays) {
+                highest = std::max(highest, play.index);
+                if (play.index >= streams)
+                    fprintf(stderr, "  %s: a play of stream %u, past its bank's %u\n", script.c_str(), play.index,
+                            streams);
+                CHECK(play.index < streams, "every play's stream one its bank has");
+            }
+            printf("\n  %s: %zu plays, the highest %u, %s %u streams", script.c_str(), plays.size(), highest,
+                   bank_name.c_str(), streams);
+            const auto expect = pinned.find(key);
+            CHECK(expect != pinned.end() && expect->second.first == plays.size() && expect->second.second == streams,
+                  "the measured counts");
+        }
+    }
+    CHECK(seen.size() == pinned.size(), "every music script the game opens");
+    printf("\n");
+    return 1;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     RUN_TEST(test_synth_gamemus);
@@ -170,6 +257,7 @@ int main(int argc, char **argv) {
         retail::skip_leg("OPENNOVA_JO_DIR (every music script the install's archives hold)");
     } else {
         RUN_TEST(test_install_scripts);
+        RUN_TEST(test_install_plays);
     }
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;

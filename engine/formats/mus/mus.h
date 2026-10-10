@@ -264,11 +264,15 @@ int mus_compile_plays(const char *text, MusScript *out_script, std::vector<MusPl
                       int *err_line, int *err_col, const char **err_msg);
 
 /* The music bank a script plays from: the script's file name, its folders stripped, with its extension made
-   .SBF, upper case. The game opens the two as a pair: its own GAMEMUS.BIN with GAMEMUS.SBF and MENUMUS.BIN with
-   MENUMUS.SBF [orig: the names @ 0x7C8D50..0x7C8D74, copied by Expansion_LoadAssets @ 0x4A4798..0x4A4807], an
-   expansion's G<name>.bin with G<name>.sbf and M<name>.bin with M<name>.sbf [orig: Expansion_LoadAssets @
-   0x4A4906..0x4A494A], each pair opened together [orig: AudioVM_OpenMusicContext @ 0x6722A0, from
-   AudioVM_InitMenuMusicStreaming @ 0x56AA78]. */
+   .SBF, upper case (the upper case is ours, a name to compare without case: the game sprintf's an expansion's
+   name in the case it is given). The game opens the two as a pair: its own GAMEMUS.BIN with GAMEMUS.SBF and
+   MENUMUS.BIN with MENUMUS.SBF [orig: the names @ 0x7C8D50..0x7C8D74, copied into g_PathGameBin/Sbf and
+   g_PathMenuBin/Sbf by Expansion_LoadAssets @ 0x4A478D..0x4A480D], an expansion's G<name>.bin with G<name>.sbf
+   and M<name>.bin with M<name>.sbf [orig: Expansion_LoadAssets @ 0x4A4906..0x4A494A]; the menu pair opened
+   together by AudioVM_InitMenuMusicStreaming @ 0x56AA6E..0x56AA78 and the game pair by Game_StartMission @
+   0x52558E..0x525593 [orig: both -> AudioVM_OpenMusicContext @ 0x6722A0]. Where the bank lies is the caller's to
+   know: an expansion's is a loose file of its folder, expansion\<name>\G<name>.sbf (the sprintf's path @
+   0x4A4936, @ 0x4A4906), whatever archive its script comes from; the base game's beside the install's archives. */
 std::string mus_bank_name(const std::string &script);
 
 /* Free all malloc'd buffers held by `script` (code, sections, variables).
