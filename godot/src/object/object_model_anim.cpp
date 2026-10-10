@@ -18,6 +18,15 @@
 
 namespace godot {
 
+void ObjectModel::set_viewmodel_rig(bool p_viewmodel) {
+	if (viewmodel_rig_ == p_viewmodel) {
+		return;
+	}
+	viewmodel_rig_ = p_viewmodel;
+	body_pose_dirty_ = true;
+	wake_runtime_frame();
+}
+
 void ObjectModel::set_skeletal_anim(const Ref<SkeletalAnim> &p_skeletal) {
 	wake_runtime_frame();
 	skeletal_ = p_skeletal;
@@ -769,14 +778,14 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
 				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
 				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_,
-				body_blend_source_variant_, anim_variant_);
+				body_blend_source_variant_, anim_variant_, !viewmodel_rig_);
 	} else {
 		skeletal_->pose_skeleton_deltas(skeleton_, anim_key_, anim_time_, anim_variant_,
 				use_overlay ? aim_overlay_classes_ : empty_classes,
 				overlay_deltas,
 				use_overlay ? wpn_key_ : String(), wpn_time, collapse_right_hand_,
 				use_overlay ? wpn_prev_key_ : String(), wpn_prev_time,
-				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_);
+				wpn_blend_weight_, wpn_variant_, wpn_prev_variant_, !viewmodel_rig_);
 	}
 	body_pose_dirty_ = false;
 }

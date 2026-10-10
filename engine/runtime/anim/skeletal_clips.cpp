@@ -132,6 +132,7 @@ void SkeletalClips::clear() {
 	rest_global_inverse_.clear();
 	clips_.clear();
 	clip_index_.clear();
+	skeleton_file_bones_ = 0;
 }
 
 bool SkeletalClips::load_from_adm(
@@ -203,18 +204,10 @@ bool SkeletalClips::load_from_files(
 	return load_clips(files, skeleton_bad, clips, false, model_bone_origins, model_bone_parents);
 }
 
-bool SkeletalClips::load_clips(
-		const RigFiles *files, const std::string &skeleton_bad,
-		const std::vector<ClipRequest> &requests, bool table_tokens,
+void SkeletalClips::build_skeleton(const BadFile &skeleton_bf,
 		const std::vector<anim::Vec3> &model_bone_origins,
-		const std::vector<int> &model_bone_parents) {
-	clear();
-	if (!files) return false;
-	const auto skeleton = files->bone_animation(skeleton_bad);
-	if (!skeleton) return false;
-	const BadFile &skeleton_bf = *skeleton;
-	adm_name_ = skeleton_bad;
-
+		const std::vector<int> &model_bone_parents,
+		std::vector<anim::Vec3> &shared_rest, std::vector<int> &rig_parents) {
 	// Pass 1: the reset/skeleton .bad -> canonical bones, shared rest origins,
 	// bind pose. Model-table mode (origins + parents paired): the .3di model's
 	// bone table defines the rig — count and hierarchy from the model rows,
@@ -225,9 +218,7 @@ bool SkeletalClips::load_clips(
 	//  modelDef+52 and walks the modelDef+56 rows]
 	const bool model_table = !model_bone_parents.empty() &&
 			model_bone_parents.size() == model_bone_origins.size();
-	std::vector<anim::Vec3> shared_rest;
-	const std::vector<int> rig_parents =
-			model_table ? model_bone_parents : std::vector<int>{};
+	rig_parents = model_table ? model_bone_parents : std::vector<int>{};
 	{
 		const std::vector<anim::Vec3> table_positions = model_table
 				? anim::positions_from_model(skeleton_bf, model_bone_parents,
@@ -237,6 +228,7 @@ bool SkeletalClips::load_clips(
 				skeleton_bf, table_positions,
 				/*model_bind=*/false, nullptr, rig_parents);
 		bones_ = reset_clip.bones;
+		skeleton_file_bones_ = skeleton_bf.bone_count;
 		// Legacy positional override (no parents supplied): model-supplied
 		// per-bone bind positions OVERRIDE the reset .bad's — BadBone.position
 		// is a lossy export, the .3di carries the real pivots.
@@ -298,6 +290,38 @@ bool SkeletalClips::load_clips(
 			}
 		}
 	}
+}
+
+bool SkeletalClips::load_rest(const std::vector<anim::Vec3> &model_bone_origins,
+		const std::vector<int> &model_bone_parents) {
+	clear();
+	if (model_bone_parents.empty() || model_bone_parents.size() != model_bone_origins.size()) return false;
+	// The model table over a skeleton with no bone: every row is a row past the .bad's records,
+	// its orientation identity, its rest the model pivot (anim::positions_from_model).
+	const BadFile none = {};
+	std::vector<anim::Vec3> shared_rest;
+	std::vector<int> rig_parents;
+	build_skeleton(none, model_bone_origins, model_bone_parents, shared_rest, rig_parents);
+	rebuild_clip_index();
+	loaded_ = !bones_.empty();
+	return loaded_;
+}
+
+bool SkeletalClips::load_clips(
+		const RigFiles *files, const std::string &skeleton_bad,
+		const std::vector<ClipRequest> &requests, bool table_tokens,
+		const std::vector<anim::Vec3> &model_bone_origins,
+		const std::vector<int> &model_bone_parents) {
+	clear();
+	if (!files) return false;
+	const auto skeleton = files->bone_animation(skeleton_bad);
+	if (!skeleton) return false;
+	const BadFile &skeleton_bf = *skeleton;
+	adm_name_ = skeleton_bad;
+
+	std::vector<anim::Vec3> shared_rest;
+	std::vector<int> rig_parents;
+	build_skeleton(skeleton_bf, model_bone_origins, model_bone_parents, shared_rest, rig_parents);
 
 	// Pass 2: sample every clip against the SHARED skeleton rest origins (not
 	// each clip's own) [orig: AnimMap_RegisterEntity @0x40bb60 pins the rig
@@ -541,6 +565,7 @@ bool SkeletalClips::eval_composed_pose(const std::string &primary_key,
 	apply_pose_overlay(r_pose, deltas, classes_, weapon_key, weapon_seconds,
 			weapon_prev_key, weapon_prev_seconds, weapon_blend_weight,
 			weapon_variant, weapon_prev_variant);
+	pose_person_rows_past_clip(r_pose, clip_file_bones(primary_key, primary_variant), deltas, classes_);
 	return !r_pose.empty();
 }
 
@@ -559,6 +584,48 @@ void SkeletalClips::apply_pose_overlay(std::vector<anim::PoseBone> &pose,
 	for (size_t i = 0; i < n; ++i) rotations[i] = pose[i].rotation;
 	anim::apply_aim_overlay(parents_, deltas, classes.data(), rotations);
 	for (size_t i = 0; i < n; ++i) pose[i].rotation = rotations[i];
+}
+
+size_t SkeletalClips::clip_file_bones(const std::string &key, int variant) const {
+	const LoadedClip *lc = find_clip_variant(key, variant);
+	return lc != nullptr && lc->clip.frame_count != 0 ? lc->clip.file_bones : skeleton_file_bones_;
+}
+
+void SkeletalClips::pose_person_rows_past_clip(std::vector<anim::PoseBone> &pose,
+		size_t clip_bones, const anim::Quat *deltas, const std::vector<uint8_t> &classes) const {
+	const size_t n = pose.size();
+	if (!n || n != bones_.size() || !fk_valid_ || clip_bones >= n) return;
+	// The world orientations the composed pose stands in (the FK the overlay walked).
+	std::vector<anim::Quat> world(n);
+	for (size_t k = 0; k < n; ++k) {
+		const int p = parents_[k];
+		world[k] = p >= 0 ? anim::quat_normalize(anim::quat_mul(world[static_cast<size_t>(p)], pose[k].rotation))
+		                  : pose[k].rotation;
+	}
+	// A row's deformation (rest to pose) turns by its world orientation over its rest one: the
+	// identity turn is the row at its rest orientation, the model frame's.
+	const auto rest = [this](size_t k) { return anim::mat3_to_quat(rest_global_[k].rows); };
+	const bool overlay = deltas != nullptr && classes.size() >= n;
+	for (size_t k = clip_bones; k < n; ++k) {
+		// Identity [orig: @0x4B1EC6..0x4B1EE8], under the row's overlay class [orig: @0x4B1FE0].
+		const anim::Quat turn = overlay
+				? deltas[classes[k] < anim::kOverlayClassCount ? classes[k] : uint8_t(anim::kOverlayBody)]
+				: anim::Quat{1.0f, 0.0f, 0.0f, 0.0f};
+		world[k] = anim::quat_normalize(anim::quat_mul(turn, rest(k)));
+	}
+	// The row at the clip's count takes the head row's finished turn [orig: @0x4B2002..0x4B2018].
+	constexpr size_t kHeadRow = 14;
+	if (clip_bones > kHeadRow) {
+		const anim::Quat head_turn = anim::quat_mul(world[kHeadRow], anim::quat_inv(rest(kHeadRow)));
+		world[clip_bones] = anim::quat_normalize(anim::quat_mul(head_turn, rest(clip_bones)));
+	}
+	// Back to parent-local; the origins keep their parent-relative pivots [orig: @0x4B201E..0x4B2162].
+	for (size_t k = clip_bones; k < n; ++k) {
+		const int p = parents_[k];
+		pose[k].rotation = p >= 0
+				? anim::quat_normalize(anim::quat_mul(anim::quat_inv(world[static_cast<size_t>(p)]), world[k]))
+				: world[k];
+	}
 }
 
 } // namespace opennova::anim

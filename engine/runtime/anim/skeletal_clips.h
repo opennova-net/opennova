@@ -52,6 +52,17 @@ public:
 						 const std::vector<std::pair<std::string, std::string>> &clips,
 						 const std::vector<anim::Vec3> &model_bone_origins = {},
 						 const std::vector<int> &model_bone_parents = {});
+	// The model's bone table at rest, with no clip: the rig a per-vertex skinned model nothing
+	// plays on draws through, one row per model row (origins = parent-relative pivots, parents
+	// paired), each row's orientation the model frame's, as the game draws such a model: a body
+	// whose channel plays nothing has every row at identity, and a model with no channel at all
+	// the entity's matrix in every row, each row then taking its part tracks
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290, no channel @0x4B1373 (no row copied),
+	//  every row past the copied ones identity @0x4B1EC6..0x4B1EE8; BoneCallback_gnrc_World
+	//  @0x4E2860, the entity matrix stamped in every row @0x4E2938..0x4E2956, submitted
+	//  @0x4E29AD]. eval_pose answers the rest; it loads no clip. Returns loaded().
+	bool load_rest(const std::vector<anim::Vec3> &model_bone_origins,
+	               const std::vector<int> &model_bone_parents);
 	void clear();
 
 	bool loaded() const { return loaded_; }
@@ -160,6 +171,27 @@ public:
 			double weapon_prev_seconds = 0.0, float weapon_weight = 1.0f,
 			int weapon_variant = 0, int weapon_prev_variant = 0) const;
 
+	// The bone count of the .bad a key's variant plays (its header's word, anim::Clip::file_bones);
+	// a key with no clip poses the bind pose (eval_pose), the skeleton .bad's, whose count it
+	// answers: 0 for a rig with neither (load_rest's).
+	size_t clip_file_bones(const std::string &key, int variant = 0) const;
+
+	// A Person's model rows past the clip it plays, as the entity's bone builder poses them, over the
+	// composed pose (after apply_pose_overlay, `deltas` and `classes` as it took them; null deltas:
+	// no overlay). The builder copies the playing clip's own bones alone (`clip_bones`, its .bad's
+	// count), so every model row past them starts at the model frame's orientation and takes its
+	// overlay class's on top; the first of them, when the clip has more than 14 bones, takes the head
+	// row's (14's) finished orientation instead (BHD's jaw, JO's ground row). Each row's pivot rides
+	// its parent as ever, so only rotations change. A first-person view model draws its clip's
+	// matrices as the clip builds them and never takes this.
+	// [orig: Entity_BuildBoneTransformMatrices @0x4B1290 -- the clip's bones copied @0x4B139C..0x4B149D
+	//  (the count the playing .bad's word +20, slot+64 AnimMap_PlayAnimBySlot @0x40BDE3); the rows past
+	//  them set to identity @0x4B1EC6..0x4B1EE8; every row's overlay multiply @0x4B1F4A..0x4B1FE7; the
+	//  row at the count, when it is above 14, takes row 14's finished matrix @0x4B2002..0x4B2018; the
+	//  pivot carried by the model row's parent @0x4B201E..0x4B2162]
+	void pose_person_rows_past_clip(std::vector<anim::PoseBone> &pose, size_t clip_bones,
+			const anim::Quat *deltas, const std::vector<uint8_t> &classes) const;
+
 private:
 	struct ClipRequest {
 		std::string key;
@@ -172,6 +204,13 @@ private:
 	                const std::vector<anim::Vec3> &model_bone_origins,
 	                const std::vector<int> &model_bone_parents);
 	void rebuild_clip_index();
+	// Pass 1 of a load: the skeleton .bad (load_rest's has no bone) and the model table to the rig's
+	// bones, parents, binds and rest globals; the rest origins and the table parents every clip
+	// samples against.
+	void build_skeleton(const bad::BadFile &skeleton_bf,
+	                    const std::vector<anim::Vec3> &model_bone_origins,
+	                    const std::vector<int> &model_bone_parents,
+	                    std::vector<anim::Vec3> &shared_rest, std::vector<int> &rig_parents);
 
 	// The upper-body WEAPON channel: sample weapon_key at ITS OWN playhead and hard-override
 	// the mask bones' WORLD rotations (clavicles/arms/forearms/neck/head/hands — the
@@ -202,6 +241,7 @@ private:
 
 	bool loaded_ = false;
 	bool fk_valid_ = false;
+	size_t skeleton_file_bones_ = 0;  // the skeleton .bad's header count (clip_file_bones)
 	std::string adm_name_;
 	std::vector<anim::ClipBone> bones_;
 	std::vector<int> parents_;

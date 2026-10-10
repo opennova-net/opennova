@@ -47,13 +47,17 @@ private:
 	const opennova::anim::SkeletalClips &rig() const;
 	const LoadedClip *find_clip(const String &key) const;
 	const LoadedClip *find_clip_variant(const String &key, int variant) const;
+	// `p_person_clip_bones`: a Person's playing clip's own bone count, its rows past them
+	// posed as its bone builder poses them (SkeletalClips::pose_person_rows_past_clip) after
+	// the overlay; kNotPerson for a pose the builder never sees (a first-person view model).
+	static constexpr size_t kNotPerson = static_cast<size_t>(-1);
 	Array apply_pose_overlay(std::vector<opennova::anim::PoseBone> p_pose,
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
 			const String &p_wpn_key, double p_wpn_playhead_seconds,
 			bool p_collapse_right_hand, const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
-			int p_wpn_prev_variant = 0) const;
+			int p_wpn_prev_variant = 0, size_t p_person_clip_bones = kNotPerson) const;
 	void write_pose_to_skeleton(Skeleton3D *p_skeleton, const Array &p_pose,
 			bool p_collapse_right_hand) const;
 
@@ -85,6 +89,11 @@ public:
 			const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
 			const PackedInt32Array &p_model_bone_parents = PackedInt32Array());
+
+	// The model's bone table at rest with no clip (SkeletalClips::load_rest): the rig
+	// a per-vertex skinned model nothing plays on draws its part tracks through.
+	bool load_rest(const PackedVector3Array &p_model_bone_origins,
+			const PackedInt32Array &p_model_bone_parents);
 
 	// A rig an embedder loaded itself (the editor's preview, over the project's files) through
 	// the same loader (anim::SkeletalClips); null unloads it.
@@ -166,7 +175,7 @@ public:
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
-			int p_wpn_prev_variant = 0, int p_variant = 0) const;
+			int p_wpn_prev_variant = 0, int p_variant = 0, bool p_person = false) const;
 	Array eval_pose_blended_overlay_deltas(const String &p_source_key,
 			double p_source_playhead_seconds, const String &p_target_key,
 			double p_target_playhead_seconds, float p_weight,
@@ -178,7 +187,7 @@ public:
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
 			int p_wpn_prev_variant = 0, int p_source_variant = 0,
-			int p_target_variant = 0) const;
+			int p_target_variant = 0, bool p_person = false) const;
 
 	// The whole per-frame body-pose write in one call: evaluate the pose
 	// (eval_pose_overlay when classes+deltas are non-empty, eval_pose otherwise)
@@ -187,6 +196,9 @@ public:
 	// in GDScript — moved native because it executes per animated model per
 	// render frame (bone-count boxed Transform3Ds + 3 cross-boundary calls per
 	// bone from script dominated the present pass).
+	// p_person: the model draws through a Person's bone builder (every clip-posed
+	// model but a first-person view model), so its rows past the clip's bones take
+	// that builder's pose (SkeletalClips::pose_person_rows_past_clip), overlay or not.
 	void pose_skeleton_deltas(Skeleton3D *p_skeleton, const String &p_key,
 			double p_playhead_seconds, int p_variant,
 			const PackedInt32Array &p_classes, const Basis *p_deltas,
@@ -195,7 +207,7 @@ public:
 			const String &p_wpn_prev_key = String(),
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
-			int p_wpn_prev_variant = 0) const;
+			int p_wpn_prev_variant = 0, bool p_person = false) const;
 	// The GDScript-facing forms of the three *_deltas entry points above: the aim
 	// overlay arrives as an Array of up to 9 Basis (index = overlay class, a missing
 	// or non-Basis entry reads identity; an empty Array means no overlay). The
@@ -239,7 +251,7 @@ public:
 			double p_wpn_prev_playhead_seconds = 0.0,
 			float p_wpn_weight = 1.0f, int p_wpn_variant = 0,
 			int p_wpn_prev_variant = 0, int p_source_variant = 0,
-			int p_target_variant = 0) const;
+			int p_target_variant = 0, bool p_person = false) const;
 
 	SkeletalAnim() = default;
 };
