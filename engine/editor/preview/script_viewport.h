@@ -103,7 +103,7 @@ struct ScriptAssistAsk {
 // view's one table, keyed by the document's type, from that type's port of its reader alone, so nothing is
 // coloured that no reader knows. The script's are the WAC compiler's own record of the words it read
 // (documents/script_type's script_highlights: a keyword, a command it emitted, an operand it looked a name up
-// for); a credits file's and charattr.def's are the ConfigFile reader's (each section's label line, each
+// for); a credits file's are the ConfigFile reader's (each section's label line, each
 // entry's key and each of its values where the reader read it [orig: ConfigFile_ParseText @ 0x7608A0]). A type
 // whose reader's port says no word it read has none (a music script, a shader, a particle file, the HUD layout,
 // a plain text): null.

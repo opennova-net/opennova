@@ -141,7 +141,7 @@ std::string first_sentence(const std::string &message) {
 
 namespace {
 
-// The ConfigFile reader's words over a text it reads (a credits file's, charattr.def's): each section's label
+// The ConfigFile reader's words over a text it reads (a credits file's): each section's label
 // line from its '[' to its ']' (a keyword), each entry's key (a command), each value as written (an operand), at
 // the places the reader read them [orig: ConfigFile_ParseText @ 0x7608A0; ConfigFile_BuildSectionLabels
 // @ 0x75DF20; ini_parse_section_entries @ 0x75DB80; ConfigFile_ParseValues @ 0x7606F0]. The reader is handed
@@ -204,7 +204,6 @@ struct HighlighterRow {
 constexpr HighlighterRow kHighlighters[] = {
 	{ DocumentTypeId::Script, script_highlights },
 	{ DocumentTypeId::Credits, config_file_highlights },
-	{ DocumentTypeId::CharAttrs, config_file_highlights },
 };
 
 } // namespace

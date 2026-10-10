@@ -486,17 +486,16 @@ int test_highlights() {
 	ScriptViewport plain("game.cfg");
 	plain.follow(ViewportInput{other, clock, other.documents.open.front().get(), ChangeClass::Loaded}, clock);
 	TEST_EXPECT(plain.status() == ViewportStatus::Ready && plain.highlights().empty());
-	// S23 C: the one table says which reader a type's highlights come from. charattr.def's are the ConfigFile
+	// S23 C: the one table says which reader a type's highlights come from. A credits file's are the ConfigFile
 	// reader's: each section's label line, each key and each value where the reader read them, the text handed it
 	// as Save writes it (the second line's LF alone CR LF), a comment and a line of no '=' nothing.
 	TEST_EXPECT(script_highlighter(DocumentTypeId::Script) == script_highlights);
 	TEST_EXPECT(script_highlighter(DocumentTypeId::Text) == nullptr && script_highlighter(DocumentTypeId::Shader) == nullptr);
-	TEST_EXPECT(script_highlighter(DocumentTypeId::Credits) != nullptr &&
-	            script_highlighter(DocumentTypeId::CharAttrs) == script_highlighter(DocumentTypeId::Credits));
-	std::unique_ptr<DocumentBase> attrs =
-			document_of(AssetKind::CharAttrDefs, "; classes\r\n[CLASS1]\nSPEED = 1.5, 2\r\njunk\r\n", "charattr.def");
+	TEST_EXPECT(script_highlighter(DocumentTypeId::Credits) != nullptr);
+	std::unique_ptr<DocumentBase> credits_text =
+			document_of(AssetKind::Credits, "; credits\r\n[CLASS1]\nSPEED = 1.5, 2\r\njunk\r\n", "credits.kda");
 	std::vector<TextHighlight> config_words;
-	script_highlighter(DocumentTypeId::CharAttrs)(*text_of(*attrs), config_words);
+	script_highlighter(DocumentTypeId::Credits)(*text_of(*credits_text), config_words);
 	TEST_EXPECT(config_words.size() == 4);
 	if (config_words.size() == 4) {
 		TEST_EXPECT(config_words[0].kind == TextHighlightKind::Keyword && config_words[0].span.line == 2 &&
