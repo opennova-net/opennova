@@ -131,13 +131,13 @@ int main() {
 	CHECK(started);
 	if (!started) return 1;
 
-	// The host file reached the session: the name, the message, the cap with the
-	// dedicated slot (8 + 1), the 20-kill limit, the starting map; the unknown
-	// mission was reported and skipped.
+	// The host file reached the session: the name, the message, the cap (8; the
+	// slot limit adds the dedicated slot, 8 + 1), the 20-kill limit, the starting
+	// map; the unknown mission was reported and skipped.
 	const inmatch::GameConfig &config = server.role().state.host_owner.ctx.config;
 	CHECK(config.server_name == "Serve Test");
 	CHECK(config.custom_text == "hello from the test");
-	CHECK(config.max_players == 9u);
+	CHECK(config.max_players == 8u && config.player_slot_limit() == 9u);
 	CHECK(config.score_limit == 20u);
 	CHECK(config.mission_file == "servetst.bms");
 	CHECK(config.mission_name == "Serve Test Map");
@@ -193,7 +193,9 @@ int main() {
 		}
 		CHECK(answered);
 		CHECK(found.server_name == "Serve Test");
-		CHECK(found.max_players == 9u);
+		// MP is the session's cap, never the dedicated slot [orig: protocol
+		// +0x524 @0x6209FF = ctx+0xF28 @0x4C9A80].
+		CHECK(found.max_players == 8u);
 		CHECK(found.current_players == 0u);
 	}
 

@@ -92,7 +92,7 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// The mission-data block's unlimited-vehicles word, rebuilt from the host
 	// config at every mission start [orig: Client_BuildMissionDataRequestBlock
 	// @0x51E8C5..0x51E8CB from dword_24D2258 = unlimitedVehicles_4D0].
-	kernel.world.rules.vehicle_respawns = config.unlimited_vehicles;
+	kernel.world.rules.vehicle_respawns = config.unlimited_vehicles != 0;
 	// The rules word every in-match reader tests (g_RulesFlags @0x24D1E34) is the
 	// +0x2C dword of the mission-data block the authority builds at every mission
 	// start: the host config's mpattrib word IN a session, the literal 0x4204 out

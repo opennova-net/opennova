@@ -190,6 +190,8 @@ std::vector<uint8_t> serialize_session_status(
 	append_cstr_limited(out, config.mission_name, 63);
 	out.push_back(static_cast<uint8_t>(config.game_type));
 	out.push_back(gtype::score_table_index(config.game_type));
+	// The cfg's cap, never the slot limit [orig: Server_BuildStatusReport
+	// @0x530A60, maxPlayers_3F4 @0x530B75..0x530B81].
 	out.push_back(static_cast<uint8_t>(config.max_players));
 	append_u32(out, uptime_ms);
 	const std::array<int32_t, 39> default_values =

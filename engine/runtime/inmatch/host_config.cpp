@@ -98,14 +98,17 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.no_crosshair_spread = cfg.mp_no_crosshair_spread;
 	config.no_scope_drift = cfg.mp_no_scope_drift;
 
-	// The published cap: the dedicated slot added [orig: @0x551B2B..0x551B48];
-	// in session the cap is already 1..65, so the apply's 65 ceiling never cuts.
-	config.max_players = host_player_slot_limit(host.player_limit, host.serve_and_play);
+	// The session's cap, already 1..65 [orig: game_settings.max_players
+	// @0x56963F], and the dedicated word the slot limit adds the host's own
+	// slot for (GameConfig::player_slot_limit) [orig: @0x551B20..0x551B35]; in
+	// session the apply's 65 ceiling never cuts.
+	config.max_players = static_cast<uint32_t>(host.player_limit);
+	config.dedicated_server = !host.serve_and_play;
 	config.num_teams = static_cast<uint8_t>(cfg.mp_numteams); // g_NumTeamsConfig @0x551BAC
 	config.mp_attributes = static_cast<uint32_t>(cfg.mpattrib); // game_settings @0x56967F
 	config.fat_bullets = cfg.fatbullets;              // g_FatBullets @0x551C01
 	config.one_shot_kill = cfg.oneshotonekill;        // g_OneShotKill @0x551BF5
-	config.unlimited_vehicles = cfg.unlimited_vehicles != 0; // dword_24D2258 @0x551D91
+	config.unlimited_vehicles = cfg.unlimited_vehicles; // dword_24D2258 @0x551D91
 	config.voting_enabled = cfg.mpvoting;             // g_VoteKickEnabled @0x551DC3
 	config.voting_min_players = cfg.mpvoting_min_players; // @0x551DCF
 	config.voting_percent = cfg.mpvoting_percent;     // g_VoteKickPercent @0x551D43

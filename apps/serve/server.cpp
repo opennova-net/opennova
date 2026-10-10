@@ -422,8 +422,8 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	// @0x53C7C4].
 	const std::string basename = mission::mission_base_name(map_file);
 
-	// The session config: the cfg block's (the published player cap with the
-	// dedicated slot among it), the session game type from the rotation's row
+	// The session config: the cfg block's (the session's cap, and the dedicated
+	// word its slot limit adds the host's own slot for), the session game type from the rotation's row
 	// [orig: Game_StartMission @0x5244DE..0x52452B sets g_GameType from the
 	//  rotation's current catalog entry +0x1128 on the authority, over the
 	//  file's GameType], the mission identity and the expansion check.
@@ -487,7 +487,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	options.terrain = true;
 	options.wac = true;
 	options.game_type = config.game_type;
-	options.player_limit = static_cast<int32_t>(config.max_players);
+	options.player_limit = static_cast<int32_t>(config.player_slot_limit());
 	options.team_count = config.num_teams;
 	request.fresh_kernel = [this]() -> mission::MissionKernel & {
 		auto fresh = std::make_unique<mission::MissionKernel>();
@@ -517,7 +517,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			"opennova-serve: '%s' (%s) up: %d entities, terrain %s, WAC %s, %u player slot(s)",
 			map_file.c_str(), config.mission_name.c_str(), kernel_->promo.spawned,
 			kernel_->terrain_store.valid() ? "loaded" : "absent",
-			kernel_->wac_loaded ? "loaded" : "absent", config.max_players);
+			kernel_->wac_loaded ? "loaded" : "absent", config.player_slot_limit());
 	return true;
 }
 
@@ -604,7 +604,7 @@ HostRegistration Server::listing_columns() const {
 	r.server_name = config.server_name;
 	r.server_message = config.custom_text;
 	r.max_players = host_.player_limit;
-	r.published_cap = static_cast<int>(config.max_players);
+	r.published_cap = static_cast<int>(config.player_slot_limit());
 	r.password = !config.server_password.empty();
 	r.listen_host = false;
 	r.lan_only = cfg_.mp_novaworld_host_lan_only != 0 ? 1 : 0;

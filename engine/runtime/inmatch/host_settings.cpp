@@ -164,8 +164,10 @@ uint32_t session_koth_limit_minutes(int32_t cfg_limit) {
 }
 
 uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
-    // Dedicated hosting reserves the extra host slot before publishing the
-    // network limit; the 65 ceiling tests the PRE-increment cap (a dedicated
+    // Dedicated hosting reserves the extra host slot in the live slot limit
+    // (dword_24D211C); the session's advertised and admitted cap
+    // (GameConfig::max_players) never carries it. The 65 ceiling tests the
+    // PRE-increment cap (a dedicated
     // 65 publishes 66) and applies only for networkConnectType 1 (game.cfg's
     // `networkconnecttype`, default 1). The apply has no lower clamp: a blank
     // cap publishes 0 (1 dedicated). In session, though, the session's
@@ -178,9 +180,13 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
     // Server_InitNewRoundState @ 0x51c8e0]
     int64_t total = static_cast<int64_t>(player_limit) + (serve_and_play ? 0 : 1);
     if (player_limit > static_cast<int32_t>(kMaxPlayersCap)) total = kMaxPlayersCap;
-    // GameConfig::max_players is unsigned: retail's signed `count >= max`
-    // @0x4c623f rejects every join for a negative cap, exactly as 0 does.
+    // The limit is unsigned: a negative total (no session create clamped the
+    // cap) reads as 0.
     return static_cast<uint32_t>(std::max<int64_t>(total, 0));
+}
+
+uint32_t GameConfig::player_slot_limit() const {
+    return host_player_slot_limit(static_cast<int32_t>(max_players), !dedicated_server);
 }
 
 int32_t session_player_cap(int32_t player_limit) {

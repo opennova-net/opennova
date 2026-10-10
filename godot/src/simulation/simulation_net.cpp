@@ -64,7 +64,8 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 	if (is_host_listening()) {
 		cfg.config = net_.host_session_config; // mission/player/spawn + game_type/mp_attributes from the UI
 		if (cfg.config.server_name.empty()) cfg.config.server_name = "OpenNova LAN Host";
-		cfg.config.max_players = net_.host_max_players; // the UI cap as configure_host_session published it (host_player_slot_limit)
+		cfg.config.max_players = net_.host_max_players; // the UI cap as configure_host_session clamped it (session_player_cap)
+		cfg.config.dedicated_server = !net_.host_serve_and_play; // the slot limit's own slot
 	} else {
 		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0), its
 		// session words the current player profile record's.
@@ -445,19 +446,19 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 		}
 	}
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
-	// loopback fold at bring-up; max_players is the session-list-advertised cap: the session
-	// create's 1..65 clamp (this host is in session), then the engine's host_player_slot_limit
-	// apply (the dedicated slot added).
+	// loopback fold at bring-up; max_players is the session's advertised and admitted cap: the
+	// session create's 1..65 clamp (this host is in session). The dedicated word makes the
+	// engine's slot limit (GameConfig::player_slot_limit) carry the host's own slot on top.
 	net_.host_serve_and_play = p_options->get_serve_and_play();
-	net_.host_max_players = opennova::inmatch::host_player_slot_limit(
-			opennova::inmatch::session_player_cap(p_options->get_max_players()),
-			net_.host_serve_and_play);
+	net_.host_max_players = static_cast<uint32_t>(
+			opennova::inmatch::session_player_cap(p_options->get_max_players()));
 	config.max_players = net_.host_max_players;
+	config.dedicated_server = !net_.host_serve_and_play;
 	net_.host_session_config = std::move(config);
 	if (kernel_ && is_host_listening()) {
 		kernel_->world.rules.fat_bullets = net_.host_session_config.fat_bullets != 0;
 		kernel_->world.rules.one_shot_kill = net_.host_session_config.one_shot_kill != 0;
-		kernel_->world.rules.vehicle_respawns = net_.host_session_config.unlimited_vehicles;
+		kernel_->world.rules.vehicle_respawns = net_.host_session_config.unlimited_vehicles != 0;
 	}
 	// A LAN host role follows the server type it was just given.
 	ensure_session_role();
@@ -468,10 +469,9 @@ Ref<HostSessionOptions> Simulation::get_host_session_config() const {
 	out.instantiate();
 	out->assign_config(net_.host_session_config);
 	out->set_bind_port(net_.host_bind_port);
-	// Return a request that can be applied again without adding the reserved
-	// dedicated slot a second time. player_slot_limit exposes the live limit.
-	out->set_max_players(static_cast<int>(net_.host_max_players) -
-			(net_.host_serve_and_play ? 0 : 1));
+	// Return a request that can be applied again: the session's cap, which
+	// player_slot_limit adds the reserved dedicated slot to.
+	out->set_max_players(static_cast<int>(net_.host_max_players));
 	out->set_serve_and_play(net_.host_serve_and_play);
 	return out;
 }

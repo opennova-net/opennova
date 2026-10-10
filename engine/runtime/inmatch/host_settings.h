@@ -28,11 +28,14 @@ bool apply_host_dialog_number(GameConfig& config, int32_t& player_limit,
 // [orig: UI_PopulateHostSettingsFromConfig @ 0x555fe0]
 std::string host_dialog_value(const GameConfig& config, int32_t player_limit,
                               bool serve_and_play, std::string_view control);
+// The live player-slot limit the session apply makes of a cap: the cap, plus
+// the host's own slot when dedicated (GameConfig::player_slot_limit).
 uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play);
 // The session create's cap: in session the cap goes into 1..65 before the apply
-// (host_player_slot_limit), so a blank cap publishes 1 (2 dedicated) and a
-// dedicated 65 the ceiling's 66. Both hosts run it: inmatch::host_session_settings
-// over the cfg block and the game's host request.
+// (host_player_slot_limit), so a blank cap is 1 (a slot limit of 2 dedicated)
+// and a dedicated 65 makes the ceiling's 66. It is GameConfig::max_players.
+// Both hosts run it: inmatch::host_session_settings over the cfg block and the
+// game's host request.
 // [orig: CNapiGameSession_BuildAndCreateSession @0x569554 (is_in_session),
 //  @0x56955D..0x56955F (below 1 -> 1), @0x56956A..0x56956C (above 65 -> 65)]
 int32_t session_player_cap(int32_t player_limit);

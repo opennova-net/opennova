@@ -95,7 +95,7 @@ HostRegistration ServeListing::registration() const {
 	r.server_name = config.server_name;
 	r.server_message = config.custom_text;
 	r.password = !config.server_password.empty();
-	r.published_cap = static_cast<int>(config.max_players);
+	r.published_cap = static_cast<int>(config.player_slot_limit());
 	r.tracers = (config.mp_attributes & inmatch::GameConfig::kMpAttribNoTracers) == 0;
 	if (kernel_ != nullptr) r.round_time_remaining_ticks = kernel_->world.match.remaining_ticks();
 	return r;

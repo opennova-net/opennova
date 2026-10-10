@@ -142,7 +142,7 @@ int main() {
 			const inmatch::GameConfig &config = server->role().state.host_owner.ctx.config;
 			CHECK(config.server_name == "From The Host File");
 			CHECK(config.custom_text == "the cfg's own message");
-			CHECK(config.max_players == 9u); // 8 plus the dedicated slot
+			CHECK(config.max_players == 8u && config.player_slot_limit() == 9u); // + the dedicated slot
 			CHECK(config.score_limit == 20u);
 			CHECK(config.respawn_time == 40u);
 			CHECK(config.spectator_slots == 3);
@@ -203,7 +203,7 @@ int main() {
 			const inmatch::GameConfig &config = server->role().state.host_owner.ctx.config;
 			// No gametext.bin in the loose root: the `!` default name.
 			CHECK(config.server_name == "!Untitled");
-			CHECK(config.max_players == 65u); // the stock 64 plus the dedicated slot
+			CHECK(config.max_players == 64u && config.player_slot_limit() == 65u); // + the dedicated slot
 			CHECK(config.score_limit == game_rules::kDefaultScoreLimit);
 			CHECK(config.respawn_time == game_rules::kDefaultRespawnTime);
 			CHECK(config.spectator_slots == 0 && config.allow_ai);

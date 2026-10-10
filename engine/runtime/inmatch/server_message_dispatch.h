@@ -43,9 +43,11 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 
 // Build the session-owned S2C 0x64 raw content. The two random regions and
 // nonzero session id are minted once by create_session; callers then retain the
-// returned block for every chunk request. [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
+// returned block for every chunk request. `mp_session_peer` is the host's
+// connection mode (false for a dedicated host, whose own slot +36 drops).
+// [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
-MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config);
+MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer);
 
 // The recipient's S2C 0x7B session summary (its name and PCID, the server
 // name, the advertised mission, the map file, the game type, the expansion).

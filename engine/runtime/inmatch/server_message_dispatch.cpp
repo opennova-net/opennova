@@ -167,7 +167,7 @@ uint32_t validate_side_password(const GameConfig &config, const NapiNPConnection
 
 } // namespace
 
-MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config) {
+MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer) {
 	MissionMetadataBlob blob{};
 	auto write_u32 = [&](std::size_t offset, uint32_t value) {
 		opennova::io::write_u32_le(blob.data() + offset, value);
@@ -184,14 +184,14 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config) {
 	while (mission_session_id == 0)
 		mission_session_id = make_random_session_u32() & 0xFFFFu;
 	write_u32(32, mission_session_id);
-	// Offset 36 carries the session's max players verbatim — the only
-	// capture-verified form (handshake goldens: le32 == max_players). An
-	// earlier serve-mode decrement here was pure inference with no witness;
-	// the dedicated-host form remains unwitnessed either way.
-	write_u32(36, std::min<uint32_t>(config.max_players, 251u));
+	// +36: the slot limit less a non-peer (dedicated) host's own slot, at most 251: the
+	// session's cap on every host; +48: the cfg's raw unlimited-vehicles word dword_24D2258.
+	// [orig: Client_BuildMissionDataRequestBlock @0x51E897..0x51E8B9, @0x51E8C5..0x51E8CB]
+	const int32_t players = static_cast<int32_t>(config.player_slot_limit()) - !mp_session_peer;
+	write_u32(36, static_cast<uint32_t>(players > 251 ? 251 : players));
 	write_u32(40, config.game_type);
 	write_u32(44, config.mp_attributes);
-	write_u32(48, 1u);
+	write_u32(48, static_cast<uint32_t>(config.unlimited_vehicles));
 	write_fixed_string(52, config.server_name);
 	write_fixed_string(84, config.mission_file);
 	// The 00TRg LAN oracle carries the map filename in both mission slots.
@@ -393,7 +393,7 @@ std::vector<uint8_t> build_tag64_mission_metadata(
 		uint32_t transfer_id, uint32_t offset) {
 	MissionMetadataBlob fallback{};
 	if (session_blob == nullptr) {
-		fallback = build_mission_metadata_blob(cfg);
+		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server); // no ctx: cfg mode
 		session_blob = &fallback;
 	}
 	return build_transfer_chunk(transfer_id, session_blob->data(),

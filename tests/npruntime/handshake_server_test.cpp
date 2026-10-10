@@ -15,6 +15,7 @@
 // so the encrypted 0x83 replies decode without any test accessor.
 
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/host_config.h> // host_session_settings (the Serve Only cap)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <runtime/inmatch/integrity_challenge_profile.h>
 #include <net/npwire/lan_discovery.h>
@@ -25,6 +26,7 @@
 #include <runtime/world/weapon_table_build.h> // build_weapon_table (the D-NET-141 armory resolve)
 
 #include <formats/def/def.h>
+#include <formats/gamecfg/game_cfg.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
@@ -3012,6 +3014,85 @@ bool run_capacity_rejects_when_full() {
 	return true;
 }
 
+// A Serve Only host (D-NET-400) advertises, admits and publishes its session cap; only the
+// slot limit carries its own slot. A cfg block with a cap of 2, dedicated, makes a session
+// whose LAN discovery 0x81 MP is 2 (protocol +0x524, the session's copy of the cap), whose
+// 0x42 gate admits two joiners and rejects the third with JFC 14 / JFP 4 (the lineup queue
+// off: the stock queue of 100 would admit it, and its reject carries JFP 5), whose S2C 0x64
+// block +36 is the slot limit (3) less the non-peer's own slot, and whose slot table is 3. A
+// listen host's block carries the same cap at +36. +48 is the cfg's raw unlimited-vehicles
+// word on both. [orig: CNapiGameSession_BuildAndCreateSession @0x569621..0x56963F;
+//  CNapiGameSession_CreateSession @0x4C988D..0x4C98D8, @0x4C9A80;
+//  NapiNPProtocol_SendServerInfoPacket @0x6209FF; CNapiNetwork_ValidateJoinRequest
+//  @0x4C6220..0x4C623F; Client_BuildMissionDataRequestBlock @0x51E897..0x51E8CB;
+//  Game_ApplySessionSettingsToGlobals @0x551B20..0x551B35]
+bool run_dedicated_host_advertises_and_admits_its_cap() {
+	gamecfg::GameCfg cfg = gamecfg::defaults();
+	cfg.mp_max_players = 2;
+	cfg.dedicated = 1;
+	cfg.unlimited_vehicles = 0;
+	// The gate's bare cap: retail adds the lineup queue's size while it is on
+	// (stock 1 / 100), which the port does not model (D-NET-403).
+	cfg.mp_use_lineup_queue = 0;
+	const inmatch::HostScreenState serve_only = inmatch::host_session_settings(cfg);
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
+			kHostKey, nullptr, serve_only.config);
+	if (!expect(ctx.config.max_players == 2u && ctx.config.player_slot_limit() == 3u &&
+	            ctx.config.total_player_slot_capacity() == 3u,
+	            "a Serve Only cap of 2 is a slot limit of 3")) return false;
+	if (!expect(le32(ctx.mission_metadata_blob.data() + 36) == 2u,
+	            "a Serve Only host's 0x64 +36 is its cap, the slot limit less its own slot"))
+		return false;
+	if (!expect(le32(ctx.mission_metadata_blob.data() + 48) == 0u,
+	            "0x64 +48 carries the cfg's unlimited-vehicles word")) return false;
+
+	const uint32_t ci = 0x00005150u;
+	const std::vector<uint8_t> probe = opennova::build_lan_discovery_probe(ci);
+	auto scan = inmatch::handle_server_datagram(ctx, PeerAddr{0x0100007Fu, 32150},
+			probe.data(), probe.size(), 1);
+	opennova::LanDiscoveryServer found;
+	if (!expect(scan.outbound.size() == 1 &&
+	            opennova::parse_lan_discovery_reply(scan.outbound[0].data(),
+	                    scan.outbound[0].size(), ci, found) &&
+	            found.max_players == 2u,
+	            "a Serve Only host's discovery 0x81 MP is its cap")) return false;
+
+	const std::string scrk = "SERVEONLYCAPSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789A";
+	auto join = [&](const PeerAddr &p, uint32_t ck, uint32_t now) {
+		auto a = craft_auth("JOINTOPERATIONS", kHostKey, ck, scrk);
+		return inmatch::handle_server_datagram(ctx, p, a.data(), a.size(), now);
+	};
+	if (!expect(join(PeerAddr{0x0100007Fu, 32151}, 0x5151u, 2).outbound.size() >= 1 &&
+	            join(PeerAddr{0x0100007Fu, 32152}, 0x5152u, 3).outbound.size() >= 1 &&
+	            inmatch::connection_count(ctx) == 2,
+	            "a Serve Only cap of 2 admits two joiners")) return false;
+	auto third = join(PeerAddr{0x0100007Fu, 32153}, 0x5153u, 4);
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ServerAuth rejected;
+	if (!expect(!third.outbound.empty() &&
+	            nw_decode_inbound(third.outbound.front().data(), third.outbound.front().size(),
+	                    opcode, body) &&
+	            opcode == SESSION_OPCODE_SERVER_AUTH &&
+	            parse_server_auth(body.data(), body.size(), rejected) &&
+	            rejected.cr == 0 && rejected.jfc == 14 && rejected.jfp == 4 &&
+	            inmatch::connection_count(ctx) == 2,
+	            "the third joiner meets the full cap, not the dedicated slot")) return false;
+
+	cfg.dedicated = 0;
+	cfg.unlimited_vehicles = 2;
+	const inmatch::HostScreenState listen = inmatch::host_session_settings(cfg);
+	replication::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx listen_ctx;
+	inmatch::test::bring_up_host(listen_ctx, inmatch::ConnectionMode::HostClient,
+			inmatch::SocketMode::Lan, kHostKey, &loopback, listen.config);
+	return expect(listen_ctx.config.player_slot_limit() == 2u &&
+	              le32(listen_ctx.mission_metadata_blob.data() + 36) == 2u &&
+	              le32(listen_ctx.mission_metadata_blob.data() + 48) == 2u,
+	              "a listen host's 0x64 +36 is the same cap; +48 the raw word");
+}
+
 // Armory-fed loadout resolve (D-NET-141): with world.tables.weapons built from the committed fixture,
 // the 0x5A reply resolves REAL ammo counts through the witnessed rules instead of echoing —
 // filters drop unfiltered (emplaced) request entries, counts come from startrounds/clipsize
@@ -3790,6 +3871,7 @@ int main(int argc, char **argv) {
 	ok = run_host_server_hello_writes_its_own_identity() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
+	ok = run_dedicated_host_advertises_and_admits_its_cap() && ok;
 	ok = run_mps_negotiates_the_connection_ceiling() && ok;
 	ok = run_character_join_vars_parsed() && ok;
 	ok = run_integrity_replies_validate_registered_profile() && ok;

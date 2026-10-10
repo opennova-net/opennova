@@ -16,6 +16,7 @@
 #include <base/io/fixed.h>
 #include <base/gameprofile/game_type.h> // game_type::for_mission_attribs
 
+#include <runtime/inmatch/host_settings.h> // host_player_slot_limit (the BMS admission limit)
 #include <runtime/mission/runtime_boot.h> // the S9 boot order + file-resolution policy
 #include <runtime/terrain_query/terrain_field_build.h> // the ONE cpt/trn(+charmap) field builder (ADR 0042 d4)
 
@@ -24,25 +25,25 @@ using namespace sim_internal;
 namespace {
 
 // The BMS admission limits (promote.cpp's player_limit/team_count gates). A
-// listen host admits against the SAME player cap its bring-up advertises
-// (net.host_max_players, the configure_host_session clamp), so the promoted
-// set and the advertised slot count cannot diverge; the no-net world keeps
-// the session config's value (admission ignores it outside a session). A
-// joiner's legacy full-BMS load (tools and direct joins; the production
-// joiner boots a wire-header-only mission with nothing to admit) takes the
-// joined session's values once its pre-load burst has delivered them: the
-// cap the host published in its S2C 0x64 session block (the host's own
-// host_max_players, so two OpenNova peers admit the same set; a retail
-// dedicated host publishes its cap while admitting against cap+1) and the replicated
-// scoreboard team count; else the host-equivalent defaults. Retail joiners
-// never promote the .bms (admission is host-only), so the joiner leg is a
-// port decision with no binary witness.
+// host admits against its live slot limit (host_player_slot_limit over the
+// configure_host_session clamp, net.host_max_players: a dedicated host's own
+// slot included); the no-net world keeps the session config's slot limit
+// (admission ignores it outside a session). A joiner's legacy full-BMS load
+// (tools and direct joins; the production joiner boots a wire-header-only
+// mission with nothing to admit) takes the joined session's values once its
+// pre-load burst has delivered them: the cap the host published in its S2C
+// 0x64 session block (the session's cap: a dedicated host, retail's and ours,
+// publishes it while admitting against cap+1, so this leg admits against one
+// fewer there) and the replicated scoreboard team count; else the
+// host-equivalent defaults. Retail joiners never promote the .bms (admission
+// is host-only), so the joiner leg is a port decision with no binary witness.
 void stamp_admission_limits(opennova::mission::KernelBootOptions &options,
 		const godot::SimulationNetState &net, bool host_listening,
 		const opennova::inmatch::ClientRuntime *joined) {
 	options.player_limit = host_listening
-			? static_cast<int32_t>(net.host_max_players)
-			: static_cast<int32_t>(net.host_session_config.max_players);
+			? static_cast<int32_t>(opennova::inmatch::host_player_slot_limit(
+					static_cast<int32_t>(net.host_max_players), net.host_serve_and_play))
+			: static_cast<int32_t>(net.host_session_config.player_slot_limit());
 	options.team_count = net.host_session_config.num_teams;
 	if (!options.joiner || joined == nullptr) return;
 	if (joined->session_max_players() != 0)
