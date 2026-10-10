@@ -2,9 +2,10 @@
 // itself, formats/configfile DataStringsPool, is tests/configfile/data_strings_pool_test's). The reader sizes its
 // pool of text values by their bytes (each its length and one), FastMem_Alloc rounds that up to 64, and the parse
 // clears it one byte per value [orig: ConfigFile_ParseText @ 0x7609e8]: a file of more values than the rounded
-// pool writes past it into the game's heap. Covered: the rule's finding on a charattr.def and a credits file, its
-// place and words, the fix that comments out the lines the loader reads the same without (applied: no finding, the
-// same classes; Undo: the finding again), none where no such line brings it under, none for a CBIN credits file
+// pool writes past it into the game's heap. Covered: the rule's finding on a charattr.def (its rows' document, S23 B:
+// over the text its save writes) and a credits file, its place and words, the fix that comments out the lines the
+// loader reads the same without (applied, in the charattr layout: no finding, the same classes; Undo: the finding
+// again), none where no such line brings it under, none for a CBIN credits file
 // nor a kind of another reader; the blanks of both kinds under the line and a credits blank over it refused; and
 // through a session, the row over a closed charattr.def, the build it refuses (the game's own failure, cited), and
 // its fix, after which the project builds. The retail leg reads every file JO:CA's game reads through the text
@@ -21,7 +22,7 @@
 
 #include <base/vfs/vfs.h>
 #include <editor/blank/blank_factory.h>
-#include <editor/documents/charattr_type.h>
+#include <editor/documents/charattr_document.h>
 #include <editor/documents/config_overrun.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/reference_kinds.h>
@@ -109,56 +110,70 @@ const Diagnostic *overrun_of(const std::vector<Diagnostic> &findings) {
 	return &findings[0];
 }
 
+// A charattr document's pool findings (its validator's document.config_overrun) and the text its save writes.
+std::vector<Diagnostic> charattr_overrun(const DocumentBase &document) {
+	std::vector<Diagnostic> out;
+	for (Diagnostic &d : validate_charattr_file(document))
+		if (d.code() == "document.config_overrun") out.push_back(std::move(d));
+	return out;
+}
+
+std::string saved_text(const DocumentBase &document) { return document.serialize().text; }
+
+size_t line_at(const std::string &text, size_t offset) {
+	return 1 + size_t(std::count(text.begin(), text.begin() + std::ptrdiff_t(offset), '\n'));
+}
+
 int test_rule_charattr() {
 	const std::string past = fixture_text("pool_past_line.def");
 	std::unique_ptr<DocumentBase> document = loaded(past, "charattr.def", AssetKind::CharAttrDefs);
-	TEST_EXPECT(document != nullptr);
+	TEST_EXPECT(document != nullptr && saved_text(*document) == past);
 	if (!document) return 1;
-	const std::vector<Diagnostic> findings = config_overrun_findings(*document);
+	TEST_EXPECT(config_overrun_findings(*document).empty()); // a record document's is its validator's
+	const std::vector<Diagnostic> findings = charattr_overrun(*document);
 	const Diagnostic *d = overrun_of(findings);
 	TEST_EXPECT(d != nullptr);
 	if (!d) return 1;
 	// At value 65, the first past the 64-byte pool: CHARACTER6's ATTRIBUTES word, the file's last value.
-	const TextDocument &text = *text_of(*document);
-	const TextSpan word = text.span_at(past.rfind("KnifeBonus"), 0);
-	TEST_EXPECT(d->line == word.line && d->column == word.column);
+	TEST_EXPECT(d->line == line_at(past, past.rfind("KnifeBonus")));
 	TEST_EXPECT(contains(d->message, "65 values") && contains(d->message, "60 bytes") &&
 	            contains(d->message, "64 bytes") && contains(d->message, "1 byte of zeros") &&
 	            contains(d->message, "ConfigFile_ParseText @ 0x7609e8") && contains(d->message, "Value 65"));
-	// Its fix: CHARACTER5's RUN_MODIFIER at 0, which the loader reads the same missing, commented out.
+	// Its fix: CHARACTER5's RUN_MODIFIER at 0, which the loader reads the same missing, commented out in the layout.
 	TEST_EXPECT(d->planned.size() == 1);
 	if (d->planned.size() != 1) return 1;
 	const PlannedFix &fix = d->planned[0];
 	TEST_EXPECT(fix.label == "Comment out the 1 line the game loads the same without" && fix.edits.size() == 1 &&
+	            fix.edits[0].operation == EditOperation::SetFileValue &&
 	            contains(fix.detail, "64 values against its 64-byte buffer") && contains(fix.detail, "Undo takes it back"));
 	Diagnostic error;
 	TEST_EXPECT(document->apply(fix.edits, error));
-	const std::string fixed = text.text();
+	const std::string fixed = saved_text(*document);
 	TEST_EXPECT(contains(fixed, "\r\n;RUN_MODIFIER = 0\r\n") && fixed.size() == past.size() + 1);
-	TEST_EXPECT(config_overrun_findings(*document).empty() && pool_of(fixed).values == 64);
+	TEST_EXPECT(charattr_overrun(*document).empty() && pool_of(fixed).values == 64);
 	TEST_EXPECT(charattr::same_rows(table_of(past), table_of(fixed)));
 	document->undo();
-	TEST_EXPECT(text.text() == past && overrun_of(config_overrun_findings(*document)) != nullptr);
+	TEST_EXPECT(saved_text(*document) == past && overrun_of(charattr_overrun(*document)) != nullptr);
 	// At the line: none.
 	std::unique_ptr<DocumentBase> at_line = loaded(fixture_text("pool_at_line.def"), "charattr.def", AssetKind::CharAttrDefs);
-	TEST_EXPECT(at_line && config_overrun_findings(*at_line).empty());
+	TEST_EXPECT(at_line && charattr_overrun(*at_line).empty());
 	// The earlier base game's form: its six SCOPE_MUTE at 0.0 and six RUN_MODIFIER at 0 the fix's lines.
 	const std::string earlier =
 			charattr_text({ "AutoScope", "Medic", "AutoScope", "AutoScope", "KnifeBonus", "KnifeBonus" }, true);
 	std::unique_ptr<DocumentBase> old_base = loaded(earlier, "charattr.def", AssetKind::CharAttrDefs);
-	const std::vector<Diagnostic> old_findings = old_base ? config_overrun_findings(*old_base) : std::vector<Diagnostic>();
+	const std::vector<Diagnostic> old_findings = old_base ? charattr_overrun(*old_base) : std::vector<Diagnostic>();
 	const Diagnostic *old_d = overrun_of(old_findings);
 	TEST_EXPECT(old_d && contains(old_d->message, "8 bytes of zeros") && old_d->planned.size() == 1 &&
-	            old_d->planned[0].edits.size() == 12);
+	            contains(old_d->planned[0].label, "the 12 lines"));
 	if (!old_d || old_d->planned.size() != 1) return 1;
 	TEST_EXPECT(old_base->apply(old_d->planned[0].edits, error));
-	TEST_EXPECT(config_overrun_findings(*old_base).empty() && pool_of(text_of(*old_base)->text()).values == 60 &&
-	            charattr::same_rows(table_of(earlier), table_of(text_of(*old_base)->text())));
+	TEST_EXPECT(charattr_overrun(*old_base).empty() && pool_of(saved_text(*old_base)).values == 60 &&
+	            charattr::same_rows(table_of(earlier), table_of(saved_text(*old_base))));
 	// The first try of classes 1 to 9, every value away from 0: no line the loader reads the same without, no fix.
 	const std::string first_try = charattr_text(
 			{ "AutoScope", "", "", "", "Medic", "AutoScope", "SpreadBonus", "KnifeBonus", "KnifeBonus" }, false);
 	std::unique_ptr<DocumentBase> tried = loaded(first_try, "charattr.def", AssetKind::CharAttrDefs);
-	const std::vector<Diagnostic> tried_findings = tried ? config_overrun_findings(*tried) : std::vector<Diagnostic>();
+	const std::vector<Diagnostic> tried_findings = tried ? charattr_overrun(*tried) : std::vector<Diagnostic>();
 	const Diagnostic *tried_d = overrun_of(tried_findings);
 	TEST_EXPECT(tried_d && contains(tried_d->message, "105 values") && contains(tried_d->message, "41 bytes of zeros") &&
 	            tried_d->planned.empty());
@@ -168,27 +183,34 @@ int test_rule_charattr() {
 	const std::string legacy = earlier + "//STEALTH = 25\r\n//HPBONUS = 2\r\n//ATTRIBUTES = Medic\r\n[NOTES]\r\nCOUNT = 3\r\n"
 	                                     "[CHARACTER9]\r\nSTEALTH = 1\r\n";
 	std::unique_ptr<DocumentBase> with_legacy = loaded(legacy, "charattr.def", AssetKind::CharAttrDefs);
+	TEST_EXPECT(with_legacy && saved_text(*with_legacy) == legacy);
 	std::vector<size_t> idle;
-	if (with_legacy) charattr_idle_lines(*text_of(*with_legacy), idle);
+	charattr_idle_lines(legacy, idle);
 	TEST_EXPECT(idle.size() == 16 && std::count(idle.begin(), idle.end(), at(legacy, "//ATTRIBUTES")) == 1 &&
 	            std::count(idle.begin(), idle.end(), at(legacy, "COUNT = 3")) == 1 &&
 	            std::count(idle.begin(), idle.end(), at(legacy, "STEALTH = 1")) == 0);
 	// The fix takes the fifteen of numbers alone (77 values over 64 bytes, then 62).
-	const std::vector<Diagnostic> legacy_findings = with_legacy ? config_overrun_findings(*with_legacy) : std::vector<Diagnostic>();
+	const std::vector<Diagnostic> legacy_findings = with_legacy ? charattr_overrun(*with_legacy) : std::vector<Diagnostic>();
 	const Diagnostic *legacy_d = overrun_of(legacy_findings);
-	TEST_EXPECT(legacy_d && legacy_d->planned.size() == 1 && legacy_d->planned[0].edits.size() == 15 &&
+	TEST_EXPECT(legacy_d && legacy_d->planned.size() == 1 && contains(legacy_d->planned[0].label, "the 15 lines") &&
 	            contains(legacy_d->planned[0].detail, "62 values"));
+	if (legacy_d && legacy_d->planned.size() == 1) {
+		TEST_EXPECT(with_legacy->apply(legacy_d->planned[0].edits, error));
+		const std::string commented = saved_text(*with_legacy);
+		TEST_EXPECT(contains(commented, "\r\n;//STEALTH = 25\r\n") && contains(commented, "\r\n;COUNT = 3\r\n") &&
+		            contains(commented, "\r\n[CHARACTER9]\r\nSTEALTH = 1\r\n") && charattr_overrun(*with_legacy).empty());
+	}
 	// The base game's earlier file with no CHARACTER2 (its classes 5 and on never read): only class 1's two zeros
 	// are idle, which leave it past the line, so no fix (charattr.unread_section says what is wrong).
 	const std::string gap = "[CHARACTER1]\r\n" + earlier.substr(at(earlier, "STEALTH"), at(earlier, "[CHARACTER2]") - at(earlier, "STEALTH")) +
 	                        "[CHARACTER5]\r\n" + earlier.substr(at(earlier, "[CHARACTER2]") + 14);
 	std::unique_ptr<DocumentBase> gapped = loaded(gap, "charattr.def", AssetKind::CharAttrDefs);
 	std::vector<size_t> gap_idle;
-	if (gapped) charattr_idle_lines(*text_of(*gapped), gap_idle);
-	const std::vector<Diagnostic> gap_findings = gapped ? config_overrun_findings(*gapped) : std::vector<Diagnostic>();
+	charattr_idle_lines(gap, gap_idle);
+	const std::vector<Diagnostic> gap_findings = gapped ? charattr_overrun(*gapped) : std::vector<Diagnostic>();
 	const Diagnostic *gap_d = overrun_of(gap_findings);
 	TEST_EXPECT(gap_idle.size() == 2 && gap_d && contains(gap_d->message, "72 values") && gap_d->planned.empty());
-	std::printf("charattr: the row at value 65, its fix applied (the same classes) and undone; the examples\n");
+	std::printf("charattr: the row at value 65, its fix applied in the layout (the same classes) and undone; the examples\n");
 	return 0;
 }
 
@@ -328,7 +350,7 @@ int test_retail() {
 			TEST_EXPECT(!pool.binary && pool.values == 278 && pool.string_bytes == 288 && pool.pool_bytes == 320);
 			const std::string text(bytes.begin(), bytes.end());
 			std::unique_ptr<DocumentBase> document = loaded(text, "charattr.def", AssetKind::CharAttrDefs);
-			TEST_EXPECT(document && config_overrun_findings(*document).empty());
+			TEST_EXPECT(document && charattr_overrun(*document).empty());
 		}
 		++ran;
 		return 0;
