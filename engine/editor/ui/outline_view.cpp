@@ -55,33 +55,6 @@ std::string record_tip(const OutlineLine &line, Document::RecordChange change) {
 	return tip;
 }
 
-// A record line's right-click menu (DI-18), over the line just drawn (inside its own id): the record selected
-// as it opens, as a click selects it; Go to definition (what the record names first, record_definition: F12 with
-// it selected); Find usages (who names what it defines: Shift+F12); then the type's own items (`own`,
-// OutlineSpec::row_menu: an item record's Place in mission).
-void record_menu(Workspace &workspace, const Document &document, const NodeAddress &record, OutlineRowMenuHook own) {
-	if (!ImGui::BeginPopupContextItem("record menu")) return;
-	const SessionView &view = workspace.view();
-	if (ImGui::IsWindowAppearing() && !view.documents.selection.holds(record)) select(workspace, document, record);
-	std::vector<ReferenceTarget> targets;
-	if (view.findings.graph && view.project.scan)
-		record_definition(*view.findings.graph, *view.project.scan, document, record, targets);
-	if (ImGui::MenuItem("Go to definition", "F12", false, !targets.empty()) && !targets.empty())
-		window_requests::go_to(workspace, targets.front());
-	ui_kit::tooltip(targets.empty() ? std::string("It names nothing the project defines or holds.")
-	                                : window_requests::go_to_words(targets.front()) + " (what it names first)");
-	const std::string locator = document.locator(record);
-	const bool finds = view.findings.graph && !locator.empty();
-	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)
-		ProjectFind::open_usages(workspace, document.path(), locator);
-	ui_kit::tooltip("Who names what it defines, each a Go to.");
-	if (own) {
-		ImGui::Separator();
-		own(workspace, document, record);
-	}
-	ImGui::EndPopup();
-}
-
 // A row's line in a list or a master column, cut to what shows of it (whole in its tooltip),
 // marked when it was added or changed since the last save, highlighted while the selection is in
 // it (the primary's row, or a row selected with others); `id` its item's id after its text; its
@@ -171,6 +144,31 @@ struct ViewNames {
 };
 
 } // namespace
+
+// The menu over a record's line (outline_view.h).
+void record_menu(Workspace &workspace, const Document &document, const NodeAddress &record, OutlineRowMenuHook own) {
+	if (!ImGui::BeginPopupContextItem("record menu")) return;
+	const SessionView &view = workspace.view();
+	if (ImGui::IsWindowAppearing() && !view.documents.selection.holds(record))
+		window_requests::select(workspace, document, record);
+	std::vector<ReferenceTarget> targets;
+	if (view.findings.graph && view.project.scan)
+		record_definition(*view.findings.graph, *view.project.scan, document, record, targets);
+	if (ImGui::MenuItem("Go to definition", "F12", false, !targets.empty()) && !targets.empty())
+		window_requests::go_to(workspace, targets.front());
+	ui_kit::tooltip(targets.empty() ? std::string("It names nothing the project defines or holds.")
+	                                : window_requests::go_to_words(targets.front()) + " (what it names first)");
+	const std::string locator = document.locator(record);
+	const bool finds = view.findings.graph && !locator.empty();
+	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)
+		ProjectFind::open_usages(workspace, document.path(), locator);
+	ui_kit::tooltip("Who names what it defines, each a Go to.");
+	if (own) {
+		ImGui::Separator();
+		own(workspace, document, record);
+	}
+	ImGui::EndPopup();
+}
 
 OutlineView::OutlineView(const OutlineSpec &spec)
     : spec_(spec), model_(spec.mode, spec.file_values, spec.row_listed, spec.groups, spec.reads_others) {}
