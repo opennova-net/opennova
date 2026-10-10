@@ -68,6 +68,7 @@ ModelViewportApplier::ModelViewportApplier(SubViewport &viewport) : viewport_(&v
 	arms_ = memnew(ObjectModel);
 	arms_->set_panm_clock(clock_);
 	arms_->set_avatar_part(ObjectModel::AVATAR_PART_ARMS);
+	arms_->set_viewmodel_rig(true);
 	root->add_child(arms_);
 }
 
@@ -225,6 +226,10 @@ void ModelViewportApplier::update(const opennova::editor::ViewportModel &model, 
 void ModelViewportApplier::apply_state_(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::PreviewClock &clock) {
 	if (applied_skeleton_ != model_of(viewport).skeleton_serial()) bind_rig_(viewport);
+	// A weapon's first-person map poses the gun as the game's view model draws it, its clip's bone array as
+	// the clip builds it; any other clip poses the model through a Person's bone builder
+	// (ObjectModel::set_viewmodel_rig).
+	object_->set_viewmodel_rig(model_of(viewport).first_person().active());
 	apply_registers_(viewport, clock);
 	apply_first_person_registers_(viewport);
 	play_clip_(viewport, clock);
