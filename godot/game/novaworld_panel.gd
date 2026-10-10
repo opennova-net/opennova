@@ -337,6 +337,20 @@ func _reconnect() -> void:
 		_client.queue_free()
 		_client = null
 	_suppress_client_messages = false
+	_reset_connection_state()
+	_set_status("Connecting to matchmaking...")
+	_set_screen(Screen.CONNECTING)
+	_create_client()
+
+
+# Everything the panel derived from its session: the sign-in, the rows, their
+# pings and the population line, the join and host requests in flight, and the
+# actions they armed. A reconnect, a disconnect and an error each leave the
+# panel with none of it, so a late answer to a sign-in, join, host or ping
+# request finds nothing to act on and a stale row cannot be joined. A later
+# `connected` still arms Login afresh, as it should after a soft gate error,
+# which reports error_occurred while the session lives on.
+func _reset_connection_state() -> void:
 	if _host_button != null:
 		_host_button.disabled = true
 	if _join_button != null:
@@ -346,15 +360,24 @@ func _reconnect() -> void:
 	_can_login = false
 	_logged_in = false
 	_nw_callsign = ""
-	_rows.clear()
-	_view.clear()
-	_pings.clear()
+	_rows = []
+	_view = []
+	_pings = {}
 	_browser_loading = false
+	if _population_label != null:
+		_population_label.text = ""
+	_pending_mission = ""
+	_pending_player = ""
+	_pending_expansion = ""
+	_joining_rid = 0
+	# The host Start button is held only while a host request is in flight.
+	_pending_host_config = null
+	if _host_start_button != null:
+		_host_start_button.disabled = false
 	if _password_edit != null:
 		_password_edit.clear()
-	_set_status("Connecting to matchmaking...")
-	_set_screen(Screen.CONNECTING)
-	_create_client()
+	_rebuild_type_filter()
+	_rebuild_view()
 
 
 func _set_status(text: String) -> void:
@@ -400,8 +423,7 @@ func _on_connected() -> void:
 func _on_disconnected(reason: String) -> void:
 	if _suppress_client_messages or _closing:
 		return
-	_host_button.disabled = true
-	_logged_in = false
+	_reset_connection_state()
 	_show_message("The connection to the matchmaking service was closed.\n\n%s" % reason,
 			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
@@ -409,8 +431,7 @@ func _on_disconnected(reason: String) -> void:
 func _on_error(message: String) -> void:
 	if _suppress_client_messages or _closing:
 		return
-	_host_button.disabled = true
-	_logged_in = false
+	_reset_connection_state()
 	_show_message("The matchmaking service could not be reached.\n\n%s" % message,
 			"Retry", Callable(self, "_reconnect"), Screen.CONNECTING)
 
@@ -554,7 +575,7 @@ func _on_refresh_pressed() -> void:
 # A ping pass landed: refresh the ping cells in place (a ping-sorted view
 # re-sorts instead).
 func _on_server_pings_updated() -> void:
-	if _client == null:
+	if _client == null or not _logged_in:
 		return
 	_pings = _client_pings()
 	if _sort_column == NovaWorldServerBrowser.COLUMN_PING:
@@ -663,6 +684,8 @@ func _on_login_pressed() -> void:
 		_show_message("Login is not available in this build.", "Back to Sign In",
 				Callable(self, "_return_to_login"), Screen.LOGIN)
 		return
+	if not _can_login:
+		return  # no session to sign in on (its Login is disabled; this guards Enter)
 	var user := _username_edit.text.strip_edges()
 	var pwd := _password_edit.text
 	if user.is_empty() or pwd.is_empty():
@@ -675,6 +698,8 @@ func _on_login_pressed() -> void:
 
 
 func _on_login_succeeded(nwhandle: String) -> void:
+	if not _can_login:
+		return  # the session was reset while the sign-in was in flight
 	_logged_in = true
 	_login_button.disabled = true
 	_password_edit.clear()
@@ -708,10 +733,11 @@ func join_callsign() -> String:
 
 
 func _on_login_failed(reason: String) -> void:
+	if not _can_login:
+		return  # the reset already reported the session
 	_logged_in = false
 	_password_edit.clear()
-	if _can_login:
-		_login_button.disabled = false
+	_login_button.disabled = false
 	_set_status("Sign-in failed.")
 	_show_message(reason, "Back to Sign In", Callable(self, "_return_to_login"), Screen.LOGIN)
 
@@ -775,6 +801,9 @@ static func error_message(reason: String) -> String:
 # authenticates again, then S2C 0x7B/0x0B owns the actual mission load exactly as
 # for LAN; the lobby hint is never a local-BMS requirement (D-NET-194).
 func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedByteArray) -> void:
+	# A join that resolves after the session was reset has no stash to enter with.
+	if not _logged_in or _suppress_client_messages:
+		return
 	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
 	var target := JoinTarget.new()
 	# The NovaWorld connect type the menu picked (the squad talk row's gate).
@@ -851,10 +880,12 @@ func _on_hosting_started() -> void:
 
 
 func _on_host_failed(reason: String) -> void:
+	var config := _pending_host_config
 	_pending_host_config = null
 	if _host_start_button != null:
 		_host_start_button.disabled = false
-	if _suppress_client_messages:
+	# A failure for a request the reset already dropped reports nothing.
+	if _suppress_client_messages or config == null:
 		return
 	host_failed(error_message(reason))
 
@@ -1012,6 +1043,15 @@ func visible_row_dimmed(index: int) -> bool:
 
 func join_enabled() -> bool:
 	return _join_button != null and not _join_button.disabled
+
+
+func login_enabled() -> bool:
+	return _login_button != null and not _login_button.disabled
+
+
+## The Join button's press path (the table's double-click takes the same one).
+func press_join() -> void:
+	_on_join_pressed()
 
 
 ## Drive the filter bar (the controls, so the real signal path rebuilds).
