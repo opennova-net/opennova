@@ -357,7 +357,9 @@ void synthetic_cbin() {
 	CHECK(bits(binary.rows[0].stealth) == bits(25.0f) && binary.rows[0].jungle_cammo == 5310);
 	CHECK(binary.rows[0].attributes == (charattr::kMedic | charattr::kKnifeBonus));
 	CHECK(bits(binary.rows[1].stealth) == bits(0.5f) && binary.rows[1].jungle_cammo == 5305);
-	CHECK(reading.sources[0].attribute_words.size() == 2 && reading.sources[0].attribute_words[1].written == "KnifeBonus");
+	// A CBIN file has no text: the Reading copies none of its table's strings.
+	CHECK(reading.sources[0].attribute_words.size() == 2 && reading.sources[0].attribute_words[1].read &&
+	      reading.sources[0].attribute_words[1].written.empty());
 
 	// No lines to lay out: the notes come back empty, and the writer's form reads back to the same rows.
 	textlayout::Notes notes;
@@ -374,6 +376,45 @@ void synthetic_cbin() {
 	charattr::Table cut;
 	cut.rows[0].active = true;
 	CHECK(!charattr::read_table(bytes.data(), bytes.size() - 1, cut) && !cut.rows[0].active);
+
+	// The game's reader takes an ATTRIBUTES of three words [orig: ConfigFile_ParseBinary @ 0x75eb21] and copies a
+	// float into a float property through the x87, which quiets a signaling NaN [orig: Effect_GetParamValue_0
+	// @ 0x75fa00, fld @ 0x75fb7f, fstp @ 0x75fb83] (D-CBIN-3).
+	cbin::BinaryConfig wide = config;
+	wide.strings.push_back("WaterGirl");
+	wide.labels[0].entries[2].values.push_back(text(8));
+	cbin::BinaryConfig::Value snan;
+	snan.raw = 0x7FA00000u;
+	snan.flags = cbin::BinaryConfig::kFloat;
+	wide.labels[0].entries[0].values[0] = snan;
+	std::vector<uint8_t> wide_bytes;
+	CHECK(cbin::encode_binary_config(wide, wide_bytes, error));
+	charattr::Table three;
+	CHECK(charattr::read_table(wide_bytes.data(), wide_bytes.size(), three));
+	CHECK(three.rows[0].attributes == (charattr::kMedic | charattr::kKnifeBonus | charattr::kWaterGirl));
+	CHECK(bits(three.rows[0].stealth) == 0x7FE00000u);
+
+	// A null-string STEALTH: the loader reads every scalar key as a number, which never touches the word
+	// [orig: ConfigFile_ReadKeyValue @ 0x75fd00 hands Effect_GetParamValue_0 no text buffer; @ 0x75fb39..0x75fb46],
+	// so every class loads, STEALTH 0.
+	cbin::BinaryConfig null_stealth = config;
+	null_stealth.labels[0].entries[0].values[0] = text(0);
+	std::vector<uint8_t> null_bytes;
+	CHECK(cbin::encode_binary_config(null_stealth, null_bytes, error));
+	charattr::Table nulled;
+	CHECK(charattr::read_table(null_bytes.data(), null_bytes.size(), nulled) && nulled.rows[0].active &&
+	      nulled.rows[1].active && bits(nulled.rows[0].stealth) == 0 && nulled.rows[0].jungle_cammo == 5310);
+	// A null ATTRIBUTES word, read as text, faults: the game ends, the load fails here.
+	cbin::BinaryConfig null_word = config;
+	null_word.labels[0].entries[2].values[1] = text(0);
+	CHECK(cbin::encode_binary_config(null_word, null_bytes, error));
+	CHECK(!charattr::read_table(null_bytes.data(), null_bytes.size(), nulled) && !nulled.rows[0].active);
+	// A null label after the classes: the lookup for the class after the last scans to it and faults
+	// [orig: @ 0x4121b5 ConfigFile_FindSection -> ConfigFile_FindLabelLinear @ 0x75ee50].
+	cbin::BinaryConfig null_label = config;
+	null_label.labels.push_back(cbin::BinaryConfig::Label{});
+	CHECK(cbin::encode_binary_config(null_label, null_bytes, error));
+	CHECK(!charattr::read_table(null_bytes.data(), null_bytes.size(), nulled) && !nulled.rows[0].active);
 	std::printf("cbin: a CBIN charattr.def reads as its text twin, with no notes\n");
 }
 

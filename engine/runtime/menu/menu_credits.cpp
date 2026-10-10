@@ -72,6 +72,9 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 	} else {
 		sections = configfile::parse_config_text(data, size);
 	}
+	// A read the game faults on (configfile::config_faulted) ends the game there; here the load fails, the
+	// credits left as they were.
+	const MarqueeCredits before = io;
 	// The file loaded: the values and the running offset start over
 	// [orig: @ 0x65c605..0x65c63d].
 	io.scroll_rate = kMarqueeScrollRate;
@@ -92,7 +95,11 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 		io.vertical_space = value;
 	}
 	ConfigSection *text = find_section(sections, "TEXT");
-	if (text == nullptr) return true;
+	if (text == nullptr) {
+		if (!configfile::config_faulted(sections)) return true;
+		io = before;
+		return false;
+	}
 	uint32_t color = 0xFFFFFFFFu; // the 8-dword block, 0xFF bytes [orig: memset(v18, 255)]
 	int justify = 1;
 	std::string font; // the buffer's +128 keeps the last font a line set
@@ -156,6 +163,10 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 			node.justify = justify;
 		}
 		more = read_value(*text, "TEXT", 1, &line, nullptr, nullptr);
+	}
+	if (configfile::config_faulted(sections)) {
+		io = before;
+		return false;
 	}
 	return true;
 }

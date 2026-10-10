@@ -176,10 +176,11 @@ struct Reading {
 // The table from charattr.def's bytes as the loader fills it [orig: CharAttr_LoadFromDef @ 0x412140]: `out`
 // cleared first, then each class read, from the text form or the CBIN form alike (ConfigFile_LoadFromFile
 // reads either into the sections the accessors walk; no shipped charattr.def is a CBIN). False when the
-// load fails and the table stays cleared: no bytes, or a CBIN file the binary reader (formats/cbin) refuses,
-// among them one with an entry of more than two values, an ATTRIBUTES of three words or more, which the game's
-// reader takes (D-CBIN-3). `reading`, when given, says where each value came from and which sections are
-// never read; of a CBIN file, which has no text, every offset is 0 and a number's `written` empty.
+// load fails and the table stays cleared: no bytes, a CBIN file that does not frame (formats/cbin), or a read
+// the game faults on (a lookup reaching a null label, a text read through a null word:
+// configfile::config_faulted). `reading`, when given, says where each value came from and which sections are
+// never read; of a CBIN file, which has no text, every offset is 0, every `written` and every unread
+// section's `label` empty (its strings are the file's table's, which many may name).
 bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading = nullptr);
 // The same read with the file's layout modeled (`notes` filled: each class's section a record, the lines the
 // loader read its values from its entries, every other line, an unread section's among them, read for

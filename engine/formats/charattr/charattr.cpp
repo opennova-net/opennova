@@ -56,11 +56,14 @@ int32_t *integer_field(ClassRow &row, Property property) {
 // read_current_config_value leave the cursor on it).
 ValueSource source_of(const configfile::ConfigSection &section, int index) {
 	ValueSource source;
-	if (section.current >= section.entries.size()) return source;
-	const configfile::ConfigEntry &entry = section.entries[section.current];
+	if (section.current >= configfile::config_entry_count(section)) return source;
+	const configfile::ConfigEntry &entry = configfile::config_entry(section, section.current);
 	if (index < 1 || static_cast<size_t>(index) > entry.values.size()) return source;
 	const configfile::ConfigValue &value = entry.values[static_cast<size_t>(index - 1)];
 	source.read = true;
+	// A CBIN file has no text: its values' strings are the file's table's, which many values may name, so
+	// none is copied here.
+	if (section.block) return source;
 	source.offset = value.offset;
 	source.length = value.text.size();
 	source.written = value.text;
@@ -144,8 +147,9 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading) 
 	// ConfigFile_LoadFromFile fails on no file [orig: CharAttr_LoadFromDef @ 0x412177 -> ConfigFile_LoadFromFile
 	// @ 0x760a10], and takes the file through the reader of its form: "CBIN" (0x4E494243) ConfigFile_ParseBinary,
 	// any other ConfigFile_ParseText [orig: @ 0x760aa3]. Both build the sections the accessors read. A CBIN file
-	// our binary reader refuses fails the load: among them an entry of more than two values (D-CBIN-3), so an
-	// ATTRIBUTES of three words or more, which the game's reader takes.
+	// that does not frame fails the load (formats/cbin/binary_config.h), and so does a read the game faults on
+	// (a lookup reaching a null label, a text read through a null word: configfile::config_faulted), where the
+	// game ends; a value nothing reads, or reads as a number, is never touched.
 	if (data == nullptr || size == 0) return false;
 	std::vector<configfile::ConfigSection> sections;
 	if (is_binary_form(data, size)) {
@@ -209,6 +213,11 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading) 
 		row.class_id = static_cast<uint8_t>(index + 1); // [orig: @ 0x412451]
 		++classes;
 	}
+	if (configfile::config_faulted(sections)) {
+		out = Table{};
+		if (reading != nullptr) *reading = Reading{};
+		return false;
+	}
 	if (reading == nullptr) return true;
 	reading->classes = classes;
 	// The sections no lookup reads: each class's after the first the file lacks, a later section of a label,
@@ -218,7 +227,7 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading) 
 		char label[32];
 		std::snprintf(label, sizeof label, "character%zu", index + 1);
 		for (size_t s = 0; s < sections.size(); ++s)
-			if (sections[s].label == label) {
+			if (configfile::config_section_label(sections[s]) == label) {
 				found[s] = true;
 				break;
 			}
@@ -226,9 +235,10 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading) 
 	for (size_t s = 0; s < sections.size(); ++s) {
 		if (found[s]) continue;
 		UnreadSection unread;
-		unread.label = strutil::to_upper(sections[s].label);
+		// A CBIN label is the file's table's string, which many sections may name: none is copied here.
+		if (!sections[s].block) unread.label = strutil::to_upper(sections[s].label);
 		unread.offset = sections[s].offset;
-		unread.class_id = label_class(sections[s].label);
+		unread.class_id = label_class(configfile::config_section_label(sections[s]));
 		if (unread.class_id == 0) {
 			unread.why = UnreadSection::Why::NotAClass;
 		} else if (static_cast<size_t>(unread.class_id) <= classes) {
