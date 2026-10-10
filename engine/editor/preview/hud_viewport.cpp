@@ -5,6 +5,7 @@
 #include <iterator>
 #include <utility>
 
+#include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/model/text_document.h>
@@ -132,6 +133,11 @@ JsonValue options_to_json(const HudViewportOptions &options) {
 	out.set("detail", json_number(options.detail));
 	out.set("crosshair", json_number(options.crosshair));
 	out.set("picked", json_string(options.picked));
+	out.set("board", JsonValue::make_bool(options.board));
+	out.set("game_type", json_string(hud_board_game_type_token(options.game_type)));
+	out.set("players", json_number(options.players));
+	out.set("sights", JsonValue::make_bool(options.sights));
+	out.set("range", json_number(options.range));
 	return out;
 }
 
@@ -146,7 +152,7 @@ bool whole(const JsonValue &value, int least, int most, int &out) {
 bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &error) {
 	if (!json.is_object()) {
 		error = "options is an object {width, height, stance, weapon, clip, reserve, health, view, damage, detail, "
-		        "crosshair, picked}.";
+		        "crosshair, picked, board, game_type, players, sights, range}.";
 		return false;
 	}
 	HudViewportOptions options = held;
@@ -212,10 +218,32 @@ bool read_options(const JsonValue &json, HudViewportOptions &held, std::string &
 				return false;
 			}
 			options.picked = value.string;
+		} else if (key == "board" || key == "sights") {
+			if (!value.is_bool()) {
+				error = "options." + key + " is true or false.";
+				return false;
+			}
+			(key == "board" ? options.board : options.sights) = value.boolean;
+		} else if (key == "game_type") {
+			if (!value.is_string() || !hud_board_game_type_from_token(value.string, options.game_type)) {
+				error = "options.game_type is a session game type: DM, TDM, KOTH, TKOTH, CTF, SD, AD, FB, FM, AAS, CAC or "
+				        "COOP.";
+				return false;
+			}
+		} else if (key == "players") {
+			if (!whole(value, 0, kHudBoardPlayersMost, options.players)) {
+				error = "options.players is the stand-in players the board lists, 0 to 128.";
+				return false;
+			}
+		} else if (key == "range") {
+			if (!whole(value, kHudSightsRangeLeast, kHudSightsRangeMost, options.range)) {
+				error = "options.range is the metres the sights' aim rests at, 2 to 1000.";
+				return false;
+			}
 		} else {
 			error = "Unknown options member \"" + key +
 			        "\" (it takes width, height, stance, weapon, clip, reserve, health, view, damage, detail, "
-			        "crosshair, picked).";
+			        "crosshair, picked, board, game_type, players, sights, range).";
 			return false;
 		}
 	}
@@ -267,7 +295,49 @@ bool hud_preview_view_from_token(const std::string &token, HudPreviewView &out) 
 bool HudViewportOptions::operator==(const HudViewportOptions &other) const {
 	return width == other.width && height == other.height && stance == other.stance && weapon == other.weapon &&
 	       clip == other.clip && reserve == other.reserve && health == other.health && view == other.view &&
-	       damage == other.damage && detail == other.detail && crosshair == other.crosshair && picked == other.picked;
+	       damage == other.damage && detail == other.detail && crosshair == other.crosshair && picked == other.picked &&
+	       board == other.board && game_type == other.game_type && players == other.players && sights == other.sights &&
+	       range == other.range;
+}
+
+const std::vector<uint32_t> &hud_board_game_types() {
+	using namespace opennova::game_type;
+	static const std::vector<uint32_t> types = { kDeathmatch, kTeamDeathmatch, kKingOfTheHill, kTeamKingOfTheHill,
+		kCaptureTheFlag, kSearchAndDestroy, kAttackDefend, kFlagBall, kFlagMe, kAdvanceAndSecure, kConquerAndControl,
+		kObjectiveCoop };
+	return types;
+}
+
+const char *hud_board_game_type_token(uint32_t game_type) {
+	return opennova::game_type::host_abbreviation_key(game_type);
+}
+
+bool hud_board_game_type_from_token(const std::string &token, uint32_t &out) {
+	for (const uint32_t type : hud_board_game_types())
+		if (strutil::iequals(token, hud_board_game_type_token(type))) {
+			out = type;
+			return true;
+		}
+	return false;
+}
+
+opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &options) {
+	opennova::hud::HudScoreboardState board;
+	board.game_type = options.game_type;
+	board.team_count = opennova::game_type::active_team_count(options.game_type, 2);
+	board.local_team = 1;
+	for (int i = 0; i < options.players; ++i) {
+		opennova::hud::ScoreboardEntry row;
+		row.slot_id = uint8_t(i + 1);
+		row.score1 = int16_t(options.players - i);
+		row.team = board.team_count > 0 ? uint8_t(i % board.team_count + 1) : uint8_t(0);
+		row.has_entity = true;
+		row.name = "Player " + std::to_string(i + 1);
+		row.quality = uint8_t(i % 3 + 1);
+		row.player_class = uint8_t(5 + i % 5);
+		board.rows.push_back(std::move(row));
+	}
+	return board;
 }
 
 io::JsonValue hud_options_json(const HudViewportOptions &options) {
@@ -295,6 +365,66 @@ const HudPreviewWeapon *HudViewport::weapon_shown() const {
 	for (const HudPreviewWeapon &weapon : weapons_)
 		if (strutil::iequals(weapon.name, options_.weapon)) return &weapon;
 	return nullptr;
+}
+
+const world::LocalPlayerViewFrame *HudViewport::scope_frame() const {
+	return scope_valid_ && range_ ? &range_->view_frame() : nullptr;
+}
+
+const world::LocalPlayerWeaponView *HudViewport::scope_weapon() const {
+	return scope_valid_ && range_ ? &range_->weapon_view() : nullptr;
+}
+
+void HudViewport::follow_scope_(const SessionView &view) {
+	scope_valid_ = false;
+	scope_why_.clear();
+	if (!options_.sights) return;
+	const HudPreviewWeapon *weapon = weapon_shown();
+	if (!weapon) {
+		scope_why_ = "No weapon is held: the sights are a weapon's.";
+		return;
+	}
+	if (options_.view == HudPreviewView::Binoculars) {
+		// The game's frame takes the binoculars first: no card, no readouts while they are up.
+		scope_why_ = "The binoculars are up: the game's frame draws them in the sights' place.";
+		return;
+	}
+	if (options_.view == HudPreviewView::NightVision) {
+		scope_why_ = "Under night vision the sights draw into the goggles' image, which the preview has none of.";
+		return;
+	}
+	if (!range_) range_ = std::make_unique<WeaponRange>();
+	WeaponRangeSetup setup;
+	setup.files = view.findings.assets;
+	setup.catalog = "weapon.def";
+	setup.weapon = weapon->name;
+	setup.target.range = float(options_.range);
+	range_->configure(setup);
+	if (!range_->ready()) {
+		scope_why_ = range_->why();
+		return;
+	}
+	// The scope toggled at the run's start, then the run until it settles and, a cycle of the body's aim ray
+	// later, the ray has found the wall (the aim's range is acquired every 16 ticks [orig:
+	// Entity_UpdateInfantryPlayerBody @0x4B4E9B..0x4B5215]).
+	range_->set_gestures({ WeaponGestureAt{ 0, WeaponGesture::Scope } });
+	constexpr int32_t kAimTicks = 16;
+	constexpr int32_t kMostTicks = 62 * 5;
+	if (range_->tick() == 0) {
+		int32_t settled = -1;
+		for (int32_t tick = 1; tick <= kMostTicks; ++tick) {
+			range_->run_to(tick);
+			if (settled < 0 && range_->scoped()) settled = tick;
+			if (settled >= 0 && tick >= settled + kAimTicks) break;
+		}
+	}
+	if (!range_->scoped()) {
+		scope_why_ = "The scope does not come up for " + weapon->name + ".";
+		for (const WeaponRangeEvent &event : range_->events())
+			if (event.kind == WeaponRangeEvent::Kind::Refused) scope_why_ = event.words;
+		return;
+	}
+	scope_valid_ = true;
 }
 
 const HudPreviewElement *HudViewport::element_at(float x, float y) const {
@@ -490,6 +620,7 @@ ViewportAction HudViewport::follow_(const ViewportInput &input, PreviewClock &) 
 	const uint64_t generation = view.findings.assets->generation();
 	assets_source_ = view.findings.assets;
 	read_weapons_(files);
+	follow_scope_(view);
 	// The text read again only when it changed.
 	if (input.document->identity() != read_identity_ || input.document->load_generation() != read_load_ ||
 	    input.document->revision() != read_revision_) {
@@ -761,6 +892,29 @@ io::JsonValue HudViewport::body_json(const ViewportInput &) const {
 	}
 	out.set("weapons", std::move(weapons));
 	out.set("elements", json_number(double(elements_.size())));
+	// The Tab board, and the sights' frame: whether the card and the readouts draw, the selectors, what the
+	// readouts read (the aim's range in metres, the zero word, the magnification), and why not.
+	JsonValue board = JsonValue::make_object();
+	board.set("shown", JsonValue::make_bool(options_.board));
+	board.set("game_type", json_string(hud_board_game_type_token(options_.game_type)));
+	board.set("rows", json_number(options_.board ? options_.players : 0));
+	board.set("teams", json_number(opennova::game_type::active_team_count(options_.game_type, 2)));
+	out.set("board", std::move(board));
+	JsonValue sights = JsonValue::make_object();
+	const world::LocalPlayerViewFrame *frame = scope_frame();
+	sights.set("up", JsonValue::make_bool(frame != nullptr));
+	if (frame) {
+		sights.set("card", JsonValue::make_bool(frame->scope_card_active));
+		sights.set("scoped", JsonValue::make_bool(frame->frame_fx.scoped_selector));
+		sights.set("sighted", JsonValue::make_bool(frame->frame_fx.sighted_selector));
+		sights.set("readouts", JsonValue::make_bool(frame->scope_details_active));
+		sights.set("range", json_number(double(frame->aim_range_q16) / 65536.0));
+		sights.set("zero", json_number(frame->scope_zero_word));
+		sights.set("magnification", json_number(frame->scope_magnification));
+		sights.set("fov", json_number(frame->fov_h_deg));
+	}
+	if (!scope_why_.empty()) sights.set("why", json_string(scope_why_));
+	out.set("sights", std::move(sights));
 	return out;
 }
 

@@ -308,3 +308,94 @@ func test_the_preview_background_draws_behind_the_hud() -> void:
 	if not drawn.is_empty():
 		assert_almost_eq((drawn["material"] as ShaderMaterial).get_shader_parameter("backdrop_own") as Vector3,
 				Vector3(0.27, 0.29, 0.31), Vector3.ONE * 0.001, "Dark draws the HUD preview's own grey")
+
+
+## S23 C: the sights and the Tab board. A scoped rifle with a rangefinder and an elevation readout, its sights up
+## with the aim on a wall 300 metres away: the game's SIGHTS card up with its one row, the scoped view's ring over
+## it, the scope readouts drawn at hudpos.def's HUDSCOPE places from gametext's templates; the binoculars put them
+## down. The Tab board held up for a team game over stand-in players draws as the game's board.
+func test_the_sights_and_the_board_draw() -> void:
+	if _app == null:
+		return
+	var dir := _project()
+	var layout := FileAccess.get_file_as_string(dir.path_join(LAYOUT))
+	_write(dir.path_join(LAYOUT), (layout + TestFs.crlf("""fonthud1_hi Gunpl22b.fnt
+HUDSCOPERANGEXY 600,400
+HUDSCOPEZEROXY 600,420
+HUDSCOPEMAGXY 600,440
+""")).to_utf8_buffer())
+	_write(dir.path_join("fonts/Gunpl22b.fnt"), FileAccess.get_file_as_bytes("res://../fixtures/fnt/synth_1page.fnt"))
+	_write(dir.path_join("textures/card.tga"), _tga(8))
+	var weapons := FileAccess.get_file_as_string(dir.path_join("defs/weapon.def"))
+	_write(dir.path_join("defs/weapon.def"), (weapons + TestFs.crlf("""weapon "W_SCOPE"
+	clipsize 5
+	startrounds 10
+	flags scoped
+	flags showrange
+	flags showelevation
+	scope_max_mag 4 0
+	scope_max_zero 10 100 200 1
+	pos 25 -5 -145 0 0 0
+	tpos -1 12 -138 0 0 0
+	sights card.tga 112 0 889 768 blend
+end
+""")).to_utf8_buffer())
+	var gametext := RtxtStringFile.new()
+	var overlays := gametext.add_section("Overlays")
+	gametext.add_entry("STROVER_DIST", "Distance: %ldm", overlays, Vector2i.ZERO)
+	gametext.add_entry("STROVER_DIST1KM", "Distance: >1km", overlays, Vector2i.ZERO)
+	gametext.add_entry("STROVER_KILLLIST", "Player List", overlays, Vector2i.ZERO)
+	var hud := gametext.add_section("hud")
+	gametext.add_entry("hud_scope_zero", "Zero: %dm", hud, Vector2i.ZERO)
+	gametext.add_entry("hud_scope_mag", "%dx", hud, Vector2i.ZERO)
+	_write(dir.path_join("gametext.bin"), gametext.to_byte_array())
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.open_document(LAYOUT))
+	var state := await _await_ready()
+	var overlay := _overlay()
+	assert_not_null(overlay)
+	if overlay == null:
+		return
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"weapon": "W_SCOPE", "sights": true, "range": 300}}}))
+	await _pump_frames(4)
+	state = _viewport()
+	var sights: Dictionary = state.get("body", {}).get("sights", {})
+	assert_true(bool(sights.get("up", false)), str(sights))
+	assert_true(bool(sights.get("card", false)) and bool(sights.get("readouts", false)), str(sights))
+	assert_almost_eq(float(sights.get("range", 0.0)), 300.0, 2.0, "the rangefinder reads the wall")
+	var cards := overlay.find_children("SightsCard", "", true, false)
+	assert_eq(cards.size(), 1, "the game's SIGHTS card rides the overlay")
+	if cards.size() == 1:
+		assert_eq(int(cards[0].call("row_count")), 1, "its one row, its picture found in the project")
+		assert_true(bool(cards[0].call("is_card_up")), "up once the scope settles")
+	var masks := overlay.find_children("ScopeCircleMask", "", true, false)
+	assert_eq(masks.size(), 1)
+	if masks.size() == 1:
+		assert_true((masks[0] as CanvasItem).visible, "the scoped view's ring over the card")
+	var details := _item(state, "scope_details")
+	assert_false(details.is_empty(), "the scope readouts drew")
+	if not details.is_empty():
+		assert_almost_eq(int(details["rect"][0]), 600, 2, "at HUDSCOPERANGEXY (the first glyph's own offset)")
+		assert_almost_eq(int(details["rect"][1]), 400, 4, "at HUDSCOPERANGEXY")
+	# The binoculars put them down.
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"view": "binoculars"}}}))
+	await _pump_frames(3)
+	state = _viewport()
+	assert_false(bool(state.get("body", {}).get("sights", {}).get("up", true)))
+	if cards.size() == 1:
+		assert_false(bool(cards[0].call("is_card_up")), "no card under the binoculars")
+	assert_true(_item(state, "scope_details").is_empty(), "no readouts under the binoculars")
+	# The Tab board over six stand-in players of a team game.
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"view": "normal", "sights": false, "board": true,
+					"game_type": "TDM", "players": 6}}}))
+	await _pump_frames(3)
+	state = _viewport()
+	assert_false(_item(state, "scoreboard").is_empty(), "the Tab board drew")
+	assert_eq(int(state.get("body", {}).get("board", {}).get("rows", 0)), 6)
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"board": false}}}))
+	await _pump_frames(3)
+	assert_true(_item(_viewport(), "scoreboard").is_empty(), "put down, it draws nothing")

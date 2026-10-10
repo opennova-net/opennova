@@ -288,6 +288,7 @@ void WeaponRange::reset_() {
 	switch_timer_ = 0;
 	draw_again_ = false;
 	card_ = false;
+	frame_ = world::LocalPlayerViewFrame();
 	shots_ = 0;
 	events_.clear();
 	view_ = world::LocalPlayerWeaponView();
@@ -387,7 +388,8 @@ void WeaponRange::run_to(int32_t tick) {
 	while (tick_ < tick) step_();
 	if (tick_ != from) ++serial_;
 	// The frame the run stands at, observed (nothing advances): whether the card replaces the view model.
-	card_ = local_ && local_->view_frame().scope_card_active;
+	frame_ = local_ ? local_->view_frame() : world::LocalPlayerViewFrame();
+	card_ = frame_.scope_card_active;
 }
 
 void WeaponRange::fire_shots_(int32_t tick) {

@@ -24,7 +24,10 @@
 #include "hud/hud_pos.h"
 #include "hud/player_hud_weapon_def.h"
 #include "object/weapon_def.h"
+#include "simulation/player_local_view.h"
 #include "util/string_convert.h"
+
+#include <runtime/renderer/texture_compression.h>
 
 namespace godot {
 
@@ -33,6 +36,10 @@ namespace {
 // The game's own first-person view effects, mounted under the overlay as its HUD presenter mounts them
 // (godot/game/world/game_hud_presenter.gd ensure_game_hud).
 constexpr const char *kViewEffectsPath = "res://game/world/player_view_effects.gd";
+// The game's SIGHTS card and scoped-view circle mask, mounted after the view effects as the presenter mounts them
+// (game_hud_presenter.gd ensure_game_hud).
+constexpr const char *kSightsCardPath = "res://game/world/hud_sights_card.gd";
+constexpr const char *kScopeMaskPath = "res://game/world/hud_scope_circle_mask.gd";
 // What the preview's backdrop is where the game has its 3D view on the Dark preview background (each
 // picture's own): a plain mid grey, which the HUD's light and dark art both read over; the editor's preview
 // background otherwise (authoring/preview_backdrop).
@@ -46,6 +53,14 @@ constexpr float kFovDegrees = opennova::world::kPlayerCameraFovHDeg;
 template <typename T>
 T *node(uint64_t id) {
 	return id ? Object::cast_to<T>(ObjectDB::get_instance(id)) : nullptr;
+}
+
+// A Control of the game's script at `path` (null where the build lacks it).
+Control *script_control(const char *path) {
+	ResourceLoader *loader = ResourceLoader::get_singleton();
+	if (!loader->exists(path)) return nullptr;
+	const Ref<Script> script = loader->load(path);
+	return script.is_valid() ? Object::cast_to<Control>(script->call("new")) : nullptr;
 }
 
 } // namespace
@@ -65,18 +80,31 @@ HudViewportApplier::HudViewportApplier(SubViewport &viewport) {
 	viewport.add_child(overlay);
 	overlay_id_ = overlay->get_instance_id();
 	// The view effects behind the overlay's own draw list, a stable layer under it.
-	ResourceLoader *loader = ResourceLoader::get_singleton();
-	if (loader->exists(kViewEffectsPath)) {
-		const Ref<Script> script = loader->load(kViewEffectsPath);
-		Control *effects = script.is_valid() ? Object::cast_to<Control>(script->call("new")) : nullptr;
-		if (effects) {
-			effects->set_name("PlayerViewEffects");
-			effects->set_draw_behind_parent(true);
-			effects->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-			overlay->add_child(effects, false, Node::INTERNAL_MODE_BACK);
-			effects->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
-			effects_id_ = effects->get_instance_id();
-		}
+	if (Control *effects = script_control(kViewEffectsPath)) {
+		effects->set_name("PlayerViewEffects");
+		effects->set_draw_behind_parent(true);
+		effects->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+		overlay->add_child(effects, false, Node::INTERNAL_MODE_BACK);
+		effects->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+		effects_id_ = effects->get_instance_id();
+	}
+	// The SIGHTS card, then the circle mask over it, behind the overlay's draw list.
+	if (Control *card = script_control(kSightsCardPath)) {
+		card->set_name("SightsCard");
+		card->set_draw_behind_parent(true);
+		card->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+		overlay->add_child(card);
+		card->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+		card_id_ = card->get_instance_id();
+	}
+	if (Control *mask = script_control(kScopeMaskPath)) {
+		mask->set_name("ScopeCircleMask");
+		mask->set_draw_behind_parent(true);
+		mask->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+		mask->set_visible(false);
+		overlay->add_child(mask);
+		mask->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+		mask_id_ = mask->get_instance_id();
 	}
 	root_.instantiate();
 }
@@ -87,6 +115,14 @@ HudOverlay *HudViewportApplier::overlay() const {
 
 Control *HudViewportApplier::view_effects() const {
 	return node<Control>(effects_id_);
+}
+
+Control *HudViewportApplier::sights_card() const {
+	return node<Control>(card_id_);
+}
+
+Control *HudViewportApplier::scope_mask() const {
+	return node<Control>(mask_id_);
 }
 
 void HudViewportApplier::rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view,
@@ -108,6 +144,10 @@ void HudViewportApplier::rebuild(const opennova::editor::ViewportModel &model, c
 	gametext_.instantiate();
 	const PackedByteArray text = root_->has_file("gametext.bin") ? root_->read_file("gametext.bin") : PackedByteArray();
 	if (text.is_empty() || gametext_->load_from_byte_array(text) != OK) gametext_.unref();
+	// The keys' help, where the Tab board's paging hint is read.
+	keyhelp_.instantiate();
+	const PackedByteArray keys = root_->has_file("keyhelp.bin") ? root_->read_file("keyhelp.bin") : PackedByteArray();
+	if (keys.is_empty() || keyhelp_->load_from_byte_array(keys) != OK) keyhelp_.unref();
 	if (Control *effects = view_effects()) effects->call("set_resource_root", root_);
 	applied_ = false;
 }
@@ -123,6 +163,10 @@ void HudViewportApplier::clear() {
 	armed_ = false;
 	weapons_.unref();
 	gametext_.unref();
+	keyhelp_.unref();
+	slice_.unref();
+	if (Control *card = sights_card()) card->call("set_weapon_sights", TypedArray<WeaponSightRow>(), Ref<ResourceRoot>());
+	board_shown_ = false;
 	stamped_.reset();
 }
 
@@ -144,6 +188,11 @@ void HudViewportApplier::apply_options_(const opennova::editor::HudViewport &mod
 		const Ref<PlayerHudWeaponDef> slice =
 				index >= 0 ? PlayerHudWeaponDef::from_weapon_def(weapons_->get_weapon(index)) : Ref<PlayerHudWeaponDef>();
 		hud->install_weapon(slice, gametext_);
+		// The card's rows for the weapon, their pictures through the stage loader at the game's fresh word.
+		slice_ = slice;
+		if (Control *card = sights_card())
+			card->call("set_weapon_sights", slice.is_valid() ? slice->get_sights() : TypedArray<WeaponSightRow>(), root_,
+					opennova::renderer::kTexCompressionLevelFreshProfile);
 		if (slice.is_valid()) {
 			armed_ = true;
 			weapon_capacity_ = slice->get_clipsize();
@@ -156,7 +205,52 @@ void HudViewportApplier::apply_options_(const opennova::editor::HudViewport &mod
 	applied_ = true;
 }
 
-void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &,
+void HudViewportApplier::apply_sights_(const opennova::editor::HudViewport &model) {
+	HudOverlay *hud = overlay();
+	if (!hud) return;
+	// The frame as the presenter reads it: the scope readouts, the player's mount and weapon category, the card's
+	// scale and slide, the card up where the frame says (not into a goggle scene), the mask on the scene frame's
+	// overlay fork (the Scoped arm), its cross and grid where the weapon authors no SIGHTS row.
+	const opennova::world::LocalPlayerViewFrame *frame = model.scope_frame();
+	Ref<PlayerLocalView> view;
+	if (frame) {
+		view.instantiate();
+		view->assign(*frame);
+	}
+	hud->set_scope_state(view, gametext_);
+	hud->set_player_context(view);
+	const bool sights = slice_.is_valid() && !slice_->get_sights().is_empty();
+	if (Control *card = sights_card()) {
+		card->call("set_sight_state", hud->get_sight_scale_index(), view.is_valid() ? view->get_sight_slide_multiplier() : 0);
+		card->call("set_card_up", frame && frame->scope_card_active && !frame->nvg_sights_in_scene);
+	}
+	if (Control *mask = scope_mask()) {
+		const bool selectors = frame && frame->scope_card_active && !frame->vehicle_attack_context && slice_.is_valid();
+		const int branch = HudPos::scoped_view_overlay(false, selectors && slice_->get_sighted_selector(),
+				selectors && slice_->get_scoped_selector());
+		const bool lens = frame && frame->nvg_lens_active;
+		mask->call("set_mask_state", branch == 3 || lens, !sights, lens);
+	}
+}
+
+void HudViewportApplier::apply_board_(const opennova::editor::HudViewport &model, int64_t ticks) {
+	HudOverlay *hud = overlay();
+	if (!hud) return;
+	const opennova::editor::HudViewportOptions &options = model.options();
+	if (!options.board) {
+		if (board_shown_) hud->set_scoreboard_board(false, 0, gametext_, opennova::hud::HudScoreboardState());
+		board_shown_ = false;
+		return;
+	}
+	// The stand-in rows, the strings from the project's tables as the game's shell resolves them.
+	opennova::hud::HudScoreboardState board = opennova::editor::hud_preview_board(options);
+	HudOverlay::scoreboard_strings(gametext_, keyhelp_, board.game_type, std::string(), std::string(),
+			int(board.rows.size()), 0, board);
+	hud->set_scoreboard_board(true, int(ticks), gametext_, board);
+	board_shown_ = true;
+}
+
+void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock,
 		opennova::editor::ViewportDeviceReport &report) {
 	const auto &hud_model = static_cast<const opennova::editor::HudViewport &>(model);
 	HudOverlay *hud = overlay();
@@ -176,7 +270,11 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 	const int clip = HudPos::displayed_clip(options.clip < 0 ? std::max(weapon_capacity_, 0) : options.clip,
 			weapon_capacity_);
 	const int reserve = HudPos::folded_reserve(clip, options.reserve, weapon_capacity_);
-	hud->set_weapon_state(armed_, clip, reserve, 0, 0, false, false, false, 0);
+	// With the sights up, the aim and the spread as the run's weapon holds them, the keep-up the frame says.
+	const opennova::world::LocalPlayerWeaponView *sighted = hud_model.scope_weapon();
+	const opennova::world::LocalPlayerViewFrame *frame = hud_model.scope_frame();
+	hud->set_weapon_state(armed_, clip, reserve, 0, sighted ? sighted->hud_spread_fp16 : 0,
+			sighted && sighted->aimed_shot_available, frame && frame->hud_keep_crosshair_while_aimed, false, 0);
 	// The view: the binoculars' state the HUD reads, the aim the first-person pin to the screen's middle.
 	const bool binoculars = options.view == opennova::editor::HudPreviewView::Binoculars;
 	const bool night_vision = options.view == opennova::editor::HudPreviewView::NightVision;
@@ -186,6 +284,8 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 		effects->call("update_view", binoculars, kBinocularRange, night_vision, kNightVisionGain);
 		effects->call("update_damage_feedback", 0, options.damage, 0, 255);
 	}
+	apply_sights_(hud_model);
+	apply_board_(hud_model, int64_t(clock.ticks()));
 	// Where each element of the HUD's walk drew, in the screen's pixels: the boxes of its compile now.
 	const std::vector<opennova::hud::HudElementBox> boxes = opennova::hud::hud_element_boxes(hud->compile_draw_list());
 	report.rects.assign(opennova::hud::kHudElementCount, opennova::editor::ViewportDeviceReport::Rect());
@@ -208,8 +308,14 @@ void HudViewportApplier::tick(const opennova::editor::ViewportModel &model, cons
 	HudOverlay *hud = overlay();
 	if (!hud || !configured_) return;
 	// The player's state on the preview clock's ticks, the HUD's clock (its fades, its flashes).
-	const opennova::editor::HudViewportOptions &options = static_cast<const opennova::editor::HudViewport &>(model).options();
-	hud->set_player_state(int(clock.ticks()), float(options.health) / 100.0f, options.stance, kFovDegrees);
+	const auto &hud_model = static_cast<const opennova::editor::HudViewport &>(model);
+	const opennova::editor::HudViewportOptions &options = hud_model.options();
+	// The field of view the crosshair's spread is drawn at: the sights' zoomed one while they are up.
+	const opennova::world::LocalPlayerViewFrame *frame = hud_model.scope_frame();
+	hud->set_player_state(int(clock.ticks()), float(options.health) / 100.0f, options.stance,
+			frame ? frame->fov_h_deg : kFovDegrees);
+	// The 4-team page alternates on the HUD's clock.
+	if (options.board) apply_board_(hud_model, int64_t(clock.ticks()));
 }
 
 void HudViewportApplier::background(opennova::editor::PreviewBackground background) {
