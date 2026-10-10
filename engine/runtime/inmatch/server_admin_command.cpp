@@ -197,14 +197,19 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	// D-NET-383):
 	// - the hosting gate, every verb but SetMPReset: the receiver is the
 	//   authority with its hosted session up (is_authority and ctx+0x68, the
-	//   latch CNapiGameSession_CreateSession sets; is_in_session stands in for
-	//   it here: a ServerCommand reaches only a hosting process, where both
-	//   are set);
+	//   latch CNapiGameSession_CreateSession alone sets, @0x4C9D16).
+	//   is_in_session stands in for ctx+0x68 only, not for retail's +0x58
+	//   (is_in_session there), which CNapiNetwork_SetNetworkType already sets
+	//   ahead of a NovaWorld host's hosting wait (@0x4C4A85, from
+	//   Game_HostMultiplayerSession @0x4A6614): a context that receives a
+	//   ServerCommand before its session exists keeps it clear, as
+	//   opennova-serve's session-less one does (ServeListing::on_command), so
+	//   only SetMPReset passes there;
 	// - the player table (dword_24C0CA0; the World here), only the
 	//   player-targeted verbs and ChangeTeam / SwapTeam;
 	// - the token count, every verb that reads an argument it cannot default.
 	// SetMPReset tests the token count alone, so it runs on any receiver this
-	// executor is handed (the shells hand it only a hosting context: a
+	// executor is handed (the game shell hands it only a hosting context: a
 	// residual of D-NET-383). The verbs that act on the World without
 	// retail's player-table gate (Cycle / EndMission / GameOver, Earthquake,
 	// Lightning, TimeOfDay) need one to act on here: retail's globals they

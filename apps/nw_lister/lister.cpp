@@ -396,8 +396,10 @@ void Lister::end(int code) {
 	exit_code_ = code;
 }
 
-// Deregister and close: the stop statement leaves on one send pump, then the verified
-// connection's disconnect burst (NovaWorldClient::stop's teardown).
+// Close the session: with `stop_hosting` (stop) the ClientStopHosting statement leaves on one
+// send pump first and the verified connection's disconnect burst follows (NovaWorldClient::stop's
+// teardown); without it (disconnect) the burst alone, as a process exit's atexit teardown sends
+// it.
 // The NovaWorld leg goes first: a console close leaves the process a few seconds, and the admin
 // thread can be mid-poll on a dead server.
 void Lister::teardown(bool stop_hosting) {

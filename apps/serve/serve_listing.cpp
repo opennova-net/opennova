@@ -137,7 +137,10 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 // dispatch hands every ServerCommand to the handler whatever the session's state: the connection
 // mode is the dead /HOST path's host-only one and ctx+0x68 is clear, so every verb's gate refuses
 // it but SetMPReset's token count, and a SetMPReset stores the word in the block and saves it,
-// which the starting map's session create then reads.
+// which the starting map's session create then reads. The context's is_in_session, the
+// executor's stand-in for ctx+0x68, stays clear on purpose: retail's own +0x58 is already set
+// in the hosting wait (CNapiNetwork_SetNetworkType @0x4C4A85, from @0x4A6614), but no verb's
+// gate reads it.
 // [orig: CNapiGameSession_HandleServerCommand — PuntPlayer @0x4D2515..0x4D254D; SetServerName's
 //  block copy @0x4D2CFC, SetServerMsg's @0x4D2DAD, SetMPReset's @0x4D2E28; Game_SaveConfig
 //  @0x4D2DDF (SetServerName / SetServerMsg) and @0x4D2E2D (SetMPReset); the gates, SetServerName's
