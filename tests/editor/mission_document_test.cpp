@@ -177,11 +177,11 @@ int test_references() {
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::Item) == 12 && edge(extracted, ReferenceKind::Item, "106101") &&
 	            edge(extracted, ReferenceKind::Item, "102044"));
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::Weapon) == 4 && edge(extracted, ReferenceKind::Weapon, "WPN_KNIFE"));
-	// By index: the stops' markers, the organics' group and path (0 names none), the KillGroup's group,
-	// the ResetEvent's and the Event trigger's event.
+	// By index: the stops' markers, the organics' group and path (0 names none) and the waypoint markers'
+	// path (the four on path 1), the KillGroup's group, the ResetEvent's and the Event trigger's event.
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::MissionMarker) == 4 && edge(extracted, ReferenceKind::MissionMarker, "3"));
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::MissionGroup) == 3 && edge(extracted, ReferenceKind::MissionGroup, "1") &&
-	            count_edges(extracted, ReferenceKind::MissionPath) == 1 && edge(extracted, ReferenceKind::MissionPath, "1"));
+	            count_edges(extracted, ReferenceKind::MissionPath) == 5 && edge(extracted, ReferenceKind::MissionPath, "1"));
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::MissionEvent) == 2 && edge(extracted, ReferenceKind::MissionEvent, "0") &&
 	            edge(extracted, ReferenceKind::MissionEvent, "1"));
 	// By id, in the mission's own scope: the trigger's SSN and zone; the record sets and the symbols.
@@ -208,7 +208,8 @@ int test_references() {
 	const NodeAddress header = row_at(*document, MissionKind::Mission, 0);
 	const GraphEdge *win = edge(extracted, ReferenceKind::TextId, "STRWINCOND001");
 	TEST_EXPECT(win && win->scope == "SYNTH_LOGIC.BIN/WinConditions" && win->field == "win_conditions[0]" &&
-	            win->address == header && count_edges(extracted, ReferenceKind::TextId) == 3);
+	            win->address == header && count_edges(extracted, ReferenceKind::TextId) == 7 &&
+	            edge(extracted, ReferenceKind::TextId, "STRWPNAME000")); // and the four waypoint markers' names
 	// The panel's rows stop at the first slot of id 0 or 255; an action reads its slot's id: a won or
 	// lost subgoal's chat line, a shown subgoal's directive (none when it hides one), a text's line.
 	{
@@ -233,7 +234,8 @@ int test_references() {
 					if (e.field != "param1" || e.scope_alternate != "MEDMSSN.BIN" || e.rewritable) return Keys{"bad"};
 					keys.push_back(e.scope + " " + e.value);
 				}
-			if (count_edges(read, ReferenceKind::TextId) != 3 + keys.size() || edge(read, ReferenceKind::TextId, "STRWINCOND007"))
+			// The location's, the person's and the win row's names, and the four waypoint markers'.
+			if (count_edges(read, ReferenceKind::TextId) != 7 + keys.size() || edge(read, ReferenceKind::TextId, "STRWINCOND007"))
 				return Keys{"bad"};
 			return keys;
 		};
@@ -692,10 +694,11 @@ int test_clipboard() {
 		            error.message.find("Every zone id 1 to 99 is taken") != std::string::npos);
 		while (document->can_undo()) document->undo();
 	}
-	// The player's SSN is never given: after an entity of SSN 9999, an Add takes 10001.
+	// No player's net id is given: after an entity of SSN 9999, an Add takes 10256, past the 256 the game
+	// stamps on its players (master's mission::ssn_after, D-MIS-10).
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, walker, "id", int64_t(9999)), error));
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Add, {0, k(MissionKind::Item), 0}), error) &&
-	            static_cast<const EntityRow *>(document->row(document->last_added()))->native.id == 10001);
+	            static_cast<const EntityRow *>(document->row(document->last_added()))->native.id == 10256);
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
 	std::printf("clipboard: rows told apart and placed, a nested kind into its owner\n");

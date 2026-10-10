@@ -389,8 +389,9 @@ int test_complete() {
 	// word past bits 0 and 1.
 	if (coverage(MissionKind::Group, 0, bytes({{1, 3}, {4, 4}, {12, 20}}), "group") != 0) return 1;
 	if (coverage(MissionKind::Layer, 0, {}, "layer") != 0) return 1;
-	// A bounding box's reserved word (written zero).
-	if (coverage(MissionKind::BoundingBox, 0, bytes({{32, 4}}), "bounding box", with_box) != 0) return 1;
+	// A bounding box: every word a field's, the reserved word a Mission box's name's last four characters
+	// (master's #1007).
+	if (coverage(MissionKind::BoundingBox, 0, {}, "bounding box", with_box) != 0) return 1;
 	std::printf("complete: every byte the writer takes from a header, an entity, an event, a trigger, an action, an "
 	            "area trigger, a group, a layer and a bounding box is a field's, but the stated members\n");
 	return 0;
@@ -535,7 +536,7 @@ int test_lists() {
 
 	// A path's stops: 32 at most, any marker index (a Record reference the mission document checks),
 	// a new one visiting the first marker; one put in or taken out writes the count as the slots.
-	const RecordHandle path = rows_of(m, MissionKind::WaypointPath)[0];
+	const RecordHandle path = rows_of(m, MissionKind::WaypointPath)[1]; // path 1: path 0 holds none
 	bms::WaypointRecord &record = path.as<MissionPath>().record;
 	const size_t markers = rows_of(m, MissionKind::Marker).size();
 	const ListOps &stops = list_of(MissionKind::WaypointPath, MissionKind::Stop).ops;
