@@ -165,12 +165,18 @@ bool read_file(const uint8_t *data, size_t size, File &out, textlayout::Notes *n
 	if (data == nullptr) return false;
 	const char *text = reinterpret_cast<const char *>(data);
 	const std::vector<Span> lines = lines_of(text, size);
-	// The first pass: VERSION, the last [orig: ScoreConfig_LoadFile @ 0x52DA45..0x52DA5E].
-	for (const Span &span : lines) {
+	// The first pass: VERSION, the last [orig: ScoreConfig_LoadFile @ 0x52DA45..0x52DA5E]. With it, the fanfare line
+	// the model holds: the last EXP_FANFARE line before the first GAMETYPE, the writer's place for its one.
+	size_t fanfare_line = SIZE_MAX;
+	bool in_block = false;
+	for (size_t at = 0; at < lines.size(); ++at) {
+		const Span &span = lines[at];
 		const std::string line(text + span.begin, span.end - span.begin);
 		if (!line.empty() && (line[0] == '/' || (line.size() > 1 && line[1] == '/'))) continue;
 		const std::vector<std::string> tokens = split_tokens(line);
 		if (tokens.size() >= 2 && strutil::iequals(tokens[0], "VERSION")) out.version = io::retail_atol(tokens[1].c_str());
+		in_block = in_block || (tokens.size() > 1 && strutil::iequals(tokens[0], "GAMETYPE"));
+		if (!in_block && tokens.size() > 2 && strutil::iequals(tokens[0], "EXP_FANFARE")) fanfare_line = at;
 	}
 	textlayout::Noter noter(text, size, notes, cut_line);
 	out.note = noter.root();
@@ -179,7 +185,8 @@ bool read_file(const uint8_t *data, size_t size, File &out, textlayout::Notes *n
 	// the defaults over the file instead, @ 0x52DA9E]: a file of another version reads to no block, its lines
 	// read for nothing but its VERSION line (the layout's entry, for the version the model holds).
 	const bool read = out.version == kVersion;
-	for (const Span &span : lines) {
+	for (size_t at = 0; at < lines.size(); ++at) {
+		const Span &span = lines[at];
 		noter.line(span.begin, span.next);
 		const std::string line(text + span.begin, span.end - span.begin);
 		// A line whose first or second character is '/' is read for nothing [orig: @ 0x52DAF6].
@@ -227,14 +234,20 @@ bool read_file(const uint8_t *data, size_t size, File &out, textlayout::Notes *n
 		} else if (strutil::iequals(tokens[0], "EXP_FANFARE")) {
 			// Two bytes [orig: @ 0x52DC75 / @ 0x52DC7C], stored only when both are other than 0 and the second is
 			// the greater [orig: @ 0x52DC75..0x52DC9F]: a line failing the gate leaves the pair as it was (the
-			// defaults', or an earlier line's) and is read for nothing.
+			// defaults', or an earlier line's). The fanfare line is the model's, its pair whatever it holds (the
+			// layout's entry, which a set rewrites); every other line stores what it stores, read for nothing.
 			const int32_t a = int32_t(uint8_t(io::retail_atol(tokens[1].c_str())));
 			const int32_t b = int32_t(uint8_t(io::retail_atol(tokens[2].c_str())));
-			if (a != 0 && b != 0 && b > a) {
+			if (at == fanfare_line) {
 				out.exp_fanfare[0] = a;
 				out.exp_fanfare[1] = b;
 				out.has_exp_fanfare = true;
-				if (!block_note) noter.entry(noter.root(), "EXP_FANFARE");
+				noter.entry(noter.root(), "EXP_FANFARE");
+			} else if (a != 0 && b != 0 && b > a) {
+				StoredFanfare &stored = out.blocks.empty() ? out.fanfare_before : out.fanfare_after;
+				stored.pair[0] = a;
+				stored.pair[1] = b;
+				stored.kept = true;
 			}
 		}
 	}
@@ -263,7 +276,7 @@ bool records_of(const File &file, textlayout::OutRecord &root, std::string &erro
 	root.lines.push_back({"VERSION", buffer});
 	root.lines.push_back({"", ""});
 	// The fanfare: the game writes its pair always (the defaults' 0 0 [orig: @ 0x52CE9C]); over a file's layout
-	// the pair a line of the file's set, or the model's own (has_exp_fanfare), and none where the file kept none.
+	// the file's fanfare line, or one set anew (has_exp_fanfare), and none where the file has none.
 	std::snprintf(buffer, sizeof buffer, "EXP_FANFARE %d %d", file.exp_fanfare[0] & 0xFF, file.exp_fanfare[1] & 0xFF);
 	if (!noted || file.has_exp_fanfare) root.lines.push_back({"EXP_FANFARE", buffer});
 	root.lines.push_back({"", ""});
@@ -385,6 +398,15 @@ bool exp_fanfare_kept(const File &file) {
 	return high != 0 && low != 0 && low > high;
 }
 
+bool kept_fanfare(const File &file, int32_t out[2]) {
+	const int32_t *pair = file.fanfare_after.kept ? file.fanfare_after.pair
+	                      : file.has_exp_fanfare && exp_fanfare_kept(file) ? file.exp_fanfare
+	                      : file.fanfare_before.kept ? file.fanfare_before.pair : nullptr;
+	out[0] = pair ? pair[0] & 0xFF : 0;
+	out[1] = pair ? pair[1] & 0xFF : 0;
+	return pair != nullptr;
+}
+
 bool parse(const uint8_t *data, size_t size, File &out, std::string &error) {
 	if (!read_file(data, size, out, nullptr)) {
 		error = "score.ini: no data";
@@ -447,10 +469,14 @@ int32_t field_value(const GameTypeBlock &block, std::string_view name, int32_t f
 }
 
 bool equal(const File &a, const File &b) {
-	// The fanfare the game keeps: a pair it stores, or none (the defaults stand).
-	const bool kept_a = a.has_exp_fanfare && exp_fanfare_kept(a), kept_b = b.has_exp_fanfare && exp_fanfare_kept(b);
-	if (a.version != b.version || kept_a != kept_b ||
-			(kept_a && (a.exp_fanfare[0] != b.exp_fanfare[0] || a.exp_fanfare[1] != b.exp_fanfare[1])) ||
+	// The fanfare the game keeps (a pair it stores, or none: the defaults stand), and the fanfare line as the file
+	// holds it.
+	int32_t pair_a[2], pair_b[2];
+	const bool kept_a = kept_fanfare(a, pair_a), kept_b = kept_fanfare(b, pair_b);
+	if (a.version != b.version || kept_a != kept_b || (kept_a && (pair_a[0] != pair_b[0] || pair_a[1] != pair_b[1])) ||
+			a.has_exp_fanfare != b.has_exp_fanfare ||
+			(a.has_exp_fanfare && ((a.exp_fanfare[0] & 0xFF) != (b.exp_fanfare[0] & 0xFF) ||
+			                       (a.exp_fanfare[1] & 0xFF) != (b.exp_fanfare[1] & 0xFF))) ||
 			a.blocks.size() != b.blocks.size())
 		return false;
 	for (size_t i = 0; i < a.blocks.size(); ++i) {
