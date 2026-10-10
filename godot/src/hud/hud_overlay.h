@@ -34,6 +34,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 
 namespace godot {
@@ -150,15 +151,32 @@ public:
 	void set_no_hud(bool p_no_hud);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
-	// The Tab board: whether it is held open, the strings the shell resolved,
-	// the Simulation the rows and session facts are pulled from natively
-	// (Simulation::fill_scoreboard — no script-side row round-trip), and the
-	// gametext table the drawers' own lookups resolve through
-	// (hud::scoreboard_text). Typed cross-class args on the bound API follow
-	// the set_minimap_terrain precedent; pass null when hiding.
-	void set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
-			const Dictionary &p_strings, const Ref<Simulation> &p_sim,
-			const Ref<RtxtStringFile> &p_gametext);
+	// The Tab board: whether it is held open, the frame counter its 4-team page
+	// alternates on, the Simulation the session header, rows and session facts
+	// are pulled from natively (Simulation::get_scoreboard, fill_scoreboard —
+	// no script-side round-trip), and the shell's gametext and keyhelp tables
+	// the strings resolve through (scoreboard_strings; the drawers' own
+	// lookups, hud::scoreboard_text). Typed cross-class args on the bound API
+	// follow the set_minimap_terrain precedent; pass null when hiding.
+	void set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Simulation> &p_sim,
+			const Ref<RtxtStringFile> &p_gametext, const Ref<RtxtStringFile> &p_keyhelp);
+	// The same board from one an embedder prepared rather than a Simulation's:
+	// `p_board`'s game type, strings (scoreboard_strings) and what
+	// inmatch::scoreboard_feed writes (the rows, the team count and table, the
+	// SU gate, the timed flag and minutes, the local team, the flag carrier).
+	// set_scoreboard hands its board here, so the board has one draw. C++ only
+	// (the editor's HUD preview).
+	void set_scoreboard_board(bool p_shown, int p_frame_counter, const Ref<RtxtStringFile> &p_gametext,
+			const opennova::hud::HudScoreboardState &p_board);
+	// The board's strings as the shell resolves them from its tables, into
+	// `r_board`: the title (gametext Overlays, else the literal), the game
+	// type's rung (the engine's key map), the players and spectators lines
+	// (Client, with their counts; the spectators' only when any), the paging
+	// hint (keyhelp's Text, else the literal; looked up only with gametext
+	// loaded), the server and mission rungs as given.
+	static void scoreboard_strings(const Ref<RtxtStringFile> &p_gametext, const Ref<RtxtStringFile> &p_keyhelp,
+			uint32_t p_game_type, const std::string &p_server, const std::string &p_mission, int p_players,
+			int p_spectators, opennova::hud::HudScoreboardState &r_board);
 	// The open chat capture's input line off the talk-key object: its prompt,
 	// text and dispatch color (hud::chat_input_line_color, the Global color
 	// keyed on the session-peer bit) and the frame counter the cursor blinks on.

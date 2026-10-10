@@ -1226,3 +1226,36 @@ func test_sights_viewport_aspect_preserves_square_reticle() -> void:
 	assert_eq(HudPos.sight_scale_rect(square, Vector2(1024, 768)), square)
 	assert_eq(HudPos.sight_scale_rect(square, Vector2(1920, 1080)),
 			Rect2(720, 300, 480, 480), "widescreen reticle stays square and centered")
+
+
+# The Tab board resolves its strings from the shell's tables natively
+# (HudOverlay.scoreboard_strings): the title from gametext Overlays, else the
+# literal, the game type's rung, the count lines, keyhelp's paging hint; hidden,
+# it draws nothing.
+func test_scoreboard_strings_resolve_from_the_tables() -> void:
+	var fixture := _load_temp_layout(PackedStringArray(["fonthud1_hi Gunpl22b.fnt"]), PackedStringArray())
+	_copy_font_into(fixture.dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	var sim := Simulation.new()
+	var bare := hud.get_draw_list_stats().glyphs
+	hud.set_scoreboard(true, 0, sim, null, null)
+	var literal := hud.get_draw_list_stats().glyphs
+	assert_gt(literal, bare, "no tables: the board draws its literal title and hint")
+	var gametext := RtxtStringFile.new()
+	var overlays := gametext.add_section("Overlays")
+	gametext.add_entry("STROVER_KILLLIST", "A much longer player list title than the literal", overlays,
+			Vector2i.ZERO)
+	gametext.add_entry("STROVER29", "Deathmatch", overlays, Vector2i.ZERO)
+	var client := gametext.add_section("Client")
+	gametext.add_entry("STRCLI04", "Players in the game:", client, Vector2i.ZERO)
+	var keyhelp := RtxtStringFile.new()
+	keyhelp.add_entry("CHANGE_SCREEN", "Page Up and Page Down turn the pages of this list",
+			keyhelp.add_section("Text"), Vector2i.ZERO)
+	hud.set_scoreboard(true, 0, sim, gametext, keyhelp)
+	assert_gt(hud.get_draw_list_stats().glyphs, literal,
+			"the tables' title, rung, players line and hint draw in the literals' place")
+	hud.set_scoreboard(false, 0, null, null, null)
+	assert_eq(hud.get_draw_list_stats().glyphs, bare, "hidden, the board draws nothing")
