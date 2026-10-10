@@ -151,16 +151,29 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
 void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
                                           const MountSlotSelectRequest &req, PlayerViewState &v);
 
-// The ordinary scope toggle, in the witnessed order: the dispatcher gates
-// (no toggle during RELOAD/SWITCHFROM, def flags), the movement-held refusal
-// of a Scoped weapon's scope-UP, the Inset-under-NVG refusal, the ForceScoped
-// pin, the mid-ease refusal with the per-toggle ease latch, then the FSM's
+// The ordinary scope toggle, in the witnessed order: the dispatcher's gate
+// (no toggle during RELOAD/SWITCHFROM), then the toggle's own: an airborne or
+// swimming body, the ForceScoped pin, Inset under NVG, a vehicle control
+// seat, the def flags and the mid-ease refusal, the movement-held refusal of
+// a Scoped weapon's scope-UP, the per-toggle ease latch, then the FSM's
 // scopeup/scopedown queue. Returns whether it toggled.
-// [orig: Player_ToggleWeaponScope @0x4df0c0 — @0x4df29c, @0x4df12d,
-//  @0x4df177, @0x4df1b3..0x4df36e; WeaponSlot_TryQueueScopeUp @0x53f050 /
-//  ..ScopeDown @0x53f080]
+// [orig: Input_HandleActionBinding_0 @0x4e052b..0x4e053d; Player_ToggleWeaponScope
+//  @0x4df0c0: the gates @0x4df0dc, @0x4df104..0x4df115, @0x4df11b..0x4df12d,
+//  @0x4df145, @0x4df177, @0x4df29c, the legs @0x4df1b3..0x4df36e;
+//  WeaponSlot_TryQueueScopeUp @0x53f050 / ..ScopeDown @0x53f080]
 bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
                                WeaponSlotState &active_slot);
+
+// The forced toggle of the local death and the camera switch: each calls the
+// whole toggle while the sight is promoted, without the dispatcher's
+// currentAction gate, so a passing toggle disengages (tips 12/14/16, the
+// SCOPEDOWN queue) and a refused one (an airborne or swimming body, the
+// ForceScoped pin, a vehicle control seat, a running ease) keeps the sight. Returns whether it
+// toggled.
+// [orig: NapiNPClientMsg_EntityDeath @0x42ec15..0x42ec19;
+//  Entity_UpdateInfantryPlayerBody @0x4b4d15..0x4b4d25; Camera_SetTrackedEntity
+//  @0x4392a1..0x4392ae]
+bool local_player_forced_scope_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v);
 
 // The one optical visibility query used by body, weapon, HUD and camera paths.
 // Its retail FOV target writes are synchronous, even without a weather tick.
@@ -306,10 +319,13 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w,
 // visible to action routing while an action's unscope/rescope begins easing
 // on the next tick [orig: call sites @0x42c18e / @0x526786; promoter
 // @0x4de4f7; ThirdPersonCamera_Update @0x437b70..76]. The quantum's camera
-// compose is LocalPlayer::tick_view's, after the aim acquisition.
+// compose is LocalPlayer::tick_view's, after the aim acquisition. `weapon`
+// (null for none) is the local weapon the death edge and the camera switch
+// force the scope toggle on.
 void local_player_view_tick(World *world, PlayerViewState &v,
                             LocalPlayerViewTracker &t,
-                            const LocalViewSessionInputs &session);
+                            const LocalViewSessionInputs &session,
+                            LocalPlayerWeapon *weapon);
 
 // The motor writes CameraOffset; every later consumer re-anchors it to the
 // current position. [orig: Camera_ComputeThirdPersonView @0x437FA5..0x437FB7]

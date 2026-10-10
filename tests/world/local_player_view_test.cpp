@@ -427,7 +427,7 @@ void test_chase_lookahead_follows_the_hull_on_every_compose() {
     PlayerViewState v;
     v.third_person_selected = true;
     LocalPlayerViewTracker t;
-    local_player_view_tick(&lw.w, v, t, {});
+    local_player_view_tick(&lw.w, v, t, {}, nullptr);
     CHECK(v.camera_mode == 1 && v.mount.control_seat);
     const int32_t zero[3] = {0, 0, 0};
     const int32_t ahead[3] = {6 << 16, 0, 0};
@@ -544,7 +544,7 @@ void test_binocular_sway_seeds_once_per_activation() {
         return local_player_binoculars_toggle(lw.w, player.weapon, v, t);
     };
     const auto tick = [&]() {
-        local_player_view_tick(&lw.w, v, t, {});
+        local_player_view_tick(&lw.w, v, t, {}, nullptr);
     };
     uint32_t expected = lw.w.prng16_state;
     CHECK(toggle());
@@ -758,23 +758,215 @@ void test_tip_events_from_scope_nvg_and_binoculars() {
         LocalPlayerViewTracker t;
         LocalViewSessionInputs s;
         // The first tick seeds the previous toggle: nothing raised.
-        local_player_view_tick(&lw.w, v, t, s);
+        local_player_view_tick(&lw.w, v, t, s, nullptr);
         CHECK(events(lw.w).empty());
         CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
-        local_player_view_tick(&lw.w, v, t, s);
+        local_player_view_tick(&lw.w, v, t, s, nullptr);
         CHECK(v.binoculars_view_active);
         CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventBinocularsOn});
-        local_player_view_tick(&lw.w, v, t, s); // no edge
+        local_player_view_tick(&lw.w, v, t, s, nullptr); // no edge
         CHECK(events(lw.w).empty());
         CHECK(!local_player_binoculars_toggle(lw.w, w, v, t));
-        local_player_view_tick(&lw.w, v, t, s);
+        local_player_view_tick(&lw.w, v, t, s, nullptr);
         CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventBinocularsOff});
         // Raised while the view cannot come up (the player moving): the fade.
         v.movement_input = true;
         CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
-        local_player_view_tick(&lw.w, v, t, s);
+        local_player_view_tick(&lw.w, v, t, s, nullptr);
         CHECK(!v.binoculars_view_active);
         CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventBinocularsOff});
+    }
+}
+
+// --- the forced scope toggles: the local death and the camera switch -------
+
+// The local dead edge and a camera switch into any mode but first person
+// each run the whole scope toggle while the sight is promoted, without the
+// dispatcher's RELOAD/SWITCHFROM gate: a passing toggle disengages (the
+// promoted and engaged bytes cleared, the FOV reset, SCOPEDOWN queued, the
+// down tips), and the toggle's own gates still refuse (the ForceScoped pin,
+// an airborne or drowning body, a vehicle control seat).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b4d15..0x4b4d25;
+//  NapiNPClientMsg_EntityDeath @0x42ec15..0x42ec19; Camera_SetTrackedEntity
+//  @0x4392a1..0x4392ae; Player_ToggleWeaponScope @0x4df0c0 -- the gates
+//  @0x4df0dc / @0x4df12d / @0x4df145 / @0x4df177, the disengage leg
+//  @0x4df18b..0x4df282; Input_HandleActionBinding_0 @0x4e052b..0x4e0537]
+void test_forced_scope_toggles_on_death_and_camera_switch() {
+    const uint32_t elevation = DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION;
+    // A raised, promoted sight with a RELOAD current: the dispatcher's gate
+    // would refuse the toggle the forced callers run.
+    const auto raise = [](LocalWorld &lw, LocalPlayerWeapon &w, PlayerViewState &v) {
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        settle_ease(v);
+        CHECK(player_view_scope_settled(v) && v.scope_engaged);
+        w.slot.current = weapon_action::kReload;
+        w.slot.phase = weapon_phase::kDone;
+        w.slot.next = weapon_action::kIdle;
+        CHECK(!local_player_scope_toggle(lw.w, w, v, w.slot));
+        lw.w.out.tip_events.clear();
+        lw.w.weather.core.scalar_channels.camera_fov_target_fp = 20 << 16;
+    };
+    const auto disengaged = [](LocalWorld &lw, const LocalPlayerWeapon &w,
+                               const PlayerViewState &v) {
+        return !player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire &&
+               w.slot.next == weapon_action::kScopeDown &&
+               lw.w.out.tip_events ==
+                       std::vector<uint8_t>{opennova::hud::kTipEventScopeElevationOff} &&
+               lw.w.weather.core.scalar_channels.camera_fov_target_fp == (80 << 16);
+    };
+    const auto kept = [](LocalWorld &lw, const LocalPlayerWeapon &w, const PlayerViewState &v) {
+        return player_view_scope_settled(v) && v.scope_engaged &&
+               w.slot.next == weapon_action::kIdle && lw.w.out.tip_events.empty();
+    };
+    // The local dead edge disengages; the mode-4 entry that follows finds the
+    // sight down and toggles nothing more.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(elevation);
+        PlayerViewState v;
+        LocalPlayerViewTracker t;
+        LocalViewSessionInputs s;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        raise(lw, w, v);
+        local_player_view_tick(&lw.w, v, t, s, &w); // alive, first person: nothing
+        CHECK(kept(lw, w, v));
+        s.local_dead = true;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(v.camera_mode == 4);
+        CHECK(disengaged(lw, w, v));
+    }
+    // ForceScoped stays raised through the death and the switch.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(elevation | DEF_WEAPON_FLAG_FORCESCOPED);
+        PlayerViewState v;
+        LocalPlayerViewTracker t;
+        LocalViewSessionInputs s;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        raise(lw, w, v);
+        s.local_dead = true;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(v.camera_mode == 4);
+        CHECK(kept(lw, w, v));
+    }
+    // An airborne (0x2000) or drowning (0x8000) body refuses both callers, and
+    // the input toggle alike.
+    for (const uint32_t flag : {kEntityFlagInAir, kEntityFlagDrowning}) {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(elevation);
+        PlayerViewState v;
+        LocalPlayerViewTracker t;
+        LocalViewSessionInputs s;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        raise(lw, w, v);
+        lw.entity().engine_flags |= flag;
+        w.slot.current = weapon_action::kIdle;
+        CHECK(!local_player_scope_toggle(lw.w, w, v, w.slot));
+        s.local_dead = true;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(v.camera_mode == 4);
+        CHECK(kept(lw, w, v));
+    }
+    // A camera switch into mode 4 (the round end on foot) or mode 1 (the
+    // death screen's free-fly sub-mode) disengages a living player's sight.
+    for (const bool round_end : {true, false}) {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(elevation);
+        PlayerViewState v;
+        LocalPlayerViewTracker t;
+        LocalViewSessionInputs s;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        raise(lw, w, v);
+        if (round_end) {
+            s.end_round_known = true;
+        } else {
+            s.death_screen_active = true;
+            s.death_screen_submode = 1;
+        }
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(v.camera_mode == (round_end ? 4 : 1));
+        CHECK(disengaged(lw, w, v));
+        // No further switch: a re-raised sight stays.
+        settle_ease(v);
+        w.slot.current = weapon_action::kIdle;
+        w.slot.next = weapon_action::kIdle;
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        settle_ease(v);
+        lw.w.out.tip_events.clear();
+        w.slot.next = weapon_action::kIdle;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(kept(lw, w, v));
+    }
+    // A vehicle control seat (parentSlot 2 or 5) refuses; a gunner seat does not.
+    for (const SeatType seat : {SeatType::Controller, SeatType::Driver, SeatType::Gunner}) {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(elevation);
+        PlayerViewState v;
+        raise(lw, w, v);
+        Entity &e = lw.entity();
+        e.mounted = true;
+        e.mount_type = seat;
+        const bool toggled = local_player_forced_scope_toggle(lw.w, w, v);
+        CHECK(toggled == (seat == SeatType::Gunner));
+        CHECK(toggled ? disengaged(lw, w, v) : kept(lw, w, v));
+    }
+    // An unpromoted sight is never forced.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(elevation);
+        PlayerViewState v;
+        CHECK(!local_player_forced_scope_toggle(lw.w, w, v));
+        CHECK(!v.scope_engaged && lw.w.out.tip_events.empty());
+    }
+}
+
+// A death or camera switch on the tick whose interp step promotes the sight
+// still forces the toggle: retail promotes in Player_UpdatePerFrame ahead of
+// the 0x13 dispatch, the body's death and the render's camera switch.
+// [orig: Client_ProcessNetworkFrame @0x42c18e ahead of
+//  CNapiNetwork_PumpClientProtocolRecv @0x42c228; Game_ProcessMainFrame
+//  @0x526692 ahead of Entity_UpdateAllEntities @0x52674b; the promoter
+//  Player_UpdatePerFrame @0x4de4c7..0x4de4f7]
+void test_forced_scope_toggle_sees_the_same_tick_promotion() {
+    const uint32_t elevation = DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION;
+    for (const bool death : {true, false}) {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(elevation);
+        PlayerViewState v;
+        v.weapon_pose_bound = true;
+        for (int i = 0; i < 3; ++i) {
+            v.weapon_hip_pose.position_q16[i] = (256 + 64 * i) * 256;
+            v.weapon_ads_pose.position_q16[i] = (496 + 64 * i) * 256;
+        }
+        LocalPlayerViewTracker t;
+        LocalViewSessionInputs s;
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+        // The ticks the raise takes to promote, counted on a copy.
+        int steps = 0;
+        {
+            PlayerViewState probe = v;
+            const float eye[3] = {0.0f, 0.0f, 0.0f};
+            while (!player_view_scope_settled(probe) && steps < 64) {
+                player_view_tick(probe, eye);
+                ++steps;
+            }
+        }
+        CHECK(steps > 1 && steps < 64);
+        for (int i = 0; i < steps - 1; ++i) local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(!player_view_scope_settled(v) && player_view_scope_ease_active(v) && v.scope_engaged);
+        lw.w.out.tip_events.clear();
+        w.slot.phase = weapon_phase::kDone;
+        w.slot.next = weapon_action::kIdle;
+        if (death) s.local_dead = true;
+        else s.end_round_known = true;
+        // This tick's step promotes the sight, then the transition lowers it.
+        local_player_view_tick(&lw.w, v, t, s, &w);
+        CHECK(v.camera_mode == 4);
+        CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
+        CHECK(w.slot.next == weapon_action::kScopeDown);
+        CHECK(lw.w.out.tip_events ==
+              std::vector<uint8_t>{opennova::hud::kTipEventScopeElevationOff});
     }
 }
 
@@ -786,7 +978,7 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
     LocalPlayerViewTracker t;
     LocalViewSessionInputs s;
     lw.w.logic_tick = 100;
-    local_player_view_tick(&lw.w, v, t, s);
+    local_player_view_tick(&lw.w, v, t, s, nullptr);
     CHECK(v.camera_mode == 0);
     CHECK(v.on_foot);
     CHECK(!v.in_session);
@@ -796,17 +988,17 @@ void test_tick_stamps_the_death_camera_on_the_local_dead_edge() {
     // camera computed on the mode-4 entry, both stable while dead.
     lw.w.logic_tick = 101;
     s.local_dead = true;
-    local_player_view_tick(&lw.w, v, t, s);
+    local_player_view_tick(&lw.w, v, t, s, nullptr);
     CHECK(v.local_dead);
     CHECK(v.camera_mode == 4);
     CHECK(v.death_cam.start_tick == 101);
     lw.w.logic_tick = 102;
-    local_player_view_tick(&lw.w, v, t, s);
+    local_player_view_tick(&lw.w, v, t, s, nullptr);
     CHECK(v.camera_mode == 4);
     CHECK(v.death_cam.start_tick == 101); // no re-stamp while dead
     // The movement delta sampler follows the entity between ticks.
     lw.entity().position.x += 2.0f;
-    local_player_view_tick(&lw.w, v, t, s);
+    local_player_view_tick(&lw.w, v, t, s, nullptr);
     CHECK(t.tick_delta[0] == 2.0f);
     CHECK(t.tick_delta[1] == 0.0f);
 }
@@ -818,11 +1010,11 @@ void test_tick_without_a_player_resolves_first_person() {
     v.mount.control_seat = true;
     LocalPlayerViewTracker t;
     LocalViewSessionInputs s;
-    local_player_view_tick(&w, v, t, s);
+    local_player_view_tick(&w, v, t, s, nullptr);
     CHECK(!v.mount.control_seat);
     CHECK(v.camera_mode == 0);
     CHECK(!v.tp_anchor_valid);
-    local_player_view_tick(nullptr, v, t, s);
+    local_player_view_tick(nullptr, v, t, s, nullptr);
     CHECK(v.camera_mode == 0);
 }
 
@@ -925,13 +1117,13 @@ void test_frame_publishes_the_fp_draw_gates() {
     PlayerViewState ticked;
     LocalViewSessionInputs s;
     s.local_dead = true;
-    local_player_view_tick(&lw.w, ticked, tracker, s);
+    local_player_view_tick(&lw.w, ticked, tracker, s, nullptr);
     local_player_view_frame(&lw.w, plain, ticked, tracker, frame);
     CHECK(frame.fp_local_dead);
     CHECK(!frame.fp_round_winner_set);
     s.local_dead = false;
     s.end_round_winner_team = 2;
-    local_player_view_tick(&lw.w, ticked, tracker, s);
+    local_player_view_tick(&lw.w, ticked, tracker, s, nullptr);
     local_player_view_frame(&lw.w, plain, ticked, tracker, frame);
     CHECK(!frame.fp_local_dead);
     CHECK(frame.fp_round_winner_set);
@@ -1609,7 +1801,7 @@ void test_view_uses_current_motor_offset_and_live_position() {
     view.debug_third_person_on_foot = true;
     LocalPlayerViewTracker tracker;
     LocalViewSessionInputs session;
-    local_player_view_tick(&lw.w, view, tracker, session);
+    local_player_view_tick(&lw.w, view, tracker, session, nullptr);
     CHECK(view.tp_anchor[0] == entity.position.x + 0.25f);
     CHECK(view.tp_anchor[1] == entity.position.y - 0.5f);
     CHECK(view.tp_anchor[2] == entity.position.z + 1.5f);
@@ -2802,6 +2994,8 @@ int main() {
     test_nvg_toggle_plays_its_interface_sets();
     test_tip_events_from_scope_nvg_and_binoculars();
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
+    test_forced_scope_toggles_on_death_and_camera_switch();
+    test_forced_scope_toggle_sees_the_same_tick_promotion();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();
     test_frame_carries_the_framefx_dispatch_facts();
