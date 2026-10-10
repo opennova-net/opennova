@@ -115,7 +115,20 @@ const MissionItemCache::Catalog &MissionItemCache::catalog_(const SessionView &v
 	++files_read_;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0)
-		for (size_t i = 0; i < items.count; ++i) catalog.scale_q16.emplace(int64_t(items.entries[i].id), items.entries[i].scale_q16);
+		for (size_t i = 0; i < items.count; ++i) {
+			const def::DefItemDef &row = items.entries[i];
+			catalog.scale_q16.emplace(int64_t(row.id), row.scale_q16);
+			Catalog::Seed seed;
+			seed.good = row.attrib_good != 0;
+			seed.evil = row.attrib_evil != 0;
+			seed.sid = row.sid_derived ? std::string() : std::string(row.sid);
+			seed.default_aip = row.default_aip;
+			seed.min_engagement = row.min_engagement_dist;
+			seed.max_engagement = row.max_engagement_dist;
+			seed.max_attack = row.max_attack_dist;
+			seed.fire_timer = row.fire_timer;
+			catalog.seeds.emplace(int64_t(row.id), std::move(seed));
+		}
 	def::def_free_items(&items);
 	return catalog;
 }
@@ -133,6 +146,24 @@ bool MissionItemCache::facts(const SessionView &view, int64_t item, MissionItemF
 	if (const std::optional<int> type = strutil::parse_int(symbol->value)) {
 		out.type = *type;
 		out.pool = mission_item_pool_of_type(*type);
+	}
+	// What a record placed of it takes from its row (D-MIS-10).
+	{
+		const Catalog &catalog = catalog_(view, symbol->file);
+		const auto seed = catalog.seeds.find(item);
+		if (seed != catalog.seeds.end()) {
+			out.seeded = true;
+			out.team = seed->second.evil ? 2 : seed->second.good ? 1 : 0;
+			out.ai_class = seed->second.sid.substr(0, 8);
+			// The profile as the original names its file: the name's extension made .aip [orig: JOTACmed.exe
+			// sub_462CB0 @ 0x462cb0 with "aip" @ 0x5b2d40, the file asked for by sub_529FA0 @ 0x529fa0].
+			const std::string &aip = seed->second.default_aip;
+			if (!aip.empty() && graph->has_file(aip.substr(0, aip.find('.')) + ".aip")) out.ai_script = aip.substr(0, 8);
+			out.min_engagement = seed->second.min_engagement;
+			out.max_engagement = seed->second.max_engagement;
+			out.max_attack = seed->second.max_attack;
+			out.fire_timer = seed->second.fire_timer;
+		}
 	}
 	const ItemModels models = models_of(*graph, *symbol);
 	out.model = models.graphic;

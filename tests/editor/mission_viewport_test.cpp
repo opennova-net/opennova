@@ -92,10 +92,15 @@ std::string fixture(const std::string &rel) {
 constexpr const char *kDropItems = "begin \"Drop Pump\"\nid 106100\ntype object\ngraphic pump\nend\n"
 								   "begin \"Drop Scaled Pump\"\nid 106103\ntype object\ngraphic pump\nscale 1.5\nend\n"
 								   "begin \"Drop Armory\"\nid 106101\ntype building\ngraphic armory\nend\n"
-								   "begin \"Drop Rifleman\"\nid 106102\ntype person\ngraphic shed\nend\n"
+								   "begin \"Drop Rifleman\"\nid 106102\ntype person\ngraphic shed\nsid RIFLEMAN1\n"
+								   "attrib: good evil\nmax_engagement_dist 400\nfire_timer 7\ndefault_aip shooter\nend\n"
 								   "begin \"Drop Crate\"\nid 106190\ntype object\ngraphic crate\nend\n"
 								   "begin \"Marker Alpha\"\nid 100001\ntype marker\nend\n"
 								   "begin \"Waypoint\"\nid 106005\ntype marker\nend\n";
+
+// The edits a drop of a catalog's item plans: the Add with its item, its x, y, z and yaw, then what the record
+// takes from the item's row (D-MIS-10): its team, AI class and script, and four AI keys.
+constexpr size_t kPlacedEdits = 12;
 
 // The preferences in memory, whose saves fail while `fail` is set (a settings file another program
 // holds, a read-only profile).
@@ -662,18 +667,39 @@ static int test_drop() {
 	TEST_EXPECT(viewport->drop(context, drop, gathered, error) && gathered.requests.size() == 1);
 	if (gathered.requests.size() != 1) return 1;
 	const std::vector<Edit> &edits = gathered.requests[0].edits;
-	TEST_EXPECT(edits.size() == 5 && edits[0].operation == EditOperation::Add &&
+	TEST_EXPECT(edits.size() == kPlacedEdits && edits[0].operation == EditOperation::Add &&
 			edits[0].address.kind == node_kind(MissionKind::Building) && edits[0].field == "item" &&
 			std::get<int64_t>(edits[0].value) == 106101);
 	double target[3];
 	preview_to_mission(viewport->camera().target, target);
-	for (size_t i = 1; i < 4 && edits.size() == 5; ++i) {
+	for (size_t i = 1; i < 4 && edits.size() == kPlacedEdits; ++i) {
 		TEST_EXPECT(edits[i].address.row == batch_made(0) && edits[i].operation == EditOperation::Set);
 		TEST_EXPECT(near(std::get<double>(edits[i].value), target[i - 1], 1e-2));
 	}
 	// S15: facing the way the camera looks: north (0) on the first framing.
-	TEST_EXPECT(edits.size() == 5 && edits[1].field == "x" && edits[2].field == "y" && edits[3].field == "z" &&
+	TEST_EXPECT(edits.size() == kPlacedEdits && edits[1].field == "x" && edits[2].field == "y" && edits[3].field == "z" &&
 			edits[4].field == "yaw" && edits[4].address.row == batch_made(0) && std::get<int64_t>(edits[4].value) == 0);
+	// What a record placed of an item takes from its row (D-MIS-10): the armory names none of it, so the new
+	// record's own values; the rifleman's team (Evil over Good), its sid's first eight characters as its AI
+	// class, no AI script (the project has no shooter.aip), its engagement distance and fire timer.
+	TEST_EXPECT(edits.size() == kPlacedEdits && edits[5].field == "team" && std::get<int64_t>(edits[5].value) == 0 &&
+	            edits[6].field == "name1" && std::get<std::string>(edits[6].value).empty() &&
+	            edits[10].field == "max_attack_distance" && std::get<int64_t>(edits[10].value) == 16);
+	{
+		ViewportDrop person = drop;
+		person.name = "106102";
+		editor_test::Gathered planned;
+		TEST_EXPECT(viewport->drop(context, person, planned, error) && planned.requests.size() == 1);
+		const std::vector<Edit> *seeded = planned.requests.size() == 1 ? &planned.requests[0].edits : nullptr;
+		TEST_EXPECT(seeded && seeded->size() == kPlacedEdits);
+		if (seeded && seeded->size() == kPlacedEdits) {
+			const auto number = [&](size_t i) { return std::get<int64_t>((*seeded)[i].value); };
+			TEST_EXPECT(number(5) == 2 && std::get<std::string>((*seeded)[6].value) == "RIFLEMAN" &&
+			            std::get<std::string>((*seeded)[7].value).empty() && number(8) == 16 &&
+			            (*seeded)[9].field == "max_engagement_distance" && number(9) == 400 && number(10) == 16 &&
+			            (*seeded)[11].field == "advancetimer" && number(11) == 7);
+		}
+	}
 	const std::string before = rig.document()->serialize().text;
 	TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
 	TEST_EXPECT(static_cast<const MissionDocument &>(*rig.document()).rows_of(MissionKind::Building).size() == buildings + 1);
@@ -688,7 +714,7 @@ static int test_drop() {
 		rig.pump();
 		gathered.requests.clear();
 		TEST_EXPECT(rig.session.outcome().done() && viewport->drop(rig.context(), drop, gathered, error) && gathered.requests.size() == 1);
-		TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5 &&
+		TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].edits.size() == kPlacedEdits &&
 				std::get<int64_t>(gathered.requests[0].edits[4].value) == faces);
 	}
 	rig.session.handle(request::set_viewport(kMission, R"({"kind": "mission", "camera": {"yaw": 0}})"));
@@ -699,7 +725,7 @@ static int test_drop() {
 	drop.file = "armory.3di";
 	gathered.requests.clear();
 	TEST_EXPECT(viewport->drop(context, drop, gathered, error) && gathered.requests.size() == 1 &&
-			gathered.requests[0].edits.size() == 5 && std::get<int64_t>(gathered.requests[0].edits[0].value) == 106101);
+			gathered.requests[0].edits.size() == kPlacedEdits && std::get<int64_t>(gathered.requests[0].edits[0].value) == 106101);
 	// Refused, nothing planned: a model two items draw (naming both), a file that is no model, an item
 	// no catalog defines.
 	gathered.requests.clear();
@@ -728,7 +754,7 @@ static int test_drop() {
 	drop.name = "106190";
 	gathered.requests.clear();
 	TEST_EXPECT(viewport->drop(grounded, drop, gathered, error) && gathered.requests.size() == 1);
-	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5) {
+	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == kPlacedEdits) {
 		const std::vector<Edit> &placed = gathered.requests[0].edits;
 		TEST_EXPECT(std::get<int64_t>(placed[0].value) == 106190 && placed[0].address.kind == node_kind(MissionKind::Item));
 		for (int i = 0; i < 3; ++i) TEST_EXPECT(near(std::get<double>(placed[size_t(i) + 1].value), point[i] - crate[i], 1e-6));
@@ -1029,11 +1055,11 @@ static int test_placing() {
 	drop.y = float(context.height) * 0.5f + 3.0f;
 	drop.snap = 5.0f;
 	TEST_EXPECT(viewport->drop(context, drop, gathered, error) && gathered.requests.size() == 1);
-	TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5);
+	TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].edits.size() == kPlacedEdits);
 	const auto on_grid = [](double value) {
 		return near(std::fmod(std::fabs(value), 5.0), 0.0, 1e-9) || near(std::fmod(std::fabs(value), 5.0), 5.0, 1e-9);
 	};
-	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5) {
+	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == kPlacedEdits) {
 		const std::vector<Edit> &edits = gathered.requests[0].edits;
 		const double x = std::get<double>(edits[1].value), y = std::get<double>(edits[2].value);
 		TEST_EXPECT(on_grid(x) && on_grid(y));
@@ -1047,8 +1073,8 @@ static int test_placing() {
 	gathered.requests.clear();
 	drop.name = "106190";
 	TEST_EXPECT(rig.viewport()->drop(rig.context(), drop, gathered, error) && gathered.requests.size() == 1 &&
-			gathered.requests[0].edits.size() == 5);
-	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 5) {
+			gathered.requests[0].edits.size() == kPlacedEdits);
+	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == kPlacedEdits) {
 		const std::vector<Edit> &edits = gathered.requests[0].edits;
 		const double x = std::get<double>(edits[1].value), y = std::get<double>(edits[2].value);
 		TEST_EXPECT(on_grid(x) && on_grid(y));
@@ -1100,7 +1126,8 @@ static int test_placing() {
 			if (static_cast<const PathRow &>(*each).native.number == 1) path_row = each;
 		TEST_EXPECT(path_row != nullptr);
 		if (path_row) {
-			const size_t held = static_cast<const PathRow &>(*path_row).native.record.waypoint_numbers.size();
+			// Past 32 stops too (D-MIS-6: a path counts every waypoint marker on it).
+			const size_t held = static_cast<const PathRow &>(*path_row).native.stops.size();
 			std::vector<Edit> fill;
 			for (size_t i = held; i < opennova::mission::kMaxWaypointPathMarkers; ++i) {
 				Edit stop;
@@ -1112,9 +1139,9 @@ static int test_placing() {
 			}
 			rig.session.handle(request::edit_record(kMission, fill));
 			TEST_EXPECT(rig.session.outcome().done());
-			TEST_EXPECT(!mission_stop_edits(static_cast<const MissionDocument &>(*rig.document()), 1, 100001, MissionKind::Marker,
+			TEST_EXPECT(mission_stop_edits(static_cast<const MissionDocument &>(*rig.document()), 1, 100001, MissionKind::Marker,
 								 where, 0, planned, error) &&
-					error.find("holds its 32 stops") != std::string::npos);
+					!planned.empty());
 			rig.session.handle(request::undo(kMission));
 			TEST_EXPECT(rig.session.outcome().done());
 		}

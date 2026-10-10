@@ -31,6 +31,17 @@ struct MissionItemFacts {
 	// Its entity's bound radius, metres (mission_item_bound_radius: what a pick of its mark tests); 0
 	// for none (no model, or a model with no collision block).
 	double radius = 0.0;
+	// What a record placed of the item takes from its catalog row, as the original editor's placement does
+	// (D-MIS-10) [orig: JOTACmed.exe MissionItem_InitFromDefinition @ 0x44dbf0]; `seeded` where its row was
+	// read (an item a drop makes has none: a new record's own values stand). The team its Good and Evil
+	// words give (1, 2, Evil over Good; 0 neither) [orig: @ 0x44dd51..0x44dd86]; its AI class, its sid's first
+	// eight characters, and its AI script, its default_aip's where the project has the profile's .aip [orig:
+	// @ 0x44dccc..0x44dd2e; sub_44C8E0 @ 0x44c8e0, the eight bytes each]; and its four AI keys [orig:
+	// @ 0x44dc46..0x44dcc2].
+	bool seeded = false;
+	int team = 0;
+	std::string ai_class, ai_script;
+	int32_t min_engagement = 16, max_engagement = 320, max_attack = 16, fire_timer = 10;
 };
 
 // The bound radius an entity of an item gets, metres, as the game's entity init stamps it at entity+0
@@ -82,6 +93,13 @@ private:
 	struct Catalog {
 		uint64_t stamp = 0;
 		std::unordered_map<int64_t, int32_t> scale_q16; // by item id, the first definition of an id
+		// By item id, the first definition of an id: what a record placed of it takes (MissionItemFacts).
+		struct Seed {
+			bool good = false, evil = false;
+			std::string sid, default_aip;
+			int32_t min_engagement = 16, max_engagement = 320, max_attack = 16, fire_timer = 10;
+		};
+		std::unordered_map<int64_t, Seed> seeds;
 	};
 	// The files an asked item read: its catalog, its graphic's model, its first husk's model.
 	struct Reads {
