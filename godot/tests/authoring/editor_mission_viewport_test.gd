@@ -159,9 +159,9 @@ func _copy_fixture(source: String, target: String) -> void:
 ## its heights, its two maps and the textures it names, its two foliage definitions' models), the
 ## environment (synth_full.env and its clouds), the item table the mission's items are in, and the models
 ## their graphics name. `effects` (DI-31): the pumps author a particle slot at their model's ground point,
-## its effect in a particle file of the project. `listen` (DI-36): the four Marker Alpha markers made the
-## game's env-sound emitters of V_TRUCK_ILP at every hour, the fixture bank that holds it (heard to 2 km, its
-## member tone.wav) as the project's game.lwf.
+## its effect in a particle file of the project. `listen` (DI-36): the mission's four waypoint markers (item
+## 106005, path 1's stops in master's synth_logic.bms) made the game's env-sound emitters of V_TRUCK_ILP at every
+## hour, the fixture bank that holds it (heard to 2 km, its member tone.wav) as the project's game.lwf.
 func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), effects := false,
 		listen := false) -> void:
 	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
@@ -181,12 +181,12 @@ func _mint_project(root: String, skip: PackedStringArray = PackedStringArray(), 
 	var crate_line := "graphic crate\r\n" + ("particlefx Puff ground\r\n" if effects else "")
 	items = items.replace("graphic pump\r\n", crate_line)
 	if listen:
-		const MARKER := "begin \"Marker Alpha\"\r\n  id 100001\r\n  type marker\r\n"
-		assert_true(items.contains(MARKER))
-		var loops := "  move_function envs\r\n"
+		# The waypoint item the mission's four markers place (the fixture's table has none of it).
+		assert_false(items.contains("  id 106005\r\n"))
+		var waypoint := "begin \"Waypoint\"\r\n  id 106005\r\n  type marker\r\n  move_function envs\r\n"
 		for slot in 4:
-			loops += "  soundloop_%d V_TRUCK_ILP\r\n" % (slot + 1)
-		items = items.replace(MARKER, MARKER + loops)
+			waypoint += "  soundloop_%d V_TRUCK_ILP\r\n" % (slot + 1)
+		items += waypoint + "end\r\n"
 		_copy_fixture("lwf/menu.lwf", root.path_join("sounds").path_join("game.lwf"))
 		_copy_fixture("lwf/tone.wav", root.path_join("sounds").path_join("tone.wav"))
 	_write(root.path_join("defs").path_join("items.def"), items.to_utf8_buffer())
@@ -1647,7 +1647,7 @@ func test_the_shoot_tool_plays_its_impacts() -> void:
 	assert_true(again, "a shot after the clear stops: %s" % str(_state().get("body", {}).get("shots", {})).left(400))
 
 
-## DI-36: the Listen. The fixture's four Marker Alpha markers made the game's env-sound emitters of a set the
+## DI-36: the Listen. The fixture's four waypoint markers made the game's env-sound emitters of a set the
 ## project's bank holds: listening near one, the viewport's mix binds each marker's layer to one of the game's
 ## channels, and the device plays each looping at its marker (an AudioStreamPlayer3D under its world, no
 ## attenuation: the mix's volume; the device's camera the listener), held paused while its picture is not drawn
