@@ -367,6 +367,8 @@ end
 	var cards := overlay.find_children("SightsCard", "", true, false)
 	assert_eq(cards.size(), 1, "the game's SIGHTS card rides the overlay")
 	if cards.size() == 1:
+		# Its rows scale to the screen it reads off the viewport: the options' screen, whatever the picture's size,
+		# the picture that screen stretched once (never the card's rows scaled to the picture and again by it).
 		assert_eq(int(cards[0].call("row_count")), 1, "its one row, its picture found in the project")
 		assert_true(bool(cards[0].call("is_card_up")), "up once the scope settles")
 	var masks := overlay.find_children("ScopeCircleMask", "", true, false)
@@ -399,3 +401,13 @@ end
 			"viewport": {"kind": "hud", "options": {"board": false}}}))
 	await _pump_frames(3)
 	assert_true(_item(_viewport(), "scoreboard").is_empty(), "put down, it draws nothing")
+	# The card's rows scale to the screen it reads off the viewport, as the game's screen: the options' screen
+	# whatever the picture's size (the picture 1024 x 768 here), the picture that screen stretched once, never the
+	# rows scaled to the picture and again by it.
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"width": 1600, "height": 1200, "sights": true}}}))
+	await _pump_frames(4)
+	if cards.size() == 1:
+		assert_true(bool(cards[0].call("is_card_up")), "up again")
+		assert_eq((cards[0] as Control).get_viewport_rect().size, Vector2(1600, 1200), "the card reads the HUD's screen")
+	assert_eq(overlay.scale, Vector2.ONE, "the overlay at the screen, the viewport stretching it")

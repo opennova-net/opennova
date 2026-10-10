@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/script.hpp>
+#include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -66,6 +67,7 @@ Control *script_control(const char *path) {
 } // namespace
 
 HudViewportApplier::HudViewportApplier(SubViewport &viewport) {
+	viewport_id_ = viewport.get_instance_id();
 	ColorRect *backdrop = memnew(ColorRect);
 	backdrop->set_name("Backdrop");
 	backdrop->set_color(kBackdrop);
@@ -247,11 +249,21 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 	const auto &hud_model = static_cast<const opennova::editor::HudViewport &>(model);
 	HudOverlay *hud = overlay();
 	const opennova::editor::HudViewportOptions &options = hud_model.options();
-	// The HUD laid out at the screen the options name, scaled onto the picture.
+	// The HUD laid out at the screen the options name: the SubViewport's 2D space that screen, stretched onto the
+	// picture, so what reads the screen off the viewport (the SIGHTS card's rows) reads the game's screen too.
+	if (SubViewport *viewport = node<SubViewport>(viewport_id_)) {
+		const Vector2i screen(options.width, options.height);
+		if (viewport->get_size_2d_override() != screen) viewport->set_size_2d_override(screen);
+		if (!viewport->is_size_2d_override_stretch_enabled()) viewport->set_size_2d_override_stretch(true);
+	}
+	if (ColorRect *backdrop = node<ColorRect>(backdrop_id_)) {
+		backdrop->set_position(Vector2(0.0f, 0.0f));
+		backdrop->set_size(Vector2(float(options.width), float(options.height)));
+	}
 	if (hud) {
 		hud->set_position(Vector2(0.0f, 0.0f));
 		hud->set_size(Vector2(float(options.width), float(options.height)));
-		hud->set_scale(Vector2(float(width_) / float(options.width), float(height_) / float(options.height)));
+		hud->set_scale(Vector2(1.0f, 1.0f));
 	}
 	if (stamped_) report.files = stamped_->stamps();
 	if (!hud || !configured_) return;
@@ -314,13 +326,8 @@ void HudViewportApplier::background(opennova::editor::PreviewBackground backgrou
 	set_preview_backdrop(**backdrop_material_, background);
 }
 
-void HudViewportApplier::resize(int width, int height) {
-	width_ = std::max(width, 1);
-	height_ = std::max(height, 1);
-	if (ColorRect *backdrop = node<ColorRect>(backdrop_id_)) {
-		backdrop->set_position(Vector2(0.0f, 0.0f));
-		backdrop->set_size(Vector2(float(width_), float(height_)));
-	}
+void HudViewportApplier::resize(int, int) {
+	// The picture's size is the SubViewport's own; its 2D space is the options' screen stretched onto it (apply).
 }
 
 } // namespace godot
