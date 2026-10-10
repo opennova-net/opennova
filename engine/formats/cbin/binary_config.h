@@ -12,6 +12,10 @@
 #include <string>
 #include <vector>
 
+namespace opennova::configfile {
+struct ConfigSection;
+}
+
 namespace opennova::cbin {
 
 struct BinaryConfig {
@@ -57,5 +61,16 @@ bool decode_binary_config(const uint8_t *data, size_t size, BinaryConfig &out, s
 // The same layout written from `config`, under its key: decode then encode gives the bytes back.
 // False with the reason for an entry of no value or of more than two, or an index past the table.
 bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out, std::string &error);
+
+// The sections the engine's binary reader builds of `config`, which the ConfigFile's accessors read as they
+// read the text form's (formats/configfile/config_file.h) [orig: ConfigFile_ParseBinary @ 0x75e8a0, taken
+// on the "CBIN" magic by ConfigFile_LoadFromFile @ 0x760aa3]: each label a section in the file's order, each
+// entry its name and its values in theirs. A label's name is lowercased in the string table itself [orig:
+// strlwr @ 0x75e9d4], so an entry's name or a string value of the same string reads lowercased too. A
+// value of flags 1 is an integer, of flags 2 a float's bits, of any flags with 4 set a string [orig: @
+// 0x75eb42; effect_get_param_value_0 @ 0x75fb2e..0x75fb58]. False (out empty) for a value of other flags,
+// whose word the accessor would read as a string's address, or of a string past the table: none the
+// writer writes.
+bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::ConfigSection> &out);
 
 } // namespace opennova::cbin

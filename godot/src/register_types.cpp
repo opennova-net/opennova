@@ -146,8 +146,6 @@
 #include "audio/mission_audio_records.h"
 #include "audio/mission_audio.h"
 #include "dbf/dbf_data.h"
-#include "cbin/cbin_credits_resource.h"
-#include "cbin/credits_player.h"
 #include "fnt/fnt_resource.h"
 #include "rtxt/rtxt_string_file.h"
 #include "network/novaworld_client.h"
@@ -374,12 +372,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MissionAudioPerf);
 	GDREGISTER_CLASS(FiredSoundset);
 	GDREGISTER_CLASS(MissionAudio);
-	GDREGISTER_ABSTRACT_CLASS(CbinEntry);
-	GDREGISTER_CLASS(CbinTextEntry);
-	GDREGISTER_CLASS(CbinNewlineEntry);
-	GDREGISTER_CLASS(CbinImageEntry);
-	GDREGISTER_CLASS(CbinCreditsResource);
-	GDREGISTER_CLASS(CreditsPlayer);
 	GDREGISTER_CLASS(FntResource);
 	GDREGISTER_CLASS(RtxtStringFile);
 	GDREGISTER_CLASS(Paths);

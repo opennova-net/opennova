@@ -1930,6 +1930,14 @@ target_link_libraries(menu_frame_notes_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_notes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_notes COMMAND menu_frame_notes_test)
 
+# A marquee's credits over both ConfigFile forms (runtime/menu/menu_credits.h): a
+# CBIN file read as its text form reads, the minted synth_nlist trio, and the
+# shipped lists from the reference fixture set (the _retail row).
+add_executable(menu_credits_test menu/menu_credits_test.cpp)
+target_link_libraries(menu_credits_test PRIVATE opennova_runtime)
+target_include_directories(menu_credits_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(menu_credits COMMAND menu_credits_test)
+
 # Every shipped screen through the frame compiler: the reference fixture menus
 # (gated) and every .mnu the packed install serves, with its assets (SKIP-LEG).
 add_executable(menu_render_corpus_test menu/menu_render_corpus_test.cpp)

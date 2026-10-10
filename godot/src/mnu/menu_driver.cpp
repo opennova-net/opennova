@@ -1,8 +1,6 @@
 #include "mnu/menu_driver.h"
 
 #include "audio/music_director.h"
-#include "cbin/cbin_credits_resource.h"
-#include "cbin/credits_player.h"
 #include "mnu/menu_audio.h"
 #include "mnu/controls_model.h"
 #include "mission/mission_catalog.h"
@@ -453,7 +451,7 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 			emit_signal("widget_hover_changed", p_event.id, p_event.flag);
 			break;
 		case Kind::ShownChanged:
-			sync_credits_();
+			// The compiled draw walk gates every widget it draws, the credits roll among them.
 			break;
 		case Kind::EditCommitted:
 			emit_signal("edit_committed", p_event.id, to_gd(p_event.text));
@@ -469,13 +467,10 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 	}
 }
 
-// Marquee DATASOURCE routing: every DATASOURCE of a marquee_wnd loads and appends
-// its credits (the witness lives at the engine home, menu_credits.h). A text
-// config reads through the engine's port into the compiled roll; a CBIN config (the
-// binary form the engine does not read there) goes to a CreditsPlayer scroller of
-// its own (godot/src/cbin, D-MNU-6).
+// Marquee DATASOURCEs: every DATASOURCE of a marquee_wnd loads and appends its
+// credits into the compiled roll, a text config and a CBIN one alike (the witness
+// lives at the engine home, menu_credits.h).
 void MenuDriver::seed_marquee_widgets_() {
-	clear_credits_();
 	MenuFrame *frame = frame_();
 	if (root_.is_null() || frame == nullptr) return;
 	for (int id : runtime_.current_screen_ids()) {
@@ -490,48 +485,11 @@ void MenuDriver::seed_marquee_widgets_() {
 			if (opennova::menu::marquee_load_credits(bytes.ptr(), static_cast<size_t>(bytes.size()),
 						credits, [frame](const std::string &name) {
 							return frame->texture_loads(to_gd(name));
-						})) {
+						}))
 				loaded = true;
-				continue;
-			}
-			const Ref<CbinCreditsResource> cbin = CbinCreditsResource::from_cbin_bytes(bytes);
-			if (cbin.is_null()) continue;
-			const Rect2 rect = widget_frame_rect(id);
-			CreditsPlayer *player = memnew(CreditsPlayer);
-			player->set_name("Credits");
-			player->set_credits_resource(cbin);
-			player->set_autoplay(true);
-			player->set_position(rect.position);
-			player->set_size(rect.size);
-			player->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-			frame->add_child(player);
-			credits_.push_back({ ObjectID(player->get_instance_id()), id });
 		}
 		const int index = runtime_.frame_index(id);
 		if (index >= 0 && loaded) frame->set_widget_marquee(index, credits);
-	}
-	sync_credits_();
-}
-
-void MenuDriver::clear_credits_() {
-	for (const CreditsMount &mount : credits_) {
-		if (CreditsPlayer *player =
-						Object::cast_to<CreditsPlayer>(ObjectDB::get_instance(mount.player)))
-			player->queue_free();
-	}
-	credits_.clear();
-}
-
-// Re-apply the draw walk's shown gate (widget + ancestors + overrides —
-// MenuFrame.is_widget_shown) to every mounted overlay.
-void MenuDriver::sync_credits_() {
-	MenuFrame *frame = frame_();
-	for (const CreditsMount &mount : credits_) {
-		CreditsPlayer *player =
-				Object::cast_to<CreditsPlayer>(ObjectDB::get_instance(mount.player));
-		if (player == nullptr) continue;
-		const int index = runtime_.frame_index(mount.id);
-		player->set_visible(frame != nullptr && index >= 0 && frame->is_widget_shown(index));
 	}
 }
 

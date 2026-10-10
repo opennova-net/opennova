@@ -30,7 +30,6 @@
 		"CanvasLayer",
 		"ClassDB",
 		"CollisionObject3D",
-		"ColorRect",
 		"Compositor",
 		"CompositorEffect",
 		"ConcavePolygonShape3D",

@@ -12,8 +12,7 @@ namespace opennova {
 // The packed-colour <-> godot::Color edges the bindings share. Packed words
 // decode straight to float channels (byte / 255.0f); the encoder rounds
 // (int(v * 255 + 0.5), clamped to a byte) -- the form the GUT vectors pin as
-// the hex idiom. Format writers with their own arithmetic keep it:
-// cbin_credits_resource.cpp's color_to_cbin truncates (CBIN parity), the
+// the hex idiom. Format writers with their own arithmetic keep it: the
 // particle renderer multiplies by 1/255 (its golden pins), and the byte
 // extractions into image buffers are not conversions at all.
 

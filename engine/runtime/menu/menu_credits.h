@@ -2,9 +2,10 @@
 
 // A MARQUEE_WND's credits: what one DATASOURCE loads [orig:
 // CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0 -> CMarqueeWnd_LoadCreditsFromIni
-// @ 0x65c5a0, reading the file through the ConfigFile text reader
-// (ConfigFile_LoadFromFile @ 0x760a10 -> ConfigFile_ParseText @ 0x7608a0;
-// ConfigFile_ReadKeyValue @ 0x75fc90 -> effect_get_param_value_0 @ 0x75fa00)] and
+// @ 0x65c5a0, reading the file through the ConfigFile's reader of its form
+// (ConfigFile_LoadFromFile @ 0x760a10 -> ConfigFile_ParseText @ 0x7608a0, or
+// ConfigFile_ParseBinary @ 0x75e8a0 for a CBIN file; ConfigFile_ReadKeyValue
+// @ 0x75fc90 -> effect_get_param_value_0 @ 0x75fa00)] and
 // the per-frame scroll the frame compiler draws them with [orig:
 // CMarqueeWnd_RenderScrollingCredits @ 0x65ca00].
 // Witness record: docs/mnu/menu-re.md ("Marquee credits").
@@ -57,11 +58,12 @@ inline constexpr int kMarqueeVerticalSpace = 0;
 inline constexpr char kMarqueeSpaceMark = '_';
 inline constexpr char kMarqueeCommaMark = '@';
 
-// Load one DATASOURCE and append its credits. `data` is the file's bytes; a CBIN
-// file (the "CBIN" magic) is the binary config form this port does not read here
-// (false, untouched: the embedder's credits scroller serves it). A text file reads
-// as the ConfigFile text reader reads it. `texture_loads` answers whether an image
-// node's texture loads (a node whose texture does not is not appended).
+// Load one DATASOURCE and append its credits. `data` is the file's bytes: a CBIN
+// file (the "CBIN" magic, the form the shipped nlist.kda is) reads as the binary
+// reader builds it (formats/cbin/binary_config.h), any other as the text reader
+// reads it. False, untouched, for a CBIN file laid out otherwise than that reader
+// reads. `texture_loads` answers whether an image node's texture loads (a node
+// whose texture does not is not appended).
 bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 		const std::function<bool(const std::string &)> &texture_loads);
 
