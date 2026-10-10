@@ -42,6 +42,7 @@
 #include <editor/project_build/archive_routing.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/sbf/sbf.h>
 #include <runtime/renderer/material_texture.h>
 #include <base/io/json.h>
 #include <editor/project_build/build_plan.h>
@@ -203,11 +204,34 @@ static int test_empty_project_is_blocked() {
 	return 0;
 }
 
+// A music bank (the game's loose .sbf) of one stream whose chunks' audio is `fill`, at least `size` bytes: a
+// project's .sbf is a document since round S23, a bank its reader refuses the gate's (document.parse). Its size,
+// 0 when it was not written.
+static uint64_t write_bank(const std::string &path, size_t size, uint8_t fill = 0x80) {
+	using namespace opennova::sbf;
+	const size_t head = size_t(SBF_HEADER_SIZE + SBF_ENTRY_SIZE);
+	const size_t chunks = std::max<size_t>(1, (size > head ? size - head : 0) / SBF_CHUNK_TOTAL + 1);
+	SbfStream stream;
+	stream.name = "FILLER";
+	stream.chunks.resize(chunks);
+	for (SbfChunk &chunk : stream.chunks) {
+		chunk.audio.assign(SBF_CHUNK_AUDIO, fill);
+	}
+	SbfFile bank;
+	bank.streams.push_back(std::move(stream));
+	std::vector<uint8_t> bytes;
+	std::string error;
+	fs::create_directories(fs::path(path).parent_path());
+	if (!sbf_write_bank(bank, bytes, error) || !opennova::io::write_file_atomic(path, bytes.data(), bytes.size(), error))
+		return 0;
+	return bytes.size();
+}
+
 static int test_filled_project_builds_and_mounts() {
 	Project p("opennova_editor_build_test");
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
-	TEST_EXPECT(editor_test::write_text(p.root + "/music/menumus.sbf", "SBF!")); // a loose-by-contract file
+	TEST_EXPECT(write_bank(p.root + "/music/menumus.sbf", 0) != 0); // a loose-by-contract file
 	const BuildPlan plan = p.plan();
 	TEST_EXPECT(plan.ok);
 	// The optional files the project lacks are notes the game does without: not the gate's.
@@ -554,7 +578,7 @@ static int test_expansion_layout() {
 	TEST_EXPECT(p.fill());
 	TEST_EXPECT(write_table(p.root + "/strings/jxm.bin", "The expansion"));
 	TEST_EXPECT(editor_test::write_text(p.root + "/video/header.bik", "BIKi"));
-	TEST_EXPECT(editor_test::write_text(p.root + "/music/Mjxm.sbf", "SBF!"));
+	TEST_EXPECT(write_bank(p.root + "/music/Mjxm.sbf", 0) != 0);
 	TEST_EXPECT(editor_test::write_text(p.root + "/version.txt", "1.0"));
 	TEST_EXPECT(editor_test::write_text(p.root + "/cc.bin", "us"));
 	TEST_EXPECT(editor_test::write_text(p.root + "/nw_error.mnx", "<HTML/>"));
@@ -1165,7 +1189,8 @@ static int test_steps_are_bounded() {
 	Project p("opennova_editor_build_steps_test");
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
-	TEST_EXPECT(write_filler(p.root + "/music/big.sbf", 5 * 1024 * 1024));
+	const uint64_t big = write_bank(p.root + "/music/big.sbf", 5 * 1024 * 1024);
+	TEST_EXPECT(big >= 5 * 1024 * 1024);
 	const BuildPlan plan = p.plan();
 	TEST_EXPECT(plan.ok);
 	constexpr uint64_t budget = 64 * 1024;
@@ -1188,7 +1213,7 @@ static int test_steps_are_bounded() {
 	TEST_EXPECT(upward && largest <= budget);
 	TEST_EXPECT(run.bytes_done() == run.bytes_total());
 	TEST_EXPECT(run.items_done() == run.items_total() && run.item_name(0) == "language.pff");
-	TEST_EXPECT(fs::file_size(fs::path(run.report().build_dir) / "big.sbf") == 5u * 1024u * 1024u);
+	TEST_EXPECT(fs::file_size(fs::path(run.report().build_dir) / "big.sbf") == big);
 	return 0;
 }
 
@@ -1263,7 +1288,7 @@ static int test_file_rewritten_mid_read_fails() {
 		TEST_EXPECT(p.create());
 		TEST_EXPECT(p.fill());
 		constexpr uint64_t kSize = 256 * 1024;
-		TEST_EXPECT(write_filler(p.root + "/music/big.sbf", kSize));  // a loose file
+		TEST_EXPECT(write_bank(p.root + "/music/big.sbf", kSize) != 0); // a loose file
 		TEST_EXPECT(write_filler(p.root + "/extra/torn.aip", kSize)); // packed: resource.pff
 		const BuildPlan plan = p.plan();
 		TEST_EXPECT(plan.ok);
@@ -1469,7 +1494,7 @@ static int test_hash_cache() {
 	Project p("opennova_editor_build_hash_cache_test");
 	TEST_EXPECT(p.create());
 	TEST_EXPECT(p.fill());
-	TEST_EXPECT(write_filler(p.root + "/music/extra.sbf", 1000));
+	TEST_EXPECT(write_bank(p.root + "/music/extra.sbf", 1000) != 0);
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "zero"));
 	// The project written a while ago: a file the cache keeps by its stamp (one written within the
 	// settle window is read by every build until it settles, below).
@@ -1771,12 +1796,12 @@ static int test_shared_folder() {
 	for (const Diagnostic &d : same.diagnostics) said = said || d.message.find("another project's build of the same files") != std::string::npos;
 	TEST_EXPECT(!same.ok && said && fs::is_directory(first_a.build_dir));
 	// b with files of its own: built beside a's, which it names and leaves.
-	TEST_EXPECT(editor_test::write_text(b.root + "/music/menumus.sbf", "SBF!"));
+	TEST_EXPECT(write_bank(b.root + "/music/menumus.sbf", 0, 0x21) != 0);
 	const BuildReport first_b = run_build(planned(b, "project-b"), shared);
 	TEST_EXPECT(first_b.ok && first_b.build_id != first_a.build_id && fs::is_directory(first_a.build_dir));
 	TEST_EXPECT(first_b.others == std::vector<std::string>({first_a.build_id}));
 	// a changed: its own last build pruned, b's left and named.
-	TEST_EXPECT(editor_test::write_text(a.root + "/music/menumus.sbf", "SBF?"));
+	TEST_EXPECT(write_bank(a.root + "/music/menumus.sbf", 0, 0x3F) != 0);
 	const BuildReport second_a = run_build(planned(a, "project-a"), shared);
 	TEST_EXPECT(second_a.ok && !fs::exists(first_a.build_dir) && fs::is_directory(first_b.build_dir));
 	TEST_EXPECT(second_a.others == std::vector<std::string>({first_b.build_id}));

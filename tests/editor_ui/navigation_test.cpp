@@ -183,20 +183,21 @@ void test_keys_and_buttons() {
 void test_page_tab() {
 	Navigating n("opennova_editor_ui_navigation_page");
 	const SessionView &v = n.view();
+	// The NovaWorld string table, a file the editor has no editor for (a font is a document since round S23).
 	std::string font;
 	for (const AssetEntry &entry : v.project.scan->entries)
-		if (entry.kind == AssetKind::Font) {
+		if (entry.kind == AssetKind::StringTableCoo) {
 			font = entry.relative_path;
 			break;
 		}
-	CHECK(!font.empty(), "a font, a file the editor has no editor for");
+	CHECK(!font.empty(), "nw_cdata.coo, a file the editor has no editor for");
 	const auto page_shows = [&] {
 		n.ui.frames(2);
 		return logged_frame(n.ui).find("Read by the game") != std::string::npos;
 	};
 	n.go(request::open_document("main.mnu"));
 	n.go(request::open_document(font));
-	CHECK(page_shows(), "the font's page shows");
+	CHECK(page_shows(), "the file's page shows");
 	n.go(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 	CHECK(!page_shows(), "a new menu's tab over the page");
 	n.go(request::navigate_back());
