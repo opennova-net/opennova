@@ -106,6 +106,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::Credits, "credits", "Credits")
 	        .edited_by(DocumentTypeId::Credits)
+	        .names_files()
 	        .folder("menus")
 	        .new_name("newcredits.kda")
 	        .row,

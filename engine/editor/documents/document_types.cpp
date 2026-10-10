@@ -112,8 +112,9 @@ constexpr DocumentType kTypes[] = {
 			script_finding_codes, nullptr, script_references },
 	{ DocumentTypeId::MusicScript, "music_script", make_music_script_document,
 			validate_music_script_file, text_fields, music_script_finding_codes },
+	// The credits' text names the images its lines draw and the fonts its text lines draw in.
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
-			text_fields, credits_finding_codes },
+			text_fields, credits_finding_codes, nullptr, credits_references },
 	// The shader's text defines the tags it registers (its EffectTag; _ffp.fx the fixed-function tags).
 	{ DocumentTypeId::Shader, "shader", make_shader_document, validate_shader_file, text_fields,
 			shader_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,

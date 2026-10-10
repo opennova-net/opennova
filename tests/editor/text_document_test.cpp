@@ -943,6 +943,32 @@ static int test_credits() {
 	TEST_EXPECT(credits.line(1) == "[ENV]" && credits.line(2) == "scroll_rate = 0.5" &&
 	            credits.line(8) == "text = Joint_Operations:, Serpen24" && made->serialize().text == kda &&
 	            made->rewrite_need() == DocumentBase::RewriteNeed::None && type->validate_file(*made).empty());
+	// What its lines name (credits_references, D-MNU-6): the text line's font and the fading image's texture,
+	// each at its span.
+	TEST_EXPECT(type->references);
+	std::vector<TextReference> names;
+	type->references(credits, names);
+	TEST_EXPECT(names.size() == 2 && names[0].kind == ReferenceKind::Font && names[0].value == "Serpen24" &&
+	            names[0].span.line == 8 && names[0].span.column == 27 && names[0].span.length == 8 &&
+	            names[1].kind == ReferenceKind::MenuTexture && names[1].value == "cr1.png" &&
+	            names[1].span.line == 10 && names[1].span.column == 14 && names[1].span.length == 7);
+	// As the loader reads [TEXT]: a spacing image, a font cut to 31 bytes, no number (the reader prints it), no
+	// line of another section, and nothing after an entry of no value (where the accessor's walk stops).
+	{
+		std::unique_ptr<DocumentBase> named = type->make();
+		TEST_EXPECT(named->load_bytes(bytes_of("[TEXT]\r\ntext = ~Ilogo.tga\r\ntext = 5, 7\r\n"
+		                                       "TEXT = Name, Font_Name_Longer_Than_Thirty_One_Bytes\r\n"
+		                                       "text = ~f1||2|fade.tga\r\ntext = ,\r\ntext = ~Iafter.tga\r\n"
+		                                       "[ENV]\r\ntext = ~Ielsewhere.tga\r\n"),
+		                              "named.kda", AssetKind::Credits, "jo", error));
+		std::vector<TextReference> read;
+		type->references(*text_of(*named), read);
+		TEST_EXPECT(read.size() == 3 && read[0].kind == ReferenceKind::MenuTexture && read[0].value == "logo.tga" &&
+		            read[0].span.line == 2 && read[0].span.column == 10 && read[1].kind == ReferenceKind::Font &&
+		            read[1].value == "Font_Name_Longer_Than_Thirty_On" && read[1].span.line == 4 &&
+		            read[1].span.length == 31 && read[2].kind == ReferenceKind::MenuTexture &&
+		            read[2].value == "fade.tga" && read[2].span.line == 5 && read[2].span.column == 15);
+	}
 	// A text line's value changed: written in the CBIN form, which reads back as the edited text.
 	size_t text_line = 0;
 	for (size_t i = 1; i <= credits.line_count() && !text_line; ++i)
@@ -1371,7 +1397,7 @@ static int test_retail() {
 	TEST_EXPECT(view.open(install_spec(install, project), view_error));
 	const opennova::Vfs &mount = view.vfs();
 	size_t scripts = 0, compiled = 0, findings = 0, references = 0, music = 0, credits = 0, shaders = 0;
-	size_t witnessed = 0, alone = 0, shader_tags = 0;
+	size_t witnessed = 0, alone = 0, shader_tags = 0, credit_fonts = 0, credit_images = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
 		const AssetKind kind = classify_asset(name, nullptr);
@@ -1444,10 +1470,15 @@ static int test_retail() {
 			++music;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
 			break;
-		case AssetKind::Credits:
+		case AssetKind::Credits: {
 			++credits;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
+			std::vector<TextReference> names;
+			type->references(*text_of(*document), names);
+			for (const TextReference &name : names)
+				++(name.kind == ReferenceKind::Font ? credit_fonts : credit_images);
 			break;
+		}
 		case AssetKind::Shader: {
 			++shaders;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
@@ -1460,12 +1491,16 @@ static int test_retail() {
 		}
 	}
 	std::printf("retail: %zu scripts (%zu with the original compiler's listing matched, %zu running no other "
-	            "file; %zu compiler reports, %zu findings, %zu references), %zu music scripts, %zu credits files, "
-	            "%zu shaders (%zu shader tags)\n",
-	            scripts, witnessed, alone, compiled, findings, references, music, credits, shaders, shader_tags);
+	            "file; %zu compiler reports, %zu findings, %zu references), %zu music scripts, %zu credits files "
+	            "(%zu fonts and %zu images named), %zu shaders (%zu shader tags)\n",
+	            scripts, witnessed, alone, compiled, findings, references, music, credits, credit_fonts, credit_images,
+	            shaders, shader_tags);
 	// The install's counts, pinned (Joint Operations: Combined Arms).
 	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
 	            references == 36 && music == 2 && credits == 1 && shaders == 44);
+	// The credits' names: each text line's font (every one of the 231 writes one) and its 19 images (17 fading,
+	// 2 spacing).
+	TEST_EXPECT(credit_fonts == 231 && credit_images == 19);
 	// The tags the shaders register, as the renderer's registry holds them: _ffp.fx's 24 and the shipped
 	// effects' (render-material-re.md, the 46-tag registry).
 	TEST_EXPECT(shader_tags == 46);
