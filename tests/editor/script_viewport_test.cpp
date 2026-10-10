@@ -109,8 +109,8 @@ std::unique_ptr<DocumentBase> document_of(AssetKind kind, const std::string &tex
 
 int test_kind_table() {
 	// The menu's, the model's, the script's, the mission's (S14), the texture's (S18), the effect's (DI-14),
-	// the HUD's (DI-20), the definition's (DI-21), the environment's (DI-19b), the terrain's (DI-30b).
-	TEST_EXPECT(kViewportKindCount == 10);
+	// the HUD's (DI-20), the definition's (DI-21), the environment's (DI-19b), the terrain's (DI-30b), the font's (S23).
+	TEST_EXPECT(kViewportKindCount == 11);
 	TEST_EXPECT(std::string(viewport_kind_token(ViewportKind::Script)) == "script");
 	ViewportKind named = ViewportKind::kCount;
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);
@@ -138,14 +138,15 @@ int test_kind_table() {
 	}
 	for (size_t i = 1; i <= kDocumentTypeCount; ++i) mains += main_viewport_kind(static_cast<DocumentTypeId>(i)) != ViewportKind::kCount;
 	for (size_t i = 0; i < kViewportKindCount; ++i)
-		// The Main-role kinds: the script's, the mission's (S14), the texture's (S18), the environment's (DI-19b) and
-		// the terrain's (DI-30b).
+		// The Main-role kinds: the script's, the mission's (S14), the texture's (S18), the environment's (DI-19b), the
+		// terrain's (DI-30b) and the font's (S23).
 		TEST_EXPECT((viewport_kind_row(static_cast<ViewportKind>(i)).role == ViewportRole::Main) ==
 		            (i == size_t(ViewportKind::Script) || i == size_t(ViewportKind::Mission) || i == size_t(ViewportKind::Texture) ||
-		             i == size_t(ViewportKind::Environment) || i == size_t(ViewportKind::Terrain)));
-	// The eight text types (the character attributes among them), the mission (S14), the texture (S18), the environment (DI-19b) and the terrain (DI-30b)
-	// have a Main-role kind.
-	TEST_EXPECT(shown == 8 && mains == 12);
+		             i == size_t(ViewportKind::Environment) || i == size_t(ViewportKind::Terrain) ||
+		             i == size_t(ViewportKind::Font)));
+	// The eight text types (the character attributes among them), the mission (S14), the texture (S18), the environment
+	// (DI-19b), the terrain (DI-30b) and the font (S23) have a Main-role kind.
+	TEST_EXPECT(shown == 8 && mains == 13);
 	// Its viewport: one option, assist (the MCP gaps lane: none asked), no camera, no canvas; the empty one's
 	// reason.
 	std::unique_ptr<ViewportModel> made = row.make("t.wac");
