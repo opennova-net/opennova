@@ -150,8 +150,12 @@ inline void resize_waypoint_padding(bms::WaypointRecord &record, bool preserve_o
 	if (!keep_over_count) {
 		record.marker_count = static_cast<uint32_t>(slots);
 	}
+	// The slot words past the stops as they stand where they already fill the record's 128 bytes (a record
+	// read, whose stale word a save keeps, 09TR.bms's path 13: the original's rebuild writes a path's stops
+	// over its first slots alone [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0]); zeros for a record made from
+	// nothing or one whose slots changed without its padding.
 	const size_t used = slots * sizeof(uint32_t);
-	record.padding.assign(128 - used, 0);
+	if (record.padding.size() != 128 - used) record.padding.assign(128 - used, 0);
 }
 
 inline bool validate_waypoint_path(const bms::File &file,
