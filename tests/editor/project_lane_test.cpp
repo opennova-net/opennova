@@ -164,7 +164,7 @@ int test_file_card() {
 	const SessionView &v = session.view();
 	const FileCard bank = file_card(v, "menu.lwf");
 	TEST_EXPECT(bank.found && bank.kind == AssetKind::SoundBank && bank.path == "sounds/menu.lwf");
-	TEST_EXPECT(bank.build == "Packed into resource.pff." && !bank.about.empty() && bank.opens);
+	TEST_EXPECT(bank.build == "Packed into language.pff." && !bank.about.empty() && bank.opens);
 	bool tone = false, missing = false;
 	for (const FileCard::Named &named : bank.names) {
 		if (named.file == "sounds/tone.wav") tone = named.wave && named.status == ReferenceStatus::Present;

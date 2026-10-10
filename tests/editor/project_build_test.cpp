@@ -94,10 +94,11 @@ const Route kRoutes[] = {
 	{AssetKind::Unknown, ArchiveSlot::None}, // resource.pff before S13 A8
 	{AssetKind::Archive, ArchiveSlot::None},
 	{AssetKind::Model, ArchiveSlot::Resource},
-	{AssetKind::Animation, ArchiveSlot::Resource},
-	{AssetKind::AnimationMap, ArchiveSlot::Resource},
+	// Where retail packs every one (master's file_kind, its retail leg).
+	{AssetKind::Animation, ArchiveSlot::Localres},
+	{AssetKind::AnimationMap, ArchiveSlot::Localres},
 	{AssetKind::FaceAnimation, ArchiveSlot::Resource},
-	{AssetKind::AiProfile, ArchiveSlot::Resource},
+	{AssetKind::AiProfile, ArchiveSlot::Localres},
 	{AssetKind::Texture, ArchiveSlot::Resource},
 	{AssetKind::MaterialChunk, ArchiveSlot::Resource},
 	{AssetKind::Font, ArchiveSlot::Localres},
@@ -105,21 +106,21 @@ const Route kRoutes[] = {
 	{AssetKind::MusicScript, ArchiveSlot::Localres},
 	{AssetKind::RawBin, ArchiveSlot::Language},
 	{AssetKind::CountryCode, ArchiveSlot::Loose}, // CC.BIN, a RawBin (language.pff) before
-	{AssetKind::Credits, ArchiveSlot::Localres},
+	{AssetKind::Credits, ArchiveSlot::Language},
 	{AssetKind::Mission, ArchiveSlot::Localres},
 	{AssetKind::MissionText, ArchiveSlot::None}, // a .mis, a Mission (localres.pff) before S14
 	{AssetKind::MapProject, ArchiveSlot::Localres},
 	{AssetKind::Terrain, ArchiveSlot::Resource},
 	{AssetKind::TerrainPolyData, ArchiveSlot::Resource},
-	{AssetKind::TileInfo, ArchiveSlot::Resource},
+	{AssetKind::TileInfo, ArchiveSlot::Localres},
 	{AssetKind::Environment, ArchiveSlot::Resource},
 	{AssetKind::Menu, ArchiveSlot::Localres},
 	{AssetKind::MenuStyle, ArchiveSlot::Localres},
 	{AssetKind::MusicBank, ArchiveSlot::Loose},   // the .sbf, SoundBank before S13 D5
-	{AssetKind::SoundBank, ArchiveSlot::Resource}, // the .lwf, WaveBank before S13 D5
+	{AssetKind::SoundBank, ArchiveSlot::Language}, // the .lwf, WaveBank before S13 D5
 	{AssetKind::Wave, ArchiveSlot::Localres},
 	{AssetKind::DialogBank, ArchiveSlot::Localres},
-	{AssetKind::Particles, ArchiveSlot::Resource},
+	{AssetKind::Particles, ArchiveSlot::Localres},
 	{AssetKind::Script, ArchiveSlot::Localres},
 	{AssetKind::ItemDefs, ArchiveSlot::Localres},
 	{AssetKind::WeaponDefs, ArchiveSlot::Localres},
@@ -137,7 +138,7 @@ const Route kRoutes[] = {
 	{AssetKind::NovaWorldScreen, ArchiveSlot::Localres},
 	{AssetKind::Video, ArchiveSlot::Loose},
 	{AssetKind::PlayerSave, ArchiveSlot::Loose},
-	{AssetKind::Shader, ArchiveSlot::Resource},
+	{AssetKind::Shader, ArchiveSlot::Localres},
 	{AssetKind::Config, ArchiveSlot::Loose},
 	{AssetKind::Score, ArchiveSlot::Loose}, // a Config before S13 D5
 	{AssetKind::Text, ArchiveSlot::Loose},
@@ -239,11 +240,10 @@ static int test_filled_project_builds_and_mounts() {
 	TEST_EXPECT(plan.archives.size() == 3);
 	TEST_EXPECT(plan.archives[0].file_name == "language.pff" && !plan.archives[0].entries.empty());
 	TEST_EXPECT(plan.archives[1].file_name == "localres.pff" && !plan.archives[1].entries.empty());
-	// resource.pff holds what the blanks make that goes there: the pointer the startup screen names and
-	// the renderer's own shader, _ffp.fx.
-	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.size() == 2);
-	for (const auto &entry : plan.archives[2].entries)
-		TEST_EXPECT(entry.logical_name == "newarow1.tga" || entry.logical_name == "_ffp.fx");
+	// resource.pff holds what the blanks make that goes there: the pointer the startup screen names (the
+	// renderer's own shader, _ffp.fx, packs with localres, as retail packs its effects).
+	TEST_EXPECT(plan.archives[2].file_name == "resource.pff" && plan.archives[2].entries.size() == 1);
+	for (const auto &entry : plan.archives[2].entries) TEST_EXPECT(entry.logical_name == "newarow1.tga");
 	TEST_EXPECT(plan.loose.size() == 2); // menumus.sbf and nw_cdata.coo
 
 	const BuildReport report = run_build(plan, p.output_root());
