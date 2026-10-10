@@ -2,10 +2,12 @@
 
 #include "auth.h"
 #include "catalog_repository.h"
+#include "nw_udp_listener.h"
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
 
+#include <net/napi/session.h>
 #include <net/novacrypto/pubcrypto.h>
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/db/sqlite.h>
@@ -62,6 +64,37 @@ std::string next_pcid() {
 	char pcid[16];
 	std::snprintf(pcid, sizeof(pcid), "%08x", static_cast<unsigned>(os_random_u32()));
 	return pcid;
+}
+
+// A ServerCommand arg the admin route refuses: one holding a control byte (below 0x20, or 0x7F).
+// The stock reader carries such a byte faithfully inside quotes (String_TokenizeQuotedToArray
+// copies a quoted run as it is), so server_command_text, the reader's exact inverse, composes it.
+// The harm is on the host: SetServerName / SetServerMsg save the token into game.cfg unescaped
+// (Game_SaveConfig @0x54C490, `game_name = "%s"\n`; ours engine/formats/gamecfg/game_cfg_write.cpp),
+// so a CR or LF injects a line into a third party's config, and the chat verbs relay the byte to
+// every player. So it is the service's own input rule at its edge, not a reader rule.
+bool has_control_byte(std::string_view s) {
+	return std::any_of(s.begin(), s.end(), [](char c) {
+		const auto byte = static_cast<unsigned char>(c);
+		return byte < 0x20 || byte == 0x7F;
+	});
+}
+
+// `s` for a log line: a control byte as \xNN, so no admin input can forge a line.
+std::string loggable(std::string_view s) {
+	std::string out;
+	out.reserve(s.size());
+	for (const char c : s) {
+		const auto byte = static_cast<unsigned char>(c);
+		if (byte < 0x20 || byte == 0x7F) {
+			char escaped[8];
+			std::snprintf(escaped, sizeof(escaped), "\\x%02X", static_cast<unsigned>(byte));
+			out += escaped;
+		} else {
+			out.push_back(c);
+		}
+	}
+	return out;
 }
 
 std::string read_file_text(const std::filesystem::path &p) {
@@ -575,6 +608,139 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
+	});
+
+	// The service's statements to a listed server, pushed over that server's own
+	// NovaWorld UDP session (NwUdpListener::push_server_command / push_stop_hosting;
+	// docs/net/novaworld-net-re.md "the service side"). 202 once queued for the
+	// receive thread, 404 for a RID no live connection holds, 409 for one whose
+	// connection is not hosting, 503 when no NW UDP listener is wired.
+	auto json_reply = [](int code, const crow::json::wvalue &out) {
+		crow::response res(code);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
+	};
+	auto json_error = [json_reply](int code, const char *error, const std::string &message) {
+		crow::json::wvalue out;
+		out["error"] = error;
+		if (!message.empty()) out["message"] = message;
+		return json_reply(code, out);
+	};
+	auto push_reply = [json_reply, json_error](HostPushResult result, uint32_t rid,
+	                                           crow::json::wvalue out) {
+		switch (result) {
+		case HostPushResult::Queued:
+			out["rid"] = rid;
+			out["status"] = host_push_result_name(result);
+			return json_reply(202, out);
+		case HostPushResult::NotHosted:
+			return json_error(409, host_push_result_name(result),
+			                  "the connection holding this RID is not hosting");
+		case HostPushResult::UnknownRid:
+			break;
+		}
+		return json_error(404, host_push_result_name(HostPushResult::UnknownRid),
+		                  "no live NovaWorld connection holds this RID");
+	};
+
+	// POST /api/admin/hosts/<rid>/command — a ServerCommand. Body JSON:
+	//   {"verb": "SetServerName", "target": "None|ByIndex|ByIpAndPort|ByName|ByPCID",
+	//    "args": ["..."]}
+	// composed through server_command_text, so a line the host's reader would
+	// drop (a verb/target pairing, too few args, a quote or NUL, past 511
+	// characters) is a 400 with its reason; so is an arg with a control byte
+	// (has_control_byte, the service's own input rule).
+	CROW_ROUTE(app, "/api/admin/hosts/<uint>/command").methods("POST"_method)(
+	    [this, admin_authorized, json_error, push_reply](const crow::request &req, uint64_t rid) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+		auto body = crow::json::load(req.body);
+		if (!body || body.t() != crow::json::type::Object) {
+			return json_error(400, "invalid_json", "");
+		}
+		if (!body.has("verb") || body["verb"].t() != crow::json::type::String) {
+			return json_error(400, "invalid_command", "\"verb\" (a string) is required");
+		}
+		ServerCommandVerb verb = ServerCommandVerb::None;
+		if (!server_command_verb_from_name(std::string(body["verb"].s()), verb)) {
+			return json_error(400, "invalid_command", "\"verb\" names no ServerCommand verb");
+		}
+		ServerCommandTarget target = ServerCommandTarget::None;
+		if (body.has("target")) {
+			if (body["target"].t() != crow::json::type::String ||
+			    !server_command_target_from_name(std::string(body["target"].s()), target)) {
+				return json_error(400, "invalid_command",
+				                  "\"target\" is None, ByIndex, ByIpAndPort, ByName or ByPCID");
+			}
+		}
+		std::vector<std::string> args;
+		if (body.has("args")) {
+			if (body["args"].t() != crow::json::type::List) {
+				return json_error(400, "invalid_command", "\"args\" is a list of strings");
+			}
+			for (const auto &arg : body["args"]) {
+				if (arg.t() != crow::json::type::String) {
+					return json_error(400, "invalid_command", "\"args\" is a list of strings");
+				}
+				args.emplace_back(arg.s());
+				if (has_control_byte(args.back())) {
+					return json_error(400, "invalid_command",
+					                  "an arg holds a control byte (below 0x20, or 0x7F), which a "
+					                  "stock host would carry into its game.cfg or its chat");
+				}
+			}
+		}
+		const char *refusal = nullptr;
+		const std::string cmd = server_command_text(verb, target, args, &refusal);
+		if (cmd.empty()) {
+			return json_error(400, "invalid_command", refusal != nullptr ? refusal : "");
+		}
+		if (nw_udp_ == nullptr) {
+			return json_error(503, "no_session_listener", "the NovaWorld UDP listener is not wired");
+		}
+		const uint32_t rid32 = rid <= UINT32_MAX ? static_cast<uint32_t>(rid) : 0u;
+		const HostPushResult result = nw_udp_->push_server_command(rid32, cmd);
+		std::printf("[http] POST /api/admin/hosts/%llu/command '%s' -> %s\n",
+		            static_cast<unsigned long long>(rid), loggable(cmd).c_str(),
+		            host_push_result_name(result));
+		crow::json::wvalue out;
+		out["statement"] = "ServerCommand";
+		out["cmd"] = cmd;
+		return push_reply(result, rid32, std::move(out));
+	});
+
+	// POST /api/admin/hosts/<rid>/stop — a ServerStopHosting with MsgCode 7,
+	// NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT (SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
+	// which code the retail service sent is unwitnessed): the sysop punt. A stock
+	// host in a NovaWorld match ends that match for everyone within 62 frames,
+	// goes to the main menu and resets its NovaWorld session
+	// (NwUdpListener::push_stop_hosting; the record's "The exit"); the server
+	// leaves the browser as the statement goes out. No body.
+	CROW_ROUTE(app, "/api/admin/hosts/<uint>/stop").methods("POST"_method)(
+	    [this, admin_authorized, json_error, push_reply](const crow::request &req, uint64_t rid) {
+		if (!admin_authorized(req)) {
+			crow::response res(401);
+			res.body = "unauthorized";
+			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
+			return res;
+		}
+		if (nw_udp_ == nullptr) {
+			return json_error(503, "no_session_listener", "the NovaWorld UDP listener is not wired");
+		}
+		const uint32_t rid32 = rid <= UINT32_MAX ? static_cast<uint32_t>(rid) : 0u;
+		const HostPushResult result =
+				nw_udp_->push_stop_hosting(rid32, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT);
+		std::printf("[http] POST /api/admin/hosts/%llu/stop -> %s\n",
+		            static_cast<unsigned long long>(rid), host_push_result_name(result));
+		crow::json::wvalue out;
+		out["statement"] = "ServerStopHosting";
+		out["msg_code"] = SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
+		return push_reply(result, rid32, std::move(out));
 	});
 
 	// Connection-registry debug dump. Admin-token gated.

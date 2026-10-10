@@ -1,6 +1,7 @@
 #include <net/napi/session.h>
 #include <net/napi/tlv.h>
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -298,6 +299,17 @@ bool check_server_statement_builders() {
 			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
 			return false;
 		}
+		// The name parser inverts the spelling, case-insensitively as the reader compares.
+		std::string lower = server_command_verb_name(v);
+		for (char &c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		ServerCommandVerb named = ServerCommandVerb::None;
+		ServerCommandVerb named_lower = ServerCommandVerb::None;
+		if (!expect(server_command_verb_from_name(server_command_verb_name(v), named) && named == v &&
+		                    server_command_verb_from_name(lower, named_lower) && named_lower == v,
+		            "server_command_verb_from_name inverts every verb's name")) {
+			std::fprintf(stderr, "  verb %s\n", server_command_verb_name(v));
+			return false;
+		}
 		// The arity gate: exactly the verb's minimum composes and parses back; one short is refused.
 		const ServerCommandTarget t0 = player_targeted(v) ? ServerCommandTarget::ByName : ServerCommandTarget::None;
 		const size_t need = min_args(v);
@@ -310,6 +322,26 @@ bool check_server_statement_builders() {
 		++covered;
 	}
 	if (!expect(covered == 18, "all eighteen verbs walked")) return false;
+	{
+		ServerCommandVerb v = ServerCommandVerb::Cycle;
+		if (!expect(!server_command_verb_from_name("", v) && !server_command_verb_from_name("Punt", v) &&
+		                    !server_command_verb_from_name("PuntPlayerByName", v) && v == ServerCommandVerb::Cycle,
+		            "a name that is no verb parses to nothing and leaves `out`")) return false;
+		ServerCommandTarget t = ServerCommandTarget::ByPCID;
+		if (!expect(server_command_target_from_name("", t) && t == ServerCommandTarget::None,
+		            "an empty target is none")) return false;
+		t = ServerCommandTarget::ByPCID;
+		if (!expect(server_command_target_from_name("none", t) && t == ServerCommandTarget::None,
+		            "\"None\" is no target")) return false;
+		for (const ServerCommandTarget want : kTargets) {
+			if (!expect(server_command_target_from_name(server_command_target_name(want), t) && t == want,
+			            "server_command_target_from_name inverts every suffix")) return false;
+		}
+		if (!expect(server_command_target_from_name("byname", t) && t == ServerCommandTarget::ByName,
+		            "a suffix name is case-insensitive")) return false;
+		if (!expect(!server_command_target_from_name("ByNumber", t) && t == ServerCommandTarget::ByName,
+		            "an unknown suffix parses to nothing and leaves `out`")) return false;
+	}
 	// An unnamed value past DisarmPlayer: a verb appended to the enum gets a name and fails here.
 	if (!expect(std::string(server_command_verb_name(static_cast<ServerCommandVerb>(covered + 1))).empty(),
 	            "no verb past DisarmPlayer")) return false;
@@ -360,6 +392,35 @@ bool check_server_statement_builders() {
 	if (!expect(fits.size() == SERVER_COMMAND_CMD_CAP - 1 && parse_server_command(make_server_command(fits), out) &&
 	                    out.verb == ServerCommandVerb::Cycle && out.args.size() == 1 && out.args[0].size() == 505,
 	            "a 511-char text round-trips whole")) return false;
+	// Each refusal names its reason; a composed line leaves the reason alone.
+	{
+		auto reason = [](ServerCommandVerb v, ServerCommandTarget t, const std::vector<std::string> &args) {
+			const char *why = nullptr;
+			const std::string text = server_command_text(v, t, args, &why);
+			return text.empty() && why != nullptr ? std::string(why) : std::string("<composed>");
+		};
+		if (!expect(reason(ServerCommandVerb::None, ServerCommandTarget::None, {}) == "no verb", "reason: no verb") ||
+		    !expect(reason(ServerCommandVerb::PuntPlayer, ServerCommandTarget::None, {"42"}).find("needs a target") !=
+		                    std::string::npos,
+		            "reason: a missing suffix") ||
+		    !expect(reason(ServerCommandVerb::Cycle, ServerCommandTarget::ByName, {}).find("no target") !=
+		                    std::string::npos,
+		            "reason: a suffix on a whole-token verb") ||
+		    !expect(reason(ServerCommandVerb::SetServerName, ServerCommandTarget::None, {}).find("token-count") !=
+		                    std::string::npos,
+		            "reason: too few args") ||
+		    !expect(reason(ServerCommandVerb::TextChatServer, ServerCommandTarget::None, {"a\"b"}).find("quote") !=
+		                    std::string::npos,
+		            "reason: a quote") ||
+		    !expect(reason(ServerCommandVerb::Cycle, ServerCommandTarget::None, {std::string(506, 'a')}).find("511") !=
+		                    std::string::npos,
+		            "reason: the cap"))
+			return false;
+		const char *untouched = "kept";
+		if (!expect(!server_command_text(ServerCommandVerb::Cycle, ServerCommandTarget::None, {}, &untouched).empty() &&
+		                    std::string(untouched) == "kept",
+		            "a composed line leaves the reason untouched")) return false;
+	}
 	const std::string raw = "TextChatServer " + std::string(585, 'b');
 	const NapiMessage raw_cmd = make_server_command(raw);
 	if (!expect(raw_cmd.fields[0].data.size() == 600, "make_server_command never clips")) return false;

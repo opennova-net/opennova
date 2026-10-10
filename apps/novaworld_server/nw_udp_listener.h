@@ -59,6 +59,9 @@ struct LobbyConnState {
 	// Outbound retains every reply's reliable records under its packet sequence until the
 	// client's ACK covers it, so a stock client's 0x44 gets them back (D-NET-291).
 	SessionSequencing sequencing;
+	// When this end last framed a packet (a reply, a push, the send-interval leg's header-only
+	// one; not a 0x44 resend), the steady clock in ms: the ACTIVE send-interval leg's base.
+	uint64_t last_framed_send_ms = 0;
 	// Exact ClientAuth fingerprint and the already-enveloped ServerAuth reply.
 	// A lost/delayed 0x82 makes the client retransmit the same 0x42. Replaying
 	// these cached bytes keeps SK/SCRK/NWUID stable and, critically, does not
@@ -91,6 +94,14 @@ struct LobbyConnState {
 };
 
 struct ServerConfig;
+
+// What NwUdpListener::push_server_command / push_stop_hosting did with a statement.
+enum class HostPushResult : uint8_t {
+	Queued,     // the receive thread frames and sends it on its next pass
+	UnknownRid, // no live lobby connection holds the RID
+	NotHosted,  // the connection holding it is not hosting (it stopped, or awaits its re-host)
+};
+const char *host_push_result_name(HostPushResult result);
 
 // Port-64206 UDP listener for the NAPI NovaWorld session protocol
 // (NWU-encrypted, NAPI-CRC-enveloped, opcode-dispatched).
@@ -152,6 +163,28 @@ public:
 	};
 	std::vector<HostedSnapshot> snapshot_hosted() const;
 
+	// The service's statements to a listed server, over that server's own NWU session (the
+	// ServerCommand admin channel; docs/net/novaworld-net-re.md "the service side"). The RID
+	// resolves here under the lobby lock to the hosting connection; the statement then waits for
+	// the receive thread, which owns the socket, and goes out on its next pass framed exactly as
+	// a reply: one reliable record on the connection's sequencing, retained until the client's
+	// ACK covers it, so the client's ordered receive and a 0x44 recover a lost one (the
+	// send-interval leg makes a gap visible when nothing follows). A connection replaced or
+	// dropped, or no longer hosting, by the drain loses the push. Thread-safe; nothing is sent
+	// from the caller.
+	// ServerCommand: one Cmd param carrying `cmd` verbatim (compose it with server_command_text).
+	HostPushResult push_server_command(uint32_t rid, const std::string &cmd);
+	// ServerStopHosting: MsgCode / MsgParam1 / MsgParam2, the sysop punt from the host's side. A
+	// stock host drops to verified with no ClientStopHosting [orig:
+	// CNapiGameSession_HandleServerMessage @0x4d1c50 — state 4, the word to 1], and in a
+	// NovaWorld match its next 62-frame block's NovaWorld exit ends the match for everyone, sends
+	// the host to the main menu and resets its NWU session [orig: Game_ProcessMainFrame
+	// @0x52654f..0x52657c, g_MissionExitReason = 12; the router @0x568552 -> @0x5686cb..0x5686fe].
+	// Once the record went out framed the connection also leaves the browser
+	// (LobbySession::end_hosting).
+	HostPushResult push_stop_hosting(uint32_t rid, int msg_code, int msg_param1 = 0,
+	                                 int msg_param2 = 0);
+
 	// Drop the per-connection lobby state for the connection at `peer`.
 	// Called from main()'s ConnectionManager::on_lost handler so
 	// heartbeat-timeouts free the lobby (otherwise hosts would persist
@@ -168,6 +201,18 @@ public:
 private:
 	void run_loop(opennova::net::ScopedSocket socket,
 	              std::optional<db::ConnectionPool::Lease> db_conn);
+	// A statement on its way to a hosting connection (push_server_command / push_stop_hosting).
+	struct HostPush {
+		PeerAddr peer{};
+		uint32_t server_sk = 0; // the connection the RID resolved to: a re-auth drops the push
+		NapiMessage statement;
+		bool ends_hosting = false;
+	};
+	HostPushResult queue_host_push(uint32_t rid, NapiMessage statement, bool ends_hosting);
+	// The receive thread's legs between receive batches: the queued pushes, then the
+	// send-interval leg over every lobby connection.
+	void drain_host_pushes(opennova::net::Socket &socket);
+	void pump_send_intervals(opennova::net::Socket &socket);
 	void initialize_jo_host();
 	void reset_per_run_state(const char *reason);
 	static void observe_jo_event(void *context, const inmatch::HostAcceptEvent &event);
@@ -213,6 +258,8 @@ private:
 		uint64_t parked_ms = 0;
 	};
 	std::unordered_map<PeerAddr, ParkedLobbyState, PeerAddrHash> parked_lobby_states_;
+	// The pushes waiting for the receive thread, in queue order. Guarded by lobby_states_mu_.
+	std::vector<HostPush> host_pushes_;
 	opennova::db::ConnectionPool *db_pool_ = nullptr;
 	opennova::UnknownTracker *tracker_ = nullptr;
 };
