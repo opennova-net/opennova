@@ -10,6 +10,10 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/dialog_bank_document.h>
 #include <editor/documents/environment_document.h>
+#include <editor/documents/face_animation_document.h>
+#include <editor/documents/font_document.h>
+#include <editor/documents/music_bank_document.h>
+#include <editor/documents/wave_document.h>
 #include <editor/documents/hud_layout_type.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
@@ -25,7 +29,6 @@
 #include <editor/documents/sound_profile_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/text_types.h>
-#include <editor/documents/wave_check.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_document.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
@@ -57,6 +60,9 @@ std::unique_ptr<DocumentBase> make_sound_profiles() { return std::make_unique<So
 std::unique_ptr<DocumentBase> make_environment() { return std::make_unique<EnvironmentDocument>(); }
 std::unique_ptr<DocumentBase> make_terrain() { return std::make_unique<TerrainDocument>(); }
 std::unique_ptr<DocumentBase> make_dialog_bank() { return std::make_unique<DialogBankDocument>(); }
+std::unique_ptr<DocumentBase> make_face_animation() { return std::make_unique<FaceAnimationDocument>(); }
+std::unique_ptr<DocumentBase> make_font() { return std::make_unique<FontDocument>(); }
+std::unique_ptr<DocumentBase> make_music_bank() { return std::make_unique<MusicBankDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -105,17 +111,18 @@ constexpr DocumentType kTypes[] = {
 			shader_definitions },
 	{ DocumentTypeId::Text, "text", make_text_document, validate_text_file, text_fields,
 			text_finding_codes },
-	// The texture (S18): its texels as the game reads them, read only for now; no findings yet (what
-	// the game makes of a texture is its role's), its content on the wire.
+	// The texture (S18): its texels as the game reads them, edited by the whole-image operations
+	// (documents/texture_operations), its findings what the game's reader makes of its file (a PCX's short
+	// rows, a DDS's sides), its content on the wire.
 	{ DocumentTypeId::Texture, "texture", make_texture_document, validate_texture_file, texture_fields,
 			texture_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			texture_content_json },
-	// The sound lane: a bank's waves and sets (a set's name a sound, a member's wave one of the bank's), its
-	// project check the project's waves the game's loader refuses; and SndProf.def's profiles, each slot
-	// naming a set.
+	// The sound lane: a bank's waves and sets (a set's name a sound, a member's wave one of the bank's); and
+	// SndProf.def's profiles, each slot naming a set. (A wave the game's loader refuses is the wave type's own
+	// finding since round S23.)
 	// Each defines its kind's names (DI-15): a sound set, a sound profile.
 	{ DocumentTypeId::SoundBank, "sound_bank", make_sound_bank, validate_sound_bank_file, SoundBankDocument::schema,
-			sound_bank_finding_codes, make_wave_check, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			sound_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, nullptr, define_sound_set },
 	{ DocumentTypeId::SoundProfiles, "sound_profiles", make_sound_profiles, validate_sound_profiles_file,
 			SoundProfileDocument::schema, sound_profile_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr,
@@ -150,6 +157,22 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::CharAttrs, "charattr", make_charattr_document, validate_charattr_file, text_fields,
 			charattr_finding_codes, nullptr, charattr_references, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, nullptr, nullptr, nullptr, charattr_idle_lines },
+	// The face animation (round S23 lane A): a .grm's face over grm::File, its references its texture fields' (each
+	// name made .TGA by the stage loader) and the base's .MDT twin; a triangle names its vertices by index.
+	{ DocumentTypeId::FaceAnimation, "face_animation", make_face_animation, validate_face_animation_file,
+			FaceAnimationDocument::schema, face_animation_finding_codes, nullptr, nullptr, nullptr,
+			face_animation_references },
+	// The font (round S23 lane A): a .fnt's header and its 224 glyphs over the engine's reader and writer, its pages'
+	// texels as read; it names nothing.
+	{ DocumentTypeId::Font, "font", make_font, validate_font_file, FontDocument::schema, font_finding_codes },
+	// The music bank (round S23 lane A): a .sbf's header and its streams over the engine's reader and writer, each
+	// stream's chunks as read; it names nothing (the music script plays its streams by place).
+	{ DocumentTypeId::MusicBank, "music_bank", make_music_bank, validate_music_bank_file, MusicBankDocument::schema,
+			music_bank_finding_codes },
+	// The wave (round S23 lane A): a .wav held as its bytes, its facts and the game loader's verdict its content on the
+	// wire, the one place a wave the loader refuses is found (asset.wave_unplayable); trimmed and normalised whole.
+	{ DocumentTypeId::Wave, "wave", make_wave_document, validate_wave_file, wave_fields, wave_finding_codes, nullptr,
+			nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, wave_content_json },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
@@ -189,7 +212,7 @@ DocumentContent content_made(const DocumentType &type) {
 	const std::unique_ptr<DocumentBase> made = type.make();
 	if (records_of(*made)) return DocumentContent::Records;
 	if (text_of(*made)) return DocumentContent::Text;
-	return made->holds_image() ? DocumentContent::Image : DocumentContent::Other;
+	return made->holds_bytes() ? DocumentContent::Bytes : DocumentContent::Other;
 }
 
 } // namespace
@@ -233,7 +256,8 @@ DocumentContent document_content(const DocumentType &type) {
 }
 
 bool validates_files(const DocumentType &type) {
-	return document_content(type) != DocumentContent::Image || (type.findings && type.findings().count > 0);
+	return document_content(type) != DocumentContent::Bytes || type.validate_file ||
+	       (type.findings && type.findings().count > 0);
 }
 
 DocumentTypeStandIn::DocumentTypeStandIn(const DocumentType &type) { g_stand_in.store(&type); }
