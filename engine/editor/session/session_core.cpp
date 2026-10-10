@@ -1744,9 +1744,7 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 	} else if (result.refused) {
 		// What refused it, by name (the UX round's problems lane): its first refusal on the status line,
 		// the whole line (the build.blocked row's) in Output and Problems.
-		std::vector<Diagnostic> blockers;
-		for (const Diagnostic &d : result.diagnostics)
-			if (blocks_build(d) && d.row() != &finding_code(CoreFinding::BuildBlocked)) blockers.push_back(d);
+		const std::vector<Diagnostic> &blockers = result.blockers; // the gate's own refusals
 		note("Build refused.");
 		view_.activity.status = blockers.empty()
 		                                ? std::string("Build refused: see Problems.")

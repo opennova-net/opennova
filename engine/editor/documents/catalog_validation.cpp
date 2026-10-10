@@ -22,7 +22,10 @@ constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	// Input the game ignores, which a save writes as the file has it (the file's modeled layout,
 	// def_notes.h): said, nothing to fix.
 	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input" } },
-	{ CatalogFinding::Unserializable, { "catalog.unserializable", FindingFix::None, nullptr, true } },
+	// A record the def writer cannot write back. From an edit, the writer's own refusal; from a file on disk, a
+	// value the reader took with no blocking finding of its own (none in the shipped defs), which the game reads
+	// as the reader did (unwritable_code: a closed file packs as stored, its Save refused).
+	{ CatalogFinding::Unserializable, unwritable_code("catalog.unserializable") },
 	// A record with no name, an item of type 0: the editor's own rules, no refusal of the game's
 	// witnessed (the gate follows retail, ADR 0046 S14): listed.
 	{ CatalogFinding::NameEmpty, listed_code("catalog.name_empty") },
@@ -223,7 +226,8 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 	if (document.blocked()) return findings;
 	for (const auto &issue : document.serialize().issues) {
 		auto diagnostic = make_finding(CatalogFinding::Unserializable, DiagnosticSeverity::Error,
-			issue.message, document.path(), issue.field);
+			issue.message + " A save is refused until the record can be written; a closed file packs as it stands, as "
+			"the game's reader reads it.", document.path(), issue.field);
 		diagnostic.record = issue.record; locate(diagnostic); findings.push_back(std::move(diagnostic));
 	}
 	// The first item of each id in the file: both of a repeated id are kept (the load logs

@@ -434,7 +434,7 @@ static int test_fixes() {
 			if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
 			if (row.blocks_save) blockers.push_back(&row);
 		}
-	TEST_EXPECT(blockers.size() == 26);
+	TEST_EXPECT(blockers.size() == 27);
 	std::vector<std::string> rewrite_tokens;
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
@@ -1583,6 +1583,10 @@ static int test_plan_refusals_are_rows() {
 	TEST_EXPECT(opennova::pff::pff_write_archive((v.project.root + "/extra.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
+	// A closed animation map with a row of nine clips: the game registers every one, and a build packs the file as
+	// stored, so its finding refuses nothing, in the result's words as in the gate.
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/anims/nine.adm",
+	                                    "\r\nanim_reset\t\t\t\t\"a\" \"b\" \"c\" \"d\" \"e\" \"f\" \"g\" \"h\" \"i\"\r\n\r\n\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto rows_of = [&v](const char *code) {
 		std::vector<size_t> rows;
@@ -1592,6 +1596,9 @@ static int test_plan_refusals_are_rows() {
 	};
 	std::vector<size_t> rows = rows_of("build.name_unstorable");
 	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v));
+	const std::vector<size_t> nine = rows_of("animation_map.invalid_input");
+	TEST_EXPECT(nine.size() == 1 && v.findings.diagnostics[nine[0]].severity == DiagnosticSeverity::Error &&
+	            !blocks_the_build(nine[0], v));
 	const std::vector<size_t> archives = rows_of("build.archive_in_project");
 	TEST_EXPECT(archives.size() == 1 && !blocks_the_build(archives[0], v) &&
 	            v.findings.diagnostics[archives[0]].severity == DiagnosticSeverity::Warning);

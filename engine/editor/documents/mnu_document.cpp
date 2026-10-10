@@ -43,6 +43,10 @@ constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
 	{ MenuFinding::DuplicateWindow, { "menu.duplicate_window", FindingFix::EditRecord } },
 	{ MenuFinding::ActionInert, { "menu.action_inert" } },
 	{ MenuFinding::RenderMapping, from_render_check("menu.render.mapping") },
+	// A number holding a stylesheet %VAR% where retail reads it: the game expands the variable and reads its
+	// value [orig: NapiXML_ExpandVariablesInText @ 0x63c980], the menu model holding the number alone
+	// (unwritable_code: a closed menu packs as stored, its Save refused).
+	{ MenuFinding::VariableNumber, unwritable_code("menu.variable_number") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MenuFinding::kCount),
 		"every MenuFinding has exactly one row");
@@ -741,8 +745,13 @@ bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	// menu without it, which retail reads the same). What retail crashes or hangs on blocks:
 	// the file as it stands cannot ship, so editing and the build wait for it to be corrected
 	// (docs/mnu/menu-re.md, "Crash and hang cases").
-	for (const mnu::ParseNote &note : notes)
+	for (const mnu::ParseNote &note : notes) {
 		issues.push_back({note.fatal, note.line, std::string(), note.key, note.message, note.locator});
+		// Every fatal note but a number holding a variable is retail's crash or hang (menu.invalid_input); that
+		// one the game reads on (menu.variable_number), its note mnu::TreeReader::variable_number's.
+		issues.back().game_stops =
+		        note.fatal && note.message.find("holds a stylesheet variable where a number goes") == std::string::npos;
+	}
 	return true;
 }
 
@@ -1129,13 +1138,16 @@ std::vector<Diagnostic> validate_menu_file(const DocumentBase &document) {
 	// screen or window the reader found it in (its locator, in the file as loaded: wherever
 	// that record is now, source_address; gone since, the file), so Problems selects it,
 	// named by its path when the reader named none.
-	source_issue_findings(*menu, finding_code(MenuFinding::InvalidInput),
+	source_issue_findings(*menu, finding_code(MenuFinding::VariableNumber),
 			finding_code(MenuFinding::IgnoredInput), findings,
 			[&](Diagnostic &finding) {
 				if (finding.row_id && finding.record.empty())
 					finding.record = menu->record_path(
 							{ finding.row_id, finding.record_kind, finding.child_id });
-			});
+			},
+			"A build packs the menu as it stands; a save, which would write the number in place of the variable, is "
+			"refused.",
+			&finding_code(MenuFinding::InvalidInput));
 	if (document.blocked()) return findings;
 	// On the record and the field that cause it, so the inspector shows it there and
 	// Problems selects it.

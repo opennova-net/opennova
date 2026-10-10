@@ -102,6 +102,9 @@ struct BuildReport {
 	uint64_t same_as_base_bytes = 0;
 	uint64_t base_bytes_read = 0;
 	std::vector<Diagnostic> diagnostics;
+	// Refused: the findings the gate refused it for (build_blockers, the plan's own reading of each over the base
+	// and the shipped files), which a result and the status line name; the rest of `diagnostics` refused nothing.
+	std::vector<Diagnostic> blockers;
 	// What the published directory holds, the archives in the plan's order then the loose files.
 	std::vector<BuiltFile> built;
 	// How long it took, start to finish (its caller's clock: the session's; 0 when none timed it).
