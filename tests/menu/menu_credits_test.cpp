@@ -8,6 +8,7 @@
 // the shipped JO, JOX01 and BHD lists each load as their text form does, their counts pinned.
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -162,12 +163,9 @@ int test_not_loaded() {
 
 // The minted lists (fixtures/cbin, tests/fixtures/minimal_cbin_gen.cpp): their [ENV] values, and each text
 // line with its font as the credits view reads the same bytes.
-int check_minted(const std::string &path, int center_x) {
-	const std::vector<uint8_t> bytes = test_io::read_file(path);
-	TEST_EXPECT(!bytes.empty());
-	MarqueeCredits credits;
-	TEST_EXPECT(load(bytes, credits));
-	TEST_EXPECT(credits.scroll_rate == 0.5f && credits.vertical_space == 14 && credits.center_x == center_x);
+// The credits' text lines and fonts against the credits view of the same bytes (cbin::decode_credits, a decode of
+// its own): each text node's line and the font it keeps, in order.
+int check_against_view(const std::vector<uint8_t> &bytes, const MarqueeCredits &credits) {
 	cbin::Credits view;
 	std::string error;
 	TEST_EXPECT(cbin::decode_credits(bytes.data(), bytes.size(), view, error));
@@ -176,13 +174,67 @@ int check_minted(const std::string &path, int center_x) {
 		if (node.text) lines.push_back(&node);
 	std::vector<const cbin::Entry *> texts;
 	for (const cbin::Entry &entry : view.entries)
-		if (entry.type == cbin::EntryType::Text) texts.push_back(&entry);
+		// A '~' line of a code the loader has no arm for (BHD's ~BINK_LOGO) is markup that draws nothing, where the
+		// credits view keeps it as text.
+		if (entry.type == cbin::EntryType::Text && !(entry.text.size() > 1 && entry.text[0] == '~'))
+			texts.push_back(&entry);
+	if (lines.size() != texts.size()) {
+		size_t i = 0;
+		while (i < lines.size() && i < texts.size() && lines[i]->line == texts[i]->text) ++i;
+		std::fprintf(stderr, "%zu text nodes, %zu text entries; first apart at %zu: \"%s\" / \"%s\"\n", lines.size(),
+		             texts.size(), i, i < lines.size() ? lines[i]->line.c_str() : "",
+		             i < texts.size() ? texts[i]->text.c_str() : "");
+	}
 	TEST_EXPECT(!lines.empty() && lines.size() == texts.size());
 	std::string font;
 	for (size_t i = 0; i < lines.size(); ++i) {
 		if (!texts[i]->font.empty()) font = texts[i]->font;
 		TEST_EXPECT(lines[i]->line == texts[i]->text && lines[i]->font == font);
 	}
+	return 0;
+}
+
+int check_minted(const std::string &path, int center_x) {
+	const std::vector<uint8_t> bytes = test_io::read_file(path);
+	TEST_EXPECT(!bytes.empty());
+	MarqueeCredits credits;
+	TEST_EXPECT(load(bytes, credits));
+	TEST_EXPECT(credits.scroll_rate == 0.5f && credits.vertical_space == 14 && credits.center_x == center_x);
+	return check_against_view(bytes, credits);
+}
+
+// A label of no entry, as the game's writer lays one out: its name and a count of 0 and no terminator pair after
+// its (absent) entries; the next label's entries straight after. It decodes, encodes back the same, and loads:
+// an [ENV] of no key reads every value 0, the [TEXT] line its own.
+int test_empty_label() {
+	BinaryConfig config;
+	config.strings = {"env", "text", "Credits", "Serpen24"};
+	config.xor_key = 0x2468ACE0u;
+	config.labels = {{1, {}}, {2, {{2, {value(3, BinaryConfig::kString), value(4, BinaryConfig::kString)}}}}};
+	const std::vector<uint8_t> bytes = encoded(config);
+	TEST_EXPECT(!bytes.empty());
+	// The words under the cipher: 2 labels, (env, 0), (text, 1), text's entry (text, 2) and its terminator, the
+	// entry's two values; no (0, 0) for env.
+	std::vector<uint8_t> plain(bytes.begin() + 20, bytes.end());
+	cbin::apply_cipher(plain.data(), plain.size(), config.xor_key);
+	const auto word = [&plain](size_t i) {
+		return uint32_t(plain[i * 4]) | uint32_t(plain[i * 4 + 1]) << 8 | uint32_t(plain[i * 4 + 2]) << 16 |
+		       uint32_t(plain[i * 4 + 3]) << 24;
+	};
+	const uint32_t expect[] = {2, 1, 0, 2, 1, 2, 2, 0, 0, 3, 4, 4, 4};
+	for (size_t i = 0; i < std::size(expect); ++i) TEST_EXPECT(word(i) == expect[i]);
+	BinaryConfig back;
+	std::string error;
+	TEST_EXPECT(cbin::decode_binary_config(bytes.data(), bytes.size(), back, error) && back.labels.size() == 2 &&
+	            back.labels[0].entries.empty() && back.labels[1].entries.size() == 1 && encoded(back) == bytes);
+	MarqueeCredits credits;
+	TEST_EXPECT(load(bytes, credits));
+	TEST_EXPECT(credits.scroll_rate == 0.0f && credits.vertical_space == 0 && credits.center_x == 0 &&
+	            credits.nodes.size() == 1 && credits.nodes[0].line == "Credits" && credits.nodes[0].font == "Serpen24");
+	// The credits view reads the same layout.
+	cbin::Credits view;
+	TEST_EXPECT(cbin::decode_credits(bytes.data(), bytes.size(), view, error) && view.entries.size() == 1 &&
+	            view.entries[0].text == "Credits");
 	return 0;
 }
 
@@ -230,7 +282,8 @@ int test_retail() {
 	int failures = 0;
 	for (const ShippedList &list : lists) {
 		MarqueeCredits credits;
-		if (check_forms_agree(list.path, test_io::read_file(retail::reference_fixture(list.path)), credits) != 0) {
+		const std::vector<uint8_t> bytes = test_io::read_file(retail::reference_fixture(list.path));
+		if (check_forms_agree(list.path, bytes, credits) != 0 || check_against_view(bytes, credits) != 0) {
 			++failures;
 			continue;
 		}
@@ -256,6 +309,7 @@ int main(int argc, char **argv) {
 	failures += test_forms_agree();
 	failures += test_label_lowercased_in_place();
 	failures += test_not_loaded();
+	failures += test_empty_label();
 	failures += test_minted();
 	failures += test_retail();
 	if (failures == 0) std::printf("menu_credits: all passed\n");

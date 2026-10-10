@@ -79,8 +79,12 @@ bool decode_binary_config(const uint8_t *data, size_t size, BinaryConfig &out, s
 		out.labels.push_back(std::move(label));
 		entry_counts.push_back(count);
 	}
-	// Every label's name entries, each list closed by its terminator.
+	// Every label's name entries, each list closed by its terminator; a label of no entry has neither, the reader
+	// stepping over its block alone where it counts entries [orig: ConfigFile_ParseBinary @ 0x75ea65, the
+	// element block and its terminator read only for a count other than 0; the writer @ 0x75e424..0x75e429, its
+	// jz past them for a label of none].
 	for (size_t i = 0; i < out.labels.size(); ++i) {
+		if (entry_counts[i] == 0) continue;
 		for (uint32_t j = 0; j <= entry_counts[i]; ++j) {
 			uint32_t name = 0, type = 0;
 			if (!word(name) || !word(type)) return fail(error, "The CBIN name table is cut short.");
@@ -125,6 +129,8 @@ bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out,
 			io::append_u32_le(plain, entry.name);
 			io::append_u32_le(plain, static_cast<uint32_t>(entry.values.size()));
 		}
+		// The terminator closes a label's entries; a label of none writes neither [orig: the writer @ 0x75e429].
+		if (label.entries.empty()) continue;
 		io::append_u32_le(plain, 0);
 		io::append_u32_le(plain, 0);
 	}

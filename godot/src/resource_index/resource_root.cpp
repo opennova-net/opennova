@@ -2,7 +2,6 @@
 #include "resource_index/resource_root.h"
 #include "util/data_format.h"
 
-#include "cbin/cbin_asset_lookup.h"
 #include "fnt/fnt_resource.h"
 #include "util/texture_path_resolver.h"
 #include "util/string_convert.h"
@@ -66,6 +65,37 @@ namespace {
 
 bool case_insensitive_less(const String &a, const String &b) {
 	return a.to_lower() < b.to_lower();
+}
+
+Ref<Resource> load_font_path(const String &p_path) {
+	if (p_path.is_empty()) {
+		return Ref<Resource>();
+	}
+	PackedByteArray bytes;
+	if (!read_nova_payload_file(p_path, bytes)) {
+		return Ref<Resource>();
+	}
+	Ref<FntResource> font;
+	font.instantiate();
+	if (font->load_from_bytes(bytes) != OK) {
+		return Ref<Resource>();
+	}
+	return font;
+}
+
+// A .fnt by its base name in the root's directory: the name as written, else the directory walked for it without
+// case.
+Ref<Resource> find_font_by_name(const String &p_name, const String &p_base_dir) {
+	if (p_name.is_empty() || p_base_dir.is_empty()) {
+		return Ref<Resource>();
+	}
+	const String file_name = p_name.get_extension().to_lower() == "fnt" ? p_name : p_name + String(".fnt");
+	const String direct_path = p_base_dir.path_join(file_name);
+	if (FileAccess::file_exists(direct_path)) {
+		return load_font_path(direct_path);
+	}
+	const String path = opennova::resolve_file_in_dir(p_base_dir, file_name);
+	return path.is_empty() ? Ref<Resource>() : load_font_path(path);
 }
 
 bool is_flat_filename(const String &name) {
@@ -841,9 +871,9 @@ Ref<Resource> ResourceRoot::load_font(const String &name) const {
 			return font;
 		}
 	}
-	// A CBIN font is found by walking the root's directory: a file source has none.
+	// A font a disk root holds under another case is found by walking its directory: a file source has none.
 	if (mount_kind_ == MountKind::Source) {
 		return Ref<Resource>();
 	}
-	return cbin_internal::find_font_by_name(file, root_dir_);
+	return find_font_by_name(file, root_dir_);
 }

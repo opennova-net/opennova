@@ -209,6 +209,8 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     struct LabelInfo {
         std::string name;
         uint32_t element_count;
+        // The name entries the label's block holds: its entries and their terminator, none for a label of none.
+        uint32_t walked() const { return element_count ? element_count + 1 : 0; }
     };
 
     std::vector<LabelInfo> labels;
@@ -239,7 +241,8 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
             error = "CBIN element count is too large";
             return false;
         }
-        total_elements += static_cast<size_t>(elem_count) + 1;
+        // A label of no entry has no terminator either [orig: ConfigFile_ParseBinary @ 0x75ea65].
+        total_elements += elem_count ? static_cast<size_t>(elem_count) + 1 : 0;
     }
 
     // Read element name entries (with type field)
@@ -319,7 +322,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     for (auto& label : labels) {
         if (label.name == "env") {
             // ENV: process environment settings
-            for (uint32_t j = 0; j <= label.element_count && name_idx < name_entries.size(); j++, name_idx++) {
+            for (uint32_t j = 0; j < label.walked() && name_idx < name_entries.size(); j++, name_idx++) {
                 auto& entry = name_entries[name_idx];
                 if (entry.type == 0) continue;
 
@@ -340,7 +343,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
             // type=1: ONE value (control code or text without font)
             // type=2: TWO CONSECUTIVE values (text + font)
 
-            for (uint32_t j = 0; j <= label.element_count && name_idx < name_entries.size(); j++, name_idx++) {
+            for (uint32_t j = 0; j < label.walked() && name_idx < name_entries.size(); j++, name_idx++) {
                 auto& entry = name_entries[name_idx];
                 if (entry.type == 0) continue;
 
@@ -426,7 +429,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
             }
         } else {
             // Other labels: skip (advance value_idx based on type)
-            for (uint32_t j = 0; j <= label.element_count && name_idx < name_entries.size(); j++, name_idx++) {
+            for (uint32_t j = 0; j < label.walked() && name_idx < name_entries.size(); j++, name_idx++) {
                 auto& entry = name_entries[name_idx];
                 if (entry.type == 1) {
                     if (value_idx >= value_entries.size()) {
@@ -616,18 +619,22 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
         write_u32(entry_table, e.name_idx);
         write_u32(entry_table, e.type);
     }
-    // ENV terminator (str_idx=0, type=0)
-    write_u32(entry_table, 0);
-    write_u32(entry_table, 0);
+    // ENV terminator (str_idx=0, type=0), none for a label of no entry [orig: the writer @ 0x75e429]
+    if (!env_elements.empty()) {
+        write_u32(entry_table, 0);
+        write_u32(entry_table, 0);
+    }
 
     // Name entries for TEXT
     for (const auto& e : text_elements) {
         write_u32(entry_table, e.name_idx);
         write_u32(entry_table, e.type);
     }
-    // TEXT terminator (str_idx=0, type=0)
-    write_u32(entry_table, 0);
-    write_u32(entry_table, 0);
+    // TEXT terminator (str_idx=0, type=0), none for a label of no entry
+    if (!text_elements.empty()) {
+        write_u32(entry_table, 0);
+        write_u32(entry_table, 0);
+    }
 
     // Value entries
     // ENV values (one per element)
