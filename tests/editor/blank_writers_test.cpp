@@ -147,9 +147,9 @@ static int test_sound() {
 	return 0;
 }
 
-// The music pairs: a bank of no stream (the 24-byte header), made with its script, whose one section idles; the
-// mission's script carries the handler the round's end runs, the shell's none; the shell's opens in its document
-// clean, the mission's held read only as retail's own (its MUS text has no handler).
+// The music pairs: a bank of no stream (the 24-byte header), made with its script, whose one section idles after
+// MDEdit's leading nop, where the chunk's message handler points (the entry the round's end runs, as menumus.bin's
+// does); each opens in its document clean, its MUS text giving back its bytes.
 static int test_music() {
 	const std::vector<uint8_t> bank = blank_of("MENUMUS.SBF", AssetKind::MusicBank, "menumus_sbf");
 	sbf::SbfArchive archive{};
@@ -169,11 +169,11 @@ static int test_music() {
 		const std::vector<uint8_t> script = blank_of(mission ? "GAMEMUS.BIN" : "MENUMUS.BIN", AssetKind::MusicScript, role);
 		mus::MusFile file{};
 		TEST_EXPECT(!script.empty() && mus::mus_open_memory(&file, script.data(), script.size()) == 0);
-		TEST_EXPECT(file.header.chunk_count == 1 && file.scripts[0].section_count == 1 && file.scripts[0].code_size >= 1 &&
-		            file.scripts[0].code[0] == 0x3F && file.scripts[0].has_message_handler == (mission ? 1 : 0));
+		TEST_EXPECT(file.header.chunk_count == 1 && file.scripts[0].section_count == 1 && file.scripts[0].code_size >= 2 &&
+		            file.scripts[0].code[0] == 0x00 && file.scripts[0].code[1] == 0x3F &&
+		            file.scripts[0].has_message_handler == 1 && file.scripts[0].message_handler_offset == 0);
 		mus::mus_close(&file);
-		if (!mission) TEST_EXPECT(opens_clean("MENUMUS.BIN", AssetKind::MusicScript, script));
-		else TEST_EXPECT(opens_clean("GAMEMUS.BIN", AssetKind::MusicScript, script, DiagnosticSeverity::Warning));
+		TEST_EXPECT(opens_clean(mission ? "GAMEMUS.BIN" : "MENUMUS.BIN", AssetKind::MusicScript, script));
 	}
 	return 0;
 }
