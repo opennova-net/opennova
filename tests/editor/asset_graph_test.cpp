@@ -176,11 +176,11 @@ static int test_blank_project() {
 	TEST_EXPECT(!font_file.empty() && !graph.referrers_of_file(font_file).empty());
 	TEST_EXPECT(graph.referrers_of_file("nothing.fnt").empty());
 	// The blank tables define nothing yet: the stylesheet's variables, the blank item
-	// table's null marker (its id and its alias), the blank menus' screens and windows, the blank SndProf.def's
-	// "default" profile and the blank _ffp.fx's fixed-function shader tags are the symbols.
+	// table's null marker (its id, its alias and its name), the blank menus' screens and windows, the blank
+	// SndProf.def's "default" profile and the blank _ffp.fx's fixed-function shader tags are the symbols.
 	for (const GraphSymbol &symbol : all_symbols(graph))
 		TEST_EXPECT(symbol.kind == ReferenceKind::StyleVar || symbol.kind == ReferenceKind::Item ||
-		            symbol.kind == ReferenceKind::ItemAlias ||
+		            symbol.kind == ReferenceKind::ItemAlias || symbol.kind == ReferenceKind::ItemName ||
 		            symbol.kind == ReferenceKind::MenuScreen || symbol.kind == ReferenceKind::MenuWindow ||
 		            symbol.kind == ReferenceKind::SoundProfile || symbol.kind == ReferenceKind::Shader);
 	TEST_EXPECT(graph.resolve(ReferenceKind::Shader, "FF_ST_OP") == ReferenceStatus::Present &&
@@ -488,6 +488,32 @@ static int test_native_extractors() {
 	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_failed == 0);
 	TEST_EXPECT(graph.references_of("test.mis").empty() &&
 			count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
+
+	// A script of the mission's name names the mission's entities and areas by its literal operands (S23 B): in
+	// test.bms, warnings where it has none, the area's in the script's words; a script of no mission the project
+	// has names none.
+	{
+		TEST_EXPECT(editor_test::write_text(root + "/test.wac", "v1=SSNarea(42,37) v2=SSNdead(10001)\r\n"));
+		TEST_EXPECT(editor_test::write_text(root + "/lone.wac", "v1=SSNarea(42,37)\r\n"));
+		editor_test::handle_to_end(session, request::rescan());
+		const GraphEdge *entity = edge_to(graph, "test.wac", ReferenceKind::MissionEntity, "42");
+		const GraphEdge *zone = edge_to(graph, "test.wac", ReferenceKind::MissionZone, "37");
+		TEST_EXPECT(entity && zone && entity->scope == "TEST.BMS" && !entity->rewritable &&
+		            graph.resolve(*entity) == ReferenceStatus::Missing && graph.resolve(*zone) == ReferenceStatus::Missing);
+		const GraphEdge *lone = edge_to(graph, "lone.wac", ReferenceKind::MissionEntity, "42");
+		TEST_EXPECT(lone && graph.resolve(*lone) == ReferenceStatus::NotAReference);
+		// A player's SSN (10000 and its slot: 10001 the second player) names no record of the mission.
+		TEST_EXPECT(!edge_to(graph, "test.wac", ReferenceKind::MissionEntity, "10001"));
+		bool zone_words = false;
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			zone_words = zone_words || (d.asset == "test.wac" && d.severity == DiagnosticSeverity::Warning &&
+			                            d.message.find("the script's command finds no area") != std::string::npos);
+		TEST_EXPECT(zone_words);
+		std::error_code gone;
+		fs::remove(fs::path(root) / "test.wac", gone);
+		fs::remove(fs::path(root) / "lone.wac", gone);
+		editor_test::handle_to_end(session, request::rescan());
+	}
 
 	// A native file the graph cannot read is a warning, its references unchecked, kept
 	// while the file is unchanged: a particle file, which opens as a text (DI-14), the particle type's
@@ -1639,7 +1665,7 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::SoundProfile || kind == ReferenceKind::Shader ||
 		                       kind == ReferenceKind::Particle || kind == ReferenceKind::AnimationKey ||
 		                       kind == ReferenceKind::ItemAlias || kind == ReferenceKind::AvatarPart ||
-		                       kind == ReferenceKind::Dialog;
+		                       kind == ReferenceKind::Dialog || kind == ReferenceKind::MusicStream || kind == ReferenceKind::ItemName;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;
@@ -1648,8 +1674,7 @@ static int test_reference_kind_rows() {
 	            reference_row(ReferenceKind::MenuTexture).file == AssetKind::Texture);
 	TEST_EXPECT(reference_row(ReferenceKind::StyleVar).resolution == ReferenceResolution::StyleVariable);
 	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Symbol &&
-	            reference_row(ReferenceKind::OtherText).resolution == ReferenceResolution::Unchecked);
-	TEST_EXPECT(reference_row(ReferenceKind::OtherText).also_offers == ReferenceKind::TextId);
+	            reference_row(ReferenceKind::MenuText).resolution == ReferenceResolution::Unchecked);
 	// A model's register by its index, every whole number from 0 one; its frame row by the pose's
 	// rule, a signed byte above 0.
 	TEST_EXPECT(reference_row(ReferenceKind::ModelRegister).resolution == ReferenceResolution::Record &&

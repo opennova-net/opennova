@@ -88,9 +88,9 @@ int test_rewrite_text() {
 
 // DI-17: where a native text writes a record's name (native_text_place), the line a Go to lands on: the
 // token whose change changes that record's name alone (a comment naming it, an earlier line the game reads
-// over and another record naming the same file are not it), found without case; two records on one line,
-// each its own column; a particle file's effect by its id; nothing for a name the loader derives, a record or
-// a field the text does not have, or the file alone.
+// over and another record naming the same file are not it: two vehicle panels' one icon), found without case;
+// two records on one line, each its own column; a particle file's effect by its id; nothing for a name the
+// loader derives, a record or a field the text does not have, or the file alone.
 int test_native_text_place() {
 	size_t line = 0, column = 0;
 	using editor_test::crlf;
@@ -100,17 +100,16 @@ int test_native_text_place() {
 	            line == 5 && column == 18);
 	TEST_EXPECT(native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "Terrain", "polytrn_detailmap", line, column) &&
 	            line == 3 && column == 19);
-	// Two heads name one model: each record's own line.
-	const std::string avatars =
-	        crlf("define head A\n{\n\tname\t\tAV_A\n\tgraphic\t\tboonie.3di\n\tcamo\t\t0 0 0\n\tvoice\t\t1\n\tsex\t\tm\n}\n\n"
-	             "define head B\n{\n\tname\t\tAV_B\n\tgraphic\t\tboonie.3di\n\tcamo\t\t3 0 0\n\tvoice\t\t1\n\tsex\t\tm\n}\n");
-	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "B", "graphic", line, column) &&
-	            line == 13 && column == 11);
-	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "A", "graphic", line, column) &&
-	            line == 4 && column == 11);
-	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "B", "name", line, column) && line == 12);
-	// A record named alone: the first name the parser reads of it.
-	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "B", "", line, column) && line == 13);
+	// Two vehicle panels name one icon: each record's own line.
+	const std::string hudpos = crlf("VEHICLE_HUD\n  sid BUGGY1\n  icon v_icon.tga\n  statictexture v_static.tga\nVEHICLE_END\n\n"
+	                                "VEHICLE_HUD\n  sid BUGGY2\n  icon v_icon.tga\n  statictexture v_static2.tga\nVEHICLE_END\n");
+	TEST_EXPECT(native_text_place("hudpos.def", AssetKind::HudPosDefs, "jo", hudpos, "VEHICLE_HUD BUGGY2", "icon", line, column) &&
+	            line == 9 && column == 8);
+	TEST_EXPECT(native_text_place("hudpos.def", AssetKind::HudPosDefs, "jo", hudpos, "VEHICLE_HUD BUGGY1", "icon", line, column) &&
+	            line == 3 && column == 8);
+	TEST_EXPECT(native_text_place("hudpos.def", AssetKind::HudPosDefs, "jo", hudpos, "VEHICLE_HUD BUGGY2", "statictexture", line,
+	                              column) &&
+	            line == 10 && column == 17);
 	// (A face animation is a record document since round S23: a Go to lands on its face's field, not a line.)
 	// A particle file's effect (a symbol the record names): its id's line.
 	const std::string ptl = "[particledef]\n{\n\tid = spark;\n\tgraphic1 = spark.tga;\n}\n[effectdef]\n{\n\tid = Hit;\n"
@@ -121,7 +120,7 @@ int test_native_text_place() {
 	            read.symbols.size() == 1);
 	TEST_EXPECT(native_text_place("fx.ptl", AssetKind::Particles, "jo", ptl, "Hit", "", line, column) && line == 8 && column == 7);
 	// Nowhere: a record or field the text has not, the file alone.
-	TEST_EXPECT(!native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "C", "graphic", line, column));
+	TEST_EXPECT(!native_text_place("hudpos.def", AssetKind::HudPosDefs, "jo", hudpos, "VEHICLE_HUD C", "icon", line, column));
 	TEST_EXPECT(!native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "Terrain", "polytrn_charmap", line, column));
 	TEST_EXPECT(!native_text_place("isle.trn", AssetKind::Terrain, "jo", trn, "", "", line, column));
 	return 0;
