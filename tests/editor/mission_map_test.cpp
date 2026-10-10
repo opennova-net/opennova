@@ -4,12 +4,15 @@
 // mission and the first framing, a hit and a box, a drag of a pin planned into the 3D view's move batch
 // (mission_move_edits) and served as one undo step, the selection the 3D view shares, the commands and the wire.
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <set>
 #include <string>
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_handle_edit.h>
@@ -25,10 +28,12 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/def/def.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/hud/hud_map_view.h>
 
 #include "common/file_io.h"
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -132,13 +137,19 @@ static int test_kind_row() {
 	return 0;
 }
 
-// The workspace's cache (set_pin_all_targets(false)): the Preview window shows the mission's map, but stands aside
-// for it until asked, so its target is pinned no device; the window drawing it (its canvas's ask) gives it one.
+// The workspace's cache (set_pin_all_targets(false)): the Preview window shows the mission's map only where the Map
+// tool asks (set_workspace's document `map`; the Windows menu's tick shows the kind shown before, S15), and stands aside
+// for it until then, so its target is pinned no device; the window drawing it (its canvas's ask) gives it one.
 static int test_workspace_pins() {
 	Rig rig("opennova_editor_mission_map_pins");
 	TEST_EXPECT(rig.open(false));
-	TEST_EXPECT(rig.session.view().documents.preview_shown == ViewportKind::Map &&
+	TEST_EXPECT(rig.session.view().documents.preview_shown == ViewportKind::kCount &&
 	            rig.session.view().documents.previews[ViewportKind::Map].path == rig.path);
+	editor_test::handle_to_end(rig.session,
+			request::set_workspace("{\"document\":{\"path\":\"" + rig.path + "\",\"map\":true},\"focus\":\"preview\"}"));
+	TEST_EXPECT(rig.session.outcome().done());
+	TEST_EXPECT(rig.session.view().documents.preview_shown == ViewportKind::Map &&
+	            rig.session.view().documents.beside == rig.path);
 	FakeDevices shown;
 	shown.cache.set_pin_all_targets(false);
 	shown.sync(rig.session);
@@ -185,6 +196,16 @@ static int test_projection() {
 	float px = 0.0f, py = 0.0f;
 	view.project(camera.center[0] + 50.0, camera.center[1] + 80.0, px, py);
 	TEST_EXPECT(px > 400.0f && py < 300.0f);
+	// A RotateMap180 mission's map turned half a turn about the centre (g_MapYaw180): the same point below the centre
+	// and to its left, each pixel the north-up one's mirrored through the middle, and back.
+	const MissionMapView turned = mission_map_view(camera, 800, 600, true);
+	TEST_EXPECT(turned.flip_180 && turned.scale == view.scale && turned.middle_x == view.middle_x);
+	float tx = 0.0f, ty = 0.0f;
+	turned.project(camera.center[0] + 50.0, camera.center[1] + 80.0, tx, ty);
+	TEST_EXPECT(tx < 400.0f && ty > 300.0f && near(tx, 800.0 - px, 0.01) && near(ty, 600.0 - py, 0.01));
+	double bx = 0.0, by = 0.0;
+	turned.unproject(tx, ty, bx, by);
+	TEST_EXPECT(near(bx, camera.center[0] + 50.0, 1e-3) && near(by, camera.center[1] + 80.0, 1e-3));
 	// The zoom for a width across: the law inverted, clamped to the map's range.
 	TEST_EXPECT(near(mission_map_zoom_for(327.68 * 3.0, 640), 3.0, 1e-4));
 	TEST_EXPECT(mission_map_zoom_for(1.0, 640) == kMissionMapZoomMin && mission_map_zoom_for(1e7, 640) == kMissionMapZoomMax);
@@ -275,6 +296,8 @@ static int test_drag() {
 	rig.pump();
 	const MissionEntityMark *moved = rig.map()->scene().entity(item.row);
 	TEST_EXPECT(moved && near(moved->x, target[0], 1.0 / 32768.0) && near(moved->y, target[1], 1.0 / 32768.0));
+	// The drag placed its one record again, no other.
+	TEST_EXPECT(rig.map()->outlines_placed() == 1);
 	rig.session.handle(request::undo(kMission));
 	TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
 	// The map moves a record; its height and heading are the 3D view's.
@@ -505,6 +528,43 @@ static int test_footprints() {
 
 // The palette's pictures (S23 C): an item's model seen from the side, made off the frame: asked and queued (none yet),
 // made by a step, then answered while its file's stamp stands (made once); a file that is no model reads as none.
+// The header's terrain, tile set or environment edited: the map's device loads its ground again (a Rebuild), the
+// 3D view's alike; another header field (the wind) reaches neither as a Rebuild.
+static int test_header_rebuilds() {
+	Rig rig("opennova_editor_mission_map_header");
+	TEST_EXPECT(rig.open());
+	const MissionMapViewport *map = rig.map();
+	TEST_EXPECT(map != nullptr && rig.devices.last(rig.path, ViewportKind::Map) == ViewportAction::Rebuild);
+	rig.pump();
+	TEST_EXPECT(rig.devices.last(rig.path, ViewportKind::Map) == ViewportAction::Keep);
+	const NodeAddress mission = first_of(*rig.document(), MissionKind::Mission);
+	TEST_EXPECT(mission.row != 0);
+	bool served = true;
+	const auto set = [&](const char *field, Value value) -> ViewportAction {
+		Edit edit;
+		edit.operation = EditOperation::Set;
+		edit.address = mission;
+		edit.field = field;
+		edit.value = std::move(value);
+		rig.session.handle(request::edit_record(kMission, edit));
+		served = served && rig.session.outcome().done();
+		rig.pump();
+		return rig.devices.last(rig.path, ViewportKind::Map);
+	};
+	TEST_EXPECT(set("terrain", std::string("Bmap")) == ViewportAction::Rebuild);
+	TEST_EXPECT(map->scene().header().terrain == "Bmap");
+	TEST_EXPECT(set("environment", std::string("other.env")) == ViewportAction::Rebuild);
+	TEST_EXPECT(set("wind_speed", int64_t(7)) != ViewportAction::Rebuild);
+	// The header's RotateMap180 (attribute 0x20): the map turned half a turn, the device's CMAP pass with it (an
+	// Update: the terrain stands).
+	TEST_EXPECT(!map->ground().flip_180 && !map->view(800, 600).flip_180);
+	TEST_EXPECT(set("attrib_flags", int64_t(0x20)) == ViewportAction::Update);
+	TEST_EXPECT(map->ground().flip_180 && map->view(800, 600).flip_180);
+	TEST_EXPECT(served);
+	std::printf("test_header_rebuilds passed\n");
+	return 0;
+}
+
 static int test_palette_pictures() {
 	Rig rig("opennova_editor_mission_map_palette");
 	TEST_EXPECT(rig.open(true, true));
@@ -523,7 +583,126 @@ static int test_palette_pictures() {
 	return 0;
 }
 
-int main() {
+// The retail leg (OPENNOVA_JO_ASSETS): JO:CA's 00TRa, the mission S23 C measured the map on, written into a project
+// with the game's items.def and the models its entities' items draw (each item's graphic), its outlines read to the end:
+// the entities, the models outlined, the lines drawn, and the edge cap (a plan of LOD 0 past kMissionOutlineEdgesMax
+// edges drawn by its first coarser LOD's that has no more, else by the fewest) pinned. Prints the time the outlines
+// took over the follows.
+static int test_retail() {
+	const std::string mission_file = retail::asset_file("00TRa.bms"), items_file = retail::asset_file("items.def");
+	if (mission_file.empty() || items_file.empty())
+		return retail::skip_leg("OPENNOVA_JO_ASSETS (00TRa's map: its outlines read and drawn)");
+	const std::vector<uint8_t> mission_bytes = test_io::read_file(mission_file), items_bytes = test_io::read_file(items_file);
+	Rig rig("opennova_editor_mission_map_retail");
+	rig.session.handle(request::new_project(rig.dir.file("project"), "Maps"));
+	rig.session.run_operations();
+	editor_test::create_missing_files(rig.session);
+	const std::string project = rig.session.view().project.root;
+	TEST_EXPECT(editor_test::write_bytes(project + "/missions/00TRa.bms", mission_bytes));
+	TEST_EXPECT(editor_test::write_bytes(project + "/defs/items.def", items_bytes));
+	rig.session.handle(request::rescan());
+	rig.session.run_operations();
+	rig.session.handle(request::open_document("missions/00TRa.bms"));
+	TEST_EXPECT(rig.session.outcome().done());
+	if (!rig.session.outcome().done()) return 1;
+	rig.path = rig.session.document_for("missions/00TRa.bms")->path();
+	rig.pump();
+	const MissionMapViewport *map = rig.map();
+	TEST_EXPECT(map && map->status() == ViewportStatus::Ready);
+	if (!map) return 1;
+	// The models its entities' items draw, from the game's archives, as the item cache names them (the graphic, its
+	// .3di where it names none).
+	opennova::def::DefItemsFile items{};
+	TEST_EXPECT(opennova::def::def_parse_items_memory(items_bytes.data(), items_bytes.size(), &items) == 0);
+	std::set<int64_t> named;
+	for (const MissionEntityMark &entity : map->scene().entities()) named.insert(entity.item);
+	std::set<std::string> models;
+	for (size_t i = 0; i < items.count; ++i) {
+		const opennova::def::DefItemDef &item = items.entries[i];
+		if (!named.count(int64_t(item.id)) || item.graphic[0] == 0) continue;
+		std::string graphic = item.graphic;
+		if (graphic.find('.') == std::string::npos) graphic += ".3di";
+		models.insert(opennova::strutil::to_lower(graphic));
+	}
+	opennova::def::def_free_items(&items);
+	size_t copied = 0;
+	for (const std::string &model : models) {
+		const std::string file = retail::asset_file(model.c_str());
+		if (file.empty()) continue;
+		TEST_EXPECT(editor_test::write_bytes(project + "/models/" + model, test_io::read_file(file)));
+		++copied;
+	}
+	rig.session.handle(request::rescan());
+	rig.session.run_operations();
+	// The outlines read over the follows, a few each within the map's budgets, to the end.
+	const auto started = std::chrono::steady_clock::now();
+	int follows = 0;
+	do {
+		rig.pump();
+		++follows;
+	} while ((map->outlines_pending() > 0 || map->outline_lines().empty()) && follows < 4000);
+	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+	TEST_EXPECT(map->outlines_pending() == 0);
+	// What it drew: the entities, the distinct models outlined, the lines; every plan within the cap but those whose
+	// every LOD's plan is past it (drawn by the fewest).
+	std::set<const MissionModelOutline *> outlined;
+	size_t past_cap = 0;
+	for (const MissionMapFootprint &footprint : map->footprints())
+		if (footprint.outline && outlined.insert(footprint.outline.get()).second &&
+		    footprint.outline->edges.size() / 6 > kMissionOutlineEdgesMax)
+			++past_cap;
+	const size_t lines = map->outline_lines().size() / 4;
+	std::printf("retail 00TRa: %zu entities, %zu items named, %zu models copied, %zu outlined, %zu past the %zu-edge cap, "
+	            "%zu lines, %zu files read, %d follows in %.2f s\n",
+	            map->scene().entities().size(), named.size(), copied, outlined.size(), past_cap, kMissionOutlineEdgesMax,
+	            lines, map->outline_files_read(), follows, seconds);
+	// 00TRa's 1,333 entity records (the game places 943 of them in a single-player run: the rest its mode admits not),
+	// 141 models outlined, six of them drawn by their fewest plan, every LOD's past the cap.
+	TEST_EXPECT(map->scene().entities().size() == 1333);
+	TEST_EXPECT(outlined.size() == 141);
+	TEST_EXPECT(lines == 79903);
+	TEST_EXPECT(past_cap == 6);
+	// A drag of the first outlined item over 20 samples of one gesture, then its end: each sample's edit served and
+	// followed places that one record again and moves the chunks its edges lie in alone. Prints a sample's time.
+	NodeAddress dragged;
+	for (size_t i = 0; i < map->scene().entities().size() && !dragged.row; ++i)
+		if (map->footprints()[i].outline && map->scene().entities()[i].pool == MissionPool::Item)
+			dragged = NodeAddress{ map->scene().entities()[i].row, map->scene().entities()[i].kind, 0 };
+	TEST_EXPECT(dragged.row != 0);
+	if (!dragged.row) return 1;
+	const std::vector<uint64_t> chunks_before = map->outline_chunks();
+	double sample_seconds = 0.0;
+	size_t samples = 0, chunks_moved = 0;
+	for (int sample = 1; sample <= 20; ++sample) {
+		ViewportDrag drag;
+		drag.id = dragged.row;
+		drag.handle = "move";
+		drag.by = true;
+		drag.x = 2.0f * float(sample);
+		drag.y = 0.0f;
+		drag.snap = 0.0f;
+		drag.end = sample == 20;
+		editor_test::Gathered gathered;
+		std::string error;
+		const auto at = std::chrono::steady_clock::now();
+		TEST_EXPECT(map->drag(rig.context(), drag, gathered, error));
+		TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
+		rig.pump();
+		sample_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - at).count();
+		++samples;
+		TEST_EXPECT(map->outlines_placed() == 1);
+	}
+	const std::vector<uint64_t> &chunks_after = map->outline_chunks();
+	TEST_EXPECT(chunks_after.size() == chunks_before.size());
+	for (size_t i = 0; i < chunks_after.size() && i < chunks_before.size(); ++i) chunks_moved += chunks_after[i] != chunks_before[i];
+	TEST_EXPECT(chunks_moved >= 1 && chunks_moved <= 2);
+	std::printf("retail 00TRa drag: %zu samples, %.2f ms a sample (the edit served and followed), %zu of %zu chunks moved\n",
+	            samples, 1000.0 * sample_seconds / double(samples), chunks_moved, chunks_after.size());
+	return 0;
+}
+
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	int failed = 0;
 	failed += test_kind_row();
 	failed += test_workspace_pins();
@@ -534,6 +713,8 @@ int main() {
 	failed += test_grid_origin();
 	failed += test_outline_of_a_box();
 	failed += test_footprints();
+	failed += test_header_rebuilds();
 	failed += test_palette_pictures();
+	failed += test_retail();
 	return failed == 0 ? 0 : 1;
 }

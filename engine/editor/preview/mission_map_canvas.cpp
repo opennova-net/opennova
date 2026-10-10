@@ -87,8 +87,10 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 			panning_ = false;
 		} else {
 			MissionMapCamera camera = pan_from_;
-			camera.center[0] = pan_from_.center[0] - double(in.mouse.x - pan_at_.x) * double(view.scale);
-			camera.center[1] = pan_from_.center[1] + double(in.mouse.y - pan_at_.y) * double(view.scale);
+			// The map follows the pointer, the way it turns (a RotateMap180 mission's south up).
+			const double turn = view.flip_180 ? -1.0 : 1.0;
+			camera.center[0] = pan_from_.center[0] - turn * double(in.mouse.x - pan_at_.x) * double(view.scale);
+			camera.center[1] = pan_from_.center[1] + turn * double(in.mouse.y - pan_at_.y) * double(view.scale);
 			camera_(camera, out);
 			return;
 		}
@@ -100,7 +102,7 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 		camera.zoom = std::clamp(camera.zoom * std::pow(step, std::fabs(in.wheel)), kMissionMapZoomMin, kMissionMapZoomMax);
 		double before[2], after[2];
 		view.unproject(in.mouse.x, in.mouse.y, before[0], before[1]);
-		mission_map_view(camera, in.width, in.height).unproject(in.mouse.x, in.mouse.y, after[0], after[1]);
+		viewport.view_of(camera, in.width, in.height).unproject(in.mouse.x, in.mouse.y, after[0], after[1]);
 		camera.center[0] += before[0] - after[0];
 		camera.center[1] += before[1] - after[1];
 		camera_(camera, out);

@@ -32,7 +32,8 @@ struct SessionView;
 // A model's plan is LOD 0's where it has kMissionOutlineEdgesMax edges or fewer; a model whose LOD 0 plan has more (a
 // palm's fronds, a hut's thatch) is drawn by its first coarser LOD whose plan has no more, else by the LOD whose plan
 // has the fewest; one whose every plan is empty (upright cards alone) by its footprint's outline. JO:CA's 00TRa
-// (943 entities, 156 models) draws so in some 80 000 lines; LOD 0's every edge seen from above in some 800 000.
+// (1,333 entity records, 141 models, six drawn by their fewest plan) draws so in 79,903 lines; LOD 0's every edge seen
+// from above in some 800 000.
 inline constexpr size_t kMissionOutlineEdgesMax = 192;
 
 // The view an outline is seen in: from above (the map's plan: the up word looked along, forward and left seen), or

@@ -115,8 +115,9 @@ bool mission_map_camera_from_json(const io::JsonValue &json, MissionMapCamera &c
 	return true;
 }
 
-MissionMapView mission_map_view(const MissionMapCamera &camera, int width, int height) {
+MissionMapView mission_map_view(const MissionMapCamera &camera, int width, int height, bool flip_180) {
 	MissionMapView view;
+	view.flip_180 = flip_180;
 	view.width = width;
 	view.height = height;
 	view.center[0] = camera.center[0];
@@ -151,13 +152,24 @@ void MissionMapView::project(double x, double y, float &px, float &py) const {
 	const float inv = 1.0f / std::max(scale, 1e-6f);
 	const int32_t dx = int32_t(uint32_t(bms::to_fixed_16_16(x)) - uint32_t(bms::to_fixed_16_16(center[0])));
 	const int32_t dy = int32_t(uint32_t(bms::to_fixed_16_16(y)) - uint32_t(bms::to_fixed_16_16(center[1])));
-	px = middle_x + float(dx) * inv / io::kFp16One;
-	py = middle_y + float(dy) * inv * -io::kInvFp16One;
+	float ox = float(dx) * inv / io::kFp16One, oy = float(dy) * inv * -io::kInvFp16One;
+	// The half turn about the centre (MissionMapView::flip_180): both offsets the other way.
+	if (flip_180) {
+		ox = -ox;
+		oy = -oy;
+	}
+	px = middle_x + ox;
+	py = middle_y + oy;
 }
 
 void MissionMapView::unproject(float px, float py, double &x, double &y) const {
-	x = center[0] + double(px - middle_x) * double(scale);
-	y = center[1] - double(py - middle_y) * double(scale);
+	double ox = double(px - middle_x), oy = double(py - middle_y);
+	if (flip_180) {
+		ox = -ox;
+		oy = -oy;
+	}
+	x = center[0] + ox * double(scale);
+	y = center[1] - oy * double(scale);
 }
 
 float mission_map_zoom_for(double metres, int width) {
@@ -507,6 +519,8 @@ void MissionMapViewport::follow_ground_(const SessionView &view) {
 			mission::mission_base_name(path()));
 	MissionMapGround ground;
 	ground.terrain = scene_.header().terrain;
+	// The header's RotateMap180: the CMAP turned half a turn (MissionMapView::flip_180).
+	ground.flip_180 = (scene_.header().attrib_flags & 0x20u) != 0;
 	ground.water = reader_.water();
 	ground.water_height = ground.water ? reader_.water_height() : 0.0;
 	// The grid's origin: the first marker whose record's type is 2043 (the Map Centerpoint, items.def 102043), as
@@ -520,7 +534,8 @@ void MissionMapViewport::follow_ground_(const SessionView &view) {
 		ground.grid_y = entity.y;
 		break;
 	}
-	if (ground.terrain != ground_.terrain || ground.water != ground_.water || ground.water_height != ground_.water_height ||
+	if (ground.terrain != ground_.terrain || ground.flip_180 != ground_.flip_180 || ground.water != ground_.water ||
+			ground.water_height != ground_.water_height ||
 			ground.grid_origin != ground_.grid_origin || ground.grid_x != ground_.grid_x || ground.grid_y != ground_.grid_y)
 		moved_ = true;
 	ground_ = std::move(ground);
@@ -538,39 +553,92 @@ bool MissionMapViewport::follow_outlines_(const SessionView &view, int64_t budge
 	const bool read = outlines_.step(view, items, budget_us);
 	const bool kinds = options_.items != placed_options_.items || options_.buildings != placed_options_.buildings ||
 	                   options_.markers != placed_options_.markers || options_.organics != placed_options_.organics;
+	placed_count_ = 0;
 	if (!read && !kinds && scene_.serial() == placed_scene_) return false;
 	placed_scene_ = scene_.serial();
 	placed_options_ = options_;
-	// Each entity's model placed as it stands; the shown kinds' wireframes, every edge of each placed.
-	footprints_.clear();
-	footprints_.reserve(scene_.entities().size());
-	lines_.clear();
-	line_rgb_.clear();
-	for (const MissionEntityMark &entity : scene_.entities()) {
-		const MissionOutlineCache::Item *item = outlines_.item(entity.item);
-		if (!item || !item->outline) {
-			footprints_.emplace_back();
-			continue;
-		}
-		footprints_.push_back(mission_map_footprint(item->outline, entity.x, entity.y, double(entity.pitch),
-				double(entity.yaw), double(entity.roll), item->scale_q16));
-		const bool kind_on = entity.pool == MissionPool::Item ? options_.items
+	const std::vector<MissionEntityMark> &entities = scene_.entities();
+	const auto shown_kind = [this](const MissionEntityMark &entity) {
+		return entity.pool == MissionPool::Item ? options_.items
 				: entity.pool == MissionPool::Building ? options_.buildings
 				: entity.pool == MissionPool::Marker ? options_.markers : options_.organics;
-		if (!kind_on) continue;
-		const MissionMapFootprint &footprint = footprints_.back();
-		const uint32_t rgb = mission_map_rgb(entity.pool, entity.team);
-		const std::vector<float> &edges = item->outline->edges;
-		for (size_t i = 0; i + 5 < edges.size(); i += 6) {
-			double ax, ay, bx, by;
-			footprint.place(&edges[i], ax, ay);
-			footprint.place(&edges[i + 3], bx, by);
-			lines_.insert(lines_.end(), { float(ax), float(ay), float(bx), float(by) });
-			line_rgb_.push_back(rgb);
-		}
+	};
+	// Edges placed anew wherever their count or order may move: the outlines read, the kinds shown, the entities
+	// added, removed or in another order, an entity given another model or SCALE.
+	bool anew = read || kinds || placed_.size() != entities.size();
+	for (size_t i = 0; !anew && i < entities.size(); ++i) {
+		const MissionOutlineCache::Item *item = outlines_.item(entities[i].item);
+		const Placed &was = placed_[i];
+		anew = was.row != entities[i].row || was.outline != (item ? item->outline.get() : nullptr) ||
+		       was.scale_q16 != (item ? item->scale_q16 : 0) || was.shown != shown_kind(entities[i]);
 	}
-	++outline_serial_;
+	if (!anew) {
+		// Each entity moved, turned or of another team placed again where it stands, its edges rewritten in place, and
+		// the chunks they lie in moved.
+		uint64_t serial = 0;
+		for (size_t i = 0; i < entities.size(); ++i) {
+			const Placed &was = placed_[i];
+			if (was.stamp == entities[i].stamp && was.team == entities[i].team) continue;
+			place_entity_(i, outlines_.item(entities[i].item), was.begin);
+			if (!serial) serial = ++outline_serial_;
+			const size_t end = was.begin + was.count;
+			for (size_t chunk = was.begin / kMissionMapLinesChunk; was.count && chunk * kMissionMapLinesChunk < end; ++chunk)
+				chunk_serials_[chunk] = serial;
+			++placed_count_;
+		}
+		return serial != 0;
+	}
+	// Each entity's model placed as it stands; the shown kinds' wireframes, every edge of each placed.
+	placed_.assign(entities.size(), Placed());
+	footprints_.assign(entities.size(), MissionMapFootprint());
+	size_t edges = 0;
+	for (size_t i = 0; i < entities.size(); ++i) {
+		const MissionOutlineCache::Item *item = outlines_.item(entities[i].item);
+		Placed &placed = placed_[i];
+		placed.row = entities[i].row;
+		placed.outline = item ? item->outline.get() : nullptr;
+		placed.scale_q16 = item ? item->scale_q16 : 0;
+		placed.shown = shown_kind(entities[i]);
+		placed.begin = edges;
+		placed.count = placed.outline && placed.shown ? placed.outline->edges.size() / 6 : 0;
+		edges += placed.count;
+	}
+	lines_.assign(edges * 4, 0.0f);
+	line_rgb_.assign(edges, 0);
+	for (size_t i = 0; i < entities.size(); ++i) place_entity_(i, outlines_.item(entities[i].item), placed_[i].begin);
+	placed_count_ = entities.size();
+	const uint64_t serial = ++outline_serial_;
+	chunk_serials_.assign((edges + kMissionMapLinesChunk - 1) / kMissionMapLinesChunk, serial);
 	return true;
+}
+
+void MissionMapViewport::place_entity_(size_t index, const MissionOutlineCache::Item *item, size_t begin) {
+	const MissionEntityMark &entity = scene_.entities()[index];
+	Placed &placed = placed_[index];
+	placed.stamp = entity.stamp;
+	placed.team = entity.team;
+	if (!item || !item->outline) {
+		footprints_[index] = MissionMapFootprint();
+		return;
+	}
+	footprints_[index] = mission_map_footprint(item->outline, entity.x, entity.y, double(entity.pitch),
+			double(entity.yaw), double(entity.roll), item->scale_q16);
+	if (!placed.count) return;
+	const MissionMapFootprint &footprint = footprints_[index];
+	const uint32_t rgb = mission_map_rgb(entity.pool, entity.team);
+	const std::vector<float> &edges = item->outline->edges;
+	size_t at = begin;
+	for (size_t i = 0; i + 5 < edges.size() && at < begin + placed.count; i += 6, ++at) {
+		double ax, ay, bx, by;
+		footprint.place(&edges[i], ax, ay);
+		footprint.place(&edges[i + 3], bx, by);
+		float *line = &lines_[at * 4];
+		line[0] = float(ax);
+		line[1] = float(ay);
+		line[2] = float(bx);
+		line[3] = float(by);
+		line_rgb_[at] = rgb;
+	}
 }
 
 ViewportAction MissionMapViewport::stop_(Reason reason) {
@@ -583,6 +651,8 @@ ViewportAction MissionMapViewport::stop_(Reason reason) {
 	footprints_.clear();
 	lines_.clear();
 	line_rgb_.clear();
+	placed_.clear();
+	chunk_serials_.clear();
 	placed_scene_ = UINT64_MAX;
 	++outline_serial_;
 	shown_none();
@@ -618,12 +688,13 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 		moved_ = false;
 		return picture_.built(FileStamps());
 	}
+	// The header as the device last loaded it, before the patch moves it.
+	const MissionSceneHeader before = scene_.header();
 	MissionSceneDelta delta;
 	if (rows) {
 		delta = scene_.patch(*rows, *source);
 		shown(*document);
 	}
-	const MissionSceneHeader before = scene_.header();
 	follow_ground_(view);
 	if (follow_outlines_(view, kOutlinesFrameUs)) moved_ = true;
 	// A file the device read moved (the terrain, the HUD's layout and art): the picture made again from the files.
@@ -631,11 +702,13 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 		moved_ = false;
 		return picture_.built(FileStamps());
 	}
-	if (delta.header && scene_.header().terrain != ground_.terrain) {
+	// What the device loaded its ground from moved (the terrain, its tile set, the environment its water and the
+	// terrain's later lines come from): the picture made again over the new one.
+	const MissionSceneHeader &now = scene_.header();
+	if (delta.header && (now.terrain != before.terrain || now.tile_set != before.tile_set || now.environment != before.environment)) {
 		moved_ = false;
 		return ViewportAction::Rebuild;
 	}
-	(void)before;
 	// The pins are the canvas's: an entity moved, added or removed redraws them with no word to the device. What the
 	// device draws (the camera, the CMAP toggles, the water, the grid's origin) moved: an Update.
 	if (!moved_) return ViewportAction::Keep;

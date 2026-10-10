@@ -5,9 +5,11 @@
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
+#include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 #include <base/vfs/file_stamps.h>
@@ -15,6 +17,7 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
+#include <runtime/hud/hud_minimap.h>
 
 #include "hud/hud_pos.h"
 #include "mission/mission_object_placer.h"
@@ -79,6 +82,7 @@ MissionMapViewportApplier::MissionMapViewportApplier(SubViewport &viewport) {
 
 MissionMapViewportApplier::~MissionMapViewportApplier() {
 	renderer_.release();
+	for (const RID &chunk : chunk_items_) RenderingServer::get_singleton()->free_rid(chunk);
 	if (outline_item_.is_valid()) RenderingServer::get_singleton()->free_rid(outline_item_);
 }
 
@@ -150,12 +154,16 @@ void MissionMapViewportApplier::install_terrain_() {
 	}
 	hud->set_minimap_terrain(terrain_data_, water);
 	hud->set_minimap_grid_origin(Vector2(float(ground_.grid_x), float(ground_.grid_y)), ground_.grid_origin);
+	// The mission's RotateMap180 as the game's presenter hands its HUD the map state (the CMAP's render sets the rest
+	// of it from the view: its mode, its centre, its zoom); no markers of the HUD's own (the map draws the records).
+	hud->set_minimap_state(Vector2(), 0.0f, 0, opennova::hud::kSpinmapZoomMin, opennova::hud::kSpinmapZoomMin, 0,
+			ground_.flip_180, PackedInt32Array());
 }
 
 void MissionMapViewportApplier::update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) {
 	const opennova::editor::MissionMapViewport &map = map_of(model);
 	const opennova::editor::MissionMapGround &ground = map.ground();
-	if (ground.water != ground_.water || ground.water_height != ground_.water_height ||
+	if (ground.water != ground_.water || ground.water_height != ground_.water_height || ground.flip_180 != ground_.flip_180 ||
 			ground.grid_origin != ground_.grid_origin || ground.grid_x != ground_.grid_x || ground.grid_y != ground_.grid_y) {
 		ground_ = ground;
 		install_terrain_();
@@ -172,7 +180,9 @@ void MissionMapViewportApplier::clear() {
 		hud->configure(Ref<HudPos>(), Ref<ResourceRoot>());
 	}
 	renderer_.clear();
-	RenderingServer::get_singleton()->canvas_item_clear(outline_item_);
+	for (const RID &chunk : chunk_items_) RenderingServer::get_singleton()->free_rid(chunk);
+	chunk_items_.clear();
+	chunk_drawn_.clear();
 	outline_serial_ = UINT64_MAX;
 	outline_edges_ = 0;
 	stamped_.reset();
@@ -200,7 +210,8 @@ void MissionMapViewportApplier::draw_(const opennova::editor::MissionMapViewport
 	Control *canvas = node<Control>(canvas_id_);
 	if (!hud || !canvas || width_ <= 1 || height_ <= 1) return;
 	// The CMAP's view: centred on the camera's centre (the player's place, no pan), at its zoom, its GRID and TEXT
-	// toggles the options'; the payload rect the whole picture [orig: CMapWindow_HandleEvent @0x549861..0x54998f].
+	// toggles the options'; the payload rect the whole picture, as MissionMapView and the engine's
+	// CommandMapView::render lay it out.
 	cmap_.view.zoom = camera.zoom;
 	cmap_.view.pan_x = 0;
 	cmap_.view.pan_y = 0;
@@ -232,32 +243,54 @@ void MissionMapViewportApplier::draw_outlines_(const opennova::editor::MissionMa
 	RenderingServer *rs = RenderingServer::get_singleton();
 	// The camera's transform: a mission point (metres, x east, y north) to the picture's pixel (MissionMapView::project).
 	const opennova::editor::MissionMapView view = map.view(width_, height_);
-	const double inv = 1.0 / double(view.scale);
+	// Turned half a turn about the centre for a RotateMap180 mission (MissionMapView::flip_180).
+	const double inv = (view.flip_180 ? -1.0 : 1.0) / double(view.scale);
 	rs->canvas_item_set_transform(outline_item_,
 			Transform2D(Vector2(float(inv), 0.0f), Vector2(0.0f, float(-inv)),
 					Vector2(float(double(view.middle_x) - view.center[0] * inv),
 							float(double(view.middle_y) + view.center[1] * inv))));
 	if (map.outline_serial() == outline_serial_) return;
 	outline_serial_ = map.outline_serial();
-	rs->canvas_item_clear(outline_item_);
 	const std::vector<float> &lines = map.outline_lines();
 	const std::vector<uint32_t> &rgb = map.outline_rgb();
+	const std::vector<uint64_t> &chunks = map.outline_chunks();
 	outline_edges_ = int(rgb.size());
-	if (rgb.empty()) return;
-	PackedVector2Array points;
-	points.resize(int64_t(rgb.size()) * 2);
-	PackedColorArray colours;
-	colours.resize(int64_t(rgb.size()));
-	Vector2 *to = points.ptrw();
-	Color *colour = colours.ptrw();
-	for (size_t i = 0; i < rgb.size(); ++i) {
-		to[2 * i] = Vector2(lines[4 * i], lines[4 * i + 1]);
-		to[2 * i + 1] = Vector2(lines[4 * i + 2], lines[4 * i + 3]);
-		colour[i] = Color(float((rgb[i] >> 16) & 0xFFu) / 255.0f, float((rgb[i] >> 8) & 0xFFu) / 255.0f,
-				float(rgb[i] & 0xFFu) / 255.0f);
+	// A canvas item a chunk under the wireframes' own (carried by its transform): the chunks whose edges moved drawn
+	// again, the others kept; a chunk past the edges freed.
+	while (chunk_items_.size() > chunks.size()) {
+		rs->free_rid(chunk_items_.back());
+		chunk_items_.pop_back();
+		chunk_drawn_.pop_back();
 	}
-	// Thin lines (a negative width: a pixel whatever the transform), a colour an edge.
-	rs->canvas_item_add_multiline(outline_item_, points, colours, -1.0f);
+	while (chunk_items_.size() < chunks.size()) {
+		const RID item = rs->canvas_item_create();
+		rs->canvas_item_set_parent(item, outline_item_);
+		chunk_items_.push_back(item);
+		chunk_drawn_.push_back(UINT64_MAX);
+	}
+	constexpr size_t kChunk = opennova::editor::MissionMapViewport::kMissionMapLinesChunk;
+	for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
+		if (chunk_drawn_[chunk] == chunks[chunk]) continue;
+		chunk_drawn_[chunk] = chunks[chunk];
+		rs->canvas_item_clear(chunk_items_[chunk]);
+		const size_t begin = chunk * kChunk, end = std::min(rgb.size(), begin + kChunk);
+		if (end <= begin) continue;
+		PackedVector2Array points;
+		points.resize(int64_t(end - begin) * 2);
+		PackedColorArray colours;
+		colours.resize(int64_t(end - begin));
+		Vector2 *to = points.ptrw();
+		Color *colour = colours.ptrw();
+		for (size_t i = begin; i < end; ++i) {
+			to[2 * (i - begin)] = Vector2(lines[4 * i], lines[4 * i + 1]);
+			to[2 * (i - begin) + 1] = Vector2(lines[4 * i + 2], lines[4 * i + 3]);
+			colour[i - begin] = Color(float((rgb[i] >> 16) & 0xFFu) / 255.0f, float((rgb[i] >> 8) & 0xFFu) / 255.0f,
+					float(rgb[i] & 0xFFu) / 255.0f);
+		}
+		// Thin lines (a negative width: a pixel whatever the transform), a colour an edge.
+		rs->canvas_item_add_multiline(chunk_items_[chunk], points, colours, -1.0f);
+		++chunks_uploaded_;
+	}
 }
 
 void MissionMapViewportApplier::apply(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &,

@@ -62,11 +62,15 @@ struct MissionMapView {
 	float zoom = 4.0f;
 	float scale = 1.0f; // metres a pixel
 	float middle_x = 0.0f, middle_y = 0.0f; // the pixel the centre lands on
+	// The mission's RotateMap180 (its header's attribute 0x20): the CMAP turned half a turn about its centre, south up
+	// [orig: HUD_InitOverlaySystem @0x5a49bc, g_BmsAttribFlags & 0x20 -> g_MapYaw180 = 0x80000000, which the map's
+	// view adds to its angle: hud::HudMinimapInput::flip_180].
+	bool flip_180 = false;
 	// A mission point's pixel, and a pixel's mission point.
 	void project(double x, double y, float &px, float &py) const;
 	void unproject(float px, float py, double &x, double &y) const;
 };
-MissionMapView mission_map_view(const MissionMapCamera &camera, int width, int height);
+MissionMapView mission_map_view(const MissionMapCamera &camera, int width, int height, bool flip_180 = false);
 // The zoom that shows `metres` across a picture `width` pixels wide (the CMAP's law inverted), in the map's range.
 float mission_map_zoom_for(double metres, int width);
 
@@ -131,6 +135,7 @@ int mission_map_route(const MissionScene &scene);
 // is 2043 (Map Centerpoint) [orig: HUD_InitOverlaySystem @0x5a4999, the scan of entity+80 == 2043].
 struct MissionMapGround {
 	std::string terrain;
+	bool flip_180 = false; // the header's RotateMap180 (MissionMapView::flip_180)
 	bool water = false;
 	double water_height = 0.0;
 	bool grid_origin = false;
@@ -154,10 +159,22 @@ public:
 	const std::vector<float> &outline_lines() const { return lines_; }
 	const std::vector<uint32_t> &outline_rgb() const { return line_rgb_; }
 	uint64_t outline_serial() const { return outline_serial_; }
+	// The wireframes in chunks of kMissionMapLinesChunk edges (the last the rest), each chunk's serial moving when an
+	// edge of it does: an entity moved, turned or of another team rewrites its own edges in place (its chunks' serials
+	// alone move), so the device uploads those chunks again and no others; what places edges anew (the outlines read,
+	// the kinds shown, an entity added, removed or given another item) moves every chunk's.
+	static constexpr size_t kMissionMapLinesChunk = 4096;
+	const std::vector<uint64_t> &outline_chunks() const { return chunk_serials_; }
+	// How many entities the last follow placed again (a test's count: one for a drag of one record).
+	size_t outlines_placed() const { return placed_count_; }
 	// The items whose models are not read yet (they are read a few a frame), and how many model files it has read.
 	size_t outlines_pending() const { return outlines_.pending(); }
 	size_t outline_files_read() const { return outlines_.files_read(); }
-	MissionMapView view(int width, int height) const { return mission_map_view(camera_, width, height); }
+	MissionMapView view(int width, int height) const { return mission_map_view(camera_, width, height, ground_.flip_180); }
+	// The view of another camera over this mission (its half turn the mission's).
+	MissionMapView view_of(const MissionMapCamera &camera, int width, int height) const {
+		return mission_map_view(camera, width, height, ground_.flip_180);
+	}
 	std::vector<MissionMapMark> marks(int width, int height) const;
 	// A record as a press finds it (MissionViewport::pressed's).
 	bool pressed(const NodeAddress &record, MissionPressed &out) const;
@@ -231,6 +248,21 @@ private:
 	std::vector<float> lines_;
 	std::vector<uint32_t> line_rgb_;
 	uint64_t outline_serial_ = 0;
+	// What each entity (the scene's order) was placed with, and where its edges lie in lines_.
+	struct Placed {
+		NodeId row = 0;
+		uint32_t stamp = 0;
+		int team = 0;
+		const MissionModelOutline *outline = nullptr;
+		int32_t scale_q16 = 0;
+		bool shown = false;
+		size_t begin = 0, count = 0; // its edges
+	};
+	std::vector<Placed> placed_;
+	std::vector<uint64_t> chunk_serials_;
+	size_t placed_count_ = 0;
+	// The entity at `index` placed and its edges written from `begin` (lines_ and line_rgb_ sized already).
+	void place_entity_(size_t index, const MissionOutlineCache::Item *item, size_t begin);
 	uint64_t placed_scene_ = UINT64_MAX; // the scene's serial the footprints were placed at
 	MissionMapOptions placed_options_; // the kinds shown the wireframes were drawn with
 	bool surface_ = false; // the device read the terrain

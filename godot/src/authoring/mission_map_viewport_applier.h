@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <editor/preview/mission_map.h>
 #include <runtime/hud/hud_map_view.h>
@@ -63,8 +64,10 @@ public:
 	int pass_sprites() const { return pass_sprites_; }
 	int pass_labels() const { return pass_labels_; }
 	bool pass_visible() const { return pass_visible_; }
-	// The wireframes' edges drawn.
+	// The wireframes' edges drawn, and how many chunks of them it has uploaded in all (a drag of one record uploads its
+	// own chunks alone).
 	int outline_edges() const { return outline_edges_; }
+	int outline_chunks_uploaded() const { return chunks_uploaded_; }
 
 private:
 	// The terrain and its water mask given the overlay; the grid's origin.
@@ -78,6 +81,9 @@ private:
 	uint64_t canvas_id_ = 0;
 	RID outline_item_; // the wireframes', under the Outlines node's own item
 	uint64_t outline_serial_ = UINT64_MAX; // the viewport's outline serial drawn
+	std::vector<RID> chunk_items_; // a canvas item a chunk of edges, under outline_item_
+	std::vector<uint64_t> chunk_drawn_; // each chunk's serial drawn
+	int chunks_uploaded_ = 0;
 	int outline_edges_ = 0;
 	Ref<ResourceRoot> root_;
 	std::shared_ptr<opennova::StampedFiles> stamped_;
