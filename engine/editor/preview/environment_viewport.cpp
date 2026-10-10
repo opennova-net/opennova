@@ -103,7 +103,7 @@ bool read_options(const JsonValue &json, const EnvironmentUses &uses, Environmen
 		bool &named_rain, bool &named_overcast, std::string &error) {
 	named_rain = named_overcast = false;
 	if (!json.is_object()) {
-		error = "options is an object {time, day_seconds, mission, header, rain, overcast, show}.";
+		error = "options is an object {time, day_seconds, mission, header, rain, overcast, show, listen}.";
 		return false;
 	}
 	EnvironmentViewportOptions options = held;
@@ -168,9 +168,11 @@ bool read_options(const JsonValue &json, const EnvironmentUses &uses, Environmen
 				}
 				(shown.key == "terrain" ? options.terrain : options.water) = shown.value.boolean;
 			}
+		} else if (key == "listen") {
+			if (!mission_listen_options_from_json(value, options.listen, error)) return false;
 		} else {
 			error = "Unknown environment option \"" + key +
-			        "\" (it takes time, day_seconds, mission, header, rain, overcast, show).";
+			        "\" (it takes time, day_seconds, mission, header, rain, overcast, show, listen).";
 			return false;
 		}
 	}
@@ -234,6 +236,7 @@ io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &opti
 	show.set("terrain", JsonValue::make_bool(options.terrain));
 	show.set("water", JsonValue::make_bool(options.water));
 	out.set("show", std::move(show));
+	out.set("listen", mission_listen_options_to_json(options.listen));
 	return out;
 }
 
@@ -314,6 +317,7 @@ double EnvironmentViewport::hours() const {
 ViewportAction EnvironmentViewport::stop_(EnvironmentViewStatus reason, const std::string &detail) {
 	reason_ = reason;
 	detail_ = detail;
+	listen_.close();
 	shown_none();
 	return picture_.stop();
 }
@@ -498,11 +502,13 @@ void EnvironmentViewport::step_(const PreviewClock &clock) {
 	}
 	const int32_t behind = ticks - stepped_;
 	const int32_t run = std::min(behind, kEnvironmentCatchUpTicks);
-	world::WeatherTickEvents events;
 	for (int32_t i = 0; i < run; ++i) {
 		weather_.tod_advance_per_tick = advance_;
+		world::WeatherTickEvents events;
 		weather_.tick_sim(nullptr, events);
 		++weather_ticks_;
+		// The tick's lightning heard (S23 C), on the clock's tick it raised it.
+		if (options_.listen.on) listen_.thunder(ticks - run + i + 1, events);
 	}
 	stepped_ = ticks;
 	// Caught up past what one follow runs: the clock set where the ticks put it.
@@ -583,6 +589,13 @@ ViewportAction EnvironmentViewport::follow_(const ViewportInput &input, PreviewC
 	rain_pending_ = overcast_pending_ = false;
 	// The camera on the ground once the ground is read (the one change its follow derives).
 	follow_ground_(view);
+	// What the weather sounds like at the camera (S23 C): the device plays the channels as they stand each frame.
+	if (options_.listen.on) {
+		listen_.refresh(view);
+		listen_.play_to(clock.ticks(), camera_.eye(), weather_);
+	} else if (listen_.open()) {
+		listen_.close();
+	}
 	if (!framed_ && (header_.terrain.empty() || ground_.height_field() || !ground_.error().empty())) {
 		framed_ = true;
 		const ViewportState picture = size();
@@ -817,10 +830,20 @@ io::JsonValue EnvironmentViewport::body_json(const ViewportInput &) const {
 	weather.set("overcast", std::move(overcast));
 	weather.set("fog", json_number(double(channels.fog_dist_fp) / 65536.0));
 	out.set("weather", std::move(weather));
+	// What the weather sounds like at the camera while the options listen (S23 C).
+	out.set("listen", options_.listen.on ? listen_.to_json(options_.listen) : JsonValue::make_null());
 	JsonValue missing = JsonValue::make_array();
 	for (const std::string &name : missing_) missing.push(json_string(name));
 	out.set("missing", std::move(missing));
 	return out;
+}
+
+std::vector<ClipSoundFired> EnvironmentViewport::fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector,
+		uint64_t &seq) {
+	if (!options_.listen.on || !listen_.open()) return {};
+	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq, options_.listen.volume);
+	for (ClipSoundFired &sound : fired) sound.path = path();
+	return fired;
 }
 
 io::JsonValue EnvironmentViewport::items_json(const ViewportInput &) const {

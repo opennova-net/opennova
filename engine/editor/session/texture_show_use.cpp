@@ -1,10 +1,14 @@
 #include <editor/session/texture_show_use.h>
 
+#include <algorithm>
+#include <cstdio>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/project_asset_source.h>
+#include <editor/documents/model_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_edge.h>
 #include <editor/graph/texture_uses.h>
@@ -15,6 +19,9 @@
 #include <editor/session/session_core.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
+#include <base/io/strutil.h>
+#include <formats/til/til_io.h>
+#include <runtime/renderer/material_eval.h>
 
 namespace opennova::editor {
 
@@ -35,7 +42,74 @@ std::string mission_drawing(const SessionView &view, const std::string &file) {
 	return first;
 }
 
+// A field's whole number.
+int64_t whole(const Value &value) {
+	if (const int64_t *i = std::get_if<int64_t>(&value)) return *i;
+	if (const double *d = std::get_if<double>(&value)) return int64_t(*d);
+	return 0;
+}
+
+// The frame a flipbook shows at `time_ms` with every register at `ctrl`: the engine's frame law.
+int frame_at(const threedi::ThreediMaterial &material, const std::vector<std::string> &names, uint32_t time_ms,
+		int32_t ctrl) {
+	renderer::ControlRegisterValues values{};
+	values.fill(ctrl);
+	return renderer::compute_anim_frame(material, 0, time_ms, names, values);
+}
+
 } // namespace
+
+bool flipbook_frame_change(const threedi::ThreediMaterial &material,
+		const std::vector<threedi::ThreediControlRegister> &registers, int frame, FlipbookFrameChange &out,
+		std::string &why) {
+	out = FlipbookFrameChange();
+	const int frames = int(material.animation.num_frames);
+	if (frames <= 1 || frame < 0 || frame >= frames) {
+		why = "Frame " + std::to_string(frame) + " is past the flipbook's " + std::to_string(frames) +
+		      " frames: the game never shows it.";
+		return false;
+	}
+	std::vector<std::string> names;
+	for (const threedi::ThreediControlRegister &each : registers)
+		names.push_back(strutil::fixed_string(each.name, sizeof(each.name)));
+	if (material.animation.animation_type == 0) {
+		// The clock's first millisecond on the frame (a frame time of 0 is 1, the loader's [orig:
+		// Material_ConvertDefinition @ 0x5B06F6..0x5B070A]).
+		const uint32_t step = uint16_t(material.animation.cycle_frame_time) == 0 ? 1u : uint16_t(material.animation.cycle_frame_time);
+		const uint32_t time = uint32_t(frame) * step;
+		if (frame_at(material, names, time, 0) != frame) {
+			why = "The flipbook's clock never shows frame " + std::to_string(frame) + ".";
+			return false;
+		}
+		out.clock = true;
+		out.change = "{\"clock\":{\"playing\":false,\"time_ms\":" + std::to_string(time) + "}}";
+		out.words = "the clock held at " + std::to_string(time) + " ms";
+		return true;
+	}
+	if (material.animation.animation_type == 1) {
+		const int index = int(material.animation.cycle_frame_time);
+		if (index < 0 || size_t(index) >= names.size() || names[size_t(index)].empty()) {
+			why = "The flipbook reads register " + std::to_string(index) + ", which the model does not name.";
+			return false;
+		}
+		// The least value the frame law shows the frame at: a texture selector's the frame itself, a 16.16
+		// fraction's the first past the frames before it.
+		const int32_t fraction = int32_t((int64_t(frame) * 65536 + frames - 1) / frames);
+		for (const int32_t value : { int32_t(frame), fraction }) {
+			if (frame_at(material, names, 0, value) != frame) continue;
+			out.clock = false;
+			out.change = "{\"kind\":\"model\",\"options\":{\"ctrl\":{\"" + names[size_t(index)] + "\":" +
+			             std::to_string(value) + "}}}";
+			out.words = names[size_t(index)] + " held at " + std::to_string(value);
+			return true;
+		}
+		why = "No value of " + names[size_t(index)] + " shows frame " + std::to_string(frame) + ".";
+		return false;
+	}
+	why = "The flipbook's clock (type " + std::to_string(material.animation.animation_type) +
+	      ") holds frame 0: the game never shows frame " + std::to_string(frame) + ".";
+	return false;
+}
 
 bool texture_use_place(const SessionView &view, const std::string &texture, const TextureUse &use, int index,
                        UsePlace &out, std::string &why) {
@@ -113,21 +187,67 @@ void show_texture_use(SessionCore &core, const EditorRequest &request) {
 	std::string why;
 	if (!texture_use_place(view, texture, use, index, place, why)) return refuse(why);
 	DocumentSet &documents = core.documents();
+	std::string flipbook; // a flipbook frame's words, where the use is one
 	switch (place.picture) {
 	case UsePicture::Model:
 	case UsePicture::Menu: {
 		documents.open_document(request::open_document(place.open, use.locator, use.field));
-		if (!documents.document_for(place.open)) return; // it did not read: the open said why
+		const DocumentBase *opened = documents.document_for(place.open);
+		if (!opened) return; // it did not read: the open said why
 		ViewEvent reveal;
 		reveal.kind = ViewEventKind::RevealPreview;
 		reveal.path = place.open;
 		view.events.post(std::move(reveal));
 		core.touch(ViewConcern::Selection);
+		// A flipbook's frame shown at its frame (S23 C): its row's frame, its material's clock.
+		const ModelDocument *model = dynamic_cast<const ModelDocument *>(opened);
+		const ModelRow *row = model ? model->model_row() : nullptr;
+		if (place.picture == UsePicture::Model && use.role == renderer::TextureRoleId::ModelFlipFrame && row &&
+				use.context.material >= 0 && size_t(use.context.material) < row->materials.size()) {
+			const NodeAddress at = model->address_at(use.locator);
+			Value value;
+			const int frame = at.row && model->get(at, "frame", value) ? int(whole(value)) : -1;
+			FlipbookFrameChange step;
+			std::string why;
+			if (flipbook_frame_change(row->materials[size_t(use.context.material)].material, row->registers, frame, step, why)) {
+				core.set_viewport(step.clock ? std::string() : place.open, step.change);
+				flipbook = ", frame " + std::to_string(frame) + " (" + step.words + ")";
+			} else {
+				flipbook = ": " + why;
+			}
+		}
 		break;
 	}
 	case UsePicture::Mission:
 		documents.open_document(request::open_document(place.open));
 		if (!documents.document_for(place.open)) return;
+		// A tile atlas's cells framed (S23 C): the squares the mission's .til places them on, as the mission's
+		// ground draws them (each 16 units, at x, -z of its entry).
+		if (use.role == renderer::TextureRoleId::TerrainTileAtlas && view.findings.assets) {
+			std::vector<uint8_t> bytes;
+			TilFile placed;
+			std::string error;
+			const std::string name = basename_of(place.open);
+			const std::string til = name.substr(0, name.find_last_of('.')) + ".til";
+			if (view.findings.assets->read(til, bytes) && load_til(bytes.data(), bytes.size(), placed, error) &&
+					!placed.entries.empty()) {
+				double box[4] = { 1e30, 1e30, -1e30, -1e30 };
+				for (const TilOverlayEntry &entry : placed.entries) {
+					const double x = double(entry.x_fixed) / 65536.0, y = -double(entry.z_fixed) / 65536.0;
+					box[0] = std::min(box[0], x);
+					box[1] = std::min(box[1], y);
+					box[2] = std::max(box[2], x + TIL_CELL_WORLD_UNITS);
+					box[3] = std::max(box[3], y + TIL_CELL_WORLD_UNITS);
+				}
+				char change[192];
+				std::snprintf(change, sizeof(change), "{\"kind\":\"mission\",\"frame_ground\":[%.3f,%.3f,%.3f,%.3f]}",
+						box[0], box[1], box[2], box[3]);
+				core.set_viewport(place.open, change);
+				flipbook = ", framed on the " + std::to_string(placed.entries.size()) + " squares " + til + " places its cells on";
+			} else {
+				flipbook = ": " + til + " places none of its cells";
+			}
+		}
 		break;
 	case UsePicture::AsUsed:
 		documents.open_document(request::open_document(place.open));
@@ -140,7 +260,7 @@ void show_texture_use(SessionCore &core, const EditorRequest &request) {
 	                        : place.picture == UsePicture::Menu    ? "in " + basename_of(place.open)
 	                        : place.picture == UsePicture::Mission ? "in " + basename_of(place.open) + "'s view"
 	                                                               : "as " + basename_of(referrer) + " draws it") +
-	                       ".";
+	                       flipbook + ".";
 	core.touch(ViewConcern::Output);
 }
 
