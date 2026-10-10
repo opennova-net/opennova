@@ -670,12 +670,17 @@ int test_sights_and_board() {
 	HudViewportOptions options;
 	options.game_type = opennova::game_type::kTeamDeathmatch;
 	options.players = 5;
-	opennova::hud::HudScoreboardState board = hud_preview_board(options);
+	const opennova::hud::GameTextLookup none = [](const char *, const char *, const char *fallback) {
+		return std::string(fallback);
+	};
+	opennova::hud::HudScoreboardState board = hud_preview_board(options, none, false, none);
 	TEST_EXPECT(board.game_type == options.game_type && board.team_count == 2 && board.rows.size() == 5 && board.local_team == 1);
 	TEST_EXPECT(board.rows[0].name == "Player 1" && board.rows[0].score1 == 5 && board.rows[0].team == 1 &&
 	            board.rows[1].team == 2 && board.rows[4].score1 == 1 && board.rows[4].team == 1 && board.rows[2].has_entity);
+	TEST_EXPECT(board.title == "!Kill List" && board.players_line == " 5" && board.spectators_line.empty() &&
+	            board.footer == "!PgUp and PgDn to change pages");
 	options.game_type = opennova::game_type::kDeathmatch;
-	board = hud_preview_board(options);
+	board = hud_preview_board(options, none, false, none);
 	TEST_EXPECT(board.team_count == 0 && board.rows[1].team == 0);
 	// On the wire, and the refusals.
 	editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
@@ -689,6 +694,9 @@ int test_sights_and_board() {
 	body = state.get("body");
 	TEST_EXPECT(body && body->get("board") && body->get("board")->get_number("rows", 0) == 12.0 &&
 	            body->get("board")->get_number("teams", 0) == 2.0);
+	// The model's board, its strings composed headlessly over the project's tables (it has none: the literals).
+	TEST_EXPECT(viewport->board().rows.size() == 12 && viewport->board().title == "!Kill List" &&
+	            viewport->board().players_line == " 12" && viewport->board().game_type == opennova::game_type::kCaptureTheFlag);
 	for (const char *refused : { "{\"game_type\":\"TAG\"}", "{\"players\":129}", "{\"range\":1}", "{\"sights\":1}" }) {
 		editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
 		        std::string("{\"kind\":\"hud\",\"options\":") + refused + "}"));

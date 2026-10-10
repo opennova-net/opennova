@@ -321,7 +321,8 @@ bool hud_board_game_type_from_token(const std::string &token, uint32_t &out) {
 	return false;
 }
 
-opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &options) {
+opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &options,
+		const opennova::hud::GameTextLookup &gametext, bool gametext_loaded, const opennova::hud::GameTextLookup &keyhelp) {
 	opennova::hud::HudScoreboardState board;
 	board.game_type = options.game_type;
 	board.team_count = opennova::game_type::active_team_count(options.game_type, 2);
@@ -337,6 +338,13 @@ opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &op
 		row.player_class = uint8_t(5 + i % 5);
 		board.rows.push_back(std::move(row));
 	}
+	const opennova::hud::ScoreboardHeaderStrings strings = opennova::hud::scoreboard_header_strings(
+			gametext, gametext_loaded, keyhelp, board.game_type, options.players, 0);
+	board.title = strings.title;
+	board.game_type_label = strings.game_type_label;
+	board.players_line = strings.players_line;
+	board.spectators_line = strings.spectators_line;
+	board.footer = strings.footer;
 	return board;
 }
 
@@ -373,6 +381,30 @@ const world::LocalPlayerViewFrame *HudViewport::scope_frame() const {
 
 const world::LocalPlayerWeaponView *HudViewport::scope_weapon() const {
 	return scope_valid_ && range_ ? &range_->weapon_view() : nullptr;
+}
+
+void HudViewport::follow_board_(const FileSource &files) {
+	// A table as its reader reads it, read again when its stamp moves.
+	const auto read = [&](const char *name, uint64_t &stamp, bool &loaded, rtxt::File &table) {
+		const uint64_t now = files.stamp(name);
+		if (tables_read_ && now == stamp) return;
+		stamp = now;
+		std::vector<uint8_t> bytes;
+		std::string error;
+		table = rtxt::File();
+		loaded = files.read(name, bytes) && !bytes.empty() && rtxt::parse(bytes.data(), bytes.size(), table, error);
+	};
+	read("gametext.bin", gametext_stamp_, gametext_loaded_, gametext_);
+	read("keyhelp.bin", keyhelp_stamp_, keyhelp_loaded_, keyhelp_);
+	tables_read_ = true;
+	const auto lookup = [](const rtxt::File &table, bool loaded) -> opennova::hud::GameTextLookup {
+		return [&table, loaded](const char *section, const char *key, const char *fallback) {
+			const rtxt::Entry *entry = loaded ? table.find_in_section(section, key) : nullptr;
+			return entry ? entry->text : std::string(fallback);
+		};
+	};
+	board_ = hud_preview_board(options_, lookup(gametext_, gametext_loaded_), gametext_loaded_,
+			lookup(keyhelp_, keyhelp_loaded_));
 }
 
 void HudViewport::follow_scope_(const SessionView &view) {
@@ -621,6 +653,7 @@ ViewportAction HudViewport::follow_(const ViewportInput &input, PreviewClock &) 
 	assets_source_ = view.findings.assets;
 	read_weapons_(files);
 	follow_scope_(view);
+	follow_board_(files);
 	// The text read again only when it changed.
 	if (input.document->identity() != read_identity_ || input.document->load_generation() != read_load_ ||
 	    input.document->revision() != read_revision_) {

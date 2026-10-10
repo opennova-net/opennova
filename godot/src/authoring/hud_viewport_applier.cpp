@@ -144,10 +144,6 @@ void HudViewportApplier::rebuild(const opennova::editor::ViewportModel &model, c
 	gametext_.instantiate();
 	const PackedByteArray text = root_->has_file("gametext.bin") ? root_->read_file("gametext.bin") : PackedByteArray();
 	if (text.is_empty() || gametext_->load_from_byte_array(text) != OK) gametext_.unref();
-	// The keys' help, where the Tab board's paging hint is read.
-	keyhelp_.instantiate();
-	const PackedByteArray keys = root_->has_file("keyhelp.bin") ? root_->read_file("keyhelp.bin") : PackedByteArray();
-	if (keys.is_empty() || keyhelp_->load_from_byte_array(keys) != OK) keyhelp_.unref();
 	if (Control *effects = view_effects()) effects->call("set_resource_root", root_);
 	applied_ = false;
 }
@@ -163,7 +159,6 @@ void HudViewportApplier::clear() {
 	armed_ = false;
 	weapons_.unref();
 	gametext_.unref();
-	keyhelp_.unref();
 	slice_.unref();
 	if (Control *card = sights_card()) card->call("set_weapon_sights", TypedArray<WeaponSightRow>(), Ref<ResourceRoot>());
 	board_shown_ = false;
@@ -242,11 +237,8 @@ void HudViewportApplier::apply_board_(const opennova::editor::HudViewport &model
 		board_shown_ = false;
 		return;
 	}
-	// The stand-in rows, the strings from the project's tables as the game's shell resolves them.
-	opennova::hud::HudScoreboardState board = opennova::editor::hud_preview_board(options);
-	HudOverlay::scoreboard_strings(gametext_, keyhelp_, board.game_type, std::string(), std::string(),
-			int(board.rows.size()), 0, board);
-	hud->set_scoreboard_board(true, int(ticks), gametext_, board);
+	// The model's board: its stand-in rows, its strings composed over the project's tables.
+	hud->set_scoreboard_board(true, int(ticks), gametext_, model.board());
 	board_shown_ = true;
 }
 

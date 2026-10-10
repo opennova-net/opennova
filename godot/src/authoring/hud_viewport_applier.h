@@ -35,12 +35,12 @@ class Control;
 // scoped-view circle mask (godot/game/world/hud_sights_card.gd, hud_scope_circle_mask.gd), the card first so the
 // mask covers its corners; a backdrop under both where the game has its 3D view. A Rebuild mounts a root over the
 // project's files (the open documents standing in for theirs: the HUD layout as Save would write it) and
-// configures the overlay from hudpos.def through it, with weapon.def, gametext.bin and keyhelp.bin; each pump
+// configures the overlay from hudpos.def through it, with weapon.def and gametext.bin; each pump
 // applies the player's state the options choose, as the game's presenter feeds it from the world (the weapon's HUD
 // slice and silhouette, the clip and the reserve, the stance and the health on the preview clock's ticks, the
 // view; the sights' frame the model's run left through the overlay's scope readouts, the card and the mask; the
-// Tab board from the model's stand-in rows through the overlay's board entry, its strings from the project's
-// tables), and reports the files it
+// Tab board the model composes, its stand-in rows and its strings over the project's tables, through the
+// overlay's board entry), and reports the files it
 // read and where each element of the HUD's walk drew (ViewportDeviceReport::rects, one per HudElement,
 // in the screen's pixels: runtime/hud/hud_elements.h). It reads none of the process-wide render state a
 // mission publishes (reads_scene_state false).
@@ -85,7 +85,6 @@ private:
 	std::shared_ptr<opennova::StampedFiles> stamped_; // what the root was asked for
 	Ref<WeaponDatabase> weapons_;
 	Ref<RtxtStringFile> gametext_;
-	Ref<RtxtStringFile> keyhelp_;
 	Ref<PlayerHudWeaponDef> slice_; // the weapon's HUD slice: its SIGHTS rows and selectors
 	bool board_shown_ = false;
 	bool configured_ = false;

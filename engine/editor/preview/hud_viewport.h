@@ -13,6 +13,7 @@
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/weapon_range.h>
 #include <formats/def/def_hudpos_text.h>
+#include <formats/rtxt/rtxt.h>
 #include <runtime/hud/hud_elements.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
@@ -110,9 +111,11 @@ std::string hud_options_change(const HudViewportOptions &options);
 // would fill it for a session of the options' game type, its rows the editor's stand-ins (the game's rows come
 // from the server's 0x16 list): "Player 1" to "Player N" in wire order, the score falling from N, the team modes'
 // players alternating over the type's sides (game_type::active_team_count of two), each with a connection band
-// (1 to 3 in turn) and a class (5 to 9 in turn), the local player on team 1. The strings are the device's
-// (HudOverlay::scoreboard_strings over the project's tables).
-opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &options);
+// (1 to 3 in turn) and a class (5 to 9 in turn), the local player on team 1; its header's strings composed as
+// the game's drawer composes them (hud::scoreboard_header_strings) over `gametext` (loaded or not) and
+// `keyhelp`, the server and mission rungs blank.
+opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &options,
+		const opennova::hud::GameTextLookup &gametext, bool gametext_loaded, const opennova::hud::GameTextLookup &keyhelp);
 
 // A weapon the project's weapon.def holds, as the HUD's weapon cluster reads it: its name, its clip
 // size, the art its HUD slice names (its hudicon, its clip and round graphics: what the HUD loads
@@ -203,6 +206,9 @@ public:
 	const world::LocalPlayerViewFrame *scope_frame() const;
 	const world::LocalPlayerWeaponView *scope_weapon() const;
 	const std::string &scope_why() const { return scope_why_; }
+	// The Tab board as the device hands it the overlay (`board`): hud_preview_board over the project's
+	// gametext.bin and keyhelp.bin (each read again when its stamp moves).
+	const opennova::hud::HudScoreboardState &board() const { return board_; }
 	// The names the HUD layout hands its loader (the fonts, the static frame, the stance art), and its
 	// stances' names (a HUDSTANCE line's last word, "" where it names none) by id, as the text holds
 	// them now.
@@ -277,6 +283,8 @@ private:
 	void read_weapons_(const FileSource &files);
 	// The sights' run over the project's files, run again when what it runs with moves.
 	void follow_scope_(const SessionView &view);
+	// The board over the project's string tables, the tables read again when their stamps move.
+	void follow_board_(const FileSource &files);
 	// The elements from the device's boxes, worded from the layout and the weapon shown.
 	void make_elements_();
 
@@ -304,6 +312,12 @@ private:
 	std::unique_ptr<WeaponRange> range_;
 	bool scope_valid_ = false;
 	std::string scope_why_;
+	// The board, and the string tables as last read by their stamps.
+	opennova::hud::HudScoreboardState board_;
+	bool tables_read_ = false;
+	uint64_t gametext_stamp_ = 0, keyhelp_stamp_ = 0;
+	bool gametext_loaded_ = false, keyhelp_loaded_ = false;
+	rtxt::File gametext_, keyhelp_;
 };
 
 } // namespace opennova::editor
