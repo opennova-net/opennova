@@ -174,10 +174,7 @@ int check_against_view(const std::vector<uint8_t> &bytes, const MarqueeCredits &
 		if (node.text) lines.push_back(&node);
 	std::vector<const cbin::Entry *> texts;
 	for (const cbin::Entry &entry : view.entries)
-		// A '~' line of a code the loader has no arm for (BHD's ~BINK_LOGO) is markup that draws nothing, where the
-		// credits view keeps it as text.
-		if (entry.type == cbin::EntryType::Text && !(entry.text.size() > 1 && entry.text[0] == '~'))
-			texts.push_back(&entry);
+		if (entry.type == cbin::EntryType::Text) texts.push_back(&entry);
 	if (lines.size() != texts.size()) {
 		size_t i = 0;
 		while (i < lines.size() && i < texts.size() && lines[i]->line == texts[i]->text) ++i;
@@ -235,6 +232,45 @@ int test_empty_label() {
 	cbin::Credits view;
 	TEST_EXPECT(cbin::decode_credits(bytes.data(), bytes.size(), view, error) && view.entries.size() == 1 &&
 	            view.entries[0].text == "Credits");
+	return 0;
+}
+
+// A '~' code the loader has no case for (BHD's ~BINK_LOGO) draws nothing, and an empty line is a text node of no
+// words, which advances the roll [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c72a, the code switch's default:
+// break; @ 0x65c8c6..0x65c90e]: the credits view holds the first as markup, never a credit line, and the second
+// as a text line; both are written back as they were, and the display view keeps the markup for its re-emit.
+int test_markup_and_empty_line() {
+	BinaryConfig config;
+	config.strings = {"env", "text", "~BINK_LOGO", "", "Credits", "Serpen24"};
+	config.xor_key = 0x13572468u;
+	config.labels = {{1, {}},
+			{2, {{2, {value(3, BinaryConfig::kString)}}, {2, {value(4, BinaryConfig::kString)}},
+					{2, {value(5, BinaryConfig::kString), value(6, BinaryConfig::kString)}}}}};
+	const std::vector<uint8_t> bytes = encoded(config);
+	TEST_EXPECT(!bytes.empty());
+	MarqueeCredits credits;
+	TEST_EXPECT(load(bytes, credits));
+	TEST_EXPECT(credits.nodes.size() == 2 && credits.nodes[0].text && credits.nodes[0].line.empty() &&
+	            credits.nodes[1].line == "Credits");
+	cbin::Credits view;
+	std::string error;
+	TEST_EXPECT(cbin::decode_credits(bytes.data(), bytes.size(), view, error) && view.entries.size() == 3);
+	if (view.entries.size() != 3) return 1;
+	TEST_EXPECT(view.entries[0].type == cbin::EntryType::Markup && view.entries[0].text == "~BINK_LOGO");
+	TEST_EXPECT(view.entries[1].type == cbin::EntryType::Text && view.entries[1].text.empty());
+	TEST_EXPECT(view.entries[2].type == cbin::EntryType::Text && view.entries[2].text == "Credits");
+	if (check_against_view(bytes, credits) != 0) return 1;
+	// Written back, both read again as they were.
+	std::vector<uint8_t> again;
+	cbin::Credits reread;
+	TEST_EXPECT(cbin::encode(view, again, error) && cbin::decode_credits(again.data(), again.size(), reread, error) &&
+	            reread.entries.size() == 3 && reread.entries[0].type == cbin::EntryType::Markup &&
+	            reread.entries[0].text == "~BINK_LOGO" && reread.entries[1].type == cbin::EntryType::Text &&
+	            reread.entries[1].text.empty() && reread.entries[2].font == "Serpen24");
+	const std::vector<cbin::CreditsDisplayItem> items = cbin::credits_display_items(view);
+	TEST_EXPECT(items.size() == 3 && items[0].type == cbin::EntryType::Markup && items[0].text == "~BINK_LOGO");
+	const std::vector<cbin::Entry> back = cbin::credits_entries_from_display(items);
+	TEST_EXPECT(!back.empty() && back[0].type == cbin::EntryType::Markup && back[0].text == "~BINK_LOGO");
 	return 0;
 }
 
@@ -310,6 +346,7 @@ int main(int argc, char **argv) {
 	failures += test_label_lowercased_in_place();
 	failures += test_not_loaded();
 	failures += test_empty_label();
+	failures += test_markup_and_empty_line();
 	failures += test_minted();
 	failures += test_retail();
 	if (failures == 0) std::printf("menu_credits: all passed\n");
