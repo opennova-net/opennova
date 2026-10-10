@@ -72,12 +72,12 @@
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
+#include <base/io/sha256.h>
 #include <net/novacrypto/pubcrypto.h>
 #include <runtime/wac/compiler.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
-#include "common/sha256.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -188,7 +188,7 @@ const CorpusVector kCorpus[] = {
 };
 
 std::string sha256(const std::string &bytes) {
-	return testhash::sha256_hex(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
+	return opennova::io::sha256_hex(bytes.data(), bytes.size());
 }
 
 bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
