@@ -3799,8 +3799,10 @@ endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s
 # orderly stop (exit 0, listeners in order, the WAL closed) with the HTTP layer
-# on or off; with it on, past Crow and a held-open request. POSIX only (fork,
-# kill); TIMEOUT bounds it should the child hang, and the child dies with it.
+# on or off; with it on, past Crow and a held-open request. A last run checks
+# that on every port 0 the gate (and the NW UDP SessionInit) advertise the
+# ports the sibling listeners bound. POSIX only (fork, kill); TIMEOUT bounds it
+# should the child hang, and the child dies with it.
 if(UNIX)
     add_executable(opennova_novaworld_server_signal_shutdown_test
         novaworld/server_signal_shutdown_test.cpp)

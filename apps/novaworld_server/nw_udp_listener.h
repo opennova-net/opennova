@@ -178,7 +178,8 @@ private:
 	std::atomic<bool> stop_requested_{false};
 	uint16_t bound_port_ = 0;
 	// public_host:http_port, the NovaworldWebDomainNameAndPortNumber CU value
-	// (no scheme — the client adds "http://").
+	// (no scheme — the client adds "http://"), with the HTTP port the config
+	// start() took names: main() passes the port the HTTP listener bound.
 	std::string web_domain_;
 
 	// Layer-4 lobby state. The dispatcher is stateless; per-connection

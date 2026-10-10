@@ -33,7 +33,6 @@
 using namespace opennova;
 namespace fs = std::filesystem;
 using serve_test::deathmatch_mission;
-using serve_test::free_udp_port;
 using serve_test::write_bytes;
 
 namespace {
@@ -100,7 +99,7 @@ int main() {
 	};
 	{
 		serve::ServeOptions parsed;
-		CHECK(parse_options(free_udp_port(), parsed) == 0);
+		CHECK(parse_options(4321, parsed) == 0 && parsed.port == 4321);
 		std::string error;
 		serve::ServeOptions missing;
 		CHECK(serve::parse_serve_options({"--resource-dir", dir.string()}, missing, error) == 1);
@@ -112,22 +111,17 @@ int main() {
 						"a", "/MOD", "abcdefghijklmnopqrstuvwxyz0123456789"},
 				mod, error) == 0);
 		CHECK(mod.expansion == "abcdefghijklmnopqrstuvwxyz012345");
+		// No --lan-port: the scan starts at the cfg range's head.
+		CHECK(!mod.port.has_value());
 	}
 
-	// The probed port is released before the server binds it, and a parallel
-	// test can take it in between. The server binds before it boots, so a lost
-	// race fails fast and the test probes again.
+	// --lan-port 0: the socket binds the port the OS picks, and bound_port()
+	// reports the port it holds from then on.
 	serve::ServeOptions options;
-	std::unique_ptr<serve::Server> holder;
+	CHECK(parse_options(0, options) == 0 && options.port == 0);
+	auto holder = std::make_unique<serve::Server>(options);
 	std::string error;
-	bool started = false;
-	for (int attempt = 0; attempt < 5 && !started; ++attempt) {
-		options = serve::ServeOptions{};
-		CHECK(parse_options(free_udp_port(), options) == 0);
-		holder = std::make_unique<serve::Server>(options);
-		started = holder->start(error);
-		if (!started && error.find("bind scan") == std::string::npos) break;
-	}
+	const bool started = holder->start(error);
 	serve::Server &server = *holder;
 	if (!started) {
 		std::printf("start: %s (catalog rows: %zu)\n", error.c_str(), server.catalog().size());
@@ -170,7 +164,7 @@ int main() {
 	CHECK(server.role().client_runtime() == nullptr);
 	CHECK(!server.kernel().local.has_local_player());
 	CHECK(server.kernel().world.rules.mp_session);
-	CHECK(server.bound_port() == options.port);
+	CHECK(server.bound_port() != 0);
 	// No game.cfg: remote_admin_port is 0, so no admin listener; the launch still truncates
 	// admin_log.txt, as retail's static construction opens it [orig: Game_InitSubsystems
 	// @0x4A72C7..0x4A72D1; CAdminServer_Construct @0x402C84].

@@ -220,16 +220,19 @@ int main() {
 	// A stale admin_log.txt: the launch truncates it.
 	CHECK(serve_test::write_text(work / "admin_log.txt", "a previous run's line\r\n"));
 
-	// A server on free ports, game.cfg written with its admin port first.
+	// A server whose game socket takes a port the OS picks (game.cfg's LAN server range
+	// 0..0) and whose admin listener takes a probed free TCP port, game.cfg written first.
+	// The admin port alone stays probed (serve_test::free_tcp_port): retail's
+	// remote_admin_port of 0 means no listener, so a lost race fails only that listen,
+	// which the server ignores as retail does, and a fresh server probes again.
 	std::string error;
 	const auto start_server = [&](uint16_t &admin_port) {
 		std::unique_ptr<serve::Server> started;
 		for (int attempt = 0; attempt < 5 && !started; ++attempt) {
 			gamecfg::GameCfg cfg = gamecfg::defaults(gamecfg::DefaultTexts{});
-			const uint16_t udp = serve_test::free_udp_port();
 			admin_port = serve_test::free_tcp_port();
-			cfg.mp_lan_server_port_min = udp;
-			cfg.mp_lan_server_port_max = udp;
+			cfg.mp_lan_server_port_min = 0;
+			cfg.mp_lan_server_port_max = 0;
 			cfg.remote_admin_port = admin_port;
 			CHECK(gamecfg::save_file(gamecfg::kFileName, cfg, {}, error));
 			serve::ServeOptions options;
@@ -237,10 +240,11 @@ int main() {
 							  (dir / "admin.host").string(), "--loose-root"},
 					options, error) == 0);
 			auto server = std::make_unique<serve::Server>(options);
-			if (server->start(error) && server->admin_port() == admin_port) {
+			if (!server->start(error)) break;
+			if (server->admin_port() == admin_port) {
 				started = std::move(server);
-			} else if (error.find("bind scan") == std::string::npos && server->running()) {
-				std::printf("the admin listener took no port %u\n", admin_port);
+			} else {
+				std::printf("the admin listener took no port %u; probing again\n", admin_port);
 			}
 		}
 		return started;

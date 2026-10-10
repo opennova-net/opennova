@@ -57,6 +57,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -73,9 +74,10 @@ struct ServeOptions {
 	std::string game;         // /game <code>
 	bool loose_root = false;  // --loose-root: a directory with no archives mounts loose
 	std::string host_file;    // /HOST <file>
-	// The first port of the bind scan (--lan-port; 0 = the cfg range's head: game.cfg
-	// mplanserverportmin, or mpnovaworldportmin on the NovaWorld network type).
-	uint16_t port = 0;
+	// The first port of the bind scan (--lan-port; 0 binds the OS's pick; unset, the cfg
+	// range's head: game.cfg mplanserverportmin, or mpnovaworldportmin on the NovaWorld
+	// network type).
+	std::optional<uint16_t> port;
 	bool log_debug = false;   // --log-debug
 	// NovaWorld listing (ADR 0051 d6), in opennova-nw-lister's spellings. With a gate host the
 	// network type is game.cfg's `networkconnecttype` (1, NovaWorld, by default), as retail's
