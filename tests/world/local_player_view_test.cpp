@@ -2242,6 +2242,188 @@ void test_pump_feeds_the_heat_window_water_gate_from_the_body_z() {
     }
 }
 
+// --- the weapon FSM's scope legs, through the pump ---------------------------
+// The reload stash, the one-shot's last recoil and the rescope after a reload
+// call the whole toggle, inline, so its gates refuse and its SCOPEUP /
+// SCOPEDOWN queue lands before the transition; a ForceScoped def never
+// rescopes; the one-shot's empty Idle / EmptyIdle clear the promoted byte
+// alone. [orig: WeaponAction_Reload @0x543126..0x543136; WeaponAction_Recoil
+//  @0x543036..0x54305d; WeaponAction_ProcessFrame @0x541372..0x5413ab;
+//  WeaponAction_Idle @0x5429d2..0x5429f0; WeaponAction_EmptyIdle
+//  @0x542ab5..0x542ad3; WeaponSlot_TryQueueScopeUp @0x53f050 / ..ScopeDown
+//  @0x53f080]
+
+namespace {
+
+LocalPlayerWeapon fsm_scoped_weapon(uint32_t flags, int32_t capacity, int32_t clip,
+                                    int32_t reserve) {
+    LocalPlayerWeapon w = scoped_weapon(flags);
+    w.def.clip_capacity = capacity;
+    w.slot.clip = clip;
+    w.slot.reserve = reserve;
+    return w;
+}
+
+void raise_settled(LocalWorld &lw, LocalPlayerWeapon &w, PlayerViewState &v) {
+    CHECK(local_player_scope_toggle(lw.w, w, v, w.slot));
+    settle_ease(v);
+    CHECK(player_view_scope_settled(v) && v.scope_engaged);
+    w.slot.current = weapon_action::kIdle;
+    w.slot.next = weapon_action::kIdle;
+    w.slot.phase = weapon_phase::kDone;
+    lw.w.out.tip_events.clear();
+}
+
+bool sight_kept(const PlayerViewState &v) {
+    return player_view_scope_settled(v) && v.scope_engaged && !player_view_scope_ease_active(v);
+}
+
+} // namespace
+
+void test_fsm_reload_scope_legs_run_the_toggle() {
+    using opennova::hud::kTipEventScopeElevationOff;
+    using opennova::hud::kTipEventScopeElevationOn;
+    const uint32_t elevation = DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION;
+    // A plain reload: the stash disengages; once the ease lands, the rescope
+    // clears the promoted byte and engages, and its SCOPEUP queue is the
+    // transition's target.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = fsm_scoped_weapon(elevation, 30, 5, 60);
+        PlayerViewState v;
+        raise_settled(lw, w, v);
+        weapon_fsm_request_reload(w.slot);
+        pump_once(lw, w, v);
+        CHECK(w.slot.current == weapon_action::kReload);
+        CHECK(!player_view_scope_settled(v) && !v.scope_engaged && w.slot.rescope_after_reload);
+        CHECK(lw.w.out.tip_events == std::vector<uint8_t>{kTipEventScopeElevationOff});
+        settle_ease(v);
+        lw.w.out.tip_events.clear();
+        pump_once(lw, w, v);
+        CHECK(w.slot.current == weapon_action::kScopeUp);
+        CHECK(v.scope_engaged && player_view_scope_ease_active(v) && !w.slot.rescope_after_reload);
+        CHECK(lw.w.out.tip_events == std::vector<uint8_t>{kTipEventScopeElevationOn});
+    }
+    // The rescope's engage leg refuses while moving with a Scoped weapon.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = fsm_scoped_weapon(elevation, 30, 5, 60);
+        PlayerViewState v;
+        raise_settled(lw, w, v);
+        weapon_fsm_request_reload(w.slot);
+        pump_once(lw, w, v);
+        settle_ease(v);
+        lw.w.out.tip_events.clear();
+        v.move_held = true;
+        pump_once(lw, w, v);
+        CHECK(w.slot.current == weapon_action::kIdle);
+        CHECK(!v.scope_engaged && !player_view_scope_settled(v));
+        CHECK(!w.slot.rescope_after_reload && lw.w.out.tip_events.empty());
+    }
+    // ForceScoped: the stash's toggle is pinned and the rescope never runs,
+    // so the sight rides through; the stash itself stays set.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = fsm_scoped_weapon(elevation | DEF_WEAPON_FLAG_FORCESCOPED, 30, 5, 60);
+        PlayerViewState v;
+        raise_settled(lw, w, v);
+        weapon_fsm_request_reload(w.slot);
+        pump_once(lw, w, v);
+        CHECK(w.slot.current == weapon_action::kReload && sight_kept(v));
+        pump_once(lw, w, v);
+        CHECK(w.slot.current == weapon_action::kIdle && sight_kept(v));
+        CHECK(w.slot.rescope_after_reload && lw.w.out.tip_events.empty());
+    }
+    // An airborne or swimming body refuses the stash's toggle and keeps the
+    // sight; the rescope then clears the promoted byte and its toggle refuses
+    // too: the target stays engaged with no ease and no SCOPEUP.
+    for (const uint32_t flag : {kEntityFlagInAir, kEntityFlagDrowning}) {
+        LocalWorld lw;
+        LocalPlayerWeapon w = fsm_scoped_weapon(elevation, 30, 5, 60);
+        PlayerViewState v;
+        raise_settled(lw, w, v);
+        lw.entity().flags |= flag;
+        weapon_fsm_request_reload(w.slot);
+        pump_once(lw, w, v);
+        CHECK(w.slot.current == weapon_action::kReload && sight_kept(v));
+        CHECK(w.slot.rescope_after_reload);
+        pump_once(lw, w, v);
+        CHECK(w.slot.current == weapon_action::kIdle);
+        CHECK(!player_view_scope_settled(v) && v.scope_engaged && !player_view_scope_ease_active(v));
+        CHECK(lw.w.out.tip_events.empty());
+    }
+    // Airborne at the stash, landed by the rescope: the sight was kept, so the
+    // rescope's cleared byte sends the toggle down its engage leg over the
+    // engaged target, re-raising from the hip copy (a full ease, the up tip,
+    // SCOPEUP).
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = fsm_scoped_weapon(elevation, 30, 5, 60);
+        PlayerViewState v;
+        raise_settled(lw, w, v);
+        lw.entity().flags |= kEntityFlagInAir;
+        weapon_fsm_request_reload(w.slot);
+        pump_once(lw, w, v);
+        CHECK(sight_kept(v));
+        lw.entity().flags &= ~kEntityFlagInAir;
+        pump_once(lw, w, v);
+        CHECK(w.slot.current == weapon_action::kScopeUp);
+        CHECK(!player_view_scope_settled(v) && v.scope_engaged && !v.scope_hipfire);
+        CHECK(v.weapon_pose_interp.remaining == static_cast<uint32_t>(kScopeEaseSteps));
+        CHECK(lw.w.out.tip_events == std::vector<uint8_t>{kTipEventScopeElevationOn});
+    }
+}
+
+void test_fsm_one_shot_scope_legs() {
+    using opennova::hud::kTipEventScopeElevationOff;
+    const uint32_t elevation = DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION;
+    // The last round's recoil toggles a promoted sight; its SCOPEDOWN queue
+    // overwrites the EMPTYIDLE the arbiter queued.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = fsm_scoped_weapon(elevation, 1, 0, 0);
+        PlayerViewState v;
+        raise_settled(lw, w, v);
+        w.slot.current = weapon_action::kRecoil;
+        w.slot.phase = weapon_phase::kEntered;
+        pump_once(lw, w, v);
+        CHECK(!player_view_scope_settled(v) && !v.scope_engaged && v.scope_hipfire);
+        CHECK(w.slot.next == weapon_action::kScopeDown);
+        CHECK(lw.w.out.tip_events == std::vector<uint8_t>{kTipEventScopeElevationOff});
+    }
+    // An engaged sight the promoted byte does not hold is no toggle.
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = fsm_scoped_weapon(elevation, 1, 0, 0);
+        PlayerViewState v;
+        raise_settled(lw, w, v);
+        v.scope_settled = false;
+        w.slot.current = weapon_action::kRecoil;
+        w.slot.phase = weapon_phase::kEntered;
+        pump_once(lw, w, v);
+        CHECK(v.scope_engaged && !player_view_scope_ease_active(v));
+        CHECK(w.slot.next == weapon_action::kEmptyIdle && lw.w.out.tip_events.empty());
+    }
+    // The empty Idle and EmptyIdle clear the promoted byte alone: the target
+    // stays engaged, no ease starts, the FOV target and the tips are untouched.
+    for (const int32_t action : {weapon_action::kIdle, weapon_action::kEmptyIdle}) {
+        LocalWorld lw;
+        LocalPlayerWeapon w = fsm_scoped_weapon(elevation, 1, 0, 0);
+        PlayerViewState v;
+        raise_settled(lw, w, v);
+        w.slot.current = action;
+        w.slot.next = action;
+        w.slot.phase = weapon_phase::kNone;
+        auto &fov = lw.w.weather.core.scalar_channels.camera_fov_target_fp;
+        fov = 20 << 16;
+        pump_once(lw, w, v);
+        CHECK(w.slot.next == weapon_action::kEmptyIdle);
+        CHECK(!player_view_scope_settled(v) && v.scope_engaged && !v.scope_hipfire);
+        CHECK(!player_view_scope_ease_active(v));
+        CHECK(fov == (20 << 16) && lw.w.out.tip_events.empty());
+    }
+}
+
 // --- the F3 Weapon window's tick trace ---------------------------------------
 // Devtools instrumentation on the pump: disarmed it records nothing, armed it
 // takes one sample per PUMP tick (which is why a 1-tick action or RECOIL's
@@ -3377,6 +3559,8 @@ int main() {
     test_use_item_vehicle_loadout_zone_gates();
     test_view_uses_current_motor_offset_and_live_position();
     test_pump_feeds_the_heat_window_water_gate_from_the_body_z();
+    test_fsm_reload_scope_legs_run_the_toggle();
+    test_fsm_one_shot_scope_legs();
     test_weapon_trace_records_one_sample_per_pump_tick();
     test_weapon_trace_samples_since_is_incremental();
     test_local_weapon_input_block_mirrors_the_pump_gate();

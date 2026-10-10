@@ -198,10 +198,14 @@ void handler_idle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         return;
     }
     slot.next = weapon_action::kEmptyIdle; // [orig: @ 0x5429cf]
-    // One-shot weapons drop the scope with the last round — unless ForceScoped
-    // (0x20000000) pins the sight view. [orig: @ 0x5429ee g_WeaponScopeActive = 0]
-    if (in.is_local && def.clip_capacity == 1 && (def.flags & weapon_flag::kForceScoped) == 0)
-        out.unscope = true;
+    // An empty one-shot clears the promoted byte alone (no toggle: no ease, no
+    // FOV write, no tip) unless ForceScoped (0x20000000) pins the sight view.
+    // [orig: the local test @ 0x5429d2, Def+0x58 == 1 @ 0x5429dd, ForceScoped
+    //  @ 0x5429e2..0x5429ee, g_WeaponScopeActive = 0 @ 0x5429f0]
+    if (in.is_local && def.clip_capacity == 1 && (def.flags & weapon_flag::kForceScoped) == 0) {
+        out.scope_cleared = true;
+        if (in.scope != nullptr) in.scope->clear_promoted();
+    }
 }
 
 // [orig: WeaponAction_EmptyIdle @ 0x542a20] Same LOOP shape on the global
@@ -224,8 +228,13 @@ void handler_emptyidle(const WeaponFsmDef &def, const WeaponFsmAction &desc,
             weapon_fsm_request_reload(slot); // [orig: @ 0x542aa3]
         } else {
             slot.next = weapon_action::kEmptyIdle; // hold [orig: @ 0x542ab2]
-            if (in.is_local && def.clip_capacity == 1 && (def.flags & weapon_flag::kForceScoped) == 0)
-                out.unscope = true; // [orig: @ 0x542ad1; ForceScoped pins the view]
+            // The same bare promoted-byte clear [orig: @ 0x542ab5..0x542ad1;
+            // g_WeaponScopeActive = 0 @ 0x542ad3].
+            if (in.is_local && def.clip_capacity == 1 &&
+                (def.flags & weapon_flag::kForceScoped) == 0) {
+                out.scope_cleared = true;
+                if (in.scope != nullptr) in.scope->clear_promoted();
+            }
         }
     }
     slot.phase = weapon_phase::kDone; // [orig: @ 0x542ae1]
@@ -334,8 +343,16 @@ void handler_recoil(const WeaponFsmDef &def, const WeaponFsmAction &desc,
         return;
     }
     slot.next = weapon_action::kEmptyIdle; // [orig: @ 0x543036]
-    if (in.is_local && def.clip_capacity == 1 && (def.flags & weapon_flag::kForceScoped) == 0)
-        out.unscope = true; // [orig: @ 0x543053; ForceScoped pins the view]
+    // The local one-shot's last round toggles a PROMOTED sight, unless
+    // ForceScoped pins it; the toggle's SCOPEDOWN queue overwrites the
+    // EMPTYIDLE just queued. [orig: the local test @ 0x543039, Def+0x58 == 1
+    //  @ 0x543041, ForceScoped @ 0x543046..0x543053, g_WeaponScopeActive
+    //  @ 0x543055, the Player_ToggleWeaponScope call @ 0x54305d]
+    if (in.is_local && def.clip_capacity == 1 && (def.flags & weapon_flag::kForceScoped) == 0 &&
+        in.scope_active) {
+        out.unscope = true;
+        if (in.scope != nullptr) in.scope->toggle(slot);
+    }
     // (auto-switch to the def+0x168 follow-up weapon — Player_SwitchToWeaponByHandle
     //  @ 0x54307c — is the weapon-switch seam, D-WPN-5)
 }
@@ -358,10 +375,16 @@ void handler_reload(const WeaponFsmDef &def, const WeaponFsmAction &desc,
                 // [orig: @ 0x543126 -> g_RescopeAfterReload = 0 @ 0x54313d]
                 slot.rescope_after_reload = false;
             } else {
-                // Stash the scope across the reload; the pump rescopes on completion.
-                // [orig: @ 0x54312f g_RescopeAfterReload = g_WeaponScopeActive]
+                // Stash the promoted byte across the reload, then a promoted
+                // sight runs the whole toggle, whose gates may keep it (the
+                // ForceScoped pin, an airborne or swimming body); the pump
+                // rescopes on completion. [orig: @ 0x54312f g_RescopeAfterReload =
+                //  g_WeaponScopeActive; the Player_ToggleWeaponScope call @ 0x543136]
                 slot.rescope_after_reload = in.scope_active;
-                if (in.scope_active) out.unscope = true; // [orig: Player_ToggleWeaponScope @ 0x543136]
+                if (in.scope_active) {
+                    out.unscope = true;
+                    if (in.scope != nullptr) in.scope->toggle(slot);
+                }
             }
         }
         if (in.is_authority) {
@@ -929,11 +952,20 @@ void weapon_fsm_tick(const WeaponFsmDef &def, WeaponSlotState &slot,
         slot.counter = 0; // idle with a pending action transitions now [orig: @ 0x541370]
     }
 
-    // Rescope after a completed reload [orig: @ 0x54139e..0x5413ab — the pump toggles
-    // the scope back on and clears g_RescopeAfterReload].
-    if (slot.current == weapon_action::kReload && slot.next == weapon_action::kIdle &&
-        in.is_local && slot.rescope_after_reload) {
+    // Rescope after a completed reload, never for a ForceScoped def (its stash
+    // stays set): the promoted byte cleared, then the whole toggle, whose
+    // engage leg queues SCOPEUP for the transition below. [orig: ForceScoped
+    //  @ 0x541372..0x54137e, RELOAD -> IDLE @ 0x541380..0x541388, the local
+    //  owner @ 0x54138a..0x541396, the stash @ 0x541398; g_WeaponScopeActive = 0
+    //  @ 0x5413a0, the Player_ToggleWeaponScope call @ 0x5413a6,
+    //  g_RescopeAfterReload = 0 @ 0x5413ab]
+    if ((def.flags & weapon_flag::kForceScoped) == 0 && slot.current == weapon_action::kReload &&
+        slot.next == weapon_action::kIdle && in.is_local && slot.rescope_after_reload) {
         out.rescope = true;
+        if (in.scope != nullptr) {
+            in.scope->clear_promoted();
+            in.scope->toggle(slot);
+        }
         slot.rescope_after_reload = false;
     }
 

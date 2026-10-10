@@ -888,6 +888,121 @@ void test_keep_scope_reload_class() {
     CHECK(s.clip == 30); // the reload itself still applied
 }
 
+// The local owner's scope legs run INLINE through WeaponFsmScope, each where
+// its handler calls it: the toggle's SCOPEUP / SCOPEDOWN queue lands on the
+// slot before the pump's transition reads `next`. The double queues as a
+// passing toggle would. [orig: WeaponAction_Reload @0x54312f / @0x543136;
+//  WeaponAction_ProcessFrame @0x541372..0x5413ab; WeaponAction_Recoil
+//  @0x543036..0x54305d; WeaponAction_Idle @0x5429f0; WeaponAction_EmptyIdle
+//  @0x542ad3; WeaponSlot_TryQueueScopeUp @0x53f050 / ..ScopeDown @0x53f080]
+struct ScopeDouble final : WeaponFsmScope {
+    std::string calls; // 'T' toggle, 'C' promoted clear, in call order
+    bool promoted = true;
+    void toggle(WeaponSlotState &slot) override {
+        calls += 'T';
+        if (promoted) weapon_fsm_queue_scope_down(slot);
+        else weapon_fsm_queue_scope_up(slot);
+        promoted = false;
+    }
+    void clear_promoted() override {
+        calls += 'C';
+        promoted = false;
+    }
+};
+
+void test_scope_legs_run_inline() {
+    // The reload: the stash toggles; on completion the rescope clears the
+    // promoted byte, then toggles, and the RELOAD transitions straight into
+    // the SCOPEUP that toggle queued.
+    {
+        WeaponFsmDef def = make_ak_def();
+        WeaponSlotState s = make_ak_slot();
+        s.clip = 5;
+        ScopeDouble scope;
+        WeaponFsmInputs in;
+        in.scope_active = true;
+        in.scope = &scope;
+        in.reload_pressed = true;
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(def, s, in, ev);
+        in.reload_pressed = false;
+        CHECK(s.current == wa::kReload && ev.unscope && scope.calls == "T");
+        CHECK(s.next == wa::kIdle); // the stash's SCOPEDOWN mid-phase leaves IDLE
+        in.scope_active = false;
+        bool rescoped = false;
+        for (int t = 0; t < 80 && s.current == wa::kReload; ++t) {
+            WeaponFsmEvents tick;
+            weapon_fsm_tick(def, s, in, tick);
+            rescoped |= tick.rescope;
+            CHECK(!tick.unscope && !tick.scope_cleared);
+        }
+        CHECK(rescoped && scope.calls == "TCT");
+        CHECK(s.current == wa::kScopeUp && !s.rescope_after_reload);
+    }
+    // A ForceScoped def stashes and calls the toggle (whose pin keeps the
+    // sight) but never rescopes; its stash stays set.
+    {
+        WeaponFsmDef def = make_ak_def();
+        def.flags |= weapon_flag::kForceScoped;
+        WeaponSlotState s = make_ak_slot();
+        s.clip = 5;
+        ScopeDouble scope;
+        WeaponFsmInputs in;
+        in.scope_active = true;
+        in.scope = &scope;
+        in.reload_pressed = true;
+        bool rescoped = false;
+        for (int t = 0; t < 80; ++t) {
+            WeaponFsmEvents ev;
+            weapon_fsm_tick(def, s, in, ev);
+            in.reload_pressed = false;
+            rescoped |= ev.rescope;
+        }
+        CHECK(scope.calls == "T" && !rescoped);
+        CHECK(s.current == wa::kIdle && s.rescope_after_reload);
+    }
+    // The one-shot's last recoil toggles only a promoted sight; the toggle's
+    // SCOPEDOWN overwrites the EMPTYIDLE the arbiter queued.
+    for (const bool promoted : {true, false}) {
+        WeaponFsmDef def = make_ak_def();
+        def.clip_capacity = 1;
+        WeaponSlotState s;
+        s.current = wa::kRecoil;
+        s.phase = weapon_phase::kEntered;
+        ScopeDouble scope;
+        WeaponFsmInputs in;
+        in.scope_active = promoted;
+        in.scope = &scope;
+        WeaponFsmEvents ev;
+        weapon_fsm_tick(def, s, in, ev);
+        CHECK(ev.unscope == promoted && !ev.scope_cleared);
+        CHECK(scope.calls == (promoted ? "T" : ""));
+        CHECK(s.next == (promoted ? wa::kScopeDown : wa::kEmptyIdle));
+    }
+    // The empty one-shot's Idle and EmptyIdle clear the promoted byte alone,
+    // whatever its state; ForceScoped pins the view and skips it.
+    for (const int32_t action : {wa::kIdle, wa::kEmptyIdle}) {
+        for (const bool force : {false, true}) {
+            WeaponFsmDef def = make_ak_def();
+            def.clip_capacity = 1;
+            if (force) def.flags |= weapon_flag::kForceScoped;
+            // No idle reseed: the handler's body runs this tick.
+            def.actions[wa::kIdle].delay_start = def.actions[wa::kIdle].delay_end = 0;
+            WeaponSlotState s;
+            s.current = action;
+            s.next = action;
+            ScopeDouble scope;
+            WeaponFsmInputs in;
+            in.scope = &scope;
+            WeaponFsmEvents ev;
+            weapon_fsm_tick(def, s, in, ev);
+            CHECK(s.next == wa::kEmptyIdle);
+            CHECK(ev.scope_cleared == !force && !ev.unscope);
+            CHECK(scope.calls == (force ? "" : "C"));
+        }
+    }
+}
+
 void test_non_local_recoil_makes_no_decision() {
     WeaponFsmDef def = make_ak_def();
     std::snprintf(def.actions[wa::kRecoil].particle,
@@ -1570,6 +1685,7 @@ int main() {
     test_fire_abort_finishes_silently();
     test_reload_end_leg();
     test_keep_scope_reload_class();
+    test_scope_legs_run_inline();
     test_non_local_recoil_makes_no_decision();
     test_recoil_effect_leg();
     test_switch_completion_signal();

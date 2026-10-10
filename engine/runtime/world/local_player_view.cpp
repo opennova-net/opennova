@@ -420,14 +420,13 @@ bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerView
     return true;
 }
 
-namespace {
-
 // Player_ToggleWeaponScope itself: its entry gates, then the leg the PROMOTED
-// byte picks. The input toggle reaches it behind its own currentAction gate,
-// the forced callers (the local death, the camera switch) without one.
+// byte picks. The input toggle reaches it behind its own currentAction gate;
+// the forced callers (the local death, the camera switch), the NVG action and
+// the weapon FSM's legs without one.
 // [orig: Player_ToggleWeaponScope @0x4df0c0]
-bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
-                         WeaponSlotState &active_slot) {
+bool local_player_toggle_weapon_scope(World &world, const LocalPlayerWeapon &w,
+                                      PlayerViewState &v, WeaponSlotState &active_slot) {
     // The local player and its equipped slot's def [orig: @0x4df0cf,
     //  @0x4df0eb..0x4df0f6].
     const Entity *player = world.registry.get(world.cached.local_player);
@@ -481,6 +480,8 @@ bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewSta
     return true;
 }
 
+namespace {
+
 // Player_IsEquippedWeaponScoped: a promoted sight on a Scoped def
 // [orig: @0x4dcc80 -- EquippedSlot and its Def @0x4dcc85..0x4dcc94, Def+8 & 1
 //  @0x4dcc99, g_WeaponScopeActive @0x4dcca5].
@@ -498,7 +499,7 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
     // [orig: Input_HandleActionBinding_0 @0x4e052b..0x4e0537, the toggle call
     //  @0x4e053d].
     if (!weapon_fsm_scope_toggle_allowed(w.def, active_slot)) return false;
-    return toggle_weapon_scope(world, w, v, active_slot);
+    return local_player_toggle_weapon_scope(world, w, v, active_slot);
 }
 
 bool local_player_forced_scope_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v) {
@@ -506,7 +507,7 @@ bool local_player_forced_scope_toggle(World &world, LocalPlayerWeapon &w, Player
     // toggle takes its disengage leg when its entry gates pass.
     if (!player_view_scope_settled(v)) return false;
     WeaponSlotState *active_slot = active_local_weapon_slot(world, w);
-    return active_slot != nullptr && toggle_weapon_scope(world, w, v, *active_slot);
+    return active_slot != nullptr && local_player_toggle_weapon_scope(world, w, v, *active_slot);
 }
 
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
@@ -574,7 +575,7 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
         //  Player_ToggleWeaponScope call @0x4e06c5, dword_B76554 = 1 @0x4e06ca,
         //  g_NVGActive = 1 @0x4e06d7].
         if (equipped_weapon_scoped(w, v) && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0) {
-            toggle_weapon_scope(world, w, v, active_slot);
+            local_player_toggle_weapon_scope(world, w, v, active_slot);
             w.nvg_scope_restore = true;
         }
         const bool on = player_view_toggle_nvg(v);
@@ -593,7 +594,7 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
     // @0x4e068b].
     player_view_toggle_nvg(v);
     if (w.nvg_scope_restore) {
-        toggle_weapon_scope(world, w, v, active_slot);
+        local_player_toggle_weapon_scope(world, w, v, active_slot);
         w.nvg_scope_restore = false;
     }
     // NV_OFF after the scope restore [orig: case 41's off branch — `mov ecx,

@@ -165,6 +165,15 @@ void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
 bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
                                WeaponSlotState &active_slot);
 
+// The toggle itself, with no caller's gate in front: its entry gates, then the
+// leg the promoted byte picks, the SCOPEUP / SCOPEDOWN queue landing on
+// `active_slot`. The weapon FSM's legs run it inline (the reload stash, the
+// one-shot's last recoil, the rescope after a reload). Returns whether it
+// toggled. [orig: Player_ToggleWeaponScope @0x4df0c0; its FSM callers
+//  @0x543136 / @0x54305d / @0x5413a6]
+bool local_player_toggle_weapon_scope(World &world, const LocalPlayerWeapon &w,
+                                      PlayerViewState &v, WeaponSlotState &active_slot);
+
 // The forced toggle of the local death and the camera switch: each calls the
 // whole toggle while the sight is promoted, without the dispatcher's
 // currentAction gate, so a passing toggle disengages (tips 12/14/16, the

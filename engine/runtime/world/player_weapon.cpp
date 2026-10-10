@@ -1079,6 +1079,23 @@ void weapon_trace_record(LocalPlayerWeapon &w, const WeaponSlotState &slot,
 	if (w.trace_head == 0) w.trace_wrapped = true;
 }
 
+// The local player's scope as the weapon FSM's legs reach it, inline: the
+// whole toggle, or the bare promoted-byte clear (weapon_fsm.h WeaponFsmScope).
+class LocalWeaponScope final : public WeaponFsmScope {
+public:
+	LocalWeaponScope(World &world, const LocalPlayerWeapon &w, PlayerViewState &view)
+			: world_(world), w_(w), view_(view) {}
+	void toggle(WeaponSlotState &slot) override {
+		local_player_toggle_weapon_scope(world_, w_, view_, slot);
+	}
+	void clear_promoted() override { player_view_clear_scope_promoted(view_); }
+
+private:
+	World &world_;
+	const LocalPlayerWeapon &w_;
+	PlayerViewState &view_;
+};
+
 } // namespace
 
 // The C2S 0x25 a local reload request ships. A UseGun seat (parentSlot 3)
@@ -1215,6 +1232,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// pump in retail and only promotes g_WeaponScopeActive after the ease has
 	// completed [orig: promoter @ 0x4de4f7; weapon pump @ 0x526786].
 	in.scope_active = player_view_scope_settled(view);
+	// The FSM's scope legs run the toggle, or clear the promoted byte, where
+	// its handlers do [orig: Player_ToggleWeaponScope @0x4df0c0 called
+	// @0x543136 / @0x54305d / @0x5413a6; g_WeaponScopeActive = 0 @0x5429f0 /
+	// @0x542ad3 / @0x5413a0].
+	LocalWeaponScope scope(world, w, view);
+	in.scope = &scope;
 	in.instant_emplaced_switch = local_usegun_switch_is_instant(world, w);
 	// The heat window is a deadline against the logic tick, not a stored level.
 	// [orig: current_tick @ 0x24C1968]
@@ -1578,20 +1601,10 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			commit_pending_weapon_switch(world, w, io.inventory);
 		}
 	}
-	// The FSM's scope side effects land on the sim-owned engaged bit: forced
-	// unscope (one-shot / reload stash) and the pump's rescope-after-reload
-	// [orig: g_WeaponScopeActive writes; the rescope block @ 0x54139e].
-	if (ev.unscope) {
-		++w.unscope_serial;
-		// The forced paths run the same refusing toggle — a mid-ease unscope keeps
-		// the scope (rare: a reload requested inside the raise ease)
-		// [orig: @ 0x543136 calls Player_ToggleWeaponScope, activeFlag-gated].
-		local_player_set_scope(world, w, view, active_slot, false);
-	}
-	if (ev.rescope) {
-		++w.rescope_serial;
-		local_player_set_scope(world, w, view, active_slot, true);
-	}
+	// The FSM's scope legs already ran inside the tick (LocalWeaponScope);
+	// the serials count the calls for the dev tools.
+	if (ev.unscope) ++w.unscope_serial;
+	if (ev.rescope) ++w.rescope_serial;
 	// Devtools instrumentation, last: the slot has finished mirroring, so the
 	// sample is the state this tick actually ends on.
 	weapon_trace_record(w, active_slot, ev, world.logic_tick);
