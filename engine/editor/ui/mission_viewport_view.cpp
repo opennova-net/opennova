@@ -453,8 +453,8 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		viewport_command(workspace, mission, "play_from_here");
 	// The mission's 2D map (S23 C) in the Preview window beside the picture, which stands aside for a mission until asked.
 	if (ui_kit::tool(row, "Map", true, "Show the mission's 2D map beside the picture (the Preview window): from straight "
-										 "above, north up, the terrain as the game's commander map draws it, its records "
-										 "as pins you select and move as here.")) {
+										 "above, north up (south up where the mission turns its map), the terrain as the "
+										 "game's commander map draws it, its records as pins you select and move as here.")) {
 		// The map asked for (the Windows menu's tick shows the kind shown before), and the window brought forward.
 		io::JsonValue change = io::JsonValue::make_object();
 		io::JsonValue document = io::JsonValue::make_object();

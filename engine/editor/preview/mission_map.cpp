@@ -351,10 +351,12 @@ int pick_mission_map_mark(const std::vector<MissionMapMark> &marks, const Missio
 std::vector<NodeAddress> mission_map_box_records(const std::vector<MissionMapMark> &marks, const MissionMapView &view,
 		CanvasPoint a, CanvasPoint b) {
 	const float x0 = std::min(a.x, b.x), x1 = std::max(a.x, b.x), y0 = std::min(a.y, b.y), y1 = std::max(a.y, b.y);
-	// The box in the mission (north up: the picture's top its north edge).
-	double west = 0.0, north = 0.0, east = 0.0, south = 0.0;
-	view.unproject(x0, y0, west, north);
-	view.unproject(x1, y1, east, south);
+	// The box in the mission: its two corners unprojected, each axis's least and most (north up the picture's top is
+	// its north edge; a RotateMap180 map's, its south).
+	double ax = 0.0, ay = 0.0, bx = 0.0, by = 0.0;
+	view.unproject(x0, y0, ax, ay);
+	view.unproject(x1, y1, bx, by);
+	const double west = std::min(ax, bx), east = std::max(ax, bx), south = std::min(ay, by), north = std::max(ay, by);
 	std::vector<NodeAddress> out;
 	for (const MissionMapMark &mark : marks) {
 		if (!mark.shown) continue;

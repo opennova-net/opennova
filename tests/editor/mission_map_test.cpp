@@ -514,6 +514,40 @@ static int test_footprints() {
 	for (const ViewportHit &each : rig.map()->box(context, kx - 4.0f, ky - 4.0f, kx + 4.0f, ky + 4.0f))
 		boxed = boxed || each.id == big.row;
 	TEST_EXPECT(boxed && !(ax >= kx - 4.0f && ax <= kx + 4.0f && ay >= ky - 4.0f && ay <= ky + 4.0f));
+	// The same box with the map turned half a turn (the header's RotateMap180): the corner where the turned view draws
+	// it, the box's corners unprojected west of east and south of north whatever the turn, the footprint taken by the
+	// wire's box and by the canvas's box alike.
+	{
+		const NodeAddress header = first_of(*rig.document(), MissionKind::Mission);
+		Edit turn;
+		turn.operation = EditOperation::Set;
+		turn.address = header;
+		turn.field = "attrib_flags";
+		turn.value = int64_t(0x20);
+		rig.session.handle(request::edit_record(kMission, turn));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.pump();
+		const ViewportContext turned_context = rig.context();
+		const MissionMapView turned = rig.map()->view(turned_context.width, turned_context.height);
+		TEST_EXPECT(turned.flip_180);
+		float tx = 0.0f, ty = 0.0f, tax = 0.0f, tay = 0.0f;
+		turned.project(shape.hull[0], shape.hull[1], tx, ty);
+		turned.project(big.x, big.y, tax, tay);
+		bool turned_boxed = false;
+		for (const ViewportHit &each : rig.map()->box(turned_context, tx - 4.0f, ty - 4.0f, tx + 4.0f, ty + 4.0f))
+			turned_boxed = turned_boxed || each.id == big.row;
+		TEST_EXPECT(turned_boxed && !(tax >= tx - 4.0f && tax <= tx + 4.0f && tay >= ty - 4.0f && tay <= ty + 4.0f));
+		const std::vector<MissionMapMark> turned_marks = rig.map()->marks(turned_context.width, turned_context.height);
+		bool canvas_boxed = false;
+		for (const NodeAddress &record : mission_map_box_records(turned_marks, turned, CanvasPoint{ tx + 4.0f, ty + 4.0f },
+				     CanvasPoint{ tx - 4.0f, ty - 4.0f }))
+			canvas_boxed = canvas_boxed || record.row == big.row;
+		TEST_EXPECT(canvas_boxed);
+		rig.session.handle(request::undo(kMission));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.pump();
+		TEST_EXPECT(!rig.map()->view(turned_context.width, turned_context.height).flip_180);
+	}
 	// Far: the crate a speck, a pin again.
 	rig.session.handle(request::set_viewport(kMission, R"({"kind": "map", "camera": {"zoom": 40}})"));
 	rig.pump();
