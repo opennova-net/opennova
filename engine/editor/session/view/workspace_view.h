@@ -145,11 +145,13 @@ struct WorkspaceView {
 	};
 	FileRename file_rename;
 
-	// Files' Delete... of a file (DI-25): the file ("" closed), what names it listed before anything goes, and
-	// whether an import source goes alone (its outputs kept as files of the project); its Delete raises
-	// delete_asset, with force where something names it.
+	// Files' Delete... of a file (DI-25): the file ("" closed) and the other files of Files' selection deleted
+	// with it (`paths`), what names them listed before anything goes, and whether an import source goes alone
+	// (its outputs kept as files of the project); its Delete raises delete_asset, with force where something
+	// names them.
 	struct FileDelete {
 		std::string path;
+		std::vector<std::string> paths;
 		bool alone = false;
 	};
 	FileDelete file_delete;

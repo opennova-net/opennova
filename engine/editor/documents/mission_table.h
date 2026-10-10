@@ -46,10 +46,15 @@ constexpr bool is_entity_kind(NodeKind kind) {
 }
 
 // A waypoint path as a row: the file's record and its number, which is its place among the file's 128
-// (an entity's waypoint_id and a parameter name it by; the file writes no number).
+// (an entity's waypoint_id and a parameter name it by; the file writes no number), and its stops: every
+// marker on it in its order, the waypoint markers that carry its number as the original editor models a
+// path (master's mission::waypoint_path_markers, D-MIS-6), unbounded. The stops are what the editor
+// edits; the record keeps the path's flags and the slot words its writer keeps, and a save lays it out
+// from the markers the stops put on it (MissionDocument::compose).
 struct MissionPath {
 	bms::WaypointRecord record;
 	int number = 0;
+	std::vector<uint32_t> stops;
 };
 
 // The native record behind each kind: the mission row a bms::File holding its header and its own
@@ -64,6 +69,11 @@ const RecordTable &mission_table();
 // The band a row's kind stands in among the file's rows, in the writer's order (0 the mission, then
 // the items, buildings, markers, organics, paths, area triggers and events); -1 for a nested kind.
 int mission_band(NodeKind kind);
+
+// What a bounding box's value is to the game by its type (bms::BoundingBoxType): "Health per tick",
+// "Mana per tick", "Reverb preset", "Location", "Music variable 4"; null where its value word is read as
+// no number (a Mission box's words are its mission's name, any other type's are read by nothing).
+const char *box_value_label(int32_t type);
 
 // The most records an event holds of each of its two lists, a path of its stops.
 inline constexpr size_t kMaxEventRecords = mission::kMaxEventChainEntries;

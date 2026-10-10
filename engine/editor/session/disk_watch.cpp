@@ -1,5 +1,6 @@
 #include <editor/session/disk_watch.h>
 
+#include <map>
 #include <set>
 #include <utility>
 
@@ -40,6 +41,7 @@ bool DiskWatch::follow_project() {
 		changes_.clear();
 		root_ = root;
 		unsettled_ = 0;
+		round_after_.clear();
 		publish(0);
 	}
 	return view.project.open && view.project.scan && view.project.document;
@@ -86,10 +88,21 @@ void DiskWatch::check(bool all) {
 	for (std::string &file : watched_files()) looks.push_back(std::move(file));
 	for (std::string &file : changes_.folder_changes(paths, *view.project.document, scan, now_ticks))
 		looks.push_back(std::move(file));
+	// The round: the next of the project's other files, after the last one the round looked at.
+	const std::set<std::string> inputs = import_inputs(view);
+	const std::map<std::string, AssetScan::Visit> &visits = scan.visits();
+	auto at = visits.upper_bound(round_after_);
+	size_t taken = 0;
+	for (size_t seen = 0; seen < visits.size() && taken < kDiskRoundFiles; ++seen, ++at) {
+		if (at == visits.end()) at = visits.begin();
+		round_after_ = at->first;
+		if (at->first.empty() || imports_watch(at->first) || inputs.count(at->first)) continue;
+		looks.push_back(at->first);
+		++taken;
+	}
 	changes_.look_at(paths, scan, looks, now_ms, now_ticks);
 	if (all) {
 		// Every file of the project the import round trip does not watch, a few a poll (step).
-		const std::set<std::string> inputs = import_inputs(view);
 		std::vector<std::string> every;
 		for (const auto &[path, visit] : scan.visits()) {
 			(void)visit;

@@ -886,7 +886,7 @@ func _model_ready(path: String, builds: int) -> Dictionary:
 ## Shell's once-a-second check reads an open catalog written from outside into its rows, the record
 ## selected in it selected again by its place, and an open model written from outside into its picture
 ## (its device builds again), each named in Output, within a few seconds. A file no document shows is
-## left to the window gaining the focus, whose sweep over every file reads it again.
+## read again too, by the checks' round over the project's files.
 func test_outside_saves_come_back_unfocused() -> void:
 	if _app == null:
 		return
@@ -929,15 +929,11 @@ func test_outside_saves_come_back_unfocused() -> void:
 	assert_eq(_seam.get_selected_records(), PackedInt64Array([_seam.get_row_id(1)]),
 			"the record selected in it selected again by its place")
 
-	# A file no document shows: the checks pass it by; the window gaining the focus sweeps it in.
+	# A file no document shows: the checks' round looks at it too (ADR 0046 S23 D), the window still unfocused.
 	var weapons := root.path_join("defs/weapon.def")
 	var bytes := FileAccess.get_file_as_bytes(weapons)
 	bytes.append_array("\r\n".to_utf8_buffer())
 	TestFs.write_bytes(self, weapons, bytes)
-	await get_tree().create_timer(1.5).timeout
-	assert_false("\n".join(_seam.get_output_lines()).contains("Read defs/weapon.def again"),
-			"a file no document shows waits for the focus")
-	_app.notification(NOTIFICATION_APPLICATION_FOCUS_IN)
 	var swept_at := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - swept_at < 10000 \
 			and not "\n".join(_seam.get_output_lines()).contains("Read defs/weapon.def again"):
