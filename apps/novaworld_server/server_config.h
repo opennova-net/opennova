@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace opennova::novaworld_server {
 
@@ -100,6 +101,24 @@ struct ServerConfig {
 	// ADMIN_API_TOKEN env var to enable. Tokens are compared with a
 	// constant-time string compare in `auth.cpp`.
 	std::string admin_api_token;
+
+	// The website session cookie's Secure flag (ONNET_COOKIE_SECURE=1). Set
+	// it wherever browsers reach the site over https: prod, behind
+	// Cloudflare's TLS (DEPLOY.md), where nginx and this server still speak
+	// plain http, so no request header can tell. Off by default for the
+	// http://localhost dev site.
+	bool cookie_secure = false;
+
+	// The reverse proxies trusted to name the client in X-Real-IP /
+	// X-Forwarded-For (ONNET_TRUSTED_PROXIES, comma-separated exact addresses;
+	// prod's nginx reaches this server from 127.0.0.1). Empty (the default):
+	// the TCP peer is the client, and those headers are ignored.
+	std::vector<std::string> trusted_proxies;
+
+	// ONNET_BOOTSTRAP_ADMIN: an existing account main() gives the admin role
+	// at boot, the way the first site admin is made. A name no account has is
+	// a warning.
+	std::string bootstrap_admin;
 
 	// Reflection override for the host/join flow (dev/NAT). NovaWorld tells a
 	// hosting client its reachable endpoint and advertises it to joiners. On the

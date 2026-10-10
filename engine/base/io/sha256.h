@@ -4,10 +4,6 @@
 // (update/finish), the one-shot `sha256`, and `sha256_hex`, the 64 lower-case hex digits.
 //
 // Not a port: nothing here is witnessed engine behaviour.
-//
-// STAGED, NOT WIRED: its include consumer is the NovaWorld service's web-session store
-// (apps/novaworld_server, the hosted-servers plan's PR E), which hashes each session token
-// before it is kept; delete this paragraph when that lands.
 #pragma once
 
 #include <array>

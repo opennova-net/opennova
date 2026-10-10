@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
 	std::string error;
 	TEST_EXPECT(score::parse(bytes.data(), bytes.size(), file, error));
 	TEST_EXPECT(file.version == 40);
-	TEST_EXPECT(file.exp_fanfare[0] == 0 && file.exp_fanfare[1] == 0 && !score::exp_fanfare_kept(file));
+	TEST_EXPECT(file.has_exp_fanfare && file.exp_fanfare[0] == 0 && file.exp_fanfare[1] == 0 && !score::exp_fanfare_kept(file));
 	TEST_EXPECT(file.blocks.size() == 3);
 
 	// Block ORDER is the engine's row index [orig: ScoreConfig_LoadScoringTableForGameType
@@ -157,10 +157,13 @@ int main(int argc, char **argv) {
 		const score::File none = parsed("VERSION 40\nFIELD \"NUMDEATHS\" 1\nGAMETYPE \"A\"\nVAR \"FIRE\"\nVAR \"NOPE\" 3\n /VAR \"FIRE\" 2\n");
 		TEST_EXPECT(none.blocks.size() == 1 && none.blocks[0].name == "A" && none.blocks[0].fields.empty() &&
 		            none.blocks[0].vars.empty());
-		// A VAR read twice keeps its last value; a FIELD of a byte keeps its byte; a fanfare of 1 2 is kept.
+		// A VAR read twice keeps its last value; a FIELD of a byte keeps its byte; a fanfare of 1 2 is kept (a
+		// block's line, after the fanfare line's place).
 		const score::File twice = parsed("VERSION 40\r\nGAMETYPE \"DM\"\r\nVAR \"FIRE\" 1\r\nVAR \"fire\" 4\r\nFIELD \"NUMDEATHS\" 300\r\nEXP_FANFARE 1 2\r\n");
 		TEST_EXPECT(twice.blocks[0].vars.size() == 1 && twice.blocks[0].vars[0].value == 4);
-		TEST_EXPECT(twice.blocks[0].fields[0].value == 44 && score::exp_fanfare_kept(twice));
+		int32_t stored[2] = {0, 0};
+		TEST_EXPECT(twice.blocks[0].fields[0].value == 44 && !twice.has_exp_fanfare && twice.fanfare_after.kept &&
+		            score::kept_fanfare(twice, stored) && stored[0] == 1 && stored[1] == 2);
 		score::File refused = twice;
 		refused.blocks[0].fields.push_back({"NOPE", 1, 0});
 		TEST_EXPECT(!score::write(refused, encoded, error) && error.find("NOPE") != std::string::npos);
@@ -203,13 +206,43 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(score::parse(reinterpret_cast<const uint8_t *>(longer.data()), longer.size(), long_file, error, long_notes));
 		TEST_EXPECT(score::write(long_file, &long_notes, out, error, &rewritten) && !rewritten && text_of(out) == longer);
 
+		// The fanfare line is the last before the first block, its pair whatever it holds; the game stores the last
+		// pair past the gate, an earlier line's where the fanfare line's fails, a block's line's after it.
+		int32_t kept[2] = {-1, -1};
 		const score::File fanfare = parsed("VERSION 40\r\nEXP_FANFARE 1 2\r\nEXP_FANFARE 0 0\r\n");
-		TEST_EXPECT(fanfare.has_exp_fanfare && fanfare.exp_fanfare[0] == 1 && fanfare.exp_fanfare[1] == 2 &&
-		            score::exp_fanfare_kept(fanfare));
+		TEST_EXPECT(fanfare.has_exp_fanfare && fanfare.exp_fanfare[0] == 0 && fanfare.exp_fanfare[1] == 0 &&
+		            !score::exp_fanfare_kept(fanfare) && fanfare.fanfare_before.kept && !fanfare.fanfare_after.kept);
+		TEST_EXPECT(score::kept_fanfare(fanfare, kept) && kept[0] == 1 && kept[1] == 2);
 		const score::File unkept = parsed("VERSION 40\r\nEXP_FANFARE 2 1\r\n");
-		TEST_EXPECT(!unkept.has_exp_fanfare && unkept.exp_fanfare[0] == 0 && unkept.exp_fanfare[1] == 0);
+		TEST_EXPECT(unkept.has_exp_fanfare && unkept.exp_fanfare[0] == 2 && unkept.exp_fanfare[1] == 1 &&
+		            !score::kept_fanfare(unkept, kept) && kept[0] == 0 && kept[1] == 0);
+		const score::File after = parsed("VERSION 40\r\nEXP_FANFARE 1 2\r\nGAMETYPE \"DM\"\r\nEXP_FANFARE 3 4\r\n");
+		TEST_EXPECT(after.exp_fanfare[0] == 1 && after.fanfare_after.kept && score::kept_fanfare(after, kept) &&
+		            kept[0] == 3 && kept[1] == 4);
 		std::printf("review cases: a minted File at 40, a version-39 file read to nothing and kept, the 2047 cut, "
 		            "the fanfare's gate\n");
+	}
+
+	// The #997 review's case: the game's own 0 0 line is the file's fanfare line, so a set rewrites it in place (one
+	// line, no second EXP_FANFARE), and setting it back gives the file again.
+	{
+		const std::string shipped = "VERSION 40\r\n\r\nEXP_FANFARE 0 0\r\n\r\nGAMETYPE \"DM\"\r\n\r\nVAR \"FIRE\" 5\r\n";
+		textlayout::Notes notes;
+		score::File noted;
+		TEST_EXPECT(score::parse(reinterpret_cast<const uint8_t *>(shipped.data()), shipped.size(), noted, error, notes));
+		TEST_EXPECT(noted.has_exp_fanfare);
+		noted.exp_fanfare[0] = 2;
+		noted.exp_fanfare[1] = 5;
+		std::vector<uint8_t> out;
+		bool rewritten = true;
+		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten) && !rewritten);
+		const std::string set = text_of(out);
+		TEST_EXPECT(lines_changed(shipped, set) == 1 && set.find("\r\nEXP_FANFARE 2 5\r\n") != std::string::npos &&
+		            set.find("EXP_FANFARE") == set.rfind("EXP_FANFARE"));
+		noted.exp_fanfare[0] = 0;
+		noted.exp_fanfare[1] = 0;
+		TEST_EXPECT(score::write(noted, &notes, out, error, &rewritten) && !rewritten && text_of(out) == shipped);
+		std::printf("fanfare line: a set rewrites the file's own line in place\n");
 	}
 
 	// --- retail: <OPENNOVA_JO_DIR>/score.ini, the score table the install

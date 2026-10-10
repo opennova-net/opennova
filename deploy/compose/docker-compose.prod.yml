@@ -11,8 +11,9 @@ services:
     pull_policy: always
     build: !reset null
     network_mode: host
-    # The base compose's `environment:` block takes ONNET_PUBLIC_HOST and
-    # ADMIN_API_TOKEN from the toolbox's --env-file pair: the committed
+    # The base compose's `environment:` block takes ONNET_PUBLIC_HOST,
+    # ADMIN_API_TOKEN and the website session settings (ONNET_COOKIE_SECURE,
+    # ONNET_TRUSTED_PROXIES) from the toolbox's --env-file pair: the committed
     # app.prod.env and the vault-injected secrets. Its `init: true` holds here
     # too: Docker's init is PID 1, so a second SIGTERM reaches the server.
 

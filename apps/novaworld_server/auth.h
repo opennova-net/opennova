@@ -2,11 +2,23 @@
 
 #include <net/novaworld/db/sqlite.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova::novaworld_server {
+
+// The longest username an account may have (create_user, update_user's
+// rename) and POST /api/login takes.
+inline constexpr size_t kUsernameMaxBytes = 64;
+
+// Whether `s` holds a control byte (below 0x20, or 0x7F). Usernames may hold
+// none; nor may an admin ServerCommand arg (http_listener.cpp, where the
+// reason is spelled out).
+bool has_control_byte(std::string_view s);
 
 // Resolved player record returned by authenticate_user / get_user_by_*.
 struct UserRecord {
@@ -16,6 +28,7 @@ struct UserRecord {
 	std::string nwh;
 	std::string nwhandle;
 	std::string account_status = "active";
+	std::string role = "player"; // players.role: "player" or "admin" (migration 0008)
 };
 
 struct GameAccessRecord {
@@ -32,7 +45,7 @@ struct ServerStatusRecord {
 
 // Result of a CRUD mutation. ok=true means success; on failure,
 // `error_code` is one of: "username_exists", "pcid_exists",
-// "missing_field", "not_found", "db_error". Used as the body
+// "missing_field", "invalid_field", "not_found", "db_error". Used as the body
 // foundation for /api/admin/users.* HTTP responses.
 struct MutationResult {
 	bool        ok = false;
@@ -43,7 +56,10 @@ struct MutationResult {
 
 // Look up `username` and verify `password` against the stored
 // `password_hash`. Returns the record on success, nullopt on missing
-// user / wrong password / DB error.
+// user / wrong password / DB error. A missing user still costs one bcrypt
+// run (against a hash no password matches), so the answer's timing does not
+// tell an unknown username from a wrong password. The account's status is the
+// caller's to check: a banned account with the right password is returned.
 //
 // `password_hash` should be a bcrypt $2a$/$2b$ string (32+ chars). For
 // dev convenience, plaintext password_hash is also accepted but logs a
@@ -100,6 +116,8 @@ struct CreateUserParams {
 	std::string nwhandle;
 };
 
+// A username of at most kUsernameMaxBytes bytes with no control byte, else
+// invalid_field.
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
 MutationResult delete_user(opennova::db::Database &db, int64_t id);
 
@@ -112,9 +130,51 @@ struct UpdateUserParams {
 	std::optional<std::string> nwh;
 	std::optional<std::string> nwhandle;
 	std::optional<std::string> account_status;
+	std::optional<std::string> role; // "player" or "admin", else invalid_field
 };
+// A rename takes create_user's username rule (invalid_field). An update that
+// sets a password or a status other than 'active' ends the account's website
+// sessions and forgets its known login addresses in the same transaction
+// (update_revokes_sessions; the HTTP layer drops the retail login pins too).
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p);
+bool update_revokes_sessions(const UpdateUserParams &p);
+
+// The addresses an account logged in from with the right password, kept 30
+// days (login_addresses, migration 0008): the login brake's per-username cap
+// spares them, so a stranger's failed logins cannot keep the owner out.
+// `address` is the brake's address key (rate_limiter.h address_key, an IPv6
+// address grouped to its /64). Each throws db::SqliteError on a database
+// failure.
+inline constexpr int kLoginAddressDays = 30;
+inline constexpr size_t kLoginAddressesPerUser = 32;
+void record_login_address(opennova::db::Database &db, int64_t user_id, const std::string &address);
+bool is_known_login_address(opennova::db::Database &db, const std::string &username,
+                            const std::string &address);
+size_t prune_login_addresses(opennova::db::Database &db);
+
+// ONNET_BOOTSTRAP_ADMIN (main() calls it at boot): gives the account named
+// `username` the admin role, once. While any account is an admin it does
+// nothing, so a later boot can neither re-promote a deliberately demoted
+// admin nor promote whoever registered the name after the first admin was
+// made. Throws db::SqliteError on a database failure.
+struct BootstrapAdminResult {
+	enum class Outcome { Promoted, AdminExists, NoSuchAccount };
+	Outcome outcome = Outcome::NoSuchAccount;
+	std::string existing_admin; // AdminExists: one admin's username
+};
+BootstrapAdminResult bootstrap_admin(opennova::db::Database &db, const std::string &username);
+
+// Every bcrypt password check authenticate_user has run in this process: the
+// test seam that pins the unknown-username path to one check like a wrong
+// password's.
+uint64_t password_verifications();
+
+// `text` as a log line may carry it: each control byte (below 0x20, or 0x7F)
+// as \xNN, so no client input can forge a line, and cut after `max_bytes`
+// bytes (".." marks the cut). For usernames, URLs, admin ServerCommand lines
+// and other client-supplied strings.
+std::string loggable(std::string_view text, size_t max_bytes = 64);
 
 struct UpdateGameAccessParams {
 	std::string game_slug;

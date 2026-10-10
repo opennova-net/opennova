@@ -6,6 +6,7 @@
 #include <net/novaworld/db/sqlite.h>
 
 #include "../common/file_io.h"
+#include "../common/temp_dir.h"
 #include "../common/test_expect.h"
 
 #include <algorithm>
@@ -41,8 +42,8 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
 		"active_hosts", "active_user_sessions",
-		"games", "host_players", "host_roster", "hosts", "player_game_access",
-		"players", "server_status", "unknown_messages"
+		"games", "host_players", "host_roster", "hosts", "login_addresses", "player_game_access",
+		"players", "server_status", "unknown_messages", "web_sessions"
 	};
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
@@ -203,6 +204,100 @@ int test_foreign_keys_enforced() {
 	return 0;
 }
 
+// 0008: every account starts as a 'player', the role takes only 'player' or
+// 'admin', web_sessions is keyed by the token hash with its user_id index, and
+// a deleted player takes its sessions.
+int test_web_sessions_and_roles() {
+	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
+	Database db(":memory:");
+	run_migrations(db, source_dir / "backend" / "migrations");
+
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+	        "VALUES ('roleless', 'x', '0000aaaa', '1', 'Roleless');");
+	auto role = db.query("SELECT role FROM players WHERE username = 'roleless';");
+	TEST_EXPECT(role.size() == 1 && role[0].as_text(0).value() == "player");
+	db.exec("UPDATE players SET role = 'admin' WHERE username = 'roleless';");
+	bool caught = false;
+	try {
+		db.exec("UPDATE players SET role = 'root' WHERE username = 'roleless';");
+	} catch (const opennova::db::SqliteError &) {
+		caught = true;
+	}
+	TEST_EXPECT(caught);
+	role = db.query("SELECT role FROM players WHERE username = 'roleless';");
+	TEST_EXPECT(role[0].as_text(0).value() == "admin");
+
+	auto index = db.query(
+		"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'web_sessions' "
+		"AND name = 'idx_web_sessions_user_id';");
+	TEST_EXPECT(index.size() == 1);
+
+	db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
+	        "SELECT 'h1', id, datetime('now', '+30 days') FROM players WHERE username = 'roleless';");
+	// The token hash is the key: a second row under it is refused.
+	caught = false;
+	try {
+		db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
+		        "SELECT 'h1', id, datetime('now') FROM players WHERE username = 'roleless';");
+	} catch (const opennova::db::SqliteError &) {
+		caught = true;
+	}
+	TEST_EXPECT(caught);
+	// A session for no player is refused.
+	caught = false;
+	try {
+		db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
+		        "VALUES ('h2', 9999, datetime('now'));");
+	} catch (const opennova::db::SqliteError &) {
+		caught = true;
+	}
+	TEST_EXPECT(caught);
+	auto fresh = db.query("SELECT created_at IS NOT NULL, last_seen_at IS NOT NULL, ip, user_agent "
+	                      "FROM web_sessions WHERE token_hash = 'h1';");
+	TEST_EXPECT(fresh.size() == 1);
+	TEST_EXPECT(fresh[0].as_int(0).value() == 1 && fresh[0].as_int(1).value() == 1);
+	TEST_EXPECT(fresh[0].as_text(2).value().empty() && fresh[0].as_text(3).value().empty());
+
+	db.exec("DELETE FROM players WHERE username = 'roleless';");
+	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
+	return 0;
+}
+
+// 0008 over a database that already holds accounts (every deployment before
+// it): the migrations up to 0007 and the seed, then the full set, which
+// applies 0008 alone and gives every existing account the 'player' role.
+int test_web_sessions_migration_over_existing_accounts() {
+	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
+	const auto migrations = source_dir / "backend" / "migrations";
+	const auto seed_dir = source_dir / "backend" / "seed";
+	test_temp::TempDir before_0008("backend_schema_pre0008");
+	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
+		if (e.path().extension() == ".sql" && e.path().filename().string() < "0008") {
+			std::filesystem::copy_file(e.path(), before_0008.path / e.path().filename());
+		}
+	}
+
+	Database db(":memory:");
+	const auto first = run_migrations(db, before_0008.path);
+	TEST_EXPECT(first.applied.size() == 7);
+	std::vector<std::filesystem::path> seeds;
+	for (const auto &e : std::filesystem::directory_iterator(seed_dir)) {
+		if (e.path().extension() == ".sql") seeds.push_back(e.path());
+	}
+	std::sort(seeds.begin(), seeds.end());
+	for (const auto &p : seeds) db.exec_script(test_io::read_file_text(p.string()));
+	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
+
+	const auto second = run_migrations(db, migrations);
+	TEST_EXPECT(second.applied.size() == 1);
+	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
+	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player') FROM players;");
+	TEST_EXPECT(roles[0].as_int(0).value() == 5);
+	TEST_EXPECT(roles[0].as_int(1).value() == 5);
+	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -210,6 +305,9 @@ int main() {
 	if (test_seed_populates_games() != 0) return 1;
 	if (test_seed_is_idempotent() != 0) return 1;
 	if (test_foreign_keys_enforced() != 0) return 1;
-	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs)\n");
+	if (test_web_sessions_and_roles() != 0) return 1;
+	if (test_web_sessions_migration_over_existing_accounts() != 0) return 1;
+	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
+	            "web sessions + roles)\n");
 	return 0;
 }

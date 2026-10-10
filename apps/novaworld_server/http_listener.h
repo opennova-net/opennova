@@ -26,9 +26,11 @@ class NwUdpListener;
 
 // Crow-backed HTTP listener. start() registers five route families, each in
 // its own private registrar (bodies in http_listener.cpp):
-//   admin REST API      — Bearer ADMIN_API_TOKEN /api/admin/* + dev host inject,
-//                         and the ServerCommand / ServerStopHosting pushes
-//   public JSON API     — /api/* for the web portal
+//   admin REST API      — /api/admin/* + dev host inject and the ServerCommand /
+//                         ServerStopHosting pushes, for the Bearer
+//                         ADMIN_API_TOKEN or an admin-role website session
+//   public JSON API     — /api/* for the web portal, with the website's
+//                         login / logout / me session routes
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -71,8 +73,7 @@ private:
 	// order; the static/catch-all family must stay last (Crow rejects a
 	// specific route registered after the /<path> wildcard). Parameters are
 	// the config-derived strings the handlers capture by value.
-	void register_admin_api_routes(const std::string &admin_token,
-	                               const std::string &public_host);
+	void register_admin_api_routes(const std::string &public_host);
 	void register_public_api_routes();
 	void register_legacy_login_routes(const std::string &templates_dir);
 	void register_legacy_host_join_routes(
@@ -106,6 +107,11 @@ private:
 	// the joiner's PCID when NWHANDLE doesn't arrive (G.8).
 	mutable std::mutex persistent_user_mu_;
 	std::unordered_map<std::string, int64_t> persistent_to_user_id_;
+	// Drops every PERSISTENTEXPRESSLOGINDATA pin to `user_id`: an admin
+	// password reset, a status other than 'active' and a deleted account end
+	// the retail logins a pin would resume with no password, as the same
+	// update ends the account's website sessions (update_revokes_sessions).
+	void forget_persistent_pins(int64_t user_id);
 	// Per-server-process EPASK params advertised via the EPASK cookie at
 	// /nwprepare.dll. Retail echoes the same params back as a form field
 	// at POST /NWLogin.dll, so we use these to decrypt the encrypted
