@@ -413,6 +413,7 @@ public:
 	void screen_configured() override {}
 	void set_widget_shown_override(int, bool) override {}
 	void set_widget_disabled(int, bool) override {}
+	void set_widget_disabled_items(int, const std::vector<uint8_t> &) override {}
 	void set_widget_checked(int, bool) override {}
 	void set_widget_text(int, const std::string &) override {}
 	void set_widget_items(int, const std::vector<std::string> &) override {}
@@ -437,6 +438,8 @@ public:
 	std::vector<opennova::menu::MenuPumpWindow> press_mouse(float, float) override { return {}; }
 	int process_mouse(float, float, bool) override { return -1; }
 	bool process_popup_mouse(int, float, float, bool) override { return false; }
+	void release_mouse() override {}
+	bool press_popup_mouse(int, float, float) override { return false; }
 	bool process_mouse_wheel(float, float, int) override { return false; }
 	void set_cursor_state(bool, float, float) override {}
 	void apply_claim_cursor() override {}

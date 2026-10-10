@@ -62,8 +62,8 @@ namespace opennova::editor {
 // it, which asks about its unsaved edits first, or, while it has them, Keep my edits and save
 // over it, a Save that writes over the file once Problems confirmed it (ADR 0046 DI-01; neither
 // in bulk). Input a
-// rewrite drops or normalizes (a Rewrite row: style.line_ending, menu.ignored_input,
-// animation_map.ignored_input, strings.regrouped): Rewrite the file, the
+// rewrite drops or normalizes (a Rewrite row: style.line_ending, animation_map.ignored_input,
+// strings.regrouped): Rewrite the file, the
 // row's rewrite_does saying what that does, unless a finding of the file says it does not
 // serialize (a blocks_save row: *.unserializable, *.invalid_input; its Save is refused). An
 // item on an id the engine keeps for another kind (catalog.reserved_kind): Use an id of its own;
