@@ -1768,21 +1768,21 @@ static int test_plain_words() {
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.findings.graph != nullptr);
 	if (!view.findings.graph) return 1;
-	// A font: no editor; the stylesheet names it.
+	// A font (a document since round S23): the stylesheet names it; its page as the query asks it.
 	std::string font;
 	for (const AssetEntry &entry : view.project.scan->entries)
 		if (entry.kind == AssetKind::Font && !view.findings.graph->usages_of(entry.relative_path).empty()) {
 			font = entry.relative_path;
 			break;
 		}
-	TEST_EXPECT(!font.empty() && !is_editable_kind(AssetKind::Font));
+	TEST_EXPECT(!font.empty() && is_editable_kind(AssetKind::Font));
 	if (font.empty()) return 1;
 	const JsonValue page = ask(session, "file_page", R"({"path": ")" + font + R"("})");
 	TEST_EXPECT(page.get_string("path", "") == font && page.get_string("kind", "") == asset_kind_label(AssetKind::Font));
 	TEST_EXPECT(page.get_string("what", "").find("bitmap font") != std::string::npos &&
 	            page.get_string("read_by", "").find("Loaded by name") != std::string::npos &&
 	            page.get_string("cite", "").find("[orig:") != std::string::npos &&
-	            page.get_string("editor", "").find("no editor") != std::string::npos);
+	            page.get_string("editor", "").find("opens it as a document") != std::string::npos);
 	const JsonValue *used_by = page.get("used_by");
 	// Each use by its file, record and field in words ("main.mnu: STARTUP/MAIN - Font").
 	bool worded = false;
@@ -1791,11 +1791,18 @@ static int test_plain_words() {
 			worded |= !use.get_string("file", "").empty() && use.get_string("text", "").find(" - Font") != std::string::npos;
 	TEST_EXPECT(worded);
 	TEST_EXPECT(refusal(session, "file_page", "{}").find("no page shows") != std::string::npos);
-	// Opened, the page shows (no document opens); the query names it with no path; closed, it goes.
-	TEST_EXPECT(done(send(session, R"({"kind": "open_document", "path": ")" + font + R"("})")));
-	TEST_EXPECT(view.documents.page == font && session.document_for(font) == nullptr);
-	TEST_EXPECT(ask(session, "file_page").get_string("path", "") == font);
-	TEST_EXPECT(done(send(session, R"({"kind": "close_document", "path": ")" + font + R"("})")));
+	// A file of no editor (the NovaWorld string table) opened: the page shows (no document opens); the query names
+	// it with no path; closed, it goes.
+	std::string coo;
+	for (const AssetEntry &entry : view.project.scan->entries)
+		if (entry.kind == AssetKind::StringTableCoo) coo = entry.relative_path;
+	TEST_EXPECT(!coo.empty() && !is_editable_kind(AssetKind::StringTableCoo));
+	TEST_EXPECT(ask(session, "file_page", R"({"path": ")" + coo + R"("})").get_string("editor", "").find("no editor") !=
+	            std::string::npos);
+	TEST_EXPECT(done(send(session, R"({"kind": "open_document", "path": ")" + coo + R"("})")));
+	TEST_EXPECT(view.documents.page == coo && session.document_for(coo) == nullptr);
+	TEST_EXPECT(ask(session, "file_page").get_string("path", "") == coo);
+	TEST_EXPECT(done(send(session, R"({"kind": "close_document", "path": ")" + coo + R"("})")));
 	TEST_EXPECT(view.documents.page.empty());
 
 	// A weapon's loadout name, a WepDes id of gametext.bin, edited as its words.

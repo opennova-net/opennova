@@ -66,8 +66,30 @@ bool parse_font_set(const std::vector<uint8_t> &bytes, FontSet &out, std::string
 		const size_t gap = text.find_first_of(" \t");
 		const std::string key = strutil::to_lower(text.substr(0, gap));
 		const std::string value = gap == std::string::npos ? std::string() : strutil::trim(text.substr(gap));
+		if (key == "columns" || key == "rows" || key == "first") {
+			// The sheet's grid: a count of cells, or the byte of the first, decimal or 0x hex.
+			const bool hex = key == "first" && value.size() > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X');
+			int parsed = 0;
+			bool read = false;
+			if (hex) {
+				const std::optional<unsigned long> number_read = strutil::parse_ulong(value.substr(2), 16);
+				read = number_read && *number_read <= 0xFF;
+				parsed = read ? int(*number_read) : 0;
+			} else {
+				read = integer_in(value, key == "first" ? 0 : 1, key == "first" ? 0xFF : kFontSheetGridMost, parsed);
+			}
+			if (!read) {
+				why = "line " + std::to_string(number) + "'s " + key + " takes " +
+				      (key == "first" ? std::string("a byte, 0 to 255 (0x00 to 0xFF)")
+				                      : "a number of cells, 1 to " + std::to_string(kFontSheetGridMost));
+				return false;
+			}
+			(key == "columns" ? out.columns : key == "rows" ? out.rows : out.first) = parsed;
+			continue;
+		}
 		if (key != "sheet") {
-			why = "line " + std::to_string(number) + " names '" + key + "', which a font set does not take (it takes sheet)";
+			why = "line " + std::to_string(number) + " names '" + key +
+			      "', which a font set does not take (it takes sheet, columns, rows and first)";
 			return false;
 		}
 		if (value.empty()) {
@@ -113,8 +135,6 @@ const std::vector<ImportOptionRow> &font_import_option_rows() {
 		tracking.forms = {"<0..32>"};
 		tracking.accepts = tracking_form;
 		tracking.fallback = "1";
-		tracking.applies_to = "advance";
-		tracking.applies_values = {"ink", "left"};
 		out.push_back(tracking);
 		ImportOptionRow space;
 		space.key = "space";
@@ -216,8 +236,15 @@ bool run_font_import(ImportContext &context, ImportProduct &out) {
 	ImportOutput output;
 	output.name = name;
 	bool opaque = false;
-	if (!make_font_from_sheet(sheet.image, settings, output.bytes, opaque, why, field))
+	// The sheet's grid, as the set says it.
+	settings.columns = set.columns;
+	settings.rows = set.rows;
+	settings.first = set.first;
+	if (!make_font_from_sheet(sheet.image, settings, output.bytes, opaque, why, field)) {
+		// The grid's are the set's, not the record's options.
+		if (field == "columns" || field == "rows" || field == "first") field.clear();
 		return refuse(set.sheet + ": " + why + ".", field.empty() ? CoreFinding::ImportFont : CoreFinding::ImportOption, field);
+	}
 	if (opaque)
 		out.diagnostics.push_back(make_finding(
 		        CoreFinding::ImportFont, DiagnosticSeverity::Warning,
