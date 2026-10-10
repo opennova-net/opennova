@@ -30,6 +30,9 @@ struct GraphEdge {
 	ReferenceKind kind = ReferenceKind::None;
 	std::string value;    // the reference as written
 	std::string target;   // what is looked up: the value after a style variable resolved, normalized
+	// The kind `target` is a name of: the fallback's (fallback_as) where the lookup reached that name, else None
+	// (the edge's own); set with target (AssetGraph::resolve_edge), which the index keys the target by.
+	ReferenceKind target_kind = ReferenceKind::None;
 	// A string id's table and section ("GAMETEXT.BIN/WepDes", a menu's "MENUTXT.BIN/menu";
 	// "/menu" names no table: the window reads none); "" = any table.
 	std::string scope;
@@ -53,6 +56,13 @@ struct GraphEdge {
 	// name, then "ammo_" and its name [orig: WacScript_ResolveParameter @ 0x4F2E21..0x4F2E92]); ""
 	// for none. A symbol kind's edge only: it resolves to the first of the two a lookup finds.
 	std::string fallback;
+	// The kind the fallback is a name of, where it is another kind's (an ammo's tracer item: its type id, then the
+	// item named as the ammo, ItemName [orig: AmmoDef_ParseProperty @ 0x40A5DA..0x40A5FE, ItemList_FindIndexByTypeId
+	// then ItemList_FindIndexByPrimaryName over the ammo's name]); None for the edge's own kind.
+	ReferenceKind fallback_kind = ReferenceKind::None;
+	ReferenceKind fallback_as() const { return fallback_kind == ReferenceKind::None ? kind : fallback_kind; }
+	// The kind the index keys the edge's target by.
+	ReferenceKind target_as() const { return target_kind == ReferenceKind::None ? kind : target_kind; }
 	// The scopes the lookup tries after `scope`, in order, where the name finds nothing there (a
 	// mission's text key: the mission's own table, then GAMETEXT.BIN [orig:
 	// MissionText_GetStringByKeyOrGameText @ 0x51ECD0]); none for a lookup of one scope. A symbol
@@ -97,7 +107,8 @@ struct GraphSymbol {
 	ReferenceKind kind = ReferenceKind::None;
 	std::string name;    // normalized
 	std::string display; // as defined
-	std::string value;   // a style variable's value; a record set's record by its own name (S13 D8)
+	std::string value;   // a style variable's value; a record set's record by its own name (S13 D8); an
+	                     // ItemName's item id (the STR_ITM key its gametext name is under)
 	std::string file;    // the defining file, project-relative
 	std::string record;  // the defining record, every name from the row down ("" = the file itself)
 	std::string record_key; // the record as itself (Document::record_identity), "" for none

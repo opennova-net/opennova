@@ -11,6 +11,7 @@
 #include <editor/documents/source_issue_findings.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/id_list.h>
+#include <editor/project/project_files.h>
 #include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/anim_slot_names.h>
 
@@ -417,6 +418,29 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 		                        " names: the game joins their clips into one ring, served last to first.");
 	}
 	return findings;
+}
+
+bool define_animation_slot(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out) {
+	const auto *map = dynamic_cast<const AnimationMapDocument *>(&document);
+	if (!map || missing.kind != ReferenceKind::AnimationKey || missing.target.empty()) return false;
+	if (!missing.scope.empty() && !strutil::iequals(missing.scope, animation_map_scope(document.path()))) return false;
+	const int slot = animation_key_slot(missing.target);
+	if (slot < 0) return false;
+	for (const auto &node : map->rows())
+		if (node && animation_key_slot(row_of(*node).key) == slot) return false;
+	out = PlannedFix();
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address.kind = kRow;
+	add.field = "key";
+	add.value = missing.target;
+	out.edits.push_back(std::move(add));
+	const std::string file = basename_of(document.path());
+	out.label = "Add the slot " + missing.target + " to " + file;
+	out.detail = "Adds a row for the slot " + missing.target + " at the end of " + file + " and selects it: name its "
+	             "clips there (the file saves once the row names one, as the game reads no row without). The "
+	             "weapon's action then plays and times those clips.";
+	return true;
 }
 
 } // namespace opennova::editor
