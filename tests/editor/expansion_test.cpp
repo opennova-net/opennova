@@ -19,6 +19,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_view.h>
+#include <editor/graph/asset_graph.h>
 #include <editor/import/import_plan.h>
 #include <editor/model/document.h>
 #include <editor/project/base_project.h>
@@ -791,6 +792,73 @@ static int test_base_layer_session() {
 	return 0;
 }
 
+namespace {
+
+// A string table's bytes: each section by its name, its keys in order.
+std::vector<uint8_t> table_bytes(const std::vector<std::pair<std::string, std::vector<std::string>>> &sections) {
+	opennova::rtxt::File table;
+	for (const auto &section : sections) {
+		table.sections.push_back({ section.first, uint32_t(section.second.size()) });
+		for (const std::string &key : section.second) {
+			opennova::rtxt::Entry entry;
+			entry.key = key;
+			entry.text = key + " text";
+			entry.section_index = uint32_t(table.sections.size() - 1);
+			table.entries.push_back(entry);
+		}
+	}
+	std::vector<uint8_t> bytes;
+	std::string error;
+	return opennova::rtxt::write(table, bytes, error) ? bytes : std::vector<uint8_t>();
+}
+
+} // namespace
+
+// The expansion's text table, which every string lookup reads before the table it names (AssetGraph::
+// text_override) [orig: TextResource_FindEntryBySectionAndKey @ 0x75D27B, TextResource_FindEntryByKey @
+// 0x75D473]: a key of the section the lookup names, of any section for a flat lookup, found there first, even
+// where the project lacks the table the lookup names; the table follows the expansion's name.
+static int test_override_table() {
+	editor_test::TempProjectDir dir("opennova_editor_expansion_override");
+	const std::string install = dir.file("install");
+	TEST_EXPECT(make_install(install));
+	Preferences chosen;
+	chosen.game_install = install;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	const std::string root = dir.file("own");
+	const ActionOutcome outcome = editor_test::handle_to_end(session, request::new_expansion_project(root, "Own", "jxm"));
+	TEST_EXPECT(!outcome.refused && view.project.open);
+	const AssetEntry *made = view.project.scan->find("jxm.bin");
+	TEST_EXPECT(made != nullptr);
+	if (!made || !view.findings.graph) return 1;
+	TEST_EXPECT(editor_test::write_bytes(root + "/" + made->relative_path,
+	                                     table_bytes({ { "WepDes", { "WEP_OVER" } }, { "Overlays", { "OVL_FLAT" } } })) &&
+	            editor_test::write_bytes(root + "/gametext.bin", table_bytes({ { "WepDes", { "WEP_OVER", "WEP_BASE" } } })));
+	editor_test::handle_to_end(session, request::rescan());
+	const auto found_in = [&](const char *key, const char *scope, const char *table) {
+		std::string file;
+		return view.findings.graph->resolve(ReferenceKind::TextId, key, scope, &file) == ReferenceStatus::Present &&
+		       opennova::strutil::iequals(std::filesystem::path(file).filename().string(), table);
+	};
+	TEST_EXPECT(view.findings.graph->text_override() == "JXM.BIN");
+	TEST_EXPECT(found_in("WEP_OVER", "GAMETEXT.BIN/WepDes", "jxm.bin"));
+	TEST_EXPECT(found_in("WEP_BASE", "GAMETEXT.BIN/WepDes", "gametext.bin"));
+	TEST_EXPECT(found_in("OVL_FLAT", "GAMETEXT.BIN", "jxm.bin"));
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::TextId, "OVL_FLAT", "GAMETEXT.BIN/WepDes") ==
+	            ReferenceStatus::Missing);
+	TEST_EXPECT(found_in("WEP_OVER", "MEDMSSN.BIN/WepDes", "jxm.bin"));
+	// The name changed: the table of the new name is the one read first.
+	ProjectSettingsChange renamed;
+	renamed.expansion = "jxk";
+	editor_test::apply_settings(session, renamed);
+	TEST_EXPECT(view.project.document->expansion.name == "jxk" && view.findings.graph->text_override() == "JXK.BIN");
+	TEST_EXPECT(found_in("WEP_OVER", "GAMETEXT.BIN/WepDes", "jxk.bin"));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_name_rule();
@@ -804,6 +872,7 @@ int main() {
 	failures += test_install_view();
 	failures += test_fold_follows_the_view();
 	failures += test_session();
+	failures += test_override_table();
 	if (failures == 0) std::printf("editor_expansion: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

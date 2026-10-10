@@ -15,6 +15,7 @@
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
 #include <runtime/audio/bank_chain.h>
 #include <runtime/menu/menu_style.h>
@@ -220,6 +221,15 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 	for (const std::string &bank : audio::global_bank_chain(project.expansion.name)) chain.push_back(upper(bank));
 	if (chain != bank_chain_) {
 		bank_chain_ = std::move(chain);
+		patch.base = true;
+	}
+	// The table every string lookup reads first: another (the expansion's name changed) resolves every
+	// edge again.
+	std::string text_override;
+	if (!project.expansion.standalone())
+		text_override = upper(expansion_file_name(expansion_file_row(ExpansionFileRole::Table), project.expansion.name));
+	if (text_override != text_override_) {
+		text_override_ = std::move(text_override);
 		patch.base = true;
 	}
 	// The open record and text documents stand in for their files (another kind of document reads
@@ -951,7 +961,22 @@ const GraphSymbol *AssetGraph::resolve_symbol(ReferenceKind kind, const std::str
 	// A set by name, where no bank names it (a menu's SOUND names its own): the game's search over its
 	// banks in order [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0].
 	if (kind == ReferenceKind::Sound && scope.empty()) return sound_binding(name);
-	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name), scope);
+	if (kind == ReferenceKind::TextId)
+		if (const GraphSymbol *over = override_symbol(name, scope)) return over;
+	return scoped_symbol(GraphIndex::key_of(kind, symbol_name(kind, name), scope), scope);
+}
+
+const GraphSymbol *AssetGraph::override_symbol(const std::string &name, const std::string &scope) const {
+	// A lookup any table answers finds the override's string anyway, and the override's own reads it
+	// alone [orig: 0x75D27B, `resource == g_TextOverrideTable`].
+	if (text_override_.empty() || scope.empty()) return nullptr;
+	const size_t slash = scope.find('/');
+	if (upper(scope.substr(0, slash)) == text_override_) return nullptr;
+	const std::string over = text_override_ + (slash == std::string::npos ? std::string() : scope.substr(slash));
+	return scoped_symbol(GraphIndex::key_of(ReferenceKind::TextId, symbol_name(ReferenceKind::TextId, name), over), over);
+}
+
+const GraphSymbol *AssetGraph::scoped_symbol(const std::string &name_key, const std::string &scope) const {
 	for (const Ref ref : index_.symbols_named(name_key)) {
 		const GraphSymbol &symbol = index_.symbol(ref);
 		if (!symbol.inert && scope_matches(symbol.scope, scope)) return &symbol;

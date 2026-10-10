@@ -259,7 +259,8 @@ public:
 	// compares names, that `scope` matches (scope_matches: a string id in its table and
 	// section, a window on its screen) and a lookup finds, the project's before the base's; for a
 	// Record kind the record at that index of the file `scope` names (its record set: the project's
-	// file's own); null for none, and for a file kind.
+	// file's own); null for none, and for a file kind. A string id is the expansion's text table's
+	// first where that table defines it (text_override).
 	const GraphSymbol *resolve_symbol(ReferenceKind kind, const std::string &name,
 	                                  const std::string &scope = std::string()) const;
 	// Whether the game's search for a sound set by name reaches the bank `file` (a path or a logical
@@ -267,6 +268,11 @@ public:
 	// <exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf, game2.lwf) [orig: Game_StartMission @
 	// 0x525443 over the slot table @ 0x82A5B0]; and its place in that search (SIZE_MAX: none).
 	bool on_bank_chain(const std::string &file) const { return bank_rank(file) != SIZE_MAX; }
+	// The table every string lookup reads first, upper case: the project's expansion's own text table
+	// (<n>.bin, the update's project's), "" for a standalone project [orig: TextResource_FindEntryBySectionAndKey
+	// @ 0x75D27B and TextResource_FindEntryByKey @ 0x75D473 read g_TextOverrideTable before the table they
+	// are given, even where they are given none; TextResource_LoadOverrideTable @ 0x4a49de loads it].
+	const std::string &text_override() const { return text_override_; }
 	size_t bank_rank(const std::string &file) const;
 	// A menu-style %NAME% through the stylesheets the game reads: its value, or the input
 	// unchanged.
@@ -421,6 +427,13 @@ private:
 	// The banks the game searches for a sound set, in its order, their names upper case (the update's
 	// project's chain: bank_rank).
 	std::vector<std::string> bank_chain_;
+	std::string text_override_; // text_override
+	// A string id's definition in the table text_override names: the same section of it where `scope`
+	// names one, any where it names a table alone (a flat lookup).
+	const GraphSymbol *override_symbol(const std::string &name, const std::string &scope) const;
+	// The first symbol `name_key` names that `scope` matches and a lookup finds, the project's before
+	// the base's (resolve_symbol's search).
+	const GraphSymbol *scoped_symbol(const std::string &name_key, const std::string &scope) const;
 	// A sound set by name as the game finds one (an unscoped Sound lookup): the definition in the
 	// chain's first bank holding the name, the project's before the base layer's; null for none.
 	const GraphSymbol *sound_binding(const std::string &name) const;
