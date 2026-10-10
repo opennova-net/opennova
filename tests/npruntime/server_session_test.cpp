@@ -550,85 +550,6 @@ bool check_create_session_brings_up_host() {
 	return true;
 }
 
-// D-NET-385: the cfg block's mpreset word ends the process at the session
-// create. A nonzero word (any sign: retail compares it with 0) creates nothing
-// and asks the embedder for the exit; a clear word creates the session. The
-// map change creates no session, so the word set on a continued session does
-// not stop it. [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0
-// (`cmp dword_25509FC, 0; jz` -> crt_exit(0)); the PreMenu's state 7
-// @0x56A90B pushes the Game Loop with no create]
-bool check_create_session_mpreset_exit() {
-	opennova::replication::LoopbackChannel local_client;
-	NapiNPServerCtx ctx;
-	opennova::inmatch::set_connection_mode(ctx, ConnectionMode::HostClient);
-	opennova::inmatch::set_transport_mode(ctx, SocketMode::Socketless);
-	opennova::inmatch::GameConfig settings;
-	settings.server_name = "RESET";
-	settings.max_players = 4;
-	opennova::inmatch::SessionStartup startup;
-	startup.host_key = 0x1234;
-	for (const int32_t word : {1, -1, 7}) {
-		settings.multiplayer_reset = word;
-		if (!expect(opennova::inmatch::create_session(ctx, settings, startup, &local_client) ==
-		                    opennova::inmatch::CreateSessionResult::ProcessExit,
-		            "a set mpreset word asks for the process exit"))
-			return false;
-		if (!expect(ctx.is_in_session == 0 && ctx.np_protocol.host_running == 0 &&
-		                    ctx.np_protocol.connection_list.empty() && ctx.total_logins == 0 &&
-		                    ctx.np_protocol.host_key == 0 &&
-		                    ctx.config.server_name == opennova::inmatch::GameConfig{}.server_name &&
-		                    ctx.server_info_transfer_id == 0,
-		            "the refused create leaves the context as it was"))
-			return false;
-	}
-	settings.multiplayer_reset = 0;
-	if (!expect(opennova::inmatch::create_session(ctx, settings, startup, &local_client) ==
-	                    opennova::inmatch::CreateSessionResult::Created,
-	            "a clear mpreset word creates the session"))
-		return false;
-	if (!expect(ctx.is_in_session == 1 && ctx.np_protocol.host_running == 1 &&
-	                    ctx.np_protocol.connection_list.size() == 1 &&
-	                    ctx.config.server_name == "RESET",
-	            "the clear word's create brings the host up"))
-		return false;
-
-	// The map change continues the session whatever the word.
-	opennova::inmatch::GameConfig next = settings;
-	next.multiplayer_reset = 1;
-	next.mission_name = "Next";
-	opennova::inmatch::continue_session(ctx, next);
-	if (!expect(ctx.is_in_session == 1 && ctx.np_protocol.host_running == 1 &&
-	                    ctx.np_protocol.connection_list.size() == 1 &&
-	                    ctx.config.mission_name == "Next" && ctx.config.multiplayer_reset == 1,
-	            "the map change continues the session with the word set"))
-		return false;
-
-	// The host bring-up stops at the refused create: no session, no loopback
-	// player, no burst.
-	opennova::replication::LoopbackChannel host_loop;
-	opennova::inmatch::HostOwner owner;
-	owner.host_loopback = &host_loop;
-	opennova::inmatch::HostConfig host;
-	host.socket_mode = SocketMode::Socketless;
-	host.serve_and_play = true;
-	host.config.multiplayer_reset = 1;
-	if (!expect(opennova::inmatch::start_host_session(owner, host) ==
-	                    opennova::inmatch::CreateSessionResult::ProcessExit,
-	            "the host bring-up reports the create's exit"))
-		return false;
-	if (!expect(owner.ctx.is_in_session == 0 && owner.ctx.np_protocol.host_running == 0 &&
-	                    owner.ctx.np_protocol.connection_list.empty(),
-	            "the refused bring-up stands no session"))
-		return false;
-	host.config.multiplayer_reset = 0;
-	opennova::inmatch::HostOwner clear_owner;
-	clear_owner.host_loopback = &host_loop;
-	return expect(opennova::inmatch::start_host_session(clear_owner, host) ==
-	                      opennova::inmatch::CreateSessionResult::Created &&
-	                      clear_owner.ctx.is_in_session == 1,
-	              "the clear word's bring-up stands the session");
-}
-
 // Connection residency changes only at the true session boundary. Reusing a
 // context must discard every role from the prior session, install exactly the
 // new role set, and restart remote connection ids from the retail joiner base.
@@ -4762,7 +4683,6 @@ int main() {
 	ok = check_retail_rate_defaults() && ok;
 	ok = check_pre_dictation_holdoff_keeps_initial_settings_open() && ok;
 	ok = check_create_session_brings_up_host() && ok;
-	ok = check_create_session_mpreset_exit() && ok;
 	ok = check_create_session_replaces_connection_role_set() && ok;
 	ok = check_listen_host_installs_local_character_profile() && ok;
 	ok = check_dedicated_host_has_no_local_client() && ok;

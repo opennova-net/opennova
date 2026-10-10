@@ -648,6 +648,21 @@ target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
 
+# The modeled layout of a line-oriented text file (formats/textlayout): a line's parts, a file generated
+# over its notes (a value, a set, a key anew, records swapped, gone and added), the writer's form without.
+add_executable(text_layout_test textlayout/text_layout_test.cpp)
+target_link_libraries(text_layout_test PRIVATE opennova_formats)
+target_include_directories(text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME text_layout COMMAND text_layout_test)
+
+# The AI profiles' writer over the file's modeled layout (formats/aip, textlayout): a minted profile in
+# the writer's form, an authored file written again as it was, one value one line; --retail: every
+# shipped profile byte for byte.
+add_executable(aip_noted_test aip/aip_noted_test.cpp)
+target_link_libraries(aip_noted_test PRIVATE opennova_base opennova_formats)
+target_include_directories(aip_noted_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(aip_noted COMMAND aip_noted_test)
+
 # game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
 # layout through gamecfg::write), its byte-exact load/write round trip, and the
 # reader's edge cases over hand-authored text.
@@ -1081,10 +1096,10 @@ add_test(NAME resource_index COMMAND resource_index_test)
 # The typed kinds and their loader facts (base/resource_index/file_kind.h): every runtime format and
 # required file has a kind and a place, and the table agrees with master's other copies of its facts.
 add_executable(file_kind_test resource_index/file_kind_test.cpp)
-target_link_libraries(file_kind_test PRIVATE opennova_base)
+target_link_libraries(file_kind_test PRIVATE opennova_formats opennova_base)
 target_include_directories(file_kind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(file_kind_test PRIVATE cxx_std_17)
-add_test(NAME file_kind COMMAND file_kind_test)
+opennova_add_mixed_test(file_kind COMMAND file_kind_test)
 
 # Launch flags + the boot resource-dir ladder (base/resource_index/boot_policy.h).
 add_executable(boot_policy_test resource_index/boot_policy_test.cpp)

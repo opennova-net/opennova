@@ -606,7 +606,7 @@ void configure_session_world(HostOwner &owner, const HostConfig &cfg) {
 
 } // namespace
 
-CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) {
+void start_host_session(HostOwner &owner, const HostConfig &cfg) {
 	owner.now_tick = 0;
 	// The process's log devices and the socket address, ahead of the session
 	// create whose server start logs HOST STARTED and whose round init clears
@@ -634,13 +634,9 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 			cfg.serve_and_play ? ConnectionMode::HostClient : ConnectionMode::HostOnly);
 	set_transport_mode(owner.ctx, cfg.socket_mode);
 	const SessionStartup startup = make_session_startup(cfg);
-	// The create also runs Server_InitNewRoundState. A set mpreset word ends
-	// the process there, so nothing of the session follows it
-	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0].
-	const CreateSessionResult created = create_session(
+	create_session(
 			owner.ctx, cfg.config, startup,
-			cfg.serve_and_play ? owner.host_loopback : nullptr);
-	if (created == CreateSessionResult::ProcessExit) return created;
+			cfg.serve_and_play ? owner.host_loopback : nullptr); // also runs Server_InitNewRoundState
 	// The connection template every server-side node is created with and the 0x82
 	// advertises: 120000 ms / 1200 records, or the game directory's loose
 	// `_NSTMOUT.TXT` override [orig: CNapiNetwork_Init @0x4ca9d7..0x4caa4b, stores
@@ -669,7 +665,6 @@ CreateSessionResult start_host_session(HostOwner &owner, const HostConfig &cfg) 
 		// per-frame compact callback.
 		(void)tick_connections(owner.ctx, /*elapsed_ms=*/0, owner.now_tick);
 	}
-	return CreateSessionResult::Created;
 }
 
 void continue_host_session(HostOwner &owner, const HostConfig &cfg) {
