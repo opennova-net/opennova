@@ -446,7 +446,7 @@ private:
 	const GraphSymbol *sound_binding(const std::string &name) const;
 	// An item by its name as the game holds it (an ItemName lookup): the first of items.def's items whose name,
 	// without case, is `name`, an item's name being its gametext "Item Names" string where the table has its key
-	// STR_ITM%04i (its id), else the one items.def gives it; null for none.
+	// STR_ITM%04i (its id less 100000), else the one items.def gives it; null for none.
 	const GraphSymbol *item_named(const std::string &name) const;
 	// The definition an edge's own value reaches in `scope` (resolve_symbol), none where it is items.def's first
 	// item and the edge's caller takes the lookup's 0 for none (a tracer: fallback_kind ItemName).

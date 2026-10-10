@@ -403,9 +403,9 @@ static int test_tracer_lookups() {
 	rtxt::File strings;
 	strings.sections = {{"Item Names", 2}};
 	rtxt::Entry renamed, as_ammo;
-	renamed.key = "STR_ITM100900";
+	renamed.key = "STR_ITM0900";
 	renamed.text = "Tracer round";
-	as_ammo.key = "STR_ITM100902";
+	as_ammo.key = "STR_ITM0902";
 	as_ammo.text = "Ammo_T";
 	strings.entries = {renamed, as_ammo};
 	std::vector<uint8_t> bytes;

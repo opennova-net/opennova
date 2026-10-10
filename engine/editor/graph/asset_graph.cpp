@@ -20,6 +20,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
+#include <formats/def/reserved_items.h>
 #include <runtime/audio/bank_chain.h>
 #include <runtime/menu/menu_style.h>
 #include <runtime/renderer/material_texture.h>
@@ -1020,8 +1021,10 @@ const GraphSymbol *AssetGraph::item_named(const std::string &name) const {
 		if (item.kind != ReferenceKind::ItemName) continue;
 		const GraphSymbol *localized = nullptr;
 		if (const std::optional<int> id = strutil::parse_int(item.value)) {
+			// The key takes the stored type id, the items.def id less 100000 [orig: Item_LoadLocalizedNames @ 0x49E1D6,
+			// `mov ecx, [esi+eax+50h]` over the field ItemDef_ParseProperty @ 0x49EC54 stores after `sub eax, 186A0h`].
 			char text_key[32];
-			std::snprintf(text_key, sizeof(text_key), "STR_ITM%04i", *id);
+			std::snprintf(text_key, sizeof(text_key), "STR_ITM%04i", *id - def::DEF_ITEM_ID_BASE);
 			localized = resolve_symbol(ReferenceKind::TextId, text_key, "GAMETEXT.BIN/Item Names");
 		}
 		if (strutil::iequals(localized ? localized->value : item.display, name)) return &item;
