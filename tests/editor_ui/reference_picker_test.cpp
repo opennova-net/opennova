@@ -296,6 +296,61 @@ void test_completes_as_typed() {
 	ui.drain();
 }
 
+// DI-09's leftover: a text reference in a record table's cell completes as a field row's box does: an animation
+// map row's clip cell holding "ga", with the keyboard, lists the clips its text begins under the cell (gamma and
+// garden); Down and Enter take the first, a Set of the clip.
+void test_cell_completes() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const std::string root = project.session.view().project.root;
+	const std::vector<uint8_t> clip = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/anim/idle.bad");
+	for (const char *name : {"gamma.bad", "garden.bad", "other.bad"})
+		CHECK(editor_test::write_bytes(root + "/anims/" + name, clip), "a clip written");
+	CHECK(editor_test::write_text(root + "/anims/gun.adm", "anim_reset\t\"ga\"\r\n"), "the map written");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("anims/gun.adm"));
+	project.session.run_operations();
+	const Document *map = project.session.document_for("anims/gun.adm");
+	CHECK(map && !map->rows().empty(), "the map opens");
+	if (!map || map->rows().empty()) return;
+	const NodeAddress row{map->rows()[0]->id, map->rows()[0]->kind, 0};
+	project.session.handle(request::select_record(map->path(), row));
+	// The clip's place in the Inspector: its section, the collection's token, the table, the clip's row.
+	std::string section, token;
+	NodeId clip_id = 0;
+	for (const InspectorSection &plan : plan_inspector(*map, row, row, ""))
+		for (const Document::Collection &collection : plan.collections)
+			if (!collection.ids.empty()) {
+				section = plan.key;
+				token = map->kind_token(collection.spec.kind);
+				clip_id = collection.ids.front();
+			}
+	CHECK(clip_id != 0, "the row's clip");
+	Ui ui;
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	const auto shown = [] {
+		const ImGuiWindow *list = ImGui::FindWindowByName("##completions");
+		return list && list->Active;
+	};
+	const ImGuiID records = item_id(Ui::window_id("Inspector"), {section.c_str(), token.c_str(), "records"});
+	ui.activate(item_id(pushed(records, static_cast<int>(clip_id)), {"clip", "##value"}));
+	CHECK(shown(), "with the keyboard, the clips its text begins under the cell");
+	const std::string listed = logged_frame(ui);
+	CHECK(listed.find("gamma") != std::string::npos && listed.find("garden") != std::string::npos, "gamma and garden");
+	press(ui, ImGuiKey_DownArrow);
+	press(ui, ImGuiKey_Enter);
+	CHECK(set_value(ui.drain(), "clip").rfind("ga", 0) == 0, "Down and Enter take the first, a Set of the clip");
+	ImGui::ClearActiveID();
+	ui.frames(2);
+	ui.drain();
+}
+
 // DI-15: a click on a missing value's red dot opens what Problems offers for it, its Add it there first: the
 // sound profile the item names added to SndProf.def. A value found has no such popup (its dot is its Go to).
 void test_missing_dot_fixes() {
@@ -1023,6 +1078,7 @@ void run_reference_picker_tests() {
 	test_drop_on_value();
 	test_missing_value_fixes();
 	test_completes_as_typed();
+	test_cell_completes();
 	test_missing_dot_fixes();
 	test_list_kept();
 	test_lists_let_go();

@@ -7,11 +7,13 @@
 #include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
+#include <formats/grm/grm.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include <array>
 #include <filesystem>
 #include <optional>
+#include <set>
 
 namespace opennova::editor {
 using namespace def;
@@ -430,7 +432,67 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 
 void catalog_references(const Document &document, Extracted &out) {
 	const auto *catalog = dynamic_cast<const DefCatalogDocument *>(&document);
-	if (!catalog || catalog->kind() != AssetKind::WeaponDefs) return;
+	if (!catalog) return;
+	if (catalog->kind() == AssetKind::ItemDefs) {
+		// A person's face: the game opens the face animation its model's name makes for an entity of a person's
+		// item, where the shadow quality is above 0 [orig: Entity_InitFromModel @ 0x40E211..0x40E22E, the type 3
+		// @ 0x40E1C3 / 0x40E21A -> sub_57FCE0 @ 0x57FCE0]; an entity's item is the first row of its id [orig:
+		// ItemList_FindIndexByTypeId @ 0x49E100], so a later row of an id makes none. The name is derived, never
+		// written, so no rename rewrites it.
+		std::set<int> seen;
+		for (const auto &row : document.rows()) {
+			if (!row || def_kind(row->kind) != DefRecordKind::Item) continue;
+			const auto &item = static_cast<const CatalogRow &>(*row).native.as<DefItemDef>();
+			if (!seen.insert(item.id).second || item.type != DEF_ITEM_TYPE_PERSON || !item.graphic[0]) continue;
+			const NodeAddress address{row->id, row->kind, 0};
+			GraphEdge edge;
+			edge.source = document.path();
+			edge.record = document.record_path(address);
+			edge.locator = document.locator(address);
+			edge.address = address;
+			edge.field = "graphic";
+			edge.kind = ReferenceKind::FaceAnimation;
+			edge.value = grm::face_file_name(item.graphic);
+			edge.rewritable = false;
+			edge.optional = true; // the game shows no face for a person whose face it lacks, and says nothing
+			out.edges.push_back(std::move(edge));
+		}
+		// Each item by its primary name, which an ammo's tracer takes where its type id finds none: the first item
+		// of a name, without case [orig: ItemList_FindIndexByPrimaryName @ 0x49E010, stricmp in the items' order],
+		// the name being gametext's for the item's id where the table has one (the graph's lookup reads it,
+		// AssetGraph::item_named, so which item of a name a lookup finds is the graph's, no symbol inert here).
+		for (const auto &row : document.rows()) {
+			if (!row || def_kind(row->kind) != DefRecordKind::Item || row->name().empty()) continue;
+			const NodeAddress address{row->id, row->kind, 0};
+			GraphSymbol symbol;
+			symbol.kind = ReferenceKind::ItemName;
+			symbol.display = row->name();
+			symbol.name = strutil::to_upper(symbol.display); // NameCase::NoCase's key
+			symbol.file = document.path();
+			symbol.record = document.record_path(address);
+			symbol.locator = document.locator(address);
+			symbol.address = address;
+			symbol.value = std::to_string(static_cast<const CatalogRow &>(*row).native.as<DefItemDef>().id);
+			out.symbols.push_back(std::move(symbol));
+		}
+		return;
+	}
+	if (catalog->kind() == AssetKind::AmmoDefs) {
+		// A tracer item by its type id, then the item named as the ammo where the id finds none [orig:
+		// AmmoDef_ParseProperty @ 0x40A5DA..0x40A5FE (frndlyTrcrID), @ 0x40A646..0x40A668 (foeTrcrID):
+		// ItemList_FindIndexByTypeId, then ItemList_FindIndexByPrimaryName over the ammo's name].
+		for (GraphEdge &edge : out.edges) {
+			if (edge.source != document.path() || edge.kind != ReferenceKind::Item || !edge.name_offset ||
+			    (edge.field != "frndly_trcr_type_id" && edge.field != "foe_trcr_type_id"))
+				continue;
+			const Node *row = document.row(edge.address.row);
+			if (!row || row->name().empty()) continue;
+			edge.fallback = row->name();
+			edge.fallback_kind = ReferenceKind::ItemName;
+		}
+		return;
+	}
+	if (catalog->kind() != AssetKind::WeaponDefs) return;
 	// An action's effect point is looked up on its weapon's first-person model as well as its third-person one
 	// [orig: WeaponDef_ResolveAllReferences @ 0x540377 (+57) and @ 0x5403E7 (+56), each over
 	// modelgpm_FindUserpointByName @ 0x5B2170]: the field's reference is the third-person model's
@@ -474,7 +536,27 @@ void DefCatalogDocument::refine_symbol(const NodeAddress &address, SymbolFacts &
 	if (!native) return;
 	if (def_kind(address.kind) == DefRecordKind::Item) facts.value = std::to_string(static_cast<const DefItemDef *>(native)->type);
 	// A weapon's loadout name's key, which its words read where the HUD's has no text (definition_words).
-	if (def_kind(address.kind) == DefRecordKind::Weapon) facts.value = static_cast<const DefWeaponDef *>(native)->loadout_menu_textid;
+	if (def_kind(address.kind) == DefRecordKind::Weapon) {
+		facts.value = static_cast<const DefWeaponDef *>(native)->loadout_menu_textid;
+		// A later block of the name reopens this one's row, reset to its defaults, so the game keeps nothing of
+		// this block; "null" names no row [orig: WeaponDefs_ParseLineCallback @ 0x5436d7 ->
+		// AvatarDef_FindIndexByName @ 0x53fd80 (stricmp, "null" none), AdmDef_InitEntryDefaults @ 0x543722].
+		const Node *node = row(address.row);
+		if (!node || node->name().empty() || strutil::iequals(node->name(), "null")) return;
+		bool after = false;
+		for (const auto &other : rows()) {
+			if (!other) continue;
+			if (other.get() == node) {
+				after = true;
+				continue;
+			}
+			if (after && other->kind == node->kind && strutil::iequals(other->name(), node->name())) {
+				facts.inert = true;
+				facts.inert_reason = "a later block of the name reopens its row, and the game keeps nothing of this one";
+				return;
+			}
+		}
+	}
 }
 
 // --- a name another file names, added (DI-15) -------------------------------------------------------------

@@ -41,7 +41,7 @@ size_t rewrite_native_text(const std::string &file, AssetKind kind, const std::s
 // defines (of `field`, where given); the whole token spelling it (as rewrite_native_text bounds one, without
 // case) whose change, the text read again, changes that one name and nothing else. Its line and column
 // (1-based, in the text's bytes); false when the text names no such record or no token is it. Any kind the
-// graph reads through a native extractor (the avatars, a terrain, a particle file).
+// graph reads through a native extractor (the HUD layout, a terrain, a particle file).
 bool native_text_place(const std::string &file, AssetKind kind, const std::string &game, const std::string &text,
                        const std::string &record, const std::string &field, size_t &line, size_t &column);
 

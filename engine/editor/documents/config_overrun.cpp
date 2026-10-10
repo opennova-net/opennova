@@ -23,8 +23,9 @@ std::string count_of(size_t n, const char *one, const char *many) {
 	return std::to_string(n) + " " + (n == 1 ? one : many);
 }
 
-// The finding's words: what the file holds, what the reader makes of it, where the first value past is.
-std::string overrun_words(const std::string &file, const configfile::DataStringsPool &pool) {
+} // namespace
+
+std::string config_overrun_words(const std::string &file, const configfile::DataStringsPool &pool) {
 	std::string words = file + " holds " + count_of(pool.values, "value", "values") +
 	                    (pool.string_bytes == 0 ? std::string(" and no text value")
 	                                            : ", and its text values take " +
@@ -39,8 +40,6 @@ std::string overrun_words(const std::string &file, const configfile::DataStrings
 	         std::to_string(pool.pool_bytes + 1) + ", here, is the first past it.";
 	return words;
 }
-
-} // namespace
 
 std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
@@ -57,7 +56,7 @@ std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document) {
 	// The value whose byte of the clear is the first past the pool, in the reader's order.
 	const size_t offset = configfile::data_strings_overrun_offset(sections, pool);
 	Diagnostic d = text_finding(finding_code(CoreFinding::DocumentConfigOverrun), DiagnosticSeverity::Error,
-	                            overrun_words(file, pool), *text, offset);
+	                            config_overrun_words(file, pool), *text, offset);
 	// The fix: the lines the kind's loader reads the same without that hold numbers alone, commented out,
 	// where that brings the file under the line.
 	const DocumentType *type = document_type_for(document.kind());
