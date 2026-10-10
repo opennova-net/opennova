@@ -246,14 +246,14 @@ static int test_textures() {
 }
 
 // What stays without a blank, each for its reason: fgn2.bin (its presence alone switches the game to its foreign
-// effects), failsafe.bad (with it a clip that does not load plays it in place of the slot's reset), hudfx.def (no
-// reader or writer of it in the engine), the country code, a video, the terrain (an import of its images, S20). A
-// face animation has one since round S23, which no role names (no file names one).
+// effects), failsafe.bad (with it a clip that does not load plays it in place of the slot's reset), the country
+// code, a video, the terrain (an import of its images, S20). A face animation has one since round S23, which no
+// role names (no file names one).
 static int test_left_out() {
-	for (const char *role : {"fgn2_bin", "failsafe_bad", "hudfx_def", "cc_bin", "intro_bik"})
+	for (const char *role : {"fgn2_bin", "failsafe_bad", "cc_bin", "intro_bik"})
 		TEST_EXPECT(find_blank_factory_for_role(role) == nullptr);
 	for (AssetKind kind : {AssetKind::Video, AssetKind::Terrain, AssetKind::TerrainPolyData, AssetKind::CountryCode,
-	                       AssetKind::RawBin, AssetKind::HudFxDefs})
+	                       AssetKind::RawBin})
 		TEST_EXPECT(find_blank_factory_for_kind(kind) == nullptr);
 	return 0;
 }
