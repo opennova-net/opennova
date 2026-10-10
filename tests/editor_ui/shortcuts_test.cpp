@@ -5,8 +5,9 @@
 // reference field under the pointer (the Inspector's: a Ctrl+click on its value goes too, its right-click menu
 // offers the three jumps), on a Files row, else on the selection (a mission's entity: its item; a record: who
 // names it); the right-click menus of Files, Problems, the outline (an item record's Place in mission) and the
-// mission's picture (Go to item, Go to model, Show model in Files, Select all like this, Place another); every
-// jump an OpenDocument, a step of the navigation history.
+// mission's picture (Go to item, Go to model, Show model in Files, Select all like this, Place another), the menu
+// view's screens and record tree and the Inspector's tables' rows (Find usages); every jump an OpenDocument, a step
+// of the navigation history.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
 
+#include "../editor/menu_test_support.h"
 #include "editor_ui_test_support.h"
 
 #include <imgui.h>
@@ -505,6 +507,122 @@ void test_context_menus() {
 	ui.away();
 }
 
+// The window active and drawn, found by a part of its name (a child window's "<parent>/<id>_<hash>").
+const ImGuiWindow *window_named(const char *part) {
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, part)) return window;
+	return nullptr;
+}
+
+// DI-18's last menus: a menu's window in the menu view's record tree opens the record's menu (the record selected as
+// it opens, as a click selects it: Go to definition and Find usages with their keys), Find usages opening the
+// project's finder on the window (who names it); a screen of its list the same; an Inspector table's row (a button's
+// actions) offers Find usages, with its key, before the list's structural edits, opening the finder on that row's
+// record.
+void test_menu_and_table_row_menus() {
+	JumpsProject project;
+	CHECK(project.open(), "the jumps project");
+	if (project.items.empty()) return;
+	const SessionView &v = project.session.view();
+	const std::string path = "menus/options.mnu";
+	CHECK(editor_test::write_text(v.project.root + "/" + path, kMenu), "the menu");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document(path));
+	const Document *document = project.session.document_for(path);
+	CHECK(document != nullptr, "the menu open");
+	if (!document) return;
+	Ui ui;
+	attach(ui, project);
+	const WorkspaceView::ProjectFind &find = v.workspace.project_find;
+	const NodeAddress main = named(*document, "MAIN"), back = named(*document, "BACK"), panel = named(*document, "PANEL");
+	project.serve(ui, request::select_record(path, back));
+	ui.focus("Document");
+	ui.frames(2);
+
+	// The record tree: PANEL's line (MAIN's child), right-clicked.
+	const ImGuiWindow *tree = window_named("/windows_");
+	CHECK(tree != nullptr, "the menu view's record tree");
+	if (!tree) return;
+	const ImGuiID main_node = item_id(pushed(tree->ID, static_cast<int>(main.child)), {"window"});
+	const ImGuiID panel_node = item_id(pushed(main_node, static_cast<int>(panel.child)), {"window"});
+	ImVec2 line;
+	CHECK(hover_find(ui, panel_node, tree->Pos.x + 60.0f, tree->Pos.y, tree->Pos.y + tree->Size.y, line), "PANEL's line");
+	std::string text = right_click(ui, line);
+	CHECK(in_order(text, {"Go to definition", "F12", "Find usages", "Shift+F12"}), "the window's menu: its jumps with their keys");
+	std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *selected = only(requests, EditorRequestKind::SelectRecord);
+	CHECK(selected && selected->path == path && selected->address == panel, "the right click selects the window");
+	if (selected) project.serve(ui, *selected);
+	const ImGuiWindow *popup = GImGui->OpenPopupStack.Size ? GImGui->OpenPopupStack.back().Window : nullptr;
+	CHECK(popup != nullptr, "the menu open");
+	if (!popup) return;
+	ui.activate(item_id(popup->ID, {"Find usages"}));
+	ui.frames(2);
+	CHECK(find.open && find.scope == FindScope::Usages && find.path == path && find.locator == project.locator(path, panel),
+	      "Find usages: who names the window");
+	text = logged_frame(ui);
+	CHECK(text.find("PANEL") != std::string::npos, "BACK's action showing PANEL listed");
+	press(ui, ImGuiKey_Escape);
+	ui.frames(2);
+	ui.away();
+	ui.drain();
+
+	// The screen's line in the list: the same menu over the screen.
+	const ImGuiWindow *tab = window_named("Document");
+	CHECK(tab != nullptr, "the Document window");
+	if (!tab) return;
+	bool opened = false;
+	for (float y = tab->Pos.y + 70.0f; y < tree->Pos.y && !opened; y += 4.0f) {
+		ui.mouse(tab->Pos.x + 60.0f, y);
+		if (GImGui->HoveredId == 0) continue;
+		text = right_click(ui, ImVec2(tab->Pos.x + 60.0f, y));
+		const ImGuiWindow *open = GImGui->OpenPopupStack.Size ? GImGui->OpenPopupStack.back().Window : nullptr;
+		opened = open && in_order(text, {"Go to definition", "F12", "Find usages", "Shift+F12"});
+		if (!opened) {
+			ImGui::ClosePopupsExceptModals();
+			ui.frames(1);
+		}
+	}
+	CHECK(opened, "the screen's line opens its menu");
+	popup = GImGui->OpenPopupStack.Size ? GImGui->OpenPopupStack.back().Window : nullptr;
+	if (popup) ui.activate(item_id(popup->ID, {"Find usages"}));
+	ui.frames(2);
+	CHECK(find.open && find.scope == FindScope::Usages && find.path == path &&
+	              find.locator == project.locator(path, NodeAddress{main.row, document->row(main.row)->kind, 0}),
+	      "Find usages: who goes to the screen");
+	press(ui, ImGuiKey_Escape);
+	ui.frames(2);
+	ui.away();
+	ui.drain();
+
+	// The Inspector: BACK's actions, a table; its first row's menu.
+	project.serve(ui, request::select_record(path, back));
+	ui.focus("Inspector");
+	ui.frames(2);
+	const NodeAddress action = menu_test::child_of(*document, back, "action", 0);
+	const ImGuiID actions = item_id(Ui::window_id("Inspector"), {"action", "action", "records"});
+	const ImGuiTable *table = ImGui::TableFindByID(actions);
+	CHECK(table != nullptr && action.child != 0, "BACK's actions as a table");
+	if (!table) return;
+	const ImGuiID number = ImHashStr((std::string(ui_kit::kChangeRoom) + "1").c_str(), 0,
+	                                 pushed(actions, static_cast<int>(action.child)));
+	const ImGuiTableColumn &first = table->Columns[0];
+	CHECK(hover_find(ui, number, (first.MinX + first.MaxX) * 0.5f, table->OuterRect.Min.y, table->OuterRect.Max.y, line),
+	      "the first action's row");
+	text = right_click(ui, line);
+	CHECK(in_order(text, {"Find usages", "Shift+F12", "Duplicate", "Remove", "Move up", "Move down"}),
+	      "the row's menu: Find usages with its key, then the list's edits");
+	const ImGuiID row_menu = ImHashStr("row", 0, pushed(actions, static_cast<int>(action.child)));
+	ui.activate(popup_item(row_menu, "Find usages"));
+	ui.frames(2);
+	CHECK(find.open && find.scope == FindScope::Usages && find.path == path && find.locator == project.locator(path, action),
+	      "Find usages from the row: who names its record");
+	press(ui, ImGuiKey_Escape);
+	ui.frames(2);
+	ui.away();
+}
+
 // The mission's picture: a right click on a pump's mark opens its menu with the entity's jumps (Go to item with
 // its key, Go to model, Show model in Files, Place another, Select all like this, Find usages with its key); Go to
 // item opens the catalog at the pump's record, Go to model the model, Show model in Files selects it there, Place
@@ -682,6 +800,7 @@ void run_shortcuts_tests() {
 	test_jumps_from_the_selection();
 	test_reference_field_jumps();
 	test_context_menus();
+	test_menu_and_table_row_menus();
 	test_mission_entity_menu();
 	test_keys_apart();
 }
