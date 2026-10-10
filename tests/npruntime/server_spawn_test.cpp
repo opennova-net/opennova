@@ -716,6 +716,32 @@ int main() {
 		if (!expect(body->alive && body->position.x == 5.0f && body->position.z == 7.25f &&
 		                    static_cast<uint32_t>(body_motor->heading) == 0x12340000u,
 		            "with no placement the revived player keeps its body's heading word")) return 1;
+
+		// D-PWR-7: the deploy's health is two signed raises to the difficulty-aware
+		// ceiling, never a store. Out of a session at the word -1 the local player's
+		// ceiling is twice the def hp as a 16-bit sum: 100 deploys at 200, but 20000
+		// wraps to -25536, so a dead player's -1 stays put (the dead bit still clears).
+		// [orig: Server_ProcessPlayerDeath -> Entity_RaiseHealthToMax @0x51782F;
+		//  Entity_ResetToSpawnState @0x4B97BC; Entity_RaiseHealthToMax @0x43C290 (the
+		//  signed jge @0x43C2A8); Entity_GetMaxHealthWithDifficulty @0x43B8D3..0x43B8D8]
+		bare_world->rules.difficulty = -1;
+		bare_world->tables.player.has_item_def = true;
+		const auto deploy_dead = [&](int32_t def_hp) {
+			bare_world->tables.player.item_hp = def_hp;
+			body->alive = false;
+			body->health = -1;
+			body->flags |= w::kEntityFlagDead;
+			inmatch::Server_ReleasePlayerDeployment(
+					bare_ctx.config, own, *bare_world, w::EntityHandle{});
+		};
+		deploy_dead(100);
+		if (!expect(body->health == 200 && body->alive,
+		            "the SP deploy at the word -1 raises to twice the def hp")) return 1;
+		deploy_dead(20000);
+		if (!expect(body->health == -1 && !body->alive &&
+		                    (body->flags & w::kEntityFlagDead) == 0,
+		            "a ceiling that wraps negative leaves the dead player's -1 alone")) return 1;
+		bare_world->rules.difficulty = 0;
 	}
 
 	// A join-time spectator is POSITIONED with the substitute team while its
