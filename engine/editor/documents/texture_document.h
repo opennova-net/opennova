@@ -87,12 +87,12 @@ private:
 // picks makes of it whatever uses it (validate_texture_file, from its header: texture_header), and a file
 // of a name its loader passes over (graph/texture_checks). What a use's role asks of the file its loader
 // opens is a finding on the use, the referring file's, whatever its type: the core's texture codes
-// (CoreFinding::Texture*). An error gates (the game draws texels the editor cannot vouch for, or writes
-// past the image); the others are warnings. Each finding says what the game does, its witness cited where
+// (CoreFinding::Texture*). An error gates (the game writes past the image, or reads past it into its own
+// memory); the others are warnings, an image the game loads and goes on from among them. Each finding says what the game does, its witness cited where
 // it is made.
 enum class TextureFinding {
 	Unloadable,          // texture.unloadable: the reader its name picks refuses it
-	TgaUnfilled,         // texture.tga_unfilled (an error): a TGA form the reader leaves unset
+	TgaUnfilled,         // texture.tga_unfilled: a TGA form the reader leaves unset, the game going on
 	TgaZeroed,           // texture.tga_zeroed: a TGA form the reader zeroes
 	TgaUpsideDown,       // texture.tga_upside_down: rows top first, the reader takes them bottom up
 	TgaColourMapSkipped, // texture.tga_colour_map_skipped: a true-colour TGA's colour map read as texels

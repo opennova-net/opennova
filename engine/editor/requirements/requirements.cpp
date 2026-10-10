@@ -21,6 +21,22 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase) {
 	}
 }
 
+bool requirement_multiplayer_only(const std::string &role) {
+	for (const char *only : { "mp_menu", "gamemus_sbf", "gamemus_bin", "expansion_gamemus_sbf", "expansion_gamemus_bin" })
+		if (role == only) return true;
+	return false;
+}
+
+bool requirement_row_enabled(const ProjectDocument &doc, const RequiredResource &resource) {
+	const std::string role = resource.role ? resource.role : "";
+	// mp.mnu is the shell's: the startup screen's NW_MULTI_PLAYER and NW_ACTIVATE controls load it with no
+	// mission [orig: sub_555890 @0x5558c7, @0x5558e5 -> sub_5557A0 -> UI_EnterNovaWorldMenu @0x5588fa], so
+	// Multiplayer alone puts it on the checklist, whatever the manifest's phase.
+	if (role == "mp_menu") return doc.features.multiplayer;
+	if (!requirement_phase_enabled(doc, resource.phase)) return false;
+	return doc.features.multiplayer || !requirement_multiplayer_only(role);
+}
+
 const char *requirement_phase_label(int phase) {
 	switch (phase) {
 	// When the game reads it, not that it cannot go on without it: what it does then is the row's
@@ -89,7 +105,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			// row of an expansion's checklist: the game never reads it there.
 			if (gameprofile::gameprofile_replaced_under_expansion(resource->name)) continue;
 		}
-		if (!requirement_phase_enabled(doc, resource->phase)) continue;
+		if (!requirement_row_enabled(doc, *resource)) continue;
 
 		RequirementRow row;
 		row.resource = resource;
@@ -105,7 +121,9 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			row.state = asset->kind == row.expected_kind ? RequirementState::Present
 			                                             : RequirementState::WrongKind;
 		} else {
-			row.state = RequirementState::Missing;
+			// A file an expansion's base game serves: the game reads the base's under /exp [orig:
+			// PFF_OpenAllArchives @ 0x4a4310, slots 2..4].
+			row.state = base.has(row.name) ? RequirementState::Served : RequirementState::Missing;
 		}
 
 		// The finding names its row (the role, the required name); a missing file is the
@@ -122,14 +140,14 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 		// A file an expansion's base game serves: the game reads the base's under /exp [orig:
 		// PFF_OpenAllArchives @ 0x4a4310, slots 2..4], as the build's gate lets it through (blocks_build
 		// over BaseNames): said so, never what the game does with no file (the demo round's bug 6).
-		const bool served = row.state == RequirementState::Missing && base.has(row.name);
+		const bool served = row.state == RequirementState::Served;
 		const std::string then = served ? " The game reads the base game's, which the expansion builds on."
 		                         : without.empty() ? std::string(" The game reads it by name.")
 		                                           : " " + without;
 		if (row.required) {
 			++report.required_total;
-			if (row.state == RequirementState::Missing) {
-				++report.required_missing;
+			if (row.state == RequirementState::Missing || served) {
+				++(served ? report.required_served : report.required_missing);
 				// One the base game serves is no file the game goes without: a note, never an error (the
 				// game reads the base's, and the build's gate lets it through).
 				report.diagnostics.push_back(finding(served ? DiagnosticSeverity::Info : DiagnosticSeverity::Error,
@@ -145,7 +163,7 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 				                                             " (found: " + asset_kind_label(row.found_kind) + ").",
 				                                     row.asset_path));
 			}
-		} else if (row.state == RequirementState::Missing) {
+		} else if (row.state == RequirementState::Missing || served) {
 			// An optional file the game does without: a note that says how.
 			report.diagnostics.push_back(finding(DiagnosticSeverity::Info, CoreFinding::RequirementOptionalMissing,
 			                                     "Optional file " + row.name + " is not in the project." + then,
@@ -178,7 +196,8 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 std::vector<std::string> unmet_required_roles(const RequirementReport &report) {
 	std::vector<std::string> roles;
 	for (const RequirementRow &row : report.rows)
-		if (row.required && row.state != RequirementState::Present) roles.push_back(row.role);
+		if (row.required && (row.state == RequirementState::Missing || row.state == RequirementState::WrongKind))
+			roles.push_back(row.role);
 	return roles;
 }
 

@@ -6,11 +6,14 @@ namespace opennova::editor {
 
 void source_issue_findings(const Document &document, const FindingCodeRow &invalid,
 		const FindingCodeRow &ignored, std::vector<Diagnostic> &findings,
-		const std::function<void(Diagnostic &)> &place) {
+		const std::function<void(Diagnostic &)> &place, const char *game_reads, const FindingCodeRow *stops) {
 	for (const SourceIssue &issue : document.issues()) {
+		const bool stopped = issue.blocks && issue.game_stops && stops;
+		const FindingCodeRow &row = !issue.blocks ? ignored : stopped ? *stops : invalid;
+		const std::string message =
+				issue.blocks && !stopped && game_reads ? issue.message + " " + game_reads : issue.message;
 		Diagnostic finding = make_finding(
-				issue.blocks ? invalid : ignored,
-				issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning, issue.message, document.path(),
+				row, issue.blocks ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning, message, document.path(),
 				issue.field);
 		finding.line = issue.line;
 		finding.record = issue.record;

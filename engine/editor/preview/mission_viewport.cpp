@@ -981,6 +981,8 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	edits.push_back(set_of(placed, "y", at[1]));
 	edits.push_back(set_of(placed, "z", at[2]));
 	edits.push_back(set_of(placed, "yaw", int64_t(yaw)));
+	// (What the record takes from its item's catalog row, D-MIS-10, the session plans as it serves the batch, as
+	// for every placement: plan_item_seeds.)
 	if (made) out.request(request::edit_record(made->catalog, made->edits, true));
 	out.request(request::edit_record(document->path(), std::move(edits)));
 	if (made)

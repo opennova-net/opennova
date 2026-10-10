@@ -15,11 +15,17 @@ namespace opennova::editor {
 using namespace def;
 namespace {
 constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
-	{ CatalogFinding::InvalidInput, { "catalog.invalid_input", FindingFix::None, nullptr, true } },
+	// Input the typed record cannot carry, which the game's reader reads on past (an unknown word keeps the old
+	// value, a fifth addeweap is ignored, an unclosed item block is registered): unwritable_code, a closed file
+	// packed as stored, its Save refused.
+	{ CatalogFinding::InvalidInput, unwritable_code("catalog.invalid_input") },
 	// Input the game ignores, which a save writes as the file has it (the file's modeled layout,
 	// def_notes.h): said, nothing to fix.
 	{ CatalogFinding::IgnoredInput, { "catalog.ignored_input" } },
-	{ CatalogFinding::Unserializable, { "catalog.unserializable", FindingFix::None, nullptr, true } },
+	// A record the def writer cannot write back. From an edit, the writer's own refusal; from a file on disk, a
+	// value the reader took with no blocking finding of its own (none in the shipped defs), which the game reads
+	// as the reader did (unwritable_code: a closed file packs as stored, its Save refused).
+	{ CatalogFinding::Unserializable, unwritable_code("catalog.unserializable") },
 	// A record with no name, an item of type 0: the editor's own rules, no refusal of the game's
 	// witnessed (the gate follows retail, ADR 0046 S14): listed.
 	{ CatalogFinding::NameEmpty, listed_code("catalog.name_empty") },
@@ -38,6 +44,13 @@ constexpr FindingCodeEntry<CatalogFinding> kFindingEntries[] = {
 	{ CatalogFinding::ReservedName, listed_code("catalog.reserved_name", FindingFix::ItemId) },
 	{ CatalogFinding::FirstRow, listed_code("catalog.first_row", FindingFix::FallbackRow) },
 	{ CatalogFinding::ReservedRefused, listed_code("catalog.reserved_refused") },
+	// Input the game's reader stops at, or corrupts the record over (DefCatalogDocument's game_stops): it gates.
+	{ CatalogFinding::ReaderStops,
+	  game_stops_code("catalog.reader_stops",
+	                  "its reader stops at a block opened inside an open one, reading nothing past it (\"weapon didn't "
+	                  "have an end\" [orig: WeaponDefs_ParseLineCallback @ 0x5436ad..0x5436d2]; the ammo reader's "
+	                  "\"definition missing end\" [orig: AmmoDef_LoadAll @ 0x40b0b0]), and a fifth sights row lands on "
+	                  "the record's row count [orig: WeaponDefs_ParseLineCallback, the count bump @ 0x544b11..0x544b20]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(CatalogFinding::kCount),
 		"every CatalogFinding has exactly one row");
@@ -206,11 +219,15 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 	// carry blocks the file: an error. On the record the issue names, found by its name.
 	source_issue_findings(
 			*catalog, finding_code(CatalogFinding::InvalidInput),
-			finding_code(CatalogFinding::IgnoredInput), findings, locate);
+			finding_code(CatalogFinding::IgnoredInput), findings, locate,
+			"The game reads on past it [orig: ItemDef_ParseProperty @ 0x49eb00; WeaponDefs_ParseLineCallback @ 0x543680]: "
+			"a build packs the file as it stands, and a save is refused while the input stands.",
+			&finding_code(CatalogFinding::ReaderStops));
 	if (document.blocked()) return findings;
 	for (const auto &issue : document.serialize().issues) {
 		auto diagnostic = make_finding(CatalogFinding::Unserializable, DiagnosticSeverity::Error,
-			issue.message, document.path(), issue.field);
+			issue.message + " A save is refused until the record can be written; a closed file packs as it stands, as "
+			"the game's reader reads it.", document.path(), issue.field);
 		diagnostic.record = issue.record; locate(diagnostic); findings.push_back(std::move(diagnostic));
 	}
 	// The first item of each id in the file: both of a repeated id are kept (the load logs

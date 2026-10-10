@@ -8,6 +8,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/model/field_text.h>
 #include <editor/ui/inspector_layout.h>
+#include <editor/ui/outline_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -117,6 +118,8 @@ const Node *MenuView::draw_screens(Workspace &workspace, const MnuDocument &docu
 		const std::string words = ui_kit::change_words(change);
 		ui_kit::tooltip(shown != name ? screen->name() + (words.empty() ? "" : "\n" + words)
 		                              : words);
+		// Its right-click menu (DI-18): Go to definition, Find usages (who goes to the screen).
+		record_menu(workspace, document, at);
 		ImGui::PopID();
 	}
 	return current;
@@ -392,6 +395,9 @@ void MenuView::draw_window_node(Workspace &workspace, const MnuDocument &documen
 		scroll_to_ = 0;
 	}
 	if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !ImGui::IsItemToggledOpen()) click_window(workspace, document, index);
+	// Its right-click menu (DI-18): Go to definition (what the window names first: a font, a texture), Find usages
+	// (who names it: an action showing or hiding it).
+	record_menu(workspace, document, entry.address);
 	// Made only while it shows, after a moment: the tree is swept by the mouse.
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
 		const char *words = ui_kit::change_words(change);

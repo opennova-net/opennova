@@ -4,7 +4,9 @@
 #include <iterator>
 #include <system_error>
 
+#include <base/io/file_io.h>
 #include <base/io/file_time.h>
+#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_kind.h>
 #include <editor/assets/asset_type_registry.h>
@@ -84,6 +86,15 @@ bool folder_reached(const fs::path &root, const fs::path &export_dir, const fs::
 	return true;
 }
 
+// Whether a last write's stamp is a coarse file system's: a whole number of ten milliseconds (exFAT's tick,
+// and FAT's two seconds), which a finer stamp is about once in a hundred thousand writes (then read once
+// more, nothing worse).
+bool stamp_coarse(int64_t modified_ticks) {
+	using Ticks = fs::file_time_type::duration;
+	const int64_t tick = static_cast<int64_t>(std::chrono::duration_cast<Ticks>(std::chrono::milliseconds(10)).count());
+	return tick > 0 && modified_ticks % tick == 0;
+}
+
 // A file of the project at `path`, listed by `key`: its entry, or the outputs its import record
 // lists, and what the walk says of it; `read`, the bytes it read.
 void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path &path, const std::string &key,
@@ -96,6 +107,21 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 	const auto own_size = fs::file_size(path, ec);
 	if (!ec) out.size_bytes = static_cast<uint64_t>(own_size);
 	out.modified_ticks = io::file_modified_ticks(path);
+	// A stamp within the file system's tick of now may outlast a rewrite of the same size where the stamp is
+	// coarse (FAT stamps two seconds apart, exFAT ten milliseconds; NTFS's and Linux's are finer, a rewrite
+	// moving them): the content read now, counted in the scan's bytes, for a look to compare once the stamp
+	// settles.
+	out.read_ticks = io::file_clock_now_ticks();
+	if (out.modified_ticks != 0 && stamp_coarse(out.modified_ticks) &&
+	    !io::file_stamp_settled(out.modified_ticks, out.read_ticks)) {
+		std::vector<uint8_t> bytes;
+		std::string unread;
+		if (io::read_file_bytes(utf8_of(path), bytes, unread)) {
+			read += bytes.size();
+			out.racy = true;
+			out.racy_fingerprint = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+		}
+	}
 	if (strutil::ends_with_icase(filename, sidecar_suffix)) {
 		// An import record: its outputs are project files that live under the cache.
 		const std::string source_relative = key.substr(0, key.size() - sidecar_suffix.size());

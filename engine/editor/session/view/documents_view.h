@@ -79,7 +79,7 @@ struct DocumentsView {
 	std::string active; // the active document's path ("" = none)
 	// The file whose page the Document window shows beside the documents (the plain-words lane, the
 	// audit's 4.6): one of a kind the editor has no editor for, opened by an OpenDocument naming it (what
-	// it is, what reads it, who names it: session/file_page.h) and closed by a CloseDocument naming it;
+	// it is, what reads it, who names it: session/file_card.h) and closed by a CloseDocument naming it;
 	// "" none. Never a document: the selection and the Inspector stay the active document's.
 	std::string page;
 	// What the OpenDocument that showed the page named on it (DI-17: a Go to lands on the page of a file the

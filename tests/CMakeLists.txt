@@ -5581,10 +5581,11 @@ target_include_directories(editor_file_placement_test PRIVATE ${CMAKE_CURRENT_SO
 add_test(NAME editor_file_placement COMMAND editor_file_placement_test)
 
 # Files' chores (DI-25): a delete to the project's trash (who names the file asked first), a duplicate under the
-# name the project's rules give, a new file in a folder, folders made, renamed and deleted, and the file
-# history's undo and redo of each.
+# name the project's rules give, a new file in a folder, folders made, renamed and deleted (with what they hold),
+# several files at once, the trash emptied, the file history's undo and redo of each, and the command line's
+# verbs for them.
 add_executable(editor_file_chores_test editor/file_chores_test.cpp)
-target_link_libraries(editor_file_chores_test PRIVATE opennova_editor)
+target_link_libraries(editor_file_chores_test PRIVATE opennova_project_cli)
 target_include_directories(editor_file_chores_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_file_chores COMMAND editor_file_chores_test)
 

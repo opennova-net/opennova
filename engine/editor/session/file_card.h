@@ -15,21 +15,28 @@ struct AssetScan;
 struct GraphEdge;
 struct SessionView;
 
-// A project file as a modder asks after it (the UX round's project lane): Files' card for a file the editor
-// opens no document of (a wave, a sound bank, a particle file, an AI profile) and for any file's References,
-// and the editor MCP's file_card query. What it is (its kind's words, AssetKindRow::about), where a build puts
-// it, where it came from, what it names (each reference with whether the project resolves it and the file it
-// does) and who names it, each a Go to; a wave's sound as the game decodes it (lwf::wav_decode_pcm16: its
-// channels, rate and length), which the Shell plays (play_sound).
+// A project file as a modder asks after it (the UX round's project lane and its plain-words lane; the audit's
+// 4.6: a double-click on a texture, a sound bank or charattr.def did nothing and said nothing): one model, which
+// Files' card (a window of its own, an about_file's) and the Document window's page of a file the editor has no
+// editor for (an open_document's: ui/file_page_view) both draw, and the editor MCP's file_card query answers.
+// What it is (its kind's words, assets/asset_kind_words: what a file of the kind holds and what in the game reads
+// it and when, cited), where a build puts it, what the editor does with it, where it came from, what it defines
+// with who names each (DI-17), what it names (each reference with whether the project resolves it and the file it
+// does) and who names it, each line a Go to; its Problems rows; a wave's sound as the game decodes it
+// (lwf::wav_decode_pcm16: its channels, rate and length), which the Shell plays (play_sound). A Go to whose
+// target the editor does not edit lands on the page (DI-17): the line of the record it names is marked.
 struct FileCard {
 	bool found = false;
 	std::string path; // project-relative
 	std::string name; // logical
 	AssetKind kind = AssetKind::Unknown;
 	std::string kind_label;
-	std::string about;
+	// What a file of its kind holds, what in the game reads it and when, and the witness of that
+	// (assets/asset_kind_words).
+	std::string what, read_by, cite;
 	uint64_t size = 0;
-	std::string build; // where a build puts it, in words
+	std::string build;  // where a build puts it, in words
+	std::string editor; // what the editor does with it ("The editor opens it as a document.")
 	std::string imported_from;
 	bool opens = false; // the editor opens a document of it
 	// A wave: what the game's decode makes of it, read once for the file's size and last write (a card made
@@ -54,33 +61,57 @@ struct FileCard {
 	};
 	bool wave = false;
 	Sound sound;
-	// What it names: the field's words, the record's, the value, whether the project has it and the file it
-	// resolves to ("" for none, or a name no file is: a symbol), that file a wave.
-	struct Named {
+	// Where a Go to landed on it (DI-17): the record (a ReferenceTarget's locator: a record of the file by its
+	// locator, else its path as the graph names it) and its field; both "" none.
+	std::string at_locator, at_field;
+	// A line of it somewhere to go: its words, whether it is the record the Go to that showed it marked, and
+	// where a click goes (the file opened at the record, or its page).
+	struct Line {
+		std::string text;
+		bool at = false;
+		ReferenceTarget target;
+	};
+	// What it names: the line's words ("polytrn_colormap: texture isle_c.tga", where in the file it is named: its
+	// record, else its field), the field's words, the record's, the value, whether the project has it and the
+	// file it resolves to ("" for none, or a name no file is: a symbol), that file a wave. A name nothing
+	// resolves goes where it belongs (missing_target: a symbol's file); a missing file's goes nowhere (Problems
+	// shows its finding, with its fixes).
+	struct Named : Line {
 		std::string field;
 		std::string record;
 		std::string value;
 		ReferenceStatus status = ReferenceStatus::NotAReference;
 		std::string file;
 		bool wave = false;
-		ReferenceTarget target;
+		bool missing() const { return status == ReferenceStatus::Missing; }
 	};
-	std::vector<Named> names;
-	// Who names it, or what it defines: the naming file, its record and field's words.
-	struct User {
+	// Who names it, or what it defines: the line's words ("ITEMS.DEF: Drivable Dune Buggy - Shadow texture"),
+	// the naming file, its record and the field's words.
+	struct User : Line {
 		std::string file;
 		std::string record;
 		std::string field;
-		ReferenceTarget target;
 	};
-	std::vector<User> named_by;
+	// A name it defines (graph/reference_queries' file_definitions): its words, whether a lookup of the game
+	// finds it, and the uses that reach it.
+	struct Definition {
+		std::string text;   // "Particle effect Effect_AmHitDirt"
+		bool read = true;   // a lookup of the game finds it (false: inert)
+		std::string unread; // why none does, in a few words
+		bool at = false;    // the definition a Go to landed on
+		std::vector<User> used_by;
+	};
+	std::vector<Definition> defines; // what it defines that others name
+	std::vector<Named> names;        // what it names, each a reference
+	std::vector<User> used_by;       // the records naming it, then those naming what it defines
+	size_t errors = 0, warnings = 0; // its Problems rows
 	// The project's references are being read (a validation runs, or none has read them yet): what it
 	// names and who names it are the graph's as far as it has read, and may grow (the demo round's bug 9:
 	// "Named by (0)" while an import's files were read).
 	bool reading = false;
 };
 
-// Who names a project file, in one look (the deep-integration plan's DI-05): the card's Named by, made
+// Who names a project file, in one look (the deep-integration plan's DI-05): the card's Used by, made
 // without a card (no wave read, nothing it names), for the Inspector's view of a file with nothing selected,
 // the document toolbars' Used by chip and the wire's used_by query. Its usages (graph/reference_queries'
 // file_uses: the records naming it, then those naming what it defines) grouped by the file they are in, in
@@ -140,11 +171,19 @@ inline constexpr size_t kWaveCardBins = 64;
 
 // The card of the project file `path` (a project-relative path or a logical name); found false for none.
 // `known`, a card's sound read before: taken as it is while the file's size and last write are those it was
-// read at, else read again.
-FileCard file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known = nullptr);
-// Its wire form: {found, path, name, kind, kind_label, about, size, build, imported_from, opens, sound?
-// {decoded, error?, rate, channels, seconds, plays, refusal?, format, peak, rms, envelope}, names [{field, record, value, status, file, wave}], named_by
-// [{file, record, field}], reading? (true while the project's references are being read)}.
+// read at, else read again. `locator` and `field`, the record a Go to names on it (a ReferenceTarget's: a
+// record of the file by its locator, else its path as the graph names it; both "" none), whose lines are
+// marked.
+FileCard file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known = nullptr,
+                   const std::string &locator = std::string(), const std::string &field = std::string());
+// The same, with the record the page's Go to marked where `path` is the page the Document window shows.
+FileCard shown_file_card(const SessionView &view, const std::string &path, const FileCard::Sound *known = nullptr);
+// Its wire form, the file_card query's: {found, and with one path, name, kind (its token), kind_label, size,
+// what, read_by, cite, build, editor, imported_from, opens, errors, warnings, wave? (true for a wave), sound?
+// {decoded, error?, rate, channels, seconds, plays, refusal?, format, peak, rms, envelope}, at_locator?,
+// at_field?, defines [{text, read, unread?, at?, used_by}], names [{text, value, status, wave?, missing?, at?,
+// file?, locator?, field?}], used_by [{text, file?, locator?, field?}], reading? (true while the project's
+// references are being read)}; a line's file, locator and field are where a click goes (open_document's).
 io::JsonValue file_card_json(const FileCard &card);
 
 // A graph edge's field by the name the Inspector shows it under (its type's schema, which no file's
