@@ -1,16 +1,22 @@
 // opennova-novaworld-server stops in order on SIGINT (Ctrl+C) and on SIGTERM
 // (what `docker stop` sends). The real binary runs as a child process on a
-// SQLite file in this run's temp directory under backend/migrations, a free
-// HTTP port and ephemeral UDP ports. Once it is ready it gets the signal, and it
-// must exit 0 within the deadline, having logged its shutdown legs in order
-// (the HTTP listener, then the gate and NW UDP receive threads) and closed every
-// database connection: the WAL file goes with the last close, and a process
-// killed instead leaves it behind.
+// SQLite file in this run's temp directory under backend/migrations, with every
+// port 0: the OS picks each one as the listener binds it, and the test reads the
+// HTTP port back from the "[http] listening on :<port>" line. Once it is ready it
+// gets the signal, and it must exit 0 within the deadline, having logged its
+// shutdown legs in order (the HTTP listener, then the gate and NW UDP receive
+// threads) and closed every database connection: the WAL file goes with the
+// last close, and a process killed instead leaves it behind.
 //
 // With the HTTP layer (the server built with BUILD_NOVAWORLD_HTTP, as the Linux
 // image is) the test first waits for Crow to answer, then holds a half-sent
 // request open across the signal, so neither Crow's own signal handling nor a
 // lingering connection can keep the process up.
+//
+// On Linux a third run checks the second signal: the first one's handler puts
+// the default action back (read from /proc's SigCgt mask) while the shutdown is
+// still pending, held off by a long tick, and a second SIGINT then ends the
+// process at once.
 //
 // POSIX only (fork, execve, kill). The child dies with the test (SIGKILL on
 // every failure path, and PR_SET_PDEATHSIG on Linux should ctest kill the test).
@@ -24,6 +30,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -171,43 +178,64 @@ bool logged_in_order(const std::string &log, const std::vector<const char *> &li
 	return true;
 }
 
-int exercise(ServerProcess &server, const std::string &binary, const test_temp::TempDir &temp,
-             const std::string &log_path, int signal_number) {
+// The server's environment: every port 0 (the OS picks each one), the database
+// in the temp directory, the repo's migrations and seed, and web roots that do
+// not exist (the HTTP layer serves its API and 404s the rest).
+std::vector<std::string> server_env(const test_temp::TempDir &temp, const std::string &db_path) {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-	const std::string db_path = temp.file("novaworld.db");
-
-	// A free port for Crow: bind an ephemeral one on loopback, release it.
-	uint16_t http_port = 0;
-	{
-		net::ScopedSocket probe(net::tcp_listen(0, 1, &http_port, true));
-		TEST_EXPECT(probe.is_valid() && http_port != 0);
-	}
-
-	const std::vector<std::string> env = {
+	return {
 		"ONNET_PUBLIC_HOST=127.0.0.1",
 		"ONNET_GATE_UDP_PORT=0",
 		"ONNET_NW_UDP_PORT=0",
-		"ONNET_HTTP_PORT=" + std::to_string(http_port),
+		"ONNET_HTTP_PORT=0",
 		"DATABASE_PATH=" + db_path,
 		"MIGRATIONS_DIR=" + (source_dir / "backend" / "migrations").string(),
 		"SEED_DIR=" + (source_dir / "backend" / "seed").string(),
-		// Roots that do not exist: the HTTP layer serves its API and 404s the rest.
 		"WEB_DIST_DIR=" + temp.file("web_dist"),
 		"TEMPLATES_DIR=" + temp.file("templates"),
 		"STATIC_DIR=" + temp.file("static"),
 	};
-	TEST_EXPECT(server.spawn(binary, env, temp.root(), log_path));
-	if (!wait_for_log(server, log_path, "[boot] ready.", kBootDeadline)) {
-		if (server.exited) {
-			std::fprintf(stderr, "  exited before ready (wait status 0x%x)\n",
-			             static_cast<unsigned>(server.status));
-		} else {
-			std::fprintf(stderr, "  not ready within the boot deadline\n");
-		}
-		return 1;
+}
+
+// Spawns the server and waits for "[boot] ready."; false, having said why,
+// when it exits first or misses the boot deadline.
+bool boot(ServerProcess &server, const std::string &binary, const std::vector<std::string> &env,
+          const test_temp::TempDir &temp, const std::string &log_path) {
+	if (!server.spawn(binary, env, temp.root(), log_path)) {
+		std::fprintf(stderr, "  fork failed\n");
+		return false;
 	}
+	if (wait_for_log(server, log_path, "[boot] ready.", kBootDeadline)) return true;
+	if (server.exited) {
+		std::fprintf(stderr, "  exited before ready (wait status 0x%x)\n",
+		             static_cast<unsigned>(server.status));
+	} else {
+		std::fprintf(stderr, "  not ready within the boot deadline\n");
+	}
+	return false;
+}
 
 #ifdef OPENNOVA_HTTP_ENABLED
+// The port the HTTP listener logged as the one Crow bound, 0 when no line names
+// one. start() logs it before it returns, so it precedes "[boot] ready.".
+uint16_t logged_http_port(const std::string &log) {
+	static const std::string kLine = "[http] listening on :";
+	const size_t at = log.find(kLine);
+	if (at == std::string::npos) return 0;
+	const unsigned long port = std::strtoul(log.c_str() + at + kLine.size(), nullptr, 10);
+	return port > 0 && port <= 65535 ? static_cast<uint16_t>(port) : 0;
+}
+#endif
+
+int exercise_shutdown(ServerProcess &server, const std::string &binary,
+                      const test_temp::TempDir &temp, const std::string &log_path,
+                      int signal_number) {
+	const std::string db_path = temp.file("novaworld.db");
+	if (!boot(server, binary, server_env(temp, db_path), temp, log_path)) return 1;
+
+#ifdef OPENNOVA_HTTP_ENABLED
+	const uint16_t http_port = logged_http_port(read_text(log_path));
+	TEST_EXPECT(http_port != 0);
 	TEST_EXPECT(wait_for_http(server, http_port));
 	// A request that never finishes: the headers' blank line is never sent.
 	net::Endpoint to;
@@ -255,7 +283,58 @@ int exercise(ServerProcess &server, const std::string &binary, const test_temp::
 	return 0;
 }
 
-int run_case(const std::string &binary, int signal_number, const char *name) {
+#ifdef __linux__
+// Whether `pid` has a handler for `signal_number`: its SigCgt mask in /proc.
+bool catches(pid_t pid, int signal_number) {
+	const std::string status =
+			test_io::read_file_text("/proc/" + std::to_string(pid) + "/status");
+	const size_t at = status.find("SigCgt:");
+	if (at == std::string::npos) return false;
+	const unsigned long long mask = std::strtoull(status.c_str() + at + 7, nullptr, 16);
+	return ((mask >> (signal_number - 1)) & 1ULL) != 0;
+}
+
+// The first signal raises the shutdown flag and puts the default action back.
+// The tick loop, sleeping a minute between looks at the flag, leaves that
+// shutdown pending (as a stuck one would be), and the second signal ends the
+// process at once.
+int exercise_second_signal(ServerProcess &server, const std::string &binary,
+                           const test_temp::TempDir &temp, const std::string &log_path,
+                           int signal_number) {
+	std::vector<std::string> env = server_env(temp, temp.file("novaworld.db"));
+	env.push_back("TICK_INTERVAL_MS=60000");
+	if (!boot(server, binary, env, temp, log_path)) return 1;
+	TEST_EXPECT(catches(server.pid, signal_number));
+
+	TEST_EXPECT(::kill(server.pid, signal_number) == 0);
+	const auto deadline = Clock::now() + kExitDeadline;
+	while (catches(server.pid, signal_number)) {
+		if (server.poll() || Clock::now() >= deadline) {
+			std::fprintf(stderr, "  the handler still installed %lld s after the first signal\n",
+			             static_cast<long long>(kExitDeadline.count()));
+			return 1;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+	TEST_EXPECT(!server.poll()); // the shutdown is still pending
+
+	TEST_EXPECT(::kill(server.pid, signal_number) == 0);
+	if (!server.wait_exit(kExitDeadline)) {
+		std::fprintf(stderr, "  still running %lld s after the second signal\n",
+		             static_cast<long long>(kExitDeadline.count()));
+		return 1;
+	}
+	TEST_EXPECT(WIFSIGNALED(server.status));
+	TEST_EXPECT(WTERMSIG(server.status) == signal_number);
+	std::printf("  the first signal left the shutdown pending, the second ended the process\n");
+	return 0;
+}
+#endif
+
+using Exercise = int (*)(ServerProcess &, const std::string &, const test_temp::TempDir &,
+                         const std::string &, int);
+
+int run_case(const std::string &binary, Exercise exercise, int signal_number, const char *name) {
 	// The TempDir outlives the child: ServerProcess is destroyed (and the child
 	// killed, on failure) before the directory goes.
 	test_temp::TempDir temp((std::string("nw_signal_") + name).c_str());
@@ -283,8 +362,11 @@ int main(int argc, char **argv) {
 	// Absolute: the child runs in its temp directory.
 	const std::string binary = std::filesystem::absolute(argv[1]).string();
 	TEST_EXPECT(net::startup() == 0);
-	int rc = run_case(binary, SIGINT, "sigint");
-	if (rc == 0) rc = run_case(binary, SIGTERM, "sigterm");
+	int rc = run_case(binary, exercise_shutdown, SIGINT, "sigint");
+	if (rc == 0) rc = run_case(binary, exercise_shutdown, SIGTERM, "sigterm");
+#ifdef __linux__
+	if (rc == 0) rc = run_case(binary, exercise_second_signal, SIGINT, "second_sigint");
+#endif
 	net::shutdown();
 	if (rc == 0) std::printf("OK: novaworld server signal shutdown\n");
 	return rc;

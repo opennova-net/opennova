@@ -3339,6 +3339,20 @@ target_link_libraries(gate_server_loopback_test PRIVATE opennova_net opennova_ap
 target_include_directories(gate_server_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gate_server_loopback COMMAND gate_server_loopback_test)
 
+# The real GateListener on port 0 over loopback UDP: the port start() reports is
+# the one that answers a probe and the one the reply advertises as POSTIPPORT,
+# and a second listener on that port fails start() (same listener-source recipe
+# as the NW UDP e2e tests below).
+add_executable(gate_listener_test
+    novaworld/gate_listener_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/gate_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(gate_listener_test PRIVATE opennova_novaworld_service opennova_app_common)
+target_include_directories(gate_listener_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME gate_listener COMMAND gate_listener_test)
+
 add_executable(gsb_roundtrip_test novaworld/gsb_roundtrip_test.cpp)
 target_link_libraries(gsb_roundtrip_test PRIVATE opennova_net)
 target_include_directories(gsb_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3749,6 +3763,9 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(opennova_novaworld_server_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(opennova_novaworld_server_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME opennova_novaworld_server_http_routes COMMAND opennova_novaworld_server_http_routes_test)
+    # The concurrent case gives each request up to 30 s; this bounds a hang
+    # below ctest's 1500 s default.
+    set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 120)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s

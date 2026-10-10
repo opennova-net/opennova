@@ -35,8 +35,15 @@ namespace {
 
 std::atomic<bool> g_shutdown{false};
 
-void on_signal(int) {
+// The first signal starts the orderly shutdown; the handler then puts the
+// default action back, so a second one ends the process even when that
+// shutdown is stuck. Both calls are signal-safe: a lock-free atomic store, and
+// std::signal for the signal being handled. (Windows' CRT resets a handler to
+// SIG_DFL before calling it anyway, so a second Ctrl+C there already ended the
+// process; the reset brings POSIX to the same behavior.)
+void on_signal(int sig) {
 	g_shutdown.store(true);
+	std::signal(sig, SIG_DFL);
 }
 
 // main() alone owns SIGINT and SIGTERM (Ctrl+C; `docker stop` sends SIGTERM):
@@ -269,8 +276,9 @@ int main() {
 
 	// The HTTP listener first (Crow's threads joined: no request still holds a
 	// lease), then the gate and NW UDP receive threads (each returns its lease
-	// as it exits), then the connections. main_lease and the pool go last, as
-	// main() returns (declaration order); the last close checkpoints the WAL.
+	// as it exits), then the connections. As main() returns, its locals are
+	// destroyed in reverse declaration order, so main_lease and then the pool
+	// (declared first) go last; the last close checkpoints the WAL.
 	std::printf("[shutdown] stopping listeners\n");
 #ifdef OPENNOVA_HTTP_ENABLED
 	http.stop();
