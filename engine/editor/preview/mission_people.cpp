@@ -7,6 +7,7 @@
 #include <runtime/world/infantry_sound.h>
 #include <runtime/anim/adm_root_motion.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/physics_class_table.h>
 
 namespace opennova::editor {
 
@@ -25,6 +26,10 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 	events_.clear();
 	for (const MissionPose &pose : poses.poses()) {
 		if (pose.status != "posed" || pose.adm_id < 0) continue;
+		// Only a body on the org1 physics row runs the head: an org0 body's update is a nullsub, its channels
+		// standing as the warmup left them (world::infantry_org1_motor_head).
+		if (world::physics_class_from_move_function(pose.definition.move_function) != world::PhysicsClass::Org1)
+			continue;
 		Person person;
 		person.row = pose.row;
 		person.channels = pose.channels;
@@ -57,7 +62,8 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 		++tick_;
 		for (Person &person : people_) {
 			world::RootMotionFrame frame;
-			const uint32_t word = world::organic_body_tick(person.channels, motion, rings_, frame);
+			world::infantry_org1_motor_head(person.channels, motion, rings_, frame);
+			const uint32_t word = person.channels.last_events;
 			if (word != 0)
 				events_.push_back(Event{ person.row, tick_, word, person.channels.clip_phase, frame.capsule_bottom });
 		}

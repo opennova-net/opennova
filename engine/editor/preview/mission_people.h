@@ -15,11 +15,12 @@ namespace opennova::editor {
 
 class MissionPoses;
 
-// A mission's people playing their clips (ADR 0046 S23 C): each person its spawn poses (MissionPoses, DI-38) ticked
-// on from its spawn as the game's org1 motor head ticks a body before its think (world::organic_body_tick: the
-// primary's state copied into the secondary's request, then the AnimMap dual update), one tick a tick of the preview
-// clock, from the tick of the clock it was posed at. Each tick's event word is what the body's sound block and its
-// fire pass read that tick (the mission view hears the people's footsteps and foley with Listen on). The editor's
+// A mission's people playing their clips (ADR 0046 S23 C): each person its spawn poses (MissionPoses, DI-38) whose
+// item's move_function binds the org1 physics row ticked on from its spawn by the game's own org1 motor head
+// (world::infantry_org1_motor_head: the primary's state copied into the secondary's request, then the AnimMap dual
+// update), one tick a tick of the preview clock, from the tick of the clock it was posed at; another row's body
+// (org0, whose update is a nullsub) stands as its warmup left it. Each tick's event word is what the body's sound
+// block and its fire pass read that tick (the mission view hears the people's footsteps and foley with Listen on). The editor's
 // choice beside the game's: the think does not run, so a person plays the state its spawn requested on and on (a
 // route's walk in place, an idle's variants as its ring serves them), the clock's ticks standing in for the world's.
 class MissionPeople {

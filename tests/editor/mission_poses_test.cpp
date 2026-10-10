@@ -71,12 +71,13 @@ std::string fixture(const std::string &rel) {
 constexpr const char *kPeopleAdm = "anim_reset\t\"idle\"\r\nanim_idle\t\"idle\" \"walk\"\r\nanim_idle_2\t\"idle\"\r\n"
 								   "anim_walk_forward\t\"walk\"\r\nanim_guard\t\"walk\"\r\n";
 
-// The persons: a rifleman (org1, aidata, the table), a civilian (org1, the table, no aidata), a player
-// (plyr), a statue (org1, aidata, no table), a pilot (org1, aidata, a table the project lacks).
+// The persons: a rifleman (org1, its body on the org1 row, aidata, the table), a civilian (org1, its body on
+// the org0 row, the table, no aidata), a player (plyr), a statue (org1, aidata, no table), a pilot (org1,
+// aidata, a table the project lacks).
 constexpr const char *kItems = "begin \"Spawn Rifleman\"\nid 106200\ntype person\ngraphic shed\nanim_def people\n"
-							   "ai_function org1\nattrib: aidata\nend\n"
+							   "move_function org1\nai_function org1\nattrib: aidata\nend\n"
 							   "begin \"Spawn Civilian\"\nid 106201\ntype person\ngraphic shed\nanim_def people\n"
-							   "ai_function org1\nend\n"
+							   "move_function org0\nai_function org1\nend\n"
 							   "begin \"Spawn Player\"\nid 106202\ntype person\ngraphic shed\nanim_def people\n"
 							   "ai_function plyr\nattrib: aidata\nend\n"
 							   "begin \"Spawn Statue\"\nid 106203\ntype person\ngraphic shed\nai_function org1\n"
@@ -226,6 +227,13 @@ struct WorldPeople {
 	double rise(world::EntityHandle handle) { return double(world.ai.for_handle(handle)->pos[2]) / 65536.0; }
 };
 
+// The next logic tick on which the org1 body of net id `id` does not think: its 16-tick think keys on the tick
+// plus 36 times the id [orig: Entity_UpdateInfantryAI @0x4b9948..0x4b9953].
+uint32_t tick_without_think(uint32_t tick, int id) {
+	while (((tick + 36u * uint32_t(id)) & 15u) == 0) ++tick;
+	return tick;
+}
+
 bool same(const world::InfantryBodyPose &a, const world::InfantryBodyPose &b) {
 	return a.state == b.state && a.phase == b.phase && a.variant == b.variant && a.parked == b.parked &&
 			a.blending == b.blending && a.source_state == b.source_state && a.source_phase == b.source_phase &&
@@ -351,10 +359,10 @@ static int test_poses() {
 		TEST_EXPECT(pose_of(0)->updates == 11 && pose_of(0)->pose.phase != phase);
 		// The catalog's table for the rifleman taken away outside the editor: those people stand.
 		std::string edited = kItems;
-		const std::string table = "anim_def people\nai_function org1\nattrib";
+		const std::string table = "anim_def people\nmove_function org1\nai_function org1\nattrib";
 		const size_t at = edited.find(table);
 		TEST_EXPECT(at != std::string::npos);
-		edited.replace(at, table.size(), "ai_function org1\nattrib");
+		edited.replace(at, table.size(), "move_function org1\nai_function org1\nattrib");
 		TEST_EXPECT(editor_test::write_text(rig.session.view().project.root + "/defs/items.def", edited));
 		rig.session.handle(request::rescan());
 		rig.session.run_operations();
@@ -462,9 +470,11 @@ static int test_retail() {
 }
 
 // S23 C: the people play their clips on the preview clock from their spawn: each tick of the clock a tick of every
-// posed body as the game's org1 motor head runs it before its think (world::organic_body_tick), in pool order over the
-// shared ring heads, so after each tick every body is the world's own body ticked so many times after its init, and the
-// event words are the world's; a clock gone back starts them again from their spawn.
+// posed body on the org1 physics row by the game's own org1 motor head (world::infantry_org1_motor_head), in pool order
+// over the shared ring heads, so after each tick every such body is the world's own body after its init and as many
+// ticks of the world's motor on ticks its think does not run, and the event words are the world's; a body on the org0
+// row (the civilian) stands as its warmup left it, as the game's nullsub leaves it; a clock gone back starts them again
+// from their spawn.
 static int test_people_play() {
 	Rig rig("opennova_editor_mission_people_play");
 	TEST_EXPECT(rig.open());
@@ -472,7 +482,7 @@ static int test_people_play() {
 	if (!viewport) return 1;
 	const MissionPeople &playing = viewport->people();
 	const std::vector<NodeAddress> rows = rig.organics();
-	TEST_EXPECT(playing.playing() == 7);
+	TEST_EXPECT(playing.playing() == 6);
 	WorldPeople people;
 	DirRigFiles files;
 	files.root = rig.session.view().project.root;
@@ -490,11 +500,12 @@ static int test_people_play() {
 	for (int32_t tick = 1; tick <= 240; ++tick) {
 		rig.session.advance(1.0 / 62.5);
 		rig.pump();
-		for (const world::EntityHandle body : bodies) {
-			world::RootMotionFrame frame;
-			world::AiEntity &entity = *people.world.ai.for_handle(body);
+		for (size_t i = 0; i < bodies.size(); ++i) {
+			if (kPeople[i].item != 106200) continue; // the civilian's org0 row runs no motor
+			world::AiEntity &entity = *people.world.ai.for_handle(bodies[i]);
 			const int32_t before = entity.inf.clip_phase;
-			if (world::organic_body_tick(entity.inf, &people.motion, people.world.ai.anim_rings, frame) != 0) ++world_events;
+			people.world.ai.update_organic(entity, people.world, tick_without_think(uint32_t(1000 + 16 * tick), kPeople[i].ssn));
+			if (entity.inf.last_events != 0) ++world_events;
 			wraps += entity.inf.clip_phase < before ? 1 : 0;
 		}
 		const int32_t played = rig.viewport()->people().tick() - start;
@@ -502,6 +513,11 @@ static int test_people_play() {
 		if (played != tick) return 1;
 		for (size_t i = 0; i < 7; ++i) {
 			const world::InfantryBodyPose *pose = rig.viewport()->people().pose(rows[i].row);
+			if (kPeople[i].item != 106200) {
+				TEST_EXPECT(!pose);
+				TEST_EXPECT(same(viewport->poses().pose(rows[i].row)->pose, people.pose(bodies[i])));
+				continue;
+			}
 			TEST_EXPECT(pose && same(*pose, people.pose(bodies[i])));
 		}
 	}
@@ -522,9 +538,10 @@ static int test_people_play() {
 	const uint64_t serial = rig.viewport()->people().serial();
 	MissionPeople again;
 	again.reset(viewport->poses(), 0);
-	TEST_EXPECT(again.playing() == 7);
+	TEST_EXPECT(again.playing() == 6);
 	for (size_t i = 0; i < 7; ++i)
-		TEST_EXPECT(same(*again.pose(rows[i].row), viewport->poses().pose(rows[i].row)->pose));
+		if (kPeople[i].item == 106200)
+			TEST_EXPECT(same(*again.pose(rows[i].row), viewport->poses().pose(rows[i].row)->pose));
 	TEST_EXPECT(again.run_to(viewport->poses(), -5) && again.tick() == -5 && again.started_at() == -5);
 	TEST_EXPECT(rig.viewport()->people().serial() == serial);
 	std::printf("test_people_play passed\n");
@@ -606,7 +623,7 @@ static int test_people_heard() {
 	TEST_EXPECT(steps > 0);
 	const JsonValue body = viewport_to_json(rig.session.view(), *rig.viewport(), JsonPage());
 	const JsonValue *people = body.get("body") ? body.get("body")->get("people") : nullptr;
-	TEST_EXPECT(people && people->get("playing") && people->get("playing")->number == 7.0);
+	TEST_EXPECT(people && people->get("playing") && people->get("playing")->number == 6.0);
 	std::printf("test_people_heard passed\n");
 	return 0;
 }

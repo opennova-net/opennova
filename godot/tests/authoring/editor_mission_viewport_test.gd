@@ -1344,7 +1344,7 @@ func _people_project() -> void:
 	var rifleman := "  id 106102\r\n  type person\r\n  graphic shed\r\n  anim_def soldier\r\n"
 	assert_true(items.contains(rifleman), "the fixture's rifleman")
 	items = items.replace(rifleman,
-			"  id 106102\r\n  type person\r\n  graphic person\r\n  anim_def soldier\r\n  ai_function org1\r\n  attrib: aidata\r\n")
+			"  id 106102\r\n  type person\r\n  graphic person\r\n  anim_def soldier\r\n  move_function org1\r\n  ai_function org1\r\n  attrib: aidata\r\n")
 	_write(items_path, items.to_utf8_buffer())
 	_copy_fixture("threedi/synth/person.3di", root.path_join("models").path_join("person.3di"))
 	for name in ["soldier.adm", "idle.bad", "walk.bad"]:
