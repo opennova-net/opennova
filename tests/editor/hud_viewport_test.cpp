@@ -647,6 +647,9 @@ int test_sights_and_board() {
 		            int(frame->scope_zero_word), int(frame->scope_magnification), double(frame->fov_h_deg));
 	}
 	TEST_EXPECT(viewport->scope_weapon() != nullptr);
+	// The aimed shot stamped as the game's input pack stamps it, the optical view up: the crosshair's gate shuts
+	// (the HUD draws none over the card, as the game's frame shows) and the spread reads the aimed row.
+	TEST_EXPECT(viewport->scope_weapon() && viewport->scope_weapon()->aimed_shot_available);
 	JsonValue state = rig.query("viewport", "{\"path\":\"" + rig.layout + "\",\"op\":\"state\"}");
 	const JsonValue *body = state.get("body");
 	const JsonValue *sights = body ? body->get("sights") : nullptr;
