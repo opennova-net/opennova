@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -12,6 +14,7 @@ namespace opennova::editor {
 
 class AssetGraph;
 struct JsonPage;
+struct SessionView;
 
 // The Place tool's palette (ADR 0046 S15, Placing and tweaking): every item a catalog of the project
 // defines, by its name, in a group of what the game makes of it, with the model its graphic loads,
@@ -70,5 +73,39 @@ MissionPalette mission_palette(const AssetGraph &graph, const std::string &filte
 // type, type_words, group, pool, model, file, recent}]}; the page reads the items in the sections'
 // order (a recent item twice: in Recent, and in its own group).
 io::JsonValue mission_palette_to_json(const MissionPalette &palette, const JsonPage &page);
+
+// An item's picture in the palette (ADR 0046 S23 C, the palette's thumbnails): its model seen from the side, the
+// elevation the map's derivation makes of it (mission_model_outline, MissionOutlineView::Side: the edges of the faces
+// that look at the viewer, a coarser LOD's past kMissionOutlineEdgesMax), lines in metres (forward, up). An editor's
+// picture, not the game's: drawn from the model's own mesh in lines, as the 2D map draws a model's plan, so a row needs
+// no device build of its own.
+struct MissionPalettePicture {
+	std::string model; // the project's model file
+	bool read = false; // the model read (false: a file that does not read as a model, no picture)
+	std::vector<float> lines; // four words a line: (forward, up) to (forward, up)
+	float lo[2] = { 0.0f, 0.0f }, hi[2] = { 0.0f, 0.0f }; // the lines' box
+	uint64_t stamp = 0;
+};
+
+// The palette's pictures (the texture thumbnails' pattern, preview/texture_thumbnails): each model's made once while
+// its file's stamp stands, made off the frame: one asked for and not made is queued, the last picture of it (if any)
+// answering meanwhile, and step() makes the queue's within the frame's budget.
+class MissionPalettePictures {
+public:
+	// The picture of `model` (a project file): the one made while its stamp stands; else it is queued and the last made
+	// answers (null for none yet).
+	std::shared_ptr<const MissionPalettePicture> get(const SessionView &view, const std::string &model) const;
+	// Makes the queued pictures, one at least, until `budget_us` microseconds have gone: true when one was made.
+	bool step(const SessionView &view, int64_t budget_us);
+	bool pending() const { return !queue_.empty(); }
+	// How many pictures it made in all (a test counts what a stamp saves).
+	size_t made() const { return made_; }
+	void clear();
+
+private:
+	mutable std::map<std::string, std::shared_ptr<const MissionPalettePicture>> pictures_;
+	mutable std::vector<std::string> queue_;
+	size_t made_ = 0;
+};
 
 } // namespace opennova::editor

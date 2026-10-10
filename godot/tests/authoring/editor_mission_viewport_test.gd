@@ -1344,7 +1344,7 @@ func _people_project() -> void:
 	var rifleman := "  id 106102\r\n  type person\r\n  graphic shed\r\n  anim_def soldier\r\n"
 	assert_true(items.contains(rifleman), "the fixture's rifleman")
 	items = items.replace(rifleman,
-			"  id 106102\r\n  type person\r\n  graphic person\r\n  anim_def soldier\r\n  ai_function org1\r\n  attrib: aidata\r\n")
+			"  id 106102\r\n  type person\r\n  graphic person\r\n  anim_def soldier\r\n  move_function org1\r\n  ai_function org1\r\n  attrib: aidata\r\n")
 	_write(items_path, items.to_utf8_buffer())
 	_copy_fixture("threedi/synth/person.3di", root.path_join("models").path_join("person.3di"))
 	for name in ["soldier.adm", "idle.bad", "walk.bad"]:
@@ -1398,6 +1398,12 @@ func test_people_posed_as_they_spawn() -> void:
 	state = _state()
 	assert_gt(int(state.get("builds", 0)), before, "built again")
 	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	# The people play their clips on the clock (S23 C): held at its start, they stand at their spawn.
+	assert_true(_change({"kind": "mission", "clock": {"playing": false, "ticks": 0}}))
+	for _frame in 3:
+		await get_tree().process_frame
+		_app.pump()
+	state = _state()
 	assert_eq(int(state.get("body", {}).get("posed", -1)), 2, "both people posed")
 	var walking := {}
 	var standing := {}
@@ -1444,6 +1450,63 @@ func test_people_posed_as_they_spawn() -> void:
 	assert_eq(_person_model(walking), model, "the same model")
 	if model != null:
 		_assert_posed(model, now["pose"], "idle now")
+
+
+## S23 C: the people play their clips on the preview clock from their spawn, the device posing each person's model by
+## its body as it plays now (its pose's `now` on the wire); held, they hold; a seek back to the start stands them at
+## their spawn again.
+func test_people_play_their_clips() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	var before := int(state.get("builds", 0))
+	_people_project()
+	for _frame in 900:
+		state = _state()
+		if String(state.get("status", "")) == "ready" and int(state.get("builds", 0)) > before:
+			break
+		await get_tree().process_frame
+	assert_true(_change({"kind": "mission", "clock": {"playing": true, "rate": 1}}))
+	for _frame in 30:
+		await get_tree().process_frame
+		_app.pump()
+	assert_true(_change({"kind": "mission", "clock": {"playing": false}}))
+	for _frame in 3:
+		await get_tree().process_frame
+		_app.pump()
+	state = _state()
+	var people: Dictionary = state.get("body", {}).get("people", {})
+	assert_eq(int(people.get("playing", -1)), 2, str(people))
+	assert_gt(int(people.get("tick", 0)), int(people.get("started_at", 0)), "played on: %s" % str(people))
+	var played := 0
+	for row: Variant in state.get("items", []):
+		var mark: Dictionary = row
+		if String(mark.get("kind", "")) != "organic":
+			continue
+		var now: Dictionary = mark.get("pose", {}).get("now", {})
+		assert_false(now.is_empty(), str(mark.get("pose", {})).left(300))
+		var model := _person_model(mark)
+		assert_not_null(model)
+		if model == null or now.is_empty():
+			continue
+		_assert_posed(model, now, String(mark.get("name", "")) + " now")
+		if int(now["playing"].get("phase", -1)) != int(mark["pose"]["playing"].get("phase", -1)):
+			played += 1
+	assert_eq(played, 2, "both played on from their spawn")
+	# A seek back to the start: at their spawn again.
+	assert_true(_change({"kind": "mission", "clock": {"ticks": 0}}))
+	for _frame in 3:
+		await get_tree().process_frame
+		_app.pump()
+	state = _state()
+	for row: Variant in state.get("items", []):
+		var mark: Dictionary = row
+		if String(mark.get("kind", "")) != "organic":
+			continue
+		var model := _person_model(mark)
+		if model != null:
+			_assert_posed(model, mark["pose"], String(mark.get("name", "")) + " at its spawn")
 
 
 ## DI-31: the device draws single-sampled (the particle renderer's passes bind its depth, DI-14's rule) and
@@ -1647,6 +1710,83 @@ func test_the_shoot_tool_plays_its_impacts() -> void:
 	assert_true(again, "a shot after the clear stops: %s" % str(_state().get("body", {}).get("shots", {})).left(400))
 
 
+## S23 C: a shot that destroys an item swaps its husk in, as the game's destruction presenter does. The pump made a
+## one-hit-point gnrc with the shed as its husk: shot from above, it dies, and its death's swap tick on (the gnrc's
+## four-tick think) its retained static's rows are hidden and the husk grafted where it stands; Clear shots lets the
+## husk go and shows the pump again.
+func test_a_shot_swaps_in_the_husk() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	var root: String = _seam.get_project_root()
+	var items_path := root.path_join("defs").path_join("items.def")
+	var items := FileAccess.get_file_as_string(items_path)
+	const PUMP := "  id 106100\r\n  type object\r\n  graphic crate\r\n"
+	assert_true(items.contains(PUMP), "the fixture's pump")
+	items = items.replace(PUMP, PUMP + "  husk shed\r\n  ai_function gnrc\r\n  hp 1\r\n")
+	_write(items_path, items.to_utf8_buffer())
+	_write(root.path_join("defs/ammo.def"), TestFs.crlf("ammo AT_NULL\nend\nammo AMMO_T\n\tvelocity 800\n\tmax_age 2\n"
+			+ "\tweight_in_grains 62\n\tscar_type 1\nend\n").to_utf8_buffer())
+	var before := int(state.get("builds", 0))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps")
+	for _frame in 900:
+		state = _state()
+		if String(state.get("status", "")) == "ready" and int(state.get("builds", 0)) > before:
+			break
+		await get_tree().process_frame
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	var pump := {}
+	for row: Variant in state.get("items", []):
+		if int((row as Dictionary).get("item", 0)) == 106100:
+			pump = row
+			break
+	assert_false(pump.is_empty(), "a pump in the mission")
+	if pump.is_empty():
+		return
+	assert_true(bool(_ask({"kind": "edit_in_viewport", "command": {"name": "ground", "kind": "mission",
+			"ids": [int(pump["id"])]}}).get("outcome", {}).get("done", false)))
+	pump = _mark_of(_state(), int(pump["id"]))
+	var at := _vector(pump.get("at"))
+	var placer: MissionObjectPlacer = _app.get_mission_placer(MISSION_PATH)
+	var key := int(_app.get_mission_entity_key(MISSION_PATH, int(pump["id"])))
+	assert_gt(key, 0, "the pump placed")
+	assert_false(placer.is_static_instance_hidden(key), "a retained static, shown")
+	assert_true(_change({"kind": "mission", "shot": {"ammo": "AMMO_T", "at": [at.x, at.y, at.z],
+			"eye": [at.x, at.y, at.z + 60.0]}, "clock": {"playing": true}}))
+	var husk: ObjectModel = null
+	var deaths: Array = []
+	for _frame in 300:
+		_app.pump()
+		await get_tree().process_frame
+		deaths = _state().get("body", {}).get("shots", {}).get("deaths", [])
+		var found := _device(_state()).find_children("HuskModel_%d" % int(pump["id"]), "ObjectModel", true, false)
+		if not found.is_empty():
+			husk = found[0]
+			break
+	assert_eq(deaths.size(), 1, "the pump destroyed: %s" % str(_state().get("body", {}).get("shots", {}).get("events", [])).left(500))
+	if not deaths.is_empty():
+		assert_eq(String((deaths[0] as Dictionary).get("husk", "")), "shed")
+		assert_true(bool((deaths[0] as Dictionary).get("swaps", false)))
+	assert_not_null(husk, "the husk swapped in")
+	if husk == null:
+		return
+	assert_eq(String(husk.get_graphic_name()).to_lower(), "shed")
+	assert_true(placer.is_static_instance_hidden(key), "the pump's rows hidden under the husk")
+	var placed := MissionObjectPlacer.bms_to_godot_position(at)
+	assert_almost_eq(husk.transform.origin, placed, Vector3(0.01, 0.01, 0.01), "the husk where the pump stands")
+	# Clear shots: the husk goes, the pump shows again.
+	assert_true(bool(_ask({"kind": "edit_in_viewport", "command": {"name": "clear_shots", "kind": "mission"}})
+			.get("outcome", {}).get("done", false)))
+	for _frame in 5:
+		_app.pump()
+		await get_tree().process_frame
+	assert_false(placer.is_static_instance_hidden(key), "the pump shown again")
+	assert_true(_device(_state()).find_children("HuskModel_%d" % int(pump["id"]), "ObjectModel", true, false).is_empty()
+			or not is_instance_valid(husk) or husk.is_queued_for_deletion(), "the husk let go")
+
+
 ## DI-36: the Listen. The fixture's four waypoint markers made the game's env-sound emitters of a set the
 ## project's bank holds: listening near one, the viewport's mix binds each marker's layer to one of the game's
 ## channels, and the device plays each looping at its marker (an AudioStreamPlayer3D under its world, no
@@ -1714,3 +1854,179 @@ func test_the_listen_plays_the_mixs_channels() -> void:
 		await get_tree().process_frame
 	assert_eq(_state().get("body", {}).get("listen"), null, "off: no listen")
 	assert_eq(device.find_children("ListenChannel", "AudioStreamPlayer3D", true, false).size(), 0, "off: no voice")
+
+
+## S23 C: the mission's 2D map (kind "map"), the Preview window's beside the 3D view, the state of it.
+func _map_state() -> Dictionary:
+	return _viewport("state", {"limit": 200, "kind": "map"})
+
+
+func _await_map() -> Dictionary:
+	var state := _map_state()
+	for _frame in 900:
+		if String(state.get("status", "")) == "ready" and bool(state.get("device", {}).get("attached", false)) \
+				and int(state.get("builds", 0)) > 0:
+			break
+		await get_tree().process_frame
+		state = _map_state()
+	_app.pump()
+	return _map_state()
+
+
+## S23 C: the map's device draws the game's commander map pass over the project's files: the runtime's HudOverlay
+## holds its state (the terrain read, the project's HUD layout), the pass's terrain triangles drawn into the
+## SubViewport's canvas; a pin per entity and area, each where the CMAP's projection puts it (its scale the CMAP's
+## law, zoom x 65536 over the picture's width x 200 metres a pixel, north up about the picture's middle).
+func test_the_map_draws_the_commander_map() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_map()
+	assert_eq(String(state.get("kind", "")), "map", str(state))
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	assert_eq(state.get("items", []).size(), 14, "a pin per entity and area")
+	var body: Dictionary = state.get("body", {})
+	assert_true(bool(body.get("surface", false)), "the terrain read: %s" % str(body))
+	var drawn: Dictionary = body.get("drawn", {})
+	assert_true(bool(drawn.get("visible", false)), str(drawn))
+	assert_gt(int(drawn.get("terrain_tris", 0)), 0, "the commander map's terrain drawn")
+	var device := _device(state)
+	assert_not_null(device, "the map's device")
+	if device == null:
+		return
+	var overlay := device.find_child("MapState", true, false) as HudOverlay
+	assert_not_null(overlay, "the HUD overlay holding the map's state")
+	assert_not_null(device.find_child("Map", true, false) as Control, "the canvas the pass draws under")
+	var width := float(state.get("device", {}).get("width", 0))
+	var height := float(state.get("device", {}).get("height", 0))
+	assert_gt(width, 1.0)
+	var camera: Dictionary = state.get("camera", {})
+	var zoom := float(camera.get("zoom", 0))
+	var scale := zoom * 65536.0 / (width * 200.0)
+	assert_almost_eq(float(body.get("scale", 0)), scale, scale * 1e-3, "the CMAP's scale")
+	var center: Array = camera.get("center", [0, 0])
+	for row: Variant in state.get("items", []):
+		var pin: Dictionary = row
+		var at: Array = pin.get("at", [0, 0])
+		var screen: Array = pin.get("screen", [0, 0])
+		var x := width * 0.5 + (float(at[0]) - float(center[0])) / scale
+		var y := height * 0.5 - (float(at[1]) - float(center[1])) / scale
+		assert_almost_eq(float(screen[0]), x, 1.0, "pin %s x" % pin.get("name"))
+		assert_almost_eq(float(screen[1]), y, 1.0, "pin %s y" % pin.get("name"))
+	# The zoom on the wire: the CMAP's ZOOMIN step, the pass drawn again at it.
+	var tris := int(drawn.get("terrain_tris", 0))
+	assert_true(bool(_ask({"kind": "edit_in_viewport", "command": {"name": "zoom_in", "kind": "map"}})
+			.get("outcome", {}).get("done", false)))
+	_app.pump()
+	state = _map_state()
+	assert_lt(float(state.get("camera", {}).get("zoom", 0)), zoom, "zoomed in: fewer metres across")
+	assert_gt(int(state.get("body", {}).get("drawn", {}).get("terrain_tris", 0)), 0, "drawn again (%d before)" % tris)
+
+
+## S23 C: the map and the 3D view are one document's: a pin hit on the map, selected, is the selection both ring; a
+## drag of a pin over the wire is the 3D view's move to the point under the pointer (stick: its height over the map
+## device's ground kept), one undo step, the 3D view's mark moved with it.
+func test_the_map_and_the_3d_view_share_a_selection_and_a_drag() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var mission := await _await_ready()
+	assert_eq(String(mission.get("status", "")), "ready", str(mission))
+	var state := await _await_map()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var terrain: Terrain = _device_node(mission, "Terrain")
+	assert_not_null(terrain)
+	if terrain == null:
+		return
+	var data: TerrainData = terrain.get_terrain_data()
+	var pin := _first_item(state)
+	assert_false(pin.is_empty())
+	if pin.is_empty():
+		return
+	var id := int(pin["id"])
+	var hit := _viewport("hit", {"x": float(pin["screen"][0]), "y": float(pin["screen"][1]), "kind": "map"})
+	assert_eq(int(hit.get("id", 0)), id, str(hit))
+	assert_true(_seam.select_record(id))
+	_app.pump()
+	assert_true(bool(_mark_of(_map_state(), id).get("selected", false)), "the map rings it")
+	assert_true(bool(_mark_of(_state(), id).get("selected", false)), "the 3D view rings it")
+	assert_eq(_map_state().get("body", {}).get("selected", []), [id])
+	# The drag: 30 pixels east, 20 north.
+	var before := _vector(_mark_of(_state(), id).get("at"))
+	var clearance := before.z - _ground(data, before.x, before.y)
+	var scale := float(state.get("body", {}).get("scale", 1))
+	var moved: Dictionary = _ask({"kind": "edit_in_viewport",
+			"drag": {"id": id, "handle": "move", "by": [30, -20], "kind": "map"}})
+	assert_true(bool(moved.get("outcome", {}).get("done", false)), str(moved))
+	var after := _vector(_mark_of(_state(), id).get("at"))
+	assert_almost_eq(after.x, before.x + 30.0 * scale, 0.01, "east by the pixels")
+	assert_almost_eq(after.y, before.y + 20.0 * scale, 0.01, "north by the pixels")
+	assert_almost_eq(after.z, _ground(data, after.x, after.y) + clearance, 0.002, "stick: its height over the ground")
+	var on_map: Dictionary = _mark_of(_map_state(), id)
+	assert_almost_eq(float(on_map.get("at", [0, 0])[0]), after.x, 0.001, "the map's pin moved with it")
+	_seam.undo()
+	_app.pump()
+	assert_true(_vector(_mark_of(_state(), id).get("at")).is_equal_approx(before), "undone in one step")
+	# A handle the map has not: refused, naming the 3D view.
+	var refused: Dictionary = _ask({"kind": "edit_in_viewport",
+			"drag": {"id": id, "handle": "yaw", "by": [30, 0], "kind": "map"}})
+	assert_false(bool(refused.get("outcome", {}).get("done", true)), str(refused))
+
+
+## S23 C (the maintainer's ask): the map draws each placed model as its wireframe seen from above, on its device (the
+## Outlines node's lines, as many edges as the viewport draws), each footprint where the 3D view's device places the
+## model: the vertices of its LOD 0 mesh carried by the placement's transform, seen from above, span the footprint.
+func test_the_map_draws_the_models_from_above() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var mission := await _await_ready()
+	assert_eq(String(mission.get("status", "")), "ready", str(mission))
+	var state := await _await_map()
+	for _frame in 120:
+		if int(state.get("body", {}).get("outlines", {}).get("pending", 1)) == 0:
+			break
+		await get_tree().process_frame
+		_app.pump()
+		state = _map_state()
+	_app.pump()
+	state = _map_state()
+	var outlines: Dictionary = state.get("body", {}).get("outlines", {})
+	assert_eq(int(outlines.get("pending", -1)), 0, str(outlines))
+	assert_gt(int(outlines.get("edges", 0)), 0, str(outlines))
+	assert_eq(int(state.get("body", {}).get("drawn", {}).get("outline_edges", -1)), int(outlines.get("edges", 0)))
+	assert_not_null(_device(state).find_child("Outlines", true, false), "the wireframes' node")
+	var placer: MissionObjectPlacer = _mission_device().get("placer")
+	assert_not_null(placer)
+	if placer == null:
+		return
+	var compared := 0
+	for row: Variant in state.get("items", []):
+		var pin: Dictionary = row
+		if not pin.has("footprint"):
+			continue
+		var mark := _mark_of(mission, int(pin["id"]))
+		var data: ObjectData = placer.object_data_for(placer.graphic_for(int(mark.get("item", 0))))
+		if data == null:
+			continue
+		var at := _placed_transform(placer, mark)
+		var lo := Vector2(INF, INF)
+		var hi := Vector2(-INF, -INF)
+		for surface: Variant in data.build_lod_submeshes(0):
+			var mesh := (surface as Dictionary).get("mesh") as ArrayMesh
+			for index in mesh.get_surface_count():
+				for vertex: Vector3 in mesh.surface_get_arrays(index)[Mesh.ARRAY_VERTEX]:
+					var p := MissionObjectPlacer.godot_to_bms_position(at * vertex)
+					lo = lo.min(Vector2(p.x, p.y))
+					hi = hi.max(Vector2(p.x, p.y))
+		var flo := Vector2(INF, INF)
+		var fhi := Vector2(-INF, -INF)
+		for corner: Variant in pin["footprint"]:
+			flo = flo.min(Vector2(float(corner[0]), float(corner[1])))
+			fhi = fhi.max(Vector2(float(corner[0]), float(corner[1])))
+		assert_almost_eq(flo.x, lo.x, 0.01, "%s west" % pin.get("name"))
+		assert_almost_eq(flo.y, lo.y, 0.01, "%s south" % pin.get("name"))
+		assert_almost_eq(fhi.x, hi.x, 0.01, "%s east" % pin.get("name"))
+		assert_almost_eq(fhi.y, hi.y, 0.01, "%s north" % pin.get("name"))
+		compared += 1
+	assert_gt(compared, 1, "the placed models compared")
