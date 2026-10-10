@@ -1,11 +1,13 @@
 #include "document_types.h"
 
+#include <editor/documents/ai_profile_document.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/avatars_document.h>
 #include <editor/documents/catalog_labels.h>
 #include <editor/documents/catalog_validation.h>
 #include <editor/documents/menu_labels.h>
-#include <editor/documents/charattr_type.h>
+#include <editor/documents/charattr_document.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/dialog_bank_document.h>
@@ -15,6 +17,7 @@
 #include <editor/documents/music_bank_document.h>
 #include <editor/documents/wave_document.h>
 #include <editor/documents/hud_layout_type.h>
+#include <editor/documents/hudfx_document.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_validation.h>
@@ -24,6 +27,7 @@
 #include <editor/documents/model_labels.h>
 #include <editor/documents/music_script_type.h>
 #include <editor/documents/particle_type.h>
+#include <editor/documents/score_document.h>
 #include <editor/documents/script_type.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/sound_profile_document.h>
@@ -63,6 +67,11 @@ std::unique_ptr<DocumentBase> make_dialog_bank() { return std::make_unique<Dialo
 std::unique_ptr<DocumentBase> make_face_animation() { return std::make_unique<FaceAnimationDocument>(); }
 std::unique_ptr<DocumentBase> make_font() { return std::make_unique<FontDocument>(); }
 std::unique_ptr<DocumentBase> make_music_bank() { return std::make_unique<MusicBankDocument>(); }
+std::unique_ptr<DocumentBase> make_ai_profile() { return std::make_unique<AiProfileDocument>(); }
+std::unique_ptr<DocumentBase> make_hudfx() { return std::make_unique<HudFxDocument>(); }
+std::unique_ptr<DocumentBase> make_charattr() { return std::make_unique<CharAttrDocument>(); }
+std::unique_ptr<DocumentBase> make_score() { return std::make_unique<ScoreDocument>(); }
+std::unique_ptr<DocumentBase> make_avatars() { return std::make_unique<AvatarsDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -87,9 +96,11 @@ constexpr DocumentType kTypes[] = {
 			model_finding_codes, nullptr, nullptr, nullptr, model_record_label, model_value_label },
 	{ DocumentTypeId::Animation, "animation", make_animation, validate_animation_file,
 			AnimationDocument::schema, animation_finding_codes },
+	// A map defines a slot a weapon action names and it lacks (DI-15, define_symbol; S23 B).
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,
 			validate_animation_map_file, AnimationMapDocument::schema,
-			animation_map_finding_codes },
+			animation_map_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, define_animation_slot },
 	// The mission (S14): its records' references no field's value is are its record_references (the
 	// text keys a record's number forms); its records and values in a modder's words, and briefly for a
 	// narrow column (S15); its project check, what the game grounds where (DI-28).
@@ -101,10 +112,12 @@ constexpr DocumentType kTypes[] = {
 	// the script device's highlights, preview/script_viewport's table).
 	{ DocumentTypeId::Script, "script", make_script_document, validate_script_file, text_fields,
 			script_finding_codes, nullptr, script_references },
+	// The music script's plays name its bank's streams by their places (S23 B).
 	{ DocumentTypeId::MusicScript, "music_script", make_music_script_document,
-			validate_music_script_file, text_fields, music_script_finding_codes },
+			validate_music_script_file, text_fields, music_script_finding_codes, nullptr, music_script_references },
+	// The credits' text names the images its lines draw and the fonts its text lines draw in.
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
-			text_fields, credits_finding_codes },
+			text_fields, credits_finding_codes, nullptr, credits_references },
 	// The shader's text defines the tags it registers (its EffectTag; _ffp.fx the fixed-function tags).
 	{ DocumentTypeId::Shader, "shader", make_shader_document, validate_shader_file, text_fields,
 			shader_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
@@ -151,12 +164,11 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::DialogBank, "dialog_bank", make_dialog_bank, validate_dialog_bank_file, DialogBankDocument::schema,
 			dialog_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, define_dialog },
-	// The character attributes (DI-09's charattr follow-up): charattr.def held as its text, its line ends the
-	// ConfigFile reader's; its references each class's camouflage items, as the game's loader reads them; the
-	// lines that loader reads the same without, which the ConfigFile pool rule's fix comments out.
-	{ DocumentTypeId::CharAttrs, "charattr", make_charattr_document, validate_charattr_file, text_fields,
-			charattr_finding_codes, nullptr, charattr_references, nullptr, nullptr, nullptr, nullptr,
-			nullptr, nullptr, nullptr, nullptr, charattr_idle_lines },
+	// The character attributes (DI-09's charattr follow-up; S23 B its rows): charattr.def's classes, each its keys
+	// as the loader reads them, a camouflage item an items.def item by its id less 100000; the ConfigFile pool rule's
+	// finding its validator's, over the text its save writes.
+	{ DocumentTypeId::CharAttrs, "charattr", make_charattr, validate_charattr_file, CharAttrDocument::schema,
+			charattr_finding_codes },
 	// The face animation (round S23 lane A): a .grm's face over grm::File, its references its texture fields' (each
 	// name made .TGA by the stage loader) and the base's .MDT twin; a triangle names its vertices by index.
 	{ DocumentTypeId::FaceAnimation, "face_animation", make_face_animation, validate_face_animation_file,
@@ -168,11 +180,24 @@ constexpr DocumentType kTypes[] = {
 	// The music bank (round S23 lane A): a .sbf's header and its streams over the engine's reader and writer, each
 	// stream's chunks as read; it names nothing (the music script plays its streams by place).
 	{ DocumentTypeId::MusicBank, "music_bank", make_music_bank, validate_music_bank_file, MusicBankDocument::schema,
-			music_bank_finding_codes },
+			music_bank_finding_codes, nullptr, nullptr, music_bank_references },
 	// The wave (round S23 lane A): a .wav held as its bytes, its facts and the game loader's verdict its content on the
 	// wire, the one place a wave the loader refuses is found (asset.wave_unplayable); trimmed and normalised whole.
 	{ DocumentTypeId::Wave, "wave", make_wave_document, validate_wave_file, wave_fields, wave_finding_codes, nullptr,
 			nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, wave_content_json },
+	// The AI profile (S23 B): an .aip's one profile, its keys the reader's in the units the file writes them, each
+	// read by its type's key set; a weapon an ammo's name.
+	{ DocumentTypeId::AiProfile, "ai_profile", make_ai_profile, validate_ai_profile_file, AiProfileDocument::schema,
+			ai_profile_finding_codes },
+	// The HUD effects (S23 B): hudfx.def's model lines, the first the one the game reads, a model by its file.
+	{ DocumentTypeId::HudFx, "hudfx", make_hudfx, validate_hudfx_file, HudFxDocument::schema, hudfx_finding_codes },
+	// The score table (S23 B): score.ini's game type blocks, each its scoreboard columns and the points each event
+	// scores, written in ScoreConfig_SaveFile's form.
+	{ DocumentTypeId::ScoreTable, "score", make_score, validate_score_file, ScoreDocument::schema, score_finding_codes },
+	// The avatars table (S23 B): Avatars.def's parts and nationalities, a part's name what a combination after it
+	// names, its shown name a key of Game.bin's Avatars section, its models files.
+	{ DocumentTypeId::Avatars, "avatars", make_avatars, validate_avatars_file, AvatarsDocument::schema,
+			avatars_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
