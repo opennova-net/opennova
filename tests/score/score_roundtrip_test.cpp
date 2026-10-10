@@ -181,25 +181,25 @@ int main(int argc, char **argv) {
 	} else {
 		const std::vector<uint8_t> rbytes = test_io::read_file(retail_ini.c_str());
 		TEST_EXPECT(!rbytes.empty());
-		score::File rfile;
-		TEST_EXPECT(score::parse(rbytes.data(), rbytes.size(), rfile, error));
-		TEST_EXPECT(rfile.blocks.size() == 12);
-		const score::GameTypeBlock *rcoop = score::block_at(rfile, 2);
-		TEST_EXPECT(rcoop != nullptr && rcoop->name == "COOP");
+			score::File rfile;
+			TEST_EXPECT(score::parse(rbytes.data(), rbytes.size(), rfile, error));
+			TEST_EXPECT(rfile.blocks.size() == 12);
+			const score::GameTypeBlock *rcoop = score::block_at(rfile, 2);
+			TEST_EXPECT(rcoop != nullptr && rcoop->name == "COOP");
 		if (rcoop != nullptr) TEST_EXPECT(score::var_value(*rcoop, "ENEMYKILL", -1) == 5);
-		// The 0 -> 2 remap is only unobservable because the shipped blocks
-		// 0 and 2 agree; assert that rather than assume it.
-		const score::GameTypeBlock *r0 = score::block_at(rfile, 0);
-		if (r0 != nullptr && rcoop != nullptr) {
-			score::File a, b;
-			a.blocks.push_back(*r0);
-			b.blocks.push_back(*rcoop);
-			TEST_EXPECT(score::equal(a, b));
-		}
+			// The 0 -> 2 remap is only unobservable because the shipped blocks
+			// 0 and 2 agree; assert that rather than assume it.
+			const score::GameTypeBlock *r0 = score::block_at(rfile, 0);
+			if (r0 != nullptr && rcoop != nullptr) {
+				score::File a, b;
+				a.blocks.push_back(*r0);
+				b.blocks.push_back(*rcoop);
+				TEST_EXPECT(score::equal(a, b));
+			}
 		// The writer's own form is the shipped file, byte for byte: the game wrote it [orig: ScoreConfig_SaveFile @
 		// 0x52CDD0].
-		std::vector<uint8_t> renc;
-		TEST_EXPECT(score::write(rfile, renc, error));
+			std::vector<uint8_t> renc;
+			TEST_EXPECT(score::write(rfile, renc, error));
 		TEST_EXPECT(renc == rbytes);
 		textlayout::Notes notes;
 		score::File noted;

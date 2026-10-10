@@ -709,7 +709,7 @@ static int fields_refused(const AvatarsFile *file) {
         }
     }
     return 0;
-}
+    }
 
 static int hand_out(const std::string &text, char **out_data, size_t *out_size) {
     char *buf = (char *)malloc(text.size() + 1);
@@ -719,7 +719,7 @@ static int hand_out(const std::string &text, char **out_data, size_t *out_size) 
     *out_data = buf;
     *out_size = text.size();
     return 0;
-}
+    }
 
 int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size) {
     return avatars_write(file, nullptr, out_data, out_size, nullptr);
@@ -744,7 +744,7 @@ int avatars_write(const AvatarsFile *file, const textlayout::Notes *notes, char 
         if (!same) {
             text = textlayout::compose(nullptr, root, textlayout::cut_ascii_walk, "\r\n");
             if (rewritten) *rewritten = true;
-        }
+    }
     }
     return hand_out(text, out_data, out_size);
 }

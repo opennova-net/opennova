@@ -158,17 +158,17 @@ bool records_of(const Table &table, const textlayout::Notes *notes, textlayout::
 	return true;
 }
 
-// The ConfigFile reader clears a pool of the words' bytes one byte per value: a file of more values than that
-// pool overruns the game's heap [orig: ConfigFile_ParseText @ 0x7609e8], so it is refused, never written.
+	// The ConfigFile reader clears a pool of the words' bytes one byte per value: a file of more values than that
+	// pool overruns the game's heap [orig: ConfigFile_ParseText @ 0x7609e8], so it is refused, never written.
 bool pool_fits(const std::string &text, std::string &error) {
 	const configfile::DataStringsPool pool =
 			configfile::data_strings_pool(reinterpret_cast<const uint8_t *>(text.data()), text.size());
 	if (pool.overrun() == 0) return true;
-	error = "The file would hold " + std::to_string(pool.values) + " values against " +
-	        std::to_string(pool.string_bytes) + " bytes of words (a " + std::to_string(pool.pool_bytes) +
-	        "-byte buffer): the game's ConfigFile reader would clear " + std::to_string(pool.overrun()) +
-	        " bytes past that buffer into the game's heap (ConfigFile_ParseText @ 0x7609e8). Fewer keys away "
-	        "from 0 would fit it.";
+		error = "The file would hold " + std::to_string(pool.values) + " values against " +
+		        std::to_string(pool.string_bytes) + " bytes of words (a " + std::to_string(pool.pool_bytes) +
+		        "-byte buffer): the game's ConfigFile reader would clear " + std::to_string(pool.overrun()) +
+		        " bytes past that buffer into the game's heap (ConfigFile_ParseText @ 0x7609e8). Fewer keys away "
+		        "from 0 would fit it.";
 	return false;
 }
 

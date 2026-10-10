@@ -329,15 +329,15 @@ bool records_of(const Profile &profile, textlayout::OutRecord &now, std::string 
 }
 
 Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::vector<UnreadLine> *unread) {
-	// AIProfile_LoadOrFind reads the .aip through File_ParseASCIIFile
-	// (@ 0x45FE45), so the lines and tokens are the shared walk's
+    // AIProfile_LoadOrFind reads the .aip through File_ParseASCIIFile
+    // (@ 0x45FE45), so the lines and tokens are the shared walk's
 	// (io::for_each_config_line_span: CR LF only, the tokenizer's quotes, commas and
-	// comments); keys compare without case, and a value past the line's count
-	// reads "" as the reset token does (no value gate). Dispatch is gated on the
-	// active `type` exactly like retail: HELO (1) and GROUND (2) accept their key
-	// sets, ORGANIC (3) nothing.
-	// [orig: AIProfile_ParseProperty @ 0x45de70]
-	Profile prof;
+    // comments); keys compare without case, and a value past the line's count
+    // reads "" as the reset token does (no value gate). Dispatch is gated on the
+    // active `type` exactly like retail: HELO (1) and GROUND (2) accept their key
+    // sets, ORGANIC (3) nothing.
+    // [orig: AIProfile_ParseProperty @ 0x45de70]
+    Profile prof;
 	const char *chars = reinterpret_cast<const char *>(text);
 	textlayout::Noter noter(chars, size, notes, textlayout::cut_ascii_walk);
 	io::ConfigTokens tokens;
@@ -345,15 +345,15 @@ Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::v
 		noter.line(span.begin, span.end + 2);
 		// The walk's gate: no token, or a first token starting '/' [orig: File_ParseASCIIFile @0x53D915 / @0x53D91E].
 		if (line.count == 0 || line.tokens[0][0] == '/') return;
-		std::vector<std::string> toks;
-		for (int index = 0; index < line.count; ++index) toks.emplace_back(line.tokens[index]);
+        std::vector<std::string> toks;
+        for (int index = 0; index < line.count; ++index) toks.emplace_back(line.tokens[index]);
 		// A value past the line's count reads the reset token's "".
 		if (toks.size() < 2) toks.emplace_back(line.token(1));
 		const int32_t type = prof.type;
 		if (const KeyRow *row = apply_line(prof, toks)) {
 			noter.entry(noter.root(), row->key);
-			return;
-		}
+            return;
+        }
 		if (!unread) return;
 		UnreadLine line_read;
 		line_read.offset = span.begin;
@@ -375,7 +375,7 @@ Profile parse(const uint8_t *text, size_t size, textlayout::Notes *notes, std::v
 		records_of(prof, as_read, error, true);
 		textlayout::model(*notes, as_read, textlayout::cut_ascii_walk);
 	}
-	return prof;
+    return prof;
 }
 
 // The shortest decimal of `value` in a unit (`scale`: what a file's number is multiplied by) that the arm's
@@ -599,25 +599,25 @@ bool write_profile(const Profile &profile, const textlayout::Notes *notes, std::
 }
 
 ClassSpeeds class_speed_words(const Profile &profile, bool helicopter_init) {
-	ClassSpeeds out;
-	if (profile.type == 1) {
-		if (helicopter_init) {
-			out.speed_a = profile.helo_combat_speed; // +0xD4
-			out.speed_b = profile.helo_patrol_speed; // +0xC8
-		} else {
-			out.speed_a = profile.hunt_limit;                       // +0xC4
-			out.speed_b = static_cast<int32_t>(profile.hunt_flags); // +0xC0
-		}
-	} else if (profile.type == 2) {
-		if (helicopter_init) {
-			out.speed_a = profile.radio_delay;        // +0xD4
-			out.speed_b = profile.turn_rate_bam_tick; // +0xC8
-		} else {
-			out.speed_a = profile.ground_combat_speed; // +0xC4
-			out.speed_b = profile.ground_patrol_speed; // +0xC0
-		}
-	}
-	return out;
+    ClassSpeeds out;
+    if (profile.type == 1) {
+        if (helicopter_init) {
+            out.speed_a = profile.helo_combat_speed;                    // +0xD4
+            out.speed_b = profile.helo_patrol_speed;                    // +0xC8
+        } else {
+            out.speed_a = profile.hunt_limit;                           // +0xC4
+            out.speed_b = static_cast<int32_t>(profile.hunt_flags);     // +0xC0
+        }
+    } else if (profile.type == 2) {
+        if (helicopter_init) {
+            out.speed_a = profile.radio_delay;                          // +0xD4
+            out.speed_b = profile.turn_rate_bam_tick;                   // +0xC8
+        } else {
+            out.speed_a = profile.ground_combat_speed;                  // +0xC4
+            out.speed_b = profile.ground_patrol_speed;                  // +0xC0
+        }
+    }
+    return out;
 }
 
-} // namespace opennova::aip
+}  // namespace opennova::aip
