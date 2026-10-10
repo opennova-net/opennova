@@ -798,6 +798,13 @@ endif()
 add_test(NAME sbf_encode COMMAND sbf_encode_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+add_executable(sbf_bank_test sbf/sbf_bank_test.cpp)
+target_link_libraries(sbf_bank_test PRIVATE opennova_formats)
+target_include_directories(sbf_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_bank_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+add_test(NAME sbf_bank COMMAND sbf_bank_test)
+
 add_executable(sbf_roundtrip_test sbf/sbf_roundtrip_test.cpp)
 target_link_libraries(sbf_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(sbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
