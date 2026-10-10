@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -108,6 +109,12 @@ std::vector<uint8_t> text_body(const char *text, size_t size) {
 int16_t sample_at(const opennova::lwf::WavPcm &pcm, size_t frame) {
 	return static_cast<int16_t>(pcm.pcm16[frame * 2] |
 			(pcm.pcm16[frame * 2 + 1] << 8));
+}
+
+std::vector<int16_t> samples_of(const opennova::lwf::WavPcm &pcm) {
+	std::vector<int16_t> out(pcm.pcm16.size() / 2);
+	for (size_t i = 0; i < out.size(); ++i) out[i] = sample_at(pcm, i);
+	return out;
 }
 
 }  // namespace
@@ -311,41 +318,104 @@ int main() {
 				"8-bit: the declared size, the present samples")) return 1;
 	}
 
-	// AOA1's sample count excludes interpolation padding and PCM8 is SIGNED.
+	// The loader's own buffer, AUD1 (bytes 41 55 44 31), copied unchecked
+	// [orig: Audio_LoadWavFileFromArchive @ 0x7664e2, @ 0x7664e9..0x766511], read
+	// as the mixer reads it: the count at +4 (sub_7BD671 @ 0x7bd67f), the Q16
+	// pitch at +8 (AudioChannel_ComputeMixCoefficients @ 0x7bd603), signed
+	// samples from +16, 16-bit where +12 is 2 and 8-bit for any other byte there
+	// (sub_7BD671 @ 0x7bd692). An AOA1 buffer falls to the RIFF compare and is
+	// refused (@ 0x766523), as is either form under the strict and the lenient decode.
 	for (const uint8_t width : {uint8_t(1), uint8_t(2)}) {
-		std::vector<uint8_t> aoa;
-		push_tag(aoa, "AOA1"); push_u32(aoa, 3); push_u32(aoa, 32768);
-		push_u32(aoa, width);
-		if (width == 1) aoa.insert(aoa.end(), {0x80, 0x00, 0x7F});
-		else { push_u16(aoa, 0x8000); push_u16(aoa, 0); push_u16(aoa, 0x7F00); }
-		const size_t payload_end = aoa.size();
-		aoa.insert(aoa.end(), 8, 0x55);
+		std::vector<uint8_t> aud;
+		push_tag(aud, "AUD1"); push_u32(aud, 3); push_u32(aud, 32768);
+		push_u32(aud, width);
+		if (width == 1) aud.insert(aud.end(), {0x80, 0x00, 0x7F});
+		else { push_u16(aud, 0x8000); push_u16(aud, 0); push_u16(aud, 0x7F00); }
+		const size_t payload_end = aud.size();
+		aud.insert(aud.end(), 8, 0x55);
 		WavPcm out;
-		if (!expect(wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"AOA1 signed PCM decodes")) return 1;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error),
+				"AUD1 signed PCM decodes")) return 1;
 		if (!expect(out.channels == 1 && out.sample_rate == 22050 && out.pcm16.size() == 6,
-				"AOA1 mono count/rate excludes mixer padding")) return 1;
+				"AUD1 mono count/rate excludes the bytes past its samples")) return 1;
 		if (!expect(sample_at(out, 0) == -32768 && sample_at(out, 1) == 0 &&
-				sample_at(out, 2) == 32512, "AOA1 signed sample extrema")) return 1;
+				sample_at(out, 2) == 32512, "AUD1 signed sample extrema")) return 1;
 		if (!expect(out.loader_samples == 3 && out.loader_pitch_q16 == 32768,
-				"AOA1 loader samples/pitch are its header's")) return 1;
-		aoa.resize(payload_end);
-		if (!expect(wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"on-disk AOA1 does not require generated mixer padding")) return 1;
-		for (const size_t truncated : {size_t(4), size_t(15), payload_end - 1}) {
-			if (!expect(!wav_decode_pcm16(aoa.data(), truncated, out, error) &&
-					out.pcm16.empty() && !error.empty(), "AOA1 rejects truncation")) return 1;
+				"AUD1 loader samples/pitch are its header's")) return 1;
+		WavPcm lenient;
+		if (!expect(opennova::lwf::wav_decode_pcm16_lenient(aud.data(), aud.size(), lenient, error) &&
+				lenient.pcm16 == out.pcm16 && lenient.loader_samples == 3,
+				"the lenient decode reads AUD1 as the strict one does")) return 1;
+		std::vector<uint8_t> aoa = aud;
+		aoa[1] = 'O';
+		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error) && out.pcm16.empty() &&
+				!opennova::lwf::wav_decode_pcm16_lenient(aoa.data(), aoa.size(), lenient, error),
+				"an AOA1 buffer is refused at the RIFF compare")) return 1;
+		aud.resize(payload_end);
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error),
+				"on-disk AUD1 needs no bytes past its samples")) return 1;
+		// The copy reads what follows the bytes: a buffer ending inside its header is
+		// refused (a bound of ours); samples past the end play those present, the
+		// count as it says.
+		for (const size_t truncated : {size_t(4), size_t(15)}) {
+			if (!expect(!wav_decode_pcm16(aud.data(), truncated, out, error) &&
+					out.pcm16.empty() && !error.empty(), "AUD1 ending inside its header is refused")) return 1;
 		}
-		aoa[4] = 0xFF; aoa[5] = 0xFF; aoa[6] = 0xFF; aoa[7] = 0xFF;
-		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"AOA1 rejects oversized count before allocation")) return 1;
-		aoa[4] = 3; aoa[5] = aoa[6] = aoa[7] = 0;
-		aoa[12] = 3;
-		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"AOA1 rejects unsupported sample width")) return 1;
-		aoa[12] = width; aoa[8] = aoa[9] = aoa[10] = aoa[11] = 0;
-		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"AOA1 rejects zero rate")) return 1;
+		if (!expect(wav_decode_pcm16(aud.data(), payload_end - width, out, error) &&
+				out.pcm16.size() == 4 && out.loader_samples == 3,
+				"AUD1 samples past the bytes play those present")) return 1;
+		aud[4] = 0xFF; aud[5] = 0xFF; aud[6] = 0xFF; aud[7] = 0xFF;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.pcm16.size() == 6 &&
+				out.loader_samples == 0xFFFFFFFFu, "AUD1 count past the bytes plays the bytes")) return 1;
+		aud[4] = 0; aud[5] = aud[6] = aud[7] = 0;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.pcm16.empty() &&
+				out.loader_samples == 0, "AUD1 count 0 plays no sample")) return 1;
+		// A pitch of 0 is taken as it is, the rate it rounds to 0.
+		aud[4] = 3;
+		aud[8] = aud[9] = aud[10] = aud[11] = 0;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.loader_pitch_q16 == 0 &&
+				out.sample_rate == 0, "AUD1 pitch 0 is taken")) return 1;
+	}
+	// The width byte: 2 is 16-bit, any other 8-bit [orig: sub_7BD671 @ 0x7bd692].
+	for (const uint8_t width : {uint8_t(0), uint8_t(3), uint8_t(0xFF)}) {
+		std::vector<uint8_t> aud;
+		push_tag(aud, "AUD1"); push_u32(aud, 2); push_u32(aud, 16384);
+		push_u32(aud, width);
+		aud.insert(aud.end(), {0x81, 0x7F});
+		WavPcm out;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.pcm16.size() == 4 &&
+				sample_at(out, 0) == -32512 && sample_at(out, 1) == 32512 && out.sample_rate == 11025,
+				"AUD1 width byte other than 2 is 8-bit")) return 1;
+	}
+	// The loader's pad goes by the raw width byte [orig: Audio_LoadWavFileFromArchive
+	// @ 0x76668a..0x7668da]: at width 0 it lands on +16, the mixer's first eight samples, and
+	// zeroes them where the word there is under 0x800 in size (else copies them onto themselves).
+	{
+		const auto width0 = [&](uint8_t lo, uint8_t hi, std::vector<int16_t> &r) {
+			std::vector<uint8_t> aud;
+			push_tag(aud, "AUD1"); push_u32(aud, 10); push_u32(aud, 32768);
+			push_u32(aud, 0);
+			aud.insert(aud.end(), {lo, hi, 3, 4, 5, 6, 7, 8, 9, 10});
+			WavPcm out;
+			if (!wav_decode_pcm16(aud.data(), aud.size(), out, error)) return false;
+			r = samples_of(out);
+			return r.size() == 10;
+		};
+		const std::vector<int16_t> tail = {9 << 8, 10 << 8};
+		std::vector<int16_t> got;
+		for (const auto &word : std::vector<std::pair<uint8_t, uint8_t>>{{0x10, 0x00}, {0xFF, 0x07}, {0x01, 0xF8}}) {
+			if (!expect(width0(word.first, word.second, got) &&
+					std::vector<int16_t>(got.begin(), got.begin() + 8) == std::vector<int16_t>(8, 0) &&
+					std::vector<int16_t>(got.begin() + 8, got.end()) == tail,
+					"AUD1 width 0: a first word under 0x800 in size zeroes the first eight samples")) return 1;
+		}
+		for (const auto &word : std::vector<std::pair<uint8_t, uint8_t>>{{0x00, 0x08}, {0x00, 0xF8}}) {
+			if (!expect(width0(word.first, word.second, got) &&
+					got[0] == static_cast<int16_t>(word.first << 8) &&
+					got[1] == static_cast<int16_t>(static_cast<int8_t>(word.second) * 256) &&
+					got[2] == (3 << 8) && got[9] == (10 << 8),
+					"AUD1 width 0: a first word of 0x800 or more in size leaves them")) return 1;
+		}
 	}
 
 	// Malformed streams report errors.

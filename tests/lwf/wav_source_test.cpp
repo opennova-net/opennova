@@ -112,6 +112,30 @@ int test_waves() {
 	adpcm[34] = 4;
 	TEST_EXPECT(wave_retail_check(adpcm).why.find("fact") != std::string::npos);
 	TEST_EXPECT(!wave_retail_check(text_bytes("not a wave")).plays);
+	// The loader's own buffer, AUD1, is taken unchecked; an AOA1 one is refused at the RIFF compare [orig:
+	// Audio_LoadWavFileFromArchive @ 0x7664e2, @ 0x766523]. Its samples read as the mixer reads them: 16-bit
+	// where its width byte is 2, else 8-bit [orig: sub_7BD671 @ 0x7bd692].
+	std::vector<uint8_t> aud = text_bytes("AUD1");
+	io::append_u32_le(aud, 2);
+	io::append_u32_le(aud, 32768);
+	io::append_u32_le(aud, 2);
+	io::append_u16_le(aud, 0x4000);
+	io::append_u16_le(aud, 0xC000);
+	TEST_EXPECT(wave_retail_check(aud).plays);
+	// One ending inside its 16-byte header the runtime's decode refuses (the game reads its count, pitch
+	// and width past the bytes), and so does the check.
+	const WaveRetailCheck short_aud = wave_retail_check(std::vector<uint8_t>(aud.begin(), aud.begin() + 10));
+	TEST_EXPECT(!short_aud.plays && short_aud.why.find("header") != std::string::npos);
+	WaveSamples own;
+	std::string own_error;
+	TEST_EXPECT(decode_wave_source(aud, own, own_error) && own.format.aud1 && own.format.bits == 16 &&
+	            own.frames() == 2 && own.samples[0] == 0.5f && own.samples[1] == -0.5f &&
+	            wave_format_words(own.format) == "16-bit AUD1, mono, 22050 Hz");
+	aud[12] = 1;
+	TEST_EXPECT(decode_wave_source(aud, own, own_error) && own.format.bits == 8 && own.frames() == 2);
+	std::vector<uint8_t> aoa = aud;
+	aoa[1] = 'O';
+	TEST_EXPECT(!wave_retail_check(aoa).plays && !decode_wave_source(aoa, own, own_error));
 	// Converted: mono 16-bit, the rate kept, then resampled.
 	const std::vector<uint8_t> source = wave_of(2, 24, 48000, 4800, true);
 	std::vector<uint8_t> converted;

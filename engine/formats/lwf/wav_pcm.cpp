@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <limits>
 #include <vector>
 
 namespace opennova {
@@ -55,40 +54,58 @@ uint32_t loader_pitch_q16(uint32_t rate) {
 	return static_cast<uint32_t>(((static_cast<uint64_t>(rate) << 16) + 22050u) / 44100u);
 }
 
-// The native cache/file form accepted before RIFF parsing. It has one mono
-// signed-PCM lane, a declared sample count, and a Q16 rate relative to 44100 Hz.
-// Bytes after the declared samples are mixer interpolation padding, not audio.
-// [orig: Audio_LoadWavFileFromArchive @0x766480, AOA1 copy and LABEL_36]
-bool decode_aoa1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &error) {
-    if (size < 16) { error = "truncated AOA1 header"; return false; }
-    const uint32_t samples = io::read_u32_le(bytes + 4);
-    const uint32_t rate_q16 = io::read_u32_le(bytes + 8);
-    const uint8_t width = bytes[12];
-    if (width != 1 && width != 2) {
-        error = "unsupported AOA1 sample width"; return false;
-    }
-    const uint64_t payload_size = uint64_t(samples) * width;
-    if (samples == 0 || samples > std::numeric_limits<size_t>::max() / 2 ||
-            payload_size > size - 16) {
-        error = "truncated or empty AOA1 payload"; return false;
-    }
-    const uint32_t rate = static_cast<uint32_t>((uint64_t(rate_q16) * 44100 + 32768) >> 16);
-    if (rate == 0) { error = "invalid AOA1 sample rate"; return false; }
-    out.pcm16.resize(size_t(samples) * 2);
-    if (width == 2) {
-        std::memcpy(out.pcm16.data(), bytes + 16, out.pcm16.size());
-    } else {
-        // AOA1 PCM8 has already had the RIFF unsigned bias removed.
-        for (size_t i = 0; i < samples; ++i) {
-            out.pcm16[2 * i] = 0;
-            out.pcm16[2 * i + 1] = bytes[16 + i];
-        }
-    }
-    out.sample_rate = rate;
-    out.channels = 1;
-    out.loader_samples = samples;
-    out.loader_pitch_q16 = rate_q16;
-    return true;
+// The loader's own form, an AUD1 buffer (bytes 41 55 44 31), which it copies as it is, unchecked
+// [orig: Audio_LoadWavFileFromArchive @ 0x766480, the magic @ 0x7664e2, the copy @ 0x7664e9..0x766511]:
+// the header its RIFF decodes write (@ 0x766603..0x76663c, @ 0x766708..0x766745,
+// @ 0x7667b4..0x7667f0), read as the mixer's channel set-up reads it, the sample count at +4
+// [orig: sub_7BD671 @ 0x7bd67f], the pitch ratio to the 44100 Hz device in Q16 at +8
+// [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd603] and the samples from +16, signed (the
+// RIFF form's 8-bit bias already taken off), 16-bit where the byte at +12 is 2 and 8-bit for any
+// other byte there [orig: sub_7BD671 @ 0x7bd692]. The byte at +13, which the mixer shifts the
+// channel's volume by, is not read (D-SND-46). The copy is the bytes' own size; where they end inside
+// the header or before the count's samples the loader's pad and the mixer read on past them
+// (unwitnessed): ours refuses the first and plays the samples present of the second, the count
+// recorded as it says.
+bool decode_aud1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &error) {
+	if (size < 16) {
+		error = "the AUD1 buffer ends inside its 16-byte header";
+		return false;
+	}
+	const uint32_t samples = io::read_u32_le(bytes + 4);
+	const uint32_t pitch_q16 = io::read_u32_le(bytes + 8);
+	const size_t width = bytes[12] == 2 ? 2 : 1;
+	const size_t present = std::min<size_t>(samples, (size - 16) / width);
+	out.pcm16.resize(present * 2);
+	if (width == 2) {
+		if (present != 0) std::memcpy(out.pcm16.data(), bytes + 16, present * 2);
+	} else {
+		for (size_t i = 0; i < present; ++i) {
+			out.pcm16[2 * i] = 0;
+			out.pcm16[2 * i + 1] = bytes[16 + i];
+		}
+	}
+	// The loader's pad for the mixer, past the last sample by the raw width byte [orig:
+	// Audio_LoadWavFileFromArchive @ 0x76668a..0x7668da]: the last sample at +16 + (count - 1) * width
+	// (@ 0x76668a..0x76669c), a byte where the width is 1 (@ 0x76669f) and a word otherwise
+	// (@ 0x7668af); eight bytes at +16 + count * width, zeroed where it is under 8 (a byte) or 0x800 (a
+	// word) in size, else the first eight sample bytes copied there (@ 0x7666b9..0x7666c7,
+	// @ 0x7668bc..0x7668da). At widths 1 and 2 that is past the count's samples; at 3 or more past
+	// them too, past the buffer unless it holds width * count bytes (D-SND-48); at 0 it is +16, the
+	// mixer's first eight samples, zeroed where the word there is under 0x800 in size (where that word
+	// runs past the bytes, unwitnessed, ours leaves them).
+	if (bytes[12] == 0 && size >= 18) {
+		const int16_t first = static_cast<int16_t>(io::read_u16_le(bytes + 16));
+		if (first > -0x800 && first < 0x800)
+			std::fill(out.pcm16.begin(), out.pcm16.begin() + std::min<size_t>(8, present) * 2, uint8_t(0));
+	}
+	// The rate the ratio is nearest, for the shell's player (the mixer steps by the ratio itself): the
+	// inverse the dialog line's hold takes, (pitch * 44100 + 0x8000) >> 16 [orig: Dialog_LoadAudioClip
+	// @ 0x44dd8e..0x44dd9f, a signed imul; ours unsigned, the same below a pitch of 2^31].
+	out.sample_rate = static_cast<uint32_t>((uint64_t(pitch_q16) * 44100 + 0x8000) >> 16);
+	out.channels = 1;
+	out.loader_samples = samples;
+	out.loader_pitch_q16 = pitch_q16;
+	return true;
 }
 
 // --- WAV IMA-ADPCM (audioFormat 0x11) decode to signed 16-bit PCM ---
@@ -271,8 +288,9 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error) {
 	r_out = WavPcm{};
 	r_error.clear();
-	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AOA1"))
-		return decode_aoa1(bytes, size, r_out, r_error);
+	// The own buffer ahead of the RIFF compare [orig: Audio_LoadWavFileFromArchive @ 0x7664e2].
+	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AUD1"))
+		return decode_aud1(bytes, size, r_out, r_error);
 	const WaveLoaderWalk walk = wave_loader_walk(bytes, size);
 	if (walk.refusal != WaveRefusal::None) {
 		r_error = std::string("the game's wave loader refuses it: ") + refusal_words(walk.refusal);
@@ -313,8 +331,8 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error) {
 	r_out = WavPcm{};
 	r_error.clear();
-	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AOA1"))
-		return decode_aoa1(bytes, size, r_out, r_error);
+	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AUD1"))
+		return decode_aud1(bytes, size, r_out, r_error);
 	if (bytes == nullptr || size < 44) {
 		r_error = "buffer too small to be a WAV";
 		return false;
