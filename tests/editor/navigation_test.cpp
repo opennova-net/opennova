@@ -476,6 +476,24 @@ int test_go_to_lands() {
 	TEST_EXPECT(n.back() && v.documents.page == coo && v.documents.page_field == "strings");
 	TEST_EXPECT(n.back() && v.documents.active == face);
 	TEST_EXPECT(n.forward(2) && v.documents.page == coo && v.documents.page_field == "names");
+	// A Problems row about it (a finding on its strings, as the graph's rows name a field): its Go to an
+	// OpenDocument as every Go to's, landing on the page with the record and field it names, the shown card's
+	// place (a line whose edge stands there is marked; no kind the editor has no editor for makes edges since
+	// round S23, so none here).
+	{
+		Diagnostic row = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Warning, "A name the strings hold.",
+		                              coo, "strings");
+		const ProblemLocation location = problem_location(row, v);
+		TEST_EXPECT(location.page && !location.in_files && location.path == coo && location.field == "strings" &&
+		            location.request().kind == EditorRequestKind::OpenDocument);
+		TEST_EXPECT(n.go(request::open_document(n.extra)) && n.go(location.request()) && v.documents.page == coo &&
+		            v.documents.page_locator.empty() && v.documents.page_field == "strings");
+		const FileCard shown_card = shown_file_card(v, coo);
+		TEST_EXPECT(shown_card.found && shown_card.at_locator.empty() && shown_card.at_field == "strings");
+		// About the file as a whole (its name): shown in Files, where Rename... sets it right.
+		row = make_finding(CoreFinding::AssetNameTooLong, DiagnosticSeverity::Error, "A name too long.", coo);
+		TEST_EXPECT(problem_location(row, v).in_files && !problem_location(row, v).page);
+	}
 
 	// A wave, a document since round S23, its page's Play; its user, the bank, is a document of its own: opened at the
 	// single.
