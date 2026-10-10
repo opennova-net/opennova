@@ -2263,15 +2263,14 @@ static int test_rewrite_closed_file() {
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") && !session.document_for(menu));
+	// A menu keeps what the game ignores with its look (D-MNU-22), as a catalog does: nothing to rewrite.
 	session.handle(request::save(menu));
-	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + menu) && v.activity.status == "Saved " + menu + ".");
+	TEST_EXPECT(session.outcome().done() && v.activity.status == menu + " has no changes to save.");
 	session.run_operations(); // the validation the save left due
 	std::string text, error;
-	TEST_EXPECT(opennova::io::read_file_text(file, text, error) && text.find("SCREENX") == std::string::npos &&
+	TEST_EXPECT(opennova::io::read_file_text(file, text, error) && text.find("SCREENX") != std::string::npos &&
 	            text.find("POSITION") != std::string::npos);
-	TEST_EXPECT(!has_code(v.findings.diagnostics, "menu.ignored_input") && !session.document_for(menu));
-	session.handle(request::save("rewrite.mnu"));
-	TEST_EXPECT(session.outcome().done() && v.activity.status == menu + " has no changes to save.");
+	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") && !session.document_for(menu));
 	const AssetEntry *entry = v.project.scan->find("items.def");
 	TEST_EXPECT(entry != nullptr);
 	if (!entry) return 1;
@@ -3444,13 +3443,10 @@ static int test_fixes_apply() {
 	                                                  "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>"));
 	session.handle(request::rescan());
 	session.run_operations();
-	TEST_EXPECT(find_fix(v, "menu.ignored_input", "Rewrite ignored.mnu", fix));
-	session.handle(fix.request);
-	session.run_operations();
-	std::string text, io_error;
-	TEST_EXPECT(
-			session.outcome().done() && !has_code(v.findings.diagnostics, "menu.ignored_input"));
-	TEST_EXPECT(opennova::io::read_file_text(ignored_file, text, io_error) && text.find("SCREENX") == std::string::npos);
+	// Kept on save with the menu's look (D-MNU-22): no Rewrite is offered.
+	TEST_EXPECT(has_code(v.findings.diagnostics, "menu.ignored_input") &&
+	            !find_fix(v, "menu.ignored_input", "Rewrite ignored.mnu", fix));
+	std::string io_error;
 	// A font no file of the project is: Create makes it, and the startup menu's name resolves.
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
@@ -4503,7 +4499,7 @@ static int test_output_cursor() {
 
 // S13 A1: of two files of one logical name, a Save of the name rewrites the one every other
 // request picks (project_file: the path named, else the first of the name, as Files shows it),
-// never another; a Save naming the other's path rewrites that one.
+// never another; a Save naming the other's path names that one.
 static int test_save_picks_like_the_rest() {
 	editor_test::TempProjectDir dir("opennova_editor_session_duplicate_save");
 	FakePlatform platform;
@@ -4513,7 +4509,7 @@ static int test_save_picks_like_the_rest() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	// A menu with input the game ignores (SCREENX), which a save drops.
+	// A menu with input the game ignores (SCREENX), which a save keeps with its look (D-MNU-22).
 	const std::string ignored = "<SCREEN><NAME>D</NAME><WINDOW type=\"button\" name=\"B\" SCREENX=\"1\">"
 	                            "<POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>";
 	TEST_EXPECT(editor_test::write_text(v.project.root + "/menus/dup.mnu", ignored));
@@ -4530,13 +4526,11 @@ static int test_save_picks_like_the_rest() {
 	const std::string other = picked == "menus/dup.mnu" ? "extra/dup.mnu" : "menus/dup.mnu";
 	TEST_EXPECT(picked == "menus/dup.mnu" || picked == "extra/dup.mnu");
 	session.handle(request::save("dup.mnu"));
-	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + picked));
+	TEST_EXPECT(session.outcome().done() && v.activity.status == picked + " has no changes to save.");
 	std::string text, error;
-	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/" + picked, text, error) && text.find("SCREENX") == std::string::npos);
 	TEST_EXPECT(opennova::io::read_file_text(v.project.root + "/" + other, text, error) && text == ignored);
 	session.handle(request::save(other));
-	TEST_EXPECT(session.outcome().done() && opennova::io::read_file_text(v.project.root + "/" + other, text, error) &&
-	            text.find("SCREENX") == std::string::npos);
+	TEST_EXPECT(session.outcome().done() && v.activity.status == other + " has no changes to save.");
 	return 0;
 }
 
