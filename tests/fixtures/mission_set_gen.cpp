@@ -17,6 +17,7 @@
 
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
 #include <formats/rtxt/rtxt.h>
@@ -49,7 +50,17 @@ size_t place(bms::File &doc, EntityKind kind, int item_id, float x, float y, int
 	t.y = y;
 	t.z = 0.0f;
 	t.yaw = yaw;
-	return mission::add_entity(doc, kind, item_id, t);
+	const size_t index = mission::add_entity(doc, kind, item_id, t);
+	// The members this mission has always held beside a new record's (bms_edit's new_entity, the original
+	// editor's initializer since D-MIS-10): the map symbol the properties dialog leaves with none chosen,
+	// and a person's engagement and attack distances.
+	bms::Entity &made = (*mission::entities(doc, kind))[index];
+	made.map_symbol = 255;
+	if (kind == EntityKind::Organic) {
+		made.max_engagement_distance = 100;
+		made.max_attack_distance = 150;
+	}
+	return index;
 }
 
 bool build_mission(std::vector<uint8_t> &bytes, std::string &err) {
@@ -80,10 +91,12 @@ bool build_mission(std::vector<uint8_t> &bytes, std::string &err) {
 	place(doc, EntityKind::Building, 106101, -300.0f, 200.0f, 0);
 	place(doc, EntityKind::Building, 106101, 250.0f, 300.0f, 270);
 	// Four path markers (marker alpha) round a square, then a location marker (def type 2044).
-	place(doc, EntityKind::Marker, 100001, -200.0f, -200.0f, 0);
-	place(doc, EntityKind::Marker, 100001, 200.0f, -200.0f, 0);
-	place(doc, EntityKind::Marker, 100001, 200.0f, 200.0f, 0);
-	place(doc, EntityKind::Marker, 100001, -200.0f, 200.0f, 0);
+	// Path 1's four waypoint markers (a path's stops are its 6005 markers', D-MIS-6).
+	const int waypoint_item = mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT;
+	place(doc, EntityKind::Marker, waypoint_item, -200.0f, -200.0f, 0);
+	place(doc, EntityKind::Marker, waypoint_item, 200.0f, -200.0f, 0);
+	place(doc, EntityKind::Marker, waypoint_item, 200.0f, 200.0f, 0);
+	place(doc, EntityKind::Marker, waypoint_item, -200.0f, 200.0f, 0);
 	place(doc, EntityKind::Marker, mission::kItemIdOffset + 2044, 0.0f, 0.0f, 0);
 	// Two organics (shed, a person): the first named, in group 1 and walking path 1 from its first
 	// stop; the second in group 2.
