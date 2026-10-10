@@ -172,6 +172,16 @@ std::string text_id_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	const size_t slash = scope.find('/');
 	const std::string table = scope.substr(0, slash);
 	const std::string section = slash == std::string::npos ? std::string() : scope.substr(slash + 1);
+	// An action's text token, read through the playing mission's table and then gametext.bin [orig:
+	// MissionText_GetStringByKeyOrGameText @ 0x51ECD0, "" where neither has it @ 0x51ED22].
+	if (edge.field == "text_token" || edge.field == "texttoken")
+		return ", which neither the playing mission's string table (medmssn.bin, a mission's with no table of its own) nor "
+		       "gametext.bin defines: the action's text is empty, as it is in a mission with no string table at all.";
+	// An item's text, whose section's text_default stands in for a key it lacks [orig: HUD_BuildEntityInfo @
+	// 0x4B8A41..0x4B8A5C].
+	if (edge.field == "text_id" && strutil::iequals(section, "item") && graph.has_file(table))
+		return ", which the first \"item\" section of " + table + " does not define: the game shows that section's "
+		       "text_default.";
 	if (scope.empty()) return ", which no string table defines; the game shows the id.";
 	if (table.empty())
 		return ", but its window names no string table (TEXT_RSRC) and neither does the window it falls back to; the "
@@ -181,6 +191,15 @@ std::string text_id_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	if (section.empty()) return ", which " + table + " does not define; the game shows the id.";
 	return ", which the first \"" + section + "\" section of " + table +
 	       " does not define (the game reads that section alone); the game shows the id.";
+}
+
+// A play's stream past its bank's: the game's stream select takes the bank's first [orig: AudioVM_StartSound @
+// 0x671FF0 -> sub_671BC0 @ 0x671BCA, an index past the entries made 0]; a bank the project lacks opens no music
+// [orig: AudioVM_OpenMusicContext @ 0x6722A0].
+std::string stream_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	if (!graph.has_file(edge.scope))
+		return ", whose bank " + edge.scope + " the project does not have: the game opens no music for the script.";
+	return ", which " + edge.scope + " does not have: the game plays the bank's first stream in its place.";
 }
 
 std::string screen_missing(const AssetGraph &, const GraphEdge &edge) {
@@ -336,7 +355,12 @@ std::string entity_missing(const AssetGraph &, const GraphEdge &) {
 // The load neuters a trigger naming a zone the file lacks, which then reads false (a negated one
 // true), and zeroes an action naming one [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000,
 // EventTrigger_ResolveZoneActionRefs @0x453100].
-std::string zone_missing(const AssetGraph &, const GraphEdge &) {
+std::string zone_missing(const AssetGraph &, const GraphEdge &edge) {
+	// A script's operand: the command looks the zone up in the mission's areas and finds none, so it reads false
+	// [orig: WacCmd_SsnArea @ 0x4F1087..0x4F10A0, 0 past the table's 128].
+	if (edge.field == "operand")
+		return ", a zone id no area trigger of the mission has: the script's command finds no area for it and reads "
+		       "false.";
 	return ", a zone id no area trigger of the mission has: the game makes a trigger naming it read false and an "
 	       "action naming it do nothing.";
 }
@@ -388,7 +412,7 @@ std::string shader_missing(const AssetGraph &graph, const GraphEdge &) {
 // [orig: Entity_SpawnFromAnimSlotProperty @ 0x43c3cf -> ItemList_FindIndexByTypeId @ 0x49e100, its 0 for no
 // match @ 0x49e12f].
 bool named_by_class_cammo(const GraphEdge &edge) {
-	return edge.name_offset && (edge.field == "JUNGLE_CAMMO" || edge.field == "DESERT_CAMMO" || edge.field == "ARCTIC_CAMMO");
+	return edge.name_offset && (edge.field == "jungle_cammo" || edge.field == "desert_cammo" || edge.field == "arctic_cammo");
 }
 
 std::string item_missing(const AssetGraph &graph, const GraphEdge &edge) {
@@ -398,8 +422,23 @@ std::string item_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	if (named_by_class_cammo(edge))
 		return " (type id " + written + "), which the project does not have: a player of the class spawns as items.def's "
 		       "first row instead.";
+	if (!edge.fallback.empty()) {
+		// items.def's first item, which the lookup's 0 cannot tell from no match [orig: ItemList_FindIndexByTypeId @
+		// 0x49E100; AmmoDef_ParseProperty @ 0x40A5DA, `if (index || ...)`].
+		const GraphSymbol *first = graph.resolve_symbol(edge.kind, edge.value, edge.scope);
+		const std::string named = first && graph.first_item(*first)
+		                                  ? "), items.def's first item, which the game's lookup by type id returns as it does none"
+		                                  : "), which the project does not have";
+		return " (type id " + written + named + ", nor an item named as the ammo ('" + edge.fallback +
+		       "'), which the game takes next: it warns that it finds none and keeps no item.";
+	}
 	return " (type id " + written + "), which the project does not have: the game takes the item named as the record "
 	       "instead, else warns that it finds none.";
+}
+
+// An item by its primary name, only ever an edge's fallback (an ammo's tracer): its missing is the item edge's.
+std::string item_name_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which no item of the project is named: the game warns that it finds none.";
 }
 
 // The game spawns the class's player as another item: a warning, the game runs on.
@@ -412,8 +451,10 @@ std::string item_alias_missing(const AssetGraph &, const GraphEdge &) {
 }
 
 std::string avatar_part_missing(const AssetGraph &, const GraphEdge &edge) {
+	// The scope's section is the kind, a shadowed part's rank after it (AVATARS.DEF/HEAD#1).
 	const size_t slash = edge.scope.find('/');
-	const std::string kind = slash == std::string::npos ? std::string("part") : strutil::to_lower(edge.scope.substr(slash + 1)) + " part";
+	const std::string section = slash == std::string::npos ? std::string() : edge.scope.substr(slash + 1);
+	const std::string kind = section.empty() ? std::string("part") : strutil::to_lower(section.substr(0, section.find('#'))) + " part";
 	return ", which no " + kind + " of the file defines: the game drops a combination missing its head or body, and keeps "
 	       "one missing its arms without them.";
 }
@@ -573,6 +614,7 @@ constexpr ReferenceKindRow kRows[] = {
 	        .message_reads_files()
 	        .row,
 	Row(ReferenceKind::AiProfile, "ai_profile", "the AI profile", "AI profile").loads(AssetKind::AiProfile, kAiProfile).row,
+	// Retired (S23 B): no field or text makes one; the row keeps the kinds' numbers and the wire token.
 	Row(ReferenceKind::OtherText, "other_text", "the string id", "string id").offers(ReferenceKind::TextId).row,
 	Row(ReferenceKind::Font, "font", "the font", "font")
 	        .loads(AssetKind::Font, nullptr, font_files)
@@ -794,6 +836,29 @@ constexpr ReferenceKindRow kRows[] = {
 	// A face animation's vertex by its index among the file's vertices: a triangle's corner, which the game draws
 	// over the vertex at that place, never testing it [orig: Render_ScarDebugOverlay @ 0x589301..0x58931D].
 	Row(ReferenceKind::FaceVertex, "face_vertex", "the vertex", "vertex").record("vertex").row,
+	// The face a person's model animates, opened by the name the model's makes; a person whose face the archives
+	// lack shows none, which the game never reports, and most of the game's people have none, so its edges are
+	// optional (no finding) [orig: Entity_InitFromModel @ 0x40E21A..0x40E22E -> sub_57FCE0 @ 0x57FCE0, its load
+	// failing @ 0x57FDA7].
+	Row(ReferenceKind::FaceAnimation, "face_animation", "the face animation", "face animation")
+	        .loads(AssetKind::FaceAnimation, nullptr)
+	        .row,
+	// A music script's play names a stream of its bank by its place [orig: AudioVM_Op_Play @ 0x672CB0 /
+	// AudioVM_Op_PlayWait @ 0x672C90 -> AudioVM_StartSound @ 0x671FF0], the bank the script's name made .SBF
+	// (mus_bank_name); one past the bank's plays its first (stream_missing).
+	Row(ReferenceKind::MusicStream, "music_stream", "the stream", "stream")
+	        .symbol(NameCase::Exact, AssetKind::MusicBank)
+	        .scoped(true)
+	        .tolerated(stream_missing)
+	        .message_reads_files()
+	        .row,
+	// An item by its primary name, the first of it without case [orig: ItemList_FindIndexByPrimaryName @
+	// 0x49E010, stricmp over the items in order]: an ammo's tracer item, where its type id finds none, is the item
+	// named as the ammo (GraphEdge::fallback_kind).
+	Row(ReferenceKind::ItemName, "item_name", "the item", "item")
+	        .symbol(NameCase::NoCase, AssetKind::ItemDefs)
+	        .tolerated(item_name_missing)
+	        .row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {

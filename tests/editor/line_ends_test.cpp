@@ -8,7 +8,7 @@
 // one-line reading back and Redo the two again); one whose one-line reading blocks (the restore taken
 // while blocked, its undo blocked again and its redo taken still); the sound profiles, whose writer
 // ends every line CR LF itself (the rule reads the source the document was read from); a mixed file
-// (the lines the game reads as one); a text kind (the avatars, the text type: the span of its text
+// (the lines the game reads as one); a text kind (a particle file: the span of its text
 // replaced) and the HUD layout (Save ends its lines CR LF too); none for a CR LF file nor for a kind of
 // another reader; and through a session: the finding over a closed weapon.def, its fix an edit_record
 // of the file opened first, which the wire carries and reads back as it was.
@@ -206,28 +206,28 @@ static int test_mixed_and_none() {
 	return 0;
 }
 
-// A text kind (the avatars, held by the text type as the file stores it): the finding at the first LF
-// alone, its restore the span of the text from it to the last written CR LF, one step; the HUD layout,
-// whose Save ends its lines CR LF itself, says so.
+// A text kind (a particle file, held as the file stores it): the finding at the first LF alone, its
+// restore the span of the text from it to the last written CR LF, one step; the HUD layout, whose Save
+// ends its lines CR LF itself, says so.
 static int test_texts() {
-	const std::string text = "nationality N00 FIRST\n{\n}\r\nnationality N01 SECOND\r\n{\r\n}\n";
-	std::unique_ptr<DocumentBase> document = loaded(text, "Avatars.def", AssetKind::AvatarDefs);
+	const std::string text = "[effectdef]\n{\n\tid = A;\r\n}\r\n[effectdef]\r\n{\n";
+	std::unique_ptr<DocumentBase> document = loaded(text, "fx.ptl", AssetKind::Particles);
 	TEST_EXPECT(document && text_of(*document));
 	if (!document) return 1;
 	const std::vector<Diagnostic> findings = line_end_findings(*document, "jo");
 	const Diagnostic *d = the_finding(findings);
-	TEST_EXPECT(d && d->line == 1 && d->column == 22 &&
+	TEST_EXPECT(d && d->line == 1 && d->column == 12 &&
 	            contains(d->message, "Line 1 ends with an LF alone (3 line ends in the file are so)") &&
 	            contains(d->message, "reads lines 1 to 3 as one line.") && !contains(d->message, "Save"));
 	if (!d) return 1;
 	// The text's batch form reads its op alone too, back as it was.
-	const EditorRequest fix = request::edit_record("Avatars.def", d->planned[0].edits, true);
+	const EditorRequest fix = request::edit_record("fx.ptl", d->planned[0].edits, true);
 	EditorRequest back;
 	std::string why;
 	TEST_EXPECT(editor_request_from_json(editor_request_to_json(fix), back, why) && back == fix);
 	Diagnostic error;
 	TEST_EXPECT(document->apply(d->planned[0].edits, error));
-	TEST_EXPECT(text_of(*document)->text() == "nationality N00 FIRST\r\n{\r\n}\r\nnationality N01 SECOND\r\n{\r\n}\r\n" &&
+	TEST_EXPECT(text_of(*document)->text() == "[effectdef]\r\n{\r\n\tid = A;\r\n}\r\n[effectdef]\r\n{\r\n" &&
 	            line_end_findings(*document, "jo").empty());
 	document->undo();
 	TEST_EXPECT(text_of(*document)->text() == text && !document->dirty());
@@ -236,7 +236,7 @@ static int test_texts() {
 	const std::vector<Diagnostic> hud_findings = layout ? line_end_findings(*layout, "jo") : std::vector<Diagnostic>();
 	const Diagnostic *hud = the_finding(hud_findings);
 	TEST_EXPECT(hud && hud->line == 1 && contains(hud->message, "Save ends every line CR LF."));
-	std::printf("texts: the avatars' span restored and undone; the HUD layout's Save said\n");
+	std::printf("texts: a particle file's span restored and undone; the HUD layout's Save said\n");
 	return 0;
 }
 
