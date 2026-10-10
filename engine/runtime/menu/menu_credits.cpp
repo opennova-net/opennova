@@ -5,6 +5,7 @@
 
 #include <formats/configfile/config_file.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 #include <cctype>
@@ -37,14 +38,6 @@ bool read_current_value(ConfigSection &s, const char *key, int index, std::strin
 // [orig: String_CopyN — at most size - 1 characters]
 std::string copy_n(const std::string &s, size_t size) {
 	return s.size() < size ? s : s.substr(0, size - 1);
-}
-
-// strtol base 16 over a narrow string, saturating at retail's 32-bit long.
-int32_t strtol16(const char *text) {
-	const long long v = std::strtoll(text, nullptr, 16);
-	if (v > INT32_MAX) return INT32_MAX;
-	if (v < INT32_MIN) return INT32_MIN;
-	return static_cast<int32_t>(v);
 }
 
 // The '|' tokens after the first two characters [orig: strtok with the "|" @ 0x7E1788].
@@ -111,14 +104,17 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 		} else if (!line.empty() && line[0] == '~') {
 			const char code = line.size() > 1 ? line[1] : '\0';
 			if (code == 'C' || code == 'c') {
-				color = static_cast<uint32_t>(strtol16(line.c_str() + 2));
+				// The CRT strtol at radix 16 (io::retail_strtol: the locale's white space,
+				// 0xA0 included, saturating at 32 bits; D-NET-384) [orig: strtol @0x65c8a4].
+				color = static_cast<uint32_t>(io::retail_strtol(line.c_str() + 2, 16));
 			} else if (code == 'F' || code == 'f') {
 				// x|y|texture: a fixed image that fades at the edges, no advance.
 				const std::vector<std::string> parts = bar_tokens(line);
 				if (parts.size() >= 3 && texture_loads && texture_loads(parts[2])) {
 					MarqueeCreditNode &node = append(false);
-					node.fixed_x = static_cast<int>(std::atol(parts[0].c_str()));
-					node.fixed_y = static_cast<int>(std::atol(parts[1].c_str()));
+					// [orig: _atol @0x65c7a3 / @0x65c7bc] (io::retail_atol; D-NET-384)
+					node.fixed_x = io::retail_atol(parts[0].c_str());
+					node.fixed_y = io::retail_atol(parts[1].c_str());
 					node.image = parts[2];
 					node.fades = true;
 					node.font = font;

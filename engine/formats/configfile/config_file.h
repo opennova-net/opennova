@@ -50,7 +50,7 @@ struct ConfigSection {
 // trimmed, the value up to ';' or the line end [orig: ini_parse_section_entries @ 0x75db80]; the
 // value's tokens split on ',' and ' ' [orig: ConfigFile_CountCommaSeparatedValues @ 0x75de30], each
 // an integer, a float or a string by String_ClassifyNumeric @ 0x75d830 [orig: ConfigFile_ParseValues
-// @ 0x7606f0; an integer through strtol, a float through atof]. A line is read up to its first NUL.
+// @ 0x7606f0; an integer through atol, a float through atof]. A line is read up to its first NUL.
 // (Retail reads each entry's values back through its line walker, whose key keeps leading spaces: a
 // key written with leading spaces is not modeled.)
 std::vector<ConfigSection> parse_config_text(const uint8_t *data, size_t size);

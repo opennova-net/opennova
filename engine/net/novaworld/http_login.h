@@ -130,12 +130,13 @@ JoiConnection parse_joi_connection_string(const std::string &body);
 inline constexpr char kJoinEndpointRejectTag[] = "CVSTATCLIENTERR";
 bool joi_endpoint_usable(const std::string &host_ip, long port);
 
-// Truncate an HTTP host to the retail cookie-jar subnet key: a dotted-decimal
-// IPv4 keeps its first two octets ("192.168.1.1" -> "192.168"); any other host
-// (a DNS name, or a malformed address) is returned unchanged.
-// [orig: Network_TruncateIPToSubnet @ 0x62dfe0 — reverse, strip past the 2nd
-// dot from the end, reverse back; only when Network_ParseIPv4AddressOctets
-// accepts the string as IPv4.]
+// The cookie-jar host key, as ours computes it today: a dotted-decimal IPv4 keeps
+// its first two octets ("192.168.1.1" -> "192.168"); any other host (a DNS name, or
+// a malformed address) is returned unchanged. Retail's branch is the opposite
+// (witnessed 2026-10-10): a host Network_ParseIPv4AddressOctets accepts is returned
+// whole and any other keeps its LAST two dot-labels (reverse, cut at the 2nd dot,
+// reverse back: "nw.novalogic.com" -> "novalogic.com") [orig: Network_TruncateIPToSubnet
+// @ 0x62dfe0 — the `jnz` @0x62dfff]; docs/net/novaworld-net-re.md D-NET-390, open.
 std::string subnet_key(const std::string &host);
 
 // The cookie store the engine carries across the NovaWorld endpoint family.

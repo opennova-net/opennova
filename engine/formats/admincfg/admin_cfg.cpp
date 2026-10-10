@@ -2,6 +2,7 @@
 #include <formats/admincfg/admin_cfg.h>
 
 #include <base/io/ascii_config.h>
+#include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/os_path.h>
 
@@ -22,12 +23,15 @@ int hex_digit(char c) {
 } // namespace
 
 // The CRT's strtoul at radix 16 on a 32-bit unsigned long [orig: CRT_strtoul
-// @0x76B302 -> strtoxl]: an overflow sets ULONG_MAX whatever the sign; a
-// minus otherwise negates the result; no digits read 0.
+// @0x76B302 -> strtoxl]: the locale's leading white space (the six C-locale
+// spaces and cp1252's 0xA0, the skip @0x76B11C..0x76B153; D-NET-384); an
+// overflow stores ULONG_MAX (`or [ebp+var_4], -1` @0x76B282) and a minus then
+// negates whatever was stored (@0x76B2A1..0x76B2A7), so "-FFFFFFFFF" reads 1,
+// not 0xFFFFFFFF (D-NET-392); no digits read 0.
 uint32_t parse_rights(const char *token) {
 	if (token == nullptr) return 0;
 	const char *p = token;
-	while (*p == ' ' || (*p >= '\t' && *p <= '\r')) ++p;
+	while (cp1252_isspace(static_cast<uint8_t>(*p))) ++p;
 	bool negative = false;
 	if (*p == '+' || *p == '-') negative = *p++ == '-';
 	if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X') && hex_digit(p[2]) >= 0) p += 2;
@@ -43,8 +47,7 @@ uint32_t parse_rights(const char *token) {
 		}
 	}
 	if (!digits) return 0;
-	if (overflow) return 0xFFFFFFFFu;
-	const uint32_t result = static_cast<uint32_t>(value);
+	const uint32_t result = overflow ? 0xFFFFFFFFu : static_cast<uint32_t>(value);
 	return negative ? 0u - result : result;
 }
 
