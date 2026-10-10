@@ -448,6 +448,25 @@ std::vector<ClipSoundFired> MissionViewport::fire_listen_sounds(const AssetScan 
 	return fired;
 }
 
+void MissionViewport::frame_ground_now_() {
+	// The box framed: its middle on the ground there (the terrain's height where it is read, else the camera's
+	// target's), north up and looking down as the first framing looks, as far back as its larger side fits the
+	// field of view.
+	const double x = 0.5 * (frame_ground_[0] + frame_ground_[2]), y = 0.5 * (frame_ground_[1] + frame_ground_[3]);
+	double held[3] = { 0.0, 0.0, 0.0 };
+	preview_to_mission(camera_.target, held);
+	double z = held[2];
+	if (const terrain::TerrainHeightField *field = terrain_ground_.height_field())
+		z = double(terrain::height_field_height_world_bilinear(*field, float(x), float(-y)));
+	const double middle[3] = { x, y, z };
+	camera_.target = mission_to_preview(middle);
+	camera_.yaw = 0.0f;
+	camera_.pitch = kMissionFramePitch;
+	const double across = std::max(frame_ground_[2] - frame_ground_[0], frame_ground_[3] - frame_ground_[1]);
+	const double half = 0.5 * double(camera_.fov_degrees()) * 3.14159265358979323846 / 180.0;
+	camera_.distance = float(std::max(10.0, across * kFrameGroundMargin / (2.0 * std::tan(half))));
+}
+
 ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock &clock) {
 	const SessionView &view = input.view;
 	gesture_open_ = view.documents.gesture_in(path()).open();
@@ -459,6 +478,15 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	const uint64_t generation = view.findings.assets->generation();
 	const PreviewFollow::Key key;
 	reason_ = MissionViewStatus::Ready;
+	if (frame_ground_pending_) {
+		// The framed box's middle set down on the ground there, the terrain read now.
+		frame_ground_pending_ = false;
+		follow_ground_(view);
+		if (terrain_ground_.height_field()) {
+			frame_ground_now_();
+			state_moved();
+		}
+	}
 
 	// What the document changed, in the picture's terms: a change set patches the scene by its rows;
 	// anything else (followed the first time, read again, a state its history no longer holds) reads
@@ -531,7 +559,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 }
 
 bool MissionViewport::takes_(const std::string &member) const {
-	return member == "options" || member == "camera" || member == "shot" || member == "shots";
+	return member == "options" || member == "camera" || member == "shot" || member == "shots" || member == "frame_ground";
 }
 
 bool MissionViewport::check_(const io::JsonValue &json, std::string &error) const {
@@ -541,6 +569,14 @@ bool MissionViewport::check_(const io::JsonValue &json, std::string &error) cons
 	OrbitCamera camera = camera_;
 	if (const JsonValue *member = json.get("camera"); member && !mission_camera_from_json(*member, camera, error))
 		return false;
+	if (const JsonValue *member = json.get("frame_ground")) {
+		bool box = member->is_array() && member->array.size() == 4;
+		for (size_t i = 0; box && i < 4; ++i) box = member->array[i].is_number() && std::isfinite(member->array[i].number);
+		if (!box || member->array[0].number > member->array[2].number || member->array[1].number > member->array[3].number) {
+			error = "frame_ground is a box of the ground [x0, y0, x1, y1], mission units, x0 <= x1 and y0 <= y1.";
+			return false;
+		}
+	}
 	// The Shoot tool's shots (DI-23): one fired on the clock's tick, or the whole list.
 	MissionShot shot;
 	if (const JsonValue *member = json.get("shot"); member && !read_mission_shot(*member, shot, error)) return false;
@@ -575,7 +611,16 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 		if (drawn != options_) options_moved_ = true;
 		options_ = options;
 	}
-	if (const JsonValue *member = json.get("camera")) mission_camera_from_json(*member, camera_, error);
+	if (const JsonValue *member = json.get("camera")) {
+		mission_camera_from_json(*member, camera_, error);
+		framed_ = true; // a camera set stands over the first framing
+	}
+	if (const JsonValue *member = json.get("frame_ground")) {
+		for (size_t i = 0; i < 4; ++i) frame_ground_[i] = member->array[i].number;
+		frame_ground_pending_ = true;
+		framed_ = true;
+		frame_ground_now_();
+	}
 	// The Shoot tool's shots (DI-23): the whole list, or one on the clock's tick (those after it gone: the run is
 	// played anew from there).
 	if (const JsonValue *member = json.get("shots")) {

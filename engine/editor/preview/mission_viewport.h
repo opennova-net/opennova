@@ -88,6 +88,11 @@ public:
 	MissionViewStatus view_status() const { return reason_; }
 	const MissionViewportOptions &options() const { return options_; }
 	const OrbitCamera &camera() const { return camera_; }
+	// A box of the ground framed (S23 C: a tile atlas's Show use, its cells' squares): a SetViewport's
+	// `frame_ground` [x0, y0, x1, y1], mission units, framed at the next follow, the camera over its middle on
+	// the ground there, north up and looking down as the first framing looks, as far as fits it; a camera so set
+	// stands over the first framing.
+	static constexpr float kFrameGroundMargin = 1.25f;
 	const MissionScene &scene() const { return scene_; }
 	// The names its device asked the project's files for and did not find (its notes), and whether
 	// its device holds a surface a ray lands on (its terrain, built).
@@ -273,6 +278,8 @@ private:
 	// The ground's height at mission (x, y): the mission's terrain as the game reads it, else the device's,
 	// else `otherwise`.
 	double ground_height_(const ViewportContext &context, double x, double y, double otherwise) const;
+	// The camera framed on the ground box frame_ground_ holds.
+	void frame_ground_now_();
 	// `shoot {at}` (DI-23): a shot of the Shoot tool's ammo where the picture's point meets the ground or an object,
 	// seen from the camera's eye (a SetViewport of the shot on the clock's tick, the clock run).
 	bool shoot_(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
@@ -296,6 +303,9 @@ private:
 	bool options_moved_ = false;
 	OrbitCamera camera_;
 	bool framed_ = false; // the camera framed a document's entities once
+	// The ground box a SetViewport asked framed, framed as asked and again on the terrain's ground at the next follow.
+	bool frame_ground_pending_ = false;
+	double frame_ground_[4] = {0.0, 0.0, 0.0, 0.0};
 	float fog_reach_ = 0.0f; // mission_fog_reach of the scene's header over the files read, 0 for none
 	MissionViewStatus reason_ = MissionViewStatus::NoProject;
 	std::string detail_;
