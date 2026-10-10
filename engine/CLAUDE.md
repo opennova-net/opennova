@@ -224,9 +224,19 @@
   string at an OS file call: `os_path`, `fopen_utf8`, `utf8_path`; Windows reads a
   narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`),
   `io/file_io.h` (whole-file reads and the atomic `.tmp`-then-rename write over
-  `os_path`, the rename's bounded retry). Do not hand-roll a new byte
-  reader; migrate existing per-lib copies on-touch (delegate the
-  body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
+  `os_path`, the rename's bounded retry), `io/sha256.h` (FIPS 180-4 SHA-256: the
+  streaming `Sha256` and the one-shot `sha256` / `sha256_hex`; infrastructure, not a
+  port). A secret or one-of-a-kind value (a salt, a session tag or key, an id, a UUID)
+  draws from `base/os_random` (the OS CSPRNG: `os_random_bytes`, `os_random_u32` /
+  `os_random_u64` / `os_random_nonzero_u32`, `make_uuid_v4`, the `OsRandom` generator),
+  never `std::random_device`, which libstdc++ serves from RDSEED (AMD's erratum answers
+  concurrent draws with 0); it is a compiled lib in `opennova_base`, not `io`, because
+  its Windows call needs `<windows.h>`. The one `std::random_device` left in `engine/`
+  is the narrow exception: the CBIN writer's fresh XOR key (`formats/cbin`, a credits
+  file with no preserved key) is written in the clear in the file's own header, so it
+  only obfuscates and is neither a secret nor an id, and formats cannot link base. Do
+  not hand-roll a new byte reader; migrate existing per-lib copies on-touch
+  (delegate the body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
   The 16.16 / 2.14 scales are `io/fixed.h`'s `kFp16One` (float), `kFp16OneD`
   (double), `kFp16OneInt`, `kInvFp16One` and `kFp14One`, and the logic clock is
   `io/tick_rate.h`'s `kTickHz` (62.5) / `kTicksPerSecondInt` (62): name a raw
