@@ -36,6 +36,7 @@
 		"ClassDB",
 		"CodeEdit",
 		"CollisionObject3D",
+		"ColorRect",
 		"Compositor",
 		"CompositorEffect",
 		"ConcavePolygonShape3D",
