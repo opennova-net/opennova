@@ -16,10 +16,12 @@
 // [orig] The per-pool serializers own the cap: each fills a 4096 B caller buffer but self-limits with a
 // guard checked AFTER writing a full record — NetPacket_SerializeEntityStatesToBuffer @0x5030a0 (0x0C) breaks
 // when `written + 100 > 650`; NetPacket_SerializeEntityPoolToPacket @0x503460 (0x20) breaks when
-// `written + 30 > 650`. The common budget is 650; the headroom margin is the pool's max single-record
-// size (0x0C carries a variable name string → 100; 0x20's records are small → 30). BatchPageLimit
+// `written + 30 > 650`. The common budget is 650; the headroom margin is each serializer's own constant
+// (0x0C 100, 0x0D 110, 0x10 40, 0x20 30), not its largest record (0x10's reaches 44 B, 0x20's 31 B,
+// so a page can end a few bytes past 650). BatchPageLimit
 // preserves that post-write guard while retaining the conventional pre-write cap used by 0x45 tiles.
-// See docs/net/novaworld-net-re.md (D-NET-135).
+// The break skips the pool-cursor step, so the record that crossed is counted in its page and starts the
+// next one again (D-NET-397). See docs/net/novaworld-net-re.md (D-NET-135).
 namespace opennova::inmatch {
 
 // The result of paging up to `max_pages` datagrams' worth of records out of a batch from a cursor.
@@ -58,10 +60,19 @@ constexpr BatchPageLimit terrain_tiles() { return BatchPageLimit::pre_write(650)
 } // namespace initial_state_page_limits
 
 // Slice records [start_cursor, n_records) into pages, at most `max_pages` this call. A pre-write limit
-// rejects the next record when its encoded body would exceed the budget. A post-write limit includes
-// the next complete record and stops once current encoded bytes + headroom exceeds the budget. Both
-// modes always ship at least one record per page. `encode_page(off, cnt)` returns the encoded body for
-// records [off, off+cnt); the cursor is retained when the per-call page budget is exhausted.
+// rejects the next record when its encoded body would exceed the budget, and the next page starts after
+// this page's last record. A post-write limit includes the next complete record and stops once current
+// encoded bytes + headroom exceeds the budget, the pool's last record included; the record that crossed
+// stays in its page and the cursor stays on it, so the next page starts with it again, and a last record
+// that crosses is sent once more as a page of its own [orig: the count then the `jg` past the cursor
+// step — NetPacket_SerializePool2StaticToBuffer @0x5042F0 (@0x50463E, @0x50464B);
+// NetPacket_SerializeEntityPoolToPacket_0 @0x503940 (@0x5039EF, @0x503F9C);
+// NetPacket_SerializeEntityStatesToBuffer @0x5030A0 (@0x5033F7, @0x50340D);
+// NetPacket_SerializeEntityPoolToPacket @0x503460 (@0x503687, @0x503694)]. Both modes always ship at
+// least one record per page, and a page whose first record crosses alone steps past it (retail's cursor
+// would resend it every call; no record of the four pools reaches budget - headroom). `encode_page(off,
+// cnt)` returns the encoded body for records [off, off+cnt); the cursor is retained when the per-call
+// page budget is exhausted.
 template <typename EncodePage>
 BatchPageResult slice_batch_pages(std::size_t n_records, BatchPageLimit limit,
                                   EncodePage encode_page, std::size_t start_cursor,
@@ -71,12 +82,15 @@ BatchPageResult slice_batch_pages(std::size_t n_records, BatchPageLimit limit,
 	while (i < n_records && out.pages.size() < max_pages) {
 		std::size_t cnt = 1;
 		std::vector<uint8_t> body = encode_page(i, cnt);
-		while (i + cnt < n_records) {
+		bool crossed = false;
+		for (;;) {
 			if (limit.check == BatchPageLimit::Check::AfterEachRecord &&
 			    (body.size() > limit.byte_budget ||
 			     limit.headroom > limit.byte_budget - body.size())) {
+				crossed = true;
 				break;
 			}
+			if (i + cnt >= n_records) break;
 			std::vector<uint8_t> grown = encode_page(i, cnt + 1);
 			if (limit.check == BatchPageLimit::Check::BeforeNextRecord &&
 			    grown.size() > limit.byte_budget) {
@@ -85,7 +99,7 @@ BatchPageResult slice_batch_pages(std::size_t n_records, BatchPageLimit limit,
 			body.swap(grown);
 			++cnt;
 		}
-		i += cnt;
+		i += crossed && cnt > 1 ? cnt - 1 : cnt;
 		out.pages.push_back(std::move(body));
 	}
 	out.next_cursor = i;
