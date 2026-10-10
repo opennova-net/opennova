@@ -23,21 +23,17 @@ Diagnostic refusal(CoreFinding code, const BlankRequest &request, const std::str
 // section and halts [orig: AudioVM_Op_Done @ 0x672cd0], so it never plays a stream. Compiled by the engine's MUS
 // compiler and encoded by its writer. One section at least: with no chunk the game's pump reads its first
 // opcode from address 0 once the bank is open [orig: ScriptInstance_Init @ 0x672ef0, the empty walk @ 0x672f0b;
-// the interpreter's read @ 0x67274d]. `handler`: the chunk's message handler pointed at that `done`, which the
-// single-player round's end runs whenever a script is loaded and without which it reads address 0x18 [orig:
-// MusicCtx_SelectEndTrack @ 0x672fd0 from Server_ProcessRoundEnd @ 0x51696b / 0x51698f; sub_672E50 @
-// 0x672eba..0x672ec1]; the compiler writes none, so it is set here as the mission's script needs it.
-bool music_script_bytes(const BlankRequest &request, bool handler, std::vector<uint8_t> &out, Diagnostic &error) {
+// the interpreter's read @ 0x67274d]. The chunk's message handler points at the code's leading nop before that
+// `done`, as the compiler writes MDEdit's layout (menumus.bin's): the single-player round's end runs it whenever a
+// script is loaded, and without one it reads address 0x18 [orig: MusicCtx_SelectEndTrack @ 0x672fd0 from
+// Server_ProcessRoundEnd @ 0x51696b / 0x51698f; sub_672E50 @ 0x672eba..0x672ec1].
+bool music_script_bytes(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	mus::MusScript script{};
 	int line = 0, column = 0;
 	const char *message = nullptr;
 	if (mus::mus_compile("script music\nsection Begin\n{\n}\n", &script, &line, &column, &message) != 0) {
 		error = refusal(CoreFinding::BlankMusic, request, "The music script", message ? message : "it does not compile");
 		return false;
-	}
-	if (handler) {
-		script.has_message_handler = 1;
-		script.message_handler_offset = 0;
 	}
 	const mus::MusScript *scripts[] = {&script};
 	uint8_t *buffer = nullptr;
@@ -112,12 +108,12 @@ bool make_blank_music_bank(const BlankRequest &request, std::vector<uint8_t> &ou
 // The shell's music script (MENUMUS.BIN): the idling script (music_script_bytes), no handler: a mission's start
 // frees or replaces the shell's script before a round can end.
 bool make_blank_menu_music_script(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
-	return music_script_bytes(request, false, out, error);
+	return music_script_bytes(request, out, error);
 }
 
 // A mission's music script (GAMEMUS.BIN): the idling script with the handler the round's end runs.
 bool make_blank_game_music_script(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
-	return music_script_bytes(request, true, out, error);
+	return music_script_bytes(request, out, error);
 }
 
 } // namespace opennova::editor
