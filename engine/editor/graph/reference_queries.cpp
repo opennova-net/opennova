@@ -180,16 +180,12 @@ std::vector<ReferenceChoice> reference_choices(const AssetGraph &graph, const Fi
 		return out;
 	}
 	// What the value may name instead: a stylesheet variable for a menu's font or texture (the
-	// %NAME% stays in the menu and the stylesheet's value is the file, ADR 0005), a string id
-	// for a text key the editor does not resolve yet; each as this field would reference it, a
-	// kind the editor cannot check keeping the offered kind's own answer.
+	// %NAME% stays in the menu and the stylesheet's value is the file, ADR 0005), each as this field
+	// would reference it.
 	if (row.also_offers == ReferenceKind::None) return out;
-	const bool checked = row.resolution != ReferenceResolution::Unchecked;
 	for (ReferenceChoice &choice : graph.choices(row.also_offers)) {
-		if (checked) {
-			choice.status = graph.resolve(field.reference, choice.name, field.scope, &choice.served, field.loader_arg);
-			if (choice.status != ReferenceStatus::Present) choice.served.clear();
-		}
+		choice.status = graph.resolve(field.reference, choice.name, field.scope, &choice.served, field.loader_arg);
+		if (choice.status != ReferenceStatus::Present) choice.served.clear();
 		out.push_back(std::move(choice));
 	}
 	return out;

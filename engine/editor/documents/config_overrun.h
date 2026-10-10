@@ -6,6 +6,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/document_base.h>
+#include <formats/configfile/config_file.h>
 
 namespace opennova::editor {
 
@@ -23,7 +24,11 @@ namespace opennova::editor {
 // lines change nothing its loader reads (DocumentType::config_idle_lines) and putting the ConfigFile's
 // comment (';', configfile::config_commented) before those of them that hold numbers alone (each takes
 // values away and no byte of text) brings the file under the line: that edit, one step Undo takes back. Reads a text document's text as the game reads those bytes; a
-// blocked document makes none.
+// blocked document makes none. A record document of such a kind (the character attributes, S23 B) makes the same
+// finding in its own validator over the text its save writes, in these words, its fix the same lines commented out
+// in its layout (documents/charattr_document.h).
 std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document);
+// The finding's words: what `file` holds, what the reader makes of it, where the first value past the pool is.
+std::string config_overrun_words(const std::string &file, const configfile::DataStringsPool &pool);
 
 } // namespace opennova::editor

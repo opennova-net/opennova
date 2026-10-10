@@ -439,11 +439,12 @@ static int test_script_type() {
 	            program.diagnostics.size(), table, findings.size());
 	TEST_EXPECT(table >= 4 && findings.empty());
 	// Its references: the effect, the sound set, two ammo (the second looked up as ammo_satchel
-	// after satchel) and the text key, each at its span, the names as written.
+	// after satchel) and the text key, each at its span, the names as written; then the mission's records
+	// its literal operands name, the area 8 and the entity 1 (S23 B).
 	std::vector<TextReference> references;
 	type->references(script, references);
-	TEST_EXPECT(references.size() == 5);
-	if (references.size() != 5) return 1;
+	TEST_EXPECT(references.size() == 7);
+	if (references.size() != 7) return 1;
 	const auto is = [&](size_t i, ReferenceKind kind, const char *value, size_t line, size_t column) {
 		const TextReference &r = references[i];
 		std::string written;
@@ -462,6 +463,11 @@ static int test_script_type() {
 	TEST_EXPECT(references[4].scope == "TEXT_DOCUMENT.BIN" && references[4].scope_alternate == "MEDMSSN.BIN" &&
 	            references[4].scope_owner == "TEXT_DOCUMENT.BMS" && references[4].scopes_after == tables_after);
 	TEST_EXPECT(references[4].rewritable && references[0].rewritable && references[3].rewritable);
+	// An operand a slot reads as a mission's record: in the mission of the script's name, only beside it, never
+	// renamed (a number).
+	TEST_EXPECT(is(5, ReferenceKind::MissionZone, "8", 5, 28) && is(6, ReferenceKind::MissionEntity, "1", 7, 10));
+	TEST_EXPECT(references[6].scope == "TEXT_DOCUMENT.BMS" && references[6].needs == "TEXT_DOCUMENT.BMS" &&
+	            references[6].field == "operand" && !references[6].rewritable && !references[5].rewritable);
 	// game.wac runs with every mission: its key reads whichever table plays, any table here, and no
 	// rename rewrites it.
 	{
@@ -481,8 +487,8 @@ static int test_script_type() {
 		                                 "first.wac");
 		std::vector<TextReference> named;
 		script_references(*files, named);
-		TEST_EXPECT(named.size() == 4);
-		if (named.size() != 4) return 1;
+		TEST_EXPECT(named.size() == 5);
+		if (named.size() != 5) return 1;
 		const auto file_at = [&](size_t i, ReferenceKind kind, const char *value, size_t line, size_t column, const char *fallback) {
 			const TextReference &r = named[i];
 			std::string written;
@@ -494,6 +500,7 @@ static int test_script_type() {
 		TEST_EXPECT(file_at(1, ReferenceKind::Wave, "radio.WAV", 3, 13, ""));
 		TEST_EXPECT(file_at(2, ReferenceKind::Script, "other.txt", 5, 5, "OTHER.wac"));
 		TEST_EXPECT(file_at(3, ReferenceKind::Script, "patrol", 6, 5, ""));
+		TEST_EXPECT(named[4].kind == ReferenceKind::MissionEntity && named[4].value == "1" && named[4].scope == "FIRST.BMS");
 		const opennova::wac::Program naming = compile_script(*files);
 		TEST_EXPECT(naming.file_uses.size() == 4 && naming.file_uses[0].kind == opennova::wac::FileUse::Kind::Wave &&
 		            naming.file_uses[0].name == "intro.wav" && naming.file_uses[3].kind == opennova::wac::FileUse::Kind::Run &&
@@ -650,7 +657,13 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(graph_reads_kind(AssetKind::Script) && !graph_reads_kind(AssetKind::Text) &&
 	            !references_unread(AssetKind::Script));
 	const std::vector<const GraphEdge *> edges = graph.references_of(script);
-	TEST_EXPECT(edges.size() == 5);
+	TEST_EXPECT(edges.size() == 7);
+	// Its operands' area and entity (S23 B) name nothing here: the project has no mission of the script's name.
+	const GraphEdge *area = edge_at(graph, script, "5:28");
+	const GraphEdge *entity = edge_at(graph, script, "7:10");
+	TEST_EXPECT(area && entity && area->kind == ReferenceKind::MissionZone &&
+	            graph.resolve(*area) == ReferenceStatus::NotAReference &&
+	            graph.resolve(*entity) == ReferenceStatus::NotAReference);
 	const GraphEdge *fx = edge_at(graph, script, "3:12");
 	const GraphEdge *ammo = edge_at(graph, script, "5:16");
 	const GraphEdge *fallback = edge_at(graph, script, "6:16");
@@ -943,6 +956,32 @@ static int test_credits() {
 	TEST_EXPECT(credits.line(1) == "[ENV]" && credits.line(2) == "scroll_rate = 0.5" &&
 	            credits.line(8) == "text = Joint_Operations:, Serpen24" && made->serialize().text == kda &&
 	            made->rewrite_need() == DocumentBase::RewriteNeed::None && type->validate_file(*made).empty());
+	// What its lines name (credits_references, D-MNU-6): the text line's font and the fading image's texture,
+	// each at its span.
+	TEST_EXPECT(type->references);
+	std::vector<TextReference> names;
+	type->references(credits, names);
+	TEST_EXPECT(names.size() == 2 && names[0].kind == ReferenceKind::Font && names[0].value == "Serpen24" &&
+	            names[0].span.line == 8 && names[0].span.column == 27 && names[0].span.length == 8 &&
+	            names[1].kind == ReferenceKind::MenuTexture && names[1].value == "cr1.png" &&
+	            names[1].span.line == 10 && names[1].span.column == 14 && names[1].span.length == 7);
+	// As the loader reads [TEXT]: a spacing image, a font cut to 31 bytes, no number (the reader prints it), no
+	// line of another section, and nothing after an entry of no value (where the accessor's walk stops).
+	{
+		std::unique_ptr<DocumentBase> named = type->make();
+		TEST_EXPECT(named->load_bytes(bytes_of("[TEXT]\r\ntext = ~Ilogo.tga\r\ntext = 5, 7\r\n"
+		                                       "TEXT = Name, Font_Name_Longer_Than_Thirty_One_Bytes\r\n"
+		                                       "text = ~f1||2|fade.tga\r\ntext = ,\r\ntext = ~Iafter.tga\r\n"
+		                                       "[ENV]\r\ntext = ~Ielsewhere.tga\r\n"),
+		                              "named.kda", AssetKind::Credits, "jo", error));
+		std::vector<TextReference> read;
+		type->references(*text_of(*named), read);
+		TEST_EXPECT(read.size() == 3 && read[0].kind == ReferenceKind::MenuTexture && read[0].value == "logo.tga" &&
+		            read[0].span.line == 2 && read[0].span.column == 10 && read[1].kind == ReferenceKind::Font &&
+		            read[1].value == "Font_Name_Longer_Than_Thirty_On" && read[1].span.line == 4 &&
+		            read[1].span.length == 31 && read[2].kind == ReferenceKind::MenuTexture &&
+		            read[2].value == "fade.tga" && read[2].span.line == 5 && read[2].span.column == 15);
+	}
 	// A text line's value changed: written in the CBIN form, which reads back as the edited text.
 	size_t text_line = 0;
 	for (size_t i = 1; i <= credits.line_count() && !text_line; ++i)
@@ -1043,6 +1082,18 @@ static int test_music_script() {
 	const TextDocument &music = *text_of(*made);
 	TEST_EXPECT(music.text() == repo_file("mus/golden_synth_gamemus.mus.txt"));
 	TEST_EXPECT(made->serialize().text == bin && type->validate_file(*made).empty());
+	// What it names (music_script_references, S23 B): each play's stream of GAMEMUS.SBF by its place, at the play's
+	// name, which no rename rewrites.
+	TEST_EXPECT(type->references);
+	std::vector<TextReference> plays;
+	type->references(music, plays);
+	bool streams = plays.size() == 9;
+	for (const TextReference &play : plays) {
+		std::string spelled;
+		streams = streams && play.kind == ReferenceKind::MusicStream && play.scope == "GAMEMUS.SBF" && !play.rewritable &&
+		          music.span_text(play.span, spelled) && spelled == "sound_" + play.value;
+	}
+	TEST_EXPECT(streams);
 	// A text that does not compile: refused at its line and column, its Save refused.
 	TEST_EXPECT(apply(*made, {TextDocument::replace(span(7, 1, 0), "@@@ ")}));
 	const std::vector<Diagnostic> findings = type->validate_file(*made);
@@ -1098,97 +1149,48 @@ static int test_shader_and_text() {
 	TEST_EXPECT(rewritten->save(error) && type->validate_file(*rewritten).empty() &&
 	            test_io::read_file(file) == stored && !rewritten->dirty());
 	// The text type: its file its text, no finding for a configuration (no reader the editor models); its
-	// table the engine readers' two codes (DI-06).
+	// table none (S23 B gave the avatars and the score table, whose readers it held, their own types).
 	const DocumentType *text = document_type_for(AssetKind::Config);
 	TEST_EXPECT(text && text->id == DocumentTypeId::Text && document_type_for(AssetKind::Text) == text);
 	std::unique_ptr<DocumentBase> config = text->make();
 	TEST_EXPECT(config->load_bytes(bytes_of("a = 1\nb = 2\n"), "game.cfg", AssetKind::Config, "jo", error) &&
 	            config->serialize().text == "a = 1\nb = 2\n" && text->validate_file(*config).empty() &&
-	            text->findings().count == 2);
+	            text->findings().count == 0);
 	return 0;
 }
 
 // Every text file opens in the editor (the deep-integration plan's DI-06): the text kinds no structured
-// type edits are the text type's, a text with undo and save; where the engine has a reader of the kind,
-// its findings are the file's (the avatar reader's notes at their lines; the score table's reader),
-// listed; a kind with none makes none. SndProf.def, the particle file (DI-14), the environment (DI-19a),
-// the HUD layout (DI-20) and the character attributes (DI-09's charattr follow-up) are left to their own
-// types (the specific type owns its kind), the mission text to no type (the build leaves it out). An open
-// avatar table stands in for its file in the graph, read by the engine's own reader: its names follow its
-// edits.
+// type edits are the text type's, a text with undo and save, no finding (none of its kinds has a reader the
+// editor ports). SndProf.def, the particle file (DI-14), the environment (DI-19a), the HUD layout (DI-20),
+// the character attributes (DI-09's charattr follow-up), the AI profile, the HUD effects, the score table
+// and the avatars (S23 B) are left to their own types (the specific type owns its kind), the mission text
+// to no type (the build leaves it out).
 static int test_text_readers() {
 	const DocumentType *text = document_type(DocumentTypeId::Text);
 	TEST_EXPECT(text != nullptr);
 	if (!text) return 1;
-	for (const AssetKind kind : {AssetKind::AiProfile,
-	                             AssetKind::HudFxDefs, AssetKind::AvatarDefs, AssetKind::OtherDefs,
-	                             AssetKind::Score, AssetKind::NovaWorldScreen})
+	for (const AssetKind kind : {AssetKind::OtherDefs, AssetKind::NovaWorldScreen})
 		TEST_EXPECT(document_type_for(kind) == text && is_editable_kind(kind));
 	TEST_EXPECT(document_type_for(AssetKind::SoundProfileDefs) != text && document_type_for(AssetKind::MissionText) == nullptr &&
 	            document_type_for(AssetKind::Particles) == document_type(DocumentTypeId::Particles) &&
 	            document_type_for(AssetKind::HudPosDefs) == document_type(DocumentTypeId::HudLayout) &&
-	            document_type_for(AssetKind::CharAttrDefs) == document_type(DocumentTypeId::CharAttrs));
+	            document_type_for(AssetKind::CharAttrDefs) == document_type(DocumentTypeId::CharAttrs) &&
+	            document_type_for(AssetKind::AiProfile) == document_type(DocumentTypeId::AiProfile) &&
+	            document_type_for(AssetKind::HudFxDefs) == document_type(DocumentTypeId::HudFx) &&
+	            document_type_for(AssetKind::Score) == document_type(DocumentTypeId::ScoreTable) &&
+	            document_type_for(AssetKind::AvatarDefs) == document_type(DocumentTypeId::Avatars));
 	TEST_EXPECT(document_type_for(AssetKind::Environment) == document_type(DocumentTypeId::Environment));
-	// The graph still reads a native kind through the engine's reader, not the text type; the character
-	// attributes through their own type's references.
-	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) &&
-	            graph_reads_kind(AssetKind::HudPosDefs) && graph_reads_kind(AssetKind::AvatarDefs) &&
-	            graph_reads_kind(AssetKind::CharAttrDefs) && !graph_reads_kind(AssetKind::Score));
+	// The graph reads a native kind through the engine's reader, not the text type; the character
+	// attributes through their own type's references; the four S23 B types through their records.
+	TEST_EXPECT(graph_reads_kind(AssetKind::Particles) && graph_reads_kind(AssetKind::HudPosDefs) &&
+	            graph_reads_kind(AssetKind::AvatarDefs) && graph_reads_kind(AssetKind::CharAttrDefs) &&
+	            graph_reads_kind(AssetKind::AiProfile) && graph_reads_kind(AssetKind::HudFxDefs) &&
+	            !graph_reads_kind(AssetKind::OtherDefs));
 	Diagnostic error;
-	bool texts_held = true; // each file loads as its text and writes back as it was
-	const auto findings_of = [&](const std::string &source, const char *name, AssetKind kind) {
-		std::unique_ptr<DocumentBase> document = text->make();
-		const bool loaded = document->load_bytes(bytes_of(source), name, kind, "jo", error);
-		texts_held = texts_held && loaded && document->serialize().text == source;
-		return loaded ? text->validate_file(*document) : std::vector<Diagnostic>();
-	};
-	// The avatar reader's notes, each at its line.
-	const std::vector<Diagnostic> avatars =
-			findings_of("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n", "Avatars.def", AssetKind::AvatarDefs);
-	TEST_EXPECT(avatars.size() == 1 && avatars[0].code() == "text.reader" && avatars[0].severity == DiagnosticSeverity::Warning &&
-	            avatars[0].line == 4 && avatars[0].message.find("Duplicate nationality") != std::string::npos);
-	// The score table's reader reads past a statement it does not know, as the game does (master's #987,
-	// formats/score): no finding.
-	const std::vector<Diagnostic> scores = findings_of("VERSION 1\nNONSENSE 2\n", "score.ini", AssetKind::Score);
-	TEST_EXPECT(scores.empty());
-	// Kinds whose reader refuses nothing, or that the editor models no reader of.
-	TEST_EXPECT(findings_of("primary_ammo 5\n", "tank.aip", AssetKind::AiProfile).empty());
-	TEST_EXPECT(texts_held);
-
-	// In a session: the avatar table opens as a text; an edit of a head's model moves the graph's reference
-	// with it, unsaved; the table's note is the text type's, at its line.
-	editor_test::TempProjectDir dir("opennova_editor_text_readers");
-	editor_test::NoProcess platform;
-	MemoryPreferencesStore preferences;
-	ProjectSession session(platform, preferences);
-	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Readers"));
-	editor_test::create_missing_files(session);
-	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_text(root + "/Avatars.def",
-	                                    "nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n\r\n"
-	                                    "define head HEAD_A\r\n{\r\n\tgraphic\t\thead_a.3di\r\n\tcamo\t\t0 0 0\r\n"
-	                                    "\tvoice\t\t1\r\n\tsex\t\tm\r\n}\r\n"));
-	editor_test::handle_to_end(session, request::rescan());
-	const auto names = [&session](const std::string &value) {
-		for (const GraphEdge *edge : session.view().findings.graph->references_of("Avatars.def"))
-			if (edge->kind == ReferenceKind::Model && edge->value == value) return true;
-		return false;
-	};
-	TEST_EXPECT(names("head_a.3di"));
-	size_t noted = 0;
-	for (const Diagnostic &d : session.view().findings.diagnostics)
-		noted += d.code() == "text.reader" && d.asset == "Avatars.def" && d.severity == DiagnosticSeverity::Warning && d.line == 4;
-	TEST_EXPECT(noted == 1);
-	editor_test::handle_to_end(session, request::open_document("Avatars.def"));
-	TextDocument *open = text_of(*session.document_base_for("Avatars.def"));
-	TEST_EXPECT(open != nullptr);
-	if (!open) return 1;
-	TEST_EXPECT(open->line(10) == "\tgraphic\t\thead_a.3di");
-	editor_test::handle_to_end(session, request::edit_record("Avatars.def", {TextDocument::replace(span(10, 11, 6), "head_b")}));
-	TEST_EXPECT(session.last_edit_ok() && open->line(10) == "\tgraphic\t\thead_b.3di" && open->dirty());
-	TEST_EXPECT(names("head_b.3di") && !names("head_a.3di"));
-	editor_test::handle_to_end(session, request::undo("Avatars.def"));
-	TEST_EXPECT(names("head_a.3di") && !open->dirty());
+	std::unique_ptr<DocumentBase> document = text->make();
+	const std::string source = "// a definition\r\nname value\r\n";
+	TEST_EXPECT(document->load_bytes(bytes_of(source), "misc.def", AssetKind::OtherDefs, "jo", error) &&
+	            document->serialize().text == source && text->validate_file(*document).empty());
 	return 0;
 }
 
@@ -1419,8 +1421,8 @@ static int test_retail() {
 	std::string view_error;
 	TEST_EXPECT(view.open(install_spec(install, project), view_error));
 	const opennova::Vfs &mount = view.vfs();
-	size_t scripts = 0, compiled = 0, findings = 0, references = 0, music = 0, credits = 0, shaders = 0;
-	size_t witnessed = 0, alone = 0, shader_tags = 0;
+	size_t scripts = 0, compiled = 0, findings = 0, references = 0, operands = 0, music = 0, credits = 0, shaders = 0;
+	size_t witnessed = 0, alone = 0, shader_tags = 0, credit_fonts = 0, credit_images = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
 		const AssetKind kind = classify_asset(name, nullptr);
@@ -1486,6 +1488,9 @@ static int test_retail() {
 			std::vector<TextReference> named;
 			type->references(*text_of(*document), named);
 			references += named.size();
+			// The mission's entities and areas its literal operands name (S23 B).
+			for (const TextReference &each : named)
+				operands += each.kind == ReferenceKind::MissionEntity || each.kind == ReferenceKind::MissionZone ? 1 : 0;
 			break;
 		}
 		case AssetKind::MusicScript:
@@ -1493,10 +1498,15 @@ static int test_retail() {
 			++music;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
 			break;
-		case AssetKind::Credits:
+		case AssetKind::Credits: {
 			++credits;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
+			std::vector<TextReference> names;
+			type->references(*text_of(*document), names);
+			for (const TextReference &name : names)
+				++(name.kind == ReferenceKind::Font ? credit_fonts : credit_images);
 			break;
+		}
 		case AssetKind::Shader: {
 			++shaders;
 			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
@@ -1509,12 +1519,16 @@ static int test_retail() {
 		}
 	}
 	std::printf("retail: %zu scripts (%zu with the original compiler's listing matched, %zu running no other "
-	            "file; %zu compiler reports, %zu findings, %zu references), %zu music scripts, %zu credits files, "
-	            "%zu shaders (%zu shader tags)\n",
-	            scripts, witnessed, alone, compiled, findings, references, music, credits, shaders, shader_tags);
+	            "file; %zu compiler reports, %zu findings, %zu references, %zu of them operands), %zu music scripts, "
+	            "%zu credits files (%zu fonts and %zu images named), %zu shaders (%zu shader tags)\n",
+	            scripts, witnessed, alone, compiled, findings, references, operands, music, credits, credit_fonts,
+	            credit_images, shaders, shader_tags);
 	// The install's counts, pinned (Joint Operations: Combined Arms).
 	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
-	            references == 36 && music == 2 && credits == 1 && shaders == 44);
+	            references == 97 && operands == 61 && music == 2 && credits == 1 && shaders == 44);
+	// The credits' names: each text line's font (every one of the 231 writes one) and its 19 images (17 fading,
+	// 2 spacing).
+	TEST_EXPECT(credit_fonts == 231 && credit_images == 19);
 	// The tags the shaders register, as the renderer's registry holds them: _ffp.fx's 24 and the shipped
 	// effects' (render-material-re.md, the 46-tag registry).
 	TEST_EXPECT(shader_tags == 46);

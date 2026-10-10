@@ -108,6 +108,10 @@ enum class FindingGroup {
 	Fonts,          // a .fnt, through the font's reader (round S23 lane A)
 	MusicBanks,     // a .sbf, through the bank's reader (round S23 lane A)
 	Waves,          // a .wav's whole-wave operations (round S23 lane A)
+	AiProfiles, // an .aip, through the game's profile reader (ADR 0046 S23 B)
+	HudEffects, // hudfx.def, as the HUD's init reads it (ADR 0046 S23 B)
+	ScoreTables, // score.ini, through the game's score table reader (ADR 0046 S23 B)
+	AvatarTables, // Avatars.def, through the game's avatar reader (ADR 0046 S23 B)
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);

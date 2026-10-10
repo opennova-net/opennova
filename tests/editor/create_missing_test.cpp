@@ -223,13 +223,12 @@ static int test_mission_rows_are_all_filled() {
 		TEST_EXPECT(created);
 	}
 	// DI-33: the rows the engine has a writer for are made, the mission's music bank with its script (the game opens
-	// the bank first); failsafe.bad, which retail ships none of, and hudfx.def, which no reader or writer of the
-	// engine's reads, keep none.
+	// the bank first) and the HUD effects of no line (S23 B); failsafe.bad, which retail ships none of, keeps none.
 	const CreateMissingResult content = create_missing_requirements(
 	        paths, doc, after.scan, after.report,
 	        {"failsafe_bad", "gamemus_sbf", "medmssn_bin", "hudpos_def", "hudfx_def", "upl_3di"});
-	TEST_EXPECT(content.diagnostics.empty() && content.created.size() == 5 &&
-	            content.unavailable == std::vector<std::string>({"failsafe.bad", "hudfx.def"}));
+	TEST_EXPECT(content.diagnostics.empty() && content.created.size() == 6 &&
+	            content.unavailable == std::vector<std::string>({"failsafe.bad"}));
 	bool script_made = false;
 	for (const std::string &made : content.created) script_made = script_made || made.find("GAMEMUS.BIN") != std::string::npos;
 	TEST_EXPECT(script_made);

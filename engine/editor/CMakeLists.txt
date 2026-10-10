@@ -92,8 +92,12 @@ add_library(opennova_editor STATIC
     # the sound lane: a bank's waves and sets, SndProf.def's profiles
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/sound_profile_document.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/charattr_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/charattr_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/dialog_bank_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/ai_profile_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/hudfx_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/score_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/avatars_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/hud_layout_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/config_overrun.cpp
@@ -108,6 +112,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/credits_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/particle_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/particle_keys.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/project_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
@@ -119,6 +124,7 @@ add_library(opennova_editor STATIC
     # checks, and what a stylesheet line's value is used as) and the one validation pass over the
     # project's files; the display names (a value as a modder reads it, the graph as the names)
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/code_text_keys.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/display_names.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
@@ -292,6 +298,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/particle_keys_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_uses.cpp
@@ -426,6 +433,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/welcome_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/font_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/music_bank_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/particle_key_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/wave_inspector.cpp
     )
     target_link_libraries(opennova_editor PRIVATE opennova_imgui)

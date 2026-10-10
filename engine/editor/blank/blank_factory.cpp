@@ -173,6 +173,9 @@ const BlankFactory k_factories[] = {
 	  "the HUD layout with nothing moved: every element where the game puts it with no layout", false },
 	{ "avatars_def", AssetKind::AvatarDefs, make_blank_avatars,
 	  "an avatars table with no part, nationality or combo yet", false },
+	// S23 B: the HUD effects, now the engine reads and writes them.
+	{ "hudfx_def", AssetKind::HudFxDefs, make_blank_hudfx,
+	  "the HUD effects with no model line: the game reads nothing of it, as with none", false },
 	// An expansion's own (ADR 0046 S16): its text table, naming it in the Mods list, and its version text.
 	{ "expansion_table", AssetKind::Strings, make_blank_expansion_table,
 	  "the expansion's text table: its name in the Mods list (the project's title) and an empty description", false },

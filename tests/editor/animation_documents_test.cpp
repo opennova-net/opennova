@@ -436,6 +436,40 @@ int table_lines() {
 	return 0;
 }
 
+// A slot a weapon action names and the map lacks (DI-15's Add it there, define_animation_slot): a row of the key as
+// the action writes it at the table's end, its clips none yet (the save waits for one); none for a key naming no
+// slot, for a slot a row already holds, for another map's scope.
+int define_slot() {
+	editor_test::TempProjectDir dir("opennova_animation_map_define_test");
+	TEST_EXPECT(editor_test::write_text(dir.file("gun.adm"), "anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\n"));
+	AnimationMapDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load(dir.file("gun.adm"), "gun.adm", AssetKind::AnimationMap, "jo", error));
+	ReferenceSubject missing;
+	missing.kind = ReferenceKind::AnimationKey;
+	missing.target = "anim_reload";
+	missing.scope = "GUN.ADM";
+	PlannedFix planned;
+	TEST_EXPECT(define_animation_slot(document, missing, planned) && planned.edits.size() == 1);
+	TEST_EXPECT(planned.label == "Add the slot anim_reload to gun.adm");
+	TEST_EXPECT(document.apply(planned.edits, error) && document.rows().size() == 3);
+	Value key;
+	TEST_EXPECT(document.get({document.rows()[2]->id, kRow, 0}, "key", key) && std::get<std::string>(key) == "anim_reload");
+	TEST_EXPECT(!document.serialize().ok()); // a row names at least one clip
+	document.undo();
+	TEST_EXPECT(document.rows().size() == 2);
+	ReferenceSubject other = missing;
+	other.target = "anim_nothing_at_all";
+	TEST_EXPECT(!define_animation_slot(document, other, planned));
+	other.target = "ANIM_IDLE";
+	TEST_EXPECT(!define_animation_slot(document, other, planned));
+	other = missing;
+	other.scope = "OTHER.ADM";
+	TEST_EXPECT(!define_animation_slot(document, other, planned));
+	std::printf("define: a missing slot added as a row of no clip; none for no slot, a held one, another map\n");
+	return 0;
+}
+
 // S12 review: a line's finding stays on the row it was read into while the rows move (the
 // locator names the file as loaded: the saved baseline), and goes to the file once that row
 // is removed; a row added in its place never takes it.
@@ -622,6 +656,7 @@ int main(int argc, char **argv) {
 	if (maps_by_kind() != 0) return 1;
 	if (unused_files_and_letters() != 0) return 1;
 	if (table_lines() != 0) return 1;
+	if (define_slot() != 0) return 1;
 	if (findings_follow_rows() != 0) return 1;
 	if (changes_since_save() != 0) return 1;
 	if (validation_and_graph() != 0) return 1;

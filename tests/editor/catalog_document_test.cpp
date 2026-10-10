@@ -984,8 +984,32 @@ static int type_words() {
 	return 0;
 }
 
+// A weapon block of a name the table has reopens that row, reset to its defaults, so a lookup by the name reads the
+// last block of it (S23 B): every earlier block's definition is inert, with why; the last is found; "null" reopens
+// no row, so its blocks stay as they are.
+static int repeated_weapon_name() {
+	editor_test::TempProjectDir dir("opennova_catalog_repeated_weapon");
+	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"),
+	                                    "weapon \"WPN_TWICE\"\nend\nweapon \"null\"\nend\nweapon \"wpn_twice\"\nend\n"
+	                                    "weapon \"null\"\nend\nweapon \"WPN_TWICE\"\nend\n"));
+	DefCatalogDocument weapons;
+	Diagnostic error;
+	TEST_EXPECT(weapons.load(dir.file("weapon.def"), "weapon.def", AssetKind::WeaponDefs, "jo", error) &&
+	            weapons.rows().size() == 5);
+	const NodeKind weapon = node_kind(DefRecordKind::Weapon);
+	std::vector<bool> inert;
+	for (const auto &row : weapons.rows()) {
+		SymbolFacts facts;
+		weapons.refine_symbol({row->id, weapon, 0}, facts);
+		inert.push_back(facts.inert);
+		if (facts.inert) TEST_EXPECT(facts.inert_reason.find("a later block of the name") != std::string::npos);
+	}
+	TEST_EXPECT(inert == std::vector<bool>({true, false, true, false, false}));
+	return 0;
+}
+
 int main() {
-	return type_words() || adds_keep_the_ending() || item_name_cut() || unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() ||
+	return repeated_weapon_name() || type_words() || adds_keep_the_ending() || item_name_cut() || unticked_line_saves_alone() || code_page_names() || history_and_save() || two_new_items() || collections() ||
 	       nested_rows_follow_the_record() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
 	       witnessed_enums() || powerup_weapon() || duplicates_apart() || plain_words();

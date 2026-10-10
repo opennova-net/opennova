@@ -4981,13 +4981,15 @@ add_test(NAME editor_add_it_there COMMAND editor_add_it_there_test)
 # Definition fields complete their references (ADR 0046 DI-09): every def field the game resolves by name a
 # reference of its kind in the scope its reader reads (user points by the lookup that scans them, an action's
 # slot in its weapon's map, an ammo's tracer items by type id), and the complete query over them.
-# The character attributes type (ADR 0046 DI-09's charattr follow-up): charattr.def's read classes'
-# camouflage items as references at their numbers, the game's words for a missing one, a rename writing
-# the type id back, the unread sections and the type's other findings.
-add_executable(editor_charattr_type_test editor/charattr_type_test.cpp)
-target_link_libraries(editor_charattr_type_test PRIVATE opennova_editor)
-target_include_directories(editor_charattr_type_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_charattr_type COMMAND editor_charattr_type_test)
+# The character attributes document (ADR 0046 DI-09's charattr follow-up; S23 B its rows): charattr.def's read
+# classes as rows over the game's loader with the file's layout, a value's own line, a class added and the last
+# removed, the camouflage items as references, the game's words for a missing one, a rename writing the type id
+# back, the unread sections and the type's other findings; --retail: the install's charattr.def (base and each
+# expansion) through the document byte for byte.
+add_executable(editor_charattr_test editor/charattr_document_test.cpp)
+target_link_libraries(editor_charattr_test PRIVATE opennova_editor)
+target_include_directories(editor_charattr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_charattr COMMAND editor_charattr_test)
 
 add_executable(editor_def_references_test editor/def_references_test.cpp)
 target_link_libraries(editor_def_references_test PRIVATE opennova_editor)
@@ -5662,6 +5664,40 @@ add_executable(editor_dialog_bank_test editor/dialog_bank_document_test.cpp)
 target_link_libraries(editor_dialog_bank_test PRIVATE opennova_editor)
 target_include_directories(editor_dialog_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_dialog_bank COMMAND editor_dialog_bank_test)
+# The AI profile document (ADR 0046 S23 B): an .aip's one profile over the game's reader with the file's layout, its
+# keys in the file's units by its type's set, a value read back as the game reads it, the save the file but for its
+# lines; --retail: every shipped profile through the document byte for byte.
+add_executable(editor_ai_profile_test editor/ai_profile_document_test.cpp)
+target_link_libraries(editor_ai_profile_test PRIVATE opennova_editor)
+target_include_directories(editor_ai_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_ai_profile COMMAND editor_ai_profile_test)
+# The particle key panel (ADR 0046 S23 B): a particle file's blocks and keys as the game's reader reads them, a set
+# rewriting one value's span, a key added where the line-ordered reader reads it, a value the reader takes otherwise
+# refused, the particle_keys query; --retail: the install's particle files, each key's text at its span.
+add_executable(editor_particle_keys_test editor/particle_keys_test.cpp)
+target_link_libraries(editor_particle_keys_test PRIVATE opennova_editor)
+target_include_directories(editor_particle_keys_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_particle_keys COMMAND editor_particle_keys_test)
+# The HUD effects document (ADR 0046 S23 B): hudfx.def's model lines, the one the game reads, the game's failure
+# where the HUD model is that line, a long name's run, an edit's one line, the blank. JO ships none.
+add_executable(editor_hudfx_test editor/hudfx_document_test.cpp)
+target_link_libraries(editor_hudfx_test PRIVATE opennova_editor)
+target_include_directories(editor_hudfx_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_hudfx COMMAND editor_hudfx_test)
+# The score table document (ADR 0046 S23 B): score.ini's blocks, columns and points over the game's reader with the
+# file's layout, a value's own line, a column and a block added, the game's reading as findings; --retail: the
+# install's loose score.ini through the document byte for byte.
+add_executable(editor_score_test editor/score_document_test.cpp)
+target_link_libraries(editor_score_test PRIVATE opennova_editor)
+target_include_directories(editor_score_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_score COMMAND editor_score_test)
+# The avatars table document (ADR 0046 S23 B): Avatars.def's parts and nationalities over the game's reader with the
+# file's layout, the graph over its records, the reader's notes, a session's edit and undo; --retail: the install's
+# Avatars.def (base and each expansion) through the document byte for byte.
+add_executable(editor_avatars_test editor/avatars_document_test.cpp)
+target_link_libraries(editor_avatars_test PRIVATE opennova_editor)
+target_include_directories(editor_avatars_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_avatars COMMAND editor_avatars_test)
 
 add_executable(editor_strings_test editor/strings_document_test.cpp)
 target_link_libraries(editor_strings_test PRIVATE opennova_editor)

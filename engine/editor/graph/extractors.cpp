@@ -30,7 +30,6 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
-#include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
 #include <formats/particle/parser.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
@@ -155,6 +154,7 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		// The file the lookup reads where the project has none of the scope's (a dialog line's wave: the
 		// dialog bank's .pwf where it has no .lwf).
 		edge.scope_alternate = field.scope_alternate;
+		if (field.schema && field.schema->scope_after) edge.scopes_after = {field.schema->scope_after};
 		// A text that is one %NAME% stands for the variable's value: a use of the variable alone
 		// (FieldUse::variable_through), which Rename rewrites with it.
 		if (field.reference == ReferenceKind::None) edge.through = field.variable_through;
@@ -229,67 +229,6 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 	return true;
 }
 
-bool extract_avatars(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	avatars::AvatarsFile file{};
-	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &file) != 0) {
-		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The avatar table could not be read.", name);
-		return false;
-	}
-	for (size_t i = 0; i < file.parts_count; ++i) {
-		const avatars::AvatarPart &part = file.parts[i];
-		const std::string record(part.name);
-		auto edge = [&](const char *field, ReferenceKind kind, const char *value) {
-			if (value && *value) out.edges.push_back(edge_of(name, record, field, kind, value));
-		};
-		edge("graphic", ReferenceKind::Model, part.graphic);
-		edge("graphic_j", ReferenceKind::Model, part.graphic_j);
-		edge("graphic_s", ReferenceKind::Model, part.graphic_s);
-		edge("name", ReferenceKind::TextId, part.display_name);
-	}
-	// Each part a name its combinations find it by, of its kind in this file; of two parts of a kind and a name
-	// the last is the one a combination after both takes (the lookup keeps the last match [orig:
-	// CAvatarDefs_ParseConfigLine @ 0x57a830..0x57a854]) (DI-09).
-	static const char *const kPartKinds[] = {"HEAD", "BODY", "ARMS"};
-	const std::string file_scope = strutil::to_upper(basename_of(name)) + "/";
-	const auto part_scope = [&](int kind) {
-		return kind >= 0 && kind < 3 ? file_scope + kPartKinds[kind] : std::string();
-	};
-	for (size_t i = 0; i < file.parts_count; ++i) {
-		const avatars::AvatarPart &part = file.parts[i];
-		const std::string scope = part_scope(part.kind);
-		if (scope.empty() || !part.name[0]) continue;
-		out.symbols.push_back(symbol_of(ReferenceKind::AvatarPart, part.name, name, part.name, scope));
-		for (size_t j = i + 1; j < file.parts_count; ++j)
-			if (file.parts[j].kind == part.kind && strutil::iequals(file.parts[j].name, part.name)) {
-				out.symbols.back().inert = true;
-				out.symbols.back().inert_reason = "a later part of the name replaces it for the combinations after both";
-				break;
-			}
-	}
-	// Each combination's head, body and arms, the parts it was read with (a combination the parser drops, its head
-	// or body missing, and arms it does not find are the parser's findings).
-	for (size_t n = 0; n < file.nationalities_count; ++n) {
-		const avatars::AvatarNationality &nationality = file.nationalities[n];
-		for (size_t d = 0; d < nationality.divisions_count; ++d) {
-			const avatars::AvatarDivision &division = nationality.divisions[d];
-			for (size_t c = 0; c < division.combos_count; ++c) {
-				const avatars::AvatarCombo &combo = division.combos[c];
-				const std::string record =
-				        std::string(nationality.raw_id) + "/" + division.raw_id + "/combo " + combo.raw_id;
-				const auto part_edge = [&](const char *field, int kind, const char *value) {
-					if (value && *value)
-						out.edges.push_back(edge_of(name, record, field, ReferenceKind::AvatarPart, value, part_scope(kind)));
-				};
-				part_edge("head", avatars::AVATAR_PART_HEAD, combo.head_name);
-				part_edge("body", avatars::AVATAR_PART_BODY, combo.body_name);
-				if (combo.has_arms) part_edge("arms", avatars::AVATAR_PART_ARMS, combo.arms_name);
-			}
-		}
-	}
-	avatars::avatars_free(&file);
-	return true;
-}
-
 bool extract_particles(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	particle::ParticleFile file;
 	particle::ParseError parse_error;
@@ -347,7 +286,6 @@ struct NativeKind {
 };
 constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::HudPosDefs, extract_hudpos},
-	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},
 };
 
@@ -471,7 +409,7 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 			out.symbols.push_back(std::move(symbol));
 		}
 	}
-	// A native kind held as a text (DI-06: the HUD layout, the avatars; the particle type, DI-14): its text
+	// A native kind held as a text (DI-06: the HUD layout; the particle type, DI-14): its text
 	// as it stands read by the engine's own parser, as its file is, so what it names follows its edits; a
 	// text the parser does not read names nothing (its own validation says why).
 	if (!type->references) {
@@ -500,6 +438,7 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		edge.scopes_after = std::move(reference.scopes_after);
 		edge.scope_alternate = std::move(reference.scope_alternate);
 		edge.scope_owner = std::move(reference.scope_owner);
+		edge.needs = std::move(reference.needs);
 		out.edges.push_back(std::move(edge));
 	}
 }

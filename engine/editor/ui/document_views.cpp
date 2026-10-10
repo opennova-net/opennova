@@ -20,6 +20,7 @@
 #include <editor/ui/mission_logic_view.h>
 #include <editor/ui/model_inspector_view.h>
 #include <editor/ui/outline_view.h>
+#include <editor/ui/particle_key_inspector.h>
 #include <editor/ui/script_view.h>
 #include <editor/ui/music_bank_inspector.h>
 #include <editor/ui/wave_inspector.h>
@@ -165,8 +166,10 @@ constexpr DocumentViewRow kViews[] = {
 	// under it; each heads the Inspector with what plays it and a Play (ui/sound_inspector).
 	{DocumentTypeId::SoundBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_bank_inspector},
 	{DocumentTypeId::SoundProfiles, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_profile_inspector},
-	// A particle file's text in the script device; the Preview window plays its effect (DI-14).
-	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// A particle file's text in the script device; the Preview window plays its effect (DI-14); a block's keys, each
+	// typed as the game's reader takes it, head the Inspector (S23 B, ui/particle_key_inspector).
+	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view, nullptr, nullptr, nullptr,
+	 draw_particle_key_inspector},
 	// An environment's row and its keyframes as a tree (DI-19a) beside its time-of-day viewport (DI-19b: the
 	// Main role, ui/main_viewport_view over the Environment viewport kind); the missions that run on it head
 	// the Inspector, each a Go to with its terrain and what its header sets over it (ui/environment_inspector).
@@ -183,8 +186,8 @@ constexpr DocumentViewRow kViews[] = {
 	// A dialog bank's dialogs as a tree, each holding its lines; a dialog or a line heads the Inspector with a Play
 	// of it as the game plays it and what the last play said (DI-32, ui/sound_inspector).
 	{DocumentTypeId::DialogBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_dialog_bank_inspector},
-	// The character attributes' text in the script device (DI-09's charattr follow-up).
-	{DocumentTypeId::CharAttrs, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// The character attributes' classes as a list, each class's keys in the Inspector (S23 B).
+	{DocumentTypeId::CharAttrs, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	// A face animation's face as a tree: its vertices, triangles and gestures, each gesture its parameters (S23 A).
 	{DocumentTypeId::FaceAnimation, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	// A font's glyphs as a tree beside its picture (S23 A: the Main role, ui/main_viewport_view over the Font viewport
@@ -196,6 +199,14 @@ constexpr DocumentViewRow kViews[] = {
 	// A wave's picture, its facts and whether the game plays it, a Play, a trim and a normalise (S23 A,
 	// ui/wave_inspector).
 	{DocumentTypeId::Wave, DocumentViewRole::Records, nullptr, make_wave_view},
+	// An AI profile's one row: its keys in the Inspector under their sections (S23 B).
+	{DocumentTypeId::AiProfile, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// hudfx.def's model lines as a list (S23 B).
+	{DocumentTypeId::HudFx, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// score.ini's game type blocks, each its columns and points under it (S23 B).
+	{DocumentTypeId::ScoreTable, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// Avatars.def's parts and nationalities, each nationality its divisions and their combinations under it (S23 B).
+	{DocumentTypeId::Avatars, DocumentViewRole::Records, &kTreeOutline, nullptr},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

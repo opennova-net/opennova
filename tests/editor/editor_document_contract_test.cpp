@@ -91,10 +91,14 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
+#include <editor/documents/ai_profile_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/avatars_document.h>
+#include <editor/documents/charattr_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
+#include <editor/documents/hudfx_document.h>
 #include <editor/documents/line_ends.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/mission_document.h>
@@ -102,6 +106,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/project_check.h>
+#include <editor/documents/score_document.h>
 #include <editor/documents/dialog_bank_document.h>
 #include <editor/documents/face_animation_document.h>
 #include <editor/documents/font_document.h>
@@ -197,12 +202,16 @@ const RowObject kRowObjects[] = {
         {&typeid(DialogBankRow), sizeof(DialogBankRow)},
         {&typeid(FaceAnimationRow), sizeof(FaceAnimationRow)},
         {&typeid(FontRow), sizeof(FontRow)}, {&typeid(MusicBankRow), sizeof(MusicBankRow)},
+        {&typeid(AiProfileRow), sizeof(AiProfileRow)}, {&typeid(HudFxRow), sizeof(HudFxRow)},
+        {&typeid(ScoreHeaderRow), sizeof(ScoreHeaderRow)}, {&typeid(ScoreBlockRow), sizeof(ScoreBlockRow)},
+        {&typeid(AvatarPartRow), sizeof(AvatarPartRow)}, {&typeid(AvatarNationalityRow), sizeof(AvatarNationalityRow)},
+        {&typeid(CharAttrRow), sizeof(CharAttrRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
-// clip's bone table, a def catalog's records, a mission's header and entity slots): a longer text
-// grows no row of theirs. Every other type's rows hold their text as strings, which a longer text
-// makes longer.
-const char *const kFixedText[] = {"model", "animation", "catalog", "mission"};
+// clip's bone table, a def catalog's records, a mission's header and entity slots), or hold none (the
+// character attributes' numbers): a longer text grows no row of theirs. Every other type's rows hold
+// their text as strings, which a longer text makes longer.
+const char *const kFixedText[] = {"model", "animation", "catalog", "mission", "charattr"};
 bool fixed_text(const DocumentType &type) {
 	for (const char *name : kFixedText)
 		if (std::string(name) == type.name) return true;
@@ -223,7 +232,7 @@ struct PinnedPresence {
 	size_t optional, presences;
 };
 const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}, {"environment", 3, 3},
-                                          {"terrain", 4, 4}};
+                                          {"terrain", 4, 4}, {"avatars", 1, 1}, {"score", 2, 2}};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -393,6 +402,21 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Font, "synth.fnt", file("fnt/synth_1page.fnt")},
 	        {AssetKind::MusicBank, "synth.sbf", file("sbf/synth_gamemus.sbf")},
 	        {AssetKind::Wave, "tone.wav", file("lwf/tone.wav")},
+	        // An AI profile (S23 B): a ground unit's view, speeds and weapon.
+	        {AssetKind::AiProfile, "g_test.aip",
+	         text_bytes("type\tGROUND\r\nview_dist\t500\r\npatrol_speed\t3\r\nprimary_weap\tAI_LAW\r\n")},
+	        // The HUD effects (S23 B): the power slot's model.
+	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n")},
+	        // The score table (S23 B): one game type's columns and points.
+	        {AssetKind::Score, "score.ini",
+	         text_bytes("VERSION 40\r\nEXP_FANFARE 0 0\r\nGAMETYPE \"TDM\"\r\nFIELD \"NUMENEMYKILLS\" 1\r\nVAR \"ENEMYKILL\" 5\r\n")},
+	        // The avatars table (S23 B): a head, a body and arms, a nationality's division wearing them.
+	        {AssetKind::AvatarDefs, "Avatars.def",
+	         text_bytes("define head HEAD_A\r\n{\r\n\tname\tAV_HEAD_A\r\n\tgraphic\thead_a.3di\r\n}\r\n"
+	                    "define body BODY_A\r\n{\r\n\tgraphic\tbody_a.3di\r\n}\r\n"
+	                    "define arms ARMS_A\r\n{\r\n\tgraphic\tarms_a.3di\r\n}\r\n"
+	                    "nationality N00 AV_NAT_US\r\n{\r\n\tdivision D00 AV_DIV_ARMY\r\n\t{\r\n"
+	                    "\t\tcombo 1 HEAD_A BODY_A ARMS_A\r\n\t}\r\n}\r\n")},
 	};
 }
 
@@ -571,8 +595,7 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
 	        // A particle file the effect system's reader stops in (DI-14: particle.unreadable).
 	        {AssetKind::Particles, "open.ptl", text_bytes("[effectdef]\n{\n\tid = OPEN;\n")},
-	        // An avatar table the avatar reader notes a duplicate nationality in, which the text type holds
-	        // (DI-06: text.reader).
+	        // An avatar table the avatar reader notes a duplicate nationality in (S23 B: avatars.ignored_input).
 	        {AssetKind::AvatarDefs, "Avatars.def",
 	         text_bytes("nationality N00 FIRST\r\n{\r\n}\r\nnationality N00 DUP_NAT\r\n{\r\n}\r\n")},
 	        // A HUD layout with an LF alone, which the game's reader reads as part of the line before it
@@ -606,6 +629,12 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::Font, "outside.fnt", font_with_a_glyph_outside(file("fnt/synth_1page.fnt"))},
 	        {AssetKind::MusicBank, "silent.sbf", music_with_a_silent_stream(file("sbf/synth_gamemus.sbf"))},
 	        {AssetKind::Wave, "stereo.wav", stereo_wave()},
+	        // An AI profile whose key stands before its type line (ai_profile.ignored_input) and a HUD effects
+	        // file of two lines, the second never read (hudfx.never_read).
+	        {AssetKind::AiProfile, "early.aip", text_bytes("view_dist\t500\r\ntype\tGROUND\r\n")},
+	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n3DIPower3 p3.3di\r\n")},
+	        // A score table of a version the game does not read (score.version).
+	        {AssetKind::Score, "score.ini", text_bytes("VERSION 39\r\nGAMETYPE \"TDM\"\r\nVAR \"ENEMYKILL\" 5\r\n")},
 	};
 }
 
@@ -1921,7 +1950,9 @@ int main() {
 		}
 		// Per type: a validate_file that never took its own documents (its cast to another type)
 		// would make nothing over its files. The text type's are the engine readers' (DI-06).
-		check(counts.findings > 0, type->name, "validate_file makes a finding over the type's files");
+		// A type of no finding codes makes none (the text type: none of its kinds has a reader the editor ports).
+		check(counts.findings > 0 || (type->findings && type->findings().count == 0), type->name,
+		      "validate_file makes a finding over the type's files");
 		// Likewise a project check that never read its type's files would keep the clause above
 		// over no findings.
 		check(!type->project_check || counts.check_findings > 0, type->name,

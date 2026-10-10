@@ -5,17 +5,22 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <cstdio>
+#include <optional>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
 
+#include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
+#include <formats/def/reserved_items.h>
 #include <runtime/audio/bank_chain.h>
 #include <runtime/menu/menu_style.h>
 #include <runtime/renderer/material_texture.h>
@@ -47,7 +52,7 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
 			a.through == b.through && a.loader_arg == b.loader_arg && a.use_context == b.use_context &&
 			a.span.line == b.span.line && a.span.column == b.span.column &&
-			a.span.length == b.span.length && a.fallback == b.fallback &&
+			a.span.length == b.span.length && a.fallback == b.fallback && a.fallback_kind == b.fallback_kind &&
 			a.scopes_after == b.scopes_after && a.optional == b.optional && a.scope_alternate == b.scope_alternate &&
 			a.scope_owner == b.scope_owner && a.needs == b.needs && a.name_offset == b.name_offset &&
 			a.key_prefix == b.key_prefix;
@@ -220,6 +225,15 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 	for (const std::string &bank : audio::global_bank_chain(project.expansion.name)) chain.push_back(upper(bank));
 	if (chain != bank_chain_) {
 		bank_chain_ = std::move(chain);
+		patch.base = true;
+	}
+	// The table every string lookup reads first: another (the expansion's name changed) resolves every
+	// edge again.
+	std::string text_override;
+	if (!project.expansion.standalone())
+		text_override = upper(expansion_file_name(expansion_file_row(ExpansionFileRole::Table), project.expansion.name));
+	if (text_override != text_override_) {
+		text_override_ = std::move(text_override);
 		patch.base = true;
 	}
 	// The open record and text documents stand in for their files (another kind of document reads
@@ -435,6 +449,20 @@ void AssetGraph::resolve_patch(Patch &patch, GraphUpdate &out) {
 		// An edge with a fallback reaches either of its two names.
 		for (const Ref ref : index_.edges_naming(name_key)) work.push_back(ref);
 	}
+	// A tracer's lookup reads items.def's order (its first item, first_item) and the items' names as the game holds
+	// them (item_named: gametext's STR_ITM keys): a change of an item, or of such a key, resolves every edge that
+	// falls back to an item by name again.
+	const std::string item_key = GraphIndex::key_of(ReferenceKind::Item, std::string(), std::string());
+	const std::string name_key = GraphIndex::key_of(ReferenceKind::ItemName, std::string(), std::string());
+	const std::string text_key = GraphIndex::key_of(ReferenceKind::TextId, symbol_name(ReferenceKind::TextId, "STR_ITM"), std::string());
+	if (!patch.base && std::any_of(patch.symbol_keys.begin(), patch.symbol_keys.end(), [&](const std::string &changed) {
+		    return changed.rfind(item_key, 0) == 0 || changed.rfind(name_key, 0) == 0 || changed.rfind(text_key, 0) == 0;
+	    }))
+		index_.for_each_slot([&](uint32_t id) {
+			const GraphSlot &slot = index_.slot(id);
+			for (uint32_t i = 0; i < slot.edges.size(); ++i)
+				if (slot.edges[i].fallback_kind == ReferenceKind::ItemName) work.push_back({id, i});
+		});
 	for (const std::string &name : out.bindings)
 		for (const Ref ref : index_.edges_through(name)) work.push_back(ref);
 	const auto before = [this](Ref a, Ref b) { return index_.before(a, b); };
@@ -577,6 +605,7 @@ bool AssetGraph::resolve_edge(Ref ref) {
 	GraphEdge &edge = slot.edges[ref.index];
 	EdgeResolution &resolution = slot.resolutions[ref.index];
 	const std::string target = resolved_target(edge);
+	const ReferenceKind target_kind = reached_kind(edge);
 	std::string file;
 	const ReferenceStatus status =
 			target.empty() ? ReferenceStatus::NotAReference : resolve(edge, &file);
@@ -586,10 +615,11 @@ bool AssetGraph::resolve_edge(Ref ref) {
 	const bool missing = counts_missing(slot, edge, target, status);
 	// Each entry of the index moves only when it changed.
 	const bool was = resolution.resolved;
-	if (!was || target != edge.target) {
-		if (was) index_.remove_target(GraphIndex::key_of(edge.kind, edge.target, edge.scope), ref);
+	if (!was || target != edge.target || target_kind != edge.target_kind) {
+		if (was) index_.remove_target(GraphIndex::key_of(edge.target_as(), edge.target, edge.scope), ref);
 		edge.target = target;
-		index_.add_target(GraphIndex::key_of(edge.kind, edge.target, edge.scope), ref);
+		edge.target_kind = target_kind;
+		index_.add_target(GraphIndex::key_of(edge.target_as(), edge.target, edge.scope), ref);
 	}
 	if (!was || file != resolution.file) {
 		if (was && !resolution.file.empty()) index_.remove_user(resolution.file, ref);
@@ -749,10 +779,17 @@ const GraphSymbol *AssetGraph::style_binding(const std::string &name) const {
 std::string AssetGraph::resolved_target(const GraphEdge &edge) const {
 	switch (reference_row(edge.kind).resolution) {
 	case ReferenceResolution::StyleVariable: return is_style_reference(edge.value) ? style_variable(edge.value) : std::string();
-	case ReferenceResolution::Symbol:
+	case ReferenceResolution::Symbol: {
 		// The name it reaches: its value, else its fallback where only that one is defined (in the
-		// first scope a lookup finds either in).
-		return symbol_name(edge.kind, reached_name(edge));
+		// first scope a lookup finds either in), as the kind it is a name of. An item found by the name
+		// the game holds it by (item_named: a gametext name, where the table gives it one) is its own
+		// symbol's name, which its uses are keyed by.
+		const std::string &reached = reached_name(edge);
+		const ReferenceKind kind = &reached == &edge.fallback ? edge.fallback_as() : edge.kind;
+		if (kind == ReferenceKind::ItemName)
+			if (const GraphSymbol *item = item_named(reached)) return item->name;
+		return symbol_name(kind, reached);
+	}
 	// A record's index, in the file the edge's scope names (the key holds it).
 	case ReferenceResolution::Record: return edge.value;
 	case ReferenceResolution::File:
@@ -825,7 +862,13 @@ ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out
 		return ReferenceStatus::NotAReference;
 	}
 	const FirstScope first = first_scope(*this, edge);
-	const ReferenceStatus status = resolve(edge.kind, edge.value, first.scope(), file_out, edge.loader_arg);
+	ReferenceStatus status = resolve(edge.kind, edge.value, first.scope(), file_out, edge.loader_arg);
+	// A tracer's type id naming items.def's first item finds none (value_symbol).
+	if (status == ReferenceStatus::Present && edge.fallback_kind == ReferenceKind::ItemName &&
+	    !value_symbol(edge, first.scope())) {
+		status = ReferenceStatus::Missing;
+		if (file_out) file_out->clear();
+	}
 	if (status != ReferenceStatus::Missing || (edge.fallback.empty() && (edge.scopes_after.empty() || !first.then_after)))
 		return status;
 	// The lookup's second name where the first finds nothing, then each later scope, both names.
@@ -833,8 +876,11 @@ ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out
 	each_scope(*this, edge, [&](const std::string &scope, bool at_first) {
 		for (const std::string *name : {&edge.value, &edge.fallback}) {
 			if (name->empty() || (name == &edge.value && at_first)) continue;
-			const ReferenceStatus second = resolve(edge.kind, *name, scope, file_out, edge.loader_arg);
-			if (second != ReferenceStatus::Present) continue;
+			const ReferenceKind kind = name == &edge.fallback ? edge.fallback_as() : edge.kind;
+			const ReferenceStatus second = resolve(kind, *name, scope, file_out, edge.loader_arg);
+			if (second != ReferenceStatus::Present ||
+			    (name == &edge.value && edge.fallback_kind == ReferenceKind::ItemName && !value_symbol(edge, scope)))
+				continue;
 			found = second;
 			return true;
 		}
@@ -846,8 +892,8 @@ ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out
 const std::string &AssetGraph::reached_name(const GraphEdge &edge) const {
 	const std::string *reached = &edge.value;
 	each_scope(*this, edge, [&](const std::string &scope, bool) {
-		if (resolve_symbol(edge.kind, edge.value, scope)) return true;
-		if (!edge.fallback.empty() && resolve_symbol(edge.kind, edge.fallback, scope)) {
+		if (value_symbol(edge, scope)) return true;
+		if (!edge.fallback.empty() && resolve_symbol(edge.fallback_as(), edge.fallback, scope)) {
 			reached = &edge.fallback;
 			return true;
 		}
@@ -856,11 +902,18 @@ const std::string &AssetGraph::reached_name(const GraphEdge &edge) const {
 	return *reached;
 }
 
+ReferenceKind AssetGraph::reached_kind(const GraphEdge &edge) const {
+	if (edge.fallback.empty() || edge.fallback_kind == ReferenceKind::None ||
+	    reference_row(edge.kind).resolution != ReferenceResolution::Symbol)
+		return ReferenceKind::None;
+	return &reached_name(edge) == &edge.fallback ? edge.fallback_kind : ReferenceKind::None;
+}
+
 const GraphSymbol *AssetGraph::symbol_reached(const GraphEdge &edge) const {
 	const GraphSymbol *found = nullptr;
 	each_scope(*this, edge, [&](const std::string &scope, bool) {
-		found = resolve_symbol(edge.kind, edge.value, scope);
-		if (!found && !edge.fallback.empty()) found = resolve_symbol(edge.kind, edge.fallback, scope);
+		found = value_symbol(edge, scope);
+		if (!found && !edge.fallback.empty()) found = resolve_symbol(edge.fallback_as(), edge.fallback, scope);
 		return found != nullptr;
 	});
 	return found;
@@ -951,7 +1004,61 @@ const GraphSymbol *AssetGraph::resolve_symbol(ReferenceKind kind, const std::str
 	// A set by name, where no bank names it (a menu's SOUND names its own): the game's search over its
 	// banks in order [orig: SoundBank_FindSetByNameAnyBank @ 0x5274f0].
 	if (kind == ReferenceKind::Sound && scope.empty()) return sound_binding(name);
-	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name), scope);
+	if (kind == ReferenceKind::ItemName) return item_named(name);
+	if (kind == ReferenceKind::TextId)
+		if (const GraphSymbol *over = override_symbol(name, scope)) return over;
+	return scoped_symbol(GraphIndex::key_of(kind, symbol_name(kind, name), scope), scope);
+}
+
+const GraphSymbol *AssetGraph::item_named(const std::string &name) const {
+	// The game's search by name over its items in order, stricmp [orig: ItemList_FindIndexByPrimaryName @ 0x49E010],
+	// over the names its boot copied from gametext.bin's "Item Names" over items.def's, by each item's id [orig:
+	// Item_LoadLocalizedNames @ 0x49E1B0, after ItemDefs_LoadAndValidate @ 0x4A71A3; a mission's ammo.def reads
+	// later, AmmoDef_LoadAll from Game_StartMission].
+	const GraphSlot *items = file_named(key("items.def"));
+	if (!items) return nullptr;
+	for (const GraphSymbol &item : items->symbols) {
+		if (item.kind != ReferenceKind::ItemName) continue;
+		const GraphSymbol *localized = nullptr;
+		if (const std::optional<int> id = strutil::parse_int(item.value)) {
+			// The key takes the stored type id, the items.def id less 100000 [orig: Item_LoadLocalizedNames @ 0x49E1D6,
+			// `mov ecx, [esi+eax+50h]` over the field ItemDef_ParseProperty @ 0x49EC54 stores after `sub eax, 186A0h`].
+			char text_key[32];
+			std::snprintf(text_key, sizeof(text_key), "STR_ITM%04i", *id - def::DEF_ITEM_ID_BASE);
+			localized = resolve_symbol(ReferenceKind::TextId, text_key, "GAMETEXT.BIN/Item Names");
+		}
+		if (strutil::iequals(localized ? localized->value : item.display, name)) return &item;
+	}
+	return nullptr;
+}
+
+bool AssetGraph::first_item(const GraphSymbol &symbol) const {
+	if (symbol.kind != ReferenceKind::Item) return false;
+	const GraphSlot *items = file_named(key("items.def"));
+	if (!items) return false;
+	for (const GraphSymbol &held : items->symbols)
+		if (held.kind == ReferenceKind::Item) return &held == &symbol;
+	return false;
+}
+
+const GraphSymbol *AssetGraph::value_symbol(const GraphEdge &edge, const std::string &scope) const {
+	const GraphSymbol *found = resolve_symbol(edge.kind, edge.value, scope);
+	// A tracer takes the item its type id finds only where the lookup's index is not 0 [orig: AmmoDef_ParseProperty
+	// @ 0x40A5DA..0x40A5FE / @ 0x40A646..0x40A668, `if (index || ...)` over ItemList_FindIndexByTypeId].
+	return found && edge.fallback_kind == ReferenceKind::ItemName && first_item(*found) ? nullptr : found;
+}
+
+const GraphSymbol *AssetGraph::override_symbol(const std::string &name, const std::string &scope) const {
+	// A lookup any table answers finds the override's string anyway, and the override's own reads it
+	// alone [orig: 0x75D27B, `resource == g_TextOverrideTable`].
+	if (text_override_.empty() || scope.empty()) return nullptr;
+	const size_t slash = scope.find('/');
+	if (upper(scope.substr(0, slash)) == text_override_) return nullptr;
+	const std::string over = text_override_ + (slash == std::string::npos ? std::string() : scope.substr(slash));
+	return scoped_symbol(GraphIndex::key_of(ReferenceKind::TextId, symbol_name(ReferenceKind::TextId, name), over), over);
+}
+
+const GraphSymbol *AssetGraph::scoped_symbol(const std::string &name_key, const std::string &scope) const {
 	for (const Ref ref : index_.symbols_named(name_key)) {
 		const GraphSymbol &symbol = index_.symbol(ref);
 		if (!symbol.inert && scope_matches(symbol.scope, scope)) return &symbol;
@@ -1244,8 +1351,10 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 	// string of a table by its text); a symbol's own name from the first.
 	const bool by_words = wanted.size() >= kSearchByRecordLetters;
 	for_each_symbol([&](const GraphSymbol &symbol) {
-		// A record set's records go by their index, no name.
+		// A record set's records go by their index, no name; an item's name is the item's own symbol's words (the
+		// item found once, by its id's symbol), the ItemName symbol only what a tracer's lookup reaches.
 		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record) return;
+		if (symbol.kind == ReferenceKind::ItemName) return;
 		if (!holds(symbol.display) && !by_words) return;
 		const std::string words = definition_words(symbol, &names);
 		if (!holds(symbol.display) && (words == symbol.display || !holds(words)) && (symbol.title.empty() || !holds(symbol.title)))

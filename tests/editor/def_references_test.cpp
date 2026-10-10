@@ -27,6 +27,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -112,14 +113,20 @@ std::string missing_message(const SessionView &view, const std::string &file, co
 	return std::string();
 }
 
-const char *kItems = "begin \"Tank\"\nid 100500\ntype vehicle\ngraphic tank\nweaplbup Late\nlaunchups_rocket Nowhere\n"
+// The first row the Null marker the shipped items.def begins with (a tracer's lookup by type id never reaches
+// the first row).
+const char *kItems = "begin \"Null\"\nid 100000\ntype marker\nend\n"
+                     "begin \"Tank\"\nid 100500\ntype vehicle\ngraphic tank\ntextid TANK_TEXT\nweaplbup Late\n"
+                     "launchups_rocket Nowhere\n"
                      "particlefx Effect_x Late\nparticlefxs Effect_x P03\nvirtualdisplay cockpit camera\n"
                      "addeweap Mount 100501\nend\n"
-                     "begin \"Turret\"\nid 100501\ntype vehicle\ngraphic tank\nend\n";
+                     "begin \"Turret\"\nid 100501\ntype vehicle\ngraphic tank\nend\n"
+                     "begin \"Soldier\"\nid 100502\ntype person\ngraphic chars\\soldier.3di\nend\n"
+                     "begin \"Soldier again\"\nid 100502\ntype person\ngraphic medic\nend\n";
 
 const char *kWeapons = "weapon \"WPN_T\"\n\tanimadm gun_1st\n\tgfx1 fpgun\n\tgfx3 tank\n\tlaunchuserpoint Late\n"
-                       "\tsameas WPN_NONE\n"
-                       "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tparticleuserpoint Muzzle\n\tend\n"
+                       "\tsameas WPN_NONE\n\tloadout_menu_ttdesc TT_WPN_T\n"
+                       "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tparticleuserpoint Muzzle\n\t\ttexttoken FIRE_TEXT\n\tend\n"
                        "\taction \"reload\"\n\t\tanim anim_wpn_reload\n\tend\n"
                        "\taction \"idle\"\n\t\tanim anim_bogus\n\tend\n"
                        "end\n";
@@ -189,6 +196,27 @@ static int test_fields_are_references() {
 	TEST_EXPECT(row && row->file == "anims/gun_1st.adm" && graph.users_of(*row).size() == 1);
 	TEST_EXPECT(missing_message(view, weapons, "anim", "anim_wpn_reload").find("has no row for") != std::string::npos);
 	TEST_EXPECT(missing_message(view, weapons, "anim", "anim_bogus").find("252 animation slots") != std::string::npos);
+	// The text keys as the game reads each: an item's text a key of gametext.bin's item section (its
+	// text_default shown for a key it lacks); an action's text token any table's, the playing mission's then
+	// gametext.bin's (an empty text for none); the loadout tooltip, which nothing reads, no reference.
+	const GraphEdge *item_text = edge_of(graph, items, "text_id", "TANK_TEXT");
+	TEST_EXPECT(item_text && item_text->kind == ReferenceKind::TextId && item_text->scope == "GAMETEXT.BIN/item" &&
+	            graph.resolve(*item_text) == ReferenceStatus::Missing);
+	TEST_EXPECT(missing_message(view, items, "text_id", "TANK_TEXT").find("text_default") != std::string::npos);
+	const GraphEdge *token = edge_of(graph, weapons, "text_token", "FIRE_TEXT");
+	TEST_EXPECT(token && token->kind == ReferenceKind::TextId && token->scope == "MEDMSSN.BIN" &&
+	            token->scopes_after == std::vector<std::string>{"GAMETEXT.BIN"});
+	TEST_EXPECT(missing_message(view, weapons, "text_token", "FIRE_TEXT").find("the action's text is empty") !=
+	            std::string::npos);
+	bool tooltip = false;
+	for (const GraphEdge *edge : graph.references_of(weapons)) tooltip = tooltip || edge->field == "loadout_menu_ttdesc";
+	TEST_EXPECT(!tooltip);
+	// A person's face: the .GRM its model's name makes, of the first row of its id alone; the name derived, so no
+	// rename rewrites it, and a face the project lacks no finding (most people have none).
+	const GraphEdge *face = edge_of(graph, items, "graphic", "soldier.GRM");
+	TEST_EXPECT(face && face->kind == ReferenceKind::FaceAnimation && !face->rewritable &&
+	            graph.resolve(*face) == ReferenceStatus::Missing && missing_message(view, items, "graphic", "soldier.GRM").empty());
+	TEST_EXPECT(!edge_of(graph, items, "graphic", "medic.GRM") && !edge_of(graph, items, "graphic", "tank.GRM"));
 	// sameas names a weapon.
 	const GraphEdge *sameas = edge_of(graph, weapons, "sameas", "WPN_NONE");
 	TEST_EXPECT(sameas && sameas->kind == ReferenceKind::Weapon);
@@ -199,6 +227,11 @@ static int test_fields_are_references() {
 	const GraphEdge *foe = edge_of(graph, ammo, "foe_trcr_type_id", "100777");
 	TEST_EXPECT(foe && graph.resolve(*foe) == ReferenceStatus::Missing);
 	TEST_EXPECT(missing_message(view, ammo, "foe_trcr_type_id", "100777").find("(type id 777)") != std::string::npos);
+	// Where its type id finds no item, the tracer is the item named as the ammo (ItemName, the edge's fallback):
+	// none named AMMO_T yet, which the finding says.
+	TEST_EXPECT(foe && foe->fallback == "AMMO_T" && foe->fallback_kind == ReferenceKind::ItemName && !friendly->fallback.empty());
+	TEST_EXPECT(missing_message(view, ammo, "foe_trcr_type_id", "100777").find("nor an item named as the ammo ('AMMO_T')") !=
+	            std::string::npos);
 	// A missing effect is tolerated: the game plays stockeffect's copy.
 	const GraphEdge *victim = edge_of(graph, ammo, "secondary_effect", "Effect_gone");
 	TEST_EXPECT(victim && victim->kind == ReferenceKind::Particle);
@@ -318,6 +351,85 @@ static int test_complete_query() {
 	return 0;
 }
 
+// A tracer whose type id finds no item is the item named as the ammo, the first of the name without case [orig:
+// AmmoDef_ParseProperty @ 0x40A646..0x40A668 -> ItemList_FindIndexByPrimaryName @ 0x49E010]: the foe tracer 777
+// reaches the item "ammo_t", whose uses are the ammo's field; a later item of the name none.
+static int test_tracer_by_name() {
+	Project project;
+	TEST_EXPECT(setup(project));
+	TEST_EXPECT(project.write(project.path("items.def"), std::string(kItems) +
+	                                                         "begin \"ammo_t\"\nid 100900\ntype building\nend\n"
+	                                                         "begin \"AMMO_T\"\nid 100901\ntype building\nend\n"));
+	project.rescan();
+	const AssetGraph &graph = project.graph();
+	const std::string ammo = project.path("ammo.def");
+	const GraphEdge *foe = edge_of(graph, ammo, "foe_trcr_type_id", "100777");
+	TEST_EXPECT(foe && graph.resolve(*foe) == ReferenceStatus::Present);
+	const GraphSymbol *item = foe ? graph.symbol_reached(*foe) : nullptr;
+	TEST_EXPECT(item && item->kind == ReferenceKind::ItemName && item->display == "ammo_t");
+	if (item) {
+		const std::vector<const GraphEdge *> users = graph.users_of(*item);
+		TEST_EXPECT(users.size() == 1 && users[0] == foe);
+	}
+	TEST_EXPECT(missing_message(project.session.view(), ammo, "foe_trcr_type_id", "100777").empty());
+	const std::vector<const GraphSymbol *> named = graph.symbols_named(ReferenceKind::ItemName, "AMMO_T");
+	TEST_EXPECT(named.size() == 2 && graph.users_of(*named[1]).empty());
+	return 0;
+}
+
+// The two turns of a tracer's lookup the game takes past items.def's names: a type id naming items.def's first item
+// finds none, the lookup's 0 being its "none" too [orig: ItemList_FindIndexByTypeId @ 0x49E100; AmmoDef_ParseProperty
+// @ 0x40A5DA, `if (index || ...)`]; and the names it searches are the items' gametext names where "Item Names" has
+// their STR_ITM%04i key, which the boot copies over items.def's [orig: Item_LoadLocalizedNames @ 0x49E1B0]. A
+// change of the table resolves the tracer again.
+static int test_tracer_lookups() {
+	Project project;
+	TEST_EXPECT(setup(project));
+	TEST_EXPECT(project.write(project.path("items.def"), "begin \"Lead\"\nid 100800\ntype building\nend\n"
+	                                                     "begin \"ammo_t\"\nid 100900\ntype building\nend\n"
+	                                                     "begin \"Other\"\nid 100902\ntype building\nend\n") &&
+	            project.write(project.path("ammo.def"), "ammo AMMO_T\n\tfrndlyTrcrID 800\n\tfoeTrcrID 902\nend\n"));
+	project.rescan();
+	const std::string ammo = project.path("ammo.def");
+	const auto reached = [&](const char *field, const char *value) -> std::string {
+		const GraphEdge *edge = edge_of(project.graph(), ammo, field, value);
+		const GraphSymbol *symbol = edge ? project.graph().symbol_reached(*edge) : nullptr;
+		return symbol ? symbol->display : std::string();
+	};
+	// 800 names the first item: the tracer is the item named as the ammo; 902 its own item.
+	TEST_EXPECT(reached("frndly_trcr_type_id", "100800") == "ammo_t" && reached("foe_trcr_type_id", "100902") == "100902");
+	// gametext names item 100900 otherwise and 100902 as the ammo: the lookup by name finds Other.
+	const std::string table = project.path("gametext.bin");
+	rtxt::File strings;
+	strings.sections = {{"Item Names", 2}};
+	rtxt::Entry renamed, as_ammo;
+	renamed.key = "STR_ITM0900";
+	renamed.text = "Tracer round";
+	as_ammo.key = "STR_ITM0902";
+	as_ammo.text = "Ammo_T";
+	strings.entries = {renamed, as_ammo};
+	std::vector<uint8_t> bytes;
+	std::string io_error;
+	TEST_EXPECT(!table.empty() && rtxt::write(strings, bytes, io_error) && project.write(table, bytes));
+	project.rescan();
+	TEST_EXPECT(reached("frndly_trcr_type_id", "100800") == "Other");
+	const GraphEdge *friendly = edge_of(project.graph(), ammo, "frndly_trcr_type_id", "100800");
+	const std::vector<const GraphSymbol *> other = project.graph().symbols_named(ReferenceKind::ItemName, "OTHER");
+	TEST_EXPECT(friendly && other.size() == 1 && project.graph().users_of(*other[0]).size() == 1 &&
+	            project.graph().users_of(*other[0])[0] == friendly);
+	// No item named as the ammo any more: the finding says the type id names the first item.
+	strings.entries = {renamed};
+	strings.sections = {{"Item Names", 1}};
+	TEST_EXPECT(rtxt::write(strings, bytes, io_error) && project.write(table, bytes));
+	project.rescan();
+	friendly = edge_of(project.graph(), ammo, "frndly_trcr_type_id", "100800");
+	TEST_EXPECT(friendly && project.graph().resolve(*friendly) == ReferenceStatus::Missing);
+	TEST_EXPECT(missing_message(project.session.view(), ammo, "frndly_trcr_type_id", "100800").find("first item") !=
+	            std::string::npos);
+	std::printf("tracer: a type id naming the first item finds none; the names searched are gametext's\n");
+	return 0;
+}
+
 // A vehicle panel names its items by their alias; a combination its parts by name, of their kind, in its file.
 static int test_aliases_and_parts() {
 	Project project;
@@ -374,6 +486,8 @@ int main() {
 	failures += test_type_ids();
 	failures += test_complete_query();
 	failures += test_aliases_and_parts();
+	failures += test_tracer_by_name();
+	failures += test_tracer_lookups();
 	failures += test_surface_choices();
 	return failures;
 }

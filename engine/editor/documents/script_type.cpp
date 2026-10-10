@@ -8,6 +8,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/text_types.h>
+#include <formats/mission/mission_params.h>
 #include <formats/wac/param_type.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_sidecars.h>
@@ -262,6 +263,36 @@ void script_references(const TextDocument &document, std::vector<TextReference> 
 			reference.fallback = use.name;
 		reference.span = document.span_at(use.offset, use.length);
 		out.push_back(std::move(reference));
+	}
+	// The mission records its literal operands name (wac::OperandUse): an entity by its SSN and an area by its zone
+	// id, in the mission of the script's name (<stem>.BMS), only beside that mission (GraphEdge::needs); the game's
+	// lookups read the playing mission's [orig: EntityPool_FindByNetId @ 0x4F0A20; WacCmd_SsnArea @ 0x4F1087, the
+	// area table by zone id]. Never renamed: a number, which a renumbering of the mission's does not follow into a
+	// script. A player's SSN (10000 and its slot [orig: PlayerClass_InitEntity @ 0x4B1155], mission::ssn_is_players)
+	// names no record. A script of no mission's name (a RUN's file, game.wac,
+	// server.wac) runs with whichever mission plays, so names none to check; a waypoint path's number is a record
+	// of its mission's file by its place there, which a script's reference cannot scope (none either); a group is
+	// one of the script groups, the game's own seven and an XML file's [orig: XML_ParseGroupMember @ 0x4CD6F0], no
+	// mission's record.
+	if (missions_own) {
+		for (const wac::OperandUse &use : program->operand_uses) {
+			if (use.source != 0 || use.length == 0 || use.offset + use.length > text.size()) continue;
+			ReferenceKind kind = ReferenceKind::None;
+			if (use.kind == wac::ParamType::Ssn && !mission::ssn_is_players(use.value))
+				kind = ReferenceKind::MissionEntity;
+			else if (use.kind == wac::ParamType::Area)
+				kind = ReferenceKind::MissionZone;
+			if (kind == ReferenceKind::None) continue;
+			TextReference reference;
+			reference.kind = kind;
+			reference.value = std::to_string(use.value);
+			reference.scope = stem + ".BMS";
+			reference.needs = stem + ".BMS";
+			reference.field = "operand";
+			reference.rewritable = false;
+			reference.span = document.span_at(use.offset, use.length);
+			out.push_back(std::move(reference));
+		}
 	}
 }
 
