@@ -30,8 +30,8 @@ struct EntityHandle;
 // player-add [orig: Server_OnPlayerJoin @0x51a680 → Server_SendInitialGameStateToPlayer @0x51bba0];
 // the inmatch equivalent is `Server_SendInitialGameStateToPlayer` over `conn.burst`. An empirical
 // per-tick phase machine (queue_mission_bootstrap / queue_state4_loading_gate / the
-// 0x10/0x0A/0x57 tick cadence) has no original-engine counterpart, so there is none here (net-re §5.45 / D-NET-127). Reply BODIES are carried verbatim from the old
-// builders (captured-from-observation fixtures, D-NET-127) pending the per-body grill wave.
+// 0x10/0x0A/0x57 tick cadence) has no original-engine counterpart, so there is none here (net-re §5.45 / D-NET-127). The reply
+// bodies, once captured-from-observation fixtures, are each their witnessed serializer's port (D-NET-127 closed with D-NET-295).
 namespace opennova::inmatch {
 
 struct HostRotation;

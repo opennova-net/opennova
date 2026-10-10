@@ -203,11 +203,11 @@ namespace {
 
 // ---------------------------------------------------------------------------
 // Byte helpers. The §5.1
-// identity bodies (0x7A PCID, 0x7B session info) are now FAITHFUL ports of the witnessed serializers
+// identity bodies (0x7A PCID, 0x7B session info) are FAITHFUL ports of the witnessed serializers
 // (NetPacket_WritePCID @0x5076e0, NapiNPMsg_0x7B_BuildPayload @0x507740; net-re §5.45, grilled
-// 2026-06-27). The remaining reply bodies (0x46 NetPacket_SerializePlayerSync0x46 @0x505e80 —
-// a flag-driven slot-state record, and 0x51 NetPacket_WriteEntityPacket @0x506bb0) carry approximations
-// pending slot-state modeling; the witnessed field maps are landed in net-re §5.45 (D-NET-127).
+// 2026-06-27), and so are the 0x46 slot-state record (NetPacket_SerializePlayerSync0x46 @0x505e80,
+// npwire encode_player_sync) and the 0x51 team-change confirm (NetPacket_WriteEntityPacket
+// @0x506bb0): D-NET-127 closed, its last 0x46 fields with D-NET-295 (net-re §8).
 // ---------------------------------------------------------------------------
 
 void append_u16_le(std::vector<uint8_t> &out, uint16_t v) {

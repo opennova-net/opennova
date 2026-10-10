@@ -262,11 +262,12 @@ std::vector<uint8_t> encode_player_extended_uplink(const PlayerExtendedUplink &r
 
 // tag=0x46 PLAYER-SYNC — the inverse of decode_player_sync (PlayerSync). Flag-driven slot-state record:
 // [u8 slot][u16 fieldFlags][u8 entitySlot] then the bit-gated fields in the witnessed order (name 0x1 /
-// clan 0x2 / vehicle-name 0x10 / team 0x4 / class 0x8 / vehicle-score 0x20 / late-join 0x1000 / squad
-// 0x40 / side 0x80 / quality 0x400 / account netId 0x800). [orig: NetPacket_SerializePlayerSync0x46
-// @0x505e80; client NapiNPClientMsg_PlayerSync @0x431370]. Per-field slot-state modeling
-// (score/squad/side/timer) is the remaining D-NET-127 nicety; the wire SHAPE is faithful and
-// round-trips through decode_player_sync.
+// team-string 0x2 / NovaWorld PCID 0x10 / team 0x4 / downed state 0x8 / NapiNPPlayer+0x9C 0x20 /
+// spectator in game 0x1000 / squad leader 0x40 / fireteam 0x80 / quality 0x400 / NovaWorld squad id
+// 0x800). [orig: NetPacket_SerializePlayerSync0x46 @0x505e80; client NapiNPClientMsg_PlayerSync
+// @0x431370]. Every field carries its witnessed source (encode_player_sync's cites); D-NET-127's last
+// residual, the NovaWorld-account fields, closed with D-NET-295 (0x20's only writers zero it). The
+// record round-trips through decode_player_sync.
 //
 // `field_flags` is the REPLY mask, serialized verbatim and gating each field — the server answers
 // EXACTLY the fieldFlags the C2S 0x22 requested, ack bit included [orig: @0x505f05 echoes 0x4000].
