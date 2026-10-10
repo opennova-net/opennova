@@ -47,5 +47,9 @@ std::string key_string(const char *key, const char *fallback);
 // help text). The literals there carry the "!" / "|" untranslated marker
 // ("!Help - %s"), stripped on the fallback like the "XX" one above.
 std::string key_help_string(const char *section, const char *key, const char *fallback);
+// The same lookup returning the fallback untouched, as the original does (the Tab board's paging hint keeps its
+// "!" marker on screen with no table): the entry text where the installed table's section carries `key`, else
+// `fallback` [orig: KeyHelp_GetStringWithFallback @0x51ed40, @0x51ed76].
+std::string key_help_string_raw(const char *section, const char *key, const char *fallback);
 
 }  // namespace opennova::controls

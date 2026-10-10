@@ -5,6 +5,7 @@
 // bracket, and the row format/column/color all switch on whether the game type
 // is a team mode.
 #include <cstdio>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -388,6 +389,43 @@ void test_layout_constants() {
 	CHECK(kRankColor == 0xFFFFFF00u);
 }
 
+// The board's header strings as the drawer composes them: the title and the paging hint keep their
+// literals where their tables lack them (the hint is keyhelp's only once gametext is loaded); the
+// count lines format "%s %i" whatever their text (a miss reads ""), the spectators' only with
+// spectators; the game type's rung its Overlays key's text, "" on a miss.
+void test_header_strings() {
+	const std::map<std::string, std::string> table = {
+		{"Overlays/STROVER_KILLLIST", "Player List"}, {"Overlays/STROVER29", "Deathmatch"},
+		{"Overlays/STROVER64", "Team Deathmatch"}, {"Client/STRCLI04", "Players:"},
+		{"Client/STRCLI23", "Spectators:"}};
+	const GameTextLookup gametext = [&](const char *section, const char *key, const char *fallback) {
+		const auto found = table.find(std::string(section) + "/" + key);
+		return found != table.end() ? found->second : std::string(fallback);
+	};
+	const GameTextLookup none = [](const char *, const char *, const char *fallback) { return std::string(fallback); };
+	const GameTextLookup keyhelp = [](const char *section, const char *key, const char *fallback) {
+		return std::string(section) == "Text" && std::string(key) == "CHANGE_SCREEN" ? std::string("PgUp/PgDn: page")
+		                                                                                : std::string(fallback);
+	};
+	ScoreboardHeaderStrings s = scoreboard_header_strings(gametext, true, keyhelp, 0, 5, 2);
+	CHECK(s.title == "Player List");
+	CHECK(s.game_type_label == "Deathmatch");
+	CHECK(s.players_line == "Players: 5");
+	CHECK(s.spectators_line == "Spectators: 2");
+	CHECK(s.footer == "PgUp/PgDn: page");
+	s = scoreboard_header_strings(gametext, true, keyhelp, 0x10000u, 0, 0);
+	CHECK(s.game_type_label == "Team Deathmatch" && s.players_line == "Players: 0" && s.spectators_line.empty());
+	// No gametext: the title's literal, the count lines with "" text, the hint's literal even with keyhelp.
+	s = scoreboard_header_strings(none, false, keyhelp, 0, 3, 1);
+	CHECK(s.title == "!Kill List");
+	CHECK(s.game_type_label.empty());
+	CHECK(s.players_line == " 3" && s.spectators_line == " 1");
+	CHECK(s.footer == "!PgUp and PgDn to change pages");
+	// Gametext loaded, keyhelp lacking the key: its literal; a type with no rung: none.
+	s = scoreboard_header_strings(gametext, true, none, 0x7777u, 1, 0);
+	CHECK(s.footer == "!PgUp and PgDn to change pages" && s.game_type_label.empty());
+}
+
 } // namespace
 
 int main() {
@@ -406,6 +444,7 @@ int main() {
 	test_row_colors();
 	test_team_page();
 	test_layout_constants();
+	test_header_strings();
 	if (failures == 0) std::printf("scoreboard_format_test: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

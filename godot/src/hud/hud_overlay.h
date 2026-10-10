@@ -34,6 +34,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 
 namespace godot {
@@ -150,15 +151,23 @@ public:
 	void set_no_hud(bool p_no_hud);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
-	// The Tab board: whether it is held open, the strings the shell resolved,
-	// the Simulation the rows and session facts are pulled from natively
-	// (Simulation::fill_scoreboard — no script-side row round-trip), and the
-	// gametext table the drawers' own lookups resolve through
-	// (hud::scoreboard_text). Typed cross-class args on the bound API follow
-	// the set_minimap_terrain precedent; pass null when hiding.
-	void set_scoreboard(bool p_shown, int64_t p_game_type, int p_frame_counter,
-			const Dictionary &p_strings, const Ref<Simulation> &p_sim,
+	// The Tab board: whether it is held open, the frame counter its 4-team page
+	// alternates on, the Simulation the session header, rows and session facts
+	// are pulled from natively (Simulation::get_scoreboard, fill_scoreboard —
+	// no script-side round-trip), and the gametext table the strings resolve
+	// through (hud::scoreboard_header_strings, the paging hint through the
+	// process's keyhelp table; the drawers' own lookups, hud::scoreboard_text).
+	// Typed cross-class args on the bound API follow the set_minimap_terrain
+	// precedent; pass null when hiding.
+	void set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Simulation> &p_sim,
 			const Ref<RtxtStringFile> &p_gametext);
+	// The same board from one an embedder prepared rather than a Simulation's:
+	// `p_board` whole (its game type, its strings, what inmatch::scoreboard_feed
+	// writes), the overlay setting what it owns (whether it is up, the page
+	// clock, the drawers' own gametext). set_scoreboard hands its board here,
+	// so the board has one draw. C++ only (the editor's HUD preview).
+	void set_scoreboard_board(bool p_shown, int p_frame_counter, const Ref<RtxtStringFile> &p_gametext,
+			const opennova::hud::HudScoreboardState &p_board);
 	// The open chat capture's input line off the talk-key object: its prompt,
 	// text and dispatch color (hud::chat_input_line_color, the Global color
 	// keyed on the session-peer bit) and the frame counter the cursor blinks on.
@@ -257,6 +266,9 @@ public:
 	int get_attach_label_count() const;
 	int get_attach_label_selected() const;
 	String get_attach_label_text(int p_index) const;
+	// The Tab board's header strings as the overlay holds them to draw (a read seam for the tests): the title, the
+	// game type's rung, the players' and the spectators' lines and the paging hint, as the board's entry composed them.
+	PackedStringArray get_scoreboard_header_text() const;
 	Vector2 get_attach_label_position(int p_index) const;
 	// The overhead friendly tags (D-HUD-20): the sim's pool-0 gather
 	// (Simulation::fill_friendly_tags) lifted, projected through the play

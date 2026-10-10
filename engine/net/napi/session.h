@@ -178,6 +178,13 @@ inline constexpr char NWEC_UNKNOWN_TAG[] = "CVUNKNOWN";
 // The menutxt key the punt notification substitutes the MsgCode into ("[[$]]").
 // [orig: CNapiGameSession_HandlePuntNotification @0x4d20b0]
 inline constexpr char MENUTXT_PUNTED_FROM_NOVAWORLD[] = "ERR_PUNTEDFROMNOVAWORLD";
+// The MsgCode the service's admin stop sends in its ServerStopHosting: the table's row whose code
+// is 7 (zero-based index 6), NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT, the one key that names a
+// NovaWorld operator's action.
+// Policy: no capture shows which code the retail service sent (the record's "ServerCommand"
+// section, the service side). [orig: the {code, key} table dword_7CB960 / off_7CB964 that
+// CNapiGameSession_HandleServerMessage @0x4d1c50 walks @0x4d1d62..0x4d1ddc]
+inline constexpr int SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT = 7;
 
 // The 52-entry ServerStopHosting MsgCode -> NWUSERVERMSGCODE_* key table (the string the
 // client latches for its message log; unknown codes yield NWUSERVERMSGCODE_UNKNOWNERROR).
@@ -356,6 +363,11 @@ struct ServerCommand {
 const char *server_command_verb_name(ServerCommandVerb verb);
 // The target suffix's spelling ("ByIndex", ...; "" for none), as the in-match executor matches it.
 const char *server_command_target_name(ServerCommandTarget target);
+// The inverse of the two spellings, case-insensitive as the reader compares (Napi_StrCaseEqual /
+// String_MatchSuffix): a verb's whole name, or a target's suffix name, "" or "None" reading as no
+// target. False for any other text, `out` then untouched.
+bool server_command_verb_from_name(std::string_view name, ServerCommandVerb &out);
+bool server_command_target_from_name(std::string_view name, ServerCommandTarget &out);
 // The retail tokenizer: whitespace splits outside double quotes, quotes toggle an in-quote
 // run and are dropped, a backslash is copied verbatim. The whitespace is the CRT isspace under
 // the game's ".ACP" LC_CTYPE, not the C locale's: pinned to cp1252, it is the six C-locale
@@ -390,13 +402,14 @@ bool server_command_verb_takes_target(ServerCommandVerb verb);
 // verb's token-count gate needs (PuntPlayer 1, TextChatPlayer / CmdEchoPlayer 2, ...), or when
 // the verb/target pairing is one the reader drops: a player-targeted verb with no suffix falls
 // through the suffix chain to the no-op tail, and a whole-token verb with a suffix never equals
-// its name.
+// its name. On a refusal `refusal`, when given, names which of those it was (a static string).
 // [orig: String_TokenizeQuotedToArray @0x616d60 (its isspace @0x616da6; LC_ALL ".ACP" set by
 //  System_InitTimerAndLocale @0x762a6e); Napi_CopyString @0x4d2356; the per-verb token-count
 //  gates (PuntPlayer @0x4d23cc, TextChatPlayer @0x4d264a, ...); the suffix chain's no-op exit
 //  @0x4d24e3; Cycle's whole-token compare @0x4d2a46]
 std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget target,
-                                const std::vector<std::string> &args);
+                                const std::vector<std::string> &args,
+                                const char **refusal = nullptr);
 // The "ServerCommand" statement: exactly one "Cmd" param carrying `cmd` verbatim (never clipped;
 // compose through server_command_text or own the cap). An empty Cmd, or one with no tokens, is a
 // no-op at the reader, as is a verb short of its token-count gate (PuntPlayer needs two tokens).

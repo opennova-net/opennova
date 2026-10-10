@@ -335,4 +335,25 @@ struct ScoreboardText {
 };
 ScoreboardText scoreboard_text(const GameTextLookup &gametext);
 
+// The board's header strings as the drawer composes them each draw: the title, gametext's
+// Overlays/STROVER_KILLLIST with its literal [orig: GameText_GetStringWithFallback("Overlays",
+// "STROVER_KILLLIST", "!Kill List") @0x423a75]; the game type's rung, its Overlays key
+// (game_type::overlay_label_key) read as GameText_GetString reads one, "" on a miss [orig:
+// HUD_GetGameTypeOverlayLabel @0x5b8680]; the players line, "%s %i" of Client/STRCLI04 ("" on a miss: no
+// table @0x51ebd7, no entry @0x51ec00) and the count [orig: @0x4231e8..0x4231fb]; the spectators line
+// likewise of STRCLI23, only while there are spectators [orig: the count's gate @0x42322a; @0x423237..0x42324a];
+// the paging hint, keyhelp's Text/CHANGE_SCREEN with its literal, which the getter answers only once
+// gametext is loaded [orig: KeyHelp_GetStringWithFallback("Text", "CHANGE_SCREEN", "!PgUp and PgDn to change
+// pages") @0x424272; the gametext gate @0x51ed47]. `keyhelp` answers the keyhelp table's entry, else its
+// fallback untouched (controls::key_help_string_raw over the process's table, or a table of the caller's).
+struct ScoreboardHeaderStrings {
+	std::string title;
+	std::string game_type_label;
+	std::string players_line;
+	std::string spectators_line; // "" with no spectators
+	std::string footer;
+};
+ScoreboardHeaderStrings scoreboard_header_strings(const GameTextLookup &gametext, bool gametext_loaded,
+		const GameTextLookup &keyhelp, uint32_t game_type, int players, int spectators);
+
 } // namespace opennova::hud
