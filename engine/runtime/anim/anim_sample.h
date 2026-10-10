@@ -83,6 +83,10 @@ struct Clip {
     uint32_t fps = 0;
     uint32_t flags = 0;            // bit0 = loop, bit1 = translation present
     uint32_t frame_count = 0;
+    // The bone count its .bad's header holds (the word at +20): a model-table clip samples
+    // every model row, but a Person's bone builder copies only this many of them
+    // (SkeletalClips::pose_person_rows_past_clip).
+    uint32_t file_bones = 0;
     std::vector<ClipBone> bones;   // skeleton: names + parent indices (shared by all frames)
     // frames[frame][bone]. Empty bones list + zero frames on a malformed clip.
     std::vector<std::vector<BoneSample>> frames;

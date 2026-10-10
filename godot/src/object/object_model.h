@@ -321,6 +321,12 @@ private:
 	// The level the slots currently carry (-1 = none applied since the build).
 	int applied_lod_ = -1;
 	bool skeletal_scene_ = false;
+	// The rig a per-vertex skinned model with no clip draws its part tracks through:
+	// its bone table at rest (rebuild_scene; SkeletalClips::load_rest). Null with a clip.
+	Ref<SkeletalAnim> rest_rig_;
+	// The first-person view model: its clip's matrices draw as the clip builds them,
+	// never through a Person's bone builder (set_viewmodel_rig).
+	bool viewmodel_rig_ = false;
 	HashMap<int, Node3D *> robj_nodes_;
 	HashMap<int, Transform3D> robj_rest_transforms_;
 	// Last applied point-light selections (FNV over count + packed vectors).
@@ -797,7 +803,7 @@ private:
 
 	// --- retained-scene construction (object_model_scene.cpp) ---
 	void rebuild_scene();
-	void build_skeleton();
+	void build_skeleton(const Ref<SkeletalAnim> &p_rig);
 	// Bumped by every rebuild_scene(): a device that stamps this subtree's
 	// instances (SlotShadow's capture layers) re-stamps when it moves.
 	uint32_t scene_build_serial_ = 0;
@@ -1205,6 +1211,13 @@ public:
 
 	// --- main-body skeletal + part channels ---
 	void set_skeletal_anim(const Ref<SkeletalAnim> &p_skeletal);
+	// Whether the clip poses a first-person view model, whose bone array the game
+	// draws as the clip builds it (rows past the clip's bones carry its row 0), or
+	// (false, every other clip-posed model) a model drawn through a Person's bone
+	// builder, whose rows past the clip's bones take that builder's pose
+	// (SkeletalClips::pose_person_rows_past_clip).
+	void set_viewmodel_rig(bool p_viewmodel);
+	bool is_viewmodel_rig() const { return viewmodel_rig_; }
 	Ref<SkeletalAnim> get_skeletal_anim() const { return skeletal_; }
 	Skeleton3D *get_skeleton() const { return skeleton_; }
 	bool has_skeleton() const { return skeleton_ != nullptr; }
