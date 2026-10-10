@@ -7,11 +7,13 @@
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/preview/mission_map_outline.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
 #include <formats/mission/authoring.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/threedi/threedi_3di3.h>
+#include <runtime/mission/placement_traits.h>
 #include <runtime/world/model_geometry.h>
 
 namespace opennova::editor {
@@ -68,10 +70,31 @@ MissionKind mission_item_pool_of_type(int type) {
 	}
 }
 
-void mission_model_point(const float model[3], double out[3]) {
-	out[0] = -double(model[0]);
-	out[1] = -double(model[2]);
+void mission_model_words(const float model[3], double out[3]) {
+	out[0] = double(model[2]);
+	out[1] = -double(model[0]);
 	out[2] = double(model[1]);
+}
+
+void mission_anchor_offset(const double words[3], int32_t scale_q16, double pitch, double yaw, double roll, double out[3]) {
+	// The point as the device's model holds it (ObjectData's godot_vec3 of the threedi_user_point_position
+	// order: x mirrored), carried by the entity's placement basis at the item's scale (the placer's
+	// item_entity_transform, mission_effects' owner_pose), and back into the mission's frame.
+	const double local[3] = { words[1], words[2], words[0] };
+	const mission::PlacementBasis basis = mission::bms_to_presentation_basis(float(pitch), float(yaw), float(roll));
+	const double scale = scale_q16 != 0 ? double(scale_q16) / io::kFp16OneD : 1.0;
+	const mission::PlacementVec3 at{
+		float((basis.x.x * local[0] + basis.y.x * local[1] + basis.z.x * local[2]) * scale),
+		float((basis.x.y * local[0] + basis.y.y * local[1] + basis.z.y * local[2]) * scale),
+		float((basis.x.z * local[0] + basis.y.z * local[1] + basis.z.z * local[2]) * scale) };
+	const mission::PlacementVec3 mission_at = mission::presentation_to_bms_position(at);
+	out[0] = mission_at.x;
+	out[1] = mission_at.y;
+	out[2] = mission_at.z;
+}
+
+void mission_ground_bake(const double words[3], double out[3]) {
+	for (int i = 0; i < 3; ++i) out[i] = words[i];
 }
 
 // --- MissionItemCache ----------------------------------------------------------------------------
@@ -91,15 +114,15 @@ const MissionItemCache::Model &MissionItemCache::model_(const SessionView &view,
 		model.read = true;
 		model.radius_q16 = world::model_bound_radius_q16_from_3di(parsed);
 		model.collision = parsed.collision != nullptr;
-		// The model's ground anchor, read from the project's file as the game reads it. NEEDS-RE (ADR
-		// 0046 S14, review m9): the original editor subtracts the Ground userpoint's +0/+4/+8 words from
-		// the entity's position unrotated (docs/world/world-wac-ai-re.md section 12, dfx2med.exe @
-		// 0x401f6e, 0x4021fe); whether those are the file's raw x/y/z (forward, left, up) taken as
-		// mission x/y/z, or the presentation swizzle used here (mission x, y = the raw y, -x), is
-		// unwitnessed. z agrees either way; an anchor off the model's vertical axis moves the stored x and
-		// y. Read 0x401f6e in a dfx2med database to settle it.
+		// The model's ground anchor, read from the project's file as the game reads it, in the model's own
+		// axes: where it stands from an entity is the game's placement matrix over it at the entity's
+		// angles (mission_anchor_offset); a drop bakes its words as they are (mission_ground_bake).
 		float anchor[3] = { 0.0f, 0.0f, 0.0f };
-		if (threedi::threedi_3di3_ground_anchor(&parsed, anchor)) mission_model_point(anchor, model.anchor);
+		if (threedi::threedi_3di3_ground_anchor(&parsed, anchor)) mission_model_words(anchor, model.anchor);
+		if (outlines_) {
+			auto outline = std::make_shared<MissionModelOutline>();
+			if (mission_model_outline(parsed, *outline)) model.outline = std::move(outline);
+		}
 	}
 	threedi::threedi_3di3_free(&parsed);
 	return model;
@@ -180,14 +203,15 @@ bool MissionItemCache::facts(const SessionView &view, int64_t item, MissionItemF
 	const Model &model = model_(view, out.model);
 	if (!model.read) return true;
 	for (int i = 0; i < 3; ++i) out.anchor[i] = model.anchor[i];
+	out.outline = model.outline;
+	const Catalog &catalog = catalog_(view, symbol->file);
+	const auto scale = catalog.scale_q16.find(item);
+	out.scale_q16 = scale == catalog.scale_q16.end() ? 0 : scale->second;
 	// Its entity's bound: the model's, by the item's SCALE, at least its first husk's.
 	if (model.collision) {
-		const int32_t radius = model.radius_q16;
-		const Catalog &catalog = catalog_(view, symbol->file);
-		const auto scale = catalog.scale_q16.find(item);
 		const Model *husk = models.husk.empty() ? nullptr : &model_(view, models.husk);
-		out.radius = mission_item_bound_radius(radius, true, scale == catalog.scale_q16.end() ? 0 : scale->second,
-				husk && husk->read, husk ? husk->radius_q16 : 0);
+		out.radius = mission_item_bound_radius(model.radius_q16, true, out.scale_q16, husk && husk->read,
+				husk ? husk->radius_q16 : 0);
 	}
 	return true;
 }
@@ -202,6 +226,7 @@ bool MissionItemCache::model_facts(const SessionView &view, int64_t item, int ty
 	const Model &model = model_(view, file);
 	if (!model.read) return false;
 	for (int i = 0; i < 3; ++i) out.anchor[i] = model.anchor[i];
+	out.outline = model.outline;
 	if (model.collision) out.radius = mission_item_bound_radius(model.radius_q16, true, 0, false, 0);
 	return true;
 }

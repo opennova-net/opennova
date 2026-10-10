@@ -24,27 +24,41 @@ void ScriptViewportView::draw_ready(Workspace &workspace, const ViewportModel &m
 	const ImVec2 at = ImGui::GetCursorScreenPos();
 	const ImVec2 end(at.x + room.x, at.y + room.y);
 	// A Control lies over everything Dear ImGui draws: not placed where it would hide something drawn
-	// over the rect, nor in another OS window than the one it is a Control of.
-	const ImGuiViewport *main = ImGui::GetMainViewport();
+	// over the rect, nor in an OS window the device cannot place it in. An undocked tab is an OS window of
+	// its own (S23 C): its viewport's platform handle is the window's id once the ImGui layer has made it.
+	const ImGuiViewport *viewport = ImGui::GetWindowViewport();
+	int64_t window = 0;
+	if (viewport != ImGui::GetMainViewport()) {
+		window = viewport->PlatformWindowCreated ? int64_t(intptr_t(viewport->PlatformHandle)) : 0;
+		if (window <= 0) {
+			home_(*device);
+			return;
+		}
+	}
 	const ui_kit::Cover cover = ui_kit::cover_of(at.x, at.y, end.x, end.y);
-	if (ImGui::GetWindowViewport() != main || ui_kit::covered(cover)) return;
-	// The rect in the OS window's pixels (Dear ImGui's less the window's place on the screen where its
+	if (ui_kit::covered(cover) || !device->places_in(window)) {
+		home_(*device);
+		return;
+	}
+	// The rect in its OS window's pixels (Dear ImGui's less the window's place on the screen where its
 	// viewports put the windows on the desktop), and the part of the window it shows in.
 	ViewportPicture picture;
-	picture.x = at.x - main->Pos.x;
-	picture.y = at.y - main->Pos.y;
+	picture.window = window;
+	picture.x = at.x - viewport->Pos.x;
+	picture.y = at.y - viewport->Pos.y;
 	picture.width = int(room.x);
 	picture.height = int(room.y);
 	const ImVec2 clip_min = ImGui::GetWindowDrawList()->GetClipRectMin();
 	const ImVec2 clip_max = ImGui::GetWindowDrawList()->GetClipRectMax();
-	picture.clip_left = clip_min.x - main->Pos.x;
-	picture.clip_top = clip_min.y - main->Pos.y;
-	picture.clip_right = clip_max.x - main->Pos.x;
-	picture.clip_bottom = clip_max.y - main->Pos.y;
+	picture.clip_left = clip_min.x - viewport->Pos.x;
+	picture.clip_top = clip_min.y - viewport->Pos.y;
+	picture.clip_right = clip_max.x - viewport->Pos.x;
+	picture.clip_bottom = clip_max.y - viewport->Pos.y;
 	picture.canvas_sized = true;
 	device->draw(picture);
 	placed_ = true;
 	placed_frame_ = ImGui::GetFrameCount();
+	placed_window_ = window;
 	path_ = model.path();
 	cover_ = cover;
 	// The surface over the whole rect: a press there is this item's, never the window's (a drag that
@@ -60,8 +74,22 @@ void ScriptViewportView::draw_ready(Workspace &workspace, const ViewportModel &m
 		ImGui::SetNextFrameWantCaptureMouse(false);
 }
 
+void ScriptViewportView::home_(ViewportDevice &device) {
+	// A control left in an undocked tab's window goes home to the main one (a picture with no room hides it), so
+	// the window, which the ImGui layer frees with its viewport, never takes it along.
+	if (placed_window_ != 0) device.draw(ViewportPicture());
+	placed_window_ = 0;
+}
+
 void ScriptViewportView::end_frame(Workspace &workspace) {
 	ViewportView::end_frame(workspace);
+	// A tab no frame drew, its control in an undocked tab's window: home before the frame's end, when the ImGui
+	// layer may free that window with its viewport.
+	if (placed_window_ != 0 && placed_frame_ != ImGui::GetFrameCount()) {
+		ViewportDeviceSource *devices = workspace.devices();
+		if (ViewportDevice *device = devices ? devices->device(path_, kind()) : nullptr) home_(*device);
+		placed_window_ = 0;
+	}
 	// A view whose tab no frame drew keeps nothing placed. A window or a modal begun after the tab this
 	// frame was unknown to Dear ImGui when the tab asked (it knows the windows begun by then and those
 	// drawn the frame before); with every window begun it is known, and over the rect it is the Control

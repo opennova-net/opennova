@@ -606,7 +606,11 @@ static int test_envelope() {
 // rescanned: the point authored at (0.25, -0.5, 0.75) (x forward, y left, z up), which is the mission
 // frame's (-0.5, -0.25, 0.75) as the drop bakes it (threedi_user_point_position, the placer's
 // godot_vec3, godot_to_bms_position).
-constexpr double kCrateAnchor[3] = { -0.5, -0.25, 0.75 };
+// The minted crate's `ground` point in the model's own axes (its file's words: forward, left, up), and where
+// the game draws it from an entity facing north (yaw 0), its placement matrix Rz(90 - yaw) over the words
+// [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40]: 0.5 east, 0.25 north, 0.75 up.
+constexpr double kCrateWords[3] = { 0.25, -0.5, 0.75 };
+constexpr double kCrateAnchor[3] = { 0.5, 0.25, 0.75 };
 static bool mint_anchored_crate(Rig &rig) {
 	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/crate.3di"));
 	opennova::threedi::Threedi3di3 model{};
@@ -647,8 +651,37 @@ static int test_drop() {
 	MissionItemFacts facts;
 	TEST_EXPECT(mission_item_facts(view, 106190, facts, error) && facts.name == "Drop Crate" && facts.pool == MissionKind::Item);
 	TEST_EXPECT(facts.model == "models/crate.3di");
-	const double *crate = kCrateAnchor;
-	for (int i = 0; i < 3; ++i) TEST_EXPECT(near(facts.anchor[i], crate[i], 1e-5));
+	for (int i = 0; i < 3; ++i) TEST_EXPECT(near(facts.anchor[i], kCrateWords[i], 1e-5));
+	TEST_EXPECT(facts.scale_q16 == 0);
+	// S23 C: where the game draws the point from the entity is its placement matrix Rz(90 - yaw) x Ry(-pitch) x
+	// Rx(roll) over the words, at the item's scale, here by the engine's placement basis: facing north the
+	// words' forward is east and their left north, facing east (90) they stand as they are, and so on round.
+	{
+		const auto engine_offset = [](double yaw, double scale, double out[3]) {
+			const double heading = (90.0 - yaw) * 3.14159265358979323846 / 180.0;
+			const double c = std::cos(heading), sn = std::sin(heading);
+			out[0] = (c * kCrateWords[0] - sn * kCrateWords[1]) * scale;
+			out[1] = (sn * kCrateWords[0] + c * kCrateWords[1]) * scale;
+			out[2] = kCrateWords[2] * scale;
+		};
+		for (const double yaw : { 0.0, 90.0, 225.0, 270.0 })
+			for (const int32_t scale_q16 : { int32_t(0), int32_t(0x18000) }) {
+				double offset[3], expected[3];
+				mission_anchor_offset(kCrateWords, scale_q16, 0.0, yaw, 0.0, offset);
+				engine_offset(yaw, scale_q16 ? 1.5 : 1.0, expected);
+				for (int i = 0; i < 3; ++i) TEST_EXPECT(near(offset[i], expected[i], 1e-5));
+			}
+		double north[3];
+		mission_anchor_offset(kCrateWords, 0, 0.0, 0.0, 0.0, north);
+		for (int i = 0; i < 3; ++i) TEST_EXPECT(near(north[i], kCrateAnchor[i], 1e-5));
+	}
+	// A drop bakes the words as they are, the original editor's unrotated and unscaled subtraction (dfx2med).
+	{
+		double baked[3];
+		mission_ground_bake(kCrateWords, baked);
+		for (int i = 0; i < 3; ++i) TEST_EXPECT(baked[i] == kCrateWords[i]);
+	}
+	const double *crate = kCrateWords;
 	// A model whose `ground` point is its origin: no anchor.
 	TEST_EXPECT(mission_item_facts(view, 106101, facts, error) && facts.pool == MissionKind::Building && facts.model == "models/armory.3di");
 	TEST_EXPECT(facts.anchor[0] == 0.0 && facts.anchor[1] == 0.0 && facts.anchor[2] == 0.0);
@@ -857,11 +890,11 @@ static int test_ground_command() {
 	TEST_EXPECT(crate != 0);
 	if (crate == 0) return 1;
 	gathered.requests.clear();
-	TEST_EXPECT(near(viewport->scene().entity(crate)->z, 7.0 - kCrateAnchor[2], 1.0 / 65536.0));
+	TEST_EXPECT(near(viewport->scene().entity(crate)->z, 7.0 - kCrateWords[2], 1.0 / 65536.0));
 	device->ground = [](double, double) { return 9.0; };
 	TEST_EXPECT(viewport->command(rig.context(), "ground", { crate }, gathered, error) && gathered.requests.size() == 1 &&
 			gathered.requests[0].edits.size() == 1 &&
-			near(std::get<double>(gathered.requests[0].edits[0].value), 9.0 - kCrateAnchor[2], 1e-9));
+			near(std::get<double>(gathered.requests[0].edits[0].value), 9.0 - kCrateWords[2], 1e-9));
 	gathered.requests.clear();
 	// The selection when none is named.
 	rig.session.handle(request::select_record(kMission, building));
@@ -1107,7 +1140,7 @@ static int test_placing() {
 		TEST_EXPECT(on_grid(x) && on_grid(y));
 		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + x / 50.0, 1e-9));
 	}
-	// A model whose ground point is off its axis (the crate's, -0.5 east, -0.25 north, 0.75 up): the
+	// A model whose ground point is off its axis (the crate's words, 0.25, -0.5 and 0.75, baked as they are): the
 	// stored origin on the grid, the point a move snaps, its height the ground's under its ground point
 	// less the anchor's height. (Snapping the ground point instead left the origin off the grid by the
 	// anchor, and a first drag jumped it.)
@@ -1120,7 +1153,7 @@ static int test_placing() {
 		const std::vector<Edit> &edits = gathered.requests[0].edits;
 		const double x = std::get<double>(edits[1].value), y = std::get<double>(edits[2].value);
 		TEST_EXPECT(on_grid(x) && on_grid(y));
-		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + (x + kCrateAnchor[0]) / 50.0 - kCrateAnchor[2], 1e-9));
+		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + (x + kCrateWords[0]) / 50.0 - kCrateWords[2], 1e-9));
 	}
 	// A path's next stop: path 1's markers are waypoint markers (item 106005), the marker the stop names the new one.
 	const size_t markers = document.rows_of(MissionKind::Marker).size();
