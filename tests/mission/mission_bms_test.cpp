@@ -1129,6 +1129,31 @@ int main() {
 		TEST_EXPECT(reparsed2.waypoint_records[0].marker_count == 5);
 	}
 
+	// --- Regression: a slot word past a path's stops (09TR.bms's path 13 ships one, 122 after its 19 stops)
+	// survives sync_counts, which a save runs: the record's padding is kept where it fills the 128 bytes. ---
+	{
+		opennova::bms::File f;
+		make_default(f);
+		TEST_EXPECT(f.waypoint_records.size() > 13);
+		opennova::bms::WaypointRecord &path = f.waypoint_records[13];
+		path.waypoint_numbers.assign(19, 1u);
+		path.marker_count = 19;
+		path.padding.assign(128 - 19 * 4, 0);
+		path.padding[0] = 122;
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(write_document(f, bytes)); // runs sync_counts
+		opennova::bms::File reparsed;
+		std::string err;
+		TEST_EXPECT(opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+		TEST_EXPECT(reparsed.waypoint_records[13].padding.size() == 128 - 19 * 4 &&
+		            reparsed.waypoint_records[13].padding[0] == 122);
+		// A record whose slots changed without its padding takes zeros past them.
+		path.waypoint_numbers.assign(20, 1u);
+		path.marker_count = 20;
+		TEST_EXPECT(write_document(f, bytes) && opennova::bms::parse(bytes.data(), bytes.size(), reparsed, err));
+		TEST_EXPECT(reparsed.waypoint_records[13].padding.size() == 128 - 20 * 4 && reparsed.waypoint_records[13].padding[0] == 0);
+	}
+
 	// --- Regression (review #1): an AUTHORED waypoint edit that keeps a path saturated at 32 markers must
 	// resync a shipped over-count (39) down to 32, NOT preserve it. The pure round-trip above keeps 39 for
 	// byte-exactness, but once the marker list is rewritten (reorder / flag-only / set_waypoint_path) the 39
