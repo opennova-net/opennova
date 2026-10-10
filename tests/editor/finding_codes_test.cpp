@@ -231,9 +231,8 @@ static int test_type_tables() {
 	                     "menu.render.text_id_missing", "menu.render.text_table_missing",
 	                     "menu.render.texture_missing" }));
 	TEST_EXPECT(noted(FindingProblem::Info) ==
-	            Tokens({ "menu.render.image_height_shared", "menu.render.item_kind_not_drawn",
-	                     "menu.render.list_rows_clipped", "menu.render.table_cells_deferred",
-	                     "menu.render.type_interior_deferred" }));
+	            Tokens({ "menu.render.image_height_shared", "menu.render.item_kind_as_text",
+	                     "menu.render.list_rows_clipped", "menu.render.table_cells_deferred" }));
 	TEST_EXPECT(noted(FindingProblem::Warning).size() == 21);
 	// Only a render check's row says it; its screen it could not map is an Error its check makes.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) {
@@ -298,10 +297,11 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
 	// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4.
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));
-	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3.)
+	// (A catalog's input the game ignores has none: a save keeps it as the file has it, the demo round's bug 3;
+	// nor a menu's, kept with its look, D-MNU-22.)
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "dialog_bank.ignored_input", "environment.ignored_input",
-	                     "face_animation.ignored_input", "font.ignored_input", "menu.ignored_input", "mission.event_order",
+	                     "face_animation.ignored_input", "font.ignored_input", "mission.event_order",
 	                     "mission.rewrite_differs", "music_bank.ignored_input", "script.line_ending",
 	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending",
 	                     "terrain.ignored_input" }));
@@ -312,7 +312,6 @@ static int test_columns() {
 		{ "face_animation.ignored_input", "without the input the game ignores" },
 		{ "font.ignored_input", "without the input the game ignores" },
 		{ "music_bank.ignored_input", "without the input the game ignores" },
-		{ "menu.ignored_input", "without the input the game ignores" },
 		{ "sound_bank.ignored_input", "without the input the game ignores" },
 		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
 		{ "mission.rewrite_differs", "with its sections as the game reads them" },

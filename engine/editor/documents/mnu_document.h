@@ -79,6 +79,10 @@ struct MenuLookupName {
 
 struct MenuFileState : FileState {
 	mnu::SourceEncoding source_encoding = mnu::SourceEncoding::CodePage;
+	// How the file looks (master's mnu::TextLayout, D-MNU-22): read with the records, so a save writes the
+	// file in its own look (mnu_write generating every byte from the records and it); null for a menu made
+	// from nothing.
+	std::shared_ptr<const mnu::TextLayout> text_layout;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<MenuFileState>(*this); }
 	size_t footprint() const override { return sizeof(MenuFileState); }
 };

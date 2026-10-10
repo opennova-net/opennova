@@ -2000,19 +2000,19 @@ void test_problems_rewrite_hidden() {
 	SessionView v;
 	v.project.open = true;
 	v.project.root = "C:/mods/Rewrite";
-	v.findings.diagnostics = {editor_test::finding_of(DiagnosticSeverity::Warning, "menu.ignored_input", "Delta: a key the game ignores.",
-	                                 "menus/a.mnu"),
-	                 editor_test::finding_of(DiagnosticSeverity::Error, "menu.unserializable", "Echo: this cannot be written.",
-	                                         "menus/a.mnu"),
-	                 editor_test::finding_of(DiagnosticSeverity::Warning, "menu.ignored_input", "Foxtrot: a key the game ignores.",
-	                                         "menus/b.mnu")};
+	v.findings.diagnostics = {editor_test::finding_of(DiagnosticSeverity::Warning, "animation_map.ignored_input", "Delta: a key the game ignores.",
+	                                 "anims/a.adm"),
+	                 editor_test::finding_of(DiagnosticSeverity::Error, "animation_map.invalid_input", "Echo: this cannot be written.",
+	                                         "anims/a.adm"),
+	                 editor_test::finding_of(DiagnosticSeverity::Warning, "animation_map.ignored_input", "Foxtrot: a key the game ignores.",
+	                                         "anims/b.adm")};
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
 	ui.focus("Problems");
 	ui.away();
 	std::string text = logged_frame(ui);
-	CHECK(in_order(text, {"Echo:", "Delta:", "Foxtrot:", "Rewrite b.mnu"}) && text.find("Rewrite a.mnu") == std::string::npos,
+	CHECK(in_order(text, {"Echo:", "Delta:", "Foxtrot:", "Rewrite b.adm"}) && text.find("Rewrite a.adm") == std::string::npos,
 	      "no Rewrite of a file that does not serialize");
 	ui.activate(item_id(Ui::window_id("Problems"), {"Only fixable"}));
 	ui.away();
