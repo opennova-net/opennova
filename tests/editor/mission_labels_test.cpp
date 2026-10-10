@@ -541,7 +541,7 @@ int test_text_key_picks() {
 	TEST_EXPECT(route.schema && same(route.schema->label, "Waypoint name") && route.applies == Applicability::Reads &&
 	            route.picks == ReferenceKind::TextId && same(route.scope, "SYNTH_LOGIC.BIN/WPNames") && route.key_prefix &&
 	            std::string(route.key_prefix) == "STRWPNAME");
-	TEST_EXPECT(unread.schema && unread.applies == Applicability::Unverified && unread.picks == ReferenceKind::None);
+	TEST_EXPECT(unread.schema && unread.applies == Applicability::Ignored && unread.picks == ReferenceKind::None);
 	listed.clear();
 	for (const ReferenceChoice &choice : picker_choices(view.findings.graph.get(), *document, marker, route, &waypoint_names))
 		listed += choice.name + "=" + choice.label + ";";

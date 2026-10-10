@@ -527,7 +527,9 @@ protected:
 	// payload `copy` made (edit.value) as rows of the file, in order, their identity stores sized
 	// and their identities left to the base (as parse leaves them), each told apart from `rows`
 	// (the rows as the batch has left them) where the type tells a copy apart (a name no row has).
-	// The base puts them in at edit.position. The default refuses: no type copies rows yet.
+	// The base puts them in at edit.position. The default refuses, for a type whose copies hold no rows
+	// (a menu's hold windows, which paste_records puts inside a screen); the mission type's copies of its
+	// rows paste here (MissionDocument::paste_rows).
 	virtual bool paste_rows(const Edit &edit, const std::vector<std::shared_ptr<const Node>> &rows,
 	                        std::vector<std::shared_ptr<Node>> &out, std::string &error);
 	// A change the type made in C++ (Edit Apply: its EditPayload, whose token says which) to the

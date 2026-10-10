@@ -30,8 +30,10 @@ bool UnsavedGuard::files(const EditorRequest &request, std::vector<std::string> 
 	case GuardScope::PlannedWrites:
 		// What the request's own plan writes over or rewrites, its planner asked.
 		if (request.kind == EditorRequestKind::ImportFiles) core_.imports().unsaved_files(request, out);
-		else if (request.kind == EditorRequestKind::DeleteAsset || request.kind == EditorRequestKind::RenameFolder ||
-		         request.kind == EditorRequestKind::UndoFile || request.kind == EditorRequestKind::RedoFile)
+		else if (request.kind == EditorRequestKind::DeleteAsset || request.kind == EditorRequestKind::DuplicateAsset ||
+		         request.kind == EditorRequestKind::DeleteFolder || request.kind == EditorRequestKind::RenameFolder ||
+		         request.kind == EditorRequestKind::UndoFile || request.kind == EditorRequestKind::RedoFile ||
+		         (request.kind == EditorRequestKind::MoveAsset && !request.paths.empty()))
 			core_.chores().unsaved_files(request, out);
 		else core_.renames().unsaved_files(request, out);
 		return true;
