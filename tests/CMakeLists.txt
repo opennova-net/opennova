@@ -88,6 +88,13 @@ target_link_libraries(threedi_retail_rewrite_test PRIVATE opennova_formats)
 target_include_directories(threedi_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(threedi_retail_rewrite COMMAND threedi_retail_rewrite_test)
 
+# The BHD-era GP reader and its migration to 3DI3: synthetic GP models built in the test,
+# and every GP model BHD ships (OPENNOVA_JO_ASSETS/fixtures/bhd/3di) migrated and read back.
+add_executable(threedi_gp_test threedi/threedi_gp_test.cpp)
+target_link_libraries(threedi_gp_test PRIVATE opennova_formats)
+target_include_directories(threedi_gp_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(threedi_gp COMMAND threedi_gp_test)
+
 # Every retail .bad and .adm through the reader and the writer the editor
 # saves by: field-equal and a fixed point (OPENNOVA_JO_ASSETS).
 add_executable(anim_retail_rewrite_test anim/retail_rewrite_test.cpp)
