@@ -91,10 +91,23 @@ struct GameTypeBlock {
 	uint64_t note = 0;         // its lines in the file's layout (0: none)
 };
 
+// A pair of fanfare bytes the reader stores from some of a file's EXP_FANFARE lines: the last of them passing its
+// gate; `kept` false where none does.
+struct StoredFanfare {
+	int32_t pair[2] = {0, 0};
+	bool kept = false;
+};
+
 struct File {
-	int32_t version = 40;            // VERSION n (the last; the reader's 0 for none); the game's own 40 (kVersion)
-	int32_t exp_fanfare[2] = {0, 0}; // the fanfare's two bytes: the last pair a line set (the defaults' 0 0)
-	bool has_exp_fanfare = false;    // a line set them: an EXP_FANFARE line passing the reader's gate
+	int32_t version = 40; // VERSION n (the last; the reader's 0 for none); the game's own 40 (kVersion)
+	// The fanfare line: the last EXP_FANFARE line before the first GAMETYPE (where the game's writer puts its one),
+	// its two bytes whether or not they pass the reader's gate (exp_fanfare_kept); 0 0 where the file has none. A
+	// set of the pair rewrites that line.
+	int32_t exp_fanfare[2] = {0, 0};
+	bool has_exp_fanfare = false; // the file has the line (the game's own writer always writes one)
+	// What the file's other EXP_FANFARE lines leave the reader storing, which a save keeps as the lines stand: the
+	// lines before the fanfare line's, and those inside the GAMETYPE blocks, after it (kept_fanfare).
+	StoredFanfare fanfare_before, fanfare_after;
 	std::vector<GameTypeBlock> blocks;
 	uint64_t note = 0; // the file's own record in its layout (0: none)
 };
@@ -127,12 +140,18 @@ const std::vector<std::string> &game_type_names();
 // The row a GAMETYPE line's name selects, the first of the name without case [orig: sub_52D850 @ 0x52D850];
 // -1 for a name no row has.
 int game_type_row(std::string_view name);
-// Whether the reader keeps the fanfare: both bytes other than 0, the second the greater [orig: @ 0x52DC75..0x52DC9F].
+// Whether the reader keeps the fanfare line's pair: both bytes other than 0, the second the greater [orig: @
+// 0x52DC75..0x52DC9F].
 bool exp_fanfare_kept(const File &file);
+// The pair the game stores from the file's EXP_FANFARE lines, the last line passing the gate's: a block's line after
+// the fanfare line, else the fanfare line's where it passes, else an earlier line's; false for none (the defaults'
+// 0 0 stand) [orig: ScoreConfig_LoadFile @ 0x52DC75..0x52DC9F, each line stored over the last].
+bool kept_fanfare(const File &file, int32_t out[2]);
 
 // The file as ScoreConfig_LoadFile reads it (the lines and tokens above): VERSION the file's (0 for none); at
 // version 40 every GAMETYPE line a block, its FIELD and VAR lines whose name the tables have its entries, the
-// fanfare the last EXP_FANFARE line passing the gate (has_exp_fanfare); every other line read for nothing, and
+// fanfare line the last EXP_FANFARE line before the first block (has_exp_fanfare, its pair whatever it holds), what
+// the other EXP_FANFARE lines store (fanfare_before, fanfare_after); every other line read for nothing, and
 // at any other version every line but VERSION (no block: the game reads none of the file and writes its
 // defaults over it). Never fails on a text (the game reads any); false only for no data.
 bool parse(const uint8_t *data, size_t size, File &out, std::string &error);
@@ -142,7 +161,8 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error, text
 
 // The file's text as ScoreConfig_SaveFile @ 0x52CDD0 writes it, from scratch (ADR 0003): its header, `VERSION
 // 40` (the model's version: a File's own is the game's 40, a file read at another keeps it), `EXP_FANFARE a b`
-// (over a file's layout only where a line of the file's set the pair, or the model has one), the FIELD names in a comment block, then each block after two blank lines, its
+// (over a file's layout only where the model has the fanfare line: the file's own, rewritten in place, or one set
+// anew), the FIELD names in a comment block, then each block after two blank lines, its
 // FIELD lines and, after a blank one, its VAR lines in the VAR table's order, each line ending CR LF
 // (File_WriteLineToHandle @ 0x437010). Over the file's modeled layout where the file has one (each line as the
 // file had it but for a changed value's; an entry put down anew after the one before it in the writer's order;
@@ -160,7 +180,8 @@ const GameTypeBlock *block_at(const File &file, int row);
 int32_t var_value(const GameTypeBlock &block, std::string_view name, int32_t fallback);
 int32_t field_value(const GameTypeBlock &block, std::string_view name, int32_t fallback);
 
-// Value equality — true iff two models read the same (the layout aside).
+// Value equality — true iff two models read the same (the layout aside), the fanfare line as the file holds it
+// too (its pair whether or not the reader keeps it).
 bool equal(const File &a, const File &b);
 
 } // namespace score
