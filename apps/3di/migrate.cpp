@@ -5,14 +5,9 @@
 // not at all.
 
 #include <cstdio>
-#include <filesystem>
-#include <set>
-#include <system_error>
 #include <vector>
 
 #include <base/io/file_io.h>
-#include <base/io/os_path.h>
-#include <base/io/strutil.h>
 #include <formats/threedi_gp/threedi_gp.h>
 #include <formats/threedi_gp/threedi_gp_migrate.h>
 
@@ -36,16 +31,9 @@ int cmd_migrate(const char *gp_path, const char *out_path, int region) {
 		std::fprintf(stderr, "%s: %s\n", gp_path, error.c_str());
 		return 1;
 	}
-	// The files beside the model, listed once, by name without case (a retail tree mixes cases).
-	std::filesystem::path folder = opennova::io::os_path(gp_path).parent_path();
-	if (folder.empty()) folder = ".";
-	std::set<std::string> beside;
-	std::error_code ec;
-	for (const auto &entry : std::filesystem::directory_iterator(folder, ec))
-		beside.insert(strutil::to_lower(opennova::io::utf8_path(entry.path().filename())));
 	opennova::threedi_gp::MigrateOptions options;
 	options.region = region;
-	options.texture_exists = [&beside](const std::string &name) { return beside.count(strutil::to_lower(name)) != 0; };
+	options.texture_exists = opennova::threedi_gp::names_beside(gp_path);
 	std::vector<uint8_t> out;
 	std::vector<opennova::threedi_gp::MigrateNote> notes;
 	if (!opennova::threedi_gp::migrate(file, out, notes, error, options)) {

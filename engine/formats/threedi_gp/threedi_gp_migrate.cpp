@@ -9,7 +9,14 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <map>
+#include <memory>
+#include <set>
+#include <system_error>
+
+#include <base/io/os_path.h>
+#include <base/io/strutil.h>
 
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
@@ -674,6 +681,9 @@ void collision(const File &gp, Assembled &a, Notes &notes) {
 	for (const CollisionSection &s : c.sections) {
 		ThreediCollisionObject o{};
 		o.unk0 = s.flags;
+		// JO's blast test breaks a section off by bit 0x2 [orig: Entity_ApplyWeaponDamage
+		// @0x4E6CD0 (Jointops)]; no BHD reader of the word was found (BHD's corpus holds 1).
+		if (s.flags & 0x2) notes.add("a collision section flagged 0x2 breaks off in a blast under JO (no BHD reader of the word)");
 		o.num_vertices = s.vertex_count;
 		o.num_faces = s.face_count;
 		o.num_normals = s.normal_count;
@@ -801,6 +811,16 @@ void occlusion(const File &gp, Assembled &a) {
 }
 
 } // namespace
+
+std::function<bool(const std::string &name)> names_beside(const std::string &file_path) {
+	auto names = std::make_shared<std::set<std::string>>();
+	std::filesystem::path folder = io::os_path(file_path).parent_path();
+	if (folder.empty()) folder = ".";
+	std::error_code ec;
+	for (std::filesystem::directory_iterator it(folder, ec), end; !ec && it != end; it.increment(ec))
+		names->insert(strutil::to_lower(io::utf8_path(it->path().filename())));
+	return [names](const std::string &name) { return names->count(strutil::to_lower(name)) != 0; };
+}
 
 bool migrate(const File &gp, std::vector<uint8_t> &out, std::vector<MigrateNote> &note_list, std::string &error,
 		const MigrateOptions &options) {
