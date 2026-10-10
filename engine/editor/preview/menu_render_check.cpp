@@ -71,12 +71,9 @@ std::string menu_note_message(const menu::MenuFrameNote &note) {
 	case Code::TypeUnknown:
 		return "The game does not know the window type " + quoted(s) +
 		       ", so it makes a plain window, which draws only its appearance and frame.";
-	case Code::TypeInteriorDeferred:
-		return "OpenNova does not draw what is inside a " + s + " yet (D-MNU-13); the preview shows it as a plain "
-		       "window.";
-	case Code::ItemKindNotDrawn:
-		return "OpenNova draws only the text rows of a list or a combo box yet (D-MNU-5), so this " + s +
-		       " row is not drawn.";
+	case Code::ItemKindAsText:
+		return "The game reads a list's or a combo box's " + s +
+		       " row as text: it keeps no image or colour, so the row draws the text written as its label.";
 	case Code::TableCellsDeferred:
 		return "OpenNova does not draw a table's " + s + " row images yet (D-MNU-13).";
 	case Code::TableCellsCustom:
