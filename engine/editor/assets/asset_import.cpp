@@ -429,12 +429,16 @@ private:
 		std::vector<uint8_t> bytes;
 		if (!read(source, name, bytes)) return;
 		// What the source becomes: a converter's outputs (the source is not kept), or
-		// the file itself.
+		// the file itself. A loose file is an author's source, and a file of the game install or an
+		// archive, or one a source marks native, the game's own, copied as the game reads it: an
+		// author's file's bytes choose its converter too (a GP model is migrated), the game's own
+		// goes by its name alone, as its plan does.
 		std::vector<ImportOutput> made;
-		const Converter *converter = converter_for(name);
+		const bool authored = !source.install && source.entry.empty() && !source.native;
+		const Converter *converter = converter_for(name, authored ? &bytes : nullptr);
 		if (converter) {
 			ImportProduct product;
-			converter->run(name, bytes, product);
+			converter->run(name, authored ? source.path : std::string(), bytes, product);
 			bool broken = false;
 			for (Diagnostic &d : product.diagnostics) {
 				broken = broken || d.severity == DiagnosticSeverity::Error;
@@ -448,9 +452,6 @@ private:
 		} else {
 			made.push_back({name, std::move(bytes)});
 		}
-		// A loose file from the disk is an author's source; a file of the game install or an
-		// archive, or one a source marks native, is the game's own, copied as the game reads it.
-		const bool authored = !source.install && source.entry.empty() && !source.native;
 		// An author's import source brings the files its import reads besides it (a font set's glyph
 		// sheet): each copied as it is to where the import reads it, beside the source, with no record of
 		// its own (import_source_inputs).
