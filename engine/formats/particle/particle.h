@@ -294,11 +294,79 @@ struct TableEditHandles {
 	int tightness = 0;
 };
 
+// A block of a .ptl, by the section line that opens it [orig: CEffectWorld_ParseSectionCallback @ 0x5ecb40]: an
+// [effectdef], a [particledef], a [tabledef], or the original editor's [tabledef_edithandles].
+enum class BlockKind : std::uint8_t { Effect, Particle, Table, Handles };
+
+// Where the text a ParticleFile was read from writes its blocks and their keys, as the parser counts lines
+// (1-based, a line ending at its LF). A block: its kind and its index among the file's blocks of that kind
+// (effects, particles, tables, table_handles), its section line, its closing brace's line and that line's
+// first byte. A key: its block, the key as written, its line, and its value as the reader takes it (after the
+// '=' and the blanks after it, before the ';'s and blanks ending the line), by its first byte and its length.
+// A value replaced there, the text read again, changes that key alone. The writers read none of them; the
+// OpenNova Editor's key panel does (ADR 0046 S23 B).
+struct BlockPlace {
+	BlockKind kind = BlockKind::Particle;
+	std::size_t index = 0;
+	int first_line = 0;
+	int last_line = 0;
+	std::size_t close_offset = 0;
+};
+struct KeyPlace {
+	BlockKind block = BlockKind::Particle;
+	std::size_t index = 0;
+	std::string key;
+	int line = 0;
+	std::size_t offset = 0;
+	std::size_t length = 0;
+};
+
+// What the reader takes a key's value as [orig: CParticleDef_ParseProperties @ 0x5ea320, its _atof (@0x76B6A1)
+// and j__atol (@0x76AB1B); FlagTable_ParseFromString @ 0x5df970; CParticleDefEntry_ParseBlendMode @ 0x5e29f0;
+// CParticleTableDef_ParseScriptLine @ 0x5e92b0]; the parser here reads each so (parser.cpp).
+enum class KeyValueKind : std::uint8_t {
+	Text,     // a name as written: an id, a child particle's id, a collision sound set
+	Real,     // a number, through atof
+	Whole,    // a number, through atol
+	Color,    // three bytes, red, green and blue, ',' between
+	Vector,   // three numbers through atof, x, y and z, ',' between
+	Flags,    // names of the particle flag table, blank-separated (particle_flag::*)
+	Move,     // names of the move table (move_flag::*)
+	Curve,    // a [tabledef]'s id, then "reverse", "inverse" or both
+	Graphic,  // a texture's name, then the blend mode's word (blend_mode_name)
+	Members,  // the effect's particles' ids, ',' between
+	TableRow, // eight bytes, ',' between
+};
+
+// A key the reader reads in a block of its kind: the key as the reader matches it, without case ('#' a graphic
+// layer's digit, 1 to 4; '*' a slot's number, collision sounds 0 to 19 and table rows 1 to 32), what it takes the
+// value as, and the range it clamps a whole number to, where it clamps one (a particle's emit_burst to at least 1
+// [orig: sub_5ed6c2]; a layer's flip_frames to 1..kMaxParticleFlipFrames, the bound the parser, the bake and the
+// renderer share; a byte's every value 0..255). `read`: false for a key the game's reader has no case for, which
+// only the writer writes (lod [orig: CParticleDef_SaveToFile @ 0x5e4d70]).
+struct KeyRow {
+	BlockKind block = BlockKind::Particle;
+	const char *key = "";
+	KeyValueKind value = KeyValueKind::Text;
+	bool clamped = false;
+	int min = 0;
+	int max = 0;
+	bool read = true;
+};
+// Every key the reader reads (and lod), in the writer's order within each block kind.
+const std::vector<KeyRow> &key_rows();
+// The row a key written in a block of `block` is (without case, a pattern's digits matched); null for a key the
+// reader keeps as unknown.
+const KeyRow *key_row(BlockKind block, std::string_view key);
+
 struct ParticleFile {
 	std::vector<EffectDef> effects;
 	std::vector<ParticleDef> particles;
 	std::vector<TableDef> tables;
 	std::vector<TableEditHandles> table_handles;
+	// Where a text wrote them (the reader's places, in the text's order; empty for a file not read from one).
+	std::vector<BlockPlace> block_places;
+	std::vector<KeyPlace> key_places;
 
 	const EffectDef *find_effect(std::string_view id) const noexcept;
 	const ParticleDef *find_particle(std::string_view id) const noexcept;

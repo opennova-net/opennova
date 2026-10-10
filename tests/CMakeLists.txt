@@ -2098,7 +2098,7 @@ add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
 # Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
         smoke_all_fixtures enum_parse writer_roundtrip curve_lut
-        lenient_lines effect_places)
+        lenient_lines effect_places key_places)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

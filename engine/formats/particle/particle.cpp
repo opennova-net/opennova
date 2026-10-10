@@ -286,4 +286,130 @@ void bake_particle_def_curves(ParticleDef &def,
 	}
 }
 
+// ------------------------------------------------------------ the reader's keys
+
+namespace {
+
+using K = KeyValueKind;
+using B = BlockKind;
+
+KeyRow row(B block, const char *key, K value) {
+	KeyRow r;
+	r.block = block;
+	r.key = key;
+	r.value = value;
+	return r;
+}
+
+KeyRow clamped(B block, const char *key, int min, int max) {
+	KeyRow r = row(block, key, K::Whole);
+	r.clamped = true;
+	r.min = min;
+	r.max = max;
+	return r;
+}
+
+// One '#' a graphic layer's digit (1..4), one trailing '*' a slot's number (its digits, `max` the last): the
+// patterns key_rows writes.
+bool key_matches(std::string_view pattern, std::string_view key, B block) {
+	size_t p = 0, k = 0;
+	while (p < pattern.size()) {
+		const char c = pattern[p];
+		if (c == '#') {
+			if (k >= key.size() || key[k] < '1' || key[k] > '4') return false;
+			++p;
+			++k;
+		} else if (c == '*') {
+			// The slot's digits to the key's end: collision sounds 0..19 [orig: the particle's 20 slots @ +3952],
+			// table rows 1..32 [orig: CParticleTableDef_ParseScriptLine @ 0x5e92b0].
+			if (k >= key.size()) return false;
+			int number = 0;
+			for (size_t i = k; i < key.size(); ++i) {
+				if (key[i] < '0' || key[i] > '9') return false;
+				number = number * 10 + (key[i] - '0');
+				if (number > 99) return false;
+			}
+			return block == B::Table ? number >= 1 && number <= 32 : number <= 19;
+		} else {
+			if (k >= key.size() || std::tolower(static_cast<unsigned char>(key[k])) != c) return false;
+			++p;
+			++k;
+		}
+	}
+	return k == key.size();
+}
+
+} // namespace
+
+// [orig: CParticleDef_ParseProperties @ 0x5ea320, the particle's and its graphic layers' keys;
+//  CEffectWorld_ParseSectionCallback @ 0x5ecb40, the effect's; CParticleTableDef_ParseScriptLine @ 0x5e92b0, a
+//  table's; the original editor's [tabledef_edithandles] its own]
+const std::vector<KeyRow> &key_rows() {
+	static const std::vector<KeyRow> rows = [] {
+		std::vector<KeyRow> r;
+		r.push_back(row(B::Effect, "id", K::Text));
+		r.push_back(row(B::Effect, "pdefs", K::Members));
+		r.push_back(row(B::Particle, "id", K::Text));
+		r.push_back(row(B::Particle, "child_id", K::Text));
+		r.push_back(row(B::Particle, "flags", K::Flags));
+		r.push_back(row(B::Particle, "move", K::Move));
+		KeyRow lod = row(B::Particle, "lod", K::Real);
+		lod.read = false;
+		r.push_back(lod);
+		for (const char *key : {"emit_dur", "emit_dur_adj", "emit_rate", "emit_rate_adj"})
+			r.push_back(row(B::Particle, key, K::Real));
+		r.push_back(row(B::Particle, "emit_rate_func", K::Curve));
+		r.push_back(row(B::Particle, "emit_delay", K::Real));
+		// [orig: sub_5ed6c2, a burst under 1 taken as 1]
+		KeyRow burst = clamped(B::Particle, "emit_burst", 1, 0x7FFFFFFF);
+		r.push_back(burst);
+		r.push_back(row(B::Particle, "emit_maxoverride", K::Whole));
+		r.push_back(row(B::Particle, "emit_shape", K::Whole));
+		r.push_back(row(B::Particle, "emit_shape_size", K::Vector));
+		r.push_back(row(B::Particle, "emit_shape_size_skip", K::Vector));
+		for (const char *key : {"y_offset", "z_offset", "age", "age_adj", "scale", "scale_adj"})
+			r.push_back(row(B::Particle, key, K::Real));
+		r.push_back(row(B::Particle, "scale_func", K::Curve));
+		r.push_back(row(B::Particle, "alpha", K::Real));
+		for (const char *key : {"alpha_func", "red_func", "green_func", "blue_func"})
+			r.push_back(row(B::Particle, key, K::Curve));
+		for (const char *key : {"color1", "color2", "color3", "color4"})
+			r.push_back(row(B::Particle, key, K::Color));
+		r.push_back(row(B::Particle, "bump_scale", K::Real));
+		r.push_back(row(B::Particle, "orientation", K::Vector));
+		r.push_back(row(B::Particle, "orientationadj", K::Vector));
+		for (const char *key : {"yaw_rot", "yaw_rot_adj", "pitch_rot", "pitch_rot_adj", "roll_rot", "roll_rot_adj",
+		                        "speed", "speed_adj", "elastic", "gravity"})
+			r.push_back(row(B::Particle, key, K::Real));
+		r.push_back(row(B::Particle, "gravity_mask", K::Vector));
+		for (const char *key : {"drag", "spread", "spread_skip", "orbitalspeed", "orbitalspeed_adj"})
+			r.push_back(row(B::Particle, key, K::Real));
+		r.push_back(row(B::Particle, "orbital_axis", K::Vector));
+		r.push_back(row(B::Particle, "collide_sound*", K::Text));
+		// A graphic layer's: its declaration, then its own keys over the particle's [orig:
+		// CParticleDefEntry_ParseGraphicProperty @ 0x5e3550].
+		r.push_back(row(B::Particle, "graphic#", K::Graphic));
+		r.push_back(clamped(B::Particle, "g#_flip_frames", 1, kMaxParticleFlipFrames));
+		r.push_back(row(B::Particle, "g#_flip_rate", K::Whole));
+		for (const char *key : {"g#_color1", "g#_color2", "g#_color3", "g#_color4"})
+			r.push_back(row(B::Particle, key, K::Color));
+		for (const char *key : {"g#_alpha", "g#_scale", "g#_scale_adj"}) r.push_back(row(B::Particle, key, K::Real));
+		for (const char *key : {"g#_scale_func", "g#_alpha_func", "g#_red_func", "g#_green_func", "g#_blue_func"})
+			r.push_back(row(B::Particle, key, K::Curve));
+		r.push_back(row(B::Table, "id", K::Text));
+		r.push_back(row(B::Table, "tl*", K::TableRow));
+		r.push_back(row(B::Handles, "tableid", K::Text));
+		r.push_back(row(B::Handles, "handlecount", K::Whole));
+		r.push_back(row(B::Handles, "tightness", K::Whole));
+		return r;
+	}();
+	return rows;
+}
+
+const KeyRow *key_row(BlockKind block, std::string_view key) {
+	for (const KeyRow &r : key_rows())
+		if (r.block == block && key_matches(r.key, key, block)) return &r;
+	return nullptr;
+}
+
 } // namespace opennova::particle
