@@ -179,6 +179,41 @@ int test_client_request_verify_result_returns_server_verify_result() {
 	return 0;
 }
 
+bool is_lower_hex(const std::string &s) {
+	for (const char c : s) {
+		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+	}
+	return !s.empty();
+}
+
+// The default SessIdString and GSID draw from the OS CSPRNG (base/os_random) in the
+// spelling they always had: the SessIdString 32 lower-hex digits, the GSID's random tail 16;
+// two sessions never share either.
+int test_default_ids_keep_their_format() {
+	LobbySession sess;
+	NapiMessage verify;
+	verify.name = "ClientRequestVerifyResult";
+	LobbyState first;
+	LobbyState second;
+	sess.dispatch(verify, first, "127.0.0.1", 32768);
+	sess.dispatch(verify, second, "127.0.0.1", 32769);
+	TEST_EXPECT(first.sess_id_string.size() == 32 && is_lower_hex(first.sess_id_string));
+	TEST_EXPECT(second.sess_id_string.size() == 32 && is_lower_hex(second.sess_id_string));
+	TEST_EXPECT(first.sess_id_string != second.sess_id_string);
+
+	LobbyState host_a;
+	LobbyState host_b;
+	sess.dispatch(make_retail_host_request("1234"), host_a, "10.0.0.1", 64500);
+	sess.dispatch(make_retail_host_request("1234"), host_b, "10.0.0.2", 64500);
+	TEST_EXPECT(host_a.gsid.rfind("GSID-10-000004d2-", 0) == 0);
+	const std::string tail_a = host_a.gsid.substr(host_a.gsid.rfind('-') + 1);
+	const std::string tail_b = host_b.gsid.substr(host_b.gsid.rfind('-') + 1);
+	TEST_EXPECT(tail_a.size() == 16 && is_lower_hex(tail_a));
+	TEST_EXPECT(tail_b.size() == 16 && is_lower_hex(tail_b));
+	TEST_EXPECT(tail_a != tail_b);
+	return 0;
+}
+
 int test_retail_host_request_returns_server_host_result_with_gsid() {
 	LobbySession sess;
 	sess.set_gsid_generator([](const std::string &app) {
@@ -649,6 +684,7 @@ int main() {
 	if (test_extract_var_lists_keeps_indexed_entries() != 0) return 1;
 	if (test_client_connected_returns_server_start_verify() != 0) return 1;
 	if (test_client_request_verify_result_returns_server_verify_result() != 0) return 1;
+	if (test_default_ids_keep_their_format() != 0) return 1;
 	if (test_retail_host_request_returns_server_host_result_with_gsid() != 0) return 1;
 	if (test_host_port_override_when_positive() != 0) return 1;
 	if (test_observed_source_is_game_endpoint() != 0) return 1;

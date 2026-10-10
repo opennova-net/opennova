@@ -9,9 +9,11 @@
 #include <random>
 
 using opennova::db::BindValue;
+using opennova::db::ConnectionPool;
 using opennova::db::Database;
 using opennova::db::run_migrations;
 using opennova::db::SqliteError;
+using opennova::db::Transaction;
 
 namespace {
 
@@ -92,6 +94,163 @@ int test_transaction_rollback() {
 	db.commit();
 	rows = db.query("SELECT COUNT(*) FROM t;");
 	TEST_EXPECT(rows[0].as_int(0).value() == 1);
+	return 0;
+}
+
+int count_rows(Database &db) {
+	return static_cast<int>(db.query("SELECT COUNT(*) FROM t;")[0].as_int(0).value());
+}
+
+int test_transaction_guard() {
+	Database db(":memory:");
+	db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY);");
+
+	// Destroyed uncommitted (an exception unwinding past it): rolled back.
+	{
+		Transaction tx(db);
+		db.exec("INSERT INTO t VALUES (1);");
+		TEST_EXPECT(db.in_transaction());
+	}
+	TEST_EXPECT(!db.in_transaction());
+	TEST_EXPECT(count_rows(db) == 0);
+
+	// A guard opened inside another is a savepoint: dropping it undoes only
+	// its own writes, committing it hands them to the outer transaction.
+	{
+		Transaction tx(db);
+		db.exec("INSERT INTO t VALUES (2);");
+		{
+			Transaction inner(db);
+			db.exec("INSERT INTO t VALUES (3);");
+		}
+		{
+			Transaction inner(db);
+			db.exec("INSERT INTO t VALUES (4);");
+			inner.commit();
+		}
+		TEST_EXPECT(db.in_transaction());
+		tx.commit();
+	}
+	TEST_EXPECT(!db.in_transaction());
+	auto rows = db.query("SELECT id FROM t ORDER BY id;");
+	TEST_EXPECT(rows.size() == 2);
+	TEST_EXPECT(rows[0].as_int(0).value() == 2);
+	TEST_EXPECT(rows[1].as_int(0).value() == 4);
+	return 0;
+}
+
+int test_shared_memory_uri_spans_connections() {
+	// The shared-cache URI is one in-memory database for every connection
+	// that names it, and each connection's last insert stays its own.
+	const char *uri = "file:db_sqlite_shared?mode=memory&cache=shared";
+	Database a(uri);
+	Database b(uri);
+	a.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT);");
+	a.exec("INSERT INTO t (name) VALUES ('alpha');");
+	b.exec("INSERT INTO t (name) VALUES ('bravo');");
+	TEST_EXPECT(a.last_insert_rowid() == 1);
+	TEST_EXPECT(b.last_insert_rowid() == 2);
+	TEST_EXPECT(count_rows(a) == 2);
+
+	// Plain ":memory:" is private to its connection.
+	Database private_a(":memory:");
+	Database private_b(":memory:");
+	private_a.exec("CREATE TABLE t (id INTEGER PRIMARY KEY);");
+	bool missing = false;
+	try {
+		private_b.query("SELECT COUNT(*) FROM t;");
+	} catch (const SqliteError &) {
+		missing = true;
+	}
+	TEST_EXPECT(missing);
+	return 0;
+}
+
+int test_connection_pool() {
+	ConnectionPool pool("file:db_sqlite_pool?mode=memory&cache=shared");
+	Database *first = nullptr;
+	Database *second = nullptr;
+	{
+		// Two holders at once get two connections to one database.
+		auto a = pool.acquire();
+		auto b = pool.acquire();
+		first = a.get();
+		second = b.get();
+		TEST_EXPECT(first != second);
+		a->exec("CREATE TABLE t (id INTEGER PRIMARY KEY);");
+		b->exec("INSERT INTO t VALUES (7);");
+		TEST_EXPECT(count_rows(*a) == 1);
+		// Every connection waits out a busy writer instead of failing.
+		TEST_EXPECT(b->query("PRAGMA busy_timeout;")[0].as_int(0).value() == 5000);
+		// A transaction left open goes back rolled back.
+		b->begin();
+		b->exec("INSERT INTO t VALUES (8);");
+	}
+	{
+		// Released connections are reused, not reopened, and none comes back
+		// with a transaction open.
+		auto c = pool.acquire();
+		auto d = pool.acquire();
+		TEST_EXPECT(c.get() == first || c.get() == second);
+		TEST_EXPECT(d.get() == first || d.get() == second);
+		TEST_EXPECT(!c->in_transaction() && !d->in_transaction());
+		TEST_EXPECT(count_rows(*c) == 1);
+	}
+
+	// A pool over a path that opens a private database per connection would
+	// hand every holder its own empty one; each spelling of that is refused.
+	auto refused = [](const char *path) {
+		try {
+			ConnectionPool private_pool(path);
+		} catch (const SqliteError &) {
+			return true;
+		}
+		return false;
+	};
+	TEST_EXPECT(refused(":memory:"));
+	TEST_EXPECT(refused(""));
+	TEST_EXPECT(refused("file::memory:"));
+	TEST_EXPECT(refused("file:db_sqlite_private?mode=memory"));
+	TEST_EXPECT(refused("file:db_sqlite_private?mode=memory&cache=private"));
+	TEST_EXPECT(refused("file:?mode=memory&cache=shared"));
+	TEST_EXPECT(!refused("file::memory:?cache=shared"));
+	TEST_EXPECT(!refused("file:db_sqlite_named?cache=shared&mode=memory"));
+	TEST_EXPECT(!refused("file:state.db"));
+	TEST_EXPECT(!refused("state.db"));
+	return 0;
+}
+
+int test_read_snapshot() {
+	// A WAL file: one connection's snapshot holds still while another commits.
+	auto dir = scratch_dir();
+	{
+		Database reader(dir / "state.db");
+		Database writer(dir / "state.db");
+		writer.exec("CREATE TABLE t (id INTEGER PRIMARY KEY);");
+		writer.exec("INSERT INTO t VALUES (1);");
+		{
+			opennova::db::ReadSnapshot snapshot(reader);
+			TEST_EXPECT(reader.in_transaction());
+			TEST_EXPECT(count_rows(reader) == 1);
+			writer.exec("INSERT INTO t VALUES (2);"); // takes no lock the snapshot holds
+			TEST_EXPECT(count_rows(reader) == 1);
+		}
+		TEST_EXPECT(!reader.in_transaction());
+		TEST_EXPECT(count_rows(reader) == 2);
+
+		// Inside an open transaction it leaves that transaction to end it.
+		{
+			Transaction tx(reader);
+			{
+				opennova::db::ReadSnapshot snapshot(reader);
+				TEST_EXPECT(count_rows(reader) == 2);
+			}
+			TEST_EXPECT(reader.in_transaction());
+			tx.commit();
+		}
+		TEST_EXPECT(!reader.in_transaction());
+	}
+	std::filesystem::remove_all(dir);
 	return 0;
 }
 
@@ -196,9 +355,13 @@ int main() {
 	if (test_null_and_blob() != 0) return 1;
 	if (test_error_throws_with_context() != 0) return 1;
 	if (test_transaction_rollback() != 0) return 1;
+	if (test_transaction_guard() != 0) return 1;
+	if (test_shared_memory_uri_spans_connections() != 0) return 1;
+	if (test_connection_pool() != 0) return 1;
+	if (test_read_snapshot() != 0) return 1;
 	if (test_migrations_apply_then_skip() != 0) return 1;
 	if (test_migrations_rollback_on_error() != 0) return 1;
 	if (test_migrations_no_dir_is_not_an_error() != 0) return 1;
-	std::printf("OK: SQLite wrapper + migration runner (apply/skip/rollback)\n");
+	std::printf("OK: SQLite wrapper, transactions, read snapshots, connection pool + migration runner\n");
 	return 0;
 }

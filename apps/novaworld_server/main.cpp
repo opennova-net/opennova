@@ -24,6 +24,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <thread>
 #include <cstdlib>
@@ -33,10 +35,21 @@ namespace {
 
 std::atomic<bool> g_shutdown{false};
 
-void on_signal(int) {
+// The first signal starts the orderly shutdown; the handler then puts the
+// default action back, so a second one ends the process even when that
+// shutdown is stuck. Both calls are signal-safe: a lock-free atomic store, and
+// std::signal for the signal being handled. (Windows' CRT resets a handler to
+// SIG_DFL before calling it anyway, so a second Ctrl+C there already ended the
+// process; the reset brings POSIX to the same behavior.)
+void on_signal(int sig) {
 	g_shutdown.store(true);
+	std::signal(sig, SIG_DFL);
 }
 
+// main() alone owns SIGINT and SIGTERM (Ctrl+C; `docker stop` sends SIGTERM):
+// the handler raises g_shutdown (and restores the default action, above), and
+// the tick loop then runs the orderly shutdown. The HTTP listener keeps Crow's
+// own signal handling off both.
 void install_signal_handlers() {
 	std::signal(SIGINT,  on_signal);
 	std::signal(SIGTERM, on_signal);
@@ -119,16 +132,25 @@ int main() {
 	if (auto parent = config.database_path.parent_path(); !parent.empty()) {
 		std::filesystem::create_directories(parent);
 	}
-	std::unique_ptr<db::Database> dbh;
+	// Every thread that touches the database owns its connection (Database is
+	// single-threaded): this thread, the gate's and the NW UDP listener's
+	// receive threads each hold one for their lifetime (the listeners lease
+	// theirs in start(), which fails the boot when the open does); each HTTP
+	// request and each erase_lobby_state call leases one for the call. The pool
+	// outlives every listener (declared first, destroyed last).
+	std::unique_ptr<db::ConnectionPool> db_pool;
+	std::optional<db::ConnectionPool::Lease> main_lease;
 	try {
-		dbh = std::make_unique<db::Database>(config.database_path);
+		db_pool = std::make_unique<db::ConnectionPool>(config.database_path);
+		main_lease.emplace(db_pool->acquire());
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[boot] FATAL: open db failed: %s\n", e.what());
 		return 1;
 	}
+	db::Database &dbh = **main_lease;
 
 	try {
-		auto r = db::run_migrations(*dbh, config.migrations_dir);
+		auto r = db::run_migrations(dbh, config.migrations_dir);
 		std::printf("[boot] migrations: %zu applied, %zu skipped\n",
 		            r.applied.size(), r.skipped.size());
 	} catch (const db::SqliteError &e) {
@@ -136,7 +158,7 @@ int main() {
 		return 1;
 	}
 
-	apply_seed(*dbh, config.seed_dir, config.seed_dev_users);
+	apply_seed(dbh, config.seed_dir, config.seed_dev_users);
 
 	// --- Connection manager (shared across listeners) ---------------------
 	ConnectionManager manager(config.heartbeat_timeout_ms);
@@ -153,14 +175,14 @@ int main() {
 	// --- Listeners --------------------------------------------------------
 	GateListener gate;
 	gate.set_unknown_tracker(&unknown_tracker);
-	gate.set_database(dbh.get());
+	gate.set_db_pool(db_pool.get());
 	if (!gate.start(config)) {
 		std::fprintf(stderr, "[boot] FATAL: gate listener start failed\n");
 		return 1;
 	}
 
 	NwUdpListener nwudp(manager);
-	nwudp.set_database(dbh.get());
+	nwudp.set_db_pool(db_pool.get());
 	// The endpoint advertised to joiners uses the client's NOVAWORLD session port
 	// (client_reflect_novaworld_port, 32768), NOT the gate port
 	// (client_reflect_gate_port, 49152 — that's only the gate's
@@ -172,14 +194,14 @@ int main() {
 	// surviving retail process will fail anyway, so its prior row is
 	// dead state).
 	try {
-		hostdb::clear_all(*dbh);
+		hostdb::clear_all(dbh);
 		std::printf("[boot] active_hosts + host_players cleared (previous-run cleanup)\n");
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[boot] WARN active_hosts clear: %s\n", e.what());
 	}
 #ifdef OPENNOVA_HTTP_ENABLED
 	try {
-		clear_all_active_user_sessions(*dbh);
+		clear_all_active_user_sessions(dbh);
 		std::printf("[boot] active_user_sessions cleared (previous-run cleanup)\n");
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[boot] WARN active_user_sessions clear: %s\n", e.what());
@@ -205,7 +227,7 @@ int main() {
 
 #ifdef OPENNOVA_HTTP_ENABLED
 	SessionStore sessions;
-	HttpListener http(manager, *dbh, sessions);
+	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
 	if (!http.start(config)) {
 		std::fprintf(stderr, "[boot] FATAL: HTTP listener start failed\n");
@@ -232,7 +254,7 @@ int main() {
 		// Flush any unknown-message sightings the listener threads recorded
 		// since the last tick into unknown_messages (deduped upsert).
 		try {
-			unknown_tracker.flush(*dbh);
+			unknown_tracker.flush(dbh);
 		} catch (const db::SqliteError &e) {
 			std::fprintf(stderr, "[tick] WARN unknown_tracker flush: %s\n", e.what());
 		}
@@ -243,7 +265,7 @@ int main() {
 			last_host_sweep_ms = now;
 			try {
 				const int pruned = hostdb::prune_stale_hosts(
-					*dbh, static_cast<int64_t>(config.host_stale_window_ms / 1000));
+					dbh, static_cast<int64_t>(config.host_stale_window_ms / 1000));
 				if (pruned > 0) {
 					std::printf("[sweep] pruned %d stale host row(s)\n", pruned);
 				}
@@ -253,6 +275,11 @@ int main() {
 		}
 	}
 
+	// The HTTP listener first (Crow's threads joined: no request still holds a
+	// lease), then the gate and NW UDP receive threads (each returns its lease
+	// as it exits), then the connections. As main() returns, its locals are
+	// destroyed in reverse declaration order, so main_lease and then the pool
+	// (declared first) go last; the last close checkpoints the WAL.
 	std::printf("[shutdown] stopping listeners\n");
 #ifdef OPENNOVA_HTTP_ENABLED
 	http.stop();

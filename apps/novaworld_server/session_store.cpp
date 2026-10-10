@@ -1,5 +1,7 @@
 #include "session_store.h"
 
+#include <base/os_random/os_random.h>
+
 #include <chrono>
 #include <cstdio>
 #include <random>
@@ -18,7 +20,7 @@ uint64_t now_ms() {
 } // namespace
 
 std::string SessionStore::generate_tag(const std::string &dll_name) {
-	static thread_local std::mt19937_64 gen{std::random_device{}()};
+	OsRandom gen; // the OS CSPRNG (base/os_random)
 	std::uniform_int_distribution<int> rand5(0, 99999);
 	std::uniform_int_distribution<uint32_t> hex8;
 	char buf[160];

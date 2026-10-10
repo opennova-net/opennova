@@ -108,16 +108,22 @@ std::vector<HostRow> query_hosts(opennova::db::Database &db, const std::string &
 } // namespace
 
 void clear_all(opennova::db::Database &db) {
+	opennova::db::Transaction tx(db);
 	db.exec("DELETE FROM host_roster;");
 	db.exec("DELETE FROM host_players;");
 	db.exec("DELETE FROM active_hosts;");
+	tx.commit();
 }
 
 void upsert_host(opennova::db::Database &db, const HostRow &h) {
 	auto binds = host_binds(h);
 	binds.insert(binds.begin(), i64(h.rid));
+	// An upsert, not INSERT OR REPLACE: a replace deletes the old row, and
+	// the delete cascades the host's host_players and host_roster rows away,
+	// so a re-sent ClientHostRequest dropped every joined player. The row
+	// keeps its created_at (the browser order) and its children.
 	db.exec(
-		"INSERT OR REPLACE INTO active_hosts ("
+		"INSERT INTO active_hosts ("
 		" rid, gsid, game, app_id, server_name, host_ip, host_port,"
 		" host_key, pcid_key, player_count, max_players, region,"
 		" game_type, mission_name, country, password, locked, dedicated, stat,"
@@ -126,7 +132,24 @@ void upsert_host(opennova::db::Database &db, const HostRow &h) {
 		" skins, tracers, pix,"
 		" host_user_id, peer_ip, peer_port, updated_at) "
 		"VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-		"CURRENT_TIMESTAMP);",
+		"CURRENT_TIMESTAMP) "
+		"ON CONFLICT(rid) DO UPDATE SET"
+		" gsid=excluded.gsid, game=excluded.game, app_id=excluded.app_id,"
+		" server_name=excluded.server_name, host_ip=excluded.host_ip,"
+		" host_port=excluded.host_port, host_key=excluded.host_key,"
+		" pcid_key=excluded.pcid_key, player_count=excluded.player_count,"
+		" max_players=excluded.max_players, region=excluded.region,"
+		" game_type=excluded.game_type, mission_name=excluded.mission_name,"
+		" country=excluded.country, password=excluded.password,"
+		" locked=excluded.locked, dedicated=excluded.dedicated, stat=excluded.stat,"
+		" exp=excluded.exp, exp_bits=excluded.exp_bits, ver1=excluded.ver1,"
+		" joicon2=excluded.joicon2, time_left=excluded.time_left,"
+		" time_of_day=excluded.time_of_day, msg=excluded.msg, mod=excluded.mod,"
+		" age=excluded.age, pb_server=excluded.pb_server,"
+		" level_range=excluded.level_range, bb_mode=excluded.bb_mode,"
+		" skins=excluded.skins, tracers=excluded.tracers, pix=excluded.pix,"
+		" host_user_id=excluded.host_user_id, peer_ip=excluded.peer_ip,"
+		" peer_port=excluded.peer_port, updated_at=CURRENT_TIMESTAMP;",
 		binds);
 }
 
@@ -181,6 +204,9 @@ void remove_player_by_peer(opennova::db::Database &db,
 
 void replace_roster(opennova::db::Database &db, uint32_t host_rid,
                     const std::vector<HostRosterSlot> &roster) {
+	// One transaction, so a reader on another connection never sees the
+	// roster between the delete and the last insert (partial or empty).
+	opennova::db::Transaction tx(db);
 	db.exec("DELETE FROM host_roster WHERE host_rid=?;", {i64(host_rid)});
 	for (const auto &s : roster) {
 		db.exec(
@@ -190,6 +216,7 @@ void replace_roster(opennova::db::Database &db, uint32_t host_rid,
 			{i64(host_rid), i64(s.slot), str(s.player_name), str(s.ip_and_port),
 			 str(s.pcid), str(s.team), str(s.type)});
 	}
+	tx.commit();
 }
 
 std::vector<HostRosterSlot> list_roster(opennova::db::Database &db, uint32_t host_rid) {
@@ -214,6 +241,10 @@ std::vector<HostRosterSlot> list_roster(opennova::db::Database &db, uint32_t hos
 
 bool apply_status_blob(opennova::db::Database &db, const LobbyStatusBlob &blob) {
 	if (blob.host_key.empty()) return false;
+	// One transaction for the read-modify-write: the row and its roster change
+	// together, and no ClientHostUpdate can commit between this read and this
+	// write (and be overwritten with the columns the read saw).
+	opennova::db::Transaction tx(db);
 	auto host = find_host_by_key(db, blob.host_key);
 	if (!host) return false;
 	HostRow h = *host;
@@ -257,6 +288,7 @@ bool apply_status_blob(opennova::db::Database &db, const LobbyStatusBlob &blob) 
 		}
 		replace_roster(db, h.rid, roster);
 	}
+	tx.commit();
 	return true;
 }
 

@@ -53,9 +53,11 @@ struct PcidBanList {
 	std::vector<PcidBan> entries;
 };
 
-// String_TokenizeQuoted: white space (the C locale's isspace) separates tokens outside
-// quotes, a `"` toggles a quoted run and is dropped, a backslash copies as itself.
-// [orig: String_TokenizeQuoted @0x4DB000]
+// String_TokenizeQuoted: white space separates tokens outside quotes, a `"` toggles a quoted
+// run and is dropped, a backslash copies as itself. The white space is the CRT isspace under
+// the game's ".ACP" LC_CTYPE, pinned to cp1252: the six C-locale spaces plus 0xA0
+// (docs/net/novaworld-net-re.md D-NET-381, D-NET-382).
+// [orig: String_TokenizeQuoted @0x4DB000 — isspace @0x4DB046]
 std::vector<std::string> tokenize_quoted(std::string_view line);
 
 // LinkedList_AddEntry: appends at the tail; false (nothing added) for an empty PCID.

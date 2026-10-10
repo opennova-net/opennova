@@ -52,6 +52,23 @@ inline constexpr bool cp1252_encode_codepoint(char32_t p_codepoint, std::uint8_t
 	return false;
 }
 
+// The CRT `isspace` as the game runs it: WinMain's System_InitTimerAndLocale sets LC_ALL to
+// ".ACP" and only LC_NUMERIC back to "C", so the CRT classes bytes by the host's ANSI code page
+// (its ctype table is that page's C1_SPACE set), not the C locale. The parity target is cp1252,
+// the code page of JO's audience: the six C-locale spaces (0x09..0x0D, 0x20) plus 0xA0, the
+// no-break space. Every Windows single-byte ANSI page (874, 1250..1258) classes the same seven
+// bytes; a double-byte or UTF-8-ACP host's set is not modeled: on a double-byte page the lead
+// bytes differ, and the CRT refuses an ACP of 65000 / 65001, so ".ACP" fails there and the C
+// locale's six stay (docs/net/novaworld-net-re.md D-NET-382).
+// [orig: System_InitTimerAndLocale @0x762a00 — setlocale(LC_ALL, ".ACP") @0x762a6e,
+//  setlocale(LC_NUMERIC, "C") @0x762a7a; isspace @0x76b964 -> _isspace_l @0x76b915 (the
+//  locale's pctype & _SPACE); CRT_init_ctype @0x784a07 (the table from __crtGetStringTypeA
+//  CT_CTYPE1 over the page's 256 bytes); ___get_qualified_locale's UTF-7 / UTF-8 refusals
+//  @0x785592 / @0x78559e]
+inline constexpr bool cp1252_isspace(std::uint8_t p_byte) noexcept {
+	return p_byte == 0x20 || (p_byte >= 0x09 && p_byte <= 0x0D) || p_byte == 0xA0;
+}
+
 // Strict UTF-8 well-formedness (no overlong forms, no surrogates, at most U+10FFFF).
 inline bool is_valid_utf8(std::string_view s) noexcept {
 	size_t i = 0;

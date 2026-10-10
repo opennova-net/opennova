@@ -661,7 +661,11 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
     size_t string_offset = kHeaderSize + entry_table.size();
     size_t blob_length = string_blob.size();
 
-    // Use preserved XOR key for byte-for-byte roundtrip, or generate random
+    // Use preserved XOR key for byte-for-byte roundtrip, or generate random.
+    // The fresh key is written in the clear in the header below, so it only
+    // obfuscates and is neither a secret nor an id: engine/CLAUDE.md's one
+    // std::random_device exception to the OS-CSPRNG rule (formats cannot link
+    // base/os_random).
     uint32_t xor_key;
     if (credits.xor_key != 0) {
         xor_key = credits.xor_key;

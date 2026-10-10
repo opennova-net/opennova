@@ -105,7 +105,6 @@ int main() {
 		std::fprintf(stderr, "FAIL: listener.start\n");
 		return 1;
 	}
-	std::this_thread::sleep_for(50ms);
 
 	opennova::ClientSession::Config cfg;
 	cfg.client_index = 0x52455345u;
