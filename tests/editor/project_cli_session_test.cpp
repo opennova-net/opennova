@@ -304,7 +304,8 @@ static int test_verb_table() {
 		TEST_EXPECT(error.empty() && (args.is_null() || args.is_object()));
 		++queries;
 	}
-	TEST_EXPECT(kCliVerbCount == 12 && queries == 9 && requests >= 2 * kCliVerbCount); // new-terrain (S20), mv (DI-03)
+	// new-terrain (S20), mv (DI-03), and the chores' rm, cp, mkdir, rename-folder, rmdir and empty-trash (DI-25).
+	TEST_EXPECT(kCliVerbCount == 18 && queries == 9 && requests >= 2 * kCliVerbCount);
 	TEST_EXPECT(cli_verb_row(CliVerb::Request).answer == CliAnswer::Request &&
 	            cli_verb_row(CliVerb::Query).answer == CliAnswer::NamedQuery);
 	const Ran usage = run(dir.root(), { "--help" });
@@ -698,8 +699,8 @@ static int test_install() {
 
 // validate exits as a build would (the build_gate query): an error the build does not gate on (a
 // project check's, after the gate since S13 V9) is listed and fails nothing, the build going
-// through; the build's own check of the files, which no Problems row shows (an archive in the
-// project), fails it and is said before the verdict, the build refused too.
+// through; the build's own check of the files (a name no archive stores) fails it and is said before
+// the verdict, the build refused too; an archive in the project is listed, the build leaving it out.
 static int test_validate_follows_the_gate() {
 	editor_test::TempProjectDir dir("opennova_project_cli_gate");
 	const std::string scratch = dir.root(), root = dir.file("Gate");
@@ -720,10 +721,16 @@ static int test_validate_follows_the_gate() {
 		TEST_EXPECT(run(scratch, { "build", root }).code == 0);
 	}
 	TEST_EXPECT(write_archive(root + "/extra.pff", "note.txt", "x"));
+	{
+		const Ran listed = run(scratch, { "validate", root });
+		TEST_EXPECT(listed.code == 0);
+		TEST_EXPECT(listed.out.find("warning build.archive_in_project: extra.pff is an archive") != std::string::npos);
+	}
+	TEST_EXPECT(editor_test::write_text(root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
 	const Ran ran = run(scratch, { "validate", root });
 	TEST_EXPECT(ran.code == 1);
-	TEST_EXPECT(ran.out.find("error build.archive_in_project: extra.pff is an archive") != std::string::npos);
-	TEST_EXPECT(ran.out.find("not ok: 1 finding blocks a build\n") != std::string::npos);
+	TEST_EXPECT(ran.out.find("error build.name_unstorable: The game cannot store a_name_far_too_long.wac") != std::string::npos);
+	TEST_EXPECT(ran.out.find("not ok: 2 findings block a build\n") != std::string::npos);
 	TEST_EXPECT(run(scratch, { "build", root }).code == 1);
 	return 0;
 }

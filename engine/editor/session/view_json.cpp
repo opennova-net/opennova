@@ -43,6 +43,8 @@ const char *requirement_state_token(RequirementState state) {
 			return "missing";
 		case RequirementState::WrongKind:
 			return "wrong_kind";
+		case RequirementState::Served:
+			return "served";
 	}
 	return "missing";
 }
@@ -144,6 +146,7 @@ JsonValue requirements_section(const SessionView &view) {
 	out.set("total", json_number(double(report.required_total)));
 	out.set("missing", json_number(double(report.required_missing)));
 	out.set("wrong_kind", json_number(double(report.required_wrong_kind)));
+	out.set("served", json_number(double(report.required_served)));
 	JsonValue rows = JsonValue::make_array();
 	for (const RequirementRow &row : report.rows) {
 		JsonValue entry = JsonValue::make_object();
@@ -170,7 +173,7 @@ JsonValue requirements_section(const SessionView &view) {
 JsonValue documents_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("active", json_string(view.documents.active));
-	// The file whose page shows beside the documents (the file_page query reads it), where one does, and
+	// The file whose page shows beside the documents (the file_card query reads it), where one does, and
 	// what the Go to that showed it named on it (DI-17: the record's line it marks).
 	if (!view.documents.page.empty()) {
 		out.set("page", json_string(view.documents.page));
@@ -544,7 +547,7 @@ constexpr ViewSectionRow kSections[] = {
 			documents_section,
 			"The open documents in short (path, kind, dirty, revision, can_undo, can_redo; the "
 			"documents query answers each whole) and the active one; page, the file whose page shows "
-			"(file_page answers it), with page_locator and page_field, the record and field the Go to "
+			"(file_card answers it), with page_locator and page_field, the record and field the Go to "
 			"that showed it marked there." },
 	{ S::Selection, "selection", concern_set({ C::Selection }), selection_section,
 			"The selection in the active document, over any of its rows: its primary record and "
@@ -603,7 +606,7 @@ constexpr ViewSectionRow kSections[] = {
 			"(build_result {open}), the new-project form (new_project {open: File > New project...'s modal, title, "
 			"dir, game_install as the form shows it, install_named, builds_on, as_expansion, expansion}), Project "
 			"settings (settings {open, and while open its fields}), the New file prompt (new_file {kind, \"\" "
-			"closed, name, values, folder}), Rename... (file_rename {path, name}), Delete... (file_delete {path, alone}, DI-25), "
+			"closed, name, values, folder}), Rename... (file_rename {path, name}), Delete... (file_delete {path, alone, paths}, DI-25), "
 			"Rename everywhere (rename {open, path, "
 			"locator, field, old_name, kind, name}) and Rename back (rename_back {open}), the find bar (find {open, "
 			"text, match_case}), the project's finder (project_find {open, text, scope: all for Find in project, files "

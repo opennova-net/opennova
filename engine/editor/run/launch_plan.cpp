@@ -324,7 +324,7 @@ bool stage_expansion_folder(const fs::path &build, const fs::path &run, const st
 
 bool prepare_expansion_run(const std::string &install, const std::string &build_dir, const std::string &expansion,
                            const std::string &run_dir, const std::string &copy_cache, Diagnostic &error,
-                           const FileLink &link, std::vector<std::string> *staged_files) {
+                           const FileLink &link, std::vector<std::string> *staged_files, bool seed_root_reads) {
 	std::error_code ec;
 	if (install.empty() || !fs::is_directory(system_path(install), ec)) {
 		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
@@ -394,7 +394,7 @@ bool prepare_expansion_run(const std::string &install, const std::string &build_
 		if (!packs(loose)) base.push_back(loose);
 	std::vector<std::string> seeds;
 	for (const char *read : kInstallRootReads) {
-		const std::string found = file_named(install, read);
+		const std::string found = seed_root_reads ? file_named(install, read) : std::string();
 		if (!found.empty() && file_named(run_dir, read).empty()) seeds.push_back(found);
 	}
 	bool ok = true;
@@ -580,24 +580,15 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 	return true;
 }
 
-Diagnostic strict_expansion_refusal(const std::string &expansion) {
-	return make_finding(CoreFinding::PlayStrictExpansion, DiagnosticSeverity::Error,
-	                    "Strict Play of an expansion needs its base game's build: the project builds as the expansion " +
-	                            expansion + " on the game install's base game, whose own archives it would play over. "
-	                            "Name the base game's project in File > Project settings... (ADR 0046 T5), or turn "
-	                            "Strict off to play it over the game install.");
-}
-
 bool prepare_strict_install_launch_plan(const std::string &install, const std::string &build_dir,
                                         const std::string &run_dir, const std::string &expansion, LaunchPlan &out,
-                                        Diagnostic &error, const FileLink &link, const std::string &base_game) {
+                                        Diagnostic &error, const FileLink &link, const std::string &base_game,
+                                        const std::string &copy_cache) {
 	out = LaunchPlan();
-	if (!expansion.empty() && (base_game.empty() || base_game == install)) {
-		error = strict_expansion_refusal(expansion);
-		return false;
-	}
+	// The install's own base game: the stock game's /exp from its install (prepare_expansion_run's base).
+	const bool on_install = !expansion.empty() && (base_game.empty() || base_game == install);
 	std::error_code base_ec;
-	if (!expansion.empty() && !fs::is_directory(system_path(base_game), base_ec)) {
+	if (!expansion.empty() && !on_install && !fs::is_directory(system_path(base_game), base_ec)) {
 		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
 		                     "The expansion " + expansion + " plays over its base game's export, and there is none at " +
 		                             base_game + ": export the base game's project first.");
@@ -622,24 +613,33 @@ bool prepare_strict_install_launch_plan(const std::string &install, const std::s
 		                     "The game install has no " + utf8_of(source));
 		return false;
 	}
+	if (on_install) {
+		// The base game and the expansion's folder as prepare_expansion_run stages them for lenient Play,
+		// none of the files the game reads by name: the install's archives and its loose files (a file the
+		// expansion packs left out), then the build's expansion/<b>/.
+		if (!prepare_expansion_run(install, build_dir, expansion, run_dir, copy_cache, error, link, &out.staged,
+		                           /*seed_root_reads=*/false))
+			return false;
+	}
 	// Every file of the build but its record (a game.cfg among them is the project's own). An expansion's
 	// build holds its folder alone (expansion/<b>/), which plays over its base game's export (T5): every file
 	// of that folder but the export's and the build's records, the base game as a player's folder holds it,
 	// then the expansion's folder beside it.
 	const fs::path files_from = expansion.empty() ? build : path_of(base_game);
 	std::vector<std::string> built;
-	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(utf8_of(files_from)), ec)) {
-		std::error_code kind;
-		const std::string name = utf8_of(entry.path().filename());
-		if (entry.is_regular_file(kind) && name != kBuildRecordFileName && name != kExportRecordFileName)
-			built.push_back(name);
-	}
+	if (!on_install)
+		for (const fs::directory_entry &entry : fs::directory_iterator(system_path(utf8_of(files_from)), ec)) {
+			std::error_code kind;
+			const std::string name = utf8_of(entry.path().filename());
+			if (entry.is_regular_file(kind) && name != kBuildRecordFileName && name != kExportRecordFileName)
+				built.push_back(name);
+		}
 	if (ec) {
 		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
 		                     "Could not read " + utf8_of(files_from) + ": " + ec.message());
 		return false;
 	}
-	if (!expansion.empty() && install_archives(base_game).empty()) {
+	if (!expansion.empty() && !on_install && install_archives(base_game).empty()) {
 		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
 		                     "The base game's export " + base_game + " has none of the game's archives for the expansion " +
 		                             expansion + " to play over: export the base game's project first.");
@@ -653,8 +653,9 @@ bool prepare_strict_install_launch_plan(const std::string &install, const std::s
 	}
 	// Both staged in place of what the run kept under their names; nothing of the install seeded: the game
 	// writes its own configuration and saves, which the run directory keeps for the next strict Play.
-	if (!stage_build_files(files_from, run, built, link, error, &out.staged)) return false;
-	if (!expansion.empty() && !stage_expansion_folder(build, run, folder, link, error, &out.staged)) return false;
+	if (!on_install && !stage_build_files(files_from, run, built, link, error, &out.staged)) return false;
+	if (!expansion.empty() && !on_install && !stage_expansion_folder(build, run, folder, link, error, &out.staged))
+		return false;
 	for (const auto &[source, name] : staged) {
 		std::string reason;
 		add_staged(&out.staged, path_of(name));
