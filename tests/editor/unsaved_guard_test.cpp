@@ -106,6 +106,12 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		request.folder = folder_of_path(dirty.extra);
 		request.new_name = "renamed_folder";
 		break;
+	// A folder deleted with what it holds: extra.mnu's.
+	case EditorRequestKind::DeleteFolder:
+		request.folder = folder_of_path(dirty.extra);
+		request.all = true;
+		request.force = true;
+		break;
 	case EditorRequestKind::RedoFile: {
 		dirty.session.handle(request::save(dirty.extra));
 		editor_test::handle_to_end(dirty.session, request::delete_asset(dirty.extra, true));
@@ -220,8 +226,9 @@ static int test_guard_column_is_the_prompt() {
 		TEST_EXPECT(prompt.target == (row.guard == GuardScope::Document ? dirty.extra : named));
 	}
 	// Export (S16) guards as Build does; a texture's split (S18) and a move (DI-03) as a rename does.
-	// DI-25: a delete, a duplicate, a folder's rename and the file history's undo and redo too.
-	TEST_EXPECT(prompted == 21 && went_ahead == kEditorRequestKindCount - 21);
+	// DI-25: a delete, a duplicate, a folder's rename, a folder's delete with what it holds and the file history's
+	// undo and redo too.
+	TEST_EXPECT(prompted == 22 && went_ahead == kEditorRequestKindCount - 22);
 	return 0;
 }
 

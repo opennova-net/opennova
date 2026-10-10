@@ -918,7 +918,8 @@ StyleVariableUse style_variable_use(ReferenceKind through) {
 
 bool blocks_build(const Diagnostic &d) {
 	if (d.severity != DiagnosticSeverity::Error) return false;
-	if (!d.row() || d.row()->gates_build) return true;
+	// A row whose file does not serialize may gate: where the build must write the file (ShippedFiles).
+	if (!d.row() || d.row()->gates_build || d.row()->blocks_save) return true;
 	// A listed code gates where its subject names the game's refusal: a reference (missing, or naming
 	// a file its loader does not load) of a kind whose row cites it; a required file whose manifest
 	// row is the boot's refusal [orig: Game_InitSubsystems @ 0x4a6fed, the string tables' MessageBox and
@@ -984,7 +985,11 @@ bool ShippedFiles::has(const std::string &asset) const {
 
 bool blocks_build(const Diagnostic &d, const BaseNames *base, const ShippedFiles *shipped) {
 	if (!blocks_build(d, base)) return false;
-	return !(shipped && d.row() && d.row()->blocks_save && shipped->has(d.asset));
+	if (!d.row() || !d.row()->blocks_save) return true;
+	// A listed code's (unwritable_code: the game reads the file on): only an open document with unsaved edits,
+	// which the build's Save cannot write; a closed file packs as stored.
+	if (!d.row()->gates_build) return shipped && shipped->unsaved.count(d.asset) != 0;
+	return !(shipped && shipped->has(d.asset));
 }
 
 bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNames *base, const ShippedFiles *shipped) {

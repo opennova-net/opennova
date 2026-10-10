@@ -72,26 +72,13 @@ using EntityRow = MissionRecordRow<bms::Entity>;
 using PathRow = MissionRecordRow<MissionPath>;
 using AreaRow = MissionRecordRow<bms::AreaTrigger>;
 
-// An event row's parameter that names an event the same step puts in (a pasted event naming
-// another copy of its paste, a duplicated event naming itself): its list (0 the triggers, 1 the
-// actions), the record's index there and the new event's place among the events the step puts in,
-// in their order. The step that puts the row in reads it (renumber_references), the parameter then
-// naming that event wherever the rows landed; no other step does, and a copy of the row carries none.
-// Kept beside the value, never in it: any index a parameter holds is one a file can hold.
-struct EventLink {
-	uint8_t list = 0;
-	uint32_t index = 0;
-	uint32_t put = 0;
-};
 struct EventRow : MissionRecordRow<mission::EventChain> {
 	using MissionRecordRow::MissionRecordRow;
-	std::vector<EventLink> links;
-	std::shared_ptr<Node> clone() const override {
-		auto copy = std::make_shared<EventRow>(*this);
-		copy->links.clear();
-		return copy;
-	}
+	std::shared_ptr<Node> clone() const override { return std::make_shared<EventRow>(*this); }
 };
+
+// The AI class each item's records are written with, by item id (MissionDocument::set_item_classes).
+using MissionItemClasses = std::unordered_map<int64_t, std::string>;
 
 class MissionDocument : public TableDocument {
 public:
@@ -157,11 +144,25 @@ public:
 	// stop by its marker (Names). The graph, the Problems rows and the editor MCP keep record_name.
 	std::string record_title(const NodeAddress &address) const override;
 	// The file as the writer takes it: the mission row's file with every band's records and the
-	// chains joined, its counts synced. False before a load.
+	// chains joined, its counts synced, each entity's AI class its item's (set_item_classes). False before
+	// a load.
 	bool compose(bms::File &out) const;
+	// The AI class each item's records are written with (name1), by item id: its catalog row's sid up to its
+	// first '.', eight characters at most, which the original editor's writer takes from its item table on
+	// every save, never from the record [orig: JOTACmed.exe sub_44C8E0 @ 0x44cabe..0x44caf2, the def's +0x450
+	// copied over the record's +0x68]. The session hands it over (DocumentSet: on an edit and before a save);
+	// an item it names none for keeps its record's own. Such a record's name1 reads as its item's and is set
+	// on the item's row, never on the record.
+	void set_item_classes(std::shared_ptr<const MissionItemClasses> classes) { item_classes_ = std::move(classes); }
+	// The AI class a save writes for `entity` from its item's row; null where the classes name none.
+	const std::string *item_class(const bms::Entity &entity) const;
 	// The code of each source finding (issues(), in their order): what the parse made of the file.
 	const std::vector<MissionFinding> &issue_codes() const { return issue_codes_; }
 
+	// A field as it stands, with what the stops decide (D-MIS-6): a waypoint marker's path and place (its
+	// waypoint_id and wp_number) are the path whose stops name it and its place there, 0 and 0 on none;
+	// a path's count is how many stops it has. Every other field as its row holds it.
+	bool get(const NodeAddress &address, const std::string &field, Value &out) const override;
 protected:
 	// What the table's labelled field decides on its record (a parameter's reference and whether the
 	// game reads it, by its type), then the mission's own: the scope of what the file defines and
@@ -182,28 +183,27 @@ protected:
 	size_t row_position(const Node &row, const std::vector<std::shared_ptr<const Node>> &rows,
 	                    size_t position) const override;
 	// A duplicated entity takes a fresh SSN (never the player's 10000), a duplicated area trigger a
-	// fresh zone id (accept_step refuses the step when 1..99 hold none), a duplicated event naming
-	// itself names its copy (an EventLink).
+	// fresh zone id (accept_step refuses the step when 1..99 hold none); a duplicated event's parameters
+	// keep naming the events they named, its original included (D-MIS-9).
 	void prepare_duplicate(Node &copy, const Node &original,
 	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
-	// A stop put into or taken out of a path whose stored count exceeds its 32 slots is refused
-	// (D-MIS-6: the original editor's count for such a path is not witnessed); a chain holds 20
-	// records at most (the table's lists say so).
-	bool accept_list_edit(const Node &row, const ListChange &change, std::string &error) const override;
-	// The mission row and the 128 paths are never added, removed or moved, and an area trigger the
-	// step puts in never takes a zone id another holds: a step that would is refused.
+	// The mission row and the 128 paths are never added, removed or moved, an area trigger the step
+	// puts in never takes a zone id another holds, and a waypoint marker's path and place are its path's
+	// stops, never set on the marker: a step that would is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
+	// The Adds that put a waypoint marker the edit copied on the path it carries (renumber_references).
+	void copies_keep_their_route(const StagedRows &rows, const RecordShift &shift, std::vector<Edit> &sites) const;
 	// The markers or the events moved: every stop's marker, every Event trigger's and ResetEvent
-	// action's event renumbered (RecordShift::now), an event the step put in naming another it put in
-	// by its EventLink; a reference to a record the edit removed refuses the edit with its site.
+	// action's event and every waypoint marker's advance trigger renumbered (RecordShift::now), the
+	// events the step put in included, as the original editor renumbers them [orig: JOTACmed.exe
+	// sub_44D460 @ 0x44d460]; a reference to a record the edit removed refuses the edit with its site.
 	bool renumber_references(const StagedRows &rows, const RecordShift &shift,
 	                         std::vector<Edit> &sites, std::string &error) const override;
 	// A payload of rows as rows of the file, told apart from the rows there: an SSN a row there
 	// holds given the next free one (never 10000), a zone id a row holds the lowest free one in 1..99,
 	// every parameter and rider of the copies that named the old value following it; a copied event's
-	// index naming another copied event naming that copy (an EventLink, which renumber_references
-	// reads once the rows are placed), one naming an event that was not copied naming the event of
-	// that index here.
+	// index names the event of that index here, which the step moves as it moves the events at or past
+	// where the copies land, as the original editor's paste does (D-MIS-9).
 	bool paste_rows(const Edit &edit, const std::vector<std::shared_ptr<const Node>> &rows,
 	                std::vector<std::shared_ptr<Node>> &out, std::string &error) override;
 	// A payload of a nested kind's records into the owner edit.parent names (0 = the row), which
@@ -231,6 +231,7 @@ private:
 
 	std::vector<MissionFinding> issue_codes_;
 	mutable Lookups lookups_;
+	std::shared_ptr<const MissionItemClasses> item_classes_;
 };
 
 bool is_mission_kind(AssetKind kind);

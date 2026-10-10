@@ -396,7 +396,7 @@ void paths(const SessionView &view, const TextDocument &script, const std::strin
 	if (!mission) return;
 	for (const Node *row : mission->rows_of(MissionKind::WaypointPath)) {
 		const MissionPath &path = static_cast<const PathRow &>(*row).native;
-		if (path.number <= 0 || path.number >= mission::kFirstPathCommand || path.record.waypoint_numbers.empty()) continue;
+		if (path.number <= 0 || path.number >= mission::kFirstPathCommand || path.stops.empty()) continue;
 		const std::string insert = std::to_string(path.number);
 		const std::string words = mission_path_title(path);
 		if (wanted(typed, insert)) add(out, insert + "  " + words, insert, "path", words);

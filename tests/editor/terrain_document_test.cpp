@@ -460,6 +460,24 @@ int test_findings() {
 			            read(*rows, child(*rows, kSectorRow, 3), "sector_2") == Value(int64_t(4)));
 		}
 	}
+	// Five rows wrapping north-south: Fill the grid to 8 rows, the grid's rows again from the first, rows 5, 6
+	// and 7 the rows 0, 1 and 2 the extension reads there [orig: Terrain_ShiftHeightmapRows @ 0x60F2A5..0x60F317],
+	// each a copy of the row of the grid as it stood (not the first row three times).
+	{
+		auto wrapped = load(maps + "polytrn_wrapy 1\r\npolytrn_sectorcount 1\r\npolytrn_sectors 10\r\npolytrn_sectors 11\r\n"
+		                           "polytrn_sectors 12\r\npolytrn_sectors 13\r\npolytrn_sectors 14\r\n");
+		const std::vector<Diagnostic> found = wrapped ? validate_terrain_file(*wrapped) : std::vector<Diagnostic>();
+		const Diagnostic *d = finding(found, "terrain.refused");
+		TEST_EXPECT(d && d->planned.size() == 1 && d->planned[0].label == "Fill the grid to 8 rows" &&
+		            d->planned[0].edits.size() == 3);
+		if (wrapped && d && !d->planned.empty()) {
+			Diagnostic error;
+			for (const Edit &edit : d->planned[0].edits) TEST_EXPECT(wrapped->apply(edit, error));
+			TEST_EXPECT(wrapped->refused().empty() && count_of(*wrapped, kSectorRow) == 8);
+			for (int r = 5; r < 8; ++r)
+				TEST_EXPECT(read(*wrapped, child(*wrapped, kSectorRow, size_t(r)), "sector_1") == Value(int64_t(10 + (r - 5))));
+		}
+	}
 	// No width: Set the width to 1.
 	{
 		auto none = load(maps + "polytrn_sectors 1\r\n");

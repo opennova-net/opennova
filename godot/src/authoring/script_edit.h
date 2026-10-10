@@ -31,7 +31,8 @@ namespace godot {
 // gutter's metadata, so the icon, the tip, the note and what the GUT tests read stay with the line as
 // text is inserted or removed above it. Its device answers what a script may use as it is typed
 // (the completion list), what a word is (the tooltip over the text) and where it is defined (a
-// Ctrl+click), from session/script_assist (S15). It tells its device what the user did
+// Ctrl+click on the word, or F12 at the caret: DI-18), from session/script_assist (S15). It tells its
+// device what the user did
 // (its text changed, the focus left it), each outside any pump (a deferred call), lets go of its
 // focus on any press of the window outside its rect (the window's own input, a press and its
 // release in one frame included), and does nothing else with it: the device turns the text into
@@ -70,7 +71,7 @@ public:
 
 	// What its device answers of the script (ADR 0046 S15; the data is session/script_assist's): the
 	// completions at the caret (the device adds the options and updates the list), a word's words at a
-	// place (its tooltip over the text), and the place a Ctrl+click looks up (the device goes there).
+	// place (its tooltip over the text), and the place a Ctrl+click or F12 looks up (the device goes there).
 	// Lines and columns from 0, the control's. Null members: nothing.
 	struct Assist {
 		std::function<void(bool force)> complete;
@@ -105,6 +106,8 @@ private:
 	void on_window_input_(const Ref<InputEvent> &p_event);
 	void on_symbol_validate_(const String &p_symbol);
 	void on_symbol_lookup_(const String &p_symbol, int64_t p_line, int64_t p_column);
+	// F12: the word at the caret (or the one it ends) looked up, as a Ctrl+click on it is.
+	void look_up_at_caret_();
 	// Each marked line's note after its text, in its severity's colour, where the line shows.
 	void draw_notes_();
 	// The hover note's box under its word, where the word shows.

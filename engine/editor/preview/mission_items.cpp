@@ -10,6 +10,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
 #include <formats/mission/authoring.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/model_geometry.h>
 
@@ -115,25 +116,64 @@ const MissionItemCache::Catalog &MissionItemCache::catalog_(const SessionView &v
 	++files_read_;
 	def::DefItemsFile items{};
 	if (def::def_parse_items_memory(bytes.data(), bytes.size(), &items) == 0)
-		for (size_t i = 0; i < items.count; ++i) catalog.scale_q16.emplace(int64_t(items.entries[i].id), items.entries[i].scale_q16);
+		for (size_t i = 0; i < items.count; ++i) {
+			const def::DefItemDef &row = items.entries[i];
+			catalog.scale_q16.emplace(int64_t(row.id), row.scale_q16);
+			Catalog::Seed seed;
+			seed.good = row.attrib_good != 0;
+			seed.evil = row.attrib_evil != 0;
+			seed.sid = row.sid_derived ? std::string() : std::string(row.sid);
+			seed.default_aip = row.default_aip;
+			seed.min_engagement = row.min_engagement_dist;
+			seed.max_engagement = row.max_engagement_dist;
+			seed.max_attack = row.max_attack_dist;
+			seed.fire_timer = row.fire_timer;
+			catalog.seeds.emplace(int64_t(row.id), std::move(seed));
+		}
 	def::def_free_items(&items);
 	return catalog;
 }
 
-bool MissionItemCache::facts(const SessionView &view, int64_t item, MissionItemFacts &out, std::string &error) {
+bool MissionItemCache::row(const SessionView &view, int64_t item, MissionItemFacts &out) {
 	out = MissionItemFacts();
 	out.item = item;
 	const AssetGraph *graph = view.findings.graph.get();
 	const GraphSymbol *symbol = graph ? graph->resolve_symbol(ReferenceKind::Item, std::to_string(item)) : nullptr;
-	if (!symbol) {
-		error = "No item catalog of the project defines item " + std::to_string(item) + ".";
-		return false;
-	}
+	if (!symbol) return false;
 	out.name = symbol->record;
 	if (const std::optional<int> type = strutil::parse_int(symbol->value)) {
 		out.type = *type;
 		out.pool = mission_item_pool_of_type(*type);
 	}
+	// What a record placed of it takes from its row (D-MIS-10).
+	{
+		const Catalog &catalog = catalog_(view, symbol->file);
+		const auto seed = catalog.seeds.find(item);
+		if (seed != catalog.seeds.end()) {
+			out.seeded = true;
+			out.team = seed->second.evil ? 2 : seed->second.good ? 1 : 0;
+			const std::string &sid = seed->second.sid;
+			out.ai_class = sid.substr(0, sid.find('.')).substr(0, 8);
+			// The profile as the original names its file: the name's extension made .aip [orig: JOTACmed.exe
+			// sub_462CB0 @ 0x462cb0 with "aip" @ 0x5b2d40, the file asked for by sub_529FA0 @ 0x529fa0].
+			const std::string &aip = seed->second.default_aip;
+			if (!aip.empty() && graph->has_file(aip.substr(0, aip.find('.')) + ".aip")) out.ai_script = aip.substr(0, 8);
+			out.min_engagement = seed->second.min_engagement;
+			out.max_engagement = seed->second.max_engagement;
+			out.max_attack = seed->second.max_attack;
+			out.fire_timer = seed->second.fire_timer;
+		}
+	}
+	return true;
+}
+
+bool MissionItemCache::facts(const SessionView &view, int64_t item, MissionItemFacts &out, std::string &error) {
+	if (!row(view, item, out)) {
+		error = "No item catalog of the project defines item " + std::to_string(item) + ".";
+		return false;
+	}
+	const AssetGraph *graph = view.findings.graph.get();
+	const GraphSymbol *symbol = graph->resolve_symbol(ReferenceKind::Item, std::to_string(item));
 	const ItemModels models = models_of(*graph, *symbol);
 	out.model = models.graphic;
 	if (out.model.empty()) return true;
@@ -232,6 +272,63 @@ void MissionItemCache::refresh(const SessionView &view, const std::vector<int64_
 		reads.husk = models.husk;
 		ask_(view, item, reads);
 	}
+}
+
+void plan_item_seeds(const SessionView &view, MissionItemCache &cache, const MissionDocument &mission,
+                     std::vector<Edit> &edits) {
+	struct Placed {
+		NodeAddress at;
+		int64_t item = 0;
+	};
+	std::vector<Placed> placed;
+	const size_t count = edits.size();
+	for (size_t i = 0; i < count; ++i) {
+		const Edit &edit = edits[i];
+		const int64_t *item = std::get_if<int64_t>(&edit.value);
+		if (!item || edit.field != "item" || !is_entity_kind(edit.address.kind) || edit.address.child) continue;
+		if (edit.operation == EditOperation::Add && !edit.address.row) {
+			placed.push_back({ NodeAddress{ batch_made(i), edit.address.kind, 0 }, *item });
+		} else if (edit.operation == EditOperation::Set && edit.address.row && !is_batch_made(edit.address.row)) {
+			// A record naming no item yet (an Add's own, item 0) taking its first.
+			const Node *row = mission.row(edit.address.row);
+			if (row && is_entity_kind(row->kind) && static_cast<const EntityRow &>(*row).native.type_id == 0)
+				placed.push_back({ NodeAddress{ row->id, row->kind, 0 }, *item });
+		}
+	}
+	for (const Placed &each : placed) {
+		MissionItemFacts facts;
+		if (!cache.row(view, each.item, facts) || !facts.seeded) continue;
+		const auto seed = [&](const char *field, Value value) {
+			for (size_t i = 0; i < count; ++i)
+				if (edits[i].operation == EditOperation::Set && edits[i].address == each.at && edits[i].field == field) return;
+			Edit set;
+			set.address = each.at;
+			set.field = field;
+			set.value = std::move(value);
+			set.gesture = edits.front().gesture;
+			edits.push_back(std::move(set));
+		};
+		seed("team", int64_t(facts.team));
+		seed("name2", facts.ai_script);
+		seed("min_engagement_distance", int64_t(facts.min_engagement));
+		seed("max_engagement_distance", int64_t(facts.max_engagement));
+		seed("max_attack_distance", int64_t(facts.max_attack));
+		seed("advancetimer", int64_t(facts.fire_timer));
+	}
+}
+
+std::shared_ptr<const MissionItemClasses> mission_item_classes(const SessionView &view, MissionItemCache &cache,
+                                                               const MissionDocument &mission) {
+	auto classes = std::make_shared<MissionItemClasses>();
+	std::unordered_set<int64_t> asked;
+	for (const auto &row : mission.rows()) {
+		if (!row || !is_entity_kind(row->kind)) continue;
+		const int64_t item = mission::entity_item_id(static_cast<const EntityRow &>(*row).native);
+		if (!asked.insert(item).second) continue;
+		MissionItemFacts facts;
+		if (cache.row(view, item, facts) && facts.seeded) (*classes)[item] = facts.ai_class;
+	}
+	return classes;
 }
 
 bool mission_item_facts(const SessionView &view, int64_t item, MissionItemFacts &out, std::string &error) {
