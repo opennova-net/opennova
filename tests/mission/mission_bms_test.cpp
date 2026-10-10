@@ -207,6 +207,25 @@ int main() {
 	TEST_EXPECT(bms_file.group_records.size() == opennova::bms::kGroupRecordCount);
 	TEST_EXPECT(bms_file.layer_records.size() == opennova::bms::kLayerRecordCount);
 
+	// A Mission box's name over its two words, the second its last four characters: written and read back as
+	// it stands, as the game loads a box's 36 bytes whole and reads the word with ref_id [orig:
+	// Mission_LoadBMSFile @0x40fcdc; Entity_UpdateInfantryPlayerBody @0x4b60b6..0x4b60c4].
+	{
+		opennova::bms::File boxed = bms_file;
+		opennova::bms::BoundingBox box{};
+		box.type = int32_t(opennova::bms::BoundingBoxType::Mission);
+		const MissionField *name = find_mission_field(MissionRecord::BoundingBox, "mission");
+		TEST_EXPECT(name && name->set(&box, std::string("CP19NEXT"), error) && box.reserved0 != 0);
+		boxed.bounding_boxes.push_back(box);
+		sync_counts(boxed);
+		std::vector<uint8_t> bytes;
+		opennova::bms::File back;
+		MissionValue read;
+		TEST_EXPECT(opennova::bms::write(boxed, bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), back, error));
+		TEST_EXPECT(!back.bounding_boxes.empty() && back.bounding_boxes.back().reserved0 == box.reserved0 &&
+		            name && name->get(&back.bounding_boxes.back(), read) && std::get<std::string>(read) == "CP19NEXT");
+	}
+
 	std::vector<uint8_t> encoded;
 	TEST_EXPECT(opennova::bms::write(bms_file, encoded, error));
 	opennova::bms::File encoded_file;

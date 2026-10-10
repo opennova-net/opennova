@@ -25,6 +25,7 @@
 
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
+#include <godot_cpp/classes/input_event_mouse_motion.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable.hpp>
@@ -157,6 +158,9 @@ public:
 	void set_widget_selected_set(int index, const std::vector<int> &rows) override {
 		if (MenuFrame *f = frame()) f->set_widget_selected_set(index, to_gd_ints(rows));
 	}
+	void set_widget_disabled_items(int index, const std::vector<uint8_t> &rows) override {
+		if (MenuFrame *f = frame()) f->set_widget_disabled_items(index, rows);
+	}
 	void set_widget_table_rows(int index,
 			const std::vector<opennova::menu::MenuTableRow> &rows) override {
 		if (MenuFrame *f = frame()) f->set_widget_table_rows(index, rows);
@@ -230,6 +234,13 @@ public:
 	int process_mouse(float x, float y, bool button_down) override {
 		MenuFrame *f = frame();
 		return f != nullptr ? f->process_mouse(Vector2(x, y), button_down) : -1;
+	}
+	void release_mouse() override {
+		if (MenuFrame *f = frame()) f->release_mouse();
+	}
+	bool press_popup_mouse(int index, float x, float y) override {
+		MenuFrame *f = frame();
+		return f != nullptr && f->press_popup_mouse(index, Vector2(x, y));
 	}
 	bool process_popup_mouse(int index, float x, float y, bool button_down) override {
 		MenuFrame *f = frame();
@@ -738,6 +749,10 @@ void MenuDriver::fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p
 
 void MenuDriver::activate(int p_id) { runtime_.activate(p_id); }
 void MenuDriver::spin_cycle(int p_id, int p_delta) { runtime_.spin_cycle(p_id, p_delta); }
+
+void MenuDriver::enable_class_rows(int p_id, int p_class_allow_mask) {
+	opennova::menu::enable_class_rows(runtime_, p_id, static_cast<uint32_t>(p_class_allow_mask));
+}
 String MenuDriver::spin_value_attr(int p_id) const { return item_value(p_id, selected_row(p_id)); }
 
 bool MenuDriver::dispatch_action_row(const Ref<MnuActionRow> &p_action) {
@@ -764,6 +779,39 @@ void MenuDriver::on_frame_scroll_value_(int p_index, int p_value) {
 void MenuDriver::process_mouse(const Vector2 &p_position, bool p_button_down) {
 	runtime_.process_mouse(p_position.x, p_position.y, p_button_down,
 			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
+}
+
+void MenuDriver::move_mouse(const Vector2 &p_position, bool p_button_down) {
+	runtime_.move_mouse(p_position.x, p_position.y, p_button_down);
+}
+
+bool MenuDriver::press_mouse(const Vector2 &p_position) {
+	return runtime_.press_mouse(p_position.x, p_position.y,
+			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
+}
+
+bool MenuDriver::release_mouse(const Vector2 &p_position) {
+	return runtime_.release_mouse(p_position.x, p_position.y);
+}
+
+void MenuDriver::pump_mouse() {
+	runtime_.pump_mouse();
+}
+
+bool MenuDriver::take_mouse_event(const Ref<InputEvent> &p_event) {
+	// The input sampling the game's mouse callback does, each event as its message (engine
+	// MenuRuntime::move_mouse, press_mouse, release_mouse); the pump is pump_mouse's, once a frame.
+	if (p_event.is_null()) return false;
+	const Ref<InputEventMouseMotion> motion = p_event;
+	if (motion.is_valid()) {
+		move_mouse(motion->get_position(), motion->get_button_mask().has_flag(MOUSE_BUTTON_MASK_LEFT));
+		return false;
+	}
+	const Ref<InputEventMouseButton> button = p_event;
+	if (button.is_null() || button->get_button_index() != MOUSE_BUTTON_LEFT) return false;
+	if (button->is_pressed()) press_mouse(button->get_position());
+	else release_mouse(button->get_position());
+	return true;
 }
 
 bool MenuDriver::process_wheel(const Vector2 &p_position, int p_steps) {
@@ -1156,6 +1204,10 @@ void MenuDriver::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("activate", "id"), &MenuDriver::activate);
 	ClassDB::bind_method(D_METHOD("spin_cycle", "id", "delta"), &MenuDriver::spin_cycle);
+	ClassDB::bind_method(D_METHOD("set_item_enabled", "id", "row", "enabled"), &MenuDriver::set_item_enabled);
+	ClassDB::bind_method(D_METHOD("is_item_enabled", "id", "row"), &MenuDriver::is_item_enabled);
+	ClassDB::bind_method(D_METHOD("enable_class_rows", "id", "class_allow_mask"),
+			&MenuDriver::enable_class_rows);
 	ClassDB::bind_method(D_METHOD("spin_value_attr", "id"), &MenuDriver::spin_value_attr);
 	ClassDB::bind_method(D_METHOD("dispatch_action_row", "action"),
 			&MenuDriver::dispatch_action_row);
@@ -1164,6 +1216,11 @@ void MenuDriver::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("process_mouse", "position", "button_down"),
 			&MenuDriver::process_mouse);
+	ClassDB::bind_method(D_METHOD("move_mouse", "position", "button_down"), &MenuDriver::move_mouse);
+	ClassDB::bind_method(D_METHOD("press_mouse", "position"), &MenuDriver::press_mouse);
+	ClassDB::bind_method(D_METHOD("release_mouse", "position"), &MenuDriver::release_mouse);
+	ClassDB::bind_method(D_METHOD("pump_mouse"), &MenuDriver::pump_mouse);
+	ClassDB::bind_method(D_METHOD("take_mouse_event", "event"), &MenuDriver::take_mouse_event);
 	ClassDB::bind_method(D_METHOD("process_wheel", "position", "steps"),
 			&MenuDriver::process_wheel);
 	ClassDB::bind_method(D_METHOD("handle_key_input", "event"), &MenuDriver::handle_key_input);

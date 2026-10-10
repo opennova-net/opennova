@@ -114,6 +114,19 @@ opennova::bms::File make_demo_mission() {
 	return m;
 }
 
+// The bring-up's session create refused on the mpreset word
+// (inmatch::HostRole::session_create): the in-memory loads fail as the file
+// boot's phase A does (inmatch::HostBoot::session_create). The shell keeps no
+// process-lifetime cfg block that would carry the word here, and quits on
+// nothing yet (docs/net/novaworld-net-re.md D-NET-385, the open half).
+bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::string &r_error) {
+	if (p_role == nullptr ||
+			p_role->session_create() != opennova::inmatch::CreateSessionResult::ProcessExit)
+		return false;
+	r_error = "mpreset is set: the session create ends the process (exit code 0)";
+	return true;
+}
+
 } // namespace
 
 Simulation::Simulation() {
@@ -744,7 +757,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
-	if (!kernel_->boot(options, boot_error)) {
+	if (!kernel_->boot(options, boot_error) || session_create_refused(host_role_, boot_error)) {
 		fail_session_load(boot_error.c_str());
 		return false;
 	}
@@ -770,7 +783,7 @@ void Simulation::build_demo_mission() {
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
-	if (!kernel_->boot(options, boot_error)) {
+	if (!kernel_->boot(options, boot_error) || session_create_refused(host_role_, boot_error)) {
 		fail_session_load(boot_error.c_str());
 		return;
 	}

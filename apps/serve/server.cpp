@@ -189,6 +189,10 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {}
 Server::~Server() { stop(); }
 
 bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
+	return begin(error, cancel) && start_session(error);
+}
+
+bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// The admin server's log opens for writing at the process's static
 	// construction, ahead of everything, so every launch truncates it whether
 	// or not the listener ever opens [orig: CAdminServer_Construct @0x402C10,
@@ -215,8 +219,27 @@ bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
 	// The subsystems' tail: admin.cfg and the listener [orig: Game_InitSubsystems
 	// @0x4A72B8..0x4A72D9, after the game.cfg read @0x4A70AB].
 	open_admin();
-	if (!read_host_file(error) || !open_socket(error) || !host_on_novaworld(error, cancel) ||
-			!boot_mission(/*next_mission=*/false, error)) {
+	if (!read_host_file(error) || !open_socket(error) || !host_on_novaworld(error, cancel)) {
+		stop();
+		return false;
+	}
+	begun_ = true;
+	return true;
+}
+
+// The starting map: the session settings from the cfg block as it stands at the create, which a
+// SetMPReset during the hosting wait changed (ServeListing::on_command), then the boot, whose
+// session create reads the block's mpreset word
+// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 builds the session settings from the
+//  block at the create, @0x56955D..0x56956C; CNapiGameSession_CreateSession @0x4C97E7 reads
+//  dword_25509FC itself].
+bool Server::start_session(std::string &error) {
+	if (!begun_ || running_) {
+		error = "the server has not begun, or its session already stands";
+		return false;
+	}
+	host_ = inmatch::host_session_settings(cfg_);
+	if (!boot_mission(/*next_mission=*/false, error)) {
 		stop();
 		return false;
 	}
@@ -472,7 +495,21 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		kernel_ = std::move(fresh);
 		return *kernel_;
 	};
-	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) return false;
+	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) {
+		// The session create's mpreset exit: retail's crt_exit(0) ends the
+		// process inside the create, so Game_Run's exit tail never runs (no
+		// game.cfg save, no banned.txt save, activesrvr.txt left behind); its
+		// atexit table still tears the NovaWorld session down (stop()). The
+		// process exits with code 0. Only the starting map creates a session
+		// here: a map change continues it
+		// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 ->
+		//  crt_exit(0), skipping Game_Run @0x4A7FFF..0x4A800E].
+		if (boot_.session_create == inmatch::CreateSessionResult::ProcessExit) {
+			reset_exit_ = true;
+			exit_save_owed_ = false;
+		}
+		return false;
+	}
 	// No device stages run between the phases on a headless host.
 	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
 	++missions_played_;
@@ -690,6 +727,7 @@ void Server::stop() {
 		session_.reset();
 	}
 	running_ = false;
+	begun_ = false;
 	// Game_Run's exit: game.cfg saved, the subsystems (the socket among them)
 	// shut down, then the lock deleted, unconditionally [orig: Game_Run
 	// @0x4A7FFF Game_SaveConfig, @0x4A8004 Game_ShutdownSubsystems,
@@ -716,9 +754,22 @@ void Server::stop() {
 	if (role_) role_->set_socket(nullptr);
 	if (listing_) listing_->unbind();
 	// The NovaWorld deregistration: ClientStopHosting, then the goodbye burst,
-	// on the same socket before it closes.
+	// on the same socket before it closes. The session create's exit sends the
+	// burst alone: retail's crt_exit runs no ClientStopHosting, but its atexit
+	// table destroys the NovaWorld session, whose connection teardown sends the
+	// burst, and the Winsock stack is still up then, held by the remote-admin
+	// server's static reference, whose release runs after both NovaWorld
+	// handlers (the table runs last-registered first)
+	// [orig: CNapiGameSession_Destroy, registered @0x7939DA (initializer slot
+	//  0x7C0578) -> CNapiGameSession_ResetToDisconnected @0x4D0890 ->
+	//  CNapiNPConnection_Destroy -> SendDisconnectPacket @0x61F2A0 -> sendto;
+	//  CAdminServer_Construct's WSAStartup @0x402C22 (slot 0x7C0554), its
+	//  WSACleanup @0x406DE2 from the destructor registered @0x79377A].
 	if (lister_) {
-		lister_->stop();
+		if (reset_exit_)
+			lister_->disconnect();
+		else
+			lister_->stop();
 		lister_.reset();
 	}
 	listing_.reset();

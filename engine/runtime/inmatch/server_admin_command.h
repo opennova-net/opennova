@@ -22,14 +22,16 @@ namespace opennova::inmatch {
 //
 // The gates are per verb, as retail's arms test them: every verb but
 // SetMPReset needs the authority with its hosted session up (retail's
-// is_authority and ctx+0x68; is_in_session here); the player-targeted verbs
-// and ChangeTeam / SwapTeam also need the player table (a World here); a verb
-// that reads an argument it cannot default needs its token; SetMPReset needs
-// only its argument, so it runs on any receiver this executor is handed. The
-// shells hand it only a hosting context, which stays a residual: the game's
-// Simulation::execute_server_command needs a host context and opennova-serve's
-// ServeListing::on_command drops a command before its match binds, where
-// retail would still store and save a SetMPReset. The World-acting verbs
+// is_authority and ctx+0x68; is_in_session here, standing in for ctx+0x68
+// only, so a context that has no session yet keeps it clear); the
+// player-targeted verbs and ChangeTeam / SwapTeam also need the player table
+// (a World here); a verb that reads an argument it cannot default needs its
+// token; SetMPReset needs only its argument, so it runs on any receiver this
+// executor is handed. opennova-serve hands it a session-less context for a
+// command that arrives before its match binds (ServeListing::on_command), where
+// only SetMPReset passes, as retail's hosting wait runs it; the game shell's
+// Simulation::execute_server_command needs a host context, which stays a
+// residual, where retail would still store and save a SetMPReset. The World-acting verbs
 // retail leaves off the player-table gate (Cycle / EndMission / GameOver,
 // Earthquake, Lightning, TimeOfDay) still need a World to act on
 // (docs/net/novaworld-net-re.md D-NET-383). Numbers are the CRT atol's, 32-bit
@@ -49,8 +51,8 @@ namespace opennova::inmatch {
 // Lightning (the flash + the S2C 0x24 "SETFLASH1 16" text command),
 // TimeOfDay (HHMM), SetServerName / SetServerMsg / SetMPReset (config;
 // config_changed asks the shell to save game.cfg and republish the NovaWorld
-// HostSetup / Host vars; retail's next session create exits the process on a
-// nonzero mpreset, which nothing here reads yet, D-NET-385), ChangeTeam /
+// HostSetup / Host vars; the next session create ends the process on a
+// nonzero mpreset, create_session's ProcessExit), ChangeTeam /
 // SwapTeam (the team 1 <-> 2 swap through Server_ChangeEntityTeam, then the
 // "Changing team...." chat to the slot).
 // ReloadPlayer (Entity_UpdateWeaponOverlayFrameState) and DisarmPlayer are

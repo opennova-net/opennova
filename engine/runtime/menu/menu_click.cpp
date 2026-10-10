@@ -37,10 +37,15 @@ bool menu_pump_window_captures(mnu::WindowType type, int part) {
 }
 
 MenuPumpWindow MenuClickLatch::capture_for(bool button_down) {
-	// The release reaches the captured window ahead of the pump and lets the capture go [orig:
-	// CButtonWnd_HandleNamedEvent @ 0x6583ed, 0x1000003 -> UI_ClearMouseCaptureWnd].
-	if (!button_down) capture_ = MenuPumpWindow();
+	// The release reaches the captured window ahead of the pump and lets the capture go (release).
+	if (!button_down) release();
 	return capture_;
+}
+
+void MenuClickLatch::release() {
+	// [orig: CWnd_DispatchMouseEventToChildren @ 0x64793f hands the release to g_UIMouseCaptureWnd;
+	// CButtonWnd_HandleNamedEvent @ 0x6583ed, 0x1000003 -> UI_ClearMouseCaptureWnd]
+	capture_ = MenuPumpWindow();
 }
 
 MenuPumpWindow MenuClickLatch::sample(const Claim &claim, bool button_down,
@@ -68,14 +73,18 @@ void MenuClickLatch::press(const MenuPumpWindow &capture) {
 	if (capture.valid()) capture_ = capture;
 }
 
-void MenuClickLatch::dropdown_sample(int combo, bool button_down) {
-	// The dropdown's list (or its scrollbar's buttons) took the press and holds the capture until the
+void MenuClickLatch::dropdown_press(int combo) {
+	// The dropdown's list (or its scrollbar's buttons) takes the press and holds the capture until the
 	// release: no window of the menu takes the claim meanwhile [orig: list_wnd_on_command @ 0x643f19
 	// reaches CButtonWnd_HandleNamedEvent @ 0x65839c; the pick hides the list,
-	// CComboWnd_HandleEvent @ 0x65c312]. The menu's own windows are not pumped while the dropdown has
-	// the mouse (the runtime's exclusive pump), so their holds stand.
-	if (!button_down) capture_ = MenuPumpWindow();
-	else if (!down_) capture_ = MenuPumpWindow{ combo, kMenuPumpPartDropdown };
+	// CComboWnd_HandleEvent @ 0x65c312].
+	capture_ = MenuPumpWindow{ combo, kMenuPumpPartDropdown };
+}
+
+void MenuClickLatch::dropdown_sample(bool button_down) {
+	// The menu's own windows are not pumped while the dropdown has the mouse (the runtime's exclusive
+	// pump), so their holds stand; the dropdown's capture is its press's (dropdown_press).
+	if (!button_down) release();
 	down_ = button_down;
 }
 

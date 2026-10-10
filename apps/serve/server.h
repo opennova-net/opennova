@@ -115,6 +115,13 @@ public:
 	// the socket layer (net::startup) first and shuts it down after stop(): it
 	// is process-wide.
 	bool start(std::string &error, const std::atomic<bool> *cancel = nullptr);
+	// start()'s two halves, for an embedder that acts between them: begin() runs everything
+	// ahead of the session create (the reads, the mount, the host file, the lock, the socket
+	// and, listed, the NovaWorld hosting), and start_session() boots the starting map, whose
+	// boot creates the session from the cfg block as it stands then. Each is false with `error`
+	// when a leg fails, and stop() has run then; start_session() before begin() refuses.
+	bool begin(std::string &error, const std::atomic<bool> *cancel = nullptr);
+	bool start_session(std::string &error);
 	// One outer frame of `delta_seconds` wall clock. A round end's mission exit
 	// runs the map change and boots the next map inside the session (a listed
 	// server's listing and socket kept). False once the session has ended
@@ -133,8 +140,12 @@ public:
 	// NovaWorld ServerCommand's name / message / mpreset change. False
 	// (logged) when the file does not open.
 	bool save_config();
-	// game.cfg set `mpreset`: retail's load exits the process with code 0
-	// before anything else runs, and start() stops there.
+	// `mpreset` is set: retail exits the process with code 0, at the load
+	// when game.cfg sets it (before anything else runs) or at the session
+	// create when the block holds it then; start() stops there, and the exit
+	// tail (the save, the lock's delete, the NovaWorld stop) does not run.
+	// [orig: Game_LoadConfig @0x5514A1..0x5514AC; CNapiGameSession_CreateSession
+	//  @0x4C97E7..0x4C97F0]
 	bool reset_exit() const { return reset_exit_; }
 
 	uint16_t bound_port() const { return bound_port_; }
@@ -228,6 +239,7 @@ private:
 	std::unique_ptr<nw_lister::Lister> lister_;
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
+	bool begun_ = false;
 	bool rotation_ended_ = false;
 	bool quit_ = false;
 	int missions_played_ = 0;

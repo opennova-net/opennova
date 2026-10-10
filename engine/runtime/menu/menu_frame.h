@@ -256,6 +256,10 @@ struct MenuWidgetState {
 	// Additional selected rows for MULTI lists (drawn with the selection
 	// style alongside selected_item); the single-select widgets ignore it.
 	std::vector<int32_t> selected_items;
+	// A spin list's rows the game disabled, by row (nonzero: disabled; a row past the end is
+	// enabled): bit 2 of the item's flags word [orig: CSpinListWnd_SetItemEnabled @ 0x64bbd0]. A
+	// disabled current row draws nothing (CSpinListWnd_Render @ 0x64b334).
+	std::vector<uint8_t> disabled_items;
 	// A runtime rect replacing the POSITION solve (CWnd_SetRect), relative to
 	// the parent's origin.
 	bool has_rect = false;
@@ -385,8 +389,7 @@ enum class MenuFrameNoteCode : uint16_t {
 	ColorTransparent,       // a COLOR or OUTLINE of fewer than eight digits: it reads alpha 0
 	StyleVarUnresolved,     // a whole-value %VAR% the shell's list lacks: kept literal
 	TypeUnknown,            // a TYPE token the factory does not match: a generic window
-	TypeInteriorDeferred,   // RADIOEDIT: drawn as a generic window (D-MNU-13)
-	ItemKindNotDrawn,       // a list or combo row of TYPE IMAGE or COLOR (D-MNU-5)
+	ItemKindAsText,         // a list or combo row of TYPE IMAGE or COLOR: its text drawn as the row's label
 	TableCellsDeferred,     // a table's ITEMS IMAGEROW row, not drawn (D-MNU-13)
 	TableCellsCustom,       // a CUSTOM_DRAW column: the menu's code draws its cells; the compile, none
 	ScrollExtentDefault,    // a SCROLL with no HEIGHT or WIDTH: its arrows are the default 20 long
@@ -821,11 +824,17 @@ public:
 		int height = 0;
 	};
 	FrameCursor frame_cursor(const MenuFrameState &state) const;
-	// The open-dropdown sample: the dropdown's scrollbar alone, restricted to
-	// the open combo `index` (the popup-exclusive dispatch gate), its windows
-	// by the game's rule (an arrow steps on its click). scroll_index >= 0 in the
-	// result means the scrollbar took the sample and the caller must not treat
-	// it as a row hover/pick.
+	// The open dropdown's press, as its message arrives: the dropdown's
+	// scrollbar alone, restricted to the open combo `index` (the popup-exclusive
+	// dispatch gate), its windows by the game's rule (the track pages; an arrow
+	// or the shuttle holds the press). scroll_index >= 0 in the result means the
+	// scrollbar took the press and the caller must not pick a row.
+	MouseClaim press_popup_mouse(MenuFrameState &io_state, int index,
+			float mouse_x, float mouse_y, float scale_x, float scale_y);
+	// The open dropdown's pump sample: the window its press holds, by the
+	// game's rule (an arrow steps on its click, the shuttle drags).
+	// scroll_index >= 0 in the result means the held window took the sample and
+	// the caller must not treat it as a row hover.
 	MouseClaim pump_popup_mouse(MenuFrameState &io_state, int index,
 			float mouse_x, float mouse_y, bool button_down, float scale_x,
 			float scale_y);
@@ -937,6 +946,8 @@ private:
 	// The enabled flag the pump reads: the runtime's once written, else the
 	// authored DISABLE.
 	static bool disabled_(const mnu::Window &w, const MenuWidgetState *ws);
+	// A spin arrow's node (its own row: what code or an ACTION wrote on the arrow a lookup found).
+	bool arrow_disabled_(int arrow, const MenuFrameState &state) const;
 	// A claim of the walk: the widget and the part (menu_click.h MenuPumpWindow).
 	struct HitClaim {
 		int index = -1;
@@ -1031,8 +1042,9 @@ private:
 	// on cut to the scaled clip rect [orig: CWnd_ApplyClipViewport @ 0x6472a0].
 	void clip_ops_(int32_t first_op, const mnu::RectEdges &clip, const WalkScale &s);
 	bool widget_shown_(int index, const MenuFrameState &state) const;
+	// `ws` the pump's row (a spin arrow's: its list's); `own` an arrow's own row, its enabled flag.
 	int pump_visual_state(const WidgetNode &node,
-			const MenuWidgetState *ws) const;
+			const MenuWidgetState *ws, const MenuWidgetState *own = nullptr) const;
 	int appearance_state_with_fallback(const WidgetNode &node,
 			int state) const;
 	mnu::RectEdges solve_rect(const WidgetNode &node) const;
@@ -1142,8 +1154,9 @@ private:
 	void emit_checkbox_label(const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 			const MenuWidgetState *ws);
-	void emit_item_cell(const WidgetNode &node, const mnu::RectEdges &rect,
-			const WalkScale &s, int color_state, const MenuWidgetState *ws);
+	// `local` the window's own rect (parent-relative), `rect` the same moved by its ancestors'.
+	void emit_item_cell(const WidgetNode &node, const mnu::RectEdges &local,
+			const mnu::RectEdges &rect, const WalkScale &s, const MenuWidgetState *ws);
 	void emit_list_rows(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, const MenuWidgetState *ws);
 	// One list row's text: the row rect, the row's justify word (WidgetNode::RowLayout::align)
@@ -1205,9 +1218,9 @@ private:
 	ScrollDrag scroll_drag_;
 	bool pump_down_ = false;
 	struct PopupScroll {
-		bool down = false;
-		int part = 0;       // the held window (menu_click.h), 0 none
-		bool under = false; // the mouse over it at the last sample
+		bool down = false;  // the button at the dropdown pump's last sample
+		int part = 0;       // the window its press holds (menu_click.h), 0 none
+		bool under = false; // the mouse over it at the last sample with the button down
 	};
 	PopupScroll popup_scroll_;
 	// The scrollbar windows of a widget the pump and the press reach (a SCROLL's

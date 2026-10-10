@@ -97,6 +97,11 @@ public:
 	// it go first, its message reaching the captured window ahead of the frame's pump. None while no
 	// press holds it.
 	MenuPumpWindow capture_for(bool button_down);
+	// The release, as its message arrives: it reaches the captured window wherever the mouse is and
+	// lets the capture go, so a press after it in the same frame takes the capture of its own [orig:
+	// CWnd_DispatchMouseEventToChildren @ 0x64793f; CButtonWnd_HandleNamedEvent @ 0x6583ed,
+	// 0x1000003 -> UI_ClearMouseCaptureWnd]. The click stays the pump's (sample).
+	void release();
 	// The press, ahead of its sample's pump: the window its message left holding the capture
 	// (MenuFrameCompiler::press_capture over its press_reach; none: no window captured) takes it
 	// [orig: CButtonWnd_HandleNamedEvent @ 0x65839c].
@@ -106,9 +111,14 @@ public:
 	// (`reached`) lets its hold go and the claim is held while the button is down.
 	MenuPumpWindow sample(const Claim &claim, bool button_down,
 			const std::function<bool(const MenuPumpWindow &)> &reached);
-	// A sample the open dropdown takes (the runtime's exclusive pump over the combo `combo`): no window
-	// of the menu takes the claim, and a press there holds the capture until its release.
-	void dropdown_sample(int combo, bool button_down);
+	// A press the open dropdown takes, as its message arrives (the combo `combo`'s): its list, or its
+	// scrollbar's buttons, take the capture until the release, so no window of the menu takes the
+	// claim meanwhile [orig: list_wnd_on_command @ 0x643f19 reaches CButtonWnd_HandleNamedEvent
+	// @ 0x65839c].
+	void dropdown_press(int combo);
+	// A pump sample the open dropdown takes (the runtime's exclusive pump): no window of the menu takes
+	// the claim, and the button up lets the dropdown's capture go.
+	void dropdown_sample(bool button_down);
 	// The menu shows another screen, or none: its windows' holds and the capture go (a screen select
 	// clears the capture [orig: CUIScene_SelectNodeByName @ 0x63b7c4]); the button stays as it is.
 	void reset();
