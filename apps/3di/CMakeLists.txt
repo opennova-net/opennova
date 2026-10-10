@@ -1,5 +1,5 @@
-# opennova-3di — build a .3di from an authored .o3d scene, write one back out
-# as a scene, inspect or compare models; the same for a rig's .bad/.adm clip
+# opennova-3di — build a .3di from an authored .o3d scene, migrate a Black Hawk
+# Down GP model to 3DI3, write one back out as a scene, inspect or compare models; the same for a rig's .bad/.adm clip
 # set through the .o3a text (`anim build|scene|info|compare`); `texture`, an
 # image written as a model's .dds, .tga or .mdt; and `catalog`, the engine
 # tables a front end offers.
@@ -16,7 +16,7 @@
 # and its merge reads the result back through the def parser. `texture` writes
 # through the runtime's image import (renderer/texture_authoring: the source
 # read, the halving, the DXT encoder), the pieces the editor's import runs too.
-add_library(opennova_3di_commands STATIC build.cpp scene.cpp info.cpp compare.cpp
+add_library(opennova_3di_commands STATIC build.cpp migrate.cpp scene.cpp info.cpp compare.cpp
     anim_load.cpp anim_build.cpp anim_scene.cpp anim_info.cpp anim_compare.cpp weapon_timing.cpp
     weapon_merge.cpp texture.cpp)
 target_link_libraries(opennova_3di_commands PUBLIC opennova_runtime)

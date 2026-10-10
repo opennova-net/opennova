@@ -7,6 +7,8 @@
 // untouched is its own bytes; and (a SKIP-LEG without OPENNOVA_JO_DIR) every model of the game
 // install validated with no error (S11h). Two versions of the model row alike but for their user
 // points only when every other table is the same (S13 V8).
+#include <formats/threedi_gp/threedi_gp.h>
+#include <formats/threedi_gp/threedi_gp_migrate.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
@@ -734,6 +736,51 @@ int retail_models() {
 	return 0;
 }
 
+// Every GP model Black Hawk Down ships (the reference tree's fixtures/bhd/3di), migrated to 3DI3 as
+// the editor's import does (formats/threedi_gp), opens as a model and validates with no error: the
+// migration writes nothing a project's model check refuses.
+int retail_bhd_migrated() {
+	const std::vector<std::string> files = retail::reference_fixture_files("bhd/3di", ".3di");
+	if (files.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bhd/3di (the models BHD ships)");
+	const ProjectDocument project;
+	size_t models = 0, errors = 0;
+	std::map<std::string, size_t> notes;
+	for (const std::string &path : files) {
+		const std::vector<uint8_t> bytes = test_io::read_file(path);
+		std::string message;
+		opennova::threedi_gp::File gp;
+		std::vector<uint8_t> model;
+		std::vector<opennova::threedi_gp::MigrateNote> migrate_notes;
+		if (!opennova::threedi_gp::parse(bytes.data(), bytes.size(), gp, message) ||
+		    !opennova::threedi_gp::migrate(gp, model, migrate_notes, message)) {
+			std::printf("bhd migrated: %s does not migrate: %s\n", path.c_str(), message.c_str());
+			++errors;
+			continue;
+		}
+		const std::string name = fs::path(path).filename().string();
+		auto document = std::make_shared<ModelDocument>();
+		Diagnostic error;
+		if (!document->load_bytes(model, "models/" + name, AssetKind::Model, project.target_game, error)) {
+			std::printf("bhd migrated: %s does not open: %s\n", name.c_str(), error.message.c_str());
+			++errors;
+			continue;
+		}
+		for (const Diagnostic &d : validated(document)) {
+			if (d.severity != DiagnosticSeverity::Error) {
+				++notes[d.code()];
+				continue;
+			}
+			std::printf("bhd migrated: %s %s: %s: %s\n", name.c_str(), d.record.c_str(), d.code().c_str(), d.message.c_str());
+			++errors;
+		}
+		++models;
+	}
+	std::printf("bhd migrated: %zu models, %zu errors\n", models, errors);
+	for (const auto &note : notes) std::printf("bhd migrated: %zu x %s\n", note.second, note.first.c_str());
+	TEST_EXPECT(errors == 0);
+	return 0;
+}
+
 // S11h: a retail model loads in the game, so the validator finds no error in one. Every model
 // the game install serves (the base game's archives and each expansion's, each file once) is
 // opened from its bytes and validated as each model of a project is (validate_model_file); every
@@ -1018,5 +1065,6 @@ int main(int argc, char **argv) {
 	if (record_references() != 0) return 1;
 	if (field_metadata() != 0) return 1;
 	if (retail_models() != 0) return 1;
+	if (retail_bhd_migrated() != 0) return 1;
 	return retail_validation();
 }
