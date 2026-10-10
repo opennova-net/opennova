@@ -431,6 +431,15 @@ static int test_function_rules(void) {
     CHECK(refused("section Begin\n{\n  frame 0\n  done\n}\n"), "a frame setup of none");
     CHECK(!refused("section Begin\n{\n  frame 2\n  done\n}\n"), "a frame setup of two");
     CHECK(refused("section Begin\n{\n#line 500\n  play nowhere\n}\n") && line == 5, "an error at its own line");
+    // A section's name past 31 characters, refused wherever it is named, never cut to one another name could share.
+    const std::string longest(31, 'S'), past(32, 'S');
+    CHECK(!refused("section " + longest + "\n{\n  goto " + longest + "\n}\n"), "a section's name of 31 characters");
+    CHECK(refused("section " + past + "\n{\n  done\n}\n"), "a section's name past 31 characters");
+    CHECK(refused("section Begin\n{\n  enter " + past + "\n}\n"), "an enter to a name past 31");
+    CHECK(refused("section Begin\n{\n  goto " + past + "\n}\n"), "a goto to a name past 31");
+    CHECK(refused("section Begin\n{\n  call " + past + "\n}\n"), "a call to a name past 31");
+    CHECK(refused("section Begin\n{\n  on (Var01) enter Begin " + past + "\n}\n"), "a table's enter to a name past 31");
+    CHECK(refused("declsection " + past + "\nsection Begin\n{\n  done\n}\n"), "a declsection of a name past 31");
     return 1;
 }
 

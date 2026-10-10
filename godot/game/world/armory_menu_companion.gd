@@ -211,6 +211,9 @@ func _populate_classes() -> void:
 				String(CLASS_FALLBACK_TEXT.get(text_key, text_key))))
 	_populating = true
 	_driver.set_widget_items(spin, rows)
+	# The host's class mask enables each class row, then the select (the engine's
+	# menu::enable_class_rows, the on-show order of UI_InitTeamClassSelection).
+	_driver.enable_class_rows(spin, _class_allow_mask)
 	# Select by VALUE = the resolved class; a class with no row falls back to row 0
 	# [orig: SpinList_SelectItemByValue @0x64ba50 selects 0 on no match].
 	_driver.select_row(spin, maxi(_class_row_for_value(_selected_class_value), 0), false)

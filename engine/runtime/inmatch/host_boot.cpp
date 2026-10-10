@@ -72,6 +72,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	boot.kernel = nullptr;
 	boot.session = request.session;
 	boot.host = request.host;
+	boot.session_create = CreateSessionResult::Created;
 	boot.mission_text = mission::MissionText{};
 	boot.terrain_til.clear();
 	boot.server_text = ServerTextTable{};
@@ -208,7 +209,20 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		if (after) after(fresh_runtime);
 	};
 	std::string boot_error;
-	if (!kernel.boot(options, boot_error)) {
+	const bool booted = kernel.boot(options, boot_error);
+	// The host's session create ended the process: retail exits there, ahead
+	// of every later leg of the mission start, so the boot stops and reports
+	// it [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0),
+	// from SinglePlayer_StartMission @0x561E65 and
+	// CNapiGameSession_BuildAndCreateSession @0x56997D (which the PreMenu's
+	// state 2 calls, MultiPlayer_JoinSessionStateMachine @0x56A46A), both
+	// before the Game Loop's Game_StartMission].
+	if (request.host != nullptr && request.host->session_create() == CreateSessionResult::ProcessExit) {
+		boot.session_create = CreateSessionResult::ProcessExit;
+		error = "mpreset is set: the session create ends the process (exit code 0)";
+		return false;
+	}
+	if (!booted) {
 		error = "the mission boot failed: " + boot_error;
 		return false;
 	}

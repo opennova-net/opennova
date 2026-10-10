@@ -47,7 +47,7 @@ const char kUsage[] =
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
 		"  --lan-port       the first port of the bind scan (default: game.cfg mplanserverportmin,\n"
 		"                   the head of the retail LAN server range; mpnovaworldportmin when\n"
-		"                   listing on NovaWorld)\n"
+		"                   listing on NovaWorld); 0 binds a port the OS picks\n"
 		"  --log-debug      print the engine's debug log lines\n"
 		"  --master-host    the NovaWorld gate to list on (127.0.0.1 for an\n"
 		"                   opennova-novaworld-server on this machine). With it, game.cfg's\n"
@@ -75,10 +75,11 @@ const char kUsage[] =
 constexpr const char *kAdminLogFileName = "admin_log.txt";
 
 // The one-token switches, retail-spelled ones matched case-insensitively.
-bool parse_port(const std::string &text, uint16_t &out) {
+bool parse_port(const std::string &text, uint16_t &out, bool allow_zero = false) {
 	char *end = nullptr;
 	const unsigned long value = std::strtoul(text.c_str(), &end, 0);
-	if (text.empty() || end == nullptr || *end != '\0' || value == 0 || value > 0xFFFF) return false;
+	if (text.empty() || end == nullptr || *end != '\0' || (value == 0 && !allow_zero) || value > 0xFFFF)
+		return false;
 	out = static_cast<uint16_t>(value);
 	return true;
 }
@@ -148,10 +149,12 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 		} else if (a == "--lan-port") {
 			std::string text;
 			if (!value(text)) return 1;
-			if (!parse_port(text, out.port)) {
-				error = "--lan-port must be 1..65535";
+			uint16_t port = 0;
+			if (!parse_port(text, port, /*allow_zero=*/true)) {
+				error = "--lan-port must be 0..65535";
 				return 1;
 			}
+			out.port = port;
 		} else if (a == "--master-host") {
 			if (!value(out.master_host)) return 1;
 		} else if (a == "--master-gate-port") {
@@ -186,6 +189,10 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {}
 Server::~Server() { stop(); }
 
 bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
+	return begin(error, cancel) && start_session(error);
+}
+
+bool Server::begin(std::string &error, const std::atomic<bool> *cancel) {
 	// The admin server's log opens for writing at the process's static
 	// construction, ahead of everything, so every launch truncates it whether
 	// or not the listener ever opens [orig: CAdminServer_Construct @0x402C10,
@@ -212,8 +219,27 @@ bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
 	// The subsystems' tail: admin.cfg and the listener [orig: Game_InitSubsystems
 	// @0x4A72B8..0x4A72D9, after the game.cfg read @0x4A70AB].
 	open_admin();
-	if (!read_host_file(error) || !open_socket(error) || !host_on_novaworld(error, cancel) ||
-			!boot_mission(/*next_mission=*/false, error)) {
+	if (!read_host_file(error) || !open_socket(error) || !host_on_novaworld(error, cancel)) {
+		stop();
+		return false;
+	}
+	begun_ = true;
+	return true;
+}
+
+// The starting map: the session settings from the cfg block as it stands at the create, which a
+// SetMPReset during the hosting wait changed (ServeListing::on_command), then the boot, whose
+// session create reads the block's mpreset word
+// [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 builds the session settings from the
+//  block at the create, @0x56955D..0x56956C; CNapiGameSession_CreateSession @0x4C97E7 reads
+//  dword_25509FC itself].
+bool Server::start_session(std::string &error) {
+	if (!begun_ || running_) {
+		error = "the server has not begun, or its session already stands";
+		return false;
+	}
+	host_ = inmatch::host_session_settings(cfg_);
+	if (!boot_mission(/*next_mission=*/false, error)) {
 		stop();
 		return false;
 	}
@@ -469,7 +495,21 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		kernel_ = std::move(fresh);
 		return *kernel_;
 	};
-	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) return false;
+	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) {
+		// The session create's mpreset exit: retail's crt_exit(0) ends the
+		// process inside the create, so Game_Run's exit tail never runs (no
+		// game.cfg save, no banned.txt save, activesrvr.txt left behind); its
+		// atexit table still tears the NovaWorld session down (stop()). The
+		// process exits with code 0. Only the starting map creates a session
+		// here: a map change continues it
+		// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 ->
+		//  crt_exit(0), skipping Game_Run @0x4A7FFF..0x4A800E].
+		if (boot_.session_create == inmatch::CreateSessionResult::ProcessExit) {
+			reset_exit_ = true;
+			exit_save_owed_ = false;
+		}
+		return false;
+	}
 	// No device stages run between the phases on a headless host.
 	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
 	++missions_played_;
@@ -520,7 +560,8 @@ bool Server::route_mission_exit(int32_t reason) {
 // over the cfg's LAN server range on the LAN type, and on the NovaWorld type the
 // mpnovaworld range whatever the authority, so the NWU session, the game
 // traffic and the joiners share it (D-NET-346). Each scans from its first port,
-// stepping by its delta and wrapping; --lan-port replaces the first port
+// stepping by its delta and wrapping; --lan-port replaces the first port (0,
+// the OS's pick, which the first bind takes)
 // [orig: CNapiNetwork_OpenTransportSocket @0x4C6A40 — the one open @0x4C6A7C,
 // the authority arm @0x4C6AA2 over mplanserverportmin / max / delta
 // (g_GameConfigState+0x244 / +0x248 / +0x24C), the NovaWorld arm
@@ -529,7 +570,7 @@ bool Server::route_mission_exit(int32_t reason) {
 // mpnovaworldportrandom start (+0x234, off by default) is not ported. The
 // embedder owns the socket layer (net::startup), which is process-wide.
 bool Server::open_socket(std::string &error) {
-	const uint32_t first = options_.port != 0 ? options_.port
+	const uint32_t first = options_.port ? *options_.port
 			: static_cast<uint32_t>(novaworld_ ? cfg_.mp_novaworld_port_min : cfg_.mp_lan_server_port_min);
 	const uint32_t max = static_cast<uint32_t>(
 			novaworld_ ? cfg_.mp_novaworld_port_max : cfg_.mp_lan_server_port_max);
@@ -686,6 +727,7 @@ void Server::stop() {
 		session_.reset();
 	}
 	running_ = false;
+	begun_ = false;
 	// Game_Run's exit: game.cfg saved, the subsystems (the socket among them)
 	// shut down, then the lock deleted, unconditionally [orig: Game_Run
 	// @0x4A7FFF Game_SaveConfig, @0x4A8004 Game_ShutdownSubsystems,
@@ -712,9 +754,22 @@ void Server::stop() {
 	if (role_) role_->set_socket(nullptr);
 	if (listing_) listing_->unbind();
 	// The NovaWorld deregistration: ClientStopHosting, then the goodbye burst,
-	// on the same socket before it closes.
+	// on the same socket before it closes. The session create's exit sends the
+	// burst alone: retail's crt_exit runs no ClientStopHosting, but its atexit
+	// table destroys the NovaWorld session, whose connection teardown sends the
+	// burst, and the Winsock stack is still up then, held by the remote-admin
+	// server's static reference, whose release runs after both NovaWorld
+	// handlers (the table runs last-registered first)
+	// [orig: CNapiGameSession_Destroy, registered @0x7939DA (initializer slot
+	//  0x7C0578) -> CNapiGameSession_ResetToDisconnected @0x4D0890 ->
+	//  CNapiNPConnection_Destroy -> SendDisconnectPacket @0x61F2A0 -> sendto;
+	//  CAdminServer_Construct's WSAStartup @0x402C22 (slot 0x7C0554), its
+	//  WSACleanup @0x406DE2 from the destructor registered @0x79377A].
 	if (lister_) {
-		lister_->stop();
+		if (reset_exit_)
+			lister_->disconnect();
+		else
+			lister_->stop();
 		lister_.reset();
 	}
 	listing_.reset();

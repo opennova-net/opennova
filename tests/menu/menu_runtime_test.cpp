@@ -24,6 +24,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -116,6 +117,11 @@ struct FakeFrame : MenuFrameSeam {
 		for (int r : rows) s += " " + std::to_string(r);
 		note(s);
 	}
+	void set_widget_disabled_items(int i, const std::vector<uint8_t> &rows) override {
+		std::string s = "disabled_items " + std::to_string(i);
+		for (uint8_t r : rows) s += r ? " 1" : " 0";
+		note(s);
+	}
 	void set_widget_table_rows(int i, const std::vector<MenuTableRow> &rows) override {
 		note("rows " + std::to_string(i) + " " + std::to_string(rows.size()));
 		table_rows[i] = rows;
@@ -165,12 +171,32 @@ struct FakeFrame : MenuFrameSeam {
 		sx = 2.0f;
 		sy = 2.0f;
 	}
+	int press_calls = 0;
 	std::vector<MenuPumpWindow> press_mouse(float, float) override {
+		++press_calls;
 		if (!reach.empty()) return reach;
 		if (claim < 0) return {};
 		return { MenuPumpWindow{ claim, scroll_owned ? kMenuPumpPartScroll : 0 } };
 	}
-	int process_mouse(float, float, bool) override { return claim; }
+	// The pump's samples (x, y, button), and the open dropdown's press holding the capture until the
+	// release (MenuClickLatch::dropdown_press): no window takes the pump's claim meanwhile.
+	std::vector<std::tuple<float, float, bool>> samples;
+	bool dropdown_capture = false;
+	int releases = 0;
+	int popup_presses = 0;
+	int process_mouse(float x, float y, bool down) override {
+		samples.emplace_back(x, y, down);
+		return dropdown_capture ? -1 : claim;
+	}
+	void release_mouse() override {
+		++releases;
+		dropdown_capture = false;
+	}
+	bool press_popup_mouse(int, float, float) override {
+		++popup_presses;
+		dropdown_capture = true;
+		return popup_mouse;
+	}
 	bool process_popup_mouse(int, float, float, bool) override { return popup_mouse; }
 	bool process_mouse_wheel(float, float, int) override { return wheel; }
 	void set_cursor_state(bool, float, float) override {}
@@ -351,7 +377,8 @@ void test_index_and_frameless() {
 	CHECK(!rt.open_document(nullptr, "main.mnu", ""));
 	CHECK(rt.open_document(&doc, "main.mnu", "nope"));
 	CHECK(rt.current_screen() == "MAIN");
-	CHECK(rt.index().node_count() == 20);
+	// The 20 windows and screens, then the three parts (the combo's LIST_BOX, the spin list's arrows).
+	CHECK(rt.index().node_count() == 23);
 	CHECK(rt.index().screen_ids() == (std::vector<int>{ 1, 17 }));
 	CHECK(rt.index().screen_root_id(17) == 18);
 	// The tree the document binding reads through: a screen container has no
@@ -363,7 +390,14 @@ void test_index_and_frameless() {
 			rt.index().node(2)->child_ids.size() == 14 && rt.index().node(2)->child_ids[1] == 4);
 	CHECK(rt.index().screen(1) != nullptr && rt.index().screen(2) == nullptr &&
 			rt.index().screen_root_id(2) == -1 && rt.index().node(0) == nullptr &&
-			rt.index().node(21) == nullptr);
+			rt.index().node(24) == nullptr);
+	// A part is numbered after every window, its owner's and no child the frame walks, found by its
+	// fixed NAME [orig: CWnd_FindChildByName @ 0x646850; sub_65BF60 @ 0x65bf8f;
+	// CSpinListWnd_CreateUpDownChildren @ 0x64b8fe].
+	CHECK(rt.index().node(21)->parent_id == 8 && rt.index().window(21) == rt.index().window(8)->list_box.get() &&
+			rt.index().node(8)->child_ids.empty());
+	CHECK(rt.find_control("", "listbox_wnd") == 21 && rt.find_control("", "SPINLISTWND_DOWN") == 23 &&
+			rt.index().node(23)->parent_id == 9);
 	// The name seam: the current screen's control first (case-insensitive), else
 	// the first screen holding one.
 	CHECK(rt.widget_id("play") == 3 && rt.widget_id("PLAY") == 3);
@@ -843,6 +877,70 @@ void test_sound_edges() {
 	CHECK(sounds() == "OVER_B CLICK_B OVER_B OUT_B");
 }
 
+// The mouse as the game takes it: each message as it arrives, the pump once a frame after them over
+// the last message's point and button [orig: Menu_ShellMouseCallback @ 0x54b860 -> UI_DispatchMouseEvent
+// @ 0x63ab00; Menu_UpdateFrame @ 0x5528a0, Game_PumpWindowMessages @ 0x5528d3 then CUIScene_EndFrame
+// @ 0x5528de]. A move is no sample: two moves across a window inside one frame play nothing of it; the
+// press reaches the windows as it comes and the release lets the capture go as it comes, so a second
+// press inside the same frame is a press of its own [orig: CButtonWnd_HandleNamedEvent @ 0x6583ed].
+void test_messages_then_the_pump() {
+	mnu::Document doc;
+	mnu::Screen screen;
+	screen.name = "S";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	mnu::Window b = widget("B", mnu::WindowType::Button);
+	b.sounds = { mnu::Sound{ "mousein", "OVER_B", "menu.lwf" }, mnu::Sound{ "mouseout", "OUT_B", "menu.lwf" } };
+	mnu::Window c = widget("C", mnu::WindowType::Button);
+	c.sounds = { mnu::Sound{ "mousein", "OVER_C", "menu.lwf" } };
+	root.children = { b, c };
+	screen.roots.push_back(root);
+	doc.screens = { screen };
+	FakeFrame frame;
+	MenuRuntime rt;
+	Recorder rec;
+	rt.set_frame(&frame);
+	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
+	rt.open_document(&doc, "s.mnu", "");
+	const auto sounds = [&rec] {
+		std::string out;
+		for (const MenuEvent &e : rec.events)
+			if (e.kind == MenuEvent::Kind::Sound) out += (out.empty() ? "" : " ") + e.text2;
+		return out;
+	};
+	// Nothing before the first message.
+	rt.pump_mouse();
+	CHECK(frame.samples.empty());
+	// Over B, then over C, inside one frame: the pump samples C alone, so B plays nothing.
+	rt.move_mouse(5, 5, false);
+	rt.move_mouse(30, 5, false);
+	CHECK(frame.samples.empty());
+	frame.claim = 2; // C
+	rt.pump_mouse();
+	CHECK(frame.samples.size() == 1 && frame.samples.back() == std::make_tuple(30.0f, 5.0f, false));
+	CHECK(sounds() == "OVER_C");
+	// The press reaches the windows as it arrives; the pump reads the button it left.
+	const int pressed = frame.press_calls;
+	CHECK(rt.press_mouse(30, 5, 0) && frame.press_calls == pressed + 1);
+	CHECK(frame.samples.size() == 1);
+	rt.pump_mouse();
+	CHECK(std::get<2>(frame.samples.back()));
+	// The release lets the capture go as it arrives, and a second press inside the same frame reaches
+	// the windows again; the pump then reads the button down.
+	CHECK(rt.release_mouse(30, 5) && frame.releases == 1);
+	CHECK(rt.press_mouse(30, 5, 0) && frame.press_calls == pressed + 2);
+	rt.pump_mouse();
+	CHECK(frame.samples.size() == 3 && std::get<2>(frame.samples.back()));
+	// A whole sample (process_mouse) is its message and the pump.
+	rt.process_mouse(30, 5, false, 0);
+	CHECK(frame.releases == 2 && frame.samples.size() == 4 && !std::get<2>(frame.samples.back()));
+	rt.process_mouse(30, 5, true, 0);
+	CHECK(frame.press_calls == pressed + 3 && frame.samples.size() == 5);
+	rt.process_mouse(30, 5, true, 0);
+	CHECK(frame.press_calls == pressed + 3 && frame.samples.size() == 6);
+	rt.process_mouse(30, 5, false, 0);
+	CHECK(frame.releases == 3);
+}
+
 void test_mouse() {
 	const mnu::Document doc = make_document();
 	FakeFrame frame;
@@ -883,17 +981,35 @@ void test_mouse() {
 	CHECK(rt.is_combo_popup_open(8) && frame.saw("popup 6 1"));
 	rt.on_widget_clicked(6, 0);
 	CHECK(!rt.is_combo_popup_open(8) && frame.saw("popup 6 0"));
-	// While open it owns the mouse: a row press selects and closes...
+	// While open it owns the mouse: a row press selects and closes; the dropdown holds the capture
+	// until the release, so no window takes the claim meanwhile...
 	rt.on_widget_clicked(6, 0);
 	frame.popup_row = 1;
-	frame.claim = 3; // the main pump must NOT run
+	frame.claim = 3;
 	rec.events.clear();
 	rt.process_mouse(50, 50, true, 0);
-	CHECK(!rt.is_combo_popup_open(8) && rt.selected_row(8) == 1);
+	CHECK(!rt.is_combo_popup_open(8) && rt.selected_row(8) == 1 && frame.popup_presses == 1);
 	CHECK(rec.last(MenuEvent::Kind::ValueChanged)->text2 == "combo" &&
 			rec.last(MenuEvent::Kind::ValueChanged)->text3 == "b" &&
 			rec.count(MenuEvent::Kind::HoverChanged) == 0);
 	rt.process_mouse(50, 50, false, 0);
+	frame.claim = -1;
+	rt.process_mouse(50, 50, false, 0);
+	// ...and takes its press as it arrives: a row's press and release inside one frame pick it, and
+	// an outside one closes it [orig: CWnd_DispatchMouseEventToChildren @ 0x647917 hands the press to
+	// g_UIActiveComboWnd; CComboWnd_HandleEvent @ 0x65c261..0x65c2bc]...
+	rt.on_widget_clicked(6, 0);
+	frame.popup_row = 0;
+	rt.press_mouse(50, 50, 0);
+	rt.release_mouse(50, 50);
+	rt.pump_mouse();
+	CHECK(!rt.is_combo_popup_open(8) && rt.selected_row(8) == 0);
+	rt.on_widget_clicked(6, 0);
+	frame.popup_row = -1;
+	rt.press_mouse(900, 900, 0);
+	rt.release_mouse(900, 900);
+	rt.pump_mouse();
+	CHECK(!rt.is_combo_popup_open(8));
 	// ...a press on the closed cell (design rect 10,20 100x40 at scale 2) is dead...
 	rt.on_widget_clicked(6, 0);
 	frame.popup_row = -1;
@@ -1414,6 +1530,120 @@ void test_host_dialog() {
 	CHECK(!host.can_start() && host.selected_missions().empty());
 }
 
+// A spin list's rows the game enables and disables [orig: CSpinListWnd_SetItemEnabled @ 0x64bbd0]: a
+// row out of range changes nothing, the spin steps past a disabled row both ways [orig:
+// CSpinListWnd_SelectNext @ 0x64b910, CSpinListWnd_SelectPrevious @ 0x64b9a0], fresh rows are all
+// enabled [orig: CSpinListWnd_InsertItem @ 0x64b84c]; and a window a lookup finds in a part is a
+// window of its screen the runtime acts on [orig: CWnd_FindChildByName @ 0x646850]: any part by its
+// fixed NAME and screen, a spin arrow by a frame index past the screen's windows, as the frame builds
+// the arrows (MenuFrameCompiler::configure).
+void test_spin_rows_enabled_and_parts() {
+	auto doc = make_document();
+	FakeFrame frame;
+	seed_counts(frame);
+	MenuRuntime rt;
+	Recorder rec;
+	rt.set_frame(&frame);
+	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
+	CHECK(rt.open_document(&doc, "MAIN.MNU", "main"));
+	const int spin = 9;
+	frame.log.clear();
+	rt.set_item_enabled(spin, 1, false);
+	CHECK(frame.saw("disabled_items 7 0 1"));
+	CHECK(!rt.is_item_enabled(spin, 1) && rt.is_item_enabled(spin, 0) && rt.is_item_enabled(spin, 2));
+	frame.log.clear();
+	rt.set_item_enabled(spin, 3, false);
+	rt.set_item_enabled(spin, -1, false);
+	CHECK(frame.log.empty() && rt.is_item_enabled(spin, 3));
+	rt.select_row(spin, 0, false);
+	rec.events.clear();
+	rt.spin_cycle(spin, 1);
+	CHECK(rt.selected_row(spin) == 2 && rec.count(MenuEvent::Kind::ValueChanged) == 1);
+	rt.spin_cycle(spin, -1);
+	CHECK(rt.selected_row(spin) == 0);
+	rt.spin_cycle(spin, -1);
+	CHECK(rt.selected_row(spin) == 2);
+	// Every row disabled: retail's loop never ends; this one changes nothing and emits nothing.
+	rt.set_item_enabled(spin, 0, false);
+	rt.set_item_enabled(spin, 2, false);
+	rec.events.clear();
+	rt.spin_cycle(spin, 1);
+	CHECK(rt.selected_row(spin) == 2 && rec.count(MenuEvent::Kind::ValueChanged) == 0);
+	// The state replays onto a fresh compile of the screen.
+	rt.set_item_enabled(spin, 0, true);
+	rt.navigate_to_screen("OPTIONS");
+	frame.log.clear();
+	rt.pop_screen();
+	CHECK(frame.saw("disabled_items 7 0 1 1"));
+	// Fresh rows: every one enabled.
+	frame.log.clear();
+	rt.set_widget_items(spin, { "a", "b", "c" });
+	CHECK(frame.saw("disabled_items 7") && rt.is_item_enabled(spin, 1) && rt.is_item_enabled(spin, 2));
+
+	// The parts: by their fixed NAMEs, on the screen of their owner.
+	const int list_box = rt.find_control("", "LISTBOX_WND");
+	const int up = rt.find_control("", "SPINLISTWND_UP");
+	const int down = rt.find_control("", "spinlistwnd_down");
+	CHECK(list_box == 21 && up == 22 && down == 23);
+	CHECK(rt.widget_screen_of(list_box) == "MAIN" && rt.widget_screen_of(up) == "MAIN");
+	CHECK(rt.widget_name_of(up) == "SPINLISTWND_UP" && rt.widget_name_of(list_box) == "LISTBOX_WND");
+	// The arrows past the screen's fifteen windows; the LIST_BOX, drawn as its combo's, has none.
+	CHECK(rt.current_screen_ids().size() == 15);
+	CHECK(rt.frame_index(up) == 15 && rt.frame_index(down) == 16 && rt.id_at_index(16) == down);
+	CHECK(rt.frame_index(list_box) == -1 && rt.id_at_index(17) == -1);
+	frame.log.clear();
+	CHECK(rt.dispatch_action(action("WINDOW", "SPINLISTWND_UP", "HIDE")));
+	CHECK(frame.saw("shown 15 0") && !rt.is_widget_shown(up));
+	// A disabled arrow's click steps nothing; enabled again, it steps.
+	rt.select_row(spin, 1, false);
+	rt.set_widget_disabled(down, true);
+	CHECK(frame.saw("disabled 16 1"));
+	rt.on_widget_clicked(7, 2);
+	CHECK(rt.selected_row(spin) == 1);
+	rt.set_widget_disabled(down, false);
+	rt.on_widget_clicked(7, 2);
+	CHECK(rt.selected_row(spin) == 0);
+}
+
+// The callers of the row switch: the host dialog's GAME_TYPE rows, each disabled, then enabled when
+// it is ALL or a mission of the whole list maps to it, then ALL selected [orig:
+// UI_InitHostSettingsDialog @ 0x558ac3..0x558c1b]; the armory's class rows by the host's class mask,
+// bits 5..9 [orig: UI_InitTeamClassSelection @ 0x56739e..0x5673f4].
+void test_row_switch_callers() {
+	auto doc = flow_document();
+	MenuRuntime menu;
+	menu.open_document(&doc, "mp.mnu", "");
+	const int game_type = menu.widget_id("GAME_TYPE");
+	menu.select_row(game_type, 1, false);
+	HostDialog host;
+	host.seed(menu, { { "dm.bms", "Deathmatch", "", game_type::kDeathmatch },
+			{ "sp.bms", "Training", "", game_type::kCoop } });
+	CHECK(menu.is_item_enabled(game_type, 0) && !menu.is_item_enabled(game_type, 1));
+	CHECK(menu.selected_row(game_type) == 0);
+	host.seed(menu, { { "team.bms", "Team", "", game_type::kTeamDeathmatch } });
+	CHECK(menu.is_item_enabled(game_type, 0) && menu.is_item_enabled(game_type, 1));
+
+	mnu::Document armory;
+	mnu::Screen screen;
+	screen.name = "WEAPON";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	mnu::Window classes = widget("PLAYER_CLASS", mnu::WindowType::SpinList);
+	classes.items.items = { item("medic", "5"), item("sniper", "6"), item("gunner", "7"),
+		item("rifleman", "8"), item("engineer", "9") };
+	root.children = { classes };
+	screen.roots.push_back(root);
+	armory.screens.push_back(screen);
+	MenuRuntime weapon;
+	weapon.open_document(&armory, "weapon.mnu", "");
+	const int spin = weapon.widget_id("PLAYER_CLASS");
+	enable_class_rows(weapon, spin, (1u << 5) | (1u << 8));
+	CHECK(weapon.is_item_enabled(spin, 0) && !weapon.is_item_enabled(spin, 1) &&
+			!weapon.is_item_enabled(spin, 2) && weapon.is_item_enabled(spin, 3) &&
+			!weapon.is_item_enabled(spin, 4));
+	enable_class_rows(weapon, spin, 0xFFFFu);
+	for (int row = 0; row < 5; ++row) CHECK(weapon.is_item_enabled(spin, row));
+}
+
 // The shipped MISSION_LIST is a LIST whose ITEMS are MULTISELECT: a click keeps a
 // selection set, ADD takes the picked mission, and the rebuilt rows drop the set (its
 // indexes named the old rows), so a second ADD adds nothing and no row stays
@@ -1913,6 +2143,7 @@ int main() {
 	test_table_column_records();
 	test_mouse();
 	test_sound_edges();
+	test_messages_then_the_pump();
 	test_keys();
 	test_two_root_keys();
 	test_duplicate_screens();
@@ -1920,6 +2151,8 @@ int main() {
 	test_shell_flow();
 	test_host_dialog();
 	test_host_dialog_multiselect();
+	test_spin_rows_enabled_and_parts();
+	test_row_switch_callers();
 	test_multiple_roots();
 	test_options_screen();
 	test_options_profile();

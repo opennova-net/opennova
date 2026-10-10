@@ -27,7 +27,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
 | `/game <code>` | The data's game code (its SCR keying), as the game's `/game`. |
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
-| `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. |
+| `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
 | `--log-debug` | Print the engine's debug log lines. |
 | `--master-host <gate>` | The NovaWorld gate to list on (`127.0.0.1` for an `opennova-novaworld-server` on this machine). Without it the server serves LAN only (below). |
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |
@@ -146,7 +146,16 @@ the directory you want). It never writes into `--resource-dir` unless it runs fr
    nothing reads it.
 
 A `game.cfg` with `mpreset = "1"` stops the server before it writes anything, with exit code
-0, as the game exits at that read.
+0, as the game exits at that read. The game's other reader of the word is the session create,
+which ends the process with code 0 when the word is set by then. The server creates its
+session once, for the starting map, after a listed server's NovaWorld hosting. While it waits
+to be listed, the service's commands already run, as the game's do, but before the session
+exists only `SetMPReset` passes its checks: it is saved to `game.cfg` at once, and the starting
+map's session create then exits. That exit skips the clean exit's work, as the game's does:
+`game.cfg` is not saved again, `activesrvr.txt` stays, and the NovaWorld session sends its
+goodbye without withdrawing the hosting first. A map change continues the session, as a
+retail host's does, so a `SetMPReset` during the match is saved and the server keeps serving
+round after round; its next launch exits with 0 at the read.
 
 The remote admin's files sit there too (below): `admin_log.txt`, which every launch starts
 empty, `admin.cfg`, read once at the start, and the ban lists `banned.txt` and
@@ -230,7 +239,7 @@ These logs go to the working directory, in retail's names and formats:
 
 | Code | Meaning |
 |---|---|
-| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset`, the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
+| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset` (at its read, or at the session create when the word is set by then), the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
 | 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), or the mission did not boot. |
 | 2 | A usage error, or the `--credentials` file did not open. |
 | 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting. |

@@ -2377,6 +2377,213 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
 			"the closed combo face draws the LIST_BOX selection (NORMAL)");
 }
 
+// The items as the game draws them (D-MNU-5): a list's row of TYPE IMAGE or COLOR is the text written
+// for it, drawn as the row's label [orig: CListWnd_ParseXMLDefinition @ 0x645b0f..0x645c6f]; a closed
+// combo with no selected row shows its first row [orig: sub_644590 @ 0x644590]; a spin list's image
+// moves the widget rect by its texture's height on both axes and stretches into it, and its colour fills
+// the rect forced opaque [orig: CSpinListWnd_Render @ 0x64b3b6..0x64b509]; a RADIOEDIT draws as the
+// radio its element makes [orig: sub_65D210 @ 0x65d210].
+void test_items_as_the_game_draws_them(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>ITEMS</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
+    <WINDOW type="list" name="L">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>200</RIGHT><BOTTOM>40</BOTTOM></POSITION>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+      <ITEMS justify="LEFT" vjustify="TOP">
+        <ITEM type="IMAGE">ab.tga</ITEM>
+        <ITEM type="COLOR">FF0000</ITEM>
+      </ITEMS>
+    </WINDOW>
+    <WINDOW type="combobox" name="C">
+      <POSITION><LEFT>0</LEFT><TOP>100</TOP><RIGHT>200</RIGHT><BOTTOM>120</BOTTOM></POSITION>
+      <LIST_BOX>
+        <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT><BOTTOM>60</BOTTOM></POSITION>
+        <ITEMS><ITEM type="IMAGE">xyz.tga</ITEM><ITEM>LONGER</ITEM></ITEMS>
+      </LIST_BOX>
+    </WINDOW>
+    <WINDOW type="spinlist" name="S">
+      <POSITION><LEFT>300</LEFT><TOP>0</TOP><RIGHT>400</RIGHT><BOTTOM>50</BOTTOM></POSITION>
+      <ITEMS><ITEM type="IMAGE">wide.tga</ITEM></ITEMS>
+    </WINDOW>
+    <WINDOW type="radioedit" name="RE">
+      <POSITION><LEFT>500</LEFT><TOP>0</TOP><RIGHT>540</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">FF123456</APPEARANCE>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	CHECK(slot_of(c, "ab.tga") == kMenuTexNone && slot_of(c, "xyz.tga") == kMenuTexNone,
+			"a list's image rows load no texture");
+	const int32_t wide = slot_of(c, "wide.tga");
+	CHECK(wide >= 0, "a spin list's image row loads its texture");
+	c.set_texture_size(wide, 32, 16);
+	MenuWidgetState combo;
+	combo.index = 2;
+	combo.selected_item = -1;
+	MenuFrameState state;
+	state.widgets.push_back(combo);
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	// The list's two rows draw "ab.tga" and "FF0000" (6 glyphs each); the closed combo its first row,
+	// "xyz.tga" (7).
+	int list_glyphs = 0, face_glyphs = 0;
+	for (const auto &g : dl.glyphs) {
+		if (g.y_top > -1.0f && g.y_bottom < 41.0f && g.x_top_left < 200.0f) ++list_glyphs;
+		if (g.y_top > 99.0f && g.y_bottom < 121.0f) ++face_glyphs;
+	}
+	CHECK(list_glyphs == 12, "a list's image and colour rows draw their text");
+	CHECK(face_glyphs == 7, "a closed combo with no selection shows its first row");
+	bool red = false;
+	for (const MenuQuad &q : dl.quads) red = red || (q.color & 0xFFFFFFu) == 0xFF0000u;
+	CHECK(!red, "a list's colour row fills nothing");
+	// The spin list's image, centred by the rect's halves less half its texture's height (16): the
+	// widget rect moved by (50 - 8, 25 - 8), stretched to the widget's 100 x 50.
+	bool stretched = false;
+	for (const MenuQuad &q : dl.quads)
+		if (q.texture == wide)
+			stretched = q.x0 == 342.0f && q.y0 == 17.0f && q.x1 == 442.0f && q.y1 == 67.0f;
+	CHECK(stretched, "the spin list's image is the widget rect moved by its height and stretched into it");
+	// The RADIOEDIT's radio draws the element's appearance over its rect.
+	bool radio = false;
+	for (const MenuQuad &q : dl.quads)
+		radio = radio || (q.color == 0xFF123456u && q.x0 == 500.0f && q.x1 == 540.0f);
+	CHECK(radio, "a RADIOEDIT draws the radio of its element");
+}
+
+// A spin list's item as the game lays it out inside a parent window [orig: CSpinListWnd_Render
+// @ 0x64b220]: an image's RIGHT and BOTTOM deltas come from the window's own, parent-relative rect
+// (@ 0x64b31d, @ 0x64b3c9, @ 0x64b468) and the parents' origins are added at the draw
+// (CUIElement_DrawTextureNative @ 0x647e6f); the item text takes the item's own colour index, 0, the
+// DEFAULT pair whatever the widget's state (@ 0x64b5a7, zeroed @ 0x64b88d); a row the game disabled
+// draws nothing (@ 0x64b334); a hidden RADIOEDIT still draws its radio (its render 0x65d310 has no
+// shown gate) while the pump passes it by; a spin arrow's own row hides or disables it.
+void test_spin_item_in_a_parent(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>SPIN</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>AABBCC</DEFAULT_FG><DISABLED_FG>00FF00</DISABLED_FG><MOUSEOVER_FG>FF0000</MOUSEOVER_FG></FONT>
+    <WINDOW type="window" name="P">
+      <POSITION><LEFT>100</LEFT><TOP>50</TOP><RIGHT>700</RIGHT><BOTTOM>550</BOTTOM></POSITION>
+      <WINDOW type="spinlist" name="S">
+        <POSITION><LEFT>300</LEFT><TOP>0</TOP><RIGHT>400</RIGHT><BOTTOM>50</BOTTOM></POSITION>
+        <ITEMS justify="RIGHT" vjustify="BOTTOM"><ITEM type="IMAGE">img.tga</ITEM><ITEM>TEXT</ITEM></ITEMS>
+        <SPINUP>
+          <POSITION><LEFT>-20</LEFT><TOP>0</TOP><RIGHT>-4</RIGHT><BOTTOM>16</BOTTOM></POSITION>
+          <APPEARANCE type="color" state="default">FF0000AA</APPEARANCE>
+        </SPINUP>
+        <SPINDOWN>
+          <POSITION><LEFT>104</LEFT><TOP>0</TOP><RIGHT>120</RIGHT><BOTTOM>16</BOTTOM></POSITION>
+          <APPEARANCE type="color" state="default">FF0000BB</APPEARANCE>
+        </SPINDOWN>
+      </WINDOW>
+    </WINDOW>
+    <WINDOW type="radioedit" name="RE" HIDDEN>
+      <POSITION><LEFT>500</LEFT><TOP>0</TOP><RIGHT>540</RIGHT><BOTTOM>20</BOTTOM></POSITION>
+      <APPEARANCE type="color" state="default">FF123456</APPEARANCE>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	const int32_t img = slot_of(c, "img.tga");
+	CHECK(img >= 0, "the spin list's image row loads its texture");
+	c.set_texture_size(img, 32, 16);
+	// Pre-order: 0 ROOT, 1 P, 2 S, 3 RE; the arrows past them, 4 SPINUP, 5 SPINDOWN.
+	MenuFrameState state;
+	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
+	// The own rect (300,0)-(400,50): moved by (400 - 8, 50 - 16), its left and top then the parents'
+	// origin (100, 50) on: (792,84)-(892,134). The absolute rect's edges would give (892,134).
+	bool image_at = false;
+	for (const MenuQuad &q : dl.quads)
+		if (q.texture == img)
+			image_at = q.x0 == 792.0f && q.y0 == 84.0f && q.x1 == 892.0f && q.y1 == 134.0f;
+	CHECK(image_at, "a nested spin list's RIGHT / BOTTOM image moves by its own rect's edges");
+	bool radio = false, up = false, down = false;
+	for (const MenuQuad &q : dl.quads) {
+		radio = radio || (q.color == 0xFF123456u && q.x0 == 500.0f && q.x1 == 540.0f);
+		up = up || q.color == 0xFF0000AAu;
+		down = down || q.color == 0xFF0000BBu;
+	}
+	CHECK(radio, "a hidden RADIOEDIT still draws its radio");
+	CHECK(up && down, "both arrows draw");
+	CHECK(c.hit_widget(state, 520.0f, 10.0f, 1.0f, 1.0f) != 3, "the pump passes a hidden RADIOEDIT by");
+
+	// The text row hovered, then disabled: DEFAULT_FG both times.
+	MenuWidgetState spin;
+	spin.index = 2;
+	spin.selected_item = 1;
+	spin.hovered = true;
+	state.widgets.push_back(spin);
+	const auto text_colours = [&](const MenuDrawList &list, bool *default_fg, bool *other) {
+		*default_fg = *other = false;
+		for (const auto &g : list.glyphs) {
+			if (g.x_top_left < 300.0f) continue;
+			if ((g.color & 0xFFFFFFu) == text_rgb(0xAABBCCu)) *default_fg = true;
+			else *other = true;
+		}
+	};
+	bool default_fg = false, other = false;
+	text_colours(c.compile(state, 1.0f, 1.0f), &default_fg, &other);
+	CHECK(default_fg && !other, "a hovered spin list's item text keeps the DEFAULT pair");
+	state.widgets[0].hovered = false;
+	state.widgets[0].has_disabled = true;
+	state.widgets[0].disabled = true;
+	text_colours(c.compile(state, 1.0f, 1.0f), &default_fg, &other);
+	CHECK(default_fg && !other, "a disabled spin list's item text keeps the DEFAULT pair");
+
+	// The current row disabled draws nothing; another row still draws.
+	state.widgets[0].has_disabled = false;
+	state.widgets[0].disabled = false;
+	state.widgets[0].disabled_items = {0, 1}; // by row: 0 enabled, 1 disabled
+	text_colours(c.compile(state, 1.0f, 1.0f), &default_fg, &other);
+	CHECK(!default_fg && !other, "a disabled current row draws no text");
+	state.widgets[0].selected_item = 0;
+	state.widgets[0].disabled_items = {1};
+	bool image_drawn = false;
+	for (const MenuQuad &q : c.compile(state, 1.0f, 1.0f).quads) image_drawn = image_drawn || q.texture == img;
+	CHECK(!image_drawn, "a disabled current image row draws nothing");
+	state.widgets[0].disabled_items = {0, 1};
+	image_drawn = false;
+	for (const MenuQuad &q : c.compile(state, 1.0f, 1.0f).quads) image_drawn = image_drawn || q.texture == img;
+	CHECK(image_drawn, "an enabled current row draws while another is disabled");
+
+	// The SPINUP's own row hides it (drawn and hit no more); the SPINDOWN's disables it (no claim
+	// goes live on it, its press reaches nothing).
+	state.widgets.clear();
+	MenuWidgetState arrow_up;
+	arrow_up.index = 4;
+	arrow_up.hide = true;
+	state.widgets.push_back(arrow_up);
+	MenuWidgetState arrow_down;
+	arrow_down.index = 5;
+	arrow_down.has_disabled = true;
+	arrow_down.disabled = true;
+	state.widgets.push_back(arrow_down);
+	up = down = false;
+	for (const MenuQuad &q : c.compile(state, 1.0f, 1.0f).quads) {
+		up = up || q.color == 0xFF0000AAu;
+		down = down || q.color == 0xFF0000BBu;
+	}
+	CHECK(!up && down, "a hidden arrow draws nothing; a disabled one still draws");
+	// SPINUP at absolute (380,50)-(396,66), SPINDOWN at (504,50)-(520,66).
+	CHECK(c.spin_arrow_at(2, state, 388.0f, 58.0f, 1.0f, 1.0f) == 0, "a hidden arrow is never hit");
+	CHECK(c.spin_arrow_at(2, state, 512.0f, 58.0f, 1.0f, 1.0f) == 2, "a disabled arrow is still hit");
+	bool pressed_down = false;
+	for (const MenuPumpWindow &w : c.press_reach(state, 512.0f, 58.0f, 1.0f, 1.0f))
+		pressed_down = pressed_down || (w.index == 2 && w.part == 2);
+	CHECK(!pressed_down, "a disabled arrow takes no press");
+}
+
 // The open dropdown draws OVER later widgets: shipped options.mnu authors
 // WATERQUALITY before SHADOWQUALITY/PARTICLES, yet its open popup covers
 // them — the scene draw defers the registered open popup to the end of the
@@ -2611,8 +2818,14 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 
 	// Popup (0,20)-(100,100): 6 rows, 4 visible, range 0..2, page 3. The
 	// authored scrollbar sits absolute (80,20)-(100,100): up arrow to y 40,
-	// track to y 80, down arrow below.
-	auto claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	// track to y 80, down arrow below. A press is its message
+	// (press_popup_mouse) and then the frame's sample with the button down.
+	auto press = [&](float x, float y) {
+		const auto pressed = c.press_popup_mouse(state, 1, x, y, 1.0f, 1.0f);
+		c.pump_popup_mouse(state, 1, x, y, true, 1.0f, 1.0f);
+		return pressed;
+	};
+	auto claim = press(90.0f, 90.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed &&
 					state.widgets[0].scroll_row == 0,
 			"the down arrow's press takes the sample and steps nothing");
@@ -2620,9 +2833,15 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 1 &&
 					state.widgets[0].scroll_row == 1,
 			"let go over it, the down arrow steps scroll_row +1");
+	// Pressed and let go inside one frame: no sample held it, so no step
+	// [orig: CWnd_ProcessMouseEvent @ 0x647b14, the verdict 3 of the sample before].
+	c.press_popup_mouse(state, 1, 90.0f, 90.0f, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+	CHECK(!claim.scroll_value_changed && state.widgets[0].scroll_row == 1,
+			"a press and release inside one frame steps nothing");
 	// Held, drifted onto the row strip and let go there: the arrow keeps the
 	// sample (never a row pick) and steps nothing.
-	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	press(90.0f, 90.0f);
 	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
 			"the held arrow keeps the sample without repeating");
@@ -2631,7 +2850,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 			"let go off the arrow: no step");
 
 	// Up arrow steps back on its click.
-	c.pump_popup_mouse(state, 1, 90.0f, 30.0f, true, 1.0f, 1.0f);
+	press(90.0f, 30.0f);
 	claim = c.pump_popup_mouse(state, 1, 90.0f, 30.0f, false, 1.0f, 1.0f);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 0 &&
 					state.widgets[0].scroll_row == 0,
@@ -2639,8 +2858,8 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 
 	// Shuttle drag: at scroll_row 0 the 26px shuttle tops the track (y 40).
 	// Capture there, drag past the track end: the ratio lands the max row.
-	claim = c.pump_popup_mouse(state, 1, 90.0f, 50.0f, true, 1.0f, 1.0f);
-	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
+	claim = press(90.0f, 50.0f);
+	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed && state.widgets[0].scroll_row == 0,
 			"the shuttle press captures without a value step");
 	claim = c.pump_popup_mouse(state, 1, 90.0f, 100.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 2 &&
@@ -2650,7 +2869,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 
 	// The track above the shuttle (row 2: the shuttle 54..80) pages back on
 	// the press and holds nothing: the next held sample is the rows'.
-	claim = c.pump_popup_mouse(state, 1, 90.0f, 45.0f, true, 1.0f, 1.0f);
+	claim = press(90.0f, 45.0f);
 	CHECK(claim.scroll_index == 1 && claim.scroll_value_changed &&
 					state.widgets[0].scroll_row == 0,
 			"the track pages -3 on its press");
@@ -2659,14 +2878,14 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
 
 	// A press on the row strip flows back to the caller's row picking.
-	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
+	claim = press(50.0f, 55.0f);
 	CHECK(claim.scroll_index == -1,
 			"a row-strip press flows past the popup pump to row picking");
 	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
 
 	// A CLOSED combo exposes no scrollbar to the pump.
 	state.widgets[0].popup_open = false;
-	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	claim = press(90.0f, 90.0f);
 	CHECK(claim.scroll_index == -1,
 			"the popup pump refuses a closed combo's scrollbar strip");
 	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
@@ -3046,6 +3265,8 @@ int main() {
 	test_degenerate_list_draws_no_dead_scrollbar(&font);
 	test_table_embedded_scrollbar_scrolls_rows(&font);
 	test_combo_face_shows_list_box_selection(&font);
+	test_items_as_the_game_draws_them(&font);
+	test_spin_item_in_a_parent(&font);
 	test_open_combo_popup_draws_over_later_widgets(&font);
 	test_multiple_roots(&font);
 	test_cursor_follows_the_claim(&font);

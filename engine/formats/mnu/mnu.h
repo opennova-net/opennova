@@ -82,6 +82,7 @@ struct Appearance {
   bool has_height = false;
   int height = 0;        // Height of each frame in sprite sheet
   std::string flags;     // FLAGS (texture flags, e.g. STANDARD_TRANSPARENT); empty = none
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Sound trigger definition.
@@ -89,6 +90,7 @@ struct Sound {
   std::string state;   // MOUSEIN / MOUSEOUT / SELECTED
   std::string trigger; // "MOUSE_OVER", "CLICK_SELECT"
   std::string file;    // the element text: a sound name (e.g., "menu.lwf")
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Action definition [orig: CUIElement_ParseXMLDefinition @ 0x648120, the ACTION arm].
@@ -106,6 +108,7 @@ struct Action {
   std::string test;              // LT/LE/EQ/GE/GT (LT when absent)
   std::string target;            // the element text, untrimmed
   bool external_browser = false; // EXTERNAL_BROWSER, presence
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // The sixteen ACTION TYPE tokens in the parse's compare order, nullptr-ended: a token's
@@ -200,12 +203,14 @@ struct Item {
   bool pairs_list = false; // PAIRS_LIST, presence (LIST)
   bool has_column = false; // COLUMN (a TABLE cell)
   int column = 0;
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // A TABLE's ITEMS > ROW: one row of cells [orig: CTableWnd_ParseXMLContentDefinition
 // @ 0x6427d0].
 struct TableRow {
   std::vector<Item> cells;
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Items container for list-like widgets.
@@ -259,6 +264,7 @@ struct TableHeader {
   int width = 0;         // WIDTH: the column width in pixels
   std::string type;      // "id" = text is a string-table key (CUIStringTable_LookupString)
   std::string text;      // Header text, or the string ID when type=="id"
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Table column body definition.
@@ -275,6 +281,7 @@ struct TableBody {
   std::string display;
   std::string bitmap_flags;      // BITMAP_FLAGS (e.g., "STANDARD_TRANSPARENT")
   bool scale_bitmap = false;     // SCALE_BITMAP flag
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Value substitution for table cells (renders image based on value).
@@ -285,6 +292,7 @@ struct TableSubst {
   bool is_file = false;  // FILE attribute present (image substitution)
   bool is_url = false;   // URL attribute present (the image is fetched)
   std::string file;      // the element text: the image name or address
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Table column definition.
@@ -341,6 +349,7 @@ struct TableData {
 struct Hotkey {
   std::string value;        // the element text, untrimmed
   bool virtual_key = false; // VIRTUAL, presence
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // An element a type-specific parse reads that the model does not type (the
@@ -356,6 +365,7 @@ struct Element {
   std::vector<ElementAttribute> attributes;
   std::string text;
   std::vector<Element> children;
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // The elements only the GLB_TABLE, GOPHER and LAN_LIST parses read, which a window keeps
@@ -496,6 +506,7 @@ struct Window {
 
   // Child windows (nested hierarchy).
   std::vector<Window> children;
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // Screen definition (top-level container) [orig: CUIScene_ParseNodeAttributes
@@ -505,6 +516,7 @@ struct Screen {
   bool has_music_var = false;
   int music_var = 0;           // Music track index
   std::vector<Window> roots;   // every root WINDOW, in document order
+  uint64_t source = 0;   // the element it was read from (Document::text_layout); 0: made in code
 };
 
 // The source encoding is document metadata, not opaque source passthrough
@@ -523,10 +535,21 @@ enum class SourceEncoding : uint8_t {
 void decode_source(const uint8_t *data, size_t size, SourceEncoding &encoding,
                    std::u32string &text);
 
+struct TextLayout;
+
 // Parsed MNU document containing one or more screens.
 struct Document {
   std::vector<Screen> screens;
   SourceEncoding source_encoding = SourceEncoding::CodePage;
+  // How the file it was read from looks (mnu_text_layout.h, D-MNU-22): the spelling and spacing
+  // of each of the writer's tokens, the comments and what the game reads nothing of, modeled
+  // beside the records (each record's `source` names its element). The writer generates every
+  // byte from the records and this data, so a menu read and written again comes back as it
+  // was, and an edit changes only its own tokens. Held only when the parse was asked for it
+  // (ParseLayout::Text); null for a document made in code or read without it (and a reset
+  // drops it): the writer then puts everything down in its own layout. Carried for the save
+  // alone; nothing shows it.
+  std::shared_ptr<const TextLayout> text_layout;
 
   // The screen a by-name lookup finds (case-insensitive): the LAST of that name,
   // as retail's newest-first walk does [orig: CUIScene_SelectNodeByName @ 0x63b6b0].
@@ -536,12 +559,28 @@ struct Document {
   const Screen *first_screen() const;
 };
 
-// The window a by-name lookup finds under `window` [orig: CWnd_FindChildByName @ 0x646850]:
-// an empty name, or a window with no NAME, finds nothing (its children unsearched); a match
-// without case is the window itself; else each child in order, recursively. Only
-// `children` are walked, the windows the menu runtime's id tree numbers: a part (list_box,
-// spinup, spindown, scrollbar) and the windows it holds are not reached, though retail's
-// walk reaches a part's windows through the part (docs/mnu/menu-re.md D-MNU-37, open).
+// A part a window's type creates once its parse is done, an ordinary child of the window behind
+// its authored children, and the fixed NAME the create gives it, which replaces the NAME its block
+// wrote: a combo's LIST_BOX is LISTBOX_WND [orig: sub_65BF60 @ 0x65bf8f], a spin list's arrows
+// SPINLISTWND_UP and SPINLISTWND_DOWN [orig: CSpinListWnd_CreateUpDownChildren @ 0x64b8d6,
+// @ 0x64b8fe], the SCROLLBAR of a LIST LISTWND_SCROLL [orig: CListWnd_CreateScrollChild @ 0x644512,
+// from CListWnd_Init @ 0x644d7d], of a TABLE TABLEWND_SCROLL [orig: CTableWnd_Init @ 0x6408a6] and of a
+// MULTILINE_EDIT MEDITWND_SCROLL [orig: CMEditWnd_CreateScrollChild @ 0x6612b2]; a LAN_LIST's create
+// makes no scroll part [orig: 0x65bd60, its create, calls neither]. The parts the model holds, those
+// written, in the order they attach. (The windows the creates make that the model holds none of, a
+// combo's DROPBTN_WND, a scroll's SCROLLWND_SHUTTLE / _UP / _DOWN, a LAN_LIST's LANJOIN and LANSEARCH, a
+// RADIOEDIT's two, are not among them.)
+struct PartWindow {
+  const Window *window = nullptr;
+  const char *name = "";
+};
+std::vector<PartWindow> part_windows(const Window &window);
+
+// The window a by-name lookup finds under `window` [orig: CWnd_FindChildByName @ 0x646850,
+// depth first]: an empty name, or a window with no NAME, finds nothing (nothing under it
+// searched, @ 0x646855..0x646864); a match without case is the window itself (@ 0x646868); else
+// each child in order (@ 0x646886..0x6468a2), the parts after the authored ones (part_windows),
+// each part by its fixed NAME and searched through.
 const Window *find_window(const Window &window, const std::string &name);
 // The same over a screen's root windows in document order: the first root that finds one
 // [orig: UI_FindScreenControl @ 0x63ae80, the walk over the section's roots].
@@ -568,18 +607,25 @@ struct ParseNote {
   std::string locator;
 };
 
+// What a parse models beside the records: nothing more (the game's loads), or the file's text
+// layout too (Document::text_layout: an editor's load, so a save writes the file in its own look).
+enum class ParseLayout : uint8_t {
+  None,
+  Text,
+};
+
 // Parse MNU content from a string buffer.
 // Returns true on success, false on error with description in `error`.
 bool parse(const std::string &content, Document &out, std::string &error,
-           std::vector<ParseNote> *notes = nullptr);
+           std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
 
 // Parse MNU content from a byte buffer.
 bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
-           std::vector<ParseNote> *notes = nullptr);
+           std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
 
 // Parse MNU file from disk.
 bool parse_file(const std::string &path, Document &out, std::string &error,
-                std::vector<ParseNote> *notes = nullptr);
+                std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
 
 // Strip the first {hot} marker from text for display; later markers remain
 // literal. Optionally returns the following hotkey byte and the marker's byte
@@ -610,8 +656,11 @@ std::vector<WriteIssue> write_issues(const Document &doc);
 // back, everything else as it is.
 std::string escape_text(const std::string &text);
 
-// Serialize MNU document back to XML-like text (the model's own bytes).
-// When pretty is true, output is indented with indent_size spaces.
+// Serialize MNU document back to XML-like text (the model's own bytes). With the document's
+// text layout (Document::text_layout, a ParseLayout::Text parse's), every element it holds
+// comes out in the file's own layout and a record it does not hold in the file's style beside
+// its neighbours; without one, the writer's own layout: when pretty is true, indented with
+// indent_size spaces, one element a line.
 std::string serialize(const Document &doc, bool pretty = true,
                       int indent_size = 2);
 

@@ -745,17 +745,49 @@ bool MenuFrameCompiler::pump_mouse_wheel(MenuFrameState &io_state,
 	return false;
 }
 
-// The open-dropdown pump: the dropdown's scrollbar sees the sample ahead of
-// its rows, the dropdown alone pumped [orig: UI_DispatchMouseEvent @ 0x63ab00
-// g_UIOpenPopupWnd gate; CListWnd child walk @ 0x643f30; CScrollWnd_HandleEvent
-// @ 0x64d050] (which retail pump serves the dropdown's list is open: D-MNU-11/12,
-// docs/mnu/menu-re.md "Not ported, or open"). Its windows keep the game's rule
-// as any scrollbar's (D-MNU-32): a press on an arrow holds it until the
-// release, which steps when it comes over the arrow it held there the sample
-// before; a press on the track pages and holds nothing; a press on the shuttle
-// holds it and drags until the release. The claim's scroll_index reports a
-// sample the scrollbar took (its press, or one its held window holds), whose
-// row hover and pick stay with the caller when it does not.
+// The open dropdown's press, as its message arrives: the dropdown's scrollbar
+// sees it ahead of its rows, the dropdown alone taking the mouse [orig:
+// UI_DispatchMouseEvent @ 0x63ab00 g_UIOpenPopupWnd gate; CListWnd child walk
+// @ 0x643f30; CScrollWnd_HandleEvent @ 0x64d050] (which retail pump serves the
+// dropdown's list is open: D-MNU-11/12, docs/mnu/menu-re.md "Not ported, or
+// open"). Its windows keep the game's rule as any scrollbar's (D-MNU-32): a
+// press on the track pages and holds nothing; a press on an arrow or the
+// shuttle holds it until the release (the shuttle anchoring its drag), held
+// under the mouse only once a pump sample finds it there with the button down
+// [orig: CWnd_ProcessMouseEvent @ 0x647b3c, the verdict 3], so a press and
+// release inside one frame click nothing. The claim's scroll_index reports a
+// press the scrollbar took, whose row pick stays with the caller when it does not.
+MenuFrameCompiler::MouseClaim MenuFrameCompiler::press_popup_mouse(
+		MenuFrameState &io_state, int index, float mouse_x, float mouse_y,
+		float scale_x, float scale_y) {
+	MouseClaim claim;
+	if (screen_ == nullptr || index < 0 || index >= document_nodes_) {
+		return claim;
+	}
+	claim.cursor = first_root_cursor_();
+	ScrollParts parts;
+	const int part = solve_scroll_for_widget_(index, io_state, &parts)
+			? scroll_window_part_(parts, mouse_x, mouse_y, scale_x, scale_y)
+			: 0;
+	if (part == 0) {
+		return claim;
+	}
+	press_scroll_window(io_state, MenuPumpWindow{ index, part }, mouse_x, mouse_y,
+			scale_x, scale_y, &claim);
+	if (part != kMenuPumpPartScroll) {
+		popup_scroll_.part = part;
+		popup_scroll_.under = false;
+	}
+	claim.scroll_index = index;
+	return claim;
+}
+
+// The open dropdown's pump sample, once a frame: the window a press holds is
+// held while the mouse is over it with the button down; the release lets it go,
+// and an arrow it comes over, held there the sample before, is clicked (its
+// step); the shuttle drags while held, the press's own sample no move. The
+// claim's scroll_index reports a sample the held window takes, whose row hover
+// stays with the caller when it does not.
 MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_popup_mouse(
 		MenuFrameState &io_state, int index, float mouse_x, float mouse_y,
 		bool button_down, float scale_x, float scale_y) {
@@ -765,65 +797,54 @@ MenuFrameCompiler::MouseClaim MenuFrameCompiler::pump_popup_mouse(
 	}
 	claim.cursor = first_root_cursor_();
 	PopupScroll &held = popup_scroll_;
-	const bool press = button_down && !held.down;
+	const bool first = button_down && !held.down;
 	held.down = button_down;
 	ScrollParts parts;
 	const int part = solve_scroll_for_widget_(index, io_state, &parts)
 			? scroll_window_part_(parts, mouse_x, mouse_y, scale_x, scale_y)
 			: 0;
 	if (!button_down) {
-		// The release lets the held window go: an arrow it comes over, held
-		// the sample before, is clicked.
 		const int was = held.part;
-		const bool clicked = was == part && held.under;
+		const bool clicked = was != 0 && was == part && held.under;
 		held = PopupScroll();
 		if (clicked) {
 			click_scroll_window(io_state, MenuPumpWindow{ index, was }, &claim);
 		}
 		return claim;
 	}
-	if (held.part != 0) {
-		held.under = part == held.part;
-		if (held.part == kMenuPumpPartScrollShuttle && !press) {
-			drag_scroll_shuttle_(io_state, MenuPumpWindow{ index, held.part }, mouse_x,
-					mouse_y, scale_x, scale_y, &claim);
-		}
-		claim.scroll_index = index;
+	if (held.part == 0) {
 		return claim;
 	}
-	if (!press || part == 0) {
-		return claim;
+	held.under = part == held.part;
+	if (held.part == kMenuPumpPartScrollShuttle && !first) {
+		drag_scroll_shuttle_(io_state, MenuPumpWindow{ index, held.part }, mouse_x,
+				mouse_y, scale_x, scale_y, &claim);
 	}
-	press_scroll_window(io_state, MenuPumpWindow{ index, part }, mouse_x, mouse_y,
-			scale_x, scale_y, &claim);
-	if (part != kMenuPumpPartScroll) {
-		held.part = part;
-		held.under = true;
-	}
-	held.down = true;
 	claim.scroll_index = index;
 	return claim;
 }
 
 // [orig: CComboWnd_Render @ 0x65c05b..0x65c083 — this[183] = row_text(list,
-// selected_row(list)); CStaticWnd_DrawLabel; restore. Text-only: image/color
-// rows contribute their stored text (possibly empty).]
+// selected_row(list)); CStaticWnd_DrawLabel; restore.] The row shown is the list's selected one, else
+// its first [orig: sub_644590 @ 0x644590, the first row of style 3, else 0; sub_6447C0 @ 0x6447c0
+// reads its text]; every row is text (a list's rows draw no image or colour, build_items).
 std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
 		const MenuWidgetState *ws) const {
 	const int selected = ws != nullptr ? ws->selected_item : 0;
+	const auto shown = [selected](int count) { return selected >= 0 && selected < count ? selected : 0; };
 	if (ws != nullptr && ws->has_items) {
-		if (selected < 0 || selected >= static_cast<int>(ws->items.size())) {
+		if (ws->items.empty()) {
 			return std::string();
 		}
-		return ws->items[static_cast<size_t>(selected)];
+		return ws->items[static_cast<size_t>(shown(static_cast<int>(ws->items.size())))];
 	}
 	const mnu::Window &w = *node.window;
 	const std::vector<WidgetNode::ItemVisual> &rows =
 			(w.list_box && w.list_box->items.present) ? node.popup_items : node.items;
-	if (selected < 0 || selected >= static_cast<int>(rows.size())) {
+	if (rows.empty()) {
 		return std::string();
 	}
-	return rows[static_cast<size_t>(selected)].text;
+	return rows[static_cast<size_t>(shown(static_cast<int>(rows.size())))].text;
 }
 
 // A list-like widget's row as it displays: the runtime rows when seeded, else

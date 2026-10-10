@@ -397,7 +397,8 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
         if (!count) invalid(DefIssueCode::UnknownProperty);
         for (int i = 0; i < count; ++i) {
             const auto text = word(i);
-            if (!lookup_item_attrib(text.data(), text.size()) && !lookup_item_attrib2(text.data(), text.size()) && text != "parent")
+            if (!lookup_item_attrib(text.data(), text.size()) && !lookup_item_attrib2(text.data(), text.size()) &&
+                text != "parent" && text != "good" && text != "evil")
                 authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty, text.c_str());
         }
         return;

@@ -384,18 +384,13 @@ void test_serve_session_capture() {
 	// The logs land in the working directory.
 	ScopedCwd cwd(dir);
 
-	std::unique_ptr<serve::Server> holder;
+	// --lan-port 0: the OS picks the port, which the server holds and reports.
 	std::string error;
-	bool started = false;
-	for (int attempt = 0; attempt < 5 && !started; ++attempt) {
-		serve::ServeOptions options;
-		CHECK(serve::parse_serve_options({"--resource-dir", dir.string(), "/HOST", "log.host",
-				"--loose-root", "--lan-port", std::to_string(free_udp_port()), "/PROFILE", "host",
-				"/PUNTLOG"}, options, error) == 0);
-		holder = std::make_unique<serve::Server>(options);
-		started = holder->start(error);
-		if (!started && error.find("bind scan") == std::string::npos) break;
-	}
+	serve::ServeOptions options;
+	CHECK(serve::parse_serve_options({"--resource-dir", dir.string(), "/HOST", "log.host",
+			"--loose-root", "--lan-port", "0", "/PROFILE", "host", "/PUNTLOG"}, options, error) == 0);
+	auto holder = std::make_unique<serve::Server>(options);
+	const bool started = holder->start(error);
 	CHECK(started);
 	if (!started) {
 		std::printf("start: %s\n", error.c_str());

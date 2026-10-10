@@ -65,6 +65,9 @@ static int check_menu(const char *path) {
     printf("  FAIL %s (parse: %s)\n", path, err.c_str());
     return 0;
   }
+  // The writer's own layout over the records: a document with its text layout would write the
+  // file back as it was read, and the check would compare the source with itself.
+  doc.text_layout.reset();
   const std::string ser = opennova::mnu::serialize(doc, true, 2);
   Occurrences authored, written;
   if (!occurrences(src, authored, err) || !occurrences(ser, written, err)) {

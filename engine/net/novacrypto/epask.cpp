@@ -3,6 +3,7 @@
 #include <net/novacrypto/ap_alphabet.h>
 #include <net/novacrypto/nwu.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/os_random/os_random.h>
 
 #include <chrono>
@@ -128,9 +129,14 @@ bool modexp_encrypt(const std::vector<uint8_t> &data, uint32_t exponent, uint32_
 	return true;
 }
 
+// The CRT _atoi64 (io::retail_atoi64: the locale's leading white space, 0xA0 included,
+// saturating at 64 bits; D-NET-384), its low 32 bits kept. The field is a copy into a
+// NUL-terminated temp, so it ends at its first NUL.
+// [orig: _atoi64 @0x76AB20 -> CRT_strtoxq @0x777947, from EPASK_ParseColonDelimitedString
+//  @0x666710]
 uint32_t atoi64_u32(std::string_view s) {
 	const std::string owned(s);
-	return static_cast<uint32_t>(std::strtoll(owned.c_str(), nullptr, 10));
+	return static_cast<uint32_t>(io::retail_atoi64(owned.c_str()));
 }
 
 } // namespace

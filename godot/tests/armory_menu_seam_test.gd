@@ -263,6 +263,29 @@ func test_class_change_refilters_slots() -> void:
 	assert_false(_items(driver, "PRIMARY").has("WPN_M4AUTO"), "M4 is hidden for Sniper")
 
 
+# The host's class mask enables each PLAYER_CLASS row, its bits 5..9 in turn, ahead of the
+# select [orig: UI_InitTeamClassSelection @0x56739e..0x5673f4 -> CSpinListWnd_SetItemEnabled
+# @0x64bbd0], and the spin steps past a disabled class [orig: CSpinListWnd_SelectNext
+# @0x64b910].
+func test_class_mask_disables_its_rows() -> void:
+	var companion := ArmoryMenuCompanion.new()
+	companion.set_weapon_database(_load_weapons())
+	companion.set_player_class(8)
+	companion.set_class_allow_mask((1 << 5) | (1 << 8))  # medic and rifleman
+	companion.set_class_selection_enabled(true)
+	var driver := _make_weapon_driver()
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
+
+	var spin := driver.widget_id("PLAYER_CLASS")
+	assert_true(driver.is_item_enabled(spin, 0), "the medic row (bit 5) is allowed")
+	assert_true(driver.is_item_enabled(spin, 3), "the rifleman row (bit 8) is allowed")
+	for row in [1, 2, 4]:
+		assert_false(driver.is_item_enabled(spin, row), "row %d's class is not allowed" % row)
+	assert_eq(driver.selected_row(spin), 3, "the rifleman is selected by value")
+	driver.spin_cycle(spin, 1)
+	assert_eq(driver.selected_row(spin), 0, "the spin steps past the disallowed engineer")
+
+
 func test_weight_updates_from_selection() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	companion.set_weapon_database(_load_weapons())

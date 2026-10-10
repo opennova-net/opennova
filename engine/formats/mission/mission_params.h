@@ -124,11 +124,24 @@ constexpr bool group_names_none(int64_t group) { return group == 0; }
 // the slot byte, the key EntityPool_FindByNetId @0x4f0a20 matches; 04TR's watchdog
 // SingleIsWithinArea(10000, zone 6), docs/mission/bms-event-runtime-re.md 7.3].
 inline constexpr int32_t kPlayerSsn = 10000;
-// The SSN a new entity takes after the largest the mission's records hold: one past it, the player's
-// skipped, since a parameter naming kPlayerSsn names the player and never a record. A tool's rule:
-// the game assigns no SSN, and the original editor's allocator is not witnessed (D-MIS-3).
+// The net ids the game stamps on its players: kPlayerSsn plus each player's slot, a byte [orig:
+// PlayerClass_InitEntity @0x4b1149 `movzx edx, byte [esi+154h]`, @0x4b1155 `add edx, 2710h`, @0x4b1173 the
+// store], which EntityPool_FindByNetId matches by their low 16 bits over the pools, the first hit winning
+// [orig: EntityPool_FindByNetId @0x4f0a20, `and ebx, 0FFFFh` @0x4f0a3a, the entry's @0x4f0a84].
+inline constexpr int32_t kPlayerSsnSlots = 256;
+// Whether an SSN would answer a player's lookups: its low 16 bits are one of the players' net ids.
+constexpr bool ssn_is_players(int32_t ssn) {
+	return (ssn & 0xFFFF) >= kPlayerSsn && (ssn & 0xFFFF) < kPlayerSsn + kPlayerSsnSlots;
+}
+// The SSN a new entity takes after the largest the mission's records hold: one past it, as the original
+// editor gives an item it places one past the largest its items hold [orig: JOTACmed.exe
+// MissionItem_NextUniqueId @ 0x44db70, written as the record's +8 by sub_44C8E0 @ 0x44c8e0], past the
+// players' net ids, which the original's does not skip: an entity holding one would answer that player's
+// lookups (above). D-MIS-10, OPEN: the skip is this port's, proposed with the row.
 constexpr int32_t ssn_after(int32_t largest) {
-	return largest + 1 == kPlayerSsn ? kPlayerSsn + 1 : largest + 1;
+	int32_t next = largest + 1;
+	while (ssn_is_players(next)) next = (next & ~0xFFFF) + kPlayerSsn + kPlayerSsnSlots;
+	return next;
 }
 
 // The SSNs the sees, targeted and shot relation records and the visited words keyed by an SSN hold:

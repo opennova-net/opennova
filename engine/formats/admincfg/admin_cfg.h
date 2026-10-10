@@ -74,9 +74,10 @@ struct AdminConfig {
 };
 
 // The rights token: the CRT's strtoul(token, NULL, 16) on a 32-bit unsigned
-// long: leading white space, an optional sign (a minus negates), an optional
-// 0x / 0X, hex digits; nothing parsed reads 0 and a value past 32 bits
-// saturates to 0xFFFFFFFF, which grants every right, PETERRABBIT included.
+// long: leading white space (cp1252's set, 0xA0 included), an optional sign,
+// an optional 0x / 0X, hex digits; nothing parsed reads 0, a value past 32 bits
+// saturates to 0xFFFFFFFF (every right, PETERRABBIT included), and a minus
+// negates the result, the saturated one too: "-FFFFFFFFF" reads 1.
 // [orig: CRT_strtoul @0x76B302, the call in AdminConfigFile_ParseLine @0x4054CE]
 uint32_t parse_rights(const char *token);
 

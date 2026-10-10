@@ -333,7 +333,9 @@ int check_source(const char *path, const std::string &src) {
   }
 
   // 3. Fixed point: the first serialize may normalize the source, but re-parsing
-  // and re-serializing it must reproduce the same bytes.
+  // and re-serializing it must reproduce the same bytes. Both in the writer's own
+  // layout: a document with its text layout writes the file back as it was read.
+  doc.text_layout.reset();
   std::string s1 = opennova::mnu::serialize(doc, true, 2);
   opennova::mnu::Document doc2;
   std::string err2;
@@ -341,6 +343,7 @@ int check_source(const char *path, const std::string &src) {
     printf("  FAIL %s (re-parse of serialized form: %s)\n", path, err2.c_str());
     return 0;
   }
+  doc2.text_layout.reset();
   std::string s2 = opennova::mnu::serialize(doc2, true, 2);
   if (s1 != s2) {
     printf("  FAIL %s (round-trip not idempotent: %zu vs %zu bytes)\n", path, s1.size(), s2.size());
