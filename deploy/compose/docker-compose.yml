@@ -44,6 +44,9 @@ services:
     environment:
       ADMIN_BASIC_AUTH_USER: ${ADMIN_BASIC_AUTH_USER:-}
       ADMIN_BASIC_AUTH_PASSWORD: ${ADMIN_BASIC_AUTH_PASSWORD:-}
+      # Edge authentication (DEPLOY.md): unset, off. Set from the vault together
+      # with the Cloudflare Transform Rule that stamps the same secret.
+      EDGE_AUTH_SECRET: ${EDGE_AUTH_SECRET:-}
     depends_on:
       - novaworld
 

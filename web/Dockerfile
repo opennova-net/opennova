@@ -11,6 +11,7 @@ FROM nginx:1.25-alpine
 RUN apk add --no-cache apache2-utils
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY cloudflare-realip.conf /etc/nginx/cloudflare-realip.conf
+COPY edge-auth.conf /etc/nginx/edge-auth.conf
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80

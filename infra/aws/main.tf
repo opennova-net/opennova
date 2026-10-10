@@ -317,6 +317,37 @@ resource "cloudflare_record" "game" {
   comment = "Managed by Terraform - OpenNova web build"
 }
 
+# Edge authentication (DEPLOY.md), created only once var.edge_auth_secret is
+# set: a request-header Transform Rule stamps X-OpenNova-Edge: <secret> on
+# every request Cloudflare forwards for the web hostnames, so the portal's
+# nginx (EDGE_AUTH_SECRET) can refuse /api/ requests that reached it any other
+# way, a Cloudflare Worker on someone else's zone fetching this origin with a
+# CF-Connecting-IP of its choosing included. A zone holds one entrypoint
+# ruleset per phase: import an existing late-transform ruleset before applying.
+resource "cloudflare_ruleset" "edge_auth" {
+  count       = local.dns_enabled && var.edge_auth_secret != "" ? 1 : 0
+  zone_id     = var.cloudflare_zone_id
+  name        = "opennova-edge-auth"
+  description = "Stamps the edge-authentication header the portal's nginx checks"
+  kind        = "zone"
+  phase       = "http_request_late_transform"
+
+  rules {
+    action      = "rewrite"
+    description = "X-OpenNova-Edge on the web hostnames"
+    enabled     = true
+    expression  = "(http.host in {\"${var.cloudflare_domain}\" \"www.${var.cloudflare_domain}\"})"
+
+    action_parameters {
+      headers {
+        name      = "X-OpenNova-Edge"
+        operation = "set"
+        value     = var.edge_auth_secret
+      }
+    }
+  }
+}
+
 # The launcher's resolution anchor: ALWAYS unproxied (game traffic is UDP and
 # hosts-file entries need the raw IP), short TTL so cutovers propagate fast.
 resource "cloudflare_record" "nw" {

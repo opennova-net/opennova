@@ -130,6 +130,13 @@ variable "cloudflare_domain" {
   default     = ""
 }
 
+variable "edge_auth_secret" {
+  description = "Edge authentication for the portal's /api/ (DEPLOY.md): when set, a Cloudflare Transform Rule adds X-OpenNova-Edge: <secret> to every request on the web hostnames, and the web container (EDGE_AUTH_SECRET, the same value) answers /api/ only to requests carrying it. Letters and digits only. Empty (the default) creates no rule. Sourced from the vault as TF_VAR_edge_auth_secret once enabled; the API token then needs Zone / Transform Rules / Edit."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "cloudflare_web_proxied" {
   description = "Whether the web records (@ / www) are proxied through Cloudflare. Proxied gives the site Cloudflare TLS; the nw record is ALWAYS unproxied because game traffic is UDP and the launcher resolves it to a raw IP."
   type        = bool

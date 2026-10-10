@@ -127,11 +127,49 @@ or a visitor on plain http cannot stay logged in.
 
 Behind the proxied records every request reaches nginx from a Cloudflare edge, so the
 portal's nginx takes the visitor's address from `CF-Connecting-IP`, for a peer in
-Cloudflare's published ranges only (`web/cloudflare-realip.conf`); the server's login
-and registration rate limits key on that address. Refresh the ranges before a web-image
-release with `sh web/cloudflare-realip.sh` (it rewrites the file from
-https://www.cloudflare.com/ips-v4 and /ips-v6; review and commit the diff). Cloudflare
-announces range changes ahead of time.
+Cloudflare's published ranges only (`web/cloudflare-realip.conf`); the server's website
+login and registration rate limits key on that address. Refresh the ranges before a
+web-image release with `sh web/cloudflare-realip.sh` (it rewrites the file from
+https://www.cloudflare.com/ips-v4 and /ips-v6, refusing any entry that is not a CIDR;
+review and commit the diff). Cloudflare announces range changes ahead of time.
+
+A Cloudflare peer does not make that header true: a Worker on anyone's zone can fetch
+this origin (its IP is public) from a real Cloudflare edge with any `CF-Connecting-IP`
+it likes, and so brake a chosen address on the website's login. The server keeps those
+addresses' buckets apart from the retail login's (which keys on its own TCP peer), so a
+forged address never brakes a game login; edge authentication, below, closes the
+website side.
+
+### Edge authentication (prepared, off)
+
+With it on, a Cloudflare Transform Rule on our zone stamps a secret header,
+`X-OpenNova-Edge`, on every request for the web hostnames, and the portal's nginx
+answers `/api/` only to requests carrying it (403 otherwise, and the header is not
+forwarded to the server), so only requests that came through our own zone, where
+Cloudflare sets `CF-Connecting-IP` itself, reach the server. It stays off while
+`EDGE_AUTH_SECRET` is unset (web/docker-entrypoint.sh, `infra/aws`
+`cloudflare_ruleset.edge_auth`). To turn it on:
+
+1. Add an `edge_auth_secret` field to the `app-prod` vault item: letters and digits, at
+   least 32 (`openssl rand -hex 32`).
+2. Give the Cloudflare API token in the `cloudflare` item the extra permission
+   Zone / Transform Rules / Edit.
+3. Add `TF_VAR_edge_auth_secret=op://OpenNova-Deploy/app-prod/edge_auth_secret` to
+   `deploy/env/terraform.env.tpl` and run `./deploy/run.sh infra plan`, then
+   `infra apply`: it creates the late-transform ruleset (a zone holds one per phase,
+   so import an existing one first). The dashboard alternative: Rules, Transform
+   Rules, Modify Request Header, "Set static" `X-OpenNova-Edge` to the secret for the
+   root and `www` hostnames.
+4. Add `EDGE_AUTH_SECRET=op://OpenNova-Deploy/app-prod/edge_auth_secret` to
+   `deploy/env/app.prod.env.tpl` and deploy (`./deploy/run.sh app deploy`). The web
+   container logs `edge authentication: ON`.
+5. Check: `curl -i https://<domain>/api/health` answers 200, and the same request
+   straight to the origin IP (`curl -i -H 'Host: <domain>' http://<EIP>/api/health`)
+   answers 403.
+
+Order matters: apply the rule (step 3) before deploying the secret (step 4), or the
+site's API answers 403 in between. To rotate, change the vault field and run both
+steps again.
 
 To make the first site admin, register the account, then add a `bootstrap_admin` field
 holding its username to the `app-prod` vault item and the line
