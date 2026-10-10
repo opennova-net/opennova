@@ -17,16 +17,6 @@
 namespace opennova::world {
 namespace {
 
-std::string grm_name(std::string name) {
-	// ItemDef+96 is the graphic name, not a material/texture name.
-	// [orig: Entity_InitFromModel @0x40E229; sub_57FCE0]
-	const size_t slash = name.find_last_of("/\\");
-	if (slash != std::string::npos) name.erase(0, slash + 1);
-	const size_t dot = name.find_last_of('.');
-	if (dot != std::string::npos) name.erase(dot);
-	return name + ".GRM";
-}
-
 const grm::Gesture *gesture(const grm::File &file, int32_t expression) {
 	if (expression < 0 || expression >= 9) return nullptr;
 	const grm::Gesture *result = nullptr;
@@ -138,8 +128,9 @@ void FacialSystem::configure(World &world, const ResourceIndex *index,
 	for (size_t i = 0; i < items.count; ++i) {
 		const auto &row = items.entries[i];
 		if (!resolved_ids.insert(row.id).second) continue;
+		// ItemDef+96 is the graphic name, not a material/texture name [orig: Entity_InitFromModel @0x40E229].
 		if (row.type == def::DEF_ITEM_TYPE_PERSON && row.graphic[0])
-			model_names_[row.id - 100000] = grm_name(row.graphic);
+			model_names_[row.id - 100000] = grm::face_file_name(row.graphic);
 	}
 	initialize(world);
 }
