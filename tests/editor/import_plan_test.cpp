@@ -466,8 +466,7 @@ static int test_plan_not_followed() {
 // each slot's set is followed. charattr.def left it with its type (DI-09's charattr follow-up): each read
 // class's camouflage items are followed.
 static int test_references_unread() {
-	const std::set<AssetKind> unread = {AssetKind::MissionText,
-	        AssetKind::HudFxDefs, AssetKind::OtherDefs, AssetKind::MapProject};
+	const std::set<AssetKind> unread = {AssetKind::MissionText, AssetKind::OtherDefs, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
 		const AssetKindRow &row = asset_kind_row(kind);
