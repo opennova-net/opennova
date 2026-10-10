@@ -37,9 +37,10 @@ JsonValue answer_particle_keys(const QueryContext &context, const QueryArgs &arg
 	}
 	JsonValue out = JsonValue::make_object();
 	out.set("path", io::json_string(open->path()));
-	const std::vector<ParticleKeyBlock> blocks = particle_key_blocks(*text);
-	// The reader stops in the text: no block, read so.
-	out.set("read", JsonValue::make_bool(!blocks.empty() || text->text().empty()));
+	bool read = false;
+	const std::vector<ParticleKeyBlock> blocks = particle_key_blocks(*text, &read);
+	// Whether the reader takes the text (one of comments alone reads, its blocks none).
+	out.set("read", JsonValue::make_bool(read));
 	JsonValue list = JsonValue::make_array();
 	for (const ParticleKeyBlock &block : blocks) {
 		JsonValue entry = JsonValue::make_object();

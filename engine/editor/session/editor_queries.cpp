@@ -1497,12 +1497,14 @@ constexpr QueryParam kEnvironmentUsesParams[] = {
 	{ "path", J::String, false, nullptr, "An environment (.env); left out, the active document's file." },
 };
 
-// The missions that run on a terrain and the import it comes from (DI-30): a .trn by its path, else the active
-// document.
+// A particle file's blocks and keys as the game's reader reads them (S23 B): a particle file open as a document by
+// its path, else the active one.
 constexpr QueryParam kParticleKeysParams[] = {
 	{ "path", J::String, false, nullptr, "A particle file open as a document; left out, the active one." },
 };
 
+// The missions that run on a terrain and the import it comes from (DI-30): a .trn by its path, else the active
+// document.
 constexpr QueryParam kTerrainUsesParams[] = {
 	{ "path", J::String, false, nullptr, "A terrain (.trn); left out, the active document's file." },
 };

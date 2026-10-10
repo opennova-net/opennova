@@ -32,10 +32,10 @@ std::map<std::string, PanelState> &panels() {
 
 // A value set: the edit's request, or why the reader would take it otherwise.
 void set_value(Workspace &workspace, const TextDocument &text, const ParticleKeyBlock &block, const std::string &key,
-		const std::string &value, PanelState &state) {
+		const std::string &value, PanelState &state, const ParticleKeyField *field = nullptr) {
 	Edit edit;
 	std::string why;
-	if (!particle_key_edit(text, block, key, value, edit, why)) {
+	if (!particle_key_edit(text, block, key, value, edit, why, field)) {
 		state.refused = key + ": " + why + ".";
 		return;
 	}
@@ -87,7 +87,7 @@ void draw_particle_key_inspector(Workspace &workspace, const DocumentBase &docum
 		std::strncpy(value, field.value.c_str(), sizeof(value) - 1);
 		if (ImGui::InputText("##value", value, sizeof(value), ImGuiInputTextFlags_EnterReturnsTrue) &&
 		    field.value != value && field.row)
-			set_value(workspace, *text, block, field.key, value, state);
+			set_value(workspace, *text, block, field.key, value, state, &field);
 		ui_kit::tooltip(field.row ? particle_key_words(*field.row) + ".\nEnter sets it, on its own line of the text."
 		                          : std::string("A key the game's reader keeps as unknown: it reads nothing of it."));
 		ImGui::PopID();
@@ -129,7 +129,9 @@ void draw_particle_key_inspector(Workspace &workspace, const DocumentBase &docum
 			if (state.refused.empty()) state.adding.clear();
 		}
 		if (const particle::KeyRow *row = particle::key_row(block.kind, state.adding))
-			ui_kit::tooltip(particle_key_words(*row) + ".\nEnter adds it on a line of its own before the block's end.");
+			ui_kit::tooltip(particle_key_words(*row) + ".\nEnter adds it on a line of its own where the game's reader takes "
+			                "it (a key a graphic line copies before the first graphic line, a layer's after its graphic "
+			                "line).");
 	}
 	ImGui::EndDisabled();
 	if (!state.refused.empty()) ImGui::TextWrapped("%s", state.refused.c_str());

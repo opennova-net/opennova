@@ -96,16 +96,76 @@ int test_blocks_and_sets() {
 	const ParticleKeyBlock &again = blocks[0];
 	TEST_EXPECT(!particle_key_edit(text, again, "emit_burst", "0", edit, why) && why.find("as 1") != std::string::npos);
 	TEST_EXPECT(!particle_key_edit(text, again, "color1", "1, 2", edit, why) && why.find("3 values") != std::string::npos);
-	TEST_EXPECT(!particle_key_edit(text, again, "color1", "1, 2, 300", edit, why) && why.find("as 255") != std::string::npos);
+	TEST_EXPECT(!particle_key_edit(text, again, "color1", "1, 2, 300", edit, why) && why.find("it reads 44") != std::string::npos);
 	TEST_EXPECT(!particle_key_edit(text, again, "flags", "NEVERAGE BOGUS", edit, why) && why.find("BOGUS") != std::string::npos);
 	TEST_EXPECT(particle_key_edit(text, again, "flags", "NEVERAGE HAZE", edit, why));
 	TEST_EXPECT(!particle_key_edit(text, again, "graphic1", "spark.tga, glow", edit, why) && why.find("as blend") != std::string::npos);
-	TEST_EXPECT(!particle_key_edit(text, again, "speed", "fast", edit, why) && why.find("no number") != std::string::npos);
+	TEST_EXPECT(!particle_key_edit(text, again, "speed", "fast", edit, why) && why.find("atof reads it as 0") != std::string::npos);
+	TEST_EXPECT(!particle_key_edit(text, again, "speed", "1.5x", edit, why) && why.find("atof reads it as 1.5") != std::string::npos);
+	TEST_EXPECT(!particle_key_edit(text, again, "emit_burst", "12x", edit, why) && why.find("atol reads it as 12") != std::string::npos);
 	TEST_EXPECT(!particle_key_edit(text, again, "id", "a; b", edit, why) && why.find("';'") != std::string::npos);
 	TEST_EXPECT(!particle_key_edit(text, again, "g5_alpha", "1", edit, why) && why.find("no key") != std::string::npos);
 	TEST_EXPECT(particle_key_words(*again.fields.front().row).size() > 0);
 	// A text the reader stops in has no block.
 	TEST_EXPECT(particle_key_blocks(*text_of(*loaded("[particledef]\r\n{\r\n\tid = a;\r\n"))).empty());
+	return 0;
+}
+
+// The game's reader is line ordered [orig: CParticleDefEntry_ParseGraphicProperty @ 0x5E3550]: a graphic line copies
+// the particle's colours, alpha, scale and curves into its layer as it is read, and a layer's key goes to the layer of
+// the graphic line before it. In a block laid out as the shipped ones are (its graphic lines last), an added key a
+// graphic line copies goes before the first graphic line, a layer's key after its own graphic line, a graphic line at
+// the end where it opens the layer its number names; a layer key of no graphic line, and a graphic1 after others, are
+// refused. Each line of a repeated key is its own row, and an edit of the first rewrites the first.
+int test_line_order() {
+	const std::string shipped = "[particledef]\r\n{\r\n\tid = a;\r\n\temit_rate = 5;\r\n\tgraphic1 = a.tga, additive;\r\n"
+	                            "\tg1_flip_frames = 2;\r\n\tgraphic2 = b.tga, additive;\r\n}\r\n";
+	const auto added = [&](const char *key, const char *value, std::string &why) {
+		std::unique_ptr<DocumentBase> document = loaded(shipped);
+		const TextDocument &text = *text_of(*document);
+		const std::vector<ParticleKeyBlock> blocks = particle_key_blocks(text);
+		Edit edit;
+		Diagnostic error;
+		if (blocks.empty() || !particle_key_edit(text, blocks[0], key, value, edit, why) || !document->apply(edit, error))
+			return std::string();
+		return text.text();
+	};
+	std::string why;
+	TEST_EXPECT(added("alpha_func", "fade", why).find("\talpha_func = fade;\r\n\tgraphic1 =") != std::string::npos);
+	TEST_EXPECT(added("g1_alpha", "0.5", why).find("\tg1_flip_frames = 2;\r\n\tg1_alpha = 0.5;\r\n\tgraphic2 =") !=
+	            std::string::npos);
+	TEST_EXPECT(added("g2_alpha", "0.5", why).find("\tgraphic2 = b.tga, additive;\r\n\tg2_alpha = 0.5;\r\n}") !=
+	            std::string::npos);
+	TEST_EXPECT(added("speed", "3", why).find("\tgraphic2 = b.tga, additive;\r\n\tspeed = 3;\r\n}") != std::string::npos);
+	TEST_EXPECT(added("graphic3", "c.tga, additive", why).find("\tgraphic3 = c.tga, additive;\r\n}") != std::string::npos);
+	TEST_EXPECT(added("g3_alpha", "0.5", why).empty() && why.find("no graphic3 line") != std::string::npos);
+	// graphic1 after other graphic lines (a block whose first is graphic2): the game would read it into the first
+	// layer again.
+	{
+		std::unique_ptr<DocumentBase> document = loaded("[particledef]\r\n{\r\n\tid = a;\r\n\tgraphic2 = b.tga, additive;\r\n}\r\n");
+		const TextDocument &text = *text_of(*document);
+		const std::vector<ParticleKeyBlock> blocks = particle_key_blocks(text);
+		Edit edit;
+		TEST_EXPECT(!blocks.empty() && !particle_key_edit(text, blocks[0], "graphic1", "c.tga, additive", edit, why) &&
+		            why.find("first layer again") != std::string::npos);
+	}
+	// A repeated key: each line its own row, the first's edit its own line.
+	std::unique_ptr<DocumentBase> document = loaded("[particledef]\r\n{\r\n\tid = a;\r\n\temit_rate = 5;\r\n\temit_rate = 6;\r\n}\r\n");
+	const TextDocument &text = *text_of(*document);
+	const std::vector<ParticleKeyBlock> blocks = particle_key_blocks(text);
+	TEST_EXPECT(blocks.size() == 1);
+	if (blocks.empty()) return 1;
+	const ParticleKeyField *first = nullptr;
+	for (const ParticleKeyField &field : blocks[0].fields)
+		if (field.present && field.key == "emit_rate" && !first) first = &field;
+	TEST_EXPECT(first && first->value == "5");
+	Edit edit;
+	Diagnostic error;
+	TEST_EXPECT(first && particle_key_edit(text, blocks[0], "emit_rate", "7", edit, why, first) && document->apply(edit, error));
+	TEST_EXPECT(text.text().find("emit_rate = 7;\r\n\temit_rate = 6;") != std::string::npos);
+	// A text of comments alone reads, of no block.
+	bool read = false;
+	TEST_EXPECT(particle_key_blocks(*text_of(*loaded("// nothing here\r\n")), &read).empty() && read);
 	return 0;
 }
 
@@ -187,6 +247,7 @@ int test_retail() {
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = test_blocks_and_sets();
+	failures += test_line_order();
 	failures += test_query();
 	failures += test_retail();
 	if (failures == 0) std::printf("editor_particle_keys: all passed\n");
