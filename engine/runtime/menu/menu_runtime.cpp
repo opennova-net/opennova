@@ -1445,7 +1445,7 @@ bool MenuRuntime::dropdown_press_(float x, float y) {
 	}
 	// The dropdown takes the press ahead of every other window [orig:
 	// CWnd_DispatchMouseEventToChildren @ 0x647917, g_UIActiveComboWnd's sink first]: its
-	// scrollbar's windows first [orig: CListWnd child walk @ 0x643f30 — the scrollbar child claims
+	// scrollbar's windows first [orig: CListWnd child walk @ 0x643f30, the scrollbar child claims
 	// first; parts = CScrollWnd_HandleEvent @ 0x64d050], then a row picks [orig: list_wnd_on_command
 	// @ 0x643cb0, the LISTBOX_WND 0x5000001 pick, CComboWnd_HandleEvent @ 0x65c2fd], and a press
 	// outside the cell and the list closes it [orig: @ 0x65c261..0x65c2bc, the outside check
@@ -1480,7 +1480,7 @@ void MenuRuntime::pump_mouse() {
 	const bool button_down = mouse_down_;
 
 	// An open dropdown owns the mouse exclusively [orig: UI_DispatchMouseEvent
-	// @0x63ab00 g_UIOpenPopupWnd gate; CComboWnd_HandleEvent @0x65c190 — D-MNU-11/12]:
+	// @0x63ab00 g_UIOpenPopupWnd gate; CComboWnd_HandleEvent @0x65c190; D-MNU-11/12]:
 	// its press is press_mouse's. No code flags the combo's list as the popup, so which
 	// retail pump serves it is open (docs/mnu/menu-re.md, "Not ported, or open"); this
 	// pump stays dropdown-exclusive.
