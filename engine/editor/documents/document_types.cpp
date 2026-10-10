@@ -96,9 +96,11 @@ constexpr DocumentType kTypes[] = {
 			model_finding_codes, nullptr, nullptr, nullptr, model_record_label, model_value_label },
 	{ DocumentTypeId::Animation, "animation", make_animation, validate_animation_file,
 			AnimationDocument::schema, animation_finding_codes },
+	// A map defines a slot a weapon action names and it lacks (DI-15, define_symbol; S23 B).
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,
 			validate_animation_map_file, AnimationMapDocument::schema,
-			animation_map_finding_codes },
+			animation_map_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, nullptr, define_animation_slot },
 	// The mission (S14): its records' references no field's value is are its record_references (the
 	// text keys a record's number forms); its records and values in a modder's words, and briefly for a
 	// narrow column (S15); its project check, what the game grounds where (DI-28).
