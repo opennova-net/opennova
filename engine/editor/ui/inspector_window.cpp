@@ -26,6 +26,7 @@
 #include <editor/ui/welcome_view.h>
 #include <formats/mnu/mnu_layout.h>
 #include <formats/mns/mns.h>
+#include <formats/rtxt/rtxt.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -701,6 +702,28 @@ const GraphSymbol *string_reached(const SessionView &view, const FieldUse &field
 	return view.findings.graph->symbol_reached(edge);
 }
 
+// A string's words as the game draws them on a button: the first {hot} taken out and the letter after it
+// underlined, the button's key [orig: CButtonWnd_SetLabel @ 0x6572F0, the first marker found with case, strstr @
+// 0x657451] (rtxt::strip_hotkey); the words as they are where they hold none.
+void hotkey_words(const std::string &text) {
+	int hot = -1;
+	const std::string words = rtxt::strip_hotkey(text, hot);
+	ImGui::TextUnformatted(words.c_str());
+	if (hot < 0 || size_t(hot) >= words.size() || words[size_t(hot)] == '\n') return;
+	// The letter's bytes (one character of the UTF-8 the editor holds), on its own line of the words.
+	size_t end = size_t(hot) + 1;
+	while (end < words.size() && (static_cast<unsigned char>(words[end]) & 0xC0) == 0x80) ++end;
+	const size_t newline = words.rfind('\n', size_t(hot));
+	const size_t line_start = newline == std::string::npos ? 0 : newline + 1;
+	const size_t line = size_t(std::count(words.begin(), words.begin() + std::ptrdiff_t(line_start), '\n'));
+	const ImVec2 at = ImGui::GetItemRectMin();
+	const char *from = words.c_str() + line_start;
+	const float x0 = at.x + ImGui::CalcTextSize(from, words.c_str() + hot).x;
+	const float x1 = at.x + ImGui::CalcTextSize(from, words.c_str() + end).x;
+	const float y = at.y + ImGui::GetTextLineHeight() * float(line) + ImGui::GetFontSize();
+	ImGui::GetWindowDrawList()->AddLine(ImVec2(x0, y), ImVec2(x1, y), ImGui::GetColorU32(ImGuiCol_Text));
+}
+
 // A string id's words as an editable box (the plain-words lane, the audit's 3.2: a menu button's Text
 // edited the key, never the words): the string the id names, as the game's lookup reaches it, edited in
 // place and set in the table that defines it when the box lets go (SetStringText: that table opened in
@@ -717,10 +740,8 @@ void string_words(Workspace &workspace, InspectorWindow::WordsBox &box, const Do
 	// A string of the data the project builds on is no file of the project: its words read only, with the
 	// way to make the table the project's own.
 	if (!view.project.scan || !view.project.scan->at_path(string.file)) {
-		ImGui::PushTextWrapPos(0.0f);
 		if (shown.empty()) ImGui::TextDisabled("(empty)");
-		else ImGui::TextUnformatted(shown.c_str());
-		ImGui::PopTextWrapPos();
+		else hotkey_words(shown);
 		ui_kit::tooltip("The words the player sees: the string " + words.raw + " in " + string.file +
 		                " of the data this project builds on. The project has no copy of that table to change.");
 		const bool allowed = view.allows(EditorRequestKind::PreviewInstallImport);
@@ -760,6 +781,14 @@ void string_words(Workspace &workspace, InspectorWindow::WordsBox &box, const Do
 	                ". A change is made there, so every use of the string shows it (Undo there takes it back).\n"
 	                "{hot} before a letter makes it the button's key: the game takes the marker out and underlines "
 	                "the letter (case matters: {HOT} stays as written).");
+	// What a button shows of the words: the marker out, its letter underlined.
+	if (box.text.find("{hot}") != std::string::npos) {
+		ImGui::TextDisabled("Shows as:");
+		ImGui::SameLine();
+		hotkey_words(box.text);
+		ui_kit::tooltip("The words as a button draws them: the game takes out the first {hot} and underlines the "
+		                "letter after it, the button's key.");
+	}
 	if (box.pending && !box.editing && box.text != shown)
 		ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "Not set: the status line says why.");
 	ImGui::TextDisabled("String id in %s:", words.source.c_str());
