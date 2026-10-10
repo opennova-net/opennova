@@ -66,6 +66,9 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	// An entity the game leaves off the ground (DI-28): its z set where the game's rule stands it, the fix the
 	// project check plans with its finding (Diagnostic::planned).
 	{ MissionFinding::OffGround, { "mission.off_ground", FindingFix::EditRecord } },
+	// A path the document holds that no save can write (D-MIS-6): the original editor lays a path out from
+	// its waypoint markers alone, each carrying one path and one place, so the file would hold another.
+	{ MissionFinding::Unserializable, { "mission.unserializable", FindingFix::None, nullptr, true } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MissionFinding::kCount),
               "every MissionFinding has exactly one row");
@@ -164,7 +167,7 @@ struct Checker {
 			// slot word there as written [orig: AIWaypoint_UpdateTarget @0x457476 reads the raw slot].
 			if (entity.waypoint_id >= 1 && entity.waypoint_id <= kLastPathNumber && size_t(entity.waypoint_id) < paths.size()) {
 				const MissionPath &path = static_cast<const PathRow &>(*paths[entity.waypoint_id]).native;
-				const size_t count = path.record.waypoint_numbers.size();
+				const size_t count = path.stops.size();
 				if (count == 0)
 					on(address, MissionFinding::PathEmpty, DiagnosticSeverity::Info,
 					   "Waypoint path " + std::to_string(entity.waypoint_id) + " has no stop: the entity walks nowhere.",
@@ -228,26 +231,50 @@ struct Checker {
 	}
 
 	void paths() {
-		const size_t markers = document.rows_of(K::Marker).size();
+		const std::vector<const Node *> marker_rows = document.rows_of(K::Marker);
+		const size_t markers = marker_rows.size();
+		std::map<uint32_t, int> carried; // a marker and the path whose stop names it first
 		for (const Node *row : document.rows_of(K::WaypointPath)) {
 			const PathRow &path = static_cast<const PathRow &>(*row);
 			const NodeAddress address{row->id, row->kind, 0};
-			const bms::WaypointRecord &record = path.native.record;
-			if (record.marker_count > kMaxWaypointPathMarkers)
+			const std::vector<uint32_t> &stops = path.native.stops;
+			if (stops.size() > kMaxWaypointPathMarkers)
 				on(address, MissionFinding::PathCount, DiagnosticSeverity::Warning,
-				   "The path stores a count of " + std::to_string(record.marker_count) +
-				           ", past its 32 slots: the walk reads the next record's words as stops.",
+				   "The path holds " + std::to_string(stops.size()) +
+				           " stops, past its 32 slots: a save writes the count and the first 32 as the original editor "
+				           "does, and the game's walk reads the next record's words as the stops past them [orig: "
+				           "AIWaypoint_UpdateTarget @0x457476].",
 				   "marker_count");
-			else if (record.marker_count == 1)
+			else if (stops.size() == 1)
 				on(address, MissionFinding::PathOneShot, DiagnosticSeverity::Info,
 				   "A path of one stop: the load makes it not loop [orig: Mission_LoadBMSFile @0x40fb72].", "marker_count");
 			const std::vector<RecordIds> &ids = path.ids.lists.empty() ? std::vector<RecordIds>() : path.ids.lists[0];
-			for (size_t i = 0; i < record.waypoint_numbers.size() && i < ids.size(); ++i)
-				if (record.waypoint_numbers[i] >= markers)
-					on({row->id, k(K::Stop), ids[i].id}, MissionFinding::MarkerMissing, DiagnosticSeverity::Warning,
-					   "The stop names marker " + std::to_string(record.waypoint_numbers[i]) + ", and the mission has " +
+			for (size_t i = 0; i < stops.size() && i < ids.size(); ++i) {
+				const NodeAddress stop{row->id, k(K::Stop), ids[i].id};
+				const std::string marker = "Marker " + std::to_string(stops[i]);
+				if (stops[i] >= markers) {
+					on(stop, MissionFinding::MarkerMissing, DiagnosticSeverity::Warning,
+					   "The stop names marker " + std::to_string(stops[i]) + ", and the mission has " +
 					           std::to_string(markers) + ": the game reads the pool's zeroed entry (position 0, radius 0).",
 					   "marker");
+				} else if (path.native.number == 0) {
+					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,
+					   "Path 0 is no path: a marker carrying 0 is on none, so a save puts no stop on it. Put the stop "
+					   "on a path from 1.",
+					   "marker");
+				} else if (static_cast<const EntityRow &>(*marker_rows[stops[i]]).native.type_id != def::DEF_TYPE_WAYPOINT) {
+					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,
+					   marker + " is no waypoint marker (item 6005): the original editor lays a path out from its "
+					            "waypoint markers alone, so a save would not put this stop on the path. Name a waypoint marker.",
+					   "marker");
+				} else if (!carried.emplace(stops[i], path.native.number).second) {
+					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,
+					   marker + " is a stop of path " + std::to_string(carried[stops[i]]) +
+					           " already: a waypoint marker carries one path and one place on it, so a save would keep "
+					           "one. Name another marker.",
+					   "marker");
+				}
+			}
 		}
 	}
 

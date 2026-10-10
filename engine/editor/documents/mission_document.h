@@ -146,6 +146,10 @@ public:
 	// The code of each source finding (issues(), in their order): what the parse made of the file.
 	const std::vector<MissionFinding> &issue_codes() const { return issue_codes_; }
 
+	// A field as it stands, with what the stops decide (D-MIS-6): a waypoint marker's path and place (its
+	// waypoint_id and wp_number) are the path whose stops name it and its place there, 0 and 0 on none;
+	// a path's count is how many stops it has. Every other field as its row holds it.
+	bool get(const NodeAddress &address, const std::string &field, Value &out) const override;
 protected:
 	// What the table's labelled field decides on its record (a parameter's reference and whether the
 	// game reads it, by its type), then the mission's own: the scope of what the file defines and
@@ -170,13 +174,9 @@ protected:
 	// keep naming the events they named, its original included (D-MIS-9).
 	void prepare_duplicate(Node &copy, const Node &original,
 	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
-	// A stop put into or taken out of a path whose stored count exceeds its 32 slots is refused: the
-	// original editor writes such a count from the waypoint markers its own document puts on the path,
-	// the stops past the 32 slots in no .bms (D-MIS-6); a chain holds 20 records at most (the table's
-	// lists say so).
-	bool accept_list_edit(const Node &row, const ListChange &change, std::string &error) const override;
-	// The mission row and the 128 paths are never added, removed or moved, and an area trigger the
-	// step puts in never takes a zone id another holds: a step that would is refused.
+	// The mission row and the 128 paths are never added, removed or moved, an area trigger the step
+	// puts in never takes a zone id another holds, and a waypoint marker's path and place are its path's
+	// stops, never set on the marker: a step that would is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 	// The markers or the events moved: every stop's marker, every Event trigger's and ResetEvent
 	// action's event and every waypoint marker's advance trigger renumbered (RecordShift::now), the

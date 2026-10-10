@@ -162,7 +162,15 @@ DisplayName stop_display(const MissionDocument &document, int64_t path, int64_t 
 		out.text = "Stop " + out.raw;
 		return out;
 	}
-	const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.record.waypoint_numbers;
+	const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.stops;
+	if (index >= int64_t(kMaxWaypointPathMarkers) && size_t(index) < stops.size()) {
+		// Past the 32 slots a save lays out: the walk reads the next record's word there [orig:
+		// AIWaypoint_UpdateTarget @0x457476].
+		out.text = "Stop " + out.raw + " of path " + std::to_string(path) + ": past its 32 slots, the game reads the "
+		           "next path's words there";
+		out.dangling = true;
+		return out;
+	}
 	if (index < 0 || size_t(index) >= stops.size()) {
 		// The walk reads the slot word there as written [orig: AIWaypoint_UpdateTarget @0x457476].
 		out.text = "Stop " + out.raw + ": past the " + counted_words(stops.size(), "stop", "stops") + " of path " +
@@ -523,7 +531,7 @@ bool mission_row_reads_others(const Document &, const Node &row) {
 std::string mission_path_title(const MissionPath &path) {
 	if (path.number == 0) return "No path";
 	if (const char *command = path_command_name(path.number)) return command;
-	const size_t stops = path.record.waypoint_numbers.size();
+	const size_t stops = path.stops.size();
 	return "Path " + std::to_string(path.number) + " (" + (stops ? counted_words(stops, "stop", "stops") : "no stops") + ")";
 }
 
@@ -594,7 +602,7 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 		break;
 	}
 	case K::Stop: {
-		const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.record.waypoint_numbers;
+		const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.stops;
 		// By the game's own number for it (0 the first: what the waypoint triggers and an entity's start
 		// stop name).
 		if (index < stops.size())

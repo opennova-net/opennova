@@ -49,6 +49,8 @@ enum class MissionFinding {
 	Pool, // an entity in another pool than its item's TYPE places it in (the mission's use check)
 	NoStart, // no marker a player of the mission's mode (and team) starts at: none moves the player there
 	OffGround, // an entity the game leaves off the ground (the mission's project check, preview/mission_ground_check.h)
+	Unserializable, // what the document holds that no save writes: a path's stop naming no waypoint marker, one
+	                // of path 0, a marker two stops name (D-MIS-6; blocks the save)
 	kCount
 };
 const FindingCodeRow &finding_code(MissionFinding code);

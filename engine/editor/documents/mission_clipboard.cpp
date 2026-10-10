@@ -174,7 +174,11 @@ std::string MissionDocument::copy(const std::vector<NodeAddress> &records) const
 		case K::Loadout: fragment.loadout.entries.push_back(record.as<bms::WeaponLoadoutRecord>()); break;
 		case K::Availability: fragment.item_availability.push_back(record.as<bms::ItemAvailabilityEntry>()); break;
 		case K::BoundingBox: fragment.bounding_boxes.push_back(record.as<bms::BoundingBox>()); break;
-		case K::Stop: fragment.waypoint_records[0].waypoint_numbers.push_back(record.as<uint32_t>()); break;
+		case K::Stop:
+			// The clipboard's path is a file's record: 32 slots at most.
+			if (fragment.waypoint_records[0].waypoint_numbers.size() >= kMaxWaypointPathMarkers) return std::string();
+			fragment.waypoint_records[0].waypoint_numbers.push_back(record.as<uint32_t>());
+			break;
 		case K::Trigger: chain.triggers.push_back(record.as<bms::Trigger>()); break;
 		case K::Action: chain.actions.push_back(record.as<bms::Action>()); break;
 		default: break;

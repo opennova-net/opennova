@@ -330,7 +330,7 @@ static int test_columns() {
 	                     "credits.invalid_input", "credits.unserializable", "dialog_bank.invalid_input", "document.unserializable",
 	                     "environment.invalid_input", "face_animation.invalid_input", "face_animation.unserializable",
 	                     "font.invalid_input", "font.unserializable",
-	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input",
+	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input", "mission.unserializable",
 	                     "music_bank.invalid_input", "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
 	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input",
 	                     "terrain.invalid_input" }));

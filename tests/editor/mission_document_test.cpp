@@ -388,7 +388,7 @@ int test_edits() {
 	TEST_EXPECT(document->apply(removal, error));
 	{
 		const PathRow &path = *static_cast<const PathRow *>(document->row(row_at(*document, MissionKind::WaypointPath, 1).row));
-		TEST_EXPECT(path.native.record.waypoint_numbers == std::vector<uint32_t>({0, 1, 2}) && path.native.record.marker_count == 3);
+		TEST_EXPECT(path.native.stops == std::vector<uint32_t>({0, 1, 2}));
 		TEST_EXPECT(as_mission(*document).rows_of(MissionKind::Marker).size() == 4);
 	}
 	document->undo();
@@ -399,7 +399,7 @@ int test_edits() {
 	TEST_EXPECT(document->apply(before, error) && document->rows()[6]->id == document->last_added());
 	{
 		const PathRow &path = *static_cast<const PathRow *>(document->row(row_at(*document, MissionKind::WaypointPath, 1).row));
-		TEST_EXPECT(path.native.record.waypoint_numbers == std::vector<uint32_t>({1, 2, 3, 4}));
+		TEST_EXPECT(path.native.stops == std::vector<uint32_t>({1, 2, 3, 4}));
 	}
 	document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
@@ -444,23 +444,43 @@ int test_edits() {
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
 
-	// A stop edit on a path counted past its 32 slots is refused (D-MIS-6).
+	// A path's stops are its waypoint markers' (D-MIS-6): past 32 too, a stop edit puts the marker on the path
+	// or takes it off, and a save lays the record out from them (the count, the first 32 the slots).
 	{
 		bms::File file;
 		std::string message;
 		const std::vector<uint8_t> bytes = fixture_bytes();
 		TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message));
-		file.waypoint_records[1].marker_count = 39;
+		std::vector<int> on_path = mission::waypoint_path_markers(file, 1);
+		while (on_path.size() < 34) {
+			size_t made = 0;
+			TEST_EXPECT(mission::add_waypoint_marker(file, 1, mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT, {}, -1, message, &made));
+			on_path.push_back(int(made));
+		}
 		std::vector<uint8_t> over;
 		TEST_EXPECT(bms::write(file, over, message));
 		std::unique_ptr<Document> counted = open(over, "over.bms");
 		TEST_EXPECT(counted && !counted->blocked());
 		const NodeAddress path = row_at(*counted, MissionKind::WaypointPath, 1);
-		TEST_EXPECT(!counted->apply(edit_of(EditOperation::Add, {path.row, k(MissionKind::Stop), 0}), error) &&
-		            error.message.find("32 slots") != std::string::npos);
-		TEST_EXPECT(!counted->apply(edit_of(EditOperation::Remove, first_child(*counted, path, MissionKind::Stop)), error));
+		const PathRow &row = static_cast<const PathRow &>(*counted->row(path.row));
+		TEST_EXPECT(row.native.stops.size() == 34);
+		Value count;
+		TEST_EXPECT(counted->get(path, "marker_count", count) && std::get<int64_t>(count) == 34);
+		TEST_EXPECT(counted->apply(edit_of(EditOperation::Remove, first_child(*counted, path, MissionKind::Stop)), error));
+		bms::File saved;
+		const std::string written = bytes_of(*counted);
+		TEST_EXPECT(bms::parse(reinterpret_cast<const uint8_t *>(written.data()), written.size(), saved, message));
+		TEST_EXPECT(saved.waypoint_records[1].marker_count == 33 && saved.waypoint_records[1].waypoint_numbers.size() == 32 &&
+		            saved.markers[size_t(on_path[0])].waypoint_id == 0 && saved.markers[size_t(on_path[1])].wp_number == 0 &&
+		            mission::waypoint_path_markers(saved, 1).size() == 33);
+		// A waypoint marker's path and place are its stops': read so, and never set on the marker.
+		const NodeAddress second = row_at(*counted, MissionKind::Marker, size_t(on_path[1]));
+		Value place;
+		TEST_EXPECT(counted->get(second, "wp_number", place) && std::get<int64_t>(place) == 0);
+		TEST_EXPECT(!counted->apply(edit_of(EditOperation::Set, second, "wp_number", int64_t(5)), error) &&
+		            error.message.find("path's stops") != std::string::npos);
 	}
-	std::printf("edits: bands, ids, the cascade of a marker's stops, an event's namers, a stop on an over-counted path\n");
+	std::printf("edits: bands, ids, the cascade of a marker's stops, an event's namers, a path's stops past 32\n");
 	return 0;
 }
 
@@ -640,7 +660,7 @@ int test_clipboard() {
 	TEST_EXPECT(document->apply(stop, error));
 	{
 		const PathRow &path = static_cast<const PathRow &>(*document->row(path2.row));
-		TEST_EXPECT(path.native.record.waypoint_numbers == std::vector<uint32_t>({0}) && path.native.record.marker_count == 1);
+		TEST_EXPECT(path.native.stops == std::vector<uint32_t>({0}));
 	}
 	Edit wrong = edit_of(EditOperation::Paste, {path2.row, k(MissionKind::Stop), 0}, "", trigger_payload);
 	TEST_EXPECT(!document->apply(wrong, error) && error.code() == "document.paste");
@@ -959,9 +979,10 @@ int test_validation() {
 	TEST_EXPECT(one(edit_of(EditOperation::Set, mission, "attrib_flags", int64_t(0)), "mission.no_start", DiagnosticSeverity::Warning,
 	                mission, "attrib_flags"));
 	{
-		const NodeAddress marker0 = row_at(*document, MissionKind::Marker, 0);
+		// (The location marker: the four before it are path 1's stops, which name waypoint markers.)
+		const NodeAddress marker4 = row_at(*document, MissionKind::Marker, 4);
 		TEST_EXPECT(document->apply({edit_of(EditOperation::Set, mission, "attrib_flags", int64_t(0)),
-		                             edit_of(EditOperation::Set, marker0, "item", int64_t(106001))},
+		                             edit_of(EditOperation::Set, marker4, "item", int64_t(106001))},
 		                            error));
 		TEST_EXPECT(type.validate_file(*document).empty());
 		document->undo();
@@ -970,19 +991,18 @@ int test_validation() {
 	                trigger0, "main_type"));
 	TEST_EXPECT(one(edit_of(EditOperation::Set, trigger0, "sub_type", int64_t(99)), "mission.trigger_type", DiagnosticSeverity::Warning,
 	                trigger0, "sub_type"));
-	// A path of one stop; a path counted past its slots; a bounding box with a corner past the other:
-	// through the file's bytes (a count is never set, a box never made).
+	// A path of one stop; a path of more stops than its slots; a bounding box with a corner past the other:
+	// through the file's bytes (a box never made), its paths its waypoint markers' (D-MIS-6).
 	{
 		const std::vector<uint8_t> bytes = fixture_bytes();
 		bms::File file;
 		std::string message;
 		TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message));
-		// A count past the slots stands only over full slots (mission_detail's resize keeps a shipped
-		// over-count that way, as CP19.bms ships one): path 1 filled, then counted 39.
-		file.waypoint_records[1].waypoint_numbers.assign(mission::kMaxWaypointPathMarkers, 0);
-		file.waypoint_records[1].marker_count = 39;
-		file.waypoint_records[2].waypoint_numbers = {0};
-		file.waypoint_records[2].marker_count = 1;
+		// Path 1 of 39 stops, as CP19.bms's path 6; path 2 of one; path 3 of none.
+		for (const size_t path : {size_t(2), size_t(3)}) TEST_EXPECT(mission::clear_waypoint_path(file, path, message));
+		while (mission::waypoint_path_markers(file, 1).size() < 39)
+			TEST_EXPECT(mission::add_waypoint_marker(file, 1, mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT, {}, -1, message));
+		TEST_EXPECT(mission::add_waypoint_marker(file, 2, mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT, {}, -1, message));
 		file.bounding_boxes.push_back(bms::BoundingBox{bms::to_fixed_16_16(10.0), 0, 0, 0, 0, 0, 1, -1, 0});
 		mission::sync_counts(file);
 		std::vector<uint8_t> out;
@@ -993,6 +1013,27 @@ int test_validation() {
 		for (const Diagnostic &d : type.validate_file(*flawed)) ++codes[d.code()];
 		TEST_EXPECT(codes.size() == 3 && codes["mission.path_count"] == 1 && codes["mission.path_one_shot"] == 1 &&
 		            codes["mission.bounding_box"] == 1);
+	}
+	// A path's stops a save cannot write (D-MIS-6): one naming no waypoint marker, one on path 0, a marker two
+	// stops name; each an error that blocks the save.
+	{
+		std::unique_ptr<Document> paths = open(fixture_bytes(), "paths.bms");
+		TEST_EXPECT(paths);
+		if (paths) {
+			const auto add_stop = [&](size_t path, int64_t marker) {
+				const NodeAddress row = row_at(*paths, MissionKind::WaypointPath, path);
+				return paths->apply(edit_of(EditOperation::Add, {row.row, k(MissionKind::Stop), 0}, "marker", marker), error);
+			};
+			TEST_EXPECT(add_stop(2, 4) && add_stop(3, 0) && add_stop(0, 1));
+			std::map<std::string, size_t> codes;
+			bool blocking = true;
+			for (const Diagnostic &d : type.validate_file(*paths)) {
+				++codes[d.code()];
+				if (d.code() == "mission.unserializable")
+					blocking = blocking && d.severity == DiagnosticSeverity::Error && d.row() && d.row()->blocks_save;
+			}
+			TEST_EXPECT(codes["mission.unserializable"] == 3 && blocking);
+		}
 	}
 	std::printf("validation: each record finding on its record\n");
 	return 0;
@@ -1271,14 +1312,13 @@ int test_witnessed_rules() {
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
 
-	// A waypoint marker (item 106005): its name and its advance trigger read; another marker's not.
+	// A waypoint marker (item 106005, one of path 1's stops): its name and its advance trigger read; another
+	// marker's not.
 	const NodeAddress marker0 = row_at(*document, MissionKind::Marker, 0), navpoint = row_at(*document, MissionKind::Marker, 4);
-	TEST_EXPECT(use(marker0, "ttool_index").applies == Applicability::Ignored &&
-	            use(marker0, "wp_adv_trigger").applies == Applicability::Ignored);
-	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, marker0, "item", int64_t(106005)), error));
 	TEST_EXPECT(use(marker0, "ttool_index").applies == Applicability::Reads &&
 	            use(marker0, "wp_adv_trigger").applies == Applicability::Reads &&
-	            use(navpoint, "ttool_index").applies == Applicability::Ignored);
+	            use(navpoint, "ttool_index").applies == Applicability::Ignored &&
+	            use(navpoint, "wp_adv_trigger").applies == Applicability::Ignored);
 	// -1 (a new record's) names no event; 1 names the second.
 	TEST_EXPECT(use(marker0, "wp_adv_trigger").reference == ReferenceKind::None);
 	Extracted before;
@@ -1340,8 +1380,8 @@ int test_witnessed_rules() {
 	TEST_EXPECT(mode(uint32_t(bms::AttribFlags::Deathmatch)) && codes() == (std::map<std::string, size_t>{{"mission.no_start", 1}}));
 	TEST_EXPECT(mode(uint32_t(bms::AttribFlags::TeamDeathmatch)) &&
 	            codes() == (std::map<std::string, size_t>{{"mission.no_start", 2}}));
-	// A team 1 start: team 2's alone.
-	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, marker0, "item", int64_t(106003)), error) &&
+	// A team 1 start (the location marker: the four before it are path 1's waypoint stops): team 2's alone.
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, navpoint, "item", int64_t(106003)), error) &&
 	            codes() == (std::map<std::string, size_t>{{"mission.no_start", 1}}));
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);

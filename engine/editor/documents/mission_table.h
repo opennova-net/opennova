@@ -46,10 +46,15 @@ constexpr bool is_entity_kind(NodeKind kind) {
 }
 
 // A waypoint path as a row: the file's record and its number, which is its place among the file's 128
-// (an entity's waypoint_id and a parameter name it by; the file writes no number).
+// (an entity's waypoint_id and a parameter name it by; the file writes no number), and its stops: every
+// marker on it in its order, the waypoint markers that carry its number as the original editor models a
+// path (master's mission::waypoint_path_markers, D-MIS-6), unbounded. The stops are what the editor
+// edits; the record keeps the path's flags and the slot words its writer keeps, and a save lays it out
+// from the markers the stops put on it (MissionDocument::compose).
 struct MissionPath {
 	bms::WaypointRecord record;
 	int number = 0;
+	std::vector<uint32_t> stops;
 };
 
 // The native record behind each kind: the mission row a bms::File holding its header and its own

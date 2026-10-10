@@ -742,49 +742,34 @@ template <class Record> ListOps fixed_list(K kind, std::vector<Record> &(*list)(
 	return ops;
 }
 
-// A path's stops, through bms_edit's stops (32 at most; one put in or taken out writes the path's
-// count as its slots). A new stop visits the file's first marker until it is given another (its
-// marker is a Record reference: the picker offers the file's markers).
-// A stop put into or taken out of the path's record, its count written as its slots and the slot bytes
-// past them zero, 32 at most: the record's own edit, until the editor takes master's model of a path as its
-// waypoint markers (mission::insert_waypoint_stop over the file, D-MIS-6; the flow lane's #992).
-bool insert_record_stop(bms::WaypointRecord &path, size_t index, uint32_t marker, std::string &error) {
-	std::vector<uint32_t> &stops = path.waypoint_numbers;
-	if (stops.size() >= kMaxWaypointPathMarkers) {
-		error = "Waypoint path marker count exceeds 32";
-		return false;
-	}
-	stops.insert(stops.begin() + std::ptrdiff_t(std::min(index, stops.size())), marker);
-	path.marker_count = uint32_t(stops.size());
-	path.padding.assign(128 - stops.size() * sizeof(uint32_t), 0);
-	return true;
-}
-bool erase_record_stop(bms::WaypointRecord &path, size_t index) {
-	std::vector<uint32_t> &stops = path.waypoint_numbers;
-	if (index >= stops.size()) return false;
-	stops.erase(stops.begin() + std::ptrdiff_t(index));
-	path.marker_count = uint32_t(stops.size());
-	path.padding.assign(128 - stops.size() * sizeof(uint32_t), 0);
-	return true;
-}
-
+// A path's stops: the markers on it in its order (MissionPath::stops, D-MIS-6), as many as it holds; a
+// save puts each on the path through its marker's path and place and lays the record out from them, the
+// first 32 its slots (MissionDocument::compose). A new stop visits the file's first marker until it is
+// given another (its marker is a Record reference: the picker offers the file's markers); a stop that
+// names no waypoint marker, one of path 0 or a marker another stop names is a finding
+// (mission.unserializable), which the save refuses.
 ListOps stop_list() {
 	ListOps ops;
-	ops.size = [](const RecordHandle &owner) { return owner.as<MissionPath>().record.waypoint_numbers.size(); };
+	ops.size = [](const RecordHandle &owner) { return owner.as<MissionPath>().stops.size(); };
 	ops.at = [](const RecordHandle &owner, size_t index) {
-		std::vector<uint32_t> &stops = owner.as<MissionPath>().record.waypoint_numbers;
+		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
 		return index < stops.size() ? RecordHandle{k(K::Stop), &stops[index]} : RecordHandle{};
 	};
 	ops.insert = [](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
 		if (!own_kind(record, K::Stop, error)) return false;
+		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
 		const uint32_t marker = record ? *static_cast<const uint32_t *>(record->data.get()) : 0;
-		return insert_record_stop(owner.as<MissionPath>().record, index, marker, error);
+		stops.insert(stops.begin() + std::ptrdiff_t(std::min(index, stops.size())), marker);
+		return true;
 	};
 	ops.erase = [](const RecordHandle &owner, size_t index) {
-		return erase_record_stop(owner.as<MissionPath>().record, index);
+		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
+		if (index >= stops.size()) return false;
+		stops.erase(stops.begin() + std::ptrdiff_t(index));
+		return true;
 	};
 	ops.copy = [](const RecordHandle &owner, size_t index) {
-		const std::vector<uint32_t> &stops = owner.as<MissionPath>().record.waypoint_numbers;
+		const std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
 		return index < stops.size() ? detached(K::Stop, stops[index]) : DetachedRecord();
 	};
 	return ops;
@@ -837,7 +822,7 @@ RecordTable make_table() {
 			           file_list<bms::BoundingBox>(K::BoundingBox, boxes_of, fresh_box), {}});
 			break;
 		case K::WaypointPath:
-			kind.list({spec(K::Stop, "Stops", kMaxWaypointPathMarkers), stop_list(), {}});
+			kind.list({spec(K::Stop, "Stops"), stop_list(), {}});
 			break;
 		case K::Event:
 			kind.list({spec(K::Trigger, "Triggers", kMaxEventRecords), chain_list<bms::Trigger>(K::Trigger, triggers_of), {}});
