@@ -962,11 +962,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// spawn-state reset below (it clears only the dead bit).
 	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
 	world::apply_spawn_point_latches(*player, pose);
-	world::entity_reset_to_spawn_state(*player);
+	world::entity_reset_to_spawn_state(*player); // [orig: Entity_RaiseHealthToMax @0x51782F, @0x4B97BC]
 	if (world.tables.player.has_item_def && world.tables.player.item_hp != 0)
-		player->health = world::retail_signed_i16(world.tables.player.item_hp);
+		player->health = world::max_health_with_difficulty(world, *player, world.tables.player.item_hp);
 	else if (player->health_max > 0)
-		player->health = player->health_max;
+		player->health = world::max_health_with_difficulty(world, *player, player->health_max);
 	else
 		player->health = 100;
 	player->alive = true;

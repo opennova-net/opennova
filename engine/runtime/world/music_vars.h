@@ -14,7 +14,9 @@ namespace opennova::world {
 class World;
 
 // Var7 = health percent: integer cur*100/max, pinned to 100 when max <= cur
-// [orig: @ 0x4b6315..0x4b6324].
+// [orig: @ 0x4b6315..0x4b6324]. A local player with no definition has the
+// ceiling 0, so a negative health divides by zero, as retail's idiv @ 0x4b631b
+// faults; no retail data reaches it.
 constexpr int music_health_percent(int cur, int max) {
 	return max > cur ? cur * 100 / max : 100;
 }

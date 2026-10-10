@@ -14,10 +14,24 @@ namespace opennova::world {
 class World;
 class AiSystem;
 
+// An entity's health ceiling [orig: Entity_GetMaxHealthWithDifficulty @0x43B8A0]:
+// 0 without a definition (@0x43B8AB), else its def hp (itemDef+0x17C @0x43B8B4,
+// the entity's health_max) as a signed 16-bit word. Outside a session
+// (@0x43B8AD) the local player's (@0x43B8C0) doubles at the difficulty word -1
+// (a 16-bit sum, @0x43B8CE..0x43B8D8) and halves toward zero at 1
+// (@0x43B8DC..0x43B8E9) [SessionRules::difficulty, dword_24D2110 @0x43B8C8].
+int32_t max_health_with_difficulty(const World &world, const Entity &e);
+// The same over a def hp the caller holds apart from the entity (the deploy's
+// player-table hp), the entity's definition taken as present.
+int32_t max_health_with_difficulty(const World &world, const Entity &e, int32_t hp);
+
 // [orig: Entity_ResetToSpawnState @0x4B9610] Entity-only seeding is for a
 // fresh row before its motor is attached. Live rows use the World overload:
 // it also resets the motor, clears references/mounts and refreshes collision.
 void entity_reset_to_spawn_state(Entity &e);
+// The same with the health raise's ceiling given: the entity-only form's is the def word, the
+// World form's max_health_with_difficulty's.
+void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling);
 void entity_reset_to_spawn_state(World &world, Entity &e);
 void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &e);
 

@@ -533,10 +533,12 @@ struct MissionTables {
     terrain::SurfaceTypeMap surface_map;
     PlayerTemplate player;
     // The mission header's attribute flags, stamped by the host at mission load
-    // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn). Read by the
-    // SP auto-lose win-condition leg and by the infantry death scream's night
-    // gate (0x100000 EnableNVG -> slot 8 SSNightDead @ 0x4b9ca3).
-    // [orig: g_BmsAttribFlags @0xa76258]
+    // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn), the
+    // objective Co-op mission start out of a session adding 0x40. Read by the
+    // SP auto-lose win-condition leg, the deploy keys and death menu, and by
+    // the infantry death scream's night gate (0x100000 EnableNVG -> slot 8
+    // SSNightDead @ 0x4b9ca3).
+    // [orig: g_BmsAttribFlags @0xa76258; the 0x40 OR Game_StartMission @0x525CF2]
     // The named bits below mirror bms::AttribFlags (engine/runtime/world stays
     // mission-parser-free; parity pinned by static_asserts in
     // engine/runtime/mission/promote.cpp).
@@ -661,7 +663,24 @@ struct SessionRules {
     // (@0x4E07A4) and Game_StartMission zeroes it (@0x525B25); no net wire
     // carries it. Defaults clear.
     bool ai_rules_skip_local_player = false;
+    // The difficulty word: outside a session the local player's health
+    // ceiling doubles at -1 and halves at 1 (max_health_with_difficulty,
+    // entity_spawn.h). Every mission start out of a session leaves it at
+    // mission_start_difficulty's word (MissionKernel::complete_mission_start);
+    // a session's is the config's byte, which no in-session reader of this
+    // word needs. [orig: dword_24D2110; Game_StartMission @0x525CDD /
+    //  @0x525CFA; Entity_GetMaxHealthWithDifficulty @0x43B8C8]
+    int32_t difficulty = 0;
 };
+
+// The difficulty word a mission start leaves outside a session: 0, and -1
+// under the objective Co-op game type (the 0x10020 family with the 0x20000
+// bit, 0x30020). [orig: Game_StartMission - `and ecx, 0FFFDFFFFh; cmp ecx,
+//  10020h` @0x525CD1..0x525CD7, the 0 @0x525CDD, `test eax, 20000h`
+//  @0x525CE5, the -1 @0x525CFA]
+constexpr int32_t mission_start_difficulty(uint32_t game_type) {
+    return (game_type & 0xFFFDFFFFu) == 0x10020u && (game_type & 0x20000u) != 0 ? -1 : 0;
+}
 
 // A HUD relay the authority sends the joiners as S2C 0x3F, in the order the
 // sim produced them: kind 0 is an objective notification (slot, is_win,

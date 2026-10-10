@@ -22,6 +22,7 @@
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/death_camera.h>
+#include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/geom.h>
 #include <runtime/world/tp_camera_mount.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
@@ -1254,9 +1255,8 @@ int local_player_health(const World &world) {
 
 int local_player_max_health(const World &world) {
     if (!world.cached.local_player.valid()) return 100;
-    const AiEntity *p = world.ai.for_handle(world.cached.local_player);
-    if (!p || p->inf.max_health <= 0) return 100;
-    return p->inf.max_health;
+    const Entity *e = world.registry.get(world.cached.local_player);
+    return e != nullptr ? max_health_with_difficulty(world, *e) : 100;
 }
 
 } // namespace opennova::world

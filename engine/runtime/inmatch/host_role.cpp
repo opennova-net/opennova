@@ -134,20 +134,25 @@ GameConfig singleplayer_game_config(uint32_t game_type,
 	config.mp_attributes = 0x3A06u;
 	config.max_players = 1;
 	config.game_type = game_type;
+	// The difficulty word, the S2C 0x08 block's seventh byte: the session
+	// settings copy the profile's +0x564 into it (@0x551F6F..0x551F75), but the
+	// mission start overwrites it out of a session before any serializer reads
+	// it, so the byte is the word that start leaves (a session's is game.cfg's
+	// mp_difficulty, host_config.cpp). Our SP stream queues at the bring-up,
+	// ahead of the mission start [orig: Game_StartMission @0x525CDD / @0x525CFA;
+	// ServerConfig_SerializeToPacket's live read @0x505D1C, from
+	// Server_SendInitialGameStateToPlayer @0x51BF95 in Server_TickUpdate].
+	config.config_bytes[6] = static_cast<uint8_t>(world::mission_start_difficulty(game_type));
 	if (profile != nullptr) {
 		// Outside a session the restriction words come from the current
 		// profile record: +0x548 -> g_SessionNoCharAbilities, +0x54C ->
 		// g_SessionNoWeaponRecoil, +0x554 -> g_SessionNoCrossHairSpread,
 		// +0x550 -> g_SessionNoScopeDrift [orig:
-		// Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F], and the
-		// difficulty word, the S2C 0x08 block's seventh byte, from +0x564
-		// (dword_24D2110 @0x551F6F..0x551F75; a session's from game.cfg's
-		// mp_difficulty, host_config.cpp).
+		// Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F].
 		config.no_char_abilities = profile->sp_no_char_abilities;
 		config.no_weapon_recoil = profile->sp_no_weapon_recoil;
 		config.no_crosshair_spread = profile->sp_no_crosshair_spread;
 		config.no_scope_drift = profile->sp_no_scope_drift;
-		config.config_bytes[6] = static_cast<uint8_t>(profile->sp_difficulty);
 	}
 	return config;
 }

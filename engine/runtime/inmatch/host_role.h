@@ -65,9 +65,11 @@ struct HostBringup {
 //  @0x561c1d -> game_settings.max_players = 1 @0x561cec].
 // Outside a session the session words a host takes from game.cfg come from
 // the current player profile record instead: the four charattr restriction
-// words and the difficulty (the record's +1352..+1380; null = a fresh
-// profile's, every one 0) [orig: Game_ApplySessionSettingsToGlobals
-// @0x551F15..0x551F75].
+// words (the record's +1352..+1364; null = a fresh profile's, every one 0)
+// [orig: Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F]. The
+// difficulty byte is the word the mission start leaves out of a session
+// (world::mission_start_difficulty), which overwrites the profile's +1380
+// before any serializer reads it [orig: Game_StartMission @0x525CDD].
 GameConfig singleplayer_game_config(uint32_t game_type,
 		const playersav::ProfileRecord *profile = nullptr);
 

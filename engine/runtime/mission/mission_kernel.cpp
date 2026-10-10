@@ -873,6 +873,25 @@ bool MissionKernel::complete_mission_start() {
 	// [orig: Game_StartMission @0x525CB8..0x526095]
 	if (world.rules.projectile_authority) wac.execute_initial(world);
 	world.weather.settle_mission_start([this] { tick_weather(); });
+	// Out of a session the difficulty word starts every mission at 0; under the
+	// objective Co-op game type the mission also takes the single-player respawn
+	// attribute, the word -1 and the local player's health at its ceiling, a
+	// 16-bit store (twice its def hp). The word the session settings copied from
+	// the profile (+0x564) does not survive this; retail's player spawn raises
+	// read it first, which ours does not (D-PWR-6).
+	// [orig: Game_StartMission @0x525CC2..0x525D12, after the WacScript_InitAndLoad
+	//  and Environment_MissionStartInit calls @0x525CB3 / @0x525CB8 and ahead of
+	//  Score_CountMissionSubgoalsAndUnits @0x525D5D; the 0x40 OR @0x525CF2, the
+	//  Entity_GetMaxHealthWithDifficulty call @0x525D04, the store @0x525D12;
+	//  Game_ApplySessionSettingsToGlobals @0x551F6F..0x551F75]
+	if (!world.rules.mp_session) {
+		world.rules.difficulty = w::mission_start_difficulty(world.match.rules().game_type);
+		if (world.rules.difficulty == -1) {
+			world.tables.mission_attrib_flags |= w::MissionTables::kMissionAttribSinglePlayerRespawn;
+			if (w::Entity *local = world.registry.get(world.cached.local_player))
+				local->health = w::max_health_with_difficulty(world, *local);
+		}
+	}
 	w::count_mission_units(world);
 	// The mission start's cine legs, after the unit census: every node gone,
 	// the end screen down, and on a first SP start the intro-cine leg

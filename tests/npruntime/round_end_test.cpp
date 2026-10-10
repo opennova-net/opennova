@@ -1693,8 +1693,15 @@ int main() {
 	expect(!world.match.outcome().ended, "death with SP-respawn never auto-loses");
 	for (int i = 0; i < 621; ++i) inmatch::Server_TickUpdate(ctx);
 	expect(!world.registry.get(player)->alive, "the expired hold deploys nothing by itself");
+	// The deploy raises the local player to its ceiling with the difficulty
+	// term: the objective Co-op word -1 doubles the def hp out of a session
+	// [orig: Server_ProcessPlayerDeath @0x51782F -> Entity_RaiseHealthToMax ->
+	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0]. (D-PWR-2)
+	world.rules.difficulty = -1;
 	pick_default_spawn();
 	expect(world.registry.get(player)->alive, "the player respawned on its pick after the timer");
+	expect(world.registry.get(player)->health == 200, "the SP Co-op deploy doubles the ceiling");
+	world.rules.difficulty = 0;
 
 	// --- 4b. The Player's own lethal blast: no Player definition authors a
 	// `score`, so the self-kill tallies nothing (the missions whose WAC reads

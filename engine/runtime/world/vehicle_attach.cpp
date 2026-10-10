@@ -11,6 +11,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/local_player.h> // the local player's stance latch clears
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/vehicle_panel_feed.h>
@@ -234,7 +235,8 @@ VehicleSeatOccupancy vehicle_seat_occupancy(
         result.player = (rider->flags & kEntityFlagPlayer) != 0;
         result.own_seat = seat.occupant == requester;
         result.health = rider->health;
-        result.max_health = rider->health_max;
+        // [orig: HUD_DrawVehicleHealthBars @0x5A51BA -> Entity_GetMaxHealthWithDifficulty]
+        result.max_health = max_health_with_difficulty(world, *rider);
     }
     return result;
 }

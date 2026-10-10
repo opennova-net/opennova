@@ -270,8 +270,12 @@ bool local_player_vehicle_zone_team_matches(const World &world);
 
 // The local player's health pair as the HUD bar, the F3/MCP card and the
 // gamemus var pump all read it: the entity's current health (0 without a
-// local player) and the body's authored max (100 without a body or an
-// authored value). One home so the readers cannot drift (ADR 0042 d2).
+// local player) and its ceiling, max_health_with_difficulty's (entity_spawn.h:
+// 0 without a definition; the difficulty word's out of a session), 100 without
+// a local player. One home so the readers cannot drift (ADR 0042 d2).
+// [orig: HUD_DrawHealthBar @0x5A2EE5, HUD_BuildEntityInfo @0x4B8794 and the
+//  var-7 pump in Entity_UpdateInfantryPlayerBody @0x4B6302, each a call of
+//  Entity_GetMaxHealthWithDifficulty]
 int local_player_health(const World &world);
 int local_player_max_health(const World &world);
 

@@ -69,6 +69,7 @@ struct Rig {
             Entity o;
             o.kind = EntityKind::Organic;
             o.item_id = 5305;
+            o.has_item_def = true; // the seat bar's ceiling is the def hp (0 without one)
             o.alive = true;
             o.health = hp;
             o.health_max = 150;

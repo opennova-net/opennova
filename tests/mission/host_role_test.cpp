@@ -15,6 +15,7 @@
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <base/gameprofile/game_type.h>
@@ -805,6 +806,43 @@ int main() {
 		CHECK(!host.client_runtime->state().take_death_menu_open(false, false));
 		CHECK(!host.client_runtime->state().death_menu_open_latch);
 		CHECK(dead_triggers());
+	}
+
+	// --- the objective Co-op mission start out of a session (D-PWR-2) ---------
+	// The difficulty word starts every SP mission at 0; the objective Co-op
+	// game type 0x30020 (an ATTRIB_COOP mission) also takes the single-player
+	// respawn attribute, the word -1 and the local player's health at its
+	// doubled ceiling. A training mission (stock Co-op 0x10020) keeps the def
+	// hp and no respawn. The SP config's difficulty byte is the word the start
+	// leaves. [orig: Game_StartMission @0x525CC2..0x525D12;
+	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0]
+	for (const bool objective : {true, false}) {
+		ms::MissionKernel kernel;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		bms::File mission = two_entity_mission();
+		mission.header.attrib_flags = objective ? bms::AttribFlags::Coop : bms::AttribFlags::None;
+		kernel.open_document(std::move(mission), "coop_start", source_over(&files));
+		ms::KernelBootOptions options;
+		options.game_type = mission_game_type(kernel.mission);
+		CHECK(options.game_type == (objective ? game_type::kObjectiveCoop : game_type::kCoop));
+		kernel.world.rules.difficulty = 1; // a previous word, never carried
+		options.bringup_net_session = [&] {
+			kernel.world.tables.player.item_hp = 100; // the Player def's hp
+			role.bring_up_singleplayer();
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		const w::Entity *local = kernel.world.registry.get(kernel.world.cached.local_player);
+		CHECK(local != nullptr);
+		if (local == nullptr) continue;
+		CHECK(local->health_max == 100);
+		CHECK(kernel.world.rules.difficulty == (objective ? -1 : 0));
+		CHECK(((kernel.world.tables.mission_attrib_flags &
+		        w::MissionTables::kMissionAttribSinglePlayerRespawn) != 0) == objective);
+		CHECK(local->health == (objective ? 200 : 100));
+		CHECK(w::local_player_max_health(kernel.world) == (objective ? 200 : 100));
+		CHECK(role.state.host_owner.ctx.config.config_bytes[6] == (objective ? 0xFF : 0x00));
 	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");
