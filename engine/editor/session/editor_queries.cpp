@@ -39,6 +39,7 @@
 #include <editor/project_build/build_plan.h>
 #include <editor/session/catalog_json.h>
 #include <editor/session/document_set.h>
+#include <editor/session/particle_keys_query.h>
 #include <editor/session/environment_uses.h>
 #include <editor/session/terrain_uses.h>
 #include <editor/session/file_card.h>
@@ -1498,6 +1499,10 @@ constexpr QueryParam kEnvironmentUsesParams[] = {
 
 // The missions that run on a terrain and the import it comes from (DI-30): a .trn by its path, else the active
 // document.
+constexpr QueryParam kParticleKeysParams[] = {
+	{ "path", J::String, false, nullptr, "A particle file open as a document; left out, the active one." },
+};
+
 constexpr QueryParam kTerrainUsesParams[] = {
 	{ "path", J::String, false, nullptr, "A terrain (.trn); left out, the active document's file." },
 };
@@ -2039,6 +2044,11 @@ constexpr EditorQueryRow kRows[] = {
 			"open_document showing it); and what is typed as the field would hold it: its status, its Go to "
 			"targets and its fixes (Add it there first).")
 			.pages("choices")
+			.row,
+	Query(K::ParticleKeys, "particle_keys", answer_particle_keys, kParticleKeysParams, kDocumentReads,
+			"A particle file's blocks as the game's reader reads them (S23 B): each its title, kind, index, id and "
+			"lines, and its keys: each key's value as the reader takes it, its place (line, column, length: a span "
+			"edit there sets it), whether the block writes it, and what the reader takes it as.")
 			.row,
 };
 

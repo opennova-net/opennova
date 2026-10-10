@@ -20,6 +20,7 @@
 #include <editor/ui/mission_logic_view.h>
 #include <editor/ui/model_inspector_view.h>
 #include <editor/ui/outline_view.h>
+#include <editor/ui/particle_key_inspector.h>
 #include <editor/ui/script_view.h>
 #include <editor/ui/music_bank_inspector.h>
 #include <editor/ui/wave_inspector.h>
@@ -165,8 +166,10 @@ constexpr DocumentViewRow kViews[] = {
 	// under it; each heads the Inspector with what plays it and a Play (ui/sound_inspector).
 	{DocumentTypeId::SoundBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_bank_inspector},
 	{DocumentTypeId::SoundProfiles, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_sound_profile_inspector},
-	// A particle file's text in the script device; the Preview window plays its effect (DI-14).
-	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view},
+	// A particle file's text in the script device; the Preview window plays its effect (DI-14); a block's keys, each
+	// typed as the game's reader takes it, head the Inspector (S23 B, ui/particle_key_inspector).
+	{DocumentTypeId::Particles, DocumentViewRole::MainViewport, nullptr, make_script_view, nullptr, nullptr, nullptr,
+	 draw_particle_key_inspector},
 	// An environment's row and its keyframes as a tree (DI-19a) beside its time-of-day viewport (DI-19b: the
 	// Main role, ui/main_viewport_view over the Environment viewport kind); the missions that run on it head
 	// the Inspector, each a Go to with its terrain and what its header sets over it (ui/environment_inspector).

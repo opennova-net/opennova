@@ -5635,6 +5635,13 @@ target_include_directories(editor_ai_profile_test PRIVATE ${CMAKE_CURRENT_SOURCE
 opennova_add_mixed_test(editor_ai_profile COMMAND editor_ai_profile_test)
 # The HUD effects document (ADR 0046 S23 B): hudfx.def's model lines, the one the game reads, the game's failure
 # where the HUD model is that line, a long name's run, an edit's one line, the blank. JO ships none.
+# The particle key panel (ADR 0046 S23 B): a particle file's blocks and keys as the game's reader reads them, a set
+# rewriting one value's span, a key added on its own line, a value the reader takes otherwise refused, the
+# particle_keys query; --retail: the install's particle files, each key's text at its span.
+add_executable(editor_particle_keys_test editor/particle_keys_test.cpp)
+target_link_libraries(editor_particle_keys_test PRIVATE opennova_editor)
+target_include_directories(editor_particle_keys_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_particle_keys COMMAND editor_particle_keys_test)
 add_executable(editor_hudfx_test editor/hudfx_document_test.cpp)
 target_link_libraries(editor_hudfx_test PRIVATE opennova_editor)
 target_include_directories(editor_hudfx_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

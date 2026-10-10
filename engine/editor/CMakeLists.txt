@@ -112,6 +112,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/credits_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/particle_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/particle_keys.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/project_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
@@ -296,6 +297,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/particle_keys_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_uses.cpp
@@ -430,6 +432,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/welcome_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/font_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/music_bank_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/particle_key_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/wave_inspector.cpp
     )
     target_link_libraries(opennova_editor PRIVATE opennova_imgui)
