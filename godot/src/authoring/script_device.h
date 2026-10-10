@@ -89,8 +89,8 @@ private:
 	void on_focus_exited_();
 	void end_burst_();
 	// What the control asks of the script (S15, session/script_assist): the completions at its caret
-	// added to its list, a word's words at a place, the place a Ctrl+click looks up gone to (a request),
-	// else a notice that nothing defines it.
+	// added to its list, a word's words at a place, the place a Ctrl+click or F12 looks up gone to (a
+	// request), else a notice that nothing defines it.
 	void complete_(bool force);
 	std::string hover_(int line, int column) const;
 	void lookup_(int line, int column);

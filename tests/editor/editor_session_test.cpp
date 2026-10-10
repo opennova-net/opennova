@@ -855,8 +855,8 @@ static int test_retail_play() {
 // run, which found no game.cfg, writing one and quitting on its own with code 0 soon after it started, is
 // started once more in the same run directory, said in Output (and on the run section), once the game's
 // one-at-a-time gate is let go; a second such exit, a stop, or a first run that wrote nothing is not. Play
-// is refused before a build while the gate is held (another game of the install runs), and for a project
-// that builds as an expansion (play.strict_expansion).
+// is refused before a build while the gate is held (another game of the install runs); a project that
+// builds as an expansion on the install's base game plays as the stock game's /exp does.
 static int test_strict_play() {
 	editor_test::TempProjectDir dir("opennova_editor_strict_play_test");
 	FakePlatform platform;
@@ -1054,19 +1054,31 @@ static int test_strict_play() {
 	TEST_EXPECT(first_run_ends(true, kStrictFirstRunWindowMs + 1, false));
 	TEST_EXPECT(first_run_ends(true, 2000, true));
 
-	// A project that builds as an expansion: strict Play is refused before anything is built.
+	// A project that builds as an expansion on the install's base game plays as the stock game plays /exp from
+	// its install: the install's archives, the build's expansion folder, the program and Bink DLL, none of the
+	// install's configuration, saves or files it reads by name; launched /w /exp jxm /FRISK, no /d.
+	const std::string standalone_build = v.activity.last_build->build_dir;
+	for (const char *archive : {"language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(fs::copy_file(standalone_build + "/" + archive, install + "/" + archive, fs::copy_options::overwrite_existing));
 	ProjectSettingsChange as_expansion;
 	as_expansion.expansion = "jxm";
 	editor_test::apply_settings(session, as_expansion);
 	TEST_EXPECT(v.project.document->expansion.name == "jxm");
 	const int spawns = platform.spawns;
-	const std::string last_build = v.activity.last_build->build_id;
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == spawns && v.activity.last_build->build_id == last_build &&
-	            v.findings.diagnostics.back().code() == "play.strict_expansion" &&
-	            v.findings.diagnostics.back().message.find("Strict Play of an expansion needs its base game's build: "
-	                                                       "the project builds as the expansion") == 0);
+	TEST_EXPECT(platform.spawns == spawns + 1 &&
+	            platform.last_plan.args == std::vector<std::string>({"/w", "/exp", "jxm", "/FRISK"}));
+	const std::string expansion_run = platform.last_plan.working_dir;
+	for (const char *present : {"Jointops.exe", "binkw32.dll", "language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(fs::is_regular_file(expansion_run + "/" + present));
+	TEST_EXPECT(fs::is_directory(expansion_run + "/expansion/jxm"));
+	// What the run directory holds of these is its own runs' (the game wrote them), never the install's.
+	for (const char *own : {"game.cfg", "player.sav", "score.ini"}) {
+		std::string held, held_error;
+		TEST_EXPECT(!opennova::io::read_file_text(expansion_run + "/" + own, held, held_error) ||
+		            held.find("install") == std::string::npos);
+	}
 	return 0;
 }
 
@@ -4899,8 +4911,10 @@ static int test_prompt_words_from_the_table() {
 		// DI-25: a delete takes the file to the trash and a duplicate copies it as saved; a folder's rename moves
 		// its files' documents, and the file history's steps take files away.
 		{EditorRequestKind::DeleteAsset, "Delete main.mnu", "Save all and delete"},
-		{EditorRequestKind::DuplicateAsset, "Duplicate main.mnu", "Save"},
+		{EditorRequestKind::DuplicateAsset, "Duplicate main.mnu", "Save all and duplicate"},
 		{EditorRequestKind::RenameFolder, "Rename the folder", "Save all and rename"},
+		// A folder deleted with what it holds takes its files' documents away.
+		{EditorRequestKind::DeleteFolder, "Delete the folder", "Save all and delete"},
 		{EditorRequestKind::UndoFile, "Undo file", "Save all and undo"},
 		{EditorRequestKind::RedoFile, "Redo file", "Save all and redo"},
 	};

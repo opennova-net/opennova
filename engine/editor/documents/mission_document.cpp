@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -89,6 +90,108 @@ size_t index_among(const std::vector<std::shared_ptr<const Node>> &rows, const N
 	return SIZE_MAX;
 }
 
+// The number each of a path's stops gives its marker (its wp_number), the stops in their order. A marker's
+// number is the key the original editor sorts a path's markers by, not its place: its writer copies the
+// number the marker holds [orig: JOTACmed.exe sub_44C8E0 @ 0x44c9ff, item +0x90 to the record's +0x30] and
+// its rebuild only sorts each path's markers by it [orig: sub_44CFD0 @ 0x44d0e9..0x44d104], never writing
+// it, so a shipped path holds keys (00TRa's path 1 holds 0, 1, 2, 2, 3 and 03TR's path 5 1 to 9 and 1648).
+// A stop keeps the number its marker was read with on this path (`held`: each marker's path and number as
+// read) while the stops' order is the order those numbers sort to (mission::waypoint_path_markers': by
+// number, a tie by the marker's place in the file); the stops an edit put in or moved take the numbers
+// after the kept stop before them, one apart, and as few stops are renumbered as keeps the order (a kept
+// stop with no room before it for the new ones is renumbered too). A path no kept stop orders is numbered
+// from 0 by place; no number goes below 0 that the file did not hold.
+std::vector<int32_t> stop_numbers(const std::vector<uint32_t> &stops, const std::vector<std::pair<int, int32_t>> &held,
+                                  size_t path) {
+	const size_t n = stops.size();
+	std::vector<int64_t> key(n, 0);
+	std::vector<bool> keeps(n, false);
+	for (size_t i = 0; i < n; ++i)
+		if (stops[i] < held.size() && size_t(held[stops[i]].first) == path) {
+			keeps[i] = true;
+			key[i] = held[stops[i]].second;
+		}
+	// Whether stop b may keep its number after kept stop a: next to it, sorting after it; else with room
+	// for the stops between, one apart.
+	const auto fits = [&](size_t a, size_t b) {
+		if (b == a + 1) return key[a] < key[b] || (key[a] == key[b] && stops[a] < stops[b]);
+		return key[b] - key[a] >= int64_t(b - a);
+	};
+	constexpr size_t kNone = SIZE_MAX;
+	std::vector<size_t> best(n, 0), before(n, kNone);
+	size_t last = kNone;
+	for (size_t b = 0; b < n; ++b) {
+		if (!keeps[b]) continue;
+		// The first kept: the stops before it take the numbers below its own, none below 0.
+		if (b == 0 || key[b] - int64_t(b) >= 0) best[b] = 1;
+		for (size_t a = 0; a < b; ++a)
+			if (keeps[a] && best[a] && best[a] + 1 > best[b] && fits(a, b)) {
+				best[b] = best[a] + 1;
+				before[b] = a;
+			}
+		// The last kept: the stops after it take the numbers above its own.
+		if (best[b] && key[b] + int64_t(n - 1 - b) <= INT32_MAX && (last == kNone || best[b] > best[last])) last = b;
+	}
+	std::vector<int32_t> out(n, 0);
+	if (last == kNone) {
+		for (size_t i = 0; i < n; ++i) out[i] = int32_t(i);
+		return out;
+	}
+	std::vector<bool> kept(n, false);
+	for (size_t at = last; at != kNone; at = before[at]) kept[at] = true;
+	size_t first = last;
+	while (before[first] != kNone) first = before[first];
+	for (size_t i = 0; i < first; ++i) out[i] = int32_t(key[first] - int64_t(first - i));
+	int64_t number = 0;
+	for (size_t i = first; i < n; ++i) {
+		number = kept[i] ? key[i] : number + 1;
+		out[i] = int32_t(number);
+	}
+	return out;
+}
+
+// The file's paths laid out from the stops the rows hold (`stops`, one list a path, in the paths' order), as
+// the original editor lays a path out from its markers (D-MIS-6): each waypoint marker carries the path
+// it is a stop of and its number there (stop_numbers), none another, and each path's record is laid out
+// from them (mission::lay_out_waypoint_path) [orig: JOTACmed.exe sub_44C8E0 @ 0x44c8e0, the path @ 0x44c9f5
+// and the number @ 0x44c9ff; sub_44CFD0 @ 0x44cfd0; sub_44F920 @ 0x44f920]. A stop that names no waypoint
+// marker, or one of path 0, puts nothing on a path, and a marker of two stops keeps the last
+// (mission.unserializable says each, which refuses the save).
+void lay_out_paths(bms::File &file, const std::vector<const std::vector<uint32_t> *> &stops) {
+	std::vector<std::pair<int, int32_t>> held(file.markers.size());
+	for (size_t i = 0; i < file.markers.size(); ++i)
+		held[i] = {file.markers[i].type_id == def::DEF_TYPE_WAYPOINT ? int(file.markers[i].waypoint_id) : -1,
+		           file.markers[i].wp_number};
+	for (bms::Entity &marker : file.markers)
+		if (marker.type_id == def::DEF_TYPE_WAYPOINT && marker.waypoint_id != 0 &&
+		    size_t(marker.waypoint_id) < file.waypoint_records.size()) {
+			marker.waypoint_id = 0;
+			marker.wp_number = 0;
+		}
+	for (size_t path = 1; path < stops.size() && path < file.waypoint_records.size(); ++path) {
+		const std::vector<int32_t> numbers = stop_numbers(*stops[path], held, path);
+		for (size_t place = 0; place < stops[path]->size(); ++place) {
+			const uint32_t index = (*stops[path])[place];
+			if (index >= file.markers.size() || file.markers[index].type_id != def::DEF_TYPE_WAYPOINT) continue;
+			file.markers[index].waypoint_id = static_cast<uint8_t>(path);
+			file.markers[index].wp_number = numbers[place];
+		}
+	}
+	for (size_t path = 0; path < file.waypoint_records.size(); ++path) mission::lay_out_waypoint_path(file, path);
+}
+
+// Each marker's path and number as its row holds them (a marker of another type: no path), the markers in
+// their order: what stop_numbers keeps.
+std::vector<std::pair<int, int32_t>> held_numbers(const std::vector<std::shared_ptr<const Node>> &rows) {
+	std::vector<std::pair<int, int32_t>> held;
+	for (const auto &row : rows)
+		if (row && row->kind == k(K::Marker)) {
+			const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
+			held.emplace_back(marker.type_id == def::DEF_TYPE_WAYPOINT ? int(marker.waypoint_id) : -1, marker.wp_number);
+		}
+	return held;
+}
+
 } // namespace
 
 // --- the rows ----------------------------------------------------------------------------------------
@@ -116,7 +219,7 @@ template <> size_t MissionRow::footprint() const {
 template <> size_t EntityRow::footprint() const { return sizeof(EntityRow) + ids_footprint(); }
 template <> size_t PathRow::footprint() const {
 	return sizeof(PathRow) + ids_footprint() + footprint_of(native.record.waypoint_numbers) +
-	       footprint_of(native.record.padding);
+	       footprint_of(native.record.padding) + footprint_of(native.stops);
 }
 template <> size_t AreaRow::footprint() const { return sizeof(AreaRow) + ids_footprint(); }
 template <> size_t MissionRecordRow<mission::EventChain>::footprint() const {
@@ -214,7 +317,24 @@ std::string MissionDocument::record_title(const NodeAddress &address) const {
 	return title.empty() ? TableDocument::record_title(address) : title;
 }
 
-bool MissionDocument::compose(bms::File &out) const { return compose_mission(rows(), out); }
+const std::string *MissionDocument::item_class(const bms::Entity &entity) const {
+	if (!item_classes_) return nullptr;
+	const auto found = item_classes_->find(mission::entity_item_id(entity));
+	return found == item_classes_->end() ? nullptr : &found->second;
+}
+
+bool MissionDocument::compose(bms::File &out) const {
+	if (!compose_mission(rows(), out)) return false;
+	// Each record's AI class its item's row's, as the original's writer copies it over the record on every save,
+	// zero-filled past it [orig: JOTACmed.exe sub_44C8E0 @ 0x44c8e0, the memset; @ 0x44cabe..0x44caf2].
+	for (std::vector<bms::Entity> *pool : {&out.items, &out.buildings, &out.markers, &out.organics})
+		for (bms::Entity &entity : *pool)
+			if (const std::string *ai_class = item_class(entity)) {
+				std::memset(entity.name1, 0, sizeof(entity.name1));
+				std::memcpy(entity.name1, ai_class->data(), std::min(ai_class->size(), sizeof(entity.name1)));
+			}
+	return true;
+}
 
 bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::File &out) {
 	const MissionRow *mission = nullptr;
@@ -230,6 +350,7 @@ bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::
 	out.waypoint_records.clear();
 	out.area_triggers.clear();
 	std::vector<EventChain> chains;
+	std::vector<const std::vector<uint32_t> *> stops;
 	for (const auto &row : rows) {
 		if (!row) continue;
 		switch (static_cast<K>(row->kind)) {
@@ -237,15 +358,37 @@ bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::
 		case K::Building: out.buildings.push_back(static_cast<const EntityRow &>(*row).native); break;
 		case K::Marker: out.markers.push_back(static_cast<const EntityRow &>(*row).native); break;
 		case K::Organic: out.organics.push_back(static_cast<const EntityRow &>(*row).native); break;
-		case K::WaypointPath: out.waypoint_records.push_back(static_cast<const PathRow &>(*row).native.record); break;
+		case K::WaypointPath:
+			out.waypoint_records.push_back(static_cast<const PathRow &>(*row).native.record);
+			stops.push_back(&static_cast<const PathRow &>(*row).native.stops);
+			break;
 		case K::Area: out.area_triggers.push_back(static_cast<const AreaRow &>(*row).native); break;
 		case K::Event: chains.push_back(static_cast<const EventRow &>(*row).native); break;
 		default: break;
 		}
 	}
 	join_event_chains(chains, out);
+	lay_out_paths(out, stops);
 	sync_counts(out);
 	return true;
+}
+
+// The first of the paths' stops no save can write (D-MIS-6), in words; "" for none: a stop of path 0, one
+// naming no waypoint marker of the file, a marker two stops name (mission.unserializable says each).
+std::string unwritable_stop(const MissionDocument &document) {
+	const std::vector<const Node *> markers = document.rows_of(K::Marker);
+	std::set<uint32_t> carried;
+	for (const Node *row : document.rows_of(K::WaypointPath)) {
+		const MissionPath &path = static_cast<const PathRow &>(*row).native;
+		for (const uint32_t stop : path.stops) {
+			const std::string where = "Path " + std::to_string(path.number) + "'s stop naming marker " + std::to_string(stop);
+			if (path.number == 0) return where + ": path 0 is no path.";
+			if (stop >= markers.size() || static_cast<const EntityRow &>(*markers[stop]).native.type_id != def::DEF_TYPE_WAYPOINT)
+				return where + ": no waypoint marker of the mission is that one.";
+			if (!carried.insert(stop).second) return where + ": another stop names that marker.";
+		}
+	}
+	return std::string();
 }
 
 SerializeResult MissionDocument::serialize() const {
@@ -253,6 +396,13 @@ SerializeResult MissionDocument::serialize() const {
 	if (blocked()) {
 		for (const SourceIssue &issue : issues())
 			if (issue.blocks) result.issues.push_back(issue);
+		return result;
+	}
+	// A path's stops are its waypoint markers' in the file: one no marker can carry is not written.
+	if (const std::string why = unwritable_stop(*this); !why.empty()) {
+		SourceIssue issue;
+		issue.message = why + " A save puts each stop on its path through its waypoint marker (mission.unserializable).";
+		result.issues.push_back(std::move(issue));
 		return result;
 	}
 	bms::File file;
@@ -302,9 +452,15 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		const std::string what = layout == RunLayout::OutOfRange ? "an event's " + table + "s run past the " + table + " table"
 		                         : layout == RunLayout::Shared  ? "a " + table + " lies in two events' runs"
 		                                                        : "a " + table + " lies in no event's run";
-		note(MissionFinding::InvalidInput, true,
+		const bool past = layout == RunLayout::OutOfRange;
+		note(past ? MissionFinding::RunsPastTable : MissionFinding::InvalidInput, true,
 		     "The mission's events cannot be edited: " + what +
-		             " (the game reads each event's run by its first index and its count).");
+		             " (the game reads each event's run by its first index and its count)." +
+		             (past ? std::string()
+		                   : std::string(" The game reads each run as written, ") +
+		                             (layout == RunLayout::Shared ? "resolving the record in both"
+		                                                          : "never reading the record no run holds") +
+		                             " [orig: EventTrigger_LoadAllData @ 0x453eb0]: a build packs the mission as it stands."));
 		if (report.event >= 0) {
 			const size_t first_event_row = 1 + file.items.size() + file.buildings.size() + file.markers.size() +
 			                               file.organics.size() + size_t(bms::kWaypointRecordCount) +
@@ -329,6 +485,35 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		     section == "length" ? std::string("The file holds bytes past what the writer writes: Save drops them.")
 		                         : "The file's " + section + " holds bytes the writer writes otherwise: Save writes " +
 		                                   "the section as the game reads it.");
+	}
+	// The paths whose records name other stops than their markers carry (no shipped mission has one; a file
+	// an earlier OpenNova wrote, whose stop edits wrote the record alone): the game walks the record's
+	// [orig: AIWaypoint_UpdateTarget @0x457476], the editor holds the markers' as the original editor does,
+	// and a save lays each record out from them, so the route the game walks changes (a warning, naming them).
+	{
+		bms::File laid = file;
+		std::vector<size_t> rebuilt;
+		for (size_t i = 0; i < laid.waypoint_records.size(); ++i) {
+			mission::lay_out_waypoint_path(laid, i);
+			const bms::WaypointRecord &was = file.waypoint_records[i], &now = laid.waypoint_records[i];
+			const size_t slots = std::min<size_t>(now.waypoint_numbers.size(), was.waypoint_numbers.size());
+			if (was.marker_count == now.marker_count && was.waypoint_numbers.size() == now.waypoint_numbers.size() &&
+			    std::equal(now.waypoint_numbers.begin(), now.waypoint_numbers.begin() + std::ptrdiff_t(slots),
+			               was.waypoint_numbers.begin()))
+				continue;
+			rebuilt.push_back(i);
+		}
+		if (!rebuilt.empty()) {
+			std::string paths;
+			for (size_t i = 0; i < rebuilt.size(); ++i)
+				paths += (i == 0 ? "" : i + 1 == rebuilt.size() ? " and " : ", ") + std::to_string(rebuilt[i]);
+			const bool one = rebuilt.size() == 1;
+			note(MissionFinding::PathRebuilt, false,
+			     std::string(one ? "Path " : "Paths ") + paths + (one ? "'s record lists" : "' records list") +
+			             " other stops than the waypoint markers carry (a file an earlier OpenNova wrote): the game walks "
+			             "the record's, the editor holds the markers' as the original editor does, and Save lays " +
+			             (one ? "the record" : "each record") + " out from them, so the route the game walks changes.");
+		}
 	}
 	issue_codes_ = std::move(codes);
 
@@ -357,7 +542,9 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	entities(K::Marker, file.markers);
 	entities(K::Organic, file.organics);
 	for (size_t i = 0; i < file.waypoint_records.size(); ++i) {
-		auto row = std::make_shared<PathRow>(k(K::WaypointPath), MissionPath{file.waypoint_records[i], int(i)});
+		MissionPath path{file.waypoint_records[i], int(i), {}};
+		for (const int marker : mission::waypoint_path_markers(file, i)) path.stops.push_back(uint32_t(marker));
+		auto row = std::make_shared<PathRow>(k(K::WaypointPath), std::move(path));
 		shape(*row);
 		rows.push_back(row);
 	}
@@ -425,36 +612,10 @@ void MissionDocument::prepare_duplicate(Node &copy, const Node &original,
 	// With none free the copy keeps the id, and accept_step refuses the step.
 	if (copy.kind == k(K::Area))
 		if (const int id = free_zone_id(rows)) static_cast<AreaRow &>(copy).native.id = id;
-	if (copy.kind == k(K::Event)) {
-		// A parameter naming the event it is in (a ResetEvent that re-arms its own event) names the
-		// copy: the one event the step puts in. One naming another event names that event still.
-		EventRow &event = static_cast<EventRow &>(copy);
-		const size_t self = index_among(rows, &original);
-		for (size_t i = 0; i < event.native.triggers.size(); ++i)
-			if (trigger_param_kind(event.native.triggers[i], 0) == ParamKind::Event &&
-			    size_t(event.native.triggers[i].param1) == self)
-				event.links.push_back({0, uint32_t(i), 0});
-		for (size_t i = 0; i < event.native.actions.size(); ++i)
-			if (action_param_kind(event.native.actions[i], 0) == ParamKind::Event &&
-			    size_t(event.native.actions[i].param1) == self)
-				event.links.push_back({1, uint32_t(i), 0});
-	}
-}
-
-bool MissionDocument::accept_list_edit(const Node &row, const ListChange &change, std::string &error) const {
-	if (row.kind != k(K::WaypointPath)) return true;
-	// A stop's path, and for a Move the one it goes to: one whose stored count exceeds its slots
-	// takes no stop edit (D-MIS-6).
-	for (const Located *owner : {change.owner, change.destination}) {
-		if (!owner || owner->record.kind != k(K::WaypointPath)) continue;
-		const MissionPath &path = owner->record.as<MissionPath>();
-		if (path.record.marker_count <= kMaxWaypointPathMarkers) continue;
-		error = "Path " + std::to_string(path.number) + " stores a count of " + std::to_string(path.record.marker_count) +
-		        ", past its 32 slots: what the game's editor writes for such a path is not known, so its stops stay "
-		        "as they are.";
-		return false;
-	}
-	return true;
+	// A duplicated event's parameters keep naming the events they named, its original included: the
+	// original editor's paste of a copied event renumbers every event index at or past where the copy goes,
+	// the copy's own with the rest [orig: JOTACmed.exe sub_44D460 @ 0x44d460, the Event triggers
+	// @ 0x44d521 and the ResetEvent actions @ 0x44d550] (renumber_references, D-MIS-9).
 }
 
 bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const {
@@ -486,6 +647,27 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 					return false;
 				}
 		}
+		// An entity's AI class is its item's row's on every save (set_item_classes): set there, never on the record.
+		if (swap.in_place() && is_entity_kind(swap.before->kind)) {
+			const bms::Entity &was = static_cast<const EntityRow &>(*swap.before).native;
+			const bms::Entity &now = static_cast<const EntityRow &>(*swap.after).native;
+			if (was.type_id == now.type_id && std::memcmp(was.name1, now.name1, sizeof(was.name1)) != 0 && item_class(now)) {
+				refusal.message = "An entity's AI class is its item's sid: a save writes it from the item's row, as the "
+				                  "original editor does. Set the sid on the item.";
+				return false;
+			}
+		}
+		// A waypoint marker's path and place are its path's stops (D-MIS-6): edited there, never on the marker.
+		if (swap.in_place() && swap.before->kind == k(K::Marker)) {
+			const bms::Entity &was = static_cast<const EntityRow &>(*swap.before).native;
+			const bms::Entity &now = static_cast<const EntityRow &>(*swap.after).native;
+			if (was.type_id == def::DEF_TYPE_WAYPOINT && now.type_id == def::DEF_TYPE_WAYPOINT &&
+			    (was.waypoint_id != now.waypoint_id || was.wp_number != now.wp_number)) {
+				refusal.message = "A waypoint marker's path and place are its path's stops: add it to the path's "
+				                  "Stops, or move it there.";
+				return false;
+			}
+		}
 		const NodeKind kind = swap.before ? swap.before->kind : swap.after ? swap.after->kind : -1;
 		if ((kind != k(K::Mission) && kind != k(K::WaypointPath)) || swap.in_place()) continue;
 		refusal.message = kind == k(K::Mission) ? "A mission keeps its mission row where it is."
@@ -493,6 +675,38 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 		return false;
 	}
 	return true;
+}
+
+bool MissionDocument::get(const NodeAddress &address, const std::string &field, Value &out) const {
+	const Node *node = address.child == 0 ? row(address.row) : nullptr;
+	if (node && node->kind == k(K::WaypointPath) && field == "marker_count") {
+		out = int64_t(static_cast<const PathRow &>(*node).native.stops.size());
+		return true;
+	}
+	if (node && node->kind == k(K::Marker) && (field == "waypoint_id" || field == "wp_number") &&
+	    static_cast<const EntityRow &>(*node).native.type_id == def::DEF_TYPE_WAYPOINT) {
+		// The path whose stop it is, and the number a save gives it there (stop_numbers).
+		int64_t path = 0, number = 0;
+		const size_t index = index_among(rows(), node);
+		for (const Node *each : rows_of(K::WaypointPath)) {
+			const MissionPath &held = static_cast<const PathRow &>(*each).native;
+			if (held.number == 0) continue;
+			const auto at = std::find(held.stops.begin(), held.stops.end(), uint32_t(index));
+			if (at == held.stops.end()) continue;
+			path = held.number;
+			number = stop_numbers(held.stops, held_numbers(rows()), size_t(held.number))[size_t(at - held.stops.begin())];
+			break;
+		}
+		out = field == "waypoint_id" ? path : number;
+		return true;
+	}
+	// An entity's AI class as a save writes it: its item's row's (set_item_classes).
+	if (node && is_entity_kind(node->kind) && field == "name1")
+		if (const std::string *ai_class = item_class(static_cast<const EntityRow &>(*node).native)) {
+			out = *ai_class;
+			return true;
+		}
+	return TableDocument::get(address, field, out);
 }
 
 void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
@@ -503,6 +717,13 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	// 0x6109C8..0x6109EE; Terrain_LoadTileSetAtlas @ 0x604A90]).
 	if (use.reference == ReferenceKind::Texture && id == "terrain_tile")
 		use.loader_arg = texture_role_arg(renderer::TextureRoleId::TerrainTileAtlas, kTextureArgTileSet);
+	if (address.kind == k(K::Marker) && address.child == 0 && (id == "waypoint_id" || id == "wp_number"))
+		if (const Node *node = row(address.row);
+		    node && static_cast<const EntityRow &>(*node).native.type_id == def::DEF_TYPE_WAYPOINT)
+			use.read_only = true; // its path's stops set them (get)
+	if (is_entity_kind(address.kind) && address.child == 0 && id == "name1")
+		if (const Node *node = row(address.row); node && item_class(static_cast<const EntityRow &>(*node).native))
+			use.read_only = true; // its item's row sets it on every save (get)
 	if (address.kind == k(K::Trigger) && id == "sub_type") use.own_choices = true;
 	if (address.kind == k(K::Action) && id == "action_sub_type") use.own_choices = true;
 	const int slot = param_slot(id);
@@ -561,10 +782,21 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	if (!address.child && is_entity_kind(address.kind) && id == "ttool_index") {
 		const Node *node = row(address.row);
 		const int32_t type = node && is_entity_kind(node->kind) ? static_cast<const EntityRow &>(*node).native.type_id : 0;
-		if (type == def::DEF_TYPE_WAYPOINT || type == def::DEF_TYPE_KOTH_CENTRE) {
-			use.applies = Applicability::Reads;
-			keyed(hud::kWaypointNameKey, 0, INT32_MAX);
-		}
+		if (type == def::DEF_TYPE_WAYPOINT || type == def::DEF_TYPE_KOTH_CENTRE) keyed(hud::kWaypointNameKey, 0, INT32_MAX);
+	}
+	// A bounding box's value by what its type makes of it (box_value_label).
+	if (address.kind == k(K::BoundingBox) && id == "ref_id") {
+		const Node *node = row(address.row);
+		const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
+		if (record)
+			if (const char *label = box_value_label(record.as<bms::BoundingBox>().type)) use.label = label;
+	}
+	// A Mission box's second word is its mission name's last four characters (bms::BoundingBoxType::Mission).
+	if (address.kind == k(K::BoundingBox) && id == "reserved0") {
+		const Node *node = row(address.row);
+		const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
+		if (record && record.as<bms::BoundingBox>().type == int32_t(bms::BoundingBoxType::Mission))
+			use.label = "Mission name (its last four characters)";
 	}
 	if (!address.child && address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0)
 		keyed(hud::kWinConditionKey, 1, 254);
@@ -692,11 +924,12 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 	// the game walks (bms::player_route_stop_count: its signed compare walks none for a count of 2^31
 	// or more) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc].
 	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
-		const bms::WaypointRecord &path = static_cast<const PathRow &>(*row).native.record;
-		if (!bms::is_player_route(path)) continue;
-		const size_t count = bms::player_route_stop_count(path);
+		const MissionPath &path = static_cast<const PathRow &>(*row).native;
+		if (!bms::is_player_route(path.record)) continue;
+		// The stops a save lays into the record's slots (its first 32), as many as the game walks.
+		const size_t count = std::min({path.stops.size(), kMaxWaypointPathMarkers, bms::kPlayerRouteMaxStops});
 		for (size_t i = 0; i < count; ++i)
-			if (path.waypoint_numbers[i] < markers.size()) made.route.insert(markers[path.waypoint_numbers[i]]->id);
+			if (path.stops[i] < markers.size()) made.route.insert(markers[path.stops[i]]->id);
 		break;
 	}
 	made.made = true;
@@ -720,28 +953,12 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 		edit.value = int64_t(now);
 		sites.push_back(std::move(edit));
 	};
-	// The events the edit put in, by the index each stands at now, in order (the copies of a paste,
-	// a duplicate): what an EventLink of one of them names.
-	std::vector<size_t> put;
-	std::vector<bool> fresh;
-	if (!markers) {
-		std::vector<bool> found(shift.after, false);
-		for (const size_t to : shift.to)
-			if (to != RecordShift::kRemoved && to < shift.after) found[to] = true;
-		fresh.assign(shift.after, false);
-		for (size_t i = 0; i < shift.after; ++i)
-			if (!found[i]) {
-				put.push_back(i);
-				fresh[i] = true;
-			}
-	}
-	size_t event_index = 0;
 	for (const std::shared_ptr<const Node> &node : rows.rows()) {
 		if (markers && node->kind == k(K::WaypointPath)) {
 			const PathRow &path = static_cast<const PathRow &>(*node);
 			if (path.ids.lists.empty()) continue;
 			const std::vector<RecordIds> &ids = path.ids.lists[0];
-			const std::vector<uint32_t> &stops = path.native.record.waypoint_numbers;
+			const std::vector<uint32_t> &stops = path.native.stops;
 			for (size_t i = 0; i < stops.size() && i < ids.size(); ++i) {
 				const size_t now = shift.now(int64_t(stops[i]));
 				if (now == size_t(stops[i])) continue;
@@ -753,17 +970,28 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 				set({node->id, k(K::Stop), ids[i].id}, "marker", now);
 			}
 		}
+		// A type-6005 marker's advance trigger, an event by its index (none below 0) [orig:
+		// Entity_SpawnFromBMSRecord @0x40f0b3; EventTrigger_MarkLinkedSpawnPoints @0x452ce0], moves with its
+		// event as the original editor moves it, 0 like any index [orig: JOTACmed.exe sub_44D460 @ 0x44d460,
+		// @ 0x44d59c; sub_411C90 @ 0x411dd8..0x411ded]; a removal sets it to -1 first (removal_edits).
+		if (!markers && is_entity_kind(node->kind)) {
+			const bms::Entity &marker = static_cast<const EntityRow &>(*node).native;
+			if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger < 0) continue;
+			const size_t now = shift.now(marker.wp_adv_trigger);
+			if (now == size_t(marker.wp_adv_trigger)) continue;
+			if (now == RecordShift::kRemoved) {
+				error = record_title({node->id, node->kind, 0}) + " advances on this event: clear its waypoint advance trigger first.";
+				return false;
+			}
+			set({node->id, node->kind, 0}, "wp_adv_trigger", now);
+		}
 		if (!markers && node->kind == k(K::Event)) {
 			const EventRow &event = static_cast<const EventRow &>(*node);
-			// Its links are read only by the step that put it in.
-			const bool linked = event_index < fresh.size() && fresh[event_index] && !event.links.empty();
-			++event_index;
 			if (event.ids.lists.size() < 2) continue;
+			// Every event's, the ones the step put in included: a copy keeps naming the event its record names
+			// wherever that event now stands (D-MIS-9).
 			const auto renumber = [&](NodeKind kind, size_t list, size_t i, int32_t held, const char *what) {
-				size_t now = shift.now(held);
-				if (linked)
-					for (const EventLink &link : event.links)
-						if (link.list == list && link.index == i) now = link.put < put.size() ? put[link.put] : RecordShift::kRemoved;
+				const size_t now = shift.now(held);
 				if (now == size_t(held)) return true;
 				if (now == RecordShift::kRemoved) {
 					error = "Event " + std::to_string(index_among(rows.rows(), node.get()) + 1) + "'s " + what + " " +
@@ -783,7 +1011,51 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 					return false;
 		}
 	}
+	if (markers) copies_keep_their_route(rows, shift, sites);
 	return true;
+}
+
+// A waypoint marker the edit put in (a Duplicate's copy, a Paste's) stays a stop of the path it carries, among
+// the stops its number sorts with, as the original editor's copy stays on its route: its copy is the whole item
+// [orig: JOTACmed.exe MissionItem_CloneTranslated @ 0x455e70, the qmemcpy keeping +0x8c and +0x90], and its
+// rebuild puts every waypoint marker on the path it carries [orig: sub_44CFD0 @ 0x44d028..0x44d063], sorted by
+// number. The stop goes after the last of the path's stops whose marker, held on the path, sorts before the
+// copy (by number, a tie by the marker's place: a duplicate right after its original); `sites` takes the Adds.
+void MissionDocument::copies_keep_their_route(const StagedRows &rows, const RecordShift &shift,
+                                              std::vector<Edit> &sites) const {
+	std::vector<bool> kept(shift.after, false);
+	for (const size_t to : shift.to)
+		if (to < shift.after) kept[to] = true;
+	const std::vector<std::pair<int, int32_t>> held = held_numbers(rows.rows());
+	std::map<int, std::vector<size_t>> routes; // a path's stops as the step leaves them, the Adds put in
+	std::map<int, const Node *> paths;
+	for (const std::shared_ptr<const Node> &node : rows.rows())
+		if (node->kind == k(K::WaypointPath)) {
+			const MissionPath &path = static_cast<const PathRow &>(*node).native;
+			paths[path.number] = node.get();
+			std::vector<size_t> &route = routes[path.number];
+			for (const uint32_t stop : path.stops) route.push_back(shift.now(int64_t(stop)));
+		}
+	for (size_t copy = 0; copy < shift.after && copy < held.size(); ++copy) {
+		const int path = held[copy].first;
+		if (kept[copy] || path <= 0 || path >= kFirstPathCommand || !paths.count(path)) continue;
+		std::vector<size_t> &route = routes[path];
+		if (std::find(route.begin(), route.end(), copy) != route.end()) continue;
+		size_t at = 0;
+		for (size_t i = 0; i < route.size(); ++i) {
+			const size_t stop = route[i];
+			if (stop >= held.size() || held[stop].first != path) continue;
+			if (held[stop].second < held[copy].second || (held[stop].second == held[copy].second && stop < copy)) at = i + 1;
+		}
+		Edit add;
+		add.operation = EditOperation::Add;
+		add.address = {paths[path]->id, k(K::Stop), 0};
+		add.field = "marker";
+		add.value = int64_t(copy);
+		add.position = at;
+		sites.push_back(std::move(add));
+		route.insert(route.begin() + std::ptrdiff_t(at), copy);
+	}
 }
 
 bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std::vector<Edit> &out,
@@ -796,7 +1068,7 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 		edit.address = address;
 		return edit;
 	};
-	std::vector<Edit> namers;
+	std::vector<Edit> namers, cleared;
 	for (const NodeAddress &record : records) {
 		const Node *node = row(record.row);
 		if (!node) {
@@ -811,12 +1083,25 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 				if (other->kind != k(K::WaypointPath)) continue;
 				const PathRow &path = static_cast<const PathRow &>(*other);
 				if (path.ids.lists.empty()) continue;
-				const std::vector<uint32_t> &stops = path.native.record.waypoint_numbers;
+				const std::vector<uint32_t> &stops = path.native.stops;
 				for (size_t i = 0; i < stops.size() && i < path.ids.lists[0].size(); ++i)
 					if (stops[i] == index) namers.push_back(remove_of({other->id, k(K::Stop), path.ids.lists[0][i].id}));
 			}
 		}
 		if (node->kind == k(K::Event)) {
+			// A waypoint marker advancing on the event advances on none: the original editor's delete of an
+			// event sets such a marker's advance trigger to -1 and says so [orig: JOTACmed.exe sub_455B20
+			// @ 0x455b20, WP_EVENT_DELETED].
+			for (const auto &other : rows()) {
+				if (!is_entity_kind(other->kind) || removed.count(other->id)) continue;
+				const bms::Entity &marker = static_cast<const EntityRow &>(*other).native;
+				if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger != int32_t(index)) continue;
+				Edit clear;
+				clear.address = {other->id, other->kind, 0};
+				clear.field = "wp_adv_trigger";
+				clear.value = int64_t(-1);
+				cleared.push_back(std::move(clear));
+			}
 			// What names the event by its index goes first where the removal takes it too, itself or
 			// with its event, whatever the order the records were named in; a namer the removal leaves
 			// refuses it with its site (S13 D8's convention).
@@ -845,7 +1130,9 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 			}
 		}
 	}
-	// The namers, each once, before the records themselves (one the removal names too goes once).
+	// The cleared advance triggers, then the namers, each once, before the records themselves (one the
+	// removal names too goes once).
+	for (Edit &edit : cleared) out.push_back(std::move(edit));
 	std::set<NodeId> listed;
 	for (const Edit &edit : namers)
 		if (listed.insert(edit.address.child).second) out.push_back(edit);

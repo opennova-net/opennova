@@ -33,7 +33,6 @@ enum class EditorQueryKind : uint8_t {
 	Missing,
 	Symbols,
 	ProjectSearch,
-	FilePage,
 	MenuTree,
 	MenuFindings,
 	MenuRender,

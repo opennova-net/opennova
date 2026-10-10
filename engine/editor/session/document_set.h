@@ -18,6 +18,7 @@
 
 namespace opennova::editor {
 
+class MissionItemCache;
 class SessionCore;
 struct ProjectPaths;
 struct SessionView;
@@ -34,6 +35,7 @@ struct SessionView;
 class DocumentSet {
 public:
 	explicit DocumentSet(SessionCore &core);
+	~DocumentSet();
 	DocumentSet(const DocumentSet &) = delete;
 	DocumentSet &operator=(const DocumentSet &) = delete;
 
@@ -193,9 +195,14 @@ private:
 	// Every open gesture ends (every edit group ended, the project closed).
 	void end_gestures(bool validate);
 
+	// A mission's records of an item take its catalog row (D-MIS-10): the AI class a save writes handed to the
+	// document, before an edit and a save (MissionDocument::set_item_classes); the rows read through `rows_`.
+	void hand_item_classes(DocumentBase &document);
+
 	SessionCore &core_;
 	SessionView &view_;
 	const ProjectPaths &paths_;
+	std::unique_ptr<MissionItemCache> rows_;
 	std::vector<std::shared_ptr<DocumentBase>> documents_;
 	// Each open document's instance and whether it has unsaved edits, as the view last listed
 	// them: DocumentSet moves when they differ (update_view).
