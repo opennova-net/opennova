@@ -118,12 +118,21 @@ int synthetic_gpm() {
 	TEST_EXPECT(m.occlusion_vertex_count == 3 && m.occlusion_face_count == 1);
 	threedi_3di3_free(&m);
 
-	// The mission region picks a material's texture row.
+	// The mission region picks a material's texture row: material 1 names row 1 in regions 0
+	// and 2 and row 0 in region 1, so region 1 takes box.tga and says the texture depends on it;
+	// region 2 writes the model region 0 does.
+	file.lods[0].materials[1].region_textures = {1, 0, 1};
 	std::vector<uint8_t> again;
 	gp::MigrateOptions region;
 	region.region = 2;
 	TEST_EXPECT(gp::migrate(file, again, notes, error, region));
-	TEST_EXPECT(again == out);
+	TEST_EXPECT(again == out && has_note(notes, "mission region"));
+	region.region = 1;
+	TEST_EXPECT(gp::migrate(file, again, notes, error, region));
+	Threedi3di3 regional{};
+	TEST_EXPECT(threedi_3di3_read_memory(again.data(), again.size(), &regional) == 0);
+	TEST_EXPECT(std::strcmp(regional.materials[1].textures[0].name, "box.tga") == 0);
+	threedi_3di3_free(&regional);
 	return 0;
 }
 

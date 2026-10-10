@@ -118,6 +118,39 @@ std::string normal_name(const std::string &texture) {
 	return (dot == std::string::npos ? texture : texture.substr(0, dot)) + ".mdt";
 }
 
+// Whether two MTRL records are the same record field for field (padding never compared).
+bool same_material(const ThreediMaterial &a, const ThreediMaterial &b) {
+	auto same_alpha = [](const ThreediAlphaGen &x, const ThreediAlphaGen &y) {
+		return x.style == y.style && x.phase == y.phase && x.reg == y.reg && x.rate == y.rate && x.start == y.start &&
+				x.end == y.end;
+	};
+	auto same_rgb = [](const ThreediRgbGen &x, const ThreediRgbGen &y) {
+		return x.style == y.style && x.phase == y.phase && x.reg == y.reg && x.rate == y.rate &&
+				std::equal(x.start_color, x.start_color + 4, y.start_color) &&
+				std::equal(x.end_color, x.end_color + 4, y.end_color);
+	};
+	auto same_uv = [](const ThreediUvParams &x, const ThreediUvParams &y) {
+		return x.style == y.style && x.phase == y.phase && x.reg == y.reg && x.gen_rate == y.gen_rate &&
+				x.start == y.start && x.end == y.end;
+	};
+	if (std::strcmp(a.shader_name, b.shader_name) != 0 || a.texture_count != b.texture_count) return false;
+	for (uint32_t i = 0; i < a.texture_count; ++i) {
+		const ThreediMaterialTexture &x = a.textures[i], &y = b.textures[i];
+		if (std::strcmp(x.name, y.name) != 0 || x.slot != y.slot || x.type != y.type || x.flags != y.flags ||
+				x.frame != y.frame)
+			return false;
+	}
+	return a.material_flags == b.material_flags && same_alpha(a.alpha_gen, b.alpha_gen) &&
+			same_rgb(a.rgb_gen, b.rgb_gen) && same_rgb(a.rgb_gen2, b.rgb_gen2) && same_uv(a.u_params, b.u_params) &&
+			same_uv(a.v_params, b.v_params) && std::equal(a.reflect_color, a.reflect_color + 4, b.reflect_color) &&
+			std::equal(a.reflect_color2, a.reflect_color2 + 4, b.reflect_color2) &&
+			a.emissive_type == b.emissive_type && a.emissive_type2 == b.emissive_type2 && a.is_glass == b.is_glass &&
+			a.glass_type2 == b.glass_type2 && a.alpha_test_value_byte == b.alpha_test_value_byte &&
+			a.animation.num_frames == b.animation.num_frames &&
+			a.animation.animation_type == b.animation.animation_type &&
+			a.animation.cycle_frame_time == b.animation.cycle_frame_time;
+}
+
 struct MaterialBuild {
 	const File &gp;
 	const MigrateOptions &options;
@@ -335,6 +368,38 @@ struct MaterialBuild {
 
 // --- render ----------------------------------------------------------------------------
 
+// The primitives BHD draws: each part's first batch (or the global table's), the only ones
+// filled and drawn [orig: GP_FillModelIndexBuffer @ 0x515E30 (dfbhd)], with each part's opaque
+// and alpha counts; `dropped` counts the batches past a part's first that hold any.
+struct DrawnPrimitives {
+	std::vector<const Primitive *> prims;
+	std::vector<int> opaque, alpha;
+	int dropped = 0;
+};
+
+DrawnPrimitives drawn_primitives(const RenderModel &rm) {
+	DrawnPrimitives out;
+	out.opaque.assign(rm.parts.size(), 0);
+	out.alpha.assign(rm.parts.size(), 0);
+	size_t cursor = 0;
+	std::vector<bool> seen(rm.parts.size(), false);
+	for (const Batch &b : rm.batches) {
+		const size_t count = static_cast<size_t>(b.opaque_count) + static_cast<size_t>(b.alpha_count);
+		const size_t part = static_cast<size_t>(b.part);
+		if (part < seen.size() && !seen[part]) {
+			seen[part] = true;
+			for (size_t k = 0; k < count && cursor + k < rm.primitives.size(); ++k)
+				out.prims.push_back(&rm.primitives[cursor + k]);
+			out.opaque[part] = b.opaque_count;
+			out.alpha[part] = b.alpha_count;
+		} else if (count != 0) {
+			++out.dropped;
+		}
+		cursor += count;
+	}
+	return out;
+}
+
 int32_t vertex_count(Kind kind, const Primitive &p) {
 	// GPM and GPS store the last index, GPP the count [orig: GP_DrawLocalBatchRModel
 	// @ 0x4FF5CB; GP_DrawSkinnedRModel @ 0x50056F (dfbhd)].
@@ -396,28 +461,10 @@ bool render_lod(const File &gp, size_t li, const std::vector<std::vector<int>> &
 		error = "a render model holds extra primitives or records BHD never ships";
 		return false;
 	}
-	// Only each part's first batch (or the global table's) is filled and drawn [orig:
-	// GP_FillModelIndexBuffer @ 0x515E30 (dfbhd)].
-	std::vector<const Primitive *> prims;
-	std::vector<int> part_opaque(rm.parts.size(), 0), part_alpha(rm.parts.size(), 0);
-	{
-		size_t cursor = 0;
-		std::vector<bool> seen(rm.parts.size(), false);
-		for (const Batch &b : rm.batches) {
-			const size_t count = static_cast<size_t>(b.opaque_count) + static_cast<size_t>(b.alpha_count);
-			const size_t part = static_cast<size_t>(b.part);
-			if (part < seen.size() && !seen[part]) {
-				seen[part] = true;
-				for (size_t k = 0; k < count && cursor + k < rm.primitives.size(); ++k)
-					prims.push_back(&rm.primitives[cursor + k]);
-				part_opaque[part] = b.opaque_count;
-				part_alpha[part] = b.alpha_count;
-			} else if (count != 0) {
-				notes.add("a batch past a part's first is dropped (BHD never draws it)");
-			}
-			cursor += count;
-		}
-	}
+	const DrawnPrimitives drawn = drawn_primitives(rm);
+	const std::vector<const Primitive *> &prims = drawn.prims;
+	const std::vector<int> &part_opaque = drawn.opaque, &part_alpha = drawn.alpha;
+	notes.add("a batch past a part's first is dropped (BHD never draws it)", drawn.dropped);
 	// This LOD's window of the model's shared vertices.
 	int32_t lo = 0, hi = 0;
 	if (!prims.empty()) {
@@ -726,7 +773,8 @@ void occlusion(const File &gp, Assembled &a) {
 			rxz = std::max(rxz, std::sqrt(dx * dx + dz * dz));
 			rxy = std::max(rxy, std::sqrt(dx * dx + dy * dy));
 		}
-		// The smallest of the three, ties going to the later.
+		// dfbhd's pick, ties included: yz when strictly below both others, else xz when strictly
+		// below both, else xy (so a yz/xz tie below xy takes xy).
 		double r2 = rxy;
 		if (ryz < rxz && ryz < rxy) r2 = ryz;
 		else if (rxz < ryz && rxz < rxy) r2 = rxz;
@@ -788,7 +836,8 @@ bool migrate(const File &gp, std::vector<uint8_t> &out, std::vector<MigrateNote>
 	for (size_t li = 0; li < gp.lods.size(); ++li) {
 		const RenderModel &rm = gp.lods[li];
 		remap[li].assign(rm.materials.size(), -1);
-		for (const Primitive &p : rm.primitives) {
+		for (const Primitive *drawn : drawn_primitives(rm).prims) {
+			const Primitive &p = *drawn;
 			if (p.material < 0 || static_cast<size_t>(p.material) >= rm.materials.size()) {
 				error = "a primitive names a material its LOD does not hold";
 				return false;
@@ -798,7 +847,7 @@ bool migrate(const File &gp, std::vector<uint8_t> &out, std::vector<MigrateNote>
 			ThreediMaterial m;
 			if (!mb.build(rm.materials, static_cast<size_t>(p.material), m)) return false;
 			for (size_t k = 0; k < a.materials.size() && slot < 0; ++k)
-				if (std::memcmp(&a.materials[k], &m, sizeof(m)) == 0) slot = static_cast<int>(k);
+				if (same_material(a.materials[k], m)) slot = static_cast<int>(k);
 			if (slot < 0) {
 				a.materials.push_back(m);
 				slot = static_cast<int>(a.materials.size()) - 1;

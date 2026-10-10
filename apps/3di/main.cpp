@@ -171,8 +171,9 @@ int main(int argc, char **argv) {
 		const bool region = argc == 7 && std::strcmp(argv[5], "--region") == 0;
 		if ((argc != 5 && !region) || std::strcmp(argv[3], "-o") != 0)
 			return usage("migrate needs <gp.3di> -o <out.3di> [--region 0|1|2]");
-		const int index = region ? std::atoi(argv[6]) : 0;
-		if (region && (std::strlen(argv[6]) != 1 || index < 0 || index > 2)) return usage("--region takes 0, 1 or 2");
+		if (region && (std::strlen(argv[6]) != 1 || argv[6][0] < '0' || argv[6][0] > '2'))
+			return usage("--region takes 0, 1 or 2");
+		const int index = region ? argv[6][0] - '0' : 0;
 		return opennova::threedi_cli::cmd_migrate(argv[2], argv[4], index);
 	}
 	if (cmd == "scene") {

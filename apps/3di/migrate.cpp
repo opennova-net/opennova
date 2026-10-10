@@ -6,9 +6,12 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <set>
 #include <system_error>
 #include <vector>
 
+#include <base/io/file_io.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <formats/threedi_gp/threedi_gp.h>
 #include <formats/threedi_gp/threedi_gp_migrate.h>
@@ -19,19 +22,12 @@ namespace opennova::threedi_cli {
 
 int cmd_migrate(const char *gp_path, const char *out_path, int region) {
 	std::vector<uint8_t> bytes;
-	{
-		FILE *f = std::fopen(gp_path, "rb");
-		if (f == nullptr) {
-			std::fprintf(stderr, "opennova-3di: cannot open %s\n", gp_path);
-			return 1;
-		}
-		uint8_t chunk[65536];
-		size_t n = 0;
-		while ((n = std::fread(chunk, 1, sizeof(chunk), f)) > 0) bytes.insert(bytes.end(), chunk, chunk + n);
-		std::fclose(f);
+	std::string error;
+	if (!opennova::io::read_file_bytes(gp_path, bytes, error)) {
+		std::fprintf(stderr, "opennova-3di: cannot read %s: %s\n", gp_path, error.c_str());
+		return 1;
 	}
 	opennova::threedi_gp::File file;
-	std::string error;
 	if (opennova::threedi_gp::detect(bytes.data(), bytes.size()) == opennova::threedi_gp::Kind::None) {
 		std::fprintf(stderr, "%s: not a GP model (a 3DI3 needs no migration)\n", gp_path);
 		return 1;
@@ -40,17 +36,16 @@ int cmd_migrate(const char *gp_path, const char *out_path, int region) {
 		std::fprintf(stderr, "%s: %s\n", gp_path, error.c_str());
 		return 1;
 	}
-	// The texture files beside the model, by name without case (a retail tree mixes cases).
-	const std::filesystem::path folder = std::filesystem::path(gp_path).parent_path();
+	// The files beside the model, listed once, by name without case (a retail tree mixes cases).
+	std::filesystem::path folder = opennova::io::os_path(gp_path).parent_path();
+	if (folder.empty()) folder = ".";
+	std::set<std::string> beside;
+	std::error_code ec;
+	for (const auto &entry : std::filesystem::directory_iterator(folder, ec))
+		beside.insert(strutil::to_lower(opennova::io::utf8_path(entry.path().filename())));
 	opennova::threedi_gp::MigrateOptions options;
 	options.region = region;
-	options.texture_exists = [&folder](const std::string &name) {
-		std::error_code ec;
-		const std::filesystem::path dir = folder.empty() ? std::filesystem::path(".") : folder;
-		for (const auto &entry : std::filesystem::directory_iterator(dir, ec))
-			if (strutil::iequals(entry.path().filename().string(), name)) return true;
-		return false;
-	};
+	options.texture_exists = [&beside](const std::string &name) { return beside.count(strutil::to_lower(name)) != 0; };
 	std::vector<uint8_t> out;
 	std::vector<opennova::threedi_gp::MigrateNote> notes;
 	if (!opennova::threedi_gp::migrate(file, out, notes, error, options)) {
