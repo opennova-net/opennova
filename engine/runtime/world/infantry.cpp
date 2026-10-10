@@ -1229,28 +1229,26 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         npc_respawn_unhide(world, *this, *tick_entity);
         if (((tick_entity->flags | tick_entity->engine_flags) & 1u) != 0) return;
     }
-    // Org1 copies the primary state and its pending target into the secondary
-    // channel at the motor head, before think or authority interpolation. The
-    // two playheads and variant rings remain independent. No equipped ADM or
-    // player hold-pose selection participates in this write.
-    // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48; copy @0x4B9A28]
-    if (npc_body) {
-        const int state = e.inf.anim_state;
-        e.inf.request_weapon_animation(state);
-        e.inf.wpn_deferred = e.inf.anim_pending;
-    }
     RootMotionFrame frame;
     // Org2 rotates root output before this tick's view/leg chase changes +0x8C.
     // [orig: @0x4B41E4..0x4B4255 precedes @0x4B4945..0x4B4ABB]
     const int32_t player_root_heading = e.inf.body_heading;
     bool have_clip = false;
-    // Each body samples secondary then primary before any state producers.
-    // A wire-owned org2 does the same in remote_player_body_anim below.
-    // [orig: org1 @0x4B9A48; org2 @0x4B41DF; dual order @0x40B908/@0x40B94E]
+    // Each body samples secondary then primary before any state producers:
+    // org1 through its motor head (the primary's state and pending target
+    // copied into the secondary's request first, before think or authority
+    // interpolation: infantry_org1_motor_head), org2 straight. A wire-owned
+    // org2 does the same in remote_player_body_anim below.
+    // [orig: org1 @0x4B9A14..0x4B9A48; org2 @0x4B41DF; dual order
+    //  @0x40B908/@0x40B94E]
     if (!e.net_is_remote_peer) {
         devtools::ProfileLap animation_lap(world.profile);
-        have_clip = infantry_dual_update(e.inf, root_motion, anim_rings, frame);
-        e.inf.last_events = have_clip ? frame.events : 0;
+        if (npc_body) {
+            have_clip = infantry_org1_motor_head(e.inf, root_motion, anim_rings, frame);
+        } else {
+            have_clip = infantry_dual_update(e.inf, root_motion, anim_rings, frame);
+            e.inf.last_events = have_clip ? frame.events : 0;
+        }
         animation_lap.mark(devtools::Slot::SIM_AI_INFANTRY_ANIMATION);
     }
     // Both bodies stamp the mover-entry savedLivePose (+0x80..+0x88) before any

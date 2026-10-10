@@ -980,6 +980,28 @@ inline InfantryBodyPose infantry_body_pose(const InfantryState &inf) {
     return pose;
 }
 
+// THE ORG1 MOTOR HEAD: one logic tick of an NPC body's animation as Entity_UpdateInfantryAI runs
+// it before its think. The primary's state and its pending target are copied into the secondary's
+// request (no equipped-ADM lookup, no hold-pose ladder: D-INF-24), the frame is zeroed, the AnimMap
+// dual update runs (the secondary, then the primary, its root output in `frame`), and the tick's
+// event word is kept as the body's last_events (0 with no clip), what its sound block and its fire
+// pass read. Returns whether the primary had a clip. AiSystem::tick_infantry runs it for every NPC
+// body; a caller ticking a body outside a world runs the same function.
+// When the game runs it at all:
+// - only for a body on the org1 physics row: Entity_UpdateAllEntities' pool-0 loop calls the move
+//   function's slot, entity+0x1C4 [orig: @0x4C2460..0x4C2472], and the org0 row's is a nullsub
+//   [orig: @0x82AC1C -> nullsub_28 @0x4AFF60], so an org0 body's channels never advance after the
+//   warmup (physics_class_from_move_function names the row);
+// - not for a body hidden at init (flags bit 0, the respawn zone of another team), which exits
+//   before the head [orig: @0x4B9A03];
+// - and the think after it, on its 16-tick stagger, may change the state played: the first promotes
+//   an alert record's idle 43 to 44 or 49 [orig: @0x4BD2FD..0x4BD31C]. A caller that runs no think
+//   plays the spawn's state on, its channels wrapping and serving `rings` as the game's do.
+// [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48, the copy @0x4B9A28; AnimMap_UpdateDualChannels
+//  @0x40B8C0 from @0x4B9A48]
+bool infantry_org1_motor_head(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings,
+                              RootMotionFrame &frame);
+
 // Pure retail body-tick kernels, exposed so deterministic tests can pin the
 // wrap/arithmetic-shift behavior independently of locomotion.
 // [orig: Entity_UpdateInfantryPlayerBody / Entity_UpdateInfantryAI]

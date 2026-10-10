@@ -1,14 +1,22 @@
 // Fresh org1 initialization and the native dual-channel spawn settle.
 // [orig: Entity_InitOrganicAI @0x4BFCC0; Entity_WarmUpOrganicAnimation @0x4B8B20]
+#include "common/retail_paths.h"
+
+#include <base/resource_index/resource_index.h>
+#include <runtime/anim/adm_root_motion.h>
+#include <runtime/anim/clip_timeline.h>
+#include <runtime/assets/asset_store.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/infantry_internal.h>
 #include <runtime/world/world.h>
 #include <runtime/terrain_query/height_field.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 using namespace opennova::world;
@@ -262,45 +270,190 @@ void world_free_pose_matches_the_world() {
     CHECK(bare.rise == 0);
 }
 
+// The channels a tick leaves, both of them: the primary's pose and requests, the secondary's state,
+// playhead, ring entry and blend, the tick's event word and the capsule history.
+bool same_channels(const InfantryState &a, const InfantryState &b) {
+    return same_pose(infantry_body_pose(a), infantry_body_pose(b)) && a.anim_state == b.anim_state &&
+           a.anim_pending == b.anim_pending && a.anim_pending_boundary == b.anim_pending_boundary &&
+           a.anim_blend_step == b.anim_blend_step && a.wpn_state == b.wpn_state &&
+           a.wpn_deferred == b.wpn_deferred && a.wpn_deferred_boundary == b.wpn_deferred_boundary &&
+           a.wpn_clip_phase == b.wpn_clip_phase && a.wpn_variant == b.wpn_variant && a.wpn_prev == b.wpn_prev &&
+           a.wpn_prev_clip_phase == b.wpn_prev_clip_phase && a.wpn_prev_variant == b.wpn_prev_variant &&
+           a.wpn_blend_weight == b.wpn_blend_weight && a.wpn_blend_step == b.wpn_blend_step &&
+           a.last_events == b.last_events && a.prev_capsule_bottom == b.prev_capsule_bottom;
+}
+
+// The next logic tick on which the org1 body's 16-tick think does not run: the think keys on the tick
+// plus 36 times the net id [orig: Entity_UpdateInfantryAI @0x4b9948..0x4b9953, gate (key & 0xF)].
+uint32_t tick_without_think(uint32_t tick, int id) {
+    while (((tick + 36u * uint32_t(id)) & 15u) == 0) ++tick;
+    return tick;
+}
+
+// What one channel's wrap did, observed against the clip's own clock and the shared ring: an unblended
+// channel wraps on the tick its playhead reaches the served entry's length, the ring serves the state's
+// entries last to first across every channel that plays it, and an entry other than the one playing
+// fades in from its first frame over eight ticks [orig: AnimChannel_AdvancePlayback @0x40B165 (t >= 1);
+// AnimMap_AdvanceToNextAnim @0x40BDF0, the serve @0x40BE02..0x40BE07, the fade @0x40BE24].
+struct RingWatch {
+    int served_last = -1;
+    int serves = 0;
+    void wrap(int count, int32_t before, int32_t after, int32_t phase, float weight, float step) {
+        ++serves;
+        if (served_last >= 0) CHECK(after == (served_last + count - 1) % count);
+        served_last = after;
+        if (after != before) CHECK(phase == 0 && weight == 0.0f && step == opennova::anim::kWrapFadeStep);
+    }
+};
+
 // A spawned body ticked on as the org1 motor head runs it before its think (the editor's mission view
-// plays its people's clips so): the same channels as the world's org1 motor head leaves an idle body
-// whose think requests nothing, each tick's event word the clip's, the variants re-served at a wrap.
+// plays its people's clips so): the world's own motor, stepped on ticks its think does not run, and the
+// shared head over the world-free spawn's channels leave the same channels every tick; the idle wraps
+// at each served entry's own length, the ring serves its entries last to first across both channels,
+// and a new entry fades in over eight ticks.
 void body_ticks_on_as_the_motor_head() {
     for (const int id : {13, 0, 7}) {
+        Rig r(id);
+        RingSource world_clips;
+        r.owned->ai.root_motion = &world_clips;
+        r.init();
         AnimVariantRings rings;
         RingSource clips;
         OrganicSpawnBody spawned = organic_spawn_pose({}, uint32_t(id), &clips, rings, 0);
-        CHECK(same_pose(spawned.pose, infantry_body_pose(spawned.channels)));
-        // The world's copy of the same body, its motor head's copy and dual update run by hand.
-        InfantryState world_body = spawned.channels;
-        AnimVariantRings world_rings = rings;
-        RingSource world_clips;
-        int wraps = 0;
-        int32_t last_phase = spawned.channels.clip_phase;
-        for (int tick = 0; tick < 300; ++tick) {
+        InfantryState &body = spawned.channels;
+        CHECK(same_channels(body, r.body().inf));
+        const int count = clips.variant_count(0, anim_state::kIdle);
+        RingWatch ring;
+        int fades_done = 0;
+        int32_t fade_ticks = -1;
+        uint32_t tick = 1000;
+        for (int step = 0; step < 600; ++step) {
+            const auto wraps_next = [&](int32_t phase, int32_t variant, bool blending) {
+                return !blending && (phase + 1) % clips.clip_length_ticks(0, anim_state::kIdle, variant) == 0;
+            };
+            const bool secondary_wraps = wraps_next(body.wpn_clip_phase, body.wpn_variant, body.weapon_blend_active());
+            const bool primary_wraps = wraps_next(body.clip_phase, body.anim_variant, body.body_blend_active());
+            const int32_t secondary_before = body.wpn_variant, primary_before = body.anim_variant;
+            tick = tick_without_think(tick + 1, id);
+            r.owned->ai.update_organic(r.body(), *r.owned, tick);
             RootMotionFrame frame;
-            const uint32_t events = organic_body_tick(spawned.channels, &clips, rings, frame);
-            CHECK(events == spawned.channels.last_events);
-            CHECK(spawned.channels.wpn_state == spawned.channels.anim_state);
-            world_body.request_weapon_animation(world_body.anim_state);
-            world_body.wpn_deferred = world_body.anim_pending;
-            RootMotionFrame world_frame;
-            CHECK(infantry_dual_update(world_body, &world_clips, world_rings, world_frame));
-            CHECK(same_pose(infantry_body_pose(spawned.channels), infantry_body_pose(world_body)));
-            if (spawned.channels.clip_phase < last_phase) ++wraps;
-            last_phase = spawned.channels.clip_phase;
+            CHECK(infantry_org1_motor_head(body, &clips, rings, frame));
+            CHECK(body.wpn_state == body.anim_state && body.anim_state == anim_state::kIdle);
+            CHECK(same_channels(body, r.body().inf));
+            // The secondary serves before the primary [orig: AnimMap_UpdateDualChannels @0x40B908, @0x40B94E].
+            if (secondary_wraps)
+                ring.wrap(count, secondary_before, body.wpn_variant, body.wpn_clip_phase, body.wpn_blend_weight,
+                          body.wpn_blend_step);
+            else
+                CHECK(body.wpn_variant == secondary_before);
+            if (primary_wraps) {
+                ring.wrap(count, primary_before, body.anim_variant, body.clip_phase, body.anim_blend_weight,
+                          body.anim_blend_step);
+                if (body.anim_variant != primary_before) fade_ticks = 0;
+            } else {
+                CHECK(body.anim_variant == primary_before);
+                if (fade_ticks >= 0 && ++fade_ticks == 8) {
+                    // The fade is done eight ticks on, not seven.
+                    CHECK(!body.body_blend_active());
+                    ++fades_done;
+                    fade_ticks = -1;
+                } else if (fade_ticks >= 0) {
+                    CHECK(body.body_blend_active());
+                }
+            }
         }
-        CHECK(wraps > 0); // the idle wrapped and played on
+        CHECK(ring.serves >= 8 && fades_done >= 3); // the idle wrapped and played on
     }
     // A clip's event word reaches the tick; no clip, none.
     Source events;
     AnimVariantRings rings;
     OrganicSpawnBody spawned = organic_spawn_pose({}, 0, &events, rings, 0);
     RootMotionFrame frame;
-    CHECK(organic_body_tick(spawned.channels, &events, rings, frame) == 0xFF);
+    CHECK(infantry_org1_motor_head(spawned.channels, &events, rings, frame));
+    CHECK(spawned.channels.last_events == 0xFF && frame.events == 0xFF);
     AnimVariantRings none;
     OrganicSpawnBody bare = organic_spawn_pose({}, 13, nullptr, none, -1);
-    CHECK(organic_body_tick(bare.channels, nullptr, none, frame) == 0);
+    CHECK(!infantry_org1_motor_head(bare.channels, nullptr, none, frame));
+    CHECK(bare.channels.last_events == 0);
+}
+
+// A retail soldier (the install's Eindo01.adm, a body of net id 13 standing), posed and ticked on over
+// the install's clips: the world's motor and the shared head leave the same channels, the idle
+// (I_idle1.bad at 363 ticks after the warmup) wraps where its own clock wraps, and each unblended
+// tick's event word is the trigger its clip authors on the frame under the playhead.
+void retail_soldier_ticks_on() {
+    const std::string install = retail::install();
+    if (install.empty()) {
+        retail::skip_leg("OPENNOVA_JO_DIR (a soldier's Eindo01.adm)");
+        return;
+    }
+    opennova::ResourceIndex index;
+    CHECK(index.scan(install));
+    opennova::assets::AssetStore store{&index};
+    opennova::anim::AdmRootMotion clips;
+    const int adm = clips.register_adm(&store, "Eindo01.adm");
+    CHECK(adm == 0);
+    if (adm != 0) return;
+    Rig r(13);
+    r.owned->ai.root_motion = &clips;
+    r.init();
+    AnimVariantRings rings;
+    OrganicSpawnBody spawned = organic_spawn_pose({}, 13, &clips, rings, adm);
+    InfantryState &body = spawned.channels;
+    CHECK(same_channels(body, r.body().inf));
+    CHECK(spawned.pose.state == anim_state::kIdle && spawned.pose.phase == 363);
+    std::string served = clips.clip_file(adm, anim_state::kIdle, spawned.pose.variant);
+    for (char &c : served) c = char(std::tolower(static_cast<unsigned char>(c)));
+    CHECK(served.find("i_idle1.bad") != std::string::npos);
+    std::printf("retail soldier: idle %s, variant %d of %d, phase %d\n", served.c_str(), spawned.pose.variant,
+                clips.variant_count(adm, anim_state::kIdle), spawned.pose.phase);
+    std::vector<uint32_t> words(8192);
+    uint32_t tick = 1000;
+    // Ticks `steps` on in the state the body plays; counts its wraps, the unblended ticks sampled and those
+    // whose frame authors an event word.
+    const auto play = [&](int state, int steps, int &wraps, int &sampled, int &events) {
+        for (int step = 0; step < steps; ++step) {
+            const int32_t phase = body.clip_phase, variant = body.anim_variant;
+            const bool settled = !body.body_blend_active() && body.body_clip_state() == state;
+            const bool wraps_now = settled && clips.clip_wraps_at(adm, state, variant, phase + 1);
+            if (wraps_now) CHECK(clips.clip_boundary_after(adm, state, phase, variant) == phase + 1);
+            tick = tick_without_think(tick + 1, 13);
+            r.owned->ai.update_organic(r.body(), *r.owned, tick);
+            RootMotionFrame frame;
+            CHECK(infantry_org1_motor_head(body, &clips, rings, frame));
+            CHECK(same_channels(body, r.body().inf));
+            if (wraps_now) {
+                ++wraps;
+                CHECK(body.anim_variant != variant ? body.clip_phase == 0 && body.body_blend_active()
+                                                  : body.clip_phase == phase + 1);
+                continue;
+            }
+            if (!settled || body.body_blend_active() || body.body_clip_state() != state) continue;
+            CHECK(body.anim_variant == variant);
+            // The frame under the playhead: the last frame the walk from the clip's start enters.
+            const int n = clips.scan_triggers(adm, state, -1, body.clip_phase, words.data(), int(words.size()),
+                                              body.anim_variant);
+            if (n <= 0) continue;
+            ++sampled;
+            const uint32_t authored = words[size_t(n - 1)];
+            CHECK(body.last_events == authored);
+            if (authored != 0 && body.last_events == authored) ++events;
+        }
+    };
+    int wraps = 0, sampled = 0, events = 0;
+    play(anim_state::kIdle, 1200, wraps, sampled, events);
+    std::printf("retail soldier idle: %d wraps, %d ticks sampled, %d on authored event frames\n", wraps, sampled,
+                events);
+    CHECK(wraps >= 2 && sampled > 0);
+    // The walk a script stores [orig: WacCmd_Anim @0x4ED5B0], played on by both: its footsteps are the
+    // event words its clip authors.
+    body.store_body_animation(anim_state::kWalkForward);
+    r.body().inf.store_body_animation(anim_state::kWalkForward);
+    wraps = sampled = events = 0;
+    play(anim_state::kWalkForward, 1200, wraps, sampled, events);
+    std::printf("retail soldier walk: %d wraps, %d ticks sampled, %d on authored event frames\n", wraps, sampled,
+                events);
+    CHECK(wraps >= 2 && sampled > 0 && events > 0);
 }
 
 void control_point_pool_precedence() {
@@ -348,11 +501,13 @@ void grounding_strict_one_unit_limit() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    retail::configure_mixed(argc, argv);
     warmup_permutation_and_root_motion();
     postures_mounts_and_wash();
     world_free_pose_matches_the_world();
     body_ticks_on_as_the_motor_head();
+    retail_soldier_ticks_on();
     control_point_pool_precedence();
     grounding_strict_one_unit_limit();
     std::printf("infantry_spawn: %s\n", failures ? "FAIL" : "PASS");
