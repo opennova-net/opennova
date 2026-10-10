@@ -15,7 +15,7 @@
 // units, an entity's item is set by its items.def id; the lists: the fixed tables take nothing in or
 // out, a path holds 32 stops and a stop put in or taken out writes the path's count as its slots where
 // a flags edit leaves a stored count past them as it was read, an event's chain holds 20 of each, a
-// new bounding box is refused, and the file reparses after every edit. With the game install (a
+// new bounding box is a type-0 box no reader reads, and the file reparses after every edit. With the game install (a
 // SKIP-LEG without OPENNOVA_JO_DIR), every mission it ships reads through the table and a Set of every
 // field to the value it reads writes the same file but the bytes it names, each a fixed text slot's
 // past its text in a slot the game is witnessed to read to its first NUL alone (the shipped missions'
@@ -389,8 +389,7 @@ int test_complete() {
 	// word past bits 0 and 1.
 	if (coverage(MissionKind::Group, 0, bytes({{1, 3}, {4, 4}, {12, 20}}), "group") != 0) return 1;
 	if (coverage(MissionKind::Layer, 0, {}, "layer") != 0) return 1;
-	// A bounding box: every word a field's, the reserved word a Mission box's name's last four characters
-	// (master's #1007).
+	// A bounding box: every word a field's, the reserved word a Mission box's name's last four characters.
 	if (coverage(MissionKind::BoundingBox, 0, {}, "bounding box", with_box) != 0) return 1;
 	std::printf("complete: every byte the writer takes from a header, an entity, an event, a trigger, an action, an "
 	            "area trigger, a group, a layer and a bounding box is a field's, but the stated members\n");
@@ -511,6 +510,17 @@ int test_fields() {
 	const RecordHandle reset = list_of(MissionKind::Event, MissionKind::Action).ops.at(rows_of(m, MissionKind::Event)[1], 0);
 	TEST_EXPECT(actions.applies(actions.find("param1"))(reset, RecordOwners{}) == Applicability::Reads &&
 	            actions.applies(actions.find("param2"))(reset, RecordOwners{}) == Applicability::Ignored);
+	// A box's name and second word are read on a Mission box alone; its value on a type the game reads.
+	with_box(m);
+	const TableKind &boxes = *T().kind(k(MissionKind::BoundingBox));
+	const RecordHandle box = nested(m, MissionKind::BoundingBox, file.bounding_boxes.size() - 1);
+	const auto box_reads = [&](const char *key) { return boxes.applies(boxes.find(key))(box, RecordOwners{}); };
+	TEST_EXPECT(schema(MissionKind::BoundingBox, "mission").label == "Mission name" &&
+	            box_reads("ref_id") == Applicability::Reads && box_reads("mission") == Applicability::Ignored &&
+	            box_reads("reserved0") == Applicability::Ignored);
+	TEST_EXPECT(set(box, "mission", std::string("CP02"), error) && set(box, "type", int64_t(3), error) &&
+	            box_reads("mission") == Applicability::Reads && box_reads("reserved0") == Applicability::Reads);
+	file.bounding_boxes.pop_back();
 
 	const RecordHandle entry = nested(m, MissionKind::Loadout, 0);
 	TEST_EXPECT(!set(entry, "name", std::string(), error) && error == "Weapon loadout entries require a name");
@@ -534,28 +544,26 @@ int test_lists() {
 		TEST_EXPECT(list.spec.fixed && !list.ops.insert(root, 0, &one, error) && !list.ops.erase(root, 0));
 	}
 
-	// A path's stops: 32 at most, any marker index (a Record reference the mission document checks),
-	// a new one visiting the first marker; one put in or taken out writes the count as the slots.
-	const RecordHandle path = rows_of(m, MissionKind::WaypointPath)[1]; // path 1: path 0 holds none
-	bms::WaypointRecord &record = path.as<MissionPath>().record;
+	// A path's stops: the markers on it (MissionPath::stops, its waypoint markers' as read, D-MIS-6), any
+	// number, any marker index (a Record reference the mission document checks, and its validation: a
+	// waypoint marker of one path from 1), a new one visiting the first marker. The record stays as read
+	// (the mission document's save lays it out from the stops).
+	const RecordHandle path = rows_of(m, MissionKind::WaypointPath)[1];
+	MissionPath &route = path.as<MissionPath>();
+	const uint32_t count = route.record.marker_count;
 	const size_t markers = rows_of(m, MissionKind::Marker).size();
 	const ListOps &stops = list_of(MissionKind::WaypointPath, MissionKind::Stop).ops;
 	const size_t held = stops.size(path);
 	TEST_EXPECT(held > 0 && stops.insert(path, held, nullptr, error) && stops.size(path) == held + 1 &&
-	            record.marker_count == held + 1 && number(stops.at(path, held), "marker") == 0);
+	            route.stops.size() == held + 1 && number(stops.at(path, held), "marker") == 0);
 	const RecordHandle last = stops.at(path, held);
-	TEST_EXPECT(set(last, "marker", int64_t(markers), error) && record.waypoint_numbers[held] == markers &&
+	TEST_EXPECT(set(last, "marker", int64_t(markers), error) && route.stops[held] == markers &&
 	            names(last, "marker") == ReferenceKind::MissionMarker);
 	DetachedRecord stop = stops.copy(path, 0);
 	*static_cast<uint32_t *>(stop.data.get()) = 0;
-	while (stops.size(path) < mission::kMaxWaypointPathMarkers) TEST_EXPECT(stops.insert(path, 0, &stop, error));
-	TEST_EXPECT(!stops.insert(path, 0, &stop, error));
-	// A count past the 32 slots (CP19.bms ships 39): a flags edit leaves it as it was read, a stop taken
-	// out writes it as the slots.
-	record.marker_count = 39;
-	TEST_EXPECT(set(path, "flags", int64_t(1), error) && record.marker_count == 39 && number(path, "marker_count") == 39);
-	TEST_EXPECT(stops.erase(path, 0) && stops.size(path) == mission::kMaxWaypointPathMarkers - 1 &&
-	            record.marker_count == mission::kMaxWaypointPathMarkers - 1 && reparses(m));
+	while (stops.size(path) < 40) TEST_EXPECT(stops.insert(path, 0, &stop, error));
+	TEST_EXPECT(stops.erase(path, 0) && stops.size(path) == 39);
+	TEST_EXPECT(set(path, "flags", int64_t(1), error) && route.record.marker_count == count && reparses(m));
 	TEST_EXPECT(load(m));
 	const RecordHandle again = root_of(m);
 	bms::File &own = again.as<bms::File>();
@@ -574,9 +582,9 @@ int test_lists() {
 	bms::File &native = top.as<bms::File>();
 	(void)own;
 
-	// A loadout entry and an availability rule come in as copies (a new one would have no name); a
-	// bounding box too (what a new one would hold is not known); each keeps the header's lengths and
-	// counts.
+	// A loadout entry and an availability rule come in as copies (a new one would have no name); a new
+	// bounding box is a box of type 0, which neither the player body's walk nor SSNloc reads (D-MIS-8);
+	// each keeps the header's lengths and counts.
 	const ListOps &loadout = list_of(MissionKind::Mission, MissionKind::Loadout).ops;
 	TEST_EXPECT(!loadout.insert(top, 0, nullptr, error));
 	const DetachedRecord kit = loadout.copy(top, 1);
@@ -591,7 +599,9 @@ int test_lists() {
 	TEST_EXPECT(availability.erase(top, 0) && native.header.secondary_chunk_len == 0);
 	const ListOps &boxes = list_of(MissionKind::Mission, MissionKind::BoundingBox).ops;
 	const size_t box_count = boxes.size(top);
-	TEST_EXPECT(!boxes.insert(top, box_count, nullptr, error) && !error.empty());
+	TEST_EXPECT(boxes.insert(top, box_count, nullptr, error) && native.bounding_box_count == int32_t(box_count + 1) &&
+	            native.bounding_boxes.back().type == 0 && native.bounding_boxes.back().max_x == 0 && reparses(m));
+	TEST_EXPECT(boxes.erase(top, box_count) && native.bounding_box_count == int32_t(box_count));
 	DetachedRecord box;
 	box.kind = k(MissionKind::BoundingBox);
 	box.data = std::make_shared<bms::BoundingBox>(bms::BoundingBox{1, 2, 3, 4, 5, 6, 5, -1, 0});

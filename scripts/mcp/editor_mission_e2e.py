@@ -13,6 +13,8 @@ ended (the editor with its tree) when it does not: only the pids this run record
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations" --whole-install
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations Combined Arms" \
         --builds-on jox01 --expansion jxm --mission 07TR.bms
+    python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations Combined Arms" \
+        --builds-on jox01 --expansion jxm --mission 07TR.bms --play-mode strict
 
 With --expansion (ADR 0046 S16) the project builds as that expansion, on the installed one
 --builds-on names when given: its mission imported from what /exp <builds-on> serves, its build
@@ -21,6 +23,15 @@ over the install's base game with /exp <expansion>, and the game read until the 
 and in OpenNova's mission catalog, the build saying nothing of the stock game's list showing it
 untitled (build.expansion.mission_untitled), and the game's strings showing the expansion's own table
 (its EXP_NAME set by the run, read from the loose <expansion>.bin the build placed).
+
+With --play-mode install or strict (ADR 0046 S23 D) Play runs the game install's own Jointops.exe over
+the build (strict: as a player who dropped it into the build's folder runs it, an expansion with /exp over
+the install's base game), which starts at its menu and has no endpoint: the run is read from what the editor
+says of it (its mode, its command line, its run directory) and, once it is stopped, from the file log the
+game wrote (/FRISK), which must show the build's archives read (an expansion's own pair among them). The
+game's window starts behind the others (Play's `behind`), so the run takes no focus; a strict run directory
+with no game.cfg of its own opens the game's device dialog first, which waits behind the others until the
+game is stopped.
 
 Local only: it needs a game install and starts the game, so no CI job runs it and it reads
 no environment variable. Standard library only; the clients are editor_mcp.py's and
@@ -228,7 +239,10 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
 
     say(f"2. a new project in {project}, on the game install {install}")
     request(client, "new_project", wait_s=120, dir=str(project), title="Mission e2e")
-    request(client, "apply_project_settings", wait_s=120, settings={"game_install": install, "mission": True})
+    settings = {"game_install": install, "mission": True}
+    if args.play_mode:
+        settings["play_mode"] = args.play_mode
+    request(client, "apply_project_settings", wait_s=120, settings=settings)
     if args.expansion:
         # The project as the expansion (project.opennova's expansion, ADR 0046 S16), then opened again,
         # so the install's listing and the import read through /exp <builds-on>.
@@ -321,8 +335,18 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
             f"({same.get('bytes', 0) / 1e6:.1f} MB) left out as the base game's own, "
             f"{same.get('base_bytes_read', 0) / 1e6:.1f} MB of the base read")
 
+    if args.play_mode in ("install", "strict"):
+        play_in_install(args, client, started_pids)
+        say("10. every step held")
+        return
+
     say(f"8. Play in {args.mission}")
-    outcome, ended = raise_and_wait(client, {"kind": "play", "mission": args.mission}, args.timeout)
+    # The game's window behind the others (Windows only: elsewhere Play spawns nothing with it): the run takes
+    # no focus from whoever works at the machine.
+    play = {"kind": "play", "mission": args.mission}
+    if os.name == "nt":
+        play["behind"] = True
+    outcome, ended = raise_and_wait(client, play, args.timeout)
     expect(bool(ended) and ended.get("end") == "done", f"Play's build did not land: {json.dumps(outcome)}")
     run_section = client.structured("editor_state", {"sections": ["run"]}).get("run", {})
     started_pids["game"] = int(run_section.get("pid", 0) or 0)
@@ -390,6 +414,62 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     say("10. every step held")
 
 
+def play_in_install(args: argparse.Namespace, client: GameMcp, started_pids: dict) -> None:
+    """Play in the game install (install or strict): the install's Jointops.exe over the build, at its menu,
+    read through the editor's run section, then stopped and read through its file log."""
+    say(f"8. Play ({args.play_mode}) in the game install")
+    play = {"kind": "play"}
+    if os.name == "nt":
+        play["behind"] = True
+    outcome, ended = raise_and_wait(client, play, args.timeout)
+    expect(bool(ended) and ended.get("end") == "done", f"Play's build did not land: {json.dumps(outcome)}")
+    run_section = client.structured("editor_state", {"sections": ["run"]}).get("run", {})
+    started_pids["game"] = int(run_section.get("pid", 0) or 0)
+    expect(run_section.get("state") == "running", f"the game is not running: {json.dumps(run_section)}")
+    expect(run_section.get("ran_mode") == args.play_mode, f"the game ran in another mode: {json.dumps(run_section)}")
+    command = run_section.get("command_line", "")
+    run_dir = Path(run_section.get("run_dir", ""))
+    say(f"   the game runs (pid {run_section.get('pid')}) in {run_dir}: {command}")
+    expect("Jointops.exe".lower() in command.lower(), f"the game install's program was not started: {command}")
+    if args.play_mode == "strict":
+        expect("/FRISK" in command and " /d" not in command, f"strict Play's command line is not the player's: {command}")
+    if args.expansion:
+        expect(f"/exp {args.expansion}" in command, f"the game was not started with /exp {args.expansion}: {command}")
+        staged = run_dir / "expansion" / args.expansion
+        expect((staged / f"{args.expansion}.pff").is_file() and (staged / f"{args.expansion}L.pff").is_file(),
+               f"the run directory holds no expansion/{args.expansion}/ pair: {staged}")
+        base = [name for name in ("resource.pff", "localres.pff", "language.pff") if (run_dir / name).is_file()]
+        expect(len(base) == 3, f"the run directory holds the base game's archives {base}, not the three")
+        say(f"   staged: the base game's three archives and expansion/{args.expansion}/ beside them")
+
+    say("9. the game read, then stopped")
+    deadline = time.monotonic() + args.install_run
+    while time.monotonic() < deadline:
+        failed = [p for p in query(client, "problems", text="play.", limit=20).get("problems", [])
+                  if str(p.get("code", "")).startswith("play.") and p.get("severity") == "error"]
+        expect(not failed, "the game reported: " + "; ".join(f"{p.get('code')}: {p.get('message')}" for p in failed))
+        if client.structured("editor_state", {"sections": ["run"]}).get("run", {}).get("state") != "running":
+            break
+        time.sleep(1.0)
+    request(client, "stop_play")
+    deadline = time.monotonic() + 60.0
+    run_section = {}
+    while time.monotonic() < deadline:
+        run_section = client.structured("editor_state", {"sections": ["run"]}).get("run", {})
+        if run_section.get("state") == "stopped" and run_section.get("file_log") is not None:
+            break
+        time.sleep(0.5)
+    expect(run_section.get("state") == "stopped", f"the game did not stop: {json.dumps(run_section)}")
+    log = run_section.get("file_log") or {}
+    archives = [str(name).replace("\\", "/").lower() for name in log.get("archives", [])]
+    say(f"   its file log: {log.get('lines', 0)} lines, archives {archives}")
+    expect(any(name.endswith("resource.pff") for name in archives), f"the game read no resource.pff: {json.dumps(log)}")
+    if args.expansion:
+        expect(any(name.endswith(f"{args.expansion.lower()}.pff") for name in archives),
+               f"the game did not mount the expansion's {args.expansion}.pff: {json.dumps(log)}")
+        say(f"   the game mounted /exp {args.expansion}'s pair over the base game's archives")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--install", required=True, help="the game install (its folder holds the three archives)")
@@ -414,6 +494,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--game-timeout", dest="game_timeout", type=float, default=300.0,
                         help="seconds the mission may take to load in the game")
     parser.add_argument("--keep", action="store_true", help="keep the project folder (a temp one is removed otherwise)")
+    parser.add_argument("--play-mode", dest="play_mode", choices=("runtime", "install", "strict"), default=None,
+                        help="how Play runs the game (the project's play_mode; default: the OpenNova runtime)")
+    parser.add_argument("--install-run", dest="install_run", type=float, default=30.0,
+                        help="with --play-mode install or strict: seconds the game runs before it is stopped")
     args = parser.parse_args(argv)
 
     made_temp = args.project is None

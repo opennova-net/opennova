@@ -14,9 +14,13 @@ namespace opennova::editor {
 // warning under `ignored` (a save drops it), on the issue's field, line and record,
 // and on the record its locator names in the file as loaded, wherever that record is now
 // (Document::source_address; gone since, or no locator: the file alone). `place`, when given,
-// then places each finding the type's own way (a catalog finds its record by name).
+// then places each finding the type's own way (a catalog finds its record by name). `game_reads`, when
+// given, ends each blocking finding under `invalid`: what the game does with the input, which it reads on
+// (an unwritable_code's words). `stops`, when given, takes a blocking issue the game's reader stops at
+// (SourceIssue::game_stops).
 void source_issue_findings(const Document &document, const FindingCodeRow &invalid,
 		const FindingCodeRow &ignored, std::vector<Diagnostic> &findings,
-		const std::function<void(Diagnostic &)> &place = nullptr);
+		const std::function<void(Diagnostic &)> &place = nullptr, const char *game_reads = nullptr,
+		const FindingCodeRow *stops = nullptr);
 
 } // namespace opennova::editor

@@ -12,7 +12,7 @@ extends GutTest
 ## undo step, the next keystroke another; a character the game's code page has no byte for is
 ## refused with a notice on the status line; a device given up mid-burst still ends its gesture, so
 ## the Problems go on; the control alone keeps no undo of its own for Ctrl+Z. Its device helps with the
-## script (S15): the completion list, a word's tooltip, a marked line's note, a Ctrl+click's Go to
+## script (S15): the completion list, a word's tooltip, a marked line's note, a Ctrl+click's and F12's Go to
 ## definition. The control's placement
 ## over the reserved rect and the pointer and keys it owns there need the workspace drawn
 ## (tests/windowed/editor_script_device_test.gd).
@@ -357,6 +357,24 @@ func test_the_device_helps_with_the_script() -> void:
 	await _frames()
 	assert_eq(String(_seam.query("document", {"limit": 1}).get("path", "")), "defs/ammo.def",
 			"the click went where the word is defined")
+
+
+## F12 in the control (ADR 0046 DI-18): Go to definition of the word at the caret, as a Ctrl+click on it goes;
+## the caret right after the word (as typing leaves it) looks that word up (the ammo's record in its def file).
+func test_f12_goes_where_the_word_at_the_caret_is_defined() -> void:
+	var edit := await _open_script()
+	if edit == null:
+		return
+	# Line 5 is "\tammoarea AMMO_AT_CONTRACT 8": the caret right after the ammo's name.
+	edit.set_caret_line(4)
+	edit.set_caret_column(26)
+	var key := InputEventKey.new()
+	key.keycode = KEY_F12
+	key.pressed = true
+	edit.emit_signal("gui_input", key)
+	await _frames()
+	assert_eq(String(_seam.query("document", {"limit": 1}).get("path", "")), "defs/ammo.def",
+			"F12 went where the word at the caret is defined")
 
 
 ## The help shown over the wire (the MCP gaps lane: the script viewport's assist option): the completion list

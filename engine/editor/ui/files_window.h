@@ -138,15 +138,26 @@ private:
 	// puts a file of its kind: the toolbar's New; a folder's New here names it, "/" the top level).
 	void draw_new_entries(const SessionView &view, const std::string &folder);
 	// A folder's menu (a right click on its row; on the list's empty room, the top level's, ""): New here, a new
-	// folder in it, its rename and, while it is empty, its delete, each typed in the menu.
+	// folder in it, its rename, its delete (with what it holds, once asked), each typed in the menu; the top
+	// level's Empty the trash....
 	void draw_folder_menu(const SessionView &view, const std::string &folder);
-	// A file's Duplicate (an import source's with its record, or alone) and Delete... entries.
+	// A file's Duplicate (an import source's with its record, or alone) and Delete... entries, of every row
+	// selected when the file is among them.
 	void draw_chore_entries(const SessionView &view, const AssetEntry &entry);
-	// Delete... (the workspace's file_delete): who names the file, what goes with it (a mission's companions,
-	// an import source's outputs or, alone, what it keeps), then Delete (anyway, where something names it) or
-	// Cancel.
-	void start_delete(const AssetEntry &entry);
+	// Delete... (the workspace's file_delete): who names the files, what goes with them (a mission's
+	// companions, an import source's outputs or, alone, what it keeps), then Delete (anyway, where something
+	// names them) or Cancel.
+	void start_delete(const AssetEntry &entry, const std::vector<std::string> &others = {});
 	void draw_delete(const SessionView &view);
+	// A folder deleted with what it holds, and the trash emptied: each asked first in a dialog of its own.
+	void draw_folder_delete(const SessionView &view);
+	void draw_empty_trash(const SessionView &view);
+	// The rows selected with `path` besides it (Ctrl+click adds or takes one, Shift+click a run of them): none
+	// when `path` is not among them, so a chore acts on the row it was asked of alone.
+	std::vector<std::string> others_of(const SessionView &view, const std::string &path) const;
+	bool chosen(const std::string &path) const;
+	// A click on a row: Ctrl adds or takes it, Shift the run from the selected row to it, else it alone.
+	void choose(const std::string &path);
 	// Rename... (the file's menu, F2, the card's): the workspace's Rename... opened on the file.
 	void start_rename(const AssetEntry &entry);
 	void draw_rename(const SessionView &view);
@@ -169,6 +180,10 @@ private:
 	ui_kit::HeldText<kWorkspaceText> filter_;
 	ui_kit::Held<AssetKind> kind_held_;
 	std::string selected_;
+	// The other rows selected with it (DI-25: a chore acts on them together), and the rows in the order they
+	// were last drawn, which a Shift+click's run follows.
+	std::vector<std::string> also_;
+	std::vector<std::string> rows_, rows_drawing_;
 	// What refresh() makes of the view, kept while what it reads stands (cache_key); the files the
 	// filter last matched and the filter and kind they matched (matching()'s).
 	const SessionView *view_ = nullptr;
@@ -229,6 +244,15 @@ private:
 	std::vector<std::string> delete_with_;
 	std::vector<std::string> delete_kept_;
 	std::vector<std::string> delete_refusals_;
+	// A folder's delete with what it holds, and Empty the trash, each held open by its asker until answered:
+	// the folder and what it lists (made again as the files move), and how many files the trash holds.
+	ui_kit::HeldPopup folder_delete_popup_, trash_popup_;
+	std::string folder_delete_;
+	RevisionKey folder_delete_key_;
+	size_t folder_delete_files_ = 0, folder_delete_use_count_ = 0;
+	std::vector<std::string> folder_delete_uses_, folder_delete_refusals_;
+	bool trash_asked_ = false;
+	size_t trash_files_ = 0;
 	// The RevealFile events held until Files draws, and then the file to scroll to and the place
 	// whose folders open on the way.
 	ViewEventMailbox<> events_;

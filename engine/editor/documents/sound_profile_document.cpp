@@ -354,7 +354,11 @@ constexpr FindingCodeEntry<SoundProfileFinding> kFindingEntries[] = {
 	// The game binds the first of a name [orig: SoundProfile_FindSlotByName @ 0x526e30]; no refusal.
 	{ SoundProfileFinding::NameRepeated, listed_code("sound_profiles.name_repeated") },
 	{ SoundProfileFinding::NoDefault, listed_code("sound_profiles.no_default") },
-	{ SoundProfileFinding::Unserializable, { "sound_profiles.unserializable", FindingFix::None, nullptr, true } },
+	// What the writer cannot write back: on disk a profile with no name, a name of 64 or more (cut), a quote or a
+	// lone CR or LF, a loop percent that wraps, each of which the game reads on [orig:
+	// SoundProfile_ParseLineCallback @ 0x526fc0, no line refused]; from an edit, a column-2 value with no set
+	// (unwritable_code: a closed file packs as stored, its Save refused).
+	{ SoundProfileFinding::Unserializable, unwritable_code("sound_profiles.unserializable") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(SoundProfileFinding::kCount),
 		"every SoundProfileFinding has exactly one row");
@@ -427,7 +431,9 @@ std::vector<Diagnostic> validate_sound_profiles_file(const DocumentBase &documen
 		                            "0x526e30].");
 	const SerializeResult written = profiles->serialize();
 	for (const SourceIssue &issue : written.issues)
-		add(nullptr, DiagnosticSeverity::Error, SoundProfileFinding::Unserializable, "", issue.message + " The file cannot be saved until it can.");
+		add(nullptr, DiagnosticSeverity::Error, SoundProfileFinding::Unserializable, "",
+		    issue.message + " A save is refused until it can; a closed file packs as it stands, the game reading it on, "
+		                    "every begin a profile and no line refused [orig: SoundProfile_ParseLineCallback @ 0x526fc0].");
 	return findings;
 }
 
