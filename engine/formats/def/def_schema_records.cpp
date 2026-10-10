@@ -191,6 +191,12 @@ const std::vector<DefField> kItemFields = {
 	FIELD_CUT(DefItemDef, door_open_sound, 25), // strncpy(.., 0x18) [orig: @0x49FBB4]
 	FIELD_CUT(DefItemDef, door_close_sound, 25), // strncpy(.., 0x18) [orig: @0x49FBF5]
 	FIELD(DefItemDef, attrib_parent, Byte),
+	FIELD(DefItemDef, max_attack_dist, Integer),
+	FIELD(DefItemDef, max_engagement_dist, Integer),
+	FIELD(DefItemDef, min_engagement_dist, Integer),
+	FIELD(DefItemDef, fire_timer, Integer),
+	FIELD(DefItemDef, attrib_good, Byte),
+	FIELD(DefItemDef, attrib_evil, Byte),
 };
 
 const std::vector<DefField> kWeaponFields = {
