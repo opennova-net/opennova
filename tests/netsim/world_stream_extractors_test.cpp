@@ -329,6 +329,206 @@ bool run_pool2_static_slot_alignment() {
 	return true;
 }
 
+// The 0x10 record's zone block rides the zone chain, not the zone number: a
+// static the chain holds streams its packed (zone + 32 * rank) byte and its
+// radius word with no field bit; any other streams a zero byte, and a SpawnPoint
+// def then its radius word behind 0x200, a zero radius included. A numbered
+// static outside the chain streams as an unnumbered one (retail streams the
+// serializer's stale bytes there, D-NET-394).
+// [orig: NetPacket_SerializePool2StaticToBuffer -- ZoneSlotChain_GetZoneInfo call
+//  @0x50459A, `shl al,5; add al,[outSlotTier]` @0x50459F..0x5045AA, byte @0x5045B7 and
+//  radius @0x5045CB; byte 0 @0x5045E6, `test dword [def+54h],40000h` @0x5045EC, 0x200
+//  @0x504601, radius @0x50460F]
+bool run_pool2_zone_block_rides_the_chain() {
+	w::World world;
+	world.registry.configure_pool(2, 4);
+	w::Entity trigger;
+	trigger.kind = w::EntityKind::Building;
+	trigger.item_id = 0x0123;
+	trigger.position = {1.0f, 2.0f, 3.0f};
+	trigger.yaw = 90; // engine heading 0: no 0x0001
+	trigger.zone_number = 2;
+	trigger.zone_radius = 70;
+	trigger.is_capture_trigger = true;
+	const w::EntityHandle trigger_h = world.registry.spawn(2, trigger);
+	world.zones.chain.zones.push_back(trigger_h);
+	world.zones.chain.ranks.push_back(1);
+	const std::vector<uint8_t> zoned =
+			nw::encode_static_entity_batch(ns::build_pool2_static_batch(world));
+	const std::vector<uint8_t> want_zoned = {
+			0x00, 0x00, 0x01, 0x00,                         // start 0, one record
+			0x23, 0x01, 0x00, 0x00,                         // type, no field bit
+			0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, // x, y
+			0x00, 0x00, 0x03, 0x00,                         // z
+			0x00,                                           // entity+290
+			0x22, 0x46, 0x00};                              // zone 2 rank 1, radius 70
+	bool ok = expect(zoned == want_zoned,
+	                 "a chain trigger streams 0x22 and its radius with no 0x200, byte for byte");
+	nw::StaticEntityBatch out;
+	ok &= expect(nw::decode_static_entity_batch(zoned.data(), zoned.size(), out) &&
+	                     out.records.size() == 1 && out.records[0].weapon_byte == 0x22 &&
+	                     out.records[0].attach_ref == 70 && !out.records[0].has_attach_ref &&
+	                     nw::encode_static_entity_batch(out) == zoned,
+	             "the chain trigger round-trips");
+
+	// A chain trigger that is also a SpawnPoint def takes the byte's arm alone:
+	// its radius rides the byte, with no 0x200.
+	w::Entity *e = world.registry.get(trigger_h);
+	e->is_spawn_point = true;
+	ok &= expect(nw::encode_static_entity_batch(ns::build_pool2_static_batch(world)) == want_zoned,
+	             "a chain trigger's SpawnPoint def adds no 0x200");
+
+	// Out of the chain, a SpawnPoint def streams the zero byte, 0x200 and its
+	// radius word; its own zone number does not ride (rank 0 would make it 0x02).
+	world.zones.chain.clear();
+	const std::vector<uint8_t> spawn70 =
+			nw::encode_static_entity_batch(ns::build_pool2_static_batch(world));
+	const std::vector<uint8_t> want_spawn70 = {
+			0x00, 0x00, 0x01, 0x00,
+			0x23, 0x01, 0x00, 0x02,                         // type, flags 0x200
+			0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00,
+			0x00, 0x00, 0x03, 0x00,
+			0x00,
+			0x00, 0x46, 0x00};                              // zero byte, radius 70
+	ok &= expect(spawn70 == want_spawn70,
+	             "a SpawnPoint outside the chain streams the zero byte, 0x200 and its radius");
+	ok &= expect(nw::decode_static_entity_batch(spawn70.data(), spawn70.size(), out) &&
+	                     out.records.size() == 1 && out.records[0].weapon_byte == 0 &&
+	                     out.records[0].has_attach_ref && out.records[0].attach_ref == 70 &&
+	                     nw::encode_static_entity_batch(out) == spawn70,
+	             "the SpawnPoint's 0x200 radius round-trips");
+	// A radius-0 SpawnPoint keeps its word.
+	e->zone_radius = 0;
+	const std::vector<uint8_t> spawn =
+			nw::encode_static_entity_batch(ns::build_pool2_static_batch(world));
+	const std::vector<uint8_t> want_spawn = {
+			0x00, 0x00, 0x01, 0x00,
+			0x23, 0x01, 0x00, 0x02,                         // type, flags 0x200
+			0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00,
+			0x00, 0x00, 0x03, 0x00,
+			0x00,
+			0x00, 0x00, 0x00};                              // zero byte, zero radius
+	ok &= expect(spawn == want_spawn,
+	             "a radius-0 SpawnPoint streams the zero byte, 0x200 and a zero word");
+	ok &= expect(nw::decode_static_entity_batch(spawn.data(), spawn.size(), out) &&
+	                     out.records.size() == 1 && out.records[0].weapon_byte == 0 &&
+	                     out.records[0].has_attach_ref && out.records[0].attach_ref == 0 &&
+	                     nw::encode_static_entity_batch(out) == spawn,
+	             "the radius-0 SpawnPoint round-trips its 0x200");
+
+	// A plain building streams the zero byte alone.
+	e->is_spawn_point = false;
+	e->zone_radius = 70;
+	const std::vector<uint8_t> plain =
+			nw::encode_static_entity_batch(ns::build_pool2_static_batch(world));
+	const std::vector<uint8_t> want_plain = {
+			0x00, 0x00, 0x01, 0x00,
+			0x23, 0x01, 0x00, 0x00,
+			0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00,
+			0x00, 0x00, 0x03, 0x00,
+			0x00,
+			0x00};                                          // zero byte, no radius
+	ok &= expect(plain == want_plain, "a plain building streams the zero byte and no radius");
+	if (ok) std::printf("PASS pool2_zone_block_rides_the_chain\n");
+	return ok;
+}
+
+// GetZoneInfo's outs are one serializer call's stack bytes, written only by a hit:
+// a static the chain does not hold streams the call's last hit's byte, then its
+// own radius, and a SpawnPoint after a hit takes that arm, not 0x200. Each page
+// is one call, so a page that starts past the hit starts over (ours from zero).
+// The 0x0D record carries the same way; before a hit, ours the entity's own zone.
+// [orig: NetPacket_SerializePool2StaticToBuffer @0x5042F0 -- the call @0x50459A,
+//  the outs [esp+12h] / [esp+13h]; NetPacket_SerializeEntityPoolToPacket_0
+//  @0x503940 -- the call @0x503EEB; ZoneSlotChain_GetZoneInfo @0x4A2750, the
+//  miss @0x4A27EA; Server_SendInitialGameStateToPlayer @0x51BBA0, one call per
+//  page @0x51BC50 / @0x51BCBA]
+bool run_zone_outs_carry_within_a_call() {
+	w::World world;
+	world.registry.configure_pool(1, 4);
+	world.registry.configure_pool(2, 4);
+	w::Entity trigger;
+	trigger.kind = w::EntityKind::Building;
+	trigger.item_id = 0x0123;
+	trigger.position = {1.0f, 2.0f, 3.0f};
+	trigger.yaw = 90;
+	trigger.zone_number = 2;
+	trigger.zone_radius = 30;
+	const w::EntityHandle trigger_h = world.registry.spawn(2, trigger);
+	w::Entity building = trigger;
+	building.zone_number = 0;
+	building.zone_radius = 70;
+	world.registry.spawn(2, building);
+	w::Entity spawn_point = building;
+	spawn_point.is_spawn_point = true;
+	spawn_point.zone_radius = 20;
+	world.registry.spawn(2, spawn_point);
+	world.zones.chain.zones.push_back(trigger_h);
+	world.zones.chain.ranks.push_back(1);
+
+	const nw::StaticEntityBatch batch = ns::build_pool2_static_batch(world);
+	const std::vector<uint8_t> wire = nw::encode_static_entity_batch(batch);
+	nw::StaticEntityBatch out;
+	bool ok = expect(nw::decode_static_entity_batch(wire.data(), wire.size(), out) && out.records.size() == 3,
+	                 "three statics decode");
+	if (!ok) return false;
+	// The building's tail: the trigger's byte, its own radius, no 0x200.
+	const nw::StaticEntityRecord &b = out.records[1];
+	ok &= expect(b.weapon_byte == 0x22 && b.attach_ref == 70 && (b.field_flags & 0x200) == 0,
+	             "a building after a chain hit streams 0x22 and its own radius 70");
+	const std::vector<uint8_t> one = [&] {
+		nw::StaticEntityBatch p;
+		p.start_index = 1;
+		p.records.assign(batch.records.begin() + 1, batch.records.begin() + 2);
+		p.entity_count = 1;
+		return nw::encode_static_entity_batch(p);
+	}();
+	ok &= expect(one.size() >= 3 && one[one.size() - 3] == 0x22 && one[one.size() - 2] == 0x46 &&
+	                     one[one.size() - 1] == 0x00,
+	             "its record ends 22 46 00 as the call carried it");
+	const nw::StaticEntityRecord &sp = out.records[2];
+	ok &= expect(sp.weapon_byte == 0x22 && sp.attach_ref == 20 && (sp.field_flags & 0x200) == 0,
+	             "a SpawnPoint after a hit takes the byte's arm, not 0x200");
+	// A page that starts at the building is a call of its own: the outs start over.
+	nw::StaticEntityBatch page;
+	page.start_index = 1;
+	page.records.assign(batch.records.begin() + 1, batch.records.end());
+	page.entity_count = static_cast<int16_t>(page.records.size());
+	ns::stream_pool2_zone_blocks(world, page);
+	ok &= expect(page.records[0].weapon_byte == 0 && !page.records[0].has_attach_ref,
+	             "a page's first static before any hit streams the zero byte");
+	ok &= expect(page.records[1].weapon_byte == 0 && page.records[1].has_attach_ref &&
+	                     page.records[1].attach_ref == 20,
+	             "and its SpawnPoint its 0x200 radius");
+
+	// The 0x0D record: a numbered entity outside the chain after a hit streams
+	// the hit's byte; before any hit, its own zone number.
+	w::Entity zone_a;
+	zone_a.kind = w::EntityKind::Item;
+	zone_a.item_id = 0x0321;
+	zone_a.zone_number = 2;
+	zone_a.zone_radius = 40;
+	const w::EntityHandle zone_a_h = world.registry.spawn(1, zone_a);
+	w::Entity zone_b = zone_a;
+	zone_b.zone_number = 5;
+	world.registry.spawn(1, zone_b);
+	nw::PoolSpawnBatch items = ns::build_pool1_spawn_batch(world);
+	ok &= expect(items.records.size() == 2 && items.records[1].zone_number_rank == 0x05,
+	             "before any hit a numbered entity streams its own zone number");
+	world.zones.chain.zones.push_back(zone_a_h);
+	world.zones.chain.ranks.push_back(1);
+	items = ns::build_pool1_spawn_batch(world);
+	ok &= expect(items.records.size() == 2 && items.records[0].zone_number_rank == 0x22 &&
+	                     items.records[1].zone_number_rank == 0x22,
+	             "after a hit a numbered entity outside the chain streams the hit's byte");
+	nw::PoolSpawnBatch tail;
+	tail.records.assign(items.records.begin() + 1, items.records.end());
+	ns::stream_pool1_zone_bytes(world, tail);
+	ok &= expect(tail.records[0].zone_number_rank == 0x05, "a page of its own starts over");
+	if (ok) std::printf("PASS zone_outs_carry_within_a_call\n");
+	return ok;
+}
+
 bool run_pool3_marker() {
 	FourPoolWorld world;
 	nw::Pool3SyncBatch batch = ns::build_pool3_marker_batch(world);
@@ -768,6 +968,8 @@ int main() {
 	ok = run_pool1_spawn_parent_is_the_occupant() && ok;
 	ok = run_pool2_static() && ok;
 	ok = run_pool2_static_slot_alignment() && ok;
+	ok = run_pool2_zone_block_rides_the_chain() && ok;
+	ok = run_zone_outs_carry_within_a_call() && ok;
 	ok = run_pool3_marker() && ok;
 	ok = run_pools_are_disjoint() && ok;
 	ok = run_pool0_player_bit0_is_per_entity() && ok;

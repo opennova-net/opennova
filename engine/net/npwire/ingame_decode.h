@@ -327,7 +327,14 @@ struct StaticEntityRecord {
 	// @0x504554..0x504588]
 	bool     has_score_flag = false; // 0x100
 	uint8_t  score_flag = 0;     // 0x100   entity+624
+	// entity+538, the packed (zoneNumber + 32 * rank) byte of a static the zone
+	// chain holds, else 0 (our host's; a retail host streams the serializer's
+	// uninitialized bytes for a static outside the chain, D-NET-394); then the
+	// u16 entity+350 radius after a nonzero byte (no field bit), or behind 0x200
+	// for a SpawnPoint def (a zero radius included).
+	// [orig: NetPacket_SerializePool2StaticToBuffer @0x50459A..0x504612]
 	uint8_t  weapon_byte = 0;    // always  entity+538
+	bool     has_attach_ref = false; // 0x200 (the SpawnPoint leg)
 	uint16_t attach_ref = 0;     // weapon_byte != 0 || flags & 0x200; entity+350
 };
 

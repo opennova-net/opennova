@@ -641,9 +641,9 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		// and else a SpawnPoint def, whatever its radius: a radius-0 SpawnPoint still
 		// emits 0x8000 and its zero word. [orig: `cmp byte [ebp+21Ah],0`
 		//  @0x503ECC..0x503ED3; `test dword [def+54h],40000h` @0x503F1F..0x503F43]
+		// The packed byte is the call's (stream_pool1_zone_bytes, below).
 		if (e.zone_number != 0) {
 			rec.has_zone_number_rank = true;
-			rec.zone_number_rank = world::zone_chain_zone_info_byte(w.zones.chain, e);
 			rec.zone_radius = e.zone_radius;
 		} else if (e.is_spawn_point) {
 			rec.has_zone_radius_alt = true;
@@ -660,7 +660,39 @@ PoolSpawnBatch build_pool1_spawn_batch(const world::World &w) {
 		batch.records.push_back(std::move(rec));
 	});
 	batch.entity_count = static_cast<int16_t>(batch.records.size());
+	stream_pool1_zone_bytes(w, batch);
 	return batch;
+}
+
+void stream_pool1_zone_bytes(const world::World &w, PoolSpawnBatch &page) {
+	// GetZoneInfo writes its outs only on a hit: the zone byte to a stack local
+	// ([esp+17h]) and the rank to the low byte of the call's buffer-size
+	// argument ([esp+50h], 0x1000 from the caller), so a numbered entity the
+	// chain does not hold streams the call's last hit's byte; before the first
+	// hit the rank is 0 and the zone byte stack garbage, ours its own zone
+	// number (D-NET-394).
+	// [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940 -- the size read
+	//  @0x50396B, the zone gate @0x503ECC, the ZoneSlotChain_GetZoneInfo call
+	//  @0x503EEB, the byte @0x503EF0..0x503F06; the caller's `push 1000h`
+	//  @0x51BCA0; ZoneSlotChain_GetZoneInfo @0x4A2750, the outs @0x4A27D1 /
+	//  @0x4A27DC, the miss @0x4A27EA]
+	uint8_t zone_number = 0;
+	uint8_t zone_rank = 0;
+	bool hit = false;
+	for (PoolSpawnRecord &rec : page.records) {
+		if (!rec.has_zone_number_rank) continue;
+		world::EntityHandle h;
+		h.packed = rec.slot_id;
+		const world::Entity *e = w.registry.get(h);
+		if (e == nullptr) continue;
+		if (w.zones.zone_info(*e, zone_number, zone_rank)) {
+			hit = true;
+		} else if (!hit) {
+			zone_number = e->zone_number;
+			zone_rank = 0;
+		}
+		rec.zone_number_rank = static_cast<uint8_t>((zone_rank << 5) + zone_number);
+	}
 }
 
 StaticEntityBatch build_pool2_static_batch(const world::World &w) {
@@ -728,7 +760,46 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 		batch.records.push_back(rec);
 	}
 	batch.entity_count = static_cast<int16_t>(batch.records.size());
+	stream_pool2_zone_blocks(w, batch);
 	return batch;
+}
+
+void stream_pool2_zone_blocks(const world::World &w, StaticEntityBatch &page) {
+	// The zone block asks the zone chain for every static: the packed 8-bit
+	// (zoneNumber + 32 * rank) byte, if nonzero, then the static's own radius
+	// with no field bit; a zero byte is written as is, and a SpawnPoint def then
+	// streams its radius behind 0x200, whatever its value. The outs are the
+	// call's two stack bytes ([esp+12h] / [esp+13h]), which only a hit writes,
+	// so a static the chain does not hold streams the call's last hit's byte;
+	// before the first hit they are uninitialized stack, ours zero (D-NET-394).
+	// An empty slot asks nothing.
+	// [orig: NetPacket_SerializePool2StaticToBuffer @0x5042F0 -- the empty slot
+	//  @0x50462C, the ZoneSlotChain_GetZoneInfo call @0x50459A, `shl al,5; add
+	//  al,[outSlotTier]` @0x50459F..0x5045AA, byte @0x5045B7, radius @0x5045CB;
+	//  byte 0 @0x5045E6, `test dword [def+54h],40000h` @0x5045EC, 0x200
+	//  @0x504601, radius @0x50460F; ZoneSlotChain_GetZoneInfo @0x4A2750, the
+	//  outs @0x4A27D1 / @0x4A27DC, the miss @0x4A27EA]
+	uint8_t zone_number = 0;
+	uint8_t zone_rank = 0;
+	for (size_t i = 0; i < page.records.size(); ++i) {
+		StaticEntityRecord &rec = page.records[i];
+		if (rec.is_empty_slot) continue;
+		const world::Entity *e = w.registry.get(
+				world::EntityHandle::make(2, static_cast<int>(page.start_index + i)));
+		if (e == nullptr) continue;
+		w.zones.zone_info(*e, zone_number, zone_rank);
+		const uint8_t zone_byte = static_cast<uint8_t>((zone_rank << 5) + zone_number);
+		rec.weapon_byte = 0;
+		rec.attach_ref = 0;
+		rec.has_attach_ref = false;
+		if (zone_byte != 0) {
+			rec.weapon_byte = zone_byte;
+			rec.attach_ref = e->zone_radius;
+		} else if (e->is_spawn_point) {
+			rec.has_attach_ref = true;
+			rec.attach_ref = e->zone_radius;
+		}
+	}
 }
 
 static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
