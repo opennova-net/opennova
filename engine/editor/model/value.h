@@ -90,6 +90,7 @@ enum class ReferenceKind {
 	ItemAlias,      // an item by its alias, items.def's sid (a hudpos.def VEHICLE_HUD block's)
 	AvatarPart,     // an avatar part by its name, of the kind and file the scope names (an Avatars.def combo's head)
 	Dialog,         // a dialog bank's dialog by its name, in the bank the scope names (a mission's Play dialog: dlg%03i)
+	FaceVertex,     // a face animation's vertex by its index in the file's vertices (a triangle's corner)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is

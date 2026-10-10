@@ -189,9 +189,10 @@ public:
 	// caller that reads lines and spans asks first (text_of).
 	virtual const TextDocument *as_text() const { return nullptr; }
 	virtual TextDocument *as_text() { return nullptr; }
-	// Whether it holds an image (ADR 0046 S18: a texture's texels), which its type's own hooks read
-	// (documents/document_types.h, DocumentContent::Image).
-	virtual bool holds_image() const { return false; }
+	// Whether it holds its file's bytes whole, edited a whole file at a time (ADR 0046 S18: a texture's
+	// texels; round S23: a wave's samples), which its type's own hooks read (documents/document_types.h,
+	// DocumentContent::Bytes).
+	virtual bool holds_bytes() const { return false; }
 
 protected:
 	DocumentBase();

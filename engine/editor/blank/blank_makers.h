@@ -102,6 +102,8 @@ bool make_blank_credits(const BlankRequest &, std::vector<uint8_t> &out, Diagnos
 bool make_blank_ai_profile(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_hud_layout(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_avatars(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+// A face animation of no mesh and no gesture, the eyes where the game puts them with none (round S23 lane A)
+bool make_blank_face_animation(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 // The player preview's environment cube (blank_texture.cpp, DI-33): a DDS cube map of the checkerboard
 bool make_blank_cube(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
