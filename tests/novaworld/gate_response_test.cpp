@@ -155,8 +155,8 @@ bool check_retail_loose_numeric_and_ipv4_edges() {
 	if (!expect((r.reflected_ip == std::array<uint8_t, 4>{1, 2, 3, 4}),
 			"REFLECTEDIPADDRESS ignores chars after fourth octet")) return false;
 	if (!expect(r.reflected_port == 4294967295u, "REFLECTEDPORTNUMBER stores u32 max")) return false;
-	if (!expect(r.met_ping == -42, "atoi_loose skips vertical-tab whitespace")) return false;
-	if (!expect(r.met_ext == 7, "atoi_loose skips form-feed whitespace")) return false;
+	if (!expect(r.met_ping == -42, "METPING's atol skips a leading vertical tab")) return false;
+	if (!expect(r.met_ext == 7, "METEXT's atol skips a leading form feed")) return false;
 	return true;
 }
 
@@ -228,11 +228,13 @@ bool check_ipv4_witnessed_rules() {
 	if (!expect(parses_post_ip("1.2.3.4.5", Quad{1, 2, 3, 4}), "a fifth octet is ignored")) return false;
 	if (!expect(parses_post_ip("1.2.3.4 5", Quad{1, 2, 3, 4}), "a quoted tail after a space is ignored"))
 		return false;
-	// Past 255 an octet keeps its low byte, the accumulator wrapping at 32 bits.
+	// Past 255 an octet keeps its low byte. Only that byte is observable, so a 32-bit
+	// accumulator and a wider one read alike; what the long octets pin is that the sum
+	// wraps rather than saturates (a strtoul-style clamp would leave 0xFF).
 	if (!expect(parses_post_ip("256.257.511.1000", Quad{0, 1, 255, 232}), "an octet keeps its low byte"))
 		return false;
 	if (!expect(parses_post_ip("4294967297.4294967552.0.0", Quad{1, 0, 0, 0}),
-			"the accumulator wraps at 32 bits")) return false;
+			"a long octet keeps the low byte of its wrapping sum, not a saturated one")) return false;
 	// cp1252's superscript digits are digits worth their signed byte less '0':
 	// 0xB9 -> -119 (0x89), 0xB2 -> -126, 1 then 0xB2 -> 10 - 126 = -116 (0x8C), 0xB3 -> -125 (0x83).
 	if (!expect(parses_post_ip("\xB9.2.3.4", Quad{0x89, 2, 3, 4}), "0xB9 reads as a digit")) return false;

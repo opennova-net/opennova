@@ -25,8 +25,9 @@ int hex_digit(char c) {
 // The CRT's strtoul at radix 16 on a 32-bit unsigned long [orig: CRT_strtoul
 // @0x76B302 -> strtoxl]: the locale's leading white space (the six C-locale
 // spaces and cp1252's 0xA0, the skip @0x76B11C..0x76B153; D-NET-384); an
-// overflow sets ULONG_MAX whatever the sign; a minus otherwise negates the
-// result; no digits read 0.
+// overflow stores ULONG_MAX (`or [ebp+var_4], -1` @0x76B282) and a minus then
+// negates whatever was stored (@0x76B2A1..0x76B2A7), so "-FFFFFFFFF" reads 1,
+// not 0xFFFFFFFF (D-NET-392); no digits read 0.
 uint32_t parse_rights(const char *token) {
 	if (token == nullptr) return 0;
 	const char *p = token;
@@ -46,8 +47,7 @@ uint32_t parse_rights(const char *token) {
 		}
 	}
 	if (!digits) return 0;
-	if (overflow) return 0xFFFFFFFFu;
-	const uint32_t result = static_cast<uint32_t>(value);
+	const uint32_t result = overflow ? 0xFFFFFFFFu : static_cast<uint32_t>(value);
 	return negative ? 0u - result : result;
 }
 

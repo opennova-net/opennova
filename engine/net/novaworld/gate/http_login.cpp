@@ -12,9 +12,11 @@
 namespace opennova {
 
 std::string subnet_key(const std::string &host) {
-	// [orig: Network_TruncateIPToSubnet @ 0x62dfe0] truncate only when the host
-	// is a valid dotted-decimal IPv4 (the retail parse gate); then keep the
-	// first two octets. Anything else (a DNS name) is returned unchanged.
+	// Ours truncates only when the host is a valid dotted-decimal IPv4, keeping the
+	// first two octets, and returns anything else (a DNS name) unchanged. Retail's
+	// branch is the opposite: it returns a host its IPv4 parse accepts whole and keeps
+	// any other host's last two dot-labels [orig: Network_TruncateIPToSubnet @ 0x62dfe0
+	// — the `jnz` @0x62dfff] (docs/net/novaworld-net-re.md D-NET-390, open).
 	int a = 0, b = 0, c = 0, d = 0;
 	char extra = 0;
 	// Reject embedded whitespace/garbage: require exactly four octets and no
