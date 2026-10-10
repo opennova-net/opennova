@@ -155,6 +155,8 @@ func tick() -> void:
 
 func _process(_delta: float) -> void:
 	if is_open() and _driver != null:
+		# The menu's pump, once a frame after the input events (MenuFrameSurface).
+		_driver.pump_mouse()
 		_driver.tick(_view.frame_clock_ms)
 
 

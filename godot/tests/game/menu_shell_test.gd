@@ -260,6 +260,80 @@ func test_right_button_never_clicks() -> void:
 	_cleanup(dir)
 
 
+# The shell takes each mouse event as its message, as it arrives, and pumps the
+# menu once a frame after them over the last event's point and button [orig:
+# Menu_ShellMouseCallback @ 0x54b860 -> UI_DispatchMouseEvent @ 0x63ab00;
+# Menu_UpdateFrame @ 0x5528a0, Game_PumpWindowMessages @ 0x5528d3 then
+# CUIScene_EndFrame @ 0x5528de]. The click is the pump's: the claim let go over
+# that a sample before held with the button down. So a press and release on
+# EXIT inside one frame click nothing, and nor does a press on the backdrop slid
+# onto EXIT and let go there inside one frame, where a pump per event clicks
+# both; held over a frame's pump first, the click lands. (A headless window never
+# hears the mouse come in, so a motion reaches the shell only while its press
+# holds the mouse focus.)
+func test_the_menu_pumps_once_a_frame_after_the_events() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	watch_signals(shell)
+	var driver: MenuDriver = shell.get_driver()
+	var shell_control: Control = shell
+	var xform := shell_control.get_global_transform_with_canvas()
+	var on_exit := xform * driver.widget_frame_rect(driver.widget_id("EXIT")).get_center()
+	var backdrop := xform * Vector2(600, 400)
+	# Pressed and let go on EXIT inside one frame.
+	_send_left(on_exit, true)
+	_send_left(on_exit, false)
+	await _frames(2)
+	assert_signal_not_emitted(shell, "exit_to_desktop_requested",
+			"a press and release inside one frame click nothing")
+	# Pressed on the backdrop, slid onto EXIT and let go there inside one frame.
+	_send_left(backdrop, true)
+	_send_held_motion(on_exit)
+	_send_left(on_exit, false)
+	await _frames(2)
+	assert_signal_not_emitted(shell, "exit_to_desktop_requested",
+			"a slide onto EXIT let go inside one frame clicks nothing")
+	# The same slide over three frames: EXIT held under the mouse by a frame's
+	# pump, then let go there.
+	_send_left(backdrop, true)
+	await _frames(2)
+	_send_held_motion(on_exit)
+	await _frames(2)
+	_send_left(on_exit, false)
+	await _frames(2)
+	assert_signal_emitted(shell, "exit_to_desktop_requested",
+			"held over a frame's pump, then let go there: EXIT's click")
+	_cleanup(dir)
+
+
+func _frames(count: int) -> void:
+	for i in count:
+		await get_tree().process_frame
+
+
+func _send_held_motion(at: Vector2) -> void:
+	var event := InputEventMouseMotion.new()
+	event.position = at
+	event.global_position = at
+	event.button_mask = MOUSE_BUTTON_MASK_LEFT
+	Input.parse_input_event(event)
+
+
+func _send_left(at: Vector2, pressed: bool) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = pressed
+	event.position = at
+	event.global_position = at
+	if pressed:
+		event.button_mask = MOUSE_BUTTON_MASK_LEFT
+	Input.parse_input_event(event)
+
+
 func test_pop_screen_with_no_history_does_nothing() -> void:
 	# POP_SCREEN pops a history that is not empty and otherwise does nothing: it
 	# never exits the game or resumes the mission (docs/mnu/menu-re.md).

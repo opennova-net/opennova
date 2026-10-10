@@ -119,6 +119,8 @@ public:
 
 	std::vector<MenuPumpWindow> press_mouse(float x, float y) override;
 	int process_mouse(float x, float y, bool button_down) override;
+	void release_mouse() override { click_.release(); }
+	bool press_popup_mouse(int index, float x, float y) override;
 	bool process_popup_mouse(int index, float x, float y, bool button_down) override;
 	bool process_mouse_wheel(float x, float y, int steps) override;
 	void set_cursor_state(bool visible, float x, float y) override;

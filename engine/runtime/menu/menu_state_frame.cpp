@@ -343,10 +343,23 @@ int MenuStateFrame::process_mouse(float x, float y, bool button_down) {
 	return claim.hovered;
 }
 
+bool MenuStateFrame::press_popup_mouse(int index, float x, float y) {
+	if (!configured_) return false;
+	// The dropdown has the mouse: its press holds the capture until the release, as the game's frame
+	// takes it (MenuFrame::press_popup_mouse).
+	click_.dropdown_press(index);
+	const MenuFrameCompiler::MouseClaim claim = compiler_.press_popup_mouse(state_, index, x, y, 1.0f, 1.0f);
+	if (claim.scroll_value_changed) {
+		++serial_;
+		if (scrolled_) scrolled_(claim.scroll_index, claim.scroll_value);
+	}
+	if (claim.scroll_index >= 0) ++serial_;
+	return claim.scroll_index >= 0;
+}
+
 bool MenuStateFrame::process_popup_mouse(int index, float x, float y, bool button_down) {
 	if (!configured_) return false;
-	// The dropdown has the mouse: a press it takes holds the capture until the release.
-	click_.dropdown_sample(index, button_down);
+	click_.dropdown_sample(button_down);
 	const MenuFrameCompiler::MouseClaim claim =
 			compiler_.pump_popup_mouse(state_, index, x, y, button_down, 1.0f, 1.0f);
 	state_.cursor_x = x;

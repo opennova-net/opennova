@@ -125,6 +125,8 @@ public:
 	void design_scale(float &sx, float &sy) const override { sx = sy = 1.0f; }
 	std::vector<MenuPumpWindow> press_mouse(float, float) override { return {}; }
 	int process_mouse(float, float, bool) override { return -1; }
+	void release_mouse() override {}
+	bool press_popup_mouse(int, float, float) override { return false; }
 	bool process_popup_mouse(int, float, float, bool) override { return false; }
 	bool process_mouse_wheel(float, float, int) override { return false; }
 	void set_cursor_state(bool, float, float) override {}

@@ -1403,27 +1403,95 @@ bool MenuRuntime::visible_in_hierarchy_(int id) const {
 
 void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now_ms) {
 	if (frame_ == nullptr || !frame_->is_configured()) return;
-	sync_popup_();
-	const bool down_edge = button_down && !mouse_down_;
+	// The sample's button edge is its message, ahead of the pump.
+	if (button_down && !mouse_down_) {
+		press_mouse(x, y, now_ms);
+		if (frame_ == nullptr) return;
+	} else if (!button_down && mouse_down_) {
+		release_mouse(x, y);
+	}
+	move_mouse(x, y, button_down);
+	pump_mouse();
+}
+
+void MenuRuntime::move_mouse(float x, float y, bool button_down) {
+	mouse_x_ = x;
+	mouse_y_ = y;
 	mouse_down_ = button_down;
+	mouse_seen_ = true;
+}
+
+bool MenuRuntime::press_mouse(float x, float y, uint32_t now_ms) {
+	if (frame_ == nullptr || !frame_->is_configured()) return false;
+	sync_popup_();
+	move_mouse(x, y, true);
+	if (!dropdown_press_(x, y)) press_reach_(x, y, now_ms);
+	return true;
+}
+
+bool MenuRuntime::release_mouse(float x, float y) {
+	if (frame_ == nullptr || !frame_->is_configured()) return false;
+	move_mouse(x, y, false);
+	frame_->release_mouse();
+	return true;
+}
+
+bool MenuRuntime::dropdown_press_(float x, float y) {
+	if (open_combo_id_ < 0) return false;
+	const int combo_index = frame_index(open_combo_id_);
+	if (combo_index < 0) {
+		open_combo_id_ = -1;
+		return false;
+	}
+	// The dropdown takes the press ahead of every other window [orig:
+	// CWnd_DispatchMouseEventToChildren @ 0x647917, g_UIActiveComboWnd's sink first]: its
+	// scrollbar's windows first [orig: CListWnd child walk @ 0x643f30 — the scrollbar child claims
+	// first; parts = CScrollWnd_HandleEvent @ 0x64d050], then a row picks [orig: list_wnd_on_command
+	// @ 0x643cb0, the LISTBOX_WND 0x5000001 pick, CComboWnd_HandleEvent @ 0x65c2fd], and a press
+	// outside the cell and the list closes it [orig: @ 0x65c261..0x65c2bc, the outside check
+	// @ 0x65c290]; a press on the input-dead closed cell does nothing. The press is consumed either
+	// way (D-MNU-11). A value its scrollbar changes arrives through on_frame_scroll_value like the
+	// main pump's.
+	if (frame_->press_popup_mouse(combo_index, x, y)) {
+		frame_->set_widget_hover_item(combo_index, -1);
+		return true;
+	}
+	const int row = frame_->combo_popup_row_at(combo_index, x, y);
+	if (row >= 0) {
+		const int combo_id = open_combo_id_;
+		select_row(combo_id, row, true);
+		play_widget_state_sound(combo_id, "SELECTED");
+		close_active_combo_popup();
+	} else {
+		float sx = 1.0f, sy = 1.0f;
+		frame_->design_scale(sx, sy);
+		if (!frame_->combo_popup_contains(combo_index, x, y) &&
+				!frame_->widget_rect(combo_index).contains(x / sx, y / sy))
+			close_active_combo_popup();
+	}
+	return true;
+}
+
+void MenuRuntime::pump_mouse() {
+	if (frame_ == nullptr || !frame_->is_configured() || !mouse_seen_) return;
+	sync_popup_();
+	const float x = mouse_x_;
+	const float y = mouse_y_;
+	const bool button_down = mouse_down_;
 
 	// An open dropdown owns the mouse exclusively [orig: UI_DispatchMouseEvent
-	// @0x63ab00 g_UIOpenPopupWnd gate; CComboWnd_HandleEvent @0x65c190,
-	// outside check @0x65c290 — D-MNU-11/12]: a press picks a popup row or
-	// dismisses (the dismissing click is consumed either way; a press on the
-	// input-dead closed cell does nothing). No code flags the combo's list as
-	// the popup, so which retail pump serves it is open (docs/mnu/menu-re.md,
-	// "Not ported, or open"); this pump stays dropdown-exclusive.
+	// @0x63ab00 g_UIOpenPopupWnd gate; CComboWnd_HandleEvent @0x65c190 — D-MNU-11/12]:
+	// its press is press_mouse's. No code flags the combo's list as the popup, so which
+	// retail pump serves it is open (docs/mnu/menu-re.md, "Not ported, or open"); this
+	// pump stays dropdown-exclusive.
 	if (open_combo_id_ >= 0) {
 		const int combo_index = frame_index(open_combo_id_);
 		if (combo_index < 0) {
 			open_combo_id_ = -1;
 		} else {
 			frame_->set_cursor_state(false, x, y);
-			// The popup's scrollbar child sees the sample ahead of row picking
-			// [orig: CListWnd child walk @0x643f30 — the scrollbar child claims
-			// first; parts = CScrollWnd_HandleEvent @0x64d050]. Its scroll_row
-			// changes arrive through on_frame_scroll_value like the main pump's.
+			// The window its press holds takes the sample (its scroll_row changes arrive
+			// through on_frame_scroll_value like the main pump's).
 			if (frame_->process_popup_mouse(combo_index, x, y, button_down)) {
 				frame_->set_widget_hover_item(combo_index, -1);
 				return;
@@ -1434,31 +1502,10 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now
 			// = CListWnd_DrawItems @0x643f30].
 			frame_->set_widget_hover_item(combo_index,
 					frame_->combo_popup_row_at(combo_index, x, y));
-			if (down_edge) {
-				const int row = frame_->combo_popup_row_at(combo_index, x, y);
-				if (row >= 0) {
-					const int combo_id = open_combo_id_;
-					select_row(combo_id, row, true);
-					play_widget_state_sound(combo_id, "SELECTED");
-					close_active_combo_popup();
-				} else {
-					float sx = 1.0f, sy = 1.0f;
-					frame_->design_scale(sx, sy);
-					if (!frame_->combo_popup_contains(combo_index, x, y) &&
-							!frame_->widget_rect(combo_index).contains(x / sx, y / sy))
-						close_active_combo_popup();
-				}
-			}
 			return;
 		}
 	}
 
-	// The press first: its message reaches the windows under the mouse ahead of the frame's pump
-	// (press_reach_).
-	if (down_edge) {
-		press_reach_(x, y, now_ms);
-		if (frame_ == nullptr) return;
-	}
 	// A click inside the frame's pump (on_widget_clicked) may show another screen or open another
 	// document: the claim then indexes the screen it left, and the next sample plays its sounds.
 	const uint32_t generation = open_generation_;
@@ -1474,22 +1521,12 @@ void MenuRuntime::process_mouse(float x, float y, bool button_down, uint32_t now
 	if (frame_ != nullptr) frame_->apply_claim_cursor();
 }
 
-bool MenuRuntime::press_mouse(float x, float y, uint32_t now_ms) {
-	if (frame_ == nullptr || !frame_->is_configured()) return false;
-	sync_popup_();
-	// An open dropdown's press is its sample's (process_mouse); a held button is no press.
-	if (open_combo_id_ >= 0 || mouse_down_) return false;
-	mouse_down_ = true;
-	press_reach_(x, y, now_ms);
-	return true;
-}
-
 void MenuRuntime::press_reach_(float x, float y, uint32_t now_ms) {
 	// Its message reaches the windows under the mouse ahead of the frame's pump [orig:
-	// Input_DispatchMouseEvent -> UI_DispatchMouseEvent @ 0x63ab00 on WM_LBUTTONDOWN; the pump,
-	// CUIScene_EndFrame @ 0x63e600, at the frame's end]: the frame runs the scrollbar windows' own (a
-	// value they change arrives through on_frame_scroll_value), the widgets' are ours, front to back
-	// (MenuFrameCompiler::press_reach, D-MNU-33). One may show another screen.
+	// Input_DispatchMouseEvent -> UI_DispatchMouseEvent @ 0x63ab00 on WM_LBUTTONDOWN, the windows
+	// walked by CWnd_DispatchMouseEventToChildren @ 0x647900]: the frame runs the scrollbar windows'
+	// own (a value they change arrives through on_frame_scroll_value), the widgets' are ours, front to
+	// back (MenuFrameCompiler::press_reach, D-MNU-33). One may show another screen.
 	const uint32_t pressed_on = open_generation_;
 	const std::string pressed_screen = current_screen_;
 	const std::vector<MenuPumpWindow> reach = frame_->press_mouse(x, y);

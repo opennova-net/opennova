@@ -289,9 +289,17 @@ public:
 	// control's size.
 	int process_mouse(const Vector2 &p_position, bool p_button_down);
 
+	// The release, as its message arrives: the capture let go (engine
+	// MenuClickLatch::release).
+	void release_mouse();
+	// The open dropdown's press, as its message arrives: the dropdown takes the
+	// capture and its scrollbar's windows their own press (engine
+	// MenuFrameCompiler::press_popup_mouse). True when the scrollbar took it (the
+	// caller picks no row); value changes arrive on "scroll_value_changed".
+	bool press_popup_mouse(int p_index, const Vector2 &p_position);
 	// The open-dropdown sample: only the popup's scrollbar interaction runs,
-	// restricted to the open combo. True when the scrollbar owns the sample
-	// (the caller skips row hover/pick); value changes arrive on
+	// restricted to the open combo. True when the window its press holds owns
+	// the sample (the caller skips row hover); value changes arrive on
 	// "scroll_value_changed" like the main pump's.
 	bool process_popup_mouse(int p_index, const Vector2 &p_position,
 			bool p_button_down);

@@ -237,6 +237,8 @@ func _process(_delta: float) -> void:
 	if not is_open():
 		set_process(false)
 		return
+	# The menu's pump, once a frame after the input events (MenuFrameSurface).
+	_driver.pump_mouse()
 	# The blink/marquee clock rides the OS tick like the original's GetTickCount
 	# gate (the shell does the same for the front-end menus).
 	_driver.tick(_view.frame_clock_ms)
