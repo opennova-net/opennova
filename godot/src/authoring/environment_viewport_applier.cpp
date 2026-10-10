@@ -158,6 +158,13 @@ EnvironmentViewportApplier::EnvironmentViewportApplier(SubViewport &viewport) : 
 	terrain_->set_weather_path(NodePath("../Weather"));
 	terrain_->set_water_path(NodePath("../Water"));
 	root_->add_child(terrain_);
+	// The terrain's foliage beside it, never under it (GameWorld's): the detail cells come off the terrain's
+	// frame, the sway off the weather's oscillator.
+	foliage_ = memnew(FoliageDispatcher);
+	foliage_->set_name("Foliage");
+	root_->add_child(foliage_);
+	foliage_->set_terrain(terrain_);
+	foliage_->set_weather(weather_);
 	precipitation_ = memnew(Precipitation);
 	precipitation_->set_name("Precipitation");
 	precipitation_->set_weather_path(NodePath("../Weather"));
@@ -377,7 +384,11 @@ void EnvironmentViewportApplier::run_environment_(const EnvironmentViewport &mod
 }
 
 void EnvironmentViewportApplier::terrain_empty_(const TerrainKey &key) {
+	foliage_->reset();
+	foliage_->set_terrain_data(Ref<TerrainData>());
 	loading_.unref();
+	foliage_->reset();
+	foliage_->set_terrain_data(Ref<TerrainData>());
 	terrain_->set_terrain_data(Ref<TerrainData>());
 	terrain_->clear_built();
 	water_->set_terrain_data(Ref<TerrainData>());
@@ -438,6 +449,19 @@ void EnvironmentViewportApplier::run_terrain_build_(Build &build) {
 		terrain_built_ = true;
 		terrain_key_ = build.terrain_key;
 		++terrain_builds_;
+		// Its foliage as the game's load configures it after the build (GameWorld::configure_foliage: the
+		// terrain data, the mission's tiles, each definition's model and :fd texture through the root); a
+		// definition whose model the project lacks a note, its slot drawing nothing.
+		foliage_->reset();
+		foliage_->configure_for_terrain(root_files_, terrain_data_, terrain_->get_tile_info_override());
+		const Array diagnostics = foliage_->get_slot_diagnostics();
+		for (int64_t i = 0; i < diagnostics.size(); ++i) {
+			const Dictionary diagnostic = diagnostics[i];
+			const String status = diagnostic.get("status", "");
+			const String graphic = diagnostic.get("graphic", "");
+			if ((status == "missing_mesh" || status == "invalid_mesh") && !graphic.is_empty())
+				note_missing_(kTerrain, graphic.get_extension().is_empty() ? graphic + String(".3di") : graphic);
+		}
 	}
 }
 
@@ -470,6 +494,7 @@ void EnvironmentViewportApplier::update(const opennova::editor::ViewportModel &v
 void EnvironmentViewportApplier::apply_state_(const EnvironmentViewport &model) {
 	const opennova::editor::EnvironmentViewportOptions &options = model.options();
 	terrain_->set_visible(options.terrain);
+	foliage_->set_visible(options.terrain);
 	if (options.water != shown_water_) touch_scene_state_();
 	water_->set_visible(options.water);
 	shown_water_ = options.water;
@@ -658,6 +683,12 @@ void EnvironmentViewportApplier::present(double dt) {
 				terrain_->get_visible_terrain_max_height());
 	}
 	water_->advance_frame(dt);
+	// The foliage leg (GameWorld::render_foliage_frame), with the terrain: its detail cells about the eye, the
+	// water's height splitting the passes.
+	if (terrain_built_ && terrain_data_.is_valid() && terrain_->is_visible()) {
+		foliage_->set_water_height(water_active ? water_->get_water_height() : 0.0f);
+		foliage_->render_frame(camera_->get_global_transform(), clock_ms_);
+	}
 	// The sun veil's exposure feed for the next weather ticks.
 	weather_->set_sun_veil_stopdown(celestial_->get_sun_veil_stopdown());
 	// The drops over the home's pool, floored on the terrain and the water.

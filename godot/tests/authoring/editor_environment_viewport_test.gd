@@ -86,6 +86,10 @@ func _open_environment() -> bool:
 		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(32))
 	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
 		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
+	# The terrain's foliage definitions grow bush1 and bush2 (the synth crate under both names, as the mission
+	# view's tests stage them).
+	for name in ["bush1.3di", "bush2.3di"]:
+		_copy_fixture("threedi/synth/crate.3di", root.path_join("models").path_join(name))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	return _seam.open_document(ENV)
@@ -162,6 +166,14 @@ func test_an_environment_draws_its_sky_over_its_missions_terrain() -> void:
 		return
 	assert_true(environment.is_loaded(), "the environment loaded through the project's files")
 	assert_not_null(terrain.get_terrain_data(), "the mission's terrain (Tmap) under it")
+	# S23 C: the terrain's foliage beside it, configured as the game's load configures it: Tmap's two definitions.
+	var foliage := _device_node("FoliageDispatcher") as FoliageDispatcher
+	assert_not_null(foliage, "the game's foliage beside the terrain")
+	if foliage != null:
+		var enabled := 0
+		for diagnostic: Dictionary in foliage.get_slot_diagnostics():
+			enabled += 1 if String(diagnostic.get("status", "")) == "enabled" else 0
+		assert_eq(enabled, 2, "Tmap's two foliage definitions configured: %s" % str(foliage.get_slot_diagnostics()))
 	assert_eq((body.get("missing", []) as Array).size(), 0, str(body.get("missing")))
 
 	# A scrub: the runtime's clock at the viewport's time.

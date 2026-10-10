@@ -25,6 +25,7 @@
 #include "authoring/preview_sound_player.h"
 #include "render/scene_overlay_compositor.h"
 #include "resource_index/resource_root.h"
+#include "terrain/foliage_dispatcher.h"
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
 
@@ -185,6 +186,9 @@ private:
 	Celestial *celestial_ = nullptr;
 	Water *water_ = nullptr;
 	Terrain *terrain_ = nullptr;
+	// The terrain's foliage (S23 C), as the mission device grows it: the game's FoliageDispatcher beside the
+	// terrain, configured once the terrain is built, drawn about the eye with the terrain.
+	FoliageDispatcher *foliage_ = nullptr;
 	Precipitation *precipitation_ = nullptr;
 	Camera3D *camera_ = nullptr;
 	// The game's particle renderer, no effect shown: its overlay passes composed on this device's cameras.
