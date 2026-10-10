@@ -34,6 +34,11 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # @0x564930], the *_AMMO2 controls, and the *_AMMO1_TYPE round-type cascade.
 
 var _weapons: WeaponDatabase
+# The mount the companion's own load read _weapons from
+# (LoadoutWeaponTable.mount_key): a new mount reads weapon.def again. An
+# injected table stands.
+var _weapons_mount := ""
+var _weapons_injected := false
 var _team := 0                       # 0 = blue/good, 1 = red/evil (host stamps before open)
 # The local player's class + the host's class-allow mask feeding the witnessed
 # open-time class resolution [orig: Armory_ResolveSelectedClass @0x5642f0].
@@ -138,6 +143,7 @@ func set_class_selection_enabled(enabled: bool) -> void:
 # already carry the db hand it in; on_menu_built otherwise loads it from the root).
 func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
+	_weapons_injected = weapons != null
 
 
 # The presenter's close() releases the companion: every open rebuilds via
@@ -172,10 +178,17 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	_update_weight()
 
 
+# A missing or empty weapon.def is an empty table: each list shows only NONE
+# (D-MNU-27).
 func _ensure_weapons() -> void:
-	if _weapons == null and _root != null:
-		_weapons = LoadoutWeaponTable.load_weapon_database(_root, "ArmoryMenuCompanion",
-				"armory lists stay empty")
+	if _weapons_injected or _root == null:
+		return
+	var mount := LoadoutWeaponTable.mount_key(_root)
+	if _weapons != null and mount == _weapons_mount:
+		return
+	_weapons = LoadoutWeaponTable.load_weapon_database(_root, "ArmoryMenuCompanion",
+			"armory lists stay empty")
+	_weapons_mount = mount
 
 
 # PLAYER_CLASS carries the five MP soldier classes; the host fills the spinlist

@@ -491,10 +491,13 @@ func test_kit_page_carries_knife_medpack_slots_and_three_grenades() -> void:
 	assert_eq(String((kit[1] as Dictionary).get("name", "")), "WPN_MEDPACK",
 		"class 5 adds the medpack entry")
 
-	# Slot index 2 = PRIMARY. Nothing picked yet, so retail's NONE row value (0)
-	# serializes weapon-table entry 0.
-	assert_eq(String((kit[2] as Dictionary).get("name", "")), wdb.get_weapon(0).name,
-		"a NONE slot serializes weapon-table entry 0")
+	# Slot index 2 = PRIMARY. Nothing picked yet, so the NONE row's value (0)
+	# serializes the catalog's row 0, the "None" WeaponDef_LoadAll seeds ahead
+	# of the file's rows [orig: PlayerInfo_SerializeWeaponLoadout @0x55e6f0;
+	# WeaponDef_LoadAll @0x54dd45], never the file's first weapon.
+	assert_eq(String((kit[2] as Dictionary).get("name", "")), "None",
+		"a NONE slot serializes the catalog's None row")
+	assert_ne(wdb.get_weapon(0).name, "None", "the file's first row is a weapon")
 
 	var picked := _select_weapon(wdb, "PRIMARY", WeaponDatabase.SLOT_PRIMARY, 1,
 			"WPN_M4AUTO")

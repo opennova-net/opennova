@@ -419,6 +419,7 @@ Ref<WeaponDatabase> GameWorld::get_weapon_database() {
 			return Ref<WeaponDatabase>();
 		}
 		weapon_db_.instantiate();
+		// A missing or empty weapon.def loads an empty table (D-MNU-27).
 		if (weapon_db_->load_from_resource_root(resource_root_, "weapon.def") != OK) {
 			UtilityFunctions::push_warning(vformat(
 					"GameWorld: weapon.def unavailable (%s) — weapon presentation/loadout lookup disabled",

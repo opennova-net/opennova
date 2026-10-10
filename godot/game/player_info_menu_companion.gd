@@ -43,12 +43,19 @@ const KIT_SLOT_ORDER := ["PRIMARY", "SECONDARY", "ACCESSORY"]
 
 var _db: AvatarDatabase
 var _weapons: WeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
+# The mount _weapons was read from (LoadoutWeaponTable.mount_key). This companion
+# lives the whole session, so a CHANGE FOLDER or a Mods switch reads weapon.def
+# again; an injected table stands.
+var _weapons_mount := ""
+var _weapons_injected := false
 var _slot_rows: Dictionary = {}         # control name -> Array[WeaponDef], row-aligned (null = NONE)
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
-# Per-def picked clip counts, keyed by weapon-table index; -1/absent = the def
-# default (the maxclips row). The interleaved saved-count pair of the original
+# Per-def picked clip counts, keyed by weapon.def row; -1/absent = the def
+# default (the maxclips row). The interleaved saved-count pair of the original,
+# every pair reset to -1 at each populate
 # [orig: g_PlayerInfoAmmoPriCounts @ 0x25DC560 / g_PlayerInfoAmmoSecCounts
-# @ 0x25DC564 — handlers store selected_row + 1].
+# @ 0x25DC564 — handlers store selected_row + 1; the reset
+# PlayerInfo_PopulateWeaponAccessoryAmmoUI @0x55e8e0..0x55e8f5].
 var _ammo_pri: Dictionary = {}
 var _ammo_sec: Dictionary = {}
 # The ammo-TYPE byte per team per slot (0=FMJ 1=AP 2=SP)
@@ -245,17 +252,29 @@ func team() -> int:
 
 func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_weapons = weapons
+	_weapons_injected = weapons != null
 	_ammo_pri.clear()
 	_ammo_sec.clear()
 	if _driver != null:
 		_populate_loadout()
 
 
-# Load weapon.def into the loadout table (best-effort; absent -> empty slot lists).
+# Load weapon.def into the loadout table, again whenever the mount changed. A
+# missing or empty file is an empty table, so each list shows only NONE
+# (D-MNU-27).
 func _ensure_weapons() -> void:
-	if _weapons == null and _root != null:
-		_weapons = LoadoutWeaponTable.load_weapon_database(_root, "PlayerInfoMenuCompanion",
-				"loadout combos stay empty")
+	if _weapons_injected or _root == null:
+		return
+	var mount := LoadoutWeaponTable.mount_key(_root)
+	if _weapons != null and mount == _weapons_mount:
+		return
+	_weapons = LoadoutWeaponTable.load_weapon_database(_root, "PlayerInfoMenuCompanion",
+			"loadout combos stay empty")
+	_weapons_mount = mount
+	# The picks are keyed by the old table's rows, and the game resets every
+	# count pair at each populate anyway (the reset @0x55e8e0, cited at _ammo_pri).
+	_ammo_pri.clear()
+	_ammo_sec.clear()
 
 
 # Fill PRIMARY/SECONDARY/ACCESSORY for the selected class + team, each led by a "NONE" row,
@@ -664,8 +683,9 @@ func snapshot() -> Dictionary:
 			_team, _driver.player_info_avatar_nationality(), _driver.player_info_avatar_division(),
 			_driver.selected_row(combo) if combo >= 0 else -1,
 			player_class, _edit_text("PLAYERNAME"), selected_voice())
-	# Missing weapon.def means there was no loadout choice to commit. Keep that
-	# distinct from a loaded screen whose three selected rows are explicitly NONE.
+	# No table (no root) means there was no loadout choice to commit. Keep that
+	# distinct from a loaded screen whose three selected rows are explicitly
+	# NONE, as a missing or empty weapon.def's are (D-MNU-27).
 	if _weapons != null and _weapons.is_loaded():
 		var primary := _selected_weapon("PRIMARY")
 		var secondary := _selected_weapon("SECONDARY")
@@ -708,7 +728,8 @@ func kit_entries() -> Array[Dictionary]:
 	# slots are the engine's page builder; this companion supplies its picks:
 	# the three category selections with their recorded count pairs (-1 =
 	# untouched) and the team's ammo-type byte for PRIMARY/SECONDARY, then the
-	# three grenade positions (entry 0 when the class/team filter left one empty).
+	# three grenade positions (-1, the "None" row, when the class/team filter
+	# left one empty).
 	var indices := PackedInt32Array()
 	var pri := PackedInt32Array()
 	var sec := PackedInt32Array()
@@ -723,7 +744,7 @@ func kit_entries() -> Array[Dictionary]:
 	var grenade_pri := PackedInt32Array()
 	var grenade_sec := PackedInt32Array()
 	for i in GRENADE_CONTROLS.size():
-		var index := _grenade_rows[i].index if i < _grenade_rows.size() else 0
+		var index := _grenade_rows[i].index if i < _grenade_rows.size() else -1
 		grenade_indices.append(index)
 		grenade_pri.append(int(_ammo_pri.get(index, -1)))
 		grenade_sec.append(int(_ammo_sec.get(index, -1)))
@@ -733,15 +754,15 @@ func kit_entries() -> Array[Dictionary]:
 	return out
 
 
-# The weapon-table index a loadout list would report as its selected VALUE.
-# Every weapon row carries its table index and the NONE row carries 0, so a
-# NONE slot serializes weapon-table entry 0 -- retail's own quirk.
+# The weapon.def row of a loadout list's selection, -1 for NONE. The game's
+# lists carry catalog rows, whose row 0 is the "None" WeaponDef_LoadAll seeds,
+# so the NONE row's value 0 serializes "None" (the kit builder maps the row).
 # retail: the NONE insert UIList_AddRow(list, "NONE", 0, 0, 0) @ 0x56058f in
 # PlayerInfo_PopulateWeaponSlotLists @ 0x560430, read back through
 # UIList_GetSelectedValue @ 0x644660 at 0x55e6e8.
 func _slot_weapon_index(control: String) -> int:
 	var w := _selected_weapon(control)
-	return w.index if w != null else 0
+	return w.index if w != null else -1
 
 
 func commit() -> void:
