@@ -53,11 +53,14 @@ int test_document() {
 	edit.value = std::string("frame2.3di");
 	TEST_EXPECT(document.apply(edit, error));
 	TEST_EXPECT(document.serialize().text == "// the HUD's models\r\n3dihud   frame2.3di   // the frame\r\n\r\n3DIPower2 p2.3di\r\n");
-	// A power slot first: loaded, never drawn; a long name runs on.
+	// A power slot first: loaded, never drawn; a name of 16 characters changes nothing, a longer one runs on.
 	edit.field = "tag";
 	edit.value = int64_t(3);
 	TEST_EXPECT(document.apply(edit, error));
 	edit.field = "model";
+	edit.value = std::string("sixteen_char.3di");
+	TEST_EXPECT(document.apply(edit, error));
+	TEST_EXPECT(!find_code(validate_hudfx_file(document), "hudfx.name_runs"));
 	edit.value = std::string("averyveryverylongmodel.3di");
 	TEST_EXPECT(document.apply(edit, error));
 	findings = validate_hudfx_file(document);

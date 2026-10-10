@@ -123,6 +123,24 @@ int test_findings() {
 	Diagnostic error;
 	TEST_EXPECT(clean.load_bytes(bytes_of(kFile), "score.ini", AssetKind::Score, "jo", error));
 	TEST_EXPECT(validate_score_file(clean).empty());
+	// The game's own EXP_FANFARE 0 0 is the file's fanfare line: no finding (the game holds what it says), and a set
+	// of the pair rewrites that line, no second one (the #997 review's item 6).
+	const std::string shipped = "VERSION 40\r\n\r\nEXP_FANFARE 0 0\r\n\r\nGAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\n";
+	ScoreDocument zeros;
+	TEST_EXPECT(zeros.load_bytes(bytes_of(shipped), "score.ini", AssetKind::Score, "jo", error) &&
+	            validate_score_file(zeros).empty());
+	const NodeAddress zeros_header{zeros.rows()[0]->id, node_kind(ScoreKind::Header), 0};
+	Edit low;
+	low.address = zeros_header;
+	low.field = "fanfare_low";
+	low.value = int64_t(2);
+	Edit high_byte = low;
+	high_byte.field = "fanfare_high";
+	high_byte.value = int64_t(5);
+	TEST_EXPECT(zeros.apply(low, error) && zeros.apply(high_byte, error));
+	const std::string set = zeros.serialize().text;
+	TEST_EXPECT(set == "VERSION 40\r\n\r\nEXP_FANFARE 2 5\r\n\r\nGAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\n" &&
+	            validate_score_file(zeros).empty());
 	std::string fields;
 	for (int i = 0; i < 35; ++i) fields += "FIELD \"NUMDEATHS\" 1\r\n";
 	const std::string flawed = "VERSION 40\r\nGAMETYPE \"NOPE\"\r\nGAMETYPE \"tdm\"\r\nGAMETYPE \"TDM\"\r\n" + fields;

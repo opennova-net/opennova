@@ -22,12 +22,14 @@ namespace opennova::editor {
 enum class ScoreKind : NodeKind { Header = 0, Block = 1, Field = 2, Var = 3 };
 constexpr NodeKind node_kind(ScoreKind kind) { return static_cast<NodeKind>(kind); }
 
-// The file's own values: what its VERSION line says, and the fanfare a line of it set (has_exp_fanfare: an
-// EXP_FANFARE line passing the reader's gate, else the defaults' 0 0 stand).
+// The file's own values: what its VERSION line says, and its fanfare line (has_exp_fanfare: the file's EXP_FANFARE
+// line before its blocks, its pair whether or not the reader keeps it; score::File's), with what the file's other
+// EXP_FANFARE lines leave stored, which a save keeps as they stand.
 struct ScoreHeader {
 	int32_t version = score::kVersion;
 	int32_t exp_fanfare[2] = {0, 0};
 	bool has_exp_fanfare = false;
+	score::StoredFanfare fanfare_before, fanfare_after;
 };
 
 struct ScoreHeaderRow : TableRow {

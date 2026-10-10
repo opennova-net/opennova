@@ -53,6 +53,9 @@ public:
 	// The text a save writes, the ConfigFile pool left unchecked (charattr::compose_table): what the game would read.
 	// False with the reason for a table no file loads as.
 	bool composed(std::string &text, std::string &error) const;
+	// Whether the file is in the ConfigFile's binary (CBIN) form: the document holds what the game reads of it
+	// (its text form's classes) read only, a save writing the text form alone (charattr.binary_form).
+	bool binary_form() const { return binary_form_; }
 
 protected:
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
@@ -68,6 +71,9 @@ protected:
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
 	// kCommentIdleLines: the layout of the text the edit holds, read again (the classes it reads are the rows').
 	bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) override;
+
+private:
+	bool binary_form_ = false;
 };
 
 bool is_charattr_kind(AssetKind kind);
@@ -75,7 +81,7 @@ bool is_charattr_kind(AssetKind kind);
 // The character attributes' validator: a section the game never reads, an ATTRIBUTES word no attribute is, a value
 // the reader reads as 0 for not being a number, a class read with no camouflage item; and the ConfigFile pool rule
 // (core document.config_overrun) over the text a save writes, its fix commenting out the lines the loader reads the
-// same table without (kCommentIdleLines).
+// same table without (kCommentIdleLines). A file in the CBIN form is that finding alone (charattr.binary_form).
 std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document);
 
 // All listed (none refuses a build: the game reads what it can of the file and goes on). A file past the
@@ -92,6 +98,9 @@ enum class CharAttrFinding {
 	// A class the game reads with no camouflage item for a camouflage (no key, or 0): a player of the class
 	// spawns as items.def's first row (or the item whose id is 100000) in such a mission.
 	NoCammo,
+	// A file in the ConfigFile's binary (CBIN) form, which the game reads through its binary reader: the editor
+	// holds its classes read only (it writes the text form alone).
+	BinaryForm,
 	kCount
 };
 const FindingCodeRow &finding_code(CharAttrFinding code);

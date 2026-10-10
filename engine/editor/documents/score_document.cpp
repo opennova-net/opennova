@@ -67,7 +67,8 @@ RecordTable make_table() {
 			fanfare.ranged = true;
 			fanfare.min = 0;
 			fanfare.max = 255;
-			// Left out where no line of the file set the pair (the defaults' 0 0 stand); a set of another value writes it.
+			// Left out where the file has no fanfare line (the defaults' 0 0 stand); a set of another value writes one,
+			// and a set where it has one rewrites that line.
 			fanfare.optional = true;
 			header.field(RF{fanfare,
 			                {[i](const RecordHandle &r, Value &out) { return out = int64_t(header_of(r).exp_fanfare[i] & 0xFF), true; },
@@ -234,6 +235,8 @@ score::File ScoreDocument::file() const {
 			out.exp_fanfare[0] = h.exp_fanfare[0];
 			out.exp_fanfare[1] = h.exp_fanfare[1];
 			out.has_exp_fanfare = h.has_exp_fanfare;
+			out.fanfare_before = h.fanfare_before;
+			out.fanfare_after = h.fanfare_after;
 		} else if (node->kind == kBlock) {
 			out.blocks.push_back(static_cast<const ScoreBlockRow &>(*node).block);
 		}
@@ -270,6 +273,8 @@ bool ScoreDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::sh
 	header->header.exp_fanfare[0] = read.exp_fanfare[0];
 	header->header.exp_fanfare[1] = read.exp_fanfare[1];
 	header->header.has_exp_fanfare = read.has_exp_fanfare;
+	header->header.fanfare_before = read.fanfare_before;
+	header->header.fanfare_after = read.fanfare_after;
 	shape(*header);
 	rows.push_back(std::move(header));
 	for (score::GameTypeBlock &block : read.blocks) {
@@ -363,13 +368,27 @@ std::vector<Diagnostic> validate_score_file(const DocumentBase &document) {
 				    "The version is " + std::to_string(h.version) + ": the game reads none of the file (no block of it is read "
 				    "here either) and writes its own defaults over it [orig: ScoreConfig_LoadFile @ 0x52DA8A -> "
 				    "ScoreConfig_SaveFile @ 0x52DA9E]. A save keeps the file's lines as they are.");
+			// The fanfare line's pair where the game ends up holding another: one failing the gate (the game's own 0 0,
+			// the defaults' too, holds what it says), or one a block's later line stores over.
 			score::File f;
 			f.exp_fanfare[0] = h.exp_fanfare[0];
 			f.exp_fanfare[1] = h.exp_fanfare[1];
-			if (h.has_exp_fanfare && !score::exp_fanfare_kept(f))
+			f.has_exp_fanfare = h.has_exp_fanfare;
+			f.fanfare_before = h.fanfare_before;
+			f.fanfare_after = h.fanfare_after;
+			int32_t kept[2] = {0, 0};
+			const bool stored = score::kept_fanfare(f, kept);
+			if (h.has_exp_fanfare && ((h.exp_fanfare[0] & 0xFF) != kept[0] || (h.exp_fanfare[1] & 0xFF) != kept[1])) {
+				const std::string held = std::to_string(kept[0]) + " " + std::to_string(kept[1]);
 				add(*node, DiagnosticSeverity::Info, ScoreFinding::FanfareUnkept, "fanfare_low",
-				    "The game keeps the fanfare only when both bytes are other than 0 and the high one is the greater [orig: "
-				    "ScoreConfig_LoadFile @ 0x52DC8E]: these are read for nothing.");
+				    score::exp_fanfare_kept(f)
+				            ? "A later EXP_FANFARE line, in a GAMETYPE block, stores " + held + " over these, which the game "
+				              "keeps [orig: ScoreConfig_LoadFile @ 0x52DC75..0x52DC9F, each line past the gate stored over "
+				              "the last]."
+				            : "The game keeps the fanfare only when both bytes are other than 0 and the high one is the "
+				              "greater [orig: ScoreConfig_LoadFile @ 0x52DC8E]: these are read for nothing, and the game "
+				              "holds " + held + (stored ? std::string(", another EXP_FANFARE line's.") : std::string(", the defaults'.")));
+			}
 			continue;
 		}
 		if (node->kind != kBlock) continue;

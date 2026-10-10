@@ -740,8 +740,17 @@ void string_words(Workspace &workspace, InspectorWindow::WordsBox &box, const Do
 	// A string of the data the project builds on is no file of the project: its words read only, with the
 	// way to make the table the project's own.
 	if (!view.project.scan || !view.project.scan->at_path(string.file)) {
-		if (shown.empty()) ImGui::TextDisabled("(empty)");
-		else hotkey_words(shown);
+		// Wrapped to the column, as any long string (a briefing); a button's label with its hotkey drawn as the game
+		// draws it (one line or a few, which its underline measures unwrapped).
+		if (shown.empty()) {
+			ImGui::TextDisabled("(empty)");
+		} else if (shown.find("{hot}") != std::string::npos) {
+			hotkey_words(shown);
+		} else {
+			ImGui::PushTextWrapPos(0.0f);
+			ImGui::TextUnformatted(shown.c_str());
+			ImGui::PopTextWrapPos();
+		}
 		ui_kit::tooltip("The words the player sees: the string " + words.raw + " in " + string.file +
 		                " of the data this project builds on. The project has no copy of that table to change.");
 		const bool allowed = view.allows(EditorRequestKind::PreviewInstallImport);

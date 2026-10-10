@@ -1,8 +1,12 @@
 #pragma once
 
 #include <array>
+#include <functional>
+#include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <editor/model/diagnostic.h>
@@ -99,13 +103,46 @@ protected:
 	// file's first head, body and arms.
 	void after_add(Node &row, const ListChange &change, const RecordHandle &made) override;
 	// A part's name is a symbol of its kind in this file (AVATARS.DEF/HEAD); a combination's head, body and arms
-	// name parts of their kinds there.
+	// name parts of their kinds there. Where parts of a kind share a name, a combination binds the last of them
+	// above it in the file a save writes [orig: CAvatarDefs_ParseConfigLine @ 0x57A830..0x57A854]: each earlier
+	// part of the name defines it in a section of its own (AVATARS.DEF/HEAD#1, by its rank in the file's order),
+	// and a combination that binds one names that section.
 	void refine_field(const NodeAddress &address, FieldUse &use) const override;
-	// Of two parts of a kind and a name, a combination after both takes the later: the earlier is inert there.
+	// An earlier part of a shared name is inert where no combination binds it (none stands between it and the
+	// next part of the name).
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 
+public:
+	// The text a save writes read again as the game reads it: the reader stopping on it (avatars.reader_stops, a
+	// 513th part or a 129th combination the edits made). A combination it would drop for a part the layout puts
+	// below it is none: such a text does not read back as the rows, so the save writes the writer's form, every part
+	// before the nationalities (formats/avatars avatars_write, its save note); one naming a part the file defines
+	// nowhere is the graph's missing reference.
+	void saved_text_findings(std::vector<Diagnostic> &out) const;
+	// The line the game's reader stops at in the file as read (its 513th part or 129th combination; 0 where it
+	// reads the file whole): the document then holds what the reader read before it, read only.
+	size_t reader_stops_line() const { return reader_stops_line_; }
+
 private:
+	// The parts' and the combinations' places in the file a save writes, where parts of a kind share a name (the
+	// composed text read again, its records matched to the rows' in their order), kept for the document's state.
+	struct Order {
+		bool made = false;
+		uint64_t load_generation = 0, revision = 0;
+		std::unordered_map<NodeId, size_t> rank;              // a shadowed part's rank among its name's (1 the first)
+		std::map<std::pair<NodeId, NodeId>, std::array<NodeId, 3>> binds; // a combination's parts by kind (0 none)
+		std::unordered_set<NodeId> bound;                     // the shadowed parts a combination binds
+	};
+	const Order &order() const;
+	// The model's combinations matched to those of the text read again (`reread`), in their order: each with the
+	// combination it reads as (null: the reader dropped it). A nationality or division the reader refuses is
+	// skipped with all it holds.
+	void match_combos(const avatars::AvatarsFile &reread,
+	                  const std::function<void(const NodeAddress &, const AvatarComboRecord &, const avatars::AvatarCombo *)>
+	                          &visit) const;
 	std::string first_part(int kind) const;
+	size_t reader_stops_line_ = 0;
+	mutable Order order_;
 };
 
 bool is_avatars_kind(AssetKind kind);
@@ -113,10 +150,13 @@ bool is_avatars_kind(AssetKind kind);
 std::string avatar_part_scope(const std::string &path, int kind);
 
 // The avatars table's validator: the reader's own notes (a refused nationality or division, a combination whose
-// part is not defined before it: dropped), each in the game's words.
+// part is not defined before it: dropped), each in the game's words; and the reader stopping, in the file as read
+// or in the text a save writes (AvatarsDocument::saved_text_findings).
 std::vector<Diagnostic> validate_avatars_file(const DocumentBase &document);
 
-enum class AvatarsFinding { InvalidInput, IgnoredInput, kCount };
+// The reader's notes (invalid, ignored); the reader stopping at a 513th part or a 129th combination
+// (avatars.reader_stops: the game fails, so a build is refused).
+enum class AvatarsFinding { InvalidInput, IgnoredInput, ReaderStops, kCount };
 const FindingCodeRow &finding_code(AvatarsFinding code);
 FindingTable avatars_finding_codes();
 

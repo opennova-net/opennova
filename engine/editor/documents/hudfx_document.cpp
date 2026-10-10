@@ -201,7 +201,10 @@ std::vector<Diagnostic> validate_hudfx_file(const DocumentBase &document) {
 			    "0x5A465F, a slot loaded only where its name is set].");
 			continue;
 		}
-		if (line.model.size() >= def::kHudFxNameBytes) {
+		// A name of 16 characters copies its NUL alone into the next slot's first byte, a slot no other line fills
+		// (the walk reads one line), so nothing changes; from 17 the copy runs into the next slot's name [orig:
+		// HUD_CacheModelNameByTag @ 0x58F970, its byte loop @ 0x58F992..0x58FB42].
+		if (line.model.size() > def::kHudFxNameBytes) {
 			const auto names = def::hudfx_slot_names(fx->file());
 			std::string runs;
 			for (size_t slot = size_t(line.slot) + 1; slot < def::kHudFxSlots; ++slot)

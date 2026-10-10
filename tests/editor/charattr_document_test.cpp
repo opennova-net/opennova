@@ -6,7 +6,8 @@
 // item's id writes the type id back at its line. A section the game never reads is no row and names nothing, and is a
 // finding (after the first missing class, a second of a label), as are a word no attribute is, a value read as text,
 // and a class read with no camouflage item. A class added is the next; one removed the last (the loader stops at the
-// first class it lacks). The retail leg (OPENNOVA_JO_DIR): the install's charattr.def, base and each expansion,
+// first class it lacks). A file in the ConfigFile's binary (CBIN) form opens read only, its classes as the game reads
+// them, with a listed finding. The retail leg (OPENNOVA_JO_DIR): the install's charattr.def, base and each expansion,
 // through the document byte for byte.
 #include <algorithm>
 #include <cstdio>
@@ -22,6 +23,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/cbin/binary_config.h>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
@@ -281,10 +283,39 @@ static int test_retail() {
 	return 0;
 }
 
+// A CBIN-form charattr.def, which the game reads through the ConfigFile's binary reader: the document holds the
+// classes its text form reads as, read only, and the one finding is listed (no build refused).
+static int test_binary_form() {
+	cbin::BinaryConfig config;
+	config.strings = {"character1", "STEALTH", "JUNGLE_CAMMO"}; // the binary reader lowercases a label where it stands
+	config.xor_key = 0x2468ACE1u;
+	cbin::BinaryConfig::Label label;
+	label.name = 1;
+	label.entries.push_back({2, {{25, cbin::BinaryConfig::kInteger}}});
+	label.entries.push_back({3, {{7001, cbin::BinaryConfig::kInteger}}});
+	config.labels.push_back(label);
+	std::vector<uint8_t> bytes;
+	std::string why;
+	TEST_EXPECT(cbin::encode_binary_config(config, bytes, why));
+	CharAttrDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes, "charattr.def", AssetKind::CharAttrDefs, "jo", error));
+	TEST_EXPECT(document.blocked() && document.binary_form() && document.rows().size() == 1);
+	const Node *one = class_row(document, 1);
+	Value value;
+	TEST_EXPECT(one && document.get({one->id, kClass, 0}, "jungle_cammo", value) && value == Value(int64_t(7001)));
+	const std::vector<Diagnostic> findings = validate_charattr_file(document);
+	TEST_EXPECT(findings.size() == 1 && findings[0].code() == "charattr.binary_form" &&
+	            findings[0].severity == DiagnosticSeverity::Warning && !findings[0].row()->gates_build);
+	std::printf("binary form: a CBIN charattr.def held read only, its class read, one listed finding\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
 	failures += test_rows();
+	failures += test_binary_form();
 	failures += test_references();
 	failures += test_rename();
 	failures += test_retail();

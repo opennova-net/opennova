@@ -352,7 +352,7 @@ static int test_columns() {
 	                     "animation_map.row", "asset.wave_unplayable", "avatars.ignored_input", "build.archive_in_project", "build.expansion.exp_desc", "build.expansion.mission_twice",
 	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.first_row",
 	                     "catalog.invalid_input", "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
-	                     "catalog.reserved_name", "catalog.reserved_refused", "catalog.unserializable", "charattr.attribute_word",
+	                     "catalog.reserved_name", "catalog.reserved_refused", "catalog.unserializable", "charattr.attribute_word", "charattr.binary_form",
 	                     "charattr.no_cammo", "charattr.not_a_number", "charattr.unread_section", "dialog_bank.line_no_wave",
 	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.line_ends",
 	                     "environment.invalid_input", "environment.sky_height_default", "environment.terrain_key",
@@ -381,9 +381,11 @@ static int test_columns() {
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader
 	// clears past the pool into the heap, and the game crashes later [orig: ConfigFile_ParseText @ 0x7609e8]; so
-	// does hudfx.def's HUD model as its one line read, the power slots' draw then reading a slot of no model (S23 B).
+	// does hudfx.def's HUD model as its one line read, the power slots' draw then reading a slot of no model, and an
+	// Avatars.def past its reader's tables, where the game fails (S23 B).
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.game_refusal != nullptr; }) ==
-	            Tokens({ "catalog.reader_stops", "document.config_overrun", "hudfx.power_slots_empty", "mission.runs_past_table" }));
+	            Tokens({ "avatars.reader_stops", "catalog.reader_stops", "document.config_overrun", "hudfx.power_slots_empty",
+	                     "mission.runs_past_table" }));
 	// A finding whose file the editor's model cannot carry where the game reads it on (unwritable_code) gates only
 	// an open file with unsaved edits, which the build's Save cannot write: a closed one packs as stored. One the
 	// game's own reader stops at gates either way, saying what the game does.

@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include <set>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
@@ -289,9 +290,43 @@ RecordTable make_table() {
 
 void copy_to(const std::string &from, char *to, size_t size) { std::snprintf(to, size, "%s", from.c_str()); }
 
+// Where the game's reader stops in a file it fails on: the first line its walk fails at, the shortest run of the
+// file's whole lines it fails on (the walk goes line by line, so every longer run fails too), with the bytes before
+// that line in `before`; 0 where it reads the whole file.
+size_t reader_stop(const std::vector<uint8_t> &bytes, size_t &before) {
+	std::vector<size_t> ends; // each line's end, past its '\n' (the last the file's end)
+	for (size_t i = 0; i < bytes.size(); ++i)
+		if (bytes[i] == '\n') ends.push_back(i + 1);
+	if (ends.empty() || ends.back() != bytes.size()) ends.push_back(bytes.size());
+	const auto fails = [&bytes, &ends](size_t lines) {
+		avatars::AvatarsFile probe{};
+		if (avatars::avatars_parse_memory(bytes.data(), ends[lines - 1], &probe) != 0) return true;
+		avatars::avatars_free(&probe);
+		return false;
+	};
+	size_t low = 1, high = ends.size();
+	if (!fails(high)) return 0;
+	while (low < high) {
+		const size_t mid = low + (high - low) / 2;
+		if (fails(mid)) high = mid;
+		else low = mid + 1;
+	}
+	before = low > 1 ? ends[low - 2] : 0;
+	return low;
+}
+
+// A record's place in a text it was read from: its note's index (0: none).
+uint64_t place_of(uint64_t note) { return note & 0xFFFFFFFFu; }
+
+
 constexpr FindingCodeEntry<AvatarsFinding> kFindingEntries[] = {
 	{ AvatarsFinding::InvalidInput, { "avatars.invalid_input", FindingFix::None, nullptr, true } },
 	{ AvatarsFinding::IgnoredInput, listed_code("avatars.ignored_input") },
+	{ AvatarsFinding::ReaderStops, { "avatars.reader_stops", FindingFix::None, nullptr, false, FindingPlace::Content,
+	                                 FindingGroup::None, FindingSource::Own, FindingProblem::None, true,
+	                                 "the avatar table's reader stops at a 513th part or a 129th combination and the "
+	                                 "game fails (ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; "
+	                                 "sub_579E10 @ 0x579E10; D-PLAYERINFO-2]" } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(AvatarsFinding::kCount),
 		"every AvatarsFinding has exactly one row");
@@ -429,14 +464,27 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	}
 	auto notes = std::make_shared<textlayout::Notes>();
 	avatars::AvatarsFile read{};
+	reader_stops_line_ = 0;
 	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &read, *notes) != 0) {
 		// The walk ends where the part table is full (D-PLAYERINFO-2) or a 129th combination writes through no row:
-		// the game's own failure, which the document cannot carry.
-		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error,
-		                     "The avatar table's reader stops: 512 parts or 129 combinations (the game's walk ends there, "
-		                     "ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 @ 0x579E10].",
-		                     path());
-		return false;
+		// the game's own failure (avatars.reader_stops, which refuses a build). The document holds what the reader
+		// read before that line, read only (a save would lose the rest), so the file opens to be seen and fixed.
+		size_t before = 0;
+		const size_t stop = reader_stop(bytes, before);
+		notes = std::make_shared<textlayout::Notes>();
+		read = avatars::AvatarsFile{};
+		if (!stop || avatars::avatars_parse_memory(bytes.data(), before, &read, *notes) != 0) {
+			error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error,
+			                     "The avatar table's reader stops: 512 parts or 129 combinations (the game's walk ends "
+			                     "there, ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 "
+			                     "@ 0x579E10].",
+			                     path());
+			return false;
+		}
+		reader_stops_line_ = stop;
+		issues.push_back({true, stop, std::string(), std::string(),
+		                  "The game's avatar reader stops at this line (a 513th part or a 129th combination): the editor "
+		                  "holds what it reads before the line, read only. Fix the file outside the editor."});
 	}
 	for (size_t i = 0; i < read.diagnostics_count; ++i) {
 		const avatars::AvatarDiagnostic &note = read.diagnostics[i];
@@ -646,38 +694,152 @@ void AvatarsDocument::after_add(Node &row, const ListChange &change, const Recor
 	}
 }
 
+void AvatarsDocument::match_combos(
+		const avatars::AvatarsFile &reread,
+		const std::function<void(const NodeAddress &, const AvatarComboRecord &, const avatars::AvatarCombo *)> &visit) const {
+	size_t nationality_at = 0;
+	for (const auto &node : rows()) {
+		if (!node || node->kind != kNationality) continue;
+		const AvatarNationalityRecord &n = static_cast<const AvatarNationalityRow &>(*node).nationality;
+		// The reader keeps the others in their order: one the text read again lacks here, it refused.
+		if (nationality_at >= reread.nationalities_count) continue;
+		const avatars::AvatarNationality &read_n = reread.nationalities[nationality_at];
+		if (read_n.id != n.id || n.raw_id != read_n.raw_id) continue;
+		++nationality_at;
+		const avatars::AvatarDivision *read_d = nullptr;
+		size_t division_at = 0, combo_at = 0;
+		walk_records(*node, [&](const NodeAddress &record, const Placement &) {
+			const RecordHandle handle = record_in(*node, record);
+			if (!handle) return true;
+			if (record.kind == kDivision) {
+				const AvatarDivisionRecord &d = division_of(handle);
+				read_d = nullptr;
+				combo_at = 0;
+				if (division_at < read_n.divisions_count && read_n.divisions[division_at].id == d.id &&
+				    d.raw_id == read_n.divisions[division_at].raw_id)
+					read_d = &read_n.divisions[division_at++];
+				return true;
+			}
+			if (record.kind != kCombo || !read_d) return true;
+			const AvatarComboRecord &c = combo_of(handle);
+			const avatars::AvatarCombo *read = nullptr;
+			// A division's combinations all see the same parts (no part stands among them), so two alike are both
+			// kept or both dropped: the first alike is this one.
+			if (combo_at < read_d->combos_count && c.raw_id == read_d->combos[combo_at].raw_id &&
+			    c.head == read_d->combos[combo_at].head_name && c.body == read_d->combos[combo_at].body_name)
+				read = &read_d->combos[combo_at++];
+			visit(record, c, read);
+			return true;
+		});
+	}
+}
+
+const AvatarsDocument::Order &AvatarsDocument::order() const {
+	if (order_.made && order_.load_generation == load_generation() && order_.revision == revision()) return order_;
+	Order made;
+	made.made = true;
+	made.load_generation = load_generation();
+	made.revision = revision();
+	// Only parts of a kind that share a name need the file's order: every other combination binds the one part.
+	std::set<std::pair<int, std::string>> names;
+	bool shared = false;
+	for (const auto &node : rows())
+		if (node && node->kind == kPart) {
+			const AvatarPartRecord &p = static_cast<const AvatarPartRow &>(*node).part;
+			shared |= !names.insert({p.kind, strutil::to_upper(p.name)}).second;
+		}
+	const SerializeResult saved = shared ? serialize() : SerializeResult();
+	avatars::AvatarsFile reread{};
+	textlayout::Notes notes;
+	if (shared && saved.ok() &&
+	    avatars::avatars_parse_memory(saved.text.data(), saved.text.size(), &reread, notes) == 0) {
+		// The parts as the text read again holds them, in the rows' order (the reader keeps every part).
+		struct Part {
+			NodeId id;
+			int kind;
+			std::string name;
+			uint64_t place;
+		};
+		std::vector<Part> parts;
+		size_t at = 0;
+		for (const auto &node : rows())
+			if (node && node->kind == kPart && at < reread.parts_count) {
+				const AvatarPartRecord &p = static_cast<const AvatarPartRow &>(*node).part;
+				parts.push_back({node->id, p.kind, strutil::to_upper(p.name), place_of(reread.parts[at++].note)});
+			}
+		std::stable_sort(parts.begin(), parts.end(), [](const Part &a, const Part &b) { return a.place < b.place; });
+		// Each part's rank among its kind's of the name, the last 0.
+		for (size_t i = 0; i < parts.size(); ++i) {
+			size_t rank = 1, later = 0;
+			for (size_t j = 0; j < parts.size(); ++j) {
+				if (j == i || parts[j].kind != parts[i].kind || parts[j].name != parts[i].name) continue;
+				if (j < i) ++rank;
+				else ++later;
+			}
+			if (later) made.rank[parts[i].id] = rank;
+		}
+		match_combos(reread, [&](const NodeAddress &record, const AvatarComboRecord &c, const avatars::AvatarCombo *read) {
+			if (!read || !place_of(read->note)) return;
+			const uint64_t place = place_of(read->note);
+			std::array<NodeId, 3> binds{};
+			const std::string named[3] = {strutil::to_upper(c.head), strutil::to_upper(c.body), strutil::to_upper(c.arms)};
+			for (const Part &p : parts)
+				if (p.place < place && p.kind >= 0 && p.kind < 3 && p.name == named[p.kind]) binds[size_t(p.kind)] = p.id;
+			for (const NodeId id : binds)
+				if (id && made.rank.count(id)) made.bound.insert(id);
+			made.binds[{record.row, record.child}] = binds;
+		});
+	}
+	avatars::avatars_free(&reread);
+	order_ = std::move(made);
+	return order_;
+}
+
 void AvatarsDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	TableDocument::refine_field(address, use);
 	const Node *node = row(address.row);
 	if (!node) return;
+	// The section of a part shadowed by a later one of its name (its rank), the plain kind's otherwise.
+	const auto section = [this](int kind, NodeId part) {
+		std::string scope = avatar_part_scope(path(), kind);
+		const auto ranked = order().rank.find(part);
+		if (part && ranked != order().rank.end()) scope += "#" + std::to_string(ranked->second);
+		return scope;
+	};
 	if (use.defines == ReferenceKind::AvatarPart && node->kind == kPart)
-		use.scope = avatar_part_scope(path(), static_cast<const AvatarPartRow &>(*node).part.kind);
+		use.scope = section(static_cast<const AvatarPartRow &>(*node).part.kind, node->id);
 	if (use.reference == ReferenceKind::AvatarPart && address.kind == kCombo) {
 		const std::string &field = use.schema->id;
-		use.scope = avatar_part_scope(path(), field == "head" ? avatars::AVATAR_PART_HEAD
-		                                      : field == "body" ? avatars::AVATAR_PART_BODY : avatars::AVATAR_PART_ARMS);
+		const int kind = field == "head" ? avatars::AVATAR_PART_HEAD
+		                 : field == "body" ? avatars::AVATAR_PART_BODY : avatars::AVATAR_PART_ARMS;
+		const auto bound = order().binds.find({address.row, address.child});
+		use.scope = section(kind, bound == order().binds.end() ? 0 : bound->second[size_t(kind)]);
 	}
 }
 
 void AvatarsDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
 	const Node *node = row(address.row);
 	if (!node || address.child || node->kind != kPart) return;
-	const AvatarPartRecord &p = static_cast<const AvatarPartRow &>(*node).part;
-	bool after = false;
-	for (const auto &other : rows()) {
-		if (!other) continue;
-		if (other.get() == node) {
-			after = true;
-			continue;
-		}
-		if (!after || other->kind != kPart) continue;
-		const AvatarPartRecord &q = static_cast<const AvatarPartRow &>(*other).part;
-		if (q.kind == p.kind && strutil::iequals(q.name, p.name)) {
-			facts.inert = true;
-			facts.inert_reason = "a later part of the name replaces it for the combinations after both";
-			return;
-		}
+	if (!order().rank.count(node->id) || order().bound.count(node->id)) return;
+	facts.inert = true;
+	facts.inert_reason = "a later part of the name replaces it for the combinations after both, and no combination "
+	                     "stands between them";
+}
+
+void AvatarsDocument::saved_text_findings(std::vector<Diagnostic> &out) const {
+	if (blocked()) return;
+	const SerializeResult saved = serialize();
+	if (!saved.ok()) return;
+	avatars::AvatarsFile reread{};
+	if (avatars::avatars_parse_memory(saved.text.data(), saved.text.size(), &reread) != 0) {
+		out.push_back(make_finding(finding_code(AvatarsFinding::ReaderStops), DiagnosticSeverity::Error,
+		                           "The table as a save writes it holds a 513th part or a 129th combination: the game's "
+		                           "reader stops there and the game fails (ComboObj Parse Error) [orig: "
+		                           "CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 @ 0x579E10; D-PLAYERINFO-2].",
+		                           path()));
+		return;
 	}
+	avatars::avatars_free(&reread);
 }
 
 const FindingCodeRow &finding_code(AvatarsFinding code) { return kFindingRows[static_cast<size_t>(code)]; }
@@ -688,7 +850,20 @@ std::vector<Diagnostic> validate_avatars_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *table = dynamic_cast<const AvatarsDocument *>(&document);
 	if (!table) return findings;
+	if (table->reader_stops_line()) {
+		// The file as read fails in the game: that alone, at its line (the document holds what reads before it).
+		Diagnostic stops = make_finding(finding_code(AvatarsFinding::ReaderStops), DiagnosticSeverity::Error,
+		                                "The game's avatar reader stops at this line, a 513th part or a 129th combination, "
+		                                "and the game fails (ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ "
+		                                "0x57A456; sub_579E10 @ 0x579E10; D-PLAYERINFO-2]. The editor holds what the "
+		                                "reader reads before it, read only.",
+		                                document.path());
+		stops.line = table->reader_stops_line();
+		findings.push_back(std::move(stops));
+		return findings;
+	}
 	source_issue_findings(*table, finding_code(AvatarsFinding::InvalidInput), finding_code(AvatarsFinding::IgnoredInput), findings);
+	table->saved_text_findings(findings);
 	return findings;
 }
 

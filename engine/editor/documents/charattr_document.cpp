@@ -14,6 +14,8 @@
 #include <editor/documents/noted_file_state.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
+#include <formats/cbin/binary_config.h>
+#include <formats/cbin/binary_config_text.h>
 #include <formats/configfile/config_file.h>
 #include <formats/def/reserved_items.h>
 
@@ -171,6 +173,7 @@ constexpr FindingCodeEntry<CharAttrFinding> kFindingEntries[] = {
 	{ CharAttrFinding::AttributeWord, listed_code("charattr.attribute_word") },
 	{ CharAttrFinding::NotANumber, listed_code("charattr.not_a_number") },
 	{ CharAttrFinding::NoCammo, listed_code("charattr.no_cammo") },
+	{ CharAttrFinding::BinaryForm, listed_code("charattr.binary_form") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(CharAttrFinding::kCount),
 		"every CharAttrFinding has exactly one row");
@@ -247,7 +250,7 @@ std::string CharAttrDocument::record_title(const NodeAddress &address) const {
 }
 
 bool CharAttrDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
-                             std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &, Diagnostic &error) {
+                             std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
 	if (!is_charattr_kind(kind())) {
 		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not charattr.def.", path());
 		return false;
@@ -255,15 +258,30 @@ bool CharAttrDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std:
 	auto notes = std::make_shared<textlayout::Notes>();
 	charattr::Table table;
 	charattr::Reading reading;
+	binary_form_ = false;
 	if (!charattr::read_table(bytes.data(), bytes.size(), table, &reading, *notes)) {
-		// A CBIN-form file the ConfigFile loader reads through its binary reader, which this one does not (no shipped
-		// charattr.def is one); a file of no bytes reads as no class (the game's own error, a required file's).
+		// A CBIN-form file the ConfigFile loader reads through its binary reader [orig: ConfigFile_LoadFromFile @
+		// 0x760aa3, on the "CBIN" magic]: what the game reads of it is its text form as the text reader reads it
+		// (formats/cbin/binary_config_text.h). The document holds those classes read only (charattr.binary_form): it
+		// writes the text form alone, and no shipped charattr.def is a CBIN one. A file of no bytes reads as no class
+		// (the game's own error, a required file's).
 		if (configfile::data_strings_pool(bytes.data(), bytes.size()).binary) {
-			error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error,
-			                     "This charattr.def is in the ConfigFile's binary (CBIN) form, which the editor does not "
-			                     "read; no shipped one is.",
-			                     path());
-			return false;
+			binary_form_ = true;
+			cbin::BinaryConfig config;
+			std::string text, why;
+			notes = std::make_shared<textlayout::Notes>();
+			table = charattr::Table();
+			reading = charattr::Reading();
+			const bool shown = cbin::decode_binary_config(bytes.data(), bytes.size(), config, why) &&
+			                   cbin::binary_config_text(config, text, why) &&
+			                   charattr::read_table(reinterpret_cast<const uint8_t *>(text.data()), text.size(), table,
+			                                        &reading, *notes);
+			if (!shown) reading = charattr::Reading();
+			issues.push_back({true, 0, std::string(), std::string(),
+			                  shown ? "This charattr.def is in the ConfigFile's binary (CBIN) form: the editor shows the "
+			                          "classes the game reads of it, read only."
+			                        : "This charattr.def is in the ConfigFile's binary (CBIN) form, which the editor cannot "
+			                          "show (" + why + "); it holds the file read only."});
 		}
 	}
 	for (size_t index = 0; index < reading.classes && index < charattr::kClassCount; ++index) {
@@ -421,6 +439,16 @@ void charattr_idle_lines(const std::string &text, std::vector<size_t> &line_star
 std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *doc = dynamic_cast<const CharAttrDocument *>(&document);
+	if (doc && doc->binary_form()) {
+		// The CBIN form: the game reads it whole through its binary reader; the editor shows it, read only.
+		findings.push_back(make_finding(finding_code(CharAttrFinding::BinaryForm), DiagnosticSeverity::Warning,
+		                                "This charattr.def is in the ConfigFile's binary (CBIN) form, which the game reads "
+		                                "through its binary reader: the editor holds its classes read only, writing "
+		                                "charattr.def's text form alone. Edit it as text elsewhere, or replace it with "
+		                                "a text form to edit it here.",
+		                                document.path()));
+		return findings;
+	}
 	if (!doc || doc->blocked()) return findings;
 	// What the game would read: the text a save writes (the file itself while nothing is changed).
 	std::string text, why;
