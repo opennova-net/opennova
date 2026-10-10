@@ -3,12 +3,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
+
+#include <formats/textlayout/text_layout.h>
 
 namespace opennova::aip {
 
-// Vehicle AI profile properties. Parsing preserves the original type gate:
-// HELO and GROUND accept their respective fields; ORGANIC accepts only type.
-// [orig: AIProfile_ParseProperty @0x45DE70]
+// An AI profile (`.aip`): the vehicle AI's settings, one profile a file, read when an item names it
+// [orig: AIProfile_LoadOrFind @ 0x45FD80: a new slot of the 128 zeroed (memset 0xF8 @ 0x45FE09), its name
+// copied, +24 cleared, then the file through the shared ASCII walk, File_ParseASCIIFile @ 0x45FE45, each
+// line to AIProfile_ParseProperty @ 0x45DE70]. The reader is gated on the profile's type, which a `type`
+// line sets: HELO (1) and GROUND (2) read their key sets, ORGANIC (3) and a profile of no type nothing more.
+// A key no arm of the type reads is read for nothing (the shipped files' `description`, a GROUND file's
+// `min_speed`). Keys compare without case; a value past the line's count reads "" (the reset token).
 
 // One weapon block — profile+120 (primary) / +152 (secondary). The SM
 // fire pump hands the block to the fire-transform solver, which reads
@@ -43,6 +50,29 @@ inline constexpr uint32_t kWeaponPitchLockedMinus45 = 0x10;
 // loops]: FOLLOW_WP 0x1, NO_ACTION 0x2, FLEE 0x4, NO_CAP 0x8, COUNTER 0x10,
 // then COMBAT_FLAGS only: ATEAM 0x20, ATEAM_LOCK 0x40, RC_FIRE 0x80.
 // (RC_FIRE is the stationary-fire mode the SM pump dispatches on.)
+
+// A flag's word and its bit, in the order a writer puts them down.
+struct FlagWord {
+	const char *word;
+	uint32_t bit;
+};
+const std::vector<FlagWord> &weapon_flag_words();
+const std::vector<FlagWord> &evade_flag_words();  // EVADE_FLAGS: the first five
+const std::vector<FlagWord> &combat_flag_words(); // COMBAT_FLAGS: all eight
+const std::vector<FlagWord> &hunt_flag_words();   // hunt_flags: MAINTAIN_SPEED
+
+// The AI states a profile's default_state names, as the name table holds them (its literal values: the
+// table stores GROUND_FOLLOWWP = 17) [orig: AIState_LookupByName @ 0x457530, table @ 0x815198]; a word no
+// row has reads 0.
+struct StateName {
+	const char *word;
+	int32_t id;
+};
+const std::vector<StateName> &state_names();
+
+inline constexpr int32_t kTypeHelo = 1;
+inline constexpr int32_t kTypeGround = 2;
+inline constexpr int32_t kTypeOrganic = 3;
 
 struct Profile {
     int32_t type = 0;            // +16: HELO 1 / GROUND 2 / ORGANIC 3 [orig: "type"]
@@ -104,10 +134,101 @@ struct Profile {
 	int32_t use_waypoint_z = 0; // +56  [orig: "use_waypoint_z" atol]
 	int32_t min_agl = 0;               // +232 [orig: "min_agl" atof -> 16.16]
     int32_t min_speed = 0;             // +236 [orig: "min_speed" km/h -> 16.16 u/tick]
+
+	// The file's modeled layout this profile was read with (textlayout: its note there, the file's own
+	// record); 0 for a profile no file's layout names (written in the writer's form).
+	uint64_t note = 0;
 };
 
 // Line-oriented, whitespace-tokenized, case-insensitive property parser.
 Profile parse_profile(const uint8_t *text, size_t size);
+// A line the reader reads nothing of (none of the walk's skipped lines: no token, or opening '/'): before any
+// `type` (the profile of no type takes no key), under ORGANIC (which takes none), a key only the other type's set
+// holds, or a key no arm has (every shipped file's `description`).
+struct UnreadLine {
+	enum class Why : uint8_t { NoType, Organic, OtherType, Unknown };
+	Why why = Why::Unknown;
+	size_t offset = 0; // the line's first byte
+	std::string key;   // its first token
+};
+// The same parse with the file's layout modeled (`notes` filled: each line the arm that read it, as the
+// writer's entry of its key, or none; the profile's note the file's own record), and, with `unread`, the lines
+// it reads nothing of.
+Profile parse_profile(const uint8_t *text, size_t size, textlayout::Notes &notes,
+                      std::vector<UnreadLine> *unread = nullptr);
+
+// What a key's value is in the file, the unit its arm reads it in [orig: AIProfile_ParseProperty @
+// 0x45DE70's arms, cited per key in aip.cpp].
+enum class Unit : uint8_t {
+	Whole,      // atol
+	Skill,      // atol clamped 0..4
+	Metres,     // atol << 16
+	Degrees,    // atof * 11930464.0, chopped to 64 bits, the low 32 kept (a BAM)
+	Seconds,    // atof * 62.5, chopped (ticks): fistp, react_time and hunt_limit ftol
+	Rate,       // atof * 655.36, chopped (ftol)
+	Fixed,      // atof * 65536.0, chopped (ftol)
+	Speed,      // km/h: atof * 1000.0 * 4.444444444444444e-06 * 65536.0, chopped (16.16 units a tick)
+	Climb,      // atof * 0.016 * 65536.0, chopped
+	TurnRate,   // 11930464 * atol / 62 (32-bit)
+	AccelTime,  // 62 * atol
+	State,      // an AI state's name (state_names)
+	Alert,      // GREEN 0, YELLOW 1, RED 2 (any other word 0)
+	Subtype,    // STD 0, BOAT 1 (GROUND), PLANE 2 (HELO), TRAIN 3 (GROUND); any other word keeps the value
+	Flags,      // words, each a bit (flag_words), ORed in
+	HuntFlags,  // MAINTAIN_SPEED; the line clears the mask first
+	Weapon,     // an ammo's name
+	Type,       // HELO 1, GROUND 2, ORGANIC 3
+};
+
+// A key the reader reads: its word as the reader compares it (`alias`, a second word the same arm reads,
+// null for none), the types whose key set holds it (1 << type), its unit, and the profile's value it fills.
+struct KeyRow {
+	const char *key;
+	const char *alias;
+	uint8_t types;
+	Unit unit;
+	// The value the arm stores, as a whole number (a mask, a state id, a BAM, ...), and its store: the two
+	// speeds a HELO profile's member or a GROUND profile's by the profile's type (a GROUND speed's store also
+	// sets its raw whole number and that it was read). Null for a Weapon key (its name is `block`'s `name`).
+	int32_t (*get)(const Profile &);
+	void (*set)(Profile &, int32_t);
+	std::string WeaponBlock::*name = nullptr; // a Weapon key's block member (with `block`)
+	WeaponBlock Profile::*block = nullptr;
+	// A Flags key's words.
+	const std::vector<FlagWord> &(*flags)() = nullptr;
+};
+inline constexpr uint8_t kHeloKeys = 1u << kTypeHelo;
+inline constexpr uint8_t kGroundKeys = 1u << kTypeGround;
+// Every key, `type` first, in the order the writer puts them down.
+const std::vector<KeyRow> &key_rows();
+// The key row of `key` (any case, an alias included), null for none.
+const KeyRow *key_row(const std::string &key);
+// The value a key holds on a profile (0 for a Weapon key).
+int32_t key_value(const KeyRow &row, const Profile &profile);
+// Whether a profile of `type` reads `row`.
+inline bool reads(const KeyRow &row, int32_t type) { return type >= 0 && type < 8 && (row.types & (1u << type)) != 0; }
+
+// The value a key's arm stores from `word` (its first value; the Flags and HuntFlags keys read every value
+// word: `words` is the line's values), over the value it held (a Subtype word no arm has keeps it, a Flags
+// line ORs in).
+int32_t read_value(const KeyRow &row, int32_t type, const std::vector<std::string> &words, int32_t held);
+// The words the writer puts down for a key's value (its values after the key): the shortest decimal its arm
+// reads back to the stored value, a whole number, a state's or a flag's words. Empty when no word reads back
+// to it (a BAM no decimal reaches, a state id no name has).
+std::vector<std::string> value_words(const KeyRow &row, int32_t type, int32_t value);
+
+// The profile as the reader reads it again: the same type, every value the same (the layout aside).
+bool same_profile(const Profile &a, const Profile &b);
+
+// The profile's text from scratch (ADR 0003): `type` and then each key of its type whose value is other than
+// the zeroed record's (the loader clears the slot first, AIProfile_LoadOrFind @ 0x45FE09), each `key<TAB>value`
+// with CR LF after it (the walk splits at a CR LF pair alone), over the file's modeled layout where the
+// profile has one (each line as the file had it but for the words of a changed value; a key put down anew
+// after the key before it in the writer's order). The text is read again: one that would not read back as
+// the profile is written in the writer's form, `rewritten` set. False with the reason for a value no word
+// reads back to.
+bool write_profile(const Profile &profile, const textlayout::Notes *notes, std::string &text, std::string &error,
+                   bool *rewritten = nullptr);
 
 // The two words a class init copies into brain[49]/brain[50], read at the
 // profile offsets that init hard-codes, whatever key the profile's own type
