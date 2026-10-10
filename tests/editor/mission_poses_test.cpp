@@ -22,6 +22,7 @@
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/mission_document.h>
+#include <editor/preview/mission_people.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_json.h>
@@ -31,6 +32,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
+#include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -459,9 +461,161 @@ static int test_retail() {
 	return 0;
 }
 
+// S23 C: the people play their clips on the preview clock from their spawn: each tick of the clock a tick of every
+// posed body as the game's org1 motor head runs it before its think (world::organic_body_tick), in pool order over the
+// shared ring heads, so after each tick every body is the world's own body ticked so many times after its init, and the
+// event words are the world's; a clock gone back starts them again from their spawn.
+static int test_people_play() {
+	Rig rig("opennova_editor_mission_people_play");
+	TEST_EXPECT(rig.open());
+	const MissionViewport *viewport = rig.viewport();
+	if (!viewport) return 1;
+	const MissionPeople &playing = viewport->people();
+	const std::vector<NodeAddress> rows = rig.organics();
+	TEST_EXPECT(playing.playing() == 7);
+	WorldPeople people;
+	DirRigFiles files;
+	files.root = rig.session.view().project.root;
+	const int adm = people.motion.register_adm(&files, "people.adm");
+	std::vector<world::EntityHandle> bodies;
+	for (size_t i = 0; i < 7; ++i) {
+		const bool slot = kPeople[i].item == 106200;
+		bodies.push_back(people.add(adm, kPeople[i].ssn, slot ? kPeople[i].route : 0,
+				slot && (kPeople[i].attributes & 0x2u) != 0));
+	}
+	people.init();
+	const int32_t start = playing.tick();
+	TEST_EXPECT(playing.started_at() == start);
+	size_t world_events = 0, wraps = 0;
+	for (int32_t tick = 1; tick <= 240; ++tick) {
+		rig.session.advance(1.0 / 62.5);
+		rig.pump();
+		for (const world::EntityHandle body : bodies) {
+			world::RootMotionFrame frame;
+			world::AiEntity &entity = *people.world.ai.for_handle(body);
+			const int32_t before = entity.inf.clip_phase;
+			if (world::organic_body_tick(entity.inf, &people.motion, people.world.ai.anim_rings, frame) != 0) ++world_events;
+			wraps += entity.inf.clip_phase < before ? 1 : 0;
+		}
+		const int32_t played = rig.viewport()->people().tick() - start;
+		TEST_EXPECT(played == tick);
+		if (played != tick) return 1;
+		for (size_t i = 0; i < 7; ++i) {
+			const world::InfantryBodyPose *pose = rig.viewport()->people().pose(rows[i].row);
+			TEST_EXPECT(pose && same(*pose, people.pose(bodies[i])));
+		}
+	}
+	TEST_EXPECT(wraps > 0); // the clips played round
+	// The events kept: the last kCatchUpTicks ticks' words, the world's over the same ticks.
+	size_t kept = 0;
+	for (const MissionPeople::Event &event : rig.viewport()->people().events())
+		kept += event.tick > rig.viewport()->people().tick() - MissionPeople::kCatchUpTicks ? 1 : 0;
+	TEST_EXPECT(kept == rig.viewport()->people().events().size());
+	std::printf("people play: %zu world event words over 240 ticks, %zu kept\n", world_events, kept);
+	{
+		// The fixture's walk and idle carry the feet's bits.
+		std::set<uint32_t> words;
+		for (const MissionPeople::Event &event : rig.viewport()->people().events()) words.insert(event.word);
+		TEST_EXPECT(words == std::set<uint32_t>({ 0x1u, 0x2u }));
+	}
+	// A seek back: every person at its spawn again.
+	const uint64_t serial = rig.viewport()->people().serial();
+	MissionPeople again;
+	again.reset(viewport->poses(), 0);
+	TEST_EXPECT(again.playing() == 7);
+	for (size_t i = 0; i < 7; ++i)
+		TEST_EXPECT(same(*again.pose(rows[i].row), viewport->poses().pose(rows[i].row)->pose));
+	TEST_EXPECT(again.run_to(viewport->poses(), -5) && again.tick() == -5 && again.started_at() == -5);
+	TEST_EXPECT(rig.viewport()->people().serial() == serial);
+	std::printf("test_people_play passed\n");
+	return 0;
+}
+
+// S23 C: with Listen on, the people's footsteps are heard as they play their clips: each event word on the body's odd
+// tick (an NPC's sound block) plays its foot's slot of the item's sound profile, its set found in the project's bank,
+// handed to the Shell as the clip preview's sounds are; with Listen off, nothing.
+static int test_people_heard() {
+	Rig rig("opennova_editor_mission_people_heard");
+	TEST_EXPECT(rig.open());
+	const std::string root = rig.session.view().project.root;
+	// A bank of the two footsteps (heard to a kilometre), their wave, the profile and the rifleman naming it.
+	opennova::lwf::File bank;
+	const char *sets[] = { "PFS_GND_L", "PFS_GND_R" };
+	for (size_t i = 0; i < 2; ++i) {
+		opennova::lwf::Single single;
+		single.name = sets[i];
+		single.path = std::string(i == 0 ? "pfs_gnd_l" : "pfs_gnd_r") + ".wav";
+		bank.singles.push_back(single);
+		opennova::lwf::Multi set;
+		set.name = sets[i];
+		set.pitch_base = opennova::lwf::kAuthoredSetPitchBase;
+		set.target_id = 1000;
+		set.playlist_indices.push_back(uint32_t(i));
+		bank.multis.push_back(set);
+		opennova::lwf::Playlist layer;
+		layer.falloff_radius = 1000;
+		layer.flags = opennova::lwf::kFlagInternal | opennova::lwf::kFlagExternal;
+		layer.sndparm_indices.push_back(uint32_t(i));
+		bank.playlists.push_back(layer);
+		opennova::lwf::Sndparm member;
+		member.single_index = uint32_t(i);
+		member.pitch_scaled = opennova::lwf::kPitchUnityQ16;
+		member.volume = 200;
+		member.clamp_volume = 255;
+		bank.sndparms.push_back(member);
+	}
+	std::vector<uint8_t> bytes;
+	std::string error;
+	TEST_EXPECT(opennova::lwf::encode_lwf(bank, bytes, error));
+	const std::vector<uint8_t> tone = test_io::read_file(fixture("lwf/tone.wav"));
+	std::string items = kItems;
+	items.replace(items.find("ai_function org1\nattrib: aidata\nend\n"), 0, "sound_profile on_people\n");
+	TEST_EXPECT(editor_test::write_bytes(root + "/sounds/game.lwf", bytes) &&
+	            editor_test::write_bytes(root + "/sounds/pfs_gnd_l.wav", tone) &&
+	            editor_test::write_bytes(root + "/sounds/pfs_gnd_r.wav", tone) &&
+	            editor_test::write_text(root + "/defs/SndProf.def",
+	                                    editor_test::crlf("begin \"default\"\nend\nbegin \"on_people\"\n"
+	                                                      "\tSSLFootGND PFS_GND_L 0 0 0\n\tSSRFootGND PFS_GND_R 0 0 0\nend\n")) &&
+	            editor_test::write_text(root + "/defs/items.def", items));
+	rig.session.handle(request::rescan());
+	rig.session.run_operations();
+	rig.pump();
+	const auto run = [&](int frames) {
+		for (int i = 0; i < frames; ++i) {
+			rig.session.advance(2.0 / 62.5);
+			rig.pump();
+		}
+	};
+	const auto heard = [&]() {
+		size_t count = 0;
+		for (const ClipSoundPlay &play : rig.session.clip_sounds_since(0))
+			for (const WorkspaceView::Voice &voice : play.voices)
+				count += voice.path == "sounds/pfs_gnd_l.wav" || voice.path == "sounds/pfs_gnd_r.wav" ? 1 : 0;
+		return count;
+	};
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "mission", "clock": {"playing": true, "rate": 1}})"));
+	rig.pump();
+	run(60);
+	TEST_EXPECT(heard() == 0); // Listen off: nothing heard
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "mission", "options": {"listen": {"on": true}}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	run(120);
+	const size_t steps = heard();
+	std::printf("people heard: %zu footsteps over 240 ticks\n", steps);
+	TEST_EXPECT(steps > 0);
+	const JsonValue body = viewport_to_json(rig.session.view(), *rig.viewport(), JsonPage());
+	const JsonValue *people = body.get("body") ? body.get("body")->get("people") : nullptr;
+	TEST_EXPECT(people && people->get("playing") && people->get("playing")->number == 7.0);
+	std::printf("test_people_heard passed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	TEST_EXPECT(test_poses() == 0);
+	TEST_EXPECT(test_people_play() == 0);
+	TEST_EXPECT(test_people_heard() == 0);
 	TEST_EXPECT(test_retail() == 0);
 	std::printf("editor_mission_poses: all tests passed\n");
 	return 0;

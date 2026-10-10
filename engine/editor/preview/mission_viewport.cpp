@@ -359,6 +359,7 @@ ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	detail_.clear();
 	scene_.clear();
 	poses_.clear();
+	people_.clear();
 	effects_.close();
 	listen_.close();
 	drawn_ = JsonValue();
@@ -398,12 +399,51 @@ void MissionViewport::follow_listen_(const SessionView &view, const Document *do
 	if (dot != std::string::npos) stem = stem.substr(0, dot);
 	listen_.refresh(view, scene_, *mission, stem);
 	listen_.play_to(clock.ticks(), camera_.eye(), hours());
+	// What the people's sounds play from (DI-04's sources: SndProf.def and the game's bank chain).
+	people_sources_.refresh(*view.findings.assets,
+			view.project.document ? view.project.document->expansion.name : std::string(), PreviewRig());
 }
 
 std::vector<ClipSoundFired> MissionViewport::fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector,
 		uint64_t &seq) {
-	if (!options_.listen.on || !listen_.open()) return {};
+	if (!options_.listen.on || !listen_.open()) {
+		people_heard_ = -1;
+		return {};
+	}
 	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq, options_.listen.volume);
+	// The people's footsteps and foley on the ticks they played since (S23 C), each where the person stands, heard at
+	// the camera; none over a start again (their spawn), from where it put them.
+	const int32_t now = people_.tick();
+	if (people_heard_ < people_.started_at() || people_heard_ > now) people_heard_ = people_.started_at();
+	if (now > people_heard_) {
+		const auto where = [&](NodeId row, MissionPersonHeard &out) {
+			const MissionPose *pose = poses_.pose(row);
+			const MissionEntityMark *entity = scene_.entity(row);
+			if (!pose || !entity || pose->status != "posed") return false;
+			const double at[3] = { entity->x, entity->y, entity->z + pose->lift };
+			out.origin = mission_to_preview(at);
+			const MissionGroundFacts ground = terrain_ground_.terrain_at(entity->x, entity->y, entity->z);
+			out.surface = ground.under_water ? audio::FootSurface::Water
+			              : ground.surface == 3 ? audio::FootSurface::Snow : audio::FootSurface::Ground;
+			const PersonDefinition &definition = pose->definition;
+			out.item.found = true;
+			out.item.sound_profile = definition.sound_profile;
+			out.item.sound_profile_female = definition.sound_profile_female;
+			out.item.move_function = definition.move_function;
+			out.item.ai_function = definition.ai_function;
+			out.title = "Person " + std::to_string(entity->ssn);
+			return true;
+		};
+		for (ClipSoundFired &sound : mission_people_sounds(people_, people_heard_, now, where, people_sources_,
+				     camera_.eye(), selector)) {
+			sound.seq = ++seq;
+			sound.path = path();
+			if (scan) find_clip_sound_waves(sound, *scan);
+			listen_.keep(sound);
+			fired.push_back(std::move(sound));
+		}
+		people_heard_ = now;
+	}
 	for (ClipSoundFired &sound : fired) sound.path = path();
 	return fired;
 }
@@ -431,6 +471,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		bound_items_(view);
 		stand_people_(view, poses_.refresh(view, scene_));
+		people_.run_to(poses_, clock.ticks());
 		follow_overlay_(view);
 		picture_.show(key, generation);
 		shown(*document);
@@ -460,6 +501,9 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// Update poses them, the picture standing.
 	bool posed = poses_.refresh(view, scene_);
 	posed = stand_people_(view, posed) || posed;
+	// The people play their clips on to the clock (S23 C): the device poses them each frame as they stand, no Update
+	// asked.
+	people_.run_to(poses_, clock.ticks());
 	// The overlay made again where the option or the ground moved (DI-29): an Update gives it the device.
 	const bool overlaid = follow_overlay_(view);
 	// The Shoot tool's shots run to the clock (DI-23): the device draws their scars each frame, their effects
@@ -1314,6 +1358,13 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	body.set("counts", std::move(counts));
 	// How many people the game's spawn poses (DI-38: each organic's own in items).
 	body.set("posed", json_number(double(poses_.posed())));
+	// The people as they play their clips on the clock (S23 C): how many, the clock's tick they stand at and the one
+	// they started from (their spawn).
+	JsonValue people = JsonValue::make_object();
+	people.set("playing", json_number(double(people_.playing())));
+	people.set("tick", json_number(people_.tick()));
+	people.set("started_at", json_number(people_.started_at()));
+	body.set("people", std::move(people));
 	body.set("ground", JsonValue::make_bool(ground_));
 	body.set("missing", json_number(double(missing_.size())));
 	// The ground overlay the options ask (DI-29): its legend and extent, null with none asked.
@@ -1375,7 +1426,13 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 			item.set("yaw", json_number(entity.yaw));
 			item.set("team", json_number(entity.team));
 			// A person's spawn pose (DI-38).
-			if (const MissionPose *pose = poses_.pose(entity.row)) item.set("pose", mission_pose_json(*pose));
+			if (const MissionPose *pose = poses_.pose(entity.row)) {
+				JsonValue posed = mission_pose_json(*pose);
+				// And its body as it plays now (S23 C), on the clock's tick the people stand at.
+				if (const world::InfantryBodyPose *body = people_.pose(entity.row))
+					posed.set("now", mission_body_json(*body, people_.tick()));
+				item.set("pose", std::move(posed));
+			}
 			// Its item's particle slot as the start attaches it (DI-31).
 			if (const MissionEffectSlot *slot = effects_.slot(entity.row)) {
 				JsonValue effect = JsonValue::make_object();

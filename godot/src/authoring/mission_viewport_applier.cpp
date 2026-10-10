@@ -962,6 +962,7 @@ void MissionViewportApplier::show_(Placed &placed, bool shown) {
 
 void MissionViewportApplier::drop_entities_() {
 	terrain_->set_static_shadow_placer(Ref<MissionObjectPlacer>());
+	people_serial_ = UINT64_MAX;
 	// The husks go with what they stood in for (an individual one's with its intact model, a graft here).
 	for (auto &entry : husks_)
 		if (entry.second.intact == 0)
@@ -1062,7 +1063,8 @@ void MissionViewportApplier::move_entities_(const MissionScene &scene, const ope
 		if (!entry.second.hidden && !scene.entity(entry.first)) show_(entry.second, false);
 }
 
-void MissionViewportApplier::pose_people_(const MissionScene &scene, const opennova::editor::MissionPoses &poses) {
+void MissionViewportApplier::pose_people_(const MissionScene &scene, const opennova::editor::MissionPoses &poses,
+		const opennova::editor::MissionPeople &people) {
 	for (auto &entry : entities_) {
 		Placed &placed = entry.second;
 		const opennova::editor::MissionPose *pose = poses.pose(entry.first);
@@ -1073,19 +1075,38 @@ void MissionViewportApplier::pose_people_(const MissionScene &scene, const openn
 		if (model == nullptr) continue;
 		// Where the spawn stands it: its record lifted by the warmup and its ground solve.
 		model->set_transform(transform_of_(*entity).translated(Vector3(0.0f, float(pose->lift), 0.0f)));
-		// The body channel as the game's presenter dispatches a person's row: the playing clip at its
-		// playhead, or the outgoing clip blended under it at the target's weight while the blend runs
-		// (EntityPresenter's body leg over the PF_ANIM_* fields the present rows carry from the same
-		// world::InfantryBodyPose).
-		const opennova::world::InfantryBodyPose &body = pose->pose;
-		const String key = opennova::to_gd(opennova::world::infantry_anim_key(body.state));
-		if (body.blending && body.source_state >= 0 && body.weight < 1.0f)
-			model->play_body_blend_at(opennova::to_gd(opennova::world::infantry_anim_key(body.source_state)),
-					body.source_phase, key, body.phase, body.weight, body.source_variant, body.variant);
-		else
-			model->play_body_clip_at(key, body.phase, body.variant, body.parked);
+		// Its body as it plays now (S23 C), its spawn's before it plays.
+		const opennova::world::InfantryBodyPose *body = people.pose(entry.first);
+		pose_body_(*model, body ? *body : pose->pose);
 		placed.posed_model = placed.model;
 		placed.pose_stamp = pose->stamp;
+	}
+}
+
+void MissionViewportApplier::pose_body_(ObjectModel &model, const opennova::world::InfantryBodyPose &body) {
+	// The body channel as the game's presenter dispatches a person's row: the playing clip at its
+	// playhead, or the outgoing clip blended under it at the target's weight while the blend runs
+	// (EntityPresenter's body leg over the PF_ANIM_* fields the present rows carry from the same
+	// world::InfantryBodyPose).
+	const String key = opennova::to_gd(opennova::world::infantry_anim_key(body.state));
+	if (body.blending && body.source_state >= 0 && body.weight < 1.0f)
+		model.play_body_blend_at(opennova::to_gd(opennova::world::infantry_anim_key(body.source_state)),
+				body.source_phase, key, body.phase, body.weight, body.source_variant, body.variant);
+	else
+		model.play_body_clip_at(key, body.phase, body.variant, body.parked);
+}
+
+void MissionViewportApplier::play_people_(const opennova::editor::MissionViewport &mission) {
+	// The people as they play their clips on the clock (S23 C): each posed person's body as it stands now, again
+	// whenever they played on.
+	const opennova::editor::MissionPeople &people = mission.people();
+	if (people.serial() == people_serial_) return;
+	people_serial_ = people.serial();
+	for (auto &entry : entities_) {
+		Placed &placed = entry.second;
+		const opennova::world::InfantryBodyPose *body = people.pose(entry.first);
+		if (body == nullptr || placed.model == 0 || placed.posed_model != placed.model) continue;
+		if (ObjectModel *model = model_of_(placed)) pose_body_(*model, *body);
 	}
 }
 
@@ -1137,7 +1158,7 @@ void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel 
 	const MissionViewport &mission = mission_of(viewport);
 	const opennova::editor::MissionViewportOptions &options = mission.options();
 	move_entities_(mission.scene(), mission.poses());
-	pose_people_(mission.scene(), mission.poses());
+	pose_people_(mission.scene(), mission.poses(), mission.people());
 	// The layers the options switch.
 	terrain_->set_visible(options.terrain);
 	sky_->set_visible(options.sky);
@@ -1349,7 +1370,10 @@ void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewpor
 	const std::shared_ptr<opennova::particle::EffectScene> &scene = mission_of(viewport).effects().scene();
 	if (effects_mounted_ && scene != effects_->scene()) effects_->show(scene);
 	apply_shots_(mission_of(viewport));
-	if (!build_) apply_husks_(mission_of(viewport), clock.ticks());
+	if (!build_) {
+		apply_husks_(mission_of(viewport), clock.ticks());
+		play_people_(mission_of(viewport));
+	}
 	apply_listen_(mission_of(viewport));
 }
 

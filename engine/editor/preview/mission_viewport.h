@@ -15,6 +15,7 @@
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_listen.h>
 #include <editor/preview/mission_options.h>
+#include <editor/preview/mission_people.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_shots.h>
@@ -131,6 +132,9 @@ public:
 	// warmup leave each placed person in), as last followed: the device poses each person's model by
 	// its row's.
 	const MissionPoses &poses() const { return poses_; }
+	// Its people playing their clips on the preview clock from their spawn (S23 C, preview/mission_people): the device
+	// poses each person's model by its body as it plays now.
+	const MissionPeople &people() const { return people_; }
 	// Its items' effects as the mission's start attaches them (DI-31, preview/mission_effects), followed and
 	// played to the preview clock while its options show them (closed otherwise): the device draws its scene.
 	const MissionEffects &effects() const { return effects_; }
@@ -140,9 +144,10 @@ public:
 	// What the mission sounds like at its camera while its options listen (DI-36, preview/mission_listen): the sources,
 	// the channels the device plays, the script's weather; closed while they do not.
 	const MissionListen &listen() const { return listen_; }
-	// The one-shots its Listen heard since the last call (the weather's thunder, the script's sounds), each planned as
-	// the game plays it with its member picked through `selector`, numbered from `seq`: what the session's clip sounds
-	// hand the Shell (session/clip_sounds). None while it does not listen.
+	// The one-shots its Listen heard since the last call (the weather's thunder, the script's sounds, its people's
+	// footsteps and foley as they play their clips), each planned as the game plays it with its member picked through
+	// `selector`, numbered from `seq`: what the session's clip sounds hand the Shell (session/clip_sounds). None while
+	// it does not listen.
 	std::vector<ClipSoundFired> fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq);
 	// The hour the picture shows: the options' time, else the mission's start time [orig: Game_StartMission @ 0x525371
 	// widens the header's Q8.8 start hour into the clock].
@@ -303,6 +308,9 @@ private:
 	uint64_t bounds_graph_ = 0; // the graph's generation then
 	uint64_t bounds_files_ = 0; // and the asset source's
 	MissionPoses poses_;
+	MissionPeople people_;
+	ClipSoundSources people_sources_; // SndProf.def and the banks the people's sounds play from
+	int32_t people_heard_ = -1; // the clock's last tick the people's sounds were heard to
 	MissionEffects effects_;
 	MissionListen listen_;
 	io::JsonValue drawn_;

@@ -148,6 +148,8 @@ public:
 	const std::vector<MissionSoundChannel> &channels() const { return channels_; }
 	const MissionScriptRun &script() const { return script_; }
 	const std::vector<ClipSoundFired> &sounds_fired() const { return fired_; }
+	// A one-shot the view heard beside the Listen's own (S23 C: its people's footsteps and foley), kept with them.
+	void keep(const ClipSoundFired &fired);
 	int32_t tick() const { return tick_; }
 	double hours() const { return hours_; }
 	const PreviewVec3 &listener() const { return listener_; }

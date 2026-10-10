@@ -207,6 +207,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_map.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_map_outline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_people.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_map_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport_shots.cpp

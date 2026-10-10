@@ -1398,6 +1398,12 @@ func test_people_posed_as_they_spawn() -> void:
 	state = _state()
 	assert_gt(int(state.get("builds", 0)), before, "built again")
 	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	# The people play their clips on the clock (S23 C): held at its start, they stand at their spawn.
+	assert_true(_change({"kind": "mission", "clock": {"playing": false, "ticks": 0}}))
+	for _frame in 3:
+		await get_tree().process_frame
+		_app.pump()
+	state = _state()
 	assert_eq(int(state.get("body", {}).get("posed", -1)), 2, "both people posed")
 	var walking := {}
 	var standing := {}
@@ -1444,6 +1450,63 @@ func test_people_posed_as_they_spawn() -> void:
 	assert_eq(_person_model(walking), model, "the same model")
 	if model != null:
 		_assert_posed(model, now["pose"], "idle now")
+
+
+## S23 C: the people play their clips on the preview clock from their spawn, the device posing each person's model by
+## its body as it plays now (its pose's `now` on the wire); held, they hold; a seek back to the start stands them at
+## their spawn again.
+func test_people_play_their_clips() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	var before := int(state.get("builds", 0))
+	_people_project()
+	for _frame in 900:
+		state = _state()
+		if String(state.get("status", "")) == "ready" and int(state.get("builds", 0)) > before:
+			break
+		await get_tree().process_frame
+	assert_true(_change({"kind": "mission", "clock": {"playing": true, "rate": 1}}))
+	for _frame in 30:
+		await get_tree().process_frame
+		_app.pump()
+	assert_true(_change({"kind": "mission", "clock": {"playing": false}}))
+	for _frame in 3:
+		await get_tree().process_frame
+		_app.pump()
+	state = _state()
+	var people: Dictionary = state.get("body", {}).get("people", {})
+	assert_eq(int(people.get("playing", -1)), 2, str(people))
+	assert_gt(int(people.get("tick", 0)), int(people.get("started_at", 0)), "played on: %s" % str(people))
+	var played := 0
+	for row: Variant in state.get("items", []):
+		var mark: Dictionary = row
+		if String(mark.get("kind", "")) != "organic":
+			continue
+		var now: Dictionary = mark.get("pose", {}).get("now", {})
+		assert_false(now.is_empty(), str(mark.get("pose", {})).left(300))
+		var model := _person_model(mark)
+		assert_not_null(model)
+		if model == null or now.is_empty():
+			continue
+		_assert_posed(model, now, String(mark.get("name", "")) + " now")
+		if int(now["playing"].get("phase", -1)) != int(mark["pose"]["playing"].get("phase", -1)):
+			played += 1
+	assert_eq(played, 2, "both played on from their spawn")
+	# A seek back to the start: at their spawn again.
+	assert_true(_change({"kind": "mission", "clock": {"ticks": 0}}))
+	for _frame in 3:
+		await get_tree().process_frame
+		_app.pump()
+	state = _state()
+	for row: Variant in state.get("items", []):
+		var mark: Dictionary = row
+		if String(mark.get("kind", "")) != "organic":
+			continue
+		var model := _person_model(mark)
+		if model != null:
+			_assert_posed(model, mark["pose"], String(mark.get("name", "")) + " at its spawn")
 
 
 ## DI-31: the device draws single-sampled (the particle renderer's passes bind its depth, DI-14's rule) and

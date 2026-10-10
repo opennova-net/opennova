@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/preview/mission_people.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_shots.h>
@@ -319,7 +320,13 @@ private:
 	void move_entities_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
 	// Each person's model in the pose the game spawns it in and where the spawn stands it (DI-38, the
 	// viewport's MissionPoses), where its pose or its model is another than it was given.
-	void pose_people_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
+	void pose_people_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses,
+			const opennova::editor::MissionPeople &people);
+	// A person's model posed by its body (a clip at its playhead, or two blended).
+	void pose_body_(ObjectModel &model, const opennova::world::InfantryBodyPose &body);
+	// The people as they play their clips now (MissionViewport::people), posed again whenever they played on.
+	void play_people_(const opennova::editor::MissionViewport &mission);
+	uint64_t people_serial_ = UINT64_MAX; // the viewport's people's serial last posed
 	// The moved entities' terrain shadow sources moved too, once no gesture is open.
 	void flush_shadows_(const opennova::editor::MissionScene &scene);
 	// The terrain's foliage definitions configured as the game's load configures them (DI-31,
