@@ -94,6 +94,10 @@ struct ViewportPicture {
 	// a selection, the game's elsewhere): a pointer held where no canvas has the mouse is not drawn (DI-34: the
 	// menu's canvas holds the game's mouse as its own as it moves).
 	bool hovered = false;
+	// The OS window the picture is in, its x and y that window's pixels (S23 C): 0 the editor's main window, else
+	// the window an undocked tab is (Dear ImGui's viewport of it, whose platform handle the ImGui layer makes the
+	// window's id).
+	int64_t window = 0;
 };
 
 // A device (ADR 0046 S13 V5): what draws one viewport's picture, the Shell's (an offscreen
@@ -115,6 +119,10 @@ public:
 	// frames it is drawn, its picture built (while a build runs, or after one failed, the last picture
 	// it built is drawn as it was).
 	virtual void draw(const ViewportPicture &picture) = 0;
+	// Whether a device that places a Control over the canvas can place it in the OS window `window`
+	// (ViewportPicture::window): the main window always; another where the device finds that window (S23 C:
+	// an undocked tab's). A device drawn through the ImGui pass is drawn in any window and is never asked.
+	virtual bool places_in(int64_t window) const { return window == 0; }
 	// The surface under the picture's point (x, y), in the viewport's space: what a drop lands on (a
 	// mission's terrain), answered only while its picture is built (none while a build runs). False
 	// where the device has none (no kind drops yet).

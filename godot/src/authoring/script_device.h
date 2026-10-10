@@ -63,6 +63,8 @@ public:
 	~ScriptDevice() override;
 
 	void draw(const opennova::editor::ViewportPicture &picture) override;
+	// The main window, and an undocked tab's (S23 C): an OS window whose Godot Window the display server names.
+	bool places_in(int64_t window) const override;
 	void take(opennova::editor::ViewportAction action, const opennova::editor::ViewportModel &model,
 			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock,
 			opennova::editor::ViewportDeviceReport &report) override;
@@ -100,8 +102,13 @@ private:
 	// and selection kept): true when it changed.
 	bool take_text_(const std::u32string &shown);
 
+	// The Godot Window of the OS window `window` (ViewportPicture::window; 0 none), and the node the control's
+	// layer goes under for it: the owner for the main window, that Window for another.
+	Window *window_of_(int64_t window) const;
+	Node *host_(int64_t window) const;
+
 	ViewportDeviceSink sink_;
-	uint64_t layer_id_ = 0, edit_id_ = 0;
+	uint64_t owner_id_ = 0, layer_id_ = 0, edit_id_ = 0;
 	Ref<ScriptHighlighter> highlighter_;
 	// The session's view (the session outlives its devices) and the document's path, as the last take
 	// gave them.

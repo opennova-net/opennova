@@ -205,6 +205,9 @@ public:
 	void drop_files_at_screen(const PackedStringArray &p_files, const Vector2 &p_screen);
 	// The point the last drop was held at, in the window's viewport (for the tests).
 	Vector2 get_last_drop_at() const { return last_drop_at_; }
+	// The windowed GUT's undock (EditorWindows::float_window): the window titled `title` off its dock, at `at` on
+	// the desktop.
+	void float_window(const String &p_title, const Vector2 &p_at);
 
 private:
 	// A free loopback port for the game's MCP endpoint, allocated when the session spawns the game
