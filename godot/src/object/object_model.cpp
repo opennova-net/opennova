@@ -2218,6 +2218,8 @@ void ObjectModel::_bind_methods() {
 			&ObjectModel::get_weapon_channel_key);
 	ClassDB::bind_method(D_METHOD("get_weapon_channel_phase_ticks"),
 			&ObjectModel::get_weapon_channel_phase_ticks);
+	ClassDB::bind_method(D_METHOD("is_weapon_channel_parked"),
+			&ObjectModel::is_weapon_channel_parked);
 	ClassDB::bind_method(D_METHOD("set_aim_overlay", "deltas"),
 			&ObjectModel::set_aim_overlay);
 	ClassDB::bind_method(D_METHOD("get_aim_overlay"),

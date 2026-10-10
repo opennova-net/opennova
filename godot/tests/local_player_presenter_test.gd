@@ -206,13 +206,13 @@ anim_wpn_switchrank\t"idle.bad"
 ## with the M4/satchel kit (the armory-proven canonical profile). `baked_terrain`
 ## swaps the mission onto the Tmap CPT heightfield so the ported terrain raycast
 ## has a real surface to measure.
-func _load_player_world(baked_terrain: bool = false) -> GameWorld:
+func _load_player_world(baked_terrain: bool = false, root_dir: String = "") -> GameWorld:
 	var packed := load("res://game/world/game_world.tscn") as PackedScene
 	assert_not_null(packed, "the packaged world scene loads")
 	var world := packed.instantiate() as GameWorld
 	add_child_autofree(world)
 	var root := ResourceRoot.new()
-	assert_eq(root.set_root_dir(_shared_root), OK)
+	assert_eq(root.set_root_dir(root_dir if not root_dir.is_empty() else _shared_root), OK)
 	world.set_resource_root(root)
 	var loadout := PlayerSpawnLoadout.new()
 	loadout.primary = "WPN_M4AUTO"
@@ -1466,6 +1466,110 @@ func test_local_avatar_body_channel_follows_the_sim_tuple() -> void:
 	presenter.teardown()
 	assert_true(_local_avatar(world) == null or _local_avatar(world).is_queued_for_deletion(),
 			"teardown releases the presenter-owned avatar")
+
+
+# The shared root with extra rows in the player's clip sets (soldier.adm, and
+# E_STAND.adm, the motor's), each over a committed .bad.
+func _stage_root_with_clips(rows: String) -> String:
+	var root_dir := OS.get_cache_dir().path_join(TEST_ROOT).path_join(
+			"clips_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(root_dir), OK)
+	for file_name in DirAccess.get_files_at(_shared_root):
+		assert_eq(DirAccess.copy_absolute(_shared_root.path_join(file_name),
+				root_dir.path_join(file_name)), OK)
+	for adm_name in ["soldier.adm", "E_STAND.adm"]:
+		var text := FileAccess.get_file_as_string(root_dir.path_join(adm_name))
+		var adm := FileAccess.open(root_dir.path_join(adm_name), FileAccess.WRITE)
+		assert_not_null(adm, "staged %s is writable" % adm_name)
+		adm.store_string(text + rows.replace("\n", "\r\n"))
+		adm.close()
+	return root_dir
+
+
+# The local player's PF_ANIM_PHASE_PARKED / PF_WPN_PHASE_PARKED, read off its
+# present row (the one player row of this single-player world).
+func _local_row_parked(sim: Simulation, field: int) -> int:
+	var snap: PackedFloat32Array = sim.get_present_snapshot()
+	var stride := sim.get_present_stride()
+	for rec in range(snap.size() / stride):
+		if int(snap[rec * stride + Simulation.PF_TYPE_ID]) == 0x14B9:
+			return int(snap[rec * stride + field])
+	return -1
+
+
+# A parked tick draws the clip's LAST frame on the local avatar too, as every
+# other body's presenter does: the armed end-notify holds the channel on its
+# boundary, where the clip samples t = 0.99999, not the wrapped start [orig:
+# AnimChannel_AdvancePlayback's armed wrap @0x40B19E..0x40B1B1]. The jump stamps
+# jump_start now and jump_loop pending (the end-notify parks jump_start's wrap);
+# a reload's end defers the weapon channel's hold behind the locked reload clip
+# (the end-notify parks the reload loop's wrap).
+func test_local_avatar_presents_the_parked_tick() -> void:
+	var root_dir := _stage_root_with_clips("anim_jump_start\t\t\t\"walk.bad\"\n"
+			+ "anim_jump_loop\t\t\t\"idle.bad\"\n"
+			+ "anim_reload\t\t\t\"walk.bad\"\n")
+	var world := _load_player_world(false, root_dir)
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var presenter := _attach_presenter(world, camera)
+	await get_tree().process_frame
+	var sim := world.get_sim()
+	_frame(world, presenter, camera, 4)
+	var avatar := _local_avatar(world)
+	assert_not_null(avatar, "the presenter owns the 3P avatar")
+
+	# The body channel: jump, then step to the parked tick.
+	var jump := _move_intent()
+	jump.jump = true
+	presenter.set_input_override(jump)
+	assert_true(_frame_until(world, presenter, camera, func() -> bool:
+		return String(sim.get_local_player_anim_key()) == "anim_jump_start", 8),
+			"the jump stamps jump_start")
+	presenter.set_input_override(_move_intent())
+	var before := avatar.get_animation_time()
+	var parked := false
+	for i in 64:
+		before = avatar.get_animation_time()
+		_frame(world, presenter, camera, 1)
+		if sim.get_local_player_anim_phase_parked():
+			parked = true
+			break
+	assert_true(parked, "jump_start's end-notify parks the body channel on its wrap")
+	assert_eq(_local_row_parked(sim, Simulation.PF_ANIM_PHASE_PARKED), 1,
+			"the getter is the present row's parked bit")
+	assert_eq(String(avatar.get_active_body_clip()), "anim_jump_start")
+	assert_gt(avatar.get_animation_time(), before,
+			"the parked tick holds jump_start's last frame, not its wrapped start")
+	_frame(world, presenter, camera, 1)
+	assert_false(sim.get_local_player_anim_phase_parked(), "the next tick promotes")
+	_frame(world, presenter, camera, 120)  # land and settle
+
+	# The weapon channel: fire once, reload, and step to the park at the
+	# reload clip's wrap after the 80-tick window.
+	var frame_input := presenter.before_world_tick(TICK, false, true)
+	frame_input.set_weapon_input(true, true, false)
+	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+	presenter.after_world_tick()
+	_frame(world, presenter, camera, 16)
+	frame_input = presenter.before_world_tick(TICK, false, true)
+	frame_input.set_weapon_input(false, false, true)
+	world.tick(camera.global_position, camera.global_transform, TICK, frame_input)
+	presenter.after_world_tick()
+	var weapon_parked := false
+	for i in 200:
+		_frame(world, presenter, camera, 1)
+		if world.local_player_weapon_view().body_anim_parked:
+			weapon_parked = true
+			break
+	assert_true(weapon_parked, "the reload's end-notify parks the weapon channel on its wrap")
+	assert_eq(String(avatar.get_weapon_channel_key()), "anim_reload")
+	assert_eq(_local_row_parked(sim, Simulation.PF_WPN_PHASE_PARKED), 1,
+			"the weapon view's parked bit is the present row's")
+	assert_true(avatar.is_weapon_channel_parked(),
+			"the avatar's weapon channel is applied parked")
+	_frame(world, presenter, camera, 1)
+	assert_false(avatar.is_weapon_channel_parked(), "and unparked on the next tick")
+	TestFs.remove_dir_recursive(root_dir)
 
 
 func test_camera_direction_keeps_precision_far_from_origin() -> void:

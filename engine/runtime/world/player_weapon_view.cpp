@@ -231,6 +231,11 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	v.body_anim_blend_weight = 1.0f;
 	v.body_anim_variant = 0;
 	v.body_anim_prev_variant = 0;
+	// The armed end-notify's park: on such a tick the channel samples its clip's
+	// last frame at the published phase, not the wrapped start (as
+	// PF_WPN_PHASE_PARKED for every other body).
+	// [orig: AnimChannel_AdvancePlayback's armed wrap @0x40B19E..0x40B1B1]
+	v.body_anim_parked = false;
 	if (world.cached.local_player.valid()) {
 		const AiEntity *p = world.ai.for_handle(world.cached.local_player);
 		const Entity *entity = world.registry.get(world.cached.local_player);
@@ -239,6 +244,7 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 			v.body_anim_key = infantry_anim_key(p->inf.weapon_clip_state());
 			v.body_anim_phase = p->inf.wpn_clip_phase;
 			v.body_anim_variant = p->inf.wpn_variant;
+			v.body_anim_parked = p->inf.weapon_phase_parked();
 			if (p->inf.weapon_blend_active()) {
 				v.body_anim_prev_key = infantry_anim_key(p->inf.wpn_prev);
 				v.body_anim_prev_phase = p->inf.wpn_prev_clip_phase;

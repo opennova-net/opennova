@@ -1125,18 +1125,23 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 	const float anim_blend_weight = anim_sim.is_valid() ? anim_sim->get_local_player_anim_blend_weight() : 1.0f;
 	const int anim_variant = anim_sim.is_valid() ? anim_sim->get_local_player_anim_variant() : 0;
 	const int anim_source_variant = anim_sim.is_valid() ? anim_sim->get_local_player_anim_source_variant() : 0;
+	// Each channel's armed end-notify park: on such a tick the clip samples its
+	// last frame at the phase, not the wrapped start, as every other body's
+	// presenter reads it off PF_ANIM_PHASE_PARKED / PF_WPN_PHASE_PARKED.
+	const bool anim_parked = anim_sim.is_valid() && anim_sim->get_local_player_anim_phase_parked();
 	// The upper-body weapon channel: the sim's secondary-channel clip (reload
 	// etc.) posed at its own playhead onto the mask bones, composed under the
 	// aim overlay. Equal state ids still carry the secondary playhead; an empty
 	// key means the gate is off.
-	// [orig: producer @0x4b5dad, override @0x4b14db; world-wac-ai-re.md §14.8]
+	// [orig: producer @0x4b5dad, override @0x4b14db; the park
+	// AnimChannel_AdvancePlayback @0x40B19E..0x40B1B1; world-wac-ai-re.md §14.8]
 	const Ref<PlayerWeaponView> weapon_view = weapon_effects_.is_valid() ? weapon_effects_->weapon_view()
 																		 : Ref<PlayerWeaponView>();
 	if (weapon_view.is_valid()) {
 		body->set_weapon_channel(weapon_view->get_body_anim_key(), weapon_view->get_body_anim_phase(),
 				weapon_view->get_body_anim_prev_key(), weapon_view->get_body_anim_prev_phase(),
 				weapon_view->get_body_anim_blend_weight(), weapon_view->get_body_anim_variant(),
-				weapon_view->get_body_anim_prev_variant());
+				weapon_view->get_body_anim_prev_variant(), weapon_view->get_body_anim_parked());
 	} else {
 		body->set_weapon_channel(String(), 0);
 	}
@@ -1144,9 +1149,10 @@ void LocalPlayerPresenter::update_avatar(const Vector3 &p_pos) {
 		body->play_body_blend_at(anim_source_key, anim_source_phase, anim_key, anim_phase, anim_blend_weight,
 				anim_source_variant, anim_variant);
 	} else if (!anim_key.is_empty()) {
-		body->play_body_clip_at(anim_key, anim_phase, anim_variant);
+		body->play_body_clip_at(anim_key, anim_phase, anim_variant, anim_parked);
 	} else {
-		body->play_body_anim_at(anim_sim.is_valid() ? anim_sim->get_local_player_body_anim_slot() : -1, anim_phase);
+		body->play_body_anim_at(anim_sim.is_valid() ? anim_sim->get_local_player_body_anim_slot() : -1, anim_phase,
+				anim_parked);
 	}
 	// Attach only after this frame's body clip and weapon layer have been posed.
 	update_held_weapon(overlay);

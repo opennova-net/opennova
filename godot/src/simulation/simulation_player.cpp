@@ -298,6 +298,12 @@ int Simulation::get_local_player_anim_source_variant() const {
 	return p ? p->inf.anim_prev_variant : 0;
 }
 
+bool Simulation::get_local_player_anim_phase_parked() const {
+	if (!kernel_->world.cached.local_player.valid()) return false;
+	const AiEntity *p = kernel_->world.ai.for_handle(kernel_->world.cached.local_player);
+	return p ? p->inf.body_phase_parked() : false;
+}
+
 
 // HUD health/team. The original rebuilds these into its per-frame HUD info struct every frame
 // (health ratio at +92 = currentHealth/maxHealth, team byte at +374). We surface the raw values
