@@ -205,9 +205,8 @@ bool Lister::tick(uint32_t now_ms) {
 	if (!ending_ && http_.valid() && http_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
 		on_http_reply(http_.get());
 	}
-	if (!ending_)
-		refresh_listing(false);
-	if (ending_) teardown(/*stop_hosting=*/true);
+	if (!ending_) refresh_listing(false);
+	if (ending_) teardown();
 	return phase_ != Phase::Done;
 }
 
@@ -221,14 +220,7 @@ void Lister::stop() {
 	if (phase_ == Phase::Done) return;
 	io::logf(LogLevel::kInfo, "[main] stopping");
 	end(kExitStopped);
-	teardown(/*stop_hosting=*/true);
-}
-
-void Lister::disconnect() {
-	if (phase_ == Phase::Done) return;
-	io::logf(LogLevel::kInfo, "[main] disconnecting");
-	end(kExitStopped);
-	teardown(/*stop_hosting=*/false);
+	teardown();
 }
 
 // ServerHostResult success: the listing is up. A fresh host's result publishes nothing: its first
@@ -417,24 +409,20 @@ void Lister::end(int code) {
 	exit_code_ = code;
 }
 
-// Close the session: with `stop_hosting` (stop) the ClientStopHosting statement leaves on one
-// send pump first and the verified connection's disconnect burst follows (NovaWorldClient::stop's
-// teardown); without it (disconnect) the burst alone, as a process exit's atexit teardown sends
-// it.
-// The NovaWorld leg goes first: a console close leaves the process a few seconds.
-void Lister::teardown(bool stop_hosting) {
+// Deregister and close: the stop statement leaves on one send pump, then the verified
+// connection's disconnect burst (NovaWorldClient::stop's teardown).
+// The NovaWorld leg goes first: a console close leaves the process a few seconds, and the admin
+// thread can be mid-poll on a dead server.
+void Lister::teardown() {
 	if (phase_ == Phase::Done) return;
 	phase_ = Phase::Done;
 	if (lobby_.is_open()) {
-		if (stop_hosting) {
-			role_.stop();
-			lobby_.flush();
-		}
+		role_.stop();
+		lobby_.flush();
 		if (ClientSession *session = lobby_.session(); session != nullptr && session->is_verified()) {
 			const std::vector<uint8_t> goodbye = session->build_goodbye();
 			for (std::size_t i = 0; i < session->disconnect_burst_count(); ++i) lobby_.send(goodbye);
-			io::logf(LogLevel::kInfo, "[session] %s",
-			         stop_hosting ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
+			io::logf(LogLevel::kInfo, "[session] ClientStopHosting and the goodbye sent");
 		}
 		lobby_.close();
 	}
