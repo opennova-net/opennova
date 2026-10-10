@@ -317,7 +317,24 @@ std::string MissionDocument::record_title(const NodeAddress &address) const {
 	return title.empty() ? TableDocument::record_title(address) : title;
 }
 
-bool MissionDocument::compose(bms::File &out) const { return compose_mission(rows(), out); }
+const std::string *MissionDocument::item_class(const bms::Entity &entity) const {
+	if (!item_classes_) return nullptr;
+	const auto found = item_classes_->find(mission::entity_item_id(entity));
+	return found == item_classes_->end() ? nullptr : &found->second;
+}
+
+bool MissionDocument::compose(bms::File &out) const {
+	if (!compose_mission(rows(), out)) return false;
+	// Each record's AI class its item's row's, as the original's writer copies it over the record on every save,
+	// zero-filled past it [orig: JOTACmed.exe sub_44C8E0 @ 0x44c8e0, the memset; @ 0x44cabe..0x44caf2].
+	for (std::vector<bms::Entity> *pool : {&out.items, &out.buildings, &out.markers, &out.organics})
+		for (bms::Entity &entity : *pool)
+			if (const std::string *ai_class = item_class(entity)) {
+				std::memset(entity.name1, 0, sizeof(entity.name1));
+				std::memcpy(entity.name1, ai_class->data(), std::min(ai_class->size(), sizeof(entity.name1)));
+			}
+	return true;
+}
 
 bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::File &out) {
 	const MissionRow *mission = nullptr;
@@ -630,6 +647,16 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 					return false;
 				}
 		}
+		// An entity's AI class is its item's row's on every save (set_item_classes): set there, never on the record.
+		if (swap.in_place() && is_entity_kind(swap.before->kind)) {
+			const bms::Entity &was = static_cast<const EntityRow &>(*swap.before).native;
+			const bms::Entity &now = static_cast<const EntityRow &>(*swap.after).native;
+			if (was.type_id == now.type_id && std::memcmp(was.name1, now.name1, sizeof(was.name1)) != 0 && item_class(now)) {
+				refusal.message = "An entity's AI class is its item's sid: a save writes it from the item's row, as the "
+				                  "original editor does. Set the sid on the item.";
+				return false;
+			}
+		}
 		// A waypoint marker's path and place are its path's stops (D-MIS-6): edited there, never on the marker.
 		if (swap.in_place() && swap.before->kind == k(K::Marker)) {
 			const bms::Entity &was = static_cast<const EntityRow &>(*swap.before).native;
@@ -673,6 +700,12 @@ bool MissionDocument::get(const NodeAddress &address, const std::string &field, 
 		out = field == "waypoint_id" ? path : number;
 		return true;
 	}
+	// An entity's AI class as a save writes it: its item's row's (set_item_classes).
+	if (node && is_entity_kind(node->kind) && field == "name1")
+		if (const std::string *ai_class = item_class(static_cast<const EntityRow &>(*node).native)) {
+			out = *ai_class;
+			return true;
+		}
 	return TableDocument::get(address, field, out);
 }
 
@@ -688,6 +721,9 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 		if (const Node *node = row(address.row);
 		    node && static_cast<const EntityRow &>(*node).native.type_id == def::DEF_TYPE_WAYPOINT)
 			use.read_only = true; // its path's stops set them (get)
+	if (is_entity_kind(address.kind) && address.child == 0 && id == "name1")
+		if (const Node *node = row(address.row); node && item_class(static_cast<const EntityRow &>(*node).native))
+			use.read_only = true; // its item's row sets it on every save (get)
 	if (address.kind == k(K::Trigger) && id == "sub_type") use.own_choices = true;
 	if (address.kind == k(K::Action) && id == "action_sub_type") use.own_choices = true;
 	const int slot = param_slot(id);

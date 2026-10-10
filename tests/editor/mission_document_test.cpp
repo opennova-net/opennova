@@ -607,6 +607,38 @@ int test_stop_numbers() {
 	return 0;
 }
 
+// An entity's AI class is its item's row's on every save (D-MIS-10, set_item_classes), as the original's writer
+// copies the sid over the record: written so, read so, and refused as an edit of the record; an item the classes
+// name none for keeps its record's own.
+int test_item_classes() {
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document);
+	if (!document) return 1;
+	MissionDocument &m = dynamic_cast<MissionDocument &>(*document);
+	const std::string unclassed = bytes_of(*document);
+	const NodeAddress walker = row_at(*document, MissionKind::Organic, 0);
+	const bms::Entity &native = static_cast<const EntityRow &>(*document->row(walker.row)).native;
+	const int64_t item = mission::entity_item_id(native);
+	auto classes = std::make_shared<MissionItemClasses>();
+	(*classes)[item] = "SCOUTING";
+	m.set_item_classes(classes);
+	Value ai_class;
+	TEST_EXPECT(document->get(walker, "name1", ai_class) && std::get<std::string>(ai_class) == "SCOUTING");
+	bms::File saved;
+	std::string message;
+	const std::string written = bytes_of(*document);
+	TEST_EXPECT(bms::parse(reinterpret_cast<const uint8_t *>(written.data()), written.size(), saved, message) &&
+	            std::string(saved.organics[0].name1, 8) == "SCOUTING");
+	Diagnostic error;
+	TEST_EXPECT(!document->apply(edit_of(EditOperation::Set, walker, "name1", std::string("OTHER")), error) &&
+	            error.message.find("item's sid") != std::string::npos);
+	m.set_item_classes(std::make_shared<MissionItemClasses>());
+	TEST_EXPECT(bytes_of(*document) == unclassed &&
+	            document->apply(edit_of(EditOperation::Set, walker, "name1", std::string("OTHER")), error));
+	std::printf("item classes: an entity's AI class its item's on every save\n");
+	return 0;
+}
+
 // The weapon loadout as Save writes it reads back as the same entries (the game's reader takes a
 // fourth string as the damage class only when it is a nonzero number or holds no letter): an edit
 // that would make it read otherwise is refused; one that keeps it is written and read back the same.
@@ -1699,6 +1731,7 @@ int main(int argc, char **argv) {
 	if (test_loadout() != 0) return 1;
 	if (test_clipboard() != 0) return 1;
 	if (test_stop_numbers() != 0) return 1;
+	if (test_item_classes() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
 	if (test_item_type_on_symbol() != 0) return 1;

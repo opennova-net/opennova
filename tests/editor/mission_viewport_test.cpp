@@ -45,6 +45,7 @@
 #include <editor/graph/reference_queries.h>
 #include <formats/env/env_weather.h>
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/threedi/threedi_3di3.h>
@@ -73,6 +74,8 @@
 #include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
+namespace bms = opennova::bms;
+namespace mission = opennova::mission;
 using opennova::io::JsonValue;
 
 namespace {
@@ -98,9 +101,9 @@ constexpr const char *kDropItems = "begin \"Drop Pump\"\nid 106100\ntype object\
 								   "begin \"Marker Alpha\"\nid 100001\ntype marker\nend\n"
 								   "begin \"Waypoint\"\nid 106005\ntype marker\nend\n";
 
-// The edits a drop of a catalog's item plans: the Add with its item, its x, y, z and yaw, then what the record
-// takes from the item's row (D-MIS-10): its team, AI class and script, and four AI keys.
-constexpr size_t kPlacedEdits = 12;
+// The edits a drop of a catalog's item plans: the Add with its item, its x, y, z and yaw (what the record takes
+// from the item's row, D-MIS-10, the session plans as it serves the batch: plan_item_seeds).
+constexpr size_t kPlacedEdits = 5;
 
 // The preferences in memory, whose saves fail while `fail` is set (a settings file another program
 // holds, a read-only profile).
@@ -679,26 +682,65 @@ static int test_drop() {
 	// S15: facing the way the camera looks: north (0) on the first framing.
 	TEST_EXPECT(edits.size() == kPlacedEdits && edits[1].field == "x" && edits[2].field == "y" && edits[3].field == "z" &&
 			edits[4].field == "yaw" && edits[4].address.row == batch_made(0) && std::get<int64_t>(edits[4].value) == 0);
-	// What a record placed of an item takes from its row (D-MIS-10): the armory names none of it, so the new
-	// record's own values; the rifleman's team (Evil over Good), its sid's first eight characters as its AI
-	// class, no AI script (the project has no shooter.aip), its engagement distance and fire timer.
-	TEST_EXPECT(edits.size() == kPlacedEdits && edits[5].field == "team" && std::get<int64_t>(edits[5].value) == 0 &&
-	            edits[6].field == "name1" && std::get<std::string>(edits[6].value).empty() &&
-	            edits[10].field == "max_attack_distance" && std::get<int64_t>(edits[10].value) == 16);
+	// What a record placed of an item takes from its row (D-MIS-10), the session's one plan for every placement
+	// (plan_item_seeds): the rifleman's team (Evil over Good), no AI script (the project has no shooter.aip), its
+	// engagement distance and fire timer, the defaults where its row writes none; its AI class its sid up to eight
+	// characters, which a save writes from the row (set_item_classes) and a Set on the record is refused.
 	{
 		ViewportDrop person = drop;
 		person.name = "106102";
 		editor_test::Gathered planned;
-		TEST_EXPECT(viewport->drop(context, person, planned, error) && planned.requests.size() == 1);
-		const std::vector<Edit> *seeded = planned.requests.size() == 1 ? &planned.requests[0].edits : nullptr;
-		TEST_EXPECT(seeded && seeded->size() == kPlacedEdits);
-		if (seeded && seeded->size() == kPlacedEdits) {
-			const auto number = [&](size_t i) { return std::get<int64_t>((*seeded)[i].value); };
-			TEST_EXPECT(number(5) == 2 && std::get<std::string>((*seeded)[6].value) == "RIFLEMAN" &&
-			            std::get<std::string>((*seeded)[7].value).empty() && number(8) == 16 &&
-			            (*seeded)[9].field == "max_engagement_distance" && number(9) == 400 && number(10) == 16 &&
-			            (*seeded)[11].field == "advancetimer" && number(11) == 7);
-		}
+		TEST_EXPECT(viewport->drop(context, person, planned, error) && planned.requests.size() == 1 &&
+		            planned.requests[0].edits.size() == kPlacedEdits);
+		const std::string unplaced = rig.document()->serialize().text;
+		TEST_EXPECT(editor_test::serve(rig.session, planned.requests));
+		const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+		const std::vector<const Node *> organics = mission.rows_of(MissionKind::Organic);
+		const bms::Entity &rifleman = static_cast<const EntityRow &>(*organics.back()).native;
+		TEST_EXPECT(mission::entity_item_id(rifleman) == 106102 && rifleman.team == 2 && rifleman.name2[0] == 0 &&
+		            rifleman.min_engagement_distance == 16 && rifleman.max_engagement_distance == 400 &&
+		            rifleman.max_attack_distance == 16 && rifleman.advancetimer == 7);
+		const NodeAddress placed{ organics.back()->id, organics.back()->kind, 0 };
+		Value ai_class;
+		TEST_EXPECT(mission.get(placed, "name1", ai_class) && std::get<std::string>(ai_class) == "RIFLEMAN");
+		bms::File saved;
+		std::string why;
+		const std::string written = rig.document()->serialize().text;
+		TEST_EXPECT(bms::parse(reinterpret_cast<const uint8_t *>(written.data()), written.size(), saved, why) &&
+		            std::string(saved.organics.back().name1, 8) == std::string("RIFLEMAN", 8));
+		rig.session.handle(request::edit_record(kMission, { [&] {
+			Edit set;
+			set.address = placed;
+			set.field = "name1";
+			set.value = std::string("SNIPER");
+			return set;
+		}() }));
+		TEST_EXPECT(!rig.session.outcome().done());
+		// The outline's Add, then its item: the same values; an MCP Add setting its team itself keeps that team.
+		Edit add;
+		add.operation = EditOperation::Add;
+		add.address = NodeAddress{ 0, node_kind(MissionKind::Organic), 0 };
+		rig.session.handle(request::edit_record(kMission, { add }));
+		const Node *fresh = mission.rows_of(MissionKind::Organic).back();
+		TEST_EXPECT(rig.session.outcome().done() && static_cast<const EntityRow &>(*fresh).native.type_id == 0);
+		Edit item;
+		item.address = NodeAddress{ fresh->id, fresh->kind, 0 };
+		item.field = "item";
+		item.value = int64_t(106102);
+		rig.session.handle(request::edit_record(kMission, { item }));
+		const bms::Entity &outlined = static_cast<const EntityRow &>(*mission.rows_of(MissionKind::Organic).back()).native;
+		TEST_EXPECT(rig.session.outcome().done() && outlined.team == 2 && outlined.advancetimer == 7);
+		add.field = "item";
+		add.value = int64_t(106102);
+		Edit team;
+		team.address = NodeAddress{ batch_made(0), node_kind(MissionKind::Organic), 0 };
+		team.field = "team";
+		team.value = int64_t(1);
+		rig.session.handle(request::edit_record(kMission, { add, team }));
+		const bms::Entity &asked = static_cast<const EntityRow &>(*mission.rows_of(MissionKind::Organic).back()).native;
+		TEST_EXPECT(rig.session.outcome().done() && asked.team == 1 && asked.max_engagement_distance == 400);
+		for (int i = 0; i < 4; ++i) rig.session.handle(request::undo(kMission));
+		TEST_EXPECT(rig.document()->serialize().text == unplaced);
 	}
 	const std::string before = rig.document()->serialize().text;
 	TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));

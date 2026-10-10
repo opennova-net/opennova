@@ -981,17 +981,8 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	edits.push_back(set_of(placed, "y", at[1]));
 	edits.push_back(set_of(placed, "z", at[2]));
 	edits.push_back(set_of(placed, "yaw", int64_t(yaw)));
-	// What the record takes from its item's catalog row, as the original editor's placement takes it
-	// (D-MIS-10, MissionItemFacts::seeded): its team, its AI class and script, its four AI keys.
-	if (facts.seeded) {
-		edits.push_back(set_of(placed, "team", int64_t(facts.team)));
-		edits.push_back(set_of(placed, "name1", facts.ai_class));
-		edits.push_back(set_of(placed, "name2", facts.ai_script));
-		edits.push_back(set_of(placed, "min_engagement_distance", int64_t(facts.min_engagement)));
-		edits.push_back(set_of(placed, "max_engagement_distance", int64_t(facts.max_engagement)));
-		edits.push_back(set_of(placed, "max_attack_distance", int64_t(facts.max_attack)));
-		edits.push_back(set_of(placed, "advancetimer", int64_t(facts.fire_timer)));
-	}
+	// (What the record takes from its item's catalog row, D-MIS-10, the session plans as it serves the batch, as
+	// for every placement: plan_item_seeds.)
 	if (made) out.request(request::edit_record(made->catalog, made->edits, true));
 	out.request(request::edit_record(document->path(), std::move(edits)));
 	if (made)

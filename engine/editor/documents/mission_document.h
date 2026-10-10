@@ -77,6 +77,9 @@ struct EventRow : MissionRecordRow<mission::EventChain> {
 	std::shared_ptr<Node> clone() const override { return std::make_shared<EventRow>(*this); }
 };
 
+// The AI class each item's records are written with, by item id (MissionDocument::set_item_classes).
+using MissionItemClasses = std::unordered_map<int64_t, std::string>;
+
 class MissionDocument : public TableDocument {
 public:
 	const RecordTable &table() const override { return mission_table(); }
@@ -141,8 +144,18 @@ public:
 	// stop by its marker (Names). The graph, the Problems rows and the editor MCP keep record_name.
 	std::string record_title(const NodeAddress &address) const override;
 	// The file as the writer takes it: the mission row's file with every band's records and the
-	// chains joined, its counts synced. False before a load.
+	// chains joined, its counts synced, each entity's AI class its item's (set_item_classes). False before
+	// a load.
 	bool compose(bms::File &out) const;
+	// The AI class each item's records are written with (name1), by item id: its catalog row's sid up to its
+	// first '.', eight characters at most, which the original editor's writer takes from its item table on
+	// every save, never from the record [orig: JOTACmed.exe sub_44C8E0 @ 0x44cabe..0x44caf2, the def's +0x450
+	// copied over the record's +0x68]. The session hands it over (DocumentSet: on an edit and before a save);
+	// an item it names none for keeps its record's own. Such a record's name1 reads as its item's and is set
+	// on the item's row, never on the record.
+	void set_item_classes(std::shared_ptr<const MissionItemClasses> classes) { item_classes_ = std::move(classes); }
+	// The AI class a save writes for `entity` from its item's row; null where the classes name none.
+	const std::string *item_class(const bms::Entity &entity) const;
 	// The code of each source finding (issues(), in their order): what the parse made of the file.
 	const std::vector<MissionFinding> &issue_codes() const { return issue_codes_; }
 
@@ -218,6 +231,7 @@ private:
 
 	std::vector<MissionFinding> issue_codes_;
 	mutable Lookups lookups_;
+	std::shared_ptr<const MissionItemClasses> item_classes_;
 };
 
 bool is_mission_kind(AssetKind kind);
