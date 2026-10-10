@@ -47,6 +47,8 @@ var _crosshair_style := HudOverlay.MIN_CROSSHAIR_STYLE
 var _crosshair_color: int = PlayerOptions.DEFAULT_CROSSHAIR_COLOR
 var _aspect_mode := -1
 var _crosshair_spread: bool = PlayerOptions.DEFAULT_CROSSHAIR_SPREAD
+# Whether an in-game menu screen is open over the HUD (set_menu_screen_open).
+var _menu_screen_open := false
 
 # The HUD's message ring has 40 physical slots; keep no more pre-HUD messages
 # than it can ever present (net spectators may never acquire a local-player HUD).
@@ -308,6 +310,16 @@ func set_crosshair_color(rgb: int) -> void:
 	_crosshair_color = rgb & PlayerOptions.CROSSHAIR_COLOR_MASK
 	if _game_hud != null:
 		_game_hud.set_crosshair_color(_crosshair_color)
+
+
+## The shell's open-menu-screen state (any in-game screen over live play),
+## which the native HUD's preround armory line yields to (engine hud_frame.h
+## HudFrameState::menu_screen_open carries the witness). Pushed at once, so a
+## screen that stops the HUD tick still redraws without the line.
+func set_menu_screen_open(open: bool) -> void:
+	_menu_screen_open = open
+	if _game_hud != null:
+		_game_hud.set_menu_screen_open(open)
 
 
 func set_crosshair_spread_enabled(enabled: bool) -> void:
@@ -586,6 +598,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# their rows in the role-facts read below; the pause word draws STROVER7).
 	_game_hud.set_overlay_panel_windows(_toggles.is_emotes_menu_open(),
 			_toggles.is_radio_menu_open(), _toggles.is_paused())
+	_game_hud.set_menu_screen_open(_menu_screen_open)
 	# The tip (engine hud/tip_system.h): the world's producer events in the
 	# order they were raised, then the countdown by the HUD clock's main
 	# frames since the last frame (paused or not), then the draw feed.

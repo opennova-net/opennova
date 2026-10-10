@@ -1678,6 +1678,13 @@ func _process(delta: float) -> void:
 			or dev_tools_interacting or _end_flow.has_screen() or not _world.is_loaded():
 		if Input.get_mouse_mode() == Input.MOUSE_MODE_CAPTURED:
 			Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	# The open-menu-screen flag the HUD's armory line yields to, every frame
+	# ahead of the early returns (the SP pause stops the HUD tick): every state
+	# but WORLD holds an in-game screen (PAUSED the in-game menu, ARMORY,
+	# DEPLOY, END_ROUND, COMMAND_MAP), the stand-in _maybe_open_death_menu
+	# reads too (hud-re D-HUD-14).
+	if _hud_presenter != null:
+		_hud_presenter.set_menu_screen_open(_state != State.WORLD)
 	# The shell-control span closes before the early returns so every frame banks it.
 	var probe_t0 := Time.get_ticks_usec() if timing else 0
 	_frame_phase_sampler.finish_shell_control(probe_t0)
