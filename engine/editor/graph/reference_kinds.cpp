@@ -175,7 +175,8 @@ std::string text_id_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	// An action's text token, read through the playing mission's table and then gametext.bin [orig:
 	// MissionText_GetStringByKeyOrGameText @ 0x51ECD0, "" where neither has it @ 0x51ED22].
 	if (edge.field == "text_token" || edge.field == "texttoken")
-		return ", which neither the playing mission's string table nor gametext.bin defines: the action's text is empty.";
+		return ", which neither the playing mission's string table (medmssn.bin, a mission's with no table of its own) nor "
+		       "gametext.bin defines: the action's text is empty, as it is in a mission with no string table at all.";
 	// An item's text, whose section's text_default stands in for a key it lacks [orig: HUD_BuildEntityInfo @
 	// 0x4B8A41..0x4B8A5C].
 	if (edge.field == "text_id" && strutil::iequals(section, "item") && graph.has_file(table))
@@ -421,9 +422,16 @@ std::string item_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	if (named_by_class_cammo(edge))
 		return " (type id " + written + "), which the project does not have: a player of the class spawns as items.def's "
 		       "first row instead.";
-	if (!edge.fallback.empty())
-		return " (type id " + written + "), which the project does not have, nor an item named as the ammo ('" +
-		       edge.fallback + "'), which the game takes next: it warns that it finds none and keeps no item.";
+	if (!edge.fallback.empty()) {
+		// items.def's first item, which the lookup's 0 cannot tell from no match [orig: ItemList_FindIndexByTypeId @
+		// 0x49E100; AmmoDef_ParseProperty @ 0x40A5DA, `if (index || ...)`].
+		const GraphSymbol *first = graph.resolve_symbol(edge.kind, edge.value, edge.scope);
+		const std::string named = first && graph.first_item(*first)
+		                                  ? "), items.def's first item, which the game's lookup by type id returns as it does none"
+		                                  : "), which the project does not have";
+		return " (type id " + written + named + ", nor an item named as the ammo ('" + edge.fallback +
+		       "'), which the game takes next: it warns that it finds none and keeps no item.";
+	}
 	return " (type id " + written + "), which the project does not have: the game takes the item named as the record "
 	       "instead, else warns that it finds none.";
 }
@@ -443,8 +451,10 @@ std::string item_alias_missing(const AssetGraph &, const GraphEdge &) {
 }
 
 std::string avatar_part_missing(const AssetGraph &, const GraphEdge &edge) {
+	// The scope's section is the kind, a shadowed part's rank after it (AVATARS.DEF/HEAD#1).
 	const size_t slash = edge.scope.find('/');
-	const std::string kind = slash == std::string::npos ? std::string("part") : strutil::to_lower(edge.scope.substr(slash + 1)) + " part";
+	const std::string section = slash == std::string::npos ? std::string() : edge.scope.substr(slash + 1);
+	const std::string kind = section.empty() ? std::string("part") : strutil::to_lower(section.substr(0, section.find('#'))) + " part";
 	return ", which no " + kind + " of the file defines: the game drops a combination missing its head or body, and keeps "
 	       "one missing its arms without them.";
 }
@@ -604,6 +614,8 @@ constexpr ReferenceKindRow kRows[] = {
 	        .message_reads_files()
 	        .row,
 	Row(ReferenceKind::AiProfile, "ai_profile", "the AI profile", "AI profile").loads(AssetKind::AiProfile, kAiProfile).row,
+	// Retired (S23 B): no field or text makes one; the row keeps the kinds' numbers and the wire token.
+	Row(ReferenceKind::OtherText, "other_text", "the string id", "string id").offers(ReferenceKind::TextId).row,
 	Row(ReferenceKind::Font, "font", "the font", "font")
 	        .loads(AssetKind::Font, nullptr, font_files)
 	        .offers(ReferenceKind::StyleVar)

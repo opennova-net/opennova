@@ -852,7 +852,9 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			}
 			ui_kit::tooltip_lazy([&] {
 				const GraphSymbol *symbol = graph->symbol_at(document.path(), document.locator(line.address), defining->id);
-				if (!symbol || !count) return std::string("No file of the project names it, nor does the game's code.");
+				if (!symbol || !count)
+					return std::string("No file of the project names it, nor does the game's code by a written key (a key "
+					                   "the code builds as it runs is not counted).");
 				const std::vector<const CodeTextKey *> code = code_reads_of(*graph, *symbol);
 				std::string tip = counted(count, "use") + " (a click lists the project's in the Inspector, each a Go to):";
 				size_t listed = 0;

@@ -107,7 +107,8 @@ struct GraphSymbol {
 	ReferenceKind kind = ReferenceKind::None;
 	std::string name;    // normalized
 	std::string display; // as defined
-	std::string value;   // a style variable's value; a record set's record by its own name (S13 D8)
+	std::string value;   // a style variable's value; a record set's record by its own name (S13 D8); an
+	                     // ItemName's item id (the STR_ITM key its gametext name is under)
 	std::string file;    // the defining file, project-relative
 	std::string record;  // the defining record, every name from the row down ("" = the file itself)
 	std::string record_key; // the record as itself (Document::record_identity), "" for none

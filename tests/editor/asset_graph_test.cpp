@@ -493,7 +493,7 @@ static int test_native_extractors() {
 	// test.bms, warnings where it has none, the area's in the script's words; a script of no mission the project
 	// has names none.
 	{
-		TEST_EXPECT(editor_test::write_text(root + "/test.wac", "v1=SSNarea(42,37)\r\n"));
+		TEST_EXPECT(editor_test::write_text(root + "/test.wac", "v1=SSNarea(42,37) v2=SSNdead(10001)\r\n"));
 		TEST_EXPECT(editor_test::write_text(root + "/lone.wac", "v1=SSNarea(42,37)\r\n"));
 		editor_test::handle_to_end(session, request::rescan());
 		const GraphEdge *entity = edge_to(graph, "test.wac", ReferenceKind::MissionEntity, "42");
@@ -502,6 +502,8 @@ static int test_native_extractors() {
 		            graph.resolve(*entity) == ReferenceStatus::Missing && graph.resolve(*zone) == ReferenceStatus::Missing);
 		const GraphEdge *lone = edge_to(graph, "lone.wac", ReferenceKind::MissionEntity, "42");
 		TEST_EXPECT(lone && graph.resolve(*lone) == ReferenceStatus::NotAReference);
+		// A player's SSN (10000 and its slot: 10001 the second player) names no record of the mission.
+		TEST_EXPECT(!edge_to(graph, "test.wac", ReferenceKind::MissionEntity, "10001"));
 		bool zone_words = false;
 		for (const Diagnostic &d : session.view().findings.diagnostics)
 			zone_words = zone_words || (d.asset == "test.wac" && d.severity == DiagnosticSeverity::Warning &&

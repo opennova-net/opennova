@@ -266,6 +266,10 @@ public:
 	// first where that table defines it (text_override).
 	const GraphSymbol *resolve_symbol(ReferenceKind kind, const std::string &name,
 	                                  const std::string &scope = std::string()) const;
+	// Whether `symbol` is items.def's first item: the row the game's lookup by type id returns 0 for, as it does
+	// for no match, so a caller that takes 0 for none (an ammo's tracer) never reaches it [orig:
+	// ItemList_FindIndexByTypeId @ 0x49E100].
+	bool first_item(const GraphSymbol &symbol) const;
 	// Whether the game's search for a sound set by name reaches the bank `file` (a path or a logical
 	// name): one of the global chain's banks (audio::global_bank_chain over the project's expansion:
 	// <exp>L.lwf, <exp>.lwf, gamelocl.lwf, game.lwf, game3.lwf, game2.lwf) [orig: Game_StartMission @
@@ -440,6 +444,13 @@ private:
 	// A sound set by name as the game finds one (an unscoped Sound lookup): the definition in the
 	// chain's first bank holding the name, the project's before the base layer's; null for none.
 	const GraphSymbol *sound_binding(const std::string &name) const;
+	// An item by its name as the game holds it (an ItemName lookup): the first of items.def's items whose name,
+	// without case, is `name`, an item's name being its gametext "Item Names" string where the table has its key
+	// STR_ITM%04i (its id), else the one items.def gives it; null for none.
+	const GraphSymbol *item_named(const std::string &name) const;
+	// The definition an edge's own value reaches in `scope` (resolve_symbol), none where it is items.def's first
+	// item and the edge's caller takes the lookup's 0 for none (a tracer: fallback_kind ItemName).
+	const GraphSymbol *value_symbol(const GraphEdge &edge, const std::string &scope) const;
 	std::vector<std::string> base_names_; // set_base_names
 	std::map<std::string, Binding> bindings_; // upper-case name -> the definition the game reads
 	std::vector<Diagnostic> diagnostics_;

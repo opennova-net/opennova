@@ -27,6 +27,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -112,7 +113,10 @@ std::string missing_message(const SessionView &view, const std::string &file, co
 	return std::string();
 }
 
-const char *kItems = "begin \"Tank\"\nid 100500\ntype vehicle\ngraphic tank\ntextid TANK_TEXT\nweaplbup Late\n"
+// The first row the Null marker the shipped items.def begins with (a tracer's lookup by type id never reaches
+// the first row).
+const char *kItems = "begin \"Null\"\nid 100000\ntype marker\nend\n"
+                     "begin \"Tank\"\nid 100500\ntype vehicle\ngraphic tank\ntextid TANK_TEXT\nweaplbup Late\n"
                      "launchups_rocket Nowhere\n"
                      "particlefx Effect_x Late\nparticlefxs Effect_x P03\nvirtualdisplay cockpit camera\n"
                      "addeweap Mount 100501\nend\n"
@@ -200,7 +204,8 @@ static int test_fields_are_references() {
 	            graph.resolve(*item_text) == ReferenceStatus::Missing);
 	TEST_EXPECT(missing_message(view, items, "text_id", "TANK_TEXT").find("text_default") != std::string::npos);
 	const GraphEdge *token = edge_of(graph, weapons, "text_token", "FIRE_TEXT");
-	TEST_EXPECT(token && token->kind == ReferenceKind::TextId && token->scope.empty());
+	TEST_EXPECT(token && token->kind == ReferenceKind::TextId && token->scope == "MEDMSSN.BIN" &&
+	            token->scopes_after == std::vector<std::string>{"GAMETEXT.BIN"});
 	TEST_EXPECT(missing_message(view, weapons, "text_token", "FIRE_TEXT").find("the action's text is empty") !=
 	            std::string::npos);
 	bool tooltip = false;
@@ -348,7 +353,7 @@ static int test_complete_query() {
 
 // A tracer whose type id finds no item is the item named as the ammo, the first of the name without case [orig:
 // AmmoDef_ParseProperty @ 0x40A646..0x40A668 -> ItemList_FindIndexByPrimaryName @ 0x49E010]: the foe tracer 777
-// reaches the item "ammo_t", whose uses are the ammo's field; a later item of the name is inert.
+// reaches the item "ammo_t", whose uses are the ammo's field; a later item of the name none.
 static int test_tracer_by_name() {
 	Project project;
 	TEST_EXPECT(setup(project));
@@ -368,7 +373,60 @@ static int test_tracer_by_name() {
 	}
 	TEST_EXPECT(missing_message(project.session.view(), ammo, "foe_trcr_type_id", "100777").empty());
 	const std::vector<const GraphSymbol *> named = graph.symbols_named(ReferenceKind::ItemName, "AMMO_T");
-	TEST_EXPECT(named.size() == 2 && named[0]->inert != named[1]->inert);
+	TEST_EXPECT(named.size() == 2 && graph.users_of(*named[1]).empty());
+	return 0;
+}
+
+// The two turns of a tracer's lookup the game takes past items.def's names: a type id naming items.def's first item
+// finds none, the lookup's 0 being its "none" too [orig: ItemList_FindIndexByTypeId @ 0x49E100; AmmoDef_ParseProperty
+// @ 0x40A5DA, `if (index || ...)`]; and the names it searches are the items' gametext names where "Item Names" has
+// their STR_ITM%04i key, which the boot copies over items.def's [orig: Item_LoadLocalizedNames @ 0x49E1B0]. A
+// change of the table resolves the tracer again.
+static int test_tracer_lookups() {
+	Project project;
+	TEST_EXPECT(setup(project));
+	TEST_EXPECT(project.write(project.path("items.def"), "begin \"Lead\"\nid 100800\ntype building\nend\n"
+	                                                     "begin \"ammo_t\"\nid 100900\ntype building\nend\n"
+	                                                     "begin \"Other\"\nid 100902\ntype building\nend\n") &&
+	            project.write(project.path("ammo.def"), "ammo AMMO_T\n\tfrndlyTrcrID 800\n\tfoeTrcrID 902\nend\n"));
+	project.rescan();
+	const std::string ammo = project.path("ammo.def");
+	const auto reached = [&](const char *field, const char *value) -> std::string {
+		const GraphEdge *edge = edge_of(project.graph(), ammo, field, value);
+		const GraphSymbol *symbol = edge ? project.graph().symbol_reached(*edge) : nullptr;
+		return symbol ? symbol->display : std::string();
+	};
+	// 800 names the first item: the tracer is the item named as the ammo; 902 its own item.
+	TEST_EXPECT(reached("frndly_trcr_type_id", "100800") == "ammo_t" && reached("foe_trcr_type_id", "100902") == "100902");
+	// gametext names item 100900 otherwise and 100902 as the ammo: the lookup by name finds Other.
+	const std::string table = project.path("gametext.bin");
+	rtxt::File strings;
+	strings.sections = {{"Item Names", 2}};
+	rtxt::Entry renamed, as_ammo;
+	renamed.key = "STR_ITM100900";
+	renamed.text = "Tracer round";
+	as_ammo.key = "STR_ITM100902";
+	as_ammo.text = "Ammo_T";
+	strings.entries = {renamed, as_ammo};
+	std::vector<uint8_t> bytes;
+	std::string io_error;
+	TEST_EXPECT(!table.empty() && rtxt::write(strings, bytes, io_error) && project.write(table, bytes));
+	project.rescan();
+	TEST_EXPECT(reached("frndly_trcr_type_id", "100800") == "Other");
+	const GraphEdge *friendly = edge_of(project.graph(), ammo, "frndly_trcr_type_id", "100800");
+	const std::vector<const GraphSymbol *> other = project.graph().symbols_named(ReferenceKind::ItemName, "OTHER");
+	TEST_EXPECT(friendly && other.size() == 1 && project.graph().users_of(*other[0]).size() == 1 &&
+	            project.graph().users_of(*other[0])[0] == friendly);
+	// No item named as the ammo any more: the finding says the type id names the first item.
+	strings.entries = {renamed};
+	strings.sections = {{"Item Names", 1}};
+	TEST_EXPECT(rtxt::write(strings, bytes, io_error) && project.write(table, bytes));
+	project.rescan();
+	friendly = edge_of(project.graph(), ammo, "frndly_trcr_type_id", "100800");
+	TEST_EXPECT(friendly && project.graph().resolve(*friendly) == ReferenceStatus::Missing);
+	TEST_EXPECT(missing_message(project.session.view(), ammo, "frndly_trcr_type_id", "100800").find("first item") !=
+	            std::string::npos);
+	std::printf("tracer: a type id naming the first item finds none; the names searched are gametext's\n");
 	return 0;
 }
 
@@ -429,6 +487,7 @@ int main() {
 	failures += test_complete_query();
 	failures += test_aliases_and_parts();
 	failures += test_tracer_by_name();
+	failures += test_tracer_lookups();
 	failures += test_surface_choices();
 	return failures;
 }

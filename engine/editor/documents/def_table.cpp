@@ -189,14 +189,19 @@ constexpr Defines kDefines[] = {
 // one the section lacks showing that section's text_default [orig: HUD_BuildEntityInfo @ 0x4B8A15..0x4B8A5C,
 // GameText_GetString("item", key)].
 constexpr const char *kItemTextSection = "item";
+// The mission text a def's action token reads first: medmssn.bin, the table of a mission with none of its own
+// [orig: TextResource_LoadMissionTextBin @ 0x51ED90].
+constexpr const char *kMissionTextTable = "MEDMSSN.BIN";
 
 // Where a field's reference resolves, when the field says: a def's game-text fields are string ids in
 // the game's own table, the loadout label's in its WepDes section (menu::weapon_label), a weapon's
 // attach label in its Overlays section (the runtime's weapon table attach_text_id), an item's text in its
 // item section; an action's text token (a weapon's or a powerup's) the playing mission's string table's
-// key, else gametext.bin's, read as the file is parsed at the mission's start, so any table's [orig:
-// ActionDef_ParseScriptLine @ 0x4028B7 -> MissionText_GetStringByKeyOrGameText @ 0x51ECD0; WeaponDefs_LoadFile
-// @ 0x5254BD and PowerUpDef_LoadFromFile @ 0x5256D2 after TextResource_LoadMissionTextBin @ 0x5247CE]. A
+// key, else gametext.bin's, read as the file is parsed at the mission's start [orig: ActionDef_ParseScriptLine @
+// 0x4028B7 -> MissionText_GetStringByKeyOrGameText @ 0x51ECD0; WeaponDefs_LoadFile @ 0x5254BD and
+// PowerUpDef_LoadFromFile @ 0x5256D2 after TextResource_LoadMissionTextBin @ 0x5247CE]: in MEDMSSN.BIN, the mission
+// table of a mission with none of its own (the def file runs with whichever mission plays), then GAMETEXT.BIN
+// (DefCatalogDocument::refine_field's scopes_after); a mission with no table at all shows none. A
 // weapon's loadout tooltip names nothing: the game stores it and nothing reads it [orig: WeaponDef_ParseProperty
 // @ 0x54DA5E, the table's +44; its consumers and its whole-table users read no +44].
 void resolve_field(const DefField &field, FieldSchema &entry) {
@@ -209,7 +214,8 @@ void resolve_field(const DefField &field, FieldSchema &entry) {
 	} else if (field.reference == DefReference::OtherText) {
 		if (field.id == "attach_text_id") entry.scope = game_text + hud::kGameTextOverlays;
 		else if (field.id == "text_id") entry.scope = game_text + kItemTextSection;
-		else if (field.id != "text_token" && field.id != "texttoken") entry.reference = ReferenceKind::None;
+		else if (field.id == "text_token" || field.id == "texttoken") entry.scope = kMissionTextTable;
+		else entry.reference = ReferenceKind::None;
 	}
 }
 

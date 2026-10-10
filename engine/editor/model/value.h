@@ -51,6 +51,7 @@ enum class FieldType { Integer, Unsigned, Byte, Count, Real, Text };
 // graph/reference_kinds: a new kind is one value here and one row there, at the end of each.
 enum class ReferenceKind {
 	None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile,
+	OtherText, // retired (S23 B: every def text key resolves as a TextId now): nothing makes one; its slot and token kept
 	Font,      // a .fnt by name, possibly through a %VAR% of the stylesheet
 	Menu,      // a .mnu file
 	TextTable, // a string table (.bin)

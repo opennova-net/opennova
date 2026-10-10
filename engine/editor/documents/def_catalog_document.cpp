@@ -8,6 +8,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/grm/grm.h>
+#include <runtime/hud/game_text_lookup.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include <array>
@@ -375,6 +376,12 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 		use.applies = Applicability::Ignored;
 		return;
 	}
+	// An action's text token: the mission's table, then gametext.bin [orig: MissionText_GetStringByKeyOrGameText @
+	// 0x51ECD0] (def_table's resolve_field gives the first).
+	if (use.reference == ReferenceKind::TextId && (use.schema->id == "text_token" || use.schema->id == "texttoken")) {
+		use.scopes_after = {strutil::to_upper(hud::kGameTextTable)};
+		return;
+	}
 	// A texture through its use's loader, by its role (def_texture_role_arg).
 	if (use.reference == ReferenceKind::Texture) {
 		use.loader_arg = def_texture_role_arg(use.schema->id);
@@ -458,8 +465,9 @@ void catalog_references(const Document &document, Extracted &out) {
 			out.edges.push_back(std::move(edge));
 		}
 		// Each item by its primary name, which an ammo's tracer takes where its type id finds none: the first item
-		// of a name, without case [orig: ItemList_FindIndexByPrimaryName @ 0x49E010, stricmp in the items' order].
-		std::set<std::string> named;
+		// of a name, without case [orig: ItemList_FindIndexByPrimaryName @ 0x49E010, stricmp in the items' order],
+		// the name being gametext's for the item's id where the table has one (the graph's lookup reads it,
+		// AssetGraph::item_named, so which item of a name a lookup finds is the graph's, no symbol inert here).
 		for (const auto &row : document.rows()) {
 			if (!row || def_kind(row->kind) != DefRecordKind::Item || row->name().empty()) continue;
 			const NodeAddress address{row->id, row->kind, 0};
@@ -471,10 +479,7 @@ void catalog_references(const Document &document, Extracted &out) {
 			symbol.record = document.record_path(address);
 			symbol.locator = document.locator(address);
 			symbol.address = address;
-			if (!named.insert(symbol.name).second) {
-				symbol.inert = true;
-				symbol.inert_reason = "an earlier item has the name, and a lookup by the name finds that one";
-			}
+			symbol.value = std::to_string(static_cast<const CatalogRow &>(*row).native.as<DefItemDef>().id);
 			out.symbols.push_back(std::move(symbol));
 		}
 		return;

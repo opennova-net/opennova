@@ -866,6 +866,17 @@ static int test_override_table() {
 	TEST_EXPECT(code_reads("STRCLI01", "jxm.bin") > 0 && code_reads("STRCLI01", "gametext.bin") == 0);
 	TEST_EXPECT(code_reads("STRCLI04", "gametext.bin") > 0);
 	TEST_EXPECT(code_reads("WEP_BASE", "gametext.bin") == 0);
+	// The table as read from the binary, pinned: 557 rows of a function and a key (642 calls of the getters with
+	// written keys), among them the yes/no prompt's key, an item's fallback text and Game.bin's class names.
+	TEST_EXPECT(code_text_keys().size() == 557);
+	const auto reads = [](const char *table, const char *section, const char *key) {
+		return std::count_if(code_text_keys().begin(), code_text_keys().end(), [&](const CodeTextKey &row) {
+			return std::string(row.table) == table && opennova::strutil::iequals(row.section, section) &&
+			       opennova::strutil::iequals(row.key, key);
+		});
+	};
+	TEST_EXPECT(reads("GAMETEXT.BIN", "KeyPress", "STRKEYPRESS_YES") == 1 && reads("GAMETEXT.BIN", "item", "text_default") == 1 &&
+	            reads("GAME.BIN", "Menu", "CHARCLASS_ENGINEER") >= 1 && reads("GAMEERR.BIN", "MP Errors", "ERR5") >= 1);
 	// The name changed: the table of the new name is the one read first.
 	ProjectSettingsChange renamed;
 	renamed.expansion = "jxk";

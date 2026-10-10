@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include <editor/model/value.h>
 
@@ -37,6 +38,9 @@ struct FieldUse {
 	// (GraphEdge::scope_alternate: a mission's text, "MEDMSSN.BIN"; a dialog bank's sounds, its .pwf);
 	// "" for none.
 	std::string scope_alternate;
+	// The scopes the lookup tries after `scope`, in order, where the name finds nothing there (GraphEdge::scopes_after:
+	// an action's text token, the mission's table, then GAMETEXT.BIN); none for a lookup of one scope.
+	std::vector<std::string> scopes_after;
 	// The numbers that form a key the game looks up, where key_prefix is set: the picker lists the keys
 	// of no other (a name index from 1, the spawn naming an entity by a nonzero index; a win slot 1 to
 	// 254, 0 and 255 an empty slot).
