@@ -1,24 +1,33 @@
 // The modeled text layout of a menu (formats/mnu/mnu_text_layout.h, D-MNU-22): a menu read and
 // written again comes back byte-identical because the writer generates it so, from the records
 // and the layout modeled beside them. Synthetic legs: a hand-written menu with comments, CR LF
-// lines, tabs, odd spacing and quoting, aliases and a RAW_TEXT block round-trips; a value edit
-// changes only its own tokens; an added record takes the writer's own layout in the file's style
-// beside its neighbours; a removed one takes its own text and comments; a reordered list is
-// written in the model's order; a document made in code writes the canonical bytes the writer
-// put down before the layout model (pinned below). Every edit is checked against the reader: the
-// written menu reads back as the edited model. The retail leg (--retail) sweeps every .mnu the
-// packed install serves and the reference set's shipped menus: each reads and writes back
-// byte-identical, and a set of edits over each reads back as the edited model.
+// lines, tabs, odd spacing and quoting, aliases and a RAW_TEXT block round-trips; the text between
+// tags and after the text's NUL is held as lines of parts; a value edit changes only its own
+// tokens; an added record takes the writer's own layout in the file's style beside its neighbours,
+// the line ending of the line it stands by; a removed one takes its own text and comments; a
+// reordered list is written in the model's order, a moved or new record beside the records of its
+// own list; what another element makes the game read nothing of stays while that element is as
+// read; a document made in code writes the canonical bytes the writer put down before the layout
+// model (pinned below), and a parse not asked for the layout holds none. Every edit is checked
+// against the reader: the written menu reads back as the edited model, and seeded rounds of list
+// edits over every text check the same. The retail leg (--retail) sweeps every .mnu the packed
+// install serves and the reference set's shipped menus: each reads and writes back
+// byte-identical, a set of edits over each reads back as the edited model, seeded rounds of list
+// edits over each distinct file read back as edited, and each one-token edit (a window renamed, a
+// STRING's text, an APPEARANCE's file) changes one line of the file and no other.
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <functional>
+#include <random>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_text_layout.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -47,7 +56,7 @@ std::string canonical(const mnu::Document &doc) {
 
 bool parse(const std::string &text, mnu::Document &doc) {
 	std::string error;
-	if (!mnu::parse(text, doc, error)) {
+	if (!mnu::parse(text, doc, error, nullptr, mnu::ParseLayout::Text)) {
 		std::fprintf(stderr, "  parse: %s\n", error.c_str());
 		return false;
 	}
@@ -519,9 +528,19 @@ bool test_hand_round_trip() {
 	          w.appearances.at(0).value == "back&drop.tga" && w.children[1].string_data.value == "a<b",
 	      "the model as the reader reads it");
 	CHECK(same(bytes_of(doc), kHand, "round trip:"), "a hand-written menu comes back byte-identical");
-	// What follows the text's NUL is never read, and comes back too.
-	const std::string tail = kHand + std::string("\0 after the end\r\n", 17);
+	// What follows the text's NUL is never read: it is held as its lines of words and comes back
+	// from them, an edit or not.
+	const std::string tail = kHand + std::string("\0 after  the\r\nend", 17);
 	CHECK(parse(tail, doc) && same(bytes_of(doc), tail, "NUL tail:"), "what follows the NUL");
+	const mnu::TextLayout &layout = *doc.text_layout;
+	CHECK(layout.nul && layout.after_nul.size() == 2 && layout.after_nul[0].indent == " " &&
+	          layout.after_nul[0].words == std::vector<std::string>({"after", "the"}) &&
+	          layout.after_nul[0].gaps == std::vector<std::string>({"  "}) && layout.after_nul[0].eol == "\r\n" &&
+	          layout.after_nul[1].words == std::vector<std::string>({"end"}) && layout.after_nul[1].eol.empty(),
+	      "what follows the NUL as lines of words, gaps and endings");
+	main_window(doc).name = "MAIN2";
+	CHECK(same(mnu::serialize(doc), replaced(tail, "name=MAIN ", "name=\"MAIN2\" "), "NUL tail, edited:"),
+	      "an edit keeps what follows the NUL");
 	// A UTF-8 file with its mark, and a UTF-16 one, each come back as they were.
 	const std::string bom = "\xEF\xBB\xBF" + kHand;
 	CHECK(parse(bom, doc) && doc.source_encoding == mnu::SourceEncoding::Utf8Bom && same(bytes_of(doc), bom, "BOM:"),
@@ -563,6 +582,8 @@ bool test_value_edits() {
 	     "map_state=\"1\""},
 	    {"the attribute a repeat stands beside: the repeat goes", [](mnu::Document &d) { main_window(d).children[0].name = "YES"; },
 	     " name=\"OK\" name=\"DUP\"", " name=\"YES\""},
+	    {"another attribute of an element with a repeat: the repeat stays", [](mnu::Document &d) { main_window(d).children[0].hidden = true; },
+	     " name=\"OK\" name=\"DUP\"", " name=\"OK\" HIDDEN name=\"DUP\""},
 	    {"a scroll row closed by another name", [](mnu::Document &d) { main_window(d).scrollup[0].value = "dn.tga"; },
 	     ">up.tga</APPEARANCE>", ">dn.tga</APPEARANCE>"},
 	};
@@ -971,6 +992,309 @@ bool test_style_of_new_records() {
 	return true;
 }
 
+// The text between tags held as lines of parts, as the def catalogs cut a line: a run's blanks and
+// words, a RAW_TEXT block's tags and its body.
+bool test_text_parts() {
+	const std::string text = "<SCREEN>\n<NAME>S</NAME>\n<WINDOW type=\"window\" name=\"P\">\n\tmore  stray\n\twords\n"
+	                         "\t<POSITION><LEFT>1</LEFT></POSITION>\n\t<STRING>pre <RAW_TEXT>a<b c</RAW_TEXT></STRING>\n"
+	                         "</WINDOW>\n</SCREEN>\n";
+	mnu::Document doc;
+	CHECK(parse(text, doc), "parse");
+	CHECK(same(bytes_of(doc), text, "parts:"), "a text of stray words and a RAW_TEXT block comes back");
+	const mnu::TextLayout &layout = *doc.text_layout;
+	const mnu::NotedElement *window = layout.element(main_window(doc).source);
+	CHECK(window != nullptr, "the window's element");
+	const mnu::NotedPiece *stray = nullptr;
+	for (const mnu::NotedPiece &piece : window->content)
+		if (piece.kind == mnu::NotedPiece::Kind::Text && piece.lines.size() == 4) stray = &piece;
+	CHECK(stray && stray->lines[0].eol == "\n" && stray->lines[1].indent == "\t" &&
+	          stray->lines[1].words == std::vector<std::string>({"more", "stray"}) &&
+	          stray->lines[1].gaps == std::vector<std::string>({"  "}) &&
+	          stray->lines[2].words == std::vector<std::string>({"words"}) && stray->lines[3].indent == "\t",
+	      "the stray words as lines of words and gaps");
+	const mnu::NotedPiece *raw = nullptr;
+	for (const mnu::NotedElement &e : layout.elements)
+		for (const mnu::NotedPiece &piece : e.content)
+			if (piece.kind == mnu::NotedPiece::Kind::RawText) raw = &piece;
+	CHECK(raw && raw->tag == "<RAW_TEXT>" && raw->close == "</RAW_TEXT>" && raw->lines.size() == 1 &&
+	          raw->lines[0].words == std::vector<std::string>({"a<b", "c"}),
+	      "a RAW_TEXT block as its tags and its body's words");
+	return true;
+}
+
+// A parse not asked for the layout reads the records alone: no layout, the writer's own layout.
+bool test_layout_on_request() {
+	mnu::Document plain;
+	std::string error;
+	CHECK(mnu::parse(kHand, plain, error) && !plain.text_layout, "the game's parse models no layout");
+	CHECK(main_window(plain).name == "MAIN" && mnu::serialize(plain) == canonical(plain), "written in the writer's own layout");
+	mnu::Document laid;
+	CHECK(parse(kHand, laid) && laid.text_layout, "the editor's parse models it");
+	CHECK(canonical(plain) == canonical(laid), "the same records either way");
+	return true;
+}
+
+// What another element makes the game read nothing of stays while that element stands as read, and
+// only then: a TEXT_RSRC a later one replaces stays when a child window is renamed, and goes with a
+// change of the one that replaces it.
+bool test_tied_tokens() {
+	const std::string text = "<SCREEN>\n<NAME>S</NAME>\n<WINDOW type=\"window\" name=\"P\">\n\t<TEXT_RSRC>a</TEXT_RSRC>\n"
+	                         "\t<TEXT_RSRC>b</TEXT_RSRC>\n\t<POSITION><LEFT>1</LEFT></POSITION>\n"
+	                         "\t<WINDOW type=\"static\" name=\"C\">\n\t\t<POSITION><LEFT>2</LEFT></POSITION>\n\t</WINDOW>\n"
+	                         "</WINDOW>\n</SCREEN>\n";
+	mnu::Document doc;
+	CHECK(parse(text, doc), "parse");
+	CHECK(main_window(doc).text_rsrc == "b", "the later TEXT_RSRC is read");
+	std::string written;
+	mnu::Document d = doc;
+	main_window(d).children[0].name = "C2";
+	CHECK(reads_back(d, &written), "reads back");
+	CHECK(same(written, replaced(text, "name=\"C\"", "name=\"C2\""), "a child renamed:"), "the replaced TEXT_RSRC stays");
+	d = doc;
+	main_window(d).name = "Q";
+	CHECK(reads_back(d, &written), "reads back");
+	CHECK(same(written, replaced(text, "name=\"P\"", "name=\"Q\""), "the window renamed:"), "the replaced TEXT_RSRC stays");
+	d = doc;
+	main_window(d).text_rsrc = "c";
+	CHECK(reads_back(d, &written), "reads back");
+	CHECK(same(written, replaced(replaced(text, "\t<TEXT_RSRC>a</TEXT_RSRC>\n", ""), ">b<", ">c<"), "replacing one changed:"),
+	      "the replaced TEXT_RSRC goes with a change of the one that replaces it");
+	d = doc;
+	main_window(d).has_text_rsrc = false;
+	main_window(d).text_rsrc.clear();
+	CHECK(reads_back(d, &written), "reads back");
+	CHECK(same(written, replaced(text, "\t<TEXT_RSRC>a</TEXT_RSRC>\n\t<TEXT_RSRC>b</TEXT_RSRC>\n", ""), "both gone:"),
+	      "both go when the model holds none");
+	return true;
+}
+
+// A new record takes the line ending of the line it is put beside, not the file's first.
+bool test_line_ending_of_new_records() {
+	const std::string text = "<SCREEN>\n<NAME>S</NAME>\r\n<WINDOW type=\"window\" name=\"P\">\r\n"
+	                         "\t<POSITION>\r\n\t\t<LEFT>1</LEFT>\r\n\t</POSITION>\r\n</WINDOW>\r\n</SCREEN>\r\n";
+	mnu::Document doc;
+	CHECK(parse(text, doc), "parse");
+	mnu::Window w;
+	w.name = "N";
+	w.type = mnu::WindowType::Static;
+	w.position.has_left = true;
+	w.position.left = 3;
+	main_window(doc).children.push_back(w);
+	std::string written;
+	CHECK(reads_back(doc, &written), "reads back");
+	CHECK(same(written,
+	           replaced(text, "\t</POSITION>\r\n</WINDOW>",
+	                    "\t</POSITION>\r\n\t<WINDOW type=\"static\" name=\"N\">\r\n\t\t<POSITION>\r\n\t\t\t<LEFT>3</LEFT>\r\n"
+	                    "\t\t</POSITION>\r\n\t</WINDOW>\r\n</WINDOW>"),
+	           "CR LF beside CR LF:"),
+	      "the new window's lines end as the line beside it does");
+	return true;
+}
+
+// A window as the shipped menus write a button: its ACTION, its APPEARANCEs, its SOUNDs, then its
+// POSITION and STRING, which the writer puts before the APPEARANCEs and the SOUNDs in its own order.
+const char *const kButton =
+    "<SCREEN>\r\n"
+    "\t<NAME>B</NAME>\r\n"
+    "\t<WINDOW type=\"button\" name=\"SINGLE_PLAYER\">\r\n"
+    "\t\t<ACTION type=\"SCREEN\" file=\"sp.mnu\">SP</ACTION>\r\n"
+    "\t\t<APPEARANCE type=\"image\" state=\"default\">d.tga</APPEARANCE>\r\n"
+    "\t\t<APPEARANCE type=\"image\" state=\"mouseover\">m.tga</APPEARANCE>\r\n"
+    "\t\t<APPEARANCE type=\"image\" state=\"selected\">s.tga</APPEARANCE>\r\n"
+    "\t\t<APPEARANCE type=\"image\" state=\"disabled\">x.tga</APPEARANCE>\r\n"
+    "\t\t<SOUND state=\"MOUSEIN\" trigger=\"MOUSE_OVER\">in.lwf</SOUND>\r\n"
+    "\t\t<SOUND state=\"selected\" trigger=\"CLICK_SELECT\">sel.lwf</SOUND>\r\n"
+    "\t\t<POSITION><LEFT>1</LEFT><TOP>2</TOP></POSITION>\r\n"
+    "\t\t<STRING type=\"id\">SP_KEY</STRING>\r\n"
+    "\t</WINDOW>\r\n"
+    "</SCREEN>\r\n";
+
+// A record moved or added at the front of its list goes beside the records of its own list, so the
+// file reads back in the model's order, whatever the writer's order puts between them.
+bool test_list_neighbours() {
+	mnu::Document doc;
+	CHECK(parse(kButton, doc), "parse");
+	CHECK(same(bytes_of(doc), kButton, "button:"), "the button comes back");
+	const std::string disabled = "\t\t<APPEARANCE type=\"image\" state=\"disabled\">x.tga</APPEARANCE>\r\n";
+	const std::string first = "\t\t<APPEARANCE type=\"image\" state=\"default\">";
+	std::string written;
+	mnu::Document d = doc;
+	std::vector<mnu::Appearance> &appearances = main_window(d).appearances;
+	std::rotate(appearances.begin(), appearances.end() - 1, appearances.end());
+	CHECK(reads_back(d, &written), "the last APPEARANCE moved to the top reads back in the model's order");
+	CHECK(same(written, replaced(replaced(kButton, disabled, ""), first, disabled + first), "moved to the top:"),
+	      "with its own line, before the first");
+	d = doc;
+	mnu::Sound out;
+	out.state = "MOUSEOUT";
+	out.trigger = "MOUSE_OVER";
+	out.file = "out.lwf";
+	main_window(d).sounds.insert(main_window(d).sounds.begin(), out);
+	CHECK(reads_back(d, &written), "a SOUND added at the front reads back first");
+	CHECK(same(written,
+	           replaced(kButton, "\t\t<SOUND state=\"MOUSEIN\"",
+	                    "\t\t<SOUND state=\"MOUSEOUT\" trigger=\"MOUSE_OVER\">out.lwf</SOUND>\r\n\t\t<SOUND state=\"MOUSEIN\""),
+	           "a SOUND at the front:"),
+	      "before the first SOUND");
+	d = doc;
+	main_window(d).appearances.insert(main_window(d).appearances.begin() + 2, appearance("default", "y.tga"));
+	CHECK(reads_back(d, &written), "an APPEARANCE added in the middle reads back in place");
+	CHECK(same(written,
+	           replaced(kButton, "m.tga</APPEARANCE>\r\n", "m.tga</APPEARANCE>\r\n\t\t<APPEARANCE type=\"image\" state=\"default\">y.tga</APPEARANCE>\r\n"),
+	           "in the middle:"),
+	      "after the one before it");
+	return true;
+}
+
+// --- seeded rounds of list edits ---------------------------------------------------------------
+
+// One list of a window: how many records it holds, and an edit of it (ListEdit).
+enum ListEdit { kLastToFront, kFirstToEnd, kReversed, kNewAtFront, kNewAfterFirst, kMiddleRemoved, kListEdits };
+const char *const kListEditNames[] = {"the last moved to the front", "the first moved to the end", "reversed",
+                                      "a new record at the front", "a new record after the first",
+                                      "the middle record removed"};
+
+template <typename T> void edit_list(std::vector<T> &v, int kind, const T &fresh) {
+	switch (kind) {
+	case kLastToFront:
+		if (v.size() > 1) std::rotate(v.begin(), v.end() - 1, v.end());
+		break;
+	case kFirstToEnd:
+		if (v.size() > 1) std::rotate(v.begin(), v.begin() + 1, v.end());
+		break;
+	case kReversed: std::reverse(v.begin(), v.end()); break;
+	case kNewAtFront: v.insert(v.begin(), fresh); break;
+	case kNewAfterFirst: v.insert(v.begin() + std::min<std::ptrdiff_t>(1, std::ptrdiff_t(v.size())), fresh); break;
+	case kMiddleRemoved:
+		if (!v.empty()) v.erase(v.begin() + std::ptrdiff_t(v.size() / 2));
+		break;
+	}
+}
+
+struct WindowList {
+	const char *name;
+	std::function<void(mnu::Window &, int)> edit;
+};
+
+mnu::Window fresh_window() {
+	mnu::Window w;
+	w.name = "FRESH";
+	w.type = mnu::WindowType::Static;
+	w.position.has_left = true;
+	w.position.left = 5;
+	return w;
+}
+
+const std::vector<WindowList> &window_lists() {
+	static const std::vector<WindowList> lists = {
+	    {"APPEARANCE", [](mnu::Window &w, int k) { edit_list(w.appearances, k, appearance("disabled", "fresh.tga")); }},
+	    {"SOUND", [](mnu::Window &w, int k) {
+		     mnu::Sound s;
+		     s.state = "MOUSEOUT";
+		     s.trigger = "MOUSE_OVER";
+		     s.file = "fresh.lwf";
+		     edit_list(w.sounds, k, s);
+	     }},
+	    {"ACTION", [](mnu::Window &w, int k) {
+		     mnu::Action a;
+		     a.type = "SCREEN";
+		     a.file = "fresh.mnu";
+		     a.target = "FRESH";
+		     edit_list(w.actions, k, a);
+	     }},
+	    {"HOTKEY", [](mnu::Window &w, int k) {
+		     mnu::Hotkey h;
+		     h.value = "Z";
+		     edit_list(w.hotkeys, k, h);
+	     }},
+	    {"WINDOW", [](mnu::Window &w, int k) { edit_list(w.children, k, fresh_window()); }},
+	    {"SHUTTLE", [](mnu::Window &w, int k) { edit_list(w.shuttle, k, appearance("default", "fresh.tga")); }},
+	    {"SCROLLDOWN", [](mnu::Window &w, int k) { edit_list(w.scrolldown, k, appearance("default", "fresh.tga")); }},
+	    {"DATASOURCE", [](mnu::Window &w, int k) { edit_list(w.datasources, k, std::string("fresh.kda")); }},
+	    {"ITEM", [](mnu::Window &w, int k) {
+		     mnu::Item i;
+		     i.text = "fresh";
+		     edit_list(w.items.items, k, i);
+	     }},
+	    {"ITEMS APPEARANCE", [](mnu::Window &w, int k) { edit_list(w.items.appearances, k, appearance("default", "row.tga")); }},
+	    {"HEADER", [](mnu::Window &w, int k) {
+		     mnu::TableHeader h;
+		     h.text = "H";
+		     h.has_column = true;
+		     edit_list(w.table_data.column.headers, k, h);
+	     }},
+	};
+	return lists;
+}
+
+std::vector<mnu::Window *> all_windows(mnu::Document &doc) {
+	std::vector<mnu::Window *> out;
+	each_window(doc, [&](mnu::Window &w) { out.push_back(&w); });
+	return out;
+}
+
+struct FuzzCount {
+	int rounds = 0;
+	int refused = 0;   // a write issue: the writer refuses the edited model
+	int canonical = 0; // the writer's own layout does not read back as the model either: not the layout's
+	int failed = 0;
+};
+
+// `rounds` seeded rounds over a document, each one to three list edits of windows drawn at random:
+// each edited model written in its layout reads back as the edited model. A model the writer
+// refuses, or that its own layout does not read back as, is counted apart.
+void fuzz_lists(const mnu::Document &doc, const std::string &label, int rounds, uint32_t seed, FuzzCount &count) {
+	std::mt19937 rng(seed);
+	const std::vector<WindowList> &lists = window_lists();
+	for (int r = 0; r < rounds; ++r) {
+		mnu::Document d = doc;
+		std::string what;
+		const int edits = 1 + int(rng() % 3);
+		for (int k = 0; k < edits; ++k) {
+			const std::vector<mnu::Window *> windows = all_windows(d);
+			if (windows.empty()) break;
+			mnu::Window &w = *windows[rng() % windows.size()];
+			const WindowList &list = lists[rng() % lists.size()];
+			const int kind = int(rng() % kListEdits);
+			list.edit(w, kind);
+			what += std::string(what.empty() ? "" : "; ") + list.name + " of " + (w.name.empty() ? "?" : w.name) + ": " +
+			        kListEditNames[kind];
+		}
+		++count.rounds;
+		if (!mnu::write_issues(d).empty()) {
+			++count.refused;
+			continue;
+		}
+		const std::string own = canonical(d);
+		mnu::Document own_read;
+		std::string error;
+		if (!mnu::parse(own, own_read, error) || canonical(own_read) != own) {
+			++count.canonical;
+			continue;
+		}
+		mnu::Document again;
+		if (!mnu::parse(mnu::serialize(d), again, error) || canonical(again) != own) {
+			++count.failed;
+			if (count.failed <= 3)
+				std::fprintf(stderr, "  %s, round %d (%s): read back %s\n", label.c_str(), r, what.c_str(),
+				             first_difference(canonical(again), own).c_str());
+		}
+	}
+}
+
+bool test_list_rounds() {
+	std::vector<std::string> texts = {kHand, kTable, kCanonicalPretty, kButton};
+	FuzzCount count;
+	for (size_t t = 0; t < texts.size(); ++t) {
+		mnu::Document doc;
+		CHECK(parse(texts[t], doc), "parse");
+		fuzz_lists(doc, "text " + std::to_string(t), 120, uint32_t(1234 + t), count);
+	}
+	std::printf("(%d rounds, %d refused, %d not the layout's) ", count.rounds, count.refused, count.canonical);
+	CHECK(count.failed == 0, "every round of list edits reads back as the edited model");
+	return true;
+}
+
 // --- the retail corpus -------------------------------------------------------------------------
 
 struct Corpus {
@@ -979,13 +1303,84 @@ struct Corpus {
 	int edits = 0;
 	int refused = 0; // edits that leave a write issue (a window with no element): the writer refuses them
 	int failed = 0;
+	std::set<std::string> distinct; // each distinct file's bytes: the list rounds and the one-line edits run once a file
+	FuzzCount rounds;
+	int one_line = 0; // one-token edits, each changing one line
 };
+
+std::vector<std::string> lines_of(const std::string &text) {
+	std::vector<std::string> out;
+	size_t at = 0;
+	for (;;) {
+		const size_t nl = text.find('\n', at);
+		out.push_back(text.substr(at, nl == std::string::npos ? std::string::npos : nl + 1 - at));
+		if (nl == std::string::npos) return out;
+		at = nl + 1;
+	}
+}
+
+// Each one-token edit of a menu changes one line of the file and no other, the line holding the
+// new token: a window renamed, a STRING's text and a window's first APPEARANCE's file changed (a
+// text holding a line end aside), each over every window of a menu of up to 16, else over 16 of
+// its windows spread evenly.
+bool one_line_edits(Corpus &corpus, const std::string &label, const mnu::Document &doc, const std::string &bytes) {
+	const std::vector<std::string> source = lines_of(bytes);
+	struct OneToken {
+		const char *what;
+		std::function<bool(mnu::Window &, std::string &)> edit; // false: nothing to edit
+	};
+	const OneToken edits[] = {
+	    {"a window renamed", [](mnu::Window &w, std::string &token) {
+		     if (w.name.empty()) return false;
+		     w.name += "Q";
+		     token = w.name;
+		     return true;
+	     }},
+	    {"a STRING's text", [](mnu::Window &w, std::string &token) {
+		     if (!w.string_data.present || w.string_data.value.find('\n') != std::string::npos) return false;
+		     w.string_data.value += "_Q";
+		     token = mnu::escape_text(w.string_data.value);
+		     return true;
+	     }},
+	    {"an APPEARANCE's file", [](mnu::Window &w, std::string &token) {
+		     if (w.appearances.empty() || w.appearances[0].value.find('\n') != std::string::npos) return false;
+		     w.appearances[0].value += "_Q";
+		     token = mnu::escape_text(w.appearances[0].value);
+		     return true;
+	     }},
+	};
+	mnu::Document probe = doc;
+	const size_t windows = all_windows(probe).size();
+	const size_t step = std::max<size_t>(1, windows / 16);
+	for (const OneToken &e : edits)
+		for (size_t i = 0; i < windows; i += step) {
+			mnu::Document d = doc;
+			std::string token;
+			if (!e.edit(*all_windows(d)[i], token)) continue;
+			const std::vector<std::string> written = lines_of(mnu::serialize(d));
+			size_t changed = 0, at = 0;
+			if (written.size() == source.size())
+				for (size_t k = 0; k < source.size(); ++k)
+					if (written[k] != source[k]) {
+						++changed;
+						at = k;
+					}
+			++corpus.one_line;
+			if (written.size() != source.size() || changed != 1 || written[at].find(token) == std::string::npos) {
+				std::printf("  FAIL %s (%s, window %zu: %zu line(s) changed of %zu, %zu written)\n", label.c_str(), e.what, i,
+				            changed, source.size(), written.size());
+				++corpus.failed;
+				return false;
+			}
+		}
+	return true;
+}
 
 void check_menu(Corpus &corpus, const std::string &label, const std::string &bytes) {
 	mnu::Document doc;
 	std::string error;
 	++corpus.checked;
-	if (!mnu::parse(bytes, doc, error)) {
+	if (!mnu::parse(bytes, doc, error, nullptr, mnu::ParseLayout::Text)) {
 		std::printf("  FAIL %s (parse: %s)\n", label.c_str(), error.c_str());
 		++corpus.failed;
 		return;
@@ -997,6 +1392,17 @@ void check_menu(Corpus &corpus, const std::string &label, const std::string &byt
 		return;
 	}
 	++corpus.identical;
+	if (corpus.distinct.insert(bytes).second) {
+		// Once a distinct file: seeded rounds of list edits, and the one-token edits.
+		const int failed = corpus.rounds.failed;
+		fuzz_lists(doc, label, 30, uint32_t(corpus.distinct.size()), corpus.rounds);
+		if (corpus.rounds.failed != failed) {
+			std::printf("  FAIL %s (%d round(s) of list edits read back as another model)\n", label.c_str(),
+			            corpus.rounds.failed - failed);
+			++corpus.failed;
+		}
+		if (!one_line_edits(corpus, label, doc, bytes)) return;
+	}
 	for (const CorpusEdit &e : corpus_edits()) {
 		mnu::Document d = doc;
 		e.edit(d);
@@ -1059,9 +1465,13 @@ int retail_leg() {
 		std::fprintf(stderr, "\nthe packed install served no .mnu\n");
 		return 1;
 	}
-	std::printf("retail leg: %d menu(s) (%d from the reference set), %d byte-identical; %d edited menus read back "
-	            "as edited (%d edits refused for a write issue); %d failure(s)\n",
-	            corpus.checked, reference, corpus.identical, corpus.edits - corpus.failed, corpus.refused, corpus.failed);
+	std::printf("retail leg: %d menu(s) (%d from the reference set; %zu distinct files), %d byte-identical; %d edited "
+	            "menus read back as edited (%d edits refused for a write issue); %d rounds of list edits over the "
+	            "distinct files (%d refused, %d the writer's own layout does not read back either); %d one-token edits, "
+	            "each changing one line; %d failure(s)\n",
+	            corpus.checked, reference, corpus.distinct.size(), corpus.identical, corpus.edits - corpus.failed,
+	            corpus.refused, corpus.rounds.rounds, corpus.rounds.refused, corpus.rounds.canonical, corpus.one_line,
+	            corpus.failed);
 	return corpus.failed == 0 ? 0 : 1;
 }
 
@@ -1085,6 +1495,12 @@ int main(int argc, char **argv) {
 	RUN(test_edits_read_back);
 	RUN(test_unusual_texts);
 	RUN(test_style_of_new_records);
+	RUN(test_text_parts);
+	RUN(test_layout_on_request);
+	RUN(test_tied_tokens);
+	RUN(test_line_ending_of_new_records);
+	RUN(test_list_neighbours);
+	RUN(test_list_rounds);
 	if (g_failed > 0) {
 		std::fprintf(stderr, "\n%d check(s) FAILED\n", g_failed);
 		return 1;

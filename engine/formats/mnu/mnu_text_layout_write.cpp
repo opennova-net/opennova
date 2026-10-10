@@ -1,8 +1,8 @@
 // The generation of a document in its text layout (mnu_text_layout.h, which states the rules):
-// every byte comes from the records (the writer's words, mnu_write.h) and the modeled layout. A
-// token keeps the file's spelling while the writer's token is the one it wrote for the record as
-// read, else it is the writer's own; a record the layout does not hold is the writer's own layout
-// in the file's style.
+// every byte comes from the records (the writer's words, mnu_write.h) and the modeled layout, the
+// text between tags made from its lines' parts. A token keeps the file's spelling while the
+// writer's token is the one it wrote for the record as read, else it is the writer's own; a record
+// the layout does not hold is the writer's own layout in the file's style.
 #include "mnu_text_layout.h"
 
 #include <formats/mnu/mnu_xml.h>
@@ -59,27 +59,49 @@ std::string spelled_token(const std::string &spelling) {
 	return raw.substr(i, j - i);
 }
 
-// The blanks before an element: whether a line end is among them, the last one, and the blanks
-// after it (the element's indentation).
+// The blanks before an element (the runs of text that go with it before it, from their parts):
+// whether a line end is among them, the last one, the blanks after it (the element's indentation,
+// up to the first word), whether they are nothing but blanks, and the text they make.
 struct Lead {
 	bool broken = false;
 	std::string eol;
 	std::string indent;
-	bool blanks = true; // nothing but blanks
+	bool blanks = true;
+	std::string text;
 };
 
-Lead lead_of(const std::string &text) {
+Lead lead_of(const Pieces &pieces, size_t at) {
 	Lead lead;
-	lead.blanks = std::all_of(text.begin(), text.end(),
-	                          [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; });
-	const size_t nl = text.rfind('\n');
-	if (nl == std::string::npos) return lead;
-	lead.broken = true;
-	lead.eol = nl > 0 && text[nl - 1] == '\r' ? "\r\n" : "\n";
-	size_t k = nl + 1;
-	while (k < text.size() && (text[k] == ' ' || text[k] == '\t')) ++k;
-	lead.indent = text.substr(nl + 1, k - nl - 1);
+	bool open = false; // the indentation after the last line end is still being read
+	for (size_t i = 0; i < at; ++i) {
+		const NotedPiece &piece = pieces[i];
+		if (piece.owner != long(at) || piece.kind != NotedPiece::Kind::Text) continue;
+		piece.put(lead.text);
+		for (const NotedLine &line : piece.lines) {
+			if (open) {
+				lead.indent += line.indent;
+				if (!line.words.empty()) open = false;
+			}
+			if (!line.words.empty()) lead.blanks = false;
+			if (!line.eol.empty()) {
+				lead.broken = true;
+				lead.eol = line.eol;
+				lead.indent.clear();
+				open = true;
+			}
+		}
+	}
 	return lead;
+}
+
+// The line ending of the line a piece stands beside: the last one before it, else the first after
+// it, else `fallback` (a content of one line takes its parent's).
+std::string eol_near(const Pieces &pieces, size_t at, const std::string &fallback) {
+	for (size_t i = std::min(at, pieces.size()); i-- > 0;)
+		if (pieces[i].broken()) return pieces[i].lines[pieces[i].lines.size() - 2].eol;
+	for (size_t i = at; i < pieces.size(); ++i)
+		if (pieces[i].broken()) return pieces[i].lines.front().eol;
+	return fallback;
 }
 
 // An attribute as it will be written.
@@ -200,7 +222,8 @@ void place_sorts(const WrittenElement &h, std::vector<Token> &tokens, const Colu
 
 class Generator {
 public:
-	Generator(const TextLayout &layout, const WrittenStyle &canonical) : l_(layout), style_(canonical) {
+	Generator(const TextLayout &layout, const WrittenStyle &canonical)
+	    : l_(layout), style_(canonical), as_read_(layout.elements.size(), false) {
 		if (!layout.styled) {
 			style_.eol.clear();
 			style_.unit.clear();
@@ -233,6 +256,7 @@ private:
 		uint32_t noted = UINT32_MAX;       // Child, a moved Insert
 		std::string lead;                  // a new Insert: what stands before it
 		std::string indent;                // Child, Insert: its line's indentation
+		std::string eol;                   // Child, Insert: the line ending of the line it stands beside
 	};
 	struct Scope {
 		const WrittenElement *w = nullptr; // null: the document
@@ -243,8 +267,15 @@ private:
 		std::string text, as_text; // text_modeled: the writer's text and the text as read, escaped
 		bool carried = false;      // a RAW_TEXT of it gave attributes away
 		std::string indent;        // its line's indentation
-		bool tied_ok = true;       // its Tied tokens are kept (it is written as read)
+		std::string eol;           // the line ending of its line (the document's: the file's first)
+		bool tree_as_read = true;  // it is written as read, all it holds with it
 		bool top = false;
+	};
+	// Where a record the file does not hold in place goes: after or before an element piece of a
+	// content (`member`), or at the end of the first content.
+	struct Anchor {
+		enum class Kind : uint8_t { After, Before, End } kind = Kind::End;
+		size_t member = 0, piece = 0;
 	};
 	struct PositionSim {
 		bool ready = false;
@@ -252,27 +283,72 @@ private:
 		int left = 0, top = 0;                // the edges as the reader stands
 	};
 
+	void mark(const std::vector<WrittenElement> &children, const std::vector<const Pieces *> &contents);
+	bool stands_as_read(uint32_t noted, const Scope &scope, int depth = 0) const;
 	Placement place(const Scope &scope) const;
+	long written_child(const Scope &scope, const Placement &p, size_t member, size_t piece) const;
+	std::vector<Anchor> anchors(const Scope &scope, const Placement &p) const;
 	std::vector<Entry> plan(const Scope &scope, const Placement &p) const;
 	void emit(const Scope &scope, const std::vector<Entry> &entries, const Placement &p);
-	void element(const WrittenElement &c, const std::vector<uint32_t> &members, size_t member, const std::string &indent);
-	void column(const WrittenElement &c, uint32_t noted, const std::string &indent);
+	void element(const WrittenElement &c, const std::vector<uint32_t> &members, size_t member, const std::string &indent,
+	             const std::string &eol);
+	void column(const WrittenElement &c, uint32_t noted, const std::string &indent, const std::string &eol);
 	void edge(const WrittenElement &position, const WrittenElement &e, uint32_t noted, const std::string &indent);
 	std::vector<Token> attributes(const WrittenElement &c, const NotedElement &n, bool primary,
 	                              const std::set<std::string> &elsewhere, ColumnPass *pass) const;
 	std::vector<Token> new_attributes(const WrittenElement &c, ColumnPass *pass) const;
 	void verbatim_element(const NotedElement &n);
-	void new_element(const WrittenElement &c, const std::string &indent);
+	void new_element(const WrittenElement &c, const std::string &indent, const std::string &eol);
+	WrittenStyle style_at(const std::string &eol) const;
 	SortRead plan_rows(const std::vector<Entry> &entries, const std::vector<WrittenElement> &rows, ColumnPass &pass) const;
 
 	const TextLayout &l_;
 	WrittenStyle style_;
+	std::vector<bool> as_read_; // each Written element: written now as read (its tree digest as read)
 	std::string out_;
 	std::set<uint32_t> used_;
 	ColumnPass *column_ = nullptr;
 	std::map<const WrittenElement *, PositionSim> positions_;
 	const WrittenElement *position_ = nullptr; // the POSITION whose edges are being written
 };
+
+// Which elements the writer puts down now as read: each Written element the writer's tree still
+// names, its tree digest as read. What keeps a Tied element read for nothing is one of these.
+void Generator::mark(const std::vector<WrittenElement> &children, const std::vector<const Pieces *> &contents) {
+	std::map<std::string, std::vector<uint32_t>> by_key;
+	for (const Pieces *content : contents)
+		for (const NotedPiece &piece : *content)
+			if (piece.kind == NotedPiece::Kind::Element && l_.elements[piece.element].role == NotedRole::Written)
+				by_key[l_.elements[piece.element].key].push_back(piece.element);
+	for (const WrittenElement &c : children) {
+		const auto it = by_key.find(c.key);
+		if (it == by_key.end()) continue;
+		std::vector<const Pieces *> inner;
+		for (uint32_t noted : it->second) {
+			as_read_[noted] = c.tree_digest == l_.elements[noted].as_tree;
+			inner.push_back(&l_.elements[noted].content);
+		}
+		by_key.erase(it);
+		mark(c.children, inner);
+	}
+}
+
+// Whether an element stands as read: one the writer puts down as read; one Tied to another while
+// that one does (a singleton read into an empty record while the writer puts none of its kind
+// down in `s`); one the game reads nothing of, always.
+bool Generator::stands_as_read(uint32_t noted, const Scope &s, int depth) const {
+	const NotedElement &n = l_.elements[noted];
+	switch (n.role) {
+	case NotedRole::Written: return as_read_[noted];
+	case NotedRole::Inert: return true;
+	case NotedRole::Tied:
+		if (n.tied_by != UINT32_MAX && depth < 64) return stands_as_read(n.tied_by, s, depth + 1);
+		if (!n.key.empty())
+			return std::none_of(s.children->begin(), s.children->end(), [&](const WrittenElement &c) { return c.key == n.key; });
+		return s.tree_as_read;
+	}
+	return false;
+}
 
 Generator::Placement Generator::place(const Scope &s) const {
 	const std::vector<WrittenElement> &children = *s.children;
@@ -334,31 +410,74 @@ Generator::Placement Generator::place(const Scope &s) const {
 	return p;
 }
 
+// The child an element piece of a content is written as, or -1: a record that is gone, an
+// occurrence of a record written from its first alone, the first of one that moves.
+long Generator::written_child(const Scope &s, const Placement &p, size_t member, size_t i) const {
+	const NotedPiece &piece = (*s.contents[member])[i];
+	if (piece.kind != NotedPiece::Kind::Element || l_.elements[piece.element].role != NotedRole::Written) return -1;
+	const auto it = p.child_at.find({member, i});
+	if (it == p.child_at.end()) return -1; // its record is gone
+	const size_t ci = it->second;
+	const Occurrence &first = p.of[ci].front();
+	const bool is_first = first.member == member && first.piece == i;
+	return (p.whole[ci] || is_first) && !(is_first && p.moved[ci]) ? long(ci) : -1;
+}
+
+// Where each child the file does not hold in place goes (new, or moved within its list): beside
+// the nearest record of its own list that stands, in the model's order (after the one before it,
+// else before the one after it), as retail reads each list in document order; a child of no list,
+// or of a list none of whose records stands, after the nearest child before it in the writer's
+// order that stands, else before the nearest after it, else at the end.
+std::vector<Generator::Anchor> Generator::anchors(const Scope &s, const Placement &p) const {
+	const std::vector<WrittenElement> &children = *s.children;
+	const size_t none = SIZE_MAX;
+	std::vector<std::pair<size_t, size_t>> here(children.size(), {none, none}); // its first standing piece
+	for (size_t m = 0; m < s.contents.size(); ++m)
+		for (size_t i = 0; i < s.contents[m]->size(); ++i) {
+			const long ci = written_child(s, p, m, i);
+			if (ci >= 0 && here[size_t(ci)].first == none) here[size_t(ci)] = {m, i};
+		}
+	auto stands = [&](size_t k) { return here[k].first != none; };
+	std::vector<Anchor> out(children.size());
+	for (size_t ci = 0; ci < children.size(); ++ci) {
+		if (!(p.of[ci].empty() || p.moved[ci])) continue;
+		auto at = [&](size_t k, Anchor::Kind kind) {
+			out[ci].kind = kind;
+			out[ci].member = here[k].first;
+			out[ci].piece = here[k].second;
+			return true;
+		};
+		auto beside = [&](bool same_list) {
+			auto in = [&](size_t k) { return !same_list || children[k].list == children[ci].list; };
+			for (size_t k = ci; k-- > 0;)
+				if (in(k) && stands(k)) return at(k, Anchor::Kind::After);
+			for (size_t k = ci + 1; k < children.size(); ++k)
+				if (in(k) && stands(k)) return at(k, Anchor::Kind::Before);
+			return false;
+		};
+		if (!children[ci].list.empty() && beside(true)) continue;
+		if (!beside(false)) out[ci].kind = Anchor::Kind::End;
+	}
+	return out;
+}
+
 std::vector<Generator::Entry> Generator::plan(const Scope &s, const Placement &p) const {
 	const Pieces &pieces = *s.contents[s.member];
 	const std::vector<WrittenElement> &children = *s.children;
 	const size_t n = pieces.size();
-	// Which element pieces are written, and as which child.
+	// Which element pieces are written, and as which child; an element the game reads nothing of
+	// while another stands, while that one stands as read.
 	std::vector<bool> written(n, true);
 	std::vector<long> child_of(n, -1);
 	bool any_element = false;
 	for (size_t i = 0; i < n; ++i) {
 		if (pieces[i].kind != NotedPiece::Kind::Element) continue;
 		any_element = true;
-		const NotedElement &e = l_.elements[pieces[i].element];
-		if (e.role == NotedRole::Written) {
-			const auto it = p.child_at.find({s.member, i});
-			if (it == p.child_at.end()) { // its record is gone
-				written[i] = false;
-				continue;
-			}
-			const size_t ci = it->second;
-			const Occurrence &first = p.of[ci].front();
-			const bool is_first = first.member == s.member && first.piece == i;
-			written[i] = (p.whole[ci] || is_first) && !(is_first && p.moved[ci]);
-			if (written[i]) child_of[i] = long(ci);
+		if (l_.elements[pieces[i].element].role == NotedRole::Written) {
+			child_of[i] = written_child(s, p, s.member, i);
+			written[i] = child_of[i] >= 0;
 		} else {
-			written[i] = e.role == NotedRole::Inert || s.tied_ok;
+			written[i] = stands_as_read(pieces[i].element, s);
 		}
 	}
 	// What goes with each element: its run of pieces.
@@ -377,77 +496,58 @@ std::vector<Generator::Entry> Generator::plan(const Scope &s, const Placement &p
 				ends[last[i]].push_back(i);
 			}
 	}
-	auto lead_text = [&](size_t at) {
-		std::string text;
-		for (size_t i = 0; i < at; ++i)
-			if (pieces[i].owner == long(at) && pieces[i].kind == NotedPiece::Kind::Text) text += pieces[i].text;
-		return text;
-	};
 	auto indent_at = [&](size_t at) {
-		const Lead lead = lead_of(lead_text(at));
+		const Lead lead = lead_of(pieces, at);
 		return lead.broken ? lead.indent : s.indent;
 	};
-	// The children the file does not hold in place (new, or moved within the list), each after the
-	// nearest child before it in the writer's order that stands here, else before the nearest after
-	// it, else at the end.
+	// The children the file does not hold in place, each beside its anchor in this content.
 	std::vector<std::vector<size_t>> after(n), before(n);
 	std::vector<size_t> at_end;
-	if (s.member == 0) {
-		std::vector<long> here(children.size(), -1);
-		for (size_t i = 0; i < n; ++i)
-			if (child_of[i] >= 0 && here[size_t(child_of[i])] < 0) here[size_t(child_of[i])] = long(i);
-		for (size_t ci = 0; ci < children.size(); ++ci) {
-			if (!(p.of[ci].empty() || p.moved[ci])) continue;
-			bool placed = false;
-			for (size_t k = ci; k-- > 0 && !placed;)
-				if (here[k] >= 0) {
-					after[size_t(here[k])].push_back(ci);
-					placed = true;
-				}
-			for (size_t k = ci + 1; k < children.size() && !placed; ++k)
-				if (here[k] >= 0) {
-					before[size_t(here[k])].push_back(ci);
-					placed = true;
-				}
-			if (!placed) at_end.push_back(ci);
+	const std::vector<Anchor> anchored = anchors(s, p);
+	for (size_t ci = 0; ci < children.size(); ++ci) {
+		if (!(p.of[ci].empty() || p.moved[ci])) continue;
+		const Anchor &a = anchored[ci];
+		if (a.kind == Anchor::Kind::End) {
+			if (s.member == 0) at_end.push_back(ci);
+		} else if (a.member == s.member) {
+			(a.kind == Anchor::Kind::After ? after : before)[a.piece].push_back(ci);
 		}
 	}
 	auto insert = [&](size_t ci, long anchor) {
 		Entry e;
 		e.kind = Entry::Kind::Insert;
 		e.child = ci;
+		e.eol = anchor >= 0 ? eol_near(pieces, size_t(anchor), s.eol) : s.eol;
 		if (p.moved[ci] && !p.of[ci].empty()) {
 			// Moved with its own text and comments, from the content it stood in.
 			e.noted = p.of[ci].front().noted;
 			const NotedElement &moved = l_.elements[e.noted];
 			const Pieces &home = moved.parent == UINT32_MAX ? l_.content : l_.elements[moved.parent].content;
-			std::string text;
-			for (size_t i = 0; i < moved.at; ++i)
-				if (home[i].owner == long(moved.at) && home[i].kind == NotedPiece::Kind::Text) text += home[i].text;
-			const Lead lead = lead_of(text);
+			const Lead lead = lead_of(home, moved.at);
 			e.indent = lead.broken ? lead.indent : s.indent;
+			e.eol = eol_near(home, moved.at, e.eol);
 			return e;
 		}
 		// A new child: the anchor's line start and indentation, else a line of its own one step in.
 		if (s.text_modeled) {
 			e.indent = s.indent;
 		} else if (anchor >= 0) {
-			const std::string text = lead_text(size_t(anchor));
-			const Lead lead = lead_of(text);
+			const Lead lead = lead_of(pieces, size_t(anchor));
 			if (lead.broken) {
 				e.lead = lead.eol + lead.indent;
 				e.indent = lead.indent;
+				e.eol = lead.eol;
 			} else if (s.top) {
-				e.lead = style_.eol;
+				e.lead = e.eol;
 			} else {
-				e.lead = lead.blanks ? text : std::string();
+				e.lead = lead.blanks ? lead.text : std::string();
 				e.indent = s.indent;
 			}
 		} else if (s.top) {
-			e.lead = style_.eol;
+			e.lead = e.eol;
 		} else {
 			e.indent = s.indent + style_.unit;
-			e.lead = style_.eol.empty() ? std::string() : style_.eol + e.indent;
+			e.lead = e.eol.empty() ? std::string() : e.eol + e.indent;
 		}
 		return e;
 	};
@@ -464,14 +564,14 @@ std::vector<Generator::Entry> Generator::plan(const Scope &s, const Placement &p
 	}
 	auto put_at_end = [&]() {
 		for (size_t ci : at_end) out.push_back(insert(ci, -1));
-		if (!at_end.empty() && !any_element && !s.text_modeled && !s.top && !style_.eol.empty()) {
+		if (!at_end.empty() && !any_element && !s.text_modeled && !s.top && !s.eol.empty()) {
 			// A content that held no element gets its close tag back on a line of its own.
 			bool broken = false;
 			for (size_t i = end_at; i < n; ++i)
-				if (pieces[i].kind == NotedPiece::Kind::Text && pieces[i].text.find('\n') != std::string::npos) broken = true;
+				if (pieces[i].broken()) broken = true;
 			if (!broken) {
 				Entry e;
-				e.text = style_.eol + s.indent;
+				e.text = s.eol + s.indent;
 				out.push_back(std::move(e));
 			}
 		}
@@ -501,6 +601,7 @@ std::vector<Generator::Entry> Generator::plan(const Scope &s, const Placement &p
 					e.child = size_t(child_of[i]);
 					e.noted = piece.element;
 					e.indent = indent_at(i);
+					e.eol = eol_near(pieces, i, s.eol);
 				} else {
 					e.kind = Entry::Kind::Piece;
 					e.piece = &piece;
@@ -546,24 +647,32 @@ void Generator::verbatim_element(const NotedElement &n) {
 	if (n.ended) out_ += ">";
 	for (const NotedPiece &piece : n.content) {
 		if (piece.kind == NotedPiece::Kind::Element) verbatim_element(l_.elements[piece.element]);
-		else out_ += piece.text;
+		else piece.put(out_);
 	}
 	if (n.closed) out_ += n.close;
 }
 
-void Generator::new_element(const WrittenElement &c, const std::string &indent) {
+// The writer's own style with the line ending of the line an element is put beside.
+WrittenStyle Generator::style_at(const std::string &eol) const {
+	WrittenStyle style = style_;
+	style.eol = eol;
+	return style;
+}
+
+void Generator::new_element(const WrittenElement &c, const std::string &indent, const std::string &eol) {
+	const WrittenStyle style = style_at(eol);
 	if (column_ && column_row(c.kind)) {
 		const auto it = column_->planned.find(&c);
 		if (it != column_->planned.end()) {
 			out_ += "<" + c.tag;
 			for (const Token &t : it->second) out_ += t.text;
 			out_ += ">";
-			render_written_content(c, style_, indent, out_);
+			render_written_content(c, style, indent, out_);
 			out_ += "</" + c.tag + ">";
 			return;
 		}
 	}
-	render_written(c, style_, indent, out_);
+	render_written(c, style, indent, out_);
 }
 
 void Generator::emit(const Scope &s, const std::vector<Entry> &entries, const Placement &p) {
@@ -573,7 +682,7 @@ void Generator::emit(const Scope &s, const std::vector<Entry> &entries, const Pl
 		case Entry::Kind::Text: out_ += e.text; break;
 		case Entry::Kind::Piece:
 			if (e.piece->kind == NotedPiece::Kind::Element) verbatim_element(l_.elements[e.piece->element]);
-			else out_ += e.piece->text;
+			else e.piece->put(out_);
 			break;
 		case Entry::Kind::Child: {
 			const WrittenElement &c = children[e.child];
@@ -585,7 +694,7 @@ void Generator::emit(const Scope &s, const std::vector<Entry> &entries, const Pl
 				members.push_back(o.noted);
 			}
 			if (position_ && c.kind == WrittenKind::Edge) edge(*position_, c, e.noted, e.indent);
-			else element(c, members, member, e.indent);
+			else element(c, members, member, e.indent, e.eol);
 			break;
 		}
 		case Entry::Kind::Insert: {
@@ -595,7 +704,7 @@ void Generator::emit(const Scope &s, const std::vector<Entry> &entries, const Pl
 				if (position_ && c.kind == WrittenKind::Edge) {
 					edge(*position_, c, UINT32_MAX, e.indent);
 				} else {
-					new_element(c, e.indent);
+					new_element(c, e.indent, e.eol);
 				}
 				break;
 			}
@@ -603,10 +712,10 @@ void Generator::emit(const Scope &s, const std::vector<Entry> &entries, const Pl
 			const NotedElement &n = l_.elements[e.noted];
 			const Pieces &home = n.parent == UINT32_MAX ? l_.content : l_.elements[n.parent].content;
 			for (size_t i = 0; i < n.at; ++i)
-				if (home[i].owner == long(n.at)) out_ += home[i].text;
-			element(c, {e.noted}, 0, e.indent);
+				if (home[i].owner == long(n.at)) home[i].put(out_);
+			element(c, {e.noted}, 0, e.indent, e.eol);
 			for (size_t i = n.at + 1; i < home.size(); ++i)
-				if (home[i].owner == long(n.at)) out_ += home[i].text;
+				if (home[i].owner == long(n.at)) home[i].put(out_);
 			break;
 		}
 		}
@@ -645,6 +754,13 @@ std::vector<Token> Generator::attributes(const WrittenElement &c, const NotedEle
 			for (const NotedAttribute &a : n.attributes)
 				if (draw(a.key)) put.insert("!" + a.key); // marks the file's to drop
 	}
+	// The writer's attributes put down on this element exactly as read: a repeat of one stays read
+	// for nothing whatever else of the element changes (the reader takes the same one of them).
+	std::set<std::string> repeated_as_read;
+	for (const NotedAttribute &a : n.attributes)
+		if (a.role == NotedRole::Written && !put.count("!" + a.key))
+			if (const WrittenAttribute *wa = find(a.key))
+				if (wa->name == a.as_name && wa->value_token() == a.as_value) repeated_as_read.insert(a.key);
 	for (const NotedAttribute &a : n.attributes) {
 		const int slot = c.kind == WrittenKind::Header ? sort_slot(a.key) : -1;
 		if (slot >= 0) {
@@ -665,7 +781,7 @@ std::vector<Token> Generator::attributes(const WrittenElement &c, const NotedEle
 			break;
 		}
 		case NotedRole::Tied:
-			if (own_as_read) out.push_back(verbatim(a));
+			if (own_as_read || repeated_as_read.count(a.key)) out.push_back(verbatim(a));
 			break;
 		case NotedRole::Inert: out.push_back(verbatim(a)); break;
 		}
@@ -714,14 +830,15 @@ SortRead Generator::plan_rows(const std::vector<Entry> &entries, const std::vect
 
 // A COLUMN: its rows planned first, so the running index and the table sort keys read back as the
 // model's; when no placement of the keys does, the COLUMN is the writer's own layout.
-void Generator::column(const WrittenElement &c, uint32_t noted, const std::string &indent) {
+void Generator::column(const WrittenElement &c, uint32_t noted, const std::string &indent, const std::string &eol) {
 	const NotedElement &n = l_.elements[noted];
 	Scope s;
 	s.w = &c;
 	s.children = &c.children;
 	s.contents = {&n.content};
 	s.indent = indent;
-	s.tied_ok = c.tree_digest == n.as_tree;
+	s.eol = eol;
+	s.tree_as_read = c.tree_digest == n.as_tree;
 	const Placement p = place(s);
 	const std::vector<Entry> entries = plan(s, p);
 	// The model's keys: what the writer's own form reads back as.
@@ -766,7 +883,7 @@ void Generator::column(const WrittenElement &c, uint32_t noted, const std::strin
 		read = plan_rows(entries, c.children, pass);
 	}
 	if (!(read == model)) {
-		render_written(c, style_, indent, out_);
+		render_written(c, style_at(eol), indent, out_);
 		return;
 	}
 	out_ += "<" + n.after_lt + (c.tag == n.as_tag ? n.tag : c.tag);
@@ -808,23 +925,23 @@ void Generator::edge(const WrittenElement &position, const WrittenElement &e, ui
 	WrittenElement written = e;
 	written.text = std::to_string(value);
 	if (noted == UINT32_MAX) {
-		new_element(written, indent);
+		new_element(written, indent, style_.eol);
 		return;
 	}
 	written.tag = l_.elements[noted].as_tag;
-	element(written, {noted}, 0, indent);
+	element(written, {noted}, 0, indent, style_.eol);
 }
 
 void Generator::element(const WrittenElement &c, const std::vector<uint32_t> &members, size_t member,
-                        const std::string &indent) {
+                        const std::string &indent, const std::string &eol) {
 	const uint32_t noted = members[member];
 	if (!used_.insert(noted).second) { // a layout element named twice: the second is the writer's own
-		new_element(c, indent);
+		new_element(c, indent, eol);
 		return;
 	}
 	const NotedElement &n = l_.elements[noted];
 	if (c.kind == WrittenKind::Column && members.size() == 1) {
-		column(c, noted, indent);
+		column(c, noted, indent, eol);
 		return;
 	}
 	std::set<std::string> elsewhere;
@@ -841,7 +958,7 @@ void Generator::element(const WrittenElement &c, const std::vector<uint32_t> &me
 	if (n.ended) out_ += ">";
 	if (!n.ended) return; // the file ends inside its open tag
 	if (c.form != n.as_form) {
-		render_written_content(c, style_, indent, out_);
+		render_written_content(c, style_at(eol), indent, out_);
 		out_ += "</" + c.tag + ">";
 		return;
 	}
@@ -856,7 +973,8 @@ void Generator::element(const WrittenElement &c, const std::vector<uint32_t> &me
 	for (const NotedPiece &piece : n.content)
 		if (piece.carries) s.carried = true;
 	s.indent = indent;
-	s.tied_ok = c.tree_digest == n.as_tree;
+	s.eol = eol;
+	s.tree_as_read = c.tree_digest == n.as_tree;
 	const Placement p = place(s);
 	if (c.kind == WrittenKind::Position) {
 		PositionSim &sim = positions_[&c];
@@ -884,10 +1002,16 @@ std::string Generator::run(const std::vector<WrittenElement> &screens) {
 	Scope s;
 	s.children = &screens;
 	s.contents = {&l_.content};
+	s.eol = style_.eol;
 	s.top = true;
+	mark(screens, s.contents);
 	const Placement p = place(s);
 	emit(s, plan(s, p), p);
-	out_ += l_.after_end;
+	// What follows the text's NUL, never read, from its lines' parts.
+	if (l_.nul) {
+		out_.push_back('\0');
+		put_lines(l_.after_nul, out_);
+	}
 	return std::move(out_);
 }
 

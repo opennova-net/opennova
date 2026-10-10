@@ -263,11 +263,12 @@ private:
   bool read_items(const Node &node, Items &items, bool list_rule, bool table_rule);
   void read_column(const Node &node, TableColumn &column);
   Element read_extra(const Node &node);
-  void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why);
+  // `by`: the element whose parse stopped (the text layout keeps the rest while it stands as read).
+  void unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why, const Node &by);
 
   SourceEncoding encoding_;
   // Told which element each record and singleton was read from, and which elements are read
-  // for nothing only as their element stands (the text layout's Tied tokens).
+  // for nothing only while another stands (the text layout's Tied tokens).
   TextLayoutCapture &capture_;
   std::map<const void *, std::string> reasons_;
   std::set<const void *> fatal_;
@@ -412,19 +413,20 @@ bool TreeReader::singleton(ReadScope &frame, const Node &node, const char *tag, 
   it->second->read = false;
   fatal_.erase(it->second);
   because(it->second, std::string("A later ") + tag + " replaces this one (retail keeps the last); it is left out.");
-  capture_.tie(*it->second);
+  capture_.tie(*it->second, node);
   it->second = &node;
   return false;
 }
 
 // Marks the elements of `tags` from `from` on as not read, with `why`.
-void TreeReader::unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why) {
+void TreeReader::unread_rest(const Node &parent, size_t from, const char *const *tags, const std::string &why,
+                             const Node &by) {
   for (size_t i = from; i < parent.children.size(); ++i) {
     const Node &child = *parent.children[i];
     if (tags && !tag_in(child, tags)) continue;
     child.read = false;
     because(&child, why);
-    capture_.tie(child);
+    capture_.tie(child, by);
   }
 }
 
@@ -600,9 +602,9 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         because(&child, "An APPEARANCE with no attributes or no STATE retail knows (DEFAULT, DISABLED, "
                         "MOUSEOVER, SELECTED) stops this window's parse in retail: it, the elements after it "
                         "and the child windows are left out.");
-        capture_.tie(child);
+        capture_.tie(child, node);
         unread_rest(node, i + 1, kBaseTags,
-                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.");
+                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.", node);
         continue;
       }
       child.read = true;
@@ -616,9 +618,9 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         because(&child, "A SOUND with no STATE retail knows (MOUSEIN, MOUSEOUT, SELECTED) or no TRIGGER stops "
                         "this window's parse in retail: it, the elements after it and the child windows are "
                         "left out.");
-        capture_.tie(child);
+        capture_.tie(child, node);
         unread_rest(node, i + 1, kBaseTags,
-                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.");
+                    "Not read: an earlier APPEARANCE or SOUND stopped this window's parse in retail.", node);
         continue;
       }
       child.read = true;
@@ -675,7 +677,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (tag_is(*child, "WINDOW")) {
         child->read = false;
         because(child.get(), "Not created: an APPEARANCE or SOUND stopped this window's parse in retail.");
-        capture_.tie(*child);
+        capture_.tie(*child, node);
       }
   for (const Node *child : windows) {
     Window window;
@@ -715,7 +717,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (!read_items(child, w.items, list_rule, table_rule)) {
         own_stopped = true;
         unread_rest(node, i + 1, list_rule ? kListTags : kTableTags,
-                    "Not read: an earlier ITEMS APPEARANCE stopped this widget's list parse in retail.");
+                    "Not read: an earlier ITEMS APPEARANCE stopped this widget's list parse in retail.", child);
       }
       if (!first_one) child.read = false;
     } else if (tag_is(child, "SPINUP")) {
@@ -746,7 +748,7 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       if (frame.seen.count("COLUMN")) {
         because(&child, "A repeated COLUMN: retail's result depends on the COUNTs (docs/mnu/menu-re.md); "
                         "only the first COLUMN is kept.");
-        capture_.tie(child);
+        capture_.tie(child, *frame.seen["COLUMN"]);
         continue;
       }
       frame.seen["COLUMN"] = &child;
@@ -765,14 +767,14 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         seen->second->read = false;
         because(seen->second, "A later HORIZONTAL ORIENTATION decides (retail never resets it to vertical); "
                               "this one is left out.");
-        capture_.tie(*seen->second);
+        capture_.tie(*seen->second, child);
         seen->second = &child;
         capture_.keep(child, "ORIENTATION");
         w.orientation = text_of(child);
       } else {
         because(&child, "A repeated ORIENTATION changes nothing in retail (only a HORIZONTAL one sets anything, "
                         "and nothing resets it); it is left out.");
-        capture_.tie(child);
+        capture_.tie(child, *seen->second);
       }
     } else if (tag_is(child, "HEIGHT") || tag_is(child, "WIDTH")) {
       // One slot: the last authored of either [orig: @ 0x64c766 / 0x64c77e].
@@ -788,9 +790,9 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
         scroll_stopped = true;
         because(&child, mnu_xml::ascii(child.tag) + " with no STATE retail knows stops the scroll parse in "
                                                    "retail: it and the scroll elements after it are left out.");
-        capture_.tie(child);
+        capture_.tie(child, node);
         unread_rest(node, i + 1, kScrollTags,
-                    "Not read: an earlier scroll part stopped the scroll parse in retail.");
+                    "Not read: an earlier scroll part stopped the scroll parse in retail.", node);
         continue;
       }
       // (Not a SCROLL: retail reads none of these; the row is kept as authored.)
@@ -1044,8 +1046,8 @@ bool TreeReader::read_items(const Node &node, Items &items, bool list_rule, bool
       if (!ok && (list_rule || table_rule)) {
         because(&c, "An ITEMS APPEARANCE with no STATE retail knows ends this widget's list parse in retail: "
                     "it and what follows are left out.");
-        capture_.tie(c);
-        unread_rest(node, i + 1, nullptr, "Not read: an earlier ITEMS APPEARANCE ended the list parse.");
+        capture_.tie(c, node);
+        unread_rest(node, i + 1, nullptr, "Not read: an earlier ITEMS APPEARANCE ended the list parse.", node);
         return false;
       }
       // (Another type reads no ITEMS APPEARANCE: the row is kept as authored.)
@@ -1397,13 +1399,13 @@ const Window *find_window(const Screen &screen, const std::string &name) {
 }
 
 bool parse(const std::string &content, Document &out, std::string &error,
-           std::vector<ParseNote> *notes) {
+           std::vector<ParseNote> *notes, ParseLayout layout) {
   return parse(reinterpret_cast<const uint8_t *>(content.data()),
-               content.size(), out, error, notes);
+               content.size(), out, error, notes, layout);
 }
 
 bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
-           std::vector<ParseNote> *notes) {
+           std::vector<ParseNote> *notes, ParseLayout layout) {
   out = Document{};
   if (notes) notes->clear();
   if (!data && size != 0) {
@@ -1417,7 +1419,7 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
     out.screens.clear();
     return false;
   }
-  TextLayoutCapture capture(out.source_encoding);
+  TextLayoutCapture capture(out.source_encoding, layout == ParseLayout::Text);
   TreeReader reader(out.source_encoding, capture);
   reader.read_document(xml, out);
   if (notes) {
@@ -1425,8 +1427,9 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
     for (const mnu_xml::Note &n : xml.notes) notes->push_back({n.line, std::string(), n.message, true});
     reader.sweep(xml, *notes);
   }
-  // The file's look, modeled against the writer's words for the records as read; the bytes the
-  // loader skips before the text (the byte order mark) are the layout's.
+  // The file's look, when asked for, modeled against the writer's words for the records as read;
+  // the bytes the loader skips before the text (the byte order mark) are the layout's.
+  if (!capture.on()) return true;
   const size_t skipped = out.source_encoding == SourceEncoding::Utf16LE ? std::min<size_t>(size, 2)
                          : out.source_encoding == SourceEncoding::Utf8Bom ? 3
                                                                           : 0;
@@ -1436,7 +1439,7 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
 }
 
 bool parse_file(const std::string &path, Document &out, std::string &error,
-                std::vector<ParseNote> *notes) {
+                std::vector<ParseNote> *notes, ParseLayout layout) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
     error = "Failed to open file: " + path;
@@ -1447,7 +1450,7 @@ bool parse_file(const std::string &path, Document &out, std::string &error,
   buffer << file.rdbuf();
   std::string content = buffer.str();
 
-  return parse(content, out, error, notes);
+  return parse(content, out, error, notes, layout);
 }
 
 std::string strip_hotkey_marker(const std::string &text,

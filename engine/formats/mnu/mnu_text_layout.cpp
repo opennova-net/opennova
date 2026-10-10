@@ -1,6 +1,7 @@
 // The capture of a file's text layout (mnu_text_layout.h): the reader's spans cut into the
-// layout's tokens, each element's what-it-is named by the reader (TextLayoutCapture's record,
-// keep and tie), and every token modeled against the writer's words for the records as read.
+// layout's tokens and the text between them into lines of parts, each element's what-it-is named
+// by the reader (TextLayoutCapture's record, keep and tie), and every token modeled against the
+// writer's words for the records as read.
 #include "mnu_text_layout.h"
 
 #include <formats/mnu/mnu_xml.h>
@@ -27,7 +28,68 @@ std::string upper(std::string s) {
 	return s;
 }
 
+bool blank(char c) { return c == ' ' || c == '\t'; }
+
+// One line's text (its ending cut off) into its parts.
+NotedLine noted_line(const std::string &text, size_t begin, size_t end, std::string eol) {
+	NotedLine line;
+	line.eol = std::move(eol);
+	size_t at = begin;
+	while (at < end && blank(text[at])) ++at;
+	line.indent.assign(text, begin, at - begin);
+	while (at < end) {
+		size_t word = at;
+		while (at < end && !blank(text[at])) ++at;
+		line.words.emplace_back(text, word, at - word);
+		size_t gap = at;
+		while (at < end && blank(text[at])) ++at;
+		if (at < end) line.gaps.emplace_back(text, gap, at - gap);
+		else line.tail.assign(text, gap, at - gap);
+	}
+	return line;
+}
+
 } // namespace
+
+std::vector<NotedLine> noted_lines(const std::string &text) {
+	std::vector<NotedLine> lines;
+	size_t begin = 0;
+	for (;;) {
+		const size_t nl = text.find('\n', begin);
+		if (nl == std::string::npos) {
+			lines.push_back(noted_line(text, begin, text.size(), std::string()));
+			return lines;
+		}
+		const size_t end = nl > begin && text[nl - 1] == '\r' ? nl - 1 : nl;
+		lines.push_back(noted_line(text, begin, end, text.substr(end, nl + 1 - end)));
+		begin = nl + 1;
+	}
+}
+
+void put_lines(const std::vector<NotedLine> &lines, std::string &out) {
+	for (const NotedLine &line : lines) {
+		out += line.indent;
+		for (size_t i = 0; i < line.words.size(); ++i) {
+			out += line.words[i];
+			if (i < line.gaps.size()) out += line.gaps[i];
+		}
+		out += line.tail;
+		out += line.eol;
+	}
+}
+
+void NotedPiece::put(std::string &out) const {
+	switch (kind) {
+	case Kind::Text: put_lines(lines, out); break;
+	case Kind::Comment: out += tag; break;
+	case Kind::RawText:
+		out += tag;
+		put_lines(lines, out);
+		out += close;
+		break;
+	case Kind::Element: break;
+	}
+}
 
 const NotedElement *TextLayout::element(uint64_t source) const {
 	const uint32_t i = index(source);
@@ -41,13 +103,16 @@ uint32_t TextLayout::index(uint64_t source) const {
 	return records[n - 1];
 }
 
-TextLayoutCapture::TextLayoutCapture(SourceEncoding encoding) : layout_(std::make_shared<TextLayout>()) {
+TextLayoutCapture::TextLayoutCapture(SourceEncoding encoding, bool on) {
+	if (!on) return;
+	layout_ = std::make_shared<TextLayout>();
 	layout_->encoding = encoding;
 	layout_->stamp = ++g_stamp;
 	if (!layout_->stamp) layout_->stamp = ++g_stamp; // never 0: a source of 0 names none
 }
 
 uint64_t TextLayoutCapture::record(const Node &node) {
+	if (!layout_) return 0;
 	record_nodes_.push_back(&node);
 	const uint64_t source = text_layout_source(layout_->stamp, uint32_t(record_nodes_.size()));
 	keys_[&node] = "#" + std::to_string(source);
@@ -56,13 +121,15 @@ uint64_t TextLayoutCapture::record(const Node &node) {
 }
 
 void TextLayoutCapture::keep(const Node &node, const std::string &key) {
+	if (!layout_) return;
 	keys_[&node] = key;
 	tied_.erase(&node);
 }
 
-void TextLayoutCapture::tie(const Node &node) {
+void TextLayoutCapture::tie(const Node &node, const Node &by) {
+	if (!layout_) return;
 	keys_.erase(&node);
-	tied_.insert(&node);
+	tied_[&node] = &by;
 }
 
 // The layout built from one reading: the tokens, then each element modeled against the writer's
@@ -76,6 +143,7 @@ public:
 private:
 	std::string narrow(size_t begin, size_t end) const;
 	void tokens();
+	void raw_text(NotedPiece &piece, size_t begin, size_t end) const;
 	void open_tag(NotedElement &e, const Node &node, size_t begin, size_t end);
 	// Each element piece's place after the runs are split at the line ends that part an element's
 	// own text from the next one's.
@@ -109,6 +177,24 @@ std::string TextLayoutBuilder::narrow(size_t begin, size_t end) const {
 		}
 	}
 	return out;
+}
+
+// A RAW_TEXT block cut where the reader cuts it [orig: NapiXML_ParseElementTree @ 0x769d70]: its
+// open tag to the one character the reader skips past the name, its body up to "</RAW_TEXT" (the
+// first character taken before the check), its close tag from there to past the '>' ending the
+// attribute list the reader reads there.
+void TextLayoutBuilder::raw_text(NotedPiece &piece, size_t begin, size_t end) const {
+	size_t at = begin + 1;
+	while (at < end && mnu_xml::is_space(text_[at])) ++at;
+	while (at < end && !mnu_xml::is_space(text_[at]) && text_[at] != U'>') ++at;
+	const size_t body = std::min(end, at + 1);
+	static const char32_t kClose[] = U"</RAW_TEXT";
+	const size_t close_length = sizeof(kClose) / sizeof(kClose[0]) - 1;
+	size_t close = std::min(end, body + 1);
+	while (close < end && text_.compare(close, close_length, kClose) != 0) ++close;
+	piece.tag = narrow(begin, body);
+	piece.lines = noted_lines(narrow(body, close));
+	piece.close = narrow(close, end);
 }
 
 // An open tag cut where the reader cut it [orig: NapiXML_ParseElementTree @ 0x769d70]: the blanks
@@ -162,13 +248,19 @@ void TextLayoutBuilder::tokens() {
 		NotedPiece piece;
 		switch (s.kind) {
 		case Span::Kind::Text:
+			piece.kind = NotedPiece::Kind::Text;
+			piece.lines = noted_lines(narrow(s.begin, s.end));
+			content.push_back(std::move(piece));
+			break;
 		case Span::Kind::Comment:
+			piece.kind = NotedPiece::Kind::Comment;
+			piece.tag = narrow(s.begin, s.end);
+			content.push_back(std::move(piece));
+			break;
 		case Span::Kind::RawText:
-			piece.kind = s.kind == Span::Kind::Text      ? NotedPiece::Kind::Text
-			             : s.kind == Span::Kind::Comment ? NotedPiece::Kind::Comment
-			                                             : NotedPiece::Kind::RawText;
-			piece.text = narrow(s.begin, s.end);
-			piece.carries = s.kind == Span::Kind::RawText && carries(s.begin, s.end);
+			piece.kind = NotedPiece::Kind::RawText;
+			raw_text(piece, s.begin, s.end);
+			piece.carries = carries(s.begin, s.end);
 			content.push_back(std::move(piece));
 			break;
 		case Span::Kind::Open: {
@@ -197,11 +289,17 @@ void TextLayoutBuilder::tokens() {
 		}
 		}
 	}
-	l_.after_end = narrow(xml_.end, text_.size());
+	// The reader ends at the text's first NUL [orig: NapiXML_ParseElementTree @ 0x769d70, the
+	// NUL-terminated buffer]: what follows it is never read.
+	if (xml_.end < text_.size()) {
+		l_.nul = true;
+		l_.after_nul = noted_lines(narrow(xml_.end + 1, text_.size()));
+	}
 }
 
 // The line end that parts what goes with an element from what goes with the next: a run after an
-// element is cut before its first line end (the cut keeps "\r\n" whole).
+// element is cut before its first line end (its first line in one piece, its ending and the lines
+// after it in the next).
 void TextLayoutBuilder::split_runs(std::vector<NotedPiece> &content) {
 	std::vector<NotedPiece> out;
 	out.reserve(content.size() + 4);
@@ -212,17 +310,17 @@ void TextLayoutBuilder::split_runs(std::vector<NotedPiece> &content) {
 			out.push_back(std::move(piece));
 			continue;
 		}
-		if (after_element && piece.kind == NotedPiece::Kind::Text) {
-			const size_t nl = piece.text.find('\n');
-			if (nl != std::string::npos) {
-				const size_t cut = nl > 0 && piece.text[nl - 1] == '\r' ? nl - 1 : nl;
-				after_element = false;
-				if (cut > 0) {
-					NotedPiece head = piece;
-					head.text = piece.text.substr(0, cut);
-					out.push_back(std::move(head));
-					piece.text = piece.text.substr(cut);
-				}
+		if (after_element && piece.broken()) {
+			after_element = false;
+			NotedLine &first = piece.lines.front();
+			if (!first.indent.empty() || !first.words.empty() || !first.tail.empty()) {
+				NotedPiece head = piece;
+				head.lines.assign(1, first);
+				head.lines.front().eol.clear();
+				out.push_back(std::move(head));
+				NotedLine ending;
+				ending.eol = first.eol;
+				first = std::move(ending);
 			}
 		}
 		out.push_back(std::move(piece));
@@ -241,7 +339,7 @@ void TextLayoutBuilder::own(std::vector<NotedPiece> &content) {
 	if (elements.empty()) return;
 	auto line_ends = [&](size_t from, size_t to) { // the first piece of [from, to) holding a line end
 		for (size_t i = from; i < to; ++i)
-			if (content[i].kind == NotedPiece::Kind::Text && content[i].text.find('\n') != std::string::npos) return i;
+			if (content[i].broken()) return i;
 		return to;
 	};
 	for (size_t i = 0; i < elements.front(); ++i) content[i].owner = int32_t(elements.front());
@@ -263,6 +361,13 @@ void TextLayoutBuilder::free_element(uint32_t index, NotedRole role) {
 	NotedElement &e = l_.elements[index];
 	e.role = role;
 	e.key.clear();
+	if (role == NotedRole::Tied) {
+		const auto by = c_.tied_.find(nodes_[index]);
+		if (by != c_.tied_.end()) {
+			const auto it = index_of_.find(by->second);
+			if (it != index_of_.end()) e.tied_by = it->second;
+		}
+	}
 	for (NotedAttribute &a : e.attributes) a.role = NotedRole::Inert;
 	for (const NotedPiece &piece : e.content)
 		if (piece.kind == NotedPiece::Kind::Element) free_element(piece.element, NotedRole::Inert);
@@ -363,29 +468,42 @@ void TextLayoutBuilder::pair_content(const std::vector<WrittenElement> &children
 		pair_element(child, it->second);
 		by_key.erase(it);
 	}
-	// Read into the model, but the writer puts nothing down for it (an empty row): kept while its
-	// element is as read.
+	// Read into the model, but the writer puts nothing down for it (a singleton read into an empty
+	// record): kept while the writer puts none of its kind down.
 	for (const auto &left : by_key)
-		for (uint32_t index : left.second) free_element(index, NotedRole::Tied);
+		for (uint32_t index : left.second) {
+			free_element(index, NotedRole::Tied);
+			l_.elements[index].key = left.first;
+		}
 }
 
-// The file's line ending and indent step: the most common step between an element's indentation
-// and its parent's, where both begin a line.
+// The file's first line ending and its indent step: the most common step between an element's
+// indentation and its parent's, where both begin a line.
 void TextLayoutBuilder::style() {
+	// Whether an element begins a line: a line end stands in its lead, and nothing but blanks after
+	// the last one (its indentation).
 	auto lead = [&](const std::vector<NotedPiece> &content, uint32_t at, std::string &indent) {
-		std::string text;
-		for (uint32_t i = 0; i < at; ++i)
-			if (content[i].owner == int32_t(at) && content[i].kind == NotedPiece::Kind::Text) text += content[i].text;
-		const size_t nl = text.rfind('\n');
-		if (nl == std::string::npos) return false;
-		indent = text.substr(nl + 1);
-		return std::all_of(indent.begin(), indent.end(), [](char c) { return c == ' ' || c == '\t'; });
+		bool broken = false, blanks = true;
+		for (uint32_t i = 0; i < at; ++i) {
+			const NotedPiece &piece = content[i];
+			if (piece.owner != int32_t(at) || piece.kind != NotedPiece::Kind::Text) continue;
+			if (piece.broken()) {
+				broken = true;
+				blanks = true;
+				indent.clear();
+			}
+			const NotedLine &last = piece.lines.back();
+			if (!last.words.empty()) blanks = false;
+			indent += last.indent;
+		}
+		return broken && blanks;
 	};
-	const size_t nl = text_.find(U'\n');
-	if (nl != std::u32string::npos) {
-		l_.styled = true;
-		l_.eol = nl > 0 && text_[nl - 1] == U'\r' ? "\r\n" : "\n";
-	}
+	for (size_t i = 0; i < text_.size() && i < xml_.end; ++i)
+		if (text_[i] == U'\n') {
+			l_.styled = true;
+			l_.eol = i > 0 && text_[i - 1] == U'\r' ? "\r\n" : "\n";
+			break;
+		}
 	std::map<std::string, size_t> steps;
 	std::vector<std::string> indents(l_.elements.size());
 	std::vector<bool> begins_line(l_.elements.size(), false);
@@ -426,6 +544,7 @@ void TextLayoutBuilder::build(const std::vector<WrittenElement> &screens) {
 
 std::shared_ptr<const TextLayout> TextLayoutCapture::finish(const std::u32string &text, const mnu_xml::Document &xml,
                                                             const std::vector<WrittenElement> &screens, std::string bom) {
+	if (!layout_) return nullptr;
 	layout_->bom = std::move(bom);
 	TextLayoutBuilder builder(*this, text, xml);
 	builder.build(screens);

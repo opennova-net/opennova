@@ -545,9 +545,10 @@ struct Document {
   // of each of the writer's tokens, the comments and what the game reads nothing of, modeled
   // beside the records (each record's `source` names its element). The writer generates every
   // byte from the records and this data, so a menu read and written again comes back as it
-  // was, and an edit changes only its own tokens. Null for a document made in code (and a
-  // reset drops it): the writer then puts everything down in its own layout. Carried for the
-  // save alone; nothing shows it.
+  // was, and an edit changes only its own tokens. Held only when the parse was asked for it
+  // (ParseLayout::Text); null for a document made in code or read without it (and a reset
+  // drops it): the writer then puts everything down in its own layout. Carried for the save
+  // alone; nothing shows it.
   std::shared_ptr<const TextLayout> text_layout;
 
   // The screen a by-name lookup finds (case-insensitive): the LAST of that name,
@@ -590,18 +591,25 @@ struct ParseNote {
   std::string locator;
 };
 
+// What a parse models beside the records: nothing more (the game's loads), or the file's text
+// layout too (Document::text_layout: an editor's load, so a save writes the file in its own look).
+enum class ParseLayout : uint8_t {
+  None,
+  Text,
+};
+
 // Parse MNU content from a string buffer.
 // Returns true on success, false on error with description in `error`.
 bool parse(const std::string &content, Document &out, std::string &error,
-           std::vector<ParseNote> *notes = nullptr);
+           std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
 
 // Parse MNU content from a byte buffer.
 bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
-           std::vector<ParseNote> *notes = nullptr);
+           std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
 
 // Parse MNU file from disk.
 bool parse_file(const std::string &path, Document &out, std::string &error,
-                std::vector<ParseNote> *notes = nullptr);
+                std::vector<ParseNote> *notes = nullptr, ParseLayout layout = ParseLayout::None);
 
 // Strip the first {hot} marker from text for display; later markers remain
 // literal. Optionally returns the following hotkey byte and the marker's byte
@@ -633,10 +641,10 @@ std::vector<WriteIssue> write_issues(const Document &doc);
 std::string escape_text(const std::string &text);
 
 // Serialize MNU document back to XML-like text (the model's own bytes). With the document's
-// text layout (Document::text_layout), every element it holds comes out in the file's own
-// layout and a record it does not hold in the file's style beside its neighbours; without
-// one, the writer's own layout: when pretty is true, indented with indent_size spaces, one
-// element a line.
+// text layout (Document::text_layout, a ParseLayout::Text parse's), every element it holds
+// comes out in the file's own layout and a record it does not hold in the file's style beside
+// its neighbours; without one, the writer's own layout: when pretty is true, indented with
+// indent_size spaces, one element a line.
 std::string serialize(const Document &doc, bool pretty = true,
                       int indent_size = 2);
 

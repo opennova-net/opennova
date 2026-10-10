@@ -51,7 +51,8 @@ bool noted(const std::vector<mnu::ParseNote> &notes, const std::string &suffix) 
 const mnu::Window &root(const mnu::Document &doc) { return doc.screens.at(0).roots.at(0); }
 
 // The writer's own layout of a document: its text layout set aside, as for a document made in
-// code (a document read from a file comes back in its own look; mnu_text_layout_test pins that).
+// code (a document read with its text layout comes back in its own look; mnu_text_layout_test
+// pins that).
 std::string own_layout(const mnu::Document &doc) {
   mnu::Document copy = doc;
   copy.text_layout.reset();
