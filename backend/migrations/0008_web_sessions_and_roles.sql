@@ -25,5 +25,16 @@ CREATE TABLE web_sessions (
 );
 CREATE INDEX idx_web_sessions_user_id ON web_sessions(user_id);
 
+-- login_addresses remembers, per account, the client addresses (an IPv6
+-- address grouped to its /64) that logged in with the right password, on the
+-- site or the retail login, for 30 days. The login brake's per-username cap
+-- spares them, so a stranger's failed logins cannot keep the owner out.
+CREATE TABLE login_addresses (
+    user_id         INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+    address         TEXT NOT NULL,
+    last_success_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, address)
+);
+
 ALTER TABLE players ADD COLUMN role TEXT NOT NULL DEFAULT 'player'
     CHECK (role IN ('player', 'admin'));

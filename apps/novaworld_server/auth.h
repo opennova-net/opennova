@@ -2,6 +2,7 @@
 
 #include <net/novaworld/db/sqlite.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -9,6 +10,15 @@
 #include <vector>
 
 namespace opennova::novaworld_server {
+
+// The longest username an account may have (create_user, update_user's
+// rename) and POST /api/login takes.
+inline constexpr size_t kUsernameMaxBytes = 64;
+
+// Whether `s` holds a control byte (below 0x20, or 0x7F). Usernames may hold
+// none; nor may an admin ServerCommand arg (http_listener.cpp, where the
+// reason is spelled out).
+bool has_control_byte(std::string_view s);
 
 // Resolved player record returned by authenticate_user / get_user_by_*.
 struct UserRecord {
@@ -106,6 +116,8 @@ struct CreateUserParams {
 	std::string nwhandle;
 };
 
+// A username of at most kUsernameMaxBytes bytes with no control byte, else
+// invalid_field.
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
 MutationResult delete_user(opennova::db::Database &db, int64_t id);
 
@@ -120,8 +132,26 @@ struct UpdateUserParams {
 	std::optional<std::string> account_status;
 	std::optional<std::string> role; // "player" or "admin", else invalid_field
 };
+// A rename takes create_user's username rule (invalid_field). An update that
+// sets a password or a status other than 'active' ends the account's website
+// sessions and forgets its known login addresses in the same transaction
+// (update_revokes_sessions; the HTTP layer drops the retail login pins too).
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p);
+bool update_revokes_sessions(const UpdateUserParams &p);
+
+// The addresses an account logged in from with the right password, kept 30
+// days (login_addresses, migration 0008): the login brake's per-username cap
+// spares them, so a stranger's failed logins cannot keep the owner out.
+// `address` is the brake's address key (rate_limiter.h address_key, an IPv6
+// address grouped to its /64). Each throws db::SqliteError on a database
+// failure.
+inline constexpr int kLoginAddressDays = 30;
+inline constexpr size_t kLoginAddressesPerUser = 32;
+void record_login_address(opennova::db::Database &db, int64_t user_id, const std::string &address);
+bool is_known_login_address(opennova::db::Database &db, const std::string &username,
+                            const std::string &address);
+size_t prune_login_addresses(opennova::db::Database &db);
 
 // ONNET_BOOTSTRAP_ADMIN (main() calls it at boot): gives the account named
 // `username` the admin role, once. While any account is an admin it does

@@ -2,12 +2,13 @@
 
 // Who an /api request comes from: the website's login sessions, the CSRF
 // header, the admin role and the Bearer ADMIN_API_TOKEN, the credential routes'
-// rate limits (the login brake the retail POST /NWLogin.dll shares), and the
+// rate limits (the login brake the retail POST /NWLogin.dll runs too), and the
 // routes that open and close a session (POST /api/login, POST /api/logout,
 // GET /api/me). The HttpListener owns one WebAccess over its Crow app; every
 // /api/admin/* handler opens with require_admin, and a session-authenticated
 // site route with require_user.
 
+#include "auth.h"
 #include "http_json.h"
 #include "rate_limiter.h"
 #include "web_session.h"
@@ -26,22 +27,22 @@ namespace opennova::novaworld_server {
 
 struct ServerConfig;
 
-// Renews the session cookie on the reply to any request whose session the
-// store slid forward (WebSessionLookup::slid), whatever route answered it:
-// WebAccess::require_user leaves the Set-Cookie text in this middleware's
-// per-request context, and after_handle adds it.
-struct SessionCookieRenewal {
+// The per-request work WebAccess leaves for after the handler: the renewed
+// session cookie of a request whose session the store slid forward
+// (WebSessionLookup::slid), whatever route answered it, and the admin
+// state change require_admin let through, logged with its actor once the
+// handler has answered (so the line carries the outcome).
+struct AccessMiddleware {
 	struct context {
 		std::string set_cookie;
+		std::string admin_actor; // "token" or "session '<username>'"
 	};
 	void before_handle(crow::request &, crow::response &, context &) {}
-	void after_handle(crow::request &, crow::response &res, context &ctx) {
-		if (!ctx.set_cookie.empty()) res.add_header("Set-Cookie", ctx.set_cookie);
-	}
+	void after_handle(crow::request &req, crow::response &res, context &ctx);
 };
 
 // The HttpListener's Crow app.
-using WebApp = crow::App<SessionCookieRenewal>;
+using WebApp = crow::App<AccessMiddleware>;
 
 // The account a request acts as, or the response that refuses it: what
 // require_user and require_admin return.
@@ -56,6 +57,21 @@ struct RouteAccess {
 // 429 {"error":"rate_limited"} with Retry-After: `wait` seconds.
 crow::response too_many_requests(int64_t wait);
 
+// Which login a brake bucket belongs to. The two keep their address-keyed
+// buckets apart, so an address the website login is braked by (an X-Real-IP
+// nginx took from a CF-Connecting-IP, which a Cloudflare Worker can set to
+// any value) never brakes the retail login, which keys on the TCP peer (a
+// stock client reaches :8080 directly, through no proxy).
+enum class LoginRoute { Web, Retail };
+
+// The failure buckets one password check drew from (begin_password_check):
+// what password_accepted hands back.
+struct LoginTicket {
+	std::string pair_key;      // the (username, address) bucket's key
+	std::string username_key;  // the per-username bucket's key; empty when not drawn
+	std::string known_address; // the address key login_addresses remembers
+};
+
 class WebAccess {
 public:
 	// The header every state-changing request a session cookie authenticates
@@ -69,23 +85,23 @@ public:
 	static constexpr const char *kCsrfHeader = "X-OpenNova-Request";
 	static bool has_csrf_header(const crow::request &req);
 
-	// The longest username POST /api/login takes (400 past it, before any
-	// brake); the brake keys cut the retail login's names to the same length.
-	static constexpr size_t kUsernameMaxBytes = 64;
-
-	// The login brake, per RateLimiter bucket.
-	// Every credentialed attempt, per client address: 20 at once, then one
-	// every 3 s (a LAN party behind one address can still all log in at once).
+	// The login brake, per RateLimiter bucket. An IPv6 address counts as its
+	// /64 for the address bucket and its /56 for the (username, address) one.
+	// Every credentialed attempt, per route and client address: 20 at once,
+	// then one every 3 s (a LAN party behind one address can still all log in
+	// at once).
 	static constexpr RateLimiter::Params kLoginPerIp{20, 1.0 / 3, 10000};
-	// Failed attempts only, per (username, client address): 10, then one every
-	// 30 s. A guesser at one address runs dry; the account's owner, at another
-	// address, never meets it.
+	// Each password check, per route, username and client address: 10, then
+	// one every 30 s, the token handed back when the password was right. A
+	// guesser at one address runs dry; the owner, elsewhere, never meets it.
 	static constexpr RateLimiter::Params kLoginFailuresPerUserIp{10, 1.0 / 30, 10000};
-	// Failed attempts only, per username from any address: 30, then one every
-	// 2 s. Caps a guesser spread over many addresses; one address alone (10
-	// failures, then two a minute) can neither empty nor hold it empty.
+	// Each password check per username, from any address and either route,
+	// except from an address the account logged in from in the last 30 days
+	// (login_addresses): 30, then one every 2 s, handed back on success. Caps a
+	// guesser spread over many addresses at 30 a minute; it can lock out only
+	// logins from addresses the account has not used.
 	static constexpr RateLimiter::Params kLoginFailuresPerUser{30, 1.0 / 2, 10000};
-	// POST /api/register per client address: 10, then one every 3 min.
+	// POST /api/register per client address (/64): 10, then one every 3 min.
 	static constexpr RateLimiter::Params kRegisterPerIp{10, 1.0 / 180, 10000};
 
 	WebAccess(WebApp &app, db::ConnectionPool &pool) : app_(app), pool_(pool) {}
@@ -115,19 +131,23 @@ public:
 	// the deploy toolbox; no CSRF header, since a browser never attaches it on
 	// its own), or else an admin-role session under require_user's rules. A
 	// player's session is refused with 403; no credential at all with 401 and
-	// the Bearer challenge. A granted state change is logged with its actor
-	// ("token" or the session's username).
+	// the Bearer challenge. A state change it lets through is logged with its
+	// actor and the reply's status (AccessMiddleware).
 	RouteAccess require_admin(const crow::request &req);
 
-	// The login brake both logins share, POST /api/login and the retail POST
-	// /NWLogin.dll, so a guesser gains nothing by switching between them.
-	// take_login_address draws the attempt from the client address's bucket;
-	// login_wait reads the username's two failure buckets before the password
-	// is checked (0, else the Retry-After seconds) and login_failed drains them
-	// after a wrong one. A right password costs them nothing.
-	int64_t take_login_address(const std::string &ip);
-	int64_t login_wait(const std::string &username, const std::string &ip);
-	void login_failed(const std::string &username, const std::string &ip);
+	// The login brake both logins run. take_login_address draws the attempt
+	// from the route's address bucket (0, else the Retry-After seconds).
+	// begin_password_check draws one token from the route's (username,
+	// address) bucket and, unless the address is one the account logged in
+	// from lately, one from the username's bucket, before the password is
+	// checked (so concurrent checks never pass a spent bucket): 0 with the
+	// ticket, or the Retry-After seconds with nothing drawn. password_accepted
+	// hands the ticket's tokens back and remembers the address for the
+	// account; a wrong password keeps them spent.
+	int64_t take_login_address(LoginRoute route, const std::string &ip);
+	int64_t begin_password_check(LoginRoute route, const std::string &username,
+	                             const std::string &ip, LoginTicket &ticket);
+	void password_accepted(const LoginTicket &ticket, int64_t user_id);
 
 	// POST /api/register's per-address brake: 0, or the Retry-After seconds.
 	int64_t take_register(const std::string &ip);

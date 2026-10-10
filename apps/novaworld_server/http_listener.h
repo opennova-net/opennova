@@ -107,6 +107,11 @@ private:
 	// the joiner's PCID when NWHANDLE doesn't arrive (G.8).
 	mutable std::mutex persistent_user_mu_;
 	std::unordered_map<std::string, int64_t> persistent_to_user_id_;
+	// Drops every PERSISTENTEXPRESSLOGINDATA pin to `user_id`: an admin
+	// password reset, a status other than 'active' and a deleted account end
+	// the retail logins a pin would resume with no password, as the same
+	// update ends the account's website sessions (update_revokes_sessions).
+	void forget_persistent_pins(int64_t user_id);
 	// Per-server-process EPASK params advertised via the EPASK cookie at
 	// /nwprepare.dll. Retail echoes the same params back as a form field
 	// at POST /NWLogin.dll, so we use these to decrypt the encrypted

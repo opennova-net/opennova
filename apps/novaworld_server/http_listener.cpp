@@ -68,20 +68,6 @@ std::string next_pcid() {
 	return pcid;
 }
 
-// A ServerCommand arg the admin route refuses: one holding a control byte (below 0x20, or 0x7F).
-// The stock reader carries such a byte faithfully inside quotes (String_TokenizeQuotedToArray
-// copies a quoted run as it is), so server_command_text, the reader's exact inverse, composes it.
-// The harm is on the host: SetServerName / SetServerMsg save the token into game.cfg unescaped
-// (Game_SaveConfig @0x54C490, `game_name = "%s"\n`; ours engine/formats/gamecfg/game_cfg_write.cpp),
-// so a CR or LF injects a line into a third party's config, and the chat verbs relay the byte to
-// every player. So it is the service's own input rule at its edge, not a reader rule.
-bool has_control_byte(std::string_view s) {
-	return std::any_of(s.begin(), s.end(), [](char c) {
-		const auto byte = static_cast<unsigned char>(c);
-		return byte < 0x20 || byte == 0x7F;
-	});
-}
-
 std::string read_file_text(const std::filesystem::path &p) {
 	std::ifstream in(p, std::ios::binary);
 	std::ostringstream os;
@@ -393,6 +379,13 @@ bool HttpListener::start(const ServerConfig &config) {
 // The port is Crow's: its run() stores the port it bound (the OS's pick for
 // port 0) in the app before it accepts the first connection, so every handler
 // reads it settled, and with a nonzero port it is the configured one.
+void HttpListener::forget_persistent_pins(int64_t user_id) {
+	std::lock_guard<std::mutex> lock(persistent_user_mu_);
+	for (auto it = persistent_to_user_id_.begin(); it != persistent_to_user_id_.end();) {
+		it = it->second == user_id ? persistent_to_user_id_.erase(it) : std::next(it);
+	}
+}
+
 std::string HttpListener::host_url() const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + "/nwhost.dll";
 }
@@ -553,7 +546,15 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	// composed through server_command_text, so a line the host's reader would
 	// drop (a verb/target pairing, too few args, a quote or NUL, past 511
 	// characters) is a 400 with its reason; so is an arg with a control byte
-	// (has_control_byte, the service's own input rule).
+	// (has_control_byte, auth.h). That is the service's own input rule at its
+	// edge, not a reader rule: the stock reader carries such a byte faithfully
+	// inside quotes (String_TokenizeQuotedToArray copies a quoted run as it is),
+	// so server_command_text, the reader's exact inverse, composes it. The harm
+	// is on the host: SetServerName / SetServerMsg save the token into game.cfg
+	// unescaped (Game_SaveConfig @0x54C490, `game_name = "%s"\n`; ours
+	// engine/formats/gamecfg/game_cfg_write.cpp), so a CR or LF injects a line
+	// into a third party's config, and the chat verbs relay the byte to every
+	// player.
 	CROW_ROUTE(app, "/api/admin/hosts/<uint>/command").methods("POST"_method)(
 	    [this, push_reply](const crow::request &req, uint64_t rid) {
 		auto caller = impl_->access.require_admin(req);
@@ -718,6 +719,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		auto result = delete_user(*db_conn, id);
+		if (result.ok) forget_persistent_pins(id);
 		crow::response res(result.ok ? 204 :
 		                   result.error_code == "not_found" ? 404 : 500);
 		if (!result.ok) {
@@ -750,6 +752,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_user(*db_conn, id, p);
+		if (result.ok && update_revokes_sessions(p)) forget_persistent_pins(id);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
@@ -1262,25 +1265,33 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		std::optional<UserRecord> user;
 		const char *resolution = nullptr;
 		if (!login_name.empty() && !login_password.empty()) {
-			// The login brake POST /api/login runs (WebAccess), on the same
-			// buckets: the address's attempts, then the username's failure
-			// buckets, which only a wrong password drains. Its refusal is this
-			// route's own failure reply, the msgbase page with a message (as a
-			// bad password and maintenance get), which a stock client shows;
-			// no retail throttling reply is witnessed (service policy).
-			const std::string ip = impl_->access.client_ip(req);
-			if (impl_->access.take_login_address(ip) != 0 ||
-			    impl_->access.login_wait(login_name, ip) != 0) {
+			// The login brake POST /api/login runs (WebAccess) on its retail
+			// buckets: the address's attempts, then one token from the
+			// username's failure buckets, handed back when the password is
+			// right. Keyed by the TCP peer: a stock client reaches this port
+			// directly (the gate's startupurl names ONNET_PUBLIC_HOST and the
+			// HTTP port, through no proxy), so no header names the client and
+			// nothing the website's brake sees can brake this one; only the
+			// per-username cap is shared, and it spares the account's known
+			// addresses. Its refusal is this route's own failure reply, the
+			// msgbase page with a message (as a bad password and maintenance
+			// get), which a stock client shows; no retail throttling reply is
+			// witnessed (service policy).
+			const std::string &peer = req.remote_ip_address;
+			LoginTicket ticket;
+			if (impl_->access.take_login_address(LoginRoute::Retail, peer) != 0 ||
+			    impl_->access.begin_password_check(LoginRoute::Retail, login_name, peer, ticket) !=
+			            0) {
 				std::fprintf(stderr,
 				             "[http] POST /NWLogin.dll rate-limited for user '%s' from %s\n",
-				             loggable(login_name).c_str(), ip.c_str());
+				             loggable(login_name).c_str(), peer.c_str());
 				return render_login_message(kLoginThrottledMessage);
 			}
 			user = authenticate_user(*db_conn, login_name, login_password);
 			if (user) {
 				resolution = "epask-auth";
+				impl_->access.password_accepted(ticket, user->id);
 			} else {
-				impl_->access.login_failed(login_name, ip);
 				// Bad credentials → render the failure template (jop_2_main.htm
 				// per retail's form `failure` arg) with a "Invalid username or
 				// password" message and bail before storing a session.
@@ -1366,12 +1377,11 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			std::lock_guard<std::mutex> lk(persistent_user_mu_);
 			persistent_to_user_id_[persist_cookie] = user->id;
 		}
-		std::printf("[http]   user resolved (%s): id=%lld username=%s pcid=%s nwhandle=%s persist=%.16s%s\n",
+		std::printf("[http]   user resolved (%s): id=%lld username=%s pcid=%s nwhandle=%s persist=%s\n",
 		            resolution ? resolution : "?",
-		            static_cast<long long>(s.user_id), s.username.c_str(),
-		            s.pcid.c_str(), s.nwhandle.c_str(),
-		            persist_cookie.empty() ? "(none)" : persist_cookie.c_str(),
-		            persist_cookie.size() > 16 ? ".." : "");
+		            static_cast<long long>(s.user_id), loggable(s.username).c_str(),
+		            loggable(s.pcid).c_str(), loggable(s.nwhandle).c_str(),
+		            persist_cookie.empty() ? "(none)" : loggable(persist_cookie, 16).c_str());
 
 		// The relay template renders this response only; nothing reads it back
 		// from the stored session.
@@ -1401,7 +1411,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 
 		std::printf("[http] POST %s body=%zuB user=%s relay->%s success->%s -> tag %s\n",
 		            req.url.c_str(), req.body.size(),
-		            sessions_.get_login(tag).value().username.c_str(),
+		            loggable(sessions_.get_login(tag).value().username).c_str(),
 		            relay_template.c_str(),
 		            sessions_.get_login(tag).value().success.c_str(),
 		            tag.c_str());
@@ -1485,7 +1495,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 
 		std::printf("[http] GET %s tag=%s -> auth ok (user=%s pcid=%s)\n",
 		            req.url.c_str(), tag.c_str(),
-		            session->username.c_str(), session->pcid.c_str());
+		            loggable(session->username).c_str(), loggable(session->pcid).c_str());
 		if (session->user_id != 0) {
 			try { touch_active_user_session(*db_pool_.acquire(), session->user_id); }
 			catch (const std::exception &e) {
@@ -1651,7 +1661,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		std::printf("[http] %s -> %s%s user=%s\n",
 		            req.url.c_str(), tpl.c_str(),
 		            exists ? "" : " (MISSING — 404)",
-		            user ? user->username.c_str() : "(unknown)");
+		            user ? loggable(user->username).c_str() : "(unknown)");
 		if (!exists) {
 			crow::response res(404);
 			res.body = "template not found: " + tpl;
@@ -1999,8 +2009,8 @@ void HttpListener::register_legacy_host_join_routes(
 						             cookie_summary(request_cookie_header(req)).c_str());
 					}
 					std::printf("[http] /NWJoin.dll PUB* encoded for joiner=%s pcid=%s nwhandle=%s host_key=%zuB name=%zuB squad=%zuB\n",
-					            joiner_label.c_str(), joiner_pcid.c_str(),
-					            joiner_nwhandle.c_str(), host_pcid_key.size(),
+					            loggable(joiner_label).c_str(), loggable(joiner_pcid).c_str(),
+					            loggable(joiner_nwhandle).c_str(), host_pcid_key.size(),
 					            payloads.name_info.size(), payloads.squad_info.size());
 				}
 			}

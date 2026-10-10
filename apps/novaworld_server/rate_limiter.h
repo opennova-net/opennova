@@ -42,13 +42,11 @@ public:
 	// request is answered with.
 	int64_t take(const std::string &key, Clock::time_point now);
 
-	// The failure-charged pair, for a bucket that only failed attempts drain:
-	// wait() reads whether `key` has a token (0, else the Retry-After seconds)
-	// without taking one, and charge() takes one after the attempt failed.
-	// Attempts that passed wait() at once and all failed can empty the bucket
-	// only to zero, never into debt, so a burst cannot extend the lockout.
-	int64_t wait(const std::string &key, Clock::time_point now);
-	void charge(const std::string &key, Clock::time_point now);
+	// Hands back a token take() drew, for a bucket only failed attempts should
+	// drain: the caller takes before the attempt (so concurrent attempts can
+	// never draw more than the bucket holds) and refunds the ones that
+	// succeeded. Never past capacity.
+	void refund(const std::string &key, Clock::time_point now);
 
 	size_t size() const;
 
@@ -81,5 +79,13 @@ private:
 std::string resolve_client_ip(std::string_view peer, std::string_view x_real_ip,
                               std::string_view x_forwarded_for,
                               const std::vector<std::string> &trusted_proxies);
+
+// The key a client address is braked by: an IPv4 address as it is, and an IPv6
+// one grouped to its first `v6_prefix_bits` bits (a /64 is one subscriber's
+// LAN, so a /128 key would hand every host 2^64 fresh buckets), spelled as the
+// prefix's hex and its length ("20010db8000000aa/64"). An IPv4-mapped IPv6
+// address is its IPv4 address. Text that parses as neither is kept as it is,
+// cut at 64 bytes.
+std::string address_key(std::string_view ip, int v6_prefix_bits);
 
 } // namespace opennova::novaworld_server

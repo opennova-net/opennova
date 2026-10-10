@@ -104,6 +104,13 @@ MutationResult err(const char *code, const char *msg) {
 
 } // namespace
 
+bool has_control_byte(std::string_view s) {
+	return std::any_of(s.begin(), s.end(), [](char c) {
+		const auto byte = static_cast<unsigned char>(c);
+		return byte < 0x20 || byte == 0x7F;
+	});
+}
+
 uint64_t password_verifications() {
 	return g_password_verifications.load(std::memory_order_relaxed);
 }
@@ -351,12 +358,30 @@ std::string hash_password(const std::string &plain, int cost) {
 	return std::string(out);
 }
 
+namespace {
+
+// The username rule: at most kUsernameMaxBytes bytes (POST /api/login takes no
+// longer one, so a longer account could never log in to the site) and no
+// control byte (a name is logged and shown in the retail browser and chat).
+std::optional<MutationResult> username_refusal(const std::string &username) {
+	if (username.size() > kUsernameMaxBytes) {
+		return err("invalid_field", "username is longer than 64 bytes");
+	}
+	if (has_control_byte(username)) {
+		return err("invalid_field", "username holds a control byte");
+	}
+	return std::nullopt;
+}
+
+} // namespace
+
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p) {
 	if (p.username.empty() || p.password.empty() || p.pcid.empty() ||
 	    p.nwhandle.empty()) {
 		return err("missing_field",
 		           "username, password, pcid, nwhandle are required");
 	}
+	if (auto refused = username_refusal(p.username)) return *refused;
 	std::string nwh = p.nwh.empty() ? std::string("1") : p.nwh;
 
 	// Detect duplicate-by-username / duplicate-by-pcid so we can return a
@@ -441,12 +466,14 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	if (p.account_status && p.account_status->empty()) {
 		return err("invalid_field", "account_status must not be empty");
 	}
+	if (p.username) {
+		if (auto refused = username_refusal(*p.username)) return *refused;
+	}
 	// A new password or an inactive status ends the account's website
-	// sessions, in the same transaction as the update: a reset locks out
-	// whoever held the old one, and a ban lifted later revives no session.
-	const bool revoke_sessions =
-			(p.password_plaintext && !p.password_plaintext->empty()) ||
-			(p.account_status && *p.account_status != "active");
+	// sessions and forgets its known login addresses, in the same transaction
+	// as the update: a reset locks out whoever held the old one, and a ban
+	// lifted later revives no session.
+	const bool revoke_sessions = update_revokes_sessions(p);
 
 	std::string sets;
 	std::vector<opennova::db::BindValue> binds;
@@ -488,6 +515,7 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 		db.exec("UPDATE players SET " + sets + " WHERE id = ?;", binds);
 		if (revoke_sessions) {
 			db.exec("DELETE FROM web_sessions WHERE user_id = ?;", {opennova::db::BindValue(id)});
+			db.exec("DELETE FROM login_addresses WHERE user_id = ?;", {opennova::db::BindValue(id)});
 		}
 		tx.commit();
 	} catch (const opennova::db::SqliteError &e) {
@@ -497,6 +525,42 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	m.ok = true;
 	m.id = id;
 	return m;
+}
+
+bool update_revokes_sessions(const UpdateUserParams &p) {
+	return (p.password_plaintext && !p.password_plaintext->empty()) ||
+	       (p.account_status && *p.account_status != "active");
+}
+
+void record_login_address(opennova::db::Database &db, int64_t user_id, const std::string &address) {
+	opennova::db::Transaction tx(db);
+	db.exec("INSERT INTO login_addresses (user_id, address, last_success_at) "
+	        "VALUES (?, ?, datetime('now')) "
+	        "ON CONFLICT(user_id, address) DO UPDATE SET last_success_at = datetime('now');",
+	        {opennova::db::BindValue(user_id), opennova::db::BindValue(address)});
+	// The newest kLoginAddressesPerUser stay.
+	db.exec("DELETE FROM login_addresses WHERE user_id = ? AND rowid NOT IN ("
+	        "SELECT rowid FROM login_addresses WHERE user_id = ? "
+	        "ORDER BY last_success_at DESC, rowid DESC LIMIT ?);",
+	        {opennova::db::BindValue(user_id), opennova::db::BindValue(user_id),
+	         opennova::db::BindValue(static_cast<int64_t>(kLoginAddressesPerUser))});
+	tx.commit();
+}
+
+bool is_known_login_address(opennova::db::Database &db, const std::string &username,
+                            const std::string &address) {
+	return !db.query("SELECT 1 FROM login_addresses a JOIN players p ON p.id = a.user_id "
+	                 "WHERE p.username = ? AND a.address = ? "
+	                 "AND a.last_success_at > datetime('now', ?) LIMIT 1;",
+	                 {opennova::db::BindValue(username), opennova::db::BindValue(address),
+	                  opennova::db::BindValue("-" + std::to_string(kLoginAddressDays) + " days")})
+	                .empty();
+}
+
+size_t prune_login_addresses(opennova::db::Database &db) {
+	db.exec("DELETE FROM login_addresses WHERE last_success_at <= datetime('now', ?);",
+	        {opennova::db::BindValue("-" + std::to_string(kLoginAddressDays) + " days")});
+	return static_cast<size_t>(db.changes());
 }
 
 BootstrapAdminResult bootstrap_admin(opennova::db::Database &db, const std::string &username) {

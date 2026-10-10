@@ -1,8 +1,8 @@
 // The NovaWorld service's credential-route brake (apps/novaworld_server/
 // rate_limiter.*): token buckets on a hand-stepped clock (the burst, the
 // refill, the Retry-After, independent keys, the table bound and its
-// eviction, the failure-charged wait/charge pair), and the client address a
-// request is keyed by (resolve_client_ip:
+// eviction, the take/refund pair the failure-only buckets use), the address
+// keys (IPv6 grouped to a prefix), and the client address a request is keyed by (resolve_client_ip:
 // a proxy header counts only from a trusted peer). Crow-free, so it runs on
 // every build; the HTTP route harness drives the same limits over the wire.
 
@@ -88,26 +88,62 @@ int test_sweep_drops_full_buckets() {
 	return 0;
 }
 
-// The failure-charged pair: wait() reads without taking (an absent key is
-// full and stays absent), charge() drains one token per failure, never into
-// debt, and the bucket refills as take()'s does.
-int test_wait_and_charge() {
+// The failure-only brake's pair: take() before the attempt, refund() after a
+// success. A run of successes never drains the bucket; failures drain it
+// exactly, however many run at once (each took its token first); a refund
+// never lifts the bucket past capacity.
+int test_take_and_refund() {
 	RateLimiter limiter({3, 0.5, 100}); // 3 failures, then one every 2 s
-	TEST_EXPECT(limiter.wait("user", kT0) == 0);
-	TEST_EXPECT(limiter.size() == 0);
-	limiter.charge("user", kT0);
-	limiter.charge("user", kT0);
-	TEST_EXPECT(limiter.wait("user", kT0) == 0); // one left
-	TEST_EXPECT(limiter.wait("user", kT0) == 0); // reading takes nothing
-	limiter.charge("user", kT0);
-	TEST_EXPECT(limiter.wait("user", kT0) == 2);
-	// Failures that all passed wait() at once drain to zero, not below: the
-	// wait stays one token's.
-	for (int i = 0; i < 5; ++i) limiter.charge("user", kT0);
-	TEST_EXPECT(limiter.wait("user", kT0) == 2);
-	TEST_EXPECT(limiter.wait("user", kT0 + seconds(2)) == 0);
-	TEST_EXPECT(limiter.wait("other", kT0) == 0);
-	TEST_EXPECT(limiter.size() == 1);
+	for (int i = 0; i < 10; ++i) {
+		TEST_EXPECT(limiter.take("user", kT0) == 0);
+		limiter.refund("user", kT0); // the password was right
+	}
+	// Three checks in flight at once, all wrong: the fourth is refused before
+	// it runs.
+	TEST_EXPECT(limiter.take("user", kT0) == 0);
+	TEST_EXPECT(limiter.take("user", kT0) == 0);
+	TEST_EXPECT(limiter.take("user", kT0) == 0);
+	TEST_EXPECT(limiter.take("user", kT0) == 2);
+	// One of them was right after all: its token comes back, and only one.
+	limiter.refund("user", kT0);
+	TEST_EXPECT(limiter.take("user", kT0) == 0);
+	TEST_EXPECT(limiter.take("user", kT0) == 2);
+	// Refunds past capacity are dropped.
+	for (int i = 0; i < 10; ++i) limiter.refund("other", kT0);
+	for (int i = 0; i < 3; ++i) TEST_EXPECT(limiter.take("other", kT0) == 0);
+	TEST_EXPECT(limiter.take("other", kT0) == 2);
+	return 0;
+}
+
+// address_key: IPv4 as it is; IPv6 grouped to the prefix, whatever its
+// spelling (case, "::", a %zone, a dotted tail); an IPv4-mapped address as
+// its IPv4; anything else as it is, cut at 64 bytes.
+int test_address_key() {
+	TEST_EXPECT(nws::address_key("198.51.100.4", 64) == "198.51.100.4");
+	TEST_EXPECT(nws::address_key("::ffff:198.51.100.4", 64) == "198.51.100.4");
+	TEST_EXPECT(nws::address_key("::FFFF:c633:6404", 56) == "198.51.100.4");
+
+	const std::string lan = nws::address_key("2001:db8:0:aa::1", 64);
+	TEST_EXPECT(lan == "20010db8000000aa/64");
+	TEST_EXPECT(nws::address_key("2001:0DB8:0000:00AA:ffff:1:2:3", 64) == lan);
+	TEST_EXPECT(nws::address_key("2001:db8:0:aa:1::%eth0", 64) == lan);
+	TEST_EXPECT(nws::address_key("2001:db8:0:aa::1.2.3.4", 64) == lan);
+	TEST_EXPECT(nws::address_key("2001:db8:0:ab::1", 64) != lan);
+	// A /56 holds 256 /64s.
+	TEST_EXPECT(nws::address_key("2001:db8:0:aa::1", 56) == "20010db8000000/56");
+	TEST_EXPECT(nws::address_key("2001:db8:0:ff::1", 56) == nws::address_key("2001:db8:0:aa::1", 56));
+	TEST_EXPECT(nws::address_key("2001:db8:0:1aa::1", 56) != nws::address_key("2001:db8:0:aa::1", 56));
+	// A prefix that splits a byte keeps only its bits.
+	TEST_EXPECT(nws::address_key("2001:db8:0:aa::1", 60) == "20010db8000000a0/60");
+	TEST_EXPECT(nws::address_key("::1", 128) == "00000000000000000000000000000001/128");
+	TEST_EXPECT(nws::address_key("::", 64) == "0000000000000000/64");
+
+	// Not addresses: kept as they are (cut at 64 bytes).
+	for (const char *text : {"1:2:3:4:5:6:7:8:9", "2001:db8::1::2", "12345::1", "::g", ":1:2:3:4:5:6:7",
+	                         "1.2.3.4:80"}) {
+		TEST_EXPECT(nws::address_key(text, 64) == text);
+	}
+	TEST_EXPECT(nws::address_key(std::string(100, 'x'), 64) == std::string(64, 'x'));
 	return 0;
 }
 
@@ -143,7 +179,8 @@ int main() {
 		{"keys_are_independent", test_keys_are_independent},
 		{"table_is_bounded", test_table_is_bounded},
 		{"sweep_drops_full_buckets", test_sweep_drops_full_buckets},
-		{"wait_and_charge", test_wait_and_charge},
+		{"take_and_refund", test_take_and_refund},
+		{"address_key", test_address_key},
 		{"client_ip", test_client_ip},
 	};
 	for (const Case &c : cases) {

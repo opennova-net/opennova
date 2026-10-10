@@ -253,6 +253,91 @@ int test_update_revokes_sessions(Database &db, int64_t) {
 	return 0;
 }
 
+// The username rule, on registration and on a rename: at most 64 bytes, no
+// control byte (invalid_field), so every account can log in to the site and
+// no stored name carries a byte into a log line or the retail browser.
+int test_username_rule(Database &db, int64_t alice) {
+	auto create = [&db](const std::string &name, const char *pcid) {
+		nws::CreateUserParams p;
+		p.username = name;
+		p.password = "pw";
+		p.pcid = pcid;
+		p.nwh = "1";
+		p.nwhandle = "handle";
+		return nws::create_user(db, p);
+	};
+	TEST_EXPECT(create(std::string(64, 'n'), "0000c001").ok);
+	for (const std::string &bad : {std::string(65, 'n'), std::string("line\nbreak"),
+	                               std::string("tab\tname"), std::string("del\x7f")}) {
+		const auto refused = create(bad, "0000c002");
+		TEST_EXPECT(!refused.ok && refused.error_code == "invalid_field");
+		nws::UpdateUserParams rename;
+		rename.username = bad;
+		const auto renamed = nws::update_user(db, alice, rename);
+		TEST_EXPECT(!renamed.ok && renamed.error_code == "invalid_field");
+	}
+	TEST_EXPECT(nws::get_user_by_id(db, alice)->username == "alice");
+	return 0;
+}
+
+// Known login addresses: recorded per account, read by username, kept 30
+// days, at most 32 an account (the oldest go), forgotten with a password
+// reset or a status other than 'active', and with the account.
+int test_login_addresses(Database &db, int64_t) {
+	const int64_t fay = make_player(db, "fay", "0000fa01");
+	TEST_EXPECT(fay > 0);
+	TEST_EXPECT(!nws::is_known_login_address(db, "fay", "198.51.100.1"));
+	nws::record_login_address(db, fay, "198.51.100.1");
+	nws::record_login_address(db, fay, "198.51.100.1"); // again: one row
+	TEST_EXPECT(nws::is_known_login_address(db, "fay", "198.51.100.1"));
+	TEST_EXPECT(!nws::is_known_login_address(db, "fay", "198.51.100.2"));
+	TEST_EXPECT(!nws::is_known_login_address(db, "alice", "198.51.100.1"));
+	auto count = [&db, fay] {
+		return db.query("SELECT COUNT(*) FROM login_addresses WHERE user_id = ?;", {BindValue(fay)})
+				.front()
+				.as_int(0)
+				.value_or(-1);
+	};
+	TEST_EXPECT(count() == 1);
+
+	// 30 days unused: no longer known, and pruned.
+	db.exec("UPDATE login_addresses SET last_success_at = datetime('now', '-31 days') "
+	        "WHERE user_id = ?;",
+	        {BindValue(fay)});
+	TEST_EXPECT(!nws::is_known_login_address(db, "fay", "198.51.100.1"));
+	TEST_EXPECT(nws::prune_login_addresses(db) >= 1);
+	TEST_EXPECT(count() == 0);
+
+	// The newest 32 stay.
+	for (int i = 0; i < 40; ++i) nws::record_login_address(db, fay, "10.0.0." + std::to_string(i));
+	TEST_EXPECT(count() == static_cast<int64_t>(nws::kLoginAddressesPerUser));
+	TEST_EXPECT(!nws::is_known_login_address(db, "fay", "10.0.0.0"));
+	TEST_EXPECT(nws::is_known_login_address(db, "fay", "10.0.0.39"));
+
+	// A reset forgets them; so does a ban; a rename keeps them.
+	nws::UpdateUserParams rename;
+	rename.nwhandle = "Fay";
+	TEST_EXPECT(nws::update_user(db, fay, rename).ok);
+	TEST_EXPECT(count() > 0);
+	nws::UpdateUserParams reset;
+	reset.password_plaintext = "new";
+	TEST_EXPECT(nws::update_revokes_sessions(reset));
+	TEST_EXPECT(nws::update_user(db, fay, reset).ok);
+	TEST_EXPECT(count() == 0);
+	nws::record_login_address(db, fay, "198.51.100.3");
+	nws::UpdateUserParams ban;
+	ban.account_status = "banned";
+	TEST_EXPECT(nws::update_revokes_sessions(ban));
+	TEST_EXPECT(nws::update_user(db, fay, ban).ok);
+	TEST_EXPECT(count() == 0);
+	TEST_EXPECT(!nws::update_revokes_sessions(rename));
+
+	nws::record_login_address(db, fay, "198.51.100.4");
+	TEST_EXPECT(nws::delete_user(db, fay).ok);
+	TEST_EXPECT(db.query("SELECT 1 FROM login_addresses WHERE user_id = ?;", {BindValue(fay)}).empty());
+	return 0;
+}
+
 // A session whose account is banned behind the store's back (a direct status
 // write) is refused and deleted on its next use; a deleted player takes its
 // sessions with it.
@@ -378,6 +463,8 @@ int main() {
 		{"authenticate", test_authenticate},
 		{"loggable", test_loggable},
 		{"update_revokes_sessions", test_update_revokes_sessions},
+		{"username_rule", test_username_rule},
+		{"login_addresses", test_login_addresses},
 		{"inactive_and_deleted_accounts", test_inactive_and_deleted_accounts},
 		{"bootstrap_and_roles", test_bootstrap_and_roles},
 	};

@@ -252,8 +252,9 @@ int test_register_ok(Harness &h) {
 }
 
 // POST /api/register refusals: a taken username, a missing password, a body
-// that is not a JSON object, a field of the wrong type, and a request without
-// the CSRF header. None of them adds an account.
+// that is not a JSON object, a field of the wrong type, a username over 64
+// bytes or holding a control byte, and a request without the CSRF header.
+// None of them adds an account.
 int test_register_duplicate(Harness &h) {
 	auto reply = h.send("POST", "/api/register", {kJson, kCsrf},
 	                    "{\"username\":\"harness\",\"password\":\"pw-harness\","
@@ -279,6 +280,16 @@ int test_register_duplicate(Harness &h) {
 	               "{\"username\":\"typed\",\"password\":12345}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_field\"}");
+
+	// The username rule: at most 64 bytes, no control byte.
+	reply = h.send("POST", "/api/register", {kJson, kCsrf},
+	               "{\"username\":\"" + std::string(65, 'u') + "\",\"password\":\"pw\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
+	reply = h.send("POST", "/api/register", {kJson, kCsrf},
+	               "{\"username\":\"two\\nlines\",\"password\":\"pw\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
 
 	// Without the CSRF header: refused before anything is read.
 	reply = h.send("POST", "/api/register", {kJson},
@@ -925,21 +936,35 @@ int test_csrf_before_buckets(Harness &h) {
 	return 0;
 }
 
-// The login brake. Every attempt draws on its address's bucket (20 at once,
-// counted before the body is read). Only failures drain the username's
-// buckets: 10 per (username, address), so a guesser's address is shut out
-// while the owner, elsewhere, still logs in; and 30 per username from any
-// address, which only failures spread over many addresses empty. A run of
-// right passwords drains nothing. Refusals are 429 with Retry-After.
+// The login brake. Every well-formed attempt draws on its address's bucket
+// (20 at once; a malformed body is a 400 before any bucket), an IPv6 address
+// counting as its /64. Each password check draws one token from the
+// username's buckets and hands it back when the password is right: 10 per
+// (username, address), an IPv6 address counting as its /56, so a guesser's
+// address is shut out while the owner, elsewhere, still logs in; and 30 per
+// username from any address the account has not logged in from, which only
+// failures spread over many addresses empty. A run of right passwords drains
+// nothing. Refusals are 429 with Retry-After.
 int test_login_brake(Harness &h) {
+	// The address bucket: a different unknown name each time, so only the
+	// address is shared.
 	net::HttpReply refusal;
 	int accepted = accepted_before_429(
-			[&h](int) { return h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.9.0.1")}, "{}"); },
-			60, refusal);
+			[&h](int i) { return login(h, "10.9.0.1", address("ghost", i), "x"); }, 60, refusal);
 	TEST_EXPECT(accepted >= 20);
 	TEST_EXPECT(body_text(refusal) == "{\"error\":\"rate_limited\"}");
 	TEST_EXPECT(is_retry_after(refusal));
-	TEST_EXPECT(h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.9.0.2")}, "{}").code == 400);
+	TEST_EXPECT(login(h, "10.9.0.2", "ghost-elsewhere", "x").code == 401);
+	// A malformed body draws nothing, even from the spent address.
+	TEST_EXPECT(h.send("POST", "/api/login", {kJson, kCsrf, from_ip("10.9.0.1")}, "{}").code == 400);
+	// IPv6: every address in one /64 shares the bucket; the next /64 has its own.
+	accepted = accepted_before_429(
+			[&h](int i) {
+				return login(h, "2001:db8:9:1::" + std::to_string(i + 1), address("ghost6-", i), "x");
+			},
+			60, refusal);
+	TEST_EXPECT(accepted >= 20);
+	TEST_EXPECT(login(h, "2001:db8:9:2::1", "ghost6-elsewhere", "x").code == 401);
 
 	// One address guessing one account: 10 failures, then refused even with
 	// the right password; the owner at another address is not.
@@ -952,6 +977,18 @@ int test_login_brake(Harness &h) {
 	TEST_EXPECT(login(h, "10.12.0.1", "web_target", "pw-target").code == 429);
 	TEST_EXPECT(login(h, "10.12.0.2", "web_target", "pw-target").code == 200);
 
+	// The same over IPv6: ten /64s inside one /56 are one guesser; another /56
+	// is someone else.
+	TEST_EXPECT(make_account(h, "web_target6", "pw-target6") > 0);
+	accepted = accepted_before_429(
+			[&h](int i) {
+				return login(h, "2001:db8:56:" + std::to_string(i) + "::1", "web_target6",
+				             address("guess", i));
+			},
+			30, refusal);
+	TEST_EXPECT(accepted == 10);
+	TEST_EXPECT(login(h, "2001:db8:57::1", "web_target6", "pw-target6").code == 200);
+
 	// Right passwords drain nothing: twelve logins in a row from one address.
 	TEST_EXPECT(make_account(h, "web_regular", "pw-regular") > 0);
 	for (int i = 0; i < 12; ++i) {
@@ -960,9 +997,7 @@ int test_login_brake(Harness &h) {
 
 	// Failures spread over addresses, five each (half the per-address limit):
 	// once about 30 have landed, the per-username cap refuses an address that
-	// is nowhere near its own limit. (Whether the right password is refused
-	// then too is the per-address case above: the brake is read before any
-	// password is checked.)
+	// is nowhere near its own limit.
 	TEST_EXPECT(make_account(h, "web_spread", "pw-spread") > 0);
 	int failures = 0;
 	bool capped = false;
@@ -994,10 +1029,16 @@ int test_register_brake(Harness &h) {
 	return 0;
 }
 
-// The retail POST /NWLogin.dll: an EPASK-encrypted NAME / PASSWORD form, the
-// way a stock client posts it, from client address `ip`.
-net::HttpReply nwlogin(Harness &h, const std::string &ip, const std::string &name,
-                       const std::string &password) {
+// The retail POST /NWLogin.dll the way a stock client posts it: the EPASK form
+// with NAME / PASSWORD encrypted, plus `headers` (a Cookie). With no name, the
+// form carries no credentials (the PERSISTENTEXPRESSLOGINDATA pin path). The
+// harness reaches the listener from 127.0.0.1, the TCP peer the retail login
+// is braked by (no X-Real-IP counts there).
+net::HttpReply nwlogin(Harness &h, const std::string &name, const std::string &password,
+                       const std::vector<std::string> &headers = {}) {
+	std::vector<std::string> request_headers = {"Content-Type: application/x-www-form-urlencoded"};
+	request_headers.insert(request_headers.end(), headers.begin(), headers.end());
+	if (name.empty()) return h.send("POST", "/NWLogin.dll", request_headers, "");
 	const auto prepare = h.send("GET", std::string("/nwprepare.dll?url=") + kUrlsTemplate);
 	opennova::EpaskParams epask;
 	if (!opennova::epask_from_string(set_cookie_value(prepare, "EPASK"), epask)) return {};
@@ -1012,15 +1053,21 @@ net::HttpReply nwlogin(Harness &h, const std::string &ip, const std::string &nam
 	                                     body)) {
 		return {};
 	}
-	return h.send("POST", "/NWLogin.dll",
-	              {"Content-Type: application/x-www-form-urlencoded", from_ip(ip)}, body);
+	return h.send("POST", "/NWLogin.dll", request_headers, body);
 }
 
-// The retail login runs the same brake on the same buckets, and its refusal
-// is a retail login failure: the msgbase page (jop_2_msg.htm, the template a
-// stock client already shows for a bad password) with its message, HTTP 200,
-// and no login session tag. Failures there close the site login to that
-// address too; the owner elsewhere still gets in on either route.
+bool nwlogin_succeeded(const net::HttpReply &reply) {
+	return reply.transport_ok && reply.code == 200 &&
+	       !set_cookie_value(reply, "LOGINSESSIONTAG").empty();
+}
+
+// The retail login runs the brake on its own buckets, keyed by its TCP peer
+// (a stock client reaches the HTTP port directly): an address the site's
+// login is braked by (an X-Real-IP, which a Cloudflare Worker can forge
+// through nginx) never brakes it. Its refusal is a retail login failure: the
+// msgbase page (jop_2_msg.htm, the template a stock client already shows for a
+// bad password) with its message, HTTP 200, and no login session tag. Its
+// failures leave the site login alone.
 int test_nwlogin_brake(Harness &h) {
 	// Maintenance would answer before any password is checked.
 	auto reply = h.send("PUT", "/api/admin/server-status", {kJson, kBearer},
@@ -1028,18 +1075,26 @@ int test_nwlogin_brake(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(make_account(h, "web_retail", "pw-retail") > 0);
 
-	const auto bad = nwlogin(h, "10.13.0.1", "web_retail", "guess0");
+	// A flood on the site's login naming the retail client's address...
+	net::HttpReply refusal;
+	const int accepted = accepted_before_429(
+			[&h](int i) { return login(h, "127.0.0.1", address("forged", i), "x"); }, 60, refusal);
+	TEST_EXPECT(accepted >= 20);
+	// ...brakes nothing on the retail login from it.
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_retail", "pw-retail")));
+
+	const auto bad = nwlogin(h, "web_retail", "guess0");
 	TEST_EXPECT(bad.transport_ok && bad.code == 200);
 	const std::string bad_page = body_text(bad);
 	TEST_EXPECT(bad_page.find("NovaWorld Message") != std::string::npos);
 	TEST_EXPECT(bad_page.find("Invalid username or password") != std::string::npos);
 	TEST_EXPECT(set_cookie_value(bad, "LOGINSESSIONTAG").empty());
 	for (int i = 1; i < 10; ++i) {
-		const auto r = nwlogin(h, "10.13.0.1", "web_retail", address("guess", i));
+		const auto r = nwlogin(h, "web_retail", address("guess", i));
 		TEST_EXPECT(r.transport_ok && body_text(r) == bad_page);
 	}
 
-	const auto refused = nwlogin(h, "10.13.0.1", "web_retail", "pw-retail");
+	const auto refused = nwlogin(h, "web_retail", "pw-retail");
 	TEST_EXPECT(refused.transport_ok && refused.code == 200);
 	TEST_EXPECT(header_value(refused, "Content-Type") == header_value(bad, "Content-Type"));
 	TEST_EXPECT(set_cookie_value(refused, "LOGINSESSIONTAG").empty());
@@ -1049,13 +1104,74 @@ int test_nwlogin_brake(Harness &h) {
 	                 "Too many failed logins. Please try again later.");
 	TEST_EXPECT(body_text(refused) == expected);
 
-	// The site login shares the buckets...
-	TEST_EXPECT(login(h, "10.13.0.1", "web_retail", "pw-retail").code == 429);
-	// ...and the owner at another address gets in on either route.
+	// The site login keeps its own buckets: in from another address.
 	TEST_EXPECT(login(h, "10.13.0.2", "web_retail", "pw-retail").code == 200);
-	const auto ok = nwlogin(h, "10.13.0.3", "web_retail", "pw-retail");
-	TEST_EXPECT(ok.transport_ok && ok.code == 200);
-	TEST_EXPECT(!set_cookie_value(ok, "LOGINSESSIONTAG").empty());
+	return 0;
+}
+
+// An account's known addresses (a right password in the last 30 days, on
+// either login) are spared the per-username cap: once strangers' failures have
+// emptied it, the owner still gets in from them, on the site and in the game,
+// while the strangers' fresh addresses are refused.
+int test_known_addresses(Harness &h) {
+	TEST_EXPECT(make_account(h, "web_known", "pw-known") > 0);
+	TEST_EXPECT(login(h, "10.15.0.1", "web_known", "pw-known").code == 200);
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_known", "pw-known"))); // from 127.0.0.1
+
+	int failures = 0;
+	bool capped = false;
+	for (int a = 0; a < 16 && !capped; ++a) {
+		for (int i = 0; i < 5 && !capped; ++i) {
+			const auto reply = login(h, address("10.15.1.", a), "web_known", address("g", i));
+			TEST_EXPECT(reply.code == 401 || reply.code == 429);
+			if (reply.code == 401) ++failures;
+			capped = reply.code == 429;
+		}
+	}
+	TEST_EXPECT(capped && failures >= 30);
+	TEST_EXPECT(login(h, "10.15.0.1", "web_known", "pw-known").code == 200);
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_known", "pw-known")));
+	return 0;
+}
+
+// A retail login carrying PERSISTENTEXPRESSLOGINDATA pins that cookie to the
+// account, and a later POST with the cookie alone resumes it with no
+// password. An admin password reset, a status other than 'active' (even one
+// lifted again) and a deleted account drop the pin.
+int test_retail_pin_revocation(Harness &h) {
+	const int64_t id = make_account(h, "web_pinned", "pw-pinned");
+	TEST_EXPECT(id > 0);
+	const std::string user_path = "/api/admin/users/" + std::to_string(id);
+	const std::vector<std::string> cookie = {"Cookie: PERSISTENTEXPRESSLOGINDATA=pin-web-pinned"};
+	auto refused_without_password = [&h, &cookie] {
+		const auto reply = nwlogin(h, "", "", cookie);
+		return reply.transport_ok && reply.code == 200 &&
+		       set_cookie_value(reply, "LOGINSESSIONTAG").empty() &&
+		       body_text(reply).find("Invalid username or password") != std::string::npos;
+	};
+	auto admin_put = [&h, &user_path](const std::string &body) {
+		const auto reply = h.send("PUT", user_path, {kJson, kBearer}, body);
+		return reply.transport_ok && reply.code == 200;
+	};
+
+	TEST_EXPECT(refused_without_password()); // no pin yet
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_pinned", "pw-pinned", cookie)));
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "", "", cookie))); // the pin resumes it
+	TEST_EXPECT(admin_put("{\"password\":\"pw-pinned-2\"}"));
+	TEST_EXPECT(refused_without_password());
+
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_pinned", "pw-pinned-2", cookie)));
+	TEST_EXPECT(admin_put("{\"account_status\":\"banned\"}"));
+	TEST_EXPECT(admin_put("{\"account_status\":\"active\"}"));
+	TEST_EXPECT(refused_without_password());
+
+	// A rename keeps the pin.
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "web_pinned", "pw-pinned-2", cookie)));
+	TEST_EXPECT(admin_put("{\"nwhandle\":\"Pinned\"}"));
+	TEST_EXPECT(nwlogin_succeeded(nwlogin(h, "", "", cookie)));
+	const auto deleted = h.send("DELETE", user_path, {kBearer});
+	TEST_EXPECT(deleted.transport_ok && deleted.code == 204);
+	TEST_EXPECT(refused_without_password());
 	return 0;
 }
 
@@ -1538,6 +1654,8 @@ int run(Harness &h) {
 		{"login_brake", test_login_brake},
 		{"register_brake", test_register_brake},
 		{"nwlogin_brake", test_nwlogin_brake},
+		{"known_addresses", test_known_addresses},
+		{"retail_pin_revocation", test_retail_pin_revocation},
 		{"untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored},
 		{"nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey},
 		{"menu_urls_name_bound_port", test_menu_urls_name_bound_port},

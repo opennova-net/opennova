@@ -329,13 +329,17 @@ int main() {
 				std::fprintf(stderr, "[sweep] WARN prune_stale_hosts: %s\n", e.what());
 			}
 #ifdef OPENNOVA_HTTP_ENABLED
-			// Website sessions past their (sliding) expiry.
+			// Website sessions past their (sliding) expiry, and login addresses
+			// not used for kLoginAddressDays.
 			try {
 				if (const auto pruned = prune_expired_web_sessions(dbh); pruned > 0) {
 					std::printf("[sweep] pruned %zu expired web session(s)\n", pruned);
 				}
+				if (const auto pruned = prune_login_addresses(dbh); pruned > 0) {
+					std::printf("[sweep] pruned %zu stale login address(es)\n", pruned);
+				}
 			} catch (const db::SqliteError &e) {
-				std::fprintf(stderr, "[sweep] WARN prune_expired_web_sessions: %s\n", e.what());
+				std::fprintf(stderr, "[sweep] WARN web session / login address prune: %s\n", e.what());
 			}
 #endif
 		}
