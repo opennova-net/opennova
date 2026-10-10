@@ -1,8 +1,9 @@
 #include <net/novaworld/http_flow.h>
 
 #include <cctype>
-#include <cstdlib> // std::atoi
+#include <cstdlib>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <net/novaworld/registration_url.h>
@@ -564,7 +565,9 @@ JoinResult LobbyHttpFlow::on_join_response(bool transport_ok, int code,
 				if (!message.empty()) return join_fail(message);
 				return join_fail("join: no connection string in .joi");
 			}
-			const int port = std::atoi(conn.host_port.c_str());
+			// The NK port is the CRT atol of the decoded tail (io::retail_atol; D-NET-384).
+			// [orig: UI_EnumerateAndJoinSession @0x569F50 — atol(g_NkExtraBuf) @0x569FDD]
+			const int port = io::retail_atol(conn.host_port.c_str());
 			if (port <= 0 || port > 65535) return join_fail("join: bad host port");
 			JoinResult r;
 			r.kind = JoinResult::Kind::Resolved;

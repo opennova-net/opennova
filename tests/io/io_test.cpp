@@ -652,6 +652,86 @@ static int test_retail_atol_saturates()
     return 0;
 }
 
+// The CRT's integer readers skip leading white space by the locale's table, which
+// WinMain sets to ".ACP": on cp1252 (D-NET-382's pin) the six C-locale spaces and
+// 0xA0, the no-break space (D-NET-384). [orig: strtoxl @0x76B0AE, the skip
+// @0x76B11C..0x76B153; CRT_strtoxq @0x777947, the skip @0x7779B4..0x7779EE]
+static int test_retail_integer_readers_skip_the_cp1252_spaces()
+{
+    // Each of the seven leads a number, alone and in a run, before a sign too.
+    const char spaces[] = {' ', '\t', '\n', '\v', '\f', '\r', '\xA0'};
+    for (char space : spaces) {
+        const std::string one = std::string(1, space) + "5";
+        TEST_EXPECT(io::retail_atol(one.c_str()) == 5);
+        const std::string run = std::string(3, space) + "-17x";
+        TEST_EXPECT(io::retail_atol(run.c_str()) == -17);
+        TEST_EXPECT(io::retail_atoi64(run.c_str()) == -17);
+        TEST_EXPECT(io::retail_strtol(run.c_str(), 16) == -0x17);
+    }
+    TEST_EXPECT(io::retail_atol("\xA0 \xA0\t42") == 42);
+    TEST_EXPECT(io::retail_atol_n("\xA0" "7", 2) == 7);
+    // 0xA0 inside the number stops it like any other non-digit, and after the sign
+    // it is no white space any more: the sign wants a digit next.
+    TEST_EXPECT(io::retail_atol("5\xA0" "7") == 5);
+    TEST_EXPECT(io::retail_atol("12\xA0") == 12);
+    TEST_EXPECT(io::retail_atol("-\xA0" "5") == 0);
+    TEST_EXPECT(io::retail_atoi64("9\xA0" "9") == 9);
+    // No other byte is white space: the cp1252 punctuation in 0x80..0x9F (0x85 the
+    // ellipsis, not NEL), the undefined 0x81 / 0x8D / 0x8F / 0x90 / 0x9D, the soft
+    // hyphen 0xAD and 0xFF all read 0, as does a lone 0xA0.
+    for (int byte : {0x1C, 0x1F, 0x81, 0x85, 0x8D, 0x8F, 0x90, 0x9D, 0xAD, 0xFF}) {
+        const std::string led = std::string(1, static_cast<char>(byte)) + "5";
+        TEST_EXPECT(io::retail_atol(led.c_str()) == 0);
+    }
+    TEST_EXPECT(io::retail_atol("\xA0") == 0);
+    // A cp1252 superscript digit is in the locale's digit class but its value (the
+    // sign-extended byte less '0') is past the radix, so it stops the walk.
+    TEST_EXPECT(io::retail_atol("\xB2") == 0);
+    TEST_EXPECT(io::retail_atol("1\xB9" "2") == 1);
+    return 0;
+}
+
+// strtoxl's radix legs and _atoi64's 64-bit range. [orig: strtoxl @0x76B0AE — the
+// radix prefixes @0x76B185..0x76B1CA, the letters @0x76B1ED..0x76B204; CRT_strtoxq
+// @0x777947 — the saturation @0x777B38..0x777B9B]
+static int test_retail_strtol_radix_and_atoi64_range()
+{
+    TEST_EXPECT(io::retail_strtol("ff", 16) == 255);
+    TEST_EXPECT(io::retail_strtol("0x1F", 16) == 31);
+    TEST_EXPECT(io::retail_strtol("0X1fz", 16) == 31);
+    TEST_EXPECT(io::retail_strtol("0x", 16) == 0);       // the 0x is skipped; no digit
+    TEST_EXPECT(io::retail_strtol("FFFFFFFF", 16) == INT32_MAX);
+    TEST_EXPECT(io::retail_strtol("-80000000", 16) == INT32_MIN);
+    TEST_EXPECT(io::retail_strtol("-80000001", 16) == INT32_MIN);
+    TEST_EXPECT(io::retail_strtol("100000000", 16) == INT32_MAX);
+    TEST_EXPECT(io::retail_strtol("12a", 10) == 12);
+    TEST_EXPECT(io::retail_strtol("0x10", 0) == 16);
+    TEST_EXPECT(io::retail_strtol("010", 0) == 8);
+    TEST_EXPECT(io::retail_strtol("19", 0) == 19);
+    TEST_EXPECT(io::retail_strtol("09", 0) == 0);        // octal stops at the 9
+    TEST_EXPECT(io::retail_atoi64("9223372036854775807") == INT64_MAX);
+    TEST_EXPECT(io::retail_atoi64("9223372036854775808") == INT64_MAX);
+    TEST_EXPECT(io::retail_atoi64("-9223372036854775808") == INT64_MIN);
+    TEST_EXPECT(io::retail_atoi64("-99999999999999999999") == INT64_MIN);
+    TEST_EXPECT(io::retail_atoi64("4294967297") == 4294967297LL);
+    TEST_EXPECT(io::retail_atoi64("") == 0);
+    return 0;
+}
+
+// The CRT ctype classes the ports pin to cp1252 (D-NET-382 for the spaces, D-NET-388
+// for the digits): every byte against the sets Windows' NLS gives code page 1252.
+static int test_cp1252_ctype_classes()
+{
+    for (int byte = 0; byte < 256; ++byte) {
+        const uint8_t b = static_cast<uint8_t>(byte);
+        const bool space = byte == 0x20 || (byte >= 0x09 && byte <= 0x0D) || byte == 0xA0;
+        const bool digit = (byte >= '0' && byte <= '9') || byte == 0xB2 || byte == 0xB3 || byte == 0xB9;
+        TEST_EXPECT(cp1252_isspace(b) == space);
+        TEST_EXPECT(cp1252_isdigit(b) == digit);
+    }
+    return 0;
+}
+
 // The CRT's atof reads no locale: the game pins LC_NUMERIC to "C" [orig:
 // System_InitTimerAndLocale @0x762A6E, the setlocale @0x762A7A], so `1.5` is
 // 1.5 whatever decimal point the embedder's locale uses; a comma is no point.
@@ -762,6 +842,9 @@ static int test_file_stamp_settled()
 int main()
 {
     if (test_retail_atol_saturates()) return 1;
+    if (test_retail_integer_readers_skip_the_cp1252_spaces()) return 1;
+    if (test_retail_strtol_radix_and_atoi64_range()) return 1;
+    if (test_cp1252_ctype_classes()) return 1;
     if (test_retail_atof_ignores_the_locale()) return 1;
     if (test_le_primitives()) return 1;
     if (test_file_stamp_settled()) return 1;
