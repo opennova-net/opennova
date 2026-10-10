@@ -186,10 +186,12 @@ void mission_anchor_offset(const double words[3], int32_t scale_q16, double pitc
 
 // What a drop on the terrain subtracts from the ground point to store an entity's position, as the original
 // editor's place-object dialog does: the model's Ground user point's +0/+4/+8 words, unrotated and unscaled
-// (`words`, mission_model_words: the point's x, y and z words in the mission's x, y and z) [orig: dfx2med.exe
-// sub_401A90 @ 0x401f6e, its scatter loop @ 0x4021fe; docs/world/world-wac-ai-re.md section 12]. The ground
-// command's terrain conform subtracts the height word alone (`out[2]`) [orig: dfx2med.exe sub_44D920,
-// sub_43BAD0].
+// (`words`, mission_model_words: the point's x, y and z words in the mission's x, y and z) [orig: JOTACmed.exe
+// @ 0x401F6E, "Ground" handed to sub_459C70, the model's user point record (its table at +0xC0, stride 0x30, the
+// name at +0x20); @ 0x401F80..0x401F94, its +0/+4/+8 dwords subtracted from the record's x, y and z; the scatter
+// loop @ 0x4021FF the same; docs/world/world-wac-ai-re.md section 12]. The ground command's terrain conform
+// subtracts the height word alone (`out[2]`) [orig: JOTACmed.exe @ 0x44D9CB..0x44D9E0, @ 0x43BBB2..0x43BBB5, the
+// height less the +8 word].
 void mission_ground_bake(const double words[3], double out[3]);
 
 } // namespace opennova::editor

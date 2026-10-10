@@ -39,8 +39,8 @@ inline constexpr uint32_t kMissionBuildingRgb = 0xC0C0C0;
 inline constexpr uint32_t kMissionMarkerRgb = 0x6EDCFF;
 inline constexpr uint32_t kMissionOrganicRgb = 0x7CD67C;
 inline constexpr uint32_t kMissionAreaRgb = 0xFFA028;
-// A team's colour as the game's map draws it (S23 C, witnessed in the game: the original editor's own
-// ring colours stay unread, no dfx2med database being open): a team-1 marker or person in the HUD
+// A team's colour as the game's map draws it (S23 C, witnessed in the game; the original editor's own ring
+// colours are not read): a team-1 marker or person in the HUD
 // palette's light blue, a team-2 one in its salmon, its palette[3] and palette[5] (the fourth and sixth entries) [orig:
 // HUD_InitTeamColorTable @ 0x51f245..0x51f2b3; Render_MinimapSlotBlip @ 0x5be4c5..0x5be4e1], the map's
 // own (runtime/hud/hud_minimap.h).
