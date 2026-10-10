@@ -321,13 +321,18 @@ bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const I
 namespace {
 
 constexpr FindingCodeEntry<AnimationMapFinding> kFindingEntries[] = {
-	{ AnimationMapFinding::InvalidInput, { "animation_map.invalid_input", FindingFix::None, nullptr, true } },
+	// A row of more than 8 clips: the game registers every one (unwritable_code: a closed table packs as
+	// stored, its Save refused).
+	{ AnimationMapFinding::InvalidInput, unwritable_code("animation_map.invalid_input") },
 	{ AnimationMapFinding::IgnoredInput, { "animation_map.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
 	// The load returns no map [orig: AnimMap_LoadAdmFile @ 0x40cc40, the reset row's test @ 0x40ce03]:
 	// that map is not loaded, and no refusal of the game's load or run past it is witnessed: listed
 	// (the gate follows retail, ADR 0046 S14).
 	{ AnimationMapFinding::NoReset, listed_code("animation_map.no_reset", FindingFix::ResetRow) },
-	{ AnimationMapFinding::Row, { "animation_map.row" } },
+	// A row the writer cannot write as it reads back: from a file, a key no slot has (registered for nothing) or
+	// a clip name registered as written, which the game reads on; from an edit, a Save refused
+	// (document.unserializable). Listed.
+	{ AnimationMapFinding::Row, listed_code("animation_map.row") },
 	{ AnimationMapFinding::KeyUnknown, { "animation_map.key_unknown" } },
 	{ AnimationMapFinding::SlotRepeated, { "animation_map.slot_repeated" } },
 };
@@ -356,7 +361,8 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 	// hold blocks the file (an error).
 	source_issue_findings(
 			*table, finding_code(AnimationMapFinding::InvalidInput),
-			finding_code(AnimationMapFinding::IgnoredInput), findings);
+			finding_code(AnimationMapFinding::IgnoredInput), findings, nullptr,
+			"A build packs the table as it stands; a save, which would drop the clips past the eighth, is refused.");
 	if (document.blocked()) return findings;
 	if (!has_reset(table->rows())) {
 		// On the first row's key, where a row takes the name (its Add anim_reset row fix
@@ -385,7 +391,11 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 		};
 		const adm::AdmEntry e = entry_of(r);
 		const int slot = anim::adm_slot_index(r.key);
-		if (const char *problem = adm::adm_row_problem(e)) add(DiagnosticSeverity::Error, AnimationMapFinding::Row, problem);
+		if (const char *problem = adm::adm_row_problem(e))
+			add(DiagnosticSeverity::Error, AnimationMapFinding::Row,
+			    std::string(problem) + " The game reads the row on, as written (a key no slot has registers nothing [orig: "
+			                           "AnimMap_ParseConfigLine @ 0x40cba4]); a build packs the table as it stands, and a "
+			                           "save cannot write the row.");
 		else if (slot < 0)
 			add(DiagnosticSeverity::Warning, AnimationMapFinding::KeyUnknown,
 			    "'" + r.key + "' names none of the engine's animation slots: the game skips the row.");

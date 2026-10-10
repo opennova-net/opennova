@@ -260,8 +260,9 @@ static std::vector<std::string> files_in(const std::string &dir);
 // or admin configuration), the build's own game.cfg among the build's files; one the game only reads
 // linked (copied where the file system will not link it: `link` injected), every other copied, the
 // build's record left out; launched /w /FRISK, no /d. The game writing every file it may write leaves
-// the build and the install as they were. Refused, nothing staged: an expansion (play.strict_expansion),
-// no install, an install without its program (play.install_missing).
+// the build and the install as they were. An expansion on the install's base game stages it as the stock
+// game's /exp plays from its install. Refused, nothing staged: no install, an install without its program
+// (play.install_missing).
 static int test_strict_install_staging() {
 	namespace fs = std::filesystem;
 	editor_test::TempProjectDir dir("opennova_editor_strict_staging");
@@ -321,17 +322,29 @@ static int test_strict_install_staging() {
 	TEST_EXPECT(!fs::equivalent(run2 + "/language.pff", build + "/language.pff", ec) && fs::is_regular_file(run2 + "/language.pff"));
 	TEST_EXPECT(!fs::exists(run2 + "/player.sav") && !fs::exists(run2 + "/score.ini") && !fs::exists(run2 + "/build.json"));
 
-	// Refused, nothing staged.
+	// An expansion on the install's own base game: the stock game's /exp from its install. An install with none
+	// of the game's archives refuses it (play.install_missing), nothing staged; with its archives, the run
+	// holds them and the build's expansion folder, none of the install's configuration, saves or files read by
+	// name; launched /w /exp jxm /FRISK. The install itself named as the base game is the same.
 	const std::string run3 = dir.file("run/3");
 	fs::create_directories(run3);
-	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "jxm", plan, error) &&
-	            error.code() == "play.strict_expansion" &&
-	            error.message.find("Strict Play of an expansion needs its base game's build: the project builds as the "
-	                               "expansion jxm") == 0 &&
-	            files_in(run3).empty());
-	// An expansion whose base game is the install itself: refused the same.
-	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "jxm", plan, error, opennova::io::link_file, install) &&
-	            error.code() == "play.strict_expansion" && files_in(run3).empty());
+	const std::string expansion_build = dir.file("build/fedcba9876543210");
+	TEST_EXPECT(write_empty_archive(expansion_build + "/expansion/jxm/jxm.pff"));
+	TEST_EXPECT(!prepare_strict_install_launch_plan(install, expansion_build, run3, "jxm", plan, error) &&
+	            error.code() == "play.install_missing" && files_in(run3).empty());
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff"}) TEST_EXPECT(write_empty_archive(install + "/" + name));
+	for (const std::string &base : {std::string(), install}) {
+		const std::string run4 = dir.file(base.empty() ? "run/4" : "run/5");
+		fs::create_directories(run4);
+		TEST_EXPECT(prepare_strict_install_launch_plan(install, expansion_build, run4, "jxm", plan, error,
+		                                               opennova::io::link_file, base));
+		TEST_EXPECT(plan.args == std::vector<std::string>({"/w", "/exp", "jxm", "/FRISK"}) && plan.expansion == "jxm");
+		for (const char *name : {"Jointops.exe", "binkw32.dll", "language.pff", "localres.pff", "resource.pff",
+		                         "menumus.sbf", "expansion/jxm/jxm.pff"})
+			TEST_EXPECT(fs::is_regular_file(run4 + "/" + name));
+		for (const char *name : {"game.cfg", "player.sav", "weapon.sav", "score.ini", "earlyerr.txt", "admin.cfg"})
+			TEST_EXPECT(!fs::exists(run4 + "/" + name));
+	}
 	TEST_EXPECT(!prepare_strict_install_launch_plan("", build, run3, "", plan, error) && error.code() == "play.install_missing");
 	fs::remove(install + "/Jointops.exe");
 	TEST_EXPECT(!prepare_strict_install_launch_plan(install, build, run3, "", plan, error) &&

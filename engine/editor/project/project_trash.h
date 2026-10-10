@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -12,8 +13,8 @@ namespace opennova::editor {
 // is a step the file history takes back (session/file_chores.h). A numbered folder under the cache's trash
 // (ProjectPaths::trash_dir, `.opennova/trash/<n>/`) per batch of paths put there, each at its project-relative
 // path beneath it. The project's walk never enters the cache (is_dot_directory), so nothing in the trash is a
-// file of the project; the editor never empties it (a person removes `.opennova/trash/` for the room), so no
-// delete is ever a permanent one.
+// file of the project. A delete is never a permanent one: only emptying the trash (empty_trash, Files' Empty
+// the trash..., asked first) removes what it holds.
 struct TrashBatch {
 	uint64_t id = 0;                // its folder's number under the trash (0: none)
 	std::vector<std::string> paths; // project-relative, as they were: files, or a folder under the cache
@@ -29,5 +30,10 @@ bool trash_paths(const ProjectPaths &paths, const std::vector<std::string> &rela
 bool restore_trash(const ProjectPaths &paths, const TrashBatch &batch, std::string &error);
 // Where a batch's paths are: its folder under the trash.
 std::string trash_batch_dir(const ProjectPaths &paths, uint64_t id);
+// How many files the trash holds, in every batch.
+size_t trash_file_count(const ProjectPaths &paths);
+// Everything the trash holds removed for good, the trash's folder with it: false with `error` (the system's
+// reason) when something stays; `files` how many files it held.
+bool empty_trash(const ProjectPaths &paths, size_t &files, std::string &error);
 
 } // namespace opennova::editor

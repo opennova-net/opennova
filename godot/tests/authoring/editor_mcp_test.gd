@@ -1182,7 +1182,7 @@ func test_graph_references_and_rename() -> void:
 		var font_file := String(places[1].get("file", ""))
 		assert_true(_done(await _call("editor_request", {"kind": "open_document", "path": font_file})))
 		assert_eq(String((await _state(["documents"])).get("documents", {}).get("active", "")), font_file)
-		var page := await _query("file_page", {"path": font_file})
+		var page := await _query("file_card", {"path": font_file})
 		assert_eq(String(page.get("path", "")), font_file, str(page))
 		assert_true(page.has("defines") and page.has("used_by"), str(page))
 		# Back to the menu, the document the queries below ask.

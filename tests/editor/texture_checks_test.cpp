@@ -173,6 +173,8 @@ int test_checks() {
 	            editor_test::write_text(root + "/terrains/f.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendw.tga\n"
 	                                                                  "polytrn_foliagemap fol2k.pcx\n")) &&
 	            editor_test::write_text(root + "/terrains/g.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendt.tga\n")) &&
+	            // A blend map the TGA reader cannot read: skipped, the terrain loading on.
+	            editor_test::write_text(root + "/terrains/k.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap map.pcx\n")) &&
 	            // A splat detail read by STAGE (its .dds) and by its own name through the TGA reader: no "never
 	            // read" on its .tga. A detail map whose .tga the project lacks: no coefficient made of its .dds.
 	            editor_test::write_text(root + "/terrains/h.trn",
@@ -211,7 +213,8 @@ int test_checks() {
 	using S = DiagnosticSeverity;
 	// The files' own.
 	TEST_EXPECT(has("texture.tga_upside_down", "textures/top.tga", S::Warning, false));
-	TEST_EXPECT(has("texture.tga_unfilled", "textures/grey16.tga", S::Error, true));
+	// A form the reader has no case for: the game loads it unset and goes on, so it refuses no build.
+	TEST_EXPECT(has("texture.tga_unfilled", "textures/grey16.tga", S::Warning, false));
 	TEST_EXPECT(has("texture.tga_zeroed", "textures/rle16.tga", S::Warning, false));
 	TEST_EXPECT(has("texture.tga_colour_map_skipped", "textures/mapped.tga", S::Warning, false));
 	TEST_EXPECT(has("texture.pcx_overrun", "textures/odd.pcx", S::Error, true));
@@ -236,6 +239,10 @@ int test_checks() {
 	TEST_EXPECT(has("texture.colormap_size", "terrains/b.trn", S::Error, true));
 	TEST_EXPECT(has("texture.colormap_size", "terrains/c.trn", S::Warning, false));
 	TEST_EXPECT(has("texture.wrong_reader", "terrains/d.trn", S::Error, true));
+	TEST_EXPECT(has("texture.wrong_reader", "terrains/k.trn", S::Warning, false));
+	for (const Found &f : found)
+		if (f.code == "texture.wrong_reader" && f.asset == "terrains/k.trn")
+			TEST_EXPECT(f.message.find("loads the terrain without one") != std::string::npos);
 	TEST_EXPECT(has("texture.foliage_map_overrun", "terrains/b.trn", S::Error, true));
 	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/c.trn", S::Warning, false));
 	// A foliage map wider than 1024 reads its first texel everywhere: its shape, no overrun.
