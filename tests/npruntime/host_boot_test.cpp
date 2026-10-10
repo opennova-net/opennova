@@ -346,7 +346,11 @@ int main() {
 	// embedder. A set word refuses the create inside the kernel boot's bring-up:
 	// phase A returns false with the exit outcome, no session stands, and the
 	// session stays Loading for the embedder, which ends its process with code
-	// 0 and runs no phase B. A clear word boots as ever.
+	// 0 and runs no phase B. A clear word boots as ever. The dedicated host
+	// first, then a listen host (serve-and-play), whose clear boot registers
+	// its own type-2 loopback connection and builds its HostClient view: with
+	// the word set the role's bring-up returns at the refused create, before
+	// either.
 	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
 	{
 		Host host;
@@ -360,15 +364,45 @@ int main() {
 		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
 		CHECK(ctx.is_in_session == 0);
 		CHECK(ctx.np_protocol.host_running == 0);
-		CHECK(ctx.np_protocol.connection_list.empty());
 		CHECK(host.session.state() == inmatch::State::Loading);
-		CHECK(host.role.client_runtime() == nullptr);
 
 		Host clear;
 		CHECK(inmatch::boot_host_mission(clear.request(0), clear.boot, error));
 		CHECK(clear.boot.session_create == inmatch::CreateSessionResult::Created);
 		CHECK(clear.role.state.host_owner.ctx.is_in_session == 1);
 		CHECK(clear.role.state.host_owner.ctx.np_protocol.host_running == 1);
+	}
+	{
+		auto listen_request = [](Host &h, int32_t mpreset) {
+			h.role.set_kind(inmatch::RoleKind::ListenHost);
+			inmatch::HostBootRequest r = h.request(0);
+			r.host_cfg.serve_and_play = true;
+			r.host_cfg.config.multiplayer_reset = mpreset;
+			return r;
+		};
+		auto loopbacks = [](const inmatch::NapiNPServerCtx &ctx) {
+			int n = 0;
+			for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+				if (c.type == inmatch::NapiNPConnection::kTypeClientSide) ++n;
+			return n;
+		};
+		std::string error;
+		Host clear;
+		CHECK(inmatch::boot_host_mission(listen_request(clear, 0), clear.boot, error));
+		CHECK(clear.boot.session_create == inmatch::CreateSessionResult::Created);
+		CHECK(clear.role.client_runtime() != nullptr);
+		CHECK(loopbacks(clear.role.state.host_owner.ctx) == 1);
+		CHECK(clear.role.state.host_owner.ctx.is_in_session == 1);
+
+		Host reset;
+		CHECK(!inmatch::boot_host_mission(listen_request(reset, 1), reset.boot, error));
+		CHECK(reset.boot.session_create == inmatch::CreateSessionResult::ProcessExit);
+		CHECK(reset.role.session_create() == inmatch::CreateSessionResult::ProcessExit);
+		CHECK(reset.role.client_runtime() == nullptr);
+		CHECK(loopbacks(reset.role.state.host_owner.ctx) == 0);
+		CHECK(reset.role.state.host_owner.ctx.is_in_session == 0);
+		CHECK(reset.role.state.host_owner.ctx.total_logins == 0);
+		CHECK(reset.session.state() == inmatch::State::Loading);
 	}
 
 	// --- a role with no HostRole (the game's joiner) skips the authority's legs

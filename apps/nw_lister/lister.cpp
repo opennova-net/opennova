@@ -191,7 +191,7 @@ bool Lister::tick(uint32_t now_ms) {
 		on_http_reply(http_.get());
 	}
 	if (!ending_) refresh_listing(false);
-	if (ending_) teardown();
+	if (ending_) teardown(/*stop_hosting=*/true);
 	return phase_ != Phase::Done;
 }
 
@@ -205,7 +205,14 @@ void Lister::stop() {
 	if (phase_ == Phase::Done) return;
 	io::logf(LogLevel::kInfo, "[main] stopping");
 	end(kExitStopped);
-	teardown();
+	teardown(/*stop_hosting=*/true);
+}
+
+void Lister::disconnect() {
+	if (phase_ == Phase::Done) return;
+	io::logf(LogLevel::kInfo, "[main] disconnecting");
+	end(kExitStopped);
+	teardown(/*stop_hosting=*/false);
 }
 
 // Verified: the account login first when there is one (the hosting page needs it), else the host
@@ -393,16 +400,19 @@ void Lister::end(int code) {
 // connection's disconnect burst (NovaWorldClient::stop's teardown).
 // The NovaWorld leg goes first: a console close leaves the process a few seconds, and the admin
 // thread can be mid-poll on a dead server.
-void Lister::teardown() {
+void Lister::teardown(bool stop_hosting) {
 	if (phase_ == Phase::Done) return;
 	phase_ = Phase::Done;
 	if (lobby_.is_open()) {
-		role_.stop();
-		lobby_.flush();
+		if (stop_hosting) {
+			role_.stop();
+			lobby_.flush();
+		}
 		if (ClientSession *session = lobby_.session(); session != nullptr && session->is_verified()) {
 			const std::vector<uint8_t> goodbye = session->build_goodbye();
 			for (std::size_t i = 0; i < session->disconnect_burst_count(); ++i) lobby_.send(goodbye);
-			io::logf(LogLevel::kInfo, "[session] ClientStopHosting and the goodbye sent");
+			io::logf(LogLevel::kInfo, "[session] %s",
+			         stop_hosting ? "ClientStopHosting and the goodbye sent" : "the goodbye sent");
 		}
 		lobby_.close();
 	}

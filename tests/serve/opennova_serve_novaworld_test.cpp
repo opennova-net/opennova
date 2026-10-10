@@ -16,7 +16,11 @@
 // source; the stop deregisters. The service's SetMPReset (D-NET-385) is saved
 // to game.cfg at once and the map change still continues the session, as
 // retail's does (it creates none, so its create-time exit never runs); the
-// next launch exits with code 0 at its game.cfg read.
+// next launch exits with code 0 at its game.cfg read. A SetMPReset during the
+// hosting wait, before the session exists, runs on the session-less context
+// (where SetServerName's gate refuses) and the starting map's session create
+// ends the process with code 0: no exit tail (the lock stays), the NovaWorld
+// session's goodbye alone (the service drops the row).
 #include "server.h"
 #include "serve_test_support.h"
 
@@ -364,6 +368,91 @@ int main() {
 		CHECK(!fs::exists(work / "activesrvr.txt"));
 		const gamecfg::LoadResult kept = gamecfg::load_file(gamecfg::kFileName, {});
 		CHECK(kept.file_read && kept.cfg.mp_reset == 1);
+	}
+
+	// --- D-NET-385 at the session create: the service's SetMPReset during the
+	// hosting wait. Retail's statement dispatch runs a ServerCommand whatever the
+	// session's state, and before CreateSession only SetMPReset passes its gate;
+	// the starting map's create then reads the word and exits with crt_exit(0):
+	// no Game_Run exit tail (no save, the lock left), and the atexit teardown of
+	// the NovaWorld session sends its goodbye burst, no ClientStopHosting.
+	// [orig: CNapiGameSession_DispatchServerStatement @0x4D18A0; SetServerName's
+	//  ctx+0x68 gate @0x4D2CE9, SetMPReset's @0x4D2E12..0x4D2E2D;
+	//  CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0; the atexit
+	//  CNapiGameSession_Destroy registered @0x7939DA]
+	{
+		const fs::path work_reset = serve_test::fresh_dir("novaworld_mpreset_cwd");
+		serve_test::ScopedCwd reset_cwd(work_reset);
+		serve::ServeOptions reset_options;
+		std::string begin_error;
+		CHECK(serve::parse_serve_options(
+				{"--resource-dir", dir.string(), "/HOST", (dir / "test.host").string(), "--loose-root",
+						"--lan-port", "0", "--master-host", "127.0.0.1", "--master-gate-port",
+						std::to_string(gate_port)},
+				reset_options, begin_error) == 0);
+		auto waiting = std::make_unique<serve::Server>(reset_options);
+		const bool begun = waiting->begin(begin_error);
+		if (!begun) std::printf("begin: %s\n", begin_error.c_str());
+		CHECK(begun);
+		if (begun) {
+			serve::Server &w = *waiting;
+			CHECK(w.lister() != nullptr && w.lister()->hosting());
+			CHECK(!w.running());
+			CHECK(fs::exists(work_reset / "activesrvr.txt"));
+			auto deliver = [&](const std::string &cmd) {
+				NapiMessage m;
+				m.name = "ServerCommand";
+				NapiField f;
+				f.name = "Cmd";
+				f.data.assign(cmd.begin(), cmd.end());
+				m.fields.push_back(f);
+				ClientSession::Notice notice;
+				notice.kind = ClientSession::Notice::Kind::Command;
+				CHECK(parse_server_command(m, notice.command));
+				CHECK(w.lister()->host_role().handle_notice(notice));
+			};
+			// No session yet: SetServerName's ctx+0x68 gate refuses it.
+			deliver("SetServerName \"Too Early\"");
+			CHECK(w.game_cfg().game_name == "Serve NW");
+			// SetMPReset passes on its token count: the block and game.cfg at once.
+			deliver("SetMPReset 1");
+			CHECK(w.game_cfg().mp_reset == 1);
+			const gamecfg::LoadResult saved = gamecfg::load_file(gamecfg::kFileName, {});
+			CHECK(saved.file_read && saved.cfg.mp_reset == 1 && saved.cfg.game_name == "Serve NW");
+			auto listed = [&]() {
+				for (const auto &h : listener.snapshot_hosted())
+					if (h.lobby.hosting && h.lobby.server_name == "Serve NW") return true;
+				return false;
+			};
+			bool was_listed = false;
+			for (int i = 0; i < 100 && !was_listed; ++i) {
+				std::this_thread::sleep_for(20ms);
+				was_listed = listed();
+			}
+			CHECK(was_listed);
+
+			// The starting map's create reads the word: exit code 0 (main's
+			// reset_exit), nothing booted, the lock left behind.
+			std::string session_error;
+			CHECK(!w.start_session(session_error));
+			CHECK(session_error.find("mpreset") != std::string::npos);
+			CHECK(w.reset_exit());
+			CHECK(!w.running());
+			CHECK(w.missions_played() == 0);
+			CHECK(w.lister() == nullptr);
+			CHECK(fs::exists(work_reset / "activesrvr.txt"));
+			// The goodbye burst reached the service, which drops the row.
+			bool dropped = false;
+			for (int i = 0; i < 100 && !dropped; ++i) {
+				std::this_thread::sleep_for(20ms);
+				dropped = !listed();
+			}
+			CHECK(dropped);
+		}
+		waiting.reset();
+		reset_cwd.restore();
+		std::error_code ec;
+		fs::remove_all(work_reset, ec);
 	}
 
 	holder.reset();

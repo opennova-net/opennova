@@ -147,12 +147,15 @@ the directory you want). It never writes into `--resource-dir` unless it runs fr
 
 A `game.cfg` with `mpreset = "1"` stops the server before it writes anything, with exit code
 0, as the game exits at that read. The game's other reader of the word is the session create,
-which ends the process with code 0 when the word is set by then; that exit skips the clean
-exit's work (`game.cfg` is not saved again, `activesrvr.txt` stays, the NovaWorld listing is
-not withdrawn), as the game's does. The server creates its session once, for the starting
-map: a map change continues the session, as a retail host's does. So the NovaWorld service's
-`SetMPReset` (saved to `game.cfg` at once) leaves the running server serving round after
-round, and its next launch exits with 0 at the read.
+which ends the process with code 0 when the word is set by then. The server creates its
+session once, for the starting map, after a listed server's NovaWorld hosting. While it waits
+to be listed, the service's commands already run, as the game's do, but before the session
+exists only `SetMPReset` passes its checks: it is saved to `game.cfg` at once, and the starting
+map's session create then exits. That exit skips the clean exit's work, as the game's does:
+`game.cfg` is not saved again, `activesrvr.txt` stays, and the NovaWorld session sends its
+goodbye without withdrawing the hosting first. A map change continues the session, as a
+retail host's does, so a `SetMPReset` during the match is saved and the server keeps serving
+round after round; its next launch exits with 0 at the read.
 
 The remote admin's files sit there too (below): `admin_log.txt`, which every launch starts
 empty, `admin.cfg`, read once at the start, and the ban lists `banned.txt` and

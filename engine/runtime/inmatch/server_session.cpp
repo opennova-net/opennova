@@ -119,12 +119,16 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 	// continue_session). The context stays as it was; the embedder ends the
 	// process with code 0. Retail's entry reset of a live session ahead of
 	// the test (@0x4C97C6..0x4C97CC, CNapiGameSession_ResetActiveSession) has
-	// no counterpart: every embedder's create runs on a fresh host context
-	// (HostRole::reset_state).
+	// no counterpart because it never acts on a reachable create: each create
+	// follows a reset of the previous session, the host's in PreMenu_HostSetup
+	// (@0x5691F5) and single player's in the mission teardown outside a
+	// session with the Post Menu pending (Game_TeardownMission @0x5227A2), so
+	// ctx+0x68 is clear by then.
 	// [orig: @0x4C97E7..0x4C97F0 `cmp dword_25509FC, 0` -> crt_exit(0); the
 	//  null checks @0x4C97D5 / @0x4C97DD; callers SinglePlayer_StartMission
-	//  @0x561E65, CNapiGameSession_BuildAndCreateSession @0x56997D from the
-	//  PreMenu's state 2 @0x56A46A]
+	//  @0x561E65 and CNapiGameSession_BuildAndCreateSession @0x56997D, which
+	//  the PreMenu's state 2 calls, MultiPlayer_JoinSessionStateMachine
+	//  @0x56A46A]
 	if (config.multiplayer_reset != 0) return CreateSessionResult::ProcessExit;
 	// A new session owns a new connection table. Clear both remote server-side
 	// peers and any prior local client before installing this session's role set;

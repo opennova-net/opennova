@@ -213,9 +213,10 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// The host's session create ended the process: retail exits there, ahead
 	// of every later leg of the mission start, so the boot stops and reports
 	// it [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0),
-	// from SinglePlayer_StartMission @0x561E65 and the PreMenu's
-	// CNapiGameSession_BuildAndCreateSession @0x56A46A, both before the Game
-	// Loop's Game_StartMission].
+	// from SinglePlayer_StartMission @0x561E65 and
+	// CNapiGameSession_BuildAndCreateSession @0x56997D (which the PreMenu's
+	// state 2 calls, MultiPlayer_JoinSessionStateMachine @0x56A46A), both
+	// before the Game Loop's Game_StartMission].
 	if (request.host != nullptr && request.host->session_create() == CreateSessionResult::ProcessExit) {
 		boot.session_create = CreateSessionResult::ProcessExit;
 		error = "mpreset is set: the session create ends the process (exit code 0)";

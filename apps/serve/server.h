@@ -115,6 +115,13 @@ public:
 	// the socket layer (net::startup) first and shuts it down after stop(): it
 	// is process-wide.
 	bool start(std::string &error, const std::atomic<bool> *cancel = nullptr);
+	// start()'s two halves, for an embedder that acts between them: begin() runs everything
+	// ahead of the session create (the reads, the mount, the host file, the lock, the socket
+	// and, listed, the NovaWorld hosting), and start_session() boots the starting map, whose
+	// boot creates the session from the cfg block as it stands then. Each is false with `error`
+	// when a leg fails, and stop() has run then; start_session() before begin() refuses.
+	bool begin(std::string &error, const std::atomic<bool> *cancel = nullptr);
+	bool start_session(std::string &error);
 	// One outer frame of `delta_seconds` wall clock. A round end's mission exit
 	// runs the map change and boots the next map inside the session (a listed
 	// server's listing and socket kept). False once the session has ended
@@ -232,6 +239,7 @@ private:
 	std::unique_ptr<nw_lister::Lister> lister_;
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
+	bool begun_ = false;
 	bool rotation_ended_ = false;
 	bool quit_ = false;
 	int missions_played_ = 0;
