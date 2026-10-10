@@ -527,11 +527,10 @@ void WeaponRange::step_() {
 			world::weapon_fsm_try_queue_switch_to(*slot);
 	}
 	apply_gestures_(tick);
-	// The aimed shot the game's input pack stamps on the body ahead of the tick, the shared optical-view verdict the
-	// HUD's crosshair gate and spread row read (LocalPlayer::apply_player_input_pre_tick's stamp; the range runs no
-	// pack of its own) [orig: Player_PackInputStateToEntity @ 0x4DF450; HUD_DrawCrosshair @ 0x592b07..0x592b87].
-	if (world::AiEntity *body = world.ai.for_handle(world.cached.local_player))
-		if (body->inf.active) body->inf.aimed_shot_available = local_->local_player_can_fire();
+	// The body's view and weapon facts the game's input pack stamps ahead of the tick (the scope raised and its Flags
+	// bit, the aimed shot the HUD's crosshair gate and spread row read, the run anim, the kit weight): the range runs
+	// no pack, so the pack's own stamp alone (LocalPlayer::stamp_body_view).
+	local_->stamp_body_view();
 	// The view tick, then the weapon walk [orig: Game_ProcessMainFrame: Camera_ComputeThirdPersonView @ 0x526781,
 	// WeaponAction_ProcessAllEntities @ 0x526786].
 	local_->run_local_view_tick();
