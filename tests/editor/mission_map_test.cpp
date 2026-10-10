@@ -16,6 +16,7 @@
 #include <editor/preview/mission_map.h>
 #include <editor/preview/mission_map_canvas.h>
 #include <editor/preview/mission_map_outline.h>
+#include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewport_model.h>
@@ -390,6 +391,22 @@ static int test_outline_of_a_box() {
 	}
 	TEST_EXPECT(near(outline.reach, std::max(std::max(std::hypot(lo[0], lo[1]), std::hypot(hi[0], hi[1])),
 	                                         std::max(std::hypot(lo[0], hi[1]), std::hypot(hi[0], lo[1]))), 1e-4));
+	// From the side: the box's elevation, four sides of (forward, up), its hull the four corners.
+	opennova::threedi::Threedi3di3 again{};
+	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &again) == 0);
+	MissionModelOutline side;
+	TEST_EXPECT(mission_model_outline(again, side, MissionOutlineView::Side) && side.view == MissionOutlineView::Side);
+	double up_lo = 1e9, up_hi = -1e9;
+	for (uint32_t i = 0; i < again.lods[0].vertices.count; ++i) {
+		double words[3];
+		mission_vertex_words(again.lods[0].vertices.items[i].position, words);
+		up_lo = std::min(up_lo, words[2]);
+		up_hi = std::max(up_hi, words[2]);
+	}
+	opennova::threedi::threedi_3di3_free(&again);
+	TEST_EXPECT(side.edges.size() / 6 == 4 && side.hull.size() / 2 == 4);
+	for (size_t i = 0; i + 1 < side.hull.size(); i += 2)
+		TEST_EXPECT(on(side.hull[i], lo[0], hi[0]) && on(side.hull[i + 1], up_lo, up_hi));
 	std::printf("test_outline_of_a_box passed\n");
 	return 0;
 }
@@ -486,6 +503,26 @@ static int test_footprints() {
 	return 0;
 }
 
+// The palette's pictures (S23 C): an item's model seen from the side, made off the frame: asked and queued (none yet),
+// made by a step, then answered while its file's stamp stands (made once); a file that is no model reads as none.
+static int test_palette_pictures() {
+	Rig rig("opennova_editor_mission_map_palette");
+	TEST_EXPECT(rig.open(true, true));
+	const SessionView &view = rig.session.view();
+	MissionPalettePictures pictures;
+	TEST_EXPECT(pictures.get(view, "models/crate.3di") == nullptr && pictures.pending());
+	TEST_EXPECT(pictures.step(view, 1000000) && !pictures.pending() && pictures.made() == 1);
+	const auto crate = pictures.get(view, "models/crate.3di");
+	TEST_EXPECT(crate && crate->read && crate->lines.size() == 16 && crate->hi[0] > crate->lo[0] && crate->hi[1] > crate->lo[1]);
+	TEST_EXPECT(!pictures.pending() && !pictures.step(view, 1000000) && pictures.made() == 1);
+	pictures.get(view, "missions/synth_logic.bms");
+	TEST_EXPECT(pictures.step(view, 1000000));
+	const auto none = pictures.get(view, "missions/synth_logic.bms");
+	TEST_EXPECT(none && !none->read && none->lines.empty());
+	std::printf("test_palette_pictures passed\n");
+	return 0;
+}
+
 int main() {
 	int failed = 0;
 	failed += test_kind_row();
@@ -497,5 +534,6 @@ int main() {
 	failed += test_grid_origin();
 	failed += test_outline_of_a_box();
 	failed += test_footprints();
+	failed += test_palette_pictures();
 	return failed == 0 ? 0 : 1;
 }

@@ -113,10 +113,22 @@ void mission_vertex_words(const float position[3], double out[3]) {
 
 namespace {
 
-// The plan of one LOD's mesh (mission_model_outline's rules).
-bool outline_of_lod(const threedi::Threedi3di3 &model, size_t lod_index, MissionModelOutline &out) {
+// The words a view looks along (`v`) and the two it sees (`p`, `q`): from above the up word, forward and left seen; from
+// the side the left word, forward and up seen.
+struct Axes {
+	int v, p, q;
+};
+Axes axes_of(MissionOutlineView view) {
+	return view == MissionOutlineView::Side ? Axes{ 1, 0, 2 } : Axes{ 2, 0, 1 };
+}
+
+// The plan (or the elevation) of one LOD's mesh (mission_model_outline's rules).
+bool outline_of_lod(const threedi::Threedi3di3 &model, size_t lod_index, MissionOutlineView view,
+		MissionModelOutline &out) {
 	out = MissionModelOutline();
 	out.lod = int(lod_index);
+	out.view = view;
+	const Axes axes = axes_of(view);
 	const threedi::ThreediLod &lod = model.lods[lod_index];
 	if (lod.vertices.items == nullptr || lod.indices.indices == nullptr || lod.strips == nullptr) return false;
 	// The distinct points, and the triangles over them.
@@ -176,7 +188,7 @@ bool outline_of_lod(const threedi::Threedi3di3 &model, size_t lod_index, Mission
 				order.push_back(key);
 				for (int axis = 0; axis < 3; ++axis) edge.normal[axis] = n[axis];
 			} else if (edge.count == 1) {
-				const bool up_a = edge.normal[2] > kFacesUp, up_b = n[2] > kFacesUp;
+				const bool up_a = edge.normal[axes.v] > kFacesUp, up_b = n[axes.v] > kFacesUp;
 				const double cos = edge.normal[0] * n[0] + edge.normal[1] * n[1] + edge.normal[2] * n[2];
 				edge.kept = up_a != up_b || (up_a && cos < kRidgeCos) || cos < kFoldCos;
 			}
@@ -189,10 +201,10 @@ bool outline_of_lod(const threedi::Threedi3di3 &model, size_t lod_index, Mission
 		const Edge &edge = edges[key];
 		if (edge.count == 2 && !edge.kept) continue;
 		const auto &a = points[size_t(key >> 32)], &b = points[size_t(key & 0xFFFFFFFFu)];
-		const double dx = b[0] - a[0], dy = b[1] - a[1];
+		const double dx = b[size_t(axes.p)] - a[size_t(axes.p)], dy = b[size_t(axes.q)] - a[size_t(axes.q)];
 		if (dx * dx + dy * dy < kEdgeShortest * kEdgeShortest) continue;
-		int64_t ax = std::llround(a[0] * kEdgeQuantum), ay = std::llround(a[1] * kEdgeQuantum);
-		int64_t bx = std::llround(b[0] * kEdgeQuantum), by = std::llround(b[1] * kEdgeQuantum);
+		int64_t ax = std::llround(a[size_t(axes.p)] * kEdgeQuantum), ay = std::llround(a[size_t(axes.q)] * kEdgeQuantum);
+		int64_t bx = std::llround(b[size_t(axes.p)] * kEdgeQuantum), by = std::llround(b[size_t(axes.q)] * kEdgeQuantum);
 		if (std::make_pair(bx, by) < std::make_pair(ax, ay)) {
 			std::swap(ax, bx);
 			std::swap(ay, by);
@@ -206,8 +218,9 @@ bool outline_of_lod(const threedi::Threedi3di3 &model, size_t lod_index, Mission
 	level.reserve(points.size());
 	for (const auto &p : points) {
 		for (int axis = 0; axis < 3; ++axis) out.points.push_back(float(p[size_t(axis)]));
-		level.push_back({ p[0], p[1] });
-		out.reach = std::max(out.reach, float(std::sqrt(p[0] * p[0] + p[1] * p[1])));
+		const double seen[2] = { p[size_t(axes.p)], p[size_t(axes.q)] };
+		level.push_back({ seen[0], seen[1] });
+		out.reach = std::max(out.reach, float(std::sqrt(seen[0] * seen[0] + seen[1] * seen[1])));
 	}
 	out.triangles.reserve(triangles.size() * 9);
 	for (const auto &t : triangles)
@@ -219,15 +232,16 @@ bool outline_of_lod(const threedi::Threedi3di3 &model, size_t lod_index, Mission
 
 } // namespace
 
-bool mission_model_outline(const threedi::Threedi3di3 &model, MissionModelOutline &out) {
+bool mission_model_outline(const threedi::Threedi3di3 &model, MissionModelOutline &out, MissionOutlineView view) {
 	out = MissionModelOutline();
 	if (model.lods == nullptr || model.lod_count == 0) return false;
+	const Axes axes = axes_of(view);
 	// LOD 0's plan where it has an edge and kMissionOutlineEdgesMax or fewer, else the first coarser LOD's that has,
 	// else the one with the fewest edges past none.
 	bool any = false, edged = false;
 	for (size_t lod = 0; lod < model.lod_count; ++lod) {
 		MissionModelOutline plan;
-		if (!outline_of_lod(model, lod, plan)) continue;
+		if (!outline_of_lod(model, lod, view, plan)) continue;
 		const bool has = !plan.edges.empty();
 		if (!any || (has && (!edged || plan.edges.size() < out.edges.size()))) {
 			out = std::move(plan);
@@ -241,8 +255,12 @@ bool mission_model_outline(const threedi::Threedi3di3 &model, MissionModelOutlin
 		const size_t n = out.hull.size() / 2;
 		for (size_t i = 0; n >= 2 && i < n; ++i) {
 			const size_t j = (i + 1) % n;
-			out.edges.insert(out.edges.end(),
-					{ out.hull[2 * i], out.hull[2 * i + 1], 0.0f, out.hull[2 * j], out.hull[2 * j + 1], 0.0f });
+			float a[3] = { 0.0f, 0.0f, 0.0f }, b[3] = { 0.0f, 0.0f, 0.0f };
+			a[axes.p] = out.hull[2 * i];
+			a[axes.q] = out.hull[2 * i + 1];
+			b[axes.p] = out.hull[2 * j];
+			b[axes.q] = out.hull[2 * j + 1];
+			out.edges.insert(out.edges.end(), { a[0], a[1], a[2], b[0], b[1], b[2] });
 			if (n == 2) break;
 		}
 	}

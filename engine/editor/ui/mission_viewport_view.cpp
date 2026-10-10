@@ -289,7 +289,7 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				const AssetGraph *graph = view.findings.graph.get();
 				// The search typed is the viewport's (its options' palette).
 				std::string typed = mission.options().palette;
-				const int64_t picked = tools.palette.draw(graph, graph ? graph->generation() : 0, view.project.recent_items,
+				const int64_t picked = tools.palette.draw(view, graph, graph ? graph->generation() : 0, view.project.recent_items,
 						mission.options().item, mission.options().palette, &typed);
 				// The search alone (review X21): another option a client set in the same pump stays as it set it.
 				if (typed != mission.options().palette) {

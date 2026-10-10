@@ -35,8 +35,13 @@ struct SessionView;
 // (943 entities, 156 models) draws so in some 80 000 lines; LOD 0's every edge seen from above in some 800 000.
 inline constexpr size_t kMissionOutlineEdgesMax = 192;
 
+// The view an outline is seen in: from above (the map's plan: the up word looked along, forward and left seen), or
+// from the side (an elevation: the left word looked along, forward and up seen; the palette's picture of an item).
+enum class MissionOutlineView : uint8_t { Above, Side };
+
 struct MissionModelOutline {
 	int lod = 0; // the LOD the plan is of
+	MissionOutlineView view = MissionOutlineView::Above;
 	std::vector<float> edges; // six words an edge: its two ends
 	std::vector<float> triangles; // nine words a triangle
 	std::vector<float> points; // three words a distinct point
@@ -46,7 +51,10 @@ struct MissionModelOutline {
 
 // The outline of `model` (its LOD 0's, else a coarser LOD's: kMissionOutlineEdgesMax); false (out empty) where it has
 // no mesh.
-bool mission_model_outline(const threedi::Threedi3di3 &model, MissionModelOutline &out);
+// `view` Side: its elevation by the same rules, the left word in the up word's place (the faces looking at the viewer,
+// the edges with no length seen from the side dropped); its hull in (forward, up).
+bool mission_model_outline(const threedi::Threedi3di3 &model, MissionModelOutline &out,
+		MissionOutlineView view = MissionOutlineView::Above);
 
 // A point of the model (render frame: threedi's vertex position, x as the file holds it) as the placement matrix takes
 // it: the words (forward, left, up) the device's model holds the vertex at, (p2, -p0, p1); a user point's are
