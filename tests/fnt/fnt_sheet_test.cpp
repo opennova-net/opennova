@@ -3,8 +3,9 @@
 // under each advance mode, its rect widths, tracking and space, the blank cells, the zero records at
 // 0x7F..0x81, the spacing and design-width header words, the pixels copied and their colour (white, or
 // the sheet's own under sheet_color: a dark rim texel kept dark); a sheet of large cells packed over
-// several pages, and one that needs more than a font holds; the sheet's refusals. Also the glyph UV
-// from a pixel rect (fnt_pixels_to_uv), the inverse of fnt_uv_to_pixels.
+// several pages, and one that needs more than a font holds; the sheet's refusals; sheets of other grids
+// (fewer rows from the space, a full 256-byte grid from 0, a grid from a later byte) and the grid's
+// refusals. Also the glyph UV from a pixel rect (fnt_pixels_to_uv), the inverse of fnt_uv_to_pixels.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -169,12 +170,14 @@ static int test_advance_modes() {
 		TEST_EXPECT(glyph_texel(made.font, 'A', 0, 4)[3] == 0 && glyph_texel(made.font, 'A', 1, 4)[3] == 255);
 	}
 	{
-		// Cell: every printing glyph the cell's width, the space and the blank cells too; tracking and
+		// Cell: every printing glyph the cell's width and its tracking, the space and the blank cells too;
 		// space ignored (a space wider than a cell refuses nothing).
 		Made made;
 		TEST_EXPECT(make(sheet, settings_of(FontSheetAdvance::Cell, 5, 12), made));
 		for (int byte = 0x20; byte <= 0xFF; ++byte)
-			TEST_EXPECT((byte >= 0x7F && byte <= 0x81) ? zero_record(made.font, byte) : width_of(made.font, byte) == kCellW);
+			TEST_EXPECT((byte >= 0x7F && byte <= 0x81) ? zero_record(made.font, byte) : width_of(made.font, byte) == kCellW + 5);
+		// The tracking's columns clear, past the cell's.
+		TEST_EXPECT(glyph_texel(made.font, 'W', kCellW - 1, 4)[3] == 255 && glyph_texel(made.font, 'W', kCellW, 4)[3] == 0);
 		TEST_EXPECT(glyph_texel(made.font, 'I', 3, 4)[3] == 255 && glyph_texel(made.font, 'I', 2, 4)[3] == 0);
 		// The space's cell, drawn on, is never read: it draws blank here too.
 		for (int x = 0; x < kCellW; ++x)
@@ -266,7 +269,7 @@ static int test_pages_and_refusals() {
 		Made tall;
 		TEST_EXPECT(!make(blank_sheet(1, 255), FontSheetSettings(), tall) && tall.why.find("255 texels tall") != std::string::npos);
 		Made fits;
-		TEST_EXPECT(make(blank_sheet(1, 254), settings_of(FontSheetAdvance::Cell), fits) && height_of(fits.font, 'A') == 254 &&
+		TEST_EXPECT(make(blank_sheet(1, 254), settings_of(FontSheetAdvance::Cell, 0), fits) && height_of(fits.font, 'A') == 254 &&
 		            fits.font.num_pages == 2);
 		RgbaImage wide = blank_sheet(254, 4);
 		ink(wide, 'M', 0, 253, 0, 3);
@@ -277,6 +280,103 @@ static int test_pages_and_refusals() {
 		TEST_EXPECT(make(wide, settings_of(FontSheetAdvance::Ink, 0), untracked) && width_of(untracked.font, 'M') == 254);
 		Made monospace;
 		TEST_EXPECT(!make(blank_sheet(255, 4), settings_of(FontSheetAdvance::Cell), monospace) && monospace.field.empty());
+		// A cell a page holds whose tracking takes it past one: the tracking's fault.
+		Made cell_tracked;
+		TEST_EXPECT(!make(blank_sheet(254, 4), settings_of(FontSheetAdvance::Cell), cell_tracked) &&
+		            cell_tracked.field == "tracking");
+		Made cell_fits;
+		TEST_EXPECT(make(blank_sheet(254, 4), settings_of(FontSheetAdvance::Cell, 0), cell_fits) &&
+		            width_of(cell_fits.font, 'A') == 254);
+		// A tracking under 0, under each advance: refused, the tracking's fault (a rect narrower than the
+		// columns copied into it would ink its neighbours, or run off its page). Cells wider than a page
+		// stay refused whatever the tracking.
+		for (const FontSheetAdvance advance : {FontSheetAdvance::Ink, FontSheetAdvance::Left, FontSheetAdvance::Cell}) {
+			Made negative;
+			TEST_EXPECT(!make(wide, settings_of(advance, -2), negative) && negative.field == "tracking" &&
+			            negative.why.find("0 or more") != std::string::npos);
+		}
+		Made huge;
+		TEST_EXPECT(!make(blank_sheet(300, 1), settings_of(FontSheetAdvance::Cell, -250), huge) && huge.field == "tracking");
+		Made too_wide;
+		TEST_EXPECT(!make(blank_sheet(300, 1), settings_of(FontSheetAdvance::Cell, 0), too_wide) && too_wide.field.empty());
+	}
+	return 0;
+}
+
+// A transparent sheet of `columns` x `rows` cells of 8 x 10, and the cell of `byte` (from `first`) inked
+// over columns [x0, x1].
+static RgbaImage grid_sheet(int columns, int rows) {
+	RgbaImage sheet;
+	sheet.width = kCellW * columns;
+	sheet.height = kCellH * rows;
+	sheet.pixels.assign(size_t(sheet.width) * size_t(sheet.height) * 4, 0);
+	return sheet;
+}
+static void grid_ink(RgbaImage &sheet, int columns, int first, int byte, int x0, int x1) {
+	const int cell = byte - first;
+	const int cx = (cell % columns) * kCellW, cy = (cell / columns) * kCellH;
+	for (int y = 1; y <= 8; ++y)
+		for (int x = x0; x <= x1; ++x) sheet.pixels[(size_t(cy + y) * size_t(sheet.width) + size_t(cx + x)) * 4 + 3] = 255;
+}
+
+static int test_grids() {
+	{
+		// Six rows from the space (0x20..0x7F): 'A' read from its cell, the bytes no cell holds blanks of
+		// the space's width.
+		RgbaImage sheet = grid_sheet(16, 6);
+		grid_ink(sheet, 16, 0x20, 'A', 1, 5);
+		grid_ink(sheet, 16, 0x20, '~', 0, 6);
+		FontSheetSettings settings;
+		settings.rows = 6;
+		Made made;
+		TEST_EXPECT(make(sheet, settings, made));
+		TEST_EXPECT(width_of(made.font, 'A') == 6 && width_of(made.font, '~') == 8);
+		TEST_EXPECT(width_of(made.font, 0xE9) == 3 && width_of(made.font, 0xFF) == 3 && zero_record(made.font, 0x80));
+		TEST_EXPECT(glyph_texel(made.font, 'A', 0, 4)[3] == 255);
+		// The same sheet read as the default grid's 14 rows is refused: its height does not divide.
+		Made fourteen;
+		TEST_EXPECT(!make(sheet, FontSheetSettings(), fourteen) && fourteen.why.find("14 rows") != std::string::npos);
+	}
+	{
+		// A full 256-byte grid from 0: the cells below the space are not read, 'A' is the 65th cell, 0xFF the last.
+		RgbaImage sheet = grid_sheet(16, 16);
+		grid_ink(sheet, 16, 0, 0x05, 0, 7); // a control's cell, never read
+		grid_ink(sheet, 16, 0, 'A', 2, 4);
+		grid_ink(sheet, 16, 0, 0xFF, 0, 1);
+		FontSheetSettings settings;
+		settings.rows = 16;
+		settings.first = 0;
+		Made made;
+		TEST_EXPECT(make(sheet, settings, made));
+		TEST_EXPECT(width_of(made.font, 'A') == 4 && width_of(made.font, 0xFF) == 3 && width_of(made.font, 'B') == 3);
+	}
+	{
+		// A grid from a later byte (8 columns by 2 rows from 0xC0): the bytes before it blanks.
+		RgbaImage sheet = grid_sheet(8, 2);
+		grid_ink(sheet, 8, 0xC0, 0xC1, 0, 4);
+		FontSheetSettings settings;
+		settings.columns = 8;
+		settings.rows = 2;
+		settings.first = 0xC0;
+		Made made;
+		TEST_EXPECT(make(sheet, settings, made));
+		TEST_EXPECT(width_of(made.font, 0xC1) == 6 && width_of(made.font, 'A') == 3 && width_of(made.font, 0xD0) == 3);
+	}
+	{
+		// The grid's refusals: no columns, rows past 256, a first byte past 0xFF; each names its setting.
+		const RgbaImage sheet = grid_sheet(16, 14);
+		FontSheetSettings settings;
+		settings.columns = 0;
+		Made none;
+		TEST_EXPECT(!make(sheet, settings, none) && none.field == "columns");
+		settings = FontSheetSettings();
+		settings.rows = 300;
+		Made many;
+		TEST_EXPECT(!make(sheet, settings, many) && many.field == "rows");
+		settings = FontSheetSettings();
+		settings.first = 256;
+		Made past;
+		TEST_EXPECT(!make(sheet, settings, past) && past.field == "first");
 	}
 	return 0;
 }
@@ -285,6 +385,7 @@ int main() {
 	if (test_pixels_to_uv()) return 1;
 	if (test_advance_modes()) return 1;
 	if (test_pages_and_refusals()) return 1;
+	if (test_grids()) return 1;
 	std::printf("fnt_sheet: ok\n");
 	return 0;
 }

@@ -9,6 +9,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <string>
+#include <vector>
+
 namespace opennova::sbf {
 
 /* --- Format constants --- */
@@ -53,8 +56,8 @@ typedef struct SbfChunkHeader {
     uint32_t valid_samples;         /* count of AUDIO BYTES, not int16 samples */
     uint8_t  scale_a;               /* L-channel right-shift (0..7) */
     uint8_t  scale_b;               /* R-channel right-shift (0..7) */
-    uint8_t  reserved_a;            /* always 0xFA on disk; never read */
-    uint8_t  reserved_b;            /* always 0x00 on disk; never read */
+    uint8_t  reserved_a;            /* never read: one value a bank, 0xFA in JO gamemus.sbf (menumus.sbf 0x1A, the expansion's 0x20 and 0xFB) */
+    uint8_t  reserved_b;            /* never read: 0x00 or 0x01, one value a bank */
 } SbfChunkHeader;
 
 /* --- Open archive (lifetime-owning state) --- */
@@ -146,7 +149,7 @@ uint8_t sbf_pick_scale(const int16_t *samples, size_t count);
 /* Encode `sample_count` int16 samples (treated as L/R interleaved bytes by the
    decoder) into one chunk: 8-byte header + `SBF_CHUNK_AUDIO` audio bytes.
    Both scale_a and scale_b take sbf_pick_scale's result; reserved bytes get
-   the on-disk constants 0xFA / 0x00; trailing audio area is padded with 0x80
+   gamemus.sbf's 0xFA / 0x00; trailing audio area is padded with 0x80
    (post-decode silence). Returns SBF_CHUNK_TOTAL on success, negative on
    parameter / capacity errors. */
 int sbf_encode_chunk(const int16_t *samples, size_t sample_count,
@@ -165,5 +168,110 @@ int sbf_encode_file(const char * const *names, uint32_t entry_count,
 
 /* Free a buffer returned by sbf_encode_file. Forwards to free(). */
 void sbf_free(void *p);
+
+/* --- The bank as a model ---
+
+   A bank as the fields its every byte is made from (ADR 0003): the header's
+   words; the two never-read bytes every chunk header carries, one pair a
+   bank; the rule the chunks' unread tails follow; and each stream (an index
+   entry) with its chunks, each its two channel shifts and the bytes the
+   stream plays (its header's valid count of them). A chunk on disk is a whole
+   block (block_size bytes, as every shipped chunk is): its audio area past
+   the bytes it plays is never read, and the writer makes it by the bank's
+   tail rule. The engine opens the index and streams one entry's chunks from
+   its offset, block_size bytes a read, the mixer taking the valid count
+   [orig: AudioVM_OpenContextFile @ 0x672160; Sbf_StartEntry @ 0x4ED910;
+   Audio_StreamNextChunk @ 0x4ED7D0]. What the editor's music bank document
+   holds; sbf_write_bank writes it from scratch: the index with each stream's
+   offset and size worked out, the streams one after another in index order,
+   so every shipped bank (JO's menumus.sbf, gamemus.sbf and the expansion's
+   MJox01.sbf, GJox01.sbf) reads into it and writes back byte for byte. The
+   model is SbfFile, as the format libs name a file's model (lwf::File):
+   SbfBank is the Godot resource over the streaming reader
+   (godot/src/audio/sbf_bank.h). */
+
+/* A name fills the index's 16 bytes; a shorter one ends at a NUL. The game
+   plays a stream by its place, never its name (docs/audio/mus-sbf-re.md). */
+inline constexpr size_t SBF_STREAM_NAME_MAX = SBF_NAME_SIZE;
+
+/* How a chunk's audio area past the bytes it plays is filled. No reader reads
+   those bytes; the rule is the encoder's, measured over JO:CA's four banks
+   (2026-10-09: every stream's last chunk is its one partial chunk). */
+enum class SbfTail : uint8_t {
+    /* The retail encoder's one reused buffer: the stream's previous chunk's
+       bytes at the same offsets, zeros under a stream's first chunk (every
+       chunk of the shipped banks). */
+    Residue,
+    /* 0x80, which decodes to silence (sbf_encode_chunk's padding, the minted
+       banks'). */
+    Silence,
+};
+
+struct SbfChunk {
+    uint8_t scale_a = 0;           /* the left channel's shift, 0..7 */
+    uint8_t scale_b = 0;           /* the right channel's */
+    std::vector<uint8_t> audio;    /* the bytes the stream plays (SbfChunkHeader::valid_samples), at most block_size - 8 */
+};
+
+struct SbfStream {
+    std::string name;              /* at most SBF_STREAM_NAME_MAX bytes, no NUL */
+    uint32_t block_size = SBF_CHUNK_TOTAL;
+    uint32_t sample_length_hint = 0;
+    std::vector<SbfChunk> chunks;
+};
+
+struct SbfFile {
+    uint32_t version = SBF_VERSION_DEFAULT;
+    uint32_t flags = SBF_FLAGS_BYTE_PAIRED_STEREO;
+    uint32_t reserved = 0;
+    /* Every chunk header's two never-read bytes (SbfChunkHeader::reserved_a,
+       _b): one pair a bank, gamemus.sbf's by default. */
+    uint8_t chunk_reserved_a = 0xFA;
+    uint8_t chunk_reserved_b = 0x00;
+    SbfTail tail = SbfTail::Residue;
+    std::vector<SbfStream> streams;
+};
+
+/* What a read found that a write lays out otherwise: streams not one after
+   another from the index's end in index order (a gap, another order), bytes
+   past the last stream, a name with bytes after its terminator, chunks whose
+   reserved pair is not the bank's (its first chunk's), chunk tails the bank's
+   rule (the rule more of them follow) does not make, and short chunks (a last
+   chunk shorter than its block, written whole; a valid count past its block,
+   cut to it). A write keeps none of those. */
+struct SbfFileLayout {
+    bool packed = true;
+    size_t trailing_bytes = 0;
+    size_t names_with_tails = 0;
+    size_t reserved_other = 0;
+    size_t tails_other = 0;
+    size_t short_chunks = 0;
+};
+
+/* The bank `data` holds: the header as sbf_validate takes it, every entry's
+   bytes inside the file, its block_size at least a chunk header, its
+   total_size whole chunks of it but a last one holding at least its header,
+   and the entries' sizes adding up to no more than the file holds past the
+   index (entries that share bytes are refused). False, with `error`, for one
+   the model cannot hold. */
+bool sbf_read_bank(const uint8_t *data, size_t size, SbfFile &out, std::string &error,
+                   SbfFileLayout *layout = nullptr);
+
+/* The bank's bytes from its fields alone, every chunk a whole block: false,
+   with `error`, for a name past SBF_STREAM_NAME_MAX or holding a NUL, a
+   block_size under a chunk header, a chunk playing more bytes than its block
+   holds, a flags word the engine refuses (above 2), or a bank past 4 GiB. */
+bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string &error);
+
+/* A stream's audio as int16 PCM, byte-paired stereo interleaved (left then
+   right) at SBF_SAMPLE_RATE: each chunk's bytes decoded at its shifts, in
+   order, the stream stopping at a chunk whose shift is past 7 (as the Godot
+   player stops: sbf_decode_chunk refuses such a chunk). */
+std::vector<int16_t> sbf_decode_stream(const SbfStream &stream);
+
+/* A stream of `pcm` (int16, left/right interleaved), encoded chunk by chunk
+   as sbf_encode_chunk encodes one: full SBF_CHUNK_AUDIO chunks, the last
+   holding the rest, at least one chunk. */
+SbfStream sbf_encode_stream(const std::string &name, const int16_t *pcm, size_t count);
 
 } // namespace opennova::sbf
