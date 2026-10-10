@@ -100,6 +100,11 @@ public:
 	// The host's network pump while it loads a mission (host_session_load_pump
 	// over the role's socket).
 	void pump_load();
+	// The map change's round init over the kept slots, which the host boot
+	// runs after the kernel boot's PreMission pass and the round counters
+	// (map_change.h) [orig: Game_StartMission @0x524360, the
+	// Server_InitAllPlayerEntitiesForRound call @0x525BAF].
+	void init_round_after_premission();
 	// The mission load's end on the authority: the S2C 0x7B to every slot,
 	// and after a map change's bring-up a pump. Phase B of the host boot runs
 	// it [orig: Game_StartMission @0x52625F..0x526267].

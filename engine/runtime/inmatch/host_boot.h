@@ -19,7 +19,7 @@
 //     with the placed tiles and the .TSD table, the environment and the water
 //     plane (both before the PreMission pass), the HostRole's staged
 //     bring-up, MissionKernel::boot with the bringup_net_session hook, the
-//     item catalog and traits, and charattr.def.
+//     item catalog and traits, charattr.def, and a map change's round init.
 //   start_host_mission (B): the water plane, the mission-start environment
 //     boundary (the weather seed, the embedder's render bind, the kernel's
 //     complete_mission_start: the eager WAC, the 255-tick settle, the

@@ -200,6 +200,12 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// the weather settle) is phase B's.
 	mission::KernelBootOptions options = std::move(request.boot_options);
 	options.defer_mission_start = true;
+	// A map change's host player is a kept slot: the round init after the
+	// boot spawns it and Player_InitPlayer finds it, so the kernel's own spawn
+	// step stands down. [orig: Player_InitPlayer @0x4E15F0 ->
+	//  Player_FindLocalPlayerEntity @0x4E0090; Game_StartMission @0x524360 calls
+	//  the round init @0x525BAF, then the Player_InitPlayer call @0x525BBC]
+	if (request.host != nullptr && request.next_mission) options.playable = false;
 	options.people_name_resolver = [names = boot.mission_text](int32_t index) {
 		return names.people_name(index);
 	};
@@ -266,6 +272,14 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		charattr_apply_restrictions(boot.charattr, charattr_restrictions);
 		kernel.world.tables.class_attribute_flags = charattr_class_attribute_rows(boot.charattr);
 		kernel.world.tables.charattr_disabled_word = charattr_pack_disabled(boot.charattr);
+		// A map change's round init over the kept slots follows the
+		// PreMission pass and the round counters' reset with its charattr
+		// tail, where retail's mission start runs it (D-NET-354); a fresh
+		// session's own player still spawns in the bring-up, ahead of the pass.
+		// [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2
+		//  call @0x525B86, the Server_ResetRoundCounters call @0x525B90, the
+		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
+		if (request.next_mission) request.host->init_round_after_premission();
 	}
 	return true;
 }

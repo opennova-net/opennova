@@ -9,7 +9,9 @@
 // swaps its team (and the side-to-team map), and the next map's first half
 // has the sides back.
 #include <base/gameprofile/game_type.h>
+#include <formats/def/def.h>
 #include <formats/mission/bms.h>
+#include <formats/mission/mission.h>
 #include <formats/mission/bms_edit.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_boot.h>
@@ -28,6 +30,7 @@
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -90,6 +93,9 @@ struct Host {
 	std::unique_ptr<net::NetDatagramSocket> datagrams;
 	uint16_t port = 0;
 	int missions = 0;
+	int map_changes = 0;
+	// A kept slot that held an entity when the boot's bring-up returned.
+	bool kept_slot_spawned_in_bringup = false;
 
 	bool start() {
 		socket = net::ScopedSocket(net::udp_bind(0, &port));
@@ -128,6 +134,10 @@ struct Host {
 		r.boot_options.game_type = rotation.list.map_game_type;
 		r.boot_options.player_limit = 9;
 		r.boot_options.team_count = 2;
+		r.after_bringup = [this](bool) {
+			for (const inmatch::NapiNPConnection &c : ctx().np_protocol.connection_list)
+				if (c.link.owned_entity.valid()) kept_slot_spawned_in_bringup = true;
+		};
 		r.fresh_kernel = [this]() -> mission::MissionKernel & {
 			auto fresh = std::make_unique<mission::MissionKernel>();
 			if (kernel) fresh->carry_across_load_from(*kernel);
@@ -141,6 +151,24 @@ struct Host {
 			return false;
 		}
 		++missions;
+		// A map change's round init spawns the kept slots after the PreMission
+		// pass, none of them in the bring-up ahead of it (D-NET-354); a fresh
+		// session has none. [orig: Game_StartMission @0x524360 -- the
+		//  EventTrigger_UpdateAllWithFlag2 call @0x525B86, the
+		//  Server_InitAllPlayerEntitiesForRound call @0x525BAF]
+		const std::vector<std::string> &trace = kernel->boot_trace;
+		const auto at = [&trace](const char *name) {
+			return static_cast<size_t>(std::find(trace.begin(), trace.end(), name) - trace.begin());
+		};
+		if (next_mission) {
+			++map_changes;
+			CHECK(at("premission") < trace.size());
+			CHECK(at("premission") < at("round_init") && at("round_init") + 1 == trace.size());
+			CHECK(!kept_slot_spawned_in_bringup);
+		} else {
+			CHECK(at("round_init") == trace.size());
+		}
+		kept_slot_spawned_in_bringup = false;
 		return true;
 	}
 
@@ -182,10 +210,163 @@ struct Host {
 	}
 };
 
+// A playable listen host's map change (serve_and_play): its own loopback slot is
+// a kept slot, so the round init after the PreMission pass spawns its player
+// once, binds that body to its items.def row at the spawn (its sound profile)
+// and the mission start's Attack & Defend latch, after the round init, finds it.
+// [orig: Game_StartMission @0x524360 -- the Server_InitAllPlayerEntitiesForRound
+//  call @0x525BAF, the sub_524110 call @0x5260C1; Entity_SpawnFromAnimSlotProperty
+//  @0x43C390 -> Entity_InitFromModel @0x40DC30]
+struct PlayHost {
+	std::map<std::string, std::string> files;
+	std::vector<mission_catalog::Row> catalog;
+	inmatch::HostRotation rotation;
+	inmatch::HostRole role{inmatch::RoleKind::ListenHost};
+	inmatch::Session session{role};
+	inmatch::HostBoot boot;
+	std::unique_ptr<mission::MissionKernel> kernel;
+	std::vector<def::DefItemDef> rows;
+	def::DefItemsFile items{};
+	net::ScopedSocket socket;
+	std::unique_ptr<net::NetDatagramSocket> datagrams;
+
+	PlayHost() {
+		uint16_t port = 0;
+		socket = net::ScopedSocket(net::udp_bind(0, &port));
+		datagrams = std::make_unique<net::NetDatagramSocket>(socket.get());
+		role.set_socket(datagrams.get());
+		files["SndProf.def"] =
+				"begin \"default\"\r\nend\r\n"
+				"begin \"SP_Host\"\r\n     SSLFootGND     T_DIRT_L\r\nend\r\n";
+		mission_catalog::Row row = catalog_row("ADMAP.BMS");
+		row.game_mode = static_cast<uint32_t>(bms::AttribFlags::AttackAndDefend);
+		catalog.push_back(row);
+		// The player's row names its sound profile; the placed item is an A&D objective (attrib 0x8000).
+		rows.resize(2);
+		rows[0].id = static_cast<int>(world::kPlayerInfantryTypeId) + static_cast<int>(mission::kItemIdOffset);
+		rows[0].hp = 150;
+		std::snprintf(rows[0].sound_profile, sizeof(rows[0].sound_profile), "SP_Host");
+		rows[1].id = 164 + static_cast<int>(mission::kItemIdOffset);
+		rows[1].hp = 100;
+		rows[1].attrib = 0x8000u;
+		items.entries = rows.data();
+		items.count = rows.size();
+		role.set_rotation(&rotation);
+		// Its Switch cell set: the first half's end replays it, the sides swapped.
+		inmatch::seed_rotation_from_host_screen(rotation, catalog, {0}, {1});
+	}
+
+	bool boot_map(bool next_mission) {
+		inmatch::HostBootRequest r;
+		r.mission = test_mission::two_entity_mission();
+		r.mission.header.attrib_flags = bms::AttribFlags::AttackAndDefend;
+		mission::sync_counts(r.mission);
+		r.mission_basename = "ADMAP";
+		r.files = test_boot::source_over(&files);
+		r.items = &items;
+		r.session = &session;
+		r.role = &role;
+		r.host = &role;
+		r.host_cfg.config.server_name = "Play Host";
+		r.host_cfg.config.game_type = game_type::kAttackDefend;
+		r.host_cfg.config.mission_file = "ADMAP.BMS";
+		r.host_cfg.config.max_players = 9;
+		r.host_cfg.config.num_teams = 2;
+		r.host_cfg.socket_mode = inmatch::SocketMode::Lan;
+		r.host_cfg.serve_and_play = true;
+		r.next_mission = next_mission;
+		r.boot_options.playable = true;
+		r.boot_options.mp_session = true;
+		r.boot_options.terrain = false;
+		r.boot_options.game_type = game_type::kAttackDefend;
+		r.boot_options.player_limit = 9;
+		r.boot_options.team_count = 2;
+		r.fresh_kernel = [this]() -> mission::MissionKernel & {
+			auto fresh = std::make_unique<mission::MissionKernel>();
+			if (kernel) fresh->carry_across_load_from(*kernel);
+			kernel = std::move(fresh);
+			return *kernel;
+		};
+		std::string error;
+		if (!inmatch::boot_host_mission(std::move(r), boot, error) ||
+				!inmatch::start_host_mission(boot, inmatch::HostStartDevice{}, error)) {
+			std::printf("play boot: %s\n", error.c_str());
+			return false;
+		}
+		return true;
+	}
+
+	inmatch::NapiNPConnection *loopback() {
+		for (inmatch::NapiNPConnection &c : role.state.host_owner.ctx.np_protocol.connection_list)
+			if (c.type == inmatch::NapiNPConnection::kTypeClientSide) return &c;
+		return nullptr;
+	}
+
+	// The pool-0 bodies the loopback slot owns.
+	int own_bodies() {
+		inmatch::NapiNPConnection *c = loopback();
+		if (c == nullptr) return -1;
+		int n = 0;
+		kernel->world.registry.for_each_in_pool(0, [&](const world::Entity &e) {
+			if (e.item_id == world::kPlayerInfantryTypeId && e.owner_connection_id == c->connection_id) ++n;
+		});
+		return n;
+	}
+};
+
+void test_play_host_map_change() {
+	PlayHost host;
+	CHECK(host.boot_map(/*next_mission=*/false));
+	if (host.kernel == nullptr) return;
+	// The fresh session's own player, once the session pumps it in.
+	for (int f = 0; f < 120 && !(host.loopback() != nullptr && host.loopback()->link.owned_entity.valid()); ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		(void)host.session.advance(input);
+		host.kernel->world.out.discard_presentation();
+	}
+	CHECK(host.loopback() != nullptr && host.loopback()->link.owned_entity.valid());
+	// The round's end: the Cycle command and its linger, to the mission exit.
+	CHECK(inmatch::Server_ExecuteServerCommand(host.role.state.host_owner.ctx, &host.kernel->world, "Cycle", "", {})
+					.handled);
+	bool ended = false;
+	for (int f = 0; f < 4000 && !ended; ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		ended = host.session.advance(input).terminal();
+		host.kernel->world.out.discard_presentation();
+	}
+	if (!ended)
+		std::printf("play host: exit %d, world exit %d, in session %u\n",
+				host.role.state.host_owner.ctx.mission_exit_reason, host.kernel->world.mission_exit_reason,
+				unsigned(host.role.state.host_owner.ctx.is_in_session));
+	CHECK(ended);
+	CHECK(inmatch::begin_host_map_change(host.role, host.catalog) == inmatch::MapChangeStep::NextMission);
+	CHECK(host.boot_map(/*next_mission=*/true));
+	inmatch::NapiNPConnection *own = host.loopback();
+	CHECK(own != nullptr && own->link.owned_entity.valid());
+	if (own == nullptr || !own->link.owned_entity.valid()) return;
+	// Spawned once, by the round init alone (the kernel's own spawn step stood down).
+	CHECK(host.own_bodies() == 1);
+	CHECK(host.kernel->world.cached.local_player == own->link.owned_entity);
+	const std::vector<std::string> &trace = host.kernel->boot_trace;
+	CHECK(std::find(trace.begin(), trace.end(), "spawn_local_player") == trace.end());
+	CHECK(!trace.empty() && trace.back() == "round_init");
+	// Bound at its spawn: its row's sound profile, not the slotless default.
+	const world::AiEntity *body = host.kernel->world.ai.for_handle(own->link.owned_entity);
+	const world::Entity *e = host.kernel->world.registry.get(own->link.owned_entity);
+	CHECK(body != nullptr && body->profile.sound_profile == 1);
+	CHECK(e != nullptr && e->has_item_def);
+	// The A&D latch found the host's player and the objective.
+	CHECK(host.kernel->local.attack_defend_role != 0);
+	std::printf("map_change: the listen host's own player respawned once, bound, A&D latched\n");
+}
+
 } // namespace
 
 int main() {
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
+	test_play_host_map_change();
 	Host host;
 	CHECK(host.start());
 	if (host.kernel == nullptr) return 1;
@@ -280,6 +461,7 @@ int main() {
 	// The 0x64 block named the next map's file [orig: @0x4324DD].
 	CHECK(client.map_file() == "MAPB.BMS");
 	CHECK(reloads == 2);
+	CHECK(host.map_changes == 2);
 	std::printf("map_change: joiner kept connection %u through %d missions\n", connection_id,
 			host.missions);
 

@@ -19,6 +19,7 @@
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/world/player_loadout.h>
 
 #include <string>
 #include <utility>
@@ -204,11 +205,12 @@ void HostRole::bring_up(const HostBringup &bringup) {
 // fresh session's starts: the kept session onto the new World (the context
 // keeps its connections; the per-mission tables, the streams and the rule
 // words are the next map's), the CRT stream carried over, the host's own
-// client view rebuilt over the cleared loopback, then the round init over
-// the kept slots and a pump of the rebuilt streams.
+// client view rebuilt over the cleared loopback, then a pump of the rebuilt
+// streams. The round init over the kept slots waits for the PreMission pass
+// (init_round_after_premission).
 // [orig: Game_StartMission's authority arm @0x524492..0x52452B, the stream
 //  rebuild @0x5247EB, the pumps @0x524813 / @0x52481D, the mission-data
-//  block @0x5248A7, Server_InitAllPlayerEntitiesForRound @0x525BAF]
+//  block @0x5248A7]
 void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
@@ -232,13 +234,33 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	map_change.torn_down = false;
 	if (host_cfg.serve_and_play) make_client_runtime(host_cfg.config.game_type);
 	pump_load();
+}
+
+// The map change's round init, after the kernel boot's PreMission pass and
+// the round counters' reset: a new entity for every kept slot, the host's own
+// included, each bound to its items.def row at its spawn as the boot's steps
+// bound the bodies that existed then (MissionKernel::bind_spawned_body: the
+// traits, the sound-profile pair, the organic weapons, the collision
+// instance) [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 ->
+// Entity_InitFromModel @0x40DC30], then on serve-and-play Player_InitPlayer's
+// weapon leg over the host's own new entity, its client's load-time stream
+// over the loopback (as a fresh session's bring-up queues it) and its look
+// heading.
+// [orig: Game_StartMission @0x524360 -- the EventTrigger_UpdateAllWithFlag2
+//  call @0x525B86, the Server_ResetRoundCounters call @0x525B90, the tick
+//  zeroed @0x525B9F, the Server_InitAllPlayerEntitiesForRound call
+//  @0x525BAF, the Player_InitPlayer call @0x525BBC]
+void HostRole::init_round_after_premission() {
+	mission::MissionKernel &kernel = *kernel_;
+	kernel.boot_trace.emplace_back("round_init");
 	init_all_player_entities_for_round(*this);
-	if (host_cfg.serve_and_play) {
-		// The host's own client takes its load-time stream over the loopback,
-		// as a fresh session's bring-up queues it.
-		(void)tick_connections(ctx, /*elapsed_ms=*/0, state.host_owner.now_tick);
-		kernel.local.reset_local_player_input_to_player_facing();
-	}
+	for (const inmatch::NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
+		if (conn.link.owned_entity.valid()) kernel.bind_spawned_body(conn.link.owned_entity);
+	if (!staged_bringup_.host_cfg.serve_and_play) return;
+	world::local_loadout_rebuild(kernel.world, kernel.local.loadout, kernel.local.weapon,
+			kernel.local.inventory, kernel.local.inventory_valid, /*select_spawn_default=*/true);
+	(void)tick_connections(state.host_owner.ctx, /*elapsed_ms=*/0, state.host_owner.now_tick);
+	kernel.local.reset_local_player_input_to_player_facing();
 }
 
 void HostRole::pump_load() {

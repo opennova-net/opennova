@@ -28,8 +28,10 @@
 //     session (HostRole::close: StopServer's goodbye).
 //   the boot's bring-up (HostRole::bring_up with HostBringup::next_mission)
 //     continues the kept session on the new World (host_session.h
-//     continue_host_session) and runs the round init over the kept slots
-//     (init_all_player_entities_for_round).
+//     continue_host_session).
+//   after the kernel boot's PreMission pass and the round counters' reset,
+//     the round init over the kept slots
+//     (HostRole::init_round_after_premission -> init_all_player_entities_for_round).
 //   the boot's phase B ends with the load-end S2C 0x7B to every slot.
 // The host pumps its socket at the load's witnessed points (the 0x25s after
 // the teardown, the rebuilt streams, the load end), so a joiner reloading in
@@ -84,8 +86,8 @@ MapChangeStep begin_host_map_change(HostRole &role,
 		const std::vector<mission_catalog::Row> &catalog, gamecfg::GameCfg *cfg_block = nullptr,
 		HostScreenState *session = nullptr);
 
-// The round init over the kept slots on the next mission's World, which the
-// bring-up of a map change runs: auto-balance when it is due, the
+// The round init over the kept slots on the next mission's World, which a
+// map change runs after the PreMission pass: auto-balance when it is due, the
 // previous-mode word, the objective and non-team coercion (team 2 -> 1), and
 // a new entity for every active slot.
 // [orig: Server_InitAllPlayerEntitiesForRound @0x516AA0 (the call @0x525BAF)]
