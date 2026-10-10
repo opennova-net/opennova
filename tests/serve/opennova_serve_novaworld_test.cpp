@@ -13,7 +13,10 @@
 // and message; that map change keeps the listing and its socket and republishes
 // the next map's mission, name and message at its start; a joiner
 // dialing the advertised endpoint plays and reaches the PlayerList as its UDP
-// source; the stop deregisters.
+// source; the stop deregisters. The service's SetMPReset (D-NET-385) is saved
+// to game.cfg at once and the map change still continues the session, as
+// retail's does (it creates none, so its create-time exit never runs); the
+// next launch exits with code 0 at its game.cfg read.
 #include "server.h"
 #include "serve_test_support.h"
 
@@ -228,6 +231,14 @@ int main() {
 		CHECK(saved.cfg.game_name == "Serve NW Renamed");
 		CHECK(saved.cfg.servermsg == "renamed by the service");
 		expected_name = "Serve NW Renamed";
+		// SetMPReset: the block's mpreset and game.cfg at once, as retail's handler
+		// [orig: @0x4D2E28 -> Game_SaveConfig @0x4D2E2D]; the running session goes on.
+		deliver("SetMPReset 1");
+		CHECK(ctx.config.multiplayer_reset == 1);
+		CHECK(server.game_cfg().mp_reset == 1);
+		const gamecfg::LoadResult reset = gamecfg::load_file(gamecfg::kFileName, {});
+		CHECK(reset.file_read && reset.cfg.mp_reset == 1 && reset.reset_exit);
+		CHECK(server.frame(kFrame));
 	}
 
 	// --- a round end's map change: the listing and its socket survive it, and
@@ -242,6 +253,13 @@ int main() {
 		}
 		CHECK(server.missions_played() == 2);
 		CHECK(server.role().state.host_owner.ctx.config.mission_name == "Serve Test Map Two");
+		// The set mpreset word did not end the process: the map change continues
+		// the session and creates none [orig: the PreMenu's state 7 @0x56A90B
+		// pushes the Game Loop; CreateSession's test @0x4C97E7 never runs].
+		CHECK(server.running() && !server.reset_exit());
+		CHECK(server.role().session_create() == inmatch::CreateSessionResult::Created);
+		CHECK(server.role().state.host_owner.ctx.config.multiplayer_reset == 1);
+		CHECK(server.role().state.host_owner.ctx.is_in_session == 1);
 		// The next map boots from the block the rename wrote, and the map change's save keeps it.
 		CHECK(server.role().state.host_owner.ctx.config.server_name == "Serve NW Renamed");
 		CHECK(server.role().state.host_owner.ctx.config.custom_text == "renamed by the service");
@@ -332,6 +350,28 @@ int main() {
 		gone = !row().has_value();
 	}
 	CHECK(gone);
+	CHECK(!server.reset_exit());
+	CHECK(!fs::exists(work / "activesrvr.txt"));
+
+	// --- the next launch: the saved mpreset ends it at the game.cfg read with
+	// code 0 (main's reset_exit), before the lock or the listing
+	// [orig: Game_LoadConfig @0x5514A1..0x5514AC].
+	{
+		serve::ServeOptions options;
+		std::string parse_error;
+		CHECK(serve::parse_serve_options(
+				{"--resource-dir", dir.string(), "/HOST", (dir / "test.host").string(), "--loose-root",
+						"--master-host", "127.0.0.1", "--master-gate-port", std::to_string(gate_port)},
+				options, parse_error) == 0);
+		serve::Server relaunch(options);
+		std::string relaunch_error;
+		CHECK(!relaunch.start(relaunch_error));
+		CHECK(relaunch.reset_exit());
+		CHECK(relaunch.lister() == nullptr);
+		CHECK(!fs::exists(work / "activesrvr.txt"));
+		const gamecfg::LoadResult kept = gamecfg::load_file(gamecfg::kFileName, {});
+		CHECK(kept.file_read && kept.cfg.mp_reset == 1);
+	}
 
 	holder.reset();
 	stop_gate = true;

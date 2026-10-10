@@ -108,8 +108,24 @@ void continue_session(NapiNPServerCtx &ctx, const GameConfig &config) {
 }
 
 // [orig: CNapiGameSession_CreateSession @0x4c97c0] — see header.
-void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
-                    const SessionStartup &startup, replication::ISessionTransport *local_client) {
+CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &config,
+                                   const SessionStartup &startup,
+                                   replication::ISessionTransport *local_client) {
+	// The cfg block's mpreset word ends the process before anything of the
+	// session exists: retail tests the global after its two null-argument
+	// checks and calls crt_exit(0) when it is nonzero, at every session
+	// create (single player's mission start and a host's session start; a
+	// joiner creates none, and the map change continues the session,
+	// continue_session). The context stays as it was; the embedder ends the
+	// process with code 0. Retail's entry reset of a live session ahead of
+	// the test (@0x4C97C6..0x4C97CC, CNapiGameSession_ResetActiveSession) has
+	// no counterpart: every embedder's create runs on a fresh host context
+	// (HostRole::reset_state).
+	// [orig: @0x4C97E7..0x4C97F0 `cmp dword_25509FC, 0` -> crt_exit(0); the
+	//  null checks @0x4C97D5 / @0x4C97DD; callers SinglePlayer_StartMission
+	//  @0x561E65, CNapiGameSession_BuildAndCreateSession @0x56997D from the
+	//  PreMenu's state 2 @0x56A46A]
+	if (config.multiplayer_reset != 0) return CreateSessionResult::ProcessExit;
 	// A new session owns a new connection table. Clear both remote server-side
 	// peers and any prior local client before installing this session's role set;
 	// no live-update API is allowed to mutate connection residency mid-match.
@@ -160,6 +176,7 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 		// its local-connection arm @0x4c8213].
 		++ctx.total_logins;
 	}
+	return CreateSessionResult::Created;
 }
 
 } // namespace opennova::inmatch

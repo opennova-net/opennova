@@ -469,7 +469,20 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 		kernel_ = std::move(fresh);
 		return *kernel_;
 	};
-	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) return false;
+	if (!inmatch::boot_host_mission(std::move(request), boot_, error)) {
+		// The session create's mpreset exit: retail's crt_exit(0) ends the
+		// process inside the create, so Game_Run's exit tail never runs (no
+		// game.cfg save, no banned.txt save, activesrvr.txt left behind) and
+		// nothing tells the NovaWorld service; the process exits with code 0.
+		// Only the starting map creates a session here: a map change continues
+		// it [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 ->
+		//  crt_exit(0), skipping Game_Run @0x4A7FFF..0x4A800E].
+		if (boot_.session_create == inmatch::CreateSessionResult::ProcessExit) {
+			reset_exit_ = true;
+			exit_save_owed_ = false;
+		}
+		return false;
+	}
 	// No device stages run between the phases on a headless host.
 	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
 	++missions_played_;
@@ -712,9 +725,10 @@ void Server::stop() {
 	if (role_) role_->set_socket(nullptr);
 	if (listing_) listing_->unbind();
 	// The NovaWorld deregistration: ClientStopHosting, then the goodbye burst,
-	// on the same socket before it closes.
+	// on the same socket before it closes. The session create's exit sends
+	// neither: retail's process ends inside the create (boot_mission).
 	if (lister_) {
-		lister_->stop();
+		if (!reset_exit_) lister_->stop();
 		lister_.reset();
 	}
 	listing_.reset();

@@ -49,8 +49,8 @@ namespace opennova::inmatch {
 // Lightning (the flash + the S2C 0x24 "SETFLASH1 16" text command),
 // TimeOfDay (HHMM), SetServerName / SetServerMsg / SetMPReset (config;
 // config_changed asks the shell to save game.cfg and republish the NovaWorld
-// HostSetup / Host vars; retail's next session create exits the process on a
-// nonzero mpreset, which nothing here reads yet, D-NET-385), ChangeTeam /
+// HostSetup / Host vars; the next session create ends the process on a
+// nonzero mpreset, create_session's ProcessExit), ChangeTeam /
 // SwapTeam (the team 1 <-> 2 swap through Server_ChangeEntityTeam, then the
 // "Changing team...." chat to the slot).
 // ReloadPlayer (Entity_UpdateWeaponOverlayFrameState) and DisarmPlayer are

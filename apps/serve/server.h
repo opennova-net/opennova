@@ -131,8 +131,12 @@ public:
 	// NovaWorld ServerCommand's name / message / mpreset change. False
 	// (logged) when the file does not open.
 	bool save_config();
-	// game.cfg set `mpreset`: retail's load exits the process with code 0
-	// before anything else runs, and start() stops there.
+	// `mpreset` is set: retail exits the process with code 0, at the load
+	// when game.cfg sets it (before anything else runs) or at the session
+	// create when the block holds it then; start() stops there, and the exit
+	// tail (the save, the lock's delete, the NovaWorld stop) does not run.
+	// [orig: Game_LoadConfig @0x5514A1..0x5514AC; CNapiGameSession_CreateSession
+	//  @0x4C97E7..0x4C97F0]
 	bool reset_exit() const { return reset_exit_; }
 
 	uint16_t bound_port() const { return bound_port_; }

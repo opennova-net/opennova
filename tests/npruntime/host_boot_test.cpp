@@ -10,7 +10,9 @@
 //   - every host carries the gametext "Server" strings (D-NET-344) and the
 //     charattr.def class attributes (D-NET-345);
 //   - phase B completes the mission start and only then the session's load,
-//     and the 0x0A view distance is the world's fog distance (D-NET-139).
+//     and the 0x0A view distance is the world's fog distance (D-NET-139);
+//   - a set mpreset word refuses the session create and phase A reports the
+//     process exit to the embedder (D-NET-385).
 #include <runtime/inmatch/host_boot.h>
 
 #include <base/gameprofile/game_type.h>
@@ -338,6 +340,35 @@ int main() {
 			CHECK(!next.kernel->world.tables.class_has_attribute(2, world::MissionTables::kCharAttrMedic));
 			CHECK(next.boot.charattr.loaded);
 		}
+	}
+
+	// --- D-NET-385: the session create's mpreset exit, reported to the
+	// embedder. A set word refuses the create inside the kernel boot's bring-up:
+	// phase A returns false with the exit outcome, no session stands, and the
+	// session stays Loading for the embedder, which ends its process with code
+	// 0 and runs no phase B. A clear word boots as ever.
+	// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0 -> crt_exit(0)]
+	{
+		Host host;
+		std::string error;
+		inmatch::HostBootRequest r = host.request(0);
+		r.host_cfg.config.multiplayer_reset = 1;
+		CHECK(!inmatch::boot_host_mission(std::move(r), host.boot, error));
+		CHECK(host.boot.session_create == inmatch::CreateSessionResult::ProcessExit);
+		CHECK(host.role.session_create() == inmatch::CreateSessionResult::ProcessExit);
+		CHECK(error.find("mpreset") != std::string::npos);
+		const inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+		CHECK(ctx.is_in_session == 0);
+		CHECK(ctx.np_protocol.host_running == 0);
+		CHECK(ctx.np_protocol.connection_list.empty());
+		CHECK(host.session.state() == inmatch::State::Loading);
+		CHECK(host.role.client_runtime() == nullptr);
+
+		Host clear;
+		CHECK(inmatch::boot_host_mission(clear.request(0), clear.boot, error));
+		CHECK(clear.boot.session_create == inmatch::CreateSessionResult::Created);
+		CHECK(clear.role.state.host_owner.ctx.is_in_session == 1);
+		CHECK(clear.role.state.host_owner.ctx.np_protocol.host_running == 1);
 	}
 
 	// --- a role with no HostRole (the game's joiner) skips the authority's legs
