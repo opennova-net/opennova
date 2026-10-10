@@ -87,5 +87,7 @@ int main() {
 	TEST_EXPECT(grm::texture_load_name("face.bmp", grm::kTextureTwinExtension) == "face.MDT");
 	TEST_EXPECT(grm::texture_load_name("chars\\faces/old.face.tga", grm::kTextureExtension) == "old.face.TGA");
 	TEST_EXPECT(grm::texture_load_name("eye1", grm::kTextureExtension) == "eye1.TGA");
+	// A person's model's face: the model's name made .GRM.
+	TEST_EXPECT(grm::face_file_name("chars\\soldier.3di") == "soldier.GRM" && grm::face_file_name("Boonie") == "Boonie.GRM");
 	return 0;
 }

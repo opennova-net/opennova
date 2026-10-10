@@ -191,6 +191,11 @@ std::string texture_load_name(const std::string &written, const char *extension)
 	return stem + extension;
 }
 
+std::string face_file_name(const std::string &model) {
+	// [orig: sub_57FCE0 @ 0x57FCE0, the same strip as the textures' then ".GRM" @ 0x57FD2E]
+	return texture_load_name(model, kFaceExtension);
+}
+
 bool write(const File &file, std::vector<uint8_t> &out, std::string &error) {
 	error.clear();
 	if (!valid(file, error)) return false;

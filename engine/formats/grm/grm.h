@@ -68,6 +68,13 @@ inline constexpr const char *kTextureExtension = ".TGA";
 inline constexpr const char *kTextureTwinExtension = ".MDT";
 std::string texture_load_name(const std::string &written, const char *extension);
 
+// The face animation the game opens for a person's model (an item of type 3, when the shadow quality is above 0):
+// the model's name with its path stripped and its extension, from the last '.', removed, then ".GRM" added [orig:
+// Entity_InitFromModel @ 0x40E211..0x40E22E -> sub_57FDF0 @ 0x57FDF0 -> sub_57FCE0 @ 0x57FCE0: PathStripPathA,
+// PathRemoveExtensionA, then PathAddExtensionA ".GRM" @ 0x57FD2E]. No file names one.
+inline constexpr const char *kFaceExtension = ".GRM";
+std::string face_file_name(const std::string &model);
+
 // Reconstructs the retail writer's CRLF output, field order, spacing and four
 // decimal places. Canonical writer output round-trips byte-for-byte; arbitrary
 // input comments/layout and excess float precision are not echoed.
