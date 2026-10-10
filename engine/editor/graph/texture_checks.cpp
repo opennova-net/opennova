@@ -322,8 +322,16 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	const TextureReader reader = reader_of(load.reader);
 	const TextureHeader *header = header_of(input, served, reader);
 	if (!header) return;
-	const DiagnosticSeverity reader_severity =
-			texture_arg_gates(edge.loader_arg) ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning;
+	// A map whose loss aborts the mission gates when its reader cannot read it, but the detail blend map: a
+	// blend map the TGA reader refuses is skipped, nothing logged, the terrain loading on without a blend
+	// [orig: PolyTrn_InitTextures @ 0x60B1B8..0x60B1C2 to @ 0x60B35B] (a missing one still aborts, the
+	// reference's own gate [orig: @ 0x60B18E, "blendermap" @ 0x60B19A]).
+	const bool skipped = role == R::TerrainBlendMap;
+	const DiagnosticSeverity reader_severity = texture_arg_gates(edge.loader_arg) && !skipped ? DiagnosticSeverity::Error
+	                                                                                           : DiagnosticSeverity::Warning;
+	const std::string skip_words = skipped ? " The game makes no detail blend from it and loads the terrain without one, "
+	                                         "logging nothing."
+	                                       : std::string();
 	// A file of a format the role's loader does not read (a colour map that is no TGA, a particle graphic
 	// that is no TGA, a loading screen that is no PCX: roles.md's loaders).
 	const size_t dot = served.find_last_of('.');
@@ -334,7 +342,8 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 		add(F::TextureWrongReader, reader_severity,
 		    basename_of(served) + ", " + where + ", is read by the game's " + reader_words(reader) + " reader, which takes " +
 		            (formats.empty() ? std::string("no texture file") : formats) + " files" +
-		            (*row.missing ? ": without one, " + std::string(row.missing) + "." : std::string(".")));
+		            (skipped ? "." + skip_words
+		                     : *row.missing ? ": without one, " + std::string(row.missing) + "." : std::string(".")));
 		return;
 	}
 	if (!header->read) {
@@ -346,7 +355,7 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 		add(F::TextureWrongReader, reader_severity,
 		    basename_of(served) + ", " + where + ", is read by the game's " + reader_words(reader) +
 		            " reader, which cannot read it: " + header->refusal +
-		            (*row.missing ? " Without it: " + std::string(row.missing) + "." : std::string()));
+		            (skipped ? skip_words : *row.missing ? " Without it: " + std::string(row.missing) + "." : std::string()));
 		return;
 	}
 	check_sizes(role, basename_of(served), *header, where, context, add);
