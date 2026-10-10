@@ -13,6 +13,7 @@
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
+#include <formats/grm/grm.h>
 #include <formats/mission/mission_params.h>
 #include <formats/threedi/threedi_panm.h>
 #include <formats/trn/trn.h>
@@ -55,6 +56,10 @@ std::vector<std::string> texture_files(const std::string &name, int32_t loader_a
 		// A sky map: its extension made PCX first (kTextureArgPcx).
 		if (loader_arg & kTextureArgPcx)
 			return texture_files(menu::replace_or_append_extension(name, "pcx"), loader_arg & ~kTextureArgPcx, exists);
+		// A face animation's texture: its path stripped and its extension made .TGA first (kTextureArgFaceTga).
+		if (loader_arg & kTextureArgFaceTga)
+			return texture_files(grm::texture_load_name(name, grm::kTextureExtension), loader_arg & ~kTextureArgFaceTga,
+			                     exists);
 		const renderer::TextureLoader by = renderer::texture_role(role).loader;
 		return renderer::texture_loader_has_attempts(by) ? texture_files(name, texture_loader_arg(by), exists) : one(name);
 	}
@@ -786,6 +791,9 @@ constexpr ReferenceKindRow kRows[] = {
 	        .tolerated(dialog_name_missing)
 	        .message_reads_files()
 	        .row,
+	// A face animation's vertex by its index among the file's vertices: a triangle's corner, which the game draws
+	// over the vertex at that place, never testing it [orig: Render_ScarDebugOverlay @ 0x589301..0x58931D].
+	Row(ReferenceKind::FaceVertex, "face_vertex", "the vertex", "vertex").record("vertex").row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {

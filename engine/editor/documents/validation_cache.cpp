@@ -75,8 +75,8 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	// them yet, the file unread.
 	const DocumentContent content = type ? document_content(*type) : DocumentContent::Other;
 	const bool records = type && content != DocumentContent::Other;
-	// An image's type with no finding codes (S18: a texture's, until its roles' findings) makes no
-	// finding: its file is left unread, as a file no type opens is (validates_files).
+	// A whole-file type with neither finding codes nor a validate_file makes no finding: its file is left
+	// unread, as a file no type opens is (validates_files).
 	const bool silent = type && !validates_files(*type);
 	const auto validate = [&entry, &input, type](const DocumentBase &document) {
 		if (type->validate_file)

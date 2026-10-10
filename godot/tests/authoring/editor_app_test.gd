@@ -611,10 +611,10 @@ func test_create_file_names_and_a_menu_of_its_own() -> void:
 	assert_gt(_seam.find_record("MAIN"), 0)
 	assert_eq(_seam.find_record("EXIT"), 0, "no Exit button")
 	assert_eq(_seam.find_record("STARTUP"), 0, "no copy of the startup screen")
-	# A kind the editor makes but does not edit (a font): made, not opened; the menu stays active.
+	# A font, a document since round S23: made and opened, its one row the font.
 	assert_true(_seam.create_file("Extra.fnt"), "\n".join(_seam.get_output_lines()))
 	assert_true(FileAccess.file_exists(dir.path_join("fonts/Extra.fnt")))
-	assert_eq(_seam.get_row_name(0), "EXTRA", "the menu is still the active document")
+	assert_eq(_seam.get_row_name(0), "Font", "the font is the active document")
 	assert_true(_seam.create_file("Extra.fnt"), "a file that is there already is no failure")
 	_seam.close_project()
 
