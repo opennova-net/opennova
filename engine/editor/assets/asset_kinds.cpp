@@ -73,10 +73,12 @@ constexpr AssetKindRow kRows[] = {
 	        .new_name("newmap.adm")
 	        .about("An animation map: which clip a soldier or a vehicle plays for each move.")
 	        .row,
-	// Its base and eye textures by name (formats/grm).
+	// Its base and eye textures by name (documents/face_animation_document: each a field's reference).
 	Kind(AssetKind::FaceAnimation, "face_animation", "Face animation")
+	        .edited_by(DocumentTypeId::FaceAnimation)
 	        .names_files()
 	        .folder("anims")
+	        .new_name("newface.grm")
 	        .about("A face's animation, with the base and eye textures it names.")
 	        .row,
 	Kind(AssetKind::AiProfile, "ai_profile", "AI profile")
@@ -97,7 +99,9 @@ constexpr AssetKindRow kRows[] = {
 	        .folder("textures")
 	        .about("A model's material data: a material row of a model reads it as a chunk container.")
 	        .row,
+	// documents/font_document: its header and its glyphs; its picture the font viewport's (preview/font_viewport).
 	Kind(AssetKind::Font, "font", "Font")
+	        .edited_by(DocumentTypeId::Font)
 	        .folder("fonts")
 	        .new_name("newfont.fnt")
 	        .about("A font the menus and the HUD write with.")
@@ -181,8 +185,9 @@ constexpr AssetKindRow kRows[] = {
 	        .folder("menus")
 	        .about("A menu stylesheet: the fonts and colours the menus name by variable.")
 	        .row,
-	// It names no file: its entries are its own chunks of audio (formats/sbf).
+	// It names no file: its entries are its own chunks of audio (formats/sbf; documents/music_bank_document).
 	Kind(AssetKind::MusicBank, "music_bank", "Music bank")
+	        .edited_by(DocumentTypeId::MusicBank)
 	        .folder("music")
 	        .about("Music the game streams by its path, never through the archives.")
 	        .row,
@@ -195,7 +200,9 @@ constexpr AssetKindRow kRows[] = {
 	        .new_name("newbank.lwf")
 	        .about("A sound bank: sound sets by name, each playing the waves it names.")
 	        .row,
+	// documents/wave_document: its facts as the game's loader reads it, a trim and a normalise.
 	Kind(AssetKind::Wave, "wave", "Wave")
+	        .edited_by(DocumentTypeId::Wave)
 	        .folder("sounds")
 	        .new_name("newwave.wav")
 	        .about("A sound: sound banks, dialogs and scripts name it, and the game loads it from the archives by name.")

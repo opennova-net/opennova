@@ -45,6 +45,19 @@ const BlankParam k_terrain_params[] = {
 	{ "layout", "Layout (island or tiled)", ReferenceKind::None, false },
 };
 
+// A font from a glyph sheet (round S23 lane A, the new_font request): the sheet (a file on disk or of the project;
+// left empty, the built-in bitmap font, the font's blank), its grid and the importer's options.
+const BlankParam k_font_params[] = {
+	{ "sheet", "Glyph sheet (a PNG on disk or of the project; empty: the built-in font)", ReferenceKind::None, false },
+	{ "columns", "Columns (16)", ReferenceKind::None, false },
+	{ "rows", "Rows (14)", ReferenceKind::None, false },
+	{ "first", "First cell's byte (0x20)", ReferenceKind::None, false },
+	{ "advance", "Advance (ink, left or cell)", ReferenceKind::None, false },
+	{ "tracking", "Tracking (1)", ReferenceKind::None, false },
+	{ "spacing", "Spacing (0)", ReferenceKind::None, false },
+	{ "color", "Colour (white or sheet)", ReferenceKind::None, false },
+};
+
 const BlankFactory k_factories[] = {
 	// Boot: the string tables and definition files Game_InitSubsystems demands.
 	{ "gameerr", AssetKind::Strings, make_blank_empty_strings, "an empty error-message table", false },
@@ -207,6 +220,9 @@ const BlankFactory k_factories[] = {
 	{ "", AssetKind::Particles, make_blank_particles, "a particle file with no effect yet", true },
 	{ "", AssetKind::Credits, make_blank_credits, "a credits roll of one line, the project's title", true },
 	{ "", AssetKind::AiProfile, make_blank_ai_profile, "an AI profile of no type yet, its grammar in a comment", true },
+	// Round S23 lane A: a face animation, which no file names (the game opens <model>.GRM for a person).
+	{ "", AssetKind::FaceAnimation, make_blank_face_animation,
+	  "a face of no texture, mesh or gesture yet, its eyes where the game puts them with none", true },
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);
@@ -251,6 +267,12 @@ const BlankParam *new_file_params(AssetKind kind, size_t &count, bool *offered) 
 		count = sizeof(k_terrain_params) / sizeof(k_terrain_params[0]);
 		if (offered) *offered = true;
 		return k_terrain_params;
+	}
+	// A font: from a glyph sheet where the prompt names one (the new_font request), else the built-in font.
+	if (kind == AssetKind::Font) {
+		count = sizeof(k_font_params) / sizeof(k_font_params[0]);
+		if (offered) *offered = true;
+		return k_font_params;
 	}
 	// The kind's free-form factory of no role: what Files' New lists under its kind's label.
 	for (const BlankFactory &factory : k_factories)

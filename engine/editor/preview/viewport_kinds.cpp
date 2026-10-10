@@ -9,6 +9,7 @@
 #include <editor/preview/definition_viewport.h>
 #include <editor/preview/effect_viewport.h>
 #include <editor/preview/environment_viewport.h>
+#include <editor/preview/font_viewport.h>
 #include <editor/preview/terrain_viewport.h>
 #include <editor/preview/hud_viewport.h>
 #include <editor/preview/menu_viewport.h>
@@ -95,6 +96,11 @@ constexpr ViewportFeed kTerrainFeeds[] = {
 	{ T::Terrain, true },
 };
 
+// The font's (round S23 lane A): a font, the Document tab's main view beside its glyphs, its rows as they stand.
+constexpr ViewportFeed kFontFeeds[] = {
+	{ T::Font, true },
+};
+
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
 // over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8); the
 // mission's waits too (a drag is Updates alone: its entities move in place), and the Shell keeps two
@@ -128,6 +134,8 @@ constexpr ViewportKindRow kRows[] = {
 			EnvironmentViewport::make, true, 2 },
 	{ ViewportKind::Terrain, ViewportRole::Main, true, false, false, kTerrainFeeds, std::size(kTerrainFeeds),
 			TerrainViewport::make, true, 2 },
+	on_backdrop({ ViewportKind::Font, ViewportRole::Main, false, false, false, kFontFeeds, std::size(kFontFeeds),
+			FontViewport::make }),
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <editor/documents/music_bank_document.h>
 #include <editor/project/project_files.h>
 #include <runtime/audio/volume_law.h>
 
@@ -30,11 +31,14 @@ void PreviewSoundPlayer::play(const std::string &p_root, const std::vector<openn
 		Voice made;
 		made.voice = voice;
 		const std::string file = opennova::editor::join_path(p_root, voice.path);
-		made.job = std::async(std::launch::async, [file]() {
+		const int32_t stream = voice.stream;
+		made.job = std::async(std::launch::async, [file, stream]() {
 			Decode out;
 			std::vector<uint8_t> bytes;
 			if (!opennova::io::read_file_bytes(file, bytes, out.error)) return out;
-			out.decoded = opennova::lwf::wav_decode_pcm16(bytes.data(), bytes.size(), out.pcm, out.error);
+			// A music bank's stream (round S23 lane A), decoded as the game streams it; else a wave as the game loads it.
+			out.decoded = stream >= 0 ? opennova::editor::music_stream_pcm(bytes, stream, out.pcm, out.error)
+			                          : opennova::lwf::wav_decode_pcm16(bytes.data(), bytes.size(), out.pcm, out.error);
 			return out;
 		});
 		voices_.push_back(std::move(made));

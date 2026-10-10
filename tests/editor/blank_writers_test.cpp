@@ -20,6 +20,7 @@
 #include <formats/dds/dds.h>
 #include <formats/def/def.h>
 #include <formats/def/def_hudpos_write.h>
+#include <formats/grm/grm.h>
 #include <formats/lwf/wav_pcm.h>
 #include <formats/lwf/wav_source.h>
 #include <formats/mus/mus.h>
@@ -212,6 +213,17 @@ static int test_text() {
 	            table.parts_count == 0 && table.nationalities_count == 0);
 	avatars::avatars_free(&table);
 	TEST_EXPECT(opens_clean("Avatars.def", AssetKind::AvatarDefs, avatars));
+
+	// A face of nothing (round S23 lane A): the reader's eye defaults, every count line written.
+	const std::vector<uint8_t> face = blank_of("newface.grm", AssetKind::FaceAnimation);
+	grm::File read;
+	std::string why;
+	TEST_EXPECT(crlf(text_of(face)) && grm::parse(face.data(), face.size(), read, why) && read.vertices.empty() &&
+	            read.triangles.empty() && read.gestures.empty() && read.eye_centers[1].x == 0.65f);
+	const std::string words = text_of(face);
+	TEST_EXPECT(words.find("vertices    0") != std::string::npos && words.find("triangles    0") != std::string::npos &&
+	            words.find("gestures  0") != std::string::npos);
+	TEST_EXPECT(opens_clean("newface.grm", AssetKind::FaceAnimation, face));
 	return 0;
 }
 
@@ -235,12 +247,13 @@ static int test_textures() {
 
 // What stays without a blank, each for its reason: fgn2.bin (its presence alone switches the game to its foreign
 // effects), failsafe.bad (with it a clip that does not load plays it in place of the slot's reset), hudfx.def (no
-// reader or writer of it in the engine), the country code, a video, the terrain (an import of its images, S20).
+// reader or writer of it in the engine), the country code, a video, the terrain (an import of its images, S20). A
+// face animation has one since round S23, which no role names (no file names one).
 static int test_left_out() {
 	for (const char *role : {"fgn2_bin", "failsafe_bad", "hudfx_def", "cc_bin", "intro_bik"})
 		TEST_EXPECT(find_blank_factory_for_role(role) == nullptr);
-	for (AssetKind kind : {AssetKind::Video, AssetKind::Terrain, AssetKind::TerrainPolyData, AssetKind::FaceAnimation,
-	                       AssetKind::CountryCode, AssetKind::RawBin, AssetKind::HudFxDefs})
+	for (AssetKind kind : {AssetKind::Video, AssetKind::Terrain, AssetKind::TerrainPolyData, AssetKind::CountryCode,
+	                       AssetKind::RawBin, AssetKind::HudFxDefs})
 		TEST_EXPECT(find_blank_factory_for_kind(kind) == nullptr);
 	return 0;
 }
