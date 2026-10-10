@@ -35,7 +35,8 @@ constexpr FindingCodeRow from_render_check(const char *token) {
 
 constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
 	{ MenuFinding::InvalidInput, { "menu.invalid_input", FindingFix::None, nullptr, true } },
-	{ MenuFinding::IgnoredInput, { "menu.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
+	// Kept on save with the file's look (master's text layout, D-MNU-22), as a catalog's is: no Rewrite drops it.
+	{ MenuFinding::IgnoredInput, { "menu.ignored_input" } },
 	{ MenuFinding::Unserializable, { "menu.unserializable", FindingFix::None, nullptr, true } },
 	// A screen or a window no by-name lookup finds: a NAME of its own (DI-11, Diagnostic::planned).
 	{ MenuFinding::DuplicateScreen, { "menu.duplicate_screen", FindingFix::EditRecord } },
@@ -70,8 +71,7 @@ constexpr FindingCodeEntry<Note> kNoteEntries[] = {
 	{ Note::ColorTransparent, note_row("menu.render.color_transparent", P::Warning) },
 	{ Note::StyleVarUnresolved, note_row("menu.render.style_var_unresolved", P::None) },
 	{ Note::TypeUnknown, note_row("menu.render.type_unknown", P::Warning) },
-	{ Note::TypeInteriorDeferred, note_row("menu.render.type_interior_deferred", P::Info) },
-	{ Note::ItemKindNotDrawn, note_row("menu.render.item_kind_not_drawn", P::Info) },
+	{ Note::ItemKindAsText, note_row("menu.render.item_kind_as_text", P::Info) },
 	{ Note::TableCellsDeferred, note_row("menu.render.table_cells_deferred", P::Info) },
 	{ Note::TableCellsCustom, note_row("menu.render.table_cells_custom", P::None) },
 	{ Note::ScrollExtentDefault, note_row("menu.render.scroll_extent_default", P::None) },
@@ -580,7 +580,10 @@ std::vector<MenuLookupName> MnuDocument::lookup_names() const {
 }
 mnu::Document MnuDocument::native() const {
 	mnu::Document document;
-	if (const auto *state = dynamic_cast<const MenuFileState *>(file_state())) document.source_encoding = state->source_encoding;
+	if (const auto *state = dynamic_cast<const MenuFileState *>(file_state())) {
+		document.source_encoding = state->source_encoding;
+		document.text_layout = state->text_layout;
+	}
 	for (const auto &node : rows()) document.screens.push_back(screen_of(*node).screen);
 	return document;
 }
@@ -719,12 +722,14 @@ bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	mnu::Document document;
 	std::string message;
 	std::vector<mnu::ParseNote> notes;
-	if (!(bytes.size() == 1 && bytes[0] == 0) && !mnu::parse(bytes.data(), bytes.size(), document, message, &notes)) {
+	if (!(bytes.size() == 1 && bytes[0] == 0) &&
+	    !mnu::parse(bytes.data(), bytes.size(), document, message, &notes, mnu::ParseLayout::Text)) {
 		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, message, path());
 		return false;
 	}
 	auto encoding = std::make_shared<MenuFileState>();
 	encoding->source_encoding = document.source_encoding;
+	encoding->text_layout = document.text_layout;
 	state = encoding;
 	for (mnu::Screen &screen : document.screens) {
 		auto row = std::make_shared<MenuScreen>();
