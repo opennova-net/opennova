@@ -1281,8 +1281,10 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 	// string of a table by its text); a symbol's own name from the first.
 	const bool by_words = wanted.size() >= kSearchByRecordLetters;
 	for_each_symbol([&](const GraphSymbol &symbol) {
-		// A record set's records go by their index, no name.
+		// A record set's records go by their index, no name; an item's name is the item's own symbol's words (the
+		// item found once, by its id's symbol), the ItemName symbol only what a tracer's lookup reaches.
 		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record) return;
+		if (symbol.kind == ReferenceKind::ItemName) return;
 		if (!holds(symbol.display) && !by_words) return;
 		const std::string words = definition_words(symbol, &names);
 		if (!holds(symbol.display) && (words == symbol.display || !holds(words)) && (symbol.title.empty() || !holds(symbol.title)))

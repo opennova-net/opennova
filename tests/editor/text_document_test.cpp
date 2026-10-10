@@ -657,7 +657,13 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(graph_reads_kind(AssetKind::Script) && !graph_reads_kind(AssetKind::Text) &&
 	            !references_unread(AssetKind::Script));
 	const std::vector<const GraphEdge *> edges = graph.references_of(script);
-	TEST_EXPECT(edges.size() == 5);
+	TEST_EXPECT(edges.size() == 7);
+	// Its operands' area and entity (S23 B) name nothing here: the project has no mission of the script's name.
+	const GraphEdge *area = edge_at(graph, script, "5:28");
+	const GraphEdge *entity = edge_at(graph, script, "7:10");
+	TEST_EXPECT(area && entity && area->kind == ReferenceKind::MissionZone &&
+	            graph.resolve(*area) == ReferenceStatus::NotAReference &&
+	            graph.resolve(*entity) == ReferenceStatus::NotAReference);
 	const GraphEdge *fx = edge_at(graph, script, "3:12");
 	const GraphEdge *ammo = edge_at(graph, script, "5:16");
 	const GraphEdge *fallback = edge_at(graph, script, "6:16");
@@ -1415,7 +1421,7 @@ static int test_retail() {
 	std::string view_error;
 	TEST_EXPECT(view.open(install_spec(install, project), view_error));
 	const opennova::Vfs &mount = view.vfs();
-	size_t scripts = 0, compiled = 0, findings = 0, references = 0, music = 0, credits = 0, shaders = 0;
+	size_t scripts = 0, compiled = 0, findings = 0, references = 0, operands = 0, music = 0, credits = 0, shaders = 0;
 	size_t witnessed = 0, alone = 0, shader_tags = 0, credit_fonts = 0, credit_images = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
@@ -1482,6 +1488,9 @@ static int test_retail() {
 			std::vector<TextReference> named;
 			type->references(*text_of(*document), named);
 			references += named.size();
+			// The mission's entities and areas its literal operands name (S23 B).
+			for (const TextReference &each : named)
+				operands += each.kind == ReferenceKind::MissionEntity || each.kind == ReferenceKind::MissionZone ? 1 : 0;
 			break;
 		}
 		case AssetKind::MusicScript:
@@ -1510,13 +1519,13 @@ static int test_retail() {
 		}
 	}
 	std::printf("retail: %zu scripts (%zu with the original compiler's listing matched, %zu running no other "
-	            "file; %zu compiler reports, %zu findings, %zu references), %zu music scripts, %zu credits files "
-	            "(%zu fonts and %zu images named), %zu shaders (%zu shader tags)\n",
-	            scripts, witnessed, alone, compiled, findings, references, music, credits, credit_fonts, credit_images,
-	            shaders, shader_tags);
+	            "file; %zu compiler reports, %zu findings, %zu references, %zu of them operands), %zu music scripts, "
+	            "%zu credits files (%zu fonts and %zu images named), %zu shaders (%zu shader tags)\n",
+	            scripts, witnessed, alone, compiled, findings, references, operands, music, credits, credit_fonts,
+	            credit_images, shaders, shader_tags);
 	// The install's counts, pinned (Joint Operations: Combined Arms).
 	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
-	            references == 36 && music == 2 && credits == 1 && shaders == 44);
+	            references == 97 && operands == 61 && music == 2 && credits == 1 && shaders == 44);
 	// The credits' names: each text line's font (every one of the 231 writes one) and its 19 images (17 fading,
 	// 2 spacing).
 	TEST_EXPECT(credit_fonts == 231 && credit_images == 19);
