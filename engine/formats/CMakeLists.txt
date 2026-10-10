@@ -193,6 +193,9 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm_matrices.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_panm_pose.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/threedi/threedi_volume_solid.cpp   # a collision volume's planes -> its convex solid
+    # threedi_gp — the BHD-era GP .3di (GPM/GPS/GPP), read only to migrate to 3DI3 (ADR 0027)
+    ${CMAKE_CURRENT_SOURCE_DIR}/threedi_gp/threedi_gp_read.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/threedi_gp/threedi_gp_migrate.cpp  # GP -> 3DI3 by the two loaders' runtime map
     # til — terrain tiles
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_io.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/til/til_foliage_blocker.cpp
