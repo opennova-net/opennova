@@ -439,11 +439,12 @@ static int test_script_type() {
 	            program.diagnostics.size(), table, findings.size());
 	TEST_EXPECT(table >= 4 && findings.empty());
 	// Its references: the effect, the sound set, two ammo (the second looked up as ammo_satchel
-	// after satchel) and the text key, each at its span, the names as written.
+	// after satchel) and the text key, each at its span, the names as written; then the mission's records
+	// its literal operands name, the area 8 and the entity 1 (S23 B).
 	std::vector<TextReference> references;
 	type->references(script, references);
-	TEST_EXPECT(references.size() == 5);
-	if (references.size() != 5) return 1;
+	TEST_EXPECT(references.size() == 7);
+	if (references.size() != 7) return 1;
 	const auto is = [&](size_t i, ReferenceKind kind, const char *value, size_t line, size_t column) {
 		const TextReference &r = references[i];
 		std::string written;
@@ -462,6 +463,11 @@ static int test_script_type() {
 	TEST_EXPECT(references[4].scope == "TEXT_DOCUMENT.BIN" && references[4].scope_alternate == "MEDMSSN.BIN" &&
 	            references[4].scope_owner == "TEXT_DOCUMENT.BMS" && references[4].scopes_after == tables_after);
 	TEST_EXPECT(references[4].rewritable && references[0].rewritable && references[3].rewritable);
+	// An operand a slot reads as a mission's record: in the mission of the script's name, only beside it, never
+	// renamed (a number).
+	TEST_EXPECT(is(5, ReferenceKind::MissionZone, "8", 5, 28) && is(6, ReferenceKind::MissionEntity, "1", 7, 10));
+	TEST_EXPECT(references[6].scope == "TEXT_DOCUMENT.BMS" && references[6].needs == "TEXT_DOCUMENT.BMS" &&
+	            references[6].field == "operand" && !references[6].rewritable && !references[5].rewritable);
 	// game.wac runs with every mission: its key reads whichever table plays, any table here, and no
 	// rename rewrites it.
 	{
@@ -481,8 +487,8 @@ static int test_script_type() {
 		                                 "first.wac");
 		std::vector<TextReference> named;
 		script_references(*files, named);
-		TEST_EXPECT(named.size() == 4);
-		if (named.size() != 4) return 1;
+		TEST_EXPECT(named.size() == 5);
+		if (named.size() != 5) return 1;
 		const auto file_at = [&](size_t i, ReferenceKind kind, const char *value, size_t line, size_t column, const char *fallback) {
 			const TextReference &r = named[i];
 			std::string written;
@@ -494,6 +500,7 @@ static int test_script_type() {
 		TEST_EXPECT(file_at(1, ReferenceKind::Wave, "radio.WAV", 3, 13, ""));
 		TEST_EXPECT(file_at(2, ReferenceKind::Script, "other.txt", 5, 5, "OTHER.wac"));
 		TEST_EXPECT(file_at(3, ReferenceKind::Script, "patrol", 6, 5, ""));
+		TEST_EXPECT(named[4].kind == ReferenceKind::MissionEntity && named[4].value == "1" && named[4].scope == "FIRST.BMS");
 		const opennova::wac::Program naming = compile_script(*files);
 		TEST_EXPECT(naming.file_uses.size() == 4 && naming.file_uses[0].kind == opennova::wac::FileUse::Kind::Wave &&
 		            naming.file_uses[0].name == "intro.wav" && naming.file_uses[3].kind == opennova::wac::FileUse::Kind::Run &&

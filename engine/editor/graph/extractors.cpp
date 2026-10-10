@@ -437,6 +437,7 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		edge.scopes_after = std::move(reference.scopes_after);
 		edge.scope_alternate = std::move(reference.scope_alternate);
 		edge.scope_owner = std::move(reference.scope_owner);
+		edge.needs = std::move(reference.needs);
 		out.edges.push_back(std::move(edge));
 	}
 }

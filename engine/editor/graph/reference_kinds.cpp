@@ -354,7 +354,12 @@ std::string entity_missing(const AssetGraph &, const GraphEdge &) {
 // The load neuters a trigger naming a zone the file lacks, which then reads false (a negated one
 // true), and zeroes an action naming one [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000,
 // EventTrigger_ResolveZoneActionRefs @0x453100].
-std::string zone_missing(const AssetGraph &, const GraphEdge &) {
+std::string zone_missing(const AssetGraph &, const GraphEdge &edge) {
+	// A script's operand: the command looks the zone up in the mission's areas and finds none, so it reads false
+	// [orig: WacCmd_SsnArea @ 0x4F1087..0x4F10A0, 0 past the table's 128].
+	if (edge.field == "operand")
+		return ", a zone id no area trigger of the mission has: the script's command finds no area for it and reads "
+		       "false.";
 	return ", a zone id no area trigger of the mission has: the game makes a trigger naming it read false and an "
 	       "action naming it do nothing.";
 }

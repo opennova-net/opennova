@@ -489,6 +489,30 @@ static int test_native_extractors() {
 	TEST_EXPECT(graph.references_of("test.mis").empty() &&
 			count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 
+	// A script of the mission's name names the mission's entities and areas by its literal operands (S23 B): in
+	// test.bms, warnings where it has none, the area's in the script's words; a script of no mission the project
+	// has names none.
+	{
+		TEST_EXPECT(editor_test::write_text(root + "/test.wac", "v1=SSNarea(42,37)\r\n"));
+		TEST_EXPECT(editor_test::write_text(root + "/lone.wac", "v1=SSNarea(42,37)\r\n"));
+		editor_test::handle_to_end(session, request::rescan());
+		const GraphEdge *entity = edge_to(graph, "test.wac", ReferenceKind::MissionEntity, "42");
+		const GraphEdge *zone = edge_to(graph, "test.wac", ReferenceKind::MissionZone, "37");
+		TEST_EXPECT(entity && zone && entity->scope == "TEST.BMS" && !entity->rewritable &&
+		            graph.resolve(*entity) == ReferenceStatus::Missing && graph.resolve(*zone) == ReferenceStatus::Missing);
+		const GraphEdge *lone = edge_to(graph, "lone.wac", ReferenceKind::MissionEntity, "42");
+		TEST_EXPECT(lone && graph.resolve(*lone) == ReferenceStatus::NotAReference);
+		bool zone_words = false;
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			zone_words = zone_words || (d.asset == "test.wac" && d.severity == DiagnosticSeverity::Warning &&
+			                            d.message.find("the script's command finds no area") != std::string::npos);
+		TEST_EXPECT(zone_words);
+		std::error_code gone;
+		fs::remove(fs::path(root) / "test.wac", gone);
+		fs::remove(fs::path(root) / "lone.wac", gone);
+		editor_test::handle_to_end(session, request::rescan());
+	}
+
 	// A native file the graph cannot read is a warning, its references unchecked, kept
 	// while the file is unchanged: a particle file, which opens as a text (DI-14), the particle type's
 	// (particle.unreadable, the reader's words at the place it stops), the graph's own reading of it
