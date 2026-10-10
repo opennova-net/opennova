@@ -73,6 +73,21 @@ struct FileUse {
     size_t offset = 0, length = 0;
 };
 
+// A literal number a command's slot reads as a mission's record (tooling metadata the VM and the listing never
+// read, as CatalogLookup is; the editor's references read it, ADR 0046 S23 B): an entity by its SSN (an Ssn slot's
+// token, or one past the SSN_ prefix in any slot), the value the leg looks the entity up by, atol of the token
+// past the prefix and its low 16 bits [orig: WacScript_ResolveParameter @0x4F2E97..0x4F2EED -> EntityPool_FindByNetId
+// @0x4F0A20]; an area by its zone id (an Area slot's number) or a waypoint path by its number (a WpList slot's),
+// the number leg's value as the slot stores it [orig: @0x4F2CEF..0x4F2D9E, the _ftol2_sse @0x4F2D8C]. Only a token
+// that is a number: a variable, an IF's name or a word names no record. `offset` and `length` are the number's
+// bytes in its source, as written (past a prefix).
+struct OperandUse {
+    ParamType kind = ParamType::Null; // Ssn, Area or WpList
+    int32_t value = 0;
+    uint32_t source = 0; // Program::source_names index
+    size_t offset = 0, length = 0;
+};
+
 // A word the compiler read as one of its language's, where it stood (tooling metadata the VM and
 // the listing never read, as CatalogLookup is; the editor's script device colours them, ADR 0046
 // S13 V10): a keyword of the block, declaration and expression syntax (IF, THEN, ELSE, ELSEIF, END
@@ -124,6 +139,7 @@ struct Program {
     std::vector<CatalogLookup> catalog_lookups; // in the order the compiler made them
     std::vector<WordUse> word_uses;             // in the order the compiler read them
     std::vector<FileUse> file_uses;             // in the order the compiler read them
+    std::vector<OperandUse> operand_uses;       // in the order the compiler read them
     // Effect handles are stable 1-based integers, separate from text-pool offsets.
     // The presentation consumer resolves these names in its mounted effect scene.
     std::vector<std::string> effect_names;

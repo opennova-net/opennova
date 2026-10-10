@@ -105,6 +105,27 @@ static void keywords() {
 	}
 }
 
+// The literal numbers a command's slots read as a mission's records, at their places (Program::operand_uses): an
+// entity by its SSN (an Ssn slot's number, or one past SSN_), an area by its zone id, a waypoint path by its
+// number; a variable in such a slot, or a number in another slot, names none.
+static void operands() {
+	const std::string source = "v1=SSNarea(42,37) v2=SSNdead(SSN_77) v3=SSNdead(V9) v4=area(5)\r\nSSNtoWP(12, 3)\r\n";
+	const Program program = compile_source(source, {});
+	struct Expect {
+		ParamType kind;
+		int32_t value;
+		const char *text;
+	};
+	const Expect expects[] = {{ParamType::Ssn, 42, "42"}, {ParamType::Area, 37, "37"}, {ParamType::Ssn, 77, "77"},
+	                          {ParamType::Area, 5, "5"},  {ParamType::Ssn, 12, "12"},  {ParamType::WpList, 3, "3"}};
+	CHECK(program.operand_uses.size() == sizeof(expects) / sizeof(expects[0]));
+	for (size_t i = 0; i < program.operand_uses.size() && i < sizeof(expects) / sizeof(expects[0]); ++i) {
+		const OperandUse &use = program.operand_uses[i];
+		CHECK(use.kind == expects[i].kind && use.value == expects[i].value && use.source == 0);
+		CHECK(source.substr(use.offset, use.length) == expects[i].text);
+	}
+}
+
 static void token_ends() {
 	CHECK(std::string(kWacOperatorSet) == "{}()[]+-*/|&^%<>=!~" && sizeof(kWacOperatorSet) == 20);
 	for (const char op : std::string_view(kWacOperatorSet)) CHECK(wac_in_operator_set(op) && wac_token_ends(op));
@@ -120,6 +141,7 @@ int main() {
 	prefixes();
 	keywords();
 	token_hash();
+	operands();
 	if (failures) {
 		std::printf("wac_lexis: %d failure(s)\n", failures);
 		return 1;
