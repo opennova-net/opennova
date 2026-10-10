@@ -46,14 +46,45 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 		const AssetEntry *entry = scan.find(name);
 		return entry ? entry->relative_path : name;
 	};
+	// The model a record pairs with `table` (preview_model_fields, the first that names a model of the project),
+	// written into `out`; false where none does.
+	const auto paired = [&](const std::string &table, PreviewRig &out) {
+		for (const GraphEdge *edge : graph.referrers_of_file(path_of(table))) {
+			if (edge->kind != ReferenceKind::AnimationMap) continue;
+			const std::vector<GraphEdge const *> record_edges = graph.references_of(edge->source);
+			for (const char *field : preview_model_fields(edge->field))
+				for (const GraphEdge *graphic : record_edges) {
+					if (graphic->record != edge->record || graphic->kind != ReferenceKind::Model || graphic->field != field) continue;
+					const std::string model = model_file(scan, graphic->target);
+					if (model.empty()) continue;
+					out.model = model;
+					out.source = file_of(edge->source) + ": " + edge->record;
+					out.pairing = usage_target(scan, *edge);
+					out.record_file = edge->source;
+					out.record = edge->record;
+					out.record_field = edge->field;
+					return true;
+				}
+		}
+		return false;
+	};
 	if (kind == AssetKind::AnimationMap) {
 		rig.table = file;
 	} else {
 		rig.clip = file;
+		// The tables that name the clip, in the graph's order: the first a record pairs with a model plays it (a
+		// clip two tables share, one of them paired, plays on the paired one's model), else the first.
+		std::vector<std::string> tables;
 		for (const GraphEdge *edge : graph.referrers_of_file(path_of(file)))
-			if (edge->kind == ReferenceKind::Animation) {
-				rig.table = file_of(edge->source);
-				break;
+			if (edge->kind == ReferenceKind::Animation &&
+					std::find(tables.begin(), tables.end(), file_of(edge->source)) == tables.end())
+				tables.push_back(file_of(edge->source));
+		if (!tables.empty()) rig.table = tables.front();
+		if (chosen.empty())
+			for (const std::string &table : tables) {
+				PreviewRig candidate = rig;
+				candidate.table = table;
+				if (paired(table, candidate)) return candidate;
 			}
 	}
 	if (!chosen.empty()) {
@@ -61,24 +92,7 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 		rig.source = "chosen";
 		return rig;
 	}
-	if (rig.table.empty()) return rig;
-	for (const GraphEdge *edge : graph.referrers_of_file(path_of(rig.table))) {
-		if (edge->kind != ReferenceKind::AnimationMap) continue;
-		const std::vector<GraphEdge const *> record_edges = graph.references_of(edge->source);
-		for (const char *field : preview_model_fields(edge->field))
-			for (const GraphEdge *graphic : record_edges) {
-				if (graphic->record != edge->record || graphic->kind != ReferenceKind::Model || graphic->field != field) continue;
-				const std::string model = model_file(scan, graphic->target);
-				if (model.empty()) continue;
-				rig.model = model;
-				rig.source = file_of(edge->source) + ": " + edge->record;
-				rig.pairing = usage_target(scan, *edge);
-				rig.record_file = edge->source;
-				rig.record = edge->record;
-				rig.record_field = edge->field;
-				return rig;
-			}
-	}
+	if (!rig.table.empty() && rig.clip.empty()) paired(rig.table, rig);
 	return rig;
 }
 
