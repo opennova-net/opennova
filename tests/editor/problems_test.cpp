@@ -440,7 +440,7 @@ static int test_fixes() {
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
 	TEST_EXPECT(rewrite_tokens == std::vector<std::string>({"animation_map.ignored_input", "dialog_bank.ignored_input",
 	                                                        "environment.ignored_input", "face_animation.ignored_input",
-	                                                        "font.ignored_input", "menu.ignored_input",
+	                                                        "font.ignored_input",
 	                                                        "mission.event_order", "mission.rewrite_differs",
 	                                                        "music_bank.ignored_input",
 	                                                        "script.line_ending", "shader.form",
@@ -508,16 +508,16 @@ static int test_fixes() {
 static int test_rewrite_unserializable() {
 	SessionView view;
 	view.project.open = true;
-	view.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "menu.ignored_input", "A key the game ignores.", "menus/a.mnu"),
-	                    finding(DiagnosticSeverity::Error, "menu.unserializable", "It cannot be written.", "menus/a.mnu"),
-	                    finding(DiagnosticSeverity::Warning, "menu.ignored_input", "A key the game ignores.", "menus/b.mnu"),
+	view.findings.diagnostics = {finding(DiagnosticSeverity::Warning, "animation_map.ignored_input", "A key the game ignores.", "anims/a.adm"),
+	                    finding(DiagnosticSeverity::Error, "animation_map.invalid_input", "It cannot be written.", "anims/a.adm"),
+	                    finding(DiagnosticSeverity::Warning, "animation_map.ignored_input", "A key the game ignores.", "anims/b.adm"),
 	                    finding(DiagnosticSeverity::Warning, "strings.regrouped", "A section read twice.", "strings/menu.bin"),
 	                    finding(DiagnosticSeverity::Error, "strings.invalid_input", "A string it cannot hold.", "strings/menu.bin")};
 	for (const size_t blocked : {size_t(0), size_t(3)}) {
 		const Diagnostic &d = view.findings.diagnostics[blocked];
 		TEST_EXPECT(fixes_for(d, view).empty() && !has_fixes(d, view) && bulk_fixes_for(d, view).empty());
 	}
-	TEST_EXPECT(labels_of(fixes_for(view.findings.diagnostics[2], view)) == std::vector<std::string>({"Rewrite b.mnu"}));
+	TEST_EXPECT(labels_of(fixes_for(view.findings.diagnostics[2], view)) == std::vector<std::string>({"Rewrite b.adm"}));
 	TEST_EXPECT(bulk_fixes_for(view.findings.diagnostics[2], view).size() == 1 && has_fixes(view.findings.diagnostics[2], view));
 	ProblemQuery fixable;
 	fixable.fixable = true;
@@ -702,16 +702,16 @@ static int test_fix_index() {
 	SessionView view;
 	view.project.open = true;
 	for (size_t i = 0; i < 3000; ++i) {
-		const std::string file = "menus/f" + std::to_string(i % 30) + ".mnu";
-		view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "menu.ignored_input", "An unknown key.", file.c_str()));
+		const std::string file = "anims/f" + std::to_string(i % 30) + ".adm";
+		view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "animation_map.ignored_input", "An unknown key.", file.c_str()));
 	}
-	view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Error, "menu.unserializable", "It cannot be written.", "menus/f7.mnu"));
+	view.findings.diagnostics.push_back(finding(DiagnosticSeverity::Error, "animation_map.invalid_input", "It cannot be written.", "anims/f7.adm"));
 	const ProblemFixIndex index(view);
-	TEST_EXPECT(index.unserializable.size() == 1 && index.unserializable.count("menus/f7.mnu"));
+	TEST_EXPECT(index.unserializable.size() == 1 && index.unserializable.count("anims/f7.adm"));
 	ProblemFixCache cache;
 	for (size_t i : {size_t(0), size_t(7), size_t(8), size_t(37), size_t(2999), size_t(3000)}) {
 		const Diagnostic &d = view.findings.diagnostics[i];
-		const bool fixable = d.asset != "menus/f7.mnu" && d.code() == "menu.ignored_input";
+		const bool fixable = d.asset != "anims/f7.adm" && d.code() == "animation_map.ignored_input";
 		TEST_EXPECT(has_fixes(d, view) == fixable && has_fixes(d, view, &index) == fixable);
 		TEST_EXPECT(labels_of(fixes_for(d, view, &index)) == labels_of(fixes_for(d, view)));
 		TEST_EXPECT(labels_of(cache.fixes(view, i)) == labels_of(fixes_for(d, view)));

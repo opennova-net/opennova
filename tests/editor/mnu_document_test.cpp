@@ -1162,7 +1162,8 @@ int nested_lists() {
 	mnu::Document reread;
 	std::string message;
 	std::vector<mnu::ParseNote> notes;
-	TEST_EXPECT(mnu::parse(edited.text, reread, message, &notes) && notes.empty() && mnu::serialize(reread) == edited.text);
+	TEST_EXPECT(mnu::parse(edited.text, reread, message, &notes, mnu::ParseLayout::Text) && notes.empty() &&
+	            mnu::serialize(reread) == edited.text);
 	while (document.can_undo()) document.undo();
 	TEST_EXPECT(document.serialize().text == original && document.identities_match());
 	return 0;
@@ -1355,9 +1356,9 @@ int parse_notes() {
 	const Document *blocked = session.document_for("crash.mnu");
 	TEST_EXPECT(editable && !editable->blocked() && editable->ignored_lines() == 1 && editable->serialize().ok());
 	TEST_EXPECT(blocked && blocked->blocked() && !blocked->serialize().ok());
-	// An explicit Save rewrites the one without the input the game ignores, and refuses the
-	// one that does not serialize: never "no changes" (S11b).
-	TEST_EXPECT(editable->rewrite_need() == Document::RewriteNeed::Rewrite);
+	// An explicit Save keeps the input the game ignores with the file's look (D-MNU-22): nothing to
+	// rewrite; it refuses the one that does not serialize (S11b).
+	TEST_EXPECT(editable->rewrite_need() == Document::RewriteNeed::None);
 	TEST_EXPECT(blocked->rewrite_need() == Document::RewriteNeed::Unserializable);
 	// S12 review: a source finding stays on its window while the window moves (its locator
 	// names the file as loaded, Document::source_address), and goes to the file once removed.
@@ -1835,7 +1836,11 @@ void sweep_menu(const std::string &label, const std::string &absolute, const std
 	if (document.blocked()) { sweep_fail(totals, label, "loads blocked"); return; }
 	mnu::Document native;
 	std::string message;
-	if (!mnu::parse(decoded.data(), decoded.size(), native, message)) { sweep_fail(totals, label, "mnu::parse: " + message); return; }
+	// Read with its look (D-MNU-22), as the document reads it: the writer gives the file back as it was.
+	if (!mnu::parse(decoded.data(), decoded.size(), native, message, nullptr, mnu::ParseLayout::Text)) {
+		sweep_fail(totals, label, "mnu::parse: " + message);
+		return;
+	}
 	std::vector<uint8_t> expected;
 	if (!mnu::serialize_bytes(native, expected, message)) { sweep_fail(totals, label, "mnu::serialize: " + message); return; }
 	const SerializeResult serialized = document.serialize();
