@@ -105,6 +105,12 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(parse_text("basetexture face.tga\neyesize .2 .3\n", second, error));
 	TEST_EXPECT(second.eye_size.x == 0.04f); // LF alone does not split lines
 	TEST_EXPECT(second.base_texture == "face.tga\neyesize");
+	// The coordinates are the CRT atof's [orig: FaceAnimConfig_ParseProperty @ 0x5886A0 -> _atof]:
+	// the locale's white space before the number (0xA0 on cp1252), a d exponent, and no NaN
+	// spelling, so "nan" reads 0.0 and is no non-finite coordinate (D-NET-389).
+	TEST_EXPECT(parse_text("vertices 1\r\nvertex 0 nan \xA0" "0.5 xxx\r\neyesize 1d1 0\r\n", second, error));
+	TEST_EXPECT(second.vertices.size() == 1 && second.vertices[0].uv.x == 0.0f && second.vertices[0].uv.y == 0.5f);
+	TEST_EXPECT(second.eye_size.x == 10.0f);
 
 	// Unsafe retail memory accesses fail transactionally (D-GRM-1).
 	second.base_texture = "unchanged";
@@ -113,7 +119,7 @@ int main(int argc, char **argv) {
 			"vertices 1\r\nvertex -1 0 0 xxx\r\n", "gestures 1\r\ngesture 2 BAD\r\n",
 			"gestures 1\r\nparameters 33\r\n", "parm 0 1 2 mouth\r\n",
 			"triangles 1\r\ntri 0 0 1 2\r\n",
-			"vertices 1\r\nvertex 0 nan 0 xxx\r\n"}) {
+			"vertices 1\r\nvertex 0 1e999 0 xxx\r\n"}) {
 		TEST_EXPECT(!parse_text(bad, second, error));
 		TEST_EXPECT(!error.empty());
 		TEST_EXPECT(second.base_texture == "unchanged");

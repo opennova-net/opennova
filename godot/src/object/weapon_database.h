@@ -132,8 +132,9 @@ public:
 	static int player_info_class_mask(int p_playerclass_value);
 	// The PLAYER_INFO kit model (one impl in engine/runtime/menu
 	// player_info_kit.h): the weapon.sav kit page in retail's order. The page takes the three category picks and
-	// the three fixed grenade picks as parallel arrays (weapon-table index,
-	// primary count, secondary count, flags) and returns one Dictionary per
+	// the three fixed grenade picks as parallel arrays (this table's row, -1 for
+	// NONE / an empty grenade slot, which write "None"; primary count, secondary
+	// count, flags) and returns one Dictionary per
 	// KitEntry (name, ammo_primary, ammo_secondary, flags).
 	Array player_info_kit_entries(int p_team, int p_player_class,
 			const PackedInt32Array &p_slot_indices, const PackedInt32Array &p_slot_ammo_primary,

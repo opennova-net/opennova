@@ -3,8 +3,11 @@
 // tone; not a stereo wave, a 24-bit or float one, a LIST ahead of the data, an ADPCM wave with no fact
 // chunk. A wave the game refuses converts into one it takes, the samples kept; a wave's facts: the
 // format, the peak and the RMS of a sine at 0.5, its picture. The retail leg (OPENNOVA_JO_ASSETS): every
-// shipped wave the loader takes but DSkid.wav (D-SND-33).
+// shipped wave the loader takes but DSkid.wav (D-SND-33), by the check and by the runtime's decode.
 #include <formats/lwf/wav_source.h>
+
+#include <formats/bfc1/bfc1.h>
+#include <formats/lwf/wav_pcm.h>
 
 #include <base/io/le.h>
 #include <base/io/os_path.h>
@@ -199,7 +202,8 @@ int test_waves() {
 
 // Every shipped wave the game's loader takes, by the check's own walk, but one: DSkid.wav, the 16-bit
 // stereo wave game.lwf's IMP_TMBL_DSKID plays, which the loader's channel test refuses [orig:
-// Audio_LoadWavFileFromArchive @ 0x7666db], so retail plays nothing for that set (D-SND-33).
+// Audio_LoadWavFileFromArchive @ 0x7666db], so retail plays nothing for that set (D-SND-33). The
+// runtime's decode, handed the bytes as the VFS reads them (BFC1 undone), refuses the same one.
 int test_retail_waves() {
 	const std::string assets = retail::assets();
 	if (assets.empty()) {
@@ -207,16 +211,24 @@ int test_retail_waves() {
 		return 0;
 	}
 	size_t waves = 0;
-	std::vector<std::string> refused;
+	std::vector<std::string> refused, undecoded;
 	std::error_code ec;
 	for (const auto &entry : std::filesystem::directory_iterator(io::os_path(assets), ec)) {
 		if (strutil::to_lower(entry.path().extension().string()) != ".wav") continue;
-		const WaveRetailCheck check = wave_retail_check(test_io::read_file(io::utf8_path(entry.path())));
+		std::vector<uint8_t> bytes = test_io::read_file(io::utf8_path(entry.path()));
+		const WaveRetailCheck check = wave_retail_check(bytes);
 		++waves;
-		if (!check.plays) refused.push_back(strutil::to_lower(io::utf8_path(entry.path().filename())));
+		const std::string name = strutil::to_lower(io::utf8_path(entry.path().filename()));
+		if (!check.plays) refused.push_back(name);
+		WavPcm pcm;
+		std::string error;
+		if (!bfc1::bfc1_unpack(bytes) || !wav_decode_pcm16(bytes.data(), bytes.size(), pcm, error))
+			undecoded.push_back(name);
 	}
-	std::printf("retail: %zu waves, %zu the check refuses\n", waves, refused.size());
+	std::printf("retail: %zu waves, %zu the check refuses, %zu the decode refuses\n", waves, refused.size(),
+	            undecoded.size());
 	TEST_EXPECT(waves > 100 && refused == std::vector<std::string>({"dskid.wav"}));
+	TEST_EXPECT(undecoded == std::vector<std::string>({"dskid.wav"}));
 	return 0;
 }
 

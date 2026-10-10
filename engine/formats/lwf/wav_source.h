@@ -12,11 +12,11 @@ namespace opennova::lwf {
 // (docs/audio/lwf-dbf-sound-re.md "The wave loader's rules"): BFC1-compressed or not, an AOA1 buffer
 // taken as it is, else a RIFF WAVE walked chunk by chunk to its data, whose samples are mono 8-bit or
 // 16-bit PCM or mono 4-bit IMA ADPCM with a fact chunk, at any rate (played at rate / 44100 of the
-// device's). The rest is refused and the sound plays nothing. wave_retail_check is that walk, ported.
+// device's). The rest is refused and the sound plays nothing. That walk is wav_pcm.h's
+// wave_loader_walk, which the runtime's decode (wav_decode_pcm16) walks and wave_retail_check words.
 // The rest of this file is tooling, not a port: a modder's wave (a DAW's 24-bit stereo with its
 // metadata) is read as an audio program reads it, never through the game's faults, and written in the
-// form the game takes. wav_pcm.h's wav_decode_pcm16 is the runtime's decode, which plays more than the
-// loader takes.
+// form the game takes.
 
 // Whether the game's loader takes the bytes (as stored: BFC1 is undone first, as the loader does), and the
 // first refusal in words where it does not, each from the loader's own walk [orig: Audio_LoadWavFileFromArchive
@@ -52,8 +52,8 @@ std::string wave_format_words(const WaveFormat &format);
 
 // A wave's samples as an audio program reads them: interleaved, each -1..1, and the format they came in.
 // PCM of 8 (unsigned), 16, 24 or 32 bits, IEEE float of 32 or 64 bits, the extensible form of either, IMA
-// ADPCM and AOA1 (through the game's own decode, wav_decode_pcm16), BFC1 undone first. False, with
-// `error`, for anything else.
+// ADPCM and AOA1 (through the game's decode as tooling reads it, wav_decode_pcm16_lenient: stereo, or no
+// fact chunk, read too), BFC1 undone first. False, with `error`, for anything else.
 struct WaveSamples {
 	WaveFormat format;
 	uint32_t rate = 0;

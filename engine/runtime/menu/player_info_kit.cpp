@@ -34,10 +34,12 @@ playersav::KitEntry filler_entry(const char *name) {
 	return e;
 }
 
-// One weapon-table entry with its recorded interleaved count pair.
+// One catalog row with its recorded interleaved count pair: row 0 is the
+// seeded "None", any other the weapon.def row before it.
 playersav::KitEntry slot_entry(const KitSlotPick &pick, const WeaponNameLookup &weapon_name) {
 	playersav::KitEntry e;
-	e.name = weapon_name ? weapon_name(pick.weapon_index) : std::string();
+	if (pick.weapon_index == 0) e.name = kCatalogNoneName;
+	else if (weapon_name) e.name = weapon_name(pick.weapon_index - 1);
 	e.ammo_primary = pick.ammo_primary;
 	e.ammo_secondary = pick.ammo_secondary;
 	e.flags = pick.flags;

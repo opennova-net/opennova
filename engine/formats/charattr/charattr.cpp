@@ -2,6 +2,7 @@
 
 #include <formats/charattr/charattr.h>
 
+#include <formats/cbin/binary_config.h>
 #include <formats/configfile/config_file.h>
 
 #include <base/io/strutil.h>
@@ -64,6 +65,11 @@ ValueSource source_of(const configfile::ConfigSection &section, int index) {
 	source.length = value.text.size();
 	source.written = value.text;
 	return source;
+}
+
+// The ConfigFile's binary form, by its magic [orig: ConfigFile_LoadFromFile @ 0x760aa3].
+bool is_binary_form(const uint8_t *data, size_t size) {
+	return data != nullptr && size >= 4 && std::memcmp(data, "CBIN", 4) == 0;
 }
 
 // The class a label names, 1..16, from "character<digits>" exactly as the loader's sprintf spells it; 0
@@ -135,11 +141,22 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading) 
 	// The whole table cleared first [orig: memset(g_CharAttr, 0, 0x7C0) @ 0x412168].
 	out = Table{};
 	if (reading != nullptr) *reading = Reading{};
-	// ConfigFile_LoadFromFile fails on no file; a "CBIN" file takes its binary reader [orig:
-	// ConfigFile_LoadFromFile @ 0x760a10], which no shipped charattr.def needs: read as failed here.
+	// ConfigFile_LoadFromFile fails on no file [orig: CharAttr_LoadFromDef @ 0x412177 -> ConfigFile_LoadFromFile
+	// @ 0x760a10], and takes the file through the reader of its form: "CBIN" (0x4E494243) ConfigFile_ParseBinary,
+	// any other ConfigFile_ParseText [orig: @ 0x760aa3]. Both build the sections the accessors read. A CBIN file
+	// our binary reader refuses fails the load: among them an entry of more than two values (D-CBIN-3), so an
+	// ATTRIBUTES of three words or more, which the game's reader takes.
 	if (data == nullptr || size == 0) return false;
-	if (size >= 4 && std::memcmp(data, "CBIN", 4) == 0) return false;
-	std::vector<configfile::ConfigSection> sections = configfile::parse_config_text(data, size);
+	std::vector<configfile::ConfigSection> sections;
+	if (is_binary_form(data, size)) {
+		cbin::BinaryConfig config;
+		std::string error;
+		if (!cbin::decode_binary_config(data, size, config, error) ||
+				!cbin::binary_config_sections(config, sections))
+			return false;
+	} else {
+		sections = configfile::parse_config_text(data, size);
+	}
 
 	// CHARACTER1, CHARACTER2, ... until the first the file has no section of, sixteen at most
 	// [orig: @ 0x4121a6 sprintf "CHARACTER%d", @ 0x4121b5 ConfigFile_FindSection, the break @ 0x4121bf,
@@ -228,6 +245,11 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading, 
 	Reading own;
 	Reading &read = reading != nullptr ? *reading : own;
 	const bool loaded = read_table(data, size, out, &read);
+	// A CBIN file has no lines: no notes, so a write puts its table down in the writer's form.
+	if (is_binary_form(data, size)) {
+		notes = textlayout::Notes();
+		return loaded;
+	}
 	// The lines as the ConfigFile reader ends them (a CR LF pair alone [orig: ConfigFile_ParseText @ 0x7608a0]),
 	// each a line of the class whose section it stands in when the loader read a value from it, the section's
 	// own line that class's first, every other line (a comment, a key the loader reads nothing of, a section it

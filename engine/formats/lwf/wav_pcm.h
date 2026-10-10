@@ -17,25 +17,78 @@ namespace lwf {
 struct WavPcm {
 	std::vector<uint8_t> pcm16;  // interleaved signed 16-bit LE frames
 	uint32_t sample_rate = 0;
-	uint16_t channels = 0;  // 1 or 2
+	uint16_t channels = 0;  // 1 (2 only from wav_decode_pcm16_lenient)
 	// What the game's wave loader records for the wave, its AOA1 buffer's +4 and +8 (a dialog line's
-	// hold reads both, audio::dialog_clip_hold): the sample count, the data's bytes for 8-bit samples,
-	// half of them for 16-bit, the `fact` chunk's count for IMA ADPCM (the decoded frames where a wave
-	// has none, which the loader refuses), an AOA1's own; and the pitch ratio,
+	// hold reads both, audio::dialog_clip_hold): the sample count, the data chunk's size as it says
+	// for 8-bit samples (past the file's bytes or not), half of it for 16-bit, the `fact` chunk's
+	// count for IMA ADPCM (the lenient decode's decoded frames where a wave has none, which the loader
+	// refuses), an AOA1's own; and the pitch ratio,
 	// ((rate << 16) + 22050) / 44100, an AOA1's own [orig: Audio_LoadWavFileFromArchive @ 0x766480,
 	// the count @ 0x766609 / @ 0x76670e / @ 0x7667ba, the ratio @ 0x76662d / @ 0x766735 / @ 0x7667e1].
 	uint32_t loader_samples = 0;
 	uint32_t loader_pitch_q16 = 0;
 };
 
-// Decode RIFF/WAVE or AOA1 to 16-bit PCM. AOA1 stores mono signed PCM8/16,
-// a sample count and Q16 rate relative to 44100 Hz; trailing mixer padding is
-// excluded. RIFF handles PCM8 (unsigned, upconverted
-// signed<<8), PCM16 (passthrough), and IMA-ADPCM 0x11 (mono block-based; the
-// defensive stereo path interleaves 4-byte nibble words round-robin per
-// channel). A truncated final data chunk clamps and plays what is present.
-// Returns false with r_error set on a malformed/unsupported stream.
+// Why the game's wave loader refuses a RIFF WAVE (docs/audio/lwf-dbf-sound-re.md, "The wave loader's
+// rules" [orig: Audio_LoadWavFileFromArchive @ 0x766480]); None where it takes the wave.
+enum class WaveRefusal : uint8_t {
+	None,
+	NotRiffWave,    // neither RIFF .. WAVE (@ 0x76653b)
+	EndsBeforeData, // the walk runs off the bytes before a data chunk (the loader reads on past them)
+	SecondFmt,      // a second fmt chunk ahead of the data (@ 0x766589)
+	ChunkPastMost,  // a chunk ahead of the data past 0x800 bytes (@ 0x7665a3); a LIST's list type
+	                // read as a size after the walk steps into it by its id alone (@ 0x766570)
+	TwelveChunks,   // a twelfth chunk ahead of the data (@ 0x7665b2)
+	NoFmt,          // no fmt chunk ahead of the data (@ 0x7665cb)
+	Bits,           // samples of other than 8, 16 or 4 bits (@ 0x76675f)
+	Channels,       // more than one channel (@ 0x7665e3, @ 0x7666db, @ 0x76676a)
+	NoFact,         // 4-bit samples with no fact chunk (@ 0x766772)
+	NotImaAdpcm,    // 4-bit samples of another format than IMA ADPCM, 0x11 (@ 0x76677d)
+};
+
+// The game's wave loader's walk of a RIFF WAVE (BFC1 undone; an AOA1 buffer is the caller's) to its
+// data and its tests there [orig: Audio_LoadWavFileFromArchive @ 0x766480]: from offset 12 a nested
+// RIFF header stepped over (12 bytes), a LIST stepped into by its 4-byte id alone, the first fmt and
+// the last fact kept, the walk stopped at the first data of nonzero size, every other chunk stepped
+// over by its size, unpadded. The fmt fields are the bytes the loader reads at the fmt chunk, whatever
+// its size; the walk's offsets and sizes are the bytes', the data size as its chunk says.
+struct WaveLoaderWalk {
+	WaveRefusal refusal = WaveRefusal::None;
+	size_t chunk = 0;         // ChunkPastMost: the refused chunk's offset
+	uint32_t chunk_size = 0;  // and its size as read
+	bool after_list = false;  // ChunkPastMost: the chunk is the one a LIST's id step left the walk on
+	size_t fmt = 0;           // the fmt chunk's offset
+	bool has_fact = false;
+	size_t fact = 0;          // the last fact chunk's offset ahead of the data
+	size_t data = 0;          // the data's first byte
+	uint32_t data_size = 0;
+	uint16_t tag = 0;         // fmt +8, read for 4-bit samples alone
+	uint16_t channels = 0;    // fmt +10
+	uint32_t rate = 0;        // fmt +12
+	uint16_t block_align = 0; // fmt +20
+	uint8_t bits = 0;         // fmt +22, the one byte the loader reads
+};
+WaveLoaderWalk wave_loader_walk(const uint8_t *bytes, size_t size);
+
+// Decode a wave as the game's loader takes it [orig: Audio_LoadWavFileFromArchive @ 0x766480] to
+// 16-bit PCM: an AOA1 buffer (mono signed PCM8/16, a sample count and a Q16 rate relative to 44100 Hz;
+// trailing mixer padding excluded) as it is, else a RIFF WAVE through wave_loader_walk, its samples by
+// their width alone: 8 bits PCM (unsigned, upconverted signed<<8), 16 bits PCM (passthrough), 4 bits
+// mono block IMA ADPCM. False with r_error set for an AOA1 that does not hold its samples and for
+// every wave the walk refuses, which the game plays nothing for. A data chunk running past the bytes
+// plays the bytes there. Two legs are not yet the loader's: its own-buffer magic is AUD1, which it
+// copies unchecked (D-SND-44), and its IMA ADPCM decode is the fact chunk's count of its own nibble
+// steps (D-SND-45).
 bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
+		std::string &r_error);
+
+// The tooling's read of the same forms, not a port: the RIFF chunks walked as the form lays them
+// (padded to an even size, every chunk read, the last data kept), the format by its tag (1 PCM8 or
+// PCM16, 0x11 IMA ADPCM: mono, or stereo interleaving 4-byte nibble words round-robin per channel),
+// one or two channels, IMA ADPCM with or without a fact chunk; an AOA1 as wav_decode_pcm16 reads it.
+// What lwf::decode_wave_source reads a modder's IMA ADPCM or AOA1 wave through, so a wave the game
+// refuses can still be read and converted into one it takes.
+bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error);
 
 // The plain RIFF/WAVE the game's wave loader reads (docs/audio/lwf-dbf-sound-re.md, "The wave

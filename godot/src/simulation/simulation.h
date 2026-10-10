@@ -1493,9 +1493,10 @@ public:
 	String get_local_player_anim_source_key() const;
 	int get_local_player_anim_source_phase_ticks() const;
 	float get_local_player_anim_blend_weight() const;
-	// The primary channel's served ring entries (target, outgoing).
+	// The primary channel's served ring entries (target, outgoing) and armed park.
 	int get_local_player_anim_variant() const;
 	int get_local_player_anim_source_variant() const;
+	bool get_local_player_anim_phase_parked() const; // InfantryState::body_phase_parked
 	// The local player's third-person aim-overlay state — the torso bend. Dictionary:
 	//   valid: bool; aim_state: bool (anim-state flag 0x40 — the bend branch);
 	//   body: Vector3 mission-euler degrees (pitch, yaw, roll) for the avatar node basis;

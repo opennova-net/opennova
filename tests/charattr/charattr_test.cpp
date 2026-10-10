@@ -18,6 +18,7 @@
 
 #include <base/io/crc32_mpeg2.h>
 #include <base/vfs/vfs.h>
+#include <formats/cbin/binary_config.h>
 #include <formats/charattr/charattr.h>
 #include <formats/configfile/config_file.h>
 
@@ -168,7 +169,7 @@ void synthetic_loader() {
 	charattr::Table lf;
 	CHECK(read("[CHARACTER1]\nSTEALTH = 25\n[CHARACTER2]\n", lf));
 	CHECK(lf.rows[0].active && lf.rows[0].stealth == 0.0f && !lf.rows[1].active);
-	// No bytes, or the CBIN form: the load fails and the table stays cleared.
+	// No bytes, or a CBIN file cut short: the load fails and the table stays cleared.
 	charattr::Table none;
 	none.rows[3].active = true;
 	CHECK(!charattr::read_table(nullptr, 0, none) && !none.rows[3].active);
@@ -317,6 +318,65 @@ void synthetic_writer() {
 	            "text would overrun the reader's pool, refused (composed all the same)\n");
 }
 
+// A charattr.def in the CBIN form reads as its text twin: ConfigFile_LoadFromFile takes it through the binary
+// reader into the sections the loader's accessors walk [orig: CharAttr_LoadFromDef @ 0x412177 ->
+// ConfigFile_LoadFromFile @ 0x760aa3 -> ConfigFile_ParseBinary @ 0x75e8a0]. It has no lines, so its notes are
+// empty and a write puts the table down in the writer's form.
+void synthetic_cbin() {
+	cbin::BinaryConfig config;
+	config.xor_key = 0x2468ACE1u;
+	config.strings = {"CHARACTER1", "STEALTH", "JUNGLE_CAMMO", "ATTRIBUTES", "Medic", "KnifeBonus", "CHARACTER2"};
+	const auto real = [](float value) {
+		cbin::BinaryConfig::Value v;
+		std::memcpy(&v.raw, &value, sizeof v.raw);
+		v.flags = cbin::BinaryConfig::kFloat;
+		return v;
+	};
+	const auto integer = [](int32_t value) {
+		return cbin::BinaryConfig::Value{static_cast<uint32_t>(value), cbin::BinaryConfig::kInteger};
+	};
+	const auto text = [](uint32_t index) { return cbin::BinaryConfig::Value{index, cbin::BinaryConfig::kString}; };
+	config.labels = {
+			{1, {{2, {real(25.0f)}}, {3, {integer(5310)}}, {4, {text(5), text(6)}}}},
+			{7, {{2, {real(0.5f)}}, {3, {integer(5305)}}}},
+	};
+	std::vector<uint8_t> bytes;
+	std::string error;
+	CHECK(cbin::encode_binary_config(config, bytes, error));
+	CHECK(bytes.size() >= 4 && std::memcmp(bytes.data(), "CBIN", 4) == 0);
+
+	charattr::Table binary;
+	charattr::Reading reading;
+	CHECK(charattr::read_table(bytes.data(), bytes.size(), binary, &reading));
+	charattr::Table twin;
+	CHECK(read(crlf("[CHARACTER1]\nSTEALTH = 25.0\nJUNGLE_CAMMO = 5310\nATTRIBUTES = Medic, KnifeBonus\n"
+	                "[CHARACTER2]\nSTEALTH = 0.5\nJUNGLE_CAMMO = 5305\n"),
+	           twin));
+	CHECK(charattr::same_rows(binary, twin));
+	CHECK(reading.classes == 2 && binary.rows[0].active && binary.rows[1].active && !binary.rows[2].active);
+	CHECK(bits(binary.rows[0].stealth) == bits(25.0f) && binary.rows[0].jungle_cammo == 5310);
+	CHECK(binary.rows[0].attributes == (charattr::kMedic | charattr::kKnifeBonus));
+	CHECK(bits(binary.rows[1].stealth) == bits(0.5f) && binary.rows[1].jungle_cammo == 5305);
+	CHECK(reading.sources[0].attribute_words.size() == 2 && reading.sources[0].attribute_words[1].written == "KnifeBonus");
+
+	// No lines to lay out: the notes come back empty, and the writer's form reads back to the same rows.
+	textlayout::Notes notes;
+	charattr::Table noted;
+	CHECK(charattr::read_table(bytes.data(), bytes.size(), noted, nullptr, notes));
+	CHECK(notes.records.empty() && noted.note == 0 && noted.rows[0].note == 0 && charattr::same_rows(noted, twin));
+	std::string written;
+	bool rewritten = true;
+	charattr::Table again;
+	CHECK(charattr::write_table(noted, &notes, written, error, &rewritten) && read(written, again) &&
+	      charattr::same_rows(again, twin));
+
+	// A CBIN file the binary reader refuses fails the load and leaves the table cleared.
+	charattr::Table cut;
+	cut.rows[0].active = true;
+	CHECK(!charattr::read_table(bytes.data(), bytes.size() - 1, cut) && !cut.rows[0].active);
+	std::printf("cbin: a CBIN charattr.def reads as its text twin, with no notes\n");
+}
+
 // A class's camouflage items by their property [orig: CharAttr_GetCammoTypeId @ 0x4127b0], and the property a
 // mission's camouflage selector picks [orig: Entity_SpawnFromAnimSlotProperty @ 0x43c399..0x43c3be]: 1 jungle,
 // 2 arctic, any other desert.
@@ -426,6 +486,7 @@ int main(int argc, char **argv) {
 	synthetic_loader();
 	synthetic_writer();
 	synthetic_noted();
+	synthetic_cbin();
 	synthetic_cammo();
 	retail_legs();
 	if (failures == 0) std::printf("charattr: all passed\n");

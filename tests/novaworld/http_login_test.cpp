@@ -234,17 +234,26 @@ int main() {
 		}
 		check(count == 1, "no duplicate NWHANDLE after update");
 
-		// Subnet key [orig: Network_TruncateIPToSubnet @ 0x62dfe0]: a valid
-		// dotted-decimal IPv4 keeps its first two octets; anything else passes
-		// through unchanged.
-		check(subnet_key("192.168.1.1") == "192.168", "IPv4 truncates to /16");
-		check(subnet_key("10.0.5.200") == "10.0", "IPv4 keeps first two octets");
-		check(subnet_key("nw.novalogic.com") == "nw.novalogic.com",
-		      "a DNS host is unchanged");
+		// The host key [orig: Network_TruncateIPToSubnet @0x62DFE0]: a host the dotted-quad
+		// parse accepts (the `jnz` @0x62DFFF; no end pointer, octets past 255 kept as their
+		// low byte) comes back whole; any other is reversed, cut at its second '.' and
+		// reversed back, its last two dot-labels; fewer than two dots, unchanged.
+		check(subnet_key("192.168.1.1") == "192.168.1.1", "an IPv4 host stays whole");
 		check(subnet_key("256.1.1.1") == "256.1.1.1",
-		      "an out-of-range octet is not IPv4, unchanged");
-		check(subnet_key("192.168.1") == "192.168.1",
-		      "a 3-octet string is not IPv4, unchanged");
+		      "an octet past 255 still parses, so the host stays whole");
+		check(subnet_key("1.2.3.4x") == "1.2.3.4x",
+		      "a tail after the fourth octet is not looked at, so the host stays whole");
+		check(subnet_key("nw.novalogic.com") == "novalogic.com",
+		      "a DNS host keeps its last two labels");
+		check(subnet_key("192.168.1") == "168.1",
+		      "a 3-octet string is no IPv4 and keeps its last two labels");
+		check(subnet_key(" 1.2.3.4") == "3.4",
+		      "a leading space fails the parse, so the last two labels are kept");
+		check(subnet_key("nw.novalogic.com.") == "com.",
+		      "a trailing dot is the last separator: only 'com.' is kept");
+		check(subnet_key("novalogic.com") == "novalogic.com", "one dot, unchanged");
+		check(subnet_key("localhost") == "localhost", "no dot, unchanged");
+		check(subnet_key("").empty(), "an empty host, unchanged");
 	}
 
 	// ---- 3. Real-NW login body: EVERY field EPASK-encrypted except EPASK ----

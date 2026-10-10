@@ -63,6 +63,15 @@ int main() {
     TEST_EXPECT(host_player_slot_limit(0, true) == 0 && host_player_slot_limit(-3, true) == 0);
     TEST_EXPECT(host_player_slot_limit(65, false) == 66 && host_player_slot_limit(65, true) == 65);
     TEST_EXPECT(host_player_slot_limit(66, false) == 65 && host_player_slot_limit(99, true) == 65);
+    // In session the create clamps the cap into 1..65 first, so a blank cap
+    // publishes 1 (2 dedicated) and a dedicated 65+ the ceiling's 66.
+    // [orig: CNapiGameSession_BuildAndCreateSession @0x56955D..0x56956C]
+    TEST_EXPECT(session_player_cap(0) == 1 && session_player_cap(-3) == 1);
+    TEST_EXPECT(session_player_cap(1) == 1 && session_player_cap(65) == 65);
+    TEST_EXPECT(session_player_cap(66) == 65 && session_player_cap(99) == 65);
+    TEST_EXPECT(host_player_slot_limit(session_player_cap(0), true) == 1 &&
+                host_player_slot_limit(session_player_cap(0), false) == 2);
+    TEST_EXPECT(host_player_slot_limit(session_player_cap(99), false) == 66);
     TEST_EXPECT(read("TAKEOVER_TIME", "20"));
     TEST_EXPECT(read("LFP_TAKEOVER", "3"));
     TEST_EXPECT(config.capture_duration_seconds == 20 && config.capture_speed_setting == 3);

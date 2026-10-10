@@ -111,7 +111,9 @@ public:
 	X(int, body_anim_prev_phase, INT)                                       \
 	X(float, body_anim_blend_weight, FLOAT)                                 \
 	X(int, body_anim_variant, INT)                                          \
-	X(int, body_anim_prev_variant, INT)
+	X(int, body_anim_prev_variant, INT)                                     \
+	/* the armed end-notify's park: the channel holds its last frame */     \
+	X(bool, body_anim_parked, BOOL)
 
 	// The per-type forwarders: an engine int/bool/float reads straight, an
 	// engine std::string as a Godot String.

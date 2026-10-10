@@ -590,6 +590,7 @@ struct LocalPlayerWeaponView {
     float body_anim_blend_weight = 1.0f;
     int32_t body_anim_variant = 0;
     int32_t body_anim_prev_variant = 0;
+    bool body_anim_parked = false; // InfantryState::weapon_phase_parked this tick
 };
 
 // The fill (player_weapon_view.cpp), from the live world, the local weapon

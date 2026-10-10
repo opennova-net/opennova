@@ -1806,6 +1806,71 @@ void test_specialized_piece_physics_callback() {
     CHECK(bare_piece->death_motion == DeathMotionMode::PiecePitchSettle);
     // ground = avg 0 - 0, then the -0x8000 landing offset.
     CHECK(to_fixed(bare_piece->position.z) == -0x8000);
+
+    // The item's sound profile replaces both fallbacks, each played at the
+    // piece: the water crossing's sound_impactwater (slot 39) before the
+    // move, the landing's sound_impact (slot 35) at the snapped pose.
+    // [orig: DeathPiece_PhysicsUpdate water @0x48F552..0x48F588 and landing
+    //  @0x48F726..0x48F759: itemDef +0x268, the +0x864 page's +0x9C / +0x8C]
+    static constexpr char profile[] = "begin \"Piece\"\r\nsound_impactwater PIECE_WATER\r\n"
+            "sound_impact PIECE_LAND\r\nend\r\n";
+    ItemDeathTraits authored = traits;
+    authored.sound_profile = "Piece";
+    auto land_heap = std::make_unique<World>();
+    World &land = *land_heap;
+    seed_ammo(land);
+    land.registry.configure_pool(1, 4);
+    CHECK(land.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+    land.tables.item_death_traits.set(735, authored);
+    land.vehicles.traits.set(735, model);
+    seed.item_id = 735;
+    seed.position = Vec3{8.0f, 8.0f, 1.0f};
+    const EntityHandle land_h = land.registry.spawn(1, seed);
+    Entity *land_piece = land.registry.get(land_h);
+    land_piece->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+    land_piece->death_motion = DeathMotionMode::PiecePhysics;
+    land_piece->veh.slide_z = -65536;
+    CollisionWorld land_collision;
+    attach_wreck_shells(land, land_collision, land_h, -2.0, -1.0);
+    tick_dead_items(land, &flat.field, -1.0e9f, land.out.destruction);
+    CHECK(land_piece->death_motion == DeathMotionMode::PiecePitchSettle);
+    int authored_landings = 0;
+    for (const DestructionSoundEvent &sound : land.out.destruction.sounds) {
+        CHECK(sound.sound != "EXPLO_VEHCL_LG");
+        if (sound.sound != "PIECE_LAND") continue;
+        ++authored_landings;
+        CHECK(sound.pos.x == land_piece->position.x);
+        CHECK(sound.pos.y == land_piece->position.y);
+        CHECK(sound.pos.z == land_piece->position.z);
+    }
+    CHECK(authored_landings == 1);
+
+    auto splash_heap = std::make_unique<World>();
+    World &splash = *splash_heap;
+    splash.registry.configure_pool(1, 4);
+    CHECK(splash.tables.sound_profiles.parse(profile, sizeof(profile) - 1) == 1);
+    splash.tables.item_death_traits.set(736, authored);
+    seed.item_id = 736;
+    seed.position = Vec3{2.0f, 3.0f, -0.25f};
+    const EntityHandle splash_h = splash.registry.spawn(1, seed);
+    Entity *splash_piece = splash.registry.get(splash_h);
+    splash_piece->engine_flags |= kEntityFlagDead | kEntityFlagHusk;
+    splash_piece->death_motion = DeathMotionMode::PiecePhysics;
+    splash_piece->veh.slide_z = -65536;
+    // The sounds go to the caller's event batch, like the splash effect.
+    DestructionEvents captured;
+    tick_dead_items(splash, nullptr, 0.0f, captured);
+    CHECK(splash.out.destruction.sounds.empty());
+    int authored_splashes = 0;
+    for (const DestructionSoundEvent &sound : captured.sounds) {
+        CHECK(sound.sound != "EXPLO_HELO_WATER");
+        if (sound.sound != "PIECE_WATER") continue;
+        ++authored_splashes;
+        CHECK(sound.pos.x == 2.0f);
+        CHECK(sound.pos.y == 3.0f);
+        CHECK(sound.pos.z == -0.25f);
+    }
+    CHECK(authored_splashes == 1);
 }
 
 // The landing split [orig: the generic leg 0x461d30 lands silently with motion

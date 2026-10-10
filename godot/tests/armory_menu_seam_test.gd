@@ -487,6 +487,30 @@ func test_empty_weapon_def_is_a_loaded_empty_table() -> void:
 		TestFs.remove_dir_recursive(dir)
 
 
+# A MISSING weapon.def is that same table, silently: the catalog is built and its
+# "None" row seeded before the walk, a missing file ends the walk before any line
+# with nothing logged, and no caller reads the result [orig: WeaponDef_LoadAll
+# @0x54dd10; File_ParseASCIIFile @0x53d823; Game_InitSubsystems @0x4a70a6], so
+# the armory's own load lists NONE in each slot (D-MNU-27).
+func test_missing_weapon_def_is_a_loaded_empty_table() -> void:
+	var dir := TestFs.cache_dir(self, "armory_missing_weapon_def")
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK)
+	var weapons := LoadoutWeaponTable.load_weapon_database(root, "ArmoryMenuSeamTest",
+			"the test fails")
+	assert_not_null(weapons, "no weapon.def in the root still gives a table")
+	if weapons != null:
+		assert_true(weapons.is_loaded(), "the table is loaded")
+		assert_eq(weapons.get_count(), 0, "with no weapon rows")
+		assert_eq(weapons.get_last_error(), "", "and no error")
+	var companion := ArmoryMenuCompanion.new()
+	var driver := _make_weapon_driver()
+	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", root)  # the companion's own load
+	for slot in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
+		assert_eq(_items(driver, slot).size(), 1, "%s lists only NONE" % slot)
+	TestFs.remove_dir_recursive(dir)
+
+
 func test_degrades_without_weapon_def() -> void:
 	var companion := ArmoryMenuCompanion.new()
 	var driver := _make_weapon_driver()

@@ -13,10 +13,24 @@
 
 namespace opennova::mission {
 
+// The render_function's bone-callback tag: its first four characters with
+// their case kept. The load packs those four bytes into one word and the
+// table compares the word exactly, so `EWEP` is not the ewep row and `ewepX`
+// is. (The ai_function's event row and the move_function's physics row are
+// whole-name, case-insensitive lookups instead.)
+// [orig: EntityDef_InitAllCallbacks packs def+0x13C..0x13F @0x4a5ace..0x4a5af1;
+//  BoneCallback_LookupByTag @0x4e32b0 compares `cmp [ecx], esi` @0x4e32c6]
+inline std::string_view render_tag(std::string_view render_function) {
+	return render_function.substr(0, 4);
+}
+
 // A Sway item owns a per-instance second-bone pose and cannot be baked into
-// the shared static mesh batch. [orig: BoneCallback_Sway_World @0x4E2B10]
-inline bool uses_sway_renderer(std::string_view tag) {
-	return tag.size() >= 4 && strutil::iequals(tag.substr(0, 4), "sway");
+// the shared static mesh batch. The sway renderer is the world callback of
+// the bone table's `tree` row; the table (19 rows) has no `sway` row.
+// [orig: g_BoneCallbackTable @0x82CF00, row 'tree' @0x82CF70 ->
+//  BoneCallback_Sway_World @0x4E2B10]
+inline bool uses_sway_renderer(std::string_view render_function) {
+	return render_tag(render_function) == "tree";
 }
 
 // items.def type ids consumed by placement (itemdef-re.md +0x5c).
@@ -105,20 +119,41 @@ inline bool item_casts_dynamic_shadow(int item_type, uint32_t attrib2) {
 // building section handles; docs/render/render-occlusion-re.md). Multiple
 // authored RLODs are no reason to leave the batch: the retained populations
 // select the level per instance.
-// [orig: Entity_RenderBoneAttachments @ 0x441660] Its source model selects LOD;
-// the callback submits only its marker submodels. Keep that source addressable.
-inline bool uses_submodel_renderer(std::string_view tag) {
-    return strutil::iequals(tag.substr(0, 4), "lndm");
+// [orig: Entity_RenderBoneAttachments @ 0x441660, the world callback of the
+// bone table's 'lndm' row @ 0x82CFC0, bound by the render tag] Its source
+// model selects LOD; the callback submits only its marker submodels. Keep
+// that source addressable.
+inline bool uses_submodel_renderer(std::string_view render_function) {
+    return render_tag(render_function) == "lndm";
 }
 
 // Section callbacks own a per-entity model mask and pivot. A static batch
 // cannot publish those independently for each instance.
 // [orig: TerrainTile_TransformPointFromSector @ 0x53BDB0;
 // Entity_BuildDeathSectionTransforms @ 0x492AF0]
-inline bool uses_section_renderer(std::string_view tag) {
-    const auto key = tag.substr(0, 4);
-    return strutil::iequals(key, "palm") || strutil::iequals(key, "psec") ||
-            strutil::iequals(key, "towr");
+// This predicate keeps the palm-state (entity+0x270) and section-damage rows
+// out of the batch, each field by its own lookup: the render tag's `psec`
+// and `cesp` bone rows (one world callback, drawing by +0x270), the
+// ai_function's `palm` and `towr` event rows (the per-entity section damage)
+// and the move_function's `psec` physics row, the last two by whole name
+// ignoring case; the pool serializer streams +0x270 exactly for the palm
+// event row and the psec physics row. (The per-entity +0x138 section mask
+// other world callbacks apply, the cveh row's and the generic one, is not
+// this predicate's.)
+// [orig: rows 'psec' @ 0x82D010 / 'cesp' @ 0x82D020 -> BoneCallback_psec_World
+//  @ 0x53C130; Entity_LookupRenderCallbacks stricmp @ 0x407DD8, rows 'palm'
+//  @ 0x813270 -> WeaponOverlay_HandleDamage @ 0x53C4C0, 'towr' @ 0x813240 ->
+//  Entity_UpdateSectionDamage @ 0x4406A0; EntityDef_LookupPhysicsCallback
+//  stricmp @ 0x4A9258, row 'psec' @ 0x82AD54 -> Entity_UpdatePhysicsStep
+//  @ 0x53BE10; NetPacket_SerializeEntityPoolToPacket_0's def+0x138 /
+//  def+0x158 tests @ 0x503F4F / @ 0x503F5B; the +0x138 mask readers
+//  Entity_BuildDeathSectionTransforms @ 0x492B07, BoneCallback_gnrc_World
+//  @ 0x4E2972]
+inline bool uses_section_renderer(std::string_view ai_function,
+        std::string_view move_function, std::string_view render_function) {
+    const std::string_view tag = render_tag(render_function);
+    return tag == "psec" || tag == "cesp" || strutil::iequals(ai_function, "palm") ||
+            strutil::iequals(ai_function, "towr") || strutil::iequals(move_function, "psec");
 }
 
 inline bool needs_individual_node(int item_type, uint32_t attrib2, bool has_anim_def,

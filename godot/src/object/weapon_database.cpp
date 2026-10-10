@@ -136,12 +136,12 @@ Error WeaponDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resourc
 	}
 	const PackedByteArray bytes = p_resource_root->read_file(file_name);
 	if (bytes.is_empty()) {
-		if (!p_resource_root->has_file(file_name)) {
-			last_error = String("Weapon database not found in resource root: ") + file_name;
-			return ERR_FILE_NOT_FOUND;
-		}
-		// A present, zero-byte weapon.def: the walk finds no line, so the
-		// table loads empty.
+		// A missing or zero-byte weapon.def: the walk finds no line, so the
+		// table loads empty, with no error. The game builds its catalog (row 0
+		// "None") before the walk, a missing file ends the walk silently and no
+		// caller reads the result (the weapon.def row of the required-resource
+		// table, base/gameprofile/required_resources.cpp, cites the original;
+		// D-MNU-27).
 		source_path = file_name;
 		weapons_file_loaded_ = true;
 		return OK;
@@ -246,11 +246,13 @@ Array WeaponDatabase::player_info_kit_entries(int p_team, int p_player_class,
 		const PackedInt32Array &p_slot_ammo_secondary, const PackedInt32Array &p_slot_flags,
 		const PackedInt32Array &p_grenade_indices, const PackedInt32Array &p_grenade_ammo_primary,
 		const PackedInt32Array &p_grenade_ammo_secondary) const {
+	// The picks name this table's rows (WeaponDef.index, -1 = NONE); the page
+	// names the game's catalog rows, its seeded "None" at 0.
 	const auto pick = [](const PackedInt32Array &idx, const PackedInt32Array &pri,
 							  const PackedInt32Array &sec, const PackedInt32Array *flags,
 							  int i) {
 		opennova::menu::KitSlotPick p;
-		if (i < idx.size()) p.weapon_index = idx[i];
+		if (i < idx.size()) p.weapon_index = opennova::menu::catalog_index_of_row(idx[i]);
 		if (i < pri.size()) p.ammo_primary = pri[i];
 		if (i < sec.size()) p.ammo_secondary = sec[i];
 		if (flags != nullptr && i < flags->size()) p.flags = (*flags)[i];
@@ -266,8 +268,8 @@ Array WeaponDatabase::player_info_kit_entries(int p_team, int p_player_class,
 		sel.grenades[i] = pick(p_grenade_indices, p_grenade_ammo_primary, p_grenade_ammo_secondary,
 				nullptr, i);
 	}
-	const opennova::menu::WeaponNameLookup name = [this](int32_t index) -> std::string {
-		const opennova::def::DefWeaponDef *w = row(index);
+	const opennova::menu::WeaponNameLookup name = [this](int32_t p_row) -> std::string {
+		const opennova::def::DefWeaponDef *w = row(p_row);
 		return w != nullptr ? std::string(w->weapon_name) : std::string();
 	};
 	Array out;

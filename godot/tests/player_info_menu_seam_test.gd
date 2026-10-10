@@ -585,7 +585,102 @@ func test_snapshot_carries_class_without_a_weapon_database() -> void:
 	assert_eq(int(profile.get("player_class", 0)), 5,
 		"class selection does not depend on weapon.def loading")
 	assert_false(profile.has("primary"),
-		"missing weapon.def remains distinct from an explicit all-NONE kit")
+		"no table at all (no root) remains distinct from an explicit all-NONE kit")
+
+
+const PLAIN_WEAPON_DEF := """
+weapon "WPN_PLAIN"
+	loadout_selectable	1
+	teamfilter	blue
+	charfilter	medic
+	weapon_class	primary
+	round_type	"AMMO_TEST"
+	clipsize	10
+	maxclips	4
+	clipweight	1
+	weaponweight	2
+end
+"""
+
+
+# A missing weapon.def is a loaded, empty table: each list shows only NONE, and
+# the ACCEPT's kit page names the catalog's seeded "None" row for every NONE
+# category and empty grenade slot, so the profile takes it [orig: WeaponDef_LoadAll
+# @0x54dd10 seeds "None" (@0x54dd45) and File_ParseASCIIFile @0x53d823 returns
+# silently; PlayerInfo_PopulateWeaponSlotLists @0x560571..0x5605ab;
+# PlayerInfo_SerializeWeaponLoadout names g_WeaponDefTable + 192 * row @0x55e6f0 /
+# @0x55e7ee] (D-MNU-27).
+func test_missing_weapon_def_accepts_a_none_kit() -> void:
+	var empty_dir := TestFs.cache_dir(self, "player_info_missing_weapon_def")
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(empty_dir), OK)
+	var companion := PlayerInfoMenuCompanion.new()
+	_ammo_driver = _make_loadout_driver()
+	companion.on_menu_built(_ammo_driver, "player.mnu", "PLAYER_INFO", root)
+	for slot in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
+		assert_eq(_ammo_driver.item_count(_ammo_id(slot)), 1, "no weapon.def: %s lists only NONE" % slot)
+	var profile := companion.snapshot()
+	var names: Array[String] = []
+	for entry: Dictionary in profile.get("kit", []):
+		names.append(String(entry.get("name", "")))
+	assert_eq(names, ["WPN_KNIFE", "WPN_MEDPACK", "None", "None", "None", "None", "None", "None"],
+		"the medic's page: knife, medpack, then None for each NONE slot and empty grenade")
+	# The ACCEPT's write (PlayerProfile.accept_player_info's), on a fresh record.
+	# This screen has no avatar controls, so one side's character stands in.
+	var profiles := PlayerProfiles.new()
+	profiles.load_bytes(PackedByteArray(), false, "NOTAPROFILE00000".to_ascii_buffer(), true, "")
+	profile["side_profiles"] = [{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200}, {}]
+	assert_eq(profiles.apply_character_selection(profile), OK, "the None kit is taken")
+	TestFs.remove_dir_recursive(empty_dir)
+
+
+# The companion lives the whole session, so its table follows the mount: the
+# same root re-pointed at another folder, a Mods switch (the same root and
+# folder remounted under another expansion) and a new root (CHANGE FOLDER)
+# each read weapon.def again (D-MNU-27).
+func test_loadout_table_follows_the_mount() -> void:
+	var empty_dir := TestFs.cache_dir(self, "player_info_missing_weapon_def")
+	var full_dir := TestFs.cache_dir(self, "player_info_weapon_def")
+	TestFs.write_text(self, full_dir.path_join("weapon.def"), PLAIN_WEAPON_DEF)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(empty_dir), OK)
+	var companion := PlayerInfoMenuCompanion.new()
+	_ammo_driver = _make_loadout_driver()
+	companion.on_menu_built(_ammo_driver, "player.mnu", "PLAYER_INFO", root)
+	assert_eq(_ammo_driver.item_count(_ammo_id("PRIMARY")), 1, "no weapon.def: only NONE")
+
+	assert_eq(root.set_root_dir(full_dir), OK)  # the same root, another folder
+	companion.on_menu_built(_ammo_driver, "player.mnu", "PLAYER_INFO", root)
+	assert_eq(_ammo_driver.item_count(_ammo_id("PRIMARY")), 2,
+		"the re-pointed root's weapon.def is read: NONE + WPN_PLAIN")
+
+	var picked := ResourceRoot.new()  # CHANGE FOLDER hands over a new root
+	assert_eq(picked.set_root_dir(empty_dir), OK)
+	companion.on_menu_built(_ammo_driver, "player.mnu", "PLAYER_INFO", picked)
+	assert_eq(_ammo_driver.item_count(_ammo_id("PRIMARY")), 1,
+		"the new root's missing weapon.def lists only NONE again")
+
+	# A Mods switch: a packed install whose weapon.def only the expansion holds,
+	# its root cleared and mounted again in place [orig: Game_ReloadExpansionAndMods
+	# @0x552710 reloads the catalog, @0x55282b..0x55285b].
+	var install := TestFs.cache_dir(self, "player_info_weapon_def_install")
+	assert_eq(DirAccess.make_dir_recursive_absolute(install.path_join("expansion/jox01")), OK)
+	WorldFixture.write_pff(self, install.path_join("resource.pff"),
+			[{"name": "readme.txt", "bytes": "base".to_utf8_buffer()}])
+	WorldFixture.write_pff(self, install.path_join("expansion/jox01/jox01.pff"),
+			[{"name": "weapon.def", "bytes": TestFs.crlf(PLAIN_WEAPON_DEF).to_utf8_buffer()}])
+	assert_eq(picked.mount_runtime(install), OK)
+	companion.on_menu_built(_ammo_driver, "player.mnu", "PLAYER_INFO", picked)
+	assert_eq(_ammo_driver.item_count(_ammo_id("PRIMARY")), 1, "the base game has no weapon.def")
+	picked.clear()
+	assert_eq(picked.mount_runtime(install, "jox01"), OK)
+	companion.on_menu_built(_ammo_driver, "player.mnu", "PLAYER_INFO", picked)
+	assert_eq(_ammo_driver.item_count(_ammo_id("PRIMARY")), 2,
+		"the expansion's weapon.def is read after the switch")
+	picked.clear()
+	TestFs.remove_dir_recursive(empty_dir)
+	TestFs.remove_dir_recursive(full_dir)
+	TestFs.remove_dir_recursive(install)
 
 
 # End-to-end against the REAL player.mnu (authored widget tree), so the loadout fills

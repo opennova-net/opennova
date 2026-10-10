@@ -104,6 +104,56 @@ static void test_building_identity_is_the_def_type() {
     CHECK(!placed_record_is_building(kEntityKindItem, false, 0));
 }
 
+// The sway and submodel renderers are bone-table rows, bound by the
+// render_function's first four characters with their case kept: the sway
+// renderer is the `tree` row's world callback (the table has no `sway` row),
+// the submodel renderer the `lndm` row's.
+// [orig: EntityDef_InitAllCallbacks packs def+0x13C..0x13F @ 0x4a5ab8..0x4a5af1;
+//  BoneCallback_LookupByTag `cmp [ecx], esi` @ 0x4e32c6; rows 'tree' @ 0x82cf70
+//  -> BoneCallback_Sway_World @ 0x4e2b10, 'lndm' @ 0x82cfc0 ->
+//  Entity_RenderBoneAttachments @ 0x441660]
+static void test_bone_row_predicates() {
+    CHECK(uses_sway_renderer("tree"));
+    CHECK(uses_sway_renderer("treeline")); // the tag is the first four characters
+    CHECK(!uses_sway_renderer("sway"));
+    CHECK(!uses_sway_renderer("Tree"));
+    CHECK(!uses_sway_renderer("tre"));
+    CHECK(!uses_sway_renderer(""));
+    CHECK(uses_submodel_renderer("lndm"));
+    CHECK(uses_submodel_renderer("lndmX"));
+    CHECK(!uses_submodel_renderer("LNDM"));
+    CHECK(!uses_submodel_renderer("LnDm"));
+    CHECK(!uses_submodel_renderer("lnd"));
+}
+
+// The section renderer's rows, each field by its own lookup: the render tag's
+// psec and cesp bone rows (first four bytes, case kept), the ai_function's
+// palm and towr event rows and the move_function's psec physics row (whole
+// name, case ignored). A name on another field binds no section row.
+// [orig: rows 'psec' @ 0x82d010 / 'cesp' @ 0x82d020 -> BoneCallback_psec_World
+//  @ 0x53c130; Entity_LookupRenderCallbacks stricmp @ 0x407dd8, rows 'palm'
+//  @ 0x813270 / 'towr' @ 0x813240; EntityDef_LookupPhysicsCallback stricmp
+//  @ 0x4a9258, row 'psec' @ 0x82ad54]
+static void test_section_renderer_rows() {
+    CHECK(uses_section_renderer("", "", "psec"));
+    CHECK(uses_section_renderer("", "", "cesp"));
+    CHECK(uses_section_renderer("", "", "psecX")); // the tag is the first four bytes
+    CHECK(!uses_section_renderer("", "", "PSEC"));
+    CHECK(!uses_section_renderer("", "", "palm")); // no bone row: row 0's callbacks
+    CHECK(!uses_section_renderer("", "", "towr"));
+    CHECK(uses_section_renderer("palm", "", ""));
+    CHECK(uses_section_renderer("Palm", "", ""));
+    CHECK(uses_section_renderer("TOWR", "", ""));
+    CHECK(!uses_section_renderer("palmX", "", ""));
+    CHECK(!uses_section_renderer("psec", "", "")); // the event row binds no section callback
+    CHECK(uses_section_renderer("", "psec", ""));
+    CHECK(uses_section_renderer("", "Psec", ""));
+    CHECK(!uses_section_renderer("", "psecX", ""));
+    CHECK(!uses_section_renderer("", "towr", "")); // the physics row is the floating init
+    CHECK(!uses_section_renderer("", "palm", ""));
+    CHECK(!uses_section_renderer("gnrc", "genx", "gnrc"));
+}
+
 int main() {
     test_dynamic_shadow_admission();
     test_static_shadow_admission();
@@ -111,6 +161,8 @@ int main() {
     test_individual_node_admission();
     test_visual_item_resolution();
     test_building_identity_is_the_def_type();
+    test_bone_row_predicates();
+    test_section_renderer_rows();
     if (failures == 0) {
         std::printf("placement_traits_test: all checks passed\n");
     }

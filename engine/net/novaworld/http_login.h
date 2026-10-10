@@ -30,11 +30,12 @@
 //   * The EPASK bundle arrives as a Set-Cookie at /nwprepare.dll, is stored in
 //     the cookie jar (CookieJar_UpdateFromURL @ 0x64e630), and is read back by
 //     name (sub_64EA90 @ 0x64ea90).
-//   * BOTH the GET and POST request builders attach EVERY cookie for the
-//     subnet-truncated host to the request (Network_TruncateIPToSubnet
-//     @ 0x62dfe0) — including the .gsb server-browser fetch. This resolves the
-//     ADR 0010 open question: on real NovaWorld the GSB GET carries
-//     NWHANDLE/PCID.
+//   * BOTH the GET and POST request builders attach EVERY cookie in the jar to
+//     the request, the .gsb server-browser fetch included. They key the host
+//     first (Network_TruncateIPToSubnet @ 0x62dfe0, subnet_key below), but the
+//     key selects nothing: retail's jar is one list for every host. This
+//     resolves the ADR 0010 open question: on real NovaWorld the GSB GET
+//     carries NWHANDLE/PCID.
 
 namespace opennova {
 
@@ -130,19 +131,31 @@ JoiConnection parse_joi_connection_string(const std::string &body);
 inline constexpr char kJoinEndpointRejectTag[] = "CVSTATCLIENTERR";
 bool joi_endpoint_usable(const std::string &host_ip, long port);
 
-// The cookie-jar host key, as ours computes it today: a dotted-decimal IPv4 keeps
-// its first two octets ("192.168.1.1" -> "192.168"); any other host (a DNS name, or
-// a malformed address) is returned unchanged. Retail's branch is the opposite
-// (witnessed 2026-10-10): a host Network_ParseIPv4AddressOctets accepts is returned
-// whole and any other keeps its LAST two dot-labels (reverse, cut at the 2nd dot,
-// reverse back: "nw.novalogic.com" -> "novalogic.com") [orig: Network_TruncateIPToSubnet
-// @ 0x62dfe0 — the `jnz` @0x62dfff]; docs/net/novaworld-net-re.md D-NET-390, open.
+// The cookie-jar host key (the IDB's name; no subnet is kept): a host
+// Network_ParseIPv4AddressOctets accepts (parse_ipv4_octets, gate_response.h, with no end
+// pointer, so "256.1.1.1" and "1.2.3.4x" are accepted) is returned whole, and any other
+// keeps its LAST two dot-labels, reversed, cut at its second '.' and reversed back
+// ("nw.novalogic.com" -> "novalogic.com", "192.168.1" -> "168.1", " 1.2.3.4" -> "3.4",
+// "nw.novalogic.com." -> "com."); a host with fewer than two dots, or empty, is unchanged.
+// The host is read as a C string (to its first NUL). Retail computes the key and decides
+// nothing by it: the four jar accesses that take a URL (the store, the PUB* gather, the two
+// request builders' read) each measure it and then take the first node of the jar's list
+// whose +0 dword is 0, and the by-name read (EPASK's) computes none. The store makes every
+// node with that dword 0 and the jar file restores the dword it saved, so a jar retail
+// wrote reloads with 0 too: one jar serves every host, as CookieJar models.
+// [orig: Network_TruncateIPToSubnet @0x62DFE0, the `jnz` @0x62DFFF; called from
+//  CookieJar_UpdateFromURL @0x64E698 (the walk @0x64E6B0, a new node's 0 @0x64E98A),
+//  Config_QueryMatchingEntries @0x64EC18, and the request builders
+//  CUIBrowser_SendHTTPRequest @0x658A34 / GopherWebWidget_SendHttpPost @0x658C57 into
+//  sub_64EA40 @0x64EA40; the by-name read sub_64EA90 @0x64EA90; the jar file's save
+//  CookieJar_SaveToFile @0x64EE60 (node+0 written @0x64EF16) and load
+//  CUIStringTable_LoadFromFile @0x64F290 (node+0 set @0x64F547)]
 std::string subnet_key(const std::string &host);
 
 // The cookie store the engine carries across the NovaWorld endpoint family.
-// Retail keys cookies by subnet-truncated host and attaches all of them to
-// every request to that subnet; the NovaWorld gate, login, host, join, and GSB
-// endpoints share a host, so we model the whole family as one jar. Insertion
+// Retail computes a host key for each jar access that takes a URL (subnet_key)
+// but keeps one jar for every host and attaches all of its cookies to every request, so the
+// NovaWorld gate, login, host, join, and GSB endpoints share one jar here too. Insertion
 // order is preserved for a stable Cookie sequence; re-setting a name updates
 // the value in place.
 class CookieJar {

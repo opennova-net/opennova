@@ -1266,10 +1266,12 @@ public:
 			float p_blend_weight = 1.0f, int p_variant = 0, int p_prev_variant = 0,
 			bool p_parked = false);
 	// The applied weapon-channel pose — presentation-state read-back: whether
-	// a channel is held, its clip key and its phase (-1 = not replicated).
+	// a channel is held, its clip key, its phase (-1 = not replicated) and
+	// whether it holds its last frame (the `parked` it was applied with).
 	bool has_weapon_channel() const;
 	String get_weapon_channel_key() const { return wpn_key_; }
 	int get_weapon_channel_phase_ticks() const { return wpn_phase_ticks_; }
+	bool is_weapon_channel_parked() const { return wpn_parked_; }
 	// The typed present path: p_deltas is kAimOverlayClasses body-relative
 	// per-class rotations; clear drops the overlay.
 	void set_aim_overlay_deltas(const Basis *p_deltas);

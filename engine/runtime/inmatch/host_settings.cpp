@@ -170,10 +170,8 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
     // `networkconnecttype`, default 1). The apply has no lower clamp: a blank
     // cap publishes 0 (1 dedicated). In session, though, the session's
     // creation clamps the cap into 1..65 before the apply runs, so the ceiling
-    // never cuts and a blank cap publishes 1 (2 dedicated); host_config.h
-    // host_session_settings ports that clamp, and the game's host, which calls
-    // this with the screen's cap, still lacks it (D-NET-335's open half). The
-    // same live count gates BMS placements.
+    // never cuts and a blank cap publishes 1 (2 dedicated): session_player_cap,
+    // which both hosts run first. The same live count gates BMS placements.
     // [orig: Game_ApplySessionSettingsToGlobals @0x551b26..0x551b48;
     // CNapiGameSession_BuildAndCreateSession @0x56955D..0x56956C;
     // Config_SetDefaults @0x54d1d4 (networkConnectType_480 = 1);
@@ -183,6 +181,12 @@ uint32_t host_player_slot_limit(int32_t player_limit, bool serve_and_play) {
     // GameConfig::max_players is unsigned: retail's signed `count >= max`
     // @0x4c623f rejects every join for a negative cap, exactly as 0 does.
     return static_cast<uint32_t>(std::max<int64_t>(total, 0));
+}
+
+int32_t session_player_cap(int32_t player_limit) {
+    constexpr int32_t kSessionCap = static_cast<int32_t>(kMaxPlayersCap);
+    if (player_limit < 1) return 1;
+    return player_limit > kSessionCap ? kSessionCap : player_limit;
 }
 
 } // namespace opennova::inmatch

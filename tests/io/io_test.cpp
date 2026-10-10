@@ -691,6 +691,36 @@ static int test_retail_integer_readers_skip_the_cp1252_spaces()
     return 0;
 }
 
+// The CRT's atof skips leading white space by the same table as the integer readers:
+// on cp1252 the six C-locale spaces and 0xA0 (D-NET-389). [orig: _atof @0x76B6A1 ->
+// _atof_l @0x76B5F8, the skip @0x76B63C..0x76B671]
+static int test_retail_atof_skips_the_cp1252_spaces()
+{
+    // Each of the seven leads a number, alone and in a run, before a sign too.
+    const char spaces[] = {' ', '\t', '\n', '\v', '\f', '\r', '\xA0'};
+    for (char space : spaces) {
+        const std::string one = std::string(1, space) + "1.5";
+        TEST_EXPECT(io::retail_atof(one.c_str()) == 1.5);
+        const std::string run = std::string(3, space) + "-2.25x";
+        TEST_EXPECT(io::retail_atof(run.c_str()) == -2.25);
+    }
+    TEST_EXPECT(io::retail_atof("\xA0 \xA0\t0.5e1") == 5.0);
+    TEST_EXPECT(io::retail_atof_n("\xA0" "7", 2) == 7.0);
+    // After the sign 0xA0 is no white space: the sign wants a digit or the point next.
+    TEST_EXPECT(io::retail_atof("-\xA0" "1") == 0.0);
+    // A trailing 0xA0 ends the number like any other byte.
+    TEST_EXPECT(io::retail_atof("2.5\xA0") == 2.5);
+    TEST_EXPECT(io::retail_atof("3\xA0" "4") == 3.0);
+    // No other byte is white space: 0x85 (the ellipsis, not NEL), the soft hyphen 0xAD
+    // and 0xFF lead to 0.0, as does a lone 0xA0.
+    for (int byte : {0x85, 0xAD, 0xFF}) {
+        const std::string led = std::string(1, static_cast<char>(byte)) + "1.5";
+        TEST_EXPECT(io::retail_atof(led.c_str()) == 0.0);
+    }
+    TEST_EXPECT(io::retail_atof("\xA0") == 0.0);
+    return 0;
+}
+
 // strtoxl's radix legs and _atoi64's 64-bit range. [orig: strtoxl @0x76B0AE — the
 // radix prefixes @0x76B185..0x76B1CA, the letters @0x76B1ED..0x76B204; CRT_strtoxq
 // @0x777947 — the saturation @0x777B38..0x777B9B]
@@ -843,6 +873,7 @@ int main()
 {
     if (test_retail_atol_saturates()) return 1;
     if (test_retail_integer_readers_skip_the_cp1252_spaces()) return 1;
+    if (test_retail_atof_skips_the_cp1252_spaces()) return 1;
     if (test_retail_strtol_radix_and_atoi64_range()) return 1;
     if (test_cp1252_ctype_classes()) return 1;
     if (test_retail_atof_ignores_the_locale()) return 1;

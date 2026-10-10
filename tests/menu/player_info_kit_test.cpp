@@ -3,7 +3,7 @@
 // with the disabled row skipped and DEFAULT_VOICE first, the persisted
 // override reset, and the weapon.sav kit page order — the side's knife, the
 // medic's medpack, the three categories with their flags, the fixed three
-// grenade slots with the entry-0 quirk.
+// grenade slots, NONE and an empty grenade slot writing the catalog's "None".
 // [orig: PlayerInfo_PopulatePlayerVoiceCombo @ 0x55dce0; PlayerInfo_SerializeWeaponLoadout @ 0x55e4b0]
 #include <runtime/menu/player_info_kit.h>
 
@@ -31,21 +31,25 @@ int main() {
 	CHECK(player_info_voice_selection(9, male) == 0);
 	CHECK(player_info_voice_selection(0, female) == 0);
 
-	const WeaponNameLookup names = [](int32_t index) -> std::string {
-		switch (index) {
-			case 0: return "WPN_ENTRY0";
-			case 4: return "WPN_M4";
-			case 7: return "WPN_PISTOL";
-			case 12: return "WPN_FRAG";
+	// The lookup names weapon.def rows; a pick names the catalog row, one past
+	// its file row, with the seeded "None" at 0.
+	const WeaponNameLookup names = [](int32_t row) -> std::string {
+		switch (row) {
+			case 0: return "WPN_ROW0";
+			case 3: return "WPN_M4";
+			case 6: return "WPN_PISTOL";
+			case 11: return "WPN_FRAG";
 			default: return std::string();
 		}
 	};
+	CHECK(catalog_index_of_row(-1) == 0 && catalog_index_of_row(0) == 1 &&
+	      catalog_index_of_row(3) == 4);
 	PlayerInfoKitSelection sel;
 	sel.team_mask = 2; // blue
 	sel.player_class = 5; // medic
 	sel.primary = KitSlotPick{4, 6, -1, 1};
 	sel.secondary = KitSlotPick{7, -1, -1, 0};
-	sel.accessory = KitSlotPick{0, -1, -1, -1}; // NONE serializes entry 0
+	sel.accessory = KitSlotPick{0, -1, -1, -1}; // NONE serializes the catalog's "None"
 	sel.grenades[0] = KitSlotPick{12, 2, -1, -1};
 	std::vector<opennova::playersav::KitEntry> page = player_info_kit_entries(sel, names);
 	// knife + medpack + PRIMARY/SECONDARY/ACCESSORY + the fixed three grenades.
@@ -54,10 +58,10 @@ int main() {
 	CHECK(page[1].name == "WPN_MEDPACK" && page[1].ammo_secondary == -1);
 	CHECK(page[2].name == "WPN_M4" && page[2].ammo_primary == 6 && page[2].flags == 1);
 	CHECK(page[3].name == "WPN_PISTOL" && page[3].ammo_primary == -1 && page[3].flags == 0);
-	CHECK(page[4].name == "WPN_ENTRY0" && page[4].flags == -1);
+	CHECK(page[4].name == "None" && page[4].flags == -1);
 	CHECK(page[5].name == "WPN_FRAG" && page[5].ammo_primary == 2 && page[5].flags == -1);
-	CHECK(page[6].name == "WPN_ENTRY0" && page[6].ammo_primary == -1);
-	CHECK(page[7].name == "WPN_ENTRY0" && page[7].ammo_secondary == -1);
+	CHECK(page[6].name == "None" && page[6].ammo_primary == -1);
+	CHECK(page[7].name == "None" && page[7].ammo_secondary == -1);
 	// The red side takes the other knife, a non-medic no medpack, and the
 	// defensive mask-zero leg the blue knife.
 	sel.team_mask = 1;
@@ -66,8 +70,9 @@ int main() {
 	CHECK(page.size() == 7 && page[0].name == "WPN_KNIFE2" && page[1].name == "WPN_M4");
 	sel.team_mask = 0;
 	CHECK(player_info_kit_entries(sel, names)[0].name == "WPN_KNIFE");
-	// No name lookup: nameless entries.
+	// No name lookup: nameless weapon entries; the "None" row needs none.
 	CHECK(player_info_kit_entries(sel, WeaponNameLookup{})[1].name.empty());
+	CHECK(player_info_kit_entries(sel, WeaponNameLookup{})[3].name == "None");
 
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

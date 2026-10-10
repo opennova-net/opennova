@@ -62,10 +62,18 @@ inline constexpr const char *kKitMedpack = "WPN_MEDPACK";
 // The PLAYERCLASS value that earns the medpack entry (retail tests == 5).
 inline constexpr int32_t kMedicPlayerClass = 5;
 
-// One serialized slot: the weapon-table index (0 = the NONE row, which retail
-// serializes as weapon-table entry 0 — its own quirk), the recorded
-// interleaved count pair (-1 = untouched) and the flags word (the team's
-// ammo-type byte for PRIMARY/SECONDARY; the filler elsewhere).
+// The loadout catalog's row 0, seeded before the file's rows, so weapon.def's
+// row i is catalog row i + 1 [orig: WeaponDef_LoadAll @0x54dd3b (count 1),
+// @0x54dd45 strcpy(g_WeaponDefTable, "None")].
+inline constexpr const char *kCatalogNoneName = "None";
+// The catalog row of a weapon.def row (0-based, the parse's order); a negative
+// row, NONE, is catalog row 0.
+inline constexpr int32_t catalog_index_of_row(int32_t row) { return row < 0 ? 0 : row + 1; }
+
+// One serialized slot: the catalog row (0 = the "None" row, which the NONE list
+// row's value and an empty grenade slot both name), the recorded interleaved
+// count pair (-1 = untouched) and the flags word (the team's ammo-type byte
+// for PRIMARY/SECONDARY; the filler elsewhere).
 struct KitSlotPick {
 	int32_t weapon_index = 0;
 	int32_t ammo_primary = kKitFiller;
@@ -79,11 +87,11 @@ struct PlayerInfoKitSelection {
 	KitSlotPick primary;
 	KitSlotPick secondary;
 	KitSlotPick accessory;
-	KitSlotPick grenades[3]; // the FIXED three grenade slots (entry 0 when empty)
+	KitSlotPick grenades[3]; // the FIXED three grenade slots (catalog row 0 when empty)
 };
 
-// The weapon-table name for an index ("" for an absent entry).
-using WeaponNameLookup = std::function<std::string(int32_t index)>;
+// The name of a weapon.def row (0-based; "" for an absent row).
+using WeaponNameLookup = std::function<std::string(int32_t row)>;
 
 // The kit page exactly as retail serializes it: the side's knife, the medic's
 // medpack, the three loadout categories, then ALWAYS three grenade slots
@@ -92,10 +100,10 @@ using WeaponNameLookup = std::function<std::string(int32_t index)>;
 //  mask-zero leg, take WPN_KNIFE, the RED mask 1 WPN_KNIFE2), the class-5
 //  medpack block (@0x55e624), the PRIMARY/SECONDARY/ACCESSORY selections
 //  (@0x55e6bb), then the fixed g_PlayerInfoGrenadeSlots[0..2] walk (@0x55e7e0,
-//  bounded by g_PlayerInfoAmmoPriCounts @ 0x25DC560); the three grenade slots
-//  are zeroed before the ammo fill, so an empty slot serializes weapon-table
-//  entry 0 (the zero store @ 0x55e8d0-0x55e8da in
-//  PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8b0)].
+//  bounded by g_PlayerInfoAmmoPriCounts @ 0x25DC560); each entry's name is
+//  g_WeaponDefTable + 192 * its catalog row (@0x55e6f0, @0x55e7ee), so NONE
+//  and an empty grenade slot, zeroed before the ammo fill (@ 0x55e8d0-0x55e8da
+//  in PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8b0), write "None"].
 std::vector<playersav::KitEntry> player_info_kit_entries(const PlayerInfoKitSelection &selection,
 		const WeaponNameLookup &weapon_name);
 

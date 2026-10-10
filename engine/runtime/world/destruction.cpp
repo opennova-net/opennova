@@ -28,15 +28,17 @@ namespace opennova::world {
 
 namespace {
 
-// Authored impact slots use the entity pose; the water fallback uses the
-// crossing point. [orig: Entity_UpdateFallingDeathPhysics @0x4940B2..0x494100;
-// ground impact @0x49417E..0x4941B5]
+// Authored impact slots use the entity pose; the fallback plays where the
+// caller says (the routed water crossing's at the crossing point).
+// [orig: Entity_UpdateFallingDeathPhysics @0x4940B2..0x494100; ground impact
+// @0x49417E..0x4941B5; the DeathPiece_PhysicsUpdate twins @0x48F552..0x48F588
+// and @0x48F726..0x48F759]
 void wreck_impact_sound(World &world, const Entity &e, const ItemDeathTraits *traits, int slot,
-		const char *fallback, Vec3 fallback_pos) {
+		const char *fallback, Vec3 fallback_pos, DestructionEvents &events) {
 	const auto *profile = world.tables.sound_profiles.find(
 			traits && !traits->sound_profile.empty() ? traits->sound_profile.c_str() : "default");
 	const std::string sound = profile ? profile->set_names[size_t(slot)] : std::string{};
-	world.out.destruction.sounds.push_back(
+	events.sounds.push_back(
 			{ sound.empty() ? fallback : sound, sound.empty() ? fallback_pos : e.position });
 }
 
@@ -1634,8 +1636,11 @@ void tick_item_death_motion(World &world, Entity &entity,
                         "Effect_MedSplash",
                         Vec3{e->position.x, e->position.y, water_height},
                         Vec3{0.0f, 0.0f, 1.0f}});
-                events.sounds.push_back(DestructionSoundEvent{
-                        "EXPLO_HELO_WATER", e->position});
+                // The item's water-impact slot, else the helo-water
+                // fallback, both at the piece [orig: itemDef +0x268 / the
+                // +0x864 page's +0x9C @0x48F552..0x48F56E; fallback
+                // dword_24E08FC @0x48F57C; the play @0x48F588 at entity+4].
+                wreck_impact_sound(world, *e, traits, 39, "EXPLO_HELO_WATER", e->position, events);
             }
             motion.vel_x = io::bam_sar(motion.vel_x, 1);
             motion.vel_y = io::bam_sar(motion.vel_y, 1);
@@ -1676,8 +1681,12 @@ void tick_item_death_motion(World &world, Entity &entity,
                 queue_named_landing_blast(
                         world, *e, kAmmoKzMItemBlast, radius);
             }
-            events.sounds.push_back(DestructionSoundEvent{
-                    "EXPLO_VEHCL_LG", e->position});
+            // The item's landing slot, else the large-vehicle fallback, at
+            // the snapped pose the effect and both blasts use [orig: itemDef
+            // +0x268 / the +0x864 page's +0x8C @0x48F726..0x48F745; fallback
+            // dword_24E08F8 @0x48F750; the play @0x48F759 at edi, entity+4
+            // @0x48F635].
+            wreck_impact_sound(world, *e, traits, 35, "EXPLO_VEHCL_LG", e->position, events);
         }
         e->engine_flags &= ~kEntityFlagMatrixBuilt;
         publish_piece_physics_angles(*e);
@@ -1792,7 +1801,7 @@ void tick_item_death_motion(World &world, Entity &entity,
                 "Effect_MedSplash", Vec3{new_x, new_y, water_height},
                 Vec3{0.0f, 0.0f, 1.0f}});
 				wreck_impact_sound(world, *e, traits, 39, "IMP_DEBLRG_WATER",
-						Vec3{ new_x, new_y, water_height });
+						Vec3{ new_x, new_y, water_height }, events);
 			}
 			if (new_z <= ground) {
         // Ground contact [orig: Entity_TransitionToGroundDeath
@@ -1826,7 +1835,7 @@ void tick_item_death_motion(World &world, Entity &entity,
 				// @ 0x4941be, r = def kz ?: boundRadius]; generic items
 				// (0x461d30) land silently.
 				if (routed_falling) {
-					wreck_impact_sound(world, *e, traits, 35, "IMP_VCL_DROP", e->position);
+					wreck_impact_sound(world, *e, traits, 35, "IMP_VCL_DROP", e->position, events);
 					if (world.rules.logic_authority) {
 						const float radius =
                         (traits != nullptr && traits->kz > 0.0f)
