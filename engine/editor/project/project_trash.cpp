@@ -46,6 +46,23 @@ std::string trash_batch_dir(const ProjectPaths &paths, uint64_t id) {
 	return join_path(paths.trash_dir, std::to_string(id));
 }
 
+size_t trash_file_count(const ProjectPaths &paths) {
+	size_t files = 0;
+	std::error_code ec;
+	for (fs::recursive_directory_iterator it(system_path(paths.trash_dir), ec), end; !ec && it != end; it.increment(ec))
+		if (it->is_regular_file(ec)) ++files;
+	return files;
+}
+
+bool empty_trash(const ProjectPaths &paths, size_t &files, std::string &error) {
+	files = trash_file_count(paths);
+	std::error_code ec;
+	fs::remove_all(system_path(paths.trash_dir), ec);
+	if (!ec) return true;
+	error = "The trash could not be emptied: " + ec.message() + ".";
+	return false;
+}
+
 bool trash_paths(const ProjectPaths &paths, const std::vector<std::string> &relative, TrashBatch &batch,
                  std::string &error) {
 	batch = TrashBatch();

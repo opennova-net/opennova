@@ -434,7 +434,7 @@ static int test_fixes() {
 			if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
 			if (row.blocks_save) blockers.push_back(&row);
 		}
-	TEST_EXPECT(blockers.size() == 23);
+	TEST_EXPECT(blockers.size() == 27);
 	std::vector<std::string> rewrite_tokens;
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
@@ -590,9 +590,10 @@ static int test_merge() {
 }
 
 // Where a finding takes Problems: a file of the project the editor opens, at the record and
-// field the finding names; Files for a file of a kind with no editor and for a file's name or
-// place (S12); nowhere for a required file the project lacks, or a name the scan does not
-// list as a path.
+// field the finding names; a file of a kind with no editor on its page, the record (by its path as
+// the graph names it) and field marked (DI-17: one OpenDocument, always); Files for a file's name
+// or place (S12); nowhere for a required file the project lacks, or a name the scan does not list
+// as a path.
 static int test_location() {
 	SessionView view;
 	view.project.open = true;
@@ -623,14 +624,24 @@ static int test_location() {
 	                                                                      "An unknown key.", "defs/items.def", "subtype"),
 	                                              view);
 	TEST_EXPECT(file.path == "defs/items.def" && file.record == NodeAddress() && file.field.empty());
-	// S12: a file of a kind the editor does not open is shown in Files (ShowInFiles), as is a
-	// file whose name or place is the finding, one the editor opens too; a name the scan does
-	// not list as a path goes nowhere.
+	// DI-17: a file of a kind the editor does not open (the NovaWorld string table; a font is a document since
+	// round S23) lands on its page (an OpenDocument, as every Go to), the record and field the finding names marked
+	// there; a file whose name or place is the finding is shown in Files, one the editor opens too; a name the scan
+	// does not list as a path goes nowhere.
 	for (const char *asset : {"nw_cdata.coo", "art/logo.png"}) {
 		const ProblemLocation shown = problem_location(editor_test::finding_of(DiagnosticSeverity::Warning, "graph.unreadable", "A finding.", asset), view);
-		TEST_EXPECT(shown.path == asset && shown.in_files && shown.request().kind == EditorRequestKind::ShowInFiles &&
-		            shown.request().path == asset && !shown.request().ask_name);
+		const EditorRequest open_page = shown.request();
+		TEST_EXPECT(shown.path == asset && shown.page && !shown.in_files && open_page.kind == EditorRequestKind::OpenDocument &&
+		            open_page.path == asset && open_page.locator.empty() && open_page.field.empty() && !open_page.address.row);
 	}
+	Diagnostic text = editor_test::finding_of(DiagnosticSeverity::Warning, "reference.missing", "A name.", "nw_cdata.coo", "text");
+	text.record = "strings/0";
+	text.row_id = 3;
+	const ProblemLocation marked = problem_location(text, view);
+	const EditorRequest at_record = marked.request();
+	TEST_EXPECT(marked.page && marked.record == NodeAddress() && at_record.kind == EditorRequestKind::OpenDocument &&
+	            at_record.path == "nw_cdata.coo" && at_record.locator == "strings/0" && at_record.field == "text" &&
+	            !at_record.address.row);
 	// The rows about the file as a whole (FindingPlace::File: S13 A6, the four the location named
 	// before; S16 a root-only file an expansion's build leaves out, a file its expansion setting leaves
 	// unread, a mission the game's list shows untitled or twice, a NovaWorld screen the game never reads).
@@ -1116,6 +1127,21 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(labels_of(fixes_for(text_id, v)) == std::vector<std::string>({"Add NO_ID to ungrouped.bin", "Open ungrouped.bin"}));
 	editor_test::own_reference(text_id).scope = "/menu";
 	TEST_EXPECT(fixes_for(text_id, v).empty());
+	// A file where it belongs that the editor has no editor for (the NovaWorld string table a scope names): its
+	// page opened, as every Go to lands (DI-17), never Files.
+	TEST_EXPECT(editor_test::write_text(root + "/nw_cdata.coo", "coo"));
+	editor_test::handle_to_end(session, request::rescan());
+	stylesheet = v.project.scan->find("menu_style.mns"); // the scan read again: its entries are new
+	const AssetEntry *coo = v.project.scan->find("nw_cdata.coo");
+	TEST_EXPECT(coo && !is_editable_kind(coo->kind));
+	if (!coo) return 1;
+	const std::string coo_path = coo->relative_path, coo_name = coo->logical_name;
+	Diagnostic on_page = style;
+	on_page.subject = ReferenceSubject{ReferenceKind::MenuScreen, "B", coo_name};
+	fixes = fixes_for(on_page, v);
+	TEST_EXPECT(labels_of(fixes) == std::vector<std::string>({"Open the page of " + coo_name}));
+	TEST_EXPECT(fixes.size() == 1 && fixes[0].request.kind == EditorRequestKind::OpenDocument &&
+	            fixes[0].request.path == coo_path && fixes[0].request.locator.empty() && !fixes[0].bulk);
 	// A table of its kind that defines nothing yet: the one the game reads (a weapon table and
 	// a stylesheet emptied).
 	const AssetEntry *weapons = v.project.scan->find("weapon.def");
@@ -1541,9 +1567,11 @@ static int test_fix_all_served_whole() {
 	return 0;
 }
 
-// What only the build's plan refuses (the review's M3): an archive in the project is a Problems row before
-// any build, marked "Blocks the build" like the gate's; the refusal's count, the rows' blocking count and
-// Show them agree; a refused build adds no second row of it; the headline says whose refusals they are.
+// What only the build's plan refuses (the review's M3): a name no archive stores is a Problems row before any
+// build, marked "Blocks the build" like the gate's; the refusal's count, the rows' blocking count and Show
+// them agree; a refused build adds no second row of it; the headline says whose refusals they are. An
+// archive in the project is a row too, the build leaving it out, blocking nothing (a quality rule refuses
+// no build).
 static int test_plan_refusals_are_rows() {
 	editor_test::TempProjectDir dir("opennova_editor_problems_plan_rows");
 	NoProcess platform;
@@ -1554,38 +1582,51 @@ static int test_plan_refusals_are_rows() {
 	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", reinterpret_cast<const uint8_t *>("x"), 1, 0, 0, 0}};
 	TEST_EXPECT(opennova::pff::pff_write_archive((v.project.root + "/extra.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
+	// A closed animation map with a row of nine clips: the game registers every one, and a build packs the file as
+	// stored, so its finding refuses nothing, in the result's words as in the gate.
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/anims/nine.adm",
+	                                    "\r\nanim_reset\t\t\t\t\"a\" \"b\" \"c\" \"d\" \"e\" \"f\" \"g\" \"h\" \"i\"\r\n\r\n\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
-	const auto archive_rows = [&v]() {
+	const auto rows_of = [&v](const char *code) {
 		std::vector<size_t> rows;
 		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
-			if (v.findings.diagnostics[i].code() == "build.archive_in_project") rows.push_back(i);
+			if (v.findings.diagnostics[i].code() == code) rows.push_back(i);
 		return rows;
 	};
-	std::vector<size_t> rows = archive_rows();
+	std::vector<size_t> rows = rows_of("build.name_unstorable");
 	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v));
-	TEST_EXPECT(count_problems(v).blocking == 5); // the four required files the boot stops without, and the archive
+	const std::vector<size_t> nine = rows_of("animation_map.invalid_input");
+	TEST_EXPECT(nine.size() == 1 && v.findings.diagnostics[nine[0]].severity == DiagnosticSeverity::Error &&
+	            !blocks_the_build(nine[0], v));
+	const std::vector<size_t> archives = rows_of("build.archive_in_project");
+	TEST_EXPECT(archives.size() == 1 && !blocks_the_build(archives[0], v) &&
+	            v.findings.diagnostics[archives[0]].severity == DiagnosticSeverity::Warning);
+	// The four required files the boot stops without, and the name (the scan's rule and the plan's word).
+	TEST_EXPECT(count_problems(v).blocking == 6);
 	ProblemQuery only;
 	only.blocking = true;
-	TEST_EXPECT(answer_problems(only, v).rows.size() == 5);
+	TEST_EXPECT(answer_problems(only, v).rows.size() == 6);
 	editor_test::handle_to_end(session, request::build());
 	TEST_EXPECT(v.activity.has_build && v.activity.last_build->refused);
-	rows = archive_rows();
-	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v) && count_problems(v).blocking == 5);
+	rows = rows_of("build.name_unstorable");
+	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v) && count_problems(v).blocking == 6);
 	const Diagnostic *refusal = nullptr;
 	for (const Diagnostic &d : v.findings.diagnostics)
 		if (d.code() == "build.blocked") refusal = &d;
-	TEST_EXPECT(refusal && refusal->message.rfind("The build was refused: 5 problems stop it: ", 0) == 0);
+	TEST_EXPECT(refusal && refusal->message.rfind("The build was refused: 6 problems stop it: ", 0) == 0);
 	const BuildResult result = build_result(*v.activity.last_build, true);
-	TEST_EXPECT(result.refusals.size() == 5 &&
-	            result.headline == "Build refused: 5 problems stop it: the game would stop for some, and the editor does not pack the others.");
+	TEST_EXPECT(result.refusals.size() == 6 &&
+	            result.headline == "Build refused: 6 problems stop it: the game would stop for some, and the editor does not pack the others.");
 	TEST_EXPECT(std::find(result.refusals.begin(), result.refusals.end(),
-	                      "extra.pff is an archive in the project: the build packs the project's files itself") != result.refusals.end());
+	                      "a_name_far_too_long.wac's name is too long for an archive") != result.refusals.end());
+	for (const std::string &line : result.refusals) TEST_EXPECT(line.find("extra.pff") == std::string::npos);
 	// The menu bar's words, from the build's own report whatever the status line says since (the review's L5).
 	TEST_EXPECT(refused_words(*v.activity.last_build) ==
-	            "Refused: " + result.refusals.front() + " (and 4 more).");
+	            "Refused: " + result.refusals.front() + " (and 5 more).");
 	// A name keeps its case in a refusal's words; a sentence's opener is lowered (the review's L6).
-	Diagnostic upper = editor_test::finding_of(DiagnosticSeverity::Error, "build.archive_in_project", "x", "RESOURCE.PFF");
-	TEST_EXPECT(blocker_words(upper) == "RESOURCE.PFF is an archive in the project: the build packs the project's files itself");
+	Diagnostic upper = editor_test::finding_of(DiagnosticSeverity::Error, "build.name_unstorable", "x", "A_NAME_FAR_TOO_LONG.WAC");
+	TEST_EXPECT(blocker_words(upper) == "A_NAME_FAR_TOO_LONG.WAC's name is too long for an archive");
 	Diagnostic named = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "MAIN.MNU cannot be read.", "main.mnu");
 	TEST_EXPECT(blocker_words(named) == "MAIN.MNU cannot be read");
 	named.message = "The file cannot be read.";

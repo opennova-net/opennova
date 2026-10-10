@@ -1021,16 +1021,27 @@ float column_width(const FieldSchema &field) {
 	return width;
 }
 
-// A row's context menu: the collection's structural edits without selecting the row.
+// A row's context menu, without selecting the row: Find usages (DI-18: who names what the record defines, the
+// project's finder, as Shift+F12 over the selection), then the collection's structural edits where its list takes
+// them.
 void row_menu(Workspace &workspace, const Document &document, const Document::CollectionSpec &spec,
               const NodeAddress &address, size_t index, size_t count) {
-	if (spec.fixed || held(workspace, document) || !ImGui::BeginPopupContextItem("row")) return;
-	if (ImGui::MenuItem("Duplicate", nullptr, false, !spec.max || count < spec.max))
-		edit(workspace, document, EditOperation::Duplicate, address, index + 1);
-	if (ImGui::MenuItem("Remove")) edit(workspace, document, EditOperation::Remove, address);
-	if (ImGui::MenuItem("Move up", nullptr, false, index > 0)) edit(workspace, document, EditOperation::Move, address, index - 1);
-	if (ImGui::MenuItem("Move down", nullptr, false, index + 1 < count))
-		edit(workspace, document, EditOperation::Move, address, index + 1);
+	if (!ImGui::BeginPopupContextItem("row")) return;
+	const SessionView &view = workspace.view();
+	const std::string locator = document.locator(address);
+	const bool finds = view.findings.graph && !locator.empty();
+	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)
+		ProjectFind::open_usages(workspace, document.path(), locator);
+	ui_kit::tooltip("Who names what it defines, each a Go to.");
+	if (!spec.fixed && !held(workspace, document)) {
+		ImGui::Separator();
+		if (ImGui::MenuItem("Duplicate", nullptr, false, !spec.max || count < spec.max))
+			edit(workspace, document, EditOperation::Duplicate, address, index + 1);
+		if (ImGui::MenuItem("Remove")) edit(workspace, document, EditOperation::Remove, address);
+		if (ImGui::MenuItem("Move up", nullptr, false, index > 0)) edit(workspace, document, EditOperation::Move, address, index - 1);
+		if (ImGui::MenuItem("Move down", nullptr, false, index + 1 < count))
+			edit(workspace, document, EditOperation::Move, address, index + 1);
+	}
 	ImGui::EndPopup();
 }
 

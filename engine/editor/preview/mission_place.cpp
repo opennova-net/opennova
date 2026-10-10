@@ -126,10 +126,6 @@ bool mission_stop_edits(const MissionDocument &document, int path, int64_t item,
 		error = "The mission has no path " + std::to_string(path) + ".";
 		return false;
 	}
-	if (static_cast<const PathRow &>(*row).native.record.waypoint_numbers.size() >= mission::kMaxWaypointPathMarkers) {
-		error = "Path " + std::to_string(path) + " holds its " + std::to_string(mission::kMaxWaypointPathMarkers) + " stops.";
-		return false;
-	}
 	if (item == 0) {
 		error = "Pick the marker a stop places (the Place tool's Markers): no stop of the mission names one yet.";
 		return false;

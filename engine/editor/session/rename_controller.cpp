@@ -223,7 +223,10 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		// A move: the file in its new folder, nothing rewritten (the game finds a file by its name alone).
 		const RenamePlan &plan = operation.file_plan();
 		const std::string left = folder_of_path(plan.path), went = folder_of_path(plan.new_path);
-		core_.note("Moved " + plan.old_name + (back ? " back" : "") + " from " + folder_words(left) + " to " +
+		std::string companions;
+		for (const RenameOutput &companion : plan.companions)
+			companions += (companions.empty() ? " with " : ", ") + companion.old_name;
+		core_.note("Moved " + plan.old_name + companions + (back ? " back" : "") + " from " + folder_words(left) + " to " +
 		           folder_words(went) + ", no reference rewritten: the game finds a file by its name alone. Undo "
 		           "does not take it back: Edit > Move " + plan.old_name + " back to " + folder_words(left) + " does.");
 		view_.activity.status = "Moved " + plan.old_name + (back ? " back" : "") + " to " + folder_words(went) + ".";
@@ -262,6 +265,8 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 			done.move = plan.move;
 			done.from = plan.move ? folder_of_path(plan.path) : plan.old_name;
 			done.to = plan.move ? folder_of_path(plan.new_path) : plan.new_name;
+			if (plan.move)
+				for (const RenameOutput &companion : plan.companions) done.companions.push_back(companion_path(companion));
 		}
 		done.sites = sites;
 		for (RenameSite &site : done.sites) {
@@ -440,6 +445,8 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 			const RenamePlan plan = plan_back_file();
 			rewrites.push_back(plan.path);
 			for (const RenameSite &site : plan.sites) rewrites.push_back(site.file);
+			// A mission's companions go back with it: their documents close and open again there.
+			for (const RenameOutput &companion : plan.companions) rewrites.push_back(companion.path);
 		}
 		for (const auto &document : documents.documents())
 			if (document->dirty() && std::find(rewrites.begin(), rewrites.end(), document->path()) != rewrites.end())
@@ -455,6 +462,10 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 		                                  request.folder, view_.project.imports.get());
 		if (!plan.ok()) return;
 		if (const DocumentBase *open = documents.document_for(plan.path); open && open->dirty()) files.push_back(plan.path);
+		// A mission's companions beside it move with it.
+		for (const RenameOutput &companion : plan.companions)
+			if (const DocumentBase *open = documents.document_for(companion.path); open && open->dirty())
+				files.push_back(companion.path);
 		return;
 	}
 	case EditorRequestKind::SplitTexture: {
@@ -614,10 +625,11 @@ RenamePlan RenameController::plan_back_file() {
 		                                     done.file));
 		return none;
 	}
-	// A move's way back: the file moved to the folder it left (no site either way).
+	// A move's way back: the file moved to the folder it left (no site either way), with exactly the files that
+	// went with it.
 	if (done.move)
 		return plan_move(paths_, *view_.project.document, *view_.project.scan, done.file, done.from,
-		                 view_.project.imports.get());
+		                 view_.project.imports.get(), &done.companions);
 	RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), done.file, done.from);
 	keep_written(plan.sites, plan.refusals);
 	return plan;

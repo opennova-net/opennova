@@ -25,6 +25,7 @@
 #include <runtime/assets/mission_fixed_files.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
+#include <editor/preview/model_preview_rig.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
@@ -963,6 +964,8 @@ private:
 		// What it names is not looked for: a file of a kind that names files the graph does not
 		// read (a dialog bank, a mission text).
 		if (!again && references_unread(kind)) note(ReferenceKind::None, kind, file);
+		// A model's rig, by its name alone (follow_rigs): what the model holds does not say it.
+		if (kind == AssetKind::Model && !again) follow_rigs(node, file);
 		if (!graph_reads_kind(kind) || !extract(node)) return;
 		if (!again) index_symbols(node);
 		if (!again && kind == AssetKind::Menu) menus_.push_back({node.row, node.origin});
@@ -975,6 +978,50 @@ private:
 				continue;
 			follow_edge(node, file, edge, again);
 		}
+	}
+
+	// A model's rig (S23 D): the animation table an item or a weapon pairs with it in the definitions the
+	// node's place and the game install serve (an item's anim_def beside its graphic or graphic_enemy, a
+	// weapon's animadm beside its gfx1: preview_model_fields, the pairing the model preview plays), followed as
+	// that definition's reference, so a model imported alone comes with the animations it plays.
+	void follow_rigs(const PlanNode &node, const std::string &model) {
+		const std::string stem = key(fs::path(model).stem().string());
+		for (const ImportOrigin *origin : {node.origin, install_ != node.origin ? install_ : nullptr}) {
+			if (!origin) continue;
+			for (const auto &[catalog, edge] : rigs_in(origin)) {
+				if (edge.second != stem) continue;
+				PlanNode from{node.row, origin};
+				follow_edge(from, catalog, edge.first, false);
+				if (plan_.truncated) return;
+			}
+		}
+	}
+
+	// The definitions a place serves, read once: each animation table edge with the stem of the model it pairs
+	// with, by the catalog it is in.
+	const std::vector<std::pair<std::string, std::pair<GraphEdge, std::string>>> &rigs_in(const ImportOrigin *origin) {
+		auto [it, made] = rigs_.try_emplace(origin);
+		if (!made) return it->second;
+		for (const char *catalog : {"items.def", "weapon.def"}) {
+			const std::string spelling = origin->find(catalog);
+			std::vector<uint8_t> bytes;
+			if (spelling.empty() || !origin->read(spelling, bytes)) continue;
+			Extracted content;
+			Diagnostic error;
+			if (!extract_from_bytes(spelling, origin->file_kind(spelling), bytes, document_.target_game, content, error))
+				continue;
+			for (const GraphEdge &map : content.edges) {
+				if (map.kind != ReferenceKind::AnimationMap) continue;
+				const std::vector<const char *> fields = preview_model_fields(map.field);
+				for (const GraphEdge &graphic : content.edges) {
+					if (graphic.record != map.record || graphic.kind != ReferenceKind::Model) continue;
+					if (std::none_of(fields.begin(), fields.end(), [&](const char *field) { return graphic.field == field; }))
+						continue;
+					it->second.push_back({spelling, {map, key(fs::path(graphic.value).stem().string())}});
+				}
+			}
+		}
+		return it->second;
 	}
 
 	// One reference of a node's file, in the plan's order (import_plan.h).
@@ -1231,6 +1278,8 @@ private:
 	size_t files_ = 0;                                                     // the files the plan takes
 	size_t held_compared_ = 0;                                             // the held files compared
 	std::map<DocumentTypeId, std::unique_ptr<DocumentBase>> blanks_;       // a document of each type, for its words
+	// What each place's definitions pair a model with (follow_rigs), read once a place.
+	std::map<const ImportOrigin *, std::vector<std::pair<std::string, std::pair<GraphEdge, std::string>>>> rigs_;
 };
 
 ImportPlanner::ImportPlanner(std::vector<ImportChoice> sources, bool with_dependencies, const ProjectPaths &paths,
