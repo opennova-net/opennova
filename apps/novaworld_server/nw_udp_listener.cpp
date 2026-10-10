@@ -258,14 +258,16 @@ bool NwUdpListener::start(const ServerConfig &config) {
 		return false;
 	}
 
+	// The socket stays bound from here into the receive thread, so the port
+	// reported is the port served: a close and a re-bind would free it in
+	// between (with port 0, for any other socket to take).
 	uint16_t bound = 0;
-	auto sock = opennova::net::udp_bind(config.nw_udp_port, &bound);
-	if (!sock.is_valid()) {
+	opennova::net::ScopedSocket socket(opennova::net::udp_bind(config.nw_udp_port, &bound));
+	if (!socket.is_valid()) {
 		std::fprintf(stderr, "[nwudp] failed to bind UDP %u\n",
 		             static_cast<unsigned>(config.nw_udp_port));
 		return false;
 	}
-	opennova::net::close_socket(sock);
 	bound_port_ = bound;
 	// The SessionInit CU carries the web domain as bare host:port — the
 	// retail client prepends the scheme itself
@@ -273,10 +275,26 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	web_domain_ = config.public_host + ":" + std::to_string(config.http_port);
 	lobby_session_.set_glsvss_results(config.glsvss_results);
 
+	// The receive thread's own connection (Database is single-threaded): the
+	// lobby session's host persistence and the maintenance lookup run on it.
+	// Leased here so a database that cannot be opened stops the boot.
+	std::optional<db::ConnectionPool::Lease> db_conn;
+	if (db_pool_) {
+		try {
+			db_conn.emplace(db_pool_->acquire());
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[nwudp] db open failed: %s\n", e.what());
+			return false;
+		}
+	}
+
 	stop_requested_.store(false);
 	initialize_jo_host();
 	running_.store(true);
-	worker_ = std::thread([this] { run_loop(); });
+	worker_ = std::thread([this, socket = std::move(socket),
+	                       db_conn = std::move(db_conn)]() mutable {
+		run_loop(std::move(socket), std::move(db_conn));
+	});
 	std::printf("[nwudp] listening on UDP :%u\n",
 	            static_cast<unsigned>(bound_port_));
 	return true;
@@ -319,18 +337,21 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 
 	// Phase I.2: drop the matching row(s) from active_hosts +
 	// host_players. Hosting peer is keyed by RID (drops the host row);
-	// joining peer's own host_players entry is keyed by peer addr.
-	if (db_) {
+	// joining peer's own host_players entry is keyed by peer addr. The
+	// connection is leased here, not the receive thread's: this runs on that
+	// thread and on the main thread alike.
+	if (db_pool_) {
 		try {
+			auto db_conn = db_pool_->acquire();
 			// The DB key MUST be the same spelling add_player stored, or
 			// remove_player_by_peer stops matching and host_players rows leak
 			// until the host row cascades. Both sides now render through
 			// peer_addr_ip_to_string, so they cannot drift apart.
 			const std::string ip_key = peer_addr_ip_to_string(peer);
 			if (was_hosting && rid != 0) {
-				hostdb::remove_host_by_rid(*db_, rid);
+				hostdb::remove_host_by_rid(*db_conn, rid);
 			}
-			hostdb::remove_player_by_peer(*db_, ip_key, peer.port);
+			hostdb::remove_player_by_peer(*db_conn, ip_key, peer.port);
 		} catch (const std::exception &e) {
 			std::fprintf(stderr, "[lobby] WARN db cleanup on erase_lobby_state: %s\n", e.what());
 		}
@@ -353,13 +374,10 @@ std::vector<NwUdpListener::HostedSnapshot> NwUdpListener::snapshot_hosted() cons
 	return out;
 }
 
-void NwUdpListener::run_loop() {
-	opennova::net::ScopedSocket socket(opennova::net::udp_bind(bound_port_));
-	if (!socket.is_valid()) {
-		std::fprintf(stderr, "[nwudp] re-bind failed; aborting loop\n");
-		running_.store(false);
-		return;
-	}
+void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
+                             std::optional<db::ConnectionPool::Lease> db_conn) {
+	lobby_session_.set_database(db_conn ? db_conn->get() : nullptr);
+
 	QueuedJoSocket jo_socket(socket.get());
 	using PumpClock = std::chrono::steady_clock;
 	const auto pump_period =
@@ -818,7 +836,8 @@ void NwUdpListener::run_loop() {
 						// (its name is the message kind).
 						LobbyDispatchResult result;
 						if (outer.name == "ClientRequestVerifyResult") {
-							const auto maintenance = load_maintenance_status(db_);
+							const auto maintenance =
+									load_maintenance_status(db_conn ? db_conn->get() : nullptr);
 							if (maintenance.enabled) {
 								result.label = "ClientRequestVerifyResult:maintenance";
 								result.reply_containers.push_back(
@@ -1013,6 +1032,7 @@ void NwUdpListener::run_loop() {
 		}
 	}
 
+	lobby_session_.set_database(nullptr);
 	std::printf("[nwudp] loop exiting\n");
 }
 

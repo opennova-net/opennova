@@ -4,6 +4,8 @@
 #include <net/novacrypto/nwu.h>
 #include <net/npwire/session_keys.h>
 
+#include <base/os_random/os_random.h>
+
 #include <random>
 
 namespace opennova {
@@ -15,7 +17,9 @@ namespace opennova {
 // while the draw counter still decrements, so the key is 63 minus the number
 // of NUL picks: 61.03 chars on average — the "61 chars" every retail capture
 // shows is that expectation, not a fixed length. The random source is the
-// only substitution (retail seeds its 16-bit LCG from the manager).
+// only substitution (retail seeds its 16-bit LCG from the manager; this draws
+// from the OS CSPRNG, base/os_random, as the SCRK, NWUID and session-key
+// helpers below all do).
 // [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0 — `chars_remaining = 63`
 //  @0x61e040, NextInRange(0, g_TxKeyCharsetLen) @0x61e05b, sprintf "%c"
 //  @0x61e075, Napi_CopyString(conn+204, key, 64) @0x61e0c9; charset
@@ -28,7 +32,7 @@ constexpr int kScrkCharsetLen = static_cast<int>(sizeof(kScrkCharset) - 1); // 3
 } // namespace
 
 std::string make_dev_scrk() {
-	static thread_local std::mt19937 gen{std::random_device{}()};
+	OsRandom gen;
 	std::uniform_int_distribution<int> pick(0, kScrkCharsetLen); // inclusive: 32 outcomes
 	std::string out;
 	out.reserve(kScrkDraws);
@@ -42,7 +46,7 @@ std::string make_dev_scrk() {
 
 std::string make_dev_nwuid() {
 	static constexpr char hex[] = "0123456789abcdef";
-	static thread_local std::mt19937 gen{std::random_device{}()};
+	OsRandom gen;
 	std::uniform_int_distribution<int> pick(0, 15);
 	std::string out;
 	out.reserve(60);
@@ -53,8 +57,7 @@ std::string make_dev_nwuid() {
 }
 
 uint32_t make_random_session_u32() {
-	static thread_local std::mt19937 gen{std::random_device{}()};
-	return std::uniform_int_distribution<uint32_t>{}(gen);
+	return os_random_u32();
 }
 
 bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,

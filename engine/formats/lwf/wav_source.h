@@ -81,20 +81,29 @@ WaveFacts wave_facts(const std::vector<uint8_t> &bytes, size_t bins = 48);
 double wave_seconds(const std::vector<uint8_t> &bytes);
 
 // The form a wave is written in for the game: its channels mixed to one (`mono`) or one of them taken
-// (`left`, `right`); its samples 16-bit, or 8-bit, or (`keep`) 8-bit where the source is 8-bit PCM and 16-bit
-// otherwise; its rate kept (0) or resampled (linear) to another. A plain RIFF WAVE: fmt (PCM) and data, no
-// other chunk, which the game's loader takes [orig: Audio_LoadWavFileFromArchive @ 0x766480].
+// (`left`, `right`); its frames from `start` to `end` kept (a trim; `end` 0 to the last); each sample times
+// `gain`, clamped to full scale (1 as it is; a normalise gives the mix's peak over full scale); its samples
+// 16-bit, or 8-bit, or (`keep`) 8-bit where the source is 8-bit PCM and 16-bit otherwise; its rate kept (0) or
+// resampled (linear) to another. A plain RIFF WAVE: fmt (PCM) and data, no other chunk, which the game's loader
+// takes [orig: Audio_LoadWavFileFromArchive @ 0x766480].
 struct WaveConversion {
 	std::string channels = "mono";
 	std::string bits = "keep";
 	uint32_t rate = 0;
+	uint64_t start = 0;
+	uint64_t end = 0;
+	float gain = 1.0f;
 };
 bool convert_wave(const std::vector<uint8_t> &source, const WaveConversion &conversion, std::vector<uint8_t> &out,
                   std::string &error);
+// The loudest sample of the one channel a conversion of `source` makes (its mix or the one taken, its frames
+// from start to end, before its gain and its rate), 0..1 of full scale: what a normalise divides by. -1 for a
+// source that does not read or a trim that keeps no frame.
+float wave_conversion_peak(const std::vector<uint8_t> &source, const WaveConversion &conversion);
 // The bits a conversion of `source` writes: 8 or 16.
 int wave_bits_written(const WaveSamples &source, const WaveConversion &conversion);
-// What a conversion changes of a source, in words ("stereo mixed to mono, 24-bit written as 16-bit, the
-// LIST chunk left out"); "" for none.
+// What a conversion changes of a source, in words ("2 channels mixed to mono, 24-bit PCM written as 16-bit
+// PCM, frames 1000..1600 of 4800 kept, scaled by 4.00 (+12.04 dB)"); "" for none.
 std::string wave_conversion_words(const WaveSamples &source, const WaveConversion &conversion);
 
 } // namespace opennova::lwf

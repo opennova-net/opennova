@@ -77,7 +77,6 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
       owned_source_(std::move(owned)),
       source_(source != nullptr ? source : owned_source_.get()),
       shared_session_socket_(session_socket),
-      rng_(std::random_device{}()),
       lobby_(
           [this]() {
 	          NwuLobbySession::Hooks hooks;
@@ -96,8 +95,7 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
 	          return hooks;
           }(),
           [this]() {
-	          NwuLobbySession::Environment env;
-	          env.random_u32 = [this]() { return static_cast<uint32_t>(rng_()); };
+	          NwuLobbySession::Environment env; // random_u32 unset: the OS CSPRNG
 	          env.resolve_ipv4 = [this](const std::string &host, PeerAddr &out) {
 		          net::Endpoint endpoint;
 		          if (!resolve_destination(host, endpoint, options_.destinations, options_.allow_public, "NovaWorld host"))
@@ -282,9 +280,10 @@ void Lister::ship(const HttpRequestSpec &spec) {
 	}
 	const bool allow_public = options_.allow_public;
 	const DestinationPolicy destinations = options_.destinations;
-	io::logf(LogLevel::kDebug, "[http] %s %s", spec.method == HttpMethod::Post ? "POST" : "GET", spec.url.c_str());
-	http_ = std::async(std::launch::async, [spec, allow_public, destinations]() {
-		return net::http_exchange(spec.method == HttpMethod::Post, spec.url, spec.headers, spec.body, kHttpTimeoutMs,
+	const char *method = spec.method == HttpMethod::Post ? "POST" : "GET";
+	io::logf(LogLevel::kDebug, "[http] %s %s", method, spec.url.c_str());
+	http_ = std::async(std::launch::async, [spec, method, allow_public, destinations]() {
+		return net::http_exchange(method, spec.url, spec.headers, spec.body, kHttpTimeoutMs,
 		                          [allow_public, destinations](const std::string &host, net::Endpoint &out) {
 			                          return resolve_destination(host, out, destinations, allow_public, "web host");
 		                          });

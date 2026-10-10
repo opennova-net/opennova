@@ -230,6 +230,157 @@ void Database::begin() { exec("BEGIN;"); }
 void Database::commit() { exec("COMMIT;"); }
 void Database::rollback() { exec("ROLLBACK;"); }
 
+bool Database::in_transaction() const {
+	return sqlite3_get_autocommit(handle_) == 0;
+}
+
+// ----------------------------------------------------------------------------
+// Transaction
+// ----------------------------------------------------------------------------
+
+namespace {
+
+// Savepoint names may repeat; RELEASE and ROLLBACK TO act on the innermost
+// one of that name, which is this guard's while its scope is the innermost.
+constexpr const char *kNestedTransaction = "opennova_tx";
+
+} // namespace
+
+Transaction::Transaction(Database &db) : db_(db), nested_(db.in_transaction()) {
+	db_.exec(nested_ ? std::string("SAVEPOINT ") + kNestedTransaction + ";"
+	                 : std::string("BEGIN IMMEDIATE;"));
+}
+
+Transaction::~Transaction() {
+	if (!open_) return;
+	try {
+		if (nested_) {
+			db_.exec(std::string("ROLLBACK TO ") + kNestedTransaction + ";");
+			db_.exec(std::string("RELEASE ") + kNestedTransaction + ";");
+		} else {
+			db_.rollback();
+		}
+	} catch (const SqliteError &) {
+		// sqlite already rolled the transaction back itself (some errors,
+		// SQLITE_FULL among them, end it); nothing is left to undo.
+	}
+}
+
+void Transaction::commit() {
+	if (nested_) {
+		db_.exec(std::string("RELEASE ") + kNestedTransaction + ";");
+	} else {
+		db_.commit();
+	}
+	open_ = false;
+}
+
+// ----------------------------------------------------------------------------
+// ReadSnapshot
+// ----------------------------------------------------------------------------
+
+ReadSnapshot::ReadSnapshot(Database &db) : db_(db), open_(!db.in_transaction()) {
+	if (open_) db_.begin();
+}
+
+ReadSnapshot::~ReadSnapshot() {
+	if (!open_) return;
+	try {
+		db_.commit();
+	} catch (const SqliteError &) {
+		try {
+			db_.rollback();
+		} catch (const SqliteError &) {
+			// Already ended by sqlite itself; nothing is left open.
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// ConnectionPool
+// ----------------------------------------------------------------------------
+
+namespace {
+
+// True when every connection that opens `path` gets a database of its own:
+// ":memory:", an empty path (a private temporary file), a file: URI with an
+// empty name (the same), or a file: URI naming an in-memory database
+// (":memory:" as the name, or mode=memory) without cache=shared.
+bool opens_private_database(const std::string &path) {
+	if (path.empty() || path == ":memory:") return true;
+	if (path.rfind("file:", 0) != 0) return false;
+	const std::size_t query_at = path.find_first_of("?#");
+	const std::string name = path.substr(5, query_at == std::string::npos
+	                                            ? std::string::npos
+	                                            : query_at - 5);
+	if (name.empty()) return true;
+	bool memory = name == ":memory:";
+	bool shared = false;
+	if (query_at != std::string::npos && path[query_at] == '?') {
+		std::string query = path.substr(query_at + 1);
+		query = query.substr(0, query.find('#'));
+		std::size_t start = 0;
+		for (;;) {
+			const std::size_t amp = query.find('&', start);
+			const std::string param = query.substr(start, amp == std::string::npos
+			                                                   ? std::string::npos
+			                                                   : amp - start);
+			if (param == "mode=memory") memory = true;
+			else if (param == "cache=shared") shared = true;
+			else if (param == "cache=private") shared = false;
+			if (amp == std::string::npos) break;
+			start = amp + 1;
+		}
+	}
+	return memory && !shared;
+}
+
+} // namespace
+
+ConnectionPool::Lease::Lease(ConnectionPool &pool, std::unique_ptr<Database> db)
+	: pool_(&pool), db_(std::move(db)) {}
+
+ConnectionPool::Lease::~Lease() {
+	if (db_) pool_->release(std::move(db_));
+}
+
+ConnectionPool::ConnectionPool(std::filesystem::path path) : path_(std::move(path)) {
+	if (opens_private_database(path_.string())) {
+		throw SqliteError(SQLITE_MISUSE,
+		                  "connection pool over a private database '" + path_.string() +
+		                  "' — use file:<name>?mode=memory&cache=shared");
+	}
+}
+
+ConnectionPool::Lease ConnectionPool::acquire() {
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		if (!idle_.empty()) {
+			std::unique_ptr<Database> db = std::move(idle_.back());
+			idle_.pop_back();
+			return Lease(*this, std::move(db));
+		}
+	}
+	// Open outside the lock so a slow open does not stall other threads'
+	// acquire().
+	return Lease(*this, std::make_unique<Database>(path_));
+}
+
+void ConnectionPool::release(std::unique_ptr<Database> db) {
+	// The next holder never inherits a transaction: one left open (a begin()
+	// whose commit an exception skipped) is rolled back, and a connection
+	// that cannot roll back is closed rather than pooled.
+	if (db->in_transaction()) {
+		try {
+			db->rollback();
+		} catch (const SqliteError &) {
+			return;
+		}
+	}
+	std::lock_guard<std::mutex> lock(mu_);
+	idle_.push_back(std::move(db));
+}
+
 // ----------------------------------------------------------------------------
 // Migration runner
 // ----------------------------------------------------------------------------

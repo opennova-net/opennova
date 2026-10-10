@@ -7,8 +7,11 @@
 // the mission boots, then boots and serves. The service lists it with the witnessed Serve Only columns (Dedicated = STRNOVA11, MaxPlayers
 // without the dedicated slot, Players without the host, Port "-1", no slot 0)
 // at the endpoint it observed, which is the game socket (D-NET-346); a LAN
-// probe on that socket is answered; a round end's map change keeps the listing
-// and its socket and republishes the next map's mission at its start; a joiner
+// probe on that socket is answered; the service's SetServerName / SetServerMsg,
+// delivered through the hosting session's notice, write the cfg block and save
+// game.cfg, so the round end's map change boots the next map under the new name
+// and message; that map change keeps the listing and its socket and republishes
+// the next map's mission, name and message at its start; a joiner
 // dialing the advertised endpoint plays and reaches the PlayerList as its UDP
 // source; the stop deregisters.
 #include "server.h"
@@ -20,8 +23,12 @@
 
 #include "net_sockets.h"
 
+#include <formats/gamecfg/game_cfg.h>
 #include <net/napi/envelope.h>
+#include <net/napi/session.h>
+#include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
+#include <net/novaworld/client_session.h>
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_session.h>
@@ -134,9 +141,11 @@ int main() {
 	CHECK(ctx.nwu_session_role == ClientSession::kSessionRoleHosting);
 
 	constexpr double kFrame = 1.0 / 62.5;
+	// The service's row, by the name the server currently carries.
+	std::string expected_name = "Serve NW";
 	auto row = [&]() -> std::optional<LobbyState> {
 		for (const auto &h : listener.snapshot_hosted())
-			if (h.lobby.hosting && h.lobby.server_name == "Serve NW") return h.lobby;
+			if (h.lobby.hosting && h.lobby.server_name == expected_name) return h.lobby;
 		return std::nullopt;
 	};
 	// The first full Host list lands right after the hosting.
@@ -188,6 +197,39 @@ int main() {
 		CHECK(found.server_name == "Serve NW");
 	}
 
+	// --- the service renames the server and changes its message: the hosting
+	// session's ServerCommand runs on the match, and the live source writes the
+	// cfg block and saves game.cfg in the working directory, as retail's handler
+	// does [orig: CNapiGameSession_HandleServerCommand — Game_SaveConfig @0x4D2DDF].
+	{
+		auto deliver = [&](const std::string &cmd) {
+			NapiMessage m;
+			m.name = "ServerCommand";
+			NapiField f;
+			f.name = "Cmd";
+			f.data.assign(cmd.begin(), cmd.end());
+			m.fields.push_back(f);
+			ClientSession::Notice notice;
+			notice.kind = ClientSession::Notice::Kind::Command;
+			CHECK(parse_server_command(m, notice.command));
+			CHECK(server.lister()->host_role().handle_notice(notice));
+		};
+		deliver("SetServerName \"Serve NW Renamed\"");
+		CHECK(ctx.config.server_name == "Serve NW Renamed");
+		CHECK(server.game_cfg().game_name == "Serve NW Renamed");
+		const gamecfg::LoadResult renamed = gamecfg::load_file(gamecfg::kFileName, {});
+		CHECK(renamed.file_read && renamed.cfg.game_name == "Serve NW Renamed");
+		deliver("SetServerMsg \"renamed by the service\"");
+		CHECK(ctx.config.custom_text == "renamed by the service");
+		CHECK(server.game_cfg().servermsg == "renamed by the service");
+		const gamecfg::LoadResult saved = gamecfg::load_file(gamecfg::kFileName, {});
+		CHECK(saved.file_read);
+		// The second save keeps the first change.
+		CHECK(saved.cfg.game_name == "Serve NW Renamed");
+		CHECK(saved.cfg.servermsg == "renamed by the service");
+		expected_name = "Serve NW Renamed";
+	}
+
 	// --- a round end's map change: the listing and its socket survive it, and
 	// the next map's mission start republishes the Host list at once
 	// [orig: Game_StartMission @0x5248f5 -> Lobby_UpdateServerInfo]. The Cycle
@@ -200,6 +242,13 @@ int main() {
 		}
 		CHECK(server.missions_played() == 2);
 		CHECK(server.role().state.host_owner.ctx.config.mission_name == "Serve Test Map Two");
+		// The next map boots from the block the rename wrote, and the map change's save keeps it.
+		CHECK(server.role().state.host_owner.ctx.config.server_name == "Serve NW Renamed");
+		CHECK(server.role().state.host_owner.ctx.config.custom_text == "renamed by the service");
+		CHECK(server.game_cfg().game_name == "Serve NW Renamed");
+		const gamecfg::LoadResult resaved = gamecfg::load_file(gamecfg::kFileName, {});
+		CHECK(resaved.file_read && resaved.cfg.game_name == "Serve NW Renamed" &&
+				resaved.cfg.servermsg == "renamed by the service");
 		CHECK(server.lister() != nullptr && server.lister()->hosting());
 		std::optional<LobbyState> after;
 		for (int f = 0; f < 300; ++f) {
@@ -212,6 +261,8 @@ int main() {
 		if (after) {
 			CHECK(after->mission_name == "Serve Test Map Two");
 			CHECK(var(after->last_host_update["Host"], "MissionName") == "Serve Test Map Two");
+			CHECK(after->server_name == "Serve NW Renamed");
+			CHECK(var(after->last_host_update["Host"], "Msg") == "renamed by the service");
 			// The same socket: the endpoint the service observed is unchanged.
 			CHECK(after->host_port == server.bound_port());
 		}

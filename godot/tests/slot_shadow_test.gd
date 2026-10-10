@@ -130,6 +130,38 @@ func test_admitted_caster_publishes_one_capture_request() -> void:
 	assert_eq(int(shadow.get_report()["armed"]), 0)
 
 
+## A tree may hold several scenes, each its own World3D (the OpenNova Editor's mission devices under their
+## SubViewports): a device plans the casters of its own world alone, the group being the tree's.
+func test_a_device_plans_its_own_worlds_casters() -> void:
+	var environment := _environment()
+	var camera := _camera()
+	camera.look_at_from_position(Vector3.ZERO, Vector3(0, 0, -10), Vector3.UP)
+	var shadow := _fresh_shadow(environment)
+	var near_model := _caster_at(5.0)
+	# A second scene: its own viewport and world, a caster of its own in it.
+	var other_scene := SubViewport.new()
+	other_scene.own_world_3d = true
+	add_child_autofree(other_scene)
+	var elsewhere: ObjectModel = autofree(ObjectModel.new())
+	other_scene.add_child(elsewhere)
+	elsewhere.set_process(false)
+	elsewhere.position = Vector3(0.0, 0.0, -6.0)
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = BoxMesh.new()
+	elsewhere.add_child(mesh)
+	elsewhere.set_shadow_caster_enabled(true)
+	assert_true(elsewhere.is_in_group("slot_shadow_casters"), "the other scene's caster joins the tree's group")
+	assert_ne(elsewhere.get_world_3d(), shadow.get_world_3d(), "a world of its own")
+	shadow.advance_frame()
+	assert_eq(int(shadow.get_report()["registered"]), 1, "the device's own world's caster alone registers")
+	assert_true(shadow.get_capture_order_of(near_model) >= 0, "its own caster takes a slot")
+	assert_eq(shadow.get_capture_order_of(elsewhere), -1, "the other world's caster takes none")
+	# Moved into the device's world, it plans there.
+	elsewhere.reparent(self)
+	shadow.advance_frame()
+	assert_eq(int(shadow.get_report()["registered"]), 2, "moved into the device's world, it registers")
+
+
 func _child_shares_parent_slot(parent_first: bool) -> void:
 	# The retail child walk renders a capture-with child (held weapon, mounted
 	# child) into its PARENT's slot RT (RenderSlot_RenderEntityAndChildren

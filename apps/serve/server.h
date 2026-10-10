@@ -11,7 +11,8 @@
 // lister's session, ADR 0051 d6), the starting mission booted as a
 // DedicatedHost through the engine's one host boot (inmatch/host_boot.h) and
 // the in-match session run round after round over the host file's rotation
-// (the engine's map change, inmatch/map_change.h, game.cfg saved at each; the
+// (the engine's map change, inmatch/map_change.h, game.cfg saved at each and
+// at the NovaWorld ServerCommand's rename, message or mpreset change; the
 // listing and its socket kept across it); at a clean exit it deregisters,
 // saves game.cfg again and deletes the lock. Everything below the config, the
 // mount, the socket and the wall clock is the engine's.
@@ -126,7 +127,9 @@ public:
 	void stop();
 	// Game_SaveConfig: the cfg block to the working directory's game.cfg. The
 	// round-end map change calls it, as the PreMenu's init saves at every map
-	// change (ADR 0051 PR3). False (logged) when the file does not open.
+	// change (ADR 0051 PR3), and so do the admin console's SET and the
+	// NovaWorld ServerCommand's name / message / mpreset change. False
+	// (logged) when the file does not open.
 	bool save_config();
 	// game.cfg set `mpreset`: retail's load exits the process with code 0
 	// before anything else runs, and start() stops there.

@@ -185,12 +185,14 @@ inline constexpr char MENUTXT_PUNTED_FROM_NOVAWORLD[] = "ERR_PUNTEDFROMNOVAWORLD
 //  the code (52 rows, `>= 0x34` -> the unknown key) and reads off_7CB964[2*i]]
 std::string novaworld_server_msg_code_key(int msg_code);
 
-// The Success/MsgCode/MsgParam1/MsgParam2 quartet every Server*Result and the three
-// server notifications carry as top-level params, parsed with atol (any nonzero integer is
-// success). Names are matched case-insensitively (Napi_StrCaseEqual).
-// [orig: HandleHostVerifyResponse @0x4d59d0, HandleVerifyResponse @0x4d1e00,
-//  HandleServerMessage @0x4d1c50, HandleServerDisconnectMsg @0x4d1fa0,
-//  HandlePuntNotification @0x4d20b0 — all four atol the same four params]
+// The Success/MsgCode/MsgParam1/MsgParam2 quartet a Server*Result carries as top-level
+// params, parsed with atol (any nonzero integer is success). Names are matched
+// case-insensitively (Napi_StrCaseEqual). The three server notifications (ServerStopHosting,
+// ServerStopPlaying, ServerLeaveNovaWorld) read MsgCode/MsgParam1/MsgParam2 only, never
+// Success; parsing one leaves `success` 0.
+// [orig: HandleHostVerifyResponse @0x4d59d0, HandleVerifyResponse @0x4d1e00 — atol the
+//  quartet; HandleServerMessage @0x4d1c50, HandleServerDisconnectMsg @0x4d1fa0,
+//  HandlePuntNotification @0x4d20b0 — atol the three (decompiled 2026-10-09)]
 struct ServerResultFields {
 	int success = 0;
 	int msg_code = 0;
@@ -296,20 +298,26 @@ NapiMessage make_client_glsvss_request(const std::string &request,
 //
 // The msginfo entry for "ServerCommand" reads the statement's "Cmd" param (512-char cap),
 // tokenizes it (double-quoted runs are one token, quotes stripped) and dispatches the first
-// token against nineteen verbs. Player-targeted verbs match by PREFIX and take one of four
+// token against eighteen verbs. Player-targeted verbs match by PREFIX and take one of four
 // target suffixes selecting the lookup: ByIndex (atol -> slot index), ByIpAndPort ("host:port"),
-// ByName (a callsign, or "*NN" for a slot) or ByPCID (the entity type name). Every verb is
-// gated on the receiver being the authority (`is_authority`) and in a session; TextChatServer /
+// ByName (a callsign, or "*NN" for a slot) or ByPCID (the entity type name); TextChatServer /
 // Cycle / EndMission / GameOver / Earthquake / Lightning / TimeOfDay / SetServerName /
-// SetServerMsg / SetMPReset compare the whole token case-insensitively.
-// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand — "Cmd" read @0x4d2333, tokenize @0x4d2392,
-//  PuntPlayer @0x4d23aa, TextChatServer @0x4d256e, TextChatPlayer @0x4d2628, CmdEchoPlayer
-//  @0x4d276f, KillPlayer @0x4d28b6, ChangeTeam @0x4d2a11, SwapTeam @0x4d2a2c, Cycle @0x4d2a46,
+// SetServerMsg / SetMPReset compare the whole token case-insensitively. The gates are per verb
+// and sit in the executor (inmatch::Server_ExecuteServerCommand): every verb but SetMPReset
+// needs the receiver to be the authority (`is_authority`) with its hosted session up
+// (ctx+0x68), the player-targeted verbs and ChangeTeam / SwapTeam also need the player table,
+// and SetMPReset needs only its argument, so it runs on any receiver the executor is handed
+// (the shells hand it only a hosting context, a residual; docs/net/novaworld-net-re.md
+// D-NET-383). SetMPReset's stored word is read by retail's next session create, which exits
+// the process when it is nonzero; that reader is not ported (D-NET-385).
+// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand @0x4d22f0 — "Cmd" read
+//  @0x4d2333, tokenize @0x4d2392, PuntPlayer @0x4d23aa, TextChatServer @0x4d256e,
+//  TextChatPlayer @0x4d2628, CmdEchoPlayer @0x4d276f, KillPlayer @0x4d28b6, ChangeTeam @0x4d2a11, SwapTeam @0x4d2a2c, Cycle @0x4d2a46,
 //  EndMission @0x4d2a60, GameOver @0x4d2a7a, Earthquake @0x4d2a94, Lightning @0x4d2b33,
 //  TimeOfDay @0x4d2bb5, SetServerName @0x4d2cc2, SetServerMsg @0x4d2d53, SetMPReset @0x4d2e00,
 //  ReloadPlayer @0x4d2e4f, DisarmPlayer @0x4d2f99; the suffix strings @0x7cc65c/0x7cc650/
 //  0x7cc648/0x7cc640; String_TokenizeQuotedToArray @0x616d60; String_StartsWithNoCase @0x616f40;
-//  String_MatchSuffix @0x617040]
+//  String_MatchSuffix @0x617040; SetMPReset's lone token-count gate @0x4d2e12]
 enum class ServerCommandVerb : uint8_t {
 	None = 0,
 	PuntPlayer,
@@ -348,10 +356,58 @@ const char *server_command_verb_name(ServerCommandVerb verb);
 // The target suffix's spelling ("ByIndex", ...; "" for none), as the in-match executor matches it.
 const char *server_command_target_name(ServerCommandTarget target);
 // The retail tokenizer: whitespace splits outside double quotes, quotes toggle an in-quote
-// run and are dropped, a backslash is copied verbatim. [orig: String_TokenizeQuotedToArray @0x616d60]
+// run and are dropped, a backslash is copied verbatim. The whitespace is the CRT isspace under
+// the game's ".ACP" LC_CTYPE, not the C locale's: pinned to cp1252, it is the six C-locale
+// spaces plus 0xA0 (cp1252_isspace; docs/net/novaworld-net-re.md D-NET-381, D-NET-382). It
+// also splits the S2C 0x24 text command, the console's BAN / PUNT lines and the gate reply.
+// [orig: String_TokenizeQuotedToArray @0x616d60 — its isspace @0x616da6; LC_ALL ".ACP" set by
+//  System_InitTimerAndLocale @0x762a6e]
 std::vector<std::string> tokenize_quoted(std::string_view text);
 // Parse a "ServerCommand" container into `out`; false when it carries no Cmd param or the
-// verb is none of the nineteen (retail falls through to the no-op tail).
+// verb is none of the eighteen (retail falls through to the no-op tail).
 bool parse_server_command(const NapiMessage &container, ServerCommand &out);
+
+// ---- The service side: the statements NovaWorld pushes to a hosting session ----
+//
+// The retail service's own bytes are unwitnessed (no capture carries either statement); the
+// shapes below are what the host's readers consume, which is the parity this side can prove.
+
+// The reader's Cmd buffer: Napi_CopyString(buf, value, 0x200) keeps at most 511 characters.
+// [orig: CNapiGameSession_HandleServerCommand @0x4d2345..0x4d2356]
+inline constexpr size_t SERVER_COMMAND_CMD_CAP = 512;
+// True for the player-targeted verbs, which the reader matches by prefix and then requires one
+// of the four target suffixes; false for the verbs it compares as a whole token.
+// [orig: CNapiGameSession_HandleServerCommand — StrStartsWithNoCase vs Napi_StrCaseEqual per verb]
+bool server_command_verb_takes_target(ServerCommandVerb verb);
+// Compose a Cmd line as the exact inverse of the reader's tokenizer: the verb name plus the
+// target suffix, then each arg space-separated, an arg wrapped in double quotes when it is empty
+// or holds whitespace (tokenize_quoted's cp1252 set, 0xA0 included) or any other byte >= 0x80
+// (a double-byte host classes its high bytes otherwise; quoting is lossless). Empty when `verb`
+// is None, when an arg holds a '"' (the tokenizer has no escape; a quote only toggles) or a NUL
+// (Napi_CopyString stops there, so the reader would see a clipped line), when the text would
+// not fit SERVER_COMMAND_CMD_CAP (the reader would clip it), when there are fewer args than the
+// verb's token-count gate needs (PuntPlayer 1, TextChatPlayer / CmdEchoPlayer 2, ...), or when
+// the verb/target pairing is one the reader drops: a player-targeted verb with no suffix falls
+// through the suffix chain to the no-op tail, and a whole-token verb with a suffix never equals
+// its name.
+// [orig: String_TokenizeQuotedToArray @0x616d60 (its isspace @0x616da6; LC_ALL ".ACP" set by
+//  System_InitTimerAndLocale @0x762a6e); Napi_CopyString @0x4d2356; the per-verb token-count
+//  gates (PuntPlayer @0x4d23cc, TextChatPlayer @0x4d264a, ...); the suffix chain's no-op exit
+//  @0x4d24e3; Cycle's whole-token compare @0x4d2a46]
+std::string server_command_text(ServerCommandVerb verb, ServerCommandTarget target,
+                                const std::vector<std::string> &args);
+// The "ServerCommand" statement: exactly one "Cmd" param carrying `cmd` verbatim (never clipped;
+// compose through server_command_text or own the cap). An empty Cmd, or one with no tokens, is a
+// no-op at the reader, as is a verb short of its token-count gate (PuntPlayer needs two tokens).
+// [orig: CNapiGameSession_HandleServerCommand — Napi_StrCaseEqual(name, "Cmd") @0x4d2333, the 0x200
+//  copy @0x4d2345..0x4d2356, the empty-buffer no-op @0x4d236f, the zero-token no-op @0x4d239c,
+//  PuntPlayer's two-token minimum @0x4d23cc]
+NapiMessage make_server_command(const std::string &cmd);
+// The "ServerStopHosting" statement: MsgCode, MsgParam1, MsgParam2 (decimal, in that order), the
+// three params the handler atol's into the session before it drops to state 4 and maps MsgCode
+// through the 52-row NWUSERVERMSGCODE table. No Success param: that handler never reads one.
+// [orig: CNapiGameSession_HandleServerMessage @0x4d1c50 — MsgCode @0x4d1c9e, MsgParam1 @0x4d1cbd,
+//  MsgParam2 @0x4d1cde]
+NapiMessage make_server_stop_hosting(int msg_code, int msg_param1 = 0, int msg_param2 = 0);
 
 } // namespace opennova

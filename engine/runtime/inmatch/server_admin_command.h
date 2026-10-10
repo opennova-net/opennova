@@ -20,8 +20,21 @@ namespace opennova::inmatch {
 // compared case-insensitively as retail does; `args` are the tokens after the
 // verb, so args[0] is the player-target token of a targeted verb.
 //
-// Every verb needs the authority in a session with a World (retail's
-// is_authority / is_in_session / the player-slot table); a targeted verb
+// The gates are per verb, as retail's arms test them: every verb but
+// SetMPReset needs the authority with its hosted session up (retail's
+// is_authority and ctx+0x68; is_in_session here); the player-targeted verbs
+// and ChangeTeam / SwapTeam also need the player table (a World here); a verb
+// that reads an argument it cannot default needs its token; SetMPReset needs
+// only its argument, so it runs on any receiver this executor is handed. The
+// shells hand it only a hosting context, which stays a residual: the game's
+// Simulation::execute_server_command needs a host context and opennova-serve's
+// ServeListing::on_command drops a command before its match binds, where
+// retail would still store and save a SetMPReset. The World-acting verbs
+// retail leaves off the player-table gate (Cycle / EndMission / GameOver,
+// Earthquake, Lightning, TimeOfDay) still need a World to act on
+// (docs/net/novaworld-net-re.md D-NET-383). Numbers are the CRT atol's, 32-bit
+// saturating on every host, and an index past the slot capacity is no slot
+// (D-NET-387). A targeted verb
 // resolves its slot ByIndex (atol -> roster slot), ByIpAndPort ("a.b.c.d:port"
 // against the connection's UDP source), ByName ("*NN" -> slot NN, else the
 // unique case-insensitive callsign) or ByPCID (the slot's entity type name —
@@ -36,11 +49,15 @@ namespace opennova::inmatch {
 // Lightning (the flash + the S2C 0x24 "SETFLASH1 16" text command),
 // TimeOfDay (HHMM), SetServerName / SetServerMsg / SetMPReset (config;
 // config_changed asks the shell to save game.cfg and republish the NovaWorld
-// HostSetup / Host vars), ChangeTeam / SwapTeam (the team 1 <-> 2 swap through
-// Server_ChangeEntityTeam, then the "Changing team...." chat to the slot).
+// HostSetup / Host vars; retail's next session create exits the process on a
+// nonzero mpreset, which nothing here reads yet, D-NET-385), ChangeTeam /
+// SwapTeam (the team 1 <-> 2 swap through Server_ChangeEntityTeam, then the
+// "Changing team...." chat to the slot).
 // ReloadPlayer (Entity_UpdateWeaponOverlayFrameState) and DisarmPlayer are
 // not modeled on this host and return handled = false.
-// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand — gates @0x4D23C0..0x4D23E7,
+// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand @0x4D22F0 —
+//  PuntPlayer's gates @0x4D23C0..0x4D23E7 and each arm's own copy, SetMPReset's lone token
+//  gate @0x4D2E12,
 //  the target suffixes @0x4D23F2..0x4D2505, PuntPlayer @0x4D2515..0x4D254D,
 //  TextChatServer @0x4D25A5..0x4D25E6, TextChatPlayer @0x4D2738..0x4D2765,
 //  CmdEchoPlayer @0x4D287F..0x4D28AC, KillPlayer @0x4D29C6..0x4D29EC,

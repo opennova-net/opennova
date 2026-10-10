@@ -74,7 +74,8 @@ HostRegistration serve_only_registration(int player_limit, bool met_ext, int joi
 	base.max_players = player_limit;
 	base.published_cap = static_cast<int>(inmatch::host_player_slot_limit(player_limit, false));
 	base.listen_host = false;
-	serve::ServeListing source(base);
+	// The columns only: no cfg block (no ServerCommand runs here).
+	serve::ServeListing source(base, {});
 	HostRegistration r = source.registration();
 	// The lister: the gate's lobby, the leg's clamp (1..65 for a dedicated host).
 	r.lobby_name = "jop_2_consumer";

@@ -919,12 +919,123 @@ bool check_server_commands() {
 	if (!expect(out.handled && out.stop_hosting && !g.conn(0).host_disconnect_sent,
 			"PuntPlayer on the host's own slot asks the shell to stop hosting"))
 		return false;
-	// ReloadPlayer is not modeled; a verb outside a session is refused.
+	// ReloadPlayer is not modeled.
 	out = inmatch::Server_ExecuteServerCommand(g.ctx, &g.world, "ReloadPlayer", "ByName", {"P1"});
-	if (!expect(!out.handled, "ReloadPlayer is not modeled")) return false;
-	g.ctx.is_in_session = 0;
-	out = inmatch::Server_ExecuteServerCommand(g.ctx, &g.world, "TextChatServer", "", {"x"});
-	return expect(!out.handled, "no verb runs outside a session");
+	return expect(!out.handled, "ReloadPlayer is not modeled");
+}
+
+// The ServerCommand gates are per verb, as retail's arms test them: every verb but SetMPReset
+// needs the authority with its hosted session up; the player-targeted verbs and ChangeTeam /
+// SwapTeam also need the player table (a World here); a verb that reads an argument it cannot
+// default needs its token; SetMPReset tests its token alone and so runs on any receiver.
+// [orig: CNapiGameSession_HandleServerCommand @0x4D22F0 — PuntPlayer @0x4D23C0..0x4D23E7,
+//  TextChatServer @0x4D2584..0x4D259F, TextChatPlayer @0x4D263E..0x4D2665, CmdEchoPlayer
+//  @0x4D2785..0x4D27AC, KillPlayer @0x4D28CC..0x4D28F3, Earthquake @0x4D2AAA..0x4D2ABC,
+//  Lightning @0x4D2B45..0x4D2B57, TimeOfDay @0x4D2BCB..0x4D2BDD, SetServerName
+//  @0x4D2CD4..0x4D2CEF, SetServerMsg @0x4D2D69..0x4D2D84, SetMPReset @0x4D2E12, ReloadPlayer
+//  @0x4D2E65..0x4D2E8C, DisarmPlayer @0x4D2FAF..0x4D2FD6, Cycle / EndMission / GameOver
+//  @0x4D30DE..0x4D30F0, ChangeTeam / SwapTeam @0x4D31EA..0x4D3211]
+bool check_server_command_gates() {
+	struct Row {
+		const char *verb;
+		const char *suffix;
+		std::vector<std::string> args;
+		bool hosting; // needs is_authority and the hosted session
+		bool table;   // needs the player table (or, here, a World to act on)
+		bool modeled; // false for ReloadPlayer / DisarmPlayer
+	};
+	const std::vector<Row> rows = {
+			{"PuntPlayer", "ByIndex", {"2"}, true, true, true},
+			{"TextChatServer", "", {"hi"}, true, false, true},
+			{"TextChatPlayer", "ByIndex", {"2", "you"}, true, true, true},
+			{"CmdEchoPlayer", "ByIndex", {"2", "echo"}, true, true, true},
+			{"KillPlayer", "ByIndex", {"2"}, true, true, true},
+			{"ChangeTeam", "ByIndex", {"2"}, true, true, true},
+			{"SwapTeam", "ByIndex", {"2"}, true, true, true},
+			{"Cycle", "", {}, true, true, true},
+			{"EndMission", "", {"Red"}, true, true, true},
+			{"GameOver", "", {}, true, true, true},
+			{"Earthquake", "", {}, true, true, true},
+			{"Lightning", "", {}, true, true, true},
+			{"TimeOfDay", "", {}, true, true, true},
+			{"SetServerName", "", {"Gated"}, true, false, true},
+			{"SetServerMsg", "", {"Gated"}, true, false, true},
+			{"SetMPReset", "", {"4"}, false, false, true},
+			{"ReloadPlayer", "ByIndex", {"2"}, true, true, false},
+			{"DisarmPlayer", "ByIndex", {"2"}, true, true, false},
+	};
+	// The receiver's state per pass: {authority, in session, a World}.
+	struct State {
+		bool authority, session, world;
+		const char *what;
+	};
+	const State states[] = {
+			{true, true, true, "the hosting authority with its match"},
+			{false, true, true, "a receiver that is not the authority"},
+			{true, false, true, "an authority whose hosted session is down"},
+			{false, false, false, "no authority, no session, no World"},
+			{true, true, false, "the hosting authority with no player table"},
+	};
+	for (const State &s : states) {
+		for (const Row &row : rows) {
+			HostFixture f(2, 1);
+			f.ctx.is_authority = s.authority ? 1 : 0;
+			f.ctx.is_in_session = s.session ? 1 : 0;
+			f.ctx.config.multiplayer_reset = 0;
+			const inmatch::ServerCommandOutcome out = inmatch::Server_ExecuteServerCommand(
+					f.ctx, s.world ? &f.world : nullptr, row.verb, row.suffix, row.args);
+			const bool want = row.modeled && (!row.hosting || (s.authority && s.session)) &&
+			                  (!row.table || s.world);
+			if (!expect(out.handled == want, "each verb runs exactly under its own gates")) {
+				std::fprintf(stderr, "  %s%s under %s: handled %d, want %d\n", row.verb, row.suffix, s.what,
+				             int(out.handled), int(want));
+				return false;
+			}
+		}
+	}
+	// SetMPReset outside the authority and the session still stores its argument and asks for
+	// the save (atol, then Game_SaveConfig) [orig: @0x4D2E1B..0x4D2E2D].
+	HostFixture peer(0, 1);
+	peer.ctx.is_authority = 0;
+	peer.ctx.is_in_session = 0;
+	inmatch::ServerCommandOutcome out =
+			inmatch::Server_ExecuteServerCommand(peer.ctx, nullptr, "SetMPReset", "", {"7"});
+	if (!expect(out.handled && out.config_changed && peer.ctx.config.multiplayer_reset == 7,
+			"SetMPReset runs on a receiver that is neither the authority nor in session"))
+		return false;
+	// Its one gate is the token count [orig: `cmp edi, 1; jle` @0x4D2E12].
+	out = inmatch::Server_ExecuteServerCommand(peer.ctx, nullptr, "SetMPReset", "", {});
+	if (!expect(!out.handled && !out.config_changed && peer.ctx.config.multiplayer_reset == 7,
+			"SetMPReset without its argument is the no-op tail"))
+		return false;
+	// The numbers are the CRT atol's, 32-bit on every host: a value past the int32 range
+	// saturates (an LP64 strtol narrowed "4294967298" to slot 2 and "4294967296" to 0), and an
+	// index past the slot capacity is no slot rather than a byte that wraps onto one.
+	// [orig: _atol @0x76AB0A; PlayerState_GetByIndex @0x500850..0x500861]
+	HostFixture wide(2, 1);
+	out = inmatch::Server_ExecuteServerCommand(wide.ctx, &wide.world, "PuntPlayer", "ByIndex",
+			{"4294967298"});
+	if (!expect(!out.handled && !wide.conn(0).host_disconnect_sent && !wide.conn(1).host_disconnect_sent,
+			"PuntPlayerByIndex 4294967298 saturates to INT32_MAX and punts nobody"))
+		return false;
+	out = inmatch::Server_ExecuteServerCommand(wide.ctx, &wide.world, "PuntPlayer", "ByIndex", {"258"});
+	if (!expect(!out.handled && !wide.conn(1).host_disconnect_sent,
+			"PuntPlayerByIndex 258 is past the slot capacity and does not wrap onto slot 2"))
+		return false;
+	out = inmatch::Server_ExecuteServerCommand(wide.ctx, &wide.world, "SetMPReset", "", {"4294967296"});
+	if (!expect(out.handled && wide.ctx.config.multiplayer_reset == INT32_MAX,
+			"SetMPReset 4294967296 saturates to INT32_MAX, a nonzero mpreset"))
+		return false;
+	out = inmatch::Server_ExecuteServerCommand(wide.ctx, &wide.world, "SetMPReset", "", {"-4294967296"});
+	if (!expect(out.handled && wide.ctx.config.multiplayer_reset == INT32_MIN,
+			"SetMPReset -4294967296 saturates to INT32_MIN"))
+		return false;
+	// The string verbs' token gate holds under the hosting gate too.
+	HostFixture host(2, 1);
+	out = inmatch::Server_ExecuteServerCommand(host.ctx, &host.world, "SetServerName", "", {});
+	if (!expect(!out.handled, "SetServerName without its argument is the no-op tail")) return false;
+	out = inmatch::Server_ExecuteServerCommand(host.ctx, &host.world, "TextChatServer", "", {});
+	return expect(!out.handled, "TextChatServer without its text is the no-op tail");
 }
 
 // --------------------------------------------------------------------------
@@ -1430,6 +1541,7 @@ int main() {
 	ok = check_medic_heal_transaction() && ok;
 	ok = check_session_ping_codec() && ok;
 	ok = check_server_commands() && ok;
+	ok = check_server_command_gates() && ok;
 	ok = check_change_team() && ok;
 	ok = check_player_enter_hook() && ok;
 	ok = check_visible_players_snapshot() && ok;

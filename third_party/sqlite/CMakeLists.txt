@@ -10,7 +10,10 @@
 # Built as a small static library so libs/novaworld/db can link it without every
 # consumer recompiling sqlite3.c. Compile-time defines follow the standard
 # "embedded library" recipe:
-#   THREADSAFE=1                — multi-threaded; we serialize via SQLITE_OPEN_NOMUTEX in code
+#   THREADSAFE=1                — serialized mode (connections open without
+#                                 SQLITE_OPEN_NOMUTEX); every thread still owns
+#                                 its own connection (db::ConnectionPool), since
+#                                 the per-connection mutex only stops crashes
 #   ENABLE_FTS5                 — full-text search may be useful for log inspection
 #   ENABLE_JSON1                — JSON1 extension for JSON /api responses
 #   OMIT_LOAD_EXTENSION         — no dlopen/LoadLibrary attack surface

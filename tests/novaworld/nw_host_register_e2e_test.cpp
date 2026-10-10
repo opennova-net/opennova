@@ -90,8 +90,8 @@ int main() {
 	// Keep the selected port for the stop/start lifecycle check later in this
 	// test; only the initial allocation needs to be collision-free.
 	config.nw_udp_port = test_nw_port;
-	// Let the worker thread re-bind its socket before the first datagram.
-	std::this_thread::sleep_for(50ms);
+	// No wait before the first datagram: start() hands its bound socket to the
+	// worker thread, so a datagram sent now queues on the port it reported.
 
 	// The client: a real ClientSession over a real UDP socket — exactly what
 	// NwuLobbySession::begin_session sets up (minus the gate-probe leg, which only
@@ -1130,7 +1130,6 @@ int main() {
 	       "listener restart reuses the prior JO client endpoint");
 	const bool restarted = listener.start(config);
 	expect(restarted, "listener starts again after a complete stop");
-	std::this_thread::sleep_for(50ms);
 	if (restarted && hello_only_client.is_valid()) {
 		opennova::ClientSession fresh_hello_only(hello_only_cfg);
 		const std::vector<uint8_t> fresh_hello =

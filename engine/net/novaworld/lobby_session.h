@@ -147,7 +147,9 @@ public:
 	// non-null, ClientHostRequest / ClientHostUpdate / ClientHostPlayerAdded /
 	// ClientHostPlayerRemoved upsert/delete `active_hosts` + `host_players`
 	// rows; null leaves the dispatcher purely in-memory (used by tests
-	// that don't bring up sqlite).
+	// that don't bring up sqlite). The connection belongs to the thread that
+	// calls dispatch() (Database is single-threaded; the NW UDP listener hands
+	// over the one its receive thread leases).
 	void set_database(opennova::db::Database *db) { db_ = db; }
 
 	// Reflection override for the advertised game-host endpoint (dev/NAT). When
