@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/file_io.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
@@ -43,6 +44,7 @@
 #include <formats/pff/pff.h>
 
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/import_test_support.h"
 #include "common/png_test_support.h"
@@ -372,6 +374,38 @@ static int test_plan_not_followed() {
 	// The dialog bank is a document the graph reads (DI-32): its lines' waves followed, nothing left unfollowed.
 	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::DialogBank));
 	TEST_EXPECT(!not_followed(plan, ReferenceKind::MenuScreen) && !not_followed(plan, ReferenceKind::Sound));
+	// Needed by in a modder's words: the definition's record by its kind and name, its field by the label the
+	// definitions give it (def_words), never the key as written.
+	const std::string vehicles = project.dir.file("vehicles");
+	TEST_EXPECT(editor_test::write_text(vehicles + "/items.def", "begin \"Dune Buggy\"\nid 100200\ntype building\ndefault_aip buggy.aip\nend\n") &&
+	            editor_test::write_text(vehicles + "/buggy.aip", "aip"));
+	const ImportPlan worded = project.plan({{vehicles + "/items.def", {}}});
+	const ImportPlanRow *profile = row_named(worded, "buggy.aip");
+	TEST_EXPECT(profile && profile->needed_by.file == "items.def" && profile->needed_by.field == "default_aip");
+	TEST_EXPECT(profile && profile->needed_by.words.find("Default AI profile") != std::string::npos &&
+	            profile->needed_by.words.find("default_aip") == std::string::npos);
+	if (profile) std::printf("needed by: %s\n", import_need_text(profile->needed_by).c_str());
+	// A model planned alone comes with its rig: the animation table the item that shows it pairs with it in the
+	// place's items.def (its anim_def beside its graphic), as the model preview plays it.
+	{
+		const std::string rigs = project.dir.file("rigs");
+		TEST_EXPECT(editor_test::write_text(rigs + "/items.def",
+		                                    "begin \"Rifleman\"\nid 100300\ntype building\ngraphic onjo\nanim_def onjo.adm\nend\n") &&
+		            editor_test::write_text(rigs + "/onjo.adm", "adm") && editor_test::write_text(rigs + "/other.adm", "adm"));
+		std::vector<uint8_t> model;
+		std::string unread;
+		TEST_EXPECT(opennova::io::read_file_bytes(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/armory.3di",
+		                                          model, unread));
+		TEST_EXPECT(editor_test::write_bytes(rigs + "/onjo.3di", model));
+		const ImportPlan rigged = project.plan({{rigs + "/onjo.3di", {}}});
+		const ImportPlanRow *table = row_named(rigged, "onjo.adm");
+		TEST_EXPECT(table && table->state == State::Found && table->kind == AssetKind::AnimationMap &&
+		            table->needed_by.file == "items.def" && table->needed_by.field == "anim_def" &&
+		            table->needed_by.reference == ReferenceKind::AnimationMap);
+		TEST_EXPECT(!row_named(rigged, "other.adm") && !row_named(rigged, "items.def"));
+		// Without the dependencies, the model alone.
+		TEST_EXPECT(!row_named(project.plan({{rigs + "/onjo.3di", {}}}, false), "onjo.adm"));
+	}
 	TEST_EXPECT(plan.undefined.size() == 1 && plan.undefined[0].reference == ReferenceKind::Sound &&
 	            plan.undefined[0].count == 1 && plan.undefined[0].first == "items.def");
 	{

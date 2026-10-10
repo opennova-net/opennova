@@ -279,7 +279,14 @@ ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView
 	const AssetEntry *entry = view.project.scan->at_path(diagnostic.asset);
 	if (!entry) return location;
 	location.path = entry->relative_path;
-	location.in_files = !is_editable_kind(entry->kind) || about_the_file(diagnostic);
+	location.in_files = about_the_file(diagnostic);
+	if (!location.in_files && !is_editable_kind(entry->kind)) {
+		// A file the editor has no editor for: its page, the record and field the finding names marked.
+		location.page = true;
+		location.locator = diagnostic.record;
+		location.field = diagnostic.field;
+		return location;
+	}
 	if (!location.in_files && diagnostic.row_id) {
 		location.record = {diagnostic.row_id, diagnostic.record_kind, diagnostic.child_id};
 		location.field = diagnostic.field;
@@ -341,6 +348,7 @@ std::string finding_field_title(const Diagnostic &diagnostic, const SessionView 
 
 EditorRequest ProblemLocation::request() const {
 	if (in_files) return request::show_in_files(path);
+	if (page) return request::open_document(path, locator, field);
 	if (!locator.empty()) return request::open_document(path, locator);
 	return request::open_record(path, record, field);
 }

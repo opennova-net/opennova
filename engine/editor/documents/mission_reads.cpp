@@ -58,7 +58,7 @@ MissionPathRead read_path(const PathRow &row, const std::vector<const Node *> &m
 	out.address = {row.id, row.kind, 0};
 	out.number = row.native.number;
 	out.flags = static_cast<uint32_t>(row.native.record.flags);
-	const std::vector<uint32_t> &stops = row.native.record.waypoint_numbers;
+	const std::vector<uint32_t> &stops = row.native.stops;
 	const std::vector<RecordIds> &ids = row.ids.lists.empty() ? std::vector<RecordIds>() : row.ids.lists[0];
 	for (size_t i = 0; i < stops.size() && i < ids.size(); ++i) {
 		out.stops.push_back({row.id, k(K::Stop), ids[i].id});
@@ -103,7 +103,7 @@ std::vector<MissionPathRead> mission_paths(const MissionDocument &document) {
 	const std::vector<const Node *> markers = document.rows_of(K::Marker);
 	for (const Node *row : document.rows_of(K::WaypointPath)) {
 		const PathRow &path = static_cast<const PathRow &>(*row);
-		if (path.native.record.waypoint_numbers.empty()) continue;
+		if (path.native.stops.empty()) continue;
 		out.push_back(read_path(path, markers));
 	}
 	return out;

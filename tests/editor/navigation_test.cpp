@@ -24,10 +24,11 @@
 #include <editor/model/document.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
-#include <editor/session/file_page.h>
+#include <editor/session/file_card.h>
 #include <editor/session/navigation_history.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
+#include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
@@ -399,11 +400,11 @@ JsonValue parsed(const std::string &text) {
 }
 
 // The lines of a page a Go to marked.
-std::vector<std::string> marked_lines(const FilePage &page) {
+std::vector<std::string> marked_lines(const FileCard &page) {
 	std::vector<std::string> out;
-	for (const FilePageDefinition &defined : page.defines)
+	for (const FileCard::Definition &defined : page.defines)
 		if (defined.at) out.push_back(defined.text);
-	for (const FilePageLine &line : page.names)
+	for (const FileCard::Named &line : page.names)
 		if (line.at) out.push_back(line.text);
 	return out;
 }
@@ -438,7 +439,7 @@ int test_go_to_lands() {
 	// The face animation, a record document since round S23, from the texture it names as its base: the face opened,
 	// its row selected at the base texture's field, a step from where the person was.
 	ReferenceTarget base;
-	for (const FilePageLine &line : file_page(v, "textures/map.tga").used_by)
+	for (const FileCard::User &line : file_card(v, "textures/map.tga").used_by)
 		if (line.target.file == face) base = line.target;
 	TEST_EXPECT(!base.locator.empty() && base.field == "base_texture" && base.editable);
 	TEST_EXPECT(n.go(request::open_document(base.file, base.locator, base.field)) && v.documents.active == face &&
@@ -447,10 +448,10 @@ int test_go_to_lands() {
 	// Its missing normal-map twin (map.MDT, a name its loader makes): no file to go to (its finding in Problems holds
 	// the fixes); the face's page lists it, marking nothing.
 	size_t missing = 0;
-	for (const FilePageLine &line : file_page(v, face).names)
-		if (line.missing) missing += line.target.file.empty() && line.name == "map.MDT" ? 1 : 100;
+	for (const FileCard::Named &line : file_card(v, face).names)
+		if (line.missing()) missing += line.target.file.empty() && line.value == "map.MDT" ? 1 : 100;
 	TEST_EXPECT(missing == 1);
-	TEST_EXPECT(marked_lines(file_page(v, face)).empty());
+	TEST_EXPECT(marked_lines(file_card(v, face)).empty());
 	TEST_EXPECT(n.back() && v.documents.active == n.extra);
 	TEST_EXPECT(n.forward() && v.documents.active == face);
 
@@ -467,7 +468,7 @@ int test_go_to_lands() {
 	std::vector<ViewEvent> shown = editor_test::events_after(v, seq, ViewEventKind::ShowDocument);
 	TEST_EXPECT(shown.size() == 1 && shown[0].path == coo && shown[0].flag);
 	TEST_EXPECT(v.navigation.back.front().pane == Pane::Document && v.navigation.back.front().path == face);
-	TEST_EXPECT(marked_lines(shown_file_page(v, coo)).empty());
+	TEST_EXPECT(marked_lines(shown_file_card(v, coo)).empty());
 	TEST_EXPECT(n.go(request::open_document(coo, "", "names")) && v.documents.page_field == "names");
 	TEST_EXPECT(v.navigation.back.front().pane == Pane::Page && v.navigation.back.front().path == coo &&
 	            v.navigation.back.front().locator.empty() && v.navigation.back.front().field == "strings" &&
@@ -475,13 +476,31 @@ int test_go_to_lands() {
 	TEST_EXPECT(n.back() && v.documents.page == coo && v.documents.page_field == "strings");
 	TEST_EXPECT(n.back() && v.documents.active == face);
 	TEST_EXPECT(n.forward(2) && v.documents.page == coo && v.documents.page_field == "names");
+	// A Problems row about it (a finding on its strings, as the graph's rows name a field): its Go to an
+	// OpenDocument as every Go to's, landing on the page with the record and field it names, the shown card's
+	// place (a line whose edge stands there is marked; no kind the editor has no editor for makes edges since
+	// round S23, so none here).
+	{
+		Diagnostic row = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Warning, "A name the strings hold.",
+		                              coo, "strings");
+		const ProblemLocation location = problem_location(row, v);
+		TEST_EXPECT(location.page && !location.in_files && location.path == coo && location.field == "strings" &&
+		            location.request().kind == EditorRequestKind::OpenDocument);
+		TEST_EXPECT(n.go(request::open_document(n.extra)) && n.go(location.request()) && v.documents.page == coo &&
+		            v.documents.page_locator.empty() && v.documents.page_field == "strings");
+		const FileCard shown_card = shown_file_card(v, coo);
+		TEST_EXPECT(shown_card.found && shown_card.at_locator.empty() && shown_card.at_field == "strings");
+		// About the file as a whole (its name): shown in Files, where Rename... sets it right.
+		row = make_finding(CoreFinding::AssetNameTooLong, DiagnosticSeverity::Error, "A name too long.", coo);
+		TEST_EXPECT(problem_location(row, v).in_files && !problem_location(row, v).page);
+	}
 
 	// A wave, a document since round S23, its page's Play; its user, the bank, is a document of its own: opened at the
 	// single.
 	TEST_EXPECT(n.go(request::open_document(wave)) && v.documents.active == wave);
-	const FilePage wave_page = file_page(v, wave);
+	const FileCard wave_page = file_card(v, wave);
 	ReferenceTarget single;
-	for (const FilePageLine &line : wave_page.used_by)
+	for (const FileCard::User &line : wave_page.used_by)
 		if (line.target.file == bank) single = line.target;
 	TEST_EXPECT(wave_page.found && wave_page.wave && single.editable && !single.locator.empty());
 	TEST_EXPECT(n.go(request::open_document(single.file, single.locator, single.field)) && v.documents.active == bank);
@@ -536,14 +555,14 @@ int test_go_to_lands() {
 
 	// The wire: a file's page asked by its path, what it names going where (the face's base texture), the wave's Play.
 	std::string error;
-	JsonValue page = n.session.query("file_page", parsed(R"({"path": "faces/head.grm"})"), error);
+	JsonValue page = n.session.query("file_card", parsed(R"({"path": "faces/head.grm"})"), error);
 	TEST_EXPECT(page.get_string("path", "") == face && !page.get("at_locator") && !page.get("at_field") && !page.get("wave"));
 	bool to_map = false;
 	if (const JsonValue *names = page.get("names"))
 		for (const JsonValue &line : names->array)
 			to_map |= line.get_string("file", "") == "textures/map.tga";
 	TEST_EXPECT(to_map);
-	page = n.session.query("file_page", parsed(R"({"path": "sounds/tone.wav"})"), error);
+	page = n.session.query("file_card", parsed(R"({"path": "sounds/tone.wav"})"), error);
 	bool to_bank = false;
 	if (const JsonValue *users = page.get("used_by"))
 		for (const JsonValue &line : users->array)
@@ -551,7 +570,7 @@ int test_go_to_lands() {
 	TEST_EXPECT(page.get_bool("wave", false) && to_bank && !page.get("at_field"));
 	// The page showing with the field its Go to named, on the wire.
 	TEST_EXPECT(n.go(request::open_document(coo, "", "strings")));
-	page = n.session.query("file_page", JsonValue(), error);
+	page = n.session.query("file_card", JsonValue(), error);
 	TEST_EXPECT(page.get_string("path", "") == coo && !page.get("at_locator") && page.get_string("at_field", "") == "strings");
 	const JsonValue state = n.session.query("state", parsed(R"({"sections": ["documents", "navigation"]})"), error);
 	const JsonValue *documents = state.get("documents");

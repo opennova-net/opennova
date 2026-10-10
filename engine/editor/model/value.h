@@ -181,6 +181,9 @@ struct SourceIssue {
 	std::string field;
 	std::string message;
 	std::string locator; // the record's Document::locator, when the type knows it ("" = the file)
+	// A blocking issue the game's own reader stops at, or corrupts its state over, beside the input the
+	// model cannot carry (source_issue_findings' `stops` row; the audit's ABORT-FILE).
+	bool game_stops = false;
 };
 
 struct SerializeResult {

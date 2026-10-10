@@ -287,7 +287,6 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/file_page.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_uses.cpp
