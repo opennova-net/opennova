@@ -5,6 +5,7 @@
 #include "authoring/definition_viewport_applier.h"
 #include "authoring/effect_viewport_applier.h"
 #include "authoring/environment_viewport_applier.h"
+#include "authoring/font_viewport_applier.h"
 #include "authoring/hud_viewport_applier.h"
 #include "authoring/menu_viewport_applier.h"
 #include "authoring/mission_viewport_applier.h"
@@ -50,6 +51,9 @@ std::unique_ptr<ViewportApplier> make_environment_applier(SubViewport &viewport)
 std::unique_ptr<ViewportApplier> make_terrain_applier(SubViewport &viewport) {
 	return std::make_unique<TerrainViewportApplier>(viewport);
 }
+std::unique_ptr<ViewportApplier> make_font_applier(SubViewport &viewport) {
+	return std::make_unique<FontViewportApplier>(viewport);
+}
 
 constexpr ViewportDeviceRow kDevices[] = {
 	{ ViewportKind::Menu, make_menu_applier, nullptr },
@@ -62,6 +66,7 @@ constexpr ViewportDeviceRow kDevices[] = {
 	{ ViewportKind::Definition, make_definition_applier, nullptr },
 	{ ViewportKind::Environment, make_environment_applier, nullptr },
 	{ ViewportKind::Terrain, make_terrain_applier, nullptr },
+	{ ViewportKind::Font, make_font_applier, nullptr },
 };
 
 constexpr bool devices_in_order() {
