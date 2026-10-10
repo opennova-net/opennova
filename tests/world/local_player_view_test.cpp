@@ -2332,6 +2332,25 @@ void test_scoped_aim_survives_kernel_replacement_without_sharing_sessions() {
     CHECK(independent.w.prng16_state == World::kMissionPrng16Seed);
 }
 
+// The pack's body stamp alone (a caller that runs no pack): a settled scope raises the body's scope and its
+// Flags bit and makes the aimed shot available (the crosshair's gate), and a lowered one takes them down, as
+// the pack's own call does. [orig: Player_PackInputStateToEntity @0x4DF450]
+void test_body_view_stamp_alone() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = DEF_WEAPON_FLAG_SIGHTED;
+    f.player.stamp_body_view();
+    CHECK(f.body().inf.scope_raised);
+    CHECK((f.entity().flags & kEntityFlagScopeRaised) != 0);
+    CHECK(f.body().inf.aimed_shot_available == f.player.local_player_can_fire());
+    CHECK(f.body().inf.aimed_shot_available);
+    f.player.view.scope_engaged = false;
+    f.player.view.scope_settled = false;
+    f.player.stamp_body_view();
+    CHECK(!f.body().inf.scope_raised);
+    CHECK((f.entity().flags & kEntityFlagScopeRaised) == 0);
+    CHECK(f.body().inf.aimed_shot_available == f.player.local_player_can_fire());
+}
+
 // A direction key in the packed word drops the raw binocular toggle: the
 // view lowers and stays down after the key releases. Between a joiner's send
 // boundaries nothing is packed, so the toggle survives until the boundary
@@ -2741,6 +2760,7 @@ int main() {
     test_scoped_aim_original_sequences();
     test_scoped_aim_gates_and_independent_stance_resets();
     test_scoped_aim_body_input_camera_and_fired_round();
+    test_body_view_stamp_alone();
     test_pack_drops_the_binocular_toggle_on_movement();
     test_pack_owns_the_movement_latch_and_unscope();
     test_pack_masks_movement_under_a_nomove_weapon();

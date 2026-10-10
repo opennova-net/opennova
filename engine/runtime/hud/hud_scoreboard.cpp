@@ -1,5 +1,7 @@
 #include <runtime/hud/hud_scoreboard.h>
 
+#include <base/gameprofile/game_type.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -274,6 +276,24 @@ uint32_t scoreboard_flag_carrier_color(uint8_t team, uint32_t hud_color) {
 	if (team == 1) return kTeamAColor; // [orig: palette[3] @0x42397c]
 	if (team == 2) return kTeamBColor; // [orig: palette[5] @0x423986]
 	return hud_color;                  // [orig: g_HUDColors.active @0x42398e]
+}
+
+ScoreboardHeaderStrings scoreboard_header_strings(const GameTextLookup &gametext, bool gametext_loaded,
+		const GameTextLookup &keyhelp, uint32_t game_type, int players, int spectators) {
+	ScoreboardHeaderStrings out;
+	// [orig: GameText_GetStringWithFallback @0x423a75]
+	out.title = game_text(gametext, kGameTextOverlays, "STROVER_KILLLIST", "!Kill List");
+	// [orig: HUD_GetGameTypeOverlayLabel @0x5b8680]
+	const char *rung = game_type::overlay_label_key(game_type);
+	if (rung[0] != 0) out.game_type_label = game_text(gametext, kGameTextOverlays, rung, "");
+	// [orig: "%s %i" @0x4231fb; the spectators' gate @0x42322a, "%s %i" @0x42324a]
+	out.players_line = game_text(gametext, kGameTextClient, "STRCLI04", "") + " " + std::to_string(players);
+	if (spectators > 0)
+		out.spectators_line = game_text(gametext, kGameTextClient, "STRCLI23", "") + " " + std::to_string(spectators);
+	// [orig: KeyHelp_GetStringWithFallback @0x51ed40 from @0x424272]
+	static constexpr const char *kPageHint = "!PgUp and PgDn to change pages";
+	out.footer = gametext_loaded && keyhelp ? keyhelp("Text", "CHANGE_SCREEN", kPageHint) : std::string(kPageHint);
+	return out;
 }
 
 ScoreboardText scoreboard_text(const GameTextLookup &gametext) {

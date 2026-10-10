@@ -1140,7 +1140,7 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 
 // The Tab board's header as the shell needs it. Row data no longer rides a
 // script Dictionary: HudOverlay pulls the drawn rows natively through
-// fill_scoreboard_rows, and the counts here come from the same replication
+// fill_scoreboard, and the counts here come from the same replication
 // projection (replication::scoreboard_header — the accepted-rows-minus-spectators
 // players count is the witnessed header arithmetic, retail @0x4231dd).
 Ref<ScoreboardHeader> Simulation::get_scoreboard() const {
