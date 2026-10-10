@@ -224,4 +224,56 @@ bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading) 
 	return true;
 }
 
+bool read_table(const uint8_t *data, size_t size, Table &out, Reading *reading, textlayout::Notes &notes) {
+	Reading own;
+	Reading &read = reading != nullptr ? *reading : own;
+	const bool loaded = read_table(data, size, out, &read);
+	// The lines as the ConfigFile reader ends them (a CR LF pair alone [orig: ConfigFile_ParseText @ 0x7608a0]),
+	// each a line of the class whose section it stands in when the loader read a value from it, the section's
+	// own line that class's first, every other line (a comment, a key the loader reads nothing of, a section it
+	// never reaches, what stands before the first section) read for nothing.
+	const char *text = reinterpret_cast<const char *>(data);
+	textlayout::Noter noter(text, data != nullptr ? size : 0, &notes, configfile::cut_config_line);
+	out.note = noter.root();
+	uint64_t open = 0;
+	size_t open_class = kClassCount;
+	for (size_t begin = 0; data != nullptr && begin < size;) {
+		size_t end = begin;
+		while (end < size && !(text[end] == '\r' && end + 1 < size && text[end + 1] == '\n')) ++end;
+		const size_t next = end < size ? end + 2 : size;
+		noter.line(begin, next);
+		bool section = false;
+		for (size_t index = 0; index < read.classes; ++index) {
+			if (!read.sources[index].read || read.sources[index].section_offset != begin) continue;
+			if (open) noter.end_before(open);
+			open = noter.open(noter.root());
+			open_class = index;
+			out.rows[index].note = open;
+			noter.entry(open, "[");
+			section = true;
+		}
+		if (!section) {
+			for (const UnreadSection &unread : read.unread)
+				if (unread.offset == begin && open) {
+					noter.end_before(open);
+					open = 0;
+					open_class = kClassCount;
+				}
+		}
+		if (!section && open && open_class < kClassCount) {
+			const ClassSource &source = read.sources[open_class];
+			for (uint8_t property = 0; property < kPropertyCount; ++property) {
+				const ValueSource &value = source.values[property];
+				if (!value.read || value.offset < begin || value.offset >= end) continue;
+				noter.entry(open, property_key(property));
+				break;
+			}
+		}
+		begin = next;
+	}
+	noter.finish();
+	model_layout(out, notes);
+	return loaded;
+}
+
 } // namespace opennova::charattr

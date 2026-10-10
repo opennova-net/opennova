@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include <formats/textlayout/text_layout.h>
+
 namespace opennova::configfile {
 
 struct ConfigValue {
@@ -121,5 +123,12 @@ size_t data_strings_overrun_offset(const std::vector<ConfigSection> &sections, c
 // byte offset into the text; one past it, or one given twice, puts none): a line opening with ';' is no
 // entry to the reader [orig: ini_parse_section_entries @ 0x75dc04, its key "%[^;\n\r=]" of no character].
 std::string config_commented(const std::string &text, std::vector<size_t> line_starts);
+
+// A text line (CR LF its ending: the one break the reader ends a line at) cut into its layout's parts
+// (textlayout::Line, the noted writers' model of a file's look): its words end at a blank, an '=' or a ','
+// (the entry's key and its values [orig: ini_parse_section_entries @ 0x75db80, the key "%[^;\n\r=]";
+// ConfigFile_CountCommaSeparatedValues @ 0x75de30, the values split on ',' and ' ']), and a ';' starts its
+// comment (where the reader's key and value stop). A section's line is one word.
+textlayout::Line cut_config_line(const char *text, size_t length);
 
 } // namespace opennova::configfile
