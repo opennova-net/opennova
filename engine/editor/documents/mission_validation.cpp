@@ -50,7 +50,6 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::ZoneId, { "mission.zone_id" } },
 	// Read with no bound, past the table, no refusal witnessed (the gate follows retail): listed.
 	{ MissionFinding::EventMissing, listed_code("mission.event_missing") },
-	{ MissionFinding::MarkerMissing, { "mission.marker_missing" } },
 	{ MissionFinding::PathCount, { "mission.path_count" } },
 	{ MissionFinding::PathOneShot, { "mission.path_one_shot" } },
 	{ MissionFinding::PathEmpty, { "mission.path_empty" } },
@@ -167,16 +166,21 @@ struct Checker {
 			// slot word there as written [orig: AIWaypoint_UpdateTarget @0x457476 reads the raw slot].
 			if (entity.waypoint_id >= 1 && entity.waypoint_id <= kLastPathNumber && size_t(entity.waypoint_id) < paths.size()) {
 				const MissionPath &path = static_cast<const PathRow &>(*paths[entity.waypoint_id]).native;
+				// (A waypoint marker's path and place are its membership of the path, D-MIS-6: it walks none.)
 				const size_t count = path.stops.size();
-				if (count == 0)
+				const size_t slots = std::min(count, kMaxWaypointPathMarkers);
+				if (entity.type_id == def::DEF_TYPE_WAYPOINT) {
+				} else if (count == 0) {
 					on(address, MissionFinding::PathEmpty, DiagnosticSeverity::Info,
 					   "Waypoint path " + std::to_string(entity.waypoint_id) + " has no stop: the entity walks nowhere.",
 					   "waypoint_id");
-				else if (entity.wp_number < 0 || size_t(entity.wp_number) >= count)
+				} else if (entity.wp_number < 0 || size_t(entity.wp_number) >= slots) {
 					on(address, MissionFinding::PathStart, DiagnosticSeverity::Warning,
-					   "Waypoint number " + std::to_string(entity.wp_number) + " is past the " + std::to_string(count) +
-					           " stops of path " + std::to_string(entity.waypoint_id) + ": the game reads the slot word there as written.",
+					   "Waypoint number " + std::to_string(entity.wp_number) + " is past the " +
+					           (count > slots ? std::string("32 slots") : std::to_string(count) + " stops") + " of path " +
+					           std::to_string(entity.waypoint_id) + ": the game reads the slot word there as written.",
 					   "wp_number");
+				}
 			}
 		}
 		// The SSNs the fixes give the rows no lookup finds, each its own: from one past the mission's
@@ -253,9 +257,10 @@ struct Checker {
 				const NodeAddress stop{row->id, k(K::Stop), ids[i].id};
 				const std::string marker = "Marker " + std::to_string(stops[i]);
 				if (stops[i] >= markers) {
-					on(stop, MissionFinding::MarkerMissing, DiagnosticSeverity::Warning,
-					   "The stop names marker " + std::to_string(stops[i]) + ", and the mission has " +
-					           std::to_string(markers) + ": the game reads the pool's zeroed entry (position 0, radius 0).",
+					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,
+					   "The stop names marker " + std::to_string(stops[i]) + ", and the mission has " + std::to_string(markers) +
+					           ": a save puts a stop on its path through its waypoint marker, so it cannot write this one. "
+					           "Name a waypoint marker.",
 					   "marker");
 				} else if (path.native.number == 0) {
 					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,

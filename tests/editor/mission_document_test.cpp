@@ -961,7 +961,7 @@ int test_validation() {
 	TEST_EXPECT(one(edit_of(EditOperation::Set, area1, "id", int64_t(100)), "mission.zone_id", DiagnosticSeverity::Info, area1, "id"));
 	TEST_EXPECT(one(edit_of(EditOperation::Set, action0, "param1", int64_t(5)), "mission.event_missing", DiagnosticSeverity::Error,
 	                action0, "param1"));
-	TEST_EXPECT(one(edit_of(EditOperation::Set, stop0, "marker", int64_t(9)), "mission.marker_missing", DiagnosticSeverity::Warning,
+	TEST_EXPECT(one(edit_of(EditOperation::Set, stop0, "marker", int64_t(9)), "mission.unserializable", DiagnosticSeverity::Error,
 	                stop0, "marker"));
 	TEST_EXPECT(one(edit_of(EditOperation::Set, organic0, "waypoint_id", int64_t(2)), "mission.path_empty", DiagnosticSeverity::Info,
 	                organic0, "waypoint_id"));
@@ -1488,15 +1488,19 @@ int test_retail() {
 	TEST_EXPECT(entity_refs == 4561 && entity_missing == 162 && zone_refs == 879 && zone_missing == 53);
 	// The event references: 841 Event triggers' and ResetEvent actions' and 73 type-6005 waypoints' advance
 	// triggers.
-	TEST_EXPECT(event_refs == 914 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 12824);
+	// The stops: every shipped path's waypoint markers (D-MIS-6), CP19's path 6 of 39 among them (its record's
+	// slots hold 32 of them).
+	TEST_EXPECT(event_refs == 914 && event_past == 0 && stops == 11242 && stops_past == 0 && text_refs == 12824);
 	// The text keys by key: no shipped action outputs a triggered text; each of the 11,250 type-6005 waypoints
 	// forms its name's, 822 of them of id -1 ("STRWPNAME-01", the key the spawn forms of it).
 	const std::map<std::string, size_t> keys = {{"LOCATION", 581},     {"STRLOSEDIRECTIVE", 17}, {"STRLOSEMSG", 29},
 	                                            {"STRNAME", 544},      {"STRWINCOND", 130},      {"STRWINDIRECTIVE", 133},
 	                                            {"STRWINMSG", 140},      {"STRWPNAME", 10428},     {"STRWPNAME-", 822}};
 	TEST_EXPECT(text_by_key == keys);
+	// (path_start: the 7 entities that walk a path from a stop past its slots; a waypoint marker's place is its
+	// membership of its path, D-MIS-6, no start.)
 	const std::map<std::string, size_t> expected = {{"mission.path_count", 1},      {"mission.path_empty", 115},
-	                                                {"mission.path_one_shot", 72},   {"mission.path_start", 95},
+	                                                {"mission.path_one_shot", 72},   {"mission.path_start", 7},
 	                                                {"mission.rewrite_differs", 5}, {"mission.ssn_duplicate", 36},
 	                                                {"mission.ssn_unscanned", 1}};
 	TEST_EXPECT(findings_by_code == expected);

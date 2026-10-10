@@ -36,7 +36,6 @@ enum class MissionFinding {
 	ZoneDegenerate,
 	ZoneId,
 	EventMissing,
-	MarkerMissing,
 	PathCount,
 	PathOneShot,
 	PathEmpty,

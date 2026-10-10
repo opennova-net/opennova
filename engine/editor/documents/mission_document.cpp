@@ -277,11 +277,36 @@ bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::
 	return true;
 }
 
+// The first of the paths' stops no save can write (D-MIS-6), in words; "" for none: a stop of path 0, one
+// naming no waypoint marker of the file, a marker two stops name (mission.unserializable says each).
+std::string unwritable_stop(const MissionDocument &document) {
+	const std::vector<const Node *> markers = document.rows_of(K::Marker);
+	std::set<uint32_t> carried;
+	for (const Node *row : document.rows_of(K::WaypointPath)) {
+		const MissionPath &path = static_cast<const PathRow &>(*row).native;
+		for (const uint32_t stop : path.stops) {
+			const std::string where = "Path " + std::to_string(path.number) + "'s stop naming marker " + std::to_string(stop);
+			if (path.number == 0) return where + ": path 0 is no path.";
+			if (stop >= markers.size() || static_cast<const EntityRow &>(*markers[stop]).native.type_id != def::DEF_TYPE_WAYPOINT)
+				return where + ": no waypoint marker of the mission is that one.";
+			if (!carried.insert(stop).second) return where + ": another stop names that marker.";
+		}
+	}
+	return std::string();
+}
+
 SerializeResult MissionDocument::serialize() const {
 	SerializeResult result;
 	if (blocked()) {
 		for (const SourceIssue &issue : issues())
 			if (issue.blocks) result.issues.push_back(issue);
+		return result;
+	}
+	// A path's stops are its waypoint markers' in the file: one no marker can carry is not written.
+	if (const std::string why = unwritable_stop(*this); !why.empty()) {
+		SourceIssue issue;
+		issue.message = why + " A save puts each stop on its path through its waypoint marker (mission.unserializable).";
+		result.issues.push_back(std::move(issue));
 		return result;
 	}
 	bms::File file;
