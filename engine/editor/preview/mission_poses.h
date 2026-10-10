@@ -29,6 +29,18 @@ class MissionScene;
 class ProjectAssetSource;
 struct SessionView;
 
+// What a person's spawn reads of its definition (its item's first row: its class, its .adm, its
+// attributes) and of its record (its SSN, its route, its attributes).
+struct PersonDefinition {
+	std::string ai_function;
+	std::string anim_def;
+	uint32_t attrib = 0;
+	// What its clips' events read of it (S23 C: the mission's people heard and firing as they play their clips): its
+	// sound profiles, the body its move_function runs, its organic ammo and launch points (ClipSoundItem's).
+	std::string sound_profile, sound_profile_female, move_function;
+	std::string ammo[4];
+	std::string launch[3];
+};
 // A placed person's body as the game spawns it (DI-38; docs/world/world-wac-ai-re.md section
 // 41): the state its definition's organic init requests and the playhead its warmup leaves,
 // before its first AI tick, computed by the engine's own spawn (world::organic_spawn_pose over
@@ -69,15 +81,13 @@ struct MissionPose {
 	bool settled = false; // the terrain's solve moved it
 	std::string clip, source_clip; // the .bad each channel plays ("" none)
 	uint32_t stamp = 0; // moves when anything above does
+	// The definition it was posed from, its .adm's id in the poses' root motion, and its channels as the init and
+	// the warmup leave them (world::OrganicSpawnBody's), which the people's play ticks on (mission_people.h).
+	PersonDefinition definition;
+	int adm_id = -1;
+	world::InfantryState channels;
 };
 
-// What a person's spawn reads of its definition (its item's first row: its class, its .adm, its
-// attributes) and of its record (its SSN, its route, its attributes).
-struct PersonDefinition {
-	std::string ai_function;
-	std::string anim_def;
-	uint32_t attrib = 0;
-};
 struct PersonRecord {
 	int ssn = 0;
 	int route = 0;
@@ -104,7 +114,7 @@ struct MissionPoseInput {
 void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
 		const std::function<const PersonDefinition *(int64_t)> &item_of,
 		const std::function<bool(const std::string &)> &has_file, const std::shared_ptr<const StampedFiles> &files,
-		anim::AdmRootMotion &motion, std::vector<MissionPose> &out);
+		anim::AdmRootMotion &motion, std::vector<MissionPose> &out, world::AnimVariantRings *rings_out = nullptr);
 
 // The warmup's ground solve over the terrain alone for a posed person whose record stands at (x, y, z):
 // its feet's height over the terrain's column there, 16.16, once the warmup has lifted it by its rise
@@ -141,6 +151,12 @@ public:
 	size_t files_read() const { return files_read_; }
 	// Moves whenever a pose's stamp does (a pose or a lift changed).
 	uint32_t serial() const { return serial_; }
+	// The root motion the people were posed through (their .adm ids its), and the .adms' ring heads as the last spawn
+	// left them: what their play ticks on with (mission_people.h). Null before a pose.
+	anim::AdmRootMotion *motion() const { return motion_.get(); }
+	const world::AnimVariantRings &rings() const { return rings_; }
+	// How many times the people were posed (moves with each pose_all_).
+	size_t generation() const { return runs_; }
 
 private:
 	struct Catalog {
@@ -153,6 +169,7 @@ private:
 	std::shared_ptr<const ProjectAssetSource> source_;
 	std::shared_ptr<StampedFiles> files_; // what the clips read, by the stamp they read it at
 	std::unique_ptr<anim::AdmRootMotion> motion_;
+	world::AnimVariantRings rings_;
 	std::unordered_map<std::string, Catalog> catalogs_;
 	std::vector<MissionPoseInput> inputs_;
 	std::unordered_map<int64_t, std::string> resolved_; // each item's catalog file ("" none)

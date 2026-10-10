@@ -441,6 +441,46 @@ func test_the_control_takes_no_ctrl_z() -> void:
 	assert_eq(edit.text, "abcd", "Ctrl+Z and Ctrl+Y swallowed")
 	assert_true(edit.has_undo())
 
+## S23 C: a copy with nothing selected takes the caret's line whole, its line end with it, and its paste with
+## nothing selected goes above the caret's line, as Godot's own empty-selection clipboard does; a selection is
+## copied as itself and pasted at the caret; a cut with nothing selected takes the line out. Through the control's
+## seams: a headless display has no clipboard.
+func test_a_line_copied_with_nothing_selected() -> void:
+	var edit: CodeEdit = ClassDB.instantiate("ScriptEdit")
+	add_child_autofree(edit)
+	edit.text = "one\ntwo\nthree"
+	edit.set_caret_line(1)
+	edit.set_caret_column(1)
+	assert_eq(String(edit.call("copy_text")), "two\n", "the caret's line and its line end")
+	edit.set_caret_line(2)
+	edit.set_caret_column(2)
+	edit.call("paste_text", "two\n")
+	assert_eq(edit.text, "one\ntwo\ntwo\nthree", "pasted above the caret's line")
+	assert_eq(edit.get_caret_line(), 3, "the caret stays on its text")
+	assert_eq(edit.get_caret_column(), 2)
+	# A selection: copied as itself, pasted at the caret.
+	edit.select(0, 0, 0, 3)
+	assert_eq(String(edit.call("copy_text")), "one")
+	edit.deselect()
+	edit.set_caret_line(3)
+	edit.set_caret_column(5)
+	edit.call("paste_text", "one")
+	assert_eq(edit.get_line(3), "threeone", "a selection's copy goes at the caret")
+	# A text that is no line the control copied goes at the caret too.
+	edit.set_caret_line(0)
+	edit.set_caret_column(0)
+	edit.call("paste_text", "x")
+	assert_eq(edit.get_line(0), "xone")
+	# A cut with nothing selected takes the line out (the last line's end the one before it).
+	edit.text = "a\nb\nc"
+	edit.set_caret_line(1)
+	assert_eq(String(edit.call("cut_text")), "b\n")
+	assert_eq(edit.text, "a\nc")
+	edit.set_caret_line(1)
+	assert_eq(String(edit.call("cut_text")), "c\n")
+	assert_eq(edit.text, "a")
+
+
 ## One tools/call through the editor MCP: the structuredContent, or {"_error": text}.
 func _tool(name: String, args: Dictionary) -> Dictionary:
 	var envelope: Variant = await _client.call_tool(get_tree(), name, args)

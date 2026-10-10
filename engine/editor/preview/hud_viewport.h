@@ -11,9 +11,13 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
+#include <editor/preview/weapon_range.h>
 #include <formats/def/def_hudpos_text.h>
+#include <formats/rtxt/rtxt.h>
 #include <runtime/hud/hud_elements.h>
+#include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_layout_from_hudpos.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/player_view.h>
 
 namespace opennova::editor {
@@ -51,6 +55,18 @@ inline constexpr HudScreenSize kHudScreenSizes[] = {
 inline constexpr int kHudScreenLeast = 240;
 inline constexpr int kHudScreenMost = 4096;
 
+// The session game types the Tab board can be drawn for: the stock types the host dialog lists, each by its
+// abbreviation there (game_type::host_abbreviation_key: DM, TDM, KOTH, TKOTH, CTF, SD, AD, FB, FM, AAS, CAC, COOP),
+// the token a SetViewport names it by.
+const std::vector<uint32_t> &hud_board_game_types();
+const char *hud_board_game_type_token(uint32_t game_type);
+bool hud_board_game_type_from_token(const std::string &token, uint32_t &out);
+// The stand-in players the board lists, at most.
+inline constexpr int kHudBoardPlayersMost = 128;
+// The distances the sights' aim can rest at, metres: what a rangefinder reads.
+inline constexpr int kHudSightsRangeLeast = 2;
+inline constexpr int kHudSightsRangeMost = 1000;
+
 // The state of the player the preview's HUD is drawn for, as the game's per-frame HUD info would
 // carry it [orig: HUD_BuildEntityInfo @ 0x4B8440], and the screen it is drawn at: each a SetViewport
 // of the viewport's options. `weapon` is a weapon.def row by its name ("" the first row the project's
@@ -59,7 +75,10 @@ inline constexpr int kHudScreenMost = 4096;
 // HUD's stance (a HUDSTANCE id, 0 to 5); `health` in percent; `damage` the red damage vignette's
 // alpha (0 none, to its cap of 192); `detail` the HUD detail level F6 steps (0 to 3: hudpos.def's
 // HUDDECLUT rows by level, 3 the HUD hidden); `crosshair` the player's crosshair style (0 to 24,
-// cross01.tga to cross25.tga); `picked` the element a click picked (its token, "" none).
+// cross01.tga to cross25.tga); `picked` the element a click picked (its token, "" none). The Tab board held
+// up (`board`) for a session of `game_type` listing `players` stand-in players (0 to 128); the weapon's
+// sights up (`sights`: its scope toggled and settled, as the game's frame decides the card and the readouts)
+// with the aim resting `range` metres away (2 to 1000).
 struct HudViewportOptions {
 	int width = 1024;
 	int height = 768;
@@ -73,6 +92,11 @@ struct HudViewportOptions {
 	int detail = 0;
 	int crosshair = 0;
 	std::string picked;
+	bool board = false;
+	uint32_t game_type = 0x10000u; // TDM
+	int players = 8;
+	bool sights = false;
+	int range = 100;
 	bool operator==(const HudViewportOptions &other) const;
 	bool operator!=(const HudViewportOptions &other) const { return !(*this == other); }
 };
@@ -82,6 +106,16 @@ inline constexpr int kHudDamageMost = world::kScreenFlashRedDrawCap;
 // The JSON of `options` (options_json's), and the change a SetViewport makes to set them.
 io::JsonValue hud_options_json(const HudViewportOptions &options);
 std::string hud_options_change(const HudViewportOptions &options);
+
+// The Tab board the preview draws (ADR 0046 S23 C): the feed's half of the board as inmatch::scoreboard_feed
+// would fill it for a session of the options' game type, its rows the editor's stand-ins (the game's rows come
+// from the server's 0x16 list): "Player 1" to "Player N" in wire order, the score falling from N, the team modes'
+// players alternating over the type's sides (game_type::active_team_count of two), each with a connection band
+// (1 to 3 in turn) and a class (5 to 9 in turn), the local player on team 1; its header's strings composed as
+// the game's drawer composes them (hud::scoreboard_header_strings) over `gametext` (loaded or not) and
+// `keyhelp`, the server and mission rungs blank.
+opennova::hud::HudScoreboardState hud_preview_board(const HudViewportOptions &options,
+		const opennova::hud::GameTextLookup &gametext, bool gametext_loaded, const opennova::hud::GameTextLookup &keyhelp);
 
 // A weapon the project's weapon.def holds, as the HUD's weapon cluster reads it: its name, its clip
 // size, the art its HUD slice names (its hudicon, its clip and round graphics: what the HUD loads
@@ -164,6 +198,17 @@ public:
 	// `weapon` "NONE", a name the file lacks, or no weapon.def).
 	const std::vector<HudPreviewWeapon> &weapons() const { return weapons_; }
 	const HudPreviewWeapon *weapon_shown() const;
+	// The sights (`sights`): the frame the game's own view leaves with the weapon shown in hand, its scope
+	// toggled and run until the scope settles and the body's aim ray has found the wall `range` metres down its
+	// line (preview/weapon_range: the local player's view tick and weapon pump, LocalPlayer::view_frame), and
+	// the weapon as it holds it then; null where the sights are down, no weapon is held, the view is not the
+	// normal one, or the scope is refused (why() in words).
+	const world::LocalPlayerViewFrame *scope_frame() const;
+	const world::LocalPlayerWeaponView *scope_weapon() const;
+	const std::string &scope_why() const { return scope_why_; }
+	// The Tab board as the device hands it the overlay (`board`): hud_preview_board over the project's
+	// gametext.bin and keyhelp.bin (each read again when its stamp moves).
+	const opennova::hud::HudScoreboardState &board() const { return board_; }
 	// The names the HUD layout hands its loader (the fonts, the static frame, the stance art), and its
 	// stances' names (a HUDSTANCE line's last word, "" where it names none) by id, as the text holds
 	// them now.
@@ -236,6 +281,10 @@ private:
 	void read_layout_(const TextDocument &text);
 	// The weapons of the project's weapon.def, read again when its stamp moves.
 	void read_weapons_(const FileSource &files);
+	// The sights' run over the project's files, run again when what it runs with moves.
+	void follow_scope_(const SessionView &view);
+	// The board over the project's string tables, the tables read again when their stamps move.
+	void follow_board_(const FileSource &files);
 	// The elements from the device's boxes, worded from the layout and the weapon shown.
 	void make_elements_();
 
@@ -259,6 +308,16 @@ private:
 	std::vector<ViewportDeviceReport::Rect> boxes_;
 	std::shared_ptr<const ProjectAssetSource> assets_source_;
 	std::vector<HudPreviewElement> elements_;
+	// The sights' run, whether its frame stands, and why not.
+	std::unique_ptr<WeaponRange> range_;
+	bool scope_valid_ = false;
+	std::string scope_why_;
+	// The board, and the string tables as last read by their stamps.
+	opennova::hud::HudScoreboardState board_;
+	bool tables_read_ = false;
+	uint64_t gametext_stamp_ = 0, keyhelp_stamp_ = 0;
+	bool gametext_loaded_ = false, keyhelp_loaded_ = false;
+	rtxt::File gametext_, keyhelp_;
 };
 
 } // namespace opennova::editor

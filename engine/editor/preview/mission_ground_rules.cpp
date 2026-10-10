@@ -294,7 +294,7 @@ const MissionGroundReads::Model *MissionGroundReads::model(const FileSource &fil
 		Model &model = kept.model;
 		model.read = true;
 		float anchor[3] = { 0.0f, 0.0f, 0.0f };
-		if (threedi::threedi_3di3_ground_anchor(&parsed, anchor)) mission_model_point(anchor, model.anchor);
+		if (threedi::threedi_3di3_ground_anchor(&parsed, anchor)) mission_model_words(anchor, model.anchor);
 		if (parsed.collision != nullptr) {
 			const threedi::ThreediCollisionModelData &data = parsed.collision->model_data;
 			model.bounds = true;
