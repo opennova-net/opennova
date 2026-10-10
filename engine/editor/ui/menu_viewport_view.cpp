@@ -1,0 +1,588 @@
+#include <editor/ui/menu_viewport_view.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+
+#include <editor/documents/mnu_clipboard.h>
+#include <editor/documents/mnu_document.h>
+#include <editor/preview/menu_arrange.h>
+#include <editor/preview/menu_canvas.h>
+#include <editor/preview/menu_render_check.h>
+#include <editor/preview/menu_viewport.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
+#include <editor/ui/editor_requests.h>
+#include <editor/ui/ui_kit.h>
+#include <editor/ui/viewport_canvas.h>
+#include <base/io/strutil.h>
+#include <runtime/menu/menu_frame.h>
+
+#include <imgui.h>
+
+namespace opennova::editor {
+
+namespace {
+
+constexpr int kMaxDevice = 8192;
+
+// "logo.tga, gunpl22b.fnt": the names as a banner lists them.
+std::string name_list(const std::vector<std::string> &names) {
+	std::string out;
+	for (const std::string &name : names) out += (out.empty() ? "" : ", ") + name;
+	return out;
+}
+
+std::string missing_banner(const std::vector<std::string> &missing) {
+	return name_list(missing) + (missing.size() == 1 ? " is" : " are") +
+	       " not in the project (Refresh in Files after adding files outside the editor).";
+}
+
+std::string unreadable_banner(const std::vector<std::string> &unreadable) {
+	const bool one = unreadable.size() == 1;
+	return name_list(unreadable) + " did not load: the project has " + (one ? "the file" : "the files") +
+	       ", but the game could not read " + (one ? "it." : "them.");
+}
+
+// The viewport's options set (a SetViewport of them).
+void set_options(Workspace &workspace, const MenuViewport &menu, const MenuViewportOptions &options) {
+	workspace.request(request::set_viewport(menu.path(),
+			viewport_change(ViewportKind::Menu, "options",
+					menu_options_to_json(options, menu.show(), menu.pointer(), menu.sound()))));
+}
+
+// The sounds muted or heard (a SetViewport of that alone, DI-34).
+void set_mute(Workspace &workspace, const MenuViewport &menu, bool mute) {
+	MenuSoundOptions sound = menu.sound();
+	sound.mute = mute;
+	io::JsonValue options = io::JsonValue::make_object();
+	options.set("sound", menu_sound_options_to_json(sound));
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "options", std::move(options))));
+}
+
+// "PLAY on hover: MOUSE_OVER (menu.lwf)": what the last window sound fired, in a line.
+std::string fired_line(const MenuSoundFired &fired) {
+	return (fired.name.empty() ? std::string("A window") : fired.name) + " " + menu_sound_state_words(fired.state) + ": " +
+	       fired.sound.set + " (" + fired.sound.bank + ")" + (fired.sound.state == "played" ? "" : ", " + fired.sound.state);
+}
+
+// The game's pointer drawn or not (a SetViewport of that alone, DI-08: where a client holds it stands).
+void set_pointer(Workspace &workspace, const MenuViewport &menu, bool shown) {
+	io::JsonValue options = io::JsonValue::make_object();
+	options.set("pointer", io::JsonValue::make_bool(shown));
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "options", std::move(options))));
+}
+
+// Where the pointer comes from: the window whose CURSOR names it, at that field (window_requests::go_to, so
+// the history records it).
+void go_to_pointer(Workspace &workspace, const MnuDocument &document, const MenuPointer &pointer) {
+	ReferenceTarget target;
+	target.label = pointer.name + "'s pointer";
+	target.file = document.path();
+	target.locator = document.locator(pointer.window);
+	target.field = "cursor.file";
+	target.editable = true;
+	window_requests::go_to(workspace, target);
+}
+
+// Try mode on or off, or Try back to where it started (a SetViewport of `try`, DI-35).
+void set_try(Workspace &workspace, const MenuViewport &menu, bool on, bool reset = false) {
+	io::JsonValue member = io::JsonValue::make_object();
+	member.set("on", io::JsonValue::make_bool(on));
+	if (reset) member.set("reset", io::JsonValue::make_bool(true));
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "try", std::move(member))));
+}
+
+// One key for the game's menu (a SetViewport of `key`, DI-35): by its name, Shift held or not.
+void send_key(Workspace &workspace, const MenuViewport &menu, const std::string &name, bool shift) {
+	io::JsonValue member = io::JsonValue::make_object();
+	member.set("key", io::json_string(name));
+	if (shift) member.set("shift", io::JsonValue::make_bool(true));
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "key", std::move(member))));
+}
+
+// "STARTUP > SINGLE_PLAYER (sp.mnu)": the screens Try showed, the menu named where it changes, the last
+// `count` of them.
+std::string breadcrumb_line(const MenuTry &tried, size_t count) {
+	const std::vector<MenuTryVisit> &visits = tried.breadcrumb();
+	const size_t first = visits.size() > count ? visits.size() - count : 0;
+	std::string line = first > 0 ? "... > " : "";
+	std::string file = first > 0 ? visits[first - 1].file : tried.start_file();
+	for (size_t i = first; i < visits.size(); ++i) {
+		if (i > first) line += " > ";
+		line += visits[i].screen;
+		if (!strutil::iequals(visits[i].file, file)) line += " (" + visits[i].file + ")";
+		file = visits[i].file;
+	}
+	return line;
+}
+
+// The canvas's zoom as the viewport's options hold it, and back.
+MenuCanvasShow show_of(const ViewportCanvas &canvas, bool snap) {
+	using Zoom = ViewportCanvas::Zoom;
+	MenuCanvasShow show;
+	show.zoom = canvas.zoom() == Zoom::Device ? MenuZoom::Device : canvas.zoom() == Zoom::Scale ? MenuZoom::Scale : MenuZoom::Fit;
+	show.scale = canvas.zoom() == Zoom::Scale ? canvas.scale() : 1.0f;
+	show.snap = snap;
+	return show;
+}
+void zoom_canvas(ViewportCanvas &canvas, const MenuCanvasShow &show) {
+	using Zoom = ViewportCanvas::Zoom;
+	canvas.set_zoom(show.zoom == MenuZoom::Device ? Zoom::Device : show.zoom == MenuZoom::Scale ? Zoom::Scale : Zoom::Fit, show.scale);
+}
+
+// The zoom and the snap set (a SetViewport of them alone: they change no picture).
+void set_show(Workspace &workspace, const MenuViewport &menu, const MenuCanvasShow &show) {
+	io::JsonValue options = io::JsonValue::make_object();
+	const io::JsonValue all = menu_options_to_json(MenuViewportOptions(), show, MenuPointerShow(), MenuSoundOptions());
+	for (const char *member : { "zoom", "scale", "snap" })
+		if (const io::JsonValue *value = all.get(member)) options.set(member, *value);
+	workspace.request(request::set_viewport(menu.path(), viewport_change(ViewportKind::Menu, "options", std::move(options))));
+}
+
+} // namespace
+
+// What the view keeps of its own: where the mouse was on the picture in design units at the last canvas
+// pass and the game's pointer there (the toolbar's readouts); the zoom and the snap are the viewport's
+// options (the MCP gaps lane), the canvas following them and its own changes (the Zoom list, Ctrl+wheel,
+// Snap) sent to them.
+struct MenuViewportView::Tools {
+	bool snap = true;
+	ui_kit::Held<MenuCanvasShow> held;
+	MenuCanvasShow sent; // the zoom and the snap last sent (each sent once)
+	bool mouse_on_picture = false;
+	int mouse_x = 0;
+	int mouse_y = 0;
+	float design_x = 0.0f; // where the mouse is on the picture, design units unrounded
+	float design_y = 0.0f;
+	MenuPointer pointer; // the game's pointer at the mouse (DI-08), while it is on the picture
+	bool panning = false; // the canvas pans its picture this frame
+	bool try_down = false; // Try: the left button held from a press begun on the picture (DI-35)
+
+	void toolbar(Workspace &workspace, ViewportView &view, ViewportCanvas &canvas, const MenuViewport &menu,
+			const MenuCanvasFrame &frame, const ViewportContext &context);
+	// The Edit and Try toggle (DI-35), leading the toolbar.
+	void mode(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu);
+	// Try's tools: Reset, then under the toolbar the screens it went through and what the game would have
+	// done last.
+	void try_tools(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu);
+	// Try's keys while the viewport has the keyboard: the game's (VK_RETURN, VK_ESCAPE, VK_TAB, the edit
+	// field's), and the characters typed.
+	void try_keys(Workspace &workspace, const MenuViewport &menu);
+	void pointer_and_sound(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu,
+			const MenuCanvasFrame &frame, const ViewportContext &context);
+	void arrange_items(Workspace &workspace, const MenuCanvasFrame &frame);
+	void keys(Workspace &workspace, const MenuCanvasFrame &frame, const MenuClipboard &board, bool pressed);
+	void clipboard(Workspace &workspace, const MenuCanvasFrame &frame, const MenuClipboard &board,
+			EditorRequestKind kind);
+};
+
+MenuViewportView::MenuViewportView() : ViewportView(ViewportKind::Menu), tools_(std::make_unique<Tools>()) {}
+
+MenuViewportView::~MenuViewportView() = default;
+
+// The toolbar, on a row that wraps whole controls in a narrow window.
+void MenuViewportView::Tools::toolbar(Workspace &workspace, ViewportView &, ViewportCanvas &canvas,
+		const MenuViewport &menu, const MenuCanvasFrame &frame, const ViewportContext &context) {
+	const NodeAddress &selected = frame.primary;
+	MenuViewportOptions options = menu.options();
+	const MenuViewportOptions before = options;
+	const float unit = ImGui::GetFontSize();
+	ui_kit::WrapRow row;
+	mode(workspace, row, menu);
+
+	using Zoom = ViewportCanvas::Zoom;
+	const Zoom zoom = canvas.zoom();
+	char zoom_label[32];
+	if (zoom == Zoom::Fit)
+		std::snprintf(zoom_label, sizeof(zoom_label), "Fit");
+	else if (zoom == Zoom::Device)
+		std::snprintf(zoom_label, sizeof(zoom_label), "Device size");
+	else
+		std::snprintf(zoom_label, sizeof(zoom_label), "%d%%", int(std::lround(canvas.scale() * 100.0f)));
+	row.next(ui_kit::field_width(unit * 7.0f, "Zoom"));
+	ImGui::SetNextItemWidth(unit * 7.0f);
+	if (ImGui::BeginCombo("Zoom", zoom_label)) {
+		if (ImGui::Selectable("Fit", zoom == Zoom::Fit)) canvas.set_zoom(Zoom::Fit);
+		for (const float level : ViewportCanvas::kZoomLevels) {
+			char text[16];
+			std::snprintf(text, sizeof(text), "%d%%", int(std::lround(level * 100.0f)));
+			if (ImGui::Selectable(text, zoom == Zoom::Scale && std::fabs(canvas.scale() - level) < 0.001f))
+				canvas.set_zoom(Zoom::Scale, level);
+		}
+		if (ImGui::Selectable("Device size", zoom == Zoom::Device)) canvas.set_zoom(Zoom::Device);
+		ImGui::EndCombo();
+	}
+	ui_kit::tooltip("Ctrl+wheel over the picture zooms about the mouse.");
+	if (zoom == Zoom::Device) {
+		int size[2] = {menu.state().width, menu.state().height};
+		row.next(unit * 8.0f);
+		ImGui::SetNextItemWidth(unit * 8.0f);
+		if (ImGui::InputInt2("##device", size)) {
+			io::JsonValue device = io::JsonValue::make_object();
+			device.set("width", io::json_number(std::clamp(size[0], 1, kMaxDevice)));
+			device.set("height", io::json_number(std::clamp(size[1], 1, kMaxDevice)));
+			workspace.request(request::set_viewport(
+					menu.path(), viewport_change(ViewportKind::Menu, "device", std::move(device))));
+		}
+		ui_kit::tooltip("The screen size in pixels to draw at; each axis scales on its own, as in "
+		                "the game.");
+	}
+	if (menu.try_on()) {
+		try_tools(workspace, row, menu);
+		pointer_and_sound(workspace, row, menu, frame, context);
+		return;
+	}
+	row.next(ui_kit::checkbox_width("Snap"));
+	ImGui::Checkbox("Snap", &snap);
+	ui_kit::tooltip("Drags snap to a grid of 8 units. Hold Alt to place freely.");
+	row.next(ui_kit::checkbox_width("Show hidden"));
+	ImGui::Checkbox("Show hidden", &options.show_hidden);
+	ui_kit::tooltip("Draw every window, including those the screen starts hidden.");
+
+	// The selected window held in a state, as the game's mouse and keyboard would leave it.
+	ImGui::BeginDisabled(!selected.child);
+	static const char *const kStateNames[] = {"Normal", "Mouseover", "Selected", "Disabled"};
+	static const int kStates[] = {-1, menu::kStateMouseover, menu::kStateSelected, menu::kStateDisabled};
+	int shown = 0;
+	for (int i = 0; i < 4; ++i)
+		if (kStates[i] == options.force_state) shown = i;
+	row.next(ui_kit::field_width(unit * 7.0f, "State"));
+	ImGui::SetNextItemWidth(unit * 7.0f);
+	if (ImGui::BeginCombo("State", kStateNames[shown])) {
+		for (int i = 0; i < 4; ++i)
+			if (ImGui::Selectable(kStateNames[i], i == shown)) {
+				options.force_state = kStates[i];
+				options.force_window = selected.child;
+			}
+		ImGui::EndCombo();
+	}
+	ui_kit::tooltip("Show the selected window under the mouse, pressed or disabled.");
+	const mnu::WindowType type = menu_window_type(*frame.document, selected);
+	auto hold = [&](const char *label, bool &flag, const char *tip) {
+		row.next(ui_kit::checkbox_width(label));
+		if (ImGui::Checkbox(label, &flag)) options.force_window = selected.child;
+		ui_kit::tooltip(tip);
+	};
+	if (menu_type_checkable(type)) hold("Checked", options.checked, "Show the selected window checked.");
+	if (menu_type_has_list(type)) hold("Open list", options.popup_open, "Show the selected combo box with its list open.");
+	if (menu_type_editable(type)) hold("Focus", options.focused, "Show the selected edit box focused, with its caret.");
+	ImGui::EndDisabled();
+
+	// Arrange: the selected windows aligned to the primary, spread, or reordered.
+	row.next(ui_kit::button_width("Arrange"));
+	ImGui::BeginDisabled(frame.windows.empty() || !frame.editable);
+	if (ImGui::Button("Arrange")) ImGui::OpenPopup("arrange");
+	ImGui::EndDisabled();
+	ui_kit::tooltip("Align the selected windows to the primary one (the last selected), spread "
+	                "them evenly, or change their drawing order. Shift+click or drag a box to "
+	                "select several.");
+	if (ImGui::BeginPopup("arrange")) {
+		arrange_items(workspace, frame);
+		ImGui::EndPopup();
+	}
+
+	pointer_and_sound(workspace, row, menu, frame, context);
+	if (options != before) set_options(workspace, menu, options);
+}
+
+void MenuViewportView::Tools::mode(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu) {
+	row.next(ui_kit::checkbox_width("Edit") + ui_kit::checkbox_width("Try"));
+	if (ImGui::RadioButton("Edit", !menu.try_on()) && menu.try_on()) set_try(workspace, menu, false);
+	ui_kit::tooltip("Edit the menu: a click selects the window under it, a drag moves or resizes it.");
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Try", menu.try_on()) && !menu.try_on()) set_try(workspace, menu, true);
+	ui_kit::tooltip("Try the menu as the game runs it, from the screen shown: its buttons run their actions, "
+	                "the keys and the pointer are the game's, its sounds play. What it changes is a sandbox: nothing "
+	                "of your settings or the project's files. What would leave the menu (a mission started, a quit, "
+	                "a game joined) is said instead of done.");
+}
+
+void MenuViewportView::Tools::try_tools(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu) {
+	const MenuTry *tried = menu.try_session();
+	if (ui_kit::tool(row, "Reset", tried && tried->started(),
+				"Back to the screen Try started from, everything the sandbox holds dropped."))
+		set_try(workspace, menu, true, true);
+	if (!menu.try_error().empty()) {
+		row.next(ui_kit::text_width(menu.try_error().c_str()));
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", menu.try_error().c_str());
+	}
+	if (!tried || !tried->started()) return;
+	// The screens it went through, the last few; whole in the tooltip.
+	const std::string crumbs = breadcrumb_line(*tried, 5);
+	row.next(ui_kit::text_width(crumbs.c_str()));
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(crumbs.c_str());
+	ui_kit::tooltip("The screens Try went through: " + breadcrumb_line(*tried, MenuTry::kBreadcrumbKept));
+	// What the game would have done last, where it would leave the menu.
+	if (!tried->outcomes().empty()) {
+		const MenuTryOutcome &last = tried->outcomes().back();
+		const std::string line = (last.control.empty() ? std::string() : last.control + ": ") + last.words;
+		row.next(ui_kit::text_width(line.c_str()));
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextColored(ImVec4(0.55f, 0.85f, 1.0f, 1.0f), "%s", line.c_str());
+		ui_kit::tooltip("Not done: Try says what the game would do here (" + last.screen + " of " + last.file + ").");
+	}
+}
+
+void MenuViewportView::Tools::try_keys(Workspace &workspace, const MenuViewport &menu) {
+	const ImGuiIO &io = ImGui::GetIO();
+	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
+	if (!focused || io.KeyCtrl || io.KeyAlt) return;
+	static const struct {
+		ImGuiKey key;
+		const char *name;
+	} kKeys[] = { { ImGuiKey_Enter, "VK_RETURN" }, { ImGuiKey_KeypadEnter, "VK_RETURN" }, { ImGuiKey_Escape, "VK_ESCAPE" },
+		{ ImGuiKey_Tab, "VK_TAB" }, { ImGuiKey_Backspace, "VK_BACK" }, { ImGuiKey_Delete, "VK_DELETE" },
+		{ ImGuiKey_LeftArrow, "VK_LEFT" }, { ImGuiKey_RightArrow, "VK_RIGHT" }, { ImGuiKey_UpArrow, "VK_UP" },
+		{ ImGuiKey_DownArrow, "VK_DOWN" }, { ImGuiKey_Home, "VK_HOME" }, { ImGuiKey_End, "VK_END" } };
+	for (const auto &key : kKeys)
+		if (ImGui::IsKeyPressed(key.key)) send_key(workspace, menu, key.name, io.KeyShift);
+	// The characters typed this frame, each a key of its own (Space its VK_SPACE).
+	for (int i = 0; i < io.InputQueueCharacters.Size; ++i) {
+		const ImWchar c = io.InputQueueCharacters[i];
+		if (c < 0x20 || c > 0x7E) continue;
+		send_key(workspace, menu, c == ' ' ? std::string("VK_SPACE") : std::string(1, char(c)), io.KeyShift);
+	}
+}
+
+void MenuViewportView::Tools::pointer_and_sound(Workspace &workspace, ui_kit::WrapRow &row, const MenuViewport &menu,
+		const MenuCanvasFrame &frame, const ViewportContext &context) {
+	const MnuDocument &document = *frame.document;
+	// Where the mouse is on the picture, in design units: as wide as the widest it reads.
+	row.next(ui_kit::text_width("x 0000, y 0000"));
+	ImGui::AlignTextToFramePadding();
+	if (mouse_on_picture) ImGui::Text("x %d, y %d", mouse_x, mouse_y);
+	else ImGui::TextDisabled("x -, y -");
+	ui_kit::tooltip("Where the mouse is on the picture, in the menu's 800 x 600 units.");
+
+	// The game's pointer (DI-08): drawn at the mouse over the picture, and named here (the one at the mouse,
+	// else the screen's own), a click going to the window whose CURSOR it is.
+	row.next(ui_kit::checkbox_width("Pointer"));
+	bool pointer_shown = menu.pointer().shown;
+	if (ImGui::Checkbox("Pointer", &pointer_shown)) set_pointer(workspace, menu, pointer_shown);
+	ui_kit::tooltip("Draw the game's mouse pointer where the mouse is over the picture, as the game does: the "
+	                "CURSOR of the window under it, else of that window's root window, else of the first root "
+	                "window whose CURSOR loads, at the image's own size whatever the zoom.");
+	// Off the picture: where a client holds it, else the screen's own (the screen Try shows while trying).
+	const MenuPointer now = mouse_on_picture ? pointer
+	                        : menu.pointer().held ? menu.pointer_at(context, menu.pointer().x, menu.pointer().y)
+	                                              : menu.screen_pointer(context);
+	if (now.drawn) {
+		const std::string label = now.file + "###pointer";
+		const std::string tip = (mouse_on_picture ? "The pointer here: " : "The screen's pointer: ") + now.file + ", " +
+		                        std::to_string(now.width) + " x " + std::to_string(now.height) + ", the CURSOR of " +
+		                        now.name + ". Click to go to it.";
+		if (ui_kit::tool(row, label.c_str(), now.window.child != 0, tip)) go_to_pointer(workspace, document, now);
+	} else {
+		row.next(ui_kit::text_width("No pointer"));
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextDisabled("No pointer");
+		ui_kit::tooltip("No window of the screen names a CURSOR whose image loads, so the game shows no mouse "
+		                "pointer on it at all. Name one on its root window (Pointer image).");
+	}
+	// The windows' sounds (DI-34): heard or muted, and what was heard last.
+	row.next(ui_kit::checkbox_width("Sound"));
+	bool heard = !menu.sound().mute;
+	if (ImGui::Checkbox("Sound", &heard)) set_mute(workspace, menu, !heard);
+	ui_kit::tooltip("Play the windows' sounds as the game does with the mouse there: a window's SOUND of state "
+	                "MOUSEIN as the mouse comes onto it, SELECTED on a click (and MOUSEIN again while the mouse stays), "
+	                "MOUSEOUT as it leaves, each a set of the bank the SOUND names. Off, they are fired and listed, "
+	                "and nothing is heard.");
+	if (!menu.sounds_fired().empty()) {
+		const MenuSoundFired &last = menu.sounds_fired().back();
+		const std::string line = fired_line(last);
+		row.next(ui_kit::text_width(line.c_str()));
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextDisabled("%s", line.c_str());
+		ui_kit::tooltip(last.sound.words);
+	}
+}
+
+void MenuViewportView::Tools::arrange_items(Workspace &workspace, const MenuCanvasFrame &frame) {
+	CanvasWindowRequests requests(workspace);
+	const size_t count = frame.windows.size();
+	for (const ArrangeOp op : kArrangeOps) {
+		if (op == ArrangeOp::DistributeHorizontally || op == ArrangeOp::BringToFront) ImGui::Separator();
+		const bool enabled = frame.current && count >= arrange_minimum(op) && frame.editable;
+		if (ImGui::MenuItem(arrange_op_label(op), nullptr, false, enabled))
+			menu_canvas_arrange(frame, op, requests);
+		if (!enabled)
+			ui_kit::tooltip("Select " + std::to_string(arrange_minimum(op)) + " windows or more.");
+	}
+}
+
+// Ctrl+C / X / V / D copy, cut, paste and duplicate windows while the viewport has the focus, no
+// text box takes the keys and no press is down, as the menu clipboard's rule says (the arrows and
+// Esc are the canvas's, preview/menu_canvas); a Copy edits nothing, so only the others wait while an
+// operation holds the documents (S13 A3).
+void MenuViewportView::Tools::keys(
+		Workspace &workspace, const MenuCanvasFrame &frame, const MenuClipboard &board, bool pressed) {
+	const ImGuiIO &io = ImGui::GetIO();
+	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
+	if (!focused || pressed || frame.document->blocked()) return;
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C)) return clipboard(workspace, frame, board, EditorRequestKind::Copy);
+	if (!frame.editable) return;
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X)) return clipboard(workspace, frame, board, EditorRequestKind::Cut);
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V)) return clipboard(workspace, frame, board, EditorRequestKind::Paste);
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D))
+		return clipboard(workspace, frame, board, EditorRequestKind::Duplicate);
+}
+
+// Copy, Cut, Duplicate and Paste as the menu clipboard's rule says (menu_clipboard).
+void MenuViewportView::Tools::clipboard(Workspace &workspace, const MenuCanvasFrame &frame,
+		const MenuClipboard &board, EditorRequestKind kind) {
+	const MnuDocument &document = *frame.document;
+	if (kind != EditorRequestKind::Paste) {
+		if (board.copy) window_requests::clipboard(workspace, document, kind);
+		return;
+	}
+	if (board.paste)
+		window_requests::paste(workspace, document, board.paste_row, board.paste_parent, board.paste_position);
+}
+
+void MenuViewportView::draw_ready(Workspace &workspace, const ViewportModel &model, ViewportContext &context) {
+	const auto &menu = static_cast<const MenuViewport &>(model);
+	const SessionView &view = workspace.view();
+	// What the toolbar, the keys and the right-click menu read: the canvas's frame of the viewport.
+	const MenuCanvasFrame frame = menu.canvas_frame(context);
+	if (!frame.document || !frame.screen) {
+		draw_empty(workspace, &model, model.path());
+		return;
+	}
+	if (!menu.missing().empty() || !menu.unreadable().empty()) {
+		ImGui::PushTextWrapPos(0.0f);
+		if (!menu.missing().empty())
+			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", missing_banner(menu.missing()).c_str());
+		if (!menu.unreadable().empty())
+			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", unreadable_banner(menu.unreadable()).c_str());
+		ImGui::PopTextWrapPos();
+	}
+	const MenuClipboard board = menu_canvas_clipboard(frame, !view.documents.clipboard.empty());
+	// The zoom and the snap the viewport holds, taken where they moved (a client's set_viewport) before the
+	// toolbar and the canvas draw.
+	if (tools_->held.follow(menu.show())) {
+		zoom_canvas(canvas_ui(), menu.show());
+		tools_->snap = menu.show().snap;
+		tools_->sent = menu.show();
+	}
+	tools_->toolbar(workspace, *this, canvas_ui(), menu, frame, context);
+	snap = tools_->snap ? 1.0f : 0.0f;
+	context.snap = snap;
+	const bool pressed = half() && half()->gesture().pressed();
+	const bool trying = menu.try_on();
+	if (trying) tools_->try_keys(workspace, menu);
+	else tools_->keys(workspace, frame, board, pressed);
+	// Room below the picture for the notes list: its heading and up to six notes.
+	const std::vector<menu::MenuFrameNote> &notes = menu.notes();
+	const size_t note_lines = notes.empty() ? 0 : 1 + std::min<size_t>(notes.size(), 6);
+	const float notes_height = ImGui::GetFrameHeightWithSpacing() * float(note_lines);
+	const MnuDocument &document = *frame.document;
+	canvas(workspace, model, context, std::max(64.0f, ImGui::GetContentRegionAvail().y - notes_height),
+			[&](const CanvasInput &in) {
+				// Where the mouse is on the picture, in design units (the toolbar's readout).
+				const float sx = float(in.width) / float(menu::kMenuDesignWidth);
+				const float sy = float(in.height) / float(menu::kMenuDesignHeight);
+				tools_->mouse_on_picture = in.hovered && in.mouse.x >= 0.0f && in.mouse.y >= 0.0f &&
+						in.mouse.x < float(in.width) && in.mouse.y < float(in.height);
+				// Read only on the picture: ImGui's position off it may be its "no position" (-FLT_MAX),
+				// which no int holds.
+				tools_->panning = in.panning;
+				if (tools_->mouse_on_picture) {
+					tools_->design_x = in.mouse.x / sx;
+					tools_->design_y = in.mouse.y / sy;
+					tools_->mouse_x = int(std::floor(tools_->design_x));
+					tools_->mouse_y = int(std::floor(tools_->design_y));
+					// The game's pointer there: the claim the pump makes at the point (DI-08), over the screen
+					// Try shows while trying.
+					tools_->pointer = menu.pointer_at(context, tools_->design_x, tools_->design_y);
+				}
+				// Try's button: held from a press begun on the picture until it comes up (DI-35).
+				tools_->try_down = in.pressed ? tools_->mouse_on_picture : in.down && tools_->try_down;
+				if (trying) return; // the right button's menu is the editor's
+				// The right button: the window under it selected unless it already is, and the menu
+				// of what the selection can do.
+				if (canvas_ui().right_clicked() && !(half() && half()->gesture().pressed())) {
+					const NodeAddress window = menu_window_at(frame, in);
+					if (window.child && !view.documents.selection.holds(window))
+						window_requests::select(workspace, document, window);
+					ImGui::OpenPopup("canvas_menu");
+				}
+				if (ImGui::BeginPopup("canvas_menu")) {
+					// The edits held back while an operation holds the documents (S13 A3); a Copy edits
+					// nothing.
+					const bool readable = !document.blocked();
+					const bool editable_now = frame.editable;
+					const bool copyable = board.copy && editable_now;
+					if (ImGui::MenuItem("Cut", "Ctrl+X", false, copyable))
+						tools_->clipboard(workspace, frame, board, EditorRequestKind::Cut);
+					if (ImGui::MenuItem("Copy", "Ctrl+C", false, board.copy && readable))
+						tools_->clipboard(workspace, frame, board, EditorRequestKind::Copy);
+					if (ImGui::MenuItem("Paste", "Ctrl+V", false, editable_now && board.paste))
+						tools_->clipboard(workspace, frame, board, EditorRequestKind::Paste);
+					if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, copyable))
+						tools_->clipboard(workspace, frame, board, EditorRequestKind::Duplicate);
+					ImGui::Separator();
+					if (ImGui::BeginMenu("Arrange", !frame.windows.empty() && editable_now)) {
+						tools_->arrange_items(workspace, frame);
+						ImGui::EndMenu();
+					}
+					ImGui::EndPopup();
+				}
+			});
+	// The game's mouse (DI-34): over the picture while the canvas neither pans nor drags (a drag is the editor's
+	// own gesture, not the game's), its button a press begun on the picture, the frame's input the session's
+	// sounds hear (Workspace::canvas_mouse).
+	ViewportMouse mouse;
+	mouse.path = menu.path();
+	mouse.kind = ViewportKind::Menu;
+	mouse.over = tools_->mouse_on_picture && !tools_->panning && !(half() && half()->gesture().dragging());
+	mouse.x = tools_->design_x;
+	mouse.y = tools_->design_y;
+	// Trying, a press is the game's (DI-35); editing, the canvas's press begun on the picture.
+	mouse.down = mouse.over && (trying ? tools_->try_down : half() && half()->gesture().pressed());
+	workspace.canvas_mouse(mouse);
+	// The zoom (the Zoom list's, Ctrl+wheel's) and the snap as the canvas has them now: the viewport's, sent
+	// where they moved from what it holds, once.
+	const MenuCanvasShow now = show_of(canvas_ui(), tools_->snap);
+	if (now != menu.show() && now != tools_->sent) {
+		tools_->sent = now;
+		set_show(workspace, menu, now);
+	}
+
+	// The notes as a list, each cut to the window (whole in its tooltip); a click selects the
+	// record a note is on. Trying, the notes are the edited screen's: none listed.
+	if (notes.empty() || trying) return;
+	const Node &screen = *frame.screen;
+	ImGui::TextDisabled("Notes (%d)", int(notes.size()));
+	if (ImGui::BeginChild("notes", ImVec2(0.0f, 0.0f), false)) {
+		for (size_t i = 0; i < notes.size(); ++i) {
+			const menu::MenuFrameNote &note = notes[i];
+			const std::string name =
+					note.widget >= 0 ? menu.render().compiler().widget_name(note.widget) : screen.name();
+			const std::string line = name + ": " + menu_note_message(note);
+			const std::string shown = ui_kit::fit(line, ImGui::GetContentRegionAvail().x);
+			ImGui::PushID(int(i));
+			if (ImGui::Selectable((shown + "###note").c_str())) {
+				const NodeAddress address = menu_note_address(note, document, screen, nullptr);
+				window_requests::select(workspace, document, address);
+			}
+			if (shown != line) ui_kit::tooltip(line);
+			ImGui::PopID();
+		}
+	}
+	ImGui::EndChild();
+}
+
+bool MenuViewportView::draws_pointer(const ViewportModel &model, const ViewportContext &, const CanvasInput &) {
+	// The pointer the canvas pass found at the mouse this frame, while Pointer is on.
+	return static_cast<const MenuViewport &>(model).pointer().shown && tools_->mouse_on_picture &&
+			tools_->pointer.drawn;
+}
+
+bool MenuViewportView::game_input(const ViewportModel &model) const {
+	return static_cast<const MenuViewport &>(model).try_on();
+}
+
+} // namespace opennova::editor

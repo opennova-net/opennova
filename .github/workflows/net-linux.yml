@@ -62,7 +62,7 @@ jobs:
             opennova_novaworld_server_signal_shutdown_test \
             nw_codec_identity_test nw_self_capture_test \
             unknown_tracker_test nwmsg_replay_test nwmsg_codec_parity_test \
-            opennova_extract opennova_wire opennova_serve \
+            opennova_extract opennova_project opennova_wire opennova_serve \
             opennova_serve_test opennova_serve_game_cfg_test opennova_serve_novaworld_test serve_registration_parity_test nwu_demux_test nw_lister_destination_policy_test npruntime_host_file_test \
             opennova_serve_server_command_push_test nw_server_command_push_e2e_test \
             npruntime_host_config_test opennova_serve_status_console_test opennova_serve_admin_test \

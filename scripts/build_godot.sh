@@ -9,9 +9,15 @@
 # class registration does not reliably hot-reload (especially on Windows, where
 # the running editor holds the DLL lock and the swap is deferred to a ~temp).
 #
-# Usage: scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N]   (default: Dev)
+# Usage: scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N] [--runtime-only]
+#   (default: Dev)
 #   --jobs N  -> build parallelism (default: the machine's CPU count)
-#   Dev       -> libopennova.<platform>.template_debug.x86_64.<dll|so>  (editor)
+#   --runtime-only -> only the runtime variant (libopennova.*); by default both
+#                variants are built: the runtime-only libopennova.* the game
+#                and the Play child ship, and the editor-enabled
+#                libopennova_editor.* the OpenNova Editor ships and every source
+#                run (the Godot editor, GUT) loads (ADR 0046 d4).
+#   Dev       -> lib*.<platform>.template_debug.x86_64.<dll|so>  (editor)
 #                RelWithDebInfo: optimized native code (/O2 + symbols). This is
 #                the flavor every editor session and every game runtime it
 #                launches (F5/F6) load; an
@@ -33,7 +39,8 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 jobs="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 flavor="Dev"
-usage="usage: scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N]"
+targets=()
+usage="usage: scripts/build_godot.sh [Dev|DebugFull|Release] [--jobs N] [--runtime-only]"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -41,6 +48,7 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
             jobs="$2"; shift 2 ;;
         --jobs=*) jobs="${1#--jobs=}"; shift ;;
+        --runtime-only) targets=(--target opennova); shift ;;
         Dev|DebugFull|Release) flavor="$1"; shift ;;
         *) echo "$usage" >&2; exit 2 ;;
     esac
@@ -70,6 +78,6 @@ build="$root/godot/src/build"
 if ! grep -qxE "CMAKE_BUILD_TYPE:[A-Z]+=$config" "$build/CMakeCache.txt" 2>/dev/null; then
     cmake -S "$root/godot/src" -B "$build" -DCMAKE_BUILD_TYPE="$config"
 fi
-cmake --build "$build" --config "$config" -j "$jobs"
+cmake --build "$build" --config "$config" -j "$jobs" "${targets[@]}"
 
 echo "GDExtension ($flavor) built into godot/bin/ — restart the Godot editor to load it."

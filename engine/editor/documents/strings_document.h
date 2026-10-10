@@ -1,0 +1,125 @@
+#pragma once
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <editor/assets/asset_registry.h>
+#include <editor/model/diagnostic.h>
+#include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
+#include <editor/project/project_document.h>
+#include <formats/rtxt/rtxt.h>
+
+namespace opennova::editor {
+
+// A string table (ADR 0046 S6b): the RTXT `.bin` files the game reads text from
+// (gametext.bin, gameerr.bin, ...). Rows are the table's sections in file order;
+// a section's strings are its nested collection, kept contiguous the way the
+// engine's lookup derives an entry's index [orig: TextResource_FindEntryBySectionAndKey
+// @ 0x75D250]. The bytes are cp1252 (docs/interface/rtxt-strings-re.md): the
+// document shows UTF-8 and stores an edit back as cp1252, refusing a character
+// cp1252 has no byte for (utf8_to_cp1252 names it), so a table stays game-readable.
+// A string's text runs over several lines. A section duplicates under a name of its
+// own. `rtxt::write` is byte-exact for an untouched table, so saving without edits
+// rewrites the same bytes.
+
+enum class StringsKind : NodeKind { Section = 0, String = 1 };
+constexpr NodeKind node_kind(StringsKind kind) { return static_cast<NodeKind>(kind); }
+
+struct StringsSection : Node {
+	std::string section_name;
+	std::vector<rtxt::Entry> entries; // collections[0] carries their identities
+
+	StringsSection();
+	std::shared_ptr<Node> clone() const override { return std::make_shared<StringsSection>(*this); }
+	std::string name() const override { return section_name; }
+	size_t footprint() const override;
+};
+
+class StringsDocument : public Document {
+public:
+	// A section, the file's row (Add section), and its strings.
+	const std::vector<RecordKindRow> &kinds() const override;
+	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
+	// The ids of a section a first section of the same name shadows are inert.
+	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
+	SerializeResult serialize() const override;
+	std::unique_ptr<DocumentBase> snapshot() const override {
+		return std::make_unique<StringsDocument>(*this);
+	}
+	// The table as the engine reads it, rebuilt from the rows.
+	rtxt::File table() const;
+	// A string moved to another section (its Move's parent that section): added there with its key, its
+	// text and its position, removed here, one step. A lookup finds a string by its section and its key
+	// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250], so a string moves between sections only
+	// so; a string moves nowhere else.
+	bool move_out_edits(const Edit &move, std::vector<Edit> &out, std::string &error) const override;
+
+protected:
+	// A string's key defines its string id in "TABLE.BIN/Section" (the table's file name, the
+	// section as written).
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
+	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
+	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
+	           Diagnostic &error) override;
+	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
+	// A section added under a name a section of the table has, in any case: that section, the one a
+	// lookup by the name reads (the first of a name [orig: TextResource_FindEntryBySectionAndKey @
+	// 0x75D250, the stricmp walk @0x75D2B0]), so no second is made that no lookup reaches.
+	NodeId existing_row_for(const Edit &add, const std::vector<std::shared_ptr<const Node>> &rows) const override;
+	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
+	               std::string &error) override;
+	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
+	                     std::string &error) override;
+	// A duplicated section is named anew: under its original's name no lookup would find it.
+	void prepare_duplicate(Node &copy, const Node &original,
+	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
+
+private:
+	// A string's index in its section as the document's index places it (SIZE_MAX for none):
+	// where read and set_field look first.
+	size_t place_of(const NodeAddress &address) const;
+};
+
+bool is_strings_kind(AssetKind kind);
+
+// The strings document type's validator over one table (DocumentType::validate_file), an
+// open document standing in for its file. An empty key is an error; a duplicate key inside
+// one section is a warning (retail tables carry them, D-RTXT-5). A section is checked by the
+// reader's own rule (rtxt::File::section_index, the first section of a name in any case): an
+// empty name is an error, a name an earlier section has a warning (a section lookup never
+// reaches it).
+std::vector<Diagnostic> validate_strings_file(const DocumentBase &document);
+// A string id no table defines, added to the table its scope names (ADR 0046 DI-15,
+// DocumentType::define_symbol): a key in the section the lookup reads, or a new section of that name.
+bool define_string_id(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
+
+// The string table type's own finding codes (DocumentType::findings), each a row of its table
+// (strings_document.cpp, static_asserted into this order): input the typed model cannot carry
+// (the file does not serialize); a table whose sections the reader takes regrouped (a rewrite
+// writes them grouped, as the game reads them); a section with no name or with the name of an
+// earlier one; a key empty, or repeated within its section; and, of the project's gametext.bin where
+// the project has a mission, a key the single-player flow reads that it lacks or holds empty
+// (graph/use_checks' gametext check).
+enum class StringsFinding {
+	InvalidInput,
+	Regrouped,
+	SectionEmpty,
+	SectionDuplicate,
+	KeyEmpty,
+	KeyDuplicate,
+	FlowKeyMissing,
+	kCount
+};
+const FindingCodeRow &finding_code(StringsFinding code);
+FindingTable strings_finding_codes();
+
+} // namespace opennova::editor

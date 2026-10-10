@@ -14,6 +14,9 @@ in the path is what makes the layering visible, so this check reads it:
        engine/base/**                    include base, formats
        engine/net/**                     include base, formats, net
        engine/runtime/**                 include base, formats, net, runtime
+       engine/editor/**                  include base, formats, net, runtime, editor
+     (the editor is the OpenNova Editor's portable core, ADR 0046 d3; nothing
+     below it may include it)
   1b. NET-AGNOSTIC (ADR 0043 d4) — every engine/runtime lib except
      runtime/inmatch and runtime/replication stays free of net/,
      runtime/inmatch/ and runtime/replication/ includes: the world, the
@@ -38,6 +41,29 @@ in the path is what makes the layering visible, so this check reads it:
      pass is the one dev-tools surface (previously the containment was a
      single CMake PRIVATE keyword). The engine's own `<runtime/devtools/
      imgui_abi.h>` seam is a group-qualified engine include, not an ImGui one.
+  7. EDITOR RANK (ADR 0046 S13 D3) — inside engine/editor the editing model,
+     the document types, the asset graph, the session and the windows are
+     ranked model < documents < graph < session < ui: a ranked library
+     includes only its own rank and below. graph/reference_kinds.h and
+     graph/graph_edge.h are seam headers any library may include (what a
+     reference kind is, which the model's field schema names; the edge and
+     symbol records a document type's own references are made of, ADR 0046
+     S14), like the terrain_query headers. The other
+     editor libraries stay unranked. The upward includes the tree still makes
+     are listed (EDITOR_RANK_ALLOWED), each with the slice that removes it; an
+     entry the tree no longer makes is itself a violation, so the list only
+     shrinks.
+  8. CLI SESSION (ADR 0046 S13 A7) — apps/project, opennova-project, is the
+     editor's session on the command line and nothing more: its own #include
+     lines reach editor/ only through editor/session/ (the session's facade,
+     its request and query tables, the request factories, the outcome's wire
+     form, the preferences stores) and editor/run/null_process_platform.h (the
+     process seam with no processes), never the editor's own parts (the
+     assets, the graph, the import planner, the build). The rule reads direct
+     includes only: a session header that includes a part brings it along
+     unseen, so the headers the command line includes stay light (it takes
+     outcome_json.h, not session_json.h, which includes the graph), and a
+     second orchestration beside the session's is a review concern too.
 
 Modes:
   (default)   report violations; exit 0
@@ -53,7 +79,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 ENGINE = REPO / "engine"
-GROUPS = ("base", "formats", "runtime", "net")
+GROUPS = ("base", "formats", "runtime", "net", "editor")
 SCAN_ROOTS = ("engine", "apps", "tests", "godot/src")
 GODOT_FREE_ROOTS = ("engine", "apps", "tests")
 # ADR 0040: a quoted include names a same-directory sibling and nothing else; a
@@ -71,6 +97,8 @@ ALLOWED = {
     "base": {("base", None), ("formats", None)},
     "net": {("base", None), ("formats", None), ("net", None)},
     "runtime": {("base", None), ("formats", None), ("net", None), ("runtime", None)},
+    "editor": {("base", None), ("formats", None), ("net", None), ("runtime", None),
+               ("editor", None)},
 }
 
 # Rule 1b: the runtime libs that carry the wire (ADR 0043 d4). Every other
@@ -106,6 +134,20 @@ SEAM_TREE_EXTRA_HEADERS = {
     "engine/runtime/mission": {"runtime/terrain_query/terrain_field_build.h"},
 }
 
+# Rule 7: the editor's rank (ADR 0046 S13 D3).
+EDITOR_RANK = {"model": 0, "documents": 1, "graph": 2, "session": 3, "ui": 4}
+EDITOR_SEAM_HEADERS = {"editor/graph/reference_kinds.h", "editor/graph/graph_edge.h"}
+# (includer, included header): the upward includes the tree still makes. None
+# since S13 V3, which moved the last (a stylesheet line's value use, which reads
+# the menus' uses from the graph) out of documents/ into graph/style_value_use;
+# a new entry names the slice that removes it.
+EDITOR_RANK_ALLOWED: set[tuple[str, str]] = set()
+
+# Rule 8: the command line reaches the editor as a session client (ADR 0046 S13 A7).
+CLI_TREE = "apps/project"
+CLI_EDITOR_PREFIXES = ("editor/session/",)
+CLI_EDITOR_HEADERS = {"editor/run/null_process_platform.h"}
+
 INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 
 # Rule 6: Dear ImGui stays behind the engine's dev-tools pass (ADR 0042 d6).
@@ -115,7 +157,11 @@ INCLUDE_LINE = re.compile(r'^\s*#\s*include\s*([<"])([^<>"]+)[>"]')
 # project), and a group-qualified engine path (`runtime/devtools/imgui_abi.h`)
 # is an engine include, checked by the group rules instead.
 IMGUI_INCLUDE = re.compile(r"(?:^|/)(?:imgui|imconfig)[^/]*\.h$")
-IMGUI_ALLOWED_TREES = ("engine/runtime/devtools", "tests/devtools")
+IMGUI_ALLOWED_TREES = ("engine/runtime/devtools", "tests/devtools",
+                       # The OpenNova Editor's windows on the same pass (ADR 0046 d11;
+                       # ADR 0042 d6 amended); godot/src/authoring stays behind the
+                       # imgui_abi.h pointer seam like godot/src/devtools.
+                       "engine/editor/ui", "tests/editor_ui")
 
 
 def engine_libs() -> dict[str, set[str]]:
@@ -169,11 +215,20 @@ def allowed(tree: str, group: str, lib: str) -> bool:
     return any(g == group and (l is None or l == lib) for g, l in ALLOWED[tree])
 
 
+def editor_lib(rel: Path) -> str | None:
+    """The ranked editor library an engine/editor source belongs to, or None."""
+    parts = rel.parts
+    if len(parts) > 3 and parts[0] == "engine" and parts[1] == "editor" and parts[2] in EDITOR_RANK:
+        return parts[2]
+    return None
+
+
 def scan() -> tuple[list[str], int]:
     libs = engine_libs()
     all_libs = set().union(*libs.values())
     violations: list[str] = []
     files = source_files()
+    rank_allowed_seen: set[tuple[str, str]] = set()
     for rel in files:
         posix = rel.as_posix()
         try:
@@ -186,6 +241,8 @@ def scan() -> tuple[list[str], int]:
         tree = includer_tree(rel)
         net_agnostic = tree == "runtime" and len(rel.parts) > 3 and \
                 rel.parts[2] not in NET_AWARE_RUNTIME_LIBS
+        editor_from = editor_lib(rel)
+        cli = posix.startswith(CLI_TREE + "/")
         for lineno, line in enumerate(text.splitlines(), 1):
             m = INCLUDE_LINE.match(line)
             if not m:
@@ -206,7 +263,7 @@ def scan() -> tuple[list[str], int]:
                     for t in IMGUI_ALLOWED_TREES):
                 violations.append(
                     f"[imgui-containment] {where} (imgui headers are allowed "
-                    f"only under engine/runtime/devtools/ and tests/devtools/; "
+                    f"only under engine/runtime/devtools/, engine/editor/ui/ and their tests; "
                     f"ADR 0042 d6)")
                 continue
             if quote == '"' and "../" in inc and rel.parts[0] in PARENT_RELATIVE_FORBIDDEN_ROOTS:
@@ -228,11 +285,27 @@ def scan() -> tuple[list[str], int]:
                 if in_seam and inc.startswith(SEAM_FORBIDDEN_PREFIXES) and \
                         inc not in TERRAIN_QUERY_HEADERS and inc not in seam_extra:
                     violations.append(f"[terrain-seam] {where}")
+                if cli and group == "editor" and not inc.startswith(CLI_EDITOR_PREFIXES) and \
+                        inc not in CLI_EDITOR_HEADERS:
+                    violations.append(
+                            f"[cli-session] {where} (apps/project includes editor/ only through "
+                            f"editor/session/ and editor/run/null_process_platform.h; ADR 0046 S13 A7)")
+                if editor_from and group == "editor" and lib in EDITOR_RANK and \
+                        EDITOR_RANK[lib] > EDITOR_RANK[editor_from] and inc not in EDITOR_SEAM_HEADERS:
+                    if (posix, inc) in EDITOR_RANK_ALLOWED:
+                        rank_allowed_seen.add((posix, inc))
+                    else:
+                        violations.append(
+                                f"[editor-rank] {where} (engine/editor/{editor_from} may not include "
+                                f"editor/{lib}: model < documents < graph < session < ui; ADR 0046 S13 D3)")
                 continue
             if first in all_libs:
                 if quote == '"' and any((r / inc).is_file() for r in local_roots(rel)):
                     continue  # a local, binding, or test-root include
                 violations.append(f"[unqualified] {where} (engine headers are <group/lib/file.h>)")
+    for includer, header in sorted(EDITOR_RANK_ALLOWED - rank_allowed_seen):
+        violations.append(f"[editor-rank] {includer} no longer includes {header}: drop its "
+                          f"EDITOR_RANK_ALLOWED entry")
     for name in sorted(GROUPS):
         if (REPO / "godot" / "src" / name).exists():
             violations.append(f"[binding-root] godot/src/{name}/ is named like an engine group")
@@ -255,11 +328,15 @@ def main() -> int:
     if violations and args.enforce:
         print("[include-graph] FAIL: engine headers are included as <group/lib/file.h>; "
               "a tree includes only the groups below it (ADR 0029 d3, net below runtime "
-              "since ADR 0043 d4); every runtime lib but inmatch/replication is "
+              "since ADR 0043 d4, editor above runtime since ADR 0046 d3); every runtime "
+              "lib but inmatch/replication is "
               "net-agnostic; inmatch/replication/wac/mission/world reach terrain only "
               "through runtime/terrain_query's seam headers (ADR 0020); nothing under "
               "engine/, apps/ or tests/ includes godot; imgui headers stay under "
-              "engine/runtime/devtools/ and tests/devtools/ (ADR 0042 d6).")
+              "engine/runtime/devtools/ and tests/devtools/ (ADR 0042 d6); inside "
+              "engine/editor, model < documents < graph < session < ui (ADR 0046 S13 D3); "
+              "apps/project includes editor/ only through editor/session/ and "
+              "editor/run/null_process_platform.h (ADR 0046 S13 A7).")
         return 1
     return 0
 

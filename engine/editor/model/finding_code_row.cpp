@@ -1,0 +1,403 @@
+#include "finding_code_row.h"
+
+#include <iterator>
+
+namespace opennova::editor {
+
+namespace {
+
+using C = CoreFinding;
+using F = FindingFix;
+using G = FindingGroup;
+using P = FindingPlace;
+
+// A code of the group, with the fixes Problems offers for it.
+constexpr FindingCodeRow code(const char *token, FindingGroup group, FindingFix fixes = F::None) {
+	FindingCodeRow row;
+	row.token = token;
+	row.group = group;
+	row.fixes = fixes;
+	return row;
+}
+
+// A code about a file as a whole (its name, its place): Problems shows it in Files, where it is
+// renamed when it has the fix.
+constexpr FindingCodeRow about_the_file(const char *token, FindingGroup group, FindingFix fixes) {
+	FindingCodeRow row = code(token, group, fixes);
+	row.place = P::File;
+	return row;
+}
+
+// A code saying its file does not serialize: its Save is refused, no Rewrite offered for it.
+constexpr FindingCodeRow blocking(FindingCodeRow row) {
+	row.blocks_save = true;
+	return row;
+}
+
+// A code the asset graph makes.
+constexpr FindingCodeRow from_graph(FindingCodeRow row) {
+	row.source = FindingSource::Graph;
+	return row;
+}
+
+// A code whose findings are listed and never refuse a build, whatever their severity.
+constexpr FindingCodeRow listed(FindingCodeRow row) {
+	row.gates_build = false;
+	return row;
+}
+
+// A gating code whose refusal is the game's own: what the game does there, cited.
+constexpr FindingCodeRow the_game_fails(FindingCodeRow row, const char *refusal) {
+	row.game_refusal = refusal;
+	return row;
+}
+
+constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
+	{ C::AssetKindUnknown, code("asset.kind.unknown", G::ProjectFiles) },
+	{ C::AssetNameDuplicate, about_the_file("asset.name.duplicate", G::ProjectFiles, F::Rename) },
+	{ C::AssetNameEmpty, about_the_file("asset.name.empty", G::ProjectFiles, F::None) },
+	{ C::AssetNameTooLong, about_the_file("asset.name.too_long", G::ProjectFiles, F::Rename) },
+	{ C::AssetUnreadable, code("asset.unreadable", G::ProjectFiles) },
+	// A wave the game's loader refuses plays nothing; the game goes on (the sound lane, wave_source.h).
+	{ C::AssetWaveUnplayable, listed(code("asset.wave_unplayable", G::ProjectFiles)) },
+	{ C::BlankAnimation, code("blank.animation", G::NewFiles) },
+	{ C::BlankDef, code("blank.def", G::NewFiles) },
+	{ C::BlankEnvironment, code("blank.environment", G::NewFiles) },
+	{ C::BlankFont, code("blank.font", G::NewFiles) },
+	{ C::BlankMenu, code("blank.menu", G::NewFiles) },
+	{ C::BlankMission, code("blank.mission", G::NewFiles) },
+	{ C::BlankModel, code("blank.model", G::NewFiles) },
+	{ C::BlankMusic, code("blank.music", G::NewFiles) },
+	{ C::BlankParticles, code("blank.particles", G::NewFiles) },
+	{ C::BlankShader, code("blank.shader", G::NewFiles) },
+	{ C::BlankStrings, code("blank.strings", G::NewFiles) },
+	{ C::BlankSound, code("blank.sound", G::NewFiles) },
+	{ C::BlankStyle, code("blank.style", G::NewFiles) },
+	{ C::BlankTexture, code("blank.texture", G::NewFiles) },
+	{ C::BlankUnavailable, code("blank.unavailable", G::NewFiles) },
+	{ C::BuildArchive, code("build.archive", G::Build) },
+	{ C::BuildArchiveInProject, listed(about_the_file("build.archive_in_project", G::Build, F::None)) },
+	{ C::BuildBlocked, code("build.blocked", G::Build) },
+	{ C::BuildChanged, code("build.changed", G::Build) },
+	{ C::BuildCopy, code("build.copy", G::Build) },
+	// An expansion whose base game does not mount (no install, none of its archives): its build cannot
+	// be compared with the base nor gated over it (ADR 0046 S16), so it gates, the editor's integrity.
+	{ C::BuildExpansionBaseMissing, code("build.expansion.base_missing", G::Build) },
+	// The Mods list's description of an expansion past its record's 272 bytes: the copy spills into the
+	// next expansion's record [orig: Expansion_ScanAndRegister @ 0x4a4612], a picture the game shows
+	// wrong, no refusal of it: listed.
+	{ C::BuildExpansionExpDesc, listed(code("build.expansion.exp_desc", G::Build)) },
+	// The Mods list's name of an expansion of 64 bytes or more: the copy runs into the record's folder
+	// name [orig: Expansion_ScanAndRegister @ 0x4a4598, after the folder's @ 0x4a4532], so choosing the
+	// expansion there loads another name's, the base game [orig: Options_HandleAcceptOrBack @ 0x55ad43;
+	// Expansion_LoadAssets @ 0x4a4767]: it gates.
+	{ C::BuildExpansionExpName, code("build.expansion.exp_name", G::Build) },
+	// A mission (or map project) an expansion ships whose name the base game lists too: the mission list
+	// lists it twice, the base pair's walk and the expansion pair's, with no dedupe [orig:
+	// MissionList_ScanAndBuildFromFiles @ 0x563170, @ 0x5635a5..0x5635bb], both rows loading the
+	// expansion's copy; a picture, no refusal: listed.
+	{ C::BuildExpansionMissionTwice, listed(about_the_file("build.expansion.mission_twice", G::Build, F::None)) },
+	// A mission (or map project) an expansion ships with no text table of its own in its pair: its row is
+	// untitled, the list titling a mission only from the text archive paired with its own [orig:
+	// Mission_BuildMapListFromPFF @ 0x562c2d, PFF_FileExists(bin, textArchive)]; the game runs it: listed.
+	{ C::BuildExpansionMissionUntitled, listed(about_the_file("build.expansion.mission_untitled", G::Build, F::None)) },
+	// A file an expansion's build leaves out because the game reads its kind only from the install's
+	// folder (ADR 0046 S16, FileKindFacts::expansion_loose): said, refusing nothing.
+	{ C::BuildExpansionRootOnly, listed(about_the_file("build.expansion.root_only", G::Build, F::None)) },
+	{ C::BuildNameUnstorable, about_the_file("build.name_unstorable", G::Build, F::Rename) },
+	{ C::BuildOutDirInProject, code("build.out_dir_in_project", G::Build) },
+	// A player's or this machine's file the project holds, which a build leaves out (ADR 0046 S14,
+	// gameprofile/player_files.h).
+	{ C::BuildPlayerFile, code("build.player_file", G::Build) },
+	{ C::BuildRead, code("build.read", G::Build) },
+	// A file the game could never read as the build would ship it (a NovaWorld screen, read through the
+	// archives alone, under a name no archive can store): the build leaves it out, refusing nothing (S16).
+	{ C::BuildUnread, listed(about_the_file("build.unread", G::Build, F::None)) },
+	{ C::BuildVerify, code("build.verify", G::Build) },
+	{ C::BuildWrite, code("build.write", G::Build) },
+	{ C::CreateMissingExists, code("create_missing.exists", G::CreateMissing) },
+	{ C::CreateMissingUnknown, code("create_missing.unknown", G::CreateMissing) },
+	{ C::CreateMissingWrite, code("create_missing.write", G::CreateMissing) },
+	{ C::CreateMissingWrongKind, code("create_missing.wrong_kind", G::CreateMissing) },
+	{ C::DocumentBatch, code("document.batch", G::Documents) },
+	{ C::DocumentCollection, code("document.collection", G::Documents) },
+	// A file of a kind the ConfigFile text reader reads holding more values than that reader's pool of its
+	// text values takes (documents/config_overrun.h): an error, the reader clearing past the pool into the
+	// game's heap [orig: ConfigFile_ParseText @ 0x7609e8]. It gates: the load goes on, but the game's heap is
+	// corrupt from there and the crash comes later, as the heap's next block is used (41 bytes past crashed a
+	// single-player mission start in the witness; 8 past ran, which no build may count on). Its fix, the lines
+	// the kind's loader reads the same without commented out, an edit of its document.
+	{ C::DocumentConfigOverrun,
+	  the_game_fails(code("document.config_overrun", G::Documents, F::EditRecord),
+	                 "its ConfigFile reader clears the buffer of the file's text values one byte per value, past its "
+	                 "end into the game's memory, and the game crashes later, as a mission starts [orig: "
+	                 "ConfigFile_ParseText @ 0x7609e8]") },
+	{ C::DocumentConflict, code("document.conflict", G::Documents, F::Reload) },
+	{ C::DocumentCopy, code("document.copy", G::Documents) },
+	{ C::DocumentDecode, code("document.decode", G::Documents) },
+	{ C::DocumentDuplicate, code("document.duplicate", G::Documents) },
+	// A file an import makes is the import's, never edited in place (DI-30): its source and options change it.
+	{ C::DocumentImported, code("document.imported", G::Documents) },
+	{ C::DocumentKind, code("document.kind", G::Documents) },
+	// A file of a kind whose game reader ends a line at CR LF alone with a line an LF ends alone
+	// (documents/line_ends.h): what the game reads, a warning refusing nothing; its fix, Restore CR LF
+	// line ends, an edit of its document.
+	{ C::DocumentLineEnds, listed(code("document.line_ends", G::Documents, F::EditRecord)) },
+	{ C::DocumentMissing, code("document.missing", G::Documents) },
+	{ C::DocumentName, code("document.name", G::Documents) },
+	{ C::DocumentNoFile, code("document.no_file", G::Documents) },
+	{ C::DocumentNoRecords, code("document.no_records", G::Documents) },
+	{ C::DocumentNotOpen, code("document.not_open", G::Documents) },
+	{ C::DocumentParse, code("document.parse", G::Documents) },
+	{ C::DocumentPaste, code("document.paste", G::Documents) },
+	{ C::DocumentPath, code("document.path", G::Documents) },
+	{ C::DocumentPayload, code("document.payload", G::Documents) },
+	{ C::DocumentRead, code("document.read", G::Documents) },
+	{ C::DocumentRevertNothing, code("document.revert_nothing", G::Documents) },
+	{ C::DocumentSelection, code("document.selection", G::Documents) },
+	{ C::DocumentSnapshot, code("document.snapshot", G::Documents) },
+	{ C::DocumentSpan, code("document.span", G::Documents) },
+	{ C::DocumentStale, code("document.stale", G::Documents) },
+	{ C::DocumentStructure, code("document.structure", G::Documents) },
+	{ C::DocumentUnserializable, blocking(code("document.unserializable", G::Documents)) },
+	{ C::DocumentValue, code("document.value", G::Documents) },
+	{ C::DocumentValues, code("document.values", G::Documents) },
+	{ C::DocumentWrite, code("document.write", G::Documents) },
+	{ C::EditorSettingsJson, code("editor_settings.json", G::EditorSettings) },
+	{ C::EditorSettingsSchemaVersionUnsupported, code("editor_settings.schema_version.unsupported", G::EditorSettings) },
+	{ C::EditorSettingsUnreadable, code("editor_settings.unreadable", G::EditorSettings) },
+	{ C::EditorSettingsWrite, code("editor_settings.write", G::EditorSettings) },
+	// A project file the game never reads for the project's expansion setting (ADR 0046 S16): a music
+	// bank but the streamed pair, an expansion's base music scripts. Listed, its fix a Rename: the
+	// game runs without it.
+	{ C::ExpansionFileUnread, listed(about_the_file("expansion.file.unread", G::Expansion, F::Rename)) },
+	// Export (ADR 0046 S16, project_build/export_build.h): a folder that is the person's, never written
+	// over; the runtime to ship that is not there; a copy or a rename refused.
+	// An Export cancelled before its folder was replaced: the folder is as it was (S16).
+	{ C::ExportCancelled, listed(code("export.cancelled", G::Export)) },
+	// The last export, set aside while the new one went in, that could not be removed (a file of it open
+	// elsewhere): the new export is in; the next export removes it first (S16). Listed.
+	{ C::ExportCleanup, listed(code("export.cleanup", G::Export)) },
+	{ C::ExportFolder, code("export.folder", G::Export) },
+	// What an export over an earlier one of the project did to it (S16): the files the person added there,
+	// kept in the new export, and the earlier export's files it no longer holds, removed. Listed.
+	{ C::ExportReplaced, listed(code("export.replaced", G::Export)) },
+	{ C::ExportRuntime, code("export.runtime", G::Export) },
+	{ C::ExportWrite, code("export.write", G::Export) },
+	// Files' chores (DI-25): a refusal of a delete, a duplicate, a new folder or a folder's rename, of the
+	// history's undo and redo, or of what the trash could not take or give back.
+	{ C::FileExists, code("file.exists", G::FileChores) },
+	{ C::FileFolder, code("file.folder", G::FileChores) },
+	{ C::FileHistory, code("file.history", G::FileChores) },
+	{ C::FileImported, code("file.imported", G::FileChores) },
+	{ C::FileName, code("file.name", G::FileChores) },
+	{ C::FileNamed, code("file.named", G::FileChores) },
+	{ C::FileTrash, code("file.trash", G::FileChores) },
+	{ C::FileUnknown, code("file.unknown", G::FileChores) },
+	{ C::FileWrite, code("file.write", G::FileChores) },
+	{ C::GraphUnreadable, from_graph(code("graph.unreadable", G::FilesNotChecked)) },
+	{ C::ImportAlphaDropped, code("import.alpha_dropped", G::Imports) },
+	{ C::ImportArchive, code("import.archive", G::Imports) },
+	{ C::ImportChanged, code("import.changed", G::Imports) },
+	{ C::ImportDecode, code("import.decode", G::Imports) },
+	{ C::ImportDuplicate, code("import.duplicate", G::Imports) },
+	{ C::ImportEncode, code("import.encode", G::Imports) },
+	{ C::ImportExists, code("import.exists", G::Imports) },
+	{ C::ImportFolder, code("import.folder", G::Imports) },
+	// A font made from a glyph sheet (import/font_import): a set or a sheet the importer cannot make into a
+	// font, a sheet with no clear texel.
+	{ C::ImportFont, code("import.font", G::Imports) },
+	{ C::ImportInput, code("import.input", G::Imports) },
+	{ C::ImportInstall, code("import.install", G::Imports) },
+	{ C::ImportKind, code("import.kind", G::Imports) },
+	// A Black Hawk Down GP model migrated to 3DI3 as it came in (import/converter): one the reader or the
+	// migration refuses, and what the migration could not carry exactly, a note a kind.
+	{ C::ImportMigrate, code("import.migrate", G::Imports) },
+	{ C::ImportMigrateNote, code("import.migrate_note", G::Imports) },
+	{ C::ImportName, code("import.name", G::Imports) },
+	{ C::ImportNotPlanned, code("import.not_planned", G::Imports) },
+	{ C::ImportNotPublished, code("import.not_published", G::Imports) },
+	{ C::ImportOption, code("import.option", G::Imports) },
+	{ C::ImportOrphanRecord, code("import.orphan_record", G::Imports) },
+	{ C::ImportOutputMissing, code("import.output_missing", G::Imports, F::Reimport) },
+	{ C::ImportPath, code("import.path", G::Imports) },
+	// A player's or this machine's file, which an import never takes (ADR 0046 S14).
+	{ C::ImportPlayerFile, code("import.player_file", G::Imports) },
+	{ C::ImportPublish, code("import.publish", G::Imports) },
+	{ C::ImportRead, code("import.read", G::Imports) },
+	{ C::ImportRecord, code("import.record", G::Imports) },
+	// An import request whose fields ask for two things at once (every file and some by name; every
+	// file and a walk; an import of nothing named and nothing planned): refused, never half-served.
+	{ C::ImportRequest, code("import.request", G::Imports) },
+	{ C::ImportScene, code("import.scene", G::Imports) },
+	{ C::ImportSceneNote, code("import.scene_note", G::Imports) },
+	{ C::ImportSidecar, code("import.sidecar", G::Imports) },
+	// A terrain made from images (S20): a set the importer cannot make into a terrain, a heightmap
+	// steeper than the game's compressed heights hold, a new_terrain request refused.
+	{ C::ImportTerrain, code("import.terrain", G::Imports) },
+	{ C::ImportNotFound, code("import.not_found", G::Imports) },
+	{ C::ImportTextureNotImported, code("import.texture_not_imported", G::Imports, F::UnimportedTexture) },
+	{ C::ImportUnreadable, code("import.unreadable", G::Imports) },
+	// An author's wave converted as it came in, or one that reads as no wave (the sound lane).
+	{ C::ImportWave, code("import.wave", G::Imports) },
+	{ C::ImportWrite, code("import.write", G::Imports) },
+	{ C::LocalSettingsJson, code("local_settings.json", G::LocalSettings) },
+	{ C::LocalSettingsSchemaVersionUnsupported, code("local_settings.schema_version.unsupported", G::LocalSettings) },
+	{ C::LocalSettingsUnreadable, code("local_settings.unreadable", G::LocalSettings) },
+	{ C::LocalSettingsWrite, code("local_settings.write", G::LocalSettings) },
+	{ C::MissionSidecarUnused, code("mission.sidecar.unused", G::Missions) },
+	// A Back or a Forward with no place that way (the navigation history, session/navigation_controller.h):
+	// the request's outcome alone, as a set_workspace refused is.
+	{ C::NavigationNone, code("navigation.none", G::Navigation) },
+	{ C::OperationBusy, code("operation.busy", G::Operations) },
+	{ C::OperationNone, code("operation.none", G::Operations) },
+	{ C::OperationNotCancellable, code("operation.not_cancellable", G::Operations) },
+	{ C::PlayAlreadyRunning, code("play.already_running", G::Play) },
+	{ C::PlayBootMissing, code("play.boot_missing", G::Play, F::Requirement) },
+	{ C::PlayCrashed, code("play.crashed", G::Play) },
+	// What the game's log said it looked for and did not find (ADR 0046 DI-27), each kept until the next
+	// Play of its mode: a file it opens by its own name (the requirement's fixes where the manifest has a
+	// row of it), a name a file of the project names (the reference's fixes, on that file's record), and
+	// the game install's mission that began loading and never finished. Like the boot report's, their rows
+	// sit before the gate a build reads (project_findings).
+	{ C::PlayFileMissing, code("play.file_missing", G::Play, F::Requirement) },
+	{ C::PlayInstallCopy, code("play.install_copy", G::Play) },
+	{ C::PlayInstallMissing, code("play.install_missing", G::Play) },
+	{ C::PlayInstallRunning, code("play.install_running", G::Play) },
+	{ C::PlayMissionFailed, code("play.mission.failed", G::Play) },
+	{ C::PlayMissionUnfinished, code("play.mission.unfinished", G::Play) },
+	{ C::PlayMissionUnknown, code("play.mission.unknown", G::Play) },
+	{ C::PlayReferenceMissing, code("play.reference_missing", G::Play, F::Reference) },
+	{ C::PlayRunDirectory, code("play.run_directory", G::Play) },
+	{ C::PlayRuntimeMissing, code("play.runtime_missing", G::Play) },
+	{ C::PlaySpawn, code("play.spawn", G::Play) },
+	// Play from here (DI-26): the start it was given refused (no mission named, a mission whose mode
+	// places its player at no marker) or not staged in the run directory (run/play_start.h).
+	{ C::PlayStart, code("play.start", G::Play) },
+	{ C::PlayUnsupported, code("play.unsupported", G::Play) },
+	// The base game's project an expansion names (ADR 0046 T5, project/base_project.h) that does not serve
+	// as one: no project there, one that does not read, an expansion itself, another game's. Refused where a
+	// project is made or its settings applied; listed where an open project's base is read again (the
+	// build's gate says build.expansion.base_missing).
+	{ C::ProjectBaseProject, listed(code("project.base_project", G::Project)) },
+	{ C::ProjectExists, code("project.exists", G::Project) },
+	// The project's expansion against its game install (ADR 0046 S16, expansion_name.h): a name the
+	// install has already, an expansion to build on it lacks. Refused where a project is made or its
+	// settings applied; listed where an open project's install is read again (the install is this
+	// machine's, the project the modder's), refusing no build: the game mounts the build's own
+	// expansion whatever else the install holds.
+	{ C::ProjectExpansionNameTaken, listed(code("project.expansion.name_taken", G::Project)) },
+	{ C::ProjectExpansionNotInstalled, listed(code("project.expansion.not_installed", G::Project)) },
+	// An expansion for a game other than Joint Operations, whose expansions alone are witnessed.
+	{ C::ProjectExpansionUnsupported, code("project.expansion.unsupported", G::Project) },
+	{ C::ProjectFieldInvalid, code("project.field.invalid", G::Project) },
+	{ C::ProjectFileMissing, code("project.file.missing", G::Project) },
+	{ C::ProjectFileUnreadable, code("project.file.unreadable", G::Project) },
+	{ C::ProjectInstallInvalid, code("project.install.invalid", G::Project) },
+	{ C::ProjectJson, code("project.json", G::Project) },
+	{ C::ProjectMissionFeatureOff, code("project.mission.feature_off", G::Project) },
+	{ C::ProjectNone, code("project.none", G::Project) },
+	{ C::ProjectRootUnreadable, code("project.root.unreadable", G::Project) },
+	{ C::ProjectSchemaVersionUnsupported, code("project.schema_version.unsupported", G::Project) },
+	{ C::ProjectTargetGameUnknown, code("project.target_game.unknown", G::Project) },
+	{ C::ProjectTitleEmpty, code("project.title_empty", G::Project) },
+	{ C::ProjectWrite, code("project.write", G::Project) },
+	// A name the project lacks is shown, counted and fixable, and gates no build (ADR 0046 S14): the
+	// shipped game's own files name what its install does not hold and it runs, so a build refused
+	// for one would assert a failure no one has witnessed; where the reference's kind cites the
+	// game's refusal (a mission's terrain: ReferenceKindRow::gates_when_missing) it gates.
+	{ C::ReferenceMissing, listed(from_graph(code("reference.missing", G::MissingReferences, F::Reference))) },
+	// A file of the name the project holds, of a kind the reference's loader does not load: the
+	// loader finds nothing it loads there, as for a missing name, so it gates where a missing
+	// reference of its kind does and is listed elsewhere (the audit of the gate: no refusal of a
+	// file of the wrong kind is witnessed beyond the kind's own).
+	{ C::ReferenceWrongKind, listed(from_graph(code("reference.wrong_kind", G::MissingReferences))) },
+	{ C::RenameConflict, code("rename.conflict", G::Renames) },
+	{ C::RenameCopy, code("rename.copy", G::Renames) },
+	{ C::RenameExists, code("rename.exists", G::Renames) },
+	{ C::RenameImported, code("rename.imported", G::Renames) },
+	{ C::RenameKind, code("rename.kind", G::Renames) },
+	{ C::RenameMove, code("rename.move", G::Renames) },
+	{ C::RenameName, code("rename.name", G::Renames) },
+	{ C::RenamePartial, code("rename.partial", G::Renames) },
+	{ C::RenamePath, code("rename.path", G::Renames) },
+	{ C::RenameRemove, code("rename.remove", G::Renames) },
+	{ C::RenameSite, code("rename.site", G::Renames) },
+	{ C::RenameStyle, code("rename.style", G::Renames) },
+	{ C::RenameTooLong, code("rename.too_long", G::Renames) },
+	{ C::RenameUnchanged, code("rename.unchanged", G::Renames) },
+	{ C::RenameUnknownFile, code("rename.unknown_file", G::Renames) },
+	{ C::RenameUnknownSymbol, code("rename.unknown_symbol", G::Renames) },
+	{ C::RenameWrite, code("rename.write", G::Renames) },
+	{ C::RequirementAssigned, code("requirement.assigned", G::RequiredFiles) },
+	{ C::RequirementKind, code("requirement.kind", G::RequiredFiles) },
+	// A required file the project lacks: listed, and gating where its manifest row is the game's
+	// refusal to boot (RES_FATAL: the string tables the boot exits without, the main menu it dead-ends
+	// without; blocks_build reads the row); the game boots on without any other, degraded as the
+	// row's failure says.
+	{ C::RequirementMissing, listed(code("requirement.missing", G::RequiredFiles, F::Requirement)) },
+	{ C::RequirementOptionalMissing, code("requirement.optional_missing", G::OptionalFiles, F::Requirement) },
+	{ C::RequirementUnknown, code("requirement.unknown", G::RequiredFiles) },
+	{ C::RequirementUnknownFile, code("requirement.unknown_file", G::RequiredFiles) },
+	// A required name holding a file of another kind: the boot's loaders read what the file holds
+	// with no check of its kind (a string table's keeps any bytes it opens [orig:
+	// TextResource_LoadFromArchive @ 0x75d0b0] and makes its header's offsets pointers unchecked
+	// [orig: TextResource_FixupPointers @ 0x75d050]): listed, gating where the row is the boot's
+	// refusal (RES_FATAL), whose table the boot then runs on wild pointers.
+	{ C::RequirementWrongKind, listed(code("requirement.wrong_kind", G::RequiredFiles, F::WrongKind)) },
+	// What a texture's use asks of the file its loader opens (ADR 0046 S18, graph/texture_checks: each
+	// finding cites its witness). An error of one gates: a terrain's colour map read past its texels, a
+	// foliage map read past its rows, a terrain map the mission needs that its loader cannot read (the
+	// mission aborts); the others are warnings and notes.
+	// What a use asks of the file its loader opens: where an import makes that file, the import made as the
+	// use asks.
+	{ C::TextureAlphaNotLoaded, code("texture.alpha_not_loaded", G::Textures, F::ImportFitsUse) },
+	{ C::TextureBlendMapSize, code("texture.blend_map_size", G::Textures, F::ImportFitsUse) },
+	{ C::TextureColourMapSize, code("texture.colormap_size", G::Textures, F::ImportFitsUse) },
+	{ C::TextureExternal, code("texture.external", G::Textures) },
+	{ C::TextureFoliageMapOverrun, code("texture.foliage_map_overrun", G::Textures, F::ImportFitsUse) },
+	{ C::TextureFoliageMapShape, code("texture.foliage_map_shape", G::Textures, F::ImportFitsUse) },
+	{ C::TextureHeightWrap, code("texture.height_wrap", G::Textures, F::ImportFitsUse) },
+	{ C::TextureLoadingScreenSize, code("texture.loading_screen_size", G::Textures, F::ImportFitsUse) },
+	// What a model texture costs the game past kTextureMemoryWarnBytes (documents/texture_budget): where an
+	// import makes the file, the import made as its uses ask (a model row's DXT5 .dds).
+	{ C::TextureMemory, code("texture.memory", G::Textures, F::ImportFitsUse) },
+	{ C::TextureMfdNotPowerOfTwo, code("texture.mfd_not_pow2", G::Textures, F::ImportFitsUse) },
+	{ C::TextureNormalMapHalved, code("texture.normal_map_halved", G::Textures, F::ImportFitsUse) },
+	// A normal-map slot's row of a type the stage or plain loader reads: its row given type 4 where the file
+	// is a finished normal map (.mdt).
+	{ C::TextureNormalSlotLoader, code("texture.normal_slot_loader", G::Textures, F::NormalRowType) },
+	{ C::TextureOperation, code("texture.operation", G::Textures) },
+	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures, F::ImportFitsUse) },
+	{ C::TextureReplace, code("texture.replace", G::Textures) },
+	{ C::TextureSetAside, code("texture.set_aside", G::Textures) },
+	{ C::TextureShowUse, code("texture.show_use", G::Textures) },
+	{ C::TextureSplit, code("texture.split", G::Textures) },
+	{ C::TextureStoreDds, code("texture.store_dds", G::Textures) },
+	{ C::TextureTileAtlasCells, code("texture.tile_atlas_cells", G::Textures, F::ImportFitsUse) },
+	{ C::TextureWrongReader, code("texture.wrong_reader", G::Textures, F::ImportFitsUse) },
+	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },
+	{ C::UnsavedNone, code("unsaved.none", G::UnsavedChanges) },
+	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },
+	// A set_workspace the session cannot take (the MCP gaps lane): a card of a file the project lacks.
+	{ C::WorkspaceRefused, code("workspace.refused", G::Workspace) },
+	// A wave_operation the wave cannot take (round S23 lane A): no sample, a trim that keeps none, a silent normalise.
+	{ C::WaveOperation, code("wave.operation", G::Waves) },
+};
+
+static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");
+static_assert(finding_entries_well_formed(kEntries),
+		"the core rows follow CoreFinding's order, each token its own, a Rewrite's words on a Rewrite row");
+
+constexpr std::array<FindingCodeRow, kCoreFindingCount> kRows = finding_rows(kEntries);
+static_assert(finding_rows_well_formed(kRows), "every core row has its group");
+
+} // namespace
+
+const FindingCodeRow &finding_code(CoreFinding code) {
+	return kRows[static_cast<size_t>(code)];
+}
+
+FindingTable core_finding_codes() { return { kRows.data(), kRows.size() }; }
+
+} // namespace opennova::editor

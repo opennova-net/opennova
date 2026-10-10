@@ -1,0 +1,346 @@
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <editor/preview/definition_effects.h>
+#include <editor/preview/effect_catalog.h>
+#include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_effects.h>
+#include <editor/preview/mission_ground_facts.h>
+#include <editor/preview/mission_ground_overlay.h>
+#include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_items.h>
+#include <editor/preview/mission_listen.h>
+#include <editor/preview/mission_options.h>
+#include <editor/preview/mission_people.h>
+#include <editor/preview/mission_poses.h>
+#include <editor/preview/mission_scene.h>
+#include <editor/preview/mission_shots.h>
+#include <editor/preview/preview_clip_sounds.h>
+#include <editor/preview/viewport_follow.h>
+#include <editor/preview/viewport_model.h>
+
+namespace opennova::editor {
+
+class Document;
+struct MissionCanvasFrame;
+
+// What a mission viewport shows, and why not (ADR 0046 S14): the kind's reason.
+enum class MissionViewStatus : uint8_t {
+	NoProject, // no project is open
+	NoMission, // no mission is open at its path
+	Ready,
+};
+// "no_project", "no_mission", "ready": its token on the wire.
+const char *mission_view_status_token(MissionViewStatus status);
+// The line a mission viewport shows for a status ("" when ready).
+std::string mission_view_status_message(MissionViewStatus status);
+
+// How far the camera stands from what it frames at most (metres), how far down a first framing looks
+// (radians: 35 degrees), the least sphere a framing looks at (metres), and the degrees a turn snaps
+// to while the canvas snaps.
+inline constexpr float kMissionFrameDistance = 400.0f;
+inline constexpr float kMissionFramePitch = 0.610865f;
+
+// How far a framing sees through a mission's fog (world units, metres): the editor's framing choice, not
+// the game's (as kMissionFrameDistance is), half the fog's end at the settled level as the game sets it
+// [orig: Render_SetFogState @ 0x58a950 via env::compute_fog_params], the level the .env's under the
+// header's overrides [orig: Game_StartMission @ 0x525371..0x525383] (no overcast at the start); 0 when the
+// project lacks the .env the header names or its fog is off. A framing stands no farther (CP10's fog ends
+// at 325 m: framed 400 m off, the picture was the fog's colour alone, as a game camera there would show it).
+float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header);
+inline constexpr float kMissionFrameRadius = 10.0f;
+inline constexpr float kMissionTurnSnap = 15.0f;
+// A framing of everything on a mission whose marks spread past kMissionFrameSpread metres from their
+// middle looks at its densest place instead: the marks within a cell of the kMissionFrameCell-metre
+// cell that holds the most (S15).
+inline constexpr float kMissionFrameSpread = 1500.0f;
+inline constexpr float kMissionFrameCell = 400.0f;
+
+// The change a SetViewport makes to set a mission viewport's camera to `camera` (its target, heading,
+// pitch and distance, in the mission's terms: mission_camera.h): what a look, a fly, a pan, an orbit,
+// a dolly or a framing on its canvas sends.
+std::string mission_camera_change(const OrbitCamera &camera);
+
+// A mission's viewport (ADR 0046 S14; ViewportKind::Mission, the Document tab's main view): the
+// mission document at its path as it stands (never its bytes: a mission that cannot be written still
+// shows), its terrain, environment and entities drawn by the Shell's device as the game draws them,
+// its marks, areas and paths drawn over the picture by its canvas. It keeps a scene of what the
+// picture and the overlays read of the document (mission_scene.h), read whole when the document is
+// first followed, read again or changed in a way it cannot say, and patched by the change set an edit
+// answers: the changed rows alone, so a drag of ten entities reads ten rows. What follows for the
+// device: a header field it reads, an entity added, removed or of another item, or a file its picture
+// read moved, builds again (the device diffs the scene against what it holds and builds only what
+// differs); an entity's transform is an Update (moved in place); a team, an area, a path, an event
+// are the overlays' alone (Keep). Its row holds a Rebuild for a gesture, so nothing builds under a
+// drag. Its camera is an OrbitCamera in the presentation frame, flown as well as orbited
+// (mission_camera.h), framed on the entities when a document is first read; its options the layers
+// the device draws, the marks the canvas draws, the mark range, stick and the time of day
+// (mission_options.h).
+class MissionViewport final : public ViewportModel {
+public:
+	explicit MissionViewport(std::string path);
+	static std::unique_ptr<ViewportModel> make(const std::string &path);
+
+	MissionViewStatus view_status() const { return reason_; }
+	const MissionViewportOptions &options() const { return options_; }
+	const OrbitCamera &camera() const { return camera_; }
+	// A box of the ground framed (S23 C: a tile atlas's Show use, its cells' squares): a SetViewport's
+	// `frame_ground` [x0, y0, x1, y1], mission units, framed at the next follow, the camera over its middle on
+	// the ground there, north up and looking down as the first framing looks, as far as fits it; a camera so set
+	// stands over the first framing.
+	static constexpr float kFrameGroundMargin = 1.25f;
+	const MissionScene &scene() const { return scene_; }
+	// The names its device asked the project's files for and did not find (its notes), and whether
+	// its device holds a surface a ray lands on (its terrain, built).
+	const std::vector<std::string> &missing() const { return missing_; }
+	bool ground() const { return ground_; }
+	// A gesture is open in its document, as it last followed (the Shell's pump each frame): what its
+	// device defers to the gesture's end (a moved entity's terrain shadow).
+	bool gesture_open() const { return gesture_open_; }
+
+	// The ground under the picture's point (x, y) in the game's words (DI-07, mission_ground_facts.h): what
+	// the device's ray meets first (an entity's drawn surface: a body standing on it; the terrain: the class
+	// the game reads there, its footstep slots and the round's effects row; nothing, or no device to say:
+	// Nothing), the mission's terrain, tiles and water read through the game's own loads when first asked.
+	MissionGroundFacts ground_under(const ViewportContext &context, float x, float y) const;
+	// What that reads of the mission's files (its terrain, its char map, its tiles and its water plane), as
+	// last asked.
+	const MissionGround &ground_reader() const { return terrain_ground_; }
+	// The ground overlay its options ask (DI-29, mission_ground_overlay.h: the surface classes or the foliage the
+	// game reads at each point), made over the ground as last followed; its kind None with the option's. Its
+	// serial moves each time it is made again (what the device takes it again by).
+	const MissionOverlayImage &overlay() const { return overlay_; }
+	uint64_t overlay_serial() const { return overlay_serial_; }
+
+	// The Shoot tool's shots (DI-23, preview/mission_shots): the run on the preview clock (its effects spawned in the
+	// items' effect scene, effects(), while that layer shows), its scars in the presentation frame (the device's),
+	// and its sounds as the clock runs (each heard at the camera, kept as the clip sounds are, the last
+	// kSoundsFiredKept).
+	const MissionShots &shots() const { return shots_; }
+	renderer::ScarDrawList shot_scars() const;
+	static constexpr size_t kSoundsFiredKept = 16;
+	const std::vector<ClipSoundFired> &sounds_fired() const { return shot_fired_; }
+	std::vector<ClipSoundFired> fire_sounds(const PreviewClock &clock, const AssetScan *scan, audio::SoundSelector &selector,
+			uint64_t &next_seq);
+
+	// The marks on a picture `width` x `height` (mission_scene.h), an area's anchor on the ground of
+	// `device` where it answers, each entity's with its item's bound (picked by it).
+	std::vector<MissionMark> marks(int width, int height, const ViewportDevice *device) const;
+	// What it reads of its entities' items (preview/mission_items: a drop's facts, the bound each item's
+	// entity is picked by), as last followed.
+	const MissionItemCache &items() const { return items_; }
+	// Its people's spawn poses (DI-38, preview/mission_poses: what the game's organic init and its
+	// warmup leave each placed person in), as last followed: the device poses each person's model by
+	// its row's.
+	const MissionPoses &poses() const { return poses_; }
+	// Its people playing their clips on the preview clock from their spawn (S23 C, preview/mission_people): the device
+	// poses each person's model by its body as it plays now.
+	const MissionPeople &people() const { return people_; }
+	// Its items' effects as the mission's start attaches them (DI-31, preview/mission_effects), followed and
+	// played to the preview clock while its options show them (closed otherwise): the device draws its scene.
+	const MissionEffects &effects() const { return effects_; }
+	// What its device says it drew of the layers it reports (DI-31: the foliage and the lights), as last
+	// reported (null before any): the body's `drawn`.
+	const io::JsonValue &drawn() const { return drawn_; }
+	// What the mission sounds like at its camera while its options listen (DI-36, preview/mission_listen): the sources,
+	// the channels the device plays, the script's weather; closed while they do not.
+	const MissionListen &listen() const { return listen_; }
+	// The one-shots its Listen heard since the last call (the weather's thunder, the script's sounds, its people's
+	// footsteps and foley as they play their clips), each planned as the game plays it with its member picked through
+	// `selector`, numbered from `seq`: what the session's clip sounds hand the Shell (session/clip_sounds). None while
+	// it does not listen.
+	std::vector<ClipSoundFired> fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq);
+	// The hour the picture shows: the options' time, else the mission's start time [orig: Game_StartMission @ 0x525371
+	// widens the header's Q8.8 start hour into the clock].
+	double hours() const;
+	// How far from its anchor the primary's handles stand, metres: a share of the camera's distance,
+	// so they keep their size on the picture.
+	float handle_reach() const { return camera_.distance * 0.08f; }
+	// A record of the scene as a press finds it (an entity's position and yaw, an area's bounds);
+	// false for a record that is neither.
+	bool pressed(const NodeAddress &record, MissionPressed &out) const;
+	// Where a mark's handle stands, the presentation frame: Move its anchor, Height and Yaw an
+	// entity's handles at the reach, an edge the middle of an area's side at its anchor's height.
+	// False for a handle the mark has not (an area has no height or yaw, an entity no edge).
+	bool handle_at(const MissionMark &mark, MissionHandle handle, PreviewVec3 &out) const;
+	// The camera looking at the marks `of` (the indexes into `marks`; none: every entity and area) on
+	// a picture `width` x `height`, from its angles now, no farther than kMissionFrameDistance nor the
+	// mission's fog reach (mission_fog_reach; kMissionFrameRadius at least).
+	OrbitCamera framed(const std::vector<MissionMark> &marks, const std::vector<int> &of, int width, int height) const;
+
+	// What a canvas maps of it in a frame (mission_canvas.h): its marks and, while the mission is the
+	// active document, the selected records' marks.
+	MissionCanvasFrame canvas_frame(const ViewportContext &context) const;
+
+	ViewportStatus status() const override;
+	const char *reason() const override { return mission_view_status_token(reason_); }
+	std::string message() const override { return mission_view_status_message(reason_); }
+	const std::string &detail() const override { return detail_; }
+	const FileStamps *picture_reads() const override { return &picture_.files(); }
+	const char *units() const override { return "pixels"; }
+	ViewportLayout layout() const override { return ViewportLayout(); }
+	std::unique_ptr<CanvasHalf> make_canvas() const override;
+	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	std::vector<ViewportHit> box(const ViewportContext &context, float x0, float y0, float x1,
+			float y1) const override;
+	// A click (ViewportModel::click, its canvas driven): taken in every join while the picture is the
+	// mission's as it is, at the picture's size.
+	bool click_frame(const ViewportContext &context, SelectMode mode, int &width, int &height,
+			std::string &error) const override;
+	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
+			std::string &error) const override;
+	// A drag of an entity's or an area's handle (mission_handle_edit.h): `move` on the ground (the
+	// device's terrain, else the plane through the anchor), `height`, `yaw`, an area's edges; a
+	// dragged record that is selected takes every selected entity with it (and every selected area,
+	// for a move), one that is not moves alone. Its snap is metres, degrees for a turn.
+	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
+			std::string &error) const override;
+	// `frame` (the first named record, else the selection, else everything) and `top` (straight down
+	// over the target, north up): each a SetViewport of the camera. `ground`: each named entity (else
+	// each selected one) set down on the device's ground under it, its z the ground's less its model's
+	// anchor height (preview/mission_items), one batch; refused with no ground under one.
+	// `select_same` (S15): one SelectRecord of every entity whose item is a named (else a selected)
+	// entity's, the primary kept where it is among them. `play_from_here` (DI-26): Play started in this
+	// mission with its player on the ground under the camera, facing the way it looks (command_of takes it
+	// at a picture point too).
+	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
+			CanvasRequests &out, std::string &error) const override;
+	// The commands that take more than their records (S15): `duplicate {ids?, by?: [east, north]}`
+	// (each named, else each selected, entity and area copied and moved by `by` metres, with stick its
+	// height over the ground kept: one batch, preview/mission_place), `paste {at: [x, y]}` (the
+	// clipboard's copied entities and areas pasted with their middle where the point meets the
+	// ground: one batch of one Paste whose payload is moved there); the rest as command() plans them.
+	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const override;
+	// A drop (a model file, or an item by its id: the Place tool's): the item's entity added to the
+	// pool its TYPE puts it in where the point meets the ground (the device's terrain, its model's
+	// ground anchor baked in; else the plane through the camera's target), facing the way the camera
+	// looks (S15: its yaw the camera's heading), one batch (an Add, then its x, y, z and yaw through
+	// batch_made). A model no item draws (DI-12, preview/model_placement): its item made first, the
+	// catalog's batch served before the mission's (two documents, an undo step each), its pool by the TYPE
+	// its parts give it; said on the status line. Refused: a file that is no model, a model several
+	// items draw (naming them) or whose item the editor cannot make from it (a person, a vehicle, a
+	// mounted gun), an item no catalog of the project defines, a point over no ground. S15: a path's next
+	// stop (`reference` "path", `name` its number: a marker of the item its stops use added at the
+	// point and a stop naming it, preview/mission_place) and an area (`reference` "area", a box: an
+	// area trigger over the ground the box's corners meet).
+	bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+			std::string &error) const override;
+	// The Place tool's palette (preview/mission_palette) over the project's graph, the recently placed
+	// (the preferences') first.
+	io::JsonValue palette_json(
+			const SessionView &view, const std::string &text, const JsonPage &page, std::string &error) const override;
+	io::JsonValue options_json() const override;
+	io::JsonValue camera_json() const override;
+	io::JsonValue body_json(const ViewportInput &input) const override;
+	io::JsonValue items_json(const ViewportInput &input) const override;
+	io::JsonValue notes_json(const ViewportInput &input) const override;
+
+protected:
+	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
+	bool takes_(const std::string &member) const override;
+	bool check_(const io::JsonValue &json, std::string &error) const override;
+	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
+	bool report_(const ViewportDeviceReport &report) override;
+
+private:
+	ViewportAction stop_(MissionViewStatus reason);
+	// The mission's ground followed over the project's files (its terrain, tiles and water, DI-07).
+	void follow_ground_(const SessionView &view) const;
+	// The overlay made again where the option's kind or the ground's reads moved (DI-29); true when it was.
+	bool follow_overlay_(const SessionView &view);
+	// The posed people stood on that ground (MissionPoses::stand) where a record, a pose (`posed`) or
+	// the terrain moved; true when a person's lift moved.
+	bool stand_people_(const SessionView &view, bool posed);
+	// The scene's items' bounds asked of the project, where the scene, the graph or the asset source's
+	// generation moved.
+	void bound_items_(const SessionView &view);
+	// The items' effects followed over the scene and played to the clock while the options show them (DI-31),
+	// closed while they do not.
+	void follow_effects_(const SessionView &view, const PreviewClock &clock);
+	// The Listen followed over the scene and the document and played to the clock at the camera's eye while the
+	// options listen (DI-36), closed while they do not.
+	void follow_listen_(const SessionView &view, const Document *document, const PreviewClock &clock);
+	// The mission document a planner works over: the one at its path while the picture is current;
+	// null, with why, otherwise.
+	const Document *planned_(const ViewportContext &context, std::string &error) const;
+	// The mark of the record whose row is `id` among `marks` (made from the scene now; -1: none).
+	int mark_of_(const std::vector<MissionMark> &marks, NodeId id) const;
+	// Where the picture point (x, y) meets the ground for a placing gesture (the device's terrain, else
+	// the plane through the camera's target, that only as far as a pick reaches from the target: near
+	// the horizon the plane is tens of kilometres out); false past it, or past what the file's
+	// positions hold.
+	bool ground_of_(const ViewportContext &context, float x, float y, double out[3], bool *on_terrain = nullptr) const;
+	// The ground's height at mission (x, y): the mission's terrain as the game reads it, else the device's,
+	// else `otherwise`.
+	double ground_height_(const ViewportContext &context, double x, double y, double otherwise) const;
+	// The camera framed on the ground box frame_ground_ holds.
+	void frame_ground_now_();
+	// `shoot {at}` (DI-23): a shot of the Shoot tool's ammo where the picture's point meets the ground or an object,
+	// seen from the camera's eye (a SetViewport of the shot on the clock's tick, the clock run).
+	bool shoot_(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const;
+	// The shots run to the clock over the mission as it stands (the world built again where the scene, the ground
+	// or a file it read moved), their effects planned and played; true when what the device draws of them moved.
+	bool follow_shots_(const ViewportInput &input, const Document &document, PreviewClock &clock);
+	// The shots' impact effects, each where the game's presenter poses it (the effect scene's spawns).
+	std::vector<DefinitionSpawn> shot_spawns_() const;
+	// `play_from_here {at?}` (DI-26): a Play of this mission with its player's start (play's start) on the
+	// ground under the camera's eye, or where the picture's point `at` meets the ground, facing the way the
+	// camera looks.
+	bool play_from_here_(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const;
+	// The records a drag of `record` by `handle` takes with it, as pressed: the selected entities (and
+	// areas, for a move) when it is selected, itself alone when not; `grabbed` its place among them.
+	std::vector<MissionPressed> taken_(const ViewportContext &context, const Document &document,
+			const NodeAddress &record, MissionHandle handle, size_t &grabbed) const;
+
+	MissionViewportOptions options_;
+	bool options_moved_ = false;
+	OrbitCamera camera_;
+	bool framed_ = false; // the camera framed a document's entities once
+	// The ground box a SetViewport asked framed, framed as asked and again on the terrain's ground at the next follow.
+	bool frame_ground_pending_ = false;
+	double frame_ground_[4] = {0.0, 0.0, 0.0, 0.0};
+	float fog_reach_ = 0.0f; // mission_fog_reach of the scene's header over the files read, 0 for none
+	MissionViewStatus reason_ = MissionViewStatus::NoProject;
+	std::string detail_;
+	PreviewFollow picture_;
+	MissionScene scene_;
+	// Mutable: a planner's facts (a drop's, the ground command's) read through it, each file parsed once
+	// while it stands.
+	mutable MissionItemCache items_;
+	uint64_t bounds_serial_ = 0; // the scene's serial the bounds were last asked over
+	uint64_t bounds_graph_ = 0; // the graph's generation then
+	uint64_t bounds_files_ = 0; // and the asset source's
+	MissionPoses poses_;
+	MissionPeople people_;
+	ClipSoundSources people_sources_; // SndProf.def and the banks the people's sounds play from
+	int32_t people_heard_ = -1; // the clock's last tick the people's sounds were heard to
+	MissionEffects effects_;
+	MissionListen listen_;
+	io::JsonValue drawn_;
+	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
+	int stood_reads_ = -1; // the ground's reads then
+	std::vector<std::string> missing_;
+	bool ground_ = false;
+	// Mutable: the ground's facts read through it, its files read once while they stand (DI-07).
+	mutable MissionGround terrain_ground_;
+	MissionOverlayImage overlay_;
+	uint64_t overlay_serial_ = 0;
+	// The Shoot tool's (DI-23).
+	MissionShots shots_;
+	uint64_t shots_key_ = 0;
+	ClipSoundSources shot_sources_;
+	std::vector<ClipSoundFired> shot_fired_;
+	int32_t shot_cursor_ = -1;
+	uint64_t shot_seeks_ = 0;
+	int overlay_reads_ = -1; // the ground's reads it was made over
+	bool gesture_open_ = false;
+};
+
+} // namespace opennova::editor

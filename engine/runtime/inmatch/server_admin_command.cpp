@@ -197,19 +197,14 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	// D-NET-383):
 	// - the hosting gate, every verb but SetMPReset: the receiver is the
 	//   authority with its hosted session up (is_authority and ctx+0x68, the
-	//   latch CNapiGameSession_CreateSession alone sets, @0x4C9D16).
-	//   is_in_session stands in for ctx+0x68 only, not for retail's +0x58
-	//   (is_in_session there), which CNapiNetwork_SetNetworkType already sets
-	//   ahead of a NovaWorld host's hosting wait (@0x4C4A85, from
-	//   Game_HostMultiplayerSession @0x4A6614): a context that receives a
-	//   ServerCommand before its session exists keeps it clear, as
-	//   opennova-serve's session-less one does (ServeListing::on_command), so
-	//   only SetMPReset passes there;
+	//   latch CNapiGameSession_CreateSession sets; is_in_session stands in for
+	//   it here: a ServerCommand reaches only a hosting process, where both
+	//   are set);
 	// - the player table (dword_24C0CA0; the World here), only the
 	//   player-targeted verbs and ChangeTeam / SwapTeam;
 	// - the token count, every verb that reads an argument it cannot default.
 	// SetMPReset tests the token count alone, so it runs on any receiver this
-	// executor is handed (the game shell hands it only a hosting context: a
+	// executor is handed (the shells hand it only a hosting context: a
 	// residual of D-NET-383). The verbs that act on the World without
 	// retail's player-table gate (Cycle / EndMission / GameOver, Earthquake,
 	// Lightning, TimeOfDay) need one to act on here: retail's globals they
@@ -226,10 +221,10 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	const bool hosting = ctx.is_authority != 0 && ctx.is_in_session != 0;
 	if (ieq(verb, "SetMPReset")) {
 		// atol of the argument into the config, then Game_SaveConfig
-		// [orig: @0x4D2E1B..0x4D2E2D]. The word's reader is the next session
-		// create, which ends the process when it is nonzero (create_session's
-		// ProcessExit); the running session and its map changes go on
-		// [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0].
+		// [orig: @0x4D2E1B..0x4D2E2D]. Retail's one reader of the word exits
+		// the process at the next session create when it is nonzero, which
+		// this host does not port yet: nothing reads multiplayer_reset
+		// (D-NET-385) [orig: CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0].
 		if (args.empty()) return outcome;
 		outcome.handled = true;
 		outcome.config_changed = true;

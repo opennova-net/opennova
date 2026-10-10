@@ -1,0 +1,1051 @@
+#include <editor/session/import_controller.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdio>
+#include <filesystem>
+#include <iterator>
+#include <map>
+#include <set>
+#include <string>
+#include <system_error>
+#include <utility>
+
+#include <base/io/file_time.h>
+#include <base/io/strutil.h>
+#include <editor/graph/file_plans.h>
+#include <editor/graph/texture_uses.h>
+#include <editor/import/font_import.h>
+#include <editor/import/import_context.h>
+#include <editor/import/import_plan.h>
+#include <editor/import/import_run.h>
+#include <editor/import/sidecar.h>
+#include <editor/import/terrain_import.h>
+#include <editor/import/texture_source.h>
+#include <editor/model/diagnostic.h>
+#include <editor/model/field_text.h>
+#include <editor/preview/texture_thumbnails.h>
+#include <editor/project/project_files.h>
+#include <editor/session/base_layer_build.h>
+#include <editor/session/document_set.h>
+#include <editor/session/editor_preferences.h>
+#include <editor/session/import_operation.h>
+#include <editor/session/import_plan_operation.h>
+#include <editor/session/problems_service.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/request_kinds.h>
+#include <editor/session/session_core.h>
+#include <editor/session/texture_import_state.h>
+#include <editor/session/texture_use_index.h>
+#include <editor/session/view/view_events.h>
+#include <editor/session/workspace_parts.h>
+#include <formats/cpt/trngen/heightmap_depth.h>
+#include <runtime/renderer/material_texture.h>
+#include <runtime/renderer/texture_authoring.h>
+#include <runtime/terrain/terrain_map_source.h>
+
+namespace fs = std::filesystem;
+
+namespace opennova::editor {
+
+ImportController::ImportController(SessionCore &core) : core_(core), view_(core.view()), paths_(core.paths()) {}
+
+// An import's one Output line (the UX round's problems lane): how many files, how many bytes, and how many
+// of each kind, the most first ("Imported 2,237 files (233.4 MB): Texture 1,093, Model 592, Wave 300 and 9
+// more kinds."), each file as the scan lists it now (an import's files are read into it before this).
+std::string ImportController::import_words(const std::vector<std::string> &paths) const {
+	std::map<AssetKind, size_t> kinds;
+	uint64_t bytes = 0;
+	for (const std::string &path : paths)
+		if (const AssetEntry *entry = view_.project.scan ? view_.project.scan->at_path(path) : nullptr) {
+			++kinds[entry->kind];
+			bytes += entry->size_bytes;
+		}
+	char size[32];
+	if (bytes < (uint64_t(1) << 20)) std::snprintf(size, sizeof(size), "%.1f KB", double(bytes) / 1024.0);
+	else std::snprintf(size, sizeof(size), "%.1f MB", double(bytes) / double(uint64_t(1) << 20));
+	std::string out = "Imported " + strutil::grouped(paths.size()) + (paths.size() == 1 ? " file" : " files") + " (" + size + ")";
+	std::vector<std::pair<size_t, AssetKind>> most;
+	for (const auto &[kind, count] : kinds) most.emplace_back(count, kind);
+	std::sort(most.begin(), most.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+	constexpr size_t kNamed = 4;
+	for (size_t i = 0; i < most.size() && i < kNamed; ++i)
+		out += (i == 0 ? ": " : ", ") + std::string(asset_kind_label(most[i].second)) + " " + strutil::grouped(most[i].first);
+	if (most.size() > kNamed) out += " and " + counted(most.size() - kNamed, "more kind");
+	return out + ". Its files are folded under this line.";
+}
+
+void ImportController::preview_files(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	std::vector<Diagnostic> diagnostics;
+	std::vector<ImportChoice> choices, roots;
+	std::vector<ImportChoiceFacts> listed, facts;
+	// A loose file picked is chosen; an archive's members are listed to choose from, with their facts.
+	std::vector<ImportChoice> sources = list_import_choices(request.paths, diagnostics, &listed);
+	for (size_t i = 0; i < sources.size(); ++i) {
+		if (sources[i].entry.empty()) {
+			roots.push_back(std::move(sources[i]));
+			continue;
+		}
+		choices.push_back(std::move(sources[i]));
+		facts.push_back(listed[i]);
+	}
+	for (const auto &d : diagnostics) core_.report(d);
+	preview(std::move(choices), std::move(facts), std::move(roots), request.with_dependencies);
+}
+
+void ImportController::plan(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const DialogsView::ImportPreview &open = view_.dialogs.import_preview;
+	preview(open.open ? open.choices : std::vector<ImportChoice>(), open.open ? open.facts : std::vector<ImportChoiceFacts>(),
+	        request.imports, request.with_dependencies);
+}
+
+void ImportController::preview_install(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	// Every file chosen takes no names and no walk: a request asking for either too is refused, not
+	// served in part (review F14).
+	if (request.all && (!request.names.empty() || request.with_dependencies))
+		return core_.refuse_now(CoreFinding::ImportRequest,
+		                        "Every file of the game install is chosen with no walk: \"all\" takes neither \"names\" nor "
+		                        "\"with_dependencies\".");
+	std::vector<Diagnostic> diagnostics;
+	std::vector<ImportChoiceFacts> facts;
+	std::vector<ImportChoice> sources =
+	        list_retail_import_choices(core_.base_game(), *view_.project.document, diagnostics, &facts);
+	// Everything: every file chosen, none to choose from, no walk (the closure of everything is
+	// everything: nothing a walk could find is not chosen already).
+	if (request.all) {
+		for (const auto &d : diagnostics) core_.report(d);
+		preview({}, {}, std::move(sources), false, true);
+		return;
+	}
+	// With names (an Import fix): those files alone, chosen; a name the game data does
+	// not have is a finding (unless the install itself is the finding). Without, every
+	// file is listed to choose from.
+	std::vector<ImportChoice> named;
+	std::map<std::string, size_t> by_name; // the install's files by name, the first of each, once (review F7)
+	if (!request.names.empty())
+		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(pff::normalized_logical_name(sources[i].name()), i);
+	for (const std::string &name : request.names) {
+		const auto found = by_name.find(pff::normalized_logical_name(name));
+		if (found == by_name.end()) {
+			if (diagnostics.empty())
+				diagnostics.push_back(make_finding(CoreFinding::ImportNotFound, DiagnosticSeverity::Error,
+				                                   "The game data has no file named " + name + "."));
+			continue;
+		}
+		named.push_back(sources[found->second]);
+	}
+	if (!request.names.empty()) {
+		sources.clear();
+		facts.clear();
+	}
+	for (const auto &d : diagnostics) core_.report(d);
+	preview(std::move(sources), std::move(facts), std::move(named), request.with_dependencies);
+}
+
+void ImportController::cancel() {
+	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
+	core_.touch(ViewConcern::Dialogs);
+	core_.touch(ViewConcern::Workspace);
+}
+
+// The refresh with the import pass forced over one source (or all), as an operation
+// (RefreshOperation): every stale source imports too, as on any refresh; `force` imports the named
+// one even when unchanged (a changed importer, a wanted rebuild). The pass's findings on the
+// sources asked for are what the operation came to.
+void ImportController::reimport(const std::string &source, bool force) {
+	if (!view_.project.open) return;
+	if (core_.start_refresh(true, force, source)) view_.activity.status = "Importing again...";
+	core_.touch(ViewConcern::Output);
+}
+
+// The record of the import `path` names, each value set as its option's row takes it ("" back to its
+// row's fallback: left out of the record), written only when it changed, then the refresh that imports
+// it again (the pass takes a record that changed as stale, and drops an output the import no longer
+// makes).
+void ImportController::set_options(const std::string &path,
+                                   const std::vector<std::pair<std::string, std::string>> &values) {
+	if (!view_.project.open) return;
+	TextureImportState state;
+	std::string error;
+	if (!texture_import_state(view_, path, state, error))
+		return core_.refuse_now(CoreFinding::ImportOption, "No import options to set: " + error, path);
+	ImportSidecar sidecar = state.sidecar;
+	for (const auto &[key, value] : values) {
+		const ImportOptionRow *row = import_option_row(state.importer->options, key);
+		if (!row) {
+			std::string keys;
+			for (const ImportOptionRow &each : state.importer->options) keys += (keys.empty() ? "" : ", ") + each.key;
+			return core_.refuse_now(CoreFinding::ImportOption,
+			                        "The " + state.sidecar.importer + " importer has no option '" + key +
+			                                "' (its options: " + keys + ").",
+			                        state.source);
+		}
+		const std::string taken = row->keeps_case ? value : strutil::to_lower(value);
+		if (taken.empty()) {
+			sidecar.options.erase(key);
+			continue;
+		}
+		if (!import_option_accepts(*row, taken))
+			return core_.refuse_now(CoreFinding::ImportOption,
+			                        "The " + state.sidecar.importer + " importer's " + key + " takes " +
+			                                import_option_takes(*row) + "; '" + value + "' is none of them.",
+			                        state.source);
+		sidecar.options[key] = taken;
+	}
+	if (sidecar.options == state.sidecar.options) return;
+	Diagnostic write_error;
+	if (!save_import_sidecar(join_path(view_.project.root, state.record), sidecar, write_error))
+		return core_.refuse_now(CoreFinding::ImportSidecar, write_error.message, state.record);
+	reimport(state.source, false);
+}
+
+// The plan a Replace of `request.path` by the image request.paths names would carry out (refusals inside):
+// the image read (a file on disk, or a project file by its path), what the texture's uses ask of it.
+TextureSourcePlan ImportController::replace_plan(const EditorRequest &request) const {
+	TextureSourcePlan plan;
+	if (request.paths.size() != 1) {
+		plan.refusals.push_back(make_finding(CoreFinding::TextureReplace, DiagnosticSeverity::Error, "A texture is replaced by one image.",
+		                                     request.path));
+		return plan;
+	}
+	const std::string &image = request.paths.front();
+	const std::string file = path_of(image).is_absolute() ? image : join_path(view_.project.root, image);
+	std::vector<uint8_t> bytes;
+	std::string message;
+	if (!io::read_file_bytes(file, bytes, message)) {
+		plan.refusals.push_back(make_finding(CoreFinding::TextureReplace, DiagnosticSeverity::Error,
+		                                     basename_of(image) + " could not be read: " + message, request.path));
+		return plan;
+	}
+	const ImportOptions overrides(request.values.begin(), request.values.end());
+	return plan_texture_replace(paths_, *view_.project.scan, request.path, basename_of(image), bytes, overrides,
+	                            texture_use_asks(view_, request.path));
+}
+
+void ImportController::replace_texture(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const TextureSourcePlan plan = replace_plan(request);
+	const std::string image = request.paths.empty() ? std::string() : request.paths.front();
+	if (!plan.ok()) {
+		for (size_t i = 0; i + 1 < plan.refusals.size(); ++i) core_.report(plan.refusals[i]);
+		return core_.refuse_now(CoreFinding::TextureReplace, plan.refusals.back().message, plan.refusals.back().asset);
+	}
+	// The file set aside takes its open document with it: one with unsaved edits waits for them.
+	if (!plan.replaced.empty())
+		if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+			if (open->dirty())
+				return core_.refuse_now(CoreFinding::TextureReplace,
+				                        plan.texture + " is open with unsaved edits: save or discard them before replacing it.",
+				                        plan.replaced);
+			core_.documents().close_document(plan.replaced);
+		}
+	std::vector<Diagnostic> findings;
+	if (!apply_texture_source(paths_, plan, findings)) {
+		for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+		return core_.refuse_now(CoreFinding::TextureReplace,
+		                        findings.empty() ? std::string("The texture could not be replaced.") : findings.back().message, plan.texture);
+	}
+	close_texture_source();
+	core_.note("Replaced " + plan.texture + " with " + basename_of(image) + ": " + plan.source + " makes it now, as its import record says" +
+	           (plan.replaced.empty() ? std::string(".") : "; the file it replaced is kept under " + std::string(kReplacedFolder) + "/."));
+	reimport(plan.source, true);
+}
+
+// A terrain made from images (S20): every value checked and every image read and checked before a byte
+// is written, then the copies, the set and its record written (each taken back should one fail), then
+// the refresh that imports the set.
+void ImportController::new_terrain(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	const AssetScan &scan = *view_.project.scan;
+	std::string stem = basename_of(request.path);
+	for (const char *extension : {".trn", kTerrainSetExtension})
+		if (strutil::ends_with_icase(stem, extension)) stem.resize(stem.size() - std::char_traits<char>::length(extension));
+	std::string why;
+	if (!terrain_stem_fits(stem, why)) return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + why + ".");
+	const std::string folder = "art/terrain";
+	const std::string set_path = folder + "/" + stem + kTerrainSetExtension;
+	// Its files' names are the project's to give: none may be taken (the game's names are flat).
+	std::vector<std::string> names = terrain_output_names(stem, true, true, true);
+	names.push_back(stem + kTerrainSetExtension);
+	for (const std::string &name : names)
+		if (const AssetEntry *taken = scan.find(name))
+			return core_.refuse_now(CoreFinding::ImportTerrain,
+			                        "No terrain made: the terrain " + stem + " makes " + name + ", and the project has " +
+			                                taken->relative_path + " of that name already. Choose another name.",
+			                        taken->relative_path);
+
+	// The values: the images by their set keys, the foliage definitions (`foliage`, on one line), the
+	// importer's options by theirs.
+	static const char *const kImageKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"};
+	std::map<std::string, std::string> images;
+	ImportOptions options;
+	TerrainSet set;
+	for (const auto &[key, value] : request.values) {
+		const bool image = std::find_if(std::begin(kImageKeys), std::end(kImageKeys),
+		                                [&](const char *k) { return key == k; }) != std::end(kImageKeys);
+		if (image) {
+			if (!value.empty()) images[key] = value;
+		} else if (key == "foliage") {
+			if (!parse_foliage_definitions(value, set.foliage, why))
+				return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: the foliage's " + why + ".");
+		} else if (import_option_row(terrain_import_option_rows(), key)) {
+			if (!value.empty()) options[key] = value;
+		} else {
+			return core_.refuse_now(CoreFinding::ImportTerrain,
+			                        "No terrain made: a new terrain takes heightmap, colormap, detail, tiles, surface, "
+			                        "foliagemap, foliage, top, water and layout; '" + key + "' is none of them.");
+		}
+	}
+	if (!images.count("heightmap") || !images.count("colormap"))
+		return core_.refuse_now(CoreFinding::ImportTerrain,
+		                        "No terrain made: a terrain is made from its heightmap and its colormap; values names both.");
+	TerrainImportSettings settings;
+	std::string field;
+	if (!terrain_import_settings(options, settings, why, field))
+		return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + why);
+
+	// Each image read and checked; a file of the project named where it is, any other copied in.
+	struct Copy {
+		std::string to; // project-relative
+		std::vector<uint8_t> bytes;
+	};
+	std::vector<Copy> copies;
+	const fs::path root = path_of(view_.project.root).lexically_normal();
+	for (const char *key : kImageKeys) {
+		const auto given = images.find(key);
+		if (given == images.end()) continue;
+		const std::string file = path_of(given->second).is_absolute() ? given->second : join_path(view_.project.root, given->second);
+		std::vector<uint8_t> bytes;
+		std::string message;
+		if (!io::read_file_bytes(file, bytes, message))
+			return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: the " + std::string(key) + " " + given->second +
+			                                                            " could not be read: " + message + ".");
+		const std::string name = basename_of(given->second);
+		bool fits = false;
+		if (std::string(key) == "heightmap") {
+			trngen::HeightmapDepth heights;
+			fits = trngen::decode_heightmap_depth(name, bytes, settings.top, heights, why);
+		} else if (std::string(key) == "surface") {
+			IndexedImage8 surface;
+			fits = terrain::decode_charmap_source(name, bytes, surface, why);
+		} else if (std::string(key) == "foliagemap") {
+			IndexedImage8 foliage;
+			fits = terrain::decode_foliage_map_source(name, bytes, foliage, why);
+		} else {
+			RgbaImage image;
+			fits = decode_terrain_image(key, name, bytes, image, why);
+		}
+		if (!fits) return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + why + ".");
+		std::string named;
+		const fs::path within = path_of(file).lexically_normal().lexically_relative(root);
+		std::string inside, relative;
+		if (!within.empty() && ImportContext::resolve(view_.project.root, view_.project.root, utf8_of(within), inside, relative)) {
+			named = utf8_of(path_of(relative).lexically_relative(path_of(folder)));
+		} else {
+			const std::string extension = strutil::to_lower(utf8_of(path_of(name).extension()));
+			named = stem + "_" + key + extension;
+			const std::string to = folder + "/" + named;
+			std::error_code ec;
+			if (scan.at_path(to) || fs::exists(system_path(join_path(view_.project.root, to)), ec))
+				return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: the project has " + to + " already.", to);
+			copies.push_back({to, std::move(bytes)});
+		}
+		if (std::string(key) == "heightmap") set.heightmap = named;
+		else if (std::string(key) == "colormap") set.colormap = named;
+		else if (std::string(key) == "detail") set.detail = named;
+		else if (std::string(key) == "tiles") set.tiles = named;
+		else if (std::string(key) == "surface") set.surface = named;
+		else set.foliagemap = named;
+	}
+
+	// Written: the copies, the set, its record; what was written taken away again should one fail.
+	std::vector<std::string> written;
+	const auto put_back = [&] {
+		std::error_code ec;
+		for (const std::string &path : written) fs::remove(system_path(join_path(view_.project.root, path)), ec);
+	};
+	std::error_code ec;
+	fs::create_directories(system_path(join_path(view_.project.root, folder)), ec);
+	const std::vector<uint8_t> set_bytes = write_terrain_set(set);
+	copies.push_back({set_path, set_bytes});
+	for (const Copy &copy : copies) {
+		std::string message;
+		if (!io::write_file_atomic(join_path(view_.project.root, copy.to), copy.bytes.data(), copy.bytes.size(), message)) {
+			put_back();
+			return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + copy.to + " could not be written: " + message + ".",
+			                        copy.to);
+		}
+		written.push_back(copy.to);
+	}
+	ImportSidecar record;
+	record.importer = "terrain";
+	record.version = kTerrainImporterVersion;
+	record.options = options;
+	Diagnostic error;
+	if (!save_import_sidecar(join_path(view_.project.root, set_path + kImportSidecarSuffix), record, error)) {
+		put_back();
+		return core_.refuse_now(CoreFinding::ImportTerrain, "No terrain made: " + error.message, set_path);
+	}
+	core_.note("Made the terrain set " + set_path + " (" + std::to_string(copies.size() - 1) + " image(s) copied in): importing it makes " +
+	           stem + ".trn, " + stem + ".cpt and their textures.");
+	reimport(set_path, true);
+}
+
+// A font made from a glyph sheet (round S23 lane A): every value checked, the sheet read and made into a font in
+// memory as the import will make it, before a byte is written; then the copy, the set and its record written (each
+// taken back should one fail), then the refresh that imports the set.
+void ImportController::new_font(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	const AssetScan &scan = *view_.project.scan;
+	std::string stem = basename_of(request.path);
+	for (const char *extension : {".fnt", kFontSetExtension})
+		if (strutil::ends_with_icase(stem, extension)) stem.resize(stem.size() - std::char_traits<char>::length(extension));
+	const auto refuse = [&](const std::string &why, const std::string &asset = std::string()) {
+		core_.refuse_now(CoreFinding::ImportFont, "No font made: " + why, asset);
+	};
+	FileNameProblem problem = FileNameProblem::None;
+	std::string message;
+	if (stem.empty() || !check_file_name(stem + ".fnt", AssetKind::Font, problem, message)) return refuse(message.empty() ? "it needs a name." : message);
+	// The folder the set (and a sheet copied in) goes in: Files' New here's (DI-25: "/" the top level), else fonts/.
+	std::string folder = asset_kind_row(AssetKind::Font).folder;
+	if (!request.folder.empty() && view_.project.document &&
+	    !project_folder_of(paths_, *view_.project.document, request.folder, folder, message))
+		return refuse(message);
+	const auto in_folder = [&](const std::string &name) { return folder.empty() ? name : folder + "/" + name; };
+	const std::string set_path = in_folder(stem + kFontSetExtension);
+	for (const std::string &name : {stem + ".fnt", stem + kFontSetExtension})
+		if (const AssetEntry *taken = scan.find(name))
+			return refuse("the font " + stem + " makes " + name + ", and the project has " + taken->relative_path +
+			                      " of that name already. Choose another name.",
+			              taken->relative_path);
+	// The values: the sheet, its grid (the set's keys) and the importer's options.
+	std::string sheet_value;
+	std::string set_text;
+	ImportOptions options;
+	for (const auto &[key, value] : request.values) {
+		// Each value is a line's of the set or a file's name: a line break or a control character in one is refused
+		// before anything is written.
+		for (const unsigned char c : value)
+			if (c < 0x20 || c == 0x7F)
+				return refuse("'" + key + "' holds a line break or a control character, which a font set's line cannot hold.");
+		if (key == "sheet") sheet_value = value;
+		else if (key == "columns" || key == "rows" || key == "first") {
+			if (!value.empty()) set_text += key + " " + value + "\r\n";
+		} else if (import_option_row(font_import_option_rows(), key)) {
+			if (!value.empty()) options[key] = value;
+		} else {
+			return refuse("a new font takes sheet, columns, rows, first, advance, tracking, space, spacing, design_width and "
+			              "color; '" + key + "' is none of them.");
+		}
+	}
+	if (sheet_value.empty()) return refuse("a font is made from its glyph sheet; values names it (sheet).");
+	fnt::FontSheetSettings settings;
+	std::string why, field;
+	if (!font_import_settings(options, settings, why, field)) return refuse(why);
+	// The sheet read; a file of the project named where it is, any other copied in beside the set.
+	const std::string file = path_of(sheet_value).is_absolute() ? sheet_value : join_path(view_.project.root, sheet_value);
+	std::vector<uint8_t> bytes;
+	if (!io::read_file_bytes(file, bytes, message)) return refuse("the sheet " + sheet_value + " could not be read: " + message + ".");
+	std::string named, copy_to;
+	const fs::path root = path_of(view_.project.root).lexically_normal();
+	const fs::path within = path_of(file).lexically_normal().lexically_relative(root);
+	std::string inside, relative;
+	if (!within.empty() && ImportContext::resolve(view_.project.root, view_.project.root, utf8_of(within), inside, relative)) {
+		named = utf8_of(folder.empty() ? path_of(relative) : path_of(relative).lexically_relative(path_of(folder)));
+	} else {
+		const std::string extension = strutil::to_lower(utf8_of(path_of(sheet_value).extension()));
+		named = stem + "_sheet" + extension;
+		copy_to = in_folder(named);
+		std::error_code ec;
+		if (scan.at_path(copy_to) || fs::exists(system_path(join_path(view_.project.root, copy_to)), ec))
+			return refuse("the project has " + copy_to + " already.", copy_to);
+	}
+	// A set's ';' starts a comment: a sheet whose name holds one cannot be named in a set.
+	if (named.find(';') != std::string::npos)
+		return refuse("the sheet " + named + " holds a ';', which starts a comment in a font set: rename it first.");
+	set_text = "; " + stem + ".fnt, made from its glyph sheet\r\nsheet " + named + "\r\n" + set_text;
+	FontSet set;
+	if (!parse_font_set(std::vector<uint8_t>(set_text.begin(), set_text.end()), set, why)) return refuse(why + ".");
+	// The font made in memory, as the import makes it, so a sheet the grid does not divide is refused here.
+	renderer::ImageSource sheet;
+	if (!renderer::decode_image_source(sheet_value, bytes, sheet, why))
+		return refuse("the sheet " + sheet_value + ": " + why + " (a glyph sheet is a PNG, a TGA or a PCX).");
+	settings.columns = set.columns;
+	settings.rows = set.rows;
+	settings.first = set.first;
+	std::vector<uint8_t> font;
+	bool opaque = false;
+	if (!fnt::make_font_from_sheet(sheet.image, settings, font, opaque, why, field)) return refuse("the sheet " + sheet_value + ": " + why + ".");
+
+	// Written: the copy, the set, its record; what was written taken away again should one fail.
+	std::vector<std::string> written;
+	const auto put_back = [&] {
+		std::error_code ec;
+		for (const std::string &path : written) fs::remove(system_path(join_path(view_.project.root, path)), ec);
+	};
+	std::error_code ec;
+	if (!folder.empty()) fs::create_directories(system_path(join_path(view_.project.root, folder)), ec);
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
+	if (!copy_to.empty()) files.emplace_back(copy_to, bytes);
+	files.emplace_back(set_path, std::vector<uint8_t>(set_text.begin(), set_text.end()));
+	for (const auto &[to, data] : files) {
+		if (!io::write_file_atomic(join_path(view_.project.root, to), data.data(), data.size(), message)) {
+			put_back();
+			return refuse(to + " could not be written: " + message + ".", to);
+		}
+		written.push_back(to);
+	}
+	ImportSidecar record;
+	record.importer = "font";
+	record.version = kFontImporterVersion;
+	record.options = options;
+	Diagnostic error;
+	if (!save_import_sidecar(join_path(view_.project.root, set_path + kImportSidecarSuffix), record, error)) {
+		put_back();
+		return refuse(error.message, set_path);
+	}
+	core_.note("Made the font set " + set_path + (copy_to.empty() ? std::string() : " (its sheet copied in as " + copy_to + ")") +
+	           ": importing it makes " + stem + ".fnt.");
+	reimport(set_path, true);
+}
+
+void ImportController::preview_texture_source(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	DialogsView::TextureSourcePreview &preview = view_.dialogs.texture_source;
+	const uint64_t serial = preview.serial + 1;
+	preview = DialogsView::TextureSourcePreview();
+	preview.open = true;
+	preview.serial = serial;
+	preview.texture = request.path;
+	preview.image = request.paths.empty() ? std::string() : request.paths.front();
+	preview.values = request.values;
+	// The stored forms the texture's name offers: the format's tokens within its extension.
+	const std::string extension = strutil::to_lower(utf8_of(path_of(request.path).extension()));
+	if (extension == ".tga") preview.forms = {"tga", "tga24"};
+	else if (extension == ".pcx") preview.forms = {"pcx", "pcx24"};
+	else if (extension == ".dds") preview.forms = {"dxt5", "dxt1", "argb"};
+	const TextureSourcePlan plan = preview.image.empty() ? plan_texture_source(paths_, *view_.project.scan, request.path)
+	                                                     : replace_plan(request);
+	if (!plan.ok()) {
+		preview.refusal = plan.refusals.back().message;
+	} else {
+		preview.changes = plan.changes;
+		preview.before_words = plan.before_words;
+		preview.after_words = plan.after_words;
+		const auto format = plan.options.find("format");
+		const auto dds = plan.options.find("dds");
+		preview.form = format == plan.options.end() ? std::string("tga")
+		               : format->second == "dds" ? (dds == plan.options.end() ? std::string("dxt5") : dds->second)
+		                                         : format->second;
+		if (view_.documents.thumbnails) {
+			const AssetEntry *entry = view_.project.scan->at_path(request.path);
+			if (!entry) entry = view_.project.scan->find(basename_of(request.path));
+			if (entry) preview.before = view_.documents.thumbnails->make_now(view_, entry->relative_path, TextureLoadTransform::None);
+			if (!plan.made.empty()) preview.after = view_.documents.thumbnails->picture_of(plan.made_name, plan.made);
+		}
+	}
+	core_.touch(ViewConcern::Dialogs);
+}
+
+void ImportController::close_texture_source() {
+	if (!view_.dialogs.texture_source.open) return;
+	const uint64_t serial = view_.dialogs.texture_source.serial;
+	view_.dialogs.texture_source = DialogsView::TextureSourcePreview();
+	view_.dialogs.texture_source.serial = serial;
+	core_.touch(ViewConcern::Dialogs);
+}
+
+// The OpenExternally view event the Shell opens a source by, and the status line.
+void ImportController::post_open_externally(const std::string &source) {
+	ViewEvent open;
+	open.kind = ViewEventKind::OpenExternally;
+	open.path = join_path(view_.project.root, source);
+	view_.events.post(std::move(open));
+	core_.touch(ViewConcern::Dialogs);
+	view_.activity.status = "Opening " + source + " in its program.";
+	core_.touch(ViewConcern::Output);
+}
+
+// A source edited in place (a PNG the game reads as it is) open with unsaved edits: its program would not
+// see them, and a refresh would read over them.
+bool ImportController::source_dirty(const std::string &source, CoreFinding code) {
+	const DocumentBase *open = core_.documents().document_for(source);
+	if (!open || !open->dirty()) return false;
+	core_.refuse_now(code, source + " is open with unsaved edits: save or discard them before its program edits it.", source);
+	return true;
+}
+
+void ImportController::open_texture_source(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const TextureSourcePlan plan = plan_texture_source(paths_, *view_.project.scan, request.path);
+	if (!plan.ok()) return core_.refuse_now(CoreFinding::TextureExternal, plan.refusals.back().message, plan.refusals.back().asset);
+	if (!plan.bytes.empty())
+		return core_.refuse_now(CoreFinding::TextureExternal,
+		                        plan.texture + " has no source yet: Edit in its program (edit_externally) makes one, " + plan.source +
+		                                ", which its import turns into it.",
+		                        request.path);
+	if (source_dirty(plan.source, CoreFinding::TextureExternal)) return;
+	post_open_externally(plan.source);
+}
+
+void ImportController::edit_externally(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	const TextureSourcePlan plan = plan_texture_source(paths_, *view_.project.scan, request.path);
+	if (!plan.ok()) return core_.refuse_now(CoreFinding::TextureExternal, plan.refusals.back().message, plan.refusals.back().asset);
+	if (plan.bytes.empty() && source_dirty(plan.source, CoreFinding::TextureExternal)) return;
+	if (!plan.bytes.empty()) {
+		// A plain texture's source made once: the file set aside takes its open document with it.
+		if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+			if (open->dirty())
+				return core_.refuse_now(CoreFinding::TextureExternal,
+				                        plan.texture + " is open with unsaved edits: save or discard them before its program edits it.",
+				                        plan.replaced);
+			core_.documents().close_document(plan.replaced);
+		}
+		std::vector<Diagnostic> findings;
+		if (!apply_texture_source(paths_, plan, findings)) {
+			for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+			return core_.refuse_now(CoreFinding::TextureExternal,
+			                        findings.empty() ? std::string("No source could be made.") : findings.back().message, plan.texture);
+		}
+		core_.note("Made " + plan.source + " for " + plan.texture + ": its import makes the texture from it now, so what its "
+		           "program saves there comes back; the file it replaced is kept under " + std::string(kReplacedFolder) + "/.");
+		reimport(plan.source, true);
+	}
+	close_texture_source();
+	post_open_externally(plan.source);
+}
+
+void ImportController::store_as_dds(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	// Each use whose loader opens the .tga itself: storing it as its .dds would lose the texture there.
+	std::vector<std::string> reads_tga;
+	const AssetEntry *entry = view_.project.scan->at_path(request.path);
+	if (!entry) entry = view_.project.scan->find(basename_of(request.path));
+	if (entry && view_.documents.texture_uses) {
+		const std::string dds = renderer::material_dds_sibling(entry->logical_name);
+		for (const TextureUse &use : view_.documents.texture_uses->uses_of(view_, entry->relative_path))
+			if (!use.known() || !texture_use_opens(use, dds))
+				reads_tga.push_back(use.words.empty() ? std::string("A use of it") : use.words);
+	}
+	const TextureSourcePlan plan = plan_texture_dds(paths_, *view_.project.scan, request.path, reads_tga);
+	if (!plan.ok()) {
+		for (size_t i = 0; i + 1 < plan.refusals.size(); ++i) core_.report(plan.refusals[i]);
+		return core_.refuse_now(CoreFinding::TextureStoreDds, plan.refusals.back().message, plan.refusals.back().asset);
+	}
+	if (plan.bytes.empty()) {
+		// An import's output: its record takes the form, then imports again (set_options).
+		const auto value = [&](const char *key) {
+			const auto found = plan.options.find(key);
+			return found == plan.options.end() ? std::string() : found->second;
+		};
+		set_options(plan.source, {{"dds", value("dds")}, {"format", "dds"}, {"name", value("name")}});
+		return;
+	}
+	if (DocumentBase *open = core_.documents().document_for(plan.replaced)) {
+		if (open->dirty())
+			return core_.refuse_now(CoreFinding::TextureStoreDds,
+			                        plan.texture + " is open with unsaved edits: save or discard them before storing it as a DDS.",
+			                        plan.replaced);
+		core_.documents().close_document(plan.replaced);
+	}
+	std::vector<Diagnostic> findings;
+	if (!apply_texture_source(paths_, plan, findings)) {
+		for (size_t i = 0; i + 1 < findings.size(); ++i) core_.report(findings[i]);
+		return core_.refuse_now(CoreFinding::TextureStoreDds,
+		                        findings.empty() ? std::string("The texture could not be stored as a DDS.") : findings.back().message,
+		                        plan.texture);
+	}
+	core_.note("Stored " + plan.texture + " as " + plan.made_name + ", which every use of it reads first: " + plan.source +
+	           " makes it now; the file it replaced is kept under " + std::string(kReplacedFolder) + "/.");
+	reimport(plan.source, true);
+}
+
+void ImportController::set_aside_texture(const EditorRequest &request) {
+	if (!view_.project.open || !view_.project.scan) return;
+	const AssetEntry *entry = view_.project.scan->at_path(request.path);
+	if (!entry) entry = view_.project.scan->find(basename_of(request.path));
+	const auto refuse = [&](const std::string &message) {
+		core_.refuse_now(CoreFinding::TextureSetAside, message, entry ? entry->relative_path : request.path);
+	};
+	if (!entry) return refuse("The project has no texture " + request.path + ".");
+	if (entry->kind != AssetKind::Texture) return refuse(entry->logical_name + " is no texture.");
+	if (!entry->imported_from.empty())
+		return refuse(entry->logical_name + " is made by the import of " + entry->imported_from + ", which makes it again: change "
+		              "how that import is made instead.");
+	// The uses: none may read the file (a .tga beside the .dds its model row loads is read by none).
+	static const std::vector<TextureUse> kNone;
+	const std::vector<TextureUse> &uses =
+	        view_.documents.texture_uses ? view_.documents.texture_uses->uses_of(view_, entry->relative_path) : kNone;
+	if (uses.empty())
+		return refuse("Nothing the editor knows names " + entry->logical_name + ", so it is kept: a script or the game may "
+		              "name it in a way the editor does not read.");
+	std::string read_instead;
+	for (const TextureUse &use : uses) {
+		if (use.reads_file) return refuse(entry->logical_name + " is read by " + (use.words.empty() ? "a use" : use.words) + ".");
+		if (read_instead.empty() && !use.served.empty()) read_instead = basename_of(use.served);
+	}
+	if (DocumentBase *open = core_.documents().document_for(entry->relative_path)) {
+		if (open->dirty()) return refuse(entry->logical_name + " is open with unsaved edits: save or discard them first.");
+		core_.documents().close_document(entry->relative_path);
+	}
+	const std::string path = entry->relative_path;
+	std::vector<Diagnostic> findings;
+	if (!set_aside_project_file(paths_, path, findings))
+		return refuse(findings.empty() ? "Could not set " + path + " aside." : findings.back().message);
+	core_.note("Set " + path + " aside under " + std::string(kReplacedFolder) + "/: the game never read it" +
+	           (read_instead.empty() ? std::string() : ", its loader opening " + read_instead + " in its place") + ".");
+	core_.start_refresh();
+}
+
+// The import dialog on `roots` chosen among `choices` (each file once, `facts` saying each one's
+// kind and size), planned with the files they need when `with_dependencies`: open while it has
+// something to show, a list to choose from or a file chosen. `all`: the roots are every file of the
+// game install.
+void ImportController::preview(std::vector<ImportChoice> choices, std::vector<ImportChoiceFacts> facts,
+                               std::vector<ImportChoice> roots, bool with_dependencies, bool all) {
+	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	// A new preview starts the dialog's own afresh (its filters, Replace existing files); one open already
+	// keeps them (a choice planned again, an Import that found the files changed).
+	if (!preview.open) {
+		forget_import_workspace(view_.workspace);
+		core_.touch(ViewConcern::Workspace);
+	}
+	preview.choices = std::move(choices);
+	preview.facts = std::move(facts);
+	preview.facts.resize(preview.choices.size());
+	preview.roots.clear();
+	if (all) {
+		// The install lists each file once already (list_retail_import_choices): nine thousand
+		// roots are not looked up one by one.
+		preview.roots = std::move(roots);
+	} else {
+		std::set<ImportChoice> seen; // each root once, in log time
+		for (ImportChoice &root : roots)
+			if (seen.insert(root).second) preview.roots.push_back(std::move(root));
+	}
+	preview.with_dependencies = with_dependencies;
+	preview.all = all;
+	preview.open = !preview.choices.empty() || !preview.roots.empty();
+	if (preview.open) start_plan();
+	else show_plan(std::make_shared<const ImportPlan>(), nullptr);
+}
+
+// The open preview's plan, made from its roots as the files are now, as an operation
+// (ImportPlanOperation: the project read again, a copy of the asset graph brought up to it, the
+// game install mounted, the plan); its findings are the dialog's to show. Every request that plans
+// it validates first (its row's `validates`), so an edit a held pump made reaches the graph it
+// copies. The dialog shows its files at once, and no plan until the operation's is made.
+void ImportController::start_plan() {
+	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	// The plan the checks are of, kept while the next is made: what they checked carries over to it.
+	if (preview.plan && !preview.plan->rows.empty()) checked_plan_ = preview.plan;
+	preview.plan = std::make_shared<const ImportPlan>();
+	preview.plan_serial = ++plans_;
+	preview.changed = false;
+	preview.planning = false;
+	const uint64_t id = core_.start_operation(std::make_unique<ImportPlanOperation>(core_.problems(), paths_,
+			*view_.project.document, core_.problems().graph(), view_.documents.open, preview.roots,
+			preview.with_dependencies, core_.base_game()));
+	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
+	preview.planning = true; // until its plan is shown (show_plan) or the operation ends without one
+	core_.outcome().operation = id;
+	view_.activity.status = "Planning the import...";
+	core_.touch(ViewConcern::Dialogs);
+	core_.touch(ViewConcern::Output);
+}
+
+OperationOutcome ImportController::absorb_plan(ImportPlanOperation &operation) {
+	show_plan(std::make_shared<const ImportPlan>(std::move(operation.plan())), nullptr);
+	return OperationOutcome();
+}
+
+// A plan made for the dialog. Each posts an ImportPlanned event, on which the dialog takes the
+// plan's checks again. `shown`: the plan an Import was shown, planned again before it writes; the
+// preview says it changed (`changed`, the event's flag) when the new plan is not that one.
+void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const ImportPlan *shown) {
+	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	// The plan the checks were of: the one an Import was shown, else the one this plan takes the place of.
+	const std::shared_ptr<const ImportPlan> before = std::move(checked_plan_);
+	const ImportPlan *checked = shown ? shown : before.get();
+	preview.plan = std::move(plan);
+	preview.planning = false;
+	preview.plan_serial = ++plans_;
+	preview.changed = shown && !same_import(*shown, *preview.plan);
+	ViewEvent planned;
+	planned.kind = ViewEventKind::ImportPlanned;
+	planned.flag = preview.changed;
+	view_.events.post(std::move(planned));
+	// Its checks taken anew, the workspace's (what Import takes), a row the plan before had keeping its own.
+	take_import_checks(view_.workspace, *preview.plan, preview.open ? checked : nullptr);
+	core_.touch(ViewConcern::Workspace);
+	if (preview.open) {
+		size_t files = 0, found = 0, missing = 0, held = 0;
+		for (const ImportPlanRow &row : preview.plan->rows) {
+			if (row.state == ImportPlanRow::State::NotFound) ++missing;
+			else if (row.selected) ++files;
+			if (row.state == ImportPlanRow::State::Found) ++found;
+			held += row.held ? 1 : 0;
+		}
+		view_.activity.status = preview.roots.empty() ? std::string("Choose the files to import.")
+		               : "Import preview: " + counted(files, "file") + " to import" +
+		                         (preview.with_dependencies ? " (" + strutil::grouped(found) + " the chosen ones need), " +
+		                                                              strutil::grouped(missing) + " not found."
+		                                                    : std::string(".")) +
+		                         (held ? " " + strutil::grouped(held) + " the project has already: kept unless replaced." : "");
+	}
+	core_.touch(ViewConcern::Dialogs);
+	if (preview.open) core_.touch(ViewConcern::Output);
+}
+
+// The import dialog's "Include the files these need": the editor's preference, written from a
+// copy (a preference that could not be written stays the one in effect, its failure a finding).
+// An open preview is planned again with the setting asked for, whatever the setting was (S13 A3:
+// a plan it takes the place of is never left half made), as a plan_import plans it, through the
+// busy gate: a running plan gives way to it, and another operation refuses the plan (the setting
+// stays written, the dialog on the plan it shows).
+void ImportController::set_dependencies(bool with_dependencies) {
+	EditorPreferences &preferences = core_.preferences();
+	if (with_dependencies != preferences.values().import_dependencies) {
+		Preferences editor = preferences.values();
+		editor.import_dependencies = with_dependencies;
+		Diagnostic error;
+		if (!preferences.write(editor, error)) core_.report(error);
+	}
+	view_.project.import_dependencies = preferences.values().import_dependencies;
+	view_.activity.status = with_dependencies ? "Imports bring the files the chosen ones need."
+	                                          : "Imports take the chosen files alone.";
+	core_.touch(ViewConcern::Preferences);
+	core_.touch(ViewConcern::Output);
+	const DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	// A preview of everything stays as it is: a walk of every file finds nothing not chosen.
+	if (preview.open && !preview.all) {
+		EditorRequest replan = request::of(EditorRequestKind::PlanImport);
+		replan.imports = preview.roots;
+		replan.with_dependencies = with_dependencies;
+		serve_request(core_, replan);
+	}
+}
+
+// The rows kept, written the whole selection or none of it as far as the disk allows
+// (import_assets), then one refresh, as an operation (ImportOperation). With a preview open the
+// files are planned again first: when that is not the import the preview showed (a dependency new
+// or gone, a file found in another place, a file that no longer reads), nothing is written and
+// the dialog shows the new plan with a line saying so; a row the plan does not have is refused.
+// An import that would write over a file with unsaved edits never reaches here: it waits on the
+// unsaved prompt first (UnsavedGuard), whose Save writes them; the refresh after it reads again
+// the open documents whose files it replaced.
+void ImportController::import_files(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	// An import of nothing named and nothing planned would plan again only to close the dialog: refused
+	// (review F14).
+	if (!request.planned && request.imports.empty())
+		return core_.refuse_now(CoreFinding::ImportRequest,
+		                        "An import names its files (\"imports\") or takes the open preview's plan (\"planned\"): "
+		                        "this one does neither.");
+	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	std::vector<ImportChoice> imports;
+	bool replace = request.replace;
+	if (!sources_of(request, imports, replace)) return;
+	std::unique_ptr<ImportPlanOperation> replan;
+	std::shared_ptr<const ImportPlan> shown;
+	if (preview.open) {
+		shown = preview.plan;
+		replan = std::make_unique<ImportPlanOperation>(core_.problems(), paths_, *view_.project.document,
+				core_.problems().graph(), view_.documents.open, preview.roots, preview.with_dependencies,
+				core_.base_game());
+	} else if (imports.empty()) {
+		view_.activity.status = "Nothing to import.";
+		core_.touch(ViewConcern::Output);
+		return;
+	}
+	const uint64_t id = core_.start_operation(std::make_unique<ImportOperation>(paths_, *view_.project.document,
+			std::move(imports), replace, std::move(replan), std::move(shown)));
+	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
+	core_.outcome().operation = id;
+	view_.activity.status = "Importing...";
+	core_.touch(ViewConcern::Output);
+}
+
+bool ImportController::sources_of(const EditorRequest &request, std::vector<ImportChoice> &imports, bool &replace) {
+	if (!request.planned) {
+		imports = request.imports;
+		return true;
+	}
+	const DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	if (!preview.open) {
+		core_.report(make_finding(CoreFinding::ImportNotPlanned, DiagnosticSeverity::Error,
+		                          "No import preview is open: plan the files first (preview_import, "
+		                          "preview_install_import)."));
+		view_.activity.status = "Nothing is planned to import.";
+		core_.touch(ViewConcern::Output);
+		return false;
+	}
+	// The plan it means, the one shown: a plan made since (a dependency setting, a choice, the files changed) is
+	// another, its checks of other rows, and the import is refused rather than retargeted (review X7).
+	if (request.plan != preview.plan_serial) {
+		core_.report(make_finding(CoreFinding::ImportNotPlanned, DiagnosticSeverity::Error,
+		                          request.plan == 0
+		                                  ? "import_files planned names the plan it imports (plan: the import_preview "
+		                                    "query's plan, " + std::to_string(preview.plan_serial) + " now)."
+		                                  : "The import was planned again: plan " + std::to_string(request.plan) +
+		                                            " is gone, the dialog shows plan " + std::to_string(preview.plan_serial) +
+		                                            ". Check its rows again (import_preview), then import it."));
+		view_.activity.status = "The import was planned again: nothing was imported.";
+		core_.touch(ViewConcern::Output);
+		return false;
+	}
+	// The rows the dialog's checks take, as its Import takes them (the workspace's checks: a new plan's are the
+	// plan's own, then what the person or a client checked and unchecked; the MCP gaps lane): an unchecked row is
+	// never taken, whatever `replace` says (review X1); a checked row the project holds replaces it (X2); a row
+	// the project cannot take is left out, as the command line leaves it.
+	const std::vector<bool> &held = view_.workspace.import.checked;
+	const std::vector<bool> checks = held.size() == preview.plan->rows.size()
+	                                         ? held
+	                                         : import_default_checks(*preview.plan, view_.workspace.import.replace_existing);
+	ImportSelection selection = import_selection(*preview.plan, checks, view_.workspace.import.replace_existing);
+	imports = std::move(selection.sources);
+	replace = replace || selection.replace;
+	return true;
+}
+
+OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
+	OperationOutcome outcome;
+	const auto refused = [&](const Diagnostic &d) {
+		core_.report(d);
+		outcome.end = OperationEnd::Failed;
+		outcome.findings.push_back(d);
+		return outcome;
+	};
+	if (operation.replanned()) {
+		show_plan(operation.new_plan(), operation.shown().get());
+		if (operation.changed()) {
+			view_.activity.status = "The files changed since the preview: nothing was imported.";
+			core_.touch(ViewConcern::Dialogs);
+			core_.touch(ViewConcern::Output);
+			return refused(make_finding(CoreFinding::ImportChanged, DiagnosticSeverity::Warning, "The files changed since the preview: nothing was imported. Check the import again."));
+		}
+		if (!operation.refusals().empty()) return refused(operation.refusals().front());
+	}
+	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
+	core_.touch(ViewConcern::Workspace);
+	if (operation.imports().empty()) {
+		view_.activity.status = "Nothing to import.";
+		core_.touch(ViewConcern::Dialogs);
+		core_.touch(ViewConcern::Output);
+		return outcome;
+	}
+	const ImportResult &imported = operation.result();
+	// What it wrote and what it did not reach are what the import came to (S13 A7's lists, the
+	// operation's since the write is one, S13 A3), besides Output.
+	outcome.imported = imported.imported;
+	outcome.not_imported = imported.not_imported;
+	if (operation.refreshed()) {
+		// A Rescan: the open documents whose files it replaced read again, then the refresh.
+		core_.documents().reload_changed();
+		core_.absorb_refresh(operation.refresh());
+	}
+	// One line for the import, its files folded under it (the UX round's problems lane: a large import's
+	// lines no longer push everything else out of Output).
+	std::vector<std::string> each;
+	for (const auto &path : imported.imported) each.push_back("Imported " + path);
+	for (const auto &path : imported.not_imported) each.push_back("Not imported " + path);
+	core_.note_folded(import_words(imported.imported), std::move(each));
+	if (!imported.not_imported.empty())
+		core_.note("Not imported: " + counted(imported.not_imported.size(), "file") + " (the import stopped at " +
+		           imported.not_imported.front() + ").");
+	// What the import reported is what it came to: an error failed it (refused before anything was
+	// written, or stopped part way, its not_imported files said).
+	for (const auto &d : imported.diagnostics) {
+		core_.report(d);
+		outcome.findings.push_back(d);
+		if (d.severity == DiagnosticSeverity::Error) outcome.end = OperationEnd::Failed;
+	}
+	const size_t done = imported.imported.size();
+	if (!imported.not_imported.empty()) outcome.end = OperationEnd::Failed;
+	view_.activity.status = !imported.not_imported.empty()
+	                       ? strutil::grouped(done) + " of " + counted(done + imported.not_imported.size(), "file") +
+	                                 " imported: the import stopped at " + imported.not_imported.front() + "."
+	                       : counted(done, "file") + " imported.";
+	core_.touch(ViewConcern::Dialogs); // the preview closed
+	core_.touch(ViewConcern::Output);
+	return outcome;
+}
+
+void ImportController::refresh_install_files() {
+	view_.project.retail_files = view_.project.open ? list_retail_file_names(core_.base_game(), *view_.project.document)
+	                                        : std::vector<std::string>();
+	view_.project.base_files = view_.project.open ? list_base_file_names(core_.base_game(), *view_.project.document)
+	                                      : std::vector<std::string>();
+	core_.problems().set_base_names(view_.project.base_files); // the missing references' words read them
+	// An expansion's base game under the graph, built again over the base as it now stands (one call: a
+	// settings change that moves the base, the Open builds it stepped).
+	core_.problems().set_base_layer(view_.project.open ? build_base_layer(core_.base_game(), *view_.project.document)
+	                                                   : nullptr);
+	core_.touch(ViewConcern::Files);
+}
+
+void ImportController::set_install_files(std::vector<std::string> names, std::vector<std::string> base) {
+	view_.project.retail_files = std::move(names);
+	view_.project.base_files = std::move(base);
+	core_.problems().set_base_names(view_.project.base_files);
+	core_.touch(ViewConcern::Files);
+}
+
+// An import writes over a project file only when it replaces one (else a file of the name is
+// refused, or kept when it holds the same bytes): the files its sources make land where the
+// plan puts them. With the import dialog open that is the plan it shows (the ImportPlan
+// operation's, S13 A3), reused: the import plans again before it writes and writes nothing when
+// the plan is not that one. With none open, the files asked for are planned here, with no cap
+// (import_assets writes every file of the request, so every destination is looked at) and none of
+// what they need: that plan reads the scan alone, never the graph, so no validation runs first.
+void ImportController::unsaved_files(const EditorRequest &request, std::vector<std::string> &files) {
+	DocumentSet &documents = core_.documents();
+	if (!view_.project.open || !documents.documents_dirty()) return;
+	const DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	std::shared_ptr<const ImportPlan> plan = preview.open ? preview.plan : nullptr;
+	if (!plan) {
+		if (request.planned || !request.replace) return; // refused once it is served: no preview is open
+		plan = std::make_shared<const ImportPlan>(plan_import(request.imports, false, paths_, *view_.project.document,
+				*view_.project.scan, core_.problems().graph(), core_.base_game(), SIZE_MAX));
+	}
+	// What it takes and whether it replaces: with planned, the rows the dialog's checks take (sources_of's rule).
+	std::set<ImportChoice> asked(request.imports.begin(), request.imports.end());
+	bool replace = request.replace;
+	if (request.planned) {
+		if (request.plan != preview.plan_serial) return; // refused once it is served: another plan
+		const std::vector<bool> &held = view_.workspace.import.checked;
+		const ImportSelection selection =
+				import_selection(*plan, held.size() == plan->rows.size() ? held : import_default_checks(*plan, view_.workspace.import.replace_existing),
+				                 view_.workspace.import.replace_existing);
+		asked = std::set<ImportChoice>(selection.sources.begin(), selection.sources.end());
+		replace = replace || selection.replace;
+	}
+	if (!replace) return;
+	// A row the request takes, which the plan finds: where its file lands. The places written, gathered once
+	// over the rows (a whole install's nine thousand, each source looked up in log time: review F7), then each
+	// unsaved document's.
+	const auto writes = [&asked](const ImportPlanRow &row) {
+		return row.state != ImportPlanRow::State::NotFound && asked.count(row.source) > 0;
+	};
+	std::set<std::string> written;
+	for (const ImportPlanRow &row : plan->rows)
+		if (writes(row)) written.insert(row.destination);
+	for (const auto &document : documents.documents())
+		if (document->dirty() && written.count(document->path())) files.push_back(document->path());
+}
+
+void ImportController::clear() {
+	view_.dialogs.import_preview = DialogsView::ImportPreview();
+	forget_import_workspace(view_.workspace);
+	view_.project.imports = std::make_shared<const std::vector<ImportedSource>>();
+	view_.project.retail_files.clear();
+	view_.project.base_files.clear();
+}
+
+} // namespace opennova::editor

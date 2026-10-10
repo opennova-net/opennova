@@ -1,0 +1,51 @@
+#pragma once
+#include <vector>
+
+#include <editor/model/diagnostic.h>
+#include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
+
+namespace opennova::editor {
+
+// The catalog document type's validator over one file (DocumentType::validate_file): used by the
+// editor, CLI validate and Build, an open document standing in for its file so the findings
+// describe the current draft. Input the game ignores is reported as a warning (saving keeps it);
+// input the typed model cannot carry is an error. A record whose name an earlier record of its
+// kind has, and an item whose id an earlier item of the file has, are warnings naming the one a
+// lookup finds (two item tables are two files of one name, of which the game reads one:
+// asset.name.duplicate, so an id is compared within its table). The references a
+// record makes (models, animation maps, ammo and weapon names, item ids, string ids) are the
+// asset graph's.
+std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document);
+
+// The catalog type's own finding codes (DocumentType::findings), each a row of its table
+// (catalog_validation.cpp, static_asserted into this order): input the reader leaves out, which
+// the game ignores and a save keeps as the file has it, or which the typed model cannot carry (the file does not
+// serialize); a value the file cannot write; a record with no name, or with one an earlier record
+// of its kind has; an item with the id of an earlier item of the file; an item with no type. And the
+// ids and rows the engine fixes (formats/def/reserved_items.h; itemdef-re.md, "The ids and rows the
+// engine fixes"): an item on an id the engine keeps, what the engine uses it for (an Info, the
+// Inspector's hint); one of another kind than the engine looks for there; one named as an item the
+// engine keeps under another id, which the file lacks; an items.def whose first row, the one every
+// lookup that finds nothing resolves to, is no marker or holds a reserved id; and an edit refused for
+// moving a reserved record off its id or giving its id to another kind (the refusal, no Problems row
+// of the file's own).
+enum class CatalogFinding {
+	InvalidInput,
+	IgnoredInput,
+	Unserializable,
+	NameEmpty,
+	NameDuplicate,
+	ItemIdentity,
+	ItemType,
+	ReservedId,
+	ReservedKind,
+	ReservedName,
+	FirstRow,
+	ReservedRefused,
+	ReaderStops, // input the game's reader stops at or corrupts the record over (catalog.reader_stops)
+	kCount
+};
+const FindingCodeRow &finding_code(CatalogFinding code);
+FindingTable catalog_finding_codes();
+} // namespace opennova::editor

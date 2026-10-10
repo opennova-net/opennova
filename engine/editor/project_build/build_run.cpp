@@ -1,0 +1,1200 @@
+#include <editor/project_build/build_run.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <system_error>
+#include <utility>
+
+#include <base/gameprofile/gameprofile.h>
+#include <base/io/file_time.h>
+#include <base/io/hash.h>
+#include <base/io/json.h>
+#include <base/io/strutil.h>
+#include <base/resource_index/boot_policy.h>
+#include <base/vfs/vfs.h>
+#include <editor/assets/asset_registry.h>
+#include <editor/model/diagnostic.h>
+#include <editor/project/project_files.h>
+#include <formats/pff/pff.h>
+#include <formats/pff/pff_stream_writer.h>
+#include <runtime/mission/mission_catalog.h>
+
+namespace fs = std::filesystem;
+
+namespace opennova::editor {
+
+namespace {
+
+// The archive flavour a build writes: a new archive's, every profile's
+// (gameprofile::GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT, PFF3).
+constexpr pff::PffFormat kBuildArchiveFormat =
+		static_cast<pff::PffFormat>(gameprofile::GAMEPROFILE_PFF_NEW_ARCHIVE_FORMAT);
+
+// The largest single read, write or copy inside a step: a budget spans several.
+constexpr uint64_t kChunkBytes = uint64_t(1) << 20;
+// What opening a file costs a step (or asking its size and last write, where the hash cache
+// vouches for its content), so one over many small files stays short.
+constexpr uint64_t kOpenCost = 4096;
+// run_build's step: a whole build in few steps, its archives reported as they land.
+constexpr uint64_t kRunBuildStepBytes = uint64_t(4) << 20;
+// The staging directories a build tries, `<id>.tmp` then `<id>.1.tmp` and on, while the one
+// before cannot be emptied.
+constexpr int kStagingAttempts = 8;
+// How long the publish keeps trying a rename refused while its refusal may pass (a scanner or an
+// indexer holding a staged file), a step at a time.
+constexpr std::chrono::seconds kPublishPatience{3};
+
+// A file's last write, as a number two reads of the same file compare equal by (0 when it cannot
+// be read).
+int64_t last_write_of(const std::string &path) {
+	return io::file_modified_ticks(system_path(path));
+}
+
+// The staging directory's name for a build's `attempt`-th try: <id>.tmp, <id>.1.tmp, ...
+std::string staging_name(const std::string &build_id, int attempt) {
+	return attempt == 0 ? build_id + kBuildStagingSuffix
+	                    : build_id + "." + std::to_string(attempt) + kBuildStagingSuffix;
+}
+
+// The build id a staging directory's name stages ("" for a name that is none).
+std::string staged_build_id(const std::string &name) {
+	const std::string suffix = kBuildStagingSuffix;
+	if (name.size() <= suffix.size() || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+		return std::string();
+	std::string stem = name.substr(0, name.size() - suffix.size());
+	if (const size_t dot = stem.find('.'); dot != std::string::npos) {
+		const std::string attempt = stem.substr(dot + 1);
+		if (attempt.empty() || attempt.size() > 3 ||
+		    !std::all_of(attempt.begin(), attempt.end(), [](char c) { return c >= '0' && c <= '9'; }))
+			return std::string();
+		stem.resize(dot);
+	}
+	return is_build_id(stem) ? stem : std::string();
+}
+
+// The archive's size on disk (0 when it cannot be read).
+uint64_t size_of(const std::string &path) {
+	std::error_code ec;
+	const uintmax_t size = fs::file_size(system_path(path), ec);
+	return ec ? 0 : uint64_t(size);
+}
+
+// True when `path` still has the size and the last write a read of it started from: a file
+// rewritten in place under a read of several steps, even to the same size, is not.
+bool still_as_read(const std::string &path, uint64_t size, int64_t written) {
+	std::error_code ec;
+	return fs::file_size(system_path(path), ec) == size && !ec && last_write_of(path) == written;
+}
+
+Diagnostic changed_while_packing(const std::string &name) {
+	return make_finding(CoreFinding::BuildChanged, DiagnosticSeverity::Error,
+	                    "The file " + name + " changed while the build packed it: build again.", name);
+}
+
+struct LastGood {
+	std::string build_id;
+	std::string project;
+	std::map<std::string, std::string> archive_hashes; // file name -> hex hash
+	std::map<std::string, uint64_t> archive_sizes;     // file name -> bytes
+};
+
+bool read_last_good(const std::string &output_root, LastGood &out) {
+	std::string text;
+	std::string io_error;
+	if (!io::read_file_text(join_path(output_root, kLastGoodBuildFileName), text, io_error))
+		return false;
+	io::JsonValue json;
+	std::string parse_error;
+	if (!io::json_parse(text, json, parse_error) || !json.is_object()) return false;
+	if (json.get_int("schema_version", -1) != kBuildRecordSchemaVersion) return false;
+	out.build_id = json.get_string("build_id", "");
+	out.project = json.get_string("project", "");
+	if (const io::JsonValue *archives = json.get("archives"); archives && archives->is_object()) {
+		for (const io::JsonMember &m : archives->object) {
+			if (!m.value.is_object()) continue;
+			const std::string hash = m.value.get_string("hash", "");
+			const double size = m.value.get_number("size", -1.0);
+			if (hash.empty() || size < 0.0) continue;
+			out.archive_hashes[m.key] = hash;
+			out.archive_sizes[m.key] = uint64_t(size);
+		}
+	}
+	return !out.build_id.empty();
+}
+
+// Each archive by its content hash and its size, which a later build checks the archive against
+// before it links or copies it (one whose size moved is packed again, never reused).
+io::JsonValue build_record(const std::string &build_id, const std::string &project,
+                           const std::map<std::string, std::string> &hashes,
+                           const std::map<std::string, uint64_t> &sizes, const std::vector<std::string> &loose) {
+	io::JsonValue json = io::JsonValue::make_object();
+	json.set("schema_version", io::JsonValue::make_number(kBuildRecordSchemaVersion));
+	json.set("build_id", io::JsonValue::make_string(build_id));
+	json.set("project", io::JsonValue::make_string(project));
+	io::JsonValue archives = io::JsonValue::make_object();
+	for (const auto &[name, hash] : hashes) {
+		io::JsonValue archive = io::JsonValue::make_object();
+		archive.set("hash", io::JsonValue::make_string(hash));
+		const auto size = sizes.find(name);
+		archive.set("size", io::JsonValue::make_number(double(size == sizes.end() ? 0 : size->second)));
+		archives.set(name, std::move(archive));
+	}
+	json.set("archives", std::move(archives));
+	io::JsonValue loose_names = io::JsonValue::make_array();
+	for (const std::string &name : loose) loose_names.push(io::JsonValue::make_string(name));
+	json.set("loose", std::move(loose_names));
+	return json;
+}
+
+// The directory a loose file lands in, made first (an expansion's folder: ADR 0046 S16).
+bool ensure_parent(const std::string &path, std::string &error) {
+	const fs::path parent = path_of(path).parent_path();
+	return parent.empty() || io::ensure_directory(utf8_of(parent), error);
+}
+
+// Every planned name must resolve through the engine's own mount of the staged
+// directory: the one a stock launch boots with (mount_install: the fixed boot table,
+// archive-only; an expansion's build with `/exp <b>`, its pair mounted from its folder and
+// nothing under it, ADR 0046 S16), handed the directory's UTF-8 path as the game is handed its own,
+// which it opens past MAX_PATH itself (base/io/os_path.h).
+bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &error) {
+	Vfs vfs;
+	LaunchFlags flags;
+	flags.expansion = plan.target.expansion;
+	flags.game = plan.target.game;
+	if (!mount_install(vfs, dir, flags) || vfs.mounted_expansion() != plan.target.expansion) {
+		error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
+		                     plan.target.is_expansion()
+		                             ? "The built expansion does not mount with /exp " + plan.target.expansion + ": " +
+		                                       vfs.last_error()
+		                             : "The built archives do not mount: " + vfs.last_error());
+		return false;
+	}
+	for (const BuildArchive &archive : plan.archives) {
+		for (const BuildEntry &entry : archive.entries) {
+			if (!vfs.has_file(entry.logical_name)) {
+				error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
+				                     entry.logical_name + " is missing from the built " + archive.file_name,
+				                     entry.logical_name);
+				return false;
+			}
+		}
+	}
+	std::error_code ec;
+	for (const BuildEntry &entry : plan.loose) {
+		if (!fs::is_regular_file(system_path(join_path(dir, entry.build_path)), ec)) {
+			error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
+			                     entry.build_path + " is missing from the build directory", entry.logical_name);
+			return false;
+		}
+	}
+	return true;
+}
+
+// A directory is ours to delete only when it proves it: a published build is named by
+// its id and carries a build record naming the same id; an abandoned staging directory
+// is `<id>.tmp` (or `<id>.<n>.tmp`) and carries the staging marker. `--out` may point anywhere,
+// so anything else under the output root (a user's own folders) is never touched. `dir` is the
+// directory's system path.
+bool is_prunable_build_dir(const fs::path &dir) {
+	const std::string name = utf8_of(dir.filename());
+	std::error_code ec;
+	const std::string tmp_suffix = kBuildStagingSuffix;
+	if (name.size() > tmp_suffix.size() && name.compare(name.size() - tmp_suffix.size(), tmp_suffix.size(), tmp_suffix) == 0)
+		return !staged_build_id(name).empty() && fs::is_regular_file(dir / kBuildStagingMarkerFileName, ec);
+	if (!is_build_id(name)) return false;
+	std::string text;
+	std::string io_error;
+	if (!io::read_file_text(utf8_of(dir / kBuildRecordFileName), text, io_error)) return false;
+	io::JsonValue json;
+	std::string parse_error;
+	if (!io::json_parse(text, json, parse_error) || !json.is_object()) return false;
+	return json.get_string("build_id", "") == name;
+}
+
+// The project a build or staging directory is of (`dir`, its system path): its record's, or the second
+// line of its staging marker; false with none named (a build recorded before records named theirs).
+bool build_project(const fs::path &dir, std::string &project) {
+	std::string text, io_error;
+	if (!staged_build_id(utf8_of(dir.filename())).empty()) {
+		if (!io::read_file_text(utf8_of(dir / kBuildStagingMarkerFileName), text, io_error)) return false;
+		const size_t line = text.find('\n');
+		if (line == std::string::npos) return false;
+		project = text.substr(line + 1);
+		return true;
+	}
+	if (!io::read_file_text(utf8_of(dir / kBuildRecordFileName), text, io_error)) return false;
+	io::JsonValue json;
+	std::string parse_error;
+	if (!io::json_parse(text, json, parse_error) || !json.is_object() || !json.get("project")) return false;
+	project = json.get_string("project", "");
+	return true;
+}
+
+// Whether a build or staging directory is `plan`'s project's: its project named and the plan's, or none
+// named in the project's own folder.
+bool of_project(const fs::path &dir, const BuildPlan &plan) {
+	std::string project;
+	return build_project(dir, project) ? project == plan.project : plan.own_folder;
+}
+
+// Removes a build or staging directory (`dir`, its system path), the file that proves it one last
+// (a staging directory's marker, a build's record): one a file held open keeps (an indexer, a
+// scanner, a game running on the last good build, which holds the archives a cancelled build linked
+// into its staging) still proves itself, so a later build prunes it instead of refusing its name as
+// "not a build directory". False when anything stayed.
+bool remove_build_dir(const fs::path &dir) {
+	const fs::path proof = dir / (staged_build_id(utf8_of(dir.filename())).empty() ? kBuildRecordFileName
+	                                                                             : kBuildStagingMarkerFileName);
+	std::error_code ec;
+	bool kept = false;
+	for (const fs::directory_entry &entry : fs::directory_iterator(dir, ec)) {
+		if (entry.path().filename() == proof.filename()) continue;
+		std::error_code removed;
+		fs::remove_all(entry.path(), removed);
+		kept = kept || removed || fs::exists(entry.path(), removed);
+	}
+	if (kept) return false;
+	std::error_code removed;
+	fs::remove(proof, removed);
+	fs::remove(dir, removed);
+	return !fs::exists(dir, removed);
+}
+
+void remove_staging(const std::string &dir) {
+	remove_build_dir(system_path(dir));
+}
+
+// The builds and staging directories of `plan`'s project under the output root but `keep_id`'s, each gone
+// (never one a game runs from); another project's left as it is, a published one named in `others`.
+void prune_old_builds(const std::string &output_root, const std::string &keep_id,
+                      const std::vector<std::string> &protected_dirs, const BuildPlan &plan,
+                      std::vector<std::string> &others) {
+	std::error_code ec;
+	for (const fs::directory_entry &entry :
+			fs::directory_iterator(system_path(output_root), fs::directory_options::skip_permission_denied, ec)) {
+		if (ec) break;
+		if (!entry.is_directory(ec)) continue;
+		const std::string name = utf8_of(entry.path().filename());
+		if (name == keep_id || !is_prunable_build_dir(entry.path())) continue;
+		if (!of_project(entry.path(), plan)) {
+			if (staged_build_id(name).empty()) others.push_back(name);
+			continue;
+		}
+		bool keep = false;
+		for (const std::string &p : protected_dirs) {
+			std::error_code cmp;
+			if (fs::equivalent(entry.path(), system_path(p), cmp)) keep = true;
+		}
+		if (keep) continue;
+		remove_build_dir(entry.path());
+	}
+}
+
+} // namespace
+
+// The files a step has open: the one being hashed, packed or copied, a copy's target (made new:
+// create_new_file), and the archive writer, whose reads of the entries come back through
+// read_chunk.
+struct BuildRun::Streams {
+	BuildRun *run = nullptr;
+	std::ifstream in;
+	std::FILE *out = nullptr;
+	uint64_t in_size = 0;
+	uint64_t in_done = 0;
+	pff::PffStreamWriter writer;
+	size_t archive = 0;        // the archive the writer writes
+	std::string failed_entry;  // the entry whose file changed while packing ("" for none)
+	std::vector<char> buffer;
+
+	~Streams() { drop_out(); }
+
+	// A copy's target made at `path`, which no file may hold yet (false when one does).
+	bool open_out(const std::string &path) {
+		drop_out();
+		out = io::create_new_file(path);
+		return out != nullptr;
+	}
+	// `size` bytes of the buffer written to the copy's target.
+	bool write_out(uint64_t size) {
+		return std::fwrite(buffer.data(), 1, static_cast<size_t>(size), out) == size;
+	}
+	// The copy's target closed, all of it written.
+	bool close_out() {
+		if (!out) return false;
+		const bool written = std::fflush(out) == 0 && !std::ferror(out);
+		const bool closed = std::fclose(out) == 0;
+		out = nullptr;
+		return written && closed;
+	}
+	void drop_out() {
+		if (out) std::fclose(out);
+		out = nullptr;
+	}
+
+	// Opens `path` for reading when it holds what the hash read (its size and last write).
+	bool open_unchanged(const std::string &path, const Stamp &stamp) {
+		in.close();
+		in.clear();
+		const fs::path file = system_path(path);
+		std::error_code ec;
+		const uint64_t size = fs::file_size(file, ec);
+		if (ec || size != stamp.size || last_write_of(path) != stamp.written) return false;
+		in.open(file, std::ios::binary);
+		in_size = size;
+		in_done = 0;
+		return static_cast<bool>(in);
+	}
+
+	// Reads `size` bytes of the open file into the buffer; false when it has fewer.
+	bool read(uint64_t size) {
+		if (buffer.size() < size) buffer.resize(static_cast<size_t>(size));
+		in.read(buffer.data(), static_cast<std::streamsize>(size));
+		if (static_cast<uint64_t>(in.gcount()) != size) return false;
+		in_done += size;
+		return true;
+	}
+
+	// The open file read to its end: false when more bytes follow (it grew).
+	bool at_end() {
+		const bool end = in.peek() == std::ifstream::traits_type::eof();
+		in.close();
+		in.clear();
+		return end;
+	}
+
+	// The PFF writer's source: entry `index` of the archive under way, a chunk at a time, from
+	// its file, which must still hold what the hash read.
+	static int read_chunk(void *ctx, uint32_t index, uint32_t offset, uint8_t *out, uint32_t size) {
+		Streams &self = *static_cast<Streams *>(ctx);
+		const BuildRun &run = *self.run;
+		const BuildEntry &entry = run.plan_.archives[self.archive].entries[index];
+		const Stamp &stamp = run.stamps_[run.stamp_index(self.archive, index)];
+		if ((offset == 0 && !self.open_unchanged(entry.source_path, stamp)) || !self.read(size) ||
+		    (self.in_done == stamp.size &&
+		     (!self.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written)))) {
+			self.failed_entry = entry.logical_name;
+			return 1;
+		}
+		std::copy_n(self.buffer.data(), size, reinterpret_cast<char *>(out));
+		return 0;
+	}
+};
+
+ProtectedDirs protect_dirs(std::vector<std::string> dirs) {
+	return [dirs = std::move(dirs)] { return dirs; };
+}
+
+bool is_build_id(const std::string &name) {
+	if (name.size() != 16) return false;
+	for (const char c : name) {
+		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+	}
+	return true;
+}
+
+std::string last_good_build_dir(const std::string &output_root) {
+	LastGood last;
+	if (!read_last_good(output_root, last)) return std::string();
+	const std::string dir = join_path(output_root, last.build_id);
+	std::error_code ec;
+	return fs::is_directory(system_path(dir), ec) ? dir : std::string();
+}
+
+BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protected_dirs) :
+		plan_(std::move(plan)), output_root_(std::move(output_root)), protected_dirs_(std::move(protected_dirs)),
+		streams_(std::make_unique<Streams>()) {
+	streams_->run = this;
+	report_.expansion = plan_.target.expansion;
+	size_t base = 0;
+	uint64_t bytes = 0;
+	for (const BuildArchive &archive : plan_.archives) {
+		group_base_.push_back(base);
+		base += archive.entries.size();
+		for (const BuildEntry &entry : archive.entries) bytes += entry.size_bytes;
+	}
+	group_base_.push_back(base);
+	base += plan_.loose.size();
+	for (const BuildEntry &entry : plan_.loose) bytes += entry.size_bytes;
+	stamps_.resize(base);
+	contents_.resize(base);
+	// Every byte hashed once (or vouched for by the hash cache), an expansion's compared with the base's
+	// once (its copy's bytes read, or vouched for by the base cache), then written or copied once; a file
+	// left out as the base's leaves the write pass (drop_same_as_base).
+	bytes_total_ = plan_.ok ? bytes * (plan_.target.is_expansion() ? 3 : 2) : 0;
+	group_hash_ = archive_hash_seed();
+	build_hash_ = io::kFnv1a64Offset;
+	// An expansion's build is another build than the standalone game's of the same files, and than
+	// another expansion name's: its id starts from the name as spelled (ADR 0046 S16), the folder's
+	// spelling being what the Mods list copies into the name the game joins with, which the host compares
+	// with case [orig: Expansion_ScanAndRegister @ 0x4a4530..0x4a453a, the folder's name copied whole;
+	// Server_ValidatePlayerJoinRequest @ 0x5122f0, String_ExactMatch, reason 0x2F], so a name changed
+	// in its case alone is another build, published under the new spelling.
+	if (plan_.target.is_expansion()) {
+		const std::string seed = "expansion/" + plan_.target.expansion;
+		build_hash_ = io::fnv1a64_bytes(build_hash_, seed.data(), seed.size());
+	}
+}
+
+// Where each archive's hash starts: the format it is written in, the writer's version and the time
+// its entries are stamped with, so a writer that would pack the same entries otherwise never finds
+// the archive the old one packed unchanged (and a link to it): a writer change rebuilds every
+// archive once (the stamp's: every archive packed with 0, which hid its effects, D-VFS-12).
+uint64_t BuildRun::archive_hash_seed() {
+	uint64_t seed = io::fnv1a64_value(io::kFnv1a64Offset, static_cast<int>(kBuildArchiveFormat));
+	seed = io::fnv1a64_value(seed, pff::PFF_WRITER_VERSION);
+	return io::fnv1a64_value(seed, pff::PFF_NEW_ENTRY_TIMESTAMP);
+}
+
+BuildRun::~BuildRun() {
+	if (!done()) cancel();
+}
+
+size_t BuildRun::stamp_index(size_t group, size_t entry) const {
+	return group_base_[group] + entry;
+}
+
+const std::string &BuildRun::item_name(size_t index) const {
+	if (index < plan_.archives.size()) return plan_.archives[index].file_name;
+	return plan_.loose[index - plan_.archives.size()].build_path;
+}
+
+void BuildRun::advance(uint64_t bytes) {
+	bytes_done_ = std::min(bytes_total_, bytes_done_ + bytes);
+}
+
+void BuildRun::close_streams() {
+	streams_->in.close();
+	streams_->in.clear();
+	streams_->drop_out();
+	streams_->writer.abort();
+}
+
+void BuildRun::fail(Diagnostic error) {
+	close_streams(); // an open file would keep the staging directory from going
+	report_.diagnostics.push_back(std::move(error));
+	if (!tmp_dir_.empty()) {
+		remove_staging(tmp_dir_);
+		tmp_dir_.clear();
+	}
+	phase_ = Phase::Done;
+}
+
+void BuildRun::cancel() {
+	if (done()) return;
+	close_streams();
+	if (!tmp_dir_.empty()) {
+		remove_staging(tmp_dir_);
+		tmp_dir_.clear();
+	}
+	cancelled_ = true;
+	report_.ok = false;
+	label_ = "Cancelled";
+	phase_ = Phase::Done;
+}
+
+bool BuildRun::step(uint64_t budget_bytes) {
+	const uint64_t budget = std::max<uint64_t>(budget_bytes, 1);
+	switch (phase_) {
+	case Phase::Prepare: prepare(); break;
+	case Phase::Hash: hash(budget); break;
+	case Phase::Base: compare_base(budget); break;
+	case Phase::Fold: fold_all(); break;
+	case Phase::Settle: settle(); break;
+	case Phase::Archives: pack(budget); break;
+	case Phase::Loose: copy_loose(budget); break;
+	case Phase::Publish: publish(); break;
+	case Phase::Done: break;
+	}
+	return done();
+}
+
+// The gate: a plan with a blocking finding never packs. Then the hash cache, read once.
+void BuildRun::prepare() {
+	if (!plan_.ok) {
+		// Refused by the gate: the line names what refuses it (the UX round's problems lane).
+		report_.diagnostics = plan_.diagnostics;
+		report_.blockers = build_blockers(plan_);
+		report_.refused = true;
+		report_.diagnostics.push_back(make_finding(CoreFinding::BuildBlocked, DiagnosticSeverity::Error,
+		                                           refusal_words(build_blockers(plan_))));
+		phase_ = Phase::Done;
+		return;
+	}
+	// What the plan itself says of the files and blocks nothing (a player's own file it leaves out,
+	// ADR 0046 S14) is the build's to report; the Problems rows it was gated on are not.
+	for (const Diagnostic &d : plan_.diagnostics)
+		if (d.row() && d.row()->group == FindingGroup::Build) report_.diagnostics.push_back(d);
+	pass_began_ = io::file_clock_now_ticks();
+	load_cache();
+	label_ = "Hashing the project's files";
+	phase_ = Phase::Hash;
+}
+
+// A cache that is missing, broken or of another schema reads as empty: every file is then hashed,
+// which is all a lost cache costs.
+void BuildRun::load_cache() {
+	if (plan_.hash_cache.empty()) return;
+	std::string message;
+	std::error_code ec;
+	if (!fs::is_regular_file(system_path(plan_.hash_cache), ec) || !io::read_file_text(plan_.hash_cache, cache_text_, message))
+		return;
+	io::JsonValue json;
+	if (!io::json_parse(cache_text_, json, message) || !json.is_object() ||
+	    json.get_int("schema_version", -1) != kBuildCacheSchemaVersion)
+		return;
+	if (const io::JsonValue *base = json.get("base")) base_cache_ = *base;
+	const io::JsonValue *files = json.get("files");
+	if (!files || !files->is_array()) return;
+	for (const io::JsonValue &item : files->array) {
+		if (!item.is_object()) continue;
+		const std::string path = item.get_string("path", "");
+		Hashed hashed;
+		uint64_t written = 0;
+		hashed.size = uint64_t(item.get_number("size", 0));
+		if (path.empty() || !io::parse_hex64(item.get_string("modified", ""), written) ||
+		    !io::parse_hex64(item.get_string("hash", ""), hashed.hash))
+			continue;
+		hashed.written = int64_t(written);
+		cache_[path] = hashed;
+	}
+}
+
+// Written when the hashes are folded, and only when it changed: the plan's files alone, each by what
+// this build read or took from the cache, so a file gone from the project leaves it; and of those
+// only a file whose last write lies far enough before the pass (io::file_stamp_settled), so a
+// rewrite of the same size inside the same timestamp tick is never taken for the bytes read
+// (a file written just before a build is read by the next one too).
+void BuildRun::save_cache() const {
+	if (plan_.hash_cache.empty()) return;
+	io::JsonValue json = io::JsonValue::make_object();
+	json.set("schema_version", io::JsonValue::make_number(kBuildCacheSchemaVersion));
+	io::JsonValue files = io::JsonValue::make_array();
+	for (const auto &[path, hashed] : seen_) {
+		if (!io::file_stamp_settled(hashed.written, pass_began_)) continue;
+		io::JsonValue item = io::JsonValue::make_object();
+		item.set("path", io::JsonValue::make_string(path));
+		item.set("size", io::JsonValue::make_number(double(hashed.size)));
+		item.set("modified", io::JsonValue::make_string(io::hex64(uint64_t(hashed.written))));
+		item.set("hash", io::JsonValue::make_string(io::hex64(hashed.hash)));
+		files.push(std::move(item));
+	}
+	json.set("files", std::move(files));
+	// The base game's hashes an expansion's build read or took from the cache (lean packing); a build
+	// that compared none keeps the ones it read.
+	if (base_) json.set("base", base_->save());
+	else if (!base_cache_.is_null()) json.set("base", base_cache_);
+	const std::string text = io::json_write(json);
+	if (text == cache_text_) return;
+	std::string message;
+	io::write_file_atomic(plan_.hash_cache, text, message); // a cache that cannot be written is only slower
+}
+
+void BuildRun::fold(const BuildEntry &entry, uint64_t size, uint64_t content) {
+	const std::string key = pff::normalized_logical_name(entry.logical_name);
+	group_hash_ = io::fnv1a64_bytes(group_hash_, key.data(), key.size());
+	group_hash_ = io::fnv1a64_byte(group_hash_, 0);
+	group_hash_ = io::fnv1a64_value(group_hash_, size);
+	group_hash_ = io::fnv1a64_value(group_hash_, content);
+}
+
+// Every archive's content and the loose files hashed, the build id covering all of it: each
+// entry's normalized name, a 0, its size and its content hash, in the archive's order. Reading the
+// bytes (not only size and time) is what makes an edit inside the same second still a change, so a
+// file's content hash comes from the cache only while its size and last write are the ones it was
+// read at (S13 A8, the import cache's rule); each file's size and last write are kept, and the pass
+// that packs it reads it only while it still holds them.
+void BuildRun::hash(uint64_t budget) {
+	Streams &s = *streams_;
+	uint64_t left = budget;
+	while (left > 0) {
+		const bool loose = hash_group_ == plan_.archives.size();
+		const std::vector<BuildEntry> &group = loose ? plan_.loose : plan_.archives[hash_group_].entries;
+		if (hash_entry_ == group.size()) {
+			if (!loose) {
+				++hash_group_;
+				hash_entry_ = 0;
+				continue;
+			}
+			// An expansion's files are compared with its base game's first (lean packing).
+			phase_ = plan_.target.is_expansion() ? Phase::Base : Phase::Fold;
+			label_ = plan_.target.is_expansion() ? "Comparing with the base game" : label_;
+			return;
+		}
+		const BuildEntry &entry = group[hash_entry_];
+		Stamp &stamp = stamps_[stamp_index(hash_group_, hash_entry_)];
+		if (!s.in.is_open()) {
+			const fs::path path = system_path(entry.source_path);
+			std::error_code ec;
+			const uint64_t size = fs::file_size(path, ec);
+			if (ec) {
+				return fail(make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error,
+				                         "cannot read " + entry.logical_name + ": " + ec.message(),
+				                         entry.logical_name));
+			}
+			if (size != entry.size_bytes) return fail(changed_while_packing(entry.logical_name));
+			stamp = {size, last_write_of(entry.source_path)};
+			label_ = "Hashing " + entry.logical_name;
+			left -= std::min(left, kOpenCost);
+			const auto cached = plan_.rehash ? cache_.end() : cache_.find(entry.source_path);
+			if (stamp.written != 0 && cached != cache_.end() && cached->second.size == size &&
+			    cached->second.written == stamp.written) {
+				contents_[stamp_index(hash_group_, hash_entry_)] = cached->second.hash;
+				seen_[entry.source_path] = cached->second;
+				advance(size);
+				++hash_entry_;
+				continue;
+			}
+			s.in.open(path, std::ios::binary);
+			if (!s.in) {
+				return fail(make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error,
+				                         "cannot open " + entry.logical_name, entry.logical_name));
+			}
+			s.in_size = size;
+			s.in_done = 0;
+			file_hash_ = io::kFnv1a64Offset;
+			++report_.files_hashed;
+		}
+		const uint64_t want = std::min({left, s.in_size - s.in_done, kChunkBytes});
+		if (want > 0) {
+			if (!s.read(want)) return fail(changed_while_packing(entry.logical_name));
+			file_hash_ = io::fnv1a64_bytes(file_hash_, s.buffer.data(), static_cast<size_t>(want));
+			left -= want;
+			advance(want);
+			report_.bytes_hashed += want;
+		}
+		if (s.in_done == s.in_size) {
+			if (!s.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written))
+				return fail(changed_while_packing(entry.logical_name));
+			contents_[stamp_index(hash_group_, hash_entry_)] = file_hash_;
+			if (stamp.written != 0) seen_[entry.source_path] = {stamp.size, stamp.written, file_hash_};
+			++hash_entry_;
+		}
+	}
+}
+
+// Lean packing (ADR 0046 S16): each of an expansion's files compared with the copy its base game
+// serves under its name (BaseMatch: an archive's member as stored and as served, a video's loose copy
+// in the install's folder, which the game reads when the expansion's folder has none), a budget of the
+// base's bytes at a time (none where the base's hashes are cached).
+void BuildRun::compare_base(uint64_t budget) {
+	if (!base_) {
+		base_ = std::make_unique<BaseMatch>();
+		std::string error;
+		if (!base_->open(plan_.target.install, plan_.target.game, error)) {
+			base_.reset();
+			return fail(make_finding(CoreFinding::BuildExpansionBaseMissing, DiagnosticSeverity::Error,
+			                         "The expansion " + plan_.target.expansion + " plays over the base game, and " + error +
+			                                 (plan_.target.base_project.empty()
+			                                          ? std::string(": choose the game install in File > Project settings...")
+			                                          : ": export the base game's project " + plan_.target.base_project +
+			                                                    " first, then Refresh.")));
+		}
+		base_->load(base_cache_);
+		same_.assign(stamps_.size(), false);
+	}
+	uint64_t left = budget;
+	while (left > 0 && base_index_ < stamps_.size()) {
+		const size_t index = base_index_++;
+		size_t group = 0;
+		while (group + 1 < group_base_.size() && index >= group_base_[group + 1]) ++group;
+		const bool archived = group < plan_.archives.size();
+		const BuildEntry &entry =
+		        archived ? plan_.archives[group].entries[index - group_base_[group]] : plan_.loose[index - group_base_[group]];
+		BaseCopy copy;
+		uint64_t read = 0;
+		const bool found = archived ? base_->archive_copy(entry.logical_name, copy, read)
+		                   : entry.kind == AssetKind::Video ? base_->root_copy(entry.logical_name, copy, read)
+		                                                    : false;
+		const Stamp &stamp = stamps_[index];
+		same_[index] = found && ((copy.size == stamp.size && copy.raw == contents_[index]) ||
+		                         (copy.served_size == stamp.size && copy.served == contents_[index]));
+		report_.base_bytes_read += read;
+		advance(stamp.size);
+		label_ = "Comparing " + entry.logical_name + " with the base game";
+		left -= std::min(left, std::max(read, kOpenCost));
+	}
+	if (base_index_ < stamps_.size()) return;
+	drop_same_as_base();
+	phase_ = Phase::Fold;
+}
+
+void BuildRun::drop_same_as_base() {
+	// A mission the expansion ships keeps its text table in <b>L.pff, however like the base's: the
+	// mission list titles a mission only from the archive paired with its own [orig:
+	// Mission_BuildMapListFromPFF @ 0x562c2d, PFF_FileExists(bin, textArchive)]; it lists the map projects
+	// (.npj, .npz) by the same rule as the .bms [orig: Mission_BuildMapListFromPFF @ 0x562910].
+	std::map<std::string, bool> kept_tables;
+	for (size_t a = 0; a < plan_.archives.size(); ++a)
+		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
+			const BuildEntry &entry = plan_.archives[a].entries[e];
+			if (!same_[stamp_index(a, e)] && mission_catalog::lists_as_mission(entry.logical_name))
+				kept_tables[pff::normalized_logical_name(mission_catalog::text_table_name(entry.logical_name))] = true;
+		}
+	std::map<std::string, bool> tables; // the text tables the expansion's pair holds
+	for (size_t a = 0; a < plan_.archives.size(); ++a)
+		if (plan_.archives[a].slot == ArchiveSlot::Language)
+			for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
+				const std::string name = pff::normalized_logical_name(plan_.archives[a].entries[e].logical_name);
+				tables[name] = true;
+				if (kept_tables.count(name)) same_[stamp_index(a, e)] = false;
+			}
+	// What the game's lists make of a mission the expansion ships, said, refusing nothing: one with no text
+	// table in its pair lists untitled; one of a name the base game lists too lists twice, both rows loading
+	// the expansion's (the lists keep no dedupe).
+	for (size_t a = 0; a < plan_.archives.size(); ++a)
+		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
+			const BuildEntry &entry = plan_.archives[a].entries[e];
+			if (same_[stamp_index(a, e)] || !mission_catalog::lists_as_mission(entry.logical_name)) continue;
+			const std::string table = mission_catalog::text_table_name(entry.logical_name);
+			if (!tables.count(pff::normalized_logical_name(table)))
+				report_.diagnostics.push_back(make_finding(
+				        CoreFinding::BuildExpansionMissionUntitled, DiagnosticSeverity::Warning,
+				        entry.logical_name + " has no text table " + table + " of its own in the expansion: the game's "
+				                             "mission list shows it untitled, with no briefing.",
+				        entry.relative_path));
+			if (base_->serves(entry.logical_name))
+				report_.diagnostics.push_back(make_finding(
+				        CoreFinding::BuildExpansionMissionTwice, DiagnosticSeverity::Warning,
+				        "The base game has a mission named " + entry.logical_name + " too: the game's mission list "
+				                "shows it twice, both rows loading the expansion's.",
+				        entry.relative_path));
+		}
+	// What stays, its stamps and hashes with it.
+	std::vector<Stamp> stamps;
+	std::vector<uint64_t> contents;
+	std::vector<size_t> group_base;
+	const auto keep = [&](std::vector<BuildEntry> &entries, size_t group) {
+		std::vector<BuildEntry> kept;
+		for (size_t e = 0; e < entries.size(); ++e) {
+			const size_t index = stamp_index(group, e);
+			if (!same_[index]) {
+				kept.push_back(std::move(entries[e]));
+				stamps.push_back(stamps_[index]);
+				contents.push_back(contents_[index]);
+				continue;
+			}
+			++report_.same_as_base_files;
+			report_.same_as_base_bytes += stamps_[index].size;
+			bytes_total_ -= std::min(bytes_total_ - bytes_done_, stamps_[index].size); // no write pass for it
+		}
+		entries = std::move(kept);
+	};
+	for (size_t a = 0; a < plan_.archives.size(); ++a) {
+		group_base.push_back(stamps.size());
+		keep(plan_.archives[a].entries, a);
+	}
+	group_base.push_back(stamps.size());
+	keep(plan_.loose, plan_.archives.size());
+	stamps_ = std::move(stamps);
+	contents_ = std::move(contents);
+	group_base_ = std::move(group_base);
+	// A file the game reads from the install's folder alone: like the base's, nothing to say; else said,
+	// an expansion cannot ship it.
+	for (const BuildEntry &entry : plan_.root_only) {
+		std::vector<uint8_t> bytes;
+		std::string error;
+		BaseCopy copy;
+		uint64_t read = 0;
+		const bool same = io::read_file_bytes(entry.source_path, bytes, error) && base_->root_copy(entry.logical_name, copy, read) &&
+		                  copy.size == bytes.size() &&
+		                  copy.raw == io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+		report_.base_bytes_read += read;
+		if (same) continue;
+		report_.diagnostics.push_back(make_finding(
+		        CoreFinding::BuildExpansionRootOnly, DiagnosticSeverity::Warning,
+		        entry.logical_name + " is read by the game from its install's folder alone, never from an expansion's: "
+		                             "the expansion's build leaves it out.",
+		        entry.build_path));
+	}
+}
+
+// Every archive's content and the loose files' folded into their hashes, the build id covering all of
+// it: each entry's normalized name, a 0, its size and its content hash, in the archive's order.
+void BuildRun::fold_all() {
+	for (size_t group = 0; group <= plan_.archives.size(); ++group) {
+		const bool loose = group == plan_.archives.size();
+		// An archive's from its seed; the loose files, copied as they are, from none.
+		group_hash_ = loose ? io::kFnv1a64Offset : archive_hash_seed();
+		const std::vector<BuildEntry> &entries = loose ? plan_.loose : plan_.archives[group].entries;
+		for (size_t e = 0; e < entries.size(); ++e)
+			fold(entries[e], stamps_[stamp_index(group, e)].size, contents_[stamp_index(group, e)]);
+		build_hash_ = io::fnv1a64_value(build_hash_, group_hash_);
+		if (!loose) hashes_[plan_.archives[group].file_name] = io::hex64(group_hash_);
+	}
+	build_hash_ = io::fnv1a64_value(build_hash_, static_cast<int>(kBuildArchiveFormat));
+	report_.build_id = io::hex64(build_hash_);
+	save_cache();
+	phase_ = Phase::Settle;
+}
+
+// Settle whether this content is built already, and open the staging directory.
+void BuildRun::settle() {
+	std::string io_error;
+	if (!io::ensure_directory(output_root_, io_error)) {
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
+	}
+	final_dir_ = join_path(output_root_, report_.build_id);
+	std::error_code ec;
+	if (fs::is_directory(system_path(final_dir_), ec)) {
+		// Another project's build of the same files: never taken, replaced or pruned.
+		if (is_prunable_build_dir(system_path(final_dir_)) && !of_project(system_path(final_dir_), plan_)) {
+			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+			                         final_dir_ + " holds another project's build of the same files, left as it is: "
+			                                     "build into another folder."));
+		}
+		// Same content, same build: prove it still mounts and hand it back.
+		Diagnostic error;
+		if (verify_staged(plan_, final_dir_, error)) {
+			report_.ok = true;
+			report_.reused_existing = true;
+			report_.build_dir = final_dir_;
+			list_built();
+			list_others();
+			bytes_done_ = bytes_total_;
+			label_ = "Build unchanged";
+			phase_ = Phase::Done;
+			return;
+		}
+		if (!is_prunable_build_dir(system_path(final_dir_))) {
+			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+			                         "cannot publish the build: " + final_dir_ +
+			                                 " exists and is not a build directory"));
+		}
+		// A damaged build is rebuilt, once it is gone.
+		if (!remove_build_dir(system_path(final_dir_))) {
+			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+			                         "cannot build again over " + final_dir_ + ", which does not mount: a file in it is in use"));
+		}
+	}
+
+	LastGood last;
+	// The last good build reused from only where it is this project's (a folder several build into).
+	if (read_last_good(output_root_, last) && (last.project == plan_.project || plan_.own_folder) &&
+	    of_project(system_path(join_path(output_root_, last.build_id)), plan_)) {
+		last_dir_ = join_path(output_root_, last.build_id);
+		last_hashes_ = last.archive_hashes;
+		last_sizes_ = last.archive_sizes;
+	}
+
+	// The staging directory, empty: one a build of this content left (a cancel, a failure) is
+	// emptied first; when a file in it will not go (a game running on the last good build holds the
+	// archives a cancelled build linked there), the next name is taken, so nothing is ever staged
+	// over a name already there.
+	std::string tmp_dir;
+	for (int attempt = 0; attempt < kStagingAttempts && tmp_dir.empty(); ++attempt) {
+		const std::string candidate = join_path(output_root_, staging_name(report_.build_id, attempt));
+		const fs::path staging = system_path(candidate);
+		if (fs::exists(staging, ec)) {
+			// Another project's staging (its build may be under way): its name passed by.
+			if (is_prunable_build_dir(staging) && !of_project(staging, plan_)) continue;
+			if (!is_prunable_build_dir(staging)) {
+				return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+				                         "cannot stage the build: " + candidate + " exists and is not a build directory"));
+			}
+			if (!remove_build_dir(staging)) continue;
+		}
+		tmp_dir = candidate;
+	}
+	if (tmp_dir.empty()) {
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+		                         "cannot stage the build: its staging directories could not be emptied (a file in "
+		                         "them is in use)"));
+	}
+	if (!io::ensure_directory(tmp_dir, io_error)) {
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
+	}
+	tmp_dir_ = tmp_dir; // from here a failure or a cancel removes it
+	if (!io::write_file_atomic(join_path(tmp_dir, kBuildStagingMarkerFileName), report_.build_id + "\n" + plan_.project,
+	                       io_error)) {
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
+	}
+	phase_ = Phase::Archives;
+}
+
+// Each archive written through the stream writer, or, when its content hashes the same, the last
+// good build's linked (one file under two names: a build never writes an archive again) or copied
+// where the file system cannot link it, a budget of bytes at a time.
+void BuildRun::pack(uint64_t budget) {
+	Streams &s = *streams_;
+	uint64_t left = budget;
+	while (left > 0) {
+		if (archive_index_ == plan_.archives.size()) {
+			phase_ = Phase::Loose;
+			return;
+		}
+		const BuildArchive &archive = plan_.archives[archive_index_];
+		const std::string target = join_path(tmp_dir_, archive.file_name);
+		if (!item_started_) {
+			item_started_ = true;
+			item_share_ = 0;
+			item_share_done_ = 0;
+			for (size_t i = 0; i < archive.entries.size(); ++i) item_share_ += stamps_[stamp_index(archive_index_, i)].size;
+			const std::string previous = join_path(last_dir_, archive.file_name);
+			const auto found = last_hashes_.find(archive.file_name);
+			const auto recorded = last_sizes_.find(archive.file_name);
+			std::error_code ec;
+			// The last good build's archive, its content unchanged and its file still the size its
+			// build recorded (one cut short under a game is packed again, never passed on).
+			item_reused_ = !last_dir_.empty() && found != last_hashes_.end() &&
+			               found->second == hashes_[archive.file_name] && recorded != last_sizes_.end() &&
+			               fs::is_regular_file(system_path(previous), ec) && size_of(previous) == recorded->second;
+			left -= std::min(left, kOpenCost);
+			std::string folder_error;
+			if (!ensure_parent(target, folder_error)) // an expansion's folder
+				return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, folder_error));
+			if (item_reused_) {
+				std::string link_error;
+				if (io::link_file(previous, target, link_error)) {
+					report_.archives_reused.push_back(archive.file_name);
+					report_.archives_linked.push_back(archive.file_name);
+					label_ = "Linking " + archive.file_name + " from the last build";
+					advance(item_share_);
+					item_started_ = false;
+					++archive_index_;
+					++items_done_;
+					continue;
+				}
+				// Copied where it cannot be linked, into a file made new: a name already in the staging
+				// directory is never written through (it may be a link to the very archive copied).
+				s.in.close();
+				s.in.clear();
+				s.in.open(system_path(previous), std::ios::binary);
+				s.in_size = fs::file_size(system_path(previous), ec);
+				s.in_done = 0;
+				if (!s.in || ec || !s.open_out(target)) {
+					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+					                         "cannot copy " + archive.file_name + " from the last build",
+					                         archive.file_name));
+				}
+				label_ = "Copying " + archive.file_name + " from the last build";
+			} else {
+				std::vector<pff::PffWriteStreamEntry> entries;
+				entries.reserve(archive.entries.size());
+				for (size_t i = 0; i < archive.entries.size(); ++i) {
+					pff::PffWriteStreamEntry e{};
+					e.name = archive.entries[i].logical_name.c_str();
+					e.size = static_cast<uint32_t>(stamps_[stamp_index(archive_index_, i)].size);
+					e.flags = 0;
+					// Never 0: the effect loaders skip such an entry (pff::PFF_NEW_ENTRY_TIMESTAMP, D-VFS-12).
+					e.timestamp = pff::PFF_NEW_ENTRY_TIMESTAMP;
+					e.checksum = 0; // no reader (ADR 0008)
+					entries.push_back(e);
+				}
+				s.archive = archive_index_;
+				s.failed_entry.clear();
+				const int rc = s.writer.open(target.c_str(), kBuildArchiveFormat, entries.data(),
+				                             static_cast<uint32_t>(entries.size()), &Streams::read_chunk, &s);
+				if (rc != pff::PFF_WRITE_OK) {
+					return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
+					                         archive.file_name + ": " + pff::pff_write_error_string(rc)));
+				}
+				label_ = "Packing " + archive.file_name;
+			}
+			continue;
+		}
+		uint64_t moved = 0;
+		bool finished = false;
+		if (item_reused_) {
+			const uint64_t want = std::min({left, s.in_size - s.in_done, kChunkBytes});
+			if (want > 0) {
+				if (!s.read(want) || !s.write_out(want)) {
+					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+					                         "cannot copy " + archive.file_name + " from the last build",
+					                         archive.file_name));
+				}
+				moved = want;
+			}
+			if (s.in_done == s.in_size) {
+				s.in.close();
+				s.in.clear();
+				if (!s.close_out()) {
+					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+					                         "cannot copy " + archive.file_name + " from the last build",
+					                         archive.file_name));
+				}
+				report_.archives_reused.push_back(archive.file_name);
+				finished = true;
+			}
+		} else {
+			const uint64_t before = s.writer.payload_written();
+			int rc = s.writer.write(left);
+			moved = s.writer.payload_written() - before;
+			if (rc == pff::PFF_WRITE_OK && s.writer.payloads_written()) {
+				rc = s.writer.finish();
+				finished = rc == pff::PFF_WRITE_OK;
+			}
+			if (rc != pff::PFF_WRITE_OK) {
+				if (!s.failed_entry.empty()) return fail(changed_while_packing(s.failed_entry));
+				return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
+				                         archive.file_name + ": " + pff::pff_write_error_string(rc)));
+			}
+			if (finished) report_.archives_written.push_back(archive.file_name);
+		}
+		const uint64_t credit = std::min(moved, item_share_ - item_share_done_);
+		item_share_done_ += credit;
+		advance(credit);
+		left -= std::min(left, moved);
+		if (finished) {
+			advance(item_share_ - item_share_done_);
+			item_started_ = false;
+			++archive_index_;
+			++items_done_;
+		} else if (moved == 0) {
+			break; // nothing moved: the next step goes on
+		}
+	}
+}
+
+// Each loose file copied beside the archives, a budget of bytes at a time, while it still holds
+// what the hash read.
+void BuildRun::copy_loose(uint64_t budget) {
+	Streams &s = *streams_;
+	uint64_t left = budget;
+	while (left > 0) {
+		if (loose_index_ == plan_.loose.size()) {
+			phase_ = Phase::Publish;
+			return;
+		}
+		const BuildEntry &entry = plan_.loose[loose_index_];
+		const Stamp &stamp = stamps_[stamp_index(plan_.archives.size(), loose_index_)];
+		if (!item_started_) {
+			item_started_ = true;
+			if (!s.open_unchanged(entry.source_path, stamp)) return fail(changed_while_packing(entry.logical_name));
+			const std::string target = join_path(tmp_dir_, entry.build_path);
+			std::string folder_error;
+			if (!ensure_parent(target, folder_error))
+				return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, folder_error));
+			if (!s.open_out(target)) {
+				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+				                         "cannot copy " + entry.logical_name, entry.logical_name));
+			}
+			label_ = "Copying " + entry.logical_name;
+			left -= std::min(left, kOpenCost);
+		}
+		const uint64_t want = std::min({left, s.in_size - s.in_done, kChunkBytes});
+		if (want > 0) {
+			if (!s.read(want)) return fail(changed_while_packing(entry.logical_name));
+			if (!s.write_out(want)) {
+				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+				                         "cannot copy " + entry.logical_name, entry.logical_name));
+			}
+			left -= want;
+			advance(want);
+		}
+		if (s.in_done == s.in_size) {
+			if (!s.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written))
+				return fail(changed_while_packing(entry.logical_name));
+			if (!s.close_out()) {
+				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+				                         "cannot copy " + entry.logical_name, entry.logical_name));
+			}
+			report_.loose_written.push_back(entry.build_path);
+			item_started_ = false;
+			++loose_index_;
+			++items_done_;
+		}
+	}
+}
+
+// Prove the staged directory mounts, record it, rename it into place, prune. A rename refused while
+// its refusal may pass (a scanner or an indexer holding a staged file: rename_refusal_passes) is
+// tried again on the next steps, for kPublishPatience at most.
+void BuildRun::publish() {
+	label_ = "Publishing the build";
+	std::string io_error;
+	if (!publish_ready_) {
+		Diagnostic verify_error;
+		if (!verify_staged(plan_, tmp_dir_, verify_error)) return fail(std::move(verify_error));
+		std::map<std::string, uint64_t> sizes;
+		for (const BuildArchive &archive : plan_.archives)
+			sizes[archive.file_name] = size_of(join_path(tmp_dir_, archive.file_name));
+		record_ = io::json_write(build_record(report_.build_id, plan_.project, hashes_, sizes, report_.loose_written));
+		if (!io::write_file_atomic(join_path(tmp_dir_, kBuildRecordFileName), record_, io_error)) {
+			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
+		}
+		publish_ready_ = true;
+	}
+	std::error_code ec;
+	if (!io::rename_with_retry(system_path(tmp_dir_), system_path(final_dir_), ec)) {
+		const auto now = std::chrono::steady_clock::now();
+		if (io::rename_refusal_passes(ec)) {
+			if (publish_refused_at_ == std::chrono::steady_clock::time_point{}) publish_refused_at_ = now;
+			if (now - publish_refused_at_ < kPublishPatience) return; // the next step tries again
+		}
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+		                         "cannot publish the build: " + ec.message()));
+	}
+	tmp_dir_.clear(); // published: nothing left to clean up
+	fs::remove(system_path(join_path(final_dir_, kBuildStagingMarkerFileName)), ec); // the record is its proof now
+	if (!io::write_file_atomic(join_path(output_root_, kLastGoodBuildFileName), record_, io_error)) {
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
+	}
+	// The directories games run from, asked now: a game started (or found alive) since the build
+	// began is as protected as one that ran when it started.
+	prune_old_builds(output_root_, report_.build_id, protected_dirs_ ? protected_dirs_() : std::vector<std::string>(), plan_,
+	                 report_.others);
+	report_.ok = true;
+	report_.build_dir = final_dir_;
+	list_built();
+	bytes_done_ = bytes_total_;
+	phase_ = Phase::Done;
+}
+
+void BuildRun::list_others() {
+	report_.others.clear();
+	std::error_code ec;
+	for (const fs::directory_entry &entry :
+	     fs::directory_iterator(system_path(output_root_), fs::directory_options::skip_permission_denied, ec)) {
+		if (ec) break;
+		const std::string name = utf8_of(entry.path().filename());
+		if (entry.is_directory(ec) && is_build_id(name) && is_prunable_build_dir(entry.path()) &&
+		    !of_project(entry.path(), plan_))
+			report_.others.push_back(name);
+	}
+}
+
+void BuildRun::list_built() {
+	report_.built.clear();
+	const auto size_of = [this](const std::string &name) {
+		std::error_code ec;
+		const uintmax_t bytes = fs::file_size(system_path(join_path(final_dir_, name)), ec);
+		return ec ? uint64_t(0) : uint64_t(bytes);
+	};
+	for (const BuildArchive &archive : plan_.archives) {
+		BuiltFile file;
+		file.name = archive.file_name;
+		file.archive = true;
+		file.files = archive.entries.size();
+		file.bytes = size_of(archive.file_name);
+		// An unchanged build hands back the last one whole: every archive of it is the one kept.
+		file.reused = report_.reused_existing ||
+		              std::find(report_.archives_reused.begin(), report_.archives_reused.end(), archive.file_name) !=
+		                      report_.archives_reused.end();
+		report_.built.push_back(std::move(file));
+	}
+	for (const BuildEntry &entry : plan_.loose) {
+		BuiltFile file;
+		file.name = entry.logical_name;
+		file.bytes = size_of(entry.logical_name);
+		report_.built.push_back(std::move(file));
+	}
+}
+
+BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs,
+                      BuildProgress *progress) {
+	BuildRun run(plan, output_root, std::move(protected_dirs));
+	size_t reported = 0;
+	for (;;) {
+		const bool finished = run.step(kRunBuildStepBytes);
+		for (; progress && reported < run.items_done(); ++reported)
+			progress->on_step(run.item_name(reported), reported + 1, run.items_total());
+		if (finished) break;
+	}
+	return run.report();
+}
+
+} // namespace opennova::editor

@@ -1,10 +1,15 @@
-<!-- OpenNova's placeholder main menu (ADR 0048), authored from scratch. The
-     shell opens main.mnu's first screen; PLAY_RETAIL, CHANGE_FOLDER and EXIT
-     are wired by name (godot/game/bundled_menu_companion.gd), EXIT the way
-     retail wires its EXIT control. Literal strings, hex colors and one named
-     font, so the menu needs no string table or stylesheet. The font is
-     uppercase-only, and its comma reads as a period at menu size, so the text
-     avoids commas. -->
+<!-- OpenNova's main menu (ADR 0048), authored from scratch. The shell opens
+     main.mnu's first screen. SINGLE PLAYER opens sp.mnu's SINGLE_PLAYER
+     screen, where the game lists its single-player missions; MODS opens
+     options.mnu's OPTIONS screen, the Mods list. PLAY_RETAIL,
+     CHANGE_FOLDER and EXIT are wired by name
+     (godot/game/bundled_menu_companion.gd), EXIT the way retail wires its EXIT
+     control; the original game leaves the first two inert. Literal strings,
+     hex colors and one named font, so the menu needs no string table or
+     stylesheet. The font is uppercase-only, and its comma reads as a period at
+     menu size, so the text avoids commas. MAIN's CURSOR names the mouse
+     pointer: the original game hides the system pointer, so a screen naming
+     none has no pointer at all (docs/mnu/menu-re.md). -->
 <SCREEN>
 	<NAME>STARTUP</NAME>
 	<WINDOW type="window" name="MAIN">
@@ -22,6 +27,10 @@
 			<SELECTED_FG>FFFF8000</SELECTED_FG>
 			<DISABLED_FG>FF545252</DISABLED_FG>
 		</FONT>
+		<CURSOR>
+			<FILE>newarow1.tga</FILE>
+			<FLAGS>STANDARD_TRANSPARENT</FLAGS>
+		</CURSOR>
 		<WINDOW type="static" name="TITLE">
 			<FONT>
 				<NAME>opennova.fnt</NAME>
@@ -42,7 +51,7 @@
 				<RIGHT>800</RIGHT>
 				<BOTTOM>205</BOTTOM>
 			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">OUR OWN GAME IS COMING SOON.</STRING>
+			<STRING justify="CENTER" vjustify="CENTER">A SMALL GAME OF OUR OWN. MORE IS COMING.</STRING>
 		</WINDOW>
 		<WINDOW type="static" name="RETAIL_NOTE_1">
 			<POSITION>
@@ -51,7 +60,7 @@
 				<RIGHT>800</RIGHT>
 				<BOTTOM>270</BOTTOM>
 			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">YOU CAN PLAY JOINT OPERATIONS FROM YOUR OWN INSTALL NOW:</STRING>
+			<STRING justify="CENTER" vjustify="CENTER">YOU CAN ALSO PLAY JOINT OPERATIONS FROM YOUR OWN INSTALL:</STRING>
 		</WINDOW>
 		<WINDOW type="static" name="RETAIL_NOTE_2">
 			<POSITION>
@@ -62,7 +71,8 @@
 			</POSITION>
 			<STRING justify="CENTER" vjustify="CENTER">PRESS PLAY RETAIL AND CHOOSE YOUR GAME FOLDER.</STRING>
 		</WINDOW>
-		<WINDOW type="button" name="PLAY_RETAIL">
+		<WINDOW type="button" name="SINGLE_PLAYER_GO">
+			<ACTION type="screen" file="sp.mnu">SINGLE_PLAYER</ACTION>
 			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
 			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
 			<POSITION>
@@ -71,9 +81,10 @@
 				<RIGHT>510</RIGHT>
 				<BOTTOM>373</BOTTOM>
 			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">PLAY RETAIL</STRING>
+			<STRING justify="CENTER" vjustify="CENTER">SINGLE PLAYER</STRING>
 		</WINDOW>
-		<WINDOW type="button" name="CHANGE_FOLDER">
+		<WINDOW type="button" name="MODS">
+			<ACTION type="screen" file="options.mnu">OPTIONS</ACTION>
 			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
 			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
 			<POSITION>
@@ -82,9 +93,9 @@
 				<RIGHT>510</RIGHT>
 				<BOTTOM>411</BOTTOM>
 			</POSITION>
-			<STRING justify="CENTER" vjustify="CENTER">CHANGE FOLDER</STRING>
+			<STRING justify="CENTER" vjustify="CENTER">MODS</STRING>
 		</WINDOW>
-		<WINDOW type="button" name="EXIT">
+		<WINDOW type="button" name="PLAY_RETAIL">
 			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
 			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
 			<POSITION>
@@ -92,6 +103,28 @@
 				<TOP>421</TOP>
 				<RIGHT>510</RIGHT>
 				<BOTTOM>449</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">PLAY RETAIL</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="CHANGE_FOLDER">
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>290</LEFT>
+				<TOP>459</TOP>
+				<RIGHT>510</RIGHT>
+				<BOTTOM>487</BOTTOM>
+			</POSITION>
+			<STRING justify="CENTER" vjustify="CENTER">CHANGE FOLDER</STRING>
+		</WINDOW>
+		<WINDOW type="button" name="EXIT">
+			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
+			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
+			<POSITION>
+				<LEFT>290</LEFT>
+				<TOP>497</TOP>
+				<RIGHT>510</RIGHT>
+				<BOTTOM>525</BOTTOM>
 			</POSITION>
 			<STRING justify="CENTER" vjustify="CENTER">EXIT</STRING>
 		</WINDOW>

@@ -314,10 +314,9 @@ NapiMessage make_client_glsvss_request(const std::string &request,
 // needs the receiver to be the authority (`is_authority`) with its hosted session up
 // (ctx+0x68), the player-targeted verbs and ChangeTeam / SwapTeam also need the player table,
 // and SetMPReset needs only its argument, so it runs on any receiver the executor is handed
-// (opennova-serve hands it a session-less context before its match binds, where SetMPReset
-// alone passes; the game shell only a hosting context, a residual; docs/net/novaworld-net-re.md
-// D-NET-383). SetMPReset's stored word is read by the next session create, which ends the
-// process when it is nonzero (inmatch::create_session's ProcessExit, D-NET-385).
+// (the shells hand it only a hosting context, a residual; docs/net/novaworld-net-re.md
+// D-NET-383). SetMPReset's stored word is read by retail's next session create, which exits
+// the process when it is nonzero; that reader is not ported (D-NET-385).
 // [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand @0x4d22f0 — "Cmd" read
 //  @0x4d2333, tokenize @0x4d2392, PuntPlayer @0x4d23aa, TextChatServer @0x4d256e,
 //  TextChatPlayer @0x4d2628, CmdEchoPlayer @0x4d276f, KillPlayer @0x4d28b6, ChangeTeam @0x4d2a11, SwapTeam @0x4d2a2c, Cycle @0x4d2a46,

@@ -517,18 +517,29 @@ target_link_libraries(opennova_runtime PRIVATE opennova_rgbcx)
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 
 # Dear ImGui (ADR 0039) links PRIVATE so no ImGui header reaches a consumer: the
-# shell hands the context over as plain pointers (devtools/imgui_abi.h). The
-# game's dev-tool windows compile only when the including root leaves
-# OPENNOVA_DEVTOOLS on (every build but the release GDExtension flavour); the
-# define is PUBLIC so the shell gates its DevTools node on it.
-if(OPENNOVA_DEVTOOLS)
+# shell hands the context over as plain pointers (devtools/imgui_abi.h). The pass
+# itself compiles when either product wants ImGui (OPENNOVA_IMGUI: the game's dev
+# tools or the OpenNova Editor, ADR 0046 d11); the game's dev-tool windows compile
+# only when the including root leaves OPENNOVA_DEVTOOLS on (every build but the
+# release GDExtension flavour). Both defines are PUBLIC so the shell gates its
+# nodes on them.
+if(OPENNOVA_IMGUI)
     target_link_libraries(opennova_runtime PRIVATE opennova_imgui)
+    # The pass owns the overlay registry and draws its layers, so the canvas
+    # builds with it (the editor-only release flavour has no dev-tool windows).
     target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
+    )
+    target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_IMGUI=1)
+else()
+    target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_IMGUI=0)
+endif()
+if(OPENNOVA_DEVTOOLS)
+    target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ai_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/collision_overlay.cpp

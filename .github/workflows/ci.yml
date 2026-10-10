@@ -338,8 +338,11 @@ jobs:
           esac
           cmake -S godot/src -B "$build_dir" -G Ninja \
             -DGODOTCPP_TARGET="$GODOTCPP_TARGET" -DCMAKE_BUILD_TYPE=Release
-          cmake --build "$build_dir" --target opennova --parallel "$(nproc)"
+          # Both variants, as on Windows (ADR 0046 d4): a source run such as GUT
+          # loads the editor-enabled library through the plain .gdextension row.
+          cmake --build "$build_dir" --target opennova opennova_editor_gdext --parallel "$(nproc)"
           test -f "godot/bin/libopennova.linux.$GODOTCPP_TARGET.x86_64.so"
+          test -f "godot/bin/libopennova_editor.linux.$GODOTCPP_TARGET.x86_64.so"
 
       - name: sccache stats
         if: always()
@@ -351,12 +354,14 @@ jobs:
           flavour: linux-gdext-${{ matrix.target }}
           mode: save
 
-      - name: Upload Linux GDExtension
+      - name: Upload Linux GDExtensions
         uses: actions/upload-artifact@v4
         with:
           name: gdext_linux_${{ matrix.target }}
           if-no-files-found: error
-          path: godot/bin/libopennova.linux.${{ matrix.target }}.x86_64.so
+          path: |
+            godot/bin/libopennova.linux.${{ matrix.target }}.x86_64.so
+            godot/bin/libopennova_editor.linux.${{ matrix.target }}.x86_64.so
 
   # The web build's side module (ADR 0049), in the Emscripten that built Godot
   # 4.6's web templates (scripts/build_godot_web.sh pins it). A compile check:
@@ -441,7 +446,9 @@ jobs:
           fi
           chmod +x "$bin"
 
-      - name: Download Linux GDExtension
+      # The template_debug flavour; GUT loads the editor-enabled variant through
+      # the plain .gdextension row.
+      - name: Download Linux GDExtensions
         uses: actions/download-artifact@v4
         with:
           name: gdext_linux_template_debug
@@ -590,10 +597,14 @@ jobs:
             "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW" `
             "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded"
           if ($LASTEXITCODE -ne 0) { throw "configure $env:GODOTCPP_TARGET failed" }
-          cmake --build $buildDir --target opennova
+          # Both variants of the flavour from the one configure (ADR 0046 d4): the
+          # runtime-only libopennova.* and the editor-enabled libopennova_editor.*.
+          cmake --build $buildDir --target opennova opennova_editor_gdext
           if ($LASTEXITCODE -ne 0) { throw "build $env:GODOTCPP_TARGET failed" }
-          $dll = "godot/bin/libopennova.windows.$env:GODOTCPP_TARGET.x86_64.dll"
-          if (-not (Test-Path $dll)) { throw "missing GDExtension DLL: $dll" }
+          foreach ($dll in @("godot/bin/libopennova.windows.$env:GODOTCPP_TARGET.x86_64.dll",
+                             "godot/bin/libopennova_editor.windows.$env:GODOTCPP_TARGET.x86_64.dll")) {
+            if (-not (Test-Path $dll)) { throw "missing GDExtension DLL: $dll" }
+          }
 
       - name: sccache stats
         if: always()
@@ -606,12 +617,14 @@ jobs:
           flavour: win-gdext-${{ matrix.target }}
           mode: save
 
-      - name: Upload Windows GDExtension
+      - name: Upload Windows GDExtensions
         uses: actions/upload-artifact@v4
         with:
           name: gdext_windows_${{ matrix.target }}
           if-no-files-found: error
-          path: godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
+          path: |
+            godot/bin/libopennova.windows.${{ matrix.target }}.x86_64.dll
+            godot/bin/libopennova_editor.windows.${{ matrix.target }}.x86_64.dll
 
   godot-tests:
     # One-entry matrix on purpose: branch protection requires the check named
@@ -672,8 +685,9 @@ jobs:
             Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
           }
 
-      # The editor binary that runs GUT loads the template_debug flavour only.
-      - name: Download GDExtension (Windows)
+      # The editor binary that runs GUT loads the template_debug flavour only
+      # (the editor-enabled variant, through the plain .gdextension row).
+      - name: Download GDExtensions (Windows)
         if: env.CODE == 'true'
         uses: actions/download-artifact@v4
         with:
@@ -715,18 +729,21 @@ jobs:
           if-no-files-found: warn
           path: build/Testing/
 
+  # The game archive and the editor archive (the editor plus the runtime it
+  # plays a project with).
   package-godot-windows:
     runs-on: windows-latest
     needs: [build-gdextension-windows]
     outputs:
       game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}
+      editor_artifact_url: ${{ steps.upload_editor.outputs.artifact-url }}
     env:
       GODOT_VERSION: 4.6.1-stable
       GODOT_VERSION_PLAIN: 4.6.1
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # scoped below: the package reads assets/ only
+          lfs: false   # scoped below: the package reads assets/ and expansions/ only
           submodules: recursive
 
       # The models, clips and textures in assets/ ride LFS. Their objects are
@@ -737,7 +754,7 @@ jobs:
       - name: Key the bundled LFS assets
         id: assets-lfs
         shell: bash
-        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        run: echo "key=assets-lfs-$(git lfs ls-files -l -I 'assets/**,expansions/**' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the bundled LFS assets
         id: assets-cache
@@ -746,11 +763,11 @@ jobs:
           path: .git/lfs/objects
           key: ${{ steps.assets-lfs.outputs.key }}
 
-      - name: Pull Git LFS assets (assets/ only)
+      - name: Pull Git LFS assets (assets/ and expansions/ only)
         shell: bash
         run: |
           git lfs install --local
-          git lfs pull --include="assets/**"
+          git lfs pull --include="assets/**,expansions/**"
 
       - name: Save the bundled LFS assets
         if: github.ref == 'refs/heads/master' && steps.assets-cache.outputs.cache-hit != 'true'
@@ -786,11 +803,30 @@ jobs:
           merge-multiple: true
           path: godot/bin
 
+      # The game zip ships the OpenNova Editor's export of assets/ (ADR 0048
+      # d8), which the package script makes with opennova-project, built here
+      # from the root project as the test job builds it (Ninja + sccache over
+      # its win-root cache, read only: that job saves it).
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: win-root
+          mode: restore
+
       # PRs export in debug mode (debug export template + the template_debug DLL,
       # the development flavour); pushes and manual runs export in
       # release mode like the release workflow.
       - name: Package Godot Windows apps
         shell: pwsh
+        env:
+          CMAKE_GENERATOR: Ninja
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          CMAKE_C_COMPILER_LAUNCHER: sccache
         run: scripts/package_godot_windows.ps1 -SkipBuild -ExportMode ${{ github.event_name == 'pull_request' && 'debug' || 'release' }}
 
       - name: Save Godot export templates
@@ -808,6 +844,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           path: dist/opennova-game-windows-v*.zip
+          archive: false
+          if-no-files-found: error
+
+      - name: Upload OpenNova Windows editor zip
+        id: upload_editor
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/opennova-editor-windows-v*.zip
           archive: false
           if-no-files-found: error
 
@@ -843,6 +887,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           GAME_URL: ${{ needs.package-godot-windows.outputs.game_artifact_url }}
+          EDITOR_URL: ${{ needs.package-godot-windows.outputs.editor_artifact_url }}
           BLENDER_URL: ${{ needs.package-blender-windows.outputs.artifact_url }}
           APPS_URL: ${{ needs.package-apps-windows.outputs.artifact_url }}
         with:
@@ -863,6 +908,7 @@ jobs:
               '| Build | Download |',
               '| --- | --- |',
               `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
+              `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
               `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-nw-lister, opennova-serve (the headless game server), opennova-wire and the NovaWorld server (gate and session listeners) | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
               '',
@@ -957,8 +1003,9 @@ jobs:
             Expand-Archive -Path .godot-bin/godot.zip -DestinationPath .godot-bin -Force
           }
 
-      # The editor binary that runs GUT loads the template_debug flavour only.
-      - name: Download GDExtension (Windows)
+      # The editor binary that runs GUT loads the template_debug flavour only
+      # (the editor-enabled variant, through the plain .gdextension row).
+      - name: Download GDExtensions (Windows)
         uses: actions/download-artifact@v4
         with:
           name: gdext_windows_template_debug

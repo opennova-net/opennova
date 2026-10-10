@@ -2,8 +2,9 @@
 
 - Godot-agnostic, strictly: no Godot/godot-cpp types or includes anywhere under `engine/`.
   Godot binding code lives only in `godot/src/`.
-- Four groups (ADR 0028) — the directories, since ADR 0029 the CMake build targets,
-  and since ADR 0040 the first include-path segment too (never C++ namespaces):
+- Five groups (ADR 0028; the fifth, `editor/`, ADR 0046 d3) — the directories, since
+  ADR 0029 the CMake build targets, and since ADR 0040 the first include-path segment
+  too (never C++ namespaces):
   - `base/` — shared substrate and repo plumbing.
   - `formats/` — one library per NovaLogic format (ADR 0024; what earns a lib vs stays
     runtime-fused: ADR 0030). `formats/wac` is the bytecode/program model, the command
@@ -33,6 +34,125 @@
     orders its own presentation/device pipeline. `world::Match` owns gameplay
     rules, scoring, clocks, winner evaluation, and the frozen result; wire
     code only serializes that result.
+  - `editor/` — the fifth group (ADR 0046 d3): the OpenNova Editor's portable core
+    (`project`, `assets`, `requirements`, `blank` (the from-scratch factories),
+    `project_build` (the steppable build), `run` (the Play session over the process
+    seam), `session` (the one open project and everything the editor does to it:
+    typed requests in, a view out; `ProjectSession` is a facade over its parts (S13 A2:
+    `SessionCore` the open project, the operation slot, the view and the request's outcome;
+    `DocumentSet` the open documents, their edits and the clipboard; `ProblemsService` the
+    validation and the Problems rows; `PlayController`, `ImportController`,
+    `RenameController`; `UnsavedGuard` the unsaved-changes prompt; `EditorPreferences` over
+    the `PreferencesStore` its embedder owns), which call one another, never `handle()`;
+    the request table (S13 A4, `request_kinds`: one row per request kind, its token, who
+    serves it, the typed fields it takes (`request_fields`), its policy; a request of each
+    kind from `request_factories.h`); the query table (S13 A5, `editor_queries`: one row per
+    question asked of the session without a request, its params, the list it pages, the concern
+    whose revision it answers with; `ProjectSession::query`); its wire form (`session_json`: the
+    documents, the records, a request with its edits in the batch form the editor MCP names
+    records by (`record_batch`), the findings; `view_json`: the view by section), the view the
+    windows read (`session/view`, S13 V4: sub-views of the project, the documents, the findings,
+    the activity and the dialogs, and the events a request posts for one window to take once),
+    the selection (S13 D7: one document's records over any of its rows), and the finding codes'
+    lookup (S13 A6, `finding_codes`: a token's row over every table, the tables, the columns' wire
+    forms)), `model` (the
+    neutral editing core, ADR 0046 d9:
+    `DocumentBase` (every document's lifecycle, S13 D6), `Document` (the record document
+    over it, whose index of each row keeps every record's path there, `path_in`, S13 D8, and
+    which has a type renumber what names a collection's records by index when an edit moves them,
+    `RecordShift`) and `TextDocument` (a text whose spans its edits replace, its `TextHistory` of
+    replacements under the same budget, S13 D9), `Node`, `Edit`, `EditHistory` (steps of row
+    swaps under a byte budget),
+    `StagedRows` (a batch's rows over any rows before it commits, S13 D7), `id_list` (the one list
+    edit of a type's records and their identities, S13 D8), the `ChangeSet` a
+    document answers since a state, `FieldSchema`, and the finding codes (S13 A6,
+    `finding_code_row`: every finding is made from a row, the editor's own `CoreFinding` table's
+    or its document type's `findings`, and keeps it, `Diagnostic::row`); it names no format
+    type), `documents` (the document types over the engine's own records: the def
+    catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
+    over an immutable parsed base, ADR 0046 S10); and the text types, a `TextDocument` each, a
+    row per behaviour (S13 D9: a script through the WAC compiler, its operands' names as
+    references with spans; a music script as its MUS text; credits as a CBIN file's ConfigFile
+    text; a shader in the shader loader's SCR form; a configuration or a text);
+    `document_types` is the registry the
+    session and the windows reach a type through, each type's `validate_file` its file's own
+    findings from its document alone, which `validation_cache` keeps per file until the file
+    changes, never keeping a closed file's document, and its `project_check`, a check of its own
+    across the project's files that keeps state between validations (the menu type's render
+    check), which the row makes and whoever validates keeps, one per type (`project_checks`)),
+    `graph` (the asset graph: typed edges from the engine's own
+    parsed records in a slot per file that an update patches, a file's record sets (the records of a
+    collection its own references name by index, S13 D8's Record references, resolved within the
+    file), the one resolver behind the badges, the
+    pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
+    (a read-only dependency mount's), and the rename transaction; what other files make of what one
+    defines, one `use_checks` row per asset kind, and what a stylesheet line's value is used as
+    (`style_value_use`, from the menus' uses of it); and `project_validation`, the one pass over the
+    project's files: the graph's update, each file's own findings, the use checks, the graph's
+    findings), `import` (the importers: a font set's glyph sheet to a `.fnt` (`font_import`, the
+    sheet brought beside the set when it is imported from the disk); a PNG to the texture
+    file its uses read, by the
+    record's options, each a row of its importer's (S18), the `.import` sidecars, the import pass
+    whose outputs the scan lists; the terrain importer (S20: a terrain set's images to a terrain's files,
+    `terrain_import`, its heights baked by TrnGen.exe's bake, the engine's `formats/cpt/trngen`); and the
+    one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
+    (the viewports, S13 V5: a document's picture as the game would draw it, one per (document,
+    kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
+    Preview or a Main role), kept by the session (`viewports`, with the one preview clock) and
+    changed by a SetViewport request and the three changes its follow derives; what follows from
+    its document (S13 V8: the change set it answers since the state followed, which the kind reads
+    for what its picture shows), the files its picture
+    read and its state (`viewport_follow`: the action its device takes, Keep, Rebuild, Update or
+    Clear; for a kind whose row holds for a gesture, the model's, a Rebuild held while a gesture is
+    open in its document over a picture the device holds), its envelope on the wire
+    (`viewport_json`), what a drag or a command plans as requests (S13 V7: the session's `viewport`
+    query reads a viewport by op, and its `edit_in_viewport` request serves a drag or a command the
+    viewport plans), and the device seam (`viewport_device`; S13 V6: a device may build its picture
+    over the Shell's frames, a unit a step within the Shell's budget, the viewport loading meanwhile
+    and a newer build generation cancelling one in flight) with its least-recently-used cache of four
+    (`viewport_device_cache`; a kind's row may hold fewer of its own, the mission's two, and the
+    devices drawn in a frame arbitrate the scene state they render with, S14 E13); the Shell's
+    devices are `godot/src/authoring`'s over the runtime's `MenuFrame` and `ObjectModel` and, for a
+    mission, the game's own environment, sky, water, terrain, placer, foliage, particle renderer and light
+    director (DI-31; the items' effects the viewport's `mission_effects` steps). The menu's viewport (`menu_viewport`): its screen compiled
+    headless, the options it holds, what a drag of a window's handles or of several windows
+    writes, and what arranging several windows (align, distribute, drawing order) writes; the
+    model's (`model_viewport`): its orbit camera and the level the game draws, what it shows and
+    when the device builds again, a clip on its rig; the mission's (`mission_viewport`, S14, the
+    Document tab's Main view): its scene over the document's typed reads (`mission_scene`), its
+    camera flown and orbited in the mission's terms (`mission_camera`), its options, its marks
+    picked by their anchors, its overlays (`mission_overlay`), what a drag of a mark's handles
+    writes (`mission_handle_edit`: a move on the ground the device answers, height, yaw, an area's
+    edges), the commands frame, top and ground, and a drop of an item or a model (`mission_items`:
+    an item's pool, model and ground anchor through the graph); and the render check, the menu type's project check:
+    every menu screen compiled headless, its compiler notes as Problems rows, a menu rendered
+    again only when it, a file it read or a variable it names changes; a menu's tree, its
+    findings and a screen as the render check compiled it, as the menu_tree, menu_findings and
+    menu_render queries read them;
+    and the
+    canvas's portable half: its one gesture machine, its overlay shapes, and each kind's half of
+    it (`canvas_half`: what a press on the menu's or the model's picture takes, the requests a drag
+    raises and what is drawn)), `ui`
+    (the Dear ImGui windows on the engine's pass, built only with `OPENNOVA_IMGUI`;
+    the only tree besides `runtime/devtools` that may include an ImGui header; each window
+    reaches the session through the `Workspace` seam, `ui/workspace.h`; the
+    inspector is generic, and a document's view in its Document tab is its type's row of
+    `ui/document_views` (S13 V3: an outline over `ui/outline_model` as a tree, a list or master
+    and detail, or a view of its own; S13 V5: or a Main-role viewport filling the tab beside the
+    outline, `ui/main_viewport_view`), one per open document; a viewport's view (`ui/viewport_view`,
+    one per kind from `ui/viewport_views`) draws its canvas through the Workspace's devices)).
+    STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its validators reuse
+    the engine's own load paths; nothing under the four groups below may include or link it
+    (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
+    child never carry it. Inside it five libraries are ranked, model < documents < graph <
+    session < ui (ADR 0046 S13 D3, `include_graph_check.py`'s editor rank): a ranked library
+    includes only its own rank and below, `graph/reference_kinds.h` being a seam header any may
+    include; the upward includes the tree still makes are the lint's listed exceptions (none since
+    S13 V3), each naming the slice that removes it, and an exception the tree no longer makes fails
+    the lint.
+    The other editor libraries stay unranked. Tooling, not a port: its sources sit in the citation
+    allowlist by the `editor/` prefix. No directory under it may start with `build`
+    (the lints skip such directories; the build lib is `project_build/`).
 - Layout per library (FLAT since 2026-08-10): `engine/<group>/<domain>/*.{h,cpp}` —
   headers and sources sit side by side in the lib dir (nested subdirs allowed, e.g.
   `npwire/wire/`), and `engine/` is the ONE public include root (ADR 0040): every
@@ -64,8 +184,9 @@
   style is `.clang-format` at the repo root (tabs, 4-wide, 100 columns,
   `NamespaceIndentation: None`) — config only until the whitespace-only
   reformat commits land; never reformat a file as part of another change.
-- Web-portable (ADR 0049 d5): the web build links this code into a wasm32 side module
-  whose templates abort on any throw, so nothing uses exceptions as control flow
+- Web-portable (ADR 0049 d5): the web build links this code (every group but `editor/`,
+  which only the editor variant links) into a wasm32 side module whose templates
+  abort on any throw, so nothing uses exceptions as control flow
   (`strutil::parse_int` / `parse_ulong` / `parse_float`, never `try { std::stoi }`);
   thread counts are the embedder's (the terrain composer's `Threads` budget and the
   TrnGen bake's `TerrainBakeInput::threads`, each `for_hardware()` being the desktop
@@ -82,7 +203,10 @@
   `replication`), and `opennova_novaworld_service` (the service alone — the ONLY
   target linking `opennova_sqlite`; the Godot layer (`godot/src`) links
   `opennova_runtime`, which PUBLIC-links `opennova_net`, never the service).
-  `opennova_io` stays header-only INTERFACE. PUBLIC chain (ADR 0043 d4): formats
+  `opennova_io` stays header-only INTERFACE. Since ADR 0046 a sixth STATIC group
+  target, `opennova_editor` (`editor/`), links `opennova_runtime` and is linked only
+  by the editor-enabled GDExtension variant, `apps/project` and the tests. PUBLIC
+  chain (ADR 0043 d4): formats
   links io, base links formats (base deliberately sits ABOVE formats because vfs
   parses pff/scr/bfc1), net links base, runtime links net, the service links net;
   `link_graph_check.py` forbids `opennova_net -> opennova_runtime` and keeps the

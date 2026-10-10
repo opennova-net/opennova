@@ -1,0 +1,91 @@
+// Weapon definitions
+
+ammoclass_max_carry CLASS_ON556 1000
+weapon "WPN_ON_AR15"
+	clipsize 30
+	startrounds 300
+	targetyawrange 120
+	targetpitchmax 22
+	targetpitchmin 50
+	statid 300
+	maxclips 10
+	ammobucket 1
+	loadout_selectable 1
+	round_type AMMO_ON_556
+	loadout_menu_icon m_onar15.tga
+	animadm on_ar15
+	launchuserpoint bullet
+	hudicon h_onar15.tga
+	gfx1 on_ar15
+	gfx3 onar15_3
+	category 3
+	ammoclass CLASS_ON556 1
+	crosshair onxhair.tga
+	hudclipgfx 0 0 h_onclip.tga
+	hudrndgfx 6 0 4 0 1 h_onrnd.tga
+	scope_max_mag 2 0
+	weapon_class primary
+	charfilter rifleman
+	charfilter medic
+	charfilter engineer
+	charfilter sniper
+	charfilter gunner
+	teamfilter blue
+	teamfilter red
+	flags auto
+	flags whileswimming
+	error 0.0165 0.2 0.25 0.0165 0.032 0.047
+	weaponweight 5.5
+	clipweight 1.5
+	pos 25.188 -5.494 -144.952 0 0 0
+	tpos -0.821 11.761 -138.449 0 0 0
+	action "idle"
+		anim anim_wpn_idle
+		delayend 125
+		function wpn_std_idle
+	end
+	action "emptyidle"
+		anim anim_wpn_idle
+		delayend auto
+		function wpn_std_idle
+	end
+	action "fire"
+		anim anim_wpn_fire
+		soundsetend GS_ONAR15
+		delayend 4
+		function wpn_std_fire
+	end
+	action "recoil"
+		function wpn_std_recoil
+	end
+	action "reload"
+		anim anim_wpn_reload
+		soundset GF_ONAR15_RL
+		delaystart 228
+		function wpn_std_reload
+	end
+	action "empty"
+		anim anim_wpn_empty
+		soundset DRY_ONAR15
+		delaystart 71
+		function wpn_std_empty
+	end
+	action "switchto"
+		anim anim_wpn_switchto
+		soundset GF_ONAR15_ST
+		delayend 2
+		function wpn_std_switchto
+	end
+	action "switchfrom"
+		anim anim_wpn_switchfrom
+		soundset GF_ONAR15_SF
+		delayend 2
+		function wpn_std_switchfrom
+	end
+	action "switchrank"
+		anim anim_wpn_switchrank
+		delaystart 59
+		function wpn_std_switchrank
+	end
+end
+

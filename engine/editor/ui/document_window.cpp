@@ -1,0 +1,368 @@
+#include <editor/ui/document_window.h>
+
+#include <algorithm>
+#include <cstring>
+#include <iterator>
+#include <map>
+#include <memory>
+
+#include <base/gameprofile/required_resources.h>
+#include <editor/assets/asset_kinds.h>
+#include <editor/assets/asset_registry.h>
+#include <editor/model/document_base.h>
+#include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
+#include <editor/ui/editor_requests.h>
+#include <editor/ui/file_page_view.h>
+#include <editor/ui/ui_kit.h>
+#include <editor/ui/welcome_view.h>
+
+#include <imgui.h>
+
+namespace opennova::editor {
+
+DocumentView *DocumentWindow::view_for(const DocumentBase &document) {
+	const DocumentTypeId type = asset_kind_row(document.kind()).document;
+	auto found = views_.find(document.path());
+	if (found != views_.end() && found->second.type != type) {
+		// Opened again as a document of another type: a view of that type's.
+		views_.erase(found);
+		found = views_.end();
+	}
+	if (found == views_.end()) {
+		Slot slot;
+		slot.view = make_view(document);
+		if (!slot.view) return nullptr;
+		slot.type = type;
+		slot.identity = document.identity();
+		slot.load = document.load_generation();
+		found = views_.emplace(document.path(), std::move(slot)).first;
+	} else if (found->second.identity != document.identity() || found->second.load != document.load_generation()) {
+		// Read again (another instance at the path, or the same one loaded again): the events it
+		// held name the old records and go; the view is kept and rebound.
+		Slot &slot = found->second;
+		slot.identity = document.identity();
+		slot.load = document.load_generation();
+		slot.view->drop_events();
+		slot.view->rebind(document);
+	}
+	return found->second.view.get();
+}
+
+void DocumentWindow::prune(const SessionView &view) {
+	// The view of a document no longer open goes with it, and the events it held.
+	for (auto slot = views_.begin(); slot != views_.end();) {
+		const bool open = std::any_of(view.documents.open.begin(), view.documents.open.end(),
+				[&](const std::shared_ptr<const DocumentBase> &document) {
+					return document->path() == slot->first;
+				});
+		slot = open ? std::next(slot) : views_.erase(slot);
+	}
+}
+
+void DocumentWindow::receive(const ViewEvent &event) {
+	for (const std::shared_ptr<const DocumentBase> &document : workspace_.view().documents.open)
+		if (document->path() == event.path) {
+			if (DocumentView *view = view_for(*document)) view->receive(event);
+			return;
+		}
+}
+
+void DocumentWindow::show_document(const ViewEvent &event) {
+	tab_asked_ = event.flag ? std::string() : event.path;
+	page_asked_ = event.flag;
+	page_reveal_ = page_reveal_ || event.flag;
+	request_focus();
+}
+
+size_t DocumentWindow::held_events(const std::string &path) const {
+	const auto found = views_.find(path);
+	return found == views_.end() ? 0 : found->second.view->held_events();
+}
+
+void DocumentWindow::set_view(const DocumentBase &document, std::unique_ptr<DocumentView> view) {
+	Slot slot;
+	slot.view = std::move(view);
+	slot.type = asset_kind_row(document.kind()).document;
+	slot.identity = document.identity();
+	slot.load = document.load_generation();
+	views_[document.path()] = std::move(slot);
+}
+
+DocumentView *DocumentWindow::view_of(const std::string &path) {
+	const auto found = views_.find(path);
+	return found == views_.end() ? nullptr : found->second.view.get();
+}
+
+void DocumentWindow::draw(devtools::ImGuiPass &, uint64_t) {
+	const SessionView &view = workspace_.view();
+	prune(view);
+	if (!view.project.open || (view.documents.open.empty() && view.documents.page.empty())) {
+		// No tab bar: the next one follows the active document from its first frame.
+		followed_.clear();
+		raised_.clear();
+		page_followed_.clear();
+		if (!view.project.open) draw_welcome(workspace_, form_);
+		else draw_first_steps(view);
+		return;
+	}
+	draw_tabs(view);
+}
+
+// Nothing open: how to open a file, and for a project that holds few files yet (a new one) the ways to
+// bring in the game's (the UX round's project lane): the main menu with what it needs, the game data to
+// choose from, or every file of the install; with no install, where to name one.
+void DocumentWindow::draw_first_steps(const SessionView &view) {
+	ui_kit::empty_state("Double-click a file in Files to open it, or make one with New.");
+	if (view.project.scan->entries.size() >= kFewFiles) return;
+	ImGui::Spacing();
+	ImGui::SeparatorText("Bring in the game's files");
+	ImGui::PushTextWrapPos(0.0f);
+	if (view.project.retail_directory.empty()) {
+		ImGui::TextWrapped("Choose the game install in File > Project settings... to import the game's files; files from "
+		                   "the disk come in with Files > Import > Files....");
+		ImGui::PopTextWrapPos();
+		return;
+	}
+	ImGui::TextDisabled("A project holds its own copies of the game's files: what you change, and what those need.");
+	ImGui::PopTextWrapPos();
+	const bool imports = view.allows(EditorRequestKind::PreviewInstallImport);
+	ImGui::BeginDisabled(!imports);
+	const gameprofile::RequiredResource *menu = gameprofile::gameprofile_required_resource_by_role("main_menu");
+	if (menu && ImGui::Button("The main menu and what it needs...") && imports)
+		workspace_.request(request::preview_install_import({menu->name}, true));
+	ui_kit::tooltip("The menus, their textures, fonts, sounds and texts: what a menu mod changes.");
+	if (ImGui::Button("Choose from the game data...") && imports)
+		workspace_.request(request::preview_install_import({}, view.project.import_dependencies));
+	ui_kit::tooltip("Every file of the game install listed to choose from, with what the chosen ones need.");
+	if (ImGui::Button("Every file of the game install...") && imports) workspace_.request(request::import_whole_install());
+	ui_kit::tooltip("All of it: what a mission mod needs to play, build and resolve every name.");
+	ImGui::EndDisabled();
+}
+
+void DocumentWindow::draw_tabs(const SessionView &view) {
+	// The active document's tab is selected when the active document changes, and only then,
+	// so a click is never fought. ImGui shows it from the next frame: on this one the tab
+	// shown is still the one before, which says nothing of the user's choice.
+	const bool follow = view.documents.active != followed_;
+	followed_ = view.documents.active;
+	// A file name two open documents share is told apart by the path.
+	std::map<std::string, int> names;
+	for (const auto &document : view.documents.open) ++names[basename_of(document->path())];
+	if (!ImGui::BeginTabBar("documents", ImGuiTabBarFlags_Reorderable | ImGuiTabBarFlags_FittingPolicyScroll |
+	                                          ImGuiTabBarFlags_TabListPopupButton))
+		return;
+	std::string shown; // the document whose tab shows
+	for (const auto &document : view.documents.open) {
+		const std::string &path = document->path();
+		// A tab is known by its document's path. A close goes through the session: a file with
+		// unsaved changes keeps its tab while the session asks (UnsavedDocument), a saved one
+		// always closes.
+		ImGuiTabItemFlags flags = ImGuiTabItemFlags_NoTooltip;
+		if (document->dirty()) flags |= ImGuiTabItemFlags_UnsavedDocument;
+		if ((follow && path == view.documents.active) || path == tab_asked_)
+			flags |= ImGuiTabItemFlags_SetSelected;
+		const std::string name = basename_of(path);
+		const std::string label = (names[name] > 1 ? path : name) + "###" + path;
+		bool open = true;
+		const bool visible = ImGui::BeginTabItem(label.c_str(), &open, flags);
+		ui_kit::tooltip(path);
+		if (!open) workspace_.request(request::close_document(path));
+		if (!visible) continue;
+		shown = path;
+		// Its view once it is the active document: the selection and the inspector are the
+		// active document's (a tab a click just showed waits the frame its OpenDocument takes).
+		// The find bar first: its Ctrl+F comes before the view's own filters'. The view takes the
+		// RevealRecord events its document was sent as it draws.
+		if (path == view.documents.active) {
+			if (const Document *records = records_of(*document)) draw_find(*records);
+			if (DocumentView *shown_view = view_for(*document)) {
+				// Its record tools and cells are edits: the view held back while an operation
+				// holds the documents (S13 A3), as the session would refuse them; one that holds
+				// back its own (a Main-role view: its outline, never its canvas) drawn as it is.
+				ImGui::BeginDisabled(!shown_view->holds_back_itself() && !view.allows(EditorRequestKind::EditRecord));
+				shown_view->draw(workspace_, *document);
+				ImGui::EndDisabled();
+			} else {
+				ui_kit::empty_state("The editor has no view of this kind of file.");
+			}
+		}
+		ImGui::EndTabItem();
+	}
+	// The page of a file the editor has no editor for (the plain-words lane), after the documents: shown
+	// when it is opened, closed with its tab.
+	if (!view.documents.page.empty()) {
+		const bool select = view.documents.page != page_followed_ || page_asked_;
+		page_followed_ = view.documents.page;
+		bool open = true;
+		const std::string label = "About " + basename_of(view.documents.page) + "###page";
+		if (ImGui::BeginTabItem(label.c_str(), &open, select ? ImGuiTabItemFlags_SetSelected : 0)) {
+			// The tab asked shows from the next frame: the marked line is scrolled to once the page draws
+			// in it, not on the frame the ask selects it.
+			const bool reveal = page_reveal_ && !page_asked_;
+			draw_file_page(workspace_, view.documents.page, page_cache_, reveal);
+			if (reveal) page_reveal_ = false;
+			ImGui::EndTabItem();
+		}
+		ui_kit::tooltip("What " + view.documents.page + " is and who uses it: the editor has no editor for its kind yet.");
+		if (!open) workspace_.request(request::close_document(view.documents.page));
+	} else {
+		page_followed_.clear();
+	}
+	ImGui::EndTabBar();
+	tab_asked_.clear();
+	page_asked_ = false;
+	if (shown == view.documents.active) {
+		raised_.clear();
+	} else if (!follow && !shown.empty() && shown != raised_) {
+		// A tab the user chose (a click, the tab list) shows another document: it becomes the
+		// active one, once.
+		raised_ = shown;
+		workspace_.request(request::open_document(shown));
+	}
+}
+
+void DocumentWindow::end_frame() {
+	for (auto &slot : views_) slot.second.view->end_frame(workspace_);
+}
+
+void DocumentWindow::draw_modals() {
+	for (auto &slot : views_) slot.second.view->draw_modals(workspace_);
+	prune(workspace_.view());
+}
+
+void DocumentWindow::open_find() {
+	find_.open = true;
+	find_.focus = true;
+	send_find("open", io::JsonValue::make_bool(true));
+	request_focus();
+}
+
+void DocumentWindow::follow_find(const SessionView &view) {
+	const WorkspaceView::Find &held = view.workspace.find;
+	if (find_.open_held.follow(held.open)) {
+		// Opened from elsewhere (the wire): the keyboard goes to its text, as Ctrl+F's does.
+		if (held.open && !find_.open) find_.focus = true;
+		find_.open = held.open;
+	}
+	find_.text.follow(held.text);
+	if (find_.case_held.follow(held.match_case)) find_.match_case = held.match_case;
+}
+
+void DocumentWindow::send_find(const char *member, io::JsonValue value) {
+	window_requests::set_workspace(workspace_, "find", member, std::move(value));
+}
+
+void DocumentWindow::show_hit(const Document &document, size_t index) {
+	const DocumentHit *hit = find_.cursor.show(index);
+	if (!hit) return;
+	find_.scroll = true;
+	ReferenceTarget target;
+	target.file = document.path();
+	target.locator = hit->locator;
+	target.field = hit->field;
+	target.editable = true;
+	window_requests::go_to(workspace_, target);
+}
+
+// The find bar over the active tab's view (open_find): the text, Aa (case), previous and next, the
+// hit shown of how many, a close; the hits listed under it, each its record and field and the
+// value as shown.
+void DocumentWindow::draw_find(const Document &document) {
+	follow_find(workspace_.view());
+	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_F)) open_find();
+	if (!find_.open) return;
+	// Found again when the text, the option or the document moved.
+	FindCursor &cursor = find_.cursor;
+	cursor.refresh(document, find_.text.sent(), find_.match_case);
+	const size_t count = cursor.hits().size();
+	const bool on_hit = cursor.on_hit();
+	const auto step = [&](bool forward) {
+		const size_t next = cursor.step(forward);
+		if (next != SIZE_MAX) show_hit(document, next);
+	};
+	ImGui::PushID("find");
+	const ImGuiStyle &style = ImGui::GetStyle();
+	const std::string of = std::to_string(cursor.current() + 1) + " of " + std::to_string(count);
+	const std::string where = !find_.text.text[0] ? std::string()
+	                          : !count       ? std::string("No match")
+	                          : on_hit       ? of
+	                                         : std::to_string(count) + (count == 1 ? " match" : " matches");
+	const float tools = ui_kit::checkbox_width("Aa") + ui_kit::button_width("<") + ui_kit::button_width(">") +
+	                    ui_kit::text_width("999 of 999") + ui_kit::button_width("x") + style.ItemSpacing.x * 5.0f;
+	ImGui::SetNextItemWidth(std::max(ImGui::GetFontSize() * 8.0f, ImGui::GetContentRegionAvail().x - tools));
+	if (find_.focus) {
+		ImGui::SetKeyboardFocusHere();
+		find_.focus = false;
+	}
+	// Escape closes the bar, the text typed kept (the session's too: review X14): the text box, which has the
+	// keyboard, would put back the text it had when it took it.
+	char typed[sizeof(find_.text.text)];
+	std::memcpy(typed, find_.text.text, sizeof(typed));
+	const bool entered = ImGui::InputTextWithHint("##text", "Find in this file", find_.text.text, sizeof(find_.text.text),
+	                                              ImGuiInputTextFlags_EnterReturnsTrue);
+	const bool edited = ImGui::IsItemEdited();
+	const bool typing = ImGui::IsItemActive();
+	if (entered) {
+		step(!ImGui::GetIO().KeyShift);
+		ImGui::SetKeyboardFocusHere(-1); // the keyboard stays in the text
+	}
+	const bool escape = (typing || ImGui::IsItemDeactivated()) && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+	if (escape) std::memcpy(find_.text.text, typed, sizeof(typed));
+	if (edited && !escape && find_.text.sent() != workspace_.view().workspace.find.text)
+		send_find("text", io::JsonValue::make_string(find_.text.sent()));
+	ui_kit::tooltip("Every field whose value, as the Inspector shows it, holds the text. Enter: the next; Shift+Enter: "
+	                "the previous; Escape closes.");
+	ImGui::SameLine();
+	if (ImGui::Checkbox("Aa", &find_.match_case)) send_find("match_case", io::JsonValue::make_bool(find_.match_case));
+	ui_kit::tooltip(find_.match_case ? "Case matters. Untick to find any case." : "Any case. Tick to match the case.");
+	ImGui::SameLine();
+	ImGui::BeginDisabled(!count);
+	if (ImGui::Button("<")) step(false);
+	ui_kit::tooltip("The previous match (Shift+Enter).");
+	ImGui::SameLine();
+	if (ImGui::Button(">")) step(true);
+	ui_kit::tooltip("The next match (Enter).");
+	ImGui::EndDisabled();
+	ImGui::SameLine();
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextDisabled("%s", where.c_str());
+	ImGui::SameLine();
+	if (ImGui::Button("x") || escape) {
+		find_.open = false;
+		send_find("open", io::JsonValue::make_bool(false));
+	}
+	ui_kit::tooltip("Close the find bar (Escape).");
+	// The hits, a few lines of them at most: each its record, its field and the value as shown.
+	if (find_.open && count) {
+		const float line = ImGui::GetTextLineHeightWithSpacing();
+		ImGui::BeginChild("hits", ImVec2(0.0f, line * float(std::min<size_t>(count, 5)) + style.WindowPadding.y),
+		                  ImGuiChildFlags_Borders);
+		ImGuiListClipper clipper;
+		clipper.Begin(static_cast<int>(count));
+		if (on_hit) clipper.IncludeItemByIndex(static_cast<int>(cursor.current()));
+		while (clipper.Step())
+			for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+				const DocumentHit &hit = cursor.hits()[size_t(i)];
+				ImGui::PushID(i);
+				const std::string title = document.record_title(hit.address);
+				const std::string line_text = title + " - " + hit.label + ": " + hit.text.substr(0, hit.text.find('\n'));
+				const bool shown = on_hit && size_t(i) == cursor.current();
+				if (ImGui::Selectable((ui_kit::fit(line_text, ImGui::GetContentRegionAvail().x) + "###hit").c_str(), shown))
+					show_hit(document, size_t(i));
+				if (shown && find_.scroll) {
+					ImGui::SetScrollHereY(0.5f);
+					find_.scroll = false;
+				}
+				ui_kit::tooltip_lazy(
+				        [&] { return hit.record + "\n" + hit.field + "\n" + hit.text; });
+				ImGui::PopID();
+			}
+		ImGui::EndChild();
+	}
+	ImGui::PopID();
+	ImGui::Separator();
+}
+
+} // namespace opennova::editor

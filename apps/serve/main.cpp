@@ -58,9 +58,8 @@ int serve_until_stopped(const opennova::serve::ServeOptions &options) {
 	std::string error;
 	if (!server.start(error, &g_stop)) {
 		io::logf(io::LogLevel::kError, "opennova-serve: %s", error.c_str());
-		// A set mpreset ends the process with code 0, as retail's load and its
-		// session create do [orig: Game_LoadConfig @0x5514A1..0x5514AC;
-		// CNapiGameSession_CreateSession @0x4C97E7..0x4C97F0; crt_exit(0)].
+		// A game.cfg with mpreset set ends the process with code 0, as retail's
+		// load does [orig: Game_LoadConfig @0x5514A1..0x5514AC, crt_exit(0)].
 		return server.reset_exit() ? 0 : 1;
 	}
 	io::logf(io::LogLevel::kInfo, "opennova-serve: serving on UDP %u (Ctrl+C stops)", server.bound_port());

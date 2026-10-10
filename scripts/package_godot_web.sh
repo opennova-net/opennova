@@ -43,7 +43,7 @@ out="$(cd "$out" && pwd)"
 # of textures and nothing references it yet (assets/README.md); every visitor
 # would download it before the menu. Drop a pattern here once the game uses
 # that art.
-web_asset_excludes=("README.md" "on_ar15*" "on_arms*")
+web_asset_excludes=("README.md" "project.opennova" "on_ar15*" "on_arms*")
 
 source "$root/scripts/godot_bin.sh"
 resolve_godot_bin "$root"

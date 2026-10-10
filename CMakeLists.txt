@@ -17,10 +17,16 @@ add_subdirectory(third_party/miniz)
 add_subdirectory(third_party/rgbcx)
 
 # The game dev tools and Dear ImGui are optional (ADR 0039). The root ctest
-# build enables them by default; release GDExtensions compile them out.
+# build enables them by default; release GDExtensions compile them out. The
+# OpenNova Editor's windows (ADR 0046 d11) ride the same ImGui pass, so ImGui is
+# built when either product wants it (OPENNOVA_IMGUI, read by engine/ and tests/).
 option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
-if(OPENNOVA_DEVTOOLS)
+option(OPENNOVA_EDITOR "Build the OpenNova Editor's ImGui windows" ON)
+if(OPENNOVA_DEVTOOLS OR OPENNOVA_EDITOR)
+    set(OPENNOVA_IMGUI ON)
     add_subdirectory(third_party/imgui)
+else()
+    set(OPENNOVA_IMGUI OFF)
 endif()
 
 # Native engine group libraries.
@@ -55,6 +61,7 @@ add_subdirectory(apps/extract)
 add_subdirectory(apps/lan_probe)
 add_subdirectory(apps/novaworld_server)
 add_subdirectory(apps/nw_lister)
+add_subdirectory(apps/project)
 add_subdirectory(apps/serve)
 add_subdirectory(apps/wire)
 

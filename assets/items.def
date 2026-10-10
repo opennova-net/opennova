@@ -1,0 +1,159 @@
+// Item definitions
+
+begin "Null"
+	id 100000
+	type marker
+end
+begin "Wooden supply crate"
+	graphic oncrate1
+	ai_function gnrl
+	id 100010
+	hp 10
+	type decoration
+	armor -1
+end
+begin "Player #1, Single player"
+	graphic onsold1
+	anim_def onp1
+	ai_function plyr
+	move_function org2
+	disk_function PLAYER
+	input_function troop
+	unit_type 9
+	id 105310
+	hp 150
+	radarsig 300
+	sound_profile on_soldier
+	type person
+	attrib: notool aidata
+end
+
+begin "Player #1, Multiplayer"
+	graphic onsold1
+	anim_def onp1
+	ai_function plyr
+	move_function org2
+	disk_function PLAYER
+	input_function troop
+	unit_type 9
+	id 105305
+	hp 150
+	radarsig 300
+	sound_profile on_soldier
+	type person
+	attrib: notool aidata
+end
+
+begin "Rebel rifleman"
+	score 10
+	graphic onenmy1
+	anim_def one1
+	ai_function org1
+	move_function org1
+	disk_function ORGANIC
+	launchups_closeattack MFlash01
+	launchups_rocket MFlash01
+	launchups_marker3 MFlash01
+	clipsize 30
+	unit_type 9
+	id 101800
+	hp 100
+	radarsig 300
+	sound_profile on_soldier
+	type person
+	attrib: aidata nodismember
+	deathtime 30
+	ammo_closeattack AMMO_ON_556
+	ammo_marker3 AMMO_ON_556
+	ammo_easyrocket AMMO_ON_556
+	ammo_advancedrocket AMMO_ON_556
+end
+
+
+begin "Insertion point"
+	id 106094
+	type marker
+end
+
+begin "Wooden barrel"
+	graphic onbarl1
+	ai_function gnrc
+	id 100011
+	hp 10
+	type decoration
+	armor -1
+end
+begin "Mud-brick hut"
+	graphic onhut1
+	id 100012
+	type building
+	attrib: landable
+end
+begin "Power Up AR-15"
+	powerupdef PU_ONAR15
+	graphic onar15_3
+	disk_function POWERUP
+	id 102050
+	type powerup
+	attrib: powerup notarget
+end
+begin "Waypoint"
+	id 106005
+	type marker
+end
+
+begin "Map centerpoint"
+	id 102043
+	type marker
+end
+
+begin "Coconut palm"
+	graphic onpalm1
+	id 100013
+	type decoration
+end
+
+begin "Leaning coconut palm"
+	graphic onpalm2
+	id 100014
+	type decoration
+end
+
+begin "Sword fern"
+	graphic onfern1
+	id 100015
+	type decoration
+end
+
+begin "Jungle bush"
+	graphic onbush1
+	id 100016
+	type decoration
+end
+
+begin "Sandbag wall, 4.6 m"
+	graphic onsbag1
+	id 100017
+	type decoration
+end
+
+begin "Wooden guard tower"
+	graphic ontower1
+	id 100018
+	hp 10
+	type building
+	armor -1 -1
+end
+
+begin "Field radio on an ammunition crate"
+	graphic onradio1
+	id 100019
+	hp 10
+	type decoration
+	armor -1 -1
+	attrib: notarget
+end
+
+
+
+

@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "pcx",
+    "palette": "median_cut"
+  },
+  "outputs": [
+    "onjo1_m1.pcx"
+  ],
+  "schema_version": 1,
+  "source_hash": "3b5b8eacfd62410e",
+  "version": 3
+}

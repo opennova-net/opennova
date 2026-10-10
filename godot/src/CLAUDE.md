@@ -60,8 +60,19 @@ Gotchas:
 - After any native change here: run `scripts/build_godot.sh` and fully restart the Godot
   editor — GDExtension registration does not hot-reload, and GDScript referencing an
   unregistered class fails to parse (GUT then silently drops those test scripts).
-- The editor loads only `godot/bin/libopennova.*`. A stale editor means a stale
-  `godot/bin` DLL — rebuild via `scripts/build_godot.sh` and fully restart.
+- Two GDExtension variants come out of one build (ADR 0046 d4): `libopennova.*`
+  (runtime-only: the game and the editor's Play child) and `libopennova_editor.*`
+  (the same bindings plus `authoring/` and the editor core: what the OpenNova
+  Editor ships). A source run (the Godot editor, GUT, export scanning) loads
+  `godot/bin/libopennova_editor.*.template_debug.*`, the superset, through the
+  plain rows of `bin/opennova.gdextension`; the `opennova_runtime` /
+  `opennova_editor` feature tags of the export presets pick the shipped one. A
+  stale editor means a stale `godot/bin` DLL — rebuild via `scripts/build_godot.sh`
+  and fully restart. `authoring/` is the editor's Godot seam (the `EditorApp`
+  root node over the shared `ImGuiPassNode`, the OS process seam under Play):
+  it compiles only into the editor variant, so nothing the game ships can
+  reach it (`link_graph_check.py`), and it reaches ImGui only through the
+  `imgui_abi.h` pointer seam like `devtools/`.
 - godot-cpp compiles only the engine classes in `godot_cpp_profile.json`, derived from
   this tree. A binding that starts using a class the list lacks fails with a missing
   `godot_cpp/classes/*.hpp` (or a missing method): run
@@ -69,14 +80,25 @@ Gotchas:
 - The web build (ADR 0049) compiles this tree as a wasm32 threads side module
   (`scripts/build_godot_web.sh`, Emscripten 4.0.20 only; `ci.yml`'s
   `build-gdextension-web` builds it on every PR) with `OPENNOVA_DEVTOOLS` off, as in
-  the release flavour. The templates abort on a throw, so no exceptions as control
-  flow, and a device that starts threads sizes them for the page's fixed pthread pool
-  under `OS::has_feature("web")` (`terrain/terrain_tile_cache_device.cpp`).
+  the release flavour, and `OPENNOVA_EDITOR` off: it is the runtime variant alone,
+  with no Dear ImGui and no `authoring/`. The templates abort on a throw, so no
+  exceptions as control flow, and a device that starts threads sizes them for the
+  page's fixed pthread pool under `OS::has_feature("web")`
+  (`terrain/terrain_tile_cache_device.cpp`).
 - godot-cpp `Basis(axis, angle)` diverges from core Godot for negative-component axes.
   When porting GDScript Basis math to C++, add a parity test first.
 - `ResourceRoot::set_root_dir` clears the dir index and texture caches — a 94s -> 2s
   mission-load regression hid here; do not call it casually. `list_files()` is
   kind-curated: load known filenames via `read_file`/`has_file`; don't expect them listed.
+- The editor's mission device (`authoring/mission_viewport_applier`, ADR 0046 S14) draws with
+  the game's process-wide render state (the environment's shader globals, the water plane: last
+  writer wins, and a conflict is sticky), so a device says the scene state its picture renders
+  with and the frame's arbitration renders one state at a time; such a global is written again in
+  `publish_scene_state` each turn, never once at build (DI-31: the statics' light atlas is its light
+  director's scene's, published there too). It draws single-sampled, as the game's view does: the particle
+  renderer's passes bind the view's depth and draw nothing under MSAA. Its bytes are the project's alone
+  (`ResourceRoot::mount_files` over the session's file source); a container it drops is renamed
+  and `queue_free`d, never `remove_child`ed mid-frame.
 - Bind native C++ engine APIs directly. Do not introduce a parallel flat FFI surface.
 - Net bindings (`network/novaworld_client`, `network/lan_session`) are thin pumps
   over the wire-compatible codecs — `engine/net/npwire` for the in-game codec + capture decode

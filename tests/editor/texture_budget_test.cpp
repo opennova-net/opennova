@@ -1,0 +1,414 @@
+// ADR 0046 S18, the texture budget (documents/texture_budget over runtime/renderer/device_texture): what a
+// model row's texture costs the game at each object texture detail level and as its .dds, from the file's
+// header; over a minted project the texture_uses query's budgets, the use check's texture.memory on a texture
+// past 16 MB with its chain and texture.normal_slot_loader on a normal-map slot's row the diffuse loader reads,
+// its fix giving an .mdt's row type 4; the texture_budget query (one texture a name written, any case, its rows
+// counted, the totals the rows' sums) and a texture's tooltip line. The retail leg (OPENNOVA_JO_DIR): every texture row of every model the
+// install ships costed through the file its loader opens, the most a model texture holds, and no normal-map
+// slot's row of a type the diffuse loader reads.
+#include <algorithm>
+#include <cstdio>
+#include <map>
+#include <string>
+#include <vector>
+
+#include <base/io/json.h>
+#include <base/vfs/vfs.h>
+#include <editor/assets/asset_import.h>
+#include <editor/assets/asset_type_registry.h>
+#include <editor/assets/install_view.h>
+#include <editor/documents/texture_budget.h>
+#include <editor/graph/reference_kinds.h>
+#include <editor/graph/texture_uses.h>
+#include <editor/project/project_document.h>
+#include <editor/project/project_files.h>
+#include <editor/session/preferences_store.h>
+#include <editor/session/problem_fixes.h>
+#include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/texture_budget_list.h>
+#include <editor/session/view/session_view.h>
+#include <formats/dds/dds.h>
+#include <formats/threedi/threedi_3di3.h>
+#include <formats/tga/tga.h>
+#include <runtime/renderer/material_texture.h>
+
+#include "common/retail_paths.h"
+#include "common/test_expect.h"
+#include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
+
+using namespace opennova::editor;
+namespace renderer = opennova::renderer;
+using opennova::io::JsonValue;
+using opennova::renderer::DdsSource;
+using opennova::renderer::DeviceTextureFormat;
+
+namespace {
+
+constexpr uint64_t kMB = 1024 * 1024;
+
+std::vector<uint8_t> tga(uint32_t w, uint32_t h, bool alpha = true) {
+	const std::vector<uint8_t> rgba(size_t(w) * h * 4, 200);
+	std::vector<uint8_t> out;
+	std::string error;
+	if (alpha) opennova::tga::tga_write_rgba32(rgba.data(), w, h, out, error);
+	else opennova::tga::tga_write_rgb24(rgba.data(), w, h, out, error);
+	return out;
+}
+
+// A DXT5 of `side` with its full chain, every block's alpha endpoints `alpha` (255 opaque).
+std::vector<uint8_t> dxt5(uint32_t side, uint8_t alpha) {
+	std::vector<std::vector<uint8_t>> levels;
+	for (uint32_t s = side; s >= 1; s /= 2) {
+		const size_t blocks = size_t(std::max(1u, s / 4)) * std::max(1u, s / 4);
+		std::vector<uint8_t> level(blocks * 16, 0);
+		for (size_t b = 0; b < blocks; ++b) level[b * 16] = level[b * 16 + 1] = alpha;
+		levels.push_back(std::move(level));
+		if (s == 1) break;
+	}
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::dds::dds_write_dxt(opennova::dds::dds_fourcc('D', 'X', 'T', '5'), side, side, levels, out, error);
+	return out;
+}
+
+int test_budget() {
+	// The base game's crate diffuse: a 2048 x 2048 32-bit TGA in slot 1, each detail level's device texture the
+	// engine's (renderer::model_row_device_texture, which renderer_device_texture pins).
+	const TextureHeader crate = texture_header("oncrate1_0.tga", tga(2048, 2048));
+	const TextureBudget budget = texture_budget(crate, "oncrate1_0.tga", renderer::TextureLoader::Stage, 1);
+	DdsSource crate_file;
+	crate_file.width = crate_file.height = 2048;
+	TEST_EXPECT(budget.known && budget.full().bytes ==
+	                                    renderer::model_row_device_texture(renderer::TextureLoader::Stage, 1, 3, crate_file, false).bytes &&
+	            budget.detail[0].width ==
+	                    renderer::model_row_device_texture(renderer::TextureLoader::Stage, 1, 0, crate_file, false).width);
+	// Its .dds: DXT5 (it holds an alpha), a quarter of the bytes.
+	TEST_EXPECT(budget.offers_dds && budget.as_dds.format == DeviceTextureFormat::Dxt5 && budget.as_dds.levels == 12 &&
+	            budget.as_dds.bytes > 5 * kMB && budget.as_dds.bytes < 6 * kMB);
+	TEST_EXPECT(texture_budget_words(budget) ==
+	            "21.3 MB in the game (2048 x 2048, A8R8G8B8 (uncompressed), 10 levels: 21.3 MB); 5.3 MB as a DXT5 .dds");
+	// A 24-bit one's .dds is DXT1.
+	const TextureBudget opaque =
+			texture_budget(texture_header("wall.tga", tga(256, 256, false)), "wall.tga", renderer::TextureLoader::Stage, 1);
+	TEST_EXPECT(opaque.as_dds.format == DeviceTextureFormat::Dxt1);
+	// A slot-3 normal map read by the normal-map loader offers no .dds; the same row read by the diffuse loader does.
+	const TextureHeader arm = texture_header("arm.mdt", tga(4096, 64));
+	const TextureBudget normal = texture_budget(arm, "arm.mdt", renderer::TextureLoader::Normal, 3);
+	TEST_EXPECT(normal.known && normal.full().width == 512 && !normal.offers_dds);
+	TEST_EXPECT(texture_budget(arm, "arm.mdt", renderer::TextureLoader::Stage, 3).offers_dds);
+	// A DDS's header as the budget reads it: an opaque DXT5 counted as the DXT1 the game stores it as.
+	const TextureHeader solid = texture_header("solid.dds", dxt5(256, 255));
+	TEST_EXPECT(solid.read && solid.dds_dxt5_opaque && solid.dds_levels == 9);
+	const TextureBudget dds = texture_budget(solid, "solid.dds", renderer::TextureLoader::Stage, 1);
+	TEST_EXPECT(dds.full().format == DeviceTextureFormat::Dxt1 && dds.full().dxt5_as_dxt1 && !dds.offers_dds);
+	const TextureHeader clear = texture_header("clear.dds", dxt5(256, 0));
+	TEST_EXPECT(clear.read && !clear.dds_dxt5_opaque);
+	TEST_EXPECT(texture_budget(clear, "clear.dds", renderer::TextureLoader::Stage, 1).full().format == DeviceTextureFormat::Dxt5);
+	// The words of bytes.
+	TEST_EXPECT(texture_bytes_words(96) == "96 bytes" && texture_bytes_words(340 * 1024) == "340 KB" &&
+	            texture_bytes_words(uint64_t(21.3 * kMB)) == "21.3 MB");
+	// The roles costed: a model row's.
+	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
+	TEST_EXPECT(texture_role_budget_loader(renderer::TextureRoleId::ModelHeightNormal, loader) && loader == renderer::TextureLoader::Normal);
+	TEST_EXPECT(texture_role_budget_loader(renderer::TextureRoleId::ModelPlain, loader) && loader == renderer::TextureLoader::Plain);
+	TEST_EXPECT(!texture_role_budget_loader(renderer::TextureRoleId::TerrainColourMap, loader));
+	std::printf("budget: the engine's device texture of each loader, its .dds, an opaque DXT5's header\n");
+	return 0;
+}
+
+// S23 C: the roles no model row loads, each by its loader's creation flags (texture_role_budget), worked by hand:
+// the HUD's one level, colour A8R8G8B8 and alpha A8 alone; a menu image's power-of-two tile; a frame's stencil and
+// brush at their sides; the terrain's colour map as four DXT1 quadrants with their chains; a splat layer halved by
+// the terrain texture detail (twice at 0, once at 1 and 2, none at 3) in DXT1; the tile atlas in DXT5; a far
+// detail map, no texture of its own; a role not witnessed, none.
+int test_role_budgets() {
+	using R = renderer::TextureRoleId;
+	const TextureHeader icon = texture_header("icon.tga", tga(100, 60));
+	TextureBudget b = texture_role_budget(icon, "icon.tga", R::HudColour);
+	TEST_EXPECT(b.known && b.count == 1 && b.setting.empty() && b.full().format == DeviceTextureFormat::A8R8G8B8 &&
+	            b.full().levels == 1 && b.full().bytes == 100u * 60 * 4 && b.detail[0].bytes == b.full().bytes);
+	b = texture_role_budget(icon, "icon.tga", R::HudAlphaOnly);
+	TEST_EXPECT(b.known && b.full().format == DeviceTextureFormat::Uncompressed && b.full().bits == 8 &&
+	            b.full().bytes == 100u * 60);
+	// A 640 x 480 menu image: one 1024 x 512 tile, one level.
+	const TextureHeader screen = texture_header("back.tga", tga(640, 480));
+	b = texture_role_budget(screen, "back.tga", R::MenuImage);
+	TEST_EXPECT(b.known && b.count == 1 && b.full().width == 1024 && b.full().height == 512 && b.full().levels == 1 &&
+	            b.full().bytes == 1024u * 512 * 4);
+	TEST_EXPECT(texture_role_budget(screen, "back.tga", R::MenuCursor).full().bytes == 1024u * 512 * 4);
+	b = texture_role_budget(screen, "frame.tga", R::MenuFrameStencil);
+	TEST_EXPECT(b.full().width == 640 && b.full().levels == 1 && b.full().bytes == 640u * 480 * 4);
+	TEST_EXPECT(texture_role_budget(screen, "brush.tga", R::MenuFrameBrush).full().bytes == 640u * 480 * 4);
+	// The colour map: four 512 x 512 DXT1 quadrants, each to 4 x 4 (8 levels).
+	const TextureHeader colour = texture_header("colormap.tga", tga(1024, 1024, false));
+	b = texture_role_budget(colour, "colormap.tga", R::TerrainColourMap);
+	uint64_t quadrant = 0;
+	for (uint32_t s = 512; s >= 4; s /= 2) quadrant += uint64_t(std::max(1u, s / 4)) * std::max(1u, s / 4) * 8;
+	TEST_EXPECT(b.count == 4 && b.full().format == DeviceTextureFormat::Dxt1 && b.full().width == 512 &&
+	            b.full().levels == 8 && b.full().bytes == 4 * quadrant);
+	TEST_EXPECT(texture_budget_words(b).find("4 textures of 512 x 512, DXT1") != std::string::npos);
+	// A 256 splat layer: 64 at level 0, 128 at 1 and 2, 256 at 3, DXT1.
+	const TextureHeader splat = texture_header("grass.tga", tga(256, 256));
+	b = texture_role_budget(splat, "grass.tga", R::TerrainSplatDetail);
+	TEST_EXPECT(b.setting == "terrain_texdetail" && b.detail[0].width == 64 && b.detail[1].width == 128 &&
+	            b.detail[2].width == 128 && b.detail[3].width == 256 && b.full().format == DeviceTextureFormat::Dxt1);
+	b = texture_role_budget(splat, "detail2.tga", R::TerrainSecondDetail);
+	TEST_EXPECT(b.detail[0].width == 64 && b.full().format == DeviceTextureFormat::A8R8G8B8);
+	// The tile atlas: DXT5 at its sides, its chain to 4 texels.
+	b = texture_role_budget(texture_header("tiles.tga", tga(256, 128)), "tiles.tga", R::TerrainTileAtlas);
+	TEST_EXPECT(b.full().format == DeviceTextureFormat::Dxt5 && b.full().width == 256 && b.full().levels == 6);
+	b = texture_role_budget(splat, "far.tga", R::TerrainFarDetail);
+	TEST_EXPECT(b.known && b.count == 0 && texture_budget_words(b) == "Drawn into its near map's levels: no texture of its own.");
+	TEST_EXPECT(!texture_role_budget(splat, "scorch.tga", R::TerrainScorch).known && !texture_role_has_budget(R::TerrainScorch));
+	// A model row's role is texture_budget's, not this one's.
+	TEST_EXPECT(texture_role_has_budget(R::ModelDiffuse) && !texture_role_budget(splat, "d.tga", R::ModelDiffuse).known);
+	std::printf("role budgets: the HUD's, the menus' and the terrain's, by their loaders' flags\n");
+	return 0;
+}
+
+const Diagnostic *finding(const SessionView &view, const std::string &code, const std::string &mentions) {
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == code && d.message.find(mentions) != std::string::npos) return &d;
+	return nullptr;
+}
+
+int test_project() {
+	editor_test::TempProjectDir dir{"opennova_editor_texture_budget"};
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Budget"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const std::string t = root + "/textures/";
+	// A 2048 crate diffuse past the warning; a small one under it; two arms' normal maps in slot 3 with type 0,
+	// a .tga and an .mdt; a crate normal map of type 4; an opaque DXT5 beside a .tga its row names.
+	TEST_EXPECT(editor_test::write_bytes(t + "crate.tga", tga(2048, 2048)) && editor_test::write_bytes(t + "small.tga", tga(64, 64)) &&
+	            editor_test::write_bytes(t + "arm_n.tga", tga(64, 64)) && editor_test::write_bytes(t + "leg_n.mdt", tga(1024, 1024)) &&
+	            editor_test::write_bytes(t + "crate_n.mdt", tga(512, 512)) && editor_test::write_bytes(t + "skin.tga", tga(8, 8)) &&
+	            editor_test::write_bytes(t + "skin.dds", dxt5(256, 255)));
+	const std::string scene = dir.file("scene");
+	TEST_EXPECT(editor_test::write_text(scene + "/crate.o3d",
+	                                    "o3d 2\nmodel CRATE\nmaterial VS_PHONGT\ntexture crate.tga 1 0\ntexture crate_n.mdt 3 4\n"
+	                                    "material FF_ST_OP\ntexture small.tga 1 0\n"
+	                                    "material VS_SKBUMPDIFFT\ntexture skin.tga 1 0\ntexture arm_n.tga 3 0\n"
+	                                    "material VS_SKBUMPDIFFT\ntexture small.tga 1 0\ntexture leg_n.mdt 3 0\n"
+	                                    "material FF_ST_OP\ntexture SMALL.TGA 1 1\n"
+	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\n"
+	                                    "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
+	ImportChoice model;
+	model.path = scene + "/crate.o3d";
+	const ImportResult imported = import_assets({model}, ProjectPaths::for_root(root), *view.project.document, false);
+	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/crate.3di"}));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	// The memory: the crate's 2048 diffuse alone, once, on its row, with its .dds's cost and the lowest detail's.
+	size_t memory = 0;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == "texture.memory") {
+			++memory;
+			TEST_EXPECT(d.asset == "models/crate.3di" && d.severity == DiagnosticSeverity::Warning && !blocks_build(d));
+			TEST_EXPECT(d.message.find("crate.tga") != std::string::npos && d.message.find("takes 21.3 MB") != std::string::npos &&
+			            d.message.find("As a DXT5 .dds beside it") != std::string::npos &&
+			            d.message.find("it would take 5.3 MB") != std::string::npos &&
+			            d.message.find("halves it to 512 x 512 (1.3 MB)") != std::string::npos);
+		}
+	TEST_EXPECT(memory == 1);
+	// The normal-map slot read as a diffuse: the .tga's words say how to store a finished one; the .mdt's fix
+	// gives its row type 4.
+	const Diagnostic *tga_row = finding(view, "texture.normal_slot_loader", "arm_n.tga");
+	const Diagnostic *mdt_row = finding(view, "texture.normal_slot_loader", "leg_n.mdt");
+	TEST_EXPECT(tga_row && mdt_row && !finding(view, "texture.normal_slot_loader", "crate_n.mdt"));
+	if (!tga_row || !mdt_row) return 1;
+	TEST_EXPECT(tga_row->message.find("sits in normal-map slot 3 with type 0") != std::string::npos &&
+	            tga_row->message.find("Store a finished normal map as an .mdt with type 4") != std::string::npos);
+	TEST_EXPECT(mdt_row->message.find("1024 x 1024, A8R8G8B8 (uncompressed), 9 levels") != std::string::npos &&
+	            mdt_row->message.find("Give the row type 4 (a finished normal map), and it takes 1.3 MB") != std::string::npos);
+	TEST_EXPECT(fixes_for(*tga_row, view).empty());
+	const std::vector<ProblemFix> fixes = fixes_for(*mdt_row, view);
+	TEST_EXPECT(fixes.size() == 1 && fixes[0].label == "Give its row type 4 (normal map)" &&
+	            fixes[0].request.kind == EditorRequestKind::EditRecord && fixes[0].request.open_first);
+	if (fixes.empty()) return 1;
+	editor_test::handle_to_end(session, fixes[0].request);
+	TEST_EXPECT(session.outcome().done());
+	session.run_operations();
+	TEST_EXPECT(!finding(view, "texture.normal_slot_loader", "leg_n.mdt") && finding(view, "texture.normal_slot_loader", "arm_n.tga"));
+	// The wire: each use's budget, by the file its loader opens (skin.tga's row loads skin.dds, an opaque DXT5
+	// stored as DXT1).
+	JsonValue args;
+	std::string error;
+	TEST_EXPECT(opennova::io::json_parse("{\"path\":\"crate.tga\"}", args, error));
+	JsonValue answer = session.query("texture_uses", args, error);
+	const JsonValue *uses = answer.get("uses");
+	TEST_EXPECT(error.empty() && uses && uses->array.size() == 1);
+	if (uses && uses->array.size() == 1) {
+		const JsonValue *budget = uses->array[0].get("budget");
+		TEST_EXPECT(budget && budget->get_string("loader", "") == "stage" && budget->get_number("slot", 0) == 1 &&
+		            budget->get("detail") && budget->get("detail")->array.size() == 4 && budget->get("as_dds") &&
+		            budget->get("as_dds")->get_string("format", "") == "DXT5");
+		if (budget && budget->get("detail") && budget->get("detail")->array.size() == 4) {
+			const JsonValue &full = budget->get("detail")->array[3];
+			TEST_EXPECT(full.get_number("width", 0) == 2048 && full.get_string("format", "") == "A8R8G8B8" &&
+			            full.get_number("levels", 0) == 10);
+		}
+	}
+	TEST_EXPECT(opennova::io::json_parse("{\"path\":\"skin.dds\"}", args, error));
+	answer = session.query("texture_uses", args, error);
+	uses = answer.get("uses");
+	TEST_EXPECT(error.empty() && uses && uses->array.size() == 1);
+	if (uses && uses->array.size() == 1) {
+		const JsonValue *budget = uses->array[0].get("budget");
+		TEST_EXPECT(budget && budget->get("as_dds") && budget->get("as_dds")->is_null() && budget->get("detail") &&
+		            budget->get("detail")->array.size() == 4 &&
+		            budget->get("detail")->array[3].get_string("format", "") == "DXT1" &&
+		            budget->get("detail")->array[3].get_bool("dxt5_as_dxt1", false));
+	}
+	// A use the budget does not cost (a .tga beside the .dds its row loads reads no budget of its own).
+	TEST_EXPECT(opennova::io::json_parse("{\"path\":\"skin.tga\"}", args, error));
+	answer = session.query("texture_uses", args, error);
+	uses = answer.get("uses");
+	TEST_EXPECT(error.empty() && uses && uses->array.size() == 1 && !uses->array[0].get_bool("reads_file", true));
+	// The project's budget: one texture a name written, any case, the stage and plain loaders sharing it (small.tga's
+	// three rows, one of them SMALL.TGA through the plain loader), the costliest first; skin.tga's row costed through
+	// skin.dds; the totals the rows' sums.
+	TEST_EXPECT(opennova::io::json_parse("{}", args, error));
+	answer = session.query("texture_budget", args, error);
+	const JsonValue *rows = answer.get("textures");
+	const JsonValue *totals = answer.get("totals");
+	// (S23 C: the new project's menu cursor, newarow1.tga, is costed too: one 32 x 32 tile, one level.)
+	TEST_EXPECT(error.empty() && rows && totals && rows->array.size() == 7 && answer.get_number("count", 0) == 7);
+	if (rows && totals && rows->array.size() == 7) {
+		TEST_EXPECT(rows->array[0].get_string("file", "") == "textures/crate.tga" && rows->array[0].get_number("uses", 0) == 1);
+		double full = 0, lowest = 0, previous = 1e18;
+		for (const JsonValue &row : rows->array) {
+			const JsonValue *detail = row.get("budget") ? row.get("budget")->get("detail") : nullptr;
+			TEST_EXPECT(detail && detail->array.size() == 4);
+			if (!detail || detail->array.size() != 4) continue;
+			const double bytes = detail->array[3].get_number("bytes", 0);
+			TEST_EXPECT(bytes <= previous);
+			previous = bytes;
+			full += bytes;
+			lowest += detail->array[0].get_number("bytes", 0);
+			const std::string file = row.get_string("file", "");
+			if (file == "textures/small.tga") TEST_EXPECT(row.get_number("uses", 0) == 3 && row.get_string("name", "") == "small.tga");
+			if (file == "textures/skin.dds") TEST_EXPECT(row.get_string("name", "") == "skin.tga");
+			if (file == "textures/leg_n.mdt") TEST_EXPECT(row.get("budget")->get_string("loader", "") == "normal");
+			if (file == "textures/newarow1.tga")
+				TEST_EXPECT(row.get("budget")->get_string("role", "") == "menu_cursor" && bytes == 32.0 * 32 * 4);
+			TEST_EXPECT(file != "textures/skin.tga");
+		}
+		const JsonValue *at = totals->get("detail");
+		TEST_EXPECT(at && at->array.size() == 4 && at->array[3].number == full && at->array[0].number == lowest);
+		TEST_EXPECT(totals->get_number("textures", 0) == 7 && totals->get_number("past_warning", 0) == 1 &&
+		            totals->get_number("as_dds", full) < full);
+	}
+	// A page of it.
+	TEST_EXPECT(opennova::io::json_parse("{\"offset\":1,\"limit\":2}", args, error));
+	answer = session.query("texture_budget", args, error);
+	rows = answer.get("textures");
+	TEST_EXPECT(error.empty() && rows && rows->array.size() == 2 && rows->array[0].get_string("file", "") != "textures/crate.tga");
+	// A texture's tooltip line: its texture's cost; none on the .tga its loader passes over.
+	TEST_EXPECT(texture_file_budget_words(view, "textures/crate.tga").find("21.3 MB in the game") == 0);
+	TEST_EXPECT(!texture_file_budget_words(view, "textures/skin.dds").empty() &&
+	            texture_file_budget_words(view, "textures/skin.tga").empty());
+	std::printf("project: the memory past 16 MB said once; a normal slot read as a diffuse, its .mdt's fix; the budgets on the wire; "
+	            "the project's budget\n");
+	return 0;
+}
+
+// Every texture row of every model the install ships, through the file its loader opens: the most a model
+// texture holds, the rows past the warning, and no normal-map slot's row of a type the diffuse loader reads.
+int test_retail() {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (every shipped model's textures costed)");
+		return 0;
+	}
+	ProjectDocument project;
+	project.target_game = "jo";
+	InstallView install_view;
+	std::string why;
+	TEST_EXPECT(install_view.open(install_spec(install, project), why));
+	const opennova::Vfs &mount = install_view.vfs();
+	const auto exists = [&mount](const std::string &name) { return mount.has_file(name); };
+	size_t models = 0, rows = 0, costed = 0, past = 0, normal_slot = 0;
+	uint64_t largest = 0;
+	std::string largest_row;
+	std::map<std::string, size_t> by_format;
+	std::map<std::string, std::pair<TextureHeader, bool>> headers;
+	for (const opennova::VfsFileLocation &location : mount.list_files()) {
+		const std::string &name = location.logical_name;
+		if (classify_asset(name, nullptr) != AssetKind::Model) continue;
+		std::vector<uint8_t> bytes;
+		opennova::threedi::Threedi3di3 model{};
+		if (!mount.read_file(name, bytes) ||
+		    opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) != 0)
+			continue;
+		++models;
+		for (uint32_t m = 0; m < model.material_count; ++m) {
+			const opennova::threedi::ThreediMaterial &material = model.materials[m];
+			for (uint32_t r = 0; r < material.texture_count && r < 24; ++r) {
+				const opennova::threedi::ThreediMaterialTexture &row = material.textures[r];
+				if (row.name[0] == 0) continue;
+				++rows;
+				renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
+				const uint8_t runtime = opennova::renderer::material_texture_runtime_type(row.type);
+				if (runtime == 4 || runtime == 5) role = renderer::TextureRoleId::ModelNormalMap;
+				else if (runtime == 1) role = renderer::TextureRoleId::ModelPlain;
+				else if (runtime == 0 || runtime == 2 || runtime == 8) role = renderer::TextureRoleId::ModelDiffuse;
+				renderer::TextureLoader loader = renderer::TextureLoader::Stage;
+				if (!texture_role_budget_loader(role, loader)) continue;
+				if ((row.slot == 3 || row.slot == 4) && loader != renderer::TextureLoader::Normal) {
+					++normal_slot;
+					std::fprintf(stderr, "retail: %s row %s slot %u type %u\n", name.c_str(), row.name, unsigned(row.slot),
+					             unsigned(row.type));
+				}
+				const opennova::renderer::MaterialTextureSource source =
+						opennova::renderer::material_texture_source(row.name, row.type, exists);
+				if (source.file.empty()) continue;
+				auto &[header, read] = headers[source.file];
+				if (!read) {
+					read = true;
+					std::vector<uint8_t> file;
+					if (mount.read_file(source.file, file)) header = texture_header(source.file, file);
+				}
+				const TextureBudget budget = texture_budget(header, source.file, loader, row.slot);
+				if (!budget.known) continue;
+				++costed;
+				const uint64_t bytes_held = budget.full().bytes;
+				++by_format[opennova::renderer::device_texture_format_name(budget.full().format)];
+				if (bytes_held > largest) {
+					largest = bytes_held;
+					largest_row = name + ": " + source.file + " (" + device_texture_words(budget.full()) + ")";
+				}
+				past += bytes_held > kTextureMemoryWarnBytes ? 1 : 0;
+			}
+		}
+		opennova::threedi::threedi_3di3_free(&model);
+	}
+	for (const auto &[format, count] : by_format) std::printf("retail: %-12s %zu rows\n", format.c_str(), count);
+	std::printf("retail: %zu models, %zu texture rows, %zu costed; the largest %s; %zu past %s; %zu normal-map slots read "
+	            "as a diffuse\n",
+	            models, rows, costed, largest_row.c_str(), past,
+	            texture_bytes_words(kTextureMemoryWarnBytes).c_str(), normal_slot);
+	// JO:CA: 649 models, 3,105 of 3,111 rows costed (six name a file the install lacks), 1,842 of them as the DXT1 an
+	// opaque DXT5 loads as, 872 as DXT5, 391 built from pixels; the largest 1.3 MB.
+	TEST_EXPECT(models > 500 && costed > 3000 && largest <= 2 * 1024 * 1024 && past == 0 && normal_slot == 0);
+	return 0;
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
+	int failures = 0;
+	failures += test_budget();
+	failures += test_role_budgets();
+	failures += test_project();
+	failures += test_retail();
+	if (failures == 0) std::printf("editor_texture_budget: all passed\n");
+	return failures == 0 ? 0 : 1;
+}

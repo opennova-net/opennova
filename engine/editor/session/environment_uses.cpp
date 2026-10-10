@@ -1,0 +1,315 @@
+#include <editor/session/environment_uses.h>
+
+#include <algorithm>
+#include <cstdio>
+#include <map>
+#include <memory>
+#include <sstream>
+
+#include <editor/assets/asset_registry.h>
+#include <editor/assets/project_asset_source.h>
+#include <editor/documents/environment_document.h>
+#include <editor/documents/mission_document.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/session/view/session_view.h>
+#include <formats/env/tod_clock.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
+#include <formats/trn/trn_io.h>
+#include <runtime/environment/environment_state.h>
+#include <runtime/environment/water_frame.h>
+
+namespace opennova::editor {
+
+namespace {
+
+using io::JsonValue;
+using io::json_number;
+using io::json_string;
+
+// The open document at `path`, as the base (null when it is not open).
+const DocumentBase *open_document(const SessionView &view, const std::string &path) {
+	for (const auto &document : view.documents.open)
+		if (document && document->path() == path) return document.get();
+	return nullptr;
+}
+
+// A project file's bytes as the game would read them now: the open document standing in for its file.
+bool read_project_file(const SessionView &view, const std::string &path, std::vector<uint8_t> &out) {
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path) : nullptr;
+	return entry && view.findings.assets && view.findings.assets->read(entry->logical_name, out);
+}
+
+} // namespace
+
+bool read_mission_header(const SessionView &view, const std::string &path, mission::MissionInfo &out) {
+	if (const auto *mission = dynamic_cast<const MissionDocument *>(open_document(view, path))) {
+		const MissionRow *row = mission->mission_row();
+		if (!row) return false;
+		out = mission::mission_info(row->native);
+		return true;
+	}
+	std::vector<uint8_t> bytes;
+	if (!read_project_file(view, path, bytes) || bytes.size() < bms::kHeaderSize) return false;
+	bms::File file;
+	std::string error;
+	if (!bms::parse_header_blob(bytes.data(), bms::kHeaderSize, file.header, error)) return false;
+	out = mission::mission_info(file);
+	return true;
+}
+
+namespace {
+
+// The environment as the game reads it: its open document's record, else its file through the
+// engine's reader.
+bool environment_config(const SessionView &view, const std::string &path, env::Config &out) {
+	if (const auto *environment = dynamic_cast<const EnvironmentDocument *>(open_document(view, path))) {
+		if (!environment->config()) return false;
+		out = *environment->config();
+		return true;
+	}
+	std::vector<uint8_t> bytes;
+	if (!read_project_file(view, path, bytes)) return false;
+	// Its own lines alone: each mission's terrain reads ahead of it (environment_uses' ladder).
+	std::istringstream input(std::string(bytes.begin(), bytes.end()));
+	std::string error;
+	return env::load_env(input, out, error);
+}
+
+std::string byte_triple(const env::Rgb &rgb) {
+	const auto byte = [](float c) { return std::to_string(int(c * 255.0f + 0.5f)); };
+	return byte(rgb.r) + "," + byte(rgb.g) + "," + byte(rgb.b);
+}
+
+std::string number_words(float value) {
+	char text[32];
+	std::snprintf(text, sizeof(text), "%g", double(value));
+	return text;
+}
+
+} // namespace
+
+const char *water_from_token(env::WaterRung from) {
+	switch (from) {
+	case env::WaterRung::Mission: return "mission";
+	case env::WaterRung::Terrain: return "terrain";
+	case env::WaterRung::Environment: return "environment";
+	case env::WaterRung::None: break;
+	}
+	return "none";
+}
+
+EnvironmentUses environment_uses(const SessionView &view, const std::string &path) {
+	EnvironmentUses uses;
+	if (!view.project.open || !view.project.scan) return uses;
+	const AssetEntry *entry = view.project.scan->named(path);
+	if (!entry) return uses;
+	uses.found = true;
+	uses.path = entry->relative_path;
+	uses.reading = !view.activity.validation.read || view.activity.validation.files_unread;
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) return uses;
+	env::Config environment;
+	const bool environment_read = environment_config(view, uses.path, environment);
+	// The texts a mission's terrain load reads after its .trn: overcast.def, then this file (D-TERRAIN-18).
+	std::vector<uint8_t> overcast_bytes, environment_bytes;
+	const AssetEntry *overcast_entry = view.project.scan->find(env::kOvercastFile);
+	const bool overcast_read = overcast_entry && read_project_file(view, overcast_entry->relative_path, overcast_bytes);
+	const bool has_environment_text = read_project_file(view, uses.path, environment_bytes);
+	const std::string overcast(overcast_bytes.begin(), overcast_bytes.end());
+	const std::string environment_lines(environment_bytes.begin(), environment_bytes.end());
+	// Each of this file's terrain keys by its line: its place among them (the document's list).
+	std::vector<int> key_lines;
+	read_trn_key_lines(environment_lines, &key_lines);
+	for (const GraphEdge *edge : graph->referrers_of_file(uses.path)) {
+		if (edge->kind != ReferenceKind::Environment) continue;
+		const AssetEntry *source = view.project.scan->at_path(edge->source);
+		if (!source || source->kind != AssetKind::Mission) continue;
+		EnvironmentMissionUse use;
+		use.edge = edge;
+		use.mission = edge->source;
+		// The terrain the same header names, and the file it finds.
+		for (const GraphEdge *reference : graph->references_of(edge->source)) {
+			if (reference->kind != ReferenceKind::Terrain) continue;
+			use.terrain_edge = reference;
+			use.terrain = reference->value;
+			std::string file;
+			if (graph->resolve(*reference, &file) == ReferenceStatus::Present) use.terrain_file = file;
+			break;
+		}
+		mission::MissionInfo info;
+		use.read = read_mission_header(view, use.mission, info);
+		if (use.read) {
+			use.title = info.mission_name;
+			use.overrides = env::bms_env_overrides_from_header(static_cast<uint32_t>(info.attrib_flags), info.water_override,
+			                                                   info.fog_override, info.fog_color, info.water_color,
+			                                                   info.water_murk);
+			use.start_time = info.start_time;
+			use.minutes_per_day = info.minutes_per_day;
+			use.tile_set = info.tile_set;
+			use.attrib_flags = static_cast<uint32_t>(info.attrib_flags);
+			use.water_override = info.water_override;
+			use.fog_override = info.fog_override;
+			use.water_murk = info.water_murk;
+			for (int i = 0; i < 3; ++i) {
+				use.fog_color[i] = info.fog_color[i];
+				use.water_color[i] = info.water_color[i];
+			}
+		}
+		if (!use.terrain_file.empty()) {
+			std::vector<uint8_t> bytes;
+			if (read_project_file(view, use.terrain_file, bytes)) {
+				const std::string text(bytes.begin(), bytes.end());
+				std::istringstream input(text);
+				TrnConfig trn;
+				std::string error;
+				use.terrain_read = load_trn(input, trn, error);
+				if (use.terrain_read) use.terrain_water = trn.water_height;
+				// The configuration this file's lines come over (the .trn's, then overcast.def's), and the lines of
+				// this file the terrain takes after them.
+				TrnLaterTexts later;
+				if (overcast_read) later.overcast = &overcast;
+				TrnConfig prior;
+				std::vector<TrnLaterLine> earlier;
+				load_mission_trn(text, later, prior, error, &earlier);
+				if (has_environment_text) later.environment = &environment_lines;
+				std::vector<TrnLaterLine> taken;
+				load_mission_trn(text, later, trn, error, &taken);
+				const std::vector<TrnKeyLine> own = read_trn_key_lines(text);
+				const auto writes = [](const auto &lines, const std::string &key) {
+					return std::any_of(lines.begin(), lines.end(), [&key](const auto &line) { return line.key == key; });
+				};
+				std::map<std::string, std::string> here; // a keyword an earlier line of this file set: its value
+				for (TrnLaterLine &line : taken) {
+					if (line.file != TrnLaterLine::File::Environment) continue;
+					EnvironmentTerrainKey key;
+					static_cast<TrnLaterLine &>(key) = std::move(line);
+					const auto at = std::find(key_lines.begin(), key_lines.end(), key.line);
+					key.index = size_t(at - key_lines.begin());
+					// What it sets over: an earlier line of this file's value, else the configuration's before it.
+					const std::string held = trn_key_value(prior, key.key);
+					if (const auto earlier_here = here.find(key.key); earlier_here != here.end()) {
+						key.over = earlier_here->second;
+						key.over_file = uses.path;
+					} else if (!held.empty()) {
+						key.over = held;
+						if (writes(earlier, key.key)) key.over_file = overcast_entry->relative_path;
+						else if (writes(own, key.key)) key.over_file = use.terrain_file;
+					}
+					if (!held.empty()) here[key.key] = key.value;
+					use.terrain_keys.push_back(std::move(key));
+				}
+			}
+		}
+		// The water plane by the game's ladder: the header's override, then the environment's water height
+		// where it writes one, then the terrain's, whose line the parse reads first (runtime/environment/
+		// water_frame.h, env #28 and #44) [orig: TimeOfDay_ParseProperty @ 0x57cb4e; Environment_LoadTimeOfDayConfig
+		// @ 0x57dbeb, @ 0x57dcbf; Terrain_Init @ 0x60fcb1..0x60fcba; Game_LoadTerrainDuringConnect @ 0x520710].
+		const env::WaterHeightRungs rungs = env::mission_water_rungs(
+				use.overrides, use.terrain_read ? float(use.terrain_water) * 0.5f : 0.0f, use.terrain_read);
+		env::EnvironmentState state;
+		if (environment_read) state.set_config(&environment, true);
+		const env::ResolvedWaterHeight water = env::resolve_water_rung(rungs, environment_read ? &state : nullptr, 0.0f);
+		use.water_height = water.height;
+		use.water_from = water.rung;
+		uses.missions.push_back(std::move(use));
+	}
+	return uses;
+}
+
+std::vector<EnvironmentOverride> environment_overrides(const EnvironmentMissionUse &use) {
+	std::vector<EnvironmentOverride> out;
+	const env::BmsEnvOverrides &o = use.overrides;
+	// mission_table's header keys; the gates are the header's (env.h bms_env_overrides_from_header).
+	if (o.has_fog_level) out.push_back({"fog_override", "fog distance " + number_words(o.fog_level) + " m"});
+	if (o.has_fog_color) out.push_back({"fog_color", "fog colour " + byte_triple(o.fog_color)});
+	if (o.has_water_height)
+		out.push_back({"water_override", "water height " + number_words(o.water_height * 0.5f) + " m"});
+	if (o.has_water_color) out.push_back({"water_color", "water colour " + byte_triple(o.water_color)});
+	if (o.has_water_murk) out.push_back({"murk", "water murk " + number_words(o.water_murk)});
+	return out;
+}
+
+std::string mission_clock_words(const EnvironmentMissionUse &use) {
+	// The header's Q8.8 start hour into the clock, the day wrapped [orig: Game_StartMission @ 0x5253ca..0x5253d5],
+	// shown as HHMM with its minutes rounded (formats/mission header_time_to_hhmm); its day length into the
+	// advance, none for 0 [orig: Environment_SetTodAdvanceRate @ 0x57d170].
+	const int hhmm = opennova::mission::header_time_to_hhmm(uint16_t(use.start_time & 0xFFFF));
+	const int hours = (hhmm / 100) % env::kTodHoursPerDay;
+	const int minutes = hhmm % 100;
+	char text[96];
+	if (use.minutes_per_day == 0)
+		std::snprintf(text, sizeof(text), "starts at %02d:%02d, the clock standing", hours, minutes);
+	else
+		std::snprintf(text, sizeof(text), "starts at %02d:%02d, a day of %d min", hours, minutes,
+		              env::tod_floored_minutes_per_day(use.minutes_per_day));
+	return text;
+}
+
+std::string water_words(const EnvironmentMissionUse &use) {
+	switch (use.water_from) {
+	case env::WaterRung::Mission: return "at " + number_words(use.water_height) + " m, from the mission's header";
+	case env::WaterRung::Terrain: return "at " + number_words(use.water_height) + " m, from the terrain";
+	case env::WaterRung::Environment: return "at " + number_words(use.water_height) + " m, from this environment";
+	case env::WaterRung::None: break;
+	}
+	return "set by none of the mission's header, its terrain and this environment";
+}
+
+io::JsonValue environment_uses_json(const EnvironmentUses &uses) {
+	JsonValue out = JsonValue::make_object();
+	out.set("path", json_string(uses.path));
+	out.set("found", JsonValue::make_bool(uses.found));
+	if (uses.reading) out.set("reading", JsonValue::make_bool(true));
+	JsonValue missions = JsonValue::make_array();
+	for (const EnvironmentMissionUse &use : uses.missions) {
+		JsonValue mission = JsonValue::make_object();
+		mission.set("mission", json_string(use.mission));
+		mission.set("title", json_string(use.title));
+		mission.set("read", JsonValue::make_bool(use.read));
+		if (use.edge) {
+			mission.set("locator", json_string(use.edge->locator));
+			mission.set("field", json_string(use.edge->field));
+		}
+		JsonValue terrain = JsonValue::make_object();
+		terrain.set("name", json_string(use.terrain));
+		if (!use.terrain_file.empty()) terrain.set("file", json_string(use.terrain_file));
+		if (use.terrain_edge) terrain.set("field", json_string(use.terrain_edge->field));
+		if (use.terrain_read) terrain.set("water_height", json_number(double(use.terrain_water) * 0.5));
+		mission.set("terrain", std::move(terrain));
+		JsonValue overrides = JsonValue::make_array();
+		for (const EnvironmentOverride &each : environment_overrides(use)) {
+			JsonValue row = JsonValue::make_object();
+			row.set("field", json_string(each.field));
+			row.set("words", json_string(each.words));
+			overrides.push(std::move(row));
+		}
+		mission.set("overrides", std::move(overrides));
+		mission.set("start_time", json_number(double(use.start_time)));
+		mission.set("minutes_per_day", json_number(double(use.minutes_per_day)));
+		mission.set("clock", json_string(mission_clock_words(use)));
+		JsonValue water = JsonValue::make_object();
+		water.set("from", json_string(water_from_token(use.water_from)));
+		water.set("height", json_number(double(use.water_height)));
+		water.set("words", json_string(water_words(use)));
+		mission.set("water", std::move(water));
+		JsonValue terrain_keys = JsonValue::make_array();
+		for (const EnvironmentTerrainKey &line : use.terrain_keys) {
+			JsonValue row = JsonValue::make_object();
+			row.set("line", json_number(double(line.line)));
+			row.set("index", json_number(double(line.index)));
+			row.set("key", json_string(line.key));
+			row.set("value", json_string(line.value));
+			if (!line.over.empty()) row.set("over", json_string(line.over));
+			if (!line.over_file.empty()) row.set("over_file", json_string(line.over_file));
+			terrain_keys.push(std::move(row));
+		}
+		mission.set("terrain_keys", std::move(terrain_keys));
+		missions.push(std::move(mission));
+	}
+	out.set("missions", std::move(missions));
+	return out;
+}
+
+} // namespace opennova::editor
