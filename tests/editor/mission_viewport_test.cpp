@@ -675,7 +675,13 @@ static int test_drop() {
 		mission_anchor_offset(kCrateWords, 0, 0.0, 0.0, 0.0, north);
 		for (int i = 0; i < 3; ++i) TEST_EXPECT(near(north[i], kCrateAnchor[i], 1e-5));
 	}
-	const double *crate = kCrateAnchor;
+	// A drop bakes the words as they are, the original editor's unrotated and unscaled subtraction (dfx2med).
+	{
+		double baked[3];
+		mission_ground_bake(kCrateWords, baked);
+		for (int i = 0; i < 3; ++i) TEST_EXPECT(baked[i] == kCrateWords[i]);
+	}
+	const double *crate = kCrateWords;
 	// A model whose `ground` point is its origin: no anchor.
 	TEST_EXPECT(mission_item_facts(view, 106101, facts, error) && facts.pool == MissionKind::Building && facts.model == "models/armory.3di");
 	TEST_EXPECT(facts.anchor[0] == 0.0 && facts.anchor[1] == 0.0 && facts.anchor[2] == 0.0);
@@ -884,11 +890,11 @@ static int test_ground_command() {
 	TEST_EXPECT(crate != 0);
 	if (crate == 0) return 1;
 	gathered.requests.clear();
-	TEST_EXPECT(near(viewport->scene().entity(crate)->z, 7.0 - kCrateAnchor[2], 1.0 / 65536.0));
+	TEST_EXPECT(near(viewport->scene().entity(crate)->z, 7.0 - kCrateWords[2], 1.0 / 65536.0));
 	device->ground = [](double, double) { return 9.0; };
 	TEST_EXPECT(viewport->command(rig.context(), "ground", { crate }, gathered, error) && gathered.requests.size() == 1 &&
 			gathered.requests[0].edits.size() == 1 &&
-			near(std::get<double>(gathered.requests[0].edits[0].value), 9.0 - kCrateAnchor[2], 1e-9));
+			near(std::get<double>(gathered.requests[0].edits[0].value), 9.0 - kCrateWords[2], 1e-9));
 	gathered.requests.clear();
 	// The selection when none is named.
 	rig.session.handle(request::select_record(kMission, building));
@@ -1134,7 +1140,7 @@ static int test_placing() {
 		TEST_EXPECT(on_grid(x) && on_grid(y));
 		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + x / 50.0, 1e-9));
 	}
-	// A model whose ground point is off its axis (the crate's, facing north 0.5 east, 0.25 north, 0.75 up): the
+	// A model whose ground point is off its axis (the crate's words, 0.25, -0.5 and 0.75, baked as they are): the
 	// stored origin on the grid, the point a move snaps, its height the ground's under its ground point
 	// less the anchor's height. (Snapping the ground point instead left the origin off the grid by the
 	// anchor, and a first drag jumped it.)
@@ -1147,7 +1153,7 @@ static int test_placing() {
 		const std::vector<Edit> &edits = gathered.requests[0].edits;
 		const double x = std::get<double>(edits[1].value), y = std::get<double>(edits[2].value);
 		TEST_EXPECT(on_grid(x) && on_grid(y));
-		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + (x + kCrateAnchor[0]) / 50.0 - kCrateAnchor[2], 1e-9));
+		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + (x + kCrateWords[0]) / 50.0 - kCrateWords[2], 1e-9));
 	}
 	// A path's next stop: path 1's markers are waypoint markers (item 106005), the marker the stop names the new one.
 	const size_t markers = document.rows_of(MissionKind::Marker).size();

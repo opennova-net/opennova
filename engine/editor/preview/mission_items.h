@@ -24,8 +24,8 @@ struct MissionModelOutline;
 // model's ground anchor (threedi_3di3_ground_anchor: its `ground` user point, else its origin) in
 // the model's own axes, and the item's SCALE. The anchor is an author-time bake
 // (docs/world/world-wac-ai-re.md section 12): an entity dropped on the terrain is stored at the ground
-// point less the anchor as the game draws it there (mission_anchor_offset), and stored positions
-// render as they are.
+// point less the anchor's words, unrotated and unscaled, as the original editor stores it, and stored
+// positions render as they are.
 struct MissionItemFacts {
 	int64_t item = 0;
 	std::string name; // the catalog's name of it ("" none)
@@ -179,11 +179,17 @@ void mission_model_words(const float model[3], double out[3]);
 // it: the placement matrix Rz(90 - yaw) x Ry(-pitch) x Rx(roll) over the point scaled by the item's
 // SCALE (`scale_q16`, 0 unscaled) [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, its
 // userpoint carried by Entity_GetAttachmentWorldPosition @ 0x4B2670], through the engine's own placement
-// basis (mission::bms_to_presentation_basis, which the device places the item's model by). A drop on
-// the terrain stores the ground point less this offset at the yaw it places (S23 C: the original
-// editor subtracts the words unrotated, @ 0x401f6e in dfx2med.exe, read where no database of it is open
-// only through world-wac-ai-re.md section 12; the game's drawing at the placed heading is what the
-// editor bakes against).
+// basis (mission::bms_to_presentation_basis, which the device places the item's model by): what the 2D map
+// draws a model's plan at. It is not what a drop bakes: the original editor stores the ground point less
+// the words unrotated and unscaled (mission_ground_bake).
 void mission_anchor_offset(const double words[3], int32_t scale_q16, double pitch, double yaw, double roll, double out[3]);
+
+// What a drop on the terrain subtracts from the ground point to store an entity's position, as the original
+// editor's place-object dialog does: the model's Ground user point's +0/+4/+8 words, unrotated and unscaled
+// (`words`, mission_model_words: the point's x, y and z words in the mission's x, y and z) [orig: dfx2med.exe
+// sub_401A90 @ 0x401f6e, its scatter loop @ 0x4021fe; docs/world/world-wac-ai-re.md section 12]. The ground
+// command's terrain conform subtracts the height word alone (`out[2]`) [orig: dfx2med.exe sub_44D920,
+// sub_43BAD0].
+void mission_ground_bake(const double words[3], double out[3]);
 
 } // namespace opennova::editor

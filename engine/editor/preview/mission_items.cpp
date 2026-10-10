@@ -93,6 +93,10 @@ void mission_anchor_offset(const double words[3], int32_t scale_q16, double pitc
 	out[2] = mission_at.z;
 }
 
+void mission_ground_bake(const double words[3], double out[3]) {
+	for (int i = 0; i < 3; ++i) out[i] = words[i];
+}
+
 // --- MissionItemCache ----------------------------------------------------------------------------
 
 const MissionItemCache::Model &MissionItemCache::model_(const SessionView &view, const std::string &file) {
@@ -112,7 +116,7 @@ const MissionItemCache::Model &MissionItemCache::model_(const SessionView &view,
 		model.collision = parsed.collision != nullptr;
 		// The model's ground anchor, read from the project's file as the game reads it, in the model's own
 		// axes: where it stands from an entity is the game's placement matrix over it at the entity's
-		// angles (mission_anchor_offset).
+		// angles (mission_anchor_offset); a drop bakes its words as they are (mission_ground_bake).
 		float anchor[3] = { 0.0f, 0.0f, 0.0f };
 		if (threedi::threedi_3di3_ground_anchor(&parsed, anchor)) mission_model_words(anchor, model.anchor);
 		if (outlines_) {

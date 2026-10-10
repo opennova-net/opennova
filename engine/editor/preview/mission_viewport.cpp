@@ -1028,9 +1028,8 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		return false;
 	}
 	// Where the point meets the ground (the device's terrain, else the plane through the camera's
-	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
-	// point less the anchor: docs/world/world-wac-ai-re.md section 12), the anchor where the game draws it
-	// from the entity at the heading it is placed with and its item's scale (mission_anchor_offset).
+	// target); on the terrain, the model's ground anchor baked in as the original editor bakes it (the stored
+	// position is the ground point less the anchor's words, unrotated and unscaled: mission_ground_bake).
 	double at[3];
 	bool on_terrain = false;
 	if (!ground_of_(context, drop.x, drop.y, at, &on_terrain)) {
@@ -1040,7 +1039,7 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	// Facing the way the camera looks (S15): its heading, a compass heading as a yaw is.
 	const int yaw = mission::wrapped_yaw(mission_camera_heading(camera_));
 	double anchor[3] = { 0.0, 0.0, 0.0 };
-	if (on_terrain) mission_anchor_offset(facts.anchor, facts.scale_q16, 0.0, double(yaw), 0.0, anchor);
+	if (on_terrain) mission_ground_bake(facts.anchor, anchor);
 	for (int i = 0; i < 3; ++i) at[i] -= anchor[i];
 	// Snapped: the stored origin's x and y on the grid, the point a move and a copy snap, so the first
 	// drag of what was placed never jumps it by its anchor; its height then the ground's under its
@@ -1282,9 +1281,8 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 	}
 	if (name == "ground") {
 		// Each named entity (else each selected one) set down on the ground under it: its height the
-		// ground's less its model's anchor height (the game's vertical terrain conform: only the
-		// height, docs/world/world-wac-ai-re.md section 12), the anchor's height as the game draws it from
-		// the entity at its angles and its item's scale (mission_anchor_offset), one batch.
+		// ground's less its model's anchor height word, as the original editor's terrain conform sets it (the
+		// height alone, unrotated and unscaled: mission_ground_bake), one batch.
 		const Document *document = planned_(context, error);
 		if (!document) return false;
 		if (!context.editable()) {
@@ -1321,8 +1319,7 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 				items_.facts(context.input.view, entity->item, facts->second, ignored);
 			}
 			double anchor[3];
-			mission_anchor_offset(facts->second.anchor, facts->second.scale_q16, double(entity->pitch), double(entity->yaw),
-					double(entity->roll), anchor);
+			mission_ground_bake(facts->second.anchor, anchor);
 			const double z = ground - anchor[2];
 			// Where its 16.16 word moves.
 			if (bms::to_fixed_16_16(z) != bms::to_fixed_16_16(entity->z))
