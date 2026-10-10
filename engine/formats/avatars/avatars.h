@@ -69,8 +69,6 @@ typedef struct AvatarPart {
     int camo[3];              /* `camo r g b` (small variant indices)            [orig @ 0x57ac50] */
     int voice;                /* `voice`                                          [orig @ 0x57acc0] */
     int sex;                  /* AvatarSex                                        [orig @ 0x57acec] */
-    char (*raw_lines)[512];   /* unrecognized lines inside the block (superset) */
-    size_t raw_lines_count;
     uint64_t note;            /* its lines in the file's modeled layout (textlayout); 0 none */
 } AvatarPart;
 
@@ -114,8 +112,6 @@ typedef struct AvatarDivision {
     char flags[128];          /* trailing tokens after name_key (e.g. "skipdemo"); "" if none */
     AvatarCombo *combos;
     size_t combos_count;
-    char (*raw_lines)[512];   /* unrecognized lines inside the division block */
-    size_t raw_lines_count;
     uint64_t note;            /* its lines in the file's modeled layout; 0 none */
 } AvatarDivision;
 
@@ -132,8 +128,6 @@ typedef struct AvatarNationality {
     int has_alignment;        /* whether an `alignment` line was present */
     AvatarDivision *divisions;
     size_t divisions_count;
-    char (*raw_lines)[512];   /* unrecognized lines directly in the nationality block (outside divisions) */
-    size_t raw_lines_count;
     uint64_t note;            /* its lines in the file's modeled layout; 0 none */
 } AvatarNationality;
 

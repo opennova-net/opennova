@@ -28,10 +28,11 @@
 //
 // The reader [orig: ScoreConfig_LoadFile @ 0x52D8A0] reads the file in two passes over its lines, each line
 // cut by Text_ReadLine @ 0x52D110 (a CR LF, an LF or a lone CR ends it; a NUL ends it too, and at a line's
-// start ends the file) and split by Text_SplitIntoTokens @ 0x52D1B0 (white space between tokens; a quote
-// toggles a quoted run, the quotes dropped); a line whose first or second character is '/' is read for
-// nothing. The first pass takes `VERSION n` (the last one), and a version other than 40 stops the read: the
-// defaults are written over the file instead. The second takes `GAMETYPE "name"` (the row of the name, the
+// start ends the file; past 2047 characters it is cut and the next byte stepped over) and split by
+// Text_SplitIntoTokens @ 0x52D1B0 (white space between tokens; a quote toggles a quoted run, the quotes
+// dropped); a line whose first or second character is '/' is read for nothing. The first pass takes
+// `VERSION n` (the last one), and a version other than 40 stops the read: the defaults are written over the
+// file instead. The second takes `GAMETYPE "name"` (the row of the name, the
 // first of the twelve; none for a name no row has [orig: sub_52D850 @ 0x52D850]), `FIELD "name" n` (the
 // first of a GAMETYPE's lines clears the row's list; a name the table has, its value a byte), `VAR "name" n`
 // (a name the table has, its value a word) and `EXP_FANFARE a b` (two bytes, kept when both are other than 0
@@ -91,9 +92,9 @@ struct GameTypeBlock {
 };
 
 struct File {
-	int32_t version = 0;             // VERSION n (the last); 0 for none
-	int32_t exp_fanfare[2] = {0, 0}; // EXP_FANFARE a b, the two bytes as read
-	bool has_exp_fanfare = false;    // an EXP_FANFARE line was read
+	int32_t version = 40;            // VERSION n (the last; the reader's 0 for none); the game's own 40 (kVersion)
+	int32_t exp_fanfare[2] = {0, 0}; // the fanfare's two bytes: the last pair a line set (the defaults' 0 0)
+	bool has_exp_fanfare = false;    // a line set them: an EXP_FANFARE line passing the reader's gate
 	std::vector<GameTypeBlock> blocks;
 	uint64_t note = 0; // the file's own record in its layout (0: none)
 };
@@ -129,16 +130,19 @@ int game_type_row(std::string_view name);
 // Whether the reader keeps the fanfare: both bytes other than 0, the second the greater [orig: @ 0x52DC75..0x52DC9F].
 bool exp_fanfare_kept(const File &file);
 
-// The file as ScoreConfig_LoadFile reads it (the lines and tokens above): every GAMETYPE line a block, its
-// FIELD and VAR lines whose name the tables have its entries, VERSION and EXP_FANFARE the file's; every other
-// line read for nothing. Never fails on a text (the game reads any); false only for no data.
+// The file as ScoreConfig_LoadFile reads it (the lines and tokens above): VERSION the file's (0 for none); at
+// version 40 every GAMETYPE line a block, its FIELD and VAR lines whose name the tables have its entries, the
+// fanfare the last EXP_FANFARE line passing the gate (has_exp_fanfare); every other line read for nothing, and
+// at any other version every line but VERSION (no block: the game reads none of the file and writes its
+// defaults over it). Never fails on a text (the game reads any); false only for no data.
 bool parse(const uint8_t *data, size_t size, File &out, std::string &error);
 // The same read with the file's layout modeled (`notes` filled; the file's, each block's and each FIELD's note
 // set).
 bool parse(const uint8_t *data, size_t size, File &out, std::string &error, textlayout::Notes &notes);
 
 // The file's text as ScoreConfig_SaveFile @ 0x52CDD0 writes it, from scratch (ADR 0003): its header, `VERSION
-// 40` (the file's own version: the game's is 40), `EXP_FANFARE a b`, the FIELD names in a comment block, then each block after two blank lines, its
+// 40` (the model's version: a File's own is the game's 40, a file read at another keeps it), `EXP_FANFARE a b`
+// (over a file's layout only where a line of the file's set the pair, or the model has one), the FIELD names in a comment block, then each block after two blank lines, its
 // FIELD lines and, after a blank one, its VAR lines in the VAR table's order, each line ending CR LF
 // (File_WriteLineToHandle @ 0x437010). Over the file's modeled layout where the file has one (each line as the
 // file had it but for a changed value's; an entry put down anew after the one before it in the writer's order;

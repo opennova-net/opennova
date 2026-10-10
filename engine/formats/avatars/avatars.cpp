@@ -52,13 +52,6 @@ static void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_le
     dst[src_len] = '\0';
 }
 
-static const char *trim_span(const char *s, size_t len, size_t *out_len) {
-    while (len > 0 && isspace((unsigned char)*s)) { ++s; --len; }
-    while (len > 0 && isspace((unsigned char)s[len - 1])) --len;
-    *out_len = len;
-    return s;
-}
-
 #define DA_PUSH(arr, count, cap, elem) do {                                    \
     if ((count) >= (cap)) {                                                    \
         (cap) = (cap) ? (cap) * 2 : 8;                                         \
@@ -66,18 +59,6 @@ static const char *trim_span(const char *s, size_t len, size_t *out_len) {
     }                                                                          \
     (arr)[(count)++] = (elem);                                                 \
 } while (0)
-
-/* Append a verbatim line to a block's raw_lines superset (grow-by-one; these
- * lines are rare — unrecognized keywords inside a block — so cost is moot). */
-static void push_raw_line(char (**raw)[512], size_t *count, const char *line, size_t len) {
-    char (*na)[512] = (char (*)[512])realloc(*raw, (*count + 1) * sizeof(**raw));
-    if (!na) return;
-    *raw = na;
-    size_t cp = len < 511 ? len : 511;
-    memcpy(na[*count], line, cp);
-    na[*count][cp] = '\0';
-    (*count)++;
-}
 
 /* ========================================================================= */
 /* Avatars-specific helpers                                                  */
@@ -200,25 +181,15 @@ static int has_division_slot(const AvatarNationality *nat, int id) {
 /* Parser                                                                    */
 /* ========================================================================= */
 
-static void free_part(AvatarPart *p) {
-    free(p->raw_lines);
-    p->raw_lines = NULL;
-    p->raw_lines_count = 0;
-}
-
 static void free_division(AvatarDivision *d) {
     free(d->combos);
-    free(d->raw_lines);
     d->combos = NULL;
-    d->raw_lines = NULL;
 }
 
 static void free_nationality(AvatarNationality *n) {
     for (size_t i = 0; i < n->divisions_count; ++i) free_division(&n->divisions[i]);
     free(n->divisions);
-    free(n->raw_lines);
     n->divisions = NULL;
-    n->raw_lines = NULL;
 }
 
 /* The parse states [orig: CAvatarDefs_ParseConfigLine's switch on
@@ -284,8 +255,6 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
            File_ParseASCIIFile @0x53D915 / @0x53D91E]. */
         if (t.count == 0 || t.tokens[0][0] == '/') return;
         const char *first = t.tokens[0];
-        size_t raw_len;
-        const char *raw = trim_span(buf + span.begin, span.end - span.begin, &raw_len);
 
         /* [orig: the `}` test @ 0x57a40f, the `{` test @ 0x57a430] */
         if (first[0] == '}' && depth > 0) {
@@ -400,9 +369,8 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
             } else if (tok_ieq(first, "sex")) {
                 pp->sex = tok_ieq(tok(t, 1), "F") ? AVATAR_SEX_FEMALE : AVATAR_SEX_MALE;
                 mark("sex");
-            } else {
-                push_raw_line(&pp->raw_lines, &pp->raw_lines_count, raw, raw_len);
             }
+            /* Any other line the walk reads nothing of: the layout keeps it (a line read for nothing). */
             return;
         }
 
@@ -448,19 +416,15 @@ static int parse_buffer(const char *buf, size_t buf_len, AvatarsFile *out, textl
                 np->divisions[np->divisions_count++] = fresh;
                 div = (long)np->divisions_count - 1;
                 state[depth + 1] = ST_DIV;
-            } else {
-                push_raw_line(&np->raw_lines, &np->raw_lines_count, raw, raw_len);
             }
+            /* Any other line the walk reads nothing of: the layout keeps it (a line read for nothing). */
             return;
         }
 
         case ST_DIV: {
             if (div < 0) return; /* a division of an earlier nationality: no slot here */
             AvatarDivision *dp = &out->nationalities[nat].divisions[div];
-            if (!tok_ieq(first, "combo")) {
-                push_raw_line(&dp->raw_lines, &dp->raw_lines_count, raw, raw_len);
-                return;
-            }
+            if (!tok_ieq(first, "combo")) return; /* read for nothing: the layout keeps the line */
             /* [orig @ 0x57a7ed]: the LAST part of each kind named by tokens 2..4
                (the search keeps the last match), the arms optional; the id a plain
                atol (@ 0x57a90d), the lenient skip being the nationality's and the
@@ -559,7 +523,6 @@ int avatars_parse(const char *path, AvatarsFile *out) {
 
 void avatars_free(AvatarsFile *file) {
     if (!file) return;
-    for (size_t i = 0; i < file->parts_count; ++i) free_part(&file->parts[i]);
     free(file->parts);
     for (size_t i = 0; i < file->nationalities_count; ++i) free_nationality(&file->nationalities[i]);
     free(file->nationalities);
@@ -603,12 +566,6 @@ static bool fields_shift(std::initializer_list<const char *> fields) {
     return false;
 }
 
-/* The raw lines a block holds, each a line of the writer's form alone (an entry of no key, textlayout): over a
- * file's layout they are its lines the walk reads nothing of, where they stand. */
-static void raw_lines_of(textlayout::OutRecord &record, char (*raw)[512], size_t count, const char *indent) {
-    for (size_t i = 0; i < count; ++i) record.lines.push_back({"", std::string(indent) + raw[i]});
-}
-
 static std::string value_of(const char *v) {
     std::string out;
     emit_value(out, v);
@@ -642,7 +599,6 @@ static void records_of(const AvatarsFile *file, textlayout::OutRecord &root) {
         snprintf(num, sizeof(num), "%d", p->voice);
         part.lines.push_back({"voice", std::string("\tvoice\t\t") + num});
         part.lines.push_back({"sex", std::string("\tsex\t\t") + ((p->sex == AVATAR_SEX_FEMALE) ? "f" : "m")});
-        raw_lines_of(part, p->raw_lines, p->raw_lines_count, "\t");
         part.lines.push_back({"}", "}"});
         part.lines.push_back({"", ""});
         root.lines.push_back({"", "", int(root.children.size())});
@@ -659,7 +615,6 @@ static void records_of(const AvatarsFile *file, textlayout::OutRecord &root) {
         record.lines.push_back({"{", "{"});
         if (nat->has_alignment)
             record.lines.push_back({"alignment", std::string("\talignment\t") + ((nat->alignment == AVATAR_ALIGN_EVIL) ? "evil" : "good")});
-        raw_lines_of(record, nat->raw_lines, nat->raw_lines_count, "\t");
         for (size_t j = 0; j < nat->divisions_count; ++j) {
             const AvatarDivision *d = &nat->divisions[j];
             textlayout::OutRecord division;
@@ -682,7 +637,6 @@ static void records_of(const AvatarsFile *file, textlayout::OutRecord &root) {
                 division.lines.push_back({"", "", int(division.children.size())});
                 division.children.push_back(std::move(combo));
             }
-            raw_lines_of(division, d->raw_lines, d->raw_lines_count, "\t\t");
             division.lines.push_back({"}", "\t}"});
             record.lines.push_back({"", "", int(record.children.size())});
             record.children.push_back(std::move(division));
@@ -749,13 +703,6 @@ int avatars_write(const AvatarsFile *file, const textlayout::Notes *notes, char 
     return hand_out(text, out_data, out_size);
 }
 
-static bool same_raw(char (*a)[512], size_t an, char (*b)[512], size_t bn) {
-    if (an != bn) return false;
-    for (size_t i = 0; i < an; ++i)
-        if (strcmp(a[i], b[i]) != 0) return false;
-    return true;
-}
-
 bool avatars_equal(const AvatarsFile &a, const AvatarsFile &b) {
     if (a.parts_count != b.parts_count || a.nationalities_count != b.nationalities_count) return false;
     for (size_t i = 0; i < a.parts_count; ++i) {
@@ -763,20 +710,18 @@ bool avatars_equal(const AvatarsFile &a, const AvatarsFile &b) {
         if (x.kind != y.kind || strcmp(x.name, y.name) || strcmp(x.display_name, y.display_name) ||
             strcmp(x.graphic, y.graphic) || strcmp(x.graphic_j, y.graphic_j) || strcmp(x.graphic_s, y.graphic_s) ||
             x.camo[0] != y.camo[0] || x.camo[1] != y.camo[1] || x.camo[2] != y.camo[2] || x.voice != y.voice ||
-            x.sex != y.sex || !same_raw(x.raw_lines, x.raw_lines_count, y.raw_lines, y.raw_lines_count))
+            x.sex != y.sex)
             return false;
     }
     for (size_t i = 0; i < a.nationalities_count; ++i) {
         const AvatarNationality &x = a.nationalities[i], &y = b.nationalities[i];
         if (strcmp(x.raw_id, y.raw_id) || x.id != y.id || strcmp(x.name_key, y.name_key) || strcmp(x.flags, y.flags) ||
             x.alignment != y.alignment || x.has_alignment != y.has_alignment ||
-            !same_raw(x.raw_lines, x.raw_lines_count, y.raw_lines, y.raw_lines_count) ||
             x.divisions_count != y.divisions_count)
             return false;
         for (size_t j = 0; j < x.divisions_count; ++j) {
             const AvatarDivision &d = x.divisions[j], &e = y.divisions[j];
             if (strcmp(d.raw_id, e.raw_id) || d.id != e.id || strcmp(d.name_key, e.name_key) || strcmp(d.flags, e.flags) ||
-                !same_raw(d.raw_lines, d.raw_lines_count, e.raw_lines, e.raw_lines_count) ||
                 d.combos_count != e.combos_count)
                 return false;
             for (size_t c = 0; c < d.combos_count; ++c) {

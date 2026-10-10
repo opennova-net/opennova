@@ -164,7 +164,7 @@ enum class Unit : uint8_t {
 	Skill,      // atol clamped 0..4
 	Metres,     // atol << 16
 	Degrees,    // atof * 11930464.0, chopped to 64 bits, the low 32 kept (a BAM)
-	Seconds,    // atof * 62.5, chopped (ticks)
+	Seconds,    // atof * 62.5, chopped (ticks): fistp, react_time and hunt_limit ftol
 	Rate,       // atof * 655.36, chopped (ftol)
 	Fixed,      // atof * 65536.0, chopped (ftol)
 	Speed,      // km/h: atof * 1000.0 * 4.444444444444444e-06 * 65536.0, chopped (16.16 units a tick)

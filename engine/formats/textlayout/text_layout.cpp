@@ -67,6 +67,10 @@ Shape model_line(const std::vector<std::string> &file, const std::vector<std::st
 			taken[found] = true;
 			shape.words.push_back({true, found, writer[found], file[i]});
 		}
+		// The set's words the line does not carry: another line's (a mask the reader ORs over several lines),
+		// left out while the writer still puts them down.
+		for (size_t k = set_from; k < writer.size(); ++k)
+			if (!taken[k]) shape.left_out.emplace_back(k, writer[k]);
 		return shape;
 	}
 	if (file.size() == writer.size()) {
@@ -108,9 +112,14 @@ std::string generate(const NotedLine &line, const std::vector<std::string> &writ
 	if (!line.shape.modeled) return joined(line.line, writer);
 	std::vector<std::string> out;
 	std::vector<bool> placed(writer.size(), false);
-	const auto left_out_as_read = [&line, &writer](size_t k) {
-		for (const auto &[at, word] : line.shape.left_out)
+	const size_t set_from = line.shape.set_from;
+	// A word the file's line left out as read: by its place, a set's word by itself (a set's words move when a
+	// member comes or goes).
+	const auto left_out_as_read = [&line, &writer, set_from](size_t k) {
+		for (const auto &[at, word] : line.shape.left_out) {
+			if (k >= set_from && at >= set_from && writer[k] == word) return true;
 			if (at == k && writer[k] == word) return true;
+		}
 		return false;
 	};
 	const auto put_before = [&](size_t limit) {
@@ -120,7 +129,6 @@ std::string generate(const NotedLine &line, const std::vector<std::string> &writ
 			if (!left_out_as_read(k)) out.push_back(writer[k]);
 		}
 	};
-	const size_t set_from = line.shape.set_from;
 	for (const Word &word : line.shape.words) {
 		if (!word.written) {
 			out.push_back(word.spelling);

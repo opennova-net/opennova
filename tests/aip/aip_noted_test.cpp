@@ -15,7 +15,9 @@
 #include "common/test_expect.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -210,6 +212,62 @@ int units() {
 	return 0;
 }
 
+// The review's cases (#987): a flag mask the reader ORs over two lines saved unchanged, each line as it was; the
+// values whose products wrap in 32 bits, every one the reader makes having its word (an unchanged save and an
+// unrelated edit both written); hunt_limit through _ftol2_sse as react_time [orig: @ 0x45F657..0x45F677].
+int review_cases() {
+	const auto unchanged = [](const std::string &text) {
+		textlayout::Notes notes;
+		const aip::Profile profile = aip::parse_profile(reinterpret_cast<const uint8_t *>(text.data()), text.size(), notes);
+		std::string out, error;
+		bool rewritten = true;
+		const bool written = aip::write_profile(profile, &notes, out, error, &rewritten);
+		if (!written || rewritten || out != text)
+			std::fprintf(stderr, "FAIL not saved as it was (written %d, rewritten %d, %s):\n%s\n", int(written), int(rewritten),
+			             error.c_str(), out.c_str());
+		return written && !rewritten && out == text;
+	};
+	TEST_EXPECT(unchanged("type GROUND\r\nprimary_flags WEAPON_TURRET\r\nprimary_flags WEAPON_FAST\r\n"));
+	TEST_EXPECT(unchanged("type HELO\r\ncombat_flags FOLLOW_WP\r\n// note\r\ncombat_flags NO_CAP\r\n"));
+	// A bit set anew goes on the line the writer pairs (the last), the other line kept.
+	{
+		const std::string text = "type GROUND\r\nprimary_flags WEAPON_TURRET\r\nprimary_flags WEAPON_FAST\r\n";
+		textlayout::Notes notes;
+		aip::Profile profile = aip::parse_profile(reinterpret_cast<const uint8_t *>(text.data()), text.size(), notes);
+		profile.primary.flags |= aip::kWeaponSlow;
+		std::string out, error;
+		bool rewritten = true;
+		TEST_EXPECT(aip::write_profile(profile, &notes, out, error, &rewritten) && !rewritten &&
+		            out == "type GROUND\r\nprimary_flags WEAPON_TURRET\r\nprimary_flags WEAPON_FAST WEAPON_SLOW\r\n");
+	}
+	for (const char *text : {"type GROUND\r\naccel_time 100000000\r\n", "type GROUND\r\nturn_rate 10000\r\n",
+	                         "type HELO\r\nturn_rate -9000\r\n", "type GROUND\r\nturn_rate 360\r\naccel_time -3\r\n"}) {
+		TEST_EXPECT(unchanged(text));
+		textlayout::Notes notes;
+		aip::Profile profile = aip::parse_profile(reinterpret_cast<const uint8_t *>(text), std::strlen(text), notes);
+		profile.rank = 3;
+		std::string out, error;
+		TEST_EXPECT(aip::write_profile(profile, &notes, out, error));
+		TEST_EXPECT(aip::same_profile(aip::parse_profile(reinterpret_cast<const uint8_t *>(out.data()), out.size()), profile));
+	}
+	// Every turn rate and accel time the reader makes has a word reading back to it.
+	const aip::KeyRow *turn = aip::key_row("turn_rate"), *accel = aip::key_row("accel_time");
+	TEST_EXPECT(turn && accel);
+	if (!turn || !accel) return 1;
+	for (int64_t n = -2000000; n <= 2000000; n += 7919) {
+		const std::string word = std::to_string(n);
+		const int32_t t = aip::read_value(*turn, aip::kTypeGround, {word}, 0), a = aip::read_value(*accel, aip::kTypeGround, {word}, 0);
+		const std::vector<std::string> tw = aip::value_words(*turn, aip::kTypeGround, t), aw = aip::value_words(*accel, aip::kTypeGround, a);
+		TEST_EXPECT(!tw.empty() && aip::read_value(*turn, aip::kTypeGround, tw, 0) == t);
+		TEST_EXPECT(!aw.empty() && aip::read_value(*accel, aip::kTypeGround, aw, 0) == a);
+	}
+	const std::string hunt = "type HELO\r\nhunt_limit 40000000\r\n";
+	const aip::Profile helo = aip::parse_profile(reinterpret_cast<const uint8_t *>(hunt.data()), hunt.size());
+	TEST_EXPECT(helo.hunt_limit == INT32_MIN);
+	std::printf("review cases: a mask over two lines kept, wrapping values written, hunt_limit through ftol\n");
+	return 0;
+}
+
 int retail_profiles() {
 	const std::string install = retail::install();
 	if (install.empty()) {
@@ -277,6 +335,6 @@ int retail_profiles() {
 
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	if (minted() || noted() || units() || retail_profiles()) return 1;
+	if (minted() || noted() || units() || review_cases() || retail_profiles()) return 1;
 	return 0;
 }

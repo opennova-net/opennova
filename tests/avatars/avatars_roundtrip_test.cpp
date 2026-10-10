@@ -163,6 +163,14 @@ int check_noted_synthetic() {
     std::string out = written(file, &notes, rewritten);
     if (out != text) std::fprintf(stderr, "noted synthetic:\n%s\n", out.c_str());
     TEST_EXPECT(!rewritten && out == text);
+    // A line the walk reads nothing of (`frobnicate 3`, the comments) is the layout's alone: the writer's own form,
+    // from the model, has none of it (no stored line text is put back).
+    {
+        bool plain_rewritten = false;
+        const std::string plain = written(file, nullptr, plain_rewritten);
+        TEST_EXPECT(plain.find("frobnicate") == std::string::npos && plain.find("// the first head") == std::string::npos &&
+                    plain.find("graphic\t\th1.3di") != std::string::npos);
+    }
     // The graphic changed: the alias stays, the word changes.
     std::snprintf(file.parts[0].graphic, sizeof(file.parts[0].graphic), "%s", "h2.3di");
     out = written(file, &notes, rewritten);

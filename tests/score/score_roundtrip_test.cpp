@@ -154,11 +154,11 @@ int main(int argc, char **argv) {
 	// What the reader reads nothing of is no error: a FIELD outside any GAMETYPE, a VAR of two tokens, a name
 	// its table lacks, a line whose second character is '/'.
 	{
-		const score::File none = parsed("FIELD \"NUMDEATHS\" 1\nGAMETYPE \"A\"\nVAR \"FIRE\"\nVAR \"NOPE\" 3\n /VAR \"FIRE\" 2\n");
+		const score::File none = parsed("VERSION 40\nFIELD \"NUMDEATHS\" 1\nGAMETYPE \"A\"\nVAR \"FIRE\"\nVAR \"NOPE\" 3\n /VAR \"FIRE\" 2\n");
 		TEST_EXPECT(none.blocks.size() == 1 && none.blocks[0].name == "A" && none.blocks[0].fields.empty() &&
 		            none.blocks[0].vars.empty());
 		// A VAR read twice keeps its last value; a FIELD of a byte keeps its byte; a fanfare of 1 2 is kept.
-		const score::File twice = parsed("GAMETYPE \"DM\"\r\nVAR \"FIRE\" 1\r\nVAR \"fire\" 4\r\nFIELD \"NUMDEATHS\" 300\r\nEXP_FANFARE 1 2\r\n");
+		const score::File twice = parsed("VERSION 40\r\nGAMETYPE \"DM\"\r\nVAR \"FIRE\" 1\r\nVAR \"fire\" 4\r\nFIELD \"NUMDEATHS\" 300\r\nEXP_FANFARE 1 2\r\n");
 		TEST_EXPECT(twice.blocks[0].vars.size() == 1 && twice.blocks[0].vars[0].value == 4);
 		TEST_EXPECT(twice.blocks[0].fields[0].value == 44 && score::exp_fanfare_kept(twice));
 		score::File refused = twice;
@@ -168,6 +168,48 @@ int main(int argc, char **argv) {
 		score::File old = twice;
 		old.version = 39;
 		TEST_EXPECT(score::write(old, encoded, error) && parsed(text_of(encoded)).version == 39);
+	}
+
+	// The review's cases (#987). A File built in code is the game's version 40 [orig: ScoreConfig_SaveFile @
+	// 0x52CE66]; a file read at another version reads to no block (the game reads none of it [orig: @ 0x52DA8A]),
+	// and its noted write is the file; the line cut at 2047 characters, the byte after it stepped over [orig:
+	// Text_ReadLine @ 0x52D110]; the fanfare stored only through its gate [orig: @ 0x52DC75..0x52DC9F].
+	{
+		score::File minted;
+		score::GameTypeBlock dm;
+		dm.name = "DM";
+		dm.vars.push_back({"FIRE", 1, 0});
+		minted.blocks.push_back(dm);
+		TEST_EXPECT(score::write(minted, encoded, error) && text_of(encoded).find("\r\nVERSION 40\r\n") != std::string::npos &&
+		            text_of(encoded).find("\r\nEXP_FANFARE 0 0\r\n") != std::string::npos);
+		TEST_EXPECT(parsed(text_of(encoded)).blocks.size() == 1);
+
+		const std::string v39 = "VERSION 39\r\nGAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\nEXP_FANFARE 1 2\r\n";
+		textlayout::Notes notes;
+		score::File old;
+		TEST_EXPECT(score::parse(reinterpret_cast<const uint8_t *>(v39.data()), v39.size(), old, error, notes));
+		TEST_EXPECT(old.version == 39 && old.blocks.empty() && !old.has_exp_fanfare);
+		std::vector<uint8_t> out;
+		bool rewritten = true;
+		TEST_EXPECT(score::write(old, &notes, out, error, &rewritten) && !rewritten && text_of(out) == v39);
+		TEST_EXPECT(parsed("GAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\n").version == 0 &&
+		            parsed("GAMETYPE \"DM\"\r\nVAR \"FIRE\" 5\r\n").blocks.empty());
+
+		const std::string longer = "VERSION 40\r\nGAMETYPE \"DM\"\r\n" + std::string(2047, ' ') + "XVAR \"FIRE\" 5\r\n";
+		const score::File cut = parsed(longer);
+		TEST_EXPECT(cut.blocks.size() == 1 && cut.blocks[0].vars.size() == 1 && cut.blocks[0].vars[0].value == 5);
+		textlayout::Notes long_notes;
+		score::File long_file;
+		TEST_EXPECT(score::parse(reinterpret_cast<const uint8_t *>(longer.data()), longer.size(), long_file, error, long_notes));
+		TEST_EXPECT(score::write(long_file, &long_notes, out, error, &rewritten) && !rewritten && text_of(out) == longer);
+
+		const score::File fanfare = parsed("VERSION 40\r\nEXP_FANFARE 1 2\r\nEXP_FANFARE 0 0\r\n");
+		TEST_EXPECT(fanfare.has_exp_fanfare && fanfare.exp_fanfare[0] == 1 && fanfare.exp_fanfare[1] == 2 &&
+		            score::exp_fanfare_kept(fanfare));
+		const score::File unkept = parsed("VERSION 40\r\nEXP_FANFARE 2 1\r\n");
+		TEST_EXPECT(!unkept.has_exp_fanfare && unkept.exp_fanfare[0] == 0 && unkept.exp_fanfare[1] == 0);
+		std::printf("review cases: a minted File at 40, a version-39 file read to nothing and kept, the 2047 cut, "
+		            "the fanfare's gate\n");
 	}
 
 	// --- retail: <OPENNOVA_JO_DIR>/score.ini, the score table the install

@@ -31,6 +31,16 @@ int32_t secs_to_ticks(const std::string &s) {
 int32_t react_ticks(const std::string &s) {
 	return io::retail_ftol_sse2(io::retail_atof(s.c_str()) * io::kTickHz); // [orig: react_time's ftol2_sse store @ 0x45EE24]
 }
+// The seconds keys through _ftol2_sse rather than the fistp chop: react_time and hunt_limit [orig: hunt_limit's
+// atof, fmul dbl_7C3B48, _ftol2_sse and store to +0xC4 @ 0x45F657..0x45F677].
+bool ftol_seconds(const char *key) { return std::strcmp(key, "react_time") == 0 || std::strcmp(key, "hunt_limit") == 0; }
+
+// The modular inverse of an odd number modulo 2^32 (Newton's iteration doubles the correct bits).
+uint32_t odd_inverse(uint32_t odd) {
+	uint32_t inv = odd;
+	for (int i = 0; i < 5; ++i) inv *= 2u - odd * inv;
+	return inv;
+}
 int32_t rate_of(const std::string &s) {
 	return io::retail_ftol_sse2(io::retail_atof(s.c_str()) * 655.36); // [orig: dbl_7C6AC0]
 }
@@ -446,7 +456,7 @@ int32_t read_value(const KeyRow &row, int32_t type, const std::vector<std::strin
 	case Unit::Skill: return clamp_skill(whole(value));
 	case Unit::Metres: return int32_t(uint32_t(whole(value)) << 16);
 	case Unit::Degrees: return deg_to_bam(value);
-	case Unit::Seconds: return std::strcmp(row.key, "react_time") == 0 ? react_ticks(value) : secs_to_ticks(value);
+	case Unit::Seconds: return ftol_seconds(row.key) ? react_ticks(value) : secs_to_ticks(value);
 	case Unit::Rate: return rate_of(value);
 	case Unit::Fixed: return units_fixed(value);
 	case Unit::Speed: return speed_fixed(value);
@@ -491,27 +501,44 @@ std::vector<std::string> value_words(const KeyRow &row, int32_t type, int32_t va
 		break;
 	case Unit::Degrees: word = shortest(value, 11930464.0, &deg_to_bam, true); break;
 	case Unit::Seconds:
-		if (std::strcmp(row.key, "react_time") == 0) word = shortest(value, io::kTickHz, &react_ticks);
+		if (ftol_seconds(row.key)) word = shortest(value, io::kTickHz, &react_ticks);
 		else word = shortest(value, io::kTickHz, &secs_to_ticks, true);
 		break;
 	case Unit::Rate: word = shortest(value, 655.36, &rate_of); break;
 	case Unit::Fixed: word = shortest(value, 65536.0, &units_fixed); break;
 	case Unit::Speed: word = shortest(value, 1000.0 * 4.444444444444444e-06 * 65536.0, &speed_fixed); break;
 	case Unit::Climb: word = shortest(value, 0.016 * 65536.0, &climb_fixed); break;
-	case Unit::TurnRate:
-		// The product wraps in 32 bits (360 degrees reads -4): each wrap's whole number (to some 5800 degrees a
-		// second either way), the fewest characters.
-		for (int wraps = -16; wraps <= 16; ++wraps) {
-			const double wrap = double(wraps) * 4294967296.0;
-			const int64_t near = int64_t(std::floor((double(value) * 62.0 + wrap) / 11930464.0));
-			for (int64_t n = near - 1; n <= near + 2; ++n) {
+	case Unit::TurnRate: {
+		// Solved exactly: the product P = 0xB60B60 * n wraps in 32 bits, then P / 62 truncates toward zero. So P is
+		// one of the 62 numbers dividing to the value, a multiple of 32 (0xB60B60 = 32 * 372827): n is P / 32 times
+		// the inverse of 372827 modulo 2^27, give or take a multiple of 2^27 (each reads the same). The word of
+		// the fewest characters.
+		const int64_t v = value;
+		const int64_t lo = v > 0 ? 62 * v : v < 0 ? 62 * v - 61 : -61;
+		const int64_t hi = v > 0 ? 62 * v + 61 : v < 0 ? 62 * v : 61;
+		const uint32_t inv = odd_inverse(372827u) & 0x07FFFFFFu;
+		for (int64_t product = lo; product <= hi; ++product) {
+			if (product < INT32_MIN || product > INT32_MAX || (uint32_t(int32_t(product)) & 31u) != 0) continue;
+			const uint32_t base = ((uint32_t(int32_t(product)) >> 5) * inv) & 0x07FFFFFFu;
+			for (int64_t k = -16; k < 16; ++k) {
+				const int64_t n = int64_t(base) + k * int64_t(0x08000000);
+				if (n < INT32_MIN || n > INT32_MAX) continue;
 				const std::string candidate = std::to_string(n);
 				if (turn_rate_of(candidate) == value && (word.empty() || candidate.size() < word.size())) word = candidate;
 			}
 		}
 		break;
+	}
 	case Unit::AccelTime:
-		if (value % 62 == 0) word = std::to_string(value / 62);
+		// Solved exactly: 62 * n wraps in 32 bits, so an even value is 62 times n0 = value / 2 times the inverse of
+		// 31 modulo 2^31, or n0 - 2^31; an odd value is none the reader makes.
+		if ((value & 1) == 0) {
+			const uint32_t n0 = ((uint32_t(value) >> 1) * odd_inverse(31u)) & 0x7FFFFFFFu;
+			for (const int64_t n : {int64_t(n0), int64_t(n0) - int64_t(0x80000000u)}) {
+				const std::string candidate = std::to_string(n);
+				if (accel_of(candidate) == value && (word.empty() || candidate.size() < word.size())) word = candidate;
+			}
+		}
 		break;
 	case Unit::State:
 		for (const StateName &state : kStates)
