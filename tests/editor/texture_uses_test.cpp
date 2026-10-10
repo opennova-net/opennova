@@ -172,17 +172,17 @@ int test_uses() {
 	const std::vector<TextureUse> &border3 = index.uses_of(view, "textures/border3.tga");
 	TEST_EXPECT(monogram.size() == 1 && monogram[0].role == renderer::TextureRoleId::BoardBox && border3.size() == 1 &&
 	            border3[0].role == renderer::TextureRoleId::BoardBox && border3[0].fixed_for == "for the tip panel's box");
-	// A face animation's textures: the base by its name made .TGA (no site of the file: the file writes
-	// face.bmp), its .MDT twin, each eye.
+	// A face animation's textures (its document's fields since round S23): the base by the name the file writes
+	// (face.bmp), which the loader makes face.TGA, its .MDT twin (derived, no site), each eye.
 	const std::vector<TextureUse> &face = index.uses_of(view, "textures/face.tga");
 	const std::vector<TextureUse> &twin = index.uses_of(view, "textures/face.mdt");
 	const std::vector<TextureUse> &eye = index.uses_of(view, "textures/eye2.tga");
 	TEST_EXPECT(face.size() == 1 && face[0].role == renderer::TextureRoleId::FaceTexture && face[0].referrer == "chars/face.grm" &&
-	            face[0].field == "basetexture" && face[0].name_written == "face.TGA" && face[0].reads_file);
-	TEST_EXPECT(twin.size() == 1 && twin[0].field == "basetexture.mdt" && twin[0].reads_file);
-	TEST_EXPECT(eye.size() == 1 && eye[0].record == "eye 2" && eye[0].field == "eyetexture");
+	            face[0].field == "base_texture" && face[0].name_written == "face.bmp" && face[0].reads_file);
+	TEST_EXPECT(twin.size() == 1 && twin[0].field == "base_texture.mdt" && twin[0].reads_file);
+	TEST_EXPECT(eye.size() == 1 && eye[0].field == "eye_texture_2");
 	for (const GraphEdge *edge : view.findings.graph->references_of("chars/face.grm"))
-		TEST_EXPECT(edge->rewritable == (edge->record.rfind("eye", 0) == 0));
+		TEST_EXPECT(edge->rewritable == (edge->field != "base_texture.mdt"));
 	// Made once while the graph and the documents stand.
 	const uint64_t made = index.made();
 	index.uses_of(view, "textures/body.tga");

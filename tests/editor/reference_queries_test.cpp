@@ -264,11 +264,15 @@ static int test_go_to_targets() {
 		TEST_EXPECT(used.file == "other.mnu" && used.editable && used.locator == jump->locator &&
 		            used.label == "other.mnu: OTHER/JUMP/Action 1");
 	}
-	// A file the editor does not edit (a font) is shown in Files; a menu opened.
-	std::string font_file;
+	// A file the editor does not edit (the NovaWorld string table) is shown in Files; a font (a document since round
+	// S23) and a menu opened.
+	std::string font_file, coo;
 	TEST_EXPECT(graph.resolve(ReferenceKind::Font, "%DEF_FONTNAME_LG%", std::string(),
 						&font_file) == ReferenceStatus::Present);
-	TEST_EXPECT(!file_target(*view.project.scan, font_file).editable &&
+	for (const AssetEntry &entry : view.project.scan->entries)
+		if (entry.kind == AssetKind::StringTableCoo) coo = entry.relative_path;
+	TEST_EXPECT(!coo.empty() && !file_target(*view.project.scan, coo).editable &&
+			file_target(*view.project.scan, font_file).editable &&
 			file_target(*view.project.scan, "other.mnu").editable &&
 			file_target(*view.project.scan, "other.mnu").locator.empty());
 	// The same file: the Go to selects the record there, its NAME shown.
