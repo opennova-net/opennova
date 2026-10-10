@@ -26,11 +26,11 @@ class ColorRect;
 class Control;
 
 // A HUD viewport's device work (the plan's DI-20): the runtime's own HudOverlay, which compiles the HUD
-// through the engine's layout fill and frame compiler (runtime/hud) and draws its list, sized to the
-// screen the viewport's options name, the device's SubViewport's 2D space that screen stretched onto the
-// picture (its size_2d_override), so the HUD and what reads the screen's size off the viewport (the SIGHTS
-// card's rows, as the game's screen) are laid out at that screen exactly (its fonts, its scale) whatever
-// room the canvas gives it; the game's own
+// through the engine's layout fill and frame compiler (runtime/hud) and draws its list on a screen of its own,
+// a SubViewport the size the viewport's options name (the game's back buffer), whose frame the device's picture
+// shows scaled to the room the canvas gives it, so the HUD and what reads the screen's size off the viewport (the
+// SIGHTS card's rows) are laid out and drawn at that screen exactly (its fonts, its scale, its one-pixel lines)
+// as a screenshot of the game is; the game's own
 // first-person view effects (godot/game/world/player_view_effects.gd, its binocular and goggle masks
 // and the damage vignette, loaded by path as the editor loads its MCP transport) as the overlay's
 // behind-parent child, as the game's HUD presenter mounts them, and after them the game's SIGHTS card and
@@ -95,7 +95,8 @@ private:
 	bool armed_ = false; // the weapon the options name found in weapon.def and installed
 	int weapon_capacity_ = 0;
 	opennova::editor::HudViewportOptions options_;
-	uint64_t viewport_id_ = 0; // the device's SubViewport, its 2D space the options' screen
+	uint64_t screen_id_ = 0; // the HUD's own SubViewport, the options' screen
+	uint64_t picture_id_ = 0; // its frame over the device's picture
 };
 
 } // namespace godot

@@ -333,9 +333,12 @@ func test_the_sights_and_the_board_draw() -> void:
 HUDSCOPERANGEXY 600,400
 HUDSCOPEZEROXY 600,420
 HUDSCOPEMAGXY 600,440
+HUDDECLUT_XHAIRS 1 1 1 1
 """)).to_utf8_buffer())
 	_write(dir.path_join("fonts/Gunpl22b.fnt"), FileAccess.get_file_as_bytes("res://../fixtures/fnt/synth_1page.fnt"))
 	_write(dir.path_join("textures/card.tga"), _tga(8))
+	# The crosshair's style 0 picture (cross01.tga), so the HUD draws its crosshair where its gate lets it.
+	_write(dir.path_join("textures/cross01.tga"), _tga(8))
 	var weapons := FileAccess.get_file_as_string(dir.path_join("defs/weapon.def"))
 	_write(dir.path_join("defs/weapon.def"), (weapons + TestFs.crlf("""weapon "W_SCOPE"
 	clipsize 5
@@ -367,9 +370,15 @@ end
 	if overlay == null:
 		return
 	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
+			"viewport": {"kind": "hud", "options": {"weapon": "W_SCOPE"}}}))
+	await _pump_frames(3)
+	assert_false(_item(_viewport(), "crosshair").is_empty(), "the crosshair drawn, the sights down")
+	assert_true(_seam.done({"kind": "set_viewport", "path": LAYOUT,
 			"viewport": {"kind": "hud", "options": {"weapon": "W_SCOPE", "sights": true, "range": 300}}}))
 	await _pump_frames(4)
 	state = _viewport()
+	# The body's aimed shot the range stamps as the game's input pack does shuts the crosshair's gate over the card.
+	assert_true(_item(state, "crosshair").is_empty(), "no crosshair with the sights up")
 	var sights: Dictionary = state.get("body", {}).get("sights", {})
 	assert_true(bool(sights.get("up", false)), str(sights))
 	assert_true(bool(sights.get("card", false)) and bool(sights.get("readouts", false)), str(sights))

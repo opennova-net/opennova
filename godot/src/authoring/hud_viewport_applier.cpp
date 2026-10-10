@@ -5,6 +5,8 @@
 #include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
+#include <godot_cpp/classes/texture_rect.hpp>
+#include <godot_cpp/classes/viewport_texture.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <godot_cpp/variant/vector2.hpp>
@@ -67,19 +69,39 @@ Control *script_control(const char *path) {
 } // namespace
 
 HudViewportApplier::HudViewportApplier(SubViewport &viewport) {
-	viewport_id_ = viewport.get_instance_id();
+	// The HUD drawn as the game draws it, on its own screen: a SubViewport of the options' size (the game's
+	// back buffer), its frame then shown on the device's picture scaled to the picture, as a screenshot of the
+	// game is (the HUD's one-pixel lines and glyphs drawn whole, then filtered down; drawn at the picture's
+	// size they would alias away).
+	SubViewport *screen = memnew(SubViewport);
+	screen->set_name("Screen");
+	screen->set_disable_3d(true);
+	// Rendered on each frame its frame is drawn: the picture's, which the device renders when the canvas draws it.
+	screen->set_update_mode(SubViewport::UPDATE_WHEN_VISIBLE);
+	screen->set_size(Vector2i(1024, 768));
+	viewport.add_child(screen);
+	screen_id_ = screen->get_instance_id();
+	TextureRect *picture = memnew(TextureRect);
+	picture->set_name("ScreenPicture");
+	picture->set_texture(screen->get_texture());
+	picture->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
+	picture->set_stretch_mode(TextureRect::STRETCH_SCALE);
+	picture->set_texture_filter(CanvasItem::TEXTURE_FILTER_LINEAR);
+	picture->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	viewport.add_child(picture);
+	picture_id_ = picture->get_instance_id();
 	ColorRect *backdrop = memnew(ColorRect);
 	backdrop->set_name("Backdrop");
 	backdrop->set_color(kBackdrop);
 	backdrop_material_ = make_preview_backdrop_canvas(kBackdrop);
 	backdrop->set_material(backdrop_material_);
 	backdrop->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	viewport.add_child(backdrop);
+	screen->add_child(backdrop);
 	backdrop_id_ = backdrop->get_instance_id();
 	HudOverlay *overlay = memnew(HudOverlay);
 	overlay->set_name("Hud");
 	overlay->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
-	viewport.add_child(overlay);
+	screen->add_child(overlay);
 	overlay_id_ = overlay->get_instance_id();
 	// The view effects behind the overlay's own draw list, a stable layer under it.
 	if (Control *effects = script_control(kViewEffectsPath)) {
@@ -249,12 +271,11 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 	const auto &hud_model = static_cast<const opennova::editor::HudViewport &>(model);
 	HudOverlay *hud = overlay();
 	const opennova::editor::HudViewportOptions &options = hud_model.options();
-	// The HUD laid out at the screen the options name: the SubViewport's 2D space that screen, stretched onto the
-	// picture, so what reads the screen off the viewport (the SIGHTS card's rows) reads the game's screen too.
-	if (SubViewport *viewport = node<SubViewport>(viewport_id_)) {
-		const Vector2i screen(options.width, options.height);
-		if (viewport->get_size_2d_override() != screen) viewport->set_size_2d_override(screen);
-		if (!viewport->is_size_2d_override_stretch_enabled()) viewport->set_size_2d_override_stretch(true);
+	// The HUD laid out at the screen the options name, its own SubViewport that size, so what reads the screen off
+	// the viewport (the SIGHTS card's rows) reads the game's screen too.
+	if (SubViewport *screen = node<SubViewport>(screen_id_)) {
+		const Vector2i size(options.width, options.height);
+		if (screen->get_size() != size) screen->set_size(size);
 	}
 	if (ColorRect *backdrop = node<ColorRect>(backdrop_id_)) {
 		backdrop->set_position(Vector2(0.0f, 0.0f));
@@ -332,8 +353,13 @@ void HudViewportApplier::background(opennova::editor::PreviewBackground backgrou
 	set_preview_backdrop(**backdrop_material_, background);
 }
 
-void HudViewportApplier::resize(int, int) {
-	// The picture's size is the SubViewport's own; its 2D space is the options' screen stretched onto it (apply).
+void HudViewportApplier::resize(int width, int height) {
+	// The screen's frame over the whole picture.
+	if (TextureRect *picture = node<TextureRect>(picture_id_)) {
+		picture->set_position(Vector2(0.0f, 0.0f));
+		picture->set_size(Vector2(float(std::max(width, 1)), float(std::max(height, 1))));
+	}
 }
+
 
 } // namespace godot
