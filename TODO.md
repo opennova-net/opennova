@@ -103,13 +103,3 @@ health. Divergences from the original engine belong in
 
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, and Godot gates.
 - [ ] Incremental conventional linting (vocabulary conventions already ride `scripts/lint/conventions_lint.py` as a CI gate; this row is formatting + per-language linters): the C++ `.clang-format` is committed CONFIG ONLY (ADR 0043 d14), with the per-group whitespace-only reformat commits and `.git-blame-ignore-revs` a separate follow-up PR; GDScript/Python have no project formatting settings yet. Then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
-- [ ] NovaWorld session-builder residue (PAR-NET): the 0x81/0x82 builders
-      (`build_server_hello` / `build_server_auth`, `engine/net/npwire/session_hello.h` +
-      `engine/net/npwire/session/session_hello.cpp`) were grilled and fixed 2026-06-27
-      (ROADMAP Wave 3), the 0x82 `MI` is the assigned dcb (D-NET-105) and the §5.2a
-      initial-state serializers were ported by D-NET Wave 1 (`server_initial_state.cpp`
-      now defers only a 0x0B header it cannot encode). What remains is the host-specific
-      values the golden byte-diff still shows: the 0x81 `CI` (`build_server_hello` echoes
-      the client's CI where the retail LAN host sends its host-node index, 2) and the
-      identity strings. Witness each at the addresses cited there, port it, land the
-      record via `re-doc`. Detail: `engine/runtime/inmatch/ROADMAP.md`.
