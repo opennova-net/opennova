@@ -141,6 +141,7 @@ struct Lexer {
     int32_t     cur_int;
     int         cur_line = 1;   /* the line the current token is on (the line table's numbering) */
     int         phys_line = 1;  /* the text's own line, which a `#line` does not move: an error's line */
+    size_t      cur_start = 0;  /* the current token's first byte (it ends at `pos`) */
 
     void advance();
 };
@@ -197,9 +198,11 @@ void Lexer::advance() {
     if (skip_ws(this)) {
         cur_kind = Tok::Eof;
         cur_line = line;
+        cur_start = pos;
         return;
     }
     cur_line = line;
+    cur_start = pos;
     char c = src[pos];
     char c2 = (pos + 1 < len) ? src[pos + 1] : 0;
 
@@ -560,6 +563,25 @@ struct Compiler {
     size_t       local_count = 0, local_cap = 0;
     MusLine     *lines = NULL;
     size_t       line_count = 0, line_cap = 0;
+
+    /* Where the text names each play's sound (mus_compile_plays), null when no one asks; and an `on` table's
+       targets' places, kept beside its names. */
+    std::vector<MusPlayUse> *plays = nullptr;
+    uint32_t     on_target_place[kMaxTableTargets][2];
+
+    /* The current token's place as a name: a quoted one's without its quotes. */
+    void token_place(uint32_t &offset, uint32_t &length) const {
+        size_t start = lex.cur_start, end = lex.pos;
+        if (lex.cur_kind == Tok::String) {
+            ++start;
+            if (end > start && lex.src[end - 1] == '"') --end;
+        }
+        offset = (uint32_t)start;
+        length = (uint32_t)(end > start ? end - start : 0);
+    }
+    void note_play(uint32_t offset, uint32_t length, int index) {
+        if (plays) plays->push_back({offset, length, (uint32_t)index});
+    }
     /* The function whose body is being compiled (-1 outside one): its parameters are its locals. */
     int          current_function = -1;
     size_t       current_locals_from = 0;
@@ -995,6 +1017,9 @@ int Compiler::parse_stmt_at(const char **err) {
             emit.byte((uint8_t)MUS_OP_PLAY);
             emit.byte((uint8_t)idx);
         }
+        uint32_t offset = 0, length = 0;
+        token_place(offset, length);
+        note_play(offset, length, idx);
         lex.advance();
         return 0;
     }
@@ -1175,6 +1200,7 @@ int Compiler::parse_stmt_at(const char **err) {
                && ntargets < kMaxTableTargets) {
             strncpy(targets[ntargets], lex.cur_text, MUS_SECTION_NAME_SIZE - 1);
             targets[ntargets][MUS_SECTION_NAME_SIZE - 1] = 0;
+            token_place(on_target_place[ntargets][0], on_target_place[ntargets][1]);
             ++ntargets;
             lex.advance();
         }
@@ -1212,6 +1238,8 @@ int Compiler::parse_stmt_at(const char **err) {
                 }
                 if (play_index[t] > 255) { inner_op = (uint8_t)MUS_OP_PLAYW; entry_size = 3; }
             }
+            for (int t = 0; t < ntargets; ++t)
+                if (!is_null(t)) note_play(on_target_place[t][0], on_target_place[t][1], play_index[t]);
         }
         /* Emit tablexec opcode + 4 header bytes: count, inner_op, entry_size,
            skip_size. skip_size is the TOTAL encoded instruction length
@@ -1716,8 +1744,15 @@ static void capture_source_path(const char *text, char *out_path, size_t cap) {
 
 int mus_compile(const char *text, MusScript *out_script,
                            int *err_line, int *err_col, const char **err_msg) {
+    return mus_compile_plays(text, out_script, nullptr, err_line, err_col, err_msg);
+}
+
+int mus_compile_plays(const char *text, MusScript *out_script, std::vector<MusPlayUse> *plays,
+                      int *err_line, int *err_col, const char **err_msg) {
+    if (plays) plays->clear();
     if (!text || !out_script) return -1;
     Compiler c;
+    c.plays = plays;
     c.lex.src  = text;
     c.lex.len  = strlen(text);
     c.lex.pos  = 0;
@@ -1741,10 +1776,24 @@ int mus_compile(const char *text, MusScript *out_script,
         if (err_line) *err_line = c.lex.phys_line;
         if (err_col)  *err_col  = c.lex.col;
         mus_script_free(&c.out);
+        if (plays) plays->clear();
         return rc;
     }
     *out_script = c.out;
     return 0;
+}
+
+std::string mus_bank_name(const std::string &script) {
+    // [orig: Expansion_LoadAssets @ 0x4A4798 (GAMEMUS.BIN/.SBF, MENUMUS.BIN/.SBF), @ 0x4A4906..0x4A494A ("M%s.bin"
+    // with "expansion\\%s\\M%s.sbf", "G%s.bin" with "expansion\\%s\\G%s.sbf")]
+    std::string name = script;
+    const size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) name.erase(0, slash + 1);
+    const size_t dot = name.find_last_of('.');
+    if (dot != std::string::npos) name.erase(dot);
+    for (char &c : name)
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+    return name + ".SBF";
 }
 
 void mus_script_free(MusScript *s) {

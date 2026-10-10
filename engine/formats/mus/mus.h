@@ -10,6 +10,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace opennova::mus {
 
@@ -246,6 +248,28 @@ int mus_decompile_with_names(const MusScript *script,
    pointer is to a static string, do not free). */
 int mus_compile(const char *text, MusScript *out_script,
                 int *err_line, int *err_col, const char **err_msg);
+
+/* A sound a `play` names (a statement's, or an entry of an `on (...) play` table): the byte offset and the
+   length of its name in the text (a quoted name's without its quotes) and the sound index it compiles to, the
+   stream of the script's bank the game plays by that index [orig: AudioVM_Op_Play @ 0x672CB0, AudioVM_Op_PlayWait
+   @ 0x672C90 -> AudioVM_StartSound @ 0x671FF0]. */
+struct MusPlayUse {
+    uint32_t offset;
+    uint32_t length;
+    uint32_t index;
+};
+/* mus_compile, and the plays the text names in `plays`, in the text's order (none where the text does not
+   compile). */
+int mus_compile_plays(const char *text, MusScript *out_script, std::vector<MusPlayUse> *plays,
+                      int *err_line, int *err_col, const char **err_msg);
+
+/* The music bank a script plays from: the script's file name, its folders stripped, with its extension made
+   .SBF, upper case. The game opens the two as a pair: its own GAMEMUS.BIN with GAMEMUS.SBF and MENUMUS.BIN with
+   MENUMUS.SBF [orig: the names @ 0x7C8D50..0x7C8D74, copied by Expansion_LoadAssets @ 0x4A4798..0x4A4807], an
+   expansion's G<name>.bin with G<name>.sbf and M<name>.bin with M<name>.sbf [orig: Expansion_LoadAssets @
+   0x4A4906..0x4A494A], each pair opened together [orig: AudioVM_OpenMusicContext @ 0x6722A0, from
+   AudioVM_InitMenuMusicStreaming @ 0x56AA78]. */
+std::string mus_bank_name(const std::string &script);
 
 /* Free all malloc'd buffers held by `script` (code, sections, variables).
    Idempotent. The script value itself (if heap-allocated) is NOT freed. */

@@ -479,9 +479,51 @@ static int test_function_limits(void) {
     return 1;
 }
 
+/* Where the text names each play's sound (mus_compile_plays): a statement's `sound_N`, a bound name, a quoted
+   bound name (its place without the quotes) and an `on (...) play` table's entries (its `null` none), each at
+   its place in the text with the stream index it compiles to, in the text's order; none for a text that does
+   not compile. The bank a script plays from is its name made .SBF. */
+static int test_play_places(void) {
+    const std::string src =
+        "script test\n"
+        "bind sound_3 \"Win Sting\"\n"
+        "bind sound_4 \"Lose\"\n"
+        "section Begin\n"
+        "{\n"
+        "  play sound_2\n"
+        "  play Lose\n"
+        "  play \"Win Sting\"\n"
+        "  on (Var01) play sound_7 null sound_300\n"
+        "  done\n"
+        "}\n";
+    MusScript out = {};
+    std::vector<MusPlayUse> plays;
+    int err_line = 0, err_col = 0;
+    const char *err_msg = NULL;
+    CHECK(mus_compile_plays(src.c_str(), &out, &plays, &err_line, &err_col, &err_msg) == 0,
+          err_msg ? err_msg : "compile");
+    mus_script_free(&out);
+    CHECK(plays.size() == 5, "five plays named");
+    const char *names[5] = {"sound_2", "Lose", "Win Sting", "sound_7", "sound_300"};
+    const uint32_t indices[5] = {2, 4, 3, 7, 300};
+    for (int i = 0; i < 5; ++i) {
+        CHECK(src.substr(plays[i].offset, plays[i].length) == names[i], "each play at its name's place");
+        CHECK(plays[i].index == indices[i], "each play's stream index");
+    }
+    CHECK(plays[0].offset < plays[1].offset && plays[1].offset < plays[2].offset, "in the text's order");
+    const std::string bad = "script test\nsection Begin\n{\n  play sound_1\n  play nowhere\n}\n";
+    CHECK(mus_compile_plays(bad.c_str(), &out, &plays, &err_line, &err_col, &err_msg) != 0 && plays.empty(),
+          "a text that does not compile names none");
+    CHECK(mus_bank_name("music\\GJox01.bin") == "GJOX01.SBF" && mus_bank_name("gamemus.bin") == "GAMEMUS.SBF" &&
+              mus_bank_name("MENUMUS") == "MENUMUS.SBF",
+          "the bank is the script's name made .SBF");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_function_rules);
     RUN_TEST(test_function_limits);
+    RUN_TEST(test_play_places);
     RUN_TEST(test_compile_minimal_script);
     RUN_TEST(test_compile_minimal_single_section);
     RUN_TEST(test_encode_file_minimal);
