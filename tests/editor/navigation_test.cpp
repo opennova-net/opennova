@@ -414,22 +414,25 @@ std::vector<std::string> marked_lines(const FileCard &page) {
 // another field of the same page a step, Back and Forward landing at each again; a wave (a document since round S23)
 // whose user is a sound bank,
 // a document of its own (S22: the specific document wins), there opened at the single; a native text held as
-// a text (DI-06: an avatar table, whose parser keeps no places) at the line that writes the record's name (of
-// two records naming one model each its own line, a record named alone its first, the text already open),
-// again on Back; a name nothing resolves where it belongs (a string id in its table, a style variable in a
+// a text (DI-06: the HUD layout, whose parser keeps no places) at the line that writes the record's name (of
+// two vehicle panels naming one icon each its own line, another field of one its own, the text already
+// open), again on Back; a name nothing resolves where it belongs (a string id in its table, a style variable in a
 // stylesheet), a file the project lacks nowhere; the page's wire: what it names, the field its Go to named, a
 // wave's Play, where its lines go.
 int test_go_to_lands() {
 	Navigated n("opennova_editor_navigation_lands");
 	const SessionView &v = n.view();
 	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/";
-	std::string avatars = "Avatars.def";
+	std::string hudpos = "defs/hudpos.def";
 	for (const AssetEntry &entry : v.project.scan->entries)
-		if (entry.kind == AssetKind::AvatarDefs) avatars = entry.relative_path;
+		if (entry.kind == AssetKind::HudPosDefs) hudpos = entry.relative_path;
 	const std::string root = v.project.root;
 	TEST_EXPECT(editor_test::write_bytes(root + "/sounds/menu.lwf", test_io::read_file(fixtures + "lwf/menu.lwf")) &&
 	            editor_test::write_bytes(root + "/sounds/tone.wav", test_io::read_file(fixtures + "lwf/tone.wav")) &&
-	            editor_test::write_bytes(root + "/" + avatars, test_io::read_file(fixtures + "avatars/synth_avatars.def")) &&
+	            editor_test::write_text(root + "/" + hudpos,
+	                                    "VEHICLE_HUD\r\n  sid BUGGY1\r\n  icon v_icon.tga\r\n  statictexture v_static.tga\r\n"
+	                                    "VEHICLE_END\r\n\r\nVEHICLE_HUD\r\n  sid BUGGY2\r\n  icon v_icon.tga\r\n"
+	                                    "  statictexture v_static2.tga\r\nVEHICLE_END\r\n") &&
 	            editor_test::write_text(root + "/textures/map.tga", "not a picture") &&
 	            editor_test::write_text(root + "/textures/grain.tga", "not a picture") &&
 	            editor_test::write_text(root + "/faces/head.grm", "basetexture map.tga\r\neyetexture grain.tga grain.tga\r\n"));
@@ -510,30 +513,30 @@ int test_go_to_lands() {
 	            bank_records->locator(v.documents.selection.primary) == single.locator);
 	TEST_EXPECT(v.navigation.back.front().pane == Pane::Document && v.navigation.back.front().path == wave);
 
-	// A native text at the record's line: two heads name synth_boonie.3di, each Go to its own line.
+	// A native text at the record's line: two vehicle panels name v_icon.tga, each Go to its own line.
 	seq = v.events.next_seq() - 1;
-	TEST_EXPECT(n.go(request::open_document(avatars, "SYN_HEAD_BOONIE_CAMO_1", "graphic")));
-	const DocumentBase *text = n.session.document_base_for(avatars);
+	TEST_EXPECT(n.go(request::open_document(hudpos, "VEHICLE_HUD BUGGY2", "icon")));
+	const DocumentBase *text = n.session.document_base_for(hudpos);
 	std::vector<ViewEvent> lines = editor_test::events_after(v, seq, ViewEventKind::RevealText);
-	TEST_EXPECT(text && text_of(*text) && lines.size() == 1 && lines[0].locator == "15:11");
+	TEST_EXPECT(text && text_of(*text) && lines.size() == 1 && lines[0].locator == "9:8");
 	seq = v.events.next_seq() - 1;
-	TEST_EXPECT(n.go(request::open_document(avatars, "SYN_HEAD_BOONIE", "graphic")));
+	TEST_EXPECT(n.go(request::open_document(hudpos, "VEHICLE_HUD BUGGY1", "icon")));
 	lines = editor_test::events_after(v, seq, ViewEventKind::RevealText);
-	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "6:11");
-	TEST_EXPECT(v.navigation.back.front().path == avatars && v.navigation.back.front().locator == "15:11" &&
-	            v.navigation.back.front().label == basename_of(avatars) + ", line 15");
+	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "3:8");
+	TEST_EXPECT(v.navigation.back.front().path == hudpos && v.navigation.back.front().locator == "9:8" &&
+	            v.navigation.back.front().label == basename_of(hudpos) + ", line 9");
 	seq = v.events.next_seq() - 1;
 	TEST_EXPECT(n.back());
 	lines = editor_test::events_after(v, seq, ViewEventKind::RevealText);
-	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "15:11");
-	// A record named alone, the text open: the first name the parser reads of it (SYN_HEAD_2's model).
+	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "9:8");
+	// Another field of a record, the text open: its own line.
 	seq = v.events.next_seq() - 1;
-	TEST_EXPECT(n.go(request::open_document(avatars, "SYN_HEAD_2")));
+	TEST_EXPECT(n.go(request::open_document(hudpos, "VEHICLE_HUD BUGGY2", "statictexture")));
 	lines = editor_test::events_after(v, seq, ViewEventKind::RevealText);
-	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "24:11");
+	TEST_EXPECT(lines.size() == 1 && lines[0].locator == "10:17");
 	// A record the text does not hold: the text, at no line.
 	seq = v.events.next_seq() - 1;
-	TEST_EXPECT(n.go(request::open_document(avatars, "NO_SUCH_HEAD", "graphic")) &&
+	TEST_EXPECT(n.go(request::open_document(hudpos, "VEHICLE_HUD NO_SUCH", "icon")) &&
 	            editor_test::events_after(v, seq, ViewEventKind::RevealText).empty());
 
 	// A name nothing resolves: where it belongs; a file the project lacks, nowhere.
@@ -551,7 +554,7 @@ int test_go_to_lands() {
 	TEST_EXPECT(!missing_target(ReferenceSubject{ReferenceKind::Model, "nothing.3di", "", -1}, v, home));
 	TEST_EXPECT(!missing_target(ReferenceSubject{ReferenceKind::TextId, "NO_SUCH_KEY", "", -1}, v, home));
 	TEST_EXPECT(n.go(request::open_document(gametext)) && v.documents.active == gametext &&
-	            v.navigation.back.front().path == avatars);
+	            v.navigation.back.front().path == hudpos);
 
 	// The wire: a file's page asked by its path, what it names going where (the face's base texture), the wave's Play.
 	std::string error;

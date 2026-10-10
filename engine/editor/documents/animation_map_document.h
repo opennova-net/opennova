@@ -6,6 +6,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/name_source.h>
+#include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
 #include <formats/adm/adm.h>
@@ -120,5 +121,14 @@ enum class AnimationMapFinding {
 };
 const FindingCodeRow &finding_code(AnimationMapFinding code);
 FindingTable animation_map_finding_codes();
+
+// A slot a weapon action names and its map lacks (ADR 0046 DI-15, Add it there; DocumentType::define_symbol): a row
+// of the key as the action writes it, at the table's end, as the type's Add makes one, its clips none yet. The
+// action's lookup finds it [orig: Anim_InitActions @ 0x54219E -> AnimMap_FindSlotByName @ 0x40CFA0, the key past
+// its first five characters], and the row is the map's once it names a clip (adm_row_problem: the save waits for
+// one, the table's reader keeping no row without). False for a key naming none of the engine's 252 slots (the
+// game skips such a row, AnimMap_ParseConfigLine @ 0x40CBA4), for a map the scope does not name, and for a key
+// a row already holds.
+bool define_animation_slot(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);
 
 } // namespace opennova::editor
