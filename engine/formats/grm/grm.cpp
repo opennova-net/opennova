@@ -51,8 +51,13 @@ int32_t integer(const std::string &text) {
 	return io::retail_atol(text.c_str());
 }
 
+// The CRT atof stored as a float: the locale's leading white space (0xA0 included), a
+// sign, a decimal with an e / E / d / D exponent, no hex, infinity or NaN spelling
+// (io::retail_atof; D-NET-389). [orig: FaceAnimConfig_ParseProperty @0x5886A0, its _atof
+// calls: vertex @0x588781 / @0x588793, parm @0x588989 / @0x588995, eyesize, eye1center,
+// eye2center and eyelimits @0x5889E7..0x588AB0]
 float real(const std::string &text) {
-	return static_cast<float>(std::strtod(text.c_str(), nullptr));
+	return static_cast<float>(io::retail_atof(text.c_str()));
 }
 
 bool name_fits(const std::string &s, size_t limit) {

@@ -134,20 +134,24 @@ Int crt_strtox_signed(const char *s, size_t len, unsigned radix) {
 
 } // namespace detail
 
-// The CRT's atof as the game links it [orig: _atof @0x76B6A1 -> _atof_l ->
+// The CRT's atof as the game links it [orig: _atof @0x76B6A1 -> _atof_l @0x76B5F8 ->
 // _fltin2]: leading white space, an optional sign, decimal digits with at most
 // one '.', then an optional exponent marked e, E, d or D. The longest such
 // prefix is the value, and a string with no digit reads 0.0. There is no hex,
 // infinity or NaN spelling (later CRTs' strtod reads those, so the prefix is cut
 // here before it converts). Over the `len` bytes at `s`, which need no NUL.
 // The conversion rounds correctly, where the game's (`__strgtold12_l` then
-// `_ld12tod`) need not in the last place (D-ITEMDEF-11). The white space here is
-// still the C locale's six: the game's `_atof_l` skips by the locale's table like
-// strtoxl, so 0xA0 too (docs/net/novaworld-net-re.md D-NET-389, open).
+// `_ld12tod`) need not in the last place (D-ITEMDEF-11). The white space is the
+// integer readers' (detail::skip_crt_space): `_atof_l` tests each byte, zero-extended,
+// against the locale's pctype & _SPACE before it hands the rest to `_fltin2`, so on
+// cp1252 the six C-locale spaces and 0xA0 (D-NET-389); `__strgtold12_l`'s own skip
+// (' ', '\t', '\n', '\r') then finds none, and after the sign a space is no digit.
+// [orig: _atof_l @0x76B5F8, the skip @0x76B63C..0x76B671 (_isctype_l on a double-byte
+//  page @0x76B652, else the pctype row @0x76B65C..0x76B669); __strgtold12_l @0x779FBE]
 inline double retail_atof_n(const char *s, size_t len) {
 	if (s == nullptr) return 0.0;
 	const char *const end = s + len;
-	while (s < end && (*s == ' ' || (*s >= '\t' && *s <= '\r'))) ++s;
+	s = detail::skip_crt_space(s, end);
 	std::string number;
 	const char *p = s;
 	if (p < end && (*p == '+' || *p == '-')) {
