@@ -123,6 +123,10 @@ struct DocumentsView {
 	// the one it showed before; when that kind has no target, the first kind that has one; kCount when
 	// none has.
 	ViewportKind preview_shown = ViewportKind::kCount;
+	// The active document whose Preview kind shows beside its own picture (a mission's 2D map, S23 C), "" none: the
+	// Map tool's ask (set_workspace's document `map`). The Windows menu's tick shows the kind shown before (S15), never
+	// that one; the ask holds until another document is made active.
+	std::string beside;
 	// The session's viewports (preview/viewports.h), each a document's picture with its state, and
 	// the preview clock: shared const, the windows reading what a viewport shows and changing it
 	// only by a request (SetViewport). Made with the session (null only in a view no session made).

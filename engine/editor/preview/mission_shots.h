@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -110,6 +111,30 @@ struct MissionShotSpawn {
 	std::string source; // "impact", "death"
 };
 
+// An item the run destroyed, its death as the game runs it (DI-10, preview/model_damage): its row and item, the
+// clock's tick it died on, the item's death facts and the plan (its husk, the swap's tick, the sections the pieces
+// leave, the destroy fade), which the mission's device draws (S23 C: the husk swapped in, as the game's presenter
+// swaps it where Flags & 4 lands [orig: world-wac-ai-re §24, Entity_RaycastCollisionModel @ 0x413086's pick]).
+struct MissionShotDeath {
+	NodeId row = 0;
+	int64_t item = 0;
+	int32_t tick = 0;
+	DamageItem item_def;
+	DamagePlan plan;
+};
+
+// What a destroyed item draws `ticks` after its death (damage_frame): whether the husk stands in its place, which
+// husk, the sections the pieces left hidden on it, and the six destroy-fade registers by name (the model preview's
+// ctrl_at), as the device writes them on the husk's model each frame.
+struct MissionHuskFrame {
+	NodeId row = 0;
+	bool husked = false;
+	std::string husk;
+	uint32_t hidden_sections = 0;
+	std::map<std::string, int64_t> ctrl;
+};
+MissionHuskFrame mission_husk_frame(const MissionShotDeath &death, int32_t clock_tick);
+
 // What the shots are fired in: the project's files (the open documents standing in), a key that moves when the
 // mission or its ground moved (the run starts again), the mission as it stands (its file composed), its ground
 // (DI-07's: the terrain, the char map, the tiles, the water; held by the caller, read again only where the key moves),
@@ -153,6 +178,8 @@ public:
 	const FileStamps &reads() const { return reads_; }
 	const std::vector<MissionShotEvent> &events() const { return events_; }
 	const std::vector<MissionShotSpawn> &spawns() const { return spawns_; }
+	// The items the run destroyed, in the order they died.
+	const std::vector<MissionShotDeath> &deaths() const { return deaths_; }
 	// The scars as the game's ring cache holds them, every ring compiled into the mission's frame (the entity rings
 	// through their owners' section matrices), and how many there are.
 	renderer::ScarDrawList scars() const;
@@ -181,6 +208,7 @@ private:
 	int32_t base_ = 0; // the first shot's tick on the clock
 	std::vector<MissionShotEvent> events_;
 	std::vector<MissionShotSpawn> spawns_;
+	std::vector<MissionShotDeath> deaths_;
 	uint64_t serial_ = 0;
 	uint64_t runs_ = 0;
 	bool dirty_ = true;

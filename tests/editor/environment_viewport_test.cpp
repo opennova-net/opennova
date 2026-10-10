@@ -15,8 +15,10 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
+#include <editor/preview/environment_listen.h>
 #include <editor/preview/environment_viewport.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewports.h>
@@ -26,11 +28,14 @@
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
 #include <formats/env/tod_clock.h>
+#include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <runtime/environment/precipitation.h>
 
+#include "common/file_io.h"
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
@@ -344,12 +349,103 @@ int test_no_mission() {
 	return 0;
 }
 
+// S23 C: Listen hears the environment's weather at the camera. With it on and the rain falling, the rain's two loops
+// (LPNV_RAIN_L and LPNV_RAIN_R beside the listener) take two channels of the project's bank; the lightning's thunder,
+// a tick's sequencer A, plays the THUNDER set at a metre; with it off, nothing listens.
+int test_listen() {
+	Rig rig;
+	editor_test::handle_to_end(rig.session, request::new_project(rig.dir.file("project"), "Listen"));
+	editor_test::create_missing_files(rig.session);
+	const std::string root = rig.root();
+	opennova::env::Config config;
+	config.curtime = 1200;
+	config.keyframes = { keyframe(600, 0xc08040, 0x8090a0), keyframe(1800, 0xc06020, 0x605060) };
+	std::ostringstream text;
+	std::string error;
+	TEST_EXPECT(opennova::env::save_env(text, config, error));
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", text.str()));
+	// The bank: the rain's two loops heard to 30 m, the thunder to 2 km; a wave each.
+	opennova::lwf::File bank;
+	const char *sets[] = { "LPNV_RAIN_L", "LPNV_RAIN_R", "THUNDER" };
+	for (size_t i = 0; i < std::size(sets); ++i) {
+		opennova::lwf::Single single;
+		single.name = sets[i];
+		single.path = opennova::strutil::to_lower(sets[i]) + ".wav";
+		bank.singles.push_back(single);
+		opennova::lwf::Multi set;
+		set.name = sets[i];
+		set.pitch_base = opennova::lwf::kAuthoredSetPitchBase;
+		set.target_id = 5000;
+		set.playlist_indices.push_back(uint32_t(i));
+		bank.multis.push_back(set);
+		opennova::lwf::Playlist layer;
+		layer.falloff_radius = i < 2 ? 30 : 2000;
+		layer.flags = opennova::lwf::kFlagInternal | opennova::lwf::kFlagExternal;
+		layer.sndparm_indices.push_back(uint32_t(i));
+		bank.playlists.push_back(layer);
+		opennova::lwf::Sndparm member;
+		member.single_index = uint32_t(i);
+		member.pitch_scaled = opennova::lwf::kPitchUnityQ16;
+		member.volume = 255;
+		member.clamp_volume = 255;
+		bank.sndparms.push_back(member);
+	}
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(opennova::lwf::encode_lwf(bank, bytes, error));
+	TEST_EXPECT(editor_test::write_bytes(root + "/sounds/game.lwf", bytes));
+	const std::vector<uint8_t> tone = test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/lwf/tone.wav");
+	for (const char *set : sets)
+		TEST_EXPECT(editor_test::write_bytes(root + "/sounds/" + opennova::strutil::to_lower(set) + ".wav", tone));
+	editor_test::handle_to_end(rig.session, request::rescan());
+	editor_test::handle_to_end(rig.session, request::open_document(rig.path));
+	rig.pump();
+	const EnvironmentViewport *viewport = rig.viewport();
+	TEST_EXPECT(viewport && viewport->status() == ViewportStatus::Ready);
+	if (!viewport) return 1;
+	JsonValue body = rig.body();
+	TEST_EXPECT(at(body, "listen") && at(body, "listen")->is_null() && !viewport->listen().open());
+	// Listen on, the rain at once: a second on, the two loops beside the listener on two channels.
+	rig.set(R"({"kind": "environment", "options": {"listen": {"on": true, "volume": 0.5}, "rain": {"percent": 100, "seconds": 0}}, "clock": {"playing": true}})");
+	rig.advance(1.0);
+	TEST_EXPECT(viewport->listen().open() && viewport->weather().raining());
+	size_t loops = 0;
+	for (const MissionSoundChannel &channel : viewport->listen().channels())
+		if (channel.candidate >= 0) {
+			++loops;
+			TEST_EXPECT(std::string(channel.source) == "rain" && channel.volume > 0 && !channel.path.empty());
+		}
+	TEST_EXPECT(loops == 2);
+	body = rig.body();
+	TEST_EXPECT(at(body, "listen", "rain") && at(body, "listen", "rain")->get("loops")->number == 2.0 &&
+	            at(body, "listen", "rain")->get("sets_found")->number == 2.0);
+	TEST_EXPECT(at(body, "listen", "volume") && at(body, "listen", "volume")->number == 0.5);
+	// The thunder of a tick's lightning (sequencer A, a metre off), planned from the project's bank.
+	EnvironmentListen listen;
+	TEST_EXPECT(listen.refresh(rig.session.view()));
+	opennova::world::WeatherTickEvents lightning;
+	lightning.thunder_a = true;
+	listen.thunder(12, lightning);
+	opennova::audio::SoundSelector selector;
+	uint64_t seq = 0;
+	const std::vector<ClipSoundFired> fired = listen.fire_sounds(rig.session.view().project.scan.get(), selector, seq, 1.0f);
+	TEST_EXPECT(fired.size() == 1 && fired[0].set == "THUNDER" && fired[0].state == "played" && fired[0].tick == 12 &&
+	            fired[0].action == "thunder" && !fired[0].voices.empty() && fired[0].voices[0].path == "sounds/thunder.wav");
+	TEST_EXPECT(listen.fire_sounds(nullptr, selector, seq, 1.0f).empty());
+	// Off: closed, nothing listens.
+	rig.set(R"({"kind": "environment", "options": {"listen": {"on": false}}})");
+	rig.advance(0.1);
+	TEST_EXPECT(!viewport->listen().open() && rig.body().get("listen")->is_null());
+	std::printf("listen: the rain's two loops at the camera, the lightning's thunder\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failures = test_kind();
 	failures += test_session();
 	failures += test_no_mission();
+	failures += test_listen();
 	if (failures == 0) std::printf("editor_environment_viewport: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

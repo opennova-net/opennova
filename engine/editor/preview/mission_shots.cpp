@@ -13,6 +13,7 @@
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
+#include <formats/threedi/threedi_ctrl_catalog.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/item_traits.h>
@@ -251,6 +252,7 @@ void MissionShots::clear() {
 	reads_.clear();
 	events_.clear();
 	spawns_.clear();
+	deaths_.clear();
 	why_.clear();
 	tick_ = 0;
 	base_ = 0;
@@ -264,6 +266,7 @@ void MissionShots::reset_() {
 	tick_ = 0;
 	events_.clear();
 	spawns_.clear();
+	deaths_.clear();
 	run_.reset();
 	entities_loaded_ = 0;
 	entities_collidable_ = 0;
@@ -588,6 +591,7 @@ void MissionShots::step_() {
 		if (!pieces.empty())
 			if (const assets::Model model = run.store->model(pieces)) note_damage_pieces(*model, models);
 		const DamagePlan plan = damage_plan(item, models);
+		deaths_.push_back(MissionShotDeath{ held.row, held.item, tick, item, plan });
 		death.words = (damage.record.empty() ? item.name : damage.record) + " is destroyed: " + plan.class_words +
 		              (plan.swaps && !plan.husk.empty() ? " (" + plan.husk + " swapped in " +
 		                                                          std::to_string(plan.swap_tick) + " ticks on)"
@@ -704,6 +708,24 @@ int MissionShots::scar_count() const {
 	return count;
 }
 
+MissionHuskFrame mission_husk_frame(const MissionShotDeath &death, int32_t clock_tick) {
+	MissionHuskFrame out;
+	out.row = death.row;
+	if (clock_tick < death.tick) return out;
+	const DamageFrame frame = damage_frame(death.plan, death.item_def, clock_tick - death.tick);
+	out.husked = frame.husked && !death.plan.husk.empty();
+	if (!out.husked) return out;
+	out.husk = death.plan.husk;
+	out.hidden_sections = frame.hidden_sections;
+	// The game writes the six every time the model draws: the fade's phases once husked [orig:
+	// Entity_PublishSwapFadePhases @ 0x5C3F40] (ModelViewport::ctrl_at's).
+	for (int i = 0; i < 6; ++i)
+		if (frame.fade.phases_q16[size_t(i)] != 0)
+			out.ctrl[threedi::threedi_ctrl_register_name(size_t(threedi::THREEDI_CTRL_OBJECT_DESTROY + i))] =
+					frame.fade.phases_q16[size_t(i)];
+	return out;
+}
+
 io::JsonValue MissionShots::to_json() const {
 	JsonValue out = JsonValue::make_object();
 	JsonValue shots = JsonValue::make_array();
@@ -758,6 +780,20 @@ io::JsonValue MissionShots::to_json() const {
 	}
 	out.set("events", std::move(events));
 	out.set("event_count", json_number(double(events_.size())));
+	// The items the run destroyed (S23 C): each one's row, the tick it died on, its husk and the tick the husk is
+	// swapped in on (the device draws it from then).
+	JsonValue deaths = JsonValue::make_array();
+	for (const MissionShotDeath &death : deaths_) {
+		JsonValue row = JsonValue::make_object();
+		row.set("record_row", json_number(double(death.row)));
+		row.set("item", json_number(double(death.item)));
+		row.set("tick", json_number(death.tick));
+		row.set("husk", json_string(death.plan.husk));
+		row.set("swaps", JsonValue::make_bool(death.plan.swaps && !death.plan.husk.empty()));
+		row.set("swap_tick", json_number(death.tick + death.plan.swap_tick));
+		deaths.push(std::move(row));
+	}
+	out.set("deaths", std::move(deaths));
 	return out;
 }
 

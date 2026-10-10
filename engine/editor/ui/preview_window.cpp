@@ -6,6 +6,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/model/document_base.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
@@ -54,8 +55,12 @@ bool preview_stands_aside(const SessionView &view) {
 	// A file Files selects leads (S18: a texture shown as it is selected): it shows that, whatever is active.
 	if (view.documents.files_lead && view.documents.preview_shown != ViewportKind::kCount) return false;
 	const ViewportKind kind = active_preview_kind(view, type);
-	// Nothing of the document shows in it: a definition table, a text, a mission (whose picture is its tab's).
+	// Nothing of the document shows in it: a definition table, a text.
 	if (kind == ViewportKind::kCount) return true;
+	// A document whose Document tab is a picture of its own (a mission's 3D view) keeps the centre: its Preview kind (the
+	// mission's 2D map, S23 C) shows where the author asks for it (the 3D view's Map, the Windows menu's tick).
+	const ViewportKind main = main_viewport_kind(type);
+	if (main != ViewportKind::kCount && viewport_kind_row(main).canvas && viewport_kind_shows(kind, type)) return true;
 	// A table that feeds a picture (a string table, a stylesheet) with no picture of it open (no menu).
 	return !viewport_kind_shows(kind, type) && view.documents.previews[kind].path.empty();
 }

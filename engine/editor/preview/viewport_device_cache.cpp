@@ -94,10 +94,12 @@ void ViewportDeviceCache::sync(Viewports &viewports, const SessionView &view) {
 						 }),
 			slots_.end());
 	// What the Preview window shows (every kind's target where nothing draws to ask, and the active
-	// document's Main view, which its tab would draw: S13 V10), then what a view asked for.
+	// document's Main view, which its tab would draw: S13 V10), then what a view asked for. In the
+	// workspace a kind shown beside its document's own picture (a mission's map, S23 C) is not pinned:
+	// the window stands aside for it until asked, and asks for its device as it draws.
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const auto kind = static_cast<ViewportKind>(i);
-		if (!pin_all_ && kind != view.documents.preview_shown) continue;
+		if (!pin_all_ && (kind != view.documents.preview_shown || viewport_kind_beside_picture(kind))) continue;
 		const std::string &target = view.documents.previews[kind].path;
 		if (!target.empty() && viewports.find(target, kind)) use_(viewports, target, kind);
 	}
