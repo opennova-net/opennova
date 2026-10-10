@@ -13,6 +13,7 @@
 
 #include <net/novaworld/db/sqlite.h>
 #include <net/npwire/cs_config.h>
+#include <net_sockets.h>
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/protocol_message.h>
@@ -133,6 +134,9 @@ public:
 	NwUdpListener(const NwUdpListener &) = delete;
 	NwUdpListener &operator=(const NwUdpListener &) = delete;
 
+	// Binds the UDP socket, which the receive thread then owns until stop(),
+	// so the port start() reports is the one it serves. False when the bind or
+	// the DB lease fails; main() treats that as fatal.
 	bool start(const ServerConfig &config);
 	void stop();
 
@@ -162,7 +166,8 @@ public:
 	void erase_lobby_state(const PeerAddr &peer, const char *reason);
 
 private:
-	void run_loop(std::optional<db::ConnectionPool::Lease> db_conn);
+	void run_loop(opennova::net::ScopedSocket socket,
+	              std::optional<db::ConnectionPool::Lease> db_conn);
 	void initialize_jo_host();
 	void reset_per_run_state(const char *reason);
 	static void observe_jo_event(void *context, const inmatch::HostAcceptEvent &event);

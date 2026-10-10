@@ -258,14 +258,16 @@ bool NwUdpListener::start(const ServerConfig &config) {
 		return false;
 	}
 
+	// The socket stays bound from here into the receive thread, so the port
+	// reported is the port served: a close and a re-bind would free it in
+	// between (with port 0, for any other socket to take).
 	uint16_t bound = 0;
-	auto sock = opennova::net::udp_bind(config.nw_udp_port, &bound);
-	if (!sock.is_valid()) {
+	opennova::net::ScopedSocket socket(opennova::net::udp_bind(config.nw_udp_port, &bound));
+	if (!socket.is_valid()) {
 		std::fprintf(stderr, "[nwudp] failed to bind UDP %u\n",
 		             static_cast<unsigned>(config.nw_udp_port));
 		return false;
 	}
-	opennova::net::close_socket(sock);
 	bound_port_ = bound;
 	// The SessionInit CU carries the web domain as bare host:port — the
 	// retail client prepends the scheme itself
@@ -289,8 +291,9 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	stop_requested_.store(false);
 	initialize_jo_host();
 	running_.store(true);
-	worker_ = std::thread([this, db_conn = std::move(db_conn)]() mutable {
-		run_loop(std::move(db_conn));
+	worker_ = std::thread([this, socket = std::move(socket),
+	                       db_conn = std::move(db_conn)]() mutable {
+		run_loop(std::move(socket), std::move(db_conn));
 	});
 	std::printf("[nwudp] listening on UDP :%u\n",
 	            static_cast<unsigned>(bound_port_));
@@ -371,13 +374,8 @@ std::vector<NwUdpListener::HostedSnapshot> NwUdpListener::snapshot_hosted() cons
 	return out;
 }
 
-void NwUdpListener::run_loop(std::optional<db::ConnectionPool::Lease> db_conn) {
-	opennova::net::ScopedSocket socket(opennova::net::udp_bind(bound_port_));
-	if (!socket.is_valid()) {
-		std::fprintf(stderr, "[nwudp] re-bind failed; aborting loop\n");
-		running_.store(false);
-		return;
-	}
+void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
+                             std::optional<db::ConnectionPool::Lease> db_conn) {
 	lobby_session_.set_database(db_conn ? db_conn->get() : nullptr);
 
 	QueuedJoSocket jo_socket(socket.get());

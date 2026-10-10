@@ -416,6 +416,13 @@ endforeach()
 # The powerup retail leg reads powerup.def off the packed install through the Vfs.
 target_link_libraries(def_parse_powerup_test PRIVATE opennova_base)
 
+# hudfx.def (docs/interface/hud-re.md "hudfx.def"): the tagged lines, the one the game reads, the slots'
+# names, the writer's form and an authored file written again over its layout. JO ships none.
+add_executable(def_hudfx_test def/def_hudfx_test.cpp)
+target_link_libraries(def_hudfx_test PRIVATE opennova_formats)
+target_include_directories(def_hudfx_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME def_hudfx COMMAND def_hudfx_test)
+
 # PLAYER_INFO loadout weight + encumbrance math (D-PLAYERINFO-11 weight readout).
 add_executable(def_loadout_weight_test def/def_loadout_weight_test.cpp)
 target_link_libraries(def_loadout_weight_test PRIVATE opennova_formats)
@@ -446,7 +453,7 @@ foreach(test parse roundtrip)
     # The minted fixtures/avatars/synth_avatars.def carries the shape; the shipped
     # table is each test's OPENNOVA_JO_ASSETS reference leg.
     add_executable(avatars_${test}_test avatars/avatars_${test}_test.cpp)
-    target_link_libraries(avatars_${test}_test PRIVATE opennova_formats)
+    target_link_libraries(avatars_${test}_test PRIVATE opennova_base opennova_formats)
     target_include_directories(avatars_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_features(avatars_${test}_test PRIVATE cxx_std_17)
     opennova_add_mixed_test(avatars_${test} COMMAND avatars_${test}_test)
@@ -633,6 +640,21 @@ target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
 
+# The modeled layout of a line-oriented text file (formats/textlayout): a line's parts, a file generated
+# over its notes (a value, a set, a key anew, records swapped, gone and added), the writer's form without.
+add_executable(text_layout_test textlayout/text_layout_test.cpp)
+target_link_libraries(text_layout_test PRIVATE opennova_formats)
+target_include_directories(text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME text_layout COMMAND text_layout_test)
+
+# The AI profiles' writer over the file's modeled layout (formats/aip, textlayout): a minted profile in
+# the writer's form, an authored file written again as it was, one value one line; --retail: every
+# shipped profile byte for byte.
+add_executable(aip_noted_test aip/aip_noted_test.cpp)
+target_link_libraries(aip_noted_test PRIVATE opennova_base opennova_formats)
+target_include_directories(aip_noted_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(aip_noted COMMAND aip_noted_test)
+
 # game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
 # layout through gamecfg::write), its byte-exact load/write round trip, and the
 # reader's edge cases over hand-authored text.
@@ -817,6 +839,13 @@ if(NOT MSVC)
 endif()
 add_test(NAME sbf_encode COMMAND sbf_encode_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_bank_test sbf/sbf_bank_test.cpp)
+target_link_libraries(sbf_bank_test PRIVATE opennova_formats)
+target_include_directories(sbf_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_bank_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+add_test(NAME sbf_bank COMMAND sbf_bank_test)
 
 add_executable(sbf_roundtrip_test sbf/sbf_roundtrip_test.cpp)
 target_link_libraries(sbf_roundtrip_test PRIVATE opennova_formats)
@@ -1058,10 +1087,10 @@ add_test(NAME resource_index COMMAND resource_index_test)
 # The typed kinds and their loader facts (base/resource_index/file_kind.h): every runtime format and
 # required file has a kind and a place, and the table agrees with master's other copies of its facts.
 add_executable(file_kind_test resource_index/file_kind_test.cpp)
-target_link_libraries(file_kind_test PRIVATE opennova_base)
+target_link_libraries(file_kind_test PRIVATE opennova_formats opennova_base)
 target_include_directories(file_kind_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(file_kind_test PRIVATE cxx_std_17)
-add_test(NAME file_kind COMMAND file_kind_test)
+opennova_add_mixed_test(file_kind COMMAND file_kind_test)
 
 # Launch flags + the boot resource-dir ladder (base/resource_index/boot_policy.h).
 add_executable(boot_policy_test resource_index/boot_policy_test.cpp)
@@ -3339,6 +3368,20 @@ target_link_libraries(gate_server_loopback_test PRIVATE opennova_net opennova_ap
 target_include_directories(gate_server_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gate_server_loopback COMMAND gate_server_loopback_test)
 
+# The real GateListener on port 0 over loopback UDP: the port start() reports is
+# the one that answers a probe and the one the reply advertises as POSTIPPORT,
+# and a second listener on that port fails start() (same listener-source recipe
+# as the NW UDP e2e tests below).
+add_executable(gate_listener_test
+    novaworld/gate_listener_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/gate_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(gate_listener_test PRIVATE opennova_novaworld_service opennova_app_common)
+target_include_directories(gate_listener_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME gate_listener COMMAND gate_listener_test)
+
 add_executable(gsb_roundtrip_test novaworld/gsb_roundtrip_test.cpp)
 target_link_libraries(gsb_roundtrip_test PRIVATE opennova_net)
 target_include_directories(gsb_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3749,6 +3792,9 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(opennova_novaworld_server_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(opennova_novaworld_server_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME opennova_novaworld_server_http_routes COMMAND opennova_novaworld_server_http_routes_test)
+    # The concurrent case gives each request up to 30 s; this bounds a hang
+    # below ctest's 1500 s default.
+    set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 120)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s

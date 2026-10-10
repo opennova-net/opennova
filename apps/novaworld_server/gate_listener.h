@@ -1,6 +1,7 @@
 #pragma once
 
 #include <net/novaworld/db/sqlite.h>
+#include <net_sockets.h>
 
 #include <atomic>
 #include <cstdint>
@@ -48,16 +49,21 @@ public:
 	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
 	// Bind the UDP socket, lease the thread's DB connection and spawn the
-	// receive loop. Returns false if the socket couldn't be bound (port in
-	// use, perms, etc.) or the connection couldn't be opened — main() should
-	// treat that as fatal.
+	// receive loop, which owns both until stop(). Returns false if the socket
+	// couldn't be bound (port in use, perms, etc.) or the connection couldn't
+	// be opened — main() should treat that as fatal.
 	bool start(const ServerConfig &config);
 
 	// Signal stop and join the worker thread. Idempotent.
 	void stop();
 
+	// The port start() bound and the receive loop serves (the OS's pick when
+	// the configured port is 0); the gate response advertises it as POSTIPPORT.
+	uint16_t bound_port() const { return bound_port_; }
+
 private:
-	void run_loop(std::optional<db::ConnectionPool::Lease> db_conn);
+	void run_loop(opennova::net::ScopedSocket socket,
+	              std::optional<db::ConnectionPool::Lease> db_conn);
 
 	std::thread worker_;
 	std::atomic<bool> running_{false};

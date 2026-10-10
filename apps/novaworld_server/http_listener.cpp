@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <ctime>
 #include <cstdlib>
@@ -297,6 +298,15 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 
 struct HttpListener::Impl {
 	crow::SimpleApp app;
+	// start()'s handshake with the Crow thread: Pending until Crow serves
+	// (Serving, with the port it bound) or until run() returns (Exited).
+	enum class Run { Pending, Serving, Exited };
+	std::mutex run_mu;
+	std::condition_variable run_cv;
+	Run run = Run::Pending;
+	uint16_t port = 0;
+	// How often Crow runs the tick whose first call tells start() it serves.
+	static constexpr std::chrono::milliseconds kServingTick{50};
 };
 
 HttpListener::HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
@@ -360,20 +370,50 @@ bool HttpListener::start(const ServerConfig &config) {
 	// its own signal_set and stop just this listener, leaving the process up.
 	app.signal_clear();
 
-	const uint16_t port = config.http_port;
-	// Set before the thread exists, so a run() that throws at once (the port
-	// taken) cannot have its false overwritten.
-	running_.store(true);
-	worker_ = std::thread([this, port] {
-		std::printf("[http] listening on :%u\n", static_cast<unsigned>(port));
+	// Crow binds inside run(), on the worker thread, and v1.2.0 says nothing
+	// when it serves: wait_for_server_start() never returns once run() has
+	// thrown first (the port taken). Its tick runs on the serving thread, after
+	// the bind and with the acceptor accepting, so the first tick hands start()
+	// the port Crow took (the OS's pick for port 0); later ticks find the
+	// handshake settled and return.
+	Impl &impl = *impl_;
+	app.tick(Impl::kServingTick, [&impl] {
+		std::lock_guard<std::mutex> lock(impl.run_mu);
+		if (impl.run != Impl::Run::Pending) return;
+		impl.run = Impl::Run::Serving;
+		impl.port = impl.app.port();
+		impl.run_cv.notify_all();
+	});
+	app.port(config.http_port).multithreaded();
+	worker_ = std::thread([&impl] {
 		try {
-			impl_->app.port(port).multithreaded().run();
+			impl.app.run();
 		} catch (const std::exception &e) {
 			std::fprintf(stderr, "[http] crashed: %s\n", e.what());
 		}
-		running_.store(false);
+		{
+			std::lock_guard<std::mutex> lock(impl.run_mu);
+			impl.run = Impl::Run::Exited;
+		}
+		impl.run_cv.notify_all();
 		std::printf("[http] loop exiting\n");
 	});
+
+	// Return once Crow serves. A run() that failed first fails the boot here
+	// (main() treats it as fatal) rather than leaving the HTTP layer dead.
+	bool serving = false;
+	{
+		std::unique_lock<std::mutex> lock(impl.run_mu);
+		impl.run_cv.wait(lock, [&impl] { return impl.run != Impl::Run::Pending; });
+		serving = impl.run == Impl::Run::Serving;
+		bound_port_ = impl.port;
+	}
+	if (!serving) {
+		worker_.join();
+		return false;
+	}
+	running_.store(true);
+	std::printf("[http] listening on :%u\n", static_cast<unsigned>(bound_port_));
 	return true;
 }
 
@@ -2197,19 +2237,15 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 }
 
 void HttpListener::stop() {
-	if (running_.load()) {
-		// run() starts on the worker thread after start() returns, and Crow's
-		// stop() before it built its server is a no-op that leaves run() to
-		// serve on forever; wait until it serves, then stop it. The stop
-		// closes every io_context, so a held-open connection does not keep
-		// run() up.
-		impl_->app.wait_for_server_start();
+	// start() returned true only once Crow served, so its stop() takes (one
+	// before run() built the server would be a no-op). The stop closes every
+	// io_context, so a held-open connection does not keep run() up.
+	if (running_.exchange(false)) {
 		impl_->app.stop();
 	}
 	if (worker_.joinable()) {
 		worker_.join();
 	}
-	running_.store(false);
 }
 
 } // namespace opennova::novaworld_server
