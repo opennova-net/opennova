@@ -258,7 +258,8 @@ static int malformed() {
 // def_notes.h), the edit its own line.
 static int ignored_input() {
 	editor_test::TempProjectDir dir("opennova_catalog_ignored_test");
-	const std::string text = "begin \"One\"\nid 100001\ntype marker\nsubtype Ruins\nattrib: good nodie\nend\n";
+	// (Train: an attrib word the game matches and skips; Good, which the mission editor reads, is modeled.)
+	const std::string text = "begin \"One\"\nid 100001\ntype marker\nsubtype Ruins\nattrib: train nodie\nend\n";
 	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), text));
 	DefCatalogDocument document; Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
@@ -271,7 +272,7 @@ static int ignored_input() {
 	std::string saved, message;
 	TEST_EXPECT(opennova::io::read_file_text(dir.file("items.def"), saved, message));
 	// (the new line after the record's lines, indented as they are)
-	TEST_EXPECT(saved == editor_test::crlf("begin \"One\"\nid 100001\ntype marker\nsubtype Ruins\nattrib: good nodie\nhp 20\nend\n"));
+	TEST_EXPECT(saved == editor_test::crlf("begin \"One\"\nid 100001\ntype marker\nsubtype Ruins\nattrib: train nodie\nhp 20\nend\n"));
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.ignored_lines() == 2 && document.issues().size() == 2);
 	TEST_EXPECT((row_at(document, 0).native.as<DefItemDef>().attrib & DEF_ITEM_ATTRIB_NODIE) != 0);
