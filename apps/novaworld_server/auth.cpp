@@ -108,15 +108,20 @@ uint64_t password_verifications() {
 	return g_password_verifications.load(std::memory_order_relaxed);
 }
 
-std::string loggable(std::string_view text) {
-	constexpr size_t kMax = 64;
+std::string loggable(std::string_view text, size_t max_bytes) {
 	std::string out;
-	out.reserve(std::min(text.size(), kMax) + 2);
-	for (size_t i = 0; i < text.size() && i < kMax; ++i) {
-		const auto c = static_cast<unsigned char>(text[i]);
-		out.push_back(c < 0x20 || c == 0x7f ? '?' : static_cast<char>(c));
+	out.reserve(std::min(text.size(), max_bytes) + 2);
+	for (size_t i = 0; i < text.size() && i < max_bytes; ++i) {
+		const auto byte = static_cast<unsigned char>(text[i]);
+		if (byte < 0x20 || byte == 0x7F) {
+			char escaped[8];
+			std::snprintf(escaped, sizeof(escaped), "\\x%02X", static_cast<unsigned>(byte));
+			out += escaped;
+		} else {
+			out.push_back(text[i]);
+		}
 	}
-	if (text.size() > kMax) out += "..";
+	if (text.size() > max_bytes) out += "..";
 	return out;
 }
 

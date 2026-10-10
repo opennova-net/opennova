@@ -197,6 +197,19 @@ int test_authenticate(Database &db, int64_t alice) {
 	return 0;
 }
 
+// loggable(): a control byte as \xNN (no client string can forge a log line),
+// the text cut after max_bytes with "..".
+int test_loggable(Database &, int64_t) {
+	TEST_EXPECT(nws::loggable("alice") == "alice");
+	TEST_EXPECT(nws::loggable("a\nb\r\x7f\x01") == "a\\x0Ab\\x0D\\x7F\\x01");
+	TEST_EXPECT(nws::loggable(std::string(64, 'u')) == std::string(64, 'u'));
+	TEST_EXPECT(nws::loggable(std::string(65, 'u')) == std::string(64, 'u') + "..");
+	const std::string line(300, 'c');
+	TEST_EXPECT(nws::loggable(line, line.size()) == line);
+	TEST_EXPECT(nws::loggable("abcdef", 3) == "abc..");
+	return 0;
+}
+
 // A new password or an inactive status ends the account's sessions in the
 // same update: after a reset the old session is gone, and a ban lifted
 // before the session was ever used again revives nothing. Other edits keep
@@ -363,6 +376,7 @@ int main() {
 		{"sliding_expiry", test_sliding_expiry},
 		{"delete_and_prune", test_delete_and_prune},
 		{"authenticate", test_authenticate},
+		{"loggable", test_loggable},
 		{"update_revokes_sessions", test_update_revokes_sessions},
 		{"inactive_and_deleted_accounts", test_inactive_and_deleted_accounts},
 		{"bootstrap_and_roles", test_bootstrap_and_roles},

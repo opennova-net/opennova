@@ -267,6 +267,9 @@ int main() {
 	SessionStore sessions;
 	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
+	// The admin host routes push ServerCommand / ServerStopHosting through the
+	// NW UDP listener, which outlives this one (stopped after it below).
+	http.set_nw_udp_listener(&nwudp);
 	if (!http.start(listening)) {
 		std::fprintf(stderr, "[boot] FATAL: HTTP listener start failed\n");
 		return 1;

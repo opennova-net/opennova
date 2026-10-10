@@ -140,9 +140,11 @@ BootstrapAdminResult bootstrap_admin(opennova::db::Database &db, const std::stri
 // password's.
 uint64_t password_verifications();
 
-// `text` as a log line may carry it: control bytes as '?', cut at 64 bytes.
-// For usernames and other client-supplied strings.
-std::string loggable(std::string_view text);
+// `text` as a log line may carry it: each control byte (below 0x20, or 0x7F)
+// as \xNN, so no client input can forge a line, and cut after `max_bytes`
+// bytes (".." marks the cut). For usernames, URLs, admin ServerCommand lines
+// and other client-supplied strings.
+std::string loggable(std::string_view text, size_t max_bytes = 64);
 
 struct UpdateGameAccessParams {
 	std::string game_slug;

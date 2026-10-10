@@ -23,12 +23,15 @@
 #include "http_listener.h"
 #include "net_http.h"
 #include "net_sockets.h"
+#include "nw_udp_listener.h"
 #include "server_config.h"
 #include "session_store.h"
 #include "web_session.h"
 
 #include <base/io/sha256.h>
 #include <net/novacrypto/epask.h>
+#include <net/napi/session.h>
+#include <net/novaworld/client_session.h>
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/db/sqlite.h>
 #include <net/novaworld/gsb.h>
@@ -77,6 +80,7 @@ constexpr const char *kCsrf = "X-OpenNova-Request: 1";
 struct Harness {
 	ConnectionPool &pool;
 	nws::SessionStore &sessions; // the listener's, for what a reply only names by its tag
+	nws::NwUdpListener &nw_udp;  // the push routes' channel, a real listener on loopback
 	uint16_t port = 0;
 	// A second listener on the same database with the Secure session cookie
 	// (ONNET_COOKIE_SECURE) and no trusted proxy.
@@ -793,10 +797,11 @@ int test_admin_routes_by_credential(Harness &h) {
 	return 0;
 }
 
-// Every /api/admin/* route: no credential is 401, a player's session 403 (the
-// CSRF header sent, so the role is what refuses), and an admin's session
-// without the CSRF header 403 on a state change and 200 on a read. Nothing a
-// refused request names is touched (the user routes name no account).
+// Every /api/admin/* route, the ServerCommand / ServerStopHosting pushes
+// included: no credential is 401, a player's session 403 (the CSRF header
+// sent, so the role is what refuses), and an admin's session without the CSRF
+// header 403 on a state change and 200 on a read. Nothing a refused request
+// names is touched (the user and host routes name no account or RID).
 int test_admin_routes_table(Harness &h) {
 	const int64_t admin_id = make_account(h, "web_table_admin", "pw-table-admin");
 	TEST_EXPECT(admin_id > 0 && make_account(h, "web_table_player", "pw-table-player") > 0);
@@ -818,6 +823,8 @@ int test_admin_routes_table(Harness &h) {
 		{"PUT", "/api/admin/users/999999", "{\"nwh\":\"1\"}"},
 		{"PUT", "/api/admin/users/999999/game-access",
 		 "{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}"},
+		{"POST", "/api/admin/hosts/999999/command", "{\"verb\":\"Cycle\"}"},
+		{"POST", "/api/admin/hosts/999999/stop", ""},
 	};
 	const auto users_before = nws::list_users(*h.pool.acquire()).size();
 	const auto status_before = nws::get_server_status(*h.pool.acquire());
@@ -1294,6 +1301,213 @@ int test_menu_urls_name_bound_port(Harness &h) {
 	return 0;
 }
 
+// A host's NovaWorld session on loopback against the harness's NwUdpListener: a ClientSession
+// verified and hosting, pumped by the test while it waits for what the service pushes.
+class PushHost {
+public:
+	explicit PushHost(uint16_t service_port) : session_(config()) {
+		socket_ = net::ScopedSocket(net::udp_bind(0));
+		service_.ip = {127, 0, 0, 1};
+		service_.port = service_port;
+	}
+
+	// Verified, then a ClientHostRequest answered with success; false on a timeout.
+	bool host(const std::string &server_name) {
+		if (!socket_.is_valid()) return false;
+		send(session_.start());
+		pump_until(8000, [this] { return session_.is_verified(); });
+		if (!session_.is_verified()) return false;
+		session_.queue_statement(opennova::make_client_host_request(
+				0, {{0, "NWUID", session_.server_nwuid()}},
+				{{0, "LobbyName", "jop_2_consumer"}, {0, "MaxPlayers", "8"}},
+				{{0, "ServerName", server_name}, {0, "Players", "1"}}, {{0, "PlayerName", "Host"}}));
+		return wait_notice(Notice::Kind::HostResult, 3000) != nullptr &&
+		       session_.host_state() == opennova::ClientSession::HostState::Established;
+	}
+
+	using Notice = opennova::ClientSession::Notice;
+	// The first notice of `kind` the session raised, pumping up to `ms` for it; null on a timeout.
+	const Notice *wait_notice(Notice::Kind kind, int ms) {
+		pump_until(ms, [this, kind] { return find(kind) != nullptr; });
+		return find(kind);
+	}
+	void clear_notices() { notices_.clear(); }
+	void goodbye() { send(session_.build_goodbye()); }
+
+private:
+	static opennova::ClientSession::Config config() {
+		opennova::ClientSession::Config cfg;
+		cfg.client_index = 0x48545450u;
+		cfg.client_key = 0x50555348u;
+		cfg.na = "http:push";
+		cfg.cookie_vars = []() {
+			return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+		};
+		return cfg;
+	}
+	void send(const std::vector<uint8_t> &dg) {
+		if (!dg.empty()) net::udp_send_to(socket_.get(), service_, dg.data(), dg.size());
+	}
+	const Notice *find(Notice::Kind kind) const {
+		for (const Notice &n : notices_) {
+			if (n.kind == kind) return &n;
+		}
+		return nullptr;
+	}
+	template <class Done> void pump_until(int ms, Done done) {
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+		uint8_t rx[4096];
+		while (std::chrono::steady_clock::now() < deadline && !done()) {
+			net::Endpoint from;
+			const int n = net::udp_recv_from(socket_.get(), rx, sizeof rx, from, 20);
+			std::vector<std::vector<uint8_t>> out;
+			if (n > 0) session_.handle_datagram(rx, static_cast<size_t>(n), out);
+			session_.finish_receive_batch(out);
+			session_.pump(out);
+			session_.process_periodic_update();
+			for (const auto &dg : out) send(dg);
+			for (Notice &notice : session_.take_notices()) notices_.push_back(std::move(notice));
+		}
+	}
+
+	opennova::ClientSession session_;
+	net::ScopedSocket socket_;
+	net::Endpoint service_{};
+	std::vector<Notice> notices_;
+};
+
+// POST /api/admin/hosts/<rid>/command and /stop: admin-gated (the Bearer token, or an admin
+// session with the CSRF header; the admin table case pins the refusals); a body the composer
+// refuses is a 400 with its reason; a RID no connection holds is a 404; a hosting connection's
+// RID is a 202, and the statement reaches that host's session; a stopped host's RID is a 409.
+int test_admin_host_push(Harness &h) {
+	const std::string valid = "{\"verb\":\"SetServerName\",\"args\":[\"Route Name\"]}";
+	auto command = [&h](const std::string &rid, const std::string &body, bool bearer = true) {
+		std::vector<std::string> headers = {kJson};
+		if (bearer) headers.push_back(kBearer);
+		return h.send("POST", "/api/admin/hosts/" + rid + "/command", headers, body);
+	};
+	auto stop = [&h](const std::string &rid, bool bearer = true) {
+		std::vector<std::string> headers;
+		if (bearer) headers.push_back(kBearer);
+		return h.send("POST", "/api/admin/hosts/" + rid + "/stop", headers);
+	};
+	auto error_of = [](const net::HttpReply &reply) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("error") ? str(json["error"]) : std::string("<none>");
+	};
+	auto message_of = [](const net::HttpReply &reply) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("message") ? str(json["message"]) : std::string();
+	};
+
+	// The admin check, before anything else is read.
+	auto reply = command("1", valid, /*bearer=*/false);
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	TEST_EXPECT(has_header(reply, "WWW-Authenticate"));
+	reply = h.send("POST", "/api/admin/hosts/1/command", {kJson, "Authorization: Bearer wrong-token"}, valid);
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = stop("1", /*bearer=*/false);
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+
+	// The composer's refusals, each with its reason.
+	struct Refused {
+		const char *body;
+		const char *reason; // a substring of the message
+	};
+	const Refused refused[] = {
+		{"not json", ""},
+		{"{\"args\":[\"x\"]}", "verb"},
+		{"{\"verb\":\"Nope\"}", "no ServerCommand verb"},
+		{"{\"verb\":\"PuntPlayer\",\"args\":[\"3\"]}", "needs a target suffix"},
+		{"{\"verb\":\"Cycle\",\"target\":\"ByName\"}", "takes no target suffix"},
+		{"{\"verb\":\"Cycle\",\"target\":\"ByNumber\"}", "\"target\""},
+		{"{\"verb\":\"SetServerName\"}", "token-count gate"},
+		{"{\"verb\":\"TextChatPlayer\",\"target\":\"ByName\",\"args\":[\"Some Guy\"]}", "token-count gate"},
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"say \\\"hi\\\"\"]}", "double quote"},
+		{"{\"verb\":\"Cycle\",\"args\":[3]}", "list of strings"},
+		// Control bytes: the stock reader would carry them inside quotes, and a host would save
+		// a LF into game.cfg as a line of its own (the service's input rule, not the composer's).
+		{"{\"verb\":\"SetServerName\",\"args\":[\"Evil\\nmpreset = \\\"1\\\"\"]}", "control byte"},
+		{"{\"verb\":\"SetServerMsg\",\"args\":[\"a\\rb\"]}", "control byte"},
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"tab\\there\"]}", "control byte"},
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"del\\u007f\"]}", "control byte"},
+	};
+	for (const Refused &r : refused) {
+		reply = command("1", r.body);
+		if (!reply.transport_ok || reply.code != 400 ||
+		    message_of(reply).find(r.reason) == std::string::npos) {
+			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
+		}
+		TEST_EXPECT(reply.transport_ok && reply.code == 400);
+		TEST_EXPECT(message_of(reply).find(r.reason) != std::string::npos);
+	}
+	reply = command("1", "{\"verb\":\"Cycle\",\"args\":[\"" + std::string(506, 'a') + "\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(message_of(reply).find("511") != std::string::npos);
+
+	// A RID no connection holds.
+	for (const char *rid : {"0", "999999", "99999999999"}) {
+		reply = command(rid, valid);
+		TEST_EXPECT(reply.transport_ok && reply.code == 404);
+		TEST_EXPECT(error_of(reply) == "unknown_rid");
+		reply = stop(rid);
+		TEST_EXPECT(reply.transport_ok && reply.code == 404);
+	}
+
+	// A hosting connection: the command is queued and reaches its session.
+	PushHost host(h.nw_udp.bound_port());
+	TEST_EXPECT(host.host("Route Push Host"));
+	uint32_t rid = 0;
+	for (const auto &entry : h.nw_udp.snapshot_hosted()) {
+		if (entry.lobby.server_name == "Route Push Host") rid = entry.lobby.rid;
+	}
+	TEST_EXPECT(rid != 0);
+	const std::string rid_text = std::to_string(rid);
+	reply = command(rid_text, valid);
+	if (reply.code != 202) std::fprintf(stderr, "  command: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["status"]) == "queued");
+	TEST_EXPECT(json && json["rid"].i() == static_cast<int64_t>(rid));
+	TEST_EXPECT(json && str(json["statement"]) == "ServerCommand");
+	TEST_EXPECT(json && str(json["cmd"]) == "SetServerName \"Route Name\"");
+	const PushHost::Notice *cmd = host.wait_notice(PushHost::Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.verb == opennova::ServerCommandVerb::SetServerName);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"Route Name"});
+
+	// An admin's website session pushes too, with the CSRF header (the
+	// bootstrap case made web_boss the admin).
+	const std::string admin = login_token(h, "10.14.0.1", "web_boss", "pw-boss");
+	TEST_EXPECT(!admin.empty());
+	host.clear_notices();
+	reply = h.send("POST", "/api/admin/hosts/" + rid_text + "/command",
+	               {kJson, kCsrf, with_session(admin)},
+	               "{\"verb\":\"SetServerName\",\"args\":[\"Session Name\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	cmd = host.wait_notice(PushHost::Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"Session Name"});
+
+	// The stop: queued, the host's session reads the sysop-punt code, the RID is then not hosting.
+	reply = stop(rid_text);
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["statement"]) == "ServerStopHosting");
+	TEST_EXPECT(json && json["msg_code"].i() == 7);
+	const PushHost::Notice *stopped = host.wait_notice(PushHost::Notice::Kind::StopHosting, 3000);
+	TEST_EXPECT(stopped != nullptr);
+	TEST_EXPECT(stopped->msg_key == "NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT");
+	reply = stop(rid_text);
+	TEST_EXPECT(reply.transport_ok && reply.code == 409);
+	TEST_EXPECT(error_of(reply) == "not_hosting");
+	reply = command(rid_text, valid);
+	TEST_EXPECT(reply.transport_ok && reply.code == 409);
+	host.goodbye();
+	return 0;
+}
+
 // The static/catch-all family answers a path no root holds with 404.
 int test_unknown_path_404(Harness &h) {
 	const auto reply = h.send("GET", "/definitely/missing.txt");
@@ -1328,6 +1542,7 @@ int run(Harness &h) {
 		{"nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey},
 		{"menu_urls_name_bound_port", test_menu_urls_name_bound_port},
 		{"unknown_path_404", test_unknown_path_404},
+		{"admin_host_push", test_admin_host_push},
 		{"concurrent_requests", test_concurrent_requests},
 	};
 	for (const Case &c : cases) {
@@ -1387,8 +1602,19 @@ int main() {
 		config.trusted_proxies = {"127.0.0.1"};
 
 		opennova::ConnectionManager manager;
+		// The push routes' channel, as main() wires it: a real NW UDP listener on a port the
+		// OS picks, with no DB pool (the hosted row lives in its memory only, so the host
+		// cases leave active_hosts as the other cases expect it).
+		nws::NwUdpListener nw_udp(manager);
+		manager.on_lost([&nw_udp](const opennova::Connection &c, opennova::DropReason r) {
+			nw_udp.erase_lobby_state(c.addr, opennova::drop_reason_name(r));
+		});
+		nws::ServerConfig udp_config;
+		udp_config.nw_udp_port = 0;
+		TEST_EXPECT(nw_udp.start(udp_config));
 		nws::SessionStore sessions;
 		nws::HttpListener http(manager, pool, sessions);
+		http.set_nw_udp_listener(&nw_udp);
 		TEST_EXPECT(http.start(config));
 		TEST_EXPECT(http.bound_port() != 0);
 
@@ -1401,11 +1627,13 @@ int main() {
 		TEST_EXPECT(secure_http.start(secure_config));
 		TEST_EXPECT(secure_http.bound_port() != 0);
 
-		Harness harness{pool, sessions, http.bound_port(), secure_http.bound_port(), {}};
+		Harness harness{pool, sessions, nw_udp, http.bound_port(), secure_http.bound_port(), {}};
 		rc = run(harness);
-		// Join the Crow threads before the pool and the TempDir go.
+		// Join the Crow threads before the pool and the TempDir go, then the
+		// NW UDP listener the push routes held.
 		secure_http.stop();
 		http.stop();
+		nw_udp.stop();
 	}
 	net::shutdown();
 	if (rc == 0) std::printf("OK: http routes\n");

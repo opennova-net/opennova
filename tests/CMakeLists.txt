@@ -3628,6 +3628,25 @@ target_include_directories(nw_lobby_resend_e2e_test PRIVATE
 add_test(NAME nw_lobby_resend_e2e COMMAND nw_lobby_resend_e2e_test)
 set_tests_properties(nw_lobby_resend_e2e PROPERTIES RUN_SERIAL TRUE)
 
+# The service's ServerCommand / ServerStopHosting pushes to a listed host, through
+# the real listener over loopback UDP (same listener-source recipe as above): the
+# RID resolves once hosting, the pushes land as the host session's notices, a
+# lost push comes back after the send-interval leg's gap and the client's 0x44,
+# and the stop takes the row out of the browser. Its one-second recovery window
+# is a protocol assertion, so it runs serially.
+add_executable(nw_server_command_push_e2e_test
+    novaworld/nw_server_command_push_e2e_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(nw_server_command_push_e2e_test
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_app_common)
+target_include_directories(nw_server_command_push_e2e_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server
+    ${CMAKE_SOURCE_DIR}/apps/common)
+add_test(NAME nw_server_command_push_e2e COMMAND nw_server_command_push_e2e_test)
+set_tests_properties(nw_server_command_push_e2e PROPERTIES RUN_SERIAL TRUE)
+
 # ADR 0010 Phase 3 — EPASK account-login wire format. Builds the NWLogin.dll
 # credential POST body with the login helpers and decodes it through a copy of
 # the server's parse_form_body + EPASK path, then checks the cookie jar carries
@@ -4399,6 +4418,18 @@ target_include_directories(opennova_serve_novaworld_test
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME opennova_serve_novaworld COMMAND opennova_serve_novaworld_test)
 set_tests_properties(opennova_serve_novaworld PROPERTIES RUN_SERIAL TRUE)
+# The service's pushes to a listed opennova-serve over its NovaWorld session (the same setup):
+# a pushed SetServerName renames the match and saves game.cfg, a pushed Cycle changes the map,
+# a pushed ServerStopHosting ends the listing, an unknown RID is refused.
+add_executable(opennova_serve_server_command_push_test
+    serve/opennova_serve_server_command_push_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(opennova_serve_server_command_push_test PRIVATE opennova_serve_core opennova_novaworld_service)
+target_include_directories(opennova_serve_server_command_push_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME opennova_serve_server_command_push COMMAND opennova_serve_server_command_push_test)
+set_tests_properties(opennova_serve_server_command_push PROPERTIES RUN_SERIAL TRUE)
 # opennova-serve's remote-admin server (ADR 0051 PR5b) over real loopback TCP, with a LAN joiner
 # in a synthetic two-map rotation: the login, PLAYER LIST, the MISSION verbs (ADD ONESHOT at a
 # position, SETNEXT, CYCLE, the one-shot's removal), SET and game.cfg's save, CHAT SEND as S2C
