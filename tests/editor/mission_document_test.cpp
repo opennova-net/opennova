@@ -1306,7 +1306,13 @@ int test_witnessed_rules() {
 	// Entity_UpdateInfantryPlayerBody @0x4b60b6..0x4b60c4]; a type no case of the walk reads, nothing.
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "type", int64_t(3)), error) &&
 	            use(box, "ref_id").applies == Applicability::Reads &&
-	            std::string(use(box, "ref_id").label) == "Mission name (its first four characters)");
+	            std::string(use(box, "ref_id").label) == "Mission name (its first four characters)" &&
+	            use(box, "reserved0").applies == Applicability::Reads &&
+	            std::string(use(box, "reserved0").label) == "Mission name (its last four characters)" &&
+	            use(box, "mission").applies == Applicability::Reads);
+	Value word;
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "mission", std::string("CP02")), error) &&
+	            document->get(box, "ref_id", word) && std::get<int64_t>(word) == 0x32305043);
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "type", int64_t(9)), error) &&
 	            use(box, "ref_id").applies == Applicability::Ignored);
 	while (document->can_undo()) document->undo();

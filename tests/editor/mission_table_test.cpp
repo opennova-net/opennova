@@ -510,6 +510,17 @@ int test_fields() {
 	const RecordHandle reset = list_of(MissionKind::Event, MissionKind::Action).ops.at(rows_of(m, MissionKind::Event)[1], 0);
 	TEST_EXPECT(actions.applies(actions.find("param1"))(reset, RecordOwners{}) == Applicability::Reads &&
 	            actions.applies(actions.find("param2"))(reset, RecordOwners{}) == Applicability::Ignored);
+	// A box's name and second word are read on a Mission box alone; its value on a type the game reads.
+	with_box(m);
+	const TableKind &boxes = *T().kind(k(MissionKind::BoundingBox));
+	const RecordHandle box = nested(m, MissionKind::BoundingBox, file.bounding_boxes.size() - 1);
+	const auto box_reads = [&](const char *key) { return boxes.applies(boxes.find(key))(box, RecordOwners{}); };
+	TEST_EXPECT(schema(MissionKind::BoundingBox, "mission").label == "Mission name" &&
+	            box_reads("ref_id") == Applicability::Reads && box_reads("mission") == Applicability::Ignored &&
+	            box_reads("reserved0") == Applicability::Ignored);
+	TEST_EXPECT(set(box, "mission", std::string("CP02"), error) && set(box, "type", int64_t(3), error) &&
+	            box_reads("mission") == Applicability::Reads && box_reads("reserved0") == Applicability::Reads);
+	file.bounding_boxes.pop_back();
 
 	const RecordHandle entry = nested(m, MissionKind::Loadout, 0);
 	TEST_EXPECT(!set(entry, "name", std::string(), error) && error == "Weapon loadout entries require a name");

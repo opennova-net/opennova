@@ -659,6 +659,13 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 		if (record)
 			if (const char *label = box_value_label(record.as<bms::BoundingBox>().type)) use.label = label;
 	}
+	// A Mission box's second word is its mission name's last four characters (bms::BoundingBoxType::Mission).
+	if (address.kind == k(K::BoundingBox) && id == "reserved0") {
+		const Node *node = row(address.row);
+		const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
+		if (record && record.as<bms::BoundingBox>().type == int32_t(bms::BoundingBoxType::Mission))
+			use.label = "Mission name (its last four characters)";
+	}
 	if (!address.child && address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0)
 		keyed(hud::kWinConditionKey, 1, 254);
 	// A Play dialog's or a Dialog trigger's number forms the dialog's name (audio::dialog_name_of's dlg%03i, a

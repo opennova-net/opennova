@@ -210,6 +210,9 @@ constexpr FieldLabel kLabels[] = {
 	{MissionRecord::BoundingBox, "max_z", "Max Z", "max", ""},
 	// A box's value, worded by its type (MissionDocument::refine_field, box_value_label).
 	{MissionRecord::BoundingBox, "ref_id", "Value", "", ""},
+	// A Mission box's two words as the name they hold (bms::BoundingBoxType::Mission), and the second alone.
+	{MissionRecord::BoundingBox, "mission", "Mission name", "", ""},
+	{MissionRecord::BoundingBox, "reserved0", "Second word", "", ""},
 };
 
 const FieldLabel *label_of(MissionRecord record, const char *key) {
@@ -618,6 +621,14 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 	if (field.record == MissionRecord::BoundingBox && same_text(field.key, "ref_id"))
 		out.applies = [](const RecordHandle &record, const RecordOwners &) {
 			return box_value_label(record.as<bms::BoundingBox>().type) ? Applicability::Reads : Applicability::Ignored;
+		};
+	// The box's second word is read as its mission name's last four characters alone [orig:
+	// Entity_UpdateInfantryPlayerBody @0x4b60aa..0x4b611e]: a Mission box's name and second word are read,
+	// any other type's are not.
+	if (field.record == MissionRecord::BoundingBox && (same_text(field.key, "mission") || same_text(field.key, "reserved0")))
+		out.applies = [](const RecordHandle &record, const RecordOwners &) {
+			return record.as<bms::BoundingBox>().type == int32_t(bms::BoundingBoxType::Mission) ? Applicability::Reads
+			                                                                                  : Applicability::Ignored;
 		};
 	return out;
 }
