@@ -323,6 +323,22 @@ uint32_t LobbySession::mint_rid() {
 	return 0x0A000000u | suffix;
 }
 
+void LobbySession::end_hosting(LobbyState &state, const char *reason) {
+	const uint32_t rid = state.rid;
+	state.hosting = false;
+	state.player_count = 0;
+	state.roster.clear();
+	if (db_ && rid != 0) {
+		try { hostdb::remove_host_by_rid(*db_, rid); }
+		catch (const std::exception &e) {
+			opennova::io::logf(opennova::io::LogLevel::kWarn,
+	"[lobby] WARN stop-host remove: %s", e.what());
+		}
+	}
+	opennova::io::logf(opennova::io::LogLevel::kInfo,
+	"[lobby] stopped rid=%u reason=%s", rid, reason);
+}
+
 LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
                                            LobbyState &state,
                                            const std::string &remote_ip,
@@ -403,19 +419,7 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		return {{}, name};
 	}
 	else if (name == "ClientStopHosting") {
-		const uint32_t rid = state.rid;
-		state.hosting = false;
-		state.player_count = 0;
-		state.roster.clear();
-		if (db_ && rid != 0) {
-			try { hostdb::remove_host_by_rid(*db_, rid); }
-			catch (const std::exception &e) {
-				opennova::io::logf(opennova::io::LogLevel::kWarn,
-		"[lobby] WARN stop-host remove: %s", e.what());
-			}
-		}
-		opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] stopped rid=%u reason=ClientStopHosting", rid);
+		end_hosting(state, "ClientStopHosting");
 		return {{}, "ClientStopHosting"};
 	}
 	else if (name == "ClientStopPlaying") {

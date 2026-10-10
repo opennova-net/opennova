@@ -91,6 +91,29 @@ it prunes `active_hosts` rows whose `updated_at` (refreshed by every
 This only catches rows the normal teardown somehow missed; `host_players` rows
 cascade. At boot the table is wiped entirely (previous-run cleanup).
 
+## Pushing statements to a listed server
+
+The service can send a hosting connection retail's two administrative statements over
+its own NovaWorld session: `ServerCommand` (one `Cmd` verb line; the host runs it, so
+the service can punt a player, rename the server, change its message, cycle the map
+and so on) and `ServerStopHosting` (`MsgCode` / `MsgParam1` / `MsgParam2`).
+`NwUdpListener::push_server_command` / `push_stop_hosting` resolve the RID to the
+hosting connection under `lobby_states_mu_` and queue the statement; the receive
+thread, which owns the socket, frames it on its next pass exactly as a reply (one
+reliable record on the connection's sequencing, retained until the client's ACK
+covers it) and answers a 0x44 for it from those records. Between receive batches the
+thread also runs the connection template's ACTIVE send-interval leg (CS field 5,
+1000 ms): a connection with records still unACKed past that interval gets a
+header-only packet, whose fresh sequence shows the client a gap if the push was lost.
+A `ServerStopHosting` also takes the server out of the browser once it is sent, since
+a stock host answers it with no `ClientStopHosting`. The admin routes (Bearer
+`ADMIN_API_TOKEN`):
+
+| Route | Body | Replies |
+| --- | --- | --- |
+| `POST /api/admin/hosts/<rid>/command` | `{"verb": "SetServerName", "target": "None", "args": ["New Name"]}` (`target` one of `None`, `ByIndex`, `ByIpAndPort`, `ByName`, `ByPCID`) | 202 queued (with the composed `cmd`); 400 when `server_command_text` refuses the line (with the reason); 404 unknown RID; 409 not hosting |
+| `POST /api/admin/hosts/<rid>/stop` | none | 202 queued (MsgCode 7, `NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT`); 404; 409 |
+
 ## Configuration
 
 All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,

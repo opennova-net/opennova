@@ -6,6 +6,7 @@
 #include <base/io/tick_rate.h>
 #include <net_sockets.h>
 #include <net/napi/envelope.h>
+#include <net/napi/session.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/connection/manager.h>
@@ -37,6 +38,7 @@
 #include <optional>
 #include <random>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -163,7 +165,88 @@ private:
 	std::deque<Pending> pending_;
 };
 
+// One lobby statement as the layer-4 record it rides in: the container alone in a root stream,
+// LEN8 or LEN16 by its size, at full message type 0, reliable (retained under its packet's
+// sequence until the client's ACK covers it, so a 0x44 resends it). Empty when it fails to encode.
+std::optional<ProtocolMessage> lobby_record(NapiMessage statement) {
+	std::vector<NapiMessage> root_stream{std::move(statement)};
+	std::vector<uint8_t> stream_bytes(napi_stream_size(root_stream));
+	size_t stream_size = 0;
+	if (napi_stream_encode(root_stream, stream_bytes.data(), stream_bytes.size(), &stream_size) !=
+	    0) {
+		return std::nullopt;
+	}
+	stream_bytes.resize(stream_size);
+
+	ProtocolMessage rpm;
+	rpm.flags.raw = (stream_size > 0xFF) ? opennova::PROTOCOL_MSG_FLAG_LEN16
+	                                     : opennova::PROTOCOL_MSG_FLAG_LEN8;
+	rpm.flags.len16 = stream_size > 0xFF;
+	rpm.flags.len8 = stream_size <= 0xFF;
+	rpm.tag = 0;
+	rpm.full_tag = 0;
+	rpm.length = static_cast<uint32_t>(stream_size);
+	rpm.payload = std::move(stream_bytes);
+	rpm.reliable = true; // retained until ACKed: a 0x44 resends it
+	return rpm;
+}
+
+// One send build on a lobby connection. The shared BuildOutgoingPackets planner splits the
+// records at the connection's CS field 13 (a long one leaves as FIRST/MID/FINAL records), and the
+// ONE seq/ack framer (ADR 0013) stamps each packet: session_id, seq_num = next_outbound_seq++,
+// ack_count = last_inbound_seq, connection_flags = 0. session_id = retail's local_key = retail's
+// ClientAuth.ck (per protocol_message.h's NapiNPProtocol_HandleSessionPacket witness); using
+// ClientHello.ci made retail TOSS our reply with code [4] — confirmed via _connectlog.txt
+// 2026-04-27. No records builds one header-only packet. `what` names the per-packet log line
+// (null: none).
+// [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430 — the ACK-only packet when the queue is
+//  empty @0x62847e..0x62848c, the per-packet send stamp @0x628605; NapiNPMessage_SplitAtLength
+//  @0x628350]
+void send_lobby_records(opennova::net::Socket &socket, const opennova::net::Endpoint &to,
+                        LobbyConnState &state, std::string_view server_scrk,
+                        const std::vector<ProtocolMessage> &records, const char *what) {
+	const std::string label = opennova::net::endpoint_to_string(to);
+	OutgoingPacketPlan plan = plan_outgoing_packets(state.sequencing, records,
+			packet_ceiling_bytes(state.cs.max_packet_bytes),
+			max_packets_per_build(state.cs.max_packets_per_tick),
+			OutgoingOverflow::DropRefused);
+	if (plan.overflow) {
+		std::fprintf(stderr, "[nwudp] %s — reply pool full (NP.C:MSGCRE, %u records)\n",
+		             label.c_str(), plan.overflow_count);
+	}
+	if (plan.encode_failed) {
+		std::fprintf(stderr, "[nwudp] %s — a record failed to encode\n", label.c_str());
+	}
+	if (plan.packets.empty()) plan.packets.emplace_back();
+	for (const std::vector<ProtocolMessage> &packet_records : plan.packets) {
+		std::vector<uint8_t> body_out;
+		if (!frame_session_packet(state.sequencing,
+		                          SessionCrypto{server_scrk, {}, state.client_ck},
+		                          packet_records, body_out)) {
+			std::fprintf(stderr, "[nwudp] %s — frame_session_packet failed\n", label.c_str());
+			break;
+		}
+		state.last_framed_send_ms = now_ms();
+		if (what != nullptr) {
+			std::printf("[nwudp]   sending %zu %s byte(s) (server_scrk=%zuB)\n", body_out.size(),
+			            what, server_scrk.size());
+		}
+		auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+		                                 std::move(body_out));
+		opennova::net::udp_send_to(socket, to, packet.data(), packet.size());
+	}
+}
+
 } // namespace
+
+const char *host_push_result_name(HostPushResult result) {
+	switch (result) {
+	case HostPushResult::Queued: return "queued";
+	case HostPushResult::UnknownRid: return "unknown_rid";
+	case HostPushResult::NotHosted: return "not_hosting";
+	}
+	return "unknown";
+}
 
 NwUdpListener::NwUdpListener(ConnectionManager &manager) : manager_(manager) {}
 
@@ -221,6 +304,7 @@ void NwUdpListener::reset_per_run_state(const char *reason) {
 		lobby_peers_.clear();
 		lobby_states_.clear();
 		parked_lobby_states_.clear();
+		host_pushes_.clear();
 	}
 
 	jo_peers_.clear();
@@ -374,6 +458,97 @@ std::vector<NwUdpListener::HostedSnapshot> NwUdpListener::snapshot_hosted() cons
 	return out;
 }
 
+HostPushResult NwUdpListener::push_server_command(uint32_t rid, const std::string &cmd) {
+	return queue_host_push(rid, make_server_command(cmd), /*ends_hosting=*/false);
+}
+
+HostPushResult NwUdpListener::push_stop_hosting(uint32_t rid, int msg_code, int msg_param1,
+                                                int msg_param2) {
+	return queue_host_push(rid, make_server_stop_hosting(msg_code, msg_param1, msg_param2),
+	                       /*ends_hosting=*/true);
+}
+
+// The RID is the service's own (LobbySession::mint_rid), kept by a connection after its hosting
+// ends and carried across a reconnect; a hosting connection holds it at most once.
+HostPushResult NwUdpListener::queue_host_push(uint32_t rid, NapiMessage statement,
+                                              bool ends_hosting) {
+	if (rid == 0) return HostPushResult::UnknownRid;
+	std::lock_guard<std::mutex> lk(lobby_states_mu_);
+	bool known = false;
+	for (const auto &[peer, state] : lobby_states_) {
+		if (state.lobby.rid != rid) continue;
+		known = true;
+		if (!state.lobby.hosting) continue;
+		std::printf("[nwudp] PUSH %s queued for rid=%u addr=%s\n", statement.name.c_str(), rid,
+		            peer_addr_to_string(peer).c_str());
+		host_pushes_.push_back(HostPush{peer, state.server_sk, std::move(statement), ends_hosting});
+		return HostPushResult::Queued;
+	}
+	return known ? HostPushResult::NotHosted : HostPushResult::UnknownRid;
+}
+
+// Each push goes out as its own send build, in queue order, on the connection the RID resolved
+// to; one replaced (a fresh 0x42 mints a new SK) or dropped since is skipped.
+void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
+	std::lock_guard<std::mutex> lk(lobby_states_mu_);
+	if (host_pushes_.empty()) return;
+	std::vector<HostPush> pushes;
+	pushes.swap(host_pushes_);
+	for (HostPush &push : pushes) {
+		const std::string name = push.statement.name;
+		const std::string addr = peer_addr_to_string(push.peer);
+		const auto it = lobby_states_.find(push.peer);
+		if (it == lobby_states_.end() || it->second.server_sk != push.server_sk) {
+			std::printf("[nwudp] PUSH %s to %s dropped: the connection is gone\n", name.c_str(),
+			            addr.c_str());
+			continue;
+		}
+		LobbyConnState &state = it->second;
+		std::optional<ProtocolMessage> record = lobby_record(std::move(push.statement));
+		if (!record) {
+			std::fprintf(stderr, "[nwudp] PUSH %s to %s failed to encode\n", name.c_str(),
+			             addr.c_str());
+			continue;
+		}
+		std::vector<ProtocolMessage> records;
+		records.push_back(std::move(*record));
+		send_lobby_records(socket, opennova::net::NetDatagramSocket::to_endpoint(push.peer), state,
+		                   state.server_scrk, records, "push");
+		std::printf("[nwudp] PUSH %s -> %s rid=%u\n", name.c_str(), addr.c_str(), state.lobby.rid);
+		if (push.ends_hosting && state.lobby.hosting) {
+			lobby_session_.end_hosting(state.lobby, "ServerStopHosting");
+		}
+	}
+}
+
+// PumpSendIntervals' ACTIVE leg on the service's end of each lobby connection: reliable records
+// still retained (not yet ACKed) and more than CS field 5 since the connection's last framed
+// packet -> a build with nothing queued, one header-only packet. Its fresh sequence shows the
+// client a gap below it when the packet before was lost, and the client's receive batch asks for
+// the gap with a 0x44, which the resend leg answers from the retained records. A reply always has
+// the client's next statement behind it to surface a loss; a push may have nothing, and without
+// this leg a lost one would wait for the host's next refresh. Policy: the retail service's own
+// pump is unwitnessed, so this runs the leg of the NAPI connection template the 0x82 advertises
+// (the NOVAWORLDUDP template, the same list in both directions: field 5 = 1000 ms). Only the
+// ACTIVE leg runs here; the EMPTY keepalive (field 4) and the timed missing-sequence leg (field
+// 6, off in the template) do not.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628fd0 — the active leg @0x628ff1..0x629017,
+//  the build @0x62906f..0x629089; CNapiGameSession_InitNPConnection @0x4d3e1f (the template)]
+void NwUdpListener::pump_send_intervals(opennova::net::Socket &socket) {
+	const uint64_t now = now_ms();
+	std::lock_guard<std::mutex> lk(lobby_states_mu_);
+	for (auto &[peer, state] : lobby_states_) {
+		if (state.cs.active_send_interval_ms < 0) continue;
+		if (state.sequencing.retained_outbound_message_count == 0) continue;
+		if (now - state.last_framed_send_ms <=
+		    static_cast<uint64_t>(state.cs.active_send_interval_ms)) {
+			continue;
+		}
+		send_lobby_records(socket, opennova::net::NetDatagramSocket::to_endpoint(peer), state,
+		                   state.server_scrk, {}, nullptr);
+	}
+}
+
 void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
                              std::optional<db::ConnectionPool::Lease> db_conn) {
 	lobby_session_.set_database(db_conn ? db_conn->get() : nullptr);
@@ -405,6 +580,10 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					next_pump += pump_period;
 				} while (next_pump <= now);
 			}
+			// The lobby connections' own sends between receive batches: the statements other
+			// threads queued for a hosting connection, then the send-interval leg.
+			drain_host_pushes(socket.get());
+			pump_send_intervals(socket.get());
 		}
 
 		opennova::net::Endpoint from{};
@@ -865,27 +1044,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 							}
 						}
 						for (auto &reply_container : result.reply_containers) {
-							std::vector<NapiMessage> root_stream{std::move(reply_container)};
-							std::vector<uint8_t> stream_bytes(napi_stream_size(root_stream));
-							size_t stream_size = 0;
-							if (napi_stream_encode(root_stream, stream_bytes.data(),
-							                       stream_bytes.size(), &stream_size) != 0) {
-								continue;
+							if (auto rpm = lobby_record(std::move(reply_container))) {
+								replies.push_back(std::move(*rpm));
 							}
-							stream_bytes.resize(stream_size);
-
-							ProtocolMessage rpm;
-							rpm.flags.raw = (stream_size > 0xFF)
-									? opennova::PROTOCOL_MSG_FLAG_LEN16
-									: opennova::PROTOCOL_MSG_FLAG_LEN8;
-							rpm.flags.len16 = stream_size > 0xFF;
-							rpm.flags.len8  = stream_size <= 0xFF;
-							rpm.tag = 0;
-							rpm.full_tag = 0;
-							rpm.length = static_cast<uint32_t>(stream_size);
-							rpm.payload = std::move(stream_bytes);
-							rpm.reliable = true; // retained until ACKed: a 0x44 resends it
-							replies.push_back(std::move(rpm));
 						}
 					}
 				}
@@ -898,44 +1059,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 				}
 			}
 
-			// The shared BuildOutgoingPackets planner splits the replies at the connection's
-			// CS field 13 (a long reply leaves as FIRST/MID/FINAL records), and the ONE seq/ack
-			// framer (ADR 0013) stamps each packet: session_id, seq_num = next_outbound_seq++,
-			// ack_count = last_inbound_seq, connection_flags = 0. session_id = retail's
-			// local_key = retail's ClientAuth.ck (per protocol_message.h's
-			// NapiNPProtocol_HandleSessionPacket witness); using conn_opt->id (= ClientHello.ci)
-			// made retail TOSS our reply with code [4] — confirmed via _connectlog.txt
-			// 2026-04-27. Every SESSION is answered, header-only when nothing replies.
-			// [orig: CNapiNPConnection_BuildOutgoingPackets @0x628430;
-			//  NapiNPMessage_SplitAtLength @0x628350]
-			OutgoingPacketPlan plan = plan_outgoing_packets(lobby_state.sequencing, replies,
-					packet_ceiling_bytes(lobby_state.cs.max_packet_bytes),
-					max_packets_per_build(lobby_state.cs.max_packets_per_tick),
-					OutgoingOverflow::DropRefused);
-			if (plan.overflow) {
-				std::fprintf(stderr, "[nwudp] %s — reply pool full (NP.C:MSGCRE, %u records)\n",
-				             client_label.c_str(), plan.overflow_count);
-			}
-			if (plan.encode_failed) {
-				std::fprintf(stderr, "[nwudp] %s — a reply failed to encode\n",
-				             client_label.c_str());
-			}
-			if (plan.packets.empty()) plan.packets.emplace_back();
-			for (const std::vector<ProtocolMessage> &packet_records : plan.packets) {
-				std::vector<uint8_t> body_out;
-				if (!frame_session_packet(lobby_state.sequencing,
-				                          SessionCrypto{conn_opt->server_scrk, {}, lobby_state.client_ck},
-				                          packet_records, body_out)) {
-					std::fprintf(stderr, "[nwudp] %s — frame_session_packet failed\n",
-					             client_label.c_str());
-					break;
-				}
-				std::printf("[nwudp]   sending %zu reply byte(s) (server_scrk=%zuB)\n",
-				            body_out.size(), conn_opt->server_scrk.size());
-				auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
-				                                 std::move(body_out));
-				opennova::net::udp_send_to(socket.get(), from, packet.data(), packet.size());
-			}
+			// Every SESSION is answered, header-only when nothing replies (send_lobby_records).
+			send_lobby_records(socket.get(), from, lobby_state, conn_opt->server_scrk, replies,
+			                   "reply");
 			break;
 		}
 
