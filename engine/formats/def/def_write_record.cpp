@@ -508,6 +508,9 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 					second &= ~def_item_attrib2_keyword_bit(i);
 				}
 			if (item.attrib_parent) tokens.push_back("parent");
+			// The mission editor's side words, which the game matches and keeps nothing of (DefItemDef::attrib_good).
+			if (item.attrib_good) tokens.push_back("good");
+			if (item.attrib_evil) tokens.push_back("evil");
 			if (first || second) fail(name, property.key, "Attributes contain bits without an authored token.");
 			for (size_t from = 0; from < tokens.size(); from += kDefAttribTokensPerLine)
 				line("attrib:", std::vector<std::string>(tokens.begin() + std::ptrdiff_t(from),

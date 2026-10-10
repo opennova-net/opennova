@@ -111,24 +111,17 @@ int main() {
 		     << "Mission servetst.bms\r\n";
 	}
 
-	// Started with the listing: the socket binds, the session hosts, then the
-	// mission boots. A port the probe released can be taken in between: retry.
-	std::unique_ptr<serve::Server> holder;
+	// Started with the listing: the socket binds (--lan-port 0, the port the OS
+	// picks), the session hosts on it, then the mission boots.
 	std::string error;
-	bool started = false;
-	for (int attempt = 0; attempt < 5 && !started; ++attempt) {
-		serve::ServeOptions options;
-		std::string parse_error;
-		CHECK(serve::parse_serve_options(
-				{"--resource-dir", dir.string(), "/HOST", (dir / "test.host").string(), "--loose-root",
-						"--lan-port", std::to_string(serve_test::free_udp_port()), "--master-host", "127.0.0.1",
-						"--master-gate-port",
-						std::to_string(gate_port)},
-				options, parse_error) == 0);
-		holder = std::make_unique<serve::Server>(options);
-		started = holder->start(error);
-		if (!started && error.find("bind scan") == std::string::npos) break;
-	}
+	serve::ServeOptions options;
+	CHECK(serve::parse_serve_options(
+			{"--resource-dir", dir.string(), "/HOST", (dir / "test.host").string(), "--loose-root",
+					"--lan-port", "0", "--master-host", "127.0.0.1", "--master-gate-port",
+					std::to_string(gate_port)},
+			options, error) == 0);
+	auto holder = std::make_unique<serve::Server>(options);
+	const bool started = holder->start(error);
 	if (!started) std::printf("start: %s\n", error.c_str());
 	CHECK(started);
 	if (!started) return 1;

@@ -7,6 +7,7 @@
 // helpers. They stay header-inline because every one is a few lines and all four
 // TUs below use some of them.
 
+#include <formats/def/reserved_items.h>
 #include <formats/mission/mission.h>
 
 #include <algorithm>
@@ -135,11 +136,9 @@ inline bms::ItemType to_bms_type(EntityKind kind) {
 
 // preserve_over_count keeps a shipped on-disk marker_count that exceeds the 32-slot capacity verbatim
 // (CP19.bms ships one == 39) so an UNTOUCHED path round-trips byte-exact. parse_waypoint_record records
-// the over-count; sync_counts runs this on every load/save and passes true to preserve it. An AUTHORED
-// edit (apply_waypoint_path_to_record / repair_waypoint_marker_references) rewrites the marker list, so
-// the stored over-count no longer describes the data: those call sites pass false to resync marker_count
-// to the real slot count. (Without that, a reorder or flag-only edit on a saturated 32-marker path would
-// keep advertising 39 markers, and the engine would walk 7 phantom waypoints.)
+// the over-count; sync_counts runs this on every load/save and passes true to preserve it. A .mis read
+// passes false (its path lists are the slots). An edit of a path's stops lays the path out from its
+// markers instead (bms_edit's lay_out_waypoint_path: the count the markers that carry it, D-MIS-6).
 inline void resize_waypoint_padding(bms::WaypointRecord &record, bool preserve_over_count) {
 	const size_t slots = std::min<size_t>(record.waypoint_numbers.size(), kMaxWaypointPathMarkers);
 	if (record.waypoint_numbers.size() != slots) {
@@ -155,17 +154,6 @@ inline void resize_waypoint_padding(bms::WaypointRecord &record, bool preserve_o
 	record.padding.assign(128 - used, 0);
 }
 
-inline WaypointPath to_path(const bms::WaypointRecord &record, size_t index) {
-	WaypointPath out;
-	out.index = index;
-	out.flags = static_cast<int>(record.flags);
-	out.marker_indices.reserve(record.waypoint_numbers.size());
-	for (uint32_t marker_index : record.waypoint_numbers) {
-		out.marker_indices.push_back(static_cast<int>(marker_index));
-	}
-	return out;
-}
-
 inline bool validate_waypoint_path(const bms::File &file,
                             size_t index,
                             const std::vector<int> &marker_indices,
@@ -174,51 +162,30 @@ inline bool validate_waypoint_path(const bms::File &file,
 		error = "Waypoint path index out of range";
 		return false;
 	}
-	if (marker_indices.size() > kMaxWaypointPathMarkers) {
-		error = "Waypoint path marker count exceeds 32";
+	// A path holds as many stops as waypoint markers carry it (the original's count has no bound [orig:
+	// JOTACmed.exe sub_44CFD0 @ 0x44cfd0, the 6005 item's markers, a number of 0 none]); a marker carries
+	// one place on one path.
+	if (index == 0 && !marker_indices.empty()) {
+		error = "Path 0 holds no stops: a marker carrying 0 is on no path.";
 		return false;
 	}
-	for (int marker_index : marker_indices) {
+	for (size_t i = 0; i < marker_indices.size(); ++i) {
+		const int marker_index = marker_indices[i];
 		if (marker_index < 0 || static_cast<size_t>(marker_index) >= file.markers.size()) {
 			error = "Waypoint path marker index out of range";
 			return false;
 		}
+		if (file.markers[size_t(marker_index)].type_id != def::DEF_TYPE_WAYPOINT) {
+			error = "Marker " + std::to_string(marker_index) + " is no waypoint marker (6005): a path's stops are those alone.";
+			return false;
+		}
+		if (std::find(marker_indices.begin(), marker_indices.begin() + static_cast<std::ptrdiff_t>(i), marker_index) !=
+		    marker_indices.begin() + static_cast<std::ptrdiff_t>(i)) {
+			error = "A marker is named twice: a marker carries one place on a path.";
+			return false;
+		}
 	}
 	return true;
-}
-
-inline void apply_waypoint_path_to_record(bms::WaypointRecord &record, const std::vector<int> &marker_indices, int flags) {
-	record.flags = static_cast<bms::WaypointFlags>(static_cast<uint32_t>(flags));
-	record.waypoint_numbers.clear();
-	record.waypoint_numbers.reserve(marker_indices.size());
-	for (int marker_index : marker_indices) {
-		record.waypoint_numbers.push_back(static_cast<uint32_t>(marker_index));
-	}
-	resize_waypoint_padding(record, /*preserve_over_count=*/false); // authored edit: count tracks the new list
-}
-
-inline void repair_waypoint_marker_references(bms::File &file, size_t removed_index) {
-	for (bms::WaypointRecord &record : file.waypoint_records) {
-		bool changed = false;
-		std::vector<uint32_t> repaired;
-		repaired.reserve(record.waypoint_numbers.size());
-		for (uint32_t marker_index : record.waypoint_numbers) {
-			if (marker_index == removed_index) {
-				changed = true;
-				continue;
-			}
-			if (marker_index > removed_index) {
-				repaired.push_back(marker_index - 1);
-				changed = true;
-			} else {
-				repaired.push_back(marker_index);
-			}
-		}
-		if (changed) {
-			record.waypoint_numbers = repaired;
-			resize_waypoint_padding(record, /*preserve_over_count=*/false); // marker delete rewrote the list
-		}
-	}
 }
 
 inline std::string unknown_label(const char *prefix, int value) {

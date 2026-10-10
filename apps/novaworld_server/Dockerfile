@@ -60,4 +60,7 @@ EXPOSE 7597/udp 64206/udp 8080/tcp
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/api/health || exit 1
 
+# Run it under an init as PID 1 (the compose files' `init: true`, or `docker
+# run --init`): a second SIGTERM ends a stuck shutdown only when the server is
+# not PID 1, which the kernel shields from default-action signals (main.cpp).
 ENTRYPOINT ["/app/opennova-novaworld-server"]

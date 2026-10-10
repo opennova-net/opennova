@@ -46,9 +46,20 @@ session handshake, the browser/host/play container services, and the legacy
   also with port 0 (the OS's pick). The HTTP listener's `start()` returns once Crow
   serves (Crow's first tick tells it, with the port Crow bound). A bind that fails
   stops the boot.
+- **The listeners start HTTP first, then NW UDP, then the gate,** so each one starts
+  knowing the ports its siblings serve and advertises those: the NW UDP SessionInit's
+  web domain names the HTTP port, the gate's `UDPNOVAWORLD` and `STARTUPURL` the NW UDP
+  and HTTP ports, and the HTTP menus' `HOST_URL` / `GSB_SERVER` the HTTP listener's own.
+  With nonzero ports these are the configured ports, byte for byte; with port 0, the
+  OS's picks. The gate, a client's first contact, answers only once what it names
+  serves.
 - **`main()` owns SIGINT and SIGTERM** (Ctrl+C; `docker stop` sends SIGTERM). The
   handler only raises the shutdown flag and puts the signal's default action back,
-  so a second signal ends a shutdown that is stuck. The tick loop sees the flag
+  so the same signal again ends a shutdown that is stuck. Not when the server is a
+  container's PID 1: the kernel drops a default-action SIGINT or SIGTERM sent to a
+  PID namespace's init (pid_namespaces(7)), so the compose files run it under
+  Docker's init (`init: true`), which is PID 1 and forwards both signals; a bare
+  `docker run` of the image needs `--init` for the same. The tick loop sees the flag
   within one tick and stops in order: the HTTP listener (Crow's threads joined, a
   held-open request included), then the gate and NW UDP receive threads (each
   returns its lease), then the connections (`Shutdown`). As `main()` returns, its
@@ -110,7 +121,8 @@ Every source but `main.cpp` builds as the static library
 `opennova_novaworld_server_http_routes`
 ([`tests/novaworld/http_routes_test.cpp`](../../tests/novaworld/http_routes_test.cpp)),
 drives the Crow listener in-process on port 0 (the port it reads back from
-`bound_port()`) over a `db::ConnectionPool`
+`bound_port()`, and the port a rendered page's `HOST_URL` / `GSB_SERVER` carry)
+over a `db::ConnectionPool`
 on a SQLite file under `backend/migrations`, with `apps/common`'s `http_exchange`. It exists only
 with `BUILD_NOVAWORLD_HTTP=ON` and runs in `net-linux.yml` and `ci.yml`'s
 test-linux. The ctest `opennova_novaworld_server_signal_shutdown`
@@ -120,7 +132,11 @@ SIGINT and then SIGTERM to a fresh run, and expects exit 0, the shutdown legs
 logged in order and no WAL file left; with the HTTP layer it reads the HTTP port
 from the `[http] listening on :<port>` line and holds a half-sent request open
 across the signal. On Linux a third run checks that the first signal puts the
-default action back and a second one ends a shutdown still pending. The ctest
+default action back and the same signal again ends a shutdown still pending. A
+last run probes the gate and opens a NovaWorld session: `UDPNOVAWORLD` names the
+NW UDP listener's logged port and, with the HTTP layer, `STARTUPURL` and the
+SessionInit's web domain the HTTP listener's. The ctest
 `gate_listener` ([`tests/novaworld/gate_listener_test.cpp`](../../tests/novaworld/gate_listener_test.cpp))
 starts the real `GateListener` on port 0 and checks that its reported port answers
-a probe and comes back as POSTIPPORT.
+a probe and comes back as POSTIPPORT, and that `UDPNOVAWORLD` and `STARTUPURL`
+carry the sibling ports its config names.

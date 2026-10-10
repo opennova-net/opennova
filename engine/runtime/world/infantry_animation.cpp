@@ -174,6 +174,22 @@ bool infantry_dual_update(InfantryState &inf, IRootMotionSource *source, AnimVar
     return have;
 }
 
+bool infantry_org1_motor_head(InfantryState &inf, IRootMotionSource *source, AnimVariantRings &rings,
+                              RootMotionFrame &frame) {
+    // The primary's state and its pending target into the secondary's request; the two playheads
+    // and variant rings stay independent. [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48;
+    // copy @0x4B9A28]
+    const int state = inf.anim_state;
+    inf.request_weapon_animation(state);
+    inf.wpn_deferred = inf.anim_pending;
+    // The five-dword output zeroed, then the dual update. [orig: @0x4B9A34..0x4B9A44;
+    // AnimMap_UpdateDualChannels @0x40B8C0 from @0x4B9A48]
+    frame = RootMotionFrame{};
+    const bool have = infantry_dual_update(inf, source, rings, frame);
+    inf.last_events = have ? frame.events : 0;
+    return have;
+}
+
 void advance_primary_channel_fallback(InfantryState &inf) {
     prepare_primary_channel(inf, nullptr, nullptr);
     if (primary_blend_active(inf)) {
