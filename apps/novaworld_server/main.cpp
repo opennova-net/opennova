@@ -36,11 +36,15 @@ namespace {
 std::atomic<bool> g_shutdown{false};
 
 // The first signal starts the orderly shutdown; the handler then puts the
-// default action back, so a second one ends the process even when that
-// shutdown is stuck. Both calls are signal-safe: a lock-free atomic store, and
-// std::signal for the signal being handled. (Windows' CRT resets a handler to
-// SIG_DFL before calling it anyway, so a second Ctrl+C there already ended the
-// process; the reset brings POSIX to the same behavior.)
+// default action back, so the same signal again ends the process even when
+// that shutdown is stuck. Both calls are signal-safe: a lock-free atomic store,
+// and std::signal for the signal being handled. (Windows' CRT resets a handler
+// to SIG_DFL before calling it anyway, so a second Ctrl+C there already ended
+// the process; the reset brings POSIX to the same behavior.) Not as a PID
+// namespace's init, though: the kernel drops a default-action SIGINT or SIGTERM
+// sent to a container's PID 1 (pid_namespaces(7)), so the second one would do
+// nothing there. deploy/compose runs the server under Docker's init
+// (`init: true`), which is PID 1 and forwards the signals.
 void on_signal(int sig) {
 	g_shutdown.store(true);
 	std::signal(sig, SIG_DFL);

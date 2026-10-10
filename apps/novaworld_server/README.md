@@ -48,7 +48,11 @@ session handshake, the browser/host/play container services, and the legacy
   stops the boot.
 - **`main()` owns SIGINT and SIGTERM** (Ctrl+C; `docker stop` sends SIGTERM). The
   handler only raises the shutdown flag and puts the signal's default action back,
-  so a second signal ends a shutdown that is stuck. The tick loop sees the flag
+  so the same signal again ends a shutdown that is stuck. Not when the server is a
+  container's PID 1: the kernel drops a default-action SIGINT or SIGTERM sent to a
+  PID namespace's init (pid_namespaces(7)), so the compose files run it under
+  Docker's init (`init: true`), which is PID 1 and forwards both signals; a bare
+  `docker run` of the image needs `--init` for the same. The tick loop sees the flag
   within one tick and stops in order: the HTTP listener (Crow's threads joined, a
   held-open request included), then the gate and NW UDP receive threads (each
   returns its lease), then the connections (`Shutdown`). As `main()` returns, its
