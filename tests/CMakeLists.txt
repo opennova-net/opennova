@@ -2108,17 +2108,19 @@ add_test(NAME minimal_particle_gen COMMAND minimal_particle_gen_test)
 # Jointops.exe IDB).
 foreach(name smallest minimal_effect multi_section multi_layer table_handles
         smoke_all_fixtures enum_parse writer_roundtrip curve_lut
-        lenient_lines effect_places)
+        lenient_lines effect_places key_places)
     add_executable(particle_${name}_test particle/particle_${name}_test.cpp)
     target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    if(name STREQUAL "smoke_all_fixtures")
+    if(name STREQUAL "smoke_all_fixtures" OR name STREQUAL "key_places")
         opennova_add_mixed_test(particle_${name} COMMAND particle_${name}_test)
     else()
         add_test(NAME particle_${name} COMMAND particle_${name}_test)
     endif()
 endforeach()
+# The key places' retail leg reads every effect file the install serves through the VFS.
+target_link_libraries(particle_key_places_test PRIVATE opennova_base)
 # effect_pose pins the spawn poses every producer hands the scene; effect_closure
 # (mixed) one effect's closure and several folded, the retail leg every effect
 # of the install's catalog alike from its closure (OPENNOVA_JO_DIR).

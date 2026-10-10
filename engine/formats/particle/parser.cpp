@@ -374,17 +374,11 @@ void apply_particle_key(ParticleDef &particle, const std::string &authored_key,
 		particle.orbitalspeed_adj = parse_float(raw_value);
 	} else if (key == "orbital_axis") {
 		parse_vec3(values, particle.orbital_axis);
-	} else if (key.size() > 13 && key.compare(0, 13, "collide_sound") == 0) {
-		const std::string suffix = key.substr(13);
-		bool digits_only = !suffix.empty();
-		for (char c : suffix) {
-			if (std::isdigit(static_cast<unsigned char>(c)) == 0) {
-				digits_only = false;
-				break;
-			}
-		}
-		const int slot = digits_only ? io::retail_atol(suffix.c_str()) : -1;
-		if (slot >= 0 && static_cast<std::size_t>(slot) < particle.collide_sounds.size()) {
+	} else if (key.size() >= 13 && key.compare(0, 13, "collide_sound") == 0) {
+		// The slot is atol of what follows the prefix, taken under 20 unsigned: the prefix alone slot 0,
+		// collide_sound7x slot 7, a minus none [orig: CParticleDef_ParseProperties @ 0x5ebb7a..0x5ebba7].
+		const int32_t slot = io::retail_atol(key.c_str() + 13);
+		if (static_cast<uint32_t>(slot) < particle.collide_sounds.size()) {
 			particle.collide_sounds[static_cast<std::size_t>(slot)] = raw_value;
 		} else {
 			particle.unknown_keys.emplace_back(authored_key, raw_value);
@@ -500,6 +494,25 @@ enum class State {
 	InBlock,
 };
 
+// The block kind of a section, and the index the block it opens takes among the file's blocks of its kind.
+BlockKind block_kind(Section section) {
+	switch (section) {
+		case Section::Effect: return BlockKind::Effect;
+		case Section::Table: return BlockKind::Table;
+		case Section::Handles: return BlockKind::Handles;
+		default: return BlockKind::Particle;
+	}
+}
+
+std::size_t block_index(const ParticleFile &file, Section section) {
+	switch (section) {
+		case Section::Effect: return file.effects.size();
+		case Section::Table: return file.tables.size();
+		case Section::Handles: return file.table_handles.size();
+		default: return file.particles.size();
+	}
+}
+
 bool match_section(std::string_view line, Section &out) {
 	// The top-level dispatcher uses _stricmp for every section token
 	// [orig: CEffectWorld_ParseSectionCallback @ 0x5ecb40].
@@ -525,9 +538,12 @@ bool match_section(std::string_view line, Section &out) {
 
 } // namespace
 
-bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
+namespace {
+
+bool load_particles_impl(std::istream &input, ParticleFile &out, ParticlePlaces *places, ParseError &error) {
 	out = ParticleFile();
 	error = ParseError();
+	if (places) *places = ParticlePlaces();
 
 	// Slurp; opennova::strutil::trim_view trailing NUL bytes (observed in 30MM/airexp/ambfx/df_exp).
 	std::string buffer{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
@@ -546,6 +562,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 	std::vector<std::pair<std::string, std::string>> stray_unknown; // for [effectdef]/[tabledef]/[handles]
 
 	std::size_t line_number = 0;
+	std::size_t block_first_line = 0; // the open block's section line (ParticlePlaces::blocks)
 	std::size_t pos = 0;
 	while (pos <= buffer.size()) {
 		const std::size_t newline = buffer.find('\n', pos);
@@ -555,6 +572,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 		if (!raw.empty() && raw.back() == '\r') {
 			raw.remove_suffix(1);
 		}
+		const std::size_t line_end = line_start + raw.size(); // before the line's CR LF
 		++line_number;
 		pos = newline == std::string::npos ? buffer.size() + 1 : newline + 1;
 
@@ -576,6 +594,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 					continue;
 				}
 				section = parsed;
+				block_first_line = line_number;
 				state = State::ExpectOpen;
 				switch (section) {
 					case Section::Effect:
@@ -611,6 +630,16 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 
 			case State::InBlock: {
 				if (line.front() == '}') {
+					// Where the block was written, its closing brace's line from its first byte.
+					if (places) {
+						BlockPlace place;
+						place.kind = block_kind(section);
+						place.index = block_index(out, section);
+						place.first_line = static_cast<int>(block_first_line);
+						place.last_line = static_cast<int>(line_number);
+						place.close_offset = line_start;
+						places->blocks.push_back(place);
+					}
 					switch (section) {
 						case Section::Effect:
 							current_effect.last_line = static_cast<int>(line_number);
@@ -618,9 +647,9 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 							break;
 						case Section::Particle: {
 							hydrate_particle(current_particle, pending_particle);
-							// Engine clamps emit_burst < 1 to 1 (sub_5ed6c2);
-							// we preserve the source value but mirror the clamp
-							// so consumers see authoring intent.
+							// The engine clamps emit_burst < 1 to 1 (the text reader
+							// CParticleDef_ParseProperties @ 0x5ea86c..0x5ea87a, the config
+							// map's sub_5ed6c2); we mirror the clamp.
 							if (current_particle.emit_burst < 1) {
 								current_particle.emit_burst = 1;
 							}
@@ -658,6 +687,22 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 				}
 				const std::string raw_value = trim_str(value_view);
 				const std::vector<std::string> values = split(raw_value, ',');
+				// Where the value the reader takes is written (the trimmed value's first byte; a value of none, the
+				// line's end before its line end, never the next line's first byte).
+				if (places) {
+					std::size_t value_at = static_cast<std::size_t>(value_view.data() - buffer.data());
+					while (value_at < line_end && is_space(buffer[value_at])) {
+						++value_at;
+					}
+					KeyPlace place;
+					place.block = block_kind(section);
+					place.index = block_index(out, section);
+					place.key = key;
+					place.line = static_cast<int>(line_number);
+					place.offset = value_at;
+					place.length = raw_value.size();
+					places->keys.push_back(std::move(place));
+				}
 
 				switch (section) {
 					case Section::Effect:
@@ -665,7 +710,7 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 						// Where the id's value is written (the last `id` read names the effect).
 						if (lowercase(key) == "id") {
 							std::size_t value_at = static_cast<std::size_t>(value_view.data() - buffer.data());
-							while (value_at < buffer.size() && is_space(buffer[value_at])) {
+							while (value_at < line_end && is_space(buffer[value_at])) {
 								++value_at;
 							}
 							current_effect.id_line = static_cast<int>(line_number);
@@ -696,6 +741,19 @@ bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
 	}
 
 	return true;
+}
+
+} // namespace
+
+bool load_particles(std::istream &input, ParticleFile &out, ParseError &error) {
+	return load_particles_impl(input, out, nullptr, error);
+}
+
+bool load_particles_with_places(const char *data, std::size_t size, ParticleFile &out, ParticlePlaces &places,
+                                ParseError &error) {
+	std::stringstream stream;
+	stream.write(data, static_cast<std::streamsize>(size));
+	return load_particles_impl(stream, out, &places, error);
 }
 
 bool load_particles_from_file(const std::string &path, ParticleFile &out, ParseError &error) {

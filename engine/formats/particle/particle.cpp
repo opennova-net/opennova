@@ -1,5 +1,6 @@
 #include <formats/particle/particle.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -284,6 +285,160 @@ void bake_particle_def_curves(ParticleDef &def,
 		bake_one_curve(layer.blue_func, tables);
 		bake_graphic_uv_rects(layer);
 	}
+}
+
+// ------------------------------------------------------------ the reader's keys
+
+namespace {
+
+using K = KeyValueKind;
+using B = BlockKind;
+
+KeyRow row(B block, const char *key, K value) {
+	KeyRow r;
+	r.block = block;
+	r.key = key;
+	r.value = value;
+	return r;
+}
+
+KeyRow clamped(B block, const char *key, int min, int max) {
+	KeyRow r = row(block, key, K::Whole);
+	r.clamped = true;
+	r.min = min;
+	r.max = max;
+	return r;
+}
+
+// One '#' a graphic layer's digit (1..4), one trailing '*' a collision sound's slot (what follows through atol,
+// under 20): the patterns key_rows writes.
+bool key_matches(std::string_view pattern, std::string_view key) {
+	size_t p = 0, k = 0;
+	while (p < pattern.size()) {
+		const char c = pattern[p];
+		if (c == '#') {
+			if (k >= key.size() || key[k] < '1' || key[k] > '4') return false;
+			++p;
+			++k;
+		} else if (c == '*') {
+			// The slot: atol of the rest, under 20 unsigned (none or a word first is 0, a minus none) [orig:
+			// CParticleDef_ParseProperties @ 0x5ebb96..0x5ebba7; the particle's 20 slots @ +3952].
+			const int32_t slot = io::retail_atol(std::string(key.substr(k)).c_str());
+			return static_cast<uint32_t>(slot) < 20u;
+		} else {
+			if (k >= key.size() || std::tolower(static_cast<unsigned char>(key[k])) != c) return false;
+			++p;
+			++k;
+		}
+	}
+	return k == key.size();
+}
+
+} // namespace
+
+// [orig: CParticleDef_ParseProperties @ 0x5ea320, the particle's and its graphic layers' keys;
+//  CParticleTableDef_ParseScriptLine @ 0x5e92b0, the effect's ([effectdef] routes there, its IDB name
+//  notwithstanding); CEffectTableDef_ParseCallback @ 0x5e4010, a table's; the original editor's
+//  [tabledef_edithandles] its own, which the game never reads]
+const std::vector<KeyRow> &key_rows() {
+	static const std::vector<KeyRow> rows = [] {
+		std::vector<KeyRow> r;
+		r.push_back(row(B::Effect, "id", K::Text));
+		r.push_back(row(B::Effect, "pdefs", K::Members));
+		r.push_back(row(B::Particle, "id", K::Text));
+		r.push_back(row(B::Particle, "child_id", K::Text));
+		r.push_back(row(B::Particle, "flags", K::Flags));
+		r.push_back(row(B::Particle, "move", K::Move));
+		KeyRow lod = row(B::Particle, "lod", K::Real);
+		lod.read = false;
+		r.push_back(lod);
+		for (const char *key : {"emit_dur", "emit_dur_adj", "emit_rate", "emit_rate_adj"})
+			r.push_back(row(B::Particle, key, K::Real));
+		r.push_back(row(B::Particle, "emit_rate_func", K::Curve));
+		r.push_back(row(B::Particle, "emit_delay", K::Real));
+		// [orig: CParticleDef_ParseProperties @ 0x5ea86c..0x5ea87a, a burst under 1 taken as 1]
+		KeyRow burst = clamped(B::Particle, "emit_burst", 1, 0x7FFFFFFF);
+		r.push_back(burst);
+		r.push_back(row(B::Particle, "emit_maxoverride", K::Whole));
+		r.push_back(row(B::Particle, "emit_shape", K::Whole));
+		r.push_back(row(B::Particle, "emit_shape_size", K::Vector));
+		r.push_back(row(B::Particle, "emit_shape_size_skip", K::Vector));
+		for (const char *key : {"y_offset", "z_offset", "age", "age_adj", "scale", "scale_adj"})
+			r.push_back(row(B::Particle, key, K::Real));
+		r.push_back(row(B::Particle, "scale_func", K::Curve));
+		r.push_back(row(B::Particle, "alpha", K::Real));
+		for (const char *key : {"alpha_func", "red_func", "green_func", "blue_func"})
+			r.push_back(row(B::Particle, key, K::Curve));
+		for (const char *key : {"color1", "color2", "color3", "color4"})
+			r.push_back(row(B::Particle, key, K::Color));
+		r.push_back(row(B::Particle, "bump_scale", K::Real));
+		r.push_back(row(B::Particle, "orientation", K::Vector));
+		r.push_back(row(B::Particle, "orientationadj", K::Vector));
+		for (const char *key : {"yaw_rot", "yaw_rot_adj", "pitch_rot", "pitch_rot_adj", "roll_rot", "roll_rot_adj",
+		                        "speed", "speed_adj", "elastic", "gravity"})
+			r.push_back(row(B::Particle, key, K::Real));
+		r.push_back(row(B::Particle, "gravity_mask", K::Vector));
+		for (const char *key : {"drag", "spread", "spread_skip", "orbitalspeed", "orbitalspeed_adj"})
+			r.push_back(row(B::Particle, key, K::Real));
+		r.push_back(row(B::Particle, "orbital_axis", K::Vector));
+		r.push_back(row(B::Particle, "collide_sound*", K::Text));
+		// A graphic layer's: its declaration, then its own keys over the particle's [orig:
+		// CParticleDefEntry_ParseGraphicProperty @ 0x5e3550].
+		r.push_back(row(B::Particle, "graphic#", K::Graphic));
+		// The game stores atol's value as it is; the bound is OpenNova's (D-PTL-19).
+		KeyRow frames = clamped(B::Particle, "g#_flip_frames", 1, kMaxParticleFlipFrames);
+		frames.port_bound = "D-PTL-19";
+		r.push_back(frames);
+		r.push_back(row(B::Particle, "g#_flip_rate", K::Whole));
+		for (const char *key : {"g#_color1", "g#_color2", "g#_color3", "g#_color4"})
+			r.push_back(row(B::Particle, key, K::Color));
+		for (const char *key : {"g#_alpha", "g#_scale", "g#_scale_adj"}) r.push_back(row(B::Particle, key, K::Real));
+		for (const char *key : {"g#_scale_func", "g#_alpha_func", "g#_red_func", "g#_green_func", "g#_blue_func"})
+			r.push_back(row(B::Particle, key, K::Curve));
+		r.push_back(row(B::Table, "id", K::Text));
+		// A row: the key as the writer writes it (tl1..tl32); the game takes any key holding a 't' (key_row).
+		r.push_back(row(B::Table, "tl*", K::TableRow));
+		// The original editor's handles, which the game never reaches (their header ends its walk): its table, its
+		// count of handles, its smoothing, and each handle (handle0, handle1, ..., two numbers).
+		for (const auto &[key, value] : {std::pair{"tableid", K::Text}, std::pair{"handlecount", K::Whole},
+		                                 std::pair{"tightness", K::Whole}, std::pair{"handle*", K::Text}}) {
+			KeyRow handle = row(B::Handles, key, value);
+			handle.read = false;
+			r.push_back(handle);
+		}
+		return r;
+	}();
+	return rows;
+}
+
+const KeyRow *key_row(BlockKind block, std::string_view key) {
+	const std::vector<KeyRow> &rows = key_rows();
+	if (block == B::Table) {
+		// `id` without case, then any key holding a 't' the next row [orig: CEffectTableDef_ParseCallback @
+		// 0x5e40c2 stricmp "id"; @ 0x5e4120 strstr "t"].
+		const auto row_named = [&rows](const char *name) -> const KeyRow * {
+			for (const KeyRow &r : rows)
+				if (r.block == B::Table && std::string_view(r.key) == name) return &r;
+			return nullptr;
+		};
+		if (strutil::iequals(key, "id")) return row_named("id");
+		return key.find('t') != std::string_view::npos ? row_named("tl*") : nullptr;
+	}
+	if (block == B::Handles) {
+		// A handle by its number (any digits after "handle"), the others by their keys.
+		const std::string_view prefix = "handle";
+		const bool numbered = key.size() > prefix.size() && strutil::iequals(key.substr(0, prefix.size()), prefix) &&
+		                      key.find_first_not_of("0123456789", prefix.size()) == std::string_view::npos;
+		for (const KeyRow &r : rows)
+			if (r.block == B::Handles &&
+			    (numbered ? std::string_view(r.key) == "handle*" : std::string_view(r.key) != "handle*" &&
+			                                                          strutil::iequals(r.key, key)))
+				return &r;
+		return nullptr;
+	}
+	for (const KeyRow &r : rows)
+		if (r.block == block && key_matches(r.key, key)) return &r;
+	return nullptr;
 }
 
 } // namespace opennova::particle
