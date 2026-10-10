@@ -27,7 +27,7 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `/d` | Prefer loose files over the archives, as the game's `/d`. |
 | `/game <code>` | The data's game code (its SCR keying), as the game's `/game`. |
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
-| `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. |
+| `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
 | `--log-debug` | Print the engine's debug log lines. |
 | `--master-host <gate>` | The NovaWorld gate to list on (`127.0.0.1` for an `opennova-novaworld-server` on this machine). Without it the server serves LAN only (below). |
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |

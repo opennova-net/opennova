@@ -58,6 +58,8 @@ using opennova::db::ConnectionPool;
 namespace {
 
 constexpr const char *kAdminToken = "harness-admin-token";
+// The one page in the templates root: the menu URLs the listener fills in.
+constexpr const char *kUrlsTemplate = "urls.htm";
 constexpr const char *kBearer = "Authorization: Bearer harness-admin-token";
 constexpr const char *kJson = "Content-Type: application/json";
 
@@ -507,6 +509,20 @@ int test_nwhost_first_call_mints_hostkey(Harness &h) {
 	return 0;
 }
 
+// GET /nwprepare.dll renders the page it names with HOST_URL and GSB_SERVER
+// on the public host and the port Crow serves: the OS's pick here, where the
+// config's port is 0.
+int test_menu_urls_name_bound_port(Harness &h) {
+	const auto reply = h.send("GET", std::string("/nwprepare.dll?url=") + kUrlsTemplate);
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	const std::string base = "http://127.0.0.1:" + std::to_string(h.port);
+	const std::string want = base + "/nwhost.dll|" + base + "/jop_2.gsb";
+	const std::string body = body_text(reply);
+	if (body != want) std::fprintf(stderr, "  the menu URLs: %s\n", body.c_str());
+	TEST_EXPECT(body == want);
+	return 0;
+}
+
 // The static/catch-all family answers a path no root holds with 404.
 int test_unknown_path_404(Harness &h) {
 	const auto reply = h.send("GET", "/definitely/missing.txt");
@@ -524,6 +540,7 @@ int run(Harness &h) {
 		{"admin_server_status_requires_token", test_admin_server_status_requires_token},
 		{"admin_users_list", test_admin_users_list},
 		{"nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey},
+		{"menu_urls_name_bound_port", test_menu_urls_name_bound_port},
 		{"unknown_path_404", test_unknown_path_404},
 		{"concurrent_requests", test_concurrent_requests},
 	};
@@ -564,10 +581,15 @@ int main() {
 		// Port 0: Crow binds the port the OS picks, and start() returns once it
 		// serves there, with that port in bound_port().
 		config.http_port = 0;
-		// Roots that do not exist, so the catch-all family 404s deterministically.
+		// Web roots that do not exist and a templates root holding only the URL
+		// page, so the catch-all family 404s deterministically.
 		config.web_dist_dir = temp.path / "web_dist";
 		config.templates_dir = temp.path / "templates";
 		config.static_dir = temp.path / "static";
+		std::filesystem::create_directories(config.templates_dir);
+		const std::string urls_page = "{{HOST_URL}}|{{GSB_SERVER}}";
+		TEST_EXPECT(test_io::write_file((config.templates_dir / kUrlsTemplate).string(),
+		                                std::vector<uint8_t>(urls_page.begin(), urls_page.end())));
 
 		opennova::ConnectionManager manager;
 		nws::SessionStore sessions;

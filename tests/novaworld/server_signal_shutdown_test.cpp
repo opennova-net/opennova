@@ -15,14 +15,25 @@
 //
 // On Linux a third run checks the second signal: the first one's handler puts
 // the default action back (read from /proc's SigCgt mask) while the shutdown is
-// still pending, held off by a long tick, and a second SIGINT then ends the
-// process at once.
+// still pending, held off by a long tick, and the same signal again then ends
+// the process at once.
+//
+// A last run checks what a server on every port 0 advertises before a SIGTERM
+// stops it: the gate's reply names the NW UDP listener's bound port
+// (UDPNOVAWORLD) and, with the HTTP layer, the HTTP listener's (STARTUPURL), as
+// does the NW UDP session's 0x82 SessionInit (its web domain). main() starts
+// HTTP, then NW UDP, then the gate, each with the ports bound before it.
 //
 // POSIX only (fork, execve, kill). The child dies with the test (SIGKILL on
 // every failure path, and PR_SET_PDEATHSIG on Linux should ctest kill the test).
 
 #include "net_http.h"
 #include "net_sockets.h"
+
+#include <net/napi/envelope.h>
+#include <net/novaworld/client_session.h>
+#include <net/novaworld/gate_probe.h>
+#include <net/novaworld/gate_response.h>
 
 #include "common/file_io.h"
 #include "common/temp_dir.h"
@@ -215,17 +226,18 @@ bool boot(ServerProcess &server, const std::string &binary, const std::vector<st
 	return false;
 }
 
-#ifdef OPENNOVA_HTTP_ENABLED
-// The port the HTTP listener logged as the one Crow bound, 0 when no line names
-// one. start() logs it before it returns, so it precedes "[boot] ready.".
-uint16_t logged_http_port(const std::string &log) {
-	static const std::string kLine = "[http] listening on :";
-	const size_t at = log.find(kLine);
+// The port a listener logged as the one it bound (the line `prefix` starts,
+// the port after it), 0 when no line names one. Each listener's start() logs
+// it before it returns, so it precedes "[boot] ready.".
+constexpr const char *kGateLine = "[gate] listening on UDP :";
+constexpr const char *kNwUdpLine = "[nwudp] listening on UDP :";
+constexpr const char *kHttpLine = "[http] listening on :";
+uint16_t logged_port(const std::string &log, const std::string &prefix) {
+	const size_t at = log.find(prefix);
 	if (at == std::string::npos) return 0;
-	const unsigned long port = std::strtoul(log.c_str() + at + kLine.size(), nullptr, 10);
+	const unsigned long port = std::strtoul(log.c_str() + at + prefix.size(), nullptr, 10);
 	return port > 0 && port <= 65535 ? static_cast<uint16_t>(port) : 0;
 }
-#endif
 
 int exercise_shutdown(ServerProcess &server, const std::string &binary,
                       const test_temp::TempDir &temp, const std::string &log_path,
@@ -234,7 +246,7 @@ int exercise_shutdown(ServerProcess &server, const std::string &binary,
 	if (!boot(server, binary, server_env(temp, db_path), temp, log_path)) return 1;
 
 #ifdef OPENNOVA_HTTP_ENABLED
-	const uint16_t http_port = logged_http_port(read_text(log_path));
+	const uint16_t http_port = logged_port(read_text(log_path), kHttpLine);
 	TEST_EXPECT(http_port != 0);
 	TEST_EXPECT(wait_for_http(server, http_port));
 	// A request that never finishes: the headers' blank line is never sent.
@@ -331,6 +343,107 @@ int exercise_second_signal(ServerProcess &server, const std::string &binary,
 }
 #endif
 
+// One gate probe to 127.0.0.1:`port` and its reply, decoded into `out`.
+int probe_gate(uint16_t port, opennova::GateResponse &out) {
+	net::ScopedSocket client(net::udp_bind(0));
+	TEST_EXPECT(client.is_valid());
+	const auto inner = opennova::gate_probe_build(opennova::GATE_PROBE_TAG_JOINTOPS);
+	std::vector<uint8_t> probe(inner.size() + 16);
+	size_t probe_size = 0;
+	TEST_EXPECT(opennova::napi_envelope_encode(inner.data(), inner.size(), probe.data(),
+	                                           probe.size(), &probe_size) == 0);
+	probe.resize(probe_size);
+	const net::Endpoint to{{127, 0, 0, 1}, port};
+	TEST_EXPECT(net::udp_send_to(client.get(), to, probe.data(), probe.size()) > 0);
+	uint8_t rx[2048];
+	net::Endpoint from{};
+	const int n = net::udp_recv_from(client.get(), rx, sizeof(rx), from, 3000);
+	TEST_EXPECT(n > 0);
+	std::vector<uint8_t> reply(static_cast<size_t>(n));
+	size_t reply_len = 0;
+	TEST_EXPECT(opennova::napi_envelope_decode(rx, static_cast<size_t>(n), reply.data(),
+	                                           reply.size(), &reply_len) == 0);
+	TEST_EXPECT(opennova::gate_response_decrypt_and_parse(reply.data(), reply_len, out));
+	return 0;
+}
+
+#ifdef OPENNOVA_HTTP_ENABLED
+// A NovaWorld session to 127.0.0.1:`port` up to its 0x82 SessionInit; the web
+// domain that carried goes to `web_domain`.
+int session_web_domain(uint16_t port, std::string &web_domain) {
+	net::ScopedSocket client(net::udp_bind(0));
+	TEST_EXPECT(client.is_valid());
+	const net::Endpoint to{{127, 0, 0, 1}, port};
+	opennova::ClientSession session;
+	const auto send = [&](const std::vector<uint8_t> &datagram) {
+		if (!datagram.empty()) net::udp_send_to(client.get(), to, datagram.data(), datagram.size());
+	};
+	send(session.start());
+	for (int i = 0; i < 25 && session.server_web_domain().empty(); ++i) {
+		uint8_t rx[4096];
+		net::Endpoint from{};
+		const int n = net::udp_recv_from(client.get(), rx, sizeof(rx), from, 200);
+		if (n <= 0) continue;
+		std::vector<std::vector<uint8_t>> out;
+		TEST_EXPECT(session.handle_datagram(rx, static_cast<size_t>(n), out));
+		session.finish_receive_batch(out);
+		session.pump(out);
+		for (const auto &datagram : out) send(datagram);
+	}
+	web_domain = session.server_web_domain();
+	return 0;
+}
+#endif
+
+// Every port 0: what the server advertises names the ports its listeners
+// bound, read back from their "listening" lines. Then the signal stops it.
+int exercise_sibling_ports(ServerProcess &server, const std::string &binary,
+                           const test_temp::TempDir &temp, const std::string &log_path,
+                           int signal_number) {
+	if (!boot(server, binary, server_env(temp, temp.file("novaworld.db")), temp, log_path)) return 1;
+	const std::string log = read_text(log_path);
+	const uint16_t gate_port = logged_port(log, kGateLine);
+	const uint16_t nw_port = logged_port(log, kNwUdpLine);
+	TEST_EXPECT(gate_port != 0 && nw_port != 0);
+
+	opennova::GateResponse reply;
+	if (probe_gate(gate_port, reply) != 0) return 1;
+	if (reply.udp_novaworld != "127.0.0.1:" + std::to_string(nw_port)) {
+		std::fprintf(stderr, "  UDPNOVAWORLD %s, the NW UDP listener on :%u\n",
+		             reply.udp_novaworld.c_str(), static_cast<unsigned>(nw_port));
+		return 1;
+	}
+#ifdef OPENNOVA_HTTP_ENABLED
+	const uint16_t http_port = logged_port(log, kHttpLine);
+	TEST_EXPECT(http_port != 0);
+	const std::string http_host = "127.0.0.1:" + std::to_string(http_port);
+	const std::string startup = "http://" + http_host + "/nwprepare.dll?";
+	if (reply.startup_url.compare(0, startup.size(), startup) != 0) {
+		std::fprintf(stderr, "  STARTUPURL %s, the HTTP listener on :%u\n",
+		             reply.startup_url.c_str(), static_cast<unsigned>(http_port));
+		return 1;
+	}
+	std::string web_domain;
+	if (session_web_domain(nw_port, web_domain) != 0) return 1;
+	if (web_domain != http_host) {
+		std::fprintf(stderr, "  SessionInit web domain '%s', the HTTP listener on :%u\n",
+		             web_domain.c_str(), static_cast<unsigned>(http_port));
+		return 1;
+	}
+#endif
+
+	TEST_EXPECT(::kill(server.pid, signal_number) == 0);
+	TEST_EXPECT(server.wait_exit(kExitDeadline));
+	TEST_EXPECT(WIFEXITED(server.status) && WEXITSTATUS(server.status) == 0);
+	std::printf("  the gate names the NW UDP listener's bound port :%u\n",
+	            static_cast<unsigned>(nw_port));
+#ifdef OPENNOVA_HTTP_ENABLED
+	std::printf("  the gate and the SessionInit name the HTTP listener's bound port :%u\n",
+	            static_cast<unsigned>(http_port));
+#endif
+	return 0;
+}
+
 using Exercise = int (*)(ServerProcess &, const std::string &, const test_temp::TempDir &,
                          const std::string &, int);
 
@@ -367,6 +480,7 @@ int main(int argc, char **argv) {
 #ifdef __linux__
 	if (rc == 0) rc = run_case(binary, exercise_second_signal, SIGINT, "second_sigint");
 #endif
+	if (rc == 0) rc = run_case(binary, exercise_sibling_ports, SIGTERM, "sibling_ports");
 	net::shutdown();
 	if (rc == 0) std::printf("OK: novaworld server signal shutdown\n");
 	return rc;

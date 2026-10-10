@@ -76,6 +76,10 @@ const std::vector<ResourceKindRule> &resource_kind_rules() {
 	        {"", ".mns", "", "menu_style"},
 	        {"", ".sbf", "", "sbf"},
 	        {"", ".lwf", "", "sound"},
+	        // A mission's dialog sounds where it has no .lwf of the bank's name: the dialog loader opens
+	        // `<bank>.pwf` through the sound bank reader then [orig: DialogManager_LoadFromFile @ 0x44e7de,
+	        // "%s.pwf" @ 0x44e7f5 -> SoundBank_OpenFile @ 0x44e807], so it is a sound bank of its own name.
+	        {"", ".pwf", "", "sound"},
 	        // NOTE: .dbf (dialog bank) is intentionally NOT classified as a browsable kind.
 	        // It is consumed at runtime by name (DbfData); classifying it as an LWF sound
 	        // profile would conflate two unrelated formats.
