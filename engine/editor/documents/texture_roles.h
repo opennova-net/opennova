@@ -59,6 +59,10 @@ inline constexpr int32_t kTextureArgTileSet = 0x20000;
 // The name's extension made PCX before its loader reads it (an environment's sky maps [orig:
 // TimeOfDay_ParseProperty @ 0x57CC41..0x57CC4B, Path_ReplaceOrAppendExtension @ 0x53C780]).
 inline constexpr int32_t kTextureArgPcx = 0x40000;
+// The name's path stripped and its extension, from its last '.', made .TGA before its loader reads it (a face
+// animation's textures [orig: Shadow_DecalLoadTextures @ 0x588040, PathStripPathA, PathRemoveExtensionA,
+// PathAddExtensionA ".TGA"]; formats/grm texture_load_name).
+inline constexpr int32_t kTextureArgFaceTga = 0x80000;
 int32_t texture_role_arg(renderer::TextureRoleId role, int32_t flags = 0);
 // Whether the argument is a model texture row's type.
 inline bool texture_arg_is_row_type(int32_t loader_arg) { return loader_arg >= 0 && loader_arg < kTextureRoleArg; }

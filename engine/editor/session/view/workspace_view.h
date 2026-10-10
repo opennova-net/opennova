@@ -63,6 +63,9 @@ struct WorkspaceView {
 		int32_t volume = 255;
 		// When it starts after the play does, milliseconds (a dialog's later lines, DI-32); 0 at once.
 		int32_t start_ms = 0;
+		// A stream of the music bank at `path` by its place (round S23 lane A), streamed as the game streams it;
+		// -1: `path` is a wave.
+		int32_t stream = -1;
 	};
 	struct Sound {
 		std::string path;

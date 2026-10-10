@@ -232,6 +232,12 @@ void serve_preview_install_import(SessionCore &core, const EditorRequest &reques
 void serve_new_terrain(SessionCore &core, const EditorRequest &request) {
 	core.imports().new_terrain(request);
 }
+void serve_new_font(SessionCore &core, const EditorRequest &request) {
+	core.imports().new_font(request);
+}
+void serve_wave_operation(SessionCore &core, const EditorRequest &request) {
+	core.documents().wave_operation(request);
+}
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
@@ -1106,10 +1112,13 @@ constexpr RequestKindRow kRows[] = {
 			"options (a timeline mark pressed; DI-04). values {leg}: begin or end, the set the weapon action "
 			"playing the row of a first-person map (the animation document at path, the active one when left "
 			"out) plays as it begins (its soundset) or finishes (its soundsetend), a leg's mark pressed "
-			"(DI-13). Refused (workspace.refused): a name no wave of the project has, a frame the game never "
-			"reads or that fires no sound, a first-person clip's frame (the game reads none), a leg no action "
-			"of the row plays, a set no bank searched holds, an empty slot, waves the project lacks, a wave "
-			"past what a card reads.")
+			"(DI-13). values {stream}: a stream of the music bank at path by its place in the index (0 the "
+			"first; the game plays a stream by its place, never its name), streamed from the bank's file as the "
+			"game streams it (round S23 lane A). Refused (workspace.refused): a name no wave of the project has, "
+			"a frame the game never reads or that fires no sound, a first-person clip's frame (the game reads "
+			"none), a leg no action of the row plays, a set no bank searched holds, an empty slot, waves the "
+			"project lacks, a wave past what a card reads, a place the bank has no stream at, an open wave or "
+			"bank with unsaved edits (the Shell plays the file).")
 			.takes(request_params({}, { F::Path, F::Values }))
 			.row,
 	Request(K::StopSound, "stop_sound", serve_stop_sound,
@@ -1247,6 +1256,36 @@ constexpr RequestKindRow kRows[] = {
 			"The file or folder path shown in the OS file manager.")
 			.served_by(ServedBy::Shell)
 			.takes(request_params({ F::Path }))
+			.row,
+	// A font made from a glyph sheet is an import of it (round S23 lane A): the set and its record written, then the
+	// refresh that imports it, as a terrain's.
+	Request(K::NewFont, "new_font", serve_new_font,
+			"A font named path (its stem; the font a name the archives hold, at most 12 characters and .fnt) made from a "
+			"glyph sheet (import/font_import.h): values names the sheet (sheet, required: a PNG, TGA or PCX on disk, "
+			"copied into fonts/ as <name>_sheet.<ext>, or a project file, named where it is), its grid (columns and rows, "
+			"1 to 256 each, 16 and 14 when left out; first, the byte of its first cell, 0 to 255 or 0x00 to 0xFF, 0x20 "
+			"when left out) and the importer's options (advance ink, left or cell; tracking 0..32; space 1..254; spacing "
+			"-16..16; design_width 1..4096; color white or sheet); fonts/<name>.fntset and its record written, then "
+			"imported, a refresh (the outcome names the operation), which makes <name>.fnt. folder (Files' New here): "
+			"the folder the set and a sheet copied in go in (\"/\" the top level; left out, fonts/). Refused, nothing "
+			"written (import.font): a name taken or that does not fit, a value of no key it takes, out of its range or "
+			"holding a line break or a control character, a folder outside the project, a sheet that does not read, or "
+			"that the grid does not divide.")
+			.takes(request_params({ F::Path, F::Values }, { F::Folder }))
+			.holds(kFiles, kFiles | kSlot)
+			.ends_edit_groups()
+			.row,
+	Request(K::WaveOperation, "wave_operation", serve_wave_operation,
+			"The wave document at path (left out, the active one) edited as a whole wave by operation, one undo step, its "
+			"params in values: trim (start and end, seconds from 0: the frames between them kept) or normalise (peak, more "
+			"than 0 and at most 1, 1 when left out: every sample scaled so the loudest is that); the file made anew in the "
+			"form the game's loader takes (one channel, the source's 8 bits kept and anything else 16, its rate kept, fmt "
+			"and data alone), which Save writes. open_first: the document opened first when it is not. Refused, nothing "
+			"changed (wave.operation): a file an import makes (its import's options make it), an operation it does not "
+			"take, a wave of no sample, a trim that keeps none, a silent wave normalised.")
+			.takes(request_params({ F::Operation }, { F::Path, F::Values, F::OpenFirst }))
+			.holds(kFiles, kDocuments)
+			.names_active()
 			.row,
 };
 

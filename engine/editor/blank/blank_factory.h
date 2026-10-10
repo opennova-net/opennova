@@ -102,9 +102,11 @@ bool blank_values_fit(const BlankFactory &factory, const BlankRequest &request, 
 
 // What Files' New > Terrain from images... asks (ADR 0046 S20): no blank (a terrain is an import of its
 // images, the new_terrain request: import/terrain_import.h), but the same prompt, its values the request's
-// (the images by their set keys, each a file on disk or of the project; the importer's options). The
-// prompt's params for a new file of `kind`: a free-form factory's, a terrain's these; null (count 0) for a
-// kind the prompt does not ask of. `offered` says whether the prompt asks of the kind at all.
+// (the images by their set keys, each a file on disk or of the project; the importer's options). A font's New
+// asks a glyph sheet, its grid and the importer's options (round S23 lane A): with a sheet the new_font request
+// makes it, without one its blank, the built-in font. The prompt's params for a new file of `kind`: a free-form
+// factory's, a terrain's and a font's these; null (count 0) for a kind the prompt does not ask of. `offered`
+// says whether the prompt asks of the kind at all.
 const BlankParam *new_file_params(AssetKind kind, size_t &count, bool *offered = nullptr);
 
 size_t blank_factory_count();

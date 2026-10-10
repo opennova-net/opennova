@@ -195,9 +195,9 @@ int test_decode() {
 int test_document() {
 	const std::vector<uint8_t> bytes = tga_of(pattern(4, 4, graded), 4, 4);
 	const DocumentType *type = document_type_for(AssetKind::Texture);
-	TEST_EXPECT(type && type->id == DocumentTypeId::Texture && document_content(*type) == DocumentContent::Image);
+	TEST_EXPECT(type && type->id == DocumentTypeId::Texture && document_content(*type) == DocumentContent::Bytes);
 	std::unique_ptr<DocumentBase> made = type->make();
-	TEST_EXPECT(made->holds_image() && !records_of(*made) && !text_of(*made));
+	TEST_EXPECT(made->holds_bytes() && !records_of(*made) && !text_of(*made));
 	Diagnostic error;
 	TEST_EXPECT(made->load_bytes(bytes, "textures/brick.tga", AssetKind::Texture, "jo", error) && !made->blocked());
 	const auto *texture = dynamic_cast<const TextureDocument *>(made.get());

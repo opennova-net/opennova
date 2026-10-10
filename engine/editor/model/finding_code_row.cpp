@@ -378,6 +378,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },
 	// A set_workspace the session cannot take (the MCP gaps lane): a card of a file the project lacks.
 	{ C::WorkspaceRefused, code("workspace.refused", G::Workspace) },
+	// A wave_operation the wave cannot take (round S23 lane A): no sample, a trim that keeps none, a silent normalise.
+	{ C::WaveOperation, code("wave.operation", G::Waves) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

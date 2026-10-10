@@ -126,9 +126,11 @@ void test_frame_bracket_follows_the_table() {
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.
 	// The plain-words lane: a string id's words set name the document whose field holds the id.
+	// S23: a wave's whole-wave edit names the active one, as a texture's does.
 	const std::vector<K> active = {K::OpenDocument, K::ReloadDocument, K::CloseDocument, K::SelectRecord, K::EditRecord,
 	                               K::SetStringText, K::RevertToSaved, K::EndEdit, K::Copy, K::Cut, K::Paste, K::Duplicate, K::Save,
-	                               K::Undo, K::Redo, K::TextureOperation, K::SetViewport, K::EditInViewport};
+	                               K::Undo, K::Redo, K::TextureOperation, K::SetViewport, K::EditInViewport,
+	                               K::WaveOperation};
 	const auto listed = [](const std::vector<K> &kinds, K kind) {
 		return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
 	};
@@ -842,11 +844,12 @@ void test_actions_after_edits() {
 	ui.drain();
 	ui.click(problems_lines().at(0, 2));
 	CHECK(ui.drain().empty(), "a required file the project lacks opens nothing");
-	// S12: a finding about a file the editor does not open (a font): its row shows it in Files.
+	// S12: a finding about a file the editor does not open (the NovaWorld string table; a font is a document since
+	// round S23): its row shows it in Files.
 	AssetEntry font_entry;
-	font_entry.logical_name = "Arial14b.fnt";
-	font_entry.relative_path = "fonts/Arial14b.fnt";
-	font_entry.kind = AssetKind::Font;
+	font_entry.logical_name = "nw_cdata.coo";
+	font_entry.relative_path = "nw_cdata.coo";
+	font_entry.kind = AssetKind::StringTableCoo;
 	editor_test::own(v.project.scan).entries.push_back(font_entry);
 	editor_test::own(v.project.scan).index();
 	v.findings.diagnostics = {editor_test::finding_of(DiagnosticSeverity::Warning, "graph.unreadable", "The font could not be read.",
@@ -860,7 +863,7 @@ void test_actions_after_edits() {
 	requests = ui.drain();
 	CHECK(requests.size() == 1 && requests[0].kind == EditorRequestKind::ShowInFiles &&
 	              requests[0].path == font_entry.relative_path && !requests[0].ask_name,
-	      "a font's row shows it in Files");
+	      "a file of no editor: its row shows it in Files");
 	Diagnostic finding = editor_test::finding_of(DiagnosticSeverity::Error, "menu.duplicate_screen", "A finding in the other menu.", other->path());
 	finding.row_id = other->rows()[0]->id;
 	finding.record_kind = kScreen;
@@ -2433,7 +2436,8 @@ void test_go_to_ui() {
 	CHECK(menu->get(main, "font.name", value), "the font's value");
 	const std::vector<ReferenceTarget> targets =
 			reference_targets(*v.findings.graph, *v.project.scan, font, value);
-	CHECK(targets.size() == 2 && targets[0].editable && !targets[1].editable, "the variable, then the font file");
+	CHECK(targets.size() == 2 && targets[0].editable && targets[1].editable,
+	      "the variable, then the font file (a document since round S23)");
 	if (targets.size() != 2) return;
 	ui.activate(item_id(inspector, {key.c_str(), "fields", "font.name", "Go to"}));
 	CHECK(ui.drain().empty(), "two places: Go to opens a menu of them, going nowhere yet");
@@ -2448,13 +2452,17 @@ void test_go_to_ui() {
 	ui.drain();
 	ui.activate(popup_item(places, targets[1].label.c_str()));
 	requests = ui.drain();
-	// DI-17: a Go to always lands, the font file on its page (the editor has no editor for its kind).
+	// DI-17: a Go to always lands, the font file in its document (round S23: a font is one).
 	const EditorRequest *file = one(requests, EditorRequestKind::OpenDocument);
-	CHECK(file && file->path == targets[1].file, "the font file: an open alone, which lands on its page");
+	CHECK(file && file->path == targets[1].file, "the font file: an open alone, which opens its document");
 	if (!file) return;
 	session.handle(*file);
-	CHECK(v.documents.page == targets[1].file && v.documents.page_locator.empty() && v.documents.page_field.empty(),
-	      "the font's page shows, the file itself marked nowhere");
+	CHECK(v.documents.active == targets[1].file, "the font's document shows");
+	// Back to the menu, its window selected again.
+	session.handle(request::open_document(menu->path()));
+	session.handle(select);
+	ui.frames(3);
+	ui.drain();
 	// A variable nothing defines: its Go to lands where it belongs, a stylesheet (DI-17).
 	Edit missing;
 	missing.address = main;

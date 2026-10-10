@@ -3468,7 +3468,9 @@ static int test_fixes_apply() {
 	session.handle(fix.request);
 	session.run_operations();
 	TEST_EXPECT(session.outcome().done() && v.project.scan->find("Custom.fnt") && v.project.scan->find("Custom.fnt")->relative_path == "fonts/Custom.fnt");
-	TEST_EXPECT(!session.document_for("Custom.fnt") && v.documents.active == menu->path());
+	// Made, and opened where the editor edits its kind (a font is a document since round S23).
+	TEST_EXPECT(session.document_for("Custom.fnt") != nullptr);
+	session.handle(request::open_document(menu->path()));
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "reference.missing"));
 
 	// A menu image the project lacks, a .png the game data has: its Import copies the game's own
