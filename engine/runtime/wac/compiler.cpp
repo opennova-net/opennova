@@ -308,6 +308,20 @@ private:
 		note_word(f, WordUse::Kind::Operand);
 	}
 
+	// A literal number the current token is, past a prefix of `prefix` bytes, which a slot of `kind` reads as a
+	// mission's record (tooling metadata: Program::operand_uses); a token that is no number names none.
+	void note_operand(const File &f, ParamType kind, size_t prefix, int32_t value) {
+		const size_t skipped = prefix < f.token_length ? prefix : f.token_length;
+		const std::string_view number = token_view(f).substr(skipped);
+		if (number.empty() || !((number[0] >= '0' && number[0] <= '9') || number[0] == '-' || number[0] == '.'))
+			return;
+		// Once however often the loop takes the token again (as note_word).
+		if (!prog_.operand_uses.empty() && prog_.operand_uses.back().source == f.source &&
+				prog_.operand_uses.back().offset == f.token_start + skipped)
+			return;
+		prog_.operand_uses.push_back({kind, value, f.source, f.token_start + skipped, f.token_length - skipped});
+	}
+
 	// The current token read as a word of the language: a keyword, a command it names, an operand
 	// it looked up or a file it names (tooling metadata: Program::word_uses), once however often the
 	// loop takes the token again.
@@ -1248,6 +1262,7 @@ private:
 			if (env_.registry != nullptr && uint16_t(net) != mission::kPlayerSsn &&
 					!env_.registry->find_by_net_id(uint16_t(net)).valid())
 				error(f, f.line, "Unknown SSN");
+			if (f.decl_mode == 0) note_operand(f, ParamType::Ssn, p, net);
 			return Operand{encode_operand(OperandKind::EntitySsn, pool(f, net, int(ParamType::Ssn), expected)), {}};
 		}
 		if (const size_t p = prefix(wac_operand_prefix(ParamType::Ammo));
@@ -1300,7 +1315,10 @@ private:
 			value *= 60.0;
 		}
 		// [orig: WacScript_ResolveParameter @0x4F2920 (the _ftol2_sse call @0x4F2D8C)]
-		return pooled(f, io::retail_ftol_sse2(value), kind, expected);
+		const int32_t whole = io::retail_ftol_sse2(value);
+		if (f.decl_mode == 0 && (expected == int(ParamType::Area) || expected == int(ParamType::WpList)))
+			note_operand(f, ParamType(expected), 0, whole);
+		return pooled(f, whole, kind, expected);
 	}
 
 	// The dword a resolved address holds during the compile: a pool slot's
