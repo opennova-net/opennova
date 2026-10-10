@@ -241,8 +241,8 @@ struct Fixture {
 std::vector<uint8_t> text_bytes(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
 // The text types' files (S13 D9): a credits file in the CBIN form, laid out as the shipped one is,
-// minted through the form's writer; a shader in the shader loader's SCR form; a music script with a
-// message handler (which its MUS text has no form for), from the minted synth_gamemus.bin.
+// minted through the form's writer; a shader in the shader loader's SCR form; a music file of two scripts (its MUS
+// text carries the first alone), from the minted synth_gamemus.bin.
 std::vector<uint8_t> credits_in_cbin() {
 	using Config = opennova::cbin::BinaryConfig;
 	Config config;
@@ -268,15 +268,14 @@ std::vector<uint8_t> shader_in_scr(const std::string &text) {
 	return text_bytes(std::string("SCR\x01", 4) + payload);
 }
 
-std::vector<uint8_t> music_with_a_handler(const std::vector<uint8_t> &bin) {
+std::vector<uint8_t> music_in_two_chunks(const std::vector<uint8_t> &bin) {
 	opennova::mus::MusFile file{};
 	std::vector<uint8_t> out;
 	if (bin.empty() || opennova::mus::mus_open_memory(&file, bin.data(), bin.size()) != 0) return out;
-	file.scripts[0].has_message_handler = 1;
-	const opennova::mus::MusScript *scripts[] = {&file.scripts[0]};
+	const opennova::mus::MusScript *scripts[] = {&file.scripts[0], &file.scripts[0]};
 	uint8_t *buffer = nullptr;
 	size_t size = 0;
-	if (opennova::mus::mus_encode_file(scripts, 1, &buffer, &size) == 0) out.assign(buffer, buffer + size);
+	if (opennova::mus::mus_encode_file(scripts, 2, &buffer, &size) == 0) out.assign(buffer, buffer + size);
 	opennova::mus::mus_free(buffer);
 	opennova::mus::mus_close(&file);
 	return out;
@@ -564,10 +563,10 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::AnimationMap, "slot_twice.adm",
 	         text_bytes("anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\nanim_idle\t\"walk.bad\"\r\n")},
 	        {AssetKind::Mission, "reordered.bms", mission_with_runs_reordered(file("bms/synth_logic.bms"))},
-	        // The text types (S13 D9): a compile error, a message handler, credits lines holding spaces
+	        // The text types (S13 D9): a compile error, a music file of two scripts, credits lines holding spaces
 	        // (the minted synth_nlist.kda), a plain shader.
 	        {AssetKind::Script, "flawed.wac", text_bytes("fxrain FX_Buildup )\r\n")},
-	        {AssetKind::MusicScript, "handled.bin", music_with_a_handler(file("mus/synth_gamemus.bin"))},
+	        {AssetKind::MusicScript, "two.bin", music_in_two_chunks(file("mus/synth_gamemus.bin"))},
 	        {AssetKind::Credits, "spaced.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
 	        // A particle file the effect system's reader stops in (DI-14: particle.unreadable).
