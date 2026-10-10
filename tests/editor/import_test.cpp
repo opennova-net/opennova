@@ -51,6 +51,7 @@
 #include <runtime/renderer/texture_load_rules.h>
 #include <formats/threedi/threedi_3di3.h>
 
+#include "common/gp_model_bytes.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -995,6 +996,70 @@ static int test_scene_imports() {
 	return 0;
 }
 
+// A Black Hawk Down GP model imported from the disk is migrated to 3DI3 as it comes in (ADR 0027
+// as amended; the converter claims it by its bytes): the project gets a 3DI3 of the source's name,
+// each migration note an import note; a 3DI3 of the same extension is copied as it is; a GP
+// model the reader refuses writes nothing and says why; the plan lists the migrated model.
+static int test_gp_import() {
+	editor_test::TempProjectDir dir("opennova_editor_gp_import");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Bhd"));
+	const std::string root = session.view().project.root;
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const ProjectDocument &document = *session.view().project.document;
+	const std::string source = dir.file("bhd");
+	fs::create_directories(source);
+	const std::vector<uint8_t> gp = gp_test::gpm_model();
+	std::string message;
+	TEST_EXPECT(editor_test::write_bytes(source + "/crate.3di", gp));
+
+	ImportResult r = import_assets({{source + "/crate.3di", {}}}, paths, document, false);
+	bool error = false, note = false;
+	for (const Diagnostic &d : r.diagnostics) {
+		error = error || d.severity == DiagnosticSeverity::Error;
+		note = note || (d.code() == "import.migrate_note" && d.message.find("flag 0x2") != std::string::npos);
+	}
+	TEST_EXPECT(!error && note);
+	TEST_EXPECT(r.imported.size() == 1 && r.imported[0] == "models/crate.3di");
+	std::vector<uint8_t> model;
+	TEST_EXPECT(io::read_file_bytes(root + "/models/crate.3di", model, message));
+	TEST_EXPECT(model.size() >= 4 && std::string(model.begin(), model.begin() + 4) == "3DI3");
+	opennova::threedi::Threedi3di3 check{};
+	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(model.data(), model.size(), &check) == 0);
+	TEST_EXPECT(check.lod_count == 1 && check.material_count == 2);
+	opennova::threedi::threedi_3di3_free(&check);
+
+	// A 3DI3 is no GP model: the same extension, copied as it is.
+	TEST_EXPECT(editor_test::write_bytes(source + "/native.3di", model));
+	r = import_assets({{source + "/native.3di", {}}}, paths, document, false);
+	std::vector<uint8_t> copied;
+	TEST_EXPECT(r.imported.size() == 1 && io::read_file_bytes(root + "/models/native.3di", copied, message));
+	TEST_EXPECT(copied == model);
+
+	// A GP model the reader refuses: nothing written, the reason given.
+	const std::vector<uint8_t> broken(gp.begin(), gp.begin() + 0x100);
+	TEST_EXPECT(editor_test::write_bytes(source + "/broken.3di", broken));
+	r = import_assets({{source + "/broken.3di", {}}}, paths, document, false);
+	bool refused = false;
+	for (const Diagnostic &d : r.diagnostics)
+		refused = refused || (d.code() == "import.migrate" && d.severity == DiagnosticSeverity::Error);
+	TEST_EXPECT(refused && r.imported.empty() && !fs::exists(root + "/models/broken.3di"));
+
+	// The plan shows the migrated model made from the source.
+	const SessionView &view = session.view();
+	ImportChoice choice;
+	choice.path = source + "/crate.3di";
+	const ImportPlan plan =
+	        plan_import({choice}, false, paths, *view.project.document, *view.project.scan, *view.findings.graph, "");
+	bool planned = false;
+	for (const ImportPlanRow &row : plan.rows)
+		planned = planned || (row.name == "crate.3di" && row.made_from == "crate.3di");
+	TEST_EXPECT(planned);
+	return 0;
+}
+
 // The plan of an import with the files it needs (import_plan_test.cpp), and the session's
 // import of it (import_apply_test.cpp; its retail leg runs with --retail).
 int run_import_plan_tests();
@@ -1012,6 +1077,7 @@ int main(int argc, char **argv) {
 	failures += test_import_lifetime();
 	failures += test_retail_source();
 	failures += test_scene_imports();
+	failures += test_gp_import();
 	failures += run_import_plan_tests();
 	failures += run_import_apply_tests();
 	if (failures == 0) std::printf("editor_import: all tests passed\n");

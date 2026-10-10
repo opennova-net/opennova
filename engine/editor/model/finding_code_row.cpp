@@ -210,6 +210,10 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportInput, code("import.input", G::Imports) },
 	{ C::ImportInstall, code("import.install", G::Imports) },
 	{ C::ImportKind, code("import.kind", G::Imports) },
+	// A Black Hawk Down GP model migrated to 3DI3 as it came in (import/converter): one the reader or the
+	// migration refuses, and what the migration could not carry exactly, a note a kind.
+	{ C::ImportMigrate, code("import.migrate", G::Imports) },
+	{ C::ImportMigrateNote, code("import.migrate_note", G::Imports) },
 	{ C::ImportName, code("import.name", G::Imports) },
 	{ C::ImportNotPlanned, code("import.not_planned", G::Imports) },
 	{ C::ImportNotPublished, code("import.not_published", G::Imports) },

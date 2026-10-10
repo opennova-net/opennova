@@ -5793,11 +5793,11 @@ add_test(NAME editor_environment_viewport COMMAND editor_environment_viewport_te
 
 # Face animations (ADR 0046, round S23 lane A): a .grm as a document over the engine's reader and writer, its
 # triangles' corners following their vertices, its findings, its references and its blank, over the authored
-# fixture (JO ships no .grm, so the row has no retail twin).
+# fixture; the retail twin opens and saves the 13 faces Black Hawk Down ships (JO ships none).
 add_executable(editor_face_animation_test editor/face_animation_document_test.cpp)
 target_link_libraries(editor_face_animation_test PRIVATE opennova_editor)
 target_include_directories(editor_face_animation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_face_animation COMMAND editor_face_animation_test)
+opennova_add_mixed_test(editor_face_animation COMMAND editor_face_animation_test)
 
 # Fonts (ADR 0046, round S23 lane A): a .fnt as a document over the engine's reader and writer, its header and
 # glyphs edited, its findings, its blank; a SKIP-LEG without OPENNOVA_JO_ASSETS (every shipped .fnt byte for byte).

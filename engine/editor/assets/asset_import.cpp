@@ -429,12 +429,14 @@ private:
 		std::vector<uint8_t> bytes;
 		if (!read(source, name, bytes)) return;
 		// What the source becomes: a converter's outputs (the source is not kept), or
-		// the file itself.
+		// the file itself. A loose file's bytes choose too (a GP model is migrated); an
+		// archive's or the install's file goes by its name alone.
 		std::vector<ImportOutput> made;
-		const Converter *converter = converter_for(name);
+		const bool loose = !source.install && source.entry.empty();
+		const Converter *converter = converter_for(name, loose ? &bytes : nullptr);
 		if (converter) {
 			ImportProduct product;
-			converter->run(name, bytes, product);
+			converter->run(name, loose ? source.path : std::string(), bytes, product);
 			bool broken = false;
 			for (Diagnostic &d : product.diagnostics) {
 				broken = broken || d.severity == DiagnosticSeverity::Error;
