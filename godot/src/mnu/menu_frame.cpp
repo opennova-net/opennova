@@ -605,6 +605,11 @@ void MenuFrame::set_widget_selected_set(int p_index,
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_disabled_items(int p_index, const std::vector<uint8_t> &p_rows) {
+	opennova::menu::frame_set_disabled_items(state_, p_index, p_rows);
+	queue_redraw();
+}
+
 void MenuFrame::set_widget_table_rows(int p_index,
 		const std::vector<opennova::menu::MenuTableRow> &p_rows) {
 	opennova::menu::frame_set_table_rows(state_, p_index, p_rows);

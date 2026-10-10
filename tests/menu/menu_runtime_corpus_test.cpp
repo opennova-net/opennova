@@ -105,6 +105,7 @@ public:
 	void set_widget_selection(int, int, int, int) override {}
 	void set_widget_scroll_range(int, int, int, int, int) override {}
 	void set_widget_selected_set(int, const std::vector<int> &) override {}
+	void set_widget_disabled_items(int, const std::vector<uint8_t> &) override {}
 	void set_widget_table_rows(int, const std::vector<MenuTableRow> &) override {}
 	void set_widget_clip_rect(int, bool, int, int, int, int) override {}
 	void set_widget_rect(int, int, int, int, int) override {}

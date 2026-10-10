@@ -49,6 +49,11 @@ private:
 	bool expansion_pending_ = false;
 };
 
+// The armory's PLAYER_CLASS spin: its rows 0..4 each enabled by the host's class mask, bits 5..9 in
+// turn, whatever the session [orig: UI_InitTeamClassSelection @ 0x56739e..0x5673f4, ahead of its
+// select by value @ 0x567402].
+void enable_class_rows(MenuRuntime &menu, int spin, uint32_t class_allow_mask);
+
 // Host-dialog mission rotation. The networking option-value readback stays
 // in inmatch/host_settings; this model consumes catalog values and menu state.
 class HostDialog {

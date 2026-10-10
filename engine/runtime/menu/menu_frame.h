@@ -256,6 +256,10 @@ struct MenuWidgetState {
 	// Additional selected rows for MULTI lists (drawn with the selection
 	// style alongside selected_item); the single-select widgets ignore it.
 	std::vector<int32_t> selected_items;
+	// A spin list's rows the game disabled, by row (nonzero: disabled; a row past the end is
+	// enabled): bit 2 of the item's flags word [orig: CSpinListWnd_SetItemEnabled @ 0x64bbd0]. A
+	// disabled current row draws nothing (CSpinListWnd_Render @ 0x64b334).
+	std::vector<uint8_t> disabled_items;
 	// A runtime rect replacing the POSITION solve (CWnd_SetRect), relative to
 	// the parent's origin.
 	bool has_rect = false;
@@ -936,6 +940,8 @@ private:
 	// The enabled flag the pump reads: the runtime's once written, else the
 	// authored DISABLE.
 	static bool disabled_(const mnu::Window &w, const MenuWidgetState *ws);
+	// A spin arrow's node (its own row: what code or an ACTION wrote on the arrow a lookup found).
+	bool arrow_disabled_(int arrow, const MenuFrameState &state) const;
 	// A claim of the walk: the widget and the part (menu_click.h MenuPumpWindow).
 	struct HitClaim {
 		int index = -1;
@@ -1030,8 +1036,9 @@ private:
 	// on cut to the scaled clip rect [orig: CWnd_ApplyClipViewport @ 0x6472a0].
 	void clip_ops_(int32_t first_op, const mnu::RectEdges &clip, const WalkScale &s);
 	bool widget_shown_(int index, const MenuFrameState &state) const;
+	// `ws` the pump's row (a spin arrow's: its list's); `own` an arrow's own row, its enabled flag.
 	int pump_visual_state(const WidgetNode &node,
-			const MenuWidgetState *ws) const;
+			const MenuWidgetState *ws, const MenuWidgetState *own = nullptr) const;
 	int appearance_state_with_fallback(const WidgetNode &node,
 			int state) const;
 	mnu::RectEdges solve_rect(const WidgetNode &node) const;
@@ -1141,8 +1148,9 @@ private:
 	void emit_checkbox_label(const WidgetNode &node,
 			const mnu::RectEdges &rect, const WalkScale &s, int color_state,
 			const MenuWidgetState *ws);
-	void emit_item_cell(const WidgetNode &node, const mnu::RectEdges &rect,
-			const WalkScale &s, int color_state, const MenuWidgetState *ws);
+	// `local` the window's own rect (parent-relative), `rect` the same moved by its ancestors'.
+	void emit_item_cell(const WidgetNode &node, const mnu::RectEdges &local,
+			const mnu::RectEdges &rect, const WalkScale &s, const MenuWidgetState *ws);
 	void emit_list_rows(const WidgetNode &node, const mnu::RectEdges &rect,
 			const WalkScale &s, const MenuWidgetState *ws);
 	// One list row's text: the row rect, the row's justify word (WidgetNode::RowLayout::align)

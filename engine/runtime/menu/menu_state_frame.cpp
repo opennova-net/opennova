@@ -105,6 +105,10 @@ void frame_set_selected_set(MenuFrameState &state, int index, const std::vector<
 	row.selected_items.assign(rows.begin(), rows.end());
 }
 
+void frame_set_disabled_items(MenuFrameState &state, int index, const std::vector<uint8_t> &rows) {
+	frame_widget(state, index).disabled_items = rows;
+}
+
 void frame_set_table_rows(MenuFrameState &state, int index, const std::vector<MenuTableRow> &rows) {
 	frame_widget(state, index).table_rows = rows;
 }
@@ -225,6 +229,10 @@ void MenuStateFrame::set_widget_scroll_range(int index, int minimum, int maximum
 }
 void MenuStateFrame::set_widget_selected_set(int index, const std::vector<int> &rows) {
 	frame_set_selected_set(state_, index, rows);
+	++serial_;
+}
+void MenuStateFrame::set_widget_disabled_items(int index, const std::vector<uint8_t> &rows) {
+	frame_set_disabled_items(state_, index, rows);
 	++serial_;
 }
 void MenuStateFrame::set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) {
