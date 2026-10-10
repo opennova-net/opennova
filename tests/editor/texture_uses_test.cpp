@@ -6,6 +6,7 @@
 // (the scope's crosshair); the index made once while what it reads stands and again after an edit of a
 // referrer; a texture's viewport showing it as a use draws it (a cut-out's test, the HUD's alpha alone)
 // and as the file again; the texture_uses query; a use shown where the game draws it (show_use).
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <sstream>
@@ -18,17 +19,21 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/texture_uses.h>
+#include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/texture_viewport.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/texture_show_use.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 #include <formats/dds/dds.h>
 #include <formats/env/env.h>
 #include <formats/tga/tga.h>
+#include <formats/til/til_io.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -295,14 +300,14 @@ int test_show_use() {
 	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	TEST_EXPECT(import_assets({loose(scene + "/thing.o3d")}, ProjectPaths::for_root(root), *view.project.document, false)
 	                    .imported == std::vector<std::string>({"models/thing.3di"}));
-	for (const char *name : {"body.tga", "map.tga", "grain.tga", "logo.tga", "stance.tga", "scopexh.tga", "puff.tga"})
+	for (const char *name : {"body.tga", "map.tga", "grain.tga", "logo.tga", "stance.tga", "scopexh.tga", "puff.tga", "strip.tga"})
 		TEST_EXPECT(editor_test::write_bytes(root + "/textures/" + name, tga_bytes()));
 	TEST_EXPECT(editor_test::write_text(root + "/effects/fx.ptl",
 	                                    "[particledef]\r\n{\r\n\tid = a;\r\n\tgraphic1 = puff.tga, additive;\r\n}\r\n"
 	                                    "[particledef]\r\n{\r\n\tid = b;\r\n\tgraphic1 = puff.tga, blend;\r\n}\r\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/isle.trn",
-	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_polydata isle.cpt\n"
-	                                    "polytrn_sectorcount 1\npolytrn_sectors 0\n") &&
+	                                    "polytrn_colormap map.tga\npolytrn_detailmap grain.tga\npolytrn_tilestrip strip.tga\n"
+	                                    "polytrn_polydata isle.cpt\npolytrn_sectorcount 1\npolytrn_sectors 0\n") &&
 	            editor_test::write_text(root + "/menus/extra.mnu",
 	                                    "<SCREEN>\r\n<NAME>EXTRA</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"PICTURE\">\r\n"
 	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
@@ -361,6 +366,31 @@ int test_show_use() {
 	session.run_operations();
 	TEST_EXPECT(answer.get_bool("ok", false) && view.documents.active == mission &&
 	            view.activity.status == "Showing map.tga in first.bms's view.");
+	// S23 C: its tile atlas's cells framed: the squares the mission's .til places them on.
+	{
+		opennova::TilFile placed;
+		opennova::TilOverlayEntry a, b;
+		a.x_fixed = 32 << 16;
+		a.z_fixed = -(48 << 16);
+		b.x_fixed = 96 << 16;
+		b.z_fixed = -(80 << 16);
+		b.tile_index = 1;
+		placed.entries = {a, b};
+		std::vector<uint8_t> til;
+		TEST_EXPECT(opennova::save_til(placed, til, error) &&
+		            editor_test::write_bytes(root + "/" + mission.substr(0, mission.find_last_of('.')) + ".til", til));
+		editor_test::handle_to_end(session, request::rescan());
+		session.run_operations();
+		editor_test::handle_to_end(session, request::show_use("textures/strip.tga", "terrains/isle.trn"));
+		TEST_EXPECT(session.outcome().done() &&
+		            view.activity.status == "Showing strip.tga in first.bms's view, framed on the 2 squares first.til places its cells on.");
+		session.run_operations();
+		const auto *shown = static_cast<const MissionViewport *>(session.viewports().find(mission, ViewportKind::Mission));
+		double at[3] = {0, 0, 0};
+		if (shown) preview_to_mission(shown->camera().target, at);
+		// The squares [32, 112] x [48, 96]: their middle.
+		TEST_EXPECT(shown && std::abs(at[0] - 72.0) < 0.01 && std::abs(at[1] - 72.0) < 0.01);
+	}
 	// As an item's HUD draws it: the texture opened, its viewport's as_used the use.
 	editor_test::handle_to_end(session, request::show_use("textures/stance.tga", "defs/items.def"));
 	const auto *stance =
@@ -388,10 +418,39 @@ int test_show_use() {
 	return 0;
 }
 
+// S23 C: a flipbook frame row shown at its frame, by the engine's frame law: a flipbook on the clock (100 ms a
+// frame) holds the clock at its frame's first millisecond, paused; one on a register (a 16.16 fraction of its
+// frames) holds the register at the least value that shows it; a frame past the frames, and a flipbook of another
+// clock, refused in words.
+int test_flipbook_frame() {
+	opennova::threedi::ThreediMaterial material{};
+	material.animation.num_frames = 4;
+	material.animation.animation_type = 0;
+	material.animation.cycle_frame_time = 100;
+	std::vector<opennova::threedi::ThreediControlRegister> registers(2);
+	std::snprintf(registers[0].name, sizeof(registers[0].name), "%s", "DOOR_1");
+	std::snprintf(registers[1].name, sizeof(registers[1].name), "%s", "ANIM_ONE");
+	FlipbookFrameChange step;
+	std::string why;
+	TEST_EXPECT(flipbook_frame_change(material, registers, 2, step, why) && step.clock &&
+	            step.change == "{\"clock\":{\"playing\":false,\"time_ms\":200}}");
+	TEST_EXPECT(!flipbook_frame_change(material, registers, 4, step, why) && why.find("past the flipbook's 4 frames") != std::string::npos);
+	material.animation.animation_type = 1;
+	material.animation.cycle_frame_time = 1;
+	TEST_EXPECT(flipbook_frame_change(material, registers, 3, step, why) && !step.clock &&
+	            step.change == "{\"kind\":\"model\",\"options\":{\"ctrl\":{\"ANIM_ONE\":49152}}}");
+	material.animation.cycle_frame_time = 7;
+	TEST_EXPECT(!flipbook_frame_change(material, registers, 1, step, why) && why.find("register 7") != std::string::npos);
+	material.animation.animation_type = 2;
+	TEST_EXPECT(!flipbook_frame_change(material, registers, 1, step, why) && why.find("holds frame 0") != std::string::npos);
+	std::printf("flipbook frame: the clock held, a register held, a frame never shown refused\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_uses() + test_show_use();
+	const int failures = test_uses() + test_show_use() + test_flipbook_frame();
 	if (failures == 0) std::printf("editor_texture_uses: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
