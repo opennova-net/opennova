@@ -53,6 +53,10 @@ enum class DocumentTypeId {
 	Terrain,     // a .trn: TrnConfig's keys, grid rows and foliage (the deep-integration plan's DI-30)
 	DialogBank,  // a .dbf: a mission's dialogs and their lines (the deep-integration plan's DI-32)
 	CharAttrs,   // charattr.def, held as its text: its classes' camouflage items as references (DI-09's follow-up)
+	FaceAnimation, // a .grm: a person's face, its textures, mesh, gestures and eyes (round S23 lane A)
+	Font,          // a .fnt: its header, its 224 glyphs' pages and rects, its pages' texels (round S23 lane A)
+	MusicBank,     // a .sbf: its header and its streams of byte-paired stereo (round S23 lane A)
+	Wave,          // a .wav: its bytes as the game's loader reads them, trimmed and normalised whole (round S23 lane A)
 	kCount, // the number of values, None among them
 };
 

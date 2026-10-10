@@ -11,6 +11,7 @@
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def_hudpos_write.h>
+#include <formats/grm/grm.h>
 #include <formats/particle/parser.h>
 #include <runtime/menu/menu_credits.h>
 
@@ -105,6 +106,24 @@ bool make_blank_avatars(const BlankRequest &request, std::vector<uint8_t> &out, 
 	}
 	out.assign(data, data + size);
 	avatars::avatars_free_buffer(data);
+	return true;
+}
+
+// A face of no texture, mesh or gesture, its eyes where the game puts them with none: the GRM writer's file of an
+// empty face (grm::write), which the game's reader loads as a face [orig: FaceAnimConfig_LoadFile @ 0x588BE0 takes a
+// file of no line; sub_5891E0 @ 0x5891E0 seeds the eyes, FaceAnimConfig_InitEyeDefaults @ 0x588D20] and its
+// compositor draws with nothing to deform [orig: Render_ScarDebugOverlay @ 0x589220, the triangles under their count
+// @ 0x5892D4; sub_588FE0 @ 0x588FE0, no gesture]. The writer writes every count line, which a face loaded into a
+// slot another mission's face held needs: the mission's end frees the arrays and keeps their counts [orig:
+// sub_57FBB0 @ 0x57FBB0 -> sub_587C30 @ 0x587C30].
+bool make_blank_face_animation(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	std::string why;
+	if (!grm::write(grm::File{}, out, why)) {
+		out.clear();
+		error = make_finding(CoreFinding::BlankDef, DiagnosticSeverity::Error, "The face animation could not be written: " + why + ".",
+		                     request.logical_name);
+		return false;
+	}
 	return true;
 }
 

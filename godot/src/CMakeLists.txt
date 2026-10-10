@@ -421,6 +421,7 @@ if(OPENNOVA_EDITOR)
         authoring/thumbnail_images.cpp
         authoring/viewport_device.cpp
         authoring/viewport_devices.cpp
+        authoring/font_viewport_applier.cpp
     )
     target_include_directories(opennova_editor_gdext PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(opennova_editor_gdext PRIVATE opennova_bindings opennova_editor)

@@ -385,7 +385,7 @@ bool texture_role_from_token(const std::string &token, renderer::TextureRoleId &
 }
 
 int32_t texture_role_arg(renderer::TextureRoleId role, int32_t flags) {
-	return kTextureRoleArg + int32_t(role) + (flags & (kTextureArgGates | kTextureArgTileSet | kTextureArgPcx));
+	return kTextureRoleArg + int32_t(role) + (flags & (kTextureArgGates | kTextureArgTileSet | kTextureArgPcx | kTextureArgFaceTga));
 }
 
 bool texture_arg_role(int32_t loader_arg, renderer::TextureRoleId &role) {

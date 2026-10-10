@@ -126,6 +126,16 @@ static int test_font_set() {
 	TEST_EXPECT(!parse_font_set(text_bytes("sheet\n"), set, why) && why.find("names no file") != std::string::npos);
 	font_set_inputs(text_bytes("colour red\n"), inputs);
 	TEST_EXPECT(inputs.empty());
+	// The sheet's grid (round S23): the columns, the rows and the first cell's byte, decimal or hex; the default
+	// grid's where the set says none; a value out of its range refused, naming its line.
+	TEST_EXPECT(parse_font_set(text_bytes("sheet a.png\n"), set, why) && set.columns == 16 && set.rows == 14 && set.first == 0x20);
+	TEST_EXPECT(parse_font_set(text_bytes("sheet a.png\ncolumns 16\nrows 16\nfirst 0\n"), set, why) && set.rows == 16 &&
+	            set.first == 0);
+	TEST_EXPECT(parse_font_set(text_bytes("sheet a.png\nfirst 0xC0\nrows 2\ncolumns 8\n"), set, why) && set.first == 0xC0 &&
+	            set.columns == 8);
+	for (const char *bad : {"columns 0", "rows 257", "first 256", "first 0x100", "first -1", "rows many"})
+		TEST_EXPECT(!parse_font_set(text_bytes(std::string("sheet a.png\n") + bad + "\n"), set, why) &&
+		            why.find("line 2") != std::string::npos);
 	return 0;
 }
 
@@ -152,14 +162,13 @@ static int test_options() {
 		TEST_EXPECT(!font_import_settings({{key, value}}, settings, why, field) && field == key);
 		TEST_EXPECT(why.find("takes") != std::string::npos);
 	}
-	// The rows the import_options query lists: tracking and space only under ink and left.
+	// The rows the import_options query lists: space only under ink and left, the tracking under every advance.
 	const std::vector<ImportOptionRow> &rows = font_import_option_rows();
 	TEST_EXPECT(rows.size() == 6);
 	TEST_EXPECT(import_option_row(rows, "color") && import_option_row(rows, "color")->fallback == "white" &&
 	            import_option_row(rows, "color")->values.size() == 2 && import_option_row(rows, "color")->applies_to.empty());
 	const ImportOptionRow *tracking = import_option_row(rows, "tracking");
-	TEST_EXPECT(tracking && tracking->fallback == "1" && tracking->applies_to == "advance" &&
-	            tracking->applies_values == std::vector<std::string>({"ink", "left"}));
+	TEST_EXPECT(tracking && tracking->fallback == "1" && tracking->applies_to.empty());
 	const ImportOptionRow *space = import_option_row(rows, "space");
 	TEST_EXPECT(space && space->fallback.empty() && space->applies_to == "advance");
 	TEST_EXPECT(import_option_row(rows, "advance")->fallback == "ink" && import_option_row(rows, "spacing")->fallback == "0" &&
@@ -352,6 +361,72 @@ static int test_import_from_disk() {
 	return 0;
 }
 
+// The new_font request (round S23 lane A): a font made from a glyph sheet on disk, its set written in fonts/ with
+// the sheet copied beside it and its grid, its record the options, then imported; a sheet of six rows from the space;
+// refused, nothing written: a name taken, no sheet, a value of no key, a grid the sheet does not divide into.
+static int test_new_font() {
+	editor_test::TempProjectDir dir("opennova_editor_new_font");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Fonts"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	// A sheet of six rows (0x20..0x7F), outside the project.
+	RgbaImage six;
+	six.width = kCellW * 16;
+	six.height = kCellH * 6;
+	six.pixels.assign(size_t(six.width) * size_t(six.height) * 4, 0);
+	for (int y = 1; y < 9; ++y)
+		for (int x = 1; x < 6; ++x) six.pixels[(size_t(kCellH * 2 + y) * size_t(six.width) + size_t(kCellW + x)) * 4 + 3] = 255; // 'A'
+	const std::string outside = dir.file("art/Ascii.png");
+	TEST_EXPECT(editor_test::write_bytes(outside, sheet_png(six)));
+	const ActionOutcome made_font = editor_test::handle_to_end(session, request::new_font("Ascii", {{"sheet", outside}, {"rows", "6"}, {"spacing", "-2"}}));
+	TEST_EXPECT(made_font.done());
+	const AssetEntry *set = view.project.scan->find("Ascii.fntset");
+	const AssetEntry *copy = view.project.scan->find("Ascii_sheet.png");
+	const AssetEntry *font = view.project.scan->find("Ascii.fnt");
+	TEST_EXPECT(set && set->relative_path == "fonts/Ascii.fntset" && copy && font && font->kind == AssetKind::Font);
+	std::string text, message;
+	TEST_EXPECT(opennova::io::read_file_text(root + "/fonts/Ascii.fntset", text, message) && text.find("sheet Ascii_sheet.png") != std::string::npos &&
+	            text.find("rows 6") != std::string::npos);
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(font && opennova::io::read_file_bytes(root + "/" + font->relative_path, bytes, message));
+	fnt_font_t made{};
+	TEST_EXPECT(fnt_parse(bytes.data(), bytes.size(), &made) == FNT_OK);
+	const bool read = width_of(made, 'A') == 6 && width_of(made, 0xE9) == 3 && made.glyph_spacing == -2;
+	fnt_free(&made);
+	TEST_EXPECT(read);
+	// Refused, nothing written: the name taken, no sheet, a value of no key, a grid the sheet does not divide into.
+	ActionOutcome refused = editor_test::handle_to_end(session, request::new_font("Ascii", {{"sheet", outside}, {"rows", "6"}}));
+	TEST_EXPECT(!refused.done() && count_code(refused.findings, "import.font") == 1);
+	refused = editor_test::handle_to_end(session, request::new_font("Other", {{"rows", "6"}}));
+	TEST_EXPECT(!refused.done());
+	refused = editor_test::handle_to_end(session, request::new_font("Other", {{"sheet", outside}, {"height", "6"}}));
+	TEST_EXPECT(!refused.done());
+	refused = editor_test::handle_to_end(session, request::new_font("Other", {{"sheet", outside}}));
+	TEST_EXPECT(!refused.done() && !refused.findings.empty() && refused.findings[0].message.find("14 rows") != std::string::npos);
+	// A value holding a line break (a second sheet line spliced into the set): refused before anything is written.
+	refused = editor_test::handle_to_end(session,
+	                                     request::new_font("Other", {{"sheet", outside}, {"rows", "6\r\nsheet ../x.png"}}));
+	TEST_EXPECT(!refused.done() && !refused.findings.empty() &&
+	            refused.findings[0].message.find("line break") != std::string::npos);
+	// A folder outside the project: refused.
+	refused = editor_test::handle_to_end(session, request::new_font("Other", {{"sheet", outside}, {"rows", "6"}}, "../away"));
+	TEST_EXPECT(!refused.done());
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(!view.project.scan->find("Other.fntset") && !view.project.scan->find("Other_sheet.png"));
+	// Files' New here: the set and its sheet's copy in the folder it names.
+	const ActionOutcome in_art = editor_test::handle_to_end(session, request::new_font("Boxed", {{"sheet", outside}, {"rows", "6"}}, "art"));
+	TEST_EXPECT(in_art.done());
+	const AssetEntry *art_set = view.project.scan->find("Boxed.fntset");
+	const AssetEntry *art_copy = view.project.scan->find("Boxed_sheet.png");
+	TEST_EXPECT(art_set && art_set->relative_path == "art/Boxed.fntset" && art_copy &&
+	            art_copy->relative_path == "art/Boxed_sheet.png" && view.project.scan->find("Boxed.fnt"));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_font_set();
@@ -359,6 +434,7 @@ int main() {
 	failures += test_import_run();
 	failures += test_project();
 	failures += test_import_from_disk();
+	failures += test_new_font();
 	if (failures == 0) std::printf("editor_font_import: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

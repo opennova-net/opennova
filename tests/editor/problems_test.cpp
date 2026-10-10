@@ -434,13 +434,15 @@ static int test_fixes() {
 			if (row.fixes == FindingFix::Rewrite) rewrites.push_back(&row);
 			if (row.blocks_save) blockers.push_back(&row);
 		}
-	TEST_EXPECT(blockers.size() == 18);
+	TEST_EXPECT(blockers.size() == 23);
 	std::vector<std::string> rewrite_tokens;
 	for (const FindingCodeRow *row : rewrites) rewrite_tokens.push_back(row->token);
 	std::sort(rewrite_tokens.begin(), rewrite_tokens.end());
 	TEST_EXPECT(rewrite_tokens == std::vector<std::string>({"animation_map.ignored_input", "dialog_bank.ignored_input",
-	                                                        "environment.ignored_input", "menu.ignored_input",
+	                                                        "environment.ignored_input", "face_animation.ignored_input",
+	                                                        "font.ignored_input", "menu.ignored_input",
 	                                                        "mission.event_order", "mission.rewrite_differs",
+	                                                        "music_bank.ignored_input",
 	                                                        "script.line_ending", "shader.form",
 	                                                        "sound_bank.ignored_input",
 	                                                        "strings.regrouped", "style.line_ending",
@@ -602,7 +604,7 @@ static int test_location() {
 		return asset;
 	};
 	editor_test::own(view.project.scan).entries = {entry("items.def", "defs/items.def", AssetKind::ItemDefs), entry("logo.png", "art/logo.png", AssetKind::ImportSource),
-	                     entry("Arial14b.fnt", "fonts/Arial14b.fnt", AssetKind::Font)};
+	                     entry("nw_cdata.coo", "nw_cdata.coo", AssetKind::StringTableCoo)};
 	editor_test::own(view.project.scan).index();
 	Diagnostic required = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", "Missing required file main.mnu.");
 	required.subject = RequirementSubject{"main_menu", "main.mnu"};
@@ -624,7 +626,7 @@ static int test_location() {
 	// S12: a file of a kind the editor does not open is shown in Files (ShowInFiles), as is a
 	// file whose name or place is the finding, one the editor opens too; a name the scan does
 	// not list as a path goes nowhere.
-	for (const char *asset : {"fonts/Arial14b.fnt", "art/logo.png"}) {
+	for (const char *asset : {"nw_cdata.coo", "art/logo.png"}) {
 		const ProblemLocation shown = problem_location(editor_test::finding_of(DiagnosticSeverity::Warning, "graph.unreadable", "A finding.", asset), view);
 		TEST_EXPECT(shown.path == asset && shown.in_files && shown.request().kind == EditorRequestKind::ShowInFiles &&
 		            shown.request().path == asset && !shown.request().ask_name);

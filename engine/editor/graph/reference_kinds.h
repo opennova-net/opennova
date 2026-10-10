@@ -176,7 +176,7 @@ std::string user_point_scope(const std::string &model, bool first_16);
 std::string animation_map_scope(const std::string &map);
 
 // The number of reference kinds: Dialog is the last.
-inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::Dialog) + 1;
+inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::FaceVertex) + 1;
 
 // The record a Record reference's value names, by its index in the kind's collection: a whole
 // number from 0 that the kind's none does not take (a negative one names none: an index from 0 is
