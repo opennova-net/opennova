@@ -147,6 +147,9 @@ struct FieldSchema {
 	// (a string table's section, a menu's screen); refined per record by Document::field_on
 	// ("" = any).
 	std::string scope;
+	// The scope the lookup tries after `scope` where the name finds nothing there (GraphEdge::scopes_after: an
+	// action's text token, the mission's table, then GAMETEXT.BIN); null for a lookup of one scope.
+	const char *scope_after = nullptr;
 	// The symbol the field's value names its record as, which other records reference it
 	// by (a menu screen's or window's NAME); refined per record by Document::field_on.
 	ReferenceKind defines = ReferenceKind::None;

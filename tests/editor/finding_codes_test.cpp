@@ -326,7 +326,7 @@ static int test_columns() {
 		TEST_EXPECT(row && row->rewrite_does && does == row->rewrite_does);
 	}
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
-	            Tokens({ "ai_profile.invalid_input", "animation_map.invalid_input", "avatars.invalid_input", "catalog.invalid_input", "catalog.reader_stops", "catalog.unserializable",
+	            Tokens({ "ai_profile.invalid_input", "animation_map.invalid_input", "avatars.invalid_input", "avatars.reader_stops", "catalog.invalid_input", "catalog.reader_stops", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "dialog_bank.invalid_input", "document.unserializable",
 	                     "environment.invalid_input", "face_animation.invalid_input", "face_animation.unserializable",
 	                     "font.invalid_input", "font.unserializable",
@@ -457,9 +457,11 @@ static int test_columns() {
 			// reader stops at (game_stops_code: the game's refusal said); a listed one is input the game reads on.
 			// A row whose file does not serialize: the editor's own (.unserializable, .invalid_input), input the game's
 			// reader stops at (game_stops_code: the game's refusal said), or input the game reads on that the model
-			// cannot carry, apart from its code's crash cases (unwritable_code: listed).
+			// cannot carry, apart from its code's crash cases (unwritable_code: listed). A game refusal of what a file
+			// that serializes holds (a ConfigFile past its pool, hudfx.def's HUD model as its one line) blocks no save.
 			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input") ||
-			                                (row.game_refusal && token != "document.config_overrun") ||
+			                                (row.game_refusal && token != "document.config_overrun" &&
+			                                 token != "hudfx.power_slots_empty") ||
 			                                token == "menu.variable_number"));
 			TEST_EXPECT(!row.blocks_save || row.gates_build || ends_with(token, ".invalid_input") ||
 			            ends_with(token, ".unserializable") || token == "menu.variable_number");

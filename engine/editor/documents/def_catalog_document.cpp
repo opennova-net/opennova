@@ -8,7 +8,6 @@
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/grm/grm.h>
-#include <runtime/hud/game_text_lookup.h>
 #include <runtime/renderer/texture_load_rules.h>
 
 #include <array>
@@ -374,12 +373,6 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 	// assigned (render-lighting-re)]. Its width and length the shadow slot reads (@ 0x5d572a..0x5d5754).
 	if (use.schema->id == "shadow_texture" && def_kind(address.kind) == DefRecordKind::Item) {
 		use.applies = Applicability::Ignored;
-		return;
-	}
-	// An action's text token: the mission's table, then gametext.bin [orig: MissionText_GetStringByKeyOrGameText @
-	// 0x51ECD0] (def_table's resolve_field gives the first).
-	if (use.reference == ReferenceKind::TextId && (use.schema->id == "text_token" || use.schema->id == "texttoken")) {
-		use.scopes_after = {strutil::to_upper(hud::kGameTextTable)};
 		return;
 	}
 	// A texture through its use's loader, by its role (def_texture_role_arg).

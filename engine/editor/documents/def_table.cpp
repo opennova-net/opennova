@@ -201,7 +201,7 @@ constexpr const char *kMissionTextTable = "MEDMSSN.BIN";
 // 0x4028B7 -> MissionText_GetStringByKeyOrGameText @ 0x51ECD0; WeaponDefs_LoadFile @ 0x5254BD and
 // PowerUpDef_LoadFromFile @ 0x5256D2 after TextResource_LoadMissionTextBin @ 0x5247CE]: in MEDMSSN.BIN, the mission
 // table of a mission with none of its own (the def file runs with whichever mission plays), then GAMETEXT.BIN
-// (DefCatalogDocument::refine_field's scopes_after); a mission with no table at all shows none. A
+// (FieldSchema::scope_after); a mission with no table at all shows none. A
 // weapon's loadout tooltip names nothing: the game stores it and nothing reads it [orig: WeaponDef_ParseProperty
 // @ 0x54DA5E, the table's +44; its consumers and its whole-table users read no +44].
 void resolve_field(const DefField &field, FieldSchema &entry) {
@@ -214,7 +214,10 @@ void resolve_field(const DefField &field, FieldSchema &entry) {
 	} else if (field.reference == DefReference::OtherText) {
 		if (field.id == "attach_text_id") entry.scope = game_text + hud::kGameTextOverlays;
 		else if (field.id == "text_id") entry.scope = game_text + kItemTextSection;
-		else if (field.id == "text_token" || field.id == "texttoken") entry.scope = kMissionTextTable;
+		else if (field.id == "text_token" || field.id == "texttoken") {
+			entry.scope = kMissionTextTable;
+			entry.scope_after = "GAMETEXT.BIN"; // hud::kGameTextTable, upper case as the graph's scopes are
+		}
 		else entry.reference = ReferenceKind::None;
 	}
 }

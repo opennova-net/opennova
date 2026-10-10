@@ -322,11 +322,12 @@ uint64_t place_of(uint64_t note) { return note & 0xFFFFFFFFu; }
 constexpr FindingCodeEntry<AvatarsFinding> kFindingEntries[] = {
 	{ AvatarsFinding::InvalidInput, { "avatars.invalid_input", FindingFix::None, nullptr, true } },
 	{ AvatarsFinding::IgnoredInput, listed_code("avatars.ignored_input") },
-	{ AvatarsFinding::ReaderStops, { "avatars.reader_stops", FindingFix::None, nullptr, false, FindingPlace::Content,
-	                                 FindingGroup::None, FindingSource::Own, FindingProblem::None, true,
-	                                 "the avatar table's reader stops at a 513th part or a 129th combination and the "
-	                                 "game fails (ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; "
-	                                 "sub_579E10 @ 0x579E10; D-PLAYERINFO-2]" } },
+	// The reader stopping (the document's game_stops issue, or the text a save writes): it gates, the game's failure.
+	{ AvatarsFinding::ReaderStops,
+	  game_stops_code("avatars.reader_stops",
+	                  "the avatar table's reader stops at a 513th part or a 129th combination and the game fails "
+	                  "(ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 @ 0x579E10; "
+	                  "D-PLAYERINFO-2]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(AvatarsFinding::kCount),
 		"every AvatarsFinding has exactly one row");
@@ -483,8 +484,11 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		}
 		reader_stops_line_ = stop;
 		issues.push_back({true, stop, std::string(), std::string(),
-		                  "The game's avatar reader stops at this line (a 513th part or a 129th combination): the editor "
-		                  "holds what it reads before the line, read only. Fix the file outside the editor."});
+		                  "The game's avatar reader stops at this line, a 513th part or a 129th combination, and the game "
+		                  "fails (ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ 0x57A456; sub_579E10 @ "
+		                  "0x579E10; D-PLAYERINFO-2]. The editor holds what the reader reads before it, read only: fix the "
+		                  "file outside the editor."});
+		issues.back().game_stops = true;
 	}
 	for (size_t i = 0; i < read.diagnostics_count; ++i) {
 		const avatars::AvatarDiagnostic &note = read.diagnostics[i];
@@ -850,19 +854,10 @@ std::vector<Diagnostic> validate_avatars_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *table = dynamic_cast<const AvatarsDocument *>(&document);
 	if (!table) return findings;
-	if (table->reader_stops_line()) {
-		// The file as read fails in the game: that alone, at its line (the document holds what reads before it).
-		Diagnostic stops = make_finding(finding_code(AvatarsFinding::ReaderStops), DiagnosticSeverity::Error,
-		                                "The game's avatar reader stops at this line, a 513th part or a 129th combination, "
-		                                "and the game fails (ComboObj Parse Error) [orig: CAvatarDefs_ParseConfigLine @ "
-		                                "0x57A456; sub_579E10 @ 0x579E10; D-PLAYERINFO-2]. The editor holds what the "
-		                                "reader reads before it, read only.",
-		                                document.path());
-		stops.line = table->reader_stops_line();
-		findings.push_back(std::move(stops));
-		return findings;
-	}
-	source_issue_findings(*table, finding_code(AvatarsFinding::InvalidInput), finding_code(AvatarsFinding::IgnoredInput), findings);
+	// The file as read stopping the reader is its game_stops issue, at its line (the document holding what reads
+	// before it, read only).
+	source_issue_findings(*table, finding_code(AvatarsFinding::InvalidInput), finding_code(AvatarsFinding::IgnoredInput),
+	                      findings, nullptr, nullptr, &finding_code(AvatarsFinding::ReaderStops));
 	table->saved_text_findings(findings);
 	return findings;
 }
