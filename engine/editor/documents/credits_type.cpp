@@ -5,11 +5,13 @@
 #include <string>
 #include <utility>
 
+#include <base/io/strutil.h>
 #include <editor/documents/text_types.h>
 #include <editor/model/text_document.h>
 #include <formats/cbin/binary_config.h>
 #include <formats/cbin/binary_config_text.h>
 #include <formats/cbin/cbin.h>
+#include <formats/configfile/config_file.h>
 
 namespace opennova::editor {
 
@@ -98,6 +100,61 @@ bool credits_text_readable(const std::string &text, std::vector<SourceIssue> &is
 					": the CBIN form keeps what the game's reader reads, so Save is refused until the "
 					"line reads whole."});
 	return false;
+}
+
+// [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0, its [TEXT] walk: each TEXT entry's first value cut to
+// 127 bytes (String_CopyN, 0x80); `~F` its '|' tokens after the code (strtok "|" @ 0x7E1788), the third the
+// texture; `~I` the rest the texture; any other line but `<CR>` a text line, its second value the font cut to
+// 31 bytes (0x20)]
+void credits_references(const TextDocument &document, std::vector<TextReference> &out) {
+	const std::string &text = document.text();
+	std::vector<configfile::ConfigSection> sections =
+			configfile::parse_config_text(reinterpret_cast<const uint8_t *>(text.data()), text.size());
+	configfile::ConfigSection *lines = configfile::find_config_section(sections, "TEXT");
+	if (lines == nullptr) return;
+	const auto add = [&](ReferenceKind kind, const configfile::ConfigValue &value, size_t at, std::string name) {
+		if (name.empty()) return;
+		TextReference reference;
+		reference.kind = kind;
+		reference.span = document.span_at(value.offset + at, name.size());
+		reference.value = std::move(name);
+		out.push_back(std::move(reference));
+	};
+	std::string line;
+	bool more = configfile::read_config_value(*lines, "TEXT", 1, &line, nullptr, nullptr);
+	while (more) {
+		const configfile::ConfigEntry &entry = lines->entries[lines->current];
+		// A value the reader takes as a number is read back printed, no name its text spells.
+		const bool spelled = entry.values[0].type == 4;
+		if (line.size() >= 0x80) line.resize(0x80 - 1);
+		const char code = line.size() > 1 && line[0] == '~' ? line[1] : '\0';
+		if (strutil::iequals(line, "<CR>")) {
+		} else if (!line.empty() && line[0] == '~') {
+			if (spelled && (code == 'F' || code == 'f')) {
+				// x|y|texture: the third token.
+				size_t p = 2, token = 0;
+				while (p < line.size()) {
+					while (p < line.size() && line[p] == '|') ++p;
+					const size_t start = p;
+					while (p < line.size() && line[p] != '|') ++p;
+					if (p > start && ++token == 3) {
+						add(ReferenceKind::MenuTexture, entry.values[0], start, line.substr(start, p - start));
+						break;
+					}
+				}
+			} else if (spelled && (code == 'I' || code == 'i')) {
+				add(ReferenceKind::MenuTexture, entry.values[0], 2, line.substr(2));
+			}
+		} else {
+			std::string font;
+			if (configfile::read_current_config_value(*lines, "TEXT", 2, &font, nullptr, nullptr) &&
+					entry.values[1].type == 4) {
+				if (font.size() >= 0x20) font.resize(0x20 - 1);
+				add(ReferenceKind::Font, entry.values[1], 0, std::move(font));
+			}
+		}
+		more = configfile::read_config_value(*lines, "TEXT", 1, &line, nullptr, nullptr);
+	}
 }
 
 std::unique_ptr<DocumentBase> make_credits_document() {

@@ -964,7 +964,8 @@ static int test_apply_retail_mission_closure() {
 				++references;
 				if (view.findings.graph->resolve(*edge) == ReferenceStatus::Present) continue;
 				++unresolved;
-				if (lacking.count(normalized_logical_name(edge->value))) continue;
+				// A file the game runs without (a person's face its model lacks) is no row of the plan.
+				if (edge->optional || lacking.count(normalized_logical_name(edge->value))) continue;
 				++unplanned;
 				std::printf("editor_import retail closure %s: %s: %s %s names %s, which the plan neither brought nor listed\n", name,
 				            entry.relative_path.c_str(), edge->record.c_str(), edge->field.c_str(), edge->value.c_str());

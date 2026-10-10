@@ -46,6 +46,8 @@ struct TextReference {
 	// the scope the lookup's (GraphEdge::scope_alternate, scope_owner).
 	std::string scope_alternate;
 	std::string scope_owner;
+	// A file the reference means something only beside (GraphEdge::needs): none where the project lacks it.
+	std::string needs;
 	TextSpan span;
 	// Whether Rename everywhere rewrites it (GraphEdge::rewritable): false for a use whose lookup the
 	// graph does not model as the game makes it (game.wac's text keys).

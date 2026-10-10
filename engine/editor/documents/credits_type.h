@@ -29,6 +29,15 @@ namespace opennova::editor {
 // rule's finding (documents/line_ends.h).
 std::unique_ptr<DocumentBase> make_credits_document();
 std::vector<Diagnostic> validate_credits_file(const DocumentBase &document);
+// What a credits file names, as the marquee's loader reads its [TEXT] lines (runtime/menu/menu_credits.h,
+// the same ConfigFile reader and accessor walk): a `~F x|y|texture` line's texture and a `~I texture`
+// line's, each a menu texture (the menu's texture loader opens it; a node whose texture does not load is
+// not appended), and a text line's second value, its font (the menu's font cache opens the .fnt from the
+// name's first dot; a line whose font does not load is not drawn) [orig: CMarqueeWnd_LoadCreditsFromIni @
+// 0x65c5a0; CMarqueeWnd_RenderScrollingCredits @ 0x65ca00, CFontCache_LoadOrGetFont @ 0x652f70]. Each at
+// its span in the text, the name as the loader cuts it (a line's first 127 bytes, a font's first 31); a
+// value the reader takes as a number is no name.
+void credits_references(const TextDocument &document, std::vector<TextReference> &out);
 // Whether `text` goes in the CBIN form whole: every line one the game's ConfigFile reader reads
 // whole (a blank line, a section line, an entry in a section, nothing after its values), every entry
 // of one or two values; false with the first other line's issue, at its line.

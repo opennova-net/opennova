@@ -39,8 +39,7 @@ constexpr ViewportFeed kModelFeeds[] = {
 	{ T::AnimationMap, true },
 };
 // The script device's (S13 V10): every text type (S13 D9), its text as it stands, the Document tab's
-// main view; the HUD layout's text too (DI-20), its HUD the Preview window's, and the character attributes'
-// (DI-09's charattr follow-up).
+// main view; the HUD layout's text too (DI-20), its HUD the Preview window's.
 constexpr ViewportFeed kScriptFeeds[] = {
 	{ T::Script, true },
 	{ T::MusicScript, true },
@@ -49,7 +48,6 @@ constexpr ViewportFeed kScriptFeeds[] = {
 	{ T::Text, true },
 	{ T::Particles, true },
 	{ T::HudLayout, true },
-	{ T::CharAttrs, true },
 };
 
 // The mission's (S14): a mission, the Document tab's main view; the rows as they stand (a mission
