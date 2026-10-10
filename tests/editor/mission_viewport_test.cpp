@@ -88,13 +88,14 @@ std::string fixture(const std::string &rel) {
 }
 
 // An item catalog for the drop: the pump drawn by two items, the armory a building, the shed a
-// person, the crate (a model with a `ground` user point) an object.
+// person, the crate (a model with a `ground` user point) an object, and the waypoint marker path 1's stops are.
 constexpr const char *kDropItems = "begin \"Drop Pump\"\nid 106100\ntype object\ngraphic pump\nend\n"
 								   "begin \"Drop Scaled Pump\"\nid 106103\ntype object\ngraphic pump\nscale 1.5\nend\n"
 								   "begin \"Drop Armory\"\nid 106101\ntype building\ngraphic armory\nend\n"
 								   "begin \"Drop Rifleman\"\nid 106102\ntype person\ngraphic shed\nend\n"
 								   "begin \"Drop Crate\"\nid 106190\ntype object\ngraphic crate\nend\n"
-								   "begin \"Marker Alpha\"\nid 100001\ntype marker\nend\n";
+								   "begin \"Marker Alpha\"\nid 100001\ntype marker\nend\n"
+								   "begin \"Waypoint\"\nid 106005\ntype marker\nend\n";
 
 // The preferences in memory, whose saves fail while `fail` is set (a settings file another program
 // holds, a read-only profile).
@@ -888,7 +889,7 @@ static int test_palette() {
 	TEST_EXPECT(graph != nullptr);
 	if (!graph) return 1;
 	MissionPalette palette = mission_palette(*graph, "", {});
-	TEST_EXPECT(palette.count == 6 && palette.items.size() == 6);
+	TEST_EXPECT(palette.count == 7 && palette.items.size() == 7);
 	std::vector<MissionPaletteGroup> groups;
 	for (const MissionPaletteSection &section : palette.sections) groups.push_back(section.group);
 	TEST_EXPECT(groups == std::vector<MissionPaletteGroup>({ MissionPaletteGroup::People, MissionPaletteGroup::Objects,
@@ -921,7 +922,7 @@ static int test_palette() {
 	// The wire: the palette op, a page of the rows in the groups' order.
 	std::string error;
 	JsonValue answer = ask(rig, R"({"op": "palette", "limit": 2})", error);
-	TEST_EXPECT(error.empty() && answer.get_number("count", 0) == 6.0 && answer.get_number("matching", 0) == 6.0);
+	TEST_EXPECT(error.empty() && answer.get_number("count", 0) == 7.0 && answer.get_number("matching", 0) == 7.0);
 	const JsonValue *rows = answer.get("items");
 	TEST_EXPECT(rows && rows->array.size() == 2 && rows->array[0].get_string("name", "") == "Drop Rifleman" &&
 			rows->array[0].get_string("group", "") == "people" && rows->array[0].get_string("pool", "") == "organics" &&
@@ -1053,9 +1054,9 @@ static int test_placing() {
 		TEST_EXPECT(on_grid(x) && on_grid(y));
 		TEST_EXPECT(near(std::get<double>(edits[3].value), 4.0 + (x + kCrateAnchor[0]) / 50.0 - kCrateAnchor[2], 1e-9));
 	}
-	// A path's next stop: path 1's markers are of item 100001, the marker the stop names the new one.
+	// A path's next stop: path 1's markers are waypoint markers (item 106005), the marker the stop names the new one.
 	const size_t markers = document.rows_of(MissionKind::Marker).size();
-	TEST_EXPECT(mission_stop_item(viewport->scene(), 1) == 100001);
+	TEST_EXPECT(mission_stop_item(viewport->scene(), 1) == 106005);
 	gathered.requests.clear();
 	drop = ViewportDrop();
 	drop.reference = "path";
@@ -1073,7 +1074,7 @@ static int test_placing() {
 		if (each.index == 1) path = &each;
 	TEST_EXPECT(path && path->stops.size() == 5 && path->stops.back() == after.rows_of(MissionKind::Marker).back()->id);
 	const MissionEntityMark *marker = path ? viewport->scene().entity(path->stops.back()) : nullptr;
-	TEST_EXPECT(marker && marker->item == 100001 && near(marker->z, 4.0 + marker->x / 50.0, 1e-3));
+	TEST_EXPECT(marker && marker->item == 106005 && near(marker->z, 4.0 + marker->x / 50.0, 1e-3));
 	// The new marker is selected (what the batch made).
 	TEST_EXPECT(marker && rig.session.view().documents.selection.primary.row == marker->row);
 	rig.session.handle(request::undo(kMission));
