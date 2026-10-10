@@ -127,6 +127,28 @@ inline std::string reference_fixture(const char *rel) {
     return file_exists(path) ? path : std::string();
 }
 
+// The files of `<assets>/fixtures/<rel_dir>` whose extension is `extension`
+// (with its dot, compared without case: a retail tree mixes FSUN.3DI and
+// fsun.3di), sorted by path; empty when the tree is unset or the folder absent.
+// A corpus the reference tree mirrors a title's archives into (fixtures/bhd/3di,
+// fixtures/bhd/grm: docs/asset-gated-tests.md).
+inline std::vector<std::string> reference_fixture_files(const char *rel_dir, const char *extension) {
+    std::vector<std::string> files;
+    const std::string root = assets();
+    if (root.empty() || !dir_exists(root)) return files;
+    const std::string dir = join(join(root, "fixtures"), rel_dir);
+    if (!dir_exists(dir)) return files;
+    const std::string wanted = lower_ascii(extension);
+    std::error_code ec;
+    for (const auto &entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file(ec)) continue;
+        if (lower_ascii(entry.path().extension().string()) == wanted)
+            files.push_back(entry.path().generic_string());
+    }
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
 // The expansion names shipped under <install>/expansion/, sorted; empty when
 // the install is unset or carries none. Which expansions a machine has is
 // machine-specific (JO:CA ships jox01, JOTAC ships revx02), so a test that

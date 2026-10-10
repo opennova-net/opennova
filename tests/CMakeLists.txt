@@ -634,7 +634,7 @@ add_test(NAME infantry_escort COMMAND infantry_escort_test)
 add_executable(grm_roundtrip_test grm/grm_roundtrip_test.cpp)
 target_link_libraries(grm_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(grm_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME grm_roundtrip COMMAND grm_roundtrip_test)
+opennova_add_mixed_test(grm_roundtrip COMMAND grm_roundtrip_test)
 
 add_executable(score_roundtrip_test score/score_roundtrip_test.cpp)
 target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)

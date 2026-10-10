@@ -50,6 +50,24 @@ int test_roots_resolve_only_to_directories(const fs::path &scratch) {
     return 0;
 }
 
+// A reference corpus folder lists its files of one extension, without case, sorted;
+// a folder that is not there lists none.
+int test_reference_fixture_files(const fs::path &scratch) {
+    set_root("OPENNOVA_JO_ASSETS", scratch.string());
+    TEST_EXPECT(retail::reference_fixture_files("bhd/grm", ".grm").empty());
+    const fs::path dir = scratch / "fixtures" / "bhd" / "grm";
+    std::error_code ec;
+    fs::create_directories(dir / "nested.grm", ec);
+    std::ofstream((dir / "b.grm").string()) << "b";
+    std::ofstream((dir / "A.GRM").string()) << "a";
+    std::ofstream((dir / "c.txt").string()) << "c";
+    const std::vector<std::string> files = retail::reference_fixture_files("bhd/grm", ".grm");
+    TEST_EXPECT(files.size() == 2);
+    TEST_EXPECT(files.size() == 2 && fs::path(files[0]).filename() == "A.GRM" &&
+                fs::path(files[1]).filename() == "b.grm");
+    return 0;
+}
+
 } // namespace
 
 int main() {
@@ -58,9 +76,10 @@ int main() {
             fs::temp_directory_path(ec) / test_paths_unique("opennova_retail_paths_test");
     fs::remove_all(scratch, ec);
     fs::create_directories(scratch, ec);
-    const int failed = test_roots_resolve_only_to_directories(scratch);
+    int failed = test_roots_resolve_only_to_directories(scratch);
+    failed += test_reference_fixture_files(scratch);
     fs::remove_all(scratch, ec);
     if (failed != 0) return 1;
-    std::printf("retail_paths: a root resolves only to an existing directory\n");
+    std::printf("retail_paths: a root resolves only to an existing directory; a corpus folder lists its files\n");
     return 0;
 }
