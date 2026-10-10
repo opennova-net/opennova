@@ -346,15 +346,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	            admin_token.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)"
 	                                : "ENABLED");
 
-	// Client-facing URLs injected into the menus. The retail client is REMOTE,
-	// so HOST_URL/GSB_SERVER must advertise the public host:port (not 127.0.0.1,
-	// which would point the client at its own machine — host registration + the
-	// server browser would silently never reach us).
-	const std::string http_base = "http://" + public_host + ":" +
-	                              std::to_string(config.http_port);
-	host_url_ = http_base + "/nwhost.dll";
-	gsb_url_  = http_base + "/jop_2.gsb";
-	std::printf("[http] HOST_URL=%s\n", host_url_.c_str());
+	public_host_ = public_host; // host_url() / gsb_url(), with the port Crow binds
 
 	register_admin_api_routes(admin_token, public_host);
 	register_public_api_routes();
@@ -413,8 +405,20 @@ bool HttpListener::start(const ServerConfig &config) {
 		return false;
 	}
 	running_.store(true);
+	std::printf("[http] HOST_URL=%s\n", host_url().c_str());
 	std::printf("[http] listening on :%u\n", static_cast<unsigned>(bound_port_));
 	return true;
+}
+
+// The port is Crow's: its run() stores the port it bound (the OS's pick for
+// port 0) in the app before it accepts the first connection, so every handler
+// reads it settled, and with a nonzero port it is the configured one.
+std::string HttpListener::host_url() const {
+	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + "/nwhost.dll";
+}
+
+std::string HttpListener::gsb_url() const {
+	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + "/jop_2.gsb";
 }
 
 // Admin REST API (Bearer ADMIN_API_TOKEN): server status, dev host
@@ -1073,8 +1077,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		            cookie_summary(request_cookie_header(req)).c_str());
 
 		TemplateVars vars{
-			{"HOST_URL",     host_url_},
-			{"GSB_SERVER",   gsb_url_},
+			{"HOST_URL",     host_url()},
+			{"GSB_SERVER",   gsb_url()},
 			{"JOINLAN_URL",  ""},
 		};
 		crow::response res(200);
@@ -1109,8 +1113,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"IN",          in_p},
 			{"OUT",         out_p},
 			{"MSGBASE",     msgbase},
-			{"HOST_URL",    host_url_},
-			{"GSB_SERVER",  gsb_url_},
+			{"HOST_URL",    host_url()},
+			{"GSB_SERVER",  gsb_url()},
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);
@@ -1205,7 +1209,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			const std::string fail_tpl = field_or("failure", std::string("jop_2_main.htm"));
 			const std::string msg_tpl  = field_or("msgbase", std::string("jop_2_msg.htm"));
 			return render_legacy_message(templates_dir, message, fail_tpl, msg_tpl,
-			                             req.remote_ip_address, host_url_, gsb_url_);
+			                             req.remote_ip_address, host_url(), gsb_url());
 		};
 
 		const auto server_status = get_server_status(*db_conn);
@@ -1377,8 +1381,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		TemplateVars vars{
 			{"MESSAGE",          "Contacting login databases..."},
 			{"REFRESH_ENDPOINT", "NWLogin.dll"},
-			{"HOST_URL",         host_url_},
-			{"GSB_SERVER",       gsb_url_},
+			{"HOST_URL",         host_url()},
+			{"GSB_SERVER",       gsb_url()},
 			{"JOINLAN_URL",      ""},
 		};
 		crow::response res(200);
@@ -1456,8 +1460,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			{"IN",           session->success},
 			{"OUT",          session->failure},
 			{"MSGBASE",      session->msgbase},
-			{"HOST_URL",     host_url_},
-			{"GSB_SERVER",   gsb_url_},
+			{"HOST_URL",     host_url()},
+			{"GSB_SERVER",   gsb_url()},
 			{"JOINLAN_URL",  ""},
 		};
 		const std::string success_template = session->success.empty() ? "jop_2_main.htm" : session->success;
@@ -1544,8 +1548,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::filesystem::path tpl_path =
 			std::filesystem::path(templates_dir) / success_tpl;
 		TemplateVars vars{
-			{"HOST_URL",    host_url_},
-			{"GSB_SERVER",  gsb_url_},
+			{"HOST_URL",    host_url()},
+			{"GSB_SERVER",  gsb_url()},
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);
@@ -1617,8 +1621,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			return res;
 		}
 		TemplateVars vars{
-			{"HOST_URL",    host_url_},
-			{"GSB_SERVER",  gsb_url_},
+			{"HOST_URL",    host_url()},
+			{"GSB_SERVER",  gsb_url()},
 			{"JOINLAN_URL", ""},
 			{"NWHANDLE",    user ? user->nwhandle : std::string()},
 			{"PCID",        user ? user->pcid     : std::string()},
@@ -1748,8 +1752,8 @@ void HttpListener::register_legacy_host_join_routes(
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting game server...."},
 				{"REFRESH_ENDPOINT", "NWJoin.dll"},
-				{"HOST_URL",         host_url_},
-				{"GSB_SERVER",       gsb_url_},
+				{"HOST_URL",         host_url()},
+				{"GSB_SERVER",       gsb_url()},
 				{"JOINLAN_URL",      ""},
 			};
 			crow::response res(200);
@@ -1839,8 +1843,8 @@ void HttpListener::register_legacy_host_join_routes(
 			{"NP",          std::to_string(host.host_port)},
 			{"BK",          BK_VALUE},
 			{"SERVER_NAME", host.server_name.empty() ? std::string("OpenNova Server") : host.server_name},
-			{"HOST_URL",    host_url_},
-			{"GSB_SERVER",  gsb_url_},
+			{"HOST_URL",    host_url()},
+			{"GSB_SERVER",  gsb_url()},
 			{"JOINLAN_URL", ""},
 		};
 		const std::string success_template = session->success.empty() ? "jop_2_join.joi" : session->success;
@@ -1924,7 +1928,7 @@ void HttpListener::register_legacy_host_join_routes(
 						: session->needexpkey;
 					return render_legacy_message(templates_dir,
 						"This NovaWorld account does not have the required expansion key.",
-						fail_tpl, msg_tpl, req.remote_ip_address, host_url_, gsb_url_);
+						fail_tpl, msg_tpl, req.remote_ip_address, host_url(), gsb_url());
 				}
 			}
 			if (host_pcid_key.empty()) {
@@ -2073,8 +2077,8 @@ void HttpListener::register_legacy_host_join_routes(
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting NovaWorld...."},
 				{"REFRESH_ENDPOINT", "NWHost.dll"},
-				{"HOST_URL",         host_url_},
-				{"GSB_SERVER",       gsb_url_},
+				{"HOST_URL",         host_url()},
+				{"GSB_SERVER",       gsb_url()},
 				{"JOINLAN_URL",      ""},
 			};
 			crow::response res(200);
@@ -2101,8 +2105,8 @@ void HttpListener::register_legacy_host_join_routes(
 
 		TemplateVars vars{
 			{"HOSTKEY",     session->host_key},
-			{"HOST_URL",    host_url_},
-			{"GSB_SERVER",  gsb_url_},
+			{"HOST_URL",    host_url()},
+			{"GSB_SERVER",  gsb_url()},
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);

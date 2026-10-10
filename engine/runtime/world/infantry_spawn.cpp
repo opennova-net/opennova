@@ -151,6 +151,7 @@ OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net
         out.capsule_top = frame.capsule_top;
     }
     out.pose = infantry_body_pose(inf);
+    out.channels = inf;
     return out;
 }
 

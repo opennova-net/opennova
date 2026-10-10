@@ -84,11 +84,14 @@ inline constexpr size_t kFileKindCount = static_cast<size_t>(FileKind::kCount);
 // 0x829f90; fatal check @ 0x4a6f44]: an arbitrary-named .pff never mounts
 // (docs/vfs/vfs-pff-mount-re.md D-VFS-2), so every packed file goes into language.pff,
 // localres.pff or resource.pff (archive_slot_file_name, base/vfs kBootArchiveTable). The placement
-// by kind mirrors retail's (witnessed against the shipped JO install: the boot text bins in
-// language, menus / defs / missions / fonts / music scripts in localres, terrain / env / art in
-// resource), which keeps a set packed by it retail-bootable; the OpenNova runtime resolves a name
-// from any slot. Two families never pack: `.sbf` music banks stream by path and never resolve
-// through the archives [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60], and `earlyerr.txt` is
+// by kind mirrors retail's (witnessed against the shipped JO install, file_kind_test's retail leg:
+// the boot text bins, the credits and the missions' sound banks in language; menus / defs / missions
+// and their tiles / fonts / music scripts / animations / AI profiles / particles / effects in
+// localres; models / terrain / env / most textures in resource; the few files retail splits from
+// their kind's archive by what they are for, as the voice lines in language, recorded there), which
+// keeps a set packed by it retail-bootable; the OpenNova runtime resolves a name from any slot. Two
+// families never pack: `.sbf` music banks stream by path and never resolve through the archives
+// [orig: AudioVM_InitMenuMusicStreaming @ 0x56aa60], and `earlyerr.txt` is
 // the pre-archive error text read before any mount [orig: Game_ShowEarlyError @ 0x4a68a0];
 // retail's own loose files (videos, configs, saves, the machine-keyed NovaWorld cache) stay loose
 // with them. None: a kind the game reads from nowhere: an archive (it holds files, it is no file

@@ -6,8 +6,9 @@
 //  Game_HostMultiplayerSession @0x4A65C1..0x4A6604, Game_Run @0x4A7FFF..0x4A800E].
 // Four runs, each in a temp working directory apart from --resource-dir:
 //   1. a game.cfg with host keys off their defaults, some of which the host
-//      file overrides: the session config, the cfg port range, the rewritten
-//      game.cfg, the lock while serving and its delete at stop();
+//      file overrides: the session config, the cfg port range (and --lan-port
+//      over it) as the bind scan, the rewritten game.cfg, the lock while
+//      serving and its delete at stop();
 //   2. no game.cfg: the defaults, and the file is created; with no
 //      --master-host the server serves LAN, though the default network type
 //      (1) is NovaWorld's (D-NET-358);
@@ -43,35 +44,30 @@ int failures = 0;
 
 constexpr double kFrame = 1.0 / 62.5;
 
-// Starts a server, probing for a free port again when a parallel test took
-// the probed one in between (the server binds before it boots, so a lost race
-// fails fast). With `cfg`, the working directory's game.cfg is written first,
-// its LAN server range the probed port alone, and no --lan-port is passed.
+// Starts a server on a port the OS picks, which it holds from the bind on.
+// With `cfg`, the working directory's game.cfg is written first, its LAN
+// server range port 0 alone (the scan's one bind), and no --lan-port is
+// passed; without it, --lan-port 0.
 std::unique_ptr<serve::Server> start_server(const fs::path &resource_dir, const fs::path &host_file,
 		const gamecfg::GameCfg *cfg, std::string &error, const std::vector<std::string> &extra = {}) {
-	std::unique_ptr<serve::Server> server;
-	for (int attempt = 0; attempt < 5; ++attempt) {
-		const uint16_t port = serve_test::free_udp_port();
-		std::vector<std::string> args = {"--resource-dir", resource_dir.string(), "/HOST",
-				host_file.string(), "--loose-root"};
-		args.insert(args.end(), extra.begin(), extra.end());
-		if (cfg != nullptr) {
-			gamecfg::GameCfg written = *cfg;
-			written.mp_lan_server_port_min = port;
-			written.mp_lan_server_port_max = port;
-			std::string save_error;
-			CHECK(gamecfg::save_file(gamecfg::kFileName, written, {}, save_error));
-		} else {
-			args.push_back("--lan-port");
-			args.push_back(std::to_string(port));
-		}
-		serve::ServeOptions options;
-		CHECK(serve::parse_serve_options(args, options, error) == 0);
-		server = std::make_unique<serve::Server>(options);
-		if (server->start(error)) return server;
-		if (error.find("bind scan") == std::string::npos) break;
+	std::vector<std::string> args = {"--resource-dir", resource_dir.string(), "/HOST",
+			host_file.string(), "--loose-root"};
+	args.insert(args.end(), extra.begin(), extra.end());
+	if (cfg != nullptr) {
+		gamecfg::GameCfg written = *cfg;
+		written.mp_lan_server_port_min = 0;
+		written.mp_lan_server_port_max = 0;
+		std::string save_error;
+		CHECK(gamecfg::save_file(gamecfg::kFileName, written, {}, save_error));
+	} else {
+		args.push_back("--lan-port");
+		args.push_back("0");
 	}
-	return nullptr;
+	serve::ServeOptions options;
+	CHECK(serve::parse_serve_options(args, options, error) == 0);
+	auto server = std::make_unique<serve::Server>(options);
+	if (!server->start(error)) return nullptr;
+	return server;
 }
 
 } // namespace
@@ -113,6 +109,30 @@ int main() {
 		cfg.music_volume = 77;                   // no host setting: round-trips
 		cfg.dedicated = 0;
 		std::string error;
+		// The bind scan starts at the cfg range's head, or at --lan-port's port
+		// over it: a one-port scan on a port this test holds fails the start,
+		// naming that port.
+		{
+			uint16_t held_port = 0;
+			net::ScopedSocket held(net::udp_bind(0, &held_port));
+			CHECK(held.is_valid());
+			const std::string held_text = std::to_string(held_port);
+			for (const bool by_flag : {false, true}) {
+				gamecfg::GameCfg written = cfg;
+				written.mp_lan_server_port_min = by_flag ? 0 : held_port;
+				written.mp_lan_server_port_max = by_flag ? 0 : held_port;
+				std::string save_error;
+				CHECK(gamecfg::save_file(gamecfg::kFileName, written, {}, save_error));
+				std::vector<std::string> args = {"--resource-dir", root.string(), "/HOST",
+						(root / "override.host").string(), "--loose-root"};
+				if (by_flag) args.insert(args.end(), {"--lan-port", held_text});
+				serve::ServeOptions options;
+				CHECK(serve::parse_serve_options(args, options, error) == 0);
+				serve::Server held_out(options);
+				CHECK(!held_out.start(error));
+				CHECK(error == "no port of the bind scan from " + held_text + " is free");
+			}
+		}
 		std::unique_ptr<serve::Server> server =
 				start_server(root, root / "override.host", &cfg, error);
 		if (!server) std::printf("start: %s\n", error.c_str());
@@ -145,7 +165,7 @@ int main() {
 			CHECK(on_disk.cfg.servermsg == "the cfg's own message");
 			CHECK(on_disk.cfg.music_volume == 77);
 			CHECK(on_disk.cfg.remote_admin_port == 4711);
-			CHECK(server->bound_port() == static_cast<uint16_t>(on_disk.cfg.mp_lan_server_port_min));
+			CHECK(on_disk.cfg.mp_lan_server_port_min == 0 && server->bound_port() != 0);
 			// The lock while serving: the one LF-framed line.
 			CHECK(fs::exists(work / gamecfg::kActiveServerMarkerFileName));
 			CHECK(serve_test::read_text(work / gamecfg::kActiveServerMarkerFileName) == marker_text);
@@ -224,8 +244,7 @@ int main() {
 		serve::ServeOptions options;
 		std::string error;
 		CHECK(serve::parse_serve_options({"--resource-dir", root.string(), "/HOST",
-						  (root / "mission_only.host").string(), "--loose-root", "--lan-port",
-						  std::to_string(serve_test::free_udp_port())},
+						  (root / "mission_only.host").string(), "--loose-root", "--lan-port", "0"},
 					  options, error) == 0);
 		serve::Server server(options);
 		CHECK(!server.start(error));
@@ -242,8 +261,12 @@ int main() {
 		gamecfg::GameCfg cfg = gamecfg::defaults();
 		cfg.networkconnecttype = 2; // the LAN screen's [orig: UI_InitLANMultiplayerScreen @0x5569E1]
 		std::string error;
+		// A gate port this test holds and never answers: the LAN type never probes it.
+		uint16_t gate_port = 0;
+		net::ScopedSocket silent_gate(net::udp_bind(0, &gate_port));
+		CHECK(silent_gate.is_valid());
 		std::unique_ptr<serve::Server> server = start_server(root, root / "mission_only.host", &cfg, error,
-				{"--master-host", "127.0.0.1", "--master-gate-port", std::to_string(serve_test::free_udp_port())});
+				{"--master-host", "127.0.0.1", "--master-gate-port", std::to_string(gate_port)});
 		if (!server) std::printf("start: %s\n", error.c_str());
 		CHECK(server != nullptr);
 		if (server) {

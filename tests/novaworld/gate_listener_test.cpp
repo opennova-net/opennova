@@ -1,7 +1,9 @@
 // The real apps/novaworld_server GateListener over loopback UDP, on port 0.
 // start() binds the port the OS picks and hands that socket to the receive
 // thread, so bound_port() is the port a probe reaches and the port the reply
-// advertises as POSTIPPORT (the host-status sink). The probe goes out as soon
+// advertises as POSTIPPORT (the host-status sink). UDPNOVAWORLD and STARTUPURL
+// name the sibling ports the config passed to start() carries (main() passes
+// the ports the NW UDP and HTTP listeners bound). The probe goes out as soon
 // as start() returns, with no wait: the socket is bound by then. A second
 // listener asking for that same port fails start(), the boot-fatal path.
 
@@ -18,6 +20,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace net = opennova::net;
@@ -62,6 +65,9 @@ int main() {
 	nws::ServerConfig config;
 	config.public_host = "127.0.0.1";
 	config.gate_udp_port = 0;
+	// The siblings' ports as main() hands them over: what they bound.
+	config.nw_udp_port = 40123;
+	config.http_port = 40456;
 
 	nws::GateListener gate;
 	TEST_EXPECT(gate.start(config));
@@ -72,6 +78,9 @@ int main() {
 	if (probe_gate(port, reply) != 0) return 1;
 	TEST_EXPECT((reply.post_ip == std::array<uint8_t, 4>{127, 0, 0, 1}));
 	TEST_EXPECT(reply.post_port == port);
+	TEST_EXPECT(reply.udp_novaworld == "127.0.0.1:40123");
+	const std::string startup = "http://127.0.0.1:40456/nwprepare.dll?";
+	TEST_EXPECT(reply.startup_url.compare(0, startup.size(), startup) == 0);
 
 	// The port is held: a second listener cannot bind it, and says so.
 	nws::ServerConfig taken = config;
