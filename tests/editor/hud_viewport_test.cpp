@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include <base/gameprofile/game_type.h>
 #include <base/io/json.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/line_ends.h>
@@ -607,12 +608,115 @@ int test_canvas_drag() {
 	return 0;
 }
 
+// S23 C: the sights and the Tab board. A scoped rifle with a rangefinder and an elevation readout, its sights up:
+// the frame the game's own view leaves once its scope settles and the body's aim ray has found the wall the range
+// option stands (the card, the readouts, the range the rangefinder reads, the zero, the magnification); refused
+// under the binoculars and for a weapon with no sights, each in words. The board's stand-in rows for a team game
+// and a free-for-all, and the options' wire with its refusals.
+int test_sights_and_board() {
+	Rig rig;
+	editor_test::handle_to_end(rig.session, request::new_project(rig.root(), "HUD"));
+	editor_test::create_missing_files(rig.session);
+	const std::string weapons = std::string(kWeapons) +
+	                            "weapon \"W_SCOPE\"\r\n\tclipsize 5\r\n\tstartrounds 10\r\n\tflags scoped\r\n"
+	                            "\tflags showrange\r\n\tflags showelevation\r\n\tscope_max_mag 4 0\r\n"
+	                            "\tscope_max_zero 10 100 200 1\r\n\tpos 25 -5 -145 0 0 0\r\n\ttpos -1 12 -138 0 0 0\r\nend\r\n";
+	TEST_EXPECT(editor_test::write_text(rig.root() + "/" + rig.layout, kLayout) &&
+	            editor_test::write_text(rig.root() + "/defs/weapon.def", weapons));
+	editor_test::handle_to_end(rig.session, request::rescan());
+	editor_test::handle_to_end(rig.session, request::open_document(rig.layout));
+	rig.pump();
+	const HudViewport *viewport = rig.viewport();
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport) return 1;
+	TEST_EXPECT(!viewport->scope_frame() && viewport->scope_why().empty());
+
+	// Up with the scoped rifle, the aim on a wall 300 metres away.
+	editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
+	        "{\"kind\":\"hud\",\"options\":{\"weapon\":\"W_SCOPE\",\"sights\":true,\"range\":300}}"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const opennova::world::LocalPlayerViewFrame *frame = viewport->scope_frame();
+	TEST_EXPECT(frame != nullptr);
+	if (frame) {
+		TEST_EXPECT(frame->scope_card_active && frame->frame_fx.scoped_selector && !frame->frame_fx.sighted_selector);
+		TEST_EXPECT(frame->scope_details_active && frame->scope_details_scoped);
+		const double range = double(frame->aim_range_q16) / 65536.0;
+		TEST_EXPECT(range > 298.0 && range < 302.0);
+		std::printf("sights: range %.2f m, zero word %d, magnification %d, fov %.2f\n", range,
+		            int(frame->scope_zero_word), int(frame->scope_magnification), double(frame->fov_h_deg));
+	}
+	TEST_EXPECT(viewport->scope_weapon() != nullptr);
+	// The aimed shot stamped as the game's input pack stamps it, the optical view up: the crosshair's gate shuts
+	// (the HUD draws none over the card, as the game's frame shows) and the spread reads the aimed row.
+	TEST_EXPECT(viewport->scope_weapon() && viewport->scope_weapon()->aimed_shot_available);
+	JsonValue state = rig.query("viewport", "{\"path\":\"" + rig.layout + "\",\"op\":\"state\"}");
+	const JsonValue *body = state.get("body");
+	const JsonValue *sights = body ? body->get("sights") : nullptr;
+	TEST_EXPECT(sights && sights->get_bool("up", false) && sights->get_bool("card", false) &&
+	            sights->get_bool("readouts", false) && sights->get_number("range", 0) > 298.0);
+	// A nearer wall: the run again, the rangefinder's reading with it.
+	editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout, "{\"kind\":\"hud\",\"options\":{\"range\":50}}"));
+	rig.pump();
+	frame = viewport->scope_frame();
+	TEST_EXPECT(frame && double(frame->aim_range_q16) / 65536.0 > 48.0 && double(frame->aim_range_q16) / 65536.0 < 52.0);
+	// The binoculars put them down; so does a weapon with no sights, the game's refusal in words.
+	editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout, "{\"kind\":\"hud\",\"options\":{\"view\":\"binoculars\"}}"));
+	rig.pump();
+	TEST_EXPECT(!viewport->scope_frame() && viewport->scope_why().find("binoculars") != std::string::npos);
+	editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
+	        "{\"kind\":\"hud\",\"options\":{\"view\":\"normal\",\"weapon\":\"W_AR15\"}}"));
+	rig.pump();
+	TEST_EXPECT(!viewport->scope_frame() && viewport->scope_why().find("neither scoped nor sighted") != std::string::npos);
+
+	// The board's stand-ins: a team game's players over its two sides, the score falling; a free-for-all's on none.
+	HudViewportOptions options;
+	options.game_type = opennova::game_type::kTeamDeathmatch;
+	options.players = 5;
+	const opennova::hud::GameTextLookup none = [](const char *, const char *, const char *fallback) {
+		return std::string(fallback);
+	};
+	opennova::hud::HudScoreboardState board = hud_preview_board(options, none, false, none);
+	TEST_EXPECT(board.game_type == options.game_type && board.team_count == 2 && board.rows.size() == 5 && board.local_team == 1);
+	TEST_EXPECT(board.rows[0].name == "Player 1" && board.rows[0].score1 == 5 && board.rows[0].team == 1 &&
+	            board.rows[1].team == 2 && board.rows[4].score1 == 1 && board.rows[4].team == 1 && board.rows[2].has_entity);
+	TEST_EXPECT(board.title == "!Kill List" && board.players_line == " 5" && board.spectators_line.empty() &&
+	            board.footer == "!PgUp and PgDn to change pages");
+	options.game_type = opennova::game_type::kDeathmatch;
+	board = hud_preview_board(options, none, false, none);
+	TEST_EXPECT(board.team_count == 0 && board.rows[1].team == 0);
+	// On the wire, and the refusals.
+	editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
+	        "{\"kind\":\"hud\",\"options\":{\"board\":true,\"game_type\":\"ctf\",\"players\":12}}"));
+	TEST_EXPECT(rig.session.outcome().done() && viewport->options().board &&
+	            viewport->options().game_type == opennova::game_type::kCaptureTheFlag && viewport->options().players == 12);
+	state = rig.query("viewport", "{\"path\":\"" + rig.layout + "\",\"op\":\"state\"}");
+	const JsonValue *options_json = state.get("options");
+	TEST_EXPECT(options_json && options_json->get_string("game_type", "") == "CTF" &&
+	            options_json->get_number("players", 0) == 12.0 && options_json->get_bool("board", false));
+	body = state.get("body");
+	TEST_EXPECT(body && body->get("board") && body->get("board")->get_number("rows", 0) == 12.0 &&
+	            body->get("board")->get_number("teams", 0) == 2.0);
+	// The model's board, its strings composed headlessly over the project's tables (it has none: the literals).
+	TEST_EXPECT(viewport->board().rows.size() == 12 && viewport->board().title == "!Kill List" &&
+	            viewport->board().players_line == " 12" && viewport->board().game_type == opennova::game_type::kCaptureTheFlag);
+	for (const char *refused : { "{\"game_type\":\"TAG\"}", "{\"players\":129}", "{\"range\":1}", "{\"sights\":1}" }) {
+		editor_test::handle_to_end(rig.session, request::set_viewport(rig.layout,
+		        std::string("{\"kind\":\"hud\",\"options\":") + refused + "}"));
+		TEST_EXPECT(!rig.session.outcome().done());
+	}
+	TEST_EXPECT(hud_board_game_types().size() == 12 && std::string(hud_board_game_type_token(0x30020u)) == "COOP");
+	std::printf("sights and board: the scope's frame at the range's wall, refused in words; the board's stand-ins\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
 	failures += test_layout_type();
 	failures += test_session();
+	failures += test_sights_and_board();
 	failures += test_canvas();
 	failures += test_layout_edit();
 	failures += test_commands();

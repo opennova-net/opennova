@@ -50,11 +50,10 @@ const std::vector<TextureUse> &TextureUseIndex::uses_of(const SessionView &view,
 		const AssetGraph &graph = *view.findings.graph;
 		std::vector<TextureUse> uses = texture_uses(graph, *view.project.scan, file, models(view),
 		                                            [&graph](const std::string &name) { return graph.has_file(name); });
-		// What each model row's texture costs the game, from the header of the file its loader opens (the use
-		// check's read of it, kept by its stamp).
+		// What each use's texture costs the game, from the header of the file its loader opens (the use check's
+		// read of it, kept by its stamp): a model row's, the HUD's, a menu's, the terrain's (S23 C).
 		for (TextureUse &use : uses) {
-			renderer::TextureLoader loader = renderer::TextureLoader::Stage;
-			if (!use.known() || use.served.empty() || !texture_role_budget_loader(use.role, loader)) continue;
+			if (!use.known() || use.served.empty() || !texture_role_has_budget(use.role)) continue;
 			const AssetEntry *served = view.project.scan->at_path(use.served);
 			if (served) use.budget = texture_use_budget(use, texture_file_header(view.project.root, *served, texture_reader_for(use.served)));
 		}
