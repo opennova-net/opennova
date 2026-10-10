@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_field.h>
@@ -207,7 +208,11 @@ constexpr FieldLabel kLabels[] = {
 	{MissionRecord::BoundingBox, "max_x", "Max X", "max", ""},
 	{MissionRecord::BoundingBox, "max_y", "Max Y", "max", ""},
 	{MissionRecord::BoundingBox, "max_z", "Max Z", "max", ""},
-	{MissionRecord::BoundingBox, "ref_id", "Refers to", "", ""},
+	// A box's value, worded by its type (MissionDocument::refine_field, box_value_label).
+	{MissionRecord::BoundingBox, "ref_id", "Value", "", ""},
+	// A Mission box's two words as the name they hold (bms::BoundingBoxType::Mission), and the second alone.
+	{MissionRecord::BoundingBox, "mission", "Mission name", "", ""},
+	{MissionRecord::BoundingBox, "reserved0", "Second word", "", ""},
 };
 
 const FieldLabel *label_of(MissionRecord record, const char *key) {
@@ -312,7 +317,8 @@ constexpr AppliesRow kApplies[] = {
 	{MissionRecord::Header, "default_str", Applicability::Unverified},
 	{MissionRecord::Header, "tt_file", Applicability::Unverified},
 	{MissionRecord::Header, "music", Applicability::Unverified},
-	{MissionRecord::Header, "reverb", Applicability::Unverified},
+	// (The header's reverb is read: the player body's reverb preset where no indoor building's or Reverb
+	// box's is [orig: Entity_UpdateInfantryPlayerBody @0x4b5f9e, the select @0x4b633f].)
 	// The loader keeps a group's words 0, 2 and 3 [orig: Mission_LoadBMSFile]; what reads them is open
 	// (docs/mission/bms-event-runtime-re.md section 3a).
 	{MissionRecord::Group, "flags", Applicability::Unverified},
@@ -320,8 +326,13 @@ constexpr AppliesRow kApplies[] = {
 	// Read and discarded [orig editor: Med_WriteBmsFile @0x44f920 writes the layer's name].
 	{MissionRecord::Layer, "name", Applicability::Unverified},
 	{MissionRecord::Entity, "next_ssn", Applicability::Unverified},
-	// Read on a waypoint marker alone (type 6005 or 6006, MissionDocument::refine_field).
-	{MissionRecord::Entity, "ttool_index", Applicability::Unverified},
+	// Read on a waypoint marker alone, a type-6005 or 6006 one: the spawn reads the record's +0x60 in
+	// those two types' arms and nowhere else [orig: Entity_SpawnFromBMSRecord @0x40f05a, @0x40f0aa,
+	// @0x40f157..0x40f173] (labelled's applies hook, MissionDocument::refine_field's key).
+	{MissionRecord::Entity, "ttool_index", Applicability::Ignored},
+	// Read on a type-6005 marker alone, the event its waypoint advances on [orig: Entity_SpawnFromBMSRecord
+	// @0x40f0b3] (labelled's hooks).
+	{MissionRecord::Entity, "wp_adv_trigger", Applicability::Ignored},
 	{MissionRecord::Entity, "color_override", Applicability::Unverified},
 	{MissionRecord::Entity, "team_budget", Applicability::Unverified},
 	// The spawn never reads the record's bytes 84..87 [orig: Entity_SpawnFromBMSRecord @0x40e9f0;
@@ -330,9 +341,8 @@ constexpr AppliesRow kApplies[] = {
 	{MissionRecord::Entity, "blink_parent_b", Applicability::Ignored},
 	{MissionRecord::Entity, "blink_group_a", Applicability::Ignored},
 	{MissionRecord::Entity, "blink_group_b", Applicability::Ignored},
-	// What a bounding box's type and the id it refers to are to the game is not witnessed (D-MIS-8).
-	{MissionRecord::BoundingBox, "type", Applicability::Unverified},
-	{MissionRecord::BoundingBox, "ref_id", Applicability::Unverified},
+	// A bounding box's value is read by its type (bms::BoundingBoxType; labelled's applies hook).
+	{MissionRecord::BoundingBox, "ref_id", Applicability::Ignored},
 };
 
 Applicability applies_of(MissionRecord record, const char *key) {
@@ -578,9 +588,68 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 				return path_command_names_entity(record.as<bms::Entity>().waypoint_id) ? ReferenceKind::MissionEntity
 				                                                                       : ReferenceKind::None;
 			};
+		// A waypoint name is read on the two waypoint marker types alone [orig: Entity_SpawnFromBMSRecord
+		// @0x40f0aa, @0x40f173].
+		if (same_text(field.key, "ttool_index"))
+			out.applies = [](const RecordHandle &record, const RecordOwners &) {
+				const int32_t type = record.as<bms::Entity>().type_id;
+				return type == def::DEF_TYPE_WAYPOINT || type == def::DEF_TYPE_KOTH_CENTRE ? Applicability::Reads
+				                                                                          : Applicability::Ignored;
+			};
+		// A type-6005 marker's advance trigger is an event by its index: the spawn keeps it as the waypoint's
+		// linked event [orig: Entity_SpawnFromBMSRecord @0x40f0b3 -> entity+0x210], an event of that index
+		// completing the waypoint when it fires and one below 0 naming none [orig:
+		// EventTrigger_MarkLinkedSpawnPoints @0x452ce0; Player_UpdatePerFrame @0x4de649], and the original
+		// editor renumbers it with the events [orig: JOTACmed.exe sub_44D460 @ 0x44d460, the paste;
+		// sub_455B20 @ 0x455b20, the delete (-1, WP_EVENT_DELETED); sub_411C90 @ 0x411c90, the move].
+		if (same_text(field.key, "wp_adv_trigger")) {
+			out.reference = [](const RecordHandle &record, const RecordOwners &) {
+				const bms::Entity &entity = record.as<bms::Entity>();
+				return entity.type_id == def::DEF_TYPE_WAYPOINT && entity.wp_adv_trigger >= 0 ? ReferenceKind::MissionEvent
+				                                                                             : ReferenceKind::None;
+			};
+			out.applies = [](const RecordHandle &record, const RecordOwners &) {
+				return record.as<bms::Entity>().type_id == def::DEF_TYPE_WAYPOINT ? Applicability::Reads
+				                                                                 : Applicability::Ignored;
+			};
+		}
 	}
+	// A bounding box's value is read as its type says: a Health, Mana, Reverb, Location or Music4 box's
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4b6094, @0x4b609d, @0x4b612a, @0x4b6133, @0x4b613c]; a
+	// Mission box's two words are its mission's name (@0x4b60b6) and any other type's are read by nothing
+	// (the switch's default @0x4b6087).
+	if (field.record == MissionRecord::BoundingBox && same_text(field.key, "ref_id"))
+		out.applies = [](const RecordHandle &record, const RecordOwners &) {
+			return box_value_label(record.as<bms::BoundingBox>().type) ? Applicability::Reads : Applicability::Ignored;
+		};
+	// The box's second word is read as its mission name's last four characters alone [orig:
+	// Entity_UpdateInfantryPlayerBody @0x4b60aa..0x4b611e]: a Mission box's name and second word are read,
+	// any other type's are not.
+	if (field.record == MissionRecord::BoundingBox && (same_text(field.key, "mission") || same_text(field.key, "reserved0")))
+		out.applies = [](const RecordHandle &record, const RecordOwners &) {
+			return record.as<bms::BoundingBox>().type == int32_t(bms::BoundingBoxType::Mission) ? Applicability::Reads
+			                                                                                  : Applicability::Ignored;
+		};
 	return out;
 }
+
+} // namespace
+
+// [orig: Entity_UpdateInfantryPlayerBody's switch over the box's type @0x4b607e..0x4b608d: 1 @0x4b6094,
+// 2 @0x4b609d, 3 @0x4b60aa, 4 @0x4b612a, 5 @0x4b6133, 6 @0x4b613c]
+const char *box_value_label(int32_t type) {
+	switch (type) {
+	case 1: return "Health per tick";
+	case 2: return "Mana per tick";
+	case 3: return "Mission name (its first four characters)";
+	case 4: return "Reverb preset";
+	case 5: return "Location";
+	case 6: return "Music variable 4";
+	default: return nullptr;
+	}
+}
+
+namespace {
 
 // --- the lists ---------------------------------------------------------------------------------------
 
@@ -664,12 +733,12 @@ bool fresh_availability(bms::ItemAvailabilityEntry &, std::string &error) {
 	error = "An item availability rule needs a weapon's name: duplicate or paste one.";
 	return false;
 }
-// A bounding box holds a type (1 or 5 in the shipped missions) and the id of what it refers to, and
-// what the game makes of either is not witnessed (D-MIS-8): a new one would be a record nothing says
-// how to fill, so one comes in as a copy.
-bool fresh_box(bms::BoundingBox &, std::string &error) {
-	error = "What a bounding box's type and the id it refers to mean is not known yet: duplicate or paste one.";
-	return false;
+// A new bounding box holds nothing: a box of type 0, which neither the player body's walk (its switch's
+// default) nor SSNloc reads [orig: Entity_UpdateInfantryPlayerBody @0x4b6087; WacCmd_SsnLoc @0x4f0efc],
+// its corners at the origin, until its type and corners are set.
+bool fresh_box(bms::BoundingBox &box, std::string &) {
+	box = bms::BoundingBox{};
+	return true;
 }
 
 // A fixed table of the file (its 64 groups, 32 layers): its records set, never added or removed (the
@@ -684,49 +753,34 @@ template <class Record> ListOps fixed_list(K kind, std::vector<Record> &(*list)(
 	return ops;
 }
 
-// A path's stops, through bms_edit's stops (32 at most; one put in or taken out writes the path's
-// count as its slots). A new stop visits the file's first marker until it is given another (its
-// marker is a Record reference: the picker offers the file's markers).
-// A stop put into or taken out of the path's record, its count written as its slots and the slot bytes
-// past them zero, 32 at most: the record's own edit, until the editor takes master's model of a path as its
-// waypoint markers (mission::insert_waypoint_stop over the file, D-MIS-6; the flow lane's #992).
-bool insert_record_stop(bms::WaypointRecord &path, size_t index, uint32_t marker, std::string &error) {
-	std::vector<uint32_t> &stops = path.waypoint_numbers;
-	if (stops.size() >= kMaxWaypointPathMarkers) {
-		error = "Waypoint path marker count exceeds 32";
-		return false;
-	}
-	stops.insert(stops.begin() + std::ptrdiff_t(std::min(index, stops.size())), marker);
-	path.marker_count = uint32_t(stops.size());
-	path.padding.assign(128 - stops.size() * sizeof(uint32_t), 0);
-	return true;
-}
-bool erase_record_stop(bms::WaypointRecord &path, size_t index) {
-	std::vector<uint32_t> &stops = path.waypoint_numbers;
-	if (index >= stops.size()) return false;
-	stops.erase(stops.begin() + std::ptrdiff_t(index));
-	path.marker_count = uint32_t(stops.size());
-	path.padding.assign(128 - stops.size() * sizeof(uint32_t), 0);
-	return true;
-}
-
+// A path's stops: the markers on it in its order (MissionPath::stops, D-MIS-6), as many as it holds; a
+// save puts each on the path through its marker's path and place and lays the record out from them, the
+// first 32 its slots (MissionDocument::compose). A new stop visits the file's first marker until it is
+// given another (its marker is a Record reference: the picker offers the file's markers); a stop that
+// names no waypoint marker, one of path 0 or a marker another stop names is a finding
+// (mission.unserializable), which the save refuses.
 ListOps stop_list() {
 	ListOps ops;
-	ops.size = [](const RecordHandle &owner) { return owner.as<MissionPath>().record.waypoint_numbers.size(); };
+	ops.size = [](const RecordHandle &owner) { return owner.as<MissionPath>().stops.size(); };
 	ops.at = [](const RecordHandle &owner, size_t index) {
-		std::vector<uint32_t> &stops = owner.as<MissionPath>().record.waypoint_numbers;
+		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
 		return index < stops.size() ? RecordHandle{k(K::Stop), &stops[index]} : RecordHandle{};
 	};
 	ops.insert = [](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
 		if (!own_kind(record, K::Stop, error)) return false;
+		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
 		const uint32_t marker = record ? *static_cast<const uint32_t *>(record->data.get()) : 0;
-		return insert_record_stop(owner.as<MissionPath>().record, index, marker, error);
+		stops.insert(stops.begin() + std::ptrdiff_t(std::min(index, stops.size())), marker);
+		return true;
 	};
 	ops.erase = [](const RecordHandle &owner, size_t index) {
-		return erase_record_stop(owner.as<MissionPath>().record, index);
+		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
+		if (index >= stops.size()) return false;
+		stops.erase(stops.begin() + std::ptrdiff_t(index));
+		return true;
 	};
 	ops.copy = [](const RecordHandle &owner, size_t index) {
-		const std::vector<uint32_t> &stops = owner.as<MissionPath>().record.waypoint_numbers;
+		const std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
 		return index < stops.size() ? detached(K::Stop, stops[index]) : DetachedRecord();
 	};
 	return ops;
@@ -779,7 +833,7 @@ RecordTable make_table() {
 			           file_list<bms::BoundingBox>(K::BoundingBox, boxes_of, fresh_box), {}});
 			break;
 		case K::WaypointPath:
-			kind.list({spec(K::Stop, "Stops", kMaxWaypointPathMarkers), stop_list(), {}});
+			kind.list({spec(K::Stop, "Stops"), stop_list(), {}});
 			break;
 		case K::Event:
 			kind.list({spec(K::Trigger, "Triggers", kMaxEventRecords), chain_list<bms::Trigger>(K::Trigger, triggers_of), {}});

@@ -517,6 +517,7 @@ void BuildRun::prepare() {
 	if (!plan_.ok) {
 		// Refused by the gate: the line names what refuses it (the UX round's problems lane).
 		report_.diagnostics = plan_.diagnostics;
+		report_.blockers = build_blockers(plan_);
 		report_.refused = true;
 		report_.diagnostics.push_back(make_finding(CoreFinding::BuildBlocked, DiagnosticSeverity::Error,
 		                                           refusal_words(build_blockers(plan_))));

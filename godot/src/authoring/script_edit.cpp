@@ -23,6 +23,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <runtime/wac/wac_lexis.h>
+
 #include "util/string_convert.h"
 
 namespace godot {
@@ -173,6 +175,25 @@ void ScriptEdit::on_symbol_lookup_(const String &, int64_t p_line, int64_t p_col
 	if (!assist_.lookup) return;
 	const int line = int(p_line), column = int(p_column);
 	// Raised outside the input's handling, at the next deferred call.
+	defer([this, line, column] {
+		if (assist_.lookup) assist_.lookup(line, column);
+	});
+}
+
+void ScriptEdit::look_up_at_caret_() {
+	if (!assist_.lookup) return;
+	const int line = get_caret_line();
+	int column = get_caret_column();
+	// The word the caret stands in, else the one it ends (the caret right after a word typed): a character of a
+	// word is one the WAC tokenizer reads on through (session/script_assist's words).
+	const String text = get_line(line);
+	const auto in_word = [&text](int at) {
+		if (at < 0 || at >= text.length()) return false;
+		const char32_t c = text[at];
+		return c > 0x7F || !opennova::wac::wac_token_ends(char(c));
+	};
+	if (!in_word(column) && in_word(column - 1)) --column;
+	// Raised outside the input's handling, at the next deferred call, as a Ctrl+click's is.
 	defer([this, line, column] {
 		if (assist_.lookup) assist_.lookup(line, column);
 	});
@@ -341,6 +362,16 @@ void ScriptEdit::on_gui_input_(const Ref<InputEvent> &p_event) {
 		if ((key && key->is_pressed()) || (button && button->is_pressed()) ||
 		    (moved && moved->get_relative().length_squared() > 0.0f))
 			set_hover_note(String());
+	}
+	// F12, Go to definition (ADR 0046 DI-18): where the word at the caret is defined, as a Ctrl+click on it goes.
+	// The control has the keys in its rect; the editor's own F12 acts on the selection, which a script has none
+	// of, so the jump is the device's.
+	if (const InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr());
+	    key && key->is_pressed() && !key->is_echo() && key->get_keycode() == KEY_F12 && !key->is_ctrl_pressed() &&
+	    !key->is_alt_pressed() && !key->is_shift_pressed() && !key->is_meta_pressed()) {
+		accept_event();
+		look_up_at_caret_();
+		return;
 	}
 	// Over the gutters: the findings of the line under the pointer, its tooltip. Over the text (S15):
 	// what the word there is, in words, then the line's findings.

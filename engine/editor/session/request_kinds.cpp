@@ -263,7 +263,9 @@ void serve_quit(SessionCore &core, const EditorRequest &) {
 	core.quit();
 }
 void serve_move_asset(SessionCore &core, const EditorRequest &request) {
-	core.renames().move_asset(request.path, request.folder);
+	// Several files: moved together as one step of the file history (DI-25).
+	if (!request.paths.empty()) core.chores().move_files(request);
+	else core.renames().move_asset(request.path, request.folder);
 }
 void serve_delete_asset(SessionCore &core, const EditorRequest &request) {
 	core.chores().delete_asset(request);
@@ -278,7 +280,10 @@ void serve_rename_folder(SessionCore &core, const EditorRequest &request) {
 	core.chores().rename_folder(request.folder, request.new_name);
 }
 void serve_delete_folder(SessionCore &core, const EditorRequest &request) {
-	core.chores().delete_folder(request.folder);
+	core.chores().delete_folder(request);
+}
+void serve_empty_trash(SessionCore &core, const EditorRequest &request) {
+	core.chores().empty_trash(request.force);
 }
 // UndoFile and RedoFile.
 void serve_file_history(SessionCore &core, const EditorRequest &request) {
@@ -1151,9 +1156,12 @@ constexpr RequestKindRow kRows[] = {
 			"organization only. An import source takes its record, its outputs made again under the new "
 			"place; the folder it leaves goes once empty. Refused with the reasons (rename.unknown_file, "
 			"rename.imported for an import's output or a file an import reads from its place, rename.path, "
-			"rename.unchanged, rename.exists). Committed as an operation, as rename_asset; not undoable, "
-			"its way back preview_rename_back and rename_back (Edit > Move back).")
-			.takes(request_params({ F::Path, F::Folder }))
+			"rename.unchanged, rename.exists). A mission takes the companions it keeps beside it (the files the game "
+			"finds by its name). Committed as an operation, as rename_asset; not undoable, its way back "
+			"preview_rename_back and rename_back (Edit > Move back). With paths, the file and each of them moved "
+			"together (one already in the folder stays), at once, as one step of the file history (DI-25: undo_file "
+			"moves them back); refused, nothing moved, when one is.")
+			.takes(request_params({ F::Path, F::Folder }, { F::Paths }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Move %s", "Save all and move")
@@ -1161,15 +1169,16 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	// DI-25: Files' chores, each done at once (no operation) and one step of the file history.
 	Request(K::DeleteAsset, "delete_asset", serve_delete_asset,
-			"The project file path deleted to the project's trash (.opennova/trash/<n>/, never emptied by the "
-			"editor: no delete is a permanent one), its open documents closed: a mission with the files the game "
-			"finds by its name, an import source with its record and its outputs, or, alone, its outputs kept as "
-			"files of the project where the placement rule puts their kinds. Refused (file.named) while anything "
-			"names what it deletes (the used_by query's uses, and an import reading it), the uses listed in words, "
-			"unless force: the uses then name nothing, Problems rows until undo_file brings it back. Refused too: "
-			"file.unknown, file.imported (an import's output: delete its source), file.exists (where a kept output "
-			"would land), file.trash. One step of the file history.")
-			.takes(request_params({ F::Path }, { F::Force, F::Alone }))
+			"The project file path, and each of paths, deleted to the project's trash (.opennova/trash/<n>/, one "
+			"batch; only empty_trash removes what it holds: no delete is a permanent one), their open documents "
+			"closed: a mission with the files the game finds by its name, an import source with its record and its "
+			"outputs, or, alone, its outputs kept as files of the project where the placement rule puts their "
+			"kinds. Refused (file.named) while anything the delete leaves names what it deletes (the used_by query's "
+			"uses, and an import reading it), the uses listed in words, unless force: the uses then name nothing, "
+			"Problems rows until undo_file brings it back. Refused too, nothing deleted: file.unknown, file.imported "
+			"(an import's output: delete its source), file.exists (where a kept output would land), file.trash. One "
+			"step of the file history.")
+			.takes(request_params({ F::Path }, { F::Paths, F::Force, F::Alone }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments)
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Delete %s", "Save all and delete")
@@ -1182,13 +1191,15 @@ constexpr RequestKindRow kRows[] = {
 			"(its add-on texture names <model>_<i>n.mdt fit 15), no name the project has in any case (as the "
 			"game's archives compare names), the base game serves, or a file of its set would take. A mission comes "
 			"with its companions under the copy's name, an import source with its record (its import makes the "
-			"copy's own outputs, a refresh started) unless alone. Selected in Files. Refused: file.unknown, "
-			"file.imported (an import's output: duplicate its source), file.name (the name rules, another "
-			"extension, no free name), file.exists, file.write. One step of the file history.")
-			.takes(request_params({ F::Path }, { F::NewName, F::Alone }))
+			"copy's own outputs, a refresh started) unless alone. With paths, each of them copied too under the name "
+			"the rules give it beside the copies before it. The first copy selected in Files. Refused, nothing "
+			"copied: file.unknown, file.imported (an import's output: duplicate its source), file.name (the name "
+			"rules, another extension, no free name), file.exists, file.write. One step of the file history; each "
+			"file copied as saved.")
+			.takes(request_params({ F::Path }, { F::Paths, F::NewName, F::Alone }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.ends_edit_groups()
-			.guarded(GuardScope::Document, "Duplicate %s", "Save")
+			.guarded(GuardScope::PlannedWrites, "Duplicate %s", "Save all and duplicate")
 			.acts_on_saved()
 			.row,
 	Request(K::NewFolder, "new_folder", serve_new_folder,
@@ -1214,10 +1225,17 @@ constexpr RequestKindRow kRows[] = {
 			.acts_on_saved()
 			.row,
 	Request(K::DeleteFolder, "delete_folder", serve_delete_folder,
-			"The empty folder removed from the project. Refused: file.folder (the top level, one that holds "
-			"anything: delete or move it first), file.unknown. One step of the file history.")
-			.takes(request_params({ F::Folder }))
-			.holds(kFiles, kFiles)
+			"The empty folder removed from the project; with all, the folder with what it holds to the project's "
+			"trash, every file of the project in it deleted as delete_asset deletes it (a mission's companions kept "
+			"elsewhere and an import source's outputs going with it), refused (file.named) while anything the "
+			"delete leaves names what goes unless force. Refused too: file.folder (the top level, one that holds "
+			"anything without all), file.unknown, file.trash, and each file's delete as delete_asset refuses it. "
+			"One step of the file history.")
+			.takes(request_params({ F::Folder }, { F::All, F::Force }))
+			.holds(kFilesAndDocuments, kFilesAndDocuments)
+			.ends_edit_groups()
+			.guarded(GuardScope::PlannedWrites, "Delete the folder", "Save all and delete")
+			.acts_on_saved()
 			.row,
 	Request(K::UndoFile, "undo_file", serve_file_history,
 			"The file history's last step taken back (Edit > Undo file): a delete's files back from the trash, a "
@@ -1240,6 +1258,14 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Redo file", "Save all and redo")
 			.acts_on_saved()
+			.row,
+	Request(K::EmptyTrash, "empty_trash", serve_empty_trash,
+			"What the project's trash holds removed for good (Files' Empty the trash..., asked first), the trash's "
+			"folder with it: the one chore that removes files. The file history goes with it, each of its steps "
+			"taking what it put there back from there; the note says how many files went. Only with force: "
+			"refused (file.trash) without it, and when something stays.")
+			.takes(request_params({}, { F::Force }))
+			.holds(kFiles, kFiles)
 			.row,
 	Request(K::PickDirectory, "pick_directory", nullptr,
 			"A native folder dialog for purpose; its answer comes back as the request the purpose "

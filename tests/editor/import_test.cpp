@@ -461,6 +461,24 @@ static int test_image_tga_output() {
 	run = run_imports(paths, doc);
 	TEST_EXPECT(run.reimported == 1 && count_code(run.diagnostics, "import.alpha_dropped") == 1 &&
 	            !fs::exists(root + "/" + tga) && fs::is_regular_file(root + "/" + pcx));
+
+	// The source and its record moved outside the editor: the next pass makes its outputs under its new place
+	// and removes the folder no source names any more (ADR 0046 S23 D); a pass over some sources alone does not.
+	const std::string old_dir = import_output_dir(paths, "art/glow.png");
+	TEST_EXPECT(editor_test::write_text(root + "/.opennova/imported/0123456789abcdef/stray.pcx", "stray"));
+	std::error_code ec;
+	fs::create_directories(root + "/moved", ec);
+	fs::rename(root + "/art/glow.png", root + "/moved/glow.png", ec);
+	fs::rename(root + "/art/glow.png.import", root + "/moved/glow.png.import", ec);
+	ImportPass limited(paths, doc);
+	limited.limit_to({"moved/glow.png"});
+	while (!limited.step(1u << 20)) {
+	}
+	TEST_EXPECT(fs::is_directory(root + "/" + old_dir) && fs::exists(root + "/.opennova/imported/0123456789abcdef"));
+	run = run_imports(paths, doc);
+	TEST_EXPECT(run.sources.size() == 1 && run.sources[0].source == "moved/glow.png" && run.sources[0].ok);
+	TEST_EXPECT(!fs::exists(root + "/" + old_dir) && !fs::exists(root + "/.opennova/imported/0123456789abcdef"));
+	TEST_EXPECT(fs::is_directory(root + "/" + import_output_dir(paths, "moved/glow.png")));
 	return 0;
 }
 

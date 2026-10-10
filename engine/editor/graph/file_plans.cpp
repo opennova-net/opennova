@@ -361,9 +361,18 @@ FolderPlan plan_folder_rename(const ProjectPaths &paths, const ProjectDocument &
 				                                   [](const Diagnostic &d) { return d.code() == "rename.imported"; }),
 				                    move.refusals.end());
 		}
-		plan.refusals.insert(plan.refusals.end(), move.refusals.begin(), move.refusals.end());
 		plan.moves.push_back(std::move(move));
 	}
+	// A mission's companions beside it go with its move (plan_move): none is a move of its own.
+	std::vector<std::string> taken;
+	for (const RenamePlan &move : plan.moves)
+		for (const RenameOutput &companion : move.companions) taken.push_back(companion.path);
+	plan.moves.erase(std::remove_if(plan.moves.begin(), plan.moves.end(),
+	                                [&](const RenamePlan &move) {
+		                                return std::find(taken.begin(), taken.end(), move.path) != taken.end();
+	                                }),
+	                 plan.moves.end());
+	for (const RenamePlan &move : plan.moves) plan.refusals.insert(plan.refusals.end(), move.refusals.begin(), move.refusals.end());
 	return plan;
 }
 

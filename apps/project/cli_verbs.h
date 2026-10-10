@@ -19,7 +19,13 @@
 //                    [--tiles <file>] [--surface <file>] [--top <units>] [--water <units>]
 //                    [--layout island|tiled]
 //   opennova-project build <dir> [--out <dir>]
-//   opennova-project mv <dir> <file> <folder>
+//   opennova-project mv <dir> <file>... <folder>
+//   opennova-project rm <dir> <file>... [--force] [--alone]
+//   opennova-project cp <dir> <file>... [--as <name>] [--alone]
+//   opennova-project mkdir <dir> <folder>
+//   opennova-project rename-folder <dir> <folder> <name>
+//   opennova-project rmdir <dir> <folder> [--all] [--force]
+//   opennova-project empty-trash <dir> --force
 //   opennova-project request <dir> <json>
 //   opennova-project query <dir> <name> [<json>]
 //
@@ -64,6 +70,12 @@ enum class CliVerb : uint8_t {
 	Build,
 	Export,
 	Move,
+	Remove,
+	Copy,
+	MakeFolder,
+	RenameFolder,
+	RemoveFolder,
+	EmptyTrash,
 	Request,
 	Query,
 	kCount,

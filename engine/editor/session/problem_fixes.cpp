@@ -385,8 +385,8 @@ void shader_create_fix(const ReferenceSubject &missing, const SessionView &view,
 
 // A missing symbol: the file where it belongs (defining_file), its Add it there where its type
 // defines names of the kind (add_there_fix, planned with `plan` alone: has_fixes and a Fix all read
-// none of it), then opened to add it or to see the names it has, or shown in Files when the editor
-// does not open its kind.
+// none of it), then opened to add it or to see the names it has, or its page opened when the editor
+// has no editor for its kind (ADR 0046 DI-17: one OpenDocument, always, as every Go to).
 void symbol_fixes(const ReferenceSubject &missing, const SessionView &view, const ProblemFixIndex &index, bool plan,
                   std::vector<ProblemFix> &out) {
 	const AssetEntry *file = defining_file(missing, view);
@@ -399,10 +399,10 @@ void symbol_fixes(const ReferenceSubject &missing, const SessionView &view, cons
 		               "Opens " + file->relative_path + ", where " + what + " belongs: add it there, or correct the name.",
 		               request::open_document(file->relative_path), false});
 	else
-		out.push_back({"Show " + file->logical_name + " in Files",
-		               "Shows " + file->relative_path + " in Files, the file where " + what +
-		                       " belongs (the editor does not edit its kind).",
-		               request::show_in_files(file->relative_path), false});
+		out.push_back({"Open the page of " + file->logical_name,
+		               "Opens the page of " + file->relative_path + ", the file where " + what +
+		                       " belongs: what it is and the names it has (the editor has no editor for its kind).",
+		               request::open_document(file->relative_path), false});
 }
 
 // An animation map with no anim_reset row: the row added, keyed anim_reset (the key a new

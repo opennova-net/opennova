@@ -122,6 +122,7 @@ constexpr WorkspaceMember kFileDelete[] = {
 			"uses), its Delete a delete_asset, with force where something names it. The session closes it as the file "
 			"goes.", kPathLongest },
 	{ "alone", J::Boolean, "An import source deleted alone: its outputs kept as files of the project." },
+	{ "paths", J::Strings, "The other project files deleted with it (Files' selection of several rows)." },
 };
 constexpr WorkspaceMember kRename[] = {
 	{ "open", J::Boolean,
@@ -574,15 +575,24 @@ bool set_file_delete(Change &change, const JsonValue &part) {
 		} else {
 			const AssetEntry *file = project_file(change.view, path->string);
 			if (!file) return change.refuse("The project has no file " + path->string + " to delete.", path->string);
-			if (file->relative_path != asked.path) asked = WorkspaceView::FileDelete{ file->relative_path, false };
+			if (file->relative_path != asked.path) asked = WorkspaceView::FileDelete{ file->relative_path, {}, false };
 		}
 	}
 	if (const JsonValue *alone = part.get("alone")) {
 		if (asked.path.empty()) return change.closed("Delete...", "name the file first (file_delete.path)");
 		asked.alone = alone->boolean;
 	}
+	if (const JsonValue *paths = part.get("paths")) {
+		if (asked.path.empty()) return change.closed("Delete...", "name the file first (file_delete.path)");
+		asked.paths.clear();
+		for (const JsonValue &each : paths->array) {
+			const AssetEntry *file = project_file(change.view, each.string);
+			if (!file) return change.refuse("The project has no file " + each.string + " to delete.", each.string);
+			if (file->relative_path != asked.path) asked.paths.push_back(file->relative_path);
+		}
+	}
 	WorkspaceView::FileDelete &held = change.workspace().file_delete;
-	if (asked.path == held.path && asked.alone == held.alone) return false;
+	if (asked.path == held.path && asked.paths == held.paths && asked.alone == held.alone) return false;
 	held = std::move(asked);
 	return true;
 }
@@ -1419,7 +1429,12 @@ JsonValue workspace_to_json(const SessionView &view) {
 	out.set("file_rename", std::move(file_rename));
 	JsonValue file_delete = JsonValue::make_object();
 	file_delete.set("path", text(workspace.file_delete.path));
-	if (!workspace.file_delete.path.empty()) file_delete.set("alone", flag(workspace.file_delete.alone));
+	if (!workspace.file_delete.path.empty()) {
+		file_delete.set("alone", flag(workspace.file_delete.alone));
+		JsonValue others = JsonValue::make_array();
+		for (const std::string &path : workspace.file_delete.paths) others.push(text(path));
+		file_delete.set("paths", std::move(others));
+	}
 	out.set("file_delete", std::move(file_delete));
 	JsonValue rename = JsonValue::make_object();
 	rename.set("open", flag(workspace.rename.open));

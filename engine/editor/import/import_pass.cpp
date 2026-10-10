@@ -1,11 +1,13 @@
 #include <editor/import/import_pass.h>
 
 #include <algorithm>
+#include <set>
 #include <system_error>
 
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <editor/assets/project_scan.h>
 #include <editor/import/import_context.h>
 #include <editor/import/importer.h>
@@ -116,9 +118,10 @@ void ImportPass::limit_to(std::vector<std::string> sources) {
 // time: a rewrite of the same size inside its timestamp tick is never taken for the bytes read. A
 // pass over some sources (limit_to) keeps what the cache knew of everything else.
 void ImportPass::save_cache() const {
-	Cache kept = limited_ ? cache_ : Cache();
+	const bool partial = limited_ || !walked_whole_;
+	Cache kept = partial ? cache_ : Cache();
 	for (const auto &[file, seen] : seen_.files) kept.files[file] = seen;
-	if (limited_)
+	if (partial)
 		for (const auto &[source, path] : listed_) {
 			(void)path;
 			kept.records.erase(source);
@@ -214,12 +217,18 @@ bool ImportPass::step(uint64_t budget) {
 				listed_.emplace_back(std::move(relative), path);
 			}
 			walk_.increment(ec);
-			if (ec) walk_ = fs::recursive_directory_iterator(); // the walk stops where it could not go on
+			if (ec) {
+				// The walk stops where it could not go on: the sources past it unlisted.
+				walk_ = fs::recursive_directory_iterator();
+				walked_whole_ = false;
+			}
 			break;
 		}
 		case Phase::Importing: {
 			if (next_ == listed_.size()) {
 				save_cache();
+				// Only a pass that listed every source knows which output folders none names.
+				if (!limited_ && walked_whole_) remove_stale_outputs();
 				phase_ = Phase::Done;
 				return true;
 			}
@@ -233,6 +242,23 @@ bool ImportPass::step(uint64_t budget) {
 		}
 	} while (spent < budget);
 	return done();
+}
+
+// The outputs' folders under the cache that no source of the project names any more (each source's is named by
+// its path: import_output_dir), removed with what they hold: a source deleted, renamed or moved outside the
+// editor left them, neither listed nor packed since (the scan lists an output only through its source's record),
+// and no source can come back to one but through the import that makes it again.
+void ImportPass::remove_stale_outputs() const {
+	std::set<std::string> named;
+	for (const auto &[relative, path] : listed_) {
+		(void)path;
+		named.insert(strutil::to_lower(basename_of(import_output_dir(paths_, relative))));
+	}
+	std::error_code ec;
+	std::vector<fs::path> stale;
+	for (fs::directory_iterator it(system_path(paths_.imported_dir), ec), end; !ec && it != end; it.increment(ec))
+		if (it->is_directory(ec) && !named.count(strutil::to_lower(utf8_of(it->path().filename())))) stale.push_back(it->path());
+	for (const fs::path &dir : stale) fs::remove_all(dir, ec);
 }
 
 bool ImportPass::file_hash(const std::string &file, const std::string &relative, uint64_t &hash, uint64_t &spent) {

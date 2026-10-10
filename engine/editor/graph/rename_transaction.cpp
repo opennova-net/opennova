@@ -238,6 +238,7 @@ void plan_sites(RenamePlan &plan, const AssetScan &scan, const AssetGraph &graph
 } // namespace
 
 std::string companion_path(const RenameOutput &companion) {
+	if (!companion.new_path.empty()) return companion.new_path;
 	return utf8_of(path_of(companion.path).parent_path() / path_of(companion.new_name));
 }
 
@@ -262,7 +263,8 @@ bool in_export_folder(const fs::path &dir, const fs::path &export_dir) {
 }
 
 RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-                     const std::string &file, const std::string &folder, const std::vector<ImportedSource> *imports) {
+                     const std::string &file, const std::string &folder, const std::vector<ImportedSource> *imports,
+                     const std::vector<std::string> *companions) {
 	RenamePlan plan;
 	plan.move = true;
 	const AssetEntry *asset = find_asset(scan, file);
@@ -312,14 +314,45 @@ RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, 
 		return plan;
 	}
 	// A file another source's import reads from its place: moved, that import would no longer find it.
-	if (imports)
+	const auto read_from_its_place = [&](const AssetEntry &file) {
+		if (!imports) return;
 		for (const ImportedSource &source : *imports)
 			for (const std::string &input : source.inputs)
-				if (strutil::iequals(input, asset->relative_path))
+				if (strutil::iequals(input, file.relative_path))
 					plan.refusals.push_back(refusal(CoreFinding::RenameImported,
-					                                asset->logical_name + " is read by the import of " + source.source +
+					                                file.logical_name + " is read by the import of " + source.source +
 					                                        " from where it is: moved, that import would no longer find it.",
-					                                asset->relative_path));
+					                                file.relative_path));
+	};
+	read_from_its_place(*asset);
+	// A mission's companions beside it go with it (the files the game finds by its name, ADR 0046 S14), so
+	// its set stays together; one kept elsewhere stays, the game finding it by its name wherever it sits. A
+	// way back's are the ones that went (`companions`).
+	std::vector<const AssetEntry *> going;
+	if (companions) {
+		for (const std::string &path : *companions)
+			if (const AssetEntry *entry = scan.at_path(path); entry && entry->imported_from.empty()) going.push_back(entry);
+	} else if (asset->kind == AssetKind::Mission && strutil::ends_with_icase(asset->logical_name, ".bms")) {
+		const std::string from = folder_of_path(asset->relative_path);
+		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, asset->logical_name)) {
+			const AssetEntry *entry = find_asset(scan, member.path);
+			if (entry && entry->imported_from.empty() && strutil::iequals(folder_of_path(entry->relative_path), from))
+				going.push_back(entry);
+		}
+	}
+	{
+		for (const AssetEntry *entry : going) {
+			RenameOutput companion{entry->relative_path, entry->logical_name, entry->logical_name,
+			                       join_path(to, entry->logical_name)};
+			if (fs::exists(system_path(join_path(paths.root, companion.new_path)), ec) || ec)
+				plan.refusals.push_back(refusal(CoreFinding::RenameExists,
+				                                "A file already sits at '" + companion.new_path + "', where " +
+				                                        entry->logical_name + " would go with the mission.",
+				                                entry->relative_path));
+			read_from_its_place(*entry);
+			plan.companions.push_back(std::move(companion));
+		}
+	}
 	// An import source takes its record, and its outputs are made again under its new place; one whose
 	// import reads files beside it (found from its folder) would no longer find them.
 	if (importer_for(asset->logical_name)) {
@@ -1439,6 +1472,22 @@ void RenameTransaction::commit_move() {
 		                                    ". The file stays where it was.",
 		                            plan.sidecar));
 		std::error_code back;
+		io::rename_with_retry(to, from, back);
+		unmake();
+		return;
+	}
+	// A mission's companions beside it, each moved with it; one that does not go puts the mission and the ones
+	// before it back.
+	for (auto it = plan.companions.begin(); it != plan.companions.end(); ++it) {
+		if (!fs::exists(at(companion_path(*it)), ec) && !ec && io::rename_with_retry(at(it->path), at(companion_path(*it)), ec))
+			continue;
+		findings_.push_back(refusal(CoreFinding::RenameMove,
+		                            it->old_name + " could not be moved with the mission" +
+		                                    (ec ? ": " + ec.message() : std::string()) + ". The mission stays where it was.",
+		                            it->path));
+		std::error_code back;
+		for (auto moved = plan.companions.begin(); moved != it; ++moved)
+			io::rename_with_retry(at(companion_path(*moved)), at(moved->path), back);
 		io::rename_with_retry(to, from, back);
 		unmake();
 		return;

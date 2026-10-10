@@ -15,14 +15,19 @@ struct PollBudget;
 // client launched never has it); while a file waits to hold still, or the sweep runs, the next comes
 // kDiskHoldStillMs after the last instead.
 inline constexpr int64_t kDiskCheckMs = 1000;
+// How many of the project's other files each check looks at besides, in turn (the round): a file no view shows
+// comes back within (its files / kDiskRoundFiles) checks of another program's save, a project of a few hundred
+// files at each check. A look is a stat of the file.
+inline constexpr size_t kDiskRoundFiles = 256;
 
 // What another program saves of the open project's files, brought back without a Rescan (ADR 0046
 // DI-01; the session's part RefreshChangedSources is served by). A check looks at the files the editor
 // shows (each open document's file, every file a viewport's picture read), the folders the scan's walk
 // went into (a file made, deleted or renamed in one moves its last write, so a new file and a gone one
-// are found too), and the files a look found moved before (assets/disk_changes.h: each read once it held
-// still, never while a program may still be writing it); with `all`, every file of the project besides,
-// swept over the polls (the editor gaining the focus). The files S18's round trip watches (an import
+// are found too), the files a look found moved before (assets/disk_changes.h: each read once it held
+// still, never while a program may still be writing it), and kDiskRoundFiles more of the project's files
+// in turn (the round, so a file no view shows comes back without the focus); with `all`, every file of the
+// project besides, swept over the polls (the editor gaining the focus). The files S18's round trip watches (an import
 // source, a file an import read, a PNG the game reads as it is: import/import_run.h's external_changes)
 // are its, under its own rule, and join what a check reads. What is ready is read again alone, as an
 // operation (SessionCore::start_changed_refresh: the sources it touches imported again, the scan updated
@@ -57,6 +62,7 @@ private:
 	DiskChanges changes_;
 	std::string root_;      // the project the looks are of
 	size_t unsettled_ = 0;  // the import round trip's files that moved too recently, at the last check
+	std::string round_after_; // the round's last file: the next check's round starts after it
 };
 
 } // namespace opennova::editor

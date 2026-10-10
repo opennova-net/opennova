@@ -43,6 +43,7 @@ enum class CatalogFinding {
 	ReservedName,
 	FirstRow,
 	ReservedRefused,
+	ReaderStops, // input the game's reader stops at or corrupts the record over (catalog.reader_stops)
 	kCount
 };
 const FindingCodeRow &finding_code(CatalogFinding code);

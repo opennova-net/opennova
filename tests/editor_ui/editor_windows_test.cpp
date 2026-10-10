@@ -121,7 +121,8 @@ void test_frame_bracket_follows_the_table() {
 	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::RenameBack,
 	                              K::SplitTexture, K::Quit, K::MoveAsset,
 	                              // DI-25: Files' chores act on the files as saved.
-	                              K::DeleteAsset, K::DuplicateAsset, K::RenameFolder, K::UndoFile, K::RedoFile};
+	                              K::DeleteAsset, K::DuplicateAsset, K::RenameFolder, K::DeleteFolder, K::UndoFile,
+	                              K::RedoFile};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	// S18: a texture's whole-image edit names the active one, as an edit_record does.
@@ -844,8 +845,8 @@ void test_actions_after_edits() {
 	ui.drain();
 	ui.click(problems_lines().at(0, 2));
 	CHECK(ui.drain().empty(), "a required file the project lacks opens nothing");
-	// S12: a finding about a file the editor does not open (the NovaWorld string table; a font is a document since
-	// round S23): its row shows it in Files.
+	// DI-17: a finding about a file the editor has no editor for (the NovaWorld string table; a font is a document
+	// since round S23): its row opens its page.
 	AssetEntry font_entry;
 	font_entry.logical_name = "nw_cdata.coo";
 	font_entry.relative_path = "nw_cdata.coo";
@@ -861,9 +862,9 @@ void test_actions_after_edits() {
 	ui.drain();
 	ui.click(problems_lines().at(0, 2));
 	requests = ui.drain();
-	CHECK(requests.size() == 1 && requests[0].kind == EditorRequestKind::ShowInFiles &&
-	              requests[0].path == font_entry.relative_path && !requests[0].ask_name,
-	      "a file of no editor: its row shows it in Files");
+	CHECK(requests.size() == 1 && requests[0].kind == EditorRequestKind::OpenDocument &&
+	              requests[0].path == font_entry.relative_path && requests[0].locator.empty(),
+	      "a file of no editor: its row opens its page");
 	Diagnostic finding = editor_test::finding_of(DiagnosticSeverity::Error, "menu.duplicate_screen", "A finding in the other menu.", other->path());
 	finding.row_id = other->rows()[0]->id;
 	finding.record_kind = kScreen;

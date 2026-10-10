@@ -326,11 +326,13 @@ static int test_columns() {
 		TEST_EXPECT(row && row->rewrite_does && does == row->rewrite_does);
 	}
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
-	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
+	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.reader_stops", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "dialog_bank.invalid_input", "document.unserializable",
 	                     "environment.invalid_input", "face_animation.invalid_input", "face_animation.unserializable",
 	                     "font.invalid_input", "font.unserializable",
-	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input",
+	                     "menu.invalid_input", "menu.unserializable", "menu.variable_number", "mission.invalid_input",
+	                     "mission.runs_past_table",
+	                     "mission.unserializable",
 	                     "music_bank.invalid_input", "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
 	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input",
 	                     "terrain.invalid_input" }));
@@ -341,41 +343,59 @@ static int test_columns() {
 	// S14, the build follows retail: the codes whose errors gate no build are listed (shown, fixable,
 	// never blocking): the ones whose subject names the game's refusal where it is witnessed (a
 	// reference, a required file), and the ones the audit found no refusal of the game's behind (the
-	// editor's own rules, a read past a table, a stylesheet read otherwise or read up to a line). An
-	// error of any other row blocks, as does an error made from no row. A row that says its file does
-	// not serialize always gates.
+	// editor's own rules, a read past a table, a stylesheet read otherwise or read up to a line), and
+	// (S23) the ones whose input the editor's model cannot carry where the game reads the file on, which
+	// gate only an open file with unsaved edits (unwritable_code). An error of any other row blocks, as
+	// does an error made from no row.
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
-	            Tokens({ "animation_map.no_reset", "asset.wave_unplayable", "build.expansion.exp_desc", "build.expansion.mission_twice",
+	            Tokens({ "animation_map.invalid_input", "animation_map.no_reset", "animation_map.row", "asset.wave_unplayable",
+	                     "build.archive_in_project", "build.expansion.exp_desc", "build.expansion.mission_twice",
 	                     "build.expansion.mission_untitled", "build.expansion.root_only", "build.unread", "catalog.first_row",
-	                     "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
-	                     "catalog.reserved_name", "catalog.reserved_refused", "charattr.attribute_word",
+	                     "catalog.invalid_input", "catalog.item_type", "catalog.name_empty", "catalog.reserved_id", "catalog.reserved_kind",
+	                     "catalog.reserved_name", "catalog.reserved_refused", "catalog.unserializable", "charattr.attribute_word",
 	                     "charattr.no_cammo", "charattr.not_a_number", "charattr.unread_section", "dialog_bank.line_no_wave",
 	                     "dialog_bank.name_repeated", "dialog_bank.name_unplayed", "dialog_bank.silent", "document.line_ends",
-	                     "environment.sky_height_default", "environment.terrain_key",
+	                     "environment.invalid_input", "environment.sky_height_default", "environment.terrain_key",
 	                     "expansion.file.unread", "export.cancelled",
 	                     "export.cleanup", "export.replaced", "face_animation.eye_texture_alone",
 	                     "face_animation.gesture_repeated", "face_animation.gesture_unplayed",
 	                     "face_animation.parameter_repeated", "face_animation.parameter_unmatched",
 	                     "font.glyph_height", "font.glyph_outside",
-	                     "mission.event_missing",
-	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
+	                     "menu.variable_number", "mission.event_missing",
+	                     "mission.group_range", "mission.invalid_input", "mission.path_rebuilt",
+	                     "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "music_bank.stream_silent",
 	                     "particle.duplicate_effect", "particle.unreadable",
 	                     "project.base_project", "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
 	                     "shader.form", "sound_bank.layer_unheard", "sound_bank.set_name_repeated", "sound_bank.set_silent",
 	                     "sound_bank.wave_file_name", "sound_bank.wave_name_repeated", "sound_bank.wave_no_file",
-	                     "sound_profiles.name_repeated", "sound_profiles.no_default",
-	                     "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
+	                     "sound_profiles.name_repeated", "sound_profiles.no_default", "sound_profiles.unserializable",
+	                     "strings.invalid_input", "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
-	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.no_width", "text.reader",
-	                     "text.unreadable" }));
+	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.invalid_input", "terrain.no_width", "text.reader",
+	                     "text.unreadable", "texture.tga_unfilled" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader
 	// clears past the pool into the heap, and the game crashes later [orig: ConfigFile_ParseText @ 0x7609e8].
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.game_refusal != nullptr; }) ==
-	            Tokens({ "document.config_overrun" }));
+	            Tokens({ "catalog.reader_stops", "document.config_overrun", "mission.runs_past_table" }));
+	// A finding whose file the editor's model cannot carry where the game reads it on (unwritable_code) gates only
+	// an open file with unsaved edits, which the build's Save cannot write: a closed one packs as stored. One the
+	// game's own reader stops at gates either way, saying what the game does.
+	{
+		const Diagnostic dropped =
+		        make_finding(*finding_row("strings.invalid_input"), DiagnosticSeverity::Error, "dropped", "lang/strings.bin");
+		ShippedFiles closed, edited;
+		edited.unsaved.insert("lang/strings.bin");
+		TEST_EXPECT(blocks_build(dropped) && !blocks_build(dropped, nullptr, &closed) && blocks_build(dropped, nullptr, &edited) &&
+		            !blocks_build(dropped, nullptr, nullptr));
+		const Diagnostic stops =
+		        make_finding(*finding_row("catalog.reader_stops"), DiagnosticSeverity::Error, "stops", "defs/weapon.def");
+		TEST_EXPECT(blocks_build(stops, nullptr, &closed) && blocks_build(stops, nullptr, nullptr) && blocker_is_the_games(stops) &&
+		            blocker_reason(stops).rfind("The game fails here as the original does: its reader stops", 0) == 0);
+	}
 	const Diagnostic overrun = make_finding(CoreFinding::DocumentConfigOverrun, DiagnosticSeverity::Error, "past the pool");
 	TEST_EXPECT(blocks_build(overrun) && blocker_is_the_games(overrun) &&
 	            blocker_reason(overrun).rfind("The game fails here as the original does: its ConfigFile reader clears", 0) == 0 &&
@@ -428,8 +448,16 @@ static int test_columns() {
 	for (const Table &table : tables()) {
 		for (const FindingCodeRow &row : table.rows) {
 			const std::string token = row.token;
-			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input")));
-			TEST_EXPECT(!row.blocks_save || row.gates_build);
+			// A row whose file does not serialize: the editor's own (.unserializable, .invalid_input) or input the game's
+			// reader stops at (game_stops_code: the game's refusal said); a listed one is input the game reads on.
+			// A row whose file does not serialize: the editor's own (.unserializable, .invalid_input), input the game's
+			// reader stops at (game_stops_code: the game's refusal said), or input the game reads on that the model
+			// cannot carry, apart from its code's crash cases (unwritable_code: listed).
+			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input") ||
+			                                (row.game_refusal && token != "document.config_overrun") ||
+			                                token == "menu.variable_number"));
+			TEST_EXPECT(!row.blocks_save || row.gates_build || ends_with(token, ".invalid_input") ||
+			            ends_with(token, ".unserializable") || token == "menu.variable_number");
 			TEST_EXPECT(!starts_with(token, "asset.name.") || row.place == FindingPlace::File);
 			const std::string key = finding_group_key(row.group);
 			TEST_EXPECT(row.group != FindingGroup::None && (token == key || starts_with(token, key + ".")));

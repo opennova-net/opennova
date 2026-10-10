@@ -933,7 +933,9 @@ bool TerrainDocument::accept_step(const EditStep &, const StagedRows &staged, St
 namespace {
 
 constexpr FindingCodeEntry<TerrainFinding> kFindingEntries[] = {
-	{ TerrainFinding::InvalidInput, { "terrain.invalid_input", FindingFix::None, nullptr, true } },
+	// A line the record cannot hold: the game reads it on (unwritable_code: a closed file packs as stored, its
+	// Save refused).
+	{ TerrainFinding::InvalidInput, unwritable_code("terrain.invalid_input") },
 	{ TerrainFinding::IgnoredInput, { "terrain.ignored_input", FindingFix::Rewrite, "with each line as the game reads it" } },
 	// The gate's refusal aborts the mission's load [orig: Game_StartMission @ 0x524780..0x52479F, @ 0x524B30]: it
 	// gates the build.
@@ -968,7 +970,10 @@ std::vector<Diagnostic> validate_terrain_file(const DocumentBase &document) {
 	const auto *terrain = dynamic_cast<const TerrainDocument *>(&document);
 	if (!terrain) return findings;
 	source_issue_findings(*terrain, finding_code(TerrainFinding::InvalidInput), finding_code(TerrainFinding::IgnoredInput),
-	                      findings);
+	                      findings, nullptr,
+	                      "The game reads the line and goes on [orig: Terrain_ParseConfigCallback @ 0x60f814..0x60f843; "
+	                      "Environment_LoadTimeOfDayConfig @ 0x57dbcc; Terrain_LoadEnvironmentConfig @ 0x61096d]: a build "
+	                      "packs the file as it stands, and a save is refused while the line stands.");
 	if (document.blocked()) return findings;
 	const TerrainRow *row = terrain->terrain_row();
 	if (!row) return findings;
@@ -1007,13 +1012,21 @@ std::vector<Diagnostic> validate_terrain_file(const DocumentBase &document) {
 			             " at the grid's end, each the row the game's extension reads there (" +
 			             (config.wrap_y ? "the grid's rows again from the first" : "the last row again") +
 			             "), so the grid's rows are a power of two and the game takes the terrain; nothing it draws moves.";
-			for (int r = rows; r < target; ++r) {
+			// Each a copy of the row of the grid as it stands that the extension reads at that index, the rows
+			// past the grid's count by its count (r % rows where it wraps): a Duplicate of that row to the end,
+			// never the insert's own choice, which reads the grid as each Add of the batch has grown it.
+			// The grid's rows are the terrain's first list (terrain_table).
+			const std::vector<RecordIds> *grid = row->ids.lists.empty() ? nullptr : &row->ids.lists[0];
+			for (int r = rows; r < target && grid; ++r) {
+				const size_t from = size_t(trn_grid_extension_source(rows, config.wrap_y, r));
+				if (from >= grid->size()) break;
 				Edit edit;
-				edit.operation = EditOperation::Add;
-				edit.address = {row->id, kSectorRow, 0};
+				edit.operation = EditOperation::Duplicate;
+				edit.address = {row->id, kSectorRow, (*grid)[from].id};
+				edit.position = size_t(r); // the end as the edits before it leave the grid
 				fix.edits.push_back(std::move(edit));
 			}
-			d.planned.push_back(std::move(fix));
+			if (fix.edits.size() == size_t(target - rows)) d.planned.push_back(std::move(fix));
 		} else if (std::string(field) == "polytrn_sectorcount" && config.sector_count > 0) {
 			const int target = next_power_of_two(config.sector_count);
 			d.planned.push_back({"Set the width to " + std::to_string(target),

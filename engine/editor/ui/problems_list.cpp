@@ -256,7 +256,7 @@ ProblemsList::Summary ProblemsList::summary(const RequirementReport &report) {
 	// The gate's rows (the boot's refusals, RES_FATAL: the build refuses them) apart from the rest.
 	size_t stop_missing = 0, stop_wrong = 0, more_missing = 0, more_wrong = 0;
 	for (const RequirementRow &row : report.rows) {
-		if (!row.required || row.state == RequirementState::Present) continue;
+		if (!row.required || row.state == RequirementState::Present || row.state == RequirementState::Served) continue;
 		const bool stops = row.severity == gameprofile::RES_FATAL;
 		const bool missing = row.state == RequirementState::Missing;
 		++(stops ? (missing ? stop_missing : stop_wrong) : (missing ? more_missing : more_wrong));

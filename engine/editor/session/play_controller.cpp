@@ -185,16 +185,6 @@ bool PlayController::refused(const PlayIntent &intent) {
 		return true;
 	}
 	if (!plays_in_install(intent.mode)) return false;
-	// Strict Play stages the build alone, and an expansion's build plays over its base game: a project's
-	// base game's export (T5), never the install's own archives, which an expansion on the install's base
-	// game would play over: refused.
-	if (intent.mode == PlayMode::Strict && view_.project.open && !view_.project.document->expansion.standalone() &&
-	    !view_.project.document->expansion.on_base_project()) {
-		core_.report(strict_expansion_refusal(view_.project.document->expansion.name));
-		view_.activity.status = "Strict Play of an expansion is not supported yet; see Problems.";
-		core_.touch(ViewConcern::Output);
-		return true;
-	}
 	// The game install's game runs one at a time: one started while another runs (a player's, one an
 	// earlier editor left) quits at once (kInstallInstanceSemaphore).
 	if (core_.platform().semaphore_held(kInstallInstanceSemaphore) == ProcessLiveness::Alive) {
@@ -344,7 +334,7 @@ void PlayController::start(const PlayIntent &intent) {
 	if (in_install) {
 		const bool staged =
 		        strict ? prepare_strict_install_launch_plan(core_.game_install(), build_dir, run_dir, expansion, plan, error,
-		                                                    io::link_file, core_.base_game())
+		                                                    io::link_file, core_.base_game(), copy_cache)
 		               : prepare_retail_launch_plan(core_.game_install(), build_dir, run_dir, plan, error, expansion,
 		                                            copy_cache, io::link_file, core_.base_game());
 		record_staging(plan.staged);

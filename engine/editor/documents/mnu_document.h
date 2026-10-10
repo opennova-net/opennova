@@ -247,6 +247,7 @@ enum class MenuFinding {
 	DuplicateWindow,
 	ActionInert,
 	RenderMapping,
+	VariableNumber, // a number holding a stylesheet %VAR%: the game reads the variable's value (listed)
 	kCount
 };
 const FindingCodeRow &finding_code(MenuFinding code);

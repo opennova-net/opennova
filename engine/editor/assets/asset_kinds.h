@@ -80,9 +80,6 @@ struct AssetKindRow {
 	// The name Files offers a new file of the kind (New > Menu...: "newmenu.mnu"); "" for a kind
 	// no New makes (its free-form blank factory's, blank_factory.cpp).
 	const char *new_name = "";
-	// What a file of the kind is to the game, in a modder's words, a sentence (Files' card for a file,
-	// the UX round's project lane): what reads it and how it is found, as the row's own witnesses say.
-	const char *about = "";
 	// What the game's loaders know of the kind: its names, archive slot, place under an expansion and
 	// line reader (base/resource_index/file_kind.h).
 	const FileKindFacts &facts() const { return file_kind_facts(kind); }

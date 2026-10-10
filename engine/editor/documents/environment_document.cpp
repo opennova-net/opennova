@@ -978,7 +978,9 @@ bool EnvironmentDocument::accept_step(const EditStep &, const StagedRows &staged
 namespace {
 
 constexpr FindingCodeEntry<EnvironmentFinding> kFindingEntries[] = {
-	{ EnvironmentFinding::InvalidInput, { "environment.invalid_input", FindingFix::None, nullptr, true } },
+	// A line the record cannot hold: the game reads it on (unwritable_code: a closed file packs as stored, its
+	// Save refused).
+	{ EnvironmentFinding::InvalidInput, unwritable_code("environment.invalid_input") },
 	{ EnvironmentFinding::IgnoredInput,
 	  { "environment.ignored_input", FindingFix::Rewrite, "with each line as the game reads it" } },
 	// The game loads the mission all the same, its dome at the engine's default height [orig:
@@ -1006,7 +1008,9 @@ std::vector<Diagnostic> validate_environment_file(const DocumentBase &document) 
 	const auto *environment = dynamic_cast<const EnvironmentDocument *>(&document);
 	if (!environment) return findings;
 	source_issue_findings(*environment, finding_code(EnvironmentFinding::InvalidInput),
-	                      finding_code(EnvironmentFinding::IgnoredInput), findings);
+	                      finding_code(EnvironmentFinding::IgnoredInput), findings, nullptr,
+	                      "The game reads the line on [orig: Terrain_ParseConfigCallback @ 0x60f330; Color_ScaleRGBAndPack "
+	                      "@ 0x57f890]: a build packs the file as it stands, and a save is refused while the line stands.");
 	if (document.blocked()) return findings;
 	const EnvironmentRow *row = environment->environment_row();
 	if (row && !row->sky_height_written()) {

@@ -14,6 +14,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/mission_sentence.h>
 #include <editor/project/project_files.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
@@ -161,7 +162,15 @@ DisplayName stop_display(const MissionDocument &document, int64_t path, int64_t 
 		out.text = "Stop " + out.raw;
 		return out;
 	}
-	const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.record.waypoint_numbers;
+	const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.stops;
+	if (index >= int64_t(kMaxWaypointPathMarkers) && size_t(index) < stops.size()) {
+		// Past the 32 slots a save lays out: the walk reads the next record's word there [orig:
+		// AIWaypoint_UpdateTarget @0x457476].
+		out.text = "Stop " + out.raw + " of path " + std::to_string(path) + ": past its 32 slots, the game reads the "
+		           "next path's words there";
+		out.dangling = true;
+		return out;
+	}
 	if (index < 0 || size_t(index) >= stops.size()) {
 		// The walk reads the slot word there as written [orig: AIWaypoint_UpdateTarget @0x457476].
 		out.text = "Stop " + out.raw + ": past the " + counted_words(stops.size(), "stop", "stops") + " of path " +
@@ -356,6 +365,19 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 			else if (entity.waypoint_id >= 1 && entity.waypoint_id <= kLastPathNumber)
 				out = stop_display(*document, entity.waypoint_id, *number, StopUse::Start, names);
 			else return false;
+		} else if (id == "wp_adv_trigger") {
+			// A waypoint's advance trigger: an event by its index, none below 0 (the original editor's -1
+			// [orig: JOTACmed.exe MissionItem_InitFromDefinition @ 0x44dd7a]) [orig: Entity_SpawnFromBMSRecord
+			// @0x40f0b3; EventTrigger_MarkLinkedSpawnPoints @0x452ce0]. One of 0 names event 1, which the game
+			// never completes a waypoint on (mission.event_missing says so).
+			if (entity.type_id != def::DEF_TYPE_WAYPOINT) return false;
+			if (*number < 0) {
+				out = DisplayName();
+				out.raw = std::to_string(*number);
+				out.text = "No event (the waypoint advances when the player reaches it)";
+				return true;
+			}
+			out = mission_event_display(*document, *number, names);
 		} else if (id == "name_index") {
 			return *number != 0 && text("");
 		} else if (id == "ttool_index") {
@@ -509,7 +531,7 @@ bool mission_row_reads_others(const Document &, const Node &row) {
 std::string mission_path_title(const MissionPath &path) {
 	if (path.number == 0) return "No path";
 	if (const char *command = path_command_name(path.number)) return command;
-	const size_t stops = path.record.waypoint_numbers.size();
+	const size_t stops = path.stops.size();
 	return "Path " + std::to_string(path.number) + " (" + (stops ? counted_words(stops, "stop", "stops") : "no stops") + ")";
 }
 
@@ -580,7 +602,7 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 		break;
 	}
 	case K::Stop: {
-		const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.record.waypoint_numbers;
+		const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.stops;
 		// By the game's own number for it (0 the first: what the waypoint triggers and an entity's start
 		// stop name).
 		if (index < stops.size())

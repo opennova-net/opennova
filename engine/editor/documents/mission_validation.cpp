@@ -20,6 +20,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <editor/documents/mission_document.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_params.h>
@@ -39,7 +40,9 @@ constexpr const char *kRewriteRuns = "with each event's triggers and actions whe
 
 constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::RewriteDiffers, { "mission.rewrite_differs", FindingFix::Rewrite, kRewriteSections } },
-	{ MissionFinding::InvalidInput, { "mission.invalid_input", FindingFix::None, nullptr, true } },
+	// A record two events' runs share or one no run holds: the game reads each run as written, the first resolved
+	// twice, the second never read (unwritable_code: a closed mission packs as stored, its Save refused).
+	{ MissionFinding::InvalidInput, unwritable_code("mission.invalid_input") },
 	{ MissionFinding::EventOrder, { "mission.event_order", FindingFix::Rewrite, kRewriteRuns } },
 	// A record no lookup finds by its SSN or its zone id: an id of its own (DI-11, Diagnostic::planned).
 	{ MissionFinding::SsnDuplicate, { "mission.ssn_duplicate", FindingFix::EditRecord } },
@@ -49,7 +52,6 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::ZoneId, { "mission.zone_id" } },
 	// Read with no bound, past the table, no refusal witnessed (the gate follows retail): listed.
 	{ MissionFinding::EventMissing, listed_code("mission.event_missing") },
-	{ MissionFinding::MarkerMissing, { "mission.marker_missing" } },
 	{ MissionFinding::PathCount, { "mission.path_count" } },
 	{ MissionFinding::PathOneShot, { "mission.path_one_shot" } },
 	{ MissionFinding::PathEmpty, { "mission.path_empty" } },
@@ -65,6 +67,19 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	// An entity the game leaves off the ground (DI-28): its z set where the game's rule stands it, the fix the
 	// project check plans with its finding (Diagnostic::planned).
 	{ MissionFinding::OffGround, { "mission.off_ground", FindingFix::EditRecord } },
+	// A path the document holds that no save can write (D-MIS-6): the original editor lays a path out from
+	// its waypoint markers alone, each carrying one path and one place, so the file would hold another.
+	{ MissionFinding::Unserializable, { "mission.unserializable", FindingFix::None, nullptr, true } },
+	// A path whose record names other stops than its waypoint markers carry, read (D-MIS-6): a save lays the
+	// record out from the markers, changing the route the game walks; a warning, nothing to fix.
+	{ MissionFinding::PathRebuilt, listed_code("mission.path_rebuilt") },
+	// An event's run reaching past its table: read with no bound, the game's state corrupted. It gates.
+	{ MissionFinding::RunsPastTable,
+	  game_stops_code("mission.runs_past_table",
+	                  "an event's trigger or action run past its table is read with no bound: its chain evaluates and "
+	                  "dispatches records from past the table's allocation, and the zone resolvers rewrite words in "
+	                  "place there [orig: EventTrigger_LoadAllData @ 0x453ff9, @ 0x45400a; "
+	                  "EventTrigger_ResolveZoneTriggerRefs @ 0x453095]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MissionFinding::kCount),
               "every MissionFinding has exactly one row");
@@ -73,10 +88,12 @@ static_assert(finding_entries_well_formed(kFindingEntries),
 constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::Missions);
 static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
 
-// The severity of a source finding: the events' runs block (an error); a rewrite that differs and
-// a layout the writer lays out again are what Save does (an info each).
+// The severity of a source finding: the events' runs block (an error); a path a save lays out again changes
+// the route the game walks (a warning); a rewrite that differs and a layout the writer lays out again are
+// what Save does (an info each).
 DiagnosticSeverity source_severity(MissionFinding code) {
-	return code == MissionFinding::InvalidInput ? DiagnosticSeverity::Error : DiagnosticSeverity::Info;
+	if (code == MissionFinding::InvalidInput || code == MissionFinding::RunsPastTable) return DiagnosticSeverity::Error;
+	return code == MissionFinding::PathRebuilt ? DiagnosticSeverity::Warning : DiagnosticSeverity::Info;
 }
 
 // The pools' limits, past which the game warns (fatal if dismissed) and loads on [orig:
@@ -163,16 +180,21 @@ struct Checker {
 			// slot word there as written [orig: AIWaypoint_UpdateTarget @0x457476 reads the raw slot].
 			if (entity.waypoint_id >= 1 && entity.waypoint_id <= kLastPathNumber && size_t(entity.waypoint_id) < paths.size()) {
 				const MissionPath &path = static_cast<const PathRow &>(*paths[entity.waypoint_id]).native;
-				const size_t count = path.record.waypoint_numbers.size();
-				if (count == 0)
+				// (A waypoint marker's path and place are its membership of the path, D-MIS-6: it walks none.)
+				const size_t count = path.stops.size();
+				const size_t slots = std::min(count, kMaxWaypointPathMarkers);
+				if (entity.type_id == def::DEF_TYPE_WAYPOINT) {
+				} else if (count == 0) {
 					on(address, MissionFinding::PathEmpty, DiagnosticSeverity::Info,
 					   "Waypoint path " + std::to_string(entity.waypoint_id) + " has no stop: the entity walks nowhere.",
 					   "waypoint_id");
-				else if (entity.wp_number < 0 || size_t(entity.wp_number) >= count)
+				} else if (entity.wp_number < 0 || size_t(entity.wp_number) >= slots) {
 					on(address, MissionFinding::PathStart, DiagnosticSeverity::Warning,
-					   "Waypoint number " + std::to_string(entity.wp_number) + " is past the " + std::to_string(count) +
-					           " stops of path " + std::to_string(entity.waypoint_id) + ": the game reads the slot word there as written.",
+					   "Waypoint number " + std::to_string(entity.wp_number) + " is past the " +
+					           (count > slots ? std::string("32 slots") : std::to_string(count) + " stops") + " of path " +
+					           std::to_string(entity.waypoint_id) + ": the game reads the slot word there as written.",
 					   "wp_number");
+				}
 			}
 		}
 		// The SSNs the fixes give the rows no lookup finds, each its own: from one past the mission's
@@ -227,26 +249,51 @@ struct Checker {
 	}
 
 	void paths() {
-		const size_t markers = document.rows_of(K::Marker).size();
+		const std::vector<const Node *> marker_rows = document.rows_of(K::Marker);
+		const size_t markers = marker_rows.size();
+		std::map<uint32_t, int> carried; // a marker and the path whose stop names it first
 		for (const Node *row : document.rows_of(K::WaypointPath)) {
 			const PathRow &path = static_cast<const PathRow &>(*row);
 			const NodeAddress address{row->id, row->kind, 0};
-			const bms::WaypointRecord &record = path.native.record;
-			if (record.marker_count > kMaxWaypointPathMarkers)
+			const std::vector<uint32_t> &stops = path.native.stops;
+			if (stops.size() > kMaxWaypointPathMarkers)
 				on(address, MissionFinding::PathCount, DiagnosticSeverity::Warning,
-				   "The path stores a count of " + std::to_string(record.marker_count) +
-				           ", past its 32 slots: the walk reads the next record's words as stops.",
+				   "The path holds " + std::to_string(stops.size()) +
+				           " stops, past its 32 slots: a save writes the count and the first 32 as the original editor "
+				           "does, and the game's walk reads the next record's words as the stops past them [orig: "
+				           "AIWaypoint_UpdateTarget @0x457476].",
 				   "marker_count");
-			else if (record.marker_count == 1)
+			else if (stops.size() == 1)
 				on(address, MissionFinding::PathOneShot, DiagnosticSeverity::Info,
 				   "A path of one stop: the load makes it not loop [orig: Mission_LoadBMSFile @0x40fb72].", "marker_count");
 			const std::vector<RecordIds> &ids = path.ids.lists.empty() ? std::vector<RecordIds>() : path.ids.lists[0];
-			for (size_t i = 0; i < record.waypoint_numbers.size() && i < ids.size(); ++i)
-				if (record.waypoint_numbers[i] >= markers)
-					on({row->id, k(K::Stop), ids[i].id}, MissionFinding::MarkerMissing, DiagnosticSeverity::Warning,
-					   "The stop names marker " + std::to_string(record.waypoint_numbers[i]) + ", and the mission has " +
-					           std::to_string(markers) + ": the game reads the pool's zeroed entry (position 0, radius 0).",
+			for (size_t i = 0; i < stops.size() && i < ids.size(); ++i) {
+				const NodeAddress stop{row->id, k(K::Stop), ids[i].id};
+				const std::string marker = "Marker " + std::to_string(stops[i]);
+				if (stops[i] >= markers) {
+					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,
+					   "The stop names marker " + std::to_string(stops[i]) + ", and the mission has " + std::to_string(markers) +
+					           ": a save puts a stop on its path through its waypoint marker, so it cannot write this one. "
+					           "Name a waypoint marker.",
 					   "marker");
+				} else if (path.native.number == 0) {
+					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,
+					   "Path 0 is no path: a marker carrying 0 is on none, so a save puts no stop on it. Put the stop "
+					   "on a path from 1.",
+					   "marker");
+				} else if (static_cast<const EntityRow &>(*marker_rows[stops[i]]).native.type_id != def::DEF_TYPE_WAYPOINT) {
+					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,
+					   marker + " is no waypoint marker (item 6005): the original editor lays a path out from its "
+					            "waypoint markers alone, so a save would not put this stop on the path. Name a waypoint marker.",
+					   "marker");
+				} else if (!carried.emplace(stops[i], path.native.number).second) {
+					on(stop, MissionFinding::Unserializable, DiagnosticSeverity::Error,
+					   marker + " is a stop of path " + std::to_string(carried[stops[i]]) +
+					           " already: a waypoint marker carries one path and one place on it, so a save would keep "
+					           "one. Name another marker.",
+					   "marker");
+				}
+			}
 		}
 	}
 
@@ -309,6 +356,25 @@ struct Checker {
 			on(address, MissionFinding::GroupRange, DiagnosticSeverity::Error,
 			   "Group " + std::to_string(index) + " is past the 64 groups the game's tables hold.", field);
 		};
+		// A waypoint marker linked to an event (its advance trigger 0 or more) never advances by proximity
+		// [orig: Player_UpdatePerFrame @0x4de650, a trigger of 0 or more skips the proximity advance] and
+		// completes only when an event of its index above 0 fires [orig: EventTrigger_MarkLinkedSpawnPoints
+		// @0x452d34, `> 0`]: one of 0, or naming no event of the mission, holds the waypoint for good.
+		for (const K pool : {K::Item, K::Building, K::Marker, K::Organic})
+			for (const Node *row : document.rows_of(pool)) {
+				const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
+				if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger < 0) continue;
+				if (marker.wp_adv_trigger == 0)
+					on({row->id, row->kind, 0}, MissionFinding::EventMissing, DiagnosticSeverity::Warning,
+					   "The waypoint advances on event 1, which the game never completes a waypoint on (an advance "
+					   "trigger of 0): it never advances, by event or by reaching it. -1 is none.",
+					   "wp_adv_trigger");
+				else if (size_t(marker.wp_adv_trigger) >= events.size())
+					on({row->id, row->kind, 0}, MissionFinding::EventMissing, DiagnosticSeverity::Warning,
+					   "The waypoint advances on event " + std::to_string(marker.wp_adv_trigger + 1) + ", and the mission has " +
+					           std::to_string(events.size()) + ": no event of it fires, so the waypoint never advances.",
+					   "wp_adv_trigger");
+			}
 		for (const Node *row : events) {
 			const EventRow &event = static_cast<const EventRow &>(*row);
 			if (event.ids.lists.size() < 2) continue;
@@ -382,23 +448,50 @@ struct Checker {
 			on(address, MissionFinding::GameMode, DiagnosticSeverity::Warning,
 			   "More than one game mode bit is set: the game plays " + name + ", the first in its decode order.", "attrib_flags");
 		}
-		// A mission of no game mode bit plays as Co-op 0x10020, the single-player family [orig:
-		// Game_StartMission @0x524ce1..0x524d01; SinglePlayer_PopulateMissionList @0x5618b3]: its player
-		// starts at a marker of type 6094 (until the team's first death), else at one of type 6001, else
-		// stays at the map's origin [orig: Server_PositionPlayerForSpawn @0x50CF60, the lookups @0x50D202 and
-		// @0x50D2DB over pool 3, the origin @0x50D3A7..0x50D46F; runtime/world/spawn_select.cpp].
-		if (!modes) {
-			const world::StartMarkerTypes starts = world::start_marker_types(game_type::for_mission_attribs(0u), 1);
-			bool start = false;
-			for (const Node *row : document.rows_of(K::Marker)) {
-				const int32_t type = static_cast<const EntityRow &>(*row).native.type_id;
-				start = start || type == starts.primary || type == starts.fallback;
-			}
-			if (!start)
+		// Where a player starts with no deploy pick (the no-pick arm, world::start_marker_types): a marker of
+		// its mode's and team's start type, else of the fallback type [orig: Server_PositionPlayerForSpawn
+		// @0x50CF60, the waypoint family @0x50D202 / @0x50D2DB, a solo mode @0x50D234 / @0x50D310, a team
+		// mode @0x50D266..0x50D2B7 / @0x50D320..0x50D371]. A mission of no game mode bit plays as Co-op
+		// 0x10020, the single-player family [orig: Game_StartMission @0x524ce1..0x524d01;
+		// SinglePlayer_PopulateMissionList @0x5618b3], whose player with neither stays at the map's origin
+		// [orig: @0x50D3A7..0x50D46F]; any other mode's finds no marker of the type and is not moved [orig:
+		// Entity_FindBestSpawnPoint @0x50CCC0, the count @0x50cd20]. A team mode is checked for the two teams
+		// every session of it plays; a third and a fourth are a host's four-team option.
+		const uint32_t game_type = game_type::for_mission_attribs(uint32_t(mission->native.header.attrib_flags));
+		std::set<int32_t> types;
+		for (const Node *row : document.rows_of(K::Marker)) types.insert(static_cast<const EntityRow &>(*row).native.type_id);
+		const auto starts_at = [&](const world::StartMarkerTypes &starts) {
+			return types.count(starts.primary) || types.count(starts.fallback);
+		};
+		const auto item = [](int32_t type) { return std::to_string(type + kItemIdOffset); };
+		if (game_type::is_waypoint_family(game_type)) {
+			// Co-op proper (the Coop bit, the objective family) falls back to a spawn vehicle of the player's
+			// team [orig: @0x50D46F..0x50D55D], which its item's items.def attribute makes one: not this file's
+			// to say, so only the single-player family is checked here.
+			const world::StartMarkerTypes starts = world::start_marker_types(game_type, 1);
+			if (!game_type::is_objective(game_type) && !starts_at(starts))
 				on(address, MissionFinding::NoStart, DiagnosticSeverity::Warning,
-				   "No marker is a start (item 106094, the insertion point, or 106001): the mission has no game mode, so the "
-				   "game plays it as single player, and its player starts at the map's origin.",
+				   "No marker is a start (item " + item(starts.primary) + ", the insertion point, or " + item(starts.fallback) +
+				           "): the mission has no game mode, so the game plays it as single player, and its player starts at "
+				           "the map's origin.",
 				   "attrib_flags");
+		} else if (!game_type::is_team(game_type)) {
+			const world::StartMarkerTypes starts = world::start_marker_types(game_type, 0);
+			if (!starts_at(starts))
+				on(address, MissionFinding::NoStart, DiagnosticSeverity::Warning,
+				   "No marker is a start of the mission's mode (item " + item(starts.primary) + ", else " + item(starts.fallback) +
+				           "): the game moves no player to one, so each starts where its body is.",
+				   "attrib_flags");
+		} else {
+			for (uint8_t team = 1; team <= game_type::active_team_count(game_type, 2); ++team) {
+				const world::StartMarkerTypes starts = world::start_marker_types(game_type, team);
+				if (!starts_at(starts))
+					on(address, MissionFinding::NoStart, DiagnosticSeverity::Warning,
+					   "No marker is a start of team " + std::to_string(team) + " (item " + item(starts.primary) + ", else " +
+					           item(starts.fallback) + "): the game moves none of its players to one, so each starts where its "
+					           "body is.",
+					   "attrib_flags");
+			}
 		}
 		const RecordIds &ids = mission->ids;
 		const size_t boxes = mission_table().kind(k(K::Mission))->lists().size() - 1; // the last list: the bounding boxes

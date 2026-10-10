@@ -1458,7 +1458,8 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 				row.set("witness", json_string(witness));
 		if (answer.grouped) row.set("group", json_string(answer.groups[group_of[i]].key));
 		// Its Go to: the request a click on the row raises (problem_location: its document opened at the
-		// record and field, a text at its line, or the file shown in Files), which editor_request passes back
+		// record and field, a text at its line, a file the editor has no editor for on its page with the
+		// record and field marked, or the file shown in Files), which editor_request passes back
 		// as it is; none for a row about no file of the project (DI-27).
 		const ProblemLocation location = problem_location(d, view);
 		if (!location.empty()) row.set("go_to", editor_request_to_json(location.request()));

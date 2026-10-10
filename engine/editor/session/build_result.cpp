@@ -37,9 +37,9 @@ BuildResult build_result(const BuildReport &report, bool in_project) {
 	BuildResult out;
 	if (report.refused) {
 		out.outcome = BuildResult::Outcome::Refused;
-		std::vector<Diagnostic> blockers;
-		for (const Diagnostic &d : report.diagnostics)
-			if (blocks_build(d) && d.row() != &finding_code(CoreFinding::BuildBlocked)) blockers.push_back(d);
+		// The gate's own refusals (BuildReport::blockers): a closed file whose finding is listed, or the game's own
+		// bytes packed as stored, refused nothing, whatever its row could gate.
+		const std::vector<Diagnostic> &blockers = report.blockers;
 		// Why, by the refusals' class: the game's own (a required file, a reference the game cannot go on
 		// without), the editor's (what it cannot read, write or store), or both.
 		const size_t games = size_t(std::count_if(blockers.begin(), blockers.end(), blocker_is_the_games));

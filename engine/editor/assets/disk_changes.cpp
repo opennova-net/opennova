@@ -6,7 +6,9 @@
 #include <system_error>
 #include <utility>
 
+#include <base/io/file_io.h>
 #include <base/io/file_time.h>
+#include <base/io/hash.h>
 #include <editor/assets/project_scan.h>
 #include <editor/project/project_files.h>
 
@@ -97,12 +99,50 @@ DiskChanges::Look DiskChanges::look(const std::string &relative, const DiskStamp
 	return Look::Ready;
 }
 
+DiskChanges::Look DiskChanges::look_file(const ProjectPaths &paths, const AssetScan &scan, const std::string &file,
+                                         int64_t now_ms, int64_t now_ticks) {
+	const DiskStamp now = disk_stamp(paths, file);
+	const DiskStamp scanned = scanned_stamp(scan, file);
+	const auto visit = scan.visits().find(file);
+	// The scan's stamp, taken within the file system's tick of the write: once it has settled, the content
+	// the scan read compared, once per visit.
+	if (now == scanned && now.present && visit != scan.visits().end() && visit->second.racy &&
+	    io::file_stamp_settled(now.modified_ticks, now_ticks)) {
+		const auto confirmed = confirmed_.find(file);
+		if (confirmed == confirmed_.end() || confirmed->second != visit->second.read_ticks) {
+			std::vector<uint8_t> bytes;
+			std::string unread;
+			if (io::read_file_bytes(join_path(paths.root, file), bytes, unread)) {
+				const uint64_t fingerprint = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+				if (fingerprint != visit->second.racy_fingerprint) {
+					// Another content under the same stamp (a write that leaves it, as a mapped one does): read
+					// once it holds still, a later look finding the same content kDiskHoldStillMs on.
+					const auto held = differs_.find(file);
+					if (held == differs_.end() || held->second.fingerprint != fingerprint) {
+						differs_[file] = Differs{fingerprint, now_ms};
+						return Look::Waiting;
+					}
+					if (now_ms - held->second.since_ms < kDiskHoldStillMs) return Look::Waiting;
+					differs_.erase(held);
+					confirmed_.erase(file);
+					looked_.erase(file);
+					ready_.insert(file);
+					return Look::Ready;
+				}
+			}
+			differs_.erase(file);
+			confirmed_[file] = visit->second.read_ticks;
+		}
+	}
+	return look(file, now, scanned, now_ms, now_ticks);
+}
+
 void DiskChanges::look_at(const ProjectPaths &paths, const AssetScan &scan, const std::vector<std::string> &files,
                           int64_t now_ms, int64_t now_ticks) {
 	std::set<std::string> once;
 	for (const std::string &file : files) {
 		if (file.empty() || !once.insert(file).second) continue;
-		look(file, disk_stamp(paths, file), scanned_stamp(scan, file), now_ms, now_ticks);
+		look_file(paths, scan, file, now_ms, now_ticks);
 	}
 }
 
@@ -180,7 +220,7 @@ bool DiskChanges::step_sweep(const ProjectPaths &paths, const AssetScan &scan, u
 	uint64_t spent = 0;
 	while (sweep_next_ < sweep_.size()) {
 		const std::string &file = sweep_[sweep_next_++];
-		look(file, disk_stamp(paths, file), scanned_stamp(scan, file), now_ms, now_ticks);
+		look_file(paths, scan, file, now_ms, now_ticks);
 		spent += kWalkEntryCost;
 		if (spent >= budget) break;
 	}
@@ -195,6 +235,10 @@ std::vector<std::string> DiskChanges::pending_files() const {
 	for (const auto &[path, looked] : looked_) {
 		(void)looked;
 		out.push_back(path);
+	}
+	for (const auto &[path, held] : differs_) {
+		(void)held;
+		if (!looked_.count(path)) out.push_back(path);
 	}
 	return out;
 }
@@ -212,6 +256,8 @@ void DiskChanges::clear() {
 	walked_.clear();
 	sweep_.clear();
 	sweep_next_ = 0;
+	confirmed_.clear();
+	differs_.clear();
 }
 
 } // namespace opennova::editor
