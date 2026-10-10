@@ -1,5 +1,6 @@
 #include <formats/grm/grm.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -43,11 +44,11 @@ std::vector<std::string> tokens(std::string_view line) {
 	return result;
 }
 
+// The CRT atol: the locale's leading white space (0xA0 included), a sign, a decimal prefix,
+// saturating at 32 bits (io::retail_atol; D-NET-384). [orig: FaceAnimConfig_ParseProperty
+// @0x5886A0, its j__atol calls]
 int32_t integer(const std::string &text) {
-	// Win32 atol consumes a decimal prefix, including a sign.
-	const long long n = std::strtoll(text.c_str(), nullptr, 10);
-	return static_cast<int32_t>(std::clamp(n,
-			static_cast<long long>(INT32_MIN), static_cast<long long>(INT32_MAX)));
+	return io::retail_atol(text.c_str());
 }
 
 float real(const std::string &text) {

@@ -2,6 +2,7 @@
 #include <formats/mission/bms.h>
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
@@ -599,10 +600,13 @@ bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_
 
 // The first three strings are opaque. Only a missing fourth string is repaired;
 // an alphabetic, zero-valued candidate remains the next record's name.
-// [orig: AIProfile_SanitizeConfigData @ 0x40cfe0]
+// [orig: AIProfile_SanitizeConfigData @ 0x40cfe0 — the atol @0x40d08a (io::retail_atol: the
+//  locale's leading white space, 0xA0 included; D-NET-384)]
 bool loadout_has_fourth_field(const std::string& value) {
     if (value.empty()) return false;
-    if (std::strtol(value.c_str(), nullptr, 10) != 0) return true;
+    if (io::retail_atol(value.c_str()) != 0) return true;
+    // ASCII letters, where retail's isalpha @0x40d0b4 is the ".ACP" class (cp1252's
+    // high-byte letters too; docs/net/novaworld-net-re.md D-NET-391, open).
     size_t pos = (value[0] == '-' || value[0] == '+') ? 1 : 0;
     for (; pos < value.size(); ++pos) {
         const unsigned char c = static_cast<unsigned char>(value[pos]);

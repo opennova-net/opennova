@@ -136,6 +136,9 @@ bool joi_endpoint_usable(const std::string &host_ip, long port);
 // [orig: Network_TruncateIPToSubnet @ 0x62dfe0 — reverse, strip past the 2nd
 // dot from the end, reverse back; only when Network_ParseIPv4AddressOctets
 // accepts the string as IPv4.]
+// Witnessed 2026-10-10, retail's branch is the opposite: a host the parse accepts is
+// returned whole (`jnz` @0x62dfff) and any other keeps its LAST two dot-labels
+// (docs/net/novaworld-net-re.md D-NET-390, open).
 std::string subnet_key(const std::string &host);
 
 // The cookie store the engine carries across the NovaWorld endpoint family.

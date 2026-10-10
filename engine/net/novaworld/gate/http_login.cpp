@@ -3,6 +3,7 @@
 #include <net/novacrypto/epask.h>
 #include <net/novacrypto/url_cipher.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 
 #include <cstdio>
@@ -127,7 +128,7 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 			else if (key == "NP") out.np = value;
 			else if (key == "BK") out.bk = value;
 			// [orig: LN `atol` @0x54e33e; GS copied @0x54e38a]
-			else if (key == "LN") out.ln = static_cast<int>(std::atol(value.c_str()));
+			else if (key == "LN") out.ln = io::retail_atol(value.c_str());
 			else if (key == "GS") out.gs = value;
 		}
 		if (amp == std::string::npos) break;
@@ -151,7 +152,7 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 	//  atol(decoded CK) @0x569b8e]
 	if (!out.ck.empty()) {
 		const std::string decoded_ck = url_cipher_decode(out.ck, URL_CIPHER_KEY_CK);
-		out.app_id = std::to_string(std::atol(decoded_ck.c_str()));
+		out.app_id = std::to_string(io::retail_atol(decoded_ck.c_str()));
 		// Lifecycle trace (kInfo -> MCP log ring): the CK -> APPID derivation.
 		opennova::io::logf(opennova::io::LogLevel::kInfo,
 				"joi: CK='%s' decoded='%s' APPID='%s' host=%s:%s",

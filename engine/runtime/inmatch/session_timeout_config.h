@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/os_path.h>
 #include <net/npwire/cs_config.h> // CsConfig (the JOINTOPERATIONS template the file overrides)
 
@@ -53,7 +54,7 @@ inline void parse_nstmout(std::string_view text, CsConfig &cfg) {
 		return;
 	}
 	const std::string buffer(text);
-	const long seconds = std::strtol(buffer.c_str(), nullptr, 10); // CRT atol
+	const long seconds = io::retail_atol(buffer.c_str()); // CRT atol (D-NET-384)
 	if (seconds >= 0) {
 		// retail: `imul eax, 1000` on the 32-bit atol result (@0x4caa44)
 		cfg.timeout_ms = static_cast<int32_t>(

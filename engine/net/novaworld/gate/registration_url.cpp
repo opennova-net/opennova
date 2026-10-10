@@ -2,6 +2,8 @@
 
 #include <net/novacrypto/url_cipher.h>
 
+#include <base/io/crt_ftol.h>
+
 #include <cstdlib>
 
 namespace opennova {
@@ -94,7 +96,7 @@ bool registration_url_parse(std::string_view url,
 	// [orig: LN= copied '&'-terminated then `*lobby_num = atol(temp_str)` @0x54e33e;
 	//  GS= copied '&'-terminated into g_GsBuf @0x54e38a (never read afterwards)]
 	if (const size_t ln = find_token(url, "LN="); ln != std::string_view::npos) {
-		out.ln = static_cast<int>(std::atol(extract_plain_value(url, ln).c_str()));
+		out.ln = io::retail_atol(extract_plain_value(url, ln).c_str());
 	}
 	if (const size_t gs = find_token(url, "GS="); gs != std::string_view::npos) {
 		out.gs = extract_plain_value(url, gs);
