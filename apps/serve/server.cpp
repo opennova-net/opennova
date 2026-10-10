@@ -647,6 +647,7 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	// Loopback and the OpenNova service by default, NovaLogic's NovaWorld behind --allow-public.
 	lister_options.destinations = nw_lister::DestinationPolicy::NovaLogicGated;
 	lister_options.credentials = options_.credentials;
+	last_lister_exit_ = -1;
 	lister_ = std::make_unique<nw_lister::Lister>(lister_options, *listing_, &demux_->session());
 	const NwuLobbySession &lobby = lister_->lobby();
 	demux_->set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
@@ -766,6 +767,7 @@ void Server::stop() {
 	//  CAdminServer_Construct's WSAStartup @0x402C22 (slot 0x7C0554), its
 	//  WSACleanup @0x406DE2 from the destructor registered @0x79377A].
 	if (lister_) {
+		if (lister_->finished()) last_lister_exit_ = lister_->exit_code();
 		if (reset_exit_)
 			lister_->disconnect();
 		else

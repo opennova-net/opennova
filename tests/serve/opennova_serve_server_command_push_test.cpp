@@ -178,10 +178,14 @@ int main() {
 	// service's word; the row leaves the browser as the statement goes out.
 	CHECK(listener.push_stop_hosting(rid, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT) == HostPushResult::Queued);
 	int lister_exit = -1;
+	// The lister can finish in the very frame whose mission exit stops the server, which tears the
+	// lister down; the server keeps the code it finished with.
 	CHECK(frame_until(
 			[&] {
 				if (server.lister() != nullptr && server.lister()->finished())
 					lister_exit = server.lister()->exit_code();
+				else if (server.lister() == nullptr)
+					lister_exit = server.last_lister_exit();
 				return lister_exit != -1;
 			},
 			10s));

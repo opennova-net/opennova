@@ -172,6 +172,10 @@ public:
 	bool novaworld() const { return novaworld_; }
 	// The NovaWorld listing's lister (null when not listing).
 	nw_lister::Lister *lister() { return lister_.get(); }
+	// The exit code the lister had finished with when stop() tore it down, -1 when it had not
+	// finished (or there was none): a lister that finishes in the frame whose mission exit stops
+	// the server is gone before the caller can read it.
+	int last_lister_exit() const { return last_lister_exit_; }
 	// The remote-admin listener's bound port: game.cfg's remote_admin_port once it listens,
 	// 0 when the port is 0 (off) or the listen failed.
 	uint16_t admin_port() const { return admin_tcp_ ? admin_tcp_->port() : 0; }
@@ -237,6 +241,7 @@ private:
 	std::unique_ptr<DatagramDemux> demux_;
 	std::unique_ptr<ServeListing> listing_;
 	std::unique_ptr<nw_lister::Lister> lister_;
+	int last_lister_exit_ = -1;
 	uint16_t bound_port_ = 0;
 	bool running_ = false;
 	bool begun_ = false;
