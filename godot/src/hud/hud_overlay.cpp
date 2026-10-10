@@ -46,6 +46,7 @@
 
 using namespace godot;
 
+#include <runtime/controls/key_strings.h> // the paging hint's keyhelp getter
 #include <runtime/hud/game_text_lookup.h> // the game-text section names
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
 #include <runtime/renderer/texture_compression.h> // the minimap colormap's fresh-profile word
@@ -169,7 +170,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_view_state);
 	ClassDB::bind_method(D_METHOD("set_objectives_header", "text"), &HudOverlay::set_objectives_header);
 	ClassDB::bind_method(
-			D_METHOD("set_scoreboard", "shown", "frame_counter", "sim", "gametext", "keyhelp"),
+			D_METHOD("set_scoreboard", "shown", "frame_counter", "sim", "gametext"),
 			&HudOverlay::set_scoreboard);
 	ClassDB::bind_method(D_METHOD("scoreboard_page_key", "forward", "in_session", "board_open"),
 			&HudOverlay::scoreboard_page_key);
@@ -1005,18 +1006,31 @@ void HudOverlay::set_objectives_header(const String &p_text) {
 }
 
 void HudOverlay::set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Simulation> &p_sim,
-		const Ref<RtxtStringFile> &p_gametext, const Ref<RtxtStringFile> &p_keyhelp) {
+		const Ref<RtxtStringFile> &p_gametext) {
 	// The feed resets what it owns and fills it over the board as it stood:
 	// rows and session facts come straight from the role feed, the session
 	// header (the game type, the server and mission rungs, the counts) from
-	// replication's projection.
+	// replication's projection, the strings composed as the drawer composes
+	// them (hud::scoreboard_header_strings), keyhelp's paging hint through the
+	// process's keyhelp table.
 	opennova::hud::HudScoreboardState board = state_.scoreboard;
 	if (p_shown && p_sim.is_valid()) {
 		p_sim->fill_scoreboard(board);
 		const Ref<ScoreboardHeader> header = p_sim->get_scoreboard();
 		board.game_type = static_cast<uint32_t>(header->get_game_type());
-		scoreboard_strings(p_gametext, p_keyhelp, board.game_type, opennova::to_std(header->get_server()),
-				opennova::to_std(header->get_mission()), header->get_players(), header->get_spectators(), board);
+		const opennova::hud::GameTextLookup keyhelp = [](const char *section, const char *key, const char *fallback) {
+			return opennova::controls::key_help_string_raw(section, key, fallback);
+		};
+		const opennova::hud::ScoreboardHeaderStrings strings = opennova::hud::scoreboard_header_strings(
+				game_text_lookup(p_gametext), p_gametext.is_valid(), keyhelp, board.game_type,
+				header->get_players(), header->get_spectators());
+		board.title = strings.title;
+		board.game_type_label = strings.game_type_label;
+		board.players_line = strings.players_line;
+		board.spectators_line = strings.spectators_line;
+		board.footer = strings.footer;
+		board.server_name = opennova::to_std(header->get_server());
+		board.mission_title = opennova::to_std(header->get_mission());
 	} else {
 		board = opennova::hud::HudScoreboardState();
 	}
@@ -1025,78 +1039,21 @@ void HudOverlay::set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Sim
 
 void HudOverlay::set_scoreboard_board(bool p_shown, int p_frame_counter, const Ref<RtxtStringFile> &p_gametext,
 		const opennova::hud::HudScoreboardState &p_board) {
+	// The board as prepared, then what the overlay owns of it: whether it is
+	// up, the 4-team page clock (the shell's 62 Hz HUD tick, the same fold and
+	// the same frame-rate caveat as the LFP panel's blink counter below), and
+	// the drawers' own gametext (class names, the team-score labels, the
+	// flag-carrier label) through the engine's key table.
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
+	sb = p_board;
 	sb.shown = p_shown;
-	sb.game_type = p_board.game_type;
-	// The 4-team page clock: the shell's 62 Hz HUD tick, the same fold (and the
-	// same frame-rate caveat) as the LFP panel's blink counter below.
 	sb.frame_counter = p_frame_counter;
-	sb.title = p_board.title;
-	sb.server_name = p_board.server_name;
-	sb.mission_title = p_board.mission_title;
-	sb.game_type_label = p_board.game_type_label;
-	sb.players_line = p_board.players_line;
-	sb.spectators_line = p_board.spectators_line;
-	sb.footer = p_board.footer;
-	// The drawers' own gametext (class names, the team-score labels, the
-	// flag-carrier label) resolves through the engine's key table.
 	const opennova::hud::ScoreboardText text =
 			opennova::hud::scoreboard_text(game_text_lookup(p_gametext));
 	sb.class_names = text.class_names;
 	sb.header_text = text.header;
 	sb.flag_carrier_label = text.flag_carrier_label;
-	// The feed's half (inmatch::scoreboard_feed's fields).
-	sb.rows = p_board.rows;
-	sb.team_count = p_board.team_count;
-	sb.teams = p_board.teams;
-	sb.status_suffix = p_board.status_suffix;
-	sb.timed = p_board.timed;
-	sb.time_limit = p_board.time_limit;
-	sb.local_team = p_board.local_team;
-	sb.flag_carrier = p_board.flag_carrier;
-	sb.flag_carrier_name = p_board.flag_carrier_name;
-	sb.flag_carrier_team = p_board.flag_carrier_team;
 	queue_redraw();
-}
-
-void HudOverlay::scoreboard_strings(const Ref<RtxtStringFile> &p_gametext, const Ref<RtxtStringFile> &p_keyhelp,
-		uint32_t p_game_type, const std::string &p_server, const std::string &p_mission, int p_players,
-		int p_spectators, opennova::hud::HudScoreboardState &r_board) {
-	const auto has = [](const Ref<RtxtStringFile> &table, const char *section, const char *key) {
-		return table.is_valid() && table->has_string_in_section(section, key);
-	};
-	const auto get = [](const Ref<RtxtStringFile> &table, const char *section, const char *key) {
-		return opennova::to_std(table->get_string_in_section(section, key));
-	};
-	// [orig: GameText_GetStringWithFallback("Overlays", "STROVER_KILLLIST",
-	//  "!Kill List") @0x423a75]
-	r_board.title = "!Kill List";
-	// [orig: KeyHelp_GetStringWithFallback("Text", "CHANGE_SCREEN",
-	//  "!PgUp and PgDn to change pages") @0x424272]
-	r_board.footer = "!PgUp and PgDn to change pages";
-	r_board.server_name = p_server;
-	r_board.mission_title = p_mission;
-	r_board.game_type_label.clear();
-	r_board.players_line.clear();
-	r_board.spectators_line.clear();
-	if (p_gametext.is_null()) return;
-	using opennova::hud::kGameTextClient;
-	using opennova::hud::kGameTextOverlays;
-	if (has(p_gametext, kGameTextOverlays, "STROVER_KILLLIST"))
-		r_board.title = get(p_gametext, kGameTextOverlays, "STROVER_KILLLIST");
-	// The key map is retail's own (base/gameprofile game_type.h overlay_label_key).
-	const char *label_key = opennova::game_type::overlay_label_key(p_game_type);
-	if (label_key[0] != 0 && has(p_gametext, kGameTextOverlays, label_key))
-		r_board.game_type_label = get(p_gametext, kGameTextOverlays, label_key);
-	// "<label> <count>": the counts are the caller's (replication's
-	// rows-minus-spectators header arithmetic, scoreboard_header).
-	if (has(p_gametext, kGameTextClient, "STRCLI04"))
-		r_board.players_line = get(p_gametext, kGameTextClient, "STRCLI04") + " " + std::to_string(p_players);
-	if (p_spectators > 0 && has(p_gametext, kGameTextClient, "STRCLI23"))
-		r_board.spectators_line = get(p_gametext, kGameTextClient, "STRCLI23") + " " + std::to_string(p_spectators);
-	// The paging hint is a keyhelp lookup, which answers only once gametext is
-	// loaded: this gate.
-	if (has(p_keyhelp, "Text", "CHANGE_SCREEN")) r_board.footer = get(p_keyhelp, "Text", "CHANGE_SCREEN");
 }
 
 void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame,
@@ -1196,8 +1153,8 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 	vp.stance_offset_x = layout_.stance_offset_x[static_cast<size_t>(stance)];
 	vp.stance_offset_y = layout_.stance_offset_y[static_cast<size_t>(stance)];
 	// Hull band + seat rows straight from the sim's feed, no script round-trip
-	// (the set_scoreboard shape: the state from the args, the rows from the
-	// sim; a null sim leaves the rows empty). The panel's one witnessed gate
+	// (the state from the args, the rows from the sim; a null sim leaves the
+	// rows empty). The panel's one witnessed gate
 	// is the interface texture: without it the whole panel is skipped, seats
 	// included [orig: HUD_DrawVehicleHealthBars @0x5a5038 tests the loaded
 	// texture's w/h, see docs/interface/hud-re.md].

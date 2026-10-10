@@ -4,7 +4,7 @@
 // (world/vehicle_panel_feed.h, world/lfp_feed.h, hud/feed_format.h); this TU is
 // the Simulation seam that resolves the local player, the client runtime's
 // zone-timer table and minimap banks, and the replica pipeline's chat drain
-// for the HudOverlay setters (the set_scoreboard / fill_scoreboard_rows shape),
+// for the HudOverlay setters (the shape of set_scoreboard over fill_scoreboard),
 // and the CMAP RULES text (inmatch::command_map_rules_text).
 
 #include "simulation/simulation_internal.h"

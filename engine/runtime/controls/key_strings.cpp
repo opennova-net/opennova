@@ -74,6 +74,17 @@ std::string key_string(const char *key, const char *fallback) {
   return entry->text;
 }
 
+std::string key_help_string_raw(const char *section, const char *key, const char *fallback) {
+  // [orig: KeyHelp_GetStringWithFallback @0x51ed40] -- the fallback as written.
+  const rtxt::Entry *entry = g_key_strings_loaded && section != nullptr && key != nullptr
+      ? g_key_strings.find_in_section(section, key)
+      : nullptr;
+  if (entry == nullptr) {
+    return fallback != nullptr ? std::string(fallback) : std::string();
+  }
+  return entry->text;
+}
+
 std::string key_help_string(const char *section, const char *key, const char *fallback) {
   // [orig: KeyHelp_GetStringWithFallback @0x51ed40], any section.
   if (!g_key_strings_loaded || section == nullptr || key == nullptr) {

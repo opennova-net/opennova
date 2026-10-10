@@ -111,9 +111,6 @@ void NetProtocol::_bind_methods() {
 	ClassDB::bind_static_method("NetProtocol",
 			D_METHOD("game_type_for_mission_mode", "attrib_mode"),
 			&NetProtocol::game_type_for_mission_mode);
-	ClassDB::bind_static_method("NetProtocol",
-			D_METHOD("game_type_overlay_label_key", "game_type"),
-			&NetProtocol::game_type_overlay_label_key);
 	ClassDB::bind_static_method("NetProtocol", D_METHOD("custom_text_default"),
 			&NetProtocol::custom_text_default);
 	ClassDB::bind_static_method("NetProtocol", D_METHOD("wire_handle_pool", "handle"),
@@ -169,11 +166,6 @@ void NetProtocol::_bind_methods() {
 int NetProtocol::game_type_for_mission_mode(int p_attrib_mode) {
 	return static_cast<int>(opennova::game_type::for_mission_mode(
 			static_cast<uint32_t>(p_attrib_mode)));
-}
-
-String NetProtocol::game_type_overlay_label_key(int p_game_type) {
-	return String(opennova::game_type::overlay_label_key(
-			static_cast<uint32_t>(p_game_type)));
 }
 
 String NetProtocol::custom_text_default() {

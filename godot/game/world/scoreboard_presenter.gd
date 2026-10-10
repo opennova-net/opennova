@@ -8,12 +8,12 @@ extends RefCounted
 ## @0x4993ae; the drawer gate HUD_DrawKillListIfVisible @0x424300]). This
 ## lane shows or hides the board for that flag.
 ##
-## The shell owns the string tables; the board resolves its strings from
-## them natively (HudOverlay.scoreboard_strings: the title from gametext
-## Overlays with retail's literal fallback, the game-type label from the
-## witnessed Overlays row map, the two count lines from Client, the paging
-## hint from keyhelp's Text section), its server and mission rungs and counts
-## from the session decode (Simulation.get_scoreboard).
+## The shell owns the gametext table; the board composes its strings from it
+## natively as the game's drawer does (the engine's
+## hud::scoreboard_header_strings: the title, the game type's rung, the count
+## lines, keyhelp's paging hint through the process's keyhelp table), its
+## server and mission rungs and counts from the session decode
+## (Simulation.get_scoreboard).
 
 var _pushed := false      # so the board clears exactly once on close
 
@@ -27,7 +27,7 @@ func update(hud: HudOverlay, world: GameWorld, open: bool, frame_counter: int) -
 		return
 	if not open:
 		if _pushed:
-			hud.set_scoreboard(false, 0, null, null, null)
+			hud.set_scoreboard(false, 0, null, null)
 			_pushed = false
 		return
 	var sim: Simulation = world.get_sim()
@@ -38,7 +38,6 @@ func update(hud: HudOverlay, world: GameWorld, open: bool, frame_counter: int) -
 	# the rows and the team count the 4-team page reads natively from the sim
 	# (HudOverlay.set_scoreboard -> get_scoreboard, fill_scoreboard), with the
 	# strings and the drawers' own gametext lookups resolved natively off the
-	# tables; the frame counter is the HUD tick the engine's page alternates on
+	# table; the frame counter is the HUD tick the engine's page alternates on
 	# (hud_scoreboard.h).
-	hud.set_scoreboard(true, frame_counter, sim, Strings.get_table(Strings.TABLE_GAMETEXT),
-			Strings.get_table(Strings.TABLE_KEYHELP))
+	hud.set_scoreboard(true, frame_counter, sim, Strings.get_table(Strings.TABLE_GAMETEXT))
