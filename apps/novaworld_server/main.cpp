@@ -176,23 +176,7 @@ int main() {
 	// main tick loop flushes them into unknown_messages (never per-packet).
 	UnknownTracker unknown_tracker;
 
-	// --- Listeners --------------------------------------------------------
-	GateListener gate;
-	gate.set_unknown_tracker(&unknown_tracker);
-	gate.set_db_pool(db_pool.get());
-	if (!gate.start(config)) {
-		std::fprintf(stderr, "[boot] FATAL: gate listener start failed\n");
-		return 1;
-	}
-
-	NwUdpListener nwudp(manager);
-	nwudp.set_db_pool(db_pool.get());
-	// The endpoint advertised to joiners uses the client's NOVAWORLD session port
-	// (client_reflect_novaworld_port, 32768), NOT the gate port
-	// (client_reflect_gate_port, 49152 — that's only the gate's
-	// ReflectedPortNumber). See server_config.h.
-	nwudp.set_reflect_endpoint(config.client_reflect_ip, config.client_reflect_novaworld_port);
-	nwudp.set_unknown_tracker(&unknown_tracker);
+	// --- Previous-run cleanup, before any listener serves -----------------
 	// Phase I.2: drop stale active_hosts rows from the previous server
 	// run before accepting new connections (the UDP HELLO from any
 	// surviving retail process will fail anyway, so its prior row is
@@ -211,35 +195,68 @@ int main() {
 		std::fprintf(stderr, "[boot] WARN active_user_sessions clear: %s\n", e.what());
 	}
 #endif
-	if (!nwudp.start(config)) {
-		std::fprintf(stderr, "[boot] FATAL: NW UDP listener start failed\n");
-		gate.stop();
-		return 1;
-	}
 
-	// Wired after NwUdpListener exists so the lost-handler can clean up the
-	// per-connection lobby_state entry too. Without this, a hosting retail
-	// process that exits without GOODBYE (heartbeat timeout) would stay in
-	// /api/hosts forever (G.6). Pass the dropped Connection's PeerAddr —
-	// lobby_states_ is keyed by addr, not by ci (two retail processes both
-	// send ci=0x00000001) (G.7).
+	// --- Listeners --------------------------------------------------------
+	GateListener gate;
+	gate.set_unknown_tracker(&unknown_tracker);
+	gate.set_db_pool(db_pool.get());
+
+	NwUdpListener nwudp(manager);
+	nwudp.set_db_pool(db_pool.get());
+	// The endpoint advertised to joiners uses the client's NOVAWORLD session port
+	// (client_reflect_novaworld_port, 32768), NOT the gate port
+	// (client_reflect_gate_port, 49152 — that's only the gate's
+	// ReflectedPortNumber). See server_config.h.
+	nwudp.set_reflect_endpoint(config.client_reflect_ip, config.client_reflect_novaworld_port);
+	nwudp.set_unknown_tracker(&unknown_tracker);
+
+	// Wired once NwUdpListener exists, before any listener starts, so the
+	// lost-handler can clean up the per-connection lobby_state entry too.
+	// Without this, a hosting retail process that exits without GOODBYE
+	// (heartbeat timeout) would stay in /api/hosts forever (G.6). Pass the
+	// dropped Connection's PeerAddr — lobby_states_ is keyed by addr, not by
+	// ci (two retail processes both send ci=0x00000001) (G.7).
 	manager.on_lost([&nwudp](const Connection &c, DropReason r) {
 		std::printf("[conn] lost  id=0x%08x identity='%s' reason=%s\n",
 		            c.id, c.identity.c_str(), drop_reason_name(r));
 		nwudp.erase_lobby_state(c.addr, drop_reason_name(r));
 	});
 
+	// Each listener advertises its siblings' ports as the config it starts
+	// with names them: the NW UDP listener the HTTP port (the SessionInit's
+	// web domain), the gate both (UDPNOVAWORLD, STARTUPURL). So they start in
+	// the order those ports become known, HTTP, then NW UDP, then the gate,
+	// and once one binds, `listening` carries the port it serves: the
+	// configured port, or the OS's pick for port 0. With nonzero ports every
+	// advertised byte stays the configured port's; and the gate, the client's
+	// first contact, answers only once what it names serves.
+	ServerConfig listening = config;
 #ifdef OPENNOVA_HTTP_ENABLED
 	SessionStore sessions;
 	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
-	if (!http.start(config)) {
+	if (!http.start(listening)) {
 		std::fprintf(stderr, "[boot] FATAL: HTTP listener start failed\n");
-		gate.stop();
+		return 1;
+	}
+	listening.http_port = http.bound_port();
+#endif
+	if (!nwudp.start(listening)) {
+		std::fprintf(stderr, "[boot] FATAL: NW UDP listener start failed\n");
+#ifdef OPENNOVA_HTTP_ENABLED
+		http.stop();
+#endif
+		return 1;
+	}
+	listening.nw_udp_port = nwudp.bound_port();
+	if (!gate.start(listening)) {
+		std::fprintf(stderr, "[boot] FATAL: gate listener start failed\n");
+#ifdef OPENNOVA_HTTP_ENABLED
+		http.stop();
+#endif
 		nwudp.stop();
 		return 1;
 	}
-#endif
 
 	install_signal_handlers();
 	std::printf("[boot] ready. Ctrl+C to stop.\n");
