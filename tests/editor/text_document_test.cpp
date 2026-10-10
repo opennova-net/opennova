@@ -1069,6 +1069,18 @@ static int test_music_script() {
 	const TextDocument &music = *text_of(*made);
 	TEST_EXPECT(music.text() == repo_file("mus/golden_synth_gamemus.mus.txt"));
 	TEST_EXPECT(made->serialize().text == bin && type->validate_file(*made).empty());
+	// What it names (music_script_references, S23 B): each play's stream of GAMEMUS.SBF by its place, at the play's
+	// name, which no rename rewrites.
+	TEST_EXPECT(type->references);
+	std::vector<TextReference> plays;
+	type->references(music, plays);
+	bool streams = plays.size() == 9;
+	for (const TextReference &play : plays) {
+		std::string spelled;
+		streams = streams && play.kind == ReferenceKind::MusicStream && play.scope == "GAMEMUS.SBF" && !play.rewritable &&
+		          music.span_text(play.span, spelled) && spelled == "sound_" + play.value;
+	}
+	TEST_EXPECT(streams);
 	// A text that does not compile: refused at its line and column, its Save refused.
 	TEST_EXPECT(apply(*made, {TextDocument::replace(span(7, 1, 0), "@@@ ")}));
 	const std::vector<Diagnostic> findings = type->validate_file(*made);

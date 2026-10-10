@@ -110,8 +110,9 @@ constexpr DocumentType kTypes[] = {
 	// the script device's highlights, preview/script_viewport's table).
 	{ DocumentTypeId::Script, "script", make_script_document, validate_script_file, text_fields,
 			script_finding_codes, nullptr, script_references },
+	// The music script's plays name its bank's streams by their places (S23 B).
 	{ DocumentTypeId::MusicScript, "music_script", make_music_script_document,
-			validate_music_script_file, text_fields, music_script_finding_codes },
+			validate_music_script_file, text_fields, music_script_finding_codes, nullptr, music_script_references },
 	// The credits' text names the images its lines draw and the fonts its text lines draw in.
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
 			text_fields, credits_finding_codes, nullptr, credits_references },
@@ -177,7 +178,7 @@ constexpr DocumentType kTypes[] = {
 	// The music bank (round S23 lane A): a .sbf's header and its streams over the engine's reader and writer, each
 	// stream's chunks as read; it names nothing (the music script plays its streams by place).
 	{ DocumentTypeId::MusicBank, "music_bank", make_music_bank, validate_music_bank_file, MusicBankDocument::schema,
-			music_bank_finding_codes },
+			music_bank_finding_codes, nullptr, nullptr, music_bank_references },
 	// The wave (round S23 lane A): a .wav held as its bytes, its facts and the game loader's verdict its content on the
 	// wire, the one place a wave the loader refuses is found (asset.wave_unplayable); trimmed and normalised whole.
 	{ DocumentTypeId::Wave, "wave", make_wave_document, validate_wave_file, wave_fields, wave_finding_codes, nullptr,

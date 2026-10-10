@@ -1639,7 +1639,7 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::SoundProfile || kind == ReferenceKind::Shader ||
 		                       kind == ReferenceKind::Particle || kind == ReferenceKind::AnimationKey ||
 		                       kind == ReferenceKind::ItemAlias || kind == ReferenceKind::AvatarPart ||
-		                       kind == ReferenceKind::Dialog;
+		                       kind == ReferenceKind::Dialog || kind == ReferenceKind::MusicStream;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;

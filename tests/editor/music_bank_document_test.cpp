@@ -7,6 +7,9 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/music_bank_document.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/model/text_document.h>
+#include <editor/session/view/session_view.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -213,6 +216,49 @@ int test_session_play() {
 	return 0;
 }
 
+// The streams a music script plays (S23 B): the bank defines each stream by its place, scoped to its file's name; the
+// script's plays name them in the bank of its name made .SBF, each present; a play past the bank's streams a warning
+// in the game's words (it plays the bank's first).
+int test_script_plays_streams() {
+	editor_test::TempProjectDir dir("opennova_editor_music_streams");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Music streams"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(editor_test::write_bytes(root + "/gamemus.sbf", synth()));
+	TEST_EXPECT(editor_test::write_bytes(root + "/gamemus.bin",
+	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
+	                                                        "/fixtures/mus/synth_gamemus.bin")));
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetGraph &graph = *session.view().findings.graph;
+	TEST_EXPECT(graph.symbols_named(ReferenceKind::MusicStream, "12").size() == 1 &&
+	            graph.symbols_named(ReferenceKind::MusicStream, "13").empty());
+	size_t plays = 0, present = 0;
+	for (const GraphEdge *edge : graph.references_of("gamemus.bin")) {
+		if (edge->kind != ReferenceKind::MusicStream) continue;
+		++plays;
+		present += edge->scope == "GAMEMUS.SBF" && graph.resolve(*edge) == ReferenceStatus::Present;
+	}
+	TEST_EXPECT(plays == 9 && present == 9);
+	// A play past the bank's 13 streams.
+	editor_test::handle_to_end(session, request::open_document("gamemus.bin"));
+	const TextDocument *text = text_of(*session.document_base_for("gamemus.bin"));
+	TEST_EXPECT(text != nullptr);
+	if (!text) return 1;
+	const size_t at = text->text().find("play sound_1\n");
+	TEST_EXPECT(at != std::string::npos);
+	if (at == std::string::npos) return 1;
+	editor_test::handle_to_end(session, request::edit_record("gamemus.bin",
+	                                                         TextDocument::replace(text->span_at(at + 5, 7), "sound_20")));
+	bool warned = false;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		warned = warned || (d.code() == "reference.missing" && d.severity == DiagnosticSeverity::Warning &&
+		                    d.message.find("first stream") != std::string::npos);
+	TEST_EXPECT(warned);
+	return 0;
+}
+
 // Every bank the install streams through the document and back, byte for byte.
 int test_retail() {
 	if (!retail::selected()) return 0;
@@ -250,6 +296,7 @@ int main(int argc, char **argv) {
 	failed += test_edits();
 	failed += test_findings();
 	failed += test_session_play();
+	failed += test_script_plays_streams();
 	failed += test_retail();
 	if (failed == 0) std::printf("editor music bank: all tests passed\n");
 	return failed == 0 ? 0 : 1;

@@ -192,6 +192,15 @@ std::string text_id_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	       " does not define (the game reads that section alone); the game shows the id.";
 }
 
+// A play's stream past its bank's: the game's stream select takes the bank's first [orig: AudioVM_StartSound @
+// 0x671FF0 -> sub_671BC0 @ 0x671BCA, an index past the entries made 0]; a bank the project lacks opens no music
+// [orig: AudioVM_OpenMusicContext @ 0x6722A0].
+std::string stream_missing(const AssetGraph &graph, const GraphEdge &edge) {
+	if (!graph.has_file(edge.scope))
+		return ", whose bank " + edge.scope + " the project does not have: the game opens no music for the script.";
+	return ", which " + edge.scope + " does not have: the game plays the bank's first stream in its place.";
+}
+
 std::string screen_missing(const AssetGraph &, const GraphEdge &edge) {
 	return ", which " + edge.scope + " does not have and no other menu of the project has: the game selects no screen "
 	       "and nothing changes.";
@@ -808,6 +817,15 @@ constexpr ReferenceKindRow kRows[] = {
 	// failing @ 0x57FDA7].
 	Row(ReferenceKind::FaceAnimation, "face_animation", "the face animation", "face animation")
 	        .loads(AssetKind::FaceAnimation, nullptr)
+	        .row,
+	// A music script's play names a stream of its bank by its place [orig: AudioVM_Op_Play @ 0x672CB0 /
+	// AudioVM_Op_PlayWait @ 0x672C90 -> AudioVM_StartSound @ 0x671FF0], the bank the script's name made .SBF
+	// (mus_bank_name); one past the bank's plays its first (stream_missing).
+	Row(ReferenceKind::MusicStream, "music_stream", "the stream", "stream")
+	        .symbol(NameCase::Exact, AssetKind::MusicBank)
+	        .scoped(true)
+	        .tolerated(stream_missing)
+	        .message_reads_files()
 	        .row,
 };
 
