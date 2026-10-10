@@ -287,20 +287,6 @@ RecordTable make_table() {
 	return RecordTable({std::move(part), std::move(nationality), std::move(division), std::move(combo)});
 }
 
-std::vector<std::string> raw_of(char (*raw)[512], size_t count) {
-	std::vector<std::string> out;
-	for (size_t i = 0; i < count; ++i) out.emplace_back(raw[i]);
-	return out;
-}
-
-void raw_into(const std::vector<std::string> &lines, char (*&raw)[512], size_t &count) {
-	raw = nullptr;
-	count = lines.size();
-	if (!count) return;
-	raw = static_cast<char (*)[512]>(std::calloc(count, 512));
-	for (size_t i = 0; i < count; ++i) std::snprintf(raw[i], 512, "%s", lines[i].c_str());
-}
-
 void copy_to(const std::string &from, char *to, size_t size) { std::snprintf(to, size, "%s", from.c_str()); }
 
 constexpr FindingCodeEntry<AvatarsFinding> kFindingEntries[] = {
@@ -331,20 +317,16 @@ std::string avatar_part_scope(const std::string &path, int kind) {
 
 size_t AvatarPartRow::footprint() const {
 	size_t bytes = sizeof(AvatarPartRow) + footprint_of(part.name) + footprint_of(part.display_name) + footprint_of(part.graphic) +
-	               footprint_of(part.graphic_j) + footprint_of(part.graphic_s) + footprint_of(part.raw_lines) + ids_footprint();
-	for (const std::string &line : part.raw_lines) bytes += footprint_of(line);
+	               footprint_of(part.graphic_j) + footprint_of(part.graphic_s) + ids_footprint();
 	return bytes;
 }
 
 size_t AvatarNationalityRow::footprint() const {
 	const AvatarNationalityRecord &n = nationality;
 	size_t bytes = sizeof(AvatarNationalityRow) + footprint_of(n.raw_id) + footprint_of(n.name_key) + footprint_of(n.flags) +
-	               footprint_of(n.divisions) + footprint_of(n.raw_lines) + ids_footprint();
-	for (const std::string &line : n.raw_lines) bytes += footprint_of(line);
+	               footprint_of(n.divisions) + ids_footprint();
 	for (const AvatarDivisionRecord &d : n.divisions) {
-		bytes += footprint_of(d.raw_id) + footprint_of(d.name_key) + footprint_of(d.flags) + footprint_of(d.combos) +
-		         footprint_of(d.raw_lines);
-		for (const std::string &line : d.raw_lines) bytes += footprint_of(line);
+		bytes += footprint_of(d.raw_id) + footprint_of(d.name_key) + footprint_of(d.flags) + footprint_of(d.combos);
 		for (const AvatarComboRecord &c : d.combos)
 			bytes += footprint_of(c.raw_id) + footprint_of(c.head) + footprint_of(c.body) + footprint_of(c.arms);
 	}
@@ -375,7 +357,6 @@ avatars::AvatarsFile AvatarsDocument::file() const {
 		for (int c = 0; c < 3; ++c) q.camo[c] = p.camo[size_t(c)];
 		q.voice = p.voice;
 		q.sex = p.sex;
-		raw_into(p.raw_lines, q.raw_lines, q.raw_lines_count);
 		q.note = p.note;
 	}
 	out.nationalities_count = nationalities.size();
@@ -390,7 +371,6 @@ avatars::AvatarsFile AvatarsDocument::file() const {
 		copy_to(n.flags, m.flags, sizeof(m.flags));
 		m.alignment = n.alignment;
 		m.has_alignment = n.has_alignment ? 1 : 0;
-		raw_into(n.raw_lines, m.raw_lines, m.raw_lines_count);
 		m.note = n.note;
 		m.divisions_count = n.divisions.size();
 		m.divisions = n.divisions.empty() ? nullptr
@@ -402,7 +382,6 @@ avatars::AvatarsFile AvatarsDocument::file() const {
 			e.id = d.id;
 			copy_to(d.name_key, e.name_key, sizeof(e.name_key));
 			copy_to(d.flags, e.flags, sizeof(e.flags));
-			raw_into(d.raw_lines, e.raw_lines, e.raw_lines_count);
 			e.note = d.note;
 			e.combos_count = d.combos.size();
 			e.combos = d.combos.empty() ? nullptr
@@ -477,7 +456,6 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		for (int c = 0; c < 3; ++c) q.camo[size_t(c)] = p.camo[c];
 		q.voice = p.voice;
 		q.sex = p.sex;
-		q.raw_lines = raw_of(p.raw_lines, p.raw_lines_count);
 		q.note = p.note;
 		shape(*row);
 		rows.push_back(std::move(row));
@@ -492,7 +470,6 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		m.flags = n.flags;
 		m.alignment = n.alignment;
 		m.has_alignment = n.has_alignment != 0;
-		m.raw_lines = raw_of(n.raw_lines, n.raw_lines_count);
 		m.note = n.note;
 		for (size_t j = 0; j < n.divisions_count; ++j) {
 			const avatars::AvatarDivision &d = n.divisions[j];
@@ -501,7 +478,6 @@ bool AvatarsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 			e.id = d.id;
 			e.name_key = d.name_key;
 			e.flags = d.flags;
-			e.raw_lines = raw_of(d.raw_lines, d.raw_lines_count);
 			e.note = d.note;
 			for (size_t k = 0; k < d.combos_count; ++k) {
 				const avatars::AvatarCombo &c = d.combos[k];

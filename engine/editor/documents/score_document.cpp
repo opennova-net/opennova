@@ -51,17 +51,13 @@ RecordTable make_table() {
 	// --- the file's own values ---------------------------------------------------------------------------
 	TableKind header(RecordKindRow{kHeader, "header", "Score table", "", true});
 	{
+		// Shown, not set: the game reads the file only at 40 and writes 40 itself; a file of another version is one
+		// it reads none of, whose blocks the document holds none of either (score.version says so).
 		FieldSchema version = schema_of("version", FieldType::Integer, "Version",
 				"The file's VERSION, the last of its lines; the game reads the file only at 40, else writes its own defaults "
 				"over it [orig: ScoreConfig_LoadFile @ 0x52DA8A -> ScoreConfig_SaveFile @ 0x52DA9E].");
-		header.field(RF{version,
-		                {[](const RecordHandle &r, Value &out) { return out = int64_t(header_of(r).version), true; },
-		                 [](const RecordHandle &r, const Value &v, std::string &e) {
-			                 int64_t n = 0;
-			                 if (!whole_of(v, n) || n < INT32_MIN || n > INT32_MAX) return e = "A version is a whole number.", false;
-			                 r.as<ScoreHeader>().version = int32_t(n);
-			                 return true;
-		                 }}});
+		version.read_only = true;
+		header.field(RF{version, {[](const RecordHandle &r, Value &out) { return out = int64_t(header_of(r).version), true; }}});
 		for (int i = 0; i < 2; ++i) {
 			FieldSchema fanfare = schema_of(i ? "fanfare_high" : "fanfare_low", FieldType::Byte,
 					i ? "Fanfare, high" : "Fanfare, low",
@@ -71,12 +67,21 @@ RecordTable make_table() {
 			fanfare.ranged = true;
 			fanfare.min = 0;
 			fanfare.max = 255;
+			// Left out where no line of the file set the pair (the defaults' 0 0 stand); a set of another value writes it.
+			fanfare.optional = true;
 			header.field(RF{fanfare,
 			                {[i](const RecordHandle &r, Value &out) { return out = int64_t(header_of(r).exp_fanfare[i] & 0xFF), true; },
 			                 [i](const RecordHandle &r, const Value &v, std::string &e) {
 				                 int64_t n = 0;
 				                 if (!whole_of(v, n) || n < 0 || n > 255) return e = "A fanfare byte is from 0 to 255.", false;
-				                 r.as<ScoreHeader>().exp_fanfare[i] = int32_t(n);
+				                 ScoreHeader &h = r.as<ScoreHeader>();
+				                 if (h.exp_fanfare[i] != int32_t(n)) h.has_exp_fanfare = true;
+				                 h.exp_fanfare[i] = int32_t(n);
+				                 return true;
+			                 },
+			                 [](const RecordHandle &r) { return header_of(r).has_exp_fanfare; },
+			                 [](const RecordHandle &r, bool present, std::string &) {
+				                 r.as<ScoreHeader>().has_exp_fanfare = present;
 				                 return true;
 			                 }}});
 		}
@@ -228,7 +233,7 @@ score::File ScoreDocument::file() const {
 			out.version = h.version;
 			out.exp_fanfare[0] = h.exp_fanfare[0];
 			out.exp_fanfare[1] = h.exp_fanfare[1];
-			out.has_exp_fanfare = true;
+			out.has_exp_fanfare = h.has_exp_fanfare;
 		} else if (node->kind == kBlock) {
 			out.blocks.push_back(static_cast<const ScoreBlockRow &>(*node).block);
 		}
@@ -264,6 +269,7 @@ bool ScoreDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::sh
 	header->header.version = read.version;
 	header->header.exp_fanfare[0] = read.exp_fanfare[0];
 	header->header.exp_fanfare[1] = read.exp_fanfare[1];
+	header->header.has_exp_fanfare = read.has_exp_fanfare;
 	shape(*header);
 	rows.push_back(std::move(header));
 	for (score::GameTypeBlock &block : read.blocks) {
@@ -354,12 +360,13 @@ std::vector<Diagnostic> validate_score_file(const DocumentBase &document) {
 			const ScoreHeader &h = static_cast<const ScoreHeaderRow &>(*node).header;
 			if (h.version != score::kVersion)
 				add(*node, DiagnosticSeverity::Warning, ScoreFinding::Version, "version",
-				    "The version is " + std::to_string(h.version) + ": the game reads the file only at 40, and writes its own "
-				    "defaults over it otherwise [orig: ScoreConfig_LoadFile @ 0x52DA8A -> ScoreConfig_SaveFile @ 0x52DA9E].");
+				    "The version is " + std::to_string(h.version) + ": the game reads none of the file (no block of it is read "
+				    "here either) and writes its own defaults over it [orig: ScoreConfig_LoadFile @ 0x52DA8A -> "
+				    "ScoreConfig_SaveFile @ 0x52DA9E]. A save keeps the file's lines as they are.");
 			score::File f;
 			f.exp_fanfare[0] = h.exp_fanfare[0];
 			f.exp_fanfare[1] = h.exp_fanfare[1];
-			if (!score::exp_fanfare_kept(f) && (h.exp_fanfare[0] || h.exp_fanfare[1]))
+			if (h.has_exp_fanfare && !score::exp_fanfare_kept(f))
 				add(*node, DiagnosticSeverity::Info, ScoreFinding::FanfareUnkept, "fanfare_low",
 				    "The game keeps the fanfare only when both bytes are other than 0 and the high one is the greater [orig: "
 				    "ScoreConfig_LoadFile @ 0x52DC8E]: these are read for nothing.");

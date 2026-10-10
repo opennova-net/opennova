@@ -30,7 +30,6 @@ struct AvatarPartRecord {
 	std::array<int, 3> camo{};
 	int voice = 0;
 	int sex = avatars::AVATAR_SEX_MALE;
-	std::vector<std::string> raw_lines; // lines the walk reads nothing of inside the block (the layout keeps them)
 	uint64_t note = 0;
 };
 struct AvatarComboRecord {
@@ -42,7 +41,6 @@ struct AvatarDivisionRecord {
 	std::string raw_id, name_key, flags;
 	int id = 0;
 	std::vector<AvatarComboRecord> combos;
-	std::vector<std::string> raw_lines;
 	uint64_t note = 0;
 };
 struct AvatarNationalityRecord {
@@ -51,7 +49,6 @@ struct AvatarNationalityRecord {
 	int alignment = avatars::AVATAR_ALIGN_GOOD;
 	bool has_alignment = false;
 	std::vector<AvatarDivisionRecord> divisions;
-	std::vector<std::string> raw_lines;
 	uint64_t note = 0;
 };
 

@@ -15,17 +15,19 @@ namespace opennova::editor {
 // name when the game types' default settings are made, over those defaults [orig: GameType_CreateDefaultSettings @
 // 0x52DD00 -> ScoreConfig_LoadFile @ 0x52D8A0]; written there with the defaults when it is missing or its version is
 // not 40 [orig: ScoreConfig_SaveFile @ 0x52CDD0]. Its rows: the file's version and fanfare first, then its GAMETYPE
-// blocks in the file's order, each holding its FIELD lines (the end-of-round scoreboard's columns, in order) and its
+// blocks in the file's order (none at a version other than 40: the game reads none of the file), each holding its FIELD lines (the end-of-round scoreboard's columns, in order) and its
 // VAR values (the points each event scores). The document reads the file through formats/score with its layout
 // modeled and writes it through ScoreConfig_SaveFile's form over that layout.
 
 enum class ScoreKind : NodeKind { Header = 0, Block = 1, Field = 2, Var = 3 };
 constexpr NodeKind node_kind(ScoreKind kind) { return static_cast<NodeKind>(kind); }
 
-// The file's own values: what its VERSION and EXP_FANFARE lines say.
+// The file's own values: what its VERSION line says, and the fanfare a line of it set (has_exp_fanfare: an
+// EXP_FANFARE line passing the reader's gate, else the defaults' 0 0 stand).
 struct ScoreHeader {
 	int32_t version = score::kVersion;
 	int32_t exp_fanfare[2] = {0, 0};
+	bool has_exp_fanfare = false;
 };
 
 struct ScoreHeaderRow : TableRow {

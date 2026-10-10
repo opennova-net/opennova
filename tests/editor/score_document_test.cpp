@@ -125,13 +125,33 @@ int test_findings() {
 	TEST_EXPECT(validate_score_file(clean).empty());
 	std::string fields;
 	for (int i = 0; i < 35; ++i) fields += "FIELD \"NUMDEATHS\" 1\r\n";
-	const std::string flawed = "VERSION 39\r\nEXP_FANFARE 2 1\r\nGAMETYPE \"NOPE\"\r\nGAMETYPE \"tdm\"\r\nGAMETYPE \"TDM\"\r\n" + fields;
+	const std::string flawed = "VERSION 40\r\nGAMETYPE \"NOPE\"\r\nGAMETYPE \"tdm\"\r\nGAMETYPE \"TDM\"\r\n" + fields;
 	ScoreDocument document;
 	TEST_EXPECT(document.load_bytes(bytes_of(flawed), "score.ini", AssetKind::Score, "jo", error));
-	const std::vector<Diagnostic> findings = validate_score_file(document);
-	TEST_EXPECT(has_code(findings, "score.version") && has_code(findings, "score.fanfare_unkept") &&
-	            has_code(findings, "score.unknown_game_type") && has_code(findings, "score.game_type_repeated") &&
-	            has_code(findings, "score.fields_past_34"));
+	std::vector<Diagnostic> findings = validate_score_file(document);
+	TEST_EXPECT(has_code(findings, "score.unknown_game_type") && has_code(findings, "score.game_type_repeated") &&
+	            has_code(findings, "score.fields_past_34") && !has_code(findings, "score.version"));
+	// A fanfare the game does not keep, set in the document (a file's line failing the gate is read for nothing).
+	const NodeAddress header{document.rows()[0]->id, node_kind(ScoreKind::Header), 0};
+	Edit high;
+	high.address = header;
+	high.field = "fanfare_low";
+	high.value = int64_t(2);
+	TEST_EXPECT(document.apply(high, error));
+	TEST_EXPECT(has_code(validate_score_file(document), "score.fanfare_unkept"));
+	// A file of another version: the game reads none of it, nor does the document (no block), and a save keeps its
+	// lines; its version shown, not set.
+	const std::string old = "VERSION 39\r\nEXP_FANFARE 2 1\r\nGAMETYPE \"TDM\"\r\nVAR \"FIRE\" 5\r\n";
+	ScoreDocument older;
+	TEST_EXPECT(older.load_bytes(bytes_of(old), "score.ini", AssetKind::Score, "jo", error) && older.rows().size() == 1);
+	findings = validate_score_file(older);
+	TEST_EXPECT(has_code(findings, "score.version") && !has_code(findings, "score.fanfare_unkept"));
+	TEST_EXPECT(older.serialize().text == old);
+	Edit version;
+	version.address = NodeAddress{older.rows()[0]->id, node_kind(ScoreKind::Header), 0};
+	version.field = "version";
+	version.value = int64_t(40);
+	TEST_EXPECT(!older.apply(version, error));
 	// A second block that changes nothing its row holds is no matter (the game's own writer writes COOP twice).
 	ScoreDocument alike;
 	TEST_EXPECT(alike.load_bytes(bytes_of("VERSION 40\r\nGAMETYPE \"COOP\"\r\nVAR \"FIRE\" 1\r\nGAMETYPE \"COOP\"\r\nVAR \"FIRE\" 1\r\n"),
@@ -139,8 +159,6 @@ int test_findings() {
 	            validate_score_file(alike).empty());
 	// None gates a build or blocks a save: the game reads any file.
 	for (const FindingCodeRow &row : score_finding_codes()) TEST_EXPECT(!row.gates_build && !row.blocks_save);
-	// The version a file holds is kept on a save.
-	TEST_EXPECT(document.serialize().text.find("VERSION 39\r\n") != std::string::npos);
 	std::printf("findings: a version other than 40, a fanfare not kept, a block of no game type, a second block, 35 "
 	            "columns\n");
 	return 0;

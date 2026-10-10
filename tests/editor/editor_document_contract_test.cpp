@@ -232,7 +232,7 @@ struct PinnedPresence {
 	size_t optional, presences;
 };
 const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}, {"environment", 3, 3},
-                                          {"terrain", 4, 4}, {"avatars", 1, 1}};
+                                          {"terrain", 4, 4}, {"avatars", 1, 1}, {"score", 2, 2}};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
