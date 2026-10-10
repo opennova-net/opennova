@@ -115,19 +115,6 @@ opennova::bms::File make_demo_mission() {
 	return m;
 }
 
-// The bring-up's session create refused on the mpreset word
-// (inmatch::HostRole::session_create): the in-memory loads fail as the file
-// boot's phase A does (inmatch::HostBoot::session_create), and
-// session_create_ended_process() tells the embedder, which ends the process
-// with exit code 0 (the game shell's GameWorld.process_exit_requested).
-bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::string &r_error) {
-	if (p_role == nullptr ||
-			p_role->session_create() != opennova::inmatch::CreateSessionResult::ProcessExit)
-		return false;
-	r_error = "mpreset is set: the session create ends the process (exit code 0)";
-	return true;
-}
-
 } // namespace
 
 bool Simulation::session_create_ended_process() const {
@@ -768,7 +755,7 @@ bool Simulation::load_from_mission_data(const Ref<MissionData> &p_mission) {
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
-	if (!kernel_->boot(options, boot_error) || session_create_refused(host_role_, boot_error)) {
+	if (!kernel_->boot(options, boot_error)) {
 		fail_session_load(boot_error.c_str());
 		return false;
 	}
@@ -794,7 +781,7 @@ void Simulation::build_demo_mission() {
 			joiner_role_ != nullptr ? joiner_role_->client_runtime() : nullptr);
 	options.bringup_net_session = role_bringup_hook();
 	std::string boot_error;
-	if (!kernel_->boot(options, boot_error) || session_create_refused(host_role_, boot_error)) {
+	if (!kernel_->boot(options, boot_error)) {
 		fail_session_load(boot_error.c_str());
 		return;
 	}
