@@ -77,14 +77,14 @@ func test_wac_voice_completion_interrupt_and_retry_use_the_real_channel() -> voi
 	_script_pass(sim)
 	assert_eq(sim.get_mission_variable(3), 0, "old completion cannot release the new line")
 
-	# Exercise the audio driver's natural completion signal as well.
+	# The live line's own completion releases waveready. Its `finished` is
+	# emitted here as the interrupted channel's is above: the player emits it
+	# on its next process frame after the mixer drops `playing`, so a
+	# real-time poll of `playing` could run the pass first and read v3 as 0.
 	if second != null:
-		# Audio mixing has its own clock and can start after the play request.
-		# Wait for actual completion, independent of scene time scale or a
-		# full suite's first-frame scheduling delay.
-		var deadline := Time.get_ticks_msec() + 5000
-		while is_instance_valid(second) and second.playing and Time.get_ticks_msec() < deadline:
-			await get_tree().create_timer(0.01, true, false, true).timeout
+		# The clip plays once, so the driver's `finished` does come (WavLoader).
+		assert_eq((second.stream as AudioStreamWAV).loop_mode, AudioStreamWAV.LOOP_DISABLED)
+		second.finished.emit()
 	_script_pass(sim)
 	assert_eq(sim.get_mission_variable(3), 1, "finished signal releases waveready")
 	assert_null(_playing_voice(audio))
