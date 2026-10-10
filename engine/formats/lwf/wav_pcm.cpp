@@ -1,6 +1,7 @@
 #include <formats/lwf/wav_pcm.h>
 #include <base/io/le.h>
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -10,9 +11,48 @@ namespace lwf {
 
 namespace {
 
+// The loader's limits ahead of the data [orig: Audio_LoadWavFileFromArchive @ 0x766480]: a chunk past
+// this size refused (@ 0x7665a3), and the walk given up at this many chunks (@ 0x7665b2).
+constexpr uint32_t kChunkMost = 0x800;
+constexpr int kChunksMost = 12;
+constexpr uint16_t kTagImaAdpcm = 0x11;
+
 bool tag_eq(const uint8_t *p, const char *tag) {
 	return p[0] == static_cast<uint8_t>(tag[0]) && p[1] == static_cast<uint8_t>(tag[1]) &&
 			p[2] == static_cast<uint8_t>(tag[2]) && p[3] == static_cast<uint8_t>(tag[3]);
+}
+
+const char *refusal_words(WaveRefusal refusal) {
+	switch (refusal) {
+		case WaveRefusal::None: return "";
+		case WaveRefusal::NotRiffWave: return "not a RIFF/WAVE file";
+		case WaveRefusal::EndsBeforeData: return "the file ends before its data chunk";
+		case WaveRefusal::SecondFmt: return "a second fmt chunk ahead of the data";
+		case WaveRefusal::ChunkPastMost: return "a chunk past 0x800 bytes ahead of the data";
+		case WaveRefusal::TwelveChunks: return "twelve chunks ahead of the data";
+		case WaveRefusal::NoFmt: return "no fmt chunk ahead of the data";
+		case WaveRefusal::Bits: return "samples of other than 8, 16 or 4 bits";
+		case WaveRefusal::Channels: return "more than one channel";
+		case WaveRefusal::NoFact: return "4-bit samples with no fact chunk";
+		case WaveRefusal::NotImaAdpcm: return "4-bit samples not IMA ADPCM";
+	}
+	return "";
+}
+
+// WAV PCM8 is UNSIGNED (128 = center): upconverted to signed 16-bit LE.
+void pcm8_to_pcm16(const uint8_t *src, uint32_t size, std::vector<uint8_t> &out) {
+	out.resize(static_cast<size_t>(size) * 2);
+	for (uint32_t i = 0; i < size; ++i) {
+		const int16_t s = static_cast<int16_t>((static_cast<int>(src[i]) - 128) * 256);
+		out[i * 2] = static_cast<uint8_t>(s & 0xFF);
+		out[i * 2 + 1] = static_cast<uint8_t>((s >> 8) & 0xFF);
+	}
+}
+
+// The loader's pitch ratio, ((rate << 16) + 22050) / 44100
+// [orig: Audio_LoadWavFileFromArchive @ 0x766612..0x76662d / @ 0x766717..0x766735].
+uint32_t loader_pitch_q16(uint32_t rate) {
+	return static_cast<uint32_t>(((static_cast<uint64_t>(rate) << 16) + 22050u) / 44100u);
 }
 
 // The native cache/file form accepted before RIFF parsing. It has one mono
@@ -160,7 +200,116 @@ std::vector<uint8_t> decode_ima_adpcm(const uint8_t *data, uint32_t size,
 
 }  // namespace
 
+WaveLoaderWalk wave_loader_walk(const uint8_t *bytes, size_t size) {
+	WaveLoaderWalk walk;
+	const auto refused = [&walk](WaveRefusal why) {
+		walk.refusal = why;
+		return walk;
+	};
+	const auto tag_at = [bytes, size](size_t at, const char *tag) {
+		return bytes != nullptr && at + 4 <= size && tag_eq(bytes + at, tag);
+	};
+	// [orig: Audio_LoadWavFileFromArchive @ 0x76651e..0x76653b]
+	if (!tag_at(0, "RIFF") || !tag_at(8, "WAVE")) return refused(WaveRefusal::NotRiffWave);
+	size_t at = 12;
+	bool has_fmt = false;
+	for (int count = 0;;) {
+		// The loader reads on past the bytes for a data chunk; the walk stops at them.
+		if (at + 8 > size) return refused(WaveRefusal::EndsBeforeData);
+		const uint32_t chunk_size = io::read_u32_le(bytes + at + 4);
+		if (tag_at(at, "RIFF")) {
+			at += 12; // a nested RIFF header [orig: @ 0x766557..0x766564]
+		} else if (tag_at(at, "LIST")) {
+			at += 4; // stepped into by its id alone [orig: @ 0x766569..0x766570]
+			walk.after_list = true;
+		} else {
+			// The first data of nonzero size ends the walk [orig: @ 0x766592..0x76659b].
+			if (tag_at(at, "data") && chunk_size != 0) {
+				walk.data = at + 8;
+				walk.data_size = chunk_size;
+				break;
+			}
+			if (tag_at(at, "fmt ")) {
+				if (has_fmt) return refused(WaveRefusal::SecondFmt); // [orig: @ 0x766589]
+				has_fmt = true;
+				walk.fmt = at;
+			} else if (tag_at(at, "fact")) {
+				walk.has_fact = true; // [orig: @ 0x76657c]
+				walk.fact = at;
+			}
+			if (chunk_size > kChunkMost) { // [orig: @ 0x76659d..0x7665a3]
+				walk.chunk = at;
+				walk.chunk_size = chunk_size;
+				return refused(WaveRefusal::ChunkPastMost);
+			}
+			walk.after_list = false;
+			at += size_t(chunk_size) + 8; // unpadded [orig: @ 0x7665a5]
+		}
+		// [orig: @ 0x7665a9..0x7665b2]
+		if (++count >= kChunksMost) return refused(WaveRefusal::TwelveChunks);
+	}
+	// At the data: the fmt chunk ahead of it [orig: @ 0x7665c9..0x7665cb], its fields read where
+	// they sit whatever its size.
+	if (!has_fmt || walk.fmt + 24 > size) return refused(WaveRefusal::NoFmt);
+	walk.tag = io::read_u16_le(bytes + walk.fmt + 8);
+	walk.channels = io::read_u16_le(bytes + walk.fmt + 10);
+	walk.rate = io::read_u32_le(bytes + walk.fmt + 12);
+	walk.block_align = io::read_u16_le(bytes + walk.fmt + 20);
+	walk.bits = bytes[walk.fmt + 22]; // [orig: @ 0x7665cd]
+	// By the sample width [orig: @ 0x7665d3, @ 0x7666ce, @ 0x76675d]: other widths refused
+	// (@ 0x76675f); one channel at each (@ 0x7665e3, @ 0x7666db, @ 0x76676a); 4-bit samples a fact
+	// chunk (@ 0x766772) and IMA ADPCM's tag (@ 0x76677d). The tag of 8-bit and 16-bit samples is
+	// never read.
+	if (walk.bits != 8 && walk.bits != 16 && walk.bits != 4) return refused(WaveRefusal::Bits);
+	if (walk.channels != 1) return refused(WaveRefusal::Channels);
+	if (walk.bits == 4 && !walk.has_fact) return refused(WaveRefusal::NoFact);
+	if (walk.bits == 4 && walk.tag != kTagImaAdpcm) return refused(WaveRefusal::NotImaAdpcm);
+	return walk;
+}
+
 bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
+		std::string &r_error) {
+	r_out = WavPcm{};
+	r_error.clear();
+	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AOA1"))
+		return decode_aoa1(bytes, size, r_out, r_error);
+	const WaveLoaderWalk walk = wave_loader_walk(bytes, size);
+	if (walk.refusal != WaveRefusal::None) {
+		r_error = std::string("the game's wave loader refuses it: ") + refusal_words(walk.refusal);
+		return false;
+	}
+	// A data chunk running past the bytes plays the bytes there (the loader copies its size from
+	// whatever memory follows the file).
+	const uint32_t data_size =
+			static_cast<uint32_t>(std::min<size_t>(walk.data_size, size - walk.data));
+	const uint8_t *src = bytes + walk.data;
+	// The samples by their width: 8-bit unbiased (the loader's psubb 0x80
+	// [orig: @ 0x766648..0x766680]), 16-bit copied as they are (@ 0x766750), 4-bit IMA ADPCM;
+	// and the loader's record, 8-bit the data chunk's size as it says, 16-bit half of it, past
+	// the bytes or not, IMA ADPCM the fact chunk's count
+	// [orig: @ 0x766609, @ 0x766706..0x76670e, @ 0x76678a..0x7667ba].
+	if (walk.bits == 8) {
+		pcm8_to_pcm16(src, data_size, r_out.pcm16);
+		r_out.loader_samples = walk.data_size;
+	} else if (walk.bits == 16) {
+		r_out.pcm16.assign(src, src + data_size);
+		r_out.loader_samples = walk.data_size >> 1;
+	} else {
+		r_out.pcm16 = decode_ima_adpcm(src, data_size, 1, walk.block_align);
+		if (r_out.pcm16.empty()) {
+			r_error = "failed to decode IMA-ADPCM (block_align " +
+					std::to_string(walk.block_align) + ")";
+			return false;
+		}
+		r_out.loader_samples = walk.fact + 12 <= size ? io::read_u32_le(bytes + walk.fact + 8) : 0;
+	}
+	r_out.sample_rate = walk.rate;
+	r_out.channels = 1;
+	r_out.loader_pitch_q16 = loader_pitch_q16(walk.rate);
+	return true;
+}
+
+bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error) {
 	r_out = WavPcm{};
 	r_error.clear();
@@ -231,13 +380,7 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	const uint8_t *src = bytes + data_off;
 	if (audio_format == 1) {
 		if (bits_per_sample == 8) {
-			// WAV PCM8 is UNSIGNED (128 = center). Upconvert to signed 16-bit LE.
-			r_out.pcm16.resize(static_cast<size_t>(data_size) * 2);
-			for (uint32_t i = 0; i < data_size; ++i) {
-				const int16_t s = static_cast<int16_t>((static_cast<int>(src[i]) - 128) * 256);
-				r_out.pcm16[i * 2] = static_cast<uint8_t>(s & 0xFF);
-				r_out.pcm16[i * 2 + 1] = static_cast<uint8_t>((s >> 8) & 0xFF);
-			}
+			pcm8_to_pcm16(src, data_size, r_out.pcm16);
 		} else if (bits_per_sample == 16) {
 			// PCM16 is signed LE already.
 			r_out.pcm16.resize(data_size);
@@ -263,18 +406,16 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 
 	r_out.sample_rate = sample_rate;
 	r_out.channels = channels;
-	// The loader's record: 8-bit the data's bytes, 16-bit half of them, IMA
-	// ADPCM the fact chunk's count; the pitch ratio rounded from the rate
-	// [orig: Audio_LoadWavFileFromArchive @ 0x766609, @ 0x766706..0x76670e,
-	// @ 0x76678a..0x7667ba; @ 0x766612..0x76662d / @ 0x766717..0x766735].
+	// The loader's record as wav_decode_pcm16 keeps it, of the bytes present
+	// where a data chunk runs past them; IMA ADPCM with no fact chunk, which
+	// the loader refuses, the decoded frames.
 	if (audio_format == 1) {
 		r_out.loader_samples = bits_per_sample == 8 ? data_size : (data_size >> 1);
 	} else {
 		r_out.loader_samples = have_fact ? fact_samples
 		                                 : static_cast<uint32_t>(r_out.pcm16.size() / (2u * channels));
 	}
-	r_out.loader_pitch_q16 = static_cast<uint32_t>(
-			((static_cast<uint64_t>(sample_rate) << 16) + 22050u) / 44100u);
+	r_out.loader_pitch_q16 = loader_pitch_q16(sample_rate);
 	return true;
 }
 

@@ -1,9 +1,11 @@
-// lwf::wav_decode_pcm16 — the RIFF walk, the PCM8/PCM16 normalizations, and
-// the IMA-ADPCM block decode (hand-computed against the IMA step/index
-// tables), moved from the shell adapter's WavLoader; and the sample count and
-// pitch ratio the game's wave loader records (a dialog line's hold reads them).
+// lwf::wav_decode_pcm16: the game's wave loader's walk and its refusals
+// (D-SND-33 / D-SND-43), the PCM8/PCM16 normalizations, and the IMA-ADPCM
+// block decode (hand-computed against the IMA step/index tables), moved from
+// the shell adapter's WavLoader; and the sample count and pitch ratio the
+// game's wave loader records (a dialog line's hold reads them).
 #include <formats/lwf/wav_pcm.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -80,6 +82,29 @@ std::vector<uint8_t> with_fact(std::vector<uint8_t> wav, uint32_t samples) {
 	return wav;
 }
 
+// The same wave with a chunk `tag` of `body` put at `at` (36: after the 16-byte
+// fmt chunk; its size: the end), followed by a pad byte where `pad` and the
+// body's size is odd.
+std::vector<uint8_t> with_chunk(std::vector<uint8_t> wav, size_t at, const char *tag,
+		const std::vector<uint8_t> &body, bool pad = false) {
+	std::vector<uint8_t> chunk;
+	push_tag(chunk, tag);
+	push_u32(chunk, static_cast<uint32_t>(body.size()));
+	chunk.insert(chunk.end(), body.begin(), body.end());
+	if (pad && (body.size() & 1)) chunk.push_back(0);
+	wav.insert(wav.begin() + static_cast<std::ptrdiff_t>(at), chunk.begin(), chunk.end());
+	const uint32_t riff_size = static_cast<uint32_t>(wav.size() - 8);
+	wav[4] = static_cast<uint8_t>(riff_size & 0xFF);
+	wav[5] = static_cast<uint8_t>((riff_size >> 8) & 0xFF);
+	wav[6] = static_cast<uint8_t>((riff_size >> 16) & 0xFF);
+	wav[7] = static_cast<uint8_t>((riff_size >> 24) & 0xFF);
+	return wav;
+}
+
+std::vector<uint8_t> text_body(const char *text, size_t size) {
+	return std::vector<uint8_t>(text, text + size);
+}
+
 int16_t sample_at(const opennova::lwf::WavPcm &pcm, size_t frame) {
 	return static_cast<int16_t>(pcm.pcm16[frame * 2] |
 			(pcm.pcm16[frame * 2 + 1] << 8));
@@ -144,8 +169,11 @@ int main() {
 		data.push_back(0x00);
 		data.push_back(0x00);
 		const std::vector<uint8_t> wav = make_wav(0x11, 1, 8000, 8, 4, data);
+		// IMA ADPCM: the fact chunk's count, not the block's decoded frames; 8000 Hz
+		// is (524288000 + 22050) / 44100 = 11889 [orig: @ 0x76678a..0x7667ba, @ 0x7667e1].
+		const std::vector<uint8_t> facted_wav = with_fact(wav, 5);
 		WavPcm out;
-		if (!expect(wav_decode_pcm16(wav.data(), wav.size(), out, error),
+		if (!expect(wav_decode_pcm16(facted_wav.data(), facted_wav.size(), out, error),
 				"ADPCM decodes")) return 1;
 		if (!expect(out.pcm16.size() == 9 * 2,
 				"one block yields predictor + 8 nibble frames")) return 1;
@@ -165,18 +193,106 @@ int main() {
 						"zero nibbles add step>>3 while the index decays")) return 1;
 			}
 		}
-		// IMA ADPCM: the fact chunk's count, not the block's decoded frames; 8000 Hz
-		// is (524288000 + 22050) / 44100 = 11889 [orig: @ 0x76678a..0x7667ba, @ 0x7667e1].
-		const std::vector<uint8_t> facted_wav = with_fact(wav, 5);
-		WavPcm facted;
-		if (!expect(wav_decode_pcm16(facted_wav.data(), facted_wav.size(), facted, error),
-				"ADPCM with a fact chunk decodes")) return 1;
-		if (!expect(facted.loader_samples == 5 && facted.loader_pitch_q16 == 11889 &&
-				facted.pcm16.size() == 9 * 2, "ADPCM loader samples are the fact count")) return 1;
-		if (!expect(out.loader_samples == 9, "no fact chunk: the decoded frames")) return 1;
+		if (!expect(out.loader_samples == 5 && out.loader_pitch_q16 == 11889 &&
+				out.pcm16.size() == 9 * 2, "ADPCM loader samples are the fact count")) return 1;
+		// 4-bit samples with no fact chunk are refused [orig: @ 0x766772].
+		WavPcm unfacted;
+		if (!expect(!wav_decode_pcm16(wav.data(), wav.size(), unfacted, error) &&
+				unfacted.pcm16.empty() && !error.empty(),
+				"ADPCM with no fact chunk is refused")) return 1;
 	}
 
-	// A truncated data chunk clamps to the bytes present.
+	// What the game's wave loader refuses the decode refuses; what it takes the
+	// decode plays (D-SND-33 / D-SND-43) [orig: Audio_LoadWavFileFromArchive @ 0x766480].
+	{
+		std::vector<uint8_t> data;
+		for (int i = 0; i < 8; ++i) push_u16(data, static_cast<uint16_t>(0x0101 * (i + 1)));
+		const std::vector<uint8_t> mono = make_wav(1, 1, 22050, 2, 16, data);
+		const auto plays = [&](const std::vector<uint8_t> &wav, const std::vector<uint8_t> &pcm,
+				const char *what) {
+			WavPcm out;
+			const bool ok = wav_decode_pcm16(wav.data(), wav.size(), out, error) && out.pcm16 == pcm &&
+					out.channels == 1;
+			if (!ok) std::fprintf(stderr, "  (%s: %s)\n", what, error.c_str());
+			return expect(ok, what);
+		};
+		const auto refuses = [&](const std::vector<uint8_t> &wav, const char *what) {
+			WavPcm out;
+			return expect(!wav_decode_pcm16(wav.data(), wav.size(), out, error) && out.pcm16.empty() &&
+					!error.empty(), what);
+		};
+		if (!plays(mono, data, "mono PCM16 plays")) return 1;
+		// One channel at every width [orig: @ 0x7665e3, @ 0x7666db, @ 0x76676a].
+		if (!refuses(make_wav(1, 2, 22050, 4, 16, data), "stereo PCM16 is refused")) return 1;
+		if (!refuses(make_wav(1, 2, 22050, 2, 8, data), "stereo PCM8 is refused")) return 1;
+		std::vector<uint8_t> ima_block;
+		for (int c = 0; c < 2; ++c) {
+			push_u16(ima_block, 100);
+			ima_block.push_back(0);
+			ima_block.push_back(0);
+		}
+		ima_block.insert(ima_block.end(), 8, 0);
+		if (!refuses(with_fact(make_wav(0x11, 2, 8000, 16, 4, ima_block), 9),
+				"stereo IMA ADPCM is refused")) return 1;
+		// A LIST ahead of the data: the walk steps into it by its id alone and reads
+		// its list type as a size [orig: @ 0x766570, @ 0x7665a3]; one after the data is
+		// never reached.
+		const std::vector<uint8_t> info = text_body("INFOISFT\x0e\0\0\0Lavf58.29.100\0", 26);
+		if (!refuses(with_chunk(mono, 36, "LIST", info), "a LIST ahead of the data is refused")) return 1;
+		if (!plays(with_chunk(mono, mono.size(), "LIST", info), data,
+				"a LIST after the data is never reached")) return 1;
+		// A chunk ahead of the data past 0x800 bytes [orig: @ 0x7665a3].
+		if (!refuses(with_chunk(mono, 36, "junk", std::vector<uint8_t>(0x802, 0)),
+				"a chunk past 0x800 bytes ahead of the data is refused")) return 1;
+		if (!plays(with_chunk(mono, 36, "junk", std::vector<uint8_t>(0x800, 0)), data,
+				"a chunk of 0x800 bytes ahead of the data is stepped over")) return 1;
+		// The twelfth chunk ahead of the data [orig: @ 0x7665b2]: fmt and ten more
+		// play, fmt and eleven more do not.
+		std::vector<uint8_t> eleven = mono;
+		for (int i = 0; i < 10; ++i) eleven = with_chunk(eleven, 36, "junk", {});
+		if (!plays(eleven, data, "eleven chunks ahead of the data play")) return 1;
+		if (!refuses(with_chunk(eleven, 36, "junk", {}),
+				"a twelfth chunk ahead of the data is refused")) return 1;
+		// A second fmt [orig: @ 0x766589].
+		if (!refuses(with_chunk(mono, 36, "fmt ", std::vector<uint8_t>(mono.begin() + 20, mono.begin() + 36)),
+				"a second fmt chunk is refused")) return 1;
+		// 4-bit samples of another format than IMA ADPCM [orig: @ 0x76677d]; other
+		// widths [orig: @ 0x76675f].
+		std::vector<uint8_t> ms_adpcm = with_fact(make_wav(0x11, 1, 8000, 8, 4, std::vector<uint8_t>(8, 0)), 9);
+		ms_adpcm[20] = 2;
+		if (!refuses(ms_adpcm, "4-bit samples not IMA ADPCM are refused")) return 1;
+		if (!refuses(make_wav(1, 1, 22050, 3, 24, std::vector<uint8_t>(12, 0)),
+				"24-bit samples are refused")) return 1;
+		// The format tag of 8-bit and 16-bit samples is never read: the width
+		// alone picks the form [orig: @ 0x7665d3, @ 0x7666ce].
+		if (!plays(make_wav(0xFFFE, 1, 22050, 2, 16, data), data,
+				"16-bit samples play whatever their tag")) return 1;
+		WavPcm eight;
+		const std::vector<uint8_t> tagged8 = make_wav(0x11, 1, 11025, 1, 8, {128, 255});
+		if (!expect(wav_decode_pcm16(tagged8.data(), tagged8.size(), eight, error) &&
+				eight.pcm16.size() == 4 && sample_at(eight, 1) == (255 - 128) << 8,
+				"8-bit samples play as PCM whatever their tag")) return 1;
+		// The walk steps over a chunk by its size, unpadded [orig: @ 0x7665a5]: an
+		// odd chunk with no pad byte is stepped over to the data; one padded to an
+		// even size, as the RIFF form lays it, leaves the walk on the pad byte, which
+		// reads the data's id and size as a chunk past 0x800 bytes.
+		const std::vector<uint8_t> odd = text_body("abc", 3);
+		if (!plays(with_chunk(mono, 36, "junk", odd), data,
+				"an odd chunk unpadded is stepped over")) return 1;
+		if (!refuses(with_chunk(mono, 36, "junk", odd, true),
+				"an odd chunk padded leaves the walk on its pad byte")) return 1;
+		// The walk stops at the first data of nonzero size: an empty one is stepped
+		// over [orig: @ 0x766592..0x76659b], a later one never reached.
+		std::vector<uint8_t> later;
+		push_u16(later, 0x7777);
+		if (!plays(with_chunk(with_chunk(mono, 36, "data", {}), mono.size() + 8, "data", later), data,
+				"the first data of nonzero size plays")) return 1;
+	}
+
+	// A truncated data chunk's samples clamp to the bytes present; the loader's
+	// sample count is the chunk's size as it says, 8-bit the size, 16-bit half
+	// of it [orig: Audio_LoadWavFileFromArchive @ 0x766609, @ 0x766706..0x76670e]
+	// (JOX's grstn4.wav and sandhit6..8.wav run 7 bytes past their files).
 	{
 		std::vector<uint8_t> data;
 		push_u16(data, 0x0102);
@@ -186,6 +302,13 @@ int main() {
 		if (!expect(wav_decode_pcm16(wav.data(), wav.size(), out, error),
 				"truncated data still decodes")) return 1;
 		if (!expect(out.pcm16.size() == 2, "clamped to the present bytes")) return 1;
+		if (!expect(out.loader_samples == 32, "16-bit: half the declared size")) return 1;
+		const std::vector<uint8_t> wav8 =
+				make_wav(1, 1, 11025, 1, 8, {128, 129, 130}, /*declared_data_size=*/10);
+		WavPcm out8;
+		if (!expect(wav_decode_pcm16(wav8.data(), wav8.size(), out8, error) &&
+				out8.pcm16.size() == 6 && out8.loader_samples == 10,
+				"8-bit: the declared size, the present samples")) return 1;
 	}
 
 	// AOA1's sample count excludes interpolation padding and PCM8 is SIGNED.
@@ -236,6 +359,6 @@ int main() {
 				"empty buffer fails")) return 1;
 	}
 
-	std::printf("OK: wav_pcm pcm16/pcm8/adpcm/truncation/errors\n");
+	std::printf("OK: wav_pcm pcm16/pcm8/adpcm/loader walk/truncation/errors\n");
 	return 0;
 }

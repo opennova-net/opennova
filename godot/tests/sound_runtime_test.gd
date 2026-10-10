@@ -377,7 +377,9 @@ func test_wav_loader_decodes_ima_adpcm() -> void:
 	assert_eq(d.decode_s16(16), 1000)
 
 
-# Build a minimal one-block mono IMA-ADPCM WAV (audioFormat 0x11).
+# Build a minimal one-block mono IMA-ADPCM WAV (audioFormat 0x11) with the
+# `fact` chunk the game's wave loader requires of 4-bit samples (D-SND-43):
+# its count is the block's frames, the predictor and two per nibble byte.
 func _build_ima_wav(predictor: int, step_index: int, nibble_bytes: PackedByteArray, rate: int, block_align: int) -> PackedByteArray:
 	var blk := StreamPeerBuffer.new()
 	blk.big_endian = false
@@ -389,7 +391,7 @@ func _build_ima_wav(predictor: int, step_index: int, nibble_bytes: PackedByteArr
 	var buf := StreamPeerBuffer.new()
 	buf.big_endian = false
 	buf.put_data("RIFF".to_ascii_buffer())
-	buf.put_u32(36 + data.size())
+	buf.put_u32(48 + data.size())
 	buf.put_data("WAVE".to_ascii_buffer())
 	buf.put_data("fmt ".to_ascii_buffer())
 	buf.put_u32(16)
@@ -399,6 +401,9 @@ func _build_ima_wav(predictor: int, step_index: int, nibble_bytes: PackedByteArr
 	buf.put_u32(rate)          # byteRate (loader ignores)
 	buf.put_u16(block_align)
 	buf.put_u16(4)             # bits per sample
+	buf.put_data("fact".to_ascii_buffer())
+	buf.put_u32(4)
+	buf.put_u32(1 + 2 * nibble_bytes.size())  # sample count
 	buf.put_data("data".to_ascii_buffer())
 	buf.put_u32(data.size())
 	buf.put_data(data)
