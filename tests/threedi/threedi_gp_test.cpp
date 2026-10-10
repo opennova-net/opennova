@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
@@ -193,6 +194,22 @@ int rejections() {
 	return 0;
 }
 
+// The files beside a model, listed once, found without case; a folder that is not there holds none.
+int files_beside() {
+	std::error_code ec;
+	const std::filesystem::path dir = std::filesystem::temp_directory_path(ec) / "opennova_threedi_gp_beside";
+	std::filesystem::remove_all(dir, ec);
+	std::filesystem::create_directories(dir, ec);
+	std::FILE *f = std::fopen((dir / "Bump.MDT").string().c_str(), "wb");
+	TEST_EXPECT(f != nullptr);
+	std::fclose(f);
+	const auto beside = gp::names_beside((dir / "model.3di").string());
+	TEST_EXPECT(beside("bump.mdt") && beside("BUMP.MDT") && !beside("other.mdt"));
+	TEST_EXPECT(!gp::names_beside((dir / "missing" / "model.3di").string())("bump.mdt"));
+	std::filesystem::remove_all(dir, ec);
+	return 0;
+}
+
 int retail_corpus() {
 	const std::vector<std::string> files = retail::reference_fixture_files("bhd/3di", ".3di");
 	if (files.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bhd/3di (the models BHD ships)");
@@ -250,5 +267,6 @@ int main(int argc, char **argv) {
 	if (synthetic_gpm() != 0) return 1;
 	if (synthetic_gpp() != 0) return 1;
 	if (rejections() != 0) return 1;
+	if (files_beside() != 0) return 1;
 	return retail_corpus();
 }

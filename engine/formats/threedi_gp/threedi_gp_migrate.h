@@ -27,6 +27,11 @@ struct MigrateOptions {
 	std::function<bool(const std::string &name)> texture_exists;
 };
 
+// MigrateOptions::texture_exists over the folder `file_path` (UTF-8) sits in: its files listed
+// once, by name without case (a retail tree mixes FSUN.3DI and fsun.3di); a folder that cannot be
+// listed, or stops listing, holds none past that point.
+std::function<bool(const std::string &name)> names_beside(const std::string &file_path);
+
 // What the migration could not carry exactly, one line a kind, with how many it met.
 struct MigrateNote {
 	std::string text;
