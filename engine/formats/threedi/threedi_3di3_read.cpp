@@ -703,8 +703,9 @@ static int parse_cobj(const ThreediChunk *chunk, ThreediCollisionObject **out_ob
     }
     for (uint32_t i = 0; i < count; ++i) {
         const uint8_t *base = chunk->data + 8 + (size_t)i * record_size;
+        // The section's flag word: JO's loader copies it and the blast test reads bit 0x2
+        // [orig: Entity_ApplyWeaponDamage @0x4E6CD0]; a BHD-era model carries 1 on some sections.
         objs[i].unk0 = read_s32_le(base + 0);
-        assert(objs[i].unk0 == 0);
         objs[i].num_vertices = read_s32_le(base + 4);
         objs[i].num_faces = read_s32_le(base + 8);
         objs[i].num_normals = read_s32_le(base + 12);

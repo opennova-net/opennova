@@ -2,6 +2,7 @@
 // a scene, inspect or compare models.
 //
 //   opennova-3di build   <scene.o3d> -o <out.3di>
+//   opennova-3di migrate <gp.3di> -o <out.3di> [--region 0|1|2]
 //   opennova-3di scene   <model.3di> -o <scene.o3d>
 //   opennova-3di info    <model.3di> [--verbose | --planes | --verts]
 //   opennova-3di compare [--strict] <expected.3di> <actual.3di>
@@ -46,6 +47,7 @@ int usage(const char *why) {
 	if (why != nullptr) std::fprintf(stderr, "opennova-3di: %s\n", why);
 	std::fprintf(stderr,
 			"usage: opennova-3di build   <scene.o3d> -o <out.3di>\n"
+			"       opennova-3di migrate <gp.3di> -o <out.3di> [--region 0|1|2]\n"
 			"       opennova-3di scene   <model.3di> -o <scene.o3d>\n"
 			"       opennova-3di info    <model.3di> [--verbose | --planes | --verts]\n"
 			"       opennova-3di compare [--strict] <expected.3di> <actual.3di>\n"
@@ -162,6 +164,17 @@ int main(int argc, char **argv) {
 	if (cmd == "build") {
 		if (argc != 5 || std::strcmp(argv[3], "-o") != 0) return usage("build needs <scene.o3d> -o <out.3di>");
 		return opennova::threedi_cli::cmd_build(argv[2], argv[4]);
+	}
+	if (cmd == "migrate") {
+		// A Black Hawk Down GP model as 3DI3; --region picks the mission region whose textures
+		// its materials take (BHD's, which JO lacks; 0 when absent).
+		const bool region = argc == 7 && std::strcmp(argv[5], "--region") == 0;
+		if ((argc != 5 && !region) || std::strcmp(argv[3], "-o") != 0)
+			return usage("migrate needs <gp.3di> -o <out.3di> [--region 0|1|2]");
+		if (region && (std::strlen(argv[6]) != 1 || argv[6][0] < '0' || argv[6][0] > '2'))
+			return usage("--region takes 0, 1 or 2");
+		const int index = region ? argv[6][0] - '0' : 0;
+		return opennova::threedi_cli::cmd_migrate(argv[2], argv[4], index);
 	}
 	if (cmd == "scene") {
 		if (argc != 5 || std::strcmp(argv[3], "-o") != 0) return usage("scene needs <model.3di> -o <scene.o3d>");

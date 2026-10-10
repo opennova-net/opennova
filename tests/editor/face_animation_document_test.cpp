@@ -3,7 +3,9 @@
 // byte; every field edited through the table and written; a triangle's corners following their vertices (a Record
 // reference: a vertex moved, added before them or removed); the type's findings; the references (each texture name
 // made .TGA by the stage loader, the base's .MDT twin derived) and the blank. JO ships no face animation (a scan of
-// every PFF of the install found none, docs/world/world-wac-ai-re.md section 33.30), so the row has no retail twin.
+// every PFF of the install found none, docs/world/world-wac-ai-re.md section 33.30); Black Hawk Down ships 13, read
+// by JO's loader line for line, which the reference tree mirrors under fixtures/bhd/grm: the retail twin opens each
+// with no layout issue, saves it byte for byte and finds no error in it.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/face_animation_document.h>
@@ -22,6 +24,7 @@
 #include <vector>
 
 #include "common/file_io.h"
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -317,9 +320,34 @@ int test_blank() {
 	return 0;
 }
 
+// Every face BHD ships opens as written, saves byte for byte and holds no error.
+int test_retail_bhd_faces() {
+	const std::vector<std::string> files = retail::reference_fixture_files("bhd/grm", ".grm");
+	if (files.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bhd/grm (the faces BHD ships)");
+	for (const std::string &path : files) {
+		const std::vector<uint8_t> bytes = test_io::read_file(path);
+		FaceAnimationDocument face;
+		Diagnostic error;
+		if (!load(face, bytes, error) || !face.issues().empty()) {
+			std::fprintf(stderr, "%s: did not open as written\n", path.c_str());
+			return 1;
+		}
+		const SerializeResult result = face.serialize();
+		TEST_EXPECT(result.ok() && std::vector<uint8_t>(result.text.begin(), result.text.end()) == bytes);
+		for (const Diagnostic &d : validate_face_animation_file(face))
+			if (d.severity == DiagnosticSeverity::Error) {
+				std::fprintf(stderr, "%s: %s\n", path.c_str(), d.message.c_str());
+				return 1;
+			}
+	}
+	std::printf("editor face animation: %zu BHD faces open, save and validate\n", files.size());
+	return 0;
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	int failed = 0;
 	failed += test_reads_and_writes_back();
 	failed += test_edits();
@@ -327,6 +355,7 @@ int main() {
 	failed += test_findings();
 	failed += test_references();
 	failed += test_blank();
+	failed += test_retail_bhd_faces();
 	if (failed == 0) std::printf("editor face animation: all tests passed\n");
 	return failed == 0 ? 0 : 1;
 }
