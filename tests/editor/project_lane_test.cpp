@@ -277,7 +277,8 @@ int test_file_card() {
 	const FileCard save = file_card(v, "player.sav");
 	TEST_EXPECT(save.found && save.build.find("left out") != std::string::npos && save.build.find("beside the archives") == std::string::npos);
 	const FileCard archive = file_card(v, "mine.pff");
-	TEST_EXPECT(archive.found && archive.build.rfind("A build refuses it: ", 0) == 0);
+	// Left out, not refused (the build's gate follows the game's loader: a quality rule refuses nothing).
+	TEST_EXPECT(archive.found && archive.build.find("the build leaves it out") != std::string::npos);
 	return 0;
 }
 
