@@ -136,7 +136,9 @@ struct ServerHello {
 // AFTER NWU-decryption). Walks the tags case-insensitively with zero
 // defaults and stops at the first malformed field; no tag is required (a
 // PM-only announce is a valid hello — see client_hello_admits). Returns
-// false only for a null buffer. Ignores unknown tags.
+// false only for a null buffer. Ignores unknown tags. A CI/PM/EIP/EPN/ET
+// shorter than four bytes takes the bytes that follow it, as retail's dword
+// load does (zero past the buffer's end).
 // [orig: NapiNPProtocol_HandleClientHello @0x6213b0 TLV walk]
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out);
 

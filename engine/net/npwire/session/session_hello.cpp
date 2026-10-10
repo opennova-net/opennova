@@ -38,6 +38,21 @@ uint32_t read_u32_le(const uint8_t *data, size_t len) {
 	return io::read_u32_le(data);
 }
 
+// The 0x41's dword load: four bytes from the field's value pointer whatever its
+// length, so a short value takes the bytes that follow it in the datagram (the
+// start of the next field: its name, then its NUL and size). Past the
+// datagram's `end` retail reads what its 64 KiB stack decrypt buffer still
+// holds; ours reads zero there (D-NET-410).
+// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - `mov ecx, [eax]` CI
+//  @0x62171E; NapiNP_ReadTLV @0x61DBE0 returns the value pointer for any length
+//  @0x61DCF7]
+uint32_t load_value_dword(const uint8_t *value, const uint8_t *end) {
+	const size_t avail = static_cast<size_t>(end - value);
+	uint8_t le[4] = {};
+	for (size_t i = 0; i < 4 && i < avail; ++i) le[i] = value[i];
+	return io::read_u32_le(le);
+}
+
 } // namespace
 
 std::array<uint8_t, 16> jointoperations_protocol_guid() {
@@ -147,13 +162,15 @@ bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 		} else if (strutil::iequals(name, "PV1")) out.pv1 = strip_nul(value, size);
 		else if (strutil::iequals(name, "PV2")) out.pv2 = strip_nul(value, size);
 		else if (strutil::iequals(name, "PV3")) out.pv3 = strip_nul(value, size);
-		else if (strutil::iequals(name, "CI")) out.ci = read_u32_le(value, size);
-		// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 — PM dword @0x62173C,
-		//  zero-initialised @0x621504]
-		else if (strutil::iequals(name, "PM")) out.pm = read_u32_le(value, size);
-		else if (strutil::iequals(name, "EIP")) out.eip = read_u32_le(value, size);
-		else if (strutil::iequals(name, "EPN")) out.epn = read_u32_le(value, size);
-		else if (strutil::iequals(name, "ET")) out.et = read_u32_le(value, size);
+		// The five dwords load whatever the field's length (load_value_dword).
+		// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 — CI @0x62171E, PM
+		//  @0x62173C (zero-initialised @0x621504), EIP @0x621756, EPN @0x621774,
+		//  ET @0x621792]
+		else if (strutil::iequals(name, "CI")) out.ci = load_value_dword(value, data + len);
+		else if (strutil::iequals(name, "PM")) out.pm = load_value_dword(value, data + len);
+		else if (strutil::iequals(name, "EIP")) out.eip = load_value_dword(value, data + len);
+		else if (strutil::iequals(name, "EPN")) out.epn = load_value_dword(value, data + len);
+		else if (strutil::iequals(name, "ET")) out.et = load_value_dword(value, data + len);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}

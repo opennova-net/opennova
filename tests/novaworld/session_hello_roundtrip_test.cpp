@@ -258,6 +258,51 @@ int test_cs_field13_follows_the_mpmaxpacketsize_clamp() {
 	return 0;
 }
 
+// A dword field shorter than four bytes loads a whole dword from its value
+// pointer, so it takes the bytes that follow it in the datagram; past the
+// datagram's end ours reads zero (D-NET-410).
+// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - CI @0x62171E, PM @0x62173C,
+//  EIP @0x621756, EPN @0x621774, ET @0x621792; NapiNP_ReadTLV @0x61DBE0 hands
+//  back the value pointer for any length @0x61DCF7]
+int test_client_hello_short_dword_takes_the_following_bytes() {
+	const auto field = [](std::vector<uint8_t> &out, const char *name,
+			std::vector<uint8_t> value) {
+		out.insert(out.end(), name, name + std::strlen(name) + 1);
+		out.push_back(static_cast<uint8_t>(value.size()));
+		out.push_back(0);
+		out.insert(out.end(), value.begin(), value.end());
+	};
+	// A two-byte CI, then a one-byte zero PM, then a four-byte EIP.
+	std::vector<uint8_t> bytes;
+	field(bytes, "CI", {0x05, 0x00});
+	field(bytes, "PM", {0x00});
+	field(bytes, "EIP", {0x11, 0x22, 0x33, 0x44});
+	ClientHello parsed;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), parsed));
+	// CI: its two bytes, then the PM field's name 'P' 'M'.
+	TEST_EXPECT(parsed.ci == (0x05u | (uint32_t('P') << 16) | (uint32_t('M') << 24)));
+	// PM: its zero byte, then 'E' 'I' 'P' of the next name: nonzero, so the
+	// identity check is skipped [orig: @0x6217C2].
+	TEST_EXPECT(parsed.pm ==
+			((uint32_t('E') << 8) | (uint32_t('I') << 16) | (uint32_t('P') << 24)));
+	TEST_EXPECT(opennova::client_hello_admits(parsed));
+	TEST_EXPECT(parsed.eip == 0x44332211u);
+
+	// A zero-length field still loads four bytes: here the next field's name and
+	// its NUL, "EPN\0".
+	bytes.clear();
+	field(bytes, "ET", {});
+	field(bytes, "EPN", {0x34, 0x12});
+	ClientHello empty_value;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), empty_value));
+	TEST_EXPECT(empty_value.et ==
+			(uint32_t('E') | (uint32_t('P') << 8) | (uint32_t('N') << 16)));
+	// The last field: its two bytes, then the two past the datagram's end,
+	// which ours reads as zero (retail's stack decrypt buffer, D-NET-410).
+	TEST_EXPECT(empty_value.epn == 0x1234u);
+	return 0;
+}
+
 int test_client_hello_tag_names_are_case_insensitive() {
 	ClientHello src;
 	src.pn = "NOVAWORLDUDP";
@@ -499,6 +544,7 @@ int main() {
 	if (test_client_hello_minimal() != 0) return 1;
 	if (test_client_hello_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_client_hello_admits_nonzero_pm_without_identity() != 0) return 1;
+	if (test_client_hello_short_dword_takes_the_following_bytes() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
