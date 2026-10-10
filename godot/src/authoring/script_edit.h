@@ -22,9 +22,10 @@ namespace godot {
 // empty (so its menu offers none) and Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z are left to the editor's
 // shortcuts, never taken here. One caret, and its selections not dragged and dropped: a change at
 // several places is a step of lines (an indent), never a caret's at each of them. No auto indent
-// after a line's end (the text's own). Its paste is its own (the clipboard's CR LFs and CRs alone
-// each an LF), which cannot reach the state that lets Godot's paste a line copied with nothing
-// selected above the current one, so a copy or a cut with nothing selected takes nothing. The
+// after a line's end (the text's own). Its copy, cut and paste are its own: the clipboard's CR LFs and
+// CRs alone each an LF as it pastes, and a copy or a cut with nothing selected taking the caret's line
+// whole, which a paste with nothing selected puts above the caret's line, as Godot's own do (whose state
+// of a line copied our paste cannot read: the control keeps the text it put on the clipboard). The
 // findings show as an icon a line in a gutter of their own (the worst one's severity, the shapes
 // and colours of the windows' marks), their messages its tooltip over the gutter and the worst one's
 // first sentence written after the line's text (S15); each marked line keeps its mark's index as its
@@ -66,8 +67,18 @@ public:
 	String get_mark_tip(int p_line) const;
 
 	// A paste: the clipboard's text with each CR LF and each CR alone an LF (a Godot text control drops
-	// a CR as it takes text, which would join the lines a CR alone ends), in place of the selection.
+	// a CR as it takes text, which would join the lines a CR alone ends), in place of the selection; a
+	// line the control copied whole, with nothing selected, above the caret's line.
 	void _paste(int32_t p_caret_index) override;
+	// A copy and a cut: the selection; with nothing selected, the caret's line whole and its line end, the
+	// cut taking the line out.
+	void _copy(int32_t p_caret_index) override;
+	void _cut(int32_t p_caret_index) override;
+	// The copy, the cut and the paste on a text in place of the clipboard (a headless display has none):
+	// what a copy or a cut puts there, and a paste of `p_text` as the clipboard's (the GUT tests' seams).
+	String copy_text();
+	String cut_text();
+	void paste_text(const String &p_text);
 
 	// What its device answers of the script (ADR 0046 S15; the data is session/script_assist's): the
 	// completions at the caret (the device adds the options and updates the list), a word's words at a
@@ -122,6 +133,9 @@ private:
 	std::vector<std::function<void()>> deferred_;
 	bool deferred_pending_ = false;
 	String path_;
+	// The line a copy or a cut with nothing selected put on the clipboard, its line end with it ("" none): a
+	// paste of that text with nothing selected goes above the caret's line.
+	String line_copy_;
 	int gutter_ = 0; // the findings' gutter
 	std::array<Ref<ImageTexture>, 3> icons_; // by severity: info, warning, error
 	std::vector<opennova::editor::ScriptMark> marks_;

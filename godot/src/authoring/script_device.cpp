@@ -1,6 +1,8 @@
 #include "authoring/script_device.h"
 
 #include <godot_cpp/classes/canvas_layer.hpp>
+#include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/window.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -81,6 +83,7 @@ ScriptDevice::ScriptDevice(Node &owner, ViewportDeviceSink sink) : sink_(std::mo
 	                  [this](int line, int column) { lookup_(line, column); }});
 	layer->add_child(edit);
 	owner.add_child(layer);
+	owner_id_ = owner.get_instance_id();
 	layer_id_ = layer->get_instance_id();
 	edit_id_ = edit->get_instance_id();
 }
@@ -122,10 +125,32 @@ const opennova::editor::DocumentBase *ScriptDevice::document_() const {
 	return nullptr;
 }
 
+Window *ScriptDevice::window_of_(int64_t window) const {
+	if (window <= 0) return nullptr;
+	DisplayServer *server = DisplayServer::get_singleton();
+	if (!server || !server->get_window_list().has(int32_t(window))) return nullptr;
+	return Object::cast_to<Window>(ObjectDB::get_instance(ObjectID(server->window_get_attached_instance_id(int32_t(window)))));
+}
+
+Node *ScriptDevice::host_(int64_t window) const {
+	if (window == 0) return Object::cast_to<Node>(ObjectDB::get_instance(ObjectID(owner_id_)));
+	return window_of_(window);
+}
+
+bool ScriptDevice::places_in(int64_t window) const {
+	return window == 0 || window_of_(window) != nullptr;
+}
+
 void ScriptDevice::draw(const opennova::editor::ViewportPicture &picture) {
 	ScriptEdit *edit = this->edit();
 	if (!edit) return;
 	drawn_ = true;
+	// Its layer under the OS window the picture is in: the owner for the main window, an undocked tab's Window
+	// for its (the control a Control of that window, its input that window's); a picture with no room (the view's
+	// bring-home) takes it home.
+	CanvasLayer *layer = Object::cast_to<CanvasLayer>(ObjectDB::get_instance(ObjectID(layer_id_)));
+	Node *host = host_(picture.window);
+	if (layer && host && layer->get_parent() != host) layer->reparent(host, false);
 	// The rect where it shows: the picture within the window's part the canvas shows it in.
 	float left = picture.x, top = picture.y;
 	float right = picture.x + float(picture.width), bottom = picture.y + float(picture.height);

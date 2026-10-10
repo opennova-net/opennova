@@ -1185,6 +1185,42 @@ func test_a_table_plays_on_its_rig() -> void:
 			var center: Vector3 = (surface.global_transform * box).get_center()
 			assert_true(camera.is_position_in_frustum(center), "the surface stands before the camera: %s" % center)
 	assert_gt(drawn, 0, "the skinned mesh draws on its rig")
+	# The strips a skinned effect's vertex program poses (VS_SKBASIC's, as the soldiers' VS_SKBUMPPHONGT) draw from
+	# the model's bone palette, published for every bone with the pose's culling box (no strip collapsed).
+	var palette: Array = model.get_skin_palette()
+	assert_eq(palette.size(), skeleton.get_bone_count(), "the bone palette holds every bone")
+	var palette_strips := 0
+	for found: Variant in skeleton.find_children("*", "MeshInstance3D", true, false):
+		var strip := found as MeshInstance3D
+		if strip.mesh != null and strip.is_visible_in_tree() and strip.custom_aabb.has_volume():
+			palette_strips += 1
+	assert_gt(palette_strips, 0, "a palette strip draws with its posed bounds")
+
+	# S23 C: the walk clip opened as its own document while a table no item pairs names it first (the base game's
+	# one1_s155.bad, which E_STAND.adm and one1.adm both name): it plays on the paired table's model, its skinned
+	# mesh drawn, where it showed no model at all.
+	_write(dir.path_join("project/anims/ASKIN.adm"), FileAccess.get_file_as_bytes(dir.path_join("project/anims/SKIN.adm")))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("anims/walk.bad"))
+	var clip := await _await_ready("anims/walk.bad")
+	assert_eq(String(clip.get("status", "")), "ready", str(clip))
+	var clip_animation: Dictionary = clip.get("body", {}).get("animation", {})
+	assert_eq(String(clip_animation.get("model", "")).to_lower(), "skinned.3di")
+	assert_eq(String(clip_animation.get("table", "")).to_lower(), "skin.adm")
+	assert_true(bool(clip_animation.get("rig", false)))
+	await get_tree().process_frame
+	var clip_model: ObjectModel = _device_node(clip, "ObjectModel")
+	assert_not_null(clip_model)
+	if clip_model == null:
+		return
+	assert_true(clip_model.has_skeleton(), "the clip's rig bound to the paired model")
+	var clip_drawn := 0
+	for found: Variant in clip_model.get_skeleton().find_children("*", "MeshInstance3D", true, false):
+		var surface := found as MeshInstance3D
+		if surface.mesh != null and surface.is_visible_in_tree():
+			clip_drawn += 1
+	assert_gt(clip_drawn, 0, "the clip's skinned mesh draws on its rig")
 
 
 ## DI-04: a clip's footstep events heard as it runs. The session fires each on the body's ticks through
