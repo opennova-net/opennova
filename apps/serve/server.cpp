@@ -47,7 +47,7 @@ const char kUsage[] =
 		"  --loose-root     mount a directory that holds no game archives as loose files\n"
 		"  --lan-port       the first port of the bind scan (default: game.cfg mplanserverportmin,\n"
 		"                   the head of the retail LAN server range; mpnovaworldportmin when\n"
-		"                   listing on NovaWorld)\n"
+		"                   listing on NovaWorld); 0 binds a port the OS picks\n"
 		"  --log-debug      print the engine's debug log lines\n"
 		"  --master-host    the NovaWorld gate to list on (127.0.0.1 for an\n"
 		"                   opennova-novaworld-server on this machine). With it, game.cfg's\n"
@@ -75,10 +75,11 @@ const char kUsage[] =
 constexpr const char *kAdminLogFileName = "admin_log.txt";
 
 // The one-token switches, retail-spelled ones matched case-insensitively.
-bool parse_port(const std::string &text, uint16_t &out) {
+bool parse_port(const std::string &text, uint16_t &out, bool allow_zero = false) {
 	char *end = nullptr;
 	const unsigned long value = std::strtoul(text.c_str(), &end, 0);
-	if (text.empty() || end == nullptr || *end != '\0' || value == 0 || value > 0xFFFF) return false;
+	if (text.empty() || end == nullptr || *end != '\0' || (value == 0 && !allow_zero) || value > 0xFFFF)
+		return false;
 	out = static_cast<uint16_t>(value);
 	return true;
 }
@@ -148,10 +149,12 @@ int parse_serve_options(const std::vector<std::string> &args, ServeOptions &out,
 		} else if (a == "--lan-port") {
 			std::string text;
 			if (!value(text)) return 1;
-			if (!parse_port(text, out.port)) {
-				error = "--lan-port must be 1..65535";
+			uint16_t port = 0;
+			if (!parse_port(text, port, /*allow_zero=*/true)) {
+				error = "--lan-port must be 0..65535";
 				return 1;
 			}
+			out.port = port;
 		} else if (a == "--master-host") {
 			if (!value(out.master_host)) return 1;
 		} else if (a == "--master-gate-port") {
@@ -520,7 +523,8 @@ bool Server::route_mission_exit(int32_t reason) {
 // over the cfg's LAN server range on the LAN type, and on the NovaWorld type the
 // mpnovaworld range whatever the authority, so the NWU session, the game
 // traffic and the joiners share it (D-NET-346). Each scans from its first port,
-// stepping by its delta and wrapping; --lan-port replaces the first port
+// stepping by its delta and wrapping; --lan-port replaces the first port (0,
+// the OS's pick, which the first bind takes)
 // [orig: CNapiNetwork_OpenTransportSocket @0x4C6A40 — the one open @0x4C6A7C,
 // the authority arm @0x4C6AA2 over mplanserverportmin / max / delta
 // (g_GameConfigState+0x244 / +0x248 / +0x24C), the NovaWorld arm
@@ -529,7 +533,7 @@ bool Server::route_mission_exit(int32_t reason) {
 // mpnovaworldportrandom start (+0x234, off by default) is not ported. The
 // embedder owns the socket layer (net::startup), which is process-wide.
 bool Server::open_socket(std::string &error) {
-	const uint32_t first = options_.port != 0 ? options_.port
+	const uint32_t first = options_.port ? *options_.port
 			: static_cast<uint32_t>(novaworld_ ? cfg_.mp_novaworld_port_min : cfg_.mp_lan_server_port_min);
 	const uint32_t max = static_cast<uint32_t>(
 			novaworld_ ? cfg_.mp_novaworld_port_max : cfg_.mp_lan_server_port_max);
