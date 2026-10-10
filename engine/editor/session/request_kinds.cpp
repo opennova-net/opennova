@@ -282,8 +282,8 @@ void serve_rename_folder(SessionCore &core, const EditorRequest &request) {
 void serve_delete_folder(SessionCore &core, const EditorRequest &request) {
 	core.chores().delete_folder(request);
 }
-void serve_empty_trash(SessionCore &core, const EditorRequest &) {
-	core.chores().empty_trash();
+void serve_empty_trash(SessionCore &core, const EditorRequest &request) {
+	core.chores().empty_trash(request.force);
 }
 // UndoFile and RedoFile.
 void serve_file_history(SessionCore &core, const EditorRequest &request) {
@@ -1262,9 +1262,9 @@ constexpr RequestKindRow kRows[] = {
 	Request(K::EmptyTrash, "empty_trash", serve_empty_trash,
 			"What the project's trash holds removed for good (Files' Empty the trash..., asked first), the trash's "
 			"folder with it: the one chore that removes files. The file history goes with it, each of its steps "
-			"taking what it put there back from there; the note says how many files went. Refused (file.trash) when "
-			"something stays.")
-			.takes(request_params({}))
+			"taking what it put there back from there; the note says how many files went. Only with force: "
+			"refused (file.trash) without it, and when something stays.")
+			.takes(request_params({}, { F::Force }))
 			.holds(kFiles, kFiles)
 			.row,
 	Request(K::PickDirectory, "pick_directory", nullptr,

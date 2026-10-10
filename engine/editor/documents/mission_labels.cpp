@@ -358,10 +358,12 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 				out = stop_display(*document, entity.waypoint_id, *number, StopUse::Start, names);
 			else return false;
 		} else if (id == "wp_adv_trigger") {
-			// A waypoint's advance trigger: the event it completes on, by its index (none at 0 or below)
-			// [orig: Entity_SpawnFromBMSRecord @0x40f0b3; EventTrigger_MarkLinkedSpawnPoints @0x452ce0].
+			// A waypoint's advance trigger: an event by its index, none below 0 (the original editor's -1
+			// [orig: JOTACmed.exe MissionItem_InitFromDefinition @ 0x44dd7a]) [orig: Entity_SpawnFromBMSRecord
+			// @0x40f0b3; EventTrigger_MarkLinkedSpawnPoints @0x452ce0]. One of 0 names event 1, which the game
+			// never completes a waypoint on (mission.event_missing says so).
 			if (entity.type_id != def::DEF_TYPE_WAYPOINT) return false;
-			if (*number <= 0) {
+			if (*number < 0) {
 				out = DisplayName();
 				out.raw = std::to_string(*number);
 				out.text = "No event (the waypoint advances when the player reaches it)";

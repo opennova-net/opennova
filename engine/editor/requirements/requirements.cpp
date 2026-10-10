@@ -28,8 +28,13 @@ bool requirement_multiplayer_only(const std::string &role) {
 }
 
 bool requirement_row_enabled(const ProjectDocument &doc, const RequiredResource &resource) {
+	const std::string role = resource.role ? resource.role : "";
+	// mp.mnu is the shell's: the startup screen's NW_MULTI_PLAYER and NW_ACTIVATE controls load it with no
+	// mission [orig: sub_555890 @0x5558c7, @0x5558e5 -> sub_5557A0 -> UI_EnterNovaWorldMenu @0x5588fa], so
+	// Multiplayer alone puts it on the checklist, whatever the manifest's phase.
+	if (role == "mp_menu") return doc.features.multiplayer;
 	if (!requirement_phase_enabled(doc, resource.phase)) return false;
-	return doc.features.multiplayer || !requirement_multiplayer_only(resource.role ? resource.role : "");
+	return doc.features.multiplayer || !requirement_multiplayer_only(role);
 }
 
 const char *requirement_phase_label(int phase) {

@@ -154,7 +154,7 @@ private:
 	void draw_empty_trash(const SessionView &view);
 	// The rows selected with `path` besides it (Ctrl+click adds or takes one, Shift+click a run of them): none
 	// when `path` is not among them, so a chore acts on the row it was asked of alone.
-	std::vector<std::string> others_of(const std::string &path) const;
+	std::vector<std::string> others_of(const SessionView &view, const std::string &path) const;
 	bool chosen(const std::string &path) const;
 	// A click on a row: Ctrl adds or takes it, Shift the run from the selected row to it, else it alone.
 	void choose(const std::string &path);

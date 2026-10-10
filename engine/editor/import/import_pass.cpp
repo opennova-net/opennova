@@ -118,9 +118,10 @@ void ImportPass::limit_to(std::vector<std::string> sources) {
 // time: a rewrite of the same size inside its timestamp tick is never taken for the bytes read. A
 // pass over some sources (limit_to) keeps what the cache knew of everything else.
 void ImportPass::save_cache() const {
-	Cache kept = limited_ ? cache_ : Cache();
+	const bool partial = limited_ || !walked_whole_;
+	Cache kept = partial ? cache_ : Cache();
 	for (const auto &[file, seen] : seen_.files) kept.files[file] = seen;
-	if (limited_)
+	if (partial)
 		for (const auto &[source, path] : listed_) {
 			(void)path;
 			kept.records.erase(source);
@@ -216,13 +217,18 @@ bool ImportPass::step(uint64_t budget) {
 				listed_.emplace_back(std::move(relative), path);
 			}
 			walk_.increment(ec);
-			if (ec) walk_ = fs::recursive_directory_iterator(); // the walk stops where it could not go on
+			if (ec) {
+				// The walk stops where it could not go on: the sources past it unlisted.
+				walk_ = fs::recursive_directory_iterator();
+				walked_whole_ = false;
+			}
 			break;
 		}
 		case Phase::Importing: {
 			if (next_ == listed_.size()) {
 				save_cache();
-				if (!limited_) remove_stale_outputs();
+				// Only a pass that listed every source knows which output folders none names.
+				if (!limited_ && walked_whole_) remove_stale_outputs();
 				phase_ = Phase::Done;
 				return true;
 			}

@@ -263,7 +263,8 @@ bool in_export_folder(const fs::path &dir, const fs::path &export_dir) {
 }
 
 RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
-                     const std::string &file, const std::string &folder, const std::vector<ImportedSource> *imports) {
+                     const std::string &file, const std::string &folder, const std::vector<ImportedSource> *imports,
+                     const std::vector<std::string> *companions) {
 	RenamePlan plan;
 	plan.move = true;
 	const AssetEntry *asset = find_asset(scan, file);
@@ -325,13 +326,22 @@ RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, 
 	};
 	read_from_its_place(*asset);
 	// A mission's companions beside it go with it (the files the game finds by its name, ADR 0046 S14), so
-	// its set stays together; one kept elsewhere stays, the game finding it by its name wherever it sits.
-	if (asset->kind == AssetKind::Mission && strutil::ends_with_icase(asset->logical_name, ".bms")) {
+	// its set stays together; one kept elsewhere stays, the game finding it by its name wherever it sits. A
+	// way back's are the ones that went (`companions`).
+	std::vector<const AssetEntry *> going;
+	if (companions) {
+		for (const std::string &path : *companions)
+			if (const AssetEntry *entry = scan.at_path(path); entry && entry->imported_from.empty()) going.push_back(entry);
+	} else if (asset->kind == AssetKind::Mission && strutil::ends_with_icase(asset->logical_name, ".bms")) {
 		const std::string from = folder_of_path(asset->relative_path);
 		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, asset->logical_name)) {
 			const AssetEntry *entry = find_asset(scan, member.path);
-			if (!entry || !entry->imported_from.empty() || !strutil::iequals(folder_of_path(entry->relative_path), from))
-				continue;
+			if (entry && entry->imported_from.empty() && strutil::iequals(folder_of_path(entry->relative_path), from))
+				going.push_back(entry);
+		}
+	}
+	{
+		for (const AssetEntry *entry : going) {
 			RenameOutput companion{entry->relative_path, entry->logical_name, entry->logical_name,
 			                       join_path(to, entry->logical_name)};
 			if (fs::exists(system_path(join_path(paths.root, companion.new_path)), ec) || ec)

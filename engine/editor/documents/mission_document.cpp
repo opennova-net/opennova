@@ -731,13 +731,13 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 				set({node->id, k(K::Stop), ids[i].id}, "marker", now);
 			}
 		}
-		// A type-6005 marker's advance trigger, an event by its index (none at 0 or below) [orig:
+		// A type-6005 marker's advance trigger, an event by its index (none below 0) [orig:
 		// Entity_SpawnFromBMSRecord @0x40f0b3; EventTrigger_MarkLinkedSpawnPoints @0x452ce0], moves with its
-		// event as the original editor moves it [orig: JOTACmed.exe sub_44D460 @ 0x44d460, sub_411C90
-		// @ 0x411c90]; a removal sets it to -1 first (removal_edits).
+		// event as the original editor moves it, 0 like any index [orig: JOTACmed.exe sub_44D460 @ 0x44d460,
+		// @ 0x44d59c; sub_411C90 @ 0x411dd8..0x411ded]; a removal sets it to -1 first (removal_edits).
 		if (!markers && is_entity_kind(node->kind)) {
 			const bms::Entity &marker = static_cast<const EntityRow &>(*node).native;
-			if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger <= 0) continue;
+			if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger < 0) continue;
 			const size_t now = shift.now(marker.wp_adv_trigger);
 			if (now == size_t(marker.wp_adv_trigger)) continue;
 			if (now == RecordShift::kRemoved) {

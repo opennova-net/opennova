@@ -112,13 +112,25 @@ DiskChanges::Look DiskChanges::look_file(const ProjectPaths &paths, const AssetS
 		if (confirmed == confirmed_.end() || confirmed->second != visit->second.read_ticks) {
 			std::vector<uint8_t> bytes;
 			std::string unread;
-			if (io::read_file_bytes(join_path(paths.root, file), bytes, unread) &&
-			    io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size()) != visit->second.racy_fingerprint) {
-				confirmed_.erase(file);
-				looked_.erase(file);
-				ready_.insert(file);
-				return Look::Ready;
+			if (io::read_file_bytes(join_path(paths.root, file), bytes, unread)) {
+				const uint64_t fingerprint = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+				if (fingerprint != visit->second.racy_fingerprint) {
+					// Another content under the same stamp (a write that leaves it, as a mapped one does): read
+					// once it holds still, a later look finding the same content kDiskHoldStillMs on.
+					const auto held = differs_.find(file);
+					if (held == differs_.end() || held->second.fingerprint != fingerprint) {
+						differs_[file] = Differs{fingerprint, now_ms};
+						return Look::Waiting;
+					}
+					if (now_ms - held->second.since_ms < kDiskHoldStillMs) return Look::Waiting;
+					differs_.erase(held);
+					confirmed_.erase(file);
+					looked_.erase(file);
+					ready_.insert(file);
+					return Look::Ready;
+				}
 			}
+			differs_.erase(file);
 			confirmed_[file] = visit->second.read_ticks;
 		}
 	}
@@ -224,6 +236,10 @@ std::vector<std::string> DiskChanges::pending_files() const {
 		(void)looked;
 		out.push_back(path);
 	}
+	for (const auto &[path, held] : differs_) {
+		(void)held;
+		if (!looked_.count(path)) out.push_back(path);
+	}
 	return out;
 }
 
@@ -241,6 +257,7 @@ void DiskChanges::clear() {
 	sweep_.clear();
 	sweep_next_ = 0;
 	confirmed_.clear();
+	differs_.clear();
 }
 
 } // namespace opennova::editor

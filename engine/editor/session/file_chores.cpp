@@ -463,27 +463,37 @@ void FileChores::move_files(const EditorRequest &request) {
 	}
 	std::string folder, why;
 	normalize_project_folder(request.folder, folder, why);
+	// The files asked for that moved (a mission's companions ride with it, unnamed).
+	std::vector<std::string> names;
+	for (const auto &[from, to] : moved)
+		for (const auto &[file, unused] : asked)
+			if (strutil::iequals(file, from) || strutil::iequals(basename_of(file), basename_of(from))) {
+				names.push_back(basename_of(from));
+				break;
+			}
+	if (names.empty()) names.push_back(basename_of(moved.front().first));
 	Step step;
-	step.words = "Move " + basename_of(moved.front().first) +
-	             (moved.size() == 1 ? std::string() : " and " + counted(moved.size() - 1, "other file")) + " to " +
+	step.words = "Move " + names.front() +
+	             (names.size() == 1 ? std::string() : " and " + counted(names.size() - 1, "other file")) + " to " +
 	             folder_words(folder);
+	// Every file the move took, a mission's companions too: its way back moves exactly these.
 	step.moves = moved;
 	push(std::move(step));
-	std::vector<std::string> names;
-	for (const auto &[from, to] : moved) names.push_back(basename_of(from));
 	core_.note("Moved " + names_in_words(names) + " to " + folder_words(folder) +
 	           ", no reference rewritten: the game finds a file by its name alone. Edit > Undo file moves them back.");
-	view_.activity.status = "Moved " + counted(moved.size(), "file") + " to " + folder_words(folder) + ".";
+	view_.activity.status = "Moved " + counted(names.size(), "file") + " to " + folder_words(folder) + ".";
 	core_.touch(ViewConcern::Output);
 }
 
 bool FileChores::move_now(const std::vector<std::pair<std::string, std::string>> &asked,
-                          std::vector<std::pair<std::string, std::string>> *moved_out) {
+                          std::vector<std::pair<std::string, std::string>> *moved_out, bool exact) {
 	const std::shared_ptr<const AssetScan> scan = view_.project.scan;
 	const ProjectDocument &project = *view_.project.document;
+	const std::vector<std::string> alone;
 	std::vector<RenamePlan> plans;
 	for (const auto &[file, folder] : asked)
-		plans.push_back(plan_move(paths_, project, *scan, file, folder, view_.project.imports.get()));
+		plans.push_back(
+		        plan_move(paths_, project, *scan, file, folder, view_.project.imports.get(), exact ? &alone : nullptr));
 	// A mission's companions go with its move: none is a move of its own. Of several, one in the folder already
 	// stays where it is.
 	std::vector<std::string> riding;
@@ -516,7 +526,16 @@ bool FileChores::move_now(const std::vector<std::pair<std::string, std::string>>
 	std::vector<std::string> touched;
 	bool sources = false;
 	if (!commit_moves(plans, moved, touched, sources)) {
+		// The folders it made, deepest first, once empty; a source put back imported again (its move took its
+		// outputs).
+		std::sort(made.begin(), made.end(), [](const std::string &a, const std::string &b) { return a.size() > b.size(); });
+		for (const std::string &dir : made) {
+			std::error_code ignored;
+			if (fs::is_directory(at(paths_, dir), ignored) && fs::is_empty(at(paths_, dir), ignored))
+				fs::remove(at(paths_, dir), ignored);
+		}
 		core_.update_files(touched);
+		if (sources) core_.start_refresh();
 		return false;
 	}
 	std::vector<std::string> gone;
@@ -527,10 +546,7 @@ bool FileChores::move_now(const std::vector<std::pair<std::string, std::string>>
 	follow(moved);
 	// An import source's outputs, made again under its new place (a move took the old ones).
 	if (sources) core_.start_refresh();
-	if (moved_out) {
-		moved_out->clear();
-		for (const RenamePlan &plan : plans) moved_out->emplace_back(plan.path, plan.new_path);
-	}
+	if (moved_out) *moved_out = moved;
 	return true;
 }
 
@@ -719,6 +735,8 @@ bool FileChores::move_folder(const std::string &folder, const std::string &new_n
 			if (fs::is_empty(at(paths_, *it), ignored)) fs::remove(at(paths_, *it), ignored);
 		}
 		core_.update_files(touched);
+		// A source put back has no outputs (its move took them): its import makes them again.
+		if (sources) core_.start_refresh();
 		return false;
 	}
 	// The folder's old tree, emptied, removed deepest first (a move takes its own folder once it empties).
@@ -762,8 +780,12 @@ void FileChores::follow(const std::vector<std::pair<std::string, std::string>> &
 
 // --- the trash ---------------------------------------------------------------------------------
 
-void FileChores::empty_trash() {
+void FileChores::empty_trash(bool force) {
 	if (!view_.project.open) return;
+	// The one chore that removes files for good: asked for, never a side effect.
+	if (!force)
+		return refuse(CoreFinding::FileTrash, "Emptying the trash removes what it holds for good and the file history with "
+		                                      "it: ask for it with force.");
 	size_t files = 0;
 	std::string error;
 	const bool emptied = opennova::editor::empty_trash(paths_, files, error);
@@ -799,11 +821,12 @@ std::vector<std::string> FileChores::leaving(const Step &step, bool back) const 
 bool FileChores::take(Step &step, bool back) {
 	// A folder's rename: renamed back, or again.
 	if (!step.from.empty()) return move_folder(back ? step.to : step.from, basename_of(back ? step.from : step.to));
-	// Files moved together: each moved back to the folder it left, or again.
+	// Files moved together: each moved back to the folder it left, or again, exactly the files the step moved
+	// (a mission's companions among them; one that sat in that folder before stays).
 	if (!step.moves.empty()) {
 		std::vector<std::pair<std::string, std::string>> asked;
 		for (const auto &[from, to] : step.moves) asked.emplace_back(back ? to : from, folder_of_path(back ? from : to));
-		return move_now(asked);
+		return move_now(asked, nullptr, true);
 	}
 	const std::vector<std::string> going = leaving(step, back);
 	TrashBatch &coming = back ? step.gone_batch : step.came_batch;

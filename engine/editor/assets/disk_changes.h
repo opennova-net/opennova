@@ -58,8 +58,9 @@ public:
 	// look() of each file of `files` against `scan`, each once; the files it found ready, in their order. A
 	// file whose stamp is the scan's but which the scan read within the file system's tick of its last write
 	// (AssetScan::Visit::racy: FAT and exFAT stamp two seconds apart, so a rewrite of the same size in that
-	// tick keeps the stamp) is compared by its content once the stamp has settled, once per visit: ready
-	// when it differs from what the scan read.
+	// tick keeps the stamp) is compared by its content once the stamp has settled, once per visit: one that
+	// differs from what the scan read waits as a moved one does, ready once a look kDiskHoldStillMs on finds
+	// the same content again.
 	void look_at(const ProjectPaths &paths, const AssetScan &scan, const std::vector<std::string> &files,
 	             int64_t now_ms, int64_t now_ticks);
 
@@ -88,7 +89,7 @@ public:
 	// those ready and not taken yet (a sweep's, between two checks), which a check looks at again before it
 	// takes them (one the scan caught up with meanwhile, an editor's own save, is then Same).
 	std::vector<std::string> pending_files() const;
-	size_t waiting() const { return looked_.size(); }
+	size_t waiting() const { return looked_.size() + differs_.size(); }
 	// The files ready to be read again, taken (their looks forgotten), in the order of their paths.
 	std::vector<std::string> take_ready();
 	size_t ready() const { return ready_.size(); }
@@ -119,6 +120,13 @@ private:
 	size_t sweep_next_ = 0;
 	// The racy visits whose content a settled look found as the scan read it, by path: the visit's read_ticks.
 	std::map<std::string, int64_t> confirmed_;
+	// The racy visits whose content a settled look found changed, by path: the content and when a look first
+	// found it, held still until a look kDiskHoldStillMs on finds it again.
+	struct Differs {
+		uint64_t fingerprint = 0;
+		int64_t since_ms = 0;
+	};
+	std::map<std::string, Differs> differs_;
 };
 
 } // namespace opennova::editor

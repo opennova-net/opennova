@@ -184,14 +184,26 @@ int test_looks() {
 	TEST_EXPECT(steps == every.size() && every.size() == 3);
 	TEST_EXPECT(sweep.take_ready() == std::vector<std::string>({"made/d.def"}));
 
-	// A file the scan read within its stamp's tick: a rewrite of the same size that keeps the stamp (FAT and
-	// exFAT stamp two seconds apart) is found by its content once the stamp has settled, never before; one
-	// whose content is as the scan read it is not.
+	// A file the scan read within its stamp's tick where the stamp is coarse: a rewrite of the same size that
+	// keeps the stamp (FAT stamps two seconds apart, exFAT ten milliseconds) is found by its content once the
+	// stamp has settled and the content holds still, never before; one whose content is as the scan read it is
+	// not. A stamp as fine as NTFS's or Linux's moves with a rewrite: no content is read for it.
 	TEST_EXPECT(editor_test::write_text(root + "/racy.def", items_text(1)) &&
-	            editor_test::write_text(root + "/kept.def", items_text(1)));
+	            editor_test::write_text(root + "/kept.def", items_text(1)) &&
+	            editor_test::write_text(root + "/fine.def", items_text(1)));
+	{
+		using Ticks = fs::file_time_type::duration;
+		const int64_t tick = std::chrono::duration_cast<Ticks>(std::chrono::milliseconds(10)).count();
+		const int64_t now = io::file_clock_now_ticks(), coarse = now - now % tick;
+		std::error_code ec;
+		for (const char *name : {"racy.def", "kept.def"})
+			fs::last_write_time(system_path(root + "/" + name), fs::file_time_type(Ticks(coarse)), ec);
+		fs::last_write_time(system_path(root + "/fine.def"), fs::file_time_type(Ticks(coarse + 1)), ec);
+	}
 	const AssetScan racy_scan = scan_project_assets(paths, doc);
 	const auto racy_visit = racy_scan.visits().find("racy.def");
 	TEST_EXPECT(racy_visit != racy_scan.visits().end() && racy_visit->second.racy);
+	TEST_EXPECT(racy_scan.visits().count("fine.def") && !racy_scan.visits().find("fine.def")->second.racy);
 	const int64_t racy_stamp = scanned_stamp(racy_scan, "racy.def").modified_ticks;
 	std::string rewritten = items_text(1);
 	rewritten.replace(rewritten.find("hp 10"), 5, "hp 11");
@@ -208,10 +220,14 @@ int test_looks() {
 	TEST_EXPECT(racy.waiting() == 0 && racy.ready() == 0);
 	const int64_t kept_stamp = scanned_stamp(racy_scan, "kept.def").modified_ticks;
 	racy.look_at(paths, racy_scan, {"racy.def", "kept.def"}, 6100, std::max(racy_stamp, kept_stamp) + settle);
-	TEST_EXPECT(racy.take_ready() == std::vector<std::string>({"racy.def"}));
+	TEST_EXPECT(racy.waiting() == 1 && racy.ready() == 0 && racy.pending_files() == std::vector<std::string>({"racy.def"}));
+	racy.look_at(paths, racy_scan, {"racy.def", "kept.def"}, 6100 + kDiskHoldStillMs - 1, std::max(racy_stamp, kept_stamp) + settle);
+	TEST_EXPECT(racy.waiting() == 1 && racy.ready() == 0);
+	racy.look_at(paths, racy_scan, {"racy.def", "kept.def"}, 6100 + kDiskHoldStillMs, std::max(racy_stamp, kept_stamp) + settle);
+	TEST_EXPECT(racy.waiting() == 0 && racy.take_ready() == std::vector<std::string>({"racy.def"}));
 	std::printf("looks: a file read once it holds still or settled, gone, moved back; the folders' made and gone "
-	            "files, a dot-folder and the export folder passed over; the sweep a step at a time; a racy stamp "
-	            "compared by content\n");
+	            "files, a dot-folder and the export folder passed over; the sweep a step at a time; a racy coarse stamp "
+	            "compared by content, held still\n");
 	return 0;
 }
 

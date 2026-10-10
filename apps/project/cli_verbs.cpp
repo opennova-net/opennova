@@ -970,8 +970,8 @@ int run_rename_folder(Cli &cli, const CliVerbRow &, const CliArgs &args) {
 int run_remove_folder(Cli &cli, const CliVerbRow &, const CliArgs &args) {
 	return send_chore(cli, editor::request::delete_folder(args.positional[1], args.has("--all"), args.has("--force")));
 }
-int run_empty_trash(Cli &cli, const CliVerbRow &, const CliArgs &) {
-	return send_chore(cli, editor::request::empty_trash());
+int run_empty_trash(Cli &cli, const CliVerbRow &, const CliArgs &args) {
+	return send_chore(cli, editor::request::empty_trash(args.has("--force")));
 }
 // --as names one copy.
 bool check_copy(const CliArgs &args, std::string &why) {
@@ -1259,6 +1259,7 @@ constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash"
 constexpr CliOption kRemoveOptions[] = { { "--force" }, { "--alone" } };
 constexpr CliOption kCopyOptions[] = { { "--as", "a file name" }, { "--alone" } };
 constexpr CliOption kRemoveFolderOptions[] = { { "--all" }, { "--force" } };
+constexpr CliOption kEmptyTrashOptions[] = { { "--force" } };
 
 using V = CliVerb;
 
@@ -1405,9 +1406,10 @@ constexpr VerbRow kRows[] = {
 	        .takes(kRemoveFolderOptions)
 	        .answers_with(CliAnswer::Request)
 	        .row,
-	Verb(V::EmptyTrash, "empty-trash", "<dir>", kEmptyTrashRequests, kDir, run_empty_trash,
-	     "remove for good what the project's trash (.opennova/trash/) holds (--json: the\n"
-	     "empty_trash request's answer)")
+	Verb(V::EmptyTrash, "empty-trash", "<dir> --force", kEmptyTrashRequests, kDir, run_empty_trash,
+	     "remove for good what the project's trash (.opennova/trash/) holds, only with --force\n"
+	     "(--json: the empty_trash request's answer)")
+	        .takes(kEmptyTrashOptions)
 	        .answers_with(CliAnswer::Request)
 	        .row,
 	Verb(V::Request, "request", "<dir> <json>", kReadRequests, kRequestArgs, run_request,

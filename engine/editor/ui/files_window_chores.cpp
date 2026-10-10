@@ -61,12 +61,17 @@ bool FilesWindow::chosen(const std::string &path) const {
 	return path == selected_ || std::find(also_.begin(), also_.end(), path) != also_.end();
 }
 
-std::vector<std::string> FilesWindow::others_of(const std::string &path) const {
+std::vector<std::string> FilesWindow::others_of(const SessionView &view, const std::string &path) const {
 	if (!chosen(path)) return {};
+	// Every row selected with it, but an import's outputs (their sources make them): a chore over several rows
+	// leaves them out rather than be refused whole.
 	std::vector<std::string> out;
-	if (selected_ != path && !selected_.empty()) out.push_back(selected_);
+	const auto take = [&](const std::string &other) {
+		if (const AssetEntry *file = chore_entry_at(view, other); file && file->imported_from.empty()) out.push_back(other);
+	};
+	if (selected_ != path && !selected_.empty()) take(selected_);
 	for (const std::string &other : also_)
-		if (other != path) out.push_back(other);
+		if (other != path) take(other);
 	return out;
 }
 
@@ -223,9 +228,7 @@ void FilesWindow::draw_chore_entries(const SessionView &view, const AssetEntry &
 	const bool output = !entry.imported_from.empty();
 	const bool source = entry.kind == AssetKind::ImportSource;
 	// Every row selected with it, but an import's outputs (their sources make them).
-	std::vector<std::string> others;
-	for (const std::string &other : others_of(entry.relative_path))
-		if (const AssetEntry *file = chore_entry_at(view, other); file && file->imported_from.empty()) others.push_back(other);
+	const std::vector<std::string> others = others_of(view, entry.relative_path);
 	const std::string several = others.empty() ? std::string() : " " + counted(others.size() + 1, "file");
 	const bool copies = !output && view.allows(EditorRequestKind::DuplicateAsset);
 	if (ImGui::MenuItem(("Duplicate" + several).c_str(), nullptr, false, copies))
@@ -424,7 +427,7 @@ void FilesWindow::draw_empty_trash(const SessionView &view) {
 	const bool empty = ImGui::Button("Empty the trash");
 	ImGui::EndDisabled();
 	if (empty && allowed) {
-		workspace_.request(request::empty_trash());
+		workspace_.request(request::empty_trash(true));
 		trash_asked_ = false;
 		trash_popup_.close();
 	}

@@ -595,15 +595,15 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 			};
 		// A type-6005 marker's advance trigger is an event by its index: the spawn keeps it as the waypoint's
 		// linked event [orig: Entity_SpawnFromBMSRecord @0x40f0b3 -> entity+0x210], an event of that index
-		// completing the waypoint when it fires and none above 0 naming none [orig:
+		// completing the waypoint when it fires and one below 0 naming none [orig:
 		// EventTrigger_MarkLinkedSpawnPoints @0x452ce0; Player_UpdatePerFrame @0x4de649], and the original
 		// editor renumbers it with the events [orig: JOTACmed.exe sub_44D460 @ 0x44d460, the paste;
 		// sub_455B20 @ 0x455b20, the delete (-1, WP_EVENT_DELETED); sub_411C90 @ 0x411c90, the move].
 		if (same_text(field.key, "wp_adv_trigger")) {
 			out.reference = [](const RecordHandle &record, const RecordOwners &) {
 				const bms::Entity &entity = record.as<bms::Entity>();
-				return entity.type_id == def::DEF_TYPE_WAYPOINT && entity.wp_adv_trigger > 0 ? ReferenceKind::MissionEvent
-				                                                                            : ReferenceKind::None;
+				return entity.type_id == def::DEF_TYPE_WAYPOINT && entity.wp_adv_trigger >= 0 ? ReferenceKind::MissionEvent
+				                                                                             : ReferenceKind::None;
 			};
 			out.applies = [](const RecordHandle &record, const RecordOwners &) {
 				return record.as<bms::Entity>().type_id == def::DEF_TYPE_WAYPOINT ? Applicability::Reads
@@ -630,6 +630,7 @@ const char *box_value_label(int32_t type) {
 	switch (type) {
 	case 1: return "Health per tick";
 	case 2: return "Mana per tick";
+	case 3: return "Mission name (its first four characters)";
 	case 4: return "Reverb preset";
 	case 5: return "Location";
 	case 6: return "Music variable 4";

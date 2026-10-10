@@ -133,9 +133,13 @@ std::string companion_path(const RenameOutput &companion);
 // files its import read beside it (they are found from its folder: moved alone, it would no longer
 // find them), or a file another source's import reads from its place (`imports`, the import pass's
 // sources: moved, that import would no longer find it); each of these of a companion it takes too.
+// `companions`, when given, the files that go with it instead, exactly those (a move's way back: the ones
+// that went with it, never one that sat in that folder before; an empty list for none), each the
+// project's file at that path, one gone since left out.
 RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                      const std::string &file, const std::string &folder,
-                     const std::vector<ImportedSource> *imports = nullptr);
+                     const std::vector<ImportedSource> *imports = nullptr,
+                     const std::vector<std::string> *companions = nullptr);
 // A project-relative path's folder ("" the top level).
 std::string folder_of_path(const std::string &relative);
 // Whether the folder `dir` (on disk) is the project's export folder `export_dir`, one an export keeps beside

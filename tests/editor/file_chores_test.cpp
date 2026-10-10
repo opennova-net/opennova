@@ -17,6 +17,7 @@
 #include <editor/graph/file_plans.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project/project_trash.h>
 #include <editor/session/file_card.h>
@@ -449,12 +450,40 @@ int test_mission_moves() {
 	// Both rows chosen: the companion goes with its mission, no move of its own.
 	TEST_EXPECT(editor_test::handle_to_end(session, request::move_assets("levels/logic1.bms", {"levels/logic1.wac"}, "")).done());
 	TEST_EXPECT(on_disk(p.root, "logic1.bms") && on_disk(p.root, "logic1.wac") && !on_disk(p.root, "levels"));
+	TEST_EXPECT(v.activity.status == "Moved 2 files to the top level.");
 	TEST_EXPECT(editor_test::handle_to_end(session, request::undo_file()).done());
 	TEST_EXPECT(on_disk(p.root, "levels/logic1.bms") && on_disk(p.root, "levels/logic1.wac"));
 	// One kept in another folder stays there.
 	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("levels/logic1.wac", "scripts")).done());
 	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("levels/logic1.bms", "")).done());
 	TEST_EXPECT(on_disk(p.root, "logic1.bms") && on_disk(p.root, "scripts/logic1.wac"));
+
+	// The way back moves the files that went, exactly those: a companion that sat in the folder before stays
+	// there (Edit > Move back, and Undo file of a move of several).
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("scripts/logic1.wac", "")).done());
+	TEST_EXPECT(editor_test::write_text(join_path(p.root, "maps/logic1.til"), "tiles"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::rescan()).done());
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("logic1.bms", "maps")).done());
+	TEST_EXPECT(on_disk(p.root, "maps/logic1.bms") && on_disk(p.root, "maps/logic1.wac") && on_disk(p.root, "maps/logic1.til"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::rename_back()).done());
+	TEST_EXPECT(on_disk(p.root, "logic1.bms") && on_disk(p.root, "logic1.wac") && on_disk(p.root, "maps/logic1.til") &&
+	            !on_disk(p.root, "logic1.til"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_assets("logic1.bms", {"logic1.wac"}, "maps")).done());
+	TEST_EXPECT(v.activity.file_history.undo == "Move logic1.bms and 1 other file to maps/");
+	TEST_EXPECT(editor_test::handle_to_end(session, request::undo_file()).done());
+	TEST_EXPECT(on_disk(p.root, "logic1.bms") && on_disk(p.root, "logic1.wac") && on_disk(p.root, "maps/logic1.til") &&
+	            !on_disk(p.root, "logic1.til"));
+
+	// A companion's unsaved edits ask first on the way back: it closes and opens again where it goes.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::move_asset("logic1.bms", "maps")).done());
+	TEST_EXPECT(on_disk(p.root, "maps/logic1.wac"));
+	TEST_EXPECT(editor_test::handle_to_end(session, request::open_document("maps/logic1.wac")).done());
+	editor_test::handle_to_end(session,
+	                           request::edit_record("maps/logic1.wac", {TextDocument::replace(TextSpan{1, 1, 0}, "// edited\r\n")}));
+	TEST_EXPECT(session.document_base_for("maps/logic1.wac") && session.document_base_for("maps/logic1.wac")->dirty());
+	session.handle(request::rename_back());
+	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.files.size() == 1 &&
+	            v.dialogs.unsaved_prompt.files[0] == "maps/logic1.wac" && on_disk(p.root, "maps/logic1.bms"));
 	return 0;
 }
 
@@ -470,12 +499,15 @@ int test_empty_trash() {
 	TEST_EXPECT(editor_test::handle_to_end(session, request::delete_asset(copy)).done());
 	const ProjectPaths paths = ProjectPaths::for_root(p.root);
 	TEST_EXPECT(trash_file_count(paths) == 1 && v.activity.file_history.undo_steps == 2);
-	TEST_EXPECT(editor_test::handle_to_end(session, request::empty_trash()).done());
+	// Asked for, or refused: nothing removed, the history kept.
+	TEST_EXPECT(has_code(editor_test::handle_to_end(session, request::empty_trash(false)).findings, "file.trash"));
+	TEST_EXPECT(trash_file_count(paths) == 1 && v.activity.file_history.undo_steps == 2);
+	TEST_EXPECT(editor_test::handle_to_end(session, request::empty_trash(true)).done());
 	TEST_EXPECT(trash_file_count(paths) == 0 && !on_disk(p.root, ".opennova/trash"));
 	TEST_EXPECT(v.activity.file_history.undo_steps == 0 && v.activity.file_history.redo_steps == 0);
 	TEST_EXPECT(v.activity.status == "Emptied the trash (1 file).");
 	TEST_EXPECT(has_code(editor_test::handle_to_end(session, request::undo_file()).findings, "file.history"));
-	TEST_EXPECT(editor_test::handle_to_end(session, request::empty_trash()).done() && v.activity.status == "The trash was empty.");
+	TEST_EXPECT(editor_test::handle_to_end(session, request::empty_trash(true)).done() && v.activity.status == "The trash was empty.");
 	return 0;
 }
 
@@ -508,7 +540,8 @@ int test_command_line() {
 	TEST_EXPECT(run({"cp", root, "main.mnu"}) == 0 && run({"rm", root, "main2.mnu"}) == 0 && !on_disk(root, join_path(folder, "main2.mnu")));
 	TEST_EXPECT(run({"rm", root, "nothing.mnu"}) == 1);
 	TEST_EXPECT(run({"rm", root}) == 2);
-	TEST_EXPECT(run({"empty-trash", root}) == 0 && trash_file_count(ProjectPaths::for_root(root)) == 0);
+	TEST_EXPECT(run({"empty-trash", root}) == 1 && trash_file_count(ProjectPaths::for_root(root)) > 0);
+	TEST_EXPECT(run({"empty-trash", root, "--force"}) == 0 && trash_file_count(ProjectPaths::for_root(root)) == 0);
 	return 0;
 }
 

@@ -521,7 +521,7 @@ void FilesWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	if (!selected_.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 	    ImGui::IsKeyPressed(ImGuiKey_Delete, false) && v.allows(EditorRequestKind::DeleteAsset))
 		if (const AssetEntry *entry = entry_at(v, selected_); entry && entry->imported_from.empty())
-			start_delete(*entry, others_of(entry->relative_path));
+			start_delete(*entry, others_of(v, entry->relative_path));
 	draw_rename(v);
 	draw_delete(v);
 	draw_folder_delete(v);
@@ -834,7 +834,7 @@ void FilesWindow::draw_move_menu(const SessionView &view, const AssetEntry &entr
 	}
 	if (ImGui::IsWindowAppearing()) new_folder_[0] = '\0';
 	const std::string here = folder_of_path(entry.relative_path);
-	const std::vector<std::string> others = others_of(entry.relative_path);
+	const std::vector<std::string> others = others_of(view, entry.relative_path);
 	const auto move_to = [&](const std::string &folder) {
 		// Several rows go together, one step of the file history (DI-25).
 		workspace_.request(others.empty() ? request::move_asset(entry.relative_path, folder)
@@ -877,7 +877,7 @@ void FilesWindow::accept_move(const SessionView &view, const std::string &folder
 		                   view.allows(EditorRequestKind::MoveAsset);
 		// A row of several selected takes them with it.
 		if (takes && ImGui::AcceptDragDropPayload(kFileDragPayload)) {
-			const std::vector<std::string> others = others_of(entry->relative_path);
+			const std::vector<std::string> others = others_of(view, entry->relative_path);
 			workspace_.request(others.empty() ? request::move_asset(entry->relative_path, folder)
 			                                  : request::move_assets(entry->relative_path, others, folder));
 		}

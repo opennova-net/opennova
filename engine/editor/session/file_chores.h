@@ -77,7 +77,8 @@ public:
 	void rename_folder(const std::string &folder, const std::string &new_name);
 	// EmptyTrash: what the project's trash holds removed for good, the file history with it (each of its steps
 	// takes what it put there back from there).
-	void empty_trash();
+	// Refused (file.trash) without `force`: a removal for good is asked for.
+	void empty_trash(bool force);
 	// UndoFile, RedoFile: the history's last step taken back, the last one taken back done again; refused
 	// (file.history) with none, or when the files are not as the step left them (it stays to try again).
 	void undo();
@@ -115,12 +116,16 @@ private:
 	bool move_folder(const std::string &folder, const std::string &new_name, std::string *from = nullptr,
 	                 std::string *to = nullptr);
 	// Each file moved to its folder (`asked`: the file, the folder), planned and committed together; the moves
-	// done (`moved`: each file before and after) on true; false refused with why, nothing moved.
+	// done (`moved`: each file before and after, a mission's companions among them) on true; false refused with
+	// why, nothing moved, the folders it made removed and a source it put back imported again. `exact`: each
+	// file of `asked` alone, no companion planned with it (a step taken back or done again: the files it moved,
+	// exactly those).
 	bool move_now(const std::vector<std::pair<std::string, std::string>> &asked,
-	              std::vector<std::pair<std::string, std::string>> *moved = nullptr);
+	              std::vector<std::pair<std::string, std::string>> *moved = nullptr, bool exact = false);
 	// Each move committed in turn through the rename transaction; one that does not take puts the ones before it
 	// back (false, refused with why). `moved` the files moved and their companions, `touched` what the scan reads
-	// again, `sources` whether an import source moved.
+	// again, `sources` whether an import source moved (its old outputs gone: on false too, the one put back
+	// has none until the import makes them again).
 	bool commit_moves(const std::vector<RenamePlan> &moves, std::vector<std::pair<std::string, std::string>> &moved,
 	                  std::vector<std::string> &touched, bool &sources);
 	// The project's files at `paths` (a file, or each file in a folder among them: the scan's while they are

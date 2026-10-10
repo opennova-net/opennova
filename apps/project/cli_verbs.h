@@ -25,7 +25,7 @@
 //   opennova-project mkdir <dir> <folder>
 //   opennova-project rename-folder <dir> <folder> <name>
 //   opennova-project rmdir <dir> <folder> [--all] [--force]
-//   opennova-project empty-trash <dir>
+//   opennova-project empty-trash <dir> --force
 //   opennova-project request <dir> <json>
 //   opennova-project query <dir> <name> [<json>]
 //

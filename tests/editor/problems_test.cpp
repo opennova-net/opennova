@@ -1131,6 +1131,7 @@ static int test_locations_and_fixes() {
 	// page opened, as every Go to lands (DI-17), never Files.
 	TEST_EXPECT(editor_test::write_text(root + "/nw_cdata.coo", "coo"));
 	editor_test::handle_to_end(session, request::rescan());
+	stylesheet = v.project.scan->find("menu_style.mns"); // the scan read again: its entries are new
 	const AssetEntry *coo = v.project.scan->find("nw_cdata.coo");
 	TEST_EXPECT(coo && !is_editable_kind(coo->kind));
 	if (!coo) return 1;

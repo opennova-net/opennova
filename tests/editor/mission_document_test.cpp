@@ -1261,7 +1261,12 @@ int test_witnessed_rules() {
 	            std::string(use(box, "ref_id").label) == "Health per tick");
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "type", int64_t(5)), error) &&
 	            std::string(use(box, "ref_id").label) == "Location");
+	// A Mission box's value is the first four characters of the mission the player leaves for [orig:
+	// Entity_UpdateInfantryPlayerBody @0x4b60b6..0x4b60c4]; a type no case of the walk reads, nothing.
 	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "type", int64_t(3)), error) &&
+	            use(box, "ref_id").applies == Applicability::Reads &&
+	            std::string(use(box, "ref_id").label) == "Mission name (its first four characters)");
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, box, "type", int64_t(9)), error) &&
 	            use(box, "ref_id").applies == Applicability::Ignored);
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
@@ -1274,7 +1279,7 @@ int test_witnessed_rules() {
 	TEST_EXPECT(use(marker0, "ttool_index").applies == Applicability::Reads &&
 	            use(marker0, "wp_adv_trigger").applies == Applicability::Reads &&
 	            use(navpoint, "ttool_index").applies == Applicability::Ignored);
-	// -1 (a new record's) and 0 name no event; 1 names the second.
+	// -1 (a new record's) names no event; 1 names the second.
 	TEST_EXPECT(use(marker0, "wp_adv_trigger").reference == ReferenceKind::None);
 	Extracted before;
 	extract_from_document(*document, before);
@@ -1302,6 +1307,24 @@ int test_witnessed_rules() {
 		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.event_missing" &&
 		            findings[0].severity == DiagnosticSeverity::Warning && findings[0].row_id == marker0.row &&
 		            findings[0].field == "wp_adv_trigger");
+	}
+	// 0 names event 1, which the game never completes a waypoint on, and turns the proximity advance off
+	// [orig: Player_UpdatePerFrame @0x4de650; EventTrigger_MarkLinkedSpawnPoints @0x452d34, `> 0`]: an event
+	// reference, a warning, and renumbered as any index [orig: JOTACmed.exe sub_411C90 @ 0x411dd8..0x411ded].
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, marker0, "wp_adv_trigger", int64_t(0)), error) &&
+	            use(marker0, "wp_adv_trigger").reference == ReferenceKind::MissionEvent);
+	{
+		const std::vector<Diagnostic> findings = type.validate_file(*document);
+		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.event_missing" &&
+		            findings[0].message.find("never completes a waypoint") != std::string::npos);
+	}
+	{
+		size_t at = 0;
+		for (size_t i = 0; i < document->rows().size(); ++i)
+			if (document->rows()[i]->id == event0.row) at = i;
+		Edit up = edit_of(EditOperation::Move, event1);
+		up.position = at;
+		TEST_EXPECT(document->apply(up, error) && advance() == 1);
 	}
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);

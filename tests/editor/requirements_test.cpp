@@ -103,7 +103,9 @@ static int test_row_set_follows_the_manifest_and_features() {
 	TEST_EXPECT(row_named(with_multiplayer, "GAMEMUS.SBF") && !row_named(with_multiplayer, "GAMEMUS.SBF")->required);
 	TEST_EXPECT(with_multiplayer.required_total == with_missions.required_total + 1);
 	doc.features.mission = false;
-	TEST_EXPECT(row_named(evaluate_requirements(doc, empty), "mp.mnu") == nullptr); // a mission's phase still
+	// mp.mnu is the shell's (the startup screen's NovaWorld controls load it): on Multiplayer alone.
+	TEST_EXPECT(row_named(evaluate_requirements(doc, empty), "mp.mnu") && row_named(evaluate_requirements(doc, empty), "mp.mnu")->required);
+	TEST_EXPECT(!row_named(evaluate_requirements(doc, empty), "GAMEMUS.SBF")); // the mission music needs Missions too
 	doc.features.multiplayer = false;
 	doc.features.mission = false;
 	TEST_EXPECT(!requirement_phase_enabled(doc, BOOT_PHASE_MISSION));

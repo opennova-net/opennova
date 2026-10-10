@@ -746,8 +746,11 @@ inline EditorRequest undo_file() {
 inline EditorRequest redo_file() {
 	return of(EditorRequestKind::RedoFile);
 }
-inline EditorRequest empty_trash() {
-	return of(EditorRequestKind::EmptyTrash);
+// `force`: asked for (Files' Empty the trash... after its question); without it the request is refused.
+inline EditorRequest empty_trash(bool force) {
+	EditorRequest request = of(EditorRequestKind::EmptyTrash);
+	request.force = force;
+	return request;
 }
 
 // --- the shell's -------------------------------------------------------------------------------

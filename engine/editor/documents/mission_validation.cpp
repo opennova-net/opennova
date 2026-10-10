@@ -310,19 +310,24 @@ struct Checker {
 			on(address, MissionFinding::GroupRange, DiagnosticSeverity::Error,
 			   "Group " + std::to_string(index) + " is past the 64 groups the game's tables hold.", field);
 		};
-		// A waypoint marker's advance trigger naming no event of the mission: no event of that index fires,
-		// and a waypoint linked to one never advances by proximity either [orig: Player_UpdatePerFrame
-		// @0x4de649; EventTrigger_MarkLinkedSpawnPoints @0x452ce0].
+		// A waypoint marker linked to an event (its advance trigger 0 or more) never advances by proximity
+		// [orig: Player_UpdatePerFrame @0x4de650, a trigger of 0 or more skips the proximity advance] and
+		// completes only when an event of its index above 0 fires [orig: EventTrigger_MarkLinkedSpawnPoints
+		// @0x452d34, `> 0`]: one of 0, or naming no event of the mission, holds the waypoint for good.
 		for (const K pool : {K::Item, K::Building, K::Marker, K::Organic})
 			for (const Node *row : document.rows_of(pool)) {
 				const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
-				if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger <= 0 ||
-				    size_t(marker.wp_adv_trigger) < events.size())
-					continue;
-				on({row->id, row->kind, 0}, MissionFinding::EventMissing, DiagnosticSeverity::Warning,
-				   "The waypoint advances on event " + std::to_string(marker.wp_adv_trigger + 1) + ", and the mission has " +
-				           std::to_string(events.size()) + ": no event of it fires, so the waypoint never advances.",
-				   "wp_adv_trigger");
+				if (marker.type_id != def::DEF_TYPE_WAYPOINT || marker.wp_adv_trigger < 0) continue;
+				if (marker.wp_adv_trigger == 0)
+					on({row->id, row->kind, 0}, MissionFinding::EventMissing, DiagnosticSeverity::Warning,
+					   "The waypoint advances on event 1, which the game never completes a waypoint on (an advance "
+					   "trigger of 0): it never advances, by event or by reaching it. -1 is none.",
+					   "wp_adv_trigger");
+				else if (size_t(marker.wp_adv_trigger) >= events.size())
+					on({row->id, row->kind, 0}, MissionFinding::EventMissing, DiagnosticSeverity::Warning,
+					   "The waypoint advances on event " + std::to_string(marker.wp_adv_trigger + 1) + ", and the mission has " +
+					           std::to_string(events.size()) + ": no event of it fires, so the waypoint never advances.",
+					   "wp_adv_trigger");
 			}
 		for (const Node *row : events) {
 			const EventRow &event = static_cast<const EventRow &>(*row);
