@@ -17,8 +17,9 @@ signal controls_accepted
 
 var _driver: MenuDriver
 var _options: PlayerOptions
-# The native options controller requests commit/revert; this is the store's
-# detached value passed back to its owner for persistence and device preview.
+# The native options controller requests commit/revert/discard; this is the
+# store's detached value passed back to its owner for persistence and device
+# preview.
 var _entry_state: PlayerOptions.State
 
 
@@ -31,8 +32,9 @@ func setup(driver: MenuDriver, options: PlayerOptions) -> void:
 	_driver.list_activated.connect(_on_list_activated)
 
 
-## Rebuild every options-owned widget after MenuDriver opens a document. All
-## helpers are presence-gated, so non-options menu files are a cheap no-op.
+## Rebuild every options-owned widget after MenuDriver opens a document, and
+## again on every show of the front-end OPTIONS screen. All helpers are
+## presence-gated, so non-options menu files are a cheap no-op.
 func prepare_document() -> void:
 	_driver.prepare_options(PlayerProfile.store())
 	if not _driver.is_options_surface():
@@ -112,9 +114,17 @@ func _set_checked(control_name: String, checked: bool) -> void:
 		_driver.set_widget_checked(id, checked)
 
 
-func _on_screen_changed(_screen_name: String) -> void:
+func _on_screen_changed(screen_name: String) -> void:
 	# Screen/document switches invalidate an armed table selection.
 	_driver.end_options_remap(true)
+	# Every show of the front OPTIONS screen runs its init again (engine
+	# OptionsScreen::is_front_screen carries the witness): the controls seed
+	# from the saved words and the owner's state is the visit's baseline, so an
+	# accepted edit is what a later BACK keeps and a discarded one is not shown
+	# again. A document open shows its screen first; the shell's
+	# prepare_document after the open repeats this harmlessly.
+	if MenuDriver.is_front_options_screen(screen_name):
+		prepare_document()
 
 
 func _on_widget_value_changed(widget_name: String, kind: String,
@@ -189,7 +199,7 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 			var state := _options.current()
 			state.gameplay_tips = _driver.is_widget_checked(id)
 			_options.update(state)
-	var effects := _driver.activate_options(PlayerProfile.store(), widget_name)
+	var effects := _driver.activate_options(PlayerProfile.store(), id)
 	if effects & MenuDriver.OPTIONS_APPLY_CONTROLS:
 		controls_accepted.emit()
 	if effects & MenuDriver.OPTIONS_COMMIT_PREVIEW:
@@ -201,6 +211,13 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 			_options.update(_entry_state.copy())
 			_seed_player_options()
 		_driver.show_ingame_main()
+	if effects & MenuDriver.OPTIONS_DISCARD_EDITS:
+		# The front-end BACK keeps no widget edit (engine
+		# OptionsScreen::DiscardEdits carries the witness): the owner, which
+		# applies and saves per edit (D-MNU-19), returns to the entry state, and
+		# the BACK's pop_screen leaves the widgets to the next open's seed.
+		if _options != null and _entry_state != null:
+			_options.update(_entry_state.copy())
 
 
 func _on_list_activated(id: int, row: int) -> void:

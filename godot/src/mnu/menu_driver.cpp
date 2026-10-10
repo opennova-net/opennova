@@ -859,6 +859,10 @@ void MenuDriver::select_host_location(int p_id, const String &p_country) {
 	opennova::menu::HostDialog::select_location(runtime_, p_id, to_std(p_country));
 }
 
+bool MenuDriver::is_front_options_screen(const String &p_screen) {
+	return opennova::menu::OptionsScreen::is_front_screen(to_std(p_screen));
+}
+
 PackedStringArray MenuDriver::command_names(const String &p_set) {
 	opennova::menu::MenuNameSet set = opennova::menu::MenuNameSet::kCount;
 	if (!opennova::menu::menu_name_set_from_token(to_std(p_set), set)) return PackedStringArray();
@@ -883,8 +887,8 @@ void MenuDriver::apply_options_policy(const Ref<PlayerProfiles> &p_profiles) {
 	options_.seed_profile(runtime_, current_record(p_profiles));
 }
 
-int MenuDriver::activate_options(const Ref<PlayerProfiles> &p_profiles, const String &p_name) {
-	return options_.activate(runtime_, current_record(p_profiles), to_std(p_name));
+int MenuDriver::activate_options(const Ref<PlayerProfiles> &p_profiles, int p_id) {
+	return options_.activate(runtime_, current_record(p_profiles), p_id);
 }
 
 String MenuDriver::options_control_text(int p_action, int p_device) const {
@@ -1051,7 +1055,9 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_options_surface"), &MenuDriver::is_options_surface);
 	ClassDB::bind_method(D_METHOD("apply_options_policy", "profiles"), &MenuDriver::apply_options_policy);
 	ClassDB::bind_static_method("MenuDriver", D_METHOD("command_names", "set"), &MenuDriver::command_names);
-	ClassDB::bind_method(D_METHOD("activate_options", "profiles", "name"), &MenuDriver::activate_options);
+	ClassDB::bind_static_method("MenuDriver", D_METHOD("is_front_options_screen", "screen"),
+			&MenuDriver::is_front_options_screen);
+	ClassDB::bind_method(D_METHOD("activate_options", "profiles", "id"), &MenuDriver::activate_options);
 	ClassDB::bind_method(D_METHOD("arm_options_remap", "id", "row"), &MenuDriver::arm_options_remap);
 	ClassDB::bind_method(D_METHOD("consume_options_input", "event"), &MenuDriver::consume_options_input);
 	ClassDB::bind_method(D_METHOD("end_options_remap", "refill"), &MenuDriver::end_options_remap);
@@ -1062,6 +1068,7 @@ void MenuDriver::_bind_methods() {
 	BIND_ENUM_CONSTANT(OPTIONS_COMMIT_PREVIEW);
 	BIND_ENUM_CONSTANT(OPTIONS_RESTORE_PREVIEW);
 	BIND_ENUM_CONSTANT(OPTIONS_APPLY_CONTROLS);
+	BIND_ENUM_CONSTANT(OPTIONS_DISCARD_EDITS);
 	ClassDB::bind_method(D_METHOD("attach", "frame", "audio"), &MenuDriver::attach);
 	ClassDB::bind_method(D_METHOD("set_music_director", "director"),
 			&MenuDriver::set_music_director);

@@ -561,6 +561,69 @@ func test_companion_released_when_document_changes_hands() -> void:
 
 
 
+# Every show of the front OPTIONS screen runs its init again (engine
+# OptionsScreen::is_front_screen): with OPTIONS and its parent in one document,
+# an ACCEPTed edit is the next visit's baseline, so that visit's BACK keeps it,
+# and a discarded edit is not what the visit after shows. Through the
+# controller: the in-document jump, the front ACCEPT's pop and the BACK's
+# pop_screen row each change the screen in place.
+func test_front_options_baseline_is_taken_per_visit() -> void:
+	var saved_config := TestFs.snapshot(PlayerOptions.CONFIG_PATH)
+	var options := PlayerOptions.new()
+	var entry := options.current()
+	entry.music_volume = 50
+	options.update(entry)
+	var dir := _make_dir()
+	var to_options := MenuDriverFixture.wnd("button", "TO_OPTIONS", 20,
+			'<ACTION type="screen" file="settings.mnu">OPTIONS</ACTION>')
+	var body := MenuDriverFixture.wnd("scroll", "MUSICVOLUME", 20)
+	body += MenuDriverFixture.wnd("table", "CONTROL_MAPPING", 50)
+	body += MenuDriverFixture.wnd("button", "ACCEPT", 80)
+	body += MenuDriverFixture.wnd("button", "BACK", 110, '<ACTION type="pop_screen"></ACTION>')
+	TestFs.write_bytes(self, dir.path_join("settings.mnu"),
+			(MenuDriverFixture.screen_xml("PARENT", to_options)
+			+ MenuDriverFixture.screen_xml("OPTIONS", body)).to_utf8_buffer())
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		DirAccess.remove_absolute(dir.path_join("settings.mnu"))
+		_cleanup(dir)
+		saved_config.restore()
+		return
+	assert_true(shell.open_menu("settings.mnu", "PARENT"), "the two-screen document opens")
+	var driver: MenuDriver = shell.get_driver()
+	var go := driver.widget_id("TO_OPTIONS")
+	var music := driver.widget_id("MUSICVOLUME")
+	# The first visit accepts 25.
+	driver.activate(go)
+	assert_eq(driver.get_current_screen(), "OPTIONS")
+	_edit_scroll(driver, music, "MUSICVOLUME", 25)
+	driver.activate(driver.widget_id("ACCEPT"))
+	assert_eq(driver.get_current_screen(), "PARENT", "the front ACCEPT pops in place")
+	assert_eq(options.current().music_volume, 25)
+	# The second visit starts from 25: its BACK keeps the accepted word.
+	driver.activate(go)
+	_edit_scroll(driver, music, "MUSICVOLUME", 75)
+	driver.activate(driver.widget_id("BACK"))
+	assert_eq(driver.get_current_screen(), "PARENT", "the BACK's pop_screen pops in place")
+	assert_eq(options.current().music_volume, 25, "BACK keeps the earlier visit's ACCEPT")
+	assert_eq(PlayerOptions.new().current().music_volume, 25, "and so does the config")
+	# The third visit shows the kept word, not the discarded one.
+	driver.activate(go)
+	assert_eq(driver.get_widget_scroll_range(music).value, 25,
+			"the visit seeds the slider from the kept word")
+	DirAccess.remove_absolute(dir.path_join("settings.mnu"))
+	_cleanup(dir)
+	saved_config.restore()
+
+
+# A slider edit as the player makes it: the control moves and reports its value.
+func _edit_scroll(driver: MenuDriver, id: int, control: String, value: int) -> void:
+	var range := driver.get_widget_scroll_range(id)
+	driver.set_widget_scroll_range(id, range.minimum, range.maximum, range.page, value)
+	driver.widget_value_changed.emit(control, "scroll", value, str(value))
+
+
 # The object-detail row is game.cfg's object_polydetail, served rather than
 # pinned (engine runtime/menu/options_policy.h kObjectDetailControls): the
 # options surface selects the row whose value is the persisted word, leaves
