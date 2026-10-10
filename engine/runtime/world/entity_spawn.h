@@ -99,6 +99,9 @@ struct OrganicSpawnBody {
     // ground spawns its origin lifted by about that much.
     int32_t rise = 0;
     int32_t capsule_bottom = 0, capsule_top = 0;
+    // The body's channels as the init and the warmup leave them, for a caller that ticks it on
+    // (infantry_org1_motor_head).
+    InfantryState channels;
 };
 OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net_id, IRootMotionSource *source,
                                     AnimVariantRings &rings, int adm_id);

@@ -85,7 +85,6 @@ int main() {
 		std::fprintf(stderr, "FAIL: listener.start\n");
 		return 1;
 	}
-	std::this_thread::sleep_for(50ms);
 
 	uint16_t gate_port = 0;
 	opennova::net::ScopedSocket gate_server(opennova::net::udp_bind(0, &gate_port));

@@ -17,6 +17,7 @@
 
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/mission.h>
 
 #include <cstdint>
@@ -79,23 +80,24 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 	add_pool(doc, EntityKind::Marker, 100001, 24, 100.0f, 700.0f, 16.0f);   // marker alpha
 	add_pool(doc, EntityKind::Organic, 105311, 40, 300.0f, 700.0f, 10.0f);  // generic soldiers
 
-	// Three waypoint paths of 4, 5 and 6 markers (15 more markers), the last
-	// one flagged as a non-looping blue-team patrol.
-	for (size_t path = 0; path < 3; ++path) {
+	// Three waypoint paths of 4, 5 and 6 waypoint markers (15 more markers), the last one flagged as a
+	// non-looping blue-team patrol: paths 1 to 3 (path 0 holds none: a marker carrying 0 is on no path).
+	for (size_t path = 1; path <= 3; ++path) {
 		opennova::mission::WaypointPath authored;
-		for (int i = 0; i < 4 + static_cast<int>(path); ++i) {
+		for (int i = 0; i < 3 + static_cast<int>(path); ++i) {
 			EntityTransform t;
 			t.x = 600.0f + static_cast<float>(i) * 20.0f;
-			t.y = 100.0f + static_cast<float>(path) * 40.0f;
+			t.y = 100.0f + static_cast<float>(path - 1) * 40.0f;
 			t.z = 0.0f;
 			t.yaw = i * 30;
-			if (!mission::add_waypoint_marker(doc, path, 100001, t, -1, edit_error)) {
+			if (!mission::add_waypoint_marker(doc, path, mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT, t, -1,
+			                                  edit_error)) {
 				err = "add_waypoint_marker failed";
 				return false;
 			}
 		}
 		(void)mission::waypoint_path(doc, path, authored);
-		const int flags = path == 2 ? static_cast<int>(opennova::bms::WaypointFlags::DoesNotLoop) |
+		const int flags = path == 3 ? static_cast<int>(opennova::bms::WaypointFlags::DoesNotLoop) |
 		                                  static_cast<int>(opennova::bms::WaypointFlags::PlayerRoute)
 		                            : 0;
 		if (!mission::set_waypoint_path(doc, path, authored.marker_indices, flags, edit_error)) {
@@ -154,8 +156,8 @@ bool build(std::vector<uint8_t> &bytes, std::string &err) {
 	}
 
 	// Every record's authored members as this fixture has always held them (a new record's values are
-	// the shipped missions' most common ones, bms_edit's new_entity, which this dense mission is not a
-	// sample of): the ranges and accuracies below, every other optional member zero.
+	// the original editor's initializer's, bms_edit's new_entity, which this dense mission predates):
+	// the ranges and accuracies below, every other optional member zero.
 	opennova::bms::File file = doc;
 	std::vector<opennova::bms::Entity> *pools[4] = {&file.items, &file.buildings, &file.markers, &file.organics};
 	uint8_t team = 0;

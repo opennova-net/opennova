@@ -1,7 +1,8 @@
 // What the opennova-serve tests share: the synthetic deathmatch mission a
-// loose game directory serves, a free loopback port, and the scoped working
-// directory every server run happens in (the server reads and writes game.cfg
-// and activesrvr.txt in the process's working directory, ADR 0051 d2).
+// loose game directory serves, a free TCP port for the remote admin, and the
+// scoped working directory every server run happens in (the server reads and
+// writes game.cfg and activesrvr.txt in the process's working directory, ADR
+// 0051 d2).
 #pragma once
 
 #include <formats/mission/bms.h>
@@ -115,12 +116,13 @@ inline void serve_gate(opennova::net::Socket &gate, uint16_t nw_port, bool met_e
 	}
 }
 
-inline uint16_t free_udp_port() {
-	uint16_t port = 0;
-	opennova::net::ScopedSocket probe(opennova::net::udp_bind(0, &port));
-	return probe.is_valid() ? port : 0;
-}
-
+// A TCP port that was free a moment ago: bound, read back and released, so
+// another process can take it before the caller listens. Only game.cfg's
+// remote_admin_port needs one: retail's 0 there means no listener, so the
+// server cannot be handed port 0 to pick its own, and the caller retries a
+// listen that lost the race. Every UDP socket a test serves binds port 0 and
+// reads back what it got (--lan-port 0, a LAN server range of 0..0, or a held
+// net::ScopedSocket).
 inline uint16_t free_tcp_port() {
 	uint16_t port = 0;
 	opennova::net::ScopedSocket probe(opennova::net::tcp_listen(0, 1, &port));

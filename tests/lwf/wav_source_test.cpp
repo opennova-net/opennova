@@ -150,6 +150,49 @@ int test_waves() {
 	TEST_EXPECT(wave_bits_written(stereo_source, WaveConversion()) == 16 && wave_bits_written(stereo_source, halved) == 8);
 	TEST_EXPECT(wave_conversion_words(stereo_source, halved) ==
 	            "2 channels mixed to mono, 24-bit PCM written as 8-bit PCM, 48000 Hz resampled to 24000 Hz");
+	// A trim keeps the frames from start to end; a gain scales each sample, clamped to full scale; the peak a
+	// normalise divides by is the kept channel's.
+	WaveConversion trimmed;
+	trimmed.start = 1000;
+	trimmed.end = 1600;
+	TEST_EXPECT(convert_wave(source, trimmed, converted, error) && decode_wave_source(converted, back, error) &&
+	            back.frames() == 600 && back.rate == 48000);
+	TEST_EXPECT(std::fabs(wave_conversion_peak(source, trimmed) - 0.5f) < 0.01f);
+	WaveConversion louder = trimmed;
+	louder.gain = 1.0f / wave_conversion_peak(source, trimmed);
+	WaveFacts loud;
+	TEST_EXPECT(convert_wave(source, louder, converted, error) && (loud = wave_facts(converted)).read &&
+	            loud.peak > 0.99f && loud.retail.plays);
+	// Clamped, never wrapped: every sample the gain takes past full scale is written at full scale, its sign
+	// kept (a wrap would turn it over), every other one as scaled.
+	louder.gain = 4.0f;
+	TEST_EXPECT(convert_wave(source, louder, converted, error) && decode_wave_source(converted, back, error) &&
+	            back.frames() == 600 && back.format.bits == 16);
+	size_t clamped = 0, kept_sign = 0, scaled = 0, unclamped = 0;
+	for (size_t i = 0; i < back.frames() && back.frames() == 600; ++i) {
+		const size_t f = 1000 + i;
+		const float mix = (stereo_source.samples[f * 2] + stereo_source.samples[f * 2 + 1]) * 0.5f;
+		const float want = mix * 4.0f;
+		if (std::fabs(want) > 1.0f) {
+			++clamped;
+			kept_sign += std::fabs(back.samples[i]) > 0.999f && (back.samples[i] > 0.0f) == (want > 0.0f) ? 1 : 0;
+		} else {
+			++unclamped;
+			scaled += std::fabs(back.samples[i] - want) < 0.001f ? 1 : 0;
+		}
+	}
+	TEST_EXPECT(clamped > 0 && kept_sign == clamped && unclamped > 0 && scaled == unclamped);
+	TEST_EXPECT(wave_conversion_words(stereo_source, louder) ==
+	            "2 channels mixed to mono, 24-bit PCM written as 16-bit PCM, frames 1000..1600 of 4800 kept, scaled by "
+	            "4.00 (+12.04 dB)");
+	WaveConversion past = trimmed;
+	past.start = 5000;
+	past.end = 0;
+	TEST_EXPECT(!convert_wave(source, past, converted, error) && error == "the trim keeps no sample");
+	TEST_EXPECT(wave_conversion_peak(source, past) < 0.0f);
+	past.start = 0;
+	past.gain = -1.0f;
+	TEST_EXPECT(!convert_wave(source, past, converted, error));
 	std::printf("waves: the loader's walk, a conversion it takes, the facts\n");
 	return 0;
 }

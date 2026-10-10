@@ -300,18 +300,24 @@ NapiMessage make_client_glsvss_request(const std::string &request,
 // tokenizes it (double-quoted runs are one token, quotes stripped) and dispatches the first
 // token against eighteen verbs. Player-targeted verbs match by PREFIX and take one of four
 // target suffixes selecting the lookup: ByIndex (atol -> slot index), ByIpAndPort ("host:port"),
-// ByName (a callsign, or "*NN" for a slot) or ByPCID (the entity type name). Every verb is
-// gated on the receiver being the authority (`is_authority`) and in a session; TextChatServer /
+// ByName (a callsign, or "*NN" for a slot) or ByPCID (the entity type name); TextChatServer /
 // Cycle / EndMission / GameOver / Earthquake / Lightning / TimeOfDay / SetServerName /
-// SetServerMsg / SetMPReset compare the whole token case-insensitively.
-// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand — "Cmd" read @0x4d2333, tokenize @0x4d2392,
-//  PuntPlayer @0x4d23aa, TextChatServer @0x4d256e, TextChatPlayer @0x4d2628, CmdEchoPlayer
-//  @0x4d276f, KillPlayer @0x4d28b6, ChangeTeam @0x4d2a11, SwapTeam @0x4d2a2c, Cycle @0x4d2a46,
+// SetServerMsg / SetMPReset compare the whole token case-insensitively. The gates are per verb
+// and sit in the executor (inmatch::Server_ExecuteServerCommand): every verb but SetMPReset
+// needs the receiver to be the authority (`is_authority`) with its hosted session up
+// (ctx+0x68), the player-targeted verbs and ChangeTeam / SwapTeam also need the player table,
+// and SetMPReset needs only its argument, so it runs on any receiver the executor is handed
+// (the shells hand it only a hosting context, a residual; docs/net/novaworld-net-re.md
+// D-NET-383). SetMPReset's stored word is read by retail's next session create, which exits
+// the process when it is nonzero; that reader is not ported (D-NET-385).
+// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand @0x4d22f0 — "Cmd" read
+//  @0x4d2333, tokenize @0x4d2392, PuntPlayer @0x4d23aa, TextChatServer @0x4d256e,
+//  TextChatPlayer @0x4d2628, CmdEchoPlayer @0x4d276f, KillPlayer @0x4d28b6, ChangeTeam @0x4d2a11, SwapTeam @0x4d2a2c, Cycle @0x4d2a46,
 //  EndMission @0x4d2a60, GameOver @0x4d2a7a, Earthquake @0x4d2a94, Lightning @0x4d2b33,
 //  TimeOfDay @0x4d2bb5, SetServerName @0x4d2cc2, SetServerMsg @0x4d2d53, SetMPReset @0x4d2e00,
 //  ReloadPlayer @0x4d2e4f, DisarmPlayer @0x4d2f99; the suffix strings @0x7cc65c/0x7cc650/
 //  0x7cc648/0x7cc640; String_TokenizeQuotedToArray @0x616d60; String_StartsWithNoCase @0x616f40;
-//  String_MatchSuffix @0x617040]
+//  String_MatchSuffix @0x617040; SetMPReset's lone token-count gate @0x4d2e12]
 enum class ServerCommandVerb : uint8_t {
 	None = 0,
 	PuntPlayer,
@@ -350,7 +356,12 @@ const char *server_command_verb_name(ServerCommandVerb verb);
 // The target suffix's spelling ("ByIndex", ...; "" for none), as the in-match executor matches it.
 const char *server_command_target_name(ServerCommandTarget target);
 // The retail tokenizer: whitespace splits outside double quotes, quotes toggle an in-quote
-// run and are dropped, a backslash is copied verbatim. [orig: String_TokenizeQuotedToArray @0x616d60]
+// run and are dropped, a backslash is copied verbatim. The whitespace is the CRT isspace under
+// the game's ".ACP" LC_CTYPE, not the C locale's: pinned to cp1252, it is the six C-locale
+// spaces plus 0xA0 (cp1252_isspace; docs/net/novaworld-net-re.md D-NET-381, D-NET-382). It
+// also splits the S2C 0x24 text command, the console's BAN / PUNT lines and the gate reply.
+// [orig: String_TokenizeQuotedToArray @0x616d60 — its isspace @0x616da6; LC_ALL ".ACP" set by
+//  System_InitTimerAndLocale @0x762a6e]
 std::vector<std::string> tokenize_quoted(std::string_view text);
 // Parse a "ServerCommand" container into `out`; false when it carries no Cmd param or the
 // verb is none of the eighteen (retail falls through to the no-op tail).
@@ -370,9 +381,9 @@ inline constexpr size_t SERVER_COMMAND_CMD_CAP = 512;
 bool server_command_verb_takes_target(ServerCommandVerb verb);
 // Compose a Cmd line as the exact inverse of the reader's tokenizer: the verb name plus the
 // target suffix, then each arg space-separated, an arg wrapped in double quotes when it is empty
-// or holds whitespace or any byte >= 0x80 (the host's tokenizer runs isspace in its ANSI code
-// page, where 0xA0 is a space on cp1252; quoting is lossless). Empty when `verb` is None, when
-// an arg holds a '"' (the tokenizer has no escape; a quote only toggles) or a NUL
+// or holds whitespace (tokenize_quoted's cp1252 set, 0xA0 included) or any other byte >= 0x80
+// (a double-byte host classes its high bytes otherwise; quoting is lossless). Empty when `verb`
+// is None, when an arg holds a '"' (the tokenizer has no escape; a quote only toggles) or a NUL
 // (Napi_CopyString stops there, so the reader would see a clipped line), when the text would
 // not fit SERVER_COMMAND_CMD_CAP (the reader would clip it), when there are fewer args than the
 // verb's token-count gate needs (PuntPlayer 1, TextChatPlayer / CmdEchoPlayer 2, ...), or when

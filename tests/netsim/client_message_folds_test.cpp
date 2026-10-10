@@ -313,6 +313,14 @@ void test_text_command_setflash_and_tokenizer() {
 	view.apply(s2c::TEXT_COMMAND, text_body("\"SETFLASH1\" \"5\""));
 	view.apply(s2c::TEXT_COMMAND, text_body("SETFLASH1 7 extra"));
 	CHECK(flash_timers(view) == std::vector<int32_t>({16, 16, 5, 7}));
+	// The tokenizer's whitespace is the CRT isspace under the game's ".ACP" LC_CTYPE, pinned to
+	// cp1252 (D-NET-381): an unquoted 0xA0 splits like a space, every C-locale space splits, and a
+	// quoted 0xA0 stays inside its token, so the last line is one token naming no command.
+	view.apply(s2c::TEXT_COMMAND, text_body("SETFLASH1\xA0" "3"));
+	view.apply(s2c::TEXT_COMMAND, text_body("SETFLASH1\v8"));
+	view.apply(s2c::TEXT_COMMAND, text_body("SETFLASH1\f11"));
+	view.apply(s2c::TEXT_COMMAND, text_body("SETFLASH1\"\xA0" "4\""));
+	CHECK(flash_timers(view) == std::vector<int32_t>({3, 8, 11}));
 
 	CHECK(!view.state().cease_fire);
 	view.apply(s2c::TEXT_COMMAND, text_body("SETCEASEFIRE"));

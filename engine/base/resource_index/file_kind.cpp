@@ -105,14 +105,16 @@ constexpr FileKindFacts kRows[] = {
 	Kind(FileKind::Unknown, ArchiveSlot::None).row,
 	Kind(FileKind::Archive, ArchiveSlot::None).extensions(kArchive).row,
 	Kind(FileKind::Model, ArchiveSlot::Resource).resource_kind("object_model").row,
-	Kind(FileKind::Animation, ArchiveSlot::Resource).extensions(kAnimation).row,
-	Kind(FileKind::AnimationMap, ArchiveSlot::Resource)
+	// Retail packs its animations, their maps and the AI profiles in localres.pff, every one (JO:CA's,
+	// file_kind_test's retail leg).
+	Kind(FileKind::Animation, ArchiveSlot::Localres).extensions(kAnimation).row,
+	Kind(FileKind::AnimationMap, ArchiveSlot::Localres)
 	        .extensions(kAnimationMap)
 	        .lines(LineReader::AsciiWalk) // [orig: AnimMap_LoadAdmFile @ 0x40ceb4 -> File_ParseASCIIFile]
 	        .row,
 	// Its base and eye textures by name (formats/grm).
 	Kind(FileKind::FaceAnimation, ArchiveSlot::Resource).extensions(kFaceAnimation).row,
-	Kind(FileKind::AiProfile, ArchiveSlot::Resource)
+	Kind(FileKind::AiProfile, ArchiveSlot::Localres)
 	        .extensions(kAiProfile)
 	        .lines(LineReader::AsciiWalk) // [orig: AIProfile_LoadOrFind @ 0x45fe45 -> File_ParseASCIIFile]
 	        .row,
@@ -135,7 +137,8 @@ constexpr FileKindFacts kRows[] = {
 	// Its fopen names the bare file ("CC.BIN"), so the game reads it from its working directory, the
 	// install's folder, whatever expansion it runs [orig: Game_ReadCCBinFile @ 0x4a5860].
 	Kind(FileKind::CountryCode, ArchiveSlot::Loose).file("cc.bin").expansion(ExpansionLoose::RootOnly).row,
-	Kind(FileKind::Credits, ArchiveSlot::Localres)
+	// Retail's (NLIST.KDA) in language.pff, an expansion's in its language archive (jox01L.pff).
+	Kind(FileKind::Credits, ArchiveSlot::Language)
 	        .resource_kind("credits")
 	        .lines(LineReader::ConfigFile) // [orig: ConfigFile_LoadFromFile @ 0x760a10, its text form]
 	        .row,
@@ -156,8 +159,9 @@ constexpr FileKindFacts kRows[] = {
 	        .lines(LineReader::AsciiWalk)
 	        .row,
 	Kind(FileKind::TerrainPolyData, ArchiveSlot::Resource).extensions(kTerrainPolyData).row,
-	// Beside the missions: the game finds a mission's by its name (runtime/mission/mission_sidecars).
-	Kind(FileKind::TileInfo, ArchiveSlot::Resource).extensions(kTileInfo).row,
+	// Beside the missions, as retail packs every one: the game finds a mission's by its name
+	// (runtime/mission/mission_sidecars).
+	Kind(FileKind::TileInfo, ArchiveSlot::Localres).extensions(kTileInfo).row,
 	Kind(FileKind::Environment, ArchiveSlot::Resource)
 	        .resource_kind("environment")
 	        .lines(LineReader::AsciiWalk) // [orig: Environment_LoadTimeOfDayConfig @ 0x57dbeb -> File_ParseASCIIFile]
@@ -168,8 +172,12 @@ constexpr FileKindFacts kRows[] = {
 	// its own chunks of audio (formats/sbf). An expansion's banks, M<name>.sbf and G<name>.sbf, are read
 	// by their path in its own folder [orig: Expansion_LoadAssets @ 0x4a4906, @ 0x4a4936].
 	Kind(FileKind::MusicBank, ArchiveSlot::Loose).resource_kind("sbf").expansion(ExpansionLoose::Folder).row,
-	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their waves naming the files.
-	Kind(FileKind::SoundBank, ArchiveSlot::Resource).resource_kind("sound").row,
+	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their waves naming the files. Retail
+	// packs a mission's bank in language.pff with the voice lines its waves name, and the game's own two,
+	// game.lwf and menu.LWF, in localres.pff with the sounds theirs name; an expansion splits its own
+	// alike (jox01L.pff holds five, jox01.pff JOx01.LWF). A bank resolves from any mounted archive, so the
+	// slot places a project's banks, a mission's dialog banks the ones a project makes.
+	Kind(FileKind::SoundBank, ArchiveSlot::Language).resource_kind("sound").row,
 	// A wave a sound bank's single names, which the game loads from the archives by name
 	// (docs/audio/lwf-dbf-sound-re.md): retail packs its sound waves in localres.pff and its
 	// localized voice lines in language.pff, and a name resolves from any mounted archive, so the
@@ -177,7 +185,8 @@ constexpr FileKindFacts kRows[] = {
 	Kind(FileKind::Wave, ArchiveSlot::Localres).extensions(kWave).row,
 	// A mission's dialogs, read by DialogManager_LoadFromFile (formats/dbf).
 	Kind(FileKind::DialogBank, ArchiveSlot::Localres).extensions(kDialogBank).row,
-	Kind(FileKind::Particles, ArchiveSlot::Resource)
+	// Retail packs every one in localres.pff.
+	Kind(FileKind::Particles, ArchiveSlot::Localres)
 	        .resource_kind("particle")
 	        .lines(LineReader::AsciiWalk) // [orig: CEffectSystem_Init @ 0x5f62f0 / 0x5f6545 -> File_ParseASCIIFile]
 	        .row,
@@ -246,8 +255,15 @@ constexpr FileKindFacts kRows[] = {
 	// set ships (gameprofile/player_files.h).
 	Kind(FileKind::PlayerSave, ArchiveSlot::Loose).extensions(kPlayerSave).expansion(ExpansionLoose::Folder).row,
 	// The HLSL effects, which the shader loader takes in the SCR form alone, under its own key
-	// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060] (vfs_loader_takes_stored).
-	Kind(FileKind::Shader, ArchiveSlot::Resource).extensions(kShader).row,
+	// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060] (vfs_loader_takes_stored). The loader reads the
+	// working directory's loose ones and then walks every mounted archive's entries for them [orig:
+	// HLSLEffect_InitAndLoadAll @ 0x5b0080, the slots 0..14 @ 0x5b0141, through
+	// HLSLEffect_LoadAllFromPFFArchive @ 0x5afed0], where it is given no override folder, which
+	// would be read alone [orig: @ 0x5b0112..0x5b0118]; both its callers give none [orig:
+	// Render_InitAllSubsystems @ 0x58642f; sub_586480 @ 0x5864a6]. So any slot serves one; retail
+	// packs its 44 in localres.pff (JO:CA, measured 2026-10-09: none in resource.pff, language.pff or
+	// jox01's), the slot that places them.
+	Kind(FileKind::Shader, ArchiveSlot::Localres).extensions(kShader).row,
 	// Read from the install's folder before any archive mounts (game.cfg, assets.cd:
 	// docs/required-resources.md); gt.ssc, read loose first from the expansion's folder, is the
 	// name's own rule (vfs_read_from_expansion_folder).

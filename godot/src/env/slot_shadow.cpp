@@ -1214,10 +1214,15 @@ void SlotShadow::_rebuild_caster_records() {
 	}
 	TypedArray<Node> nodes = get_tree()->get_nodes_in_group(caster_group());
 	caster_records_.reserve(static_cast<size_t>(nodes.size()));
+	// The casters of this node's own world: the group is the tree's, and a tree
+	// may hold several scenes, each a world of its own (the OpenNova Editor's
+	// mission devices and model previews, each under its SubViewport); the game
+	// holds one, so every caster is its.
+	const Ref<World3D> world = get_world_3d();
 	for (int64_t i = 0; i < nodes.size(); ++i) {
 		ObjectModel *model = Object::cast_to<ObjectModel>(
 				static_cast<Object *>(nodes[i]));
-		if (model == nullptr) {
+		if (model == nullptr || model->get_world_3d() != world) {
 			continue;
 		}
 		CasterRecord record;

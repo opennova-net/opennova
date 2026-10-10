@@ -15,7 +15,7 @@
 namespace opennova {
 class ConnectionManager;
 class UnknownTracker;
-namespace db { class Database; }
+namespace db { class ConnectionPool; }
 } // namespace opennova
 
 namespace opennova::novaworld_server {
@@ -32,11 +32,13 @@ class SessionStore;
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
 //
 // Crow is async + multi-threaded internally; we just hand it a thread to
-// own. start() spawns that thread; stop() terminates the Crow loop and
-// joins.
+// own. start() spawns that thread and returns once Crow serves; stop()
+// terminates the Crow loop and joins. Handlers run on Crow's worker threads
+// at once, so each request leases its own connection from `db_pool` for the
+// handler's duration.
 class HttpListener {
 public:
-	HttpListener(ConnectionManager &manager, db::Database &db,
+	HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
 	             SessionStore &sessions);
 	~HttpListener();
 
@@ -48,8 +50,14 @@ public:
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
 
+	// Registers the routes and returns once Crow serves them, or false when
+	// Crow's run() failed first (the port taken) — main() treats that as fatal.
 	bool start(const ServerConfig &config);
 	void stop();
+
+	// The port Crow bound and serves (the OS's pick when config.http_port is
+	// 0); valid once start() returned true.
+	uint16_t bound_port() const { return bound_port_; }
 
 private:
 	// Route-family registrars called once from start(), in registration
@@ -66,13 +74,23 @@ private:
 	                            const std::string &static_dir,
 	                            const std::string &templates_dir);
 
+	// Client-facing URLs injected into the menu templates (@HOST_URL@ /
+	// @GSB_SERVER@): config.public_host and the port Crow serves, the
+	// configured one or the OS's pick for port 0. The retail client is REMOTE,
+	// so these must point at the public host, never 127.0.0.1 (else the client
+	// POSTs its host registration / fetches the server browser from its own
+	// localhost).
+	std::string host_url() const;
+	std::string gsb_url() const;
+
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 	ConnectionManager &manager_;
-	db::Database &db_;
+	db::ConnectionPool &db_pool_;
 	SessionStore &sessions_;
 	std::thread worker_;
 	std::atomic<bool> running_{false};
+	uint16_t bound_port_ = 0;
 	// PERSISTENTEXPRESSLOGINDATA cookie → players.id. Retail's IB3 sets
 	// this cookie itself (we never set it) and ships it on every HTTP
 	// request from the same retail process. Acts as a stable per-process
@@ -91,13 +109,9 @@ private:
 	// Optional unknown-message tracker (set via set_unknown_tracker). Read
 	// by /api/unknowns; written by the catch-all 404 path. Null in tests.
 	opennova::UnknownTracker *tracker_ = nullptr;
-	// Client-facing URLs injected into the menu templates (@HOST_URL@ /
-	// @GSB_SERVER@). Built once in start() from config.public_host +
-	// config.http_port — the retail client is REMOTE, so these must point at
-	// the public host, never 127.0.0.1 (else the client POSTs its host
-	// registration / fetches the server browser from its own localhost).
-	std::string host_url_;
-	std::string gsb_url_;
+	// config.public_host, set in start() before Crow runs (host_url() /
+	// gsb_url()).
+	std::string public_host_;
 };
 
 } // namespace opennova::novaworld_server
