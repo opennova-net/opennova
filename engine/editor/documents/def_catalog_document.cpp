@@ -3,7 +3,6 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/catalog_validation.h>
-#include <editor/graph/graph_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
@@ -467,7 +466,7 @@ void catalog_references(const Document &document, Extracted &out) {
 			GraphSymbol symbol;
 			symbol.kind = ReferenceKind::ItemName;
 			symbol.display = row->name();
-			symbol.name = graph_names::symbol_name(ReferenceKind::ItemName, symbol.display);
+			symbol.name = strutil::to_upper(symbol.display); // NameCase::NoCase's key
 			symbol.file = document.path();
 			symbol.record = document.record_path(address);
 			symbol.locator = document.locator(address);
