@@ -588,6 +588,15 @@ struct Compiler {
         return false;
     }
 
+    /* A section's name is held in 32 bytes, its NUL among them (mus.h MusSection, the debug table's
+       section names): a longer one is refused, never cut (two names agreeing in their first 31
+       characters would be one section, and a cut `enter` target would name none). */
+    static bool section_name_fits(const char *name, const char **err) {
+        if (strlen(name) < (size_t)MUS_SECTION_NAME_SIZE) return true;
+        *err = "a section's name past 31 characters, which the debug table cannot hold";
+        return false;
+    }
+
     /* Find/intern a section by name; returns its index in `sections`. */
     int section_find_or_create(const char *name) {
         for (size_t i = 0; i < section_count; ++i) {
@@ -1006,6 +1015,7 @@ int Compiler::parse_stmt_at(const char **err) {
             *err = "expected section name after 'enter'";
             return -1;
         }
+        if (!section_name_fits(lex.cur_text, err)) return -1;
         int sidx = section_find_or_create(lex.cur_text);
         emit.byte((uint8_t)MUS_OP_SETSTATE);  /* decompiles same as 0x38 enter */
         emit.byte((uint8_t)sidx);
@@ -1021,6 +1031,7 @@ int Compiler::parse_stmt_at(const char **err) {
             *err = "expected target after 'goto'";
             return -1;
         }
+        if (!section_name_fits(lex.cur_text, err)) return -1;
         char name[MUS_SECTION_NAME_SIZE];
         strncpy(name, lex.cur_text, sizeof(name) - 1);
         name[sizeof(name) - 1] = 0;
@@ -1038,6 +1049,7 @@ int Compiler::parse_stmt_at(const char **err) {
             *err = "expected target after 'call'";
             return -1;
         }
+        if (!section_name_fits(lex.cur_text, err)) return -1;
         char name[MUS_SECTION_NAME_SIZE];
         strncpy(name, lex.cur_text, sizeof(name) - 1);
         name[sizeof(name) - 1] = 0;
@@ -1173,6 +1185,7 @@ int Compiler::parse_stmt_at(const char **err) {
         int  ntargets = 0;
         while ((lex.cur_kind == Tok::Ident || lex.cur_kind == Tok::String)
                && ntargets < kMaxTableTargets) {
+            if (inner_op != (uint8_t)MUS_OP_PLAY && !section_name_fits(lex.cur_text, err)) return -1;
             strncpy(targets[ntargets], lex.cur_text, MUS_SECTION_NAME_SIZE - 1);
             targets[ntargets][MUS_SECTION_NAME_SIZE - 1] = 0;
             ++ntargets;
@@ -1513,6 +1526,7 @@ int Compiler::parse_top_decl(const char **err) {
             *err = "expected section name after 'declsection'";
             return -1;
         }
+        if (!section_name_fits(lex.cur_text, err)) return -1;
         section_find_or_create(lex.cur_text);
         lex.advance();
         return 0;
@@ -1529,6 +1543,7 @@ int Compiler::parse_top_decl(const char **err) {
             *err = "a function has this name: a section and a function may not share one";
             return -1;
         }
+        if (!section_name_fits(lex.cur_text, err)) return -1;
         int sidx = section_find_or_create(lex.cur_text);
         sections[sidx].code_offset = (uint32_t)emit.used;
         sections[sidx].defined = true;
