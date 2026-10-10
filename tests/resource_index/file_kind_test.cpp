@@ -12,7 +12,8 @@
 // agrees with master's other copies of its facts: the shader loader's stored form
 // (vfs_loader_takes_stored), the boot table's names (kBootArchiveTable), the mission list's walk
 // (runtime/mission/mission_catalog) and the names the game reads from an expansion's folder
-// (vfs_read_from_expansion_folder).
+// (vfs_read_from_expansion_folder). With --retail, retail's boot archives hold each entry where its
+// kind's slot says, but the splits recorded with why.
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -25,7 +26,9 @@
 #include <base/resource_index/resource_kind.h>
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
+#include <formats/pff/pff.h>
 
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 
 using namespace opennova;
@@ -260,6 +263,12 @@ static int test_master_copies() {
 	}
 	TEST_EXPECT(extensions > 0);
 	TEST_EXPECT(file_kind_for_name("glass.fx") == FileKind::Shader && vfs_loader_takes_stored("glass.fx"));
+	// Retail packs its effects with the menus' and the missions' files (localres.pff), and a mission's
+	// dialog reads the bank of its name as a .pwf where it has no .lwf [orig: DialogManager_LoadFromFile
+	// @ 0x44e7de, "%s.pwf" @ 0x44e7f5 -> SoundBank_OpenFile @ 0x44e807]: either is a sound bank.
+	TEST_EXPECT(file_kind_facts(FileKind::Shader).archive_slot == ArchiveSlot::Localres);
+	TEST_EXPECT(file_kind_for_name("cp01.pwf") == FileKind::SoundBank && file_kind_for_name("CP01.PWF") == FileKind::SoundBank &&
+	            file_kind_for_name("cp01.lwf") == FileKind::SoundBank);
 	TEST_EXPECT(std::string(archive_slot_file_name(ArchiveSlot::Language)) == kBootArchiveTable[0] &&
 	            std::string(archive_slot_file_name(ArchiveSlot::Localres)) == kBootArchiveTable[1] &&
 	            std::string(archive_slot_file_name(ArchiveSlot::Resource)) == kBootArchiveTable[2]);
@@ -277,8 +286,89 @@ static int test_master_copies() {
 	return 0;
 }
 
-int main() {
+// Retail's boot archives against the table (the install under OPENNOVA_JO_DIR): each entry sits in the
+// archive its kind's slot names, but where retail splits a kind over two archives by what a file is for,
+// which no name says (kRetailSplits, each with why). A split no entry needs any more fails too, so the
+// list stays retail's.
+struct RetailSplit {
+	ArchiveSlot archive;
+	FileKind kind;
+	const char *name; // one file (lower case), or null for every file of the kind in that archive
+	const char *why;
+};
+constexpr RetailSplit kRetailSplits[] = {
+	{ ArchiveSlot::Language, FileKind::Wave, nullptr, "the voice lines, localized; the other sounds sit in localres" },
+	{ ArchiveSlot::Localres, FileKind::SoundBank, "game.lwf", "the game's own sounds, beside the waves they name" },
+	{ ArchiveSlot::Localres, FileKind::SoundBank, "menu.lwf", "the menus' sounds, beside the waves they name" },
+	{ ArchiveSlot::Language, FileKind::Texture, nullptr, "the missions' map images (<mission>.pcx), localized" },
+	{ ArchiveSlot::Localres, FileKind::Texture, nullptr, "the menus', the HUD's and the weapons' art" },
+	{ ArchiveSlot::Resource, FileKind::Strings, "medmssn.bin", "a mission name table packed with the art" },
+	{ ArchiveSlot::Resource, FileKind::OtherDefs, "overcast.def", "a weather .def packed with the terrains" },
+	{ ArchiveSlot::Localres, FileKind::Notes, "mislist.txt", "a list the game never reads (no kind packs it)" },
+};
+
+static int test_retail_archives() {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (the boot archives' entries against their kinds' slots)");
+		return 0;
+	}
 	int failures = 0;
+	bool used[sizeof(kRetailSplits) / sizeof(kRetailSplits[0])] = {};
+	const std::vector<std::string> slots = vfs_boot_archive_slots(install);
+	size_t archives = 0, entries = 0, split = 0;
+	for (size_t slot = 0; slot < slots.size(); ++slot) {
+		if (slots[slot].empty()) continue;
+		pff::PffArchive archive{};
+		const std::string path = retail::join(install, slots[slot]);
+		TEST_EXPECT(pff::pff_open(&archive, path.c_str()) == 0);
+		++archives;
+		for (uint32_t i = 0; i < archive.entry_count; ++i) {
+			const pff::PffEntry &entry = archive.entries[i];
+			const std::string name = pff::pff_entry_stored_name(entry);
+			// A .bin's kind is its magic's (a string table, a music script or a raw table).
+			std::vector<uint8_t> bytes;
+			if (resource_extension_for_name(name) == ".bin") {
+				bytes.resize(entry.size);
+				TEST_EXPECT(pff::pff_extract(&archive, &entry, bytes.data(), bytes.size()) == 0);
+			}
+			const FileKind kind = file_kind_for_file(name, bytes.empty() ? nullptr : &bytes);
+			++entries;
+			if (static_cast<size_t>(file_kind_facts(kind).archive_slot) == slot) continue;
+			const std::string lower = strutil::to_lower(name);
+			bool listed = false;
+			for (size_t at = 0; at < sizeof(kRetailSplits) / sizeof(kRetailSplits[0]) && !listed; ++at) {
+				const RetailSplit &row = kRetailSplits[at];
+				if (static_cast<size_t>(row.archive) != slot || row.kind != kind || (row.name && lower != row.name))
+					continue;
+				listed = used[at] = true;
+			}
+			if (listed) {
+				++split;
+				continue;
+			}
+			std::fprintf(stderr, "%s holds %s, of kind %d, whose slot names %s\n", slots[slot].c_str(), name.c_str(),
+			             int(kind), archive_slot_file_name(file_kind_facts(kind).archive_slot));
+			++failures;
+		}
+		pff::pff_close(&archive);
+	}
+	TEST_EXPECT(archives == slots.size());
+	for (size_t at = 0; at < sizeof(kRetailSplits) / sizeof(kRetailSplits[0]); ++at)
+		if (!used[at]) {
+			std::fprintf(stderr, "no entry of %s needs the split %s (%s)\n", archive_slot_file_name(kRetailSplits[at].archive),
+			             kRetailSplits[at].name ? kRetailSplits[at].name : "of its kind", kRetailSplits[at].why);
+			++failures;
+		}
+	std::printf("file_kind: %zu entries of %zu boot archives on their kinds' slots, %zu of them by a recorded split\n",
+	            entries, archives, split);
+	return failures;
+}
+
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
+	int failures = 0;
+	failures += test_retail_archives();
 	failures += test_runtime_formats();
 	failures += test_required_files();
 	failures += test_boot_files();
