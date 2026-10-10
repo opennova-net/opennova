@@ -402,8 +402,10 @@ if(OPENNOVA_EDITOR)
         authoring/definition_viewport_applier.cpp
         authoring/editor_app.cpp
         authoring/environment_viewport_applier.cpp
+        authoring/preview_frame_effects.cpp
         authoring/hud_viewport_applier.cpp
         authoring/menu_viewport_applier.cpp
+        authoring/mission_map_viewport_applier.cpp
         authoring/mission_placed_tiles.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp

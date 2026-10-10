@@ -28,7 +28,8 @@ struct MissionListenOptions {
 };
 
 // The mission viewport's options (ADR 0046 S14): the layers its device draws (the terrain, the sky,
-// the water, the models, the static terrain shadows), the marks the canvas draws over them (each
+// the water, the models, the shadows as the game casts them: the terrain's static ones and, S23 C, the
+// entities' moving ground shadows, one layer), the marks the canvas draws over them (each
 // pool's entities, the area triggers, the paths, the labels beside every shown mark rather than
 // the hovered and selected ones alone), how far from the eye a mark is still drawn and picked
 // (metres; 0: no limit), whether a move keeps each entity's height over the ground (stick), and the

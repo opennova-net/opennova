@@ -1,5 +1,6 @@
 #include <editor/ui/mission_palette_view.h>
 
+#include <algorithm>
 #include <string>
 
 #include <imgui.h>
@@ -24,8 +25,35 @@ std::string MissionPaletteView::name_of(int64_t item) const {
 	return std::string();
 }
 
-int64_t MissionPaletteView::draw(const AssetGraph *graph, uint64_t generation, const std::vector<int64_t> &recent,
-		int64_t picked, const std::string &search, std::string *typed) {
+namespace {
+
+// The time a frame gives the pictures (the texture thumbnails' share of a poll).
+constexpr int64_t kPicturesFrameUs = 2000;
+
+// `picture` drawn into the square at `at`, `side` pixels, its lines fitted with a margin, in the text's colour; a
+// muted square where it has none yet (or the model does not read).
+void draw_picture(const MissionPalettePicture *picture, ImVec2 at, float side) {
+	ImDrawList *draw = ImGui::GetWindowDrawList();
+	const ImU32 frame = ImGui::GetColorU32(ImGuiCol_Border);
+	draw->AddRect(at, ImVec2(at.x + side, at.y + side), frame);
+	if (!picture || !picture->read || picture->lines.empty()) return;
+	const float margin = 3.0f;
+	const float w = std::max(picture->hi[0] - picture->lo[0], 1e-3f), h = std::max(picture->hi[1] - picture->lo[1], 1e-3f);
+	const float scale = (side - 2.0f * margin) / std::max(w, h);
+	// Centred, up the screen's up.
+	const float ox = at.x + margin + ((side - 2.0f * margin) - w * scale) * 0.5f;
+	const float oy = at.y + side - margin - ((side - 2.0f * margin) - h * scale) * 0.5f;
+	const ImU32 colour = ImGui::GetColorU32(ImGuiCol_Text);
+	const std::vector<float> &lines = picture->lines;
+	for (size_t i = 0; i + 3 < lines.size(); i += 4)
+		draw->AddLine(ImVec2(ox + (lines[i] - picture->lo[0]) * scale, oy - (lines[i + 1] - picture->lo[1]) * scale),
+				ImVec2(ox + (lines[i + 2] - picture->lo[0]) * scale, oy - (lines[i + 3] - picture->lo[1]) * scale), colour);
+}
+
+} // namespace
+
+int64_t MissionPaletteView::draw(const SessionView &view, const AssetGraph *graph, uint64_t generation,
+		const std::vector<int64_t> &recent, int64_t picked, const std::string &search, std::string *typed) {
 	filter_.follow(search);
 	if (ui_kit::filter_box("##palette_filter", filter_.text, sizeof(filter_.text), "Search items", 0.0f,
 			"Find an item by its name, its id or its model's file.", false) && typed)
@@ -72,9 +100,15 @@ int64_t MissionPaletteView::draw(const AssetGraph *graph, uint64_t generation, c
 						const MissionPaletteItem &item = palette_.items[section.items[size_t(row)]];
 						ImGui::PushID(row);
 						const std::string name = item.name.empty() ? "Item " + std::to_string(item.item) : item.name;
-						const float room = ImGui::GetContentRegionAvail().x;
+						// The row two lines high: the model's picture, then the name.
+						const float side = ImGui::GetTextLineHeight() * 2.0f + ImGui::GetStyle().ItemSpacing.y;
+						const ImVec2 at = ImGui::GetCursorScreenPos();
+						const float room = ImGui::GetContentRegionAvail().x - side - muted_gap;
 						const std::string shown = ui_kit::fit(name, room);
-						if (ImGui::Selectable((shown + "###item").c_str(), picked == item.item)) chosen = item.item;
+						if (ImGui::Selectable("###item", picked == item.item, 0, ImVec2(0.0f, side))) chosen = item.item;
+						draw_picture(pictures_.get(view, item.model).get(), at, side);
+						const ImVec2 text_at(at.x + side + muted_gap, at.y + (side - ImGui::GetTextLineHeight()) * 0.5f);
+						ImGui::GetWindowDrawList()->AddText(text_at, ImGui::GetColorU32(ImGuiCol_Text), shown.c_str());
 						if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
 							const std::string id = std::to_string(item.item);
 							ImGui::SetDragDropPayload(kItemDragPayload, id.c_str(), id.size() + 1);
@@ -93,10 +127,10 @@ int64_t MissionPaletteView::draw(const AssetGraph *graph, uint64_t generation, c
 						if (!item.model.empty()) {
 							const float used = ImGui::CalcTextSize(shown.c_str()).x;
 							const std::string model = file_name(item.model);
-							if (room - used > ImGui::CalcTextSize(model.c_str()).x + muted_gap * 2.0f) {
-								ImGui::SameLine(room - ImGui::CalcTextSize(model.c_str()).x);
-								ImGui::TextDisabled("%s", model.c_str());
-							}
+							const float width = ImGui::CalcTextSize(model.c_str()).x;
+							if (room - used > width + muted_gap * 2.0f)
+								ImGui::GetWindowDrawList()->AddText(ImVec2(at.x + side + muted_gap + room - width, text_at.y),
+										ImGui::GetColorU32(ImGuiCol_TextDisabled), model.c_str());
 						}
 						ImGui::PopID();
 					}
@@ -106,6 +140,8 @@ int64_t MissionPaletteView::draw(const AssetGraph *graph, uint64_t generation, c
 		}
 	}
 	ImGui::EndChild();
+	// The pictures the rows asked for, a few a frame.
+	pictures_.step(view, kPicturesFrameUs);
 	return chosen;
 }
 

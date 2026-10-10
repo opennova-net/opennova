@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include <editor/assets/asset_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/shown_text.h>
@@ -97,13 +98,25 @@ struct ScriptAssistAsk {
 	uint64_t serial = 0;
 };
 
+// The runs of a text document's text its game reader knows as words of its language, each at its span, which
+// the script device colours (ADR 0046 S13 V10, S23 C): which reader a text type's highlights come from is the
+// view's one table, keyed by the document's type, from that type's port of its reader alone, so nothing is
+// coloured that no reader knows. The script's are the WAC compiler's own record of the words it read
+// (documents/script_type's script_highlights: a keyword, a command it emitted, an operand it looked a name up
+// for); a credits file's are the ConfigFile reader's (each section's label line, each
+// entry's key and each of its values where the reader read it [orig: ConfigFile_ParseText @ 0x7608A0]). A type
+// whose reader's port says no word it read has none (a music script, a shader, a particle file, the HUD layout,
+// a plain text): null.
+using ScriptHighlighter = void (*)(const TextDocument &document, std::vector<TextHighlight> &out);
+ScriptHighlighter script_highlighter(DocumentTypeId type);
+
 // The script device's viewport (ADR 0046 S13 V10; ViewportKind::Script, the Main role of every text
 // type; CONTEXT.md "Script device"): a text document's text as it stands (never as saved: the text
 // is the document's), which the Shell's device shows in a Godot CodeEdit that owns the input in the
 // rect the tab reserves. It follows its document into what the device shows: the text as the
 // control holds it (ShownText), the gutter marks of the findings at the document's places, the
-// highlights its type's reader knows (DocumentType::highlights: a script's keywords, commands and
-// operands), whether the document takes an edit now (none when it is held read only, a music
+// highlights its type's reader knows (script_highlighter's table: a script's keywords, commands and
+// operands, a ConfigFile's sections, keys and values), whether the document takes an edit now (none when it is held read only, a music
 // script's message handler or a credits file its text form cannot carry, nor while an operation
 // holds the documents), and the place a RevealText asks it to show (a Go to's span, a Problems
 // row's place: selected where a reference or a word of the language starts there, the caret alone

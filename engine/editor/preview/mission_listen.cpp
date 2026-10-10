@@ -832,4 +832,9 @@ void mission_listen_shapes(const MissionListen &listen, const OrbitCamera &camer
 	}
 }
 
+void MissionListen::keep(const ClipSoundFired &fired) {
+	fired_.push_back(fired);
+	if (fired_.size() > kFiredKept) fired_.erase(fired_.begin(), fired_.end() - std::ptrdiff_t(kFiredKept));
+}
+
 } // namespace opennova::editor

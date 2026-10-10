@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/mnu_document.h>
@@ -18,6 +19,7 @@
 #include <editor/import/import_plan.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_card.h>
@@ -222,6 +224,9 @@ constexpr WorkspaceMember kDocument[] = {
 			"while it keeps a second." },
 	{ "remap_from", J::Integer, "An 8-bit PCX's palette index to move (0 to 255): a .pcx texture's." },
 	{ "remap_to", J::Integer, "The palette index it moves to (0 to 255)." },
+	{ "map", J::Boolean,
+			"A mission's 2D map shown in the Preview window beside its 3D view (S23 C, the Map tool's ask; the Windows "
+			"menu's tick shows the kind shown before): the active document's, until another is made active." },
 };
 
 constexpr WorkspacePartRow kParts[] = {
@@ -920,8 +925,18 @@ bool set_document(Change &change, const JsonValue &part) {
 		if (index->number > 255.0) return change.refuse(std::string("document.") + member + " is a palette index, 0 to 255.", at);
 		(std::string(member) == "remap_from" ? shown.remap_from : shown.remap_to) = int(index->number);
 	}
+	bool beside_moved = false;
+	if (const JsonValue *map = part.get("map")) {
+		const DocumentTypeId type = asset_kind_row(document->kind()).document;
+		if (!viewport_kind_beside_picture(preview_kind_of(type)))
+			return change.refuse(at + " has no 2D map: a mission's shows beside its 3D view.", at);
+		if (at != change.view.documents.active) return change.refuse(at + " is not the active document: its map shows beside it once it is.", at);
+		const std::string beside = map->boolean ? at : std::string();
+		beside_moved = change.view.documents.beside != beside;
+		change.view.documents.beside = beside;
+	}
 	WorkspaceView::DocumentView &held = change.workspace().documents[at];
-	const bool moved = held.filter != shown.filter || held.kinds != shown.kinds || held.all_rows != shown.all_rows ||
+	const bool moved = beside_moved || held.filter != shown.filter || held.kinds != shown.kinds || held.all_rows != shown.all_rows ||
 	                   held.sort != shown.sort || held.every != shown.every || held.inspector_filter != shown.inspector_filter ||
 	                   held.new_window_type != shown.new_window_type || held.remove_screen != shown.remove_screen ||
 	                   held.remap_from != shown.remap_from || held.remap_to != shown.remap_to;
@@ -1029,6 +1044,7 @@ JsonValue document_json(const SessionView &view, const DocumentBase &document, c
 	out.set("remove_screen", number(double(shown.remove_screen)));
 	out.set("remap_from", number(shown.remap_from));
 	out.set("remap_to", number(shown.remap_to));
+	out.set("map", flag(!view.documents.beside.empty() && view.documents.beside == document.path()));
 	out.set("active", flag(document.path() == view.documents.active));
 	return out;
 }

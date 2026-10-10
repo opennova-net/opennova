@@ -61,11 +61,6 @@ struct DocumentType {
 	// (the graph reads a record document's references through its schema). Read from the document
 	// alone, as validate_file is.
 	void (*references)(const TextDocument &document, std::vector<TextReference> &out) = nullptr;
-	// A text type's highlights (ADR 0046 S13 V10): the runs of its document's text its game reader
-	// reads as words of its language, each at its span (a script's keywords, commands and operands,
-	// the WAC compiler's), which the script device colours; null for a type whose reader the editor
-	// has no port of that says so (nothing is coloured that no reader knows), and for a record type.
-	void (*highlights)(const TextDocument &document, std::vector<TextHighlight> &out) = nullptr;
 	// A record type's references that no field's value is (ADR 0046 S14): the files a mission's own
 	// name finds (its text table, script, loading image, tile placement and dialog bank), a text key
 	// formed from a number (a marker's name index). Added to what the schema's fields give

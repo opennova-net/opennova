@@ -13,6 +13,7 @@
 #include <editor/preview/terrain_viewport.h>
 #include <editor/preview/hud_viewport.h>
 #include <editor/preview/menu_viewport.h>
+#include <editor/preview/mission_map.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/script_viewport.h>
@@ -101,6 +102,13 @@ constexpr ViewportFeed kFontFeeds[] = {
 	{ T::Font, true },
 };
 
+// The map's (S23 C): a mission's 2D map, the Preview window's beside its 3D view; the rows as they stand (as the 3D
+// view reads them), each pin redrawn as a drag goes. The Shell keeps one of its devices (the Preview window shows one
+// map; each holds a terrain), so the cache's four leave the two 3D views theirs.
+constexpr ViewportFeed kMapFeeds[] = {
+	{ T::Mission, true },
+};
+
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
 // over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8); the
 // mission's waits too (a drag is Updates alone: its entities move in place), and the Shell keeps two
@@ -136,6 +144,8 @@ constexpr ViewportKindRow kRows[] = {
 			TerrainViewport::make, true, 2 },
 	on_backdrop({ ViewportKind::Font, ViewportRole::Main, false, false, false, kFontFeeds, std::size(kFontFeeds),
 			FontViewport::make }),
+	{ ViewportKind::Map, ViewportRole::Preview, false, false, false, kMapFeeds, std::size(kMapFeeds),
+			MissionMapViewport::make, true, 1 },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");
@@ -203,8 +213,26 @@ ViewportKind main_viewport_kind(DocumentTypeId type) {
 }
 
 ViewportKind default_viewport_kind(DocumentTypeId type) {
+	// A type whose Document tab is a picture of its own (a Main-role kind a canvas draws: a mission's 3D view) is read
+	// through it; else through the Preview-role kind that shows it, else its Main-role kind (a text's script device).
+	const ViewportKind main = main_viewport_kind(type);
+	if (main != ViewportKind::kCount && viewport_kind_row(main).canvas) return main;
 	const ViewportKind preview = preview_kind_of(type);
-	return viewport_kind_shows(preview, type) ? preview : main_viewport_kind(type);
+	return viewport_kind_shows(preview, type) ? preview : main;
+}
+
+bool viewport_kind_beside_picture(ViewportKind kind) {
+	if (kind == ViewportKind::kCount) return false;
+	const ViewportKindRow &row = viewport_kind_row(kind);
+	if (row.role != ViewportRole::Preview) return false;
+	bool any = false;
+	for (size_t i = 0; i < row.feed_count; ++i) {
+		if (!row.feeds[i].shows) continue;
+		const ViewportKind main = main_viewport_kind(row.feeds[i].type);
+		if (main == ViewportKind::kCount || !viewport_kind_row(main).canvas) return false;
+		any = true;
+	}
+	return any;
 }
 
 ViewportKind preview_kind_of(DocumentTypeId type) {
@@ -252,10 +280,17 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
 				documents.previews[files].path != documents.active)
 			return files;
 	}
+	// A kind that shows beside its document's own picture (a mission's map) shows only where it was asked for (the Map
+	// tool's ask, while that document stays active); the Windows menu's tick keeps the kind shown before (S15).
+	const auto asked = [&](ViewportKind kind) {
+		return !viewport_kind_beside_picture(kind) ||
+		       (!documents.beside.empty() && documents.beside == documents.active && documents.previews[kind].path == documents.active);
+	};
+	if (!asked(last)) last = ViewportKind::kCount;
 	ViewportKind kind = last;
 	if (const DocumentBase *active = open_at(documents, documents.active)) {
 		const ViewportKind fed = preview_kind_of(asset_kind_row(active->kind()).document);
-		if (fed != ViewportKind::kCount) kind = fed;
+		if (fed != ViewportKind::kCount && asked(fed)) kind = fed;
 	}
 	// A files kind the Preview window showed stays only while Files leads.
 	if (kind != ViewportKind::kCount && viewport_kind_row(kind).role != ViewportRole::Preview) kind = ViewportKind::kCount;
@@ -267,7 +302,7 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
 	    !documents.previews[last].path.empty())
 		return last;
 	for (const ViewportKindRow &row : kRows)
-		if (row.role == ViewportRole::Preview && !documents.previews[row.kind].path.empty()) return row.kind;
+		if (row.role == ViewportRole::Preview && !documents.previews[row.kind].path.empty() && asked(row.kind)) return row.kind;
 	return ViewportKind::kCount;
 }
 
@@ -277,6 +312,8 @@ void update_preview_targets(DocumentsView &documents) {
 		documents.files_lead = false;
 		documents.previews_active = documents.active;
 	}
+	// The Map tool's ask holds while its document stays active.
+	if (documents.beside != documents.active) documents.beside.clear();
 	const DocumentBase *shown = open_at(documents, documents.active);
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const auto kind = static_cast<ViewportKind>(i);

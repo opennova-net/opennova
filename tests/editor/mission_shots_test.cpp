@@ -119,7 +119,7 @@ const char *kAmmo =
 		"\teffects_table\n\t\tobj Hit_O S_OBJ_T 15\n\tend\nend\n";
 
 const char *kItems = "begin \"Shot Crate\"\nid 106190\ntype object\ngraphic crate\nhp 500\nend\n"
-                     "begin \"Frail Crate\"\nid 106191\ntype object\ngraphic crate\nhp 1\nend\n";
+                     "begin \"Frail Crate\"\nid 106191\ntype object\ngraphic crate\nhusk cratehusk\nai_function gnrc\nhp 1\nend\n";
 
 std::shared_ptr<ShotFiles> shot_files() {
 	auto files = std::make_shared<ShotFiles>();
@@ -127,6 +127,7 @@ std::shared_ptr<ShotFiles> shot_files() {
 	files->put("Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
 	files->put("Tmap_m.pcx", charmap());
 	files->put("crate.3di", test_io::read_file(fixture("threedi/synth/crate.3di")));
+	files->put("cratehusk.3di", test_io::read_file(fixture("threedi/synth/crate.3di")));
 	files->put_text("ammo.def", kAmmo);
 	files->put_text("items.def", kItems);
 	return files;
@@ -280,6 +281,29 @@ int test_object_shot() {
 	const std::vector<MissionShotEvent> deaths = events_of(rig.shots, MissionShotEvent::Kind::Death);
 	TEST_EXPECT(deaths.size() == 1 && deaths[0].row == 12 && deaths[0].health_after <= 0 &&
 	            deaths[0].words.find("is destroyed") != std::string::npos);
+	// S23 C: the death kept for the device, its husk swapped in from the plan's swap tick on (none before it), the
+	// destroy fade's registers and the sections the pieces left with it.
+	TEST_EXPECT(rig.shots.deaths().size() == 1);
+	if (rig.shots.deaths().size() == 1 && !deaths.empty()) {
+		const MissionShotDeath &death = rig.shots.deaths()[0];
+		TEST_EXPECT(death.row == 12 && death.item == 106191 && death.tick == deaths[0].tick && death.plan.husk == "cratehusk");
+		TEST_EXPECT(death.plan.swaps);
+		const int32_t swap = death.tick + death.plan.swap_tick;
+		TEST_EXPECT(!mission_husk_frame(death, death.tick - 1).husked);
+		if (death.plan.swap_tick > 0) TEST_EXPECT(!mission_husk_frame(death, swap - 1).husked);
+		const MissionHuskFrame husked = mission_husk_frame(death, swap);
+		TEST_EXPECT(husked.husked && husked.row == 12 && husked.husk == "cratehusk");
+		const MissionHuskFrame later = mission_husk_frame(death, swap + 600);
+		TEST_EXPECT(later.husked && later.husk == "cratehusk");
+		const opennova::io::JsonValue json = rig.shots.to_json();
+		const opennova::io::JsonValue *listed = json.get("deaths");
+		TEST_EXPECT(listed && listed->array.size() == 1 && listed->array[0].get_string("husk", "") == "cratehusk" &&
+		            int(listed->array[0].get("swap_tick")->number) == swap);
+	}
+	// No shot: no death.
+	rig.shots.set_shots({});
+	rig.shots.run_to(12);
+	TEST_EXPECT(rig.shots.deaths().empty());
 	std::printf("test_object_shot passed\n");
 	return 0;
 }

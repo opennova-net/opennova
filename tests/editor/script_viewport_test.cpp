@@ -109,8 +109,9 @@ std::unique_ptr<DocumentBase> document_of(AssetKind kind, const std::string &tex
 
 int test_kind_table() {
 	// The menu's, the model's, the script's, the mission's (S14), the texture's (S18), the effect's (DI-14),
-	// the HUD's (DI-20), the definition's (DI-21), the environment's (DI-19b), the terrain's (DI-30b), the font's (S23).
-	TEST_EXPECT(kViewportKindCount == 11);
+	// the HUD's (DI-20), the definition's (DI-21), the environment's (DI-19b), the terrain's (DI-30b), the font's (S23),
+	// the mission's 2D map (S23 C).
+	TEST_EXPECT(kViewportKindCount == 12);
 	TEST_EXPECT(std::string(viewport_kind_token(ViewportKind::Script)) == "script");
 	ViewportKind named = ViewportKind::kCount;
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);
@@ -485,6 +486,27 @@ int test_highlights() {
 	ScriptViewport plain("game.cfg");
 	plain.follow(ViewportInput{other, clock, other.documents.open.front().get(), ChangeClass::Loaded}, clock);
 	TEST_EXPECT(plain.status() == ViewportStatus::Ready && plain.highlights().empty());
+	// S23 C: the one table says which reader a type's highlights come from. A credits file's are the ConfigFile
+	// reader's: each section's label line, each key and each value where the reader read them, the text handed it
+	// as Save writes it (the second line's LF alone CR LF), a comment and a line of no '=' nothing.
+	TEST_EXPECT(script_highlighter(DocumentTypeId::Script) == script_highlights);
+	TEST_EXPECT(script_highlighter(DocumentTypeId::Text) == nullptr && script_highlighter(DocumentTypeId::Shader) == nullptr);
+	TEST_EXPECT(script_highlighter(DocumentTypeId::Credits) != nullptr);
+	std::unique_ptr<DocumentBase> credits_text =
+			document_of(AssetKind::Credits, "; credits\r\n[CLASS1]\nSPEED = 1.5, 2\r\njunk\r\n", "credits.kda");
+	std::vector<TextHighlight> config_words;
+	script_highlighter(DocumentTypeId::Credits)(*text_of(*credits_text), config_words);
+	TEST_EXPECT(config_words.size() == 4);
+	if (config_words.size() == 4) {
+		TEST_EXPECT(config_words[0].kind == TextHighlightKind::Keyword && config_words[0].span.line == 2 &&
+		            config_words[0].span.column == 1 && config_words[0].span.length == 8);
+		TEST_EXPECT(config_words[1].kind == TextHighlightKind::Command && config_words[1].span.line == 3 &&
+		            config_words[1].span.column == 1 && config_words[1].span.length == 5);
+		TEST_EXPECT(config_words[2].kind == TextHighlightKind::Operand && config_words[2].span.column == 9 &&
+		            config_words[2].span.length == 3);
+		TEST_EXPECT(config_words[3].kind == TextHighlightKind::Operand && config_words[3].span.column == 14 &&
+		            config_words[3].span.length == 1);
+	}
 	return 0;
 }
 
@@ -898,7 +920,7 @@ int test_retail() {
 		if (!text) continue;
 		++scripts;
 		std::vector<TextHighlight> words;
-		type->highlights(*text, words);
+		script_highlighter(type->id)(*text, words);
 		const TextHighlight *last = nullptr;
 		for (const TextHighlight &word : words) {
 			keywords += word.kind == TextHighlightKind::Keyword;

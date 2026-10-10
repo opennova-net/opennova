@@ -101,6 +101,9 @@ void ScriptEdit::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_word_tip", "line", "column"), &ScriptEdit::get_word_tip);
 	ClassDB::bind_method(D_METHOD("get_hover_note"), &ScriptEdit::get_hover_note);
 	ClassDB::bind_method(D_METHOD("is_completion_shown"), &ScriptEdit::is_completion_shown);
+	ClassDB::bind_method(D_METHOD("copy_text"), &ScriptEdit::copy_text);
+	ClassDB::bind_method(D_METHOD("cut_text"), &ScriptEdit::cut_text);
+	ClassDB::bind_method(D_METHOD("paste_text", "text"), &ScriptEdit::paste_text);
 }
 
 ScriptEdit::ScriptEdit() {
@@ -139,8 +142,8 @@ ScriptEdit::ScriptEdit() {
 	set_multiple_carets_enabled(false);
 	set_drag_and_drop_selection_enabled(false);
 	set_auto_indent_prefixes(TypedArray<String>());
-	// Our paste (_paste) cannot reach the state Godot's pastes a line copied with nothing selected above
-	// the current one by, so a copy or a cut with nothing selected takes nothing.
+	// The copy, the cut and the paste are its own (_copy, _cut, _paste): Godot's line copy with nothing
+	// selected keeps a state our paste cannot read, so the control keeps the line it copied itself.
 	set_empty_selection_clipboard_enabled(false);
 	// The findings' gutter, before the line numbers.
 	add_gutter(0);
@@ -322,14 +325,66 @@ void ScriptEdit::on_focus_exited_() {
 
 void ScriptEdit::_paste(int32_t p_caret_index) {
 	if (!is_editable()) return;
+	paste_text(DisplayServer::get_singleton()->clipboard_get());
+}
+
+void ScriptEdit::_copy(int32_t p_caret_index) {
+	const String text = copy_text();
+	if (!text.is_empty()) DisplayServer::get_singleton()->clipboard_set(text);
+}
+
+void ScriptEdit::_cut(int32_t p_caret_index) {
+	if (!is_editable()) return;
+	const String text = cut_text();
+	if (!text.is_empty()) DisplayServer::get_singleton()->clipboard_set(text);
+}
+
+String ScriptEdit::copy_text() {
+	// The selection; with nothing selected, the caret's line and its line end, kept as the line copied.
+	if (has_selection(0)) {
+		line_copy_ = String();
+		return get_selected_text(0);
+	}
+	line_copy_ = get_line(get_caret_line(0)) + "\n";
+	return line_copy_;
+}
+
+String ScriptEdit::cut_text() {
+	const bool whole_line = !has_selection(0);
+	const String text = copy_text();
+	if (!is_editable()) return text;
+	begin_complex_operation();
+	if (!whole_line) {
+		delete_selection(0);
+	} else {
+		// The line out, its line end with it (the last line's: the one before it).
+		const int line = get_caret_line(0);
+		if (line < get_line_count() - 1) {
+			remove_text(line, 0, line + 1, 0);
+		} else if (line > 0) {
+			remove_text(line - 1, get_line(line - 1).length(), line, get_line(line).length());
+		} else {
+			remove_text(0, 0, 0, get_line(0).length());
+		}
+	}
+	end_complex_operation();
+	return text;
+}
+
+void ScriptEdit::paste_text(const String &p_text) {
+	if (!is_editable()) return;
 	// The clipboard's line ends as the text's own, each an LF whether the clipboard's was a CR LF or a
 	// CR alone (Godot drops a CR as it takes text, which would join the lines a CR alone ended).
-	const String text = DisplayServer::get_singleton()->clipboard_get().replace("\r\n", "\n").replace("\r", "\n");
+	const String text = p_text.replace("\r\n", "\n").replace("\r", "\n");
 	if (text.is_empty()) return;
-	const int caret = p_caret_index < 0 ? 0 : p_caret_index;
 	begin_complex_operation();
-	if (has_selection(caret)) delete_selection(caret);
-	insert_text_at_caret(text, caret);
+	if (!has_selection(0) && !line_copy_.is_empty() && text == line_copy_) {
+		// A line copied whole: above the caret's line, the caret staying on its text.
+		insert_text(text, get_caret_line(0), 0);
+	} else {
+		if (has_selection(0)) delete_selection(0);
+		insert_text_at_caret(text, 0);
+	}
 	end_complex_operation();
 }
 

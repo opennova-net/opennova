@@ -118,6 +118,56 @@ int test_budget() {
 	return 0;
 }
 
+// S23 C: the roles no model row loads, each by its loader's creation flags (texture_role_budget), worked by hand:
+// the HUD's one level, colour A8R8G8B8 and alpha A8 alone; a menu image's power-of-two tile; a frame's stencil and
+// brush at their sides; the terrain's colour map as four DXT1 quadrants with their chains; a splat layer halved by
+// the terrain texture detail (twice at 0, once at 1 and 2, none at 3) in DXT1; the tile atlas in DXT5; a far
+// detail map, no texture of its own; a role not witnessed, none.
+int test_role_budgets() {
+	using R = renderer::TextureRoleId;
+	const TextureHeader icon = texture_header("icon.tga", tga(100, 60));
+	TextureBudget b = texture_role_budget(icon, "icon.tga", R::HudColour);
+	TEST_EXPECT(b.known && b.count == 1 && b.setting.empty() && b.full().format == DeviceTextureFormat::A8R8G8B8 &&
+	            b.full().levels == 1 && b.full().bytes == 100u * 60 * 4 && b.detail[0].bytes == b.full().bytes);
+	b = texture_role_budget(icon, "icon.tga", R::HudAlphaOnly);
+	TEST_EXPECT(b.known && b.full().format == DeviceTextureFormat::Uncompressed && b.full().bits == 8 &&
+	            b.full().bytes == 100u * 60);
+	// A 640 x 480 menu image: one 1024 x 512 tile, one level.
+	const TextureHeader screen = texture_header("back.tga", tga(640, 480));
+	b = texture_role_budget(screen, "back.tga", R::MenuImage);
+	TEST_EXPECT(b.known && b.count == 1 && b.full().width == 1024 && b.full().height == 512 && b.full().levels == 1 &&
+	            b.full().bytes == 1024u * 512 * 4);
+	TEST_EXPECT(texture_role_budget(screen, "back.tga", R::MenuCursor).full().bytes == 1024u * 512 * 4);
+	b = texture_role_budget(screen, "frame.tga", R::MenuFrameStencil);
+	TEST_EXPECT(b.full().width == 640 && b.full().levels == 1 && b.full().bytes == 640u * 480 * 4);
+	TEST_EXPECT(texture_role_budget(screen, "brush.tga", R::MenuFrameBrush).full().bytes == 640u * 480 * 4);
+	// The colour map: four 512 x 512 DXT1 quadrants, each to 4 x 4 (8 levels).
+	const TextureHeader colour = texture_header("colormap.tga", tga(1024, 1024, false));
+	b = texture_role_budget(colour, "colormap.tga", R::TerrainColourMap);
+	uint64_t quadrant = 0;
+	for (uint32_t s = 512; s >= 4; s /= 2) quadrant += uint64_t(std::max(1u, s / 4)) * std::max(1u, s / 4) * 8;
+	TEST_EXPECT(b.count == 4 && b.full().format == DeviceTextureFormat::Dxt1 && b.full().width == 512 &&
+	            b.full().levels == 8 && b.full().bytes == 4 * quadrant);
+	TEST_EXPECT(texture_budget_words(b).find("4 textures of 512 x 512, DXT1") != std::string::npos);
+	// A 256 splat layer: 64 at level 0, 128 at 1 and 2, 256 at 3, DXT1.
+	const TextureHeader splat = texture_header("grass.tga", tga(256, 256));
+	b = texture_role_budget(splat, "grass.tga", R::TerrainSplatDetail);
+	TEST_EXPECT(b.setting == "terrain_texdetail" && b.detail[0].width == 64 && b.detail[1].width == 128 &&
+	            b.detail[2].width == 128 && b.detail[3].width == 256 && b.full().format == DeviceTextureFormat::Dxt1);
+	b = texture_role_budget(splat, "detail2.tga", R::TerrainSecondDetail);
+	TEST_EXPECT(b.detail[0].width == 64 && b.full().format == DeviceTextureFormat::A8R8G8B8);
+	// The tile atlas: DXT5 at its sides, its chain to 4 texels.
+	b = texture_role_budget(texture_header("tiles.tga", tga(256, 128)), "tiles.tga", R::TerrainTileAtlas);
+	TEST_EXPECT(b.full().format == DeviceTextureFormat::Dxt5 && b.full().width == 256 && b.full().levels == 6);
+	b = texture_role_budget(splat, "far.tga", R::TerrainFarDetail);
+	TEST_EXPECT(b.known && b.count == 0 && texture_budget_words(b) == "Drawn into its near map's levels: no texture of its own.");
+	TEST_EXPECT(!texture_role_budget(splat, "scorch.tga", R::TerrainScorch).known && !texture_role_has_budget(R::TerrainScorch));
+	// A model row's role is texture_budget's, not this one's.
+	TEST_EXPECT(texture_role_has_budget(R::ModelDiffuse) && !texture_role_budget(splat, "d.tga", R::ModelDiffuse).known);
+	std::printf("role budgets: the HUD's, the menus' and the terrain's, by their loaders' flags\n");
+	return 0;
+}
+
 const Diagnostic *finding(const SessionView &view, const std::string &code, const std::string &mentions) {
 	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code() == code && d.message.find(mentions) != std::string::npos) return &d;
@@ -228,8 +278,9 @@ int test_project() {
 	answer = session.query("texture_budget", args, error);
 	const JsonValue *rows = answer.get("textures");
 	const JsonValue *totals = answer.get("totals");
-	TEST_EXPECT(error.empty() && rows && totals && rows->array.size() == 6 && answer.get_number("count", 0) == 6);
-	if (rows && totals && rows->array.size() == 6) {
+	// (S23 C: the new project's menu cursor, newarow1.tga, is costed too: one 32 x 32 tile, one level.)
+	TEST_EXPECT(error.empty() && rows && totals && rows->array.size() == 7 && answer.get_number("count", 0) == 7);
+	if (rows && totals && rows->array.size() == 7) {
 		TEST_EXPECT(rows->array[0].get_string("file", "") == "textures/crate.tga" && rows->array[0].get_number("uses", 0) == 1);
 		double full = 0, lowest = 0, previous = 1e18;
 		for (const JsonValue &row : rows->array) {
@@ -245,11 +296,13 @@ int test_project() {
 			if (file == "textures/small.tga") TEST_EXPECT(row.get_number("uses", 0) == 3 && row.get_string("name", "") == "small.tga");
 			if (file == "textures/skin.dds") TEST_EXPECT(row.get_string("name", "") == "skin.tga");
 			if (file == "textures/leg_n.mdt") TEST_EXPECT(row.get("budget")->get_string("loader", "") == "normal");
+			if (file == "textures/newarow1.tga")
+				TEST_EXPECT(row.get("budget")->get_string("role", "") == "menu_cursor" && bytes == 32.0 * 32 * 4);
 			TEST_EXPECT(file != "textures/skin.tga");
 		}
 		const JsonValue *at = totals->get("detail");
 		TEST_EXPECT(at && at->array.size() == 4 && at->array[3].number == full && at->array[0].number == lowest);
-		TEST_EXPECT(totals->get_number("textures", 0) == 6 && totals->get_number("past_warning", 0) == 1 &&
+		TEST_EXPECT(totals->get_number("textures", 0) == 7 && totals->get_number("past_warning", 0) == 1 &&
 		            totals->get_number("as_dds", full) < full);
 	}
 	// A page of it.
@@ -353,6 +406,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	int failures = 0;
 	failures += test_budget();
+	failures += test_role_budgets();
 	failures += test_project();
 	failures += test_retail();
 	if (failures == 0) std::printf("editor_texture_budget: all passed\n");

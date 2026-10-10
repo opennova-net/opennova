@@ -8,6 +8,7 @@
 #include "authoring/font_viewport_applier.h"
 #include "authoring/hud_viewport_applier.h"
 #include "authoring/menu_viewport_applier.h"
+#include "authoring/mission_map_viewport_applier.h"
 #include "authoring/mission_viewport_applier.h"
 #include "authoring/model_viewport_applier.h"
 #include "authoring/script_device.h"
@@ -54,6 +55,9 @@ std::unique_ptr<ViewportApplier> make_terrain_applier(SubViewport &viewport) {
 std::unique_ptr<ViewportApplier> make_font_applier(SubViewport &viewport) {
 	return std::make_unique<FontViewportApplier>(viewport);
 }
+std::unique_ptr<ViewportApplier> make_map_applier(SubViewport &viewport) {
+	return std::make_unique<MissionMapViewportApplier>(viewport);
+}
 
 constexpr ViewportDeviceRow kDevices[] = {
 	{ ViewportKind::Menu, make_menu_applier, nullptr },
@@ -67,6 +71,7 @@ constexpr ViewportDeviceRow kDevices[] = {
 	{ ViewportKind::Environment, make_environment_applier, nullptr },
 	{ ViewportKind::Terrain, make_terrain_applier, nullptr },
 	{ ViewportKind::Font, make_font_applier, nullptr },
+	{ ViewportKind::Map, make_map_applier, nullptr },
 };
 
 constexpr bool devices_in_order() {

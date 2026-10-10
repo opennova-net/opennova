@@ -114,6 +114,7 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("drop_files", "files", "at"), &EditorApp::drop_files);
 	ClassDB::bind_method(D_METHOD("drop_files_at_screen", "files", "screen"), &EditorApp::drop_files_at_screen);
 	ClassDB::bind_method(D_METHOD("get_last_drop_at"), &EditorApp::get_last_drop_at);
+	ClassDB::bind_method(D_METHOD("float_window", "title", "at"), &EditorApp::float_window);
 }
 
 EditorApp::EditorApp() : platform_(std::make_unique<ChildProcessPlatform>()) {
@@ -652,6 +653,10 @@ void EditorApp::_on_picker_canceled() {
 // The OS's drop on the editor's window, where the OS's cursor let go: held for the item it lands on.
 void EditorApp::_on_files_dropped(const PackedStringArray &p_files) {
 	drop_files_at_screen(p_files, Vector2(DisplayServer::get_singleton()->mouse_get_position()));
+}
+
+void EditorApp::float_window(const String &p_title, const Vector2 &p_at) {
+	if (windows_) windows_->float_window(opennova::to_std(p_title), p_at.x, p_at.y);
 }
 
 void EditorApp::drop_files_at_screen(const PackedStringArray &p_files, const Vector2 &p_screen) {

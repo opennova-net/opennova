@@ -47,9 +47,7 @@ uint32_t pool_rgb(MissionPool pool) {
 } // namespace
 
 uint32_t mission_team_rgb(int team) {
-	// NEEDS-RE: the original editor's team colours are not witnessed; team 1 blue and team 2 red is
-	// the game's HUD convention assumed here, and which team number is which side is to be
-	// confirmed against the editor's own ring colours (ADR 0046 S14, the view design's open note).
+	// The game's map colours (mission_overlay.h): team 1 the HUD palette's palette[3], team 2 its palette[5].
 	switch (team) {
 	case 1: return kMissionBlueRgb;
 	case 2: return kMissionRedRgb;

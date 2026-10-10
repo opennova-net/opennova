@@ -2813,7 +2813,7 @@ void test_preview_steps_aside() {
 	run.open("missions/synth_logic.bms");
 	ui.frames(3);
 	CHECK(preview_stands_aside(v) && !preview->Active && v.documents.preview_shown == ViewportKind::Menu,
-	      "the mission again: Preview steps aside, though it has the menu to show");
+	      "the mission again: Preview steps aside, though it has the menu to show (the map only where the Map tool asks)");
 	// The author's ask (S15 review): the menu closed, the Preview steps aside for the mission again;
 	// ticked in the Windows menu (show_anyway), it shows beside that mission until another document is
 	// made active.

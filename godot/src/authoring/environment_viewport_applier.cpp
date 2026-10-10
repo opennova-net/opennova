@@ -31,6 +31,7 @@
 #include "env/mission_environment_overrides.h"
 #include "mission/mission_object_placer.h"
 #include "particle/particle_renderer.h"
+#include "authoring/preview_frame_effects.h"
 #include "render/frame_fx.h"
 #include "terrain/terrain_tile_info.h"
 #include "util/string_convert.h"
@@ -110,9 +111,12 @@ EnvironmentViewportApplier::EnvironmentViewportApplier(SubViewport &viewport) : 
 	// Single-sampled, as the game's own view draws: the particle renderer's overlay passes bind the view's depth
 	// (a multisampled view's resolved depth is no attachment they can bind: DI-14's rule).
 	viewport.set_msaa_3d(Viewport::MSAA_DISABLED);
+	// Its camera is the 3D listener of its own world (S23 C: the Listen's rain loops pan about it, as the game's camera).
+	viewport.set_as_audio_listener_3d(true);
 	root_ = memnew(Node3D);
 	root_->set_name("EnvironmentPreview");
 	viewport.add_child(root_);
+	listen_ = std::make_unique<PreviewSoundLoops>(root_);
 	// The clear colour is the environment's frame clear (the game's ClearColor node, its clear colour leg);
 	// the terminal display decode installs on it (the one decode a 3D view of retail's gamma-domain shaders
 	// takes), and the particle renderer's overlay passes inherit it, placing theirs before the decode.
@@ -124,7 +128,6 @@ EnvironmentViewportApplier::EnvironmentViewportApplier(SubViewport &viewport) : 
 	environment->set_ambient_source(Environment::AMBIENT_SOURCE_DISABLED);
 	clear_->set_environment(environment);
 	root_->add_child(clear_);
-	root_->add_child(memnew(DisplayDecode));
 	// The environment and the water hold their process-wide globals (E13): only this device's publication
 	// and its presented frames write them.
 	environment_ = memnew(MissionEnvironment);
@@ -155,6 +158,13 @@ EnvironmentViewportApplier::EnvironmentViewportApplier(SubViewport &viewport) : 
 	terrain_->set_weather_path(NodePath("../Weather"));
 	terrain_->set_water_path(NodePath("../Water"));
 	root_->add_child(terrain_);
+	// The terrain's foliage beside it, never under it (GameWorld's): the detail cells come off the terrain's
+	// frame, the sway off the weather's oscillator.
+	foliage_ = memnew(FoliageDispatcher);
+	foliage_->set_name("Foliage");
+	root_->add_child(foliage_);
+	foliage_->set_terrain(terrain_);
+	foliage_->set_weather(weather_);
 	precipitation_ = memnew(Precipitation);
 	precipitation_->set_name("Precipitation");
 	precipitation_->set_weather_path(NodePath("../Weather"));
@@ -169,6 +179,9 @@ EnvironmentViewportApplier::EnvironmentViewportApplier(SubViewport &viewport) : 
 	// the game's particle renderer's, composed on this device's cameras, no effect of its own drawn.
 	effects_ = std::make_unique<PreviewEffects>(*root_);
 	effects_->set_environment_source(environment_);
+	// The game's frame effects (S23 C): FrameFx as the terminal compositor (the bloom of the sun and the glare, and the
+	// display decode), the sun-glare veil over the picture.
+	frame_effects_ = std::make_unique<PreviewFrameEffects>(*root_, viewport);
 	root_files_.instantiate();
 }
 
@@ -277,6 +290,7 @@ void EnvironmentViewportApplier::plan_(Build &build, const EnvironmentViewport &
 void EnvironmentViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &) {
 	build_.reset();
+	project_root_ = view.project.root;
 	const EnvironmentViewport &model = environment_of(viewport);
 	if (model.view_status() != opennova::editor::EnvironmentViewStatus::Ready || !view.findings.assets) {
 		clear();
@@ -371,6 +385,8 @@ void EnvironmentViewportApplier::run_environment_(const EnvironmentViewport &mod
 
 void EnvironmentViewportApplier::terrain_empty_(const TerrainKey &key) {
 	loading_.unref();
+	foliage_->reset();
+	foliage_->set_terrain_data(Ref<TerrainData>());
 	terrain_->set_terrain_data(Ref<TerrainData>());
 	terrain_->clear_built();
 	water_->set_terrain_data(Ref<TerrainData>());
@@ -431,6 +447,19 @@ void EnvironmentViewportApplier::run_terrain_build_(Build &build) {
 		terrain_built_ = true;
 		terrain_key_ = build.terrain_key;
 		++terrain_builds_;
+		// Its foliage as the game's load configures it after the build (GameWorld::configure_foliage: the
+		// terrain data, the mission's tiles, each definition's model and :fd texture through the root); a
+		// definition whose model the project lacks a note, its slot drawing nothing.
+		foliage_->reset();
+		foliage_->configure_for_terrain(root_files_, terrain_data_, terrain_->get_tile_info_override());
+		const Array diagnostics = foliage_->get_slot_diagnostics();
+		for (int64_t i = 0; i < diagnostics.size(); ++i) {
+			const Dictionary diagnostic = diagnostics[i];
+			const String status = diagnostic.get("status", "");
+			const String graphic = diagnostic.get("graphic", "");
+			if ((status == "missing_mesh" || status == "invalid_mesh") && !graphic.is_empty())
+				note_missing_(kTerrain, graphic.get_extension().is_empty() ? graphic + String(".3di") : graphic);
+		}
 	}
 }
 
@@ -463,6 +492,7 @@ void EnvironmentViewportApplier::update(const opennova::editor::ViewportModel &v
 void EnvironmentViewportApplier::apply_state_(const EnvironmentViewport &model) {
 	const opennova::editor::EnvironmentViewportOptions &options = model.options();
 	terrain_->set_visible(options.terrain);
+	foliage_->set_visible(options.terrain);
 	if (options.water != shown_water_) touch_scene_state_();
 	water_->set_visible(options.water);
 	shown_water_ = options.water;
@@ -476,8 +506,36 @@ void EnvironmentViewportApplier::place_camera_(const EnvironmentViewport &model)
 	camera_->set_transform(Transform3D(Basis(to_godot(right), to_godot(up), to_godot(back)), to_godot(camera.eye())));
 }
 
+void EnvironmentViewportApplier::apply_listen_(const EnvironmentViewport &model) {
+	// The Listen's rain loops (S23 C) as the viewport's mix binds them now, heard while the picture is drawn (held a
+	// moment past its last drawn frame, as the mission device's Listen is).
+	const opennova::editor::EnvironmentListen &listen = model.listen();
+	if (!model.options().listen.on || !listen.open() || project_root_.empty()) {
+		listen_->stop();
+		listen_idle_frames_ = kListenHeldFrames;
+		return;
+	}
+	listen_idle_frames_ = presented_ != listen_presented_ ? 0 : std::min(listen_idle_frames_ + 1, kListenHeldFrames);
+	listen_presented_ = presented_;
+	std::vector<PreviewSoundLoops::Channel> channels;
+	channels.reserve(listen.channels().size());
+	for (const opennova::editor::MissionSoundChannel &each : listen.channels()) {
+		PreviewSoundLoops::Channel channel;
+		channel.started = each.started;
+		channel.path = each.candidate >= 0 ? each.path : std::string();
+		channel.volume = each.volume;
+		channel.pitch_q16 = each.pitch_q16;
+		channel.at[0] = each.at.x;
+		channel.at[1] = each.at.y;
+		channel.at[2] = each.at.z;
+		channels.push_back(std::move(channel));
+	}
+	listen_->follow(project_root_, channels, model.options().listen.volume, listen_idle_frames_ < kListenHeldFrames);
+}
+
 void EnvironmentViewportApplier::clear() {
 	build_.reset();
+	listen_->stop();
 	loading_.unref();
 	terrain_->set_terrain_data(Ref<TerrainData>());
 	terrain_->clear_built();
@@ -515,8 +573,9 @@ void EnvironmentViewportApplier::apply(const opennova::editor::ViewportModel &vi
 	apply_state_(model);
 }
 
-void EnvironmentViewportApplier::tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &clock) {
+void EnvironmentViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
 	clock_ms_ = int64_t(clock.ms());
+	apply_listen_(environment_of(viewport));
 	// No mirror pass unless this frame presents the picture.
 	water_->set_mirror_enabled(false);
 	// The weather's state follows the viewport's every frame, drawn or not; what it publishes is the
@@ -601,6 +660,7 @@ void EnvironmentViewportApplier::overlay_frame_() {
 void EnvironmentViewportApplier::present(double dt) {
 	// Nothing to draw while the first build runs.
 	if (!environment_built_) return;
+	++presented_;
 	environment_->set_globals_held(false);
 	water_->set_globals_held(false);
 	water_->set_mirror_enabled(shown_water_);
@@ -621,6 +681,12 @@ void EnvironmentViewportApplier::present(double dt) {
 				terrain_->get_visible_terrain_max_height());
 	}
 	water_->advance_frame(dt);
+	// The foliage leg (GameWorld::render_foliage_frame), with the terrain: its detail cells about the eye, the
+	// water's height splitting the passes.
+	if (terrain_built_ && terrain_data_.is_valid() && terrain_->is_visible()) {
+		foliage_->set_water_height(water_active ? water_->get_water_height() : 0.0f);
+		foliage_->render_frame(camera_->get_global_transform(), clock_ms_);
+	}
 	// The sun veil's exposure feed for the next weather ticks.
 	weather_->set_sun_veil_stopdown(celestial_->get_sun_veil_stopdown());
 	// The drops over the home's pool, floored on the terrain and the water.
@@ -640,6 +706,9 @@ void EnvironmentViewportApplier::present(double dt) {
 	// The overlay tail, then the particle renderer's passes composed for this frame.
 	overlay_frame_();
 	effects_->render(clock_ms_);
+	// The frame effects: the Q3 glow frame at the camera, the screen effects' plan (the veil reads the Celestial's
+	// global as it pushed it above).
+	frame_effects_->present();
 	// The clear colour: Godot decodes BG_COLOR from sRGB, so the gamma-domain value goes pre-encoded.
 	const bool above = !water_active || eye_y > water_->get_water_height();
 	clear_->get_environment()->set_bg_color(environment_->frame_clear_color_for(above).linear_to_srgb());

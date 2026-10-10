@@ -138,3 +138,59 @@ func test_device_placed_and_owns_the_keys() -> void:
 		Input.parse_input_event(button)
 	await _frames(2)
 	assert_false(edit.has_focus(), "a press and its release in one frame outside it let its focus go")
+
+## S23 C: a script's tab undocked into an OS window of its own (Dear ImGui's undock, through the editor's
+## float_window seam, the tab set out past the main window's right edge) carries its control there: the control a
+## Control of that window, shown over the tab's rect inside it. Floated back inside the main window, the tab's
+## viewport merges back and the ImGui layer frees its window; the control has gone home first and is still there.
+func test_an_undocked_tab_carries_its_control() -> void:
+	if not await _boot():
+		return
+	if not bool(_app.call("is_available")):
+		pending("the script device's placement needs the ImGui pass attached (a windowed run with imgui-godot)")
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor script device undock %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "Script Device Undock"))
+	_seam.create_missing_files()
+	assert_eq(DirAccess.make_dir_recursive_absolute(dir.path_join("scripts")), OK)
+	var out := FileAccess.open(dir.path_join(SCRIPT), FileAccess.WRITE)
+	out.store_buffer(FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/wac/text_document.wac")))
+	out.close()
+	_seam.request({"kind": "rescan"})
+	assert_true(_seam.open_document(SCRIPT))
+	await _frames(12)
+	var main := get_tree().root
+	var edit := _edit_anywhere(SCRIPT)
+	assert_not_null(edit, "the script's device")
+	if edit == null:
+		return
+	assert_eq(edit.get_window(), main, "docked: a Control of the main window")
+	_app.call("float_window", "Document", Vector2(main.position) + Vector2(float(main.size.x) + 40.0, 40.0))
+	await _frames(24)
+	edit = _edit_anywhere(SCRIPT)
+	assert_not_null(edit, "the control kept as its tab moves")
+	if edit == null:
+		return
+	var window := edit.get_window()
+	if window == main:
+		pending("no OS window of its own for the undocked tab in this run (Dear ImGui's platform windows off)")
+		return
+	assert_true(edit.is_visible_in_tree(), "shown in the undocked tab's window")
+	var rect := edit.get_global_rect()
+	assert_true(rect.size.x > 100.0 and rect.size.y > 100.0, str(rect))
+	assert_true(Rect2(Vector2.ZERO, Vector2(window.size)).encloses(rect), "within that window: %s" % str(rect))
+	_app.call("float_window", "Document", Vector2(main.position) + Vector2(120.0, 120.0))
+	await _frames(24)
+	edit = _edit_anywhere(SCRIPT)
+	assert_not_null(edit, "the control kept as the tab's window is freed")
+	if edit != null:
+		assert_eq(edit.get_window(), main, "home in the main window")
+
+
+## The script's control wherever its layer is (an undocked tab's window is the ImGui layer's, outside the app).
+func _edit_anywhere(path: String) -> CodeEdit:
+	for node: Node in get_tree().root.find_children("*", "ScriptEdit", true, false):
+		if String(node.call("get_document_path")) == path:
+			return node as CodeEdit
+	return null
