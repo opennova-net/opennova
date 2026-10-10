@@ -202,7 +202,55 @@ void HudViewportView::draw_ready(Workspace &workspace, const ViewportModel &view
 			options.crosshair = style;
 		ui_kit::tooltip("The player's crosshair style, cross01.tga to cross25.tga.");
 	}
+	// Room for four digits beside a field's step buttons.
+	const float digits = ui_kit::text_width("9999") + 2.0f * ImGui::GetFrameHeight() +
+	                     4.0f * ImGui::GetStyle().FramePadding.x + 2.0f * ImGui::GetStyle().ItemInnerSpacing.x;
+	// The sights and where the aim rests.
+	{
+		row.next(ui_kit::checkbox_width("Sights"));
+		bool sights = options.sights;
+		if (ImGui::Checkbox("Sights", &sights)) options.sights = sights;
+		ui_kit::tooltip("The weapon's sights up, as the game's frame draws them once its scope settles: the weapon's "
+		                "SIGHTS card, the scoped view's ring, and the scope readouts (range, zero, magnification) at "
+		                "hudpos.def's HUDSCOPERANGEXY, HUDSCOPEZEROXY and HUDSCOPEMAGXY.");
+		if (options.sights) {
+			row.next(ui_kit::field_width(digits, "Range"));
+			ImGui::SetNextItemWidth(digits);
+			int range = options.range;
+			if (ImGui::InputInt("Range", &range, 10, 100))
+				options.range = std::clamp(range, kHudSightsRangeLeast, kHudSightsRangeMost);
+			ui_kit::tooltip("The metres the aim rests at: what a rangefinder reads (2 to 1000).");
+		}
+	}
+	// The player list.
+	{
+		row.next(ui_kit::checkbox_width("Player list"));
+		bool board = options.board;
+		if (ImGui::Checkbox("Player list", &board)) options.board = board;
+		ui_kit::tooltip("The Tab board held up, drawn as the game draws it over stand-in players.");
+		if (options.board) {
+			const std::vector<uint32_t> &types = hud_board_game_types();
+			int current = 0;
+			for (size_t i = 0; i < types.size(); ++i)
+				if (types[i] == options.game_type) current = int(i);
+			int chosen = current;
+			const float width = combo_width(ui_kit::text_width("TKOTH"));
+			if (choice(row, "##game_type", int(types.size()), current, width,
+			           [&](int i) { return std::string(hud_board_game_type_token(types[size_t(i)])); }, chosen,
+			           "The session's game type the board is drawn for: its header's rung and team scores, and "
+			           "its columns (a team game's by side)."))
+				options.game_type = types[size_t(chosen)];
+			row.next(ui_kit::field_width(digits, "Players"));
+			ImGui::SetNextItemWidth(digits);
+			int players = options.players;
+			if (ImGui::InputInt("Players", &players, 1, 8))
+				options.players = std::clamp(players, 0, kHudBoardPlayersMost);
+			ui_kit::tooltip("How many stand-in players the board lists (the game's rows come from the server).");
+		}
+	}
 	if (options != model.options()) workspace.request(request::set_viewport(model.path(), hud_options_change(options)));
+	if (options.sights && !model.scope_frame() && !model.scope_why().empty())
+		ImGui::TextDisabled("%s", model.scope_why().c_str());
 
 	// The element picked: its lines and its textures, each a Go to.
 	if (const HudPreviewElement *picked = model.picked()) {

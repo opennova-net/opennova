@@ -84,10 +84,15 @@ ViewportKind preview_kind_of(DocumentTypeId type);
 // script device, S13 V10); kCount for none.
 ViewportKind main_viewport_kind(DocumentTypeId type);
 // The kind a document of `type` is read and changed through when none is named (S13 V7: the
-// viewport query, a SetViewport, an edit in a viewport): the Preview-role kind that shows it (the
-// one the Preview window shows while the document is active), else its Main-role kind; kCount for a
-// type no kind shows (a stylesheet feeds the menu's, but shows in none).
+// viewport query, a SetViewport, an edit in a viewport): its Main-role kind where a canvas draws it (S23
+// C: a mission's 3D view, beside which the Preview window shows its map), else the Preview-role kind that
+// shows it (the one the Preview window shows while the document is active), else its Main-role kind;
+// kCount for a type no kind shows (a stylesheet feeds the menu's, but shows in none).
 ViewportKind default_viewport_kind(DocumentTypeId type);
+// A Preview-role kind every type of which a Main-role kind's canvas also draws (S23 C: a mission's map beside its 3D
+// view): the Preview window stands aside for such a document until asked, so the workspace gives its viewport a device
+// only as the window draws it (ViewportDeviceCache::sync pins no such target).
+bool viewport_kind_beside_picture(ViewportKind kind);
 // The types a viewport shows, in words, from the kinds' table ("a menu, a model, an animation or an
 // animation map"): what a refusal of a document that shows in none names.
 std::string viewport_shown_types();
@@ -109,8 +114,8 @@ ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last);
 // type, a kind that shows a row of it the row the selection lands in, keeping the one it had while
 // none is selected; a target whose document closed, or whose row went, cleared; a Main-role kind's
 // empty but a files kind's, which is the file Files selects where the kind draws its type. Files
-// stops leading once another document is made active. Then the kind it shows
-// (DocumentsView::preview_shown, preview_kind over the one before).
+// stops leading once another document is made active, and the Map tool's ask (DocumentsView::beside) goes with
+// it. Then the kind it shows (DocumentsView::preview_shown, preview_kind over the one before).
 void update_preview_targets(DocumentsView &documents);
 
 } // namespace opennova::editor

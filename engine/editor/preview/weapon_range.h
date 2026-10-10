@@ -9,6 +9,7 @@
 #include <editor/preview/viewport_follow.h>
 #include <runtime/renderer/scar_draw_list.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/local_player_view.h>
 #include <runtime/world/player_weapon.h>
 
 namespace opennova::world {
@@ -247,6 +248,11 @@ public:
 	// Render_ProcessMainSceneFrame @0x5CA299..0x5CA304]).
 	bool scoped() const;
 	bool card() const { return card_; }
+	// The local player's view frame the run stands at, observed as the game's frame observes it (nothing
+	// advances): the SIGHTS card's selectors, the scope's readouts (its zero word, its magnification, the aim's
+	// range the body update's ray found), what the HUD reads of the view [orig: Render_ProcessMainSceneFrame
+	// @0x5CA299..0x5CA304; HUD_DrawScopeOverlayDetails @0x59E420]. A default frame with no weapon in hand.
+	const world::LocalPlayerViewFrame &view_frame() const { return frame_; }
 	// The weapon's ammo ("" none) and its tracer rate; whether the range fires an ammo alone (no weapon).
 	const std::string &ammo() const { return ammo_; }
 	bool ammo_alone() const { return setup_.weapon.empty() && !setup_.ammo.empty(); }
@@ -299,6 +305,7 @@ private:
 	int32_t switch_timer_ = 0; // the slot's holster timer before the pump (the completion's edge)
 	bool draw_again_ = false;  // the holster finished: the draw is queued on the next tick
 	bool card_ = false;
+	world::LocalPlayerViewFrame frame_;
 	int shots_ = 0;
 	std::vector<WeaponRangeEvent> events_;
 	world::LocalPlayerWeaponView view_;

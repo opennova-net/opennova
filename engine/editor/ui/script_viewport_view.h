@@ -15,10 +15,13 @@ namespace opennova::editor {
 // shown (ViewportDevice::draw: the place in the OS window's pixels and the clip), and lets the
 // pointer through to the control over that rect (Dear ImGui wants none of it the next frame while
 // the pointer is over it or a press there lasts, whatever item holds the keyboard: a text field's
-// first press out of it is the control's). It places nothing, and says so (placed), while the
-// device is not made yet (the next pump makes it), while a popup, a modal or a window floating over
-// the tab lies over the rect (a Control placed there would hide it), or while the window is in
-// another OS window than the main one: the script view then draws the document's lines instead
+// first press out of it is the control's). A tab undocked into an OS window of its own (S23 C) places it
+// in that window (ViewportPicture::window, the window's id), where the device can (ViewportDevice::places_in),
+// and brings it home to the main window as the tab leaves that window, or the frame ends with the tab not
+// drawn, before the ImGui layer frees the window with its viewport. It places nothing, and says so (placed),
+// while the device is not made yet (the next pump makes it), while a popup, a modal or a window floating over
+// the tab lies over the rect (a Control placed there would hide it), or while the tab's OS window is one the
+// device cannot place in (not made yet): the script view then draws the document's lines instead
 // (ui/text_view), and the device hides on its next tick. A window or a modal begun after the tab in
 // the frame is known only once begun: end_frame asks again with every window begun, and hides the
 // device the same frame (its draw of a picture with no room), the lines coming the frame after.
@@ -39,8 +42,11 @@ private:
 	// Where the device was placed this frame (the frame count it was), the document it shows and the
 	// rect it covers, for end_frame's second look.
 	int placed_frame_ = -1;
+	int64_t placed_window_ = 0; // the OS window it was last placed in (0: the main one)
 	std::string path_;
 	ui_kit::Cover cover_;
+	// The control brought home to the main window where it was placed in another.
+	void home_(ViewportDevice &device);
 };
 
 } // namespace opennova::editor

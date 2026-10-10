@@ -15,14 +15,16 @@
 namespace opennova::editor {
 
 struct SessionView;
+struct MissionModelOutline;
 
 // What a mission's drop reads of an item (ADR 0046 S14), through the project's asset graph and its
 // files: the item a catalog of the project defines by its id (its name, its TYPE: the item symbol's
 // value, data commit 6), the pool its TYPE puts a record in as the game's editor places it
 // (formats/mission/authoring.h, entity_kind_for_item_type), the model its `graphic` loads, and that
 // model's ground anchor (threedi_3di3_ground_anchor: its `ground` user point, else its origin) in
-// the mission's frame. The anchor is an author-time bake (docs/world/world-wac-ai-re.md section 12):
-// an entity dropped on the terrain is stored at the ground point less the anchor, and stored
+// the model's own axes, and the item's SCALE. The anchor is an author-time bake
+// (docs/world/world-wac-ai-re.md section 12): an entity dropped on the terrain is stored at the ground
+// point less the anchor's words, unrotated and unscaled, as the original editor stores it, and stored
 // positions render as they are.
 struct MissionItemFacts {
 	int64_t item = 0;
@@ -30,7 +32,10 @@ struct MissionItemFacts {
 	int type = -1; // its TYPE (-1: not known)
 	MissionKind pool = MissionKind::Item;
 	std::string model; // the project's model file its graphic loads ("": none found)
-	double anchor[3] = { 0.0, 0.0, 0.0 }; // mission x east, y north, z up
+	// Its ground anchor in the model's own axes as the game's placement matrix takes them (the file's
+	// words, metres: mission_model_words), and the item's SCALE (16.16; 0 unscaled).
+	double anchor[3] = { 0.0, 0.0, 0.0 };
+	int32_t scale_q16 = 0;
 	// Its entity's bound radius, metres (mission_item_bound_radius: what a pick of its mark tests); 0
 	// for none (no model, or a model with no collision block).
 	double radius = 0.0;
@@ -47,6 +52,9 @@ struct MissionItemFacts {
 	int team = 0;
 	std::string ai_class, ai_script;
 	int32_t min_engagement = 16, max_engagement = 320, max_attack = 16, fire_timer = 10;
+	// Its model seen from above (preview/mission_map_outline.h), where the cache keeps outlines (the 2D map's); null
+	// otherwise, and for a model with no mesh.
+	std::shared_ptr<const MissionModelOutline> outline;
 };
 
 // The bound radius an entity of an item gets, metres, as the game's entity init stamps it at entity+0
@@ -66,6 +74,8 @@ double mission_item_bound_radius(int32_t model_q16, bool collision, int32_t scal
 // an item's radius is asked once while the graph's generation stands and while the files it read stand.
 class MissionItemCache {
 public:
+	// `outlines`: each model read keeps its outline seen from above too (the 2D map's cache, S23 C).
+	explicit MissionItemCache(bool outlines = false) : outlines_(outlines) {}
 	// The item `item` as the project defines it now; false, with why, when no catalog of the project
 	// does. A graphic that loads no model of the project leaves `model` empty, the anchor at the origin
 	// and no bound.
@@ -96,7 +106,8 @@ private:
 		bool read = false;
 		bool collision = false;
 		int32_t radius_q16 = 0;
-		double anchor[3] = { 0.0, 0.0, 0.0 }; // its ground anchor in the mission's frame
+		double anchor[3] = { 0.0, 0.0, 0.0 }; // its ground anchor in the model's own axes (mission_model_words)
+		std::shared_ptr<const MissionModelOutline> outline; // where the cache keeps outlines
 	};
 	struct Catalog {
 		uint64_t stamp = 0;
@@ -118,6 +129,7 @@ private:
 	// An item's radius from its files (none listed for none).
 	void ask_(const SessionView &view, int64_t item, const Reads &reads);
 
+	bool outlines_ = false;
 	uint64_t graph_generation_ = 0;
 	bool graph_ = false;
 	uint64_t files_generation_ = 0;
@@ -157,9 +169,29 @@ std::shared_ptr<const MissionItemClasses> mission_item_classes(const SessionView
 // the catalogs' order, each once.
 std::vector<int64_t> mission_items_of_model(const SessionView &view, const std::string &file);
 
-// A model-space point (threedi_user_point_position's axes) in the mission's frame: the model's x, y,
-// z are the presentation frame's -x, y, z (the placer's godot_vec3), which is the mission's
-// (-x, -z, y).
-void mission_model_point(const float model[3], double out[3]);
+// A model-space point (threedi_user_point_position's axes) as the game's placement matrix takes it: the
+// file's words (forward, left, up, metres), which threedi_user_point_position hands back as (-left,
+// up, forward). Its z is the point's height over the model's origin whatever the entity's heading.
+void mission_model_words(const float model[3], double out[3]);
+
+// Where a model's point `words` (mission_model_words) of an entity at the angles `pitch`, `yaw`, `roll`
+// (the record's degrees) stands from the entity's position, in the mission's frame, as the game draws
+// it: the placement matrix Rz(90 - yaw) x Ry(-pitch) x Rx(roll) over the point scaled by the item's
+// SCALE (`scale_q16`, 0 unscaled) [orig: Math_BuildFixedPointMatrixFromEulerAngles @ 0x613f40, its
+// userpoint carried by Entity_GetAttachmentWorldPosition @ 0x4B2670], through the engine's own placement
+// basis (mission::bms_to_presentation_basis, which the device places the item's model by): what the 2D map
+// draws a model's plan at. It is not what a drop bakes: the original editor stores the ground point less
+// the words unrotated and unscaled (mission_ground_bake).
+void mission_anchor_offset(const double words[3], int32_t scale_q16, double pitch, double yaw, double roll, double out[3]);
+
+// What a drop on the terrain subtracts from the ground point to store an entity's position, as the original
+// editor's place-object dialog does: the model's Ground user point's +0/+4/+8 words, unrotated and unscaled
+// (`words`, mission_model_words: the point's x, y and z words in the mission's x, y and z) [orig: JOTACmed.exe
+// @ 0x401F6E, "Ground" handed to sub_459C70, the model's user point record (its table at +0xC0, stride 0x30, the
+// name at +0x20); @ 0x401F80..0x401F94, its +0/+4/+8 dwords subtracted from the record's x, y and z; the scatter
+// loop @ 0x4021FF the same; docs/world/world-wac-ai-re.md section 12]. The ground command's terrain conform
+// subtracts the height word alone (`out[2]`) [orig: JOTACmed.exe @ 0x44D9CB..0x44D9E0, @ 0x43BBB2..0x43BBB5, the
+// height less the +8 word].
+void mission_ground_bake(const double words[3], double out[3]);
 
 } // namespace opennova::editor

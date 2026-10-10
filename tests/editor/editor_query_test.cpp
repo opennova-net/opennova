@@ -1653,8 +1653,8 @@ static int test_viewport_query() {
 	}
 	TEST_EXPECT(kind_tokens.size() >= 2 && kind_tokens[0] == "menu" && kind_tokens[1] == "model");
 	TEST_EXPECT(says(R"({"op": "zoom"})", "\"op\" is one of state, items, hit, box, notes, render, palette, not \"zoom\"."));
-	TEST_EXPECT(says(R"({"op": "state", "kind": "map"})",
-			("\"kind\" is one of " + kinds_named + ", not \"map\".").c_str()));
+	TEST_EXPECT(says(R"({"op": "state", "kind": "chart"})",
+			("\"kind\" is one of " + kinds_named + ", not \"chart\".").c_str()));
 	TEST_EXPECT(says(R"({"op": "state", "x": 1})", "op state takes no \"x\" (it takes path, kind, op, offset, limit)."));
 	TEST_EXPECT(says(R"({"op": "hit", "x": 1, "y": 2, "limit": 3})",
 			"op hit takes no \"limit\" (it takes path, kind, op, x, y)."));

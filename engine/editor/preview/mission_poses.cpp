@@ -103,6 +103,13 @@ const MissionPoses::Catalog &MissionPoses::catalog_(const std::string &file) {
 			definition.ai_function = row.ai_function;
 			definition.anim_def = row.anim_def;
 			definition.attrib = row.attrib;
+			definition.sound_profile = row.sound_profile;
+			definition.sound_profile_female = row.sound_profile_female;
+			definition.move_function = row.move_function;
+			const char *ammo[] = { row.ammo_closeattack, row.ammo_easyrocket, row.ammo_advancedrocket, row.ammo_marker3 };
+			const char *launch[] = { row.launchups_closeattack, row.launchups_rocket, row.launchups_marker3 };
+			for (size_t slot = 0; slot < 4; ++slot) definition.ammo[slot] = ammo[slot];
+			for (size_t slot = 0; slot < 3; ++slot) definition.launch[slot] = launch[slot];
 			catalog.items.emplace(int64_t(row.id), std::move(definition));
 		}
 	}
@@ -216,14 +223,14 @@ void MissionPoses::pose_all_() {
 		return found == catalog.items.end() ? nullptr : &found->second;
 	};
 	const auto has_file = [this](const std::string &file) { return source_ && !source_->path_of(file).empty(); };
-	mission_pose_people(inputs_, item_of, has_file, files_, *motion_, poses_);
+	mission_pose_people(inputs_, item_of, has_file, files_, *motion_, poses_, &rings_);
 	for (size_t i = 0; i < poses_.size(); ++i) rows_[poses_[i].row] = i;
 }
 
 void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
 		const std::function<const PersonDefinition *(int64_t)> &item_of,
 		const std::function<bool(const std::string &)> &has_file, const std::shared_ptr<const StampedFiles> &files,
-		anim::AdmRootMotion &motion, std::vector<MissionPose> &out) {
+		anim::AdmRootMotion &motion, std::vector<MissionPose> &out, world::AnimVariantRings *rings_out) {
 	out.clear();
 	const PreviewRigFiles rig_files(files);
 	// One ring-head table per .adm, served by every person of it in the file's order (the init runs
@@ -244,6 +251,7 @@ void mission_pose_people(const std::vector<MissionPoseInput> &inputs,
 				rig_files.store, motion, rings, pose);
 		out.push_back(std::move(pose));
 	}
+	if (rings_out) *rings_out = rings;
 }
 
 void pose_person(const PersonDefinition &definition, const PersonRecord &record,
@@ -252,6 +260,7 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 		MissionPose &pose) {
 	pose.ai_function = definition.ai_function;
 	pose.ai_slot = (definition.attrib & world::kItemAttribAIData) != 0;
+	pose.definition = definition;
 	if (!world::organic_init_class(definition.ai_function.c_str())) {
 		pose.status = "class";
 		return;
@@ -285,6 +294,8 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 	pose.updates = world::organic_warmup_updates(uint32_t(record.ssn)) + 1;
 	const world::OrganicSpawnBody spawned = world::organic_spawn_pose(facts, uint32_t(record.ssn), &motion, rings, adm_id);
 	pose.pose = spawned.pose;
+	pose.adm_id = adm_id;
+	pose.channels = spawned.channels;
 	pose.rise = double(spawned.rise) / io::kFp16OneD;
 	pose.capsule_bottom = spawned.capsule_bottom;
 	pose.lift = pose.rise; // stood on the terrain by MissionPoses::stand()

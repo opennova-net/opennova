@@ -13,8 +13,10 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/preview/mission_people.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/mission_shots.h>
 #include <editor/preview/viewport_follow.h>
 
 #include "authoring/preview_effects.h"
@@ -23,6 +25,7 @@
 #include "env/env_file.h"
 #include "env/mission_environment.h"
 #include "env/sky_dome.h"
+#include "env/slot_shadow.h"
 #include "env/water.h"
 #include "env/weather.h"
 #include "lights/effect_light_director.h"
@@ -101,6 +104,13 @@ namespace godot {
 // end moves what stands. The FLICKER ring and the detail tier's sway read the weather's oscillator, whose
 // wave alone the device runs on the preview clock (the mission's start settle first); no other weather runs.
 //
+// S23 C: the shadows as the game casts them, one layer: the terrain's static shadows (the placer's casters composed
+// into its pages) and the entities' moving ground shadows, the game's render-slot device (SlotShadow) over the
+// picture's casters (the placer flags a person's and a DynamicShadow item's model, as the game's presenter does),
+// its captures on the clear's compositor and its drape over the terrain, planned in the frame's slot-shadow leg
+// (after the lights, before the particles: game_world_frame.cpp's order) with the light director's pool and gain.
+// With the layer off nothing plans and the drape hides with the terrain's pass.
+//
 // DI-36: the Listen. While the options listen, each channel the viewport's MissionListen binds plays its wave looping
 // at its place (PreviewSoundLoops, DI-02's player), the SubViewport's camera the 3D listener, as the game's ambient
 // channels play; heard while the picture is drawn (held paused once it has not been for kListenHeldFrames frames).
@@ -135,6 +145,8 @@ public:
 
 	// Its nodes and its placer, for the parity tests.
 	Camera3D *camera() const { return camera_; }
+	// S23 C: the entities' moving ground shadows, the game's render-slot device over the picture's casters.
+	SlotShadow *slot_shadow() const { return slot_shadow_; }
 	// The Shoot tool's (DI-23): the scars its shots left, drawn by the game's ScarPresenter (their effects play in
 	// the items' effect scene, effects()).
 	ScarPresenter *shot_scars() const { return shot_scars_; }
@@ -308,7 +320,13 @@ private:
 	void move_entities_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
 	// Each person's model in the pose the game spawns it in and where the spawn stands it (DI-38, the
 	// viewport's MissionPoses), where its pose or its model is another than it was given.
-	void pose_people_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses);
+	void pose_people_(const opennova::editor::MissionScene &scene, const opennova::editor::MissionPoses &poses,
+			const opennova::editor::MissionPeople &people);
+	// A person's model posed by its body (a clip at its playhead, or two blended).
+	void pose_body_(ObjectModel &model, const opennova::world::InfantryBodyPose &body);
+	// The people as they play their clips now (MissionViewport::people), posed again whenever they played on.
+	void play_people_(const opennova::editor::MissionViewport &mission);
+	uint64_t people_serial_ = UINT64_MAX; // the viewport's people's serial last posed
 	// The moved entities' terrain shadow sources moved too, once no gesture is open.
 	void flush_shadows_(const opennova::editor::MissionScene &scene);
 	// The terrain's foliage definitions configured as the game's load configures them (DI-31,
@@ -332,6 +350,23 @@ private:
 
 	// The Shoot tool's scars (DI-23), presented where the shots' run moved, cleared with no shot.
 	void apply_shots_(const opennova::editor::MissionViewport &mission);
+	// S23 C: the husks of the items the shots destroyed, at the clock's tick (the run's deaths through
+	// editor::mission_husk_frame): swapped in as the game's destruction presenter swaps a husk (a placed individual
+	// model's husk built under it, its own parts hidden; a retained static's rows hidden, the husk grafted at its
+	// placed transform with its projection), the destroy fade's registers and the sections the pieces left written
+	// each frame; let go (the item shown again) where the clock steps back past the swap or the shots clear.
+	struct Husk {
+		std::string husk;
+		uint64_t model = 0;  // the husk's ObjectModel
+		uint64_t intact = 0; // the intact individual model it hangs under (0: a static's graft)
+		int key = 0;         // the placer's key the static's rows were hidden under
+		std::vector<std::pair<uint64_t, bool>> hidden_children; // the intact model's parts and how they stood
+		std::map<std::string, int64_t> ctrl;
+		uint32_t sections = 0;
+	};
+	void apply_husks_(const opennova::editor::MissionViewport &mission, int32_t tick);
+	void unhusk_(Husk &husk);
+	std::unordered_map<opennova::editor::NodeId, Husk> husks_;
 	ScarPresenter *shot_scars_ = nullptr;
 	uint64_t shot_scars_shown_ = UINT64_MAX;
 
@@ -342,6 +377,9 @@ private:
 	Water *water_ = nullptr;
 	Terrain *terrain_ = nullptr;
 	uint64_t terrain_id_ = 0;
+	// The entities' moving ground shadows (S23 C): the game's SlotShadow, its silhouette captures on the clear's
+	// compositor and its drape over the terrain, run in the frame's slot-shadow leg while the shadows show.
+	SlotShadow *slot_shadow_ = nullptr;
 	Camera3D *camera_ = nullptr;
 	Node3D *objects_ = nullptr;
 	Node3D *lifted_root_ = nullptr;

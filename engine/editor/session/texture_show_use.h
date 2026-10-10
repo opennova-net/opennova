@@ -2,6 +2,9 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
+
+#include <formats/threedi/threedi_3di3.h>
 
 namespace opennova::editor {
 
@@ -37,8 +40,26 @@ bool texture_use_place(const SessionView &view, const std::string &texture, cons
 // ShowUse: the use of the texture `request.path` in the project file `request.paths[0]` (at its locator
 // and field, when given: a referrer may use it more than once; else its first) shown where texture_use_place
 // says: the referrer opened at the use and the Preview window brought forward (a RevealPreview view event),
-// the mission opened, or the texture opened with its viewport's as_used set to the use. Refused, nothing
+// the mission opened, or the texture opened with its viewport's as_used set to the use. A model's flipbook
+// frame row is shown at its frame (S23 C, flipbook_frame_change): the preview clock held at the time its
+// frame shows, or, for a flipbook on a register, the register held at a value that shows it. Refused, nothing
 // opened (texture.show_use): references not read yet, a referrer that does not use it, a place there is not.
 void show_texture_use(SessionCore &core, const EditorRequest &request);
+
+// The change that shows the flipbook frame `frame` of `material` (S23 C): for a flipbook on the clock
+// (texanim.type 0), a set_viewport of the clock alone (`clock` true), paused at the first millisecond the game's
+// frame law shows it; for one on a register (type 1), the model viewport's options holding that register
+// (`clock` false) at the least value that shows it; each found by the engine's own frame law
+// (renderer::compute_anim_frame [orig: Material_ApplyShaderParameters @ 0x58DB80]). False, with why, for a
+// frame the game never shows (past the flipbook's frames, or a flipbook of another clock, which stays on frame
+// 0).
+struct FlipbookFrameChange {
+	bool clock = true;
+	std::string change;
+	std::string words;
+};
+bool flipbook_frame_change(const threedi::ThreediMaterial &material,
+		const std::vector<threedi::ThreediControlRegister> &registers, int frame, FlipbookFrameChange &out,
+		std::string &why);
 
 } // namespace opennova::editor

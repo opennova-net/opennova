@@ -86,6 +86,10 @@ func _open_environment() -> bool:
 		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(32))
 	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
 		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
+	# The terrain's foliage definitions grow bush1 and bush2 (the synth crate under both names, as the mission
+	# view's tests stage them).
+	for name in ["bush1.3di", "bush2.3di"]:
+		_copy_fixture("threedi/synth/crate.3di", root.path_join("models").path_join(name))
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	return _seam.open_document(ENV)
@@ -144,12 +148,32 @@ func test_an_environment_draws_its_sky_over_its_missions_terrain() -> void:
 	var terrain := _device_node("Terrain") as Terrain
 	for type in ["Weather", "SkyDome", "Celestial", "Water", "Precipitation", "ParticleRenderer", "Camera3D"]:
 		assert_not_null(_device_node(type), "its device holds a " + type)
+	# S23 C: the game's frame effects, FrameFx the terminal compositor (its bloom, the display decode) and the
+	# sun-glare veil over the picture, the game's shader on it.
+	assert_not_null(_device_node("FrameFx"), "its device holds the game's FrameFx")
+	assert_null(_device_node("DisplayDecode"), "FrameFx is the one decode")
+	var veil := _device_node("ColorRect") as ColorRect
+	assert_not_null(veil, "the sun veil")
+	if veil != null:
+		assert_eq(String(veil.name), "SunVeil")
+		var material := veil.material as ShaderMaterial
+		assert_not_null(material, "the veil's shader")
+		if material != null:
+			assert_eq(material.shader.resource_path, "res://shaders/sun_veil_overlay.gdshader")
 	assert_not_null(environment, "and the mission environment")
 	assert_not_null(terrain, "and the terrain")
 	if environment == null or terrain == null:
 		return
 	assert_true(environment.is_loaded(), "the environment loaded through the project's files")
 	assert_not_null(terrain.get_terrain_data(), "the mission's terrain (Tmap) under it")
+	# S23 C: the terrain's foliage beside it, configured as the game's load configures it: Tmap's two definitions.
+	var foliage := _device_node("FoliageDispatcher") as FoliageDispatcher
+	assert_not_null(foliage, "the game's foliage beside the terrain")
+	if foliage != null:
+		var enabled := 0
+		for diagnostic: Dictionary in foliage.get_slot_diagnostics():
+			enabled += 1 if String(diagnostic.get("status", "")) == "enabled" else 0
+		assert_eq(enabled, 2, "Tmap's two foliage definitions configured: %s" % str(foliage.get_slot_diagnostics()))
 	assert_eq((body.get("missing", []) as Array).size(), 0, str(body.get("missing")))
 
 	# A scrub: the runtime's clock at the viewport's time.

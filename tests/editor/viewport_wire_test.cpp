@@ -227,7 +227,7 @@ static int test_edits_in_viewport() {
 				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move", "by": [8, 0], "colour": 1}})",
 				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move", "by": [8]}})",
 				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move", "by": [1e300, 0]}})",
-				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move", "by": [8, 0], "kind": "map"}})",
+				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move", "by": [8, 0], "kind": "chart"}})",
 				 std::string(R"({"kind": "edit_in_viewport", "command": {"ids": [1]}})"),
 				 std::string(R"({"kind": "edit_in_viewport", "viewport": {}})") }) {
 		const JsonValue answer = wire(unread);
@@ -925,7 +925,7 @@ static int test_drop() {
 				 R"({"kind": "edit_in_viewport", "drop": {"reference": "area", "name": "1", "at": [1, 1], "to": [2, 2]}})",
 				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [1, 1], "to": [2, 2]}})",
 				 R"({"kind": "edit_in_viewport", "drop": {"reference": "area", "at": [1, 1], "to": [2]}})",
-				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "kind": "map"}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "kind": "chart"}})",
 				 R"({"kind": "edit_in_viewport", "drop": "a.3di"})" }) {
 		const JsonValue answer = wired.wire(unread);
 		TEST_EXPECT(!answer.get_bool("ok", true) && answer.get_string("error", "").find("drop") != std::string::npos);

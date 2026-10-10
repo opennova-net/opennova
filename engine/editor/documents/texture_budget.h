@@ -30,6 +30,14 @@ struct TextureBudget {
 	bool known = false;
 	renderer::TextureLoader loader = renderer::TextureLoader::Stage;
 	uint8_t slot = 0;
+	// S23 C: a role's budget no model row loads (texture_role_budget): its role (kCount for a model row's), how many
+	// device textures of `detail`'s sides and levels the game makes of the file (a menu image's tiles, a terrain
+	// map's four quadrants; 0 for a texture drawn into another's levels), whose `bytes` and `stat_bytes` are then
+	// all of them together, and the setting whose levels `detail` runs over ("object_texdetail" a model row's,
+	// "terrain_texdetail" the terrain's detail family's, "" where no setting halves it: the four levels alike).
+	renderer::TextureRoleId role = renderer::TextureRoleId::kCount;
+	uint32_t count = 1;
+	std::string setting = "object_texdetail";
 	// The file the loader opens, by its logical name.
 	std::string file;
 	// The device texture at each object texture detail level, 0 the lowest, 3 full detail.
@@ -44,6 +52,33 @@ struct TextureBudget {
 // The budget of the file `file` (its header as the loader's reader reads it) for a model row of `slot`
 // loaded by `loader` (Stage, Plain or Normal); unknown where the header does not read.
 TextureBudget texture_budget(const TextureHeader &header, const std::string &file, renderer::TextureLoader loader, uint8_t slot);
+
+// S23 C: whether a role has a budget, a model row's (texture_role_budget_loader) or its own (texture_role_budget).
+bool texture_role_has_budget(renderer::TextureRoleId role);
+// The budget of the file `file` for a use of `role` that no model row loads, from the creation flags the role's
+// loader makes its textures with (the fresh profile's texture compression word, texcompression_level 1, where the
+// flags read it), at each level of the setting that halves it; unknown for a role whose device texture is not
+// witnessed, or where the header does not read:
+// - the HUD's: built from pixels with flags 0x140000, one level, A8R8G8B8 in colour mode and A8 alone in alpha
+//   mode [orig: HUD_LoadImageAsTexture @ 0x5916AE..0x5916BE (pixel format 2), @ 0x5916FB..0x59170B (1);
+//   GTexture_PixelFormatToD3DFormat @ 0x686D80: 2 is D3DFMT_A8, 1 A8R8G8B8];
+// - a menu's image and cursor: cut into tiles, each its side's power of two (the card's largest side at most),
+//   A8R8G8B8 with flags 0x140001, one level [orig: CTextureManager_LoadOrFindTexture @ 0x654DC4..0x654DD6;
+//   GImage_CreateTiledTextures_0 @ 0x67A8B9 (the tile, sub_679DF0), @ 0x67AA30..0x67AA43
+//   (flags | 1)]; a frame's stencil at its sides with 0x140000 and its brush (and mouse-over stencil) with 0x40000,
+//   one level each [orig: CUIElement_ParseXMLDefinition @ 0x648899, @ 0x6488BC, @ 0x6488E2, through
+//   GTexture_FindOrCreateFromData @ 0x654D92];
+// - the terrain's colour and blend maps: four quadrants of half the file's width a side, flags 0x100001 with the
+//   compression word (0x400200 at a texcompression_level of 1 or less: DXT1 on the reference card; none above:
+//   A8R8G8B8), their full chains [orig: PolyTrn_InitTextures @ 0x60ABAD..0x60ABC6 (the word), @ 0x60B4FE..0x60B532,
+//   @ 0x60B970..0x60B986]; the splat layers through the stage loader (a .dds beside the name first) with
+//   0x400200, 0x8 and the terrain texture detail's halvings (0x20000 at level 0, 0x10000 at 1 and 2, none at 3),
+//   DXT1 from pixels [orig: @ 0x60ABE5..0x60AC13; sub_605D70 @ 0x605DBF..0x605E0A from Terrain_Init
+//   @ 0x60FC0D..0x60FC36]; the second detail map through the stage loader with 0x8 and the same halvings,
+//   A8R8G8B8 from pixels [orig: @ 0x60AF80..0x60AF88]; its far pair drawn into its levels, no texture of its own
+//   [orig: GTexture_CreateFromPixelDataWithAlphaBlend @ 0x60B01A]; the tile atlas at its sides with 0x100203, DXT5,
+//   its full chain [orig: Terrain_LoadTileSetAtlas @ 0x604B24].
+TextureBudget texture_role_budget(const TextureHeader &header, const std::string &file, renderer::TextureRoleId role);
 
 // Bytes in words: "21.3 MB", "340 KB", "96 bytes".
 std::string texture_bytes_words(uint64_t bytes);

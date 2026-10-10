@@ -15,6 +15,7 @@
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_listen.h>
 #include <editor/preview/mission_options.h>
+#include <editor/preview/mission_people.h>
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_shots.h>
@@ -87,6 +88,11 @@ public:
 	MissionViewStatus view_status() const { return reason_; }
 	const MissionViewportOptions &options() const { return options_; }
 	const OrbitCamera &camera() const { return camera_; }
+	// A box of the ground framed (S23 C: a tile atlas's Show use, its cells' squares): a SetViewport's
+	// `frame_ground` [x0, y0, x1, y1], mission units, framed at the next follow, the camera over its middle on
+	// the ground there, north up and looking down as the first framing looks, as far as fits it; a camera so set
+	// stands over the first framing.
+	static constexpr float kFrameGroundMargin = 1.25f;
 	const MissionScene &scene() const { return scene_; }
 	// The names its device asked the project's files for and did not find (its notes), and whether
 	// its device holds a surface a ray lands on (its terrain, built).
@@ -131,6 +137,9 @@ public:
 	// warmup leave each placed person in), as last followed: the device poses each person's model by
 	// its row's.
 	const MissionPoses &poses() const { return poses_; }
+	// Its people playing their clips on the preview clock from their spawn (S23 C, preview/mission_people): the device
+	// poses each person's model by its body as it plays now.
+	const MissionPeople &people() const { return people_; }
 	// Its items' effects as the mission's start attaches them (DI-31, preview/mission_effects), followed and
 	// played to the preview clock while its options show them (closed otherwise): the device draws its scene.
 	const MissionEffects &effects() const { return effects_; }
@@ -140,9 +149,10 @@ public:
 	// What the mission sounds like at its camera while its options listen (DI-36, preview/mission_listen): the sources,
 	// the channels the device plays, the script's weather; closed while they do not.
 	const MissionListen &listen() const { return listen_; }
-	// The one-shots its Listen heard since the last call (the weather's thunder, the script's sounds), each planned as
-	// the game plays it with its member picked through `selector`, numbered from `seq`: what the session's clip sounds
-	// hand the Shell (session/clip_sounds). None while it does not listen.
+	// The one-shots its Listen heard since the last call (the weather's thunder, the script's sounds, its people's
+	// footsteps and foley as they play their clips), each planned as the game plays it with its member picked through
+	// `selector`, numbered from `seq`: what the session's clip sounds hand the Shell (session/clip_sounds). None while
+	// it does not listen.
 	std::vector<ClipSoundFired> fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq);
 	// The hour the picture shows: the options' time, else the mission's start time [orig: Game_StartMission @ 0x525371
 	// widens the header's Q8.8 start hour into the clock].
@@ -268,6 +278,8 @@ private:
 	// The ground's height at mission (x, y): the mission's terrain as the game reads it, else the device's,
 	// else `otherwise`.
 	double ground_height_(const ViewportContext &context, double x, double y, double otherwise) const;
+	// The camera framed on the ground box frame_ground_ holds.
+	void frame_ground_now_();
 	// `shoot {at}` (DI-23): a shot of the Shoot tool's ammo where the picture's point meets the ground or an object,
 	// seen from the camera's eye (a SetViewport of the shot on the clock's tick, the clock run).
 	bool shoot_(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
@@ -291,6 +303,9 @@ private:
 	bool options_moved_ = false;
 	OrbitCamera camera_;
 	bool framed_ = false; // the camera framed a document's entities once
+	// The ground box a SetViewport asked framed, framed as asked and again on the terrain's ground at the next follow.
+	bool frame_ground_pending_ = false;
+	double frame_ground_[4] = {0.0, 0.0, 0.0, 0.0};
 	float fog_reach_ = 0.0f; // mission_fog_reach of the scene's header over the files read, 0 for none
 	MissionViewStatus reason_ = MissionViewStatus::NoProject;
 	std::string detail_;
@@ -303,6 +318,9 @@ private:
 	uint64_t bounds_graph_ = 0; // the graph's generation then
 	uint64_t bounds_files_ = 0; // and the asset source's
 	MissionPoses poses_;
+	MissionPeople people_;
+	ClipSoundSources people_sources_; // SndProf.def and the banks the people's sounds play from
+	int32_t people_heard_ = -1; // the clock's last tick the people's sounds were heard to
 	MissionEffects effects_;
 	MissionListen listen_;
 	io::JsonValue drawn_;

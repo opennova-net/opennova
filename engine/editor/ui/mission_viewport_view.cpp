@@ -289,7 +289,7 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				const AssetGraph *graph = view.findings.graph.get();
 				// The search typed is the viewport's (its options' palette).
 				std::string typed = mission.options().palette;
-				const int64_t picked = tools.palette.draw(graph, graph ? graph->generation() : 0, view.project.recent_items,
+				const int64_t picked = tools.palette.draw(view, graph, graph ? graph->generation() : 0, view.project.recent_items,
 						mission.options().item, mission.options().palette, &typed);
 				// The search alone (review X21): another option a client set in the same pump stays as it set it.
 				if (typed != mission.options().palette) {
@@ -451,6 +451,19 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 							"mission's own file is left as it is."
 						  : std::string("Make the mission the active document to start the game in it.")))
 		viewport_command(workspace, mission, "play_from_here");
+	// The mission's 2D map (S23 C) in the Preview window beside the picture, which stands aside for a mission until asked.
+	if (ui_kit::tool(row, "Map", true, "Show the mission's 2D map beside the picture (the Preview window): from straight "
+										 "above, north up (south up where the mission turns its map), the terrain as the "
+										 "game's commander map draws it, its records as pins you select and move as here.")) {
+		// The map asked for (the Windows menu's tick shows the kind shown before), and the window brought forward.
+		io::JsonValue change = io::JsonValue::make_object();
+		io::JsonValue document = io::JsonValue::make_object();
+		document.set("path", io::JsonValue::make_string(mission.path()));
+		document.set("map", io::JsonValue::make_bool(true));
+		change.set("document", std::move(document));
+		change.set("focus", io::JsonValue::make_string("preview"));
+		workspace.request(request::set_workspace(io::json_write(change)));
+	}
 	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
 	// 0x4F91F0], opened, or made beside the mission where the project has none.
 	const MissionScript script = mission_script(view, mission.path());
@@ -777,7 +790,10 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Sky", &options.sky);
 	ImGui::Checkbox("Water", &options.water);
 	ImGui::Checkbox("Models", &options.models);
-	ImGui::Checkbox("Static shadows", &options.shadows);
+	ImGui::Checkbox("Shadows", &options.shadows);
+	ui_kit::tooltip("The shadows as the game casts them, together: the terrain's static shadows under the placed "
+					"models, and the moving ground shadows of the people and the items that cast one (the game's "
+					"render slots).");
 	// DI-31: the game's own foliage, effects and lights.
 	ImGui::Checkbox("Foliage", &options.foliage);
 	ui_kit::tooltip("The terrain's foliage as the game grows it from its foliage map around the camera (its .trn's "

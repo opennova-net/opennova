@@ -69,22 +69,22 @@ constexpr DocumentType kTypes[] = {
 	// Each defines a name another file names and nothing defines (DI-15, define_symbol): a weapon, an ammo, an
 	// item or a powerup row; a string id; a screen or a window; a style variable.
 	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file,
-			DefCatalogDocument::schema, catalog_finding_codes, nullptr, nullptr, nullptr, catalog_references,
+			DefCatalogDocument::schema, catalog_finding_codes, nullptr, nullptr, catalog_references,
 			catalog_record_label, nullptr, nullptr, nullptr, nullptr, nullptr, define_catalog_symbol },
 	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
-			StringsDocument::schema, strings_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			StringsDocument::schema, strings_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, nullptr, nullptr, nullptr, define_string_id },
 	// The menu: its parts by what they do (an action, a look, a sound), never "Action 1" (the plain-words
 	// lane).
 	{ DocumentTypeId::Menu, "menu", make_menu, validate_menu_file, MnuDocument::schema,
-			menu_finding_codes, make_menu_render_check, nullptr, nullptr, nullptr, menu_record_label, nullptr,
+			menu_finding_codes, make_menu_render_check, nullptr, nullptr, menu_record_label, nullptr,
 			nullptr, nullptr, nullptr, nullptr, define_menu_name },
 	{ DocumentTypeId::Styles, "styles", make_styles, validate_styles_file, MnsDocument::schema,
-			style_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			style_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, define_style_variable },
 	// The model: its records and the values naming a part or a surface in a modder's words (S17).
 	{ DocumentTypeId::Model, "model", make_model, validate_model_file, ModelDocument::schema,
-			model_finding_codes, nullptr, nullptr, nullptr, nullptr, model_record_label, model_value_label },
+			model_finding_codes, nullptr, nullptr, nullptr, model_record_label, model_value_label },
 	{ DocumentTypeId::Animation, "animation", make_animation, validate_animation_file,
 			AnimationDocument::schema, animation_finding_codes },
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,
@@ -94,20 +94,20 @@ constexpr DocumentType kTypes[] = {
 	// text keys a record's number forms); its records and values in a modder's words, and briefly for a
 	// narrow column (S15); its project check, what the game grounds where (DI-28).
 	{ DocumentTypeId::Mission, "mission", make_mission, validate_mission_file, MissionDocument::schema,
-			mission_finding_codes, make_mission_ground_check, nullptr, nullptr, mission_references,
+			mission_finding_codes, make_mission_ground_check, nullptr, mission_references,
 			mission_record_label, mission_value_label, mission_record_brief, mission_game_choices },
 	// The text types (S13 D9): one TextDocument class, a row per behaviour, none with records
-	// (text_fields) or a project check; the script's text names references, and its compiler's
-	// words are its highlights (S13 V10).
+	// (text_fields) or a project check; the script's text names references (its compiler's words are
+	// the script device's highlights, preview/script_viewport's table).
 	{ DocumentTypeId::Script, "script", make_script_document, validate_script_file, text_fields,
-			script_finding_codes, nullptr, script_references, script_highlights },
+			script_finding_codes, nullptr, script_references },
 	{ DocumentTypeId::MusicScript, "music_script", make_music_script_document,
 			validate_music_script_file, text_fields, music_script_finding_codes },
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
 			text_fields, credits_finding_codes },
 	// The shader's text defines the tags it registers (its EffectTag; _ffp.fx the fixed-function tags).
 	{ DocumentTypeId::Shader, "shader", make_shader_document, validate_shader_file, text_fields,
-			shader_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			shader_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			shader_definitions },
 	{ DocumentTypeId::Text, "text", make_text_document, validate_text_file, text_fields,
 			text_finding_codes },
@@ -115,23 +115,23 @@ constexpr DocumentType kTypes[] = {
 	// (documents/texture_operations), its findings what the game's reader makes of its file (a PCX's short
 	// rows, a DDS's sides), its content on the wire.
 	{ DocumentTypeId::Texture, "texture", make_texture_document, validate_texture_file, texture_fields,
-			texture_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			texture_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			texture_content_json },
 	// The sound lane: a bank's waves and sets (a set's name a sound, a member's wave one of the bank's); and
 	// SndProf.def's profiles, each slot naming a set. (A wave the game's loader refuses is the wave type's own
 	// finding since round S23.)
 	// Each defines its kind's names (DI-15): a sound set, a sound profile.
 	{ DocumentTypeId::SoundBank, "sound_bank", make_sound_bank, validate_sound_bank_file, SoundBankDocument::schema,
-			sound_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			sound_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, nullptr, define_sound_set },
 	{ DocumentTypeId::SoundProfiles, "sound_profiles", make_sound_profiles, validate_sound_profiles_file,
-			SoundProfileDocument::schema, sound_profile_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr,
+			SoundProfileDocument::schema, sound_profile_finding_codes, nullptr, nullptr, nullptr, nullptr,
 			nullptr, nullptr, nullptr, nullptr, nullptr, define_sound_profile },
 	// The particle file (DI-14): a text the effect system's reader reads, its findings that reader's;
 	// what it names the asset graph reads through the same reader (no references of the type's own). An
 	// effect a file names and no file defines is written by the engine's own effect writer (DI-15).
 	{ DocumentTypeId::Particles, "particle", make_particle_document, validate_particle_file, text_fields,
-			particle_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			particle_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, define_particle_effect },
 	// The environment (DI-19a): a .env's keywords and keyframes over env::Config, its references its
 	// fields' (the cloud layers' textures, the sun, moon, glare and star models).
@@ -149,18 +149,18 @@ constexpr DocumentType kTypes[] = {
 	// plays, a line's wave one of the bank's sounds; a dialog a mission names and the bank lacks added there
 	// (DI-15).
 	{ DocumentTypeId::DialogBank, "dialog_bank", make_dialog_bank, validate_dialog_bank_file, DialogBankDocument::schema,
-			dialog_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			dialog_bank_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
 			nullptr, define_dialog },
 	// The character attributes (DI-09's charattr follow-up): charattr.def held as its text, its line ends the
 	// ConfigFile reader's; its references each class's camouflage items, as the game's loader reads them; the
 	// lines that loader reads the same without, which the ConfigFile pool rule's fix comments out.
 	{ DocumentTypeId::CharAttrs, "charattr", make_charattr_document, validate_charattr_file, text_fields,
-			charattr_finding_codes, nullptr, charattr_references, nullptr, nullptr, nullptr, nullptr, nullptr,
+			charattr_finding_codes, nullptr, charattr_references, nullptr, nullptr, nullptr, nullptr,
 			nullptr, nullptr, nullptr, nullptr, charattr_idle_lines },
 	// The face animation (round S23 lane A): a .grm's face over grm::File, its references its texture fields' (each
 	// name made .TGA by the stage loader) and the base's .MDT twin; a triangle names its vertices by index.
 	{ DocumentTypeId::FaceAnimation, "face_animation", make_face_animation, validate_face_animation_file,
-			FaceAnimationDocument::schema, face_animation_finding_codes, nullptr, nullptr, nullptr,
+			FaceAnimationDocument::schema, face_animation_finding_codes, nullptr, nullptr,
 			face_animation_references },
 	// The font (round S23 lane A): a .fnt's header and its 224 glyphs over the engine's reader and writer, its pages'
 	// texels as read; it names nothing.
@@ -172,7 +172,7 @@ constexpr DocumentType kTypes[] = {
 	// The wave (round S23 lane A): a .wav held as its bytes, its facts and the game loader's verdict its content on the
 	// wire, the one place a wave the loader refuses is found (asset.wave_unplayable); trimmed and normalised whole.
 	{ DocumentTypeId::Wave, "wave", make_wave_document, validate_wave_file, wave_fields, wave_finding_codes, nullptr,
-			nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, wave_content_json },
+			nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, wave_content_json },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its

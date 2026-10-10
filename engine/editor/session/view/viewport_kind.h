@@ -52,6 +52,10 @@ enum class ViewportKind : uint8_t {
 	// MODULATE2X over the caller's halved colour; the Shell's font device), or a page of it with its glyphs' rects,
 	// the Document tab's main view
 	Font,
+	// A mission's 2D map (S23 C: from straight above, north up, its terrain's colour map as the game's commander map
+	// draws it, its records as pins picked and moved as the 3D view's marks are), the Preview window's beside the
+	// mission's 3D view
+	Map,
 	kCount,
 };
 
@@ -66,7 +70,7 @@ inline constexpr size_t kViewportKindCount = static_cast<size_t>(ViewportKind::k
 enum class ViewportRole : uint8_t { Preview, Main };
 
 // A kind's token on the wire ("menu", "model", "script", "mission", "texture", "effect", "hud", "definition",
-// "environment"; "" past
+// "environment", "terrain", "map"; "" past
 // the last kind), and
 // the kind a token names (false for none).
 const char *viewport_kind_token(ViewportKind kind);

@@ -232,7 +232,24 @@ void EditorWindows::canvas_mouse(const ViewportMouse &mouse) {
 	canvas_mice_.push_back(mouse);
 }
 
+void EditorWindows::float_window(const std::string &title, float x, float y) {
+	floating_ = Floating{ title, x, y };
+}
+
 void EditorWindows::begin_frame() {
+	// A test's undock: off its dock (Dear ImGui's queued undock, served at the next frame's start), then placed.
+	if (!floating_.title.empty()) {
+		if (ImGuiWindow *window = ImGui::FindWindowByName(floating_.title.c_str())) {
+			if (window->DockId != 0) {
+				ImGui::DockContextQueueUndockWindow(ImGui::GetCurrentContext(), window);
+			} else {
+				ImGui::SetWindowPos(window, ImVec2(floating_.x, floating_.y), ImGuiCond_Always);
+				floating_ = Floating();
+			}
+		} else {
+			floating_ = Floating();
+		}
+	}
 	in_frame_ = true;
 	pointer_hidden_ = false;
 	canvas_mice_.clear();

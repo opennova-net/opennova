@@ -18,6 +18,9 @@ extends GutTest
 ## - DI-31: the game's foliage, effects and lights drawn: the terrain's foliage grown at its foliage map's
 ##   routed witness (and gone with its option), the pumps' particle slots drawn by the particle renderer, the
 ##   armories' LGHT records selected for the frame's draws.
+## - S23 C: the people's moving ground shadows: the game's render-slot device in the picture, the people
+##   registered as its casters and their slots bound, the drape drawn with the terrain's pass and gone with the
+##   Shadows option (one layer with the terrain's static shadows).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -343,3 +346,62 @@ func test_the_mission_draws_its_foliage_effects_and_lights() -> void:
 		if quads > 0:
 			break
 	assert_gt(quads, 0, "the particle renderer drew the pump's slot")
+
+
+## S23 C: the shadows as the game casts them, one layer. The device carries the game's render-slot device
+## (SlotShadow) over its own scene: the people the placement flags as dynamic casters (the fixture's two persons)
+## register with it and bind their slots in the frame's slot-shadow leg, the drape drawn with the terrain's pass;
+## Show > Shadows off hides the drape (the terrain's static shadows with it) and plans nothing, an Update.
+func test_the_people_cast_their_moving_shadows() -> void:
+	if _app == null:
+		return
+	assert_true(_app.is_available(), "a window: the editor's ImGui pass attached, its canvases drawing")
+	_open_mission()
+	assert_true(_seam.open_document(MISSION_PATH))
+	var state := await _await_ready(MISSION_PATH)
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device: SubViewport = _app.get_viewport_device(MISSION_PATH, "mission")
+	assert_not_null(device)
+	if device == null:
+		return
+	var slots := device.find_children("*", "SlotShadow", true, false)
+	assert_false(slots.is_empty(), "the game's render-slot device in the picture")
+	if slots.is_empty():
+		return
+	var slot := slots[0] as SlotShadow
+	# Framed on the people: their slots bind within the drape's reach.
+	var person := {}
+	for row: Variant in _seam.query("viewport", {"op": "items", "path": MISSION_PATH, "limit": 200}).get("items", []):
+		if String((row as Dictionary).get("kind", "")) == "organic":
+			person = row
+			break
+	assert_false(person.is_empty(), "a person in the mission")
+	if person.is_empty():
+		return
+	var at: Array = person.get("at", [0, 0, 0])
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH, "viewport": {"kind": "mission",
+			"camera": {"target": [at[0], at[1], float(at[2]) + 1.0], "yaw": 30, "pitch": 30, "distance": 12}}}))
+	var shadows := {}
+	for _frame in 60:
+		await get_tree().process_frame
+		shadows = _state(MISSION_PATH).get("body", {}).get("drawn", {}).get("shadows", {})
+		if int(shadows.get("bound", 0)) > 0:
+			break
+	assert_true(bool(shadows.get("shown", false)), "the layer on by default: %s" % str(shadows))
+	assert_eq(int(shadows.get("registered", 0)), 2, "both people cast: %s" % str(shadows))
+	assert_gt(int(shadows.get("bound", 0)), 0, "their slots bound: %s" % str(shadows))
+	assert_gt(int(shadows.get("captures", 0)), 0, "their silhouettes captured: %s" % str(shadows))
+	assert_true(slot.is_terrain_pass_drawn(), "the drape drawn with the terrain's pass")
+	var builds := int(_state(MISSION_PATH).get("builds", 0))
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH,
+			"viewport": {"kind": "mission", "options": {"show": {"shadows": false}}}}))
+	for _frame in 6:
+		await get_tree().process_frame
+	assert_false(slot.is_terrain_pass_drawn(), "the layer off: no drape")
+	assert_false(bool(_state(MISSION_PATH).get("body", {}).get("drawn", {}).get("shadows", {}).get("shown", true)))
+	assert_eq(int(_state(MISSION_PATH).get("builds", 0)), builds, "an Update, never a build")
+	assert_true(_seam.done({"kind": "set_viewport", "path": MISSION_PATH,
+			"viewport": {"kind": "mission", "options": {"show": {"shadows": true}}}}))
+	for _frame in 6:
+		await get_tree().process_frame
+	assert_true(slot.is_terrain_pass_drawn(), "on again: the drape drawn")

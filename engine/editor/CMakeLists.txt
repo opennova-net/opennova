@@ -205,6 +205,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_script_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_map.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_map_outline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_people.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/environment_listen.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_map_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport_shots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_shots.cpp
@@ -382,6 +387,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_logic_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_palette_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_map_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_inspector_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_viewport_view.cpp
