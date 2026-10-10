@@ -186,6 +186,7 @@ static int test_mission_rows_are_all_filled() {
 	Diagnostic error;
 	TEST_EXPECT(create_project(root, "Mission", "jo", doc, error));
 	doc.features.mission = true;
+	doc.features.multiplayer = true; // mp.mnu, the NovaWorld screens, with it
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	Evaluated before = evaluate(paths, doc);
 	for (const RequirementRow &row : before.report.rows) {

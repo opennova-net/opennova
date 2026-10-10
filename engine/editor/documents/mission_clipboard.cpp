@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -31,12 +30,10 @@ constexpr NodeKind k(K kind) { return node_kind(kind); }
 
 constexpr const char *kClipHeader = "opennova-mission-clip";
 
-// The payload's lines: the header, what it holds ("rows", or a nested kind's token), for rows the
-// original indexes of the copied events ("events=3,5"), then the fragment's bytes in hex
-// (strutil::bytes_to_hex, read back by strutil::hex_to_bytes).
+// The payload's lines: the header, what it holds ("rows", or a nested kind's token), then the
+// fragment's bytes in hex (strutil::bytes_to_hex, read back by strutil::hex_to_bytes).
 struct Clip {
 	std::string holds;
-	std::vector<size_t> events;
 	bms::File fragment;
 };
 
@@ -49,25 +46,15 @@ bool read_clip(const std::string &payload, Clip &clip) {
 		at = end + 1;
 		return true;
 	};
-	std::string header, events;
-	if (!line(header) || header != kClipHeader || !line(clip.holds) || !line(events)) return false;
-	if (events.compare(0, 7, "events=") != 0) return false;
-	for (size_t i = 7; i < events.size();) {
-		const size_t comma = events.find(',', i);
-		const std::string one = events.substr(i, comma == std::string::npos ? std::string::npos : comma - i);
-		const std::optional<int> index = strutil::parse_int(one);
-		if (!index || *index < 0) return false;
-		clip.events.push_back(size_t(*index));
-		if (comma == std::string::npos) break;
-		i = comma + 1;
-	}
+	std::string header;
+	if (!line(header) || header != kClipHeader || !line(clip.holds)) return false;
 	std::vector<uint8_t> bytes;
 	std::string error;
 	return at <= payload.size() && strutil::hex_to_bytes(std::string_view(payload).substr(at), bytes) &&
 	       bms::parse(bytes.data(), bytes.size(), clip.fragment, error);
 }
 
-std::string write_clip(const std::string &holds, const std::vector<size_t> &events, bms::File &fragment) {
+std::string write_clip(const std::string &holds, bms::File &fragment) {
 	sync_counts(fragment);
 	std::vector<uint8_t> bytes;
 	std::string error;
@@ -78,10 +65,7 @@ std::string write_clip(const std::string &holds, const std::vector<size_t> &even
 	std::vector<uint8_t> again;
 	if (!bms::parse(bytes.data(), bytes.size(), back, error) || !bms::write(back, again, error) || again != bytes)
 		return std::string();
-	std::string out = std::string(kClipHeader) + "\n" + holds + "\nevents=";
-	for (size_t i = 0; i < events.size(); ++i) out += (i ? "," : "") + std::to_string(events[i]);
-	out += "\n" + strutil::bytes_to_hex(bytes);
-	return out;
+	return std::string(kClipHeader) + "\n" + holds + "\n" + strutil::bytes_to_hex(bytes);
 }
 
 const char *holds_of(NodeKind kind) {
@@ -135,7 +119,6 @@ std::string MissionDocument::copy(const std::vector<NodeAddress> &records) const
 	if (records.empty()) return std::string();
 	bms::File fragment;
 	make_default(fragment);
-	std::vector<size_t> events;
 	// Rows: entities of any pools, area triggers and events together, in the rows' order.
 	if (!records.front().child) {
 		std::set<NodeId> wanted;
@@ -154,15 +137,12 @@ std::string MissionDocument::copy(const std::vector<NodeAddress> &records) const
 			case K::Marker: fragment.markers.push_back(static_cast<const EntityRow &>(*node).native); break;
 			case K::Organic: fragment.organics.push_back(static_cast<const EntityRow &>(*node).native); break;
 			case K::Area: fragment.area_triggers.push_back(static_cast<const AreaRow &>(*node).native); break;
-			case K::Event:
-				events.push_back(index_among(rows(), node->id, k(K::Event)));
-				chains.push_back(static_cast<const EventRow &>(*node).native);
-				break;
+			case K::Event: chains.push_back(static_cast<const EventRow &>(*node).native); break;
 			default: break;
 			}
 		}
 		join_event_chains(chains, fragment);
-		return write_clip("rows", events, fragment);
+		return write_clip("rows", fragment);
 	}
 	// Nested records: of one kind, from one owner, in their list's order.
 	const Node *node = row(records.front().row);
@@ -194,7 +174,11 @@ std::string MissionDocument::copy(const std::vector<NodeAddress> &records) const
 		case K::Loadout: fragment.loadout.entries.push_back(record.as<bms::WeaponLoadoutRecord>()); break;
 		case K::Availability: fragment.item_availability.push_back(record.as<bms::ItemAvailabilityEntry>()); break;
 		case K::BoundingBox: fragment.bounding_boxes.push_back(record.as<bms::BoundingBox>()); break;
-		case K::Stop: fragment.waypoint_records[0].waypoint_numbers.push_back(record.as<uint32_t>()); break;
+		case K::Stop:
+			// The clipboard's path is a file's record: 32 slots at most.
+			if (fragment.waypoint_records[0].waypoint_numbers.size() >= kMaxWaypointPathMarkers) return std::string();
+			fragment.waypoint_records[0].waypoint_numbers.push_back(record.as<uint32_t>());
+			break;
 		case K::Trigger: chain.triggers.push_back(record.as<bms::Trigger>()); break;
 		case K::Action: chain.actions.push_back(record.as<bms::Action>()); break;
 		default: break;
@@ -205,7 +189,7 @@ std::string MissionDocument::copy(const std::vector<NodeAddress> &records) const
 	if (kind == k(K::Stop))
 		fragment.waypoint_records[0].marker_count = uint32_t(fragment.waypoint_records[0].waypoint_numbers.size());
 	if (kind == k(K::Trigger) || kind == k(K::Action)) join_event_chains({chain}, fragment);
-	return write_clip(holds, {}, fragment);
+	return write_clip(holds, fragment);
 }
 
 bool mission_clip_middle(const std::string &payload, double out[2]) {
@@ -267,7 +251,7 @@ std::string mission_clip_moved(const std::string &payload, double east, double n
 		area.y_min = y_min;
 		area.y_max = y_max;
 	}
-	return write_clip(clip.holds, clip.events, fragment);
+	return write_clip(clip.holds, fragment);
 }
 
 bool MissionDocument::pastes_rows(const std::string &payload) const {
@@ -331,26 +315,10 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 		error = "The clipboard's events cannot be read.";
 		return false;
 	}
-	// An event index naming a copied event names that copy: an EventLink to its place among the
-	// copies, which renumber_references reads once the step has put them in (the events grew), the
-	// copies standing in their order wherever they landed. One naming an event that was not copied
-	// names the event of that index here, which the same step moves as it moves that event.
-	const auto copy_named = [&](int32_t value) -> int64_t {
-		for (size_t i = 0; i < clip.events.size() && i < chains.size(); ++i)
-			if (value >= 0 && size_t(value) == clip.events[i]) return int64_t(i);
-		return -1;
-	};
-	std::vector<std::vector<EventLink>> links(chains.size());
-	for (size_t c = 0; c < chains.size(); ++c) {
-		for (size_t i = 0; i < chains[c].triggers.size(); ++i)
-			if (trigger_param_kind(chains[c].triggers[i], 0) == ParamKind::Event)
-				if (const int64_t copy = copy_named(chains[c].triggers[i].param1); copy >= 0)
-					links[c].push_back({0, uint32_t(i), uint32_t(copy)});
-		for (size_t i = 0; i < chains[c].actions.size(); ++i)
-			if (action_param_kind(chains[c].actions[i], 0) == ParamKind::Event)
-				if (const int64_t copy = copy_named(chains[c].actions[i].param1); copy >= 0)
-					links[c].push_back({1, uint32_t(i), uint32_t(copy)});
-	}
+	// A copied event's index names the event of that index here, which the step moves with the events at
+	// or past where the copies land: the original editor's paste renumbers every event index at or past
+	// the paste, the copy's own with the rest, so a copy keeps naming the event it named [orig: JOTACmed.exe
+	// sub_44D460 @ 0x44d460] (D-MIS-9).
 	// The rows, in band order (the base puts each where its band is, row_position).
 	const auto entities = [&](K kind, const std::vector<bms::Entity> &records) {
 		for (const bms::Entity &record : records) {
@@ -368,9 +336,8 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 		shape(*row);
 		out.push_back(row);
 	}
-	for (size_t c = 0; c < chains.size(); ++c) {
-		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chains[c]));
-		row->links = std::move(links[c]);
+	for (EventChain &chain : chains) {
+		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chain));
 		shape(*row);
 		out.push_back(row);
 	}

@@ -23,6 +23,7 @@
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/mission_items.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_chores.h>
@@ -36,7 +37,15 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-DocumentSet::DocumentSet(SessionCore &core) : core_(core), view_(core.view()), paths_(core.paths()) {}
+DocumentSet::DocumentSet(SessionCore &core)
+	: core_(core), view_(core.view()), paths_(core.paths()), rows_(std::make_unique<MissionItemCache>()) {}
+
+DocumentSet::~DocumentSet() = default;
+
+void DocumentSet::hand_item_classes(DocumentBase &document) {
+	if (auto *mission = dynamic_cast<MissionDocument *>(&document))
+		mission->set_item_classes(mission_item_classes(view_, *rows_, *mission));
+}
 
 // --- what is open ----------------------------------------------------------------------------
 
@@ -608,6 +617,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 			shown->second.remove_screen = 0;
 			core_.touch(ViewConcern::Workspace);
 		}
+		hand_item_classes(*document);
 		documents_.push_back(document);
 		activate(document->path());
 		if (!keep) select_named(*document);
@@ -1043,6 +1053,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	std::vector<std::string> written;
 	for (DocumentBase *document : writes) {
 		Diagnostic error;
+		hand_item_classes(*document); // a mission's AI classes as its items' rows hold them now
 		const bool outside = over && !document->matches_file();
 		if (!document->save(error, over)) {
 			// A file changed outside the editor under unsaved edits: the conflict is a row
@@ -1102,6 +1113,7 @@ void DocumentSet::rewrite_file(const std::string &path) {
 		core_.touch(ViewConcern::Output);
 		return;
 	}
+	hand_item_classes(*document);
 	if (!document->save(error)) { // one that does not serialize says why here
 		core_.report(error);
 		view_.activity.status = relative + " could not be saved: see Problems.";
@@ -1321,6 +1333,18 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 			out_of_row = true;
 		}
 		if (out_of_row) edits = &expanded;
+	}
+	// A mission's records placed of an item take its catalog row (D-MIS-10): one place for every placement, a
+	// drop, the Place tool's stop, the outline's Add and its item, an MCP Add (plan_item_seeds).
+	if (const auto *mission = dynamic_cast<const MissionDocument *>(records)) {
+		std::vector<Edit> seeded = *edits;
+		const size_t asked = seeded.size();
+		plan_item_seeds(view_, *rows_, *mission, seeded);
+		if (seeded.size() != asked) {
+			expanded = std::move(seeded);
+			edits = &expanded;
+		}
+		hand_item_classes(document);
 	}
 	NodeAddress owner;
 	Document::Placement at;

@@ -312,7 +312,10 @@ bool StringsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	}
 	for (const rtxt::Entry &entry : file.entries) {
 		if (entry.section_index >= sections.size()) {
-			issues.push_back({true, 0, entry.key, "key", "A string names a section the table does not have."});
+			issues.push_back({true, 0, entry.key, "key",
+			                  "A string names a section the table does not have. The game never reads that index: it finds "
+			                  "the string by its place in the table [orig: TextResource_FindEntryBySectionAndKey @ 0x75d250], "
+			                  "so a build packs the table as it stands, while a save, which would drop the string, is refused."});
 			continue;
 		}
 		sections[entry.section_index]->entries.push_back(entry);
@@ -425,7 +428,9 @@ bool StringsDocument::edit_collection(Node &node, const Edit &edit, const IdAllo
 namespace {
 
 constexpr FindingCodeEntry<StringsFinding> kFindingEntries[] = {
-	{ StringsFinding::InvalidInput, { "strings.invalid_input", FindingFix::None, nullptr, true } },
+	// A string the model cannot file (its entry's section past the table's): the game reads on, never reading
+	// that index (unwritable_code: a closed table packs as stored, its Save refused).
+	{ StringsFinding::InvalidInput, unwritable_code("strings.invalid_input") },
 	{ StringsFinding::Regrouped, { "strings.regrouped", FindingFix::Rewrite,
 				"with its strings grouped by section the way the game reads them" } },
 	// An empty section name or key: the editor's rule, no refusal of the game's witnessed (the gate

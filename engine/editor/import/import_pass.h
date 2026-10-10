@@ -88,6 +88,8 @@ private:
 	bool file_hash(const std::string &file, const std::string &relative, uint64_t &hash, uint64_t &spent);
 	static Cache load_cache(const std::string &path, std::string &text);
 	void save_cache() const;
+	// At the end of a pass over the whole project: the outputs' folders under the cache no source names.
+	void remove_stale_outputs() const;
 
 	ProjectPaths paths_;
 	ProjectDocument project_;
@@ -107,6 +109,9 @@ private:
 	ImportRunResult result_;
 	Phase phase_ = Phase::Start;
 	bool limited_ = false; // limit_to: the sources listed, no walk; the cache merged, not replaced
+	// The walk reached every folder: one stopped early (a folder renamed or deleted under it) listed some sources
+	// alone, so the pass merges the cache and removes no output folder, as a limited one.
+	bool walked_whole_ = true;
 };
 
 } // namespace opennova::editor

@@ -17,10 +17,24 @@ namespace opennova::editor {
 using namespace def;
 namespace {
 
+// Whether the game's own reader stops at the input, or corrupts the record over it, by the def readers'
+// sites (catalog.reader_stops): a `weapon` line inside an open weapon ends the walk [orig:
+// WeaponDefs_ParseLineCallback @ 0x5436ad..0x5436d2], as an `ammo` line inside an open ammo does [orig:
+// AmmoDef_LoadAll @ 0x40b0b0] (each a MalformedBlock on its line's key, formats/def/def_weapons.cpp and
+// def_ammo.cpp); a fifth `sights` row lands on the row count [orig: WeaponDefs_ParseLineCallback, the count
+// bump @ 0x544b11..0x544b20] (an Unrepresentable on its key). Any other blocking input the game reads on past.
+bool game_stops(const DefIssue &issue) {
+	if (issue.code == DefIssueCode::MalformedBlock)
+		return strutil::iequals(issue.field, "weapon") || strutil::iequals(issue.field, "ammo");
+	return issue.code == DefIssueCode::Unrepresentable && strutil::iequals(issue.field, "sights");
+}
+
 std::vector<SourceIssue> source_issues(const DefParseReport &report) {
 	std::vector<SourceIssue> issues;
-	for (const DefIssue &issue : report)
+	for (const DefIssue &issue : report) {
 		issues.push_back({issue.blocks(), issue.line, issue.record, issue.field, issue.message});
+		issues.back().game_stops = issue.blocks() && game_stops(issue);
+	}
 	return issues;
 }
 

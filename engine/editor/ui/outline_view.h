@@ -107,4 +107,12 @@ private:
 	Measured defining_, masters_; // defining_width's and masters_width's
 };
 
+// A record line's right-click menu (DI-18), over the item just drawn (inside its own id): the record selected as
+// it opens, as a click selects it; Go to definition (what the record names first, record_definition: F12 with it
+// selected); Find usages (who names what it defines, the project's finder: Shift+F12); then `own`'s items (the
+// type's own, OutlineSpec::row_menu: an item record's Place in mission), none for null. An outline's lines open it,
+// and the menu view's screens and the windows of its record tree.
+void record_menu(Workspace &workspace, const Document &document, const NodeAddress &record,
+                 OutlineRowMenuHook own = nullptr);
+
 } // namespace opennova::editor
