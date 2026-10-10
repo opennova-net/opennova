@@ -116,8 +116,9 @@ struct MissionSoundChannel {
 // building over it); the hour the picture's (the options' time, else the mission's start time). Not heard: the
 // occlusion the game inflates a distance by (no world stands between them in the picture: DI-04's rule), the music
 // (the game context's lead-in and its one GAMINT sting, which the shell's music director plays: the body names the
-// pair and what it plays, docs/audio/mus-sbf-re.md), what only a running world raises (a vehicle's engine, a person's
-// footsteps, a placed genx item's hum: D-SND-32).
+// pair and what it plays, docs/audio/mus-sbf-re.md), what only a running world raises (a vehicle's engine, a placed
+// genx item's hum: D-SND-32). The people's footsteps and foley as they play their clips from their spawn (S23 C,
+// preview/mission_people) are heard beside it, kept with its one-shots (keep).
 class MissionListen {
 public:
 	MissionListen();

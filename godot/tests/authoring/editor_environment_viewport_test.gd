@@ -144,6 +144,18 @@ func test_an_environment_draws_its_sky_over_its_missions_terrain() -> void:
 	var terrain := _device_node("Terrain") as Terrain
 	for type in ["Weather", "SkyDome", "Celestial", "Water", "Precipitation", "ParticleRenderer", "Camera3D"]:
 		assert_not_null(_device_node(type), "its device holds a " + type)
+	# S23 C: the game's frame effects, FrameFx the terminal compositor (its bloom, the display decode) and the
+	# sun-glare veil over the picture, the game's shader on it.
+	assert_not_null(_device_node("FrameFx"), "its device holds the game's FrameFx")
+	assert_null(_device_node("DisplayDecode"), "FrameFx is the one decode")
+	var veil := _device_node("ColorRect") as ColorRect
+	assert_not_null(veil, "the sun veil")
+	if veil != null:
+		assert_eq(String(veil.name), "SunVeil")
+		var material := veil.material as ShaderMaterial
+		assert_not_null(material, "the veil's shader")
+		if material != null:
+			assert_eq(material.shader.resource_path, "res://shaders/sun_veil_overlay.gdshader")
 	assert_not_null(environment, "and the mission environment")
 	assert_not_null(terrain, "and the terrain")
 	if environment == null or terrain == null:

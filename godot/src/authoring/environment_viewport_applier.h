@@ -21,6 +21,8 @@
 #include "env/sky_dome.h"
 #include "env/water.h"
 #include "env/weather.h"
+#include "authoring/preview_frame_effects.h"
+#include "authoring/preview_sound_player.h"
 #include "render/scene_overlay_compositor.h"
 #include "resource_index/resource_root.h"
 #include "terrain/terrain.h"
@@ -187,6 +189,14 @@ private:
 	Camera3D *camera_ = nullptr;
 	// The game's particle renderer, no effect shown: its overlay passes composed on this device's cameras.
 	std::unique_ptr<PreviewEffects> effects_;
+	std::unique_ptr<PreviewFrameEffects> frame_effects_; // the game's FrameFX and the sun veil (S23 C)
+	// The Listen's rain loops (S23 C), the project's root their waves load from, and how long since a frame was drawn.
+	std::unique_ptr<PreviewSoundLoops> listen_;
+	std::string project_root_;
+	static constexpr int kListenHeldFrames = 30;
+	int listen_idle_frames_ = kListenHeldFrames;
+	uint64_t presented_ = 0, listen_presented_ = 0;
+	void apply_listen_(const opennova::editor::EnvironmentViewport &model);
 	SceneOverlayModelSurfaces overlay_bodies_;
 	uint64_t overlay_frame_id_ = 0;
 	Ref<ResourceRoot> root_files_;

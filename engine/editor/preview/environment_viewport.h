@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/preview/environment_listen.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/model_preview_camera.h>
@@ -52,9 +53,12 @@ struct EnvironmentViewportOptions {
 	EnvironmentWeatherCommand overcast;
 	bool terrain = true;
 	bool water = true;
+	// Listen (S23 C): the weather heard at the camera, the rain's loops and the lightning's thunder
+	// (preview/environment_listen), at the master volume.
+	MissionListenOptions listen;
 	bool operator==(const EnvironmentViewportOptions &o) const {
 		return time == o.time && day_seconds == o.day_seconds && mission == o.mission && header == o.header &&
-				rain == o.rain && overcast == o.overcast && terrain == o.terrain && water == o.water;
+				rain == o.rain && overcast == o.overcast && terrain == o.terrain && water == o.water && listen == o.listen;
 	}
 	bool operator!=(const EnvironmentViewportOptions &o) const { return !(*this == o); }
 };
@@ -69,7 +73,8 @@ inline constexpr int32_t kEnvironmentCatchUpTicks = 620;
 inline constexpr float kEnvironmentEyeHeight = 1.8f;
 
 // The options on the wire (the envelope's `options`, a SetViewport's): {time (null: the start), day_seconds,
-// mission, header, rain {percent, seconds}, overcast {percent, seconds}, show {terrain, water}}.
+// mission, header, rain {percent, seconds}, overcast {percent, seconds}, show {terrain, water}, listen {on,
+// volume}}.
 io::JsonValue environment_options_to_json(const EnvironmentViewportOptions &options);
 // The change a SetViewport makes to set the options to `options` (a weather member only where it differs
 // from `held`'s: a command is issued each time a SetViewport names it), and its camera.
@@ -132,6 +137,12 @@ public:
 	// kind), how many game ticks it has run in all, and how many times its clock was set anew (a seek: the
 	// device takes the colours at once).
 	const world::WeatherState &weather() const { return weather_; }
+	// What the weather sounds like at the camera while the options listen (S23 C), closed while they do not: the
+	// device plays its channels.
+	const EnvironmentListen &listen() const { return listen_; }
+	// The thunder heard since the last call, each planned as the game plays it with its member picked through
+	// `selector`, numbered from `seq`: what the session's clip sounds hand the Shell. None while it does not listen.
+	std::vector<ClipSoundFired> fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector, uint64_t &seq);
 	uint64_t weather_ticks() const { return weather_ticks_; }
 	uint64_t clock_sets() const { return clock_sets_; }
 	// The names its device asked the project's files for and did not find.
@@ -242,6 +253,7 @@ private:
 	EnvironmentClockFrom rate_from_ = EnvironmentClockFrom::Default;
 	// The weather home and its stepping.
 	world::WeatherState weather_;
+	EnvironmentListen listen_;
 	bool seeded_ = false;
 	uint64_t seed_key_ = 0; // what the home was seeded from (the config read, the header, the clock)
 	int32_t stepped_ = 0; // the preview clock's ticks the home stands at
