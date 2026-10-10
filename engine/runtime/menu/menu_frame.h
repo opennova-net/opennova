@@ -824,11 +824,17 @@ public:
 		int height = 0;
 	};
 	FrameCursor frame_cursor(const MenuFrameState &state) const;
-	// The open-dropdown sample: the dropdown's scrollbar alone, restricted to
-	// the open combo `index` (the popup-exclusive dispatch gate), its windows
-	// by the game's rule (an arrow steps on its click). scroll_index >= 0 in the
-	// result means the scrollbar took the sample and the caller must not treat
-	// it as a row hover/pick.
+	// The open dropdown's press, as its message arrives: the dropdown's
+	// scrollbar alone, restricted to the open combo `index` (the popup-exclusive
+	// dispatch gate), its windows by the game's rule (the track pages; an arrow
+	// or the shuttle holds the press). scroll_index >= 0 in the result means the
+	// scrollbar took the press and the caller must not pick a row.
+	MouseClaim press_popup_mouse(MenuFrameState &io_state, int index,
+			float mouse_x, float mouse_y, float scale_x, float scale_y);
+	// The open dropdown's pump sample: the window its press holds, by the
+	// game's rule (an arrow steps on its click, the shuttle drags).
+	// scroll_index >= 0 in the result means the held window took the sample and
+	// the caller must not treat it as a row hover.
 	MouseClaim pump_popup_mouse(MenuFrameState &io_state, int index,
 			float mouse_x, float mouse_y, bool button_down, float scale_x,
 			float scale_y);
@@ -1212,9 +1218,9 @@ private:
 	ScrollDrag scroll_drag_;
 	bool pump_down_ = false;
 	struct PopupScroll {
-		bool down = false;
-		int part = 0;       // the held window (menu_click.h), 0 none
-		bool under = false; // the mouse over it at the last sample
+		bool down = false;  // the button at the dropdown pump's last sample
+		int part = 0;       // the window its press holds (menu_click.h), 0 none
+		bool under = false; // the mouse over it at the last sample with the button down
 	};
 	PopupScroll popup_scroll_;
 	// The scrollbar windows of a widget the pump and the press reach (a SCROLL's

@@ -51,6 +51,8 @@ func open(root: ResourceRoot, owner: Node) -> bool:
 	_driver = surface.driver
 	_starting_shown = false
 	show_progress("")
+	# The menu's pump runs every frame the screen is up (_process).
+	set_process(true)
 	return true
 
 
@@ -62,7 +64,6 @@ func is_open() -> bool:
 ## game start hands over (game_starting) after showing for one frame.
 func follow(world: GameWorld) -> void:
 	_world = world
-	set_process(world != null)
 
 
 ## The join's progress: the status line with Cancel.
@@ -73,7 +74,7 @@ func show_progress(text: String) -> void:
 
 ## A failed join: the reason with Cancel only, until the player leaves.
 func show_failure(text: String) -> void:
-	set_process(false)
+	_world = null
 	_set_panel(JoinScreenStatus.PANEL_ERROR)
 	_set_message(text)
 
@@ -117,10 +118,17 @@ func is_window_shown(window_name: String) -> bool:
 
 
 func _process(_delta: float) -> void:
-	if not is_open() or _world == null or _panel != JoinScreenStatus.PANEL_PROGRESS:
+	if not is_open():
+		return
+	# The menu's pump, once a frame after the input events, whatever the join
+	# stands at (MenuFrameSurface; the join screen's mode pumps its menu at the
+	# head of every update, engine/runtime/menu/menu_runtime.h).
+	if _driver != null:
+		_driver.pump_mouse()
+	if _world == null or _panel != JoinScreenStatus.PANEL_PROGRESS:
 		return
 	if _starting_shown:
-		set_process(false)
+		_world = null
 		game_starting.emit()
 		return
 	var status: JoinScreenStatus = _world.get_join_screen_status()

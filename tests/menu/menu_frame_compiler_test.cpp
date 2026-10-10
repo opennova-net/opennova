@@ -2818,8 +2818,14 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 
 	// Popup (0,20)-(100,100): 6 rows, 4 visible, range 0..2, page 3. The
 	// authored scrollbar sits absolute (80,20)-(100,100): up arrow to y 40,
-	// track to y 80, down arrow below.
-	auto claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	// track to y 80, down arrow below. A press is its message
+	// (press_popup_mouse) and then the frame's sample with the button down.
+	auto press = [&](float x, float y) {
+		const auto pressed = c.press_popup_mouse(state, 1, x, y, 1.0f, 1.0f);
+		c.pump_popup_mouse(state, 1, x, y, true, 1.0f, 1.0f);
+		return pressed;
+	};
+	auto claim = press(90.0f, 90.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed &&
 					state.widgets[0].scroll_row == 0,
 			"the down arrow's press takes the sample and steps nothing");
@@ -2827,9 +2833,15 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 1 &&
 					state.widgets[0].scroll_row == 1,
 			"let go over it, the down arrow steps scroll_row +1");
+	// Pressed and let go inside one frame: no sample held it, so no step
+	// [orig: CWnd_ProcessMouseEvent @ 0x647b14, the verdict 3 of the sample before].
+	c.press_popup_mouse(state, 1, 90.0f, 90.0f, 1.0f, 1.0f);
+	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);
+	CHECK(!claim.scroll_value_changed && state.widgets[0].scroll_row == 1,
+			"a press and release inside one frame steps nothing");
 	// Held, drifted onto the row strip and let go there: the arrow keeps the
 	// sample (never a row pick) and steps nothing.
-	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	press(90.0f, 90.0f);
 	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
 			"the held arrow keeps the sample without repeating");
@@ -2838,7 +2850,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 			"let go off the arrow: no step");
 
 	// Up arrow steps back on its click.
-	c.pump_popup_mouse(state, 1, 90.0f, 30.0f, true, 1.0f, 1.0f);
+	press(90.0f, 30.0f);
 	claim = c.pump_popup_mouse(state, 1, 90.0f, 30.0f, false, 1.0f, 1.0f);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 0 &&
 					state.widgets[0].scroll_row == 0,
@@ -2846,8 +2858,8 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 
 	// Shuttle drag: at scroll_row 0 the 26px shuttle tops the track (y 40).
 	// Capture there, drag past the track end: the ratio lands the max row.
-	claim = c.pump_popup_mouse(state, 1, 90.0f, 50.0f, true, 1.0f, 1.0f);
-	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
+	claim = press(90.0f, 50.0f);
+	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed && state.widgets[0].scroll_row == 0,
 			"the shuttle press captures without a value step");
 	claim = c.pump_popup_mouse(state, 1, 90.0f, 100.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_value_changed && claim.scroll_value == 2 &&
@@ -2857,7 +2869,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 
 	// The track above the shuttle (row 2: the shuttle 54..80) pages back on
 	// the press and holds nothing: the next held sample is the rows'.
-	claim = c.pump_popup_mouse(state, 1, 90.0f, 45.0f, true, 1.0f, 1.0f);
+	claim = press(90.0f, 45.0f);
 	CHECK(claim.scroll_index == 1 && claim.scroll_value_changed &&
 					state.widgets[0].scroll_row == 0,
 			"the track pages -3 on its press");
@@ -2866,14 +2878,14 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
 
 	// A press on the row strip flows back to the caller's row picking.
-	claim = c.pump_popup_mouse(state, 1, 50.0f, 55.0f, true, 1.0f, 1.0f);
+	claim = press(50.0f, 55.0f);
 	CHECK(claim.scroll_index == -1,
 			"a row-strip press flows past the popup pump to row picking");
 	c.pump_popup_mouse(state, 1, 50.0f, 55.0f, false, 1.0f, 1.0f);
 
 	// A CLOSED combo exposes no scrollbar to the pump.
 	state.widgets[0].popup_open = false;
-	claim = c.pump_popup_mouse(state, 1, 90.0f, 90.0f, true, 1.0f, 1.0f);
+	claim = press(90.0f, 90.0f);
 	CHECK(claim.scroll_index == -1,
 			"the popup pump refuses a closed combo's scrollbar strip");
 	c.pump_popup_mouse(state, 1, 90.0f, 90.0f, false, 1.0f, 1.0f);

@@ -339,7 +339,17 @@ public:
 	void play_widget_sound(const String &p_trigger, const String &p_file);
 
 	// --- input (the shell's _gui_input owners forward here) ---
+	// The mouse as the game takes it (engine MenuRuntime): each event as its message arrives
+	// (move_mouse, press_mouse, release_mouse; take_mouse_event samples one), the pump once a
+	// frame after them (pump_mouse). process_mouse is one whole sample (a scripted pump).
 	void process_mouse(const Vector2 &p_position, bool p_button_down);
+	void move_mouse(const Vector2 &p_position, bool p_button_down);
+	bool press_mouse(const Vector2 &p_position);
+	bool release_mouse(const Vector2 &p_position);
+	void pump_mouse();
+	// A mouse event as its message: a motion's point and left button, the left button's press or
+	// release. True for a left-button event (the caller accepts it).
+	bool take_mouse_event(const Ref<InputEvent> &p_event);
 	bool process_wheel(const Vector2 &p_position, int p_steps);
 	bool handle_key_input(const Ref<InputEventKey> &p_event);
 	void close_active_combo_popup();

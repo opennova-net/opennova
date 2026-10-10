@@ -194,6 +194,8 @@ func _process(_delta: float) -> void:
 	if not is_open():
 		set_process(false)
 		return
+	# The menu's pump, once a frame after the input events (MenuFrameSurface).
+	_driver.pump_mouse()
 	_driver.tick(_view.frame_clock_ms)
 	var sim: Simulation = _view.sim() if _view != null else null
 	if sim == null:
