@@ -127,18 +127,18 @@ bool GateListener::start(const ServerConfig &config) {
 		return false;
 	}
 
+	// The socket stays bound from here into the receive thread, so the port
+	// reported (and advertised as POSTIPPORT) is the port served: a close and
+	// a re-bind would free it in between, and with port 0 take another one.
 	uint16_t bound = 0;
-	auto sock = opennova::net::udp_bind(config.gate_udp_port, &bound);
-	if (!sock.is_valid()) {
+	opennova::net::ScopedSocket socket(opennova::net::udp_bind(config.gate_udp_port, &bound));
+	if (!socket.is_valid()) {
 		std::fprintf(stderr, "[gate] failed to bind UDP %u\n",
 		             static_cast<unsigned>(config.gate_udp_port));
 		return false;
 	}
-	// Close — we'll re-bind inside run_loop so the socket lifetime tracks
-	// the worker thread, simplifying error paths.
-	opennova::net::close_socket(sock);
 
-	bound_port_     = config.gate_udp_port;
+	bound_port_     = bound;
 	public_host_    = config.public_host;
 	nw_udp_port_    = config.nw_udp_port;
 	http_port_      = config.http_port;
@@ -169,8 +169,9 @@ bool GateListener::start(const ServerConfig &config) {
 
 	stop_requested_.store(false);
 	running_.store(true);
-	worker_ = std::thread([this, db_conn = std::move(db_conn)]() mutable {
-		run_loop(std::move(db_conn));
+	worker_ = std::thread([this, socket = std::move(socket),
+	                       db_conn = std::move(db_conn)]() mutable {
+		run_loop(std::move(socket), std::move(db_conn));
 	});
 	std::printf("[gate] listening on UDP :%u (also the POSTIPPORT status sink)\n",
 	            static_cast<unsigned>(bound_port_));
@@ -185,14 +186,8 @@ void GateListener::stop() {
 	running_.store(false);
 }
 
-void GateListener::run_loop(std::optional<db::ConnectionPool::Lease> db_conn) {
-	opennova::net::ScopedSocket socket(opennova::net::udp_bind(bound_port_));
-	if (!socket.is_valid()) {
-		std::fprintf(stderr, "[gate] re-bind failed; aborting loop\n");
-		running_.store(false);
-		return;
-	}
-
+void GateListener::run_loop(opennova::net::ScopedSocket socket,
+                            std::optional<db::ConnectionPool::Lease> db_conn) {
 	uint8_t rx[65535];
 	while (!stop_requested_.load()) {
 		opennova::net::Endpoint from{};

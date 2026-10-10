@@ -1,7 +1,8 @@
 // The NovaWorld service's HTTP routes, driven in-process: a SQLite file in the
 // run's temp directory under backend/migrations (plus the games seed), the
-// Crow HttpListener from opennova_novaworld_server_core on a free loopback
-// port, and requests sent through apps/common's http_exchange. Built only
+// Crow HttpListener from opennova_novaworld_server_core on port 0 (the OS
+// picks; the harness reads the port back from bound_port()), and requests sent
+// through apps/common's http_exchange to 127.0.0.1. Built only
 // with BUILD_NOVAWORLD_HTTP. The cases share one listener and run in order
 // (the admin users case reads the account the register case made; the
 // concurrent case runs last, since it adds accounts and a host).
@@ -66,11 +67,12 @@ struct Harness {
 	uint16_t port = 0;
 	std::string registered_pcid; // what the register case's reply carried
 
+	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
 	                    const std::vector<std::string> &headers = {},
-	                    const std::string &body = {}) const {
+	                    const std::string &body = {}, int timeout_ms = 3000) const {
 		const std::string url = "http://127.0.0.1:" + std::to_string(port) + path;
-		return net::http_exchange(method, url, headers, body, 3000,
+		return net::http_exchange(method, url, headers, body, timeout_ms,
 		                          [](const std::string &host, net::Endpoint &out) {
 			                          return net::resolve_ipv4(host, out, false);
 		                          });
@@ -79,6 +81,12 @@ struct Harness {
 
 std::string body_text(const net::HttpReply &reply) {
 	return std::string(reply.body.begin(), reply.body.end());
+}
+
+// A reply for a failure line: its status and body, or why no reply came.
+std::string describe(const net::HttpReply &reply) {
+	if (!reply.transport_ok) return "no reply (" + reply.error + ")";
+	return "HTTP " + std::to_string(reply.code) + " " + body_text(reply);
 }
 
 std::string str(const crow::json::rvalue &v) { return std::string(v.s()); }
@@ -121,18 +129,12 @@ std::string set_cookie_value(const net::HttpReply &reply, const std::string &nam
 	return {};
 }
 
-// GET /api/health, the readiness probe: the listener binds on its own thread
-// after start() returns, so this polls until a reply comes back.
+// GET /api/health on the port bound_port() reported: start() returned once Crow
+// served, so the first request answers.
 int test_health(Harness &h) {
-	net::HttpReply reply;
-	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-	for (;;) {
-		reply = h.send("GET", "/api/health");
-		if (reply.transport_ok || std::chrono::steady_clock::now() >= deadline) break;
-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
-	}
+	const net::HttpReply reply = h.send("GET", "/api/health");
 	if (!reply.transport_ok) {
-		std::fprintf(stderr, "  /api/health never answered on :%u: %s\n",
+		std::fprintf(stderr, "  /api/health did not answer on :%u: %s\n",
 		             static_cast<unsigned>(h.port), reply.error.c_str());
 	}
 	TEST_EXPECT(reply.transport_ok);
@@ -306,6 +308,13 @@ int test_admin_users_list(Harness &h) {
 constexpr uint32_t kConcurrentRid = 2000;
 constexpr int kConcurrentRegistrations = 16;
 constexpr int kHostGenerations = 40;
+// The case checks that the replies are each request's own and consistent, not
+// how fast they come: the bcrypt registrations queue behind Crow's few workers
+// (three on a 4-vCPU runner), so a request may wait well past the default 3 s.
+constexpr int kConcurrentTimeoutMs = 30000;
+// The readers' pause between rounds, so they do not crowd the registrations
+// out of the workers.
+constexpr auto kReaderPause = std::chrono::milliseconds(5);
 
 std::string generation_name(int generation, int slot) {
 	return "c" + std::to_string(generation) + "-s" + std::to_string(slot);
@@ -388,10 +397,11 @@ int test_concurrent_requests(Harness &h) {
 		threads.emplace_back([&h, &registered, &fail, i] {
 			const std::string username = "conc" + std::to_string(i);
 			const auto reply = h.send("POST", "/api/register", {kJson},
-			                          "{\"username\":\"" + username + "\",\"password\":\"pw\"}");
+			                          "{\"username\":\"" + username + "\",\"password\":\"pw\"}",
+			                          kConcurrentTimeoutMs);
 			const auto json = crow::json::load(body_text(reply));
 			if (!reply.transport_ok || reply.code != 201 || !json || !json.has("user")) {
-				fail(username + ": HTTP " + std::to_string(reply.code) + " " + body_text(reply));
+				fail(username + ": " + describe(reply));
 				return;
 			}
 			if (str(json["user"]["username"]) != username) {
@@ -404,10 +414,10 @@ int test_concurrent_requests(Harness &h) {
 	for (int r = 0; r < 3; ++r) {
 		readers.emplace_back([&h, &writing, &host_reads, &fail] {
 			while (writing.load()) {
-				const auto hosts = h.send("GET", "/api/hosts");
+				const auto hosts = h.send("GET", "/api/hosts", {}, {}, kConcurrentTimeoutMs);
 				const auto json = crow::json::load(body_text(hosts));
 				if (!hosts.transport_ok || hosts.code != 200 || !json) {
-					fail("/api/hosts: HTTP " + std::to_string(hosts.code));
+					fail("/api/hosts: " + describe(hosts));
 					return;
 				}
 				for (const auto &e : json["hosts"]) {
@@ -418,11 +428,14 @@ int test_concurrent_requests(Harness &h) {
 					                            static_cast<int>(e["players"].i()), names);
 					if (!bad.empty()) fail("/api/hosts: " + bad);
 				}
-				const auto gsb = h.send("GET", "/jop_2.gsb");
+				const auto gsb = h.send("GET", "/jop_2.gsb", {}, {}, kConcurrentTimeoutMs);
+				if (!gsb.transport_ok || gsb.code != 200) {
+					fail("/jop_2.gsb: " + describe(gsb));
+					return;
+				}
 				opennova::GsbResponse parsed;
-				if (!gsb.transport_ok || gsb.code != 200 ||
-				    !opennova::gsb_parse_response(gsb.body.data(), gsb.body.size(), parsed)) {
-					fail("/jop_2.gsb: HTTP " + std::to_string(gsb.code));
+				if (!opennova::gsb_parse_response(gsb.body.data(), gsb.body.size(), parsed)) {
+					fail("/jop_2.gsb: " + std::to_string(gsb.body.size()) + " bytes that do not parse");
 					return;
 				}
 				for (const auto &s : parsed.servers) {
@@ -431,6 +444,7 @@ int test_concurrent_requests(Harness &h) {
 					if (!bad.empty()) fail("/jop_2.gsb: " + bad);
 				}
 				host_reads.fetch_add(1);
+				std::this_thread::sleep_for(kReaderPause);
 			}
 		});
 	}
@@ -544,17 +558,12 @@ int main() {
 					(source_dir / "backend" / "seed" / "0001_games.sql").string()));
 		}
 
-		// A free loopback port: bind an ephemeral one, release it, hand it to Crow.
-		uint16_t port = 0;
-		{
-			net::ScopedSocket probe(net::tcp_listen(0, 1, &port, true));
-			TEST_EXPECT(probe.is_valid() && port != 0);
-		}
-
 		nws::ServerConfig config;
 		config.public_host = "127.0.0.1";
 		config.admin_api_token = kAdminToken;
-		config.http_port = port;
+		// Port 0: Crow binds the port the OS picks, and start() returns once it
+		// serves there, with that port in bound_port().
+		config.http_port = 0;
 		// Roots that do not exist, so the catch-all family 404s deterministically.
 		config.web_dist_dir = temp.path / "web_dist";
 		config.templates_dir = temp.path / "templates";
@@ -564,8 +573,9 @@ int main() {
 		nws::SessionStore sessions;
 		nws::HttpListener http(manager, pool, sessions);
 		TEST_EXPECT(http.start(config));
+		TEST_EXPECT(http.bound_port() != 0);
 
-		Harness harness{pool, sessions, port, {}};
+		Harness harness{pool, sessions, http.bound_port(), {}};
 		rc = run(harness);
 		http.stop(); // joins the Crow thread before the pool and the TempDir go
 	}
