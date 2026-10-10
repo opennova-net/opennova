@@ -15,7 +15,7 @@
 // line and column; the wire's span edits, refusals and pages of lines. The other types: a credits
 // file through the CBIN codec byte for byte and an edit written back in the form, one the text form
 // cannot carry held read only; a music script through its MUS text byte for byte, one with a message
-// handler held read only, a text that does not compile refused at its line and column; a shader in
+// file of two scripts held read only, a text that does not compile refused at its line and column; a shader in
 // the shader loader's SCR form byte for byte, a plain one a finding Save fixes. After the review: a
 // line end a type's reader reads otherwise (a script's LF alone and CR alone, a credits text's LF
 // alone) a finding a Rewrite fixes, Save writing every line CR LF as a step of the text; a credits
@@ -125,20 +125,17 @@ struct OtherChange : EditPayload {
 	const char *token() const override { return "other.change"; }
 };
 
-// The minted music script with a message handler (the restart frame's entry, which the MUS text has
-// no form for), from the minted synth_gamemus.bin's own text.
-std::vector<uint8_t> script_with_handler() {
+// The minted music script twice in one file (two chunks: the MUS text carries the first alone).
+std::vector<uint8_t> script_in_two_chunks() {
 	const std::string bin = repo_file("mus/synth_gamemus.bin");
 	opennova::mus::MusFile file{};
 	std::vector<uint8_t> out;
 	if (opennova::mus::mus_open_memory(&file, reinterpret_cast<const uint8_t *>(bin.data()), bin.size()) != 0)
 		return out;
-	file.scripts[0].has_message_handler = 1;
-	file.scripts[0].message_handler_offset = 0;
-	const opennova::mus::MusScript *scripts[] = {&file.scripts[0]};
+	const opennova::mus::MusScript *scripts[] = {&file.scripts[0], &file.scripts[0]};
 	uint8_t *buffer = nullptr;
 	size_t size = 0;
-	if (opennova::mus::mus_encode_file(scripts, 1, &buffer, &size) == 0) out.assign(buffer, buffer + size);
+	if (opennova::mus::mus_encode_file(scripts, 2, &buffer, &size) == 0) out.assign(buffer, buffer + size);
 	opennova::mus::mus_free(buffer);
 	opennova::mus::mus_close(&file);
 	return out;
@@ -1033,8 +1030,8 @@ static int test_credits_unread() {
 	return 0;
 }
 
-// The music script type: its MUS text byte for byte; a script with a message handler held read only;
-// a text that does not compile refused at its line and column.
+// The music script type: its MUS text byte for byte (the minted script's MessageHandler its `handler`); a
+// file of two scripts held read only; a text that does not compile refused at its line and column.
 static int test_music_script() {
 	const std::string bin = repo_file("mus/synth_gamemus.bin");
 	TEST_EXPECT(!bin.empty());
@@ -1055,13 +1052,14 @@ static int test_music_script() {
 	TEST_EXPECT(!made->serialize().ok() && made->rewrite_need() == DocumentBase::RewriteNeed::Unserializable);
 	made->undo();
 	TEST_EXPECT(made->serialize().text == bin);
-	// A message handler: read only, a finding.
+	TEST_EXPECT(music.text().find("handler MessageHandler(msgtype, source)\n") != std::string::npos);
+	// Two scripts in one file: read only, a finding.
 	std::unique_ptr<DocumentBase> handled = type->make();
-	TEST_EXPECT(handled->load_bytes(script_with_handler(), "gamemus.bin", AssetKind::MusicScript, "jo", error) &&
+	TEST_EXPECT(handled->load_bytes(script_in_two_chunks(), "gamemus.bin", AssetKind::MusicScript, "jo", error) &&
 	            handled->blocked());
 	const std::vector<Diagnostic> held = type->validate_file(*handled);
 	TEST_EXPECT(has_code(held, "music_script.invalid_input") && held[0].severity == DiagnosticSeverity::Warning &&
-	            held[0].message.find("message handler") != std::string::npos);
+	            held[0].message.find("holds 2 scripts") != std::string::npos);
 	TEST_EXPECT(handled->rewrite_need() == DocumentBase::RewriteNeed::Unserializable);
 	return 0;
 }
@@ -1407,8 +1405,8 @@ static int test_import_shader() {
 // it (no catalog, a RUN's file from the install) writes the listing the original compiler wrote
 // (wac_corpus's committed vectors): the editor's compiler is the game's, and so are its reports; a
 // script that RUNs no other file makes exactly those reports a finding each, at their places, but
-// the names other files hold. Both music scripts carry a message handler: read only, their MUS text
-// compiling. The credits file and every shader go through their text and back byte for byte.
+// the names other files hold. Both music scripts (gamemus's MessageHandler among them) go through their MUS
+// text and back byte for byte, as do the credits file and every shader.
 static int test_retail() {
 	const std::string install = retail::install();
 	if (install.empty()) {
@@ -1491,10 +1489,9 @@ static int test_retail() {
 			break;
 		}
 		case AssetKind::MusicScript:
-			// Both shipped scripts carry a message handler: read only, their text compiling.
+			// Both shipped scripts: their text, MDEdit's layout written again, byte for byte.
 			++music;
-			TEST_EXPECT(document->blocked() && has_code(found, "music_script.invalid_input") &&
-			            !has_code(found, "music_script.unserializable"));
+			TEST_EXPECT(!document->blocked() && document->serialize().text == stored && found.empty());
 			break;
 		case AssetKind::Credits:
 			++credits;

@@ -99,21 +99,19 @@ bool decode_music_script(const std::string &, const std::vector<uint8_t> &stored
 	mus::mus_decompile(&script, &text[0], text.size());
 	text.resize(size_t(needed));
 	encoding = std::make_shared<MusicEncoding>();
-	// What the MUS text cannot carry: the script is held read only.
+	// What the MUS text cannot carry: the script is held read only. Its text compiles to MDEdit's layout (a
+	// MessageHandler its `handler`, the debug tables and the line table carried; every shipped script its own
+	// bytes, formats/mus), so a file the text does not give back as it is (one written otherwise) is held so too.
 	if (file.header.chunk_count != 1) {
 		hold_read_only(issues, "holds " + std::to_string(file.header.chunk_count) +
 				" scripts, and its MUS text the first alone");
-	} else if (script.has_message_handler) {
-		hold_read_only(issues,
-				"has a message handler (the entry the win and lose music restart at), which its "
-				"MUS text has no form for");
 	} else {
 		const Compiled again = compile(text);
 		if (!again.ok || again.bytes.size() != stored.size() ||
 				std::memcmp(again.bytes.data(), stored.data(), stored.size()) != 0)
 			hold_read_only(issues,
-					"would not be written back as it is from its MUS text (it carries the "
-					"editor-only debug information, or bytecode the compiler writes otherwise)");
+					"would not be written back as it is from its MUS text (a layout other than MDEdit's, which the "
+					"compiler writes)");
 	}
 	mus::mus_close(&file);
 	return true;
