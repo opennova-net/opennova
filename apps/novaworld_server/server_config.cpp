@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <string_view>
 
 namespace opennova::novaworld_server {
 
@@ -65,6 +66,19 @@ ServerConfig ServerConfig::from_env() {
 	c.host_stale_window_ms   = getenv_u64("HOST_STALE_WINDOW_MS",   c.host_stale_window_ms);
 
 	if (auto v = getenv_safe("ADMIN_API_TOKEN"))     c.admin_api_token = v;
+	c.cookie_secure = getenv_bool("ONNET_COOKIE_SECURE", c.cookie_secure);
+	if (auto v = getenv_safe("ONNET_TRUSTED_PROXIES")) {
+		const std::string_view list(v);
+		size_t pos = 0;
+		while (pos <= list.size()) {
+			const auto comma = list.find(',', pos);
+			const auto end = comma == std::string_view::npos ? list.size() : comma;
+			const auto entry = strutil::trim_view(list.substr(pos, end - pos));
+			if (!entry.empty()) c.trusted_proxies.emplace_back(entry);
+			pos = end + 1;
+		}
+	}
+	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
 
 	if (auto v = getenv_safe("ONNET_MET_IP"))    c.met_ip = v;
 	c.met_port = getenv_u16("ONNET_MET_PORT", c.met_port);

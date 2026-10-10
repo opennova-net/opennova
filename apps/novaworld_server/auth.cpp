@@ -1,5 +1,6 @@
 #include "auth.h"
 
+#include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
 #include <array>
@@ -69,8 +70,22 @@ std::optional<UserRecord> row_to_user(const opennova::db::Row &row) {
 	u.nwhandle = row.as_text(4).value_or("");
 	u.account_status = row.as_text(5).value_or("active");
 	if (u.account_status.empty()) u.account_status = "active";
+	u.role     = row.as_text(6).value_or("player");
 	if (u.id == 0) return std::nullopt;
 	return u;
+}
+
+// The hash an unknown username's password is checked against, so an unknown
+// name costs the bcrypt run a wrong password does: the reply's timing does not
+// enumerate accounts. Random bytes hashed at hash_password's cost, once per
+// process; no password matches it.
+const std::string &unknown_user_hash() {
+	static const std::string hash = [] {
+		std::array<uint8_t, 16> raw{};
+		os_random_bytes(raw.data(), raw.size());
+		return hash_password(strutil::bytes_to_hex(raw.data(), raw.size()));
+	}();
+	return hash;
 }
 
 MutationResult err(const char *code, const char *msg) {
@@ -90,7 +105,7 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 	std::vector<opennova::db::Row> rows;
 	try {
 		rows = db.query(
-			"SELECT id, username, pcid, nwh, nwhandle, account_status, password_hash "
+			"SELECT id, username, pcid, nwh, nwhandle, account_status, role, password_hash "
 			"FROM players WHERE username = ? LIMIT 1;",
 			{opennova::db::BindValue(username)});
 	} catch (const opennova::db::SqliteError &e) {
@@ -98,10 +113,15 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 		return std::nullopt;
 	}
 	if (rows.empty()) {
+		try {
+			verify_password(password, unknown_user_hash());
+		} catch (const std::exception &e) {
+			std::fprintf(stderr, "[auth] WARN unknown-user hash failed: %s\n", e.what());
+		}
 		std::fprintf(stderr, "[auth] user '%s' not found\n", username.c_str());
 		return std::nullopt;
 	}
-	const auto stored_hash = rows.front().as_text(6).value_or("");
+	const auto stored_hash = rows.front().as_text(7).value_or("");
 	if (!verify_password(password, stored_hash)) {
 		std::fprintf(stderr, "[auth] bad password for user '%s'\n", username.c_str());
 		return std::nullopt;
@@ -122,7 +142,7 @@ std::optional<UserRecord> get_user_by_username(opennova::db::Database &db,
 	if (username.empty()) return std::nullopt;
 	try {
 		auto rows = db.query(
-			"SELECT id, username, pcid, nwh, nwhandle, account_status "
+			"SELECT id, username, pcid, nwh, nwhandle, account_status, role "
 			"FROM players WHERE username = ? OR nwhandle = ? LIMIT 1;",
 			{opennova::db::BindValue(username), opennova::db::BindValue(username)});
 		if (rows.empty()) return std::nullopt;
@@ -136,7 +156,7 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 	if (id == 0) return std::nullopt;
 	try {
 		auto rows = db.query(
-			"SELECT id, username, pcid, nwh, nwhandle, account_status "
+			"SELECT id, username, pcid, nwh, nwhandle, account_status, role "
 			"FROM players WHERE id = ? LIMIT 1;",
 			{opennova::db::BindValue(id)});
 		if (rows.empty()) return std::nullopt;
@@ -150,7 +170,7 @@ std::vector<UserRecord> list_users(opennova::db::Database &db) {
 	std::vector<UserRecord> out;
 	try {
 		auto rows = db.query(
-			"SELECT id, username, pcid, nwh, nwhandle, account_status "
+			"SELECT id, username, pcid, nwh, nwhandle, account_status, role "
 			"FROM players ORDER BY id;");
 		out.reserve(rows.size());
 		for (const auto &r : rows) {
@@ -386,6 +406,9 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p) {
 	if (id <= 0) return err("not_found", "invalid id");
 	if (!get_user_by_id(db, id)) return err("not_found", "no such user");
+	if (p.role && *p.role != "player" && *p.role != "admin") {
+		return err("invalid_field", "role must be player or admin");
+	}
 
 	std::string sets;
 	std::vector<opennova::db::BindValue> binds;
@@ -407,6 +430,7 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	if (p.nwh)      add_set("nwh",      *p.nwh);
 	if (p.nwhandle) add_set("nwhandle", *p.nwhandle);
 	if (p.account_status) add_set("account_status", *p.account_status);
+	if (p.role)     add_set("role",     *p.role);
 	if (p.password_plaintext && !p.password_plaintext->empty()) {
 		try {
 			add_set("password_hash", hash_password(*p.password_plaintext));
@@ -430,6 +454,13 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	m.ok = true;
 	m.id = id;
 	return m;
+}
+
+bool promote_to_admin(opennova::db::Database &db, const std::string &username) {
+	if (username.empty()) return false;
+	db.exec("UPDATE players SET role = 'admin' WHERE username = ?;",
+	        {opennova::db::BindValue(username)});
+	return db.changes() > 0;
 }
 
 MutationResult update_game_access(opennova::db::Database &db, int64_t user_id,

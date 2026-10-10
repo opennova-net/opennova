@@ -25,8 +25,10 @@ class SessionStore;
 
 // Crow-backed HTTP listener. start() registers five route families, each in
 // its own private registrar (bodies in http_listener.cpp):
-//   admin REST API      — Bearer ADMIN_API_TOKEN /api/admin/* + dev host inject
-//   public JSON API     — /api/* for the web portal
+//   admin REST API      — /api/admin/* + dev host inject, for the Bearer
+//                         ADMIN_API_TOKEN or an admin-role website session
+//   public JSON API     — /api/* for the web portal, with the website's
+//                         login / logout / me session routes
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -64,8 +66,7 @@ private:
 	// order; the static/catch-all family must stay last (Crow rejects a
 	// specific route registered after the /<path> wildcard). Parameters are
 	// the config-derived strings the handlers capture by value.
-	void register_admin_api_routes(const std::string &admin_token,
-	                               const std::string &public_host);
+	void register_admin_api_routes(const std::string &public_host);
 	void register_public_api_routes();
 	void register_legacy_login_routes(const std::string &templates_dir);
 	void register_legacy_host_join_routes(

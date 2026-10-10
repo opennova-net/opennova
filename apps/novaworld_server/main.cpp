@@ -11,6 +11,7 @@
 #include "auth.h"
 #include "http_listener.h"
 #include "session_store.h"
+#include "web_session.h"
 #endif
 
 #include <net/novaworld/connection/manager.h>
@@ -164,6 +165,24 @@ int main() {
 
 	apply_seed(dbh, config.seed_dir, config.seed_dev_users);
 
+#ifdef OPENNOVA_HTTP_ENABLED
+	// The first website admin: ONNET_BOOTSTRAP_ADMIN names an existing account.
+	if (!config.bootstrap_admin.empty()) {
+		try {
+			if (promote_to_admin(dbh, config.bootstrap_admin)) {
+				std::printf("[boot] bootstrap admin: '%s' has the admin role\n",
+				            config.bootstrap_admin.c_str());
+			} else {
+				std::fprintf(stderr,
+				             "[boot] WARN bootstrap admin: no account named '%s'; nobody promoted\n",
+				             config.bootstrap_admin.c_str());
+			}
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[boot] WARN bootstrap admin: %s\n", e.what());
+		}
+	}
+#endif
+
 	// --- Connection manager (shared across listeners) ---------------------
 	ConnectionManager manager(config.heartbeat_timeout_ms);
 	manager.on_added([](const Connection &c) {
@@ -293,6 +312,16 @@ int main() {
 			} catch (const db::SqliteError &e) {
 				std::fprintf(stderr, "[sweep] WARN prune_stale_hosts: %s\n", e.what());
 			}
+#ifdef OPENNOVA_HTTP_ENABLED
+			// Website sessions past their (sliding) expiry.
+			try {
+				if (const auto pruned = prune_expired_web_sessions(dbh); pruned > 0) {
+					std::printf("[sweep] pruned %zu expired web session(s)\n", pruned);
+				}
+			} catch (const db::SqliteError &e) {
+				std::fprintf(stderr, "[sweep] WARN prune_expired_web_sessions: %s\n", e.what());
+			}
+#endif
 		}
 	}
 

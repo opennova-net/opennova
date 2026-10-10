@@ -2,9 +2,11 @@
 
 #include "auth.h"
 #include "catalog_repository.h"
+#include "http_cookies.h"
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
+#include "web_access.h"
 
 #include <net/novacrypto/pubcrypto.h>
 #include <net/novaworld/connection/manager.h>
@@ -71,53 +73,7 @@ std::string read_file_text(const std::filesystem::path &p) {
 	return os.str();
 }
 
-// ---- cookie + form helpers (Phase E.1) ---------------------------------
-
-std::map<std::string, std::string> parse_cookie_header(std::string_view header) {
-	std::map<std::string, std::string> out;
-	size_t pos = 0;
-	while (pos < header.size()) {
-		// Cookie pairs are separated by ';' OR ','. Retail's IB3 client uses
-		// commas (RFC 2965 style); splitting on ';' alone swallows every pair
-		// after the first into one value (e.g. NWHANDLE hidden inside the
-		// NWJOINSESSIONTAG value), so the joiner can't be identified at
-		// /NWJoin.dll -> empty PUBPCID -> "login information is absent (GDC024)".
-		// werkzeug (onnet) splits on both — match it.
-		while (pos < header.size() &&
-		       (header[pos] == ';' || header[pos] == ',' || header[pos] == ' ')) ++pos;
-		const auto eq = header.find('=', pos);
-		if (eq == std::string_view::npos) break;
-		const auto end = header.find_first_of(";,", eq + 1);
-		const auto val_end = (end == std::string_view::npos) ? header.size() : end;
-		std::string name(header.substr(pos, eq - pos));
-		std::string value(header.substr(eq + 1, val_end - eq - 1));
-		// Defensive: strip any leftover leading comma (onnet's lstrip(",")).
-		while (!name.empty() && name.front() == ',') name.erase(0, 1);
-		out.emplace(std::move(name), std::move(value));
-		pos = val_end + 1;
-	}
-	return out;
-}
-
-// Crow stores request headers in a case-INSENSITIVE multimap and
-// get_header_value() returns only the FIRST match. Retail's IB3 client sends
-// each cookie as its OWN "Cookie:" header, so reading a single header silently
-// drops every other cookie — at /NWJoin.dll that loses NWHANDLE, the joiner
-// can't be identified, PUBPCID comes out empty and the client reports "login
-// info invalid or expired" (host/login happen to work because the one cookie
-// Crow returns is the session tag they need). werkzeug (onnet) merges every
-// Cookie header into request.cookies; match it by concatenating them all here
-// before parsing. [verified: 3 separate Cookie: headers -> Crow exposes 1]
-std::string request_cookie_header(const crow::request &req) {
-	std::string combined;
-	const auto range = req.headers.equal_range("Cookie");
-	for (auto it = range.first; it != range.second; ++it) {
-		if (it->second.empty()) continue;
-		if (!combined.empty()) combined += "; ";
-		combined += it->second;
-	}
-	return combined;
-}
+// ---- cookie + form helpers (Phase E.1; cookie reading: http_cookies.h) ----
 
 std::string url_decode(std::string_view s) {
 	std::string out;
@@ -291,13 +247,16 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 	e["nwh"]      = u.nwh;
 	e["nwhandle"] = u.nwhandle;
 	e["account_status"] = u.account_status;
+	e["role"]     = u.role;
 	return e;
 }
 
 } // namespace
 
 struct HttpListener::Impl {
-	crow::SimpleApp app;
+	explicit Impl(db::ConnectionPool &pool) : access(app, pool) {}
+
+	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
 	// (Serving, with the port it bound) or until run() returns (Exited).
 	enum class Run { Pending, Serving, Exited };
@@ -307,11 +266,14 @@ struct HttpListener::Impl {
 	uint16_t port = 0;
 	// How often Crow runs the tick whose first call tells start() it serves.
 	static constexpr std::chrono::milliseconds kServingTick{50};
+	// Who each /api request comes from (web_access.h); declared after `app`,
+	// which it registers its routes on.
+	WebAccess access;
 };
 
 HttpListener::HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
                            SessionStore &sessions)
-	: impl_(std::make_unique<Impl>()), manager_(manager), db_pool_(db_pool),
+	: impl_(std::make_unique<Impl>(db_pool)), manager_(manager), db_pool_(db_pool),
 	  sessions_(sessions) {
 	// A bundle that did not converge stays the zero one, which every client
 	// refuses (the modexp gate), so the login leg fails rather than the service.
@@ -340,15 +302,12 @@ bool HttpListener::start(const ServerConfig &config) {
 	const std::filesystem::path web_dist = config.web_dist_dir;
 	const std::string templates_dir = config.templates_dir.string();
 	const std::string static_dir    = config.static_dir.string();
-	const std::string admin_token   = config.admin_api_token;
 	const std::string public_host   = config.public_host;
-	std::printf("[http] admin api %s\n",
-	            admin_token.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)"
-	                                : "ENABLED");
+	impl_->access.configure(config);
 
 	public_host_ = public_host; // host_url() / gsb_url(), with the port Crow binds
 
-	register_admin_api_routes(admin_token, public_host);
+	register_admin_api_routes(public_host);
 	register_public_api_routes();
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
@@ -421,37 +380,17 @@ std::string HttpListener::gsb_url() const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + "/jop_2.gsb";
 }
 
-// Admin REST API (Bearer ADMIN_API_TOKEN): server status, dev host
-// injection, connection dump, user CRUD.
-void HttpListener::register_admin_api_routes(const std::string &admin_token,
-                                             const std::string &public_host) {
+// Admin REST API: server status, dev host injection, connection dump, user
+// CRUD. Every handler opens with WebAccess::require_admin: the Bearer
+// ADMIN_API_TOKEN, or an admin-role website session (with the CSRF header on a
+// state change).
+void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	auto &app = impl_->app;
 
-	// Constant-time string compare (timing-safe). Returns false on length
-	// mismatch or any byte difference. Used by admin endpoints below.
-	auto admin_authorized = [admin_token](const crow::request &req) {
-		if (admin_token.empty()) return false;
-		std::string auth = req.get_header_value("Authorization");
-		// Expect "Bearer <token>"
-		if (auth.rfind("Bearer ", 0) != 0) return false;
-		const std::string presented = auth.substr(7);
-		if (presented.size() != admin_token.size()) return false;
-		unsigned diff = 0;
-		for (size_t i = 0; i < presented.size(); ++i) {
-			diff |= static_cast<unsigned>(presented[i])
-			      ^ static_cast<unsigned>(admin_token[i]);
-		}
-		return diff == 0;
-	};
-
 	CROW_ROUTE(app, "/api/admin/server-status").methods("GET"_method)(
-	    [this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		auto status = get_server_status(*db_conn);
 		crow::json::wvalue out;
@@ -464,13 +403,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	});
 
 	CROW_ROUTE(app, "/api/admin/server-status").methods("PUT"_method)(
-	    [this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = crow::json::load(req.body);
 		if (!body) {
 			crow::response res(400);
@@ -505,20 +440,16 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	});
 
 	// Dev/test helper: inject an active_hosts row so the GSB browser shows a
-	// joinable game without a live host process. Bearer-gated (CLOSED unless
-	// ADMIN_API_TOKEN is set), so prod is unaffected. Defaults point the host at
+	// joinable game without a live host process. Admin-gated like every route
+	// here, so prod's players never reach it. Defaults point the host at
 	// this server's own NW UDP port (127.0.0.1:64206) so a joining OpenNova
 	// client's JointOperations hello lands on our nw_udp_listener and routes to
 	// the game-runtime PN path. The row is wiped on the next boot (clear_all)
 	// and by the stale-host sweep; re-inject per run.
 	CROW_ROUTE(app, "/api/admin/hosts").methods("POST"_method)(
-	    [this, admin_authorized, public_host](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this, public_host](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = crow::json::load(req.body);
 		auto str_or = [&](const char *k, const char *fallback) {
 			return (body && body.has(k)) ? std::string(body[k].s()) : std::string(fallback);
@@ -577,14 +508,10 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		return res;
 	});
 
-	// Connection-registry debug dump. Admin-token gated.
-	CROW_ROUTE(app, "/api/admin/connections")([this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	// Connection-registry debug dump.
+	CROW_ROUTE(app, "/api/admin/connections")([this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto snapshot = manager_.registry().snapshot();
 		crow::json::wvalue out;
 		out["count"] = snapshot.size();
@@ -612,13 +539,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	// ----- Phase J: admin user CRUD ------------------------------------
 	// GET /api/admin/users — list every player (no password_hash).
 	CROW_ROUTE(app, "/api/admin/users").methods("GET"_method)(
-	    [this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		std::vector<crow::json::wvalue> arr;
 		for (const auto &u : list_users(*db_conn)) arr.push_back(user_to_json(u));
@@ -633,13 +556,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	// POST /api/admin/users — create. Body JSON:
 	//   {username, password, pcid, nwhandle, nwh? (default "1")}
 	CROW_ROUTE(app, "/api/admin/users").methods("POST"_method)(
-	    [this, admin_authorized](const crow::request &req) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = crow::json::load(req.body);
 		if (!body) {
 			crow::response res(400);
@@ -678,13 +597,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 
 	// DELETE /api/admin/users/<id>
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
-	    [this, admin_authorized](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req, int id) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		auto result = delete_user(*db_conn, id);
 		crow::response res(result.ok ? 204 :
@@ -700,15 +615,12 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 	});
 
 	// PUT /api/admin/users/<id> — partial update. Any field omitted is
-	// left untouched. password (plaintext) triggers a fresh bcrypt hash.
+	// left untouched. password (plaintext) triggers a fresh bcrypt hash; role
+	// takes "player" or "admin" (anything else is a 400 invalid_field).
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("PUT"_method)(
-	    [this, admin_authorized](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req, int id) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = crow::json::load(req.body);
 		if (!body) {
 			crow::response res(400);
@@ -723,6 +635,7 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 		if (body.has("nwh"))      p.nwh                = std::string(body["nwh"].s());
 		if (body.has("nwhandle")) p.nwhandle           = std::string(body["nwhandle"].s());
 		if (body.has("account_status")) p.account_status = std::string(body["account_status"].s());
+		if (body.has("role"))     p.role               = std::string(body["role"].s());
 		auto db_conn = db_pool_.acquire();
 		auto result = update_user(*db_conn, id, p);
 		crow::json::wvalue out;
@@ -746,13 +659,9 @@ void HttpListener::register_admin_api_routes(const std::string &admin_token,
 
 	// PUT /api/admin/users/<id>/game-access — per-game expansion/access gate.
 	CROW_ROUTE(app, "/api/admin/users/<int>/game-access").methods("PUT"_method)(
-	    [this, admin_authorized](const crow::request &req, int id) {
-		if (!admin_authorized(req)) {
-			crow::response res(401);
-			res.body = "unauthorized";
-			res.set_header("WWW-Authenticate", "Bearer realm=\"opennova-admin\"");
-			return res;
-		}
+	    [this](const crow::request &req, int id) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = crow::json::load(req.body);
 		if (!body) {
 			crow::response res(400);
@@ -857,12 +766,24 @@ void HttpListener::register_public_api_routes() {
 		return out;
 	});
 
+	// POST /api/login, POST /api/logout, GET /api/me (web_access.cpp).
+	impl_->access.register_routes();
+
 	// POST /api/register — public self-signup. No admin token needed.
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
 	// to username when omitted. Returns the new user's public record on
 	// success; 400 on conflict / missing fields, 500 on DB error.
+	// Rate-limited per client address (429 + Retry-After), checked before the
+	// body is read. No X-OpenNova-Request header is required: no session
+	// authenticates it and it starts none, so a forged cross-site
+	// registration can neither act as the visitor nor sign them in.
 	CROW_ROUTE(app, "/api/register").methods("POST"_method)(
 	    [this](const crow::request &req) {
+		const std::string ip = impl_->access.client_ip(req);
+		if (const int64_t wait = impl_->access.take_register(ip)) {
+			std::printf("[http] /api/register rate-limited for %s\n", ip.c_str());
+			return too_many_requests(wait);
+		}
 		auto body = crow::json::load(req.body);
 		if (!body) {
 			crow::response res(400);

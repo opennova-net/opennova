@@ -110,12 +110,69 @@ Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
 
+The website's sessions (next section) take three more:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ONNET_COOKIE_SECURE` | off | `1` adds `Secure` to the session cookie. Set it wherever browsers reach the site over https: prod sits behind Cloudflare's TLS while nginx and this server speak plain http, so no request header can tell (`deploy/env/app.prod.env` sets it). Leave it off for the http://localhost dev site, where a Secure cookie is never sent back. |
+| `ONNET_TRUSTED_PROXIES` | none | Comma-separated exact addresses of the reverse proxies whose `X-Real-IP` (else the last `X-Forwarded-For` hop) names the client, for the rate limits and the session's recorded address. Prod's nginx (`web/nginx.conf`, host networking) reaches the server from `127.0.0.1`. Unset, the TCP peer is the client and those headers are ignored. |
+| `ONNET_BOOTSTRAP_ADMIN` | none | An existing account's username, given the `admin` role at boot (logged; a name no account has is a warning). How the first site admin is made; later ones through `PUT /api/admin/users/<id>` `{"role":"admin"}`. |
+
+## Website sessions and roles
+
+The NovaWorld site logs players in with their NovaWorld account (`web_access.*`,
+`web_session.*`, `rate_limiter.*`; migration `0008_web_sessions_and_roles.sql`). The
+retail `NW*.dll` login is separate and unchanged.
+
+- **Routes.** `POST /api/login` `{username, password}` answers `{id, username, role}`
+  and sets the session cookie; `POST /api/logout` ends the session and clears the
+  cookie (204, also with no live session); `GET /api/me` answers `{id, username, role}`
+  or 401.
+- **Session.** 32 bytes from the OS CSPRNG, the cookie `opennova_session=<64 hex>;
+  Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax` (plus `Secure` with
+  `ONNET_COOKIE_SECURE`). `web_sessions` stores only the token's SHA-256 with the
+  account, the client address and the user agent. A session lasts 30 days from its
+  last use: a use more than a minute after the last recorded one moves the expiry
+  forward and renews the cookie on that reply (any route), so a busy session writes
+  at most once a minute. The main tick's sweep prunes expired rows; a deleted player
+  takes its sessions, and a session whose account is banned or restricted is refused
+  and deleted when next used.
+- **Login answers.** An unknown username and a wrong password get the same 401
+  `invalid_credentials`, and an unknown name still costs one bcrypt run, so neither the
+  body nor the timing enumerates accounts. Only the right password learns that an
+  account is banned (403 `account_banned`) or otherwise inactive (403
+  `account_restricted`), the game login's NWEC11 / NWEC12. A new login ends the session
+  the browser held. Maintenance mode does not close the site login (an admin turns it
+  off from there).
+- **CSRF.** Every state-changing request (any method but GET, HEAD, OPTIONS) that a
+  session cookie authenticates needs `X-OpenNova-Request: 1`, else 403
+  `csrf_header_required`. A cross-site form cannot set the header, and a cross-origin
+  script that sets one needs a CORS preflight the server never grants (it sends no
+  `Access-Control-*` header). `SameSite=Lax` already keeps the cookie off cross-site
+  POSTs; the header also covers same-site origins such as `game.<domain>`. Login and
+  logout require it as well (a forged login would sign the visitor into the forger's
+  account, a forged logout sign them out). `POST /api/register` does not: no session
+  authenticates it and it starts none.
+- **Rate limits.** In-memory token buckets (mutex-guarded, at most 10,000 keys per
+  limiter; refilled buckets are dropped and a full table evicts the least recently
+  used): login 20 at once then one every 3 s per client address, counted before the
+  body is read; login 10 then one every 30 s per username, from any address; register
+  10 then one every 3 min per address. A refusal is 429 `rate_limited` with
+  `Retry-After` in seconds.
+- **Roles and admin routes.** `players.role` is `player` (every account) or `admin`.
+  Every `/api/admin/*` route accepts the Bearer `ADMIN_API_TOKEN` (machine callers and
+  the deploy toolbox; no CSRF header) or an admin-role session (with the CSRF header on
+  a state change); a player's session gets 403 `forbidden`, no credential 401 with the
+  Bearer challenge. The role is read on every request, so a demotion takes effect on
+  the live session.
+
 ## Build layout and tests
 
 Every source but `main.cpp` builds as the static library
 `opennova_novaworld_server_core` (mirroring `opennova_serve_core`); the exe is
-`main.cpp` over it. The HTTP sources (`http_listener`, `template_engine`,
-`session_store`, `auth`, `catalog_repository`) join the core only under
+`main.cpp` over it. The HTTP sources (`http_listener`, `web_access`, `web_session`,
+`rate_limiter`, `template_engine`, `session_store`, `auth`, `catalog_repository`) join
+the core only under
 `BUILD_NOVAWORLD_HTTP`, which also defines `OPENNOVA_HTTP_ENABLED` PUBLIC so
 `main.cpp` starts the listener. The route harness, ctest
 `opennova_novaworld_server_http_routes`
@@ -139,4 +196,12 @@ SessionInit's web domain the HTTP listener's. The ctest
 `gate_listener` ([`tests/novaworld/gate_listener_test.cpp`](../../tests/novaworld/gate_listener_test.cpp))
 starts the real `GateListener` on port 0 and checks that its reported port answers
 a probe and comes back as POSTIPPORT, and that `UDPNOVAWORLD` and `STARTUPURL`
-carry the sibling ports its config names.
+carry the sibling ports its config names. The website sessions' store and the rate
+limiter also have Crow-free ctests that compile those sources straight in and run on
+every build: `web_session`
+([`tests/novaworld/web_session_test.cpp`](../../tests/novaworld/web_session_test.cpp),
+the store and the roles on a migrated in-memory database) and `rate_limiter`
+([`tests/novaworld/rate_limiter_test.cpp`](../../tests/novaworld/rate_limiter_test.cpp),
+the buckets on a hand-stepped clock and the trusted-proxy client address); the
+route harness drives the cookie, CSRF, rate-limit and admin-credential paths over
+the wire.

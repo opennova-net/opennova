@@ -119,6 +119,14 @@ drift never replaces your instance and releases the EIP.
 Set `ONNET_PUBLIC_HOST` in `deploy/env/app.prod.env` to the EIP that
 `infra apply` reports (`terraform output public_ip`).
 
+The same file sets the website login's `ONNET_COOKIE_SECURE=1` and
+`ONNET_TRUSTED_PROXIES=127.0.0.1` (apps/novaworld_server/README.md). The Secure
+session cookie needs the site served over https only: keep the web records proxied
+(`cloudflare_web_proxied`, the default) and turn on Cloudflare's "Always Use HTTPS",
+or a visitor on plain http cannot stay logged in. To make the first site admin, add
+`ONNET_BOOTSTRAP_ADMIN=<username>` there once that account exists; it promotes the
+account at every boot, so drop it again after that deploy.
+
 `infra apply` also creates the `launcher_ci` IAM user (S3 upload to the
 downloads bucket; pending retirement with the launcher, ADR 0048) and outputs its keys. Store them in the vault so the GitHub
 stack (next step) can hand them to the expansion repos:

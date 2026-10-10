@@ -3517,6 +3517,35 @@ target_include_directories(db_concurrency_test PRIVATE
 target_compile_definitions(db_concurrency_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME db_concurrency COMMAND db_concurrency_test)
 
+# The NovaWorld site's login sessions and roles (web_sessions, players.role):
+# the token kept as its SHA-256, the sliding expiry, the refusals, the prune and
+# the bootstrap promotion, on a migrated in-memory database. Compiles the
+# server's web_session.cpp and auth.cpp directly, as db_concurrency_test does,
+# so it runs on every build, not only under BUILD_NOVAWORLD_HTTP.
+add_executable(web_session_test
+    novaworld/web_session_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/web_session.cpp)
+target_link_libraries(web_session_test PRIVATE opennova_novaworld_service opennova_bcrypt)
+target_include_directories(web_session_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(web_session_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME web_session COMMAND web_session_test)
+
+# The credential routes' brake: token buckets on a hand-stepped clock and the
+# trusted-proxy client address. The server's rate_limiter.cpp compiled in
+# directly, so it runs on every build.
+add_executable(rate_limiter_test
+    novaworld/rate_limiter_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/rate_limiter.cpp)
+target_link_libraries(rate_limiter_test PRIVATE opennova_io)
+target_compile_features(rate_limiter_test PRIVATE cxx_std_17)
+target_include_directories(rate_limiter_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME rate_limiter COMMAND rate_limiter_test)
+
 # Phase A — ClientHello/ClientAuth serializer roundtrip
 add_executable(session_hello_roundtrip_test novaworld/session_hello_roundtrip_test.cpp)
 target_link_libraries(session_hello_roundtrip_test PRIVATE opennova_net)

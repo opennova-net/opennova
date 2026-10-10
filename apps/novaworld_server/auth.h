@@ -16,6 +16,7 @@ struct UserRecord {
 	std::string nwh;
 	std::string nwhandle;
 	std::string account_status = "active";
+	std::string role = "player"; // players.role: "player" or "admin" (migration 0008)
 };
 
 struct GameAccessRecord {
@@ -32,7 +33,7 @@ struct ServerStatusRecord {
 
 // Result of a CRUD mutation. ok=true means success; on failure,
 // `error_code` is one of: "username_exists", "pcid_exists",
-// "missing_field", "not_found", "db_error". Used as the body
+// "missing_field", "invalid_field", "not_found", "db_error". Used as the body
 // foundation for /api/admin/users.* HTTP responses.
 struct MutationResult {
 	bool        ok = false;
@@ -43,7 +44,10 @@ struct MutationResult {
 
 // Look up `username` and verify `password` against the stored
 // `password_hash`. Returns the record on success, nullopt on missing
-// user / wrong password / DB error.
+// user / wrong password / DB error. A missing user still costs one bcrypt
+// run (against a hash no password matches), so the answer's timing does not
+// tell an unknown username from a wrong password. The account's status is the
+// caller's to check: a banned account with the right password is returned.
 //
 // `password_hash` should be a bcrypt $2a$/$2b$ string (32+ chars). For
 // dev convenience, plaintext password_hash is also accepted but logs a
@@ -112,9 +116,15 @@ struct UpdateUserParams {
 	std::optional<std::string> nwh;
 	std::optional<std::string> nwhandle;
 	std::optional<std::string> account_status;
+	std::optional<std::string> role; // "player" or "admin", else invalid_field
 };
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p);
+
+// ONNET_BOOTSTRAP_ADMIN: gives the account named `username` the admin role
+// (main() calls it at boot). False when no account has that username. Throws
+// db::SqliteError on a database failure.
+bool promote_to_admin(opennova::db::Database &db, const std::string &username);
 
 struct UpdateGameAccessParams {
 	std::string game_slug;
