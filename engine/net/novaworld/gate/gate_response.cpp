@@ -1,6 +1,7 @@
 #include <net/novaworld/gate_response.h>
 
 #include <net/napi/literal.h>
+#include <net/napi/session.h> // tokenize_quoted (String_TokenizeQuotedToArray)
 
 #include <cctype>
 #include <cstdlib>
@@ -19,47 +20,6 @@ bool ieq(std::string_view a, std::string_view b) { return opennova::strutil::ieq
 
 bool is_line_break(char c) { return c == '\n' || c == '\r'; }
 bool is_ws(char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; }
-
-// Quote-aware tokenizer, mirroring [orig: String_TokenizeQuotedToArray @
-// 0x616d60]: whitespace separates tokens OUTSIDE quotes; a `"` toggles
-// in-quote state and is NOT copied (so surrounding quotes are stripped);
-// whitespace inside quotes stays part of the token; every other char
-// (including `\`, which retail copies as-is) is copied literally. A token
-// begins at the first non-whitespace char — an opening quote starts a
-// (possibly empty) token, so `""` yields one empty token.
-//
-// The real gate quotes its VAR lines (`VAR "POSTIPADDRESS" "127.0.0.1"`); a
-// whitespace-only split left the quotes attached to the key (`"POSTIPADDRESS"`),
-// so no key matched and every real-gate reply was rejected as "bad gate
-// response". Tokens are owned (retail copies into a buffer too) because
-// quote-stripped tokens are not contiguous in the source line.
-std::vector<std::string> tokenize_line(std::string_view line) {
-	std::vector<std::string> tokens;
-	std::string cur;
-	bool in_quote = false;
-	bool in_token = false;
-	for (const char c : line) {
-		if (!is_ws(c) || in_quote) {
-			if (!in_token) {
-				in_token = true;
-				cur.clear();
-			}
-			if (c == '"') {
-				in_quote = !in_quote;
-			} else {
-				cur.push_back(c);
-			}
-		} else if (in_token) {
-			tokens.push_back(std::move(cur));
-			cur.clear();
-			in_token = false;
-		}
-	}
-	if (in_token) {
-		tokens.push_back(std::move(cur));
-	}
-	return tokens;
-}
 
 bool parse_ipv4(std::string_view s, std::array<uint8_t, 4> &out) {
 	std::array<uint8_t, 4> parts{0, 0, 0, 0};
@@ -132,7 +92,14 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		// Skip over line break(s).
 		while (i < body.size() && is_line_break(body[i])) ++i;
 
-		const auto tokens = tokenize_line(line);
+		// The retail quote-aware tokenizer (napi `tokenize_quoted`): whitespace (the CRT
+		// isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252, 0xA0 included;
+		// D-NET-381) splits outside quotes, a `"` toggles and is dropped, so the quotes the
+		// real gate wraps around every key and value (`VAR "POSTIPADDRESS" "127.0.0.1"`)
+		// are stripped, and `""` is one empty token.
+		// [orig: CNapiGateManager_ProcessResponse @0x4cf0b7 -> CNapiFileReader_ReadAndTokenizeLine
+		//  @0x6336E0 -> String_TokenizeQuotedToArray @0x616d60 (the call @0x633758)]
+		const auto tokens = tokenize_quoted(line);
 		if (tokens.size() < 3 || !ieq(tokens[0], LINE_TAG)) {
 			continue; // matches `v7 >= 3 && str1 == "VAR"` gate in the binary
 		}

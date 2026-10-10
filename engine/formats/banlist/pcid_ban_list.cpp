@@ -1,6 +1,7 @@
 // banlist.txt (pcid_ban_list.h).
 #include <formats/banlist/pcid_ban_list.h>
 
+#include <base/io/cp1252.h> // cp1252_isspace
 #include <base/io/crt_ftol.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
@@ -11,9 +12,14 @@ namespace opennova::banlist {
 
 namespace {
 
-// The C locale's isspace [orig: isspace @0x76B964].
+// The CRT isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252: the six C-locale spaces
+// plus 0xA0 (docs/net/novaworld-net-re.md D-NET-381, D-NET-382). This tokenizer passes the
+// byte SIGN-extended, and the CRT's ctype table mirrors its 128..254 rows below index 0 for
+// that, so 0xA0 (-96) is a space here too; 0xFF (-1) reads the EOF row, which no set marks.
+// [orig: String_TokenizeQuoted @0x4DB000 — `movsx` @0x4DB042, isspace @0x4DB046 ->
+//  @0x76B964; CRT_init_ctype's mirror copy @0x784C59]
 bool is_space(char c) {
-	return c == ' ' || (c >= '\t' && c <= '\r');
+	return cp1252_isspace(static_cast<uint8_t>(c));
 }
 
 // String_CompareCaseInsensitive_0: equal under toupper, both ends together.

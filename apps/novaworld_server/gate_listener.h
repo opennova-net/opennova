@@ -1,13 +1,16 @@
 #pragma once
 
+#include <net/novaworld/db/sqlite.h>
+#include <net_sockets.h>
+
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <thread>
 
 namespace opennova {
 class UnknownTracker;
-namespace db { class Database; }
 }
 
 namespace opennova::novaworld_server {
@@ -39,20 +42,28 @@ public:
 	// recorded (deduped) for /api/unknowns. Null is safe.
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
-	// Optional DB handle. When set, a received host-status blob refreshes the
-	// active_hosts row that owns its HostKey (hostdb::apply_status_blob).
-	void set_database(opennova::db::Database *db) { db_ = db; }
+	// Optional DB pool. When set, start() leases one connection and hands it
+	// to the receive thread for its lifetime, and a received host-status blob
+	// refreshes the active_hosts row that owns its HostKey on it
+	// (hostdb::apply_status_blob).
+	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
-	// Bind the UDP socket and spawn the receive loop. Returns false if
-	// the socket couldn't be bound (port in use, perms, etc.) — main()
-	// should treat that as fatal.
+	// Bind the UDP socket, lease the thread's DB connection and spawn the
+	// receive loop, which owns both until stop(). Returns false if the socket
+	// couldn't be bound (port in use, perms, etc.) or the connection couldn't
+	// be opened — main() should treat that as fatal.
 	bool start(const ServerConfig &config);
 
 	// Signal stop and join the worker thread. Idempotent.
 	void stop();
 
+	// The port start() bound and the receive loop serves (the OS's pick when
+	// the configured port is 0); the gate response advertises it as POSTIPPORT.
+	uint16_t bound_port() const { return bound_port_; }
+
 private:
-	void run_loop();
+	void run_loop(opennova::net::ScopedSocket socket,
+	              std::optional<db::ConnectionPool::Lease> db_conn);
 
 	std::thread worker_;
 	std::atomic<bool> running_{false};
@@ -75,7 +86,7 @@ private:
 	int         glsvss_rims_  = 0;
 	int         glsvss_agrms_ = 0;
 	opennova::UnknownTracker *tracker_ = nullptr;
-	opennova::db::Database *db_ = nullptr;
+	opennova::db::ConnectionPool *db_pool_ = nullptr;
 };
 
 } // namespace opennova::novaworld_server

@@ -63,6 +63,18 @@ target_compile_features(sha256_test PRIVATE cxx_std_17)
 target_include_directories(sha256_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME sha256 COMMAND sha256_test)
 
+# The OS CSPRNG (base/os_random): buffers of many sizes filled to the byte, draws that differ,
+# no all-zero fill, the nonzero draw, make_uuid_v4's spelling with no repeat, the OsRandom
+# generator under <random>, and 32 threads drawing at once with
+# no zero runs and no repeats past the birthday bound (the RDSEED failure std::random_device
+# shows under libstdc++ on a CPU with AMD's RDSEED erratum).
+find_package(Threads REQUIRED)
+add_executable(os_random_test os_random/os_random_test.cpp)
+target_link_libraries(os_random_test PRIVATE opennova_base Threads::Threads)
+target_compile_features(os_random_test PRIVATE cxx_std_17)
+target_include_directories(os_random_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME os_random COMMAND os_random_test)
+
 # Roundtrip test
 add_executable(threedi_roundtrip_test threedi/roundtrip_test.cpp)
 target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
@@ -805,6 +817,13 @@ if(NOT MSVC)
 endif()
 add_test(NAME sbf_encode COMMAND sbf_encode_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(sbf_bank_test sbf/sbf_bank_test.cpp)
+target_link_libraries(sbf_bank_test PRIVATE opennova_formats)
+target_include_directories(sbf_bank_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(sbf_bank_test PRIVATE
+    SBF_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/sbf")
+add_test(NAME sbf_bank COMMAND sbf_bank_test)
 
 add_executable(sbf_roundtrip_test sbf/sbf_roundtrip_test.cpp)
 target_link_libraries(sbf_roundtrip_test PRIVATE opennova_formats)
@@ -3327,6 +3346,20 @@ target_link_libraries(gate_server_loopback_test PRIVATE opennova_net opennova_ap
 target_include_directories(gate_server_loopback_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gate_server_loopback COMMAND gate_server_loopback_test)
 
+# The real GateListener on port 0 over loopback UDP: the port start() reports is
+# the one that answers a probe and the one the reply advertises as POSTIPPORT,
+# and a second listener on that port fails start() (same listener-source recipe
+# as the NW UDP e2e tests below).
+add_executable(gate_listener_test
+    novaworld/gate_listener_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/gate_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(gate_listener_test PRIVATE opennova_novaworld_service opennova_app_common)
+target_include_directories(gate_listener_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME gate_listener COMMAND gate_listener_test)
+
 add_executable(gsb_roundtrip_test novaworld/gsb_roundtrip_test.cpp)
 target_link_libraries(gsb_roundtrip_test PRIVATE opennova_net)
 target_include_directories(gsb_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3431,6 +3464,22 @@ add_executable(db_sqlite_test novaworld/db_sqlite_test.cpp)
 target_link_libraries(db_sqlite_test PRIVATE opennova_novaworld_service)
 target_include_directories(db_sqlite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME db_sqlite COMMAND db_sqlite_test)
+
+# One connection per thread under load (issue #981): registrations race host
+# writes and roster readers on one WAL file, each thread on its own pooled
+# connection. Compiles the server's auth.cpp (create_user) directly: it joins
+# opennova_novaworld_server_core only under BUILD_NOVAWORLD_HTTP, and this test
+# runs on every build.
+add_executable(db_concurrency_test
+    novaworld/db_concurrency_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp)
+target_link_libraries(db_concurrency_test
+    PRIVATE opennova_novaworld_service opennova_bcrypt Threads::Threads)
+target_include_directories(db_concurrency_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(db_concurrency_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME db_concurrency COMMAND db_concurrency_test)
 
 # Phase A — ClientHello/ClientAuth serializer roundtrip
 add_executable(session_hello_roundtrip_test novaworld/session_hello_roundtrip_test.cpp)
@@ -3710,8 +3759,8 @@ target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CM
 add_test(NAME backend_schema COMMAND backend_schema_test)
 
 # The service's HTTP route harness (hosted servers, PR A): the Crow listener from
-# opennova_novaworld_server_core on a loopback port over an in-memory DB under the
-# backend migrations, driven with apps/common's http_exchange. Only with the
+# opennova_novaworld_server_core on a loopback port over a pooled SQLite file under
+# the backend migrations, driven with apps/common's http_exchange. Only with the
 # HTTP layer (BUILD_NOVAWORLD_HTTP); the service edge is direct for the
 # sqlite-containment lint.
 if(BUILD_NOVAWORLD_HTTP)
@@ -3721,6 +3770,27 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(opennova_novaworld_server_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(opennova_novaworld_server_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME opennova_novaworld_server_http_routes COMMAND opennova_novaworld_server_http_routes_test)
+    # The concurrent case gives each request up to 30 s; this bounds a hang
+    # below ctest's 1500 s default.
+    set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 120)
+endif()
+
+# The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s
+# orderly stop (exit 0, listeners in order, the WAL closed) with the HTTP layer
+# on or off; with it on, past Crow and a held-open request. POSIX only (fork,
+# kill); TIMEOUT bounds it should the child hang, and the child dies with it.
+if(UNIX)
+    add_executable(opennova_novaworld_server_signal_shutdown_test
+        novaworld/server_signal_shutdown_test.cpp)
+    target_link_libraries(opennova_novaworld_server_signal_shutdown_test PRIVATE opennova_app_common)
+    target_include_directories(opennova_novaworld_server_signal_shutdown_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(opennova_novaworld_server_signal_shutdown_test PRIVATE
+        OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+        $<$<BOOL:${BUILD_NOVAWORLD_HTTP}>:OPENNOVA_HTTP_ENABLED>)
+    add_dependencies(opennova_novaworld_server_signal_shutdown_test opennova_novaworld_server)
+    add_test(NAME opennova_novaworld_server_signal_shutdown
+        COMMAND opennova_novaworld_server_signal_shutdown_test $<TARGET_FILE:opennova_novaworld_server>)
+    set_tests_properties(opennova_novaworld_server_signal_shutdown PROPERTIES TIMEOUT 120)
 endif()
 
 # Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
@@ -4278,6 +4348,11 @@ add_test(NAME serve_registration_parity COMMAND serve_registration_parity_test)
 add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)
 target_link_libraries(nwu_demux_test PRIVATE opennova_net)
 add_test(NAME nwu_demux COMMAND nwu_demux_test)
+# The NWU lobby driver's own draws (no Environment::random_u32, as opennova-nw-lister runs):
+# 32 sessions opened on 32 threads at once share no client index or key.
+add_executable(nwu_lobby_draws_test novaworld/nwu_lobby_draws_test.cpp)
+target_link_libraries(nwu_lobby_draws_test PRIVATE opennova_net Threads::Threads)
+add_test(NAME nwu_lobby_draws COMMAND nwu_lobby_draws_test)
 
 # opennova-serve's status console (ADR 0051 PR7): the page as text over a synthetic feed (a
 # text snapshot) and its print rule; the client-less host's CHAT ring and console chat; the

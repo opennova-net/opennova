@@ -93,6 +93,31 @@ int main() {
 			expect(remove(edit, "B C") && edit.entries.size() == 3, "the UNBAN's unlink");
 		}
 	}
+	// banlist.txt: String_TokenizeQuoted's white space is the CRT isspace under the game's ".ACP"
+	// LC_CTYPE, pinned to cp1252: the six C-locale spaces split, and so does 0xA0 (the no-break
+	// space), which a quoted run keeps (docs/net/novaworld-net-re.md D-NET-381).
+	// [orig: String_TokenizeQuoted @0x4DB000 — isspace @0x4DB046; System_InitTimerAndLocale
+	//  @0x762A6E]
+	{
+		for (const char space : std::string(" \t\n\v\f\r")) {
+			const std::vector<std::string> tokens = tokenize_quoted(std::string("a") + space + "b");
+			expect(tokens.size() == 2 && tokens[0] == "a" && tokens[1] == "b", "each C-locale space splits");
+		}
+		const std::vector<std::string> nbsp = tokenize_quoted("a\xA0" "b");
+		expect(nbsp.size() == 2 && nbsp[0] == "a" && nbsp[1] == "b", "0xA0 splits a token");
+		const std::vector<std::string> quoted = tokenize_quoted("\"a\xA0" "b\"");
+		expect(quoted.size() == 1 && quoted[0] == "a\xA0" "b", "a quoted 0xA0 stays in its token");
+		const std::vector<std::string> high = tokenize_quoted("a\x85\xFF" "b");
+		expect(high.size() == 1 && high[0] == "a\x85\xFF" "b", "no other high byte splits");
+		const std::string text = "VERSION\xA0" "1\nBAN\xA0" "A-1\xA0" "Bob\nBAN \"A-2\xA0" "x\" \"N\xA0" "M\"\n";
+		const auto list = parse_pcid_list(text.data(), text.size());
+		expect(list.has_value() && list->entries.size() == 2, "0xA0 separates the keywords and their tokens");
+		if (list.has_value() && list->entries.size() == 2) {
+			expect(list->entries[0].pcid == "A-1" && list->entries[0].name == "Bob", "an unquoted 0xA0 splits");
+			expect(list->entries[1].pcid == "A-2\xA0" "x" && list->entries[1].name == "N\xA0" "M",
+			       "a quoted 0xA0 is kept");
+		}
+	}
 	// banned.txt: the fixture round-trip.
 	{
 		const std::string text = read_fixture("synth_banned.txt");

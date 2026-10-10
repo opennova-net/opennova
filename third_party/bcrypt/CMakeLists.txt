@@ -4,9 +4,8 @@
 # We only build the verify-side bits: bcrypt_hashpass + Blowfish +
 # timingsafe_bcmp. bcrypt_gensalt is intentionally absent — it requires
 # arc4random_buf which doesn't exist on Windows. Hash generation for new
-# users is delegated to the standalone tools/gen-bcrypt helper or done
-# server-side via libs/novacrypto's bcrypt::hashpw wrapper which uses
-# std::random_device for the salt. (See libs/novacrypto/bcrypt.cpp.)
+# users is done server-side by hash_password (apps/novaworld_server/auth.cpp),
+# which draws the salt from the OS CSPRNG (engine/base/os_random).
 
 add_library(opennova_bcrypt STATIC
     bcrypt.c

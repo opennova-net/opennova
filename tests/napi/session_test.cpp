@@ -162,6 +162,25 @@ bool check_server_command_parse() {
 	if (!expect(tokens.size() == 4 && tokens[0] == "PuntPlayerByName" && tokens[1] == "Some Guy" &&
 	                    tokens[2] == "extra" && tokens[3] == "arg",
 	            "quotes group one token, whitespace splits, quotes are dropped")) return false;
+	// The whitespace is the CRT isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252: the
+	// six C-locale spaces and 0xA0 (the no-break space) split outside quotes, and no other byte
+	// does (D-NET-381). [orig: String_TokenizeQuotedToArray @0x616d60 — isspace @0x616da6;
+	// System_InitTimerAndLocale @0x762a6e]
+	for (int b = 1; b < 256; ++b) {
+		if (b == '"') continue; // the quote toggles; it never splits
+		const std::string text = std::string("a") + static_cast<char>(b) + "b";
+		const auto split = tokenize_quoted(text);
+		const bool space = b == ' ' || (b >= '\t' && b <= '\r') || b == 0xA0;
+		const bool ok = space ? (split.size() == 2 && split[0] == "a" && split[1] == "b")
+		                      : (split.size() == 1 && split[0] == text);
+		if (!expect(ok, "exactly the six C-locale spaces and 0xA0 split a token")) {
+			std::fprintf(stderr, "  byte 0x%02X\n", b);
+			return false;
+		}
+	}
+	const auto nbsp_quoted = tokenize_quoted("x \"Some\xA0Guy\" y");
+	if (!expect(nbsp_quoted.size() == 3 && nbsp_quoted[1] == "Some\xA0Guy",
+	            "a quoted 0xA0 stays in its token")) return false;
 	auto make = [](const std::string &cmd) {
 		NapiMessage m;
 		m.name = "ServerCommand";
@@ -185,6 +204,13 @@ bool check_server_command_parse() {
 	            "TextChatServer takes the quoted text")) return false;
 	if (!expect(!parse_server_command(make("TextChatServerX hi"), out),
 	            "whole-token verbs do not prefix-match")) return false;
+	if (!expect(parse_server_command(make("PuntPlayerByName Some\xA0Guy"), out) &&
+	                    out.verb == ServerCommandVerb::PuntPlayer && out.args.size() == 2 &&
+	                    out.args[0] == "Some" && out.args[1] == "Guy",
+	            "an unquoted 0xA0 splits the Cmd's tokens, as a cp1252 host's reader does")) return false;
+	if (!expect(parse_server_command(make("SetMPReset\xA0" "3"), out) && out.verb == ServerCommandVerb::SetMPReset &&
+	                    out.args.size() == 1 && out.args[0] == "3",
+	            "0xA0 ends the verb token too")) return false;
 	if (!expect(parse_server_command(make("DisarmPlayerByPCID guy"), out) &&
 	                    out.verb == ServerCommandVerb::DisarmPlayer && out.target == ServerCommandTarget::ByPCID,
 	            "DisarmPlayerByPCID")) return false;
@@ -299,7 +325,7 @@ bool check_server_statement_builders() {
 	                    "PuntPlayerByIndex 42",
 	            "a plain arg is not quoted")) return false;
 	// A byte >= 0x80 is quoted: the host's tokenizer runs isspace in its ANSI code page (0xA0 is a
-	// space on cp1252), and a quoted run is copied as it is.
+	// space on cp1252, as in our reader), and a quoted run is copied as it is.
 	const std::vector<std::string> high = {"Some\xA0Guy", "caf\xE9"};
 	const std::string high_text =
 		server_command_text(ServerCommandVerb::TextChatPlayer, ServerCommandTarget::ByName, high);
