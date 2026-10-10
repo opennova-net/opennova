@@ -26,6 +26,7 @@
 #include <runtime/replication/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
 
 #include <base/gameprofile/game_type.h>       // is_waypoint_family / is_stock_coop (§5.32, D-NET-203/205)
+#include <base/io/crt_ftol.h>                 // retail_atol (the VERSIONCRCSTRING compare)
 #include <base/io/strutil.h>                  // iequals (the JOIN body's CD field)
 #include <net/npwire/flat_tlv.h>        // the C2S 0x00 JOIN body walk (the CD identity blob)
 #include <net/npwire/wire_handle.h>     // is_batch_end_sentinel / kInvalid (the wire handle home)
@@ -43,7 +44,6 @@
 #include <runtime/world/world.h>  // world::World::registry (the authoritative roster, §6.9)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
 #include <runtime/world/zone_chain.h>    // zone_chain_frontier_zone — the 0x1E ev-0x3A deploy hint
-
 #include <runtime/world/vehicle_mount.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
@@ -261,7 +261,7 @@ uint32_t validate_join_request(
 	// [orig: Server_ValidatePlayerJoinRequest @0x5122fc..0x512349]
 	if (expansion != config.expansion) return 47;
 	if (!config.expansion.empty() &&
-	    static_cast<int32_t>(std::strtol(version_crc.c_str(), nullptr, 10)) !=
+	    io::retail_atol(version_crc.c_str()) != // the CRT atol @0x512327 (D-NET-384)
 	            config.expansion_version_checksum) return 48;
 	return 0;
 }

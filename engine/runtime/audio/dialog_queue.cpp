@@ -6,6 +6,7 @@
 #include <cstring>
 #include <utility>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 namespace opennova::audio {
@@ -99,11 +100,13 @@ std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &li
 		return text->text;
 	// Else the flat entry the sequence's suffix after its last '_' names: the walk tests the
 	// character before the cursor from the string's last character back [orig: @0x44ddec..0x44de3c;
-	// IniSection_GetEntryByIndex @0x75D130].
+	// IniSection_GetEntryByIndex @0x75D130]. The suffix is the CRT atol (io::retail_atol; D-NET-384)
+	// [orig: _atol @0x44de21], its result compared unsigned against the entry count [orig: `cmp eax,
+	// [ecx+0Ch]; jnb` @0x75D13F], so a negative index finds nothing.
 	const std::string &sequence = line.sequence;
 	for (size_t cursor = sequence.size() > 0 ? sequence.size() - 1 : 0; cursor >= 1; --cursor) {
 		if (sequence[cursor - 1] != '_') continue;
-		const unsigned long index = std::strtoul(sequence.c_str() + cursor, nullptr, 10);
+		const uint32_t index = static_cast<uint32_t>(io::retail_atol(sequence.c_str() + cursor));
 		if (index < mission_text->entries.size()) return mission_text->entries[index].text;
 		break;
 	}

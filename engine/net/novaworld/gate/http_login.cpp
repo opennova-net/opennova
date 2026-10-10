@@ -3,6 +3,7 @@
 #include <net/novacrypto/epask.h>
 #include <net/novacrypto/url_cipher.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 
 #include <cstdio>
@@ -11,9 +12,11 @@
 namespace opennova {
 
 std::string subnet_key(const std::string &host) {
-	// [orig: Network_TruncateIPToSubnet @ 0x62dfe0] truncate only when the host
-	// is a valid dotted-decimal IPv4 (the retail parse gate); then keep the
-	// first two octets. Anything else (a DNS name) is returned unchanged.
+	// Ours truncates only when the host is a valid dotted-decimal IPv4, keeping the
+	// first two octets, and returns anything else (a DNS name) unchanged. Retail's
+	// branch is the opposite: it returns a host its IPv4 parse accepts whole and keeps
+	// any other host's last two dot-labels [orig: Network_TruncateIPToSubnet @ 0x62dfe0
+	// — the `jnz` @0x62dfff] (docs/net/novaworld-net-re.md D-NET-390, open).
 	int a = 0, b = 0, c = 0, d = 0;
 	char extra = 0;
 	// Reject embedded whitespace/garbage: require exactly four octets and no
@@ -127,7 +130,7 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 			else if (key == "NP") out.np = value;
 			else if (key == "BK") out.bk = value;
 			// [orig: LN `atol` @0x54e33e; GS copied @0x54e38a]
-			else if (key == "LN") out.ln = static_cast<int>(std::atol(value.c_str()));
+			else if (key == "LN") out.ln = io::retail_atol(value.c_str());
 			else if (key == "GS") out.gs = value;
 		}
 		if (amp == std::string::npos) break;
@@ -151,7 +154,7 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 	//  atol(decoded CK) @0x569b8e]
 	if (!out.ck.empty()) {
 		const std::string decoded_ck = url_cipher_decode(out.ck, URL_CIPHER_KEY_CK);
-		out.app_id = std::to_string(std::atol(decoded_ck.c_str()));
+		out.app_id = std::to_string(io::retail_atol(decoded_ck.c_str()));
 		// Lifecycle trace (kInfo -> MCP log ring): the CK -> APPID derivation.
 		opennova::io::logf(opennova::io::LogLevel::kInfo,
 				"joi: CK='%s' decoded='%s' APPID='%s' host=%s:%s",

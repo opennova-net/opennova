@@ -99,6 +99,17 @@ int main() {
 		expect(parse_rights("  7f") == 0x7F && parse_rights("+40") == 0x40 && parse_rights("0x") == 0 &&
 		               parse_rights("80000000") == 0x80000000u && parse_rights("") == 0,
 		       "strtoul's edges");
+		// An overflow stores ULONG_MAX and a minus still negates it (strtoxl @0x76B282, then
+		// @0x76B2A1..0x76B2A7; msvcrt's strtoul agrees), so a negative overflow grants bit 0
+		// alone; the leading white space is the .ACP locale's, 0xA0 included (D-NET-384).
+		expect(parse_rights("FFFFFFFFF") == 0xFFFFFFFFu && parse_rights("100000000") == 0xFFFFFFFFu,
+		       "a positive overflow saturates to every right");
+		expect(parse_rights("-FFFFFFFFF") == 1u && parse_rights("-FFFFFFFF") == 1u &&
+		               parse_rights("-1") == 0xFFFFFFFFu && parse_rights("-0x10") == 0xFFFFFFF0u,
+		       "a minus negates the stored value, a saturated one too (D-NET-392)");
+		expect(parse_rights("\xA0" "7f") == 0x7F && parse_rights("\xA0\t-1") == 0xFFFFFFFFu &&
+		               parse_rights("\x85" "7f") == 0,
+		       "the .ACP locale's leading white space (D-NET-384)");
 	}
 	if (g_failures == 0) {
 		std::printf("admin_cfg: OK\n");

@@ -5,6 +5,9 @@
 namespace opennova {
 namespace {
 
+// The process locale's classes, where retail's decimal arm calls the CRT _isdigit /
+// _isalpha under the game's ".ACP" LC_CTYPE [orig: NapiScript_ParseDecimalIntegerB
+// @0x62da61 / @0x62da97] (docs/net/novaworld-net-re.md D-NET-391, open).
 bool is_alpha(char c) {
 	return std::isalpha(static_cast<unsigned char>(c)) != 0;
 }
