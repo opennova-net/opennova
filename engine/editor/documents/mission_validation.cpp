@@ -68,6 +68,9 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	// A path the document holds that no save can write (D-MIS-6): the original editor lays a path out from
 	// its waypoint markers alone, each carrying one path and one place, so the file would hold another.
 	{ MissionFinding::Unserializable, { "mission.unserializable", FindingFix::None, nullptr, true } },
+	// A path whose record names other stops than its waypoint markers carry, read (D-MIS-6): a save lays the
+	// record out from the markers, changing the route the game walks; a warning, nothing to fix.
+	{ MissionFinding::PathRebuilt, listed_code("mission.path_rebuilt") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MissionFinding::kCount),
               "every MissionFinding has exactly one row");
@@ -76,10 +79,12 @@ static_assert(finding_entries_well_formed(kFindingEntries),
 constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::Missions);
 static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
 
-// The severity of a source finding: the events' runs block (an error); a rewrite that differs and
-// a layout the writer lays out again are what Save does (an info each).
+// The severity of a source finding: the events' runs block (an error); a path a save lays out again changes
+// the route the game walks (a warning); a rewrite that differs and a layout the writer lays out again are
+// what Save does (an info each).
 DiagnosticSeverity source_severity(MissionFinding code) {
-	return code == MissionFinding::InvalidInput ? DiagnosticSeverity::Error : DiagnosticSeverity::Info;
+	if (code == MissionFinding::InvalidInput) return DiagnosticSeverity::Error;
+	return code == MissionFinding::PathRebuilt ? DiagnosticSeverity::Warning : DiagnosticSeverity::Info;
 }
 
 // The pools' limits, past which the game warns (fatal if dismissed) and loads on [orig:

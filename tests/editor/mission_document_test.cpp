@@ -470,17 +470,140 @@ int test_edits() {
 		bms::File saved;
 		const std::string written = bytes_of(*counted);
 		TEST_EXPECT(bms::parse(reinterpret_cast<const uint8_t *>(written.data()), written.size(), saved, message));
+		// The stops left keep the numbers their markers hold (the original editor's writer copies them).
 		TEST_EXPECT(saved.waypoint_records[1].marker_count == 33 && saved.waypoint_records[1].waypoint_numbers.size() == 32 &&
-		            saved.markers[size_t(on_path[0])].waypoint_id == 0 && saved.markers[size_t(on_path[1])].wp_number == 0 &&
+		            saved.markers[size_t(on_path[0])].waypoint_id == 0 && saved.markers[size_t(on_path[1])].wp_number == 1 &&
 		            mission::waypoint_path_markers(saved, 1).size() == 33);
-		// A waypoint marker's path and place are its stops': read so, and never set on the marker.
+		// A waypoint marker's path and number are its stops': read so, and never set on the marker.
 		const NodeAddress second = row_at(*counted, MissionKind::Marker, size_t(on_path[1]));
 		Value place;
-		TEST_EXPECT(counted->get(second, "wp_number", place) && std::get<int64_t>(place) == 0);
+		TEST_EXPECT(counted->get(second, "wp_number", place) && std::get<int64_t>(place) == 1);
 		TEST_EXPECT(!counted->apply(edit_of(EditOperation::Set, second, "wp_number", int64_t(5)), error) &&
 		            error.message.find("path's stops") != std::string::npos);
 	}
 	std::printf("edits: bands, ids, the cascade of a marker's stops, an event's namers, a path's stops past 32\n");
+	return 0;
+}
+
+// A waypoint marker's number on its path is a sort key the original editor's writer copies (D-MIS-6,
+// stop_numbers): a save keeps every number while the stops stand in the order the numbers sort to, a tie
+// included; a stop an edit put in takes the number after the kept stop before it, a moved stop one that
+// sorts where it went, and only where there is no room is a kept stop renumbered. A waypoint marker copied
+// (a Duplicate, a Paste) stays on its path beside its original, as the original editor's copy does.
+int test_stop_numbers() {
+	std::string message;
+	Diagnostic error;
+	bms::File file;
+	const std::vector<uint8_t> bytes = fixture_bytes();
+	TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message));
+	const std::vector<int> on_path = mission::waypoint_path_markers(file, 1);
+	TEST_EXPECT(on_path.size() == 4);
+	// Keys, not places: 10, 20, 20 (a tie, by the markers' place in the file) and 30.
+	const int32_t keys[4] = {10, 20, 20, 30};
+	for (size_t i = 0; i < 4; ++i) file.markers[size_t(on_path[i])].wp_number = keys[i];
+	TEST_EXPECT(on_path[1] < on_path[2]);
+	std::vector<uint8_t> keyed;
+	TEST_EXPECT(bms::write(file, keyed, message));
+	std::unique_ptr<Document> document = open(keyed, "keyed.bms");
+	TEST_EXPECT(document && !document->blocked() && as_mission(*document).issue_codes().empty());
+	const std::string unedited(keyed.begin(), keyed.end());
+	TEST_EXPECT(bytes_of(*document) == unedited);
+	const NodeAddress path = row_at(*document, MissionKind::WaypointPath, 1);
+	const auto numbers_saved = [&](const Document &d) {
+		bms::File saved;
+		std::string written = bytes_of(d), why;
+		std::vector<int32_t> out;
+		if (!bms::parse(reinterpret_cast<const uint8_t *>(written.data()), written.size(), saved, why)) return out;
+		for (const int marker : mission::waypoint_path_markers(saved, 1)) out.push_back(saved.markers[size_t(marker)].wp_number);
+		return out;
+	};
+	const auto stops_of = [&](const Document &d) {
+		return static_cast<const PathRow &>(*d.row(row_at(d, MissionKind::WaypointPath, 1).row)).native.stops;
+	};
+	// A stop put in after the first: its new marker takes 11, every other keeps its number.
+	{
+		const size_t made = as_mission(*document).rows_of(MissionKind::Marker).size();
+		std::vector<Edit> edits;
+		Edit add = edit_of(EditOperation::Add, {0, k(MissionKind::Marker), 0}, "item",
+		                   int64_t(mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT));
+		edits.push_back(add);
+		Edit stop = edit_of(EditOperation::Add, {path.row, k(MissionKind::Stop), 0}, "marker", int64_t(made));
+		stop.position = 1;
+		edits.push_back(stop);
+		TEST_EXPECT(document->apply(edits, error));
+		TEST_EXPECT(numbers_saved(*document) == (std::vector<int32_t>{10, 11, 20, 20, 30}));
+		Value number;
+		TEST_EXPECT(document->get(row_at(*document, MissionKind::Marker, made), "wp_number", number) &&
+		            std::get<int64_t>(number) == 11);
+		document->undo();
+		TEST_EXPECT(bytes_of(*document) == unedited);
+	}
+	// The last stop moved to the front: it takes 9, below the first kept; the rest keep theirs.
+	{
+		const NodeAddress last{path.row, k(MissionKind::Stop), document->collections_of(path)[0].ids[3]};
+		Edit move = edit_of(EditOperation::Move, last);
+		move.position = 0;
+		TEST_EXPECT(document->apply(move, error));
+		const std::vector<uint32_t> moved = stops_of(*document);
+		TEST_EXPECT(moved.size() == 4 && moved[0] == uint32_t(on_path[3]) &&
+		            numbers_saved(*document) == (std::vector<int32_t>{9, 10, 20, 20}));
+		const std::string written = bytes_of(*document);
+		std::unique_ptr<Document> reopened = open(std::vector<uint8_t>(written.begin(), written.end()), "moved.bms");
+		TEST_EXPECT(reopened && stops_of(*reopened) == moved);
+		document->undo();
+		TEST_EXPECT(bytes_of(*document) == unedited);
+	}
+	// No room between two kept stops one apart: the stop put in takes the next number, and so on past it.
+	{
+		bms::File places = file;
+		for (size_t i = 0; i < 4; ++i) places.markers[size_t(on_path[i])].wp_number = int32_t(i);
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(places, out, message));
+		std::unique_ptr<Document> placed = open(out, "places.bms");
+		TEST_EXPECT(placed);
+		const NodeAddress route = row_at(*placed, MissionKind::WaypointPath, 1);
+		const size_t made = as_mission(*placed).rows_of(MissionKind::Marker).size();
+		std::vector<Edit> edits;
+		edits.push_back(edit_of(EditOperation::Add, {0, k(MissionKind::Marker), 0}, "item",
+		                        int64_t(mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT)));
+		Edit stop = edit_of(EditOperation::Add, {route.row, k(MissionKind::Stop), 0}, "marker", int64_t(made));
+		stop.position = 1;
+		edits.push_back(stop);
+		TEST_EXPECT(placed->apply(edits, error));
+		TEST_EXPECT(numbers_saved(*placed) == (std::vector<int32_t>{0, 1, 2, 3, 4}));
+		bms::File saved;
+		const std::string written = bytes_of(*placed);
+		TEST_EXPECT(bms::parse(reinterpret_cast<const uint8_t *>(written.data()), written.size(), saved, message) &&
+		            mission::waypoint_path_markers(saved, 1)[1] == int(made) && saved.markers[size_t(on_path[0])].wp_number == 0);
+	}
+	// A stop's marker duplicated: the copy is a stop of the path right after its original, holding its number.
+	{
+		const NodeAddress original = row_at(*document, MissionKind::Marker, size_t(on_path[1]));
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Duplicate, original), error));
+		const std::vector<uint32_t> stops = stops_of(*document);
+		TEST_EXPECT(stops.size() == 5 && stops[1] == uint32_t(on_path[1]) && stops[2] == uint32_t(on_path[1] + 1));
+		TEST_EXPECT(numbers_saved(*document) == (std::vector<int32_t>{10, 20, 20, 20, 30}));
+		const std::string written = bytes_of(*document);
+		std::unique_ptr<Document> reopened = open(std::vector<uint8_t>(written.begin(), written.end()), "dup.bms");
+		TEST_EXPECT(reopened && stops_of(*reopened) == stops);
+		document->undo();
+		TEST_EXPECT(bytes_of(*document) == unedited);
+	}
+	// Pasted: the copy goes on its path too, after the stops its number sorts after.
+	{
+		const std::string payload = document->copy({row_at(*document, MissionKind::Marker, size_t(on_path[2]))});
+		TEST_EXPECT(!payload.empty() && document->pastes_rows(payload));
+		Edit paste = edit_of(EditOperation::Paste, {0, 0, 0}, "", payload);
+		paste.position = SIZE_MAX;
+		TEST_EXPECT(document->apply(paste, error));
+		const std::vector<uint32_t> stops = stops_of(*document);
+		const uint32_t copy = uint32_t(as_mission(*document).rows_of(MissionKind::Marker).size() - 1);
+		TEST_EXPECT(stops.size() == 5 && stops[3] == copy && stops[4] == uint32_t(on_path[3]));
+		TEST_EXPECT(numbers_saved(*document) == (std::vector<int32_t>{10, 20, 20, 20, 30}));
+		document->undo();
+		TEST_EXPECT(bytes_of(*document) == unedited);
+	}
+	std::printf("stop numbers: kept as read, the new and the moved between, a copy on its route\n");
 	return 0;
 }
 
@@ -784,7 +907,27 @@ int test_parse_findings() {
 		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.rewrite_differs" && findings[0].severity == DiagnosticSeverity::Info);
 		TEST_EXPECT(bytes_of(*document) == std::string(bytes.begin(), bytes.end()));
 	}
-	std::printf("parse: the runs' order, a shared run, a chunk the writer writes otherwise\n");
+	// A path whose record lists other stops than its waypoint markers carry (a file an earlier OpenNova wrote,
+	// its stop edits written to the record alone): a warning naming the path, as Save changes the route the
+	// game walks.
+	{
+		bms::File other = file;
+		bms::WaypointRecord &record = other.waypoint_records[1];
+		TEST_EXPECT(record.waypoint_numbers.size() >= 2);
+		std::swap(record.waypoint_numbers[0], record.waypoint_numbers[1]);
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(other, out, message));
+		std::unique_ptr<Document> document = open(out, "rebuilt.bms");
+		TEST_EXPECT(document && !document->blocked() &&
+		            as_mission(*document).issue_codes() == std::vector<MissionFinding>{MissionFinding::PathRebuilt});
+		const std::vector<Diagnostic> findings = type.validate_file(*document);
+		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.path_rebuilt" &&
+		            findings[0].severity == DiagnosticSeverity::Warning &&
+		            findings[0].message.rfind("Path 1's record lists", 0) == 0 &&
+		            findings[0].message.find("the route the game walks changes") != std::string::npos);
+		TEST_EXPECT(bytes_of(*document) == std::string(bytes.begin(), bytes.end()));
+	}
+	std::printf("parse: the runs' order, a shared run, a chunk the writer writes otherwise, a path laid out again\n");
 	return 0;
 }
 
@@ -1402,7 +1545,7 @@ int test_retail() {
 	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
 	expansions.insert(expansions.begin(), std::string());
 	std::set<std::string> seen;
-	size_t missions = 0, differing = 0;
+	size_t missions = 0, differing = 0, unedited_same = 0;
 	size_t entity_refs = 0, entity_missing = 0, zone_refs = 0, zone_missing = 0, event_refs = 0, event_past = 0,
 	       stops = 0, stops_past = 0, text_refs = 0;
 	std::map<std::string, size_t> findings_by_code, text_by_key;
@@ -1427,6 +1570,21 @@ int test_retail() {
 			for (const MissionFinding code : m.issue_codes()) {
 				TEST_EXPECT(code == MissionFinding::RewriteDiffers); // every shipped mission's runs canonical
 				++differing;
+			}
+			// An unedited save writes the shipped bytes, the waypoint markers' numbers kept (D-MIS-6); a mission
+			// the writer writes otherwise (its noted chunk) writes what the format's writer writes of it.
+			{
+				const std::string saved = bytes_of(*document);
+				bms::File read;
+				std::vector<uint8_t> canonical;
+				std::string why;
+				TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), read, why) && bms::write(read, canonical, why));
+				const bool noted = !m.issue_codes().empty();
+				const bool same = saved == (noted ? std::string(canonical.begin(), canonical.end())
+				                                  : std::string(bytes.begin(), bytes.end()));
+				if (!same) std::printf("  %s: an unedited save writes other bytes\n", file.logical_name.c_str());
+				TEST_EXPECT(same);
+				unedited_same += same;
 			}
 			std::set<int32_t> ssns, zones;
 			for (const MissionEntityRead &entity : mission_entities(m)) ssns.insert(entity.ssn);
@@ -1490,7 +1648,7 @@ int test_retail() {
 	// stop past the markers, and the findings the validator makes over the shipped missions, one
 	// path counted past its slots (CP19), 36 SSNs carried twice, one alive test on a marker's SSN
 	// (CP13's SSN 2072), every mission with an entity on an empty path.
-	TEST_EXPECT(missions == 115 && differing == 5);
+	TEST_EXPECT(missions == 115 && differing == 5 && unedited_same == 115);
 	TEST_EXPECT(entity_refs == 4561 && entity_missing == 162 && zone_refs == 879 && zone_missing == 53);
 	// The event references: 841 Event triggers' and ResetEvent actions' and 73 type-6005 waypoints' advance
 	// triggers.
@@ -1522,6 +1680,7 @@ int main(int argc, char **argv) {
 	if (test_edits() != 0) return 1;
 	if (test_loadout() != 0) return 1;
 	if (test_clipboard() != 0) return 1;
+	if (test_stop_numbers() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
 	if (test_item_type_on_symbol() != 0) return 1;

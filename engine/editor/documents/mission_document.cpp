@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -89,28 +90,106 @@ size_t index_among(const std::vector<std::shared_ptr<const Node>> &rows, const N
 	return SIZE_MAX;
 }
 
+// The number each of a path's stops gives its marker (its wp_number), the stops in their order. A marker's
+// number is the key the original editor sorts a path's markers by, not its place: its writer copies the
+// number the marker holds [orig: JOTACmed.exe sub_44C8E0 @ 0x44c9ff, item +0x90 to the record's +0x30] and
+// its rebuild only sorts each path's markers by it [orig: sub_44CFD0 @ 0x44d0e9..0x44d104], never writing
+// it, so a shipped path holds keys (00TRa's path 1 holds 0, 1, 2, 2, 3 and 03TR's path 5 1 to 9 and 1648).
+// A stop keeps the number its marker was read with on this path (`held`: each marker's path and number as
+// read) while the stops' order is the order those numbers sort to (mission::waypoint_path_markers': by
+// number, a tie by the marker's place in the file); the stops an edit put in or moved take the numbers
+// after the kept stop before them, one apart, and as few stops are renumbered as keeps the order (a kept
+// stop with no room before it for the new ones is renumbered too). A path no kept stop orders is numbered
+// from 0 by place; no number goes below 0 that the file did not hold.
+std::vector<int32_t> stop_numbers(const std::vector<uint32_t> &stops, const std::vector<std::pair<int, int32_t>> &held,
+                                  size_t path) {
+	const size_t n = stops.size();
+	std::vector<int64_t> key(n, 0);
+	std::vector<bool> keeps(n, false);
+	for (size_t i = 0; i < n; ++i)
+		if (stops[i] < held.size() && size_t(held[stops[i]].first) == path) {
+			keeps[i] = true;
+			key[i] = held[stops[i]].second;
+		}
+	// Whether stop b may keep its number after kept stop a: next to it, sorting after it; else with room
+	// for the stops between, one apart.
+	const auto fits = [&](size_t a, size_t b) {
+		if (b == a + 1) return key[a] < key[b] || (key[a] == key[b] && stops[a] < stops[b]);
+		return key[b] - key[a] >= int64_t(b - a);
+	};
+	constexpr size_t kNone = SIZE_MAX;
+	std::vector<size_t> best(n, 0), before(n, kNone);
+	size_t last = kNone;
+	for (size_t b = 0; b < n; ++b) {
+		if (!keeps[b]) continue;
+		// The first kept: the stops before it take the numbers below its own, none below 0.
+		if (b == 0 || key[b] - int64_t(b) >= 0) best[b] = 1;
+		for (size_t a = 0; a < b; ++a)
+			if (keeps[a] && best[a] && best[a] + 1 > best[b] && fits(a, b)) {
+				best[b] = best[a] + 1;
+				before[b] = a;
+			}
+		// The last kept: the stops after it take the numbers above its own.
+		if (best[b] && key[b] + int64_t(n - 1 - b) <= INT32_MAX && (last == kNone || best[b] > best[last])) last = b;
+	}
+	std::vector<int32_t> out(n, 0);
+	if (last == kNone) {
+		for (size_t i = 0; i < n; ++i) out[i] = int32_t(i);
+		return out;
+	}
+	std::vector<bool> kept(n, false);
+	for (size_t at = last; at != kNone; at = before[at]) kept[at] = true;
+	size_t first = last;
+	while (before[first] != kNone) first = before[first];
+	for (size_t i = 0; i < first; ++i) out[i] = int32_t(key[first] - int64_t(first - i));
+	int64_t number = 0;
+	for (size_t i = first; i < n; ++i) {
+		number = kept[i] ? key[i] : number + 1;
+		out[i] = int32_t(number);
+	}
+	return out;
+}
+
 // The file's paths laid out from the stops the rows hold (`stops`, one list a path, in the paths' order), as
 // the original editor lays a path out from its markers (D-MIS-6): each waypoint marker carries the path
-// it is a stop of and its place there, none another, and each path's record is laid out from them
-// (mission::lay_out_waypoint_path) [orig: JOTACmed.exe sub_44C8E0 @ 0x44c8e0, the path @ 0x44c9f5 and the
-// place @ 0x44c9ff; sub_44CFD0 @ 0x44cfd0; sub_44F920 @ 0x44f920]. A stop that names no waypoint marker,
-// or one of path 0, puts nothing on a path, and a marker of two stops keeps the last (mission.unserializable
-// says each, which refuses the save).
+// it is a stop of and its number there (stop_numbers), none another, and each path's record is laid out
+// from them (mission::lay_out_waypoint_path) [orig: JOTACmed.exe sub_44C8E0 @ 0x44c8e0, the path @ 0x44c9f5
+// and the number @ 0x44c9ff; sub_44CFD0 @ 0x44cfd0; sub_44F920 @ 0x44f920]. A stop that names no waypoint
+// marker, or one of path 0, puts nothing on a path, and a marker of two stops keeps the last
+// (mission.unserializable says each, which refuses the save).
 void lay_out_paths(bms::File &file, const std::vector<const std::vector<uint32_t> *> &stops) {
+	std::vector<std::pair<int, int32_t>> held(file.markers.size());
+	for (size_t i = 0; i < file.markers.size(); ++i)
+		held[i] = {file.markers[i].type_id == def::DEF_TYPE_WAYPOINT ? int(file.markers[i].waypoint_id) : -1,
+		           file.markers[i].wp_number};
 	for (bms::Entity &marker : file.markers)
 		if (marker.type_id == def::DEF_TYPE_WAYPOINT && marker.waypoint_id != 0 &&
 		    size_t(marker.waypoint_id) < file.waypoint_records.size()) {
 			marker.waypoint_id = 0;
 			marker.wp_number = 0;
 		}
-	for (size_t path = 1; path < stops.size() && path < file.waypoint_records.size(); ++path)
+	for (size_t path = 1; path < stops.size() && path < file.waypoint_records.size(); ++path) {
+		const std::vector<int32_t> numbers = stop_numbers(*stops[path], held, path);
 		for (size_t place = 0; place < stops[path]->size(); ++place) {
 			const uint32_t index = (*stops[path])[place];
 			if (index >= file.markers.size() || file.markers[index].type_id != def::DEF_TYPE_WAYPOINT) continue;
 			file.markers[index].waypoint_id = static_cast<uint8_t>(path);
-			file.markers[index].wp_number = static_cast<int32_t>(place);
+			file.markers[index].wp_number = numbers[place];
 		}
+	}
 	for (size_t path = 0; path < file.waypoint_records.size(); ++path) mission::lay_out_waypoint_path(file, path);
+}
+
+// Each marker's path and number as its row holds them (a marker of another type: no path), the markers in
+// their order: what stop_numbers keeps.
+std::vector<std::pair<int, int32_t>> held_numbers(const std::vector<std::shared_ptr<const Node>> &rows) {
+	std::vector<std::pair<int, int32_t>> held;
+	for (const auto &row : rows)
+		if (row && row->kind == k(K::Marker)) {
+			const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
+			held.emplace_back(marker.type_id == def::DEF_TYPE_WAYPOINT ? int(marker.waypoint_id) : -1, marker.wp_number);
+		}
+	return held;
 }
 
 } // namespace
@@ -384,11 +463,13 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		                         : "The file's " + section + " holds bytes the writer writes otherwise: Save writes " +
 		                                   "the section as the game reads it.");
 	}
-	// A path whose record names other stops than its markers carry (no shipped mission has one; a file
-	// written by an earlier OpenNova): the editor holds the markers' stops, as the original editor does,
-	// and a save lays the record out from them.
+	// The paths whose records name other stops than their markers carry (no shipped mission has one; a file
+	// an earlier OpenNova wrote, whose stop edits wrote the record alone): the game walks the record's
+	// [orig: AIWaypoint_UpdateTarget @0x457476], the editor holds the markers' as the original editor does,
+	// and a save lays each record out from them, so the route the game walks changes (a warning, naming them).
 	{
 		bms::File laid = file;
+		std::vector<size_t> rebuilt;
 		for (size_t i = 0; i < laid.waypoint_records.size(); ++i) {
 			mission::lay_out_waypoint_path(laid, i);
 			const bms::WaypointRecord &was = file.waypoint_records[i], &now = laid.waypoint_records[i];
@@ -397,10 +478,18 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 			    std::equal(now.waypoint_numbers.begin(), now.waypoint_numbers.begin() + std::ptrdiff_t(slots),
 			               was.waypoint_numbers.begin()))
 				continue;
-			note(MissionFinding::RewriteDiffers, false,
-			     "Path " + std::to_string(i) + "'s record lists other stops than its waypoint markers carry: the "
-			     "editor holds the markers' (the original editor lays a path out from them), and Save lays the record "
-			     "out from them.");
+			rebuilt.push_back(i);
+		}
+		if (!rebuilt.empty()) {
+			std::string paths;
+			for (size_t i = 0; i < rebuilt.size(); ++i)
+				paths += (i == 0 ? "" : i + 1 == rebuilt.size() ? " and " : ", ") + std::to_string(rebuilt[i]);
+			const bool one = rebuilt.size() == 1;
+			note(MissionFinding::PathRebuilt, false,
+			     std::string(one ? "Path " : "Paths ") + paths + (one ? "'s record lists" : "' records list") +
+			             " other stops than the waypoint markers carry (a file an earlier OpenNova wrote): the game walks "
+			             "the record's, the editor holds the markers' as the original editor does, and Save lays " +
+			             (one ? "the record" : "each record") + " out from them, so the route the game walks changes.");
 		}
 	}
 	issue_codes_ = std::move(codes);
@@ -563,7 +652,8 @@ bool MissionDocument::get(const NodeAddress &address, const std::string &field, 
 	}
 	if (node && node->kind == k(K::Marker) && (field == "waypoint_id" || field == "wp_number") &&
 	    static_cast<const EntityRow &>(*node).native.type_id == def::DEF_TYPE_WAYPOINT) {
-		int64_t path = 0, place = 0;
+		// The path whose stop it is, and the number a save gives it there (stop_numbers).
+		int64_t path = 0, number = 0;
 		const size_t index = index_among(rows(), node);
 		for (const Node *each : rows_of(K::WaypointPath)) {
 			const MissionPath &held = static_cast<const PathRow &>(*each).native;
@@ -571,10 +661,10 @@ bool MissionDocument::get(const NodeAddress &address, const std::string &field, 
 			const auto at = std::find(held.stops.begin(), held.stops.end(), uint32_t(index));
 			if (at == held.stops.end()) continue;
 			path = held.number;
-			place = int64_t(at - held.stops.begin());
+			number = stop_numbers(held.stops, held_numbers(rows()), size_t(held.number))[size_t(at - held.stops.begin())];
 			break;
 		}
-		out = field == "waypoint_id" ? path : place;
+		out = field == "waypoint_id" ? path : number;
 		return true;
 	}
 	return TableDocument::get(address, field, out);
@@ -879,7 +969,51 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 					return false;
 		}
 	}
+	if (markers) copies_keep_their_route(rows, shift, sites);
 	return true;
+}
+
+// A waypoint marker the edit put in (a Duplicate's copy, a Paste's) stays a stop of the path it carries, among
+// the stops its number sorts with, as the original editor's copy stays on its route: its copy is the whole item
+// [orig: JOTACmed.exe MissionItem_CloneTranslated @ 0x455e70, the qmemcpy keeping +0x8c and +0x90], and its
+// rebuild puts every waypoint marker on the path it carries [orig: sub_44CFD0 @ 0x44d028..0x44d063], sorted by
+// number. The stop goes after the last of the path's stops whose marker, held on the path, sorts before the
+// copy (by number, a tie by the marker's place: a duplicate right after its original); `sites` takes the Adds.
+void MissionDocument::copies_keep_their_route(const StagedRows &rows, const RecordShift &shift,
+                                              std::vector<Edit> &sites) const {
+	std::vector<bool> kept(shift.after, false);
+	for (const size_t to : shift.to)
+		if (to < shift.after) kept[to] = true;
+	const std::vector<std::pair<int, int32_t>> held = held_numbers(rows.rows());
+	std::map<int, std::vector<size_t>> routes; // a path's stops as the step leaves them, the Adds put in
+	std::map<int, const Node *> paths;
+	for (const std::shared_ptr<const Node> &node : rows.rows())
+		if (node->kind == k(K::WaypointPath)) {
+			const MissionPath &path = static_cast<const PathRow &>(*node).native;
+			paths[path.number] = node.get();
+			std::vector<size_t> &route = routes[path.number];
+			for (const uint32_t stop : path.stops) route.push_back(shift.now(int64_t(stop)));
+		}
+	for (size_t copy = 0; copy < shift.after && copy < held.size(); ++copy) {
+		const int path = held[copy].first;
+		if (kept[copy] || path <= 0 || path >= kFirstPathCommand || !paths.count(path)) continue;
+		std::vector<size_t> &route = routes[path];
+		if (std::find(route.begin(), route.end(), copy) != route.end()) continue;
+		size_t at = 0;
+		for (size_t i = 0; i < route.size(); ++i) {
+			const size_t stop = route[i];
+			if (stop >= held.size() || held[stop].first != path) continue;
+			if (held[stop].second < held[copy].second || (held[stop].second == held[copy].second && stop < copy)) at = i + 1;
+		}
+		Edit add;
+		add.operation = EditOperation::Add;
+		add.address = {paths[path]->id, k(K::Stop), 0};
+		add.field = "marker";
+		add.value = int64_t(copy);
+		add.position = at;
+		sites.push_back(std::move(add));
+		route.insert(route.begin() + std::ptrdiff_t(at), copy);
+	}
 }
 
 bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std::vector<Edit> &out,

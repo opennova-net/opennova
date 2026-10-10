@@ -178,6 +178,8 @@ protected:
 	// puts in never takes a zone id another holds, and a waypoint marker's path and place are its path's
 	// stops, never set on the marker: a step that would is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
+	// The Adds that put a waypoint marker the edit copied on the path it carries (renumber_references).
+	void copies_keep_their_route(const StagedRows &rows, const RecordShift &shift, std::vector<Edit> &sites) const;
 	// The markers or the events moved: every stop's marker, every Event trigger's and ResetEvent
 	// action's event and every waypoint marker's advance trigger renumbered (RecordShift::now), the
 	// events the step put in included, as the original editor renumbers them [orig: JOTACmed.exe

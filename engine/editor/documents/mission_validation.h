@@ -50,6 +50,7 @@ enum class MissionFinding {
 	OffGround, // an entity the game leaves off the ground (the mission's project check, preview/mission_ground_check.h)
 	Unserializable, // what the document holds that no save writes: a path's stop naming no waypoint marker, one
 	                // of path 0, a marker two stops name (D-MIS-6; blocks the save)
+	PathRebuilt,    // paths whose records name other stops than their markers carry: a save lays them out again
 	kCount
 };
 const FindingCodeRow &finding_code(MissionFinding code);
