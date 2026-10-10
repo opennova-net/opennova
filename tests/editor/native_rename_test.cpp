@@ -111,17 +111,7 @@ int test_native_text_place() {
 	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "B", "name", line, column) && line == 12);
 	// A record named alone: the first name the parser reads of it.
 	TEST_EXPECT(native_text_place("Avatars.def", AssetKind::AvatarDefs, "jo", avatars, "B", "", line, column) && line == 13);
-	// A face animation: each eye on the one line that writes both; the base texture's .MDT twin, a name the
-	// loader derives and the text never writes, nowhere.
-	std::string grm;
-	TEST_EXPECT(test_io::read_file_text(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/grm/person.grm", grm));
-	TEST_EXPECT(native_text_place("person.grm", AssetKind::FaceAnimation, "jo", grm, "", "basetexture", line, column) &&
-	            line == 5 && column == 16);
-	TEST_EXPECT(native_text_place("person.grm", AssetKind::FaceAnimation, "jo", grm, "eye 1", "eyetexture", line, column) &&
-	            line == 6 && column == 16);
-	TEST_EXPECT(native_text_place("person.grm", AssetKind::FaceAnimation, "jo", grm, "eye 2", "eyetexture", line, column) &&
-	            line == 6 && column == 28);
-	TEST_EXPECT(!native_text_place("person.grm", AssetKind::FaceAnimation, "jo", grm, "", "basetexture.mdt", line, column));
+	// (A face animation is a record document since round S23: a Go to lands on its face's field, not a line.)
 	// A particle file's effect (a symbol the record names): its id's line.
 	const std::string ptl = "[particledef]\n{\n\tid = spark;\n\tgraphic1 = spark.tga;\n}\n[effectdef]\n{\n\tid = Hit;\n"
 	                        "\tpdefs = spark;\n}\n";
