@@ -687,6 +687,29 @@ template <class Record> ListOps fixed_list(K kind, std::vector<Record> &(*list)(
 // A path's stops, through bms_edit's stops (32 at most; one put in or taken out writes the path's
 // count as its slots). A new stop visits the file's first marker until it is given another (its
 // marker is a Record reference: the picker offers the file's markers).
+// A stop put into or taken out of the path's record, its count written as its slots and the slot bytes
+// past them zero, 32 at most: the record's own edit, until the editor takes master's model of a path as its
+// waypoint markers (mission::insert_waypoint_stop over the file, D-MIS-6; the flow lane's #992).
+bool insert_record_stop(bms::WaypointRecord &path, size_t index, uint32_t marker, std::string &error) {
+	std::vector<uint32_t> &stops = path.waypoint_numbers;
+	if (stops.size() >= kMaxWaypointPathMarkers) {
+		error = "Waypoint path marker count exceeds 32";
+		return false;
+	}
+	stops.insert(stops.begin() + std::ptrdiff_t(std::min(index, stops.size())), marker);
+	path.marker_count = uint32_t(stops.size());
+	path.padding.assign(128 - stops.size() * sizeof(uint32_t), 0);
+	return true;
+}
+bool erase_record_stop(bms::WaypointRecord &path, size_t index) {
+	std::vector<uint32_t> &stops = path.waypoint_numbers;
+	if (index >= stops.size()) return false;
+	stops.erase(stops.begin() + std::ptrdiff_t(index));
+	path.marker_count = uint32_t(stops.size());
+	path.padding.assign(128 - stops.size() * sizeof(uint32_t), 0);
+	return true;
+}
+
 ListOps stop_list() {
 	ListOps ops;
 	ops.size = [](const RecordHandle &owner) { return owner.as<MissionPath>().record.waypoint_numbers.size(); };
@@ -697,10 +720,10 @@ ListOps stop_list() {
 	ops.insert = [](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
 		if (!own_kind(record, K::Stop, error)) return false;
 		const uint32_t marker = record ? *static_cast<const uint32_t *>(record->data.get()) : 0;
-		return insert_waypoint_stop(owner.as<MissionPath>().record, index, marker, error);
+		return insert_record_stop(owner.as<MissionPath>().record, index, marker, error);
 	};
 	ops.erase = [](const RecordHandle &owner, size_t index) {
-		return erase_waypoint_stop(owner.as<MissionPath>().record, index);
+		return erase_record_stop(owner.as<MissionPath>().record, index);
 	};
 	ops.copy = [](const RecordHandle &owner, size_t index) {
 		const std::vector<uint32_t> &stops = owner.as<MissionPath>().record.waypoint_numbers;
