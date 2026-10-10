@@ -618,7 +618,8 @@ set_tests_properties(teammate_spawn PROPERTIES SKIP_RETURN_CODE 77 LABELS retail
 
 add_executable(infantry_spawn_test world/infantry_spawn_test.cpp)
 target_link_libraries(infantry_spawn_test PRIVATE opennova_runtime)
-add_test(NAME infantry_spawn COMMAND infantry_spawn_test)
+target_include_directories(infantry_spawn_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(infantry_spawn COMMAND infantry_spawn_test)
 
 add_executable(teammate_operations_test world/teammate_operations_test.cpp)
 target_link_libraries(teammate_operations_test PRIVATE opennova_runtime)
