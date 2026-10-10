@@ -124,6 +124,7 @@ add_library(opennova_editor STATIC
     # checks, and what a stylesheet line's value is used as) and the one validation pass over the
     # project's files; the display names (a value as a modder reads it, the graph as the names)
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/code_text_keys.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/display_names.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp

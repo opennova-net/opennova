@@ -8,6 +8,7 @@
 #include <editor/ui/document_views.h>
 #include <editor/ui/outline_model.h>
 #include <editor/ui/record_reveal.h>
+#include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
@@ -92,6 +93,8 @@ private:
 	OutlineSpec spec_;
 	OutlineModel model_;
 	RecordReveal reveal_;
+	// A text reference's completions under its cell, as under a field row's box (DI-09).
+	ReferencePicker picker_;
 	FindingsIndex findings_;
 	char filter_[kWorkspaceText]{};  // the filter box's text: the model's filter
 	char add_name_[128]{};           // master and detail: the name a new row is added by (row_name_field)

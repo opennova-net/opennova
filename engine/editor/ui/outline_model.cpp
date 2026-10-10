@@ -6,6 +6,7 @@
 #include <variant>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/code_text_keys.h>
 #include <editor/graph/display_names.h>
 
 namespace opennova::editor {
@@ -409,7 +410,8 @@ size_t OutlineModel::uses(const AssetGraph &graph, const Document &document, con
 	const auto found = uses_.find(id);
 	if (found != uses_.end()) return found->second;
 	const GraphSymbol *symbol = graph.symbol_at(document.path(), document.locator(record), defining->id);
-	return uses_[id] = symbol ? graph.users_of(*symbol).size() : 0;
+	// The project's references, and the game's own reads of a string by name (code_text_keys).
+	return uses_[id] = symbol ? graph.users_of(*symbol).size() + code_reads_of(graph, *symbol).size() : 0;
 }
 
 size_t OutlineModel::line_of(const NodeAddress &address) const {

@@ -4,6 +4,7 @@
 // such a project (install_view.h) over a synthetic install written with the PFF writer, and a session's
 // expansion project over it: made, checked against the install, renamed with its files.
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -20,6 +21,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_view.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/code_text_keys.h>
 #include <editor/import/import_plan.h>
 #include <editor/model/document.h>
 #include <editor/project/base_project.h>
@@ -835,8 +837,11 @@ static int test_override_table() {
 	TEST_EXPECT(made != nullptr);
 	if (!made || !view.findings.graph) return 1;
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + made->relative_path,
-	                                     table_bytes({ { "WepDes", { "WEP_OVER" } }, { "Overlays", { "OVL_FLAT" } } })) &&
-	            editor_test::write_bytes(root + "/gametext.bin", table_bytes({ { "WepDes", { "WEP_OVER", "WEP_BASE" } } })));
+	                                     table_bytes({ { "WepDes", { "WEP_OVER" } }, { "Overlays", { "OVL_FLAT" } },
+	                                                   { "Client", { "STRCLI01" } } })) &&
+	            editor_test::write_bytes(root + "/gametext.bin",
+	                                     table_bytes({ { "WepDes", { "WEP_OVER", "WEP_BASE" } },
+	                                                   { "Client", { "STRCLI01", "STRCLI04" } } })));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto found_in = [&](const char *key, const char *scope, const char *table) {
 		std::string file;
@@ -850,6 +855,17 @@ static int test_override_table() {
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::TextId, "OVL_FLAT", "GAMETEXT.BIN/WepDes") ==
 	            ReferenceStatus::Missing);
 	TEST_EXPECT(found_in("WEP_OVER", "MEDMSSN.BIN/WepDes", "jxm.bin"));
+	// The game's own code reads Client/STRCLI01 and Client/STRCLI04 by name (code_text_keys): the reads reach the
+	// expansion's string where it defines one, gametext.bin's where it does not.
+	const auto code_reads = [&](const char *key, const char *table) {
+		for (const GraphSymbol *symbol : view.findings.graph->symbols_named(ReferenceKind::TextId, key))
+			if (opennova::strutil::iequals(std::filesystem::path(symbol->file).filename().string(), table))
+				return code_reads_of(*view.findings.graph, *symbol).size();
+		return size_t(SIZE_MAX);
+	};
+	TEST_EXPECT(code_reads("STRCLI01", "jxm.bin") > 0 && code_reads("STRCLI01", "gametext.bin") == 0);
+	TEST_EXPECT(code_reads("STRCLI04", "gametext.bin") > 0);
+	TEST_EXPECT(code_reads("WEP_BASE", "gametext.bin") == 0);
 	// The name changed: the table of the new name is the one read first.
 	ProjectSettingsChange renamed;
 	renamed.expansion = "jxk";
