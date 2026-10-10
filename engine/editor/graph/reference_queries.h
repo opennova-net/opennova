@@ -60,7 +60,7 @@ ReferenceStatus reference_status(const AssetGraph &graph, const FieldUse &field,
                                  std::string *symbol = nullptr);
 // What the picker offers a field: the names of its kind in its scope (AssetGraph::choices),
 // then what the value may name instead (a menu's font or texture a stylesheet variable, ADR
-// 0005; an unchecked text a string id), each with what the field would reference, set to it. A
+// 0005), each with what the field would reference, set to it. A
 // Record reference's (S13 D8): the records of its collection in its own file, each by its index,
 // those the field can hold and that name a record.
 std::vector<ReferenceChoice> reference_choices(const AssetGraph &graph, const FieldUse &field);

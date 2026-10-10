@@ -112,14 +112,17 @@ std::string missing_message(const SessionView &view, const std::string &file, co
 	return std::string();
 }
 
-const char *kItems = "begin \"Tank\"\nid 100500\ntype vehicle\ngraphic tank\nweaplbup Late\nlaunchups_rocket Nowhere\n"
+const char *kItems = "begin \"Tank\"\nid 100500\ntype vehicle\ngraphic tank\ntextid TANK_TEXT\nweaplbup Late\n"
+                     "launchups_rocket Nowhere\n"
                      "particlefx Effect_x Late\nparticlefxs Effect_x P03\nvirtualdisplay cockpit camera\n"
                      "addeweap Mount 100501\nend\n"
-                     "begin \"Turret\"\nid 100501\ntype vehicle\ngraphic tank\nend\n";
+                     "begin \"Turret\"\nid 100501\ntype vehicle\ngraphic tank\nend\n"
+                     "begin \"Soldier\"\nid 100502\ntype person\ngraphic chars\\soldier.3di\nend\n"
+                     "begin \"Soldier again\"\nid 100502\ntype person\ngraphic medic\nend\n";
 
 const char *kWeapons = "weapon \"WPN_T\"\n\tanimadm gun_1st\n\tgfx1 fpgun\n\tgfx3 tank\n\tlaunchuserpoint Late\n"
-                       "\tsameas WPN_NONE\n"
-                       "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tparticleuserpoint Muzzle\n\tend\n"
+                       "\tsameas WPN_NONE\n\tloadout_menu_ttdesc TT_WPN_T\n"
+                       "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tparticleuserpoint Muzzle\n\t\ttexttoken FIRE_TEXT\n\tend\n"
                        "\taction \"reload\"\n\t\tanim anim_wpn_reload\n\tend\n"
                        "\taction \"idle\"\n\t\tanim anim_bogus\n\tend\n"
                        "end\n";
@@ -189,6 +192,26 @@ static int test_fields_are_references() {
 	TEST_EXPECT(row && row->file == "anims/gun_1st.adm" && graph.users_of(*row).size() == 1);
 	TEST_EXPECT(missing_message(view, weapons, "anim", "anim_wpn_reload").find("has no row for") != std::string::npos);
 	TEST_EXPECT(missing_message(view, weapons, "anim", "anim_bogus").find("252 animation slots") != std::string::npos);
+	// The text keys as the game reads each: an item's text a key of gametext.bin's item section (its
+	// text_default shown for a key it lacks); an action's text token any table's, the playing mission's then
+	// gametext.bin's (an empty text for none); the loadout tooltip, which nothing reads, no reference.
+	const GraphEdge *item_text = edge_of(graph, items, "text_id", "TANK_TEXT");
+	TEST_EXPECT(item_text && item_text->kind == ReferenceKind::TextId && item_text->scope == "GAMETEXT.BIN/item" &&
+	            graph.resolve(*item_text) == ReferenceStatus::Missing);
+	TEST_EXPECT(missing_message(view, items, "text_id", "TANK_TEXT").find("text_default") != std::string::npos);
+	const GraphEdge *token = edge_of(graph, weapons, "text_token", "FIRE_TEXT");
+	TEST_EXPECT(token && token->kind == ReferenceKind::TextId && token->scope.empty());
+	TEST_EXPECT(missing_message(view, weapons, "text_token", "FIRE_TEXT").find("the action's text is empty") !=
+	            std::string::npos);
+	bool tooltip = false;
+	for (const GraphEdge *edge : graph.references_of(weapons)) tooltip = tooltip || edge->field == "loadout_menu_ttdesc";
+	TEST_EXPECT(!tooltip);
+	// A person's face: the .GRM its model's name makes, of the first row of its id alone; the name derived, so no
+	// rename rewrites it, and a face the project lacks no finding (most people have none).
+	const GraphEdge *face = edge_of(graph, items, "graphic", "soldier.GRM");
+	TEST_EXPECT(face && face->kind == ReferenceKind::FaceAnimation && !face->rewritable &&
+	            graph.resolve(*face) == ReferenceStatus::Missing && missing_message(view, items, "graphic", "soldier.GRM").empty());
+	TEST_EXPECT(!edge_of(graph, items, "graphic", "medic.GRM") && !edge_of(graph, items, "graphic", "tank.GRM"));
 	// sameas names a weapon.
 	const GraphEdge *sameas = edge_of(graph, weapons, "sameas", "WPN_NONE");
 	TEST_EXPECT(sameas && sameas->kind == ReferenceKind::Weapon);

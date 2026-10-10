@@ -121,7 +121,7 @@ struct ReferenceKindRow {
 	// the failsafe clip), so the graph words the kind's findings again when the file set changes.
 	bool message_reads_files = false;
 	// What the picker offers besides the kind's own names: the kind a value may name instead (a
-	// menu's font or texture a stylesheet variable, ADR 0005; an unchecked text a string id).
+	// menu's font or texture a stylesheet variable, ADR 0005).
 	ReferenceKind also_offers = ReferenceKind::None;
 	// A symbol whose scope names the file defining it (the part before its first '/'): a string
 	// id's table, the menu a screen or window is looked up in, the model a user point is on.
@@ -175,8 +175,8 @@ std::string user_point_scope(const std::string &model, bool first_16);
 // ".adm" then) upper case. "" for no map.
 std::string animation_map_scope(const std::string &map);
 
-// The number of reference kinds: Dialog is the last.
-inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::FaceVertex) + 1;
+// The number of reference kinds: FaceAnimation is the last.
+inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::FaceAnimation) + 1;
 
 // The record a Record reference's value names, by its index in the kind's collection: a whole
 // number from 0 that the kind's none does not take (a negative one names none: an index from 0 is

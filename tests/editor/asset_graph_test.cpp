@@ -1648,8 +1648,7 @@ static int test_reference_kind_rows() {
 	            reference_row(ReferenceKind::MenuTexture).file == AssetKind::Texture);
 	TEST_EXPECT(reference_row(ReferenceKind::StyleVar).resolution == ReferenceResolution::StyleVariable);
 	TEST_EXPECT(reference_row(ReferenceKind::Sound).resolution == ReferenceResolution::Symbol &&
-	            reference_row(ReferenceKind::OtherText).resolution == ReferenceResolution::Unchecked);
-	TEST_EXPECT(reference_row(ReferenceKind::OtherText).also_offers == ReferenceKind::TextId);
+	            reference_row(ReferenceKind::MenuText).resolution == ReferenceResolution::Unchecked);
 	// A model's register by its index, every whole number from 0 one; its frame row by the pose's
 	// rule, a signed byte above 0.
 	TEST_EXPECT(reference_row(ReferenceKind::ModelRegister).resolution == ReferenceResolution::Record &&

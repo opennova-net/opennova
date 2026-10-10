@@ -172,6 +172,15 @@ std::string text_id_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	const size_t slash = scope.find('/');
 	const std::string table = scope.substr(0, slash);
 	const std::string section = slash == std::string::npos ? std::string() : scope.substr(slash + 1);
+	// An action's text token, read through the playing mission's table and then gametext.bin [orig:
+	// MissionText_GetStringByKeyOrGameText @ 0x51ECD0, "" where neither has it @ 0x51ED22].
+	if (edge.field == "text_token" || edge.field == "texttoken")
+		return ", which neither the playing mission's string table nor gametext.bin defines: the action's text is empty.";
+	// An item's text, whose section's text_default stands in for a key it lacks [orig: HUD_BuildEntityInfo @
+	// 0x4B8A41..0x4B8A5C].
+	if (edge.field == "text_id" && strutil::iequals(section, "item") && graph.has_file(table))
+		return ", which the first \"item\" section of " + table + " does not define: the game shows that section's "
+		       "text_default.";
 	if (scope.empty()) return ", which no string table defines; the game shows the id.";
 	if (table.empty())
 		return ", but its window names no string table (TEXT_RSRC) and neither does the window it falls back to; the "
@@ -573,7 +582,6 @@ constexpr ReferenceKindRow kRows[] = {
 	        .message_reads_files()
 	        .row,
 	Row(ReferenceKind::AiProfile, "ai_profile", "the AI profile", "AI profile").loads(AssetKind::AiProfile, kAiProfile).row,
-	Row(ReferenceKind::OtherText, "other_text", "the string id", "string id").offers(ReferenceKind::TextId).row,
 	Row(ReferenceKind::Font, "font", "the font", "font")
 	        .loads(AssetKind::Font, nullptr, font_files)
 	        .offers(ReferenceKind::StyleVar)
@@ -794,6 +802,13 @@ constexpr ReferenceKindRow kRows[] = {
 	// A face animation's vertex by its index among the file's vertices: a triangle's corner, which the game draws
 	// over the vertex at that place, never testing it [orig: Render_ScarDebugOverlay @ 0x589301..0x58931D].
 	Row(ReferenceKind::FaceVertex, "face_vertex", "the vertex", "vertex").record("vertex").row,
+	// The face a person's model animates, opened by the name the model's makes; a person whose face the archives
+	// lack shows none, which the game never reports, and most of the game's people have none, so its edges are
+	// optional (no finding) [orig: Entity_InitFromModel @ 0x40E21A..0x40E22E -> sub_57FCE0 @ 0x57FCE0, its load
+	// failing @ 0x57FDA7].
+	Row(ReferenceKind::FaceAnimation, "face_animation", "the face animation", "face animation")
+	        .loads(AssetKind::FaceAnimation, nullptr)
+	        .row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {

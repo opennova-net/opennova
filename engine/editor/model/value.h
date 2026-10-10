@@ -51,7 +51,6 @@ enum class FieldType { Integer, Unsigned, Byte, Count, Real, Text };
 // graph/reference_kinds: a new kind is one value here and one row there, at the end of each.
 enum class ReferenceKind {
 	None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile,
-	OtherText, // a text key the editor does not resolve yet
 	Font,      // a .fnt by name, possibly through a %VAR% of the stylesheet
 	Menu,      // a .mnu file
 	TextTable, // a string table (.bin)
@@ -91,6 +90,7 @@ enum class ReferenceKind {
 	AvatarPart,     // an avatar part by its name, of the kind and file the scope names (an Avatars.def combo's head)
 	Dialog,         // a dialog bank's dialog by its name, in the bank the scope names (a mission's Play dialog: dlg%03i)
 	FaceVertex,     // a face animation's vertex by its index in the file's vertices (a triangle's corner)
+	FaceAnimation,  // a person's face animation, the .grm its model's name makes (an item's graphic)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is
