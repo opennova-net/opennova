@@ -15,7 +15,7 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                 (the `Callee @0xCALLSITE` form)
   site-only     the marker names no symbol (`@0xADDR` alone, or a prose word before the @)
                 and the address is a defined location -- accepted
-  other-image   the marker carries another image's qualifier (dfx2med, ModSuperOed,
+  other-image   the marker carries another image's qualifier (dfx2med, JOTACmed, jomed, ModSuperOed,
                 misldr.dll, binkw32, jodemo, dfvas, TrnGen) -- skipped, this tool only knows the
                 Jointops.exe IDB
 

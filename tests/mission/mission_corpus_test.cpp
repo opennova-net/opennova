@@ -115,6 +115,7 @@ bool differing_sections(const std::vector<uint8_t> &a, const std::vector<uint8_t
 
 struct Counts {
 	size_t missions = 0, identical = 0, failed = 0;
+	size_t paths = 0, stops = 0, over_slots = 0; // the waypoint paths every one its markers' (D-MIS-6)
 	std::vector<std::string> differing; // "NAME: section, section"
 };
 
@@ -185,13 +186,27 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 	    parsed.layer_records.size() != size_t(bms::kLayerRecordCount))
 		return fail("fixed section count wrong (wp/grp/layer)");
 
-	// Former GUT waypoint-view oracle, including CP19's authored count of
-	// 39: preserve the raw record, but bound the public view to its 32 slots.
-	for (const auto &summary : opennova::mission::waypoint_summaries(parsed)) {
-		opennova::mission::WaypointPath waypoint;
-		if (summary.marker_count < 0 || summary.marker_count > 32 ||
-		    !opennova::mission::waypoint_path(parsed, summary.index, waypoint) || waypoint.marker_indices.size() > 32)
-			return fail("waypoint view exceeds its stored slots");
+	// Every path is its markers' (D-MIS-6), as the original editor's writer lays it out: its count the markers
+	// that carry its number, its 32 slots the first of them in wp_number order [orig: JOTACmed.exe
+	// sub_44CFD0 @ 0x44cfd0, sub_44F920 @ 0x44f920]; CP19's path 6 counts 39 over its 32 slots.
+	for (size_t path = 0; path < parsed.waypoint_records.size(); ++path) {
+		const bms::WaypointRecord &record = parsed.waypoint_records[path];
+		const std::vector<int> stops = opennova::mission::waypoint_path_markers(parsed, path);
+		std::vector<uint32_t> slots;
+		for (size_t i = 0; i < stops.size() && i < 32; ++i) slots.push_back(uint32_t(stops[i]));
+		if (record.marker_count != stops.size() || record.waypoint_numbers != slots)
+			return fail("path " + std::to_string(path) + " counts " + std::to_string(record.marker_count) + " stops, its markers " +
+			            std::to_string(stops.size()) + ", or its slots are not theirs in wp_number order");
+		counts.paths += stops.empty() ? 0 : 1;
+		counts.stops += stops.size();
+		if (stops.size() > 32) ++counts.over_slots;
+		// Laid out again from its markers, the record is as read.
+		bms::File laid = parsed;
+		opennova::mission::lay_out_waypoint_path(laid, path);
+		if (laid.waypoint_records[path].marker_count != record.marker_count ||
+		    laid.waypoint_records[path].waypoint_numbers != record.waypoint_numbers ||
+		    laid.waypoint_records[path].padding != record.padding)
+			return fail("path " + std::to_string(path) + " laid out from its markers differs from the record read");
 	}
 
 	std::vector<uint8_t> encoded;
@@ -377,6 +392,8 @@ int test_retail() {
 	std::printf("retail: %zu missions, %zu rewritten to their own bytes, %zu differing in the loadout chunk alone "
 	            "(%zu of the %zu named are in this install), %zu failed\n",
 	            counts.missions, counts.identical, counts.differing.size(), met.size(), damaged.size(), counts.failed);
+	std::printf("retail: %zu paths, %zu stops, every one its markers' (%zu counted past their 32 slots)\n", counts.paths,
+	            counts.stops, counts.over_slots);
 	return counts.failed == 0 ? 0 : 1;
 }
 

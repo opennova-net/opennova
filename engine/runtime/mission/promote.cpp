@@ -922,7 +922,10 @@ PromoteResult promote_mission(const bms::File &m, World &world,
 
     // [orig: Mission_LoadBMSFile @0x40FCC3] Normalize each bounding-box axis.
     // A Location box (type 5) supplies WAC location IDs; these are not area-trigger records. The
-    // Health, Mana and Mission boxes' player-body legs are unported (D-INF-28, bms::BoundingBoxType).
+    // Health and Mana boxes' player-body legs are unported (D-INF-28), and so is the Mission box's
+    // (D-INF-29: the game sends the local player to the mission it names [orig: Entity_UpdateInfantryPlayerBody
+    // @0x4b60aa..0x4b611e, exit reason 8; Game_ProcessMainFrame @0x526806]); the Location box's music
+    // variable 3 and the type-6 box's variable 4 are D-MUS-VARPUMP's (bms::BoundingBoxType).
     world.reverb = {};
     world.reverb.mission = world.reverb.selected = m.header.reverb;
     for (const bms::BoundingBox &box : m.bounding_boxes) {

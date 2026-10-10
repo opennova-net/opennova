@@ -621,8 +621,8 @@ const MissionField kEntityFields[] = {
 
 using W = bms::WaypointRecord;
 
-// A path's flags, and the count it stores, which a stop put in or taken out writes as its slots
-// (bms_edit's insert_waypoint_stop, D-MIS-6); a flags edit leaves the count as it was read (CP19.bms
+// A path's flags, and the count it stores, which an edit of its stops lays out from its waypoint markers
+// (bms_edit's lay_out_waypoint_path, D-MIS-6); a flags edit leaves the count as it was read (CP19.bms
 // ships one of 39 over its 32 slots, which the runtime walks into the next record's words [orig:
 // AIWaypoint_UpdateTarget @0x457476]).
 const MissionField kWaypointPathFields[] = {

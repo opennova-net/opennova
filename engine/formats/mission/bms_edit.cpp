@@ -398,7 +398,9 @@ bool remove_entity(bms::File &file, EntityKind kind, size_t index, std::string &
 	}
 	list->erase(list->begin() + static_cast<std::ptrdiff_t>(index));
 	if (kind == EntityKind::Marker) {
-		repair_waypoint_marker_references(file, index);
+		// The markers past it moved down one: every path laid out again from its markers, as the original's
+		// writer lays them all out [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0].
+		for (size_t path = 0; path < file.waypoint_records.size(); ++path) lay_out_waypoint_path(file, path);
 	}
 	sync_counts(file);
 	return true;
@@ -429,8 +431,42 @@ bool waypoint_path(const bms::File &file, size_t index, WaypointPath &out) {
 	if (index >= file.waypoint_records.size()) {
 		return false;
 	}
-	out = to_path(file.waypoint_records[index], index);
+	out = WaypointPath();
+	out.index = index;
+	out.flags = static_cast<int>(file.waypoint_records[index].flags);
+	out.marker_indices = waypoint_path_markers(file, index);
 	return true;
+}
+
+std::vector<int> waypoint_path_markers(const bms::File &file, size_t index) {
+	std::vector<std::pair<int32_t, int>> held;
+	for (size_t i = 0; i < file.markers.size(); ++i)
+		if (index != 0 && file.markers[i].type_id == def::DEF_TYPE_WAYPOINT && size_t(file.markers[i].waypoint_id) == index)
+			held.emplace_back(file.markers[i].wp_number, int(i));
+	std::stable_sort(held.begin(), held.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+	std::vector<int> out;
+	out.reserve(held.size());
+	for (const auto &stop : held) out.push_back(stop.second);
+	return out;
+}
+
+void lay_out_waypoint_path(bms::File &file, size_t index) {
+	if (index >= file.waypoint_records.size()) return;
+	bms::WaypointRecord &record = file.waypoint_records[index];
+	const std::vector<int> stops = waypoint_path_markers(file, index);
+	const size_t slots = std::min<size_t>(stops.size(), kMaxWaypointPathMarkers);
+	// The 32 slot words as they stand: the original's rebuild zeroes a path's count alone and writes its stops
+	// over the first slots, so a word past them keeps what the path held before (09TR.bms's path 13 ships
+	// one) [orig: JOTACmed.exe sub_44CFD0 @ 0x44cfd0, the counts cleared, the slots appended over].
+	std::vector<uint8_t> region(128, 0);
+	for (size_t i = 0; i < record.waypoint_numbers.size() && i < kMaxWaypointPathMarkers; ++i)
+		io::write_u32_le(region.data() + i * 4, record.waypoint_numbers[i]);
+	const size_t past = record.waypoint_numbers.size() * 4;
+	for (size_t i = 0; i < record.padding.size() && past + i < region.size(); ++i) region[past + i] = record.padding[i];
+	for (size_t i = 0; i < slots; ++i) io::write_u32_le(region.data() + i * 4, uint32_t(stops[i]));
+	record.waypoint_numbers.assign(stops.begin(), stops.begin() + static_cast<std::ptrdiff_t>(slots));
+	record.marker_count = static_cast<uint32_t>(stops.size());
+	record.padding.assign(region.begin() + static_cast<std::ptrdiff_t>(slots * 4), region.end());
 }
 
 bool set_waypoint_path(bms::File &file, size_t index, const std::vector<int> &marker_indices,
@@ -438,7 +474,21 @@ bool set_waypoint_path(bms::File &file, size_t index, const std::vector<int> &ma
 	if (!validate_waypoint_path(file, index, marker_indices, error)) {
 		return false;
 	}
-	apply_waypoint_path_to_record(file.waypoint_records[index], marker_indices, flags);
+	std::vector<size_t> touched{index};
+	// The markers the path held that the list leaves out carry no path.
+	for (const int held : waypoint_path_markers(file, index))
+		if (std::find(marker_indices.begin(), marker_indices.end(), held) == marker_indices.end()) {
+			file.markers[size_t(held)].waypoint_id = 0;
+			file.markers[size_t(held)].wp_number = 0;
+		}
+	for (size_t place = 0; place < marker_indices.size(); ++place) {
+		bms::Entity &marker = file.markers[size_t(marker_indices[place])];
+		if (marker.waypoint_id != 0 && size_t(marker.waypoint_id) != index) touched.push_back(size_t(marker.waypoint_id));
+		marker.waypoint_id = static_cast<uint8_t>(index);
+		marker.wp_number = static_cast<int32_t>(place);
+	}
+	file.waypoint_records[index].flags = static_cast<bms::WaypointFlags>(static_cast<uint32_t>(flags));
+	for (const size_t path : touched) lay_out_waypoint_path(file, path);
 	return true;
 }
 
@@ -453,14 +503,8 @@ bool add_waypoint_marker(bms::File &file, size_t path_index, int marker_item_id,
 		error = "Waypoint path index out of range";
 		return false;
 	}
-	WaypointPath current = to_path(file.waypoint_records[path_index], path_index);
-	if (current.marker_indices.size() >= kMaxWaypointPathMarkers) {
-		error = "Waypoint path marker count exceeds 32";
-		return false;
-	}
-	if (!validate_waypoint_path(file, path_index, current.marker_indices, error)) {
-		return false;
-	}
+	WaypointPath current;
+	waypoint_path(file, path_index, current);
 
 	bms::Entity marker = make_default_entity(file, EntityKind::Marker, marker_item_id, transform);
 	marker.bmsi_attributes |= static_cast<uint32_t>(bms::BmsiAttributeFlags::NavigationWaypoint);
@@ -471,7 +515,10 @@ bool add_waypoint_marker(bms::File &file, size_t path_index, int marker_item_id,
 		insertion = std::min<size_t>(static_cast<size_t>(insert_index), current.marker_indices.size());
 	}
 	current.marker_indices.insert(current.marker_indices.begin() + static_cast<std::ptrdiff_t>(insertion), new_marker_index);
-	apply_waypoint_path_to_record(file.waypoint_records[path_index], current.marker_indices, current.flags);
+	if (!set_waypoint_path(file, path_index, current.marker_indices, current.flags, error)) {
+		file.markers.pop_back();
+		return false;
+	}
 	sync_counts(file);
 	if (out_marker_index != nullptr) {
 		*out_marker_index = file.markers.size() - 1;
@@ -479,23 +526,32 @@ bool add_waypoint_marker(bms::File &file, size_t path_index, int marker_item_id,
 	return true;
 }
 
-bool insert_waypoint_stop(bms::WaypointRecord &path, size_t index, uint32_t marker, std::string &error) {
-	std::vector<uint32_t> &stops = path.waypoint_numbers;
-	if (stops.size() >= kMaxWaypointPathMarkers) {
-		error = "A path holds 32 stops: a stop past them is in no .bms, and the game reads the next path's words for it.";
+bool insert_waypoint_stop(bms::File &file, size_t path_index, size_t index, uint32_t marker, std::string &error) {
+	if (path_index >= file.waypoint_records.size()) {
+		error = "Waypoint path index out of range";
 		return false;
 	}
-	stops.insert(stops.begin() + static_cast<std::ptrdiff_t>(std::min(index, stops.size())), marker);
-	resize_waypoint_padding(path, /*preserve_over_count=*/false); // the stops changed: the count is theirs
-	return true;
+	std::vector<int> stops = waypoint_path_markers(file, path_index);
+	if (std::find(stops.begin(), stops.end(), int(marker)) != stops.end()) {
+		error = "The marker is one of the path's stops already: a marker carries one place on a path.";
+		return false;
+	}
+	stops.insert(stops.begin() + static_cast<std::ptrdiff_t>(std::min(index, stops.size())), int(marker));
+	return set_waypoint_path(file, path_index, stops, static_cast<int>(file.waypoint_records[path_index].flags), error);
 }
 
-bool erase_waypoint_stop(bms::WaypointRecord &path, size_t index) {
-	std::vector<uint32_t> &stops = path.waypoint_numbers;
-	if (index >= stops.size()) return false;
+bool erase_waypoint_stop(bms::File &file, size_t path_index, size_t index, std::string &error) {
+	if (path_index >= file.waypoint_records.size()) {
+		error = "Waypoint path index out of range";
+		return false;
+	}
+	std::vector<int> stops = waypoint_path_markers(file, path_index);
+	if (index >= stops.size()) {
+		error = "The path has no stop " + std::to_string(index) + ".";
+		return false;
+	}
 	stops.erase(stops.begin() + static_cast<std::ptrdiff_t>(index));
-	resize_waypoint_padding(path, /*preserve_over_count=*/false);
-	return true;
+	return set_waypoint_path(file, path_index, stops, static_cast<int>(file.waypoint_records[path_index].flags), error);
 }
 
 // --- area triggers ----------------------------------------------------------------
