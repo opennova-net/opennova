@@ -192,6 +192,139 @@ func test_connection_and_join_failures_reach_the_message_screen() -> void:
 	assert_eq(join_panel.message_text(), "The host is no longer available.")
 
 
+# A dropped session leaves the panel clean: the rows, the sign-in, the join and
+# host requests in flight and the actions they armed all go, and no late answer
+# can act on them.
+func test_disconnect_resets_the_connection_state() -> void:
+	var panel := _panel_with_requests_in_flight()
+	panel.client_for_test().emit_signal("disconnected", "The session timed out.")
+	_assert_connection_state_reset(panel, "a disconnect")
+
+
+func test_connection_error_resets_the_connection_state() -> void:
+	var panel := _panel_with_requests_in_flight()
+	panel.client_for_test().emit_signal("error_occurred", "DNS lookup failed.")
+	_assert_connection_state_reset(panel, "an error")
+
+
+# A populated, signed-in panel with a join and a host request in flight. The
+# unstarted session answers both legs at once, so those answers are held off for
+# the presses and wired back after them.
+func _panel_with_requests_in_flight() -> NovaWorldPanel:
+	var panel := _make_panel(PackedStringArray(["alpha.bms"]))
+	var client := panel.client_for_test()
+	client.emit_signal("connected")
+	client.emit_signal("login_succeeded", "ljim")
+	panel.set_rows_for_test(_browser_rows())
+	panel.set_pings_for_test({1: 33})
+	var held := {}
+	for signal_name: String in ["join_failed", "host_failed"]:
+		held[signal_name] = client.get_signal_connection_list(signal_name)
+		for connection: Dictionary in held[signal_name]:
+			client.disconnect(signal_name, connection["callable"])
+	panel.press_join()
+	panel.press_host()
+	for signal_name: String in held:
+		for connection: Dictionary in held[signal_name]:
+			client.connect(signal_name, connection["callable"])
+	assert_eq(panel.visible_rows().size(), 3, "the browser is populated")
+	assert_eq(panel.joining_rid(), 2, "a join to the selected row is in flight")
+	assert_eq(panel.join_callsign(), "ljim", "the signed-in handle is the callsign")
+	assert_true(panel.host_enabled(), "Host is live on the signed-in session")
+	assert_true(_host_start_button(panel).disabled, "the host Start waits on its request")
+	return panel
+
+
+func _host_start_button(panel: NovaWorldPanel) -> Button:
+	return panel.get_node("Center/Shell/Margin/RootVBox/Pages/HostView/HostCard/HostMargin/"
+			+ "HostForm/HostActions/StartButton") as Button
+
+
+func _assert_connection_state_reset(panel: NovaWorldPanel, cause: String) -> void:
+	var client := panel.client_for_test()
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_eq(panel.visible_rows().size(), 0, "%s clears the rows" % cause)
+	assert_eq(panel.server_item_count(), 0, "%s empties the table" % cause)
+	assert_eq(panel.joining_rid(), 0, "%s drops the join in flight" % cause)
+	assert_eq(panel.join_callsign(), panel.player_name, "%s drops the signed-in handle" % cause)
+	assert_false(panel.host_enabled(), "%s disables Host" % cause)
+	assert_false(panel.join_enabled(), "%s disables Join" % cause)
+	assert_false(panel.login_enabled(), "%s disables Login" % cause)
+	assert_false(_host_start_button(panel).disabled,
+			"%s drops the host request the Start button waited on" % cause)
+	assert_eq(_population_label(panel).text, "", "%s clears the population line" % cause)
+	var message := panel.message_text()
+	watch_signals(panel)
+	panel.press_join()
+	assert_eq(panel.joining_rid(), 0, "a Join press after %s submits no row" % cause)
+	# Late answers to the dropped requests find nothing to act on.
+	client.emit_signal("joined_game", "203.0.113.7", 3000, "APPID", PackedByteArray())
+	assert_signal_not_emitted(panel, "join_in_match_requested",
+			"a join resolving after %s enters no match" % cause)
+	client.emit_signal("hosting_started")
+	assert_signal_not_emitted(panel, "host_requested",
+			"a hosting granted after %s starts no mission" % cause)
+	client.emit_signal("host_failed", "NWEC01")
+	assert_eq(panel.message_text(), message, "a host failure after %s reports nothing" % cause)
+	client.emit_signal("join_failed", "NWEC09")
+	assert_eq(panel.message_text(), message, "a join failure after %s reports nothing" % cause)
+	client.emit_signal("login_failed", "The account name or password is incorrect.")
+	assert_eq(panel.message_text(), message, "a sign-in failure after %s reports nothing" % cause)
+	assert_false(panel.login_enabled(), "a sign-in failure after %s re-arms no Login" % cause)
+	client.emit_signal("login_succeeded", "ljim")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE,
+			"the report of %s stays up" % cause)
+	assert_eq(panel.message_text(), message)
+	assert_false(panel.browser_visible(), "a late sign-in cannot reopen the lobby")
+	assert_false(panel.host_enabled())
+	assert_eq(panel.join_callsign(), panel.player_name, "a late sign-in names no callsign")
+	# A late ping pass reads nothing into the signed-out panel.
+	panel.set_rows_for_test(_browser_rows())
+	panel.set_pings_for_test({1: 33})
+	client.emit_signal("server_pings_updated")
+	assert_eq(_ping_cell(panel, "Bravo"), "33",
+			"a ping pass after %s leaves the panel's pings alone" % cause)
+
+
+func _population_label(panel: NovaWorldPanel) -> Label:
+	return panel.get_node("Center/Shell/Margin/RootVBox/Pages/LobbyView/PopulationLabel") as Label
+
+
+func _ping_cell(panel: NovaWorldPanel, server: String) -> String:
+	for i in panel.visible_rows().size():
+		if panel.visible_cell(i, NovaWorldServerBrowser.COLUMN_NAME) == server:
+			return panel.visible_cell(i, NovaWorldServerBrowser.COLUMN_PING)
+	return ""
+
+
+# A session dropped at Sign In takes Login with it, and the press path too
+# (Enter in the password field submits without the button).
+func test_disconnect_at_sign_in_disarms_login() -> void:
+	var panel := _make_panel(PackedStringArray())
+	panel.client_for_test().emit_signal("connected")
+	assert_true(panel.login_enabled(), "a verified session arms Login")
+	panel.client_for_test().emit_signal("disconnected", "The session timed out.")
+	assert_false(panel.login_enabled(), "the disconnect disarms Login")
+	var form := "Center/Shell/Margin/RootVBox/Pages/LoginView/LoginCard/LoginMargin/LoginForm/"
+	(panel.get_node(form + "UsernameEdit") as LineEdit).text = "ljim"
+	var password := panel.get_node(form + "PasswordEdit") as LineEdit
+	password.text = "secret"
+	var status := panel.status_text()
+	password.text_submitted.emit(password.text)
+	assert_eq(panel.status_text(), status, "Enter after the disconnect starts no sign-in")
+
+
+# A live Join goes with the session that armed it.
+func test_error_in_the_lobby_disarms_join() -> void:
+	var panel := _make_panel(PackedStringArray())
+	panel.client_for_test().emit_signal("connected")
+	panel.client_for_test().emit_signal("login_succeeded", "ljim")
+	panel.set_rows_for_test(_browser_rows())
+	assert_true(panel.join_enabled(), "the selected row's Join is live")
+	panel.client_for_test().emit_signal("error_occurred", "DNS lookup failed.")
+	assert_false(panel.join_enabled(), "the error disarms Join")
+
+
 func test_empty_and_filtered_states_are_not_fake_server_rows() -> void:
 	var panel := _make_panel(PackedStringArray())
 	panel.client_for_test().emit_signal("connected")

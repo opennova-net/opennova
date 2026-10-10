@@ -25,28 +25,41 @@ size_t scan_run(const std::string &line, size_t at, const char *stop) {
 	return end;
 }
 
-// A value as the accessors print it [orig: sprintf "%d" @ 0x75fc11 / "%f" @ 0x75fbae].
-std::string printed(const ConfigValue &v) {
+// A value as the accessors print it [orig: sprintf "%d" @ 0x75fc11 / "%f" @ 0x75fbae]; any other type's
+// text is `as_text`, the value's own or its CBIN string.
+std::string printed(const ConfigValue &v, const std::string &as_text) {
 	if (v.type == 1) return std::to_string(v.integer);
 	if (v.type == 2) {
 		char buffer[512];
 		std::snprintf(buffer, sizeof buffer, "%f", static_cast<double>(v.real));
 		return buffer;
 	}
-	return v.text;
+	return as_text;
+}
+
+// A float copied through the x87 (`fld dword` then `fstp dword`): every value comes out as it went in but a
+// signaling NaN, which the load quiets, its quiet bit (0x400000) set.
+float x87_float_copy(float value) {
+	uint32_t bits = 0;
+	std::memcpy(&bits, &value, sizeof bits);
+	if ((bits & 0x7F800000u) == 0x7F800000u && (bits & 0x007FFFFFu) != 0) bits |= 0x00400000u;
+	std::memcpy(&value, &bits, sizeof value);
+	return value;
 }
 
 // One value into the accessor's outputs [orig: @ 0x75fb2e..0x75fc36]: an integer read as a float
-// converts (fild), a float read as an integer truncates (_ftol2_sse), a string reads as 0.
-void store(const ConfigValue &v, std::string *text, float *real, int32_t *integer) {
+// converts (fild), a float read as a float goes through the x87 [orig: Effect_GetParamValue_0 @ 0x75fa00,
+// fld @ 0x75fb7f, fstp @ 0x75fb83; Effect_GetParamValue @ 0x75f580, fld @ 0x75f693, fstp @ 0x75f697], a
+// float read as an integer truncates (_ftol2_sse), any other type reads as 0.
+void store(const ConfigValue &v, const std::string &as_text, std::string *text, float *real, int32_t *integer) {
 	if (v.type == 1) {
 		if (real != nullptr) *real = static_cast<float>(v.integer);
 		if (integer != nullptr) *integer = v.integer;
 	} else if (v.type == 2) {
-		if (real != nullptr) *real = v.real;
+		if (real != nullptr) *real = x87_float_copy(v.real);
 		if (integer != nullptr) *integer = io::retail_ftol_sse2(static_cast<double>(v.real));
 	}
-	if (text != nullptr) *text = printed(v);
+	if (text != nullptr) *text = printed(v, as_text);
 }
 
 } // namespace
@@ -159,10 +172,42 @@ std::vector<ConfigSection> parse_config_text(const uint8_t *data, size_t size) {
 	return sections;
 }
 
+size_t config_entry_count(const ConfigSection &s) {
+	return s.block ? s.count : s.entries.size();
+}
+
+const ConfigEntry &config_entry(const ConfigSection &s, size_t index) {
+	return s.block ? s.block->entries[s.first + index] : s.entries[index];
+}
+
+const std::string &config_section_label(const ConfigSection &s) {
+	return s.block && s.label_string != 0 ? s.block->strings[s.label_string - 1] : s.label;
+}
+
+const std::string &config_entry_key(const ConfigSection &s, const ConfigEntry &e) {
+	return s.block && e.key_string != 0 ? s.block->strings[e.key_string - 1] : e.key;
+}
+
+const std::string &config_value_text(const ConfigSection &s, const ConfigValue &v) {
+	return s.block && v.text_string != 0 ? s.block->strings[v.text_string - 1] : v.text;
+}
+
+bool config_faulted(const std::vector<ConfigSection> &sections) {
+	for (const ConfigSection &s : sections)
+		if (s.fault) return true;
+	return false;
+}
+
 ConfigSection *find_config_section(std::vector<ConfigSection> &sections, const char *name) {
 	const std::string label = strutil::to_lower(name);
 	for (ConfigSection &s : sections) {
-		if (!strutil::iequals(s.label, label)) continue;
+		// The scan's stricmp on a null label ends the game [orig: ConfigFile_FindLabelLinear @ 0x75ee50, the
+		// call @ 0x75ee84]: the stand-in fault.
+		if (s.null_label) {
+			s.fault = true;
+			return nullptr;
+		}
+		if (!strutil::iequals(config_section_label(s), label)) continue;
 		s.current = 0;
 		s.next = SIZE_MAX;
 		return &s;
@@ -175,18 +220,32 @@ bool read_config_value(ConfigSection &s, const char *key, int index, std::string
 	if (real != nullptr) *real = 0.0f;
 	if (integer != nullptr) *integer = 0;
 	size_t at = s.next != SIZE_MAX ? s.next : s.current;
-	if (index < 1 || at >= s.entries.size()) return false;
-	while (!strutil::iequals(s.entries[at].key, key)) {
+	const size_t count = config_entry_count(s);
+	if (index < 1 || at >= count) return false;
+	// Each name the walk compares through stricmp [orig: @ 0x75fa8f]; a stray one faults.
+	const auto compared = [&s, key](size_t i) {
+		const ConfigEntry &e = config_entry(s, i);
+		if (e.key_faults) s.fault = true;
+		return s.fault || strutil::iequals(config_entry_key(s, e), key);
+	};
+	while (!compared(at)) {
 		s.current = at;
-		if (s.entries[at].values.empty()) return false;
+		const ConfigEntry &passed = config_entry(s, at);
+		if (passed.values.empty() && !passed.value_pointer_set) return false;
 		s.next = ++at;
-		if (at >= s.entries.size()) return false;
+		if (at >= count) return false;
 	}
+	if (s.fault) return false;
 	s.current = at;
 	s.next = at + 1;
-	const ConfigEntry &entry = s.entries[at];
+	const ConfigEntry &entry = config_entry(s, at);
 	if (static_cast<size_t>(index) > entry.values.size()) return false;
-	store(entry.values[static_cast<size_t>(index - 1)], text, real, integer);
+	const ConfigValue &value = entry.values[static_cast<size_t>(index - 1)];
+	if (text != nullptr && value.text_faults) {
+		s.fault = true;
+		return false;
+	}
+	store(value, config_value_text(s, value), text, real, integer);
 	return true;
 }
 
@@ -194,12 +253,21 @@ bool read_current_config_value(ConfigSection &s, const char *key, int index, std
 		int32_t *integer) {
 	if (real != nullptr) *real = 0.0f;
 	if (integer != nullptr) *integer = 0;
-	if (index < 1 || s.current >= s.entries.size() || !strutil::iequals(s.entries[s.current].key, key))
+	if (index < 1 || s.current >= config_entry_count(s)) return false;
+	const ConfigEntry &entry = config_entry(s, s.current);
+	if (entry.key_faults) {
+		s.fault = true;
 		return false;
-	const ConfigEntry &entry = s.entries[s.current];
+	}
+	if (!strutil::iequals(config_entry_key(s, entry), key)) return false;
 	s.next = s.current + 1;
 	if (static_cast<size_t>(index) > entry.values.size()) return false;
-	store(entry.values[static_cast<size_t>(index - 1)], text, real, integer);
+	const ConfigValue &value = entry.values[static_cast<size_t>(index - 1)];
+	if (text != nullptr && value.text_faults) {
+		s.fault = true;
+		return false;
+	}
+	store(value, config_value_text(s, value), text, real, integer);
 	return true;
 }
 

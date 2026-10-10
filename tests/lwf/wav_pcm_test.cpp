@@ -1,8 +1,9 @@
 // lwf::wav_decode_pcm16: the game's wave loader's walk and its refusals
-// (D-SND-33 / D-SND-43), the PCM8/PCM16 normalizations, and the IMA-ADPCM
-// block decode (hand-computed against the IMA step/index tables), moved from
-// the shell adapter's WavLoader; and the sample count and pitch ratio the
-// game's wave loader records (a dialog line's hold reads them).
+// (D-SND-33 / D-SND-43), the PCM8/PCM16 normalizations, the loader's own AUD1
+// buffer (D-SND-44) and its own IMA ADPCM decode (D-SND-45, each leg
+// hand-computed from the witnessed nibble step), moved from the shell
+// adapter's WavLoader; and the sample count and pitch ratio the game's wave
+// loader records (a dialog line's hold reads them).
 #include <formats/lwf/wav_pcm.h>
 
 #include <cstddef>
@@ -10,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -110,6 +112,12 @@ int16_t sample_at(const opennova::lwf::WavPcm &pcm, size_t frame) {
 			(pcm.pcm16[frame * 2 + 1] << 8));
 }
 
+std::vector<int16_t> samples_of(const opennova::lwf::WavPcm &pcm) {
+	std::vector<int16_t> out(pcm.pcm16.size() / 2);
+	for (size_t i = 0; i < out.size(); ++i) out[i] = sample_at(pcm, i);
+	return out;
+}
+
 }  // namespace
 
 int main() {
@@ -152,13 +160,13 @@ int main() {
 				"PCM8 loader samples/pitch")) return 1;
 	}
 
-	// IMA-ADPCM mono, one 8-byte block: header {pred=100, idx=0, pad} + one
-	// 4-byte nibble word 0x40 0x00 0x00 0x00. Hand-walk of the IMA tables:
-	// the block's first frame IS the predictor (100); nibble 0 at idx 0
-	// (step 7) adds step>>3 = 0 -> 100, idx clamps at 0; nibble 4 adds
-	// step (7) -> 107, idx += 2; the six zero nibbles then decay idx to 0
-	// adding step>>3 of steps {9, 8, 7, 7, 7, 7} -> 101 each time... step>>3
-	// for steps 9/8/7 is 1/1/0, so frames run 108, 109, 109, 109, 109, 109.
+	// IMA ADPCM, the loader's own decode [orig: Audio_LoadWavFileFromArchive @ 0x766480, the 4-bit
+	// leg; Audio_AdpcmDecodeNibbleStep @ 0x7bf250]: exactly the fact chunk's count of samples, each
+	// block its predictor and then, per byte, its low and its high nibble, each nibble moving the
+	// sample by (step * scale[nibble]) >> 16, floored. One 8-byte block {pred 100, index 0, pad,
+	// 0x40 0x00 0x00 0x00} with a fact count of 5: the predictor 100; nibble 0 at step 7 adds
+	// 7 * 0x2000 >> 16 = 0 (index 0); nibble 4 adds 7 * 0x12000 >> 16 = 7 (index 2); nibble 0 at
+	// step 9 adds 1 (index 1); nibble 0 at step 8 adds 1; then the count is spent, mid-block.
 	{
 		std::vector<uint8_t> data;
 		push_u16(data, 100);   // predictor
@@ -169,37 +177,150 @@ int main() {
 		data.push_back(0x00);
 		data.push_back(0x00);
 		const std::vector<uint8_t> wav = make_wav(0x11, 1, 8000, 8, 4, data);
-		// IMA ADPCM: the fact chunk's count, not the block's decoded frames; 8000 Hz
-		// is (524288000 + 22050) / 44100 = 11889 [orig: @ 0x76678a..0x7667ba, @ 0x7667e1].
+		// The loader's record: the fact chunk's count; 8000 Hz is
+		// (524288000 + 22050) / 44100 = 11889 [orig: @ 0x76678a..0x7667ba, @ 0x7667e1].
 		const std::vector<uint8_t> facted_wav = with_fact(wav, 5);
 		WavPcm out;
 		if (!expect(wav_decode_pcm16(facted_wav.data(), facted_wav.size(), out, error),
 				"ADPCM decodes")) return 1;
-		if (!expect(out.pcm16.size() == 9 * 2,
-				"one block yields predictor + 8 nibble frames")) return 1;
-		if (!expect(sample_at(out, 0) == 100, "frame 0 is the block predictor")) return 1;
-		if (!expect(sample_at(out, 1) == 100, "nibble 0 at step 7 adds 0")) return 1;
-		if (!expect(sample_at(out, 2) == 107, "nibble 4 at step 7 adds the step")) return 1;
-		// Verify the tail against an independent re-walk of the tables.
-		{
-			int pred = 107;
-			int idx = 2;
-			const int kStep[] = { 7, 8, 9, 10 };
-			(void)kStep;
-			const int steps[] = { 9, 8, 7, 7, 7, 7 };
-			for (int i = 0; i < 6; ++i) {
-				pred += steps[i] >> 3;
-				if (!expect(sample_at(out, static_cast<size_t>(3 + i)) == pred,
-						"zero nibbles add step>>3 while the index decays")) return 1;
-			}
+		if (!expect(samples_of(out) == std::vector<int16_t>({100, 100, 107, 108, 109}),
+				"the fact count's samples, stopped mid-block")) return 1;
+		if (!expect(out.loader_samples == 5 && out.loader_pitch_q16 == 11889,
+				"ADPCM loader samples are the fact count")) return 1;
+		// The stop lands on the predictor, a low nibble or a high one
+		// [orig: @ 0x766823, @ 0x766866, @ 0x766896].
+		const std::vector<std::vector<int16_t>> stops = {{100}, {100, 100}, {100, 100, 107}};
+		for (uint32_t count = 1; count <= 3; ++count) {
+			const std::vector<uint8_t> stopped = with_fact(wav, count);
+			if (!expect(wav_decode_pcm16(stopped.data(), stopped.size(), out, error) &&
+					samples_of(out) == stops[count - 1], "the count stops the decode at once")) return 1;
 		}
-		if (!expect(out.loader_samples == 5 && out.loader_pitch_q16 == 11889 &&
-				out.pcm16.size() == 9 * 2, "ADPCM loader samples are the fact count")) return 1;
+		// A count of 0 or less decodes none [orig: @ 0x7667fb]; the record keeps it as it says.
+		for (const uint32_t count : {0u, 0xFFFFFFFFu, 0x80000000u}) {
+			const std::vector<uint8_t> none = with_fact(wav, count);
+			if (!expect(wav_decode_pcm16(none.data(), none.size(), out, error) && out.pcm16.empty() &&
+					out.loader_samples == count, "a count of 0 or less decodes no sample")) return 1;
+		}
 		// 4-bit samples with no fact chunk are refused [orig: @ 0x766772].
 		WavPcm unfacted;
 		if (!expect(!wav_decode_pcm16(wav.data(), wav.size(), unfacted, error) &&
 				unfacted.pcm16.empty() && !error.empty(),
 				"ADPCM with no fact chunk is refused")) return 1;
+		// Past the data the decode reads on through the file, a chunk after it included (the
+		// loader's read is the count's, never the data chunk's size): a 4-byte data chunk and a LIST
+		// after it, its id's 'L' (0x4C) read as nibbles 12 and 4 (at step 7 floor(-63 / 8) = -8,
+		// then at step 9 floor(81 / 8) = 10). Where the file's bytes end the decode stops (a bound of ours: the loader reads on
+		// past them).
+		const std::vector<uint8_t> header(data.begin(), data.begin() + 4);
+		std::vector<uint8_t> listed = with_fact(make_wav(0x11, 1, 8000, 8, 4, header), 3);
+		listed.insert(listed.end(), {'L', 'I', 'S', 'T', 0, 0, 0, 0});
+		if (!expect(wav_decode_pcm16(listed.data(), listed.size(), out, error) &&
+				samples_of(out) == std::vector<int16_t>({100, 92, 102}),
+				"the decode reads past the data chunk")) return 1;
+		const std::vector<uint8_t> past = with_fact(wav, 100);
+		if (!expect(wav_decode_pcm16(past.data(), past.size(), out, error) &&
+				out.pcm16.size() == 9 * 2 && out.loader_samples == 100,
+				"a count past the file's bytes plays the samples there")) return 1;
+	}
+
+	// The nibble step [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf250]: the step read at the index
+	// before it moves (word_7BF300 @ 0x7bf256), diff = (step * scale[nibble]) >> 16 over the scale
+	// table +/-0x2000 * (2n + 1) (dword_7BF2C0 @ 0x7bf265; imul, shrd 16), the sample held to int16
+	// (@ 0x7bf274..0x7bf289), the index moved by dword_7BF3B2 (@ 0x7bf25e) and held to 0..88
+	// (@ 0x7bf28e..0x7bf29a). Each leg: a 5-byte block {pred, index, pad, byte}, the fact count 3.
+	{
+		const auto decode = [&](int16_t pred, uint8_t index, uint8_t byte, std::vector<int16_t> &r) {
+			std::vector<uint8_t> block;
+			push_u16(block, static_cast<uint16_t>(pred));
+			block.push_back(index);
+			block.push_back(0);
+			block.push_back(byte);
+			const std::vector<uint8_t> wav = with_fact(make_wav(0x11, 1, 8000, 5, 4, block), 3);
+			WavPcm out;
+			if (!wav_decode_pcm16(wav.data(), wav.size(), out, error)) return false;
+			r = samples_of(out);
+			return r.size() == 3;
+		};
+		struct Leg {
+			int16_t pred;
+			uint8_t index;
+			uint8_t byte;   // low nibble first, then high
+			int16_t first;  // after the low nibble
+			int16_t second; // after the high nibble
+			const char *what;
+		};
+		const Leg legs[] = {
+			// Step 7: nibble 7 adds floor(7 * 15 / 8) = 13 (the shifted steps add 11); then at the
+			// index 8 (step 16) nibble 0 adds 2.
+			{0, 0, 0x07, 13, 15, "step 7, nibble 7 adds 13"},
+			// Step 7: nibble 8 takes floor(-7 / 8) = -1 (the shifted steps 0); the index held at 0,
+			// nibble 0 adds floor(7 / 8) = 0.
+			{0, 0, 0x08, -1, -1, "step 7, nibble 8 takes 1"},
+			// Step 7: nibble 15 takes floor(-105 / 8) = -14; then step 16, nibble 1 adds 6.
+			{0, 0, 0x1F, -14, -8, "step 7, nibble 15 takes 14"},
+			// Step 876 (index 50): nibble 3 adds floor(876 * 7 / 8) = 766; at index 49 (step 796)
+			// nibble 11 takes floor(-796 * 7 / 8) = -697 (the shifted steps 696).
+			{0, 50, 0xB3, 766, 69, "step 876 nibble 3 adds 766, step 796 nibble 11 takes 697"},
+			// Step 19 (index 10): nibble 4 adds 21; at index 12 (step 23) nibble 5 adds
+			// floor(23 * 11 / 8) = 31 (the shifted steps 30).
+			{1000, 10, 0x54, 1021, 1052, "step 19 nibble 4, then step 23 nibble 5"},
+			// Step 32767 (index 88): nibble 7 adds floor(32767 * 15 / 8) = 61438, held at 32767;
+			// nibble 15 takes 61439, held at -32768.
+			{0, 88, 0x77, 32767, 32767, "the sample is held at 32767"},
+			{0, 88, 0xFF, -32768, -32768, "the sample is held at -32768"},
+			// The index held at 88: nibble 7 from -32768 adds 61438 (28670), the index 96 held at
+			// 88, so nibble 0 adds floor(32767 / 8) = 4095.
+			{-32768, 88, 0x07, 28670, 32765, "the index is held at 88"},
+			// The index held at 0: nibble 0 at index 0 leaves it 0, nibble 7 adds 13.
+			{500, 0, 0x70, 500, 513, "the index is held at 0"},
+		};
+		for (const Leg &leg : legs) {
+			std::vector<int16_t> got;
+			const bool ok = decode(leg.pred, leg.index, leg.byte, got);
+			if (!expect(ok && got[0] == leg.pred && got[1] == leg.first && got[2] == leg.second,
+					leg.what)) {
+				if (got.size() == 3) std::fprintf(stderr, "  got %d %d %d\n", got[0], got[1], got[2]);
+				return 1;
+			}
+		}
+		// The block's step index is a signed byte [orig: @ 0x766804]: 0xF7 is -9, which nibble 7
+		// moves to -1 and the step holds at 0, so the next nibble steps at 7 (nibble 9 takes
+		// floor(-21 / 8) = -3); read unsigned it would be 247, held at 88 (a step of 32767). The
+		// first nibble's own step, read at -9 past the table's start, is D-SND-47's.
+		std::vector<int16_t> got;
+		if (!expect(decode(0, 0xF7, 0x97, got) && got[2] - got[1] == -3,
+				"the step index is a signed byte")) return 1;
+	}
+
+	// block_align is read signed, its 4-byte header taken off [orig: @ 0x766786..0x76679e]: at 4 or
+	// under (0, 2, 0x8000, 0xFFFF among them) a block is its header alone, each 4 bytes one sample
+	// [orig: @ 0x766834]; at 5 a header and one byte, three samples.
+	{
+		std::vector<uint8_t> headers;
+		for (const int16_t pred : {int16_t(11), int16_t(-22), int16_t(33)}) {
+			push_u16(headers, static_cast<uint16_t>(pred));
+			headers.push_back(0);
+			headers.push_back(0);
+		}
+		for (const uint16_t align : {uint16_t(0), uint16_t(2), uint16_t(4), uint16_t(0x8000), uint16_t(0xFFFF)}) {
+			const std::vector<uint8_t> wav = with_fact(make_wav(0x11, 1, 8000, align, 4, headers), 3);
+			WavPcm out;
+			if (!expect(wav_decode_pcm16(wav.data(), wav.size(), out, error) &&
+					samples_of(out) == std::vector<int16_t>({11, -22, 33}),
+					"a block_align of 4 or under (signed) is a header alone")) return 1;
+		}
+		std::vector<uint8_t> blocks;
+		for (const int16_t pred : {int16_t(100), int16_t(-100)}) {
+			push_u16(blocks, static_cast<uint16_t>(pred));
+			blocks.push_back(0);
+			blocks.push_back(0);
+			blocks.push_back(0x07);
+		}
+		const std::vector<uint8_t> wav = with_fact(make_wav(0x11, 1, 8000, 5, 4, blocks), 6);
+		WavPcm out;
+		if (!expect(wav_decode_pcm16(wav.data(), wav.size(), out, error) &&
+				samples_of(out) == std::vector<int16_t>({100, 113, 115, -100, -87, -85}),
+				"a block_align of 5 is a header and one byte")) return 1;
 	}
 
 	// What the game's wave loader refuses the decode refuses; what it takes the
@@ -311,41 +432,104 @@ int main() {
 				"8-bit: the declared size, the present samples")) return 1;
 	}
 
-	// AOA1's sample count excludes interpolation padding and PCM8 is SIGNED.
+	// The loader's own buffer, AUD1 (bytes 41 55 44 31), copied unchecked
+	// [orig: Audio_LoadWavFileFromArchive @ 0x7664e2, @ 0x7664e9..0x766511], read
+	// as the mixer reads it: the count at +4 (sub_7BD671 @ 0x7bd67f), the Q16
+	// pitch at +8 (AudioChannel_ComputeMixCoefficients @ 0x7bd603), signed
+	// samples from +16, 16-bit where +12 is 2 and 8-bit for any other byte there
+	// (sub_7BD671 @ 0x7bd692). An AOA1 buffer falls to the RIFF compare and is
+	// refused (@ 0x766523), as is either form under the strict and the lenient decode.
 	for (const uint8_t width : {uint8_t(1), uint8_t(2)}) {
-		std::vector<uint8_t> aoa;
-		push_tag(aoa, "AOA1"); push_u32(aoa, 3); push_u32(aoa, 32768);
-		push_u32(aoa, width);
-		if (width == 1) aoa.insert(aoa.end(), {0x80, 0x00, 0x7F});
-		else { push_u16(aoa, 0x8000); push_u16(aoa, 0); push_u16(aoa, 0x7F00); }
-		const size_t payload_end = aoa.size();
-		aoa.insert(aoa.end(), 8, 0x55);
+		std::vector<uint8_t> aud;
+		push_tag(aud, "AUD1"); push_u32(aud, 3); push_u32(aud, 32768);
+		push_u32(aud, width);
+		if (width == 1) aud.insert(aud.end(), {0x80, 0x00, 0x7F});
+		else { push_u16(aud, 0x8000); push_u16(aud, 0); push_u16(aud, 0x7F00); }
+		const size_t payload_end = aud.size();
+		aud.insert(aud.end(), 8, 0x55);
 		WavPcm out;
-		if (!expect(wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"AOA1 signed PCM decodes")) return 1;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error),
+				"AUD1 signed PCM decodes")) return 1;
 		if (!expect(out.channels == 1 && out.sample_rate == 22050 && out.pcm16.size() == 6,
-				"AOA1 mono count/rate excludes mixer padding")) return 1;
+				"AUD1 mono count/rate excludes the bytes past its samples")) return 1;
 		if (!expect(sample_at(out, 0) == -32768 && sample_at(out, 1) == 0 &&
-				sample_at(out, 2) == 32512, "AOA1 signed sample extrema")) return 1;
+				sample_at(out, 2) == 32512, "AUD1 signed sample extrema")) return 1;
 		if (!expect(out.loader_samples == 3 && out.loader_pitch_q16 == 32768,
-				"AOA1 loader samples/pitch are its header's")) return 1;
-		aoa.resize(payload_end);
-		if (!expect(wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"on-disk AOA1 does not require generated mixer padding")) return 1;
-		for (const size_t truncated : {size_t(4), size_t(15), payload_end - 1}) {
-			if (!expect(!wav_decode_pcm16(aoa.data(), truncated, out, error) &&
-					out.pcm16.empty() && !error.empty(), "AOA1 rejects truncation")) return 1;
+				"AUD1 loader samples/pitch are its header's")) return 1;
+		WavPcm lenient;
+		if (!expect(opennova::lwf::wav_decode_pcm16_lenient(aud.data(), aud.size(), lenient, error) &&
+				lenient.pcm16 == out.pcm16 && lenient.loader_samples == 3,
+				"the lenient decode reads AUD1 as the strict one does")) return 1;
+		std::vector<uint8_t> aoa = aud;
+		aoa[1] = 'O';
+		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error) && out.pcm16.empty() &&
+				!opennova::lwf::wav_decode_pcm16_lenient(aoa.data(), aoa.size(), lenient, error),
+				"an AOA1 buffer is refused at the RIFF compare")) return 1;
+		aud.resize(payload_end);
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error),
+				"on-disk AUD1 needs no bytes past its samples")) return 1;
+		// The copy reads what follows the bytes: a buffer ending inside its header is
+		// refused (a bound of ours); samples past the end play those present, the
+		// count as it says.
+		for (const size_t truncated : {size_t(4), size_t(15)}) {
+			if (!expect(!wav_decode_pcm16(aud.data(), truncated, out, error) &&
+					out.pcm16.empty() && !error.empty(), "AUD1 ending inside its header is refused")) return 1;
 		}
-		aoa[4] = 0xFF; aoa[5] = 0xFF; aoa[6] = 0xFF; aoa[7] = 0xFF;
-		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"AOA1 rejects oversized count before allocation")) return 1;
-		aoa[4] = 3; aoa[5] = aoa[6] = aoa[7] = 0;
-		aoa[12] = 3;
-		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"AOA1 rejects unsupported sample width")) return 1;
-		aoa[12] = width; aoa[8] = aoa[9] = aoa[10] = aoa[11] = 0;
-		if (!expect(!wav_decode_pcm16(aoa.data(), aoa.size(), out, error),
-				"AOA1 rejects zero rate")) return 1;
+		if (!expect(wav_decode_pcm16(aud.data(), payload_end - width, out, error) &&
+				out.pcm16.size() == 4 && out.loader_samples == 3,
+				"AUD1 samples past the bytes play those present")) return 1;
+		aud[4] = 0xFF; aud[5] = 0xFF; aud[6] = 0xFF; aud[7] = 0xFF;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.pcm16.size() == 6 &&
+				out.loader_samples == 0xFFFFFFFFu, "AUD1 count past the bytes plays the bytes")) return 1;
+		aud[4] = 0; aud[5] = aud[6] = aud[7] = 0;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.pcm16.empty() &&
+				out.loader_samples == 0, "AUD1 count 0 plays no sample")) return 1;
+		// A pitch of 0 is taken as it is, the rate it rounds to 0.
+		aud[4] = 3;
+		aud[8] = aud[9] = aud[10] = aud[11] = 0;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.loader_pitch_q16 == 0 &&
+				out.sample_rate == 0, "AUD1 pitch 0 is taken")) return 1;
+	}
+	// The width byte: 2 is 16-bit, any other 8-bit [orig: sub_7BD671 @ 0x7bd692].
+	for (const uint8_t width : {uint8_t(0), uint8_t(3), uint8_t(0xFF)}) {
+		std::vector<uint8_t> aud;
+		push_tag(aud, "AUD1"); push_u32(aud, 2); push_u32(aud, 16384);
+		push_u32(aud, width);
+		aud.insert(aud.end(), {0x81, 0x7F});
+		WavPcm out;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.pcm16.size() == 4 &&
+				sample_at(out, 0) == -32512 && sample_at(out, 1) == 32512 && out.sample_rate == 11025,
+				"AUD1 width byte other than 2 is 8-bit")) return 1;
+	}
+	// The loader's pad goes by the raw width byte [orig: Audio_LoadWavFileFromArchive
+	// @ 0x76668a..0x7668da]: at width 0 it lands on +16, the mixer's first eight samples, and
+	// zeroes them where the word there is under 0x800 in size (else copies them onto themselves).
+	{
+		const auto width0 = [&](uint8_t lo, uint8_t hi, std::vector<int16_t> &r) {
+			std::vector<uint8_t> aud;
+			push_tag(aud, "AUD1"); push_u32(aud, 10); push_u32(aud, 32768);
+			push_u32(aud, 0);
+			aud.insert(aud.end(), {lo, hi, 3, 4, 5, 6, 7, 8, 9, 10});
+			WavPcm out;
+			if (!wav_decode_pcm16(aud.data(), aud.size(), out, error)) return false;
+			r = samples_of(out);
+			return r.size() == 10;
+		};
+		const std::vector<int16_t> tail = {9 << 8, 10 << 8};
+		std::vector<int16_t> got;
+		for (const auto &word : std::vector<std::pair<uint8_t, uint8_t>>{{0x10, 0x00}, {0xFF, 0x07}, {0x01, 0xF8}}) {
+			if (!expect(width0(word.first, word.second, got) &&
+					std::vector<int16_t>(got.begin(), got.begin() + 8) == std::vector<int16_t>(8, 0) &&
+					std::vector<int16_t>(got.begin() + 8, got.end()) == tail,
+					"AUD1 width 0: a first word under 0x800 in size zeroes the first eight samples")) return 1;
+		}
+		for (const auto &word : std::vector<std::pair<uint8_t, uint8_t>>{{0x00, 0x08}, {0x00, 0xF8}}) {
+			if (!expect(width0(word.first, word.second, got) &&
+					got[0] == static_cast<int16_t>(word.first << 8) &&
+					got[1] == static_cast<int16_t>(static_cast<int8_t>(word.second) * 256) &&
+					got[2] == (3 << 8) && got[9] == (10 << 8),
+					"AUD1 width 0: a first word of 0x800 or more in size leaves them")) return 1;
+		}
 	}
 
 	// Malformed streams report errors.

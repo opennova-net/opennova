@@ -188,10 +188,20 @@ void OptionsScreen::switch_device(MenuRuntime &menu, controls::Device device) {
 // ENABLE_JOYSTICK -> sub_5554B0 @0x5556bc; sub_55A710 (the front ACCEPT) @0x55ab5f..0x55ace5;
 // UI_RegisterOptionsCallbacks ENABLE_JOYSTICK -> sub_55B010 @0x55d780;
 // OPTIONS DEFAULTS @0x55bd90; CLEAR_KEY @0x55bfd0]
-int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record,
-		const std::string &name) {
+int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record, int id) {
 	if (!is_surface_) return None;
-	const auto upper = strutil::to_upper(name);
+	const auto upper = strutil::to_upper(menu.widget_name_of(id));
+	// The front BACK is registered on the OPTIONS scene's own BACK control,
+	// user_data 0 [orig: UI_RegisterOptionsCallbacks @0x55d629], so the in-game
+	// dialog (scene INGAME) has none. The callback rides that control and runs
+	// after its ACTION rows [orig: CWnd_EmitEventToNamedHandlerAndCallbacks
+	// @0x646970], whatever screen a pop_screen row selected meanwhile
+	// [orig: UIScene_PopScreenHistory @0x63c410]: the gate is the activated
+	// control's own screen, not the shown one. It writes no word: it puts the
+	// saved gamma, music volume and menu sound-effects volume back over the live
+	// previews [orig: Options_HandleAcceptOrBack @0x55adcf..0x55ae01], which the
+	// shell's options owner does by returning to its entry state.
+	if (upper == "BACK" && is_front_screen(menu.widget_screen_of(id))) return DiscardEdits;
 	if (upper == "OPT_ACCEPT") {
 		if (record != nullptr) {
 			profile::store_bindings(bindings_, *record);  // [orig: @0x554e74]
@@ -251,6 +261,10 @@ int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record,
 		menu.table_select_row(table, row, false);
 	}
 	return None;
+}
+
+bool OptionsScreen::is_front_screen(const std::string &screen) {
+	return strutil::iequals(screen, "OPTIONS");
 }
 
 void OptionsScreen::show_ingame_main(MenuRuntime &menu) {

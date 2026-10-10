@@ -447,6 +447,52 @@ func test_front_options_accept_keeps_immediate_changes_and_returns_to_main() -> 
 	_cleanup(dir)
 
 
+# The front-end OPTIONS BACK keeps no widget edit: retail writes the widgets'
+# words only at the ACCEPT, and its BACK puts the saved music volume (and the gamma and the menu's
+# sound-effects volume) back over the live previews, so an edit the owner applied
+# and saved at once returns to the entry state, on the device too, while the
+# BACK's pop_screen returns to main.mnu [orig: Options_HandleAcceptOrBack
+# @0x55adcf..0x55ae01; UI_RegisterOptionsCallbacks @0x55d629].
+func test_front_options_back_discards_the_screen_edits_and_returns_to_main() -> void:
+	var saved_config := TestFs.snapshot(PlayerOptions.CONFIG_PATH)
+	var options := PlayerOptions.new()
+	var entry := options.current()
+	entry.music_volume = 40
+	entry.sound_fx_volume = 50
+	options.update(entry)
+	var dir := _make_dir()
+	_copy(OPTIONS_FIXTURE, dir.path_join("options.mnu"))
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		saved_config.restore()
+		return
+	var driver: MenuDriver = shell.get_driver()
+	driver.menu_requested.emit("options.mnu", "")
+	assert_eq(shell.get_current_menu_file(), "options.mnu")
+	driver.widget_value_changed.emit("MUSICVOLUME", "scroll", 88, "88")
+	driver.widget_value_changed.emit("SOUNDFXVOLUME", "scroll", 99, "99")
+	assert_eq(options.current().music_volume, 88, "the edit applies live as the preview")
+	var back := driver.widget_id("BACK")
+	assert_gte(back, 0, "the front Options authors BACK")
+	driver.activate(back)
+	assert_eq(shell.get_current_menu_file(), "main.mnu",
+			"the BACK's pop_screen returns through the shell file stack")
+	assert_eq(options.current().music_volume, 40, "BACK discards the music edit")
+	assert_eq(options.current().sound_fx_volume, 50, "BACK discards the sound-effects edit")
+	var reloaded := PlayerOptions.new().current()
+	assert_eq(reloaded.music_volume, 40, "the config holds the entry music volume")
+	assert_eq(reloaded.sound_fx_volume, 50, "the config holds the entry sound-effects volume")
+	var music_bus := AudioServer.get_bus_index(PlayerOptions.MUSIC_BUS)
+	if music_bus >= 0:
+		assert_almost_eq(AudioServer.get_bus_volume_db(music_bus),
+				SoundSelector.volume_db_from_255(40), 0.001,
+				"the live music preview is rolled back")
+	_cleanup(dir)
+	saved_config.restore()
+
+
 func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> void:
 	var options := PlayerOptions.new()
 	var initial := options.current()

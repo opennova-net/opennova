@@ -112,6 +112,7 @@ public:
 		OPTIONS_COMMIT_PREVIEW = opennova::menu::OptionsScreen::CommitPreview,
 		OPTIONS_RESTORE_PREVIEW = opennova::menu::OptionsScreen::RestorePreview,
 		OPTIONS_APPLY_CONTROLS = opennova::menu::OptionsScreen::ApplyControls,
+		OPTIONS_DISCARD_EDITS = opennova::menu::OptionsScreen::DiscardEdits,
 	};
 	void set_mission_controls(const PackedStringArray &p_lists,
 			const PackedStringArray &p_briefings, const PackedStringArray &p_accepts);
@@ -157,7 +158,10 @@ public:
 	// "mod_lists", "mod_descriptions"): MenuShell's defaults, one table the editor's Try mode
 	// reads too. Empty for another token.
 	static PackedStringArray command_names(const String &p_set);
-	int activate_options(const Ref<PlayerProfiles> &p_profiles, const String &p_name);
+	// The front-end OPTIONS screen, whose every show re-runs the options
+	// preparation (engine OptionsScreen::is_front_screen).
+	static bool is_front_options_screen(const String &p_screen);
+	int activate_options(const Ref<PlayerProfiles> &p_profiles, int p_id);
 	void arm_options_remap(int p_id, int p_row) { options_.arm(runtime_, p_id, p_row); }
 	int consume_options_input(const Ref<InputEvent> &p_event);
 	void end_options_remap(bool p_refill) { options_.end_remap(runtime_, p_refill); }

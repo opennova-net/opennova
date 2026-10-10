@@ -65,7 +65,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // [orig: model+168 callback; BoneCallback_Simple @ 0x4e2600;
     // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 advances matrix+64 and
     // COBJ+108 in lockstep.]
-    if (e->item_section_piece && !e->palm_sections) {
+    if (e->section_clone && !e->palm_sections) {
         const Vec3 render_pos = item_section_render_position(world, *e);
         world_mat.m[3] = int32_t(render_pos.x * 65536);
         world_mat.m[7] = int32_t(render_pos.y * 65536);

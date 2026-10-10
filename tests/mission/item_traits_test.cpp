@@ -8,6 +8,7 @@
 // post-parse so this file pins only the FOLD's mapping.
 #include <formats/def/def.h>
 #include <runtime/mission/item_traits.h>
+#include <runtime/world/item_sections.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/world.h>
 
@@ -263,6 +264,45 @@ const char kItemsDef[] = "begin \"S5 Player\"\r\n"
     "  graphic swaytag\r\n"
     "  sid s5swaytag\r\n"
     "  render_function sway\r\n"
+    "end\r\n"
+    "\r\n"
+    // The palm-state section draw is the render tag's psec / cesp bone row;
+    // the palm event row writes +0x270 under any render tag and the
+    // ai_function's psec row is the null callback [orig: rows 'psec'
+    // @0x82d010 / 'cesp' @0x82d020 -> BoneCallback_psec_World @0x53c130;
+    // event row 'psec' @0x813288].
+    "begin \"S5 Psec Palm\"\r\n"
+    "  id 100549\r\n"
+    "  type decoration\r\n"
+    "  graphic psecpalm\r\n"
+    "  sid s5psecpalm\r\n"
+    "  ai_function palm\r\n"
+    "  render_function psec\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Cesp Tag\"\r\n"
+    "  id 100550\r\n"
+    "  type decoration\r\n"
+    "  graphic cesptag\r\n"
+    "  sid s5cesptag\r\n"
+    "  render_function cesp\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Gnrc Palm\"\r\n"
+    "  id 100551\r\n"
+    "  type decoration\r\n"
+    "  graphic gnrcpalm\r\n"
+    "  sid s5gnrcpalm\r\n"
+    "  ai_function palm\r\n"
+    "  render_function gnrc\r\n"
+    "end\r\n"
+    "\r\n"
+    "begin \"S5 Psec Event\"\r\n"
+    "  id 100552\r\n"
+    "  type decoration\r\n"
+    "  graphic psecevent\r\n"
+    "  sid s5psecevent\r\n"
+    "  ai_function psec\r\n"
     "end\r\n";
 
 // The minimal SndProf shape ("default" first, so a real profile lands at
@@ -303,7 +343,7 @@ int main() {
     CHECK(def_parse_items_memory(
                   reinterpret_cast<const uint8_t *>(kItemsDef),
                   sizeof(kItemsDef) - 1, &file) == 0);
-    CHECK(file.count == 24);
+    CHECK(file.count == 28);
 
     // Stamp the fields whose authored-token spellings are the def parser's own
     // test surface: distinct sentinels per vehicle-physics slot so any
@@ -390,7 +430,7 @@ int main() {
     World w;
     w.registry.configure_pool(0, 8);  // organics
     w.registry.configure_pool(1, 10); // items/vehicles
-    w.registry.configure_pool(2, 16); // buildings (bunker, bush, unknown, the 7 class rows + the 2 sway rows)
+    w.registry.configure_pool(2, 16); // buildings (bunker, bush, unknown, the 7 class rows, the 2 sway rows + the 4 section rows)
     const EntityHandle tank_h = spawn(w, 1, 500, EntityKind::Item);
     const EntityHandle apc_h = spawn(w, 1, 501, EntityKind::Item);
     const EntityHandle helo_h = spawn(w, 1, 502, EntityKind::Item);
@@ -423,6 +463,10 @@ int main() {
     for (uint16_t id = 540; id <= 546; ++id) spawn(w, 2, id, EntityKind::Building);
     const EntityHandle sway_tree_h = spawn(w, 2, 547, EntityKind::Building);
     const EntityHandle sway_tag_h = spawn(w, 2, 548, EntityKind::Building);
+    const EntityHandle psec_palm_h = spawn(w, 2, 549, EntityKind::Building);
+    const EntityHandle cesp_tag_h = spawn(w, 2, 550, EntityKind::Building);
+    const EntityHandle gnrc_palm_h = spawn(w, 2, 551, EntityKind::Building);
+    const EntityHandle psec_event_h = spawn(w, 2, 552, EntityKind::Building);
 
     // The wire-class supplier stub: the fold must stamp the returned byte
     // verbatim and default a functor miss to 0 (Unknown, fail closed).
@@ -704,6 +748,55 @@ int main() {
 		const Entity *sway_tag = w.registry.get(sway_tag_h);
 		CHECK(sway_tree != nullptr && sway_tree->render_sway);
 		CHECK(sway_tag != nullptr && !sway_tag->render_sway);
+	}
+
+	// The palm-state (+0x270) section draw binds through the render tag's
+	// psec / cesp bone rows alone: a palm event row under the gnrc tag and
+	// the ai_function's psec row draw no palm state.
+	// [orig: rows 'psec' @0x82d010 / 'cesp' @0x82d020 -> BoneCallback_psec_World
+	//  @0x53c130 -> CTerrainMap_BuildSectorTransformMatrices @0x53bf10;
+	//  BoneCallback_gnrc_World @0x4e2860; event row 'psec' @0x813288]
+	{
+		const Entity *psec_palm = w.registry.get(psec_palm_h);
+		const Entity *cesp_tag = w.registry.get(cesp_tag_h);
+		const Entity *gnrc_palm = w.registry.get(gnrc_palm_h);
+		const Entity *psec_event = w.registry.get(psec_event_h);
+		CHECK(psec_palm != nullptr && psec_palm->palm_sections);
+		CHECK(cesp_tag != nullptr && cesp_tag->palm_sections);
+		CHECK(gnrc_palm != nullptr && !gnrc_palm->palm_sections);
+		CHECK(psec_event != nullptr && !psec_event->palm_sections);
+		// The pool serializer still streams +0x270 for the palm event row.
+		CHECK(gnrc_palm != nullptr && gnrc_palm->palm_state_streamed);
+		CHECK(cesp_tag != nullptr && !cesp_tag->palm_state_streamed);
+	}
+
+	// A def resweep recomputes the draw both ways: the psec item edited to
+	// gnrc draws every section, the gnrc palm edited to psec draws the palm
+	// state; a palm fragment keeps its seed's under any tag (D-ITEMDEF-20).
+	{
+		DefItemDef *psec_def = entry_for(file, 100549);
+		DefItemDef *gnrc_def = entry_for(file, 100551);
+		CHECK(psec_def != nullptr && gnrc_def != nullptr);
+		Entity *fragment = w.registry.get(psec_event_h);
+		if (psec_def != nullptr && gnrc_def != nullptr && fragment != nullptr) {
+			std::snprintf(psec_def->render_function, sizeof(psec_def->render_function), "gnrc");
+			std::snprintf(gnrc_def->render_function, sizeof(gnrc_def->render_function), "psec");
+			fragment->palm_fragment = true;
+			mission::resolve_item_traits(w, file, wire_class);
+			CHECK(!w.registry.get(psec_palm_h)->palm_sections);
+			CHECK(w.registry.get(gnrc_palm_h)->palm_sections);
+			CHECK(fragment->palm_sections); // ai_function psec, no section tag
+			Entity *palm = w.registry.get(psec_palm_h);
+			palm->palm_state = 0;
+			CHECK(item_hidden_sections(*palm) == palm->section_mask);
+			std::snprintf(psec_def->render_function, sizeof(psec_def->render_function), "psec");
+			std::snprintf(gnrc_def->render_function, sizeof(gnrc_def->render_function), "gnrc");
+			fragment->palm_fragment = false;
+			mission::resolve_item_traits(w, file, wire_class);
+			CHECK(w.registry.get(psec_palm_h)->palm_sections);
+			CHECK(!w.registry.get(gnrc_palm_h)->palm_sections);
+			CHECK(!fragment->palm_sections);
+		}
 	}
 
 	// ---- the throwable class scan ----

@@ -1409,6 +1409,9 @@ mnu::Document flow_document(bool options = false) {
 		root.children.push_back(widget("CONTROL_MAPPING", mnu::WindowType::Table));
 		root.children.push_back(widget("KEYBOARD", mnu::WindowType::Radio));
 		root.children.push_back(widget("MOUSE", mnu::WindowType::Radio));
+		root.children.push_back(widget("JOYSTICK", mnu::WindowType::Radio));
+		root.children.push_back(widget("DEFAULTS", mnu::WindowType::Button));
+		root.children.push_back(widget("CLEAR_KEY", mnu::WindowType::Button));
 	}
 	screen.roots.push_back(root);
 	doc.screens.push_back(screen);
@@ -1709,6 +1712,8 @@ void test_multiple_roots() {
 
 void test_options_screen() {
 	auto doc = flow_document(true);
+	for (const char *name : {"OPT_ACCEPT", "OPT_CANCEL"})
+		doc.screens[0].roots[0].children.push_back(widget(name, mnu::WindowType::Button));
 	MenuRuntime menu;
 	menu.open_document(&doc, "options.mnu", "");
 	OptionsScreen options;
@@ -1741,11 +1746,11 @@ void test_options_screen() {
 	CHECK(menu.table_cell_text(table, 0, 2) == "Y or Up");
 	CHECK(options.consume(menu, input) == OptionsScreen::None);
 	menu.table_select_row(table, 0, false);
-	CHECK(options.activate(menu, nullptr, "CLEAR_KEY") == OptionsScreen::None);
+	CHECK(options.activate(menu, nullptr, menu.widget_id("CLEAR_KEY")) == OptionsScreen::None);
 	CHECK(menu.table_cell_text(table, 0, 2).empty());
-	CHECK(options.activate(menu, nullptr, "DEFAULTS") == OptionsScreen::None);
+	CHECK(options.activate(menu, nullptr, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
-	options.activate(menu, nullptr, "MOUSE");
+	options.activate(menu, nullptr, menu.widget_id("MOUSE"));
 	options.arm(menu, table, 0);
 	input = RemapInput();
 	input.kind = RemapInput::Kind::Mouse;
@@ -1755,12 +1760,13 @@ void test_options_screen() {
 	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
 	const controls::BindingSet &bindings = options.bindings();
 	CHECK(bindings.record(bindings.action_index_for_row(0))->mouse_mask == controls::kMouseRight);
-	options.activate(menu, nullptr, "JOYSTICK");
+	options.activate(menu, nullptr, menu.widget_id("JOYSTICK"));
 	options.arm(menu, table, 0);
 	CHECK(options.consume(menu, input) == OptionsScreen::None);
-	CHECK(options.activate(menu, nullptr, "OPT_ACCEPT") ==
+	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_ACCEPT")) ==
 		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls));
-	CHECK(options.activate(menu, nullptr, "OPT_CANCEL") == OptionsScreen::RestorePreview);
+	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_CANCEL")) ==
+		OptionsScreen::RestorePreview);
 	OptionsScreen::show_ingame_main(menu);
 	CHECK(menu.is_widget_shown(menu.widget_id("MAIN_WRAPPER")));
 	CHECK(!menu.is_widget_shown(menu.widget_id("OPTIONS_WRAPPER")));
@@ -1769,8 +1775,8 @@ void test_options_screen() {
 	menu.open_document(&non_options, "sp.mnu", "");
 	options.prepare(menu, nullptr);
 	CHECK(!options.is_surface());
-	CHECK(options.activate(menu, nullptr, "DEFAULTS") == OptionsScreen::None);
-	CHECK(options.activate(menu, nullptr, "OPT_CANCEL") == OptionsScreen::None);
+	CHECK(options.activate(menu, nullptr, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
+	CHECK(options.activate(menu, nullptr, menu.widget_id("OPT_CANCEL")) == OptionsScreen::None);
 }
 
 // The Options screens over the current player.sav record: the screen's own
@@ -1816,7 +1822,8 @@ void test_options_profile() {
 
 	// ENABLE_JOYSTICK makes the two joystick rows interactive.
 	menu.set_widget_checked(menu.widget_id("ENABLE_JOYSTICK"), true);
-	CHECK(options.activate(menu, &record, "ENABLE_JOYSTICK") == OptionsScreen::None);
+	CHECK(options.activate(menu, &record, menu.widget_id("ENABLE_JOYSTICK")) ==
+		OptionsScreen::None);
 	CHECK(!menu.is_widget_disabled(menu.widget_id("INVERT_JOYSTICK")));
 	CHECK(!menu.is_widget_disabled(menu.widget_id("ENABLE_FORCE_FEEDBACK")));
 
@@ -1836,13 +1843,13 @@ void test_options_profile() {
 	menu.set_widget_checked(menu.widget_id("INVERT_MOUSE"), false);
 	menu.set_widget_checked(menu.widget_id("OPTIONS_AUTORELOAD"), false);
 	menu.set_widget_scroll_range(menu.widget_id("MOUSE_SENSITIVITY"), 4, 511, 10, 200);
-	CHECK(options.activate(menu, &record, "ACCEPT") == OptionsScreen::None);
+	CHECK(options.activate(menu, &record, menu.widget_id("ACCEPT")) == OptionsScreen::None);
 	CHECK(forward().primary == 'J');
 	CHECK(record.invert_mouse == 0 && record.mouse_sensitivity == 200 && record.joystick_enabled == 1);
 	CHECK(record.auto_reload == 1 && record.auto_medic_off == 1);  // the front ACCEPT skips the pair
 
 	// DEFAULTS: the screen's records and the record's mouse/joystick words.
-	CHECK(options.activate(menu, &record, "DEFAULTS") == OptionsScreen::None);
+	CHECK(options.activate(menu, &record, menu.widget_id("DEFAULTS")) == OptionsScreen::None);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
 	CHECK(record.mouse_sensitivity == 128 && record.joystick_enabled == 0);
 	CHECK(menu.get_widget_scroll_range(menu.widget_id("MOUSE_SENSITIVITY"), range) && range.value == 128);
@@ -1851,6 +1858,7 @@ void test_options_profile() {
 	// The in-game dialog: its init seeds the pair, its Accept writes it (the
 	// medic box inverted) and the records, and asks the shell to apply.
 	root.children.push_back(widget("OPT_ACCEPT", mnu::WindowType::Button));
+	root.children.push_back(widget("OPT_CANCEL", mnu::WindowType::Button));
 	menu.open_document(&doc, "game.mnu", "");
 	record.auto_reload = 0;
 	record.auto_medic_off = 0;
@@ -1863,13 +1871,70 @@ void test_options_profile() {
 	menu.set_widget_checked(menu.widget_id("OPTIONS_AUTORELOAD"), true);
 	menu.set_widget_checked(menu.widget_id("OPTIONS_AUTOMEDIC"), false);
 	menu.set_widget_checked(menu.widget_id("INVERT_MOUSE"), true);
-	CHECK(options.activate(menu, &record, "OPT_ACCEPT") ==
+	CHECK(options.activate(menu, &record, menu.widget_id("OPT_ACCEPT")) ==
 		(OptionsScreen::CommitPreview | OptionsScreen::ApplyControls));
 	CHECK(record.auto_reload == 1 && record.auto_medic_off == 1 && record.invert_mouse == 1);
 	// Cancel re-seeds the screen from the record it left alone.
 	menu.set_widget_checked(menu.widget_id("INVERT_MOUSE"), false);
-	CHECK(options.activate(menu, &record, "OPT_CANCEL") == OptionsScreen::RestorePreview);
+	CHECK(options.activate(menu, &record, menu.widget_id("OPT_CANCEL")) ==
+		OptionsScreen::RestorePreview);
 	CHECK(menu.is_widget_checked(menu.widget_id("INVERT_MOUSE")) && record.invert_mouse == 1);
+}
+
+// The front-end BACK keeps no widget edit: the OPTIONS screen's own BACK writes
+// no record word and asks the shell to drop the screen's live edits. The gate is
+// the activated control's own screen: an in-document OPTIONS still reverts after
+// the BACK's pop_screen row showed the screen below, a BACK elsewhere that shows
+// OPTIONS does not, and the in-game dialog's scene (INGAME) registers no BACK.
+// [orig: UI_RegisterOptionsCallbacks @0x55d629 (BACK, user_data 0, scene OPTIONS);
+//  CWnd_EmitEventToNamedHandlerAndCallbacks @0x646970 (the control's callbacks
+//  after its rows); Options_HandleAcceptOrBack @0x55adcf..0x55ae01]
+void test_options_front_back() {
+	auto doc = flow_document(true);
+	doc.screens[0].name = "OPTIONS";
+	doc.screens[0].roots[0].children.push_back(widget("BACK", mnu::WindowType::Button));
+	doc.screens[0].roots[0].children.push_back(widget("INVERT_MOUSE", mnu::WindowType::CheckBox));
+	mnu::Screen below;
+	below.name = "BELOW";
+	mnu::Window below_root = widget("BELOW_ROOT", mnu::WindowType::Window);
+	below_root.children.push_back(widget("BACK", mnu::WindowType::Button));
+	below.roots.push_back(below_root);
+	doc.screens.push_back(below);
+	MenuRuntime menu;
+	menu.open_document(&doc, "options.mnu", "OPTIONS");
+	playersav::ProfileRecord record;
+	record.bindings = profile::default_binding_table();
+	record.invert_mouse = 1;
+	OptionsScreen options;
+	options.prepare(menu, &record);
+	options.apply_policy(menu);
+	options.seed_profile(menu, &record);
+	const int back = menu.find_control("OPTIONS", "BACK");
+	const int below_back = menu.find_control("BELOW", "BACK");
+	CHECK(back >= 0 && below_back >= 0 && back != below_back);
+	// The front screen is OPTIONS by name, ignoring case, as retail's stricmp has it.
+	CHECK(OptionsScreen::is_front_screen("options") && !OptionsScreen::is_front_screen("INGAME"));
+	menu.set_widget_checked(menu.widget_id("INVERT_MOUSE"), false);
+	CHECK(options.activate(menu, &record, back) == OptionsScreen::DiscardEdits);
+	CHECK(record.invert_mouse == 1);  // the BACK writes no word
+
+	// An OPTIONS screen pushed in the document: the BACK's pop_screen row pops in
+	// place before its callback runs, which still reverts.
+	CHECK(menu.show_screen("BELOW") && menu.navigate_to_screen("OPTIONS"));
+	CHECK(menu.pop_screen() && menu.current_screen() == "BELOW");
+	CHECK(options.activate(menu, &record, back) == OptionsScreen::DiscardEdits);
+	// A BACK on another screen whose row showed OPTIONS is not this revert.
+	CHECK(menu.navigate_to_screen("OPTIONS"));
+	CHECK(options.activate(menu, &record, below_back) == OptionsScreen::None);
+
+	auto ingame = flow_document(true);
+	ingame.screens[0].name = "INGAME";
+	for (const char *name : {"BACK", "OPT_ACCEPT"})
+		ingame.screens[0].roots[0].children.push_back(widget(name, mnu::WindowType::Button));
+	menu.open_document(&ingame, "game.mnu", "");
+	options.prepare(menu, &record);
+	CHECK(options.is_surface());
+	CHECK(options.activate(menu, &record, menu.widget_id("BACK")) == OptionsScreen::None);
 }
 
 } // namespace
@@ -2156,6 +2221,7 @@ int main() {
 	test_multiple_roots();
 	test_options_screen();
 	test_options_profile();
+	test_options_front_back();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

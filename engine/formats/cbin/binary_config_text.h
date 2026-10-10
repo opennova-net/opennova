@@ -5,8 +5,8 @@
 // ("[TEXT]", the label upper case as the text reader takes it), each entry a line "name = value, value"
 // (an integer, a float written so it reads back to the same bits, a string), CR LF after each
 // (formats/configfile/config_file.h). The CBIN form keeps what the text reader reads and nothing else:
-// a text with a line the reader reads none of or only part of, or an entry of more than two values, is
-// none it carries whole (binary_config_text_readable).
+// a text with a line the reader reads none of or only part of is none it carries whole
+// (binary_config_text_readable).
 #pragma once
 
 #include <cstddef>
@@ -20,10 +20,11 @@ namespace opennova::cbin {
 
 // The text form of a CBIN file, or why it has none: what the text reader would read back as the file
 // holds it. False with `why` (the first thing that does not go: a label of a character a section line
-// cannot carry, an entry name a line's key cannot, a string value with a separator in it or one that
-// reads as a number, a float that is no number, a value of other flags). A float is written in the
-// fewest decimals the text reader's atof reads back to its very bits, with a point so it reads as a
-// float.
+// cannot carry or of no name, a label counted 0xFFFFFFFF, a terminator other than the writer's (0, 0),
+// an entry name a line's key cannot carry or none, an entry of no value, a string value with a separator
+// in it or one that reads as a number or none, a float that is no number, a value of other flags). A
+// float is written in the fewest decimals the text reader's atof reads back to its very bits, with a
+// point so it reads as a float.
 bool binary_config_text(const BinaryConfig &config, std::string &text, std::string &why);
 
 // A line of a text the CBIN form does not carry whole: its 1-based number and why, in words ("is outside
@@ -34,9 +35,9 @@ struct ConfigTextRefusal {
 };
 
 // Whether `text` goes in the CBIN form whole: every line one the game's ConfigFile reader reads whole (a
-// blank line, a section line, an entry in a section, nothing after its values), every entry of one or
-// two values [orig: ConfigFile_ParseText @ 0x7608a0]. The lines as the reader splits them, at CR LF: a
-// CR or an LF alone is part of a line. False with the first other line in `refusal`.
+// blank line, a section line, an entry in a section, nothing after its values) [orig: ConfigFile_ParseText
+// @ 0x7608a0]. The lines as the reader splits them, at CR LF: a CR or an LF alone is part of a line. False
+// with the first other line in `refusal`.
 bool binary_config_text_readable(const std::string &text, ConfigTextRefusal &refusal);
 
 // `text` read as the game's text reader reads it, in the CBIN form under `key`: its labels, entries and

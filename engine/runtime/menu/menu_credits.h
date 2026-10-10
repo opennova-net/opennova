@@ -62,7 +62,9 @@ inline constexpr char kMarqueeCommaMark = '@';
 // file (the "CBIN" magic, the form the shipped nlist.kda is) reads as the binary
 // reader builds it (formats/cbin/binary_config.h), any other as the text reader
 // reads it. False, untouched, for a CBIN file laid out otherwise than that reader
-// reads. `texture_loads` answers whether an image node's texture loads (a node
+// reads, or one a read faults on where the game's would (a lookup reaching a null
+// label, a text read through a null word: configfile::config_faulted).
+// `texture_loads` answers whether an image node's texture loads (a node
 // whose texture does not is not appended).
 bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 		const std::function<bool(const std::string &)> &texture_loads);

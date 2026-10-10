@@ -9,7 +9,7 @@ func after_each() -> void:
 	staged_dirs.clear()
 
 
-func _boot_voice_world(aoa: bool = false) -> GameWorld:
+func _boot_voice_world(aud: bool = false) -> GameWorld:
 	var script := (
 		"if never() then wave(\"tone.wav\") endif\n" +
 		"if eq(v1,1) then wave(\"tone.wav\") set(v1,0) endif\n" +
@@ -18,8 +18,9 @@ func _boot_voice_world(aoa: bool = false) -> GameWorld:
 		{"mnml.wac": script})
 	staged_dirs.append(root_dir)
 	WorldFixture.stage_sound_bank(root_dir, PackedStringArray())
-	if aoa:
-		var bytes := "AOA1".to_ascii_buffer()
+	if aud:
+		# The game's own buffer, AUD1, which its wave loader takes unchecked.
+		var bytes := "AUD1".to_ascii_buffer()
 		bytes.resize(16 + 22050)
 		bytes.encode_u32(4, 22050)
 		bytes.encode_u32(8, 32768) # half the retail 44100 Hz device rate
@@ -98,7 +99,7 @@ func test_wac_voice_completion_interrupt_and_retry_use_the_real_channel() -> voi
 	world.unload()
 
 
-func test_aoa1_script_voice_reaches_the_audio_player() -> void:
+func test_aud1_script_voice_reaches_the_audio_player() -> void:
 	var world := _boot_voice_world(true)
 	var voice := _playing_voice(world.get_mission_audio())
 	assert_not_null(voice)

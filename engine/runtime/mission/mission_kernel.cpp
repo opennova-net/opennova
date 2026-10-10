@@ -487,7 +487,9 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 	mission::stamp_seat_spec_turret_limits(world, seat_specs);
 	// The authoritative side's own player spawned before this feed: re-stamp
 	// its equipped default now that WPN_M4AUTO resolves by name
-	// [orig: PlayerClass_InitEntity @0x4B1116] (D-NET-143).
+	// [orig: PlayerClass_InitEntity @0x4B1116] (D-NET-143). A fresh session's
+	// own player only: a map change's kept slots spawn after the PreMission
+	// pass and take it at the spawn (D-NET-354).
 	const int m4 = world.tables.weapons.index_of("WPN_M4AUTO");
 	if (m4 >= 0) {
 		std::vector<w::EntityHandle> handles;
@@ -553,6 +555,7 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	bringup_net_session_ = options.bringup_net_session;
 	people_name_resolver_ = options.people_name_resolver;
 	restart_boot_ = options.restart;
+	mission_game_type_ = options.game_type;
 	boot_trace.clear();
 
 	// The mission's .cpt/.trn(+charmap) height field: the shell hands its
@@ -809,11 +812,6 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// joiner, which runs no pre pass, otherwise ran every even/odd cadence one
 	// tick out of phase.
 	world.logic_tick = 1;
-	// The Attack & Defend side latch (world/local_player.h), taken here where
-	// the load still knows its game type; retail's call sits after the initial
-	// WAC execution and the weather settle (complete_mission_start's legs)
-	// [orig: Game_StartMission -> sub_524110 @0x5260C1].
-	local.latch_attack_defend_role(options.game_type);
 	mission_start_pending = true;
 	if (!options.defer_mission_start) complete_mission_start();
 	return true;
@@ -883,6 +881,11 @@ bool MissionKernel::complete_mission_start() {
 	world.epilog.mission_start(!restart_boot_, world.rules.mp_session, world);
 	if (world.rules.projectile_authority)
 		world.vehicles.initialize_mission_vehicles();
+	// The Attack & Defend side latch (world/local_player.h), after the round
+	// init and Player_InitPlayer (a map change's host player exists only from
+	// there), the initial WAC run and the weather settle.
+	// [orig: Game_StartMission @0x524360 -- the sub_524110 call @0x5260C1]
+	local.latch_attack_defend_role(mission_game_type_);
 	capture_baseline();
 	mission_start_pending = false;
 	return true;

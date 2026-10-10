@@ -145,9 +145,9 @@ func current() -> State:
 
 ## Normalize, atomically persist, apply the device settings, then publish the
 ## new detached state. Live application is retail's preview behavior; the
-## pause dialog's OPT_CANCEL rolls the model back to its entry snapshot
-## through OptionsMenuController (docs/mnu/menu-re.md "The in-game options
-## dialog").
+## pause dialog's OPT_CANCEL and the front-end OPTIONS BACK roll the model back
+## to its entry snapshot through OptionsMenuController (docs/mnu/menu-re.md
+## "The in-game options dialog").
 func update(state: State) -> void:
 	if state == null:
 		return

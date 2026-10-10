@@ -65,8 +65,9 @@ public:
     // included); every other game type returns nothing.
     // [orig: ZoneSlotChain_GetWinningTeamIfAllOwned @0x4A2920]
     std::optional<uint8_t> winning_team_if_all_owned() const;
-    // A registered entry's zone number and rank; false for an entity outside
-    // the chain. [orig: ZoneSlotChain_GetZoneInfo @0x4A2750]
+    // A registered entry's zone number and rank; false, the outs untouched, for
+    // an entity outside the chain. [orig: ZoneSlotChain_GetZoneInfo @0x4A2750,
+    // the miss @0x4A27EA]
     bool zone_info(const Entity &zone, uint8_t &number, uint8_t &rank) const;
     // The cached owned mask for `team` (0 above team 4).
     // [orig: ZoneSlotChain_GetTeamMask @0x4A2350]

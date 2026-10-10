@@ -776,7 +776,7 @@ void LocalPlayer::pump_local_weapon() {
 
 void LocalPlayer::tick_view() {
 	World &world = world_;
-	w::local_player_view_tick(&world, view, view_tracker, view_session_inputs);
+	w::local_player_view_tick(&world, view, view_tracker, view_session_inputs, &weapon);
 	// Retail acquires the aim inside the entity update, BEFORE the quantum's
 	// camera compose, so its camera leg reads the view the previous compose
 	// left [orig: Game_ProcessMainFrame @0x5263F0 -- the Entity_UpdateAllEntities

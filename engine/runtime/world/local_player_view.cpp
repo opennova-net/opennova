@@ -407,26 +407,44 @@ bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerView
     return true;
 }
 
-bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
-                               WeaponSlotState &active_slot) {
-    if (!w.active) return false;
-    // currentAction not in {RELOAD, SWITCHFROM}, then the Player_ToggleWeaponScope
-    // view/definition gates. [orig: Player_ToggleWeaponScope @0x4df0c0]
-    if (!weapon_fsm_scope_toggle_allowed(w.def, active_slot)) return false;
+namespace {
+
+// Player_ToggleWeaponScope itself: its entry gates, then the leg the PROMOTED
+// byte picks. The input toggle reaches it behind its own currentAction gate,
+// the forced callers (the local death, the camera switch) without one.
+// [orig: Player_ToggleWeaponScope @0x4df0c0]
+bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
+                         WeaponSlotState &active_slot) {
+    // The local player and its equipped slot's def [orig: @0x4df0cf,
+    //  @0x4df0eb..0x4df0f6].
+    const Entity *player = world.registry.get(world.cached.local_player);
+    if (player == nullptr || !w.active) return false;
+    // An airborne or swimming (the deep-water 0x8000) body refuses either way
+    // [orig: (Flags & 0xA000) == 0 @0x4df0dc]. The airborne bit shares retail
+    // storage with the motor's mirror, which may not be published back yet
+    // this tick.
+    const AiEntity *body = world.ai.for_handle(player->handle);
+    const uint32_t flags = player->flags | player->engine_flags;
+    if ((flags & (kEntityFlagInAir | kEntityFlagDrowning)) != 0 ||
+        (body != nullptr && body->inf.airborne))
+        return false;
     // The toggle branches on the PROMOTED byte, not the target: a promoted
     // sight disengages, anything else engages [orig: the g_WeaponScopeActive
     // branch @0x4df17f].
     const bool promoted = player_view_scope_settled(v);
     // ForceScoped pins the raised sight: un-scoping is refused once promoted
-    // [orig: (flags1 & 0x20000000) == 0 || !g_WeaponScopeActive @0x4df12d].
+    // [orig: (flags1 & 0x20000000) == 0 || !g_WeaponScopeActive
+    //  @0x4df104..0x4df115, the decompiler's @0x4df12d].
     if (promoted && (w.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) != 0) return false;
-    // Inset optics cannot be raised under NVG. Non-Inset sights retain the
-    // original independent behavior.
-    if (!promoted && v.nvg_active && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0)
-        return false;
-    // Every toggle is refused while the previous ease runs
-    // [orig: (flags & 3) && !g_FpCameraInterp.activeFlag @0x4df177].
-    if (player_view_scope_ease_active(v)) return false;
+    // Inset optics neither rise nor drop under NVG; the NVG toggle drops and
+    // restores them around its own switch [orig: (flags2 & 0x200) == 0 ||
+    //  !g_NVGActive @0x4df11b..0x4df12d].
+    if (v.nvg_active && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0) return false;
+    // A vehicle control seat (parentSlot 2 or 5) refuses [orig: @0x4df133..0x4df145].
+    if (player->mounted && is_vehicle_control_seat(player->mount_type)) return false;
+    // A Scoped or Sighted def, and every toggle is refused while the previous
+    // ease runs [orig: (flags & 3) && !g_FpCameraInterp.activeFlag @0x4df177].
+    if ((w.def.flags & 3) == 0 || player_view_scope_ease_active(v)) return false;
     // Scope-UP is refused while a movement key is held on a Scoped weapon
     // [orig: the engage branch's g_MovementKeyHeld && (flags & 1) -> return @0x4df29c].
     if (!promoted && player_view_scope_up_blocked(v, w.def.flags)) return false;
@@ -446,6 +464,26 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
     else
         weapon_fsm_queue_scope_down(active_slot);
     return true;
+}
+
+} // namespace
+
+bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
+                               WeaponSlotState &active_slot) {
+    if (!w.active) return false;
+    // Input case 6's own gate: currentAction not in {RELOAD, SWITCHFROM}
+    // [orig: Input_HandleActionBinding_0 @0x4e052b..0x4e0537, the toggle call
+    //  @0x4e053d].
+    if (!weapon_fsm_scope_toggle_allowed(w.def, active_slot)) return false;
+    return toggle_weapon_scope(world, w, v, active_slot);
+}
+
+bool local_player_forced_scope_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v) {
+    // Each forced caller toggles only while the sight is promoted, so the
+    // toggle takes its disengage leg when its entry gates pass.
+    if (!player_view_scope_settled(v)) return false;
+    WeaponSlotState *active_slot = active_local_weapon_slot(world, w);
+    return active_slot != nullptr && toggle_weapon_scope(world, w, v, *active_slot);
 }
 
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
@@ -535,7 +573,8 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
 }
 
 void local_player_view_tick(World *world, PlayerViewState &v,
-                            LocalPlayerViewTracker &t, const LocalViewSessionInputs &s) {
+                            LocalPlayerViewTracker &t, const LocalViewSessionInputs &s,
+                            LocalPlayerWeapon *weapon) {
 	t.hud_hit_feedback_frames = s.hud_hit_feedback_frames;
 	t.hud_service = s.hud_service;
 	t.hud_designations = s.hud_designations;
@@ -597,8 +636,9 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     v.view_tick = world->logic_tick;
     // The death stamp (retail: g_CameraLerpStartTick = current_tick on the
     // local death path @0x4b4d00 / the 0x13 self record @0x42ec0f): the local
-    // dead EDGE.
-    if (v.local_dead && !t.camera_local_dead_seen) v.death_cam.start_tick = world->logic_tick;
+    // dead EDGE. The same edge forces the scope toggle, below.
+    const bool death_edge = v.local_dead && !t.camera_local_dead_seen;
+    if (death_edge) v.death_cam.start_tick = world->logic_tick;
     t.camera_local_dead_seen = v.local_dead;
     const int mode_before = v.camera_mode;
     player_view_resolve_mode(v);
@@ -612,6 +652,12 @@ void local_player_view_tick(World *world, PlayerViewState &v,
             s.spectate_target_key != 0;
     const uint32_t tracked = tracks_target ? s.spectate_target_key : 0u;
     const bool tracked_dead = tracks_target ? s.spectate_target_dead : v.local_dead;
+    // A call into any mode but first person forces the scope toggle (the
+    // tracked entity is the target by then), below
+    // [orig: Camera_SetTrackedEntity @0x439248 (mode 0 skips), the test
+    //  @0x4392a1..0x4392ac, Player_ToggleWeaponScope @0x4392ae].
+    const bool camera_switch = (tracked != v.camera_tracked || v.camera_mode != mode_before) &&
+            v.camera_mode != 0;
     player_view_track_entity(v, tracked, v.camera_mode != mode_before, tracked_dead);
     if (v.camera_mode == 4 && mode_before != 4) enter_death_camera(*world, *e, v, s);
     local_player_view_refresh(world, v);
@@ -649,6 +695,18 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     // ThirdPersonCamera_Update @0x437c1b..0x437d02].
     player_view_chase_tick(v, world->script.input_action_bits, tracked_dead);
     player_view_tick(v, eye);
+    // The forced scope toggles see this tick's settle promoter, as retail's
+    // do: Player_UpdatePerFrame steps the interp and promotes the sight first
+    // [orig: Client_ProcessNetworkFrame @0x42c18e; the promoter @0x4de4c7..0x4de4f7],
+    // ahead of the receive dispatch that runs the 0x13 death [orig:
+    // CNapiNetwork_PumpClientProtocolRecv @0x42c228 -> Player_ToggleWeaponScope
+    // @0x42ec15..0x42ec19], the body's death [orig: Entity_UpdateAllEntities
+    // @0x52674b, after Client_ProcessNetworkFrame @0x526692; @0x4b4d1d..0x4b4d25]
+    // and the render's camera switch. Each toggles only a promoted sight.
+    if (weapon != nullptr) {
+        if (death_edge) local_player_forced_scope_toggle(*world, *weapon, v);
+        if (camera_switch) local_player_forced_scope_toggle(*world, *weapon, v);
+    }
 }
 
 bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,

@@ -223,10 +223,12 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (rec.bone_a)       f |= kStaticEntityHasRefNum; // entity+533 (D-NET-94)
 		if (rec.bone_b)       f |= kStaticEntityHasSubType; // entity+532 (D-NET-94)
 		if (rec.has_score_flag) f |= kStaticEntityHasScoreFlag; // entity+624, the def callback gate [orig: 0x504554]
-		// attach_ref is written when `weapon_byte != 0 || flags & 0x200`; force the 0x200
+		// attach_ref is written when `weapon_byte != 0 || flags & 0x200`. A SpawnPoint's
+		// radius rides 0x200 whatever its value [orig: @0x504601]; otherwise force the
 		// gate only when attach_ref is populated but weapon_byte is zero (else weapon_byte
 		// already triggers the write and 0x200 would be redundant).
-		if (rec.attach_ref && rec.weapon_byte == 0) f |= kStaticEntityHasAttachRef;
+		if (rec.has_attach_ref || (rec.attach_ref && rec.weapon_byte == 0))
+			f |= kStaticEntityHasAttachRef;
 
 		w.u16(f);
 		w.u32(uint32_t(rec.pos_x)); // entity+4

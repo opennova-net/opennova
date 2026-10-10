@@ -81,6 +81,18 @@ void play_action_sound(World &world, const PowerupAction &action, const Entity &
                                          at.handle.packed);
 }
 
+// The action's particle at the entity's position, unattached and undirected,
+// when the row authored one (its interned handle word +0x10). The EFFECT
+// userpoint the helper looks up first is overwritten unread.
+// [orig: ActionSlot_SpawnParticleAtEntity @0x442380 -- the userpoint
+//  @0x442384..0x4423A4, overwritten by the handle load @0x4423AC;
+//  Effect_SubmitDescriptor(0, 0, entity+4, handle) @0x4423BD]
+void spawn_action_particle(World &world, const PowerupAction &action, const Entity &at) {
+    if (action.particle.empty()) return;
+    world.out.destruction.effects.push_back(
+            DestructionEffectEvent{action.particle, at.position, Vec3{}});
+}
+
 // The tables the authority's refusal walk reads for `picker`: the local
 // player's own inventory (one table here for retail's g_WeaponSlotArrayBase and
 // the listen host's own slot block, D-WPN-24's collapse), else the session
@@ -260,13 +272,17 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
         }
     }
 
-    // The action's texttoken reaches the local player's HUD text
-    // [orig: ActionSlot_OnTextTokenCallback @0x4011B0 @0x442A9A]: JO:CA's rows
-    // author none, JOTAC's PU_* rows do (D-PWR-3).
+    // The action's texttoken, its text resolved at the load (the mission
+    // text's entry, else the game text's, else ""), becomes the local
+    // player's kill-announce banner line [orig: ActionSlot_OnTextTokenCallback
+    // @0x4011B0 @0x442A9A; ActionDef_ParseScriptLine @0x4028A8]: JO:CA's rows
+    // author none, JOTAC's PU_* rows do; not emitted here (D-PWR-3).
     // The soundset plays at the PICKER [orig: @0x442AA6, entity+4]
     play_action_sound(world, action, picker);
-    // The action's particle spawns at the picker [orig: sub_442380 @0x442AB8
-    //  -> Effect_SubmitDescriptor at entity+4]: no pickup row authors one (D-PWR-3).
+    // So does the action's particle [orig: the handle test @0x442AAE,
+    //  ActionSlot_SpawnParticleAtEntity(action, row, picker) @0x442AB8]: no
+    //  shipped pickup row authors one.
+    spawn_action_particle(world, action, picker);
 
     // Consume: a respawning row hides (its model pointer zeroed) and arms the
     // countdown; otherwise the row is destroyed [orig: @0x442AC0..0x442B35]
@@ -276,8 +292,11 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
         // the respawn restores it (CollisionWorld::live_instance reads this
         // pair as the withdrawn model)                                     // +0x30 = 0 @0x442AE7
         powerup.hidden = true;
-        // The row's own emitter stops and its effect handle clears
-        // [orig: @0x442AF1 / @0x442B17]: neither is bound on a shipped row (D-PWR-3).
+        // The row's +0x1CC emitter (its ItemDef+0x274 particlefx, which no
+        // shipped Powerup item authors) stops [orig: @0x442AF1] (D-PWR-3), and
+        // its +0x1B4 glow handle clears [orig: CEffectInstance_ClearByHandle
+        //  @0x442B17; the store Entity_SpawnGlowEffects @0x56C92C]: the light
+        // director follows the row's visibility (renderer light_scene).
     } else {
         world.commands.remove_ssn(powerup.handle); // Entity_Destroy @0x442B27
     }
@@ -292,8 +311,11 @@ void action_respawn(World &world, const PowerupAction &action, Entity &powerup,
     // The model pointer returns from the ItemDef (+0xF0) [orig: @0x442B6B]
     powerup.hidden = false;
     play_action_sound(world, action, at); // @0x442B6E
-    // The action's particle at the entity [orig: @0x442B76..0x442B80]: JOTAC's
-    // PU_* respawn rows author FX_Pickup_Green (D-PWR-3).
+    // The action's particle at the entity, the row itself from the countdown
+    // [orig: the handle test @0x442B76, ActionSlot_SpawnParticleAtEntity
+    //  (action, row, entity) @0x442B80]: JOTAC's PU_* respawn rows author
+    //  FX_Pickup_Green.
+    spawn_action_particle(world, action, at);
     // A row with an item ordinal re-spawns its model's LGHT glow records
     // [orig: @0x442B88..0x442BA0 -> Entity_SpawnGlowEffects @0x56C7C0]: the
     // light director follows the row's visibility (renderer light_scene).
@@ -392,8 +414,10 @@ void powerup_bind_entities(World &world, const def::DefItemsFile &items) {
         // [orig: @0x442D42..0x442D59]
         e->powerup_respawns_left = def.max_respawns != 0 ? def.max_respawns - 1 : -1;
         e->powerup_respawn_timer = -1;                           // +0x2B4 @0x442D65
-        // The EFFECT userpoint and the ItemDef+0x274 emitter bind
-        // [orig: @0x442D60..0x442E18]: dormant on every shipped row (D-PWR-3).
+        // The EFFECT userpoint and the ItemDef+0x274 (particlefx) emitter bind
+        // [orig: @0x442D60..0x442E18]: no shipped Powerup item authors
+        // particlefx, and the userpoint's one reader overwrites it unread
+        // (D-PWR-3).
     }
 }
 

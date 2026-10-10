@@ -51,8 +51,13 @@ WaveRetailCheck refused(std::string why) {
 
 WaveRetailCheck wave_retail_check(const std::vector<uint8_t> &bytes) {
 	const std::vector<uint8_t> data = as_loaded(bytes);
-	// An AOA1 buffer is the loader's own form, copied as it is [orig: @ 0x7664e7].
-	if (tag_at(data, 0, "AOA1")) {
+	// An AUD1 buffer is the loader's own form, copied as it is, unchecked [orig: Audio_LoadWavFileFromArchive
+	// @ 0x7664e2, @ 0x7664e9..0x766511]; an AOA1 one falls to the RIFF compare and is refused (@ 0x766523).
+	// One ending inside its 16-byte header is read past the bytes, which the runtime's decode refuses.
+	if (tag_at(data, 0, "AUD1")) {
+		if (data.size() < 16)
+			return refused("Its AUD1 header ends at byte " + std::to_string(data.size()) +
+			               " of 16: the game reads its count, pitch and sample width past the bytes.");
 		WaveRetailCheck ok;
 		ok.plays = true;
 		return ok;
@@ -62,8 +67,8 @@ WaveRetailCheck wave_retail_check(const std::vector<uint8_t> &bytes) {
 	switch (walk.refusal) {
 		case WaveRefusal::None: break;
 		case WaveRefusal::NotRiffWave:
-			return refused("It is neither a RIFF WAVE nor an AOA1 buffer, which the game's loader refuses [orig: "
-			               "Audio_LoadWavFileFromArchive @ 0x76653b].");
+			return refused("It is neither a RIFF WAVE nor an AUD1 buffer, which the game's loader refuses [orig: "
+			               "Audio_LoadWavFileFromArchive @ 0x766523, @ 0x76653b].");
 		case WaveRefusal::EndsBeforeData:
 			return refused("The file ends before its data: the game's loader reads past it for a data chunk.");
 		case WaveRefusal::SecondFmt:
@@ -105,7 +110,7 @@ WaveRetailCheck wave_retail_check(const std::vector<uint8_t> &bytes) {
 
 std::string wave_format_words(const WaveFormat &format) {
 	std::string kind;
-	if (format.aoa1) kind = std::to_string(format.bits) + "-bit AOA1";
+	if (format.aud1) kind = std::to_string(format.bits) + "-bit AUD1";
 	else if (format.tag == kWaveTagImaAdpcm) kind = "IMA ADPCM";
 	else if (format.tag == kWaveTagFloat) kind = std::to_string(format.bits) + "-bit float";
 	else if (format.tag == kWaveTagPcm || format.tag == kWaveTagExtensible) kind = std::to_string(format.bits) + "-bit PCM";
@@ -138,14 +143,15 @@ bool decode_wave_source(const std::vector<uint8_t> &bytes, WaveSamples &out, std
 			out.samples[i] = float(int16_t(io::read_u16_le(pcm.pcm16.data() + 2 * i))) / 32768.0f;
 		return true;
 	};
-	if (tag_at(data, 0, "AOA1")) {
+	if (tag_at(data, 0, "AUD1")) {
 		WaveFormat format;
-		format.aoa1 = true;
-		format.bits = data.size() > 12 ? uint16_t(data[12] * 8) : 0;
+		format.aud1 = true;
+		// 16-bit where the width byte is 2, else 8-bit, as the mixer reads it [orig: sub_7BD671 @ 0x7bd692].
+		format.bits = data.size() > 12 && data[12] == 2 ? 16 : 8;
 		return through_game(format);
 	}
 	if (!tag_at(data, 0, "RIFF") || !tag_at(data, 8, "WAVE")) {
-		error = "it is neither a RIFF WAVE nor an AOA1 buffer";
+		error = "it is neither a RIFF WAVE nor an AUD1 buffer";
 		return false;
 	}
 	// The chunks as the RIFF form lays them (each padded to an even size).
@@ -249,7 +255,7 @@ double wave_seconds(const std::vector<uint8_t> &bytes) {
 int wave_bits_written(const WaveSamples &source, const WaveConversion &conversion) {
 	if (conversion.bits == "8") return 8;
 	if (conversion.bits == "16") return 16;
-	return source.format.tag == kWaveTagPcm && source.format.bits == 8 && !source.format.aoa1 ? 8 : 16;
+	return source.format.tag == kWaveTagPcm && source.format.bits == 8 && !source.format.aud1 ? 8 : 16;
 }
 
 namespace {

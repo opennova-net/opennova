@@ -2,8 +2,9 @@
 // through the binary reader's sections (formats/cbin/binary_config.h binary_config_sections) as its text form
 // reads through the text reader, value for value and node for node; a label's name lowercased in the string
 // table itself, so a string value of that very string reads lowercased (one of the same text elsewhere in
-// the table does not); a value of flags none of an integer, a float or a string, and a file laid out
-// otherwise, not loaded and the credits left as they were. The minted synth_nlist trio loads with its
+// the table does not); a value of flags none of an integer, a float or a string read as the number 0 and
+// as no text; a null text the reader would read through, and a file laid out otherwise, not loaded and the
+// credits left as they were. The minted synth_nlist trio loads with its
 // [ENV] values and its lines and fonts as the credits view reads them. The retail leg (OPENNOVA_JO_ASSETS):
 // the shipped JO, JOX01 and BHD lists each load as their text form does, their counts pinned.
 #include <cstdio>
@@ -140,15 +141,38 @@ int test_label_lowercased_in_place() {
 	return 0;
 }
 
-// What the binary reader does not build: a value of flags none of an integer, a float or a string (the
-// accessor would read its word as a string's address), and a file laid out otherwise. Neither loads, the
-// credits left as they were.
+// A value of flags none of an integer, a float or a string loads: read as a number it is 0 [orig:
+// Effect_GetParamValue_0 @ 0x75fb39..0x75fb3d], read as text none (the game takes its word for a string's
+// address, D-CBIN-5). What the game reads through a null pointer, a null text [orig: ConfigFile_ParseBinary
+// @ 0x75eb4e; String_CopyN @ 0x75eca4], and a file laid out otherwise do not load, the credits left as they
+// were.
 int test_not_loaded() {
 	MarqueeCredits credits;
 	TEST_EXPECT(load(encoded(laid_out_list()), credits) && credits.nodes.size() == 4);
 	BinaryConfig flagged = laid_out_list();
-	flagged.labels[1].entries[2].values[1].flags = 8;
-	TEST_EXPECT(!load(encoded(flagged), credits));
+	flagged.labels[0].entries[2].values[0].flags = 8; // CENTER_X
+	flagged.labels[1].entries[2].values[1].flags = 8; // the first line's font
+	MarqueeCredits odd;
+	TEST_EXPECT(load(encoded(flagged), odd) && odd.center_x == 0 && odd.nodes.size() == 4 &&
+	            odd.nodes[0].line == "Open_Nova" && odd.nodes[0].font.empty());
+	// A null text the loader reads as text (the first line's font) faults there; one it reads as a number
+	// (CENTER_X) reads 0 [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c67e].
+	BinaryConfig null_text = laid_out_list();
+	null_text.labels[1].entries[2].values[1].raw = 0;
+	TEST_EXPECT(!load(encoded(null_text), credits));
+	BinaryConfig null_number = laid_out_list();
+	null_number.labels[0].entries[2].values[0] = value(0, BinaryConfig::kString);
+	MarqueeCredits numbered;
+	TEST_EXPECT(load(encoded(null_number), numbered) && numbered.center_x == 0 && numbered.nodes.size() == 4);
+	// A null label after [ENV] and [TEXT] is one no lookup reaches: the credits draw [orig:
+	// ConfigFile_FindLabelLinear @ 0x75ee50, the scan's stop at its match]; before them the lookups fault.
+	BinaryConfig tail_label = laid_out_list();
+	tail_label.labels.push_back(BinaryConfig::Label{});
+	MarqueeCredits tailed;
+	TEST_EXPECT(load(encoded(tail_label), tailed) && tailed.nodes.size() == 4 && tailed.center_x == 300);
+	BinaryConfig head_label = laid_out_list();
+	head_label.labels.insert(head_label.labels.begin(), BinaryConfig::Label{});
+	TEST_EXPECT(!load(encoded(head_label), credits));
 	std::vector<uint8_t> cut = encoded(laid_out_list());
 	cut.resize(cut.size() - 3);
 	TEST_EXPECT(!load(cut, credits));

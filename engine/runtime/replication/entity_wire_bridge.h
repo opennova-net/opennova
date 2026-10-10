@@ -75,7 +75,21 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w);
 PoolSpawnBatch build_pool1_spawn_batch(const world::World &w);
 // pool-2 static structures -> S2C 0x10 [orig: NetPacket_SerializePool2StaticToBuffer @0x5042f0]. Slot-aligned (start_index 0, empty-slot
 // sentinels for holes) because the 0x10 record carries no slot id — the client's slot = start+index.
+// Its zone blocks are the whole pool's as one serializer call's (stream_pool2_zone_blocks).
 StaticEntityBatch build_pool2_static_batch(const world::World &w);
+// The zone blocks of one serializer call, its page: each record's static asks the zone chain
+// (ZoneSlotChain_GetZoneInfo), whose two out bytes are the call's stack locals, written only by a
+// hit, so a static the chain does not hold streams the last hit's byte from the same call, then its
+// own radius. Before the call's first hit the bytes are uninitialized stack, read here as zero
+// (D-NET-394). Each S2C 0x10 page is one call [orig: Server_SendInitialGameStateToPlayer @0x51bba0,
+// the call @0x51bc50 per page].
+void stream_pool2_zone_blocks(const world::World &w, StaticEntityBatch &page);
+// The 0x0D zone bytes of one serializer call, its page: each numbered entity asks the zone chain,
+// the outs carried from the call's last hit; before its first hit the rank is the low byte of the
+// call's buffer-size argument (0x1000: 0), the zone byte uninitialized stack, read here as the
+// entity's own zone number (D-NET-394). [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940,
+// the call @0x51bcba per page]
+void stream_pool1_zone_bytes(const world::World &w, PoolSpawnBatch &page);
 // pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: NetPacket_SerializeEntityPoolToPacket @0x503460].
 Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 

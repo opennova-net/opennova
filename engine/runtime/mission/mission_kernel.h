@@ -214,7 +214,8 @@ public:
 	// then the ordered step sequence with its gates (a missing file source
 	// skips every file-fed step, a missing item db the trait/collision steps,
 	// a joiner never spawns its own player). Every step that ran lands in
-	// boot_trace, in order — the ctest-locked contract.
+	// boot_trace, in order (the ctest-locked contract); a map change's host
+	// boot appends its round init ("round_init") after it.
 	bool boot(const KernelBootOptions &options, std::string &error);
 	std::vector<std::string> boot_trace;
 
@@ -518,6 +519,9 @@ private:
 	std::function<void()> bringup_net_session_;
 	// This boot is the SP restart's (KernelBootOptions::restart).
 	bool restart_boot_ = false;
+	// This boot's game type (KernelBootOptions::game_type), for the mission
+	// start's Attack & Defend latch.
+	uint32_t mission_game_type_ = 0;
 	// The embedder source overrides (set_assets / set_items_table).
 	const assets::AssetStore *external_assets_ = nullptr;
 	const opennova::def::DefItemsFile *items_override_ = nullptr;

@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <limits>
 #include <vector>
 
 namespace opennova {
@@ -55,48 +54,66 @@ uint32_t loader_pitch_q16(uint32_t rate) {
 	return static_cast<uint32_t>(((static_cast<uint64_t>(rate) << 16) + 22050u) / 44100u);
 }
 
-// The native cache/file form accepted before RIFF parsing. It has one mono
-// signed-PCM lane, a declared sample count, and a Q16 rate relative to 44100 Hz.
-// Bytes after the declared samples are mixer interpolation padding, not audio.
-// [orig: Audio_LoadWavFileFromArchive @0x766480, AOA1 copy and LABEL_36]
-bool decode_aoa1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &error) {
-    if (size < 16) { error = "truncated AOA1 header"; return false; }
-    const uint32_t samples = io::read_u32_le(bytes + 4);
-    const uint32_t rate_q16 = io::read_u32_le(bytes + 8);
-    const uint8_t width = bytes[12];
-    if (width != 1 && width != 2) {
-        error = "unsupported AOA1 sample width"; return false;
-    }
-    const uint64_t payload_size = uint64_t(samples) * width;
-    if (samples == 0 || samples > std::numeric_limits<size_t>::max() / 2 ||
-            payload_size > size - 16) {
-        error = "truncated or empty AOA1 payload"; return false;
-    }
-    const uint32_t rate = static_cast<uint32_t>((uint64_t(rate_q16) * 44100 + 32768) >> 16);
-    if (rate == 0) { error = "invalid AOA1 sample rate"; return false; }
-    out.pcm16.resize(size_t(samples) * 2);
-    if (width == 2) {
-        std::memcpy(out.pcm16.data(), bytes + 16, out.pcm16.size());
-    } else {
-        // AOA1 PCM8 has already had the RIFF unsigned bias removed.
-        for (size_t i = 0; i < samples; ++i) {
-            out.pcm16[2 * i] = 0;
-            out.pcm16[2 * i + 1] = bytes[16 + i];
-        }
-    }
-    out.sample_rate = rate;
-    out.channels = 1;
-    out.loader_samples = samples;
-    out.loader_pitch_q16 = rate_q16;
-    return true;
+// The loader's own form, an AUD1 buffer (bytes 41 55 44 31), which it copies as it is, unchecked
+// [orig: Audio_LoadWavFileFromArchive @ 0x766480, the magic @ 0x7664e2, the copy @ 0x7664e9..0x766511]:
+// the header its RIFF decodes write (@ 0x766603..0x76663c, @ 0x766708..0x766745,
+// @ 0x7667b4..0x7667f0), read as the mixer's channel set-up reads it, the sample count at +4
+// [orig: sub_7BD671 @ 0x7bd67f], the pitch ratio to the 44100 Hz device in Q16 at +8
+// [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd603] and the samples from +16, signed (the
+// RIFF form's 8-bit bias already taken off), 16-bit where the byte at +12 is 2 and 8-bit for any
+// other byte there [orig: sub_7BD671 @ 0x7bd692]. The byte at +13, which the mixer shifts the
+// channel's volume by, is not read (D-SND-46). The copy is the bytes' own size; where they end inside
+// the header or before the count's samples the loader's pad and the mixer read on past them
+// (unwitnessed): ours refuses the first and plays the samples present of the second, the count
+// recorded as it says.
+bool decode_aud1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &error) {
+	if (size < 16) {
+		error = "the AUD1 buffer ends inside its 16-byte header";
+		return false;
+	}
+	const uint32_t samples = io::read_u32_le(bytes + 4);
+	const uint32_t pitch_q16 = io::read_u32_le(bytes + 8);
+	const size_t width = bytes[12] == 2 ? 2 : 1;
+	const size_t present = std::min<size_t>(samples, (size - 16) / width);
+	out.pcm16.resize(present * 2);
+	if (width == 2) {
+		if (present != 0) std::memcpy(out.pcm16.data(), bytes + 16, present * 2);
+	} else {
+		for (size_t i = 0; i < present; ++i) {
+			out.pcm16[2 * i] = 0;
+			out.pcm16[2 * i + 1] = bytes[16 + i];
+		}
+	}
+	// The loader's pad for the mixer, past the last sample by the raw width byte [orig:
+	// Audio_LoadWavFileFromArchive @ 0x76668a..0x7668da]: the last sample at +16 + (count - 1) * width
+	// (@ 0x76668a..0x76669c), a byte where the width is 1 (@ 0x76669f) and a word otherwise
+	// (@ 0x7668af); eight bytes at +16 + count * width, zeroed where it is under 8 (a byte) or 0x800 (a
+	// word) in size, else the first eight sample bytes copied there (@ 0x7666b9..0x7666c7,
+	// @ 0x7668bc..0x7668da). At widths 1 and 2 that is past the count's samples; at 3 or more past
+	// them too, past the buffer unless it holds width * count bytes (D-SND-48); at 0 it is +16, the
+	// mixer's first eight samples, zeroed where the word there is under 0x800 in size (where that word
+	// runs past the bytes, unwitnessed, ours leaves them).
+	if (bytes[12] == 0 && size >= 18) {
+		const int16_t first = static_cast<int16_t>(io::read_u16_le(bytes + 16));
+		if (first > -0x800 && first < 0x800)
+			std::fill(out.pcm16.begin(), out.pcm16.begin() + std::min<size_t>(8, present) * 2, uint8_t(0));
+	}
+	// The rate the ratio is nearest, for the shell's player (the mixer steps by the ratio itself): the
+	// inverse the dialog line's hold takes, (pitch * 44100 + 0x8000) >> 16 [orig: Dialog_LoadAudioClip
+	// @ 0x44dd8e..0x44dd9f, a signed imul; ours unsigned, the same below a pitch of 2^31].
+	out.sample_rate = static_cast<uint32_t>((uint64_t(pitch_q16) * 44100 + 0x8000) >> 16);
+	out.channels = 1;
+	out.loader_samples = samples;
+	out.loader_pitch_q16 = pitch_q16;
+	return true;
 }
 
-// --- WAV IMA-ADPCM (audioFormat 0x11) decode to signed 16-bit PCM ---
-// NovaLogic stores voice/zone audio as 4-bit IMA-ADPCM (mono, block-based). This
-// is the standard Microsoft/IMA scheme: each block begins with a per-channel
-// header (int16 predictor + uint8 step index), then 4-bit nibbles decoded via the
-// step/index tables. Stereo (defensive) interleaves 4-byte (8-nibble) words per
-// channel after the headers.
+// --- WAV IMA ADPCM (audioFormat 0x11) decode to signed 16-bit PCM ---
+// NovaLogic stores voice/zone audio as 4-bit IMA ADPCM, mono, block by block: each block a header
+// (int16 predictor, step index byte, a byte unread), then 4-bit nibbles stepped through the tables.
+// The step at an index and the index's move by a nibble are the standard IMA tables, which the game's
+// loader holds as word_7BF300 and dword_7BF3B2 [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf250,
+// read @ 0x7bf256 and @ 0x7bf25e].
 const int IMA_STEP_TABLE[89] = {
 	7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
 	50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
@@ -106,7 +123,15 @@ const int IMA_STEP_TABLE[89] = {
 	12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
 };
 const int IMA_INDEX_TABLE[16] = { -1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8 };
+// The loader's scale of a nibble's step, in Q16: 0x2000 * (2n + 1) for its low three bits n, negative
+// for its fourth (dword_7BF2C0) [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf265].
+const int32_t ADPCM_SCALE_TABLE[16] = {
+	0x2000, 0x6000, 0xA000, 0xE000, 0x12000, 0x16000, 0x1A000, 0x1E000,
+	-0x2000, -0x6000, -0xA000, -0xE000, -0x12000, -0x16000, -0x1A000, -0x1E000
+};
 
+// The tooling's nibble step (decode_ima_adpcm_standard), not the loader's: the standard IMA sum of
+// the step's shifts, each truncated.
 inline int16_t ima_decode_nibble(uint8_t nib, int &predictor, int &index) {
 	const int step = IMA_STEP_TABLE[index];
 	int diff = step >> 3;
@@ -138,8 +163,11 @@ inline int16_t ima_decode_nibble(uint8_t nib, int &predictor, int &index) {
 	return static_cast<int16_t>(predictor);
 }
 
-// Returns interleaved signed-16-bit-LE PCM, or empty on a malformed stream.
-std::vector<uint8_t> decode_ima_adpcm(const uint8_t *data, uint32_t size,
+// The tooling's IMA ADPCM read (wav_decode_pcm16_lenient), not the loader's: every block the data
+// holds whole or in part, each nibble by the standard steps above, mono or stereo (4-byte nibble words
+// round-robin per channel after the headers). Interleaved signed 16-bit LE PCM, or empty on a
+// malformed stream.
+std::vector<uint8_t> decode_ima_adpcm_standard(const uint8_t *data, uint32_t size,
 		int channels, uint32_t block_align) {
 	const uint32_t header_bytes = static_cast<uint32_t>(4 * channels);
 	if (block_align < header_bytes || channels < 1 || channels > 2) {
@@ -196,6 +224,62 @@ std::vector<uint8_t> decode_ima_adpcm(const uint8_t *data, uint32_t size,
 		}
 	}
 	return out;
+}
+
+// One nibble of the game's loader's IMA ADPCM decode [orig: Audio_AdpcmDecodeNibbleStep @ 0x7bf250]:
+// the nibble the low four bits (@ 0x7bf253), the step at the index as it stands (@ 0x7bf256), the
+// index moved by the nibble (@ 0x7bf25e), the sample moved by (step * scale) >> 16, floored (imul;
+// shrd 16 @ 0x7bf265..0x7bf272), and held to int16 (@ 0x7bf274..0x7bf289), the index to 0..88
+// (@ 0x7bf28e..0x7bf29a). The index comes in outside 0..88 only as a block's header byte, where the
+// loader reads the step past the table's ends in the image; ours reads it at the end it passed
+// (D-SND-47).
+void adpcm_nibble_step(uint32_t nibble, int32_t &sample, int32_t &index) {
+	nibble &= 0x0F;
+	const int32_t step = IMA_STEP_TABLE[index < 0 ? 0 : (index > 88 ? 88 : index)];
+	index += IMA_INDEX_TABLE[nibble];
+	// The 64-bit product shifted right, floored (an arithmetic shift, as shrd over imul's edx:eax).
+	sample += static_cast<int32_t>((static_cast<int64_t>(step) * ADPCM_SCALE_TABLE[nibble]) >> 16);
+	if (sample < INT16_MIN) sample = INT16_MIN;
+	if (sample > INT16_MAX) sample = INT16_MAX;
+	if (index < 0) index = 0;
+	if (index > 88) index = 88;
+}
+
+// The game's loader's IMA ADPCM decode [orig: Audio_LoadWavFileFromArchive @ 0x766480, the 4-bit leg
+// @ 0x766783..0x7668aa]: `count` samples, the fact chunk's (@ 0x76678a), none for a count of 0 or
+// less (@ 0x7667fb), from the data's first byte. Each block its 4-byte header, the predictor a sample
+// of its own and the step index a signed byte (@ 0x766801..0x76681e), then block_align - 4 bytes,
+// block_align read signed (@ 0x766786..0x76679e), each byte its low nibble and then its high one
+// (@ 0x766836..0x76688d); a block_align of 4 or under is a header alone (@ 0x766834). The decode stops
+// the moment the count is spent, mid-block too (@ 0x766823, @ 0x766866, @ 0x766896). The loader reads
+// on for the count, past the data chunk (its size unread) and past the file's end (unwitnessed):
+// ours reads to the end of the bytes and stops there. Signed 16-bit LE PCM.
+std::vector<uint8_t> decode_ima_adpcm_loader(const uint8_t *bytes, size_t size, size_t data,
+		int32_t count, uint16_t block_align) {
+	std::vector<uint8_t> out;
+	const int32_t block_bytes = static_cast<int32_t>(static_cast<int16_t>(block_align)) - 4;
+	if (count <= 0 || data > size) return out;
+	out.reserve(2 * std::min<size_t>(static_cast<size_t>(count), 2 * (size - data) + 1));
+	size_t at = data;
+	for (;;) {
+		if (at + 3 > size) return out;
+		int32_t sample = static_cast<int16_t>(io::read_u16_le(bytes + at));
+		int32_t index = static_cast<int8_t>(bytes[at + 2]);
+		at += 4;
+		io::append_u16_le(out, static_cast<uint16_t>(sample));
+		if (--count <= 0) return out;
+		for (int32_t n = 0; n < block_bytes; ++n) {
+			if (at >= size) return out;
+			// The byte sign-extended (movsx @ 0x766836); its high nibble shifted down (@ 0x76686f).
+			const uint32_t byte = static_cast<uint32_t>(static_cast<int8_t>(bytes[at++]));
+			adpcm_nibble_step(byte, sample, index);
+			io::append_u16_le(out, static_cast<uint16_t>(sample));
+			if (--count <= 0) return out;
+			adpcm_nibble_step(byte >> 4, sample, index);
+			io::append_u16_le(out, static_cast<uint16_t>(sample));
+			if (--count <= 0) return out;
+		}
+	}
 }
 
 }  // namespace
@@ -271,8 +355,9 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error) {
 	r_out = WavPcm{};
 	r_error.clear();
-	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AOA1"))
-		return decode_aoa1(bytes, size, r_out, r_error);
+	// The own buffer ahead of the RIFF compare [orig: Audio_LoadWavFileFromArchive @ 0x7664e2].
+	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AUD1"))
+		return decode_aud1(bytes, size, r_out, r_error);
 	const WaveLoaderWalk walk = wave_loader_walk(bytes, size);
 	if (walk.refusal != WaveRefusal::None) {
 		r_error = std::string("the game's wave loader refuses it: ") + refusal_words(walk.refusal);
@@ -295,13 +380,12 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		r_out.pcm16.assign(src, src + data_size);
 		r_out.loader_samples = walk.data_size >> 1;
 	} else {
-		r_out.pcm16 = decode_ima_adpcm(src, data_size, 1, walk.block_align);
-		if (r_out.pcm16.empty()) {
-			r_error = "failed to decode IMA-ADPCM (block_align " +
-					std::to_string(walk.block_align) + ")";
-			return false;
-		}
-		r_out.loader_samples = walk.fact + 12 <= size ? io::read_u32_le(bytes + walk.fact + 8) : 0;
+		// IMA ADPCM: the fact chunk's count of the loader's own nibble steps, read on from the data
+		// [orig: @ 0x76678a..0x7668aa], the count its record (@ 0x7667ba).
+		const uint32_t count = walk.fact + 12 <= size ? io::read_u32_le(bytes + walk.fact + 8) : 0;
+		r_out.pcm16 = decode_ima_adpcm_loader(bytes, size, walk.data, static_cast<int32_t>(count),
+				walk.block_align);
+		r_out.loader_samples = count;
 	}
 	r_out.sample_rate = walk.rate;
 	r_out.channels = 1;
@@ -313,8 +397,8 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error) {
 	r_out = WavPcm{};
 	r_error.clear();
-	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AOA1"))
-		return decode_aoa1(bytes, size, r_out, r_error);
+	if (bytes != nullptr && size >= 4 && tag_eq(bytes, "AUD1"))
+		return decode_aud1(bytes, size, r_out, r_error);
 	if (bytes == nullptr || size < 44) {
 		r_error = "buffer too small to be a WAV";
 		return false;
@@ -393,7 +477,7 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		}
 	} else if (audio_format == 0x11) {
 		// IMA-ADPCM (NovaLogic voice / zone audio) -> signed 16-bit PCM.
-		r_out.pcm16 = decode_ima_adpcm(src, data_size, channels, block_align);
+		r_out.pcm16 = decode_ima_adpcm_standard(src, data_size, channels, block_align);
 		if (r_out.pcm16.empty()) {
 			r_error = "failed to decode IMA-ADPCM (block_align " +
 					std::to_string(block_align) + ")";

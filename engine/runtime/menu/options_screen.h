@@ -20,11 +20,12 @@ struct RemapInput {
 // the remap flow edits; the front-end ACCEPT writes the controls words and the
 // records back into the record, the in-game Accept the same plus the
 // auto-reload / auto-medic pair, and leaves the live apply, the save and the
-// device preview to the shell (the ApplyControls / CommitPreview effects).
-// Nothing reaches the game's live bindings or the session's words before an
-// Accept (and a front-end one waits for the next mission start's controls
-// apply). A null record (no profile) leaves the words alone and the records
-// the catalog defaults.
+// device preview to the shell (the ApplyControls / CommitPreview effects); the
+// front-end BACK writes nothing and asks the shell to drop the screen's live
+// edits (DiscardEdits). Nothing reaches the game's live bindings or the
+// session's words before an Accept (and a front-end one waits for the next
+// mission start's controls apply). A null record (no profile) leaves the words
+// alone and the records the catalog defaults.
 // [orig: UI_BuildKeyBindingLoadoutTable @0x559e50 (the records, from
 //  UI_OptionsScreenInit @0x554dc5 and UI_PopulateRenderAndAudioSettings
 //  @0x55d503); sub_55A710 @0x55ab5f..0x55ace5 (the front ACCEPT);
@@ -41,6 +42,11 @@ public:
 		CommitPreview = 4,
 		RestorePreview = 8,
 		ApplyControls = 16,
+		// The front-end BACK keeps no widget edit: the shell rolls its live
+		// previews back to the words the screen opened with and writes no other
+		// word
+		// [orig: Options_HandleAcceptOrBack @0x55adcf..0x55ae01].
+		DiscardEdits = 32,
 	};
 	void prepare(MenuRuntime &menu, const playersav::ProfileRecord *record);
 	bool is_surface() const { return is_surface_; }
@@ -59,13 +65,22 @@ public:
 	// UI_PopulateRenderAndAudioSettings @0x55d2b0..0x55d3c2]. Nothing off the surface or
 	// without a record.
 	void seed_profile(MenuRuntime &menu, const playersav::ProfileRecord *record) const;
-	int activate(MenuRuntime &menu, playersav::ProfileRecord *record, const std::string &name);
+	// The activated control, by its runtime id: its name picks the arm, its own
+	// screen gates the front BACK.
+	int activate(MenuRuntime &menu, playersav::ProfileRecord *record, int id);
 	void arm(MenuRuntime &menu, int id, int row);
 	int consume(MenuRuntime &menu, const RemapInput &event);
 	void end_remap(MenuRuntime &menu, bool refill);
 	// The screen's own binding records (the remap flow's).
 	const controls::BindingSet &bindings() const { return bindings_; }
 	static void show_ingame_main(MenuRuntime &menu);
+	// The front-end OPTIONS screen, by name (ignoring case). Every show of it runs
+	// its init again, which seeds the controls from the saved words, so each visit
+	// starts from the last accepted state; its BACK control alone discards.
+	// [orig: UI_DispatchScreenEvent @0x54e6a0 case 5 (activate), the stricmp with
+	//  "OPTIONS" @0x54eea2 -> UI_PopulateRenderAndAudioSettings @0x54eeae;
+	//  UI_RegisterOptionsCallbacks @0x55d629]
+	static bool is_front_screen(const std::string &screen);
 
 private:
 	int control_table(const MenuRuntime &menu) const;

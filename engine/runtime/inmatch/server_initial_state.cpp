@@ -431,6 +431,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				p.records.assign(full.records.begin() + static_cast<std::ptrdiff_t>(off),
 				                 full.records.begin() + static_cast<std::ptrdiff_t>(off + cnt));
 				p.entity_count = static_cast<int16_t>(p.records.size());
+				// Each page is one serializer call: its zone outs start over (D-NET-394).
+				opennova::replication::stream_pool2_zone_blocks(*ctx.world, p);
 				return opennova::encode_static_entity_batch(p);
 			}, step, b, budget);
 			break;
@@ -444,6 +446,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				p.records.assign(full.records.begin() + static_cast<std::ptrdiff_t>(off),
 				                 full.records.begin() + static_cast<std::ptrdiff_t>(off + cnt));
 				p.entity_count = static_cast<int16_t>(p.records.size());
+				// Each page is one serializer call: its zone outs start over (D-NET-394).
+				opennova::replication::stream_pool1_zone_bytes(*ctx.world, p);
 				return opennova::encode_pool_spawn_batch(p);
 			}, step, b, budget);
 			break;

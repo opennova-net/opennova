@@ -324,7 +324,8 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 			rec.score_flag = c.u8();
 		}
 		rec.weapon_byte = c.u8();                                 // entity+538, unconditional
-		if (rec.weapon_byte != 0 || (rec.field_flags & kStaticEntityHasAttachRef)) rec.attach_ref = c.u16();
+		rec.has_attach_ref = (rec.field_flags & kStaticEntityHasAttachRef) != 0;
+		if (rec.weapon_byte != 0 || rec.has_attach_ref) rec.attach_ref = c.u16();
 
 		const bool record_ok = c.ok;
 		if (!record_ok) out.last_record_partial = true;

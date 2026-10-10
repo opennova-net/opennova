@@ -96,8 +96,17 @@ uint32_t string_index(std::vector<std::string> &strings, const std::string &text
 bool binary_config_text(const BinaryConfig &config, std::string &text, std::string &why) {
 	text.clear();
 	for (const BinaryConfig::Label &label : config.labels) {
+		if (label.name == 0) {
+			why = "a label has a null name (string 0), which no section line carries";
+			return false;
+		}
 		if (!config.string_at(label.name)) {
 			why = "a label names a string past its string table";
+			return false;
+		}
+		if (label.count_minus_one || label.terminator.name != 0 || !label.terminator.values.empty()) {
+			why = "the label \"" + *config.string_at(label.name) +
+					"\" is counted 0xFFFFFFFF or closed by a terminator other than (0, 0), which no line carries";
 			return false;
 		}
 		const std::string &name = *config.string_at(label.name);
@@ -118,6 +127,10 @@ bool binary_config_text(const BinaryConfig &config, std::string &text, std::stri
 		}
 		text += "[" + upper + "]\r\n";
 		for (const BinaryConfig::Entry &entry : label.entries) {
+			if (entry.name == 0) {
+				why = "an entry has a null name (string 0), which no line's key carries";
+				return false;
+			}
 			if (!config.string_at(entry.name)) {
 				why = "an entry names a string past its string table";
 				return false;
@@ -126,6 +139,10 @@ bool binary_config_text(const BinaryConfig &config, std::string &text, std::stri
 			if (key.empty() || key.front() == '[' || key.front() == ' ' || key.back() == ' ' ||
 					key.find_first_of("=;\t\r\n") != std::string::npos || key.find('\0') != std::string::npos) {
 				why = "its entry name \"" + key + "\" is not one a line's key can carry";
+				return false;
+			}
+			if (entry.values.empty()) {
+				why = "the entry \"" + key + "\" holds no value, of which the reader reads no entry";
 				return false;
 			}
 			text += key + " =";
@@ -140,6 +157,10 @@ bool binary_config_text(const BinaryConfig &config, std::string &text, std::stri
 						return false;
 					}
 				} else if (value.flags == BinaryConfig::kString) {
+					if (value.raw == 0) {
+						why = "the entry \"" + key + "\" holds a null string (string 0), which no text carries";
+						return false;
+					}
 					if (!config.string_at(value.raw)) {
 						why = "the entry \"" + key + "\" holds a string past its string table";
 						return false;
@@ -203,13 +224,6 @@ bool binary_config_text_readable(const std::string &text, ConfigTextRefusal &ref
 		if (!in_section) return refuse(number, "is outside any section, where the reader reads nothing");
 		const std::string unread = entry_unread(read);
 		if (!unread.empty()) return refuse(number, unread);
-		// Its values, as the reader splits them: one or two go in the form.
-		const std::vector<configfile::ConfigSection> parsed =
-				configfile::parse_config_text(reinterpret_cast<const uint8_t *>(("[X]\r\n" + read).data()), read.size() + 5);
-		const size_t values = parsed.empty() || parsed[0].entries.empty() ? 0 : parsed[0].entries[0].values.size();
-		if (values > 2)
-			return refuse(number, "holds " + std::to_string(values) +
-			                              " values, where an entry of the CBIN form holds one or two");
 	}
 	return true;
 }
