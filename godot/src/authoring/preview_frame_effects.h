@@ -23,13 +23,10 @@ public:
 	// A presented frame's legs, after the environment nodes advanced (the Celestial's veil and glare are this
 	// frame's): the Q3 frame compiled at the view's camera, the screen effects planned.
 	void present();
-	// Whether the veil shows (the device's Show option for the sky, else always).
-	void set_veil_visible(bool visible);
 	FrameFx *frame_fx() const;
 
 private:
 	uint64_t frame_fx_id_ = 0;
-	uint64_t veil_id_ = 0;
 };
 
 } // namespace godot

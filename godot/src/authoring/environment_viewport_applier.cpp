@@ -384,8 +384,6 @@ void EnvironmentViewportApplier::run_environment_(const EnvironmentViewport &mod
 }
 
 void EnvironmentViewportApplier::terrain_empty_(const TerrainKey &key) {
-	foliage_->reset();
-	foliage_->set_terrain_data(Ref<TerrainData>());
 	loading_.unref();
 	foliage_->reset();
 	foliage_->set_terrain_data(Ref<TerrainData>());

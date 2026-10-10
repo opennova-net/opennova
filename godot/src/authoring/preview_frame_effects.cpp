@@ -39,18 +39,10 @@ PreviewFrameEffects::PreviewFrameEffects(Node3D &root, SubViewport &viewport) {
 		veil->set_visible(false);
 	}
 	viewport.add_child(veil);
-	veil_id_ = veil->get_instance_id();
 }
 
 FrameFx *PreviewFrameEffects::frame_fx() const {
 	return frame_fx_id_ ? Object::cast_to<FrameFx>(ObjectDB::get_instance(ObjectID(frame_fx_id_))) : nullptr;
-}
-
-void PreviewFrameEffects::set_veil_visible(bool visible) {
-	ColorRect *veil = veil_id_ ? Object::cast_to<ColorRect>(ObjectDB::get_instance(ObjectID(veil_id_))) : nullptr;
-	if (veil == nullptr) return;
-	const Ref<ShaderMaterial> material = veil->get_material();
-	veil->set_visible(visible && material.is_valid());
 }
 
 void PreviewFrameEffects::present() {

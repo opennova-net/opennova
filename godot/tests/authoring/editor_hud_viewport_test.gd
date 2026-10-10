@@ -308,6 +308,16 @@ func test_the_preview_background_draws_behind_the_hud() -> void:
 	if not drawn.is_empty():
 		assert_almost_eq((drawn["material"] as ShaderMaterial).get_shader_parameter("backdrop_own") as Vector3,
 				Vector3(0.27, 0.29, 0.31), Vector3.ONE * 0.001, "Dark draws the HUD preview's own grey")
+	# The view effects' sun veil reads the Celestial's process-wide alpha: another device's sun (an environment view
+	# looking at it) never veils the HUD preview, which has no world.
+	RenderingServer.global_shader_parameter_set("opennova_sun_veil_alpha", 0.8)
+	await _pump_frames(2)
+	var overlay := _overlay()
+	var veil := overlay.get_node_or_null("PlayerViewEffects/SunVeil") as CanvasItem if overlay != null else null
+	assert_not_null(veil, "the view effects' sun veil")
+	if veil != null:
+		assert_false(veil.visible, "no sun over the HUD preview")
+	RenderingServer.global_shader_parameter_set("opennova_sun_veil_alpha", 0.0)
 
 
 ## S23 C: the sights and the Tab board. A scoped rifle with a rangefinder and an elevation readout, its sights up

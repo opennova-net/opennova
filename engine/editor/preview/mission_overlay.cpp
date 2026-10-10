@@ -47,7 +47,7 @@ uint32_t pool_rgb(MissionPool pool) {
 } // namespace
 
 uint32_t mission_team_rgb(int team) {
-	// The game's map colours (mission_overlay.h): team 1 the HUD palette's third entry, team 2 its fifth.
+	// The game's map colours (mission_overlay.h): team 1 the HUD palette's palette[3], team 2 its palette[5].
 	switch (team) {
 	case 1: return kMissionBlueRgb;
 	case 2: return kMissionRedRgb;

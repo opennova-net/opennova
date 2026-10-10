@@ -64,7 +64,7 @@ bool texture_role_has_budget(renderer::TextureRoleId role);
 //   GTexture_PixelFormatToD3DFormat @ 0x686D80: 2 is D3DFMT_A8, 1 A8R8G8B8];
 // - a menu's image and cursor: cut into tiles, each its side's power of two (the card's largest side at most),
 //   A8R8G8B8 with flags 0x140001, one level [orig: CTextureManager_LoadOrFindTexture @ 0x654DC4..0x654DD6;
-//   GImage_CreateTiledTextures_0 @ 0x67A8B9 (the tile, GTexture_ComputeTileSize @ 0x679DF0), @ 0x67AA30..0x67AA43
+//   GImage_CreateTiledTextures_0 @ 0x67A8B9 (the tile, sub_679DF0), @ 0x67AA30..0x67AA43
 //   (flags | 1)]; a frame's stencil at its sides with 0x140000 and its brush (and mouse-over stencil) with 0x40000,
 //   one level each [orig: CUIElement_ParseXMLDefinition @ 0x648899, @ 0x6488BC, @ 0x6488E2, through
 //   GTexture_FindOrCreateFromData @ 0x654D92];

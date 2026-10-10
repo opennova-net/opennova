@@ -309,6 +309,12 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 }
 
 void HudViewportApplier::tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) {
+	// The view effects' sun veil is the world's (the Celestial pushes its alpha as a process-wide global): the HUD
+	// preview has no world and no sun, so none, whatever another device's Celestial (an environment view looking at
+	// the sun) last pushed. The effects make the veil as they enter the tree.
+	if (Control *effects = view_effects())
+		if (CanvasItem *veil = Object::cast_to<CanvasItem>(effects->get_node_or_null(NodePath("SunVeil"))))
+			if (veil->is_visible()) veil->set_visible(false);
 	HudOverlay *hud = overlay();
 	if (!hud || !configured_) return;
 	// The player's state on the preview clock's ticks, the HUD's clock (its fades, its flashes).
