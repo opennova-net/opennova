@@ -243,6 +243,12 @@ public:
     // [orig: Input_ProcessFrame @0x49d541; Client_ProcessNetworkFrame
     //  @0x42c3dd gate -> Player_PackInputStateToEntity @0x42c3e9]
     void apply_player_input_pre_tick(bool pack_input);
+    // The pack's stamp of the body's view and weapon facts, its last step: the weapon switch stamp, the
+    // scope raised (settled), the binoculars, the weapon's run anim and forced crouch, the kit weight, the
+    // aimed shot (local_player_can_fire: the crosshair gate and the spread row read it) and the Flags word's
+    // NVG, binoculars and scope bits [orig: Player_PackInputStateToEntity @0x4DF450]. Its own entry for a
+    // caller that runs the view and the weapon walk without the input pack (the editor's weapon range).
+    void stamp_body_view();
     // The body-pass scoped/binocular drift, after weight dispersion and before
     // upper-body decay. Writes persistent aim, including the next input fold.
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, block @0x4B5966..0x4B5C97]
