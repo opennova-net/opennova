@@ -66,7 +66,9 @@ std::vector<const char *> preview_model_fields(const std::string &map_field);
 // The rig of the animation document `file` (a table or a clip, its file name): a table
 // plays on the model a record pairs with it (preview_model_fields, the first that names a model of
 // the project: an item's graphic, else its graphic_enemy; a weapon's gfx1); a clip on the first
-// table that names it, and that table's model. `chosen` (a model's file name) wins.
+// table naming it that a record pairs with a model, and that table's model (a clip two tables share,
+// one of them no item's, plays on the other's), else on the first table naming it. `chosen` (a model's
+// file name) wins.
 PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, const std::string &file, AssetKind kind,
                                const std::string &chosen);
 
