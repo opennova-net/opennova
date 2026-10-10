@@ -23,6 +23,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/squad_messages.h>
 #include <runtime/mission/mission_kernel.h>
+#include <formats/playersav/player_sav.h>
 
 #include <runtime/inmatch/null_datagram_socket.h>
 
@@ -843,6 +844,48 @@ int main() {
 		CHECK(local->health == (objective ? 200 : 100));
 		CHECK(w::local_player_max_health(kernel.world) == (objective ? 200 : 100));
 		CHECK(role.state.host_owner.ctx.config.config_bytes[6] == (objective ? 0xFF : 0x00));
+	}
+
+	// --- a fresh SP start spawns at the profile's ceiling (D-PWR-6) ---------
+	// The session settings copy the profile's +0x564 into the difficulty word
+	// ahead of the round init, whose class init and spawn raise the zeroed
+	// local player to its ceiling: a training mission (stock Co-op 0x10020)
+	// starts at twice the def hp at -1 and half at 1, and keeps it after the
+	// mission start sets the word 0. The SP restart's start skips the copy.
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551F6F..0x551F75 (called
+	//  @0x524662, skipped on the restart @0x52465E); PlayerClass_InitEntity
+	//  @0x4B112B; Entity_SpawnFromAnimSlotProperty @0x43C557; Game_StartMission
+	//  @0x525CDD]
+	for (const int32_t profile_word : {-1, 1}) {
+		for (const bool restart : {false, true}) {
+			ms::MissionKernel kernel;
+			inmatch::HostRole role;
+			role.bind(kernel);
+			bms::File mission = two_entity_mission();
+			mission.header.attrib_flags = bms::AttribFlags::None;
+			kernel.open_document(std::move(mission), "profile_start", source_over(&files));
+			ms::KernelBootOptions options;
+			options.game_type = mission_game_type(kernel.mission);
+			CHECK(options.game_type == game_type::kCoop);
+			options.restart = restart;
+			playersav::ProfileRecord profile;
+			profile.sp_difficulty = profile_word;
+			int32_t spawn_word = 0;
+			options.bringup_net_session = [&] {
+				kernel.world.tables.player.item_hp = 100; // the Player def's hp
+				role.bring_up_singleplayer(&profile);
+				spawn_word = kernel.world.rules.difficulty;
+			};
+			std::string error;
+			CHECK(kernel.boot(options, error));
+			const w::Entity *local = kernel.world.registry.get(kernel.world.cached.local_player);
+			CHECK(local != nullptr);
+			if (local == nullptr) continue;
+			CHECK(spawn_word == (restart ? 0 : profile_word));
+			CHECK(kernel.world.rules.difficulty == 0);
+			CHECK(local->health == (restart ? 100 : profile_word == -1 ? 200 : 50));
+			CHECK(w::local_player_max_health(kernel.world) == 100);
+		}
 	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");

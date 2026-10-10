@@ -44,9 +44,15 @@ struct PlayerSpawn {
     int16_t roll = 0;
     uint8_t team = 0;
     uint16_t net_id = 0xFFF0;
-    // Item-less FALLBACK only: when World::player_item_hp is resolved (the items.def Player hp,
-    // 150), the spawn seeds THAT at full [orig: Entity_InitFromItemDef @0x49e550]. (D-NET-144)
+    // Item-less FALLBACK only: when the Player def is resolved (world.tables.player, the
+    // items.def Player hp, 150) the spawn's ceiling is THAT def word. (D-NET-144)
     int16_t health = 100;
+    // A joiner's own body, built from its 0x0C record: the client's item init stores the def word
+    // as its health, which the class init's raise (in a session, to that word) keeps, where the
+    // authority's spawn zeroes the row first. [orig: NapiNPClientMsg_0x00C @0x42E730 - the memset
+    //  @0x42E7F1, the Entity_InitFromItemDef call @0x42E84D; Entity_InitFromItemDef @0x49E550 -
+    //  Health @0x49E5B9..0x49E5C0, the +0x148 class init @0x49E5D5..0x49E5EA]
+    bool from_wire_record = false;
     uint16_t min_entity_slot = 0;
     // The owning connection's ConnectionId/dcb -> Entity::owner_connection_id (entity+0x78). The host's
     // own player carries the host dcb (the loopback connection_id); a joiner carries its 0x48-ack dcb.

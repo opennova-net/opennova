@@ -876,9 +876,9 @@ bool MissionKernel::complete_mission_start() {
 	// Out of a session the difficulty word starts every mission at 0; under the
 	// objective Co-op game type the mission also takes the single-player respawn
 	// attribute, the word -1 and the local player's health at its ceiling, a
-	// 16-bit store (twice its def hp). The word the session settings copied from
-	// the profile (+0x564) does not survive this; retail's player spawn raises
-	// read it first, which ours does not (D-PWR-6).
+	// 16-bit store (twice its def hp). The word a fresh start's bring-up copied
+	// from the profile (+0x564) does not survive this; the player's spawn raise
+	// read it first (D-PWR-6).
 	// [orig: Game_StartMission @0x525CC2..0x525D12, after the WacScript_InitAndLoad
 	//  and Environment_MissionStartInit calls @0x525CB3 / @0x525CB8 and ahead of
 	//  Score_CountMissionSubgoalsAndUnits @0x525D5D; the 0x40 OR @0x525CF2, the

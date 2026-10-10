@@ -95,6 +95,12 @@ struct GameConfig {
 	int32_t no_weapon_recoil = 0;
 	int32_t no_crosshair_spread = 0;
 	int32_t no_scope_drift = 0;
+	// Out of a session, the difficulty word the session settings copy from the
+	// current profile record's +0x564 (a fresh profile's 0), which the SP
+	// bring-up seeds world::SessionRules::difficulty with on a fresh start
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551F6F..0x551F75]. A
+	// session's word rides config_bytes[6] (game.cfg's mp_difficulty).
+	int32_t profile_difficulty = 0;
 	// (retail game_settings +0x80 internet_address has no reader here; +0xC4
 	//  use_lineup_queue and +0xC8 lineup_queue_size, which the join gate reads,
 	//  are not modelled: join_capacity, D-NET-403.)

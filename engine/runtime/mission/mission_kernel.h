@@ -218,6 +218,9 @@ public:
 	// boot appends its round init ("round_init") after it.
 	bool boot(const KernelBootOptions &options, std::string &error);
 	std::vector<std::string> boot_trace;
+	// This boot is the SP restart's (KernelBootOptions::restart), for the
+	// bring-up's legs its start skips.
+	bool restart_boot() const { return restart_boot_; }
 
 	// --- the cross-mission carry ---------------------------------------------
 	// A load swaps in a fresh kernel (ADR 0042 d3); the embedder hands this

@@ -111,6 +111,15 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// mode: set for the SP/listen HostClient, clear for a HostOnly dedicated
 	// host. [orig: g_NapiNPCtx +0x64; napi_np_server_ctx.h connection modes]
 	kernel.world.rules.mp_session_peer = serve_and_play;
+	// Out of a session a fresh start's session settings copy the current
+	// profile's +0x564 into the difficulty word, which the player's spawn
+	// raises read before the mission start resets it (D-PWR-6); the SP
+	// restart's start skips the copy [orig: Game_ApplySessionSettingsToGlobals
+	//  @0x551F6F..0x551F75, called from SinglePlayer_StartMission @0x561C28 and
+	//  Game_StartMission @0x524662, which `cmp esi, ebx` @0x52465E skips on the
+	//  restart's start (Game_RestartRoundSP pushes 1 @0x5263D9)].
+	if (!kernel.world.rules.mp_session && !kernel.restart_boot())
+		kernel.world.rules.difficulty = config.profile_difficulty;
 }
 
 // The HostClient replica pipeline (recv-fold only, 0x0C suppressed): it folds
@@ -148,20 +157,22 @@ GameConfig singleplayer_game_config(uint32_t game_type,
 		// profile record: +0x548 -> g_SessionNoCharAbilities, +0x54C ->
 		// g_SessionNoWeaponRecoil, +0x554 -> g_SessionNoCrossHairSpread,
 		// +0x550 -> g_SessionNoScopeDrift [orig:
-		// Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F].
+		// Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F], and +0x564
+		// -> the difficulty word (dword_24D2110 @0x551F6F..0x551F75).
 		config.no_char_abilities = profile->sp_no_char_abilities;
 		config.no_weapon_recoil = profile->sp_no_weapon_recoil;
 		config.no_crosshair_spread = profile->sp_no_crosshair_spread;
 		config.no_scope_drift = profile->sp_no_scope_drift;
+		config.profile_difficulty = profile->sp_difficulty;
 	}
 	return config;
 }
 
 // [orig: SinglePlayer_StartMission @0x561af0]
-void HostRole::bring_up_singleplayer() {
+void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::GameConfig config = singleplayer_game_config(
-			game_type::for_mission_attribs(kernel.mission.header.attrib_flags));
+			game_type::for_mission_attribs(kernel.mission.header.attrib_flags), profile);
 	reset_state(config, /*serve_and_play=*/true, /*in_session=*/false);
 	state.host_owner.host_loopback = &state.host_loop;
 	inmatch::HostConfig host_cfg;

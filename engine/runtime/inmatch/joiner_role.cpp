@@ -672,6 +672,9 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	// entity+0x15C (the wire NetId); EntityPool_FindByNetId @0x4f0a20 keys entity+0x7C, left 0
 	// for players]
 	spawn.net_id = 0;
+	// L is the client's body from the record: its item init's def word, not the
+	// authority's zeroed row (world/player_spawn.h).
+	spawn.from_wire_record = true;
 	return spawn;
 }
 
