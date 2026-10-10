@@ -7,6 +7,7 @@
     "base/resource_index/boot_policy.cpp",
     "base/resource_index/texture_candidates.cpp",
     "base/vfs/vfs_decode.cpp",
+    "base/os_random",
     "net/novaworld/service",
     "runtime/inmatch/loopback_channel.cpp",
     "runtime/inmatch/udp_session_transport.cpp",

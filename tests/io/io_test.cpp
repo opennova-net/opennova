@@ -31,7 +31,6 @@
 #include <base/io/le.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
-#include <base/io/uuid.h>
 
 #include "common/test_expect.h"
 
@@ -374,23 +373,6 @@ static int test_base64()
     TEST_EXPECT(encode("fooba") == "Zm9vYmE=");
     TEST_EXPECT(encode("foobar") == "Zm9vYmFy");
     TEST_EXPECT(io::base64_encode(std::vector<uint8_t>{0xFB, 0xFF, 0xBF}) == "+/+/");
-    return 0;
-}
-
-// A version 4 UUID: its text form, its version and variant digits, and two never the same.
-static int test_uuid_v4()
-{
-    const std::string a = io::make_uuid_v4(), b = io::make_uuid_v4();
-    TEST_EXPECT(a.size() == 36 && a != b);
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (i == 8 || i == 13 || i == 18 || i == 23) {
-            TEST_EXPECT(a[i] == '-');
-        } else {
-            TEST_EXPECT((a[i] >= '0' && a[i] <= '9') || (a[i] >= 'a' && a[i] <= 'f'));
-        }
-    }
-    TEST_EXPECT(a[14] == '4');
-    TEST_EXPECT(a[19] == '8' || a[19] == '9' || a[19] == 'a' || a[19] == 'b');
     return 0;
 }
 
@@ -796,7 +778,6 @@ int main()
     if (test_strutil_parse_numbers()) return 1;
     if (test_strutil_text_chores()) return 1;
     if (test_base64()) return 1;
-    if (test_uuid_v4()) return 1;
     if (test_append_writers()) return 1;
     if (test_byte_reader_truncation_latch()) return 1;
     if (test_byte_reader_cstr_and_skip_if_available()) return 1;

@@ -3,9 +3,10 @@
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 
-#include "network/random_id.h"
 #include "util/data_format.h"
 #include "util/string_convert.h"
+
+#include <base/os_random/os_random.h>
 
 #include <cstdint>
 #include <string>
@@ -73,7 +74,7 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 
 	const String target = destination.strip_edges();
 	if (target.is_empty() ||
-			!browser_.begin(pick_random_uint32(), port_min, port_max, connect_type)) {
+			!browser_.begin(opennova::os_random_nonzero_u32(), port_min, port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);
 	}

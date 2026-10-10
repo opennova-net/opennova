@@ -15,19 +15,47 @@ session handshake, the browser/host/play container services, and the legacy
 
 ## Thread model
 
-- **The main thread owns the database and the tick loop.** It runs
-  `manager.tick(now)` every `tick_interval_ms`, then on the same tick flushes the
-  `UnknownTracker` and runs the throttled host-staleness sweep. All routine DB
-  mutation funnels through here.
+- **The main thread owns the boot and the tick loop.** It migrates and seeds the
+  database, then runs `manager.tick(now)` every `tick_interval_ms` and on the same
+  tick flushes the `UnknownTracker` and runs the throttled host-staleness sweep.
 - **Each listener runs on its own internal thread(s).** They mutate shared state
   through the `ConnectionManager` verbs (add / refresh / drop) and the
-  `NwUdpListener`'s `lobby_states_` map (guarded by `lobby_states_mu_`). SQLite is
-  built `THREADSAFE=1`, so writes from a listener thread are serialized by the
-  engine; the higher-level invariants (the per-peer session-state map, the unknown
+  `NwUdpListener`'s `lobby_states_` map (guarded by `lobby_states_mu_`); the
+  higher-level invariants (the per-peer session-state map, the unknown
   accumulator) carry their own mutexes.
+- **Every thread has its own SQLite connection.** A `db::Database` is used by one
+  thread at a time: its last insert id, its error text and any open transaction
+  belong to the connection. `main()` owns one `db::ConnectionPool` on
+  `DATABASE_PATH`; the main thread and the gate and NW UDP receive threads each
+  hold a connection for their lifetime (the listeners lease theirs in `start()`,
+  so a database that cannot be opened stops the boot), each HTTP request leases
+  one for the handler, and `erase_lobby_state` (run from the NW UDP thread and
+  from the main thread's `on_lost`) leases one per call. The database is WAL, so
+  connections read while one writes, and the 5 s busy timeout makes a second
+  writer wait. A write that spans statements (`clear_all`, `replace_roster`,
+  `apply_status_blob`, the lobby's host row with its roster, a registration's
+  checks and insert) is one `db::Transaction`, and a read that spans them
+  (`/api/hosts` and the `.gsb` feeds: the rows, then each roster) is one
+  `db::ReadSnapshot`, so a host never goes out beside another write's roster.
 - **The `UnknownTracker` records from listener threads** into an in-memory,
   mutex-guarded accumulator and is flushed to the DB only on the main tick — never
   per packet.
+- **Each listener's `start()` holds its port before the boot goes on.** The gate and
+  NW UDP listeners bind their socket in `start()` and move it into the receive
+  thread (with the thread's lease), so the port they report is the one they serve,
+  also with port 0 (the OS's pick). The HTTP listener's `start()` returns once Crow
+  serves (Crow's first tick tells it, with the port Crow bound). A bind that fails
+  stops the boot.
+- **`main()` owns SIGINT and SIGTERM** (Ctrl+C; `docker stop` sends SIGTERM). The
+  handler only raises the shutdown flag and puts the signal's default action back,
+  so a second signal ends a shutdown that is stuck. The tick loop sees the flag
+  within one tick and stops in order: the HTTP listener (Crow's threads joined, a
+  held-open request included), then the gate and NW UDP receive threads (each
+  returns its lease), then the connections (`Shutdown`). As `main()` returns, its
+  locals go in reverse declaration order, so the main lease and then the pool
+  (declared first) close last, and the last close checkpoints the WAL. The HTTP
+  listener clears Crow's own signal set (`signal_clear()`), which would otherwise
+  take both signals and stop only Crow.
 
 ## Connection lifecycle
 
@@ -70,3 +98,29 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
+
+## Build layout and tests
+
+Every source but `main.cpp` builds as the static library
+`opennova_novaworld_server_core` (mirroring `opennova_serve_core`); the exe is
+`main.cpp` over it. The HTTP sources (`http_listener`, `template_engine`,
+`session_store`, `auth`, `catalog_repository`) join the core only under
+`BUILD_NOVAWORLD_HTTP`, which also defines `OPENNOVA_HTTP_ENABLED` PUBLIC so
+`main.cpp` starts the listener. The route harness, ctest
+`opennova_novaworld_server_http_routes`
+([`tests/novaworld/http_routes_test.cpp`](../../tests/novaworld/http_routes_test.cpp)),
+drives the Crow listener in-process on port 0 (the port it reads back from
+`bound_port()`) over a `db::ConnectionPool`
+on a SQLite file under `backend/migrations`, with `apps/common`'s `http_exchange`. It exists only
+with `BUILD_NOVAWORLD_HTTP=ON` and runs in `net-linux.yml` and `ci.yml`'s
+test-linux. The ctest `opennova_novaworld_server_signal_shutdown`
+([`tests/novaworld/server_signal_shutdown_test.cpp`](../../tests/novaworld/server_signal_shutdown_test.cpp),
+POSIX builds) runs the real binary on a temp database with every port 0, sends
+SIGINT and then SIGTERM to a fresh run, and expects exit 0, the shutdown legs
+logged in order and no WAL file left; with the HTTP layer it reads the HTTP port
+from the `[http] listening on :<port>` line and holds a half-sent request open
+across the signal. On Linux a third run checks that the first signal puts the
+default action back and a second one ends a shutdown still pending. The ctest
+`gate_listener` ([`tests/novaworld/gate_listener_test.cpp`](../../tests/novaworld/gate_listener_test.cpp))
+starts the real `GateListener` on port 0 and checks that its reported port answers
+a probe and comes back as POSTIPPORT.

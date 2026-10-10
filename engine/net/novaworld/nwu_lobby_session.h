@@ -54,7 +54,8 @@ public:
 		std::function<void(const std::string &)> on_soft_error;
 	};
 	struct Environment {
-		// The client index/key draws and the reconnect's fresh CK.
+		// The client index/key draws, the reconnect's fresh CK and the host role's AppId and
+		// cookie-key seeds. Unset: make_random_session_u32, the OS CSPRNG (base/os_random).
 		std::function<uint32_t()> random_u32;
 		// Resolve a gate or UDPNOVAWORLD host ("a.b.c.d" or a name) into `out` (its port left
 		// alone); false when it does not resolve. Unset: dotted quads only.

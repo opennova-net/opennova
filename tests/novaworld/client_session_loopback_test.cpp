@@ -22,6 +22,7 @@
 #include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
+#include <net/novaworld/nwu_host_role.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/protocol_message.h>
@@ -38,6 +39,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -478,10 +480,7 @@ void test_peer_disconnect_legs() {
 		               client.disconnect_event().dstr == "server shutting down",
 		       "H:0x03: the description record is latched");
 		// Once closed, further 0x83s are dropped.
-		NapiMessage stop;
-		stop.name = "ServerStopHosting";
-		stop.fields.push_back(str_field("Success", "1"));
-		const auto late = server.push(stop);
+		const auto late = server.push(make_server_stop_hosting(0));
 		out.clear();
 		expect(client.handle_datagram(late.data(), late.size(), out) && out.empty() &&
 		               client.take_notices().empty(),
@@ -1452,14 +1451,8 @@ void test_lobby_np_connection() {
 		cfg.client_key = 0x44444444u;
 		ClientSession client(cfg);
 		if (!expect(bring_up(server, client), "gate: session reaches Verified")) return;
-		NapiMessage first;
-		first.name = "ServerCommand";
-		first.fields.push_back(str_field("Cmd", "SetServerName First"));
-		NapiMessage second;
-		second.name = "ServerCommand";
-		second.fields.push_back(str_field("Cmd", "SetServerName Second"));
-		const auto d_first = server.push(first);
-		const auto d_second = server.push(second);
+		const auto d_first = server.push(make_server_command("SetServerName First"));
+		const auto d_second = server.push(make_server_command("SetServerName Second"));
 		std::vector<std::vector<uint8_t>> out;
 		expect(client.handle_datagram(d_second.data(), d_second.size(), out) && out.empty() &&
 		               client.take_notices().empty(),
@@ -1862,10 +1855,8 @@ int main() {
 	// and the verb + target suffix resolved; an unknown verb yields no notice.
 	// [orig: the ServerCommand handler CNapiGameSession_HandleServerCommand]
 	{
-		NapiMessage cmd;
-		cmd.name = "ServerCommand";
-		cmd.fields.push_back(str_field("Cmd", "PuntPlayerByName \"Some Guy\" 42"));
-		const auto d_cmd = server.push(cmd);
+		const auto d_cmd = server.push(make_server_command(server_command_text(
+			ServerCommandVerb::PuntPlayer, ServerCommandTarget::ByName, {"Some Guy", "42"})));
 		std::vector<std::vector<uint8_t>> cmd_out;
 		expect(client.handle_datagram(d_cmd.data(), d_cmd.size(), cmd_out) && cmd_out.empty() &&
 		               pump_client(client).size() == 1,
@@ -1879,11 +1870,19 @@ int main() {
 			expect(sc.command == "PuntPlayerByName" && sc.args.size() == 2 &&
 			               sc.args[0] == "Some Guy" && sc.args[1] == "42",
 			       "the quoted callsign is one argument token");
+			// The host leg: the role forwards the command to on_command. The lobby is
+			// constructed and never opened; the Command notice touches neither it nor the phase.
+			NwuLobbySession dormant(NwuLobbySession::Hooks{}, NwuLobbySession::Environment{});
+			NwuHostRole::Hooks hooks;
+			std::optional<ServerCommand> seen;
+			hooks.on_command = [&seen](const ServerCommand &c) { seen = c; };
+			NwuHostRole role(dormant, hooks);
+			expect(role.handle_notice(notices[0]) && seen && seen->verb == ServerCommandVerb::PuntPlayer &&
+			               seen->target == ServerCommandTarget::ByName && seen->command == "PuntPlayerByName" &&
+			               seen->args == std::vector<std::string>{"Some Guy", "42"},
+			       "the host role forwards the command to on_command");
 		}
-		NapiMessage unknown;
-		unknown.name = "ServerCommand";
-		unknown.fields.push_back(str_field("Cmd", "Frobnicate now"));
-		const auto d_unknown = server.push(unknown);
+		const auto d_unknown = server.push(make_server_command("Frobnicate now"));
 		cmd_out.clear();
 		expect(client.handle_datagram(d_unknown.data(), d_unknown.size(), cmd_out) &&
 		               client.take_notices().empty(),
@@ -1893,13 +1892,7 @@ int main() {
 	// 15) ServerStopHosting: the triple + the 52-row msgcode key; the host leg is
 	// back to Idle (state 4). [orig: HandleServerMessage @0x4d1c50]
 	{
-		NapiMessage stop;
-		stop.name = "ServerStopHosting";
-		stop.fields.push_back(str_field("Success", "1"));
-		stop.fields.push_back(str_field("MsgCode", "3"));
-		stop.fields.push_back(str_field("MsgParam1", "0"));
-		stop.fields.push_back(str_field("MsgParam2", "0"));
-		const auto d_stop = server.push(stop);
+		const auto d_stop = server.push(make_server_stop_hosting(3));
 		std::vector<std::vector<uint8_t>> stop_out;
 		expect(client.handle_datagram(d_stop.data(), d_stop.size(), stop_out) &&
 		               pump_client(client).size() == 1,

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include <base/io/le.h>
@@ -276,6 +277,41 @@ int wave_bits_written(const WaveSamples &source, const WaveConversion &conversio
 	return source.format.tag == kWaveTagPcm && source.format.bits == 8 && !source.format.aoa1 ? 8 : 16;
 }
 
+namespace {
+
+// The one channel a conversion makes of `wave`: the mix, or the one taken, its frames from start to end.
+std::vector<float> conversion_channel(const WaveSamples &wave, const WaveConversion &conversion) {
+	const uint64_t frames = wave.frames();
+	const uint64_t end = conversion.end && conversion.end < frames ? conversion.end : frames;
+	const uint64_t start = conversion.start < end ? conversion.start : end;
+	std::vector<float> mono(size_t(end - start));
+	const uint16_t channels = wave.channels;
+	for (size_t i = 0; i < mono.size(); ++i) {
+		const size_t f = size_t(start) + i;
+		if (conversion.channels == "left") mono[i] = wave.samples[f * channels];
+		else if (conversion.channels == "right") mono[i] = wave.samples[f * channels + (channels > 1 ? 1 : 0)];
+		else {
+			float sum = 0.0f;
+			for (uint16_t c = 0; c < channels; ++c) sum += wave.samples[f * channels + c];
+			mono[i] = sum / float(channels);
+		}
+	}
+	return mono;
+}
+
+} // namespace
+
+float wave_conversion_peak(const std::vector<uint8_t> &source, const WaveConversion &conversion) {
+	WaveSamples wave;
+	std::string error;
+	if (!decode_wave_source(source, wave, error)) return -1.0f;
+	const std::vector<float> mono = conversion_channel(wave, conversion);
+	if (mono.empty()) return -1.0f;
+	float peak = 0.0f;
+	for (const float s : mono) peak = std::max(peak, std::fabs(s));
+	return std::min(peak, 1.0f);
+}
+
 bool convert_wave(const std::vector<uint8_t> &source, const WaveConversion &conversion, std::vector<uint8_t> &out,
                   std::string &error) {
 	WaveSamples wave;
@@ -284,17 +320,15 @@ bool convert_wave(const std::vector<uint8_t> &source, const WaveConversion &conv
 		error = "it holds no sample";
 		return false;
 	}
-	// One channel: the mix, or the one taken.
-	std::vector<float> mono(wave.frames());
-	const uint16_t channels = wave.channels;
-	for (size_t f = 0; f < mono.size(); ++f) {
-		if (conversion.channels == "left") mono[f] = wave.samples[f * channels];
-		else if (conversion.channels == "right") mono[f] = wave.samples[f * channels + (channels > 1 ? 1 : 0)];
-		else {
-			float sum = 0.0f;
-			for (uint16_t c = 0; c < channels; ++c) sum += wave.samples[f * channels + c];
-			mono[f] = sum / float(channels);
-		}
+	if (!(conversion.gain >= 0.0f) || !std::isfinite(conversion.gain)) {
+		error = "its gain is no number of 0 or more";
+		return false;
+	}
+	// One channel: the mix, or the one taken, its frames from start to end.
+	std::vector<float> mono = conversion_channel(wave, conversion);
+	if (mono.empty()) {
+		error = "the trim keeps no sample";
+		return false;
 	}
 	// The rate: kept, or resampled by straight lines between the source's samples.
 	const uint32_t rate = conversion.rate ? conversion.rate : wave.rate;
@@ -315,7 +349,7 @@ bool convert_wave(const std::vector<uint8_t> &source, const WaveConversion &conv
 	std::vector<uint8_t> data;
 	data.reserve(samples.size() * size_t(bits / 8));
 	for (const float s : samples) {
-		const float v = std::clamp(s, -1.0f, 1.0f);
+		const float v = std::clamp(s * conversion.gain, -1.0f, 1.0f);
 		if (bits == 8) data.push_back(uint8_t(std::clamp(std::lround(v * 127.0f) + 128, 0L, 255L)));
 		else io::append_u16_le(data, uint16_t(int16_t(std::clamp(std::lround(v * 32767.0f), -32768L, 32767L))));
 	}
@@ -335,6 +369,22 @@ std::string wave_conversion_words(const WaveSamples &source, const WaveConversio
 	                                   " written as " + std::to_string(bits) + "-bit PCM");
 	if (conversion.rate && conversion.rate != source.rate)
 		parts.push_back(std::to_string(source.rate) + " Hz resampled to " + std::to_string(conversion.rate) + " Hz");
+	// The trim (the frames conversion_channel keeps) and the gain.
+	const uint64_t frames = source.frames();
+	const uint64_t end = conversion.end && conversion.end < frames ? conversion.end : frames;
+	const uint64_t start = conversion.start < end ? conversion.start : end;
+	if (start > 0 || end < frames)
+		parts.push_back("frames " + std::to_string(start) + ".." + std::to_string(end) + " of " + std::to_string(frames) +
+		                " kept");
+	if (conversion.gain != 1.0f) {
+		char gain[64];
+		if (conversion.gain > 0.0f)
+			std::snprintf(gain, sizeof(gain), "scaled by %.2f (%+.2f dB)", double(conversion.gain),
+			              20.0 * std::log10(double(conversion.gain)));
+		else
+			std::snprintf(gain, sizeof(gain), "scaled by 0 (silent)");
+		parts.push_back(gain);
+	}
 	std::string out;
 	for (size_t i = 0; i < parts.size(); ++i) out += (i ? ", " : "") + parts[i];
 	return out;
