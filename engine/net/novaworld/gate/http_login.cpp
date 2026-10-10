@@ -2,30 +2,39 @@
 
 #include <net/novacrypto/epask.h>
 #include <net/novacrypto/url_cipher.h>
+#include <net/novaworld/gate_response.h> // parse_ipv4_octets (Network_ParseIPv4AddressOctets)
 
 #include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 
-#include <cstdio>
+#include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cstdlib>
 
 namespace opennova {
 
 std::string subnet_key(const std::string &host) {
-	// Ours truncates only when the host is a valid dotted-decimal IPv4, keeping the
-	// first two octets, and returns anything else (a DNS name) unchanged. Retail's
-	// branch is the opposite: it returns a host its IPv4 parse accepts whole and keeps
-	// any other host's last two dot-labels [orig: Network_TruncateIPToSubnet @ 0x62dfe0
-	// — the `jnz` @0x62dfff] (docs/net/novaworld-net-re.md D-NET-390, open).
-	int a = 0, b = 0, c = 0, d = 0;
-	char extra = 0;
-	// Reject embedded whitespace/garbage: require exactly four octets and no
-	// trailing characters. Each octet must be 0..255.
-	if (std::sscanf(host.c_str(), "%d.%d.%d.%d%c", &a, &b, &c, &d, &extra) == 4 &&
-	    a >= 0 && a <= 255 && b >= 0 && b <= 255 && c >= 0 && c <= 255 && d >= 0 && d <= 255) {
-		return std::to_string(a) + "." + std::to_string(b);
+	// The key is the host read as a C string. A host the dotted-quad parse accepts comes
+	// back whole: no end pointer is passed, so a tail after the fourth octet is never
+	// looked at, and an octet past 255 parses (its low byte kept).
+	// [orig: Network_TruncateIPToSubnet @0x62DFE0: the parse @0x62DFF5, the `jnz` @0x62DFFF]
+	std::string key = host.c_str();
+	std::array<uint8_t, 4> octets{};
+	if (parse_ipv4_octets(key, octets)) return key;
+	// Any other host is reversed, cut at its second '.' and reversed back, keeping its
+	// last two dot-labels; with no dot or one it is reversed back whole, unchanged.
+	// [orig: Buffer_ReverseBytes @0x61B290 (@0x62E01D); sub_6173B0 @0x6173B0, a plain
+	//  strstr for "." (@0x62E028, then past the first dot @0x62E060); the cut @0x62E088;
+	//  the reverses back @0x62E04D / @0x62E07E / @0x62E09D]
+	std::reverse(key.begin(), key.end());
+	const size_t first_dot = key.find('.');
+	if (first_dot != std::string::npos) {
+		const size_t second_dot = key.find('.', first_dot + 1);
+		if (second_dot != std::string::npos) key.resize(second_dot);
 	}
-	return host;
+	std::reverse(key.begin(), key.end());
+	return key;
 }
 
 bool build_login_post_body(const EpaskParams &pub, const std::vector<LoginFormField> &fields,

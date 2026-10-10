@@ -88,4 +88,18 @@ struct GateResponse {
 // lines and unknown keys (ignored, consistent with the binary).
 bool gate_response_parse(std::string_view body, GateResponse &out);
 
+// The engine's dotted quad: four octets, each a digit at once (no white space, no sign)
+// and then digits (cp1252_isdigit, D-NET-388) accumulated in a wrapping 32-bit int, the
+// first three each followed DIRECTLY by '.', so white space, a sign or any other byte
+// before an octet or its dot fails the parse; nothing is required after the fourth
+// (neither caller passes an end pointer, so "1.2.3.4xyz" and "1.2.3.4.5" read 1.2.3.4).
+// Each octet keeps its low byte (256 reads 0, 300 reads 44), packed octet 1 first. On
+// failure `out` is not written, so a gate field keeps what an earlier line stored. The
+// text is read as a C string (to its first NUL).
+// [orig: Network_ParseIPv4AddressOctets @0x62DC10; called from
+//  CNapiGateManager_ProcessResponse @0x4CF159 (POSTIPADDRESS, the store @0x4CF16D on
+//  success only) and @0x4CF395 (REFLECTEDIPADDRESS, @0x4CF3A9), and from
+//  Network_TruncateIPToSubnet @0x62DFF5 (subnet_key, http_login.h)]
+bool parse_ipv4_octets(const std::string &text, std::array<uint8_t, 4> &out);
+
 } // namespace opennova

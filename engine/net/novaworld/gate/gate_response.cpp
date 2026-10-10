@@ -44,17 +44,12 @@ bool parse_simple_decimal(const char *s, int32_t &value, const char *&end) {
 	return true;
 }
 
-// The dotted quad: four parse_simple_decimal octets, the first three each followed
-// DIRECTLY by '.', so white space, a sign or any other byte before an octet or its dot
-// fails the parse; nothing is required after the fourth (the gate's caller passes no
-// end pointer, so "1.2.3.4xyz" and "1.2.3.4.5" read 1.2.3.4). Each octet keeps its low
-// byte (256 reads 0, 300 reads 44), packed octet 1 first. On failure `out` is not
-// written, so the field keeps what an earlier line stored.
-// [orig: Network_ParseIPv4AddressOctets @0x62DC10 — the octets @0x62DC26 / @0x62DC53 /
+} // namespace
+
+// [orig: Network_ParseIPv4AddressOctets @0x62DC10: the octets @0x62DC26 / @0x62DC53 /
 //  @0x62DC7A / @0x62DCA1, the dots @0x62DC3C / @0x62DC63 / @0x62DC8A, the failure return
 //  @0x62DC32, the pack @0x62DCAD..0x62DCD2 (three movzx bytes and the fourth shifted out
-//  past bit 31); called from CNapiGateManager_ProcessResponse @0x4CF159 (POSTIPADDRESS,
-//  the store @0x4CF16D on success only) and @0x4CF395 (REFLECTEDIPADDRESS, @0x4CF3A9)]
+//  past bit 31)]
 bool parse_ipv4_octets(const std::string &text, std::array<uint8_t, 4> &out) {
 	int32_t octets[4] = {0, 0, 0, 0};
 	const char *p = text.c_str();
@@ -68,8 +63,6 @@ bool parse_ipv4_octets(const std::string &text, std::array<uint8_t, 4> &out) {
 	for (int i = 0; i < 4; ++i) out[static_cast<size_t>(i)] = static_cast<uint8_t>(octets[i]);
 	return true;
 }
-
-} // namespace
 
 // [orig: CNapiGateManager_ProcessResponse @ 0x4ced20], tokenized by
 // [orig: String_TokenizeQuotedToArray @ 0x616d60] — quote-aware, strips the
