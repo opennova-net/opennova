@@ -18,6 +18,7 @@
 #include <runtime/inmatch/server_console.h>    // the /INOUT player lines
 #include <runtime/inmatch/server_log_recorder.h> // the /PROFILE disconnect marker
 
+#include <base/io/crt_ftol.h>
 #include <base/io/log.h>
 
 #include <base/io/le.h>       // append_u32_le (the CS update dword)
@@ -68,8 +69,7 @@ ParsedClientJoinRequest parse_client_join_request(const ClientAuth &auth) {
 		// (unsigned __int8)atol @0x4c7607, JSPP -> NapiNetConfig_SetJspp;
 		// Napi_StrCaseEqual @0x616e70]
 		if (strutil::iequals(cu_name, "JSR")) {
-			parsed.spectator = static_cast<uint8_t>(
-					std::strtol(cu_value.c_str(), nullptr, 10)) != 0;
+			parsed.spectator = static_cast<uint8_t>(io::retail_atol(cu_value.c_str())) != 0;
 		} else if (strutil::iequals(cu_name, "JSP")) {
 			// [orig: NapiNetConfig_SetJsp @0x4C26BE, Napi_CopyString(..., 64)]
 			parsed.join_password = cu_value.substr(0, 63);
@@ -94,8 +94,9 @@ ClientGameEnvironment parse_client_game_environment(const ClientAuth &auth) {
 
 		// NapiNetConfig_LoadFromConnTags applies the tag list in order with atol semantics, so a
 		// later duplicate overwrites an earlier value; the tags compare case-insensitively
-		// [orig: Napi_StrCaseEqual @0x616e70].
-		const long value = std::strtol(cu_value.c_str(), nullptr, 10);
+		// [orig: Napi_StrCaseEqual @0x616e70]. The atol is the CRT's: the locale's leading white
+		// space, 0xA0 included, saturating at 32 bits (io::retail_atol; D-NET-384).
+		const long value = io::retail_atol(cu_value.c_str());
 		if (strutil::iequals(cu_name, "BT")) {
 			parsed.bt = value;
 		} else if (strutil::iequals(cu_name, "VN")) {
@@ -822,7 +823,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		std::string cu_name, cu_value;
 		if (!parse_client_cu_chunk(blob.data(), blob.size(), cu_type, cu_name, cu_value)) continue;
 		if (cu_type != 2) continue;
-		const long v = std::strtol(cu_value.c_str(), nullptr, 10); // retail atol
+		const long v = io::retail_atol(cu_value.c_str()); // retail atol (D-NET-384)
 		if (strutil::iequals(cu_name, "CI0")) {
 			conn.char_vars.char_id[0] = static_cast<uint16_t>(v);
 		} else if (strutil::iequals(cu_name, "CI1")) {

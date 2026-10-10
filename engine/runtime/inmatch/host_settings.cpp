@@ -1,5 +1,7 @@
 #include "host_settings.h"
 
+#include <base/io/crt_ftol.h>
+
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
@@ -8,12 +10,10 @@ namespace opennova::inmatch {
 namespace {
 
 int32_t edit_integer(const std::string& value) {
-    // Windows strtol is signed 32-bit even when the port's long is wider.
-    // [orig: CEditWnd_GetIntValue @ 0x6575d0]
-    const long long parsed = std::strtoll(value.c_str(), nullptr, 10);
-    return static_cast<int32_t>(std::clamp(parsed,
-            static_cast<long long>(std::numeric_limits<int32_t>::min()),
-            static_cast<long long>(std::numeric_limits<int32_t>::max())));
+    // The CRT strtol at radix 10 on a signed 32-bit long even when the port's long is
+    // wider, its white space the locale's (0xA0 included; io::retail_strtol, D-NET-384).
+    // [orig: CEditWnd_GetIntValue @ 0x6575d0 — strtol(text, &end, 10) @0x6575e5]
+    return io::retail_strtol(value.c_str(), 10);
 }
 
 struct FlagControl {

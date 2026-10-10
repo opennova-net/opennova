@@ -5,6 +5,7 @@
 #include <runtime/menu/menu_runtime.h>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/options_policy.h>
@@ -1946,7 +1947,7 @@ void MenuRuntime::edit_filter_rows_(int id) {
 		MenuEvent e;
 		e.kind = MenuEvent::Kind::FilterRequested;
 		e.id = receiver;
-		e.value = static_cast<int>(std::strtol(it->field.c_str(), nullptr, 10));
+		e.value = io::retail_atol(it->field.c_str()); // the CRT atol (D-NET-384)
 		e.text = get_widget_text(id);
 		e.flag = code == kActionGlbFilterNum;
 		e.text2 = it->test.empty() ? std::string("LT") : it->test;
