@@ -299,12 +299,13 @@ struct TableEditHandles {
 enum class BlockKind : std::uint8_t { Effect, Particle, Table, Handles };
 
 // Where the text a ParticleFile was read from writes its blocks and their keys, as the parser counts lines
-// (1-based, a line ending at its LF). A block: its kind and its index among the file's blocks of that kind
-// (effects, particles, tables, table_handles), its section line, its closing brace's line and that line's
-// first byte. A key: its block, the key as written, its line, and its value as the reader takes it (after the
-// '=' and the blanks after it, before the ';'s and blanks ending the line), by its first byte and its length.
-// A value replaced there, the text read again, changes that key alone. The writers read none of them; the
-// OpenNova Editor's key panel does (ADR 0046 S23 B).
+// (1-based, a line ending at its LF), read only where asked (load_particles_with_places: the game's loads keep
+// none). A block: its kind and its index among the file's blocks of that kind (effects, particles, tables,
+// table_handles), its section line, its closing brace's line and that line's first byte. A key: its block, the
+// key as written, its line, and its value as the reader takes it (after the '=' and the blanks after it, before
+// the ';'s and blanks ending the line), by its first byte and its length; a key of no value, the end of its line
+// before its line end (never into the next line). A value replaced there, the text read again, changes that key
+// alone. The writers read none of them; the OpenNova Editor's key panel does (ADR 0046 S23 B).
 struct BlockPlace {
 	BlockKind kind = BlockKind::Particle;
 	std::size_t index = 0;
@@ -320,10 +321,17 @@ struct KeyPlace {
 	std::size_t offset = 0;
 	std::size_t length = 0;
 };
+// A text's places, in the text's order.
+struct ParticlePlaces {
+	std::vector<BlockPlace> blocks;
+	std::vector<KeyPlace> keys;
+};
 
 // What the reader takes a key's value as [orig: CParticleDef_ParseProperties @ 0x5ea320, its _atof (@0x76B6A1)
 // and j__atol (@0x76AB1B); FlagTable_ParseFromString @ 0x5df970; CParticleDefEntry_ParseBlendMode @ 0x5e29f0;
-// CParticleTableDef_ParseScriptLine @ 0x5e92b0]; the parser here reads each so (parser.cpp).
+// the [effectdef] reader CParticleTableDef_ParseScriptLine @ 0x5e92b0, its IDB name notwithstanding; the
+// [tabledef] reader CEffectTableDef_ParseCallback @ 0x5e4010]; the parser here reads each so (parser.cpp), but
+// for a table's rows (KeyRow).
 enum class KeyValueKind : std::uint8_t {
 	Text,     // a name as written: an id, a child particle's id, a collision sound set
 	Real,     // a number, through atof
@@ -335,15 +343,29 @@ enum class KeyValueKind : std::uint8_t {
 	Curve,    // a [tabledef]'s id, then "reverse", "inverse" or both
 	Graphic,  // a texture's name, then the blend mode's word (blend_mode_name)
 	Members,  // the effect's particles' ids, ',' between
-	TableRow, // eight bytes, ',' between
+	TableRow, // up to eight bytes, ',' between
 };
 
 // A key the reader reads in a block of its kind: the key as the reader matches it, without case ('#' a graphic
-// layer's digit, 1 to 4; '*' a slot's number, collision sounds 0 to 19 and table rows 1 to 32), what it takes the
-// value as, and the range it clamps a whole number to, where it clamps one (a particle's emit_burst to at least 1
-// [orig: sub_5ed6c2]; a layer's flip_frames to 1..kMaxParticleFlipFrames, the bound the parser, the bake and the
-// renderer share; a byte's every value 0..255). `read`: false for a key the game's reader has no case for, which
-// only the writer writes (lod [orig: CParticleDef_SaveToFile @ 0x5e4d70]).
+// layer's digit, 1 to 4; '*' a collision sound's slot, what follows the prefix through atol, under 20: the
+// prefix alone slot 0, `collide_sound7x` slot 7 [orig: CParticleDef_ParseProperties @ 0x5ebb7a..0x5ebba7,
+// strnicmp of 13 bytes, then j__atol, unsigned under 20]), what it takes the value as, and the range a whole
+// number is clamped to, where one is: the game's own (a particle's emit_burst to at least 1 [orig:
+// CParticleDef_ParseProperties @ 0x5ea86c..0x5ea87a]; a byte's every value 0..255), or OpenNova's where
+// `port_bound` names the divergence (a layer's flip_frames to 1..kMaxParticleFlipFrames, the bound the parser,
+// the bake and the renderer share, where the game stores atol's value as it is [orig:
+// CParticleDefEntry_ParseGraphicProperty @ 0x5e3550]: D-PTL-19).
+// A table's rows are not keys by number: the game's table reader takes `id` (without case) and any other key
+// holding a 't' (with case) as the table's next row, in the order written, up to 32, its values a stream of
+// bytes through atol, up to 8 a row, a short row's next row going on from its last byte [orig:
+// CEffectTableDef_ParseCallback @ 0x5e4010, strstr(key, "t") @ 0x5e4120]. key_row matches so; the parser here
+// takes tl1..tl32 by their numbers, 8 bytes each (D-PTL-32).
+// `read`: false for a key the game's reader has no case for: lod, which only the writer writes [orig:
+// CParticleDef_SaveToFile @ 0x5e4d70, its format "lod\t= %5.3f;\n" @ 0x7dd328, which no reader compares a key
+// with], and the keys of a [tabledef_edithandles] block (its table, its handle count, its smoothing and each
+// handle by its number, handle0 on), which the game never reaches (its header ends the
+// file's walk [orig: CEffectWorld_ParseSectionCallback @ 0x5ecb40 -> File_ParseASCIIFile @ 0x53d942]; the
+// parser here reads them and the blocks after, D-PTL-32).
 struct KeyRow {
 	BlockKind block = BlockKind::Particle;
 	const char *key = "";
@@ -351,12 +373,14 @@ struct KeyRow {
 	bool clamped = false;
 	int min = 0;
 	int max = 0;
+	const char *port_bound = nullptr; // the divergence where min..max is OpenNova's own bound, not the game's
 	bool read = true;
 };
-// Every key the reader reads (and lod), in the writer's order within each block kind.
+// Every key the reader reads (and the keys only the writer or the original editor wrote), in the writer's order
+// within each block kind.
 const std::vector<KeyRow> &key_rows();
-// The row a key written in a block of `block` is (without case, a pattern's digits matched); null for a key the
-// reader keeps as unknown.
+// The row a key written in a block of `block` is, as the game's reader matches it (without case, a pattern's
+// digits matched; a table's row by the game's rule above); null for a key the reader has no case for.
 const KeyRow *key_row(BlockKind block, std::string_view key);
 
 struct ParticleFile {
@@ -364,9 +388,6 @@ struct ParticleFile {
 	std::vector<ParticleDef> particles;
 	std::vector<TableDef> tables;
 	std::vector<TableEditHandles> table_handles;
-	// Where a text wrote them (the reader's places, in the text's order; empty for a file not read from one).
-	std::vector<BlockPlace> block_places;
-	std::vector<KeyPlace> key_places;
 
 	const EffectDef *find_effect(std::string_view id) const noexcept;
 	const ParticleDef *find_particle(std::string_view id) const noexcept;

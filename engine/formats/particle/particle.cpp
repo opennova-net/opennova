@@ -1,5 +1,6 @@
 #include <formats/particle/particle.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -309,9 +310,9 @@ KeyRow clamped(B block, const char *key, int min, int max) {
 	return r;
 }
 
-// One '#' a graphic layer's digit (1..4), one trailing '*' a slot's number (its digits, `max` the last): the
-// patterns key_rows writes.
-bool key_matches(std::string_view pattern, std::string_view key, B block) {
+// One '#' a graphic layer's digit (1..4), one trailing '*' a collision sound's slot (what follows through atol,
+// under 20): the patterns key_rows writes.
+bool key_matches(std::string_view pattern, std::string_view key) {
 	size_t p = 0, k = 0;
 	while (p < pattern.size()) {
 		const char c = pattern[p];
@@ -320,16 +321,10 @@ bool key_matches(std::string_view pattern, std::string_view key, B block) {
 			++p;
 			++k;
 		} else if (c == '*') {
-			// The slot's digits to the key's end: collision sounds 0..19 [orig: the particle's 20 slots @ +3952],
-			// table rows 1..32 [orig: CParticleTableDef_ParseScriptLine @ 0x5e92b0].
-			if (k >= key.size()) return false;
-			int number = 0;
-			for (size_t i = k; i < key.size(); ++i) {
-				if (key[i] < '0' || key[i] > '9') return false;
-				number = number * 10 + (key[i] - '0');
-				if (number > 99) return false;
-			}
-			return block == B::Table ? number >= 1 && number <= 32 : number <= 19;
+			// The slot: atol of the rest, under 20 unsigned (none or a word first is 0, a minus none) [orig:
+			// CParticleDef_ParseProperties @ 0x5ebb96..0x5ebba7; the particle's 20 slots @ +3952].
+			const int32_t slot = io::retail_atol(std::string(key.substr(k)).c_str());
+			return static_cast<uint32_t>(slot) < 20u;
 		} else {
 			if (k >= key.size() || std::tolower(static_cast<unsigned char>(key[k])) != c) return false;
 			++p;
@@ -342,8 +337,9 @@ bool key_matches(std::string_view pattern, std::string_view key, B block) {
 } // namespace
 
 // [orig: CParticleDef_ParseProperties @ 0x5ea320, the particle's and its graphic layers' keys;
-//  CEffectWorld_ParseSectionCallback @ 0x5ecb40, the effect's; CParticleTableDef_ParseScriptLine @ 0x5e92b0, a
-//  table's; the original editor's [tabledef_edithandles] its own]
+//  CParticleTableDef_ParseScriptLine @ 0x5e92b0, the effect's ([effectdef] routes there, its IDB name
+//  notwithstanding); CEffectTableDef_ParseCallback @ 0x5e4010, a table's; the original editor's
+//  [tabledef_edithandles] its own, which the game never reads]
 const std::vector<KeyRow> &key_rows() {
 	static const std::vector<KeyRow> rows = [] {
 		std::vector<KeyRow> r;
@@ -360,7 +356,7 @@ const std::vector<KeyRow> &key_rows() {
 			r.push_back(row(B::Particle, key, K::Real));
 		r.push_back(row(B::Particle, "emit_rate_func", K::Curve));
 		r.push_back(row(B::Particle, "emit_delay", K::Real));
-		// [orig: sub_5ed6c2, a burst under 1 taken as 1]
+		// [orig: CParticleDef_ParseProperties @ 0x5ea86c..0x5ea87a, a burst under 1 taken as 1]
 		KeyRow burst = clamped(B::Particle, "emit_burst", 1, 0x7FFFFFFF);
 		r.push_back(burst);
 		r.push_back(row(B::Particle, "emit_maxoverride", K::Whole));
@@ -389,7 +385,10 @@ const std::vector<KeyRow> &key_rows() {
 		// A graphic layer's: its declaration, then its own keys over the particle's [orig:
 		// CParticleDefEntry_ParseGraphicProperty @ 0x5e3550].
 		r.push_back(row(B::Particle, "graphic#", K::Graphic));
-		r.push_back(clamped(B::Particle, "g#_flip_frames", 1, kMaxParticleFlipFrames));
+		// The game stores atol's value as it is; the bound is OpenNova's (D-PTL-19).
+		KeyRow frames = clamped(B::Particle, "g#_flip_frames", 1, kMaxParticleFlipFrames);
+		frames.port_bound = "D-PTL-19";
+		r.push_back(frames);
 		r.push_back(row(B::Particle, "g#_flip_rate", K::Whole));
 		for (const char *key : {"g#_color1", "g#_color2", "g#_color3", "g#_color4"})
 			r.push_back(row(B::Particle, key, K::Color));
@@ -397,18 +396,48 @@ const std::vector<KeyRow> &key_rows() {
 		for (const char *key : {"g#_scale_func", "g#_alpha_func", "g#_red_func", "g#_green_func", "g#_blue_func"})
 			r.push_back(row(B::Particle, key, K::Curve));
 		r.push_back(row(B::Table, "id", K::Text));
+		// A row: the key as the writer writes it (tl1..tl32); the game takes any key holding a 't' (key_row).
 		r.push_back(row(B::Table, "tl*", K::TableRow));
-		r.push_back(row(B::Handles, "tableid", K::Text));
-		r.push_back(row(B::Handles, "handlecount", K::Whole));
-		r.push_back(row(B::Handles, "tightness", K::Whole));
+		// The original editor's handles, which the game never reaches (their header ends its walk): its table, its
+		// count of handles, its smoothing, and each handle (handle0, handle1, ..., two numbers).
+		for (const auto &[key, value] : {std::pair{"tableid", K::Text}, std::pair{"handlecount", K::Whole},
+		                                 std::pair{"tightness", K::Whole}, std::pair{"handle*", K::Text}}) {
+			KeyRow handle = row(B::Handles, key, value);
+			handle.read = false;
+			r.push_back(handle);
+		}
 		return r;
 	}();
 	return rows;
 }
 
 const KeyRow *key_row(BlockKind block, std::string_view key) {
-	for (const KeyRow &r : key_rows())
-		if (r.block == block && key_matches(r.key, key, block)) return &r;
+	const std::vector<KeyRow> &rows = key_rows();
+	if (block == B::Table) {
+		// `id` without case, then any key holding a 't' the next row [orig: CEffectTableDef_ParseCallback @
+		// 0x5e40c2 stricmp "id"; @ 0x5e4120 strstr "t"].
+		const auto row_named = [&rows](const char *name) -> const KeyRow * {
+			for (const KeyRow &r : rows)
+				if (r.block == B::Table && std::string_view(r.key) == name) return &r;
+			return nullptr;
+		};
+		if (strutil::iequals(key, "id")) return row_named("id");
+		return key.find('t') != std::string_view::npos ? row_named("tl*") : nullptr;
+	}
+	if (block == B::Handles) {
+		// A handle by its number (any digits after "handle"), the others by their keys.
+		const std::string_view prefix = "handle";
+		const bool numbered = key.size() > prefix.size() && strutil::iequals(key.substr(0, prefix.size()), prefix) &&
+		                      key.find_first_not_of("0123456789", prefix.size()) == std::string_view::npos;
+		for (const KeyRow &r : rows)
+			if (r.block == B::Handles &&
+			    (numbered ? std::string_view(r.key) == "handle*" : std::string_view(r.key) != "handle*" &&
+			                                                          strutil::iequals(r.key, key)))
+				return &r;
+		return nullptr;
+	}
+	for (const KeyRow &r : rows)
+		if (r.block == block && key_matches(r.key, key)) return &r;
 	return nullptr;
 }
 

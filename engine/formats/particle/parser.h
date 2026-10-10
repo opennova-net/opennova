@@ -21,10 +21,14 @@ struct ParseError {
 // Mirrors the engine pipeline:
 //   CEffectWorld_ParseSectionCallback @ 0x5ecb40  — section tag dispatch
 //   CParticleDef_ParseFromConfigMap   @ 0x5ed210  — [particledef] hydration
-//   CParticleTableDef_ParseScriptLine @ 0x5e92b0  — [tabledef] line driver
+//   CParticleTableDef_ParseScriptLine @ 0x5e92b0  — the [effectdef] reader (its IDB name notwithstanding)
+//   CEffectTableDef_ParseCallback     @ 0x5e4010  — the [tabledef] reader (its rows: particle.h KeyRow, D-PTL-32)
 bool load_particles(std::istream &input, ParticleFile &out, ParseError &error);
 bool load_particles_from_file(const std::string &path, ParticleFile &out, ParseError &error);
 bool load_particles_from_buffer(const char *data, std::size_t size, ParticleFile &out, ParseError &error);
+// The same read, and where the text writes each block and key (ParticlePlaces): what the editor asks for alone.
+bool load_particles_with_places(const char *data, std::size_t size, ParticleFile &out, ParticlePlaces &places,
+                                ParseError &error);
 
 // Serializes a ParticleFile back to text. Field ordering, leading whitespace,
 // numeric format ("%5.3f"), pdefs separator (", ") and the duplicated `emit_dur`

@@ -2103,12 +2103,14 @@ foreach(name smallest minimal_effect multi_section multi_layer table_handles
     target_link_libraries(particle_${name}_test PRIVATE opennova_formats)
     target_include_directories(particle_${name}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(particle_${name}_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    if(name STREQUAL "smoke_all_fixtures")
+    if(name STREQUAL "smoke_all_fixtures" OR name STREQUAL "key_places")
         opennova_add_mixed_test(particle_${name} COMMAND particle_${name}_test)
     else()
         add_test(NAME particle_${name} COMMAND particle_${name}_test)
     endif()
 endforeach()
+# The key places' retail leg reads every effect file the install serves through the VFS.
+target_link_libraries(particle_key_places_test PRIVATE opennova_base)
 # effect_pose pins the spawn poses every producer hands the scene; effect_closure
 # (mixed) one effect's closure and several folded, the retail leg every effect
 # of the install's catalog alike from its closure (OPENNOVA_JO_DIR).
