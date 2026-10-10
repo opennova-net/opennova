@@ -117,6 +117,19 @@ bool SkeletalAnim::load_from_resource_root(const Ref<ResourceRoot> &p_resource_r
 	return rig_ != nullptr;
 }
 
+bool SkeletalAnim::load_rest(const PackedVector3Array &p_model_bone_origins,
+		const PackedInt32Array &p_model_bone_parents) {
+	rig_.reset();
+	last_error_ = String();
+	auto rest = std::make_shared<opennova::anim::SkeletalClips>();
+	if (!rest->load_rest(to_model_origins(p_model_bone_origins), to_model_parents(p_model_bone_parents))) {
+		last_error_ = "Model bone table missing or invalid";
+		return false;
+	}
+	rig_ = std::move(rest);
+	return true;
+}
+
 bool SkeletalAnim::load_from_bad_files(const Ref<ResourceRoot> &p_resource_root,
 		const String &p_skeleton_bad, const Dictionary &p_key_to_bad,
 		const PackedVector3Array &p_model_bone_origins,
@@ -237,13 +250,14 @@ Array SkeletalAnim::eval_pose_overlay_deltas(const String &p_key, double p_playh
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
 		bool p_collapse_right_hand, const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
-		int p_wpn_variant, int p_wpn_prev_variant, int p_variant) const {
+		int p_wpn_variant, int p_wpn_prev_variant, int p_variant, bool p_person) const {
 	std::vector<opennova::anim::PoseBone> pose;
 	rig().eval_pose(opennova::to_std(p_key), p_playhead_seconds, p_variant, pose);
 	return apply_pose_overlay(std::move(pose),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
 			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
-			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
+			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant,
+			p_person ? rig().clip_file_bones(opennova::to_std(p_key), p_variant) : kNotPerson);
 }
 
 Array SkeletalAnim::eval_pose_blended_overlay_deltas(
@@ -254,7 +268,7 @@ Array SkeletalAnim::eval_pose_blended_overlay_deltas(
 		double p_wpn_playhead_seconds, bool p_collapse_right_hand,
 		const String &p_wpn_prev_key, double p_wpn_prev_playhead_seconds,
 		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant,
-		int p_source_variant, int p_target_variant) const {
+		int p_source_variant, int p_target_variant, bool p_person) const {
 	std::vector<opennova::anim::PoseBone> pose;
 	rig().eval_pose_blended(opennova::to_std(p_source_key), p_source_playhead_seconds,
 			opennova::to_std(p_target_key), p_target_playhead_seconds, p_weight, pose,
@@ -262,7 +276,9 @@ Array SkeletalAnim::eval_pose_blended_overlay_deltas(
 	return apply_pose_overlay(std::move(pose),
 			p_classes, p_deltas, p_wpn_key, p_wpn_playhead_seconds,
 			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
-			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
+			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant,
+			p_person ? rig().clip_file_bones(opennova::to_std(p_target_key), p_target_variant)
+					 : kNotPerson);
 }
 
 Array SkeletalAnim::apply_pose_overlay(std::vector<opennova::anim::PoseBone> native_pose,
@@ -270,7 +286,7 @@ Array SkeletalAnim::apply_pose_overlay(std::vector<opennova::anim::PoseBone> nat
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
 		bool p_collapse_right_hand, const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
-		int p_wpn_variant, int p_wpn_prev_variant) const {
+		int p_wpn_variant, int p_wpn_prev_variant, size_t p_person_clip_bones) const {
 	std::vector<uint8_t> classes;
 	classes.reserve(static_cast<size_t>(p_classes.size()));
 	for (int i = 0; i < p_classes.size(); ++i) {
@@ -289,6 +305,10 @@ Array SkeletalAnim::apply_pose_overlay(std::vector<opennova::anim::PoseBone> nat
 			opennova::to_std(p_wpn_key), p_wpn_playhead_seconds,
 			opennova::to_std(p_wpn_prev_key), p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
+	if (p_person_clip_bones != kNotPerson) {
+		rig().pose_person_rows_past_clip(native_pose, p_person_clip_bones, p_deltas ? deltas : nullptr,
+				classes);
+	}
 	Array pose = pose_to_array(native_pose);
 	apply_right_hand_local_collapse(pose, p_collapse_right_hand);
 	return pose;
@@ -300,15 +320,22 @@ void SkeletalAnim::pose_skeleton_deltas(Skeleton3D *p_skeleton, const String &p_
 		const String &p_wpn_key, double p_wpn_playhead_seconds,
 		bool p_collapse_right_hand, const String &p_wpn_prev_key,
 		double p_wpn_prev_playhead_seconds, float p_wpn_weight,
-		int p_wpn_variant, int p_wpn_prev_variant) const {
+		int p_wpn_variant, int p_wpn_prev_variant, bool p_person) const {
 	// Branch mirror of ObjectModel.advance_body_animation: overlay inputs
-	// present -> the composed overlay pose, else the plain clip pose.
+	// present -> the composed overlay pose, else the plain clip pose (a
+	// Person's rows past its clip posed by its bone builder either way).
 	Array pose;
 	if (p_deltas != nullptr && !p_classes.is_empty()) {
 		pose = eval_pose_overlay_deltas(p_key, p_playhead_seconds, p_classes, p_deltas,
 				p_wpn_key, p_wpn_playhead_seconds, p_collapse_right_hand,
 				p_wpn_prev_key, p_wpn_prev_playhead_seconds, p_wpn_weight,
-				p_wpn_variant, p_wpn_prev_variant, p_variant);
+				p_wpn_variant, p_wpn_prev_variant, p_variant, p_person);
+	} else if (p_person) {
+		std::vector<opennova::anim::PoseBone> native_pose;
+		const std::string key = opennova::to_std(p_key);
+		rig().eval_pose(key, p_playhead_seconds, p_variant, native_pose);
+		rig().pose_person_rows_past_clip(native_pose, rig().clip_file_bones(key, p_variant), nullptr, {});
+		pose = pose_to_array(native_pose);
 	} else {
 		pose = eval_pose(p_key, p_playhead_seconds, p_variant);
 	}
@@ -323,7 +350,7 @@ void SkeletalAnim::pose_skeleton_blended(Skeleton3D *p_skeleton,
 		double p_wpn_playhead_seconds, bool p_collapse_right_hand,
 		const String &p_wpn_prev_key, double p_wpn_prev_playhead_seconds,
 		float p_wpn_weight, int p_wpn_variant, int p_wpn_prev_variant,
-		int p_source_variant, int p_target_variant) const {
+		int p_source_variant, int p_target_variant, bool p_person) const {
 	Array pose;
 	if (p_deltas != nullptr && !p_classes.is_empty()) {
 		pose = eval_pose_blended_overlay_deltas(
@@ -333,7 +360,16 @@ void SkeletalAnim::pose_skeleton_blended(Skeleton3D *p_skeleton,
 				p_wpn_playhead_seconds, p_collapse_right_hand,
 				p_wpn_prev_key, p_wpn_prev_playhead_seconds, p_wpn_weight,
 				p_wpn_variant, p_wpn_prev_variant, p_source_variant,
-				p_target_variant);
+				p_target_variant, p_person);
+	} else if (p_person) {
+		std::vector<opennova::anim::PoseBone> native_pose;
+		const std::string target = opennova::to_std(p_target_key);
+		rig().eval_pose_blended(opennova::to_std(p_source_key), p_source_playhead_seconds,
+				target, p_target_playhead_seconds, p_weight, native_pose,
+				p_source_variant, p_target_variant);
+		rig().pose_person_rows_past_clip(native_pose, rig().clip_file_bones(target, p_target_variant),
+				nullptr, {});
+		pose = pose_to_array(native_pose);
 	} else {
 		pose = eval_pose_blended(
 				p_source_key, p_source_playhead_seconds,

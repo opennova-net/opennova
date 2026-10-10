@@ -179,6 +179,7 @@ Clip sample_clip(const BadFile &bad, const std::vector<Vec3> &shared_rest_origin
     clip.fps = bad.fps;
     clip.flags = bad.flags;
     clip.frame_count = bad.frame_count;
+    clip.file_bones = bad.bone_count;
 
     const size_t bad_bone_count = bad.num_bones;
     // A bone moves by its translation rows only when the playing clip AND the bind carry

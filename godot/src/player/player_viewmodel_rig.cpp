@@ -225,6 +225,7 @@ void PlayerViewmodelRig::update_viewmodel(const Ref<PlayerLocalView> &p_view,
 		if (ObjectModel *part = Object::cast_to<ObjectModel>(ObjectDB::get_instance(id))) {
 			part->set_presentation_layer(ObjectModel::PRESENTATION_LAYER_VIEWMODEL);
 			part->set_viewmodel_pass(true);
+			part->set_viewmodel_rig(true);
 		}
 	}
 	// The alive gate, the card switch, the showhud bit-0 gate (skipped by an
