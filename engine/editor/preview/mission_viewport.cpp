@@ -359,6 +359,7 @@ ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	detail_.clear();
 	scene_.clear();
 	poses_.clear();
+	people_.clear();
 	effects_.close();
 	listen_.close();
 	drawn_ = JsonValue();
@@ -398,14 +399,72 @@ void MissionViewport::follow_listen_(const SessionView &view, const Document *do
 	if (dot != std::string::npos) stem = stem.substr(0, dot);
 	listen_.refresh(view, scene_, *mission, stem);
 	listen_.play_to(clock.ticks(), camera_.eye(), hours());
+	// What the people's sounds play from (DI-04's sources: SndProf.def and the game's bank chain).
+	people_sources_.refresh(*view.findings.assets,
+			view.project.document ? view.project.document->expansion.name : std::string(), PreviewRig());
 }
 
 std::vector<ClipSoundFired> MissionViewport::fire_listen_sounds(const AssetScan *scan, audio::SoundSelector &selector,
 		uint64_t &seq) {
-	if (!options_.listen.on || !listen_.open()) return {};
+	if (!options_.listen.on || !listen_.open()) {
+		people_heard_ = -1;
+		return {};
+	}
 	std::vector<ClipSoundFired> fired = listen_.fire_sounds(scan, selector, seq, options_.listen.volume);
+	// The people's footsteps and foley on the ticks they played since (S23 C), each where the person stands, heard at
+	// the camera; none over a start again (their spawn), from where it put them.
+	const int32_t now = people_.tick();
+	if (people_heard_ < people_.started_at() || people_heard_ > now) people_heard_ = people_.started_at();
+	if (now > people_heard_) {
+		const auto where = [&](NodeId row, MissionPersonHeard &out) {
+			const MissionPose *pose = poses_.pose(row);
+			const MissionEntityMark *entity = scene_.entity(row);
+			if (!pose || !entity || pose->status != "posed") return false;
+			const double at[3] = { entity->x, entity->y, entity->z + pose->lift };
+			out.origin = mission_to_preview(at);
+			const MissionGroundFacts ground = terrain_ground_.terrain_at(entity->x, entity->y, entity->z);
+			out.surface = ground.under_water ? audio::FootSurface::Water
+			              : ground.surface == 3 ? audio::FootSurface::Snow : audio::FootSurface::Ground;
+			const PersonDefinition &definition = pose->definition;
+			out.item.found = true;
+			out.item.sound_profile = definition.sound_profile;
+			out.item.sound_profile_female = definition.sound_profile_female;
+			out.item.move_function = definition.move_function;
+			out.item.ai_function = definition.ai_function;
+			out.title = "Person " + std::to_string(entity->ssn);
+			return true;
+		};
+		for (ClipSoundFired &sound : mission_people_sounds(people_, people_heard_, now, where, people_sources_,
+				     camera_.eye(), selector)) {
+			sound.seq = ++seq;
+			sound.path = path();
+			if (scan) find_clip_sound_waves(sound, *scan);
+			listen_.keep(sound);
+			fired.push_back(std::move(sound));
+		}
+		people_heard_ = now;
+	}
 	for (ClipSoundFired &sound : fired) sound.path = path();
 	return fired;
+}
+
+void MissionViewport::frame_ground_now_() {
+	// The box framed: its middle on the ground there (the terrain's height where it is read, else the camera's
+	// target's), north up and looking down as the first framing looks, as far back as its larger side fits the
+	// field of view.
+	const double x = 0.5 * (frame_ground_[0] + frame_ground_[2]), y = 0.5 * (frame_ground_[1] + frame_ground_[3]);
+	double held[3] = { 0.0, 0.0, 0.0 };
+	preview_to_mission(camera_.target, held);
+	double z = held[2];
+	if (const terrain::TerrainHeightField *field = terrain_ground_.height_field())
+		z = double(terrain::height_field_height_world_bilinear(*field, float(x), float(-y)));
+	const double middle[3] = { x, y, z };
+	camera_.target = mission_to_preview(middle);
+	camera_.yaw = 0.0f;
+	camera_.pitch = kMissionFramePitch;
+	const double across = std::max(frame_ground_[2] - frame_ground_[0], frame_ground_[3] - frame_ground_[1]);
+	const double half = 0.5 * double(camera_.fov_degrees()) * 3.14159265358979323846 / 180.0;
+	camera_.distance = float(std::max(10.0, across * kFrameGroundMargin / (2.0 * std::tan(half))));
 }
 
 ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock &clock) {
@@ -419,6 +478,15 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	const uint64_t generation = view.findings.assets->generation();
 	const PreviewFollow::Key key;
 	reason_ = MissionViewStatus::Ready;
+	if (frame_ground_pending_) {
+		// The framed box's middle set down on the ground there, the terrain read now.
+		frame_ground_pending_ = false;
+		follow_ground_(view);
+		if (terrain_ground_.height_field()) {
+			frame_ground_now_();
+			state_moved();
+		}
+	}
 
 	// What the document changed, in the picture's terms: a change set patches the scene by its rows;
 	// anything else (followed the first time, read again, a state its history no longer holds) reads
@@ -431,6 +499,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		bound_items_(view);
 		stand_people_(view, poses_.refresh(view, scene_));
+		people_.run_to(poses_, clock.ticks());
 		follow_overlay_(view);
 		picture_.show(key, generation);
 		shown(*document);
@@ -460,6 +529,9 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// Update poses them, the picture standing.
 	bool posed = poses_.refresh(view, scene_);
 	posed = stand_people_(view, posed) || posed;
+	// The people play their clips on to the clock (S23 C): the device poses them each frame as they stand, no Update
+	// asked.
+	people_.run_to(poses_, clock.ticks());
 	// The overlay made again where the option or the ground moved (DI-29): an Update gives it the device.
 	const bool overlaid = follow_overlay_(view);
 	// The Shoot tool's shots run to the clock (DI-23): the device draws their scars each frame, their effects
@@ -487,7 +559,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 }
 
 bool MissionViewport::takes_(const std::string &member) const {
-	return member == "options" || member == "camera" || member == "shot" || member == "shots";
+	return member == "options" || member == "camera" || member == "shot" || member == "shots" || member == "frame_ground";
 }
 
 bool MissionViewport::check_(const io::JsonValue &json, std::string &error) const {
@@ -497,6 +569,14 @@ bool MissionViewport::check_(const io::JsonValue &json, std::string &error) cons
 	OrbitCamera camera = camera_;
 	if (const JsonValue *member = json.get("camera"); member && !mission_camera_from_json(*member, camera, error))
 		return false;
+	if (const JsonValue *member = json.get("frame_ground")) {
+		bool box = member->is_array() && member->array.size() == 4;
+		for (size_t i = 0; box && i < 4; ++i) box = member->array[i].is_number() && std::isfinite(member->array[i].number);
+		if (!box || member->array[0].number > member->array[2].number || member->array[1].number > member->array[3].number) {
+			error = "frame_ground is a box of the ground [x0, y0, x1, y1], mission units, x0 <= x1 and y0 <= y1.";
+			return false;
+		}
+	}
 	// The Shoot tool's shots (DI-23): one fired on the clock's tick, or the whole list.
 	MissionShot shot;
 	if (const JsonValue *member = json.get("shot"); member && !read_mission_shot(*member, shot, error)) return false;
@@ -531,7 +611,16 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 		if (drawn != options_) options_moved_ = true;
 		options_ = options;
 	}
-	if (const JsonValue *member = json.get("camera")) mission_camera_from_json(*member, camera_, error);
+	if (const JsonValue *member = json.get("camera")) {
+		mission_camera_from_json(*member, camera_, error);
+		framed_ = true; // a camera set stands over the first framing
+	}
+	if (const JsonValue *member = json.get("frame_ground")) {
+		for (size_t i = 0; i < 4; ++i) frame_ground_[i] = member->array[i].number;
+		frame_ground_pending_ = true;
+		framed_ = true;
+		frame_ground_now_();
+	}
 	// The Shoot tool's shots (DI-23): the whole list, or one on the clock's tick (those after it gone: the run is
 	// played anew from there).
 	if (const JsonValue *member = json.get("shots")) {
@@ -939,27 +1028,28 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		return false;
 	}
 	// Where the point meets the ground (the device's terrain, else the plane through the camera's
-	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
-	// point less the anchor: docs/world/world-wac-ai-re.md section 12).
+	// target); on the terrain, the model's ground anchor baked in as the original editor bakes it (the stored
+	// position is the ground point less the anchor's words, unrotated and unscaled: mission_ground_bake).
 	double at[3];
 	bool on_terrain = false;
 	if (!ground_of_(context, drop.x, drop.y, at, &on_terrain)) {
 		error = "The point is not over the ground (or too far out): drop it nearer.";
 		return false;
 	}
-	if (on_terrain)
-		for (int i = 0; i < 3; ++i) at[i] -= facts.anchor[i];
+	// Facing the way the camera looks (S15): its heading, a compass heading as a yaw is.
+	const int yaw = mission::wrapped_yaw(mission_camera_heading(camera_));
+	double anchor[3] = { 0.0, 0.0, 0.0 };
+	if (on_terrain) mission_ground_bake(facts.anchor, anchor);
+	for (int i = 0; i < 3; ++i) at[i] -= anchor[i];
 	// Snapped: the stored origin's x and y on the grid, the point a move and a copy snap, so the first
 	// drag of what was placed never jumps it by its anchor; its height then the ground's under its
 	// ground point there (else the plane's).
 	if (drop.snap > 0.0f) {
 		for (int axis = 0; axis < 2; ++axis) at[axis] = std::round(at[axis] / double(drop.snap)) * double(drop.snap);
 		double ground = 0.0;
-		if (on_terrain && context.device && context.device->ground_at(at[0] + facts.anchor[0], at[1] + facts.anchor[1], ground))
-			at[2] = ground - facts.anchor[2];
+		if (on_terrain && context.device && context.device->ground_at(at[0] + anchor[0], at[1] + anchor[1], ground))
+			at[2] = ground - anchor[2];
 	}
-	// Facing the way the camera looks (S15): its heading, a compass heading as a yaw is.
-	const int yaw = mission::wrapped_yaw(mission_camera_heading(camera_));
 	std::vector<Edit> edits;
 	if (path) {
 		if (!mission_stop_edits(mission, path, item, facts.pool, at, yaw, edits, error)) return false;
@@ -1191,8 +1281,8 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 	}
 	if (name == "ground") {
 		// Each named entity (else each selected one) set down on the ground under it: its height the
-		// ground's less its model's anchor height (the game's vertical terrain conform: only the
-		// height, docs/world/world-wac-ai-re.md section 12), one batch.
+		// ground's less its model's anchor height word, as the original editor's terrain conform sets it (the
+		// height alone, unrotated and unscaled: mission_ground_bake), one batch.
 		const Document *document = planned_(context, error);
 		if (!document) return false;
 		if (!context.editable()) {
@@ -1209,8 +1299,8 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 			return false;
 		}
 		std::vector<Edit> edits;
-		// Each item's anchor read once (its model parsed once), however many entities draw it.
-		std::unordered_map<int64_t, double> anchors;
+		// Each item's facts read once (its model parsed once), however many entities draw it.
+		std::unordered_map<int64_t, MissionItemFacts> items;
 		for (const NodeId row : rows) {
 			const MissionEntityMark *entity = scene_.entity(row);
 			if (!entity) {
@@ -1222,14 +1312,15 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 				error = "The picture has no ground under record " + std::to_string(row) + " (no terrain built there).";
 				return false;
 			}
-			auto anchor = anchors.find(entity->item);
-			if (anchor == anchors.end()) {
-				MissionItemFacts facts;
+			auto facts = items.find(entity->item);
+			if (facts == items.end()) {
 				std::string ignored;
-				items_.facts(context.input.view, entity->item, facts, ignored);
-				anchor = anchors.emplace(entity->item, facts.anchor[2]).first;
+				facts = items.emplace(entity->item, MissionItemFacts()).first;
+				items_.facts(context.input.view, entity->item, facts->second, ignored);
 			}
-			const double z = ground - anchor->second;
+			double anchor[3];
+			mission_ground_bake(facts->second.anchor, anchor);
+			const double z = ground - anchor[2];
 			// Where its 16.16 word moves.
 			if (bms::to_fixed_16_16(z) != bms::to_fixed_16_16(entity->z))
 				edits.push_back(set_of(NodeAddress{ row, entity->kind, 0 }, "z", z));
@@ -1309,6 +1400,13 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	body.set("counts", std::move(counts));
 	// How many people the game's spawn poses (DI-38: each organic's own in items).
 	body.set("posed", json_number(double(poses_.posed())));
+	// The people as they play their clips on the clock (S23 C): how many, the clock's tick they stand at and the one
+	// they started from (their spawn).
+	JsonValue people = JsonValue::make_object();
+	people.set("playing", json_number(double(people_.playing())));
+	people.set("tick", json_number(people_.tick()));
+	people.set("started_at", json_number(people_.started_at()));
+	body.set("people", std::move(people));
 	body.set("ground", JsonValue::make_bool(ground_));
 	body.set("missing", json_number(double(missing_.size())));
 	// The ground overlay the options ask (DI-29): its legend and extent, null with none asked.
@@ -1370,7 +1468,13 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 			item.set("yaw", json_number(entity.yaw));
 			item.set("team", json_number(entity.team));
 			// A person's spawn pose (DI-38).
-			if (const MissionPose *pose = poses_.pose(entity.row)) item.set("pose", mission_pose_json(*pose));
+			if (const MissionPose *pose = poses_.pose(entity.row)) {
+				JsonValue posed = mission_pose_json(*pose);
+				// And its body as it plays now (S23 C), on the clock's tick the people stand at.
+				if (const world::InfantryBodyPose *body = people_.pose(entity.row))
+					posed.set("now", mission_body_json(*body, people_.tick()));
+				item.set("pose", std::move(posed));
+			}
 			// Its item's particle slot as the start attaches it (DI-31).
 			if (const MissionEffectSlot *slot = effects_.slot(entity.row)) {
 				JsonValue effect = JsonValue::make_object();

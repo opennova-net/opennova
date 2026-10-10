@@ -6,6 +6,7 @@
 
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/definition_viewport.h>
+#include <editor/preview/environment_viewport.h>
 #include <editor/preview/menu_viewport.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
@@ -30,7 +31,7 @@ ViewportModel *previewed(SessionCore &core, ViewportKind kind) {
 }
 
 // The sounds a viewport keeps of those it fired (a model's, a definition's, a mission's Shoot tool's and its Listen's,
-// a menu's), none for a kind that fires none.
+// an environment's Listen's (S23 C), a menu's), none for a kind that fires none.
 std::vector<const ClipSoundFired *> fired_by(const ViewportModel &model) {
 	std::vector<const ClipSoundFired *> out;
 	if (const auto *clip = dynamic_cast<const ModelViewport *>(&model))
@@ -40,6 +41,8 @@ std::vector<const ClipSoundFired *> fired_by(const ViewportModel &model) {
 	else if (const auto *mission = dynamic_cast<const MissionViewport *>(&model)) {
 		for (const ClipSoundFired &fired : mission->sounds_fired()) out.push_back(&fired);
 		for (const ClipSoundFired &fired : mission->listen().sounds_fired()) out.push_back(&fired);
+	} else if (const auto *environment = dynamic_cast<const EnvironmentViewport *>(&model)) {
+		for (const ClipSoundFired &fired : environment->listen().sounds_fired()) out.push_back(&fired);
 	} else if (const auto *menu = dynamic_cast<const MenuViewport *>(&model))
 		for (const MenuSoundFired &fired : menu->sounds_fired()) out.push_back(&fired.sound);
 	return out;
@@ -89,6 +92,17 @@ void fire_clip_sounds(SessionCore &core) {
 			                 .empty() ||
 			        fired;
 		}
+	// What a listening environment heard of its weather's thunder (S23 C), each environment viewport's.
+	std::vector<std::string> environments;
+	for (size_t i = 0; i < viewports.size(); ++i)
+		if (viewports.at(i).kind() == ViewportKind::Environment) environments.push_back(viewports.at(i).path());
+	for (const std::string &environment_path : environments)
+		if (auto *environment =
+						dynamic_cast<EnvironmentViewport *>(viewports.find(environment_path, ViewportKind::Environment)))
+			fired = !environment->fire_listen_sounds(view.project.scan.get(), core.sound_selector(),
+			                                         viewports.clip_sound_seq())
+			                 .empty() ||
+			        fired;
 	if (fired) core.touch(ViewConcern::Viewports);
 }
 
