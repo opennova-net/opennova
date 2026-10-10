@@ -473,21 +473,33 @@ static int test_build_gate() {
 	session.run_operations();
 	gate = ask(session, "build_gate");
 	TEST_EXPECT(!gate.get_bool("blocked", true));
-	// An archive in the project: blocked by the build's own check, a Problems row before any build (the
-	// review's M3: the refusal's count, Problems' and Show them agree).
+	// An archive in the project: listed, the build leaving it out (the game never mounts one packed inside
+	// another), no refusal (the build's gate follows the game: a quality rule refuses nothing).
 	const uint8_t note[] = { 'x' };
 	const opennova::pff::PffWriteEntry entries[] = { { "note.txt", note, sizeof(note), 0, 0, 0 } };
 	TEST_EXPECT(opennova::pff::pff_write_archive(dir.file("project/extra.pff").c_str(),
 						opennova::pff::PFF_FORMAT_PFF3, entries, 1) == opennova::pff::PFF_WRITE_OK);
 	session.handle(request::rescan());
 	session.run_operations(); // the Rescan's refresh (S13 A3)
+	gate = ask(session, "build_gate");
+	size_t archives = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		archives += d.code() == "build.archive_in_project" && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
+	TEST_EXPECT(!gate.get_bool("blocked", true) && archives == 1);
+	// A name no archive stores: refused by the build's own check, a Problems row before any build (the
+	// review's M3: the refusal's count, Problems' and Show them agree).
+	TEST_EXPECT(editor_test::write_text(dir.file("project/scripts/a_name_far_too_long.wac"), "// a script\r\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	// (The scan's name rule and the plan's word on the file say it each.)
 	gate = ask(session, "build_gate", R"({"limit": 1})");
-	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
+	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 2.0 &&
 			gate.get("blocking")->array.size() == 1 &&
-			gate.get("blocking")->array[0].get_string("code", "") == "build.archive_in_project");
+			gate.get("blocking")->array[0].get_string("code", "") == "build.name_unstorable");
 	size_t rows = 0;
-	for (const Diagnostic &d : session.view().findings.diagnostics) rows += d.code() == "build.archive_in_project" ? 1 : 0;
-	TEST_EXPECT(rows == 1);
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		rows += d.code() == "asset.name.too_long" || d.code() == "build.name_unstorable" ? 1 : 0;
+	TEST_EXPECT(rows == 2);
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);

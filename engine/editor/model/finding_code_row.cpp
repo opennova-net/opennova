@@ -76,7 +76,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BlankTexture, code("blank.texture", G::NewFiles) },
 	{ C::BlankUnavailable, code("blank.unavailable", G::NewFiles) },
 	{ C::BuildArchive, code("build.archive", G::Build) },
-	{ C::BuildArchiveInProject, about_the_file("build.archive_in_project", G::Build, F::None) },
+	{ C::BuildArchiveInProject, listed(about_the_file("build.archive_in_project", G::Build, F::None)) },
 	{ C::BuildBlocked, code("build.blocked", G::Build) },
 	{ C::BuildChanged, code("build.changed", G::Build) },
 	{ C::BuildCopy, code("build.copy", G::Build) },

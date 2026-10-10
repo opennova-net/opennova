@@ -1567,9 +1567,11 @@ static int test_fix_all_served_whole() {
 	return 0;
 }
 
-// What only the build's plan refuses (the review's M3): an archive in the project is a Problems row before
-// any build, marked "Blocks the build" like the gate's; the refusal's count, the rows' blocking count and
-// Show them agree; a refused build adds no second row of it; the headline says whose refusals they are.
+// What only the build's plan refuses (the review's M3): a name no archive stores is a Problems row before any
+// build, marked "Blocks the build" like the gate's; the refusal's count, the rows' blocking count and Show
+// them agree; a refused build adds no second row of it; the headline says whose refusals they are. An
+// archive in the project is a row too, the build leaving it out, blocking nothing (a quality rule refuses
+// no build).
 static int test_plan_refusals_are_rows() {
 	editor_test::TempProjectDir dir("opennova_editor_problems_plan_rows");
 	NoProcess platform;
@@ -1580,38 +1582,44 @@ static int test_plan_refusals_are_rows() {
 	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", reinterpret_cast<const uint8_t *>("x"), 1, 0, 0, 0}};
 	TEST_EXPECT(opennova::pff::pff_write_archive((v.project.root + "/extra.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
-	const auto archive_rows = [&v]() {
+	const auto rows_of = [&v](const char *code) {
 		std::vector<size_t> rows;
 		for (size_t i = 0; i < v.findings.diagnostics.size(); ++i)
-			if (v.findings.diagnostics[i].code() == "build.archive_in_project") rows.push_back(i);
+			if (v.findings.diagnostics[i].code() == code) rows.push_back(i);
 		return rows;
 	};
-	std::vector<size_t> rows = archive_rows();
+	std::vector<size_t> rows = rows_of("build.name_unstorable");
 	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v));
-	TEST_EXPECT(count_problems(v).blocking == 5); // the four required files the boot stops without, and the archive
+	const std::vector<size_t> archives = rows_of("build.archive_in_project");
+	TEST_EXPECT(archives.size() == 1 && !blocks_the_build(archives[0], v) &&
+	            v.findings.diagnostics[archives[0]].severity == DiagnosticSeverity::Warning);
+	// The four required files the boot stops without, and the name (the scan's rule and the plan's word).
+	TEST_EXPECT(count_problems(v).blocking == 6);
 	ProblemQuery only;
 	only.blocking = true;
-	TEST_EXPECT(answer_problems(only, v).rows.size() == 5);
+	TEST_EXPECT(answer_problems(only, v).rows.size() == 6);
 	editor_test::handle_to_end(session, request::build());
 	TEST_EXPECT(v.activity.has_build && v.activity.last_build->refused);
-	rows = archive_rows();
-	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v) && count_problems(v).blocking == 5);
+	rows = rows_of("build.name_unstorable");
+	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v) && count_problems(v).blocking == 6);
 	const Diagnostic *refusal = nullptr;
 	for (const Diagnostic &d : v.findings.diagnostics)
 		if (d.code() == "build.blocked") refusal = &d;
-	TEST_EXPECT(refusal && refusal->message.rfind("The build was refused: 5 problems stop it: ", 0) == 0);
+	TEST_EXPECT(refusal && refusal->message.rfind("The build was refused: 6 problems stop it: ", 0) == 0);
 	const BuildResult result = build_result(*v.activity.last_build, true);
-	TEST_EXPECT(result.refusals.size() == 5 &&
-	            result.headline == "Build refused: 5 problems stop it: the game would stop for some, and the editor does not pack the others.");
+	TEST_EXPECT(result.refusals.size() == 6 &&
+	            result.headline == "Build refused: 6 problems stop it: the game would stop for some, and the editor does not pack the others.");
 	TEST_EXPECT(std::find(result.refusals.begin(), result.refusals.end(),
-	                      "extra.pff is an archive in the project: the build packs the project's files itself") != result.refusals.end());
+	                      "a_name_far_too_long.wac's name is too long for an archive") != result.refusals.end());
+	for (const std::string &line : result.refusals) TEST_EXPECT(line.find("extra.pff") == std::string::npos);
 	// The menu bar's words, from the build's own report whatever the status line says since (the review's L5).
 	TEST_EXPECT(refused_words(*v.activity.last_build) ==
-	            "Refused: " + result.refusals.front() + " (and 4 more).");
+	            "Refused: " + result.refusals.front() + " (and 5 more).");
 	// A name keeps its case in a refusal's words; a sentence's opener is lowered (the review's L6).
-	Diagnostic upper = editor_test::finding_of(DiagnosticSeverity::Error, "build.archive_in_project", "x", "RESOURCE.PFF");
-	TEST_EXPECT(blocker_words(upper) == "RESOURCE.PFF is an archive in the project: the build packs the project's files itself");
+	Diagnostic upper = editor_test::finding_of(DiagnosticSeverity::Error, "build.name_unstorable", "x", "A_NAME_FAR_TOO_LONG.WAC");
+	TEST_EXPECT(blocker_words(upper) == "A_NAME_FAR_TOO_LONG.WAC's name is too long for an archive");
 	Diagnostic named = editor_test::finding_of(DiagnosticSeverity::Error, "document.parse", "MAIN.MNU cannot be read.", "main.mnu");
 	TEST_EXPECT(blocker_words(named) == "MAIN.MNU cannot be read");
 	named.message = "The file cannot be read.";

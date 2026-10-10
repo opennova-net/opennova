@@ -374,13 +374,18 @@ static int test_protected_build_survives_and_archives_are_refused() {
 	TEST_EXPECT(!fs::exists(first.build_dir) && !fs::exists(second.build_dir));
 	TEST_EXPECT(fs::is_regular_file(out + "/my important documents/keep.txt"));
 
-	// A .pff inside the project blocks the build with a plain explanation.
+	// A .pff inside the project is left out with a plain explanation, the build going ahead: the game never
+	// mounts an archive packed inside another.
 	TEST_EXPECT(editor_test::write_text(p.root + "/old/stuff.pff", "PFF3"));
 	const BuildPlan plan = p.plan();
-	TEST_EXPECT(!plan.ok);
+	TEST_EXPECT(plan.ok);
 	bool reported = false;
-	for (const Diagnostic &d : plan.diagnostics) reported = reported || d.code() == "build.archive_in_project";
+	for (const Diagnostic &d : plan.diagnostics)
+		reported = reported || (d.code() == "build.archive_in_project" && d.severity == DiagnosticSeverity::Warning);
 	TEST_EXPECT(reported);
+	for (const BuildArchive &archive : plan.archives)
+		for (const BuildEntry &entry : archive.entries) TEST_EXPECT(entry.logical_name != "stuff.pff");
+	for (const BuildEntry &entry : plan.loose) TEST_EXPECT(entry.logical_name != "stuff.pff");
 	return 0;
 }
 
