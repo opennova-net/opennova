@@ -189,6 +189,14 @@ const std::vector<DefProperty> kItemProperties = {
 	{"door_close_sound_id", {"door_close_sound"}, DefEncoding::Plain, 1.0, ""},
 	{"husk_sub_part_types", {"husk_sub_part_types[0]", "husk_sub_part_types[1]", "husk_sub_part_types[2]", "husk_sub_part_types[3]", "husk_sub_part_types[4]", "husk_sub_part_types[5]", "husk_sub_part_types[6]", "husk_sub_part_types[7]", "husk_sub_part_types[8]", "husk_sub_part_types[9]", "husk_sub_part_types[10]", "husk_sub_part_types[11]", "husk_sub_part_types[12]", "husk_sub_part_types[13]", "husk_sub_part_types[14]", "husk_sub_part_types[15]"}, DefEncoding::DeathPieces, 1.0, ""},
 	{"pcvehicle_spawnlist", {"vehicle_spawn_mask"}, DefEncoding::SpawnMask, 1.0, ""},
+	// The mission editor's AI keys, which the game knows and keeps nothing of (DefItemDef::max_attack_dist).
+	{"max_attack_dist", {"max_attack_dist"}, DefEncoding::Plain, 1.0, ""},
+	{"max_engagement_dist", {"max_engagement_dist"}, DefEncoding::Plain, 1.0, ""},
+	{"min_engagement_dist", {"min_engagement_dist"}, DefEncoding::Plain, 1.0, ""},
+	{"fire_timer", {"fire_timer"}, DefEncoding::Plain, 1.0, ""},
+	// Its side words on the attrib: lines, written there as Parent is (DefItemDef::attrib_good).
+	{"good", {"attrib_good"}, DefEncoding::ItemParent, 1.0, ""},
+	{"evil", {"attrib_evil"}, DefEncoding::ItemParent, 1.0, ""},
 };
 
 const std::vector<DefProperty> kWeaponProperties = {

@@ -1,6 +1,7 @@
 // Mission -> world promotion. See mission/promote.h + docs/world/world-wac-ai-re.md.
 #include <runtime/mission/promote.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/le.h>
 #include <formats/def/reserved_items.h>
 #include <formats/mission/mission_params.h>
@@ -921,11 +922,15 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     }
 
     // [orig: Mission_LoadBMSFile @0x40FCC3] Normalize each bounding-box axis.
-    // Type 5 supplies WAC location IDs; these are not area-trigger records.
+    // A Location box (type 5) supplies WAC location IDs; these are not area-trigger records. The
+    // Health and Mana boxes' player-body legs are unported (D-INF-28), and so is the Mission box's
+    // (D-INF-29: the game sends the local player to the mission it names [orig: Entity_UpdateInfantryPlayerBody
+    // @0x4b60aa..0x4b611e, exit reason 8; Game_ProcessMainFrame @0x526806]); the Location box's music
+    // variable 3 and the type-6 box's variable 4 are D-MUS-VARPUMP's (bms::BoundingBoxType).
     world.reverb = {};
     world.reverb.mission = world.reverb.selected = m.header.reverb;
     for (const bms::BoundingBox &box : m.bounding_boxes) {
-        if (box.type == 4) {
+        if (box.type == int32_t(bms::BoundingBoxType::Reverb)) {
             ReverbRegion r;
             const int32_t lo[3] = {box.min_x, box.min_y, box.min_z};
             const int32_t hi[3] = {box.max_x, box.max_y, box.max_z};
@@ -933,7 +938,7 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             r.value = box.ref_id;
             world.reverb.regions.push_back(r);
         }
-        if (box.type != 5) continue;
+        if (box.type != int32_t(bms::BoundingBoxType::Location)) continue;
         Aabb bounds;
         bounds.min = {std::min(box.min_x, box.max_x) / 65536.0f,
                       std::min(box.min_y, box.max_y) / 65536.0f,
@@ -1129,12 +1134,13 @@ void stash_mission_loadout_rules(
         if (row.name.empty()) continue;
         world::WeaponKitEntry entry;
         entry.name = row.name;
-        entry.ammo_primary = static_cast<int32_t>(
-                std::strtol(row.ammo_primary.c_str(), nullptr, 10));
-        entry.ammo_secondary = static_cast<int32_t>(
-                std::strtol(row.ammo_secondary.c_str(), nullptr, 10));
-        entry.flags = static_cast<int32_t>(
-                std::strtol(row.flags.c_str(), nullptr, 10));
+        // The kit row's three numbers are the CRT atol (io::retail_atol: the locale's
+        // white space, 0xA0 included, saturating at 32 bits; D-NET-384)
+        // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550 — j__atol @0x515647,
+        //  @0x51566f, @0x515697].
+        entry.ammo_primary = io::retail_atol(row.ammo_primary.c_str());
+        entry.ammo_secondary = io::retail_atol(row.ammo_secondary.c_str());
+        entry.flags = io::retail_atol(row.flags.c_str());
         r_kit_rows.push_back(std::move(entry));
     }
 }

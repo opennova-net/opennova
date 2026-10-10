@@ -69,6 +69,21 @@ inline constexpr bool cp1252_isspace(std::uint8_t p_byte) noexcept {
 	return p_byte == 0x20 || (p_byte >= 0x09 && p_byte <= 0x0D) || p_byte == 0xA0;
 }
 
+// The CRT `isdigit` under the same ".ACP" LC_CTYPE: cp1252's C1_DIGIT bytes, which are the ten
+// ASCII digits plus the superscripts 0xB2, 0xB3 and 0xB9 (Windows' NLS classes U+00B2, U+00B3 and
+// U+00B9 as digits; probed 2026-10-10 with MultiByteToWideChar(1252) + GetStringTypeW(CT_CTYPE1),
+// and msvcrt's isdigit after setlocale(LC_ALL, ".ACP") on a cp1252 host gives the same set).
+// Unlike the space set, the digit set differs between single-byte pages (1250 and 1251 have no
+// superscript digits, 1253 lacks 0xB9, 874 adds the Thai digits 0xF0..0xF9); the pin to cp1252
+// is D-NET-388's. A caller passing the byte sign-extended reads the same row: CRT_init_ctype
+// copies the table's upper half below its base, so pctype[-128..-2] mirrors pctype[128..254]
+// (and pctype[-1], EOF, is 0; 0xFF is no digit either way).
+// [orig: _isdigit @0x76b86d -> _isdigit_l @0x76b81e (the locale's pctype & _DIGIT);
+//  CRT_init_ctype @0x784a07 (the mirror memcpy @0x784c59, the EOF word @0x784bde)]
+inline constexpr bool cp1252_isdigit(std::uint8_t p_byte) noexcept {
+	return (p_byte >= '0' && p_byte <= '9') || p_byte == 0xB2 || p_byte == 0xB3 || p_byte == 0xB9;
+}
+
 // Strict UTF-8 well-formedness (no overlong forms, no surrogates, at most U+10FFFF).
 inline bool is_valid_utf8(std::string_view s) noexcept {
 	size_t i = 0;

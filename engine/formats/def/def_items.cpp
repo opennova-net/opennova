@@ -126,6 +126,12 @@ void def_init_item(DefItemDef &value) {
     d->flip = 45;          /* [orig: flip] */
     d->hand_brake = 1;     /* [orig: handBrake] */
     d->tire_slip = 5;      /* [orig: tireSlip] */
+    /* The mission editor's AI keys as its parse seeds them at each `begin` (the game keeps none)
+       [orig: JOTACmed.exe ItemsDef_ParseToken @0x431159..0x431179]. */
+    d->max_attack_dist = 16;
+    d->max_engagement_dist = 320;
+    d->min_engagement_dist = 16;
+    d->fire_timer = 10;
 }
 
 /* Shared items.def parser over an in-memory buffer. The caller owns `buf` and must have
@@ -647,6 +653,20 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
         } else if (key_is(key, "flip")) {
             current.flip = parse_int_n(v, vl);
             parsed = 1;
+        } else if (key_is(key, "max_attack_dist")) {
+            /* A key the game knows and keeps nothing of [orig: @0x4a1a7b -> @0x4a1ca6]; the mission
+               editor's atol [orig: JOTACmed.exe @0x431a6e -> +0x494]. */
+            current.max_attack_dist = parse_int_n(v, vl);
+            parsed = 1;
+        } else if (key_is(key, "max_engagement_dist")) {
+            current.max_engagement_dist = parse_int_n(v, vl); /* [orig: @0x4a1a94; JOTACmed.exe @0x431a9f -> +0x498] */
+            parsed = 1;
+        } else if (key_is(key, "min_engagement_dist")) {
+            current.min_engagement_dist = parse_int_n(v, vl); /* [orig: @0x4a1aad; JOTACmed.exe @0x431ad0 -> +0x49C] */
+            parsed = 1;
+        } else if (key_is(key, "fire_timer")) {
+            current.fire_timer = parse_int_n(v, vl); /* [orig: @0x4a1ac6; JOTACmed.exe @0x431b01 -> +0x4A0] */
+            parsed = 1;
         } else if (key_is(key, "hand_brake")) {
             current.hand_brake = parse_int_n(v, vl); /* raw +0x944 [orig: key @0x7c7d60] */
             parsed = 1;
@@ -870,6 +890,13 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
                     /* `Parent` is a byte, not a bit: ItemDef+0x548, the gunner-attachment
                        gate (VehicleTraits::attrib_parent). [orig: @0x4a0cd6..0x4a0ce2] */
                     current.attrib_parent = 1;
+                } else if (k == 4 && memcmp(lo, "good", 4) == 0) {
+                    /* The mission editor's side words, which the game matches and stores nothing for
+                       [orig: @0x4a06c3 / @0x4a06db -> @0x4a0cea; JOTACmed.exe ItemsDef_ParseToken
+                       @0x431682 / @0x43169f]. */
+                    current.attrib_good = 1;
+                } else if (k == 4 && memcmp(lo, "evil", 4) == 0) {
+                    current.attrib_evil = 1;
                 } else {
                     int b2 = lookup_item_attrib2(lo, k);
                     if (b2) current.attrib2 |= (unsigned)b2;

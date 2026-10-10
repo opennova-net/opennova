@@ -74,6 +74,15 @@ private:
 	                            const std::string &static_dir,
 	                            const std::string &templates_dir);
 
+	// Client-facing URLs injected into the menu templates (@HOST_URL@ /
+	// @GSB_SERVER@): config.public_host and the port Crow serves, the
+	// configured one or the OS's pick for port 0. The retail client is REMOTE,
+	// so these must point at the public host, never 127.0.0.1 (else the client
+	// POSTs its host registration / fetches the server browser from its own
+	// localhost).
+	std::string host_url() const;
+	std::string gsb_url() const;
+
 	struct Impl;
 	std::unique_ptr<Impl> impl_;
 	ConnectionManager &manager_;
@@ -100,13 +109,9 @@ private:
 	// Optional unknown-message tracker (set via set_unknown_tracker). Read
 	// by /api/unknowns; written by the catch-all 404 path. Null in tests.
 	opennova::UnknownTracker *tracker_ = nullptr;
-	// Client-facing URLs injected into the menu templates (@HOST_URL@ /
-	// @GSB_SERVER@). Built once in start() from config.public_host +
-	// config.http_port — the retail client is REMOTE, so these must point at
-	// the public host, never 127.0.0.1 (else the client POSTs its host
-	// registration / fetches the server browser from its own localhost).
-	std::string host_url_;
-	std::string gsb_url_;
+	// config.public_host, set in start() before Crow runs (host_url() /
+	// gsb_url()).
+	std::string public_host_;
 };
 
 } // namespace opennova::novaworld_server

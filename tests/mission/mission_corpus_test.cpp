@@ -115,6 +115,7 @@ bool differing_sections(const std::vector<uint8_t> &a, const std::vector<uint8_t
 
 struct Counts {
 	size_t missions = 0, identical = 0, failed = 0;
+	size_t paths = 0, stops = 0, over_slots = 0; // the waypoint paths every one its markers' (D-MIS-6)
 	std::vector<std::string> differing; // "NAME: section, section"
 };
 
@@ -185,13 +186,27 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 	    parsed.layer_records.size() != size_t(bms::kLayerRecordCount))
 		return fail("fixed section count wrong (wp/grp/layer)");
 
-	// Former GUT waypoint-view oracle, including CP19's authored count of
-	// 39: preserve the raw record, but bound the public view to its 32 slots.
-	for (const auto &summary : opennova::mission::waypoint_summaries(parsed)) {
-		opennova::mission::WaypointPath waypoint;
-		if (summary.marker_count < 0 || summary.marker_count > 32 ||
-		    !opennova::mission::waypoint_path(parsed, summary.index, waypoint) || waypoint.marker_indices.size() > 32)
-			return fail("waypoint view exceeds its stored slots");
+	// Every path is its markers' (D-MIS-6), as the original editor's writer lays it out: its count the markers
+	// that carry its number, its 32 slots the first of them in wp_number order [orig: JOTACmed.exe
+	// sub_44CFD0 @ 0x44cfd0, sub_44F920 @ 0x44f920]; CP19's path 6 counts 39 over its 32 slots.
+	for (size_t path = 0; path < parsed.waypoint_records.size(); ++path) {
+		const bms::WaypointRecord &record = parsed.waypoint_records[path];
+		const std::vector<int> stops = opennova::mission::waypoint_path_markers(parsed, path);
+		std::vector<uint32_t> slots;
+		for (size_t i = 0; i < stops.size() && i < 32; ++i) slots.push_back(uint32_t(stops[i]));
+		if (record.marker_count != stops.size() || record.waypoint_numbers != slots)
+			return fail("path " + std::to_string(path) + " counts " + std::to_string(record.marker_count) + " stops, its markers " +
+			            std::to_string(stops.size()) + ", or its slots are not theirs in wp_number order");
+		counts.paths += stops.empty() ? 0 : 1;
+		counts.stops += stops.size();
+		if (stops.size() > 32) ++counts.over_slots;
+		// Laid out again from its markers, the record is as read.
+		bms::File laid = parsed;
+		opennova::mission::lay_out_waypoint_path(laid, path);
+		if (laid.waypoint_records[path].marker_count != record.marker_count ||
+		    laid.waypoint_records[path].waypoint_numbers != record.waypoint_numbers ||
+		    laid.waypoint_records[path].padding != record.padding)
+			return fail("path " + std::to_string(path) + " laid out from its markers differs from the record read");
 	}
 
 	std::vector<uint8_t> encoded;
@@ -227,14 +242,18 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 	if (!bms::equal(parsed, reparsed)) return fail("bms::equal(parsed, reparsed) is false");
 }
 
-// What a new record holds is what the shipped records most often hold (bms_edit's new_entity and
-// make_blank, which cite this leg): every member of a new entity but those an author always sets
-// (its item, its SSN, its position and yaw, its team) is the most common value of that member over
-// the shipped item records, over the building records, over the marker records and over the organic
-// records (each pool its own: bms_edit's new_entity by its kind); every member of a
-// blank mission's header but those that are the mission's own (its name and designer, its terrain,
-// tile set and environment, its game mode and option bits, the fog distance those gate) is the most
-// common value over the shipped missions. Returns the members that are not.
+// What a new record holds is what the original editor's initializer gives an item it places (bms_edit's
+// new_entity, D-MIS-10), and a blank mission's header what the shipped missions most often hold
+// (make_blank). Every member of a new entity but those an author always sets (its item, its SSN, its
+// position and yaw, its team) is the most common value of that member over the shipped item records,
+// over the building records, over the marker records and over the organic records, but for the members
+// the original editor's properties dialog writes on its OK: the map symbol, its combo's selection (-1
+// with none, 255 in the record [orig: JOTACmed.exe sub_4096D0, CB_GETCURSEL of 4045]), in every pool,
+// and an organic's engagement and attack distances (the person's AI distances, its dialog's), which the
+// shipped records hold otherwise. Every member of a blank mission's header but those that are the
+// mission's own (its name and designer, its terrain, tile set and environment, its game mode and option
+// bits, the fog distance those gate) is the most common value over the shipped missions. Returns the
+// members that are not.
 int check_new_records(const Tally &tally) {
 	namespace mission = opennova::mission;
 	int failures = 0;
@@ -242,7 +261,11 @@ int check_new_records(const Tally &tally) {
 	const char *const pool_names[4] = {"items", "buildings", "markers", "organics"};
 	const mission::EntityKind kinds[4] = {mission::EntityKind::Item, mission::EntityKind::Building,
 	                                      mission::EntityKind::Marker, mission::EntityKind::Organic};
-	size_t members = 0;
+	const auto dialog_written = [](int pool, const std::string &key) {
+		if (key == "map_symbol") return true;
+		return pool == 3 && (key == "max_engagement_distance" || key == "max_attack_distance");
+	};
+	size_t members = 0, dialog = 0;
 	double least = 100.0;
 	for (int pool = 0; pool < 4; ++pool) {
 		if (!tally.records[pool]) continue;
@@ -256,6 +279,16 @@ int check_new_records(const Tally &tally) {
 			if (found == tally.pools[pool].end()) continue;
 			const std::pair<std::string, size_t> best = Tally::most(found->second);
 			const double share = 100.0 * double(best.second) / double(tally.records[pool]);
+			if (dialog_written(pool, field.key)) {
+				// The shipped records hold what the dialog wrote, not what the initializer gives.
+				if (Tally::text(value) == best.first) {
+					std::fprintf(stderr, "  FAIL the shipped %s most often hold a new entity's %s '%s': the dialog no longer "
+					             "explains it\n", pool_names[pool], field.key, best.first.c_str());
+					++failures;
+				}
+				++dialog;
+				continue;
+			}
 			if (Tally::text(value) != best.first) {
 				std::fprintf(stderr, "  FAIL a new entity's %s is '%s'; the shipped %s most often hold '%s' (%.1f%%)\n",
 				             field.key, Tally::text(value).c_str(), pool_names[pool], best.first.c_str(), share);
@@ -292,9 +325,10 @@ int check_new_records(const Tally &tally) {
 		fewest = std::min(fewest, best.second);
 	}
 	std::printf("new records: %zu members of a new entity hold the shipped items', buildings', markers' and organics' most common "
-	            "value (the least common of them the value of %.1f%% of its pool); %zu members of a blank mission's "
-	            "header the shipped missions' (the least common in %zu of %zu)\n",
-	            members, least, header_members, fewest, tally.missions);
+	            "value (the least common of them the value of %.1f%% of its pool), %zu what the original editor's dialog "
+	            "writes otherwise; %zu members of a blank mission's header the shipped missions' (the least common in %zu "
+	            "of %zu)\n",
+	            members, least, dialog, header_members, fewest, tally.missions);
 	return failures;
 }
 
@@ -358,6 +392,8 @@ int test_retail() {
 	std::printf("retail: %zu missions, %zu rewritten to their own bytes, %zu differing in the loadout chunk alone "
 	            "(%zu of the %zu named are in this install), %zu failed\n",
 	            counts.missions, counts.identical, counts.differing.size(), met.size(), damaged.size(), counts.failed);
+	std::printf("retail: %zu paths, %zu stops, every one its markers' (%zu counted past their 32 slots)\n", counts.paths,
+	            counts.stops, counts.over_slots);
 	return counts.failed == 0 ? 0 : 1;
 }
 

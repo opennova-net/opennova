@@ -70,6 +70,9 @@ private:
 	std::atomic<bool> stop_requested_{false};
 	uint16_t bound_port_ = 0;
 	std::string public_host_;
+	// The siblings' ports UDPNOVAWORLD and STARTUPURL advertise, as the config
+	// start() took names them: main() starts the gate last, with the ports the
+	// NW UDP and HTTP listeners bound.
 	uint16_t nw_udp_port_ = 0;
 	uint16_t http_port_   = 0;
 	// Reflection override (ONNET_CLIENT_REFLECT_IP/PORT). When set, advertised

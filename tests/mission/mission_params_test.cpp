@@ -245,11 +245,16 @@ int test_named_values() {
 	return 0;
 }
 
-// The SSN a new entity takes skips the player's; the pools load and scan organics, items,
+// The SSN a new entity takes skips the players' net ids; the pools load and scan organics, items,
 // buildings, markers; a zone id resolves to the first area of the id unless its box is flat.
 int test_ssns_pools_and_zones() {
+	// Past every player's net id, 10000 plus the slot byte, by its low 16 bits [orig: PlayerClass_InitEntity
+	// @0x4b1149..0x4b1173; EntityPool_FindByNetId @0x4f0a20].
 	TEST_EXPECT(ssn_after(0) == 1 && ssn_after(41) == 42);
-	TEST_EXPECT(ssn_after(kPlayerSsn - 1) == kPlayerSsn + 1 && ssn_after(kPlayerSsn) == kPlayerSsn + 1);
+	TEST_EXPECT(ssn_after(kPlayerSsn - 1) == kPlayerSsn + kPlayerSsnSlots && ssn_after(kPlayerSsn + 7) == kPlayerSsn + kPlayerSsnSlots);
+	TEST_EXPECT(ssn_after(kPlayerSsn + kPlayerSsnSlots) == kPlayerSsn + kPlayerSsnSlots + 1);
+	TEST_EXPECT(ssn_after(0x10000 + kPlayerSsn - 1) == 0x10000 + kPlayerSsn + kPlayerSsnSlots);
+	TEST_EXPECT(ssn_is_players(kPlayerSsn + 255) && !ssn_is_players(kPlayerSsn + 256) && ssn_is_players(0x20000 + kPlayerSsn));
 
 	using opennova::mission::EntityKind;
 	TEST_EXPECT(entity_pool(EntityKind::Organic) == 0 && entity_pool(EntityKind::Item) == 1 &&

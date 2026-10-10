@@ -3,6 +3,7 @@
 
 #include <runtime/menu/menu_table.h>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -22,7 +23,7 @@ int32_t numeric_cell(const std::string *cell) {
 	const char first = s.empty() ? '\0' : s[0];
 	const char second = s.size() > 1 ? s[1] : '\0';
 	if (digit(first) || (first == '-' && digit(second))) {
-		return static_cast<int32_t>(std::strtol(s.c_str(), nullptr, 10));
+		return io::retail_atol(s.c_str()); // the CRT atol @0x63eb6c / @0x63ebd9 (D-NET-384)
 	}
 	return 0x7FFFFFFF;
 }
