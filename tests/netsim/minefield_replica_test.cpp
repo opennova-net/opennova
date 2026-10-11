@@ -89,6 +89,7 @@ int main() {
         mines.kind = world::EntityKind::Building;
         mines.item_id = 1896;
         mines.has_item_def = true;
+        mines.item_type_index = 1; // the trait sweep's row: not an empty slot
         mines.item_attrib2 = 0x4000u; // Landmine
         mines.section_mask = 0x6u;
         host->registry.spawn(2, mines);

@@ -283,11 +283,12 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// are dead code there because entitySlotPtr is null). Retail relies on the
 		// client asking for a sweep (C2S 0x32 -> S2C 0x5D) to retire the entity, so
 		// on retail a leaver's body lingers until the next sweep.
-		// NOT WITNESSED (D-NET-176): pushing that same sweep at teardown instead of
+		// NOT WITNESSED (D-NET-176 delta (a)): pushing a sweep at teardown instead of
 		// waiting to be asked. The probe3 capture shows 0x5D coinciding with
 		// disconnects, which is consistent with a sweep, but the only witnessed
-		// TRIGGER is the 0x32 request — this is a trigger relocation, and the BYTES
-		// are the witnessed builder's (@0x5160f0) exactly.
+		// TRIGGER is the 0x32 request. The body is not the witnessed builder's
+		// either: it lists the leaver's slot alone, where Server_CollectEmptyPool0Slots
+		// (@0x5160f0) lists every empty pool-0 slot below the used count.
 		DestroyEntityList leave_sweep;
 		if (freed_pool0_entity) leave_sweep.pool0_indices.push_back(freed_pool0_slot);
 		for (NapiNPConnection &other : list) {

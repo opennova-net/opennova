@@ -8,6 +8,7 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
+#include <runtime/mission/promote.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/world.h>
@@ -40,6 +41,17 @@ int32_t heading_bam(int16_t yaw) {
 }
 int32_t axis_bam(int16_t degrees) {
 	return placement_angle_bam(degrees);
+}
+
+// The trait sweep's resolved row: an entity of a type items.def holds carries a
+// nonzero ItemTypeIndex (+0x1C) and its def (+0x20), the pair the pool-2
+// serializer's empty-slot test reads.
+// [orig: Entity_SpawnFromBMSRecord @0x40EBFC; NetPacket_SerializePool2StaticToBuffer
+//  @0x504369..0x504378]
+w::Entity &with_def(w::Entity &e, int32_t type_index = 1) {
+	e.item_type_index = type_index;
+	e.has_item_def = true;
+	return e;
 }
 
 // A world with one entity in each of the four pools (the four EntityKinds promote into).
@@ -85,7 +97,7 @@ struct FourPoolWorld final : w::World {
 		building.position = {-5.0f, 6.0f, 2.0f};
 		building.yaw = 45;
 		building.team = 0;
-		world.registry.spawn(2, building);
+		world.registry.spawn(2, with_def(building));
 
 		w::Entity marker;
 		marker.kind = w::EntityKind::Marker;
@@ -311,8 +323,8 @@ bool run_pool2_static_slot_alignment() {
 	// client's slot = start_index + index stays correct.
 	w::World world;
 	world.registry.configure_pool(2, 8);
-	w::Entity a; a.kind = w::EntityKind::Building; a.item_id = 0x10; world.registry.spawn(2, a);
-	w::Entity b; b.kind = w::EntityKind::Building; b.item_id = 0x20; world.registry.spawn(2, b);
+	w::Entity a; a.kind = w::EntityKind::Building; a.item_id = 0x10; world.registry.spawn(2, with_def(a));
+	w::Entity b; b.kind = w::EntityKind::Building; b.item_id = 0x20; world.registry.spawn(2, with_def(b));
 	world.registry.despawn(w::EntityHandle::make(2, 0)); // leave a hole at slot 0; b is at slot 1
 
 	nw::StaticEntityBatch batch = ns::build_pool2_static_batch(world);
@@ -327,6 +339,95 @@ bool run_pool2_static_slot_alignment() {
 	if (!expect(out.records.size() == 2 && out.records[0].is_empty_slot, "hole preserved on the wire")) return false;
 	std::printf("PASS pool2_static_slot_alignment\n");
 	return true;
+}
+
+// The 0x10 stream walks to the pool's used count, its allocation high-water
+// mark, with a zero word for each empty slot below it; a freed slot stays below
+// it, so the stream does not end at the highest live slot (D-NET-417).
+// [orig: NetPacket_SerializePool2StaticToBuffer @0x5042F0 -- Pool_GetUsedCount(2)
+//  @0x5042F9 / @0x50433E / @0x504656, the zero word @0x50462C; Pool_AllocEntry
+//  @0x442230 raises `used` only @0x44228B]
+bool run_pool2_static_walks_to_the_used_count() {
+	w::World world;
+	world.registry.configure_pool(2, 8);
+	for (uint16_t i = 0; i < 4; ++i) {
+		w::Entity b;
+		b.kind = w::EntityKind::Building;
+		b.item_id = 0x10 + i;
+		world.registry.spawn(2, with_def(b));
+	}
+	world.registry.despawn(w::EntityHandle::make(2, 3));
+	const nw::StaticEntityBatch batch = ns::build_pool2_static_batch(world);
+	bool ok = expect(batch.records.size() == 4 && batch.records[3].is_empty_slot &&
+	                         !batch.records[2].is_empty_slot,
+	                 "the freed last slot still streams, as a zero word");
+	const std::vector<uint8_t> wire = nw::encode_static_entity_batch(batch);
+	nw::StaticEntityBatch out;
+	ok &= expect(nw::decode_static_entity_batch(wire.data(), wire.size(), out) &&
+	                     out.records.size() == 4 && out.records[3].is_empty_slot &&
+	                     wire.size() >= 2 && wire[wire.size() - 2] == 0 && wire.back() == 0,
+	             "the page ends with the bare zero word");
+	// A later spawn takes the lowest free slot below the used count and leaves
+	// the count where it is [orig: Pool_AllocEntry @0x442253..0x442274].
+	w::Entity c;
+	c.kind = w::EntityKind::Building;
+	c.item_id = 0x30;
+	ok &= expect(world.registry.spawn(2, with_def(c)) == w::EntityHandle::make(2, 3) &&
+	                     ns::build_pool2_static_batch(world).records.size() == 4,
+	             "the refill reuses the freed slot");
+	if (ok) std::printf("PASS pool2_static_walks_to_the_used_count\n");
+	return ok;
+}
+
+// The empty-slot test is the row's ItemTypeIndex (+0x1C) or its def (+0x20),
+// not its allocation: a live static of a type items.def lacks reads index 0
+// (the lookup's miss answers row 0) and streams as a zero word.
+// [orig: NetPacket_SerializePool2StaticToBuffer @0x5042F0 -- `cmp [ebp+1Ch],0`
+//  @0x504369, `mov eax,[ebp+20h]; test eax,eax` @0x504373..0x504378, the zero
+//  word @0x50462C; ItemList_FindIndexByTypeId @0x49E100, the miss @0x49E131]
+bool run_pool2_static_unknown_type_is_a_zero_word() {
+	w::World world;
+	world.registry.configure_pool(2, 4);
+	w::Entity known;
+	known.kind = w::EntityKind::Building;
+	known.item_id = 0x10;
+	world.registry.spawn(2, with_def(known));
+	w::Entity unknown;
+	unknown.kind = w::EntityKind::Building;
+	unknown.item_id = 0x7777; // no items.def row: index 0, no def
+	const w::EntityHandle unknown_h = world.registry.spawn(2, unknown);
+	const nw::StaticEntityBatch batch = ns::build_pool2_static_batch(world);
+	const bool ok = expect(world.registry.get(unknown_h) != nullptr && batch.records.size() == 2 &&
+	                               !batch.records[0].is_empty_slot && batch.records[1].is_empty_slot,
+	                       "a live static of an unknown type streams as a zero word");
+	if (ok) std::printf("PASS pool2_static_unknown_type_is_a_zero_word\n");
+	return ok;
+}
+
+// The mission load sets pool 2's used count to its record count, so a building
+// the load rejects still streams as a zero word, the last one included (D-NET-417).
+// [orig: Mission_LoadBMSFile @0x40F4E0 -- Pool_GetEntry(2, i) @0x40FA2B,
+//  Pool_SetUsed(2, the record count) @0x40FA4A]
+bool run_pool2_static_used_count_is_the_load_count() {
+	opennova::bms::File file;
+	file.buildings.resize(3);
+	for (size_t i = 0; i < file.buildings.size(); ++i) {
+		file.buildings[i].type_id = 0x40 + static_cast<int32_t>(i);
+		file.buildings[i].id = 500 + static_cast<int32_t>(i);
+	}
+	file.buildings[2].bmsi_attributes = 0x80; // multiplayer only: rejected offline
+	w::World world;
+	const opennova::mission::PromoteResult r = opennova::mission::promote_mission(file, world);
+	// No items.def here: stamp the rows the trait sweep would resolve.
+	std::vector<w::EntityHandle> statics;
+	world.registry.for_each_in_pool(2, [&](const w::Entity &e) { statics.push_back(e.handle); });
+	for (const w::EntityHandle h : statics) with_def(*world.registry.get(h));
+	const nw::StaticEntityBatch batch = ns::build_pool2_static_batch(world);
+	const bool ok = expect(r.spawned == 2 && batch.records.size() == 3 &&
+	                               !batch.records[1].is_empty_slot && batch.records[2].is_empty_slot,
+	                       "the rejected last building streams as a zero word");
+	if (ok) std::printf("PASS pool2_static_used_count_is_the_load_count\n");
+	return ok;
 }
 
 // The 0x10 record's zone block rides the zone chain, not the zone number: a
@@ -350,7 +451,7 @@ bool run_pool2_zone_block_rides_the_chain() {
 	trigger.zone_number = 2;
 	trigger.zone_radius = 70;
 	trigger.is_capture_trigger = true;
-	const w::EntityHandle trigger_h = world.registry.spawn(2, trigger);
+	const w::EntityHandle trigger_h = world.registry.spawn(2, with_def(trigger));
 	world.zones.chain.zones.push_back(trigger_h);
 	world.zones.chain.ranks.push_back(1);
 	const std::vector<uint8_t> zoned =
@@ -454,7 +555,7 @@ bool run_zone_outs_carry_within_a_call() {
 	trigger.yaw = 90;
 	trigger.zone_number = 2;
 	trigger.zone_radius = 30;
-	const w::EntityHandle trigger_h = world.registry.spawn(2, trigger);
+	const w::EntityHandle trigger_h = world.registry.spawn(2, with_def(trigger));
 	w::Entity building = trigger;
 	building.zone_number = 0;
 	building.zone_radius = 70;
@@ -901,7 +1002,7 @@ bool run_palm_state_rides_its_callbacks() {
 	w::Entity tree = palm;
 	tree.kind = w::EntityKind::Building;
 	tree.palm_state = 2; // fallen
-	world.registry.spawn(2, tree);
+	world.registry.spawn(2, with_def(tree));
 	nw::StaticEntityBatch statics;
 	const std::vector<uint8_t> swire =
 			nw::encode_static_entity_batch(ns::build_pool2_static_batch(world));
@@ -968,6 +1069,9 @@ int main() {
 	ok = run_pool1_spawn_parent_is_the_occupant() && ok;
 	ok = run_pool2_static() && ok;
 	ok = run_pool2_static_slot_alignment() && ok;
+	ok = run_pool2_static_walks_to_the_used_count() && ok;
+	ok = run_pool2_static_unknown_type_is_a_zero_word() && ok;
+	ok = run_pool2_static_used_count_is_the_load_count() && ok;
 	ok = run_pool2_zone_block_rides_the_chain() && ok;
 	ok = run_zone_outs_carry_within_a_call() && ok;
 	ok = run_pool3_marker() && ok;

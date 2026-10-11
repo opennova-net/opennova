@@ -279,6 +279,7 @@ void test_static_batch_carries_door_sections() {
 	e.kind = w::EntityKind::Building;
 	e.item_id = 700;
 	e.has_item_def = true;
+	e.item_type_index = 1;   // the trait sweep's row: not an empty slot
 	e.item_attrib = 0x80u;   // Door
 	e.deathtime_ticks = 3;    // def+0x890's low byte: three doors
 	e.door_count = 3;

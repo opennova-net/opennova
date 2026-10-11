@@ -701,25 +701,23 @@ void stream_pool1_zone_bytes(const world::World &w, PoolSpawnBatch &page) {
 }
 
 StaticEntityBatch build_pool2_static_batch(const world::World &w) {
-	// The 0x10 record carries no slot id — the client's slot is start_index + iteration
-	// index — so emit slot-aligned: start at 0, one record per slot 0..max_live_slot, with
-	// empty-slot sentinels (item_type_id 0) for holes (faithful to the pool cursor walk).
+	// The 0x10 record carries no slot id (the client's slot is start_index + iteration
+	// index), so emit slot-aligned: start at 0, one record per slot below the pool's used
+	// count, its allocation high-water mark, with an empty-slot sentinel (item_type_id 0)
+	// for each empty one, those past the last live slot included (D-NET-417). A slot is
+	// empty when its ItemTypeIndex (+0x1C) is 0 or it has no def (+0x20): a free row, or
+	// a live one of a type items.def lacks (the lookup's miss answers row 0).
+	// [orig: NetPacket_SerializePool2StaticToBuffer @0x5042F0 -- Pool_GetUsedCount(2)
+	//  @0x5042F9 / @0x50433E / @0x504656, the empty-slot tests @0x504369..0x504378,
+	//  the zero word @0x50462C]
 	StaticEntityBatch batch;
-	std::vector<const world::Entity *> by_slot;
-	int max_slot = -1;
-	w.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 2) return;
-		const int slot = e.handle.slot();
-		if (slot > max_slot) max_slot = slot;
-		if (static_cast<int>(by_slot.size()) <= slot) by_slot.resize(slot + 1, nullptr);
-		by_slot[slot] = &e;
-	});
-	if (max_slot < 0) return batch; // empty pool -> empty batch
+	const int used = static_cast<int>(w.registry.pool_used(2));
+	if (used == 0) return batch; // empty pool -> empty batch
 	batch.start_index = 0;
-	for (int slot = 0; slot <= max_slot; ++slot) {
+	for (int slot = 0; slot < used; ++slot) {
 		StaticEntityRecord rec;
-		const world::Entity *e = by_slot[static_cast<size_t>(slot)];
-		if (e == nullptr) {
+		const world::Entity *e = w.registry.get(world::EntityHandle::make(2, slot));
+		if (e == nullptr || e->item_type_index == 0 || !e->has_item_def) {
 			rec.is_empty_slot = true; // bare [u16 0] sentinel
 			batch.records.push_back(rec);
 			continue;

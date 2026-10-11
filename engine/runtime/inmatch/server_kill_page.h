@@ -30,8 +30,8 @@ bool kill_page_entity_eligible(const world::World &world, uint32_t window_min,
 // the leading word, at most 33 of them, and the leading word is the handle
 // the walk stopped at (0xFFFF when it ran out). Empty (nothing sent) while
 // spawns are suspended or the round is over, or when the walk has no first
-// handle. The used count is the pool's live high-water slot + 1, the model the
-// 0x10 builder streams by.
+// handle. The used count is the pool's allocation high-water mark
+// (EntityRegistry::pool_used), the count the 0x10 builder walks to.
 // [orig: Server_CollectValidWeaponSlots @0x516000 (the gates @0x51602E, the
 //  begin @0x516048..0x516057, the loop @0x516090..0x5160D1, the leading word
 //  @0x5160D7); WeaponLoadout_IteratorBegin @0x501680; ItemPoolIterator_Advance

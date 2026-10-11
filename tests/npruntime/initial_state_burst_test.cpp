@@ -105,6 +105,8 @@ int main_impl() {
 		bld.engine_flags = 0x04020400u;
 		bld.ammo_count = 0xFF;
 		bld.sub_type = 0xFF;
+		bld.item_type_index = 1; // the trait sweep's row: not an empty slot
+		bld.has_item_def = true;
 		world.registry.spawn(2, bld);
 	}
 
@@ -835,6 +837,8 @@ int pool1_fixture_bytes_impl() {
 	// bits in the runtime word.
 	building.engine_flags = 0x04000000u | w::kEntityFlagMatrixBuilt;
 	building.flags = w::kEntityFlagDead | w::kEntityFlagHusk;
+	building.item_type_index = 1; // the trait sweep's row: not an empty slot
+	building.has_item_def = true;
 	sworld.registry.spawn(2, building);
 	const std::vector<uint8_t> swire =
 			opennova::encode_static_entity_batch(ns::build_pool2_static_batch(sworld));

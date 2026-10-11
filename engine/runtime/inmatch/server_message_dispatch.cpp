@@ -2362,14 +2362,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// @0x429730). The handler reads NO fields from the request, is
 				// authority-gated, and is SKIPPED while g_NetSpawnSuspended or
 				// g_SpawnSuccessGate (round over) is set — our reachable analog of the
-				// latter is world->match.outcome().ended.
-				// Documented delta (D-NET-176, FIXED — entry (b) of its ledger row): retail
-				// walks the pool's fixed entry count. Our
-				// pool-0 capacity is an OpenNova sizing choice (1024 by default), so the
-				// walk stops at the highest OCCUPIED slot: a slot above that high-water
-				// mark was never streamed to any client, so listing it is a no-op that
-				// would only inflate the datagram.
-				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0]
+				// latter is world->match.outcome().ended. The walk covers pool 0's used
+				// count, its allocation high-water mark (D-NET-417); its empty test is the
+				// ItemTypeIndex (+0x1C) alone, ours a free slot (D-NET-486).
+				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0,
+				//  the used read @0x5160FF, the +0x1C test @0x516123]
 				std::size_t consumed = 0;
 				if (world == nullptr ||
 				    !decode_empty_slots_request(
@@ -2377,14 +2374,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				    world->match.outcome().ended) {
 					break;
 				}
-				const std::size_t capacity = world->registry.pool_capacity(0);
-				std::size_t high_water = 0;
-				for (std::size_t slot = 0; slot < capacity; ++slot) {
-					const world::EntityHandle h{static_cast<uint16_t>(slot)};
-					if (world->registry.get(h) != nullptr) high_water = slot + 1;
-				}
+				const std::size_t used = world->registry.pool_used(0);
 				DestroyEntityList sweep;
-				for (std::size_t slot = 0; slot < high_water; ++slot) {
+				for (std::size_t slot = 0; slot < used; ++slot) {
 					const world::EntityHandle h{static_cast<uint16_t>(slot)};
 					if (world->registry.get(h) == nullptr)
 						sweep.pool0_indices.push_back(static_cast<uint16_t>(slot));

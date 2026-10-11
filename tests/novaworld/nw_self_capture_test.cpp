@@ -143,6 +143,8 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		bld.engine_flags = 0x04020400u;
 		bld.ammo_count = 0xFF;
 		bld.sub_type = 0xFF;
+		bld.item_type_index = 1; // the trait sweep's row: not an empty slot (D-NET-417)
+		bld.has_item_def = true;
 		world.registry.spawn(2, bld);
 	}
 	bms::File mission;
