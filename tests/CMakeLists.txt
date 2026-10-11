@@ -3859,6 +3859,23 @@ target_compile_definitions(opennova_wire_parity_events_test PRIVATE
 add_test(NAME opennova_wire_parity_events
          COMMAND opennova_wire_parity_events_test $<TARGET_FILE:opennova_wire>)
 
+# opennova-parity (apps/parity, ADR 0050 R4): every metric identical / within its floor /
+# beyond it over synthetic canonical traces of one scripted case, the A/A widening rule, the
+# evidence checks, the normalization registry and the verdict document.
+add_executable(opennova_parity_metrics_test parity/parity_metrics_test.cpp)
+target_link_libraries(opennova_parity_metrics_test PRIVATE opennova_parity_core)
+target_include_directories(opennova_parity_metrics_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME opennova_parity_metrics COMMAND opennova_parity_metrics_test)
+# Its command line over run directories built from the committed self-capture session: exit
+# codes, the PARITY_* lines, the verdict file, the moved-run-directory rebase.
+add_executable(opennova_parity_cli_test parity/parity_cli_test.cpp)
+target_link_libraries(opennova_parity_cli_test PRIVATE opennova_parity_core)
+target_include_directories(opennova_parity_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(opennova_parity_cli_test PRIVATE
+    SELF_CAPTURE_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/novaworld/self-capture-session.pcap"
+    ITEMS_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/def/items.def")
+add_test(NAME opennova_parity_cli COMMAND opennova_parity_cli_test $<TARGET_FILE:opennova_parity>)
+
 # Host-row staleness backstop sweep (prune_stale_hosts).
 add_executable(host_prune_test novaworld/host_prune_test.cpp)
 target_link_libraries(host_prune_test PRIVATE opennova_novaworld_service)
