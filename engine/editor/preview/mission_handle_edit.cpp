@@ -229,6 +229,8 @@ void mission_restore_edits(const Document &document, const std::vector<MissionPr
 			set_position(document, each.record, "x_max", each.max[0], gesture, out);
 			set_position(document, each.record, "y_min", each.min[1], gesture, out);
 			set_position(document, each.record, "y_max", each.max[1], gesture, out);
+			set_position(document, each.record, "z_min", each.min[2], gesture, out);
+			set_position(document, each.record, "z_max", each.max[2], gesture, out);
 			continue;
 		}
 		set_position(document, each.record, "x", each.x, gesture, out);

@@ -194,9 +194,9 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		reveal_ = NodeAddress();
 	}
 	// Esc under a tool goes back to Select once the canvas has read this frame (where it is not taken
-	// as "select nothing").
+	// as "select nothing"): while the view's own window has the keyboard, never a pane beside it (S24).
 	const MissionTool tool = mission.options().tool;
-	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput;
+	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && !ImGui::GetIO().WantTextInput;
 	auto *canvas = static_cast<MissionCanvas *>(half());
 	// An Esc while a press is down is the canvas's (it cancels the press, the tool kept).
 	const bool stop = tool != MissionTool::Select && focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&

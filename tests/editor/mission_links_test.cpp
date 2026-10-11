@@ -3,7 +3,9 @@
 // documents/mission_links: what an event, a trigger or an action names in the mission's space, as the game finds
 // it (an SSN's first holder in pool order, a zone's first area, a path's stops, a group's members, a stop by its
 // number, the numbered 6088 markers), the distances the near, line-of-sight and sees triggers test, and how many
-// events name each record, counted once a state of the document; over the minted mission with a third event, a
+// events name each record, counted once a state of the document (and the events a badge's hover lists); what a
+// pick takes from a mark (a record naming another refused with the record the game finds first, a path picked at a
+// stop setting the stop too) and the group New group hands out; over the minted mission with a third event, a
 // second zone 20, a second holder of the walker's SSN and two numbered markers authored on top.
 //
 // S0: the pick a board chip asks of the views (the workspace's document `pick`, session/workspace_parts): a
@@ -21,6 +23,8 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_links.h>
 #include <editor/documents/mission_table.h>
+#include <editor/preview/canvas_gesture.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -100,6 +104,32 @@ int test_pick() {
 	TEST_EXPECT(!session.view().workspace.document(path).pick.active());
 	entry = document_entry(session.view(), path);
 	TEST_EXPECT(entry.get("pick") && entry.get("pick")->is_null());
+	// S24: a stop removed that a record names by its place: the record keeps that number, and the status line counts
+	// it (the organic walking path 1 from its stop 1, that stop taken out).
+	{
+		const NodeAddress walker{organic->id, organic->kind, 0};
+		Edit walks;
+		walks.address = walker;
+		walks.field = "waypoint_id";
+		walks.value = int64_t(1);
+		Edit from = walks;
+		from.field = "wp_number";
+		from.value = int64_t(1);
+		session.handle(request::edit_record(path, {walks, from}));
+		TEST_EXPECT(session.outcome().done());
+		const Node *route = mission->rows_of(MissionKind::WaypointPath)[1];
+		const std::vector<Document::Collection> stops = mission->collections_of({route->id, route->kind, 0});
+		TEST_EXPECT(!stops.empty() && stops[0].ids.size() > 2);
+		Edit taken;
+		taken.operation = EditOperation::Remove;
+		taken.address = {route->id, node_kind(MissionKind::Stop), stops[0].ids[1]};
+		session.handle(request::edit_record(path, {taken}));
+		TEST_EXPECT(session.outcome().done());
+		const std::string &status = session.view().activity.status;
+		TEST_EXPECT(status.find("1 record named a removed stop by its place and keeps that number") != std::string::npos);
+		Value start;
+		TEST_EXPECT(mission->get(walker, "wp_number", start) && std::get<int64_t>(start) == 1);
+	}
 	return 0;
 }
 
@@ -242,6 +272,24 @@ int test_links() {
 	TEST_EXPECT(near.subject == walker.row && near.other == guard.row && near.metres == 25 && !near.sight &&
 	            !near.facing && !near.centres && near.from == child_at(m, third, MissionKind::Trigger, 0));
 	TEST_EXPECT(sees.subject == walker.row && sees.metres == 40 && sees.sight && sees.facing && sees.centres);
+	TEST_EXPECT(!near.player && !sees.player);
+	// The metres the game compares: param3's low 16 bits, signed (the call's << 16): 32778 is negative (no distance
+	// within it), 65546 wraps to 10.
+	{
+		Fixture g;
+		TEST_EXPECT(g.load());
+		const MissionDocument &n = as_mission(*g.document);
+		const NodeAddress reach = child_at(n, row_at(n, MissionKind::Event, 2), MissionKind::Trigger, 0);
+		Diagnostic error;
+		for (const auto &[authored, compared] : {std::pair<int64_t, int64_t>{32778, -32758}, {65546, 10}}) {
+			Edit edit;
+			edit.address = reach;
+			edit.field = "param3";
+			edit.value = authored;
+			TEST_EXPECT(g.document->apply({edit}, error));
+			TEST_EXPECT(mission_links(n, reach).reaches.size() == 1 && mission_links(n, reach).reaches[0].metres == compared);
+		}
+	}
 	// The player's SSN names no record; zone 30 its area.
 	const MissionLink *player = nullptr, *zone = nullptr;
 	for (const MissionLink &link : three.links) {
@@ -301,6 +349,10 @@ int test_counts() {
 	TEST_EXPECT(counts.events(row_at(m, MissionKind::WaypointPath, 1).row) == 1 && counts.events(row_at(m, MissionKind::Marker, 2).row) == 1);
 	TEST_EXPECT(counts.events(row_at(m, MissionKind::Marker, 5).row) == 1 && counts.events(row_at(m, MissionKind::Marker, 6).row) == 1);
 	TEST_EXPECT(counts.events(row_at(m, MissionKind::Marker, 0).row) == 0);
+	// The events a badge counts are the ones its hover lists (S24): each once, in their order.
+	TEST_EXPECT(counts.namers(walker.row).size() == counts.events(walker.row) &&
+	            counts.namers(row_at(m, MissionKind::Marker, 6).row) == std::vector<NodeId>{row_at(m, MissionKind::Event, 2).row} &&
+	            counts.namers(row_at(m, MissionKind::Marker, 0).row).empty());
 	TEST_EXPECT(counts.group_events(1) == 1 && counts.group_events(2) == 1 && counts.group_events(3) == 0 && counts.group_events(0) == 0);
 	// The same state counts nothing again; an edit counts anew.
 	counts.follow(m);
@@ -360,23 +412,71 @@ int test_pick_values() {
 	TEST_EXPECT(mission_pick_slot(m, child_at(m, second, MissionKind::Action, 0), 0, slot) && slot.kind == mission::ParamKind::Group &&
 	            mission_pick_value(m, slot, walker, value) && value == 1 &&
 	            !mission_pick_value(m, slot, row_at(m, MissionKind::Item, 0), value));
-	// Event 3's redirect: the path a stop's marker is on, and the stop's place on the record's path (path 1).
+	// A record whose value names another (S24): the item carrying the walker's SSN, the second area of zone 20, each
+	// refused with the record the game finds first.
+	std::string refusal;
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, first, MissionKind::Trigger, 0), 0, slot) &&
+	            !mission_pick_value(m, slot, row_at(m, MissionKind::Item, 3), value, &refusal) &&
+	            refusal == "SSN " + std::to_string(f.walker) + " names " + m.record_title(walker) + ", which the game finds first.");
+	refusal.clear();
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, first, MissionKind::Trigger, 0), 1, slot) &&
+	            !mission_pick_value(m, slot, row_at(m, MissionKind::Area, 2), value, &refusal) &&
+	            refusal == "Zone id 20 names " + m.record_title(zone20) + ", which the game finds first.");
+	// Event 3's redirect: the path a stop's marker is on, with the stop's place for its stop slot (param3), and the
+	// stop's place on the record's path (path 1).
 	const NodeAddress redirect = child_at(m, third, MissionKind::Action, 0);
-	TEST_EXPECT(mission_pick_slot(m, redirect, 1, slot) && slot.kind == mission::ParamKind::Path &&
+	TEST_EXPECT(mission_pick_slot(m, redirect, 1, slot) && slot.kind == mission::ParamKind::Path && slot.node_slot == 2 &&
 	            mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 3), value) && value == 1 &&
 	            !mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 4), value));
+	int64_t place = -1;
+	TEST_EXPECT(mission_pick_node(m, slot, row_at(m, MissionKind::Marker, 3), place) && place == 3 &&
+	            !mission_pick_node(m, slot, row_at(m, MissionKind::Marker, 4), place));
+	// The pick's frame over two marks: the path picked at marker 3's stop sets its stop slot to that stop in the same
+	// batch (one request, two Sets), then the pick ended; marker 4 (on no path) fills nothing.
+	{
+		struct Collect : CanvasRequests {
+			std::vector<EditorRequest> got;
+			void request(EditorRequest request) override { got.push_back(std::move(request)); }
+		} collect;
+		const MissionPickFrame pick = mission_pick_frame(m, redirect, 1, {row_at(m, MissionKind::Marker, 3), row_at(m, MissionKind::Marker, 4)});
+		TEST_EXPECT(pick.fills_mark(0) && !pick.fills_mark(1) && pick.nodes.size() == 2 && pick.nodes[0] == 3);
+		mission_pick_requests("missions/logic.bms", pick, 0, collect);
+		TEST_EXPECT(collect.got.size() == 2 && collect.got[0].edits.size() == 2 && collect.got[0].edits[0].field == "param2" &&
+		            collect.got[0].edits[1].field == "param3" && std::get<int64_t>(collect.got[0].edits[1].value) == 3 &&
+		            collect.got[1].kind == EditorRequestKind::SetWorkspace);
+		// Over a mark that names another record, the hint says why.
+		const MissionPickFrame teleport =
+		        mission_pick_frame(m, child_at(m, third, MissionKind::Action, 1), 1, {row_at(m, MissionKind::Marker, 6)});
+		TEST_EXPECT(!teleport.fills_mark(0) &&
+		            mission_pick_hint(teleport, 0).find("which the game finds first. Click another (Esc cancels).") != std::string::npos &&
+		            mission_pick_hint(teleport, -1) == "Click a numbered marker (record type 6088) for Teleport target (Esc cancels).");
+	}
 	TEST_EXPECT(mission_pick_slot(m, redirect, 2, slot) && slot.kind == mission::ParamKind::PathNode && slot.path == 1 &&
-	            slot.what == "a stop of path 1" && mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 2), value) && value == 2);
-	// The teleport's target: a numbered marker's wp_number; a waypoint marker gives none.
-	TEST_EXPECT(mission_pick_slot(m, child_at(m, third, MissionKind::Action, 1), 1, slot) &&
-	            slot.kind == mission::ParamKind::TeleportTarget && mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 6), value) &&
-	            value == 7 && !mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 0), value));
+	            slot.node_slot == -1 && slot.what == "a stop of path 1" &&
+	            mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 2), value) && value == 2);
+	// The teleport's target: the first numbered marker of its number (the teleport finds it); the second refused,
+	// the effect's taking either (it plays at each); a waypoint marker gives none.
+	refusal.clear();
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, third, MissionKind::Action, 1), 1, slot) && !slot.every_marker &&
+	            slot.kind == mission::ParamKind::TeleportTarget && mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 5), value) &&
+	            value == 7 && !mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 6), value, &refusal) &&
+	            !mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 0), value));
+	TEST_EXPECT(refusal == "Marker number 7 names " + m.record_title(row_at(m, MissionKind::Marker, 5)) +
+	                               ", which the game finds first.");
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, third, MissionKind::Action, 2), 0, slot) && slot.every_marker &&
+	            mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 6), value) && value == 7);
 	// Refused: a record that is no trigger or action, a slot past 3.
 	TEST_EXPECT(!mission_pick_slot(m, walker, 0, slot) && !mission_pick_slot(m, redirect, 4, slot));
 	TEST_EXPECT(std::string(mission_param_field(2)) == "param3" && std::string(mission_param_field(4)).empty());
 	// B3: what a dropped record gives a reference field: an entity its SSN, an area its zone, a path its number,
 	// an event its index, a group record its index; another kind nothing.
 	TEST_EXPECT(mission_record_value(m, walker, ReferenceKind::MissionEntity, value) && value == f.walker);
+	refusal.clear();
+	TEST_EXPECT(!mission_record_value(m, row_at(m, MissionKind::Item, 3), ReferenceKind::MissionEntity, value, &refusal) &&
+	            refusal.find("which the game finds first") != std::string::npos);
+	refusal.clear();
+	TEST_EXPECT(!mission_record_value(m, row_at(m, MissionKind::Area, 2), ReferenceKind::MissionZone, value, &refusal) &&
+	            refusal.find("Zone id 20 names") == 0);
 	TEST_EXPECT(!mission_record_value(m, walker, ReferenceKind::MissionZone, value) &&
 	            !mission_record_value(m, walker, ReferenceKind::MissionGroup, value));
 	TEST_EXPECT(mission_record_value(m, zone20, ReferenceKind::MissionZone, value) && value == 20);
@@ -404,6 +504,28 @@ int test_pick_values() {
 	const NodeAddress group2 = mission_links(m, second).links[1].record;
 	TEST_EXPECT(mission_record_value(m, group2, ReferenceKind::MissionGroup, value) && value == 2 &&
 	            !mission_record_value(m, group2, ReferenceKind::MissionEntity, value));
+	// New group: the lowest group no entity carries (1 and 2 carried), no event names and no name is given; one an
+	// event names is skipped, as a named one.
+	TEST_EXPECT(mission_fresh_group(m) == 3);
+	Edit names_three;
+	names_three.address = child_at(m, second, MissionKind::Action, 0);
+	names_three.field = "param1";
+	names_three.value = int64_t(3);
+	Diagnostic error;
+	TEST_EXPECT(f.document->apply({names_three}, error) && mission_fresh_group(m) == 4);
+	{
+		const std::vector<uint8_t> bytes =
+		        test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
+		bms::File file;
+		std::string why;
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, why) && file.group_records.size() > 3 &&
+		            bms::set_group_name(file.group_records[3], "Reserve", why) && bms::write(file, out, why));
+		const std::unique_ptr<Document> named = open(out);
+		TEST_EXPECT(named && mission_fresh_group(as_mission(*named)) == 4);
+	}
+	// The player's starts: none in this mission (no marker of the start types).
+	TEST_EXPECT(mission_player_starts(m).empty());
 	return 0;
 }
 

@@ -200,8 +200,15 @@ func test_a_click_on_the_picture_picks_for_a_chip() -> void:
 	var picked := _trigger()
 	var values: Dictionary = picked.get("values", {})
 	assert_false(_pick_waits(), "the click ended the pick")
-	assert_ne(int(values.get(0, 0)), int(trigger.get("values", {}).get(0, 0)),
-			"the trigger names another entity now: %s (the item clicked %d)" % [str(values), int(target["id"])])
+	# The trigger's entity is the clicked item's SSN (its record's `id` field).
+	var ssn := -1
+	var record: Dictionary = _seam.query("record", {"path": MISSION_PATH, "id": int(target["id"])})
+	for field: Variant in record.get("fields", []):
+		if String((field as Dictionary).get("id", "")) == "id":
+			ssn = int((field as Dictionary).get("value", -1))
+	assert_gt(ssn, 0, "the clicked item's SSN: %s" % str(record.get("fields", [])).left(200))
+	assert_eq(int(values.get(0, 0)), ssn,
+			"the trigger names the item clicked (record %d) by its SSN: %s" % [int(target["id"]), str(values)])
 
 
 ## The group colour of the editor's palette (mission_overlay.cpp's mission_group_rgb: the golden angle a group, three

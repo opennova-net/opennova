@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <unordered_set>
+#include <utility>
 
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_reads.h>
@@ -191,8 +193,10 @@ size_t mission_stop_place(const MissionScene &scene, int path, float x, float y,
 
 std::vector<NodeAddress> mission_view_removals(const MissionDocument &document, const std::vector<NodeAddress> &records) {
 	std::vector<NodeAddress> out;
+	// Each record once, in the order met (a set beside the list: a Delete of thousands stays linear).
+	std::set<std::pair<NodeId, NodeId>> seen;
 	const auto add = [&](const NodeAddress &record) {
-		if (std::find(out.begin(), out.end(), record) == out.end()) out.push_back(record);
+		if (seen.emplace(record.row, record.child).second) out.push_back(record);
 	};
 	for (const NodeAddress &record : records) {
 		if (record.child && record.kind == node_kind(MissionKind::Stop)) {

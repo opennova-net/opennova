@@ -677,8 +677,9 @@ MissionCanvasFrame MissionViewport::canvas_frame(const ViewportContext &context)
 	frame.document = reason_ == MissionViewStatus::Ready ? document_of(input) : nullptr;
 	frame.current = frame.document && current(input);
 	frame.marks = marks(context.width, context.height, context.device);
-	// S24 pick mode: the slot the workspace's pick names, each mark's value for it.
-	if (frame.current && frame.editable) {
+	// S24 pick mode: the slot the workspace's pick names, each mark's value for it; held (shown, no mark filling it)
+	// while the context takes no edits.
+	if (frame.current) {
 		const auto shown = input.view.workspace.documents.find(frame.document->path());
 		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(frame.document);
 		if (mission && shown != input.view.workspace.documents.end() && shown->second.pick.active()) {
@@ -686,6 +687,7 @@ MissionCanvasFrame MissionViewport::canvas_frame(const ViewportContext &context)
 			records.reserve(frame.marks.size());
 			for (const MissionMark &mark : frame.marks) records.push_back(mark.record);
 			frame.pick = mission_pick_frame(*mission, shown->second.pick.record, shown->second.pick.slot, records);
+			if (!frame.editable) frame.pick.hold(frame.not_editable);
 		}
 	}
 	const Selection *selection = frame.current ? selection_of(input, *frame.document) : nullptr;

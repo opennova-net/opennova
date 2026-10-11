@@ -250,13 +250,18 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 			return mission_project_segment(camera, in.width, in.height, mission_scene_point(a[0], a[1], a[2]),
 					mission_scene_point(b[0], b[1], b[2]), from, to);
 		};
-		// A sphere's outline seen from the eye: its apparent radius, f r / sqrt(d^2 - r^2) (none from inside it).
+		// A sphere's outline seen from the eye: the silhouette cone's half-angle a, sin a = r / d at the eye distance d,
+		// drawn as the circle of its projection's minor semi-axis, f tan(a) d / z at the centre's depth z (f r / sqrt(d^2
+		// - r^2) straight ahead; none from inside it).
 		const float focal = camera.focal(in.width);
+		const PreviewVec3 eye = camera.eye();
 		view.outline = [&](const std::array<double, 3> &at, double metres) {
+			const PreviewVec3 centre = mission_scene_point(at[0], at[1], at[2]);
 			float x = 0.0f, y = 0.0f, depth = 0.0f;
-			if (!camera.project(mission_scene_point(at[0], at[1], at[2]), in.width, in.height, x, y, &depth)) return 0.0f;
-			const double d = double(depth), r = metres;
-			return d > r ? float(double(focal) * r / std::sqrt(d * d - r * r)) : 0.0f;
+			if (!camera.project(centre, in.width, in.height, x, y, &depth) || depth <= 0.0f) return 0.0f;
+			const double dx = double(centre.x - eye.x), dy = double(centre.y - eye.y), dz = double(centre.z - eye.z);
+			const double d = std::sqrt(dx * dx + dy * dy + dz * dz), r = metres;
+			return d > r ? float(double(focal) * r * d / (double(depth) * std::sqrt(d * d - r * r))) : 0.0f;
 		};
 		view.area_height = [&](const MissionLinkSpot &spot) {
 			return spot.area_index >= 0 && size_t(spot.area_index) < scene.areas().size()

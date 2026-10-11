@@ -8,7 +8,10 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
+#include <base/gameprofile/game_type.h>
 #include <formats/mission/bms.h>
+#include <formats/mission/mission.h>
+#include <runtime/world/spawn_select.h>
 
 namespace opennova::editor {
 
@@ -18,13 +21,17 @@ namespace {
 
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
-// The record type of the markers a teleport, an effect and a teammate's pickup find by their wp_number
-// [orig: EventAction_SpawnParticleEffect @0x4540e0, `result[20] == 6088`].
-constexpr int32_t kNumberedMarkerType = 6088;
-
-// The groups' list on the mission row: the loadout, the availability rules, then the groups
-// (mission_table's lists, in their order).
-constexpr size_t kGroupsList = 2;
+// The record of group `group` on the mission row's list of groups, found by its kind among the row's lists
+// (none past the list).
+NodeAddress group_record(const MissionDocument &document, int64_t group) {
+	const MissionRow *mission = document.mission_row();
+	if (!mission || group < 0) return NodeAddress();
+	for (const Document::Collection &list : document.collections_of({mission->id, mission->kind, 0}))
+		if (list.spec.kind == k(MissionKind::Group))
+			return size_t(group) < list.ids.size() ? NodeAddress{mission->id, k(MissionKind::Group), list.ids[size_t(group)]}
+			                                       : NodeAddress();
+	return NodeAddress();
+}
 
 // The sub-types of a Single trigger that test a distance between two entities [orig:
 // EventTrigger_EvaluateCondition @0x453620: cat 2 cases 43 @0x453842, 44 @0x45388c, 45 @0x4538d6].
@@ -79,9 +86,7 @@ bool resolve(const MissionDocument &document, ParamKind kind, int64_t value, boo
 	}
 	case ParamKind::Group: {
 		if (mission::group_names_none(value) || value < 0 || value >= int64_t(bms::kGroupRecordCount)) return true;
-		const MissionRow *mission = document.mission_row();
-		if (mission && mission->ids.lists.size() > kGroupsList && size_t(value) < mission->ids.lists[kGroupsList].size())
-			out.record = {mission->id, k(MissionKind::Group), mission->ids.lists[kGroupsList][size_t(value)].id};
+		out.record = group_record(document, value);
 		out.rows = mission_group_rows(document, value);
 		return true;
 	}
@@ -152,8 +157,9 @@ void link_record(const MissionDocument &document, const NodeAddress &from, const
 		MissionReach reach;
 		reach.from = from;
 		reach.subject = document.entity_holder(record.param1);
+		reach.player = !reach.subject && mission::ssn_is_players(record.param1);
 		reach.other = document.entity_holder(record.param2);
-		reach.metres = record.param3;
+		reach.metres = int64_t(int16_t(uint16_t(uint32_t(record.param3) & 0xFFFFu)));
 		reach.sight = record.sub_type != kNear;
 		reach.facing = reach.centres = record.sub_type == kSees;
 		out.reaches.push_back(reach);
@@ -213,7 +219,8 @@ std::vector<NodeAddress> mission_group_members(const MissionDocument &document, 
 	return out;
 }
 
-bool mission_record_value(const MissionDocument &document, const NodeAddress &record, ReferenceKind kind, int64_t &value) {
+bool mission_record_value(const MissionDocument &document, const NodeAddress &record, ReferenceKind kind, int64_t &value,
+		std::string *refusal) {
 	// What the record is to a parameter (mission_uses' reading), taken where the reference names that kind.
 	ParamKind is = ParamKind::Unused;
 	int64_t held = 0;
@@ -225,15 +232,40 @@ bool mission_record_value(const MissionDocument &document, const NodeAddress &re
 	                            : is == ParamKind::Group ? ReferenceKind::MissionGroup
 	                                                     : ReferenceKind::None;
 	if (names != kind) return false;
+	// The value names the record the game's lookup finds first: another one, refused.
+	const NodeId holder = is == ParamKind::Entity ? document.entity_holder(held)
+	                      : is == ParamKind::Zone ? document.zone_holder(held)
+	                                              : record.row;
+	if (holder != record.row) {
+		if (refusal) {
+			const Node *first = document.row(holder);
+			*refusal = std::string(is == ParamKind::Entity ? "SSN " : "Zone id ") + std::to_string(held) + " names " +
+			           (first ? document.record_title({first->id, first->kind, 0}) : std::string("another record")) +
+			           ", which the game finds first.";
+		}
+		return false;
+	}
 	value = held;
 	return true;
 }
 
-NodeAddress mission_group_address(const MissionDocument &document, int64_t group) {
+NodeAddress mission_group_address(const MissionDocument &document, int64_t group) { return group_record(document, group); }
+
+int64_t mission_fresh_group(const MissionDocument &document) {
+	// The groups some event's trigger or action names.
+	std::vector<char> named(bms::kGroupRecordCount, 0);
+	for (const Node *event : document.rows_of(MissionKind::Event))
+		for (const MissionLink &link : mission_links(document, {event->id, event->kind, 0}).links)
+			if (link.kind == ParamKind::Group && link.value > 0 && link.value < int64_t(named.size())) named[size_t(link.value)] = 1;
 	const MissionRow *mission = document.mission_row();
-	if (!mission || group < 0 || mission->ids.lists.size() <= kGroupsList || size_t(group) >= mission->ids.lists[kGroupsList].size())
-		return NodeAddress();
-	return {mission->id, k(MissionKind::Group), mission->ids.lists[kGroupsList][size_t(group)].id};
+	for (int64_t group = 1; group < int64_t(bms::kGroupRecordCount); ++group) {
+		if (document.group_members(group) || named[size_t(group)]) continue;
+		if (mission && size_t(group) < mission->native.group_records.size() &&
+		    !bms::group_name(mission->native.group_records[size_t(group)]).empty())
+			continue;
+		return group;
+	}
+	return -1;
 }
 
 std::vector<MissionSubject> mission_subjects(const MissionDocument &document, const NodeAddress &record) {
@@ -288,6 +320,9 @@ bool mission_pick_slot(const MissionDocument &document, const NodeAddress &recor
 		for (int i = 0; i < 4; ++i) params[i] = param_of(trigger, i);
 		for (int i = 0; i < 4; ++i)
 			if (mission::trigger_param_kind(trigger, i) == ParamKind::Path && out.path < 0) out.path = params[i];
+		if (const mission::ParamRow *type = mission::trigger_params(int32_t(trigger.main_type), trigger.sub_type))
+			for (int i = 0; i < 4 && out.node_slot < 0; ++i)
+				if (type->p[i] == ParamKind::PathNode) out.node_slot = i;
 	} else if (record.kind == k(MissionKind::Action) && at.index < event.native.actions.size()) {
 		const bms::Action &action = event.native.actions[at.index];
 		out.kind = mission::action_param_kind(action, slot);
@@ -295,10 +330,18 @@ bool mission_pick_slot(const MissionDocument &document, const NodeAddress &recor
 		for (int i = 0; i < 4; ++i) params[i] = param_of(action, i);
 		for (int i = 0; i < 4; ++i)
 			if (mission::action_param_kind(action, i) == ParamKind::Path && out.path < 0) out.path = params[i];
+		// The stop slot its type's row reads beside a path (a Redirect's third parameter names a stop once its
+		// waypoint list is a path, not a command).
+		if (const mission::ParamRow *type = mission::action_params(int32_t(action.action_type), action.action_sub_type))
+			for (int i = 0; i < 4 && out.node_slot < 0; ++i)
+				if (type->p[i] == ParamKind::PathNode) out.node_slot = i;
+		// An effect plays at every numbered marker of its number; a teleport and a teammate's pickup find the first.
+		out.every_marker = action.action_type == bms::ActionType::ParticleEffectAction;
 	} else {
 		return false;
 	}
 	if (out.kind != ParamKind::PathNode) out.path = -1;
+	if (out.kind != ParamKind::Path) out.node_slot = -1;
 	out.marks = true;
 	switch (out.kind) {
 	case ParamKind::Entity: out.what = "an entity"; break;
@@ -321,36 +364,60 @@ bool mission_pick_slot(const MissionDocument &document, const NodeAddress &recor
 }
 
 bool mission_pick_value(const MissionDocument &document, const MissionPickSlot &slot, const NodeAddress &record,
-		int64_t &value) {
+		int64_t &value, std::string *refusal) {
 	if (!slot.marks || record.child) return false;
 	const Node *row = document.row(record.row);
 	if (!row) return false;
 	const bool entity = is_entity_kind(row->kind);
+	// A value that names another record than this one: refused with the record the game finds.
+	const auto names_another = [&](const std::string &what, NodeId holder) {
+		if (refusal) {
+			const Node *first = document.row(holder);
+			*refusal = what + " names " + (first ? document.record_title({first->id, first->kind, 0}) : std::string("another record")) +
+			           ", which the game finds first.";
+		}
+		return false;
+	};
 	switch (slot.kind) {
-	case ParamKind::Entity:
+	case ParamKind::Entity: {
 		if (!entity) return false;
 		value = static_cast<const EntityRow &>(*row).native.id;
+		const NodeId holder = document.entity_holder(value);
+		if (holder != row->id) return names_another("SSN " + std::to_string(value), holder);
 		return true;
-	case ParamKind::Zone:
+	}
+	case ParamKind::Zone: {
 		if (row->kind != k(MissionKind::Area)) return false;
 		value = static_cast<const AreaRow &>(*row).native.id;
+		const NodeId holder = document.zone_holder(value);
+		if (holder != row->id) return names_another("Zone id " + std::to_string(value), holder);
 		return true;
+	}
 	case ParamKind::Group:
 		if (!entity || mission::group_names_none(static_cast<const EntityRow &>(*row).native.group_id)) return false;
 		value = static_cast<const EntityRow &>(*row).native.group_id;
 		return true;
-	case ParamKind::Path:
+	case ParamKind::Path: {
+		if (row->kind != k(MissionKind::Marker)) return false;
+		const std::vector<MissionDocument::StopPlace> &stops = document.stops_of(*row);
+		if (stops.empty()) return false;
+		value = stops.front().path;
+		return true;
+	}
 	case ParamKind::PathNode: {
 		if (row->kind != k(MissionKind::Marker)) return false;
-		const size_t marker = document.index_of(*row);
-		for (const Node *path : document.rows_of(MissionKind::WaypointPath)) {
-			const PathRow &each = static_cast<const PathRow &>(*path);
-			if (slot.kind == ParamKind::PathNode && each.native.number != slot.path) continue;
-			for (size_t stop = 0; stop < each.native.stops.size(); ++stop)
-				if (each.native.stops[stop] == marker) {
-					value = slot.kind == ParamKind::Path ? int64_t(each.native.number) : int64_t(stop);
-					return true;
-				}
+		for (const MissionDocument::StopPlace &stop : document.stops_of(*row)) {
+			if (stop.path != slot.path) continue;
+			// A path's record holds 32 stops: the game reads no place past them (an AtWaypoint's bit is never
+			// recorded, a Redirect's node reads past the slots).
+			if (stop.place >= mission::kMaxWaypointPathMarkers) {
+				if (refusal)
+					*refusal = "Stop " + std::to_string(stop.place) + " of path " + std::to_string(stop.path) + " is past the " +
+					           std::to_string(mission::kMaxWaypointPathMarkers) + " stops a path's record holds.";
+				return false;
+			}
+			value = int64_t(stop.place);
+			return true;
 		}
 		return false;
 	}
@@ -360,16 +427,30 @@ bool mission_pick_value(const MissionDocument &document, const MissionPickSlot &
 		const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
 		if (marker.type_id != kNumberedMarkerType) return false;
 		value = marker.wp_number;
+		const NodeId holder = document.numbered_holder(value);
+		if (!slot.every_marker && holder != row->id) return names_another("Marker number " + std::to_string(value), holder);
 		return true;
 	}
 	default: return false;
 	}
 }
 
+bool mission_pick_node(const MissionDocument &document, const MissionPickSlot &slot, const NodeAddress &record,
+		int64_t &place) {
+	if (slot.kind != ParamKind::Path || slot.node_slot < 0 || record.child) return false;
+	const Node *row = document.row(record.row);
+	if (!row || row->kind != k(MissionKind::Marker)) return false;
+	const std::vector<MissionDocument::StopPlace> &stops = document.stops_of(*row);
+	if (stops.empty() || stops.front().place >= mission::kMaxWaypointPathMarkers) return false;
+	place = int64_t(stops.front().place);
+	return true;
+}
+
 std::vector<NodeId> mission_reveal_rows(const MissionDocument &document, const NodeAddress &record) {
 	std::vector<NodeId> out;
+	std::unordered_set<NodeId> seen; // each row once, in the order met
 	const auto add = [&](NodeId row) {
-		if (row && std::find(out.begin(), out.end(), row) == out.end()) out.push_back(row);
+		if (row && seen.insert(row).second) out.push_back(row);
 	};
 	const Node *row = document.row(record.row);
 	if (!row) return out;
@@ -409,6 +490,22 @@ std::vector<NodeId> mission_reveal_rows(const MissionDocument &document, const N
 	return out;
 }
 
+std::vector<NodeId> mission_player_starts(const MissionDocument &document) {
+	std::vector<NodeId> out;
+	const MissionRow *mission = document.mission_row();
+	if (!mission) return out;
+	const uint32_t mode = game_type::for_mission_attribs(uint32_t(mission->native.header.attrib_flags));
+	const world::StartMarkerTypes starts = world::start_marker_types(mode, 1);
+	const std::vector<const Node *> markers = document.rows_of(MissionKind::Marker);
+	for (const int32_t type : {starts.primary, starts.fallback}) {
+		if (type == 0) continue;
+		for (const Node *row : markers)
+			if (static_cast<const EntityRow &>(*row).native.type_id == type) out.push_back(row->id);
+		if (!out.empty()) break;
+	}
+	return out;
+}
+
 bool mission_logic_record(const NodeAddress &record) {
 	if (!record.row) return false;
 	if (!record.child) return record.kind == k(MissionKind::Event);
@@ -437,7 +534,7 @@ void MissionLinkCounts::follow(const MissionDocument &document) {
 	load_ = document.load_generation();
 	revision_ = document.revision();
 	++made_;
-	std::unordered_map<NodeId, size_t> rows;
+	std::unordered_map<NodeId, std::vector<NodeId>> rows;
 	groups_.assign(bms::kGroupRecordCount, 0);
 	for (const Node *node : document.rows_of(MissionKind::Event)) {
 		MissionLinks links = mission_links(document, NodeAddress{node->id, node->kind, 0});
@@ -454,17 +551,23 @@ void MissionLinkCounts::follow(const MissionDocument &document) {
 			if (link.kind == ParamKind::WpNumber || link.kind == ParamKind::TeleportTarget)
 				named.insert(link.rows.begin(), link.rows.end());
 		}
-		for (const NodeId row : named) ++rows[row];
+		for (const NodeId row : named) rows[row].push_back(node->id);
 		for (size_t g = 0; g < grouped.size(); ++g) groups_[g] += size_t(grouped[g]);
 	}
-	rows_.assign(rows.begin(), rows.end());
-	std::sort(rows_.begin(), rows_.end());
+	rows_.clear();
+	rows_.reserve(rows.size());
+	for (auto &[row, events] : rows) rows_.emplace_back(row, std::move(events));
+	std::sort(rows_.begin(), rows_.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
 }
 
-size_t MissionLinkCounts::events(NodeId row) const {
-	const auto found = std::lower_bound(rows_.begin(), rows_.end(), std::make_pair(row, size_t(0)));
-	return found != rows_.end() && found->first == row ? found->second : 0;
+const std::vector<NodeId> &MissionLinkCounts::namers(NodeId row) const {
+	static const std::vector<NodeId> kNone;
+	const auto found = std::lower_bound(rows_.begin(), rows_.end(), row,
+	                                    [](const auto &each, NodeId id) { return each.first < id; });
+	return found != rows_.end() && found->first == row ? found->second : kNone;
 }
+
+size_t MissionLinkCounts::events(NodeId row) const { return namers(row).size(); }
 
 size_t MissionLinkCounts::group_events(int64_t group) const {
 	return group >= 0 && size_t(group) < groups_.size() ? groups_[size_t(group)] : 0;

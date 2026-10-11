@@ -465,6 +465,56 @@ static int test_area_handles() {
 	drag.id = first_of(mission, MissionKind::Item).row;
 	drag.handle = "x_min";
 	TEST_EXPECT(!rig.map()->drag(context, drag, gathered, error));
+	// Esc mid-drag of the primary area's east edge on the canvas: what the drag wrote goes back where the press found it.
+	{
+		rig.session.handle(request::select_record(kMission, zone));
+		rig.pump();
+		const ViewportContext now = rig.context();
+		std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+		editor_test::Gathered got;
+		half->follow(*rig.map(), now, got);
+		const MissionMapView seen = rig.map()->view(now.width, now.height);
+		double ex = 0.0, ny = 0.0;
+		TEST_EXPECT(mission_map_handle_point(held, MissionHandle::XMax, ex, ny));
+		CanvasInput in;
+		in.width = now.width;
+		in.height = now.height;
+		in.hovered = true;
+		in.keyboard.focused = true;
+		seen.project(ex, ny, in.mouse.x, in.mouse.y);
+		in.screen = in.mouse;
+		const auto step = [&](CanvasInput frame) {
+			got.requests.clear();
+			half->follow(*rig.map(), rig.context(), got);
+			got.requests.clear();
+			half->input(rig.context(), frame, got);
+			return got.requests;
+		};
+		CanvasInput press = in;
+		press.pressed = true;
+		press.down = true;
+		step(press);
+		CanvasInput moved = in;
+		moved.down = true;
+		moved.mouse.x += 40.0f;
+		moved.screen = moved.mouse;
+		std::vector<EditorRequest> wrote = step(moved);
+		TEST_EXPECT(!wrote.empty() && editor_test::serve(rig.session, wrote));
+		rig.pump();
+		MissionPressed dragged;
+		TEST_EXPECT(rig.map()->pressed(zone, dragged) && dragged.max[0] > held.max[0] + 1.0);
+		CanvasInput escaped = moved;
+		escaped.keyboard.escape = true;
+		std::vector<EditorRequest> undone = step(escaped);
+		bool restored = false;
+		for (const EditorRequest &request : undone)
+			for (const Edit &edit : request.edits)
+				restored = restored || (edit.field == "x_max" && near(std::get<double>(edit.value), held.max[0], 1e-6));
+		TEST_EXPECT(restored);
+		TEST_EXPECT(editor_test::serve(rig.session, undone));
+		rig.pump();
+		TEST_EXPECT(rig.map()->pressed(zone, dragged) && near(dragged.max[0], held.max[0], 1e-6));
+	}
 	std::printf("test_area_handles passed\n");
 	return 0;
 }
@@ -575,6 +625,43 @@ static int test_keys() {
 		for (const Edit &edit : request.edits)
 			east = east || (edit.field == "x" && std::fabs(std::get<double>(edit.value) - (held.x + double(rig.map()->options().snap))) < 1e-3);
 	TEST_EXPECT(east);
+	// Up moves north up the picture and Down south (arrow_y is +1 for Down); a RotateMap180 mission's map the other
+	// way. Each press on a canvas of its own, so no nudge before it carries over.
+	const double snap = double(rig.map()->options().snap);
+	const auto nudged_y = [&](int arrow_y) {
+		std::unique_ptr<CanvasHalf> fresh = rig.map()->make_canvas();
+		editor_test::Gathered got;
+		const ViewportContext now = rig.context();
+		fresh->follow(*rig.map(), now, got);
+		CanvasInput frame = in;
+		frame.width = now.width;
+		frame.height = now.height;
+		frame.keyboard.arrow_y = arrow_y;
+		frame.keyboard.arrow_held = true;
+		got.requests.clear();
+		fresh->input(now, frame, got);
+		for (const EditorRequest &request : got.requests)
+			for (const Edit &edit : request.edits)
+				if (edit.field == "y") return std::get<double>(edit.value) - held.y;
+		return 0.0;
+	};
+	TEST_EXPECT(std::fabs(nudged_y(-1) - snap) < 1e-3 && std::fabs(nudged_y(1) + snap) < 1e-3);
+	{
+		Edit turn;
+		turn.operation = EditOperation::Set;
+		turn.address = first_of(*rig.document(), MissionKind::Mission);
+		turn.field = "attrib_flags";
+		turn.value = int64_t(0x20);
+		rig.session.handle(request::edit_record(kMission, turn));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.pump();
+		rig.session.handle(request::select_record(kMission, item));
+		rig.pump();
+		TEST_EXPECT(rig.map()->ground().flip_180);
+		TEST_EXPECT(std::fabs(nudged_y(-1) + snap) < 1e-3 && std::fabs(nudged_y(1) - snap) < 1e-3);
+		rig.session.handle(request::undo(kMission));
+		rig.pump();
+	}
 	std::printf("test_keys passed\n");
 	return 0;
 }

@@ -11,6 +11,6 @@ void draw_mission_row_menu(Workspace &workspace, const Document &document, const
 	mission_space_row_items(workspace, *mission, record);
 }
 
-// The views' items (lane B, S24) are ui/mission_mark_menu.cpp's.
+// The views' items (S24) are ui/mission_mark_menu.cpp's.
 
 } // namespace opennova::editor

@@ -406,6 +406,15 @@ int test_area_edges() {
 			edits.size() == 1 && near(set_of(edits, area, "z_max"), 12.5));
 	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::ZMin, at(0, 0, 20.0).data(), 0.0f, 3, edits) &&
 			edits.size() == 1 && near(set_of(edits, area, "z_min"), 8.0));
+	// Esc mid-drag of the top or the bottom: the restore writes z back where the press found it (S24).
+	{
+		std::vector<MissionPressed> dragged = pressed;
+		dragged[2].min[2] = -3.0;
+		dragged[2].max[2] = 12.5;
+		mission_restore_edits(document, dragged, 5, edits);
+		TEST_EXPECT(edits.size() == 2 && near(set_of(edits, area, "z_min"), -3.0) && near(set_of(edits, area, "z_max"), 12.5) &&
+				edits[0].gesture == 5);
+	}
 	// An entity has no edge; a move is no edge.
 	TEST_EXPECT(!mission_area_handle_edits(document, pressed[0], MissionHandle::XMin, at(1.0, 0, 0).data(), 0.0f, 3, edits));
 	TEST_EXPECT(!mission_area_handle_edits(document, pressed[2], MissionHandle::Move, at(1.0, 0, 0).data(), 0.0f, 3, edits));

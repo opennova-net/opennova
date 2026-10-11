@@ -162,14 +162,11 @@ void group_menu(Workspace &workspace, const MissionDocument &mission, const Node
 		set.keep_selection = true;
 		workspace.request(std::move(set));
 	};
-	int64_t fresh = -1;
+	const int64_t fresh = mission_fresh_group(mission);
 	bool any = false;
 	for (int64_t group = 1; group < 64; ++group) {
 		const size_t members = mission.group_members(group);
-		if (!members) {
-			if (fresh < 0) fresh = group;
-			continue;
-		}
+		if (!members) continue;
 		any = true;
 		const std::string label = capitalized(names.group(group)) + " (" + std::to_string(members) + ")###group" +
 		                          std::to_string(group);
@@ -177,8 +174,8 @@ void group_menu(Workspace &workspace, const MissionDocument &mission, const Node
 	}
 	if (any) ImGui::Separator();
 	if (ImGui::MenuItem("New group", nullptr, false, fresh > 0) && fresh > 0) set_group(fresh);
-	ui_kit::tooltip(fresh > 0 ? "Group " + std::to_string(fresh) + ", the lowest no entity carries."
-	                          : "Every group of the 63 holds an entity.");
+	ui_kit::tooltip(fresh > 0 ? "Group " + std::to_string(fresh) + ", the lowest no entity carries, no event names and no name is given."
+	                          : "Every group of the 63 holds an entity, is named by an event or has a name.");
 	if (ImGui::MenuItem("No group")) set_group(0);
 	ui_kit::tooltip("Group 0: in none (what names a group names no unit of it).");
 	ImGui::EndMenu();

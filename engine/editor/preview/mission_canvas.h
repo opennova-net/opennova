@@ -5,7 +5,6 @@
 #include <vector>
 
 #include <editor/documents/mission_links.h>
-#include <editor/documents/mission_uses.h>
 #include <editor/graph/display_names.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/canvas_half.h>
@@ -198,7 +197,7 @@ private:
 	std::vector<size_t> badges_;
 	MissionLinkCounts counts_;
 	// The hovered record's uses (its badge's words), kept while it, the document and the names stand.
-	mutable MissionUsesCache uses_;
+	mutable MissionLinkHover hover_;
 	MissionTool tool_ = MissionTool::Select;
 	int64_t item_ = 0;
 	std::string item_name_;

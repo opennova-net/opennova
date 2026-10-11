@@ -2,11 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <set>
 
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_recipes.h>
-#include <editor/documents/mission_uses.h>
+#include <editor/documents/mission_sentence.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/view/session_view.h>
@@ -92,17 +91,47 @@ MissionLinkScene mission_link_scene(const MissionDocument &document, const Missi
 		for (size_t a = 0; a < out.spots.size(); ++a)
 			if (!out.spots[a].watched && out.spots[a].record != out.spots[w].record) out.lines.emplace_back(w, a);
 	}
+	// Each reach about its subject: the player's about each of the mission's start markers (its heading theirs); one
+	// of no metres or fewer none (the game's shift leaves a param3 of 32768..65535 negative). Drawn about the subject's
+	// position: 45 measures between the models' bound centres, which the scene does not hold (a model's centre lies
+	// within its bounds, near its position).
+	std::vector<NodeId> starts;
+	bool starts_known = false;
 	for (const MissionReach &reach : links.reaches) {
-		const MissionEntityMark *subject = reach.subject ? scene.entity(reach.subject) : nullptr;
-		if (!subject || reach.metres <= 0) continue;
-		MissionLinkRing ring;
-		ring.at = position_of(*subject);
-		ring.metres = double(reach.metres);
-		ring.facing = reach.facing;
-		ring.yaw = double(subject->yaw);
-		ring.selected = emphasized(reach.from);
-		out.rings.push_back(ring);
+		if (reach.metres <= 0) continue;
+		std::vector<NodeId> subjects;
+		if (reach.player) {
+			if (!starts_known) {
+				starts = mission_player_starts(document);
+				starts_known = true;
+			}
+			subjects = starts;
+		} else if (reach.subject) {
+			subjects.push_back(reach.subject);
+		}
+		for (const NodeId row : subjects) {
+			const MissionEntityMark *subject = scene.entity(row);
+			if (!subject) continue;
+			MissionLinkRing ring;
+			ring.at = position_of(*subject);
+			ring.metres = double(reach.metres);
+			ring.facing = reach.facing;
+			ring.yaw = double(subject->yaw);
+			ring.selected = emphasized(reach.from);
+			out.rings.push_back(ring);
+		}
+		if (reach.player && starts.empty() && reach.other)
+			out.notes.emplace_back(reach.other, "A trigger tests the player within " + std::to_string(reach.metres) +
+					" m of this: the player's place is not known in the editor (the mission has no start marker), so no "
+					"ring is drawn.");
 	}
+	return out;
+}
+
+std::string MissionLinkScene::note(NodeId row) const {
+	std::string out;
+	for (const auto &[at, words] : notes)
+		if (at == row) out += (out.empty() ? "" : "\n") + words;
 	return out;
 }
 
@@ -212,26 +241,54 @@ MissionPickFrame mission_pick_frame(const MissionDocument &document, const NodeA
 	out.slot = slot;
 	out.fills.assign(marks.size(), 0);
 	out.values.assign(marks.size(), 0);
+	out.refusals.assign(marks.size(), std::string());
+	out.nodes.assign(marks.size(), -1);
 	if (!out.takes.marks) return out;
-	for (size_t i = 0; i < marks.size(); ++i) out.fills[i] = mission_pick_value(document, out.takes, marks[i], out.values[i]);
+	for (size_t i = 0; i < marks.size(); ++i) {
+		out.fills[i] = mission_pick_value(document, out.takes, marks[i], out.values[i], &out.refusals[i]);
+		if (out.fills[i]) mission_pick_node(document, out.takes, marks[i], out.nodes[i]);
+	}
 	return out;
 }
 
-std::string mission_pick_hint(const MissionPickFrame &pick) {
+void MissionPickFrame::hold(const std::string &why) {
+	fills.assign(fills.size(), 0);
+	held = why.empty() ? std::string("This file takes no edits now.") : why;
+}
+
+const std::string &MissionPickFrame::refusal(int mark) const {
+	static const std::string kNone;
+	return mark >= 0 && size_t(mark) < refusals.size() ? refusals[size_t(mark)] : kNone;
+}
+
+std::string mission_pick_hint(const MissionPickFrame &pick, int hovered) {
 	if (!pick.active()) return std::string();
-	if (!pick.takes.marks)
-		return pick.takes.label + " takes " + pick.takes.what + ": pick it in its list instead (Esc cancels).";
+	if (!pick.held.empty()) return pick.held + " (Esc cancels the pick.)";
+	// An event is picked on the board: a card's title clicked answers the pick.
+	if (pick.takes.kind == mission::ParamKind::Event)
+		return "Click an event's card title on the board for " + pick.takes.label + " (Esc cancels).";
+	if (!pick.takes.marks) return pick.takes.label + " takes " + pick.takes.what + " (Esc cancels).";
+	if (!pick.refusal(hovered).empty()) return pick.refusal(hovered) + " Click another (Esc cancels).";
 	return "Click " + pick.takes.what + " for " + pick.takes.label + " (Esc cancels).";
 }
 
 void mission_pick_requests(const std::string &path, const MissionPickFrame &pick, int mark, CanvasRequests &out) {
 	if (!pick.fills_mark(mark)) return;
-	Edit edit;
-	edit.address = pick.record;
-	edit.field = mission_param_field(pick.slot);
-	edit.value = pick.values[size_t(mark)];
+	std::vector<Edit> edits(1);
+	edits[0].address = pick.record;
+	edits[0].field = mission_param_field(pick.slot);
+	edits[0].value = pick.values[size_t(mark)];
+	// A path picked at a stop: the record's stop slot names that stop too, in the same batch (else it keeps a
+	// number that named a stop of the path before).
+	if (pick.takes.node_slot >= 0 && size_t(mark) < pick.nodes.size() && pick.nodes[size_t(mark)] >= 0) {
+		Edit node;
+		node.address = pick.record;
+		node.field = mission_param_field(pick.takes.node_slot);
+		node.value = pick.nodes[size_t(mark)];
+		edits.push_back(std::move(node));
+	}
 	// The selection stands (keep_selection): the chip's record stays the one the board and the Inspector show.
-	EditorRequest set = request::edit_record(path, std::vector<Edit>{ edit });
+	EditorRequest set = request::edit_record(path, std::move(edits));
 	set.keep_selection = true;
 	out.request(std::move(set));
 	mission_pick_end(path, out);
@@ -265,8 +322,10 @@ bool mission_pick_command(const ViewportContext &context, const Document &docume
 	const MissionPickFrame pick = mission_pick_frame(*mission, shown->second.pick.record, shown->second.pick.slot,
 			{ document.address_of(ids.front()) });
 	if (!pick.fills_mark(0)) {
-		error = "Record " + std::to_string(ids.front()) + " gives " + (pick.takes.label.empty() ? std::string("the slot") : pick.takes.label) +
-				" nothing: it takes " + (pick.takes.what.empty() ? std::string("another record") : pick.takes.what) + ".";
+		error = !pick.refusal(0).empty()
+				? pick.refusal(0)
+				: "Record " + std::to_string(ids.front()) + " gives " + (pick.takes.label.empty() ? std::string("the slot") : pick.takes.label) +
+						  " nothing: it takes " + (pick.takes.what.empty() ? std::string("another record") : pick.takes.what) + ".";
 		return false;
 	}
 	mission_pick_requests(document.path(), pick, 0, out);
@@ -332,18 +391,34 @@ void mission_link_badge(CanvasPoint at, size_t count, OverlayList &out) {
 	out.text(CanvasPoint{ at.x - 6.0f - 7.0f * float(number.size()), at.y - 21.0f }, number, kMissionBadgeRgb);
 }
 
-std::string mission_link_hover(const MissionUses &uses, size_t most) {
-	std::set<size_t> seen;
-	std::string lines;
-	size_t listed = 0;
-	for (const MissionUse &use : uses.uses) {
-		if (!seen.insert(use.event_index).second) continue;
-		if (listed++ < most) lines += "\nEvent " + std::to_string(use.event_index + 1) + ": " + use.sentence;
+const std::string &MissionLinkHover::words(const MissionDocument &document, const MissionLinkCounts &counts, NodeId row,
+                                          const std::function<std::unique_ptr<MissionNames>()> &names, bool has_names,
+                                          uint64_t names_generation, size_t most) {
+	if (held_ && identity_ == document.identity() && load_ == document.load_generation() &&
+	    revision_ == document.revision() && row_ == row && has_names_ == has_names && generation_ == names_generation)
+		return words_;
+	held_ = true;
+	identity_ = document.identity();
+	load_ = document.load_generation();
+	revision_ = document.revision();
+	row_ = row;
+	has_names_ = has_names;
+	generation_ = names_generation;
+	words_.clear();
+	const std::vector<NodeId> &events = counts.namers(row);
+	if (events.empty()) return words_;
+	const std::unique_ptr<MissionNames> named = names();
+	const MissionRow *mission = document.mission_row();
+	const bms::Header *header = mission ? &mission->native.header : nullptr;
+	words_ = "Named by " + std::to_string(events.size()) + (events.size() == 1 ? " event:" : " events:");
+	for (size_t i = 0; i < events.size() && i < most; ++i) {
+		const Node *event = document.row(events[i]);
+		if (!event || event->kind != k(MissionKind::Event) || !named) continue;
+		words_ += "\nEvent " + std::to_string(document.index_of(*event) + 1) + ": " +
+		          event_sentence(static_cast<const EventRow &>(*event).native, *named, header);
 	}
-	if (seen.empty()) return std::string();
-	std::string out = "Named by " + std::to_string(seen.size()) + (seen.size() == 1 ? " event:" : " events:") + lines;
-	if (seen.size() > most) out += "\n... and " + std::to_string(seen.size() - most) + " more (the Inspector lists them).";
-	return out;
+	if (events.size() > most) words_ += "\n... and " + std::to_string(events.size() - most) + " more.";
+	return words_;
 }
 
 } // namespace opennova::editor

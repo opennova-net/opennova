@@ -301,6 +301,20 @@ size_t MissionDocument::index_of(const Node &row) const {
 
 bool MissionDocument::on_player_route(const Node &row) const { return lookups().route.count(row.id) != 0; }
 
+NodeId MissionDocument::numbered_holder(int64_t number) const {
+	const Lookups &made = lookups();
+	if (number < INT32_MIN || number > INT32_MAX) return 0;
+	const auto found = made.numbered.find(int32_t(number));
+	return found == made.numbered.end() ? 0 : found->second;
+}
+
+const std::vector<MissionDocument::StopPlace> &MissionDocument::stops_of(const Node &marker) const {
+	static const std::vector<StopPlace> kNone;
+	const Lookups &made = lookups();
+	const auto found = made.stops.find(marker.id);
+	return found == made.stops.end() ? kNone : found->second;
+}
+
 int MissionDocument::location_of(const Node &row) const {
 	const Lookups &made = lookups();
 	const auto found = made.locations.find(row.id);
@@ -945,8 +959,16 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 	marker_records.reserve(markers.size());
 	for (const Node *row : markers) marker_records.push_back(static_cast<const EntityRow &>(*row).native);
 	const std::vector<int32_t> locations = mission::location_numbers(marker_records);
-	for (size_t i = 0; i < markers.size(); ++i)
+	for (size_t i = 0; i < markers.size(); ++i) {
 		if (locations[i]) made.locations.emplace(markers[i]->id, int(locations[i]));
+		if (marker_records[i].type_id == kNumberedMarkerType) made.numbered.emplace(marker_records[i].wp_number, markers[i]->id);
+	}
+	// Each marker's stops, the paths in their order.
+	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
+		const MissionPath &path = static_cast<const PathRow &>(*row).native;
+		for (size_t i = 0; i < path.stops.size(); ++i)
+			if (path.stops[i] < markers.size()) made.stops[markers[path.stops[i]]->id].push_back({path.number, i});
+	}
 	// The player's route: the first path with the flag, its stops by their marker's index, as many as
 	// the game walks (bms::player_route_stop_count: its signed compare walks none for a count of 2^31
 	// or more) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc].
@@ -1040,6 +1062,85 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 	}
 	if (markers) copies_keep_their_route(rows, shift, sites);
 	return true;
+}
+
+std::vector<std::vector<NodeId>> MissionDocument::place_lists(const Node &row) const {
+	if (row.kind != k(K::WaypointPath)) return {};
+	const PathRow &path = static_cast<const PathRow &>(row);
+	std::vector<NodeId> stops;
+	if (!path.ids.lists.empty()) {
+		stops.reserve(path.ids.lists[0].size());
+		for (const RecordIds &stop : path.ids.lists[0]) stops.push_back(stop.id);
+	}
+	return {std::move(stops)};
+}
+
+bool MissionDocument::renumber_places(const StagedRows &rows, NodeId row, size_t list, const RecordShift &shift,
+                                      std::vector<Edit> &sites, std::string &error) const {
+	(void)error;
+	const Node *node = rows.find(row);
+	if (list != 0 || !node || node->kind != k(K::WaypointPath)) return true;
+	const int number = static_cast<const PathRow &>(*node).native.number;
+	std::vector<MissionStopNamer> namers;
+	for (const std::shared_ptr<const Node> &each : rows.rows()) mission_stop_namers(*each, number, namers);
+	for (const MissionStopNamer &namer : namers) {
+		const size_t now = shift.now(namer.place);
+		// A stop the edit removed: its number kept, naming the stop that took its place.
+		if (now == RecordShift::kRemoved || now == size_t(namer.place)) continue;
+		Edit edit;
+		edit.address = namer.record;
+		edit.field = namer.field;
+		edit.value = int64_t(now);
+		sites.push_back(std::move(edit));
+	}
+	return true;
+}
+
+void mission_stop_namers(const Node &row, int path, std::vector<MissionStopNamer> &out) {
+	if (path <= 0 || path >= kFirstPathCommand) return;
+	if (is_entity_kind(row.kind)) {
+		const bms::Entity &entity = static_cast<const EntityRow &>(row).native;
+		if (row.kind != k(K::Marker) && entity.waypoint_id == path)
+			out.push_back({{row.id, row.kind, 0}, "wp_number", entity.wp_number});
+		return;
+	}
+	if (row.kind != k(K::Event)) return;
+	const EventRow &event = static_cast<const EventRow &>(row);
+	if (event.ids.lists.size() < 2) return;
+	for (size_t i = 0; i < event.native.triggers.size() && i < event.ids.lists[0].size(); ++i) {
+		const bms::Trigger &trigger = event.native.triggers[i];
+		if (trigger_param_kind(trigger, 2) == ParamKind::PathNode && trigger.param2 == path)
+			out.push_back({{row.id, k(K::Trigger), event.ids.lists[0][i].id}, "param3", trigger.param3});
+	}
+	for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i) {
+		const bms::Action &action = event.native.actions[i];
+		if (action_param_kind(action, 2) == ParamKind::PathNode && action.param2 == path)
+			out.push_back({{row.id, k(K::Action), event.ids.lists[1][i].id}, "param3", action.param3});
+	}
+}
+
+size_t mission_removed_stop_namers(const MissionDocument &document, const std::vector<Edit> &edits) {
+	// Each path's places the Removes take.
+	std::map<int, std::set<int64_t>> taken;
+	for (const Edit &edit : edits) {
+		if (edit.operation != EditOperation::Remove || edit.address.kind != k(K::Stop)) continue;
+		Document::Placement at;
+		if (!document.placement(edit.address, at)) continue;
+		const Node *row = document.row(edit.address.row);
+		if (!row || row->kind != k(K::WaypointPath)) continue;
+		taken[static_cast<const PathRow &>(*row).native.number].insert(int64_t(at.index));
+	}
+	if (taken.empty()) return 0;
+	size_t count = 0;
+	std::vector<MissionStopNamer> namers;
+	for (const MissionKind kind : {MissionKind::Item, MissionKind::Building, MissionKind::Organic, MissionKind::Event})
+		for (const Node *row : document.rows_of(kind))
+			for (const auto &[path, places] : taken) {
+				namers.clear();
+				mission_stop_namers(*row, path, namers);
+				for (const MissionStopNamer &namer : namers) count += places.count(namer.place);
+			}
+	return count;
 }
 
 // A waypoint marker the edit put in (a Duplicate's copy, a Paste's) stays a stop of the path it carries, among

@@ -2,8 +2,8 @@
 
 // A mission record's own items in its outline line's right-click menu (ADR 0046 S24; the outline's row_menu,
 // drawn after the jumps): the logic's (ui/mission_logic_view: Show on board, Add trigger, Add action, Move to
-// event, Negate) and the views' (lane B: New event, Add to group, Select group members), each lane's over the
-// same record.
+// event, Negate) and the views' (ui/mission_mark_menu: New event, Add to group, Select group members), each over
+// the same record.
 
 #include <editor/model/document.h>
 #include <editor/ui/workspace.h>

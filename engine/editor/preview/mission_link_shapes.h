@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,7 +19,7 @@ namespace opennova::editor {
 class Document;
 class MissionDocument;
 class MissionScene;
-struct MissionUses;
+class MissionNames;
 
 // A mission's logic drawn where the things it names stand (ADR 0046 S24, In the views), in the 3D view
 // and on the map alike: for the selected event, trigger or action (documents/mission_links), each record
@@ -63,7 +64,12 @@ struct MissionLinkScene {
 	std::vector<MissionLinkSpot> spots;
 	std::vector<std::pair<size_t, size_t>> lines; // a watched spot to an acted-on one
 	std::vector<MissionLinkRing> rings;
+	// What a mark's hover says of a reach drawn about nothing (a distance about the player in a mission with no
+	// start marker: the player's place is not known in the editor), by the row of the other entity.
+	std::vector<std::pair<NodeId, std::string>> notes;
 	bool any() const { return !spots.empty() || !rings.empty(); }
+	// The notes on `row`, a line each ("" for none).
+	std::string note(NodeId row) const;
 };
 // The links of `selected` (an event, a trigger or an action of `document`) placed over `scene`: what the
 // scene does not hold (an event, a value nothing holds) has no spot. Empty for any other record.
@@ -93,22 +99,34 @@ bool mission_select_group(const MissionDocument &document, const std::vector<Nod
 		const NodeAddress &primary, CanvasRequests &out, std::string &error);
 
 // S24 pick mode (the workspace's document `pick`, which a board chip's Pick in view asks): what a click on a mark
-// gives the picked slot, by mark (`values` its value, `fills` whether it fills the slot), made once a frame over
-// the views' marks (an entity's or an area's record each); the hint the views show while the pick waits ("Click an
-// area for Zone (Esc cancels)"); the requests a click raises (the record's parameter set, then the pick ended) and
-// those Esc or a click on nothing raises (the pick ended).
+// gives the picked slot, by mark (`values` its value, `fills` whether it fills the slot, `refusals` why a mark
+// holding a value gives none: it names another record, mission_pick_value; `nodes` the stop a path's pick sets
+// beside it, -1 none), made once a frame over the views' marks (an entity's or an area's record each) from the
+// document's lookups; the hint the views show while the pick waits ("Click an area for Zone (Esc cancels)"; over a
+// refused mark, its refusal); the requests a click raises (the record's parameter set, with its stop for a path
+// clicked at a stop, then the pick ended) and those Esc or a click on nothing raises (the pick ended). A click on a
+// refused mark raises nothing.
 struct MissionPickFrame {
 	NodeAddress record;
 	int slot = -1;
 	MissionPickSlot takes;
 	std::vector<char> fills;
 	std::vector<int64_t> values;
+	std::vector<std::string> refusals;
+	std::vector<int64_t> nodes;
+	// Why no mark fills it now (the context takes no edits: its words), "" while it may: the pick still shows
+	// and Esc or a click on nothing ends it.
+	std::string held;
 	bool active() const { return record.row != 0; }
+	// No mark fills it (a context that takes no edits): `why` said by the hint.
+	void hold(const std::string &why);
 	bool fills_mark(int mark) const { return mark >= 0 && size_t(mark) < fills.size() && fills[size_t(mark)]; }
+	const std::string &refusal(int mark) const;
 };
 MissionPickFrame mission_pick_frame(const MissionDocument &document, const NodeAddress &record, int slot,
 		const std::vector<NodeAddress> &marks);
-std::string mission_pick_hint(const MissionPickFrame &pick);
+// `hovered`: the mark under the pointer (-1 none).
+std::string mission_pick_hint(const MissionPickFrame &pick, int hovered = -1);
 void mission_pick_requests(const std::string &path, const MissionPickFrame &pick, int mark, CanvasRequests &out);
 void mission_pick_end(const std::string &path, CanvasRequests &out);
 // The views' `pick` command (the wire's click of a mark while a pick waits): the record `ids` names given to the
@@ -129,8 +147,21 @@ bool mission_new_event_requests(const MissionDocument &document, const std::stri
 // The ring a candidate of the pick is drawn with (each mark that fills the slot).
 void mission_pick_candidate(CanvasPoint at, OverlayList &out);
 
-// The hover's words for a record events name (its uses, documents/mission_uses): how many events, then
-// each one's sentence, at most `most` ("" for a record no event names).
-std::string mission_link_hover(const MissionUses &uses, size_t most = 8);
+// The hover's words for a row events name: the events its badge counts (MissionLinkCounts::namers), how
+// many, then each one's sentence, at most `most` ("" for a row no event names). Kept while the document
+// (its identity, load and revision), the row and the names (their source's generation) stand, since a
+// hover asks every frame; `names` is made only when the words are made again.
+class MissionLinkHover {
+public:
+	const std::string &words(const MissionDocument &document, const MissionLinkCounts &counts, NodeId row,
+	                         const std::function<std::unique_ptr<MissionNames>()> &names, bool has_names,
+	                         uint64_t names_generation, size_t most = 8);
+
+private:
+	bool held_ = false, has_names_ = false;
+	uint64_t identity_ = 0, load_ = 0, revision_ = 0, generation_ = 0;
+	NodeId row_ = 0;
+	std::string words_;
+};
 
 } // namespace opennova::editor

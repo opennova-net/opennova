@@ -591,10 +591,15 @@ bool ReferencePicker::accept_record(const SessionView &, const Document &documen
 		// What the field names: its reference, or what it is picked by (an SSN that may be the player's).
 		const ReferenceKind kind = field.reference != ReferenceKind::None ? field.reference : field.picks;
 		int64_t value = 0;
-		if (drag.document == document.identity() && mission_record_value(*mission, drag.record, kind, value) &&
-		    ImGui::AcceptDragDropPayload(kRecordDragPayload)) {
-			picked = std::to_string(value);
-			dropped = true;
+		std::string refusal;
+		if (drag.document == document.identity() && mission_record_value(*mission, drag.record, kind, value, &refusal)) {
+			if (ImGui::AcceptDragDropPayload(kRecordDragPayload)) {
+				picked = std::to_string(value);
+				dropped = true;
+			}
+		} else if (!refusal.empty()) {
+			// A record whose value names another one (S24): not taken, the reason beside the pointer.
+			ImGui::SetTooltip("%s", refusal.c_str());
 		}
 	}
 	ImGui::EndDragDropTarget();

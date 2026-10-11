@@ -52,8 +52,11 @@ bool mission_area_edits(const double a[2], const double b[2], float snap, std::v
 // A stop of the path of number `path`: a marker of `item` added at mission point `at`, facing `yaw`
 // degrees, and a stop naming it after the path's last, or (S24) at its place `position` among the
 // path's stops (SIZE_MAX: the end): a stop put between two on the line between them. False with
-// `error` for a path the file has not, a command (0 and 123..127 name no route), a path holding its 32
-// stops, an item placed in another pool than the markers.
+// `error` for a path the file has not, a command (0 and 123..127 name no route), an item placed in
+// another pool than the markers. A path of 32 stops or more takes one too (D-MIS-6): a save writes its
+// first 32 into the path's record, so one put among them pushes the 32nd past the slots (the
+// mission.path_count finding says so); what names a later stop by its place follows it (the document's
+// renumber_places, S24).
 bool mission_stop_edits(const MissionDocument &document, int path, int64_t item, MissionKind pool, const double at[3],
 		int yaw, std::vector<Edit> &out, std::string &error, size_t position = SIZE_MAX);
 // The place a stop of `path` added at picture point (x, y) takes (S24): one past the first stop of the segment of

@@ -60,14 +60,16 @@ void MissionMapCanvas::follow(const ViewportModel &viewport, const ViewportConte
 	pick_ = MissionPickFrame();
 	const Document *document = document_of(context);
 	const bool current = document && viewport.current(context.input);
-	// S24 pick mode: the slot the workspace's pick names, each pin's value for it.
-	if (const MissionDocument *picked = dynamic_cast<const MissionDocument *>(document); picked && current && context.editable()) {
+	// S24 pick mode: the slot the workspace's pick names, each pin's value for it; held (shown, no pin filling it)
+	// while the context takes no edits.
+	if (const MissionDocument *picked = dynamic_cast<const MissionDocument *>(document); picked && current) {
 		const auto shown = context.input.view.workspace.documents.find(document->path());
 		if (shown != context.input.view.workspace.documents.end() && shown->second.pick.active()) {
 			std::vector<NodeAddress> records;
 			records.reserve(marks_.size());
 			for (const MissionMapMark &mark : marks_) records.push_back(mark.record);
 			pick_ = mission_pick_frame(*picked, shown->second.pick.record, shown->second.pick.slot, records);
+			if (!context.editable()) pick_.hold(context.not_editable());
 		}
 	}
 	// S24: how many events name each mark.
@@ -163,6 +165,24 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 	// S24: Esc while a pick waits ends it.
 	if (pick_.active() && in.keyboard.focused && in.keyboard.escape && !gesture_.pressed()) {
 		mission_pick_end(path, out);
+		return;
+	}
+	// Esc while a press is down cancels it, as in the 3D view: what its release would raise (a click's selection, a
+	// box's) is not raised, and what a drag wrote (pins moved, an area's edge or corner) goes back where the press
+	// found it, under its gesture (its one undo step then changes nothing).
+	if (gesture_.pressed() && in.keyboard.focused && in.keyboard.escape) {
+		if (gesture_.dragging() && document && !pick_.active()) {
+			std::vector<MissionPressed> pressed = press_.taken;
+			if (press_.handle != MissionHandle::Move) pressed.assign(1, press_.area);
+			std::vector<Edit> edits;
+			mission_restore_edits(*document, pressed, gesture_.token(), edits);
+			if (!edits.empty()) {
+				out.request(request::edit_record(path, std::move(edits)));
+				gesture_.sent();
+			}
+		}
+		gesture_.end(out);
+		press_ = Press();
 		return;
 	}
 	// A nudge lasts while an arrow is held on the canvas that has the keyboard.
@@ -286,10 +306,10 @@ void MissionMapCanvas::keys_(const ViewportContext &context, const CanvasInput &
 	}
 	if (!keyboard.arrow_x && !keyboard.arrow_y) return;
 	// A step on the map's axes as the picture shows them: right east, up north (a RotateMap180 mission's the other
-	// way), Shift a tenth.
+	// way), Shift a tenth. arrow_y is +1 for Down, which is south on the picture.
 	const double step = double(in.keys.shift ? snap * 0.1f : snap);
 	const double turn = viewport_->ground().flip_180 ? -1.0 : 1.0;
-	const double east = turn * double(keyboard.arrow_x) * step, north = turn * double(keyboard.arrow_y) * step;
+	const double east = turn * double(keyboard.arrow_x) * step, north = -turn * double(keyboard.arrow_y) * step;
 	if (!gesture_.nudging()) {
 		nudge_.clear();
 		MissionPressed held;
@@ -339,25 +359,31 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 		view.project(x, y, point.x, point.y);
 		return point;
 	};
-	// The paths first, under the pins: a line through each one's stops, the player's route numbered.
+	// The paths first, under the pins: a line through each one's stops (a looping path of two stops or more closed, as
+	// the 3D view closes it), the player's route numbered from 0, each stop by its place as the 3D view and an event's
+	// stop name it.
 	if (options.paths) {
 		const int route = mission_map_route(scene);
 		for (size_t p = 0; p < scene.paths().size(); ++p) {
 			const MissionPathMark &path = scene.paths()[p];
 			std::vector<CanvasPoint> stops;
-			for (const NodeId stop : path.stops)
-				if (const MissionEntityMark *marker = stop ? scene.entity(stop) : nullptr) stops.push_back(at(marker->x, marker->y));
+			std::vector<size_t> places;
+			for (size_t s = 0; s < path.stops.size(); ++s)
+				if (const MissionEntityMark *marker = path.stops[s] ? scene.entity(path.stops[s]) : nullptr) {
+					stops.push_back(at(marker->x, marker->y));
+					places.push_back(s);
+				}
 			if (stops.size() < 1) continue;
 			const uint32_t rgb = (path.flags & uint32_t(bms::WaypointFlags::PlayerRoute)) ? kMissionBlueRgb
 					: (path.flags & uint32_t(bms::WaypointFlags::RedTeam))             ? kMissionRedRgb
 					                                                                    : kMissionPathRgb;
 			const float thickness = int(p) == route ? 2.0f : 1.0f;
 			for (size_t i = 0; i + 1 < stops.size(); ++i) list.line(stops[i], stops[i + 1], rgb, thickness);
-			if (stops.size() > 2 && !(path.flags & uint32_t(bms::WaypointFlags::DoesNotLoop)))
+			if (stops.size() > 1 && !(path.flags & uint32_t(bms::WaypointFlags::DoesNotLoop)))
 				list.line(stops.back(), stops.front(), rgb, thickness);
 			if (int(p) == route)
 				for (size_t i = 0; i < stops.size(); ++i)
-					list.text(CanvasPoint{ stops[i].x + 5.0f, stops[i].y - 7.0f }, std::to_string(i + 1), kMissionBlueRgb);
+					list.text(CanvasPoint{ stops[i].x + 5.0f, stops[i].y - 7.0f }, std::to_string(places[i]), kMissionBlueRgb);
 		}
 	}
 	// The areas' boxes.
@@ -529,24 +555,30 @@ CanvasCursor MissionMapCanvas::cursor(const ViewportContext &context, const Canv
 
 std::string MissionMapCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	if (!viewport_ || gesture_.dragging() || !in.hovered) return std::string();
-	// S24: while a pick waits, what to click.
-	if (pick_.active()) return mission_pick_hint(pick_);
 	const int index = pick_mission_map_mark(marks_, viewport_->view(in.width, in.height), in.mouse.x, in.mouse.y);
+	// S24: while a pick waits, what to click (over a pin that names another record, why it gives nothing).
+	if (pick_.active()) return mission_pick_hint(pick_, index);
 	if (index < 0) return std::string();
 	const MissionMapMark &mark = marks_[size_t(index)];
 	char at[64];
 	std::snprintf(at, sizeof(at), " at %.1f east, %.1f north", mark.x, mark.y);
 	std::string tip = viewport_->title(context, mark.record) + at +
 	                  "\nClick to select it (Shift adds, Ctrl toggles); drag to move it. Right-drag pans, the wheel zooms.";
+	// S24: what the selected logic's reach cannot draw about it (the player's place unknown).
+	const std::string noted = links_.note(mark.record.row);
+	if (!noted.empty()) tip += "\n\n" + noted;
 	// S24: the events that name it, its badge's words.
 	const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document_of(context));
 	if (mission && size_t(index) < badges_.size() && badges_[size_t(index)] > 0) {
 		const AssetGraph *graph = context.input.view.findings.graph.get();
+		// The names read the graph's source, which outlives them (made only when the words are made again).
 		std::optional<GraphNameSource> source;
-		if (graph) source.emplace(*graph);
-		const std::unique_ptr<MissionNames> names = mission_label_names(*mission, source ? &*source : nullptr);
-		const std::string named = mission_link_hover(
-				uses_.uses(*mission, mark.record, *names, graph != nullptr, graph ? graph->generation() : 0));
+		const auto names = [&]() {
+			if (graph && !source) source.emplace(*graph);
+			return mission_label_names(*mission, source ? &*source : nullptr);
+		};
+		const std::string &named = hover_.words(*mission, counts_, mark.record.row, names, graph != nullptr,
+				graph ? graph->generation() : 0);
 		if (!named.empty()) tip += "\n\n" + named;
 	}
 	return tip;

@@ -53,7 +53,11 @@
 #include <formats/til/til_io.h>
 #include <formats/trn/charmap_legend.h>
 #include <runtime/audio/sound_profile.h>
+#include <base/gameprofile/game_type.h>
+#include <editor/documents/mission_links.h>
+#include <formats/mission/mission_params.h>
 #include <runtime/world/ammo_table.h>
+#include <runtime/world/spawn_select.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_kinds.h>
@@ -561,6 +565,46 @@ static int test_links() {
 		made.value = "group_wiped_out";
 		gathered.requests.clear();
 		TEST_EXPECT(viewport->command_of(rig.context(), made, gathered, error) && gathered.requests.size() == 2);
+	}
+	// S24: a distance about the player (Single sub 43, param1 the player's SSN): with no start marker in the mission
+	// no ring, and the other entity's hover saying the player's place is not known; a start marker of the type the
+	// single player deploys at placed, a ring about it.
+	{
+		const int32_t walker_ssn = static_cast<const EntityRow &>(*mission.row(walker.row)).native.id;
+		const auto set = [&](const char *field, int64_t value) {
+			Edit edit;
+			edit.address = trigger;
+			edit.field = field;
+			edit.value = value;
+			return edit;
+		};
+		rig.session.handle(request::edit_record(kMission, { set("main_type", int64_t(bms::TriggerMainType::Single)),
+				set("sub_type", 43), set("param1", mission::kPlayerSsn), set("param2", walker_ssn), set("param3", 20) }));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.session.handle(request::select_record(kMission, trigger));
+		rig.pump();
+		canvas->follow(*viewport, rig.context(), gathered);
+		TEST_EXPECT(mission_player_starts(mission).empty() && canvas->links().rings.empty() &&
+		            canvas->links().note(walker.row).find("not known in the editor") != std::string::npos);
+		const std::string noted = canvas->hover_tip(rig.context(), in);
+		TEST_EXPECT(noted.find("the player's place is not known") != std::string::npos);
+		const opennova::world::StartMarkerTypes starts = opennova::world::start_marker_types(opennova::game_type::for_mission_attribs(uint32_t(
+				mission.mission_row()->native.header.attrib_flags)), 1);
+		Edit start;
+		start.operation = EditOperation::Add;
+		start.address = NodeAddress{ 0, node_kind(MissionKind::Marker), 0 };
+		start.field = "item";
+		start.value = int64_t(mission::kItemIdOffset + starts.primary);
+		rig.session.handle(request::edit_record(kMission, start));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.session.handle(request::select_record(kMission, trigger));
+		rig.pump();
+		canvas->follow(*viewport, rig.context(), gathered);
+		TEST_EXPECT(mission_player_starts(mission).size() == 1 && canvas->links().rings.size() == 1 &&
+		            canvas->links().notes.empty());
+		rig.session.handle(request::undo(kMission));
+		rig.session.handle(request::undo(kMission));
+		rig.pump();
 	}
 	// A mark selected: no links.
 	rig.session.handle(request::select_record(kMission, walker));

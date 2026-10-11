@@ -15,6 +15,7 @@
 #include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/texture_document.h>
 #include <editor/documents/wave_document.h>
@@ -1478,6 +1479,10 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 	const std::string named = records && (removal || sets_one_field(requested) || sets_one_record(requested))
 	                                  ? records_words(*records, requested)
 	                                  : std::string();
+	// The records naming a stop the removal takes by its place, which keep naming that place
+	// (MissionDocument::renumber_places): the status line says how many.
+	const auto *mission = dynamic_cast<const MissionDocument *>(records);
+	const size_t kept_places = removal && mission ? mission_removed_stop_namers(*mission, *edits) : 0;
 	// A record's new name is its own edit: its uses keep the old name until Rename everywhere
 	// (RenameSymbol) rewrites them.
 	if (!document.apply(*edits, error)) {
@@ -1521,6 +1526,10 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 		else core_.problems().validate_later();
 	}
 	view_.activity.status = removal ? "Removed " + named + "." : records ? edit_words(*records, *edits, named) : std::string();
+	if (kept_places)
+		view_.activity.status += " " + counted(kept_places, "record") + " named a removed stop by its place and " +
+		                         (kept_places == 1 ? "keeps" : "keep") +
+		                         " that number, which names the stop after it now (or none past the path's end).";
 	if (found && document.revision() == before) {
 		std::optional<GraphNameSource> names;
 		if (view_.findings.graph) names.emplace(*view_.findings.graph);

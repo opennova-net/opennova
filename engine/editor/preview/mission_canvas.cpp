@@ -714,7 +714,7 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 	}
 	overlay.links = &links_;
 	overlay.badges = &badges_;
-	// The groups' legend by the mission's words for them (S24; lane C's names where the document gives them).
+	// The groups' legend by the mission's words for them (S24: a group's name where the mission gives one).
 	std::unique_ptr<MissionNames> group_names;
 	if (const MissionDocument *mission = dynamic_cast<const MissionDocument *>(frame_.document);
 			mission && viewport.options().color_by == MissionColorBy::Group) {
@@ -747,26 +747,31 @@ CanvasCursor MissionCanvas::cursor(const ViewportContext &, const CanvasInput &i
 
 std::string MissionCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	// The label beside the hovered mark says it (mission_overlay): no tip beside it, but for what an ambient source
-	// plays while the view listens (DI-36), and (S24) the events that name it, its badge's words.
+	// plays while the view listens (DI-36), and (S24) the events that name it, its badge's words, and what the
+	// selected logic's reach cannot draw about it (the player's place unknown).
 	if (!frame_.viewport || looking_ || gesture_.dragging() || tool() != MissionTool::Select) return std::string();
 	const MissionViewport &viewport = *frame_.viewport;
 	const bool listening = viewport.options().listen.on && viewport.listen().open();
-	if (!listening && badges_.empty()) return std::string();
+	if (!listening && badges_.empty() && links_.notes.empty()) return std::string();
 	const int hovered = mission_canvas_under(frame_, in, MissionPick::Click);
 	if (hovered < 0 || size_t(hovered) >= frame_.marks.size()) return std::string();
 	std::string tip;
 	if (listening)
 		for (const std::string &line : viewport.listen().source_words(frame_.marks[size_t(hovered)].record.row))
 			tip += (tip.empty() ? "" : "\n") + line;
+	const std::string noted = links_.note(frame_.marks[size_t(hovered)].record.row);
+	if (!noted.empty()) tip += (tip.empty() ? "" : "\n\n") + noted;
 	const MissionDocument *document = dynamic_cast<const MissionDocument *>(frame_.document);
 	if (document && size_t(hovered) < badges_.size() && badges_[size_t(hovered)] > 0) {
 		const AssetGraph *graph = context.input.view.findings.graph.get();
+		// The names read the graph's source, which outlives them (made only when the words are made again).
 		std::optional<GraphNameSource> source;
-		if (graph) source.emplace(*graph);
-		const std::unique_ptr<MissionNames> names = mission_label_names(*document, source ? &*source : nullptr);
-		const MissionUses &uses = uses_.uses(*document, frame_.marks[size_t(hovered)].record, *names, graph != nullptr,
-				graph ? graph->generation() : 0);
-		const std::string named = mission_link_hover(uses);
+		const auto names = [&]() {
+			if (graph && !source) source.emplace(*graph);
+			return mission_label_names(*document, source ? &*source : nullptr);
+		};
+		const std::string &named = hover_.words(*document, counts_, frame_.marks[size_t(hovered)].record.row, names,
+				graph != nullptr, graph ? graph->generation() : 0);
 		if (!named.empty()) tip += (tip.empty() ? "" : "\n\n") + named;
 	}
 	return tip;
@@ -839,8 +844,9 @@ std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInpu
 		hint.empty_mission = frame_.viewport->scene().entities().empty() && frame_.viewport->scene().areas().empty();
 	// While a drag writes, what it has come to.
 	std::string line = mission_canvas_hint(hint);
-	// S24: while a pick waits, what to click.
-	if (frame_.pick.active()) line = mission_pick_hint(frame_.pick);
+	// S24: while a pick waits, what to click (over a mark that names another record, why it gives nothing).
+	if (frame_.pick.active())
+		line = mission_pick_hint(frame_.pick, in.hovered ? mission_canvas_under(frame_, in, MissionPick::Click) : -1);
 	if (gesture_.dragging() && grab_.what == MissionGrab::What::Handle && !grab_.pressed.empty() && frame_.viewport) {
 		const MissionPressed &held = grab_.pressed[grab_.grabbed];
 		std::string now;

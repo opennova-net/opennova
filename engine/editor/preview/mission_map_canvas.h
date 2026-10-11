@@ -4,7 +4,6 @@
 #include <vector>
 
 #include <editor/documents/mission_links.h>
-#include <editor/documents/mission_uses.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_link_shapes.h>
@@ -62,7 +61,7 @@ private:
 	MissionLinkScene links_;
 	std::vector<size_t> badges_;
 	MissionLinkCounts counts_;
-	mutable MissionUsesCache uses_;
+	mutable MissionLinkHover hover_;
 	// S24 pick mode: the slot a pick waits for and what each mark gives it.
 	MissionPickFrame pick_;
 	// What a press took: the mark under it (-1: a box from nothing), the records it moves as the press found them and
