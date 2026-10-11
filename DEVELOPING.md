@@ -277,6 +277,14 @@ Notes:
 The full cross-system suite can be flaky from shared state; if a run shows an unrelated
 red, re-run that single test file in isolation to confirm before treating it as real.
 
+## Cut a release
+
+Tag a master merge head whose master CI run passed (`git tag v0.0.N <sha>` then
+`git push origin v0.0.N`). `release.yml`'s `gate` job refuses a tag that is not on
+master or whose commit has no green master-push `ci.yml` run (it waits for one still
+running), so the release ships only what every required CI gate already passed; the
+package jobs then build the game, Blender add-on and apps zips.
+
 ## Troubleshooting
 
 - **GDScript "class not found" / a GUT test silently dropped**: stale GDExtension. Re-run
