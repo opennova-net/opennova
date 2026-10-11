@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -61,6 +62,19 @@ struct LobbyState {
 	std::string host_ip;            // the observed UDP source (retail advertises no address)
 	int         host_port = 0;      // Host.Port when > 0, else the observed UDP source port
 	std::string host_key;           // Host.HostKey (request or update)
+	// The listing's owner (service policy): the account the HostKey the
+	// connection presented was minted for (hostdb::claim_host_key). A stock
+	// host's fresh ClientHostRequest carries no HostKey (its Host list is
+	// rebuilt without one), so the key comes with the first ClientHostUpdate
+	// that carries it, or with a re-host's kept Host list, which a parked
+	// connection sends under its kept RID. Unset: the listing is anonymous.
+	std::optional<int64_t> host_user_id;
+	// The HostKey the owner was decided from; nullopt until the connection's
+	// request (or an update since) presented one.
+	std::optional<std::string> owner_key;
+	// ONNET_REQUIRE_HOST_KEY: hosting, but held out of the browser (no
+	// active_hosts row) until a presented HostKey names an account.
+	bool awaiting_host_key = false;
 	std::string pcid_key;           // Host.PCIDKey (request or update; rotates every refresh)
 	std::string server_name;
 	int         player_count = 0;
@@ -170,6 +184,17 @@ public:
 	//  param is found].
 	void set_glsvss_results(std::string results) { glsvss_results_ = std::move(results); }
 
+	// ONNET_REQUIRE_HOST_KEY. Off (the default), a host whose HostKey claims no
+	// account (hostdb::claim_host_key; with no database, none does) is listed
+	// with no owner. On, such a key is refused with SERVER_MSG_CODE_NEED_TO_LOGIN
+	// (napi/session.h): a ClientHostRequest carrying it gets ServerHostResult
+	// Success=0 (a stock host shows NWEC58); a request carrying no HostKey (a
+	// stock host's fresh one) is answered but held out of the browser until an
+	// update presents one, and an update whose key claims nothing ends the
+	// hosting with ServerStopHosting. Service policy: the retail service's own
+	// HostKey check is unwitnessed.
+	void set_require_host_key(bool require) { require_host_key_ = require; }
+
 	// Dispatch one inbound lobby message. `inner_message` is the outer
 	// container's first child (the actual ClientConnected / ClientHostRequest /
 	// etc.). `state` is the caller-owned per-connection state.
@@ -208,12 +233,19 @@ private:
 	LobbyDispatchResult handle_client_play_request(const NapiMessage &msg, LobbyState &state);
 	LobbyDispatchResult handle_client_glsvss_request(const NapiMessage &msg, LobbyState &state);
 	uint32_t mint_rid();
+	// The account `host_key` claims for `rid` (hostdb::claim_host_key); nullopt
+	// with no database, or on a database failure (logged).
+	std::optional<int64_t> claim_host_owner(const std::string &host_key, uint32_t rid);
+	// A HostKey the connection presents decides its owner (owner_key,
+	// host_user_id). False when ONNET_REQUIRE_HOST_KEY refuses it.
+	bool present_host_key(LobbyState &state, const std::string &host_key);
 
 	IdGenerator sess_id_gen_;
 	std::function<std::string(const std::string&)> gsid_gen_;
 	std::function<uint32_t()> rid_gen_;     // null == mint_rid()
 	uint32_t next_rid_suffix_ = 1;          // policy: monotonic per process
 	std::string glsvss_results_;
+	bool require_host_key_ = false;         // ONNET_REQUIRE_HOST_KEY
 	opennova::db::Database *db_ = nullptr;  // optional, null in tests
 	std::string reflect_ip_;                // ONNET_CLIENT_REFLECT_IP (empty=unset)
 	uint16_t    reflect_port_ = 0;          // client NovaWorld session port (0=unset)

@@ -5,7 +5,8 @@
 // live session's user, the refusals (malformed, unknown, expired, an inactive
 // account), the once-a-minute sliding expiry and its race, logout, the prune,
 // the revocations (a password reset, a ban, a deleted player), the one-shot
-// bootstrap promotion, and the unknown-username bcrypt run. Crow-free (the
+// bootstrap promotion, the unknown-username bcrypt run, and what a deleted or
+// revoked account leaves of the servers it listed and joined. Crow-free (the
 // sources compile straight in, as db_concurrency_test does with auth.cpp), so
 // it runs on every build; the HTTP route harness drives the same store through
 // the cookie.
@@ -15,13 +16,16 @@
 
 #include <base/io/sha256.h>
 #include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/host_repository.h>
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -357,6 +361,81 @@ int test_inactive_and_deleted_accounts(Database &db, int64_t) {
 	return 0;
 }
 
+// A listed server's owner and a listed server's player rows. A password reset
+// deletes the account's hosting keys, so its live listing's next refresh stores
+// no owner. delete_user succeeds for an account that hosts a listed server and
+// sits in another's player list (ON DELETE SET NULL): the listing stays with no
+// owner, the player row with no account; a newcomer never gets the deleted id
+// (AUTOINCREMENT), and the listing's next refresh, the lobby still holding the
+// deleted id, names no one.
+int test_listing_owner_revoked_and_deleted(Database &db, int64_t) {
+	namespace hostdb = opennova::hostdb;
+	auto owner_of = [&db](uint32_t rid) {
+		const auto row = hostdb::find_host_by_rid(db, rid);
+		return row ? row->host_user_id : std::optional<int64_t>(-1);
+	};
+	// A listing whose owner holds a claimed key, as the lobby writes it.
+	auto list_for = [&db](int64_t owner, uint32_t rid, char letter) {
+		const std::string key(hostdb::kHostKeyChars, letter);
+		hostdb::record_host_key(db, key, owner);
+		hostdb::HostRow row;
+		row.rid = rid;
+		row.gsid = "GSID-" + std::to_string(rid);
+		row.game = "jop_2_consumer";
+		row.server_name = "Listing " + std::to_string(rid);
+		row.host_ip = "10.0.0.5";
+		row.peer_ip = "10.0.0.5";
+		row.host_user_id = hostdb::claim_host_key(db, key, rid);
+		hostdb::upsert_host(db, row);
+		return row;
+	};
+
+	const int64_t erin = make_player(db, "erin", "0000e201");
+	TEST_EXPECT(erin > 0);
+	hostdb::HostRow reset_row = list_for(erin, 0x0A0000E1u, 'E');
+	TEST_EXPECT(owner_of(reset_row.rid) == erin);
+	nws::UpdateUserParams reset;
+	reset.password_plaintext = "pw-erin-2";
+	TEST_EXPECT(nws::update_user(db, erin, reset).ok);
+	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE user_id = ?;", {BindValue(erin)}).empty());
+	TEST_EXPECT(owner_of(reset_row.rid) == erin); // until the listing's next refresh
+	hostdb::update_host(db, reset_row);           // the lobby still holds erin
+	TEST_EXPECT(owner_of(reset_row.rid) == std::nullopt);
+
+	// An account hosts a listed server and has joined another.
+	const int64_t gus = make_player(db, "gus", "0000a901");
+	TEST_EXPECT(gus > 0);
+	hostdb::HostRow gus_row = list_for(gus, 0x0A0000E2u, 'G');
+	TEST_EXPECT(owner_of(gus_row.rid) == gus);
+	hostdb::PlayerRow joined;
+	joined.host_rid = reset_row.rid;
+	joined.user_id = gus;
+	joined.nwhandle = "gus";
+	joined.peer_ip = "10.0.0.9";
+	joined.peer_port = 0; // /NWJoin.dll's, which no ClientHostPlayerRemoved matches
+	hostdb::add_player(db, joined);
+
+	TEST_EXPECT(nws::delete_user(db, gus).ok);
+	TEST_EXPECT(!nws::get_user_by_id(db, gus).has_value());
+	TEST_EXPECT(owner_of(gus_row.rid) == std::nullopt);
+	const auto players = hostdb::list_players(db, reset_row.rid);
+	TEST_EXPECT(players.size() == 1 && !players[0].user_id.has_value());
+
+	// A newcomer never takes the deleted id; the deleted owner's listing
+	// refreshes (the lobby still holds gus's id) and names no one.
+	const int64_t newcomer = make_player(db, "newcomer", "0000a902");
+	TEST_EXPECT(newcomer > gus);
+	hostdb::update_host(db, gus_row);
+	TEST_EXPECT(owner_of(gus_row.rid) == std::nullopt);
+	hostdb::upsert_host(db, gus_row);
+	TEST_EXPECT(owner_of(gus_row.rid) == std::nullopt);
+	TEST_EXPECT(hostdb::list_hosts_by_owner(db, gus).empty());
+
+	hostdb::remove_host_by_rid(db, reset_row.rid);
+	hostdb::remove_host_by_rid(db, gus_row.rid);
+	return 0;
+}
+
 // ONNET_BOOTSTRAP_ADMIN: promotes the named account only while no account is
 // an admin, so it can neither re-promote a demoted admin while another admin
 // exists nor promote a name registered after the first admin was made. The
@@ -467,6 +546,7 @@ int main() {
 		{"login_addresses", test_login_addresses},
 		{"inactive_and_deleted_accounts", test_inactive_and_deleted_accounts},
 		{"bootstrap_and_roles", test_bootstrap_and_roles},
+		{"listing_owner_revoked_and_deleted", test_listing_owner_revoked_and_deleted},
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

@@ -200,6 +200,18 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 	}
 }
 
+std::optional<UserRecord> get_user_by_login_session_tag(opennova::db::Database &db,
+                                                         const std::string &session_tag) {
+	if (session_tag.empty()) return std::nullopt;
+	auto rows = db.query(
+		"SELECT p.id, p.username, p.pcid, p.nwh, p.nwhandle, p.account_status, p.role "
+		"FROM active_user_sessions s JOIN players p ON p.id = s.user_id "
+		"WHERE s.session_tag = ? LIMIT 1;",
+		{opennova::db::BindValue(session_tag)});
+	if (rows.empty()) return std::nullopt;
+	return row_to_user(rows.front());
+}
+
 std::vector<UserRecord> list_users(opennova::db::Database &db) {
 	std::vector<UserRecord> out;
 	try {
@@ -470,9 +482,13 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 		if (auto refused = username_refusal(*p.username)) return *refused;
 	}
 	// A new password or an inactive status ends the account's website
-	// sessions and forgets its known login addresses, in the same transaction
-	// as the update: a reset locks out whoever held the old one, and a ban
-	// lifted later revives no session.
+	// sessions, its retail login's session row and its hosting keys, and
+	// forgets its known login addresses, in the same transaction as the
+	// update: a reset locks out whoever held the old one, and a ban lifted
+	// later revives no session. A server the account has listed stays listed;
+	// its next refresh stores no owner (the claim went with the keys), its next
+	// re-host links to no one (refused under ONNET_REQUIRE_HOST_KEY), and POST
+	// /api/admin/hosts/<rid>/stop ends it at once.
 	const bool revoke_sessions = update_revokes_sessions(p);
 
 	std::string sets;
@@ -516,6 +532,11 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 		if (revoke_sessions) {
 			db.exec("DELETE FROM web_sessions WHERE user_id = ?;", {opennova::db::BindValue(id)});
 			db.exec("DELETE FROM login_addresses WHERE user_id = ?;", {opennova::db::BindValue(id)});
+			// The retail login's session row (its LOGINSESSIONTAG names the
+			// account to /NWHost.dll) and the hosting keys it minted.
+			db.exec("DELETE FROM active_user_sessions WHERE user_id = ?;",
+			        {opennova::db::BindValue(id)});
+			db.exec("DELETE FROM host_keys WHERE user_id = ?;", {opennova::db::BindValue(id)});
 		}
 		tx.commit();
 	} catch (const opennova::db::SqliteError &e) {

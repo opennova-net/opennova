@@ -75,6 +75,13 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 std::optional<UserRecord> get_user_by_username(opennova::db::Database &db,
                                                 const std::string &username);
 std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id);
+// The account whose live retail login set `session_tag` (the LOGINSESSIONTAG
+// POST /NWLogin.dll mints after a password check or a pin resume): its
+// active_user_sessions row, until a logout, the 2 h idle sweep, a boot or a
+// revoking update ends it. nullopt for an empty or unknown tag. The account's
+// status is the caller's to check. Throws db::SqliteError.
+std::optional<UserRecord> get_user_by_login_session_tag(opennova::db::Database &db,
+                                                         const std::string &session_tag);
 
 // All registered players, stripped of password_hash, ordered by id.
 // Powers GET /api/admin/users.
@@ -119,6 +126,11 @@ struct CreateUserParams {
 // A username of at most kUsernameMaxBytes bytes with no control byte, else
 // invalid_field.
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
+// Deletes the account with its sessions and hosting keys (ON DELETE CASCADE).
+// A server it has listed stays listed with no owner, and its rows in listed
+// servers' player lists stay with no account (ON DELETE SET NULL); the
+// listing's later refreshes store no owner, the claim having gone with the
+// keys. POST /api/admin/hosts/<rid>/stop ends such a listing.
 MutationResult delete_user(opennova::db::Database &db, int64_t id);
 
 // Optional fields (only those passed-in by the admin) are updated.
@@ -134,8 +146,11 @@ struct UpdateUserParams {
 };
 // A rename takes create_user's username rule (invalid_field). An update that
 // sets a password or a status other than 'active' ends the account's website
-// sessions and forgets its known login addresses in the same transaction
-// (update_revokes_sessions; the HTTP layer drops the retail login pins too).
+// sessions, its retail login's active_user_sessions row and its hosting keys
+// (host_keys), and forgets its known login addresses, in the same transaction
+// (update_revokes_sessions; the HTTP layer drops the retail login pins too). A
+// server the account has listed stays listed and loses its owner at its next
+// refresh (the claim went with the keys).
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p);
 bool update_revokes_sessions(const UpdateUserParams &p);

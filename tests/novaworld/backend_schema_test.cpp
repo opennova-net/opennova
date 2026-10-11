@@ -42,7 +42,8 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
 		"active_hosts", "active_user_sessions",
-		"games", "host_players", "host_roster", "hosts", "login_addresses", "player_game_access",
+		"games", "host_keys", "host_players", "host_roster", "hosts", "login_addresses",
+		"player_game_access",
 		"players", "server_status", "unknown_messages", "web_sessions"
 	};
 	TEST_EXPECT(rows.size() == expected.size());
@@ -265,7 +266,8 @@ int test_web_sessions_and_roles() {
 
 // 0008 over a database that already holds accounts (every deployment before
 // it): the migrations up to 0007 and the seed, then the full set, which
-// applies 0008 alone and gives every existing account the 'player' role.
+// applies 0008 (and 0009 after it) and gives every existing account the
+// 'player' role.
 int test_web_sessions_migration_over_existing_accounts() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
@@ -289,12 +291,94 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 1);
+	TEST_EXPECT(second.applied.size() == 2);
 	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
+	TEST_EXPECT(second.applied[1] == "0009_host_keys.sql");
 	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player') FROM players;");
 	TEST_EXPECT(roles[0].as_int(0).value() == 5);
 	TEST_EXPECT(roles[0].as_int(1).value() == 5);
 	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
+	return 0;
+}
+
+// The fresh schema's account deletes and host_keys (0001, 0002, 0009, edited
+// in place: the service database is reset on deploy). players.id is
+// AUTOINCREMENT, so a deleted account's id is never handed out again; a
+// deleted account leaves its listed server listed and its player-list rows
+// in place with no account (ON DELETE SET NULL) and takes its hosting keys
+// (ON DELETE CASCADE). host_keys is keyed by the key hash, with its indexes; a
+// key needs a player, and a fresh key row carries both times and no claim.
+int test_host_keys_and_account_deletes() {
+	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
+	Database db(":memory:");
+	run_migrations(db, source_dir / "backend" / "migrations");
+	auto add_player = [&db](const std::string &name) {
+		db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+		        "VALUES (?, 'x', ?, '1', ?);",
+		        {opennova::db::BindValue(name), opennova::db::BindValue("pc-" + name),
+		         opennova::db::BindValue(name)});
+		return db.query("SELECT id FROM players WHERE username = ?;", {opennova::db::BindValue(name)})
+		        .front()
+		        .as_int(0)
+		        .value();
+	};
+
+	// The newest account deleted, its id stays retired.
+	const int64_t first = add_player("first");
+	const int64_t newest = add_player("newest");
+	TEST_EXPECT(newest > first);
+	db.exec("DELETE FROM players WHERE id = ?;", {opennova::db::BindValue(newest)});
+	TEST_EXPECT(add_player("newcomer") > newest);
+
+	for (const char *index : {"idx_host_keys_user_id", "idx_host_keys_last_used_at"}) {
+		TEST_EXPECT(db.query("SELECT 1 FROM sqlite_master WHERE type = 'index' "
+		                     "AND tbl_name = 'host_keys' AND name = ?;",
+		                     {opennova::db::BindValue(std::string(index))})
+		                    .size() == 1);
+	}
+	const int64_t host = add_player("host");
+	db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h1', ?);",
+	        {opennova::db::BindValue(host)});
+	auto fresh = db.query("SELECT created_at IS NOT NULL, last_used_at IS NOT NULL, claimed_rid "
+	                      "FROM host_keys WHERE key_hash = 'h1';");
+	TEST_EXPECT(fresh.size() == 1);
+	TEST_EXPECT(fresh[0].as_int(0).value() == 1 && fresh[0].as_int(1).value() == 1);
+	TEST_EXPECT(!fresh[0].as_int(2).has_value());
+	// The hash is the key: a second row under it is refused.
+	bool caught = false;
+	try {
+		db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h1', ?);",
+		        {opennova::db::BindValue(first)});
+	} catch (const opennova::db::SqliteError &) {
+		caught = true;
+	}
+	TEST_EXPECT(caught);
+	// A key for no player is refused.
+	caught = false;
+	try {
+		db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h2', 9999);");
+	} catch (const opennova::db::SqliteError &) {
+		caught = true;
+	}
+	TEST_EXPECT(caught);
+
+	// The host's listed server, with the first account in its player list.
+	db.exec("INSERT INTO active_hosts (rid, gsid, game, app_id, server_name, host_ip, host_port, "
+	        "host_user_id, peer_ip, peer_port) VALUES (7, 'G7', 'jop_2_consumer', '1234', 'Owned', "
+	        "'10.0.0.7', 32768, ?, '10.0.0.7', 32768);",
+	        {opennova::db::BindValue(host)});
+	db.exec("INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip, peer_port) "
+	        "VALUES (7, ?, 'first', '10.0.0.8', 0);",
+	        {opennova::db::BindValue(first)});
+	db.exec("DELETE FROM players WHERE id IN (?, ?);",
+	        {opennova::db::BindValue(host), opennova::db::BindValue(first)});
+	const auto listed = db.query("SELECT server_name, host_user_id FROM active_hosts WHERE rid = 7;");
+	TEST_EXPECT(listed.size() == 1 && listed[0].as_text(0).value() == "Owned");
+	TEST_EXPECT(!listed[0].as_int(1).has_value());
+	const auto joined = db.query("SELECT nwhandle, user_id FROM host_players WHERE host_rid = 7;");
+	TEST_EXPECT(joined.size() == 1 && joined[0].as_text(0).value() == "first");
+	TEST_EXPECT(!joined[0].as_int(1).has_value());
+	TEST_EXPECT(db.query("SELECT 1 FROM host_keys;").empty());
 	return 0;
 }
 
@@ -307,7 +391,8 @@ int main() {
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
 	if (test_web_sessions_migration_over_existing_accounts() != 0) return 1;
+	if (test_host_keys_and_account_deletes() != 0) return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
-	            "web sessions + roles)\n");
+	            "web sessions + roles, host keys)\n");
 	return 0;
 }

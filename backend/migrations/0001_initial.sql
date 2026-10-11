@@ -14,9 +14,12 @@
 --   PostgreSQL NOW()           -> SQLite CURRENT_TIMESTAMP
 
 -- Players (auth + handle).
--- From 001_create_players_table + 002_add_player_handles.
+-- From 001_create_players_table + 002_add_player_handles. AUTOINCREMENT: a
+-- deleted account's id is never handed to a later registrant (a plain rowid
+-- key reuses the highest one), so nothing that kept an id (a listed server's
+-- host_user_id in a lobby's memory, a log line) ever names the newcomer.
 CREATE TABLE players (
-    id            INTEGER PRIMARY KEY,
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     pcid          TEXT NOT NULL UNIQUE,

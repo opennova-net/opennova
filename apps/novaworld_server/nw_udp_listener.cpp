@@ -363,6 +363,10 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	// [orig: CNapiGameSession_OnNovaWorldConnected @0x4d1627 sprintf("http://%s")].
 	web_domain_ = config.public_host + ":" + std::to_string(config.http_port);
 	lobby_session_.set_glsvss_results(config.glsvss_results);
+	lobby_session_.set_require_host_key(config.require_host_key);
+	if (config.require_host_key) {
+		std::printf("[nwudp] ONNET_REQUIRE_HOST_KEY: no host is listed before its HostKey names an account\n");
+	}
 
 	// The receive thread's own connection (Database is single-threaded): the
 	// lobby session's host persistence and the maintenance lookup run on it.
