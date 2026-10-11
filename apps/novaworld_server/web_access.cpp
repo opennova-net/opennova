@@ -44,6 +44,18 @@ crow::json::wvalue session_user_json(int64_t id, const std::string &username,
 
 void AccessMiddleware::after_handle(crow::request &req, crow::response &res, context &ctx) {
 	if (!ctx.set_cookie.empty()) res.add_header("Set-Cookie", ctx.set_cookie);
+	// The backstop: Crow writes header text as it is, so a CR or LF in one would
+	// split the response. Every header the routes build is checked where it is
+	// built (set_cookie_text); one that still holds a control byte is dropped.
+	for (auto it = res.headers.begin(); it != res.headers.end();) {
+		if (header_text_ok(it->first) && header_text_ok(it->second)) {
+			++it;
+			continue;
+		}
+		std::fprintf(stderr, "[http] dropped a response header holding a control byte: '%s: %s'\n",
+				loggable(it->first).c_str(), loggable(it->second).c_str());
+		it = res.headers.erase(it);
+	}
 	if (!ctx.admin_actor.empty()) {
 		const std::string method = crow::method_name(req.method);
 		std::printf("[http] admin %s %s by %s -> %d\n", method.c_str(), loggable(req.url).c_str(),
@@ -79,10 +91,11 @@ std::string WebAccess::client_ip(const crow::request &req) const {
 }
 
 std::string WebAccess::session_cookie(const std::string &token, int64_t max_age) const {
-	std::string cookie = cookie_name_ + "=" + token + "; Path=/; Max-Age=" +
-	                     std::to_string(max_age) + "; HttpOnly; SameSite=Lax";
-	if (cookie_secure_) cookie += "; Secure";
-	return cookie;
+	std::string attributes =
+			"Path=/; Max-Age=" + std::to_string(max_age) + "; HttpOnly; SameSite=Lax";
+	if (cookie_secure_)
+		attributes += "; Secure";
+	return set_cookie_text(cookie_name_, token, attributes);
 }
 
 std::string WebAccess::session_token(const crow::request &req) const {

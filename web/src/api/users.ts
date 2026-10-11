@@ -1,5 +1,6 @@
-// Admin user-management API. Goes through `adminClient`, which attaches
-// the bearer token from local storage and clears it on 401.
+// Admin user-management API. Goes through `adminClient`: an admin-role
+// session's cookie authorizes it, or the bearer token from local storage,
+// which the client attaches when one is stored and drops when refused.
 //
 // Public self-signup at /api/register goes through the plain
 // `apiClient` so anonymous browsers can call it.

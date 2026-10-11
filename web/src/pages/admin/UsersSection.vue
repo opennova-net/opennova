@@ -3,7 +3,7 @@
     <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-3xl font-semibold text-ink">Users</h1>
-        <p class="text-sm text-ink-muted">Create, edit, and remove player accounts.</p>
+        <p class="text-sm text-ink-muted">Create, edit, and remove player accounts, and choose who is an admin.</p>
       </div>
       <button
         type="button"
@@ -15,21 +15,27 @@
       </button>
     </header>
 
-    <div v-if="message" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">
+    <!-- Live regions, always in the page so a screen reader hears what lands in
+         them (a role change's result, any action's failure); the boxes below
+         are their visible copies. -->
+    <div role="status" class="sr-only">{{ message }}</div>
+    <div role="alert" class="sr-only">{{ error }}</div>
+    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">
       {{ message }}
     </div>
-    <div v-if="error" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
+    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
       {{ error }}
     </div>
 
     <section class="space-y-4">
       <h2 class="text-xl font-semibold text-ink">Existing users</h2>
-      <div class="overflow-hidden rounded-panel border border-border bg-panel">
+      <div class="overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
           <thead>
             <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
               <th class="px-4 py-3">ID</th>
               <th class="px-4 py-3">Username</th>
+              <th class="px-4 py-3">Role</th>
               <th class="px-4 py-3">PCID</th>
               <th class="px-4 py-3">NW Handle</th>
               <th class="px-4 py-3">NWH</th>
@@ -38,15 +44,18 @@
           </thead>
           <tbody class="divide-y divide-border text-sm text-ink">
             <tr v-if="loading">
-              <td colspan="6" class="px-4 py-6 text-center text-ink-muted">Loading…</td>
+              <td colspan="7" class="px-4 py-6 text-center text-ink-muted">Loading…</td>
             </tr>
             <tr v-else-if="users.length === 0">
-              <td colspan="6" class="px-4 py-6 text-center text-ink-muted">No users yet.</td>
+              <td colspan="7" class="px-4 py-6 text-center text-ink-muted">No users yet.</td>
             </tr>
             <tr v-for="u in users" :key="u.id" class="hover:bg-hover align-top">
               <td class="px-4 py-3 font-mono text-xs">{{ u.id }}</td>
               <template v-if="editing[u.id]">
                 <td class="px-4 py-3"><input v-model="edits[u.id].username" class="w-full rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink"/></td>
+                <td class="px-4 py-3">
+                  <span :class="roleBadgeClass(u.role)">{{ u.role }}</span>
+                </td>
                 <td class="px-4 py-3"><input v-model="edits[u.id].pcid"     class="w-full rounded-control border border-border bg-surface px-2 py-1 font-mono text-xs text-ink"/></td>
                 <td class="px-4 py-3"><input v-model="edits[u.id].nwhandle" class="w-full rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink"/></td>
                 <td class="px-4 py-3"><input v-model="edits[u.id].nwh"      class="w-16 rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink"/></td>
@@ -62,7 +71,21 @@
                 </td>
               </template>
               <template v-else>
-                <td class="px-4 py-3">{{ u.username }}</td>
+                <td class="px-4 py-3">
+                  {{ u.username }}
+                  <span v-if="isSelf(u)" class="ml-1 text-xs text-ink-muted">(you)</span>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap">
+                  <span :class="roleBadgeClass(u.role)">{{ u.role }}</span>
+                  <button
+                    type="button"
+                    class="ml-3 text-xs text-accent/80 hover:text-accent disabled:opacity-40"
+                    :disabled="roleBusy[u.id]"
+                    @click="changeRole(u, u.role === 'admin' ? 'player' : 'admin')"
+                  >
+                    {{ u.role === 'admin' ? 'Make player' : 'Make admin' }}<span class="sr-only">, {{ u.username }}</span>
+                  </button>
+                </td>
                 <td class="px-4 py-3 font-mono text-xs">{{ u.pcid }}</td>
                 <td class="px-4 py-3">{{ u.nwhandle }}</td>
                 <td class="px-4 py-3 font-mono text-xs">{{ u.nwh }}</td>
@@ -118,12 +141,26 @@ import {
   registerUser,
   updateUser,
 } from '../../api/users';
-import type { User } from '../../types/users';
+import { hasAdminToken } from '../../api/authToken';
+import { useSession } from '../../composables/useSession';
+import type { Role, User } from '../../types/users';
 
 const users = ref<User[]>([]);
 const loading = ref(false);
 const message = ref<string | null>(null);
 const error = ref<string | null>(null);
+
+const { user: sessionUser, refresh: refreshSession } = useSession();
+const roleBusy = reactive<Record<number, boolean>>({});
+
+function roleBadgeClass(role: Role): string {
+  const base = 'rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
+  return role === 'admin' ? `${base} bg-accent/15 text-accent` : `${base} bg-hover text-ink-muted`;
+}
+
+function isSelf(u: User): boolean {
+  return sessionUser.value?.id === u.id;
+}
 
 const editing = reactive<Record<number, boolean>>({});
 const edits   = reactive<Record<number, {
@@ -207,6 +244,90 @@ async function remove(id: number) {
     await refresh();
   } catch (e) {
     flashError(e);
+  }
+}
+
+// An account that can log in: `active`, or a status stored empty (which the
+// server reads as active).
+function isActiveAccount(u: User): boolean {
+  return (u.account_status || 'active') === 'active';
+}
+
+// What the admin confirms before a role change, judged on `list`, the users
+// as the server has them now. Demoting one's own account says that the
+// session loses these pages at once (unless a valid admin token is also
+// held). Demoting the last admin who can log in says how one comes back:
+// ONNET_BOOTSTRAP_ADMIN promotes only while NO account holds the admin role
+// (bootstrap_admin in apps/novaworld_server/auth.cpp), so a banned or
+// restricted admin left behind blocks it and only the token remains.
+function roleChangePrompt(u: User, role: Role, list: User[]): string {
+  if (role === 'admin') {
+    return `Make ${u.username} an admin? An admin can manage every account and the server.`;
+  }
+  const lines: string[] = [];
+  if (isSelf(u)) {
+    lines.push(`You are about to remove your own admin role (${u.username}).`);
+    lines.push(
+      hasAdminToken.value
+        ? 'Your session loses admin access at once; these pages stay open only if the stored admin token is valid.'
+        : 'Your session loses admin access at once, and these pages close.',
+    );
+  } else {
+    lines.push(`Make ${u.username} a player? Their session loses admin access at once.`);
+  }
+  const otherAdmins = list.filter((x) => x.role === 'admin' && x.id !== u.id);
+  const inactiveAdmins = otherAdmins.filter((x) => !isActiveAccount(x));
+  if (otherAdmins.length === inactiveAdmins.length) {
+    if (inactiveAdmins.length === 0) {
+      lines.push(
+        'No other account is an admin. Only the ADMIN_API_TOKEN, or ONNET_BOOTSTRAP_ADMIN at the next server start, can make one again.',
+      );
+    } else {
+      const names = inactiveAdmins.map((x) => `${x.username} (${x.account_status})`).join(', ');
+      lines.push(
+        `No other admin can log in: ${names} ${inactiveAdmins.length === 1 ? 'holds' : 'hold'} the admin role but ${inactiveAdmins.length === 1 ? 'is' : 'are'} not active. ` +
+          'While any account holds the role, ONNET_BOOTSTRAP_ADMIN does nothing, so only the ADMIN_API_TOKEN can make a working admin again.',
+      );
+    }
+  }
+  return lines.join('\n\n');
+}
+
+// PUT /api/admin/users/<id> {role}, after the admin confirms. The list is
+// read again first, so the confirm judges the server's current admins, not
+// the ones this page loaded.
+async function changeRole(u: User, role: Role) {
+  if (roleBusy[u.id]) return;
+  roleBusy[u.id] = true;
+  try {
+    const list = await listUsers();
+    users.value = list;
+    const current = list.find((x) => x.id === u.id);
+    if (!current) {
+      flashError(new Error(`${u.username} no longer exists.`));
+      return;
+    }
+    if (current.role === role) {
+      flashMessage(`${current.username} is already ${role === 'admin' ? 'an admin' : 'a player'}.`);
+      return;
+    }
+    if (!confirm(roleChangePrompt(current, role, list))) return;
+    const self = isSelf(current);
+    const updated = await updateUser(current.id, { role });
+    users.value = users.value.map((x) => (x.id === updated.id ? updated : x));
+    flashMessage(`${updated.username} is now ${updated.role === 'admin' ? 'an admin' : 'a player'}.`);
+    if (self) {
+      // The gate follows the session's role: without the token, a demoted
+      // admin's pages close here. With a token stored, the list is asked for
+      // again at once, so a token the admin session was covering for is
+      // refused now (and dropped) rather than on some later request.
+      await refreshSession();
+      if (hasAdminToken.value) await refresh();
+    }
+  } catch (e) {
+    flashError(e);
+  } finally {
+    roleBusy[u.id] = false;
   }
 }
 
