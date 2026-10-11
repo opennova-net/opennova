@@ -563,6 +563,24 @@ bool check_spectator_convert_deploys() {
 			"a named spawn point of any team places the converted body");
 }
 
+// D-NET-440: the C2S 0x51 convert runs inline in retail's receive pump, ahead
+// of Server_BuildEntitySlotLists, whose humans count skips a hidden player; so
+// the convert's own tick already counts the converted body out.
+// [orig: Server_TickUpdate, the pump call @0x51D895 and the count call @0x51D89A;
+//  Server_BuildEntitySlotLists `test bl,al` @0x4F9820; Server_KillPlayerAndNotify
+//  `or Flags,1` @0x519E92]
+bool check_spectator_convert_humans_count() {
+	HostFixture f(2);
+	f.ctx.config.permanent_death = true;
+	f.ctx.config.spectator_slots = 1;
+	inmatch::Server_TickUpdate(f.ctx);
+	if (!expect(f.world.cached.humans == 2, "both players count as humans")) return false;
+	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
+	inmatch::Server_TickUpdate(f.ctx);
+	return expect(f.conn(0).link.spectator && f.world.cached.humans == 1,
+			"the convert's own tick counts one human fewer");
+}
+
 // The S2C 0x32 join and leave lines: [1][name][team] from the player add,
 // [2][name][team] from the disconnect, each to every OTHER in-match
 // connection [orig: Server_PlayerAdd @0x51d21e..0x51d291;
@@ -1608,6 +1626,7 @@ int main() {
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_spectator_respawn_request() && ok;
 	ok = check_spectator_convert_deploys() && ok;
+	ok = check_spectator_convert_humans_count() && ok;
 	ok = check_join_leave_lines() && ok;
 	ok = check_medic_revive_transaction() && ok;
 	ok = check_medic_revive_gates() && ok;

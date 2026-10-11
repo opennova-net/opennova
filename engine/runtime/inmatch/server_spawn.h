@@ -116,7 +116,8 @@ void Server_ChangeEntityTeam(NapiNPServerCtx &ctx, world::World &world,
 // disabled, its spawn-wave removal, the hold latch (the request named no
 // target), the deploy leg (Server_ReleasePlayerDeployment) over the request's
 // handle, its private replies, then S2C 0x32 [5][name] to every active player.
-// Runs once per host tick before the state fan. [orig: Server_KillPlayerAndNotify
+// Runs once per host tick at the receive pump's place, before the humans
+// count and the state fan. [orig: Server_KillPlayerAndNotify
 //  @0x519E00: gates @0x519E16..0x519E3F, the convert @0x519E5B..0x519EA4,
 //  SpawnWaveList_RemovePlayer @0x519EB3, the latch @0x519EBC..0x519EC8,
 //  Server_ProcessPlayerDeath @0x519ECE, 0x32 @0x519EDC..0x519F43]

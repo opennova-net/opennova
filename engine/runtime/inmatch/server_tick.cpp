@@ -1706,16 +1706,19 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		replication::drain_connection_c2s(world, conn.link);
 	}
 
-	// (1b) The WAC 'humans' count, rebuilt each server tick just before the script
-	// pass. The original also uses it as the empty-server world-run gate
-	// (entities/WAC advance while humans > 0 || ticks == 0).
+	// The C2S 0x51 spectator converts the dispatcher admitted this frame run
+	// inline in retail's receive dispatch, so ahead of the humans count below
+	// and the state fan: a converted body is hidden before it is counted.
+	// [orig: Server_TickUpdate, the receive pump call @0x51D895]
+	Server_ProcessSpectatorRespawnRequests(ctx, world);
+
+	// (1b) The WAC 'humans' count, rebuilt each server tick right after the
+	// receive pump, just before the script pass. The original also uses it as
+	// the empty-server world-run gate (entities/WAC advance while humans > 0 ||
+	// ticks == 0).
 	// [orig: Server_BuildEntitySlotLists @0x4f97a0, called from Server_TickUpdate
 	//  @0x51d89a before the WAC pre-pass]
 	world.cached.humans = world.registry.count_humans();
-
-	// The C2S 0x51 spectator converts the dispatcher admitted this frame run
-	// inline in retail's receive dispatch, ahead of the state fan.
-	Server_ProcessSpectatorRespawnRequests(ctx, world);
 	lap.mark(devtools::Slot::SIM_SERVER_INPUT);
 
 
