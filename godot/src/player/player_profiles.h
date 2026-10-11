@@ -106,11 +106,12 @@ public:
 	Ref<PlayerInfoKitRestore> restore_player_info_kit(int p_side,
 			const Ref<WeaponDatabase> &p_weapons) const;
 	// PLAYER_INFO's dialog save (its ACCEPT, a side radio, a class pick) into the
-	// current weapon.sav record: `player_class` (5..9) to both sides, each
-	// non-empty `side_profiles[side]` {avatar_a, avatar_b, avatar_packed} to its
-	// side, and a `kit` array to the shown side's (`team`) page of `kit_class`,
-	// the class whose page the screen restored (`player_class` when absent or
-	// outside 5..9). ERR_INVALID_PARAMETER for a snapshot the record cannot take.
+	// current weapon.sav record: `player_class` (5..9) to both sides, the shown
+	// side's (`team`, 0 or 1) `side_profiles[team]` {avatar_a, avatar_b,
+	// avatar_packed} to that side alone when non-empty, and a `kit` array to its
+	// page of `kit_class`, the class whose page the screen restored (`player_class`
+	// when absent or outside 5..9). ERR_INVALID_PARAMETER for a snapshot the record
+	// cannot take.
 	Error apply_character_selection(const Dictionary &p_profile);
 
 	void record_mission_start(int p_campaign) { store_.record_mission_start(p_campaign); }

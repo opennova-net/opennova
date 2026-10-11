@@ -1327,3 +1327,49 @@ func test_class_pick_saves_the_class_it_leaves() -> void:
 	_ammo_driver.select_row(_ammo_id("PLAYERCLASS"), 0)  # back to class 5
 	assert_eq(_selected_text("PRIMARY"), "WPN_P2", "the medic page's edit is restored")
 	assert_eq(_selected_text("SECONDARY"), "WPN_S1")
+
+
+# --- The dialog's write of the side not shown (D-PLAYERINFO-20) ----------------
+
+# The dialog's save writes the class to both sides and the character of the shown
+# side alone [orig: PlayerInfo_SaveFromDialog @0x55EE3F..0x55EE6D; the shown side's
+# stores @0x55EEAB / @0x55EEEE / @0x55EF31, each indexed by g_PlayerInfoTeamIndex]:
+# a red character the table no longer resolves stays as saved through a blue
+# ACCEPT, though the screen holds red's first combo for it.
+func test_accept_leaves_the_side_not_shown() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root)
+	if root == null:
+		return
+	var store := PlayerProfile.store()
+	var stale_packed := 0x8000 | (63 << 9) | (15 << 5) | 30
+	assert_eq(store.apply_character_selection({"team": 1, "player_class": 5,
+			"side_profiles": [{}, {"avatar_a": 30, "avatar_b": 15, "avatar_packed": stale_packed}]}), OK)
+	assert_null(_load_db().resolve_character_id(stale_packed, 1), "the table has no such character")
+	# Blue's nationality and division bytes and red's class byte unlike what the
+	# ACCEPT writes, so each write below shows.
+	var bytes := store.weapon_sav_bytes()
+	bytes[HEADER_BYTES + 1] = 7
+	bytes[HEADER_BYTES + 2] = 3
+	bytes[HEADER_BYTES + SIDE_BYTES] = 9
+	store.load_bytes(store.player_sav_bytes(), true, bytes, true, "")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_persisted_profile(PlayerProfile.load_character_profile(root))
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
+	var sides: Array = companion.snapshot()["side_profiles"]
+	var blue: Dictionary = sides[0]
+	var shown := [int(blue.get("avatar_a", -1)), int(blue.get("avatar_b", -1)),
+			int(blue.get("avatar_packed", -1))]
+	assert_ne(shown, [7, 3, 0x0200], "the screen's blue character differs from the record's bytes")
+	assert_eq(int((sides[1] as Dictionary).get("avatar_packed", -1)), 0x8204,
+			"the screen holds red's first combo for it")
+
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	var summary := store.character_summary()
+	assert_eq([summary.red.avatar_a, summary.red.avatar_b, summary.red.avatar_packed],
+			[30, 15, stale_packed], "the ACCEPT on blue leaves red's bytes")
+	assert_eq([summary.blue.avatar_a, summary.blue.avatar_b, summary.blue.avatar_packed], shown,
+			"and writes blue's")
+	assert_eq([summary.blue.player_class, summary.red.player_class], [5, 5],
+			"the class goes to both sides, red's 9 included")
