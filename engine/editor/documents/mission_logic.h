@@ -96,8 +96,18 @@ std::string logic_add_refusal(const MissionDocument &document, NodeId event, boo
 // record holds a parameter its type does not read), then its sub-type and each parameter its type reads
 // set to its kind's default, every edit after the Add naming what it made (batch_made). False, with why, where the event takes no more
 // or is no event of the document.
+// `presets`: parameters the new record takes instead of their kinds' defaults (S24: a recipe's, a subject's
+// value, a slot the type does not read included).
+struct LogicPreset {
+	int slot = 0;
+	int64_t value = 0;
+};
 bool logic_add_edits(const MissionDocument &document, NodeId event, const LogicType &type, size_t position,
-                     std::vector<Edit> &out, std::string &error);
+                     std::vector<Edit> &out, std::string &error, const std::vector<LogicPreset> &presets = {});
+// The add's edits appended to `out` (the batch so far: the Add names batch_made of its place there, so a batch
+// that made the event first adds to it, `event` being that batch_made), no refusal asked.
+void logic_record_edits(NodeId event, const LogicType &type, size_t position, const std::vector<LogicPreset> &presets,
+                        std::vector<Edit> &out);
 // The edits that give a trigger or an action another type: its type and sub-type set, each parameter
 // whose kind the new type reads in the same slot kept, every other one the new type reads set to its
 // kind's default, and one the new type does not read set to -1, as every shipped record holds one
@@ -111,6 +121,11 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
                       std::vector<Edit> &out, std::string &error);
 // The Set of a trigger's condition flags that negates it or not, and the one that joins it to the next
 // by `join`, each keeping the flag word's other bits.
+// The steps a wait of `seconds` comes to, as a delay or a repeat holds it: round(seconds / 1.024), a step being
+// bms::kEventStepTicks (64) ticks of the 62.5 Hz clock [docs/mission/bms-event-runtime-re.md 1.6]; 0 at least, 1023
+// at most (ten bits on disk). Past bms::kEventStepsUnwrapped (512) steps the game's countdown wraps and ends on
+// the next pass (bms::event_steps_wrap; logic_steps_words says so).
+int64_t logic_seconds_steps(double seconds);
 bool logic_negate_edit(const MissionDocument &document, const NodeAddress &trigger, bool negated, Edit &out);
 bool logic_join_edit(const MissionDocument &document, const NodeAddress &trigger, LogicJoin join, Edit &out);
 

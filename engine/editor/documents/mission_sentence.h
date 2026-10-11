@@ -80,6 +80,19 @@ LogicJoin trigger_join(const bms::Trigger &trigger);
 // "and", "or", "or else" (exclusive: one of the two, not both).
 const char *logic_join_words(LogicJoin join);
 
+// A trigger's or an action's words in runs (S24, the board's chips): each run its text and what it is, a
+// parameter's words (`slot` 0 to 3, its param1 to param4: the value a chip there picks), the type's own words
+// (kLogicTypeSlot: what a retype changes), or a note on what the game makes of it (-1). Joined
+// (logic_runs_text) they are trigger_words' and action_words': the words are made from them.
+inline constexpr int kLogicTypeSlot = 4;
+struct LogicRun {
+	std::string text;
+	int slot = -1;
+};
+std::vector<LogicRun> trigger_runs(const bms::Trigger &trigger, const MissionNames &names);
+std::vector<LogicRun> action_runs(const bms::Action &action, const MissionNames &names, const bms::Header *header);
+std::string logic_runs_text(const std::vector<LogicRun> &runs);
+
 // One trigger in words, its negation in them ("Hostage #10034 is not destroyed"). Whether an SSN slot keys
 // a relation record the game never writes for it is the engine's (mission::trigger_ssn_unrecorded).
 std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names);
@@ -133,6 +146,10 @@ struct LogicType {
 // Every trigger type the evaluator has a case for, and every action type the dispatcher has one for
 // (and each AI command of the four AI actions), in their groups' order.
 const std::vector<LogicType> &logic_types(bool actions);
+// The types the shipped missions use most, the most first (S24: what the type picker offers as Common): the
+// eight trigger types and the eight action types the install's 115 missions hold the most records of (measured
+// over their 3,858 triggers and 4,971 actions; the editor_mission_logic ctest's retail leg pins the ranking).
+const std::vector<const LogicType *> &logic_common_types(bool actions);
 // The row of a trigger's or an action's type and sub-type (null: none: an unknown type).
 const LogicType *logic_type(bool action, int32_t type, int32_t sub);
 // An action type's own title whatever its sub-type ("Change group AI"); null for a type the dispatcher has

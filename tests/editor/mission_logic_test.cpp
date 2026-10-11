@@ -11,6 +11,7 @@
 // nothing, the value each value kind's records hold most often measured, and what every record holds where its
 // type reads nothing (-1 in a parameter, 0 in a sub-type): the defaults a new
 // record's parameters take.
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -26,6 +27,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_logic.h>
+#include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_sentence.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/session/preferences_store.h>
@@ -305,6 +307,60 @@ int test_uses() {
 	return 0;
 }
 
+// S24's helpers: a wait in seconds as the steps the game counts, the Common types, a new event of a recipe (one
+// batch: the event at the end, its flags and its trigger with its presets and the subject's value), a recipe
+// over a record of another kind refused, an add with presets, and what a record is to a parameter.
+int test_recipes_and_steps() {
+	// Steps of 1.024 s, rounded; ten bits at most; past 512 the countdown wraps (the words say so).
+	TEST_EXPECT(logic_seconds_steps(5.0) == 5 && logic_seconds_steps(5.1) == 5 && logic_seconds_steps(1.5) == 1);
+	TEST_EXPECT(logic_seconds_steps(0.0) == 0 && logic_seconds_steps(-3.0) == 0 && logic_seconds_steps(0.6) == 1);
+	TEST_EXPECT(logic_seconds_steps(512 * 1.024) == 512 && logic_seconds_steps(5000.0) == 1023);
+	TEST_EXPECT(logic_steps_words(logic_seconds_steps(600.0)).find("wraps") != std::string::npos);
+	TEST_EXPECT(logic_common_types(false).size() == 8 && logic_common_types(true).size() == 8);
+	TEST_EXPECT(same(logic_common_types(false)[0]->title, "Entity is destroyed") &&
+	            same(logic_common_types(true)[0]->title, "Send group along a path"));
+	TEST_EXPECT(mission_recipe("player_in_area") && !mission_recipe("player_enters"));
+	TEST_EXPECT(mission_recipes_for(mission::ParamKind::Zone).size() == 2);
+
+	Fixture f;
+	TEST_EXPECT(f.load());
+	const MissionDocument &m = as_mission(*f.document);
+	mission::ParamKind kind = mission::ParamKind::Unused;
+	int64_t value = 0;
+	TEST_EXPECT(mission_record_value(m, f.zone20, kind, value) && kind == mission::ParamKind::Zone && value == 20);
+	TEST_EXPECT(mission_record_value(m, f.walker, kind, value) && kind == mission::ParamKind::Entity && value == f.ssn);
+	TEST_EXPECT(mission_record_value(m, f.second, kind, value) && kind == mission::ParamKind::Event && value == 1);
+	TEST_EXPECT(!mission_record_value(m, f.trigger, kind, value));
+
+	// The player inside zone 30: one batch, the event last, its sentence reads it; the others keep their places.
+	const std::string before_first = m.record_title(f.first), before_second = m.record_title(f.second);
+	std::vector<Edit> edits;
+	std::string error;
+	TEST_EXPECT(recipe_event_edits(m, *mission_recipe("player_in_area"), f.zone30, edits, error));
+	TEST_EXPECT(edits.size() >= 4 && edits[0].operation == EditOperation::Add && edits[1].operation == EditOperation::Add &&
+	            edits[1].address.row == batch_made(0));
+	TEST_EXPECT(f.apply(edits));
+	std::vector<const Node *> events = m.rows_of(MissionKind::Event);
+	TEST_EXPECT(events.size() == 3 && same(m.record_title(f.first), before_first) && same(m.record_title(f.second), before_second));
+	const NodeAddress made{events[2]->id, events[2]->kind, 0};
+	TEST_EXPECT(same(m.record_title(made), "Event 3: When the player is in Zone 30 (mission area), then nothing."));
+	// At the mission's start: no trigger, the start flag.
+	TEST_EXPECT(recipe_event_edits(m, *mission_recipe("at_start"), NodeAddress(), edits, error) && f.apply(edits));
+	events = m.rows_of(MissionKind::Event);
+	TEST_EXPECT(events.size() == 4 && same(m.record_title({events[3]->id, events[3]->kind, 0}), "Event 4: At the mission's start, then nothing."));
+	// A recipe over an entity given an area: refused, in words.
+	TEST_EXPECT(!recipe_event_edits(m, *mission_recipe("destroyed"), f.zone20, edits, error) && !error.empty());
+	TEST_EXPECT(recipe_event_edits(m, *mission_recipe("destroyed"), f.walker, edits, error) && f.apply(edits));
+	events = m.rows_of(MissionKind::Event);
+	TEST_EXPECT(same(m.record_title({events[4]->id, events[4]->kind, 0}),
+	                 "Event 5: When Organic #" + std::to_string(f.ssn) + " is destroyed, then nothing."));
+	// An add with presets: the walker's SSN where the kind's default would be none.
+	const LogicType *destroyed = logic_type(false, int32_t(bms::TriggerMainType::Single), 4);
+	TEST_EXPECT(destroyed && logic_add_edits(m, f.second.row, *destroyed, SIZE_MAX, edits, error, {{0, f.ssn}}) && f.apply(edits));
+	TEST_EXPECT(m.record_title(f.second).find("and Organic #" + std::to_string(f.ssn) + " is destroyed") != std::string::npos);
+	return 0;
+}
+
 // The two queries over a session: the event's form, the types, an add planned and applied through
 // edit_record, a refusal answered, a record's uses.
 int test_wire() {
@@ -368,6 +424,76 @@ bool measured(mission::ParamKind kind) {
 	using K = mission::ParamKind;
 	return kind == K::Count || kind == K::Hp || kind == K::DistanceM || kind == K::Seconds || kind == K::SpeedKph ||
 	       kind == K::Bool || kind == K::Team || kind == K::SubGoal;
+}
+
+// The types the shipped missions use most (logic_common_types, the type picker's Common) and the compositions
+// the recipes offer (mission_recipes): over the install's 115 missions, the eight trigger and action types holding
+// the most records, in order, and each recipe's events and missions, as the tables state them.
+int test_retail_common_and_recipes() {
+	const std::string root = retail::install();
+	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (the types most used, the recipes' measures)");
+	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
+	expansions.insert(expansions.begin(), std::string());
+	std::set<std::string> seen;
+	std::map<const LogicType *, size_t> held[2];
+	std::vector<size_t> events(mission_recipes().size());
+	std::vector<std::set<std::string>> missions(mission_recipes().size());
+	size_t read = 0;
+	for (const std::string &expansion : expansions) {
+		opennova::Vfs game;
+		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
+		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
+		for (const opennova::VfsFileLocation &file : game.list_files()) {
+			if (retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string()) != ".bms") continue;
+			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
+			std::vector<uint8_t> bytes;
+			TEST_EXPECT(game.read_file(file.logical_name, bytes));
+			std::unique_ptr<Document> document = open(bytes, file.logical_name.c_str());
+			TEST_EXPECT(document);
+			if (!document) continue;
+			++read;
+			const MissionDocument &m = as_mission(*document);
+			const std::string name = retail::lower_ascii(std::filesystem::path(file.logical_name).filename().string());
+			for (const Node *row : m.rows_of(MissionKind::Event)) {
+				const EventRow &event = static_cast<const EventRow &>(*row);
+				for (const bms::Trigger &trigger : event.native.triggers)
+					if (const LogicType *type = logic_type(false, int32_t(trigger.main_type), trigger.sub_type)) ++held[0][type];
+				for (const bms::Action &action : event.native.actions)
+					if (const LogicType *type = logic_type(true, int32_t(action.action_type), action.action_sub_type)) ++held[1][type];
+				for (size_t r = 0; r < mission_recipes().size(); ++r)
+					if (recipe_matches(mission_recipes()[r], event.native.event, event.native.triggers)) {
+						++events[r];
+						missions[r].insert(name);
+					}
+			}
+		}
+	}
+	if (read == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
+	TEST_EXPECT(read == 115);
+	for (const bool actions : {false, true}) {
+		std::vector<std::pair<size_t, const LogicType *>> ranked;
+		for (const auto &[type, count] : held[actions]) ranked.push_back({count, type});
+		std::sort(ranked.begin(), ranked.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+		const std::vector<const LogicType *> &common = logic_common_types(actions);
+		std::printf("  the %s most used:", actions ? "actions" : "triggers");
+		for (size_t i = 0; i < common.size() && i < ranked.size(); ++i)
+			std::printf(" [%s %zu]", ranked[i].second->title, ranked[i].first);
+		std::printf("\n");
+		TEST_EXPECT(common.size() == 8 && ranked.size() > 8 && ranked[7].first > ranked[8].first);
+		for (size_t i = 0; i < common.size(); ++i) TEST_EXPECT(common[i] == ranked[i].second);
+	}
+	size_t differ = 0;
+	for (size_t r = 0; r < mission_recipes().size(); ++r) {
+		const MissionRecipe &recipe = mission_recipes()[r];
+		std::string first;
+		size_t named = 0;
+		for (const std::string &mission : missions[r])
+			if (named++ < 3) first += (first.empty() ? "" : ", ") + mission;
+		std::printf("  recipe %s: %zu events in %zu missions (%s)\n", recipe.token, events[r], missions[r].size(), first.c_str());
+		differ += events[r] != recipe.events || missions[r].size() != recipe.missions || first != recipe.seen_in;
+	}
+	TEST_EXPECT(differ == 0);
+	return 0;
 }
 
 // Every shipped trigger and action given a form, retyped to its own type planning nothing; and the
@@ -498,6 +624,8 @@ int main(int argc, char **argv) {
 	if (test_add_and_limit() != 0) return 1;
 	if (test_retype_move_negate() != 0) return 1;
 	if (test_uses() != 0) return 1;
+	if (test_recipes_and_steps() != 0) return 1;
 	if (test_wire() != 0) return 1;
-	return test_retail();
+	if (test_retail() != 0) return 1;
+	return test_retail_common_and_recipes();
 }

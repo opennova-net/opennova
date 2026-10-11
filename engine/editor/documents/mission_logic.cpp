@@ -1,5 +1,7 @@
 #include "mission_logic.h"
 
+#include <cmath>
+
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
 #include <formats/mission/mission_chains.h>
@@ -15,6 +17,8 @@ using K = ParamKind;
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 const char *const kParams[4] = {"param1", "param2", "param3", "param4"};
+// The most steps a delay or a repeat holds: ten bits on disk (bms.h's Event: the upper 10 bits of its word).
+constexpr int64_t kMostSteps = 1023;
 
 int64_t param_of(const bms::Trigger &trigger, int slot) {
 	const int32_t params[4] = {trigger.param1, trigger.param2, trigger.param3, trigger.param4};
@@ -251,29 +255,43 @@ std::string logic_add_refusal(const MissionDocument &document, NodeId event, boo
 }
 
 bool logic_add_edits(const MissionDocument &document, NodeId event, const LogicType &type, size_t position,
-                     std::vector<Edit> &out, std::string &error) {
+                     std::vector<Edit> &out, std::string &error, const std::vector<LogicPreset> &presets) {
 	error = logic_add_refusal(document, event, type.action);
 	if (!error.empty()) return false;
-	const NodeKind kind = k(type.action ? MissionKind::Action : MissionKind::Trigger);
 	out.clear();
+	logic_record_edits(event, type, position, presets, out);
+	return true;
+}
+
+void logic_record_edits(NodeId event, const LogicType &type, size_t position, const std::vector<LogicPreset> &presets,
+                        std::vector<Edit> &out) {
+	const NodeKind kind = k(type.action ? MissionKind::Action : MissionKind::Trigger);
 	Edit add;
 	add.operation = EditOperation::Add;
 	add.address = {event, kind, 0};
 	add.position = position;
 	add.field = type.action ? "action_type" : "main_type";
 	add.value = int64_t(type.type);
+	const NodeAddress made{event, kind, batch_made(out.size())};
 	out.push_back(add);
-	const NodeAddress made{event, kind, batch_made(0)};
 	if (type.sub) out.push_back(set_of(made, type.action ? "action_sub_type" : "sub_type", type.sub));
 	for (int slot = 0; slot < 4; ++slot) {
+		const LogicPreset *preset = nullptr;
+		for (const LogicPreset &each : presets)
+			if (each.slot == slot) preset = &each;
 		const ParamKind param = kind_of(type.action, type.type, type.sub, slot);
 		// A slot its type does not read stays as the new record holds it, -1 (kUnreadParam: what every
-		// shipped record holds there); one it reads takes its kind's default.
-		if (param == K::Unused) continue;
-		const int64_t value = logic_param_default(param);
+		// shipped record holds there); one it reads takes its kind's default; a preset takes its value.
+		if (!preset && param == K::Unused) continue;
+		const int64_t value = preset ? preset->value : logic_param_default(param);
 		if (value != kUnreadParam) out.push_back(set_of(made, kParams[slot], value));
 	}
-	return true;
+}
+
+int64_t logic_seconds_steps(double seconds) {
+	if (!(seconds > 0.0)) return 0;
+	const double steps = std::floor(seconds / logic_units_seconds(1) + 0.5);
+	return steps >= double(kMostSteps) ? kMostSteps : int64_t(steps);
 }
 
 bool logic_retype_edits(const MissionDocument &document, const NodeAddress &record, const LogicType &type,

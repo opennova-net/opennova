@@ -8,7 +8,9 @@
 // words on the wire (the `record` query's title) and in Problems (a row's `record_title`); the
 // types "Add trigger" and "Add action" offer, each with its title, group and line, every row of
 // mission_params' triggers and actions among them. With the game install (a SKIP-LEG without
-// OPENNOVA_JO_DIR), every event of every shipped mission worded, none of a type no row names, timed.
+// OPENNOVA_JO_DIR), every event of every shipped mission worded, none of a type no row names, timed. S24: the
+// words as runs (a parameter's words its slot's run, the type's own words the type's), joined the words, for the
+// hand-worded types too and for every shipped record.
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -89,6 +91,62 @@ public:
 		return std::string();
 	}
 };
+
+// Names that know no area: every zone id fails to resolve.
+class DocumentlessZones : public MissionNames {
+public:
+	bool zone_resolves(int64_t) const override { return false; }
+};
+
+// The words as runs (S24, the board's chips): each parameter's words its slot's run, the type's own words the
+// type's (kLogicTypeSlot), a note on what the game makes of it apart; joined, the words. The hand-worded types
+// too: a variable change, a Redirect, Show text, an AI command over a group and over an area.
+bool runs_are(const std::vector<LogicRun> &got, const std::vector<LogicRun> &want) {
+	bool same_runs = got.size() == want.size();
+	for (size_t i = 0; same_runs && i < got.size(); ++i) same_runs = got[i].text == want[i].text && got[i].slot == want[i].slot;
+	if (!same_runs) {
+		std::printf("  got: ");
+		for (const LogicRun &run : got) std::printf(" [%s|%d]", run.text.c_str(), run.slot);
+		std::printf("\n  want:");
+		for (const LogicRun &run : want) std::printf(" [%s|%d]", run.text.c_str(), run.slot);
+		std::printf("\n");
+	}
+	return same_runs;
+}
+
+int test_runs() {
+	const Names names;
+	using M = bms::TriggerMainType;
+	using A = bms::ActionType;
+	constexpr int T = kLogicTypeSlot;
+	TEST_EXPECT(runs_are(trigger_runs(trigger(M::Single, 4, 10034), names), {{"Hostage #10034", 0}, {" is destroyed", T}}));
+	TEST_EXPECT(runs_are(trigger_runs(trigger(M::Single, 43, 10034, 2200, 25), names),
+	                     {{"Hostage #10034", 0}, {" is within ", T}, {"25 m", 2}, {" of ", T}, {"Truck #2200", 1}}));
+	TEST_EXPECT(runs_are(trigger_runs(trigger(M::Single, 4, 10034, 0, 0, bms::Trigger::kConditionNegated), names),
+	                     {{"Hostage #10034", 0}, {" is not destroyed", T}}));
+	// A zone no area holds: the game drops the trigger, said apart as a note.
+	const DocumentlessZones zones;
+	const std::vector<LogicRun> dropped = trigger_runs(trigger(M::Single, 10, 10034, 9), zones);
+	TEST_EXPECT(dropped.size() == 4 && dropped[3].slot == -1 && dropped[3].text.find("never true in the game") != std::string::npos);
+	TEST_EXPECT(runs_are(action_runs(action(A::MisvarChange, 2, 1, 7), names, nullptr), {{"add ", T}, {"7", 1}, {" to ", T}, {"V1", 0}}));
+	TEST_EXPECT(runs_are(action_runs(action(A::OutputText, 0, 4), names, nullptr), {{"show text ", T}, {"4: 'Mission failed'", 0}}));
+	TEST_EXPECT(runs_are(action_runs(action(A::RedirectGroupTo, 0, 4, 5, 2), names, nullptr),
+	                     {{"send ", T}, {"group 4", 0}, {" along ", T}, {"path 5", 1}, {", from ", T}, {"stop 2", 2}}));
+	TEST_EXPECT(runs_are(action_runs(action(A::RedirectSingleTo, 0, 10034, 125, 2200), names, nullptr),
+	                     {{"send ", T}, {"Hostage #10034", 0}, {" to board ", 1}, {"Truck #2200", 2}, {" (any seat)", 1}}));
+	const std::vector<LogicRun> alert = action_runs(action(A::ChangeGroupAI, 5, 4), names, nullptr);
+	TEST_EXPECT(!alert.empty() && logic_runs_text(alert) == action_words(action(A::ChangeGroupAI, 5, 4), names, nullptr));
+	bool subject = false;
+	for (const LogicRun &run : alert) subject = subject || (run.slot == 0 && run.text == "group 4");
+	TEST_EXPECT(subject);
+	const std::vector<LogicRun> area = action_runs(action(A::AreaAiRed, 5, 3), names, nullptr);
+	bool zone = false;
+	for (size_t i = 0; i + 1 < area.size(); ++i)
+		zone = zone || (area[i].slot == T && area[i].text.find("the red team's soldiers in ") != std::string::npos &&
+		                area[i + 1].slot == 0 && area[i + 1].text == "Zone 3 (bridge)");
+	TEST_EXPECT(zone);
+	return 0;
+}
 
 int test_words() {
 	const Names names;
@@ -432,7 +490,7 @@ int test_retail() {
 	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
 	expansions.insert(expansions.begin(), std::string());
 	std::set<std::string> seen;
-	size_t missions = 0, events = 0, triggers = 0, actions = 0, unknown = 0, longest = 0;
+	size_t missions = 0, events = 0, triggers = 0, actions = 0, unknown = 0, longest = 0, runs_made = 0;
 	double took_ms = 0;
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
@@ -448,6 +506,8 @@ int test_retail() {
 			if (!document) continue;
 			++missions;
 			const MissionDocument &m = dynamic_cast<const MissionDocument &>(*document);
+			const DocumentMissionNames names(m);
+			const bms::Header *header = m.mission_row() ? &m.mission_row()->native.header : nullptr;
 			const auto started = std::chrono::steady_clock::now();
 			for (const Node *row : m.rows_of(MissionKind::Event)) {
 				++events;
@@ -469,6 +529,27 @@ int test_retail() {
 					}
 				}
 				TEST_EXPECT(sentence.find("unknown type") == std::string::npos);
+				// The runs (S24): joined, the words; a parameter's run of a slot the type reads.
+				for (const bms::Trigger &t : chain.triggers) {
+					const std::vector<LogicRun> runs = trigger_runs(t, names);
+					TEST_EXPECT(logic_runs_text(runs) == trigger_words(t, names));
+					for (const LogicRun &run : runs) {
+						TEST_EXPECT(run.slot >= -1 && run.slot <= kLogicTypeSlot && !run.text.empty());
+						TEST_EXPECT(run.slot < 0 || run.slot == kLogicTypeSlot ||
+						            mission::trigger_param_kind(t, run.slot) != mission::ParamKind::Unused);
+						runs_made += 1;
+					}
+				}
+				for (const bms::Action &a : chain.actions) {
+					const std::vector<LogicRun> runs = action_runs(a, names, header);
+					TEST_EXPECT(logic_runs_text(runs) == action_words(a, names, header));
+					for (const LogicRun &run : runs) {
+						TEST_EXPECT(run.slot >= -1 && run.slot <= kLogicTypeSlot && !run.text.empty());
+						TEST_EXPECT(run.slot < 0 || run.slot == kLogicTypeSlot ||
+						            mission::action_param_kind(a, run.slot) != mission::ParamKind::Unused);
+						runs_made += 1;
+					}
+				}
 			}
 			took_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 		}
@@ -477,6 +558,7 @@ int test_retail() {
 	std::printf("retail: %zu missions, %zu events (%zu triggers, %zu actions) worded in %.1f ms, the longest sentence %zu "
 	            "characters, %zu of a type no row names\n",
 	            missions, events, triggers, actions, took_ms, longest, unknown);
+	std::printf("retail: every trigger's and action's runs joined are its words (%zu runs)\n", runs_made);
 	TEST_EXPECT(missions == 115 && unknown == 0);
 	return 0;
 }
@@ -486,6 +568,7 @@ int test_retail() {
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	if (test_words() != 0) return 1;
+	if (test_runs() != 0) return 1;
 	if (test_sentences() != 0) return 1;
 	if (test_game_reading() != 0) return 1;
 	if (test_document_titles() != 0) return 1;

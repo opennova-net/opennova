@@ -7,6 +7,7 @@
 // 3a, 3b and 7.4 for the triggers, 7.5 and 8.2 for the actions, 1.2 to 1.6 for an event's timing).
 
 #include <cstdio>
+#include <iterator>
 #include <memory>
 
 #include <base/io/tick_rate.h>
@@ -447,10 +448,34 @@ int64_t param_of(const bms::Action &action, int slot) {
 	return slot >= 0 && slot < 4 ? params[slot] : 0;
 }
 
+// Words built as runs (trigger_runs, action_runs): each piece added with what it is, a piece of the same
+// kind as the last joining it.
+class Runs {
+public:
+	Runs &add(const std::string &text, int slot) {
+		if (text.empty()) return *this;
+		if (!runs_.empty() && runs_.back().slot == slot) runs_.back().text += text;
+		else runs_.push_back({text, slot});
+		return *this;
+	}
+	Runs &add(const Runs &other) {
+		for (const LogicRun &run : other.runs_) add(run.text, run.slot);
+		return *this;
+	}
+	std::vector<LogicRun> take() { return std::move(runs_); }
+
+private:
+	std::vector<LogicRun> runs_;
+};
+
+constexpr int kType = kLogicTypeSlot;
+constexpr int kNote = -1;
+
 // A template's words: [a|b] the first where `negated` is false, else the second; {1}..{4} the
-// parameter (`word(slot)`), {s} `subject`. A negated template with no choice says "not" before it.
+// parameter (`word(slot)`, the slot's run), {s} `subject`; the rest the type's own words. A negated template
+// with no choice says "not" before it.
 template <class Word>
-std::string fill(const char *words, bool negated, const std::string &subject, const Word &word) {
+Runs fill(const char *words, bool negated, const Runs &subject, const Word &word) {
 	std::string out;
 	bool chose = false;
 	for (const char *c = words; *c; ++c) {
@@ -467,24 +492,25 @@ std::string fill(const char *words, bool negated, const std::string &subject, co
 		}
 		out += *c;
 	}
-	std::string filled;
+	Runs filled;
+	if (negated && !chose) filled.add("not: ", kType);
+	std::string literal;
 	for (size_t i = 0; i < out.size(); ++i) {
 		if (out[i] == '{' && i + 2 < out.size() && out[i + 2] == '}') {
 			const char key = out[i + 1];
-			if (key >= '1' && key <= '4') {
-				filled += word(key - '1');
-				i += 2;
-				continue;
-			}
-			if (key == 's') {
-				filled += subject;
+			if ((key >= '1' && key <= '4') || key == 's') {
+				filled.add(literal, kType);
+				literal.clear();
+				if (key == 's') filled.add(subject);
+				else filled.add(word(key - '1'), key - '1');
 				i += 2;
 				continue;
 			}
 		}
-		filled += out[i];
+		literal += out[i];
 	}
-	return negated && !chose ? "not: " + filled : filled;
+	filled.add(literal, kType);
+	return filled;
 }
 
 // The sub-goal of a slot (1..8) with the text its key reads where the names know it: the objective's
@@ -500,24 +526,28 @@ std::string slot_text(const MissionNames &names, const bms::Header *header, bool
 }
 
 // A Redirect's words [orig: Entity_SetWaypointByTeam @0x43CD20, Entity_SetWaypointForTeam @0x43DD00:
-// the path or the command, then the stop or the SSN; docs/world/world-wac-ai-re.md 11].
-std::string redirect_words(const bms::Action &action, const MissionNames &names, const std::string &subject) {
+// the path or the command, then the stop or the SSN; docs/world/world-wac-ai-re.md 11]: the path's or the
+// command's words its second parameter's, the stop or the SSN its third's.
+Runs redirect_runs(const bms::Action &action, const MissionNames &names, const Runs &subject) {
 	const int64_t path = action.param2;
-	if (path == 0) return "stop " + subject + " (no path)";
+	Runs out;
+	if (path == 0) return out.add("stop ", kType).add(subject).add(" (no path)", 1);
+	out.add("send ", kType).add(subject);
 	if (mission::path_command_names_entity(path)) {
 		// [world-wac-ai-re.md 9.1: 123 admits the passenger seats alone, 124 every seat but the controller's
 		// (the driver's, weighted lowest, is taken first), 125 any]
 		const char *seat = path == 123 ? " (a passenger seat)" : path == 124 ? " (any seat but the controller's)" : " (any seat)";
-		return "send " + subject + " to board " + names.entity(action.param3) + seat;
+		return out.add(" to board ", 1).add(names.entity(action.param3), 2).add(seat, 1);
 	}
 	// [world-wac-ai-re.md 3.2: 126 parks the walk within 10 m @ 0x4baabd; the rest is not witnessed]
-	if (path == 126)
-		return "send " + subject + " on command 126 (Goto group): it holds within 10 m; what else it does is unknown";
-	if (path == 127) return "send " + subject + " to follow the player";
+	if (path == 126) return out.add(" on command 126 (Goto group): it holds within 10 m; what else it does is unknown", 1);
+	if (path == 127) return out.add(" to follow the player", 1);
 	// The Redirect's node: -1 the nearest, else the stop by its number from 0 [world-wac-ai-re.md: only
 	// node -1 requests the nearest, `Entity_SetWaypointByTeam @0x43CD20`].
-	return "send " + subject + " along " + names.path(path) + ", from " +
-	       (action.param3 == -1 ? std::string("the nearest stop") : "stop " + number(action.param3));
+	return out.add(" along ", kType)
+	        .add(names.path(path), 1)
+	        .add(", from ", kType)
+	        .add(action.param3 == -1 ? std::string("the nearest stop") : "stop " + number(action.param3), 2);
 }
 
 } // namespace
@@ -616,7 +646,7 @@ const char *logic_join_words(LogicJoin join) {
 	return "and";
 }
 
-std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names) {
+std::vector<LogicRun> trigger_runs(const bms::Trigger &trigger, const MissionNames &names) {
 	const int32_t main = int32_t(trigger.main_type);
 	const bool negated = trigger.is_negated();
 	const int32_t sub = trigger.sub_type;
@@ -632,16 +662,18 @@ std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names
 		return out;
 	};
 	if (const TriggerRow *row = trigger_row(main, sub)) {
-		std::string out = fill(row->words, negated, std::string(), word);
+		Runs out = fill(row->words, negated, Runs(), word);
 		// An area trigger naming a zone that does not resolve is dropped at the mission's start: it reads
 		// false, so negated it reads true [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000; section 7.3].
 		const int zone_slot = (main == kGroup || main == kSingle) && sub == 10 ? 1 : main == kPlayerType && sub == 37 ? 0 : -1;
 		if (zone_slot >= 0 && !names.zone_resolves(param_of(trigger, zone_slot)))
-			out += negated ? " (always true in the game: it drops a trigger whose area does not resolve, and reads it false)"
-			               : " (never true in the game: it drops a trigger whose area does not resolve)";
+			out.add(negated ? " (always true in the game: it drops a trigger whose area does not resolve, and reads it false)"
+			                : " (never true in the game: it drops a trigger whose area does not resolve)",
+			        kNote);
 		// The berserk bit is read raw, 0x200, so negated (0x201) it is always true [section 1.3].
-		if (main == kPlayerType && sub == 18 && negated) out += " (always true in the game: it reads the berserk bit as a raw 0x200)";
-		return out;
+		if (main == kPlayerType && sub == 18 && negated)
+			out.add(" (always true in the game: it reads the berserk bit as a raw 0x200)", kNote);
+		return out.take();
 	}
 	// A type the evaluator has no case for reads false [orig: EventTrigger_EvaluateCondition's default],
 	// a main type 0 the load's neutered zone reference among them.
@@ -650,26 +682,36 @@ std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names
 	else if (main >= kGroup && main <= kPlayerType)
 		out = "a trigger of unknown kind " + number(trigger.sub_type) + " (false)";
 	else out = "a trigger of unknown type " + number(main) + " (false)";
-	return negated ? "not: " + out : out;
+	return Runs().add(negated ? "not: " + out : out, kType).take();
 }
 
-std::string action_words(const bms::Action &action, const MissionNames &names, const bms::Header *header) {
+std::string trigger_words(const bms::Trigger &trigger, const MissionNames &names) {
+	return logic_runs_text(trigger_runs(trigger, names));
+}
+
+std::vector<LogicRun> action_runs(const bms::Action &action, const MissionNames &names, const bms::Header *header) {
 	const int32_t type = int32_t(action.action_type);
 	const int32_t sub = action.action_sub_type;
 	const auto word = [&](int slot) { return param_word(mission::action_param_kind(action, slot), param_of(action, slot), names); };
+	const auto param = [&](int slot) { return Runs().add(word(slot), slot); };
+	Runs out;
 	switch (action.action_type) {
 	case A::RedirectGroupTo:
-	case A::RedirectSingleTo: return redirect_words(action, names, word(0));
+	case A::RedirectSingleTo: return redirect_runs(action, names, param(0)).take();
 	case A::MisvarChange: {
 		// [orig: EventAction_Dispatch case 5: 1 Set, 2 Add, 3 Sub, 4 Inc, 5 Dec; the add and the sub wrap]
 		const std::string variable = word(0), value = number(action.param2);
 		switch (sub) {
-		case 1: return "set " + variable + " to " + value;
-		case 2: return "add " + value + " to " + variable;
-		case 3: return "take " + value + " from " + variable;
-		case 4: return "add 1 to " + variable;
-		case 5: return "take 1 from " + variable;
-		default: return "do nothing to " + variable + " (change " + number(sub) + " is none the game has)";
+		case 1: return out.add("set ", kType).add(variable, 0).add(" to ", kType).add(value, 1).take();
+		case 2: return out.add("add ", kType).add(value, 1).add(" to ", kType).add(variable, 0).take();
+		case 3: return out.add("take ", kType).add(value, 1).add(" from ", kType).add(variable, 0).take();
+		case 4: return out.add("add 1 to ", kType).add(variable, 0).take();
+		case 5: return out.add("take 1 from ", kType).add(variable, 0).take();
+		default:
+			return out.add("do nothing to ", kType)
+			        .add(variable, 0)
+			        .add(" (change " + number(sub) + " is none the game has)", kType)
+			        .take();
 		}
 	}
 	case A::OutputText: {
@@ -677,10 +719,13 @@ std::string action_words(const bms::Action &action, const MissionNames &names, c
 		char key[32];
 		std::snprintf(key, sizeof(key), "ID%03i", int(action.param1));
 		const std::string text = names.text("Triggered Text", key);
-		return "show text " + number(action.param1) + (text.empty() ? std::string() : ": " + quoted(text));
+		return out.add("show text ", kType).add(number(action.param1) + (text.empty() ? std::string() : ": " + quoted(text)), 0).take();
 	}
 	case A::PlayWavList:
-		return "play " + word(0) + (action.param2 == 1 ? " (even after the round is over)" : std::string());
+		return out.add("play ", kType)
+		        .add(word(0), 0)
+		        .add(action.param2 == 1 ? " (even after the round is over)" : "", 1)
+		        .take();
 	case A::SubGoalWon:
 	case A::SubGoalLost: {
 		const bool win = action.action_type == A::SubGoalWon;
@@ -688,59 +733,81 @@ std::string action_words(const bms::Action &action, const MissionNames &names, c
 		                                   win ? "STRWINCOND" : "STRLOSECOND");
 		const std::string message = slot_text(names, header, win, action.param1, win ? "WinConditions" : "LoseConditions",
 		                                      win ? "STRWINMSG" : "STRLOSEMSG");
-		std::string out = std::string(win ? "win " : "lose ") + word(0);
-		if (!goal.empty()) out += " (" + quoted(goal) + ")";
-		if (!message.empty()) out += ", saying " + quoted(message);
-		return out;
+		out.add(win ? "win " : "lose ", kType).add(word(0), 0);
+		if (!goal.empty()) out.add(" (" + quoted(goal) + ")", 0);
+		if (!message.empty()) out.add(", saying " + quoted(message), 0);
+		return out.take();
 	}
 	case A::ShowWinSubgoal:
 	case A::ShowLoseSubgoal: {
 		const bool win = action.action_type == A::ShowWinSubgoal;
-		const std::string what = std::string(win ? "win objective " : "lose objective ") + number(action.param1);
-		if (action.param2 == 0) return "hide " + what;
+		out.add(action.param2 == 0 ? "hide " : "show ", 1)
+		        .add(win ? "win objective " : "lose objective ", kType)
+		        .add(number(action.param1), 0);
+		if (action.param2 == 0) return out.take();
 		const std::string directive = slot_text(names, header, win, action.param1, win ? "WinConditions" : "LoseConditions",
 		                                        win ? "STRWINDIRECTIVE" : "STRLOSEDIRECTIVE");
-		return "show " + what + (directive.empty() ? std::string() : ": " + quoted(directive));
+		return out.add(directive.empty() ? std::string() : ": " + quoted(directive), 0).take();
 	}
-	case A::ShowWaypoints: return action.param1 ? "show the waypoints" : "hide the waypoints";
+	case A::ShowWaypoints: return out.add(action.param1 ? "show" : "hide", 0).add(" the waypoints", kType).take();
 	case A::SpecialSubType:
 		// [orig: EventAction_HandleSpecialTypes @0x4535a0: 37 the HUD item flash, 38 the input bits cleared,
 		// 39 a store nothing reads; every other returns]
 		switch (sub) {
-		case 37: return "flash " + word(0) + " for " + number(action.param2) + " ticks";
-		case 38: return "clear the player's view keys";
-		case 39: return "store whether " + number(action.param1) + " is 0 (nothing reads it)";
-		default: return "do nothing (special " + number(sub) + " has no effect)";
+		case 37:
+			return out.add("flash ", kType).add(word(0), 0).add(" for ", kType).add(number(action.param2), 1).add(" ticks", kType).take();
+		case 38: return out.add("clear the player's view keys", kType).take();
+		case 39:
+			return out.add("store whether ", kType).add(number(action.param1), 0).add(" is 0 (nothing reads it)", kType).take();
+		default: return out.add("do nothing (special " + number(sub) + " has no effect)", kType).take();
 		}
 	case A::Teammates:
 		// [orig: EventAction_Dispatch case 39: 1 HeliLift_SpawnPickup, 2 HeliLift_SpawnFlyover, any other none]
 		switch (sub) {
 		// [section 7.5: the first pool-3 type-6088 marker of the number]
-		case 1: return "call a medevac for " + word(0) + " to the first teleport marker numbered " + number(action.param2);
-		case 2: return "call a flyover for " + word(0) + " to the first teleport marker numbered " + number(action.param2);
-		default: return "do nothing (teammate call " + number(sub) + " has no effect)";
+		case 1:
+		case 2:
+			return out.add(sub == 1 ? "call a medevac for " : "call a flyover for ", kType)
+			        .add(word(0), 0)
+			        .add(" to the first teleport marker numbered ", kType)
+			        .add(number(action.param2), 1)
+			        .take();
+		default: return out.add("do nothing (teammate call " + number(sub) + " has no effect)", kType).take();
 		}
 	default: break;
 	}
 	if (is_ai_action(type)) {
 		// [orig: Entity_HandleAlertCommand @0x43CF10, Entity_KillTeamInBounds @0x43D030, Entity_HandleAlertStateEvent
 		// @0x43DEE0: sub-type 0 does nothing]
-		std::string subject = word(0);
+		Runs subject = param(0);
 		const bool area = action.action_type == A::AreaAiRed || action.action_type == A::AreaAiBlue;
-		if (action.action_type == A::AreaAiRed) subject = "the red team's soldiers in " + names.zone(action.param1);
-		if (action.action_type == A::AreaAiBlue) subject = "the blue team's soldiers in " + names.zone(action.param1);
+		if (area)
+			subject = Runs()
+			                  .add(action.action_type == A::AreaAiRed ? "the red team's soldiers in " : "the blue team's soldiers in ", kType)
+			                  .add(names.zone(action.param1), 0);
 		// An area action naming a zone that does not resolve is dropped at the mission's start, and the load
 		// writes the area's box over the action's third and fourth values, which the command then reads
 		// [orig: EventTrigger_ResolveZoneActionRefs @0x453100, @0x4531B1 / @0x4531C6; section 7.3].
 		if (area && !names.zone_resolves(action.param1))
-			return "do nothing (the game drops this action: no area resolves zone " + number(action.param1) + ")";
+			return out.add("do nothing (the game drops this action: no area resolves zone " + number(action.param1) + ")", kType)
+			        .take();
 		const auto area_word = [&](int slot) { return area && slot >= 2 ? std::string("(a value of the area's box)") : word(slot); };
-		if (sub == 0) return "do nothing to " + subject + " (no AI change)";
-		if (const AiRow *row = ai_row(sub)) return fill(row->words, false, subject, area_word);
-		return "apply AI command " + number(sub) + " to " + subject + " (what it does is unknown)";
+		if (sub == 0) return out.add("do nothing to ", kType).add(subject).add(" (no AI change)", kType).take();
+		if (const AiRow *row = ai_row(sub)) return fill(row->words, false, subject, area_word).take();
+		return out.add("apply AI command " + number(sub) + " to ", kType).add(subject).add(" (what it does is unknown)", kType).take();
 	}
-	if (const ActionRow *row = action_row(type); row && *row->words) return fill(row->words, false, std::string(), word);
-	return "an action of unknown type " + number(type) + " (does nothing)";
+	if (const ActionRow *row = action_row(type); row && *row->words) return fill(row->words, false, Runs(), word).take();
+	return out.add("an action of unknown type " + number(type) + " (does nothing)", kType).take();
+}
+
+std::string action_words(const bms::Action &action, const MissionNames &names, const bms::Header *header) {
+	return logic_runs_text(action_runs(action, names, header));
+}
+
+std::string logic_runs_text(const std::vector<LogicRun> &runs) {
+	std::string out;
+	for (const LogicRun &run : runs) out += run.text;
+	return out;
 }
 
 double logic_units_seconds(int64_t units) { return double(units) * bms::kEventStepTicks / io::kTickHz; }
@@ -893,6 +960,29 @@ std::vector<LogicType> make_types(bool actions) {
 
 const std::vector<LogicType> &logic_types(bool actions) {
 	static const std::vector<LogicType> triggers = make_types(false), all_actions = make_types(true);
+	return actions ? all_actions : triggers;
+}
+
+const std::vector<const LogicType *> &logic_common_types(bool actions) {
+	// The ranking by records held (the retail leg's measure): Entity is destroyed 1,076, Group is in an area 606,
+	// Event has fired 501, Group has passed a waypoint 484, Group has lost units 289, Entity is in an area 267,
+	// Group is wiped out 166, Variable equals 126; Send group along a path 659, Send entity along a path 491,
+	// Kill entity 343, Re-arm event 340, Group AI: Patrol speed 334, Remove entity 307, Show or hide a win
+	// objective 275, Play dialog 238.
+	struct Pair {
+		int32_t type, sub;
+	};
+	constexpr Pair kTriggers[] = {{kSingle, 4}, {kGroup, 10}, {kEvent, 0}, {kGroup, 7},
+	                              {kGroup, 6},  {kSingle, 10}, {kGroup, 4}, {kVariable, 1}};
+	constexpr Pair kActions[] = {{1, 0}, {19, 0}, {20, 0}, {34, 0}, {3, 30}, {22, 0}, {35, 0}, {7, 0}};
+	const auto make = [](bool action, const Pair *pairs, size_t count) {
+		std::vector<const LogicType *> out;
+		for (size_t i = 0; i < count; ++i)
+			if (const LogicType *type = logic_type(action, pairs[i].type, pairs[i].sub)) out.push_back(type);
+		return out;
+	};
+	static const std::vector<const LogicType *> triggers = make(false, kTriggers, std::size(kTriggers));
+	static const std::vector<const LogicType *> all_actions = make(true, kActions, std::size(kActions));
 	return actions ? all_actions : triggers;
 }
 
