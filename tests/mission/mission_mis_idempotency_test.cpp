@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -26,6 +27,7 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_mis.h>
+#include <formats/mission/mission_var_names.h>
 
 namespace {
 
@@ -150,6 +152,31 @@ int check(const std::string &path) {
 	std::string gen2;
 	TEST_EXPECT(write_mis_text(reparsed, gen2, error));
 	TEST_EXPECT(texts_equal(gen1, gen2));
+
+	// The variable names (mission_var_names.h) ride the layer table, which the .mis carries as
+	// `begin layer N / description`: the tagged table comes back record for record, and the text again.
+	bms::File named = doc;
+	if (layer_table(named) != LayerTable::LayerNames) {
+		const std::vector<VariableName> names = {{2, "alarm"}, {9, "bridge blown"}, {300, "fifteen chars.."}};
+		TEST_EXPECT(set_variable_names(named, names, error));
+		std::string named1;
+		TEST_EXPECT(write_mis_text(named, named1, error));
+		TEST_EXPECT(named1.find("begin layer 0\r\n  description \"OPENNOVA-VAR-NAMES-1\"\r\n") != std::string::npos);
+		bms::File named_back;
+		TEST_EXPECT(parse_mis_text(named1, resolver, named_back, error));
+		TEST_EXPECT(layer_table(named_back) == LayerTable::VariableNames);
+		const std::vector<VariableName> read = variable_names(named_back);
+		TEST_EXPECT(read.size() == names.size());
+		for (size_t i = 0; i < read.size() && i < names.size(); ++i)
+			TEST_EXPECT(read[i].index == names[i].index && read[i].name == names[i].name);
+		for (size_t i = 0; i < named.layer_records.size(); ++i)
+			TEST_EXPECT(std::memcmp(named.layer_records[i].name, named_back.layer_records[i].name,
+			                        bms::kLayerRecordSize) == 0);
+		sync_counts(named_back);
+		std::string named2;
+		TEST_EXPECT(write_mis_text(named_back, named2, error));
+		TEST_EXPECT(texts_equal(named1, named2));
+	}
 
 	return 0;
 }

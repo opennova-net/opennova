@@ -16,6 +16,7 @@
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_field.h>
 #include <formats/mission/mission_mis.h>
+#include <formats/mission/mission_var_names.h>
 
 #include "common/file_io.h"
 
@@ -641,6 +642,74 @@ int main() {
 		opennova::bms::File rejected_group;
 		TEST_EXPECT(!opennova::bms::parse(group_bytes.data(), group_bytes.size(), rejected_group, group_error));
 		TEST_EXPECT(group_error.find("group") != std::string::npos);
+	}
+
+	// --- The mission's variable names (formats/mission/mission_var_names.h): a TAGGED layer table, the
+	// tag record then `V<index> <name>` per record; the game reads and drops the table, the original
+	// editor's layer names are never written over. ---
+	{
+		using opennova::mission::LayerTable;
+		using opennova::mission::VariableName;
+		std::string names_error;
+		opennova::bms::File named;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), named, names_error));
+		TEST_EXPECT(opennova::mission::layer_table(named) == LayerTable::Empty);
+		TEST_EXPECT(opennova::mission::variable_names(named).empty());
+		TEST_EXPECT(opennova::mission::variable_name_room(5) == 17 && opennova::mission::variable_name_room(12) == 16 &&
+		            opennova::mission::variable_name_room(511) == 15);
+		const std::vector<VariableName> wanted = {{12, "alarm_raised"}, {3, "bridge blown"}, {511, "fifteen chars.."}};
+		TEST_EXPECT(opennova::mission::set_variable_names(named, wanted, names_error));
+		TEST_EXPECT(opennova::mission::layer_table(named) == LayerTable::VariableNames);
+		TEST_EXPECT(std::memcmp(named.layer_records[0].name, "OPENNOVA-VAR-NAMES-1", 20) == 0);
+		TEST_EXPECT(std::memcmp(named.layer_records[1].name, "V3 bridge blown\0\0\0\0\0", 20) == 0);
+		TEST_EXPECT(std::memcmp(named.layer_records[2].name, "V12 alarm_raised\0\0\0\0", 20) == 0);
+		TEST_EXPECT(std::memcmp(named.layer_records[3].name, "V511 fifteen chars..", 20) == 0); // full width
+		const std::vector<VariableName> read = opennova::mission::variable_names(named);
+		TEST_EXPECT(read.size() == 3 && read[0].index == 3 && read[0].name == "bridge blown" && read[1].index == 12 &&
+		            read[1].name == "alarm_raised" && read[2].index == 511 && read[2].name == "fifteen chars..");
+		// The bytes round-trip through the .bms writer; only the layer table changed.
+		std::vector<uint8_t> named_bytes;
+		TEST_EXPECT(opennova::bms::write(named, named_bytes, names_error));
+		opennova::bms::File named_back;
+		TEST_EXPECT(opennova::bms::parse(named_bytes.data(), named_bytes.size(), named_back, names_error));
+		TEST_EXPECT(opennova::bms::equal(named_back, named));
+		TEST_EXPECT(opennova::mission::variable_names(named_back).size() == 3);
+		// Refused, the table untouched: an index past the bank, twice, a name past its room, empty, a quote,
+		// an edge space, 32 names.
+		const opennova::bms::File before = named;
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{512, "x"}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{-1, "x"}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "a"}, {4, "b"}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "eighteen characters"}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, ""}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "say \"hi\""}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, " lead"}}, names_error));
+		std::vector<VariableName> too_many;
+		for (int32_t i = 0; i < 32; ++i) too_many.push_back({i, "n"});
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, too_many, names_error));
+		too_many.pop_back();
+		TEST_EXPECT(opennova::bms::equal(named, before));
+		TEST_EXPECT(opennova::mission::set_variable_names(named, too_many, names_error)); // 31 fit
+		TEST_EXPECT(opennova::mission::variable_names(named).size() == 31);
+		// No names empties the table again: the shipped zeros.
+		TEST_EXPECT(opennova::mission::set_variable_names(named, {}, names_error));
+		TEST_EXPECT(opennova::mission::layer_table(named) == LayerTable::Empty);
+		TEST_EXPECT(opennova::bms::equal(named, bms_file));
+		// A table holding layer names (untagged, not empty) is the original editor's: read as no variable
+		// names, never written over.
+		opennova::bms::File layered = bms_file;
+		std::memcpy(layered.layer_records[0].name, "Enemies", 7);
+		TEST_EXPECT(opennova::mission::layer_table(layered) == LayerTable::LayerNames);
+		TEST_EXPECT(opennova::mission::variable_names(layered).empty());
+		TEST_EXPECT(!opennova::mission::set_variable_names(layered, {{1, "door"}}, names_error));
+		TEST_EXPECT(names_error.find("layer names") != std::string::npos);
+		// A record of a tagged table that is not `V<index> <name>` names nothing.
+		opennova::bms::File odd = bms_file;
+		TEST_EXPECT(opennova::mission::set_variable_names(odd, {{7, "seven"}}, names_error));
+		std::memcpy(odd.layer_records[2].name, "V07 leading zero", 16);
+		std::memcpy(odd.layer_records[3].name, "Vx junk", 7);
+		const std::vector<VariableName> odd_read = opennova::mission::variable_names(odd);
+		TEST_EXPECT(odd_read.size() == 1 && odd_read[0].index == 7 && odd_read[0].name == "seven");
 	}
 
 	// --- Phase 0: area-trigger 32-byte record is interleaved per axis (x_min,x_max,y_min,y_max,

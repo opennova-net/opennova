@@ -28,6 +28,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_field.h>
+#include <formats/mission/mission_var_names.h>
 #include "common/file_io.h"
 #include "common/retail_paths.h"
 #include "common/test_paths.h"
@@ -114,6 +115,7 @@ bool differing_sections(const std::vector<uint8_t> &a, const std::vector<uint8_t
 }
 
 struct Counts {
+	size_t layer_named = 0; // missions whose layer table holds anything (mission_var_names.h LayerTable)
 	size_t missions = 0, identical = 0, failed = 0;
 	size_t paths = 0, stops = 0, over_slots = 0; // the waypoint paths every one its markers' (D-MIS-6)
 	std::vector<std::string> differing; // "NAME: section, section"
@@ -176,6 +178,7 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 	    !bms::parse(original.data(), original.size(), parsed, error))
 		return fail("does not parse: " + error);
 	if (tally) tally->take(parsed);
+	if (opennova::mission::layer_table(parsed) != opennova::mission::LayerTable::Empty) ++counts.layer_named;
 
 	// Pool vectors must match the header counts, and the fixed sections are always full-size.
 	if (parsed.items.size() != parsed.header.num_items || parsed.buildings.size() != parsed.header.num_buildings ||
@@ -388,6 +391,7 @@ int test_retail() {
 	}
 	if (counts.missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
 	if (check_new_records(tally) != 0) ++counts.failed;
+	std::printf("retail: %zu missions hold anything in their layer table\n", counts.layer_named);
 	for (const std::string &line : counts.differing) std::printf("  differs: %s\n", line.c_str());
 	std::printf("retail: %zu missions, %zu rewritten to their own bytes, %zu differing in the loadout chunk alone "
 	            "(%zu of the %zu named are in this install), %zu failed\n",
