@@ -605,6 +605,63 @@ void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving) {
 	}
 }
 
+void LocalPlayer::pack_input_word() {
+	World &world = world_;
+	// The pack: the accumulated word onto MoveOrder, then the word is
+	// saved as the previous pack's and cleared. The analog throttle is
+	// the pack's too [orig: Player_PackInputStateToEntity @0x4df450 --
+	// MoveOrder @0x4df68f..0x4df790, analogThrottle @0x4df86e/@0x4df8cb,
+	// the clear @0x4df904/@0x4df909].
+	// A NoMove weapon strips the direction and lean bits from the word
+	// first, the saved copy included; jump, the look keys and free look
+	// survive. An OnlyScoped weapon answers only once promoted.
+	// [orig: Entity_CheckWeaponSeatFlags(EquippedSlot, 0x20000) @0x4df46c;
+	//  `g_InputFlags &= 0xFFFF9FE1` @0x4df482]
+	if (w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
+				DEF_WEAPON_FLAG_NOMOVE))
+		input_flags.flags &= 0xFFFF9FE1u;
+	move_order = w::pack_player_body_input(input_flags.flags, input);
+	// The packed word's direction bits drive the movement legs: the
+	// movement-held latch (it refuses scope-UP on a Scoped weapon
+	// @0x4df29c), the drop of the raw binocular toggle (moving lowers the
+	// binoculars for good), and, while SETTLED at scope on a Scoped
+	// (flags 1) weapon, the full unscope through the toggle -- the
+	// ForceScoped pin (@0x4df12d) keeps pinned sights raised -- else the
+	// hip-fire camera legs. A joiner runs them once per send boundary.
+	// [orig: Player_PackInputStateToEntity @0x4df4b2..0x4df63b --
+	//  g_MovementKeyHeld @0x4df4bb / @0x4df4f9, `mov g_BinocularsToggle, 0`
+	//  @0x4df4c2, Player_ToggleWeaponScope @0x4df4c9..0x4df4ec, the
+	//  entitySlotPtr legs @0x4df500..0x4df63b]
+	const bool direction = move_order.direction_bits != 0;
+	if (direction) view.binoculars_requested = false;
+	if (w::player_view_move_input(view, direction, weapon.active ? weapon.def.flags : 0) &&
+			(weapon.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
+		if (w::local_player_set_scope(world, weapon, view,
+					*w::active_local_weapon_slot(world, weapon), false))
+			w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
+	}
+	if (w::Entity *entity = world.registry.get(world.cached.local_player))
+		pack_analog_axes(*entity, move_order.moving);
+	input_flags.clear_after_pack();
+}
+
+void LocalPlayer::reset_key_input() {
+	World &world = world_;
+	// [orig: sub_4B2B80 @0x4B2B80 -- the local entity @0x4B2B85 and its def
+	//  @0x4B2B89; Input_DisableScrollLock @0x4B2B91 and Input_ResetAllState
+	//  @0x4B2B99 are device legs this port does not model (D-NET-560)]
+	const w::Entity *local = player();
+	if (local == nullptr || !local->has_item_def) return;
+	input_flags.flags = 0; // [orig: `mov g_InputFlags, 0` @0x4B2B9E]
+	pack_input_word();     // [orig: Player_PackInputStateToEntity @0x4B2BA8]
+	// A moving state drops to the idle at once [orig: `test
+	// g_AnimStateFlagsTable[animStateId*4], 1` @0x4B2BB8, `mov [eax+2BCh], 2Bh`
+	// @0x4B2BC2].
+	if (w::AiEntity *body = world.ai.for_handle(world.cached.local_player))
+		if ((w::infantry_anim_flags(body->inf.anim_state) & 1u) != 0u)
+			body->inf.anim_state = w::anim_state::kIdle;
+}
+
 void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	World &world = world_;
 	if (!world.cached.local_player.valid()) return;
@@ -636,44 +693,7 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// `test byte ptr g_InputFlags, 1Eh` @0x4de3ae; the pack follows @0x42c3e9].
 	view.movement_input = (input_flags.flags & w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
-	if (pack_input) {
-		// The pack: the accumulated word onto MoveOrder, then the word is
-		// saved as the previous pack's and cleared. The analog throttle is
-		// the pack's too [orig: Player_PackInputStateToEntity @0x4df450 --
-		// MoveOrder @0x4df68f..0x4df790, analogThrottle @0x4df86e/@0x4df8cb,
-		// the clear @0x4df904/@0x4df909].
-		// A NoMove weapon strips the direction and lean bits from the word
-		// first, the saved copy included; jump, the look keys and free look
-		// survive. An OnlyScoped weapon answers only once promoted.
-		// [orig: Entity_CheckWeaponSeatFlags(EquippedSlot, 0x20000) @0x4df46c;
-		//  `g_InputFlags &= 0xFFFF9FE1` @0x4df482]
-		if (w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
-					DEF_WEAPON_FLAG_NOMOVE))
-			input_flags.flags &= 0xFFFF9FE1u;
-		move_order = w::pack_player_body_input(input_flags.flags, input);
-		// The packed word's direction bits drive the movement legs: the
-		// movement-held latch (it refuses scope-UP on a Scoped weapon
-		// @0x4df29c), the drop of the raw binocular toggle (moving lowers the
-		// binoculars for good), and, while SETTLED at scope on a Scoped
-		// (flags 1) weapon, the full unscope through the toggle -- the
-		// ForceScoped pin (@0x4df12d) keeps pinned sights raised -- else the
-		// hip-fire camera legs. A joiner runs them once per send boundary.
-		// [orig: Player_PackInputStateToEntity @0x4df4b2..0x4df63b --
-		//  g_MovementKeyHeld @0x4df4bb / @0x4df4f9, `mov g_BinocularsToggle, 0`
-		//  @0x4df4c2, Player_ToggleWeaponScope @0x4df4c9..0x4df4ec, the
-		//  entitySlotPtr legs @0x4df500..0x4df63b]
-		const bool direction = move_order.direction_bits != 0;
-		if (direction) view.binoculars_requested = false;
-		if (w::player_view_move_input(view, direction, weapon.active ? weapon.def.flags : 0) &&
-				(weapon.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
-			if (w::local_player_set_scope(world, weapon, view,
-						*w::active_local_weapon_slot(world, weapon), false))
-				w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
-		}
-		if (w::Entity *entity = world.registry.get(p->handle))
-			pack_analog_axes(*entity, move_order.moving);
-		input_flags.clear_after_pack();
-	}
+	if (pack_input) pack_input_word();
     // The keyboard turn/look rotation reads the MoveOrder bits the last pack
     // wrote; the prone halving reads its stance bit. Both pitch limits follow
     // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090 -- MoveOrder

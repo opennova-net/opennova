@@ -595,6 +595,16 @@ bool ClientRuntime::queue_medic_request() {
 	return true;
 }
 
+bool ClientRuntime::queue_respawn_request() {
+	// No authority test: the listen host's own client queues it on its local
+	// connection like a joiner [orig: Input_HandleActionBinding case 55, the
+	// call @0x49B22A behind is_in_session / is_mp_session_peer alone].
+	if (queue_host_message(c2s::DEATH_TIMEOUT_RESET, {})) return true;
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	send_queue_.push_back(make_protocol_message(c2s::DEATH_TIMEOUT_RESET, {}));
+	return true;
+}
+
 // The stance key SELECT QUEUES the change like every other input-side producer:
 // [i16 action id] (0xA9 crouch / 0xAA prone / 0xAC stand) as one reliable C2S
 // 0x1D, user param 0 = retained until ACK. It is framed only inside the next open

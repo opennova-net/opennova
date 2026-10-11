@@ -188,6 +188,12 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// [orig: Input_HandleActionBinding case 217 @0x49b4b4 (row 64 MedicReq)]
 	frame.medic_edge = world::latched_key_edge(
 			admitted("MedicReq") && source.pressed("MedicReq"), true, medic_was_down_);
+	// Respawn: the dispatcher's code 55 row (byte_49C384[54] = 37, jump-table
+	// entry 37 -> the case) under the gameplay gate; its latch follows the
+	// keys regardless. [orig: Input_HandleActionBinding @0x49AEE9..0x49AEF0
+	//  (the index byte @0x49C3BA, the entry @0x49C32C) -> case 55 @0x49B20B]
+	frame.respawn_edge = world::latched_key_edge(
+			admitted("respawn") && source.pressed("respawn"), gate.active, respawn_was_down_);
 	// ToSpecial's keys are read raw (the handler reads g_InputState.keyState);
 	// an edge dispatches only with captured gameplay input and under the
 	// death screen's binding scan, like the other weapon rows, and the latch

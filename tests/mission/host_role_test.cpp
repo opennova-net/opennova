@@ -629,6 +629,66 @@ int main() {
 		}
 	}
 
+	// --- the listen host's own Respawn key rides its looped-back C2S 0x41 ----
+	// A session peer's key queues the bodiless 0x41 on its own connection: the
+	// press frame's client frame flushes it, the next frame's drain hands it to
+	// the server's handler for the host's own slot (its body's Health zeroed,
+	// the respawn holds stored). Out of a session the key queues nothing.
+	// [orig: Input_HandleActionBinding case 55 @0x49B20B..0x49B22A ->
+	//  NetPacket_SendRequestRespawn @0x42DBA0; NapiNPServerMsg_ResetPlayerAmmo
+	//  @0x510540]
+	for (const bool mp : {true, false}) {
+		ms::MissionKernel kernel;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "respawn_key", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = mp;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			if (!mp) {
+				role.bring_up_singleplayer();
+				return;
+			}
+			inmatch::HostConfig cfg;
+			cfg.config.server_name = "respawn_key";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.config.respawn_timeout = 7;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(host.client_runtime != nullptr && kernel.local.has_local_player());
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		w::Entity *body = kernel.local.player();
+		CHECK(own != nullptr && body != nullptr);
+		if (own == nullptr || body == nullptr) continue;
+		CHECK(body->health > 0 && !kernel.local.local_player_dead());
+		inmatch::TickInput press = tick_input(0);
+		press.player.pressed_action_bits = inmatch::PRESSED_RESPAWN;
+		role.apply_input(press);
+		role.run_tick(tick_input(0));
+		CHECK(body->health > 0); // the press frame only flushed it
+		role.run_tick(tick_input(0));
+		if (mp) {
+			CHECK(body->health <= 0 && kernel.local.local_player_dead());
+			CHECK(own->link.respawn_delay_seconds > 0);
+		} else {
+			CHECK(body->health > 0 && !kernel.local.local_player_dead());
+		}
+	}
+
 	// --- the authority's own stance rides its looped-back C2S 0x1D ----------
 	// The server handler latches the host's own player from the 0x1D its own
 	// client sent: the datagram the press frame's client frame flushed is read

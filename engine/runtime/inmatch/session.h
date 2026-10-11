@@ -185,6 +185,9 @@ public:
 	// The dead player's medic call (C2S 0x2E) for this role; the entity, dead
 	// and cooldown gates are the shared prologue's. False = nothing sent.
 	virtual bool send_medic_request() { return false; }
+	// The Respawn key's bodiless C2S 0x41 for this role, past request_respawn's
+	// gates: a session peer queues it on its connection. False = nothing sent.
+	virtual bool send_respawn_request() { return false; }
 	virtual void run_tick(const TickInput &input) = 0;
 	virtual bool session_lost(SessionError &error) const { (void)error; return false; }
 	virtual bool reset_to_baseline(SessionError &error) = 0;
@@ -233,6 +236,9 @@ public:
 	// The medic call past the session/entity gates: a dead local player with
 	// the cooldown at zero sends through the role and stamps the cooldown.
 	bool request_medic();
+	// The Respawn key (dispatch 55) past the row's head gates: the local
+	// player's input reset, then in a session the role's 0x41. True = sent.
+	bool request_respawn();
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera), as plain values off the role's replica runtime, plus
 	// the retail is_in_session fact (the world's mp_session rule: single
@@ -261,6 +267,9 @@ enum PressedAction : uint32_t {
 	PRESSED_MEDIC_REQUEST = 1u << 2,
 	// A ToSpecial dispatch: a press or a release edge of its keys.
 	PRESSED_TO_SPECIAL = 1u << 3,
+	// The Respawn row's press edge (catalog row 68; retail
+	// Input_HandleActionBinding case 55 @0x49B20B).
+	PRESSED_RESPAWN = 1u << 4,
 };
 
 

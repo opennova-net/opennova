@@ -265,6 +265,13 @@ public:
 	// dword_B76804 == 0; NetPacket_WriteEntityIndex32 -> QueueReliableMessage
 	// (0x2E, param 0x136)].
 	bool queue_medic_request();
+	// The Respawn key's request: one bodiless reliable C2S 0x41, retained
+	// until acknowledged, on an in-session joiner's connection or the listen
+	// host's own (its server's 0x41 handler then names the host's own slot).
+	// The live-player and round gates are the role's (Role::request_respawn)
+	// [orig: NetPacket_SendRequestRespawn @0x42DBA0 --
+	//  CNapiNetwork_QueueReliableMessage(0x41, 1, 0, payload, 0) @0x42DBBC].
+	bool queue_respawn_request();
 	// The listen host's own client queues a C2S on its local connection, as
 	// every input-side sender does: its client frame sends it and the next
 	// frame's server tick dispatches it (the queue_stance_change path). False

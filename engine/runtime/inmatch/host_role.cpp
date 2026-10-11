@@ -360,6 +360,10 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// the pack follows and rewrites MoveOrder's stance from the same latches.
 		// [orig: NapiNPServerMsg_HandleStanceChange @0x501c60 from
 		//  Server_TickUpdate's receive pump @0x51d895]
+		// So does its Respawn key's bodiless 0x41, which the handler applies
+		// to the host's own slot and body [orig: NetPacket_SendRequestRespawn
+		//  @0x42DBA0, its queue call @0x42DBBC; NapiNPServerMsg_ResetPlayerAmmo
+		//  @0x510540].
 		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
 		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
 		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
@@ -379,16 +383,17 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
 				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
 				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE &&
-				dg.tag != c2s::RESPAWN_REQUEST) {
+				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
 		// The chat handler, the snapshot builder, the radio call (its
-		// designation table and zone test), the squad handlers and the team
-		// change read the host context.
+		// designation table and zone test), the squad handlers, the team
+		// change and the Respawn key's 0x41 (the authority and the respawn
+		// timeout) read the host context.
 		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
 				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
-				dg.tag == c2s::TEAM_CHANGE_REQUEST;
+				dg.tag == c2s::TEAM_CHANGE_REQUEST || dg.tag == c2s::DEATH_TIMEOUT_RESET;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;
@@ -412,6 +417,15 @@ bool HostRole::send_medic_request() {
 	request.entity_index = kernel_->world.cached.local_player.packed;
 	return state.client_runtime->queue_host_message(opennova::c2s::MEDIC_REQUEST,
 			opennova::encode_medic_request(request));
+}
+
+// The listen host's own Respawn key: its 0x41 rides its local connection, and
+// the drain above hands it to the server's handler for its own slot.
+// [orig: Input_HandleActionBinding case 55 -> NetPacket_SendRequestRespawn
+//  @0x49B22A, no is_authority branch]
+bool HostRole::send_respawn_request() {
+	return state.host_owner.serve_and_play && state.client_runtime &&
+			state.client_runtime->queue_respawn_request();
 }
 
 bool HostRole::request_stance(int stance) {
