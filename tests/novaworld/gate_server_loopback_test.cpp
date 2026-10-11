@@ -119,7 +119,7 @@ int main() {
 	if (!expect((r.post_ip == std::array<uint8_t, 4>{127, 0, 0, 1}),
 			"POSTIPADDRESS")) return 1;
 	if (!expect(r.post_port == 7597, "POSTIPPORT")) return 1;
-	if (!expect(r.udp_novaworld == "127.0.0.1:64206", "UDPNOVAWORLD")) return 1;
+	if (!expect(r.udp_novaworld == std::vector<std::string>{"127.0.0.1:64206"}, "UDPNOVAWORLD")) return 1;
 	if (!expect(r.startup_url == "http://127.0.0.1:8080", "STARTUPURL")) return 1;
 
 	server_thread.join();

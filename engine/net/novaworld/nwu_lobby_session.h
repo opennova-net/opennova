@@ -41,14 +41,14 @@ public:
 		std::function<std::vector<std::pair<std::string, std::string>>()> cookie_vars;
 		// The session was created; its ClientHello ships right after.
 		std::function<void(std::size_t cu_vars, std::size_t cookie_vars)> on_session_created;
-		// An outbound datagram just shipped on the session socket (trace hook).
-		std::function<void(const std::vector<uint8_t> &)> on_sent;
+		// An outbound datagram just shipped on the session socket to `to` (trace hook).
+		std::function<void(const PeerAddr &to, const std::vector<uint8_t> &)> on_sent;
 		// One inbound session datagram was handled (trace hook).
 		std::function<void(const RxInfo &)> on_received;
 		// The session advanced: the owner maps ClientSession::State onto its own states.
 		std::function<void()> on_session_state;
-		// Fatal: a malformed gate endpoint, a session error, or a connect deadline. The message is
-		// the retail NWEC tag when one is witnessed for the failure.
+		// Fatal: a gate response naming no UDPNOVAWORLD, a session error, or a connect deadline.
+		// The message is the retail NWEC tag when one is witnessed for the failure.
 		std::function<void(const std::string &)> on_fatal;
 		// Recoverable decode noise on the gate socket (a bad envelope or response).
 		std::function<void(const std::string &)> on_soft_error;
@@ -57,8 +57,11 @@ public:
 		// The client index/key draws, the reconnect's fresh CK and the host role's AppId and
 		// cookie-key seeds. Unset: make_random_session_u32, the OS CSPRNG (base/os_random).
 		std::function<uint32_t()> random_u32;
-		// Resolve a gate or UDPNOVAWORLD host ("a.b.c.d" or a name) into `out` (its port left
-		// alone); false when it does not resolve. Unset: dotted quads only.
+		// Resolve a gate host or a UDPNOVAWORLD entry's host ("a.b.c.d" or a name) into `out`
+		// (its port left alone): the platform's inet_addr, then its name lookup; false when
+		// neither reads it. Unset: dotted quads only.
+		// [orig: Napi_ResolveAddress @0x62DF90 - inet_addr @0x62DFAD, gethostbyname
+		//  @0x62DFCA]
 		std::function<bool(const std::string &host, PeerAddr &out)> resolve_ipv4;
 		// The configured game.cfg `mpmaxpacketsize` (0 -> 1300): the lobby template's field 13
 		// and the 0x42's MaxPacketSize CU. [orig: InitNPConnection @0x4d3df4; ConnectToNovaWorld
@@ -92,7 +95,8 @@ public:
 	// missing-sequence tail, the connection's send pump, the periodic update's statements, then
 	// the gate worker's and the first connect's retransmits and deadlines.
 	void tick(uint32_t now_ms);
-	// Send one datagram to the NW session endpoint (fires on_sent).
+	// Send one datagram (fires on_sent per send): the announce (a 0x41) to every probe target,
+	// anything else to the connection's server.
 	void send(const std::vector<uint8_t> &dg);
 	// One connection send pump now, outside the tick: what the session queued (a stop statement
 	// before the goodbye) goes out at once.
@@ -105,7 +109,9 @@ public:
 	// Whether this session's protocol takes `data` from `from` when the session socket is shared
 	// with the game's protocol (DatagramDemux's claim): a server-direction opcode (0x81..0x87, the
 	// client-side handlers of the opcode table) from the lobby server's endpoint, which is where
-	// its connection lives. Everything else is the game's (a joiner's 0x41..0x47, a LAN probe).
+	// its connection lives, or a 0x81 its connection takes from any sender (the reply finds the
+	// connection by its CI: ClientSession::takes_server_hello). Everything else is the game's (a
+	// joiner's 0x41..0x47, a LAN probe).
 	// [orig: NapiNPManager_HandlePacket @0x622f10 offers the envelope-stripped datagram to each
 	//  protocol; NapiNPProtocol_DispatchOpcode @0x622b40 over g_NPOpcodeHandlers @0x849d90 (0x81
 	//  Nwu_HandleServerHello .. 0x87 Nwu_HandleServerProbe); Nwu_HandleServerSession @0x627f90 ->
@@ -121,14 +127,28 @@ public:
 	MatchFacts match_facts() const;
 	uint32_t client_index() const { return client_index_; }
 	uint32_t client_key() const { return client_key_; }
-	const std::string &nw_udp_host() const { return nw_udp_host_; }
-	uint16_t nw_udp_port() const { return nw_udp_port_; }
+	// One probe target: an address and the port as parsed (the send narrows it to 16 bits).
+	struct Target {
+		uint32_t ip = 0; // PeerAddr's packing
+		uint32_t port = 0;
+	};
+	// The connect's probe targets, one per gate UDPNOVAWORLD entry that resolved, in order and
+	// without repeats.
+	const std::vector<Target> &targets() const { return targets_; }
+	// The connection's server: the sender of the 0x81 it last took (empty until then).
+	const PeerAddr &nw_peer() const { return nw_peer_; }
 	// The driver's wall clock in ms (the session's GetTickCount).
 	uint32_t clock_ms() const { return clock_ms_; }
 	uint32_t random_u32() const;
 
 private:
 	void begin_session();
+	// One address string into a probe target, as retail's send-to-address does; false (no
+	// target) when it names no address.
+	bool add_target(const std::string &address);
+	// The address of a host as Napi_ResolveAddress reads it (DNS on), 0 when it does not resolve.
+	uint32_t resolve_address(const std::string &host) const;
+	void send_one(const PeerAddr &to, const std::vector<uint8_t> &dg);
 	void poll_gate();
 	void poll_session();
 	void send_gate_probe();
@@ -149,8 +169,7 @@ private:
 	std::unique_ptr<ClientSession> session_;
 	uint32_t client_index_ = 0;
 	uint32_t client_key_ = 0;
-	std::string nw_udp_host_; // from the gate's UDPNOVAWORLD
-	uint16_t nw_udp_port_ = 0;
+	std::vector<Target> targets_; // the enumerator's target list
 	PeerAddr nw_peer_;
 	GateResponse gate_response_;
 	uint32_t clock_ms_ = 0;

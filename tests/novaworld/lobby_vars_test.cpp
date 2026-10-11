@@ -341,17 +341,48 @@ int main() {
 		       "NWUSID matches generate_hardware_fingerprint transform");
 	}
 
-	// 9. parse_host_port — good / no-colon / empty-port / non-numeric-port.
+	// 9. D-NET-469: parse_host_and_port is retail's host-and-port split: the host before the first
+	// colon (all of it without one), the port the napi literal's value after it, else 0; only a
+	// string over 511 bytes fails. [orig: Network_ParseHostAndPort @0x62E200 - @0x62E260,
+	// @0x62E297, @0x62E2B1, @0x62E2BD]
 	{
+		struct Case {
+			const char *in;
+			const char *host;
+			uint32_t port;
+		};
+		const Case cases[] = {
+				{"1.2.3.4:7597", "1.2.3.4", 7597},
+				{"1.2.3.4:$7D00", "1.2.3.4", 32000},
+				{"1.2.3.4:0x7D00", "1.2.3.4", 32000},
+				{"1.2.3.4:076400", "1.2.3.4", 32000},
+				{"1.2.3.4:32000d", "1.2.3.4", 32000},
+				{"1.2.3.4:0o5", "1.2.3.4", 0},
+				{"1.2.3.4:65536", "1.2.3.4", 65536},
+				{"nohostport", "nohostport", 0},
+				{"1.2.3.4:", "1.2.3.4", 0},
+				{"1.2.3.4:abc", "1.2.3.4", 0},
+				{"1.2.3.4:7597:9", "1.2.3.4", 7597},
+				{"nw.example.com:1", "nw.example.com", 1},
+				{"", "", 0},
+		};
+		for (const Case &c : cases) {
+			std::string host = "unset";
+			uint32_t port = 123;
+			expect(nw::parse_host_and_port(c.in, host, port) && host == c.host && port == c.port,
+			       c.in);
+		}
 		std::string host;
-		uint16_t port = 0;
-		expect(nw::parse_host_port("1.2.3.4:7597", host, port) && host == "1.2.3.4" && port == 7597,
-		       "parse_host_port good case");
-		host.clear();
-		port = 123;
-		expect(!nw::parse_host_port("nohostport", host, port), "parse_host_port rejects no colon");
-		expect(!nw::parse_host_port("1.2.3.4:", host, port), "parse_host_port rejects empty port");
-		expect(!nw::parse_host_port("1.2.3.4:abc", host, port), "parse_host_port rejects non-numeric port");
+		uint32_t port = 0;
+		const std::string nul_tail = std::string("5.6.7.8:9") + std::string(1, '\0') + "9";
+		expect(nw::parse_host_and_port(nul_tail, host, port) && host == "5.6.7.8" && port == 9,
+		       "parse_host_and_port reads to the first NUL");
+		expect(nw::parse_host_and_port(std::string(511, 'a'), host, port) && port == 0,
+		       "parse_host_and_port takes 511 bytes");
+		host = "kept";
+		port = 7;
+		expect(!nw::parse_host_and_port(std::string(512, 'a'), host, port) && host == "kept" && port == 7,
+		       "parse_host_and_port fails past 511 bytes, writing nothing");
 	}
 
 	if (g_fail == 0) {

@@ -408,9 +408,10 @@ int exercise_sibling_ports(ServerProcess &server, const std::string &binary,
 
 	opennova::GateResponse reply;
 	if (probe_gate(gate_port, reply) != 0) return 1;
-	if (reply.udp_novaworld != "127.0.0.1:" + std::to_string(nw_port)) {
-		std::fprintf(stderr, "  UDPNOVAWORLD %s, the NW UDP listener on :%u\n",
-		             reply.udp_novaworld.c_str(), static_cast<unsigned>(nw_port));
+	if (reply.udp_novaworld != std::vector<std::string>{"127.0.0.1:" + std::to_string(nw_port)}) {
+		std::fprintf(stderr, "  UDPNOVAWORLD %s (%zu), the NW UDP listener on :%u\n",
+		             reply.udp_novaworld.empty() ? "" : reply.udp_novaworld[0].c_str(),
+		             reply.udp_novaworld.size(), static_cast<unsigned>(nw_port));
 		return 1;
 	}
 #ifdef OPENNOVA_HTTP_ENABLED

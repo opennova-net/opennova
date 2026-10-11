@@ -112,9 +112,9 @@ bool NwuHostRole::handle_notice(const ClientSession::Notice &notice) {
 			if (session != nullptr) {
 				for (const auto &entry : players_) session->send_host_player_added(entry.second);
 			}
-			io::logf(io::LogLevel::kInfo, "[NovaWorld] hosting '%s' gsid=%s -> %s:%u",
-			         cfg_.server_name.c_str(), gsid().c_str(), lobby_.nw_udp_host().c_str(),
-			         static_cast<unsigned>(lobby_.nw_udp_port()));
+			io::logf(io::LogLevel::kInfo, "[NovaWorld] hosting '%s' gsid=%s -> %s",
+			         cfg_.server_name.c_str(), gsid().c_str(),
+			         peer_addr_to_string(lobby_.nw_peer()).c_str());
 			if (hooks_.on_hosting) hooks_.on_hosting();
 		} else {
 			// Rejected: the MsgCode maps through the host switch (NWEC53..60).
