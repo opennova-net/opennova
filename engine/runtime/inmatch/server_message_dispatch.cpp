@@ -934,12 +934,12 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// spawn-state reset below (it clears only the dead bit).
 	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
 	world::apply_spawn_point_latches(*player, pose);
-	// Two signed raises to the difficulty-aware ceiling, the deploy's and the reset's; one that
-	// wraps negative leaves a dead player's health alone [orig: Server_ProcessPlayerDeath ->
+	// The deploy's and the reset's signed raises to the row's difficulty-aware ceiling: 0 leaves
+	// the hp-0 body's 1, a wrapped one a dead player's health [orig: Server_ProcessPlayerDeath ->
 	// Entity_RaiseHealthToMax @0x51782F; Entity_ResetToSpawnState @0x4B97BC].
-	const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp != 0;
+	const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp.has_value();
 	const int32_t ceiling = def_hp || player->health_max > 0 ? world::max_health_with_difficulty(
-			world, *player, def_hp ? world.tables.player.item_hp : player->health_max) : 100;
+			world, *player, def_hp ? *world.tables.player.item_hp : player->health_max) : 100;
 	if (world::retail_signed_i16(player->health) < ceiling) player->health = ceiling;
 	world::entity_reset_to_spawn_state(*player, ceiling);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)

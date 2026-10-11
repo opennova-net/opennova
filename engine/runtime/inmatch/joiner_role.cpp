@@ -1072,7 +1072,7 @@ void JoinerRole::wire_frame_providers() {
 						picker.has_item_def = true;
 						picker.item_id = q.type_id;
 						picker.position = resolve_pos;
-						picker.health_max = world_->tables.player.item_hp;
+						picker.health_max = world_->tables.player.item_hp.value_or(0);
 						picker.health = picker.health_max;
 						if (row != nullptr && row->net_health_zero) picker.health = 0;
 						else if (row != nullptr && row->net_has_compact)

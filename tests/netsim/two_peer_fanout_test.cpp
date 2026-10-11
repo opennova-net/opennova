@@ -787,6 +787,53 @@ bool run_0a_health_class_byte_packed() {
 	return true;
 }
 
+// (g2) [D-PWR-10] The field-17 tier divides by the def's own hp word, 0 included: a Player row
+//      hp of 0 spawns its body at Health 1 with healthMax 0, the classifier's guard divides by 1,
+//      and the record packs tier 2 (0x28), not the tier 0 a stand-in 150 would give (0x08).
+//      [orig: Entity_GetHealthClassification @0x4AD4E0 - movsx def+0x17C @0x4AD505, the zero
+//      guard @0x4AD514]. A def-less entity reaches no retail record writer (the 0x0A loop's
+//      def gate @0x50F0FD), so it keeps the class-8 stand-in.
+bool run_0a_health_class_byte_hp0_row() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.tables.player.item_hp = 0; // the traits sweep stored the Player row's hp word 0
+	const w::EntityHandle h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	if (!expect(h.valid(), "hp-0 player spawned")) return false;
+	const w::Entity *body = world.registry.get(h);
+	if (!expect(body->has_item_def && body->health == 1 && body->health_max == 0,
+	            "the hp-0 row's body: def-bearing, Health 1, healthMax 0")) return false;
+	const nw::GameEntitySnapshot snap = ns::snapshot_of(*body);
+	if (!expect(snap.health == 1 && snap.health_max == 0,
+	            "the snapshot carries the def's hp word 0, not the 150 stand-in")) return false;
+
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, h, 0});
+	ns::test::emit_all(world, conns);
+	ns::Datagram dg;
+	if (!expect(ch.client_recv(dg), "0x0A frame dequeued")) return false;
+	nw::FrameUpdate fu;
+	if (!expect(nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu),
+	            "0x0A frame decodes")) return false;
+	bool found = false;
+	for (const auto &rec : fu.records) {
+		if (rec.handle != h.packed) continue;
+		found = true;
+		if (!expect(rec.player.health_class_byte == 0x28,
+		            "Health 1 over healthMax 0 packs tier 2 | class 8 (0x28)")) return false;
+	}
+	if (!expect(found, "player record present in the frame")) return false;
+
+	w::Entity defless;
+	defless.item_id = w::kPlayerInfantryTypeId;
+	defless.has_item_def = false;
+	if (!expect(ns::snapshot_of(defless).health_max == 150,
+	            "a def-less entity keeps the class-8 stand-in")) return false;
+	std::printf("PASS 0a_health_class_byte_hp0_row\n");
+	return true;
+}
+
 // (h) [D-NET-134 step 2] The 0x0A entity loop: pool-1 vehicles replicate as Vehicle compact
 //     records, the byte budget caps each frame [orig: g_EntitySendBudget @0xC8FC50 = 600,
 //     soft cap @0x50f34b], and AGING gives budget-starved entities the next frame's slots
@@ -2091,6 +2138,7 @@ int main() {
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
 	                run_retail_player_slots_start_after_bms_organics() &&
 	                run_0a_subblock_phase_cycle() && run_0a_health_class_byte_packed() &&
+	                run_0a_health_class_byte_hp0_row() &&
 	                run_0a_vehicle_budget_round_robin() && run_0a_priority_view_terms() &&
 	                run_0a_priority_dead_recipient_social_score() &&
 	                run_0a_owner_hidden_admission() &&
