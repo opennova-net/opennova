@@ -14,6 +14,12 @@
 #                                 pull GHCR images + compose up on the target
 #   app status|logs [svc]|restart|down
 #   app sql <statement>           run SQL against the live sqlite DB
+#   app reset-db --yes-drop-database --tag SHA [--game-tag SHA] [--no-backup]
+#                                 delete the sqlite DB, then deploy SHA onto an
+#                                 empty one (a deploy with an edited migration;
+#                                 DEPLOY.md "Resetting the service database").
+#                                 Takes a final backup first unless --no-backup;
+#                                 earlier backups stay in S3
 #   backup now|list               trigger / list the sqlite backups
 #   state push|pull               terraform state <-> 1Password document
 #
@@ -165,13 +171,147 @@ SSHCFG
                 --env-file "$app_env")
 }
 
+# The one compose invocation every app/backup action runs: COMPOSE_ARGS (set
+# by remote_compose) against whatever engine DOCKER_HOST names.
+app_compose() {
+  docker compose "${COMPOSE_ARGS[@]}" "$@"
+}
+
+# The deployed images. --tag moves the server + portal pair; the game image
+# (the web build, ADR 0049) publishes on its own path filter, so it has its
+# own tag.
+app_images() {
+  local tag="$1" game_tag="$2" owner
+  owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
+  export SERVER_IMAGE="ghcr.io/${owner}/novaworld-server:${tag}"
+  export WEB_IMAGE="ghcr.io/${owner}/novaworld-web:${tag}"
+  export GAME_IMAGE="ghcr.io/${owner}/opennova-game:${game_tag}"
+}
+
+check_target() {
+  ssh -i "$(ssh_key_file)" -o StrictHostKeyChecking=accept-new \
+    "ubuntu@$(target_ip)" "docker --version" >/dev/null \
+    || die "cannot reach docker on the target over SSH"
+}
+
+# Pull only the published images; the backup sidecar has no registry image
+# (it's built from deploy/backup/), so a blanket `pull` fails on it.
+app_pull() {
+  app_compose pull novaworld web game
+}
+
+# `up --build` pulls server/web/game (pull_policy: always) and builds the backup
+# sidecar on the remote in one shot. It also starts any stopped service.
+app_up() {
+  app_compose up -d --remove-orphans --build
+}
+
+# app reset-db: delete the service's SQLite database and deploy onto an empty
+# one. The database is disposable: a schema fix edits a migration in place,
+# and the server records applied migrations by file name only
+# (_schema_migrations, engine/net/novaworld/db/sqlite.h), so an edited file
+# never runs again on an existing database. Such a deploy starts from nothing.
+#
+# It takes --tag and deploys itself rather than leaving the server stopped:
+# the first server to boot on the empty database applies and records every
+# migration, so that boot must be the image carrying the edit. Any other (an
+# `app restart` of the old container, a deploy of an older tag) writes the old
+# schema under the same file names and the reset is spent with no error.
+# Deploying in the same command also pulls the new images before anything is
+# stopped, so a mistyped tag fails while the database is still there.
+#
+# The final backup is on by default: the nightly snapshot can be a day old, and
+# the reset cannot be undone without one. --no-backup is for a database known
+# to be worthless or a backup path that is itself broken.
+app_reset_db() {
+  local tag="" game_tag="latest" confirmed=0 backup=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes-drop-database) confirmed=1; shift ;;
+      --tag)      [ $# -ge 2 ] || die "--tag needs a value"; tag="$2"; shift 2 ;;
+      --game-tag) [ $# -ge 2 ] || die "--game-tag needs a value"; game_tag="$2"; shift 2 ;;
+      --no-backup) backup=0; shift ;;
+      *) die "unknown: app reset-db $1 (try: --yes-drop-database --tag SHA [--game-tag SHA] [--no-backup])" ;;
+    esac
+  done
+  [ -n "$tag" ] || die "app reset-db needs --tag SHA: the server image carrying the edited migration, deployed onto the empty database"
+
+  app_images "$tag" "$game_tag"
+  remote_compose
+  local project volume
+  project="$(app_compose config 2>/dev/null | sed -n 's/^name: //p' | head -n 1)"
+  volume="${project:+${project}_}nw_data"
+
+  log "app reset-db on $(target_ip) will:"
+  log "  1. pull $SERVER_IMAGE + $WEB_IMAGE + $GAME_IMAGE (a bad tag stops here, before anything changes)"
+  log "  2. stop novaworld and the backup sidecar (web and game stay up; the site's API is down until step 5)"
+  if [ "$backup" -eq 1 ]; then
+    log "  3. take a final backup to s3://${BACKUP_BUCKET:-<backup bucket>}/ (as 'backup now'); if it fails, start both again and stop here"
+  else
+    log "  3. take NO final backup (--no-backup)"
+  fi
+  log "  4. delete novaworld.db and its -wal, -shm and -journal files from the volume $volume"
+  log "  5. deploy into a fresh novaworld container (compose up): its first boot applies every migration to the empty database"
+  log "Earlier backups stay in S3 (90-day lifecycle) and hold the old schema: restoring one undoes the reset."
+  [ "$confirmed" -eq 1 ] || die "refusing to drop the database without --yes-drop-database"
+
+  check_target
+  log "pulling the images…"
+  app_pull || die "the pull failed; nothing was stopped or deleted"
+  log "stopping novaworld + backup…"
+  app_compose stop novaworld backup \
+    || die "stopping novaworld + backup failed; nothing was deleted (app status shows what runs)"
+  if [ "$backup" -eq 1 ]; then
+    log "taking the final backup…"
+    if ! app_compose run --rm --no-deps backup /backup/backup.sh; then
+      app_compose start novaworld backup || true
+      die "the final backup failed; nothing was deleted and novaworld + backup were started again (fix the backup, or pass --no-backup)"
+    fi
+  fi
+  log "deleting the database files…"
+  # One-off container of the backup sidecar: it mounts the same nw_data volume
+  # as the server, and DATABASE_PATH names the same file.
+  # shellcheck disable=SC2016  # expanded by the container's sh, not here
+  app_compose run --rm --no-deps backup sh -c '
+    set -eu
+    db="$DATABASE_PATH"
+    rm -f "$db" "$db-wal" "$db-shm" "$db-journal"
+    for f in "$db" "$db-wal" "$db-shm" "$db-journal"; do
+      if [ -e "$f" ]; then echo "still present: $f" >&2; exit 1; fi
+    done
+    echo "[reset-db] deleted $db (+ -wal, -shm, -journal); $(dirname "$db") now holds:"
+    ls -la "$(dirname "$db")"' \
+    || die "deleting the database files failed; novaworld + backup are stopped and nothing was deployed (rerun reset-db)"
+
+  # Only the new image may boot first on the empty database (see above). The
+  # stopped server container goes too, so the deploy creates a fresh one whose
+  # log holds nothing but its boots on the empty database.
+  local redeploy="app deploy --tag $tag --game-tag $game_tag (not app restart)"
+  app_compose rm -f novaworld \
+    || die "removing the stopped novaworld container failed; the database is deleted and nothing was deployed; run: $redeploy"
+  log "deploying onto the empty database…"
+  app_up || die "the deploy onto the empty database failed; rerun: $redeploy"
+  # The first boot logs its migration count; on an empty database nothing is skipped.
+  local line="" _
+  for _ in $(seq 1 30); do
+    line="$(app_compose logs --no-log-prefix novaworld 2>/dev/null \
+              | grep -m 1 '\[boot\] migrations:' || true)"
+    [ -n "$line" ] && break
+    sleep 2
+  done
+  case "$line" in
+    *" 0 skipped"*) log "novaworld: $line" ;;
+    "") die "novaworld logged no '[boot] migrations:' line in 60 s; check: app logs novaworld" ;;
+    *) die "novaworld: $line (expected 0 skipped on an empty database; check: app logs novaworld)" ;;
+  esac
+  log "reset-db complete."
+}
+
 cmd_app() {
   require_op
   local action="${1:-status}"; shift || true
   case "$action" in
     deploy)
-      # --tag moves the server + portal pair; the game image (the web build,
-      # ADR 0049) publishes on its own path filter, so it has its own tag.
       local tag="latest" game_tag="latest"
       while [ $# -gt 0 ]; do
         case "$1" in
@@ -180,33 +320,24 @@ cmd_app() {
           *) die "unknown: app deploy $1 (try: --tag SHA, --game-tag SHA)" ;;
         esac
       done
-      local owner
-      owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
-      export SERVER_IMAGE="ghcr.io/${owner}/novaworld-server:${tag}"
-      export WEB_IMAGE="ghcr.io/${owner}/novaworld-web:${tag}"
-      export GAME_IMAGE="ghcr.io/${owner}/opennova-game:${game_tag}"
+      app_images "$tag" "$game_tag"
       remote_compose
       log "deploying $SERVER_IMAGE + $WEB_IMAGE + $GAME_IMAGE to $(target_ip)…"
-      ssh -i "$(ssh_key_file)" -o StrictHostKeyChecking=accept-new \
-        "ubuntu@$(target_ip)" "docker --version" >/dev/null \
-        || die "cannot reach docker on the target over SSH"
-      # Pull only the published images; the backup sidecar has no registry image
-      # (it's built from deploy/backup/), so a blanket `pull` fails on it.
-      docker compose "${COMPOSE_ARGS[@]}" pull novaworld web game
-      # `up --build` pulls server/web/game (pull_policy: always) and builds the backup
-      # sidecar on the remote in one shot.
-      docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans --build
+      check_target
+      app_pull
+      app_up
       log "deploy complete."
       ;;
-    status)  remote_compose; docker compose "${COMPOSE_ARGS[@]}" ps ;;
-    logs)    remote_compose; docker compose "${COMPOSE_ARGS[@]}" logs --tail=200 "${1:-}" ;;
-    restart) remote_compose; docker compose "${COMPOSE_ARGS[@]}" restart "${1:-}" ;;
-    down)    remote_compose; docker compose "${COMPOSE_ARGS[@]}" down ;;
+    status)  remote_compose; app_compose ps ;;
+    logs)    remote_compose; app_compose logs --tail=200 "${1:-}" ;;
+    restart) remote_compose; app_compose restart "${1:-}" ;;
+    down)    remote_compose; app_compose down ;;
     # Run SQL against the live SQLite DB via the backup sidecar (it has sqlite3
     # and the nw_data volume rw). E.g. one-off admin cleanup.
-    sql)     remote_compose; docker compose "${COMPOSE_ARGS[@]}" exec -T backup \
+    sql)     remote_compose; app_compose exec -T backup \
                sqlite3 /data/novaworld.db "$*" ;;
-    *) die "unknown: app $action (try: deploy|status|logs|restart|down|sql)" ;;
+    reset-db) app_reset_db "$@" ;;
+    *) die "unknown: app $action (try: deploy|status|logs|restart|down|sql|reset-db)" ;;
   esac
 }
 
@@ -251,8 +382,9 @@ cmd_state() {
   esac
 }
 
+# The header comment above `set -euo pipefail` is the help text.
 usage() {
-  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,/^[^#]/p' "${BASH_SOURCE[0]}" | sed -e '$d' -e 's/^# \{0,1\}//'
 }
 
 main() {
@@ -269,4 +401,9 @@ main() {
   esac
 }
 
-main "$@"
+# Run when executed. Sourced, it only defines the functions, so a local check
+# can drive one (say app_reset_db) against a local engine with the vault,
+# terraform and SSH steps stubbed.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi
