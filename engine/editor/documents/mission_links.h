@@ -79,6 +79,14 @@ struct MissionLinks {
 	std::vector<MissionReach> reaches;
 	bool any() const { return !links.empty() || !reaches.empty(); }
 };
+// The rows of the entities that carry a group, in the rows' order (every pool's; none for group 0, which names no
+// group); and the members of the groups `records` carry or are (an entity's group, a group's record), each once, in
+// the rows' order: what Select group members selects.
+std::vector<NodeId> mission_group_rows(const MissionDocument &document, int64_t group);
+std::vector<NodeAddress> mission_group_members(const MissionDocument &document, const std::vector<NodeAddress> &records);
+// The group a record names as a member or is (an entity's group, a group record's index); -1 for neither.
+int64_t mission_group_of(const MissionDocument &document, const NodeAddress &record);
+
 // Whether a record is an event, a trigger or an action of a mission.
 bool mission_logic_record(const NodeAddress &record);
 MissionLinks mission_links(const MissionDocument &document, const NodeAddress &record);

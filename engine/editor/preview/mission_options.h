@@ -18,6 +18,14 @@ enum class MissionTool : uint8_t { Select, Place, Path, Area, Shoot };
 const char *mission_tool_token(MissionTool tool);
 bool mission_tool_from_token(const std::string &token, MissionTool &out);
 
+// What the marks are coloured by (ADR 0046 S24, In the views): their team (the game's map colours, a ring in team
+// 1's or team 2's), or their group (the editor's palette, mission_group_rgb: a ring in each group's colour, group 0,
+// none, unringed). The 3D view's and the map's alike.
+enum class MissionColorBy : uint8_t { Team, Group };
+// "team", "group".
+const char *mission_color_by_token(MissionColorBy by);
+bool mission_color_by_from_token(const std::string &token, MissionColorBy &out);
+
 // The mission view's Listen (ADR 0046 DI-36), its options' `listen`: on or off, and the master volume (0..1) every
 // sound it plays is scaled by (the editor's, not the game's). Off by default: a mission opened is silent until asked.
 struct MissionListenOptions {
@@ -52,8 +60,9 @@ struct MissionViewportOptions {
 	bool items = true, buildings = true, markers = true, organics = true;
 	bool areas = true, paths = true, labels = false;
 	// S24: the selected event's links, the distance triggers' reaches and the badges on what events name
-	// (preview/mission_link_shapes).
+	// (preview/mission_link_shapes); what the marks are coloured by.
 	bool links = true;
+	MissionColorBy color_by = MissionColorBy::Team;
 	float mark_range = 600.0f;
 	bool stick = true;
 	double time = -1.0;
@@ -76,9 +85,9 @@ bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b
 inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOptions &b) { return !(a == b); }
 
 // The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks: {items,
-// buildings, markers, organics, areas, paths, labels, links}, mark_range, stick, time (null: the mission's start
-// time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage), ammo, listen
-// {on, volume}}.
+// buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), mark_range, stick, time
+// (null: the mission's start time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or
+// foliage), ammo, listen {on, volume}}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.

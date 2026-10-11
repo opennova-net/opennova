@@ -668,6 +668,83 @@ int test_link_overlays() {
 	return 0;
 }
 
+// S24: the marks coloured by group: the editor's palette (63 colours, none for group 0 or past the 64 groups,
+// neighbours apart), a ring in its group's colour on each grouped mark and none on the others or by team, the
+// legend of the groups drawn in the top-right corner by the words given; color_by on the wire.
+int test_group_colours() {
+	std::vector<uint32_t> seen;
+	for (int group = 1; group < 64; ++group) {
+		const uint32_t rgb = mission_group_rgb(group);
+		TEST_EXPECT(rgb != 0 && std::find(seen.begin(), seen.end(), rgb) == seen.end());
+		if (group > 1) {
+			// Neighbours apart: at least 64 in some channel.
+			const uint32_t before = mission_group_rgb(group - 1);
+			int most = 0;
+			for (int shift = 0; shift < 24; shift += 8)
+				most = std::max(most, std::abs(int((rgb >> shift) & 0xFF) - int((before >> shift) & 0xFF)));
+			TEST_EXPECT(most >= 64);
+		}
+		seen.push_back(rgb);
+	}
+	TEST_EXPECT(mission_group_rgb(0) == 0 && mission_group_rgb(64) == 0 && mission_group_rgb(-1) == 0);
+	uint32_t ring = 0;
+	TEST_EXPECT(!mission_mark_ring_rgb(MissionColorBy::Group, 1, 0, ring) && mission_mark_ring_rgb(MissionColorBy::Team, 1, 0, ring) &&
+			ring == kMissionBlueRgb && mission_mark_ring_rgb(MissionColorBy::Group, 0, 5, ring) && ring == mission_group_rgb(5) &&
+			!mission_mark_ring_rgb(MissionColorBy::Team, 0, 5, ring));
+	// The wire.
+	MissionViewportOptions options;
+	options.color_by = MissionColorBy::Group;
+	opennova::io::JsonValue json = mission_options_to_json(options);
+	TEST_EXPECT(json.get_string("color_by", "") == "group");
+	MissionViewportOptions read;
+	std::string error;
+	TEST_EXPECT(mission_options_from_json(json, read, error) && read.color_by == MissionColorBy::Group && read == options);
+	opennova::io::JsonValue bad;
+	opennova::io::json_parse(R"({"color_by": "pool"})", bad, error);
+	TEST_EXPECT(!mission_options_from_json(bad, read, error) && error.find("options.color_by is team or group") != std::string::npos);
+	// The overlay: two entities in group 3, one in group 7, one in none.
+	Source source = make_source();
+	source.entity_rows[0].group = 3;
+	source.entity_rows[1].group = 3;
+	source.entity_rows[2].group = 7;
+	MissionScene scene;
+	scene.read(source);
+	const OrbitCamera camera = camera_over(0.0, 0.0, 0.0, 400.0f);
+	const int width = 640, height = 480;
+	const std::vector<MissionMark> marks = mission_marks(scene, options, camera, width, height, nullptr);
+	MissionOverlayInput in;
+	in.scene = &scene;
+	in.options = &options;
+	in.camera = &camera;
+	in.width = width;
+	in.height = height;
+	in.marks = &marks;
+	in.group_title = [](int group) { return group == 3 ? std::string("Alpha squad") : "Group " + std::to_string(group); };
+	OverlayList list = mission_overlay_shapes(in);
+	const auto rings = [&](uint32_t rgb) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Circle && shape.rgb == rgb && shape.size == 6.0f;
+		});
+	};
+	TEST_EXPECT(rings(mission_group_rgb(3)) == 2 && rings(mission_group_rgb(7)) == 1 && rings(kMissionBlueRgb) == 0 &&
+			rings(kMissionRedRgb) == 0);
+	const auto text = [&](const std::string &words, uint32_t rgb) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Text && shape.text == words && shape.rgb == rgb && shape.points[0].x > 320.0f &&
+					shape.points[0].y < 80.0f;
+		});
+	};
+	TEST_EXPECT(text("Groups in view", 0xFFFFFF) == 1 && text("Alpha squad (2)", mission_group_rgb(3)) == 1 &&
+			text("Group 7 (1)", mission_group_rgb(7)) == 1);
+	// By team: the team rings, no legend.
+	options.color_by = MissionColorBy::Team;
+	list = mission_overlay_shapes(in);
+	TEST_EXPECT(rings(mission_group_rgb(3)) == 0 && rings(kMissionBlueRgb) == 1 && rings(kMissionRedRgb) == 2 &&
+			text("Groups in view", 0xFFFFFF) == 0);
+	std::printf("test_group_colours passed\n");
+	return 0;
+}
+
 // The labels' declutter (S15): the hovered mark's and the primary's always, even over each other; the
 // other selected before the rest but only where they fit, each nearest first; the rest after.
 int test_label_picks() {
@@ -725,6 +802,7 @@ int main() {
 	TEST_EXPECT(test_options() == 0);
 	TEST_EXPECT(test_overlays() == 0);
 	TEST_EXPECT(test_link_overlays() == 0);
+	TEST_EXPECT(test_group_colours() == 0);
 	TEST_EXPECT(test_label_picks() == 0);
 	std::printf("editor_mission_scene: all tests passed\n");
 	return 0;

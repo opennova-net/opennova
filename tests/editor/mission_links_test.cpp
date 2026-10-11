@@ -316,11 +316,32 @@ int test_counts() {
 	return 0;
 }
 
+// The groups' members: by group, by the records that carry or are a group, each once in the rows' order.
+int test_groups() {
+	Fixture f;
+	TEST_EXPECT(f.load());
+	const MissionDocument &m = as_mission(*f.document);
+	const NodeAddress walker = row_at(m, MissionKind::Organic, 0), guard = row_at(m, MissionKind::Organic, 1);
+	TEST_EXPECT(mission_group_rows(m, 1) == std::vector<NodeId>{walker.row} && mission_group_rows(m, 2) == std::vector<NodeId>{guard.row});
+	TEST_EXPECT(mission_group_rows(m, 0).empty() && mission_group_rows(m, 9).empty());
+	TEST_EXPECT(mission_group_of(m, walker) == 1 && mission_group_of(m, row_at(m, MissionKind::Area, 0)) == -1);
+	// The group record event 2 kills (group 2) is the guard's group.
+	const MissionLinks two = mission_links(m, row_at(m, MissionKind::Event, 1));
+	const NodeAddress group2 = two.links[1].record;
+	TEST_EXPECT(mission_group_of(m, group2) == 2);
+	TEST_EXPECT(mission_group_members(m, {group2}) == std::vector<NodeAddress>{guard});
+	TEST_EXPECT((mission_group_members(m, {guard, walker, group2}) == std::vector<NodeAddress>{walker, guard}));
+	// An item in no group carries none.
+	TEST_EXPECT(mission_group_members(m, {row_at(m, MissionKind::Item, 0)}).empty());
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_pick() != 0) return 1;
 	if (test_links() != 0) return 1;
+	if (test_groups() != 0) return 1;
 	if (test_counts() != 0) return 1;
 	std::printf("editor_mission_links: all tests passed\n");
 	return 0;

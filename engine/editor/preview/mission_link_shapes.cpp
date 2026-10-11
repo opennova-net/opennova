@@ -7,6 +7,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/session/request_factories.h>
 
 namespace opennova::editor {
 
@@ -181,6 +182,22 @@ void mission_link_shapes(const MissionLinkScene &links, const MissionLinkView &v
 		out.ring(at, radius, OverlayRole::Normal, thickness + 2.0f, 0x000000, kShadowAlpha);
 		out.ring(at, radius, OverlayRole::Normal, thickness, rgb, spot.selected ? 255 : 160);
 	}
+}
+
+bool mission_select_group(const MissionDocument &document, const std::vector<NodeAddress> &records,
+		const NodeAddress &primary, CanvasRequests &out, std::string &error) {
+	std::vector<NodeAddress> members = mission_group_members(document, records);
+	if (members.empty()) {
+		error = "Select an entity in a group (or a group) first: the command selects every entity of its group.";
+		return false;
+	}
+	// The primary last (SelectRecord's records name it last).
+	NodeAddress last = primary;
+	if (std::find(members.begin(), members.end(), last) == members.end()) last = members.front();
+	members.erase(std::remove(members.begin(), members.end(), last), members.end());
+	members.push_back(last);
+	out.request(request::select_record(document.path(), last, SelectMode::Replace, members));
+	return true;
 }
 
 void mission_link_badge(CanvasPoint at, size_t count, OverlayList &out) {

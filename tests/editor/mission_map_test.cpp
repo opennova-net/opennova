@@ -21,6 +21,7 @@
 #include <editor/preview/mission_map.h>
 #include <editor/preview/mission_map_canvas.h>
 #include <editor/preview/mission_map_outline.h>
+#include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_kinds.h>
@@ -369,6 +370,59 @@ static int test_links() {
 	TEST_EXPECT(count(OverlayKind::Circle, kMissionWatchedRgb, 14.0f) == 0 && count(OverlayKind::Text, kMissionBadgeRgb, -1.0f) == 0);
 	TEST_EXPECT(!rig.map()->options().links && rig.map()->options_json().get("marks")->get_bool("links", true) == false);
 	std::printf("test_links passed\n");
+	return 0;
+}
+
+// S24: coloured by group, the wireframes' edges and the pins' rings in each group's colour (an edge's colour moved in
+// place, the chunks' serials moved), a legend of the groups in view; the select_group command selects the members of
+// the named record's group; color_by on the wire.
+static int test_group_colours() {
+	Rig rig("opennova_editor_mission_map_groups");
+	TEST_EXPECT(rig.open(true, true));
+	for (int i = 0; i < 40 && rig.map() && rig.map()->outlines_pending(); ++i) rig.pump();
+	const MissionMapViewport *map = rig.map();
+	if (!map) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress walker = first_of(mission, MissionKind::Organic);
+	const std::vector<uint32_t> before = map->outline_rgb();
+	TEST_EXPECT(!before.empty());
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "map", "options": {"color_by": "group"}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	TEST_EXPECT(rig.map()->options().color_by == MissionColorBy::Group &&
+	            rig.map()->options_json().get_string("color_by", "") == "group");
+	// The walker's (group 1) and the guard's (group 2) edges in their groups' colours; none of a group-0 entity's.
+	const std::vector<uint32_t> &after = rig.map()->outline_rgb();
+	TEST_EXPECT(after.size() == before.size());
+	const auto has = [&](uint32_t rgb) { return std::find(after.begin(), after.end(), rgb) != after.end(); };
+	TEST_EXPECT(has(mission_group_rgb(1)) && has(mission_group_rgb(2)) && !has(mission_group_rgb(3)));
+	TEST_EXPECT(mission_map_rgb(MissionPool::Organic, 2, 1, MissionColorBy::Group) == mission_group_rgb(1) &&
+	            mission_map_rgb(MissionPool::Organic, 2, 0, MissionColorBy::Group) == kMissionOrganicRgb &&
+	            mission_map_rgb(MissionPool::Organic, 2, 1, MissionColorBy::Team) == kMissionRedRgb);
+	// The legend.
+	const ViewportContext context = rig.context();
+	std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+	editor_test::Gathered gathered;
+	half->follow(*rig.map(), context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	const OverlayList list = half->shapes(context, in);
+	const auto text = [&](const std::string &words) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Text && shape.text == words;
+		});
+	};
+	TEST_EXPECT(text("Groups in view") == 1 && text("Group 1 (1)") == 1 && text("Group 2 (1)") == 1);
+	// select_group: the walker's group's members (the walker alone), one SelectRecord.
+	gathered.requests.clear();
+	std::string error;
+	TEST_EXPECT(rig.map()->command(context, "select_group", { walker.row }, gathered, error));
+	TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].kind == EditorRequestKind::SelectRecord);
+	gathered.requests.clear();
+	TEST_EXPECT(!rig.map()->command(context, "select_group", { first_of(mission, MissionKind::Item).row }, gathered, error) &&
+	            error.find("group") != std::string::npos);
+	std::printf("test_group_colours passed\n");
 	return 0;
 }
 
@@ -808,6 +862,7 @@ int main(int argc, char **argv) {
 	failed += test_marks_hit_box();
 	failed += test_drag();
 	failed += test_links();
+	failed += test_group_colours();
 	failed += test_commands_and_wire();
 	failed += test_grid_origin();
 	failed += test_outline_of_a_box();

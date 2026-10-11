@@ -65,6 +65,7 @@ bool read_flags(const JsonValue &json, const char *group, const Flag (&flags)[N]
 }
 
 constexpr const char *kTools[] = { "select", "place", "path", "area", "shoot" };
+constexpr const char *kColorBy[] = { "team", "group" };
 
 // The path numbers a stop is added to: 1 to 122 (0 and 123 to 127, mission::kFirstPathCommand on, name no route).
 constexpr int64_t kLastRoutePath = mission::kFirstPathCommand - 1;
@@ -84,6 +85,19 @@ bool mission_tool_from_token(const std::string &token, MissionTool &out) {
 	return false;
 }
 
+const char *mission_color_by_token(MissionColorBy by) {
+	return size_t(by) < std::size(kColorBy) ? kColorBy[size_t(by)] : "team";
+}
+
+bool mission_color_by_from_token(const std::string &token, MissionColorBy &out) {
+	for (size_t i = 0; i < std::size(kColorBy); ++i)
+		if (token == kColorBy[i]) {
+			out = MissionColorBy(i);
+			return true;
+		}
+	return false;
+}
+
 bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b) {
 	for (const Flag &flag : kShow)
 		if (a.*flag.member != b.*flag.member) return false;
@@ -91,13 +105,14 @@ bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b
 		if (a.*flag.member != b.*flag.member) return false;
 	return a.mark_range == b.mark_range && a.stick == b.stick && a.time == b.time && a.tool == b.tool &&
 			a.item == b.item && a.path == b.path && a.snap == b.snap && a.turn == b.turn && a.palette == b.palette &&
-			a.overlay == b.overlay && a.ammo == b.ammo && a.listen == b.listen;
+			a.overlay == b.overlay && a.ammo == b.ammo && a.listen == b.listen && a.color_by == b.color_by;
 }
 
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options) {
 	JsonValue out = JsonValue::make_object();
 	out.set("show", flags_json(options, kShow));
 	out.set("marks", flags_json(options, kMarks));
+	out.set("color_by", io::json_string(mission_color_by_token(options.color_by)));
 	out.set("mark_range", io::json_number(double(options.mark_range)));
 	out.set("stick", JsonValue::make_bool(options.stick));
 	out.set("time", options.time < 0.0 ? JsonValue::make_null() : io::json_number(options.time));
@@ -125,6 +140,11 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 			if (!read_flags(value, "show", kShow, read, error)) return false;
 		} else if (member.key == "marks") {
 			if (!read_flags(value, "marks", kMarks, read, error)) return false;
+		} else if (member.key == "color_by") {
+			if (!value.is_string() || !mission_color_by_from_token(value.string, read.color_by)) {
+				error = "options.color_by is team or group.";
+				return false;
+			}
 		} else if (member.key == "mark_range") {
 			float range = 0.0f;
 			if (!io::json_float(value, range) || range < 0.0f) {
@@ -201,8 +221,8 @@ bool mission_options_from_json(const JsonValue &json, MissionViewportOptions &he
 			read.ammo = value.string;
 		} else {
 			error = "Unknown options member \"" + member.key +
-					"\" (it takes show, marks, mark_range, stick, time, tool, item, path, snap, turn, palette, overlay, "
-					"ammo, listen).";
+					"\" (it takes show, marks, color_by, mark_range, stick, time, tool, item, path, snap, turn, palette, "
+					"overlay, ammo, listen).";
 			return false;
 		}
 	}

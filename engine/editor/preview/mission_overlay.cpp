@@ -55,6 +55,56 @@ uint32_t mission_team_rgb(int team) {
 	}
 }
 
+uint32_t mission_group_rgb(int group) {
+	if (group <= 0 || group >= 64) return 0;
+	// The golden angle round the hue circle a group, three tiers of saturation and value in turn (the editor's
+	// palette: each reads on the terrain, neighbours apart).
+	const double hue = std::fmod(double(group) * 0.3819660112501051, 1.0) * 6.0;
+	const double saturation[3] = { 0.85, 0.55, 0.95 }, value[3] = { 1.0, 0.95, 0.8 };
+	const double s = saturation[group % 3], v = value[(group / 3) % 3];
+	const int sector = int(hue) % 6;
+	const double f = hue - std::floor(hue), p = v * (1.0 - s), q = v * (1.0 - s * f), t = v * (1.0 - s * (1.0 - f));
+	double r = v, g = t, b = p;
+	switch (sector) {
+	case 0: r = v, g = t, b = p; break;
+	case 1: r = q, g = v, b = p; break;
+	case 2: r = p, g = v, b = t; break;
+	case 3: r = p, g = q, b = v; break;
+	case 4: r = t, g = p, b = v; break;
+	default: r = v, g = p, b = q; break;
+	}
+	const auto byte = [](double c) { return uint32_t(std::lround(std::clamp(c, 0.0, 1.0) * 255.0)); };
+	return (byte(r) << 16) | (byte(g) << 8) | byte(b);
+}
+
+bool mission_mark_ring_rgb(MissionColorBy by, int team, int group, uint32_t &rgb) {
+	if (by == MissionColorBy::Group) {
+		rgb = mission_group_rgb(group);
+		return rgb != 0;
+	}
+	if (team != 1 && team != 2) return false;
+	rgb = mission_team_rgb(team);
+	return true;
+}
+
+void mission_group_legend(const std::vector<std::pair<int, size_t>> &groups, const std::function<std::string(int)> &title,
+		int width, OverlayList &out, size_t most) {
+	if (groups.empty()) return;
+	std::vector<std::pair<std::string, uint32_t>> lines;
+	lines.emplace_back("Groups in view", 0xFFFFFF);
+	for (size_t i = 0; i < groups.size() && i < most; ++i) {
+		const auto &[group, count] = groups[i];
+		const std::string name = title ? title(group) : "Group " + std::to_string(group);
+		lines.emplace_back(name + " (" + std::to_string(count) + ")", mission_group_rgb(group));
+	}
+	if (groups.size() > most) lines.emplace_back("and " + std::to_string(groups.size() - most) + " more", 0xC0C0C0);
+	size_t longest = 0;
+	for (const auto &line : lines) longest = std::max(longest, line.first.size());
+	const float x = float(width) - 10.0f - float(longest) * kMissionLabelCharWidth;
+	for (size_t i = 0; i < lines.size(); ++i)
+		out.text(CanvasPoint{ x, 8.0f + float(i) * (kMissionLabelHeight + 2.0f) }, lines[i].first, lines[i].second);
+}
+
 PreviewVec3 mission_entity_heading(const MissionEntityMark &entity) {
 	float forward[3];
 	world::presentation_forward_from_angles(float(entity.yaw), 0.0f, forward);
@@ -181,6 +231,8 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 		drawn.resize(kMissionMarksDrawn);
 		std::sort(drawn.begin(), drawn.end());
 	}
+	// S24: how many drawn marks carry each group (the legend's, coloured by group).
+	std::vector<size_t> grouped(64, 0);
 	// The labels asked for, placed once every mark is drawn (over them).
 	std::vector<MissionLabelCandidate> labels;
 	std::vector<int> label_marks;
@@ -230,7 +282,11 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 			case MissionPool::Marker: list.marker(at, OverlayGlyph::Cross, 5.0f, OverlayRole::Normal, rgb, 1.5f); break;
 			case MissionPool::Organic: list.marker(at, OverlayGlyph::Dot, 4.0f, OverlayRole::Normal, rgb); break;
 			}
-			if (entity.team == 1 || entity.team == 2) list.ring(at, 6.0f, OverlayRole::Normal, 1.0f, mission_team_rgb(entity.team));
+			// Its team's ring, or (S24) its group's.
+			uint32_t ring = 0;
+			if (mission_mark_ring_rgb(in.options->color_by, entity.team, entity.group, ring))
+				list.ring(at, 6.0f, OverlayRole::Normal, in.options->color_by == MissionColorBy::Group ? 1.75f : 1.0f, ring);
+			if (in.options->color_by == MissionColorBy::Group && entity.group > 0 && entity.group < 64) ++grouped[entity.group];
 			if (index == in.primary && in.handle_reach > 0.0f) {
 				// The heading line to the yaw handle, the height handle above.
 				float hx = 0.0f, hy = 0.0f;
@@ -354,6 +410,13 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 		list.rect(CanvasPoint{ std::min(in.marquee_from.x, in.marquee_to.x), std::min(in.marquee_from.y, in.marquee_to.y) },
 				CanvasPoint{ std::max(in.marquee_from.x, in.marquee_to.x), std::max(in.marquee_from.y, in.marquee_to.y) },
 				OverlayRole::Marquee);
+	}
+	// S24: the groups' legend, coloured by group.
+	if (in.options->color_by == MissionColorBy::Group) {
+		std::vector<std::pair<int, size_t>> groups;
+		for (int group = 1; group < 64; ++group)
+			if (grouped[size_t(group)]) groups.emplace_back(group, grouped[size_t(group)]);
+		mission_group_legend(groups, in.group_title, in.width, list);
 	}
 	// An empty mission says how to start, in the middle of the picture.
 	if (scene.entities().empty() && scene.areas().empty()) {

@@ -72,6 +72,19 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		ImGui::Checkbox(kind.label, kind.shown);
 		ui_kit::tooltip(kind.tip);
 	}
+	{
+		const char *const words[] = { "Team", "Group" };
+		const float width = ui_kit::text_width("Group") + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
+		row.next(ui_kit::field_width(width, "Colour"));
+		ImGui::SetNextItemWidth(width);
+		if (ImGui::BeginCombo("Colour", words[size_t(options.color_by)])) {
+			for (size_t i = 0; i < 2; ++i)
+				if (ImGui::Selectable(words[i], size_t(options.color_by) == i)) options.color_by = MissionColorBy(i);
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip("What the pins and the wireframes are coloured by: the team (the game's map colours) or the "
+		                "group (the editor's own colours, group 0 none, with a legend of the groups in view).");
+	}
 	row.next(ui_kit::checkbox_width("Stick"));
 	ImGui::Checkbox("Stick", &options.stick);
 	ui_kit::tooltip("A moved entity keeps its height over the ground (as the 3D view's Stick).");

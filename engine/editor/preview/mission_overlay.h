@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/model/node.h>
@@ -9,6 +10,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_link_shapes.h>
+#include <editor/preview/mission_options.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_overlay.h>
 #include <runtime/hud/hud_minimap.h>
@@ -55,6 +57,17 @@ inline constexpr uint32_t kMissionPathRgb = 0xC8C8C8;
 // The colour of a team as the game's map draws it (1 light blue, 2 salmon; kMissionPathRgb for the
 // rest, which the overlay rings in no team's colour).
 uint32_t mission_team_rgb(int team);
+// S24: a group's colour in the editor's palette (no game colours a group): 63 hues apart for groups 1 to 63, the
+// golden angle apart from one to the next in three lightness tiers, so neighbours differ and each reads on the
+// ground; 0 for group 0 (none) and any number past the 64 groups.
+uint32_t mission_group_rgb(int group);
+// The ring a mark is drawn with by `by`: its team's (team 1 or 2) or its group's (not 0); false for none.
+bool mission_mark_ring_rgb(MissionColorBy by, int team, int group, uint32_t &rgb);
+// The groups' legend in the picture's top-right corner: "Groups in view", then each group the marks drawn carry
+// (`groups`: its number and how many drawn marks carry it, by number) by `title`, in its colour, at most `most`
+// lines, the rest counted.
+void mission_group_legend(const std::vector<std::pair<int, size_t>> &groups, const std::function<std::string(int)> &title,
+		int width, OverlayList &out, size_t most = 12);
 
 // The direction an entity faces in the presentation frame (its yaw a compass heading, 0 north, 90
 // east: world::presentation_forward_from_angles).
@@ -109,6 +122,8 @@ struct MissionOverlayInput {
 	// each mark (by mark index; null or shorter: none).
 	const MissionLinkScene *links = nullptr;
 	const std::vector<size_t> *badges = nullptr;
+	// S24: a group's words in the legend (with options.color_by group; none: "Group N").
+	std::function<std::string(int)> group_title;
 };
 OverlayList mission_overlay_shapes(const MissionOverlayInput &in);
 

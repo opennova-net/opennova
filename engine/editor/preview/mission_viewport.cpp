@@ -1238,10 +1238,11 @@ bool MissionViewport::command_of(const ViewportContext &context, const ViewportC
 
 bool MissionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error) const {
-	if (name != "frame" && name != "top" && name != "ground" && name != "select_same" && name != "duplicate" &&
-			name != "paste" && name != "play_from_here" && name != "clear_shots") {
+	if (name != "frame" && name != "top" && name != "ground" && name != "select_same" && name != "select_group" &&
+			name != "duplicate" && name != "paste" && name != "play_from_here" && name != "clear_shots") {
 		error = "Unknown mission command \"" + name +
-				"\" (frame, top, ground, select_same, duplicate, paste, play_from_here, clear_shots; shoot takes at).";
+				"\" (frame, top, ground, select_same, select_group, duplicate, paste, play_from_here, clear_shots; "
+				"shoot takes at).";
 		return false;
 	}
 	if (reason_ != MissionViewStatus::Ready) {
@@ -1258,6 +1259,18 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 		whole.name = name;
 		whole.ids = ids;
 		return command_of(context, whole, out, error);
+	}
+	if (name == "select_group") {
+		// S24: every entity of the named (else the selected) records' groups, the primary kept.
+		const Document *document = planned_(context, error);
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document);
+		if (!mission) return false;
+		const Selection *selection = selection_of(context.input, *document);
+		std::vector<NodeAddress> of;
+		for (const NodeId id : ids) of.push_back(document->address_of(id));
+		if (ids.empty() && selection) of = selection->records;
+		const NodeAddress primary = !ids.empty() ? of.front() : selection ? selection->primary : NodeAddress();
+		return mission_select_group(*mission, of, primary, out, error);
 	}
 	if (name == "select_same") {
 		// Every entity of the named (else the selected) entities' items, the primary kept.

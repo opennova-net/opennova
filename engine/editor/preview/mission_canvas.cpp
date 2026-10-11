@@ -86,6 +86,12 @@ std::vector<MissionPressed> selected_pressed(const MissionCanvasFrame &frame, bo
 constexpr MissionHandle kPrimaryHandles[] = { MissionHandle::Yaw, MissionHandle::Height, MissionHandle::XMin,
 	MissionHandle::XMax, MissionHandle::YMin, MissionHandle::YMax };
 
+// Words with their first letter upper case ("group 4" -> "Group 4").
+std::string capitalized_words(std::string words) {
+	if (!words.empty() && words[0] >= 'a' && words[0] <= 'z') words[0] = char(words[0] - 'a' + 'A');
+	return words;
+}
+
 // A number of metres as the readout says it.
 std::string metres(double value) {
 	char text[32];
@@ -673,6 +679,13 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 	}
 	overlay.links = &links_;
 	overlay.badges = &badges_;
+	// The groups' legend by the mission's words for them (S24; lane C's names where the document gives them).
+	std::unique_ptr<MissionNames> group_names;
+	if (const MissionDocument *mission = dynamic_cast<const MissionDocument *>(frame_.document);
+			mission && viewport.options().color_by == MissionColorBy::Group) {
+		group_names = mission_label_names(*mission, names ? &*names : nullptr);
+		overlay.group_title = [&group_names](int group) { return capitalized_words(group_names->group(group)); };
+	}
 	OverlayList shapes = mission_overlay_shapes(overlay);
 	// The Listen's sources ringed at their reach (DI-36), under the marks drawn after them.
 	if (viewport.options().listen.on && viewport.listen().open()) {

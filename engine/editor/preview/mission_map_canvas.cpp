@@ -272,7 +272,33 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 		case MissionPool::Marker: list.marker(point, OverlayGlyph::Cross, 5.0f, OverlayRole::Normal, rgb, 1.5f); break;
 		case MissionPool::Organic: list.marker(point, OverlayGlyph::Dot, 4.0f, OverlayRole::Normal, rgb); break;
 		}
-		if (mark.team == 1 || mark.team == 2) list.ring(point, 6.0f, OverlayRole::Normal, 1.0f, mission_team_rgb(mark.team));
+		// Its team's ring, or (S24) its group's.
+		const int group = mark.entity >= 0 ? scene.entities()[size_t(mark.entity)].group : 0;
+		uint32_t ring = 0;
+		if (mission_mark_ring_rgb(options.color_by, mark.team, group, ring))
+			list.ring(point, 6.0f, OverlayRole::Normal, options.color_by == MissionColorBy::Group ? 1.75f : 1.0f, ring);
+	}
+	// S24: the groups' legend, coloured by group: each group a shown mark carries, by the mission's words for it.
+	if (options.color_by == MissionColorBy::Group) {
+		std::vector<size_t> grouped(64, 0);
+		for (const MissionMapMark &mark : marks_)
+			if (mark.shown && mark.entity >= 0) {
+				const int group = scene.entities()[size_t(mark.entity)].group;
+				if (group > 0 && group < 64) ++grouped[size_t(group)];
+			}
+		std::vector<std::pair<int, size_t>> groups;
+		for (int group = 1; group < 64; ++group)
+			if (grouped[size_t(group)]) groups.emplace_back(group, grouped[size_t(group)]);
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document_of(context));
+		const AssetGraph *graph = context.input.view.findings.graph.get();
+		std::optional<GraphNameSource> source;
+		if (graph) source.emplace(*graph);
+		const std::unique_ptr<MissionNames> names = mission ? mission_label_names(*mission, source ? &*source : nullptr) : nullptr;
+		mission_group_legend(groups, [&names](int group) {
+			std::string words = names ? names->group(group) : "group " + std::to_string(group);
+			if (!words.empty() && words[0] >= 'a' && words[0] <= 'z') words[0] = char(words[0] - 'a' + 'A');
+			return words;
+		}, in.width, list);
 	}
 	// S24: how many events name each shown mark.
 	if (options.links)

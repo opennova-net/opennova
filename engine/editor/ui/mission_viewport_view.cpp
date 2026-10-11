@@ -837,6 +837,13 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Labels", &options.labels);
 	ui_kit::tooltip("A label beside the nearer marks too, not only the hovered and the selected ones (those that "
 					"would overlap another are left out).");
+	ImGui::TextDisabled("Colour the marks by");
+	if (ImGui::RadioButton("Team##color_by", options.color_by == MissionColorBy::Team)) options.color_by = MissionColorBy::Team;
+	ui_kit::tooltip("A ring in the team's colour as the game's map draws it (team 1 light blue, team 2 salmon).");
+	ImGui::SameLine();
+	if (ImGui::RadioButton("Group##color_by", options.color_by == MissionColorBy::Group)) options.color_by = MissionColorBy::Group;
+	ui_kit::tooltip("A ring in each group's colour (the editor's own: no game colours a group), group 0 none, and a "
+					"legend of the groups in view.");
 	ImGui::Checkbox("Links", &options.links);
 	ui_kit::tooltip("The selected event's links: what its triggers watch and what its actions act on, ringed, a line "
 					"from one to the other, and a distance trigger's reach as the game measures it (a sphere about its "

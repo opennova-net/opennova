@@ -38,16 +38,6 @@ int32_t param_of(const bms::Action &action, int slot) {
 	return params[slot];
 }
 
-// The rows of the entities carrying a group, in the rows' order: every pool's.
-std::vector<NodeId> group_rows(const MissionDocument &document, int64_t group) {
-	std::vector<NodeId> out;
-	if (mission::group_names_none(group) || document.group_members(group) == 0) return out;
-	for (const auto &row : document.rows())
-		if (row && is_entity_kind(row->kind) && static_cast<const EntityRow &>(*row).native.group_id == group)
-			out.push_back(row->id);
-	return out;
-}
-
 // The pool-3 markers of record type 6088 whose wp_number is `number`, in their order; the first alone
 // where `first`.
 std::vector<NodeId> numbered_markers(const MissionDocument &document, int64_t number, bool first) {
@@ -91,7 +81,7 @@ bool resolve(const MissionDocument &document, ParamKind kind, int64_t value, boo
 		const MissionRow *mission = document.mission_row();
 		if (mission && mission->ids.lists.size() > kGroupsList && size_t(value) < mission->ids.lists[kGroupsList].size())
 			out.record = {mission->id, k(MissionKind::Group), mission->ids.lists[kGroupsList][size_t(value)].id};
-		out.rows = group_rows(document, value);
+		out.rows = mission_group_rows(document, value);
 		return true;
 	}
 	case ParamKind::Event:
@@ -186,6 +176,41 @@ template <class Fn> void for_each_record(const EventRow &event, Fn &&fn) {
 }
 
 } // namespace
+
+std::vector<NodeId> mission_group_rows(const MissionDocument &document, int64_t group) {
+	std::vector<NodeId> out;
+	if (mission::group_names_none(group) || group < 0 || document.group_members(group) == 0) return out;
+	for (const auto &row : document.rows())
+		if (row && is_entity_kind(row->kind) && static_cast<const EntityRow &>(*row).native.group_id == group)
+			out.push_back(row->id);
+	return out;
+}
+
+int64_t mission_group_of(const MissionDocument &document, const NodeAddress &record) {
+	const Node *row = document.row(record.row);
+	if (!row) return -1;
+	if (!record.child && is_entity_kind(row->kind)) return static_cast<const EntityRow &>(*row).native.group_id;
+	if (record.child && record.kind == k(MissionKind::Group)) {
+		Document::Placement at;
+		if (document.placement(record, at)) return int64_t(at.index);
+	}
+	return -1;
+}
+
+std::vector<NodeAddress> mission_group_members(const MissionDocument &document, const std::vector<NodeAddress> &records) {
+	std::vector<char> groups(256, 0);
+	bool any = false;
+	for (const NodeAddress &record : records) {
+		const int64_t group = mission_group_of(document, record);
+		if (group > 0 && group < int64_t(groups.size())) groups[size_t(group)] = any = true;
+	}
+	std::vector<NodeAddress> out;
+	if (!any) return out;
+	for (const auto &row : document.rows())
+		if (row && is_entity_kind(row->kind) && groups[static_cast<const EntityRow &>(*row).native.group_id])
+			out.push_back(NodeAddress{row->id, row->kind, 0});
+	return out;
+}
 
 bool mission_logic_record(const NodeAddress &record) {
 	if (!record.row) return false;

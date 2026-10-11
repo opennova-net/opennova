@@ -10,6 +10,7 @@
 
 #include <editor/documents/mission_links.h>
 #include <editor/preview/canvas_gesture.h>
+#include <editor/preview/canvas_half.h>
 #include <editor/preview/viewport_overlay.h>
 
 namespace opennova::editor {
@@ -83,6 +84,12 @@ void mission_link_shapes(const MissionLinkScene &links, const MissionLinkView &v
 
 // The badge beside a mark `count` events name ("2"), its hover saying so: nothing for 0.
 void mission_link_badge(CanvasPoint at, size_t count, OverlayList &out);
+// The SelectRecord of every member of the groups `records` carry or are (documents/mission_links'
+// mission_group_members), the primary kept where it is a member (else the first): Select group members, the views'
+// `select_group` command (S24, In the views). False, with why, where they carry none.
+bool mission_select_group(const MissionDocument &document, const std::vector<NodeAddress> &records,
+		const NodeAddress &primary, CanvasRequests &out, std::string &error);
+
 // The hover's words for a record events name (its uses, documents/mission_uses): how many events, then
 // each one's sentence, at most `most` ("" for a record no event names).
 std::string mission_link_hover(const MissionUses &uses, size_t most = 8);

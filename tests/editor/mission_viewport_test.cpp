@@ -533,6 +533,13 @@ static int test_links() {
 	in.mouse = CanvasPoint{ glyph.x, glyph.y };
 	const std::string tip = canvas->hover_tip(rig.context(), in);
 	TEST_EXPECT(glyph.shown && tip.find("Named by 1 event:") == 0 && tip.find("Event 1: When ") != std::string::npos);
+	// S24 B5: select_group, the walker's group's members (the walker alone), the primary last.
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->command(rig.context(), "select_group", { walker.row }, gathered, error) &&
+	            gathered.requests.size() == 1 && gathered.requests[0].kind == EditorRequestKind::SelectRecord);
+	gathered.requests.clear();
+	TEST_EXPECT(!viewport->command(rig.context(), "select_group", { zone.row }, gathered, error) &&
+	            error.find("group") != std::string::npos);
 	// A mark selected: no links.
 	rig.session.handle(request::select_record(kMission, walker));
 	rig.pump();

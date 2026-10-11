@@ -9,6 +9,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
+#include <editor/documents/mission_document.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_map_canvas.h>
 #include <editor/preview/mission_overlay.h>
@@ -183,7 +184,7 @@ float mission_map_zoom_for(double metres, int width) {
 bool MissionMapOptions::operator==(const MissionMapOptions &o) const {
 	return items == o.items && buildings == o.buildings && markers == o.markers && organics == o.organics &&
 	       areas == o.areas && paths == o.paths && labels == o.labels && links == o.links && grid == o.grid &&
-	       text == o.text && stick == o.stick && snap == o.snap;
+	       text == o.text && stick == o.stick && snap == o.snap && color_by == o.color_by;
 }
 
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
@@ -198,6 +199,7 @@ io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
 	marks.set("links", JsonValue::make_bool(options.links));
 	JsonValue out = JsonValue::make_object();
 	out.set("marks", std::move(marks));
+	out.set("color_by", JsonValue::make_string(mission_color_by_token(options.color_by)));
 	out.set("grid", JsonValue::make_bool(options.grid));
 	out.set("text", JsonValue::make_bool(options.text));
 	out.set("stick", JsonValue::make_bool(options.stick));
@@ -207,7 +209,7 @@ io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
 
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "options is an object: {marks?, grid?, text?, stick?, snap?}.";
+		error = "options is an object: {marks?, color_by?, grid?, text?, stick?, snap?}.";
 		return false;
 	}
 	MissionMapOptions out = held;
@@ -234,6 +236,11 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 				}
 				*into = mark.value.boolean;
 			}
+		} else if (name == "color_by") {
+			if (!member.value.is_string() || !mission_color_by_from_token(member.value.string, out.color_by)) {
+				error = "options.color_by is team or group.";
+				return false;
+			}
 		} else if (name == "grid" || name == "text" || name == "stick") {
 			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : out.stick;
 			if (!read_bool(json, name.c_str(), into, error)) return false;
@@ -244,7 +251,7 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 			}
 			out.snap = float(member.value.number);
 		} else {
-			error = "options takes marks, grid, text, stick and snap, not " + name + ".";
+			error = "options takes marks, color_by, grid, text, stick and snap, not " + name + ".";
 			return false;
 		}
 	}
@@ -254,8 +261,12 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 
 // --- the marks -------------------------------------------------------------------------------------
 
-uint32_t mission_map_rgb(MissionPool pool, int team) {
-	if (team == 1 || team == 2) return mission_team_rgb(team);
+uint32_t mission_map_rgb(MissionPool pool, int team, int group, MissionColorBy by) {
+	if (by == MissionColorBy::Group) {
+		if (const uint32_t rgb = mission_group_rgb(group)) return rgb;
+	} else if (team == 1 || team == 2) {
+		return mission_team_rgb(team);
+	}
 	switch (pool) {
 	case MissionPool::Item: return kMissionItemRgb;
 	case MissionPool::Building: return kMissionBuildingRgb;
@@ -555,7 +566,8 @@ bool MissionMapViewport::follow_outlines_(const SessionView &view, int64_t budge
 	}
 	const bool read = outlines_.step(view, items, budget_us);
 	const bool kinds = options_.items != placed_options_.items || options_.buildings != placed_options_.buildings ||
-	                   options_.markers != placed_options_.markers || options_.organics != placed_options_.organics;
+	                   options_.markers != placed_options_.markers || options_.organics != placed_options_.organics ||
+	                   options_.color_by != placed_options_.color_by;
 	placed_count_ = 0;
 	if (!read && !kinds && scene_.serial() == placed_scene_) return false;
 	placed_scene_ = scene_.serial();
@@ -576,12 +588,13 @@ bool MissionMapViewport::follow_outlines_(const SessionView &view, int64_t budge
 		       was.scale_q16 != (item ? item->scale_q16 : 0) || was.shown != shown_kind(entities[i]);
 	}
 	if (!anew) {
-		// Each entity moved, turned or of another team placed again where it stands, its edges rewritten in place, and
-		// the chunks they lie in moved.
+		// Each entity moved, turned or of another colour (its team's, its group's) placed again where it stands, its
+		// edges rewritten in place, and the chunks they lie in moved.
 		uint64_t serial = 0;
 		for (size_t i = 0; i < entities.size(); ++i) {
 			const Placed &was = placed_[i];
-			if (was.stamp == entities[i].stamp && was.team == entities[i].team) continue;
+			const uint32_t rgb = mission_map_rgb(entities[i].pool, entities[i].team, entities[i].group, options_.color_by);
+			if (was.stamp == entities[i].stamp && was.rgb == rgb) continue;
 			place_entity_(i, outlines_.item(entities[i].item), was.begin);
 			if (!serial) serial = ++outline_serial_;
 			const size_t end = was.begin + was.count;
@@ -619,7 +632,7 @@ void MissionMapViewport::place_entity_(size_t index, const MissionOutlineCache::
 	const MissionEntityMark &entity = scene_.entities()[index];
 	Placed &placed = placed_[index];
 	placed.stamp = entity.stamp;
-	placed.team = entity.team;
+	placed.rgb = mission_map_rgb(entity.pool, entity.team, entity.group, options_.color_by);
 	if (!item || !item->outline) {
 		footprints_[index] = MissionMapFootprint();
 		return;
@@ -628,7 +641,7 @@ void MissionMapViewport::place_entity_(size_t index, const MissionOutlineCache::
 			double(entity.yaw), double(entity.roll), item->scale_q16);
 	if (!placed.count) return;
 	const MissionMapFootprint &footprint = footprints_[index];
-	const uint32_t rgb = mission_map_rgb(entity.pool, entity.team);
+	const uint32_t rgb = placed.rgb;
 	const std::vector<float> &edges = item->outline->edges;
 	size_t at = begin;
 	for (size_t i = 0; i + 5 < edges.size() && at < begin + placed.count; i += 6, ++at) {
@@ -881,13 +894,27 @@ bool MissionMapViewport::command(const ViewportContext &context, const std::stri
 				if (const Selection *selection = selection_of(context.input, *document))
 					for (const NodeAddress &record : selection->records) of.push_back(record.row);
 		camera = framed(of, context.width, context.height);
+	} else if (name == "select_group") {
+		// S24: every entity of the named (else the selected) records' groups, as the 3D view's command.
+		const Document *document = document_of(context.input);
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document);
+		if (!mission || !current(context.input)) {
+			error = "The map shows no mission as it stands.";
+			return false;
+		}
+		const Selection *selection = selection_of(context.input, *document);
+		std::vector<NodeAddress> of;
+		for (const NodeId id : ids) of.push_back(document->address_of(id));
+		if (ids.empty() && selection) of = selection->records;
+		const NodeAddress primary = !ids.empty() ? of.front() : selection ? selection->primary : NodeAddress();
+		return mission_select_group(*mission, of, primary, out, error);
 	} else if (name == "zoom_in" || name == "zoom_out") {
 		// The CMAP's ZOOMIN and ZOOMOUT steps [orig: loc_548230 @0x548230; hud::MapViewPan::zoom_step], over the map's
 		// own range.
 		camera.zoom = std::clamp(camera.zoom * (name == "zoom_in" ? hud::kMapViewZoomInStep : hud::kMapViewZoomOutStep),
 				kMissionMapZoomMin, kMissionMapZoomMax);
 	} else {
-		error = "The map's commands are frame, zoom_in and zoom_out.";
+		error = "The map's commands are frame, zoom_in, zoom_out and select_group.";
 		return false;
 	}
 	out.request(request::set_viewport(path(), camera_change(camera)));

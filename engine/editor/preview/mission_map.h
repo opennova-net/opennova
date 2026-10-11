@@ -9,6 +9,7 @@
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_map_outline.h>
+#include <editor/preview/mission_options.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -81,13 +82,15 @@ float mission_map_zoom_for(double metres, int width);
 struct MissionMapOptions {
 	bool items = true, buildings = true, markers = true, organics = true;
 	bool areas = true, paths = true, labels = false, links = true;
+	MissionColorBy color_by = MissionColorBy::Team;
 	bool grid = true, text = true;
 	bool stick = true;
 	float snap = 1.0f;
 	bool operator==(const MissionMapOptions &o) const;
 	bool operator!=(const MissionMapOptions &o) const { return !(*this == o); }
 };
-// {marks: {items, buildings, markers, organics, areas, paths, labels, links}, grid, text, stick, snap}.
+// {marks: {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), grid, text,
+// stick, snap}.
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 
@@ -96,8 +99,9 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 inline constexpr float kMissionMapOutlinePx = 4.0f;
 
 // The colour the map draws an entity in, its pin and its wireframe: its team's map colour (team 1 the HUD's light blue,
-// team 2 its salmon: mission_overlay.h), else its pool's.
-uint32_t mission_map_rgb(MissionPool pool, int team);
+// team 2 its salmon: mission_overlay.h), else its pool's; coloured by group (S24), its group's (mission_group_rgb),
+// else its pool's.
+uint32_t mission_map_rgb(MissionPool pool, int team, int group = 0, MissionColorBy by = MissionColorBy::Team);
 
 // A record as the map shows it: an entity at its position, an area at its middle (its box beside), a pixel each.
 struct MissionMapMark {
@@ -211,7 +215,7 @@ public:
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	// `frame` (the named records, else the selection, else everything), `zoom_in` and `zoom_out` (the CMAP's
-	// ZOOMIN and ZOOMOUT steps): each a SetViewport of the camera.
+	// ZOOMIN and ZOOMOUT steps): each a SetViewport of the camera. `select_group` (S24): the 3D view's.
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
 	io::JsonValue options_json() const override;
@@ -253,7 +257,7 @@ private:
 	struct Placed {
 		NodeId row = 0;
 		uint32_t stamp = 0;
-		int team = 0;
+		uint32_t rgb = 0; // its edges' colour (its team's or its group's)
 		const MissionModelOutline *outline = nullptr;
 		int32_t scale_q16 = 0;
 		bool shown = false;
