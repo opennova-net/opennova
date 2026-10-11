@@ -5,10 +5,8 @@
 // game_debug tool for its mission_logic_snapshot about four times a second and hands each answer to the session,
 // and makes the calls play_debug queued, saying what each came to. Everything but the bytes is here: the HTTP
 // requests (POST /mcp, JSON-RPC 2.0, the endpoint's own docs/mcp.md), reading the answers, the one exchange at a
-// time; the embedder gives the byte stream (GameMcpChannel: the Shell's TCP stream to 127.0.0.1).
-//
-// STAGED, NOT WIRED: its live owner is the Shell's godot/src/authoring/play_logic_link (S24 C5's Godot half, the
-// next commit of the lane), which steps it each frame over a StreamPeerTCP; until then the tests drive it.
+// time; the embedder gives the byte stream (GameMcpChannel: the Shell's TCP stream to 127.0.0.1,
+// godot/src/authoring/play_logic_link, stepped each frame by the editor app).
 
 #include <cstddef>
 #include <cstdint>

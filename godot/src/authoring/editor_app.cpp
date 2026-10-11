@@ -376,6 +376,8 @@ void EditorApp::pump() {
 	                                                                            : opennova::editor::kDiskCheckMs;
 	if (int64_t(now - last_disk_check_ms_) >= interval) refresh_changed_sources_(false);
 	session_->poll();
+	// The running game's logic asked of it, and the calls play_debug queued made (S24 Live).
+	play_link_.step(*session_, int64_t(now));
 	// A game started behind (play {behind}) kept behind while it starts.
 	platform_->tend();
 	open_externally_events_();

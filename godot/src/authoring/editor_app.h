@@ -18,6 +18,7 @@
 #include <editor/session/project_session.h>
 
 #include "authoring/child_process.h"
+#include "authoring/play_logic_link.h"
 #include "authoring/preview_sound_player.h"
 #include "authoring/thumbnail_images.h"
 #include "devtools/imgui_pass_node.h"
@@ -267,6 +268,8 @@ private:
 	std::unique_ptr<PreviewSoundVoices> clip_voices_;
 	uint64_t clip_sound_seq_ = 0;
 	std::weak_ptr<const opennova::editor::AssetScan> clip_wave_scan_;
+	// The running game's logic (S24 Live): the link to its MCP endpoint, stepped each pump.
+	PlayLogicLink play_link_;
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window
