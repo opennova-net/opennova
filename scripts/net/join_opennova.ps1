@@ -1,8 +1,8 @@
 # Launch one visible OpenNova instance as a LAN joiner.
 #
 # The joiner is configured entirely by launch flags (`--lan-join host:port
-# --callsign <name> [--integrity-profile <id>] [--resource-dir <dir>] [/exp
-# <name>]`, docs/dev-env-vars.md) and drives through its opennova-game MCP
+# --callsign <name> [--resource-dir <dir>] [/exp <name>]`,
+# docs/dev-env-vars.md) and drives through its opennova-game MCP
 # endpoint (`--mcp-port`, docs/mcp.md). The mission is learned from the LAN
 # session (D-NET-194); there is no local override. -Host accepts an IPv4
 # address or hostname without a port; use -Port separately.
@@ -17,7 +17,6 @@ param(
     [ValidateRange(1, 65535)] [int] $Port = 32768,
     [ValidateRange(1, 65535)] [int] $McpPort = 8976,
     [ValidateRange(1, 600)] [int] $McpReadyTimeoutSeconds = 240,
-    [string] $IntegrityProfile = "",
     [string] $ResourceDir = "",
     [string] $Expansion = "",
     [string] $LogFile = "",
@@ -61,9 +60,6 @@ if (-not [string]::IsNullOrWhiteSpace($LogFile)) {
     $godotArguments += @("--log-file", $LogFile)
 }
 $gameArguments = @("--lan-join", $target, "--callsign", $Name.Trim())
-if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {
-    $gameArguments += @("--integrity-profile", $IntegrityProfile.Trim())
-}
 if (-not [string]::IsNullOrWhiteSpace($ResourceDir)) {
     $gameArguments += @("--resource-dir", $ResourceDir)
 }
@@ -82,9 +78,6 @@ Write-Host "OPENNOVA_JOIN_LAUNCHER_PID=$($process.OpenNovaLauncherProcess.Id)"
 Write-Host "OPENNOVA_JOIN_TARGET=$target"
 Write-Host "OPENNOVA_JOIN_MCP=$(Get-GameMcpUrl -Port $McpPort)"
 Write-Host "OPENNOVA_JOIN_RESOLUTION=$(if ($normalizedResolution) { $normalizedResolution } else { 'project-default' })"
-if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {
-    Write-Host "OPENNOVA_JOIN_INTEGRITY_PROFILE=$($IntegrityProfile.Trim())"
-}
 if (-not [string]::IsNullOrWhiteSpace($ResourceDir)) {
     Write-Host "OPENNOVA_JOIN_RESOURCE_DIR=$ResourceDir"
 } else {

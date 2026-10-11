@@ -853,8 +853,6 @@ private:
 	void install_auto_medic_preference();
 	// The session copy of the record's input words (profile::session_input).
 	void apply_session_input();
-	// Install or clear the explicitly selected retail integrity corpus profile.
-	void install_join_integrity_profile();
 	// Install the retained JOIN-checksum install root (D-NET-166).
 	void install_expansion_version_root();
 	// Install the retained APPID join token (decoded .joi CK) on the current runtime.
@@ -1173,12 +1171,9 @@ public:
 	// (AvatarDatabase.character_join_profile); null installs nothing.
 	void set_join_character_profile(const Ref<CharacterJoinProfile> &p_profile);
 	void set_local_character_profile(const Ref<CharacterJoinProfile> &p_profile);
-	// Select a registered retail resource-corpus profile for S2C 0x30/0x31.
-	// Empty clears it; an unknown id also clears it and returns false.
-	bool set_join_integrity_profile(const String &p_profile_id);
 	// The game-session APPID join token the client recovers from the NWJoin .joi
 	// CK; a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN
-	// default. Retained across runtime rebuilds like the character/integrity data.
+	// default. Retained across runtime rebuilds like the character data.
 	void set_app_id(const String &p_token);
 	// The joiner's network type (JoinTarget::NetworkType; retail's g_NapiNPCtx.transport_mode).
 	void set_join_network_type(int p_type);
@@ -1189,7 +1184,7 @@ public:
 	void set_join_discovered_session(bool, int64_t, bool, const String &); // the row's 0x81 (C++)
 	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
-	// Retained across runtime rebuilds like the character/integrity data.
+	// Retained across runtime rebuilds like the character data.
 	void set_join_expansion_version_root(const String &p_game_root);
 	// Load the process-scoped character-attribute table before the first join
 	// network pump. Missing/empty charattr.def is soft and leaves all rows inactive,

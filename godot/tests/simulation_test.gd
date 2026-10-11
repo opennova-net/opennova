@@ -431,18 +431,6 @@ func test_joiner_full_bms_load_admits_against_the_joined_session_player_cap() ->
 			"the joiner admits the same organic against the host's published cap of 4")
 
 
-func test_host_integrity_profile_is_explicit_and_roundtrips() -> void:
-	var sim := Simulation.new()
-	assert_eq(sim.get_host_session_config().integrity_profile, "",
-			"a host never infers integrity bytes from its expansion name")
-	var host_options := HostSessionOptions.new()
-	host_options.integrity_profile = " retail-revx02-024f56f2-2d087374 "
-	sim.configure_host_session(host_options)
-	assert_eq(sim.get_host_session_config().integrity_profile,
-			"retail-revx02-024f56f2-2d087374",
-			"the independently witnessed corpus is an explicit host-session input")
-
-
 func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
 	var sim: Simulation = autofree(Simulation.new())
 	var snapshot: PackedInt32Array = sim.get_hud_minimap_snapshot()

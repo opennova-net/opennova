@@ -78,13 +78,6 @@ param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_-]{0,30}$')]
     [string] $Expansion = "jox01",
 
-    # The OpenNova integrity-challenge profile (--integrity-profile): the
-    # retail CRC table image our host validates replies against and our
-    # joiner answers from (D-NET-181). Profiles exist per witnessed corpus
-    # (retail-revx02-024f56f2-2d087374 for revx02); empty passes none, so our
-    # host stays silent on CRC replies and our joiner does not answer.
-    [string] $IntegrityProfile = "",
-
     # Diagnostic only: accept OpenNova launches through the plain runtime
     # executable (no console-wrapper job). A verdict-bearing run needs the
     # wrapper's ownership proof; the summary records the relaxation.
@@ -1423,7 +1416,6 @@ function Start-OpenNovaHostExact {
         -Mission $Mission -Name $HostCallsign -Port $Port -LanMode 1 `
         -MaxPlayers 4 -GameType ([string] $GameType) -ResourceDir $ServerDir `
         -Expansion $Expansion `
-        -IntegrityProfile $IntegrityProfile `
         -LogFile (Join-Path $hostDir "godot.log") `
         -Resolution $Resolution -Windowed -McpPort $HostMcpPort `
         -SkipReadyCheck -PassThru
@@ -1482,7 +1474,7 @@ function Start-OpenNovaJoinerExact {
         -GameArguments (@(
             "--lan-join", "127.0.0.1:$Port",
             "--callsign", $JoinerCallsign
-        ) + $(if ($IntegrityProfile) { @("--integrity-profile", $IntegrityProfile) } else { @() }) + @(
+        ) + @(
             "--resource-dir", $ClientDir, "/exp", $Expansion
         )) `
         -McpPort $JoinerMcpPort
@@ -2231,7 +2223,6 @@ $summary = [pscustomobject]@{
     steady_seconds = $SteadySeconds
     steady_started_utc = $script:SteadyStartedUtc
     steady_completed_utc = $script:SteadyCompletedUtc
-    integrity_profile = $IntegrityProfile
     retail_exe_sha256 = $RetailServerExeSha256
     retail_stock_observer = [bool] $StockObserver
     onhook_mcp_sha256 = (Get-FileHash -LiteralPath $McpExe -Algorithm SHA256).Hash.ToLowerInvariant()

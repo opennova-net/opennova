@@ -7,6 +7,8 @@
 #include <net/npwire/entity_class.h>
 #include <runtime/environment/water_frame.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/session_status.h>
 
@@ -182,6 +184,15 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	//  EventTrigger_UpdateAllWithFlag2 call @0x525B86].
 	load_environment_and_water(files, kernel, boot);
 
+	// The anti-cheat challenge sources from this peer's own corpus, built as
+	// the mission load builds retail's ammo.def and weapon.def tables
+	// (integrity_sources.h): a host validates C2S 0x20/0x21 against them and
+	// a joiner answers S2C 0x30/0x31 from them, every mission.
+	// [orig: Game_StartMission @0x525495 (AmmoDef_LoadAll), @0x5254B3 /
+	//  @0x5254BD (AnimDef_InitAll, WeaponDefs_LoadFile), both roles]
+	const IntegritySources integrity = compute_integrity_sources(files, &kernel.assets());
+	if (request.host != nullptr) host_cfg.config.integrity_sources = integrity;
+
 	// The host's bring-up record, staged for the boot hook: the config with
 	// its score rows, the .til, the mission text and the Server strings.
 	if (request.host != nullptr) {
@@ -210,8 +221,10 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 		return names.people_name(index);
 	};
 	Role &role = *request.role;
-	options.bringup_net_session = [&role, after = std::move(request.after_bringup)] {
+	options.bringup_net_session = [&role, integrity, after = std::move(request.after_bringup)] {
 		const bool fresh_runtime = role.bring_up();
+		if (ClientRuntime *runtime = role.client_runtime())
+			runtime->set_integrity_sources(integrity);
 		if (after) after(fresh_runtime);
 	};
 	std::string boot_error;
