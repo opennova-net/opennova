@@ -1,11 +1,13 @@
 #pragma once
 
 // The PLAYER_INFO screen's kit model (ADR 0040 ladder E4): the voice-list
-// rows and the persisted-override reset, and the weapon.sav kit page in the
-// order retail serializes it. The masks, slot filters, clip rows and weights
-// live in runtime/world/player_loadout.h and formats/def; native menu
-// controllers apply these to MenuRuntime, while the shell supplies resources.
+// rows and the persisted-override reset, the weapon.sav kit page in the
+// order retail serializes it, and the populate's restore of a saved page. The
+// masks, slot filters, clip rows and weights live in runtime/world/player_loadout.h
+// and formats/def; native menu controllers apply these to MenuRuntime, while the
+// shell supplies resources.
 
+#include <formats/def/def.h>
 #include <formats/playersav/weapon_sav.h>
 
 #include <cstdint>
@@ -106,5 +108,50 @@ using WeaponNameLookup = std::function<std::string(int32_t row)>;
 //  in PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8b0), write "None"].
 std::vector<playersav::KitEntry> player_info_kit_entries(const PlayerInfoKitSelection &selection,
 		const WeaponNameLookup &weapon_name);
+
+// --- the saved kit page's restore ------------------------------------------------
+
+// The catalog rows the screen's count pairs span: WeaponDef_LoadAll zeroes
+// 0xBF40 bytes, 255 rows of 192, and the pair reset walks up to
+// g_PlayerInfoLoadoutWeight @ 0x25DCD5C [orig: WeaponDef_LoadAll @ 0x54dd10;
+// PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8e0..0x55e8f5].
+inline constexpr size_t kPlayerInfoCatalogRows = 255;
+
+// What the screen's populate takes from the shown side's class page before its
+// ammo fills read it. Catalog rows throughout (0 = the seeded "None", weapon.def's
+// row i = i + 1): the interleaved count pairs, every pair -1 but the page's; the
+// row each category list's select-by-value asked for, -1 when the page named none
+// for it (the list then keeps its fill's selection; a row the list lacks leaves
+// it with none); the ammo-type bytes a PRIMARY / SECONDARY entry carried; and the
+// three grenade slots, zeroed, then the page's grenades in page order.
+struct PlayerInfoKitRestore {
+	std::vector<int32_t> ammo_primary;   // by catalog row
+	std::vector<int32_t> ammo_secondary; // by catalog row
+	int32_t select[3] = { -1, -1, -1 };  // PRIMARY, SECONDARY, ACCESSORY
+	bool has_type[2] = { false, false }; // PRIMARY, SECONDARY
+	int32_t type[2] = { 0, 0 };
+	int32_t grenade_slots[3] = { 0, 0, 0 };
+};
+
+// The populate's walk of the side's class page: the slot and pair reset, then
+// each string the catalog names (first match, case-insensitive; "None" and an
+// unknown name advance ONE string) takes the next three as its primary count,
+// its secondary count (stored only when a subclass row within its
+// loadout_subclasses carries another round type) and its flags byte, and a
+// loadout-selectable entry selects its category list by value (the PRIMARY /
+// SECONDARY flags byte its team's ammo type) or, a grenade, takes the next slot.
+// The slot append has no bound: a fourth grenade lands in the "None" row's
+// primary count, the slots and the pairs being one block.
+// [orig: PlayerInfo_PopulateWeaponAccessoryAmmoUI @ 0x55e8b0 - the slot zeroing
+//  @0x55e8d0..0x55e8da, the pair reset @0x55e8e0..0x55e8f5, the name lookup
+//  EntityDef_FindIndexByName @ 0x563020 (called @0x55e909), the one-string skip
+//  @0x55eadb, the counts @0x55e945 / @0x55e9a4 (the round-type walk
+//  @0x55e963..0x55e9bf), the flags byte @0x55e9db, the selectable gate @0x55e9f0, the
+//  class switch @0x55ea10, the selects @0x55eab2 / @0x55ea3d / @0x55ea79
+//  (UIList_SelectByValue @ 0x645240 clears every row first), the type bytes
+//  @0x55ea48 / @0x55ea84, the unbounded slot append @0x55eac1..0x55eac6; the page
+//  PlayerInfo_PopulateWeaponSlotLists @0x5605b3..0x5605e0, its call @0x5605e5]
+PlayerInfoKitRestore player_info_restore_kit(const playersav::KitPage &page,
+		const def::DefWeaponsFile &weapons);
 
 } // namespace opennova::menu

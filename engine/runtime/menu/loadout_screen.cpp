@@ -77,9 +77,13 @@ int player_info_fill_ammo(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 			// NOAMMOTYPES reset; this selects by authored value after it. The
 			// two agree because player.mnu authors FMJ/AP/SP as 0/1/2 in row
 			// order, and a locked combo then shows the reset row (D-MNU-9's
-			// deferred cascade); a miss retains the selection.
+			// deferred cascade); a miss retains the selection. A saved -1, a kit
+			// page's filler, selects type 0 and stays -1 in the byte [orig: the
+			// sign-extended read @0x55e01c / @0x55dfe3, -1 -> 0 @0x55e08a..0x55e091]:
+			// retail's row 0, ours the row authored 0, the first in player.mnu's order.
+			const int shown_type = saved_type == -1 ? 0 : saved_type;
 			for (int row = 0; row < menu.item_count(type); ++row) {
-				if (menu.item_value(type, row) == std::to_string(saved_type)) {
+				if (menu.item_value(type, row) == std::to_string(shown_type)) {
 					menu.select_row(type, row, false);
 					break;
 				}

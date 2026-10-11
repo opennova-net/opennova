@@ -13,28 +13,37 @@ extends GutTest
 const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
-# The process's profile record the screen's voice fills and picks write (PlayerProfile.store()),
-# its two voice bytes as each test found them.
-var _saved_voices: Array[int] = []
-
-
 # Strings is a shared autoload; keep the registry clean so the raw-key tests below see
 # no gametext table and the resolved-names test starts from a known state. The
-# profile's voice pair starts each test on DEFAULT_VOICE and goes back after it.
+# process's profile (PlayerProfile.store(), which the screen reads and writes) starts
+# each test as a fresh record (_reset_profile) and is left as the test leaves it.
 func before_each() -> void:
 	Strings.clear()
-	_saved_voices = [PlayerProfile.store().get_voice(0), PlayerProfile.store().get_voice(1)]
-	PlayerProfile.store().set_voice(0, 0)
-	PlayerProfile.store().set_voice(1, 0)
-
-
-func after_each() -> void:
-	PlayerProfile.store().set_voice(0, _saved_voices[0])
-	PlayerProfile.store().set_voice(1, _saved_voices[1])
+	_reset_profile()
 
 
 func after_all() -> void:
 	Strings.clear()
+
+
+# The process's profile as a fresh record, both sides on the medic class with
+# each side's first character, the voice pair on DEFAULT_VOICE and both medic
+# pages empty: the screen reads its class and restores its loadout from the
+# record (engine menu::player_info_restore_kit), so every case opens on the
+# medic with its lists on NONE.
+func _reset_profile() -> void:
+	var store := PlayerProfile.store()
+	store.load_bytes(PackedByteArray(), false, PackedByteArray(), false, "")
+	for side in 2:
+		assert_eq(store.apply_character_selection({
+			"team": side,
+			"player_class": 5,
+			"side_profiles": [{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200},
+					{"avatar_a": 4, "avatar_b": 0, "avatar_packed": 0x8204}],
+			"kit": [],
+		}), OK, "the side's medic page is emptied")
+	store.set_voice(0, 0)
+	store.set_voice(1, 0)
 
 
 func _load_db() -> AvatarDatabase:
