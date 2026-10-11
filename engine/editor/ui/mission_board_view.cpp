@@ -22,6 +22,7 @@
 #include <editor/ui/document_views.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_card.h>
+#include <editor/ui/mission_variable_name.h>
 #include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
@@ -68,7 +69,7 @@ private:
 	void keys(Workspace &workspace, const MissionDocument &mission, const WorkspaceView::DocumentView &shown, bool editable);
 	void set_shown(Workspace &workspace, const MissionDocument &mission, const char *member, io::JsonValue value);
 
-	void variables(Workspace &workspace, const MissionDocument &mission);
+	void variables(Workspace &workspace, const MissionDocument &mission, bool editable);
 
 	std::optional<BoardKey> key_;
 	MissionBoard board_;
@@ -151,7 +152,7 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 
 // The variables the events use (S24 A7), folded at first: each by its name with where it is used, a click there
 // selecting that trigger or action; what a new one is called.
-void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mission) {
+void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mission, bool editable) {
 	// The events' variables and the script's (its V#), by number.
 	std::map<int64_t, const MissionVariable *> events;
 	for (const MissionVariable &variable : variables_) events[variable.index] = &variable;
@@ -171,7 +172,9 @@ void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mi
 		const std::string name = event != events.end() ? event->second->name : variable_names_[index];
 		ImGui::PushID(int(index));
 		const std::string label = name + " (" + std::to_string(count) + " use" + (count == 1 ? ")" : "s)");
-		if (ImGui::TreeNode(label.c_str())) {
+		// Its id the variable's, not its words': a rename keeps it open.
+		if (ImGui::TreeNode((label + "###variable").c_str())) {
+			draw_variable_name_field(workspace, mission, index, editable);
 			if (event != events.end())
 				for (size_t i = 0; i < event->second->uses.size(); ++i) {
 					const MissionVariableUse &use = event->second->uses[i];
@@ -197,6 +200,7 @@ void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mi
 		ImGui::PopID();
 	}
 	ImGui::TextDisabled("A new variable is %s.", new_variable_.c_str());
+	draw_variable_names_left(mission);
 }
 
 void MissionBoardPane::keys(Workspace &workspace, const MissionDocument &mission, const WorkspaceView::DocumentView &shown,
@@ -300,7 +304,7 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 			window_requests::pick_in_view(workspace, mission->path(), NodeAddress(), -1);
 	}
 	keys(workspace, *mission, shown, editable);
-	variables(workspace, *mission);
+	variables(workspace, *mission, editable);
 	ImGui::Separator();
 	// The selection moved (a new event made, a record selected in a view): its card brought into sight.
 	const bool here = view.documents.active == mission->path();

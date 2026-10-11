@@ -5,6 +5,7 @@
 
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
+#include <editor/documents/mission_variable_names.h>
 #include <formats/mission/mission_params.h>
 
 namespace opennova::editor {
@@ -58,6 +59,8 @@ std::vector<MissionVariable> mission_variables(const MissionDocument &document, 
 		use.words = action ? action_words(event.native.actions[i], names, header) : trigger_words(event.native.triggers[i], names);
 		variable.uses.push_back(std::move(use));
 	});
+	// A variable the mission names (S24 Names) that no event uses yet: listed, so its name can be changed.
+	for (const mission::VariableName &name : mission_variable_names(document)) held[name.index].index = name.index;
 	std::vector<MissionVariable> out;
 	for (auto &[index, variable] : held) {
 		variable.name = names.variable(index);

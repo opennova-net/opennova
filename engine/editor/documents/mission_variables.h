@@ -34,7 +34,8 @@ struct MissionVariable {
 	std::vector<MissionVariableUse> uses;
 };
 
-// The variables the events use, by number, each with its uses in the events' order.
+// The variables the events use, and those the mission names (S24 Names) though no event uses them, by number,
+// each with its uses in the events' order.
 std::vector<MissionVariable> mission_variables(const MissionDocument &document, const MissionNames &names);
 // The number a new variable takes: the lowest no trigger or action uses, from 0.
 int64_t mission_new_variable(const MissionDocument &document);

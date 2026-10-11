@@ -452,6 +452,7 @@ if(OPENNOVA_IMGUI)
         # each lane's own files under its line
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_board_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_board_live.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_variable_name.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_row_menu.cpp
         # S24 lane A (the board)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_card.cpp
