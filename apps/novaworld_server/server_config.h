@@ -128,6 +128,17 @@ struct ServerConfig {
 	// a warning.
 	std::string bootstrap_admin;
 
+	// ONNET_REQUIRE_HOST_KEY=1: list no host whose HostKey names no account
+	// (the key a logged-in client's /NWHost.dll fetch minted). A request
+	// carrying such a key gets ServerHostResult Success=0, MsgCode 200 (a stock
+	// client's NWEC58); a keyless request (a stock host's fresh one) is held out
+	// of the browser until an update's key names the owner, and ended with
+	// ServerStopHosting (MsgCode 200) when it names none. Off by default: such a
+	// host is listed with no owner, as opennova-serve without --credentials and
+	// opennova-nw-lister without an account list. Service policy
+	// (LobbySession::set_require_host_key).
+	bool require_host_key = false;
+
 	// Reflection override for the host/join flow (dev/NAT). NovaWorld tells a
 	// hosting client its reachable endpoint and advertises it to joiners. On the
 	// open internet the observed UDP source IS that endpoint, but behind a docker

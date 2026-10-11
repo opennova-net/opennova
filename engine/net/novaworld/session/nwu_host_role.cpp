@@ -90,14 +90,21 @@ bool NwuHostRole::handle_notice(const ClientSession::Notice &notice) {
 	case Notice::Kind::HostResult:
 		if (phase_ == Phase::Hosting) {
 			// A re-host's answer: a refusal ends the hosting (the session's word drops, and the
-			// hosted match exits on it).
+			// hosted match exits on it). Retail's success also republishes the full Host list
+			// here, ours does not (D-NET-465, OPEN). [orig: HandleHostVerifyResponse @0x4d59d0,
+			//  the ReconnectCounter gate @0x4d5c58, SendHostUpdate(1) @0x4d5c8c]
 			if (!notice.fields.success) phase_ = Phase::Idle;
 			return true;
 		}
 		if (phase_ != Phase::Requested) return true;
 		if (notice.fields.success) {
-			// Hosting (state 6): the full Host list republishes at once and the refresh clock
-			// starts. [orig: HandleHostVerifyResponse @0x4d59d0]
+			// Hosting (state 6): the refresh clock starts. Ours republishes the full Host list
+			// at once, where a fresh retail host does not: HandleHostVerifyResponse's republish
+			// runs only while ReconnectCounter (session+0x500, zeroed by BuildHostVarLists) is
+			// above 0, so a fresh stock host's first full list is its mission start's
+			// (D-NET-465, OPEN). [orig: HandleHostVerifyResponse @0x4d59d0 — state 6 @0x4d5c1b,
+			//  the gate @0x4d5c58; Game_StartMission @0x5248f5 -> Lobby_UpdateServerInfo
+			//  @0x4fe8c0]
 			phase_ = Phase::Hosting;
 			refresh_ticks_ = 0.0;
 			hosting_started_ms_ = lobby_.clock_ms();

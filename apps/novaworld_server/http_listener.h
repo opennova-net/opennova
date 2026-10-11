@@ -19,10 +19,7 @@
 namespace opennova {
 class ConnectionManager;
 class UnknownTracker;
-namespace db {
-class ConnectionPool;
-class Database;
-} //namespace db
+namespace db { class ConnectionPool; class Database; }
 } // namespace opennova
 
 namespace opennova::novaworld_server {
@@ -33,11 +30,13 @@ class NwUdpListener;
 
 // Crow-backed HTTP listener. start() registers five route families, each in
 // its own private registrar (bodies in http_listener.cpp):
-//   admin REST API      — /api/admin/* + dev host inject and the ServerCommand /
+//   admin REST API      — /api/admin/* + dev host inject, the listed servers
+//                         with their owners, and the ServerCommand /
 //                         ServerStopHosting pushes, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
 //   public JSON API     — /api/* for the web portal, with the website's
-//                         login / logout / me session routes
+//                         login / logout / me session routes and the
+//                         logged-in account's listed servers
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -129,13 +128,15 @@ private:
 	// pin's credentials generation; a pin that lost it is dropped. nullopt for
 	// an empty or unknown cookie. The account's status is the caller's to check.
 	std::optional<UserRecord> pinned_user(const std::string &cookie, db::Database &db);
-	// The account a retail request's own login names: the LOGINSESSIONTAG
-	// cookie of a live retail login (its active_user_sessions row,
-	// get_user_by_login_session_tag), else the PERSISTENTEXPRESSLOGINDATA pin
-	// a login made (pinned_user); `how` names the cookie that resolved it. The
-	// account's status is the caller's to check. The NWHANDLE cookie never
-	// counts: the service sets it in the clear to the account's handle, so any
-	// client can send any account's. Throws db::SqliteError.
+	// The account a retail request's own login names, for /NWJoin.dll's
+	// joiner, /NWAccount.dll's identity and the HOSTKEY /NWHost.dll mints
+	// (hostdb::record_host_key): the LOGINSESSIONTAG cookie of a live retail
+	// login (its active_user_sessions row, get_user_by_login_session_tag), else
+	// the PERSISTENTEXPRESSLOGINDATA pin a login made (pinned_user); `how` names
+	// the cookie that resolved it. The account's status is the caller's to
+	// check. The NWHANDLE cookie never counts: the service sets it in the clear
+	// to the account's handle, so any client can send any account's (and a key
+	// minted on it would list a server as anyone's). Throws db::SqliteError.
 	std::optional<UserRecord> retail_login_user(
 			const std::map<std::string, std::string> &cookies, db::Database &db, const char *&how);
 	// Per-server-process EPASK params advertised via the EPASK cookie at

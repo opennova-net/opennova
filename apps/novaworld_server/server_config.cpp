@@ -80,6 +80,7 @@ ServerConfig ServerConfig::from_env() {
 	}
 	c.api_proxy_only = getenv_bool("ONNET_API_PROXY_ONLY", c.api_proxy_only);
 	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
+	c.require_host_key = getenv_bool("ONNET_REQUIRE_HOST_KEY", c.require_host_key);
 
 	if (auto v = getenv_safe("ONNET_MET_IP"))    c.met_ip = v;
 	c.met_port = getenv_u16("ONNET_MET_PORT", c.met_port);

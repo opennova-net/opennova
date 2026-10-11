@@ -511,8 +511,13 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 		if (auto refused = username_refusal(*p.username)) return *refused;
 	}
 	// A new password or an inactive status ends the account's website
-	// sessions, in the same transaction as the update: a reset locks out
-	// whoever held the old one, and a ban lifted later revives no session.
+	// sessions, its retail login's session row and its hosting keys, in the
+	// same transaction as the update: a reset locks out whoever held the old
+	// one, and a ban lifted later revives no session. A server the account has
+	// listed stays listed; its next refresh stores no owner (the claim went
+	// with the keys), its next re-host links to no one (refused under
+	// ONNET_REQUIRE_HOST_KEY), and POST /api/admin/hosts/<rid>/stop ends it at
+	// once.
 	const bool revoke_sessions = update_revokes_sessions(p);
 
 	std::string sets;
@@ -563,6 +568,12 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 		db.exec("UPDATE players SET " + sets + " WHERE id = ?;", binds);
 		if (revoke_sessions) {
 			db.exec("DELETE FROM web_sessions WHERE user_id = ?;", { opennova::db::BindValue(id) });
+			// The retail login's session row (its LOGINSESSIONTAG names the
+			// account to /NWHost.dll, /NWJoin.dll and /NWAccount.dll) and the
+			// hosting keys it minted.
+			db.exec("DELETE FROM active_user_sessions WHERE user_id = ?;",
+			        {opennova::db::BindValue(id)});
+			db.exec("DELETE FROM host_keys WHERE user_id = ?;", {opennova::db::BindValue(id)});
 		}
 		tx.commit();
 	} catch (const opennova::db::SqliteError &e) {

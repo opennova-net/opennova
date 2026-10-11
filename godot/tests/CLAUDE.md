@@ -1,7 +1,9 @@
 # godot/tests/ — GUT suite
 
-- Run via `scripts/test_godot.sh` (headless; needs `GODOT_BIN` or a binary in the main
-  checkout's `.godot-bin/`). On a fresh worktree run `scripts/bootstrap_godot.sh`
+- Run via `scripts/test_godot.sh` (headless; needs `GODOT_BIN` or a `Godot_v4.6.1-stable_*`
+  binary in `.godot-bin/` — the resolver, `scripts/godot_bin.sh`, walks parent directories,
+  so a worktree borrows the main checkout's; export `GODOT_BIN` yourself for direct GUT
+  runs). On a fresh worktree run `scripts/bootstrap_godot.sh`
   (installs GUT and the imgui-godot addon the `DevTools` node expects) and then
   `"$GODOT_BIN" --headless --path godot --import`, or engine classes appear missing.
   Headless runs never attach an ImGui context: `DevTools.is_available()` is false

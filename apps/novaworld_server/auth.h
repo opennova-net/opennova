@@ -94,11 +94,12 @@ std::optional<UserRecord> get_user_by_username(opennova::db::Database &db,
 std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id);
 // The account whose live retail login set `session_tag` (the LOGINSESSIONTAG
 // POST /NWLogin.dll mints after a password check or a pin resume): its
-// active_user_sessions row, until a logout, the 2 h idle sweep, a boot or the
-// account's next login ends it, and only while the account is still at the
-// credentials_gen the row was made under, so a password reset or a status
-// other than 'active' ends it too. nullopt for an empty or unknown tag. The
-// account's status is the caller's to check. Throws db::SqliteError.
+// active_user_sessions row, until a logout, the 2 h idle sweep, a boot, the
+// account's next login or a revoking update ends it, and only while the
+// account is still at the credentials_gen the row was made under, so a
+// password reset or a status other than 'active' ends it even where nothing
+// deleted the row. nullopt for an empty or unknown tag. The account's status
+// is the caller's to check. Throws db::SqliteError.
 std::optional<UserRecord> get_user_by_login_session_tag(
 		opennova::db::Database &db, const std::string &session_tag);
 
@@ -148,6 +149,11 @@ struct CreateUserParams {
 // A username of at most kUsernameMaxBytes bytes and a handle of at most
 // kHandleMaxBytes, neither holding a control byte, else invalid_field.
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
+// Deletes the account with its sessions and hosting keys (ON DELETE CASCADE).
+// A server it has listed stays listed with no owner, and its rows in listed
+// servers' player lists stay with no account (ON DELETE SET NULL); the
+// listing's later refreshes store no owner, the claim having gone with the
+// keys. POST /api/admin/hosts/<rid>/stop ends such a listing.
 MutationResult delete_user(opennova::db::Database &db, int64_t id);
 
 // Optional fields (only those passed-in by the admin) are updated.
@@ -163,13 +169,15 @@ struct UpdateUserParams {
 };
 // A rename and a new handle take create_user's rules, and neither may be empty
 // (invalid_field). An update that sets a password or a status other than
-// 'active' bumps the account's credentials_gen and ends its website sessions
-// in the same transaction (update_revokes_sessions), which also ends its
-// retail login's session row and pins: each counts only at the generation it
-// was made under (the HTTP layer drops the pins as well). Its known login
-// addresses stay: forgetting them would bare the owner to the per-username
-// cap just when someone else is guessing, and the per-(username, address)
-// bucket still brakes a guesser at one of them.
+// 'active' bumps the account's credentials_gen and ends its website sessions,
+// its retail login's active_user_sessions row and its hosting keys (host_keys)
+// in the same transaction (update_revokes_sessions). Its retail login's pins
+// count only at the generation they were made under (the HTTP layer drops
+// them as well). Its known login addresses stay: forgetting them would bare
+// the owner to the per-username cap just when someone else is guessing, and
+// the per-(username, address) bucket still brakes a guesser at one of them. A
+// server the account has listed stays listed and loses its owner at its next
+// refresh (the claim went with the keys).
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p);
 bool update_revokes_sessions(const UpdateUserParams &p);
