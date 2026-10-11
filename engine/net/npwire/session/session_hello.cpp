@@ -894,7 +894,7 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 			out.locale_block = true;
 		}
 		else if (strutil::iequals(name, "TZB")) { out.tzb = load_value_dword(value, end); out.locale_block = true; }
-		else if (strutil::iequals(name, "SF")) { out.sf = load_value_dword(value, end); out.is_game_server = true; }
+		else if (strutil::iequals(name, "SF"))   out.sf   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P1"))   out.p1   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P2"))   out.p2   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P3"))   out.p3   = load_value_dword(value, end);
