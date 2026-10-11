@@ -599,7 +599,10 @@ void JoinerConnection::on_server_auth(
 		last_join_reject_.set = true;
 		last_join_reject_.jfc = sa.jfc;
 		last_join_reject_.jfp = sa.jfp;
-		last_join_reject_.jfs = sa.jfs;
+		// JFS lands in the connection's 64-byte failure string, the text the reason builder
+		// reads. [orig: CNapiSessionConfig_SetServerPassword @0x4CACE0 - Napi_CopyString(this +
+		//  0x5F8, jfs, 64) @0x4CACEE; the call @0x629CF6]
+		last_join_reject_.jfs = sa.jfs.substr(0, 63);
 		io::logf(io::LogLevel::kWarn,
 				"np joiner: join rejected: jfc=%u jfp=%u jfs='%s'",
 				static_cast<unsigned>(sa.jfc), static_cast<unsigned>(sa.jfp),

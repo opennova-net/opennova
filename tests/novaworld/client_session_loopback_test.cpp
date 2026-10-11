@@ -456,6 +456,37 @@ void test_peer_disconnect_legs() {
 		       "0x46 after a punt echoes the latched record");
 	}
 	{
+		// The 0x86 record is latched with the PEER role 1 whatever DS the wire carried, its
+		// DSTR cut at 127 and its DDSTR at 31, and the 0x46 burst echoes that latched record.
+		// [orig: Nwu_HandleDisconnect @0x623CE0 - the role @0x624065, DSTR 128 @0x624079,
+		//  DDSTR 32 @0x624097]
+		MiniServer server;
+		ClientSession::Config cfg;
+		cfg.client_index = 0x00000034u;
+		cfg.client_key = 0x34343434u;
+		ClientSession client(cfg);
+		if (!expect(bring_up(server, client), "0x86 caps leg: session reaches Verified")) return;
+		DisconnectEvent wire;
+		wire.ds = 2;
+		wire.dc = 2;
+		wire.dstr = std::string(200, 'd');
+		wire.dpc = 5;
+		wire.ddstr = std::string(50, 't');
+		const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+				server_goodbye_to_bytes(cfg.client_key, wire));
+		const DisconnectEvent latched =
+				make_disconnect_event(1, 2, 0, 0, wire.dstr, 5, wire.ddstr);
+		std::vector<std::vector<uint8_t>> out;
+		expect(client.handle_datagram(goodbye.data(), goodbye.size(), out) &&
+		               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, latched)),
+		       "0x86 caps leg: the 0x46 burst echoes the latched record");
+		expect(client.disconnect_event().ds == 1 &&
+		               client.disconnect_event().dstr == std::string(127, 'd') &&
+		               client.disconnect_event().ddstr == std::string(31, 't') &&
+		               client.last_error() == std::string(31, 't'),
+		       "0x86 caps leg: role 1, DSTR 127 and DDSTR 31 are latched");
+	}
+	{
 		MiniServer server;
 		ClientSession::Config cfg;
 		cfg.client_index = 0x00000032u;
@@ -463,8 +494,19 @@ void test_peer_disconnect_legs() {
 		ClientSession client(cfg);
 		if (!expect(bring_up(server, client), "H:0x03 leg: session reaches Verified")) return;
 
-		const DisconnectEvent description =
-				make_disconnect_event(1, 2, 7, 0, "server shutting down", 4, "NP.S:PT:MSGCRE");
+		// The host's record (DS 1, a 140-character DSTR) is latched with the client
+		// connection's LOCAL role 2 and its DSTR cut at 127; the burst echoes that record.
+		// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621AE0 - the role
+		//  @0x621CC4..0x621CDE, DSTR 128 @0x621D0C, DDSTR 32 @0x621D2E]
+		DisconnectEvent description;
+		description.ds = 1;
+		description.dc = 2;
+		description.dp1 = 7;
+		description.dstr = std::string(140, 's');
+		description.dpc = 4;
+		description.ddstr = "NP.S:PT:MSGCRE";
+		const DisconnectEvent latched =
+				make_disconnect_event(2, 2, 7, 0, description.dstr, 4, description.ddstr);
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(
 				hightag::DESCRIPTION_PACKET, connection_description_to_bytes(description),
@@ -472,13 +514,14 @@ void test_peer_disconnect_legs() {
 		const auto datagram = server.wrap(std::move(messages));
 		std::vector<std::vector<uint8_t>> out;
 		expect(client.handle_datagram(datagram.data(), datagram.size(), out) &&
-		               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, description)),
+		               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, latched)),
 		       "H:0x03 is terminal: the teardown's 0x46 burst and no ack follow it");
 		expect(client.state() == ClientSession::State::Closed && client.disconnected_by_peer(),
 		       "H:0x03 closes the session as a peer disconnect");
 		expect(client.last_error() == "NP.S:PT:MSGCRE" && client.disconnect_event().dpc == 4 &&
-		               client.disconnect_event().dstr == "server shutting down",
-		       "H:0x03: the description record is latched");
+		               client.disconnect_event().ds == 2 &&
+		               client.disconnect_event().dstr == std::string(127, 's'),
+		       "H:0x03: the description record is latched with role 2 and DSTR 127");
 		// Once closed, further 0x83s are dropped.
 		const auto late = server.push(make_server_stop_hosting(0));
 		out.clear();

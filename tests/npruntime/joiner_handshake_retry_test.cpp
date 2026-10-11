@@ -704,6 +704,43 @@ bool run_idle_keepalive_survives_a_quiet_session() {
 			"idle: two keepalive intervals still fit inside the retail connection timeout");
 }
 
+// A rejecting 0x82's JFS lands in the connection's 64-byte failure string, so the join-reject
+// record (and the reason text built over it) keeps 63 characters of a 600-character JFS.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - JFS into 512 @0x629B29, then
+//  CNapiSessionConfig_SetServerPassword @0x4CACE0 (Napi_CopyString(this + 0x5F8, jfs, 64)
+//  @0x4CACEE), the call @0x629CF6]
+bool run_join_reject_text_keeps_sixty_three() {
+	uint64_t now_ms = 11000;
+	inmatch::JoinerConnection joiner("RejectText", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E116u;
+	joiner.set_discovered_session(session);
+	const std::vector<uint8_t> first = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	if (!expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth),
+			"reject text: the joiner is connecting with its 0x42"))
+		return false;
+	ServerAuth reject;
+	reject.ci = auth.ci;
+	reject.ck = auth.ck;
+	reject.cr = 0;
+	reject.jfc = 4;
+	reject.jfs = std::string(600, 'j');
+	const std::vector<uint8_t> datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_rejection_to_bytes(reject));
+	joiner.handle_datagram(datagram.data(), datagram.size());
+	return expect(joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
+				joiner.last_join_reject().set && joiner.last_join_reject().jfc == 4u &&
+				joiner.last_join_reject().jfs == std::string(63, 'j') &&
+				joiner.connection_error_record().connect_text == std::string(63, 'j'),
+			"reject text: a 600-character JFS keeps 63 in the join-reject record");
+}
+
 } // namespace
 
 int main() {
@@ -715,6 +752,7 @@ int main() {
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;
 	if (!run_client_active_probe_recovers_join()) return 1;
 	if (!run_server_active_probe_recovers_settings()) return 1;
+	if (!run_join_reject_text_keeps_sixty_three()) return 1;
 	std::printf("OK\n");
 	return 0;
 }
