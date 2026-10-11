@@ -73,6 +73,8 @@ static Entity make_vehicle(uint16_t ssn, SeatType seat_type) {
     e.bms_id = 77;
     e.spawn_origin = (1u << 24) | 3u;
     e.kind = EntityKind::Item;
+    // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+    e.item_attrib = world::kItemAttribPlayerControl;
     Seat seat;
     seat.type = seat_type;
     e.seats.push_back(seat);
@@ -340,11 +342,12 @@ int main() {
     }
 
     // A vehicle can expose both Controller and Driver seats. The +368 claim is
-    // single-owner: the second control occupant never claims (no started repeat), the
-    // claimant's departure runs the stop leg even while the other controller remains
-    // seated, and the survivor does not inherit the claim [orig:
-    // Entity_AttachToVehicleSlot @0x4946d0 empty-or-same claim;
-    // Entity_DetachFromVehicle @0x4356e9 claimant-only stop leg].
+    // single-owner, and a control seat refuses while another entity holds it:
+    // the second control occupant is not seated at all (no seat, no parent, no
+    // started repeat); after the claimant's departure (the stop) it boards and
+    // claims afresh (D-NET-398) [orig: Entity_AttachToVehicleSlot @0x4946d0, the
+    // refusals @0x4947bf / @0x4948c5; Entity_DetachFromVehicle @0x4356e9
+    // claimant-only stop leg].
     {
         auto world_fixture = std::make_unique<World>();
         World &w = *world_fixture;
@@ -355,21 +358,27 @@ int main() {
         const EntityHandle c1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
 
         CHECK(w.commands.mount(100, 200));
-        CHECK(w.commands.mount(101, 200));
+        CHECK(!w.commands.mount(101, 200)); // the Driver seat refuses: +368 is c0
         CHECK(w.registry.get(c0)->mount_type == SeatType::Controller);
-        CHECK(w.registry.get(c1)->mount_type == SeatType::Driver);
+        CHECK(!w.registry.get(c1)->mounted);
+        CHECK(w.registry.get(c1)->mount_type == SeatType::None);
+        CHECK(!w.registry.get(c1)->mount_target.valid());
         CHECK(w.registry.get(vh)->seats[0].occupant == c0);
-        CHECK(w.registry.get(vh)->seats[1].occupant == c1);
+        CHECK(!w.registry.get(vh)->seats[1].occupant.valid());
+        CHECK(w.registry.get(vh)->primary_occupant == c0);
         CHECK(w.out.effects.entries().size() == 1);
         if (w.out.effects.entries().size() == 1)
             CHECK(w.out.effects.entries()[0].kind == "vehicle_control_started");
 
-        CHECK(w.commands.dismount(100)); // the claimant departs -> stop, c1 still seated
+        CHECK(w.commands.dismount(100)); // the claimant departs -> stop
         CHECK(w.out.effects.entries().size() == 2);
         if (w.out.effects.entries().size() == 2)
             CHECK(w.out.effects.entries()[1].kind == "vehicle_control_stopped");
-        CHECK(w.commands.dismount(101)); // the non-claimant departure is silent
-        CHECK(w.out.effects.entries().size() == 2);
+        CHECK(w.commands.mount(101, 200)); // +368 empty: c1 boards and claims
+        CHECK(w.registry.get(vh)->primary_occupant == c1);
+        CHECK(w.out.effects.entries().size() == 3);
+        if (w.out.effects.entries().size() == 3)
+            CHECK(w.out.effects.entries()[2].kind == "vehicle_control_started");
     }
 
     // The accepted wire attach/detach path publishes the same controlling-seat edges.
@@ -399,18 +408,40 @@ int main() {
         }
     }
 
-    // The wire path obeys the same single-owner claim for dual control seats.
+    // The wire path refuses the same way. A rider moving from its sitex seat
+    // to the claimed control seat has already left the sitex seat, so it ends
+    // detached; a body on foot keeps its stance bits, the success-only clear
+    // skipped (D-NET-398). [orig: Entity_ProcessVehicleAttach @0x435bce, the
+    // clear @0x435c42 under @0x435c40; Entity_AttachToVehicleSlot @0x4948c5 ->
+    // @0x494714]
     {
         auto world_fixture = std::make_unique<World>();
         World &w = *world_fixture;
         w.registry.configure_pool(0, 16);
         w.registry.configure_pool(1, 16);
-        const EntityHandle vh = w.registry.spawn(1, make_dual_control_vehicle(200));
+        Entity dual = make_dual_control_vehicle(200);
+        Seat sit;
+        sit.type = SeatType::Passenger;
+        sit.bone_index = 11;
+        dual.seats.push_back(sit);
+        const EntityHandle vh = w.registry.spawn(1, dual);
         const EntityHandle c0 = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         const EntityHandle c1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
+        const EntityHandle c2 = w.registry.spawn(0, make_soldier(102, 0.f, 0.f, 0.f));
 
         CHECK(w.vehicles.process_attach(c0, vh, 7));
+        w.registry.get(c2)->net_stance_bits = 1; // prone
+        CHECK(!w.vehicles.process_attach(c2, vh, 9));
+        CHECK(!w.registry.get(c2)->mounted && w.registry.get(c2)->net_stance_bits == 1);
+        CHECK(w.vehicles.process_attach(c1, vh, 11));
+        CHECK(w.registry.get(c1)->mount_type == SeatType::Passenger);
+        // Refused, but the relation changed: c1 left its sitex seat first.
         CHECK(w.vehicles.process_attach(c1, vh, 9));
+        CHECK(!w.registry.get(c1)->mounted && !w.registry.get(c1)->mount_target.valid());
+        CHECK((w.registry.get(c1)->flags & world::kEntityFlagMounted) == 0);
+        CHECK(!w.registry.get(vh)->seats[1].occupant.valid());
+        CHECK(!w.registry.get(vh)->seats[2].occupant.valid());
+        CHECK(w.registry.get(vh)->primary_occupant == c0);
         CHECK(w.out.effects.entries().size() == 1);
         if (w.out.effects.entries().size() == 1)
             CHECK(w.out.effects.entries()[0].kind == "vehicle_control_started");
@@ -419,7 +450,7 @@ int main() {
         CHECK(w.out.effects.entries().size() == 2);
         if (w.out.effects.entries().size() == 2)
             CHECK(w.out.effects.entries()[1].kind == "vehicle_control_stopped");
-        CHECK(w.vehicles.detach(c1)); // the non-claimant departure is silent
+        CHECK(!w.vehicles.detach(c1)); // c1 left its seat with the refusal
         CHECK(w.out.effects.entries().size() == 2);
     }
 
@@ -496,6 +527,8 @@ int main() {
         Entity vehicle;
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
+        // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+        vehicle.item_attrib = world::kItemAttribPlayerControl;
         vehicle.position = {100.f, 200.f, 7.f};
         vehicle.yaw = -90;
         Seat control;
@@ -843,16 +876,15 @@ int main() {
         const EntityHandle sh0 = w.registry.spawn(0, make_soldier(100, 0.f, 0.f, 0.f));
         const EntityHandle sh1 = w.registry.spawn(0, make_soldier(101, 0.f, 0.f, 0.f));
         CHECK(w.commands.mount(100, 200));
-        CHECK(w.commands.mount(101, 200));
+        CHECK(!w.commands.mount(101, 200)); // the second control seat refuses (D-NET-398)
         const auto occupied = std::make_unique<World::Snapshot>(w.snapshot());
         CHECK(w.commands.dismount(100));
-        CHECK(w.commands.dismount(101));
 
         w.restore(*occupied);
         CHECK(w.registry.get(sh0)->mounted);
-        CHECK(w.registry.get(sh1)->mounted);
+        CHECK(!w.registry.get(sh1)->mounted);
         CHECK(w.registry.get(vh)->seats[0].occupant == sh0);
-        CHECK(w.registry.get(vh)->seats[1].occupant == sh1);
+        CHECK(!w.registry.get(vh)->seats[1].occupant.valid());
         CHECK(w.out.effects.entries().size() == 1);
         if (w.out.effects.entries().size() == 1) {
             const auto &started = w.out.effects.entries()[0];

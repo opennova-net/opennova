@@ -141,6 +141,8 @@ struct Rig {
 		veh.spawn_origin = (1u << 24) | 3u;
 		veh.kind = EntityKind::Item;
 		veh.item_id = 1291;
+		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+		veh.item_attrib = kItemAttribPlayerControl;
 		veh.position = {100.0f, 200.0f, 10.0f};
 		veh.yaw = 0;
 		veh.health = 3000;

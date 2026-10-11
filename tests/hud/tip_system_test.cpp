@@ -357,6 +357,8 @@ world::Entity make_vehicle(int32_t item_id, int32_t unit_type, world::SeatType s
 	e.kind = world::EntityKind::Item;
 	e.item_id = item_id;
 	e.has_item_def = true;
+	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+	e.item_attrib = world::kItemAttribPlayerControl;
 	e.item_type = 1;
 	e.item_unit_type = unit_type;
 	world::Seat seat;
@@ -434,6 +436,18 @@ void test_world_boarding() {
 		CHECK(w.out.tip_events.empty());
 		w.registry.despawn(veh);
 	}
+	// A control seat the carrier refuses (its def lacks PlayerControl) raises
+	// no tip, on the authority or a client (D-NET-398).
+	// [orig: Entity_AttachToVehicleSlot @0x4948d2; Entity_ProcessVehicleAttach
+	//  @0x435c09 -> @0x435c67]
+	world::Entity locked = make_vehicle(10, 1, SeatType::Driver);
+	locked.item_attrib = 0;
+	const world::EntityHandle locked_h = w.registry.spawn(1, locked);
+	w.out.tip_events.clear();
+	CHECK(!w.vehicles.process_attach(local, locked_h, 7));
+	CHECK(!w.vehicles.apply_confirmed_mount(local, locked_h, 7));
+	CHECK(w.out.tip_events.empty() && !w.registry.get(local)->mounted);
+	w.registry.despawn(locked_h);
 	// A non-vehicle def's control seat raises no vehicle tip.
 	world::Entity crate = make_vehicle(10, 1, SeatType::Driver);
 	crate.item_type = 2;

@@ -110,8 +110,10 @@ bool candidate_relevant_for_mode(const Entity &candidate, bool armory_mode) {
 }
 
 // Shared host attach write block. Retail splits UseGun from ordinary vehicle slots at
-// the flags write; the remaining relationship fields are common.
-void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
+// the flags write; the remaining relationship fields are common. Returns false for a
+// control seat retail refuses, before any relationship write.
+bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t bone) {
+    const bool control_seat = is_vehicle_control_seat(veh.seats[seat_idx].type);
     // The local player's control-seat attach resets its camera first, EWeap
     // carrier or not, ahead of the +368 claim test: the scope target and
     // ease, the fov, the binoculars and the NVG restore latch. (The function's
@@ -119,11 +121,24 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     // to Entity_AttachToUseGunSlot @0x435c9f / @0x435caa.)
     // [orig: Entity_AttachToVehicleSlot -- ctrlx @0x4947ac..0x4947ae ahead of
     //  @0x4947bf, drvrx @0x4948b2..0x4948b4 ahead of @0x4948d2]
-    if (is_vehicle_control_seat(veh.seats[seat_idx].type) &&
-            occ.handle == world.cached.local_player && world.local_player_state != nullptr)
+    if (control_seat && occ.handle == world.cached.local_player &&
+            world.local_player_state != nullptr)
         local_player_camera_reset(&world, world.local_player_state->weapon,
                                   world.local_player_state->view);
     world.vehicles.presnap_attach_heading(occ, veh, veh.seats[seat_idx]);
+    // A control seat claims +368 or refuses: another entity holds it, or the
+    // carrier's def lacks PlayerControl (0x40). A refusal writes no seat
+    // handle, parent, slot type or Flags, and the caller then skips the
+    // boarding tip and the stance clear; a body that rode elsewhere has
+    // already left that seat, so it stays off.
+    // [orig: Entity_AttachToVehicleSlot -- ctrlx @0x4947b3..0x4947d2 (refusals
+    //  @0x4947bf / @0x4947cc), drvrx @0x4948b9..0x4948d8 (@0x4948c5 / @0x4948d2),
+    //  the 0 return @0x494714..0x49471a; Entity_ProcessVehicleAttach: the local
+    //  player's @0x435c09 -> @0x435c67, any other's @0x435c40, past the tip and the
+    //  stance clear; the earlier detach @0x435bce]
+    if (control_seat &&
+            !world.vehicles.claim_primary_occupant(veh, occ.handle, veh.seats[seat_idx].type))
+        return false;
     veh.seats[seat_idx].occupant = occ.handle; // [orig: mountHandles[idx] = handle @0x494746]
     occ.mount_type = veh.seats[seat_idx].type; // [orig: parentSlot(0x168) = slotType]
     static_assert((kEntityFlagDrowning | kEntityFlagInAir) == 0xA000u,
@@ -168,7 +183,11 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     occ.net_stance_bits = 0;
     if (occ.handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->clear_stance_latches();
-    world.vehicles.claim_primary_occupant(veh, occ.handle, occ.mount_type); // [orig: +368 @0x4946d0]
+    // The UseGun claim (the control seats claimed above).
+    // [orig: Entity_AttachToUseGunSlot +368 @0x546c6d]
+    if (!control_seat)
+        world.vehicles.claim_primary_occupant(veh, occ.handle, occ.mount_type);
+    return true;
 }
 
 // Local-point world position: the same local rotate the per-tick pose applies
@@ -423,9 +442,14 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     const Seat &seat = veh->seats[static_cast<size_t>(selection.seat_index)];
     if (seat.type == SeatType::None || seat.type != selection.type) return false;
     if (seat.occupant.valid() && seat.occupant != player) return false;
+    const bool was_mounted = occ->mounted;
     if (occ->mounted)
         world.vehicles.detach(player); // [orig: @0x435BCE]
-    attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index);
+    // A refused control seat attaches nothing [orig: @0x435c09 / @0x435c40];
+    // as apply_confirmed_mount reports, the relation changed only if the body
+    // left a seat first.
+    if (!attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index))
+        return was_mounted;
     world.out.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
     raise_boarding_tip(world, player, *veh, selection.type);
     return true;
@@ -437,7 +461,8 @@ bool VehicleSystem::process_attach(EntityHandle player, EntityHandle vehicle, ui
     Entity *veh = world.registry.get(vehicle);
     // 1. Resolve + dead gates [orig: @0x435b01 — null vehicle/itemDef/player or either
     //    Flags & 2 reject]. Our authoritative dead store is health/alive; the flags bit-1
-    //    movement/spawn gate also rejects (a mid-spawn player cannot mount).
+    //    movement/spawn gate also rejects (a mid-spawn player cannot mount). The itemDef
+    //    leg is not tested: a def-less carrier still seats (D-NET-422).
     if (occ == nullptr || veh == nullptr) return false;
     if (occ->health <= 0 || !occ->alive || (occ->flags & 2u) != 0) return false;
     if (veh->health <= 0 || !veh->alive || (veh->flags & 2u) != 0) return false;
@@ -505,9 +530,13 @@ bool VehicleSystem::apply_confirmed_mount(
         release_primary_occupant(*veh, previous);
         seat.occupant = {};
     }
+    const bool was_mounted = occ->mounted;
     if (occ->mounted) detach(player);
     const SeatType seat_type = seat.type;
-    attach_apply(world, *occ, *veh, seat_idx, bone);
+    // The client runs the same refusal on its own +368: the relation changed
+    // only when the body left a seat [orig: Entity_ProcessVehicleAttach
+    // @0x435bce, then Entity_AttachToVehicleSlot @0x494714].
+    if (!attach_apply(world, *occ, *veh, seat_idx, bone)) return was_mounted;
     world.out.scars.clear_entity(player);
     // The client's attach runs the same function [orig: Entity_TryAttachOrDetach
     // @0x4366e8 -> Entity_ProcessVehicleAttach, the tip @0x435bfd].

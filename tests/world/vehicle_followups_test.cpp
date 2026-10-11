@@ -40,6 +40,8 @@ struct Rig {
         Entity v;
         v.kind = EntityKind::Item;
         v.has_item_def = true;
+        // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+        v.item_attrib = kItemAttribPlayerControl;
         v.item_id = 1291;
         v.health = v.health_max = 3000;
         v.alive = true;

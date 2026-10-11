@@ -56,7 +56,8 @@ public:
 	void cleanup_destroyed_ref_group(Entity &vehicle);
 
 	// Validate + apply one C2S 0x26 attach request: `player` mounts `vehicle` at model-bone
-	// `bone` (1-based, the wire byte — the occupancy/echo key). Returns true iff attached.
+	// `bone` (1-based, the wire byte — the occupancy/echo key). Returns true when the
+	// requester's relation changed: it attached, or it left a seat before a refusal.
 	// Ported validation order [orig: Entity_ProcessVehicleAttach @0x435AA0]:
 	//   1. resolve both handles; reject a missing entity or either side dead
 	//      (Flags & 2 / health <= 0) [orig: @0x435b01];
@@ -72,7 +73,11 @@ public:
 	//   4. seat occupancy: an occupied matching seat / an already-taken wire bone rejects
 	//      [orig: @0x435ba9 mountHandles[idx] != 0xFFFF];
 	//   5. an already-mounted requester detaches first [orig: @0x435bce];
-	//   6. writes: seat occupant + mount_target/mount_bone/mount_type/mount_seat, then
+	//   6. a Controller/Driver seat refuses while +368 names another entity or the
+	//      carrier's def lacks PlayerControl (0x40), writing nothing; the requester
+	//      stays off [orig: Entity_AttachToVehicleSlot @0x4947bf / @0x4947cc,
+	//      @0x4948c5 / @0x4948d2];
+	//   7. writes: seat occupant + mount_target/mount_bone/mount_type/mount_seat, then
 	//      stance bits clear [orig: MoveOrder &= ~0x300 @0x435c42 + input latches
 	//      @0x435c54]. Generic vehicle slots clear 0xA000 and set Flags 0x40
 	//      [orig: Entity_AttachToVehicleSlot @0x494752]; UseGun clears 0xA000 without
@@ -96,7 +101,8 @@ public:
     bool detach(EntityHandle player);
     // Validate and atomically attach to an already selected seat. This is the one
     // authoritative relationship-write path used by wire requests, script mounts,
-    // use-key mounts, and mobile-spawn deployment.
+    // use-key mounts, and mobile-spawn deployment. Returns true when the relation
+    // changed: an attach, or the detach that runs before a refused control seat.
     // [orig: Entity_RequestVehicleAttach @0x4364A0 ->
     //  Entity_ProcessVehicleAttach @0x435AA0]
     bool attach_to_seat(EntityHandle player, const VehicleSeatSelection &selection);
@@ -165,11 +171,15 @@ public:
     void emit_control_stopped(uint16_t target_net_id, int32_t target_bms_id, uint32_t target_spawn_origin, uint16_t target_wire_handle);
     void emit_control_stopped(const Entity &vehicle);
     // The +368 primary-occupant claim: Controller/Driver seats claim when the slot is empty
-    // or already theirs; a Gunner claims only when empty (the emplaced-gun UseGun leg);
-    // Passengers never claim. Emits vehicle_control_started on the empty -> claimed edge.
-    // Returns true when the occupant holds the claim after the call.
+    // or already theirs and the carrier's def has PlayerControl (0x40), and a false
+    // return is their attach's refusal; a Gunner claims only when empty, where retail's
+    // authority also keeps the requester's own claim and a client forces it (D-NET-420);
+    // Passengers never claim. Emits vehicle_control_started on the empty -> claimed
+    // edge. Returns true when the occupant holds the claim after the call.
     // [orig: Entity_AttachToVehicleSlot @0x4946d0 — +368 writes @0x4947d2 (ctrlx,
-    // empty-or-same), @0x4948d8 (drvrx, empty-or-same), @0x49495e (UseGun, empty only)]
+    // empty-or-same, attrib 0x40 @0x4947cc), @0x4948d8 (drvrx, the same tests
+    // @0x4948c5 / @0x4948d2); Entity_AttachToUseGunSlot @0x546B80 — the test
+    // @0x546bb6..0x546bc6, the store @0x546c6d]
     bool claim_primary_occupant(Entity &vehicle, EntityHandle occupant, SeatType seat);
     // Clears the claim and emits vehicle_control_stopped iff `occupant` IS the claimant —
     // a second control-seat occupant staying aboard does NOT keep the engine running.

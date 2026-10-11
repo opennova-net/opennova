@@ -877,13 +877,16 @@ void test_vehicle_seats_clear_the_nvg_restore_latch() {
         LocalPlayer player;
         SeatType seat;
         EntityHandle vehicle;
-        explicit Rig(SeatType type) : player(lw.w), seat(type) {
+        // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+        explicit Rig(SeatType type, uint32_t attrib = kItemAttribPlayerControl)
+                : player(lw.w), seat(type) {
             lw.w.local_player_state = &player;
             lw.w.registry.configure_pool(1, 4);
             Entity carrier;
             carrier.kind = EntityKind::Item;
             carrier.health = 100;
             carrier.alive = true;
+            carrier.item_attrib = attrib;
             Seat s;
             s.type = seat;
             s.bone_index = 2;
@@ -927,6 +930,20 @@ void test_vehicle_seats_clear_the_nvg_restore_latch() {
         CHECK(!local_player_nvg_toggle(r.lw.w, r.player.weapon, r.player.view));
         CHECK(r.player.view.scope_engaged == !control);
         CHECK(!r.player.weapon.nvg_scope_restore);
+    }
+    // A control seat the carrier refuses (its def lacks PlayerControl) has
+    // still reset the camera, and the body stays off (D-NET-398).
+    // [orig: the resets @0x4947ae / @0x4948b4 ahead of the refusals @0x4947cc /
+    //  @0x4948d2, the 0 return @0x494714]
+    for (const SeatType seat : {SeatType::Controller, SeatType::Driver}) {
+        Rig r(seat, 0);
+        r.player.view.binoculars_requested = true;
+        r.lw.w.weather.core.scalar_channels.camera_fov_target_fp = 20 << 16;
+        CHECK(!r.attach());
+        CHECK(!r.player.weapon.nvg_scope_restore && !r.player.view.binoculars_requested);
+        CHECK(r.lw.w.weather.core.scalar_channels.camera_fov_target_fp == (80 << 16));
+        CHECK(!r.lw.w.registry.get(r.lw.local)->mounted);
+        CHECK(!r.lw.w.registry.get(r.vehicle)->seats[0].occupant.valid());
     }
     // The detach's mount: a ctrlx or UseGun detach clears a latch set while
     // seated, a drvrx or a sitex keeps it.
@@ -1009,6 +1026,8 @@ void test_scope_press_after_a_reset_runs_its_leg() {
         carrier.kind = EntityKind::Item;
         carrier.health = 100;
         carrier.alive = true;
+        // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+        carrier.item_attrib = kItemAttribPlayerControl;
         Seat driver;
         driver.type = SeatType::Driver;
         driver.bone_index = 2;

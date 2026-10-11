@@ -1434,6 +1434,8 @@ bool run_remote_mounted_player_death_detaches_compact() {
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
 	vehicle.item_id = 0x1004;
+	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+	vehicle.item_attrib = w::kItemAttribPlayerControl;
 	vehicle.net_class_code = static_cast<uint8_t>(nw::EntityClass::Vehicle);
 	vehicle.health = 3000;
 	vehicle.health_max = 3000;

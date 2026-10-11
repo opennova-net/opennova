@@ -1061,11 +1061,12 @@ struct Entity {
     //  Entity_ResolveBoneUserpoints @0x545940]
     uint8_t weapon_userpoint_bytes[4][3] = {};
     // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
-    // ctrlx/drvrx (empty-or-same) and UseGun (only when empty), never by sitex; cleared only
-    // when THE claimant detaches — a remaining second controller does not inherit it. This
+    // ctrlx/drvrx (empty-or-same, else the attach refuses, D-NET-398) and UseGun (ours only
+    // when empty, D-NET-420), never by sitex; cleared only when THE claimant detaches. This
     // is the retail engine-running latch: the PlayerControl occupancy effect (and the engine
     // start/stop sounds) key off it, not off any-control-seat occupancy.
-    // [orig: Entity_AttachToVehicleSlot @0x4946d0 writes +368 @0x4947d2/@0x4948d8/@0x49495e;
+    // [orig: Entity_AttachToVehicleSlot @0x4946d0 writes +368 @0x4947d2/@0x4948d8;
+    //  Entity_AttachToUseGunSlot @0x546c6d;
     //  Entity_DetachFromVehicle @0x4355f0 stop leg @0x4356e9..0x435759 + clear @0x43577c;
     //  spawner gate @0x48faad in Entity_UpdateHeloRotorSpin (ex entity_update_damage_accumulator_and_shadow) Entity_UpdateHeloRotorSpin @0x48fa70]
     // On a person the same word is the ride link: the same-team occupant of the
