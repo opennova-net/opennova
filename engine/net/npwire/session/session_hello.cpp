@@ -1,6 +1,5 @@
 #include <net/npwire/session_hello.h>
 
-#include <cstring>
 #include <base/io/le.h>
 #include <base/io/strutil.h>
 #include <net/napi/tlv.h>
@@ -38,27 +37,6 @@ uint32_t read_u32_le(const uint8_t *data, size_t len) {
 	return io::read_u32_le(data);
 }
 
-// The 0x41 / 0x42 handlers' loads: `n` bytes from the field's value pointer
-// whatever its length, so a short value takes the bytes that follow it in the
-// datagram (the start of the next field: its name, then its NUL and size) and a
-// long one gives its first `n`. Past the datagram's `end` retail reads what its
-// 64 KiB stack decrypt buffer still holds; ours reads zero there (D-NET-410).
-// [orig: NapiNP_ReadTLV @0x61DBE0 returns the value pointer for any length
-//  @0x61DCF7]
-void load_value_bytes(const uint8_t *value, const uint8_t *end, uint8_t *out, size_t n) {
-	const size_t avail = static_cast<size_t>(end - value);
-	for (size_t i = 0; i < n; ++i) out[i] = i < avail ? value[i] : 0;
-}
-
-// A dword field. [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - `mov ecx,
-//  [eax]` CI @0x62171E; NapiNPProtocol_HandleClientJoin @0x62B750 - `mov ecx,
-//  [eax]` CI @0x62BAE7]
-uint32_t load_value_dword(const uint8_t *value, const uint8_t *end) {
-	uint8_t le[4];
-	load_value_bytes(value, end, le, sizeof(le));
-	return io::read_u32_le(le);
-}
-
 // The PG: its four dwords load from the value pointer whatever the field's
 // length. An absent PG leaves retail's block zeroed, ours `pg_present` false;
 // either fails the identity compare against the nonzero protocol GUID.
@@ -68,6 +46,28 @@ uint32_t load_value_dword(const uint8_t *value, const uint8_t *end) {
 void load_value_guid(const uint8_t *value, const uint8_t *end, std::array<uint8_t, 16> &out) {
 	load_value_bytes(value, end, out.data(), out.size());
 }
+
+// A string field: the 0x41 / 0x42 handlers copy from the value pointer up to
+// the first NUL and at most `buffer` less one characters, whatever the field's
+// length, so an inner NUL ends the string and a value without its NUL runs on
+// into the bytes that follow it (the next field's name, up to that name's NUL).
+// Past the datagram's `end` ours reads zero, which ends the copy (D-NET-410).
+// [orig: Napi_CopyString @0x617E10 - the NUL test @0x617E32, the `buffer - 1`
+//  bound @0x617E41..0x617E44]
+std::string load_value_string(const uint8_t *value, const uint8_t *end, size_t buffer) {
+	std::string out;
+	for (const uint8_t *p = value; p < end && *p != 0 && out.size() + 1 < buffer; ++p)
+		out.push_back(static_cast<char>(*p));
+	return out;
+}
+
+// The handlers' string buffers: NVS 128 bytes, PW 512, every other 64.
+// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - `push 80h` @0x621562;
+//  NapiNPProtocol_HandleClientJoin @0x62B750 - `push 80h` @0x62B925, `push 200h`
+//  @0x62BB78, `push 40h` for the rest]
+constexpr size_t kNvsBuffer = 128;
+constexpr size_t kPwBuffer = 512;
+constexpr size_t kStringBuffer = 64;
 
 } // namespace
 
@@ -166,18 +166,26 @@ bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out) {
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
 		const uint16_t size = field.size;
-		if (strutil::iequals(name, "NVS")) out.nvs = strip_nul(value, size);
-		else if (strutil::iequals(name, "CO")) out.co = strip_nul(value, size);
-		else if (strutil::iequals(name, "AP")) out.ap = strip_nul(value, size);
-		else if (strutil::iequals(name, "BDAT")) out.bdat = strip_nul(value, size);
+		const uint8_t *end = data + len;
+		const auto copy_string = [value, end](size_t buffer) {
+			return load_value_string(value, end, buffer);
+		};
+		// The string fields copy whatever the field's length (load_value_string).
+		// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - NVS @0x621570, CO
+		//  @0x62159E, AP @0x6215CC, BDAT @0x6215FA, PN @0x62163B, PV1 @0x62169F, PV2
+		//  @0x6216CD, PV3 @0x6216FB]
+		if (strutil::iequals(name, "NVS")) out.nvs = copy_string(kNvsBuffer);
+		else if (strutil::iequals(name, "CO")) out.co = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "AP")) out.ap = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "BDAT")) out.bdat = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "DE")) out.de = read_u32_le(value, size);
-		else if (strutil::iequals(name, "PN")) out.pn = strip_nul(value, size);
+		else if (strutil::iequals(name, "PN")) out.pn = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "PG")) {
 			load_value_guid(value, data + len, out.pg); // [orig: @0x62165E..0x621672]
 			out.pg_present = true;
-		} else if (strutil::iequals(name, "PV1")) out.pv1 = strip_nul(value, size);
-		else if (strutil::iequals(name, "PV2")) out.pv2 = strip_nul(value, size);
-		else if (strutil::iequals(name, "PV3")) out.pv3 = strip_nul(value, size);
+		} else if (strutil::iequals(name, "PV1")) out.pv1 = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "PV2")) out.pv2 = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "PV3")) out.pv3 = copy_string(kStringBuffer);
 		// The five dwords load whatever the field's length (load_value_dword).
 		// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 — CI @0x62171E, PM
 		//  @0x62173C (zero-initialised @0x621504), EIP @0x621756, EPN @0x621774,
@@ -262,17 +270,25 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		// exact and our own server records what the client claimed. Every tag
 		// compares case-insensitively, as the retail walk does
 		// [orig: Napi_StrCaseEqual(tag, "NVS") @0x62b915 .. "SCRK" @0x62bc30].
-		if      (strutil::iequals(name, "NVS"))  out.nvs  = strip_nul(value, size);
-		else if (strutil::iequals(name, "CO"))   out.co   = strip_nul(value, size);
-		else if (strutil::iequals(name, "AP"))   out.ap   = strip_nul(value, size);
-		else if (strutil::iequals(name, "BDAT")) out.bdat = strip_nul(value, size);
-		else if (strutil::iequals(name, "PN"))   out.pn   = strip_nul(value, size);
+		// The string fields copy whatever the field's length (load_value_string).
+		// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - NVS @0x62B933, CO
+		//  @0x62B961, AP @0x62B98F, BDAT @0x62B9BD, PN @0x62BA01, PV1 @0x62BA68, PV2
+		//  @0x62BA96, NA @0x62BB55, PW @0x62BB86, SCRK @0x62BC4B]
+		const uint8_t *end = data + len;
+		const auto copy_string = [value, end](size_t buffer) {
+			return load_value_string(value, end, buffer);
+		};
+		if      (strutil::iequals(name, "NVS"))  out.nvs  = copy_string(kNvsBuffer);
+		else if (strutil::iequals(name, "CO"))   out.co   = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "AP"))   out.ap   = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "BDAT")) out.bdat = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "PN"))   out.pn   = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "PG")) {
 			load_value_guid(value, data + len, out.pg); // [orig: @0x62BA24..0x62BA38]
 			out.pg_present = true;
 		}
-		else if (strutil::iequals(name, "PV1"))  out.pv1  = strip_nul(value, size);
-		else if (strutil::iequals(name, "PV2"))  out.pv2  = strip_nul(value, size);
+		else if (strutil::iequals(name, "PV1"))  out.pv1  = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "PV2"))  out.pv2  = copy_string(kStringBuffer);
 		// Auth fields. The eight dwords load whatever the field's length
 		// (load_value_dword). [orig: NapiNPProtocol_HandleClientJoin @0x62B750 —
 		//  CI @0x62BAE7, HK @0x62BB08, CK @0x62BB29, SIP @0x62BBA9, SPN @0x62BBCA,
@@ -280,11 +296,11 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		else if (strutil::iequals(name, "CI"))   out.ci   = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "HK"))   out.hk   = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "CK"))   out.ck   = load_value_dword(value, data + len);
-		else if (strutil::iequals(name, "NA"))   out.na   = strip_nul(value, size).substr(0, 63);
-		else if (strutil::iequals(name, "PW"))   out.pw   = strip_nul(value, size).substr(0, 511);
+		else if (strutil::iequals(name, "NA"))   out.na   = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "PW"))   out.pw   = copy_string(kPwBuffer);
 		else if (strutil::iequals(name, "SIP"))  out.sip  = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "SPN"))  out.spn  = load_value_dword(value, data + len);
-		else if (strutil::iequals(name, "SCRK")) out.scrk = strip_nul(value, size);
+		else if (strutil::iequals(name, "SCRK")) out.scrk = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "CU"))   out.cu.emplace_back(value, value + size);
 		else if (strutil::iequals(name, "NF"))   out.nf   = load_value_dword(value, data + len);
 		else if (strutil::iequals(name, "DCNT")) out.dcnt = load_value_dword(value, data + len);
@@ -292,8 +308,15 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		// Unknown tags (DE/PV3/etc.) intentionally ignored.
 		pos = next;
 	}
-	// Minimum sanity: CK should be nonzero for a valid ClientAuth.
-	return out.ck != 0;
+	// No field is required: a zero (or absent) CK is the connection's remote key
+	// like any other, and the gates that follow the walk never test it. Only a
+	// non-stock peer sends one: a stock client draws a nonzero key and writes CK
+	// only when nonzero.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - CK @0x62BB29 to the
+	//  connection's remote key @0x62BF7F, compared only by the retransmit match
+	//  @0x62BEE0..0x62BEE6; NapiNP_GenerateSessionKey @0x61EA70 redraws a zero
+	//  @0x61EAC3; CNapiNPConnection_SendClientJoin @0x61fe20 gates CK @0x620119]
+	return true;
 }
 
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
@@ -386,9 +409,13 @@ std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const Disconnec
 // gathered before it. Nothing after the walk tests what was parsed: the description is recorded
 // with zero defaults and the connection moves to state 6 (@0x621d59), so an unknown-only or
 // truncated body disconnects exactly like a complete one. DS is read off the wire and
-// deliberately dropped: the receiver re-derives the role from its own connection. A value shorter
-// than its field's width reads as zero here; retail's unguarded `*(_DWORD *)value` would read past
-// it, and bounds safety is a platform primitive.
+// deliberately dropped: the receiver re-derives the role from its own connection. The 0x46 / 0x86
+// goodbye walk is the same shape. DC, DP1, DP2 and DPC each load a whole dword at the field's
+// value pointer whatever its length (load_value_dword), so a short value takes the bytes that
+// follow it, zero past the body's end (D-NET-410).
+// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 - DC @0x621BCB, DP1 @0x621BEC, DP2
+//  @0x621C0D, DPC @0x621C51; Nwu_HandleDisconnect @0x623CE0 - DC @0x623EF9, DP1 @0x623F1A, DP2
+//  @0x623F34, DPC @0x623F69]
 bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &out) {
 	if (!data) return false;
 	out = DisconnectEvent{};
@@ -402,18 +429,19 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
 		const uint16_t size = field.size;
+		const uint8_t *end = data + len;
 		if (strutil::iequals(name, "DS")) {
 			out.ds = read_u32_le(value, size);
 		} else if (strutil::iequals(name, "DC")) {
-			out.dc = read_u32_le(value, size);
+			out.dc = load_value_dword(value, end);
 		} else if (strutil::iequals(name, "DP1")) {
-			out.dp1 = read_u32_le(value, size);
+			out.dp1 = load_value_dword(value, end);
 		} else if (strutil::iequals(name, "DP2")) {
-			out.dp2 = read_u32_le(value, size);
+			out.dp2 = load_value_dword(value, end);
 		} else if (strutil::iequals(name, "DSTR")) {
 			out.dstr = strip_nul(value, size);
 		} else if (strutil::iequals(name, "DPC")) {
-			out.dpc = read_u32_le(value, size);
+			out.dpc = load_value_dword(value, end);
 		} else if (strutil::iequals(name, "DDSTR")) {
 			out.ddstr = strip_nul(value, size);
 		}
@@ -657,22 +685,34 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
 		const uint16_t size = field.size;
+		const uint8_t *end = data + len;
 		// Case-insensitive tag walk, as the retail 0x82 reader does
 		// [orig: NapiNP_HandleServerJoinResponse @0x629840 via Napi_StrCaseEqual @0x616e70].
-		if      (strutil::iequals(name, "CI"))  out.ci  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "MI"))  out.mi  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "CK"))  out.ck  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "CR"))  { out.cr  = read_u32_le(value, size); saw_cr = true; }
-		else if (strutil::iequals(name, "JFC")) { out.jfc = read_u32_le(value, size); saw_rejection_detail = true; }
-		else if (strutil::iequals(name, "JFP")) { out.jfp = read_u32_le(value, size); saw_rejection_detail = true; }
+		// Every dword loads whatever the field's length (load_value_dword).
+		// [orig: NapiNP_HandleServerJoinResponse @0x629840 - CI @0x629A34, MI @0x629A55, CK
+		//  @0x629A76, CR @0x629A97, SK @0x629AB8, JFC @0x629AD9, JFP @0x629AFA, RIP @0x629C3E,
+		//  RPN @0x629C5C, RCNT @0x629C7A]
+		if      (strutil::iequals(name, "CI"))  out.ci  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "MI"))  out.mi  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "CK"))  out.ck  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "CR"))  { out.cr  = load_value_dword(value, end); saw_cr = true; }
+		else if (strutil::iequals(name, "JFC")) { out.jfc = load_value_dword(value, end); saw_rejection_detail = true; }
+		else if (strutil::iequals(name, "JFP")) { out.jfp = load_value_dword(value, end); saw_rejection_detail = true; }
 		else if (strutil::iequals(name, "JFS")) { out.jfs = strip_nul(value, size); saw_rejection_detail = true; }
-		else if (strutil::iequals(name, "SK"))  out.sk  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "CS") && size == 6) {
-			// [direction][field_index][LE uint32]. direction 1 = client, 0 = server.
-			const uint8_t direction = value[0];
-			CsField f{value[1], read_u32_le(value + 2, 4)};
-			if (direction == 1) out.client_cs.push_back(f);
-			else                out.server_cs.push_back(f);
+		else if (strutil::iequals(name, "SK"))  out.sk  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "CS")) {
+			// [direction][field_index][LE uint32], six bytes at the value pointer whatever the
+			// field's length. A nonzero direction byte (1 on the wire) is the client block, zero
+			// the server's; an index past 14 is dropped.
+			// [orig: @0x629B4C..0x629B55 the loads; the direction test @0x629B4F / @0x629B58; the
+			//  index bound @0x629B5A..0x629B5D / @0x629B6C..0x629B6F]
+			uint8_t cs[6];
+			load_value_bytes(value, end, cs, sizeof(cs));
+			const CsField f{cs[1], io::read_u32_le(cs + 2)};
+			if (f.field_index <= 14) {
+				if (cs[0] != 0) out.client_cs.push_back(f);
+				else            out.server_cs.push_back(f);
+			}
 		}
 		else if (strutil::iequals(name, "CU")) {
 			std::string cu_name, cu_value;
@@ -682,9 +722,9 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		}
 		else if (strutil::iequals(name, "SCRK")) out.scrk = strip_nul(value, size);
 		else if (strutil::iequals(name, "NA"))   out.na   = strip_nul(value, size);
-		else if (strutil::iequals(name, "RIP"))  out.rip  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "RPN"))  out.rpn  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "RCNT")) out.rcnt = read_u32_le(value, size);
+		else if (strutil::iequals(name, "RIP"))  out.rip  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "RPN"))  out.rpn  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "RCNT")) out.rcnt = load_value_dword(value, end);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
@@ -801,44 +841,51 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
 		const uint16_t size = field.size;
-		if      (strutil::iequals(name, "CI"))   out.ci   = read_u32_le(value, size);
+		const uint8_t *end = data + len;
+		// Every dword, and the PG's 16 bytes, load whatever the field's length
+		// (load_value_dword / load_value_guid).
+		// [orig: Nwu_HandleServerHello @0x626d20 - CI @0x626F63, DE @0x62700A, UT @0x62702B, PG
+		//  @0x62707A..0x627097, HK @0x627146, TZB @0x6271F7, SF @0x627218, P1..P8
+		//  @0x627239..0x627320, NP @0x627341, MP @0x627362, NPW @0x627383, NC @0x6273A4, RIP
+		//  @0x6273C5, RPN @0x6273E6, EIP @0x6274C8, EPN @0x6274E6, ET @0x627504]
+		if      (strutil::iequals(name, "CI"))   out.ci   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "CO"))   out.co   = strip_nul(value, size);
 		else if (strutil::iequals(name, "AP"))   out.ap   = strip_nul(value, size);
 		else if (strutil::iequals(name, "BDAT")) out.bdat = strip_nul(value, size);
-		else if (strutil::iequals(name, "DE"))   out.de   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "UT"))   out.ut   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "DE"))   out.de   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "UT"))   out.ut   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "PN"))   out.pn   = strip_nul(value, size);
-		else if (strutil::iequals(name, "PG") && size == 16) std::memcpy(out.pg.data(), value, 16);
+		else if (strutil::iequals(name, "PG"))   load_value_guid(value, end, out.pg);
 		else if (strutil::iequals(name, "PV1"))  out.pv1  = strip_nul(value, size);
 		else if (strutil::iequals(name, "PV2"))  out.pv2  = strip_nul(value, size);
 		else if (strutil::iequals(name, "PV3"))  out.pv3  = strip_nul(value, size);
-		else if (strutil::iequals(name, "HK")) { out.hk = read_u32_le(value, size); saw_hk = true; }
+		else if (strutil::iequals(name, "HK")) { out.hk = load_value_dword(value, end); saw_hk = true; }
 		else if (strutil::iequals(name, "SN"))   out.sn   = strip_nul(value, size);
 		else if (strutil::iequals(name, "CN")) { out.cn = strip_nul(value, size); out.locale_block = true; }
 		else if (strutil::iequals(name, "LNG")) { out.lng = strip_nul(value, size); out.locale_block = true; }
-		else if (strutil::iequals(name, "TZB")) { out.tzb = read_u32_le(value, size); out.locale_block = true; }
-		else if (strutil::iequals(name, "SF")) { out.sf = read_u32_le(value, size); out.is_game_server = true; }
-		else if (strutil::iequals(name, "P1"))   out.p1   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "P2"))   out.p2   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "P3"))   out.p3   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "P4"))   out.p4   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "P5"))   out.p5   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "P6"))   out.p6   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "P7"))   out.p7   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "P8"))   out.p8   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "NP"))   out.np   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "MP"))   out.mp   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "NPW"))  out.npw  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "NC"))   out.nc   = read_u32_le(value, size);
-		else if (strutil::iequals(name, "RIP"))  out.rip  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "RPN"))  out.rpn  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "TZB")) { out.tzb = load_value_dword(value, end); out.locale_block = true; }
+		else if (strutil::iequals(name, "SF")) { out.sf = load_value_dword(value, end); out.is_game_server = true; }
+		else if (strutil::iequals(name, "P1"))   out.p1   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "P2"))   out.p2   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "P3"))   out.p3   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "P4"))   out.p4   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "P5"))   out.p5   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "P6"))   out.p6   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "P7"))   out.p7   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "P8"))   out.p8   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "NP"))   out.np   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "MP"))   out.mp   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "NPW"))  out.npw  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "NC"))   out.nc   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "RIP"))  out.rip  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "RPN"))  out.rpn  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "SUS1")) out.sus1 = strip_nul(value, size);
 		else if (strutil::iequals(name, "SUS2")) out.sus2 = strip_nul(value, size);
 		else if (strutil::iequals(name, "SUS3")) out.sus3 = strip_nul(value, size);
 		else if (strutil::iequals(name, "SUS4")) out.sus4 = strip_nul(value, size);
-		else if (strutil::iequals(name, "EIP"))  out.eip  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "EPN"))  out.epn  = read_u32_le(value, size);
-		else if (strutil::iequals(name, "ET"))   out.et   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "EIP"))  out.eip  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "EPN"))  out.epn  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "ET"))   out.et   = load_value_dword(value, end);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}

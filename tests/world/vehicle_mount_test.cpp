@@ -19,6 +19,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_mount.h>
+#include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading
 #include <runtime/world/mounted_pose.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_part_anim.h>
@@ -211,6 +212,7 @@ void test_usegun_attach_presnaps_local_look() {
 
     Entity gun;
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.health = 100;
     gun.alive = true;
     gun.yaw = 35;
@@ -239,7 +241,7 @@ void test_usegun_attach_presnaps_local_look() {
     body.inf.target_heading = body.heading;
     body.inf.look_pitch = 0x12345678;
 
-    CHECK(w.vehicles.process_attach(player_h, gun_h, 6));
+    CHECK(w.vehicles.request_attach(player_h, {gun_h, 0, SeatType::Gunner}));
     const int16_t expected_yaw = 23; // the carried frame: vehicle yaw 35 - UseGun offset 12
     // The unmoved gun's spawn heading ((55 << 16) / 360) << 16 = 656146432 less
     // 0x0400 << 16. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
@@ -256,6 +258,107 @@ void test_usegun_attach_presnaps_local_look() {
     CHECK(body.inf.body_heading == 799312009);
 }
 
+// The attach yaw snap is the request's alone (D-NET-421). A request turns the
+// requester to the seat whenever the carrier's bone lookup answers, ahead of
+// every gate of the process, so a request the process refuses has turned the
+// body all the same; the process itself (the C2S 0x26 handler, the vehicle
+// spawn, a client's decoded relation) writes no yaw.
+// [orig: Entity_RequestVehicleAttach @0x4364A0 -- the lookup @0x436540..0x43654a,
+//  the stores @0x43655F..0x4365CE, then the process @0x4365E4; the 0x26 handler
+//  NapiNPServerMsg_HandleVehicleAttach @0x5023ED / @0x502418 and a client's
+//  Entity_TryAttachOrDetach @0x4366E8 reach Entity_ProcessVehicleAttach directly;
+//  the AI board's request Entity_UpdateInfantryAI @0x4BBDF2 (EntityCommands::mount); the
+//  enemy refusal Entity_ProcessVehicleAttach @0x435b40]
+void test_attach_yaw_snaps_at_the_request_alone() {
+	constexpr int32_t kStart = 0x10000000;
+	struct Npc {
+		EntityHandle handle;
+		AiEntity *body = nullptr;
+	};
+	const auto stage = [&](Rig &r) {
+		for (Seat &seat : r.veh().seats) seat.yaw_offset = 30;
+		Entity npc;
+		npc.kind = EntityKind::Organic;
+		npc.net_id = 50;
+		npc.health = 100;
+		npc.alive = true;
+		npc.team = 1;
+		npc.position = r.player().position;
+		Npc out;
+		out.handle = r.w.registry.spawn(0, npc);
+		out.body = r.sys.at(r.sys.attach(out.handle));
+		out.body->inf.active = true;
+		out.body->health = 100;
+		out.body->heading = kStart;
+		return out;
+	};
+	// Every seat here turns 30 degrees off the carrier's frame.
+	const auto seat_heading = [](const Rig &r) {
+		return opennova::io::bam_sub(emplaced_gun_frame_heading(
+				*r.w.registry.get(r.veh_h)), bam_from_degrees_wrapped(30));
+	};
+	{
+		// The AI board's mount is a request: a free seat turns and seats the body.
+		Rig r;
+		const Npc npc = stage(r);
+		CHECK(r.w.commands.mount(50, 11));
+		CHECK(r.w.registry.get(npc.handle)->mount_target == r.veh_h);
+		CHECK(npc.body->heading == seat_heading(r));
+	}
+	{
+		// (a) The process refuses a carrier an enemy rides, after the request
+		// turned the body.
+		Rig r;
+		const Npc npc = stage(r);
+		Entity enemy;
+		enemy.kind = EntityKind::Organic;
+		enemy.health = 100;
+		enemy.alive = true;
+		enemy.team = 2;
+		enemy.mounted = true;
+		enemy.mount_target = r.veh_h;
+		r.w.registry.spawn(0, enemy);
+		CHECK(!r.w.commands.mount(50, 11));
+		CHECK(!r.w.registry.get(npc.handle)->mounted);
+		CHECK(npc.body->heading == seat_heading(r));
+	}
+	{
+		// The request writes no yaw where the carrier's bone lookup fails.
+		struct NoSeatBone final : IPoseProvider {
+			bool resolve_seat_bone(World &, const Entity &, int) override { return false; }
+		} no_bone;
+		Rig r;
+		const Npc npc = stage(r);
+		r.w.pose_provider = &no_bone;
+		CHECK(r.w.commands.mount(50, 11));
+		CHECK(npc.body->heading == kStart);
+	}
+	{
+		// (b) The C2S 0x26 process seats the body and turns nothing.
+		Rig r;
+		const Npc npc = stage(r);
+		CHECK(r.w.vehicles.process_attach(npc.handle, r.veh_h, 2));
+		CHECK(r.w.registry.get(npc.handle)->mount_target == r.veh_h);
+		CHECK(npc.body->heading == kStart);
+	}
+	{
+		// (c) A client's decoded relation seats its own player and leaves the
+		// body heading and the look target where they were.
+		Rig r;
+		AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+		body.inf.active = true;
+		body.inf.is_local_player = true;
+		body.health = 150;
+		body.heading = kStart;
+		body.inf.target_heading = kStart;
+		r.veh().seats[1].yaw_offset = 30;
+		CHECK(r.w.vehicles.apply_confirmed_mount(r.player_h, r.veh_h, 2));
+		CHECK(r.player().mount_target == r.veh_h);
+		CHECK(body.heading == kStart);
+		CHECK(body.inf.target_heading == kStart);
+	}
+}
+
 // A remote player's LOOK is still independent in either vehicle-control seat.
 // The authority motor consumes Entity::yaw as the mouse-steer target, while the
 // carried body frame remains owned by the seat. The post-motor refresh must keep
@@ -270,6 +373,7 @@ void test_remote_player_control_seat_preserves_wire_look() {
 
         Entity vehicle;
         vehicle.kind = EntityKind::Item;
+        vehicle.has_item_def = true; // seats need the def (D-NET-422)
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         vehicle.item_attrib = kItemAttribPlayerControl;
         vehicle.position = {10.0f, 20.0f, 30.0f};
@@ -340,6 +444,7 @@ void test_live_pose_provider_and_static_fallback() {
         Entity vehicle;
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
+        vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.position = {10.0f, 20.0f, 30.0f};
         vehicle.yaw = 90;
         vehicle.pitch = 4;
@@ -380,6 +485,7 @@ void test_live_pose_provider_and_static_fallback() {
         Entity vehicle;
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
+        vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.health = 100;
         vehicle.alive = true;
         Seat seat;
@@ -439,6 +545,7 @@ void test_live_pose_provider_and_static_fallback() {
         Entity vehicle;
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
+        vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.yaw = 90;
         vehicle.health = 100;
         vehicle.alive = true;
@@ -656,6 +763,7 @@ void test_best_seat_walks_vehicle_children() {
 
     Entity root;
     root.kind = EntityKind::Item;
+    root.has_item_def = true; // seats need the def (D-NET-422)
     root.health = 100;
     root.alive = true;
     Seat passenger;
@@ -666,6 +774,7 @@ void test_best_seat_walks_vehicle_children() {
 
     Entity child;
     child.kind = EntityKind::Item;
+    child.has_item_def = true; // seats need the def (D-NET-422)
     child.health = 100;
     child.alive = true;
     child.ground_target = root_h;
@@ -794,6 +903,7 @@ void test_post_epoch_player_spawn_discovers_nearby_seat_immediately() {
 
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
+    vehicle.has_item_def = true; // seats need the def (D-NET-422)
     vehicle.position = {10.0f, 20.0f, 0.0f};
     vehicle.health = 100;
     vehicle.alive = true;
@@ -835,6 +945,7 @@ void test_restore_refreshes_completed_candidate_epoch() {
 
     Entity other;
     other.kind = EntityKind::Item;
+    other.has_item_def = true; // seats need the def (D-NET-422)
     other.position = {200.0f, 200.0f, 10.0f};
     other.health = 100;
     other.alive = true;
@@ -1123,6 +1234,150 @@ void test_enemy_on_carried_gun_blocks_root_and_sibling() {
 	CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
 }
 
+// A carrier with no ItemDef takes no rider (D-NET-422). The process refuses
+// every seat kind of it, as it refuses a dead carrier or requester, before
+// anything: a requester riding elsewhere keeps its seat, where a refused
+// control seat used to leave it detached. The USE scan, the labels and the
+// best-seat search offer none of its seats.
+// [orig: Entity_ProcessVehicleAttach @0x435ae5..0x435b01 (the ItemDef
+//  @0x435aed..0x435af1), ahead of the detach @0x435bce;
+//  Entity_FindNearestSeatOrArmory @0x435e35..0x435e3a;
+//  HUD_DrawVehicleSeatAndArmoryLabels @0x5a335a..0x5a335f;
+//  Entity_FindBestSeatSlot @0x4352d3..0x4352d7]
+void test_carrier_without_a_def_takes_no_rider() {
+	{
+		Rig r;
+		Seat gun;
+		gun.type = SeatType::Gunner;
+		gun.bone_index = 3;
+		gun.source_name = "UseGun";
+		gun.seat_local = {0.0f, 0.0f, 2.0f};
+		r.veh().seats.push_back(gun);
+		Entity ride;
+		ride.kind = EntityKind::Item;
+		ride.has_item_def = true;
+		ride.position = {140.0f, 200.0f, 10.0f};
+		ride.health = 500;
+		ride.health_max = 500;
+		ride.alive = true;
+		Seat sit;
+		sit.type = SeatType::Passenger;
+		sit.bone_index = 2;
+		sit.source_name = "sitex00";
+		ride.seats.push_back(sit);
+		const EntityHandle ride_h = r.w.registry.spawn(1, ride);
+		CHECK(r.w.vehicles.process_attach(r.player_h, ride_h, 2));
+		const auto still_riding = [&]() {
+			const Entity &p = r.player();
+			CHECK(p.mounted && p.mount_target == ride_h && p.mount_seat == 0);
+			CHECK(r.w.registry.get(ride_h)->seats[0].occupant == r.player_h);
+			for (const Seat &s : r.veh().seats) CHECK(!s.occupant.valid());
+			CHECK(!r.veh().primary_occupant.valid());
+			CHECK(r.w.out.tip_events.empty()); // no boarding, no detach
+		};
+		r.w.out.tip_events.clear();
+		r.veh().has_item_def = false;
+		for (const uint8_t bone : {uint8_t(2), uint8_t(3), uint8_t(1)}) { // sitex, UseGun, ctrlx
+			CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, bone));
+			still_riding();
+			CHECK(!r.w.vehicles.apply_confirmed_mount(r.player_h, r.veh_h, bone));
+			still_riding();
+		}
+		// The request paths (the USE scan, the numbered seat, the script mount,
+		// the AI board) reach the same process.
+		CHECK(!r.w.vehicles.attach_to_seat(r.player_h, {r.veh_h, 1, SeatType::Passenger}));
+		still_riding();
+
+		// A dead carrier or a dead requester: Flags & 2 alone refuses.
+		r.veh().has_item_def = true;
+		r.veh().flags |= kEntityFlagDead;
+		CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+		still_riding();
+		r.veh().flags &= ~kEntityFlagDead;
+		r.player().flags |= kEntityFlagDead;
+		CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+		still_riding();
+		r.player().flags &= ~kEntityFlagDead;
+		CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+		CHECK(r.player().mount_target == r.veh_h && r.veh().seats[1].occupant == r.player_h);
+		CHECK(!r.w.registry.get(ride_h)->seats[0].occupant.valid());
+	}
+	{
+		// On foot facing +y from +2x, the truck's control seat inside the cone
+		// (test_toggle_nearest_seat), and a def-less carrier's sitex seat dead
+		// ahead at 1.5 u, which would outscore it: neither the scan nor the
+		// labels offer it, and the best-seat search finds no seat on it.
+		Rig r(2.0f);
+		Entity bare;
+		bare.kind = EntityKind::Item;
+		bare.position = {102.0f, 201.5f, 10.0f};
+		bare.health = 500;
+		bare.health_max = 500;
+		bare.alive = true;
+		Seat sit;
+		sit.type = SeatType::Passenger;
+		sit.bone_index = 1;
+		sit.source_name = "sitex00";
+		sit.seat_local = {0.0f, 0.0f, -0.1875f}; // eye level once the scan's bias lands
+		bare.seats.push_back(sit);
+		const EntityHandle bare_h = r.w.registry.spawn(1, bare);
+		VehicleSeatSelection hit;
+		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+		CHECK(hit.vehicle == r.veh_h && hit.seat_index == 0);
+		std::vector<AttachLabel> labels;
+		r.w.vehicles.collect_attach_labels(r.player(), false, false, labels);
+		CHECK(labels.size() == 2);
+		for (const AttachLabel &l : labels) CHECK(l.entity == r.veh_h);
+		CHECK(!find_best_vehicle_seat(r.w, bare_h, r.player_h, hit));
+		// With its def the same seat wins the scan.
+		r.w.registry.get(bare_h)->has_item_def = true;
+		CHECK(r.w.vehicles.find_nearest_free_seat(r.player(), hit, false));
+		CHECK(hit.vehicle == bare_h);
+		CHECK(find_best_vehicle_seat(r.w, bare_h, r.player_h, hit));
+		r.w.registry.get(bare_h)->has_item_def = false;
+		CHECK(r.w.vehicles.player_toggle_mount(r.player_h));
+		CHECK(r.player().mount_target == r.veh_h);
+	}
+	{
+		// The best-seat search passes over a def-less child whose UseGun seat
+		// outweighs the root's sitex seat (0x20000 against 0x200000).
+		World w;
+		w.registry.configure_pool(0, 4);
+		w.registry.configure_pool(1, 4);
+		Entity root;
+		root.kind = EntityKind::Item;
+		root.has_item_def = true;
+		root.health = 100;
+		root.alive = true;
+		Seat sit;
+		sit.type = SeatType::Passenger;
+		sit.bone_index = 1;
+		root.seats.push_back(sit);
+		const EntityHandle root_h = w.registry.spawn(1, root);
+		Entity child;
+		child.kind = EntityKind::Item;
+		child.health = 100;
+		child.alive = true;
+		child.ground_target = root_h;
+		Seat gun;
+		gun.type = SeatType::Gunner;
+		gun.bone_index = 2;
+		child.seats.push_back(gun);
+		const EntityHandle child_h = w.registry.spawn(1, child);
+		Entity player;
+		player.kind = EntityKind::Organic;
+		player.health = 100;
+		player.alive = true;
+		const EntityHandle player_h = w.registry.spawn(0, player);
+		VehicleSeatSelection pick;
+		CHECK(find_best_vehicle_seat(w, root_h, player_h, pick));
+		CHECK(pick.vehicle == root_h && pick.type == SeatType::Passenger);
+		w.registry.get(child_h)->has_item_def = true;
+		CHECK(find_best_vehicle_seat(w, root_h, player_h, pick));
+		CHECK(pick.vehicle == child_h && pick.type == SeatType::Gunner);
+	}
+}
+
 void test_vehicle_admission_stationary_threshold_and_deck() {
 	Rig r;
 	r.veh().spawn_position = {};
@@ -1376,6 +1631,7 @@ void test_bms_mount_predicates() {
     gun.net_id = 500;
     gun.bms_id = 500;
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.item_id = 1800;
     gun.item_type_index = 7;
     gun.position = r.veh().position;
@@ -2895,6 +3151,7 @@ void test_attach_labels_can_fire_gate() {
     Entity veh2;
     veh2.net_id = 12;
     veh2.kind = EntityKind::Item;
+    veh2.has_item_def = true; // seats need the def (D-NET-422)
     veh2.item_id = 1295;
     veh2.position = {103.0f, 200.0f, 10.0f}; // ~2 u from the player at 101,200
     veh2.health = 500;
@@ -2930,6 +3187,7 @@ void test_attach_labels_armory_mode() {
     Entity crate;
     crate.net_id = 21;
     crate.kind = EntityKind::Item;
+    crate.has_item_def = true; // armory points need the def (D-NET-422)
     crate.item_id = 1125; // "Armory Version #1"
     crate.position = {99.0f, 199.0f, 10.0f};
     crate.health = 100;
@@ -2977,6 +3235,7 @@ void test_attach_labels_build_enemy_occupancy_once() {
     for (int i = 0; i < 32; ++i) {
         Entity vehicle;
         vehicle.kind = EntityKind::Item;
+        vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.position = {
             100.1f + 0.05f * static_cast<float>(i), 200.0f, 10.0f};
         vehicle.health = 100;
@@ -3737,7 +3996,9 @@ static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
         vehicle.kind = EntityKind::Item;
         vehicle.health = 100;
         vehicle.alive = true;
-        vehicle.has_item_def = item_def;
+        // The attach needs the def (D-NET-422); a def-less carrier loses it
+        // after the boarding below.
+        vehicle.has_item_def = true;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         vehicle.item_attrib = kItemAttribPlayerControl;
         vehicle.ground_target = deck_h;
@@ -3761,6 +4022,7 @@ static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
         body->slot.f[37] = order;
         body->slot.f[38] = target_ssn;
         CHECK(w.vehicles.process_attach(occupant_h, vehicle_h, 7));
+        w.registry.get(vehicle_h)->has_item_def = item_def;
         w.ai.is_authority = authority;
         w.ai.tick_infantry(*body, w, 1);
         const Entity *occ = w.registry.get(occupant_h);
@@ -3885,6 +4147,8 @@ int main() {
     test_toggle_dismount_and_swap();
 	test_scan_uses_live_eye_offset();
 	test_enemy_on_carried_gun_blocks_root_and_sibling();
+	test_carrier_without_a_def_takes_no_rider();
+	test_attach_yaw_snaps_at_the_request_alone();
 	test_vehicle_admission_stationary_threshold_and_deck();
 	test_seated_board_any_upgrades_on_64_tick_phase();
 	test_ai_authored_entry_claim_and_stages();

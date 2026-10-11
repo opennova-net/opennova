@@ -1357,6 +1357,7 @@ static void test_mounted_gunner_acquires_and_fires() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90; // engine heading 0: faces the enemy on +X.
@@ -1463,6 +1464,8 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
 
         Entity gun{};
         gun.kind = EntityKind::Item;
+        gun.has_item_def = true; // the boarding needs the def (D-NET-422); the fixture,
+                                 // built around a def-less gun, drops it below
         gun.team = 1;
         gun.net_id = 0x31;
         gun.yaw = 90;
@@ -1504,6 +1507,7 @@ static void test_mounted_gunner_fires_from_the_slot_barrel() {
         configure_rifleman(npc, 0x11, 1);
         npc.profile.organic.ammo.fill(0);
         CHECK(w->commands.mount(0x11, 0x31));
+        w->registry.get(points.gun)->has_item_def = false; // the def-less gun past boarding
         CHECK(w->registry.get(points.gun)->primary_weapon_slot.clip == -1);
 
         bool fired = false;
@@ -1897,6 +1901,8 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // the boarding needs the def (D-NET-422); the fixture,
+                             // built around a def-less gun, drops it below
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -1928,6 +1934,7 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     npc.inf.aim_valid = true;
     npc.inf.aim_heading = 0;
     CHECK(w->commands.mount(0x11, 0x31));
+    w->registry.get(w->registry.find_by_net_id(0x31))->has_item_def = false; // the def-less gun past boarding
 
     // Retail halves dz before the 3-D range test: sqrt(1^2 + (10/2)^2) < 6.
     // [orig: Entity_UpdateInfantryAI sar dz,1 @0x4bf515]
@@ -1936,8 +1943,9 @@ static void test_mounted_fire_uses_retail_range_and_spatial_stagger() {
     CHECK(gun_live != nullptr);
     CHECK(gun_live->primary_weapon_slot.next == weapon_action::kFire);
     CHECK(w->out.rounds.count == 0);
-    // The emplacement's def authors weapon userpoints (attrib 0x20 + a resolved
-    // slot-0 fire byte); the provider returns the posed point and the barrel
+    // The emplacement authors weapon userpoints (attrib 0x20 + a resolved
+    // slot-0 fire byte: its def's in retail, the entity's fields on this
+    // def-less fixture gun); the provider returns the posed point and the barrel
     // bone's euler, which the round leaves along.
     // [orig: Entity_CalcWeaponFirePosition parentSlot 3 @0x4dc7e6;
     //  Entity_FireWeaponAndSendPacket copies out[0..2] + out[3]/[4]]
@@ -2074,6 +2082,7 @@ static void test_weapon_walk_visits_pool0_in_slot_order() {
     const auto spawn_gun = [&](uint16_t net_id) {
         Entity gun{};
         gun.kind = EntityKind::Item;
+        gun.has_item_def = true; // seats need the def (D-NET-422)
         gun.team = 1;
         gun.net_id = net_id;
         gun.yaw = 90;
@@ -2128,6 +2137,7 @@ static void test_mounted_request_copies_the_parent_adm_byte() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -2191,6 +2201,7 @@ static void test_mounted_gunner_runs_the_anim_event_fire_block() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -2257,6 +2268,7 @@ static void test_mounted_request_runs_for_a_passenger() {
 
         Entity truck{};
         truck.kind = EntityKind::Item;
+        truck.has_item_def = true; // seats need the def (D-NET-422)
         truck.team = 1;
         truck.net_id = 0x31;
         truck.yaw = 90;
@@ -2320,6 +2332,7 @@ static void test_mounted_request_copies_the_parents_live_byte() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -2370,6 +2383,7 @@ static void test_mounted_look_traverses_before_fire_request() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.team = 1;
     gun.net_id = 0x31;
     gun.yaw = 90;
@@ -2424,6 +2438,7 @@ static void test_mounted_gunner_dismounts_into_death_animation() {
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // seats need the def (D-NET-422)
     gun.net_id = 0x31;
     Seat seat{};
     seat.type = SeatType::Gunner;
@@ -2481,11 +2496,13 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
 
     Entity gun{};
     gun.kind = EntityKind::Item;
+    gun.has_item_def = true; // the boarding needs the def (D-NET-422); the
+                             // test's subject, a def-less parent, drops it below
     gun.net_id = 0x20;
     Seat seat{};
     seat.type = SeatType::Gunner;
     gun.seats.push_back(seat);
-    w->registry.spawn(1, gun);
+    const EntityHandle gun_h = w->registry.spawn(1, gun);
 
     Entity npc_seed{};
     npc_seed.kind = EntityKind::Organic;
@@ -2501,6 +2518,7 @@ static void test_mounted_collision_tail_uses_retail_eight_tick_phase_without_mod
     AiEntity &npc = *ai.at(ai.attach(npc_h));
     configure_rifleman(npc, 0x10, 1);
     CHECK(w->commands.mount(0x10, 0x20));
+    w->registry.get(gun_h)->has_item_def = false; // the def-less gun past boarding
     CHECK(collision.instance_count() == 0);
 
     Entity *npc_live = w->registry.get(npc_h);

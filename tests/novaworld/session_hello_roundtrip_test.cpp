@@ -9,9 +9,11 @@
 // having to launch retail every iteration.
 
 #include <net/npwire/session_hello.h>
+#include <net/npwire/session_ping.h>
 
 #include "../common/test_expect.h"
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -397,6 +399,160 @@ int test_pg_of_any_length_loads_sixteen_bytes() {
 	return 0;
 }
 
+// The 0x41 / 0x42 string fields copy from the value pointer up to the first
+// NUL, at most their buffer less one (NVS 127, PW 511, the rest 63), whatever
+// the field's length: an inner NUL ends the string, a value without its NUL
+// runs on into the next field's name and stops at that name's NUL, and the last
+// field's copy stops at the datagram's end (zero past it, D-NET-410).
+// [orig: Napi_CopyString @0x617E10; NapiNPProtocol_HandleClientHello @0x6213B0 -
+//  NVS @0x621570, CO @0x62159E, PN @0x62163B, PV1 @0x62169F;
+//  NapiNPProtocol_HandleClientJoin @0x62B750 - NVS @0x62B933, CO @0x62B961, PN
+//  @0x62BA01, PV1 @0x62BA68, NA @0x62BB55, PW @0x62BB86, SCRK @0x62BC4B]
+int test_hello_and_auth_strings_copy_to_the_first_nul() {
+	const ClientHello retail = opennova::make_jointoperations_client_hello(3);
+	const std::vector<uint8_t> guid(retail.pg.begin(), retail.pg.end());
+	const auto bare = [](const std::string &s) { return std::vector<uint8_t>(s.begin(), s.end()); };
+
+	// An inner NUL ends PN and PV1, so the identity holds in the 0x41 and the 0x42.
+	std::vector<uint8_t> inner;
+	append_field(inner, "NVS", cstr_value(retail.nvs));
+	std::vector<uint8_t> pn = cstr_value(retail.pn);
+	pn.push_back('X');
+	pn.push_back(0);
+	append_field(inner, "PN", pn);
+	append_field(inner, "PG", guid);
+	std::vector<uint8_t> pv1 = cstr_value(retail.pv1);
+	pv1.push_back('Y');
+	append_field(inner, "PV1", pv1);
+	ClientHello hello;
+	TEST_EXPECT(parse_client_hello(inner.data(), inner.size(), hello));
+	TEST_EXPECT(hello.pn == retail.pn && hello.pv1 == retail.pv1);
+	TEST_EXPECT(opennova::matches_jointoperations_identity(hello));
+	ClientAuth auth;
+	TEST_EXPECT(parse_client_auth(inner.data(), inner.size(), auth));
+	TEST_EXPECT(auth.pn == retail.pn && auth.pv1 == retail.pv1);
+	TEST_EXPECT(opennova::matches_jointoperations_identity(auth));
+
+	// A value without its NUL runs on into the next field's name; the last
+	// field's stops at the datagram's end.
+	std::vector<uint8_t> run_on;
+	append_field(run_on, "CO", bare("Logic"));
+	append_field(run_on, "AP", cstr_value("Jointops.exe"));
+	append_field(run_on, "NA", bare("Player"));
+	append_field(run_on, "PW", cstr_value("pw"));
+	append_field(run_on, "SCRK", bare("KEY"));
+	TEST_EXPECT(parse_client_hello(run_on.data(), run_on.size(), hello));
+	TEST_EXPECT(hello.co == "LogicAP" && hello.ap == "Jointops.exe");
+	TEST_EXPECT(parse_client_auth(run_on.data(), run_on.size(), auth));
+	TEST_EXPECT(auth.co == "LogicAP" && auth.na == "PlayerPW" && auth.pw == "pw");
+	TEST_EXPECT(auth.scrk == "KEY");
+
+	// The buffers: NVS keeps 127, PW 511, CO / NA / SCRK 63.
+	std::vector<uint8_t> caps;
+	append_field(caps, "NVS", cstr_value(std::string(200, 'v')));
+	append_field(caps, "CO", cstr_value(std::string(100, 'c')));
+	append_field(caps, "NA", cstr_value(std::string(100, 'n')));
+	append_field(caps, "PW", cstr_value(std::string(600, 'p')));
+	append_field(caps, "SCRK", cstr_value(std::string(100, 's')));
+	TEST_EXPECT(parse_client_hello(caps.data(), caps.size(), hello));
+	TEST_EXPECT(hello.nvs == std::string(127, 'v') && hello.co == std::string(63, 'c'));
+	TEST_EXPECT(parse_client_auth(caps.data(), caps.size(), auth));
+	TEST_EXPECT(auth.nvs == std::string(127, 'v') && auth.co == std::string(63, 'c'));
+	TEST_EXPECT(auth.na == std::string(63, 'n') && auth.pw == std::string(511, 'p'));
+	TEST_EXPECT(auth.scrk == std::string(63, 's'));
+	return 0;
+}
+
+// The client-side readers load each fixed-width field at its value pointer
+// whatever its TLV length, as the 0x41 / 0x42 handlers do: a short value takes
+// the bytes that follow it in the body, zero past its end (D-NET-410).
+// [orig: Nwu_HandleServerHello @0x626D20 - CI @0x626F63, PG @0x62707A..0x627097,
+//  HK @0x627146, TZB @0x6271F7, SF @0x627218, NP @0x627341, ET @0x627504;
+//  NapiNP_HandleServerJoinResponse @0x629840 - CI @0x629A34, CK @0x629A76, CR
+//  @0x629A97, the CS loads @0x629B4C..0x629B55 and tests @0x629B4F..0x629B6F, RIP
+//  @0x629C3E, RCNT @0x629C7A; CNapiNPConnection_HandleDescriptionPacket @0x621AE0
+//  - DC @0x621BCB, DP1 @0x621BEC, DPC @0x621C51; Nwu_HandlePing @0x623A70 - WR
+//  @0x623C0F, MS @0x623C2A]
+int test_client_side_readers_load_short_fields_whole() {
+	// 0x81: a two-byte CI takes the next name "HK"; a 15-byte PG takes the 'S'
+	// of "SN"; an empty TZB takes "SF", its NUL and SF's size byte; a one-byte
+	// SF takes "NP" and its NUL; the last field, a one-byte ET, reads zero past
+	// the end.
+	const std::array<uint8_t, 16> guid = opennova::jointoperations_protocol_guid();
+	std::vector<uint8_t> sh;
+	append_field(sh, "CI", {0x09, 0x00});
+	append_field(sh, "HK", {0x44, 0x33, 0x22, 0x11});
+	append_field(sh, "PG", std::vector<uint8_t>(guid.begin(), guid.begin() + 15));
+	append_field(sh, "SN", cstr_value("Host"));
+	append_field(sh, "TZB", {});
+	append_field(sh, "SF", {0x00});
+	append_field(sh, "NP", {0x05, 0x00, 0x00, 0x00});
+	append_field(sh, "ET", {0x07});
+	ServerHello hello;
+	TEST_EXPECT(parse_server_hello(sh.data(), sh.size(), hello));
+	TEST_EXPECT(hello.ci == (0x09u | (uint32_t('H') << 16) | (uint32_t('K') << 24)));
+	TEST_EXPECT(hello.hk == 0x11223344u && hello.sn == "Host");
+	std::array<uint8_t, 16> short_pg = guid;
+	short_pg[15] = 'S';
+	TEST_EXPECT(hello.pg == short_pg);
+	TEST_EXPECT(hello.tzb == (uint32_t('S') | (uint32_t('F') << 8) | (0x01u << 24)));
+	TEST_EXPECT(hello.sf == ((uint32_t('N') << 8) | (uint32_t('P') << 16)));
+	TEST_EXPECT(hello.np == 5u && hello.et == 7u);
+
+	// 0x82: a one-byte CI takes "CK"; a two-byte CS takes its dword from the
+	// next name, "RIP\0"; a direction byte of 2 files the client block; an index
+	// of 15 is dropped; a seven-byte CS loads its first six; the last field, a
+	// one-byte RCNT, reads zero past the end.
+	std::vector<uint8_t> sa;
+	append_field(sa, "CI", {0x04});
+	append_field(sa, "CK", {0xEF, 0xBE, 0xAD, 0xDE});
+	append_field(sa, "CR", {0x01, 0x00, 0x00, 0x00});
+	append_field(sa, "CS", {0x01, 0x0D});
+	append_field(sa, "RIP", {0x01, 0x02, 0x03, 0x04});
+	append_field(sa, "CS", {0x02, 0x00, 0x10, 0x27, 0x00, 0x00});
+	append_field(sa, "CS", {0x01, 0x0F, 0x01, 0x00, 0x00, 0x00});
+	append_field(sa, "CS", {0x00, 0x05, 0xE8, 0x03, 0x00, 0x00, 0xFF});
+	append_field(sa, "SCRK", cstr_value("KEY"));
+	append_field(sa, "RCNT", {0x03});
+	ServerAuth auth;
+	TEST_EXPECT(parse_server_auth(sa.data(), sa.size(), auth));
+	TEST_EXPECT(auth.ci == (0x04u | (uint32_t('C') << 8) | (uint32_t('K') << 16)));
+	TEST_EXPECT(auth.ck == 0xDEADBEEFu && auth.cr == 1u && auth.rip == 0x04030201u);
+	TEST_EXPECT(auth.client_cs.size() == 2 && auth.server_cs.size() == 1);
+	TEST_EXPECT(auth.client_cs[0].field_index == 13 &&
+			auth.client_cs[0].value ==
+					(uint32_t('R') | (uint32_t('I') << 8) | (uint32_t('P') << 16)));
+	TEST_EXPECT(auth.client_cs[1].field_index == 0 && auth.client_cs[1].value == 10000u);
+	TEST_EXPECT(auth.server_cs[0].field_index == 5 && auth.server_cs[0].value == 1000u);
+	TEST_EXPECT(auth.scrk == "KEY" && auth.rcnt == 3u);
+
+	// The description record (and a goodbye's, the same walk): a two-byte DC
+	// takes "DP"; the last field, a one-byte DPC, reads zero past the end.
+	std::vector<uint8_t> desc;
+	append_field(desc, "DC", {0x02, 0x00});
+	append_field(desc, "DP1", {0x01, 0x00, 0x00, 0x00});
+	append_field(desc, "DPC", {0x21});
+	opennova::DisconnectEvent event;
+	TEST_EXPECT(opennova::parse_disconnect_event(desc.data(), desc.size(), event));
+	TEST_EXPECT(event.dc == (0x02u | (uint32_t('D') << 16) | (uint32_t('P') << 24)));
+	TEST_EXPECT(event.dp1 == 1u && event.dpc == 0x21u);
+
+	// The ping: an empty WR takes the 'M' of "MS" (a reply is wanted); the last
+	// field, a two-byte MS, reads zero past the end. An empty last WR reads zero.
+	std::vector<uint8_t> ping = {0x78, 0x56, 0x34, 0x12};
+	append_field(ping, "WR", {});
+	append_field(ping, "MS", {0x34, 0x12});
+	opennova::SessionPingBody body;
+	TEST_EXPECT(opennova::parse_session_ping_body(ping.data(), ping.size(), body));
+	TEST_EXPECT(body.receiver_local_key == 0x12345678u && body.wants_reply &&
+			body.timestamp_ms == 0x1234u);
+	std::vector<uint8_t> last_wr = {0x78, 0x56, 0x34, 0x12};
+	append_field(last_wr, "WR", {});
+	TEST_EXPECT(opennova::parse_session_ping_body(last_wr.data(), last_wr.size(), body));
+	TEST_EXPECT(!body.wants_reply);
+	return 0;
+}
+
 int test_client_hello_tag_names_are_case_insensitive() {
 	ClientHello src;
 	src.pn = "NOVAWORLDUDP";
@@ -443,7 +599,6 @@ int test_client_auth_roundtrip() {
 }
 
 int test_client_auth_minimum_for_acceptance() {
-	// parse_client_auth requires ck != 0; everything else can be defaulted.
 	ClientAuth src;
 	src.ci = 1;
 	src.ck = 0xCAFE0001u;
@@ -453,6 +608,33 @@ int test_client_auth_minimum_for_acceptance() {
 	TEST_EXPECT(parse_client_auth(bytes.data(), bytes.size(), round));
 	TEST_EXPECT(round.ci == 1);
 	TEST_EXPECT(round.ck == 0xCAFE0001u);
+	return 0;
+}
+
+// No field is required, CK included: a 0x42 whose CK is zero (an explicit zero
+// dword, or no CK tag at all, which is how retail's builder writes a zero key)
+// parses with CK 0, the remote key retail stores without a test.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - CK @0x62BB29, stored
+//  @0x62BF7F; CNapiNPConnection_SendClientJoin @0x61fe20 gates the CK tag on
+//  nonzero]
+int test_client_auth_zero_ck_parses() {
+	ClientAuth src = opennova::make_jointoperations_client_auth(
+			1, /*client_key=*/0, 0x0FE0E112u, "ZeroKey", "SCRK");
+	const auto absent = client_auth_to_bytes(src);
+	TEST_EXPECT(!has_tlv_field(absent, "CK"));
+	ClientAuth round;
+	round.ck = 0xFFFFFFFFu;
+	TEST_EXPECT(parse_client_auth(absent.data(), absent.size(), round));
+	TEST_EXPECT(round.ck == 0 && round.na == "ZeroKey" && round.ci == 1);
+	TEST_EXPECT(opennova::matches_jointoperations_identity(round));
+
+	std::vector<uint8_t> explicit_zero;
+	append_field(explicit_zero, "CI", {0x02, 0x00, 0x00, 0x00});
+	append_field(explicit_zero, "CK", {0x00, 0x00, 0x00, 0x00});
+	round.ck = 0xFFFFFFFFu;
+	TEST_EXPECT(parse_client_auth(explicit_zero.data(), explicit_zero.size(), round));
+	TEST_EXPECT(round.ck == 0 && round.ci == 2);
+	TEST_EXPECT(!parse_client_auth(nullptr, 0, round));
 	return 0;
 }
 
@@ -641,8 +823,11 @@ int main() {
 	if (test_client_hello_short_dword_takes_the_following_bytes() != 0) return 1;
 	if (test_client_auth_short_dword_takes_the_following_bytes() != 0) return 1;
 	if (test_pg_of_any_length_loads_sixteen_bytes() != 0) return 1;
+	if (test_hello_and_auth_strings_copy_to_the_first_nul() != 0) return 1;
+	if (test_client_side_readers_load_short_fields_whole() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
+	if (test_client_auth_zero_ck_parses() != 0) return 1;
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;

@@ -159,9 +159,14 @@ GameEntitySnapshot snapshot_of(const world::Entity &e) {
 	s.euler_z = carrier_heading_bam(e);
 	s.entity_class = entity_class_of(e);
 	s.health = e.health; // §5.10 field-17 tier numerator — non-zero keeps the player alive
-	// items.def-resolved healthMax when the item-traits sweep stamped it; else the struct's
-	// class-8 player default (150) stands (see GameEntitySnapshot::health_max).
-	if (e.health_max > 0) s.health_max = e.health_max;
+	// The tier denominator is the def's signed hp word, 0 included (the classifier's guard
+	// turns it into 1): an hp-0 Player row's Health-1 body packs tier 2 (D-PWR-10)
+	// [orig: Entity_GetHealthClassification @0x4AD4E0 - entity+0x20 @0x4AD4EF, the
+	//  movsx of def+0x17C @0x4AD505]. The 0x0A loop reaches a record writer only through a
+	// def [orig: NetPacket_SerializeEntityStatesToPacket - entity+0x20 @0x50F0FD, def+356
+	// @0x50F103, the dispatch @0x50F2E2], so a def-less entity has no retail tier: it keeps
+	// a positive stamp, else the struct's class-8 player default (150).
+	if (e.has_item_def || e.health_max > 0) s.health_max = e.health_max;
 	s.player_class = player_class_for_wire(e); // field-17 low nibble (entity+0x294)
 	// Engine pitch/roll BAM (entity+0x14/+0x18): a pure degree widen — neither has the
 	// (90-x) frame inversion (that is yaw-only, D-NET-86); a seeded mover's own BAM wins

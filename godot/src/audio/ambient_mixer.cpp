@@ -1,8 +1,6 @@
 #include "audio/ambient_mixer.h"
 
 #include <godot_cpp/core/object.hpp>
-
-#include <base/io/fixed.h> // kFp16One
 #include <godot_cpp/variant/vector3.hpp>
 
 #include "simulation/simulation.h"
@@ -179,8 +177,4 @@ int AmbientMixer::emitter_layer_volume(int64_t dist_q16, int falloff_u,
 		int min_u, int vol_byte, int member_vol, int clamp_vol) {
 	return opennova::audio::emitter_layer_volume(dist_q16, falloff_u, min_u, vol_byte,
 			member_vol, clamp_vol);
-}
-
-float AmbientMixer::q16_to_float(int q16) {
-	return static_cast<float>(q16) / opennova::io::kFp16One;
 }

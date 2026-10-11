@@ -726,6 +726,7 @@ void test_seated_rider_rides_the_parent_quad() {
     w.registry.configure_pool(1, 4);
     Entity gun_seed;
     gun_seed.kind = EntityKind::Item;
+    gun_seed.has_item_def = true; // seats need the def (D-NET-422)
     gun_seed.health = 100;
     gun_seed.alive = true;
     gun_seed.emplaced_ctrl_publisher = true;

@@ -186,10 +186,9 @@ struct GameEntitySnapshot {
 	// (Player_BuildTag0CInputBody @0x42a59d, gated on entity->Health != 0) never fires. Default
 	// 100 keeps positional-only inits alive.
 	int32_t health = 100;
-	// itemDef->healthMax (itemDef+0x17C), the field-17 tier denominator. world::Entity does not
-	// carry the resolved item def yet, so the default is the class-8 player healthMax (150) — the
-	// same stopgap the 0x0A tail health uses; resolving per-item healthMax from items.def is a
-	// tracked follow-up.
+	// itemDef->healthMax (itemDef+0x17C), the field-17 tier denominator: snapshot_of copies a
+	// def-bearing entity's word, 0 included. The default is the class-8 player healthMax (150),
+	// which only a def-less entity (no retail record writer reaches one) or a bare harness keeps.
 	int32_t health_max = 150;
 	// playerClass (entity+0x294) — the field-17 low nibble the client apply writes back to
 	// entity->playerClass and re-resolves the soldier model/itemDef from (@0x4AD580 / @0x4c1248).

@@ -22,15 +22,20 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // slot so a missing AiSystem never leaks a half-initialized 0x14B9 entity into the pool (the
     // per-tick spawn retry would otherwise orphan one every tick until the pool is exhausted).
 
-    // The def hp word (itemDef+0x17C) when the host's traits sweep resolved the Player def
-    // (class-8 Player = 150), else the spawn seed's fallback (a def hp of 0 included: D-PWR-10).
-    // health_max is stamped alongside so the §5.10 field-17 tier denominator reads the spawn
-    // value (full => tier 2 => the golden 0x28) even for a joiner spawning AFTER the
-    // mission-load sweep. (D-NET-144)
+    // The def hp word (itemDef+0x17C) once the traits sweep stored the Player row's (class-8
+    // Player = 150; 0 a real word), else, unswept, the spawn seed's fallback. health_max is
+    // stamped alongside so the §5.10 field-17 tier denominator reads the spawn value (full =>
+    // tier 2 => the golden 0x28) even for a joiner spawning AFTER the mission-load sweep.
+    // (D-NET-144)
+    const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp.has_value();
     const int32_t hp = retail_signed_i16(
-        (world.tables.player.has_item_def && world.tables.player.item_hp != 0)
-            ? world.tables.player.item_hp
-            : static_cast<int32_t>(spawn.health));
+        def_hp ? *world.tables.player.item_hp : static_cast<int32_t>(spawn.health));
+    // A row word of 0: the class init's model init marks the body indestructible, the row's
+    // two armor words -1, subType -1 and Health 1, which the ceiling-0 raises below leave
+    // (D-PWR-10). [orig: PlayerClass_InitEntity @0x4B1060 - Entity_InitFromModel called
+    //  @0x4B10C8: the healthMax test @0x40DC85, Flags |= 0x4000000 @0x40DC8E, def+0x190 /
+    //  def+0x192 = -1 @0x40DC95 / @0x40DC9F, Health = 1 @0x40DCA6, subType @0x40DCAF]
+    const bool indestructible = def_hp && hp == 0;
 
     // §5.2b steps 1-4: a pool-0 player-infantry entity (type 0x14B9), item-template health,
     // placed pose. kind=Organic so entity_wire_bridge::entity_class_of resolves it as Player.
@@ -58,6 +63,12 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.damage_reduc_max = world.tables.player.damage_reduc_max;
     seed.radar_sig = world.tables.player.radar_sig; // AI engage caps [orig: @0x40e136]
     seed.heat_sig = world.tables.player.heat_sig;
+    if (indestructible) {
+        seed.engine_flags |= kEntityFlagIndestructible;
+        seed.armor_impact = -1;
+        seed.armor_kz = -1;
+        seed.sub_type = 0xFF;
+    }
     seed.player_class = spawn.player_class; // entity+0x294 (host-diag 2026-07-01: was left 0)
     seed.position = spawn.position;
     seed.yaw = spawn.yaw;
@@ -106,6 +117,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     //  @0x43C4FE (PlayerClass_InitEntity's raise @0x4B112B), the raise @0x43C557..0x43C56B]
     const int32_t ceiling = max_health_with_difficulty(world, *ent, hp);
     if (!spawn.from_wire_record) ent->health = 0;
+    if (indestructible) ent->health = 1; // the model init, ahead of the raises [orig: @0x40DCA6]
     if (retail_signed_i16(ent->health) < ceiling) ent->health = ceiling;
 
     // §5.2b step 5: clear the entity+36 bit-1 movement gate + back up the spawn position.

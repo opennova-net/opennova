@@ -104,19 +104,31 @@ func _attachment_items_db(anchor_name: String, ambiguous: bool) -> ItemDatabase:
 	assert_not_null(file)
 	if file == null:
 		return null
-	file.store_string(TestFs.crlf("""begin "Attachment Fixture Carrier"
-  id 105004
-  graphic mount
-  primary_weapon WPN_EMPLCD50NA
-  addeweap %s 101419
-""" % anchor_name))
-	if ambiguous:
-		file.store_string("  addeweap missing 101419\r\n")
-	file.store_string("end\r\n")
+	file.store_string(TestFs.crlf(_attachment_row(anchor_name, ambiguous)))
 	file.close()
 	var db := ItemDatabase.new()
 	assert_eq(db.load(path), OK)
 	return db
+
+
+func _attachment_row(anchor_name: String, ambiguous: bool) -> String:
+	return ("""begin "Attachment Fixture Carrier"
+  id 105004
+  graphic mount
+  primary_weapon WPN_EMPLCD50NA
+  addeweap %s 101419
+""" % anchor_name) + ("  addeweap missing 101419\n" if ambiguous else "") + "end\n"
+
+
+# The carrier's row ahead of the committed table, so its traits bind beside
+# every other body's: a carrier offers its seats only with its items.def row
+# bound (D-NET-422), and the table's own 105004 row follows and loses. The row
+# alone would not do: the sweep stamps every body its table lacks Unknown, so a
+# player (row 105305) no longer falls back to Player (entity_class_of) and the
+# joiner cannot size its record.
+func _attachment_traits_db(anchor_name: String) -> ItemDatabase:
+	return ItemDbFixture.load_with(self, "coop_attachment_traits.def",
+			_attachment_row(anchor_name, false), ItemDbFixture.fixture_text(self))
 
 
 func _combat_mission() -> MissionData:
@@ -1014,6 +1026,8 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_gt(host.get_mounted_graphic_source_count(), 0,
 			"the native install resolved the carrier model source")
 	assert_true(host.load_from_mission_data(mission))
+	var traits_db := _attachment_traits_db(anchor_name)
+	host.resolve_item_traits(traits_db)
 	var def_root := ResourceRoot.new()
 	assert_eq(def_root.set_root_dir(DefFixture.directory()), OK)
 	assert_eq(host.load_weapon_table(def_root, "weapon.def"), OK)
@@ -1043,6 +1057,7 @@ func test_joiner_reconstructs_eweap_attachment_userpoint_from_decoded_gunner() -
 	assert_true(joiner.install_seat_specs_for_type_ids(
 			attach_db, PackedInt32Array([5004])))
 	assert_true(joiner.load_from_mission_data(mission))
+	joiner.resolve_item_traits(traits_db)
 	var reached := false
 	for _tick in range(800):
 		host.step()

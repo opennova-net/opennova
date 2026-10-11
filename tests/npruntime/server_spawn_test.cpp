@@ -742,6 +742,18 @@ int main() {
 		                    (body->flags & w::kEntityFlagDead) == 0,
 		            "a ceiling that wraps negative leaves the dead player's -1 alone")) return 1;
 		bare_world->rules.difficulty = 0;
+
+		// D-PWR-10: a swept Player row word of 0 is the deploy's ceiling, so the raises
+		// leave the hp-0 body's 1, whatever the body's health_max (here the unswept
+		// spawn's 100). [orig: Server_ProcessPlayerDeath -> Entity_RaiseHealthToMax
+		//  @0x51782F; Entity_ResetToSpawnState @0x4B97BC; Entity_InitFromModel @0x40DCA6]
+		bare_world->tables.player.item_hp = 0;
+		body->health = 1;
+		body->alive = true;
+		inmatch::Server_ReleasePlayerDeployment(
+				bare_ctx.config, own, *bare_world, w::EntityHandle{});
+		if (!expect(body->health == 1 && body->health_max == 100,
+		            "a row word of 0 deploys the hp-0 body at its 1")) return 1;
 	}
 
 	// A join-time spectator is POSITIONED with the substitute team while its

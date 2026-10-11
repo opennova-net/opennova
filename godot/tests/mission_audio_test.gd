@@ -48,7 +48,6 @@ func _layer(falloff: int, min_dist := 0, volume := 255, clamp_vol := 255) -> Amb
 	layer.min_distance = min_dist
 	layer.volume = volume
 	layer.clamp_volume = clamp_vol
-	layer.base_pitch = 1.0
 	return layer
 
 
@@ -752,7 +751,7 @@ func test_the_mission_own_bank_is_not_searched_for_a_set() -> void:
 
 func _add_lwf_set(
 		lwf: LwfData, set_name: String, wav_path: String,
-		falloff_radius: int) -> void:
+		falloff_radius: int, member_pitch := 1.0) -> void:
 	var set_i := lwf.add_set()
 	lwf.set_set_field(set_i, "name", set_name)
 	var layer_i := lwf.add_layer(set_i)
@@ -761,6 +760,7 @@ func _add_lwf_set(
 	lwf.set_layer_field(set_i, layer_i, "falloff_radius", falloff_radius)
 	var member_i := lwf.add_member(set_i, layer_i)
 	lwf.set_member_field(set_i, layer_i, member_i, "wav_path", wav_path)
+	lwf.set_member_field(set_i, layer_i, member_i, "base_pitch", member_pitch)
 
 
 func _reverb_count(bus_idx: int) -> int:
@@ -816,5 +816,51 @@ func test_emitter_word_of_step_zero_plays_at_the_least_step() -> void:
 	if voice != null:
 		assert_almost_eq(voice.pitch_scale, 44100.0 / 512.0 / 22050.0, 0.000001,
 			"a word whose step is 0 plays at the least step")
+	audio.teardown()
+	TestFs.remove_dir_recursive(fixture_dir)
+
+
+# An emitter's channel plays its emitter word alone: the mix reads the layer's
+# member 0 for its wave, volume and clamp, never its pitch, and opens or updates
+# the channel with the slot's word as its play factor [orig:
+# SoundEmitter_UpdateAndMixTop8 @ 0x528943..0x528949, member 0 @ 0x528649; the
+# AudioChannel_OpenSlotChecked call @ 0x528ae3, the AudioChannel_SetAndPlay call
+# @ 0x528a5c] (D-SND-56). game.lwf's V_AH62_ILP carries a member 0 pitch of
+# 0x11709 (1.09), which ours had composed onto the word.
+func test_emitter_channel_plays_its_word_alone() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_word_alone_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path(
+				"res://../fixtures/lwf/tone.wav")))
+	var lwf := LwfData.new()
+	lwf.create_empty()
+	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000, float(0x11709) / 65536.0)
+	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = MissionAudio.create(root, null)
+	audio.setup(mission, "word_alone_probe.bms", container)
+
+	# tone.wav is 22050 Hz, its ratio 0x8000: the word 0x10000 steps at 256,
+	# the wave's own rate, and 0xC000 at 192, three quarters of it.
+	var pos := Vector3(900, 4, -300)
+	audio.apply_sound_emitters([_emitter_row(77, pos, 0x10000, 0xFFFF)])
+	audio.tick(pos, 0.2)
+	var voice := _player_at_position(container, pos)
+	assert_not_null(voice, "the emitter takes a channel")
+	if voice != null:
+		assert_almost_eq(voice.pitch_scale, 1.0, 0.000001,
+			"the channel opens at the word alone, not member 0's pitch")
+		audio.apply_sound_emitters([_emitter_row(77, pos, 0xC000, 0xFFFF)])
+		audio.tick(pos, 0.2)
+		assert_almost_eq(voice.pitch_scale, 0.75, 0.000001,
+			"and a live channel's update takes the word alone")
 	audio.teardown()
 	TestFs.remove_dir_recursive(fixture_dir)

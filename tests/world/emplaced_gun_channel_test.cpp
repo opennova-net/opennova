@@ -48,6 +48,7 @@ struct Rig {
 
         Entity gun_seed;
         gun_seed.kind = EntityKind::Item;
+        gun_seed.has_item_def = true; // seats need the def (D-NET-422)
         gun_seed.health = 100;
         gun_seed.alive = true;
         gun_seed.yaw = 0;

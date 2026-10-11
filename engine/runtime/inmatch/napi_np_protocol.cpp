@@ -163,9 +163,10 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 // The S2C 0x86 SERVER_GOODBYE burst for `conn`: up to cs_dir0.recv_max_per_tick (4, clamped
 // 0..32) identical datagrams carrying [le32 client CK][the connection's latched disconnect
 // record, zeros when none is latched], NWU-encrypted like every session opcode. Empty for a
-// node that never completed the 0x42 (no CK), a client-side node, or a host that is no longer
-// running — SendDisconnectPacket's own gates. The unwitnessed proto+0x1F4 no-op gate (zero at
-// NapiNPProtocol_Create @0x625840; its setter was not located) is not modeled.
+// node that never completed the 0x42, a client-side node, or a host that is no longer
+// running: SendDisconnectPacket's own gates; a zero CK keys the burst like any other
+// (D-NET-418). The unwitnessed proto+0x1F4 no-op gate (zero at NapiNPProtocol_Create
+// @0x625840; its setter was not located) is not modeled.
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 — count clamp @0x6253ef..0x625403,
 //  send loop @0x625406..0x625424; CNapiNPConnection_SendDisconnectPacket @0x61F2A0 — conn_flag0
 //  gate @0x61f30b, `!is_server || host_running` @0x61f329, opcode 0x86 @0x61f367, the peer key
@@ -173,11 +174,12 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
 		const NapiNPConnection &conn) {
 	// SendDisconnectPacket's gates: an ACTIVE server-side node (conn_flag0, i.e. the 0x42 was
-	// accepted and the CK is known) on a host that is still running; a client-side node would
-	// select 0x46 instead and is never torn down through this host path.
-	// [orig: @0x61f30b conn_flag0; @0x61f329 `!is_server || host_running`; @0x61f367 opcode 0x86]
+	// accepted) on a host that is still running; a client-side node would select 0x46 instead
+	// and is never torn down through this host path. Nothing tests the key it writes.
+	// [orig: @0x61f30b conn_flag0; @0x61f329 `!is_server || host_running`; @0x61f367 opcode 0x86;
+	//  the remote key read @0x61f396 and written @0x61f3af]
 	if (conn.type != NapiNPConnection::kTypeServerSide || conn.phase < ConnectionPhase::Joined ||
-	    conn.client_ck == 0 || ctx.np_protocol.host_running == 0) {
+	    ctx.np_protocol.host_running == 0) {
 		return {};
 	}
 	const DisconnectEvent record =

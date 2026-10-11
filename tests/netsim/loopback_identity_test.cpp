@@ -1055,6 +1055,7 @@ bool run_mounted_infantry_pose_fields_round_trip() {
 
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
+	vehicle.has_item_def = true; // seats need the def (D-NET-422)
 	vehicle.item_id = 0x1004;
 	vehicle.position = {100.0f, 200.0f, 10.0f};
 	vehicle.yaw = 90; // identity engine-frame carrier rotation
@@ -1433,6 +1434,7 @@ bool run_remote_mounted_player_death_detaches_compact() {
 
 	w::Entity vehicle;
 	vehicle.kind = w::EntityKind::Item;
+	vehicle.has_item_def = true; // seats need the def (D-NET-422)
 	vehicle.item_id = 0x1004;
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	vehicle.item_attrib = w::kItemAttribPlayerControl;

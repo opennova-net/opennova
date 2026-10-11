@@ -59,8 +59,9 @@ public:
 	// `bone` (1-based, the wire byte — the occupancy/echo key). Returns true when the
 	// requester's relation changed: it attached, or it left a seat before a refusal.
 	// Ported validation order [orig: Entity_ProcessVehicleAttach @0x435AA0]:
-	//   1. resolve both handles; reject a missing entity or either side dead
-	//      (Flags & 2 / health <= 0) [orig: @0x435b01];
+	//   1. resolve both handles; reject a missing entity, a carrier with no item def, or
+	//      either side dead (Flags & 2 / health <= 0) [orig: @0x435b01, the item def
+	//      @0x435aed..0x435af1];
 	//   2. seat classification: the vehicle seat whose bone_index matches the wire bone
 	//      [orig: Entity_GetBoneSlotType @0x434ED0 classifies the MODEL USRP row name —
 	//      48-byte rows, name +32, 1-based index; sitex 1 / ctrlx 2 / drvrx 5 / UseGun 3].
@@ -99,13 +100,24 @@ public:
     //  all matching mountHandles -> 0xFFFF, Flags &= ~0x40, +0x16C/+0x157/+0x168 cleared.]
     // Returns true iff the entity was mounted.
     bool detach(EntityHandle player);
-    // Validate and atomically attach to an already selected seat. This is the one
-    // authoritative relationship-write path used by wire requests, script mounts,
-    // use-key mounts, and mobile-spawn deployment. Returns true when the relation
-    // changed: an attach, or the detach that runs before a refused control seat.
-    // [orig: Entity_RequestVehicleAttach @0x4364A0 ->
-    //  Entity_ProcessVehicleAttach @0x435AA0]
+    // Validate and atomically attach to an already selected seat: the process, the
+    // one authoritative relationship-write path, which snaps no yaw. Returns true
+    // when the relation changed: an attach, or the detach that runs before a
+    // refused control seat. [orig: Entity_ProcessVehicleAttach @0x435AA0]
     bool attach_to_seat(EntityHandle player, const VehicleSeatSelection &selection);
+    // The request's yaw leg: the requester faces the chosen seat (presnap_attach_heading)
+    // when the carrier's bone lookup answers, ahead of every gate of the process. A
+    // client runs it before it queues the C2S 0x26.
+    // [orig: Entity_RequestVehicleAttach @0x4364A0, the lookup @0x436540..0x43654a,
+    //  the stores @0x43655F..0x4365CE, ahead of @0x4365E4 / @0x436602]
+    void request_attach_heading(EntityHandle player, const VehicleSeatSelection &selection);
+    // A request on the authority: the yaw leg, then the process. The use key, the
+    // numbered seat, the script mount, the AI board and seat upgrade and the deploy
+    // into a vehicle request; C2S 0x26, the vehicle spawn and a client's decoded
+    // relation run the process alone.
+    // [orig: Entity_RequestVehicleAttach @0x4364A0 -> Entity_ProcessVehicleAttach
+    //  @0x4365E4]
+    bool request_attach(EntityHandle player, const VehicleSeatSelection &selection);
     // The use-key nearest-seat scan [orig: Entity_FindNearestSeatOrArmory @0x435d50]: for
     // every live seat-bearing entity, test each FREE seat's world position against the player
     // eye: 3D distance <= 4.0 u (0x40000 16.16) and the point inside the view cone —
@@ -214,7 +226,7 @@ public:
     // [orig: shared helper @0x5460e0; NetPacket_WritePlayerState @0x4ffe18]
     WeaponSlotState *resolve_mounted_ammo_slot(Entity &mount);
     // Entity_RequestVehicleAttach snaps the requester yaw to the chosen seat before
-    // authority applies the relationship. Keep the registry Entity and our split
+    // the process (request_attach_heading). Keep the registry Entity and our split
     // AiEntity/local-player look target coherent so the first mounted tick cannot
     // restore the pre-attach look. Pitch is deliberately untouched.
     // [orig: Entity_RequestVehicleAttach @0x4364a0; UseGun yaw @0x43656c]

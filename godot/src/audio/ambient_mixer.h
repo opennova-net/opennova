@@ -86,9 +86,6 @@ public:
 			int clamp_vol);
 	static int emitter_layer_volume(int64_t dist_q16, int falloff_u, int min_u,
 			int vol_byte, int member_vol, int clamp_vol);
-	// A 16.16 word (the mix rows' pitch_q16, the emitter registrations) as a
-	// float factor (io/fixed.h kFp16One).
-	static float q16_to_float(int q16);
 };
 
 } // namespace godot

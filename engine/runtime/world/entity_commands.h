@@ -308,9 +308,12 @@ public:
     bool group_alive(int group) const;
 
     // --- mount / emplacement (AttachToEmplaced) ---
-    // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] Attach occupant_ssn into target_ssn's best
-    // free root/child seat through the canonical vehicle attach operation. Reject if the
-    // occupant is already mounted or the target has no free seat. Returns false on any reject.
+    // The AI board's mount (mount_boarding_command) and the shell's debug crew seams:
+    // request occupant_ssn into target_ssn's best free root/child seat. Reject if the
+    // occupant is already mounted or the target has no free seat. Returns false on any
+    // reject. The script mount is use_boarding_target.
+    // [orig: Entity_UpdateInfantryAI -> Entity_FindBestSeatSlot @0x4BBDD4 ->
+    //  Entity_RequestVehicleAttach @0x4BBDF2]
     bool mount(EntityTarget occupant_ssn, EntityTarget target_ssn,
                SeatSelectionMode mode = SeatSelectionMode::Any);
     // Port-side helper for authored "Goto SSN and board" commands 123/124/125, not a retail

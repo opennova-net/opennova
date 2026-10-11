@@ -104,6 +104,7 @@ w::Entity *mount_prediction_driver(Rig &r, bool is_local) {
 	seat.type = w::SeatType::Driver;
 	seat.bone_index = 7;
 	seat.source_name = "drvrx00";
+	vehicle->has_item_def = true; // seats need the def (D-NET-422)
 	vehicle->seats.push_back(seat);
 
 	w::Entity body;
@@ -2024,6 +2025,7 @@ w::Entity *mount_ai_driver(Rig &r) {
 	seat.type = w::SeatType::Driver;
 	seat.bone_index = 7;
 	seat.source_name = "drvrx00";
+	vehicle->has_item_def = true; // seats need the def (D-NET-422)
 	vehicle->seats.push_back(seat);
 	w::Entity body;
 	body.kind = w::EntityKind::Organic;

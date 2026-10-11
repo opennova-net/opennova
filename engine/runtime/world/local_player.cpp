@@ -394,10 +394,7 @@ bool LocalPlayer::select_numbered_seat(int index) {
 	// [orig: Entity_AttachToUseGunSlot @0x546c07].
 	if (!world_.rules.mp_session && !weapon.active && selected.type == w::SeatType::Gunner)
 		return false;
-	const w::Entity *carrier = world_.registry.get(selected.vehicle);
-	const bool changed = carrier != nullptr && world_.vehicles.process_attach(
-			world_.cached.local_player, selected.vehicle,
-			carrier->seats[static_cast<size_t>(selected.seat_index)].bone_index);
+	const bool changed = world_.vehicles.request_attach(world_.cached.local_player, selected);
 	if (changed) {
 		view.binoculars_requested = false;
 		w::local_player_view_refresh(&world_, view);

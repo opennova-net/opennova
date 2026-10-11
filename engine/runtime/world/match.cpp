@@ -92,9 +92,14 @@ uint8_t objective_proximity_bit(int32_t item_id) {
     }
 }
 
+// A player counts as live while its entity's dead bit is clear: the proximity
+// pass and the per-team count test `Flags & 2` alone, never the health word,
+// so a body whose health sits at or below 0 with the bit clear (a deploy that
+// wraps its ceiling negative, D-PWR-7) still counts until its death edge.
+// [orig: Server_UpdateCaptureZoneProximity @0x5087AD, @0x50892D, @0x508A77,
+//  @0x508AA9, @0x508C10, @0x508C59; Game_CountAlivePlayersPerTeam @0x50022F]
 bool is_live_player(const Entity *entity) {
-    return entity != nullptr && entity->alive &&
-           (entity->flags & kEntityFlagDead) == 0;
+    return entity != nullptr && (entity->flags & kEntityFlagDead) == 0;
 }
 
 bool within_2d(const Vec3 &a, const Vec3 &b, float radius) {
@@ -1563,23 +1568,34 @@ void Match::update_objective_proximity(const World &world) {
     }
 }
 
+std::array<int32_t, 5> Match::count_alive_players_per_team(const World &world) const {
+    std::array<int32_t, 5> holders{};
+    // The count takes state-6 slots only, and the round end moves every active
+    // slot to state 7, so past it every team counts 0.
+    // [orig: Game_CountAlivePlayersPerTeam `cmp [ecx+20h], 6` @0x500208;
+    //  Server_ProcessRoundEnd's state 7 @0x51685E]
+    if (outcome_.ended)
+        return holders;
+    for (const MatchPlayer &match_player : players_) {
+        const Entity *entity = world.registry.get(match_player.identity.entity);
+        // [orig: Game_CountAlivePlayersPerTeam @0x5001C0 - the spectator
+        //  test @0x500214, the dead bit @0x50022F, the mask's bit 0 @0x500235]
+        if (match_player.spectator || !is_live_player(entity) ||
+            (match_player.objective_proximity_mask & 0x01u) == 0 ||
+            entity->team >= holders.size())
+            continue;
+        ++holders[entity->team];
+    }
+    return holders;
+}
+
 void Match::accumulate_team_scores(const World &world) {
     // Game_AccumulateTeamScores consumes the bit-0 masks the proximity pass
     // last built. It runs for every team game, although only TKOTH exposes
     // this hold counter as a win condition. [orig: Game_CountAlivePlayersPerTeam
     // @0x5001C0; Game_AccumulateTeamScores @0x508D70]
     if ((rules_.game_type & 0x10000u) != 0) {
-        std::array<int32_t, 5> holders{};
-        for (const MatchPlayer &match_player : players_) {
-            const Entity *entity = world.registry.get(match_player.identity.entity);
-            // [orig: Game_CountAlivePlayersPerTeam @0x5001C0 — the spectator
-            //  test @0x500214]
-            if (match_player.spectator || !is_live_player(entity) ||
-                (match_player.objective_proximity_mask & 0x01u) == 0 ||
-                entity->team >= holders.size())
-                continue;
-            ++holders[entity->team];
-        }
+        const std::array<int32_t, 5> holders = count_alive_players_per_team(world);
         // Per team row, once a second: at least one alive holder in the
         // volume gains one tick, an empty team loses min(hold, koth_delta).
         // [orig: Game_AccumulateTeamScores @0x508DA0..0x508DC2 — holders test
@@ -1880,7 +1896,8 @@ void Match::advance_tick(World &world, TickPhase phase) {
     if (outcome_.ended) {
         // Past the round end the proximity pass returns at its head, leaving
         // the masks as its last pass built them, while the team hold census
-        // after it has no round-over test.
+        // after it has no round-over test: it counts no slot (none is in state
+        // 6 any more), so each hold decays by min(hold, koth_delta).
         // [orig: Server_TickUpdate — the round-over test @0x51DE58 skips only
         //  to @0x51DF50; the calls @0x51DF50/@0x51DF55;
         //  Server_UpdateCaptureZoneProximity @0x5086A3]
@@ -1980,14 +1997,12 @@ MatchLiveScoreboard Match::live_scoreboard(World &world) {
         out.teams[team].points = teams_[team][MatchStats::kPoints];
     }
 
+    // TKOTH's per-team byte is the count the board build takes first: the
+    // live non-spectators in the hill, as the hold timer reads them.
+    // [orig: Server_BuildAndBroadcastScoreboard - Game_CountAlivePlayersPerTeam
+    //  @0x50D9B5, TeamRecord+0x14C into the rows @0x50DC62..0x50DC85]
     if (rules_.game_type == gt::kTeamKingOfTheHill) {
-        std::array<uint32_t, 5> alive{};
-        for (const MatchPlayer &match_player : players_) {
-            const Entity *entity = world.registry.get(match_player.identity.entity);
-            if (entity != nullptr && entity->team < alive.size() && entity->alive &&
-                (entity->flags & kEntityFlagDead) == 0)
-                ++alive[entity->team];
-        }
+        const std::array<int32_t, 5> alive = count_alive_players_per_team(world);
         for (uint8_t team = 1; team <= out.team_count; ++team)
             out.teams[team].alive_players = static_cast<uint8_t>(alive[team]);
     }

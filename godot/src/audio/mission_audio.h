@@ -267,7 +267,7 @@ private:
 	int _allocate_dynamic_candidate_id();
 	void _prune_dynamic_emitter_states();
 	void _release_retired_candidate_ids();
-	static double _pitch_scale(const Ref<AmbientLayer> &p_descriptor, int p_pitch_q16);
+	static double _pitch_scale(int p_pitch_q16);
 	static double _hhmm_to_hours(double p_hhmm);
 	void _load_bank(const String &p_lwf_name);
 	void _apply_reverb(int p_reverb_id);

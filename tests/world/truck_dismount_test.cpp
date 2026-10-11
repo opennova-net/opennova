@@ -154,6 +154,7 @@ int main() {
 
 	w::Entity truck{};
 	truck.kind = w::EntityKind::Item;
+	truck.has_item_def = true; // seats need the def (D-NET-422)
 	truck.item_id = 1294;
 	truck.net_id = 4098;
 	truck.alive = true;

@@ -3510,6 +3510,7 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 
 	w::Entity gun;
 	gun.kind = w::EntityKind::Item;
+	gun.has_item_def = true; // seats need the def (D-NET-422)
 	gun.item_id = 1294; // B50Cal ewep
 	gun.position = {0.0f, 8.0f, 0.0f};
 	gun.yaw = 45;

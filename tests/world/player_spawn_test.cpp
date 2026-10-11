@@ -211,6 +211,46 @@ int main() {
         const Entity *client = w.registry.get(spawn_player(w, record));
         CHECK(client != nullptr && client->health == -1 && client->health_max == -1);
     }
+    // D-PWR-10: a swept Player row whose hp word is 0 is a real 0, not the unswept
+    // template: the class init's model init marks the body indestructible (Flags
+    // 0x4000000, the armor words -1, subType -1, Health 1) and the raises to the
+    // ceiling 0 leave the 1, for the authority's body in a session and out and for
+    // a joiner's own from its record. A joiner's own keeps Health 1 and the armor
+    // pair in retail too, but its 0x0C apply then overwrites Flags and subType with
+    // the wire's, so the flag and the 0xFF pinned for it here are ours (D-PWR-11).
+    // [orig: PlayerClass_InitEntity - Entity_InitFromModel called @0x4B10C8:
+    //  @0x40DC85..0x40DCAF; the raises @0x4B112B, @0x43C557..0x43C56B;
+    //  Entity_InitFromItemDef @0x49E5D5..0x49E5EA; NapiNPClientMsg_0x00C
+    //  @0x42E91A, @0x42EA35]
+    {
+        World w;
+        w.registry.configure_pool(0, 8);
+        w.tables.player.has_item_def = true;
+        w.tables.player.item_hp = 0;
+        w.tables.player.armor_impact = 30;
+        w.tables.player.armor_kz = 40;
+        const auto check_indestructible = [](const Entity *e) {
+            CHECK(e != nullptr && e->health == 1 && e->health_max == 0);
+            CHECK(e != nullptr && (e->engine_flags & 0x4000000u) != 0u);
+            CHECK(e != nullptr && e->armor_impact == -1 && e->armor_kz == -1);
+            CHECK(e != nullptr && e->sub_type == 0xFF);
+        };
+        w.rules.difficulty = -1; // out of a session the local ceiling doubles: 0 still
+        check_indestructible(w.registry.get(spawn_player(w, PlayerSpawn{})));
+        w.rules.difficulty = 0;
+        w.rules.mp_session = true;
+        check_indestructible(w.registry.get(spawn_remote_player(w, PlayerSpawn{})));
+        PlayerSpawn record;
+        record.from_wire_record = true;
+        // A joiner's own: Health 1 and the armor pair are retail's end state; the
+        // flag and subType 0xFF pin ours (retail's 0x0C apply overwrites both).
+        check_indestructible(w.registry.get(spawn_player(w, record)));
+        // The unswept template (no hp word) keeps the seed's fallback.
+        w.tables.player.item_hp.reset();
+        const Entity *bare = w.registry.get(spawn_remote_player(w, PlayerSpawn{}));
+        CHECK(bare != nullptr && bare->health == 100 && bare->health_max == 100 &&
+              (bare->engine_flags & 0x4000000u) == 0u);
+    }
     {
         World w; // item-less world: the spawn-seed fallback still spawns AT FULL (100/100)
         AiSystem &ai = w.ai;

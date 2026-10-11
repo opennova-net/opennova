@@ -494,6 +494,7 @@ bool run_mounted_moving_carrier_roundtrip() {
 
 	w::Entity carrier_seed;
 	carrier_seed.kind = w::EntityKind::Item;
+	carrier_seed.has_item_def = true; // seats need the def (D-NET-422)
 	carrier_seed.item_id = 0x1004;
 	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	carrier_seed.item_attrib = w::kItemAttribPlayerControl;
@@ -768,6 +769,7 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 		body->inf.is_local_player = true;
 		w::Entity carrier_seed;
 		carrier_seed.kind = w::EntityKind::Item;
+		carrier_seed.has_item_def = true; // seats need the def (D-NET-422)
 		carrier_seed.item_id = 0x1004;
 		carrier_seed.position = {85.0f, -20.0f, 7.0f};
 		carrier_seed.yaw = static_cast<int16_t>(std::lround(yaw_deg));

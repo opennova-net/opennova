@@ -25,6 +25,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/gameprofile/resource_missing.h>
+#include <formats/lwf/lwf.h>
 #include <formats/lwf/wav_pcm.h>
 #include <runtime/audio/ambient_mixer.h>
 #include <runtime/audio/envs_markers.h>
@@ -637,8 +638,10 @@ AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &
 		voice->set_bus(StringName(kVoiceBus));
 	}
 	voice->set_stream(p_stream);
-	// The line plays at its wave's own rate; a decoded wave's player takes its scale through
-	// WavLoader::pitch_scale_for (a rate boxed at INT32_MAX played at its own).
+	// The line plays at the play factor 0x10000, centred: the dialog's play hook writes both into the
+	// line's record before the open [orig: sub_527560 @ 0x52757c, called through dword_A8A23C
+	// @ 0x44de50]. A decoded wave's player takes its scale through WavLoader::pitch_scale_for (the
+	// mixer's step of the wave, a boxed rate's too).
 	voice->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(p_stream, 1.0)));
 	voice->set_volume_db(opennova::audio::volume_db_from_byte(p_volume));
 	add_child(voice);
@@ -862,12 +865,11 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 		const Ref<MissionAudioCandidateBinding> *binding = candidate_lookup_.getptr(bind.row.candidate_id);
 		const Ref<AudioStreamWAV> *stream = resolved.getptr(bind.row.candidate_id);
 		if (player == nullptr || binding == nullptr || stream == nullptr) continue;
-		SoundBank::configure_ambient_player(player, *stream, (*binding)->get_descriptor(),
-				(*binding)->get_bus());
+		SoundBank::configure_ambient_player(player, *stream, (*binding)->get_bus());
 		player->set_position(Vector3(bind.row.pos[0], bind.row.pos[1], bind.row.pos[2]));
 		player->set_volume_db(static_cast<float>(SoundBank::volume_db_from_255(bind.row.vol)));
 		player->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(*stream,
-				_pitch_scale((*binding)->get_descriptor(), bind.row.pitch_q16))));
+				_pitch_scale(bind.row.pitch_q16))));
 		player->set_process_mode(Node::PROCESS_MODE_INHERIT);
 		channel->set_candidate_id(bind.row.candidate_id);
 		player->play();
@@ -890,7 +892,7 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 			changed = true;
 		}
 		const double pitch_scale = WavLoader::pitch_scale_for(incumbent->get_stream(),
-				_pitch_scale((*binding)->get_descriptor(), update.row.pitch_q16));
+				_pitch_scale(update.row.pitch_q16));
 		if (!Math::is_equal_approx(static_cast<double>(incumbent->get_pitch_scale()), pitch_scale)) {
 			incumbent->set_pitch_scale(static_cast<float>(pitch_scale));
 			changed = true;
@@ -1251,16 +1253,19 @@ void MissionAudio::_release_retired_candidate_ids() {
 	retired_candidate_ids_ = still_retired;
 }
 
-// The player's pitch: the layer's authored base pitch (D-SND-56) times the
-// emitter's 16.16 pitch word (the native mix row's pitch_q16), the channel's play
-// factor [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528943..0x528949, into the
-// channel's +4 through the AudioChannel_OpenSlotChecked call @ 0x528ae3 and the
-// AudioChannel_SetAndPlay call @ 0x528a5c], unfloored: a word whose step is 0 plays
-// at the mixer's least step through the player's scale (WavLoader::pitch_scale_for).
-double MissionAudio::_pitch_scale(const Ref<AmbientLayer> &p_descriptor, int p_pitch_q16) {
-	const double base_pitch = p_descriptor.is_valid() ? p_descriptor->get_base_pitch() : 1.0;
-	return SoundBank::effective_base_pitch(base_pitch) *
-			static_cast<double>(AmbientMixer::q16_to_float(p_pitch_q16));
+// The player's pitch: the emitter's 16.16 pitch word alone (the native mix row's
+// pitch_q16), 0 read as 0x10000, the channel's play factor; the layer's member 0
+// is read for its wave, volume and clamp, never its pitch (D-SND-56) [orig:
+// SoundEmitter_UpdateAndMixTop8 @ 0x528943..0x528949, into the channel's +4
+// through the AudioChannel_OpenSlotChecked call @ 0x528ae3 and the
+// AudioChannel_SetAndPlay call @ 0x528a5c; member 0 @ 0x528649]. The word goes as
+// the mixer reads it, unsigned and exact, its doppler unported
+// (Sound_Calculate3DAttenuation, called @ 0x52896a; D-SND-8): a word whose step is
+// 0 plays at the mixer's least step through the player's scale
+// (WavLoader::pitch_scale_for).
+double MissionAudio::_pitch_scale(int p_pitch_q16) {
+	return opennova::lwf::pitch_from_q16(p_pitch_q16 == 0 ? opennova::lwf::kPitchUnityQ16
+			: static_cast<uint32_t>(p_pitch_q16));
 }
 
 // HHMM (MissionEnvironment.time_of_day) -> hours, through the engine's

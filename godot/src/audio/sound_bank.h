@@ -86,15 +86,18 @@ public:
 	// channel entrants cause VFS reads and WAV decoding.
 	Ref<AudioStreamWAV> resolve_ambient_stream(const Ref<AmbientLayer> &p_layer);
 	// Bind a resolved stream to a reusable physical ambient channel. Playback is
-	// owned by MissionAudio: incumbents continue while new bindings restart.
+	// owned by MissionAudio: incumbents continue while new bindings restart, and
+	// the channel's pitch is its emitter word's, which MissionAudio sets (the
+	// layer's member 0 pitch is never played, D-SND-56).
 	static void configure_ambient_player(AudioStreamPlayer3D *p_player,
-			const Ref<AudioStreamWAV> &p_stream, const Ref<AmbientLayer> &p_layer,
-			const StringName &p_bus);
+			const Ref<AudioStreamWAV> &p_stream, const StringName &p_bus);
 
 	// Spawn the looping ambient voices for the named sound set at `world_pos`,
 	// parented under `parent`. One AudioStreamPlayer3D per layer, playing the
 	// layer's FIRST member -- the emitter path does not run the selection machine
-	// [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649 reads layer+16 = member 0].
+	// (it reads layer+16, member 0, as describe_ambient cites) -- at a placed set's
+	// emitter word, 0x10000 (the engine's marker registration,
+	// AmbientMixer::register_set), never the member's pitch (D-SND-56).
 	// Voices spawn SILENT and paused; the caller's mix tick (MissionAudio)
 	// owns audibility via the witnessed distance model over its own candidate
 	// records. Returns the holder Node3D, or null if the set is unknown or no
@@ -139,14 +142,6 @@ public:
 	bool play_interface_oneshot(Node *p_parent, const String &p_name, const StringName &p_bus);
 	AudioStreamPlayer *spawn_oneshot_2d(Node *p_parent, const String &p_name, const StringName &p_bus);
 
-	// An ambient layer's member pitch (its member 0's) or a dialog line's as the
-	// shell composes it: an unauthored or degenerate value (<= 0.01) plays at
-	// unity. Neither is a play factor the game composes: an emitter's channel
-	// plays its emitter word alone (D-SND-56) and a dialog line its dialog
-	// module's frequency. A voice's composed play factor (a trigger set's, a
-	// script voice's, a menu row's) is never floored: the player's scale forces a
-	// step of 0 to the mixer's least step (WavLoader::pitch_scale_for, D-SND-53).
-	static double effective_base_pitch(double p_base_pitch);
 	// A looping copy of a decoded one-shot stream, the whole buffer forward
 	// (the cached stream stays a one-shot's): loop_end is an absolute frame
 	// index that playback wraps at, so 0 would pin the voice at sample 0.
@@ -173,10 +168,10 @@ public:
 	// listener distance in Q16.16 units -- the arms subtract in Q16 FIRST and
 	// truncate to whole units at the curve call, exactly like the original
 	// (HIWORD(dist - min) is floor(d - m), NOT min - floor(d): the proximity arm
-	// differs by a unit for fractional d) [orig: SoundEmitter_UpdateAndMixTop8
-	// @ 0x528667..0x5286df]. `vol_byte` is the emitter volume 0..255 (the
-	// time-of-day crossfade blend for placed markers); member volume and clamp
-	// scale by it before the curve [orig: @ 0x5286b9]. With a min_distance the
+	// differs by a unit for fractional d). `vol_byte` is the emitter volume 0..255
+	// (the time-of-day crossfade blend for placed markers); member volume and
+	// clamp scale by it before the curve [orig: SoundEmitter_UpdateAndMixTop8
+	// @ 0x528667..0x5286df, the scale @ 0x5286b9]. With a min_distance the
 	// falloff REBASES to run min..falloff; inside min_distance the volume RISES
 	// as (d/min)^2 (the proximity fade); a bare falloff runs 0..falloff. The arm
 	// forms live in engine/runtime/audio (ambient_mixer.cpp) beside the mix that
@@ -213,7 +208,6 @@ private:
 	const opennova::lwf::File &_bank_at(const opennova::audio::SetLocation &p_loc) const;
 	static String _member_wav_path(const opennova::lwf::File &p_bank,
 			const opennova::lwf::Sndparm &p_member);
-	static double _member_base_pitch(const opennova::lwf::Sndparm &p_member);
 	AudioStreamPlayer3D *_make_player(const Ref<AudioStreamWAV> &p_stream, double p_play_scale,
 			const StringName &p_bus, bool p_loop, int p_vol255);
     bool _play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,

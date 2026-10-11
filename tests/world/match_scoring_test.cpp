@@ -496,12 +496,15 @@ void test_periodic_score_needs_a_deployed_session_player() {
 }
 
 // Past the round end the proximity pass returns at its head, but the team
-// hold census after it keeps running over the masks the last pass built;
-// it still never counts a spectator slot.
-// [orig: Server_TickUpdate — the round-over test @0x51DE58 skips only to
+// hold census after it keeps running; it counts no slot, because the round
+// end moved every active slot out of state 6 (a spectator slot it never
+// counts), so each team's hold decays by min(hold, koth_delta) while the
+// frozen result keeps the round's (D-NET-406).
+// [orig: Server_TickUpdate - the round-over test @0x51DE58 skips only to
 //  @0x51DF50, the calls @0x51DF50/@0x51DF55; Server_UpdateCaptureZoneProximity
-//  @0x5086A3; Game_CountAlivePlayersPerTeam @0x500214]
-void test_team_hold_counts_after_the_round() {
+//  @0x5086A3; Game_CountAlivePlayersPerTeam @0x500208, @0x500214;
+//  Server_ProcessRoundEnd @0x51685E]
+void test_team_hold_decays_after_the_round() {
     MatchRules koth = rules(gt::kTeamKingOfTheHill);
     koth.game_time_minutes = 5;
     koth.hill_limit_minutes = 99;
@@ -527,7 +530,7 @@ void test_team_hold_counts_after_the_round() {
     world->match.set_player_spectator(red, true);
     for (int tick = 0; tick < 62; ++tick)
         world->match.advance_tick(*world);
-    CHECK(world->match.team_primary_score(1) == 2);
+    CHECK(world->match.team_primary_score(1) == 0);
     CHECK(world->match.team_primary_score(2) == 0);
     CHECK(world->match.result().team_hold_ticks[1] == 1);
 }
@@ -592,7 +595,7 @@ int main() {
     test_team_winner_pass_needs_the_team_bit();
     test_spectators_hold_no_objective();
     test_periodic_score_needs_a_deployed_session_player();
-    test_team_hold_counts_after_the_round();
+    test_team_hold_decays_after_the_round();
     test_winner_award_needs_a_score_table();
     test_heal_scores_medicheal();
     if (failures != 0) {

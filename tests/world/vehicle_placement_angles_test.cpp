@@ -231,7 +231,9 @@ void test_seat_presnap_reads_the_spawn_form() {
     const EntityHandle rider_h = r.w.registry.spawn(0, rider);
     AiEntity &body = *r.w.ai.at(r.w.ai.attach(rider_h));
     body.inf.active = true;
-    CHECK(r.w.vehicles.process_attach(rider_h, r.veh_h, 1));
+    // The request snaps; the process alone would not (D-NET-421).
+    const int seat_index = static_cast<int>(r.veh().seats.size()) - 1;
+    CHECK(r.w.vehicles.request_attach(rider_h, {r.veh_h, seat_index, SeatType::Passenger}));
     CHECK(body.heading == io::bam_sub(kHeading89, 0x40000000)); // 89 - 90 degrees
 }
 

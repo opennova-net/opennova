@@ -494,6 +494,75 @@ bool check_spectator_respawn_request() {
 	return expect(saw, "S2C 0x32 [5][name] reaches the other player");
 }
 
+// D-NET-408: the convert ends in the deploy leg. The stock request names no
+// target (0xFFFF), so the hold arm places nothing: the dead body keeps its spot
+// with its angle words zeroed, is raised to its ceiling with the dead bit and
+// the hold cleared, takes the 620 protection over the convert's -1, stays
+// hidden and gets the deploy's 0x5A / 0x61 before the 0x32; the next 0x0A then
+// restamps the spectator's body to Health 1 and -1. Another handle is the
+// deploy's target, resolved with the cleared team 0, which takes the other
+// team's spawn point. [orig: Server_KillPlayerAndNotify @0x519E89, @0x519EBC..0x519ECE;
+//  Server_ProcessPlayerDeath @0x51782F, @0x517837..0x517863, @0x51787A,
+//  @0x517960; Input_HandleActionBinding @0x49B085; Server_ResolveSpawnTargetHandle
+//  @0x4FE175..0x4FE187; NetPacket_WritePlayerState @0x4FF71B..0x4FF728]
+bool check_spectator_convert_deploys() {
+	HostFixture f(2);
+	f.ctx.config.permanent_death = true;
+	f.ctx.config.spectator_slots = 2;
+	w::Entity *body = f.world.registry.get(f.players[0]);
+	body->flags |= w::kEntityFlagDead;
+	body->health = 0;
+	body->alive = false;
+	body->yaw = 30;
+	body->pitch = 5;
+	body->group_id = 4;
+	body->position = {40.0f, 50.0f, 6.0f};
+	f.conn(0).link.respawn_pending = true;
+	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
+	for (auto &t : f.transports) (void)drain(t);
+	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
+	if (!expect(f.conn(0).link.spectator && body->team == 0 && body->group_id == 0,
+			"the request converts the slot and clears the command group word"))
+		return false;
+	if (!expect((body->flags & w::kEntityFlagDead) == 0 && body->health == 100 && body->alive &&
+					!f.conn(0).link.respawn_pending,
+			"the deploy leg clears the dead bit and the hold and raises the body to its ceiling"))
+		return false;
+	if (!expect(body->damage_state == 620 && (body->flags & 1u) != 0,
+			"the deploy's 620 protection overwrites the -1; the body stays hidden"))
+		return false;
+	if (!expect(body->position.x == 40.0f && body->position.y == 50.0f && body->position.z == 6.0f &&
+					body->yaw == 90 && body->pitch == 0 && !f.conn(0).reply.convert_holds_pose,
+			"the hold arm places nothing, zeroes the angle words and clears its latch"))
+		return false;
+	std::vector<ns::Datagram> own = drain(f.transports[0]);
+	if (!expect(own.size() >= 3 && own[0].tag == s2c::WEAPON_LOADOUT &&
+					own[1].tag == s2c::TICK_SEED && own.back().tag == s2c::FORMATTED_GAME_TEXT,
+			"the deploy's 0x5A and 0x61 reach the converted player ahead of the 0x32"))
+		return false;
+	inmatch::Server_TickUpdate(f.ctx);
+	if (!expect(body->health == 1 && body->damage_state == -1 && (body->flags & 1u) != 0,
+			"the spectator's next 0x0A restamps Health 1, -1 and the hide bit"))
+		return false;
+
+	// A handle naming the other team's spawn point positions the convert on it.
+	w::Entity point;
+	point.kind = w::EntityKind::Item;
+	point.has_item_def = true;
+	point.is_spawn_point = true;
+	point.team = 1;
+	point.position = {300.0f, 400.0f, 20.0f};
+	const w::EntityHandle point_handle = f.world.registry.spawn(1, point);
+	w::Entity *other = f.world.registry.get(f.players[1]);
+	if (!expect(other->team == 2, "the second player is on team 2")) return false;
+	(void)f.dispatch(1, c2s::SPECTATOR_RESPAWN,
+			{static_cast<uint8_t>(point_handle.packed), static_cast<uint8_t>(point_handle.packed >> 8)});
+	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
+	return expect(f.conn(1).link.spectator && other->position.x == 300.0f &&
+					other->position.y == 400.0f && other->position.z == 21.0f,
+			"a named spawn point of any team places the converted body");
+}
+
 // The S2C 0x32 join and leave lines: [1][name][team] from the player add,
 // [2][name][team] from the disconnect, each to every OTHER in-match
 // connection [orig: Server_PlayerAdd @0x51d21e..0x51d291;
@@ -809,11 +878,14 @@ bool check_session_ping_codec() {
 					parsed.timestamp_ms == 0x01020304u,
 			"the body round-trips"))
 		return false;
-	// Tags compare case-insensitively; a value short of its width reads zero.
+	// Tags compare case-insensitively; a value short of its width loads its bytes and those
+	// after it, zero past the body's end (D-NET-415) [orig: Nwu_HandlePing @0x623A70 - MS
+	// @0x623C2A].
 	const std::vector<uint8_t> odd = {1, 0, 0, 0, 'w', 'r', 0, 1, 0, 0, 'm', 's', 0, 2, 0, 9, 9};
 	if (!expect(parse_session_ping_body(odd.data(), odd.size(), parsed) &&
-					parsed.receiver_local_key == 1 && !parsed.wants_reply && parsed.timestamp_ms == 0,
-			"lower-case tags parse, a two-byte MS reads zero"))
+					parsed.receiver_local_key == 1 && !parsed.wants_reply &&
+					parsed.timestamp_ms == 0x0909u,
+			"lower-case tags parse, a two-byte MS loads its bytes and zero past the end"))
 		return false;
 	const std::vector<uint8_t> tiny = {1, 2, 3};
 	return expect(!parse_session_ping_body(tiny.data(), tiny.size(), parsed),
@@ -1535,6 +1607,7 @@ int main() {
 	ok = check_loaded_model_reply_stamp() && ok;
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_spectator_respawn_request() && ok;
+	ok = check_spectator_convert_deploys() && ok;
 	ok = check_join_leave_lines() && ok;
 	ok = check_medic_revive_transaction() && ok;
 	ok = check_medic_revive_gates() && ok;

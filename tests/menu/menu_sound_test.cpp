@@ -213,11 +213,11 @@ void test_plan_menu_sound() {
 	CHECK(small.size() == 2 && small[0].pitch == 1000.0 / 65536.0 * 0.5);
 	// The product is one truncated Q16 word [orig: @ 0x75cef3..0x75cefd]: 127 x 0x8000 >> 16 is 63,
 	// not 63.5, so a 44.1 kHz wave's step is 0 and it plays at the least step, as retail's does; the
-	// fraction kept would round to 64, a step of 1, and play at its own 42.7 Hz.
+	// fraction kept would round to 64, a step of 1 (which plays at the least step too, D-SND-50).
 	bank.sndparms[0].pitch_scaled = 127;
 	const std::vector<MenuSoundVoice> edge = plan_menu_sound(bank, 1, "CLICK", 255, selector);
 	CHECK(edge.size() == 2 && edge[0].pitch == 63.0 / 65536.0);
-	CHECK(lwf::wave_pitch_scale(lwf::kPitchUnityQ16, 44100, 44100, edge[0].pitch) == (44100.0 / 512.0) / 44100.0);
+	CHECK(lwf::wave_pitch_scale(lwf::kPitchUnityQ16, 44100, edge[0].pitch) == (44100.0 / 512.0) / 44100.0);
 }
 
 int main() {

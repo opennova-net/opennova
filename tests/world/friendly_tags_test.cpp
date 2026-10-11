@@ -100,6 +100,31 @@ void test_tag_fold() {
     CHECK(tag_radio_request(w, local, tagged));
 }
 
+// D-NET-406: the tag's dead latch is the dead bit alone; a body whose `alive`
+// latch dropped with its health while the bit stays clear is not dead.
+// [orig: HUD_DrawEntityLabel `Flags & 2` @0x5a3c1c..0x5a3c27]
+void test_dead_latch_is_the_flags_bit() {
+    World w;
+    w.registry.configure_pool(0, 8);
+    const EntityHandle local = spawn_organic(w, true, 0);
+    const EntityHandle tagged = spawn_organic(w, false, 0);
+    Entity *e = w.registry.get(tagged);
+    e->alive = false;
+    e->health = -1;
+    const auto dead = [&] {
+        FriendlyTagPassContext ctx;
+        ctx.game_type = 0x30020u;
+        std::vector<FriendlyTagSource> tags;
+        collect_friendly_tags(w, *w.registry.get(local), tags, ctx);
+        CHECK(tags.size() == 1);
+        return !tags.empty() && tags[0].dead;
+    };
+    CHECK(!dead());
+    e->flags |= kEntityFlagDead;
+    e->alive = true;
+    CHECK(dead());
+}
+
 void test_viewer_gate() {
     Entity local;
     // On foot without a request: no viewer [orig: var_DC stays 0 @0x5a3bc1].
@@ -152,6 +177,7 @@ void test_neutral_organics_do_not_get_friendly_labels() {
 
 int main() {
     test_tag_fold();
+    test_dead_latch_is_the_flags_bit();
     test_viewer_gate();
     test_neutral_organics_do_not_get_friendly_labels();
     if (failures == 0) std::printf("friendly_tags_test: ok\n");
