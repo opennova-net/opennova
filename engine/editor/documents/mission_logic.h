@@ -67,8 +67,10 @@ struct LogicForm {
 	std::string words;
 	std::string sentence;
 };
-// False for a record that is no trigger or action of the document.
-bool logic_form(const MissionDocument &document, const NodeAddress &record, const MissionNames &names, LogicForm &out);
+// False for a record that is no trigger or action of the document. `sentence` false leaves its event's sentence
+// unmade (the board words each event once, not once a line).
+bool logic_form(const MissionDocument &document, const NodeAddress &record, const MissionNames &names, LogicForm &out,
+                bool sentence = true);
 
 // An event's form: its sentence and its parts, its flags in words (repeats, at the mission's start, at
 // its end), its delay and its repeat in steps of 64 ticks and in seconds, the most a step count holds

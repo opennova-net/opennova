@@ -48,7 +48,8 @@ inline constexpr QueryParam kMissionLogicParams[] = {
 	{ "op", QueryJson::String, true, nullptr,
 			"What is asked: form (an event's, or a trigger's or an action's: its words and what it holds), types "
 			"(what Add trigger or Add action offers, by name and group), add, retype, move, negate, join (the "
-			"edits that change the logic so, in the batch form an edit_record takes back)." },
+			"edits that change the logic so, in the batch form an edit_record takes back), board (the Event board's "
+			"cards, S24)." },
 	{ "id", QueryJson::Integer, false, nullptr,
 			"The record: an event (form, add) or a trigger or an action (form, retype, move, negate, join), by "
 			"its identity." },
@@ -59,6 +60,12 @@ inline constexpr QueryParam kMissionLogicParams[] = {
 	{ "position", QueryJson::Integer, false, nullptr, "add's and move's place in the list; left out, the end." },
 	{ "negated", QueryJson::Boolean, false, nullptr, "negate's: whether the trigger is negated." },
 	{ "join", QueryJson::String, false, nullptr, "join's: how the trigger joins the next (and, or, or_else)." },
+	{ "filter", QueryJson::String, false, nullptr,
+			"board's filter: the cards whose title or sentence holds it, without case; left out, the Logic pane's." },
+	{ "folded", QueryJson::Integers, false, nullptr,
+			"board's folded events, by their identities; left out, the Logic pane's." },
+	{ "attention", QueryJson::Boolean, false, nullptr,
+			"board's Needs attention: only the cards with notes; left out, the Logic pane's." },
 	{ "offset", QueryJson::Integer, false, "0", kQueryOffsetDoc },
 	{ "limit", QueryJson::Integer, false, "100", kQueryLimitDoc },
 };
@@ -75,7 +82,17 @@ inline constexpr const char *kMissionLogicDoc =
 		"negate, join: the edits that add a record of a type with its kinds' defaults, give one another type "
 		"keeping what still applies, move it (to another event: added there and removed here, one batch), "
 		"negate it or join it to the next, in the batch form an edit_record takes back, or the refusal that "
-		"says why none (an event holding the most it holds).";
+		"says why none (an event holding the most it holds). board (S24): the Event board, events (how many the "
+		"mission holds), noted (how many cards have notes), filter and attention as applied, and a page of its "
+		"cards in the events' order (count, offset, next_offset): each its event, index, title, sentence and its "
+		"parts, flags, wait and repeat in steps and seconds, folded, the Add refusals, its triggers and actions as "
+		"lines (record, index, type, type_words, a trigger's negated and join, last, words, runs {text, slot: 0 to 3 "
+		"a parameter, 4 the type's own words, -1 a note}, chips {slot, field, label, words, value, kind, unit, "
+		"picks, unset, missing}), its notes {record, code, words} (never gating: no action, no trigger, a pick "
+		"unset or naming nothing, an area the game drops, a wait past 512 steps, a value its type does not read) "
+		"and, while Play runs it, live; with common_triggers and common_actions (what the type picker offers "
+		"first, the shipped missions' most used) and recipes (what a new event is made from, each measured over "
+		"the shipped missions).";
 
 inline constexpr QueryParam kMissionUsesParams[] = {
 	{ "path", QueryJson::String, false, nullptr, "An open mission, as mission_logic takes it." },

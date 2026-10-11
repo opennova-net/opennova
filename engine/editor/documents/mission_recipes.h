@@ -8,9 +8,6 @@
 // reading of the type (documents/mission_sentence.h): an area trigger holds while the entity stands inside
 // the area's box, tested each time the chain is checked [docs/mission/bms-event-runtime-re.md 7.4, sub 10], and a
 // repeating event fires again while it holds [1.2], so the recipe says "is inside", never "enters".
-//
-// STAGED, NOT WIRED: the Event board's New event (ui/mission_board_view, its `board` query op) and the views'
-// New event menu (lane B's mark menu) are its live owners, landing next in S24.
 
 #include <cstddef>
 #include <cstdint>

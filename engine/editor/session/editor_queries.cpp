@@ -2060,6 +2060,11 @@ bool check_args(const EditorQueryRow &row, const JsonValue &args, std::string &e
 						std::all_of(value.array.begin(), value.array.end(),
 								[](const JsonValue &item) { return item.is_string(); });
 				break;
+			case J::Integers:
+				typed = value.is_array() &&
+						std::all_of(value.array.begin(), value.array.end(),
+								[](const JsonValue &item) { return io::json_exact_whole(item); });
+				break;
 		}
 		if (!typed) {
 			error = "\"" + member.key + "\" must be " +
@@ -2205,6 +2210,14 @@ std::vector<std::string> QueryArgs::strings(const char *name) const {
 	return out;
 }
 
+std::vector<int64_t> QueryArgs::integers(const char *name) const {
+	std::vector<int64_t> out;
+	if (const JsonValue *member = value(name); member && member->is_array())
+		for (const JsonValue &item : member->array)
+			if (item.is_number()) out.push_back(int64_t(item.number));
+	return out;
+}
+
 const EditorQueryRow &editor_query_row(EditorQueryKind kind) {
 	const size_t index = static_cast<size_t>(kind);
 	return kRows[index < kEditorQueryKindCount ? index : static_cast<size_t>(K::Catalog)];
@@ -2232,6 +2245,8 @@ const char *query_json_token(QueryJson type) {
 			return "boolean";
 		case QueryJson::Strings:
 			return "string[]";
+		case QueryJson::Integers:
+			return "integer[]";
 	}
 	return "string";
 }

@@ -12,6 +12,7 @@
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/session/mission_board_json.h>
 #include <editor/session/mission_logic_json.h>
 #include <editor/session/session_core.h>
 
@@ -132,6 +133,7 @@ constexpr MissionLogicOp kMissionLogicOps[] = {
 	{ "move", answer_move },
 	{ "negate", answer_flag },
 	{ "join", answer_flag },
+	{ "board", answer_mission_board },
 };
 
 constexpr bool same_text(const char *a, const char *b) {

@@ -371,6 +371,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_queries.cpp
     # S24 lane A (the board)
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_recipes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_board.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_board_json.cpp
     # S24 lane B (logic in the views)
     # S24 lane C (names and live logic)
 )

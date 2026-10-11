@@ -141,7 +141,8 @@ bool logic_param_picks(ParamKind kind) {
 	return kind == K::Group || kind == K::Entity || kind == K::Zone || kind == K::Event || kind == K::Path;
 }
 
-bool logic_form(const MissionDocument &document, const NodeAddress &record, const MissionNames &names, LogicForm &out) {
+bool logic_form(const MissionDocument &document, const NodeAddress &record, const MissionNames &names, LogicForm &out,
+                bool sentence) {
 	Located at;
 	if (!locate(document, record, at)) return false;
 	out = LogicForm();
@@ -215,7 +216,7 @@ bool logic_form(const MissionDocument &document, const NodeAddress &record, cons
 		out.type_words = "Unknown trigger type " + std::to_string(int32_t(trigger.main_type)) + " (" +
 		                 std::to_string(trigger.sub_type) + ")";
 	}
-	out.sentence = event_sentence(at.event->native, names, header);
+	if (sentence) out.sentence = event_sentence(at.event->native, names, header);
 	return true;
 }
 

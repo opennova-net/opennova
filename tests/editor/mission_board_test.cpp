@@ -1,8 +1,13 @@
-// The Event board's portable half (ADR 0046 S24, The board), over the minted synth_logic mission. The
-// mission_logic query answers by its op's row (session/mission_queries.h): every op its catalog offers is one
-// of the table's tokens, each answered by its own row (none falls through as unknown), the moved answers as
-// before (an event's form); and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped event given the form a
-// card reads, its lists as the event holds them.
+// The Event board's portable half (ADR 0046 S24, The board; editor/documents/mission_board.h), over the minted
+// synth_logic mission: its events as cards (title, sentence, flags, wait and repeat), each trigger and action a
+// line of runs with a chip per parameter its type reads; the notes, never gating (an event with no action, one
+// with no trigger, a pick left unset or naming nothing, an area the game drops, a wait past 512 steps, a value
+// its type does not read); the filter, Needs attention and folds; the running game's report on its card. The
+// mission_logic query answers by its op's row (session/mission_queries.h): every op its catalog offers is one of
+// the table's tokens, each answered by its own row; `board` the cards as the Logic pane shows them, its filter
+// and folds the workspace's unless the args name them, with the Common types and the recipes. And (a SKIP-LEG
+// without OPENNOVA_JO_DIR) every shipped mission's board built, every event a card, each line's runs its words,
+// its notes counted by code, timed.
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -14,10 +19,15 @@
 #include <base/io/json.h>
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
+#include <chrono>
+#include <map>
 #include <editor/documents/document_types.h>
+#include <editor/documents/mission_board.h>
+#include <editor/documents/mission_live.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_logic.h>
 #include <editor/documents/mission_sentence.h>
+#include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/mission_queries.h>
@@ -34,6 +44,8 @@
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
+namespace bms = opennova::bms;
+namespace mission = opennova::mission;
 
 namespace {
 
@@ -51,6 +63,137 @@ std::unique_ptr<Document> open(const std::vector<uint8_t> &bytes, const char *na
 	return document;
 }
 
+std::vector<uint8_t> fixture_bytes() {
+	return test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
+}
+
+const BoardNote *note_of(const BoardCard &card, const char *code) {
+	for (const BoardNote &note : card.notes)
+		if (std::string(note.code) == code) return &note;
+	return nullptr;
+}
+
+bool apply_edits(Document &document, const std::vector<Edit> &edits) {
+	Diagnostic error;
+	const bool ok = document.apply(edits, error);
+	if (!ok) std::printf("  refused: %s\n", error.message.c_str());
+	return ok;
+}
+
+// The cards over the minted mission: two events, the first's trigger and action as lines of runs and chips.
+int test_cards() {
+	std::unique_ptr<Document> document = open(fixture_bytes(), "synth_logic.bms");
+	TEST_EXPECT(document);
+	if (!document) return 1;
+	const auto &m = dynamic_cast<const MissionDocument &>(*document);
+	const DocumentMissionNames names(m);
+	MissionBoard board = mission_board(m, names, BoardQuery());
+	TEST_EXPECT(board.events == 2 && board.cards.size() == 2 && board.noted == 0);
+	const BoardCard &first = board.cards[0];
+	const Node *organic = m.rows_of(MissionKind::Organic)[0];
+	const std::string walker = "Organic #" + std::to_string(static_cast<const EntityRow &>(*organic).native.id);
+	TEST_EXPECT(same(first.title, "Event 1") && first.index == 0 && !first.folded && !first.live);
+	TEST_EXPECT(same(first.words.sentence, "When " + walker + " is in Zone 20, then re-arm event 2."));
+	TEST_EXPECT(first.triggers.size() == 1 && first.actions.size() == 1 && first.notes.empty());
+	const BoardLine &trigger = first.triggers[0];
+	TEST_EXPECT(!trigger.action && trigger.type && same(trigger.type_words, "Entity is in an area") && trigger.last);
+	TEST_EXPECT(trigger.runs.size() == 3 && trigger.runs[0].slot == 0 && same(trigger.runs[0].text, walker) &&
+	            trigger.runs[1].slot == kLogicTypeSlot && same(trigger.runs[1].text, " is in ") && trigger.runs[2].slot == 1 &&
+	            same(trigger.runs[2].text, "Zone 20"));
+	TEST_EXPECT(trigger.chips.size() == 2 && trigger.chips[0].kind == mission::ParamKind::Entity && trigger.chips[0].picks &&
+	            !trigger.chips[0].unset && !trigger.chips[0].missing && same(trigger.chips[1].words, "Zone 20"));
+	const BoardCard &second = board.cards[1];
+	TEST_EXPECT(same(second.title, "Event 2") && second.delay_steps == 5 && same(second.words.delay, "after 5.1 s"));
+
+	// An event of no trigger and no action: fires right away, does nothing; a trigger whose entity is unset; a
+	// wait past 512 steps; a value its type does not read.
+	std::vector<Edit> edits;
+	std::string error;
+	TEST_EXPECT(recipe_event_edits(m, *mission_recipe("right_away"), NodeAddress(), edits, error) && apply_edits(*document, edits));
+	const LogicType *destroyed = logic_type(false, int32_t(bms::TriggerMainType::Single), 4);
+	const NodeId second_event = m.rows_of(MissionKind::Event)[1]->id;
+	TEST_EXPECT(destroyed && logic_add_edits(m, second_event, *destroyed, SIZE_MAX, edits, error) && apply_edits(*document, edits));
+	Edit wait;
+	wait.address = {second_event, node_kind(MissionKind::Event), 0};
+	wait.field = "delay";
+	wait.value = int64_t(600);
+	TEST_EXPECT(apply_edits(*document, {wait}));
+	board = mission_board(m, names, BoardQuery());
+	TEST_EXPECT(board.events == 3 && board.cards.size() == 3 && board.noted == 2);
+	const BoardCard &noted = board.cards[1];
+	TEST_EXPECT(noted.triggers.size() == 2 && noted.triggers[1].chips.size() == 1 && noted.triggers[1].chips[0].unset);
+	TEST_EXPECT(note_of(noted, kBoardUnset) && same(note_of(noted, kBoardUnset)->words, "Trigger 2: its entity is not set."));
+	TEST_EXPECT(note_of(noted, kBoardWaitWraps) && note_of(noted, kBoardWaitWraps)->words.find("past 512") != std::string::npos);
+	const BoardCard &empty = board.cards[2];
+	TEST_EXPECT(note_of(empty, kBoardNoActions) && note_of(empty, kBoardRightAway) && empty.notes[0].code == kBoardRightAway);
+
+	// Needs attention, the filter, the folds.
+	BoardQuery query;
+	query.attention = true;
+	TEST_EXPECT(mission_board(m, names, query).cards.size() == 2);
+	query = BoardQuery();
+	query.filter = "RE-ARM";
+	board = mission_board(m, names, query);
+	TEST_EXPECT(board.cards.size() == 1 && board.cards[0].index == 0 && board.events == 3);
+	query = BoardQuery();
+	query.folded = {second_event};
+	board = mission_board(m, names, query);
+	TEST_EXPECT(!board.cards[0].folded && board.cards[1].folded);
+
+	// A running game's report: its event's state on the card.
+	LiveLogic live;
+	live.mission = m.path();
+	LiveEvent fired;
+	fired.index = 1;
+	fired.fired = true;
+	live.events.push_back(fired);
+	board = mission_board(m, names, BoardQuery(), &live);
+	TEST_EXPECT(!board.cards[0].live && board.cards[1].live && board.cards[1].live->fired);
+	return 0;
+}
+
+// The board op over a session: the cards as the Logic pane shows them (its filter the workspace's), the args'
+// own filter, the Common types and the recipes.
+int test_board_op() {
+	editor_test::TempProjectDir dir("opennova_mission_board_op");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
+	const auto ask = [&](const std::string &args) {
+		JsonValue parsed;
+		std::string error;
+		opennova::io::json_parse(args, parsed, error);
+		JsonValue answer = session.query("mission_logic", parsed, error);
+		if (!error.empty()) std::printf("  refused: %s\n", error.c_str());
+		return answer;
+	};
+	JsonValue board = ask("{\"op\": \"board\"}");
+	const JsonValue *cards = board.get("cards");
+	TEST_EXPECT(cards && cards->array.size() == 2 && board.get_number("events", 0) == 2 && board.get_number("count", 0) == 2);
+	const JsonValue &first = cards->array[0];
+	TEST_EXPECT(same(first.get_string("title", ""), "Event 1") && first.get("triggers") && first.get("triggers")->array.size() == 1);
+	const JsonValue &line = first.get("triggers")->array[0];
+	TEST_EXPECT(line.get("runs") && line.get("runs")->array.size() == 3 && line.get("chips") && line.get("chips")->array.size() == 2);
+	TEST_EXPECT(line.get_string("words", "").find(" is in Zone 20") != std::string::npos);
+	TEST_EXPECT(board.get("recipes") && board.get("recipes")->array.size() == mission_recipes().size());
+	TEST_EXPECT(board.get("common_triggers") && board.get("common_triggers")->array.size() == 8);
+	// The Logic pane's filter read, the args' own taking its place.
+	session.handle(request::set_workspace(R"({"document": {"path": "missions/logic.bms", "logic_filter": "has fired"}})"));
+	board = ask("{\"op\": \"board\"}");
+	TEST_EXPECT(board.get("cards") && board.get("cards")->array.size() == 1 && same(board.get_string("filter", ""), "has fired"));
+	board = ask("{\"op\": \"board\", \"filter\": \"\"}");
+	TEST_EXPECT(board.get("cards") && board.get("cards")->array.size() == 2);
+	board = ask("{\"op\": \"board\", \"filter\": \"\", \"limit\": 1, \"offset\": 1}");
+	TEST_EXPECT(board.get("cards") && board.get("cards")->array.size() == 1 &&
+	            board.get("cards")->array[0].get_number("index", -1) == 1);
+	return 0;
+}
+
 // The op table (S24 S0): the query's op param takes exactly the table's tokens, each answered by its own row.
 int test_op_table() {
 	const EditorQueryRow &row = editor_query_row(EditorQueryKind::MissionLogic);
@@ -61,7 +204,7 @@ int test_op_table() {
 	std::vector<std::string> table;
 	for (size_t i = 0; const char *token = mission_logic_op_choice(i); ++i) table.push_back(token);
 	TEST_EXPECT(!table.empty() && offered == table);
-	for (const char *op : {"form", "types", "add", "retype", "move", "negate", "join"})
+	for (const char *op : {"form", "types", "add", "retype", "move", "negate", "join", "board"})
 		TEST_EXPECT(std::find(table.begin(), table.end(), op) != table.end());
 
 	editor_test::TempProjectDir dir("opennova_mission_board_ops");
@@ -99,14 +242,16 @@ int test_op_table() {
 	return 0;
 }
 
-// Every shipped event given the form its card reads: its lists as the event holds them, its sentence.
+// Every shipped mission's board: every event a card, each line's runs its words, the notes counted by code.
 int test_retail() {
 	const std::string root = retail::install();
-	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped event's form)");
+	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission's board)");
 	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
 	expansions.insert(expansions.begin(), std::string());
 	std::set<std::string> seen;
-	size_t missions = 0, events = 0;
+	size_t missions = 0, cards = 0, lines = 0, largest = 0;
+	std::map<std::string, size_t> notes;
+	double took_ms = 0, slowest_ms = 0;
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
 		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
@@ -122,19 +267,36 @@ int test_retail() {
 			++missions;
 			const auto &m = dynamic_cast<const MissionDocument &>(*document);
 			const DocumentMissionNames names(m);
-			for (const Node *row : m.rows_of(MissionKind::Event)) {
-				LogicEventForm form;
-				TEST_EXPECT(logic_event_form(m, row->id, names, form));
-				const std::vector<Document::Collection> lists = m.collections_of({row->id, row->kind, 0});
-				TEST_EXPECT(lists.size() == 2 && form.triggers == lists[0].ids.size() && form.actions == lists[1].ids.size());
-				TEST_EXPECT(!form.words.sentence.empty());
-				++events;
+			const bms::Header *header = m.mission_row() ? &m.mission_row()->native.header : nullptr;
+			const auto started = std::chrono::steady_clock::now();
+			const MissionBoard board = mission_board(m, names, BoardQuery());
+			const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+			took_ms += ms;
+			if (ms > slowest_ms) slowest_ms = ms;
+			TEST_EXPECT(board.cards.size() == board.events && board.events == m.rows_of(MissionKind::Event).size());
+			largest = std::max(largest, board.cards.size());
+			for (const BoardCard &card : board.cards) {
+				++cards;
+				const auto &event = static_cast<const EventRow &>(*m.row(card.event.row));
+				TEST_EXPECT(card.triggers.size() == event.native.triggers.size() && card.actions.size() == event.native.actions.size());
+				for (const BoardLine &line : card.triggers) {
+					++lines;
+					TEST_EXPECT(logic_runs_text(line.runs) == trigger_words(event.native.triggers[line.index], names));
+				}
+				for (const BoardLine &line : card.actions) {
+					++lines;
+					TEST_EXPECT(logic_runs_text(line.runs) == action_words(event.native.actions[line.index], names, header));
+				}
+				for (const BoardNote &note : card.notes) ++notes[note.code];
 			}
 		}
 	}
 	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
-	std::printf("retail: %zu missions, %zu events given their form\n", missions, events);
-	TEST_EXPECT(missions == 115);
+	std::printf("retail: %zu missions' boards, %zu cards (at most %zu), %zu lines, in %.1f ms (the slowest %.1f ms); notes:",
+	            missions, cards, largest, lines, took_ms, slowest_ms);
+	for (const auto &[code, count] : notes) std::printf(" %s %zu", code.c_str(), count);
+	std::printf("\n");
+	TEST_EXPECT(missions == 115 && cards == 3073 && lines == 3858 + 4971);
 	return 0;
 }
 
@@ -142,6 +304,8 @@ int test_retail() {
 
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
+	if (test_cards() != 0) return 1;
+	if (test_board_op() != 0) return 1;
 	if (test_op_table() != 0) return 1;
 	return test_retail();
 }
