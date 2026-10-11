@@ -131,6 +131,13 @@ int pick_mission_map_mark(const std::vector<MissionMapMark> &marks, const Missio
 std::vector<NodeAddress> mission_map_box_records(const std::vector<MissionMapMark> &marks, const MissionMapView &view,
 		CanvasPoint a, CanvasPoint b);
 
+// Where an area's edge or corner handle stands on the map, mission x and y (S24: the 3D view's edges and corners;
+// its bottom and top are the 3D view's alone); false for any other handle.
+bool mission_map_handle_point(const MissionPressed &area, MissionHandle handle, double &x, double &y);
+// The map's handles of an area: its four edges and its four corners.
+inline constexpr MissionHandle kMissionMapAreaHandles[] = { MissionHandle::XMin, MissionHandle::XMax, MissionHandle::YMin,
+	MissionHandle::YMax, MissionHandle::XMinYMin, MissionHandle::XMaxYMin, MissionHandle::XMaxYMax, MissionHandle::XMinYMax };
+
 // The player's route (the first path whose flags carry PlayerRoute, the route the game's single player follows:
 // documents' mission_reads), -1 for none.
 int mission_map_route(const MissionScene &scene);
@@ -211,7 +218,9 @@ public:
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
 	// A drag of a record's `move` handle: the 3D view's move (mission_move_edits) to the point under the pointer,
-	// the selected records with it, with stick over the device's ground; one batch a sample under one gesture.
+	// the selected records with it, with stick over the device's ground; one batch a sample under one gesture. S24:
+	// an area's edge or corner (x_min .. x_min_y_max) as far as the pointer went, the area alone
+	// (mission_area_handle_edits).
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	// `frame` (the named records, else the selection, else everything), `zoom_in` and `zoom_out` (the CMAP's

@@ -79,6 +79,22 @@ void MissionMapCanvas::follow(const ViewportModel &viewport, const ViewportConte
 	}
 }
 
+MissionHandle MissionMapCanvas::handle_under_(const ViewportContext &context, const MissionMapView &view, float x, float y,
+		MissionPressed &area) const {
+	if (!viewport_ || primary_ < 0 || size_t(primary_) >= marks_.size() || marks_[size_t(primary_)].area < 0 ||
+			!context.editable())
+		return MissionHandle::Move;
+	if (!viewport_->pressed(marks_[size_t(primary_)].record, area)) return MissionHandle::Move;
+	for (const MissionHandle handle : kMissionMapAreaHandles) {
+		double hx = 0.0, hy = 0.0;
+		float px = 0.0f, py = 0.0f;
+		if (!mission_map_handle_point(area, handle, hx, hy)) continue;
+		view.project(hx, hy, px, py);
+		if (std::fabs(px - x) <= kMissionPickSlop && std::fabs(py - y) <= kMissionPickSlop) return handle;
+	}
+	return MissionHandle::Move;
+}
+
 void MissionMapCanvas::camera_(const MissionMapCamera &camera, CanvasRequests &out) {
 	if (!viewport_ || camera == viewport_->camera()) return;
 	out.request(request::set_viewport(viewport_->path(), viewport_->camera_change(camera)));
@@ -136,9 +152,13 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 	if (in.pressed && !in.middle && !in.panning && in.hovered) {
 		gesture_.press(subject, in.screen, out);
 		press_ = Press();
-		press_.mark = pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y);
 		press_.box_from = in.mouse;
 		view.unproject(in.mouse.x, in.mouse.y, press_.from[0], press_.from[1]);
+		// S24: the primary area's edge or corner first (its own handles stand over its pin and its box).
+		if (current) press_.handle = handle_under_(context, view, in.mouse.x, in.mouse.y, press_.area);
+		if (press_.handle != MissionHandle::Move)
+			mission_map_handle_point(press_.area, press_.handle, press_.handle_at[0], press_.handle_at[1]);
+		else press_.mark = pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y);
 		if (press_.mark >= 0 && current) {
 			const NodeAddress &record = marks_[size_t(press_.mark)].record;
 			press_.taken = viewport.taken(context, *document, record, press_.grabbed);
@@ -151,7 +171,9 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 		// Let go: a click selects the pin under it (joined as the keys say; nothing under it clears the selection), a
 		// box selects what it holds; a drag's end is its gesture's.
 		const CanvasJoin join = canvas_join(in.keys);
-		if (current && !gesture_.dragging()) {
+		if (press_.handle != MissionHandle::Move) {
+			// A tap or a drag of the primary area's handle: the selection stands.
+		} else if (current && !gesture_.dragging()) {
 			if (press_.mark >= 0)
 				out.request(request::select_record(path, marks_[size_t(press_.mark)].record, select_mode(join)));
 			else if (join == CanvasJoin::Replace && (primary_ >= 0 || !selected_.empty()))
@@ -168,6 +190,21 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 		return;
 	}
 	const bool began = gesture_.move(in.screen);
+	if (gesture_.dragging() && press_.handle != MissionHandle::Move && current && context.editable()) {
+		// S24: the area's edge or corner as far as the pointer went, the area alone.
+		double at[2];
+		view.unproject(in.mouse.x, in.mouse.y, at[0], at[1]);
+		const double to[3] = { press_.handle_at[0] + (at[0] - press_.from[0]), press_.handle_at[1] + (at[1] - press_.from[1]),
+			0.0 };
+		std::vector<Edit> edits;
+		mission_area_handle_edits(*document, press_.area, press_.handle, to, in.keys.ctrl ? 0.0f : viewport.options().snap,
+				gesture_.token(), edits);
+		if (!edits.empty()) {
+			out.request(request::edit_record(path, std::move(edits)));
+			gesture_.sent();
+		}
+		return;
+	}
 	if (!gesture_.dragging() || press_.mark < 0 || press_.taken.empty() || !current) return;
 	// A drag of a pin not selected selects it first, so what moves is what is selected (the 3D view's rule).
 	if (began && !press_.selected) out.request(request::select_record(path, marks_[size_t(press_.mark)].record));
@@ -326,6 +363,15 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 	};
 	for (const int index : selected_) ringed(index, 1.5f);
 	ringed(primary_, 2.5f);
+	// S24: the primary area's edge and corner handles.
+	MissionPressed area;
+	if (primary_ >= 0 && size_t(primary_) < marks_.size() && marks_[size_t(primary_)].area >= 0 && context.editable() &&
+			viewport.pressed(marks_[size_t(primary_)].record, area))
+		for (const MissionHandle handle : kMissionMapAreaHandles) {
+			double hx = 0.0, hy = 0.0;
+			if (mission_map_handle_point(area, handle, hx, hy))
+				list.marker(at(hx, hy), OverlayGlyph::Square, mission_handle_is_corner(handle) ? 3.5f : 4.0f, OverlayRole::Selected);
+		}
 	const int hovered = in.hovered && !gesture_.dragging() ? pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y) : -1;
 	if (hovered >= 0) {
 		const MissionMapMark &mark = marks_[size_t(hovered)];
@@ -356,10 +402,28 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 	return list;
 }
 
-CanvasCursor MissionMapCanvas::cursor(const ViewportContext &, const CanvasInput &in) const {
+CanvasCursor MissionMapCanvas::cursor(const ViewportContext &context, const CanvasInput &in) const {
 	if (!viewport_ || in.panning || panning_) return CanvasCursor::Default;
+	// S24: an area's edge or corner: a resize along its axis or its diagonal.
+	const auto resize = [](MissionHandle handle) {
+		switch (handle) {
+		case MissionHandle::XMin:
+		case MissionHandle::XMax: return CanvasCursor::ResizeEW;
+		case MissionHandle::YMin:
+		case MissionHandle::YMax: return CanvasCursor::ResizeNS;
+		case MissionHandle::XMinYMax:
+		case MissionHandle::XMaxYMin: return CanvasCursor::ResizeNWSE;
+		default: return CanvasCursor::ResizeNESW;
+		}
+	};
+	if (gesture_.pressed() && press_.handle != MissionHandle::Move) return resize(press_.handle);
 	if (gesture_.pressed()) return press_.mark >= 0 && gesture_.dragging() ? CanvasCursor::Move : CanvasCursor::Default;
 	const MissionMapView view = viewport_->view(in.width, in.height);
+	MissionPressed area;
+	if (in.hovered) {
+		const MissionHandle handle = handle_under_(context, view, in.mouse.x, in.mouse.y, area);
+		if (handle != MissionHandle::Move) return resize(handle);
+	}
 	return in.hovered && pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y) >= 0 ? CanvasCursor::Move
 	                                                                                        : CanvasCursor::Default;
 }

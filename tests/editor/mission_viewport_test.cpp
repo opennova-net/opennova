@@ -549,6 +549,48 @@ static int test_links() {
 	return 0;
 }
 
+// S24 B6: an area's corner, bottom and top handles over the wire's drag: a corner moves two bounds, the bottom and the
+// top only where the area's flags bound z (else refused); the handles' tokens in the refusal's list.
+static int test_area_handles() {
+	Rig rig("opennova_editor_mission_viewport_area_handles");
+	TEST_EXPECT(rig.open());
+	const MissionViewport *viewport = rig.viewport();
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress zone = first_of(mission, MissionKind::Area);
+	float x = 0.0f, y = 0.0f;
+	std::string error;
+	TEST_EXPECT(viewport->handle_point(rig.context(), zone.row, "x_min_y_min", x, y, error));
+	TEST_EXPECT(!viewport->handle_point(rig.context(), zone.row, "z_max", x, y, error) && error.find("z_min and z_max") != std::string::npos);
+	TEST_EXPECT(!viewport->handle_point(rig.context(), zone.row, "x_min_y", x, y, error) && error.find("x_min_y_max") != std::string::npos);
+	// The south-west corner dragged 20 px right and 10 px up: x_min and y_min both move, one batch.
+	ViewportDrag drag;
+	drag.id = zone.row;
+	drag.handle = "x_min_y_min";
+	drag.by = true;
+	drag.x = 20.0f;
+	drag.y = -10.0f;
+	drag.end = true;
+	editor_test::Gathered gathered;
+	TEST_EXPECT(viewport->drag(rig.context(), drag, gathered, error) && !gathered.requests.empty() &&
+			gathered.requests[0].kind == EditorRequestKind::EditRecord && gathered.requests[0].edits.size() == 2 &&
+			gathered.requests[0].edits[0].field == "x_min" && gathered.requests[0].edits[1].field == "y_min");
+	// Its flags bound z: the top dragged up 30 px raises z_max.
+	rig.session.handle(request::edit_record(kMission, set_of(zone, "flags", int64_t(opennova::bms::AreaTrigger::kFlagConstrainZ))));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	TEST_EXPECT(viewport->scene().area(zone.row) && viewport->scene().area(zone.row)->constrains_z);
+	drag.handle = "z_max";
+	drag.x = 0.0f;
+	drag.y = -30.0f;
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->drag(rig.context(), drag, gathered, error) && !gathered.requests.empty() &&
+			gathered.requests[0].edits.size() == 1 && gathered.requests[0].edits[0].field == "z_max");
+	const MissionAreaMark *area = viewport->scene().area(zone.row);
+	TEST_EXPECT(area && std::get<double>(gathered.requests[0].edits[0].value) > area->max[2]);
+	std::printf("test_area_handles passed\n");
+	return 0;
+}
+
 // The polish: an entity's bound sphere about its position (the model's GHDR radius by the item's SCALE,
 // padded, none without a collision block: mission_item_bound_radius, the game's entity+0), read once per
 // item while the graph and its files stand and again when a file it read moves (a SCALE edited in the
@@ -1260,6 +1302,48 @@ static int test_placing() {
 	rig.session.handle(request::undo(kMission));
 	TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
 	rig.pump();
+	// S24 B6: a drop on the path's line between its stops 0 and 1 puts the new stop between them (its place 1), the
+	// marker added after the last; a stop selected and deleted takes its marker (mission_view_removals).
+	{
+		const MissionPathMark *one = nullptr;
+		for (const MissionPathMark &each : viewport->scene().paths())
+			if (each.index == 1) one = &each;
+		const MissionEntityMark *a = one ? viewport->scene().entity(one->stops[0]) : nullptr;
+		const MissionEntityMark *b = one ? viewport->scene().entity(one->stops[1]) : nullptr;
+		float ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
+		TEST_EXPECT(a && b && viewport->camera().project(a->at, context.width, context.height, ax, ay) &&
+				viewport->camera().project(b->at, context.width, context.height, bx, by));
+		gathered.requests.clear();
+		drop.name = "1";
+		drop.x = (ax + bx) * 0.5f;
+		drop.y = (ay + by) * 0.5f;
+		TEST_EXPECT(viewport->drop(context, drop, gathered, error) && gathered.requests.size() == 1 &&
+				gathered.requests[0].edits.back().position == 1);
+		TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
+		rig.pump();
+		const auto &inserted = static_cast<const MissionDocument &>(*rig.document());
+		one = nullptr;
+		for (const MissionPathMark &each : viewport->scene().paths())
+			if (each.index == 1) one = &each;
+		TEST_EXPECT(one && one->stops.size() == 5 && one->stops[1] == inserted.rows_of(MissionKind::Marker).back()->id);
+		// The stop selected and deleted: its marker removed (and with it the stop).
+		const Node *path_row = nullptr;
+		for (const Node *each : inserted.rows_of(MissionKind::WaypointPath))
+			if (static_cast<const PathRow &>(*each).native.number == 1) path_row = each;
+		NodeAddress stop;
+		if (path_row)
+			for (const Document::Collection &list : inserted.collections_of(NodeAddress{ path_row->id, path_row->kind, 0 }))
+				if (list.spec.kind == node_kind(MissionKind::Stop) && list.ids.size() > 1)
+					stop = NodeAddress{ path_row->id, list.spec.kind, list.ids[1] };
+		const NodeAddress made{ inserted.rows_of(MissionKind::Marker).back()->id, node_kind(MissionKind::Marker), 0 };
+		const std::vector<NodeAddress> removals = mission_view_removals(inserted, { stop, made });
+		TEST_EXPECT(stop.child != 0 && removals.size() == 1 && removals[0] == made);
+		rig.session.handle(request::undo(kMission));
+		TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
+		rig.pump();
+		drop.x = float(context.width) * 0.5f;
+		drop.y = float(context.height) * 0.5f;
+	}
 	// Refused: a command path.
 	drop.name = "124";
 	TEST_EXPECT(!viewport->drop(context, drop, gathered, error) && error.find("command") != std::string::npos);
@@ -2197,6 +2281,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_fog_reach() == 0);
 	TEST_EXPECT(test_hit_and_box() == 0);
 	TEST_EXPECT(test_links() == 0);
+	TEST_EXPECT(test_area_handles() == 0);
 	TEST_EXPECT(test_sphere_picking() == 0);
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_drop() == 0);

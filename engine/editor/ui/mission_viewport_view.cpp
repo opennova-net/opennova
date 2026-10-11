@@ -679,8 +679,14 @@ void MissionViewportView::Tools::canvas_menu(Workspace &workspace, const Mission
 		viewport_command(workspace, mission, "duplicate", { east * step, north * step });
 	}
 	if (ImGui::MenuItem("Delete", "Delete", false, edits && selected)) {
+		// A selected stop takes its marker (S24), as Delete on the picture does.
 		std::vector<Edit> removes;
-		for (const NodeAddress &record : view.documents.selection.records) {
+		const DocumentBase *open = nullptr;
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == mission.path()) open = each.get();
+		const MissionDocument *document = open ? dynamic_cast<const MissionDocument *>(records_of(*open)) : nullptr;
+		for (const NodeAddress &record : document ? mission_view_removals(*document, view.documents.selection.records)
+		                                          : view.documents.selection.records) {
 			Edit edit;
 			edit.operation = EditOperation::Remove;
 			edit.address = record;

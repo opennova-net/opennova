@@ -483,7 +483,13 @@ int test_overlays() {
 	// The four glyphs, the team rings (three entities on a team), the area's footprint and its z box
 	// (4 + 8 + 4 lines), the path's two lines (one stop names no marker; it does not loop), no label.
 	OverlayList list = mission_overlay_shapes(in);
-	TEST_EXPECT(count(list, OverlayKind::Quad, OverlayRole::Normal) == 1);
+	// The item's diamond; S24: the path's one segment's arrowhead in its colour, no stop numbers (not selected).
+	const auto quads = [&](uint32_t rgb) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Quad && shape.rgb == rgb;
+		});
+	};
+	TEST_EXPECT(quads(kMissionItemRgb) == 1 && quads(kMissionRedRgb) == 1);
 	TEST_EXPECT(glyphs(list, OverlayGlyph::Square, kMissionBuildingRgb) == 1 && glyphs(list, OverlayGlyph::Cross, kMissionMarkerRgb) == 1 &&
 			glyphs(list, OverlayGlyph::Dot, kMissionOrganicRgb) == 1 && glyphs(list, OverlayGlyph::Square, kMissionAreaRgb) == 1);
 	TEST_EXPECT(count(list, OverlayKind::Circle, OverlayRole::Normal) == 3);
@@ -501,6 +507,14 @@ int test_overlays() {
 	in.selected_rows = &selected_rows;
 	list = mission_overlay_shapes(in);
 	TEST_EXPECT(lines(kMissionBlueRgb, 2.5f) == 2);
+	// S24: selected, each stop's number beside it (the marker 12 is stop 0, the pump 10 stop 1), in the path's
+	// colour.
+	const auto numbered = [&](const char *words) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Text && shape.text == words && shape.rgb == kMissionBlueRgb;
+		});
+	};
+	TEST_EXPECT(numbered("0") == 1 && numbered("1") == 1);
 	in.selected_rows = nullptr;
 	// Hovered: a Hover ring; the primary: a thick Selected ring, its handles (the yaw handle of the
 	// yaw-90 building east of its anchor, the height handle above it); another selected: a thinner
@@ -532,9 +546,9 @@ int test_overlays() {
 	TEST_EXPECT(count(list, OverlayKind::Marker, OverlayRole::Selected) == 1); // the height handle's square
 	options.labels = true;
 	list = mission_overlay_shapes(in);
-	TEST_EXPECT(count(list, OverlayKind::Text, OverlayRole::Normal) == 5);
+	TEST_EXPECT(count(list, OverlayKind::Text, OverlayRole::Normal) == 5 + 2); // the labels, the path's two stop numbers (S24)
 	options.labels = false;
-	// The area primary: its four edge handles; the marquee drawn.
+	// The area primary: its edge handles (S24: its corners, bottom and top too); the marquee drawn.
 	in.primary = 4;
 	in.hover = -1;
 	selected.clear();
@@ -542,11 +556,20 @@ int test_overlays() {
 	in.marquee_from = CanvasPoint{ 50.0f, 60.0f };
 	in.marquee_to = CanvasPoint{ 10.0f, 20.0f };
 	list = mission_overlay_shapes(in);
-	TEST_EXPECT(count(list, OverlayKind::Marker, OverlayRole::Selected) == 4);
+	TEST_EXPECT(count(list, OverlayKind::Marker, OverlayRole::Selected) == 10); // its edges, corners, bottom and top
 	TEST_EXPECT(count(list, OverlayKind::Rect, OverlayRole::Marquee) == 1 && list.shapes.back().points[0].x == 10.0f &&
 			list.shapes.back().points[1].y == 60.0f);
-	const PreviewVec3 edge = mission_area_edge_middle(scene.areas()[0], MissionHandle::XMax, 0.0);
+	const PreviewVec3 edge = mission_area_handle_point(scene.areas()[0], MissionHandle::XMax, 0.0);
 	TEST_EXPECT(near(edge.x, 30.0) && near(edge.z, -20.0));
+	// S24: a corner at the anchor's height, the bottom and the top at the z bounds (the area bounds z: its ten
+	// handles, eight with flat z).
+	const PreviewVec3 corner = mission_area_handle_point(scene.areas()[0], MissionHandle::XMinYMax, 2.0);
+	const PreviewVec3 top = mission_area_handle_point(scene.areas()[0], MissionHandle::ZMax, 2.0);
+	TEST_EXPECT(near(corner.x, 10.0) && near(corner.z, -30.0) && near(corner.y, 2.0) && near(top.y, 8.0) && near(top.x, 20.0));
+	TEST_EXPECT(mission_area_handles(scene.areas()[0]).size() == 10);
+	MissionAreaMark flat = scene.areas()[0];
+	flat.constrains_z = false;
+	TEST_EXPECT(mission_area_handles(flat).size() == 8);
 	// A line clipped at the near plane: one end behind the eye still draws to the plane; both
 	// behind, nothing.
 	OrbitCamera low = camera_over(0.0, 0.0, 0.0, 5.0f);

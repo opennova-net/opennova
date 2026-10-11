@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -13,6 +15,7 @@ namespace opennova::editor {
 class Document;
 class MissionDocument;
 class MissionScene;
+struct MissionEntityMark;
 class ViewportDevice;
 
 // What the mission viewport's placing and tweaking verbs write (ADR 0046 S15, Placing and tweaking),
@@ -47,11 +50,21 @@ bool mission_duplicate_edits(const Document &document, const MissionScene &scene
 bool mission_area_edits(const double a[2], const double b[2], float snap, std::vector<Edit> &out, std::string &error);
 
 // A stop of the path of number `path`: a marker of `item` added at mission point `at`, facing `yaw`
-// degrees, and a stop naming it after the path's last. False with `error` for a path the file has
-// not, a command (0 and 123..127 name no route), a path holding its 32 stops, an item placed in
-// another pool than the markers.
+// degrees, and a stop naming it after the path's last, or (S24) at its place `position` among the
+// path's stops (SIZE_MAX: the end): a stop put between two on the line between them. False with
+// `error` for a path the file has not, a command (0 and 123..127 name no route), a path holding its 32
+// stops, an item placed in another pool than the markers.
 bool mission_stop_edits(const MissionDocument &document, int path, int64_t item, MissionKind pool, const double at[3],
-		int yaw, std::vector<Edit> &out, std::string &error);
+		int yaw, std::vector<Edit> &out, std::string &error, size_t position = SIZE_MAX);
+// The place a stop of `path` added at picture point (x, y) takes (S24): one past the first stop of the segment of
+// the path's line within `slop` pixels of the point, nearest first, as `project` places the stops' markers (false
+// off the picture); SIZE_MAX (after its last) for a point on no segment, or on the segment that closes a looping
+// path.
+size_t mission_stop_place(const MissionScene &scene, int path, float x, float y, float slop,
+		const std::function<bool(const MissionEntityMark &marker, float &px, float &py)> &project);
+// The records Delete removes from a mission's views: each selected record, a stop's marker for a stop (the marker
+// takes the stops that visit it with it: MissionDocument::removal_edits), each once.
+std::vector<NodeAddress> mission_view_removals(const MissionDocument &document, const std::vector<NodeAddress> &records);
 
 // The marker item a new stop of path `path` takes: the item of the marker its last stop names, else
 // that of the last stop of the mission's last path (by number) whose stops name a marker, else 0

@@ -112,7 +112,7 @@ bool mission_area_edits(const double a[2], const double b[2], float snap, std::v
 }
 
 bool mission_stop_edits(const MissionDocument &document, int path, int64_t item, MissionKind pool, const double at[3],
-		int yaw, std::vector<Edit> &out, std::string &error) {
+		int yaw, std::vector<Edit> &out, std::string &error, size_t position) {
 	out.clear();
 	if (path <= 0 || path >= mission::kFirstPathCommand) {
 		error = path <= 0 ? std::string("Pick a path to add stops to (path 0 is none).")
@@ -149,14 +149,66 @@ bool mission_stop_edits(const MissionDocument &document, int path, int64_t item,
 	out.push_back(set_of(made, mission_field_ids::kY, at[1]));
 	out.push_back(set_of(made, mission_field_ids::kZ, at[2]));
 	out.push_back(set_of(made, mission_field_ids::kYaw, int64_t(mission::wrapped_yaw(double(yaw)))));
-	// The stop, after the path's last.
+	// The stop, after the path's last, or at its place among them.
 	Edit stop;
 	stop.operation = EditOperation::Add;
 	stop.address = NodeAddress{ row->id, node_kind(MissionKind::Stop), 0 };
 	stop.field = "marker";
 	stop.value = int64_t(index);
+	stop.position = position < static_cast<const PathRow &>(*row).native.stops.size() ? position : SIZE_MAX;
 	out.push_back(std::move(stop));
 	return true;
+}
+
+size_t mission_stop_place(const MissionScene &scene, int path, float x, float y, float slop,
+		const std::function<bool(const MissionEntityMark &marker, float &px, float &py)> &project) {
+	const MissionPathMark *found = nullptr;
+	for (const MissionPathMark &each : scene.paths())
+		if (each.index == path) found = &each;
+	if (!found) return SIZE_MAX;
+	// Each stop that names a marker on the picture, by its place among the path's stops.
+	std::vector<std::pair<size_t, CanvasPoint>> stops;
+	for (size_t i = 0; i < found->stops.size(); ++i) {
+		const MissionEntityMark *marker = found->stops[i] ? scene.entity(found->stops[i]) : nullptr;
+		CanvasPoint at;
+		if (marker && project(*marker, at.x, at.y)) stops.emplace_back(i, at);
+	}
+	size_t best = SIZE_MAX;
+	float nearest = slop;
+	for (size_t i = 0; i + 1 < stops.size(); ++i) {
+		const CanvasPoint a = stops[i].second, b = stops[i + 1].second;
+		const float dx = b.x - a.x, dy = b.y - a.y, length2 = dx * dx + dy * dy;
+		const float t = length2 > 0.0f ? std::clamp(((x - a.x) * dx + (y - a.y) * dy) / length2, 0.0f, 1.0f) : 0.0f;
+		const float distance = std::hypot(a.x + dx * t - x, a.y + dy * t - y);
+		// Strictly between its ends: a click on a stop itself adds after the last, as before.
+		if (distance <= nearest && t > 0.0f && t < 1.0f) {
+			nearest = distance;
+			best = stops[i + 1].first;
+		}
+	}
+	return best;
+}
+
+std::vector<NodeAddress> mission_view_removals(const MissionDocument &document, const std::vector<NodeAddress> &records) {
+	std::vector<NodeAddress> out;
+	const auto add = [&](const NodeAddress &record) {
+		if (std::find(out.begin(), out.end(), record) == out.end()) out.push_back(record);
+	};
+	for (const NodeAddress &record : records) {
+		if (record.child && record.kind == node_kind(MissionKind::Stop)) {
+			// The marker the stop names (its index among the markers).
+			const Node *row = document.row(record.row);
+			Document::Placement at;
+			if (!row || row->kind != node_kind(MissionKind::WaypointPath) || !document.placement(record, at)) continue;
+			const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.stops;
+			if (at.index < stops.size())
+				if (const Node *marker = document.row_of(MissionKind::Marker, stops[at.index]))
+					add(NodeAddress{ marker->id, marker->kind, 0 });
+			continue;
+		}
+		add(record);
+	}
+	return out;
 }
 
 int64_t mission_stop_item(const MissionScene &scene, int path) {

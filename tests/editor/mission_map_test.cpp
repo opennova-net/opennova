@@ -426,6 +426,48 @@ static int test_group_colours() {
 	return 0;
 }
 
+// S24 B6: an area's edges and corners on the map over the wire's drag (as far as the pointer went, the area alone);
+// its bottom and top refused (the 3D view's).
+static int test_area_handles() {
+	Rig rig("opennova_editor_mission_map_area_handles");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress zone = first_of(mission, MissionKind::Area);
+	const ViewportContext context = rig.context();
+	const MissionMapView view = rig.map()->view(context.width, context.height);
+	MissionPressed held;
+	TEST_EXPECT(rig.map()->pressed(zone, held));
+	ViewportDrag drag;
+	drag.id = zone.row;
+	drag.handle = "x_max";
+	drag.by = true;
+	drag.x = 10.0f;
+	drag.y = 0.0f;
+	drag.end = true;
+	editor_test::Gathered gathered;
+	std::string error;
+	TEST_EXPECT(rig.map()->drag(context, drag, gathered, error) && gathered.requests.size() == 2 &&
+	            gathered.requests[0].edits.size() == 1 && gathered.requests[0].edits[0].field == "x_max");
+	if (gathered.requests.size() == 2 && gathered.requests[0].edits.size() == 1) {
+		const double x_max = std::get<double>(gathered.requests[0].edits[0].value);
+		TEST_EXPECT(near(x_max, held.max[0] + 10.0 * double(view.scale), 1e-3));
+	}
+	drag.handle = "x_min_y_max";
+	gathered.requests.clear();
+	TEST_EXPECT(rig.map()->drag(context, drag, gathered, error) && !gathered.requests.empty() &&
+	            gathered.requests[0].edits.size() == 1 && gathered.requests[0].edits[0].field == "x_min");
+	drag.handle = "z_max";
+	gathered.requests.clear();
+	TEST_EXPECT(!rig.map()->drag(context, drag, gathered, error) && error.find("3D view") != std::string::npos);
+	// An entity has no edge on the map.
+	drag.id = first_of(mission, MissionKind::Item).row;
+	drag.handle = "x_min";
+	TEST_EXPECT(!rig.map()->drag(context, drag, gathered, error));
+	std::printf("test_area_handles passed\n");
+	return 0;
+}
+
 // The commands (frame, the CMAP's zoom steps), each a SetViewport of the camera; the wire's camera and options, and
 // their refusals.
 static int test_commands_and_wire() {
@@ -863,6 +905,7 @@ int main(int argc, char **argv) {
 	failed += test_drag();
 	failed += test_links();
 	failed += test_group_colours();
+	failed += test_area_handles();
 	failed += test_commands_and_wire();
 	failed += test_grid_origin();
 	failed += test_outline_of_a_box();

@@ -27,8 +27,10 @@ struct OrbitCamera;
 // colour, the hovered mark ringed, the selected marks ringed (the primary thicker) and the primary's
 // handles (a line along its heading to the yaw handle's disc, a square above it for the height), an
 // area's footprint (its corners at the ground where a device answers, else at its z_min; its top and
-// bottom too where its flags bound z) with its edge handles when primary, a path's line through its
-// stops (closed unless it does not loop; thick while it or one of its markers is selected), a label
+// bottom too where its flags bound z) with its edge handles when primary (S24: its corners', and its bottom's and
+// top's where its flags bound z), a path's line through its stops (closed unless it does not loop; thick while it
+// or one of its markers is selected; S24: an arrowhead along each segment the way the path goes, each stop's
+// number beside it while the path is selected or with the labels option, a one-stop path ringed), a label
 // beside the hovered and the selected marks (beside the other shown ones with the labels option,
 // decluttered: preview/mission_label_picks), and the marquee. A line with an end behind the near plane is
 // clipped to it. At most kMissionMarksDrawn marks are drawn, the nearest. S15: the selected marks
@@ -76,8 +78,12 @@ PreviewVec3 mission_entity_heading(const MissionEntityMark &entity);
 // `reach` metres above it.
 PreviewVec3 mission_yaw_handle(const MissionEntityMark &entity, float reach);
 PreviewVec3 mission_height_handle(const MissionEntityMark &entity, float reach);
-// The middle of an area's edge `edge`, at mission height `z`.
-PreviewVec3 mission_area_edge_middle(const MissionAreaMark &area, MissionHandle edge, double z);
+// Where an area's handle sits: an edge's middle and a corner at mission height `z` (its anchor's), its bottom's
+// and its top's middle at its z_min and z_max (S24); its middle at `z` for any other handle.
+PreviewVec3 mission_area_handle_point(const MissionAreaMark &area, MissionHandle handle, double z);
+// The handles an area carries as the primary: its four edges and four corners, and its bottom and top where its
+// flags bound z.
+std::vector<MissionHandle> mission_area_handles(const MissionAreaMark &area);
 // An area's anchor height: the ground at its centre where `device` answers, else its z_min.
 double mission_area_anchor_z(const MissionAreaMark &area, const ViewportDevice *device);
 

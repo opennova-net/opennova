@@ -379,6 +379,25 @@ std::vector<NodeAddress> mission_map_box_records(const std::vector<MissionMapMar
 	return out;
 }
 
+bool mission_map_handle_point(const MissionPressed &area, MissionHandle handle, double &x, double &y) {
+	if (!area.area || !(mission_handle_is_edge(handle) || mission_handle_is_corner(handle))) return false;
+	const double mx = (area.min[0] + area.max[0]) * 0.5, my = (area.min[1] + area.max[1]) * 0.5;
+	x = mx;
+	y = my;
+	switch (handle) {
+	case MissionHandle::XMin: x = area.min[0]; break;
+	case MissionHandle::XMax: x = area.max[0]; break;
+	case MissionHandle::YMin: y = area.min[1]; break;
+	case MissionHandle::YMax: y = area.max[1]; break;
+	case MissionHandle::XMinYMin: x = area.min[0], y = area.min[1]; break;
+	case MissionHandle::XMaxYMin: x = area.max[0], y = area.min[1]; break;
+	case MissionHandle::XMaxYMax: x = area.max[0], y = area.max[1]; break;
+	case MissionHandle::XMinYMax: x = area.min[0], y = area.max[1]; break;
+	default: return false;
+	}
+	return true;
+}
+
 int mission_map_route(const MissionScene &scene) {
 	for (size_t i = 0; i < scene.paths().size(); ++i)
 		if (scene.paths()[i].flags & uint32_t(bms::WaypointFlags::PlayerRoute)) return int(i);
@@ -820,8 +839,13 @@ bool MissionMapViewport::click_frame(const ViewportContext &context, SelectMode,
 
 bool MissionMapViewport::handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x,
 		float &y, std::string &error) const {
-	if (handle != "move") {
-		error = "The map moves a record (handle move); its height, heading and an area's edges are the 3D view's.";
+	MissionHandle held_handle = MissionHandle::Move;
+	const bool known = mission_handle_from_token(handle.c_str(), held_handle);
+	if (!known || !(held_handle == MissionHandle::Move || mission_handle_is_edge(held_handle) ||
+	                  mission_handle_is_corner(held_handle))) {
+		error = "The map moves a record (handle move) and an area's edges and corners (x_min, x_max, y_min, y_max, "
+		        "x_min_y_min, x_max_y_min, x_max_y_max, x_min_y_max); its height, heading and an area's bottom and top are "
+		        "the 3D view's.";
 		return false;
 	}
 	if (!planned(context, error)) return false;
@@ -831,7 +855,12 @@ bool MissionMapViewport::handle_point(const ViewportContext &context, NodeId id,
 		error = "Record " + std::to_string(id) + " is no entity or area of the mission.";
 		return false;
 	}
-	view(context.width, context.height).project(held.x, held.y, x, y);
+	double at[2] = { held.x, held.y };
+	if (held_handle != MissionHandle::Move && !mission_map_handle_point(held, held_handle, at[0], at[1])) {
+		error = "An entity has no " + handle + " handle on the map (move).";
+		return false;
+	}
+	view(context.width, context.height).project(at[0], at[1], x, y);
 	return true;
 }
 
@@ -853,25 +882,39 @@ bool MissionMapViewport::drag(const ViewportContext &context, const ViewportDrag
 		if (drag.end && drag.gesture) out.request(request::end_edit(document->path()));
 		return true;
 	}
-	size_t grabbed = 0;
-	const std::vector<MissionPressed> held = taken(context, *document, document->address_of(drag.id), grabbed);
-	if (held.empty()) {
-		error = "Record " + std::to_string(drag.id) + " is no entity or area of the mission.";
-		return false;
-	}
-	// The record goes as far as the point under the pointer went from the one under its pin: the 3D view's move
-	// (mission_move_edits), the selection with it, its height over the device's ground kept with stick.
+	MissionHandle handle = MissionHandle::Move;
+	mission_handle_from_token(drag.handle.c_str(), handle);
 	const MissionMapView shown = view(context.width, context.height);
 	const float x = drag.by ? hx + drag.x : drag.x, y = drag.by ? hy + drag.y : drag.y;
 	double to[2], from[2];
 	shown.unproject(x, y, to[0], to[1]);
 	shown.unproject(hx, hy, from[0], from[1]);
-	const double target[2] = { held[grabbed].x + (to[0] - from[0]), held[grabbed].y + (to[1] - from[1]) };
 	const uint64_t gesture = drag.gesture ? drag.gesture : next_edit_gesture();
 	std::vector<Edit> edits;
-	if (!mission_move_edits(*document, held, grabbed, target, drag.snap, options_.stick, context.device, gesture, edits)) {
-		error = "The record cannot be moved.";
-		return false;
+	if (handle != MissionHandle::Move) {
+		// An area's edge or corner (S24): as far as the pointer went from where the handle stands, the area alone.
+		MissionPressed area;
+		double hx_m = 0.0, hy_m = 0.0;
+		if (!pressed(document->address_of(drag.id), area) || !mission_map_handle_point(area, handle, hx_m, hy_m)) {
+			error = "Record " + std::to_string(drag.id) + " is no area of the mission.";
+			return false;
+		}
+		const double point[3] = { hx_m + (to[0] - from[0]), hy_m + (to[1] - from[1]), 0.0 };
+		mission_area_handle_edits(*document, area, handle, point, drag.snap, gesture, edits);
+	} else {
+		size_t grabbed = 0;
+		const std::vector<MissionPressed> held = taken(context, *document, document->address_of(drag.id), grabbed);
+		if (held.empty()) {
+			error = "Record " + std::to_string(drag.id) + " is no entity or area of the mission.";
+			return false;
+		}
+		// The record goes as far as the point under the pointer went from the one under its pin: the 3D view's move
+		// (mission_move_edits), the selection with it, its height over the device's ground kept with stick.
+		const double target[2] = { held[grabbed].x + (to[0] - from[0]), held[grabbed].y + (to[1] - from[1]) };
+		if (!mission_move_edits(*document, held, grabbed, target, drag.snap, options_.stick, context.device, gesture, edits)) {
+			error = "The record cannot be moved.";
+			return false;
+		}
 	}
 	const bool wrote = !edits.empty();
 	if (wrote) out.request(request::edit_record(document->path(), std::move(edits)));

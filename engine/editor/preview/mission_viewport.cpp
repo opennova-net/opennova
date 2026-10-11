@@ -203,11 +203,13 @@ bool MissionViewport::handle_at(const MissionMark &mark, MissionHandle handle, P
 			out = mark.at;
 			return true;
 		}
-		if (!mission_handle_is_edge(handle)) return false;
-		// At the anchor's height: the ground under its middle, or its z_min (the mark's own).
+		const MissionAreaMark &area = scene_.areas()[size_t(mark.area)];
+		if (!mission_handle_is_area(handle) || (mission_handle_is_level(handle) && !area.constrains_z)) return false;
+		// At the anchor's height: the ground under its middle, or its z_min (the mark's own); its bottom and top
+		// at its z bounds.
 		double anchor[3];
 		preview_to_mission(mark.at, anchor);
-		out = mission_area_edge_middle(scene_.areas()[size_t(mark.area)], handle, anchor[2]);
+		out = mission_area_handle_point(area, handle, anchor[2]);
 		return true;
 	}
 	if (mark.entity < 0) return false;
@@ -782,7 +784,9 @@ bool MissionViewport::handle_point(const ViewportContext &context, NodeId id, co
 		float &y, std::string &error) const {
 	MissionHandle held = MissionHandle::Move;
 	if (!mission_handle_from_token(handle.c_str(), held)) {
-		error = "Unknown handle \"" + handle + "\" (move, height, yaw, x_min, x_max, y_min, y_max).";
+		error = "Unknown handle \"" + handle +
+				"\" (move, height, yaw, x_min, x_max, y_min, y_max, x_min_y_min, x_max_y_min, x_max_y_max, x_min_y_max, z_min, "
+				"z_max).";
 		return false;
 	}
 	if (!planned_(context, error)) return false;
@@ -794,7 +798,9 @@ bool MissionViewport::handle_point(const ViewportContext &context, NodeId id, co
 	}
 	PreviewVec3 at;
 	if (!handle_at(shown[size_t(index)], held, at)) {
-		error = shown[size_t(index)].area >= 0 ? "An area has no " + handle + " handle (move, x_min, x_max, y_min, y_max)."
+		error = shown[size_t(index)].area >= 0 ? "An area has no " + handle +
+				" handle (move, its edges x_min, x_max, y_min, y_max, its corners x_min_y_min, x_max_y_min, x_max_y_max, "
+				"x_min_y_max, and where its flags bound z, z_min and z_max)."
 											   : "An entity has no " + handle + " handle (move, height, yaw).";
 		return false;
 	}
@@ -812,8 +818,8 @@ std::vector<MissionPressed> MissionViewport::taken_(const ViewportContext &conte
 	MissionPressed own;
 	if (!pressed(record, own)) return out;
 	const Selection *selection = selection_of(context.input, document);
-	// An edge is its area's alone; a record not selected moves alone.
-	if (mission_handle_is_edge(handle) || !selection || !selection->holds(record)) {
+	// An area's edge, corner, bottom or top is its alone; a record not selected moves alone.
+	if (mission_handle_is_area(handle) || !selection || !selection->holds(record)) {
 		out.push_back(own);
 		return out;
 	}
@@ -909,14 +915,27 @@ bool MissionViewport::drag(const ViewportContext &context, const ViewportDrag &d
 				options_.stick, context.device);
 		break;
 	}
+	case MissionHandle::ZMin:
+	case MissionHandle::ZMax: {
+		// In the plane through the handle that faces the eye: the bound's height there.
+		const PreviewVec3 through = mission_scene_point((held.min[0] + held.max[0]) * 0.5, (held.min[1] + held.max[1]) * 0.5,
+				handle == MissionHandle::ZMin ? held.min[2] : held.max[2]);
+		PreviewVec3 at;
+		if (!camera_.on_view_plane(x, y, context.width, context.height, through, at)) {
+			error = "The point is not over the area's height.";
+			return false;
+		}
+		const double to[3] = { 0.0, 0.0, double(at.y) };
+		planned = mission_area_handle_edits(*document, held, handle, to, drag.snap, gesture, edits);
+		break;
+	}
 	default: {
 		double to[3];
 		if (!mission_ground_point(context, camera_, x, y, held.z, to)) {
 			error = "The point is not over the ground.";
 			return false;
 		}
-		const bool east = handle == MissionHandle::XMin || handle == MissionHandle::XMax;
-		planned = mission_area_edge_edits(*document, held, handle, to[east ? 0 : 1], drag.snap, gesture, edits);
+		planned = mission_area_handle_edits(*document, held, handle, to, drag.snap, gesture, edits);
 		break;
 	}
 	}
@@ -1053,7 +1072,12 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	}
 	std::vector<Edit> edits;
 	if (path) {
-		if (!mission_stop_edits(mission, path, item, facts.pool, at, yaw, edits, error)) return false;
+		// S24: a drop on the path's line puts the stop between the two it lies between.
+		const size_t position = mission_stop_place(scene_, path, drop.x, drop.y, kMissionPickSlop,
+				[&](const MissionEntityMark &marker, float &px, float &py) {
+					return camera_.project(marker.at, context.width, context.height, px, py);
+				});
+		if (!mission_stop_edits(mission, path, item, facts.pool, at, yaw, edits, error, position)) return false;
 		out.request(request::edit_record(document->path(), std::move(edits)));
 		return true;
 	}

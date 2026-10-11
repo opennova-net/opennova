@@ -16,6 +16,7 @@
 #include <editor/model/document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_overlay.h>
+#include <editor/preview/mission_place.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/request_factories.h>
@@ -84,7 +85,8 @@ std::vector<MissionPressed> selected_pressed(const MissionCanvasFrame &frame, bo
 
 // The handles the primary carries, nearest the pointer first in this order.
 constexpr MissionHandle kPrimaryHandles[] = { MissionHandle::Yaw, MissionHandle::Height, MissionHandle::XMin,
-	MissionHandle::XMax, MissionHandle::YMin, MissionHandle::YMax };
+	MissionHandle::XMax, MissionHandle::YMin, MissionHandle::YMax, MissionHandle::XMinYMin, MissionHandle::XMaxYMin,
+	MissionHandle::XMaxYMax, MissionHandle::XMinYMax, MissionHandle::ZMin, MissionHandle::ZMax };
 
 // Words with their first letter upper case ("group 4" -> "Group 4").
 std::string capitalized_words(std::string words) {
@@ -149,7 +151,7 @@ MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportC
 			grab.what = MissionGrab::What::Handle;
 			grab.handle = handle;
 			grab.through = at;
-			if (mission_handle_is_edge(handle)) {
+			if (mission_handle_is_area(handle)) {
 				MissionPressed area;
 				viewport.pressed(primary.record, area);
 				grab.pressed.push_back(area);
@@ -361,9 +363,11 @@ void MissionCanvas::keys_(const ViewportContext &, const CanvasInput &in, Canvas
 	}
 	if (!frame_.editable || !frame_.current || frame_.records.empty()) return;
 	if (keyboard.remove) {
-		// The selected records removed, one batch: the type repairs what named them.
+		// The selected records removed, one batch: the type repairs what named them. S24: a selected stop takes its
+		// marker (which takes the stops that visit it).
 		std::vector<Edit> edits;
-		for (const NodeAddress &record : frame_.records) {
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(frame_.document);
+		for (const NodeAddress &record : mission ? mission_view_removals(*mission, frame_.records) : frame_.records) {
 			Edit edit;
 			edit.operation = EditOperation::Remove;
 			edit.address = record;
@@ -448,11 +452,19 @@ void MissionCanvas::drag_(const ViewportContext &context, const CanvasInput &in,
 				in.keys.ctrl ? 0.0f : frame_.turn_snap, gesture_.token(), edits, viewport.options().stick, frame_.device);
 		break;
 	}
+	case MissionHandle::ZMin:
+	case MissionHandle::ZMax: {
+		// S24: the area's bottom or top, in the plane through the handle that faces the eye.
+		PreviewVec3 at;
+		if (!camera.on_view_plane(x, y, in.width, in.height, grab_.through, at)) return;
+		const double to[3] = { 0.0, 0.0, double(at.y) };
+		mission_area_handle_edits(*frame_.document, held, grab_.handle, to, snap, gesture_.token(), edits);
+		break;
+	}
 	default: {
 		double ground[3];
 		if (!grab_.grounded || !mission_ground_point(context, camera, x, y, grab_.ground[2], ground)) return;
-		const bool east = grab_.handle == MissionHandle::XMin || grab_.handle == MissionHandle::XMax;
-		mission_area_edge_edits(*frame_.document, held, grab_.handle, ground[east ? 0 : 1], snap, gesture_.token(), edits);
+		mission_area_handle_edits(*frame_.document, held, grab_.handle, ground, snap, gesture_.token(), edits);
 		break;
 	}
 	}

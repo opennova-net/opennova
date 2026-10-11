@@ -41,6 +41,10 @@ public:
 private:
 	// The camera moved to `camera`, raised as a SetViewport once a frame at most.
 	void camera_(const MissionMapCamera &camera, CanvasRequests &out);
+	// S24: the primary area's edge or corner within the pick slop of (x, y) on a view (Move: none), with the area as
+	// a press finds it.
+	MissionHandle handle_under_(const ViewportContext &context, const MissionMapView &view, float x, float y,
+			MissionPressed &area) const;
 
 	CanvasGesture gesture_;
 	const MissionMapViewport *viewport_ = nullptr; // the frame's, from follow
@@ -57,6 +61,11 @@ private:
 	// the grabbed one's place among them, where it began in the mission, and the box's corners.
 	struct Press {
 		int mark = -1;
+		// S24: the primary area's edge or corner the press took (Move: none), the area as pressed and where the
+		// handle stood (mission x and y).
+		MissionHandle handle = MissionHandle::Move;
+		MissionPressed area;
+		double handle_at[2] = { 0.0, 0.0 };
 		std::vector<MissionPressed> taken;
 		size_t grabbed = 0;
 		double from[2] = { 0.0, 0.0 };
