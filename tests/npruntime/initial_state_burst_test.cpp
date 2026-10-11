@@ -77,6 +77,8 @@ int main_impl() {
 		start.item_id = 6002;
 		start.position = {50.0f, 60.0f, 1.0f};
 		start.yaw = 0;
+		start.item_type_index = 1; // the trait sweep's row: not an empty slot
+		start.has_item_def = true;
 		world.registry.spawn(3, start);
 	}
 	{
@@ -85,6 +87,8 @@ int main_impl() {
 		w::Entity location;
 		location.kind = w::EntityKind::Marker;
 		location.item_id = 2044;
+		location.item_type_index = 2; // the trait sweep's row: not an empty slot
+		location.has_item_def = true;
 		world.registry.spawn(3, location);
 		world.registry.spawn(3, location);
 	}
@@ -414,6 +418,8 @@ int main_impl() {
 			m.kind = w::EntityKind::Marker;
 			m.item_id = 6002;
 			m.position = {10.0f, 20.0f, 1.0f};
+			m.item_type_index = 1; // the trait sweep's row: not an empty slot
+			m.has_item_def = true;
 			w2.registry.spawn(3, m);
 		}
 		ns::LoopbackChannel lb2;
@@ -509,6 +515,8 @@ int main_impl() {
 			m.kind = w::EntityKind::Marker;
 			m.item_id = 6002;
 			m.position = {10.0f, 20.0f, 1.0f};
+			m.item_type_index = 1; // the trait sweep's row: not an empty slot
+			m.has_item_def = true;
 			w3.registry.spawn(3, m);
 		}
 		inmatch::NapiNPServerCtx ctx3;
@@ -850,11 +858,98 @@ int pool1_fixture_bytes_impl() {
 	std::printf("PASS pool1_fixture_bytes\n");
 	return 0;
 }
+
+// The 0x20 page's start word is the pool cursor, a slot: with empty slots
+// below the page boundary, every record of every page lands on the slot its
+// start word plus its index names, and a zero word counts like a record
+// toward the budget. Four freed slots size the first page so that the last of
+// them is the record that crosses it (4 + 29 x 21 + 3 x 2 = 619 bytes before
+// it, 621 with it, past 650 - 30): it ends the first page, and the second page
+// starts on it again (D-NET-416, D-NET-397).
+// [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 -- the start word
+//  @0x5034C5, the zero word @0x503673, the count @0x503687, the budget
+//  @0x50368B..0x503694 (the cursor step @0x503696 skipped on the cross);
+//  Server_SendInitialGameStateToPlayer @0x51BBA0, the call @0x51BD8E]
+int pool3_page_start_impl() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(3, 96);
+	for (int i = 0; i < 80; ++i) {
+		w::Entity m;
+		m.kind = w::EntityKind::Marker;
+		m.item_id = 6002; // a 21-byte record: type, flags, x/y/z, heading, handle
+		m.position = {static_cast<float>(i), 20.0f, 1.0f};
+		m.item_type_index = 1; // the trait sweep's row: not an empty slot
+		m.has_item_def = true;
+		world.registry.spawn(3, m);
+	}
+	const std::vector<std::size_t> freed = {5, 10, 15, 32};
+	for (const std::size_t slot : freed)
+		world.registry.despawn(w::EntityHandle::make(3, static_cast<int>(slot)));
+	ns::LoopbackChannel loopback;
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
+	                        inmatch::SocketMode::Socketless, /*host_key=*/0, &loopback);
+	ctx.world = &world;
+	inmatch::Server_InitNewRoundState(ctx);
+	inmatch::Server_ProcessPendingPlayerSpawns(ctx, world);
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list[0];
+	std::vector<std::vector<uint8_t>> pages;
+	bool reached = false;
+	for (int i = 0; i < 64 && !reached; ++i) {
+		inmatch::InitialStateStep step =
+				inmatch::Server_SendInitialGameStateToPlayer(ctx, conn, /*now_tick=*/1);
+		if (!step.advanced) break;
+		for (const auto &m : step.messages)
+			if (m.tag == 0x20) pages.push_back(m.body);
+		reached = step.reached_in_game;
+	}
+	if (!expect(reached && pages.size() >= 2, "the 80 pool-3 slots take more than one 0x20 page"))
+		return 1;
+	std::vector<opennova::Pool3SyncBatch> batches(pages.size());
+	std::size_t zero_words = 0;
+	for (std::size_t p = 0; p < pages.size(); ++p) {
+		opennova::Pool3SyncBatch &batch = batches[p];
+		if (!expect(opennova::decode_pool3_sync_batch(pages[p].data(), pages[p].size(), batch) &&
+		                    pages[p].size() <= 650 + 30,
+		            "each 0x20 page decodes within the budget"))
+			return 1;
+		for (std::size_t i = 0; i < batch.records.size(); ++i) {
+			const opennova::Pool3SyncRecord &r = batch.records[i];
+			const std::size_t slot = batch.start_index + i;
+			if (r.is_empty_slot) {
+				if (!expect(std::find(freed.begin(), freed.end(), slot) != freed.end(),
+				            "a zero word is a freed slot"))
+					return 1;
+				++zero_words;
+				continue;
+			}
+			if (!expect(r.net_handle == w::EntityHandle::make(3, static_cast<int>(slot)).packed,
+			            "a record's slot is the page's start word plus its index"))
+				return 1;
+		}
+	}
+	const opennova::Pool3SyncBatch &first = batches[0];
+	if (!expect(first.start_index == 0 && pages[0].size() == 621 && first.records.size() == 33 &&
+	                    first.records.back().is_empty_slot,
+	            "the freed slot 32 is the zero word that crosses the first page's budget"))
+		return 1;
+	if (!expect(batches[1].start_index == 32 && !batches[1].records.empty() &&
+	                    batches[1].records.front().is_empty_slot,
+	            "the second page starts on that zero word"))
+		return 1;
+	if (!expect(zero_words == freed.size() + 1,
+	            "each freed slot streams as a zero word, the crossing one twice"))
+		return 1;
+	std::printf("PASS pool3_page_start\n");
+	return 0;
+}
 } // namespace
 
 int main() {
 	const int burst = main_impl();
 	const int flags = pool1_flags_field_impl();
 	const int bytes = pool1_fixture_bytes_impl();
-	return burst != 0 ? burst : (flags != 0 ? flags : bytes);
+	const int pool3 = pool3_page_start_impl();
+	return burst != 0 ? burst : (flags != 0 ? flags : (bytes != 0 ? bytes : pool3));
 }

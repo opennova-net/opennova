@@ -474,7 +474,10 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			                                initial_state_page_limits::pool3_markers(),
 			                                [&](std::size_t off, std::size_t cnt) {
 				opennova::Pool3SyncBatch p;
-				p.start_index = static_cast<uint16_t>(off);
+				// The start word is the pool cursor, a slot: the records are slot-aligned,
+				// zero words included (D-NET-416). [orig: NetPacket_SerializeEntityPoolToPacket
+				// @0x503460 -- the cursor written @0x5034C5]
+				p.start_index = static_cast<uint16_t>(full.start_index + off);
 				p.records.assign(full.records.begin() + static_cast<std::ptrdiff_t>(off),
 				                 full.records.begin() + static_cast<std::ptrdiff_t>(off + cnt));
 				p.entity_count = static_cast<int16_t>(p.records.size());

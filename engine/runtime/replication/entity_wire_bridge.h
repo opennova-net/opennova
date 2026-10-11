@@ -92,6 +92,8 @@ void stream_pool2_zone_blocks(const world::World &w, StaticEntityBatch &page);
 // the call @0x51bcba per page]
 void stream_pool1_zone_bytes(const world::World &w, PoolSpawnBatch &page);
 // pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: NetPacket_SerializeEntityPoolToPacket @0x503460].
+// Slot-aligned like 0x10 (start_index 0, a zero word for each free slot below the pool's used count): the joiner's
+// slot = start+index.
 Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 
 // One S2C 0x18 FULL-ENTITY-SPAWN record (§5.46) for a live World entity — the host's

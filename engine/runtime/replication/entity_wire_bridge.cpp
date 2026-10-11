@@ -824,11 +824,25 @@ static Pool3SyncRecord pool3_record_of(const world::Entity &e) {
 }
 
 Pool3SyncBatch build_pool3_marker_batch(const world::World &w) {
+	// Slot-aligned like the 0x10 stream: one record per slot below the pool's
+	// used count, an empty slot as the bare zero word counted like a record,
+	// so the joiner's slot is the page's start word plus the record's index
+	// (D-NET-416). Empty is the 0x10 stream's test: an ItemTypeIndex (+0x1C) of
+	// 0 or no def (+0x20). [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 --
+	//  Pool_GetUsedCount(3) @0x5034DC / @0x50369F, the empty-slot tests
+	//  @0x503505..0x503514, the zero word @0x503673, the count @0x503687]
 	Pool3SyncBatch batch;
-	w.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() != 3) return;
-		batch.records.push_back(pool3_record_of(e));
-	});
+	const int used = static_cast<int>(w.registry.pool_used(3));
+	for (int slot = 0; slot < used; ++slot) {
+		const world::Entity *e = w.registry.get(world::EntityHandle::make(3, slot));
+		if (e == nullptr || e->item_type_index == 0 || !e->has_item_def) {
+			Pool3SyncRecord rec;
+			rec.is_empty_slot = true; // bare [u16 0]
+			batch.records.push_back(rec);
+			continue;
+		}
+		batch.records.push_back(pool3_record_of(*e));
+	}
 	batch.entity_count = static_cast<int16_t>(batch.records.size());
 	return batch;
 }

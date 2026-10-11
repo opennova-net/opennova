@@ -263,7 +263,12 @@ void NwUdpListener::initialize_jo_host() {
 
 	// A loaded mission normally supplies this marker. The standalone gate has
 	// no mission path, so its minimal authoritative world uses the spawn
-	// pipeline's ordinary start-marker input at the origin.
+	// pipeline's ordinary start-marker input at the origin. It loads no
+	// items.def either, so the start has no ItemTypeIndex and the 0x20 page
+	// streams its slot as an empty one, as a host whose items.def lacked the
+	// row would (D-NET-416). Nothing reads that copy: the start's reader is the
+	// spawn resolve (world::resolve_player_spawn_pose), which runs on the host's
+	// own registry, never on a streamed row.
 	world::Entity start;
 	start.kind = world::EntityKind::Marker;
 	start.item_id = 6002;

@@ -44,10 +44,10 @@ int32_t axis_bam(int16_t degrees) {
 }
 
 // The trait sweep's resolved row: an entity of a type items.def holds carries a
-// nonzero ItemTypeIndex (+0x1C) and its def (+0x20), the pair the pool-2
-// serializer's empty-slot test reads.
+// nonzero ItemTypeIndex (+0x1C) and its def (+0x20), the pair the pool-2 and
+// pool-3 serializers' empty-slot tests read.
 // [orig: Entity_SpawnFromBMSRecord @0x40EBFC; NetPacket_SerializePool2StaticToBuffer
-//  @0x504369..0x504378]
+//  @0x504369..0x504378; NetPacket_SerializeEntityPoolToPacket @0x503505..0x503514]
 w::Entity &with_def(w::Entity &e, int32_t type_index = 1) {
 	e.item_type_index = type_index;
 	e.has_item_def = true;
@@ -106,7 +106,7 @@ struct FourPoolWorld final : w::World {
 		marker.yaw = 270;
 		marker.team = 1;
 		marker.bound_radius = 25.5f;
-		world.registry.spawn(3, marker);
+		world.registry.spawn(3, with_def(marker));
 	}
 };
 
@@ -650,6 +650,64 @@ bool run_pool3_marker() {
 	return true;
 }
 
+// The 0x20 stream walks every pool-3 slot below the used count and writes a
+// zero word for an empty one, counted like a record, so the joiner's slot for
+// a record is the page's start word plus its index (D-NET-416).
+// [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 -- Pool_GetUsedCount(3)
+//  @0x5034DC / @0x50369F, the empty-slot tests @0x503505..0x503514, the zero
+//  word @0x503673, the count @0x503687, the start word @0x5034C5]
+bool run_pool3_marker_empty_slot_is_a_zero_word() {
+	w::World world;
+	world.registry.configure_pool(3, 8);
+	for (int i = 0; i < 3; ++i) {
+		w::Entity m;
+		m.kind = w::EntityKind::Marker;
+		m.item_id = 6002;
+		world.registry.spawn(3, with_def(m));
+	}
+	world.registry.despawn(w::EntityHandle::make(3, 1));
+	const nw::Pool3SyncBatch batch = ns::build_pool3_marker_batch(world);
+	bool ok = expect(batch.start_index == 0 && batch.records.size() == 3 &&
+	                         !batch.records[0].is_empty_slot && batch.records[1].is_empty_slot &&
+	                         !batch.records[2].is_empty_slot,
+	                 "slots 0..2 stream, the freed slot 1 as a zero word");
+	const std::vector<uint8_t> wire = nw::encode_pool3_sync_batch(batch);
+	nw::Pool3SyncBatch out;
+	ok &= expect(nw::decode_pool3_sync_batch(wire.data(), wire.size(), out) &&
+	                     out.entity_count == 3 && out.records.size() == 3 &&
+	                     out.records[1].is_empty_slot &&
+	                     out.records[2].net_handle == w::EntityHandle::make(3, 2).packed,
+	             "the record after the zero word lands on its own slot");
+	if (ok) std::printf("PASS pool3_marker_empty_slot_is_a_zero_word\n");
+	return ok;
+}
+
+// The 0x20 empty test is the 0x10 stream's pair, ItemTypeIndex (+0x1C) or def
+// (+0x20): a live marker of a type items.def lacks reads index 0 and streams
+// as a zero word, its slot still counted.
+// [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 -- `cmp [eax+1Ch],0`
+//  @0x503505, `mov ecx,[eax+20h]; test ecx,ecx` @0x50350F..0x503514, the zero
+//  word @0x503673; ItemList_FindIndexByTypeId @0x49E100, the miss @0x49E131]
+bool run_pool3_marker_unknown_type_is_a_zero_word() {
+	w::World world;
+	world.registry.configure_pool(3, 4);
+	w::Entity unknown;
+	unknown.kind = w::EntityKind::Marker;
+	unknown.item_id = 0x7777; // no items.def row: index 0, no def
+	const w::EntityHandle unknown_h = world.registry.spawn(3, unknown);
+	w::Entity known;
+	known.kind = w::EntityKind::Marker;
+	known.item_id = 6002;
+	world.registry.spawn(3, with_def(known));
+	const nw::Pool3SyncBatch batch = ns::build_pool3_marker_batch(world);
+	const bool ok = expect(world.registry.get(unknown_h) != nullptr && batch.records.size() == 2 &&
+	                               batch.records[0].is_empty_slot && !batch.records[1].is_empty_slot &&
+	                               batch.records[1].net_handle == w::EntityHandle::make(3, 1).packed,
+	                       "a live marker of an unknown type streams as a zero word");
+	if (ok) std::printf("PASS pool3_marker_unknown_type_is_a_zero_word\n");
+	return ok;
+}
+
 bool run_pools_are_disjoint() {
 	// Each extractor reads ONLY its own pool — no cross-contamination.
 	FourPoolWorld world;
@@ -1075,6 +1133,8 @@ int main() {
 	ok = run_pool2_zone_block_rides_the_chain() && ok;
 	ok = run_zone_outs_carry_within_a_call() && ok;
 	ok = run_pool3_marker() && ok;
+	ok = run_pool3_marker_empty_slot_is_a_zero_word() && ok;
+	ok = run_pool3_marker_unknown_type_is_a_zero_word() && ok;
 	ok = run_pools_are_disjoint() && ok;
 	ok = run_pool0_player_bit0_is_per_entity() && ok;
 	ok = run_nonplayer_records_carry_the_flags_word() && ok;
