@@ -102,6 +102,11 @@ WaveRetailCheck wave_retail_check(const std::vector<uint8_t> &bytes) {
 		case WaveRefusal::NotImaAdpcm:
 			return refused("Its 4-bit samples are not IMA ADPCM, the one 4-bit form the game's loader takes [orig: "
 			               "Audio_LoadWavFileFromArchive @ 0x76677d].");
+		case WaveRefusal::RatioFaults:
+			return refused("Its rate of " + std::to_string(walk.rate) +
+			               " Hz puts the game's loader's pitch ratio, ((rate << 16) + 22050) / 44100, past 32 bits, "
+			               "and the division faults the game; a rate under 2890137600 Hz plays [orig: "
+			               "Audio_LoadWavFileFromArchive @ 0x76662b, @ 0x766730, @ 0x7667dc].");
 	}
 	WaveRetailCheck ok;
 	ok.plays = true;

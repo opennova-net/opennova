@@ -637,6 +637,9 @@ AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &
 		voice->set_bus(StringName(kVoiceBus));
 	}
 	voice->set_stream(p_stream);
+	// The line plays at its wave's own rate; a decoded wave's player takes its scale through
+	// WavLoader::pitch_scale_for (a rate boxed at INT32_MAX played at its own).
+	voice->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(p_stream, 1.0)));
 	voice->set_volume_db(opennova::audio::volume_db_from_byte(p_volume));
 	add_child(voice);
 	voice->play();
@@ -715,6 +718,7 @@ bool MissionAudio::play_wac_wave(const String &p_filename) {
 		wac_voice_id_ = ObjectID(voice->get_instance_id());
 	}
 	voice->set_stream(stream);
+	voice->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(stream, 1.0)));
 	voice->play(); // play() on an active player restarts it -> interrupts the previous wave
 	return true;
 }

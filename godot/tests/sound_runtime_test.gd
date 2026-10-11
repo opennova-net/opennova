@@ -516,6 +516,35 @@ func test_zero_pitch_wave_ignores_the_voice_pitch() -> void:
 		assert_almost_eq(voice.pitch_scale, 1.0, 0.00001, "nor a 2D voice's member pitch")
 
 
+# A rate past INT32_MAX: the player's whole mix rate holds INT32_MAX, so the
+# stream boxes its rate there and keeps its own, which every player scales the
+# box back up to through WavLoader.pitch_scale_for (D-SND-52;
+# opennova::lwf::wave_pitch_scale). An AUD1 pitch of 0xFFFFFFFF plays at
+# (pitch * 44100 + 0x8000) >> 16 = 2890137599 Hz, a RIFF rate of 0x80000000 at
+# its own; a RIFF rate from 0xAC440000 faults the game's loader, which ours
+# refuses (D-SND-54).
+func test_rate_past_int32_max_is_boxed() -> void:
+	var aud := WavLoader.from_bytes(_build_aud1(4, 0xFFFFFFFF)) as WaveStream
+	assert_not_null(aud)
+	if aud != null:
+		assert_eq(aud.mix_rate, 2147483647, "the stream's mix rate is boxed at INT32_MAX")
+		assert_eq(aud.wave_rate, 2890137599, "the stream keeps its own rate")
+		assert_almost_eq(aud.mix_rate * WavLoader.pitch_scale_for(aud, 1.0), 2890137599.0, 1.0,
+				"its player plays at its own rate")
+		assert_almost_eq(aud.mix_rate * WavLoader.pitch_scale_for(aud, 0.5), 1445068799.5, 1.0,
+				"and takes the voice pitch on it")
+		var looped := aud.duplicate() as WaveStream
+		assert_eq(looped.wave_rate, 2890137599, "a loop copy keeps the rate its channel updates read")
+	var samples := PackedByteArray([0, 0, 0, 0])
+	var riff := WavLoader.from_bytes(_build_wav(samples, 1, 0x80000000, 16))
+	assert_not_null(riff)
+	if riff != null:
+		assert_eq(riff.mix_rate, 2147483647)
+		assert_almost_eq(riff.mix_rate * WavLoader.pitch_scale_for(riff, 1.0), 2147483648.0, 1.0)
+	assert_null(WavLoader.from_bytes(_build_wav(samples, 1, 0xAC440000, 16)),
+			"a RIFF rate from 0xAC440000 is refused where the game's loader faults")
+
+
 func test_entity_refire_retakes_its_own_channel() -> void:
 	# Retail keys the open call on the source entity: a channel already playing
 	# the same wave for the same entity scores zero and is retaken, so a body
