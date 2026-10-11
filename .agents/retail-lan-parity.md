@@ -65,8 +65,10 @@ recorded with it.
 
 `scripts/net/run_parity_topology.ps1` is the repository adapter around the
 onHook MCP executable and the OpenNova launchers. It runs one explicit
-topology; there is intentionally no second matrix definition or generated
-manifest.
+topology. `scripts/net/run_parity_suite.ps1` runs it for every cell of the
+tracked case table (`scripts/net/parity-cases.json`: RR, an A/A RR, RO, OR,
+OO per case, resumable) and judges each case with `opennova-parity`
+(`scripts/net/README.md`, "Parity verdict"); there is no generated manifest.
 
 ```powershell
 pwsh -File scripts/net/run_parity_topology.ps1 `
@@ -156,6 +158,9 @@ artifact layout to each cell.
   endpoint reports its role through `game_state` and its readiness witness
   through the parity probes.
 - Captures decode with the native `opennova-wire` application.
+- The case verdict is `opennova-parity`'s `PARITY_STATUS=PASS` over RR,
+  RR-aa and all three subject topologies; a widened A/A floor is reported,
+  not hidden.
 - Mismatches are recorded in `docs/net/novaworld-net-re.md`; absence of a
   decoder warning is not itself a parity verdict.
 - Only sanitized conclusions and structural fixtures enter Git. Raw local

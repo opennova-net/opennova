@@ -1,0 +1,27 @@
+{
+  "schema": "opennova.parity-cases.v1",
+  "expansion": "jox01",
+  "host_session_name": "Untitled ",
+  "cases": [
+    {
+      "id": "01tr-coop",
+      "mission": "01TR.bms",
+      "game_type": 65568,
+      "port": 32786,
+      "readiness": "in_match",
+      "steady_seconds": 45,
+      "exercise_input": true,
+      "auto_deploy": false
+    },
+    {
+      "id": "ash-i5a-aas-deploy",
+      "mission": "ASH_I5A.BMS",
+      "game_type": 65552,
+      "port": 32787,
+      "readiness": "deploy_hold",
+      "steady_seconds": 35,
+      "exercise_input": false,
+      "auto_deploy": false
+    }
+  ]
+}

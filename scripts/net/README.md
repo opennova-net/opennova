@@ -6,10 +6,11 @@ retail data stay machine-local and gitignored and must never be
 committed without the sanitization review described in
 [`docs/asset-gated-tests.md`](../../docs/asset-gated-tests.md).
 
-The former generated parity matrix, corpus exporter and manifest verifier have
-been removed (they depended on the retired Python FFI); `diff_0a.py`, the S2C
-0x0A field-shape diff, remains. Do not treat these remaining helpers as a
-hash-bound parity verdict.
+The former generated parity matrix, corpus exporter and PowerShell manifest
+verifier have been removed. The parity verdict is now `opennova-parity` (C++,
+`apps/parity`), run per case by `run_parity_suite.ps1` (see "Parity verdict"
+below). It judges the runs it is given; it does not hash-bind binaries, retail
+trees or the corpus the way the retired manifest did.
 
 ## Tools
 
@@ -24,6 +25,8 @@ hash-bound parity verdict.
 | `join_opennova.ps1` | Start an OpenNova LAN joiner on launch flags with its MCP endpoint. |
 | `run_lan_pair.ps1` | Start a local OpenNova host/joiner pair (MCP ports 8975/8976). |
 | `run_parity_topology.ps1` | Run one explicitly configured live topology, optionally playing a scenario (`-Scenario`). |
+| `run_parity_suite.ps1` | Run every case of `parity-cases.json` as RR, RR-aa, RO, OR and OO cells (resumable), then judge each case with `opennova-parity`. |
+| `parity-cases.json` | The tracked parity case table (`opennova.parity-cases.v1`). |
 | `compare_scenario.py` | Check scenario runs against their expectations and against the RR reference. |
 | `wait_parity_wire_ready.ps1` | Wait for and validate the topology's live wire-ready state. |
 
@@ -34,7 +37,7 @@ launched only through onhook-mcp.
 ## Build native helpers
 
 ```powershell
-cmake --build build --config Release --target opennova_wire opennova_lan_probe
+cmake --build build --config Release --target opennova_wire opennova_lan_probe opennova_parity
 ```
 
 The scripts locate binaries in the Release or Debug output directories.
@@ -110,6 +113,113 @@ row means we send none), the header field value-sets, and per-record-class field
 population (a field golden always fills but we leave zero is an under-send). The
 golden's parsed profile caches to `<golden>.0a.json`, so iterating on our encoder
 only re-decodes our own capture; pass `--refresh` after a decoder change.
+The report always exits 0; `opennova-parity` carries the same sub-block,
+record-class, header-value and field-population checks as failing metrics.
+
+## Parity verdict (ADR 0050 R4)
+
+`opennova-parity` judges one parity case: every subject topology (RO, OR, OO)
+against the same case's RR run, in both directions, with a second
+retail-vs-retail run (RR-aa) as the noise floor.
+
+```powershell
+build\apps\parity\Release\opennova-parity.exe --items <corpus>\items.def `
+    --rr .scratch\runs\<prefix>-<case>-rr --rr-aa .scratch\runs\<prefix>-<case>-rr-aa `
+    --ro .scratch\runs\<prefix>-<case>-ro --or .scratch\runs\<prefix>-<case>-or `
+    --oo .scratch\runs\<prefix>-<case>-oo --out <case>.verdict.json
+```
+
+Each argument is a `run_parity_topology.ps1` run directory. Its
+`run-summary.json` names the evidence capture (the retail endpoint's capture for
+RR, RO and OR, the external one for OO; `--evidence external` takes every run's
+`external.pcapng` instead) and the steady window. A run directory moved since
+its run still resolves: a capture recorded under the old run root is found
+under the new one. The capture decodes into the canonical trace, the records
+`opennova-wire --parity-events` prints (`apps/wire/parity_trace.h`), and binds
+to its one gameplay session.
+
+The windows: the steady window is `steady_started_utc` plus `steady_seconds`.
+The comparison interval runs from the session's first packet to the steady
+window's end. The initial prefix is each direction's packets through its first
+gameplay packet (C2S 0x0C, S2C 0x0A).
+
+The A/A rule: a metric's distance from RR fails when it exceeds
+`max(fixed floor, distance(RR-aa, RR))`. The fixed floors are the retired
+verifier's tolerances. The A/A distances form the verdict's `aa` section,
+`pass` or `widened` against the fixed floors alone: where retail's own
+run-to-run noise exceeds a floor, the floor widens to it for every subject and
+the report says so.
+
+| Metric family | Distance | Floor | Finding codes |
+| --- | --- | --- | --- |
+| Tag histogram (comparison interval, per `tag:settings`) | presence 0/1; count vs RR rate-normalized (when RR has 20 or more); length-set and stable-body-set Jaccard | 0; `max(1, ceil 20%)` for counts | `MISSING_TAG`, `UNEXPECTED_TAG`, `COUNT_MISMATCH`, `LENGTH_SET_MISMATCH`, `LENGTH_CONSTANT`, `BODY_CONSTANT`, `BODY_ALL_ZERO`, `STABLE_BODY_MISMATCH`, `FIRST_ORDER_MISMATCH` |
+| Initial stream | edit distance over origin-packet groups (`flags\|tags\|raw/LEN/SKIP`); differing bodies by position | 0 | `INITIAL_PACKET_GROUPING`, `INITIAL_BODY_MISMATCH` |
+| Steady distributions (after the first gameplay packet) | largest share delta over keys of at least 2% share, in units of `max(0.08, RR share / 2)` | 1 | `GAMEPLAY_GROUP_DISTRIBUTION`, `GAMEPLAY_ORDER_DISTRIBUTION`, `GAMEPLAY_DISTRIBUTION_UNEXERCISED` |
+| Session packet envelope | class presence 0/1; packet and header-only cadence vs RR rate-normalized; header-only flag set; shape distribution | 0; `max(1, ceil 20%)`; 0; 1 | `SESSION_PACKET_CADENCE`, `SESSION_PACKET_HEADER_FLAGS`, `SESSION_PACKET_SHAPE_DISTRIBUTION` |
+| Outer handshake (first 0x41/0x42, 0x81/0x82) | edit distance over field keys, dynamic values masked | 0 | `HANDSHAKE_MISMATCH`, `HANDSHAKE_MISSING` |
+| Integrity stream | invalid pairs, CRCs off RR's for the row, unwitnessed rows, OR/OO host rows (Jaccard), repeats, challenges without a preceding 0x16, PUNTs | 0 | `INTEGRITY_PAIR_INVALID`, `INTEGRITY_CRC_MISMATCH`, `INTEGRITY_ROW_UNWITNESSED`, `HOST_AMMO_ROW_MISMATCH`, `HOST_DYNAMIC_ENTITY_ROW_MISMATCH`, `INTEGRITY_NOT_ALTERNATING`, `INTEGRITY_SCOREBOARD_ORDER`, `INTEGRITY_PUNT` (entity-family variants prefixed `ENTITY_`) |
+| Milestones (handshake, 0x7B, 0x08, 0x0B, 0x46, C2S 0x0B, 0x0F, first 0x0C/0x0A) | one-sided milestones plus order inversions | 0 | `MILESTONE_MISMATCH` |
+| Bandwidth and gameplay cadence (steady window) | `\|subject / RR - 1\|` | 0.20 | `BANDWIDTH_MISMATCH`, `GAMEPLAY_CADENCE` |
+| C2S 0x0C state (steady window) | value-set Jaccard (shape, ADM, state, move, carrier none/bound, priority occupancy and scores); fill 0/1; dynamic `\|log2(subject / RR)\|`; initial position delta | 0; 0; 3 (the 1/8x..8x band); 64 world units | `UPLINK_*_MISMATCH`, `UPLINK_ALL_ZERO`, `UPLINK_CONSTANT`, `DYNAMIC_RANGE_MISMATCH`, `DYNAMIC_STEP_MISMATCH`, `DYNAMIC_BASELINE_MISMATCH` |
+| S2C 0x0A state and entities (steady window) | value-set Jaccard (sub-block, flags, record classes, local state, health, state word, carried, weapon/timer/env/objective/mount blocks, entity class:type); fields RR fills that the run never does; dynamic as above | as above | `FRAME_*_MISMATCH`, `FRAME_ANCHOR_ZERO`, `FRAME_ENTITY_TYPES_MISMATCH`, `ENTITY_FIELD_EMPTY`, `FRAME_ENTITY_CONSTANT` |
+
+Every run's evidence must hold too, or the verdict fails: one gameplay session,
+a steady window inside the capture, decoded gameplay within 500 ms of each
+window edge with no gap over 1 s, every datagram in the comparison interval
+decoded with one packet per protocol datagram, and the same mission, game
+type and port as RR.
+
+The normalization registry (`apps/parity/normalization.h`) lists every field a
+comparison masks, strips or reduces with the nondeterminism source that makes
+that correct: the handshake's dynamic fields, the initial bodies routed to the
+stateful checks, S2C 0x0F's live tick, the 0x30/0x31 phase, the session-local
+handles. The masks are driven from it, a mask elsewhere asserts its entry at
+compile time, and every verdict carries it.
+
+Output: `--out` (default `parity-verdict.json`) is an
+`opennova.parity-verdict.v1` document. Its `rows` give each topology,
+direction, metric and key with the status, distance, floor, A/A distance,
+threshold, the subject's and RR's values and the finding code; `aa` holds the
+sanity rows, `evidence` each run's findings. Stdout carries `PARITY_FAIL` lines
+for the first failures, `PARITY_AA_WIDENED=<n>`, `PARITY_STATUS=PASS|FAIL`,
+`PARITY_FAILURES=<n>` and `PARITY_REPORT=<path>`. Exit 0 is PASS, 1 FAIL, 2 a
+usage or input error (nothing judged).
+
+### The suite
+
+`run_parity_suite.ps1` runs the tracked case table through
+`run_parity_topology.ps1`, five cells per case with identical inputs (RunId
+`<prefix>-<case>-rr`, `-rr-aa`, `-ro`, `-or`, `-oo`), then calls
+`opennova-parity` per case and prints `PARITY_SUITE_CASE` lines and
+`PARITY_SUITE_STATUS=PASS|FAIL`:
+
+```powershell
+powershell -File scripts\net\run_parity_suite.ps1 -CorpusRoot C:\retail\corpus `
+    -RetailServerRoot C:\retail\jox01\SERVER -RetailClientRoot C:\retail\jox01\CLIENT `
+    -OnHookMcpPath C:\opennova-int\onhook\onhook-mcp.exe `
+    -GodotLauncher C:\Godot\Godot_v4.6.1-stable_win64_console.exe `
+    -Prefix parity-20261011 [-Cases 01tr-coop] [-Topologies RR,RR-aa] [-Plan]
+```
+
+`-CorpusRoot` holds the extracted `items.def` and `missions\<MISSION>` (the
+layout the wire-readiness gate reads; see `.agents/retail-lan-parity.md`). The
+suite hashes each mission artifact for the runner, and a case may pin it with
+`mission_sha256`. A cell whose run root already holds `run-summary.json` is
+reused, so rerunning with the same `-Prefix` resumes a suite. A run root
+without one is a failed attempt, moved aside to `<RunId>.failed-<stamp>` before
+the cell runs again. `-Cases` and `-Topologies` choose which cells run; each
+case's verdict judges every successful cell it has. PASS needs every selected
+cell to succeed and every selected case judged PASS with RO, OR and OO all
+present. The verdicts and `suite-summary.json` land in
+`.scratch\parity-suites\<prefix>\`. `-Plan` prints the cells and their runner
+arguments and runs nothing.
+
+A case (`parity-cases.json`, `opennova.parity-cases.v1`) gives `id`,
+`mission`, `game_type`, `port` (32786-32789), `readiness` (`in_match` or
+`deploy_hold`), `steady_seconds`, `exercise_input` and `auto_deploy`. The table
+fixes `expansion` (`jox01`) and `host_session_name`, which must equal the
+SERVER copy's `game.cfg` `game_name` byte for byte (`"Untitled "`, with the
+trailing space).
 
 ## Scenario parity (ADR 0050 R5)
 
