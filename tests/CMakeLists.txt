@@ -3918,9 +3918,9 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(opennova_novaworld_server_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(opennova_novaworld_server_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME opennova_novaworld_server_http_routes COMMAND opennova_novaworld_server_http_routes_test)
-    # The concurrent case gives each request up to 30 s; this bounds a hang
-    # below ctest's 1500 s default.
-    set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 120)
+    # The concurrent case gives each request up to 90 s (its handler may wait out
+    # the pool's 60 s busy timeout); this bounds a hang below ctest's 1500 s default.
+    set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 300)
 
     # The listing's owner end to end (host_keys, migration 0009): two in-process
     # services (the HTTP, NW UDP and gate listeners over one pooled SQLite file

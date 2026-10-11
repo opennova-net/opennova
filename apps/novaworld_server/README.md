@@ -32,7 +32,15 @@ session handshake, the browser/host/play container services, and the legacy
   one for the handler, and `erase_lobby_state` (run from the NW UDP thread and
   from the main thread's `on_lost`) leases one per call. The database is WAL, so
   connections read while one writes, and the 5 s busy timeout makes a second
-  writer wait. A write that spans statements (`clear_all`, `replace_roster`,
+  writer wait. Every connection runs `synchronous=NORMAL`: under WAL the WAL
+  syncs before each checkpoint, not at every commit, so no writer holds the
+  write lock across an fsync. The file stays consistent; a power loss or OS
+  crash can roll back the last commits before it, which the disposable service
+  database accepts. A `db::SqliteError` carries sqlite's extended code and, for
+  a busy or locked statement, how long its failing step ran, so a busy timeout
+  that ran out (`[extended 5, after 5003 ms]`) reads apart from a lock sqlite
+  refused at once (`[extended 517, after 0 ms]`, `SQLITE_BUSY_SNAPSHOT`). A
+  write that spans statements (`clear_all`, `replace_roster`,
   `apply_status_blob`, the lobby's host row with its roster, a registration's
   checks and insert) is one `db::Transaction`, and a read that spans them
   (`/api/hosts` and the `.gsb` feeds: the rows, then each roster) is one

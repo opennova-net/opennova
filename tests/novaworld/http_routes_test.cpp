@@ -1212,10 +1212,18 @@ int test_untrusted_proxy_header_ignored(Harness &h) {
 constexpr uint32_t kConcurrentRid = 2000;
 constexpr int kConcurrentRegistrations = 16;
 constexpr int kHostGenerations = 40;
+// The pool's busy timeout, raised from the server's 5 s to 60 s as
+// db_concurrency_test raises its own: on a loaded host (WSL2's virtual disk
+// under a parallel build) one writer once waited out the others' commits for
+// longer than 5 s and 13 of the 16 registrations failed "database is locked",
+// and how long a write waits is not what these cases ask.
+constexpr int kPoolBusyTimeoutMs = 60000;
 // The case checks that the replies are each request's own and consistent, not
 // how fast they come: the bcrypt registrations queue behind Crow's few workers
-// (three on a 4-vCPU runner), so a request may wait well past the default 3 s.
-constexpr int kConcurrentTimeoutMs = 30000;
+// (three on a 4-vCPU runner), so a request may wait well past the default 3 s,
+// and its handler may wait up to the pool's busy timeout on the write lock, so
+// the client waits past that before it gives up.
+constexpr int kConcurrentTimeoutMs = kPoolBusyTimeoutMs + 30000;
 // The readers' pause between rounds, so they do not crowd the registrations
 // out of the workers.
 constexpr auto kReaderPause = std::chrono::milliseconds(5);
@@ -2378,7 +2386,7 @@ int main() {
 		// Declared first, so it outlives the pool and the listener: the database
 		// file and its WAL siblings go only once every connection is closed.
 		test_temp::TempDir temp("http_routes");
-		ConnectionPool pool(temp.path / "novaworld.db");
+		ConnectionPool pool(temp.path / "novaworld.db", kPoolBusyTimeoutMs);
 		{
 			auto boot = pool.acquire();
 			const auto migrated =

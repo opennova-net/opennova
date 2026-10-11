@@ -17,6 +17,14 @@ using opennova::db::Transaction;
 
 namespace {
 
+// sqlite's result codes (sqlite3.h, which the test does not include): the
+// primary codes, and the extended codes as sqlite composes them.
+constexpr int kSqliteError = 1;
+constexpr int kSqliteBusy = 5;
+constexpr int kSqliteConstraint = 19;
+constexpr int kSqliteBusySnapshot = kSqliteBusy | (2 << 8); // 517
+constexpr int kSqliteConstraintUnique = kSqliteConstraint | (8 << 8); // 2067
+
 // Generate a unique temp dir under the system temp for test isolation.
 std::filesystem::path scratch_dir() {
 	auto base = std::filesystem::temp_directory_path() / test_paths_unique("opennova_sqlite_test");
@@ -72,8 +80,12 @@ int test_error_throws_with_context() {
 		db.exec("SELECT FROM nowhere;"); // syntax error
 	} catch (const SqliteError &e) {
 		caught = true;
+		TEST_EXPECT(e.code() == kSqliteError);
+		TEST_EXPECT(e.extended_code() == kSqliteError);
+		TEST_EXPECT(!e.elapsed_ms()); // kept for busy and locked failures only
 		const std::string what = e.what();
-		TEST_EXPECT(what.find("sqlite error") != std::string::npos);
+		TEST_EXPECT(what.rfind("sqlite error 1 (", 0) == 0);
+		TEST_EXPECT(what.find("[extended 1] — prepare: SELECT FROM nowhere;") != std::string::npos);
 	}
 	TEST_EXPECT(caught);
 	return 0;
@@ -254,6 +266,111 @@ int test_read_snapshot() {
 	return 0;
 }
 
+int check_pragmas(Database &db, int64_t busy_timeout_ms) {
+	TEST_EXPECT(db.query("PRAGMA journal_mode;")[0].as_text(0).value() == "wal");
+	TEST_EXPECT(db.query("PRAGMA synchronous;")[0].as_int(0).value() == 1); // NORMAL
+	TEST_EXPECT(db.query("PRAGMA foreign_keys;")[0].as_int(0).value() == 1);
+	TEST_EXPECT(db.query("PRAGMA busy_timeout;")[0].as_int(0).value() == busy_timeout_ms);
+	return 0;
+}
+
+int test_connection_pragmas() {
+	// The file keeps WAL, but synchronous and the busy timeout belong to the
+	// connection: every new one, the pool's included, sets its own.
+	auto dir = scratch_dir();
+	{
+		const auto path = dir / "state.db";
+		Database first(path);
+		TEST_EXPECT(check_pragmas(first, opennova::db::kDefaultBusyTimeoutMs) == 0);
+		Database second(path, 60000);
+		TEST_EXPECT(check_pragmas(second, 60000) == 0);
+		ConnectionPool pool(path);
+		TEST_EXPECT(check_pragmas(*pool.acquire(), opennova::db::kDefaultBusyTimeoutMs) == 0);
+		ConnectionPool patient_pool(path, 60000);
+		TEST_EXPECT(check_pragmas(*patient_pool.acquire(), 60000) == 0);
+	}
+	std::filesystem::remove_all(dir);
+	return 0;
+}
+
+int test_error_codes() {
+	// A constraint: the extended code names which one, and no time is kept.
+	{
+		Database db(":memory:");
+		db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT UNIQUE);");
+		db.exec("INSERT INTO t (name) VALUES ('alpha');");
+		bool caught = false;
+		try {
+			db.exec("INSERT INTO t (name) VALUES ('alpha');");
+		} catch (const SqliteError &e) {
+			caught = true;
+			TEST_EXPECT(e.code() == kSqliteConstraint);
+			TEST_EXPECT(e.extended_code() == kSqliteConstraintUnique);
+			TEST_EXPECT(!e.elapsed_ms());
+			TEST_EXPECT(std::string(e.what()).find("[extended 2067] — exec: INSERT") !=
+					std::string::npos);
+		}
+		TEST_EXPECT(caught);
+	}
+
+	// Two busy failures that share SQLITE_BUSY and its "database is locked",
+	// told apart by the extended code and the failing step's time.
+	auto dir = scratch_dir();
+	{
+		const auto path = dir / "state.db";
+		Database writer(path);
+		writer.exec("CREATE TABLE t (id INTEGER PRIMARY KEY);");
+
+		// The write lock held elsewhere: BEGIN IMMEDIATE waits out the whole
+		// busy timeout, then fails plain SQLITE_BUSY.
+		constexpr int kShortTimeoutMs = 200;
+		Database waiter(path, kShortTimeoutMs);
+		{
+			Transaction holding(writer);
+			bool caught = false;
+			try {
+				Transaction tx(waiter);
+			} catch (const SqliteError &e) {
+				caught = true;
+				TEST_EXPECT(e.code() == kSqliteBusy);
+				TEST_EXPECT(e.extended_code() == kSqliteBusy);
+				TEST_EXPECT(e.elapsed_ms().has_value());
+				TEST_EXPECT(*e.elapsed_ms() >= kShortTimeoutMs / 2);
+				const std::string what = e.what();
+				TEST_EXPECT(
+						what.find("(database is locked) [extended 5, after ") != std::string::npos);
+				TEST_EXPECT(what.find(" ms] — exec: BEGIN IMMEDIATE;") != std::string::npos);
+			}
+			TEST_EXPECT(caught);
+		}
+
+		// A read snapshot that writes after another connection committed:
+		// SQLITE_BUSY_SNAPSHOT at once, with no wait on the busy timeout.
+		Database reader(path);
+		{
+			opennova::db::ReadSnapshot snapshot(reader);
+			TEST_EXPECT(count_rows(reader) == 0);
+			writer.exec("INSERT INTO t VALUES (1);");
+			bool caught = false;
+			try {
+				reader.exec("INSERT INTO t VALUES (2);");
+			} catch (const SqliteError &e) {
+				caught = true;
+				TEST_EXPECT(e.code() == kSqliteBusy);
+				TEST_EXPECT(e.extended_code() == kSqliteBusySnapshot);
+				TEST_EXPECT(e.elapsed_ms().has_value());
+				TEST_EXPECT(*e.elapsed_ms() < opennova::db::kDefaultBusyTimeoutMs);
+				TEST_EXPECT(
+						std::string(e.what()).find("[extended 517, after ") != std::string::npos);
+			}
+			TEST_EXPECT(caught);
+		}
+		TEST_EXPECT(count_rows(reader) == 1);
+	}
+	std::filesystem::remove_all(dir);
+	return 0;
+}
+
 int test_migrations_apply_then_skip() {
 	auto dir = scratch_dir();
 	auto db_path = dir / "state.db";
@@ -359,6 +476,10 @@ int main() {
 	if (test_shared_memory_uri_spans_connections() != 0) return 1;
 	if (test_connection_pool() != 0) return 1;
 	if (test_read_snapshot() != 0) return 1;
+	if (test_connection_pragmas() != 0)
+		return 1;
+	if (test_error_codes() != 0)
+		return 1;
 	if (test_migrations_apply_then_skip() != 0) return 1;
 	if (test_migrations_rollback_on_error() != 0) return 1;
 	if (test_migrations_no_dir_is_not_an_error() != 0) return 1;
