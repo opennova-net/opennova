@@ -280,6 +280,65 @@ static void test_bms_increment_and_threshold() {
     CHECK(w.script.vars.get_mission(3) == 1); // B saw V2==3 at tick 160, fired once
 }
 
+// The variable trigger and MisvarChange index the mission bank with no bound:
+// words 512..767 run on into the G bank that follows its 2048 bytes, and the
+// index scales by 4 in a 32-bit address, so only its low 30 bits select the
+// word. A word past both banks, or a small negative index, lands in neither:
+// read 0 and dropped here (D-EVT-12; the residual is D-EVT-13 and D-EVT-14).
+// [orig: EventTrigger_EvaluateCondition @0x453620 - `mov ecx,
+//  dword_C6B240[eax*4]` @0x453AAC; EventAction_Dispatch @0x4542E0 case 5 - the
+//  Set @0x45439A, the Increment @0x4543EE; WacScript_ResolveParameter
+//  @0x4F2920 - G# = 0xC6BA40 + 4n @0x4F2B66]
+static void test_misvar_index_runs_into_the_global_bank() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+
+    // Event A (fire-once, unconditional): five writes. Event B: when the word
+    // at index 700 (G188) is 42, set V9 = 1.
+    bms::Event a = simple_event(bms::EventFlags::None, 0);
+    a.action_count = 5;
+    bms::Event b{};
+    b.flags = bms::EventFlags::None;
+    b.trigger_index = 0;
+    b.trigger_count = 1;
+    b.action_index = 5;
+    b.action_count = 1;
+    bms::Trigger t{};
+    t.main_type = bms::TriggerMainType::MissionVariable;
+    t.sub_type = static_cast<int32_t>(bms::MissionVariableTriggerType::MissionVariableIsEqual);
+    t.param1 = 700;
+    t.param2 = 42;
+
+    mission::BmsEventSystem sys;
+    sys.load({a, b}, {t},
+             {misvar(bms::MissionVariableActionSubType::Set, 512, 9),        // G0
+              misvar(bms::MissionVariableActionSubType::Increment, 767, 0),  // G255
+              misvar(bms::MissionVariableActionSubType::Set, 0x40000003, 4), // V3
+              misvar(bms::MissionVariableActionSubType::Set, 768, 11),       // past G255
+              misvar(bms::MissionVariableActionSubType::Set, -1, 13),        // before V0
+              misvar(bms::MissionVariableActionSubType::Set, 9, 1)});
+    w.add_system(&sys);
+    w.load_systems();
+    w.script.vars.set_global(188, 42);
+
+    tick_n(w, kCycle); // A on the first pass, B on the second
+    CHECK(w.script.vars.get_global(0) == 9);
+    CHECK(w.script.vars.get_global(255) == 1);
+    CHECK(w.script.vars.get_mission(3) == 4);
+    CHECK(w.script.vars.get_mission(9) == 1); // B read G188 through index 700
+    int moved = 0;
+    for (int i = 0; i < world::ScriptVarStore::kMissionVars; ++i)
+        if (i != 3 && i != 9 && w.script.vars.get_mission(i) != 0) ++moved;
+    for (int g = 0; g < world::ScriptVarStore::kGlobalVars; ++g)
+        if (g != 0 && g != 188 && g != 255 && w.script.vars.get_global(g) != 0) ++moved;
+    CHECK(moved == 0); // 768 and -1 wrote nowhere
+    // Only a small negative index leaves the banks: 0x80000003 and 0xC0000003
+    // select V3 as 0x40000003 does.
+    CHECK(w.script.vars.get_bank_word(static_cast<int32_t>(0x80000003u)) == 4);
+    CHECK(w.script.vars.get_bank_word(static_cast<int32_t>(0xC0000003u)) == 4);
+}
+
 // Activation delay [orig: event +18 reload -> +16 countdown, -64 per processing pass].
 // delay=2 (authored units): armed on the pass that passes the chain, counts 128->64->0
 // across the next two passes, fires on the third. event_fired() (the cat-3 read:
@@ -2747,6 +2806,7 @@ int main() {
     test_wac_accuracyspread_drives_npc_aim();
 	test_wac_seatbelt_controls_local_use();
 	test_bms_increment_and_threshold();
+	test_misvar_index_runs_into_the_global_bank();
     test_activation_delay();
     test_live_logic_trace_and_fire();
     test_activation_delay_signed_wrap();
