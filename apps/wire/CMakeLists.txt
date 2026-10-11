@@ -10,6 +10,28 @@
 # novaworld protocol) so the bytes shown are exactly what the shipping libs
 # parse — no parallel re-implementation.
 
+# The canonical parity trace (`--parity-events`, ADR 0050 R4) and the items.def
+# tables the decoders key on: opennova-wire prints the trace, opennova-parity
+# (apps/parity) compares it, so both link this one builder.
+add_library(opennova_wire_trace STATIC
+    item_tables.cpp
+    parity_trace.cpp
+)
+
+target_include_directories(opennova_wire_trace
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(opennova_wire_trace
+    PUBLIC
+        opennova_net
+        opennova_formats
+        opennova_base
+)
+
+target_compile_features(opennova_wire_trace PUBLIC cxx_std_17)
+
 add_executable(opennova_wire main.cpp scenario_events.cpp)
 
 # The wire group for the decode, and the runtime group for the one HUD policy
@@ -17,6 +39,7 @@ add_executable(opennova_wire main.cpp scenario_events.cpp)
 # runtime/hud/feed_format).
 target_link_libraries(opennova_wire
     PRIVATE
+        opennova_wire_trace
         opennova_runtime
         opennova_net
         opennova_formats

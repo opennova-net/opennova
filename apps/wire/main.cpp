@@ -24,10 +24,9 @@
 //   opennova-wire <capture-path>                # pcapng/pcap/hexcap all accepted
 //   opennova-wire <capture-path> 0x0d 0x20      # filter to listed S2C tags
 //   opennova-wire <capture-path> --sequencing   # packet-level seq/ACK timeline
-//   opennova-wire <capture-path> --parity-events # stable packet/event verifier stream
+//   opennova-wire <capture-path> --parity-events # the canonical parity trace (parity_trace.h)
 //   opennova-wire <capture-path> --scenario-events # decoded scenario events (scenario_events.h)
 
-#include <formats/def/def.h>
 #include <formats/wac/command.h>
 #include <net/napi/envelope.h>
 #include <net/napi/tlv.h>
@@ -43,7 +42,6 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/wire_capture.h>
-#include <formats/scr/scr.h>
 
 #include <base/pcapio/pcap_reader.h>
 
@@ -64,11 +62,11 @@
 
 #include <base/io/strutil.h>
 
+#include "item_tables.h"
+#include "parity_trace.h"
 #include "scenario_events.h"
 
 using namespace opennova;
-using namespace opennova::def;
-using namespace opennova::scr;
 
 namespace {
 
@@ -108,182 +106,6 @@ void print_session_packet(const CapturedSessionPacket &packet) {
 		}
 	}
 	std::printf("\n");
-}
-
-// --parity-events is the stable, line-oriented contract consumed by the LAN
-// parity verifier.  Keep it deliberately simpler than the human pretty
-// printer: one packet line preserves grouping/replay evidence, one event line
-// preserves semantic order, and state/entity lines expose decoded 0x0C/0x0A
-// gameplay fields. Every other event is a byte-for-byte witness. The two
-// high-volume gameplay bodies retain their exact length without turning an
-// hour-long capture into a giant text intermediary.
-constexpr bool parity_body_is_material(char dir, uint16_t full_tag) {
-	// Compare the full 9-bit dispatch identity: high-table/control messages may
-	// share these low bytes but are not gameplay frames.
-	return !((dir == 'C' && full_tag == c2s::ENTITY_UPLINK) ||
-			(dir == 'S' && full_tag == s2c::PER_FRAME_UPDATE));
-}
-
-constexpr bool parity_body_contract_holds() {
-	for (uint16_t full_tag = 0; full_tag <= 0x1FF; ++full_tag) {
-		if (parity_body_is_material('C', full_tag) != (full_tag != 0x00C))
-			return false;
-		if (parity_body_is_material('S', full_tag) != (full_tag != 0x00A))
-			return false;
-	}
-	return true;
-}
-
-// The parity stream is the byte witness for every message other than the two
-// high-rate gameplay records, whose dedicated structured lines carry the
-// comparison contract. Keep representative initial-stream tags pinned here so
-// adding a new semantic comparison cannot silently hide their payload bytes.
-static_assert(parity_body_contract_holds());
-static_assert(parity_body_is_material('S', 0x75));
-static_assert(parity_body_is_material('S', 0x60));
-static_assert(parity_body_is_material('S', 0x2A));
-static_assert(parity_body_is_material('C', 0x47));
-static_assert(parity_body_is_material('C', 0x0A));
-static_assert(parity_body_is_material('S', 0x10A));
-static_assert(parity_body_is_material('C', 0x10C));
-static_assert(!parity_body_is_material('C', 0x0C));
-static_assert(!parity_body_is_material('S', 0x0A));
-
-void print_parity_handshake(int frame_index, uint64_t ts_nanos, int src_port,
-                            int dst_port, const std::vector<uint8_t> &raw) {
-	std::vector<uint8_t> stripped(raw.size());
-	size_t stripped_len = 0;
-	if (napi_envelope_decode(raw.data(), raw.size(), stripped.data(), stripped.size(),
-	                         &stripped_len) != 0)
-		return;
-	stripped.resize(stripped_len);
-	if (stripped.empty()) return;
-	const uint8_t opcode = stripped[0];
-	const bool client = opcode == SESSION_OPCODE_CLIENT_HELLO ||
-	                    opcode == SESSION_OPCODE_CLIENT_AUTH;
-	const bool server = opcode == SESSION_OPCODE_SERVER_HELLO ||
-	                    opcode == SESSION_OPCODE_SERVER_AUTH;
-	if (!client && !server) return;
-	std::vector<uint8_t> body(stripped.begin() + 1, stripped.end());
-	if (!body.empty()) nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
-	bool decoded = false;
-	switch (opcode) {
-		case SESSION_OPCODE_CLIENT_HELLO: {
-			ClientHello value;
-			decoded = parse_client_hello(body.data(), body.size(), value);
-			break;
-		}
-		case SESSION_OPCODE_CLIENT_AUTH: {
-			ClientAuth value;
-			decoded = parse_client_auth(body.data(), body.size(), value);
-			break;
-		}
-		case SESSION_OPCODE_SERVER_HELLO: {
-			ServerHello value;
-			decoded = parse_server_hello(body.data(), body.size(), value);
-			break;
-		}
-		case SESSION_OPCODE_SERVER_AUTH: {
-			ServerAuth value;
-			decoded = parse_server_auth(body.data(), body.size(), value);
-			break;
-		}
-	}
-	const char direction = client ? 'C' : 'S';
-	const int session = client ? src_port : dst_port;
-	const std::string body_hex = bytes_to_hex(body);
-	std::printf(
-			"PARITY_HANDSHAKE frame=%d ts_ns=%llu dir=%c session=%d "
-			"opcode=0x%02x decode=%u len=%zu body=%s\n",
-			frame_index, static_cast<unsigned long long>(ts_nanos), direction,
-			session, unsigned(opcode), decoded ? 1u : 0u, body.size(),
-			body_hex.c_str());
-}
-
-const char *parity_datagram_class_name(CaptureDatagramClass datagram_class) {
-	switch (datagram_class) {
-	case CaptureDatagramClass::Invalid:
-		return "invalid";
-	case CaptureDatagramClass::Unknown:
-		return "unknown";
-	case CaptureDatagramClass::ClientHello:
-		return "client_hello";
-	case CaptureDatagramClass::ClientAuth:
-		return "client_auth";
-	case CaptureDatagramClass::ServerHello:
-		return "server_hello";
-	case CaptureDatagramClass::ServerAuth:
-		return "server_auth";
-	case CaptureDatagramClass::ClientProtocol:
-		return "client_protocol";
-	case CaptureDatagramClass::ServerProtocol:
-		return "server_protocol";
-	}
-	return "invalid";
-}
-
-void print_parity_datagram(const CapturedDatagramResult &datagram,
-                           uint64_t ts_nanos) {
-	std::printf(
-			"PARITY_DATAGRAM frame=%d ts_ns=%llu src=%d dst=%d len=%zu outer=%u "
-			"opcode=",
-			datagram.frame_index, static_cast<unsigned long long>(ts_nanos),
-			datagram.src_port, datagram.dst_port, datagram.payload_length,
-			datagram.outer_decoded ? 1u : 0u);
-	if (datagram.outer_decoded)
-		std::printf("0x%02x", static_cast<unsigned>(datagram.opcode));
-	else
-		std::printf("--");
-	std::printf(" class=%s decode=%u\n",
-	            parity_datagram_class_name(datagram.datagram_class),
-	            datagram.decoded ? 1u : 0u);
-}
-
-void print_parity_packet(const CapturedSessionPacket &packet, uint64_t ts_nanos) {
-	std::printf(
-			"PARITY_PACKET frame=%d ts_ns=%llu dir=%c session=%d sid=0x%08x "
-			"seq=%u ack=%u flags=0x%02x records=%zu tags=",
-			packet.frame_index, static_cast<unsigned long long>(ts_nanos), packet.dir,
-			packet.session, static_cast<unsigned>(packet.header.session_id),
-			static_cast<unsigned>(packet.header.seq_num),
-			static_cast<unsigned>(packet.header.ack_count),
-			static_cast<unsigned>(packet.header.connection_flags), packet.records.size());
-	if (packet.tags.empty()) {
-		std::printf("-");
-	} else {
-		for (size_t i = 0; i < packet.tags.size(); ++i) {
-			if (i != 0) std::printf(",");
-			std::printf("0x%03x", static_cast<unsigned>(packet.tags[i]));
-		}
-	}
-	std::printf(" wire=");
-	if (packet.records.empty()) {
-		std::printf("-");
-	} else {
-		for (size_t i = 0; i < packet.records.size(); ++i) {
-			if (i != 0) std::printf(",");
-			const CapturedProtocolRecord &record = packet.records[i];
-			const std::string skip = record.skip_bytes.empty()
-					? std::string("-") : bytes_to_hex(record.skip_bytes);
-			std::printf("0x%03x:0x%02x:%u:%s",
-			            static_cast<unsigned>(record.full_tag),
-			            static_cast<unsigned>(record.raw_flags),
-			            static_cast<unsigned>(record.encoded_length), skip.c_str());
-		}
-	}
-	std::printf("\n");
-}
-
-void print_parity_event(const InGameMessage &message, uint64_t ts_nanos) {
-	const uint8_t tag = static_cast<uint8_t>(message.tag & 0xFFu);
-	const std::string body = parity_body_is_material(message.dir, message.tag)
-			? bytes_to_hex(message.payload) : std::string("-");
-	std::printf(
-			"PARITY_EVENT frame=%d ts_ns=%llu dir=%c session=%d participant=%d tag=0x%02x "
-			"settings=%u len=%zu body=%s\n",
-			message.frame_index, static_cast<unsigned long long>(ts_nanos), message.dir,
-			message.session, message.participant, static_cast<unsigned>(tag),
-			message.settings_update ? 1u : 0u, message.payload.size(), body.c_str());
 }
 
 // pcap/pcapng reading is shared with the test suite: engine/base/pcapio/pcap_reader.h
@@ -370,75 +192,13 @@ std::string type_str(uint16_t type) {
 	return buf;
 }
 
-// Load items.def into g_item_names. Accepts plaintext or SCR-encrypted
-// input — the engine/formats/scr decryptor expects the SCR magic in the first 3
-// bytes, otherwise we treat the file as plaintext .def. Returns count
-// of items loaded, 0 on any failure.
+// Load items.def into g_item_names / g_item_class (item_tables.h, shared with
+// opennova-parity). Returns the count of items loaded, 0 on any failure.
 size_t load_items_def(const char *path) {
-	std::ifstream f(path, std::ios::binary | std::ios::ate);
-	if (!f) {
-		std::fprintf(stderr, "items: failed to open %s\n", path);
-		return 0;
-	}
-	const std::streamsize n = f.tellg();
-	if (n <= 0) return 0;
-	std::vector<uint8_t> raw(static_cast<size_t>(n));
-	f.seekg(0);
-	if (!f.read(reinterpret_cast<char *>(raw.data()), n)) return 0;
-
-	const uint8_t *plain = raw.data();
-	size_t plain_size = raw.size();
-	std::vector<uint8_t> decrypted;
-	if (scr_is_scr(raw.data(), raw.size())) {
-		decrypted.resize(raw.size());
-		size_t out_size = decrypted.size();
-		if (scr_decrypt_buf(raw.data(), raw.size(), decrypted.data(),
-		                    &out_size, SCR_KEY_JO_DFX2) != 0) {
-			std::fprintf(stderr, "items: SCR decrypt failed for %s\n", path);
-			return 0;
-		}
-		decrypted.resize(out_size);
-		plain = decrypted.data();
-		plain_size = decrypted.size();
-	}
-
-	DefItemsFile items{};
-	if (def_parse_items_memory(plain, plain_size, &items) != 0) {
-		std::fprintf(stderr, "items: def_parse_items_memory failed\n");
-		return 0;
-	}
-	// The wire `itemTypeId` is `items.def.id - 100000` (cross-witnessed
-	// 2026-06-16: wire 0x050b=1291 ↔ items.def `id 101291` "Drivable Dune
-	// Buggy", wire 0x14B9=5305 ↔ id 105305 "Player #1 (Multiplayer)",
-	// wire 0x04b0=1200 ↔ id 101200 "Drivable Indonesian LCT"). Engine
-	// loader presumably folds the 100000 offset out before storing the
-	// runtime `g_ItemDefs[i].id` field that `ItemList_FindIndexByTypeId
-	// @ 0x49E100` compares against.
-	for (size_t i = 0; i < items.count; ++i) {
-		const DefItemDef &it = items.entries[i];
-		const int wire_id = it.id - 100000;
-		// A wire type resolves to its FIRST items.def row; a later row repeating
-		// the id is never reached [orig: ItemList_FindIndexByTypeId @0x49E100,
-		// called by NapiNPClientMsg_0x00D @0x4332DA].
-		if (wire_id >= 0 && wire_id < 0x10000 &&
-				g_item_names.find(wire_id) == g_item_names.end()) {
-			g_item_names[wire_id] = it.display_name;
-			// §5.10b: the engine reads ItemDef+356 to dispatch the per-entity
-			// network-serialize callback; that field is seeded from one of the
-			// 4 *_function class-tag directives at items.def load time. We
-			// haven't IDA-witnessed which directive specifically — but the
-			// player has `ai_function plyr` (matching the documented `plyr →
-			// SerializePlayerState` callback), so ai_function is the primary
-			// signal. Fall back to move_function for items that omit it.
-			EntityClass cls = class_from_tag(it.ai_function);
-			if (cls == EntityClass::Unknown)
-				cls = class_from_tag(it.move_function);
-			if (cls != EntityClass::Unknown)
-				g_item_class[uint16_t(wire_id)] = cls;
-		}
-	}
-	const size_t loaded = items.count;
-	def_free_items(&items);
+	wire::ItemTables tables;
+	const size_t loaded = wire::load_items_def(path, tables);
+	g_item_names = std::move(tables.names);
+	g_item_class = std::move(tables.classes);
 	return loaded;
 }
 
@@ -1118,179 +878,6 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		            g_item_class.empty()
 		                    ? " — likely an unclassifiable trailer record; pass --items <ITEMS.def>"
 		                    : "");
-}
-
-// Decoded state contract paired with --parity-events.  These lines expose the
-// two continuous gameplay surfaces that tag/count parity alone cannot validate:
-// the client's player-state uplink (C2S 0x0C) and the host's per-frame world
-// update (S2C 0x0A).  Session ids, packet numbers, and timestamps remain
-// available for correlation, while the verifier aggregates handles/positions
-// only within one capture before comparing stable shapes, classes, types, and
-// observed value diversity across independent sessions.
-void print_parity_entity(const InGameMessage &message, uint64_t ts_nanos,
-                         const FrameUpdateRecord &record) {
-	char cls = '?';
-	uint32_t x = 0, y = 0, z = 0;
-	int32_t orient_a = 0, orient_b = 0;
-	uint32_t state_a = 0, state_b = 0, vital = 0;
-	switch (record.cls) {
-		case EntityClass::Player:
-			cls = 'P';
-			x = record.player.pos_x_compressed;
-			y = record.player.pos_y_compressed;
-			z = record.player.pos_z_compressed;
-			orient_a = record.player.yaw_byte;
-			orient_b = record.player.pitch_byte;
-			state_a = record.player.state_flags;
-			state_b = (uint32_t(record.player.anim_state_id) << 8) |
-			          uint32_t(record.player.anim_def_index);
-			vital = record.player.health_class_byte;
-			break;
-		case EntityClass::Vehicle:
-			cls = 'V';
-			x = record.vehicle.pos_x_compressed;
-			y = record.vehicle.pos_y_compressed;
-			z = record.vehicle.pos_z_compressed;
-			orient_a = record.vehicle.euler_z;
-			orient_b = record.vehicle.is_dead_pose
-					? record.vehicle.euler_y : record.vehicle.weapon_heading_bam;
-			state_a = record.vehicle.flags_byte;
-			state_b = record.vehicle.is_dead_pose ? 1u : 0u;
-			vital = record.vehicle.health_word;
-			break;
-		case EntityClass::Infantry:
-			cls = 'I';
-			x = record.infantry.pos_x_compressed;
-			y = record.infantry.pos_y_compressed;
-			z = record.infantry.pos_z_compressed;
-			orient_a = record.infantry.yaw_byte;
-			orient_b = record.infantry.pitch_byte;
-			state_a = record.infantry.flags_byte;
-			state_b = record.infantry.anim_byte;
-			break;
-		case EntityClass::NoNetworkCallback:
-			cls = 'N';
-			break;
-		default:
-			break;
-	}
-	std::printf(
-			"PARITY_ENTITY frame=%d ts_ns=%llu session=%d class=%c handle=%u "
-			"type=%u pos=%u,%u,%u orient=%d,%d state=%u,%u vital=%u\n",
-			message.frame_index, static_cast<unsigned long long>(ts_nanos),
-			message.session, cls, unsigned(record.handle), unsigned(record.type_id),
-			unsigned(x), unsigned(y), unsigned(z), int(orient_a), int(orient_b),
-			unsigned(state_a), unsigned(state_b), unsigned(vital));
-}
-
-void print_parity_semantics(const InGameMessage &message, uint64_t ts_nanos) {
-	// Settings-update/high-table records share the low dispatch byte but are not
-	// ordinary gameplay 0x0A/0x0C messages and must never satisfy parity state.
-	if (message.settings_update) return;
-	const uint8_t tag = static_cast<uint8_t>(message.tag & 0xFFu);
-	if (message.dir == 'S' && tag == s2c::FULL_PLAYER_INFO) {
-		FullPlayerInfo info;
-		if (decode_full_player_info(message.payload.data(), message.payload.size(), info))
-			g_game_type = info.extra;
-		return;
-	}
-
-	if (message.dir == 'C' && tag == c2s::ENTITY_UPLINK) {
-		EntityPacketSubHeader header;
-		PlayerExtendedUplink uplink;
-		size_t header_bytes = 0, body_bytes = 0;
-		const bool have_header = decode_entity_packet_sub_header(
-				message.payload.data(), message.payload.size(), header, header_bytes);
-		bool clean = false;
-		if (have_header && header.sub_op == ENTITY_SUB_OP_EXTENDED) {
-			const uint8_t *body = message.payload.data() + header_bytes;
-			const size_t body_len = message.payload.size() - header_bytes;
-			clean = decode_player_extended_uplink(body, body_len, uplink, body_bytes) &&
-			        body_bytes == body_len;
-		}
-		unsigned priority_nonzero = 0;
-		if (uplink.priority_handle_0 || uplink.priority_score_0) ++priority_nonzero;
-		if (uplink.priority_handle_1 || uplink.priority_score_1) ++priority_nonzero;
-		if (uplink.priority_handle_2 || uplink.priority_score_2) ++priority_nonzero;
-		if (uplink.priority_handle_3 || uplink.priority_score_3) ++priority_nonzero;
-		std::printf(
-				"PARITY_STATE frame=%d ts_ns=%llu dir=C session=%d tag=0x0c "
-				"kind=uplink decode=%u len=%zu handle=%u type=%u sub=%u carrier=%u "
-				"pos=%d,%d,%d orient=%d,%d move=%u state=%u analog=%u,%u,%u "
-				"adm=%u priority_nonzero=%u priority=%u:%u,%u:%u,%u:%u,%u:%u\n",
-				message.frame_index, static_cast<unsigned long long>(ts_nanos),
-				message.session, clean ? 1u : 0u, message.payload.size(),
-				unsigned(header.handle), unsigned(header.item_type_id),
-				unsigned(header.sub_op), unsigned(uplink.carrier_handle),
-				uplink.pos_x, uplink.pos_y, uplink.pos_z, int(uplink.heading),
-				int(uplink.pitch), unsigned(uplink.move_input_byte),
-				unsigned(uplink.state_flags_byte), unsigned(uplink.analog_x),
-				unsigned(uplink.analog_y), unsigned(uplink.analog_z),
-				unsigned(uplink.equipped_adm_index), priority_nonzero,
-				unsigned(uplink.priority_handle_0), unsigned(uplink.priority_score_0),
-				unsigned(uplink.priority_handle_1), unsigned(uplink.priority_score_1),
-				unsigned(uplink.priority_handle_2), unsigned(uplink.priority_score_2),
-				unsigned(uplink.priority_handle_3), unsigned(uplink.priority_score_3));
-		return;
-	}
-
-	if (message.dir != 'S' || tag != s2c::PER_FRAME_UPDATE) return;
-	auto class_of = [](uint16_t type) -> EntityClass {
-		auto found = g_item_class.find(type);
-		if (found != g_item_class.end()) return found->second;
-		if (type == kPlayerPersonTypeId) return EntityClass::Player;
-		return EntityClass::Unknown;
-	};
-	FrameUpdate frame;
-	const bool clean = decode_frame_update(message.payload.data(), message.payload.size(),
-	                                       class_of, frame, gt_is_objective());
-	unsigned players = 0, vehicles = 0, infantry = 0, no_callback = 0;
-	for (const FrameUpdateRecord &record : frame.records) {
-		switch (record.cls) {
-			case EntityClass::Player: ++players; break;
-			case EntityClass::Vehicle: ++vehicles; break;
-			case EntityClass::Infantry: ++infantry; break;
-			case EntityClass::NoNetworkCallback: ++no_callback; break;
-			default: break;
-		}
-	}
-	std::printf(
-			"PARITY_STATE frame=%d ts_ns=%llu dir=S session=%d tag=0x0a "
-			"kind=frame decode=%u len=%zu sub=%u flags=%u,%u anchor=%d,%d,%d "
-			"local=%u local_state=%u,%d,%d records=%zu players=%u vehicles=%u "
-			"infantry=%u none=%u rounds=%zu carried=%u "
-			"weapon=%u,%u,%u,%u,%u,%u,%u,%u,%d "
-			"timer=%u,%u,%u,%u,%u,%d "
-			"env=%u,%u,%u,%u,%u,%u,%u,%u,%u "
-			"objective=%u,%d,%d,%d,%d mount=%u,%u,%u,%u,%u\n",
-			message.frame_index, static_cast<unsigned long long>(ts_nanos),
-			message.session, clean ? 1u : 0u, message.payload.size(),
-			unsigned(frame.sub_block), unsigned(frame.flags1), unsigned(frame.flags2),
-			frame.anchor_x, frame.anchor_y, frame.anchor_z,
-			frame.local_tail_present ? 1u : 0u, unsigned(frame.state_flag_byte),
-			int(frame.health), int(frame.state_word), frame.records.size(), players,
-			vehicles, infantry, no_callback, frame.round_events.size(),
-			unsigned(frame.carried_handle),
-			frame.weapon.present ? 1u : 0u, unsigned(frame.weapon.preround_timer),
-			unsigned(frame.weapon.slot_state360), unsigned(frame.weapon.slot_state368),
-			unsigned(frame.weapon.slot_state364), unsigned(frame.weapon.slot_state356),
-			unsigned(frame.weapon.slot_state460), unsigned(frame.weapon.reload_seconds),
-			frame.weapon.uniform_team_mask,
-			frame.timer.present ? 1u : 0u, unsigned(frame.timer.state0),
-			unsigned(frame.timer.state1), unsigned(frame.timer.state2),
-			unsigned(frame.timer.state3), int(frame.timer.timer_seconds),
-			frame.env.present ? 1u : 0u, unsigned(frame.env.fog_dist),
-			unsigned(frame.env.fog_accel), unsigned(frame.env.tod_fixed),
-			unsigned(frame.env.quake_ticks), unsigned(frame.env.cloud_scroll),
-			unsigned(frame.env.rain_pct), unsigned(frame.env.overcast),
-			unsigned(frame.env.env_param),
-			frame.objective.present ? 1u : 0u, frame.objective.state[0],
-			frame.objective.state[1], frame.objective.state[2], frame.objective.state[3],
-			frame.passenger.present ? 1u : 0u, unsigned(frame.passenger.mount_handle),
-			frame.passenger.has_mount ? 1u : 0u, unsigned(frame.passenger.clip),
-			unsigned(frame.passenger.reserve));
-	for (const FrameUpdateRecord &record : frame.records)
-		print_parity_entity(message, ts_nanos, record);
 }
 
 // S2C 0x1E game event — kill feed + objectives + zone control.
@@ -2315,37 +1902,23 @@ int main(int argc, char *argv[]) {
 		opennova::CaptureDecoder decoder;
 		std::map<int, uint64_t> frame_timestamps;
 		wire::ScenarioEventTracker scenario_tracker;
-		long seen = 0, printed_through = 0;
-		bool stopped_early = false;
-		auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
-			++seen;
-			if (skip_frames > 0 && seen <= skip_frames) return true;
+		// --parity-events: the canonical trace (parity_trace.h) drives its own
+		// decoder over the same datagrams.
+		wire::ParityTracePrinter parity_printer(stdout);
+		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class);
+		auto decode_and_print = [&](const net::PcapDatagram &pk) {
 			frame_timestamps[pk.frame_index] = pk.ts_nanos;
-			if (parity_events_mode)
-				print_parity_handshake(pk.frame_index, pk.ts_nanos, pk.srcport,
-				                       pk.dstport, pk.payload);
 			opennova::CaptureDatagram cd;
 			cd.frame_index = pk.frame_index;
 			cd.src_port = pk.srcport;
 			cd.dst_port = pk.dstport;
 			cd.payload = pk.payload; // copy: reference only valid during the callback
 			CaptureDecodeResult decoded = decoder.push_detailed(cd);
-			if (parity_events_mode) {
-				for (const CapturedDatagramResult &datagram : decoded.datagrams)
-					print_parity_datagram(datagram, pk.ts_nanos);
-				for (const CapturedSessionPacket &packet : decoded.session_packets)
-					print_parity_packet(packet, frame_timestamps[packet.frame_index]);
-			} else if (sequencing_mode) {
+			if (sequencing_mode) {
 				for (const CapturedSessionPacket &packet : decoded.session_packets)
 					print_session_packet(packet);
 			}
 			for (const auto &m : decoded.messages) {
-				if (parity_events_mode) {
-					const uint64_t ts_nanos = frame_timestamps[m.frame_index];
-					print_parity_event(m, ts_nanos);
-					print_parity_semantics(m, ts_nanos);
-					continue;
-				}
 				if (scenario_events_mode) {
 					const std::string line = wire::format_scenario_event(
 							m, frame_timestamps[m.frame_index], scenario_tracker);
@@ -2358,6 +1931,16 @@ int main(int argc, char *argv[]) {
 				const int display_tag = int(m.tag) | (m.settings_update ? 0x1000 : 0);
 				print_payload(m.dir, m.frame_index, display_tag, m.payload, m.session);
 			}
+		};
+		long seen = 0, printed_through = 0;
+		bool stopped_early = false;
+		auto on_dg = [&](const net::PcapDatagram &pk) -> bool {
+			++seen;
+			if (skip_frames > 0 && seen <= skip_frames) return true;
+			if (parity_events_mode)
+				parity_trace.push(pk);
+			else
+				decode_and_print(pk);
 			printed_through = pk.frame_index;
 			if (max_frames > 0 && (seen - skip_frames) >= max_frames) {
 				stopped_early = true;
@@ -2431,21 +2014,15 @@ int main(int argc, char *argv[]) {
 
 	CaptureDecodeResult decoded = decode_capture(caps);
 	if (parity_events_mode) {
-		for (const CapturedDatagramResult &datagram : decoded.datagrams)
-			print_parity_datagram(datagram, frame_timestamps[datagram.frame_index]);
-		for (const CapturedSessionPacket &packet : decoded.session_packets)
-			print_parity_packet(packet, frame_timestamps[packet.frame_index]);
+		wire::ParityTracePrinter parity_printer(stdout);
+		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class);
+		parity_trace.push_decoded(decoded, frame_timestamps);
+		decoded.messages.clear();
 	} else if (sequencing_mode) {
 		for (const CapturedSessionPacket &packet : decoded.session_packets)
 			print_session_packet(packet);
 	}
 	for (const auto &m : decoded.messages) {
-		if (parity_events_mode) {
-			const uint64_t ts_nanos = frame_timestamps[m.frame_index];
-			print_parity_event(m, ts_nanos);
-			print_parity_semantics(m, ts_nanos);
-			continue;
-		}
 		if (sequencing_mode) continue;
 		if (!tag_filter.empty() && !tag_filter.count(m.tag & 0xFF)) continue;
 		if (histogram_mode) { hist_tally(m.dir, m.tag, m.payload.size()); continue; }

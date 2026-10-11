@@ -3847,6 +3847,18 @@ target_include_directories(opennova_wire_scenario_events_test PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/wire)
 add_test(NAME opennova_wire_scenario_events COMMAND opennova_wire_scenario_events_test)
 
+# opennova-wire --parity-events: the canonical parity trace (apps/wire/parity_trace.h) over
+# the committed self-capture session -- the executable prints the library printer's bytes,
+# every line matches scripts/net/wait_parity_wire_ready.ps1's patterns, and the bytes match a
+# pinned hash for the pinned fixture.
+add_executable(opennova_wire_parity_events_test novaworld/wire_parity_events_test.cpp)
+target_link_libraries(opennova_wire_parity_events_test PRIVATE opennova_wire_trace)
+target_include_directories(opennova_wire_parity_events_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(opennova_wire_parity_events_test PRIVATE
+    SELF_CAPTURE_FIXTURE="${CMAKE_SOURCE_DIR}/fixtures/novaworld/self-capture-session.pcap")
+add_test(NAME opennova_wire_parity_events
+         COMMAND opennova_wire_parity_events_test $<TARGET_FILE:opennova_wire>)
+
 # Host-row staleness backstop sweep (prune_stale_hosts).
 add_executable(host_prune_test novaworld/host_prune_test.cpp)
 target_link_libraries(host_prune_test PRIVATE opennova_novaworld_service)
