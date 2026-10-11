@@ -80,10 +80,12 @@ param(
 
     # The OpenNova integrity-challenge profile (--integrity-profile): the
     # retail CRC table image our host validates replies against and our
-    # joiner answers from (D-NET-181). Profiles exist per witnessed corpus
-    # (retail-revx02-024f56f2-2d087374 for revx02); empty passes none, so our
-    # host stays silent on CRC replies and our joiner does not answer.
-    [string] $IntegrityProfile = "",
+    # joiner answers from (D-NET-181). Profiles exist per witnessed corpus:
+    # retail-jox01-47724f02-6422e3a9 for the jox01 reference,
+    # retail-revx02-024f56f2-2d087374 for revx02. `auto` picks the jox01
+    # profile when -Expansion is jox01 and none otherwise; `none` passes none,
+    # so our host stays silent on CRC replies and our joiner does not answer.
+    [string] $IntegrityProfile = "auto",
 
     # Diagnostic only: accept OpenNova launches through the plain runtime
     # executable (no console-wrapper job). A verdict-bearing run needs the
@@ -107,6 +109,11 @@ if ($HostSessionName.Length -gt 31 -or $HostSessionName -notmatch '^[\x20-\x7e]+
     throw "HostSessionName must be at most 31 printable ASCII characters."
 }
 $ServerName = $HostSessionName
+if ($IntegrityProfile -eq "auto") {
+    $IntegrityProfile = if ($Expansion -eq "jox01") { "retail-jox01-47724f02-6422e3a9" } else { "" }
+} elseif ($IntegrityProfile -eq "none") {
+    $IntegrityProfile = ""
+}
 if ($ReadinessMode -eq "deploy_hold" -and ($AutoDeploy -or $ExerciseInput)) {
     throw "deploy_hold readiness cannot auto-deploy or exercise input."
 }

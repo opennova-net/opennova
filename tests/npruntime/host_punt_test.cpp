@@ -13,6 +13,7 @@
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/integrity_challenge_profile.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -1819,6 +1820,71 @@ bool check_verified_revx02_profile_answers_exact_crc_challenges() {
 			"rejecting an unknown profile clears a previously selected corpus");
 }
 
+// The pinned JO:CA reference's corpus (jox01): all 75 ammo rows read from one
+// live stock host per mission (01TR, ASH_I5A; scripts/net/read_integrity_profile.py),
+// cross-checked against the retail client's replies in
+// fixtures/novaworld/run_20260426_120859:
+//   - C2S 0x20 to {FF,00,00} => the whole-table CRC 0x47724F02
+//   - C2S 0x21 to {16,00,00} => ammo row 0x16 0xB4D3A790
+// Row 0x18 (0x6422E3A9) names the profile; index 75 takes the zero-CRC arm.
+bool check_verified_jox01_profile_answers_exact_crc_challenges() {
+	inmatch::JoinerConnection joiner("Jox01Challenge");
+	if (!expect(joiner.set_integrity_challenge_profile(
+				inmatch::kRetailJox01IntegrityProfileId),
+			"the witnessed jox01 integrity profile is registered"))
+		return false;
+	seed_joiner(joiner);
+	SessionSequencing server_tx{1, 0};
+
+	struct Case {
+		uint8_t request_tag;
+		std::vector<uint8_t> request_body;
+		uint8_t reply_tag;
+		std::vector<uint8_t> reply_body;
+	};
+	const std::vector<Case> cases = {
+		{0x30, {0xFF, 0x00, 0x00}, 0x20, {0xFF, 0x02, 0x4F, 0x72, 0x47}},
+		{0x31, {0x16, 0x00, 0x00}, 0x21,
+		 {0x16, 0x90, 0xA7, 0xD3, 0xB4, 0x00, 0x00, 0x00, 0x00}},
+		{0x31, {0x18, 0x00, 0x00}, 0x21,
+		 {0x18, 0xA9, 0xE3, 0x22, 0x64, 0x00, 0x00, 0x00, 0x00}},
+		{0x31, {0x4B, 0x34, 0x12}, 0x21,
+		 {0x4B, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00}},
+	};
+	std::vector<uint8_t> body;
+	for (const Case &c : cases) {
+		const std::vector<uint8_t> challenge = frame_s2c(
+				server_tx, {make_protocol_message(c.request_tag, c.request_body)});
+		const inmatch::JoinerConnection::PollResult result =
+				joiner.handle_datagram(challenge.data(), challenge.size());
+		if (!expect(reply_body(result, c.reply_tag, body) && body == c.reply_body,
+				"the jox01 profile emits the exact witnessed integrity reply"))
+			return false;
+	}
+
+	// The live witness's digest over every `[row][crc32-le]` tuple.
+	uint64_t corpus_digest = 14695981039346656037ull;
+	for (uint16_t row = 0; row < 75; ++row) {
+		const std::vector<uint8_t> request = frame_s2c(
+				server_tx,
+				{make_protocol_message(0x31,
+						{static_cast<uint8_t>(row), 0x00, 0x00})});
+		const inmatch::JoinerConnection::PollResult result =
+				joiner.handle_datagram(request.data(), request.size());
+		body.clear();
+		if (!expect(reply_body(result, 0x21, body) && body.size() == 9 &&
+					body[0] == row,
+				"the jox01 profile covers every witnessed ammo row"))
+			return false;
+		for (const uint8_t byte : {body[0], body[1], body[2], body[3], body[4]}) {
+			corpus_digest ^= byte;
+			corpus_digest *= 1099511628211ull;
+		}
+	}
+	return expect(corpus_digest == 0x7B7F326C906F274Bull,
+			"all 75 indexed CRC constants match the live jox01 witness digest");
+}
+
 } // namespace
 
 int main() {
@@ -1843,5 +1909,6 @@ int main() {
 	ok = check_join_rejection_retains_the_raw_reject_record() && ok;
 	ok = check_pv2_mismatch_reports_an_incompatible_version() && ok;
 	ok = check_verified_revx02_profile_answers_exact_crc_challenges() && ok;
+	ok = check_verified_jox01_profile_answers_exact_crc_challenges() && ok;
 	return ok ? 0 : 1;
 }

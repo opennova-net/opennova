@@ -39,6 +39,8 @@ constexpr bool weapon_integrity_reply_matches(
 
 inline constexpr std::string_view kRetailRevx02IntegrityProfileId =
 		"retail-revx02-024f56f2-2d087374";
+inline constexpr std::string_view kRetailJox01IntegrityProfileId =
+		"retail-jox01-47724f02-6422e3a9";
 
 // Unknown ids return null. Callers must treat null and uncovered in-range
 // entries as silence, never as CRC zero.

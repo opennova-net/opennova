@@ -133,6 +133,109 @@ constexpr IntegrityChallengeProfile kRetailRevx02Profile = {
 		sizeof(kRetailRevx02AmmoCrcs) / sizeof(kRetailRevx02AmmoCrcs[0]),
 };
 
+// [orig: NetPacket_WriteEntityCRCChecksum @0x42B020 (g_AmmoDefTable @0xA2ECE8,
+// g_AmmoDefCapacity @0xA2ECEC)]
+// The same method over the pinned JO:CA reference (jox01, Jointops.exe SHA-256
+// 9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57), scripted as
+// scripts/net/read_integrity_profile.py: the complete 75-row table of one live
+// stock host per mission, identical on 01TR (COOP) and ASH_I5A (AAS). Cross-check
+// anchor: row 0x16 => 0xB4D3A790, the retail client's C2S 0x21 reply in
+// fixtures/novaworld/run_20260426_120859 (ASB_G11A).
+constexpr IntegrityCrcEntry kRetailJox01AmmoCrcs[] = {
+		{0x00, 0x445867A1u},
+		{0x01, 0x687AE92Bu},
+		{0x02, 0x019C3B58u},
+		{0x03, 0x5676601Du},
+		{0x04, 0xFA6767C1u},
+		{0x05, 0x2A452975u},
+		{0x06, 0x7AB2D07Cu},
+		{0x07, 0x5B48EF3Fu},
+		{0x08, 0xF27F6797u},
+		{0x09, 0xB3B9B4BCu},
+		{0x0A, 0xA1FD15BBu},
+		{0x0B, 0x0E1EB4FAu},
+		{0x0C, 0xBE45DED0u},
+		{0x0D, 0x281B1A06u},
+		{0x0E, 0x21F86840u},
+		{0x0F, 0x830F5936u},
+		{0x10, 0xC1F52ADCu},
+		{0x11, 0xECC401BCu},
+		{0x12, 0xFC3BF8B8u},
+		{0x13, 0x7FFE62B3u},
+		{0x14, 0x88E37ECDu},
+		{0x15, 0x5B292E86u},
+		{0x16, 0xB4D3A790u},
+		{0x17, 0xCA8FBD0Au},
+		{0x18, 0x6422E3A9u},
+		{0x19, 0x5352AE16u},
+		{0x1A, 0xE0E18838u},
+		{0x1B, 0x83C74B1Eu},
+		{0x1C, 0x4DADABAEu},
+		{0x1D, 0x2EED8BAFu},
+		{0x1E, 0x7805AE61u},
+		{0x1F, 0x5F5FDDA1u},
+		{0x20, 0x09A93C7Eu},
+		{0x21, 0xCFA430FEu},
+		{0x22, 0xD9F346B1u},
+		{0x23, 0x8E8DFBC9u},
+		{0x24, 0xEC81E16Au},
+		{0x25, 0x82966D39u},
+		{0x26, 0xD76829B6u},
+		{0x27, 0x177C5656u},
+		{0x28, 0xB52591EDu},
+		{0x29, 0xB21FAFFEu},
+		{0x2A, 0x5D513E9Du},
+		{0x2B, 0xAE39693Fu},
+		{0x2C, 0x6502DFF4u},
+		{0x2D, 0xBE58AE98u},
+		{0x2E, 0x939B2995u},
+		{0x2F, 0x28BFF2AEu},
+		{0x30, 0xA9D33A25u},
+		{0x31, 0xD48EA7C7u},
+		{0x32, 0xF5426AFEu},
+		{0x33, 0x6D375DDEu},
+		{0x34, 0x14108541u},
+		{0x35, 0xEEE01C9Du},
+		{0x36, 0x57DCDD0Au},
+		{0x37, 0x552D4513u},
+		{0x38, 0x120A72D5u},
+		{0x39, 0x947DB965u},
+		{0x3A, 0x7C85F4A9u},
+		{0x3B, 0x61B1C8DEu},
+		{0x3C, 0x22317B44u},
+		{0x3D, 0x6174E03Fu},
+		{0x3E, 0x066EB819u},
+		{0x3F, 0x5120D23Bu},
+		{0x40, 0x7B83B778u},
+		{0x41, 0x08BFBC80u},
+		{0x42, 0x69467357u},
+		{0x43, 0xF14590ACu},
+		{0x44, 0xD060D90Du},
+		{0x45, 0xF445EBEEu},
+		{0x46, 0x69B1EB74u},
+		{0x47, 0x182165B2u},
+		{0x48, 0x0AD8FE07u},
+		{0x49, 0x3CC202AAu},
+		{0x4A, 0xA6DC2359u},
+};
+
+static_assert(sizeof(kRetailJox01AmmoCrcs) /
+		sizeof(kRetailJox01AmmoCrcs[0]) == 75);
+
+// The whole sanitized WeaponSlotDef walk is the retail client's C2S 0x20 reply
+// to a stock host's {FF,00,00} challenge: 0x47724F02 in
+// fixtures/novaworld/run_20260426_120859. Individual ADM rows are not
+// witnessed, as for revx02.
+constexpr IntegrityChallengeProfile kRetailJox01Profile = {
+		kRetailJox01IntegrityProfileId,
+		0x47724F02u,
+		75,
+		nullptr,
+		0,
+		kRetailJox01AmmoCrcs,
+		sizeof(kRetailJox01AmmoCrcs) / sizeof(kRetailJox01AmmoCrcs[0]),
+};
+
 bool find_crc(const IntegrityCrcEntry *entries, std::size_t count,
 		uint8_t index, uint32_t &crc_out) {
 	for (std::size_t i = 0; i < count; ++i) {
@@ -159,7 +262,11 @@ bool IntegrityChallengeProfile::find_ammo_definition_crc(
 
 const IntegrityChallengeProfile *find_integrity_challenge_profile(
 		std::string_view id) {
-	return id == kRetailRevx02Profile.id ? &kRetailRevx02Profile : nullptr;
+	for (const IntegrityChallengeProfile *profile :
+			{&kRetailRevx02Profile, &kRetailJox01Profile}) {
+		if (id == profile->id) return profile;
+	}
+	return nullptr;
 }
 
 } // namespace opennova::inmatch
