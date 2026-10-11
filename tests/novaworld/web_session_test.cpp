@@ -223,7 +223,8 @@ int test_authenticate(Database &db, int64_t alice) {
 }
 
 // loggable(): a control byte as \xNN (no client string can forge a log line),
-// the text cut after max_bytes with "..".
+// the text cut after max_bytes with "..". loggable_secret(): a bearer secret
+// as its hash's prefix; is_secret_cookie(): the cookies that are one.
 int test_loggable(Database &, int64_t) {
 	TEST_EXPECT(nws::loggable("alice") == "alice");
 	TEST_EXPECT(nws::loggable("a\nb\r\x7f\x01") == "a\\x0Ab\\x0D\\x7F\\x01");
@@ -232,6 +233,20 @@ int test_loggable(Database &, int64_t) {
 	const std::string line(300, 'c');
 	TEST_EXPECT(nws::loggable(line, line.size()) == line);
 	TEST_EXPECT(nws::loggable("abcdef", 3) == "abc..");
+
+	// A bearer secret logs as its SHA-256's first 8 hex digits, never itself.
+	TEST_EXPECT(nws::loggable_secret("abc") == "<redacted #ba7816bf>");
+	TEST_EXPECT(nws::loggable_secret("") == "(none)");
+	const std::string tag = "NWServer:NWLogin.dll:SESSIONTAG:12345:0a1b2c3d";
+	TEST_EXPECT(nws::loggable_secret(tag).find("0a1b2c3d") == std::string::npos);
+	for (const char *name : { "LOGINSESSIONTAG", "NWJOINSESSIONTAG", "PERSISTENTEXPRESSLOGINDATA",
+				 "PERSISTENTREMEMBERLOGINDATA", "persistentexpresslogindata", "opennova_session",
+				 "__Host-opennova_session" }) {
+		TEST_EXPECT(nws::is_secret_cookie(name));
+	}
+	for (const char *name : { "NWHANDLE", "CHAR", "PCID", "EPASK", "YOURIP", "NWPF", "EXPBITS" }) {
+		TEST_EXPECT(!nws::is_secret_cookie(name));
+	}
 	return 0;
 }
 
@@ -239,7 +254,7 @@ int test_loggable(Database &, int64_t) {
 // same update and moves its credentials generation: after a reset the old
 // session is gone, and a ban lifted before the session was ever used again
 // revives nothing. Other edits (a new handle, a rename, a lifted ban) keep
-// both. An empty status is refused; one stored empty reads as active.
+// both. An empty status is refused, by the update and by the schema.
 int test_update_revokes_sessions(Database &db, int64_t) {
 	const int64_t bob = make_player(db, "bob", "0000b0b0");
 	TEST_EXPECT(bob > 0);
@@ -278,9 +293,15 @@ int test_update_revokes_sessions(Database &db, int64_t) {
 	empty.account_status = "";
 	const auto refused = update(empty);
 	TEST_EXPECT(!refused.ok && refused.error_code == "invalid_field");
-	token = mint(db, bob);
-	db.exec("UPDATE players SET account_status = '' WHERE id = ?;", {BindValue(bob)});
-	TEST_EXPECT(nws::resolve_web_session(db, token).has_value());
+	// The schema refuses one too, so no account is ever read as active
+	// without the word.
+	bool caught = false;
+	try {
+		db.exec("UPDATE players SET account_status = '' WHERE id = ?;", { BindValue(bob) });
+	} catch (const opennova::db::SqliteError &) {
+		caught = true;
+	}
+	TEST_EXPECT(caught);
 	TEST_EXPECT(nws::get_user_by_id(db, bob)->account_status == "active");
 	return 0;
 }
@@ -508,7 +529,7 @@ int test_listing_owner_revoked_and_deleted(Database &db, int64_t) {
 	// A listing whose owner holds a claimed key, as the lobby writes it.
 	auto list_for = [&db](int64_t owner, uint32_t rid, char letter) {
 		const std::string key(hostdb::kHostKeyChars, letter);
-		hostdb::record_host_key(db, key, owner);
+		hostdb::record_host_key(db, key, owner, generation(db, owner));
 		hostdb::HostRow row;
 		row.rid = rid;
 		row.gsid = "GSID-" + std::to_string(rid);

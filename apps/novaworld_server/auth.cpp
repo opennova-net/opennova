@@ -84,8 +84,9 @@ std::optional<UserRecord> row_to_user(const opennova::db::Row &row) {
 	u.pcid     = row.as_text(2).value_or("");
 	u.nwh      = row.as_text(3).value_or("");
 	u.nwhandle = row.as_text(4).value_or("");
-	u.account_status = row.as_text(5).value_or("active");
-	if (u.account_status.empty()) u.account_status = "active";
+	// The schema refuses an empty status (migration 0003), so 'active' alone
+	// is active, here and in every query that tests it.
+	u.account_status = row.as_text(5).value_or("");
 	u.role     = row.as_text(6).value_or("player");
 	u.credentials_gen = row.as_int(7).value_or(0);
 	if (u.id == 0) return std::nullopt;
@@ -498,8 +499,8 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	if (p.role && *p.role != "player" && *p.role != "admin") {
 		return err("invalid_field", "role must be player or admin");
 	}
-	// '' would read back as 'active' (row_to_user) on one path and as no
-	// status on another; a status names itself.
+	// A status names itself: the schema refuses '' too (migration 0003), and
+	// this answers it as the field's own error rather than a db_error.
 	if (p.account_status && p.account_status->empty()) {
 		return err("invalid_field", "account_status must not be empty");
 	}

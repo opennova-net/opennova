@@ -185,16 +185,18 @@ local file after a run on any machine others can read.
 **Rotating.** nginx accepts a second value, `EDGE_AUTH_SECRET_PREVIOUS`, beside the
 current one while a rotation runs, so the rule can move without a window of 403s:
 
-1. In the `app-prod` vault item, copy the current `edge_auth_secret` into a new field
-   `edge_auth_secret_previous`, then set `edge_auth_secret` to the new secret
-   (`openssl rand -hex 32`).
-2. Add `EDGE_AUTH_SECRET_PREVIOUS=op://OpenNova-Deploy/app-prod/edge_auth_secret_previous`
-   to `deploy/env/app.prod.env.tpl` and deploy the app. nginx now accepts both (the web
-   container logs that the previous secret is accepted too); the rule still stamps
-   the old one.
-3. `./deploy/run.sh infra apply`: the rule stamps the new secret.
-4. Remove the `EDGE_AUTH_SECRET_PREVIOUS` line (and the vault field) and deploy the app
-   again: only the new secret passes. Run step 5's checks.
+1. In one sitting, with no other app deploy or `infra` run in between (from the vault
+   edit until this deploy, the vault names a secret nothing accepts yet, so any of
+   them would answer the site's API with 403): in the `app-prod` vault item, copy the
+   current `edge_auth_secret` into a new field `edge_auth_secret_previous` and set
+   `edge_auth_secret` to the new secret (`openssl rand -hex 32`); add
+   `EDGE_AUTH_SECRET_PREVIOUS=op://OpenNova-Deploy/app-prod/edge_auth_secret_previous`
+   to `deploy/env/app.prod.env.tpl`; and deploy the app. nginx now accepts both (the
+   web container logs that the previous secret is accepted too); the rule still
+   stamps the old one.
+2. `./deploy/run.sh infra apply`: the rule stamps the new secret.
+3. Remove the `EDGE_AUTH_SECRET_PREVIOUS` line (and the vault field) and deploy the app
+   again: only the new secret passes. Run the turn-on checks (step 5 above).
 
 The previous secret takes the same rule as the current one (the container stops on a
 malformed one, one set without `EDGE_AUTH_SECRET`, or one equal to it).

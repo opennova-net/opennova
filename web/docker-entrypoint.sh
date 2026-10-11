@@ -69,13 +69,17 @@ if [ -n "${EDGE_AUTH_SECRET:-}" ]; then
             longest=${#EDGE_AUTH_SECRET_PREVIOUS}
         fi
     fi
-    # nginx keeps each map key whole in one hash bucket, and the default bucket
-    # (64 bytes, a cache line) holds no key past about 50 characters: a 64-digit
-    # `openssl rand -hex 32` secret stops nginx ("could not build map_hash"). The
-    # bucket is the smallest power of two holding the longest secret with the
-    # entry's own bytes, set before the map, which reads it.
+    # nginx keeps each map key whole in one hash bucket: an entry is its value
+    # pointer (8 bytes) and the key's length (2) and bytes, rounded up to 8, and
+    # the bucket ends with an 8-byte terminator, so a key of N characters needs
+    # ((N + 9) / 8) * 8 + 16 bytes. The default bucket (64 bytes, a cache line)
+    # holds no key past 46 characters: a 64-digit `openssl rand -hex 32` secret
+    # stops nginx ("could not build map_hash"). The bucket is the smallest
+    # power of two from 64 that holds the longest secret, set before the map,
+    # which reads it.
+    need=$(( ((longest + 9) / 8) * 8 + 16 ))
     bucket=64
-    while [ "$bucket" -lt $((longest + 16)) ]; do
+    while [ "$bucket" -lt "$need" ]; do
         bucket=$((bucket * 2))
     done
     {

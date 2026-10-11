@@ -5,7 +5,8 @@
 // the whole flow over the wire is nw_host_ownership_e2e's).
 //
 //   * the store keeps only a key's SHA-256, never the key, and records only a
-//     48-letter A..P key; an account keeps its newest kHostKeysPerUser keys and
+//     48-letter A..P key, for an active account still at the credentials
+//     generation its login read; an account keeps its newest kHostKeysPerUser keys and
 //     every key a listed server holds;
 //   * a claim names the account for a live key of an active account; a key
 //     backs one listed RID at a time, a gone listing frees it, an idle or
@@ -239,7 +240,7 @@ int test_record() {
 	const int64_t alice = make_player(db, "alice");
 	const int64_t bob = make_player(db, "bob");
 
-	hostdb::record_host_key(db, key_of('A'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
 	const auto rows = db.query("SELECT key_hash, user_id, claimed_rid FROM host_keys;");
 	TEST_EXPECT(rows.size() == 1);
 	TEST_EXPECT(rows[0].as_text(0).value() == hostdb::host_key_hash(key_of('A')));
@@ -249,8 +250,27 @@ int test_record() {
 	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE key_hash = ?;", {BindValue(key_of('A'))})
 	                    .empty());
 
-	hostdb::record_host_key(db, "HK-NOT-A-KEY", alice);
-	hostdb::record_host_key(db, std::string(48, 'a'), alice);
+	TEST_EXPECT(!hostdb::record_host_key(db, "HK-NOT-A-KEY", alice, 0));
+	TEST_EXPECT(!hostdb::record_host_key(db, std::string(48, 'a'), alice, 0));
+	TEST_EXPECT(db.query("SELECT COUNT(*) FROM host_keys;").front().as_int(0).value() == 1);
+
+	// Only at the account's credentials generation, and only for an active
+	// account: a login whose generation a reset has since moved records
+	// nothing (the race between /NWHost.dll's lookup and this insert), and
+	// neither does a banned account; nor does an account that is gone.
+	db.exec("UPDATE players SET credentials_gen = credentials_gen + 1 WHERE id = ?;",
+			{ BindValue(alice) });
+	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), alice, 0));
+	TEST_EXPECT(!key_stored(db, key_of('O')));
+	TEST_EXPECT(hostdb::record_host_key(db, key_of('O'), alice, 1));
+	TEST_EXPECT(key_stored(db, key_of('O')));
+	db.exec("DELETE FROM host_keys WHERE key_hash = ?;",
+			{ BindValue(hostdb::host_key_hash(key_of('O'))) });
+	db.exec("UPDATE players SET credentials_gen = 0, account_status = 'banned' WHERE id = ?;",
+			{ BindValue(alice) });
+	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), alice, 0));
+	db.exec("UPDATE players SET account_status = 'active' WHERE id = ?;", { BindValue(alice) });
+	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), 9999, 0));
 	TEST_EXPECT(db.query("SELECT COUNT(*) FROM host_keys;").front().as_int(0).value() == 1);
 
 	// The cap: alice's 'A' key backs a listed server, then 24 more keys.
@@ -262,9 +282,9 @@ int test_record() {
 		key[0] = static_cast<char>('A' + i % 16);
 		key[1] = static_cast<char>('A' + i / 16);
 		later.push_back(key);
-		hostdb::record_host_key(db, key, alice);
+		hostdb::record_host_key(db, key, alice, 0);
 	}
-	hostdb::record_host_key(db, key_of('P'), bob);
+	hostdb::record_host_key(db, key_of('P'), bob, 0);
 	const auto counts = db.query("SELECT user_id, COUNT(*) FROM host_keys GROUP BY user_id "
 	                             "ORDER BY user_id;");
 	TEST_EXPECT(counts.size() == 2);
@@ -285,7 +305,7 @@ int test_claim() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	hostdb::record_host_key(db, key_of('A'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
 
 	TEST_EXPECT(!hostdb::claim_host_key(db, key_of('B'), 0x0A000001u));  // unknown
 	TEST_EXPECT(!hostdb::claim_host_key(db, "", 0x0A000001u));
@@ -320,7 +340,7 @@ int test_claim() {
 	age_key(db, key_of('A'), "-86401 seconds");
 	TEST_EXPECT(!hostdb::claim_host_key(db, key_of('A'), 0x0A000004u));
 	// A claim moves last_used_at forward.
-	hostdb::record_host_key(db, key_of('C'), alice);
+	hostdb::record_host_key(db, key_of('C'), alice, 0);
 	age_key(db, key_of('C'), "-86000 seconds");
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('C'), 0x0A000005u) == alice);
 	TEST_EXPECT(!db.query("SELECT 1 FROM host_keys WHERE key_hash = ? "
@@ -340,7 +360,8 @@ int test_prune() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	for (char c : {'A', 'B', 'C', 'D'}) hostdb::record_host_key(db, key_of(c), alice);
+	for (char c : { 'A', 'B', 'C', 'D' })
+		hostdb::record_host_key(db, key_of(c), alice, 0);
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), 0x0A000001u) == alice);  // listed
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('B'), 0x0A000002u) == alice);  // gone
 	list_rid(db, 0x0A000001u);
@@ -365,7 +386,7 @@ int test_lobby_links() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	hostdb::record_host_key(db, key_of('A'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
 
 	LobbySession sess;
 	sess.set_database(&db);
@@ -454,8 +475,8 @@ int test_owner_needs_live_claim() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	hostdb::record_host_key(db, key_of('A'), alice);
-	hostdb::record_host_key(db, key_of('B'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
+	hostdb::record_host_key(db, key_of('B'), alice, 0);
 
 	LobbySession sess;
 	sess.set_database(&db);
@@ -515,8 +536,8 @@ int test_require_host_key() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	hostdb::record_host_key(db, key_of('A'), alice);
-	hostdb::record_host_key(db, key_of('B'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
+	hostdb::record_host_key(db, key_of('B'), alice, 0);
 
 	LobbySession sess;
 	sess.set_database(&db);

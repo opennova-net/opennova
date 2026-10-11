@@ -133,7 +133,9 @@ private:
 	// (hostdb::record_host_key): the LOGINSESSIONTAG cookie of a live retail
 	// login (its active_user_sessions row, get_user_by_login_session_tag), else
 	// the PERSISTENTEXPRESSLOGINDATA pin a login made (pinned_user); `how` names
-	// the cookie that resolved it. The account's status is the caller's to
+	// the cookie that resolved it. A row that resolves has its last_seen_at
+	// moved to now, so the 2 h sweep measures the login's real idleness. The
+	// account's status is the caller's to
 	// check. The NWHANDLE cookie never counts: the service sets it in the clear
 	// to the account's handle, so any client can send any account's (and a key
 	// minted on it would list a server as anyone's). Throws db::SqliteError.

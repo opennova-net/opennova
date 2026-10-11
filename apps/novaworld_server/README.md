@@ -270,7 +270,8 @@ the known addresses and the credentials generation below.
   owner to the per-username cap just when someone else is guessing, and the
   per-(username, address) bucket still brakes a guesser at one of them. A session
   whose account went inactive any other way is refused and deleted when next used. An
-  empty status is refused, so no account has one.
+  empty status is refused, by the update (400 `invalid_field`) and by the schema (a
+  `CHECK` in migration 0003), so `active` alone is active everywhere.
 - **The credentials generation.** A login reads the account's generation with its
   password hash, before bcrypt runs, and everything it then grants is written only
   while the account is still at it, tested by the insert itself: the website session
@@ -301,11 +302,13 @@ the known addresses and the credentials generation below.
   missing expansion gets (the `msgbase` page, NWEC11 for a ban, NWEC12 otherwise); one
   with no login standing joins with empty PUB* cookies, which a stock host refuses.
 - **Retail pages.** Every value the routes fill a page with (`{{VAR}}`,
-  `template_engine.*`) goes out with `& < > " '` as entities, which a stock client's
-  page parser turns back into the characters, so a request's `IN` / `OUT` / `MSGBASE`,
-  a listed server's name and a maintenance message show as text and add no markup.
-  The values the service and a stock client use hold none of the five and go out byte
-  for byte.
+  `template_engine.*`) goes out with `& < > " '` as entities, so a request's `IN` /
+  `OUT` / `MSGBASE`, a listed server's name and a maintenance message add no markup. In
+  a page's text a stock client's page parser turns the entities back into the
+  characters, so a server name or a message shows as itself; inside a tag (the login
+  form's `VALUE="{{IN}}"`) it decodes none, which costs nothing because the values
+  there are bare page names. The values the service and a stock client use hold none
+  of the five and go out byte for byte.
 - **Login answers.** An unknown username and a wrong password get the same 401
   `invalid_credentials`, and an unknown name still costs one bcrypt run, so neither the
   body nor the timing enumerates accounts. Only the right password learns that an

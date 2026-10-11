@@ -214,10 +214,12 @@ const char *content_type_for(const std::filesystem::path &p) {
 }
 
 // One-line summary of inbound cookies for logging. Each entry is
-// `name=value` with the value truncated to ~20 chars, both loggable(). Tags
-// showing up here that we didn't issue this run = retail bridging state from a
-// prior process via its persistent cookie jar (PERSISTENTEXPRESSLOGINDATA
-// is the usual suspect — see G.4).
+// `name=value` with the value truncated to ~20 chars, both loggable(); a
+// bearer secret (a session tag or token, a persistent login: is_secret_cookie)
+// shows only as its loggable_secret() stand-in. Tags showing up here that we
+// didn't issue this run = retail bridging state from a prior process via its
+// persistent cookie jar (PERSISTENTEXPRESSLOGINDATA is the usual suspect — see
+// G.4).
 std::string cookie_summary(std::string_view header) {
 	std::string out;
 	const auto cookies = parse_cookie_header(header);
@@ -226,7 +228,7 @@ std::string cookie_summary(std::string_view header) {
 		if (!first) out += ',';
 		out += loggable(k);
 		out += '=';
-		out += loggable(v, 20);
+		out += is_secret_cookie(k) ? loggable_secret(v) : loggable(v, 20);
 		first = false;
 	}
 	return out;
@@ -433,6 +435,10 @@ std::optional<UserRecord> HttpListener::retail_login_user(
 		const std::map<std::string, std::string> &cookies, db::Database &db, const char *&how) {
 	if (const auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) {
 		if (auto user = get_user_by_login_session_tag(db, it->second)) {
+			// The login is in use: its row's idle clock restarts, so the 2 h
+			// sweep (evict_active_user_sessions_older_than) ends a login idle
+			// that long, not one in the lobby since its last GET /NWLogin.dll.
+			touch_active_user_session(db, user->id);
 			how = "login-session";
 			return user;
 		}
@@ -1447,8 +1453,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 		std::string effective_exp_bits = (game_slug == "dfx2_consumer") ? "1" : "3";
 		if (user->id != 0) {
-			const std::string account_status =
-				user->account_status.empty() ? std::string("active") : user->account_status;
+			const std::string &account_status = user->account_status;
 			if (account_status == "banned") {
 				std::printf("[http] POST /NWLogin.dll rejected: user %lld banned\n",
 				            static_cast<long long>(user->id));
@@ -1522,11 +1527,11 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		s.nwh      = user->nwh;
 		s.nwhandle = user->nwhandle;
 		s.exp_bits = effective_exp_bits;
-		std::printf("[http]   user resolved (%s): id=%lld username=%s pcid=%s nwhandle=%s persist=%s\n",
-		            resolution ? resolution : "?",
-		            static_cast<long long>(s.user_id), loggable(s.username).c_str(),
-		            loggable(s.pcid).c_str(), loggable(s.nwhandle).c_str(),
-		            persist_cookie.empty() ? "(none)" : loggable(persist_cookie, 16).c_str());
+		std::printf(
+				"[http]   user resolved (%s): id=%lld username=%s pcid=%s nwhandle=%s persist=%s\n",
+				resolution ? resolution : "?", static_cast<long long>(s.user_id),
+				loggable(s.username).c_str(), loggable(s.pcid).c_str(),
+				loggable(s.nwhandle).c_str(), loggable_secret(persist_cookie).c_str());
 
 		// The relay template renders this response only; nothing reads it back
 		// from the stored session.
@@ -1546,7 +1551,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 				loggable(req.url).c_str(), req.body.size(),
 				loggable(sessions_.get_login(tag).value().username).c_str(),
 				loggable(relay_template).c_str(),
-				loggable(sessions_.get_login(tag).value().success).c_str(), tag.c_str());
+				loggable(sessions_.get_login(tag).value().success).c_str(),
+				loggable_secret(tag).c_str());
 
 		// Relay refresh target is the BARE "NWLogin.dll" — matching onnet AND
 		// the genuine NovaLogic server (Wireshark capture, docs/net/
@@ -1609,7 +1615,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			// round-robin a dev user. Log it loudly so the cookie bridge
 			// is visible.
 			std::printf("[http] GET %s WARN stale/unknown tag '%s' — minting fresh login session\n",
-					loggable(req.url).c_str(), loggable(tag).c_str());
+					loggable(req.url).c_str(), loggable_secret(tag).c_str());
 			// Mint a fresh, UNAUTHENTICATED session so retail doesn't hit a
 			// blank screen on a cross-restart tag — but it carries no user.
 			// The POST /NWLogin.dll path is the only auth gate; a stale tag
@@ -1627,7 +1633,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 
 		std::printf("[http] GET %s tag=%s -> auth ok (user=%s pcid=%s)\n",
-				loggable(req.url).c_str(), loggable(tag).c_str(),
+				loggable(req.url).c_str(), loggable_secret(tag).c_str(),
 				loggable(session->username).c_str(), loggable(session->pcid).c_str());
 		if (session->user_id != 0) {
 			try { touch_active_user_session(*db_pool_.acquire(), session->user_id); }
@@ -1722,8 +1728,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string success_tpl = req.url_params.get("success")
 		                                  ? req.url_params.get("success")
 		                                  : "jop_2_login.htm";
-		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n", loggable(tag).c_str(),
-				persist_it != cookies.end() ? 1 : 0, loggable(success_tpl).c_str());
+		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n",
+				loggable_secret(tag).c_str(), persist_it != cookies.end() ? 1 : 0,
+				loggable(success_tpl).c_str());
 
 		TemplateVars vars{
 			{"HOST_URL",    host_url()},
@@ -1919,7 +1926,8 @@ void HttpListener::register_legacy_host_join_routes(
 											  : "(none)",
 					req.url_params.get("success") ? loggable(req.url_params.get("success")).c_str()
 												  : "(default)",
-					tag.c_str(), cookie_summary(request_cookie_header(req)).c_str());
+					loggable_secret(tag).c_str(),
+					cookie_summary(request_cookie_header(req)).c_str());
 
 			// Bare "NWJoin.dll" refresh — matches onnet and the genuine server;
 			// the NWJOINSESSIONTAG cookie carries the tag (see the /NWLogin.dll
@@ -1946,12 +1954,13 @@ void HttpListener::register_legacy_host_join_routes(
 		// full inbound cookie set — LOGINSESSIONTAG / PERSISTENTEXPRESSLOGINDATA
 		// decide the joiner identity that PUBPCID is encoded from.
 		std::printf("[http] /NWJoin.dll (second call) tag=%s (from %s) cookies=[%s]\n",
-				loggable(tag_from_request).c_str(), req.url_params.get("tag") ? "query" : "cookie",
+				loggable_secret(tag_from_request).c_str(),
+				req.url_params.get("tag") ? "query" : "cookie",
 				cookie_summary(request_cookie_header(req)).c_str());
 		const auto session = sessions_.get_join(tag_from_request);
 		if (!session) {
-			std::printf("[http] /NWJoin.dll (second call) WARN unknown tag '%s'\n",
-					loggable(tag_from_request).c_str());
+			std::printf("[http] /NWJoin.dll (second call) WARN unknown tag %s\n",
+					loggable_secret(tag_from_request).c_str());
 			crow::response res(400);
 			res.body = "unknown NWJOINSESSIONTAG";
 			return res;
@@ -2249,8 +2258,12 @@ void HttpListener::register_legacy_host_join_routes(
 				auto db_conn = db_pool_.acquire();
 				const char *how = "";
 				const auto owner = retail_login_user(cookies, *db_conn, how);
-				if (owner && owner->account_status == "active") {
-					hostdb::record_host_key(*db_conn, s.host_key, owner->id);
+				// Recorded only while the account is still active and at the
+				// generation the login read, tested by the insert: a reset that
+				// commits after the lookup leaves the key unrecorded.
+				if (owner && owner->account_status == "active" &&
+						hostdb::record_host_key(
+								*db_conn, s.host_key, owner->id, owner->credentials_gen)) {
 					owner_label = std::to_string(owner->id) + " (" + how + ")";
 				}
 			} catch (const std::exception &e) {
@@ -2263,7 +2276,7 @@ void HttpListener::register_legacy_host_join_routes(
 			sessions_.put_host(new_tag, std::move(s));
 
 			std::printf("[http] /NWHost.dll (first call) -> tag %s host_key=%s... owner=%s\n",
-			            new_tag.c_str(), key_head.c_str(), owner_label.c_str());
+					loggable_secret(new_tag).c_str(), key_head.c_str(), owner_label.c_str());
 
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting NovaWorld...."},
@@ -2281,18 +2294,21 @@ void HttpListener::register_legacy_host_join_routes(
 			return res;
 		}
 
-		// Second call — look up session, render success with HOSTKEY.
-		const auto session = sessions_.get_host(tag);
+		// Second call — take the session (served once: a stock client follows
+		// the relay page's refresh once and reads the key from that page's
+		// TITLE, so the tag never serves the key again), render success with
+		// HOSTKEY.
+		const auto session = sessions_.take_host(tag);
 		if (!session) {
 			std::printf("[http] /NWHost.dll (second call) -> 400 (unknown tag %s)\n",
-					loggable(tag).c_str());
+					loggable_secret(tag).c_str());
 			crow::response res(400);
 			res.body = "unknown NWJOINSESSIONTAG (host)";
 			return res;
 		}
 
 		std::printf("[http] /NWHost.dll (second call) tag=%s -> %s with HOSTKEY=%.6s...\n",
-				loggable(tag).c_str(), loggable(session->success).c_str(),
+				loggable_secret(tag).c_str(), loggable(session->success).c_str(),
 				session->host_key.c_str());
 
 		TemplateVars vars{

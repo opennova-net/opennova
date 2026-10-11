@@ -75,10 +75,10 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 	if (rows.empty()) return std::nullopt;
 	const auto &row = rows.front();
 	// A banned or restricted account keeps no session: the game login refuses
-	// every status but 'active', and so does the site. An empty status reads as
-	// 'active', as row_to_user (auth.cpp) and the game login read it.
+	// every status but 'active', and so does the site. (The schema refuses an
+	// empty status, so 'active' alone is active.)
 	const std::string status = row.as_text(3).value_or("");
-	if (!status.empty() && status != "active") {
+	if (status != "active") {
 		db.exec("DELETE FROM web_sessions WHERE token_hash = ?;", {db::BindValue(hash)});
 		return std::nullopt;
 	}

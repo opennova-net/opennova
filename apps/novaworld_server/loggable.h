@@ -5,6 +5,8 @@
 // main()'s connection callbacks and engine log sink). Header-only, so the
 // listeners built without the HTTP layer take it too.
 
+#include <base/io/sha256.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
@@ -44,6 +46,33 @@ inline std::string loggable(std::string_view text, size_t max_bytes = 64) {
 	if (text.size() > max_bytes)
 		out += "..";
 	return out;
+}
+
+// A bearer secret's stand-in in a log line: "<redacted #" and the first 8 hex
+// digits of its SHA-256 ">", enough to tie the lines about one value together
+// and nothing to present it with; "(none)" for an empty one. For the retail
+// session tags (LOGINSESSIONTAG, NWJOINSESSIONTAG: the tag names a live login,
+// and a host tag serves its HOSTKEY), the persistent-login cookies and the
+// website's session token.
+inline std::string loggable_secret(std::string_view secret) {
+	if (secret.empty())
+		return "(none)";
+	return "<redacted #" + io::sha256_hex(io::sha256(secret)).substr(0, 8) + ">";
+}
+
+// Whether a cookie (or form field) named `name` carries a bearer secret: a
+// session tag or token (any name holding "session", the retail
+// LOGINSESSIONTAG / NWJOINSESSIONTAG and the website's opennova_session
+// alike) or a persistent login (PERSISTENTEXPRESSLOGINDATA, a password-less
+// login resume, and PERSISTENTREMEMBERLOGINDATA, the remembered credentials).
+// Case aside.
+inline bool is_secret_cookie(std::string_view name) {
+	std::string lower(name);
+	for (char &c : lower) {
+		if (c >= 'A' && c <= 'Z')
+			c = static_cast<char>(c - 'A' + 'a');
+	}
+	return lower.find("session") != std::string::npos || lower.rfind("persistent", 0) == 0;
 }
 
 } // namespace opennova::novaworld_server

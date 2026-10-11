@@ -1584,7 +1584,8 @@ int test_listed_server_owners(Harness &h) {
 		if (l.owner) {
 			const std::string key(opennova::hostdb::kHostKeyChars,
 			                      static_cast<char>('A' + (l.rid - 2001)));
-			opennova::hostdb::record_host_key(*conn, key, *l.owner);
+			TEST_EXPECT(opennova::hostdb::record_host_key(
+					*conn, key, *l.owner, nws::get_user_by_id(*conn, *l.owner)->credentials_gen));
 			row.host_user_id = opennova::hostdb::claim_host_key(*conn, key, l.rid);
 			TEST_EXPECT(row.host_user_id == l.owner);
 		}
@@ -2494,30 +2495,29 @@ void forget_joins(Harness &h) {
 			{ opennova::db::BindValue(static_cast<int64_t>(kJoinRid)) });
 }
 
-// The .joi /NWJoin.dll's second leg renders (NK / CK as the route encodes
-// them: each char + key char - '0').
-std::string expected_joi(Harness &h, const std::string &server_name) {
-	auto encode = [](const std::string &value, const char *key) {
-		std::string out;
-		for (size_t i = 0; i < value.size() && key[i] != '\0'; ++i)
-			out.push_back(static_cast<char>(value[i] + key[i] - 48));
-		return out;
-	};
-	const std::string base = "http://127.0.0.1:" + std::to_string(h.fresh_port);
-	const nws::TemplateVars vars{
-		{ "NK", encode("10.0.0.43:32771", "diheijefhgcdjcgcjcfbd") },
-		{ "CK", encode("20", "cfhdcegjigecjehcgjdhe") },
-		{ "NI", "10.0.0.43" },
-		{ "NP", "32771" },
-		{ "BK", "986119" },
-		{ "SERVER_NAME", server_name },
-		{ "HOST_URL", base + "/nwhost.dll" },
-		{ "GSB_SERVER", base + "/jop_2.gsb" },
-		{ "JOINLAN_URL", "" },
-	};
-	return nws::render_template(
+// `text` with each of `fills`' markers replaced by its text, verbatim: the
+// expected page built without the renderer under test.
+std::string fill_markers(
+		std::string text, const std::vector<std::pair<std::string, std::string>> &fills) {
+	for (const auto &[marker, value] : fills) {
+		for (auto at = text.find(marker); at != std::string::npos;
+				at = text.find(marker, at + value.size())) {
+			text.replace(at, marker.size(), value);
+		}
+	}
+	return text;
+}
+
+// The .joi /NWJoin.dll's second leg renders for the join cases' host, its
+// server name given as the page must carry it. NK and CK are written out: the
+// host's "10.0.0.43:32771" and app id "20", each char plus its key char
+// ("diheijefhgcdjcgcjcfbd", "cfhdcegjigecjehcgjdhe") less '0'.
+std::string expected_joi(Harness &h, const std::string &server_name_as_sent) {
+	return fill_markers(
 			test_io::read_file_text((h.retail_root / "templates" / "jop_2_join.joi").string()),
-			vars);
+			{ { "{{NK}}", "eifegjcjkqffqjh" }, { "{{CK}}", "ef" }, { "{{NI}}", "10.0.0.43" },
+					{ "{{NP}}", "32771" }, { "{{BK}}", "986119" },
+					{ "{{SERVER_NAME}}", server_name_as_sent } });
 }
 
 // /NWJoin.dll takes its joiner from server-side state only: the request's own
@@ -2566,7 +2566,9 @@ int test_join_identity(Harness &h) {
 	auto reply = join(h, { tag });
 	TEST_EXPECT(identified(reply));
 	TEST_EXPECT(body_text(reply) == expected_joi(h, "Plain Server 7"));
-	TEST_EXPECT(body_text(reply).find("&NI=10.0.0.43&NP=32771&BK=986119&]") != std::string::npos);
+	TEST_EXPECT(
+			body_text(reply).find("[NK=eifegjcjkqffqjh&CK=ef&NI=10.0.0.43&NP=32771&BK=986119&]") !=
+			std::string::npos);
 	TEST_EXPECT(joined_user(h) == joiner);
 
 	forget_joins(h);
@@ -2608,11 +2610,9 @@ int test_join_identity(Harness &h) {
 				{ opennova::db::BindValue(std::string(status)), opennova::db::BindValue(other) });
 		forget_joins(h);
 		reply = join(h, { other_tag });
-		const std::string base = "http://127.0.0.1:" + std::to_string(h.fresh_port);
-		const std::string expected = nws::render_template(msg_page,
-				{ { "MESSAGE", message }, { "IN", "jop_2_main.htm" }, { "OUT", "jop_2_main.htm" },
-						{ "MSGBASE", "jop_2_msg.htm" }, { "HOST_URL", base + "/nwhost.dll" },
-						{ "GSB_SERVER", base + "/jop_2.gsb" }, { "JOINLAN_URL", "" } });
+		// The message page (its one marker is MESSAGE), filled by hand.
+		const std::string expected = fill_markers(msg_page, { { "{{MESSAGE}}", message } });
+		TEST_EXPECT(expected.find("{{") == std::string::npos);
 		TEST_EXPECT(reply.transport_ok && reply.code == 200 && body_text(reply) == expected);
 		TEST_EXPECT(header_values(reply, "Set-Cookie").size() == 1); // YOURIP alone
 		TEST_EXPECT(joined_user(h) == -1);
@@ -2724,7 +2724,8 @@ int test_template_values_escaped(Harness &h) {
 	}
 	reply = join(h, {});
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
-	TEST_EXPECT(body_text(reply) == expected_joi(h, "Tom & Jerry's <b>Base</b>"));
+	TEST_EXPECT(
+			body_text(reply) == expected_joi(h, "Tom &amp; Jerry&#39;s &lt;b&gt;Base&lt;/b&gt;"));
 	TEST_EXPECT(body_text(reply).find("Joining Tom &amp; Jerry&#39;s &lt;b&gt;Base&lt;/b&gt;...") !=
 			std::string::npos);
 	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kJoinRid);
@@ -2772,6 +2773,92 @@ int test_register_handle_rule(Harness &h) {
 	return 0;
 }
 
+// A retail login's session row stays alive while the login is used: each
+// request it names its account by (here /NWJoin.dll and /NWAccount.dll)
+// restarts the row's idle clock, so the main tick's 2 h sweep keeps a login
+// used 1 h 50 min after its GET /NWLogin.dll, and the join after it still
+// names the joiner. A row left idle past the 2 h is swept, and its tag then
+// names no one.
+int test_login_row_kept_alive(Harness &h) {
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = kJoinRid;
+		row.gsid = "GSID-JOIN";
+		row.game = "jop_2_consumer";
+		row.app_id = "20";
+		row.server_name = "Plain Server 7";
+		row.host_ip = "10.0.0.43";
+		row.host_port = 32771;
+		row.pcid_key = "pcid-key-for-the-join-case";
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+	}
+	const int64_t id = make_account(h, "lobby_sitter", "pw-sitter");
+	TEST_EXPECT(id > 0);
+	const auto logged_in = nwlogin_to(h, h.fresh_port, "lobby_sitter", "pw-sitter");
+	TEST_EXPECT(nwlogin_succeeded(logged_in));
+	const std::string tag = "LOGINSESSIONTAG=" + set_cookie_value(logged_in, "LOGINSESSIONTAG");
+	auto age = [&h, id](const char *ago) {
+		h.pool.acquire()->exec(
+				std::string("UPDATE active_user_sessions SET last_seen_at = datetime('now', '") +
+						ago + "') WHERE user_id = ?;",
+				{ opennova::db::BindValue(id) });
+	};
+	auto fresh_row = [&h, id] {
+		return !h.pool.acquire()
+						->query("SELECT 1 FROM active_user_sessions WHERE user_id = ? "
+								"AND last_seen_at >= datetime('now', '-5 seconds');",
+								{ opennova::db::BindValue(id) })
+						.empty();
+	};
+	auto sweep = [&h] {
+		return nws::evict_active_user_sessions_older_than(*h.pool.acquire(), 2 * 60 * 60);
+	};
+	auto joined_by_login = [&h, &tag] {
+		const auto reply = join(h, { tag });
+		return reply.transport_ok && reply.code == 200 &&
+				!set_cookie_value(reply, "PUBPCID").empty();
+	};
+
+	age("-110 minutes");
+	TEST_EXPECT(joined_by_login());
+	TEST_EXPECT(fresh_row());
+	sweep();
+	TEST_EXPECT(joined_by_login());
+
+	age("-110 minutes");
+	TEST_EXPECT(account_page_names(h, { "Cookie: " + tag }, "lobby_sitter"));
+	TEST_EXPECT(fresh_row());
+
+	age("-121 minutes");
+	TEST_EXPECT(sweep() >= 1);
+	const auto reply = join(h, { tag });
+	TEST_EXPECT(
+			reply.transport_ok && reply.code == 200 && has_set_cookie(reply, "PUBPCID=; Path=/"));
+	forget_joins(h);
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kJoinRid);
+	return 0;
+}
+
+// /NWHost.dll's second leg serves a tag's HOSTKEY once: the same tag again is
+// the unknown-tag 400, with no key.
+int test_host_tag_serves_once(Harness &h) {
+	const auto first =
+			h.send_to(h.fresh_port, "GET", "/NWHost.dll?success=jop_2_host2.htm&pfid=28");
+	const std::string tag = join_tag(first);
+	TEST_EXPECT(!tag.empty());
+	const auto session = h.sessions.get_host(tag);
+	TEST_EXPECT(session.has_value());
+	const std::vector<std::string> jar = { "Cookie: NWJOINSESSIONTAG=" + tag };
+	auto reply = h.send_to(h.fresh_port, "GET", "/NWHost.dll", jar);
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(body_text(reply).find("[HOSTKEY=" + session->host_key + "&]") != std::string::npos);
+	TEST_EXPECT(!h.sessions.get_host(tag).has_value());
+	reply = h.send_to(h.fresh_port, "GET", "/NWHost.dll", jar);
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(body_text(reply).find(session->host_key) == std::string::npos);
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
@@ -2814,6 +2901,8 @@ int run(Harness &h) {
 		{ "api_proxy_only", test_api_proxy_only },
 		{ "template_values_escaped", test_template_values_escaped },
 		{ "register_handle_rule", test_register_handle_rule },
+		{ "login_row_kept_alive", test_login_row_kept_alive },
+		{ "host_tag_serves_once", test_host_tag_serves_once },
 		{ "concurrent_requests", test_concurrent_requests },
 	};
 	for (const Case &c : cases) {

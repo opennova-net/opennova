@@ -303,7 +303,8 @@ int test_web_sessions_migration_over_existing_accounts() {
 }
 
 // 0010: a new account starts at credentials generation 0, a retail login's
-// session row carries one, and neither column takes NULL.
+// session row carries one, and neither column takes NULL. And 0003's
+// account_status: 'active' by default, never empty (inserted or updated).
 int test_credentials_generation() {
 	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
 	Database db(":memory:");
@@ -320,8 +321,14 @@ int test_credentials_generation() {
 	TEST_EXPECT(db.query("SELECT 1 FROM active_user_sessions WHERE session_tag = 'tag-gen' "
 						 "AND credentials_gen = 0;")
 						.size() == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM players WHERE username = 'gen' "
+						 "AND account_status = 'active';")
+						.size() == 1);
 	for (const char *sql : { "UPDATE players SET credentials_gen = NULL WHERE username = 'gen';",
-				 "UPDATE active_user_sessions SET credentials_gen = NULL;" }) {
+				 "UPDATE active_user_sessions SET credentials_gen = NULL;",
+				 "UPDATE players SET account_status = '' WHERE username = 'gen';",
+				 "INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, "
+				 "account_status) VALUES ('blank', 'x', '0000cccc', '1', 'Blank', '');" }) {
 		bool caught = false;
 		try {
 			db.exec(sql);
