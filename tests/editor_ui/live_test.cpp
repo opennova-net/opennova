@@ -41,7 +41,7 @@ void test_board_with_a_report() {
 	run.take();
 	run.ui.away();
 	const std::string text = logged_frame(run.ui);
-	CHECK(MissionRun::drawn_window("/logic_pane_") && in_order(text, {"Events (2)", "Event 1: When "}),
+	CHECK(MissionRun::drawn_window("/logic_pane_") && in_order(text, {"2 of 2 events", "Event 1", "When"}),
 	      "the board drawn with the report");
 	run.ui.frames(3);
 	CHECK(run.ui.drain().empty(), "drawing it raises nothing");

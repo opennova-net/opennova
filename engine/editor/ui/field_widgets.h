@@ -19,6 +19,16 @@
 // time, so one string per window, emptied as a list opens), the controls keeping nothing.
 namespace opennova::editor::field_widgets {
 
+// A number naming a definition or a record of its own file (an item id, an SSN, a zone, an event, a
+// group, a path, a register by its index): picked by name in the value's place (ReferencePicker::
+// draw_field, ADR 0046 S15), never typed as a number; one whose value the game resolves itself (the
+// player's SSN) picked as what it would name otherwise (FieldUse::picks; graph/display_names' picked_as).
+// The Inspector's and the Event board's chips alike (S24).
+bool picks_by_name(const FieldUse &field);
+// What a name picked sets the field to: the text, or the index a Record reference's name is (a
+// name that is no index stays the text, which the field refuses).
+Value picked_value(const FieldUse &field, const std::string &picked);
+
 // What a field's tooltip says of it: its name, its id and the key the file writes when that
 // differs, its unit and range, and the format table's note.
 std::string field_tip(const FieldSchema &field);

@@ -918,7 +918,8 @@ void EditorWindows::draw_new_project() {
 // Redo, as Ctrl+Y is. None of them while the unsaved prompt is open: an Undo behind it would make a
 // file it does not list unsaved. No two share keys: Ctrl+S, Ctrl+Shift+S, Ctrl+W, Ctrl+B, Ctrl+P, Ctrl+T,
 // Ctrl+L, Ctrl+Shift+F, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, F5, Ctrl+F5, Alt+F5, Shift+F5, F12, Shift+F12, Alt+Left and
-// Alt+Right here; Ctrl+F, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D, F2, Delete, F and the arrows the windows' own.
+// Alt+Right here; Ctrl+F, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D, F2, Delete, F and the arrows the windows' own, and the Event
+// board's Space, Enter, Alt+Up, Alt+Down, Ctrl+Shift+T and Ctrl+Shift+A (S24) while it has the keyboard.
 void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document) {
 	if (v.dialogs.unsaved_prompt.open) return;
 	const ImGuiIO &io = ImGui::GetIO();

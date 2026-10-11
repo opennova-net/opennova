@@ -453,6 +453,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_row_menu.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_drag.cpp
         # S24 lane A (the board)
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_card.cpp
         # S24 lane B (logic in the views)
         # S24 lane C (names and live logic)
     )
