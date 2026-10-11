@@ -572,9 +572,7 @@ double wave_pitch_scale(uint32_t loader_pitch_q16, uint32_t sample_rate, uint32_
 	// 32 bits [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5f6..0x7bd60e]. The mixer reads the word
 	// unsigned (`mul` @ 0x7bd5f9); ours takes a scale of 0 or below as the word 0 and holds one past the
 	// word's range at 0xFFFFFFFF. Every scale the shell composes is a word's own (lwf::pitch_from_q16 of
-	// a uint32) but an emitter's, which MissionAudio::_pitch_scale reads as an int: a word with bit 31
-	// set would come out below 0 and play at the least step, where the game steps it enormously fast.
-	// No shipped registration makes one.
+	// a uint32), an emitter's among them (MissionAudio::_pitch_scale reads its word unsigned).
 	const double play_q16 = play_scale * 65536.0;
 	const uint32_t play = !(play_scale > 0.0) ? 0u
 			: play_q16 >= 4294967295.0 ? 0xFFFFFFFFu : static_cast<uint32_t>(play_q16 + 0.5);

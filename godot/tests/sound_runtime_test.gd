@@ -584,7 +584,7 @@ func test_entity_refire_retakes_its_own_channel() -> void:
 	assert_true(first_quiet.is_queued_for_deletion(), "an id-less fire steals the quietest channel instead")
 
 
-func test_dialog_line_plays_at_member_pitch_without_draws() -> void:
+func test_dialog_line_plays_unpitched_without_draws() -> void:
 	# The dialog module resolves its line to one wave entry and plays it at the
 	# fixed dialog frequency; it never enters the trigger-set player, so a set's
 	# authored pitch jitter neither shifts the line nor consumes the shared ROL3
@@ -614,7 +614,7 @@ func test_dialog_line_plays_at_member_pitch_without_draws() -> void:
 	if voice == null:
 		return
 	assert_almost_eq(voice.pitch_scale, 1.0, 0.00001,
-			"the line plays at the member's base pitch, unjittered")
+			"the line plays at its wave's own rate, unjittered")
 	# The next trigger-set fire sees the untouched stream: the pinned fresh-bank
 	# pitch of the fourteen-channel test above, not the value two draws later.
 	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "POOL", StringName(), Vector3.ZERO))
@@ -689,3 +689,32 @@ func test_zero_play_factor_plays_at_the_least_step() -> void:
 	assert_not_null(click)
 	if click != null:
 		assert_almost_eq(click.pitch_scale, 44100.0 / 512.0 / 22050.0, 0.000001, "the menu voice alike")
+
+
+# A layer's member 0 pitch is no play factor. An emitter's channel plays its
+# emitter word alone, reading member 0 for its wave, volume and clamp, and a
+# placed set registers the word 0x10000, so a placed layer plays at its wave's
+# own rate whatever member 0's pitch [orig: SoundEmitter_UpdateAndMixTop8
+# @ 0x528943..0x528949, member 0 @ 0x528649; Entity_UpdateEnvSoundEmitter
+# @ 0x4a815a]; and a dialog line plays its wave with no set or member pitch, as
+# the mission's dialog voice does (D-SND-56).
+func test_member_zero_pitch_is_no_play_factor() -> void:
+	var samples := PackedByteArray()
+	samples.resize(64)
+	var profile := _profile_with_set("AH6", "rate.wav")
+	profile.set_member_field(0, 0, 0, "base_pitch", float(0x11709) / 65536.0)
+	var root := _real_root({"rate.wav": _build_wav(samples, 1, 22050, 16)})
+	var bank = SoundBank.create(root)
+	bank.add_bank(profile)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var holder: Node3D = bank.spawn_ambient(parent, Vector3.ZERO, "AH6", &"Ambient")
+	assert_not_null(holder)
+	if holder != null:
+		var ambient := holder.get_child(0) as AudioStreamPlayer3D
+		assert_almost_eq(ambient.pitch_scale, 1.0, 0.000001,
+				"a placed layer plays at the marker's word, not member 0's pitch")
+	var voice: AudioStreamPlayer = bank.spawn_oneshot_2d(parent, "AH6", StringName())
+	assert_not_null(voice)
+	if voice != null:
+		assert_almost_eq(voice.pitch_scale, 1.0, 0.000001, "a dialog line's voice composes no member pitch")
