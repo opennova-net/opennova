@@ -40,7 +40,7 @@ the game has loaded the mission the editor's Logic pane is shown, the editor's l
 is deployed (deploy_pick) and teleported into the area (teleport_local_player) and the event is seen active, then
 fired about 5.1 s later, the editor's report and the game's own mission_logic_snapshot agreeing. A single-player
 mission with a loading image holds its reveal on the start-mission splash until a key or a click in the game's
-window, which no MCP verb gives yet: the run says so and waits for whoever runs it to dismiss it.
+window, which the game's world_reveal probe gives (game_probe): the run dismisses it as a player's key does.
 
 Local only: it needs a game install and starts the game, so no CI job runs it and it reads
 no environment variable. Standard library only; the clients are editor_mcp.py's and
@@ -327,15 +327,22 @@ def live_leg(client: GameMcp, game: GameMcp, path: str, event: int, centre: tupl
     # The world done loading (its clock starts then), the player deployed (the deploy screen's Default Spawn), the
     # clock running, then the player moved into the area.
     # A single-player mission with a loading image holds its reveal on the start-mission splash until a fresh key or
-    # click in the game's window (main_game.gd's start splash); no MCP verb dismisses it yet (the game's probes call
-    # the shell's dismiss_start_mission_splash in-process), so the run asks whoever runs it to.
-    if game.structured("game_state").get("shell", {}).get("world_loading", True):
-        say("   the game holds its start-mission splash: press a key or click in the game's window to dismiss it")
-    while time.monotonic() < deadline and game.structured("game_state").get("shell", {}).get("world_loading", True):
-        time.sleep(1.0)
+    # click in the game's window (main_game.gd's start splash): the world_reveal probe dismisses it as one does.
+    held = bool(game.structured("game_state").get("shell", {}).get("world_loading", True))
+    started = game.structured("game_probe", {"op": "run", "name": "world_reveal", "args": {"timeout_ms": 60000}})
+    expect(bool(started.get("run_id")), f"the world_reveal probe did not start: {json.dumps(started)}")
+    status: dict = {}
+    while time.monotonic() < deadline:
+        status = game.structured("game_probe", {"op": "status", "run_id": started["run_id"], "cursor": 0,
+                                                "wait_ms": 5000}, timeout=60)
+        if status.get("state") != "running":
+            break
+    verdict = status.get("verdict") or {}
+    expect(status.get("state") == "passed" or bool(verdict.get("ok")),
+           f"the world_reveal probe did not reveal the world: {json.dumps(status)[:600]}")
+    say(f"   {verdict.get('summary', 'revealed')}" + (" (it was held)" if held else ""))
     shell_now = game.structured("game_state").get("shell", {})
-    expect(not shell_now.get("world_loading", True),
-           f"the world was not revealed (its start-mission splash not dismissed): {json.dumps(shell_now)}")
+    expect(not shell_now.get("world_loading", True), f"the world is still not revealed: {json.dumps(shell_now)}")
     say("   deploying the player (Default Spawn)")
     present = False
     while time.monotonic() < deadline and not present:
