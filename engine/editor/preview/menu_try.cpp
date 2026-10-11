@@ -435,7 +435,7 @@ void MenuTry::on_event_(const menu::MenuEvent &event) {
 		// sandbox's profile record.
 		const std::string screen = runtime_.current_screen();
 		const uint32_t revision = options_.bindings().revision();
-		const int effects = options_.activate(runtime_, &profile_, event.text);
+		const int effects = options_.activate(runtime_, &profile_, event.id);
 		if (options_.bindings().revision() != revision)
 			setting_("CONTROL_MAPPING", "binding", "changed (the sandbox's bindings: nothing saved)");
 		// The in-game dialog's OK and Cancel keep or put back what it holds, then show the menu again
