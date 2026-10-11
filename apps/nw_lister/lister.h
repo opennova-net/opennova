@@ -63,6 +63,13 @@ public:
 	bool tick(uint32_t now_ms);
 	// Deregister and finish: ClientStopHosting on one pump, then the goodbye burst.
 	void stop();
+	// Finish without deregistering: the goodbye burst alone, as a process exit's atexit teardown
+	// of the NovaWorld session sends it, with no ClientStopHosting.
+	// [orig: crt_exit -> doexit -> the atexit CNapiGameSession_Destroy (registered
+	// @0x7939DA) -> CNapiGameSession_ResetToDisconnected @0x4D0890 ->
+	// CNapiNPConnection_RequestDisconnect / CNapiNPConnection_Destroy ->
+	// CNapiNPConnection_TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
+	void disconnect();
 	// The server-info update outside the refresh timer: the source's columns and roster at once,
 	// then the Host list's dirty delta (a mission start on a listed server). Nothing while not
 	// hosting.
@@ -94,7 +101,9 @@ private:
 	void sync_roster();
 	// Record the outcome; the teardown runs at the end of the tick, outside the driver's hooks.
 	void end(int code);
-	void teardown();
+	// `stop_hosting`: ClientStopHosting ahead of the goodbye burst (stop), or the burst alone
+	// (disconnect).
+	void teardown(bool stop_hosting);
 
 	ListerOptions options_;
 	std::unique_ptr<ListingSource> owned_source_;
