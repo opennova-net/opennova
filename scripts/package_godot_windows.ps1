@@ -217,9 +217,11 @@ function Invoke-GodotExport {
 # logs, so a package whose main scene cannot load (e.g. a missing per-product
 # run/main_scene feature override in project.godot) still shipped, crashing on
 # first launch. Runs against the staged zip layout (exe, GDExtension DLL and
-# assets/ side by side). Returns the combined output.
+# assets/ side by side), with a throwaway directory for everything it writes,
+# so nothing lands in the stage. $UserArgs are the game's own arguments (after
+# Godot's `--`). Returns the combined output.
 function Invoke-GodotAppBoot {
-    param([string]$ExePath, [string]$ExtraArgs, [int]$ExpectedExit)
+    param([string]$ExePath, [string]$UserArgs, [int]$ExpectedExit)
 
     $stdoutLog = [System.IO.Path]::GetTempFileName()
     $stderrLog = [System.IO.Path]::GetTempFileName()
@@ -235,9 +237,21 @@ function Invoke-GodotAppBoot {
         # GPU work here. Disable it to keep --quit-after from racing render-server
         # teardown while this smoke still loads the product scene, scripts,
         # shaders, and GDExtension.
+        # The game keeps its saves in its working directory, as retail does
+        # (player.sav and weapon.sav, written at the first menu start;
+        # LaunchFlags.working_dir). Godot's export templates move the process to
+        # the exe's folder before the game runs (Main::setup), whatever folder it
+        # was started in, so the smoke of the staged exe saved into the stage and
+        # the 0.0.16 and 0.0.17 zips shipped the packager's profile, its Windows
+        # login the callsign. --working-dir names the throwaway profile instead,
+        # as the editor's Play names its run directory, and the process starts
+        # there too. user:// sits under APPDATA, above. The bundled assets/ still
+        # resolve from the exe's folder (BootRootMount.bundled_assets_dir), so the
+        # staged layout is what boots.
         $proc = Start-Process `
             -FilePath $ExePath `
-            -ArgumentList "--headless --disable-render-loop --disable-crash-handler --quit-after 120 --verbose $ExtraArgs" `
+            -ArgumentList "--headless --disable-render-loop --disable-crash-handler --quit-after 120 --verbose -- --working-dir `"$bootProfile`" $UserArgs" `
+            -WorkingDirectory $bootProfile `
             -WindowStyle Hidden `
             -Wait `
             -PassThru `
@@ -247,11 +261,11 @@ function Invoke-GodotAppBoot {
         $combinedOutput = "$(Get-Content $stdoutLog -Raw)`n$(Get-Content $stderrLog -Raw)"
         if ($proc.ExitCode -ne $ExpectedExit) {
             Write-Host $combinedOutput.TrimEnd()
-            throw "Boot smoke ($ExtraArgs) exited with code $($proc.ExitCode), expected $ExpectedExit"
+            throw "Boot smoke ($UserArgs) exited with code $($proc.ExitCode), expected $ExpectedExit"
         }
         if ($combinedOutput -match "Failed loading scene|Cannot open file 'res://|SCRIPT ERROR|GDExtension dynamic library not found|Failed to load script") {
             Write-Host $combinedOutput.TrimEnd()
-            throw "Boot smoke ($ExtraArgs) logged load errors"
+            throw "Boot smoke ($UserArgs) logged load errors"
         }
         return $combinedOutput
     }
@@ -275,13 +289,13 @@ function Test-GodotAppBoot {
 
     Write-Host "=== Boot smoke: opennova-runtime ==="
     # No arguments: the bundled assets/ placeholder menu (ADR 0048).
-    $bundled = Invoke-GodotAppBoot -ExePath $ExePath -ExtraArgs "" -ExpectedExit 0
+    $bundled = Invoke-GodotAppBoot -ExePath $ExePath -UserArgs "" -ExpectedExit 0
     if ($bundled -match "bundled assets not found|no menu found in resource dir") {
         Write-Host $bundled.TrimEnd()
         throw "Boot smoke did not reach the bundled placeholder menu"
     }
     # --resource-dir without a value stays a usage error.
-    $usage = Invoke-GodotAppBoot -ExePath $ExePath -ExtraArgs "-- --resource-dir" -ExpectedExit 2
+    $usage = Invoke-GodotAppBoot -ExePath $ExePath -UserArgs "--resource-dir" -ExpectedExit 2
     if ($usage -notmatch "--resource-dir needs a path") {
         Write-Host $usage.TrimEnd()
         throw "Boot smoke did not report the --resource-dir usage error"
@@ -291,10 +305,12 @@ function Test-GodotAppBoot {
 # Stage the TRACKED files of assets/ (never a wildcard copy: a working checkout
 # may hold untracked local data there that must never ship). The models, clips
 # and textures ride LFS, so a checkout without them pulled holds pointer files,
-# which must never ship either.
+# which must never ship either. Returns each staged file's path under
+# $AssetsStageDir.
 function Copy-BundledAssets {
     param([string]$AssetsStageDir)
 
+    $copied = New-Object System.Collections.Generic.List[string]
     New-Item -ItemType Directory -Force -Path $AssetsStageDir | Out-Null
     $tracked = & git -C $ROOT ls-files -z assets
     if ($LASTEXITCODE -ne 0) { throw "git ls-files assets failed (exit $LASTEXITCODE)" }
@@ -315,8 +331,43 @@ function Copy-BundledAssets {
         $dst = Join-Path $AssetsStageDir $rel
         New-Item -ItemType Directory -Force -Path (Split-Path $dst -Parent) | Out-Null
         Copy-Item -LiteralPath $src -Destination $dst -Force
+        $copied.Add($rel)
     }
     Write-Host "    staged $($names.Count) tracked asset files"
+    return $copied
+}
+
+# The zip ships exactly the files this script staged. Anything else in the
+# stage fails the package, named: a save or log the boot smoke wrote (the
+# 0.0.16 and 0.0.17 zips shipped the CI runner's player.sav and weapon.sav,
+# which also overwrite a player's own on unzipping over an install) or a file
+# any other step left there. $Staged holds paths relative to $StageDir.
+function Assert-StageHoldsOnly {
+    param([string]$StageDir, [string[]]$Staged)
+
+    $prefix = [IO.Path]::GetFullPath($StageDir).TrimEnd('\') + '\'
+    $files = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $dirs = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($rel in $Staged) {
+        $rel = $rel -replace '/', '\'
+        [void]$files.Add($rel)
+        for ($dir = Split-Path $rel -Parent; $dir; $dir = Split-Path $dir -Parent) { [void]$dirs.Add($dir) }
+    }
+    $unexpected = @(Get-ChildItem -LiteralPath $StageDir -Recurse -Force | ForEach-Object {
+        $rel = $_.FullName.Substring($prefix.Length)
+        if ($_.PSIsContainer) {
+            if (-not $dirs.Contains($rel)) { "$rel\" }
+        }
+        elseif (-not $files.Contains($rel)) { $rel }
+    })
+    if ($unexpected.Count -gt 0) {
+        throw "The game stage holds files this script did not stage, which the zip would ship: $($unexpected -join ', ')"
+    }
+    $missing = @($files | Where-Object { -not (Test-Path -LiteralPath (Join-Path $StageDir $_) -PathType Leaf) })
+    if ($missing.Count -gt 0) {
+        throw "Files this script staged are gone from the game stage: $($missing -join ', ')"
+    }
+    Write-Host "    the stage holds exactly the $($files.Count) files staged"
 }
 
 Write-Host "=== Exporting opennova.exe ==="
@@ -337,15 +388,25 @@ if (Test-Path -LiteralPath $stagePath) {
 }
 New-Item -ItemType Directory -Path $stagePath | Out-Null
 try {
+    # Each file staged, as its path in the stage: the only files the zip may
+    # hold (Assert-StageHoldsOnly).
+    $staged = New-Object System.Collections.Generic.List[string]
     $stagedExe = Join-Path $stagePath "opennova.exe"
     Copy-Item -LiteralPath $RUNTIME_EXE -Destination $stagedExe
+    $staged.Add("opennova.exe")
     Copy-Item -LiteralPath $SHIPPED_DLL -Destination $stagePath
+    $staged.Add((Split-Path $SHIPPED_DLL -Leaf))
     if ($ExportMode -eq "debug") {
         $imguiLibs = @(Get-ChildItem -LiteralPath $DIST -Filter "libimgui-godot-native.*" -File)
         if ($imguiLibs.Count -eq 0) { throw "Debug export is missing the ImGui addon library" }
-        foreach ($lib in $imguiLibs) { Copy-Item -LiteralPath $lib.FullName -Destination $stagePath }
+        foreach ($lib in $imguiLibs) {
+            Copy-Item -LiteralPath $lib.FullName -Destination $stagePath
+            $staged.Add($lib.Name)
+        }
     }
-    Copy-BundledAssets -AssetsStageDir (Join-Path $stagePath "assets")
+    foreach ($rel in @(Copy-BundledAssets -AssetsStageDir (Join-Path $stagePath "assets"))) {
+        $staged.Add("assets\$rel")
+    }
     $launchHelp = @"
 OpenNova
 
@@ -361,7 +422,9 @@ Loose data:
 Use /game <code> and /exp <name> to select a game or expansion.
 "@
     Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $launchHelp -Encoding UTF8
+    $staged.Add("README.txt")
     Test-GodotAppBoot -ExePath $stagedExe
+    Assert-StageHoldsOnly -StageDir $stagePath -Staged $staged
     Compress-Archive -Path (Join-Path $stagePath "*") -DestinationPath $GAME_ZIP -Force
     if (-not (Test-Path -LiteralPath $GAME_ZIP)) { throw "Packaging produced no zip" }
 }
