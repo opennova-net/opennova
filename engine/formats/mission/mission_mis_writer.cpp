@@ -145,11 +145,14 @@ void write_mis_waypoints(const bms::File &file, std::string &out) {
 void write_mis_groups(const bms::File &file, std::string &out) {
 	for (size_t i = 0; i < file.group_records.size(); ++i) {
 		const bms::GroupRecord &record = file.group_records[i];
-		if (record.flags == 0 && record.value == 0) {
+		// A group's description is its name (the 20 bytes the game's loader drops, bms.h
+		// GroupRecord), so a named group is written even with no flags and no value.
+		const std::string name = bms::group_name(record);
+		if (record.flags == 0 && record.value == 0 && name.empty()) {
 			continue;
 		}
 		append_kv(out, "begin group ", i);
-		append_line(out, "  description \"\"");
+		append_kv(out, "  description \"", mis_string(name), "\"");
 		if (record.flags != 0) {
 			append_kv(out, "  flags ", record.flags);
 		}

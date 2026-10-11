@@ -279,5 +279,47 @@ int main() {
 		TEST_EXPECT(back.reverb == 44);
 	}
 
+	// --- A group's name (bms.h GroupRecord, the 20 bytes the game's loader drops) is its .mis
+	// `description`; a named group is written even with no flags and no value. ---------------------
+	{
+		bms::File named;
+		make_default(named);
+		TEST_EXPECT(bms::set_group_name(named.group_records[5], "Bridge guards", error));
+		named.group_records[6].flags = 1;
+		TEST_EXPECT(bms::set_group_name(named.group_records[6], "Convoy", error));
+		std::string named_text;
+		TEST_EXPECT(write_mis_text(named, named_text, error));
+		TEST_EXPECT(named_text.find("begin group 5\r\n  description \"Bridge guards\"\r\nend group\r\n") !=
+		            std::string::npos);
+		TEST_EXPECT(named_text.find("begin group 6\r\n  description \"Convoy\"\r\n  flags 1\r\n") !=
+		            std::string::npos);
+		TEST_EXPECT(named_text.find("begin group 4\r\n") == std::string::npos); // no name, flags or value
+		bms::File named_back;
+		TEST_EXPECT(parse_mis_text(named_text, {}, named_back, error));
+		TEST_EXPECT(bms::group_name(named_back.group_records[5]) == "Bridge guards");
+		TEST_EXPECT(bms::group_name(named_back.group_records[6]) == "Convoy" &&
+		            named_back.group_records[6].flags == 1);
+		TEST_EXPECT(bms::group_name(named_back.group_records[4]).empty());
+		std::string named_again;
+		TEST_EXPECT(write_mis_text(named_back, named_again, error));
+		TEST_EXPECT(named_again == named_text);
+		// A description that is no group name (past 20 characters, a control character) is skipped with an issue,
+		// never stored as bytes; the group's flags still read.
+		bms::File long_name;
+		std::vector<MisIssue> issues;
+		TEST_EXPECT(parse_mis_text("begin group 2\r\n  description \"The northern ridge sentries\"\r\n  flags 1\r\n"
+		                           "end group\r\nbegin group 3\r\n  description \"tab\there\"\r\nend group\r\n",
+		                           {}, long_name, error, &issues));
+		TEST_EXPECT(bms::group_name(long_name.group_records[2]).empty() && long_name.group_records[2].flags == 1);
+		TEST_EXPECT(bms::group_name_readable(long_name.group_records[2]) && bms::group_name_readable(long_name.group_records[3]));
+		TEST_EXPECT(issues.size() == 2 && issues[0].line == 2 && issues[1].line == 6 &&
+		            issues[0].message.find("group 2") != std::string::npos &&
+		            issues[0].message.find("20 characters") != std::string::npos);
+		// The same text read with no issues list still reads.
+		bms::File quiet;
+		TEST_EXPECT(parse_mis_text("begin group 2\r\n  description \"The northern ridge sentries\"\r\nend group\r\n", {}, quiet,
+		                           error));
+	}
+
 	return 0;
 }

@@ -625,11 +625,11 @@ int main() {
 		TEST_EXPECT(chunk_error.find("item availability") != std::string::npos);
 	}
 
-	// --- Modeling policy: group records are flags/value/constant records. Offset 4 and bytes 16..31
-	// are canonical zero, and offset 12 is the writer-confirmed literal 10. ---
+	// --- Modeling policy: a group record is flags @0, the value @8, the writer-confirmed literal 10
+	// @12, and the group's NAME in the 20 bytes the game's loader drops: the first 4 characters @4..7,
+	// the next 16 @16..31 (bms.h GroupRecord; Mission_LoadBMSFile @0x40fbbb..0x40fc03). ---
 	{
 		std::string group_error;
-		std::vector<uint8_t> group_bytes = original;
 		const size_t entity_total = bms_file.header.num_items + bms_file.header.num_buildings +
 		                            bms_file.header.num_markers + bms_file.header.num_people;
 		const size_t group_offset = opennova::bms::kHeaderSize +
@@ -637,10 +637,91 @@ int main() {
 		                            original_secondary_len +
 		                            entity_total * opennova::bms::kEntitySize +
 		                            opennova::bms::kWaypointRecordCount * opennova::bms::kWaypointRecordSize;
-		group_bytes[group_offset + 4] = 1;
+		const size_t named = group_offset + 3 * opennova::bms::kGroupRecordSize; // group 3
+		std::vector<uint8_t> group_bytes = original;
+		const char *raw = "Bridge patrol team A"; // 20 characters: the full width, no terminator
+		std::memcpy(group_bytes.data() + named + 4, raw, 4);
+		std::memcpy(group_bytes.data() + named + 16, raw + 4, 16);
+		opennova::bms::File grouped;
+		TEST_EXPECT(opennova::bms::parse(group_bytes.data(), group_bytes.size(), grouped, group_error));
+		TEST_EXPECT(opennova::bms::group_name(grouped.group_records[3]) == "Bridge patrol team A");
+		TEST_EXPECT(opennova::bms::group_name(grouped.group_records[2]).empty());
+		std::vector<uint8_t> group_rewritten;
+		TEST_EXPECT(opennova::bms::write(grouped, group_rewritten, group_error));
+		TEST_EXPECT(group_rewritten == group_bytes); // the name's bytes go back where they were read
+		TEST_EXPECT(opennova::bms::group_name_readable(grouped.group_records[3]) &&
+		            opennova::bms::group_name_readable(grouped.group_records[2]));
+
+		// Bytes another tool left (a byte after the NUL, a control byte, a quote) load as the game loads them
+		// and write back as read, but are no name: group_name() reads none, so the .mis claims none.
+		std::vector<uint8_t> foreign = original;
+		const uint8_t after_nul[] = {'A', 0, 0, 0};
+		std::memcpy(foreign.data() + named + 4, after_nul, 4);
+		foreign[named + 16] = 'X';
+		foreign[named + 32 + 4] = 0x07;                // group 4: a control byte
+		foreign[named + 64 + 4] = '"';                 // group 5: a quote
+		foreign[named + 96 + 4] = static_cast<uint8_t>(0xE9); // group 6: a high byte
+		opennova::bms::File foreign_file;
+		TEST_EXPECT(opennova::bms::parse(foreign.data(), foreign.size(), foreign_file, group_error));
+		for (size_t g = 3; g <= 6; ++g) {
+			TEST_EXPECT(!opennova::bms::group_name_readable(foreign_file.group_records[g]));
+			TEST_EXPECT(opennova::bms::group_name(foreign_file.group_records[g]).empty());
+		}
+		std::vector<uint8_t> foreign_rewritten;
+		TEST_EXPECT(opennova::bms::write(foreign_file, foreign_rewritten, group_error));
+		TEST_EXPECT(foreign_rewritten == foreign);
+		std::string foreign_text;
+		TEST_EXPECT(opennova::mission::write_mis_text(foreign_file, foreign_text, group_error));
+		TEST_EXPECT(foreign_text.find("begin group 3\r\n") == std::string::npos); // no flags, no value, no name
+
+		// A name set through the record lands in the same bytes, NUL-padded; equal() sees it.
+		opennova::bms::File renamed;
+		TEST_EXPECT(opennova::bms::parse(original.data(), original.size(), renamed, group_error));
+		TEST_EXPECT(opennova::bms::equal(renamed, bms_file));
+		TEST_EXPECT(opennova::bms::set_group_name(renamed.group_records[3], "Alpha", group_error));
+		TEST_EXPECT(!opennova::bms::equal(renamed, bms_file));
+		std::vector<uint8_t> renamed_bytes;
+		TEST_EXPECT(opennova::bms::write(renamed, renamed_bytes, group_error));
+		TEST_EXPECT(renamed_bytes.size() == original.size());
+		TEST_EXPECT(std::memcmp(renamed_bytes.data() + named + 4, "Alph", 4) == 0);
+		TEST_EXPECT(renamed_bytes[named + 16] == 'a' && renamed_bytes[named + 17] == 0);
+		bool only_the_name = true;
+		for (size_t at = 0; at < renamed_bytes.size(); ++at) {
+			const bool name_byte = (at >= named + 4 && at < named + 8) || (at >= named + 16 && at < named + 32);
+			only_the_name = only_the_name && (name_byte || renamed_bytes[at] == original[at]);
+		}
+		TEST_EXPECT(only_the_name);
+		TEST_EXPECT(opennova::bms::set_group_name(renamed.group_records[3], "", group_error));
+		TEST_EXPECT(opennova::bms::equal(renamed, bms_file)); // an empty name is the shipped zeros
+		// Refused: past 20 characters, a control character, a double quote; the record untouched.
+		opennova::bms::GroupRecord kept = renamed.group_records[4];
+		TEST_EXPECT(opennova::bms::set_group_name(kept, "Kept", group_error));
+		TEST_EXPECT(!opennova::bms::set_group_name(kept, "Twenty-one characters", group_error));
+		TEST_EXPECT(!opennova::bms::set_group_name(kept, "tab\there", group_error));
+		TEST_EXPECT(!opennova::bms::set_group_name(kept, "say \"hi\"", group_error));
+		TEST_EXPECT(opennova::bms::group_name(kept) == "Kept");
+
+		// The field row the editor edits: "name" on the group record, refusing past the width.
+		const opennova::mission::MissionField *name_field =
+		        opennova::mission::find_mission_field(opennova::mission::MissionRecord::Group, "name");
+		TEST_EXPECT(name_field != nullptr && name_field->width == opennova::bms::kGroupNameSize);
+		if (name_field != nullptr) {
+			opennova::bms::GroupRecord record{};
+			TEST_EXPECT(name_field->set(&record, std::string("Guards"), group_error));
+			opennova::mission::MissionValue value;
+			TEST_EXPECT(name_field->get(&record, value) && std::get<std::string>(value) == "Guards");
+			TEST_EXPECT(!name_field->set(&record, std::string("A name of more than twenty"), group_error));
+		}
+
+		// The flag word keeps bits 0 and 1 only, and @12 is the literal 10.
+		std::vector<uint8_t> bad_flags = original;
+		bad_flags[named] = 4;
 		opennova::bms::File rejected_group;
-		TEST_EXPECT(!opennova::bms::parse(group_bytes.data(), group_bytes.size(), rejected_group, group_error));
+		TEST_EXPECT(!opennova::bms::parse(bad_flags.data(), bad_flags.size(), rejected_group, group_error));
 		TEST_EXPECT(group_error.find("group") != std::string::npos);
+		std::vector<uint8_t> bad_constant = original;
+		bad_constant[named + 12] = 11;
+		TEST_EXPECT(!opennova::bms::parse(bad_constant.data(), bad_constant.size(), rejected_group, group_error));
 	}
 
 	// --- Phase 0: area-trigger 32-byte record is interleaved per axis (x_min,x_max,y_min,y_max,
