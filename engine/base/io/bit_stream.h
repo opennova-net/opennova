@@ -1,10 +1,9 @@
-// Bit-level LSB-first stream reader.
+// Bit-level LSB-first stream reader and writer.
 //
-// The shape is lifted from engine/formats/cpt's CDEP bit codec (the proven
-// consumer), and cpt consumes io::BitReader (its remaining_bits bound moved
-// here). The matching writer stays cpt's own (cpt_io.cpp): it carries a
-// normalizing set_position (a bit_offset > 8 folds into byte+bit) and a
-// write_to_file.
+// The shape is lifted from engine/formats/cpt's CDEP/POLY bit codec (the proven
+// consumer), and cpt reads through io::BitReader and writes through
+// io::BitWriter; its byte-exact retail re-encode (cpt_jo_assets_sweep) pins
+// the writer's bytes and its high-water rule.
 //
 // Layout contract: values pack LSB-first within a little-endian dword stream;
 // align_dword() pads to the next 4-byte boundary (a partial byte first).
@@ -15,6 +14,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <vector>
+
+#include <base/io/le.h>
 
 namespace opennova {
 namespace io {
@@ -93,6 +95,94 @@ private:
     size_t size_;
     size_t byte_pos_ = 0;
     int bit_pos_ = 0;
+};
+
+// The writer over a zero-filled buffer that grows in 0x4000-byte steps. A field
+// is written at the cursor's current width (set_bit_width) as one little-endian
+// dword read-modify-write, so the cursor's bit offset plus the width stays
+// within 32 (every width up to 25 bits is exact at any offset). Unwritten bytes
+// stay zero, so the align pads are zero.
+class BitWriter {
+public:
+    void set_bit_width(int num_bits)
+    {
+        bit_width_ = static_cast<uint32_t>(num_bits);
+        bitmask_ = (num_bits >= 32) ? 0xFFFFFFFFu : ((1u << num_bits) - 1u);
+    }
+
+    void write_bits(uint32_t value)
+    {
+        ensure_capacity(byte_pos_ + 32u);
+        uint8_t *dst = buffer_.data() + byte_pos_;
+        const uint32_t cur = read_u32_le(dst);
+        const uint32_t mask = bitmask_ << bit_pos_;
+        write_u32_le(dst, ((value & bitmask_) << bit_pos_) | (cur & ~mask));
+
+        const uint32_t total = bit_pos_ + bit_width_;
+        byte_pos_ += total >> 3;
+        bit_pos_ = total & 7u;
+        // A bit write counts the byte the cursor rests in, even when it rests
+        // on a byte boundary with nothing written there yet.
+        high_water_ = std::max(high_water_, byte_pos_ + 1u);
+    }
+
+    void write_field(int num_bits, uint32_t value)
+    {
+        set_bit_width(num_bits);
+        write_bits(value);
+    }
+
+    // Raw bytes, starting on the next whole byte.
+    void write_bytes(const void *data, size_t size)
+    {
+        ensure_capacity(byte_pos_ + size + 32u);
+        advance_byte();
+        std::memcpy(buffer_.data() + byte_pos_, data, size);
+        byte_pos_ += size;
+        high_water_ = std::max(high_water_, byte_pos_);
+    }
+
+    void advance_byte()
+    {
+        if (bit_pos_) {
+            bit_pos_ = 0;
+            ++byte_pos_;
+        }
+    }
+
+    // Moves the cursor only: the pad becomes part of the output once a later
+    // write lands past it.
+    void align_dword()
+    {
+        advance_byte();
+        if (byte_pos_ & 3u) {
+            byte_pos_ = (byte_pos_ + 3u) & ~static_cast<size_t>(3);
+        }
+    }
+
+    // The bytes through the high-water mark, then `zero_tail` zero bytes.
+    std::vector<uint8_t> bytes(size_t zero_tail = 0) const
+    {
+        std::vector<uint8_t> out(buffer_.begin(),
+                                 buffer_.begin() + static_cast<std::ptrdiff_t>(high_water_));
+        out.resize(high_water_ + zero_tail, 0);
+        return out;
+    }
+
+private:
+    void ensure_capacity(size_t needed)
+    {
+        while (needed >= buffer_.size()) {
+            buffer_.resize(buffer_.size() + 0x4000, 0);
+        }
+    }
+
+    std::vector<uint8_t> buffer_ = std::vector<uint8_t>(0x4000, 0);
+    size_t byte_pos_ = 0;
+    size_t high_water_ = 0;
+    uint32_t bit_pos_ = 0;
+    uint32_t bit_width_ = 0;
+    uint32_t bitmask_ = 0;
 };
 
 } // namespace io

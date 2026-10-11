@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <vector>
 #include <base/io/bit_stream.h>
-#include <base/io/le.h>
 #include <base/io/log.h>
 
 // [orig: Terrain_LoadLodStorage @0x603550 — the CDEP/DPTH/POLY/NMAP chunk reader with the CBitStream
@@ -26,107 +25,10 @@ static constexpr uint32_t CDEP_MAGIC = 0x50454443; // "CDEP"
 static constexpr uint32_t POLY_MAGIC = 0x594C4F50; // "POLY"
 
 
-// The CDEP/POLY bit reader is the shared io::BitReader (engine/base/io/bit_stream.h).
+// The CDEP/POLY bit codec is the shared io::BitReader / io::BitWriter
+// (engine/base/io/bit_stream.h).
 using io::BitReader;
-
-class BitWriter {
-public:
-	explicit BitWriter(size_t initial_capacity = 0x4000) : buffer_(initial_capacity, 0) {}
-
-	void set_bit_width(int num_bits) {
-		bit_width_ = static_cast<uint32_t>(num_bits);
-		bitmask_ = (num_bits >= 32) ? 0xFFFFFFFFu : ((1u << num_bits) - 1u);
-	}
-
-	void set_position(uint32_t byte_offset, uint32_t bit_offset) {
-		if (bit_offset <= 8) {
-			byte_pos_ = byte_offset;
-			bit_pos_ = bit_offset;
-		} else {
-			byte_pos_ = byte_offset + (bit_offset >> 3);
-			bit_pos_ = bit_offset & 7u;
-		}
-	}
-
-	void advance_byte() {
-		if (bit_pos_) {
-			bit_pos_ = 0;
-			++byte_pos_;
-		}
-	}
-
-	void align_dword() {
-		if (bit_pos_) {
-			bit_pos_ = 0;
-			++byte_pos_;
-		}
-		if (byte_pos_ & 3u) {
-			byte_pos_ = (byte_pos_ + 3u) & ~3u;
-		}
-	}
-
-	void write_bytes(const void *data, size_t size) {
-		ensure_capacity(byte_pos_ + static_cast<uint32_t>(size) + 32u);
-		if (bit_pos_) {
-			bit_pos_ = 0;
-			++byte_pos_;
-		}
-		std::memcpy(buffer_.data() + byte_pos_, data, size);
-		byte_pos_ += static_cast<uint32_t>(size);
-		if (byte_pos_ > high_water_) {
-			high_water_ = byte_pos_;
-		}
-	}
-
-	void write_bits(uint32_t value) {
-		ensure_capacity(byte_pos_ + 32u);
-		// Byte-wise little-endian read-modify-write. This was a dword store through a
-		// reinterpret_cast at an arbitrary byte offset: strict-aliasing and alignment
-		// UB that merely happened to work on x86, and that UBSan flags. io/le.h is
-		// also the layout contract — the stream packs LSB-first within a
-		// little-endian dword — so being explicit makes the codec correct rather
-		// than accidentally correct. Identical bytes on a little-endian host.
-		uint8_t *dst = buffer_.data() + byte_pos_;
-		const uint32_t cur = opennova::io::read_u32_le(dst);
-		const uint32_t mask = bitmask_ << bit_pos_;
-		opennova::io::write_u32_le(dst, ((value & bitmask_) << bit_pos_) | (cur & ~mask));
-
-		const uint32_t total_bits = bit_pos_ + bit_width_;
-		byte_pos_ += total_bits >> 3;
-		bit_pos_ = total_bits & 7u;
-		if (byte_pos_ + 1u > high_water_) {
-			high_water_ = byte_pos_ + 1u;
-		}
-	}
-
-	void write_field(int num_bits, uint32_t value) {
-		set_bit_width(num_bits);
-		write_bits(value);
-	}
-
-	// The written bytes: up to the high-water mark and the four bytes past it the file carries.
-	std::vector<uint8_t> bytes() const {
-		std::vector<uint8_t> out(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(high_water_ + 4u));
-		return out;
-	}
-
-private:
-	void ensure_capacity(uint32_t needed) {
-		if (buffer_.empty()) {
-			buffer_.resize(0x4000, 0);
-		}
-		while (needed >= buffer_.size()) {
-			buffer_.resize(buffer_.size() + 0x4000, 0);
-		}
-	}
-
-	std::vector<uint8_t> buffer_;
-	uint32_t bit_width_ = 0;
-	uint32_t byte_pos_ = 0;
-	uint32_t bit_pos_ = 0;
-	uint32_t bitmask_ = 0;
-	uint32_t high_water_ = 0;
-};
+using io::BitWriter;
 
 int count_bit_width(int value) {
 	int result = 0;
@@ -477,7 +379,8 @@ bool save_cpt(const CptFile &cpt, std::vector<uint8_t> &out, std::string &error)
 	bits.align_dword();
 	if (!write_depth_section(bits, cpt.depth_format, cpt.depth_buffer, error)) return false;
 	if (!write_poly_section(bits, cpt.tiles, error)) return false;
-	out = bits.bytes();
+	// The file carries four zero bytes past the stream's high-water mark.
+	out = bits.bytes(4);
 	return true;
 }
 

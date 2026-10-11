@@ -58,7 +58,6 @@ health. Divergences from the original engine belong in
       is where the next attribution round reads it (the #403 live sessions observed the
       remaining frame cost concentrated outside the model system after the
       park/submission gates)
-- [ ] Converge `engine/formats/cpt`'s bit WRITER on `engine/base/io/bit_stream.h` (owner: `engine/formats/cpt/cpt_io.cpp`; the reader already rides the shared `io::BitReader`): `io/bit_stream.h` carries no writer, and cpt's private `BitWriter` carries a normalizing `set_position` and a `write_to_file`, so this is a real migration (add the shared writer, then move cpt onto it), not a swap, which is why `engine/CLAUDE.md` tracks it as a named exception. Acceptance: `tests/cpt/cpt_roundtrip_test` (ctest `cpt_roundtrip`) stays green AND a by-hand retail-corpus byte diff still reports byte-identical CPT output after cpt drops its private writer; the corpus diff is not in ctest, so it has to be run by hand (`engine/CLAUDE.md` migration exceptions).
 
 ## Project health follow-ups
 

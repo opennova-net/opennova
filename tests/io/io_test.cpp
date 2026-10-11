@@ -1,7 +1,8 @@
 // opennova::io unit tests: LE primitives, fixed-point, bounds-checked byte
-// cursors, LSB-first bit streams, the ASCII string helpers and the text chores
-// beside them, the 64-bit FNV-1a hash with its hex spelling and splitmix64, the path
-// chores beside os_path, the checked cp1252 encoder, base64 and the version 4 UUID.
+// cursors, the LSB-first bit stream reader and writer, the ASCII string helpers
+// and the text chores beside them, the 64-bit FNV-1a hash with its hex spelling
+// and splitmix64, the path chores beside os_path, the checked cp1252 encoder,
+// base64 and the version 4 UUID.
 
 #include <atomic>
 #include <chrono>
@@ -196,6 +197,76 @@ static int test_bit_stream_unaligned_golden()
     TEST_EXPECT(r.read_bits(16) == 0x1234);
     TEST_EXPECT(r.read_bits(12) == 0xABC);
     TEST_EXPECT(r.read_bits(12) == 0xDEF);
+    return 0;
+}
+
+// The writer reproduces both reader goldens byte for byte: a bit write counts
+// the byte its cursor rests in (the trailing 0x00 of each), the dword align
+// pads with zero, and raw bytes start on the next whole byte.
+static int test_bit_writer_goldens()
+{
+    io::BitWriter w;
+    w.write_field(3, 5);
+    w.write_field(7, 100);
+    w.write_field(13, 4095);
+    w.align_dword();
+    w.write_field(32, 0xDEADBEEFu);
+    w.write_field(8, 0x12);
+    w.write_field(8, 0x34);
+    w.write_field(5, 21);
+    static const uint8_t kStream[] = {0x25, 0xFF, 0x3F, 0x00, 0xEF, 0xBE, 0xAD, 0xDE,
+                                      0x12, 0x34, 0x15};
+    const std::vector<uint8_t> stream = w.bytes();
+    TEST_EXPECT(stream == std::vector<uint8_t>(kStream, kStream + sizeof(kStream)));
+
+    io::BitWriter u;
+    u.write_field(8, 0xA1);
+    u.write_field(16, 0xBEEF);
+    u.write_field(16, 0x1234);
+    u.write_field(12, 0xABC);
+    u.write_field(12, 0xDEF);
+    static const uint8_t kGolden[] = {0xA1, 0xEF, 0xBE, 0x34, 0x12, 0xBC, 0xFA, 0xDE, 0x00};
+    TEST_EXPECT(u.bytes() == std::vector<uint8_t>(kGolden, kGolden + sizeof(kGolden)));
+
+    // A width set once serves every following write_bits; write_bytes skips
+    // the partial byte; the align alone adds nothing; the tail is zeros.
+    io::BitWriter b;
+    b.set_bit_width(4);
+    b.write_bits(0x3);
+    b.write_bits(0xC);
+    b.write_bits(0x1);
+    b.write_bytes("AB", 2);
+    b.align_dword();
+    static const uint8_t kBytes[] = {0xC3, 0x01, 'A', 'B', 0x00, 0x00};
+    TEST_EXPECT(b.bytes(2) == std::vector<uint8_t>(kBytes, kBytes + sizeof(kBytes)));
+    return 0;
+}
+
+// Fields of every width 1..16 at every bit offset read back through BitReader,
+// past the first 0x4000-byte buffer step.
+static int test_bit_writer_roundtrip()
+{
+    io::BitWriter w;
+    uint32_t seed = 0x1234567u;
+    std::vector<std::pair<int, uint32_t>> fields;
+    for (int i = 0; i < 20000; ++i) {
+        seed = seed * 1103515245u + 12345u;
+        const int width = 1 + static_cast<int>((seed >> 16) % 16u);
+        const uint32_t value = (seed >> 3) & ((1u << width) - 1u);
+        fields.emplace_back(width, value);
+        w.write_field(width, value);
+    }
+    w.write_bytes("END", 3);
+    const std::vector<uint8_t> out = w.bytes(4);
+    TEST_EXPECT(out.size() > 0x4000);
+    io::BitReader r(out.data(), out.size());
+    for (const auto &field : fields) {
+        TEST_EXPECT(r.read_bits(field.first) == field.second);
+    }
+    r.advance_byte();
+    TEST_EXPECT(r.read_bits(8) == 'E' && r.read_bits(8) == 'N' && r.read_bits(8) == 'D');
+    TEST_EXPECT(r.read_bits(32) == 0);
+    TEST_EXPECT(r.at_end());
     return 0;
 }
 
@@ -888,6 +959,8 @@ int main()
     if (test_byte_writer_roundtrip()) return 1;
     if (test_bit_stream_fields()) return 1;
     if (test_bit_stream_unaligned_golden()) return 1;
+    if (test_bit_writer_goldens()) return 1;
+    if (test_bit_writer_roundtrip()) return 1;
     if (test_strutil()) return 1;
     if (test_strutil_parse_numbers()) return 1;
     if (test_strutil_text_chores()) return 1;
