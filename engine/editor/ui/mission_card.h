@@ -9,8 +9,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <type_traits>
+#include <vector>
 
 #include <editor/documents/mission_board.h>
 #include <editor/graph/display_names.h>
@@ -88,6 +90,20 @@ struct CardAsked {
 
 // One card, the full width of the room.
 CardAsked draw_mission_card(CardContext &context, const BoardCard &card);
+// A script line naming a mission's variable or event by its number (S24 C4: a script's V# and event(n), the graph's
+// MissionVariable and MissionEventLatch edges): its file, its place (line:column) and its line.
+struct ScriptUse {
+	std::string file;
+	std::string locator;
+	size_t line = 0;
+};
+// The mission's script's variables (its V#), by number, each with its lines.
+std::map<int64_t, std::vector<ScriptUse>> script_variable_uses(const SessionView &view, const MissionDocument &mission);
+// The script lines that name the event at `index` by its number (event(n)).
+std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index);
+// The number a new variable takes: the lowest neither an event nor the mission's script uses.
+int64_t new_variable_index(const SessionView &view, const MissionDocument &mission);
+
 // One line of a card alone (S24 A7: the Inspector over a trigger or an action), the card's width: its lead, its
 // runs and chips, its retype picker.
 void draw_mission_line(CardContext &context, const BoardCard &card, const BoardLine &line);

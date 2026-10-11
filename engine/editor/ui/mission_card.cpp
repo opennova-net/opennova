@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
+#include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,7 +19,11 @@
 #include <editor/documents/mission_links.h>
 #include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
+#include <base/io/strutil.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/model/text_document.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
@@ -160,17 +167,20 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		flow.place(width, style.ItemSpacing.x * 0.5f);
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("##variable", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
-			for (const MissionVariable &variable : mission_variables(context.mission, *names)) {
-				ImGui::PushID(int(variable.index));
-				const std::string label = variable.name + "  (" + std::to_string(variable.uses.size()) + " use" +
-				                          (variable.uses.size() == 1 ? ")" : "s)");
-				if (ImGui::Selectable(label.c_str(), variable.index == chip.value)) set_field(context, line.record, chip.field, variable.index);
+			// The events' and the script's, by number.
+			std::map<int64_t, size_t> used;
+			for (const MissionVariable &variable : mission_variables(context.mission, *names)) used[variable.index] += variable.uses.size();
+			for (const auto &[index, lines] : script_variable_uses(view, context.mission)) used[index] += lines.size();
+			for (const auto &[index, count] : used) {
+				ImGui::PushID(int(index));
+				const std::string label = names->variable(index) + "  (" + std::to_string(count) + " use" + (count == 1 ? ")" : "s)");
+				if (ImGui::Selectable(label.c_str(), index == chip.value)) set_field(context, line.record, chip.field, index);
 				ImGui::PopID();
 			}
-			const int64_t fresh = mission_new_variable(context.mission);
+			const int64_t fresh = new_variable_index(view, context.mission);
 			const std::string label = "New variable: " + names->variable(fresh);
 			if (ImGui::Selectable(label.c_str())) set_field(context, line.record, chip.field, fresh);
-			ui_kit::tooltip("The lowest number no trigger or action of the mission uses.");
+			ui_kit::tooltip("The lowest number neither a trigger or an action nor the mission's script uses.");
 			ImGui::EndCombo();
 		}
 	} else if (by_name) {
@@ -481,8 +491,21 @@ void move_event_popup(CardContext &context, const BoardCard &card) {
 		ImGui::TextDisabled("Named by %zu trigger%s or action%s, renumbered with it:", uses.uses.size(), uses.uses.size() == 1 ? "" : "s",
 		                    uses.uses.size() == 1 ? "" : "s");
 	for (const MissionUse &use : uses.uses) ImGui::BulletText("Event %zu: %s", use.event_index + 1, use.words.c_str());
-	ImGui::TextColored(kWarn, "Every event after the place it leaves or takes is renumbered too. The mission's script, which "
-	                          "may name events by number, is not followed: check it.");
+	// The mission's script's event(n) of it: a number, which the move does not follow into the script.
+	const std::vector<ScriptUse> scripted = script_event_uses(context.workspace.view(), mission, card.index);
+	if (!scripted.empty()) {
+		ImGui::TextColored(kWarn, "The mission's script names it by its number on %zu line%s, which the move does not change:",
+		                   scripted.size(), scripted.size() == 1 ? "" : "s");
+		for (size_t i = 0; i < scripted.size(); ++i) {
+			ImGui::PushID(int(i));
+			const std::string label = scripted[i].file + ", line " + std::to_string(scripted[i].line);
+			if (ImGui::Selectable(label.c_str())) context.workspace.request(request::open_document(scripted[i].file, scripted[i].locator));
+			ui_kit::tooltip("Open the script there.");
+			ImGui::PopID();
+		}
+	}
+	ImGui::TextColored(kWarn, "Every event after the place it leaves or takes is renumbered too: the triggers and actions "
+	                          "follow, a script's numbers do not.");
 	ImGui::PopTextWrapPos();
 	ImGui::Separator();
 	const size_t count = mission.count_of(MissionKind::Event);
@@ -501,7 +524,51 @@ void move_event_popup(CardContext &context, const BoardCard &card) {
 	ImGui::EndPopup();
 }
 
+std::vector<ScriptUse> script_uses_of(const std::vector<const GraphEdge *> &edges) {
+	std::vector<ScriptUse> out;
+	for (const GraphEdge *edge : edges) {
+		ScriptUse use;
+		use.file = edge->source;
+		use.line = size_t(edge->span.line);
+		use.locator = TextDocument::locator(size_t(edge->span.line), size_t(edge->span.column));
+		out.push_back(std::move(use));
+	}
+	return out;
+}
+
 } // namespace
+
+std::map<int64_t, std::vector<ScriptUse>> script_variable_uses(const SessionView &view, const MissionDocument &mission) {
+	std::map<int64_t, std::vector<ScriptUse>> out;
+	const AssetGraph *graph = view.findings.graph.get();
+	const MissionScript script = mission_script(view, mission.path());
+	if (!graph || script.path.empty()) return out;
+	const std::string scope = mission_scope(mission);
+	for (const GraphEdge *edge : graph->references_of(script.path)) {
+		if (edge->kind != ReferenceKind::MissionVariable || !strutil::iequals(edge->scope, scope)) continue;
+		const std::optional<int> index = strutil::parse_int(edge->value);
+		if (!index) continue;
+		std::vector<ScriptUse> one = script_uses_of({edge});
+		out[*index].push_back(std::move(one.front()));
+	}
+	return out;
+}
+
+std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index) {
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) return {};
+	return script_uses_of(graph->referrers_of(ReferenceKind::MissionEventLatch, std::to_string(index), mission_scope(mission)));
+}
+
+int64_t new_variable_index(const SessionView &view, const MissionDocument &mission) {
+	const std::map<int64_t, std::vector<ScriptUse>> scripted = script_variable_uses(view, mission);
+	std::vector<int64_t> events;
+	const std::unique_ptr<MissionNames> base = std::make_unique<MissionNames>();
+	for (const MissionVariable &variable : mission_variables(mission, *base)) events.push_back(variable.index);
+	int64_t index = 0;
+	while (scripted.count(index) || std::find(events.begin(), events.end(), index) != events.end()) ++index;
+	return index;
+}
 
 bool raise_logic_add(CardContext &context, NodeId event, const LogicType &type, size_t position,
                      const std::vector<LogicPreset> &presets) {

@@ -271,12 +271,71 @@ void test_line_drag() {
 	CHECK(one.size() == 2 && one[0].ids.empty() && two.size() == 2 && two[0].ids.size() == 2, "the trigger moved to the second event");
 }
 
+// A7 with the mission's script (S24 C4's references): the Variables fold lists the script's V7 with its line, and
+// Move event... on the second event lists the script's event(1), which the move does not follow.
+void test_script_uses() {
+	MissionRun run("opennova_editor_ui_board_script");
+	CHECK(run.open(), "the mission open");
+	const MissionDocument *mission = run.mission();
+	if (!mission) return;
+	const SessionView &v = run.session.view();
+	CHECK(editor_test::write_text(v.project.root + "/missions/logic.wac", "if event(1) then set(v7,1) endif\r\n"), "the script written");
+	run.session.handle(request::rescan());
+	run.session.run_operations();
+	show_logic(run);
+	run.session.handle(request::set_workspace(R"({"document": {"path": "missions/logic.bms", "logic_split": 0.2}})"));
+	run.settle();
+	const ImGuiWindow *pane = MissionRun::drawn_window("/logic_pane_");
+	CHECK(pane != nullptr, "the pane");
+	if (!pane) return;
+	// The fold's header clicked open.
+	const ImGuiID fold = item_id(pane->ID, {"###variables"});
+	bool clicked = false;
+	for (float y = pane->Pos.y; y < pane->Pos.y + pane->Size.y && !clicked; y += 3.0f) {
+		run.ui.mouse(pane->Pos.x + 30.0f, y);
+		if (GImGui->HoveredId != fold) continue;
+		run.ui.click(ImVec2(pane->Pos.x + 30.0f, y));
+		clicked = true;
+	}
+	CHECK(clicked, "the Variables fold's header");
+	run.ui.away();
+	std::string text = logged_frame(run.ui);
+	CHECK(text.find("Variables (1)") != std::string::npos && text.find("V7 (1 use)") != std::string::npos, "the fold lists the script's V7");
+	run.ui.activate(item_id(pane->ID, {"V7 (1 use)"}));
+	run.ui.away();
+	text = logged_frame(run.ui);
+	CHECK(text.find("logic.wac, line 1") != std::string::npos, "its line in the script");
+	// Move event... on the second event: the script's event(1).
+	const std::vector<const ImGuiWindow *> cards = card_windows();
+	CHECK(cards.size() == 2, "two cards");
+	if (cards.size() != 2) return;
+	run.ui.activate(item_id(cards[1]->ID, {"Event 2"}));
+	run.settle();
+	run.take();
+	run.ui.mouse(cards[1]->Pos.x + ImGui::GetStyle().WindowPadding.x + ImGui::GetFrameHeight() * 2.0f, cards[1]->Pos.y +
+	             ImGui::GetStyle().WindowPadding.y + 4.0f);
+	run.ui.button(true, ImGuiMouseButton_Right);
+	run.ui.button(false, ImGuiMouseButton_Right);
+	const ImGuiWindow *menu = GImGui->OpenPopupStack.Size ? GImGui->OpenPopupStack.back().Window : nullptr;
+	CHECK(menu != nullptr, "the card's menu");
+	if (!menu) return;
+	run.ui.activate(item_id(menu->ID, {"Move event..."}));
+	run.ui.frames(2);
+	run.ui.away();
+	text = logged_frame(run.ui);
+	CHECK(in_order(text, {"Move Event 2", "Named by 1 trigger", "names it by its number on 1 line", "logic.wac, line 1", "To place 1"}),
+	      "Move event...: what names it, the script's line, the places");
+	ImGui::ClosePopupsExceptModals();
+	run.ui.frames(1);
+}
+
 } // namespace
 
 void run_board_tests() {
 	test_logic_pane();
 	test_cards();
 	test_line_drag();
+	test_script_uses();
 }
 
 } // namespace editor_ui_test

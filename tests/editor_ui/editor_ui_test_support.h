@@ -723,11 +723,14 @@ struct MissionRun {
 		out.swap(raised);
 		return out;
 	}
-	// The window drawn last frame whose name holds `part` ("/logic_pane_"), null for none.
+	// The window drawn last frame whose own name is `part` ("/logic_pane_": the last step of its name, never a child
+	// of it, whose name holds its parent's), null for none.
 	static const ImGuiWindow *drawn_window(const char *part) {
 		const ImGuiWindow *found = nullptr;
-		for (const ImGuiWindow *window : GImGui->Windows)
-			if (window->Active && !window->Hidden && std::strstr(window->Name, part)) found = window;
+		for (const ImGuiWindow *window : GImGui->Windows) {
+			const char *at = window->Active && !window->Hidden ? std::strstr(window->Name, part) : nullptr;
+			if (at && !std::strchr(at + 1, '/')) found = window;
+		}
 		return found;
 	}
 };

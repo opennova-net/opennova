@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -70,6 +71,8 @@ private:
 	std::optional<BoardKey> key_;
 	MissionBoard board_;
 	std::vector<MissionVariable> variables_;
+	std::map<int64_t, std::vector<ScriptUse>> script_variables_;
+	std::map<int64_t, std::string> variable_names_;
 	std::string new_variable_;
 	size_t built_ = 0;
 	CardState state_;
@@ -146,23 +149,46 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 // The variables the events use (S24 A7), folded at first: each by its name with where it is used, a click there
 // selecting that trigger or action; what a new one is called.
 void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mission) {
-	const std::string heading = "Variables (" + std::to_string(variables_.size()) + ")###variables";
+	// The events' variables and the script's (its V#), by number.
+	std::map<int64_t, const MissionVariable *> events;
+	for (const MissionVariable &variable : variables_) events[variable.index] = &variable;
+	std::vector<int64_t> indexes;
+	for (const auto &[index, variable] : events) indexes.push_back(index);
+	for (const auto &[index, lines] : script_variables_)
+		if (!events.count(index)) indexes.push_back(index);
+	std::sort(indexes.begin(), indexes.end());
+	const std::string heading = "Variables (" + std::to_string(indexes.size()) + ")###variables";
 	if (!ImGui::CollapsingHeader(heading.c_str())) return;
-	if (variables_.empty()) ImGui::TextDisabled("No trigger or action uses a variable.");
-	for (const MissionVariable &variable : variables_) {
-		ImGui::PushID(int(variable.index));
-		const std::string label = variable.name + " (" + std::to_string(variable.uses.size()) + " use" +
-		                          (variable.uses.size() == 1 ? ")" : "s)");
+	if (indexes.empty()) ImGui::TextDisabled("No trigger or action, and no line of the script, uses a variable.");
+	for (const int64_t index : indexes) {
+		const auto event = events.find(index);
+		const auto scripted = script_variables_.find(index);
+		const size_t count = (event != events.end() ? event->second->uses.size() : 0) +
+		                     (scripted != script_variables_.end() ? scripted->second.size() : 0);
+		const std::string name = event != events.end() ? event->second->name : variable_names_[index];
+		ImGui::PushID(int(index));
+		const std::string label = name + " (" + std::to_string(count) + " use" + (count == 1 ? ")" : "s)");
 		if (ImGui::TreeNode(label.c_str())) {
-			for (size_t i = 0; i < variable.uses.size(); ++i) {
-				const MissionVariableUse &use = variable.uses[i];
-				ImGui::PushID(int(i));
-				const std::string line = "Event " + std::to_string(use.event_index + 1) + ": " + use.words;
-				if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()))
-					window_requests::select(workspace, mission, use.record);
-				ui_kit::tooltip(line);
-				ImGui::PopID();
-			}
+			if (event != events.end())
+				for (size_t i = 0; i < event->second->uses.size(); ++i) {
+					const MissionVariableUse &use = event->second->uses[i];
+					ImGui::PushID(int(i));
+					const std::string line = "Event " + std::to_string(use.event_index + 1) + ": " + use.words;
+					if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()))
+						window_requests::select(workspace, mission, use.record);
+					ui_kit::tooltip(line);
+					ImGui::PopID();
+				}
+			if (scripted != script_variables_.end())
+				for (size_t i = 0; i < scripted->second.size(); ++i) {
+					const ScriptUse &use = scripted->second[i];
+					ImGui::PushID(int(1000 + i));
+					const std::string line = use.file + ", line " + std::to_string(use.line);
+					if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()))
+						workspace.request(request::open_document(use.file, use.locator));
+					ui_kit::tooltip("The mission's script uses it there: open it.");
+					ImGui::PopID();
+				}
 			ImGui::TreePop();
 		}
 		ImGui::PopID();
@@ -254,7 +280,10 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 		const std::unique_ptr<MissionNames> names = mission_label_names(*mission, source ? &*source : nullptr);
 		board_ = mission_board(*mission, *names, query, view.activity.live_logic.empty() ? nullptr : &view.activity.live_logic);
 		variables_ = mission_variables(*mission, *names);
-		new_variable_ = names->variable(mission_new_variable(*mission));
+		script_variables_ = script_variable_uses(view, *mission);
+		new_variable_ = names->variable(new_variable_index(view, *mission));
+		variable_names_.clear();
+		for (const auto &[index, lines] : script_variables_) variable_names_[index] = names->variable(index);
 		key_ = key;
 		++built_;
 	}
