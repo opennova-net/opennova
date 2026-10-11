@@ -9,13 +9,12 @@
 #       -OnHookMcpPath C:\opennova-int\onhook\onhook-mcp.exe `
 #       -GodotLauncher C:\Godot\Godot_v4.6.1-stable_win64_console.exe `
 #       [-Prefix parity-20261011] [-Cases 01tr-coop,ash-i5a-aas-deploy] `
-#       [-Topologies RR,RR-aa,RO,OR,OO] [-IntegrityProfile <profile>] `
+#       [-Topologies RR,RR-aa,RO,OR,OO] `
 #       [-Resolution 2560x1440] [-Evidence summary|external] [-Plan]
 #
 # Run it from a real console: the cells' Godot console wrapper stalls without
 # one. -Resolution must match the retail copies' own video setting (the runner
 # checks the retail viewport against it); empty takes the runner's default.
-# -IntegrityProfile empty takes the runner's `auto` (the jox01 profile).
 #
 # CorpusRoot holds the extracted items.def and missions\<MISSION>, the layout
 # run_parity_topology.ps1's wire-readiness gate reads (items.def one directory
@@ -62,8 +61,6 @@ param(
 
     # Any of RR, RR-aa, RO, OR, OO; comma-separated accepted.
     [string[]] $Topologies = @("RR", "RR-aa", "RO", "OR", "OO"),
-
-    [string] $IntegrityProfile = "",
 
     [string] $Resolution = "",
 
@@ -175,7 +172,6 @@ function Get-CellArguments {
         "-HostMcpPort", [string] $HostMcpPort,
         "-JoinerMcpPort", [string] $JoinerMcpPort
     )
-    if ($IntegrityProfile) { $arguments += @("-IntegrityProfile", $IntegrityProfile) }
     if ($Resolution) { $arguments += @("-Resolution", $Resolution) }
     if ([bool] $Case.auto_deploy) { $arguments += "-AutoDeploy" }
     if ([bool] $Case.exercise_input) { $arguments += "-ExerciseInput" }
