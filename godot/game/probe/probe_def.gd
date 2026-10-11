@@ -235,6 +235,14 @@ static func _build_definitions() -> Array[ProbeDef]:
 					"ammo_name": { "type": "string" }, "ammo_velocity": { "type": "integer" },
 				}, ["item_id", "item_name", "weapon_name", "weapon_clipsize", "ammo_name", "ammo_velocity"],
 				false, false, 30_000),
+		ProbeDef.make("world_reveal",
+				"Reveal a loaded mission the single-player start-mission splash holds, as a player's key or "
+				+ "click does (the shell's dismiss_start_mission_splash), and wait until the world is "
+				+ "revealed (timeout_ms); passes at once for a world already revealed, saying whether a "
+				+ "splash was dismissed.",
+				RUNTIME + "world_reveal_probe.gd", {
+					"timeout_ms": { "type": "integer", "minimum": 1000, "default": 60000 },
+				}, [], false, true, 120_000),
 
 		ProbeDef.make("perf_sample",
 				"Sample the shell's frame-time counters (world tick legs, the audio "
