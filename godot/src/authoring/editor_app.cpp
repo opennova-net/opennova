@@ -81,6 +81,7 @@ void EditorApp::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "first_picture_budget_ms"), "set_first_picture_budget_ms",
 			"get_first_picture_budget_ms");
 	ClassDB::bind_method(D_METHOD("get_viewport_device", "path", "kind"), &EditorApp::get_viewport_device);
+	ClassDB::bind_method(D_METHOD("get_viewport_canvas_at", "path", "kind"), &EditorApp::get_viewport_canvas_at);
 	ClassDB::bind_method(D_METHOD("get_thumbnail_texture", "path", "transform"), &EditorApp::get_thumbnail_texture);
 	ClassDB::bind_method(D_METHOD("get_mission_placer", "path"), &EditorApp::get_mission_placer);
 	ClassDB::bind_method(D_METHOD("get_mission_device_count", "path", "what"), &EditorApp::get_mission_device_count);
@@ -737,6 +738,13 @@ SubViewport *EditorApp::get_viewport_device(const String &p_path, const String &
 	// The Shell's cache makes its devices by the kinds' table alone (authoring/viewport_devices).
 	auto *device = static_cast<ViewportDevice *>(devices_->held(opennova::to_std(p_path), kind));
 	return device ? device->sub_viewport() : nullptr;
+}
+
+Vector2 EditorApp::get_viewport_canvas_at(const String &p_path, const String &p_kind) const {
+	ViewportKind kind = ViewportKind::kCount;
+	if (!devices_ || !opennova::editor::viewport_kind_from_token(opennova::to_std(p_kind), kind)) return Vector2();
+	auto *device = static_cast<ViewportDevice *>(devices_->held(opennova::to_std(p_path), kind));
+	return device ? device->canvas_at() : Vector2();
 }
 
 Ref<ImageTexture> EditorApp::get_thumbnail_texture(const String &p_path, const String &p_transform) {
