@@ -366,18 +366,27 @@ def live_leg(client: GameMcp, game: GameMcp, path: str, event: int, centre: tupl
     expect(not teleported.get("isError"), f"the teleport was refused: {text_of(teleported)}")
     player = game.structured("game_state").get("player", {})
     say(f"   the player stands at {player.get('position')}")
+    # The wait as the game counts it: seen active with `left` ticks of its 320 (5 steps of 64) to go, it fires that
+    # long after (62.5 ticks a second), give or take a step and the editor's 4 Hz poll.
     active_at = fired_at = None
+    left = 0
     report = {}
+    first_serial = int(live().get("serial", 0) or 0)
+    polled_from = time.monotonic()
     while time.monotonic() < deadline and fired_at is None:
         report = live()
         entry = ours(report) or {}
         now = time.monotonic()
         if active_at is None and (entry.get("active") or entry.get("fired")):
             active_at = now
-            say(f"   active: its wait {entry.get('activate_countdown')} ticks")
+            left = int(entry.get("activate_countdown", 0))
+            expect(int(entry.get("activate_reload", 0)) == 320, f"the event's wait is not 5 steps (320 ticks): {entry}")
+            say(f"   active: {left} of its 320 ticks to wait")
         if entry.get("fired"):
             fired_at = now
         time.sleep(0.1)
+    reports = int(report.get("serial", 0) or 0) - first_serial
+    say(f"   the editor took {reports} reports in {time.monotonic() - polled_from:.1f} s")
     if active_at is None:
         snapshot = game.structured("game_debug", {"op": "invoke", "id": "mission_logic_snapshot"}).get("result", {})
         game_entry = next((e for e in snapshot.get("events", []) if int(e.get("index", -1)) == index), {})
@@ -390,8 +399,11 @@ def live_leg(client: GameMcp, game: GameMcp, path: str, event: int, centre: tupl
                          f"{json.dumps(state.get('runtime', {}))[:400]}")
     expect(fired_at is not None, "the event never fired")
     waited = fired_at - active_at
-    say(f"   fired {waited:.1f} s after it became active")
-    expect(3.5 <= waited <= 8.0, f"the event fired {waited:.1f} s after it became active, not about 5.1 s")
+    expected = left / 62.5
+    say(f"   fired {waited:.1f} s after it was seen active with {left} ticks to go ({expected:.1f} s by the game's "
+        f"clock; the whole wait 320 ticks, 5.1 s)")
+    expect(abs(waited - expected) <= 1.5,
+           f"the event fired {waited:.1f} s after it was seen active, not the {expected:.1f} s its {left} ticks make")
 
     # The game's own snapshot agrees with the editor's report.
     snapshot = game.structured("game_debug", {"op": "invoke", "id": "mission_logic_snapshot"}).get("result", {})
