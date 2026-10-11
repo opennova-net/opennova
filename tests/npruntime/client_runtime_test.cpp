@@ -2523,6 +2523,8 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
+	// A joiner's host is in a session, where the deploy sends its 0x5A.
+	world.rules.mp_session = true;
 	w::AiSystem &ai = world.ai;
 	ctx.world = &world;
 	{

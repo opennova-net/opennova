@@ -1017,8 +1017,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 			world.vehicles.request_attach(player->handle, selected);
 	}
 	// Never on a revive deploy, whose client leaves the deploy wait on its record's
-	// respawn edge (D-NET-379) [orig: @0x5178F2, under the @0x5178C5 test].
-	if (!revive_deploy)
+	// respawn edge (D-NET-379), nor out of a session (world.rules.mp_session)
+	// [orig: @0x5178F2, under the @0x5178C5 test and is_in_session @0x5178E9 / @0x5178EF].
+	if (!revive_deploy && world.rules.mp_session)
 		replies.push_back(make_protocol_message(
 				0x5A, build_current_loadout_reply(
 						conn.reply.last_loadout_reply, player->player_class)));
@@ -1669,13 +1670,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// bypass it. [orig: Server_ProcessClientRequestRespawn @0x519c67]
 				if (target != nullptr && conn.link.spawn_target_hold_seconds != 0)
 					break;
-				if (target != nullptr) {
-					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
-					// control(+540) >= 0x10000].
-					if (target->zone_number != 0 &&
-					    (target->team != request_team || target->zone_control < 0x10000))
-						break;
-				}
 				// Retail's `nodefaultspawnpoints` option is named after its UI,
 				// not its actual predicate. It applies only to a target-less pick
 				// and walks SpawnZoneList for an unnumbered or fully controlled
@@ -1687,37 +1681,47 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						world->zones.team_has_available_spawn_zone(request_team))
 					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
-				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
-				// player's request is a no-op; an alive-but-undeployed joiner deploys now.
-				if (!conn.link.respawn_pending && player->health > 0) break;
-				// +360 follows the dead-or-pending test and silently rejects every
-				// pick, including Default Spawn. [orig: @0x519cf2]
-				if (conn.link.respawn_delay_seconds != 0) break;
-				if (target != nullptr && target->item_type == 1 &&
-						target->is_spawn_point) {
-					// A vehicle target is selectable only while alive and while its
-					// weighted root/child seat walk finds a free slot. The separate
-					// +0x170 primary-occupant gate belongs to release, below.
-					// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34]
-					world::VehicleSeatSelection selected;
-					if (!world::find_best_vehicle_seat(
-							*world, target->handle, player->handle, selected))
-						break;
-				}
-				// A spectator skips the wave [orig: @0x519D65..0x519D7F].
-				if (target != nullptr && !conn.link.spectator) {
-					if (world->zones.spawn_waves.try_queue(
-							*world, target->handle, player->handle)) {
-						ProtocolMessage status = make_protocol_message(
-								s2c::SPAWN_WAVE_STATUS,
-								build_spawn_wave_status_body(*world, player->handle));
-						status.reliable = false;
-						replies.push_back(std::move(status));
-						break;
+				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive, unheld
+				// player's request is refused in a session; out of one (world.rules.mp_session)
+				// it deploys at once, ahead of +360, the seat, the zone and the wave
+				// [orig: is_in_session @0x519cd0 / @0x519cd7, the deploy @0x519cdd..0x519ce3].
+				const bool deploy_now = !conn.link.respawn_pending && player->health > 0;
+				if (deploy_now && world->rules.mp_session) break;
+				if (!deploy_now) {
+					// +360 follows the dead-or-pending test and silently rejects every
+					// pick, including Default Spawn. [orig: @0x519cf2]
+					if (conn.link.respawn_delay_seconds != 0) break;
+					if (target != nullptr && target->item_type == 1 &&
+							target->is_spawn_point) {
+						// A vehicle target is selectable only while alive (ours tests each
+						// walked entry, not the root first: D-NET-480) and while its weighted
+						// root/child seat walk finds a free slot. The +0x170 gate is release's.
+						// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34]
+						world::VehicleSeatSelection selected;
+						if (!world::find_best_vehicle_seat(
+								*world, target->handle, player->handle, selected))
+							break;
 					}
-					if (world->zones.spawn_waves.has_entry(target->handle)) break;
+					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
+					// control(+540) >= 0x10000].
+					if (target != nullptr && target->zone_number != 0 &&
+					    (target->team != request_team || target->zone_control < 0x10000))
+						break;
+					// A spectator skips the wave [orig: @0x519D65..0x519D7F].
+					if (target != nullptr && !conn.link.spectator) {
+						if (world->zones.spawn_waves.try_queue(
+								*world, target->handle, player->handle)) {
+							ProtocolMessage status = make_protocol_message(
+									s2c::SPAWN_WAVE_STATUS,
+									build_spawn_wave_status_body(*world, player->handle));
+							status.reliable = false;
+							replies.push_back(std::move(status));
+							break;
+						}
+						if (world->zones.spawn_waves.has_entry(target->handle)) break;
+					}
+					world->zones.spawn_waves.remove_player(player->handle);
 				}
-				world->zones.spawn_waves.remove_player(player->handle);
 				const world::EntityHandle target_handle = target != nullptr
 						? target->handle
 						: world::EntityHandle{};
