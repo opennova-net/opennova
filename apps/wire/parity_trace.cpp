@@ -56,17 +56,19 @@ static_assert(parity_body_is_material('C', 0x10C));
 static_assert(!parity_body_is_material('C', 0x0C));
 static_assert(!parity_body_is_material('S', 0x0A));
 
-ParityEntity entity_record(
-		const InGameMessage &message, uint64_t ts_ns, const FrameUpdateRecord &record) {
+ParityEntity entity_record(const InGameMessage &message, uint64_t ts_ns, const FrameUpdate &frame,
+		const FrameUpdateRecord &record) {
 	ParityEntity out;
 	out.frame = message.frame_index;
 	out.ts_ns = ts_ns;
 	out.session = message.session;
 	out.handle = record.handle;
 	out.type_id = record.type_id;
+	uint16_t carrier = 0xFFFF;
 	switch (record.cls) {
 		case EntityClass::Player:
 			out.cls = 'P';
+			carrier = record.player.carrier_handle;
 			out.pos_x = record.player.pos_x_compressed;
 			out.pos_y = record.player.pos_y_compressed;
 			out.pos_z = record.player.pos_z_compressed;
@@ -79,6 +81,7 @@ ParityEntity entity_record(
 			break;
 		case EntityClass::Vehicle:
 			out.cls = 'V';
+			carrier = record.vehicle.parent_slot_handle;
 			out.pos_x = record.vehicle.pos_x_compressed;
 			out.pos_y = record.vehicle.pos_y_compressed;
 			out.pos_z = record.vehicle.pos_z_compressed;
@@ -91,6 +94,7 @@ ParityEntity entity_record(
 			break;
 		case EntityClass::Infantry:
 			out.cls = 'I';
+			carrier = record.infantry.vehicle_slot_handle;
 			out.pos_x = record.infantry.pos_x_compressed;
 			out.pos_y = record.infantry.pos_y_compressed;
 			out.pos_z = record.infantry.pos_z_compressed;
@@ -101,10 +105,19 @@ ParityEntity entity_record(
 			break;
 		case EntityClass::NoNetworkCallback:
 			out.cls = 'N';
-			break;
+			return out;
 		default:
-			break;
+			return out;
 	}
+	// A compact position is sign/exponent/mantissa relative to the frame anchor, or
+	// carrier-local when the record names a carrier (ingame_decode.h).
+	out.offset_x = network_decompress_fixedpoint(uint16_t(out.pos_x));
+	out.offset_y = network_decompress_fixedpoint(uint16_t(out.pos_y));
+	out.offset_z = network_decompress_fixedpoint(uint16_t(out.pos_z));
+	out.carrier_local = carrier != 0xFFFF;
+	out.world_x = out.carrier_local ? out.offset_x : frame.anchor_x + out.offset_x;
+	out.world_y = out.carrier_local ? out.offset_y : frame.anchor_y + out.offset_y;
+	out.world_z = out.carrier_local ? out.offset_z : frame.anchor_z + out.offset_z;
 	return out;
 }
 
@@ -407,7 +420,7 @@ void ParityTraceBuilder::emit_message(const InGameMessage &message, uint64_t ts_
 	out.mount_reserve = frame.passenger.reserve;
 	sink_.on_frame(out);
 	for (const FrameUpdateRecord &record : frame.records)
-		sink_.on_entity(entity_record(message, ts_ns, record));
+		sink_.on_entity(entity_record(message, ts_ns, frame, record));
 }
 
 // ---------------------------------------------------------------------------

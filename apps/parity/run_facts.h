@@ -30,8 +30,10 @@ struct RunInfo {
 	std::string run_id;
 	std::string mission;
 	std::string game_type;
+	std::string integrity_profile; // the corpus's integrity row profile ("" unknown)
 	int port = 0;
 	std::string capture; // the resolved evidence capture
+	std::string external_capture; // the run's external.pcapng ("" when it has none)
 	std::string perspective;
 	double steady_seconds = 0.0;
 	uint64_t steady_start_ns = 0;
@@ -54,6 +56,15 @@ struct EvidenceFinding {
 	std::string detail;
 };
 
+// One message of the run's external capture: wire time, not read time. An onHook
+// capture stamps a datagram when the process reads it, so through a blocking load
+// its stamps bunch (normalization.h `trace.read_time`); wire timing reads these.
+struct WireTimedEvent {
+	char dir = '?';
+	uint16_t identity = 0; // the 9-bit message identity
+	uint64_t ts_ns = 0;
+};
+
 struct RunFacts {
 	RunInfo info;
 	wire::ParityTrace trace; // the bound gameplay session's records only
@@ -61,6 +72,10 @@ struct RunFacts {
 	uint64_t first_packet_ns = 0;
 	double comparison_ms = 0.0; // the comparison interval's length
 	std::vector<EvidenceFinding> evidence;
+	// The external capture's messages of its own bound gameplay session, through
+	// the steady window's end; `external_loaded` false when the run has none.
+	bool external_loaded = false;
+	std::vector<WireTimedEvent> external_events;
 
 	bool in_comparison(uint64_t ts_ns) const { return ts_ns <= info.steady_end_ns; }
 	bool in_steady(uint64_t ts_ns) const {
@@ -73,11 +88,17 @@ struct RunFacts {
 // accounting). Never fails: what is wrong lands in `evidence`.
 RunFacts make_run_facts(RunInfo info, wire::ParityTrace trace);
 
+// Bind the run's external capture `external` to its own gameplay session and keep
+// its message times (`external_events`).
+void attach_external(RunFacts &facts, const wire::ParityTrace &external);
+
 // A datagram's direction: its class's, or by port when it has none.
 char datagram_direction(const wire::ParityDatagram &datagram, int session);
 
-// Decode `info.capture` and make its facts. False with `error` when the capture
-// cannot be read.
+// Decode `info.capture` and make its facts, then attach `info.external_capture`
+// (the same trace when it is the evidence). False with `error` when the evidence
+// capture cannot be read; an unreadable external capture leaves the wire-time
+// metrics without a sample instead.
 bool load_run_facts(const RunInfo &info, const wire::ItemClassMap *item_classes, RunFacts &out,
 		std::string &error);
 

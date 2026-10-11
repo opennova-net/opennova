@@ -148,9 +148,17 @@ struct ParityEntity {
 	int session = 0;
 	char cls = '?'; // P player, V vehicle, I infantry, N no network callback
 	uint32_t handle = 0, type_id = 0;
-	uint32_t pos_x = 0, pos_y = 0, pos_z = 0;
+	uint32_t pos_x = 0, pos_y = 0, pos_z = 0; // the compressed codes, as sent
 	int32_t orient_a = 0, orient_b = 0;
 	uint32_t state_a = 0, state_b = 0, vital = 0;
+	// The decompressed offset (network_decompress_fixedpoint, i32 16.16) and, for a
+	// record not on a carrier, the world position: the frame anchor plus that offset.
+	// A carrier-local record (a mount / ground carrier / vehicle parent handle) is
+	// relative to its carrier, so its world fields hold the offset alone. Not printed
+	// (the PARITY_ENTITY line is a contract).
+	int32_t offset_x = 0, offset_y = 0, offset_z = 0;
+	int32_t world_x = 0, world_y = 0, world_z = 0;
+	bool carrier_local = false;
 };
 
 // The records in emission order, delivered as they are built.

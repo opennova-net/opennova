@@ -143,6 +143,10 @@ inline constexpr Normalization kNormalizations[] = {
 			"the client UDP port is ephemeral: each run binds its one gameplay session" },
 	{ "trace.ts_ns", MaskKind::Field, '*', 0, "ts_ns", 0,
 			"capture timestamps are wall clock: only rates, gaps and windows compare" },
+	{ "trace.read_time", MaskKind::Field, '*', 0, "ts_ns (hook capture)", 0,
+			"an onHook capture stamps a datagram when the process READS it, so reads bunch "
+			"through the joiner's blocking loads: wire timing (scoreboard_cadence) reads the "
+			"run's external.pcapng" },
 	{ "packet.sid_seq_ack", MaskKind::Field, '*', 0, "sid/seq/ack", 0,
 			"the protocol SID is drawn per connection and seq/ack count from it: they key "
 			"origin packets within a run, never compare across runs" },

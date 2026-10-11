@@ -188,12 +188,10 @@ std::string verdict_json(const Verdict &verdict, const std::string &items_path, 
 	io::JsonValue runs = io::JsonValue::make_object();
 	runs.set("rr", run_json(rr));
 	runs.set("rr_aa", run_json(rr_aa));
-	for (const SubjectRun &subject : subjects) {
-		std::string label = subject.topology;
-		std::transform(label.begin(), label.end(), label.begin(),
-				[](char c) { return char(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c); });
-		runs.set(label, run_json(*subject.facts));
-	}
+	// Keyed by the subject's slot label: an RR run judged as a subject (the A/A
+	// sanity) must not overwrite the reference's entry.
+	for (const SubjectRun &subject : subjects)
+		runs.set(subject.facts->info.label, run_json(*subject.facts));
 	json.set("runs", std::move(runs));
 
 	io::JsonValue registry = io::JsonValue::make_array();

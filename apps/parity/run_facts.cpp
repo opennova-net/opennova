@@ -266,6 +266,7 @@ bool read_run_info(const std::string &run_dir, const std::string &label, Evidenc
 		return false;
 	out.run_id = json.get_string("run_id", "");
 	out.perspective = json.get_string("evidence_perspective", "");
+	out.integrity_profile = json.get_string("integrity_profile", "");
 	const io::JsonValue *game_type = json.get("game_type");
 	if (game_type && game_type->is_string()) {
 		out.game_type = game_type->string;
@@ -286,11 +287,14 @@ bool read_run_info(const std::string &run_dir, const std::string &label, Evidenc
 	out.steady_end_ns =
 			out.steady_start_ns + static_cast<uint64_t>(std::llround(out.steady_seconds * 1e9));
 	const std::string run_root = json.get_string("run_root", "");
+	out.external_capture =
+			resolve_capture(json.get_string("external_capture", ""), run_root, run_dir);
+	if (out.external_capture.empty() &&
+			file_exists(io::utf8_join(run_dir, "external.pcapng")))
+		out.external_capture = io::utf8_join(run_dir, "external.pcapng");
 	if (source == EvidenceSource::External) {
-		out.capture = io::utf8_join(run_dir, "external.pcapng");
+		out.capture = out.external_capture;
 		out.perspective = "external";
-		if (!file_exists(out.capture))
-			out.capture.clear();
 	} else {
 		out.capture = resolve_capture(recorded_capture, run_root, run_dir);
 	}
@@ -350,6 +354,21 @@ RunFacts make_run_facts(RunInfo info, wire::ParityTrace trace) {
 	return facts;
 }
 
+void attach_external(RunFacts &facts, const wire::ParityTrace &external) {
+	static_assert(has_normalization("trace.read_time"));
+	std::vector<EvidenceFinding> ignored; // the evidence capture's binding is the one judged
+	const int session = bind_session(external, ignored);
+	facts.external_loaded = true;
+	facts.external_events.clear();
+	for (const wire::ParityEvent &event : external.events) {
+		if (event.session != session || !facts.in_comparison(event.ts_ns))
+			continue;
+		facts.external_events.push_back({ event.dir,
+				identity_of(static_cast<uint8_t>(event.full_tag & 0xFFu), event.settings_update),
+				event.ts_ns });
+	}
+}
+
 bool load_run_facts(const RunInfo &info, const wire::ItemClassMap *item_classes, RunFacts &out,
 		std::string &error) {
 	wire::ParityTrace trace;
@@ -357,7 +376,17 @@ bool load_run_facts(const RunInfo &info, const wire::ItemClassMap *item_classes,
 		error = info.label + ": cannot read the capture " + info.capture;
 		return false;
 	}
+	const bool evidence_is_external = !info.external_capture.empty() &&
+			generic(info.external_capture) == generic(info.capture);
+	wire::ParityTrace external;
+	if (evidence_is_external)
+		external = trace;
+	const bool external_read = evidence_is_external ||
+			(!info.external_capture.empty() &&
+					wire::read_parity_trace(info.external_capture, item_classes, external));
 	out = make_run_facts(info, std::move(trace));
+	if (external_read)
+		attach_external(out, external);
 	return true;
 }
 

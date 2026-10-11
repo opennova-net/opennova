@@ -22,6 +22,8 @@ constexpr const char *kUsage =
 		"  Each runDir is a scripts/net/run_parity_topology.ps1 cell (run-summary.json\n"
 		"  beside its captures). Every subject topology is compared to RR, both\n"
 		"  directions; a distance fails beyond max(fixed floor, the RR-aa distance).\n"
+		"  A subject slot also takes an RR run (the A/A sanity: --rr <rr-aa>\n"
+		"  --rr-aa <rr> --ro <rr> must pass).\n"
 		"  --evidence external compares every run's external.pcapng instead of the\n"
 		"  summary's evidence capture. Exit 0 PASS, 1 FAIL, 2 usage or input error.\n";
 
@@ -95,7 +97,10 @@ int run_cli(const std::vector<std::string> &args, std::FILE *out, std::FILE *err
 			std::fprintf(err, "opennova-parity: %s\n", error.c_str());
 			return kExitUsage;
 		}
-		if (info.topology != slot.topology) {
+		// A subject slot also takes an RR run: retail judged as a subject is the A/A
+		// sanity (`--rr <rr-aa> --rr-aa <rr> --ro <rr>` must pass).
+		const bool subject_slot = std::string(slot.topology) != "RR";
+		if (info.topology != slot.topology && !(subject_slot && info.topology == "RR")) {
 			std::fprintf(err, "opennova-parity: %s %s is a %s run, not %s\n", slot.flag,
 					values[slot.flag].c_str(), info.topology.c_str(), slot.topology);
 			return kExitUsage;

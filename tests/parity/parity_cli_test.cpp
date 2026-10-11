@@ -201,9 +201,26 @@ int main(int argc, char **argv) {
 		const Result r = run(args);
 		check(r.code == parity::kExitPass, "--evidence external reads external.pcapng: " + r.err);
 	}
+	{
+		// The A/A sanity: RR-aa as the reference, RR as both the floor and the subject.
+		const Result r = run({ "--items", items, "--rr", aa, "--rr-aa", rr, "--ro", rr, "--out",
+				verdict });
+		check(r.code == parity::kExitPass,
+				"an RR run in a subject slot is judged and passes (exit " + std::to_string(r.code) +
+						"): " + r.out + r.err);
+		std::string text, error;
+		io::JsonValue json;
+		check(io::read_file_text(verdict, text, error) && io::json_parse(text, json, error),
+				"the A/A sanity verdict is JSON");
+		const io::JsonValue *runs = json.get("runs");
+		check(runs && runs->get("ro") && runs->get("rr") &&
+						runs->get("ro")->get_string("topology", "") == "RR" &&
+						runs->get("rr")->get_string("run_id", "") == "case-rr-aa",
+				"the subject keeps its slot's entry beside the reference's");
+	}
 
 	// Usage and input errors: exit 2, nothing judged.
-	const std::string ro_wrong = make_run(dir, "case-ro-is-rr", "RR", session);
+	const std::string ro_wrong = make_run(dir, "case-ro-is-oo", "OO", session);
 	const std::string bad_time =
 			make_run(dir, "case-bad-time", "RO", session, "1970-01-01T00:00:00.9+00:00");
 	const std::string no_capture = make_run(dir, "case-no-capture", "RO", session);
