@@ -13,10 +13,24 @@ extends GutTest
 const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
+# The process's profile record the screen's voice fills and picks write (PlayerProfile.store()),
+# its two voice bytes as each test found them.
+var _saved_voices: Array[int] = []
+
+
 # Strings is a shared autoload; keep the registry clean so the raw-key tests below see
-# no gametext table and the resolved-names test starts from a known state.
+# no gametext table and the resolved-names test starts from a known state. The
+# profile's voice pair starts each test on DEFAULT_VOICE and goes back after it.
 func before_each() -> void:
 	Strings.clear()
+	_saved_voices = [PlayerProfile.store().get_voice(0), PlayerProfile.store().get_voice(1)]
+	PlayerProfile.store().set_voice(0, 0)
+	PlayerProfile.store().set_voice(1, 0)
+
+
+func after_each() -> void:
+	PlayerProfile.store().set_voice(0, _saved_voices[0])
+	PlayerProfile.store().set_voice(1, _saved_voices[1])
 
 
 func after_all() -> void:

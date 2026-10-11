@@ -195,6 +195,18 @@ bool name_char_allowed(char c) {
 			c == ' ' || c == '-' || c == '.';
 }
 
+int voice_override(const playersav::ProfileRecord &record, int side) {
+	if (side < 0 || side > 1) return 0;
+	return record.voice[static_cast<size_t>(side)];
+}
+
+void set_voice_override(playersav::ProfileRecord &record, int side, int value) {
+	if (side < 0 || side > 1) return;
+	// [orig: `mov cl, [eax+10h]` -> `mov [eax+edx+5FCh], cl` @0x56003e..0x56004c:
+	//  the low byte of the row's value into profile + 1532 + team]
+	record.voice[static_cast<size_t>(side)] = static_cast<uint8_t>(value);
+}
+
 PlayerProfiles::PlayerProfiles() = default;
 
 void PlayerProfiles::select_slot(int slot) {

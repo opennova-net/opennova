@@ -84,6 +84,9 @@ public:
 	int get_flags() const { return static_cast<int>(store_.current().flags); }
 	PackedStringArray get_macros() const;
 	int get_voice(int p_side) const;
+	// PLAYERVOICE's pick (or its fill's reset) into a side's override byte
+	// (engine profile::set_voice_override).
+	void set_voice(int p_side, int p_value);
 	int get_binding_count() const { return static_cast<int>(store_.current().bindings.size()); }
 	// PLAYER_INFO's OPTIONS_AUTORELOAD / OPTIONS_AUTOMEDIC over the current
 	// record: the checked states its fill shows and its ACCEPT's writes, the

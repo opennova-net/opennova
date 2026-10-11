@@ -67,21 +67,17 @@ var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-z
 # NAME (upper) -> Callable(row, value), dispatched by combo value changes.
 var _combo_handlers: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
-# The persisted voice override per side, 0 = DEFAULT_VOICE.
-# retail: the profile bytes g_CurPlayerProfile[teamIndex + 1532] @ 0x25510FC.
-var _voice_override: Dictionary = {}
+# While a build or a side switch restores the shown side, the cascade's voice
+# results are held here and only the last, the fill against the restored
+# selection, is written (_populate_side).
+var _restoring_side := false
+var _restored_voice := 0
 signal avatar_chosen(profile: Dictionary)
 
 
 ## Install the active + per-side weapon.sav character snapshot before the next build.
 func set_persisted_profile(profile: Dictionary) -> void:
 	_character_state.set_persisted_profile(profile)
-	# Retail keeps one override BYTE per side (profile+1532 and profile+1533);
-	# our saved profile carries a single "voice", so both sides start from it
-	# and then diverge per side exactly as retail's pair does. The per-side
-	# persistence of the pair is the remaining D-PLAYERINFO-9 residual.
-	var voice := int(profile.get("voice", WeaponDatabase.DEFAULT_VOICE_VALUE))
-	_voice_override = {0: voice, 1: voice}
 
 
 # True for the JO PLAYER_INFO screen's unique avatar controls.
@@ -133,8 +129,7 @@ func _wire(_file: String, _screen: String) -> void:
 		_driver.set_widget_checked(blue_radio, _team == 0)
 	if red_radio >= 0:
 		_driver.set_widget_checked(red_radio, _team == 1)
-	_populate_nationalities()  # cascades into divisions -> combos -> voice
-	_restore_character_selection(_team)
+	_populate_side()
 	_wire_preview()
 	# Loadout: PLAYERCLASS drives the class mask, the team radios the team mask; both
 	# filter the weapon slot lists [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430].
@@ -493,20 +488,43 @@ func _populate_nationalities() -> void:
 	_update_avatars(MenuDriver.AVATAR_TEAM, 0)
 
 
+# The shown side's lists filled and its saved selection restored, as the
+# screen's build and a side switch do. The cascade runs through the first rows
+# on its way to the restored ones; each of its legs reads the profile's byte as
+# it stands, and only the last leg's voice, the fill against the restored
+# selection, is written (engine profile::set_voice_override).
+func _populate_side() -> void:
+	_restoring_side = true
+	_restored_voice = selected_voice()
+	_populate_nationalities()  # cascades into divisions -> combos -> voice
+	_restore_character_selection(_team)
+	_restoring_side = false
+	PlayerProfile.store().set_voice(_team, _restored_voice)
+
+
+# The voice the cascade leaves selected (a pick, or the fill's reset of a value
+# the list does not carry) is the shown side's override byte in the current
+# profile record, written at once for a user's pick (engine
+# profile::set_voice_override); a side's restore writes only its last leg's.
 func _update_avatars(change: int, value: int) -> void:
 	_populating = true
-	_voice_override[_team] = _driver.update_player_info_avatars(_db, change, value,
-			_team, selected_voice(), Strings.get_table(Strings.TABLE_GAMEUI),
+	var voice := _driver.update_player_info_avatars(_db, change, value, _team,
+			selected_voice(), Strings.get_table(Strings.TABLE_GAMEUI),
 			Strings.get_table(Strings.TABLE_MENUTXT))
 	_populating = false
+	if _restoring_side:
+		_restored_voice = voice
+	else:
+		PlayerProfile.store().set_voice(_team, voice)
 	if _driver.player_info_avatar_preview_changed():
 		_refresh_preview()
 
 
-## The persisted voice override for the shown side; 0 = DEFAULT_VOICE, otherwise
-## the CHARVOICE id the PLAYERVOICE list carries as that row's value.
+## The shown side's voice override in the current profile record; 0 =
+## DEFAULT_VOICE, otherwise the CHARVOICE id the PLAYERVOICE list carries as
+## that row's value.
 func selected_voice() -> int:
-	return int(_voice_override.get(_team, WeaponDatabase.DEFAULT_VOICE_VALUE))
+	return PlayerProfile.store().get_voice(_team)
 
 
 func _on_voice_selected(row: int, _value: String) -> void:
@@ -649,8 +667,7 @@ func _set_team(team: int) -> void:
 		_driver.set_widget_checked(blue_radio, team == 0)
 	if red_radio >= 0:
 		_driver.set_widget_checked(red_radio, team == 1)
-	_populate_nationalities()
-	_restore_character_selection(team)
+	_populate_side()
 	_restore_player_class()
 	_populate_loadout()  # the team mask re-filters the weapon slot lists
 
@@ -676,13 +693,11 @@ func _remember_current_character_selection() -> void:
 func snapshot() -> Dictionary:
 	var combo := _id("COMBO_LIST")
 	var player_class := _selected_player_class()
-	# The persisted voice is the picked row's VALUE, not its position: retail
-	# stores the notification's value byte into the profile and re-selects the
-	# list by that value on the next populate.
+	# The voice is not here: its pick already wrote the profile record.
 	var profile := _character_state.snapshot(
 			_team, _driver.player_info_avatar_nationality(), _driver.player_info_avatar_division(),
 			_driver.selected_row(combo) if combo >= 0 else -1,
-			player_class, _edit_text("PLAYERNAME"), selected_voice())
+			player_class, _edit_text("PLAYERNAME"))
 	# No table (no root) means there was no loadout choice to commit. Keep that
 	# distinct from a loaded screen whose three selected rows are explicitly
 	# NONE, as a missing or empty weapon.def's are (D-MNU-27).

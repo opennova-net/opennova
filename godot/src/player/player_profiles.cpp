@@ -243,8 +243,11 @@ PackedStringArray PlayerProfiles::get_macros() const {
 }
 
 int PlayerProfiles::get_voice(int p_side) const {
-	if (p_side < 0 || p_side > 1) return 0;
-	return store_.current().voice[static_cast<size_t>(p_side)];
+	return opennova::profile::voice_override(store_.current(), p_side);
+}
+
+void PlayerProfiles::set_voice(int p_side, int p_value) {
+	opennova::profile::set_voice_override(store_.current(), p_side, p_value);
 }
 
 bool PlayerProfiles::is_auto_reload_checked() const {
@@ -379,6 +382,7 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_flags"), &PlayerProfiles::get_flags);
 	ClassDB::bind_method(D_METHOD("get_macros"), &PlayerProfiles::get_macros);
 	ClassDB::bind_method(D_METHOD("get_voice", "side"), &PlayerProfiles::get_voice);
+	ClassDB::bind_method(D_METHOD("set_voice", "side", "value"), &PlayerProfiles::set_voice);
 	ClassDB::bind_method(D_METHOD("get_binding_count"), &PlayerProfiles::get_binding_count);
 	ClassDB::bind_method(D_METHOD("is_auto_reload_checked"), &PlayerProfiles::is_auto_reload_checked);
 	ClassDB::bind_method(D_METHOD("is_auto_medic_checked"), &PlayerProfiles::is_auto_medic_checked);

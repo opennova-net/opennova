@@ -10,7 +10,7 @@ extends RefCounted
 #
 # The profile Dictionary shape (the ACCEPT snapshot, PlayerProfile's load, and
 # MainGame's set_local_player_profile all speak it):
-#   name, team (the side shown/committed), player_class (5..9), voice,
+#   name, team (the side shown/committed), player_class (5..9),
 #   nationality/division/combo (the active side's tree indices),
 #   side_profiles: [blue, red] -- each Selection.to_dict() or {} when unknown,
 #   plus the loadout keys the companion appends.
@@ -144,7 +144,7 @@ func remember(selection: Selection) -> void:
 # side-block class loop followed by its selected-side avatar stores
 # [orig: PlayerInfo_SaveFromDialog @0x55EE3F..0x55EF38].
 func snapshot(team: int, nat_index: int, div_index: int, combo_index: int,
-		selected_class: int, player_name: String, voice_row: int) -> Dictionary:
+		selected_class: int, player_name: String) -> Dictionary:
 	var current := make_selection(
 			team, nat_index, div_index, combo_index, selected_class)
 	if current != null:
@@ -156,7 +156,6 @@ func snapshot(team: int, nat_index: int, div_index: int, combo_index: int,
 		"combo": combo_index,
 	}
 	profile["name"] = player_name
-	profile["voice"] = voice_row
 	profile["player_class"] = selected_class
 	var sides: Array[Dictionary] = [{}, {}]
 	for side in 2:
