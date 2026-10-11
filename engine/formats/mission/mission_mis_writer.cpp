@@ -13,6 +13,11 @@ namespace opennova::mission::detail {
 
 namespace {
 
+// A record's name from `names`' list, "" past it or with no names.
+std::string listed_name(const std::vector<std::string> *list, size_t index) {
+	return list != nullptr && index < list->size() ? (*list)[index] : std::string();
+}
+
 void write_mis_general_information(const bms::File &file, std::string &out) {
 	const bms::Header &header = file.header;
 	const uint8_t *raw = header_bytes(header);
@@ -113,30 +118,34 @@ void write_mis_briefing(const bms::File &file, std::string &out) {
 	append_line(out);
 }
 
-void write_mis_area_triggers(const bms::File &file, std::string &out) {
+void write_mis_area_triggers(const bms::File &file, std::string &out, const MisNames *names) {
 	for (size_t i = 0; i < file.area_triggers.size(); ++i) {
 		append_kv(out, "begin areatrig ", i + 1);
-		append_line(out, "  description \"\"");
+		append_kv(out, "  description \"", mis_string(listed_name(names ? &names->areas : nullptr, i)), "\"");
 		append_line(out, "end areatrig");
 		append_line(out);
 	}
 }
 
-void write_mis_waypoints(const bms::File &file, std::string &out) {
+void write_mis_waypoints(const bms::File &file, std::string &out, const MisNames *names) {
 	for (size_t i = 1; i < file.waypoint_records.size(); ++i) {
 		const bms::WaypointRecord &record = file.waypoint_records[i];
+		const std::string description = names != nullptr && i < names->paths.size() ? names->paths[i] : std::string();
 		// Emit a waypoint section only when it carries information (its flags). Path MEMBERSHIP
 		// never travels in this section: the .mis text carries it on the marker items themselves
 		// and the original importer rebuilds the lists from the type-6005 pair ids
 		// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. A flag-less section body
 		// would be just `description ""` — unrecoverable on re-parse (marker_count is not a .mis
-		// concept), which broke .mis write->parse->write idempotency (D-MIS-5).
-		if (static_cast<uint32_t>(record.flags) == 0) {
+		// concept), which broke .mis write->parse->write idempotency (D-MIS-5). A described path is
+		// written too (its description is the information), its attrib only when it has flags.
+		if (static_cast<uint32_t>(record.flags) == 0 && description.empty()) {
 			continue;
 		}
 		append_kv(out, "begin waypoint ", i);
-		append_line(out, "  description \"\"");
-		append_kv(out, "  attrib ", static_cast<uint32_t>(record.flags));
+		append_kv(out, "  description \"", mis_string(description), "\"");
+		if (static_cast<uint32_t>(record.flags) != 0) {
+			append_kv(out, "  attrib ", static_cast<uint32_t>(record.flags));
+		}
 		append_line(out, "end waypoint");
 		append_line(out);
 	}
@@ -177,11 +186,11 @@ void write_mis_layers(const bms::File &file, std::string &out) {
 	}
 }
 
-void write_mis_events(const bms::File &file, std::string &out) {
+void write_mis_events(const bms::File &file, std::string &out, const MisNames *names) {
 	for (size_t i = 0; i < file.events.size(); ++i) {
 		const bms::Event &event = file.events[i];
 		append_kv(out, "begin event ", i);
-		append_line(out, "  name \"\"");
+		append_kv(out, "  name \"", mis_string(listed_name(names ? &names->events : nullptr, i)), "\"");
 		if (static_cast<uint32_t>(event.flags) != 0) {
 			append_kv(out, "  attrib ", static_cast<uint32_t>(event.flags));
 		}
@@ -339,7 +348,7 @@ constexpr size_t kMisTextReserveBytes = 32u * 1024u;
 } // namespace
 
 bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
-                    const std::vector<int32_t> *base_heights) {
+                    const std::vector<int32_t> *base_heights, const MisNames *names) {
 	(void)error;
 	out.clear();
 	out.reserve(kMisTextReserveBytes);
@@ -348,11 +357,11 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
 	write_mis_general_information(file, out);
 	write_mis_weapon_availability(out);
 	write_mis_briefing(file, out);
-	write_mis_area_triggers(file, out);
-	write_mis_waypoints(file, out);
+	write_mis_area_triggers(file, out, names);
+	write_mis_waypoints(file, out, names);
 	write_mis_groups(file, out);
 	write_mis_layers(file, out);
-	write_mis_events(file, out);
+	write_mis_events(file, out, names);
 	write_mis_items(file, out, base_heights);
 	return true;
 }

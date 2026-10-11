@@ -765,4 +765,68 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 	return true;
 }
 
+bool parse_mis_names(const std::string &text, MisNames &out, std::string &error) {
+	out = MisNames{};
+	const std::vector<MisLine> lines = tokenize_mis_text(text);
+	// The section a line is in: the three that carry a name kept, any other walked to its end (an item's
+	// `name` and general_information's are not these). The indexes are parse_mis_text's: events and area
+	// triggers by their place in the file, a path by its record index.
+	enum class Kind { None, Event, Area, Path, Other };
+	Kind kind = Kind::None;
+	std::string section;
+	size_t index = 0;
+	size_t begun_at = 0;
+	size_t events = 0, areas = 0;
+	for (const MisLine &line : lines) {
+		const std::vector<std::string> &t = line.tokens;
+		if (kind == Kind::None) {
+			if (t.size() < 2 || t[0] != "begin") continue;
+			section = t[1];
+			begun_at = line.line_no;
+			if (section == "event") {
+				kind = Kind::Event;
+				index = events++;
+			} else if (section == "areatrig") {
+				kind = Kind::Area;
+				index = areas++;
+			} else if (section == "waypoint") {
+				int32_t number = 0;
+				if (!token_i32(line, 2, number, error)) return false;
+				if (number < 0 || number >= bms::kWaypointRecordCount) {
+					error = "MIS waypoint index out of range in line " + std::to_string(line.line_no);
+					return false;
+				}
+				kind = Kind::Path;
+				index = static_cast<size_t>(number);
+			} else {
+				kind = Kind::Other;
+			}
+			continue;
+		}
+		const bool ends = (t.size() >= 2 && t[0] == "end" && t[1] == section) ||
+		                  (section == "briefing" && !t.empty() && t[0] == "endbriefing");
+		if (ends) {
+			kind = Kind::None;
+			continue;
+		}
+		if (t.size() < 2) continue;
+		if (kind == Kind::Event && t[0] == "name") {
+			if (out.events.size() <= index) out.events.resize(index + 1);
+			out.events[index] = t[1];
+		} else if (kind == Kind::Area && t[0] == "description") {
+			if (out.areas.size() <= index) out.areas.resize(index + 1);
+			out.areas[index] = t[1];
+		} else if (kind == Kind::Path && t[0] == "description") {
+			out.paths[index] = t[1];
+		}
+	}
+	if (kind != Kind::None) {
+		error = "MIS " + section + " section begun in line " + std::to_string(begun_at) + " is missing its end marker";
+		return false;
+	}
+	out.events.resize(events);
+	out.areas.resize(areas);
+	return true;
+}
+
 } // namespace opennova::mission::detail

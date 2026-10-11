@@ -8,6 +8,7 @@
 
 #include <formats/mission/mission.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -19,12 +20,25 @@ struct MisIssue {
 	std::string message;
 };
 
+// The names the .mis gives a mission's records where the .bms has no room for them (ADR 0046 S24
+// "Names"): an event's `name` and an area trigger's and a waypoint path's `description`, by the index
+// the parse gives the record (an event by its place in the file's events, an area trigger by its place
+// in the file's areatrig sections, a path by its record index). An empty name is none; an index past
+// a list is none. A group's description is its name in the .bms record (bms.h GroupRecord), so it is
+// not here.
+struct MisNames {
+	std::vector<std::string> events;
+	std::vector<std::string> areas;
+	std::array<std::string, bms::kWaypointRecordCount> paths{};
+};
+
 } // namespace opennova::mission
 
 namespace opennova::mission::detail {
 
 bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
-                    const std::vector<int32_t> *base_heights = nullptr);
+                    const std::vector<int32_t> *base_heights = nullptr, const MisNames *names = nullptr);
+bool parse_mis_names(const std::string &text, MisNames &out, std::string &error);
 
 // `resolve_item_type` classifies each `begin item` record into its BMS pool by
 // items.def TYPE (mission.h MisItemTypeResolver); empty = all records land in
@@ -45,9 +59,16 @@ namespace opennova::mission {
 // the height-locked absolute z); out-of-range / absent entries fall back to
 // the entity's own mis_extra_bheight. See docs/mission/mis-format-re.md
 // (D-MIS-4).
+// `names` (optional): the names written into the events' `name` and the area triggers' and the
+// waypoint paths' `description` lines (empty strings without it); a path with a description is written
+// even with no flags.
 inline bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
-                           const std::vector<int32_t> *base_heights = nullptr) {
-	return detail::write_mis_text(file, out, error, base_heights);
+                           const std::vector<int32_t> *base_heights = nullptr, const MisNames *names = nullptr) {
+	return detail::write_mis_text(file, out, error, base_heights, names);
+}
+// The names a .mis text holds (MisNames), read beside parse_mis_text's records by the same indexes.
+inline bool parse_mis_names(const std::string &text, MisNames &out, std::string &error) {
+	return detail::parse_mis_names(text, out, error);
 }
 // `resolve_item_type` classifies each `begin item` record into its BMS pool by
 // items.def TYPE (MisItemTypeResolver); pass {} when no items.def is loaded

@@ -179,6 +179,27 @@ int check(const std::string &path) {
 		TEST_EXPECT(texts_equal(named1, named2));
 	}
 
+	// With names (MisNames): every event named, every area and every path described, the flag-less
+	// paths among them written for their description; the names read back are the names written, and the
+	// text written from them again is the same.
+	MisNames names;
+	for (size_t i = 0; i < doc.events.size(); ++i) names.events.push_back("event " + std::to_string(i));
+	for (size_t i = 0; i < doc.area_triggers.size(); ++i) names.areas.push_back("area " + std::to_string(i));
+	for (size_t i = 1; i < names.paths.size(); ++i) names.paths[i] = "path " + std::to_string(i);
+	std::string named1;
+	TEST_EXPECT(write_mis_text(doc, named1, error, nullptr, &names));
+	MisNames names_back;
+	TEST_EXPECT(parse_mis_names(named1, names_back, error));
+	TEST_EXPECT(names_back.events == names.events);
+	TEST_EXPECT(names_back.areas == names.areas);
+	TEST_EXPECT(names_back.paths == names.paths);
+	bms::File named_back;
+	TEST_EXPECT(parse_mis_text(named1, resolver, named_back, error));
+	sync_counts(named_back);
+	std::string named2;
+	TEST_EXPECT(write_mis_text(named_back, named2, error, nullptr, &names_back));
+	TEST_EXPECT(texts_equal(named1, named2));
+
 	return 0;
 }
 
