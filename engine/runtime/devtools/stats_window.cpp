@@ -156,8 +156,8 @@ void StatsWindow::set_info(const char *row_id, const char *text) {
 
 // The counter cells backed by the board's VALUE slots. The retired page also
 // pulled live counters off Godot-side objects (Performance monitors, the
-// occlusion/effect/present stats); those return as VALUE slots the shell
-// samplers feed (TODO.md, "Stats window info cells").
+// occlusion/effect/present stats); those were not carried over, and one
+// returns only as a VALUE slot a shell sampler feeds.
 void StatsWindow::format_info() {
 	const CaptureWindow &w = reading_;
 	for (auto &text : texts_) {

@@ -318,6 +318,9 @@ void NovaWorldClient::start() {
 	clock_accum_s_ = 0.0;
 	clock_ms_ = 0;
 	lobby_.open(*gate_socket_, demux.session());
+	// A session that ended in error or a disconnect may have left the hosting leg
+	// mid-request; the new session starts it idle (no statement: the old session is gone).
+	host_role_.stop();
 
 	enter_state(STATE_GATE_PROBING);
 	lobby_.probe(opennova::to_std(host_), static_cast<uint16_t>(gate_port_));
@@ -1024,6 +1027,9 @@ void NovaWorldClient::abort_playing(const String &tag) {
 opennova::NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
 	opennova::NwuHostRole::Hooks hooks;
 	hooks.on_hosting = [this]() {
+		// Only the hosting leg's own request resolves here: a session that went to ERROR or
+		// DISCONNECTED with the request out stays there.
+		if (state_ != STATE_HOSTING_REQUESTED) return;
 		enter_state(STATE_HOSTING);
 		emit_signal("hosting_started");
 	};
@@ -1188,7 +1194,10 @@ void NovaWorldClient::enter_state(State next, const String &reason) {
 	const State previous = state_;
 	state_ = next;
 	if (next == STATE_DISCONNECTED || next == STATE_ERROR) {
+		// A play in flight dies with the session: the rest of this _process (the notice
+		// drain, the play timeout) must not resolve or abort it back into CONNECTED.
 		authenticated_ = false;
+		play_in_flight_ = false;
 	}
 	trace(String(state_name(previous)) + " -> " + state_name(next)
 		+ (reason.is_empty() ? String() : (String(" (") + reason + String(")"))));

@@ -1,0 +1,15 @@
+# Python lint and format settings. scripts/lint/format_lint.py checks them on
+# changed lines only (advisory in CI); the tree is not formatted to them yet.
+line-length = 100
+target-version = "py311"
+extend-exclude = ["third_party", "godot/addons", "docs", "build"]
+
+[lint]
+# Pyflakes, pycodestyle's error classes and bugbear: defects, not taste.
+select = ["E4", "E7", "E9", "F", "B"]
+# zip(strict=) everywhere and the l/I/O name rule are taste.
+ignore = ["B905", "E741"]
+
+[format]
+# The scripts mix quote styles; the formatter leaves them as written.
+quote-style = "preserve"

@@ -9,28 +9,68 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  # A tag publishes only a commit master carries whose master CI run passed,
+  # so a release inherits every gate CI requires (the maturity lints, native
+  # core and retail, Godot GUT) instead of re-running a subset of them. Master
+  # pushes always run everything and are never cancelled (ci.yml's `changes`
+  # and concurrency), so a tag on a pushed master head finds its run; a tag
+  # pushed straight after the merge waits for that run to finish.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # scoped below: the tests read fixtures/ only
+          fetch-depth: 0
+          lfs: false
 
-      - name: Pull Git LFS assets (fixtures/ only)
+      - name: The tagged commit is on master
+        id: commit
         shell: bash
         run: |
-          git lfs install --local
-          git lfs pull --include="fixtures/**"
+          sha="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          if ! git merge-base --is-ancestor "$sha" origin/master; then
+            echo "::error::${GITHUB_REF_NAME} (${sha}) is not on master: release tags point at a master commit."
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and test
+      - name: Master CI passed on the tagged commit
         shell: bash
-        run: scripts/build.sh --no-godot
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          query="repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&branch=master&event=push"
+          verdict='if any(.workflow_runs[]; .conclusion == "success") then "pass"
+            elif any(.workflow_runs[]; .status != "completed") then "running"
+            elif (.workflow_runs | length) == 0 then "none" else "fail" end'
+          deadline=$((SECONDS + 150 * 60))
+          while :; do
+            case "$(gh api "$query" --jq "$verdict")" in
+              pass)
+                echo "Master CI passed on ${SHA}."
+                exit 0 ;;
+              none)
+                echo "::error::No master CI run for ${SHA}: tag a commit a master push ran CI on (a merge head)."
+                exit 1 ;;
+              fail)
+                echo "::error::Master CI did not pass on ${SHA}."
+                exit 1 ;;
+            esac
+            if (( SECONDS > deadline )); then
+              echo "::error::Master CI on ${SHA} is still running after 150 minutes."
+              exit 1
+            fi
+            sleep 60
+          done
 
   # Tagged releases ship the runtime, the Blender authoring add-on and the apps, without game data.
   package-godot-windows:
+    needs: gate
     runs-on: windows-latest
     outputs:
       artifact_id: ${{ steps.upload_game.outputs.artifact-id }}
@@ -88,12 +128,14 @@ jobs:
           if-no-files-found: error
 
   package-blender-windows:
+    needs: gate
     uses: ./.github/workflows/package-blender-windows.yml
     with:
       # Blender reports the zipped manifest's version: stamp the tag into it.
       version: ${{ github.ref_name }}
 
   package-apps-windows:
+    needs: gate
     # The called job asks for actions: write (its compiler cache's master
     # save); a tag run restores only, but the grant must still cover it.
     permissions:
@@ -103,7 +145,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [test, package-godot-windows, package-blender-windows, package-apps-windows]
+    needs: [gate, package-godot-windows, package-blender-windows, package-apps-windows]
     permissions:
       contents: write
     steps:

@@ -93,7 +93,7 @@
   and every runtime lib but inmatch/replication is NET-AGNOSTIC (no `net/`,
   `runtime/inmatch/` or `runtime/replication/` include — the same lint).
 - Shared infrastructure lives in `engine/base/io` (`opennova::io` / `opennova::strutil`,
-  header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`,
+  header-only): bounds-checked `ByteReader`/`ByteWriter`, LSB-first `BitReader`/`BitWriter`,
   `io/le.h` primitives (including the `append_*_le` vector writers every
   streaming encoder wants), `io/fixed.h` (16.16 / 2.14), `io/log.h` (the diagnostic
   sink), `io/strutil.h` ASCII case-insensitive helpers, `io/os_path.h` (a UTF-8 path
@@ -127,10 +127,9 @@
   `engine/net/npwire/wire_cursor.h`, and it must not be folded into `ByteReader`.
 - Migration exceptions, each with its reason (do not "clean these up" casually):
   the `mus`/`wac` VM program-counter cursors are a witnessed faithful-port surface with
-  their own clamp semantics. `engine/formats/cpt` reads through the shared
-  `io::BitReader` but keeps its own bit WRITER (a normalizing `set_position` and a
-  `write_to_file`); `io/bit_stream.h` carries no writer, and replacing cpt's is a real
-  migration needing a CPT-corpus byte diff, not a swap. That byte diff is the
+  their own clamp semantics. `engine/formats/cpt` is no longer one: it reads and writes through the shared
+  `io::BitReader` / `io::BitWriter`, and the writer's bytes (its high-water rule, the
+  zero pads) are pinned by a CPT-corpus byte diff: the
   re-encode leg of the gated `tests/terrain/cpt_jo_assets_sweep_test` (ctest
   `cpt_jo_assets_sweep`, `--suite retail`: every retail .cpt read by `load_cpt` and
   written again by `save_cpt`, the writer behind `CptFile::write_bytes` and the TrnGen

@@ -61,6 +61,29 @@ jobs:
           fi
           echo "code=${code}" >> "$GITHUB_OUTPUT"
 
+  # Formatting and per-language lint on the lines a change adds
+  # (scripts/lint/format_lint.py: clang-format, ruff, gdlint/gdformat at the
+  # pins below). Advisory until the tree's whitespace-only reformat lands: it
+  # annotates the diff and never fails, and it is not a required check.
+  format-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          # The merge-base with origin/master is the diff base.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Format lint (advisory)
+        shell: bash
+        run: |
+          python -m pip install --quiet clang-format==21.1.6 ruff==0.16.9 gdtoolkit==4.5.0
+          python scripts/lint/format_lint.py --github
+
   # The C++ engine + ctest suites, core then retail, from ONE build. Built with
   # Ninja + sccache (.github/actions/compiler-cache): the Visual Studio
   # generator ignores CMAKE_*_COMPILER_LAUNCHER. scripts/build.sh lets CMake
