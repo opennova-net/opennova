@@ -618,7 +618,8 @@ constexpr ViewSectionRow kSections[] = {
 			"confirm {group | required | finding, label, proposal {lines, requests, findings} or {gone}: what "
 			"apply_confirmation raises}, confirm_serial}) and each open document's views "
 			"(documents [{path, active, filter, kinds, all_rows, sort, every, inspector_filter, new_window_type, "
-			"remove_screen, remap_from, remap_to}])." },
+			"remove_screen, remap_from, remap_to, map; a mission's logic, logic_split, logic_filter, logic_folded, "
+			"logic_attention and pick {record, slot} or null, S24}])." },
 	{ S::Navigation, "navigation", concern_set({ C::Navigation }), navigation_section,
 			"The navigation history (Back and Forward: navigate_back, navigate_forward): can_back, can_forward, "
 			"and the places each goes to, nearest first (back, forward: [{pane: document, page or files, path, "

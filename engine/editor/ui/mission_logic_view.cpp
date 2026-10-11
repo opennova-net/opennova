@@ -18,6 +18,7 @@
 #include <editor/graph/display_names.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/mission_row_menu.h>
 #include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
@@ -438,6 +439,16 @@ void draw_mission_add_menu(Workspace &workspace, const Document &document, const
 		const bool ok = logic_add_edits(*mission, owner.row, *type, SIZE_MAX, edits, error);
 		raise(workspace, *mission, ok, std::move(edits));
 	}
+}
+
+void mission_logic_row_items(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record) {
+	const bool logic = record.kind == k(MissionKind::Event) || record.kind == k(MissionKind::Trigger) ||
+	                   record.kind == k(MissionKind::Action);
+	if (!logic) return;
+	// The Logic pane beside the 3D view, on the record's card (the right-click selected it).
+	if (ImGui::MenuItem("Show on board") && !workspace.view().workspace.document(mission.path()).logic)
+		window_requests::show_logic(workspace, mission.path(), true);
+	ui_kit::tooltip("The mission's Logic pane beside its 3D view, on this event's card (Ctrl+L shows or hides it).");
 }
 
 } // namespace opennova::editor

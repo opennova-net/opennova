@@ -364,6 +364,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/font_viewport.cpp
+    # round S24 (ADR 0046, the mission logic): the mission queries apart from the table (S0); each lane's own
+    # files under its line
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_queries.cpp
+    # S24 lane A (the board)
+    # S24 lane B (logic in the views)
+    # S24 lane C (names and live logic)
 )
 
 # ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the
@@ -435,6 +441,14 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/music_bank_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/particle_key_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/wave_inspector.cpp
+        # round S24 (ADR 0046, the mission logic): the Logic pane, the outline's row menu, the live hook (S0);
+        # each lane's own files under its line
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_board_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_board_live.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_row_menu.cpp
+        # S24 lane A (the board)
+        # S24 lane B (logic in the views)
+        # S24 lane C (names and live logic)
     )
     target_link_libraries(opennova_editor PRIVATE opennova_imgui)
     target_compile_definitions(opennova_editor PUBLIC OPENNOVA_EDITOR_UI=1)

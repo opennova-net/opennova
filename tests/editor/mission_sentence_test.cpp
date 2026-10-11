@@ -103,7 +103,7 @@ int test_words() {
 	TEST_EXPECT(trigger_words(trigger(M::Group, 7, 4, 5, -1), names) == "group 4 has passed stop -1 (never recorded: the game keeps stops 0 to 31) of path 5");
 	TEST_EXPECT(trigger_words(trigger(M::Single, 43, 10034, 2200, 25), names) == "Hostage #10034 is within 25 m of Truck #2200");
 	TEST_EXPECT(trigger_words(trigger(M::Event, 9, 2), names) == "event 3 has fired"); // the sub-type unread
-	TEST_EXPECT(trigger_words(trigger(M::MissionVariable, 3, 1, 5), names) == "variable 1 is greater than 5");
+	TEST_EXPECT(trigger_words(trigger(M::MissionVariable, 3, 1, 5), names) == "V1 is greater than 5");
 	TEST_EXPECT(trigger_words(trigger(M::Player, 36, 30), names) == "the player has been outside the mission area for 30.7 s");
 	// Never a guess: a type no row names says so.
 	TEST_EXPECT(trigger_words(trigger(M::Single, 8, 10034), names) == "a trigger of unknown kind 8 (false)");
@@ -115,8 +115,8 @@ int test_words() {
 	TEST_EXPECT(action_words(action(A::OutputText, 0, 5), names, nullptr) == "show text 5");
 	TEST_EXPECT(action_words(action(A::KillSingle, 0, 10034), names, nullptr) == "kill Hostage #10034");
 	TEST_EXPECT(action_words(action(A::ChangeGTeamAction, 0, 4, 2), names, nullptr) == "move group 4 to the red team (team 2)");
-	TEST_EXPECT(action_words(action(A::MisvarChange, 2, 1, 7), names, nullptr) == "add 7 to variable 1");
-	TEST_EXPECT(action_words(action(A::MisvarChange, 4, 1, 7), names, nullptr) == "add 1 to variable 1");
+	TEST_EXPECT(action_words(action(A::MisvarChange, 2, 1, 7), names, nullptr) == "add 7 to V1");
+	TEST_EXPECT(action_words(action(A::MisvarChange, 4, 1, 7), names, nullptr) == "add 1 to V1");
 	// A Redirect: a path from a stop, or a command naming an entity [world-wac-ai-re.md 11].
 	TEST_EXPECT(action_words(action(A::RedirectGroupTo, 0, 4, 5, 2), names, nullptr) ==
 	            "send group 4 along path 5, from stop 2");

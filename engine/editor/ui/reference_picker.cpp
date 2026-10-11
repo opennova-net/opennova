@@ -573,4 +573,9 @@ bool ReferencePicker::accept_file(const SessionView &view, const FieldUse &field
 	return dropped;
 }
 
+bool ReferencePicker::accept_record(const SessionView &, const Document &, const NodeAddress &, const FieldUse &,
+                                    std::string &) {
+	return false;
+}
+
 } // namespace opennova::editor

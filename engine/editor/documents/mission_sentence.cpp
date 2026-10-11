@@ -417,7 +417,7 @@ std::string param_word(ParamKind kind, int64_t value, const MissionNames &names)
 		// holds stops 0 to 31 [section 3a]. (A Redirect's node is worded by redirect_words.)
 		return value >= 0 && value < 32 ? "stop " + number(value)
 		                                : "stop " + number(value) + " (never recorded: the game keeps stops 0 to 31)";
-	case K::MissionVar: return "variable " + number(value);
+	case K::MissionVar: return names.variable(value);
 	case K::Dialog: return "dialog " + number(value);
 	case K::DistanceM: return number(value) + " m";
 	case K::Seconds: return number(value) + " s";
@@ -555,6 +555,8 @@ std::string MissionNames::path(int64_t number_) const {
 }
 
 std::string MissionNames::event(int64_t index) const { return "event " + number(index + 1); }
+
+std::string MissionNames::variable(int64_t index) const { return "V" + number(index); }
 
 std::string MissionNames::text(const std::string &, const std::string &) const { return std::string(); }
 

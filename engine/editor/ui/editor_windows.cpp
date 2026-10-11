@@ -454,6 +454,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	draw_edit_menu(v, document);
 	draw_go_menu(v);
 	draw_build_menu(v);
+	draw_windows_items(v, document);
 	// The modals, every frame, whichever window or menu opened them: the one the session's order shows
 	// (shown_modal) opens, the others held wait closed.
 	bring_modal_forward(v);
@@ -681,6 +682,18 @@ void EditorWindows::draw_go_menu(const SessionView &v) {
 	ImGui::EndMenu();
 }
 
+void EditorWindows::draw_windows_items(const SessionView &v, const DocumentBase *document) {
+	if (!ImGui::BeginMenu("Windows")) return;
+	const bool mission = document && document->kind() == AssetKind::Mission;
+	bool shown = mission && v.workspace.document(document->path()).logic;
+	if (ImGui::MenuItem("Logic", "Ctrl+L", &shown, mission)) window_requests::show_logic(*this, document->path(), shown);
+	ui_kit::tooltip(mission ? std::string("The mission's Logic pane beside its 3D view: its events as cards that read as their "
+	                                      "sentences.")
+	                        : std::string("Make a mission the active document: its Logic pane shows beside its 3D view."));
+	ImGui::Separator();
+	ImGui::EndMenu();
+}
+
 void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
 	if (menu_item("Build", "Ctrl+B", v.project.open && v.allows(EditorRequestKind::Build)))
@@ -904,7 +917,7 @@ void EditorWindows::draw_new_project() {
 // request()); Undo and Redo, and Alt+Left and Alt+Right, are the field's own then. Ctrl+Shift+Z is
 // Redo, as Ctrl+Y is. None of them while the unsaved prompt is open: an Undo behind it would make a
 // file it does not list unsaved. No two share keys: Ctrl+S, Ctrl+Shift+S, Ctrl+W, Ctrl+B, Ctrl+P, Ctrl+T,
-// Ctrl+Shift+F, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, F5, Ctrl+F5, Alt+F5, Shift+F5, F12, Shift+F12, Alt+Left and
+// Ctrl+L, Ctrl+Shift+F, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, F5, Ctrl+F5, Alt+F5, Shift+F5, F12, Shift+F12, Alt+Left and
 // Alt+Right here; Ctrl+F, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D, F2, Delete, F and the arrows the windows' own.
 void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document) {
 	if (v.dialogs.unsaved_prompt.open) return;
@@ -928,6 +941,10 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 	const bool plain_ctrl = io.KeyCtrl && !io.KeyShift && !io.KeyAlt;
 	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_P, false) && finds) ProjectFind::open(*this, ProjectFind::Scope::Files);
 	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_T, false) && finds) ProjectFind::open(*this, ProjectFind::Scope::Names);
+	// The active mission's Logic pane (S24) shown or hidden.
+	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_L, false) && document && document->kind() == AssetKind::Mission &&
+	    modal == HeldModal::None)
+		window_requests::show_logic(*this, document->path(), !v.workspace.document(document->path()).logic);
 	if (ImGui::IsKeyPressed(ImGuiKey_F12, false) && !io.KeyCtrl && !io.KeyAlt && modal == HeldModal::None) {
 		if (io.KeyShift) find_usages(v, jump_subject());
 		else go_to_definition(jump_subject());

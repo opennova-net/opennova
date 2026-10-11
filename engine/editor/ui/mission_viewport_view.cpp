@@ -464,6 +464,14 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		change.set("focus", io::JsonValue::make_string("preview"));
 		workspace.request(request::set_workspace(io::json_write(change)));
 	}
+	// The mission's Logic pane (S24, the Event board) beside the picture: its events as cards reading as their
+	// sentences (Ctrl+L; the Windows menu's tick).
+	const bool logic = view.workspace.document(mission.path()).logic;
+	if (tool_button(row, "Logic", logic, true,
+				logic ? std::string("Hide the Logic pane (Ctrl+L).")
+					  : std::string("Show the mission's events beside the picture, each a card that reads as its sentence "
+									"(Ctrl+L).")))
+		window_requests::show_logic(workspace, mission.path(), !logic);
 	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
 	// 0x4F91F0], opened, or made beside the mission where the project has none.
 	const MissionScript script = mission_script(view, mission.path());
