@@ -1,5 +1,8 @@
 #include <runtime/inmatch/server_spawn.h>
 
+#include <runtime/inmatch/server_message_dispatch.h> // Server_ReleasePlayerDeployment (the convert's deploy)
+#include <base/io/fixed.h>                          // fp16_16_to_float (a revive's saved position)
+
 #include <runtime/inmatch/mission_rotation.h> // HostRotation (LASTGAME, the side-to-team map)
 
 #include <runtime/world/ai.h>           // AiEntity / AiSystem
@@ -887,6 +890,63 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	return h;
 }
 
+world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
+		NapiNPConnection &conn, world::World &world, world::Entity &player,
+		world::EntityHandle target_zone) {
+	// The convert's hold arm: no placement; the three angle words are zeroed
+	// (the mission yaw of heading word 0 is 90) and the latch clears. The
+	// warmup it runs first is D-NET-431's. A revive latch the placement would
+	// have consumed is only cleared, as the leg's tail clears it on every
+	// deploy. [orig: Server_ProcessPlayerDeath - the latch test @0x517837,
+	//  Entity_WarmUpOrganicAnimation @0x517842, +0x10/+0x14/+0x18 = 0
+	//  @0x517849..0x517853, the clear @0x517859; +89932 = 0 @0x5179C7]
+	if (conn.reply.convert_holds_pose) {
+		conn.reply.convert_holds_pose = false;
+		conn.reply.revive_pose_valid = false;
+		world::SpawnPointResult held;
+		held.found = true;
+		held.position = player.position;
+		held.yaw = static_cast<int16_t>(world::mission_yaw_deg_from_bam_heading(0));
+		player.yaw = held.yaw;
+		player.pitch = 0;
+		player.roll = 0;
+		return held;
+	}
+	// The no-pick arm reads the slot's spectator latch/restore team beside the
+	// team byte [orig: Server_ProcessPlayerDeath @0x517863 ->
+	// Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6].
+	const world::SpawnSlotState slot_state{
+			conn.link.spectator, conn.spectator_restore_team};
+	const world::SpawnPointResult pose = world::resolve_player_spawn_pose(
+			world, player.handle, target_zone, conn.reply.player_slot,
+			player.team, config.game_type, slot_state);
+	if (pose.found) {
+		player.position = pose.position;
+		player.yaw = pose.yaw;
+		player.pitch = pose.pitch;
+		player.roll = pose.roll;
+	}
+	// A medic revive lands the player on the position the revive saved (its
+	// death position raised 0x4000) after the placement ran, so the angles stay
+	// the placement's: the picked marker's words, or the body's own when nothing
+	// was picked (D-NET-377). [orig: Server_PositionPlayerForSpawn
+	//  @0x50D60A..0x50D62A; GameEvent_RevivePlayer @0x517DCD..0x517E09 saves]
+	if (conn.reply.revive_pose_valid) {
+		player.position.x = opennova::io::fp16_16_to_float(conn.reply.revive_pos[0]);
+		player.position.y = opennova::io::fp16_16_to_float(conn.reply.revive_pos[1]);
+		player.position.z = opennova::io::fp16_16_to_float(conn.reply.revive_pos[2]);
+		conn.reply.revive_pose_valid = false;
+	} else if (!pose.found) {
+		// No authored marker: the deploy transaction restores the position
+		// recorded by the previous Entity_ResetToSpawnState. Keeping this in the
+		// shared release makes C2S, wave, and listen-host paths identical.
+		// [orig: Server_ProcessPlayerDeath @0x517740 ->
+		// Entity_ResetToSpawnState @0x4B9610; D-NET-66]
+		player.position = player.spawn_position;
+	}
+	return pose;
+}
+
 void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &world) {
 	if (!ctx.is_authority) return;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -899,14 +959,33 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 		if (player == nullptr) continue;
 		// The convert: latch + hide byte + team 0 + Flags bit 0 + damage -1 +
 		// health 1 [orig: @0x519E5B..0x519EA4]; Server_SetPlayerSpectator is that
-		// same slot/entity mutation.
+		// same slot/entity mutation, bar the command group word.
 		if (!Server_SetPlayerSpectator(ctx, conn, world, /*spectator=*/true)) continue;
+		player->group_id = 0;                                     // entity+0x11C = 0 @0x519E89
 		player->health = 1;                                       // entity+286 = 1 @0x519EA4
 		world.zones.spawn_waves.remove_player(conn.link.owned_entity); // @0x519EB3
-		// Server_ProcessPlayerDeath(player, killerHandle) @0x519ECE: the deploy
-		// leg, whose spectator arm hides the body; the killer handle only feeds
-		// the death record.
-		(void)conn.reply.spectator_convert_killer;
+		// A request naming no target (the stock client's 0xFFFF) holds the body
+		// in place; any other handle is the deploy's target, resolved with the
+		// cleared team 0, which admits every team's spawn point. [orig:
+		//  @0x519EBC..0x519EC8; Input_HandleActionBinding @0x49B085 sends 0xFFFF;
+		//  Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
+		const uint16_t request = static_cast<uint16_t>(conn.reply.spectator_convert_killer);
+		conn.reply.convert_holds_pose = request == 0xFFFFu;
+		const world::Entity *target = conn.reply.convert_holds_pose
+				? nullptr
+				: world.zones.resolve_spawn_target(player->team, request);
+		// Server_ProcessPlayerDeath(player, handle) @0x519ECE: the deploy leg, its
+		// raises, placement, reset and private replies, before the 0x32.
+		std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
+				ctx.config, conn, world,
+				target != nullptr ? target->handle : world::EntityHandle{}, ctx.logs.profile);
+		if (conn.link.transport != nullptr) {
+			for (ProtocolMessage &message : deployment)
+				conn.link.transport->host_send(
+						message.tag, std::move(message.payload),
+						message.reliable, message.flags.raw,
+						message.capacity_exempt, message.retention_flushes);
+		}
 		// S2C 0x32 [u8 5][cstr name], mask 128 [orig: @0x519EDC..0x519F43].
 		FormattedGameText text;
 		text.subtype = kGameTextPlayerSpectating;

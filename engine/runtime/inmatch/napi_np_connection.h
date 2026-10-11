@@ -283,6 +283,11 @@ struct SessionReplyState {
 	// [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
 	bool spectator_convert_pending = false;
 	int16_t spectator_convert_killer = -1;
+	// The convert's hold latch: set when its request named no target (0xFFFF),
+	// read and cleared by the deploy leg the convert runs, which then places
+	// nothing (Server_PositionDeployingPlayer). [orig: slot+0x188D9 -
+	//  Server_KillPlayerAndNotify @0x519EC8; Server_ProcessPlayerDeath @0x517837]
+	bool convert_holds_pose = false;
 	// Host ms of this player's last accepted chat (the 1000 ms per-sender
 	// throttle; 0 = never). The same slot word is the refused-capture-touch
 	// nag's stamp: a numbered flip stamps the capturer's and the join zeroes it.
