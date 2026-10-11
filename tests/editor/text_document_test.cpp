@@ -1487,9 +1487,13 @@ static int test_retail() {
 			std::vector<TextReference> named;
 			type->references(*text_of(*document), named);
 			references += named.size();
-			// The mission's entities and areas its literal operands name (S23 B).
+			// The mission's entities and areas its literal operands name (S23 B), and its variables and events (S24 C4).
 			for (const TextReference &each : named)
-				operands += each.kind == ReferenceKind::MissionEntity || each.kind == ReferenceKind::MissionZone ? 1 : 0;
+				operands += each.kind == ReferenceKind::MissionEntity || each.kind == ReferenceKind::MissionZone ||
+				                            each.kind == ReferenceKind::MissionVariable ||
+				                            each.kind == ReferenceKind::MissionEventLatch
+				                    ? 1
+				                    : 0;
 			break;
 		}
 		case AssetKind::MusicScript:
@@ -1524,7 +1528,7 @@ static int test_retail() {
 	            credit_images, shaders, shader_tags);
 	// The install's counts, pinned (Joint Operations: Combined Arms).
 	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
-	            references == 97 && operands == 61 && music == 2 && credits == 1 && shaders == 44);
+	            references == 141 && operands == 105 && music == 2 && credits == 1 && shaders == 44);
 	// The credits' names: each text line's font (every one of the 231 writes one) and its 19 images (17 fading,
 	// 2 spacing).
 	TEST_EXPECT(credit_fonts == 231 && credit_images == 19);
