@@ -1,9 +1,14 @@
 #include "template_engine.h"
 
+#include "auth.h"
+
+#include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <system_error>
 
 namespace opennova::novaworld_server {
 
@@ -52,11 +57,73 @@ std::string render_template(std::string_view tmpl, const TemplateVars &vars) {
 	return out;
 }
 
+bool is_bare_file_name(std::string_view name) {
+	if (name.empty() || name.front() == '.')
+		return false;
+	return std::all_of(name.begin(), name.end(), [](char c) {
+		return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+				c == '_' || c == '.' || c == '-';
+	});
+}
+
+std::optional<std::filesystem::path> file_under_root(
+		const std::filesystem::path &root, std::string_view relative) {
+	namespace fs = std::filesystem;
+	bool named = !relative.empty();
+	for (size_t start = 0; named;) {
+		const size_t slash = relative.find('/', start);
+		named = is_bare_file_name(relative.substr(
+				start, slash == std::string_view::npos ? std::string_view::npos : slash - start));
+		if (slash == std::string_view::npos)
+			break;
+		start = slash + 1;
+	}
+	if (!named) {
+		std::fprintf(stderr, "[http] refused a file name: '%s'\n", loggable(relative).c_str());
+		return std::nullopt;
+	}
+
+	// The segment rule already keeps the path under the root lexically; the
+	// canonical check also refuses a symlink under the root that leads out.
+	std::error_code ec;
+	fs::path base = fs::weakly_canonical(root, ec);
+	if (ec)
+		return std::nullopt;
+	if (base.filename().empty())
+		base = base.parent_path(); // a trailing separator
+	const fs::path full = fs::weakly_canonical(base / fs::path(std::string(relative)), ec);
+	if (ec)
+		return std::nullopt;
+	auto at = full.begin();
+	for (const fs::path &part : base) {
+		if (at == full.end() || *at != part) {
+			std::fprintf(stderr, "[http] refused a file outside its root: '%s'\n",
+					loggable(relative).c_str());
+			return std::nullopt;
+		}
+		++at;
+	}
+	if (at == full.end() || !fs::is_regular_file(full, ec))
+		return std::nullopt;
+	return full;
+}
+
+std::optional<std::filesystem::path> template_file(
+		const std::string &templates_dir, std::string_view name) {
+	if (name.find('/') != std::string_view::npos) {
+		std::fprintf(stderr, "[http] refused a template name: '%s'\n", loggable(name).c_str());
+		return std::nullopt;
+	}
+	return file_under_root(templates_dir, name);
+}
+
 std::string render_template_file(const std::string &templates_dir,
                                  const std::string &filename,
                                  const TemplateVars &vars) {
-	std::filesystem::path p = std::filesystem::path(templates_dir) / filename;
-	std::ifstream in(p, std::ios::binary);
+	const auto path = template_file(templates_dir, filename);
+	if (!path)
+		return {};
+	std::ifstream in(*path, std::ios::binary);
 	if (!in) {
 		return {};
 	}
