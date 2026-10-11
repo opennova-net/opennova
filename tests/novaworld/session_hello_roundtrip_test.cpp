@@ -397,6 +397,70 @@ int test_pg_of_any_length_loads_sixteen_bytes() {
 	return 0;
 }
 
+// The 0x41 / 0x42 string fields copy from the value pointer up to the first
+// NUL, at most their buffer less one (NVS 127, PW 511, the rest 63), whatever
+// the field's length: an inner NUL ends the string, a value without its NUL
+// runs on into the next field's name and stops at that name's NUL, and the last
+// field's copy stops at the datagram's end (zero past it, D-NET-410).
+// [orig: Napi_CopyString @0x617E10; NapiNPProtocol_HandleClientHello @0x6213B0 -
+//  NVS @0x621570, CO @0x62159E, PN @0x62163B, PV1 @0x62169F;
+//  NapiNPProtocol_HandleClientJoin @0x62B750 - NVS @0x62B933, CO @0x62B961, PN
+//  @0x62BA01, PV1 @0x62BA68, NA @0x62BB55, PW @0x62BB86, SCRK @0x62BC4B]
+int test_hello_and_auth_strings_copy_to_the_first_nul() {
+	const ClientHello retail = opennova::make_jointoperations_client_hello(3);
+	const std::vector<uint8_t> guid(retail.pg.begin(), retail.pg.end());
+	const auto bare = [](const std::string &s) { return std::vector<uint8_t>(s.begin(), s.end()); };
+
+	// An inner NUL ends PN and PV1, so the identity holds in the 0x41 and the 0x42.
+	std::vector<uint8_t> inner;
+	append_field(inner, "NVS", cstr_value(retail.nvs));
+	std::vector<uint8_t> pn = cstr_value(retail.pn);
+	pn.push_back('X');
+	pn.push_back(0);
+	append_field(inner, "PN", pn);
+	append_field(inner, "PG", guid);
+	std::vector<uint8_t> pv1 = cstr_value(retail.pv1);
+	pv1.push_back('Y');
+	append_field(inner, "PV1", pv1);
+	ClientHello hello;
+	TEST_EXPECT(parse_client_hello(inner.data(), inner.size(), hello));
+	TEST_EXPECT(hello.pn == retail.pn && hello.pv1 == retail.pv1);
+	TEST_EXPECT(opennova::matches_jointoperations_identity(hello));
+	ClientAuth auth;
+	TEST_EXPECT(parse_client_auth(inner.data(), inner.size(), auth));
+	TEST_EXPECT(auth.pn == retail.pn && auth.pv1 == retail.pv1);
+	TEST_EXPECT(opennova::matches_jointoperations_identity(auth));
+
+	// A value without its NUL runs on into the next field's name; the last
+	// field's stops at the datagram's end.
+	std::vector<uint8_t> run_on;
+	append_field(run_on, "CO", bare("Logic"));
+	append_field(run_on, "AP", cstr_value("Jointops.exe"));
+	append_field(run_on, "NA", bare("Player"));
+	append_field(run_on, "PW", cstr_value("pw"));
+	append_field(run_on, "SCRK", bare("KEY"));
+	TEST_EXPECT(parse_client_hello(run_on.data(), run_on.size(), hello));
+	TEST_EXPECT(hello.co == "LogicAP" && hello.ap == "Jointops.exe");
+	TEST_EXPECT(parse_client_auth(run_on.data(), run_on.size(), auth));
+	TEST_EXPECT(auth.co == "LogicAP" && auth.na == "PlayerPW" && auth.pw == "pw");
+	TEST_EXPECT(auth.scrk == "KEY");
+
+	// The buffers: NVS keeps 127, PW 511, CO / NA / SCRK 63.
+	std::vector<uint8_t> caps;
+	append_field(caps, "NVS", cstr_value(std::string(200, 'v')));
+	append_field(caps, "CO", cstr_value(std::string(100, 'c')));
+	append_field(caps, "NA", cstr_value(std::string(100, 'n')));
+	append_field(caps, "PW", cstr_value(std::string(600, 'p')));
+	append_field(caps, "SCRK", cstr_value(std::string(100, 's')));
+	TEST_EXPECT(parse_client_hello(caps.data(), caps.size(), hello));
+	TEST_EXPECT(hello.nvs == std::string(127, 'v') && hello.co == std::string(63, 'c'));
+	TEST_EXPECT(parse_client_auth(caps.data(), caps.size(), auth));
+	TEST_EXPECT(auth.nvs == std::string(127, 'v') && auth.co == std::string(63, 'c'));
+	TEST_EXPECT(auth.na == std::string(63, 'n') && auth.pw == std::string(511, 'p'));
+	TEST_EXPECT(auth.scrk == std::string(63, 's'));
+	return 0;
+}
+
 int test_client_hello_tag_names_are_case_insensitive() {
 	ClientHello src;
 	src.pn = "NOVAWORLDUDP";
@@ -667,6 +731,7 @@ int main() {
 	if (test_client_hello_short_dword_takes_the_following_bytes() != 0) return 1;
 	if (test_client_auth_short_dword_takes_the_following_bytes() != 0) return 1;
 	if (test_pg_of_any_length_loads_sixteen_bytes() != 0) return 1;
+	if (test_hello_and_auth_strings_copy_to_the_first_nul() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_client_auth_zero_ck_parses() != 0) return 1;

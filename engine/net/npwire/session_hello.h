@@ -139,8 +139,12 @@ struct ServerHello {
 // false only for a null buffer. Ignores unknown tags. A CI/PM/EIP/EPN/ET
 // shorter than four bytes takes the bytes that follow it, as retail's dword
 // load does (zero past the buffer's end), and a PG of any length gives the 16
-// bytes at its value.
-// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 TLV walk]
+// bytes at its value. Each string field copies from its value up to the first
+// NUL, at most its buffer less one (NVS 127, the rest 63), whatever the field's
+// length, as retail's Napi_CopyString does: an inner NUL ends it, and a value
+// without its NUL runs on into the next field's name.
+// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 TLV walk; Napi_CopyString
+//  @0x617E10]
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out);
 
 // Serialize a ClientHello back to flat-TLV bytes (inverse of
@@ -223,7 +227,8 @@ struct ClientAuth {
 };
 
 // Parse a ClientAuth TLV payload (the 0x42's, after NWU-decryption). Its dword
-// fields shorter than four bytes and its PG load as parse_client_hello's do.
+// fields shorter than four bytes, its PG and its string fields load as
+// parse_client_hello's do (PW keeps 511 characters, NA and SCRK 63).
 // False only for a null buffer: no field is required, and a zero or absent CK
 // parses as 0, the remote key retail stores without a test.
 // [orig: NapiNPProtocol_HandleClientJoin @0x62b750 TLV walk; CK @0x62BB29]
