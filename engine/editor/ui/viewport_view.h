@@ -7,6 +7,7 @@
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewport_model.h>
+#include <editor/session/view/view_events.h>
 #include <editor/ui/viewport_canvas.h>
 #include <editor/ui/workspace.h>
 
@@ -42,6 +43,10 @@ public:
 	// its end raised once for the document it began in. A kind with no canvas has its own to say (the
 	// script view's: its device hidden where a window begun after it lies over it).
 	virtual void end_frame(Workspace &workspace);
+	// A RevealRecord its document's view was sent (S24: a Main-role view hands it to its viewport as its
+	// outline takes it): the viewport shows the record its way (the 3D view framing what it names). None by
+	// default.
+	virtual void reveal(const ViewEvent &event);
 
 protected:
 	ViewportView(ViewportKind kind);

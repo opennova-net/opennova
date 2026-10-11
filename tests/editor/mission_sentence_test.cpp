@@ -8,7 +8,9 @@
 // words on the wire (the `record` query's title) and in Problems (a row's `record_title`); the
 // types "Add trigger" and "Add action" offer, each with its title, group and line, every row of
 // mission_params' triggers and actions among them. With the game install (a SKIP-LEG without
-// OPENNOVA_JO_DIR), every event of every shipped mission worded, none of a type no row names, timed.
+// OPENNOVA_JO_DIR), every event of every shipped mission worded, none of a type no row names, timed. S24: the
+// words as runs (a parameter's words its slot's run, the type's own words the type's), joined the words, for the
+// hand-worded types too and for every shipped record.
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -90,6 +92,390 @@ public:
 	}
 };
 
+// Names that know no area: every zone id fails to resolve.
+class DocumentlessZones : public MissionNames {
+public:
+	bool zone_resolves(int64_t) const override { return false; }
+};
+
+// The words of every type over one record of it each (a trigger also negated), as the board's runs join them: a
+// golden table, so the runs (S24 A2: the words built as runs, a parameter's run its slot's) cannot drift from the
+// words the S15 sentences said. Made from the build whose runs matched the S15 words byte for byte over every
+// trigger and action of the shipped missions; a change of wording is a change of this table.
+struct GoldenWords {
+	bool action;
+	int32_t type, sub, flags;
+	const char *words;
+};
+const GoldenWords kGoldenWords[] = {
+	{false, 1, 4, 0, "group 10034 has no unit left alive"},
+	{false, 1, 4, 1, "group 10034 still has a unit alive"},
+	{false, 1, 5, 0, "group 10034 still has a unit alive"},
+	{false, 1, 5, 1, "group 10034 has no unit left alive"},
+	{false, 1, 6, 0, "group 10034 has lost 3 units or more"},
+	{false, 1, 6, 1, "group 10034 has not lost 3 units or more"},
+	{false, 1, 9, 0, "group 10034 has lost no unit"},
+	{false, 1, 9, 1, "group 10034 has lost a unit"},
+	{false, 1, 12, 0, "group 10034 has 3 units or more alive"},
+	{false, 1, 12, 1, "group 10034 has fewer than 3 units alive"},
+	{false, 2, 4, 0, "Hostage #10034 is destroyed"},
+	{false, 2, 4, 1, "Hostage #10034 is not destroyed"},
+	{false, 2, 5, 0, "Hostage #10034 is alive"},
+	{false, 2, 5, 1, "Hostage #10034 is not alive"},
+	{false, 2, 6, 0, "Hostage #10034 has lost 3 hit points or more"},
+	{false, 2, 6, 1, "Hostage #10034 has not lost 3 hit points or more"},
+	{false, 2, 9, 0, "Hostage #10034 has full health"},
+	{false, 2, 9, 1, "Hostage #10034 does not have full health"},
+	{false, 2, 12, 0, "Hostage #10034 has 3 hit points or more"},
+	{false, 2, 12, 1, "Hostage #10034 has fewer than 3 hit points"},
+	{false, 1, 1, 0, "group 10034 has seen group 3"},
+	{false, 1, 1, 1, "group 10034 has not seen group 3"},
+	{false, 1, 2, 0, "group 10034 has targeted group 3"},
+	{false, 1, 2, 1, "group 10034 has not targeted group 3"},
+	{false, 1, 13, 0, "group 10034 has shot group 3"},
+	{false, 1, 13, 1, "group 10034 has not shot group 3"},
+	{false, 1, 16, 0, "group 10034 has seen SSN 3"},
+	{false, 1, 16, 1, "group 10034 has not seen SSN 3"},
+	{false, 1, 15, 0, "group 10034 has targeted SSN 3"},
+	{false, 1, 15, 1, "group 10034 has not targeted SSN 3"},
+	{false, 1, 17, 0, "group 10034 has shot SSN 3"},
+	{false, 1, 17, 1, "group 10034 has not shot SSN 3"},
+	{false, 2, 16, 0, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has seen SSN 3"},
+	{false, 2, 16, 1, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has not seen SSN 3"},
+	{false, 2, 15, 0, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has targeted SSN 3"},
+	{false, 2, 15, 1, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has not targeted SSN 3"},
+	{false, 2, 17, 0, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has shot SSN 3"},
+	{false, 2, 17, 1, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has not shot SSN 3"},
+	{false, 2, 1, 0, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has seen group 3"},
+	{false, 2, 1, 1, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has not seen group 3"},
+	{false, 2, 2, 0, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has targeted group 3"},
+	{false, 2, 2, 1, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has not targeted group 3"},
+	{false, 2, 13, 0, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has shot group 3"},
+	{false, 2, 13, 1, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has not shot group 3"},
+	{false, 2, 44, 0, "Hostage #10034 has a clear line of sight to SSN 3 within 2 m"},
+	{false, 2, 44, 1, "Hostage #10034 has no clear line of sight to SSN 3 within 2 m"},
+	{false, 2, 45, 0, "Hostage #10034 sees SSN 3 within 2 m"},
+	{false, 2, 45, 1, "Hostage #10034 does not see SSN 3 within 2 m"},
+	{false, 1, 3, 0, "group 10034 is at red alert"},
+	{false, 1, 3, 1, "group 10034 is not at red alert"},
+	{false, 1, 14, 0, "group 10034 is at yellow alert"},
+	{false, 1, 14, 1, "group 10034 is not at yellow alert"},
+	{false, 2, 3, 0, "Hostage #10034 is at red alert"},
+	{false, 2, 3, 1, "Hostage #10034 is not at red alert"},
+	{false, 2, 14, 0, "Hostage #10034 is at yellow alert"},
+	{false, 2, 14, 1, "Hostage #10034 is not at yellow alert"},
+	{false, 1, 10, 0, "group 10034 has a unit in Zone 3 (bridge)"},
+	{false, 1, 10, 1, "group 10034 has no unit in Zone 3 (bridge)"},
+	{false, 1, 7, 0, "group 10034 has passed stop 2 of path 3"},
+	{false, 1, 7, 1, "group 10034 has not passed stop 2 of path 3"},
+	{false, 2, 10, 0, "Hostage #10034 is in Zone 3 (bridge)"},
+	{false, 2, 10, 1, "Hostage #10034 is not in Zone 3 (bridge)"},
+	{false, 2, 43, 0, "Hostage #10034 is within 2 m of SSN 3"},
+	{false, 2, 43, 1, "Hostage #10034 is not within 2 m of SSN 3"},
+	{false, 2, 7, 0, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has passed stop 2 of path 3"},
+	{false, 2, 7, 1, "Hostage #10034 (never recorded: the game keeps SSNs below 128) has not passed stop 2 of path 3"},
+	{false, 7, 37, 0, "a satchel charge lies in zone 10034"},
+	{false, 7, 37, 1, "a satchel charge does not lie in zone 10034"},
+	{false, 7, 36, 0, "the player has been outside the mission area for 10274.8 s"},
+	{false, 7, 36, 1, "the player has not been outside the mission area for 10274.8 s"},
+	{false, 1, 11, 0, "a soldier of group 10034 carries an object of group 3"},
+	{false, 1, 11, 1, "a soldier of group 10034 does not carry an object of group 3"},
+	{false, 2, 42, 0, "Hostage #10034 is on top of SSN 3"},
+	{false, 2, 42, 1, "Hostage #10034 is not on top of SSN 3"},
+	{false, 2, 11, 0, "Hostage #10034 carries an object of group 3"},
+	{false, 2, 11, 1, "Hostage #10034 does not carry an object of group 3"},
+	{false, 7, 39, 0, "the player is on Hostage #10034"},
+	{false, 7, 39, 1, "the player is not on Hostage #10034"},
+	{false, 7, 40, 0, "the player drives Hostage #10034"},
+	{false, 7, 40, 1, "the player does not drive Hostage #10034"},
+	{false, 7, 41, 0, "the player is on Hostage #10034's gun"},
+	{false, 7, 41, 1, "the player is not on Hostage #10034's gun"},
+	{false, 7, 38, 0, "the player is attached to Hostage #10034"},
+	{false, 7, 38, 1, "the player is not attached to Hostage #10034"},
+	{false, 3, 0, 0, "event 10035 has fired"},
+	{false, 3, 0, 1, "event 10035 has not fired"},
+	{false, 4, 1, 0, "variable 10034 equals 3"},
+	{false, 4, 1, 1, "variable 10034 does not equal 3"},
+	{false, 4, 2, 0, "variable 10034 is less than 3"},
+	{false, 4, 2, 1, "variable 10034 is not less than 3"},
+	{false, 4, 3, 0, "variable 10034 is greater than 3"},
+	{false, 4, 3, 1, "variable 10034 is not greater than 3"},
+	{false, 4, 4, 0, "variable 10034 is at most 3"},
+	{false, 4, 4, 1, "variable 10034 is not at most 3"},
+	{false, 4, 5, 0, "variable 10034 is at least 3"},
+	{false, 4, 5, 1, "variable 10034 is not at least 3"},
+	{false, 5, 0, 0, "it is the second time through"},
+	{false, 5, 0, 1, "it is not the second time through"},
+	{false, 6, 1, 0, "teammates are on"},
+	{false, 6, 1, 1, "teammates are not on"},
+	{false, 6, 2, 0, "a helicopter lift is under way"},
+	{false, 6, 2, 1, "a helicopter lift is not under way"},
+	{false, 6, 3, 0, "a helicopter lift is under way"},
+	{false, 6, 3, 1, "a helicopter lift is not under way"},
+	{false, 7, 34, 0, "dialog 10034 is not playing"},
+	{false, 7, 34, 1, "dialog 10034 is playing"},
+	{false, 7, 35, 0, "dialog 10034 has played and finished"},
+	{false, 7, 35, 1, "dialog 10034 has not played to its end"},
+	{false, 7, 18, 0, "the player is berserk"},
+	{false, 7, 18, 1, "the player is not berserk (always true in the game: it reads the berserk bit as a raw 0x200)"},
+	{false, 7, 19, 0, "the player has chosen the first-person view"},
+	{false, 7, 19, 1, "the player has not chosen the first-person view"},
+	{false, 7, 20, 0, "the player has chosen the third-person view"},
+	{false, 7, 20, 1, "the player has not chosen the third-person view"},
+	{false, 7, 21, 0, "the player has chosen the view with the gun"},
+	{false, 7, 21, 1, "the player has not chosen the view with the gun"},
+	{false, 7, 32, 0, "the player's input bit 10034 is set"},
+	{false, 7, 32, 1, "the player's input bit 10034 is not set"},
+	{false, 7, 33, 0, "the player's input bit 10034 + 15 is set"},
+	{false, 7, 33, 1, "the player's input bit 10034 + 15 is not set"},
+	{false, 7, 22, 0, "the player's input bit 10 is set (never, in the game)"},
+	{false, 7, 22, 1, "the player's input bit 10 is not set (never, in the game)"},
+	{false, 7, 23, 0, "the player's input bit 11 is set (never, in the game)"},
+	{false, 7, 23, 1, "the player's input bit 11 is not set (never, in the game)"},
+	{false, 7, 24, 0, "the player's input bit 12 is set (never, in the game)"},
+	{false, 7, 24, 1, "the player's input bit 12 is not set (never, in the game)"},
+	{false, 7, 25, 0, "the player's input bit 13 is set (never, in the game)"},
+	{false, 7, 25, 1, "the player's input bit 13 is not set (never, in the game)"},
+	{false, 7, 26, 0, "the look bit is clear (always, in the game)"},
+	{false, 7, 26, 1, "the look bit is set (never, in the game)"},
+	{false, 7, 27, 0, "the look bit is set (never, in the game)"},
+	{false, 7, 27, 1, "the look bit is clear (always, in the game)"},
+	{false, 7, 28, 0, "the player's input bit 29 is set (never, in the game)"},
+	{false, 7, 28, 1, "the player's input bit 29 is not set (never, in the game)"},
+	{false, 7, 29, 0, "the player's input bit 14 is set (never, in the game)"},
+	{false, 7, 29, 1, "the player's input bit 14 is not set (never, in the game)"},
+	{false, 7, 30, 0, "the player's input bit 15 is set (never, in the game)"},
+	{false, 7, 30, 1, "the player's input bit 15 is not set (never, in the game)"},
+	{true, 14, 0, 0, "win sub-goal 4"},
+	{true, 15, 0, 0, "lose sub-goal 4"},
+	{true, 35, 0, 0, "show win objective 4"},
+	{true, 36, 0, 0, "show lose objective 4"},
+	{true, 8, 0, 0, "end the round: the blue team (team 1) wins"},
+	{true, 9, 0, 0, "end the round: the red team (team 2) wins"},
+	{true, 10, 0, 0, "end the round: the green team (team 0) wins"},
+	{true, 6, 0, 0, "show text 4: 'Mission failed'"},
+	{true, 7, 0, 0, "play dialog 4"},
+	{true, 2, 0, 0, "kill group 4"},
+	{true, 20, 0, 0, "kill SSN 4"},
+	{true, 4, 0, 0, "remove group 4 from the mission"},
+	{true, 22, 0, 0, "remove SSN 4 from the mission"},
+	{true, 1, 0, 0, "send group 4 along path 2200, from stop 3"},
+	{true, 19, 0, 0, "send SSN 4 along path 2200, from stop 3"},
+	{true, 18, 0, 0, "teleport group 4 to teleport target 2200"},
+	{true, 26, 0, 0, "teleport SSN 4 to teleport target 2200"},
+	{true, 32, 0, 0, "forget the waypoints group 4 has passed"},
+	{true, 33, 0, 0, "forget the waypoints SSN 4 has passed"},
+	{true, 37, 0, 0, "put SSN 4 into the vehicle it was ordered to board"},
+	{true, 11, 0, 0, "set group 4's speed to 2200 km/h (the game never reads it)"},
+	{true, 23, 0, 0, "set SSN 4's speed to 2200 km/h (does nothing in the game)"},
+	{true, 3, 5, 0, "put group 4 on red alert"},
+	{true, 3, 22, 0, "put group 4 on yellow alert"},
+	{true, 3, 6, 0, "put group 4 on green alert"},
+	{true, 3, 8, 0, "set group 4's accuracy to 2200"},
+	{true, 3, 27, 0, "set group 4's aiming skill to 2200"},
+	{true, 3, 26, 0, "set group 4's driving skill to 2200"},
+	{true, 3, 29, 0, "set group 4's combat speed to 2200 km/h"},
+	{true, 3, 30, 0, "set group 4's patrol speed to 2200 km/h"},
+	{true, 3, 41, 0, "set group 4's attack distance to 2200 m"},
+	{true, 3, 42, 0, "set group 4's engage distance to 2200 m to 3 m"},
+	{true, 3, 46, 0, "set group 4's firing angle to 2200"},
+	{true, 3, 44, 0, "make group 4 target Truck #2200"},
+	{true, 3, 31, 0, "make group 4 find and use Truck #2200"},
+	{true, 3, 45, 0, "turn group 4's firing on"},
+	{true, 3, 2, 0, "turn group 4's guard behaviour on"},
+	{true, 3, 15, 0, "turn group 4's blindness on"},
+	{true, 3, 16, 0, "turn group 4's berserk behaviour on"},
+	{true, 3, 17, 0, "turn group 4's climbing on"},
+	{true, 3, 21, 0, "turn group 4's cowardice on"},
+	{true, 3, 40, 0, "turn group 4's node-path following on"},
+	{true, 3, 43, 0, "turn group 4's indestructibility on"},
+	{true, 3, 28, 0, "set group 4's AI state to 2200"},
+	{true, 3, 34, 0, "play part animation 2200 on group 4 (play type 3, time 0)"},
+	{true, 3, 32, 0, "apply AIUSEWPZ to group 4 (what it does is unknown)"},
+	{true, 3, 33, 0, "apply AICLEARWPZ to group 4 (what it does is unknown)"},
+	{true, 3, 37, 0, "do nothing to group 4 (HUDITEM has no effect)"},
+	{true, 3, 39, 0, "do nothing to group 4 (TMATESTATUS has no effect)"},
+	{true, 21, 5, 0, "put SSN 4 on red alert"},
+	{true, 21, 22, 0, "put SSN 4 on yellow alert"},
+	{true, 21, 6, 0, "put SSN 4 on green alert"},
+	{true, 21, 8, 0, "set SSN 4's accuracy to 2200"},
+	{true, 21, 27, 0, "set SSN 4's aiming skill to 2200"},
+	{true, 21, 26, 0, "set SSN 4's driving skill to 2200"},
+	{true, 21, 29, 0, "set SSN 4's combat speed to 2200 km/h"},
+	{true, 21, 30, 0, "set SSN 4's patrol speed to 2200 km/h"},
+	{true, 21, 41, 0, "set SSN 4's attack distance to 2200 m"},
+	{true, 21, 42, 0, "set SSN 4's engage distance to 2200 m to 3 m"},
+	{true, 21, 46, 0, "set SSN 4's firing angle to 2200"},
+	{true, 21, 44, 0, "make SSN 4 target Truck #2200"},
+	{true, 21, 31, 0, "make SSN 4 find and use Truck #2200"},
+	{true, 21, 45, 0, "turn SSN 4's firing on"},
+	{true, 21, 2, 0, "turn SSN 4's guard behaviour on"},
+	{true, 21, 15, 0, "turn SSN 4's blindness on"},
+	{true, 21, 16, 0, "turn SSN 4's berserk behaviour on"},
+	{true, 21, 17, 0, "turn SSN 4's climbing on"},
+	{true, 21, 21, 0, "turn SSN 4's cowardice on"},
+	{true, 21, 40, 0, "turn SSN 4's node-path following on"},
+	{true, 21, 43, 0, "turn SSN 4's indestructibility on"},
+	{true, 21, 28, 0, "set SSN 4's AI state to 2200"},
+	{true, 21, 34, 0, "play part animation 2200 on SSN 4 (play type 3, time 0)"},
+	{true, 21, 32, 0, "apply AIUSEWPZ to SSN 4 (what it does is unknown)"},
+	{true, 21, 33, 0, "apply AICLEARWPZ to SSN 4 (what it does is unknown)"},
+	{true, 21, 37, 0, "do nothing to SSN 4 (HUDITEM has no effect)"},
+	{true, 21, 39, 0, "do nothing to SSN 4 (TMATESTATUS has no effect)"},
+	{true, 12, 5, 0, "put the red team's soldiers in zone 4 on red alert"},
+	{true, 12, 22, 0, "put the red team's soldiers in zone 4 on yellow alert"},
+	{true, 12, 6, 0, "put the red team's soldiers in zone 4 on green alert"},
+	{true, 12, 8, 0, "set the red team's soldiers in zone 4's accuracy to 2200"},
+	{true, 12, 27, 0, "set the red team's soldiers in zone 4's aiming skill to 2200"},
+	{true, 12, 26, 0, "set the red team's soldiers in zone 4's driving skill to 2200"},
+	{true, 12, 29, 0, "set the red team's soldiers in zone 4's combat speed to 2200 km/h"},
+	{true, 12, 30, 0, "set the red team's soldiers in zone 4's patrol speed to 2200 km/h"},
+	{true, 12, 41, 0, "set the red team's soldiers in zone 4's attack distance to 2200 m"},
+	{true, 12, 42, 0, "set the red team's soldiers in zone 4's engage distance to 2200 m to (a value of the area's box)"},
+	{true, 12, 46, 0, "set the red team's soldiers in zone 4's firing angle to 2200"},
+	{true, 12, 44, 0, "make the red team's soldiers in zone 4 target Truck #2200"},
+	{true, 12, 31, 0, "make the red team's soldiers in zone 4 find and use Truck #2200"},
+	{true, 12, 45, 0, "turn the red team's soldiers in zone 4's firing on"},
+	{true, 12, 2, 0, "turn the red team's soldiers in zone 4's guard behaviour on"},
+	{true, 12, 15, 0, "turn the red team's soldiers in zone 4's blindness on"},
+	{true, 12, 16, 0, "turn the red team's soldiers in zone 4's berserk behaviour on"},
+	{true, 12, 17, 0, "turn the red team's soldiers in zone 4's climbing on"},
+	{true, 12, 21, 0, "turn the red team's soldiers in zone 4's cowardice on"},
+	{true, 12, 40, 0, "turn the red team's soldiers in zone 4's node-path following on"},
+	{true, 12, 43, 0, "turn the red team's soldiers in zone 4's indestructibility on"},
+	{true, 12, 28, 0, "set the red team's soldiers in zone 4's AI state to 2200"},
+	{true, 12, 34, 0, "play part animation 2200 on the red team's soldiers in zone 4 (play type (a value of the area's box), time (a value of the area's box))"},
+	{true, 12, 32, 0, "apply AIUSEWPZ to the red team's soldiers in zone 4 (what it does is unknown)"},
+	{true, 12, 33, 0, "apply AICLEARWPZ to the red team's soldiers in zone 4 (what it does is unknown)"},
+	{true, 12, 37, 0, "do nothing to the red team's soldiers in zone 4 (HUDITEM has no effect)"},
+	{true, 12, 39, 0, "do nothing to the red team's soldiers in zone 4 (TMATESTATUS has no effect)"},
+	{true, 13, 5, 0, "put the blue team's soldiers in zone 4 on red alert"},
+	{true, 13, 22, 0, "put the blue team's soldiers in zone 4 on yellow alert"},
+	{true, 13, 6, 0, "put the blue team's soldiers in zone 4 on green alert"},
+	{true, 13, 8, 0, "set the blue team's soldiers in zone 4's accuracy to 2200"},
+	{true, 13, 27, 0, "set the blue team's soldiers in zone 4's aiming skill to 2200"},
+	{true, 13, 26, 0, "set the blue team's soldiers in zone 4's driving skill to 2200"},
+	{true, 13, 29, 0, "set the blue team's soldiers in zone 4's combat speed to 2200 km/h"},
+	{true, 13, 30, 0, "set the blue team's soldiers in zone 4's patrol speed to 2200 km/h"},
+	{true, 13, 41, 0, "set the blue team's soldiers in zone 4's attack distance to 2200 m"},
+	{true, 13, 42, 0, "set the blue team's soldiers in zone 4's engage distance to 2200 m to (a value of the area's box)"},
+	{true, 13, 46, 0, "set the blue team's soldiers in zone 4's firing angle to 2200"},
+	{true, 13, 44, 0, "make the blue team's soldiers in zone 4 target Truck #2200"},
+	{true, 13, 31, 0, "make the blue team's soldiers in zone 4 find and use Truck #2200"},
+	{true, 13, 45, 0, "turn the blue team's soldiers in zone 4's firing on"},
+	{true, 13, 2, 0, "turn the blue team's soldiers in zone 4's guard behaviour on"},
+	{true, 13, 15, 0, "turn the blue team's soldiers in zone 4's blindness on"},
+	{true, 13, 16, 0, "turn the blue team's soldiers in zone 4's berserk behaviour on"},
+	{true, 13, 17, 0, "turn the blue team's soldiers in zone 4's climbing on"},
+	{true, 13, 21, 0, "turn the blue team's soldiers in zone 4's cowardice on"},
+	{true, 13, 40, 0, "turn the blue team's soldiers in zone 4's node-path following on"},
+	{true, 13, 43, 0, "turn the blue team's soldiers in zone 4's indestructibility on"},
+	{true, 13, 28, 0, "set the blue team's soldiers in zone 4's AI state to 2200"},
+	{true, 13, 34, 0, "play part animation 2200 on the blue team's soldiers in zone 4 (play type (a value of the area's box), time (a value of the area's box))"},
+	{true, 13, 32, 0, "apply AIUSEWPZ to the blue team's soldiers in zone 4 (what it does is unknown)"},
+	{true, 13, 33, 0, "apply AICLEARWPZ to the blue team's soldiers in zone 4 (what it does is unknown)"},
+	{true, 13, 37, 0, "do nothing to the blue team's soldiers in zone 4 (HUDITEM has no effect)"},
+	{true, 13, 39, 0, "do nothing to the blue team's soldiers in zone 4 (TMATESTATUS has no effect)"},
+	{true, 42, 0, 0, "make SSN 4 target Truck #2200 first"},
+	{true, 43, 0, 0, "make SSN 4 never target Truck #2200"},
+	{true, 44, 0, 0, "make SSN 4 target group 2200 first"},
+	{true, 45, 0, 0, "make SSN 4 never target group 2200"},
+	{true, 46, 0, 0, "make group 4 target Truck #2200 first"},
+	{true, 47, 0, 0, "make group 4 never target Truck #2200"},
+	{true, 48, 0, 0, "make group 4 target group 2200 first"},
+	{true, 49, 0, 0, "make group 4 never target group 2200"},
+	{true, 16, 0, 0, "move group 4 to team 2200"},
+	{true, 24, 0, 0, "move SSN 4 to team 2200"},
+	{true, 17, 0, 0, "move every unit of group 4 into group 2200"},
+	{true, 25, 0, 0, "move SSN 4 into group 2200"},
+	{true, 5, 1, 0, "set V4 to 2200"},
+	{true, 5, 2, 0, "add 2200 to V4"},
+	{true, 5, 3, 0, "take 2200 from V4"},
+	{true, 5, 4, 0, "add 1 to V4"},
+	{true, 5, 5, 0, "take 1 from V4"},
+	{true, 34, 0, 0, "re-arm event 5"},
+	{true, 30, 0, 0, "open the doors of group 4"},
+	{true, 31, 0, 0, "close the doors of group 4"},
+	{true, 27, 0, 0, "play the effect at the markers numbered 4"},
+	{true, 38, 0, 0, "turn light channel 4 on"},
+	{true, 40, 0, 0, "show the waypoints"},
+	{true, 28, 37, 0, "flash HUD item 4 for 2200 ticks"},
+	{true, 28, 38, 0, "clear the player's view keys"},
+	{true, 28, 39, 0, "store whether 4 is 0 (nothing reads it)"},
+	{true, 0, 0, 0, "do nothing"},
+	{true, 41, 0, 0, "do nothing (Execute WAC has no effect)"},
+	{true, 39, 1, 0, "call a medevac for SSN 4 to the first teleport marker numbered 2200"},
+	{true, 39, 2, 0, "call a flyover for SSN 4 to the first teleport marker numbered 2200"},
+};
+
+int test_golden_words() {
+	const Names names;
+	size_t checked = 0;
+	for (const GoldenWords &golden : kGoldenWords) {
+		const std::string words =
+		        golden.action ? action_words(action(static_cast<bms::ActionType>(golden.type), golden.sub, 4, 2200, 3), names, nullptr)
+		                      : trigger_words(trigger(static_cast<bms::TriggerMainType>(golden.type), golden.sub, 10034, 3, 2, golden.flags), names);
+		if (words != golden.words)
+			std::printf("  %s %d/%d: \"%s\" where the table says \"%s\"\n", golden.action ? "action" : "trigger", golden.type, golden.sub,
+			            words.c_str(), golden.words);
+		TEST_EXPECT(words == golden.words);
+		++checked;
+	}
+	// Every type the picker offers is in the table, each trigger both ways.
+	TEST_EXPECT(checked == logic_types(false).size() * 2 + logic_types(true).size());
+	return 0;
+}
+
+// The words as runs (S24, the board's chips): each parameter's words its slot's run, the type's own words the
+// type's (kLogicTypeSlot), a note on what the game makes of it apart; joined, the words. The hand-worded types
+// too: a variable change, a Redirect, Show text, an AI command over a group and over an area.
+bool runs_are(const std::vector<LogicRun> &got, const std::vector<LogicRun> &want) {
+	bool same_runs = got.size() == want.size();
+	for (size_t i = 0; same_runs && i < got.size(); ++i) same_runs = got[i].text == want[i].text && got[i].slot == want[i].slot;
+	if (!same_runs) {
+		std::printf("  got: ");
+		for (const LogicRun &run : got) std::printf(" [%s|%d]", run.text.c_str(), run.slot);
+		std::printf("\n  want:");
+		for (const LogicRun &run : want) std::printf(" [%s|%d]", run.text.c_str(), run.slot);
+		std::printf("\n");
+	}
+	return same_runs;
+}
+
+int test_runs() {
+	const Names names;
+	using M = bms::TriggerMainType;
+	using A = bms::ActionType;
+	constexpr int T = kLogicTypeSlot;
+	TEST_EXPECT(runs_are(trigger_runs(trigger(M::Single, 4, 10034), names), {{"Hostage #10034", 0}, {" is destroyed", T}}));
+	TEST_EXPECT(runs_are(trigger_runs(trigger(M::Single, 43, 10034, 2200, 25), names),
+	                     {{"Hostage #10034", 0}, {" is within ", T}, {"25 m", 2}, {" of ", T}, {"Truck #2200", 1}}));
+	TEST_EXPECT(runs_are(trigger_runs(trigger(M::Single, 4, 10034, 0, 0, bms::Trigger::kConditionNegated), names),
+	                     {{"Hostage #10034", 0}, {" is not destroyed", T}}));
+	// A zone no area holds: the game drops the trigger, said apart as a note.
+	const DocumentlessZones zones;
+	const std::vector<LogicRun> dropped = trigger_runs(trigger(M::Single, 10, 10034, 9), zones);
+	TEST_EXPECT(dropped.size() == 4 && dropped[3].slot == -1 && dropped[3].text.find("never true in the game") != std::string::npos);
+	TEST_EXPECT(runs_are(action_runs(action(A::MisvarChange, 2, 1, 7), names, nullptr), {{"add ", T}, {"7", 1}, {" to ", T}, {"V1", 0}}));
+	TEST_EXPECT(runs_are(action_runs(action(A::OutputText, 0, 4), names, nullptr), {{"show text ", T}, {"4: 'Mission failed'", 0}}));
+	TEST_EXPECT(runs_are(action_runs(action(A::RedirectGroupTo, 0, 4, 5, 2), names, nullptr),
+	                     {{"send ", T}, {"group 4", 0}, {" along ", T}, {"path 5", 1}, {", from ", T}, {"stop 2", 2}}));
+	TEST_EXPECT(runs_are(action_runs(action(A::RedirectSingleTo, 0, 10034, 125, 2200), names, nullptr),
+	                     {{"send ", T}, {"Hostage #10034", 0}, {" to board ", 1}, {"Truck #2200", 2}, {" (any seat)", 1}}));
+	const std::vector<LogicRun> alert = action_runs(action(A::ChangeGroupAI, 5, 4), names, nullptr);
+	TEST_EXPECT(!alert.empty() && logic_runs_text(alert) == action_words(action(A::ChangeGroupAI, 5, 4), names, nullptr));
+	bool subject = false;
+	for (const LogicRun &run : alert) subject = subject || (run.slot == 0 && run.text == "group 4");
+	TEST_EXPECT(subject);
+	const std::vector<LogicRun> area = action_runs(action(A::AreaAiRed, 5, 3), names, nullptr);
+	bool zone = false;
+	for (size_t i = 0; i + 1 < area.size(); ++i)
+		zone = zone || (area[i].slot == T && area[i].text.find("the red team's soldiers in ") != std::string::npos &&
+		                area[i + 1].slot == 0 && area[i + 1].text == "Zone 3 (bridge)");
+	TEST_EXPECT(zone);
+	return 0;
+}
+
 int test_words() {
 	const Names names;
 	using M = bms::TriggerMainType;
@@ -103,7 +489,7 @@ int test_words() {
 	TEST_EXPECT(trigger_words(trigger(M::Group, 7, 4, 5, -1), names) == "group 4 has passed stop -1 (never recorded: the game keeps stops 0 to 31) of path 5");
 	TEST_EXPECT(trigger_words(trigger(M::Single, 43, 10034, 2200, 25), names) == "Hostage #10034 is within 25 m of Truck #2200");
 	TEST_EXPECT(trigger_words(trigger(M::Event, 9, 2), names) == "event 3 has fired"); // the sub-type unread
-	TEST_EXPECT(trigger_words(trigger(M::MissionVariable, 3, 1, 5), names) == "variable 1 is greater than 5");
+	TEST_EXPECT(trigger_words(trigger(M::MissionVariable, 3, 1, 5), names) == "V1 is greater than 5");
 	TEST_EXPECT(trigger_words(trigger(M::Player, 36, 30), names) == "the player has been outside the mission area for 30.7 s");
 	// Never a guess: a type no row names says so.
 	TEST_EXPECT(trigger_words(trigger(M::Single, 8, 10034), names) == "a trigger of unknown kind 8 (false)");
@@ -115,8 +501,8 @@ int test_words() {
 	TEST_EXPECT(action_words(action(A::OutputText, 0, 5), names, nullptr) == "show text 5");
 	TEST_EXPECT(action_words(action(A::KillSingle, 0, 10034), names, nullptr) == "kill Hostage #10034");
 	TEST_EXPECT(action_words(action(A::ChangeGTeamAction, 0, 4, 2), names, nullptr) == "move group 4 to the red team (team 2)");
-	TEST_EXPECT(action_words(action(A::MisvarChange, 2, 1, 7), names, nullptr) == "add 7 to variable 1");
-	TEST_EXPECT(action_words(action(A::MisvarChange, 4, 1, 7), names, nullptr) == "add 1 to variable 1");
+	TEST_EXPECT(action_words(action(A::MisvarChange, 2, 1, 7), names, nullptr) == "add 7 to V1");
+	TEST_EXPECT(action_words(action(A::MisvarChange, 4, 1, 7), names, nullptr) == "add 1 to V1");
 	// A Redirect: a path from a stop, or a command naming an entity [world-wac-ai-re.md 11].
 	TEST_EXPECT(action_words(action(A::RedirectGroupTo, 0, 4, 5, 2), names, nullptr) ==
 	            "send group 4 along path 5, from stop 2");
@@ -432,7 +818,7 @@ int test_retail() {
 	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
 	expansions.insert(expansions.begin(), std::string());
 	std::set<std::string> seen;
-	size_t missions = 0, events = 0, triggers = 0, actions = 0, unknown = 0, longest = 0;
+	size_t missions = 0, events = 0, triggers = 0, actions = 0, unknown = 0, longest = 0, runs_made = 0;
 	double took_ms = 0;
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
@@ -448,6 +834,8 @@ int test_retail() {
 			if (!document) continue;
 			++missions;
 			const MissionDocument &m = dynamic_cast<const MissionDocument &>(*document);
+			const DocumentMissionNames names(m);
+			const bms::Header *header = m.mission_row() ? &m.mission_row()->native.header : nullptr;
 			const auto started = std::chrono::steady_clock::now();
 			for (const Node *row : m.rows_of(MissionKind::Event)) {
 				++events;
@@ -469,6 +857,27 @@ int test_retail() {
 					}
 				}
 				TEST_EXPECT(sentence.find("unknown type") == std::string::npos);
+				// The runs (S24): joined, the words; a parameter's run of a slot the type reads.
+				for (const bms::Trigger &t : chain.triggers) {
+					const std::vector<LogicRun> runs = trigger_runs(t, names);
+					TEST_EXPECT(logic_runs_text(runs) == trigger_words(t, names));
+					for (const LogicRun &run : runs) {
+						TEST_EXPECT(run.slot >= -1 && run.slot <= kLogicTypeSlot && !run.text.empty());
+						TEST_EXPECT(run.slot < 0 || run.slot == kLogicTypeSlot ||
+						            mission::trigger_param_kind(t, run.slot) != mission::ParamKind::Unused);
+						runs_made += 1;
+					}
+				}
+				for (const bms::Action &a : chain.actions) {
+					const std::vector<LogicRun> runs = action_runs(a, names, header);
+					TEST_EXPECT(logic_runs_text(runs) == action_words(a, names, header));
+					for (const LogicRun &run : runs) {
+						TEST_EXPECT(run.slot >= -1 && run.slot <= kLogicTypeSlot && !run.text.empty());
+						TEST_EXPECT(run.slot < 0 || run.slot == kLogicTypeSlot ||
+						            mission::action_param_kind(a, run.slot) != mission::ParamKind::Unused);
+						runs_made += 1;
+					}
+				}
 			}
 			took_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
 		}
@@ -477,6 +886,7 @@ int test_retail() {
 	std::printf("retail: %zu missions, %zu events (%zu triggers, %zu actions) worded in %.1f ms, the longest sentence %zu "
 	            "characters, %zu of a type no row names\n",
 	            missions, events, triggers, actions, took_ms, longest, unknown);
+	std::printf("retail: every trigger's and action's runs joined are its words (%zu runs)\n", runs_made);
 	TEST_EXPECT(missions == 115 && unknown == 0);
 	return 0;
 }
@@ -486,6 +896,8 @@ int test_retail() {
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	if (test_words() != 0) return 1;
+	if (test_runs() != 0) return 1;
+	if (test_golden_words() != 0) return 1;
 	if (test_sentences() != 0) return 1;
 	if (test_game_reading() != 0) return 1;
 	if (test_document_titles() != 0) return 1;

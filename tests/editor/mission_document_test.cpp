@@ -11,7 +11,8 @@
 // mission row never added, moved or removed, a duplicate given a fresh id, a marker removed only with
 // the stops that visit it (removal_edits), an event named by index removed only with its namer, a
 // marker added before the markers named leaving every stop naming its marker, a stop edit refused on
-// a path counted past its slots (D-MIS-6); what the parse makes of a file laid out otherwise than its
+// a path counted past its slots (D-MIS-6), a stop put in, taken out or moved renumbering what names its path's
+// stops by place (S24, over the shipped missions too); what the parse makes of a file laid out otherwise than its
 // events stand (event_order), of one whose runs share a record (invalid_input, blocked) and of one
 // holding bytes the writer writes otherwise (rewrite_differs), each a finding of the type's; what the
 // picture reads (mission_reads.h); a second record of an SSN or a zone id inert; and an item's TYPE on
@@ -51,6 +52,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <formats/mission/mission_params.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -604,6 +606,117 @@ int test_stop_numbers() {
 		TEST_EXPECT(bytes_of(*document) == unedited);
 	}
 	std::printf("stop numbers: kept as read, the new and the moved between, a copy on its route\n");
+	return 0;
+}
+
+// The records naming a stop by its place (mission_stop_namers, S24): a Group AtWaypoint trigger's stop, a
+// RedirectGroupTo's node and an entity's starting stop follow their stop when a stop is put in before it, taken
+// out before it or moved, in the same step (one undo takes back both); one naming the removed stop keeps its
+// number (mission_removed_stop_namers counts it, also through a marker's removal_edits); -1 (the nearest) and
+// another path's stops stay as they are.
+int test_stop_places() {
+	Diagnostic error;
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document);
+	const MissionDocument &m = as_mission(*document);
+	const NodeAddress path = row_at(*document, MissionKind::WaypointPath, 1);
+	TEST_EXPECT(document->collections_of(path)[0].ids.size() == 4);
+	const NodeAddress event = row_at(*document, MissionKind::Event, 0);
+	const NodeAddress walker = row_at(*document, MissionKind::Organic, 0), other = row_at(*document, MissionKind::Organic, 1);
+	// One trigger and three actions put in, and the two organics on path 1, in one batch.
+	std::vector<Edit> setup;
+	const auto made = [&](size_t index, MissionKind kind) { return NodeAddress{event.row, k(kind), batch_made(index)}; };
+	const auto add_into = [&](MissionKind kind) {
+		setup.push_back(edit_of(EditOperation::Add, {event.row, k(kind), 0}));
+		return setup.size() - 1;
+	};
+	const size_t at_waypoint = add_into(MissionKind::Trigger);
+	setup.push_back(edit_of(EditOperation::Set, made(at_waypoint, MissionKind::Trigger), "main_type", int64_t(bms::TriggerMainType::Group)));
+	setup.push_back(edit_of(EditOperation::Set, made(at_waypoint, MissionKind::Trigger), "sub_type", int64_t(7)));
+	setup.push_back(edit_of(EditOperation::Set, made(at_waypoint, MissionKind::Trigger), "param2", int64_t(1)));
+	setup.push_back(edit_of(EditOperation::Set, made(at_waypoint, MissionKind::Trigger), "param3", int64_t(3)));
+	const auto redirect = [&](int64_t on, int64_t node) {
+		const size_t at = add_into(MissionKind::Action);
+		setup.push_back(edit_of(EditOperation::Set, made(at, MissionKind::Action), "action_type", int64_t(bms::ActionType::RedirectGroupTo)));
+		setup.push_back(edit_of(EditOperation::Set, made(at, MissionKind::Action), "param2", on));
+		setup.push_back(edit_of(EditOperation::Set, made(at, MissionKind::Action), "param3", node));
+	};
+	redirect(1, 2);
+	redirect(1, -1);
+	redirect(2, 2);
+	setup.push_back(edit_of(EditOperation::Set, walker, "waypoint_id", int64_t(1)));
+	setup.push_back(edit_of(EditOperation::Set, walker, "wp_number", int64_t(2)));
+	setup.push_back(edit_of(EditOperation::Set, other, "waypoint_id", int64_t(1)));
+	setup.push_back(edit_of(EditOperation::Set, other, "wp_number", int64_t(0)));
+	TEST_EXPECT(document->apply(setup, error));
+	const std::string unedited = bytes_of(*document);
+	const std::vector<NodeId> triggers = document->collections_of(event)[0].ids, actions = document->collections_of(event)[1].ids;
+	TEST_EXPECT(triggers.size() >= 2 && actions.size() >= 4);
+	const NodeAddress trigger{event.row, k(MissionKind::Trigger), triggers.back()};
+	const NodeAddress node2{event.row, k(MissionKind::Action), actions[actions.size() - 3]},
+	        nearest{event.row, k(MissionKind::Action), actions[actions.size() - 2]},
+	        elsewhere{event.row, k(MissionKind::Action), actions.back()};
+	const auto value = [&](const NodeAddress &address, const char *field) {
+		Value out;
+		return document->get(address, field, out) ? std::get<int64_t>(out) : int64_t(-99);
+	};
+	// The places named, in this order: the trigger's, the Redirect's, the nearest, the other path's, the walker's,
+	// the other organic's.
+	const auto places = [&]() {
+		return std::vector<int64_t>{value(trigger, "param3"), value(node2, "param3"),  value(nearest, "param3"),
+		                            value(elsewhere, "param3"), value(walker, "wp_number"), value(other, "wp_number")};
+	};
+	TEST_EXPECT(places() == (std::vector<int64_t>{3, 2, -1, 2, 2, 0}));
+	std::vector<MissionStopNamer> namers;
+	for (const auto &row : document->rows()) mission_stop_namers(*row, 1, namers);
+	// The trigger, the two Redirects of path 1 (the nearest too: -1, which no edit moves), the walker and the other.
+	TEST_EXPECT(namers.size() == 5);
+	// A stop put in at place 2 (a new waypoint marker's): the places from 2 on move up one.
+	{
+		const size_t marker = m.rows_of(MissionKind::Marker).size();
+		std::vector<Edit> edits;
+		edits.push_back(edit_of(EditOperation::Add, {0, k(MissionKind::Marker), 0}, "item",
+		                        int64_t(mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT)));
+		Edit stop = edit_of(EditOperation::Add, {path.row, k(MissionKind::Stop), 0}, "marker", int64_t(marker));
+		stop.position = 2;
+		edits.push_back(stop);
+		TEST_EXPECT(document->apply(edits, error));
+		TEST_EXPECT(places() == (std::vector<int64_t>{4, 3, -1, 2, 3, 0}));
+		document->undo();
+		TEST_EXPECT(bytes_of(*document) == unedited && places() == (std::vector<int64_t>{3, 2, -1, 2, 2, 0}));
+	}
+	// The stop at place 2 taken out: the Redirect and the walker named it and keep 2 (counted), the trigger's 3
+	// moves down to 2.
+	{
+		const NodeAddress taken{path.row, k(MissionKind::Stop), document->collections_of(path)[0].ids[2]};
+		TEST_EXPECT(mission_removed_stop_namers(m, {edit_of(EditOperation::Remove, taken)}) == 2);
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Remove, taken), error));
+		TEST_EXPECT(places() == (std::vector<int64_t>{2, 2, -1, 2, 2, 0}));
+		document->undo();
+		TEST_EXPECT(bytes_of(*document) == unedited);
+	}
+	// The first stop's marker removed (removal_edits takes its stop first): the other organic named it.
+	{
+		const uint32_t first = static_cast<const PathRow &>(*document->row(path.row)).native.stops[0];
+		std::vector<Edit> removal;
+		std::string why;
+		TEST_EXPECT(document->removal_edits({row_at(*document, MissionKind::Marker, first)}, removal, why));
+		TEST_EXPECT(mission_removed_stop_namers(m, removal) == 1);
+		TEST_EXPECT(document->apply(removal, error));
+		TEST_EXPECT(places() == (std::vector<int64_t>{2, 1, -1, 2, 1, 0}));
+		document->undo();
+		TEST_EXPECT(bytes_of(*document) == unedited);
+	}
+	// The last stop moved to the front: each place follows its stop.
+	{
+		Edit move = edit_of(EditOperation::Move, {path.row, k(MissionKind::Stop), document->collections_of(path)[0].ids[3]});
+		move.position = 0;
+		TEST_EXPECT(document->apply(move, error));
+		TEST_EXPECT(places() == (std::vector<int64_t>{0, 3, -1, 2, 3, 1}));
+		document->undo();
+		TEST_EXPECT(bytes_of(*document) == unedited);
+	}
+	std::printf("stop places: put in, taken out and moved, each naming record follows its stop in the same step\n");
 	return 0;
 }
 
@@ -1598,6 +1711,7 @@ int test_retail() {
 	size_t missions = 0, differing = 0, unedited_same = 0;
 	size_t entity_refs = 0, entity_missing = 0, zone_refs = 0, zone_missing = 0, event_refs = 0, event_past = 0,
 	       stops = 0, stops_past = 0, text_refs = 0;
+	size_t stop_missions = 0, stop_shifted_actions = 0, stop_shifted_triggers = 0, stop_shifted_entities = 0, stop_kept = 0;
 	std::map<std::string, size_t> findings_by_code, text_by_key;
 	// What the extractions took (timed, not held to a bound): all of them, and the slowest with its rows.
 	double extraction_ms = 0, slowest_ms = 0;
@@ -1680,6 +1794,48 @@ int test_retail() {
 				if (d.code() == "mission.ssn_unscanned")
 					std::printf("  %s, %s: %s\n", file.logical_name.c_str(), d.record.c_str(), d.message.c_str());
 			}
+			// The stops named by place (S24): the first path whose stop past its first a Redirect names (else any
+			// record), its first stop taken out: every place past it moves down one, the first's namers keep 0 (as
+			// mission_removed_stop_namers counts them), in one step the undo takes back to the bytes.
+			{
+				const auto namers_of = [&](int number) {
+					std::vector<MissionStopNamer> namers;
+					for (const auto &row : document->rows()) mission_stop_namers(*row, number, namers);
+					return namers;
+				};
+				int chosen = 0;
+				for (int pass = 0; pass < 2 && !chosen; ++pass)
+					for (int number = 1; number < mission::kFirstPathCommand && !chosen; ++number) {
+						if (m.row_of(MissionKind::WaypointPath, size_t(number)) == nullptr) continue;
+						for (const MissionStopNamer &namer : namers_of(number))
+							if (namer.place > 0 && (pass == 1 || namer.record.kind == k(MissionKind::Action))) chosen = number;
+					}
+				const Node *path = chosen ? m.row_of(MissionKind::WaypointPath, size_t(chosen)) : nullptr;
+				if (path && !static_cast<const PathRow &>(*path).native.stops.empty()) {
+					const std::string before_bytes = bytes_of(*document);
+					const std::vector<MissionStopNamer> before = namers_of(chosen);
+					const NodeAddress first{path->id, k(MissionKind::Stop), document->collections_of({path->id, path->kind, 0})[0].ids[0]};
+					const size_t kept = mission_removed_stop_namers(m, {edit_of(EditOperation::Remove, first)});
+					Diagnostic error;
+					TEST_EXPECT(document->apply(edit_of(EditOperation::Remove, first), error));
+					const std::vector<MissionStopNamer> after = namers_of(chosen);
+					TEST_EXPECT(after.size() == before.size());
+					size_t zeros = 0;
+					for (size_t i = 0; i < before.size() && i < after.size(); ++i) {
+						const int64_t was = before[i].place;
+						TEST_EXPECT(after[i].record == before[i].record && after[i].place == (was > 0 ? was - 1 : was));
+						zeros += was == 0;
+						stop_shifted_actions += was > 0 && before[i].record.kind == k(MissionKind::Action);
+						stop_shifted_triggers += was > 0 && before[i].record.kind == k(MissionKind::Trigger);
+						stop_shifted_entities += was > 0 && before[i].record.child == 0;
+					}
+					TEST_EXPECT(kept == zeros);
+					stop_kept += kept;
+					++stop_missions;
+					document->undo();
+					TEST_EXPECT(bytes_of(*document) == before_bytes);
+				}
+			}
 		}
 	}
 	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
@@ -1690,6 +1846,11 @@ int test_retail() {
 	            stops_past, text_refs);
 	std::printf("retail: the %zu extractions took %.1f ms, the slowest %.1f ms (%zu rows)\n", missions, extraction_ms,
 	            slowest_ms, slowest_rows);
+	std::printf("retail: a path's first stop taken out in %zu missions: %zu actions, %zu triggers and %zu entities follow "
+	            "their stops, %zu records keep the first's place\n",
+	            stop_missions, stop_shifted_actions, stop_shifted_triggers, stop_shifted_entities, stop_kept);
+	TEST_EXPECT(stop_missions == 35 && stop_shifted_actions == 22 && stop_shifted_triggers == 60 &&
+	            stop_shifted_entities == 26 && stop_kept == 37);
 	for (const auto &[key, count] : text_by_key) std::printf("  %s%%03i: %zu\n", key.c_str(), count);
 	for (const auto &[code, count] : findings_by_code) std::printf("  %s: %zu\n", code.c_str(), count);
 	// What the install holds, measured by this document (the design's emulation counted 3,272 entity
@@ -1731,6 +1892,7 @@ int main(int argc, char **argv) {
 	if (test_loadout() != 0) return 1;
 	if (test_clipboard() != 0) return 1;
 	if (test_stop_numbers() != 0) return 1;
+	if (test_stop_places() != 0) return 1;
 	if (test_item_classes() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;

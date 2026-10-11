@@ -23,7 +23,9 @@ struct HandleToken {
 constexpr HandleToken kHandles[] = {
 	{ MissionHandle::Move, "move" }, { MissionHandle::Height, "height" }, { MissionHandle::Yaw, "yaw" },
 	{ MissionHandle::XMin, "x_min" }, { MissionHandle::XMax, "x_max" }, { MissionHandle::YMin, "y_min" },
-	{ MissionHandle::YMax, "y_max" },
+	{ MissionHandle::YMax, "y_max" }, { MissionHandle::XMinYMin, "x_min_y_min" }, { MissionHandle::XMaxYMin, "x_max_y_min" },
+	{ MissionHandle::XMaxYMax, "x_max_y_max" }, { MissionHandle::XMinYMax, "x_min_y_max" }, { MissionHandle::ZMin, "z_min" },
+	{ MissionHandle::ZMax, "z_max" },
 };
 
 double snapped(double value, float snap) {
@@ -227,6 +229,8 @@ void mission_restore_edits(const Document &document, const std::vector<MissionPr
 			set_position(document, each.record, "x_max", each.max[0], gesture, out);
 			set_position(document, each.record, "y_min", each.min[1], gesture, out);
 			set_position(document, each.record, "y_max", each.max[1], gesture, out);
+			set_position(document, each.record, "z_min", each.min[2], gesture, out);
+			set_position(document, each.record, "z_max", each.max[2], gesture, out);
 			continue;
 		}
 		set_position(document, each.record, "x", each.x, gesture, out);
@@ -236,17 +240,31 @@ void mission_restore_edits(const Document &document, const std::vector<MissionPr
 	}
 }
 
-bool mission_area_edge_edits(const Document &document, const MissionPressed &area, MissionHandle edge, double to,
-		float snap, uint64_t gesture, std::vector<Edit> &out) {
+bool mission_area_handle_edits(const Document &document, const MissionPressed &area, MissionHandle handle,
+		const double to[3], float snap, uint64_t gesture, std::vector<Edit> &out) {
 	out.clear();
-	if (!area.area || !mission_handle_is_edge(edge)) return false;
-	const double value = snapped(to, snap);
-	switch (edge) {
-	case MissionHandle::XMin: set_position(document, area.record, "x_min", std::min(value, area.max[0]), gesture, out); break;
-	case MissionHandle::XMax: set_position(document, area.record, "x_max", std::max(value, area.min[0]), gesture, out); break;
-	case MissionHandle::YMin: set_position(document, area.record, "y_min", std::min(value, area.max[1]), gesture, out); break;
-	case MissionHandle::YMax: set_position(document, area.record, "y_max", std::max(value, area.min[1]), gesture, out); break;
+	if (!area.area || !mission_handle_is_area(handle)) return false;
+	// Which bound of each axis the handle moves: -1 its min, +1 its max, 0 neither.
+	int bound[3] = { 0, 0, 0 };
+	switch (handle) {
+	case MissionHandle::XMin: bound[0] = -1; break;
+	case MissionHandle::XMax: bound[0] = 1; break;
+	case MissionHandle::YMin: bound[1] = -1; break;
+	case MissionHandle::YMax: bound[1] = 1; break;
+	case MissionHandle::XMinYMin: bound[0] = bound[1] = -1; break;
+	case MissionHandle::XMaxYMin: bound[0] = 1, bound[1] = -1; break;
+	case MissionHandle::XMaxYMax: bound[0] = bound[1] = 1; break;
+	case MissionHandle::XMinYMax: bound[0] = -1, bound[1] = 1; break;
+	case MissionHandle::ZMin: bound[2] = -1; break;
+	case MissionHandle::ZMax: bound[2] = 1; break;
 	default: return false;
+	}
+	static const char *const kMin[3] = { "x_min", "y_min", "z_min" }, *const kMax[3] = { "x_max", "y_max", "z_max" };
+	for (int axis = 0; axis < 3; ++axis) {
+		if (!bound[axis]) continue;
+		const double value = snapped(to[axis], snap);
+		if (bound[axis] < 0) set_position(document, area.record, kMin[axis], std::min(value, area.max[axis]), gesture, out);
+		else set_position(document, area.record, kMax[axis], std::max(value, area.min[axis]), gesture, out);
 	}
 	return true;
 }

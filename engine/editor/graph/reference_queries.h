@@ -51,7 +51,8 @@ struct ReferenceTarget {
 // ones the graph read from the document when its slot is current for it (the same instance at the
 // same revision), each as the document's own lookup makes it (AssetGraph::for_each_definition),
 // else the document's own extraction; never a record of its record sets, which goes by its index
-// in its own file and no other file's name.
+// in its own file and no other file's name, nor a symbol of a kind found only in its section
+// (ReferenceKindRow::section_only: a mission's events by their index) unless the scope names one.
 bool find_definition(const AssetGraph &graph, const Document &document, const std::string &symbol,
 		NodeAddress &out, const std::string &scope = std::string());
 // Present / Missing / Unverified for a field's value (NotAReference when it names nothing);

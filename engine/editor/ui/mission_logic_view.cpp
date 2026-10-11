@@ -9,6 +9,7 @@
 
 #include <imgui.h>
 
+#include <editor/documents/mission_board.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_logic.h>
@@ -16,8 +17,12 @@
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/graph/display_names.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/mission_card.h>
+#include <editor/ui/mission_row_menu.h>
 #include <editor/ui/ui_kit.h>
 
 namespace opennova::editor {
@@ -145,129 +150,28 @@ void record_tools(Workspace &workspace, const MissionDocument &mission, const Vi
 		window_requests::edit(workspace, mission, EditOperation::Remove, record);
 }
 
-// An event's form value as a number.
-int64_t number_of(const Document &document, const NodeAddress &address, const char *field) {
-	Value value;
-	const int64_t *number = document.get(address, field, value) ? std::get_if<int64_t>(&value) : nullptr;
-	return number ? *number : 0;
+// The board's card state the Inspector's card and line keep between frames (one Inspector).
+CardState &inspector_cards() {
+	static CardState state;
+	return state;
 }
 
-// A count of 64-tick steps, typed, with its seconds and its range beside it.
-void steps_field(Workspace &workspace, const MissionDocument &mission, const NodeAddress &event, const char *label,
-                 const char *field, int64_t steps, int64_t most, const char *tip) {
-	ImGui::PushID(field);
-	ImGui::AlignTextToFramePadding();
-	ImGui::TextUnformatted(label);
-	ui_kit::tooltip(tip);
-	ImGui::SameLine();
-	int typed = int(steps);
-	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
-	if (ImGui::InputInt("##steps", &typed, 1, 10)) {
-		const int64_t held = std::clamp<int64_t>(typed, 0, most);
-		if (held != steps) window_requests::set(workspace, mission, event, field, held, true);
-	}
-	if (ImGui::IsItemDeactivatedAfterEdit()) window_requests::end_edit(workspace, mission.path());
-	ui_kit::tooltip(tip);
-	ImGui::SameLine();
-	// What the steps come to in the game: past 512 the countdown wraps and ends on the next pass (S15).
-	const std::string seconds = "steps = " + logic_steps_words(steps) + " (0 to " + std::to_string(most) + ")";
-	if (bms::event_steps_wrap(steps))
-		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", seconds.c_str());
-	else
-		ImGui::TextDisabled("%s", seconds.c_str());
-	ImGui::PopID();
-}
-
-// A flag bit of the event as a tick box in words.
-void flag_box(Workspace &workspace, const MissionDocument &mission, const NodeAddress &event, int64_t flags, int64_t bit,
-              const char *label, const char *tip) {
-	bool on = (flags & bit) != 0;
-	if (ImGui::Checkbox(label, &on)) window_requests::set(workspace, mission, event, "flags", on ? (flags | bit) : (flags & ~bit), false);
-	ui_kit::tooltip(tip);
-}
-
-// An event's list of triggers or actions: its heading with Add (by type, off with why where the event
-// holds the most it holds), then each record in words, a click selecting it, its tools in its context
-// menu.
-void logic_list(Workspace &workspace, const MissionDocument &mission, const LogicEventForm &form, const ViewNames &names,
-                bool actions, bool editable) {
-	const NodeKind kind = k(actions ? MissionKind::Action : MissionKind::Trigger);
-	std::vector<NodeId> ids;
-	for (const Document::Collection &collection : mission.collections_of(form.event))
-		if (collection.spec.kind == kind) ids = collection.ids;
-	ImGui::PushID(actions ? "actions" : "triggers");
-	const std::string heading =
-	        std::string(actions ? "Actions" : "Triggers") + " (" + std::to_string(ids.size()) + " of " + std::to_string(form.most) + ")";
-	ImGui::SeparatorText(heading.c_str());
-	const std::string &refusal = actions ? form.action_refusal : form.trigger_refusal;
-	ui_kit::WrapRow row;
-	const char *add = actions ? "Add action..." : "Add trigger...";
-	if (ui_kit::tool(row, add, editable && refusal.empty(),
-	                 refusal.empty() ? std::string(actions ? "What the event does: pick it by name." : "What the event waits on: pick it by name.")
-	                                 : refusal,
-	                 true))
-		ImGui::OpenPopup("add");
-	if (ImGui::BeginPopup("add")) {
-		if (const LogicType *type = type_menu(actions, nullptr)) {
-			std::vector<Edit> edits;
-			std::string error;
-			const bool ok = logic_add_edits(mission, form.event.row, *type, SIZE_MAX, edits, error);
-			raise(workspace, mission, ok, std::move(edits));
-		}
-		ImGui::EndPopup();
-	}
-	if (ids.empty())
-		ui_kit::empty_state(actions ? "No action: the event does nothing." : "No trigger: the event fires on its first check.");
-	const SessionView &view = workspace.view();
-	for (size_t i = 0; i < ids.size(); ++i) {
-		const NodeAddress address{form.event.row, kind, ids[i]};
-		ImGui::PushID(static_cast<int>(ids[i]));
-		const std::string words = std::to_string(i + 1) + ". " + mission_record_label(mission, address, names.source());
-		if (ImGui::Selectable(ui_kit::fit(words, ImGui::GetContentRegionAvail().x).c_str(),
-		                      view.documents.selection.holds(address)))
-			window_requests::select(workspace, mission, address);
-		ui_kit::tooltip(words + "\nRight-click: move it, or remove it.");
-		if (ImGui::BeginPopupContextItem("tools")) {
-			record_tools(workspace, mission, names, address, i, ids.size(), editable);
-			ImGui::EndPopup();
-		}
-		ImGui::PopID();
-	}
-	ImGui::PopID();
-}
-
+// An event's card as the board draws it (S24 A7), over the Inspector's width: its sentence above it.
 void event_form(Workspace &workspace, const MissionDocument &mission, NodeId event, InspectorTaken &taken, bool editable) {
-	const ViewNames names(workspace.view(), mission);
-	LogicEventForm form;
-	if (!logic_event_form(mission, event, *names, form)) return;
+	const SessionView &view = workspace.view();
+	const ViewNames names(view, mission);
+	BoardCard card;
+	if (!mission_board_card(mission, event, *names, card, view.activity.live_logic.empty() ? nullptr : &view.activity.live_logic,
+	                        mission_script_events(view, mission.path())))
+		return;
 	taken.fields = {"flags", "reset_after", "delay"};
 	taken.collections = {k(MissionKind::Trigger), k(MissionKind::Action)};
-	ImGui::TextWrapped("%s", form.words.sentence.c_str());
+	ImGui::TextWrapped("%s", card.words.sentence.c_str());
 	ImGui::Spacing();
-	const int64_t flags = number_of(mission, form.event, "flags");
-	ImGui::BeginDisabled(!editable);
-	flag_box(workspace, mission, form.event, flags, int64_t(bms::EventFlags::PreMission), "Once, at the mission's start",
-	         "Checked once as the mission starts, before its first tick, and never again (the PreMission pass).");
-	flag_box(workspace, mission, form.event, flags, int64_t(bms::EventFlags::PostMission), "Once, at the mission's end",
-	         "Checked once as the mission ends, after its soldiers, items and buildings are gone (the PostMission pass).");
-	flag_box(workspace, mission, form.event, flags, int64_t(bms::EventFlags::ResetAfter), "Repeats",
-	         "Checked again after its triggers held (the wait counts from then); without it, it fires once.");
-	const char *steps_tip = "In steps of 64 ticks, about 1.02 s each: the file holds 0 to 1023 of them, and past 512 the "
-	                        "game's countdown wraps and ends on the next pass.";
-	steps_field(workspace, mission, form.event, "Wait before acting", "delay", form.delay, form.most_steps, steps_tip);
-	if (form.repeats)
-		steps_field(workspace, mission, form.event, "Check again after", "reset_after", form.repeat, form.most_steps, steps_tip);
-	// A start or end event is checked once and never processed again: a wait never ends, and it is never
-	// checked again by its repeat [bms-event-runtime-re.md 1.2, 1.6].
-	const bool once = (flags & (int64_t(bms::EventFlags::PreMission) | int64_t(bms::EventFlags::PostMission))) != 0;
-	if (once && (form.delay > 0 || form.repeats)) {
-		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Warning));
-		ImGui::TextWrapped("%s", "A start or end event is checked once: its wait never ends and it is never checked again.");
-		ImGui::PopStyleColor();
-	}
-	ImGui::EndDisabled();
-	logic_list(workspace, mission, form, names, false, editable);
-	logic_list(workspace, mission, form, names, true, editable);
+	CardContext context{workspace, mission, names.source(), editable, view.documents.selection.primary,
+	                    view.workspace.document(mission.path()).pick, inspector_cards()};
+	draw_mission_card(context, card);
+	inspector_cards().settle_open(mission.revision());
 }
 
 void record_form(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record, InspectorTaken &taken,
@@ -277,12 +181,12 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 	if (!logic_form(mission, record, *names, form)) return;
 	taken.fields = form.action ? std::vector<std::string>{"action_type", "action_sub_type"}
 	                           : std::vector<std::string>{"condition_flags", "main_type", "sub_type"};
-	// A parameter the type does not read that holds nothing is no field to fill.
+	// The parameters its type reads are its line's chips (S24 A7); one the type does not read that holds nothing is
+	// no field to fill. One it does not read that holds a value stays the generic form's, marked ignored.
 	for (int slot = 0; slot < 4; ++slot) {
-		bool shown = false;
-		for (const LogicParam &param : form.params) shown = shown || param.slot == slot;
-		for (const LogicParam &param : form.unread) shown = shown || param.slot == slot;
-		if (!shown) taken.fields.push_back("param" + std::to_string(slot + 1));
+		bool unread = false;
+		for (const LogicParam &param : form.unread) unread = unread || param.slot == slot;
+		if (!unread) taken.fields.push_back("param" + std::to_string(slot + 1));
 	}
 	taken.collections = {k(MissionKind::Trigger), k(MissionKind::Action)};
 	// Its event, in words: a click goes there.
@@ -347,10 +251,20 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 		}
 	}
 	ImGui::EndDisabled();
-	// What it reads, in words.
-	ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
-	ImGui::TextWrapped("Reads: %s", form.words.c_str());
-	ImGui::PopStyleColor();
+	// Its line as the board draws it (S24 A7): its words, its values as chips.
+	const SessionView &view = workspace.view();
+	BoardCard card;
+	if (mission_board_card(mission, record.row, *names, card)) {
+		const std::vector<BoardLine> &lines = form.action ? card.actions : card.triggers;
+		for (const BoardLine &line : lines) {
+			if (line.record != record) continue;
+			CardContext context{workspace, mission, names.source(), editable, view.documents.selection.primary,
+			                    view.workspace.document(mission.path()).pick, inspector_cards()};
+			ImGui::PushID("line");
+			draw_mission_line(context, card, line);
+			ImGui::PopID();
+		}
+	}
 	if (!form.unread.empty()) {
 		ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
 		ImGui::TextWrapped("It holds values its type does not read (shown below, marked ignored).");
@@ -365,7 +279,7 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 bool draw_mission_inspector(Workspace &workspace, const Document &document, const NodeAddress &record, InspectorTaken &taken) {
 	const MissionDocument *mission = mission_of(document);
 	if (!mission) return false;
-	const bool editable = workspace.view().allows(EditorRequestKind::EditRecord) && !document.blocked();
+	const bool editable = logic_editable(workspace.view(), document);
 	if (!record.child && record.kind == k(MissionKind::Event)) {
 		ImGui::PushID("mission_event");
 		event_form(workspace, *mission, record.row, taken, editable);
@@ -438,6 +352,94 @@ void draw_mission_add_menu(Workspace &workspace, const Document &document, const
 		const bool ok = logic_add_edits(*mission, owner.row, *type, SIZE_MAX, edits, error);
 		raise(workspace, *mission, ok, std::move(edits));
 	}
+}
+
+// A menu of the types of a list, Common first then each group's: the one chosen.
+const LogicType *type_submenu(bool actions) {
+	const LogicType *chosen = nullptr;
+	ImGui::SeparatorText("Common");
+	for (const LogicType *type : logic_common_types(actions)) {
+		ImGui::PushID(type);
+		if (ImGui::MenuItem(type->title)) chosen = type;
+		ui_kit::tooltip(type->tip);
+		ImGui::PopID();
+	}
+	ImGui::Separator();
+	const char *group = nullptr;
+	bool open = false;
+	for (const LogicType &type : logic_types(actions)) {
+		if (group != type.group) {
+			if (open) ImGui::EndMenu();
+			group = type.group;
+			open = ImGui::BeginMenu(group);
+		}
+		if (!open) continue;
+		ImGui::PushID(&type);
+		if (ImGui::MenuItem(type.title)) chosen = &type;
+		ui_kit::tooltip(type.tip);
+		ImGui::PopID();
+	}
+	if (open) ImGui::EndMenu();
+	return chosen;
+}
+
+void mission_logic_row_items(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record) {
+	const bool event = !record.child && record.kind == k(MissionKind::Event);
+	const bool trigger = record.child && record.kind == k(MissionKind::Trigger);
+	const bool action = record.child && record.kind == k(MissionKind::Action);
+	if (!event && !trigger && !action) return;
+	const bool editable = logic_editable(workspace.view(), mission);
+	// An event's Add trigger and Add action, each its types by name (the event selected stays so).
+	if (event)
+		for (const bool actions : {false, true}) {
+			const std::string refusal = logic_add_refusal(mission, record.row, actions);
+			if (ImGui::BeginMenu(actions ? "Add action" : "Add trigger", editable && refusal.empty())) {
+				if (const LogicType *type = type_submenu(actions)) {
+					std::vector<Edit> edits;
+					std::string error;
+					if (logic_add_edits(mission, record.row, *type, SIZE_MAX, edits, error)) {
+						EditorRequest add = request::edit_record(mission.path(), std::move(edits));
+						add.keep_selection = true;
+						workspace.request(std::move(add));
+					}
+				}
+				ImGui::EndMenu();
+			}
+			if (!refusal.empty()) ui_kit::tooltip(refusal);
+		}
+	// A trigger negated; a trigger or an action moved to another event.
+	if (trigger) {
+		LogicForm form;
+		const ViewNames names(workspace.view(), mission);
+		Edit negate;
+		if (logic_form(mission, record, *names, form, false) &&
+		    ImGui::MenuItem("Not: holds when this is not so", nullptr, form.negated, editable) &&
+		    logic_negate_edit(mission, record, !form.negated, negate))
+			window_requests::edits(workspace, mission, {negate});
+	}
+	if (trigger || action) {
+		if (ImGui::BeginMenu("Move to event", editable)) {
+			size_t index = 0;
+			for (const Node *row : mission.rows_of(MissionKind::Event)) {
+				++index;
+				if (row->id == record.row) continue;
+				ImGui::PushID(static_cast<int>(row->id));
+				const std::string label = "Event " + std::to_string(index);
+				if (ImGui::MenuItem(label.c_str())) {
+					std::vector<Edit> edits;
+					std::string error;
+					if (logic_move_edits(mission, record, row->id, SIZE_MAX, edits, error)) window_requests::edits(workspace, mission, std::move(edits));
+				}
+				ui_kit::tooltip(mission.record_title({row->id, row->kind, 0}));
+				ImGui::PopID();
+			}
+			ImGui::EndMenu();
+		}
+	}
+	// The Logic pane beside the 3D view, on the record's card (the right-click selected it).
+	if (ImGui::MenuItem("Show on board") && !workspace.view().workspace.document(mission.path()).logic)
+		window_requests::show_logic(workspace, mission.path(), true);
+	ui_kit::tooltip("The mission's Logic pane beside its 3D view, on this event's card (Ctrl+L shows or hides it).");
 }
 
 } // namespace opennova::editor
