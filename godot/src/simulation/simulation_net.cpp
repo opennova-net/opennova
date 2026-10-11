@@ -433,18 +433,6 @@ void Simulation::configure_host_session(const Ref<HostSessionOptions> &p_options
 		net_.rotation_missions.push_back(opennova::to_std(rotation_missions[i]));
 		net_.rotation_launch_options.push_back(i < rotation_options.size() ? rotation_options[i] : 0);
 	}
-	{
-		const String requested = p_options->get_integrity_profile().strip_edges();
-		const std::string id = opennova::to_std(requested);
-		if (id.empty() ||
-				opennova::inmatch::find_integrity_challenge_profile(id) != nullptr) {
-			config.integrity_profile = id;
-		} else {
-			UtilityFunctions::push_warning(
-					String("Unknown authority integrity profile: ") + requested);
-			config.integrity_profile.clear();
-		}
-	}
 	// Server type + player cap (UI host config): serve_and_play gates the host's own-player spawn +
 	// loopback fold at bring-up; max_players is the session's advertised and admitted cap: the
 	// session create's 1..65 clamp (this host is in session). The dedicated word makes the
@@ -491,23 +479,6 @@ void Simulation::set_local_character_profile(const Ref<CharacterJoinProfile> &p_
 	if (p_profile.is_null()) return;
 	net_.local_character_vars = opennova::inmatch::character_join_vars(p_profile->value());
 	net_.local_character_vars_set = true;
-}
-
-bool Simulation::set_join_integrity_profile(const String &p_profile_id) {
-	const std::string id = opennova::to_std(p_profile_id.strip_edges());
-	if (id.empty()) {
-		net_.join_integrity_profile_id.clear();
-		install_join_integrity_profile();
-		return true;
-	}
-	if (opennova::inmatch::find_integrity_challenge_profile(id) == nullptr) {
-		net_.join_integrity_profile_id.clear();
-		install_join_integrity_profile();
-		return false;
-	}
-	net_.join_integrity_profile_id = id;
-	install_join_integrity_profile();
-	return true;
 }
 
 void Simulation::set_app_id(const String &p_token) {
@@ -591,7 +562,6 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_charattr_table();
 	install_character_join_vars();
 	install_auto_medic_preference();
-	install_join_integrity_profile();
 	install_expansion_version_root();
 	install_app_id();
 	install_join_cd_cookie();

@@ -29,9 +29,7 @@ health. Divergences from the original engine belong in
       comparison (both directions, packet grouping, 0x0A/0x0C state) as a ctest or
       PowerShell verifier (ADR 0050 R4). Every cell runs on the pinned JO:CA reference
       (`jox01`) with retail stock under onHook's StockObserver (opennova-int, bridge
-      protocol 1.8+). Open: a jox01 integrity-challenge profile (D-NET-181; with none,
-      our host stays silent on CRC replies and our joiner does not answer a retail
-      host's challenges), and optionally an `onhook_exercise_input` tool to retire
+      protocol 1.8+). Open: optionally an `onhook_exercise_input` tool to retire
       `exercise_retail_input.ps1`. Baseline: the 2026-08-05 suites captured 24/24 cells
       cleanly, wire-ready + the since-retired `diff_vs_golden.ps1` (ca1cef465) GREEN.
 

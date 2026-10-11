@@ -54,33 +54,6 @@ func test_discovered_spectator_host_prompts_before_joining() -> void:
 				"the prompt preserves retail's 17-character password limit")
 
 
-# `--integrity-profile` reaches EVERY joiner entry (the NovaWorld browser's
-# targets carry none), while an explicit target-set profile is never clobbered.
-# The default stays empty = anti-cheat silence (D-NET-181).
-func test_integrity_profile_flag_covers_browser_joins() -> void:
-	var layer := Control.new()
-	add_child_autofree(layer)
-	var controller := _controller(layer)
-	LaunchFlags.set_args_override(PackedStringArray(
-			["--integrity-profile", "retail-revx02-024f56f2-2d087374"]))
-	var target := _target(JoinTarget.FLAG_ALLOW_SPECTATORS)
-	controller.join_lan_server(target)  # stops at the role prompt — no world load
-	assert_eq(target.integrity_profile, "retail-revx02-024f56f2-2d087374",
-			"a profile-less target inherits the launch-flag opt-in")
-
-	var explicit := _target(JoinTarget.FLAG_ALLOW_SPECTATORS)
-	explicit.integrity_profile = "operator-pinned"
-	controller.join_lan_server(explicit)
-	assert_eq(explicit.integrity_profile, "operator-pinned",
-			"an explicit target profile is never overwritten by the flag")
-
-	LaunchFlags.clear_args_override()
-	var unflagged := _target(JoinTarget.FLAG_ALLOW_SPECTATORS)
-	controller.join_lan_server(unflagged)
-	assert_eq(unflagged.integrity_profile, "",
-			"without the flag the joiner keeps the silent default")
-
-
 func test_unprotected_spectator_host_omits_password_field_and_cancel_closes() -> void:
 	var layer := Control.new()
 	add_child_autofree(layer)

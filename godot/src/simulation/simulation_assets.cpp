@@ -131,15 +131,6 @@ void Simulation::install_auto_medic_preference() {
 			static_cast<uint32_t>(player_.profile_record.auto_medic_off));
 }
 
-void Simulation::install_join_integrity_profile() {
-	if (!runtime_) return;
-	if (net_.join_integrity_profile_id.empty()) {
-		runtime_->clear_integrity_challenge_profile();
-		return;
-	}
-	runtime_->set_integrity_challenge_profile(net_.join_integrity_profile_id);
-}
-
 void Simulation::install_expansion_version_root() {
 	if (!runtime_) return;
 	runtime_->set_expansion_version_root(net_.join_expansion_version_root);

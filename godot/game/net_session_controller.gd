@@ -91,7 +91,6 @@ func maybe_launch_lan_from_flags() -> bool:
 		demo_config.game_type_auto = lan_gametype < 0
 		if not demo_config.game_type_auto:
 			demo_config.game_type = lan_gametype
-		demo_config.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
 		demo_config.lan_mode = LaunchFlags.lan_mode(demo_config.lan_mode)
 		_on_lan_host_start_requested(demo_config)
 		return true
@@ -100,7 +99,6 @@ func maybe_launch_lan_from_flags() -> bool:
 		var demo_target := JoinTarget.new()
 		demo_target.host_ip = lan_join_ip
 		demo_target.port = LaunchFlags.lan_join_port(demo_target.port)
-		demo_target.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
 		if LaunchFlags.spectator():
 			demo_target.join_role = JoinTarget.ROLE_SPECTATOR
 			demo_target.spectator_password = LaunchFlags.spectator_password()
@@ -161,13 +159,6 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 func join_lan_server(target: JoinTarget) -> void:
 	if target == null or _refuse_on_web():
 		return
-	# `--integrity-profile` is the operator opt-in for EVERY joiner entry (the
-	# NovaWorld browser included), not just the --lan-join launch. The default
-	# stays empty: silence is the parity-safe anti-cheat posture — a canned
-	# profile answering a different host corpus is the one reply that punts
-	# (D-NET-181).
-	if target.integrity_profile.strip_edges().is_empty():
-		target.integrity_profile = LaunchFlags.integrity_profile().strip_edges()
 	_cancel_spectator_probe()
 	_dismiss_join_role_prompt()
 	# The entry's step is the engine's (inmatch/server_flags.h join_entry_step):

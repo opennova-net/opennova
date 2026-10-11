@@ -3,7 +3,7 @@
 #include <runtime/inmatch/charattr_table.h>
 #include <runtime/inmatch/disconnect_reason.h>
 #include <runtime/inmatch/pre_game_menu.h>
-#include <runtime/inmatch/integrity_challenge_profile.h>
+#include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/join_role.h>
 #include <runtime/inmatch/napi_np_connection.h>
 
@@ -498,14 +498,15 @@ public:
 	// checksum hashes [orig: CharAttr_ClassHasAttribute @0x4125e0].
 	const CharAttrTable &charattr_table() const { return charattr_table_; }
 
-	// Install one exact retail-corpus anti-cheat source profile. Unknown ids
-	// clear any previous profile and return false. With no profile—or when a
-	// profile does not cover the requested in-range record—S2C 0x30/0x31 remain
-	// deliberately unanswered because a guessed reply is grounds for a punt.
-	bool set_integrity_challenge_profile(std::string_view id);
-	void clear_integrity_challenge_profile() {
-		integrity_challenge_profile_ = nullptr;
+	// The anti-cheat challenge sources this peer computed from its own loaded
+	// corpus (integrity_sources.h), installed at each mission load. A leg the
+	// sources hold no value for leaves S2C 0x30/0x31 deliberately unanswered,
+	// because a guessed reply is grounds for a punt.
+	void set_integrity_sources(IntegritySources sources) {
+		integrity_sources_ = std::move(sources);
 	}
+	void clear_integrity_sources() { integrity_sources_ = IntegritySources{}; }
+	const IntegritySources &integrity_sources() const { return integrity_sources_; }
 
 	// The C2S 0x3D source is NOT the decoded network-entity registry. Retail freezes a
 	// renderer-side snapshot of loaded, non-foliage .3DI definitions after mission model
@@ -533,7 +534,7 @@ public:
 	// Anti-cheat challenge traffic counters. Every field is bookkeeping around
 	// the existing handlers (no wire effect): a live join that punts can be
 	// read back — did challenges arrive, and did the deliberate-silence policy
-	// (no integrity profile) leave 0x30/0x31 unanswered.
+	// (no computed integrity source) leave 0x30/0x31 unanswered.
 	struct ChallengeDiagnostics {
 		uint32_t entity_checksum_seen = 0;     // S2C 0x30 received
 		uint32_t entity_checksum_answered = 0; // C2S 0x20 replies queued
@@ -945,7 +946,7 @@ private:
 	// The boot-loaded g_CharAttr[16] and its latches. Ordered S2C 0x41 and
 	// 0x42 mutate this retained table before every later 0x39 challenge.
 	CharAttrTable charattr_table_{};
-	const IntegrityChallengeProfile *integrity_challenge_profile_ = nullptr;
+	IntegritySources integrity_sources_;
 	// Frozen renderer-definition snapshot for S2C 0x68 -> C2S 0x3D. Configuration
 	// survives start(): bindings may finish loading models before the first net pump.
 	std::vector<uint32_t> loaded_model_challenge_snapshot_;

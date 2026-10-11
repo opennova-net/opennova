@@ -75,7 +75,6 @@ GAME_VALUE_FLAGS = (
     ("lan_gametype", "--lan-gametype"),
     ("lan_mode", "--lan-mode"),
     ("lan_max_players", "--lan-max-players"),
-    ("integrity_profile", "--integrity-profile"),
     ("capture_pcap", "--capture-pcap"),
 )
 
@@ -1000,7 +999,6 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--lan-gametype", default=None, help="numeric g_GameType override (0x ok)")
     launch.add_argument("--lan-mode", default=None, help="host LAN rate mode 1..4")
     launch.add_argument("--lan-max-players", default=None, help="listen-host capacity 1..64")
-    launch.add_argument("--integrity-profile", default=None, help="the session's integrity profile")
     launch.add_argument("--capture-pcap", default=None, help="record the session's datagrams to this pcap")
     launch.add_argument("game_args", nargs="*", help="further game flags, after --")
     launch.set_defaults(func=cmd_launch)

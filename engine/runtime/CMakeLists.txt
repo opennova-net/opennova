@@ -439,7 +439,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/map_change.cpp             # the host's round-end map change (D-NET-331)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_settings.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_sources.cpp      # the anti-cheat CRC sources (D-NET-181)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_ammo_image.cpp   # retail's ammo.def table image
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_weapon_image.cpp # retail's weapon.def table image
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_doors.cpp  # the C2S 0x1A door request (S2C 0x37 reply)

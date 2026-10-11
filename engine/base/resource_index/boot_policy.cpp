@@ -91,7 +91,6 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.spectator = has_flag(args, kLaunchFlagSpectator);
     f.spectator_password = value_after(args, kLaunchFlagSpectatorPassword);
     f.callsign = value_after(args, kLaunchFlagCallsign);
-    f.integrity_profile = value_after(args, kLaunchFlagIntegrityProfile);
     f.capture_pcap = value_after(args, kLaunchFlagCapturePcap);
     f.mcp_port = int_after(args, kLaunchFlagMcpPort, 1, 65535, 0);
     f.working_dir = value_after(args, kLaunchFlagWorkingDir);
