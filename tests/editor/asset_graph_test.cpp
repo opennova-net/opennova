@@ -535,7 +535,7 @@ static int test_native_extractors() {
 		const GraphEdge *past = edge_to(graph, "logic.wac", ReferenceKind::MissionEventLatch, "5");
 		const GraphEdge *variable = edge_to(graph, "logic.wac", ReferenceKind::MissionVariable, "7");
 		const GraphEdge *other_variable = edge_to(graph, "logic.wac", ReferenceKind::MissionVariable, "12");
-		TEST_EXPECT(event && past && variable && other_variable && event->scope == "LOGIC.BMS" && variable->scope == "LOGIC.BMS" &&
+		TEST_EXPECT(event && past && variable && other_variable && event->scope == "LOGIC.BMS/EVENTS" && variable->scope == "LOGIC.BMS" &&
 		            !event->rewritable && !variable->rewritable && event->field == "operand");
 		std::string file;
 		TEST_EXPECT(event && graph.resolve(*event, &file) == ReferenceStatus::Present && file == "logic.bms");
@@ -543,12 +543,12 @@ static int test_native_extractors() {
 		TEST_EXPECT(variable && graph.resolve(*variable, &file) == ReferenceStatus::Present && file == "logic.bms");
 		TEST_EXPECT(other_variable && graph.resolve(*other_variable) == ReferenceStatus::Present);
 		// The event's Used by: its symbol's referrers, the script's line among them.
-		const std::vector<const GraphEdge *> users = graph.referrers_of(ReferenceKind::MissionEventLatch, "1", "LOGIC.BMS");
+		const std::vector<const GraphEdge *> users = graph.referrers_of(ReferenceKind::MissionEventLatch, "1", "LOGIC.BMS/EVENTS");
 		TEST_EXPECT(users.size() == 1 && users[0]->source == "logic.wac" && users[0]->span.line == 1);
 		bool event_symbol = false;
 		for (const AssetGraph::FileSymbol &symbol : graph.symbols_in("logic.bms"))
 			event_symbol = event_symbol || (symbol.symbol->kind == ReferenceKind::MissionEventLatch && symbol.symbol->name == "1" &&
-			                                symbol.symbol->scope == "LOGIC.BMS" && symbol.read);
+			                                symbol.symbol->scope == "LOGIC.BMS/EVENTS" && symbol.read);
 		TEST_EXPECT(event_symbol);
 		// The variable's uses, by name and scope: both lines of the script.
 		TEST_EXPECT(graph.referrers_of(ReferenceKind::MissionVariable, "7", "LOGIC.BMS").size() == 2);

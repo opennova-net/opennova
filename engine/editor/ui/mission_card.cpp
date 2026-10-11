@@ -575,7 +575,7 @@ std::map<int64_t, std::vector<ScriptUse>> script_variable_uses(const SessionView
 std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index) {
 	const AssetGraph *graph = view.findings.graph.get();
 	if (!graph) return {};
-	return script_uses_of(graph->referrers_of(ReferenceKind::MissionEventLatch, std::to_string(index), mission_scope(mission)));
+	return script_uses_of(graph->referrers_of(ReferenceKind::MissionEventLatch, std::to_string(index), mission_event_scope(mission.path())));
 }
 
 int64_t new_variable_index(const SessionView &view, const MissionDocument &mission) {

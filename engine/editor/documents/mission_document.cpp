@@ -240,6 +240,10 @@ int entity_pool_of(NodeKind kind) { return is_entity_kind(kind) ? entity_pool(po
 
 std::string mission_scope(const DocumentBase &document) { return strutil::to_upper(basename_of(document.path())); }
 
+std::string mission_event_scope(const std::string &mission) {
+	return strutil::to_upper(basename_of(mission)) + "/" + kMissionEventSection;
+}
+
 namespace {
 
 // The header's dialog bank slot as read (its second terrain slot, the original editor's cnv_file; "" none).
@@ -1328,7 +1332,7 @@ void mission_references(const Document &document, Extracted &out) {
 	// Each event as a script of the mission's name finds it, by its index (ReferenceKind::MissionEventLatch: its
 	// event() condition reads the event's latch [orig: WacCmd_Event @ 0x4ED1E0]), defined by the event's record,
 	// so the event's Used by lists the script's lines.
-	const std::string scope = mission_scope(*mission);
+	const std::string scope = mission_event_scope(file);
 	size_t index = 0;
 	for (const Node *row : mission->rows_of(K::Event)) {
 		const NodeAddress address{row->id, row->kind, 0};

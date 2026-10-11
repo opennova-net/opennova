@@ -266,6 +266,11 @@ std::string mission_clip_moved(const std::string &payload, double east, double n
 // The scope the mission's symbols are defined in and looked up by: its file name, upper case
 // ("ASH_I5B.BMS").
 std::string mission_scope(const DocumentBase &document);
+// The scope its events are found by their index in by a script's event() (ReferenceKind::MissionEventLatch):
+// the mission's scope's section kMissionEventSection, apart from the zone ids and SSNs a number names too
+// ("ASH_I5B.BMS/EVENTS"); `mission` a mission's file name.
+inline constexpr const char *kMissionEventSection = "EVENTS";
+std::string mission_event_scope(const std::string &mission);
 
 // The dialog bank the mission loads, as the game names it: the name its header's second terrain slot (the
 // original editor's cnv_file) holds where it holds one, else the mission's own, with .dbf (runtime/mission/

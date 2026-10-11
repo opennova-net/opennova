@@ -7,6 +7,7 @@
 #include <string>
 
 #include <base/io/strutil.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/text_types.h>
 #include <formats/mission/mission_params.h>
 #include <formats/wac/param_type.h>
@@ -293,7 +294,8 @@ void script_references(const TextDocument &document, std::vector<TextReference> 
 			TextReference reference;
 			reference.kind = kind;
 			reference.value = std::to_string(use.value);
-			reference.scope = stem + ".BMS";
+			// An event's index in its section of the mission's scope, apart from the zone ids and SSNs.
+			reference.scope = kind == ReferenceKind::MissionEventLatch ? mission_event_scope(stem + ".BMS") : stem + ".BMS";
 			reference.needs = stem + ".BMS";
 			reference.field = "operand";
 			reference.rewritable = false;
