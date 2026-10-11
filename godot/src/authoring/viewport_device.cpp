@@ -67,6 +67,9 @@ void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 	// would be made anew, empty).
 	drawn_ = 2;
 	canvas_sized_ = picture.canvas_sized;
+	// Where the canvas drew the picture (its top-left corner, the screen's pixels as ImGui's platform windows place it):
+	// what a windowed test finds a mark's pixel in the window by (S24 B8, EditorApp::get_viewport_canvas_at).
+	canvas_at_ = Vector2(picture.x, picture.y);
 	// Where the mouse is over the picture, for a picture that draws the game's pointer (DI-08).
 	applier_->pointer(picture.hovered, picture.pointer, picture.pointer_x, picture.pointer_y);
 	if (!keeps_last_()) {

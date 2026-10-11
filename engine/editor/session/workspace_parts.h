@@ -23,9 +23,9 @@ struct SessionView;
 // `focus` is no part but an ask, the window it names brought forward (a focus_window view event; shown where it
 // stands aside, as the Windows menu's tick shows it).
 // The catalog query lists the table, from which the editor MCP makes the request's schema.
-enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Integers, Object };
+enum class WorkspaceJson : uint8_t { String, Boolean, Integer, Strings, Integers, Object, Number };
 
-// A JSON type's word: "string", "boolean", "integer", "string[]", "integer[]", "object".
+// A JSON type's word: "string", "boolean", "integer", "string[]", "integer[]", "object", "number" (a finite one).
 const char *workspace_json_token(WorkspaceJson json);
 
 // `longest` (the window's field's buffer, workspace_view.h's kWorkspaceText and the rest, less its
@@ -86,7 +86,8 @@ void workspace_follows(SessionCore &core, const EditorRequest &request);
 void workspace_closes_for(SessionCore &core, const EditorRequest &request);
 // What the workspace holds kept true to the project after anything moved it (each request served, each
 // operation's end): a card, Rename... or Find usages whose file the files no longer have closes; a menu's Remove prompt
-// whose screen is gone (or is its menu's last) closes; Rename everywhere whose plan is no longer its name's
+// whose screen is gone (or is its menu's last) closes; a mission's pick whose trigger or action is gone ends (S24);
+// Rename everywhere whose plan is no longer its name's
 // (another rename planned in its place) closes, and so does Rename back once the plan is no longer a way back.
 void workspace_tidies(SessionCore &core);
 // The files a rename moved (each from, to): a card of one shows it at its new path, Find usages of one lists its

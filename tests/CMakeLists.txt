@@ -5827,7 +5827,8 @@ add_test(NAME editor_font_import COMMAND editor_font_import_test)
 # import, Files and the layout as a modder meets them (the UX round's project lane) project_test.cpp's;
 # Back and Forward (the navigation history: the arrows, Alt+Left and Alt+Right, the mouse's buttons)
 # navigation_test.cpp's; the jumps' keys and menus (DI-18: Go to file and name, Go to definition, Find usages, the Go
-# menu, the right-click menus) shortcuts_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# menu, the right-click menus) shortcuts_test.cpp's; the mission logic (ADR 0046 S24: the Event board, the logic in
+# the views, the live logic during Play) board_test.cpp's, space_test.cpp's and live_test.cpp's; all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
 # group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
 # this list and the program's table of groups to one list.
 if(OPENNOVA_IMGUI)
@@ -5837,12 +5838,13 @@ if(OPENNOVA_IMGUI)
                                   editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp
                                   editor_ui/logic_test.cpp editor_ui/animation_test.cpp
                                   editor_ui/model_test.cpp editor_ui/project_test.cpp
-                                  editor_ui/navigation_test.cpp editor_ui/shortcuts_test.cpp)
+                                  editor_ui/navigation_test.cpp editor_ui/shortcuts_test.cpp
+                                  editor_ui/board_test.cpp editor_ui/space_test.cpp editor_ui/live_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
                                   menu inspector preview styles problems gate logic animation model
-                                  project navigation shortcuts)
+                                  project navigation shortcuts board space live)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
@@ -6054,6 +6056,25 @@ add_executable(editor_mission_logic_test editor/mission_logic_test.cpp)
 target_link_libraries(editor_mission_logic_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_logic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_logic COMMAND editor_mission_logic_test)
+
+# The mission logic, deeply integrated (ADR 0046 S24): the Event board's portable half (the mission_logic query's
+# op table; editor/documents/mission_board.h), and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped event's form;
+# the logic in the views (the pick a chip asks of them; editor/documents/mission_links.h); the names and the live
+# logic (a variable's words, editor/documents/mission_live.h).
+add_executable(editor_mission_board_test editor/mission_board_test.cpp)
+target_link_libraries(editor_mission_board_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_board_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_board COMMAND editor_mission_board_test)
+
+add_executable(editor_mission_links_test editor/mission_links_test.cpp)
+target_link_libraries(editor_mission_links_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_links_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_links COMMAND editor_mission_links_test)
+
+add_executable(editor_mission_names_test editor/mission_names_test.cpp)
+target_link_libraries(editor_mission_names_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_names_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_names COMMAND editor_mission_names_test)
 
 # The display names (ADR 0046 S15, Names: editor/documents/mission_labels.h and
 # editor/graph/display_names.h) over the minted synth_logic mission: every record and every value

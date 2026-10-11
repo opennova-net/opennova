@@ -29,6 +29,12 @@ std::string mission_handle_words(MissionHandle handle) {
 	case MissionHandle::XMax: return "move the east edge";
 	case MissionHandle::YMin: return "move the south edge";
 	case MissionHandle::YMax: return "move the north edge";
+	case MissionHandle::XMinYMin: return "move the south-west corner";
+	case MissionHandle::XMaxYMin: return "move the south-east corner";
+	case MissionHandle::XMaxYMax: return "move the north-east corner";
+	case MissionHandle::XMinYMax: return "move the north-west corner";
+	case MissionHandle::ZMin: return "raise or lower the bottom";
+	case MissionHandle::ZMax: return "raise or lower the top";
 	}
 	return "move";
 }
@@ -54,8 +60,8 @@ std::string mission_canvas_hint(const MissionHintInput &in) {
 				"for the next (Esc stops).";
 	case MissionTool::Path:
 		if (in.path <= 0) return "Path stops: pick a path in the list, then click the ground to add its next stop (Esc stops).";
-		return "Path " + std::to_string(in.path) + ": click the ground to add a stop (a marker the path visits next; Esc "
-				"stops).";
+		return "Path " + std::to_string(in.path) + ": click the ground to add a stop (a marker the path visits next), or "
+				"click its line to put one between two (Esc stops).";
 	case MissionTool::Area:
 		if (in.dragging) return "Let go to make an area trigger over the box.";
 		// The box takes the toolbar's grid whatever is held.

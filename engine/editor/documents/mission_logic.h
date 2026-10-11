@@ -67,8 +67,10 @@ struct LogicForm {
 	std::string words;
 	std::string sentence;
 };
-// False for a record that is no trigger or action of the document.
-bool logic_form(const MissionDocument &document, const NodeAddress &record, const MissionNames &names, LogicForm &out);
+// False for a record that is no trigger or action of the document. `sentence` false leaves its event's sentence
+// unmade (the board words each event once, not once a line).
+bool logic_form(const MissionDocument &document, const NodeAddress &record, const MissionNames &names, LogicForm &out,
+                bool sentence = true);
 
 // An event's form: its sentence and its parts, its flags in words (repeats, at the mission's start, at
 // its end), its delay and its repeat in steps of 64 ticks and in seconds, the most a step count holds
@@ -96,8 +98,18 @@ std::string logic_add_refusal(const MissionDocument &document, NodeId event, boo
 // record holds a parameter its type does not read), then its sub-type and each parameter its type reads
 // set to its kind's default, every edit after the Add naming what it made (batch_made). False, with why, where the event takes no more
 // or is no event of the document.
+// `presets`: parameters the new record takes instead of their kinds' defaults (S24: a recipe's, a subject's
+// value, a slot the type does not read included).
+struct LogicPreset {
+	int slot = 0;
+	int64_t value = 0;
+};
 bool logic_add_edits(const MissionDocument &document, NodeId event, const LogicType &type, size_t position,
-                     std::vector<Edit> &out, std::string &error);
+                     std::vector<Edit> &out, std::string &error, const std::vector<LogicPreset> &presets = {});
+// The add's edits appended to `out` (the batch so far: the Add names batch_made of its place there, so a batch
+// that made the event first adds to it, `event` being that batch_made), no refusal asked.
+void logic_record_edits(NodeId event, const LogicType &type, size_t position, const std::vector<LogicPreset> &presets,
+                        std::vector<Edit> &out);
 // The edits that give a trigger or an action another type: its type and sub-type set, each parameter
 // whose kind the new type reads in the same slot kept, every other one the new type reads set to its
 // kind's default, and one the new type does not read set to -1, as every shipped record holds one
@@ -109,6 +121,22 @@ bool logic_retype_edits(const MissionDocument &document, const NodeAddress &reco
 // and removes it from its own (one undo step). False, with why, where the other event takes no more.
 bool logic_move_edits(const MissionDocument &document, const NodeAddress &record, NodeId to_event, size_t position,
                       std::vector<Edit> &out, std::string &error);
+// What `to_event` reads once a trigger or an action moved there at `position` (SIZE_MAX the end) as
+// logic_move_edits leaves it (S24: the board's drop preview): its sentence, a moved trigger read with the joins its
+// place gives it (a trigger's join is the previous trigger's flags, which move with the trigger before it). ""
+// for a move logic_move_edits refuses.
+std::string logic_move_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event, size_t position,
+                                const MissionNames &names);
+// The other half of that preview: what the event the record leaves reads once it moved to another event, and
+// whether that leaves it no trigger as the mission runs (`untriggered`: the game then holds it on its first check).
+// "" for a move within one event, or one logic_move_edits refuses.
+std::string logic_move_left_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event,
+                                     size_t position, const MissionNames &names, bool *untriggered = nullptr);
+// The steps a wait of `seconds` comes to, as a delay or a repeat holds it: round(seconds / 1.024), a step being
+// bms::kEventStepTicks (64) ticks of the 62.5 Hz clock [docs/mission/bms-event-runtime-re.md 1.6]; 0 at least, 1023
+// at most (ten bits on disk). Past bms::kEventStepsUnwrapped (512) steps the game's countdown wraps and ends on
+// the next pass (bms::event_steps_wrap; logic_steps_words says so).
+int64_t logic_seconds_steps(double seconds);
 // The Set of a trigger's condition flags that negates it or not, and the one that joins it to the next
 // by `join`, each keeping the flag word's other bits.
 bool logic_negate_edit(const MissionDocument &document, const NodeAddress &trigger, bool negated, Edit &out);
