@@ -819,6 +819,14 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 			use.key_last = INT32_MAX;
 		}
 	}
+	// Show text's number forms Triggered Text's ID%03i in the mission's table [orig: HUD_DisplayTriggeredText
+	// @0x51F190]: picked by that section's strings, the number written (S24, the board's chip).
+	if (id == "param1" && address.kind == k(K::Action)) {
+		const Node *node = row(address.row);
+		const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
+		if (record && record.as<bms::Action>().action_type == bms::ActionType::OutputText)
+			keyed(hud::kTriggeredTextKey, 0, INT32_MAX);
+	}
 }
 
 bool MissionDocument::record_choices(const NodeAddress &address, const FieldUse &use,

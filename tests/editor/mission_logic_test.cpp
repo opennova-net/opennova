@@ -34,6 +34,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <formats/mission/bms.h>
+#include <formats/rtxt/rtxt.h>
 #include <formats/mission/mission_params.h>
 
 #include "common/file_io.h"
@@ -428,7 +429,8 @@ bool measured(mission::ParamKind kind) {
 
 // The types the shipped missions use most (logic_common_types, the type picker's Common) and the compositions
 // the recipes offer (mission_recipes): over the install's 115 missions, the eight trigger and action types holding
-// the most records, in order, and each recipe's events and missions, as the tables state them.
+// the most records, in order, and each recipe's events and missions, as the tables state them; and Show text,
+// which no shipped event uses and no shipped table has a Triggered Text section for.
 int test_retail_common_and_recipes() {
 	const std::string root = retail::install();
 	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (the types most used, the recipes' measures)");
@@ -438,13 +440,25 @@ int test_retail_common_and_recipes() {
 	std::map<const LogicType *, size_t> held[2];
 	std::vector<size_t> events(mission_recipes().size());
 	std::vector<std::set<std::string>> missions(mission_recipes().size());
-	size_t read = 0;
+	size_t read = 0, tables = 0, triggered = 0;
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
 		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
 		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
 		for (const opennova::VfsFileLocation &file : game.list_files()) {
-			if (retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string()) != ".bms") continue;
+			const std::string extension = retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string());
+			if (extension == ".bin" && seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) {
+				// A string table: whether it holds the section Show text reads.
+				std::vector<uint8_t> bytes;
+				opennova::rtxt::File table;
+				std::string error;
+				if (game.read_file(file.logical_name, bytes) && opennova::rtxt::parse(bytes.data(), bytes.size(), table, error)) {
+					++tables;
+					triggered += table.section_index("Triggered Text") != size_t(-1);
+				}
+				continue;
+			}
+			if (extension != ".bms") continue;
 			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
 			std::vector<uint8_t> bytes;
 			TEST_EXPECT(game.read_file(file.logical_name, bytes));
@@ -482,6 +496,12 @@ int test_retail_common_and_recipes() {
 		TEST_EXPECT(common.size() == 8 && ranked.size() > 8 && ranked[7].first > ranked[8].first);
 		for (size_t i = 0; i < common.size(); ++i) TEST_EXPECT(common[i] == ranked[i].second);
 	}
+	// Show text: no shipped event shows a Triggered Text line and no shipped table holds the section, so the
+	// numbering New text gives (set_string_text's create: the lowest free from 1) follows none of theirs.
+	const LogicType *show = logic_type(true, int32_t(bms::ActionType::OutputText), 0);
+	std::printf("  Show text: %zu actions; %zu string tables, %zu with a Triggered Text section\n",
+	            show && held[1].count(show) ? held[1][show] : size_t(0), tables, triggered);
+	TEST_EXPECT(show && held[1].count(show) == 0 && tables > 100 && triggered == 0);
 	size_t differ = 0;
 	for (size_t r = 0; r < mission_recipes().size(); ++r) {
 		const MissionRecipe &recipe = mission_recipes()[r];

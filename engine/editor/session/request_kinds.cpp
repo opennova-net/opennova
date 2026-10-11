@@ -673,8 +673,8 @@ constexpr RequestKindRow kRows[] = {
 			"The edits, a batch over any rows (records, rows and file-wide values), applied to the "
 			"document at path as one undo step (batches sharing a nonzero gesture fold into one "
 			"until end_edit); open_first: the document opened first when it is not (a fix's "
-			"edit).")
-			.takes(request_params({ F::Edits }, { F::Path, F::OpenFirst }))
+			"edit); keep_selection: what it adds left unselected, the selection as it was (S24).")
+			.takes(request_params({ F::Edits }, { F::Path, F::OpenFirst, F::KeepSelection }))
 			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,
@@ -693,8 +693,11 @@ constexpr RequestKindRow kRows[] = {
 			"field: a menu window's Text, a weapon's loadout name) given the text values.text: the string "
 			"table that defines the id, as the game's lookup reaches it, opened where it is not (the active "
 			"document kept), its string's text set there, one undo step in that table; refused where the "
-			"field names no string id or the project defines none of that id.")
-			.takes(request_params({ F::Address, F::Field, F::Values }, { F::Path }))
+			"field names no string id or the project defines none of that id. create (S24): the string made "
+			"first, the next free key of the field's form in the mission's own table (made where the project has "
+			"none; never MEDMSSN.BIN), one undo step there, then the field set to its number, one undo step in "
+			"the document; refused for a field that forms no key.")
+			.takes(request_params({ F::Address, F::Field, F::Values }, { F::Path, F::Create }))
 			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,

@@ -414,6 +414,13 @@ struct EditorRequest {
 	// What the previews of the project's own data draw behind their picture (SetPreviewBackground: the editor's
 	// preference, session/preview_background.h).
 	std::optional<PreviewBackground> preview_background;
+	// An edit_record's batch leaves the selection as it is (S24: a chip of the Event board sets a value, an add
+	// between its lines adds there, the card staying selected): what it adds is not selected, its document not
+	// made the active one.
+	bool keep_selection = false;
+	// A set_string_text makes the string first (S24: Show text's New text...): the next free key of the field's
+	// form in the section the game looks it up in, in the mission's own table, the field then set to its number.
+	bool create = false;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -437,7 +444,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.all == b.all && a.planned == b.planned && a.behind == b.behind && a.fresh == b.fresh && a.plan == b.plan &&
 			a.report == b.report && a.steps == b.steps && a.folder == b.folder && a.start == b.start &&
 			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.alone == b.alone &&
-			a.define == b.define && a.preview_background == b.preview_background;
+			a.define == b.define && a.preview_background == b.preview_background &&
+			a.keep_selection == b.keep_selection && a.create == b.create;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

@@ -2,16 +2,20 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <system_error>
 #include <utility>
 
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/strings_document.h>
 #include <editor/documents/texture_document.h>
 #include <editor/documents/wave_document.h>
 #include <editor/documents/texture_operations.h>
@@ -31,6 +35,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 #include <editor/session/workspace_parts.h>
+#include <formats/rtxt/rtxt.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace fs = std::filesystem;
@@ -750,7 +755,7 @@ void DocumentSet::edit_record(const EditorRequest &request) {
 	}
 	// A batch that asks nothing (a replace_list of an empty list by none, S13 A5) is done.
 	if (request.edits.empty()) return;
-	if (!apply_edits(*document, request.edits) || !request.open_first) return;
+	if (!apply_edits(*document, request.edits, !request.keep_selection) || !request.open_first) return;
 	// A fix's batch that made a record and what holds it (DI-15: a string id and the section it goes in) selects the
 	// record it is for, the last it made, where the Add's own selection is the outermost.
 	const bool adds = std::any_of(request.edits.begin(), request.edits.end(),
@@ -892,6 +897,7 @@ void DocumentSet::set_string_text(const EditorRequest &request) {
 	if (!schema || !document->get(request.address, request.field, value))
 		return refuse("No field " + request.field + " on that record.", document->path());
 	const FieldUse use = document->field_on(request.address, *schema);
+	if (request.create) return create_string(request, *document, use, text);
 	ReferenceKind kind = ReferenceKind::None;
 	std::string name, scope;
 	if (!reference_target(use, value, kind, name, scope) || kind != ReferenceKind::TextId)
@@ -930,6 +936,100 @@ void DocumentSet::set_string_text(const EditorRequest &request) {
 	set.field = "text";
 	set.value = text;
 	apply_edits(*table, {set});
+}
+
+std::string DocumentSet::make_mission_text_table(const std::string &mission) {
+	const mission::Sidecar *role = mission::sidecar_for_role("text");
+	const std::string table = role ? mission::sidecar_name(basename_of(mission), *role) : std::string();
+	const BlankFactory *factory = find_blank_factory_for_role(kBlankMissionTextRole);
+	if (table.empty() || !factory) return std::string();
+	if (const AssetEntry *held = view_.project.scan->find(table)) return held->relative_path;
+	BlankRequest blank;
+	blank.logical_name = table;
+	blank.role = kBlankMissionTextRole;
+	blank.project_title = view_.project.document->title;
+	blank.values = {{"title", basename_of(mission)}};
+	const std::string relative = placement_path(*view_.project.scan, table, AssetKind::Strings);
+	const auto target = path_of(paths_.root) / path_of(relative);
+	std::vector<uint8_t> bytes;
+	Diagnostic error;
+	std::string message;
+	std::error_code ec;
+	if (fs::exists(system_path(utf8_of(target)), ec) || !make_from(*factory, blank, bytes, error) ||
+	    !io::ensure_directory(utf8_of(target.parent_path()), message) ||
+	    !io::write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), message)) {
+		const std::string &reason = !message.empty() ? message : error.message;
+		core_.refuse_now(CoreFinding::DocumentWrite,
+		                 "The mission's text table " + table + " was not made" + (reason.empty() ? std::string(".") : ": " + reason),
+		                 mission);
+		return std::string();
+	}
+	core_.note("Created " + relative);
+	core_.update_files({relative});
+	core_.chores().made("New file " + relative, {relative}, {});
+	return relative;
+}
+
+void DocumentSet::create_string(const EditorRequest &request, const Document &document, const FieldUse &use,
+                                const std::string &text) {
+	const auto refuse = [&](const std::string &why) { core_.refuse_now(CoreFinding::DocumentValue, why, document.path()); };
+	// A number that forms a key in the section of the mission's own table (FieldUse::key_prefix, the scope
+	// "TABLE.BIN/Section"), never the table the game reads in its place (scope_alternate: MEDMSSN.BIN).
+	const size_t slash = use.scope.find('/');
+	if (use.picks != ReferenceKind::TextId || !use.key_prefix || !*use.key_prefix || slash == std::string::npos)
+		return refuse("This field forms no string key: there is no string to make for it.");
+	const std::string table_name = use.scope.substr(0, slash), section = use.scope.substr(slash + 1);
+	const AssetEntry *held = view_.project.scan ? view_.project.scan->find(table_name) : nullptr;
+	const std::string table_path = held ? held->relative_path : make_mission_text_table(document.path());
+	if (table_path.empty()) return;
+	if (!document_for(table_path)) {
+		const std::string was = view_.documents.active;
+		open_document(request::open_document(table_path));
+		if (!was.empty() && document_for(was)) activate(was);
+		core_.touch(ViewConcern::Selection);
+	}
+	Document *table = records_for(table_path);
+	const DocumentType *type = table ? document_type_for(table->kind()) : nullptr;
+	if (!table || !type || !type->define_symbol) return refuse("The mission's text table " + table_path + " did not open.");
+	// The next free number: the lowest from the field's first (and from 1) whose key the section lacks, compared
+	// without case as the game's lookup compares [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250].
+	const auto *strings = dynamic_cast<const StringsDocument *>(table);
+	std::set<std::string> keys;
+	if (strings) {
+		const rtxt::File held_table = strings->table();
+		const size_t index = held_table.section_index(section);
+		if (index != size_t(-1))
+			for (const rtxt::Entry *entry : held_table.get_section_entries(uint32_t(index))) keys.insert(strutil::to_upper(entry->key));
+	}
+	int64_t number = std::max<int64_t>(1, use.key_first);
+	const auto key_of = [&](int64_t n) {
+		char key[64];
+		std::snprintf(key, sizeof(key), "%s%03lld", use.key_prefix, static_cast<long long>(n));
+		return std::string(key);
+	};
+	while (number <= use.key_last && keys.count(strutil::to_upper(key_of(number)))) ++number;
+	if (number > use.key_last) return refuse("The section " + section + " of " + table_name + " has no free key left.");
+	ReferenceSubject made;
+	made.kind = ReferenceKind::TextId;
+	made.target = key_of(number);
+	made.scope = basename_of(table_path) + "/" + section;
+	PlannedFix planned;
+	if (!type->define_symbol(*table, made, planned) || planned.edits.empty())
+		return refuse("The string " + made.target + " cannot be added to " + table_path + ".");
+	// The key's string, its text set in the same step.
+	Edit words;
+	words.address = {planned.edits.back().address.row, planned.edits.back().address.kind, batch_made(planned.edits.size() - 1)};
+	words.field = "text";
+	words.value = text;
+	planned.edits.push_back(std::move(words));
+	if (!apply_edits(*table, planned.edits, false)) return;
+	Document *edited = records_for(request.path);
+	if (!edited) return;
+	Edit set;
+	set.address = request.address;
+	set.field = request.field;
+	set.value = number;
+	apply_edits(*edited, {set}, false);
 }
 
 void DocumentSet::revert_to_saved(const EditorRequest &request) {
@@ -1275,7 +1375,7 @@ bool sets_one_record(const std::vector<Edit> &edits) {
 // gesture, until it ends). A batch of Removes alone is what the type makes of removing those
 // records (Document::removal_edits, S14: a mission's marker takes the stops that visit it with
 // it), refused as the type refuses it (document.collection), nothing applied.
-bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &requested) {
+bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &requested, bool select_made) {
 	last_edit_ok_ = false;
 	// A file an import makes is the import's (DI-30): it lives in the machine's import cache, the next import
 	// makes it again from its source and options (an input changed, another machine's first scan, a Reimport),
@@ -1392,8 +1492,8 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 	// made repairs the selection as any other edit does.
 	const bool made = adds && records && document.revision() != before;
 	if (made) core_.outcome().made = records->last_made();
-	if (made && !records->last_added_records().empty()) {
-		core_.outcome().added = records->last_added_records();
+	if (made && !records->last_added_records().empty()) core_.outcome().added = records->last_added_records();
+	if (made && select_made && !records->last_added_records().empty()) {
 		activate(document.path());
 		view_.documents.selection.select_added(*records);
 	} else if (document.revision() != before) {
@@ -1402,7 +1502,7 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 	// An Add the type found a row for in place of making one (a string table's section of the name
 	// asked, which a lookup reads first): that row selected when the batch made nothing of its own.
 	const NodeId found = records && !records->last_found_rows().empty() ? records->last_found_rows().front() : 0;
-	if (found && !(made && !records->last_added_records().empty())) {
+	if (found && select_made && !(made && !records->last_added_records().empty())) {
 		activate(document.path());
 		view_.documents.selection.select_only(document.path(), records->address_of(found));
 	}

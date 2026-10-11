@@ -67,6 +67,8 @@ enum class RequestFieldId : uint8_t {
 	Alone,
 	Define,
 	PreviewBackground,
+	KeepSelection,
+	Create,
 	kCount,
 };
 

@@ -29,6 +29,7 @@
 #include <editor/documents/mission_sentence.h>
 #include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
+#include <editor/documents/strings_document.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/mission_queries.h>
 #include <editor/session/preferences_store.h>
@@ -194,6 +195,77 @@ int test_board_op() {
 	return 0;
 }
 
+// The chips' requests (S24 A4): an edit_record with keep_selection adds without selecting what it made; Show
+// text's number is a key of the mission's Triggered Text, picked by its words; set_string_text's create makes the
+// next free key in the mission's own table (made from the mission text blank where the project has none, never
+// MEDMSSN.BIN), its text, and sets the field to its number, again the next.
+int test_text_and_selection() {
+	editor_test::TempProjectDir dir("opennova_mission_board_text");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
+	const auto *m = dynamic_cast<const MissionDocument *>(session.document_for("missions/logic.bms"));
+	TEST_EXPECT(m);
+	if (!m) return 1;
+	const std::string path = m->path();
+	const SessionView &v = session.view();
+	const Node *first = m->rows_of(MissionKind::Event)[0];
+	session.handle(request::select_record(path, {first->id, first->kind, 0}));
+	// Show text added with keep_selection: the event stays selected.
+	const LogicType *show = logic_type(true, int32_t(bms::ActionType::OutputText), 0);
+	std::vector<Edit> edits;
+	std::string error;
+	TEST_EXPECT(show && logic_add_edits(*m, first->id, *show, SIZE_MAX, edits, error));
+	EditorRequest add = request::edit_record(path, edits);
+	add.keep_selection = true;
+	editor_test::handle_to_end(session, add);
+	TEST_EXPECT(v.documents.selection.primary == NodeAddress({first->id, first->kind, 0}) && v.documents.selection.records.size() == 1);
+	const std::vector<Document::Collection> lists = m->collections_of({first->id, first->kind, 0});
+	TEST_EXPECT(lists.size() == 2 && lists[1].ids.size() == 2);
+	const NodeAddress action{first->id, node_kind(MissionKind::Action), lists[1].ids[1]};
+	// Its number a key of the mission's Triggered Text.
+	const FieldSchema *param1 = nullptr;
+	for (const FieldSchema &field : m->fields(action.kind))
+		if (field.id == "param1") param1 = &field;
+	TEST_EXPECT(param1);
+	if (!param1) return 1;
+	const FieldUse use = m->field_on(action, *param1);
+	TEST_EXPECT(use.picks == ReferenceKind::TextId && use.key_prefix && std::string(use.key_prefix) == "ID" &&
+	            same(use.scope, "LOGIC.BIN/Triggered Text") && same(use.scope_alternate, "MEDMSSN.BIN"));
+	// The project has no LOGIC.BIN: New text makes it, the key ID001 in a new Triggered Text section, the field 1.
+	TEST_EXPECT(!v.project.scan->find("logic.bin"));
+	EditorRequest create = request::set_string_text(path, action, "param1", "Get to the bridge");
+	create.create = true;
+	editor_test::handle_to_end(session, create);
+	const AssetEntry *table = v.project.scan->find("logic.bin");
+	TEST_EXPECT(table && !v.project.scan->find("medmssn.bin"));
+	if (!table) return 1;
+	const auto *strings = dynamic_cast<const StringsDocument *>(session.document_for(table->relative_path));
+	TEST_EXPECT(strings);
+	if (!strings) return 1;
+	TEST_EXPECT(same(strings->table().get_in_section("Triggered Text", "ID001"), "Get to the bridge"));
+	Value value;
+	TEST_EXPECT(m->get(action, "param1", value) && value == Value(int64_t(1)));
+	TEST_EXPECT(v.documents.active == path && v.documents.selection.primary == NodeAddress({first->id, first->kind, 0}));
+	// Again: the next free key.
+	create.values = {{"text", "Hold the line"}};
+	editor_test::handle_to_end(session, create);
+	TEST_EXPECT(same(strings->table().get_in_section("Triggered Text", "ID002"), "Hold the line"));
+	TEST_EXPECT(m->get(action, "param1", value) && value == Value(int64_t(2)));
+	// A field that forms no key: refused.
+	EditorRequest wrong = request::set_string_text(path, {first->id, first->kind, 0}, "delay", "x");
+	wrong.create = true;
+	const ActionOutcome refused = editor_test::handle_to_end(session, wrong);
+	TEST_EXPECT(m->get(action, "param1", value) && value == Value(int64_t(2)));
+	(void)refused;
+	return 0;
+}
+
 // The op table (S24 S0): the query's op param takes exactly the table's tokens, each answered by its own row.
 int test_op_table() {
 	const EditorQueryRow &row = editor_query_row(EditorQueryKind::MissionLogic);
@@ -306,6 +378,7 @@ int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	if (test_cards() != 0) return 1;
 	if (test_board_op() != 0) return 1;
+	if (test_text_and_selection() != 0) return 1;
 	if (test_op_table() != 0) return 1;
 	return test_retail();
 }

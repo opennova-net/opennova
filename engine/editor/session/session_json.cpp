@@ -1047,6 +1047,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		request.preview_background = background;
 		return true;
 	}
+	case F::KeepSelection: return flag_of(json, token, request.keep_selection, error);
+	case F::Create: return flag_of(json, token, request.create, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1169,6 +1171,8 @@ bool field_to_json(
 	case F::PreviewBackground:
 		out = json_string(preview_background_token(request.preview_background.value_or(kDefaultPreviewBackground)));
 		return request.preview_background.has_value();
+	case F::KeepSelection: out = boolean(request.keep_selection); return request.keep_selection;
+	case F::Create: out = boolean(request.create); return request.create;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

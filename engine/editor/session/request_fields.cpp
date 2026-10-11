@@ -284,6 +284,16 @@ constexpr RequestField kFields[] = {
 			"before the preference), grey (a mid grey, the default), light (a pale grey) or checker (two greys' "
 			"squares, through which alpha shows). A mission's, an environment's, a terrain's and a menu's picture "
 			"draws the game's own." },
+	{ F::KeepSelection, "keep_selection", J::Boolean,
+			"edit_record's batch leaves the selection as it is (S24: a value set from an Event board chip, a line "
+			"added between two): what it adds is not selected and its document not made the active one (left out: "
+			"what it adds is selected)." },
+	{ F::Create, "create", J::Boolean,
+			"set_string_text makes the string first (S24, Show text's New text...): the next free key of the field's "
+			"form (Triggered Text's ID%03i: the lowest number from 1 the section lacks) added to the section the game "
+			"looks it up in, in the mission's own table (<mission>.bin, made from the mission text blank where the "
+			"project has none; never MEDMSSN.BIN, the table the game reads in its place), its text values.text, and "
+			"the field set to that number." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");
