@@ -509,7 +509,7 @@ static int test_pick() {
 	            error.find("an area") != std::string::npos);
 	gathered.requests.clear();
 	TEST_EXPECT(rig.map()->command(context, "pick", { areas[1]->id }, gathered, error) && gathered.requests.size() == 2 &&
-	            gathered.requests[0].kind == EditorRequestKind::EditRecord &&
+	            gathered.requests[0].kind == EditorRequestKind::EditRecord && gathered.requests[0].keep_selection &&
 	            gathered.requests[1].kind == EditorRequestKind::SetWorkspace);
 	TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
 	rig.pump();

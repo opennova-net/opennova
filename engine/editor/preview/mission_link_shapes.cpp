@@ -229,7 +229,10 @@ void mission_pick_requests(const std::string &path, const MissionPickFrame &pick
 	edit.address = pick.record;
 	edit.field = mission_param_field(pick.slot);
 	edit.value = pick.values[size_t(mark)];
-	out.request(request::edit_record(path, std::vector<Edit>{ edit }));
+	// The selection stands (keep_selection): the chip's record stays the one the board and the Inspector show.
+	EditorRequest set = request::edit_record(path, std::vector<Edit>{ edit });
+	set.keep_selection = true;
+	out.request(std::move(set));
 	mission_pick_end(path, out);
 }
 
