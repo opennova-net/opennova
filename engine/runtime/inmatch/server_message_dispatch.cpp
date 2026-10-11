@@ -903,7 +903,8 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone, ServerLogRecorder *server_log) {
+		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
+		ServerLogRecorder *server_log) {
 	std::vector<ProtocolMessage> replies;
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
@@ -983,8 +984,10 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
 	conn.link.respawn_pending = false;
 	world.match.set_player_respawn_pending(player->handle, false);
-	conn.link.respawn_delay_seconds = 0;
-	conn.link.spawn_target_hold_seconds = 0;
+	// No +360 store; the +364 hold clears only for a raw handle other than
+	// 0xFFFF, resolvable or not [orig: Server_ProcessPlayerDeath @0x51786B..0x517872].
+	if (requested_handle != world::EntityHandle::kInvalid)
+		conn.link.spawn_target_hold_seconds = 0;
 	conn.link.downed_revive_seconds = 0;
 	conn.link.medic_request_active = false;
 	conn.link.death_cause_revivable = false;
@@ -1713,8 +1716,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const world::EntityHandle target_handle = target != nullptr
 						? target->handle
 						: world::EntityHandle{};
+				// The leg takes the stored handle [orig: Server_ProcessClientRequestRespawn,
+				//  the Server_ProcessPlayerDeath calls @0x519CE3/@0x519D7F/@0x519DC8/@0x519DE8].
 				std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
-						config, conn, *world, target_handle,
+						config, conn, *world, target_handle, target_handle.packed,
 						inputs.server_ctx != nullptr ? inputs.server_ctx->logs.profile : nullptr);
 				replies.insert(replies.end(),
 				               std::make_move_iterator(deployment.begin()),

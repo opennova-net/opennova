@@ -335,7 +335,7 @@ bool check_deploy_seeds_protection_and_armory_state() {
 	inmatch::GameConfig config;
 	world.preround_delay_seconds = 4;
 	const std::vector<ProtocolMessage> replies =
-			inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+			inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
 	if (!expect(!replies.empty() && entity->health > 0 && entity->damage_state == 620,
 			"the deploy leg seeds the 620-tick protection after the spawn-state reset"))
 		return false;
@@ -347,7 +347,7 @@ bool check_deploy_seeds_protection_and_armory_state() {
 	entity->alive = false;
 	entity->health = 0;
 	entity->flags |= w::kEntityFlagDead;
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
 	return expect(!conn.link.preround_loadout_latch,
 			"a deploy outside pre-round leaves the latch clear");
 }
@@ -1287,7 +1287,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 		body->flags |= w::kEntityFlagDead;
 		body->alive = false;
 		body->health = 0;
-		return inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {});
+		return inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
 	};
 	auto loadout_body = [](const std::vector<ProtocolMessage> &replies) {
 		for (const ProtocolMessage &m : replies)
