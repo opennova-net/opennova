@@ -629,4 +629,19 @@ MissionScript mission_script(const SessionView &view, const std::string &mission
 	return out;
 }
 
+std::vector<size_t> mission_script_events(const SessionView &view, const std::string &mission_path) {
+	std::vector<size_t> out;
+	const AssetGraph *graph = view.findings.graph.get();
+	const MissionScript script = mission_script(view, mission_path);
+	if (!graph || script.path.empty()) return out;
+	const std::string scope = mission_event_scope(mission_path);
+	for (const GraphEdge *edge : graph->references_of(script.path)) {
+		if (edge->kind != ReferenceKind::MissionEventLatch || !strutil::iequals(edge->scope, scope)) continue;
+		const std::optional<int> index = strutil::parse_int(edge->value);
+		if (index && *index >= 0 && std::find(out.begin(), out.end(), size_t(*index)) == out.end()) out.push_back(size_t(*index));
+	}
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
 } // namespace opennova::editor

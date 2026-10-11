@@ -145,6 +145,9 @@ private:
 	// Go (DI-18): Back and Forward, Go to file, Go to name, Find in project, Go to definition, Find usages.
 	void draw_go_menu(const SessionView &v);
 	void draw_build_menu(const SessionView &v);
+	// The editor's own items at the head of the pass's Windows menu (Dear ImGui appends the pass's to it): the
+	// active mission's Logic pane (S24), ticked while it shows.
+	void draw_windows_items(const SessionView &v, const DocumentBase *document);
 	// Go to definition and Find usages of `subject`: true when it went (a request raised).
 	bool go_to_definition(const JumpSubject &subject);
 	bool find_usages(const SessionView &v, const JumpSubject &subject);

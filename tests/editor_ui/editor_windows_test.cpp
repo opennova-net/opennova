@@ -2906,6 +2906,8 @@ constexpr Group kGroups[] = {
 	{"animation", run_animation_tests},   {"model", run_model_tests},
 	{"project", run_project_tests},       {"navigation", run_navigation_tests},
 	{"shortcuts", run_shortcuts_tests},
+	{"board", run_board_tests},           {"space", run_space_tests},
+	{"live", run_live_tests},
 };
 
 } // namespace

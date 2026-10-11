@@ -18,21 +18,36 @@ struct ViewportContext;
 // the ground, its height, the heading it faces) and of an area trigger (its place, its four edges),
 // each planned into Sets of the fields the file writes, in the file's own units: `x`, `y`, `z` in
 // mission units (x east, y north, z up, absolute: a mission has no ground-snap flag), `yaw` whole
-// degrees in 0..359, an area's `x_min`, `x_max`, `y_min`, `y_max`. One batch a sample, every edit
-// carrying the gesture, so a drag is one undo step.
+// degrees in 0..359, an area's `x_min`, `x_max`, `y_min`, `y_max` (S24: its corners, two of them at
+// once, and where its flags bound z, its `z_min` and `z_max`). One batch a sample, every edit carrying
+// the gesture, so a drag is one undo step.
 //
 // Every sample is planned from the records as the gesture's press found them (MissionPressed), so a
 // sample is absolute and the gesture's fold keeps the first value before and the last after per row.
 // A field gets a Set only where the sample changes what the row holds now: a position's 16.16 word,
 // a yaw's degrees. A sample that changes nothing plans nothing.
 
-enum class MissionHandle : uint8_t { Move, Height, Yaw, XMin, XMax, YMin, YMax };
+enum class MissionHandle : uint8_t {
+	Move, Height, Yaw, XMin, XMax, YMin, YMax,
+	// S24: an area's corners (the south-west, south-east, north-east and north-west), its bottom and its top.
+	XMinYMin, XMaxYMin, XMaxYMax, XMinYMax, ZMin, ZMax,
+};
 // "move", "height", "yaw" (an entity's; an area's move), "x_min", "x_max", "y_min", "y_max" (an
-// area's edges).
+// area's edges), "x_min_y_min", "x_max_y_min", "x_max_y_max", "x_min_y_max" (its corners), "z_min",
+// "z_max" (its bottom and its top).
 bool mission_handle_from_token(const char *token, MissionHandle &out);
 const char *mission_handle_token(MissionHandle handle);
-// The handle is an area's edge.
-inline bool mission_handle_is_edge(MissionHandle handle) { return handle >= MissionHandle::XMin; }
+// The handle is an area's edge, its corner, its bottom or top, any of them.
+inline bool mission_handle_is_edge(MissionHandle handle) {
+	return handle >= MissionHandle::XMin && handle <= MissionHandle::YMax;
+}
+inline bool mission_handle_is_corner(MissionHandle handle) {
+	return handle >= MissionHandle::XMinYMin && handle <= MissionHandle::XMinYMax;
+}
+inline bool mission_handle_is_level(MissionHandle handle) {
+	return handle == MissionHandle::ZMin || handle == MissionHandle::ZMax;
+}
+inline bool mission_handle_is_area(MissionHandle handle) { return handle >= MissionHandle::XMin; }
 
 // A record as a gesture's press found it: an entity (its position and its yaw), or an area (its
 // bounds: min and max on x, y and z; its anchor, x and y, the middle of its footprint).
@@ -86,9 +101,11 @@ bool mission_turn_centre(const std::vector<MissionPressed> &pressed, double out[
 // the fields that moved alone: what a drag cancelled (Esc) writes under its gesture.
 void mission_restore_edits(const Document &document, const std::vector<MissionPressed> &pressed, uint64_t gesture,
 		std::vector<Edit> &out);
-// An area's edge to the mission coordinate `to` (snapped to `snap` metres), never past its opposite
-// edge. False for a record that is no area, or a handle that is no edge.
-bool mission_area_edge_edits(const Document &document, const MissionPressed &area, MissionHandle edge, double to,
-		float snap, uint64_t gesture, std::vector<Edit> &out);
+// An area's handle to the mission point `to` (x, y, z; each coordinate the handle moves snapped to `snap`
+// metres), never past the opposite bound: an edge its one bound (x for the west and east edges, y for the
+// south and north), a corner its two, the bottom and the top z_min and z_max. False for a record that is no
+// area, or a handle that is none of an area's.
+bool mission_area_handle_edits(const Document &document, const MissionPressed &area, MissionHandle handle,
+		const double to[3], float snap, uint64_t gesture, std::vector<Edit> &out);
 
 } // namespace opennova::editor

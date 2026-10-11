@@ -255,6 +255,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlayAlreadyRunning, code("play.already_running", G::Play) },
 	{ C::PlayBootMissing, code("play.boot_missing", G::Play, F::Requirement) },
 	{ C::PlayCrashed, code("play.crashed", G::Play) },
+	// A play_debug the running game cannot be asked (S24 Live): no game reports the mission, an event it does not
+	// report, a variable past its bank.
+	{ C::PlayDebug, code("play.debug", G::Play) },
 	// What the game's log said it looked for and did not find (ADR 0046 DI-27), each kept until the next
 	// Play of its mode: a file it opens by its own name (the requirement's fixes where the manifest has a
 	// row of it), a name a file of the project names (the reference's fixes, on that file's record), and

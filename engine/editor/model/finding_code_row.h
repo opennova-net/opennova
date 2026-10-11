@@ -429,6 +429,7 @@ enum class CoreFinding {
 	PlayAlreadyRunning,
 	PlayBootMissing,
 	PlayCrashed,
+	PlayDebug,
 	PlayFileMissing,
 	PlayInstallCopy,
 	PlayInstallMissing,

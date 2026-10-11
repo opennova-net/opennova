@@ -120,6 +120,17 @@ public:
 	// EventTrigger_ResolveZoneTriggerRefs @0x453000]); 0 for none.
 	NodeId entity_holder(int64_t ssn) const;
 	NodeId zone_holder(int64_t id) const;
+	// The first marker of record type 6088 (kNumberedMarkerType) holding a wp_number, in the markers' order: the
+	// one a teleport and a teammate's pickup find (an effect plays at each) [orig:
+	// EventAction_SpawnParticleEffect @0x4540e0]; 0 for none.
+	NodeId numbered_holder(int64_t number) const;
+	// The stops a marker is (S24, what a pick in the views asks of each mark every frame): each as its path's
+	// number and its place among that path's stops, in the paths' order; none for a marker no stop names.
+	struct StopPlace {
+		int path = 0;
+		size_t place = 0;
+	};
+	const std::vector<StopPlace> &stops_of(const Node &marker) const;
 	// The rows by their place (ADR 0046 S15: what the display names read per drawn row), from the same
 	// lookups, made once per state of the rows: the row of a kind at an index among that kind's rows (a
 	// stop's marker, a parameter's event, a path's number), null past them; a row's index among its
@@ -199,6 +210,16 @@ protected:
 	// sub_44D460 @ 0x44d460]; a reference to a record the edit removed refuses the edit with its site.
 	bool renumber_references(const StagedRows &rows, const RecordShift &shift,
 	                         std::vector<Edit> &sites, std::string &error) const override;
+	// A path's stops, which records name by their place (mission_stop_namers), never by an index the
+	// graph keeps.
+	std::vector<std::vector<NodeId>> place_lists(const Node &row) const override;
+	// A path's stops added, removed or moved: every record naming a stop of that path by its place
+	// (mission_stop_namers) renumbered to the place its stop stands at now (RecordShift::now), in the
+	// same step (ADR 0046 S24). A record naming a stop the edit removed keeps its number, which names
+	// the stop that took that place (or none past the path's end): never refused, the status line counts
+	// them (mission_removed_stop_namers).
+	bool renumber_places(const StagedRows &rows, NodeId row, size_t list, const RecordShift &shift,
+	                     std::vector<Edit> &sites, std::string &error) const override;
 	// A payload of rows as rows of the file, told apart from the rows there: an SSN a row there
 	// holds given the next free one (never 10000), a zone id a row holds the lowest free one in 1..99,
 	// every parameter and rider of the copies that named the old value following it; a copied event's
@@ -226,6 +247,8 @@ private:
 		std::unordered_map<NodeId, int> locations;
 		std::vector<size_t> groups;
 		std::unordered_set<NodeId> route; // the markers the player's route stops at
+		std::unordered_map<int32_t, NodeId> numbered; // the first type-6088 marker of each wp_number
+		std::unordered_map<NodeId, std::vector<StopPlace>> stops; // each marker's stops
 	};
 	const Lookups &lookups() const;
 
@@ -240,6 +263,29 @@ bool is_mission_kind(AssetKind kind);
 // the largest the rows hold, never the player's 10000 (mission::ssn_after) [bms-event-runtime-re.md
 // 7.3: the single-player lookups take 10000 for the player].
 int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows);
+// The record type of the markers a teleport, an effect and a teammate's pickup find by their wp_number [orig:
+// EventAction_SpawnParticleEffect @0x4540e0, `result[20] == 6088`].
+inline constexpr int32_t kNumberedMarkerType = 6088;
+
+// A record naming a stop of a path by its place among the path's stops, never by its marker (ADR 0046 S24):
+// a RedirectGroupTo's or RedirectSingleTo's node, a Group or Single AtWaypoint trigger's stop (its third
+// parameter, where its second names the path; docs/mission/bms-event-runtime-re.md 3a), and the stop an
+// entity walking the path starts at (its wp_number beside its waypoint_id [orig: Entity_SpawnFromBMSRecord
+// @0x40e9f0]; docs/world/world-wac-ai-re.md 3.2). A waypoint marker's own place is its membership of the
+// path (D-MIS-6), which no field of it names.
+struct MissionStopNamer {
+	NodeAddress record;
+	const char *field = "";
+	int64_t place = 0;
+};
+// The records of `row` (an entity, or an event's triggers and actions) naming a stop of path `path`
+// (1..122; none for another number), appended to `out`.
+void mission_stop_namers(const Node &row, int path, std::vector<MissionStopNamer> &out);
+// How many records name a stop that the Removes among `edits` take (a stop, or a marker whose stops
+// removal_edits takes with it) by its place, as the document stands before them: what a removal keeps
+// naming that place (MissionDocument::renumber_places), which the status line says.
+size_t mission_removed_stop_namers(const MissionDocument &document, const std::vector<Edit> &edits);
+
 // The pool an entity row's records load into, the game's pool index (mission::entity_pool: organics 0,
 // items 1, buildings 2, markers 3), the order its lookups by SSN scan them in [orig: Entity_KillByNetId
 // @0x43DBD0]; -1 for a kind no pool holds.
@@ -266,6 +312,11 @@ std::string mission_clip_moved(const std::string &payload, double east, double n
 // The scope the mission's symbols are defined in and looked up by: its file name, upper case
 // ("ASH_I5B.BMS").
 std::string mission_scope(const DocumentBase &document);
+// The scope its events are found by their index in by a script's event() (ReferenceKind::MissionEventLatch):
+// the mission's scope's section kMissionEventSection, apart from the zone ids and SSNs a number names too
+// ("ASH_I5B.BMS/EVENTS"); `mission` a mission's file name.
+inline constexpr const char *kMissionEventSection = "EVENTS";
+std::string mission_event_scope(const std::string &mission);
 
 // The dialog bank the mission loads, as the game names it: the name its header's second terrain slot (the
 // original editor's cnv_file) holds where it holds one, else the mission's own, with .dbf (runtime/mission/

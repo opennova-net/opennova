@@ -69,10 +69,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_logic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_sentence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_uses.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_links.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_reads.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_file_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_labels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_variable_names.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/name_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mns_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document.cpp
@@ -205,6 +207,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_label_picks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_options.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_link_shapes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_palette.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_place.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_poses.cpp
@@ -318,6 +321,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/live_logic.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/live_logic_link.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_confirmation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_fixes.cpp
@@ -364,6 +369,16 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_bank_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/wave_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/font_viewport.cpp
+    # round S24 (ADR 0046, the mission logic): the mission queries apart from the table (S0); each lane's own
+    # files under its line
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_queries.cpp
+    # S24 lane A (the board)
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_recipes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_board.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_board_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_variables.cpp
+    # S24 lane B (logic in the views)
+    # S24 lane C (names and live logic)
 )
 
 # ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the
@@ -435,6 +450,18 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/music_bank_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/particle_key_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/wave_inspector.cpp
+        # round S24 (ADR 0046, the mission logic): the Logic pane, the outline's row menu, the live hook (S0);
+        # each lane's own files under its line
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_board_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_board_live.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_variable_name.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_row_menu.cpp
+        # S24 lane A (the board)
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_card.cpp
+        # S24 lane B (logic in the views)
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_mark_menu.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_drag.cpp
+        # S24 lane C (names and live logic)
     )
     target_link_libraries(opennova_editor PRIVATE opennova_imgui)
     target_compile_definitions(opennova_editor PUBLIC OPENNOVA_EDITOR_UI=1)
