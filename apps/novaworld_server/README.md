@@ -234,6 +234,13 @@ The website's sessions (next section) take four more:
 | `ONNET_API_PROXY_ONLY` | off | `1` answers every `/api` request (`/api` and everything under it, a route or not) with 403 `{"error":"proxy_required"}` unless its TCP peer is one of `ONNET_TRUSTED_PROXIES`, so the website's API is reached only through the proxy that applies the edge checks, never straight on the HTTP port. The retail routes a stock client reaches on that port directly (the `NW*.dll` pages, the `.gsb` feeds, the templates and static files) stay open. Prod sets it (`deploy/env/app.prod.env`): its nginx reaches the server from `127.0.0.1`, the one trusted proxy. With it on and no trusted proxy, every `/api` request is refused (logged at boot). Leave it off for the dev site. |
 | `ONNET_BOOTSTRAP_ADMIN` | none | An existing account's username, given the `admin` role at boot while no account is an admin; with an admin present it does nothing (logged either way, a name no account has is a warning). How the first site admin is made; later ones through `PUT /api/admin/users/<id>` `{"role":"admin"}`. Pass it through the vault-injected secrets file, never a committed one, and remove it once it ran (DEPLOY.md). |
 
+Migrations: each boot applies the `backend/migrations` files (`MIGRATIONS_DIR`) that
+`_schema_migrations` does not name yet. It goes by file name only, so a migration
+edited in place never runs again on an existing database. The service database is
+disposable: a PR that edits one says "the service DB must be reset" in its notes, and
+its deploy is `./deploy/run.sh app reset-db` ([DEPLOY.md](../../DEPLOY.md),
+"Resetting the service database").
+
 ## Website sessions and roles
 
 The NovaWorld site logs players in with their NovaWorld account (`web_access.*`,
