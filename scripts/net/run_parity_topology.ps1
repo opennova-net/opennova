@@ -8,7 +8,7 @@ param(
     [string] $Mission,
 
     [Parameter(Mandatory = $true)]
-    [ValidateRange(32786, 32789)]
+    [ValidateRange(1, 65535)]
     [int] $Port,
 
     [Parameter(Mandatory = $true)]
@@ -267,6 +267,19 @@ function Get-FileSha256OrNull {
 $RepoCommit = (& git -C $Repo rev-parse HEAD 2>$null)
 $RepoDirty = [bool] (& git -C $Repo status --porcelain --untracked-files=no 2>$null)
 $GdextensionDll = Join-Path $Repo "godot\bin\libopennova.windows.template_debug.x86_64.dll"
+# A retail LAN host binds only inside its game.cfg mplanserverportmin..max
+# (stock JO:CA: 32768..32787), so a port outside the SERVER copy's own range can
+# never host a retail cell.
+$serverPortBounds = @{}
+foreach ($key in @("mplanserverportmin", "mplanserverportmax")) {
+    $match = Select-String -LiteralPath (Join-Path $ServerDir "game.cfg") `
+        -Pattern ('^\s*' + $key + '\s*=\s*"?(\d+)"?') | Select-Object -First 1
+    if ($match) { $serverPortBounds[$key] = [int] $match.Matches[0].Groups[1].Value }
+}
+if ($serverPortBounds.Count -eq 2 -and ($Port -lt $serverPortBounds["mplanserverportmin"] -or
+        $Port -gt $serverPortBounds["mplanserverportmax"])) {
+    throw "Port $Port is outside the SERVER copy's LAN host range $($serverPortBounds["mplanserverportmin"])..$($serverPortBounds["mplanserverportmax"]) (game.cfg mplanserverportmin/max)."
+}
 # A retail host advertises its game.cfg game_name verbatim (S2C 0x2C/0x7B), so
 # the session name every cell expects is the SERVER copy's own, exactly.
 $serverGameName = Select-String -LiteralPath (Join-Path $ServerDir "game.cfg") `

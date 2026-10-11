@@ -100,8 +100,10 @@ and `... --out <corpus> items.def` (from git-bash, set `MSYS_NO_PATHCONV=1` or
 the name a retail host advertises (JO:CA ships `Untitled`).
 
 Run the command once for each of `RR`, `RO`, `OR`, and `OO`, changing `RunId`
-for every cell while holding all other case inputs fixed. Ports supported by
-the current retail automation are 32786 through 32789. Numeric game type zero
+for every cell while holding all other case inputs fixed. A retail LAN host
+binds only inside its `game.cfg` `mplanserverportmin`..`mplanserverportmax`
+(stock JO:CA: 32768 through 32787); the runner refuses a port outside the
+SERVER copy's range. Numeric game type zero
 is valid Deathmatch; `auto` is discovery-only and is not a verdict-bearing
 input. Run the command from a real terminal: the Godot console wrapper stalls
 from a shell without a console, and a verdict-bearing run needs the wrapper's

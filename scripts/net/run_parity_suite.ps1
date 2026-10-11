@@ -144,8 +144,10 @@ function Read-ParityCases {
                 ([bool] $case.exercise_input -or [bool] $case.auto_deploy)) {
             throw "Parity case '$($case.id)': deploy_hold can neither exercise input nor auto-deploy"
         }
-        if ([int] $case.port -lt 32786 -or [int] $case.port -gt 32789) {
-            throw "Parity case '$($case.id)': the retail automation supports ports 32786-32789"
+        # The runner checks the port against the SERVER copy's game.cfg LAN
+        # host range (stock JO:CA 32768-32787).
+        if ([int] $case.port -lt 1 -or [int] $case.port -gt 65535) {
+            throw "Parity case '$($case.id)': port must be 1-65535"
         }
     }
     return $table

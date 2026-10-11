@@ -214,7 +214,7 @@ present. The verdicts and `suite-summary.json` land in
 arguments and runs nothing.
 
 A case (`parity-cases.json`, `opennova.parity-cases.v1`) gives `id`,
-`mission`, `game_type`, `port` (32786-32789), `readiness` (`in_match` or
+`mission`, `game_type`, `port` (inside the SERVER copy's `mplanserverportmin`..`max`, stock 32768-32787), `readiness` (`in_match` or
 `deploy_hold`), `steady_seconds`, `exercise_input` and `auto_deploy`. The table
 fixes `expansion` (`jox01`) and `host_session_name`, which must equal the
 SERVER copy's `game.cfg` `game_name` byte for byte (`"Untitled "`, with the
