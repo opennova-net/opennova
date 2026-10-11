@@ -468,6 +468,21 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     const bool was_mounted = occ->mounted;
     if (occ->mounted)
         world.vehicles.detach(player); // [orig: @0x435BCE]
+    // The UseGun attach, which the authority's process calls with forceAttach 0,
+    // refuses a player holding no weapon out of a session, after the detach above
+    // and ahead of its camera reset, so a body that rode elsewhere stays off. Out
+    // of a session the one player body is the local player, whose EquippedSlot
+    // is LocalPlayer::equipped_slot_held (D-WPN-50 for where it differs).
+    // [orig: Entity_ProcessVehicleAttach -- forceAttach 0 on the
+    //  authority @0x435C9C, the call @0x435caa; Entity_AttachToUseGunSlot @0x546B80
+    //  -- is_in_session @0x546bf6..0x546bfc, Flags & 0x100 @0x546bfe..0x546c05,
+    //  EquippedSlot @0x546c07..0x546c0d, the 0 return @0x546c0f..0x546c14, ahead
+    //  of the camera reset @0x546ba4]
+    if (seat.type == SeatType::Gunner && !world.rules.mp_session &&
+            ((occ->flags | occ->engine_flags) & kEntityFlagPlayer) != 0 &&
+            player == world.cached.local_player && world.local_player_state != nullptr &&
+            !world.local_player_state->equipped_slot_held())
+        return was_mounted;
     // A refused control seat attaches nothing [orig: @0x435c09 / @0x435c40];
     // as apply_confirmed_mount reports, the relation changed only if the body
     // left a seat first.

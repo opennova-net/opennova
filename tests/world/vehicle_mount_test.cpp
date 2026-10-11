@@ -16,6 +16,7 @@
 #include <runtime/world/entity_pose.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/world/local_player.h>
+#include <runtime/world/player_loadout.h> // local_loadout_rebuild
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_mount.h>
@@ -710,27 +711,124 @@ void test_live_pose_provider_and_static_fallback() {
     }
 }
 
-// An unarmed player's USE onto a UseGun seat is refused outside a session:
-// single player, the in-process listen server included, is outside it; in a
-// session the same USE mounts the gun.
-// [orig: Entity_AttachToUseGunSlot @0x546b80 -- `cmp g_NapiNPCtx.is_in_session`
-//  @0x546BF6, the player bit @0x546BFE, the EquippedSlot test @0x546C07;
-//  SinglePlayer_StartMission @0x561AF0 leaves is_in_session clear]
+// An unarmed player's UseGun attach is refused outside a session: single
+// player, the in-process listen server included, is outside it; in a session
+// the same USE mounts the gun. The refusal is the attach's, which the
+// authority's process calls with forceAttach 0 after the request turned the
+// body and after the process left the seat the body rode: a refused USE has
+// turned the body, and a seated passenger who picks the UseGun ends unmounted.
+// [orig: Entity_RequestVehicleAttach @0x43655F..0x4365CE (the turn);
+//  Entity_ProcessVehicleAttach -- the detach @0x435bce, forceAttach 0
+//  @0x435C9C; Entity_AttachToUseGunSlot @0x546b80 -- `cmp
+//  g_NapiNPCtx.is_in_session` @0x546BF6, the player bit @0x546BFE, the
+//  EquippedSlot test @0x546C07; SinglePlayer_StartMission @0x561AF0 leaves
+//  is_in_session clear]
+// The rig's seat 0 as a UseGun carrying WPN_USEGUN, and the player's bit.
+void arm_usegun_seat(Rig &r) {
+    r.veh().seats[0].type = SeatType::Gunner;
+    r.veh().primary_weapon = "WPN_USEGUN";
+    r.w.tables.weapons.entries.resize(1);
+    r.w.tables.weapons.entries[0].name = "WPN_USEGUN";
+    r.w.tables.weapons.entries[0].valid = true;
+    r.player().flags |= kEntityFlagPlayer;
+    r.player().engine_flags |= kEntityFlagPlayer;
+}
+
+// Arms the local player the way the boot's Player_InitPlayer leg does: the
+// spawn kit's select stores the equipped slot, and no shell install has run,
+// so the weapon FSM stays inactive. [orig: Player_InitPlayer @0x4E15F0 --
+// Player_SelectWeaponSlot @0x4E1995, its EquippedSlot store @0x4DD704]
+void arm_at_boot(Rig &r, LocalPlayer &local) {
+    WeaponTable &t = r.w.tables.weapons;
+    if (t.ammo_class_names.empty()) {
+        t.ammo_class_names.emplace_back("");
+        t.ammo_class_caps.push_back(0);
+    }
+    WeaponTableEntry m4;
+    m4.name = "WPN_M4AUTO";
+    m4.valid = true;
+    m4.category = 3;
+    m4.clipsize = 30;
+    m4.startrounds = 210;
+    m4.maxclips = 10;
+    m4.ammo_class_count = 1;
+    m4.weapon_class_slot = 1;
+    m4.ammo_class_id = 0;
+    t.entries.push_back(m4);
+    local.loadout.spawn_kit = {WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
+    local.loadout.spawn_kit_set = true;
+    local_loadout_rebuild(r.w, local.loadout, local.weapon, local.inventory,
+            local.inventory_valid, /*select_spawn_default=*/true);
+}
+
 void test_unarmed_usegun_needs_the_session() {
+    constexpr int32_t kStale = 0x0F000000;
+    const auto arm_gun = [](Rig &r) { arm_usegun_seat(r); };
     for (const bool mp : {false, true}) {
         Rig r(2.0f);
-        r.veh().seats[0].type = SeatType::Gunner;
-        r.veh().primary_weapon = "WPN_USEGUN";
-        r.w.tables.weapons.entries.resize(1);
-        r.w.tables.weapons.entries[0].name = "WPN_USEGUN";
-        r.w.tables.weapons.entries[0].valid = true;
-        r.player().flags |= kEntityFlagPlayer;
-        r.player().engine_flags |= kEntityFlagPlayer;
+        arm_gun(r);
         r.w.rules.mp_session = mp;
         LocalPlayer local(r.w);
-        CHECK(!local.weapon.active);
+        r.w.local_player_state = &local;
+        local.input.look_heading = kStale;
+        CHECK(!local.equipped_slot_held());
         CHECK(local.toggle_mount() == mp);
         CHECK(r.player().mounted == mp);
+        // The request turned the look to the gun either way.
+        CHECK(local.input.look_heading != kStale);
+        r.w.local_player_state = nullptr;
+    }
+    {
+        // Seated as a passenger, the unarmed player picks the UseGun: the
+        // process leaves the passenger seat, then the attach refuses.
+        Rig r(2.0f);
+        arm_gun(r);
+        LocalPlayer local(r.w);
+        r.w.local_player_state = &local;
+        CHECK(r.w.vehicles.request_attach(r.player_h, {r.veh_h, 1, SeatType::Passenger}));
+        CHECK(r.player().mounted && r.player().mount_seat == 1);
+        CHECK(r.w.vehicles.request_attach(r.player_h, {r.veh_h, 0, SeatType::Gunner}));
+        CHECK(!r.player().mounted);
+        CHECK(!r.veh().seats[0].occupant.valid() && !r.veh().seats[1].occupant.valid());
+        // Armed, the same pick seats the gunner.
+        arm_at_boot(r, local);
+        CHECK(local.equipped_slot_held() && !local.weapon.active);
+        CHECK(r.w.vehicles.request_attach(r.player_h, {r.veh_h, 0, SeatType::Gunner}));
+        CHECK(r.player().mounted && r.player().mount_seat == 0);
+        r.w.local_player_state = nullptr;
+    }
+}
+
+// The gate reads the local player's EquippedSlot as it stands, not the shell's
+// weapon install: a single player whose spawn select equipped a slot at the
+// boot, ahead of the mission start's WAC pass and of any shell install, is
+// admitted to a UseGun by the script mount; an unarmed one is refused; and an
+// unarmed one still holding a borrowed carrier slot (a seat-2/3 detach keeps
+// it until the queued switch back commits) is admitted.
+// [orig: Player_InitPlayer, the call Game_StartMission @0x525BBC ->
+//  Player_SelectWeaponSlot @0x4E1995 (EquippedSlot @0x4DD704), ahead of
+//  WacScript_InitAndLoad @0x525CB3; WacScript_TryMountEntityToVehicle @0x4F7186;
+//  Entity_AttachToUseGunSlot @0x546C07; Entity_DetachFromVehicle @0x43565F]
+void test_script_mount_reads_the_boot_equipped_slot() {
+    for (int arm = 0; arm < 3; ++arm) {
+        Rig r(2.0f);
+        arm_usegun_seat(r);
+        r.veh().seats.resize(1); // the UseGun alone
+        r.player().net_id = 55;
+        r.player().item_type_index = 9;
+        AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+        body.inf.active = true;
+        body.health = 150;
+        body.slot.f[36] = int32_t(r.veh_h.packed) + 1;
+        LocalPlayer local(r.w);
+        r.w.local_player_state = &local;
+        if (arm == 1) arm_at_boot(r, local);
+        if (arm == 2) local.weapon.usegun_slot_active = true;
+        CHECK(!local.weapon.active);
+        CHECK(local.equipped_slot_held() == (arm != 0));
+        CHECK(r.w.commands.use_boarding_target(55) == (arm != 0));
+        CHECK(r.player().mounted == (arm != 0));
+        r.w.local_player_state = nullptr;
     }
 }
 
@@ -4153,6 +4251,7 @@ int main() {
     test_entity_pose_seat_bone_lookup();
     test_toggle_nearest_seat();
     test_unarmed_usegun_needs_the_session();
+    test_script_mount_reads_the_boot_equipped_slot();
     test_best_seat_walks_vehicle_children();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
     test_post_epoch_player_spawn_discovers_nearby_seat_immediately();
