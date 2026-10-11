@@ -3,8 +3,6 @@
 # Ported from the opennova-int reference deployment with these deltas:
 #   - the EC2 key pair is created from a vault-sourced public key
 #     (TF_VAR_ssh_public_key) instead of referencing a pre-existing pair
-#   - a dedicated unproxied `nw` A record (TTL 300) anchors the launcher's
-#     DNS fallback for server-IP resolution
 #   - IMDSv2 is required on the instance
 #   - the backups bucket gets a lifecycle policy (expire after 90 days)
 #   - user_data installs docker + the compose plugin ONLY (the target host
@@ -29,6 +27,8 @@ provider "aws" {
   region = var.region
 }
 
+# Kept only so the apply that retires the downloads certificate (it lived in
+# us-east-1 for CloudFront) can destroy it; drop it after that apply.
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"
@@ -50,10 +50,8 @@ locals {
 
   allocate_eip = var.allocate_eip
 
-  dns_enabled           = var.cloudflare_zone_id != "" && var.cloudflare_domain != ""
-  dns_root_name         = "@"
-  dns_nw_name           = "nw"
-  downloads_dns_enabled = local.dns_enabled
+  dns_enabled   = var.cloudflare_zone_id != "" && var.cloudflare_domain != ""
+  dns_root_name = "@"
 
   public_ip = local.allocate_eip ? aws_eip.server[0].public_ip : aws_instance.server.public_ip
 }
@@ -348,136 +346,14 @@ resource "cloudflare_ruleset" "edge_auth" {
   }
 }
 
-# The launcher's resolution anchor: ALWAYS unproxied (game traffic is UDP and
-# hosts-file entries need the raw IP), short TTL so cutovers propagate fast.
-resource "cloudflare_record" "nw" {
-  count   = local.dns_enabled ? 1 : 0
-  zone_id = var.cloudflare_zone_id
-  name    = local.dns_nw_name
-  content = local.public_ip
-  type    = "A"
-  ttl     = 300
-  proxied = false
-
-  comment = "Managed by Terraform - NovaWorld server anchor"
-}
-
-# ---------------------------------------------------------------------------
-# Downloads bucket + CDN (shared)
-# ---------------------------------------------------------------------------
-
-resource "aws_s3_bucket" "downloads" {
-  count         = local.manage_shared ? 1 : 0
-  bucket        = var.downloads_bucket_name
-  force_destroy = false
-
-  tags = merge(var.tags, {
-    Name = "${local.name}-downloads"
-  })
-}
-
-resource "aws_s3_bucket_cors_configuration" "downloads" {
-  count  = local.manage_shared ? 1 : 0
-  bucket = aws_s3_bucket.downloads[0].id
-
-  cors_rule {
-    allowed_methods = ["GET", "HEAD"]
-    allowed_origins = ["*"]
-    allowed_headers = ["*"]
-    max_age_seconds = 300
-  }
-}
-
-resource "aws_s3_bucket_versioning" "downloads" {
-  count  = local.manage_shared ? 1 : 0
-  bucket = aws_s3_bucket.downloads[0].id
-
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_public_access_block" "downloads" {
-  count  = local.manage_shared ? 1 : 0
-  bucket = aws_s3_bucket.downloads[0].id
-
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
-}
-
-resource "aws_s3_bucket_policy" "downloads_public_read" {
-  count  = local.manage_shared ? 1 : 0
-  bucket = aws_s3_bucket.downloads[0].id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowPublicRead"
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = ["s3:GetObject"]
-        Resource  = "${aws_s3_bucket.downloads[0].arn}/*"
-      }
-    ]
-  })
-}
-
+# The account-wide S3 public access block: every bucket here is private.
 resource "aws_s3_account_public_access_block" "this" {
   count = local.manage_shared ? 1 : 0
 
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
-}
-
-resource "aws_iam_user" "launcher_ci" {
-  count = local.manage_shared && var.create_ci_user ? 1 : 0
-
-  name = "${local.name}-launcher-ci"
-
-  tags = merge(var.tags, {
-    Purpose = "github-actions-launcher-upload"
-  })
-}
-
-resource "aws_iam_user_policy" "launcher_ci" {
-  count = local.manage_shared && var.create_ci_user ? 1 : 0
-
-  name = "${local.name}-launcher-ci-policy"
-  user = aws_iam_user.launcher_ci[0].name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
-        Resource = aws_s3_bucket.downloads[0].arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:GetObjectTagging",
-          "s3:PutObjectTagging",
-          "s3:DeleteObjectTagging"
-        ]
-        Resource = "${aws_s3_bucket.downloads[0].arn}/*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_access_key" "launcher_ci" {
-  count = local.manage_shared && var.create_ci_user ? 1 : 0
-
-  user = aws_iam_user.launcher_ci[0].name
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # ---------------------------------------------------------------------------
@@ -600,126 +476,4 @@ resource "aws_iam_role_policy_attachment" "backup" {
 resource "aws_iam_instance_profile" "backup" {
   name = "${local.name}-instance-profile"
   role = aws_iam_role.backup.name
-}
-
-# ---------------------------------------------------------------------------
-# ACM cert + CloudFront for the downloads domain (shared)
-# ---------------------------------------------------------------------------
-
-resource "aws_acm_certificate" "downloads" {
-  provider = aws.us_east_1
-  count    = local.downloads_dns_enabled ? 1 : 0
-
-  domain_name       = var.downloads_bucket_name
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
-  }
-
-  tags = merge(var.tags, {
-    Name = "${local.name}-downloads-cert"
-  })
-}
-
-resource "cloudflare_record" "downloads_cert_validation" {
-  for_each = local.downloads_dns_enabled ? {
-    for dvo in aws_acm_certificate.downloads[0].domain_validation_options : dvo.domain_name => dvo
-  } : {}
-
-  zone_id = var.cloudflare_zone_id
-  name    = replace(trimsuffix(each.value.resource_record_name, "."), ".${var.cloudflare_domain}", "")
-  type    = each.value.resource_record_type
-  content = trimsuffix(each.value.resource_record_value, ".")
-  ttl     = 300
-  proxied = false
-
-  comment = "ACM validation for downloads certificate"
-}
-
-resource "aws_acm_certificate_validation" "downloads" {
-  provider = aws.us_east_1
-  count    = local.downloads_dns_enabled ? 1 : 0
-
-  certificate_arn         = aws_acm_certificate.downloads[0].arn
-  validation_record_fqdns = [for record in cloudflare_record.downloads_cert_validation : record.hostname]
-}
-
-resource "aws_cloudfront_distribution" "downloads" {
-  count = local.downloads_dns_enabled ? 1 : 0
-
-  enabled             = true
-  comment             = "Downloads distribution"
-  price_class         = "PriceClass_100"
-  wait_for_deployment = false
-
-  aliases = [var.downloads_bucket_name]
-
-  # The downloads bucket is public-read, so CloudFront fetches over plain HTTPS
-  # from the bucket's regional REST endpoint — a custom HTTP origin, not an S3
-  # origin. (s3_origin_config with an empty origin_access_identity does not
-  # round-trip through the aws provider and produces a perpetual in-place diff.)
-  origin {
-    domain_name = aws_s3_bucket.downloads[0].bucket_regional_domain_name
-    origin_id   = "downloads-s3-origin"
-
-    custom_origin_config {
-      http_port              = 80
-      https_port             = 443
-      origin_protocol_policy = "https-only"
-      origin_ssl_protocols   = ["TLSv1.2"]
-    }
-  }
-
-  default_cache_behavior {
-    target_origin_id       = "downloads-s3-origin"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    compress               = true
-
-    forwarded_values {
-      query_string = false
-
-      headers = ["Origin"]
-
-      cookies {
-        forward = "none"
-      }
-    }
-
-    min_ttl     = 0
-    default_ttl = 3600
-    max_ttl     = 86400
-  }
-
-  restrictions {
-    geo_restriction {
-      restriction_type = "none"
-    }
-  }
-
-  viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate.downloads[0].arn
-    ssl_support_method       = "sni-only"
-    minimum_protocol_version = "TLSv1.2_2021"
-  }
-
-  tags = merge(var.tags, {
-    Name = "${local.name}-downloads-cdn"
-  })
-
-  depends_on = [aws_acm_certificate_validation.downloads]
-}
-
-resource "cloudflare_record" "downloads" {
-  count   = local.downloads_dns_enabled ? 1 : 0
-  zone_id = var.cloudflare_zone_id
-  name    = "downloads"
-  content = aws_cloudfront_distribution.downloads[0].domain_name
-  type    = "CNAME"
-  ttl     = 300
-  proxied = false
-
-  comment = "CloudFront distribution for downloads"
 }

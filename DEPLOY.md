@@ -41,27 +41,14 @@ op item create --vault OpenNova-Deploy --title ghcr --category 'Secure Note' \
 op item create --vault OpenNova-Deploy --title app-prod --category 'Server' \
   admin_api_token="$(openssl rand -hex 24)" \
   admin_basic_auth_user=admin \
-  admin_basic_auth_password="$(openssl rand -hex 16)" \
-  expansion_publish_token="$(openssl rand -hex 24)"
+  admin_basic_auth_password="$(openssl rand -hex 16)"
 
 # 1Password-generated SSH key the EC2 instance trusts.
 op item create --vault OpenNova-Deploy --title ssh --category 'SSH Key'
-
-# GitHub provisioning (infra/github): manages the expansion repos + their
-# Actions secrets. token = a PAT with repo + admin:repo_hook scopes on the
-# owner org; owner = the GitHub org/user that owns the expansion repos.
-op item create --vault OpenNova-Deploy --title github --category 'API Credential' \
-  token="ghp_replace_with_a_repo_admin_PAT" \
-  owner=opennova-net
 ```
 
-`app-prod`'s `expansion_publish_token` field and the `github` item feed only the
-`infra/github` stack, which is pending retirement (ADR 0048, `TODO.md`); the
-server no longer reads them.
-
 The `op://` reference paths the toolbox reads are listed in
-`deploy/env/terraform.env.tpl`, `deploy/env/app.prod.env.tpl` and
-`deploy/env/github.tfvars.json.tpl`.
+`deploy/env/terraform.env.tpl` and `deploy/env/app.prod.env.tpl`.
 
 ## 2. Mint the service-account token
 
@@ -90,8 +77,7 @@ export OP_SERVICE_ACCOUNT_TOKEN=ops_...        # the only secret you handle
 ```
 
 `secrets check` resolves every reference without printing a value. Fix any miss
-before continuing (the `github.tfvars.json` line also needs the `expansions-ci`
-item that step 3 creates, so on a first deployment it fails until then).
+before continuing.
 
 ## 3. Stand up the infrastructure
 
@@ -101,7 +87,7 @@ instance size, region, the proxied toggle) come from this file:
 
 ```bash
 cp infra/aws/terraform.tfvars.example infra/aws/terraform.tfvars
-# edit downloads_bucket_name / backup_bucket_name etc. for your deployment
+# edit backup_bucket_name etc. for your deployment
 ```
 
 Then plan and apply:
@@ -180,42 +166,7 @@ promotes the account only while no account is an admin and logs what it did; rem
 both lines after that deploy (the server warns at every boot while the setting is
 present).
 
-`infra apply` also creates the `launcher_ci` IAM user (S3 upload to the
-downloads bucket; pending retirement with the launcher, ADR 0048) and outputs its keys. Store them in the vault so the GitHub
-stack (next step) can hand them to the expansion repos:
-
-```bash
-op item create --vault OpenNova-Deploy --title expansions-ci --category 'API Credential' \
-  access_key_id="$(./deploy/run.sh infra output -raw ci_user_access_key_id)" \
-  secret_access_key="$(./deploy/run.sh infra output -raw ci_user_secret_access_key)"
-```
-
-## 4. Provision the GitHub stack (expansion repos, pending retirement)
-
-ADR 0048 removed the server's expansion publish callback and the web catalogue;
-this stack stays only until the infrastructure retirement in `TODO.md`. Skip it
-on a new deployment, and do not `github apply` on an existing one: it regenerates
-`backend/seed/0002_expansions.generated.sql`, which the server can no longer seed.
-
-The expansion content repos and their Actions secrets are managed by
-`infra/github`. Because the repos already exist, adopt them once with an import,
-then apply:
-
-```bash
-./deploy/run.sh github import                  # one time — adopt revx02/onjo01/ondx01
-./deploy/run.sh github plan                    # should show no creates/destroys
-./deploy/run.sh github apply                   # set the Actions secrets
-```
-
-State lives in its own 1Password document (`tfstate-github`). The Actions secrets
-let each expansion repo's build workflow upload its package to S3 and call the
-server's `/admin/internal/.../publish` endpoint (now removed). See
-`infra/github/README.md` for the full pipeline and
-`infra/github/expansion-publish-workflow.yml.example` for the workflow the
-expansion repos copy in. On a brand-new GitHub org with no repos,
-skip `github import` and run `github apply` directly.
-
-## 5. Publish and deploy the images
+## 4. Publish and deploy the images
 
 The server and web images publish to GHCR from CI
 (`.github/workflows/novaworld-images.yml`). Make those packages public once so
@@ -254,7 +205,7 @@ docker build -f deploy/game/Dockerfile -t opennova-game .
 docker run --rm -p 8090:8090 opennova-game          # http://localhost:8090
 ```
 
-## 6. Backups
+## 5. Backups
 
 ```bash
 ./deploy/run.sh backup now                     # sqlite .backup -> S3

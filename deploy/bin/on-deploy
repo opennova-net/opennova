@@ -9,7 +9,6 @@
 #   secrets check                 dry-run every op:// reference
 #   infra plan|apply|destroy      terraform (AWS + Cloudflare)
 #   infra output|list [args...]   terraform output / state list
-#   github import|plan|apply      terraform (expansion repos + Actions secrets)
 #   aws <args...>                 run the AWS CLI with vault credentials
 #   app deploy [--tag SHA] [--game-tag SHA]
 #                                 pull GHCR images + compose up on the target
@@ -24,11 +23,9 @@ set -euo pipefail
 VAULT="${OP_VAULT:-OpenNova-Deploy}"
 SECRETS_DIR="/run/secrets"
 TF_DIR="/workspace/infra/aws"
-GH_TF_DIR="/workspace/infra/github"
 COMPOSE_DIR="/workspace/deploy/compose"
 TF_ENV_TPL="/workspace/deploy/env/terraform.env.tpl"
 APP_ENV_TPL="/workspace/deploy/env/app.prod.env.tpl"
-GH_TFVARS_TPL="/workspace/deploy/env/github.tfvars.json.tpl"
 
 # Progress/diagnostics go to STDERR so stdout stays clean for captured output
 # (e.g. `infra output -raw`, `aws ...` in command substitutions).
@@ -82,8 +79,6 @@ cmd_secrets() {
         && log "  terraform.env.tpl    OK" || { err "  terraform.env.tpl    FAILED"; rc=1; }
       op inject -f -i "$APP_ENV_TPL"  -o /dev/null >/dev/null \
         && log "  app.prod.env.tpl     OK" || { err "  app.prod.env.tpl     FAILED"; rc=1; }
-      op inject -f -i "$GH_TFVARS_TPL" -o /dev/null >/dev/null \
-        && log "  github.tfvars.json   OK" || { err "  github.tfvars.json   FAILED"; rc=1; }
       op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null \
         && log "  ssh private key      OK" || { err "  ssh private key      FAILED"; rc=1; }
       [ "$rc" -eq 0 ] || die "one or more references did not resolve — create the missing vault items (DEPLOY.md §1)"
@@ -127,43 +122,6 @@ cmd_aws() {
       -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
       -e AWS_REGION -e AWS_DEFAULT_REGION \
       "$AWS_CLI_IMAGE" "$@"
-}
-
-# GitHub stack: the expansion repos + their Actions secrets. Separate
-# terraform root (infra/github), separate state document (tfstate-github),
-# different provider (integrations/github). Secrets are op-injected to a tmpfs
-# var-file and passed as -var-file (the repository_secrets map is nested, so a
-# var-file is cleaner than env injection).
-cmd_github() {
-  require_op
-  local action="${1:-plan}"
-  cmd_state pull tfstate-github "$GH_TF_DIR"
-  terraform -chdir="$GH_TF_DIR" init -input=false >/dev/null
-  local varfile
-  varfile="$(inject "$GH_TFVARS_TPL" "$SECRETS_DIR/github.tfvars.json")"
-  log "github terraform $action…"
-  case "$action" in
-    import)
-      # Adopt the pre-existing expansion repos once. Idempotent: skip any
-      # already in state. A fresh org with no repos can skip this and apply.
-      for repo in revx02 onjo01 ondx01; do
-        if terraform -chdir="$GH_TF_DIR" state show \
-             "github_repository.managed[\"$repo\"]" >/dev/null 2>&1; then
-          log "  $repo already in state — skipping"
-        else
-          log "  importing $repo"
-          terraform -chdir="$GH_TF_DIR" import -input=false -var-file="$varfile" \
-            "github_repository.managed[\"$repo\"]" "$repo"
-        fi
-      done
-      cmd_state push tfstate-github "$GH_TF_DIR" ;;
-    plan)
-      terraform -chdir="$GH_TF_DIR" plan -input=false -var-file="$varfile" ;;
-    apply)
-      terraform -chdir="$GH_TF_DIR" apply -input=false -auto-approve -var-file="$varfile"
-      cmd_state push tfstate-github "$GH_TF_DIR" ;;
-    *) die "unknown: github $action (try: import|plan|apply)" ;;
-  esac
 }
 
 # Build the compose invocation for the remote host (DOCKER_HOST=ssh://).
@@ -294,7 +252,7 @@ cmd_state() {
 }
 
 usage() {
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -302,7 +260,6 @@ main() {
   case "$group" in
     secrets) cmd_secrets "$@" ;;
     infra)   cmd_infra "$@" ;;
-    github)  cmd_github "$@" ;;
     aws)     cmd_aws "$@" ;;
     app)     cmd_app "$@" ;;
     backup)  cmd_backup "$@" ;;

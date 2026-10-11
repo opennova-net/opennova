@@ -14,16 +14,18 @@ health. Divergences from the original engine belong in
       gate 8 becomes the protected-pair pin (hits land on the instructor, no damage, the round
       live) and gates 9 to 11 route through the in-game menu's exit and RESTART instead.
       Acceptance: a `mission_playthrough` run on 00TRa through the game MCP passes 11 of 11.
-- [ ] Retire the launcher and expansion-distribution infrastructure ADR 0048 left
-      standing: the `infra/aws` downloads bucket + CloudFront + ACM cert + Cloudflare
-      CNAME, the `launcher_ci` IAM user and its outputs, the unproxied `nw` record, the
-      whole `infra/github` stack (it manages the expansion repos and regenerates
-      `backend/seed/0002_expansions.generated.sql`, whose inserts would now hit the table
-      migration 0007 dropped: logged as "seed FAILED" on every boot and failing the
-      `backend_schema` ctest, so drop that output first), `deploy/bin/on-deploy github`,
-      `deploy/env/github.tfvars.json.tpl`, the `expansion_*` 1Password items, and
-      `infra/github/expansion-publish-workflow.yml.example`. Empty the bucket before `apply`,
-      and keep the expansion repos (`removed` blocks, not destroy).
+- [ ] Apply the launcher and expansion-distribution retirement (the config left the repo
+      with `infra/github`, `on-deploy github` and the downloads/`launcher_ci`/`nw` blocks;
+      the PR body has the commands): drop `downloads_bucket_name` and `create_ci_user` from
+      the local `infra/aws/terraform.tfvars`; empty `downloads.opennova.net` (every version
+      and delete marker); `./deploy/run.sh infra plan` then `apply` (it destroys the bucket
+      set, CloudFront, the ACM cert and its validation record, the `downloads` CNAME, the
+      `nw` record and `launcher_ci`, and turns the account-wide S3 public access block on);
+      delete the `expansions-ci` and `github` items, the `tfstate-github` document and
+      `app-prod`'s `expansion_publish_token` field in 1Password; delete the
+      `LAUNCHER_AWS_*` secrets and the `DOWNLOADS_BUCKET` variable on this repo and the five
+      Actions secrets on revx02/onjo01/ondx01 (the repos stay); then drop the
+      `us_east_1` provider alias in `infra/aws/main.tf`.
 - [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness
       (`run_parity_matrix.ps1`/`generate_parity_manifest.ps1`/`verify_parity_matrix.ps1`
       over `export_parity_corpus.py`) was retired with the Python FFI (ADR 0038; last

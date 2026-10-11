@@ -125,7 +125,7 @@ variable "cloudflare_zone_id" {
 }
 
 variable "cloudflare_domain" {
-  description = "Domain name (e.g. 'example.com'). Creates @, www, and nw records."
+  description = "Domain name (e.g. 'example.com'). Creates the @ and www records."
   type        = string
   default     = ""
 }
@@ -138,24 +138,13 @@ variable "edge_auth_secret" {
 }
 
 variable "cloudflare_web_proxied" {
-  description = "Whether the web records (@ / www) are proxied through Cloudflare. Proxied gives the site Cloudflare TLS; the nw record is ALWAYS unproxied because game traffic is UDP and the launcher resolves it to a raw IP."
+  description = "Whether the web records (@ / www) are proxied through Cloudflare. Proxied gives the site Cloudflare TLS."
   type        = bool
   default     = true
-}
-
-variable "downloads_bucket_name" {
-  description = "S3 bucket name for launcher distribution (e.g. downloads.example.com)."
-  type        = string
 }
 
 variable "backup_bucket_name" {
   description = "S3 bucket for automated database backups."
   type        = string
   default     = "opennova-backups"
-}
-
-variable "create_ci_user" {
-  description = "Whether to provision an IAM user/access key for GitHub Actions launcher uploads"
-  type        = bool
-  default     = true
 }

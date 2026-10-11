@@ -65,7 +65,6 @@ Testing/Temporary/
 # Terraform (state, providers, and operator var-files are never committed; the
 # .terraform.lock.hcl provider pins and *.tfvars.example ARE committed; see DEPLOY.md)
 infra/aws/.terraform/
-infra/github/.terraform/
 *.tfstate
 *.tfstate.*
 terraform.tfvars

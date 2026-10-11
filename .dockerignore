@@ -16,7 +16,6 @@ __pycache__/
 .scratch/
 fixtures/
 infra/aws/.terraform/
-infra/github/.terraform/
 # Terraform state + operator var-files hold real secrets — never into any build
 # context (CI checkouts lack them since they're gitignored; this guards local builds).
 **/*.tfstate
