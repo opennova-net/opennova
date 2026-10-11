@@ -15,6 +15,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mnu_table.h>
+#include <editor/documents/mission_table.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/import/import_plan.h>
 #include <editor/model/document.h>
@@ -227,6 +228,14 @@ constexpr WorkspaceMember kDocument[] = {
 	{ "map", J::Boolean,
 			"A mission's 2D map shown in the Preview window beside its 3D view (S23 C, the Map tool's ask; the Windows "
 			"menu's tick shows the kind shown before): the active document's, until another is made active." },
+	{ "logic", J::Boolean, "A mission's Logic pane (S24, the Event board) shown beside its 3D view, or hidden." },
+	{ "logic_split", J::Number, "The share of the tab a mission's 3D view keeps beside its Logic pane, 0.2 to 0.8 (the pane the rest)." },
+	{ "logic_filter", J::String, "The Event board's filter: the cards whose words hold it.", kTextLongest },
+	{ "logic_folded", J::Integers, "The events the Event board shows folded, each an event of the mission by its identity." },
+	{ "logic_attention", J::Boolean, "Needs attention: the Event board shows only the cards it notes something on." },
+	{ "pick", J::Object,
+			"Pick in view (S24): {record, slot}, a trigger's or an action's parameter (slot 0 to 3) that what is clicked "
+			"next in the 3D view or the map is picked for; {} or null (as the view reports none) ends it." },
 };
 
 constexpr WorkspacePartRow kParts[] = {
@@ -305,6 +314,8 @@ bool typed(const JsonValue &value, WorkspaceJson json) {
 			for (const io::JsonMember &member : value.object)
 				if (!member.value.is_string() && !io::json_exact_whole(member.value)) return false;
 			return true;
+		case J::Number:
+			return value.is_number() && std::isfinite(value.number);
 	}
 	return false;
 }
@@ -323,6 +334,8 @@ const char *type_words(WorkspaceJson json) {
 			return "an array of whole numbers, 0 or more";
 		case J::Object:
 			return "an object of strings and whole numbers";
+		case J::Number:
+			return "a number";
 	}
 	return "a string";
 }
@@ -925,6 +938,53 @@ bool set_document(Change &change, const JsonValue &part) {
 		if (index->number > 255.0) return change.refuse(std::string("document.") + member + " is a palette index, 0 to 255.", at);
 		(std::string(member) == "remap_from" ? shown.remap_from : shown.remap_to) = int(index->number);
 	}
+	// A mission's Logic pane and its pick (S24).
+	constexpr const char *kLogicMembers[] = { "logic", "logic_split", "logic_filter", "logic_folded", "logic_attention", "pick" };
+	for (const char *member : kLogicMembers)
+		if (part.get(member) && !mission) return change.refuse(at + " has no Logic pane: a mission's shows beside its 3D view.", at);
+	if (const JsonValue *logic = part.get("logic")) shown.logic = logic->boolean;
+	if (const JsonValue *split = part.get("logic_split")) {
+		if (split->number < WorkspaceView::kLogicSplitLeast - 1e-6 || split->number > WorkspaceView::kLogicSplitMost + 1e-6)
+			return change.refuse("document.logic_split is the 3D view's share of the tab, 0.2 to 0.8.", at);
+		shown.logic_split = float(split->number);
+	}
+	if (const JsonValue *filter = part.get("logic_filter")) shown.logic_filter = filter->string;
+	if (const JsonValue *folded = part.get("logic_folded")) {
+		const Document *records = records_of(*document);
+		std::vector<NodeId> ids;
+		for (const JsonValue &id : folded->array) {
+			const NodeAddress event = records ? records->address_of(NodeId(id.number)) : NodeAddress{};
+			if (!event.row || event.child || event.kind != node_kind(MissionKind::Event))
+				return change.refuse(at + " has no event " + std::to_string(uint64_t(id.number)) + " to fold.", at);
+			ids.push_back(event.row);
+		}
+		std::sort(ids.begin(), ids.end());
+		ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+		shown.logic_folded = std::move(ids);
+	}
+	if (const JsonValue *attention = part.get("logic_attention")) shown.logic_attention = attention->boolean;
+	if (const JsonValue *pick = part.get("pick")) {
+		WorkspaceView::Pick asked;
+		for (const io::JsonMember &member : pick->object)
+			if (member.key != "record" && member.key != "slot")
+				return change.refuse("document.pick takes a record and a slot, not \"" + member.key + "\".", at);
+		const JsonValue *record = pick->get("record");
+		if (record && !record->is_number())
+			return change.refuse("document.pick's record is a trigger's or an action's identity, a number.", at);
+		if (!record && pick->get("slot")) return change.refuse("document.pick's slot goes with its record.", at);
+		if (record && record->number != 0.0) {
+			const Document *records = records_of(*document);
+			const NodeAddress address = records ? records->address_of(NodeId(record->number)) : NodeAddress{};
+			if (!address.child || (address.kind != node_kind(MissionKind::Trigger) && address.kind != node_kind(MissionKind::Action)))
+				return change.refuse(at + " has no trigger or action " + std::to_string(uint64_t(record->number)) + " to pick for.", at);
+			const JsonValue *slot = pick->get("slot");
+			if (!slot || !slot->is_number() || slot->number > 3.0)
+				return change.refuse("document.pick's slot is a parameter's, 0 to 3.", at);
+			asked.record = address;
+			asked.slot = int(slot->number);
+		}
+		shown.pick = asked;
+	}
 	bool beside_moved = false;
 	if (const JsonValue *map = part.get("map")) {
 		const DocumentTypeId type = asset_kind_row(document->kind()).document;
@@ -939,7 +999,10 @@ bool set_document(Change &change, const JsonValue &part) {
 	const bool moved = beside_moved || held.filter != shown.filter || held.kinds != shown.kinds || held.all_rows != shown.all_rows ||
 	                   held.sort != shown.sort || held.every != shown.every || held.inspector_filter != shown.inspector_filter ||
 	                   held.new_window_type != shown.new_window_type || held.remove_screen != shown.remove_screen ||
-	                   held.remap_from != shown.remap_from || held.remap_to != shown.remap_to;
+	                   held.remap_from != shown.remap_from || held.remap_to != shown.remap_to || held.logic != shown.logic ||
+	                   held.logic_split != shown.logic_split || held.logic_filter != shown.logic_filter ||
+	                   held.logic_folded != shown.logic_folded || held.logic_attention != shown.logic_attention ||
+	                   held.pick != shown.pick;
 	held = std::move(shown);
 	return moved;
 }
@@ -1045,6 +1108,24 @@ JsonValue document_json(const SessionView &view, const DocumentBase &document, c
 	out.set("remap_from", number(shown.remap_from));
 	out.set("remap_to", number(shown.remap_to));
 	out.set("map", flag(!view.documents.beside.empty() && view.documents.beside == document.path()));
+	// A mission's Logic pane and its pick (S24): the pick by its record's identity and its slot, null for none.
+	if (document.kind() == AssetKind::Mission) {
+		out.set("logic", flag(shown.logic));
+		out.set("logic_split", number(double(shown.logic_split)));
+		out.set("logic_filter", text(shown.logic_filter));
+		JsonValue folded = JsonValue::make_array();
+		for (const NodeId id : shown.logic_folded) folded.push(number(double(id)));
+		out.set("logic_folded", std::move(folded));
+		out.set("logic_attention", flag(shown.logic_attention));
+		if (shown.pick.active()) {
+			JsonValue pick = JsonValue::make_object();
+			pick.set("record", number(double(shown.pick.record.child ? shown.pick.record.child : shown.pick.record.row)));
+			pick.set("slot", number(double(shown.pick.slot)));
+			out.set("pick", std::move(pick));
+		} else {
+			out.set("pick", JsonValue::make_null());
+		}
+	}
 	out.set("active", flag(document.path() == view.documents.active));
 	return out;
 }
@@ -1071,6 +1152,8 @@ const char *workspace_json_token(WorkspaceJson json) {
 			return "integer[]";
 		case J::Object:
 			return "object";
+		case J::Number:
+			return "number";
 	}
 	return "string";
 }
@@ -1117,7 +1200,9 @@ bool check_workspace_change(const JsonValue &json, std::string &error) {
 				error = "\"workspace." + member.key + "\" takes no \"" + value.key + "\" (it takes " + tokens_of(*part) + ").";
 				return false;
 			}
-			if (!typed(value.value, row->json)) {
+			// A pick none: null, as the view reports it, is {} (its member's words say so).
+			const bool none = value.value.is_null() && std::string(row->token) == "pick";
+			if (!none && !typed(value.value, row->json)) {
 				error = "\"workspace." + member.key + "." + value.key + "\" must be " + type_words(row->json) + ".";
 				return false;
 			}
@@ -1305,6 +1390,29 @@ void workspace_tidies(SessionCore &core) {
 		moved = true;
 	}
 	for (auto &[path, shown] : workspace.documents) {
+		// S24: a pick whose trigger or action is gone (removed, or its document read again) ends.
+		if (shown.pick.active()) {
+			const DocumentBase *document = open_document(view, path);
+			const Document *records = document ? records_of(*document) : nullptr;
+			Document::Placement at;
+			if (!records || !records->placement(shown.pick.record, at)) {
+				shown.pick = WorkspaceView::Pick();
+				moved = true;
+			}
+		}
+		// S24: an event folded on the board that is gone (removed, or its document read again) leaves the folds.
+		if (!shown.logic_folded.empty()) {
+			const DocumentBase *document = open_document(view, path);
+			const Document *records = document ? records_of(*document) : nullptr;
+			const size_t held = shown.logic_folded.size();
+			shown.logic_folded.erase(std::remove_if(shown.logic_folded.begin(), shown.logic_folded.end(),
+			                                        [&](NodeId id) {
+				                                        const NodeAddress event = records ? records->address_of(id) : NodeAddress();
+				                                        return !event.row || event.child || event.kind != node_kind(MissionKind::Event);
+			                                        }),
+			                         shown.logic_folded.end());
+			moved = moved || shown.logic_folded.size() != held;
+		}
 		if (!shown.remove_screen) continue;
 		const DocumentBase *document = open_document(view, path);
 		if (document && removable_screen(*document, shown.remove_screen)) continue;

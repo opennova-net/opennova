@@ -9,11 +9,14 @@
 #include <optional>
 
 #include <editor/assets/project_asset_source.h>
+#include <editor/documents/mission_document.h>
+#include <editor/documents/mission_labels.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_overlay.h>
+#include <editor/preview/mission_place.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/request_factories.h>
@@ -82,7 +85,14 @@ std::vector<MissionPressed> selected_pressed(const MissionCanvasFrame &frame, bo
 
 // The handles the primary carries, nearest the pointer first in this order.
 constexpr MissionHandle kPrimaryHandles[] = { MissionHandle::Yaw, MissionHandle::Height, MissionHandle::XMin,
-	MissionHandle::XMax, MissionHandle::YMin, MissionHandle::YMax };
+	MissionHandle::XMax, MissionHandle::YMin, MissionHandle::YMax, MissionHandle::XMinYMin, MissionHandle::XMaxYMin,
+	MissionHandle::XMaxYMax, MissionHandle::XMinYMax, MissionHandle::ZMin, MissionHandle::ZMax };
+
+// Words with their first letter upper case ("group 4" -> "Group 4").
+std::string capitalized_words(std::string words) {
+	if (!words.empty() && words[0] >= 'a' && words[0] <= 'z') words[0] = char(words[0] - 'a' + 'A');
+	return words;
+}
 
 // A number of metres as the readout says it.
 std::string metres(double value) {
@@ -141,7 +151,7 @@ MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportC
 			grab.what = MissionGrab::What::Handle;
 			grab.handle = handle;
 			grab.through = at;
-			if (mission_handle_is_edge(handle)) {
+			if (mission_handle_is_area(handle)) {
 				MissionPressed area;
 				viewport.pressed(primary.record, area);
 				grab.pressed.push_back(area);
@@ -218,6 +228,19 @@ void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext 
 	// edit meanwhile (one through the wire).
 	const bool writes_places = (gesture_.dragging() && grab_.what == MissionGrab::What::Handle) || gesture_.nudging();
 	titles_.hold(writes_places ? gesture_.token() : 0);
+	// S24: the selected logic record's links where the picture is the document as it is, and how many events
+	// name each mark.
+	links_ = MissionLinkScene();
+	badges_.clear();
+	const MissionDocument *document = dynamic_cast<const MissionDocument *>(frame_.document);
+	if (document && frame_.current && options.links) {
+		if (frame_.logic.row) links_ = mission_link_scene(*document, mission.scene(), frame_.logic);
+		counts_.follow(*document);
+		if (counts_.named()) {
+			badges_.resize(frame_.marks.size());
+			for (size_t i = 0; i < frame_.marks.size(); ++i) badges_[i] = counts_.events(frame_.marks[i].record.row);
+		}
+	}
 }
 
 void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out) {
@@ -259,13 +282,16 @@ void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in,
 		grab_ = mission_canvas_grab(frame_, context, in, under);
 		// What a click there takes: the press's, else (no device to say) the sphere about an entity.
 		grab_.click = under >= 0 ? under : mission_canvas_under(frame_, in, MissionPick::Click);
-		// Under a tool: a press takes no mark and draws no marquee (its click places, its drag draws the
-		// Area tool's box).
-		if (tool() != MissionTool::Select && grab_.what != MissionGrab::What::Pan && grab_.what != MissionGrab::What::Orbit) {
+		// Under a tool, or (S24) while a pick waits: a press takes no mark and draws no marquee (its click places or
+		// picks, its drag draws the Area tool's box).
+		if ((tool() != MissionTool::Select || frame_.pick.active()) && grab_.what != MissionGrab::What::Pan &&
+				grab_.what != MissionGrab::What::Orbit) {
 			const CanvasPoint from = grab_.from;
+			const int click = grab_.click;
 			grab_ = MissionGrab();
 			grab_.from = grab_.to = from;
-			if (tool() == MissionTool::Area) grab_.what = MissionGrab::What::Area;
+			grab_.click = click;
+			if (tool() == MissionTool::Area && !frame_.pick.active()) grab_.what = MissionGrab::What::Area;
 		}
 	}
 	if (gesture_.pressed() && !in.down) {
@@ -333,6 +359,11 @@ void MissionCanvas::keys_(const ViewportContext &, const CanvasInput &in, Canvas
 	const CanvasKeyboard &keyboard = in.keyboard;
 	if (!keyboard.focused || gesture_.pressed() || !frame_.document) return;
 	const std::string &path = frame_.document->path();
+	// S24: Esc while a pick waits ends it.
+	if (keyboard.escape && frame_.pick.active()) {
+		mission_pick_end(path, out);
+		return;
+	}
 	// Esc under a tool is the tool's (the view goes back to Select); else it selects nothing.
 	if (keyboard.escape && tool() == MissionTool::Select && !frame_.records.empty()) {
 		out.request(request::select_record(path, NodeAddress()));
@@ -340,9 +371,11 @@ void MissionCanvas::keys_(const ViewportContext &, const CanvasInput &in, Canvas
 	}
 	if (!frame_.editable || !frame_.current || frame_.records.empty()) return;
 	if (keyboard.remove) {
-		// The selected records removed, one batch: the type repairs what named them.
+		// The selected records removed, one batch: the type repairs what named them. S24: a selected stop takes its
+		// marker (which takes the stops that visit it).
 		std::vector<Edit> edits;
-		for (const NodeAddress &record : frame_.records) {
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(frame_.document);
+		for (const NodeAddress &record : mission ? mission_view_removals(*mission, frame_.records) : frame_.records) {
 			Edit edit;
 			edit.operation = EditOperation::Remove;
 			edit.address = record;
@@ -427,11 +460,19 @@ void MissionCanvas::drag_(const ViewportContext &context, const CanvasInput &in,
 				in.keys.ctrl ? 0.0f : frame_.turn_snap, gesture_.token(), edits, viewport.options().stick, frame_.device);
 		break;
 	}
+	case MissionHandle::ZMin:
+	case MissionHandle::ZMax: {
+		// S24: the area's bottom or top, in the plane through the handle that faces the eye.
+		PreviewVec3 at;
+		if (!camera.on_view_plane(x, y, in.width, in.height, grab_.through, at)) return;
+		const double to[3] = { 0.0, 0.0, double(at.y) };
+		mission_area_handle_edits(*frame_.document, held, grab_.handle, to, snap, gesture_.token(), edits);
+		break;
+	}
 	default: {
 		double ground[3];
 		if (!grab_.grounded || !mission_ground_point(context, camera, x, y, grab_.ground[2], ground)) return;
-		const bool east = grab_.handle == MissionHandle::XMin || grab_.handle == MissionHandle::XMax;
-		mission_area_edge_edits(*frame_.document, held, grab_.handle, ground[east ? 0 : 1], snap, gesture_.token(), edits);
+		mission_area_handle_edits(*frame_.document, held, grab_.handle, ground, snap, gesture_.token(), edits);
 		break;
 	}
 	}
@@ -443,6 +484,17 @@ void MissionCanvas::drag_(const ViewportContext &context, const CanvasInput &in,
 void MissionCanvas::release_(CanvasRequests &out) {
 	const std::string &path = gesture_.path();
 	const MissionTool now = tool();
+	if (frame_.pick.active() && grab_.what != MissionGrab::What::Pan && grab_.what != MissionGrab::What::Orbit) {
+		// S24 pick mode: a click on a mark that fills the slot sets it and ends the pick; a click on nothing ends it;
+		// a click on a mark that does not fill it, nothing (the hint says what to click).
+		if (!gesture_.dragging() && frame_.current) {
+			if (frame_.pick.fills_mark(grab_.click)) mission_pick_requests(path, frame_.pick, grab_.click, out);
+			else if (grab_.click < 0) mission_pick_end(path, out);
+		}
+		gesture_.release(out);
+		grab_ = MissionGrab();
+		return;
+	}
 	if (grab_.what == MissionGrab::What::Marquee && gesture_.dragging()) {
 		// The records in the box, one selection: nearest last, the primary; joined as the keys say. A
 		// box that takes nothing selects nothing.
@@ -596,7 +648,11 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 	overlay.marks = &frame_.marks;
 	// Nothing is under the pointer while it looks or drags.
 	const bool busy = looking_ || gesture_.dragging();
-	overlay.hover = busy || tool() != MissionTool::Select ? -1 : mission_canvas_under(frame_, in, MissionPick::Click);
+	overlay.hover = busy || (tool() != MissionTool::Select && !frame_.pick.active()) ? -1
+	                                                                                : mission_canvas_under(frame_, in, MissionPick::Click);
+	// S24 pick mode: a mark hovers only where it fills the slot; each candidate rung.
+	if (frame_.pick.active() && !frame_.pick.fills_mark(overlay.hover)) overlay.hover = -1;
+	overlay.pick = frame_.pick.active() ? &frame_.pick.fills : nullptr;
 	overlay.primary = frame_.primary;
 	overlay.selected = &frame_.selected;
 	std::vector<NodeId> rows;
@@ -656,6 +712,15 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 			overlay.box = true;
 		overlay.box_snap = frame_.snap;
 	}
+	overlay.links = &links_;
+	overlay.badges = &badges_;
+	// The groups' legend by the mission's words for them (S24: a group's name where the mission gives one).
+	std::unique_ptr<MissionNames> group_names;
+	if (const MissionDocument *mission = dynamic_cast<const MissionDocument *>(frame_.document);
+			mission && viewport.options().color_by == MissionColorBy::Group) {
+		group_names = mission_label_names(*mission, names ? &*names : nullptr);
+		overlay.group_title = [&group_names](int group) { return capitalized_words(group_names->group(group)); };
+	}
 	OverlayList shapes = mission_overlay_shapes(overlay);
 	// The Listen's sources ringed at their reach (DI-36), under the marks drawn after them.
 	if (viewport.options().listen.on && viewport.listen().open()) {
@@ -680,17 +745,35 @@ CanvasCursor MissionCanvas::cursor(const ViewportContext &, const CanvasInput &i
 	return CanvasCursor::Default;
 }
 
-std::string MissionCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
+std::string MissionCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	// The label beside the hovered mark says it (mission_overlay): no tip beside it, but for what an ambient source
-	// plays while the view listens (DI-36).
+	// plays while the view listens (DI-36), and (S24) the events that name it, its badge's words, and what the
+	// selected logic's reach cannot draw about it (the player's place unknown).
 	if (!frame_.viewport || looking_ || gesture_.dragging() || tool() != MissionTool::Select) return std::string();
 	const MissionViewport &viewport = *frame_.viewport;
-	if (!viewport.options().listen.on || !viewport.listen().open()) return std::string();
+	const bool listening = viewport.options().listen.on && viewport.listen().open();
+	if (!listening && badges_.empty() && links_.notes.empty()) return std::string();
 	const int hovered = mission_canvas_under(frame_, in, MissionPick::Click);
 	if (hovered < 0 || size_t(hovered) >= frame_.marks.size()) return std::string();
 	std::string tip;
-	for (const std::string &line : viewport.listen().source_words(frame_.marks[size_t(hovered)].record.row))
-		tip += (tip.empty() ? "" : "\n") + line;
+	if (listening)
+		for (const std::string &line : viewport.listen().source_words(frame_.marks[size_t(hovered)].record.row))
+			tip += (tip.empty() ? "" : "\n") + line;
+	const std::string noted = links_.note(frame_.marks[size_t(hovered)].record.row);
+	if (!noted.empty()) tip += (tip.empty() ? "" : "\n\n") + noted;
+	const MissionDocument *document = dynamic_cast<const MissionDocument *>(frame_.document);
+	if (document && size_t(hovered) < badges_.size() && badges_[size_t(hovered)] > 0) {
+		const AssetGraph *graph = context.input.view.findings.graph.get();
+		// The names read the graph's source, which outlives them (made only when the words are made again).
+		std::optional<GraphNameSource> source;
+		const auto names = [&]() {
+			if (graph && !source) source.emplace(*graph);
+			return mission_label_names(*document, source ? &*source : nullptr);
+		};
+		const std::string &named = hover_.words(*document, counts_, frame_.marks[size_t(hovered)].record.row, names,
+				graph != nullptr, graph ? graph->generation() : 0);
+		if (!named.empty()) tip += (tip.empty() ? "" : "\n\n") + named;
+	}
 	return tip;
 }
 
@@ -761,6 +844,9 @@ std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInpu
 		hint.empty_mission = frame_.viewport->scene().entities().empty() && frame_.viewport->scene().areas().empty();
 	// While a drag writes, what it has come to.
 	std::string line = mission_canvas_hint(hint);
+	// S24: while a pick waits, what to click (over a mark that names another record, why it gives nothing).
+	if (frame_.pick.active())
+		line = mission_pick_hint(frame_.pick, in.hovered ? mission_canvas_under(frame_, in, MissionPick::Click) : -1);
 	if (gesture_.dragging() && grab_.what == MissionGrab::What::Handle && !grab_.pressed.empty() && frame_.viewport) {
 		const MissionPressed &held = grab_.pressed[grab_.grabbed];
 		std::string now;

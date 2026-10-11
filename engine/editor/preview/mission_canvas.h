@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/mission_links.h>
 #include <editor/graph/display_names.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/canvas_half.h>
@@ -11,6 +12,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_label_picks.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_overlay.h>
 
@@ -48,6 +50,10 @@ struct MissionCanvasFrame {
 	int primary = -1; // the primary record's mark, while the mission is the active document
 	std::vector<int> selected; // the other selected records' marks
 	std::vector<NodeAddress> records; // every selected record of the document (Delete's, a path's line)
+	NodeAddress logic; // S24: the primary record where it is an event, a trigger or an action (its links drawn)
+	// S24 pick mode: the slot a chip asked a click for and what each mark gives it (none while no pick waits, or
+	// the picture is not the document as it is, or it takes no edits).
+	MissionPickFrame pick;
 	bool current = false; // the picture shows the document as it is now
 	bool editable = true; // edits may be raised (ViewportContext::editable)
 	std::string not_editable; // why not
@@ -122,6 +128,11 @@ public:
 	// title worded once and the labels laid out once while nothing they read moves).
 	const DisplayNameCache &titles() const { return titles_; }
 	const MissionLabelLayout &label_layout() const { return labels_; }
+	// S24: the selected logic record's links placed in the scene, and how many events name each mark (by
+	// mark index), with the links option; the counts kept while the document stands.
+	const MissionLinkScene &links() const { return links_; }
+	const std::vector<size_t> &badges() const { return badges_; }
+	const MissionLinkCounts &link_counts() const { return counts_; }
 
 	// The camera on the selected marks, else on everything (F, a double click, the toolbar's Frame).
 	void frame_selected(int width, int height, CanvasRequests &out) const;
@@ -182,6 +193,11 @@ private:
 		MissionGroundFacts facts;
 	};
 	mutable GroundAsked ground_;
+	MissionLinkScene links_;
+	std::vector<size_t> badges_;
+	MissionLinkCounts counts_;
+	// The hovered record's uses (its badge's words), kept while it, the document and the names stand.
+	mutable MissionLinkHover hover_;
 	MissionTool tool_ = MissionTool::Select;
 	int64_t item_ = 0;
 	std::string item_name_;

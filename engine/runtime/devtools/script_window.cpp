@@ -134,12 +134,15 @@ void ScriptWindow::draw_variables() {
 			ImGui::PushID(i);
 			if (!globals && editing_index_ == i) {
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::InputInt("##edit", &edit_value_, 1, 65536,
-							ImGuiInputTextFlags_EnterReturnsTrue)) {
-					request_set_mission_variable(i, edit_value_);
+				// Written as it is typed or stepped, set once it is left (Enter, Tab, a click elsewhere, a step
+				// button let go; Esc puts back what it held). No EnterReturnsTrue: InputScalar asserts on it.
+				ImGui::InputInt("##edit", &edit_value_, 1, 65536);
+				if (ImGui::IsItemDeactivatedAfterEdit()) {
+					if (edit_value_ != value) request_set_mission_variable(i, edit_value_);
+					editing_index_ = -1;
+				} else if (ImGui::IsItemDeactivated()) {
 					editing_index_ = -1;
 				}
-				if (ImGui::IsItemDeactivated() && !ImGui::IsItemDeactivatedAfterEdit()) editing_index_ = -1;
 			} else {
 				ImGui::Text("%d", value);
 				if (!globals && can_edit && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
@@ -147,7 +150,7 @@ void ScriptWindow::draw_variables() {
 					edit_value_ = value;
 				}
 				if (!globals && can_edit && ImGui::IsItemHovered()) {
-					ImGui::SetTooltip("Double-click to edit (Enter applies).");
+					ImGui::SetTooltip("Double-click to edit (Enter, or leaving it, applies).");
 				}
 			}
 			ImGui::PopID();

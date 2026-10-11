@@ -1,5 +1,9 @@
 #include "mission_logic.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
 #include <formats/mission/mission_chains.h>
@@ -15,6 +19,8 @@ using K = ParamKind;
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 const char *const kParams[4] = {"param1", "param2", "param3", "param4"};
+// The most steps a delay or a repeat holds: ten bits on disk (bms.h's Event: the upper 10 bits of its word).
+constexpr int64_t kMostSteps = 1023;
 
 int64_t param_of(const bms::Trigger &trigger, int slot) {
 	const int32_t params[4] = {trigger.param1, trigger.param2, trigger.param3, trigger.param4};
@@ -137,7 +143,8 @@ bool logic_param_picks(ParamKind kind) {
 	return kind == K::Group || kind == K::Entity || kind == K::Zone || kind == K::Event || kind == K::Path;
 }
 
-bool logic_form(const MissionDocument &document, const NodeAddress &record, const MissionNames &names, LogicForm &out) {
+bool logic_form(const MissionDocument &document, const NodeAddress &record, const MissionNames &names, LogicForm &out,
+                bool sentence) {
 	Located at;
 	if (!locate(document, record, at)) return false;
 	out = LogicForm();
@@ -211,7 +218,7 @@ bool logic_form(const MissionDocument &document, const NodeAddress &record, cons
 		out.type_words = "Unknown trigger type " + std::to_string(int32_t(trigger.main_type)) + " (" +
 		                 std::to_string(trigger.sub_type) + ")";
 	}
-	out.sentence = event_sentence(at.event->native, names, header);
+	if (sentence) out.sentence = event_sentence(at.event->native, names, header);
 	return true;
 }
 
@@ -251,29 +258,43 @@ std::string logic_add_refusal(const MissionDocument &document, NodeId event, boo
 }
 
 bool logic_add_edits(const MissionDocument &document, NodeId event, const LogicType &type, size_t position,
-                     std::vector<Edit> &out, std::string &error) {
+                     std::vector<Edit> &out, std::string &error, const std::vector<LogicPreset> &presets) {
 	error = logic_add_refusal(document, event, type.action);
 	if (!error.empty()) return false;
-	const NodeKind kind = k(type.action ? MissionKind::Action : MissionKind::Trigger);
 	out.clear();
+	logic_record_edits(event, type, position, presets, out);
+	return true;
+}
+
+void logic_record_edits(NodeId event, const LogicType &type, size_t position, const std::vector<LogicPreset> &presets,
+                        std::vector<Edit> &out) {
+	const NodeKind kind = k(type.action ? MissionKind::Action : MissionKind::Trigger);
 	Edit add;
 	add.operation = EditOperation::Add;
 	add.address = {event, kind, 0};
 	add.position = position;
 	add.field = type.action ? "action_type" : "main_type";
 	add.value = int64_t(type.type);
+	const NodeAddress made{event, kind, batch_made(out.size())};
 	out.push_back(add);
-	const NodeAddress made{event, kind, batch_made(0)};
 	if (type.sub) out.push_back(set_of(made, type.action ? "action_sub_type" : "sub_type", type.sub));
 	for (int slot = 0; slot < 4; ++slot) {
+		const LogicPreset *preset = nullptr;
+		for (const LogicPreset &each : presets)
+			if (each.slot == slot) preset = &each;
 		const ParamKind param = kind_of(type.action, type.type, type.sub, slot);
 		// A slot its type does not read stays as the new record holds it, -1 (kUnreadParam: what every
-		// shipped record holds there); one it reads takes its kind's default.
-		if (param == K::Unused) continue;
-		const int64_t value = logic_param_default(param);
+		// shipped record holds there); one it reads takes its kind's default; a preset takes its value.
+		if (!preset && param == K::Unused) continue;
+		const int64_t value = preset ? preset->value : logic_param_default(param);
 		if (value != kUnreadParam) out.push_back(set_of(made, kParams[slot], value));
 	}
-	return true;
+}
+
+int64_t logic_seconds_steps(double seconds) {
+	if (!(seconds > 0.0)) return 0;
+	const double steps = std::floor(seconds / logic_units_seconds(1) + 0.5);
+	return steps >= double(kMostSteps) ? kMostSteps : int64_t(steps);
 }
 
 bool logic_retype_edits(const MissionDocument &document, const NodeAddress &record, const LogicType &type,
@@ -335,7 +356,8 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 	}
 	error = logic_add_refusal(document, to_event, at.action);
 	if (!error.empty()) return false;
-	// Added there with every field it holds, then removed here: one batch, one undo step.
+	// Added there with every field it holds, then removed here: one batch, one undo step. (An action's reserved
+	// words and a trigger's last word are always 0 in a document: the format reads no other and writes 0.)
 	const NodeKind kind = record.kind;
 	Edit add;
 	add.operation = EditOperation::Add;
@@ -365,6 +387,46 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 	remove.address = record;
 	out.push_back(remove);
 	return true;
+}
+
+std::string logic_move_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event, size_t position,
+                                const MissionNames &names) {
+	std::vector<Edit> edits;
+	std::string error;
+	if (!logic_move_edits(document, record, to_event, position, edits, error)) return std::string();
+	Located at;
+	const EventRow *to = event_row(document, to_event);
+	if (!locate(document, record, at) || !to) return std::string();
+	mission::EventChain chain = to->native;
+	const auto place = [&](auto &list, const auto &moved) {
+		if (to_event == record.row) list.erase(list.begin() + std::ptrdiff_t(at.index));
+		const size_t index = std::min(position, list.size());
+		list.insert(list.begin() + std::ptrdiff_t(index), moved);
+	};
+	if (at.action) place(chain.actions, at.event->native.actions[at.index]);
+	else place(chain.triggers, at.event->native.triggers[at.index]);
+	return event_words(chain, names, header_of(document)).sentence;
+}
+
+std::string logic_move_left_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event,
+                                     size_t position, const MissionNames &names, bool *untriggered) {
+	if (untriggered) *untriggered = false;
+	std::vector<Edit> edits;
+	std::string error;
+	Located at;
+	if (to_event == record.row || !logic_move_edits(document, record, to_event, position, edits, error) ||
+	    !locate(document, record, at))
+		return std::string();
+	mission::EventChain chain = at.event->native;
+	if (at.action) chain.actions.erase(chain.actions.begin() + std::ptrdiff_t(at.index));
+	else chain.triggers.erase(chain.triggers.begin() + std::ptrdiff_t(at.index));
+	// No trigger left: the chain holds on its first check [orig: EventTrigger_EvaluateChain @0x454050, zero triggers
+	// true], unless a start or an end pass alone checks it.
+	const uint32_t flags = uint32_t(chain.event.flags);
+	if (untriggered)
+		*untriggered = !at.action && chain.triggers.empty() &&
+		               !(flags & (uint32_t(bms::EventFlags::PreMission) | uint32_t(bms::EventFlags::PostMission)));
+	return event_words(chain, names, header_of(document)).sentence;
 }
 
 bool logic_negate_edit(const MissionDocument &document, const NodeAddress &trigger, bool negated, Edit &out) {
