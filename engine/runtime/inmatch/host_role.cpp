@@ -49,6 +49,7 @@ HostRole::HostRole(RoleKind kind,
 // (the HostClient view follows on serve-and-play, taking the catalog this
 // role holds).
 bool HostRole::bring_up() {
+	session_create_ = CreateSessionResult::Created;
 	if (staged_bringup_.next_mission)
 		bring_up_next_mission(staged_bringup_);
 	else
@@ -216,7 +217,9 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	host_cfg.host_key = state.host_key;
 	host_cfg.host_start_tick = state.host_start_tick;
 	host_cfg.session_seed_id = state.session_seed_id;
-	inmatch::start_host_session(state.host_owner, host_cfg);
+	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
+	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	install_spawned_body_bind();
 	make_client_runtime(config.game_type);
 	// Seed the look heading from the auto-spawned player's facing.
 	kernel.local.reset_local_player_input_to_player_facing();
@@ -242,7 +245,9 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	// A host session's start zeroes the round count [orig: UI_HandleHostSessionStart
 	// @0x556EAB; HostDialog_StartSession @0x5587BD].
 	if (rotation_ != nullptr) rotation_->round_count = 0;
-	inmatch::start_host_session(state.host_owner, host_cfg);
+	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
+	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	install_spawned_body_bind();
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);
 		kernel.local.reset_local_player_input_to_player_facing();
