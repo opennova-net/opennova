@@ -53,19 +53,16 @@ bool Simulation::native_script_report(opennova::mission::ScriptDebugReport &r_ou
 	return true;
 }
 
-// The BMS half of the Script record alone, which game_debug's
-// mission_logic_snapshot row polls (the editor's live board during Play). A
-// joiner runs no BMS events, so it has none to report.
-bool Simulation::native_mission_logic_report(opennova::mission::MissionLogicReport &r_out) const {
-	if (!kernel_ || is_joiner()) return false;
-	r_out = opennova::mission::mission_logic_report(*kernel_);
-	return true;
-}
-
-Error Simulation::debug_fire_event(int p_event) {
+// game_debug's fire_event: the engine's request (BmsEventSystem::force_fire), refused off the authority (a
+// joiner runs no BMS events) and with the engine's words for a refused one.
+Error Simulation::debug_fire_event(int p_event, String &r_reason) {
+	r_reason = String();
 	if (!kernel_ || is_joiner()) return ERR_UNAVAILABLE;
-	if (p_event < 0) return ERR_INVALID_PARAMETER;
-	return kernel_->events.force_fire(static_cast<size_t>(p_event)) ? OK : ERR_INVALID_PARAMETER;
+	const opennova::mission::FireRequest request =
+			p_event < 0 ? opennova::mission::FireRequest::NoEvent : kernel_->events.force_fire(static_cast<size_t>(p_event));
+	if (request == opennova::mission::FireRequest::Armed) return OK;
+	r_reason = String(opennova::mission::fire_request_words(request));
+	return ERR_INVALID_PARAMETER;
 }
 
 bool Simulation::native_local_player_report(opennova::world::inspect::LocalPlayerReport &r_out) const {

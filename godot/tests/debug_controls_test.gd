@@ -270,8 +270,10 @@ func test_mission_logic_rows_read_the_events_and_gate_the_fire() -> void:
 	# The fire is authoritative, then the engine's own verdict.
 	assert_eq(int(_controls.invoke(&"fire_event", [0]).error), ERR_UNAUTHORIZED,
 			"an unconfirmed caller cannot fire an event")
-	assert_eq(int(_controls.invoke(&"fire_event", [0], true).error), ERR_INVALID_PARAMETER,
+	var no_event := _controls.invoke(&"fire_event", [0], true)
+	assert_eq(int(no_event.error), ERR_INVALID_PARAMETER,
 			"no event 0 in the default mission: the engine refuses it")
+	assert_string_contains(String(no_event.result), "no event", "the refusal carries the engine's words")
 	_host.authority = false
 	assert_eq(int(_controls.invoke(&"fire_event", [0], true).error), ERR_UNAUTHORIZED,
 			"a joiner does not own the events")
@@ -287,6 +289,8 @@ func test_fire_event_runs_the_events_own_chain() -> void:
 	# V1 == 1 (MissionVariable 4 / IsEqual 1), then V3 = 7 (MisvarChange 5 / Set 1).
 	assert_true(mission.add_event_trigger(0, 4, 1, 1, 1))
 	assert_true(mission.add_event_action(0, 5, 1, 3, 7))
+	# A pre-mission event (flags 2) beside it.
+	assert_gte(mission.add_event(2, 0, 0), 1)
 	var runtime := WorldFixture.boot_mission_data(self, mission)
 	var sim := runtime.get_sim()
 	var controls := DebugControlTable.new()
@@ -306,8 +310,12 @@ func test_fire_event_runs_the_events_own_chain() -> void:
 	assert_eq(event["chain"], 0)
 	assert_false(event["active"])
 
-	assert_eq(int(controls.invoke(&"fire_event", [1], true).error), ERR_INVALID_PARAMETER,
-			"the mission has one event")
+	assert_eq(int(controls.invoke(&"fire_event", [2], true).error), ERR_INVALID_PARAMETER,
+			"the mission has two events")
+	# The pre-mission event ran in its one pass: refused, in the engine's words.
+	var pre := controls.invoke(&"fire_event", [1], true)
+	assert_eq(int(pre.error), ERR_INVALID_PARAMETER)
+	assert_string_contains(String(pre.result), "pre-mission")
 	assert_eq(int(controls.invoke(&"fire_event", [0], true).error), OK)
 	assert_true(controls.invoke(&"mission_logic_snapshot", []).result["events"][0]["fire_pending"])
 	for _i in range(64):
@@ -319,6 +327,11 @@ func test_fire_event_runs_the_events_own_chain() -> void:
 	assert_eq(sim.get_mission_variable(3), 7, "its action ran")
 	assert_true((controls.invoke(&"mission_logic_snapshot", []).result["variables"] as Array)
 			.has({"index": 3, "value": 7}))
+	# Fired once, its latch set: a second fire is refused until a ResetEvent clears it.
+	var again := controls.invoke(&"fire_event", [0], true)
+	assert_eq(int(again.error), ERR_INVALID_PARAMETER)
+	assert_string_contains(String(again.result), "ResetEvent")
+	assert_false(controls.invoke(&"mission_logic_snapshot", []).result["events"][0]["fire_pending"])
 	controls.clear()
 
 

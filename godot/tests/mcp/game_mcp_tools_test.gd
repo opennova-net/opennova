@@ -234,6 +234,8 @@ func test_mission_logic_snapshot_reads_without_confirmation_and_fire_event_does_
 		"confirm_authority": true,
 	})
 	assert_true(missing.is_error, "the default mission has no event 0: the engine refuses it")
+	assert_true(String(missing.content[0]["text"]).contains("no event of that index"),
+			"the refusal names why: %s" % missing.content[0]["text"])
 
 
 func test_authority_confirmation_requires_a_json_boolean() -> void:

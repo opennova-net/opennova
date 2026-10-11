@@ -62,10 +62,33 @@ void BmsEventSystem::reset_traces() {
         traces_[i].trigger_truth.assign(events_[i].triggers.size(), int8_t{-1});
 }
 
-bool BmsEventSystem::force_fire(size_t index) {
-    if (index >= traces_.size()) return false;
+const char *fire_request_words(FireRequest request) {
+    switch (request) {
+    case FireRequest::Armed: return "";
+    case FireRequest::NoEvent: return "The mission has no event of that index.";
+    case FireRequest::PreMission:
+        return "A pre-mission event runs once, as the mission starts; its chain does not run again during play.";
+    case FireRequest::PostMission:
+        return "A post-mission event runs once, as the mission is torn down; its chain does not run during play.";
+    case FireRequest::Latched:
+        return "Already fired: a fire-once event runs again only after a ResetEvent clears its latch.";
+    }
+    return "";
+}
+
+FireRequest BmsEventSystem::force_fire(size_t index) {
+    if (index >= events_.size() || index >= traces_.size()) return FireRequest::NoEvent;
+    const ScriptedEvent &se = events_[index];
+    const uint32_t flags = static_cast<uint32_t>(se.event.flags);
+    // The quarter pass skips both [orig: @0x454d50, (flags & 6) == 0]; each runs in its one pass.
+    if ((flags & static_cast<uint32_t>(bms::EventFlags::PreMission)) != 0) return FireRequest::PreMission;
+    if ((flags & static_cast<uint32_t>(bms::EventFlags::PostMission)) != 0) return FireRequest::PostMission;
+    // The chain runs only with the latch clear [orig: EventTrigger_UpdateEntry @0x454c63], which a
+    // fire-once event's never is again but by a ResetEvent [orig: EventAction_Dispatch case 0x22 @0x454974].
+    if (se.active != 0 && (flags & static_cast<uint32_t>(bms::EventFlags::ResetAfter)) == 0)
+        return FireRequest::Latched;
     traces_[index].fire_pending = true;
-    return true;
+    return FireRequest::Armed;
 }
 
 void BmsEventSystem::resolve_zone_refs(World &w) {
@@ -480,7 +503,8 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
     }
 }
 
-int32_t BmsEventSystem::evaluate_chain(World &w, const ScriptedEvent &se) {
+int32_t BmsEventSystem::evaluate_chain(World &w, size_t index) {
+    const ScriptedEvent &se = events_[index];
     // [orig: EventTrigger_EvaluateChain @0x454050.] Each trigger negated by its own
     // bit0 (`xor 1`); the join operator (or/xor/else and, bitwise over the raw
     // ints) comes from the PREVIOUS trigger. Every predicate runs (no
@@ -494,10 +518,8 @@ int32_t BmsEventSystem::evaluate_chain(World &w, const ScriptedEvent &se) {
     // The live-logic trace (EventTrace) records each term as it is folded and
     // the result; a pending fire_event makes the result true once, after
     // every predicate has run as usual.
-    EventTrace *trace = nullptr;
-    if (!events_.empty() && &se >= events_.data() && &se < events_.data() + events_.size() &&
-            traces_.size() == events_.size()) {
-        trace = &traces_[static_cast<size_t>(&se - events_.data())];
+    EventTrace *trace = index < traces_.size() ? &traces_[index] : nullptr;
+    if (trace != nullptr) {
         std::fill(trace->trigger_truth.begin(), trace->trigger_truth.end(), int8_t{-1});
         trace->last_checked_tick = static_cast<int64_t>(w.logic_tick);
     }
@@ -874,7 +896,8 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
     }
 }
 
-void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
+void BmsEventSystem::fire(World &w, size_t index) {
+    ScriptedEvent &se = events_[index];
     // [orig: the dispatch loops @0x454ca6/@0x454d0e: signed byte count, in order.]
     // The input-bit consume: the chain mirror (the live word with every
     // matched bit toggled off) is committed back to the live word right
@@ -882,16 +905,15 @@ void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     // and the delayed fire, which commits whatever the mirror holds at
     // expiry [orig: @0x454c8b immediate, @0x454cfa delayed].
     w.script.input_action_bits = w.script.input_action_mirror;
-    const int32_t event = static_cast<int32_t>(&se - events_.data());
+    const int32_t event = static_cast<int32_t>(index);
     // The raw file byte is signed only at dispatch: 128..255 execute no
     // actions, while the input consume, linked-spawn hook and timers still run.
     // Spell the sign extension without implementation-defined uint8 -> int8.
     // [orig: immediate @0x454C92/@0x454CAB; delayed @0x454D01/@0x454D13]
     const int action_count = se.event.action_count < 128
             ? se.event.action_count : static_cast<int>(se.event.action_count) - 256;
-    for (int index = 0;
-            index < action_count && static_cast<size_t>(index) < se.actions.size(); ++index)
-        dispatch_action(w, se.actions[index], event, se.event.action_index + index);
+    for (int a = 0; a < action_count && static_cast<size_t>(a) < se.actions.size(); ++a)
+        dispatch_action(w, se.actions[static_cast<size_t>(a)], event, se.event.action_index + a);
     // The waypoint completion hook: a fired event completes every route marker
     // linked to its index (the original computes the index from the record's
     // position in g_Events; events_ mirrors that array order).
@@ -899,13 +921,11 @@ void BmsEventSystem::fire(World &w, ScriptedEvent &se) {
     //  both dispatch loops @0x454cbd/@0x454d25]
     // The hook returns at once off the authority [orig: the is_authority test
     //  @0x452ce0].
-    if (w.rules.logic_authority && !events_.empty() && &se >= events_.data() &&
-            &se < events_.data() + events_.size())
-        w.script.waypoints.on_event_fired(static_cast<int32_t>(&se - events_.data()),
-                w.waypoint_context());
+    if (w.rules.logic_authority) w.script.waypoints.on_event_fired(event, w.waypoint_context());
 }
 
-void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
+void BmsEventSystem::update_entry(World &w, size_t index) {
+    ScriptedEvent &se = events_[index];
     // Faithful port of EventTrigger_UpdateEntry @0x454c30. Timer words are read
     // unsigned and the decremented value is tested as SIGNED 16-bit
     // (@0x454cef/@0x454d40): reload values >= (513 << 6), past
@@ -917,18 +937,18 @@ void BmsEventSystem::update_entry(World &w, ScriptedEvent &se) {
         se.activate_countdown = static_cast<uint16_t>(nv);
         if (nv <= 0) {
             se.activate_countdown = 0;
-            fire(w, se);
+            fire(w, index);
         }
         // Falls through: the repeat cooldown ticks in the same call (@0x454d2d).
     } else if (se.repeat_countdown == 0) {
         if (se.active == 0) {
             // Any nonzero raw chain result passes [orig: @0x454c6b].
-            if (evaluate_chain(w, se) != 0) {
+            if (evaluate_chain(w, index) != 0) {
                 se.active = 1; // latched the moment the chain passes (@0x454c7a)
                 if (se.activate_reload != 0) {
                     se.activate_countdown = se.activate_reload; // arm [orig: +16 = +18 @0x454c80]
                 } else {
-                    fire(w, se); // no delay: fire now
+                    fire(w, index); // no delay: fire now
                 }
                 if ((static_cast<uint32_t>(se.event.flags) &
                      static_cast<uint32_t>(bms::EventFlags::ResetAfter)) != 0) {
@@ -966,8 +986,8 @@ void BmsEventSystem::run_post_mission_pass(World &w) {
     //  Game_TeardownMission @0x52266c; Game_RestartRoundSP @0x5263ae runs
     //  after EventSystem_FreeAll zeroed the count @0x453266]
     const uint32_t post_bit = static_cast<uint32_t>(bms::EventFlags::PostMission);
-    for (ScriptedEvent &se : events_)
-        if ((static_cast<uint32_t>(se.event.flags) & post_bit) != 0) update_entry(w, se);
+    for (size_t i = 0; i < events_.size(); ++i)
+        if ((static_cast<uint32_t>(events_[i].event.flags) & post_bit) != 0) update_entry(w, i);
 }
 
 void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
@@ -983,8 +1003,8 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
         // pass is a single call, never periodic (D-EVT-4).
         // [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0; sole caller
         //  Game_StartMission @0x525b86, before tick = 0 @0x525b9f]
-        for (ScriptedEvent &se : events_)
-            if ((static_cast<uint32_t>(se.event.flags) & pre_bit) != 0) update_entry(w, se);
+        for (size_t i = 0; i < events_.size(); ++i)
+            if ((static_cast<uint32_t>(events_[i].event.flags) & pre_bit) != 0) update_entry(w, i);
         return;
     }
     // An empty host does not advance the mission. Retail wraps the WAC tick, the
@@ -1015,9 +1035,8 @@ void BmsEventSystem::tick(World &w, const opennova::world::TickContext &ctx) {
     const size_t start = quarter * static_cast<size_t>(quarter_cursor_);
     const size_t end = (start + quarter < events_.size()) ? start + quarter : events_.size();
     for (size_t i = start; i < end; ++i) {
-        ScriptedEvent &se = events_[i];
-        if ((static_cast<uint32_t>(se.event.flags) & (pre_bit | post_bit)) == 0)
-            update_entry(w, se);
+        if ((static_cast<uint32_t>(events_[i].event.flags) & (pre_bit | post_bit)) == 0)
+            update_entry(w, i);
     }
     quarter_cursor_ = (quarter_cursor_ + 1) & 3;
 }

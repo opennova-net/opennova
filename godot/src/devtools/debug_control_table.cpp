@@ -120,19 +120,21 @@ PackedStringArray choices_of(std::initializer_list<const char *> p_choices) {
 	return out;
 }
 
-// game_debug's mission_logic_snapshot wire record over the engine report
-// (mission::mission_logic_report): per event its latch, fired state,
-// countdowns with their reloads, each trigger's last truth (-1 not evaluated,
-// 0, 1), the chain's result and the tick it ran, a fire still pending; the
-// non-zero mission variables (an absent index reads 0). A joiner reports
-// authority false and no rows.
-Dictionary mission_logic_json(const opennova::mission::MissionLogicReport &p_report, bool p_authority) {
+// game_debug's mission_logic_snapshot wire record over the Script record's BMS half
+// (mission::script_debug_report): per event its latch, fired state, countdowns with their
+// reloads, each trigger's last truth (-1 not evaluated, 0, 1), the chain's result and the tick
+// it ran, a fire still pending; the non-zero mission variables (an absent index reads 0). A
+// joiner runs no BMS events: it reports authority false and no rows.
+Dictionary mission_logic_json(const opennova::mission::ScriptDebugReport &p_report, bool p_authority) {
 	Dictionary out;
 	out["authority"] = p_authority;
 	out["mission"] = opennova::to_gd(p_report.mission);
 	out["tick"] = static_cast<int64_t>(p_report.logic_tick);
 	Array events;
-	for (const opennova::mission::ScriptBmsEventRow &row : p_report.events) {
+	for (const opennova::mission::ScriptBmsEventRow &row : p_report.bms_events) {
+		if (!p_authority) {
+			break;
+		}
 		Dictionary event;
 		event["index"] = row.index;
 		event["active"] = row.active;
@@ -153,7 +155,7 @@ Dictionary mission_logic_json(const opennova::mission::MissionLogicReport &p_rep
 	}
 	out["events"] = events;
 	Array variables;
-	for (size_t i = 0; i < p_report.mission_vars.size(); ++i) {
+	for (size_t i = 0; i < p_report.mission_vars.size() && p_authority; ++i) {
 		if (p_report.mission_vars[i] == 0) {
 			continue;
 		}
@@ -832,17 +834,26 @@ void DebugControlTable::register_runtime_rows() {
 		if (value == nullptr) {
 			return outcome_error(ERR_UNAVAILABLE);
 		}
-		opennova::mission::MissionLogicReport report;
-		const bool authority = value->native_mission_logic_report(report);
-		return outcome_result(mission_logic_json(report, authority));
+		opennova::mission::ScriptDebugReport report;
+		value->native_script_report(report);
+		return outcome_result(mission_logic_json(report, value->session_role() != Simulation::ROLE_JOINER));
 	};
 
+	// A refusal carries the engine's words as the outcome's result.
 	Entry &fire_event = action(control_id::kFireEvent, "Vars", "Fire event",
-			"Make one BMS event's trigger chain read true at its next run, so its delay, latch and repeat then run as the event's own (a latched fire-once event waits until its latch clears).",
+			"Make one BMS event's trigger chain read true at its next run, so its delay, latch and repeat then run as the event's own. Refused for a pre- or post-mission event (each runs in its one pass) and a fire-once event already fired (it runs again only after a ResetEvent clears its latch).",
 			DebugControlRow::TARGET_SIM, DebugControlRow::OWNER_ENGINE,
 			args_of(DebugArgSpec::integer("event")->at_least(0)));
 	authoritative(fire_event);
-	bind_action(fire_event, &DebugControlTable::sim, &Simulation::debug_fire_event);
+	fire_event.invoke = [this](const Array &p_args) -> Outcome {
+		Simulation *value = sim();
+		if (value == nullptr) {
+			return outcome_error(ERR_UNAVAILABLE);
+		}
+		String reason;
+		const Error error = value->debug_fire_event(from_variant<int>(p_args[0]), reason);
+		return Outcome{error, reason.is_empty() ? Variant() : Variant(reason)};
+	};
 }
 
 // The Environment rows: the hosted mission clock (GameWorld coordinates the

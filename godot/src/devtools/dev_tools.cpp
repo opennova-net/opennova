@@ -615,6 +615,10 @@ void DevTools::apply_control_requests() {
 			if (state.is_valid() && !state->get_reason().is_empty()) {
 				message += ": " + state->get_reason();
 			}
+			// A row that refuses with the engine's words carries them as its result (fire_event).
+			if (outcome->get_result().get_type() == Variant::STRING) {
+				message += ": " + String(outcome->get_result());
+			}
 			result.message = opennova::to_std(message);
 		} else if (outcome->get_result().get_type() != Variant::NIL) {
 			// A read's payload in full (the Log window keeps it); capped so a

@@ -35,32 +35,16 @@ ScriptDebugReport script_debug_report(const MissionKernel &kernel) {
 		out.wac_events.push_back({e.last_fired_tick, e.fired_count, e.ever_fired, e.active});
 	}
 
-	MissionLogicReport logic = mission_logic_report(kernel);
-	out.bms_events = std::move(logic.events);
-	out.mission_vars = logic.mission_vars;
-	out.awol_count = kernel.events.awol_count();
-	out.second_time_through = BmsEventSystem::second_time_through();
-
-	const world::ScriptVarStore &vars = kernel.world.script.vars;
-	for (int i = 0; i < world::ScriptVarStore::kGlobalVars; ++i) {
-		out.global_vars[static_cast<size_t>(i)] = vars.get_global(i);
-	}
-	out.runtime_gaps = kernel.world.diagnostics.gaps();
-	out.runtime_gap_calls = kernel.world.diagnostics.total_calls();
-	return out;
-}
-
-MissionLogicReport mission_logic_report(const MissionKernel &kernel) {
-	MissionLogicReport out;
 	out.mission = kernel.mission_basename;
 	out.logic_tick = kernel.world.logic_tick;
 	const auto &events = kernel.events.events();
 	const auto &traces = kernel.events.traces();
-	out.events.reserve(events.size());
+	out.bms_events.reserve(events.size());
 	for (size_t i = 0; i < events.size(); ++i) {
 		const ScriptedEvent &e = events[i];
 		ScriptBmsEventRow row;
 		row.index = static_cast<int32_t>(i);
+		row.flags = static_cast<uint32_t>(e.event.flags);
 		row.trigger_count = static_cast<int32_t>(e.triggers.size());
 		row.action_count = static_cast<int32_t>(e.actions.size());
 		row.active = e.active != 0;
@@ -76,12 +60,20 @@ MissionLogicReport mission_logic_report(const MissionKernel &kernel) {
 			row.last_checked_tick = trace.last_checked_tick;
 			row.fire_pending = trace.fire_pending;
 		}
-		out.events.push_back(std::move(row));
+		out.bms_events.push_back(std::move(row));
 	}
+	out.awol_count = kernel.events.awol_count();
+	out.second_time_through = BmsEventSystem::second_time_through();
+
 	const world::ScriptVarStore &vars = kernel.world.script.vars;
 	for (int i = 0; i < world::ScriptVarStore::kMissionVars; ++i) {
 		out.mission_vars[static_cast<size_t>(i)] = vars.get_mission(i);
 	}
+	for (int i = 0; i < world::ScriptVarStore::kGlobalVars; ++i) {
+		out.global_vars[static_cast<size_t>(i)] = vars.get_global(i);
+	}
+	out.runtime_gaps = kernel.world.diagnostics.gaps();
+	out.runtime_gap_calls = kernel.world.diagnostics.total_calls();
 	return out;
 }
 

@@ -1,5 +1,6 @@
 #include <runtime/devtools/script_window.h>
 
+#include <formats/mission/bms.h>
 #include <runtime/devtools/debug_control_ids.h>
 
 #include <imgui.h>
@@ -265,8 +266,16 @@ void ScriptWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				ImGui::TableNextColumn();
 				ImGui::Text("%u / %u", e.activate_countdown, e.activate_reload);
 				ImGui::TableNextColumn();
+				const auto flagged = [&e](bms::EventFlags flag) {
+					return (e.flags & static_cast<uint32_t>(flag)) != 0;
+				};
+				// The refusals fire_event makes, shown before it is asked (mission::force_fire).
 				if (e.fire_pending) {
 					ImGui::TextDisabled("fire pending");
+				} else if (flagged(bms::EventFlags::PreMission) || flagged(bms::EventFlags::PostMission)) {
+					ImGui::TextDisabled(flagged(bms::EventFlags::PreMission) ? "pre-mission" : "post-mission");
+				} else if (e.active && !flagged(bms::EventFlags::ResetAfter)) {
+					ImGui::TextDisabled("latched");
 				} else if (can_fire) {
 					ImGui::PushID(static_cast<int>(i));
 					if (ImGui::SmallButton("Fire")) request_fire_event(e.index);

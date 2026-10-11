@@ -65,9 +65,20 @@ struct EventTrace {
     int64_t last_checked_tick = -1;
     // A requested fire (force_fire): the chain's next run reads true, so the
     // activation delay, the latch and the repeat cooldown then run as the
-    // event's own.
+    // event's own. Cleared with the trace at each load.
     bool fire_pending = false;
 };
+
+// What a fire request (BmsEventSystem::force_fire) came to.
+enum class FireRequest {
+    Armed,       // the chain reads true at its next run
+    NoEvent,     // no event of that index
+    PreMission,  // its one pass ran at the mission start
+    PostMission, // its one pass runs at the teardown
+    Latched,     // a fire-once event whose latch is set: its chain runs no more
+};
+// The refusal in a sentence ("" for Armed).
+const char *fire_request_words(FireRequest request);
 
 class BmsEventSystem : public opennova::world::ISystem, public opennova::world::IScriptEventQuery {
 public:
@@ -130,11 +141,17 @@ public:
     const std::vector<EventTrace> &traces() const { return traces_; }
 
     // Debug control (game_debug fire_event): the event's chain reads true at
-    // its next run. The chain runs only while the event is idle (no delay or
-    // cooldown counting, the latch clear), so a latched fire-once event keeps
-    // the request until a ResetEvent clears its latch. Every predicate still
-    // runs (and records) as on any pass. False for an index outside the list.
-    bool force_fire(size_t index);
+    // its next run, after every predicate has run (and recorded) as on any
+    // pass. The chain runs only while the event is idle (no delay or cooldown
+    // counting, the latch clear), so a request on a repeat event waits for
+    // that. Refused, nothing armed: an index past the list; a PreMission or
+    // PostMission event, whose one pass runs at the mission's start or its
+    // teardown [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0, Game_StartMission
+    // @0x525b86; EventTrigger_UpdateAllWithFlag4 @0x454e00, Game_TeardownMission
+    // @0x52266c]; a fire-once event whose latch is set, which runs its chain
+    // again only after a ResetEvent clears the latch [orig: EventTrigger_UpdateEntry
+    // @0x454c63; EventAction_Dispatch case 0x22 @0x454974].
+    FireRequest force_fire(size_t index);
 
     // Test seams over the private evaluator/dispatcher and the raw 24-byte
     // record words (public API for the ctest suite; no behavior of their own).
@@ -142,10 +159,10 @@ public:
         return evaluate_trigger(w, t);
     }
     int32_t evaluate_chain_for_test(opennova::world::World &w, size_t index) {
-        return evaluate_chain(w, events_[index]);
+        return evaluate_chain(w, index);
     }
     void update_entry_for_test(opennova::world::World &w, size_t index) {
-        update_entry(w, events_[index]);
+        update_entry(w, index);
     }
     void dispatch_action_for_test(opennova::world::World &w, const bms::Action &a) {
         dispatch_action(w, a);
@@ -177,13 +194,14 @@ private:
     // One cleared trace per event, its truth row sized to the trigger slice.
     void reset_traces();
 
-    void update_entry(opennova::world::World &w, ScriptedEvent &se);
-    void fire(opennova::world::World &w, ScriptedEvent &se);
+    // Each by the event's index in events_ (the record's place in g_Events).
+    void update_entry(opennova::world::World &w, size_t index);
+    void fire(opennova::world::World &w, size_t index);
     // Both return the original's raw ints: every evaluator answers 0/1 except
     // the Berserk read (the 0x200 bit) and the load-parity word, and the chain
     // folds them bitwise. [orig: EventTrigger_EvaluateCondition @0x453620;
     //  EventTrigger_EvaluateChain @0x454050]
-    int32_t evaluate_chain(opennova::world::World &w, const ScriptedEvent &se);
+    int32_t evaluate_chain(opennova::world::World &w, size_t index);
     int32_t evaluate_trigger(opennova::world::World &w, const bms::Trigger &t);
     void dispatch_action(opennova::world::World &w, const bms::Action &a, int32_t event = -1, int32_t action = -1);
 };
