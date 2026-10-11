@@ -293,6 +293,20 @@ void ProjectSession::report_sound(uint64_t serial, WorkspaceView::SoundState sta
 		impl_->core.touch(ViewConcern::Workspace);
 }
 
+bool ProjectSession::live_logic_polling() const { return impl_->play.live().polling(); }
+
+bool ProjectSession::report_live_logic(const std::string &snapshot, std::string &error) {
+	return impl_->play.live().report(snapshot, error);
+}
+
+std::vector<PlayDebugCall> ProjectSession::play_debug_since(uint64_t after) const {
+	return impl_->play.live().calls_since(after);
+}
+
+void ProjectSession::answer_play_debug(uint64_t serial, bool ok, const std::string &words) {
+	impl_->play.live().answered(serial, ok, words);
+}
+
 // --- what is asked without a request -------------------------------------------------------------
 
 Document *ProjectSession::document_for(const std::string &path) {

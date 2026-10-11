@@ -1049,6 +1049,20 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	}
 	case F::KeepSelection: return flag_of(json, token, request.keep_selection, error);
 	case F::Create: return flag_of(json, token, request.create, error);
+	case F::Event:
+	case F::Variable: {
+		int64_t index = 0;
+		if (io::json_exact_whole_in(json, 0.0, 4294967295.0, index)) {
+			(id == F::Event ? request.event : request.variable) = index;
+			return true;
+		}
+		error = std::string("\"") + token + "\" must be a whole number, 0 or more.";
+		return false;
+	}
+	case F::Value:
+		if (io::json_exact_whole_in(json, -2147483648.0, 2147483647.0, request.value)) return true;
+		error = std::string("\"") + token + "\" must be a 32-bit whole number.";
+		return false;
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1173,6 +1187,9 @@ bool field_to_json(
 		return request.preview_background.has_value();
 	case F::KeepSelection: out = boolean(request.keep_selection); return request.keep_selection;
 	case F::Create: out = boolean(request.create); return request.create;
+	case F::Event: out = json_number(double(request.event)); return request.event >= 0;
+	case F::Variable: out = json_number(double(request.variable)); return request.variable >= 0;
+	case F::Value: out = json_number(double(request.value)); return request.value != 0;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

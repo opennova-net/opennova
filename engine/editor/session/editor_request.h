@@ -42,6 +42,8 @@ enum class EditorRequestKind {
 	Play,
 	Export,
 	StopPlay,
+	// S24 Live: a call of the running game (fire an event, set a variable), queued for the Shell.
+	PlayDebug,
 	CancelOperation,
 	CreateFile,
 	OpenDocument,
@@ -421,6 +423,11 @@ struct EditorRequest {
 	// A set_string_text makes the string first (S24: Show text's New text...): the next free key of the field's
 	// form in the section the game looks it up in, in the mission's own table, the field then set to its number.
 	bool create = false;
+	// A play_debug's call (S24 Live): the event the game fires (its index, 0 the first), or the variable it sets
+	// (V0..V511) to `value`; -1 none.
+	int64_t event = -1;
+	int64_t variable = -1;
+	int64_t value = 0;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -445,7 +452,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.report == b.report && a.steps == b.steps && a.folder == b.folder && a.start == b.start &&
 			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.alone == b.alone &&
 			a.define == b.define && a.preview_background == b.preview_background &&
-			a.keep_selection == b.keep_selection && a.create == b.create;
+			a.keep_selection == b.keep_selection && a.create == b.create && a.event == b.event &&
+			a.variable == b.variable && a.value == b.value;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

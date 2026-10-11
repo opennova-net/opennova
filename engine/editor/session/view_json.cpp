@@ -221,6 +221,16 @@ JsonValue run_section(const SessionView &view) {
 	out.set("pid", json_number(double(activity.play_pid)));
 	out.set("mcp_port", json_number(double(activity.play_mcp_port)));
 	out.set("mission", json_string(activity.play_mission));
+	// The game's logic, once it reports it (S24 Live): mission_logic's live op says it record by record.
+	if (!activity.live_logic.empty()) {
+		JsonValue live = JsonValue::make_object();
+		live.set("mission", json_string(activity.live_logic.mission));
+		live.set("tick", json_number(double(activity.live_logic.tick)));
+		live.set("events", json_number(double(activity.live_logic.events.size())));
+		live.set("stale", boolean(activity.live_logic.stale));
+		live.set("serial", json_number(double(activity.live_logic.serial)));
+		out.set("live", std::move(live));
+	}
 	out.set("behind", boolean(activity.play_behind));
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("run_dir", json_string(activity.play_run_dir));

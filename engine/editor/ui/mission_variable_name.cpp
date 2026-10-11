@@ -11,6 +11,8 @@
 
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_variable_names.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 
@@ -25,6 +27,8 @@ struct FieldState {
 	char text[32] = {};
 	bool typing = false; // the field was active last frame: its text is the person's
 	std::string refusal;
+	int value = 0;            // the value typed for Set
+	bool value_edited = false; // typed since the last Set: kept, not the game's
 };
 std::map<std::pair<uint64_t, int64_t>, FieldState> &field_states() {
 	static std::map<std::pair<uint64_t, int64_t>, FieldState> states;
@@ -68,6 +72,28 @@ void draw_variable_name_field(Workspace &workspace, const MissionDocument &missi
 		ImGui::TextColored(kWarn, "%s", state.refusal.c_str());
 		ImGui::PopTextWrapPos();
 	}
+	ImGui::PopID();
+}
+
+void draw_variable_live(Workspace &workspace, const MissionDocument &mission, int64_t index) {
+	const LiveLogic &live = workspace.view().activity.live_logic;
+	if (live.empty() || live.mission != mission.path() || index < 0 || size_t(index) >= live.variables.size()) return;
+	FieldState &state = field_states()[{mission.identity(), index}];
+	const int32_t now = live.variables[size_t(index)];
+	ImGui::PushID("variable_live");
+	ImGui::AlignTextToFramePadding();
+	ImGui::Text("In the game: %d", int(now));
+	ui_kit::tooltip("V" + std::to_string(index) + " as the running game last reported it (tick " + std::to_string(live.tick) + ").");
+	ImGui::SameLine();
+	if (!state.value_edited) state.value = int(now);
+	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+	if (ImGui::InputInt("##value", &state.value, 0, 0)) state.value_edited = true;
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Set")) {
+		workspace.request(request::play_debug_set(index, int64_t(state.value)));
+		state.value_edited = false;
+	}
+	ui_kit::tooltip("Asks the running game to set V" + std::to_string(index) + " to the value typed.");
 	ImGui::PopID();
 }
 

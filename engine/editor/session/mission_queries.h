@@ -49,7 +49,7 @@ inline constexpr QueryParam kMissionLogicParams[] = {
 			"What is asked: form (an event's, or a trigger's or an action's: its words and what it holds), types "
 			"(what Add trigger or Add action offers, by name and group), add, retype, move, negate, join (the "
 			"edits that change the logic so, in the batch form an edit_record takes back), board (the Event board's "
-			"cards, S24), variables (the variables' names, S24)." },
+			"cards, S24), variables (the variables' names, S24), live (the running game's logic, S24)." },
 	{ "id", QueryJson::Integer, false, nullptr,
 			"The record: an event (form, add) or a trigger or an action (form, retype, move, negate, join), by "
 			"its identity." },
@@ -99,7 +99,13 @@ inline constexpr const char *kMissionLogicDoc =
 		"name}, kept in its layer table, which the game reads and drops), table (empty, names, or layer_names: the "
 		"original editor's layer names, which no name is written over), left (how many more take a name, 31 at "
 		"most); with variable (and name), the edits that give it the name, in the batch form an edit_record takes "
-		"back, or the refusal that says why none.";
+		"back, or the refusal that says why none. live (S24 Live): what the game Play runs last reported of this "
+		"mission's logic: playing (whether it reports this mission), polling (whether the editor asks a game for "
+		"it: the OpenNova runtime's, started in a mission), tick, played_revision and revision (the document's "
+		"now; stale once it moved on), events {index, event (the document's event of that place), active, fired, "
+		"activate_countdown and repeat_countdown with their reloads (64-tick steps), triggers {truth: 1, 0, -1 not "
+		"checked yet, trigger}, chain, last_checked_tick, fire_pending} and variables {index, value, name} (those "
+		"holding a value or a name).";
 
 inline constexpr QueryParam kMissionUsesParams[] = {
 	{ "path", QueryJson::String, false, nullptr, "An open mission, as mission_logic takes it." },

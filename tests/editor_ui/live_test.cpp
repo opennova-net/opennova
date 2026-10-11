@@ -2,6 +2,7 @@
 // game's report of the mission (ActivityView::live_logic), the board draws its cards with it (the live hook at
 // each card's heading), raising nothing by drawing, nothing past its room. And a variable's name in the board's
 // Variables fold (S24 Names, C3).
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -35,22 +36,49 @@ void test_board_with_a_report() {
 		LiveEvent event;
 		event.index = i;
 		event.active = i == 0;
+		event.fired = i == 1;
+		// Event 1 waits on its delay, 3 of its 64-tick steps left; event 2 fired.
+		event.activate_countdown = i == 0 ? 192 : 0;
 		event.truth = {1};
+		event.chain = 1;
 		event.last_checked_tick = 600;
 		live.events.push_back(event);
 	}
-	live.variables.assign(8, 0);
+	live.variables.assign(512, 0);
 	live.serial = 1;
 	window_requests::show_logic(run.ui.windows, run.path, true);
 	run.settle();
 	run.take();
 	run.ui.away();
-	const std::string text = logged_frame(run.ui);
-	CHECK(MissionRun::drawn_window("/logic_pane_") && in_order(text, {"2 of 2 events", "Event 1", "When"}),
-	      "the board drawn with the report");
+	std::string text = logged_frame(run.ui);
+	CHECK(MissionRun::drawn_window("/logic_pane_") && in_order(text, {"2 of 2 events", "Event 1", "Waiting: acts in 3.1 s (3 steps)",
+	                                                                    "Fire", "When", "Event 2", "Fired", "Fire"}),
+	      "the board drawn with the report: each card's state and its Fire");
+	CHECK(text.find("stale") == std::string::npos, "not stale while the document is as played");
 	run.ui.frames(3);
 	CHECK(run.ui.drain().empty(), "drawing it raises nothing");
 	CHECK(overflowing().empty(), "nothing runs past its room");
+	// Fire on event 2's card: one play_debug of its index.
+	std::vector<const ImGuiWindow *> cards;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/card_") && std::strstr(window->Name, "/logic_pane_"))
+			cards.push_back(window);
+	std::sort(cards.begin(), cards.end(), [](const ImGuiWindow *a, const ImGuiWindow *b) { return a->Pos.y < b->Pos.y; });
+	CHECK(cards.size() == 2, "two cards");
+	if (cards.size() != 2) return;
+	run.ui.activate(item_id(cards[1]->ID, {"live", "Fire"}));
+	const std::vector<EditorRequest> raised = run.ui.drain();
+	const EditorRequest *fire = only(raised, EditorRequestKind::PlayDebug);
+	CHECK(fire && fire->event == 1 && fire->variable == -1, "Fire: one play_debug of the event's index");
+	// A fire asked waits for the event's next check; an edit since it was played says the report is stale.
+	live.events[1].fire_pending = true;
+	live.stale = true;
+	++live.serial;
+	run.settle();
+	run.take();
+	run.ui.away();
+	text = logged_frame(run.ui);
+	CHECK(in_order(text, {"Event 2", "Fired", "stale", "fire asked"}), "the fire asked, the report stale");
 	v.activity.live_logic = LiveLogic();
 }
 
@@ -119,6 +147,22 @@ void test_variable_name_field() {
 	CHECK(in_order(text, {"alarm (0 uses)", "V12's name holds 16 characters"}), "the refusal said beside the field");
 	CHECK(mission_variable_name(*mission, 12) == "alarm", "the name as it was");
 	CHECK(overflowing().empty(), "nothing runs past its room");
+	// While the game reports the mission: V12's value there, and Set asks it to take the one typed.
+	SessionView &v = const_cast<SessionView &>(run.session.view());
+	v.activity.live_logic.mission = run.path;
+	v.activity.live_logic.variables.assign(512, 0);
+	v.activity.live_logic.variables[12] = 7;
+	v.activity.live_logic.serial = 1;
+	run.settle();
+	run.take();
+	run.ui.away();
+	text = logged_frame(run.ui);
+	CHECK(in_order(text, {"alarm (0 uses)", "In the game: 7", "Set"}), "the variable's value in the game");
+	run.ui.activate(item_id(pushed(pane->ID, 12), {"###variable", "variable_live", "Set"}));
+	raised = run.ui.drain();
+	const EditorRequest *set = only(raised, EditorRequestKind::PlayDebug);
+	CHECK(set && set->variable == 12 && set->value == 7 && set->event == -1, "Set: one play_debug of V12's value");
+	v.activity.live_logic = LiveLogic();
 }
 
 } // namespace

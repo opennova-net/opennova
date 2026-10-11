@@ -182,6 +182,7 @@ void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mi
 		// Its id the variable's, not its words': a rename keeps it open.
 		if (ImGui::TreeNode((label + "###variable").c_str())) {
 			draw_variable_name_field(workspace, mission, index, editable);
+			draw_variable_live(workspace, mission, index);
 			if (event != events.end())
 				for (size_t i = 0; i < event->second->uses.size(); ++i) {
 					const MissionVariableUse &use = event->second->uses[i];

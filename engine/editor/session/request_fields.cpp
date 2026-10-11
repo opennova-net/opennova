@@ -294,6 +294,15 @@ constexpr RequestField kFields[] = {
 			"looks it up in, in the mission's own table (<mission>.bin, made from the mission text blank where the "
 			"project has none; never MEDMSSN.BIN, the table the game reads in its place), its text values.text, and "
 			"the field set to that number." },
+	{ F::Event, "event", J::Integer,
+			"play_debug's event (S24 Live): the running game's event by its index (0 the first, as the board's cards "
+			"number it from 1), whose triggers read true at its next check (game_debug's fire_event). Refused "
+			"(play.debug) for an event the game does not report." },
+	{ F::Variable, "variable", J::Integer,
+			"play_debug's variable (S24 Live): the running game's mission variable V0 to V511 set to value "
+			"(game_debug's set_mission_variable)." },
+	{ F::Value, "value", J::Integer,
+			"play_debug's value for variable: a 32-bit whole number, negative too (0 when left out)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

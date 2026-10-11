@@ -15,6 +15,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/session/mission_board_json.h>
 #include <editor/session/mission_logic_json.h>
+#include <editor/session/play_controller.h>
 #include <editor/session/session_core.h>
 
 namespace opennova::editor {
@@ -153,6 +154,67 @@ JsonValue answer_variables(const QueryContext &context, const QueryArgs &args, s
 	return out;
 }
 
+// live: the running game's report of the mission's logic (S24 Live), by the mission's own records.
+JsonValue answer_live(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const MissionDocument *mission = mission_of(context, args, error);
+	if (!mission) return JsonValue::make_null();
+	const SessionView &view = context.core.view();
+	const LiveLogic &live = view.activity.live_logic;
+	const bool reported = !live.empty() && live.mission == mission->path();
+	JsonValue out = JsonValue::make_object();
+	out.set("path", json_string(mission->path()));
+	out.set("playing", JsonValue::make_bool(reported));
+	out.set("polling", JsonValue::make_bool(context.core.play().live().polling()));
+	if (!reported) return out;
+	out.set("tick", json_number(double(live.tick)));
+	out.set("played_revision", json_number(double(live.played_revision)));
+	out.set("revision", json_number(double(mission->revision())));
+	out.set("stale", JsonValue::make_bool(live.stale));
+	const MissionWords names(context, *mission);
+	JsonValue events = JsonValue::make_array();
+	const std::vector<const Node *> rows = mission->rows_of(MissionKind::Event);
+	for (const LiveEvent &event : live.events) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("index", json_number(double(event.index)));
+		// The document's event of that place, where the document has one (a stale report may hold more).
+		const EventRow *row = event.index < rows.size() ? static_cast<const EventRow *>(rows[event.index]) : nullptr;
+		if (row) entry.set("event", json_number(double(row->id)));
+		entry.set("active", JsonValue::make_bool(event.active));
+		entry.set("fired", JsonValue::make_bool(event.fired));
+		entry.set("activate_countdown", json_number(double(event.activate_countdown)));
+		entry.set("activate_reload", json_number(double(event.activate_reload)));
+		entry.set("repeat_countdown", json_number(double(event.repeat_countdown)));
+		entry.set("repeat_reload", json_number(double(event.repeat_reload)));
+		JsonValue triggers = JsonValue::make_array();
+		for (size_t i = 0; i < event.truth.size(); ++i) {
+			JsonValue term = JsonValue::make_object();
+			term.set("truth", json_number(double(event.truth[i])));
+			if (row && row->ids.lists.size() > 0 && i < row->ids.lists[0].size())
+				term.set("trigger", json_number(double(row->ids.lists[0][i].id)));
+			triggers.push(std::move(term));
+		}
+		entry.set("triggers", std::move(triggers));
+		entry.set("chain", json_number(double(event.chain)));
+		entry.set("last_checked_tick", json_number(double(event.last_checked_tick)));
+		entry.set("fire_pending", JsonValue::make_bool(event.fire_pending));
+		events.push(std::move(entry));
+	}
+	out.set("events", std::move(events));
+	// The variables that hold a value or a name.
+	JsonValue variables = JsonValue::make_array();
+	for (size_t i = 0; i < live.variables.size(); ++i) {
+		const std::string name = mission_variable_name(*mission, int64_t(i));
+		if (live.variables[i] == 0 && name.empty()) continue;
+		JsonValue entry = JsonValue::make_object();
+		entry.set("index", json_number(double(i)));
+		entry.set("value", json_number(double(live.variables[i])));
+		entry.set("name", json_string((*names).variable(int64_t(i))));
+		variables.push(std::move(entry));
+	}
+	out.set("variables", std::move(variables));
+	return out;
+}
+
 // The ops, in the op param's order. S24 lanes append one row each here: the board's (lane A), the live
 // logic's (lane C).
 constexpr MissionLogicOp kMissionLogicOps[] = {
@@ -165,6 +227,7 @@ constexpr MissionLogicOp kMissionLogicOps[] = {
 	{ "join", answer_flag },
 	{ "board", answer_mission_board },
 	{ "variables", answer_variables },
+	{ "live", answer_live },
 };
 
 constexpr bool same_text(const char *a, const char *b) {

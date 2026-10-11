@@ -20,9 +20,14 @@
 #include <base/io/json.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
+#include <editor/session/live_logic.h>
+#include <editor/session/live_logic_link.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/view_json.h>
 #include <editor/session/view/activity_view.h>
 #include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -255,6 +260,234 @@ int test_variables_wire() {
 	return 0;
 }
 
+// A byte stream that answers as the game's MCP endpoint does: the requests it was sent, its answers queued.
+struct FakeChannel : GameMcpChannel {
+	State now = State::Closed;
+	int port = 0;
+	int connects = 0;
+	std::vector<std::string> sent;
+	std::string inbox;
+	void connect(int p) override {
+		port = p;
+		++connects;
+		now = State::Connected;
+	}
+	State state() override { return now; }
+	bool send(const std::string &bytes) override {
+		sent.push_back(bytes);
+		return true;
+	}
+	std::string receive() override {
+		std::string out;
+		out.swap(inbox);
+		return out;
+	}
+	void close() override { now = State::Closed; }
+	// An HTTP answer of `body` (with the endpoint's session id).
+	void answer(const std::string &body, const char *session = nullptr) {
+		inbox += "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n";
+		if (session) inbox += std::string("Mcp-Session-Id: ") + session + "\r\n";
+		inbox += "Content-Length: " + std::to_string(body.size()) + "\r\nConnection: keep-alive\r\n\r\n" + body;
+	}
+	// The JSON-RPC body of the last request sent.
+	JsonValue last_body() const {
+		JsonValue out;
+		std::string error;
+		if (!sent.empty()) opennova::io::json_parse(sent.back().substr(sent.back().find("\r\n\r\n") + 4), out, error);
+		return out;
+	}
+};
+
+// A tools/call answer whose tool result is `structured`.
+std::string tool_answer(const JsonValue &structured, bool error = false, const std::string &words = std::string()) {
+	JsonValue text = JsonValue::make_object();
+	text.set("type", opennova::io::json_string("text"));
+	text.set("text", opennova::io::json_string(error ? words : opennova::io::json_write(structured)));
+	JsonValue content = JsonValue::make_array();
+	content.push(std::move(text));
+	JsonValue result = JsonValue::make_object();
+	result.set("content", std::move(content));
+	result.set("isError", JsonValue::make_bool(error));
+	if (!error) result.set("structuredContent", structured);
+	JsonValue out = JsonValue::make_object();
+	out.set("jsonrpc", opennova::io::json_string("2.0"));
+	out.set("id", opennova::io::json_number(1));
+	out.set("result", std::move(result));
+	return opennova::io::json_write(out);
+}
+
+JsonValue parsed(const std::string &text) {
+	JsonValue out;
+	std::string error;
+	opennova::io::json_parse(text, out, error);
+	return out;
+}
+
+// The game's mission_logic_snapshot answer (the invoke's {error, result}) for mission `mission` at `tick`: event 0
+// latched waiting on its delay, its trigger held; event 1 not checked, a fire asked; V12 = 7.
+JsonValue snapshot_of(const char *mission, int tick = 640) {
+	return parsed(std::string(R"({"error": 0, "result": {"authority": true, "mission": ")") + mission +
+	              R"(", "tick": )" + std::to_string(tick) + R"(, "events": [{"index": 0, "active": true, "fired": false, "activate_countdown": 192, )"
+	              R"("activate_reload": 320, "repeat_countdown": 0, "repeat_reload": 0, "triggers": [1], "chain": 1, )"
+	              R"("last_checked_tick": 576, "fire_pending": false}, {"index": 1, "active": false, "fired": false, )"
+	              R"("activate_countdown": 0, "activate_reload": 0, "repeat_countdown": 0, "repeat_reload": 0, )"
+	              R"("triggers": [-1], "chain": -1, "last_checked_tick": -1, "fire_pending": true}], )"
+	              R"("variables": [{"index": 12, "value": 7}, {"index": 600, "value": 1}]}, "state": null})");
+}
+
+// The live logic over a session (S24 Live): an OpenNova Play in the mission, its report read into the view and the
+// live op, the calls play_debug queues and what the game made of them, stale once the document moves on, nothing
+// once the game ends; and the link to the game's endpoint (session/live_logic_link) over a fake stream: initialize,
+// the snapshot polled, a call made, an answer that does not come given up.
+int test_live_session() {
+	editor_test::TempProjectDir dir("opennova_mission_live_session");
+	editor_test::FakePlatform platform;
+	platform.terminate_exits = false;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Live"));
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	// A mission the build takes as it is (the default one) with two events, the first waiting on V1.
+	std::vector<uint8_t> bytes;
+	{
+		bms::File file;
+		mission::make_default(file);
+		mission::add_event(file, mission::MissionEventRecord{});
+		mission::add_event(file, mission::MissionEventRecord{});
+		mission::MissionTriggerRecord trigger;
+		trigger.main_type = 4; // MissionVariable
+		trigger.sub_type = 1;  // equals
+		trigger.param1 = 1;
+		trigger.param2 = 1;
+		std::string made;
+		TEST_EXPECT(mission::insert_event_trigger(file, 0, 0, trigger, made) && bms::write(file, bytes, made));
+	}
+	TEST_EXPECT(editor_test::write_bytes(v.project.root + "/missions/logic.bms", bytes));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	launcher.mcp_port = 8993;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+	TEST_EXPECT(!session.live_logic_polling());
+	// Nothing to ask before a game reports.
+	editor_test::handle_to_end(session, request::play_debug_fire(0));
+	TEST_EXPECT(session.outcome().refused && !session.outcome().findings.empty() &&
+	            session.outcome().findings.back().code() == "play.debug");
+
+	editor_test::handle_to_end(session, request::play("missions/logic.bms"));
+	TEST_EXPECT(v.activity.play_state == PlayState::Running && v.activity.play_mcp_port == 8993);
+	if (v.activity.play_state != PlayState::Running) return 1;
+	TEST_EXPECT(session.live_logic_polling() && v.activity.live_logic.empty());
+	std::string error;
+	// The game's report: its basename names the played mission (as the game spells it, any case).
+	TEST_EXPECT(session.report_live_logic(opennova::io::json_write(snapshot_of("LOGIC")), error));
+	const LiveLogic &live = v.activity.live_logic;
+	TEST_EXPECT(live.mission == "missions/logic.bms" && live.tick == 640 && live.serial == 1 && !live.stale);
+	TEST_EXPECT(live.events.size() == 2 && live.event(0) && live.event(0)->active && live.event(0)->activate_countdown == 192 &&
+	            live.event(0)->truth == std::vector<int8_t>({1}) && live.event(0)->chain == 1 &&
+	            live.event(1)->fire_pending && live.event(1)->last_checked_tick == -1);
+	TEST_EXPECT(live.variables.size() == 512 && live.variables[12] == 7); // V600 is past the bank: dropped
+	TEST_EXPECT(view_section_to_json(v, ViewSection::Run).get("live") &&
+	            view_section_to_json(v, ViewSection::Run).get("live")->get_number("events", 0) == 2);
+	// The live op: by the document's events and triggers.
+	JsonValue parsed_args;
+	opennova::io::json_parse(R"({"path": "missions/logic.bms", "op": "live"})", parsed_args, error);
+	JsonValue answer = session.query("mission_logic", parsed_args, error);
+	const Document *document = session.document_for("missions/logic.bms");
+	const MissionDocument &m = dynamic_cast<const MissionDocument &>(*document);
+	const std::vector<const Node *> events = m.rows_of(MissionKind::Event);
+	TEST_EXPECT(answer.get_bool("playing", false) && answer.get_bool("polling", false) && answer.get_number("tick", 0) == 640);
+	const JsonValue *reported = answer.get("events");
+	TEST_EXPECT(reported && reported->array.size() == 2 && reported->array[0].get_number("event", 0) == double(events[0]->id) &&
+	            reported->array[0].get("triggers") && reported->array[0].get("triggers")->array.size() == 1 &&
+	            reported->array[0].get("triggers")->array[0].get_number("truth", 0) == 1 &&
+	            reported->array[0].get("triggers")->array[0].get("trigger"));
+	const JsonValue *variables = answer.get("variables");
+	TEST_EXPECT(variables && variables->array.size() == 1 && variables->array[0].get_number("index", 0) == 12 &&
+	            variables->array[0].get_number("value", 0) == 7 && variables->array[0].get_string("name", "") == "V12");
+
+	// play_debug: a call queued for the Shell; refused past the game's events, for neither or both.
+	editor_test::handle_to_end(session, request::play_debug_fire(1));
+	TEST_EXPECT(!session.outcome().refused);
+	editor_test::handle_to_end(session, request::play_debug_set(12, -5));
+	TEST_EXPECT(!session.outcome().refused);
+	editor_test::handle_to_end(session, request::play_debug_fire(9));
+	TEST_EXPECT(session.outcome().refused && session.outcome().findings.back().message.find("no event 10") != std::string::npos);
+	EditorRequest both = request::play_debug_fire(0);
+	both.variable = 3;
+	editor_test::handle_to_end(session, both);
+	TEST_EXPECT(session.outcome().refused);
+	editor_test::handle_to_end(session, request::play_debug_set(512, 1));
+	TEST_EXPECT(session.outcome().refused);
+	std::vector<PlayDebugCall> calls = session.play_debug_since(0);
+	TEST_EXPECT(calls.size() == 2 && calls[0].op == PlayDebugOp::FireEvent && calls[0].event == 1 &&
+	            calls[1].op == PlayDebugOp::SetVariable && calls[1].variable == 12 && calls[1].value == -5);
+	TEST_EXPECT(session.play_debug_since(calls[0].serial).size() == 1);
+	// The wire form of the request.
+	JsonValue wire;
+	opennova::io::json_parse(R"({"kind": "play_debug", "variable": 4, "value": -2})", wire, error);
+	TEST_EXPECT(session.handle_json(wire).get_bool("ok", false));
+	TEST_EXPECT(session.play_debug_since(0).size() == 3 && session.play_debug_since(0)[2].value == -2);
+	// What the game made of them, said in Output.
+	session.answer_play_debug(calls[0].serial, false, "Already fired: a fire-once event runs again only after a ResetEvent.");
+	TEST_EXPECT(v.activity.status.find("The game refused to fire event 2: Already fired") == 0);
+	session.answer_play_debug(calls[1].serial, true, "");
+	TEST_EXPECT(v.activity.status == "The game took the call to set V12 to -5.");
+
+	// The link over a fake stream: initialize, then the call left queued, then the snapshot when due.
+	FakeChannel channel;
+	LiveLogicLink link;
+	link.step(session, channel, 0);
+	TEST_EXPECT(channel.connects == 1 && channel.port == 8993 && channel.sent.size() == 1 &&
+	            channel.last_body().get_string("method", "") == "initialize" &&
+	            channel.sent[0].find("Host: 127.0.0.1:8993\r\n") != std::string::npos);
+	channel.answer(R"({"jsonrpc": "2.0", "id": 1, "result": {}})", "abc123");
+	link.step(session, channel, 10);
+	link.step(session, channel, 20);
+	TEST_EXPECT(channel.sent.size() == 2 && channel.sent[1].find("Mcp-Session-Id: abc123\r\n") != std::string::npos);
+	const JsonValue call = channel.last_body();
+	TEST_EXPECT(call.get_string("method", "") == "tools/call" && call.get("params") &&
+	            call.get("params")->get_string("name", "") == "game_debug" &&
+	            call.get("params")->get("arguments")->get_string("id", "") == "set_mission_variable" &&
+	            call.get("params")->get("arguments")->get_bool("confirm_authority", false));
+	channel.answer(tool_answer(parsed(R"({"error": 0, "result": true})")));
+	link.step(session, channel, 30);
+	TEST_EXPECT(link.stats().calls == 1 && v.activity.status == "The game took the call to set V4 to -2.");
+	// The snapshot, due: the view updated from its answer.
+	link.step(session, channel, 300);
+	TEST_EXPECT(channel.last_body().get("params")->get("arguments")->get_string("id", "") == "mission_logic_snapshot");
+	channel.answer(tool_answer(snapshot_of("logic", 704)));
+	link.step(session, channel, 310);
+	TEST_EXPECT(link.stats().snapshots == 1 && live.tick == 704 && live.serial == 2);
+	// An answer that does not come is given up: the stream opened again.
+	link.step(session, channel, 600);
+	link.step(session, channel, 600 + LiveLogicLink::kAnswerMs + 1);
+	TEST_EXPECT(link.stats().failures == 1 && channel.connects == 2);
+
+	// Edited since it was played: stale, the played revision kept.
+	const uint64_t played = live.played_revision;
+	editor_test::handle_to_end(session,
+	                           request::edit_record("missions/logic.bms", set_of(listed(m, MissionKind::Group)[4], "name", "Bridge patrol")));
+	session.poll();
+	TEST_EXPECT(live.stale && live.played_revision == played);
+	// A report of another mission (the game moved on to it) holds none of this one's.
+	TEST_EXPECT(session.report_live_logic(opennova::io::json_write(snapshot_of("other")), error) && live.empty());
+	TEST_EXPECT(!session.report_live_logic("not json", error) && !error.empty());
+	// The game ends: no logic, no calls, nothing polled.
+	TEST_EXPECT(session.report_live_logic(opennova::io::json_write(snapshot_of("logic")), error) && !live.empty());
+	platform.exit_child(v.activity.play_pid);
+	session.poll();
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped && live.empty() && !session.live_logic_polling() &&
+	            session.play_debug_since(0).empty());
+	link.step(session, channel, 2000);
+	TEST_EXPECT(channel.now == GameMcpChannel::State::Closed);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -263,6 +496,7 @@ int main() {
 	if (test_group_names() != 0) return 1;
 	if (test_variable_names() != 0) return 1;
 	if (test_variables_wire() != 0) return 1;
+	if (test_live_session() != 0) return 1;
 	std::printf("editor_mission_names: all tests passed\n");
 	return 0;
 }

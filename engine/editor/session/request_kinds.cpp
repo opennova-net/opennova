@@ -102,6 +102,9 @@ void serve_export(SessionCore &core, const EditorRequest &request) {
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
 }
+void serve_play_debug(SessionCore &core, const EditorRequest &request) {
+	core.play().live().serve(request);
+}
 void serve_cancel_operation(SessionCore &core, const EditorRequest &) {
 	core.cancel_operation(true);
 }
@@ -566,6 +569,16 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.row,
 	Request(K::StopPlay, "stop_play", serve_stop_play, "The running game stopped.").row,
+	// S24 Live (session/live_logic.h).
+	Request(K::PlayDebug, "play_debug", serve_play_debug,
+			"A call of the game Play runs, queued for the Shell, which asks it of the game's MCP endpoint and says "
+			"in Output what it came to: event, the event whose triggers read true at its next check (its delay, "
+			"latch and repeat then its own; the game refuses a start or end event, and a fire-once event already "
+			"fired, in its words); or variable and value, the mission variable set. Only a game of the OpenNova "
+			"runtime started in a mission, once it reports its logic (the run section's live): else refused "
+			"(play.debug).")
+			.takes(request_params({}, { F::Event, F::Variable, F::Value }))
+			.row,
 	Request(K::CancelOperation, "cancel_operation", serve_cancel_operation,
 			"The running operation stopped between two steps, its work discarded (a build's "
 			"staging "

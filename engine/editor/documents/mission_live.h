@@ -31,8 +31,12 @@ struct LiveEvent {
 	// Each trigger's last result as the chain ran, by its place in the event: 1 true, 0 false, -1 not checked yet
 	// (recorded as the chain runs, never by evaluating again).
 	std::vector<int8_t> truth;
-	// The tick the game last checked its triggers at (-1: never).
+	// The tick the game last checked its triggers at (-1: never), and what the chain came to then (1 true, 0
+	// false, -1 not run yet).
 	int64_t last_checked_tick = -1;
+	int8_t chain = -1;
+	// A fire asked of it (play_debug) waits for its next check.
+	bool fire_pending = false;
 };
 
 // The mission logic of the game Play runs, as last reported.
