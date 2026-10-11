@@ -88,6 +88,9 @@ struct CardAsked {
 
 // One card, the full width of the room.
 CardAsked draw_mission_card(CardContext &context, const BoardCard &card);
+// One line of a card alone (S24 A7: the Inspector over a trigger or an action), the card's width: its lead, its
+// runs and chips, its retype picker.
+void draw_mission_line(CardContext &context, const BoardCard &card, const BoardLine &line);
 // The type picker for the add or the retype `state` names, drawn in an open popup's body: Common (the shipped
 // missions' most used), for a trigger the recipes' triggers with their presets, then every type by its group,
 // filtered by what is typed. True once it raised the add or the retype (the popup then closed).

@@ -22,11 +22,12 @@ namespace editor_ui_test {
 
 namespace {
 
-// The cards drawn last frame, top to bottom.
+// The board's cards drawn last frame, top to bottom (the Inspector's card aside).
 std::vector<const ImGuiWindow *> card_windows() {
 	std::vector<const ImGuiWindow *> out;
 	for (const ImGuiWindow *window : GImGui->Windows)
-		if (window->Active && !window->Hidden && std::strstr(window->Name, "/card_")) out.push_back(window);
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/card_") && std::strstr(window->Name, "/logic_pane_"))
+			out.push_back(window);
 	std::sort(out.begin(), out.end(), [](const ImGuiWindow *a, const ImGuiWindow *b) { return a->Pos.y < b->Pos.y; });
 	return out;
 }
@@ -223,6 +224,12 @@ void test_line_drag() {
 	if (cards.size() != 2) return;
 	const Node *first = mission->rows_of(MissionKind::Event)[0];
 	const Node *second = mission->rows_of(MissionKind::Event)[1];
+	// The pane given most of the column, both cards in sight.
+	run.session.handle(request::set_workspace(R"({"document": {"path": "missions/logic.bms", "logic_split": 0.2}})"));
+	run.settle();
+	run.ui.away();
+	cards = card_windows();
+	if (cards.size() != 2) return;
 	// Where the second card's + trigger is: the point the mouse hovers it at.
 	const ImGuiID plus = item_id(cards[1]->ID, {"+ trigger"});
 	ImVec2 target(-1.0f, -1.0f);

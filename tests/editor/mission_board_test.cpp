@@ -29,6 +29,7 @@
 #include <editor/documents/mission_sentence.h>
 #include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
+#include <editor/documents/mission_variables.h>
 #include <editor/documents/strings_document.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/mission_queries.h>
@@ -150,6 +151,33 @@ int test_cards() {
 	live.events.push_back(fired);
 	board = mission_board(m, names, BoardQuery(), &live);
 	TEST_EXPECT(!board.cards[0].live && board.cards[1].live && board.cards[1].live->fired);
+	return 0;
+}
+
+// The variables the events use (S24 A7, the board's Variables fold): by number with their uses in the events'
+// order, named as the mission's names name them; a new one the lowest number no event uses.
+int test_variables() {
+	std::unique_ptr<Document> document = open(fixture_bytes(), "synth_logic.bms");
+	TEST_EXPECT(document);
+	if (!document) return 1;
+	const auto &m = dynamic_cast<const MissionDocument &>(*document);
+	const DocumentMissionNames names(m);
+	TEST_EXPECT(mission_variables(m, names).empty() && mission_new_variable(m) == 0);
+	const NodeId first = m.rows_of(MissionKind::Event)[0]->id, second = m.rows_of(MissionKind::Event)[1]->id;
+	const LogicType *set = logic_type(true, int32_t(bms::ActionType::MisvarChange), 1);
+	const LogicType *equals = logic_type(false, int32_t(bms::TriggerMainType::MissionVariable), 1);
+	std::vector<Edit> edits;
+	std::string error;
+	TEST_EXPECT(set && equals);
+	TEST_EXPECT(logic_add_edits(m, first, *set, SIZE_MAX, edits, error, {{0, 0}, {1, 1}}) && apply_edits(*document, edits));
+	TEST_EXPECT(logic_add_edits(m, second, *equals, SIZE_MAX, edits, error, {{0, 0}, {1, 1}}) && apply_edits(*document, edits));
+	TEST_EXPECT(logic_add_edits(m, second, *set, SIZE_MAX, edits, error, {{0, 2}, {1, 5}}) && apply_edits(*document, edits));
+	const std::vector<MissionVariable> variables = mission_variables(m, names);
+	TEST_EXPECT(variables.size() == 2 && variables[0].index == 0 && same(variables[0].name, "V0") && variables[0].uses.size() == 2);
+	TEST_EXPECT(variables[0].uses[0].event_index == 0 && variables[0].uses[0].action && same(variables[0].uses[0].words, "set V0 to 1"));
+	TEST_EXPECT(variables[0].uses[1].event_index == 1 && !variables[0].uses[1].action && same(variables[0].uses[1].words, "V0 equals 1"));
+	TEST_EXPECT(variables[1].index == 2 && variables[1].uses.size() == 1);
+	TEST_EXPECT(mission_new_variable(m) == 1);
 	return 0;
 }
 
@@ -377,6 +405,7 @@ int test_retail() {
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	if (test_cards() != 0) return 1;
+	if (test_variables() != 0) return 1;
 	if (test_board_op() != 0) return 1;
 	if (test_text_and_selection() != 0) return 1;
 	if (test_op_table() != 0) return 1;

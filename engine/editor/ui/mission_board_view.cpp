@@ -13,6 +13,7 @@
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
+#include <editor/documents/mission_variables.h>
 #include <editor/graph/display_names.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -64,8 +65,12 @@ private:
 	void keys(Workspace &workspace, const MissionDocument &mission, const WorkspaceView::DocumentView &shown, bool editable);
 	void set_shown(Workspace &workspace, const MissionDocument &mission, const char *member, io::JsonValue value);
 
+	void variables(Workspace &workspace, const MissionDocument &mission);
+
 	std::optional<BoardKey> key_;
 	MissionBoard board_;
+	std::vector<MissionVariable> variables_;
+	std::string new_variable_;
 	size_t built_ = 0;
 	CardState state_;
 	char filter_[kWorkspaceText] = {};
@@ -136,6 +141,33 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 		set_shown(workspace, mission, "logic_folded", std::move(ids));
 	}
 	ImGui::TextDisabled("%zu of %zu events", board_.cards.size(), board_.events);
+}
+
+// The variables the events use (S24 A7), folded at first: each by its name with where it is used, a click there
+// selecting that trigger or action; what a new one is called.
+void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mission) {
+	const std::string heading = "Variables (" + std::to_string(variables_.size()) + ")###variables";
+	if (!ImGui::CollapsingHeader(heading.c_str())) return;
+	if (variables_.empty()) ImGui::TextDisabled("No trigger or action uses a variable.");
+	for (const MissionVariable &variable : variables_) {
+		ImGui::PushID(int(variable.index));
+		const std::string label = variable.name + " (" + std::to_string(variable.uses.size()) + " use" +
+		                          (variable.uses.size() == 1 ? ")" : "s)");
+		if (ImGui::TreeNode(label.c_str())) {
+			for (size_t i = 0; i < variable.uses.size(); ++i) {
+				const MissionVariableUse &use = variable.uses[i];
+				ImGui::PushID(int(i));
+				const std::string line = "Event " + std::to_string(use.event_index + 1) + ": " + use.words;
+				if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()))
+					window_requests::select(workspace, mission, use.record);
+				ui_kit::tooltip(line);
+				ImGui::PopID();
+			}
+			ImGui::TreePop();
+		}
+		ImGui::PopID();
+	}
+	ImGui::TextDisabled("A new variable is %s.", new_variable_.c_str());
 }
 
 void MissionBoardPane::keys(Workspace &workspace, const MissionDocument &mission, const WorkspaceView::DocumentView &shown,
@@ -221,11 +253,14 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 		query.attention = key.attention;
 		const std::unique_ptr<MissionNames> names = mission_label_names(*mission, source ? &*source : nullptr);
 		board_ = mission_board(*mission, *names, query, view.activity.live_logic.empty() ? nullptr : &view.activity.live_logic);
+		variables_ = mission_variables(*mission, *names);
+		new_variable_ = names->variable(mission_new_variable(*mission));
 		key_ = key;
 		++built_;
 	}
 	toolbar(workspace, *mission, shown, editable);
 	keys(workspace, *mission, shown, editable);
+	variables(workspace, *mission);
 	ImGui::Separator();
 	// The selection moved (a new event made, a record selected in a view): its card brought into sight.
 	const bool here = view.documents.active == mission->path();

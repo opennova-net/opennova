@@ -12,6 +12,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_uses.h>
+#include <editor/documents/mission_variables.h>
 #include <editor/documents/mission_links.h>
 #include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
@@ -151,7 +152,28 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 	const std::string raw = std::to_string(chip.value);
 	if (chip.unset) ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.45f, 0.32f, 0.10f, 0.85f));
 	ImGui::BeginDisabled(!context.editable);
-	if (by_name) {
+	if (chip.kind == mission::ParamKind::MissionVar) {
+		// A variable: picked from those the events use, by name, or a new one (the lowest no event uses).
+		const std::unique_ptr<MissionNames> names = mission_label_names(context.mission, context.names);
+		const std::string preview = names->variable(chip.value);
+		const float width = ui_kit::text_width(preview.c_str()) + ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f;
+		flow.place(width, style.ItemSpacing.x * 0.5f);
+		ImGui::SetNextItemWidth(width);
+		if (ImGui::BeginCombo("##variable", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
+			for (const MissionVariable &variable : mission_variables(context.mission, *names)) {
+				ImGui::PushID(int(variable.index));
+				const std::string label = variable.name + "  (" + std::to_string(variable.uses.size()) + " use" +
+				                          (variable.uses.size() == 1 ? ")" : "s)");
+				if (ImGui::Selectable(label.c_str(), variable.index == chip.value)) set_field(context, line.record, chip.field, variable.index);
+				ImGui::PopID();
+			}
+			const int64_t fresh = mission_new_variable(context.mission);
+			const std::string label = "New variable: " + names->variable(fresh);
+			if (ImGui::Selectable(label.c_str())) set_field(context, line.record, chip.field, fresh);
+			ui_kit::tooltip("The lowest number no trigger or action of the mission uses.");
+			ImGui::EndCombo();
+		}
+	} else if (by_name) {
 		DisplayName shown;
 		shown.text = chip.unset ? "(" + chip.label + ": not set)" : words;
 		shown.raw = raw;
@@ -488,6 +510,20 @@ bool raise_logic_add(CardContext &context, NodeId event, const LogicType &type, 
 	if (!logic_add_edits(context.mission, event, type, position, edits, error, presets)) return false;
 	raise_kept(context, std::move(edits));
 	return true;
+}
+
+void draw_mission_line(CardContext &context, const BoardCard &card, const BoardLine &line) {
+	CardAsked asked;
+	const float lead = std::max({ui_kit::text_width("When "), ui_kit::text_width("or else "), ui_kit::text_width("Then ")});
+	const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+	const char *word = line.action ? (line.index == 0 ? "Then" : "")
+	                               : line.index == 0 ? "When" : logic_join_words(card.triggers[line.index - 1].join);
+	draw_line(context, card, line, word, lead, right, asked);
+	if (asked.picker) ImGui::OpenPopup("types");
+	if (ImGui::BeginPopup("types")) {
+		draw_type_picker(context, context.state.add_actions);
+		ImGui::EndPopup();
+	}
 }
 
 bool draw_type_picker(CardContext &context, bool actions) {
