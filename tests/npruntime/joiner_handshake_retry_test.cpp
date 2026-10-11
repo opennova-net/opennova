@@ -303,6 +303,31 @@ bool run_discovered_row_join_skips_the_hello() {
 	              "a bare dial (no row record) still sends the 0x41 first");
 }
 
+// D-NET-438: the joiner's CK is a session key, drawn until nonzero: a draw of {0, 0, 9} joins
+// with CK 9 (a zero was once mapped to 1).
+// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey @0x61EA70,
+//  jz @0x61EAC3]
+bool run_zero_client_key_is_drawn_again() {
+	uint64_t now_ms = 0;
+	inmatch::JoinerConnection joiner("ZeroKeyJoiner", [&now_ms] { return now_ms; });
+	const uint32_t draws[] = {0u, 0u, 9u};
+	std::size_t next = 0;
+	joiner.set_session_key_draw([&]() { return draws[next++]; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E115u;
+	joiner.set_discovered_session(session);
+	const std::vector<uint8_t> first = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	return expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth) && next == 3 &&
+				joiner.client_key() == 9u && auth.ck == 9u,
+			"a zero CK draw is drawn again: the 0x42 carries the third draw's 9");
+}
+
 // D-NET-437: the joiner reads any 0x82 from its host, no field required. One whose CI or CK is
 // not its connection's is dropped and the connection stays in the connect state; then CR's truth
 // splits it: any nonzero CR accepts (an SCRK-less one too), and zero rejects with failure code 1
@@ -822,6 +847,7 @@ int main() {
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
 	if (!run_discovered_row_join_skips_the_hello()) return 1;
+	if (!run_zero_client_key_is_drawn_again()) return 1;
 	if (!run_server_auth_acceptance_follows_retail()) return 1;
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;
 	if (!run_client_active_probe_recovers_join()) return 1;

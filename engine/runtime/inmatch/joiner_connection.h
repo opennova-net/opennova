@@ -778,6 +778,8 @@ public:
 	// This connection's own numeric key (ClientAuth.CK; fresh per start()) — the
 	// receiver-local key a host's 0x84 resend request addresses us by.
 	uint32_t client_key() const { return client_key_; }
+	// The draw start() makes the CK from (unset, make_session_key's own); a test injects zeros.
+	void set_session_key_draw(std::function<uint32_t()> draw) { session_key_draw_ = std::move(draw); }
 	uint32_t monotonic_milliseconds32() const {
 		return static_cast<uint32_t>(monotonic_milliseconds_() & 0xFFFFFFFFu);
 	}
@@ -874,6 +876,7 @@ private:
 
 	uint32_t client_index_ = 1;
 	uint32_t client_key_ = 1;
+	std::function<uint32_t()> session_key_draw_;
 	std::string player_name_;
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;

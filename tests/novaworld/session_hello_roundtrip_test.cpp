@@ -8,6 +8,7 @@
 // Godot client and the standalone server stay byte-compatible without us
 // having to launch retail every iteration.
 
+#include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_ping.h>
 
@@ -721,6 +722,20 @@ int test_client_auth_zero_ck_parses() {
 	return 0;
 }
 
+// A session key is drawn until it is nonzero: a draw of {0, 0, 9} keys 9 on the third draw,
+// and a nonzero first draw is kept as drawn.
+// [orig: NapiNP_GenerateSessionKey @0x61EA70 - jz @0x61EAC3]
+int test_session_key_draws_until_nonzero() {
+	const std::array<uint32_t, 3> draws{0u, 0u, 9u};
+	size_t next = 0;
+	TEST_EXPECT(opennova::make_session_key([&]() { return draws[next++]; }) == 9u);
+	TEST_EXPECT(next == 3);
+	next = 2;
+	TEST_EXPECT(opennova::make_session_key([&]() { return draws[next++]; }) == 9u && next == 3);
+	TEST_EXPECT(opennova::make_session_key() != 0);
+	return 0;
+}
+
 int test_server_auth_rejection_roundtrip() {
 	ServerAuth src;
 	src.ci = 7;
@@ -958,6 +973,7 @@ int main() {
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_client_auth_zero_ck_parses() != 0) return 1;
+	if (test_session_key_draws_until_nonzero() != 0) return 1;
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;

@@ -396,12 +396,13 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 	if (reconnecting()) {
 		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
-		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join.
+		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join. The CK is
+		// drawn until nonzero (NapiNP_GenerateSessionKey's jz @0x61EAC3).
 		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3; CNapiNPConnection_InitFromSession
 		//  @0x626320 — the keys @0x6263fb/@0x626401, the cs_dir copies @0x626449/@0x62645c,
 		//  state 3 @0x626496]
 		reconnect_.probing = false;
-		cfg_.client_key = cfg_.next_client_key ? cfg_.next_client_key() : make_random_session_u32();
+		cfg_.client_key = make_session_key(cfg_.next_client_key);
 		client_scrk_ = cfg_.next_scrk ? cfg_.next_scrk() : make_dev_scrk();
 		server_hk_ = sh.hk;
 		server_sk_ = 0;

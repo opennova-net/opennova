@@ -1099,6 +1099,33 @@ void test_reconnect_schedule() {
 	expect(pump_until_probe(client, t0 + span + 1, 200000, out) == 0, "a disarmed session never re-probes");
 }
 
+// The re-join's CK is a session key: a zero draw is drawn again, so a generator yielding 0 and
+// then 1 re-joins with CK 1, on the client and on the 0x42.
+// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey @0x61EA70,
+//  jz @0x61EAC3]
+void test_reconnect_redraws_a_zero_client_key() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x0000003Cu;
+	cfg.client_key = 0x3C3C3C3Cu;
+	inject_reconnect_keys(cfg, 0);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "zero CK: session reaches Verified")) return;
+	client.set_clock_ms(240001);
+	std::vector<std::vector<uint8_t>> out;
+	client.pump(out);
+	if (!expect(client.reconnecting(), "zero CK: the reap starts the reconnect")) return;
+	if (!expect(pump_until_probe(client, 240002, 5000, out) != 0, "zero CK: the probe goes out")) return;
+	std::vector<std::vector<uint8_t>> joined;
+	exchange(server, client, out, joined);
+	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth,
+	            "zero CK: the ServerHello re-joins with one 0x42")) return;
+	expect(client.client_key() == 1u, "zero CK: the re-join draws past the zero to CK 1");
+	std::vector<std::vector<uint8_t>> up;
+	exchange(server, client, joined, up);
+	expect(server.last_dcnt == 1 && server.client_ck == 1u, "zero CK: the re-join's 0x42 carries CK 1");
+}
+
 // A joiner's reconnect: the word stays 3 across the drop, the re-join carries DCNT/RCNT with a
 // fresh CK and SCRK, the service's 0x82 echoes RCNT, and the re-verify replays the play request
 // (CurrentlyPlaying=1, the same PlaySetup). The GSID/NWUID/web domain the connection fed clear on
@@ -1606,6 +1633,7 @@ int main() {
 	test_reconnect_wire();
 	test_reconnect_schedule();
 	test_reconnect_replay();
+	test_reconnect_redraws_a_zero_client_key();
 	test_reconnect_rehost();
 	test_reconnect_join_timeout();
 	test_reconnect_verified_word();
