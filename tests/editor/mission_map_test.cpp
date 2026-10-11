@@ -4,8 +4,10 @@
 // mission and the first framing, a hit and a box, a drag of a pin planned into the 3D view's move batch
 // (mission_move_edits) and served as one undo step, the selection the 3D view shares, the commands and the wire.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <set>
 #include <string>
@@ -16,9 +18,11 @@
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_map.h>
 #include <editor/preview/mission_map_canvas.h>
 #include <editor/preview/mission_map_outline.h>
+#include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_kinds.h>
@@ -305,6 +309,360 @@ static int test_drag() {
 	gathered.requests.clear();
 	TEST_EXPECT(!rig.map()->drag(rig.context(), drag, gathered, error) && error.find("3D view") != std::string::npos);
 	std::printf("test_drag passed\n");
+	return 0;
+}
+
+// S24: the selected event's links on the map (preview/mission_link_shapes, its reach a circle seen from above), the
+// badges on what the events name and the hover's words; none with the links option off.
+static int test_links() {
+	Rig rig("opennova_editor_mission_map_links");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress event = first_of(mission, MissionKind::Event);
+	const NodeAddress walker = first_of(mission, MissionKind::Organic);
+	const NodeAddress zone = first_of(mission, MissionKind::Area);
+	rig.session.handle(request::select_record(kMission, event));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const ViewportContext context = rig.context();
+	std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+	editor_test::Gathered gathered;
+	half->follow(*rig.map(), context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	OverlayList list = half->shapes(context, in);
+	const auto count = [&](OverlayKind kind, uint32_t rgb, float size) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == kind && shape.rgb == rgb && (size < 0.0f || shape.size == size);
+		});
+	};
+	// Event 1 watches the walker in zone 20 (each rung where it stands on the map) and re-arms event 2 (no place).
+	const std::vector<MissionMapMark> marks = rig.map()->marks(context.width, context.height);
+	const MissionMapMark &at = marks[size_t(rig.map()->scene().mark_index(walker.row))];
+	TEST_EXPECT(count(OverlayKind::Circle, kMissionWatchedRgb, 14.0f) == 2 && count(OverlayKind::Circle, kMissionActedRgb, -1.0f) == 0);
+	bool rung = false;
+	for (const OverlayShape &shape : list.shapes)
+		rung = rung || (shape.kind == OverlayKind::Circle && shape.rgb == kMissionWatchedRgb && shape.points[0].x == at.px &&
+		                shape.points[0].y == at.py);
+	TEST_EXPECT(rung);
+	// The badges: the walker, zone 20, both events (named by each other), and no other pin.
+	TEST_EXPECT(count(OverlayKind::Text, kMissionBadgeRgb, -1.0f) == 2);
+	// The hover over the walker's pin says which event names it.
+	in.hovered = true;
+	in.mouse = CanvasPoint{ at.px, at.py };
+	const std::string tip = half->hover_tip(context, in);
+	TEST_EXPECT(tip.find("Named by 1 event:\nEvent 1: When ") != std::string::npos);
+	in.hovered = false;
+	// The zone's ring is at its middle.
+	const MissionMapMark &area = marks[size_t(rig.map()->scene().mark_index(zone.row))];
+	bool middle = false;
+	for (const OverlayShape &shape : list.shapes)
+		middle = middle || (shape.kind == OverlayKind::Circle && shape.rgb == kMissionWatchedRgb &&
+		                    std::fabs(shape.points[0].x - area.px) < 0.5f && std::fabs(shape.points[0].y - area.py) < 0.5f);
+	TEST_EXPECT(middle);
+	// Off: none.
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "map", "options": {"marks": {"links": false}}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	half->follow(*rig.map(), rig.context(), gathered);
+	list = half->shapes(rig.context(), in);
+	TEST_EXPECT(count(OverlayKind::Circle, kMissionWatchedRgb, 14.0f) == 0 && count(OverlayKind::Text, kMissionBadgeRgb, -1.0f) == 0);
+	TEST_EXPECT(!rig.map()->options().links && rig.map()->options_json().get("marks")->get_bool("links", true) == false);
+	std::printf("test_links passed\n");
+	return 0;
+}
+
+// S24: coloured by group, the wireframes' edges and the pins' rings in each group's colour (an edge's colour moved in
+// place, the chunks' serials moved), a legend of the groups in view; the select_group command selects the members of
+// the named record's group; color_by on the wire.
+static int test_group_colours() {
+	Rig rig("opennova_editor_mission_map_groups");
+	TEST_EXPECT(rig.open(true, true));
+	for (int i = 0; i < 40 && rig.map() && rig.map()->outlines_pending(); ++i) rig.pump();
+	const MissionMapViewport *map = rig.map();
+	if (!map) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress walker = first_of(mission, MissionKind::Organic);
+	const std::vector<uint32_t> before = map->outline_rgb();
+	TEST_EXPECT(!before.empty());
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "map", "options": {"color_by": "group"}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	TEST_EXPECT(rig.map()->options().color_by == MissionColorBy::Group &&
+	            rig.map()->options_json().get_string("color_by", "") == "group");
+	// The walker's (group 1) and the guard's (group 2) edges in their groups' colours; none of a group-0 entity's.
+	const std::vector<uint32_t> &after = rig.map()->outline_rgb();
+	TEST_EXPECT(after.size() == before.size());
+	const auto has = [&](uint32_t rgb) { return std::find(after.begin(), after.end(), rgb) != after.end(); };
+	TEST_EXPECT(has(mission_group_rgb(1)) && has(mission_group_rgb(2)) && !has(mission_group_rgb(3)));
+	TEST_EXPECT(mission_map_rgb(MissionPool::Organic, 2, 1, MissionColorBy::Group) == mission_group_rgb(1) &&
+	            mission_map_rgb(MissionPool::Organic, 2, 0, MissionColorBy::Group) == kMissionOrganicRgb &&
+	            mission_map_rgb(MissionPool::Organic, 2, 1, MissionColorBy::Team) == kMissionRedRgb);
+	// The legend.
+	const ViewportContext context = rig.context();
+	std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+	editor_test::Gathered gathered;
+	half->follow(*rig.map(), context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	const OverlayList list = half->shapes(context, in);
+	const auto text = [&](const std::string &words) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Text && shape.text == words;
+		});
+	};
+	TEST_EXPECT(text("Groups in view") == 1 && text("Group 1 (1)") == 1 && text("Group 2 (1)") == 1);
+	// select_group: the walker's group's members (the walker alone), one SelectRecord.
+	gathered.requests.clear();
+	std::string error;
+	TEST_EXPECT(rig.map()->command(context, "select_group", { walker.row }, gathered, error));
+	TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].kind == EditorRequestKind::SelectRecord);
+	gathered.requests.clear();
+	TEST_EXPECT(!rig.map()->command(context, "select_group", { first_of(mission, MissionKind::Item).row }, gathered, error) &&
+	            error.find("group") != std::string::npos);
+	std::printf("test_group_colours passed\n");
+	return 0;
+}
+
+// S24 B6: an area's edges and corners on the map over the wire's drag (as far as the pointer went, the area alone);
+// its bottom and top refused (the 3D view's).
+static int test_area_handles() {
+	Rig rig("opennova_editor_mission_map_area_handles");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress zone = first_of(mission, MissionKind::Area);
+	const ViewportContext context = rig.context();
+	const MissionMapView view = rig.map()->view(context.width, context.height);
+	MissionPressed held;
+	TEST_EXPECT(rig.map()->pressed(zone, held));
+	ViewportDrag drag;
+	drag.id = zone.row;
+	drag.handle = "x_max";
+	drag.by = true;
+	drag.x = 10.0f;
+	drag.y = 0.0f;
+	drag.end = true;
+	editor_test::Gathered gathered;
+	std::string error;
+	TEST_EXPECT(rig.map()->drag(context, drag, gathered, error) && gathered.requests.size() == 2 &&
+	            gathered.requests[0].edits.size() == 1 && gathered.requests[0].edits[0].field == "x_max");
+	if (gathered.requests.size() == 2 && gathered.requests[0].edits.size() == 1) {
+		const double x_max = std::get<double>(gathered.requests[0].edits[0].value);
+		TEST_EXPECT(near(x_max, held.max[0] + 10.0 * double(view.scale), 1e-3));
+	}
+	drag.handle = "x_min_y_max";
+	gathered.requests.clear();
+	TEST_EXPECT(rig.map()->drag(context, drag, gathered, error) && !gathered.requests.empty() &&
+	            gathered.requests[0].edits.size() == 1 && gathered.requests[0].edits[0].field == "x_min");
+	drag.handle = "z_max";
+	gathered.requests.clear();
+	TEST_EXPECT(!rig.map()->drag(context, drag, gathered, error) && error.find("3D view") != std::string::npos);
+	// An entity has no edge on the map.
+	drag.id = first_of(mission, MissionKind::Item).row;
+	drag.handle = "x_min";
+	TEST_EXPECT(!rig.map()->drag(context, drag, gathered, error));
+	// Esc mid-drag of the primary area's east edge on the canvas: what the drag wrote goes back where the press found it.
+	{
+		rig.session.handle(request::select_record(kMission, zone));
+		rig.pump();
+		const ViewportContext now = rig.context();
+		std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+		editor_test::Gathered got;
+		half->follow(*rig.map(), now, got);
+		const MissionMapView seen = rig.map()->view(now.width, now.height);
+		double ex = 0.0, ny = 0.0;
+		TEST_EXPECT(mission_map_handle_point(held, MissionHandle::XMax, ex, ny));
+		CanvasInput in;
+		in.width = now.width;
+		in.height = now.height;
+		in.hovered = true;
+		in.keyboard.focused = true;
+		seen.project(ex, ny, in.mouse.x, in.mouse.y);
+		in.screen = in.mouse;
+		const auto step = [&](CanvasInput frame) {
+			got.requests.clear();
+			half->follow(*rig.map(), rig.context(), got);
+			got.requests.clear();
+			half->input(rig.context(), frame, got);
+			return got.requests;
+		};
+		CanvasInput press = in;
+		press.pressed = true;
+		press.down = true;
+		step(press);
+		CanvasInput moved = in;
+		moved.down = true;
+		moved.mouse.x += 40.0f;
+		moved.screen = moved.mouse;
+		std::vector<EditorRequest> wrote = step(moved);
+		TEST_EXPECT(!wrote.empty() && editor_test::serve(rig.session, wrote));
+		rig.pump();
+		MissionPressed dragged;
+		TEST_EXPECT(rig.map()->pressed(zone, dragged) && dragged.max[0] > held.max[0] + 1.0);
+		CanvasInput escaped = moved;
+		escaped.keyboard.escape = true;
+		std::vector<EditorRequest> undone = step(escaped);
+		bool restored = false;
+		for (const EditorRequest &request : undone)
+			for (const Edit &edit : request.edits)
+				restored = restored || (edit.field == "x_max" && near(std::get<double>(edit.value), held.max[0], 1e-6));
+		TEST_EXPECT(restored);
+		TEST_EXPECT(editor_test::serve(rig.session, undone));
+		rig.pump();
+		TEST_EXPECT(rig.map()->pressed(zone, dragged) && near(dragged.max[0], held.max[0], 1e-6));
+	}
+	std::printf("test_area_handles passed\n");
+	return 0;
+}
+
+// S24 B2: pick mode on the map: while the workspace's pick waits for event 1's zone, each area's pin is a candidate
+// (rung), the hover says what to click, a `pick` of zone 20 sets the trigger's zone and ends the pick (one batch,
+// then the workspace), and one of an entity is refused; the pick ends when its trigger goes.
+static int test_pick() {
+	Rig rig("opennova_editor_mission_map_pick");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress event = first_of(mission, MissionKind::Event);
+	NodeAddress trigger;
+	for (const Document::Collection &list : mission.collections_of(event))
+		if (list.spec.kind == node_kind(MissionKind::Trigger)) trigger = { event.row, list.spec.kind, list.ids[0] };
+	const std::vector<const Node *> areas = mission.rows_of(MissionKind::Area);
+	const auto ask_pick = [&](const std::string &pick) {
+		rig.session.handle(request::set_workspace("{\"document\": {\"path\": \"" + rig.path + "\", \"pick\": " + pick + "}}"));
+		return rig.session.outcome().done();
+	};
+	TEST_EXPECT(ask_pick("{\"record\": " + std::to_string(trigger.child) + ", \"slot\": 1}"));
+	rig.pump();
+	const ViewportContext context = rig.context();
+	std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+	editor_test::Gathered gathered;
+	half->follow(*rig.map(), context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	const OverlayList list = half->shapes(context, in);
+	TEST_EXPECT(std::count_if(list.shapes.begin(), list.shapes.end(), [](const OverlayShape &shape) {
+		return shape.kind == OverlayKind::Circle && shape.size == 13.0f && shape.rgb == kMissionCandidateRgb;
+	}) == long(areas.size()));
+	const std::vector<MissionMapMark> marks = rig.map()->marks(context.width, context.height);
+	const MissionMapMark &pin = marks[size_t(rig.map()->scene().mark_index(areas[0]->id))];
+	in.hovered = true;
+	in.mouse = CanvasPoint{ pin.px, pin.py };
+	TEST_EXPECT(half->hover_tip(context, in) == "Click an area for Zone (Esc cancels).");
+	// The wire's pick: an entity refused, zone 30's area taken.
+	std::string error;
+	TEST_EXPECT(!rig.map()->command(context, "pick", { first_of(mission, MissionKind::Organic).row }, gathered, error) &&
+	            error.find("an area") != std::string::npos);
+	gathered.requests.clear();
+	TEST_EXPECT(rig.map()->command(context, "pick", { areas[1]->id }, gathered, error) && gathered.requests.size() == 2 &&
+	            gathered.requests[0].kind == EditorRequestKind::EditRecord && gathered.requests[0].keep_selection &&
+	            gathered.requests[1].kind == EditorRequestKind::SetWorkspace);
+	TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
+	rig.pump();
+	Value zone;
+	TEST_EXPECT(rig.document()->get(trigger, "param2", zone) && std::get<int64_t>(zone) == 30);
+	TEST_EXPECT(!rig.session.view().workspace.document(rig.path).pick.active());
+	// No pick waits: refused.
+	TEST_EXPECT(!rig.map()->command(rig.context(), "pick", { areas[0]->id }, gathered, error) &&
+	            error.find("No pick waits") != std::string::npos);
+	// A pick whose trigger goes ends with it.
+	TEST_EXPECT(ask_pick("{\"record\": " + std::to_string(trigger.child) + ", \"slot\": 0}"));
+	TEST_EXPECT(rig.session.view().workspace.document(rig.path).pick.active());
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = trigger;
+	rig.session.handle(request::edit_record(kMission, std::vector<Edit>{ remove }));
+	TEST_EXPECT(rig.session.outcome().done() && !rig.session.view().workspace.document(rig.path).pick.active());
+	std::printf("test_pick passed\n");
+	return 0;
+}
+
+// S24 B7: the 3D view's keys on the map: Delete removes the selection (one batch), Ctrl+D copies it a snap step east
+// (the 3D view's duplicate), an arrow nudges it a snap step on the map's axes (one gesture while it is held).
+static int test_keys() {
+	Rig rig("opennova_editor_mission_map_keys");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress item = first_of(mission, MissionKind::Item);
+	rig.session.handle(request::select_record(kMission, item));
+	rig.pump();
+	std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+	editor_test::Gathered gathered;
+	const ViewportContext context = rig.context();
+	half->follow(*rig.map(), context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	in.keyboard.focused = true;
+	const auto keyed = [&](const std::function<void(CanvasKeyboard &)> &set) {
+		CanvasInput frame = in;
+		set(frame.keyboard);
+		gathered.requests.clear();
+		half->input(context, frame, gathered);
+		return gathered.requests;
+	};
+	std::vector<EditorRequest> raised = keyed([](CanvasKeyboard &k) { k.remove = true; });
+	TEST_EXPECT(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditRecord && raised[0].edits.size() == 1 &&
+	            raised[0].edits[0].operation == EditOperation::Remove && raised[0].edits[0].address == item);
+	raised = keyed([](CanvasKeyboard &k) { k.duplicate = true; });
+	TEST_EXPECT(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditInViewport &&
+	            raised[0].command.name == "duplicate" && raised[0].command.by.size() == 2 &&
+	            raised[0].command.by[0] == double(rig.map()->options().snap));
+	MissionPressed held;
+	TEST_EXPECT(rig.map()->pressed(item, held));
+	raised = keyed([](CanvasKeyboard &k) {
+		k.arrow_x = 1;
+		k.arrow_held = true;
+	});
+	bool east = false;
+	for (const EditorRequest &request : raised)
+		for (const Edit &edit : request.edits)
+			east = east || (edit.field == "x" && std::fabs(std::get<double>(edit.value) - (held.x + double(rig.map()->options().snap))) < 1e-3);
+	TEST_EXPECT(east);
+	// Up moves north up the picture and Down south (arrow_y is +1 for Down); a RotateMap180 mission's map the other
+	// way. Each press on a canvas of its own, so no nudge before it carries over.
+	const double snap = double(rig.map()->options().snap);
+	const auto nudged_y = [&](int arrow_y) {
+		std::unique_ptr<CanvasHalf> fresh = rig.map()->make_canvas();
+		editor_test::Gathered got;
+		const ViewportContext now = rig.context();
+		fresh->follow(*rig.map(), now, got);
+		CanvasInput frame = in;
+		frame.width = now.width;
+		frame.height = now.height;
+		frame.keyboard.arrow_y = arrow_y;
+		frame.keyboard.arrow_held = true;
+		got.requests.clear();
+		fresh->input(now, frame, got);
+		for (const EditorRequest &request : got.requests)
+			for (const Edit &edit : request.edits)
+				if (edit.field == "y") return std::get<double>(edit.value) - held.y;
+		return 0.0;
+	};
+	TEST_EXPECT(std::fabs(nudged_y(-1) - snap) < 1e-3 && std::fabs(nudged_y(1) + snap) < 1e-3);
+	{
+		Edit turn;
+		turn.operation = EditOperation::Set;
+		turn.address = first_of(*rig.document(), MissionKind::Mission);
+		turn.field = "attrib_flags";
+		turn.value = int64_t(0x20);
+		rig.session.handle(request::edit_record(kMission, turn));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.pump();
+		rig.session.handle(request::select_record(kMission, item));
+		rig.pump();
+		TEST_EXPECT(rig.map()->ground().flip_180);
+		TEST_EXPECT(std::fabs(nudged_y(-1) + snap) < 1e-3 && std::fabs(nudged_y(1) - snap) < 1e-3);
+		rig.session.handle(request::undo(kMission));
+		rig.pump();
+	}
+	std::printf("test_keys passed\n");
 	return 0;
 }
 
@@ -743,6 +1101,11 @@ int main(int argc, char **argv) {
 	failed += test_projection();
 	failed += test_marks_hit_box();
 	failed += test_drag();
+	failed += test_links();
+	failed += test_group_colours();
+	failed += test_area_handles();
+	failed += test_pick();
+	failed += test_keys();
 	failed += test_commands_and_wire();
 	failed += test_grid_origin();
 	failed += test_outline_of_a_box();

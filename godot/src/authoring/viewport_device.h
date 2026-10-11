@@ -74,6 +74,8 @@ public:
 
 	ViewportApplier &applier() { return *applier_; }
 	SubViewport *sub_viewport() const { return viewport_; }
+	// Where the canvas last drew the picture: its top-left corner in the screen's pixels (S24 B8).
+	Vector2 canvas_at() const { return canvas_at_; }
 
 private:
 	void size_(int width, int height);
@@ -81,6 +83,7 @@ private:
 	bool keeps_last_() const { return build_.loading || build_.failed; }
 
 	SubViewport *viewport_ = nullptr;
+	Vector2 canvas_at_;
 	uint64_t viewport_id_ = 0; // its instance, checked as the device goes
 	std::unique_ptr<ViewportApplier> applier_;
 	Retire retire_;

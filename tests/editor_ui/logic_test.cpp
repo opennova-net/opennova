@@ -1,15 +1,15 @@
-// A mission's logic in the Inspector over a real session (ui/mission_logic_view, ADR 0046 S15, Events
-// and scripts): an event selected shows its sentence and its form in words (repeats, the start and
-// end passes, the wait in steps and seconds), its triggers and actions by their words with Add trigger
-// and Add action, and none of the format's raw fields; Add action opens the types by name, and the
-// one chosen is one EditRecord of the planned add, which the sentence then reads; a trigger selected
-// shows its type by name, its negation and its words; an entity selected lists the events that name
-// it, in words.
+// A mission's logic in the Inspector over a real session (ui/mission_logic_view, ADR 0046 S15, Events and scripts;
+// S24 A7: the board's card and line): an event selected shows its sentence and its card (its flags, its wait in
+// seconds with the steps, its triggers and actions as lines of words and chips, + trigger and + action), and none
+// of the format's raw fields; + action opens the type picker, and the type chosen is one EditRecord of the planned
+// add, which the sentence then reads; a trigger selected shows its type by name, its negation and its line; an
+// entity selected lists the events that name it, in words.
 #include <cstdio>
 #include <string>
 #include <vector>
 
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_sentence.h>
 #include <editor/documents/mission_table.h>
 
 #include "editor_ui_test_support.h"
@@ -90,46 +90,52 @@ void test_event_inspector() {
 	ui.away();
 	std::string text = logged_frame(ui);
 	CHECK(text.find("When " + walker + " is in Zone 20, then re-arm event 2.") != std::string::npos, "the event's sentence");
-	const std::string first_trigger = "1. " + walker + " is in Zone 20";
-	CHECK(in_order(text, {"Once, at the mission's start", "Once, at the mission's end", "Repeats", "Wait before acting",
-	                      "Triggers (1 of 20)", "Add trigger...", first_trigger.c_str()}) &&
-	              in_order(text, {"Actions (1 of 20)", "Add action...", "1. re-arm event 2"}),
-	      "its form in words, its lists by their words");
+	CHECK(in_order(text, {"Event 1", "Repeats", "At start", "At end", "Wait", "When", "is ", "in ", "Zone 20", "+ trigger", "Then",
+	                      "re-arm ", "+ action"}),
+	      "its card: flags, wait, its lines by their words and chips");
 	CHECK(text.find("Reset after") == std::string::npos && text.find("ResetAfter") == std::string::npos &&
 	              text.find("Bits...") == std::string::npos,
 	      "none of the format's raw fields");
 
-	// Add action: the types by name; Blue team wins chosen is one EditRecord, the sentence reads it.
-	const ImGuiID inspector = Ui::window_id("Inspector");
-	ui.activate(item_id(inspector, {"mission_event", "actions", "Add action..."}));
-	const ImGuiID popup = item_id(inspector, {"mission_event", "actions", "add"});
-	CHECK(ImGui::IsPopupOpen(popup, ImGuiPopupFlags_None), "Add action opens the types");
+	// + action: the types by name; Blue team wins chosen is one EditRecord, the sentence reads it.
+	const ImGuiWindow *card = nullptr;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "Inspector") && std::strstr(window->Name, "/card_"))
+			card = window;
+	CHECK(card != nullptr, "the Inspector's card");
+	if (!card) return;
+	ui.activate(item_id(card->ID, {"+ action"}));
+	const ImGuiID popup = ImHashStr("types", 0, card->ID);
+	CHECK(ImGui::IsPopupOpen(popup, ImGuiPopupFlags_None), "+ action opens the types");
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"Objectives and the end", "Win a sub-goal", "Blue team wins"}) && text.find("Group AI: Red alert") != std::string::npos,
-	      "the types by name, in their groups");
+	CHECK(in_order(text, {"Common", "By group", "Objectives and the end"}) && text.find("Blue team wins") == std::string::npos,
+	      "the types by name, Common first, then their groups folded");
+	ui.activate(ImHashStr("Objectives and the end", 0, popup_child(popup, "types")));
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Objectives and the end", "Win a sub-goal", "Blue team wins"}), "a group opened: its types");
 	const int blue = int(opennova::bms::ActionType::BlueWin);
-	ui.activate(ImHashStr("Blue team wins", 0, pushed(pushed(popup_child(popup, "types"), blue), 0)));
+	ui.activate(ImHashStr("Blue team wins", 0, pushed(pushed(ImHashStr("all", 0, popup_child(popup, "types")), blue), 0)));
 	run.settle();
 	const std::vector<EditorRequest> raised = run.take();
 	const EditorRequest *add = only(raised, EditorRequestKind::EditRecord);
-	CHECK(add && add->edits.size() == 1 && add->edits[0].operation == EditOperation::Add && add->edits[0].field == "action_type" &&
-	              add->edits[0].value == Value(int64_t(blue)),
-	      "one EditRecord: the action added by its type");
+	CHECK(add && add->keep_selection && add->edits.size() == 1 && add->edits[0].operation == EditOperation::Add &&
+	              add->edits[0].field == "action_type" && add->edits[0].value == Value(int64_t(blue)),
+	      "one EditRecord: the action added by its type, the event kept selected");
 	CHECK(mission->record_title(first) == "Event 1: When " + walker + " is in Zone 20, then re-arm event 2; end the round: the blue team (team 1) wins.",
 	      "the sentence reads the new action");
 
-	// The trigger: its type by name, its negation, its words; its event's sentence above.
+	// The trigger: its type by name, its negation, its line; its event's sentence above.
 	const std::vector<Document::Collection> lists = mission->collections_of(first);
 	session.handle(request::select_record(path, {first.row, kind_of(MissionKind::Trigger), lists[0].ids[0]}));
 	run.settle();
 	ui.away();
 	text = logged_frame(ui);
-	const std::string reads = "Reads: " + walker + " is in Zone 20";
 	CHECK(in_order(text, {"Event 1", "/", "Trigger 1", "Event 1: When ", "Go to its event", "Type", "Entity is in an area",
-	                      "Not: it holds when this is not so", reads.c_str()}),
-	      "the breadcrumb by name, then the trigger's form in words");
-	CHECK(text.find("Condition") == std::string::npos && text.find("Sub-type") == std::string::npos,
-	      "its raw condition and sub-type left to the format");
+	                      "Not: it holds when this is not so", "When", "is ", "in ", "Zone 20"}),
+	      "the breadcrumb by name, then the trigger's form and its line");
+	CHECK(text.find("Condition") == std::string::npos && text.find("Sub-type") == std::string::npos &&
+	              text.find("Parameter 1") == std::string::npos,
+	      "its raw condition, its sub-type and its read parameters left to the line");
 
 	// The walker: the events that name it.
 	session.handle(request::select_record(path, {organic->id, organic->kind, 0}));
@@ -142,8 +148,64 @@ void test_event_inspector() {
 	CHECK(overflowing().empty(), "nothing runs past its window");
 }
 
+// S24 A7: an event's outline line's right-click menu offers Add trigger and Add action (their types by name, Common
+// first) and Show on board; a type chosen there is one edit_record that keeps the event selected.
+void test_outline_logic_items() {
+	MissionRun run("opennova_editor_ui_logic_row_menu");
+	CHECK(run.open(), "the mission open");
+	const MissionDocument *mission = run.mission();
+	if (!mission) return;
+	const SessionView &v = run.session.view();
+	const Node *first = mission->rows_of(MissionKind::Event)[0];
+	const ImGuiWindow *outline = MissionRun::drawn_window("/outline_column_");
+	CHECK(outline != nullptr, "the outline column");
+	if (!outline) return;
+	std::string text;
+	bool opened = false;
+	for (float y = outline->InnerRect.Min.y + 2.0f; y < outline->InnerRect.Max.y && !opened; y += 6.0f) {
+		run.ui.mouse(outline->InnerRect.Min.x + 40.0f, y);
+		if (GImGui->HoveredId == 0) continue;
+		run.ui.button(true, ImGuiMouseButton_Right);
+		run.ui.button(false, ImGuiMouseButton_Right);
+		text = logged_frame(run.ui);
+		opened = text.find("Add trigger") != std::string::npos && GImGui->OpenPopupStack.Size == 1;
+		if (!opened) {
+			ImGui::ClosePopupsExceptModals();
+			run.ui.frames(1);
+		}
+	}
+	CHECK(opened && in_order(text, {"Go to definition", "Find usages", "Add trigger", "Add action", "Show on board"}),
+	      "an event's line: its jumps, then Add trigger, Add action and Show on board");
+	if (!opened) return;
+	run.settle();
+	run.take();
+	CHECK(v.documents.selection.primary == NodeAddress({first->id, first->kind, 0}), "the right click selected the event");
+	const ImGuiWindow *popup = GImGui->OpenPopupStack.Size ? GImGui->OpenPopupStack.back().Window : nullptr;
+	if (!popup) return;
+	run.ui.activate(item_id(popup->ID, {"Add trigger"}));
+	text = logged_frame(run.ui);
+	CHECK(in_order(text, {"Common", "Entity is destroyed"}), "Add trigger: the Common types first");
+	const LogicType *destroyed = logic_common_types(false)[0];
+	const ImGuiWindow *submenu = GImGui->OpenPopupStack.Size ? GImGui->OpenPopupStack.back().Window : nullptr;
+	CHECK(submenu != nullptr && submenu != popup, "its submenu open");
+	if (!submenu || submenu == popup) return;
+	run.ui.activate(ImHashStr(destroyed->title, 0, ImHashData(&destroyed, sizeof(destroyed), submenu->ID)));
+	run.settle();
+	const std::vector<EditorRequest> raised = run.take();
+	const EditorRequest *add = only(raised, EditorRequestKind::EditRecord);
+	CHECK(add && add->keep_selection && !add->edits.empty() && add->edits[0].operation == EditOperation::Add &&
+	              add->edits[0].field == "main_type",
+	      "a type chosen: one edit_record of the add, the selection kept");
+	const std::vector<Document::Collection> lists = mission->collections_of({first->id, first->kind, 0});
+	CHECK(lists.size() == 2 && lists[0].ids.size() == 2, "the trigger added");
+	CHECK(v.documents.selection.primary == NodeAddress({first->id, first->kind, 0}), "the event still selected");
+}
+
 } // namespace
 
-void run_logic_tests() { test_event_inspector(); }
+void run_logic_tests() {
+	test_event_inspector();
+	test_outline_logic_items();
+}
 
 } // namespace editor_ui_test

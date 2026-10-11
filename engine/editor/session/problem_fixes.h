@@ -113,6 +113,10 @@ private:
 	mutable std::map<std::string, Copy> copies_;
 };
 
+// The game install's spelling of a file it has (view.project.retail_files: the names the install resolves, by
+// their normalized form), or "" when it has none of that name.
+std::string install_file_name(const SessionView &view, const std::string &name);
+
 // The fixes for a finding over the view as it is, the first the one a click applies.
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view,
                                   const ProblemFixIndex *index = nullptr);

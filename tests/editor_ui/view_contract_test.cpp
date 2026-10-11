@@ -271,6 +271,22 @@ void test_every_view() {
 				CHECK(workspace.requests.empty(), (at + ": drawing raises no request").c_str());
 				for (const std::string &offender : overflowing()) CHECK(false, (at + ": " + offender).c_str());
 			}
+			// A row's pane (S24: the mission's Logic pane) shown beside its viewport: drawn within the tab at every
+			// width, side by side or stacked, raising nothing as it draws.
+			if (row->make_pane) {
+				workspace.seeded.workspace.documents[document->path()].logic = true;
+				workspace.seeded.revisions.touch(ViewConcern::Workspace);
+				for (const float width : {1400.0f, 520.0f, 320.0f}) {
+					const std::string at = where + " with its pane at " + std::to_string(int(width));
+					draw_frames(workspace, *view, *document, width, 4);
+					const auto *main = dynamic_cast<const MainViewportView *>(view.get());
+					CHECK(main && main->pane_drawn(), (at + ": the pane drawn").c_str());
+					CHECK(workspace.requests.empty(), (at + ": drawing raises no request").c_str());
+					for (const std::string &offender : overflowing()) CHECK(false, (at + ": " + offender).c_str());
+				}
+				workspace.seeded.workspace.documents[document->path()].logic = false;
+				workspace.seeded.revisions.touch(ViewConcern::Workspace);
+			}
 			// It draws its document: the title of its first row of its own kind shows.
 			const std::string title = first_title(*document);
 			const std::string shown = view_frame(workspace, *view, *document, 520.0f, true);

@@ -127,6 +127,8 @@ bool ViewportView::game_input(const ViewportModel &) const {
 	return false;
 }
 
+void ViewportView::reveal(const ViewEvent &) {}
+
 void ViewportView::end_frame(Workspace &workspace) {
 	if (half_) {
 		CanvasWindowRequests requests(workspace);

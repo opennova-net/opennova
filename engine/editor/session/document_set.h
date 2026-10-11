@@ -159,7 +159,16 @@ private:
 	// its type's Add makes one (an edit_record of the type's batch, opened first, selecting it); false, said
 	// in Problems and on the status line, where the type defines no name of the kind there.
 	bool define_in_made(const std::string &name, const ReferenceSubject &define);
-	bool apply_edits(DocumentBase &document, const std::vector<Edit> &edits);
+	// `select_made` false (edit_record's keep_selection, S24): what the batch adds is not selected nor its document
+	// made the active one; the selection is repaired as for any other edit.
+	bool apply_edits(DocumentBase &document, const std::vector<Edit> &edits, bool select_made = true);
+	// The mission's own text table (<mission>.bin) made from the mission text blank where the project has none
+	// (S24, set_string_text's create; as a new mission's create_file makes it): its project path, "" with the
+	// refusal reported.
+	std::string make_mission_text_table(const std::string &mission);
+	// set_string_text's create (S24): the next free key of the field's form in the mission's own table, its text,
+	// and the field set to its number.
+	void create_string(const EditorRequest &request, const Document &document, const FieldUse &use, const std::string &text);
 	// The status line's words for a batch (ADR 0046 S15): its records by their titles, a field set by
 	// its name (on `named`, its records as they read before) and the new value's words; "" where a
 	// batch is none it words.
