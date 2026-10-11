@@ -8,9 +8,11 @@
 // concurrent case runs last, since it adds accounts and a host). The listener
 // trusts 127.0.0.1 as its proxy, so the website-session cases each name their
 // own client address in X-Real-IP and keep their own rate-limit buckets; a
-// second listener on the same database sets the Secure (__Host-) cookie and
-// trusts no proxy. The retail POST /NWLogin.dll cases post an EPASK-encrypted
-// form the way a stock client does.
+// second listener on the same database sets the Secure (__Host-) cookie,
+// trusts no proxy and serves copies of the retail templates and static files,
+// with a planted secret file beside them that no reply may carry. The retail
+// POST /NWLogin.dll cases post an EPASK-encrypted form the way a stock client
+// does.
 //
 // The listener and the test share one db::ConnectionPool, the way main() wires
 // the server: each Crow handler leases a connection for its request, and the
@@ -20,12 +22,14 @@
 // writers wait on.
 
 #include "auth.h"
+#include "http_cookies.h"
 #include "http_listener.h"
 #include "net_http.h"
 #include "net_sockets.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
 #include "session_store.h"
+#include "template_engine.h"
 #include "web_session.h"
 
 #include <base/io/sha256.h>
@@ -86,6 +90,11 @@ struct Harness {
 	// (ONNET_COOKIE_SECURE) and no trusted proxy.
 	uint16_t secure_port = 0;
 	std::string registered_pcid; // what the register case's reply carried
+	// The second listener also serves copies of the retail templates and static
+	// files (under retail_root); a planted secret file sits beside each root
+	// of both listeners, and symlinks under the retail roots lead to it.
+	std::filesystem::path temp_root;
+	std::filesystem::path retail_root;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -1631,37 +1640,502 @@ int test_unknown_path_404(Harness &h) {
 	return 0;
 }
 
+// ---- Request-named files and response header values ----
+
+// What the planted secret files hold; no reply may carry it.
+constexpr const char *kSecret = "PLANTED-SECRET-c41f";
+// The RID of the host row the join cases reach.
+constexpr uint32_t kSplitRid = 4242;
+
+// `text` with every byte but [A-Za-z0-9] percent-encoded: a query value that
+// reaches the route as exactly these bytes.
+std::string pct(const std::string &text) {
+	static const char *kHex = "0123456789ABCDEF";
+	std::string out;
+	for (const char c : text) {
+		const auto byte = static_cast<unsigned char>(c);
+		if (std::isalnum(byte)) {
+			out.push_back(c);
+		} else {
+			out += '%';
+			out += kHex[byte >> 4];
+			out += kHex[byte & 0x0F];
+		}
+	}
+	return out;
+}
+
+// `text` as a query value with only the bytes a request line cannot carry
+// escaped, so "../" and "/" travel as they are.
+std::string raw_query(const std::string &text) {
+	std::string out;
+	for (const char c : text) {
+		const auto byte = static_cast<unsigned char>(c);
+		if (byte <= 0x20 || byte >= 0x7F || c == '%' || c == '&' || c == '#' || c == '+' ||
+				c == '\\') {
+			out += pct(std::string(1, c));
+		} else {
+			out.push_back(c);
+		}
+	}
+	return out;
+}
+
+// Template names a request may hand a route that the rule refuses: absolute
+// paths, dot segments, a backslash, a drive, a hidden file and a symlink out
+// of the root (both planted under the retail templates root).
+std::vector<std::string> refused_names(const Harness &h) {
+	return {
+		"/proc/self/environ",
+		"../../../../etc/hostname",
+		"../secret.txt",
+		"..\\secret.txt",
+		(h.retail_root / "secret.txt").generic_string(),
+		"C:\\Windows\\win.ini",
+		"C:/Windows/win.ini",
+		"jop_2_msg.htm/../../secret.txt",
+		"./jop_2_msg.htm",
+		".hidden.htm",
+		"leak.htm",
+	};
+}
+
+bool carries_secret(const net::HttpReply &reply) {
+	return body_text(reply).find(kSecret) != std::string::npos;
+}
+
+// The tag a first relay leg set (NWJOINSESSIONTAG), "" when none.
+std::string join_tag(const net::HttpReply &reply) {
+	return set_cookie_value(reply, "NWJOINSESSIONTAG");
+}
+
+// The retail POST /NWLogin.dll to the second listener with `fields` beside the
+// credentials, every field EPASK-encrypted as a stock client sends it.
+net::HttpReply retail_login(Harness &h, const std::string &name, const std::string &password,
+		const std::vector<std::pair<std::string, std::string>> &fields) {
+	const auto prepare = h.send_to(h.secure_port, "GET", "/nwprepare.dll?url=jop_2_start.htm");
+	opennova::EpaskParams epask;
+	if (!opennova::epask_from_string(set_cookie_value(prepare, "EPASK"), epask))
+		return {};
+	std::vector<opennova::LoginFormField> form = { { "EPASK", opennova::epask_to_string(epask),
+														   false },
+		{ "NAME", name, true }, { "PASSWORD", password, true }, { "pfid", "28", true } };
+	for (const auto &[field, value] : fields)
+		form.push_back({ field, value, true });
+	std::string body;
+	if (!opennova::build_login_post_body(epask, form, body))
+		return {};
+	return h.send_to(h.secure_port, "POST", "/NWLogin.dll",
+			{ "Content-Type: application/x-www-form-urlencoded" }, body);
+}
+
+// The rules themselves: every retail template name is a bare file name; a
+// path out of its root (a dot segment, an empty segment, a symlink) resolves
+// to nothing; a cookie value with a byte that could split the response or
+// forge a cookie goes out empty, while every value the service sends a stock
+// client, and a handle with a space, goes out as it is.
+int test_name_and_value_rules(Harness &h) {
+	const std::filesystem::path source_templates =
+			std::filesystem::path(OPENNOVA_SOURCE_DIR) / "apps" / "novaworld_server" / "templates";
+	int templates = 0;
+	for (const auto &entry : std::filesystem::directory_iterator(source_templates)) {
+		const std::string name = entry.path().filename().string();
+		if (!nws::is_bare_file_name(name))
+			std::fprintf(stderr, "  not a bare name: %s\n", name.c_str());
+		TEST_EXPECT(nws::is_bare_file_name(name));
+		TEST_EXPECT(nws::template_file((h.retail_root / "templates").string(), name).has_value());
+		++templates;
+	}
+	TEST_EXPECT(templates >= 30);
+	for (const std::string &name : refused_names(h)) {
+		if (name == "leak.htm")
+			continue; // a bare name; its target is what is refused
+		TEST_EXPECT(!nws::is_bare_file_name(name));
+	}
+	const auto templates_root = (h.retail_root / "templates").string();
+	TEST_EXPECT(!nws::template_file(templates_root, "leak.htm").has_value());
+	TEST_EXPECT(!nws::template_file(templates_root, "jop_2/../jop_2_msg.htm").has_value());
+	const auto static_root = h.retail_root / "static";
+	TEST_EXPECT(nws::file_under_root(static_root, "jop_2/nonbhdx2.tga").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2//nonbhdx2.tga").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "/etc/hostname").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2/../../secret.txt").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "leak.tga").has_value());
+	TEST_EXPECT(!nws::file_under_root(static_root, "jop_2").has_value()); // a directory
+
+	for (const char *value : { "3", "2345", "jop:cus2", "us", "127.0.0.1", "::ffff:10.0.0.7",
+				 "65537:3233:ABCDEFGHIJKLMNOP", "NWServer:NWLogin.dll:SESSIONTAG:123:0a1b2c3d",
+				 "A-A02-085D18", "5e550001", "ljim", "Space Handle", "Jim's \"quoted\"",
+				 "JT:0a000013143f1efe6c8000767fd748e1127304c5b6d728", "" }) {
+		TEST_EXPECT(nws::cookie_value_ok(value));
+		TEST_EXPECT(nws::set_cookie_text("NWHANDLE", value, "Path=/") ==
+				std::string("NWHANDLE=") + value + "; Path=/");
+	}
+	for (const std::string &value :
+			{ std::string("a\rb"), std::string("a\nb"), std::string("a\0b", 3), std::string("a;b"),
+					std::string("a,b"), std::string("a\tb"), std::string("a\x7f") }) {
+		TEST_EXPECT(!nws::cookie_value_ok(value));
+		TEST_EXPECT(nws::set_cookie_text("NWHANDLE", value, "Path=/") == "NWHANDLE=; Path=/");
+	}
+	TEST_EXPECT(nws::set_cookie_text("BAD NAME", "x", "Path=/").empty());
+	TEST_EXPECT(nws::set_cookie_text("A\r\nB", "x", "Path=/").empty());
+	TEST_EXPECT(nws::header_text_ok("text/html; charset=a\tb"));
+	TEST_EXPECT(!nws::header_text_ok("a\r\nX-Injected: 1"));
+	return 0;
+}
+
+// Every template route answers a name the rule refuses as it answers a
+// missing template, with no file's bytes: the absolute and dot-segment names,
+// raw and percent-encoded, the backslash and drive names, a hidden file and a
+// symlink planted in the templates root, on /NWAccount.dll and
+// /NWCharacter.dll (404), /NWLogout.dll ("Logged out."), /nwprepare.dll,
+// /NWStart.dll, both /NWJoin.dll and /NWHost.dll legs, and the retail
+// POST /NWLogin.dll's msgbase / failure page (a bad password) and its relay and
+// success pages (a good one): an empty page.
+int test_template_names_refused(Harness &h) {
+	auto get = [&h](const std::string &path, const std::vector<std::string> &headers = {}) {
+		return h.send_to(h.secure_port, "GET", path, headers);
+	};
+	auto expect = [](const net::HttpReply &reply, int code, const std::string &body,
+						  const std::string &what) {
+		const bool ok = reply.transport_ok && reply.code == code && body_text(reply) == body &&
+				!carries_secret(reply);
+		if (!ok)
+			std::fprintf(stderr, "  %s: %s\n", what.c_str(), describe(reply).c_str());
+		return ok;
+	};
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = kSplitRid;
+		row.gsid = "GSID-SPLIT";
+		row.game = "jop_2_consumer";
+		row.app_id = "20";
+		row.server_name = "Split Srv";
+		row.host_ip = "10.0.0.42";
+		row.host_port = 32770;
+		auto conn = h.pool.acquire();
+		opennova::hostdb::upsert_host(*conn, row);
+	}
+
+	for (const std::string &name : refused_names(h)) {
+		// The 404 names only a bare file name (the symlink's).
+		const std::string not_found =
+				"template not found: " + (nws::is_bare_file_name(name) ? name : std::string());
+		for (const std::string &q : { pct(name), raw_query(name) }) {
+			const std::string what = "'" + nws::loggable(name) + "' as " + q;
+			TEST_EXPECT(expect(
+					get("/NWAccount.dll?success=" + q), 404, not_found, "NWAccount " + what));
+			TEST_EXPECT(expect(
+					get("/nwcharacter.dll?success=" + q), 404, not_found, "nwcharacter " + what));
+			TEST_EXPECT(expect(
+					get("/NWLogout.dll?success=" + q), 200, "Logged out.", "NWLogout " + what));
+			TEST_EXPECT(expect(get("/nwprepare.dll?url=" + q), 200, "", "nwprepare " + what));
+			TEST_EXPECT(expect(get("/NWStart.dll?OUT=" + q), 200, "", "NWStart " + what));
+			TEST_EXPECT(
+					expect(get("/NWJoin.dll?rid=1&relay=" + q), 200, "", "NWJoin relay " + what));
+			TEST_EXPECT(
+					expect(get("/NWHost.dll?pfid=28&relay=" + q), 200, "", "NWHost relay " + what));
+
+			const auto join_first =
+					get("/NWJoin.dll?rid=" + std::to_string(kSplitRid) + "&success=" + q);
+			TEST_EXPECT(join_first.transport_ok && !join_tag(join_first).empty());
+			TEST_EXPECT(expect(
+					get("/NWJoin.dll", { "Cookie: NWJOINSESSIONTAG=" + join_tag(join_first) }), 200,
+					"", "NWJoin success " + what));
+			const auto host_first = get("/NWHost.dll?pfid=28&success=" + q);
+			TEST_EXPECT(host_first.transport_ok && !join_tag(host_first).empty());
+			TEST_EXPECT(expect(
+					get("/NWHost.dll", { "Cookie: NWJOINSESSIONTAG=" + join_tag(host_first) }), 200,
+					"", "NWHost success " + what));
+		}
+	}
+
+	// The retail login: three names, a bad password then a good one each.
+	TEST_EXPECT(make_account(h, "tpl_user", "pw-tpl") > 0);
+	for (const std::string &name : { std::string("/proc/self/environ"),
+				 std::string("../secret.txt"), (h.retail_root / "secret.txt").generic_string() }) {
+		const std::string what = "'" + name + "'";
+		const auto bad = retail_login(
+				h, "tpl_user", "wrong-pw", { { "msgbase", name }, { "failure", name } });
+		TEST_EXPECT(expect(bad, 200, "", "NWLogin msgbase " + what));
+		TEST_EXPECT(set_cookie_value(bad, "LOGINSESSIONTAG").empty());
+
+		const auto good =
+				retail_login(h, "tpl_user", "pw-tpl", { { "relay", name }, { "success", name } });
+		TEST_EXPECT(expect(good, 200, "", "NWLogin relay " + what));
+		const std::string tag = set_cookie_value(good, "LOGINSESSIONTAG");
+		TEST_EXPECT(!tag.empty());
+		TEST_EXPECT(expect(get("/NWLogin.dll", { "Cookie: LOGINSESSIONTAG=" + tag }), 200, "",
+				"NWLogin success " + what));
+	}
+	return 0;
+}
+
+// Every retail template still renders, by the names a stock client sends:
+// /nwprepare.dll?url= fills each in, the catch-all serves each as it is, the
+// retail static file serves, and the default pages render.
+int test_retail_templates_render(Harness &h) {
+	const auto templates_root = h.retail_root / "templates";
+	const std::string base = "http://127.0.0.1:" + std::to_string(h.secure_port);
+	const nws::TemplateVars vars{
+		{ "HOST_URL", base + "/nwhost.dll" },
+		{ "GSB_SERVER", base + "/jop_2.gsb" },
+		{ "JOINLAN_URL", "" },
+	};
+	for (const auto &entry : std::filesystem::directory_iterator(templates_root)) {
+		const std::string name = entry.path().filename().string();
+		if (name == "leak.htm" || name == ".hidden.htm")
+			continue; // the planted ones
+		const std::string text = test_io::read_file_text(entry.path().string());
+		TEST_EXPECT(!text.empty());
+		const auto rendered = h.send_to(h.secure_port, "GET", "/nwprepare.dll?url=" + name);
+		if (body_text(rendered) != nws::render_template(text, vars)) {
+			std::fprintf(
+					stderr, "  %s did not render: %s\n", name.c_str(), describe(rendered).c_str());
+		}
+		TEST_EXPECT(rendered.transport_ok && rendered.code == 200);
+		TEST_EXPECT(body_text(rendered) == nws::render_template(text, vars));
+		const auto served = h.send_to(h.secure_port, "GET", "/" + name);
+		TEST_EXPECT(served.transport_ok && served.code == 200 && body_text(served) == text);
+	}
+	const auto tga = h.send_to(h.secure_port, "GET", "/static/jop_2/nonbhdx2.tga");
+	TEST_EXPECT(tga.transport_ok && tga.code == 200);
+	TEST_EXPECT(tga.body ==
+			test_io::read_file((h.retail_root / "static" / "jop_2" / "nonbhdx2.tga").string()));
+	const auto asset = h.send_to(h.secure_port, "GET", "/assets/app.js");
+	TEST_EXPECT(asset.transport_ok && asset.code == 200 && body_text(asset) == "console.log(1);");
+
+	const auto account = h.send_to(h.secure_port, "GET", "/NWAccount.dll?success=jop_2_main.htm");
+	TEST_EXPECT(account.transport_ok && account.code == 200 && !body_text(account).empty());
+	const auto logout = h.send_to(h.secure_port, "GET", "/NWLogout.dll");
+	TEST_EXPECT(logout.transport_ok && logout.code == 200);
+	TEST_EXPECT(body_text(logout) ==
+			nws::render_template(
+					test_io::read_file_text((templates_root / "jop_2_login.htm").string()), vars));
+	return 0;
+}
+
+// The catch-all static route serves nothing outside its roots, on either
+// listener: an absolute path after the route's slash ("//etc/..."), dot
+// segments raw or percent-encoded, a backslash, a hidden file, and a symlink
+// in each retail root that leads to the secret file.
+int test_catch_all_stays_in_root(Harness &h) {
+	for (const auto &[port, root] :
+			{ std::pair<uint16_t, std::filesystem::path>{ h.port, h.temp_root },
+					{ h.secure_port, h.retail_root } }) {
+		const std::string secret = (root / "secret.txt").generic_string();
+		for (const std::string &path : { "/" + secret, "/static/" + secret, "/" + secret.substr(1),
+					 std::string("/static/../secret.txt"), std::string("/%2e%2e/secret.txt"),
+					 std::string("/%2e%2e%2fsecret.txt"), std::string("/static/..%2fsecret.txt"),
+					 std::string("/static/%2e%2e%2f%2e%2e%2fsecret.txt"),
+					 std::string("/..%5csecret.txt"),
+					 std::string("/static/jop_2/..%5c..%5c..%5csecret.txt"),
+					 std::string("/.hidden.htm"), std::string("/leak.htm"),
+					 std::string("/static/leak.tga"), std::string("/webleak.txt"),
+					 std::string("/static/jop_2/../../secret.txt") }) {
+			const auto reply = h.send_to(port, "GET", path);
+			const bool ok = reply.transport_ok && reply.code != 200 && !carries_secret(reply);
+			if (!ok) {
+				std::fprintf(stderr, "  GET %s on :%u: %s\n", path.c_str(),
+						static_cast<unsigned>(port), describe(reply).c_str());
+			}
+			TEST_EXPECT(ok);
+		}
+	}
+	return 0;
+}
+
+// Whether a reply's head is the one the route built: no header line holds a
+// CR, LF or NUL, none is an injected one, and nothing injected spilled into
+// the body.
+bool split_free(const net::HttpReply &reply) {
+	if (!reply.transport_ok)
+		return false;
+	for (const std::string &line : reply.headers) {
+		if (line.find_first_of(std::string("\r\n\0", 3)) != std::string::npos)
+			return false;
+		std::string lower = line.substr(0, 10);
+		for (char &c : lower)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		if (lower == "x-injected")
+			return false;
+	}
+	return body_text(reply).find("X-Injected") == std::string::npos;
+}
+
+bool has_set_cookie(const net::HttpReply &reply, const std::string &text) {
+	const auto cookies = header_values(reply, "Set-Cookie");
+	return std::find(cookies.begin(), cookies.end(), text) != cookies.end();
+}
+
+// A CR, LF, NUL, ';' or ',' in any value a Set-Cookie carries never splits the
+// response or forges a cookie: the cookie goes out empty. The sources: the
+// /nwprepare.dll query (VER1, VER2, GT, CC), an nwhandle from /api/register and
+// from the admin create and update (NWHANDLE, CHAR at /NWLogin.dll and
+// /NWAccount.dll), an admin-set PCID and expansion bits (PCID, EXPBITS), and the
+// pfid a first relay leg stored (NWPF on the second /NWHost.dll and
+// /NWJoin.dll leg). The values a stock client sends, and a handle with a
+// space, go out byte for byte.
+int test_header_values_cannot_split(Harness &h) {
+	// The /nwprepare.dll query: retail's own values, then injected ones.
+	auto reply = h.send("GET", "/nwprepare.dll?ver1=3&ver2=2345&cc=us&gt=jop:cus2&url=urls.htm");
+	TEST_EXPECT(split_free(reply));
+	for (const char *cookie : { "VER1=3; Path=/", "VER2=2345; Path=/", "GT=jop:cus2; Path=/",
+				 "CC=us; Path=/", "YOURIP=127.0.0.1; Path=/" }) {
+		TEST_EXPECT(has_set_cookie(reply, cookie));
+	}
+	const std::string epask = set_cookie_value(reply, "EPASK");
+	TEST_EXPECT(std::count(epask.begin(), epask.end(), ':') == 2);
+	TEST_EXPECT(has_set_cookie(reply, "EPASK=" + epask + "; Path=/"));
+	reply = h.send("GET",
+			"/nwprepare.dll?url=urls.htm&ver1=" + pct("3\r\nX-Injected: v1") + "&ver2=" +
+					pct("2345\nX-Injected: v2") + "&gt=" + pct("jop:cus2\rX-Injected: gt") +
+					"&cc=" + pct("us; Domain=evil.example"));
+	TEST_EXPECT(split_free(reply));
+	for (const char *cookie : { "VER1=; Path=/", "VER2=; Path=/", "GT=; Path=/", "CC=; Path=/" }) {
+		if (!has_set_cookie(reply, cookie))
+			std::fprintf(stderr, "  no Set-Cookie %s\n", cookie);
+		TEST_EXPECT(has_set_cookie(reply, cookie));
+	}
+	// A query's %00 ends the value Crow hands the route (a C string), so a NUL
+	// reaches add_cookie only from a stored value; the rules case covers it.
+	reply = h.send("GET",
+			"/nwprepare.dll?url=urls.htm&ver1=" + pct("3,X-Injected=1") +
+					"&ver2=" + pct("2345\r\n\r\nX-Injected: body"));
+	TEST_EXPECT(split_free(reply));
+	TEST_EXPECT(has_set_cookie(reply, "VER1=; Path=/") && has_set_cookie(reply, "VER2=; Path=/"));
+	TEST_EXPECT(body_text(reply) ==
+			"http://127.0.0.1:" + std::to_string(h.port) + "/nwhost.dll|" +
+					"http://127.0.0.1:" + std::to_string(h.port) + "/jop_2.gsb");
+
+	// An nwhandle from /api/register, and expansion bits an admin set: the
+	// retail login's relay and completion.
+	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.41.0.1") },
+			"{\"username\":\"split_reg\",\"password\":\"pw-split\","
+			"\"nwhandle\":\"Reg\\r\\nX-Injected: reg\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 201);
+	const auto reg = nws::get_user_by_username(*h.pool.acquire(), "split_reg");
+	TEST_EXPECT(reg.has_value());
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(reg->id) + "/game-access",
+			{ kJson, kBearer },
+			"{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\","
+			"\"exp_bits\":\"3\\r\\nX-Injected: exp\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	const auto relay = retail_login(h, "split_reg", "pw-split", {});
+	TEST_EXPECT(split_free(relay));
+	TEST_EXPECT(has_set_cookie(relay, "EXPBITS=; Path=/"));
+	const std::string tag = set_cookie_value(relay, "LOGINSESSIONTAG");
+	TEST_EXPECT(!tag.empty());
+	reply = h.send_to(h.secure_port, "GET", "/NWLogin.dll", { "Cookie: LOGINSESSIONTAG=" + tag });
+	TEST_EXPECT(split_free(reply));
+	for (const char *cookie : { "NWHANDLE=; Path=/", "CHAR=; Path=/", "EXPBITS=; Path=/" }) {
+		TEST_EXPECT(has_set_cookie(reply, cookie));
+	}
+	TEST_EXPECT(has_set_cookie(reply, "PCID=" + reg->pcid + "; Path=/"));
+
+	// An nwhandle from the admin create, then an nwhandle and a PCID from the
+	// admin update: /NWAccount.dll refreshes them.
+	reply = h.send("POST", "/api/admin/users", { kJson, kBearer },
+			"{\"username\":\"split_admin\",\"password\":\"pw-split\",\"pcid\":\"5p11a001\","
+			"\"nwhandle\":\"Adm\\nX-Injected: adm\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 201);
+	const std::vector<std::string> as_admin_user = { "Cookie: NWHANDLE=split_admin" };
+	reply = h.send_to(h.secure_port, "GET", "/NWAccount.dll", as_admin_user);
+	TEST_EXPECT(split_free(reply) && reply.code == 200);
+	TEST_EXPECT(
+			has_set_cookie(reply, "NWHANDLE=; Path=/") && has_set_cookie(reply, "CHAR=; Path=/"));
+	TEST_EXPECT(has_set_cookie(reply, "PCID=5p11a001; Path=/"));
+	const auto adm = nws::get_user_by_username(*h.pool.acquire(), "split_admin");
+	TEST_EXPECT(adm.has_value());
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(adm->id), { kJson, kBearer },
+			"{\"nwhandle\":\"Upd\\r\\n\\r\\nX-Injected: upd\","
+			"\"pcid\":\"p,c;id\\r\\nX-Injected: pcid\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	reply = h.send_to(h.secure_port, "GET", "/NWCharacter.dll", as_admin_user);
+	TEST_EXPECT(split_free(reply) && reply.code == 200);
+	TEST_EXPECT(
+			has_set_cookie(reply, "NWHANDLE=; Path=/") && has_set_cookie(reply, "PCID=; Path=/"));
+
+	// A handle with a space is a real one: byte for byte.
+	{
+		nws::CreateUserParams p;
+		p.username = "split_space";
+		p.password = "pw-split";
+		p.pcid = "5p11a002";
+		p.nwh = "1";
+		p.nwhandle = "Space Handle";
+		TEST_EXPECT(nws::create_user(*h.pool.acquire(), p).ok);
+	}
+	reply = h.send_to(h.secure_port, "GET", "/NWAccount.dll", { "Cookie: NWHANDLE=split_space" });
+	TEST_EXPECT(split_free(reply) && reply.code == 200);
+	TEST_EXPECT(has_set_cookie(reply, "NWHANDLE=Space Handle; Path=/"));
+	TEST_EXPECT(has_set_cookie(reply, "CHAR=Space Handle; Path=/"));
+	TEST_EXPECT(has_set_cookie(reply, "PCID=5p11a002; Path=/"));
+
+	// The pfid a first relay leg stored, sent back as NWPF on the second.
+	const std::string pfid = pct("28\r\nX-Injected: pf");
+	const auto host_first =
+			h.send_to(h.secure_port, "GET", "/NWHost.dll?success=jop_2_host2.htm&pfid=" + pfid);
+	TEST_EXPECT(split_free(host_first) && !join_tag(host_first).empty());
+	reply = h.send_to(h.secure_port, "GET", "/NWHost.dll",
+			{ "Cookie: NWJOINSESSIONTAG=" + join_tag(host_first) });
+	TEST_EXPECT(split_free(reply) && reply.code == 200);
+	TEST_EXPECT(has_set_cookie(reply, "NWPF=; Path=/"));
+	const auto join_first = h.send_to(
+			h.secure_port, "GET", "/NWJoin.dll?rid=" + std::to_string(kSplitRid) + "&pfid=" + pfid);
+	TEST_EXPECT(split_free(join_first) && !join_tag(join_first).empty());
+	reply = h.send_to(h.secure_port, "GET", "/NWJoin.dll",
+			{ "Cookie: NWJOINSESSIONTAG=" + join_tag(join_first) });
+	TEST_EXPECT(split_free(reply) && reply.code == 200);
+	TEST_EXPECT(has_set_cookie(reply, "NWPF=; Path=/"));
+	// A stock client's pfid goes out as it came.
+	const auto host_ok =
+			h.send_to(h.secure_port, "GET", "/NWHost.dll?success=jop_2_host2.htm&pfid=28");
+	reply = h.send_to(h.secure_port, "GET", "/NWHost.dll",
+			{ "Cookie: NWJOINSESSIONTAG=" + join_tag(host_ok) });
+	TEST_EXPECT(split_free(reply) && has_set_cookie(reply, "NWPF=28; Path=/"));
+
+	auto conn = h.pool.acquire();
+	opennova::hostdb::remove_host_by_rid(*conn, kSplitRid);
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
-		{"health", test_health},
-		{"lobbies_lists_seeded_games", test_lobbies_lists_seeded_games},
-		{"register_ok", test_register_ok},
-		{"register_duplicate", test_register_duplicate},
-		{"admin_server_status_requires_token", test_admin_server_status_requires_token},
-		{"admin_users_list", test_admin_users_list},
-		{"login_sets_session_cookie", test_login_sets_session_cookie},
-		{"cookie_secure_flag", test_cookie_secure_flag},
-		{"login_failures_are_generic", test_login_failures_are_generic},
-		{"login_refuses_inactive_accounts", test_login_refuses_inactive_accounts},
-		{"me_requires_live_session", test_me_requires_live_session},
-		{"session_slides", test_session_slides},
-		{"logout_invalidates", test_logout_invalidates},
-		{"admin_routes_by_credential", test_admin_routes_by_credential},
-		{"admin_routes_table", test_admin_routes_table},
-		{"bootstrap_admin", test_bootstrap_admin},
-		{"csrf_before_buckets", test_csrf_before_buckets},
-		{"login_brake", test_login_brake},
-		{"register_brake", test_register_brake},
-		{"nwlogin_brake", test_nwlogin_brake},
-		{"known_addresses", test_known_addresses},
-		{"retail_pin_revocation", test_retail_pin_revocation},
-		{"untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored},
-		{"nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey},
-		{"menu_urls_name_bound_port", test_menu_urls_name_bound_port},
-		{"unknown_path_404", test_unknown_path_404},
-		{"admin_host_push", test_admin_host_push},
-		{"concurrent_requests", test_concurrent_requests},
+		{ "health", test_health },
+		{ "lobbies_lists_seeded_games", test_lobbies_lists_seeded_games },
+		{ "register_ok", test_register_ok },
+		{ "register_duplicate", test_register_duplicate },
+		{ "admin_server_status_requires_token", test_admin_server_status_requires_token },
+		{ "admin_users_list", test_admin_users_list },
+		{ "login_sets_session_cookie", test_login_sets_session_cookie },
+		{ "cookie_secure_flag", test_cookie_secure_flag },
+		{ "login_failures_are_generic", test_login_failures_are_generic },
+		{ "login_refuses_inactive_accounts", test_login_refuses_inactive_accounts },
+		{ "me_requires_live_session", test_me_requires_live_session },
+		{ "session_slides", test_session_slides },
+		{ "logout_invalidates", test_logout_invalidates },
+		{ "admin_routes_by_credential", test_admin_routes_by_credential },
+		{ "admin_routes_table", test_admin_routes_table },
+		{ "bootstrap_admin", test_bootstrap_admin },
+		{ "csrf_before_buckets", test_csrf_before_buckets },
+		{ "login_brake", test_login_brake },
+		{ "register_brake", test_register_brake },
+		{ "nwlogin_brake", test_nwlogin_brake },
+		{ "known_addresses", test_known_addresses },
+		{ "retail_pin_revocation", test_retail_pin_revocation },
+		{ "untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored },
+		{ "nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey },
+		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
+		{ "unknown_path_404", test_unknown_path_404 },
+		{ "admin_host_push", test_admin_host_push },
+		{ "name_and_value_rules", test_name_and_value_rules },
+		{ "template_names_refused", test_template_names_refused },
+		{ "retail_templates_render", test_retail_templates_render },
+		{ "catch_all_stays_in_root", test_catch_all_stays_in_root },
+		{ "header_values_cannot_split", test_header_values_cannot_split },
+		{ "concurrent_requests", test_concurrent_requests },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);
@@ -1736,16 +2210,51 @@ int main() {
 		TEST_EXPECT(http.start(config));
 		TEST_EXPECT(http.bound_port() != 0);
 
+		// A secret file beside every root of both listeners, which no reply may
+		// carry. The second listener's roots (under retail/) are copies of the
+		// retail templates and static files and a small web root, each holding
+		// a symlink to the secret; its templates also hold a hidden file with it.
+		const std::string secret = kSecret;
+		const std::vector<uint8_t> secret_bytes(secret.begin(), secret.end());
+		const std::filesystem::path retail_root = temp.path / "retail";
+		const std::filesystem::path apps_dir = source_dir / "apps" / "novaworld_server";
+		std::filesystem::create_directories(retail_root / "web" / "assets");
+		std::filesystem::copy(apps_dir / "templates", retail_root / "templates",
+				std::filesystem::copy_options::recursive);
+		std::filesystem::copy(apps_dir / "static", retail_root / "static",
+				std::filesystem::copy_options::recursive);
+		const std::string app_js = "console.log(1);";
+		TEST_EXPECT(test_io::write_file((retail_root / "web" / "assets" / "app.js").string(),
+				std::vector<uint8_t>(app_js.begin(), app_js.end())));
+		for (const auto &file : { temp.path / "secret.txt", retail_root / "secret.txt",
+					 retail_root / "templates" / ".hidden.htm" }) {
+			TEST_EXPECT(test_io::write_file(file.string(), secret_bytes));
+		}
+		for (const auto &link : { retail_root / "templates" / "leak.htm",
+					 retail_root / "static" / "leak.tga", retail_root / "web" / "webleak.txt" }) {
+			std::error_code ec;
+			std::filesystem::create_symlink(retail_root / "secret.txt", link, ec);
+			if (ec)
+				std::fprintf(
+						stderr, "  symlink %s: %s\n", link.string().c_str(), ec.message().c_str());
+			TEST_EXPECT(!ec);
+		}
+
 		// The second listener: the Secure cookie (an https site) and no
-		// trusted proxy.
+		// trusted proxy, over the retail roots.
 		nws::ServerConfig secure_config = config;
 		secure_config.cookie_secure = true;
 		secure_config.trusted_proxies.clear();
+		secure_config.templates_dir = retail_root / "templates";
+		secure_config.static_dir = retail_root / "static";
+		secure_config.web_dist_dir = retail_root / "web";
 		nws::HttpListener secure_http(manager, pool, sessions);
 		TEST_EXPECT(secure_http.start(secure_config));
 		TEST_EXPECT(secure_http.bound_port() != 0);
 
 		Harness harness{pool, sessions, nw_udp, http.bound_port(), secure_http.bound_port(), {}};
+		harness.temp_root = temp.path;
+		harness.retail_root = retail_root;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.
