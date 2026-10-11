@@ -9,7 +9,7 @@
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
 
 
-#include <runtime/inmatch/integrity_challenge_profile.h>
+#include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/end_round_protocol.h>
 #include <net/npwire/nw_session_framing.h> // make_random_session_u32 (the per-player tick seed)
 #include <runtime/inmatch/server_spawn.h> // Server_ReservePlayerTeam (0x04/spawn identity)
@@ -1059,8 +1059,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 	if (conn.host_disconnect_sent) return replies;
 	SessionReplyState &st = conn.reply;
 	const PlayerReplicationState rep = make_rep_state(config, conn, world);
-	const IntegrityChallengeProfile *integrity_profile =
-			find_integrity_challenge_profile(config.integrity_profile);
+	const IntegritySources &integrity = config.integrity_sources;
 
 	// The loadout gate (burst phase 7→8) is opened ONLY by the C2S 0x2F handler (case 0x2F below).
 	// A prior auto-advance ("any C2S at phase 8") fired on stale handshake messages before the
@@ -1267,19 +1266,20 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::ENTITY_CHECKSUM_REPLY: {
 				// C2S 0x20 is [u8 id][u32 checksum]. Retail's packet reads
 				// are lenient (missing bytes are zero) and ignore everything
-				// after byte 4. Id 0xFF selects the whole WeaponSlotDef table;
-				// any other id selects one AnimDef row. An explicit profile is
-				// essential: an unknown corpus or uncovered individual row is
-				// silence, never an invented CRC-zero source.
+				// after byte 4. Id 0xFF selects the host's own whole weapon.def
+				// table CRC; any other id one row's (0 for a row with no name).
+				// The sources are the host's own loaded tables, computed as
+				// retail computes them; a source they hold no value for (an
+				// uncomputed table, a named row) is silence, never an invented
+				// CRC-zero source.
 				// [orig: Server_ValidateWeaponCRC @0x501F70]
-				if (integrity_profile == nullptr) break;
 				const uint8_t id = msg.payload.empty() ? 0 : msg.payload[0];
 				const uint32_t received = read_u32_le_lenient(msg.payload, 1);
 				uint32_t source = 0;
 				if (id == 0xFF) {
-					source = integrity_profile->weapon_slot_table_crc;
-				} else if (!integrity_profile->find_animation_definition_crc(
-							id, source)) {
+					if (!integrity.weapon_table_known) break;
+					source = integrity.weapon_table_crc;
+				} else if (!integrity.weapon_row_crc(id, source)) {
 					break;
 				}
 				if (!weapon_integrity_reply_matches(
@@ -1294,19 +1294,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// The retail client commonly appends the echoed four-byte request
 				// key; the host consumes only index+CRC and ignores that tail.
 				// [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck (0x21) @0x502050]
-				if (integrity_profile == nullptr) break;
 				const uint8_t raw_index =
 						msg.payload.empty() ? 0 : msg.payload[0];
-				const int32_t signed_index = raw_index < 0x80
-						? static_cast<int32_t>(raw_index)
-						: static_cast<int32_t>(raw_index) - 0x100;
-				if (signed_index < 0 ||
-						static_cast<uint16_t>(signed_index) >=
-								integrity_profile->ammo_definition_count)
-					break;
 				uint32_t source = 0;
-				if (!integrity_profile->find_ammo_definition_crc(
-							raw_index, source))
+				if (integrity.ammo_row(raw_index, source) !=
+						IntegritySources::AmmoRow::Crc)
 					break;
 				const uint32_t received = read_u32_le_lenient(msg.payload, 1);
 				if ((source ^ st.integrity_ammo_crc_salt) != received &&

@@ -119,14 +119,6 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 		join_profile->assign(profile);
 	}
 	join_preload_sim_->set_join_character_profile(join_profile);
-	if (!p_target->get_integrity_profile().is_empty() &&
-			!join_preload_sim_->set_join_integrity_profile(p_target->get_integrity_profile())) {
-		join_preload_sim_.unref();
-		clear_pending_session();
-		world_->emit_signal(kSignalLoadFailed, vformat(
-				"join: unknown integrity profile '%s'", p_target->get_integrity_profile()));
-		return ERR_INVALID_PARAMETER;
-	}
 	// The APPID join token (decoded .joi CK) a NovaWorld host validates in
 	// ClientAuth (reject code 9), and the CD identity cookie (packed PUB*
 	// blob) it validates in the 0x00 JOIN (codes 23/24/25). Both empty/"0"

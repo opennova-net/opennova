@@ -378,7 +378,7 @@ bool run_seeded_objective_layout_hint() {
 }
 
 // The runtime surfaces the joiner's anti-cheat challenge counters for the live
-// join diagnostics: a 0x30 with no integrity profile counts as seen-not-answered
+// join diagnostics: a 0x30 with no computed integrity source counts as seen-not-answered
 // (the deliberate-silence policy, D-NET-181), and a non-joiner runtime reports
 // zeroed defaults.
 bool run_challenge_diagnostics_pass_through_the_runtime() {

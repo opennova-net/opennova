@@ -2,9 +2,9 @@
 #
 # The host is configured entirely by launch flags (`--lan-host <mission>
 # --lan-port <port> --callsign <name> --lan-mode <1..4> --lan-max-players
-# <1..64> [--lan-gametype <n>] [--integrity-profile <id>] [--resource-dir
-# <dir>] [/exp <name>]`, docs/dev-env-vars.md) and drives through its
-# opennova-game MCP endpoint (`--mcp-port`, docs/mcp.md). Readiness is the
+# <1..64> [--lan-gametype <n>] [--resource-dir <dir>] [/exp <name>]`,
+# docs/dev-env-vars.md) and drives through its opennova-game MCP endpoint
+# (`--mcp-port`, docs/mcp.md). Readiness is the
 # JO LAN discovery answer (opennova-lan-probe) AND the endpoint's game_state
 # reporting the host role on the requested port.
 #
@@ -25,7 +25,6 @@ param(
     [string] $GameType = "auto",
     [string] $ResourceDir = "",
     [string] $Expansion = "",
-    [string] $IntegrityProfile = "",
     [string] $LogFile = "",
     [string] $Resolution = "",
     [switch] $Windowed,
@@ -79,9 +78,6 @@ $gameArguments = @(
 if (-not $normalizedGameType.Equals("auto", [System.StringComparison]::OrdinalIgnoreCase)) {
     $gameArguments += @("--lan-gametype", [string] $parsedGameType)
 }
-if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {
-    $gameArguments += @("--integrity-profile", $IntegrityProfile.Trim())
-}
 if (-not [string]::IsNullOrWhiteSpace($ResourceDir)) {
     $gameArguments += @("--resource-dir", $ResourceDir)
 }
@@ -110,9 +106,6 @@ if (-not [string]::IsNullOrWhiteSpace($ResourceDir)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($Expansion)) {
     Write-Host "OPENNOVA_HOST_EXPANSION=$($Expansion.Trim())"
-}
-if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {
-    Write-Host "OPENNOVA_HOST_INTEGRITY_PROFILE=$($IntegrityProfile.Trim())"
 }
 Write-Host "OPENNOVA_HOST_WINDOWED=$([bool] $Windowed)"
 if (-not [string]::IsNullOrWhiteSpace($LogFile)) {

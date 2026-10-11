@@ -37,8 +37,6 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("spectator_password"),
 			&LaunchFlags::spectator_password);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("callsign"), &LaunchFlags::callsign);
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("integrity_profile"),
-			&LaunchFlags::integrity_profile);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("capture_pcap"), &LaunchFlags::capture_pcap);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("mcp_port"), &LaunchFlags::mcp_port);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_hud"), &LaunchFlags::no_hud);
@@ -152,10 +150,6 @@ String LaunchFlags::spectator_password() {
 
 String LaunchFlags::callsign() {
 	return to_gd(parse().callsign);
-}
-
-String LaunchFlags::integrity_profile() {
-	return to_gd(parse().integrity_profile);
 }
 
 String LaunchFlags::capture_pcap() {

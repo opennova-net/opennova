@@ -19,7 +19,6 @@ param(
     [ValidateRange(1, 65535)] [int] $HostMcpPort = 8975,
     [ValidateRange(1, 65535)] [int] $JoinerMcpPort = 8976,
     [ValidateRange(0, 10000)] [int] $JoinDelayMs = 1500,
-    [string] $IntegrityProfile = "",
     [string] $HostResourceDir = "",
     [string] $JoinResourceDir = "",
     [string] $Expansion = "",
@@ -57,9 +56,6 @@ if (-not [string]::IsNullOrWhiteSpace($HostResourceDir)) {
 if (-not [string]::IsNullOrWhiteSpace($Expansion)) {
     $hostArgs["Expansion"] = $Expansion
 }
-if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {
-    $hostArgs["IntegrityProfile"] = $IntegrityProfile
-}
 if ($PSBoundParameters.ContainsKey("GameType")) {
     $hostArgs["GameType"] = $GameType
 }
@@ -86,9 +82,6 @@ $joinArgs = @{
     Port = $Port
     McpPort = $JoinerMcpPort
     PassThru = $true
-}
-if (-not [string]::IsNullOrWhiteSpace($IntegrityProfile)) {
-    $joinArgs["IntegrityProfile"] = $IntegrityProfile
 }
 if (-not [string]::IsNullOrWhiteSpace($JoinResourceDir)) {
     $joinArgs["ResourceDir"] = $JoinResourceDir

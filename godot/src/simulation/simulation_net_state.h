@@ -105,10 +105,6 @@ struct SimulationNetState {
 	// installed before its authoritative player spawn.
 	opennova::inmatch::CharacterJoinVars local_character_vars{};
 	bool local_character_vars_set = false;
-	// Explicit resource-corpus identity for the retail anti-cheat 0x30/0x31
-	// sources. Empty keeps safe silence. Retained across direct-load runtime
-	// rebuilds just like the character and charattr profile data.
-	std::string join_integrity_profile_id;
 	// The install root the joiner's JOIN VERSIONCRCSTRING checksum reads its
 	// loose expansion/<name>/version.txt from (D-NET-166). Empty keeps the
 	// golden "0". Retained across direct-load runtime rebuilds.

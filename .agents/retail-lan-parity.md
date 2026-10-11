@@ -126,12 +126,20 @@ joiner holds on the deploy screen with no local Person, which the in-match
 readiness waits for.
 
 The OpenNova roles answer and validate retail's anti-cheat CRC challenges
-only from an explicit `-IntegrityProfile` reproduced from the same retail
-corpus (D-NET-181). The revx02 corpus has `retail-revx02-024f56f2-2d087374`;
-the jox01 reference has none yet, so its default is empty: our host stays
-silent on CRC replies and our joiner does not answer a retail host's
-challenges. Passing the revx02 profile against jox01 makes our host punt a
-retail joiner on the first mismatched reply.
+from their own loaded corpus, as retail does: every mission load rebuilds
+retail's in-memory ammo.def and weapon.def tables from the mounted files and
+CRCs them (`engine/runtime/inmatch/integrity_sources.h`, D-NET-181). Both
+roles therefore need the same corpus as the retail peer: a mismatched install
+(another expansion, a patched or modded def file) makes the CRCs differ and
+the retail host punts our joiner, or our host punts the retail joiner, exactly
+as two mismatched retail installs would. A leg whose files are missing stays
+silent. The live witness for a corpus is
+`python scripts/net/read_integrity_profile.py --pid <Jointops.exe pid>` on a
+stock host of that corpus in a mission (read-only; it prints the ammo rows, the
+executable's SHA-256 and the row digest), with the whole-table CRC a retail
+joiner's C2S 0x20 reply to a stock host's `{FF,00,00}` challenge: those are
+the oracles the computed sources must reproduce (the
+`npruntime_integrity_sources_retail` ctest pins jox01's).
 
 For a cold retail-to-retail session, the lower-level call is
 `onhook_run_lan_pair`, a method of the external onHook executable and invoked

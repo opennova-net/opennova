@@ -191,17 +191,6 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 		if (needs_join_connection && options->get_join_character_profile().is_valid()) {
 			sim_->set_join_character_profile(options->get_join_character_profile());
 		}
-		if (needs_join_connection && join_target.is_valid() &&
-				!join_target->get_integrity_profile().is_empty() &&
-				!sim_->set_join_integrity_profile(join_target->get_integrity_profile())) {
-			UtilityFunctions::push_warning(vformat(
-					"MissionRoot: unknown join integrity profile '%s'.",
-					join_target->get_integrity_profile()));
-			setup_error_ = ERR_INVALID_PARAMETER;
-			sim_.unref();
-			has_trace_stats_sampling_ = false;
-			return 0;
-		}
 		if (needs_join_connection && join_target.is_valid() && !sim_->enable_join(
 				join_target->get_host_ip(), join_target->get_port(),
 				join_target->get_player_name(), join_target->get_join_role(),

@@ -12,7 +12,9 @@
 //   - phase B completes the mission start and only then the session's load,
 //     and the 0x0A view distance is the world's fog distance (D-NET-139);
 //   - a set mpreset word refuses the session create and phase A reports the
-//     process exit to the embedder (D-NET-385).
+//     process exit to the embedder (D-NET-385);
+//   - the host's session config carries the anti-cheat sources the boot
+//     computed from the mount (D-NET-181).
 #include <runtime/inmatch/host_boot.h>
 
 #include <base/gameprofile/game_type.h>
@@ -22,6 +24,8 @@
 #include <formats/til/til.h>
 #include <formats/til/til_io.h>
 #include <formats/trn/trn.h>
+#include <runtime/inmatch/integrity_ammo_image.h>
+#include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/local_role.h>
 #include <runtime/replication/connection_fan.h>
 #include <runtime/terrain_query/terrain_field_build.h>
@@ -436,6 +440,40 @@ int main() {
 			CHECK(kernel->terrain_store.placed_tiles().empty());
 			CHECK(!kernel->world.match.rules().score_values.has_value());
 		}
+	}
+
+	// --- the anti-cheat challenge sources ------------------------------------
+	// Every boot computes them from the mounted corpus (inmatch/integrity_sources.h)
+	// and the host's session config carries them into the C2S 0x20/0x21
+	// validation. This mount has no asset store, so the weapon table (whose
+	// action bind reads .adm clips) stays unknown; without ammo.def nothing is
+	// computed and the host validates nothing.
+	{
+		Host host;
+		host.files["items.def"] = "begin ITEM_ZERO\r\nid 100000\r\nend\r\n";
+		host.files["ammo.def"] = "ammo AT_NULL\r\nend\r\nammo AMMO_ONE\r\nvelocity 3\r\nend\r\n";
+		std::string error;
+		CHECK(inmatch::boot_host_mission(host.request(0), host.boot, error));
+		const inmatch::IntegritySources &sources =
+				host.role.state.host_owner.ctx.config.integrity_sources;
+		const std::vector<uint8_t> ammo_text(
+				host.files["ammo.def"].begin(), host.files["ammo.def"].end());
+		io::ConfigTokens tokens;
+		const inmatch::AmmoRecordTable ammo = inmatch::build_ammo_record_table(
+				ammo_text.data(), ammo_text.size(), {{"ITEM_ZERO", 0}}, nullptr, tokens);
+		uint32_t row1 = 0;
+		CHECK(ammo.row_crc(1, row1));
+		CHECK(sources.ammo_known && sources.ammo_row_crcs.size() == 2 &&
+				sources.ammo_row_crcs[1] == row1);
+		CHECK(!sources.weapon_table_known);
+	}
+	{
+		Host host;
+		std::string error;
+		CHECK(inmatch::boot_host_mission(host.request(0), host.boot, error));
+		const inmatch::IntegritySources &sources =
+				host.role.state.host_owner.ctx.config.integrity_sources;
+		CHECK(!sources.ammo_known && !sources.weapon_table_known);
 	}
 
 	if (failures != 0) {
