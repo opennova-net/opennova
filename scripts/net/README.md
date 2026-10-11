@@ -140,7 +140,13 @@ to its one gameplay session.
 The windows: the steady window is `steady_started_utc` plus `steady_seconds`.
 The comparison interval runs from the session's first packet to the steady
 window's end. The initial prefix is each direction's packets through its first
-gameplay packet (C2S 0x0C, S2C 0x0A).
+gameplay packet (C2S 0x0C, S2C 0x0A). An onHook capture stamps a datagram when
+the process reads it, so through a blocking load its stamps bunch: wire timing
+(the scoreboard cadence) reads every run's `external.pcapng` (the summary's
+`external_capture`), whatever the evidence capture.
+
+A subject slot also takes an RR run: `--rr <rr-aa> --rr-aa <rr> --ro <rr>` is the
+A/A sanity and must pass (its only failures can be evidence findings).
 
 The A/A rule: a metric's distance from RR fails when it exceeds
 `max(fixed floor, distance(RR-aa, RR))`. The fixed floors are the retired
@@ -151,16 +157,18 @@ the report says so.
 
 | Metric family | Distance | Floor | Finding codes |
 | --- | --- | --- | --- |
-| Tag histogram (comparison interval, per `tag:settings`) | presence 0/1; count vs RR rate-normalized (when RR has 20 or more); length-set and stable-body-set Jaccard | 0; `max(1, ceil 20%)` for counts | `MISSING_TAG`, `UNEXPECTED_TAG`, `COUNT_MISMATCH`, `LENGTH_SET_MISMATCH`, `LENGTH_CONSTANT`, `BODY_CONSTANT`, `BODY_ALL_ZERO`, `STABLE_BODY_MISMATCH`, `FIRST_ORDER_MISMATCH` |
-| Initial stream | edit distance over origin-packet groups (`flags\|tags\|raw/LEN/SKIP`); differing bodies by position | 0 | `INITIAL_PACKET_GROUPING`, `INITIAL_BODY_MISMATCH` |
-| Steady distributions (after the first gameplay packet) | largest share delta over keys of at least 2% share, in units of `max(0.08, RR share / 2)` | 1 | `GAMEPLAY_GROUP_DISTRIBUTION`, `GAMEPLAY_ORDER_DISTRIBUTION`, `GAMEPLAY_DISTRIBUTION_UNEXERCISED` |
+| Tag histogram (comparison interval, per `tag:settings`) | presence 0/1; count vs RR rate-normalized (when RR has 20 or more); length-set (but S2C 0x10 and C2S 0x3D) and stable-body-set Jaccard | 0; `max(1, ceil 20%)` for counts | `MISSING_TAG`, `UNEXPECTED_TAG`, `COUNT_MISMATCH`, `LENGTH_SET_MISMATCH`, `LENGTH_CONSTANT`, `BODY_CONSTANT`, `BODY_ALL_ZERO`, `STABLE_BODY_MISMATCH`, `FIRST_ORDER_MISMATCH` |
+| Initial stream | edit distance over origin-packet groups (`flags\|tags\|raw/LEN/SKIP`, timer-phase identities left out, gameplay / world-page / fragment lengths `*`; C2S as one record sequence); bodies by position over the common prefix and their count; S2C 0x16 / 0x46 as sets of distinct (decoded) bodies; S2C 0x0C / 0x10 decoded and compared by slot | 0; the count rule for counts | `INITIAL_PACKET_GROUPING`, `INITIAL_BODY_MISMATCH`, `INITIAL_COUNT_MISMATCH`, `INITIAL_RECORD_MISMATCH` |
+| Steady distributions (after the first gameplay packet) | largest share delta over keys of at least 2% share, in units of `max(0.08, RR share / 2)`; a packet groups as its record multiset, a gameplay packet without the S2C 0x57 replies it carries | 1 | `GAMEPLAY_GROUP_DISTRIBUTION`, `GAMEPLAY_ORDER_DISTRIBUTION`, `GAMEPLAY_DISTRIBUTION_UNEXERCISED` |
 | Session packet envelope | class presence 0/1; packet and header-only cadence vs RR rate-normalized; header-only flag set; shape distribution | 0; `max(1, ceil 20%)`; 0; 1 | `SESSION_PACKET_CADENCE`, `SESSION_PACKET_HEADER_FLAGS`, `SESSION_PACKET_SHAPE_DISTRIBUTION` |
-| Outer handshake (first 0x41/0x42, 0x81/0x82) | edit distance over field keys, dynamic values masked | 0 | `HANDSHAKE_MISMATCH`, `HANDSHAKE_MISSING` |
-| Integrity stream | invalid pairs, CRCs off RR's for the row, unwitnessed rows, OR/OO host rows (Jaccard), repeats, challenges without a preceding 0x16, PUNTs | 0 | `INTEGRITY_PAIR_INVALID`, `INTEGRITY_CRC_MISMATCH`, `INTEGRITY_ROW_UNWITNESSED`, `HOST_AMMO_ROW_MISMATCH`, `HOST_DYNAMIC_ENTITY_ROW_MISMATCH`, `INTEGRITY_NOT_ALTERNATING`, `INTEGRITY_SCOREBOARD_ORDER`, `INTEGRITY_PUNT` (entity-family variants prefixed `ENTITY_`) |
-| Milestones (handshake, 0x7B, 0x08, 0x0B, 0x46, C2S 0x0B, 0x0F, first 0x0C/0x0A) | one-sided milestones plus order inversions | 0 | `MILESTONE_MISMATCH` |
+| Outer handshake (first 0x41/0x42, 0x81/0x82) | edit distance over field keys, dynamic values masked or reduced (SCRK's size as 62-63, CU CI0/CI1 as the low 16 bits); whether the auth SCRK walks the manager LCG's cycle; each opcode's count | 0 | `HANDSHAKE_MISMATCH`, `HANDSHAKE_MISSING`, `HANDSHAKE_KEY_GENERATOR`, `HANDSHAKE_COUNT_MISMATCH` |
+| Requests and replies | C2S 0x3D's length per start both runs answered; RTT pongs echoing no earlier S2C 0x57 ping, pings running backward | 0 | `REPLY_LENGTH_MISMATCH`, `RTT_ECHO_MISMATCH` |
+| Integrity stream | invalid pairs, CRCs off the retail oracle (RR's rows plus RR-aa's of the same `integrity_profile`), unwitnessed rows (none with a retail host that punted nothing), OR/OO host rows (Jaccard), repeats, challenges without a preceding 0x16, PUNTs | 0 | `INTEGRITY_PAIR_INVALID`, `INTEGRITY_CRC_MISMATCH`, `INTEGRITY_ROW_UNWITNESSED`, `HOST_AMMO_ROW_MISMATCH`, `HOST_DYNAMIC_ENTITY_ROW_MISMATCH`, `INTEGRITY_NOT_ALTERNATING`, `INTEGRITY_SCOREBOARD_ORDER`, `INTEGRITY_PUNT` (entity-family variants prefixed `ENTITY_`) |
+| Milestones (handshake, 0x7B, C2S 0x09, S2C 0x2C, 0x08, 0x0B, C2S 0x0B, 0x0F, first 0x0C/0x0A) | one-sided milestones plus order inversions | 0 | `MILESTONE_MISMATCH` |
+| Scoreboard cadence (external capture, comparison interval) | S2C 0x16 lists under 4,000 ms after the previous one | 0 | `SCOREBOARD_OFF_CADENCE` |
 | Bandwidth and gameplay cadence (steady window) | `\|subject / RR - 1\|` | 0.20 | `BANDWIDTH_MISMATCH`, `GAMEPLAY_CADENCE` |
-| C2S 0x0C state (steady window) | value-set Jaccard (shape, ADM, state, move, carrier none/bound, priority occupancy and scores); fill 0/1; dynamic `\|log2(subject / RR)\|`; initial position delta | 0; 0; 3 (the 1/8x..8x band); 64 world units | `UPLINK_*_MISMATCH`, `UPLINK_ALL_ZERO`, `UPLINK_CONSTANT`, `DYNAMIC_RANGE_MISMATCH`, `DYNAMIC_STEP_MISMATCH`, `DYNAMIC_BASELINE_MISMATCH` |
-| S2C 0x0A state and entities (steady window) | value-set Jaccard (sub-block, flags, record classes, local state, health, state word, carried, weapon/timer/env/objective/mount blocks, entity class:type); fields RR fills that the run never does; dynamic as above | as above | `FRAME_*_MISMATCH`, `FRAME_ANCHOR_ZERO`, `FRAME_ENTITY_TYPES_MISMATCH`, `ENTITY_FIELD_EMPTY`, `FRAME_ENTITY_CONSTANT` |
+| C2S 0x0C state (steady window) | value-set Jaccard (shape, ADM, state, move, carrier none/bound, priority occupancy); fill 0/1; dynamic `\|log2(subject / RR)\|` (positions, orientation, analog, each priority slot's median score); initial position delta | 0; 0; 3 (the 1/8x..8x band); 64 world units | `UPLINK_*_MISMATCH`, `UPLINK_ALL_ZERO`, `UPLINK_CONSTANT`, `DYNAMIC_RANGE_MISMATCH`, `DYNAMIC_STEP_MISMATCH`, `DYNAMIC_BASELINE_MISMATCH` |
+| S2C 0x0A state and entities (steady window) | value-set Jaccard (sub-block, flags (flags2's route nibble and modal step), record classes, local state, health, state word, carried, weapon/timer (breathtime, fallmps)/env/objective/mount blocks, entity class:type, the recipient's own record against the anchor); fields RR fills that the run never does (the server CPU byte included); dynamic as above, entity positions in world units with carrier-local records left out (p90 nearest rank) | as above | `FRAME_*_MISMATCH`, `FRAME_ANCHOR_ZERO`, `FRAME_ANCHOR_OFFSET_MISMATCH`, `FRAME_ENTITY_TYPES_MISMATCH`, `ENTITY_FIELD_EMPTY`, `FRAME_ENTITY_CONSTANT` |
 
 Every run's evidence must hold too, or the verdict fails: one gameplay session,
 a steady window inside the capture, decoded gameplay within 500 ms of each
@@ -170,10 +178,15 @@ type and port as RR.
 
 The normalization registry (`apps/parity/normalization.h`) lists every field a
 comparison masks, strips or reduces with the nondeterminism source that makes
-that correct: the handshake's dynamic fields, the initial bodies routed to the
-stateful checks, S2C 0x0F's live tick, the 0x30/0x31 phase, the session-local
-handles. The masks are driven from it, a mask elsewhere asserts its entry at
-compile time, and every verdict carries it.
+that correct: the handshake's dynamic fields and reductions, the initial bodies
+routed to stateful, set or decoded-record checks, S2C 0x0F's live tick, the
+timer-phase identities (0x30/0x31, 0x16, 0x46, 0x79, 0x6E, 0x6F), the grouping
+lengths and the client's send-pump boundaries, the session-local handles, the
+measured fps/CPU bytes and the send counter. The masks are driven from it, a
+mask elsewhere asserts its entry at compile time, and every verdict carries it.
+A mask whose finding is real keeps it visible through another row (the
+scoreboard cadence, the anchor's own offset, the C2S 0x09 / S2C 0x2C milestones,
+the key generator).
 
 Output: `--out` (default `parity-verdict.json`) is an
 `opennova.parity-verdict.v1` document. Its `rows` give each topology,
