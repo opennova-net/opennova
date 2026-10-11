@@ -199,7 +199,7 @@ public:
 	// for a move), one that is not moves alone. Its snap is metres, degrees for a turn.
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
-	// `frame` (the first named record, else the selection, else everything) and `top` (straight down
+	// `frame` (the named records, S24 every one, else the selection, else everything) and `top` (straight down
 	// over the target, north up): each a SetViewport of the camera. `ground`: each named entity (else
 	// each selected one) set down on the device's ground under it, its z the ground's less its model's
 	// anchor height (preview/mission_items), one batch; refused with no ground under one.

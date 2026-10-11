@@ -34,6 +34,7 @@ struct MissionUses;
 inline constexpr uint32_t kMissionWatchedRgb = 0xFF5FD2; // what a trigger watches
 inline constexpr uint32_t kMissionActedRgb = 0xB48CFF; // what an action acts on
 inline constexpr uint32_t kMissionBadgeRgb = 0xFFB4E8;
+inline constexpr uint32_t kMissionCandidateRgb = 0xF4F8FF; // a mark that fills the slot a pick waits for
 
 // A record a logic record names, found in the scene: its anchor (an entity's position, an area's middle at
 // its z_min, a group's members' middle, a path's first stop, mission metres), whether a trigger names it

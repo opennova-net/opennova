@@ -497,7 +497,7 @@ static int test_pick() {
 	in.height = context.height;
 	const OverlayList list = half->shapes(context, in);
 	TEST_EXPECT(std::count_if(list.shapes.begin(), list.shapes.end(), [](const OverlayShape &shape) {
-		return shape.kind == OverlayKind::Circle && shape.size == 13.0f && shape.rgb == kMissionWatchedRgb;
+		return shape.kind == OverlayKind::Circle && shape.size == 13.0f && shape.rgb == kMissionCandidateRgb;
 	}) == long(areas.size()));
 	const std::vector<MissionMapMark> marks = rig.map()->marks(context.width, context.height);
 	const MissionMapMark &pin = marks[size_t(rig.map()->scene().mark_index(areas[0]->id))];

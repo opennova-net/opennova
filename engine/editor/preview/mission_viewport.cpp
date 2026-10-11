@@ -1400,17 +1400,19 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 		out.request(request::set_viewport(path(), mission_camera_change(camera)));
 		return true;
 	}
-	// The first record named (one that is no entity or area refused), else the selection, else
-	// everything.
+	// The records named (one that is no entity or area refused; S24: every one of them, what a revealed event
+	// names), else the selection, else everything.
 	const std::vector<MissionMark> shown = marks(context.width, context.height, context.device);
 	std::vector<int> of;
 	if (!ids.empty()) {
-		const int index = mark_of_(shown, ids.front());
-		if (index < 0) {
-			error = "Record " + std::to_string(ids.front()) + " is no entity or area the viewport shows.";
-			return false;
+		for (const NodeId id : ids) {
+			const int index = mark_of_(shown, id);
+			if (index < 0) {
+				error = "Record " + std::to_string(id) + " is no entity or area the viewport shows.";
+				return false;
+			}
+			of.push_back(index);
 		}
-		of.push_back(index);
 	} else if (const Document *document = document_of(context.input)) {
 		if (const Selection *selection = selection_of(context.input, *document))
 			for (const NodeAddress &record : selection->records)

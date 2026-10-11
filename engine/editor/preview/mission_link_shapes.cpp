@@ -320,8 +320,9 @@ bool mission_new_event_command(const ViewportContext &context, const Document &d
 }
 
 void mission_pick_candidate(CanvasPoint at, OverlayList &out) {
-	out.ring(at, 13.0f, OverlayRole::Normal, 3.0f, 0x000000, 110);
-	out.ring(at, 13.0f, OverlayRole::Normal, 1.5f, kMissionWatchedRgb, 200);
+	// White over a dark ring: apart from the links' pink and violet, which may ring the same mark.
+	out.ring(at, 13.0f, OverlayRole::Normal, 3.5f, 0x000000, 140);
+	out.ring(at, 13.0f, OverlayRole::Normal, 1.75f, kMissionCandidateRgb, 230);
 }
 
 void mission_link_badge(CanvasPoint at, size_t count, OverlayList &out) {
