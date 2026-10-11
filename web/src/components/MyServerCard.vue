@@ -332,7 +332,7 @@ function serverLabel(): string {
 }
 
 function teamLabel(team: string): string {
-  if (!team) return '—';
+  if (!team) return 'None';
   return TEAM_NAMES[team] ?? team;
 }
 
