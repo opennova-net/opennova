@@ -380,8 +380,16 @@ int test_palm_sections() {
     CHECK(leaf.item_section_piece && !leaf.section_clone);
     CHECK(leaf.position.z == 7 && leaf.engine_flags == kEntityFlagDead);
     CHECK(leaf.health == 20 && leaf.pitch == 0 && leaf.roll == 0);
-    CHECK(item_hidden_sections(leaf) == 0x3B);
-    CHECK(item_section_render_position(w, leaf).z == 3);
+    // The spawn stores the sector builder into item 900's collision and scar
+    // callbacks, not its draw: the fragment draws by item 900's own render tag
+    // (none here: every section at its own origin) and collides through the
+    // palm state (D-ITEMDEF-20) [orig: Projectile_SpawnFromTile @0x53C3B0 /
+    // @0x53C3C6].
+    CHECK(leaf.palm_fragment && !leaf.palm_sections);
+    CHECK(item_hidden_sections(leaf) == 0);
+    CHECK(item_section_render_position(w, leaf).z == 7);
+    CHECK(palm_sector_hidden_sections(leaf) == 0x3B);
+    CHECK(palm_sector_position(w, leaf).z == 3);
     CHECK(w.out.entity_events.size() == 1 && std::get<ItemStateEvent>(w.out.entity_events[0]).section == 5);
     CHECK(w.out.destruction.sounds.size() == 1);
     const auto state_b = w.prng16_b_state;
@@ -393,6 +401,15 @@ int test_palm_sections() {
     CHECK(w.registry.get(spawner.pieces[1])->palm_state == 32);
     CHECK(w.registry.get(spawner.pieces[1])->position.z == 5);
     CHECK(item_hidden_sections(e) == 0x36);
+    // The psec draw hides the sector builder's sections alone: neither the
+    // section mask nor a husk's piece mask joins them (D-ITEMDEF-20)
+    // [orig: BoneCallback_psec_World @0x53C130].
+    e.section_mask = 0x1;
+    e.engine_flags |= kEntityFlagHusk;
+    e.spawned_piece_mask = 0x8;
+    CHECK(item_hidden_sections(e) == 0x36);
+    e.section_mask = e.spawned_piece_mask = 0;
+    e.engine_flags &= ~kEntityFlagHusk;
     leaf.position = {8,16,1}; leaf.veh.vel_x = 4096; leaf.veh.vel_y = -4096;
     leaf.veh.slide_z = -65536;
     tick_item_death_motion(w, leaf, nullptr, 0, w.out.destruction);

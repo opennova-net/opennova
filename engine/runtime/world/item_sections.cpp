@@ -235,10 +235,12 @@ void palm_transition(World &world, Entity &entity, int section) {
         seed.alive = false;
         seed.health = 20;
         seed.item_section_piece = true;
-        // The fragment draws the palm state whatever item 900's render tag
-        // (D-ITEMDEF-20); the flag survives the def resolve.
+        // The spawn stores the sector builder into item 900's model callbacks
+        // for collision (+0xA8) and the scar cache (+0xAC), not the draw:
+        // the fragment draws by item 900's own render tag (palm_sections, the
+        // def resolve's) and collides through its palm state.
+        // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6]
         seed.palm_fragment = true;
-        seed.palm_sections = true;
         seed.palm_state = type;
         seed.death_motion = DeathMotionMode::PalmPiece;
         const int32_t x = int32_t(entity.position.x * 65536);
@@ -352,28 +354,31 @@ void palm_item_event(World &world, Entity &entity, int phase, ItemHitContext hit
     entity.class_think_ticks = 32;
 }
 
-// [orig: CTerrainMap_BuildSectorTransformMatrices @ 0x53BF10]
+// The sector builder's hidden sections: its +0x270 switch alone, which reads
+// neither the section mask nor the husk piece mask.
+// [orig: CTerrainMap_BuildSectorTransformMatrices @ 0x53BF10, the switch @ 0x53BFE0]
+uint32_t palm_sector_hidden_sections(const Entity &entity) {
+    switch (entity.palm_state) {
+    case 0: return 0x38; // 3,4,5
+    case 1: return 0x36; // 1,2,4,5
+    case 2: return 0x1C; // 2,3,4
+    case 16: return 0x29; // 0,3,5
+    case 17: return 0x3B; // 0,1,3,4,5
+    case 32: return 0x0D; // 0,2,3
+    default: return 0;
+    }
+}
 uint32_t item_hidden_sections(const Entity &entity) {
+    // The psec / cesp world callback hides the sector builder's sections and
+    // nothing else [orig: BoneCallback_psec_World @ 0x53C130].
+    if (entity.palm_sections) return palm_sector_hidden_sections(entity);
     uint32_t mask = entity.section_mask;
     if (entity.engine_flags & kEntityFlagHusk)
         mask |= entity.spawned_piece_mask;
-    if (!entity.palm_sections) return mask;
-    switch (entity.palm_state) {
-    case 0: return mask | 0x38; // 3,4,5
-    case 1: return mask | 0x36; // 1,2,4,5
-    case 2: return mask | 0x1C; // 2,3,4
-    case 16: return mask | 0x29; // 0,3,5
-    case 17: return mask | 0x3B; // 0,1,3,4,5
-    case 32: return mask | 0x0D; // 0,2,3
-    default: return mask;
-    }
+    return mask;
 }
-Vec3 item_section_render_position(const World &world, const Entity &entity) {
-    // A section clone whose def's render tag is a section row draws through
-    // that row instead: the def's world callback overrides the model's, the
-    // husk model's too [orig: Render_SectorEntity @0x5C431B..0x5C4335;
-    // Entity_RenderWithLODCallback @0x5D6F39..0x5D6F4B].
-    if (entity.section_clone && !entity.palm_sections && entity.spawned_piece_mask) {
+Vec3 section_clone_position(const World &world, const Entity &entity) {
+    if (entity.section_clone && entity.spawned_piece_mask) {
         // The death render callback pivots around the first surviving HUSK
         // section, not the intact-model pivot used by the spawn.
         // [orig: Entity_BuildDeathSectionTransforms @ 0x492AF0]
@@ -392,8 +397,21 @@ Vec3 item_section_render_position(const World &world, const Entity &entity) {
             }
         }
     }
-    if (!entity.palm_sections ||
-            (entity.palm_state != 16 && entity.palm_state != 17 && entity.palm_state != 32))
+    return entity.position;
+}
+Vec3 item_section_render_position(const World &world, const Entity &entity) {
+    // A section clone whose def's render tag is a section row draws through
+    // that row instead: the def's world callback overrides the model's, the
+    // husk model's too [orig: Render_SectorEntity @0x5C431B..0x5C4335;
+    // Entity_RenderWithLODCallback @0x5D6F39..0x5D6F4B].
+    return entity.palm_sections ? palm_sector_position(world, entity)
+                                : section_clone_position(world, entity);
+}
+// The sector builder's origin: the palm fragments' states pivot their matrix
+// on the model's CXLT translation [orig: CTerrainMap_BuildSectorTransformMatrices
+// @ 0x53BF10, the switch @ 0x53BF31].
+Vec3 palm_sector_position(const World &world, const Entity &entity) {
+    if (entity.palm_state != 16 && entity.palm_state != 17 && entity.palm_state != 32)
         return entity.position;
     const auto *traits = world.tables.item_death_traits.get(entity.item_id);
     const size_t pivot = entity.palm_state == 17 ? 1 : 0;

@@ -809,13 +809,15 @@ struct Entity {
     // it takes item 900's own callbacks [orig: Projectile_SpawnFromTile
     //  @0x53C35D / @0x53C36F].
     bool section_clone = false;
-    // The palm fragment (item 900) a palm transition seeds [orig:
-    // Projectile_SpawnFromTile @0x53C1C0]: its palm_sections is the seed's,
-    // kept through every def resolve (D-ITEMDEF-20).
+    // The palm fragment (item 900) a palm transition seeds: its spawn stores
+    // the sector builder into item 900's model +0xA8 / +0xAC, so it collides
+    // and scars through its palm state, whatever its draw [orig:
+    // Projectile_SpawnFromTile @0x53C1C0, the stores @0x53C3B0 / @0x53C3C6].
     bool palm_fragment = false;
     // The palm-state (+0x270) section draw: the render tag's psec / cesp bone
     // row [orig: BoneCallback_psec_World @0x53C130 -> @0x53BF10], recomputed
-    // on every def resolve; the palm fragment's seed forces it on (D-ITEMDEF-20).
+    // on every def resolve. The draw alone: collision follows the model's
+    // callback (palm_fragment).
     bool palm_sections = false;
     int32_t palm_state = 0; // entity+0x270
     // The def's damage callback is the palm row's (WeaponOverlay_HandleDamage)

@@ -772,7 +772,12 @@ int main() {
 
 	// A def resweep recomputes the draw both ways: the psec item edited to
 	// gnrc draws every section, the gnrc palm edited to psec draws the palm
-	// state; a palm fragment keeps its seed's under any tag (D-ITEMDEF-20).
+	// state. A palm fragment's draw is its def's too: its spawn stores the
+	// sector builder into the model's collision and scar callbacks only, and
+	// that flag survives the resolve (D-ITEMDEF-20). A psec draw hides the
+	// sector builder's sections alone, never the section or piece masks.
+	// [orig: Projectile_SpawnFromTile @0x53c3b0 / @0x53c3c6; Render_SectorEntity
+	//  @0x5c431b..0x5c4372; BoneCallback_psec_World @0x53c130]
 	{
 		DefItemDef *psec_def = entry_for(file, 100549);
 		DefItemDef *gnrc_def = entry_for(file, 100551);
@@ -785,7 +790,8 @@ int main() {
 			mission::resolve_item_traits(w, file, wire_class);
 			CHECK(!w.registry.get(psec_palm_h)->palm_sections);
 			CHECK(w.registry.get(gnrc_palm_h)->palm_sections);
-			CHECK(fragment->palm_sections); // ai_function psec, no section tag
+			// ai_function psec, no section tag: no palm draw, the store kept.
+			CHECK(!fragment->palm_sections && fragment->palm_fragment);
 			Entity *palm = w.registry.get(psec_palm_h);
 			palm->palm_state = 0;
 			CHECK(item_hidden_sections(*palm) == palm->section_mask);
@@ -796,6 +802,13 @@ int main() {
 			CHECK(w.registry.get(psec_palm_h)->palm_sections);
 			CHECK(!w.registry.get(gnrc_palm_h)->palm_sections);
 			CHECK(!fragment->palm_sections);
+			palm = w.registry.get(psec_palm_h);
+			palm->section_mask = 0x1;
+			palm->engine_flags |= kEntityFlagHusk;
+			palm->spawned_piece_mask = 0x2;
+			CHECK(item_hidden_sections(*palm) == 0x38); // palm state 0: 3,4,5
+			palm->engine_flags &= ~kEntityFlagHusk;
+			palm->section_mask = palm->spawned_piece_mask = 0;
 		}
 	}
 
