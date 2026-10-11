@@ -1310,6 +1310,25 @@ void mission_references(const Document &document, Extracted &out) {
 			if (action_param_kind(event.native.actions[i], 0) == ParamKind::Dialog)
 				plays(k(K::Action), 1, i, audio::dialog_name_of(event.native.actions[i].param1));
 	}
+	// Each event as a script of the mission's name finds it, by its index (ReferenceKind::MissionEventLatch: its
+	// event() condition reads the event's latch [orig: WacCmd_Event @ 0x4ED1E0]), defined by the event's record,
+	// so the event's Used by lists the script's lines.
+	const std::string scope = mission_scope(*mission);
+	size_t index = 0;
+	for (const Node *row : mission->rows_of(K::Event)) {
+		const NodeAddress address{row->id, row->kind, 0};
+		GraphSymbol symbol;
+		symbol.kind = ReferenceKind::MissionEventLatch;
+		symbol.display = std::to_string(index++);
+		symbol.name = symbol.display;
+		symbol.file = file;
+		symbol.record = document.record_path(address);
+		symbol.record_key = document.record_identity(address);
+		symbol.locator = document.locator(address);
+		symbol.address = address;
+		symbol.scope = scope;
+		out.symbols.push_back(std::move(symbol));
+	}
 }
 
 } // namespace opennova::editor

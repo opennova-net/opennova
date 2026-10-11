@@ -515,6 +515,62 @@ static int test_native_extractors() {
 		editor_test::handle_to_end(session, request::rescan());
 	}
 
+	// A script of the mission's name names its variables by their V# and its events by event()'s index (S24 C4):
+	// an event defines the index (its Used by lists the script's line), one past the events is a warning in the
+	// script's words; a variable is a word of the mission's bank, present wherever the mission is, never missing.
+	{
+		opennova::bms::File logic;
+		opennova::mission::make_default(logic);
+		opennova::mission::add_event(logic, opennova::mission::MissionEventRecord{});
+		opennova::mission::add_event(logic, opennova::mission::MissionEventRecord{});
+		std::string error;
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(logic, bytes, error));
+		TEST_EXPECT(editor_test::write_bytes(root + "/logic.bms", bytes));
+		TEST_EXPECT(editor_test::write_text(root + "/logic.wac",
+		                                    "if event(1) then set(v7,1) endif\r\nif event(5) then v12=v7 endif\r\n"));
+		TEST_EXPECT(editor_test::write_text(root + "/other.wac", "if event(1) then set(v7,1) endif\r\n"));
+		editor_test::handle_to_end(session, request::rescan());
+		const GraphEdge *event = edge_to(graph, "logic.wac", ReferenceKind::MissionEventLatch, "1");
+		const GraphEdge *past = edge_to(graph, "logic.wac", ReferenceKind::MissionEventLatch, "5");
+		const GraphEdge *variable = edge_to(graph, "logic.wac", ReferenceKind::MissionVariable, "7");
+		const GraphEdge *other_variable = edge_to(graph, "logic.wac", ReferenceKind::MissionVariable, "12");
+		TEST_EXPECT(event && past && variable && other_variable && event->scope == "LOGIC.BMS" && variable->scope == "LOGIC.BMS" &&
+		            !event->rewritable && !variable->rewritable && event->field == "operand");
+		std::string file;
+		TEST_EXPECT(event && graph.resolve(*event, &file) == ReferenceStatus::Present && file == "logic.bms");
+		TEST_EXPECT(past && graph.resolve(*past) == ReferenceStatus::Missing);
+		TEST_EXPECT(variable && graph.resolve(*variable, &file) == ReferenceStatus::Present && file == "logic.bms");
+		TEST_EXPECT(other_variable && graph.resolve(*other_variable) == ReferenceStatus::Present);
+		// The event's Used by: its symbol's referrers, the script's line among them.
+		const std::vector<const GraphEdge *> users = graph.referrers_of(ReferenceKind::MissionEventLatch, "1", "LOGIC.BMS");
+		TEST_EXPECT(users.size() == 1 && users[0]->source == "logic.wac" && users[0]->span.line == 1);
+		bool event_symbol = false;
+		for (const AssetGraph::FileSymbol &symbol : graph.symbols_in("logic.bms"))
+			event_symbol = event_symbol || (symbol.symbol->kind == ReferenceKind::MissionEventLatch && symbol.symbol->name == "1" &&
+			                                symbol.symbol->scope == "LOGIC.BMS" && symbol.read);
+		TEST_EXPECT(event_symbol);
+		// The variable's uses, by name and scope: both lines of the script.
+		TEST_EXPECT(graph.referrers_of(ReferenceKind::MissionVariable, "7", "LOGIC.BMS").size() == 2);
+		// Findings: the event past the table is a warning in the script's words; no variable is ever missing.
+		bool past_words = false, variable_finding = false;
+		for (const Diagnostic &d : session.view().findings.diagnostics) {
+			if (d.asset != "logic.wac") continue;
+			past_words = past_words || (d.severity == DiagnosticSeverity::Warning &&
+			                            d.message.find("the script's event() reads it as not set") != std::string::npos);
+			variable_finding = variable_finding || d.message.find("the variable") != std::string::npos;
+		}
+		TEST_EXPECT(past_words && !variable_finding);
+		// A script of no mission's name the project has names none.
+		const GraphEdge *other = edge_to(graph, "other.wac", ReferenceKind::MissionEventLatch, "1");
+		TEST_EXPECT(other && graph.resolve(*other) == ReferenceStatus::NotAReference);
+		std::error_code gone;
+		fs::remove(fs::path(root) / "logic.bms", gone);
+		fs::remove(fs::path(root) / "logic.wac", gone);
+		fs::remove(fs::path(root) / "other.wac", gone);
+		editor_test::handle_to_end(session, request::rescan());
+	}
+
 	// A native file the graph cannot read is a warning, its references unchecked, kept
 	// while the file is unchanged: a particle file, which opens as a text (DI-14), the particle type's
 	// (particle.unreadable, the reader's words at the place it stops), the graph's own reading of it
@@ -1654,13 +1710,15 @@ static int test_reference_kind_rows() {
 		TEST_EXPECT(row.defined_in == AssetKind::Unknown || row.names_symbol());
 		// A Record reference names its collection, and the graph finds none missing (S13 D8).
 		TEST_EXPECT(record == (*row.collection != '\0') && (!row.none || record));
-		TEST_EXPECT((row.missing_message != nullptr) == (file || (row.names_symbol() && !record)));
+		// A mission variable is the one symbol kind never missing: every index is a word of its mission's bank.
+		TEST_EXPECT((row.missing_message != nullptr) ==
+		            (file || (row.names_symbol() && !record && kind != ReferenceKind::MissionVariable)));
 		const bool tolerated = kind == ReferenceKind::Wave || kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
 		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
 		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint ||
 		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone ||
-		                       kind == ReferenceKind::TilePlacement || kind == ReferenceKind::DialogBank ||
+		                       kind == ReferenceKind::MissionEventLatch || kind == ReferenceKind::TilePlacement || kind == ReferenceKind::DialogBank ||
 		                       kind == ReferenceKind::MissionStrings || kind == ReferenceKind::Sound ||
 		                       kind == ReferenceKind::SoundProfile || kind == ReferenceKind::Shader ||
 		                       kind == ReferenceKind::Particle || kind == ReferenceKind::AnimationKey ||
