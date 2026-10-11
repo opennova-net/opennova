@@ -96,8 +96,8 @@ void test_runtime_launch_flags_parse() {
         {"game.exe", "--", "--Mission", " 00TRa.bms ", "--lan-host", "ASH_I5A.BMS",
          "--lan-join", "192.168.10.120:32770", "--lan-port", "32768", "--LAN-GAMETYPE",
          "0x10020", "--lan-mode", "3", "--lan-max-players", "16", "--callsign", "Host",
-         "--spectator", "--spectator-password", " watch me ", "--integrity-profile",
-         "retail", "--capture-pcap", "C:/cap/s.pcapng", "--mcp-port", "8975", "--Working-Dir",
+         "--spectator", "--spectator-password", " watch me ", "--capture-pcap",
+         "C:/cap/s.pcapng", "--mcp-port", "8975", "--Working-Dir",
          " C:/p/.opennova/run/1 "});
     CHECK(f.mission == "00TRa.bms");
     CHECK(f.lan_host == "ASH_I5A.BMS");
@@ -109,7 +109,6 @@ void test_runtime_launch_flags_parse() {
     CHECK(f.spectator);
     CHECK(f.spectator_password == "watch me");
     CHECK(f.callsign == "Host");
-    CHECK(f.integrity_profile == "retail");
     CHECK(f.capture_pcap == "C:/cap/s.pcapng");
     CHECK(f.mcp_port == 8975);
     // The directory a source run was started in (ADR 0046 S13 A8: the editor's run directory).
@@ -121,7 +120,7 @@ void test_runtime_launch_flags_parse() {
     CHECK(none.lan_port == 0 && none.lan_gametype == -1 && none.lan_mode == 0);
     CHECK(none.lan_max_players == 0 && none.mcp_port == 0);
     CHECK(!none.spectator && none.spectator_password.empty());
-    CHECK(none.callsign.empty() && none.integrity_profile.empty() && none.capture_pcap.empty());
+    CHECK(none.callsign.empty() && none.capture_pcap.empty());
     // Malformed or out-of-range integers read the sentinel, never a clamp.
     const LaunchFlags bad = parse_launch_flags(
         {"--lan-port", "fast", "--lan-gametype", "-3", "--lan-mode", "5", "--lan-max-players",

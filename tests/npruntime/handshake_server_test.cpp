@@ -17,7 +17,7 @@
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/host_config.h> // host_session_settings (the Serve Only cap)
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
-#include <runtime/inmatch/integrity_challenge_profile.h>
+#include <runtime/inmatch/integrity_sources.h>
 #include <net/npwire/lan_discovery.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -3600,11 +3600,12 @@ bool run_character_join_vars_parsed() {
 	return true;
 }
 
-// Host-side validation of the two integrity reply families is profile-scoped:
-// only CRC sources covered by the explicitly selected retail resource corpus
-// may disconnect a peer. The mismatch record is the exact high-table 0x103
-// connection description consumed by an unmodified retail client.
-bool run_integrity_replies_validate_registered_profile() {
+// Host-side validation of the two integrity reply families reads the host's
+// own computed sources (inmatch/integrity_sources.h): only a source they hold
+// a value for may disconnect a peer. The mismatch record is the exact
+// high-table 0x103 connection description consumed by an unmodified retail
+// client.
+bool run_integrity_replies_validate_computed_sources() {
 	struct Observation {
 		bool replies_empty = false;
 		bool disconnect_latched = false;
@@ -3615,11 +3616,11 @@ bool run_integrity_replies_validate_registered_profile() {
 		DisconnectEvent event;
 	};
 
-	auto observe = [](std::string_view profile_id, uint8_t tag,
+	auto observe = [](const inmatch::IntegritySources &sources, uint8_t tag,
 			std::vector<uint8_t> body, uint32_t weapon_salt = 0,
 			uint32_t ammo_salt = 0, bool append_ping = false) {
 		inmatch::GameConfig config;
-		config.integrity_profile = std::string(profile_id);
+		config.integrity_sources = sources;
 		replication::UdpSessionTransport transport(
 				replication::UdpSessionTransport::Role::Host);
 		std::vector<inmatch::NapiNPConnection> roster(1);
@@ -3682,17 +3683,26 @@ bool run_integrity_replies_validate_registered_profile() {
 	constexpr uint32_t kAmmoRow18Crc = 0x2D087374u;
 	constexpr uint32_t kWeaponSalt = 0x11223344u;
 	constexpr uint32_t kAmmoSalt = 0x55667788u;
-	const std::string_view profile = inmatch::kRetailRevx02IntegrityProfileId;
+	// The revx02 corpus's witnessed values as the host's computed sources:
+	// 140 named weapon rows, 102 ammo rows (row 0x18 the one pinned here).
+	inmatch::IntegritySources profile;
+	profile.weapon_table_known = true;
+	profile.weapon_table_crc = kWeaponTableCrc;
+	profile.weapon_named_rows = 140;
+	profile.ammo_known = true;
+	profile.ammo_row_crcs.assign(102, 0x0BADF00Du);
+	profile.ammo_row_crcs[0x18] = kAmmoRow18Crc;
+	const inmatch::IntegritySources none;
 
 	if (!expect(!inmatch::weapon_integrity_reply_matches(
 					0xFF, /*source_crc=*/42, /*salt=*/0,
 					/*received_crc=*/41),
-			"a profile source CRC of 42 does not bypass a non-42 C2S 0x20 mismatch"))
+			"a source CRC of 42 does not bypass a non-42 C2S 0x20 mismatch"))
 		return false;
 	if (!expect_silent(
 			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
 					indexed_crc_reply(0xFF, 42), kWeaponSalt),
-			"C2S 0x20 id 0xFF bypasses on received checksum 42 regardless of profile CRC and salt"))
+			"C2S 0x20 id 0xFF bypasses on received checksum 42 regardless of source CRC and salt"))
 		return false;
 	if (!expect_silent(
 			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
@@ -3714,14 +3724,25 @@ bool run_integrity_replies_validate_registered_profile() {
 			"a short C2S 0x20 zero-fills its missing checksum before validation"))
 		return false;
 	if (!expect_silent(
-			observe({}, c2s::ENTITY_CHECKSUM_REPLY,
+			observe(none, c2s::ENTITY_CHECKSUM_REPLY,
 					indexed_crc_reply(0xFF, 0)),
-			"C2S 0x20 is ignored when no integrity profile is selected"))
+			"C2S 0x20 is ignored when the host computed no weapon table"))
 		return false;
 	if (!expect_silent(
 			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
 					indexed_crc_reply(0x07, 0)),
-			"C2S 0x20 cannot validate an individual ADM row absent from the profile"))
+			"C2S 0x20 cannot validate a named weapon row's own CRC"))
+		return false;
+	if (!expect_silent(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
+					indexed_crc_reply(0x8C, kWeaponSalt), kWeaponSalt),
+			"C2S 0x20 accepts key ^ 0 for a row with no name"))
+		return false;
+	if (!expect_crc_punt(
+			observe(profile, c2s::ENTITY_CHECKSUM_REPLY,
+					indexed_crc_reply(0x8C, 1), kWeaponSalt),
+			"PUNT WCRC",
+			"C2S 0x20 validates a row with no name against CRC zero"))
 		return false;
 
 	if (!expect_silent(
@@ -3729,7 +3750,7 @@ bool run_integrity_replies_validate_registered_profile() {
 					indexed_crc_reply(0x18, kAmmoRow18Crc ^ kAmmoSalt,
 							{0xCA, 0xFE, 0xBA, 0xBE}),
 					0, kAmmoSalt),
-			"C2S 0x21 accepts a salted covered ammo CRC and ignores trailing bytes"))
+			"C2S 0x21 accepts a salted ammo row CRC and ignores trailing bytes"))
 		return false;
 	if (!expect_crc_punt(
 			observe(profile, c2s::CHECKSUM_REPLY,
@@ -3753,9 +3774,9 @@ bool run_integrity_replies_validate_registered_profile() {
 			"C2S 0x21 ignores a positive row index at the table capacity"))
 		return false;
 	return expect_silent(
-			observe({}, c2s::CHECKSUM_REPLY,
+			observe(none, c2s::CHECKSUM_REPLY,
 					indexed_crc_reply(0x18, 0)),
-			"C2S 0x21 is ignored when no integrity profile is selected");
+			"C2S 0x21 is ignored when the host computed no ammo table");
 }
 
 // A retail client drops a 0x16 row until that slot has been introduced by 0x46. The
@@ -3918,7 +3939,7 @@ int main(int argc, char **argv) {
 	ok = run_dedicated_host_advertises_and_admits_its_cap() && ok;
 	ok = run_mps_negotiates_the_connection_ceiling() && ok;
 	ok = run_character_join_vars_parsed() && ok;
-	ok = run_integrity_replies_validate_registered_profile() && ok;
+	ok = run_integrity_replies_validate_computed_sources() && ok;
 	ok = run_periodic_scoreboard_repairs_pre_sync_dropped_row() && ok;
 	return ok ? 0 : 1;
 }

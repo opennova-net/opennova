@@ -49,7 +49,6 @@ public:
 	static bool spectator();
 	static String spectator_password();
 	static String callsign();
-	static String integrity_profile();
 	static String capture_pcap();
 	// 0 = no runtime MCP endpoint.
 	static int mcp_port();

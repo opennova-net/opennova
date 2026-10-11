@@ -16,7 +16,7 @@ func test_runtime_flags_read_through_the_override() -> void:
 		"--lan-join", "192.168.10.120:32770", "--lan-port", "32768",
 		"--lan-gametype", "0x10020", "--lan-mode", "3", "--lan-max-players", "16",
 		"--spectator", "--spectator-password", "watch me",
-		"--callsign", "Ranger", "--integrity-profile", "retail",
+		"--callsign", "Ranger",
 		"--capture-pcap", "C:/cap/s.pcapng", "--mcp-port", "8975",
 		"--resource-dir", "C:/Games/JO", "/exp", "jox01", "/d", "--loose-root",
 	]))
@@ -32,7 +32,6 @@ func test_runtime_flags_read_through_the_override() -> void:
 	assert_true(LaunchFlags.spectator())
 	assert_eq(LaunchFlags.spectator_password(), "watch me")
 	assert_eq(LaunchFlags.callsign(), "Ranger")
-	assert_eq(LaunchFlags.integrity_profile(), "retail")
 	assert_eq(LaunchFlags.capture_pcap(), "C:/cap/s.pcapng")
 	assert_eq(LaunchFlags.mcp_port(), 8975)
 	assert_eq(LaunchFlags.resource_dir(), "C:/Games/JO")
@@ -55,7 +54,6 @@ func test_absent_flags_fall_back() -> void:
 	assert_false(LaunchFlags.spectator())
 	assert_eq(LaunchFlags.spectator_password(), "")
 	assert_eq(LaunchFlags.callsign(), "")
-	assert_eq(LaunchFlags.integrity_profile(), "")
 	assert_eq(LaunchFlags.capture_pcap(), "")
 	assert_eq(LaunchFlags.mcp_port(), 0)
 	assert_eq(LaunchFlags.resource_dir(), "")

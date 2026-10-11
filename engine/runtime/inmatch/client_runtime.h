@@ -499,12 +499,10 @@ public:
 	const CharAttrTable *charattr_table() const {
 		return joiner_ ? &joiner_->charattr_table() : nullptr;
 	}
-	bool set_integrity_challenge_profile(std::string_view id) {
-		return joiner_ != nullptr &&
-		       joiner_->set_integrity_challenge_profile(id);
-	}
-	void clear_integrity_challenge_profile() {
-		if (joiner_) joiner_->clear_integrity_challenge_profile();
+	// The joiner's anti-cheat challenge sources (JoinerConnection::
+	// set_integrity_sources); a HostClient has no joiner and answers none.
+	void set_integrity_sources(IntegritySources sources) {
+		if (joiner_) joiner_->set_integrity_sources(std::move(sources));
 	}
 	void set_loaded_model_challenge_snapshot(std::vector<uint32_t> values) {
 		if (joiner_)

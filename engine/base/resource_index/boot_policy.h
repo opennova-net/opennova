@@ -36,7 +36,6 @@
 //   --spectator                 request the spectator role when joining.
 //   --spectator-password <text> spectator password for that join request.
 //   --callsign <name>           the local player's callsign (wire clamp applies).
-//   --integrity-profile <name>  the session's integrity profile.
 //   --capture-pcap <path>       record this session's datagrams to a pcap.
 //   --mcp-port <n>              host the runtime MCP endpoint on that loopback
 //                               port (1..65535); absent = no endpoint.
@@ -81,7 +80,6 @@ inline constexpr const char *kLaunchFlagLanMaxPlayers = "--lan-max-players";
 inline constexpr const char *kLaunchFlagSpectator = "--spectator";
 inline constexpr const char *kLaunchFlagSpectatorPassword = "--spectator-password";
 inline constexpr const char *kLaunchFlagCallsign = "--callsign";
-inline constexpr const char *kLaunchFlagIntegrityProfile = "--integrity-profile";
 inline constexpr const char *kLaunchFlagCapturePcap = "--capture-pcap";
 inline constexpr const char *kLaunchFlagMcpPort = "--mcp-port";
 inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
@@ -106,7 +104,6 @@ struct LaunchFlags {
     bool spectator = false;        // --spectator
     std::string spectator_password;// --spectator-password <text>
     std::string callsign;          // --callsign <name>
-    std::string integrity_profile; // --integrity-profile <name>
     std::string capture_pcap;      // --capture-pcap <path>
     int mcp_port = 0;              // --mcp-port; 0 = no endpoint (1..65535 accepted)
     std::string working_dir;       // --working-dir <path>; "" = the process's own

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <net/npwire/protocol_message.h>
+#include <runtime/inmatch/integrity_sources.h>
 
 // GameConfig — the ONE consolidated in-match server-state config (ADR 0013, D-NET-132; §6.9). It
 // merges the three formerly-separate reimpl structs (NapiGameSettings §6.4, ServerRules, and the
@@ -370,12 +371,12 @@ struct GameConfig {
 	// it against the client's VERSIONCRCSTRING only while `expansion` is
 	// non-empty [orig: @0x51231e..0x512349, reject DPC=48] (D-NET-166).
 	int32_t expansion_version_checksum = 0;
-	// Optional exact retail resource corpus used to validate the host's inbound
-	// C2S 0x20/0x21 integrity replies. Empty (or an unknown id at the binding
-	// boundary) disables validation: a host must never compare against guessed
-	// table bytes. This is deliberately independent of `expansion`, because two
-	// installs with the same expansion name can carry different patched data.
-	std::string integrity_profile;
+	// The anti-cheat sources the host validates inbound C2S 0x20/0x21 replies
+	// against: its own loaded weapon.def and ammo.def tables, computed at each
+	// mission load as retail computes them (integrity_sources.h; the host boot
+	// fills them). A leg with no computed value validates nothing: a host must
+	// never compare against guessed table bytes.
+	IntegritySources integrity_sources;
 	std::string player_name = "DevUser";                    // host identity/roster name; remote 0x7B uses recipient ClientAuth.NA
 	uint32_t spawn_x = 0xfe56f854u;
 	uint32_t spawn_y = 0x0049f5f0u;
