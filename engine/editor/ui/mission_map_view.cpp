@@ -62,6 +62,10 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		{ "Areas", &options.areas, "The area triggers' boxes." },
 		{ "Paths", &options.paths, "The paths through their stops, the player's route numbered." },
 		{ "Labels", &options.labels, "Every pin's name, beside the hovered and the selected ones' always." },
+		{ "Links", &options.links,
+		  "The selected event's links: what its triggers watch and what its actions act on, ringed, a line from one "
+		  "to the other, and a distance trigger's reach seen from above. And on each pin some event names, how many "
+		  "events name it." },
 	};
 	for (const Kind &kind : kinds) {
 		row.next(ui_kit::checkbox_width(kind.label));

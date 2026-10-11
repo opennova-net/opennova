@@ -24,6 +24,7 @@
 
 #include <base/io/json.h>
 #include <editor/preview/mission_label_picks.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_scene.h>
@@ -565,6 +566,108 @@ int test_overlays() {
 	return 0;
 }
 
+// S24: the selected logic record's links over the picture (preview/mission_link_shapes): each record named
+// rung in its role's colour (what a trigger watches, what an action acts on), a line from the watched to
+// the acted on with its arrowhead, a group's members each rung with a spoke, a distance trigger's reach
+// as its circle (64 segments, a sees trigger's 30 degrees either side of its heading bolder, the wedge's
+// two edges) and its sphere's outline; a badge on each mark some event names; none with the links option
+// off.
+int test_link_overlays() {
+	Source source = make_source();
+	MissionScene scene;
+	scene.read(source);
+	MissionViewportOptions options;
+	const OrbitCamera camera = camera_over(0.0, 0.0, 0.0, 400.0f);
+	const int width = 640, height = 480;
+	const std::vector<MissionMark> marks = mission_marks(scene, options, camera, width, height, nullptr);
+	MissionLinkScene links;
+	MissionLinkSpot watched;
+	watched.record = NodeAddress{ 10, kItemKind, 0 };
+	watched.watched = watched.selected = true;
+	watched.at = { -60.0, -90.0, 0.0 };
+	MissionLinkSpot area;
+	area.record = NodeAddress{ 20, kAreaKind, 0 };
+	area.selected = true;
+	area.area = true;
+	area.area_index = 0;
+	area.at = { 20.0, 20.0, 0.0 };
+	MissionLinkSpot group;
+	group.record = NodeAddress{ 1, 9, 77 };
+	group.at = { -100.0, 80.0, 1.0 };
+	group.members = { { 0.0, 100.0, 0.0 }, { -50.0, -50.0, 2.0 } };
+	links.spots = { watched, area, group };
+	links.lines = { { 0, 1 }, { 0, 2 } };
+	MissionLinkRing ring;
+	ring.at = { -50.0, -50.0, 2.0 };
+	ring.metres = 30.0;
+	ring.facing = true;
+	ring.yaw = 180.0;
+	ring.selected = true;
+	links.rings = { ring };
+	const std::vector<size_t> badges = { 2, 0, 0, 1, 0 };
+	MissionOverlayInput in;
+	in.scene = &scene;
+	in.options = &options;
+	in.camera = &camera;
+	in.width = width;
+	in.height = height;
+	in.marks = &marks;
+	in.links = &links;
+	in.badges = &badges;
+	const auto rings = [](const OverlayList &list, uint32_t rgb, float radius) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Circle && shape.rgb == rgb && shape.size == radius;
+		});
+	};
+	const auto lines = [](const OverlayList &list, uint32_t rgb, float thickness) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Line && shape.rgb == rgb && shape.thickness == thickness;
+		});
+	};
+	OverlayList list = mission_overlay_shapes(in);
+	// The watched item rung, the area and the group acted on rung, the group's two members rung.
+	TEST_EXPECT(rings(list, kMissionWatchedRgb, 14.0f) == 1 && rings(list, kMissionActedRgb, 17.0f) == 2);
+	TEST_EXPECT(rings(list, kMissionActedRgb, 7.0f) == 2);
+	// The two lines from the item (bold: both ends selected or the item selected), each with an arrowhead.
+	TEST_EXPECT(lines(list, kMissionWatchedRgb, 2.0f) == 2);
+	TEST_EXPECT(std::count_if(list.shapes.begin(), list.shapes.end(), [](const OverlayShape &shape) {
+		return shape.kind == OverlayKind::Quad && shape.rgb == kMissionActedRgb;
+	}) == 2);
+	// The reach: 64 segments at the subject's height, the 10 within 30 degrees of its heading bolder; the wedge's
+	// two edges; the sphere's outline about it.
+	TEST_EXPECT(lines(list, kMissionWatchedRgb, 1.75f) == 54 && lines(list, kMissionWatchedRgb, 2.75f) == 10);
+	TEST_EXPECT(lines(list, kMissionWatchedRgb, 2.25f) == 2);
+	TEST_EXPECT(std::count_if(list.shapes.begin(), list.shapes.end(), [](const OverlayShape &shape) {
+		return shape.kind == OverlayKind::Circle && shape.rgb == kMissionWatchedRgb && shape.size > 14.0f;
+	}) == 1);
+	// The wedge's edges go south of the subject (its heading 180): on the picture, below it (north is up).
+	float sx = 0.0f, sy = 0.0f;
+	TEST_EXPECT(camera.project(mission_scene_point(-50.0, -50.0, 2.0), width, height, sx, sy));
+	for (const OverlayShape &shape : list.shapes)
+		if (shape.kind == OverlayKind::Line && shape.rgb == kMissionWatchedRgb && shape.thickness == 2.25f)
+			TEST_EXPECT(shape.points[1].y > sy + 10.0f);
+	// The badges: the item named by two events, the organic by one.
+	const auto badge = [&](const OverlayList &shapes, const char *words) {
+		return std::count_if(shapes.shapes.begin(), shapes.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == OverlayKind::Text && shape.rgb == kMissionBadgeRgb && shape.text == words;
+		});
+	};
+	TEST_EXPECT(badge(list, "2") == 1 && badge(list, "1") == 1);
+	// Off: none of it.
+	options.links = false;
+	list = mission_overlay_shapes(in);
+	TEST_EXPECT(rings(list, kMissionWatchedRgb, 14.0f) == 0 && badge(list, "2") == 0 && lines(list, kMissionWatchedRgb, 1.75f) == 0);
+	// A reach seen from inside its sphere has no outline.
+	options.links = true;
+	links.rings[0].metres = 2000.0;
+	list = mission_overlay_shapes(in);
+	TEST_EXPECT(std::count_if(list.shapes.begin(), list.shapes.end(), [](const OverlayShape &shape) {
+		return shape.kind == OverlayKind::Circle && shape.rgb == kMissionWatchedRgb && shape.size > 14.0f;
+	}) == 0);
+	std::printf("test_link_overlays passed\n");
+	return 0;
+}
+
 // The labels' declutter (S15): the hovered mark's and the primary's always, even over each other; the
 // other selected before the rest but only where they fit, each nearest first; the rest after.
 int test_label_picks() {
@@ -621,6 +724,7 @@ int main() {
 	TEST_EXPECT(test_sphere_picks() == 0);
 	TEST_EXPECT(test_options() == 0);
 	TEST_EXPECT(test_overlays() == 0);
+	TEST_EXPECT(test_link_overlays() == 0);
 	TEST_EXPECT(test_label_picks() == 0);
 	std::printf("editor_mission_scene: all tests passed\n");
 	return 0;

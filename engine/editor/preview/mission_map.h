@@ -76,17 +76,18 @@ float mission_map_zoom_for(double metres, int width);
 
 // The map's options: the marks by kind and the labels (the 3D view's), the CMAP's grid and text toggles (the
 // commander map's GRID and TEXT, which the device's compile draws), stick (a moved entity keeps its height over the
-// ground) and the grid a drag snaps to (metres; 0 free).
+// ground) and the grid a drag snaps to (metres; 0 free). S24: the selected event's links, the reaches and the
+// badges (the 3D view's links).
 struct MissionMapOptions {
 	bool items = true, buildings = true, markers = true, organics = true;
-	bool areas = true, paths = true, labels = false;
+	bool areas = true, paths = true, labels = false, links = true;
 	bool grid = true, text = true;
 	bool stick = true;
 	float snap = 1.0f;
 	bool operator==(const MissionMapOptions &o) const;
 	bool operator!=(const MissionMapOptions &o) const { return !(*this == o); }
 };
-// {marks: {items, buildings, markers, organics, areas, paths, labels}, grid, text, stick, snap}.
+// {marks: {items, buildings, markers, organics, areas, paths, labels, links}, grid, text, stick, snap}.
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 

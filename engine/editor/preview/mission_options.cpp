@@ -27,7 +27,7 @@ constexpr Flag kMarks[] = {
 	{ "items", &MissionViewportOptions::items }, { "buildings", &MissionViewportOptions::buildings },
 	{ "markers", &MissionViewportOptions::markers }, { "organics", &MissionViewportOptions::organics },
 	{ "areas", &MissionViewportOptions::areas }, { "paths", &MissionViewportOptions::paths },
-	{ "labels", &MissionViewportOptions::labels },
+	{ "labels", &MissionViewportOptions::labels }, { "links", &MissionViewportOptions::links },
 };
 
 template <size_t N>

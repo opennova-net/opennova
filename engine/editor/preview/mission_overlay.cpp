@@ -145,6 +145,32 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 		}
 	}
 
+	// S24: the selected logic record's links, under the marks.
+	if (in.options->links && in.links && in.links->any()) {
+		MissionLinkView view;
+		view.point = [&](const std::array<double, 3> &at, CanvasPoint &out) {
+			return camera.project(mission_scene_point(at[0], at[1], at[2]), in.width, in.height, out.x, out.y);
+		};
+		view.segment = [&](const std::array<double, 3> &a, const std::array<double, 3> &b, CanvasPoint &from, CanvasPoint &to) {
+			return mission_project_segment(camera, in.width, in.height, mission_scene_point(a[0], a[1], a[2]),
+					mission_scene_point(b[0], b[1], b[2]), from, to);
+		};
+		// A sphere's outline seen from the eye: its apparent radius, f r / sqrt(d^2 - r^2) (none from inside it).
+		const float focal = camera.focal(in.width);
+		view.outline = [&](const std::array<double, 3> &at, double metres) {
+			float x = 0.0f, y = 0.0f, depth = 0.0f;
+			if (!camera.project(mission_scene_point(at[0], at[1], at[2]), in.width, in.height, x, y, &depth)) return 0.0f;
+			const double d = double(depth), r = metres;
+			return d > r ? float(double(focal) * r / std::sqrt(d * d - r * r)) : 0.0f;
+		};
+		view.area_height = [&](const MissionLinkSpot &spot) {
+			return spot.area_index >= 0 && size_t(spot.area_index) < scene.areas().size()
+					? mission_area_anchor_z(scene.areas()[size_t(spot.area_index)], in.device)
+					: spot.at[2];
+		};
+		mission_link_shapes(*in.links, view, list);
+	}
+
 	// The nearest kMissionMarksDrawn shown marks.
 	std::vector<int> drawn;
 	for (size_t i = 0; i < marks.size(); ++i)
@@ -215,6 +241,9 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 					list.marker(CanvasPoint{ hx, hy }, OverlayGlyph::Square, 4.0f, OverlayRole::Selected);
 			}
 		}
+		// S24: how many events name it.
+		if (in.options->links && in.badges && size_t(index) < in.badges->size())
+			mission_link_badge(at, (*in.badges)[size_t(index)], list);
 		// The hovered and the selected rings over a dark one, so they read on any ground.
 		if (index == in.hover) {
 			list.ring(at, 11.0f, OverlayRole::Normal, 4.0f, kMissionShadowRgb, kMissionShadowAlpha);

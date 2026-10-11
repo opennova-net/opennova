@@ -4,6 +4,7 @@
 // mission and the first framing, a hit and a box, a drag of a pin planned into the 3D view's move batch
 // (mission_move_edits) and served as one undo step, the selection the 3D view shares, the commands and the wire.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -16,6 +17,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_map.h>
 #include <editor/preview/mission_map_canvas.h>
 #include <editor/preview/mission_map_outline.h>
@@ -305,6 +307,68 @@ static int test_drag() {
 	gathered.requests.clear();
 	TEST_EXPECT(!rig.map()->drag(rig.context(), drag, gathered, error) && error.find("3D view") != std::string::npos);
 	std::printf("test_drag passed\n");
+	return 0;
+}
+
+// S24: the selected event's links on the map (preview/mission_link_shapes, its reach a circle seen from above), the
+// badges on what the events name and the hover's words; none with the links option off.
+static int test_links() {
+	Rig rig("opennova_editor_mission_map_links");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress event = first_of(mission, MissionKind::Event);
+	const NodeAddress walker = first_of(mission, MissionKind::Organic);
+	const NodeAddress zone = first_of(mission, MissionKind::Area);
+	rig.session.handle(request::select_record(kMission, event));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const ViewportContext context = rig.context();
+	std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+	editor_test::Gathered gathered;
+	half->follow(*rig.map(), context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	OverlayList list = half->shapes(context, in);
+	const auto count = [&](OverlayKind kind, uint32_t rgb, float size) {
+		return std::count_if(list.shapes.begin(), list.shapes.end(), [&](const OverlayShape &shape) {
+			return shape.kind == kind && shape.rgb == rgb && (size < 0.0f || shape.size == size);
+		});
+	};
+	// Event 1 watches the walker in zone 20 (each rung where it stands on the map) and re-arms event 2 (no place).
+	const std::vector<MissionMapMark> marks = rig.map()->marks(context.width, context.height);
+	const MissionMapMark &at = marks[size_t(rig.map()->scene().mark_index(walker.row))];
+	TEST_EXPECT(count(OverlayKind::Circle, kMissionWatchedRgb, 14.0f) == 2 && count(OverlayKind::Circle, kMissionActedRgb, -1.0f) == 0);
+	bool rung = false;
+	for (const OverlayShape &shape : list.shapes)
+		rung = rung || (shape.kind == OverlayKind::Circle && shape.rgb == kMissionWatchedRgb && shape.points[0].x == at.px &&
+		                shape.points[0].y == at.py);
+	TEST_EXPECT(rung);
+	// The badges: the walker, zone 20, both events (named by each other), and no other pin.
+	TEST_EXPECT(count(OverlayKind::Text, kMissionBadgeRgb, -1.0f) == 2);
+	// The hover over the walker's pin says which event names it.
+	in.hovered = true;
+	in.mouse = CanvasPoint{ at.px, at.py };
+	const std::string tip = half->hover_tip(context, in);
+	TEST_EXPECT(tip.find("Named by 1 event:\nEvent 1: When ") != std::string::npos);
+	in.hovered = false;
+	// The zone's ring is at its middle.
+	const MissionMapMark &area = marks[size_t(rig.map()->scene().mark_index(zone.row))];
+	bool middle = false;
+	for (const OverlayShape &shape : list.shapes)
+		middle = middle || (shape.kind == OverlayKind::Circle && shape.rgb == kMissionWatchedRgb &&
+		                    std::fabs(shape.points[0].x - area.px) < 0.5f && std::fabs(shape.points[0].y - area.py) < 0.5f);
+	TEST_EXPECT(middle);
+	// Off: none.
+	rig.session.handle(request::set_viewport(kMission, R"({"kind": "map", "options": {"marks": {"links": false}}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	half->follow(*rig.map(), rig.context(), gathered);
+	list = half->shapes(rig.context(), in);
+	TEST_EXPECT(count(OverlayKind::Circle, kMissionWatchedRgb, 14.0f) == 0 && count(OverlayKind::Text, kMissionBadgeRgb, -1.0f) == 0);
+	TEST_EXPECT(!rig.map()->options().links && rig.map()->options_json().get("marks")->get_bool("links", true) == false);
+	std::printf("test_links passed\n");
 	return 0;
 }
 
@@ -743,6 +807,7 @@ int main(int argc, char **argv) {
 	failed += test_projection();
 	failed += test_marks_hit_box();
 	failed += test_drag();
+	failed += test_links();
 	failed += test_commands_and_wire();
 	failed += test_grid_origin();
 	failed += test_outline_of_a_box();

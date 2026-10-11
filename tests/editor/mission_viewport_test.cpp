@@ -36,6 +36,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_canvas.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_palette.h>
@@ -467,6 +468,77 @@ static int test_hit_and_box() {
 		TEST_EXPECT(now[size_t(boxed[i - 1].index)].depth <= now[size_t(boxed[i].index)].depth);
 	}
 	std::printf("test_hit_and_box passed\n");
+	return 0;
+}
+
+// S24: the 3D canvas over the selected logic record: its links placed in the scene (event 1 watches the walker
+// in zone 20; a trigger of it selected, the event's links with that trigger's own bold), the badges by mark
+// (the walker's and zone 20's: one event each), drawn by the overlay; nothing selected or a mark selected,
+// no links; the hover over the walker's glyph names the event.
+static int test_links() {
+	Rig rig("opennova_editor_mission_viewport_links");
+	TEST_EXPECT(rig.open());
+	const MissionViewport *viewport = rig.viewport();
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress event = first_of(mission, MissionKind::Event);
+	const NodeAddress walker = first_of(mission, MissionKind::Organic);
+	const NodeAddress zone = first_of(mission, MissionKind::Area);
+	std::unique_ptr<CanvasHalf> half = viewport->make_canvas();
+	auto *canvas = static_cast<MissionCanvas *>(half.get());
+	editor_test::Gathered gathered;
+	canvas->follow(*viewport, rig.context(), gathered);
+	TEST_EXPECT(!canvas->links().any() && canvas->frame().logic.row == 0);
+	// The badges: one event names the walker, one zone 20 (by mark index); the guard none (event 2 names its group).
+	const std::vector<size_t> &badges = canvas->badges();
+	const int walker_mark = viewport->scene().mark_index(walker.row), zone_mark = viewport->scene().mark_index(zone.row);
+	TEST_EXPECT(badges.size() == canvas->frame().marks.size() && walker_mark >= 0 && zone_mark >= 0);
+	if (walker_mark < 0 || zone_mark < 0 || badges.size() != canvas->frame().marks.size()) return 1;
+	TEST_EXPECT(badges[size_t(walker_mark)] == 1 && badges[size_t(zone_mark)] == 1);
+	size_t named = 0;
+	for (const size_t count : badges) named += count ? 1 : 0;
+	TEST_EXPECT(named == 2);
+	// The event selected: the walker and zone 20 watched, nothing acted on (event 2 has no place).
+	rig.session.handle(request::select_record(kMission, event));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	TEST_EXPECT(canvas->frame().logic == event && canvas->links().spots.size() == 2 && canvas->links().lines.empty());
+	for (const MissionLinkSpot &spot : canvas->links().spots) TEST_EXPECT(spot.watched && spot.selected);
+	TEST_EXPECT(canvas->links().spots[0].record == walker && canvas->links().spots[1].record == zone &&
+	            canvas->links().spots[1].area);
+	CanvasInput in;
+	in.width = rig.context().width;
+	in.height = rig.context().height;
+	OverlayList list = canvas->shapes(rig.context(), in);
+	TEST_EXPECT(std::count_if(list.shapes.begin(), list.shapes.end(), [](const OverlayShape &shape) {
+		return shape.kind == OverlayKind::Circle && shape.rgb == kMissionWatchedRgb;
+	}) == 2);
+	// Its trigger selected: the same links, the trigger's own.
+	NodeAddress trigger;
+	for (const Document::Collection &list_of : mission.collections_of(event))
+		if (list_of.spec.kind == node_kind(MissionKind::Trigger)) trigger = { event.row, list_of.spec.kind, list_of.ids[0] };
+	rig.session.handle(request::select_record(kMission, trigger));
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	TEST_EXPECT(canvas->frame().logic == trigger && canvas->links().spots.size() == 2 && canvas->links().spots[0].selected);
+	// The hover over the walker's glyph, the camera framed on it: the event that names it, as its badge counts.
+	gathered.requests.clear();
+	std::string error;
+	TEST_EXPECT(viewport->command(rig.context(), "frame", { walker.row }, gathered, error) &&
+	            editor_test::serve(rig.session, gathered.requests));
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	const MissionMark &glyph = canvas->frame().marks[size_t(walker_mark)];
+	in.hovered = true;
+	in.mouse = CanvasPoint{ glyph.x, glyph.y };
+	const std::string tip = canvas->hover_tip(rig.context(), in);
+	TEST_EXPECT(glyph.shown && tip.find("Named by 1 event:") == 0 && tip.find("Event 1: When ") != std::string::npos);
+	// A mark selected: no links.
+	rig.session.handle(request::select_record(kMission, walker));
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	TEST_EXPECT(!canvas->links().any() && canvas->frame().logic.row == 0);
+	std::printf("test_links passed\n");
 	return 0;
 }
 
@@ -2117,6 +2189,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_camera_frame() == 0);
 	TEST_EXPECT(test_fog_reach() == 0);
 	TEST_EXPECT(test_hit_and_box() == 0);
+	TEST_EXPECT(test_links() == 0);
 	TEST_EXPECT(test_sphere_picking() == 0);
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_drop() == 0);

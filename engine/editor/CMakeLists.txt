@@ -69,6 +69,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_logic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_sentence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_uses.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_links.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_reads.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_file_set.cpp
@@ -205,6 +206,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_label_picks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_options.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_link_shapes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_palette.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_place.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_poses.cpp

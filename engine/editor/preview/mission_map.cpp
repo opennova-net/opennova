@@ -182,8 +182,8 @@ float mission_map_zoom_for(double metres, int width) {
 
 bool MissionMapOptions::operator==(const MissionMapOptions &o) const {
 	return items == o.items && buildings == o.buildings && markers == o.markers && organics == o.organics &&
-	       areas == o.areas && paths == o.paths && labels == o.labels && grid == o.grid && text == o.text &&
-	       stick == o.stick && snap == o.snap;
+	       areas == o.areas && paths == o.paths && labels == o.labels && links == o.links && grid == o.grid &&
+	       text == o.text && stick == o.stick && snap == o.snap;
 }
 
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
@@ -195,6 +195,7 @@ io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
 	marks.set("areas", JsonValue::make_bool(options.areas));
 	marks.set("paths", JsonValue::make_bool(options.paths));
 	marks.set("labels", JsonValue::make_bool(options.labels));
+	marks.set("links", JsonValue::make_bool(options.links));
 	JsonValue out = JsonValue::make_object();
 	out.set("marks", std::move(marks));
 	out.set("grid", JsonValue::make_bool(options.grid));
@@ -221,9 +222,9 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 				bool *into = mark.key == "items" ? &out.items : mark.key == "buildings" ? &out.buildings
 						: mark.key == "markers" ? &out.markers : mark.key == "organics" ? &out.organics
 						: mark.key == "areas" ? &out.areas : mark.key == "paths" ? &out.paths
-						: mark.key == "labels" ? &out.labels : nullptr;
+						: mark.key == "labels" ? &out.labels : mark.key == "links" ? &out.links : nullptr;
 				if (!into) {
-					error = "options.marks takes items, buildings, markers, organics, areas, paths and labels, not " +
+					error = "options.marks takes items, buildings, markers, organics, areas, paths, labels and links, not " +
 					        mark.key + ".";
 					return false;
 				}

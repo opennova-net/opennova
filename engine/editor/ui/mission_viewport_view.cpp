@@ -837,6 +837,10 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Labels", &options.labels);
 	ui_kit::tooltip("A label beside the nearer marks too, not only the hovered and the selected ones (those that "
 					"would overlap another are left out).");
+	ImGui::Checkbox("Links", &options.links);
+	ui_kit::tooltip("The selected event's links: what its triggers watch and what its actions act on, ringed, a line "
+					"from one to the other, and a distance trigger's reach as the game measures it (a sphere about its "
+					"subject). And on each mark some event names, how many events name it.");
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 	float range = options.mark_range;
 	if (ImGui::SliderFloat("Mark range", &range, 0.0f, 2000.0f, range <= 0.0f ? "no limit" : "%.0f m",

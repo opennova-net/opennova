@@ -1,8 +1,14 @@
 #include <editor/preview/mission_map_canvas.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <optional>
 
+#include <editor/documents/mission_document.h>
+#include <editor/documents/mission_labels.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/session/request_factories.h>
@@ -48,9 +54,23 @@ void MissionMapCanvas::follow(const ViewportModel &viewport, const ViewportConte
 	marks_ = viewport_->marks(context.width, context.height);
 	selected_.clear();
 	primary_ = -1;
+	links_ = MissionLinkScene();
+	badges_.clear();
 	const Document *document = document_of(context);
-	const Selection *selection = document && viewport.current(context.input) ? selection_of(context, *document) : nullptr;
+	const bool current = document && viewport.current(context.input);
+	// S24: how many events name each mark.
+	const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document);
+	if (mission && current && viewport_->options().links) {
+		counts_.follow(*mission);
+		if (counts_.named()) {
+			badges_.resize(marks_.size());
+			for (size_t i = 0; i < marks_.size(); ++i) badges_[i] = counts_.events(marks_[i].record.row);
+		}
+	}
+	const Selection *selection = current ? selection_of(context, *document) : nullptr;
 	if (!selection) return;
+	if (mission && viewport_->options().links && mission_logic_record(selection->primary))
+		links_ = mission_link_scene(*mission, viewport_->scene(), selection->primary);
 	for (const NodeAddress &record : selection->records) {
 		const int index = viewport_->scene().mark_index(record.row);
 		if (index < 0 || size_t(index) >= marks_.size()) continue;
@@ -219,6 +239,21 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 			list.line(b, CanvasPoint{ a.x, b.y }, kMissionAreaRgb, 1.0f);
 			list.line(CanvasPoint{ a.x, b.y }, a, kMissionAreaRgb, 1.0f);
 		}
+	// S24: the selected logic record's links, over the boxes and under the pins.
+	if (options.links && links_.any()) {
+		MissionLinkView links;
+		links.point = [&](const std::array<double, 3> &point, CanvasPoint &out) {
+			out = at(point[0], point[1]);
+			return true;
+		};
+		links.segment = [&](const std::array<double, 3> &a, const std::array<double, 3> &b, CanvasPoint &from,
+		                    CanvasPoint &to) {
+			from = at(a[0], a[1]);
+			to = at(b[0], b[1]);
+			return true;
+		};
+		mission_link_shapes(links_, links, list);
+	}
 	// The pins (a model drawn as its wireframe, the device's, has none).
 	for (const MissionMapMark &mark : marks_) {
 		if (!mark.shown || mark.outlined) continue;
@@ -239,6 +274,10 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 		}
 		if (mark.team == 1 || mark.team == 2) list.ring(point, 6.0f, OverlayRole::Normal, 1.0f, mission_team_rgb(mark.team));
 	}
+	// S24: how many events name each shown mark.
+	if (options.links)
+		for (size_t i = 0; i < marks_.size() && i < badges_.size(); ++i)
+			if (marks_[i].shown) mission_link_badge(CanvasPoint{ marks_[i].px, marks_[i].py }, badges_[i], list);
 	// A wireframe's footprint outlined in `role` (over a dark outline where `dark`, so it reads on any ground).
 	const auto footprint = [&](const MissionMapFootprint &shape, OverlayRole role, float thickness, bool dark) {
 		const size_t n = shape.hull.size() / 2;
@@ -306,8 +345,20 @@ std::string MissionMapCanvas::hover_tip(const ViewportContext &context, const Ca
 	const MissionMapMark &mark = marks_[size_t(index)];
 	char at[64];
 	std::snprintf(at, sizeof(at), " at %.1f east, %.1f north", mark.x, mark.y);
-	return viewport_->title(context, mark.record) + at +
-	       "\nClick to select it (Shift adds, Ctrl toggles); drag to move it. Right-drag pans, the wheel zooms.";
+	std::string tip = viewport_->title(context, mark.record) + at +
+	                  "\nClick to select it (Shift adds, Ctrl toggles); drag to move it. Right-drag pans, the wheel zooms.";
+	// S24: the events that name it, its badge's words.
+	const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document_of(context));
+	if (mission && size_t(index) < badges_.size() && badges_[size_t(index)] > 0) {
+		const AssetGraph *graph = context.input.view.findings.graph.get();
+		std::optional<GraphNameSource> source;
+		if (graph) source.emplace(*graph);
+		const std::unique_ptr<MissionNames> names = mission_label_names(*mission, source ? &*source : nullptr);
+		const std::string named = mission_link_hover(
+				uses_.uses(*mission, mark.record, *names, graph != nullptr, graph ? graph->generation() : 0));
+		if (!named.empty()) tip += "\n\n" + named;
+	}
+	return tip;
 }
 
 } // namespace opennova::editor

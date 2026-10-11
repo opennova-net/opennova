@@ -8,6 +8,7 @@
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_label_picks.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_overlay.h>
 #include <runtime/hud/hud_minimap.h>
@@ -32,7 +33,10 @@ struct OrbitCamera;
 // ringed twice over a dark ring (they read on any ground, among thousands of glyphs) and the hovered
 // one ringed wide; the handle the pointer is on (or a drag holds) named beside it with its step ("Turn,
 // 15 deg steps"); an Alt-drag's copies as rings where they go, a line from each original; the Area
-// tool's box on the ground; and on an empty mission, a line saying how to start.
+// tool's box on the ground; and on an empty mission, a line saying how to start. S24: the selected event's,
+// trigger's or action's links (preview/mission_link_shapes: what it watches and acts on rung, a line from
+// one to the other, a distance trigger's reach as its sphere) under the marks, and a badge on each drawn
+// mark some event names, with the links option.
 
 inline constexpr uint32_t kMissionItemRgb = 0xFFDC5A;
 inline constexpr uint32_t kMissionBuildingRgb = 0xC0C0C0;
@@ -101,6 +105,10 @@ struct MissionOverlayInput {
 	bool box = false;
 	double box_from[3] = { 0.0, 0.0, 0.0 }, box_to[3] = { 0.0, 0.0, 0.0 };
 	float box_snap = 0.0f;
+	// S24: the selected logic record's links placed in the scene (null none), and how many events name
+	// each mark (by mark index; null or shorter: none).
+	const MissionLinkScene *links = nullptr;
+	const std::vector<size_t> *badges = nullptr;
 };
 OverlayList mission_overlay_shapes(const MissionOverlayInput &in);
 

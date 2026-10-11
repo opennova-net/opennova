@@ -677,6 +677,7 @@ MissionCanvasFrame MissionViewport::canvas_frame(const ViewportContext &context)
 	const Selection *selection = frame.current ? selection_of(input, *frame.document) : nullptr;
 	if (!selection) return frame;
 	frame.records = selection->records;
+	if (mission_logic_record(selection->primary)) frame.logic = selection->primary;
 	for (const NodeAddress &record : selection->records) {
 		const int mark = mark_of_(frame.marks, record.row);
 		if (mark < 0) continue;

@@ -51,6 +51,9 @@ struct MissionViewportOptions {
 	bool foliage = true, effects = true, lights = true;
 	bool items = true, buildings = true, markers = true, organics = true;
 	bool areas = true, paths = true, labels = false;
+	// S24: the selected event's links, the distance triggers' reaches and the badges on what events name
+	// (preview/mission_link_shapes).
+	bool links = true;
 	float mark_range = 600.0f;
 	bool stick = true;
 	double time = -1.0;
@@ -73,7 +76,7 @@ bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b
 inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOptions &b) { return !(a == b); }
 
 // The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks: {items,
-// buildings, markers, organics, areas, paths, labels}, mark_range, stick, time (null: the mission's start
+// buildings, markers, organics, areas, paths, labels, links}, mark_range, stick, time (null: the mission's start
 // time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or foliage), ammo, listen
 // {on, volume}}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);

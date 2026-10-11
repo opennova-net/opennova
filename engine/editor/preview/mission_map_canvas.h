@@ -3,8 +3,11 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/mission_links.h>
+#include <editor/documents/mission_uses.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_map.h>
 
 namespace opennova::editor {
@@ -21,7 +24,9 @@ namespace opennova::editor {
 // each area's box, each entity with no wireframe its pin by its pool ringed in its team's map colour, the hovered and
 // the selected rings (a wireframe's: its footprint outlined), the labels (the hovered and the selected, every shown
 // mark's with the labels option), the box being dragged. A press takes a pin, else the model under it seen from above
-// (pick_mission_map_mark); a box the pins in it and the footprints it meets.
+// (pick_mission_map_mark); a box the pins in it and the footprints it meets. S24: with the links option, the
+// selected event's, trigger's or action's links (preview/mission_link_shapes; a reach is its circle seen from
+// above) over the boxes and under the pins, and a badge on each mark some event names, its hover listing them.
 class MissionMapCanvas final : public CanvasHalf {
 public:
 	const CanvasGesture &gesture() const override { return gesture_; }
@@ -42,6 +47,12 @@ private:
 	std::vector<MissionMapMark> marks_; // the frame's, at its picture's size
 	std::vector<int> selected_; // the frame's selected marks
 	int primary_ = -1;
+	// S24: the selected logic record's links, how many events name each mark (by mark index), the counts kept
+	// while the document stands, and the hovered record's uses.
+	MissionLinkScene links_;
+	std::vector<size_t> badges_;
+	MissionLinkCounts counts_;
+	mutable MissionUsesCache uses_;
 	// What a press took: the mark under it (-1: a box from nothing), the records it moves as the press found them and
 	// the grabbed one's place among them, where it began in the mission, and the box's corners.
 	struct Press {

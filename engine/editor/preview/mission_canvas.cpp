@@ -9,6 +9,8 @@
 #include <optional>
 
 #include <editor/assets/project_asset_source.h>
+#include <editor/documents/mission_document.h>
+#include <editor/documents/mission_labels.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/model/document.h>
@@ -218,6 +220,19 @@ void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext 
 	// edit meanwhile (one through the wire).
 	const bool writes_places = (gesture_.dragging() && grab_.what == MissionGrab::What::Handle) || gesture_.nudging();
 	titles_.hold(writes_places ? gesture_.token() : 0);
+	// S24: the selected logic record's links where the picture is the document as it is, and how many events
+	// name each mark.
+	links_ = MissionLinkScene();
+	badges_.clear();
+	const MissionDocument *document = dynamic_cast<const MissionDocument *>(frame_.document);
+	if (document && frame_.current && options.links) {
+		if (frame_.logic.row) links_ = mission_link_scene(*document, mission.scene(), frame_.logic);
+		counts_.follow(*document);
+		if (counts_.named()) {
+			badges_.resize(frame_.marks.size());
+			for (size_t i = 0; i < frame_.marks.size(); ++i) badges_[i] = counts_.events(frame_.marks[i].record.row);
+		}
+	}
 }
 
 void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out) {
@@ -656,6 +671,8 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 			overlay.box = true;
 		overlay.box_snap = frame_.snap;
 	}
+	overlay.links = &links_;
+	overlay.badges = &badges_;
 	OverlayList shapes = mission_overlay_shapes(overlay);
 	// The Listen's sources ringed at their reach (DI-36), under the marks drawn after them.
 	if (viewport.options().listen.on && viewport.listen().open()) {
@@ -680,17 +697,30 @@ CanvasCursor MissionCanvas::cursor(const ViewportContext &, const CanvasInput &i
 	return CanvasCursor::Default;
 }
 
-std::string MissionCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
+std::string MissionCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	// The label beside the hovered mark says it (mission_overlay): no tip beside it, but for what an ambient source
-	// plays while the view listens (DI-36).
+	// plays while the view listens (DI-36), and (S24) the events that name it, its badge's words.
 	if (!frame_.viewport || looking_ || gesture_.dragging() || tool() != MissionTool::Select) return std::string();
 	const MissionViewport &viewport = *frame_.viewport;
-	if (!viewport.options().listen.on || !viewport.listen().open()) return std::string();
+	const bool listening = viewport.options().listen.on && viewport.listen().open();
+	if (!listening && badges_.empty()) return std::string();
 	const int hovered = mission_canvas_under(frame_, in, MissionPick::Click);
 	if (hovered < 0 || size_t(hovered) >= frame_.marks.size()) return std::string();
 	std::string tip;
-	for (const std::string &line : viewport.listen().source_words(frame_.marks[size_t(hovered)].record.row))
-		tip += (tip.empty() ? "" : "\n") + line;
+	if (listening)
+		for (const std::string &line : viewport.listen().source_words(frame_.marks[size_t(hovered)].record.row))
+			tip += (tip.empty() ? "" : "\n") + line;
+	const MissionDocument *document = dynamic_cast<const MissionDocument *>(frame_.document);
+	if (document && size_t(hovered) < badges_.size() && badges_[size_t(hovered)] > 0) {
+		const AssetGraph *graph = context.input.view.findings.graph.get();
+		std::optional<GraphNameSource> source;
+		if (graph) source.emplace(*graph);
+		const std::unique_ptr<MissionNames> names = mission_label_names(*document, source ? &*source : nullptr);
+		const MissionUses &uses = uses_.uses(*document, frame_.marks[size_t(hovered)].record, *names, graph != nullptr,
+				graph ? graph->generation() : 0);
+		const std::string named = mission_link_hover(uses);
+		if (!named.empty()) tip += (tip.empty() ? "" : "\n\n") + named;
+	}
 	return tip;
 }
 
