@@ -1,7 +1,8 @@
-# OpenNova C++ style (ADR 0043 d14). CONFIG ONLY for now: the tree is not yet
-# formatted to it, and no whitespace-only reformat commit exists; that rides a
-# follow-up PR (one commit per group plus .git-blame-ignore-revs). Do not run
-# clang-format over the tree as part of an unrelated change.
+# OpenNova C++ style (ADR 0043 d14). The tree is not yet formatted to it, and
+# no whitespace-only reformat commit exists; that rides a follow-up PR (one
+# commit per group plus .git-blame-ignore-revs). Do not run clang-format over
+# the tree as part of an unrelated change. scripts/lint/format_lint.py checks
+# the lines a change adds against it (advisory in CI).
 #
 # Derived from third_party/godot-cpp/.clang-format (Godot's own style: tabs,
 # 4-wide, attached braces, 8-wide continuation) with these deliberate

@@ -277,6 +277,23 @@ Notes:
 The full cross-system suite can be flaky from shared state; if a run shows an unrelated
 red, re-run that single test file in isolation to confirm before treating it as real.
 
+## Lint and format checks
+
+CI's required gates are the `scripts/lint/*.py --enforce` checks in `ci.yml`'s `test`
+job (stdlib Python, no installs). Formatting is advisory for now: the tree is not yet
+formatted to `.clang-format`, `ruff.toml`, `gdformatrc` or `gdlintrc`, so
+`scripts/lint/format_lint.py` checks only the lines a change adds, against the
+merge-base with `origin/master`, and CI's `format-lint` job annotates the diff
+without failing. Run it locally with the same pins (new files count once staged):
+
+```bash
+pip install clang-format==21.1.6 ruff==0.16.9 gdtoolkit==4.5.0
+python scripts/lint/format_lint.py            # C++, Python and GDScript on changed lines
+ruff format <file.py>; gdformat <file.gd>     # format a file you own end to end
+```
+
+Never reformat a whole existing file as part of another change.
+
 ## Cut a release
 
 Tag a master merge head whose master CI run passed (`git tag v0.0.N <sha>` then

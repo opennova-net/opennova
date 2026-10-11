@@ -1,0 +1,9 @@
+# GDScript formatting (gdtoolkit's gdformat). scripts/lint/format_lint.py
+# checks it on changed lines only (advisory in CI); the tree is not formatted yet.
+excluded_directories: !!set
+  .git: null
+  godot/addons: null
+  third_party: null
+line_length: 100
+safety_checks: null
+use_spaces: null
