@@ -3861,6 +3861,16 @@ target_include_directories(host_register_list_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_definitions(host_register_list_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME host_register_list COMMAND host_register_list_test)
 
+# The listing's owner below the HTTP layer (host_keys, migration 0009): the hosting-key
+# store's hash, cap, claims and sweep, and the lobby session linking a listing to the account
+# its HostKey was minted for, through updates and a parked re-host, plus
+# ONNET_REQUIRE_HOST_KEY's refusal. A migrated in-memory database; runs on every build.
+add_executable(host_key_test novaworld/host_key_test.cpp)
+target_link_libraries(host_key_test PRIVATE opennova_novaworld_service opennova_net)
+target_include_directories(host_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(host_key_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME host_key COMMAND host_key_test)
+
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld_service)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3882,6 +3892,20 @@ if(BUILD_NOVAWORLD_HTTP)
     # The concurrent case gives each request up to 30 s; this bounds a hang
     # below ctest's 1500 s default.
     set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 120)
+
+    # The listing's owner end to end (host_keys, migration 0009): two in-process
+    # services (the HTTP, NW UDP and gate listeners over one pooled SQLite file
+    # each, one with ONNET_REQUIRE_HOST_KEY) and opennova-nw-lister's Lister with
+    # and without an account, plus hand-driven host sessions for the NWU
+    # reconnect and a second connection presenting a listed key. Its packet
+    # windows are protocol assertions, so it runs serially.
+    add_executable(nw_host_ownership_e2e_test novaworld/nw_host_ownership_e2e_test.cpp)
+    target_link_libraries(nw_host_ownership_e2e_test PRIVATE
+        opennova_novaworld_server_core opennova_nw_lister_core opennova_novaworld_service)
+    target_include_directories(nw_host_ownership_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(nw_host_ownership_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME nw_host_ownership_e2e COMMAND nw_host_ownership_e2e_test)
+    set_tests_properties(nw_host_ownership_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s

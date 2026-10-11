@@ -42,7 +42,8 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
 		"active_hosts", "active_user_sessions",
-		"games", "host_players", "host_roster", "hosts", "login_addresses", "player_game_access",
+		"games", "host_keys", "host_players", "host_roster", "hosts", "login_addresses",
+		"player_game_access",
 		"players", "server_status", "unknown_messages", "web_sessions"
 	};
 	TEST_EXPECT(rows.size() == expected.size());
@@ -265,7 +266,8 @@ int test_web_sessions_and_roles() {
 
 // 0008 over a database that already holds accounts (every deployment before
 // it): the migrations up to 0007 and the seed, then the full set, which
-// applies 0008 alone and gives every existing account the 'player' role.
+// applies 0008 (and 0009 after it) and gives every existing account the
+// 'player' role.
 int test_web_sessions_migration_over_existing_accounts() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
@@ -289,12 +291,92 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 1);
+	TEST_EXPECT(second.applied.size() == 2);
 	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
+	TEST_EXPECT(second.applied[1] == "0009_host_keys.sql");
 	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player') FROM players;");
 	TEST_EXPECT(roles[0].as_int(0).value() == 5);
 	TEST_EXPECT(roles[0].as_int(1).value() == 5);
 	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
+	return 0;
+}
+
+// 0009 over a database already at 0008 (every deployment before it), holding
+// accounts and a listed server: the full set then applies 0009 alone, the
+// accounts and the listing are untouched, host_keys is keyed by the key hash
+// with its indexes, its rows need a player and go with it, and a fresh key
+// row carries both times and no claim.
+int test_host_keys_migration_over_0008() {
+	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
+	const auto migrations = source_dir / "backend" / "migrations";
+	const auto seed_dir = source_dir / "backend" / "seed";
+	test_temp::TempDir before_0009("backend_schema_pre0009");
+	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
+		if (e.path().extension() == ".sql" && e.path().filename().string() < "0009") {
+			std::filesystem::copy_file(e.path(), before_0009.path / e.path().filename());
+		}
+	}
+
+	Database db(":memory:");
+	const auto first = run_migrations(db, before_0009.path);
+	TEST_EXPECT(first.applied.size() == 8);
+	std::vector<std::filesystem::path> seeds;
+	for (const auto &e : std::filesystem::directory_iterator(seed_dir)) {
+		if (e.path().extension() == ".sql") seeds.push_back(e.path());
+	}
+	std::sort(seeds.begin(), seeds.end());
+	for (const auto &p : seeds) db.exec_script(test_io::read_file_text(p.string()));
+	db.exec("INSERT INTO active_hosts (rid, gsid, game, app_id, server_name, host_ip, host_port, "
+	        "peer_ip, peer_port) VALUES (7, 'G7', 'jop_2_consumer', '1234', 'Before 0009', "
+	        "'10.0.0.7', 32768, '10.0.0.7', 32768);");
+	TEST_EXPECT(db.query("SELECT name FROM sqlite_master WHERE name = 'host_keys';").empty());
+
+	const auto second = run_migrations(db, migrations);
+	TEST_EXPECT(second.applied.size() == 1);
+	TEST_EXPECT(second.applied[0] == "0009_host_keys.sql");
+	TEST_EXPECT(second.skipped.size() == 8);
+	TEST_EXPECT(db.query("SELECT COUNT(*) FROM players;")[0].as_int(0).value() == 5);
+	const auto listed = db.query("SELECT server_name, host_user_id FROM active_hosts WHERE rid = 7;");
+	TEST_EXPECT(listed.size() == 1 && listed[0].as_text(0).value() == "Before 0009");
+	TEST_EXPECT(!listed[0].as_int(1).has_value());
+	// A third run applies nothing.
+	TEST_EXPECT(run_migrations(db, migrations).applied.empty());
+
+	for (const char *index : {"idx_host_keys_user_id", "idx_host_keys_last_used_at"}) {
+		TEST_EXPECT(db.query("SELECT 1 FROM sqlite_master WHERE type = 'index' "
+		                     "AND tbl_name = 'host_keys' AND name = ?;",
+		                     {opennova::db::BindValue(std::string(index))})
+		                    .size() == 1);
+	}
+	db.exec("INSERT INTO host_keys (key_hash, user_id) "
+	        "SELECT 'h1', id FROM players WHERE username = 'foo';");
+	auto fresh = db.query("SELECT created_at IS NOT NULL, last_used_at IS NOT NULL, claimed_rid "
+	                      "FROM host_keys WHERE key_hash = 'h1';");
+	TEST_EXPECT(fresh.size() == 1);
+	TEST_EXPECT(fresh[0].as_int(0).value() == 1 && fresh[0].as_int(1).value() == 1);
+	TEST_EXPECT(!fresh[0].as_int(2).has_value());
+	// The hash is the key: a second row under it is refused.
+	bool caught = false;
+	try {
+		db.exec("INSERT INTO host_keys (key_hash, user_id) "
+		        "SELECT 'h1', id FROM players WHERE username = 'test';");
+	} catch (const opennova::db::SqliteError &) {
+		caught = true;
+	}
+	TEST_EXPECT(caught);
+	// A key for no player is refused.
+	caught = false;
+	try {
+		db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h2', 9999);");
+	} catch (const opennova::db::SqliteError &) {
+		caught = true;
+	}
+	TEST_EXPECT(caught);
+	// A deleted player takes its keys.
+	db.exec("DELETE FROM player_game_access WHERE user_id = "
+	        "(SELECT id FROM players WHERE username = 'foo');");
+	db.exec("DELETE FROM players WHERE username = 'foo';");
+	TEST_EXPECT(db.query("SELECT 1 FROM host_keys;").empty());
 	return 0;
 }
 
@@ -307,7 +389,8 @@ int main() {
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
 	if (test_web_sessions_migration_over_existing_accounts() != 0) return 1;
+	if (test_host_keys_migration_over_0008() != 0) return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
-	            "web sessions + roles)\n");
+	            "web sessions + roles, host keys)\n");
 	return 0;
 }

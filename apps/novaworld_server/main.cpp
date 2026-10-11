@@ -215,7 +215,7 @@ int main() {
 	// dead state).
 	try {
 		hostdb::clear_all(dbh);
-		std::printf("[boot] active_hosts + host_players cleared (previous-run cleanup)\n");
+		std::printf("[boot] active_hosts + host_players + host key claims cleared (previous-run cleanup)\n");
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[boot] WARN active_hosts clear: %s\n", e.what());
 	}
@@ -327,6 +327,14 @@ int main() {
 				}
 			} catch (const db::SqliteError &e) {
 				std::fprintf(stderr, "[sweep] WARN prune_stale_hosts: %s\n", e.what());
+			}
+			// Hosting keys idle for a day; a listed server's key counts as used.
+			try {
+				if (const auto pruned = hostdb::prune_host_keys(dbh); pruned > 0) {
+					std::printf("[sweep] pruned %zu idle host key(s)\n", pruned);
+				}
+			} catch (const db::SqliteError &e) {
+				std::fprintf(stderr, "[sweep] WARN prune_host_keys: %s\n", e.what());
 			}
 #ifdef OPENNOVA_HTTP_ENABLED
 			// Website sessions past their (sliding) expiry, and login addresses

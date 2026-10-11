@@ -6,8 +6,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <future>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -15,7 +17,7 @@
 namespace opennova {
 class ConnectionManager;
 class UnknownTracker;
-namespace db { class ConnectionPool; }
+namespace db { class ConnectionPool; class Database; }
 } // namespace opennova
 
 namespace opennova::novaworld_server {
@@ -26,11 +28,13 @@ class NwUdpListener;
 
 // Crow-backed HTTP listener. start() registers five route families, each in
 // its own private registrar (bodies in http_listener.cpp):
-//   admin REST API      — /api/admin/* + dev host inject and the ServerCommand /
+//   admin REST API      — /api/admin/* + dev host inject, the listed servers
+//                         with their owners, and the ServerCommand /
 //                         ServerStopHosting pushes, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
 //   public JSON API     — /api/* for the web portal, with the website's
-//                         login / logout / me session routes
+//                         login / logout / me session routes and the
+//                         logged-in account's listed servers
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -112,6 +116,17 @@ private:
 	// the retail logins a pin would resume with no password, as the same
 	// update ends the account's website sessions (update_revokes_sessions).
 	void forget_persistent_pins(int64_t user_id);
+	// The account a retail request's own login names, for the HOSTKEY
+	// /NWHost.dll mints (hostdb::record_host_key): the LOGINSESSIONTAG cookie
+	// of a live retail login (its active_user_sessions row), else the
+	// PERSISTENTEXPRESSLOGINDATA pin a password-checked login made (the pin
+	// /NWJoin.dll falls back to). The account must be active; `how` names the
+	// cookie that resolved it. The NWHANDLE cookie, /NWJoin.dll's first choice,
+	// never counts here: the service sets it in the clear to the account's
+	// handle, so any client can send any account's, and a key minted on it
+	// would list a server as anyone's. Throws db::SqliteError.
+	std::optional<int64_t> retail_login_owner(const std::map<std::string, std::string> &cookies,
+	                                          db::Database &db, const char *&how) const;
 	// Per-server-process EPASK params advertised via the EPASK cookie at
 	// /nwprepare.dll. Retail echoes the same params back as a form field
 	// at POST /NWLogin.dll, so we use these to decrypt the encrypted

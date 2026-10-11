@@ -185,6 +185,17 @@ inline constexpr char MENUTXT_PUNTED_FROM_NOVAWORLD[] = "ERR_PUNTEDFROMNOVAWORLD
 // section, the service side). [orig: the {code, key} table dword_7CB960 / off_7CB964 that
 // CNapiGameSession_HandleServerMessage @0x4d1c50 walks @0x4d1d62..0x4d1ddc]
 inline constexpr int SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT = 7;
+// The MsgCode the service refuses a host whose HostKey names no account with, under
+// ONNET_REQUIRE_HOST_KEY (LobbySession::set_require_host_key): the table's row whose code is 200,
+// NWUSERVERMSGCODE_NEEDTOLOGIN, the key that names a missing login. In a ServerHostResult
+// (Success=0) a stock host stores it at session+304 [orig: CNapiGameSession_HandleHostVerifyResponse
+// @0x4d59d0, the failure leg @0x4d5ae1] and ConnectOrHost's switch shows every code but its six as
+// NWEC58 [orig: CNapiGameSession_ConnectOrHost @0x4d4f10, the switch @0x4d5207, the default
+// @0x4d52f1]: "NovaWorld has denied your request to host for some unspecified reason. Please check
+// your host options and try again." (menutxt.bin); in a ServerStopHosting it latches the
+// NWUSERVERMSGCODE_NEEDTOLOGIN key (novaworld_server_msg_code_key). Policy: the retail service's
+// own HostKey check and the code it sent are unwitnessed.
+inline constexpr int SERVER_MSG_CODE_NEED_TO_LOGIN = 200;
 
 // The 52-entry ServerStopHosting MsgCode -> NWUSERVERMSGCODE_* key table (the string the
 // client latches for its message log; unknown codes yield NWUSERVERMSGCODE_UNKNOWNERROR).

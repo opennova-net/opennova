@@ -34,6 +34,9 @@ services:
       ONNET_COOKIE_SECURE: ${ONNET_COOKIE_SECURE:-}
       ONNET_TRUSTED_PROXIES: ${ONNET_TRUSTED_PROXIES:-}
       ONNET_BOOTSTRAP_ADMIN: ${ONNET_BOOTSTRAP_ADMIN:-}
+      # 1 lists no host whose HostKey names no account (unset: listed with no
+      # owner); apps/novaworld_server/README.md "Listed servers and owners".
+      ONNET_REQUIRE_HOST_KEY: ${ONNET_REQUIRE_HOST_KEY:-}
 
   web:
     image: ${WEB_IMAGE:-opennova-web:local}

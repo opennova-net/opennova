@@ -244,6 +244,28 @@ const char *connection_state_name(ConnectionState s) {
 	return "unknown";
 }
 
+// A listed server for its owner (GET /api/me/hosts) or an admin (GET
+// /api/admin/hosts): its browser columns, the endpoint joiners are sent to and
+// the address its session comes from, and the row's UTC times. The public
+// /api/lobbies and /api/hosts name no owner.
+crow::json::wvalue listed_host_json(const hostdb::HostRow &h) {
+	crow::json::wvalue e;
+	e["rid"]          = h.rid;
+	e["gsid"]         = h.gsid;
+	e["game"]         = h.game;
+	e["server_name"]  = h.server_name;
+	e["mission_name"] = h.mission_name;
+	e["game_type"]    = h.game_type;
+	e["players"]      = h.player_count;
+	e["max_players"]  = h.max_players;
+	e["host_ip"]      = h.host_ip;
+	e["host_port"]    = h.host_port;
+	e["peer_ip"]      = h.peer_ip;
+	e["created_at"]   = h.created_at;
+	e["updated_at"]   = h.updated_at;
+	return e;
+}
+
 // Serialize a user row to JSON (no password_hash). Shared by the
 // public /api/register response and the admin user CRUD routes.
 crow::json::wvalue user_to_json(const UserRecord &u) {
@@ -386,6 +408,36 @@ void HttpListener::forget_persistent_pins(int64_t user_id) {
 	}
 }
 
+std::optional<int64_t> HttpListener::retail_login_owner(
+		const std::map<std::string, std::string> &cookies, db::Database &db,
+		const char *&how) const {
+	auto active = [](const std::optional<UserRecord> &user) {
+		return user && (user->account_status.empty() || user->account_status == "active");
+	};
+	if (const auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) {
+		const auto user = get_user_by_login_session_tag(db, it->second);
+		if (active(user)) {
+			how = "login-session";
+			return user->id;
+		}
+	}
+	if (const auto it = cookies.find("PERSISTENTEXPRESSLOGINDATA");
+	    it != cookies.end() && !it->second.empty()) {
+		int64_t pinned_id = 0;
+		{
+			std::lock_guard<std::mutex> lk(persistent_user_mu_);
+			const auto pin_it = persistent_to_user_id_.find(it->second);
+			if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
+		}
+		const auto user = get_user_by_id(db, pinned_id);
+		if (active(user)) {
+			how = "persist-pin";
+			return user->id;
+		}
+	}
+	return std::nullopt;
+}
+
 std::string HttpListener::host_url() const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + "/nwhost.dll";
 }
@@ -443,6 +495,49 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
+	});
+
+	// GET /api/admin/hosts — every listed server with its owner: listed_host_json
+	// plus "owner", {id, username} of the account whose HostKey listed it, or
+	// null for an anonymous listing (the HostKey named no account).
+	CROW_ROUTE(app, "/api/admin/hosts").methods("GET"_method)(
+	    [this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		std::vector<crow::json::wvalue> entries;
+		try {
+			auto db_conn = db_pool_.acquire();
+			db::ReadSnapshot snapshot(*db_conn);
+			std::map<int64_t, std::optional<UserRecord>> owners;
+			for (const auto &h : hostdb::list_hosts(*db_conn)) {
+				crow::json::wvalue e = listed_host_json(h);
+				std::optional<UserRecord> owner;
+				if (h.host_user_id) {
+					auto it = owners.find(*h.host_user_id);
+					if (it == owners.end()) {
+						it = owners.emplace(*h.host_user_id,
+						                    get_user_by_id(*db_conn, *h.host_user_id)).first;
+					}
+					owner = it->second;
+				}
+				if (owner) {
+					crow::json::wvalue o;
+					o["id"] = owner->id;
+					o["username"] = owner->username;
+					e["owner"] = std::move(o);
+				} else {
+					e["owner"] = nullptr;
+				}
+				entries.push_back(std::move(e));
+			}
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[http] GET /api/admin/hosts failed: %s\n", e.what());
+			return json_error(500, "db_error");
+		}
+		crow::json::wvalue out;
+		out["count"] = entries.size();
+		out["hosts"] = std::move(entries);
+		return json_reply(200, out);
 	});
 
 	// Dev/test helper: inject an active_hosts row so the GSB browser shows a
@@ -810,7 +905,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 }
 
 // Public JSON API consumed by the web portal: lobbies, stats, self-signup,
-// games, hosts, health, unknowns.
+// games, hosts, health, unknowns, and the logged-in account's listed servers.
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
@@ -879,6 +974,29 @@ void HttpListener::register_public_api_routes() {
 
 	// POST /api/login, POST /api/logout, GET /api/me (web_access.cpp).
 	impl_->access.register_routes();
+
+	// GET /api/me/hosts — the servers the logged-in account has listed now (each
+	// with a HostKey its client's /NWHost.dll fetch minted for it):
+	// {"hosts": [listed_host_json...]}, oldest first, or 401.
+	CROW_ROUTE(app, "/api/me/hosts")([this](const crow::request &req) {
+		auto access = impl_->access.require_user(req);
+		if (access.refusal) return std::move(*access.refusal);
+		std::vector<crow::json::wvalue> hosts;
+		try {
+			auto db_conn = db_pool_.acquire();
+			for (const auto &h : hostdb::list_hosts_by_owner(*db_conn, access.user->id)) {
+				hosts.push_back(listed_host_json(h));
+			}
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[http] GET /api/me/hosts failed: %s\n", e.what());
+			return json_error(500, "db_error");
+		}
+		crow::json::wvalue out;
+		out["hosts"] = std::move(hosts);
+		crow::response res = json_reply(200, out);
+		res.set_header("Cache-Control", "no-store");
+		return res;
+	});
 
 	// POST /api/register — public self-signup. No admin token needed.
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
@@ -2062,6 +2180,8 @@ void HttpListener::register_legacy_host_join_routes(
 	// Mirrors onnet's onnw/controllers/nova_world/host.py.
 	//   First call (no NWJOINSESSIONTAG cookie OR ?tag= query):
 	//     - generate session + 48-char A-P host_key (24 random bytes nibble-encoded)
+	//     - record the key's hash with the account the request's retail login
+	//       names (retail_login_owner -> hostdb::record_host_key), if any
 	//     - store HostSession with default templates (jop_2_host2.htm etc.)
 	//     - render relay template with REFRESH_ENDPOINT="NWHost.dll" (bare; the
 	//       NWJOINSESSIONTAG cookie carries the tag — matches onnet/genuine)
@@ -2083,11 +2203,11 @@ void HttpListener::register_legacy_host_join_routes(
 		};
 
 		// Resolve tag — prefer ?tag= query, fall back to NWJOINSESSIONTAG cookie.
+		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		std::string tag;
 		if (req.url_params.get("tag")) {
 			tag = req.url_params.get("tag");
 		} else {
-			const auto cookies = parse_cookie_header(request_cookie_header(req));
 			auto it = cookies.find("NWJOINSESSIONTAG");
 			if (it != cookies.end()) tag = it->second;
 		}
@@ -2116,11 +2236,31 @@ void HttpListener::register_legacy_host_join_routes(
 			const std::string relay_tpl = field_or("relay", "jop_2_relay.htm");
 			s.pfid       = field_or("pfid",       "28");
 
+			// The listing's owner (service policy, unwitnessed in retail): the
+			// account this request's own retail login names gets the key, kept as
+			// its hash (host_keys), so the host that presents it on its NovaWorld
+			// session lists its server as that account's. With no such login
+			// nothing is recorded, and that host lists anonymously (or not at all
+			// under ONNET_REQUIRE_HOST_KEY). Either way the pages are the same bytes.
+			std::string owner_label = "none";
+			try {
+				auto db_conn = db_pool_.acquire();
+				const char *how = "";
+				if (const auto owner = retail_login_owner(cookies, *db_conn, how)) {
+					hostdb::record_host_key(*db_conn, s.host_key, *owner);
+					owner_label = std::to_string(*owner) + " (" + how + ")";
+				}
+			} catch (const std::exception &e) {
+				owner_label = "none (db error)";
+				std::fprintf(stderr, "[http] /NWHost.dll WARN host key record: %s\n", e.what());
+			}
+
 			const std::string new_tag    = s.session_tag;
+			const std::string key_head   = s.host_key.substr(0, 6);
 			sessions_.put_host(new_tag, std::move(s));
 
-			std::printf("[http] /NWHost.dll (first call) -> tag %s host_key=%.16s...\n",
-			            new_tag.c_str(), sessions_.get_host(new_tag).value().host_key.c_str());
+			std::printf("[http] /NWHost.dll (first call) -> tag %s host_key=%s... owner=%s\n",
+			            new_tag.c_str(), key_head.c_str(), owner_label.c_str());
 
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting NovaWorld...."},
@@ -2148,7 +2288,7 @@ void HttpListener::register_legacy_host_join_routes(
 			return res;
 		}
 
-		std::printf("[http] /NWHost.dll (second call) tag=%s -> %s with HOSTKEY=%.16s...\n",
+		std::printf("[http] /NWHost.dll (second call) tag=%s -> %s with HOSTKEY=%.6s...\n",
 		            tag.c_str(), session->success.c_str(), session->host_key.c_str());
 
 		TemplateVars vars{

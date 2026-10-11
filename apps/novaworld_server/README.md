@@ -125,6 +125,72 @@ line (control bytes escaped):
 | `POST /api/admin/hosts/<rid>/command` | `{"verb": "SetServerName", "target": "None", "args": ["New Name"]}` (`target` one of `None`, `ByIndex`, `ByIpAndPort`, `ByName`, `ByPCID`) | 202 queued (with the composed `cmd`); 400 when `server_command_text` refuses the line or an arg holds a control byte (below 0x20, or 0x7F, which a host would save into its `game.cfg` or relay in chat), with the reason; 404 unknown RID; 409 not hosting |
 | `POST /api/admin/hosts/<rid>/stop` | none | 202 queued (MsgCode 7, `NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT`): ends a stock host's running NovaWorld match for everyone and drops the host from NovaWorld (the browser row at once, its session reset with the match's exit); 404; 409 |
 
+## Listed servers and owners
+
+Every listed server can name the account that hosted it (`active_hosts.host_user_id`),
+through the HOSTKEY a stock client fetches from `/NWHost.dll` and copies into its `Host`
+var list's `HostKey`. Service policy throughout: how the retail service checked a
+HostKey is unwitnessed.
+
+- **The key.** `/NWHost.dll`'s first call mints the 48-letter A..P key (24 OS CSPRNG
+  bytes, a nibble each) and, when the request's own retail login names an account,
+  records the key for it in `host_keys` (migration `0009_host_keys.sql`), as its
+  SHA-256 only, the way `web_sessions` keeps its tokens. The account is the one the
+  request's `LOGINSESSIONTAG` cookie names while that retail login's
+  `active_user_sessions` row lives (a stock client sends its whole cookie jar on every
+  GET), else the one its `PERSISTENTEXPRESSLOGINDATA` pin names (the pin a
+  password-checked login made, `/NWJoin.dll`'s fallback too); it must be active. The
+  `NWHANDLE` cookie never counts here: the service sets it in the clear to the
+  account's handle, so any client can send any account's. With no such login nothing is
+  recorded. Either way the relay page, the HOSTKEY page and their cookies are the same
+  bytes a stock client parses. An account keeps its newest 20 keys (and any a listed
+  server holds).
+- **The claim.** Where the connection presents a `HostKey`, the service looks it up by
+  hash and claims it for the connection's RID (`hostdb::claim_host_key`); the row then
+  carries the account, and the connection's later updates and roster statements keep
+  it. A stock host's fresh `ClientHostRequest` carries no `HostKey` (its `Host` list is
+  rebuilt without one), so such a host is listed with no owner until the first
+  `ClientHostUpdate` that carries the key (the full `Host` list a stock host sends at
+  its mission's start; opennova-nw-lister and `opennova-serve` send theirs right after
+  the host result). A key backs one listed server at a time: another connection
+  presenting it while that listing lives links to no account. A dropped connection
+  parks its lobby state and RID (`kParkedLobbyTtlMs`, 240 s), and its re-host after the
+  NWU reconnect (`CurrentlyHosting=1`) re-sends its kept `Host` list, key included, so
+  it claims the same key under the same RID and keeps the owner; a key whose listing
+  is gone can be claimed again. A boot releases every claim with the previous run's
+  rows.
+- **Expiry.** A key lasts 24 h from its last use, its `ClientHostRequest` or the main
+  tick's sweep while a listed server holds it (counted at most once an hour); the sweep
+  deletes the rest. An admin password reset or a status other than `active` deletes the
+  account's keys (with its retail login's `active_user_sessions` row); a banned account's
+  key claims nothing; a deleted account takes its keys, and its listed servers stay
+  listed with no owner.
+- **Strict mode.** `ONNET_REQUIRE_HOST_KEY=1` lists no server whose `HostKey` claims no
+  account (empty, unknown, expired, revoked, or held by another listing). The code is
+  200, the retail table's `NWUSERVERMSGCODE_NEEDTOLOGIN`.
+  - A `ClientHostRequest` carrying such a key (a re-host after the NWU reconnect) is
+    refused with `ServerHostResult` `Success=0`, `MsgCode=200`. A stock client stores
+    the code and shows every code but its six (1001, 1004, 1005, 1008, 1009, 1011) as
+    NWEC58: "NovaWorld has denied your request to host for some unspecified reason.
+    Please check your host options and try again." A refused re-host ends that host's
+    match, as any failed re-host does.
+  - A request carrying no key (a stock host's fresh one) is answered as usual, since
+    the key has not come yet, but held out of the browser (no `active_hosts` row, no
+    roster) until an update presents a key. A key that claims an account lists it with
+    the owner; one that claims none ends the hosting with `ServerStopHosting`
+    `MsgCode=200` (a stock host latches `NWUSERVERMSGCODE_NEEDTOLOGIN`; in a match it
+    ends the match at the next exit check and returns to the menu).
+
+  Off (the default), such a host is listed with no owner, so `opennova-serve` without
+  `--credentials` and `opennova-nw-lister` without an account keep listing.
+
+| Route | Access | Replies |
+| --- | --- | --- |
+| `GET /api/me/hosts` | a website session (`require_user`) | `{"hosts": [...]}`, the caller's listed servers, oldest first: `rid`, `gsid`, `game`, `server_name`, `mission_name`, `game_type`, `players`, `max_players`, `host_ip`, `host_port` (the endpoint joiners are sent to), `peer_ip` (the address its session comes from), `created_at`, `updated_at` (UTC); 401 with no live session |
+| `GET /api/admin/hosts` | admin (the Bearer token or an admin session) | `{"count", "hosts": [...]}`, every listed server with the same fields plus `owner`, `{id, username}` or `null` |
+
+The public `/api/lobbies`, `/api/hosts` and the GSB name no owner.
+
 ## Configuration
 
 All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
@@ -139,7 +205,9 @@ and the GLSVSS leg `ONNET_GLSVSS_REQUEST`, `ONNET_GLSVSS_RIMS`,
 `ClientGLSVSSRequest` is answered with). The gate response carries only the
 nineteen keys the retail parser recognises. The host/join reflection override
 for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP`,
-`ONNET_CLIENT_REFLECT_{GATE,NOVAWORLD}_PORT`.
+`ONNET_CLIENT_REFLECT_{GATE,NOVAWORLD}_PORT`. The listing policy:
+`ONNET_REQUIRE_HOST_KEY=1` lists no host whose HostKey names no account (default off:
+listed with no owner; "Listed servers and owners" above).
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
@@ -177,7 +245,9 @@ shares only the login brake's per-username cap and known addresses below.
 - **Revocation.** A deleted player takes its sessions and its known login addresses.
   An admin password reset or a status other than `active` (`PUT
   /api/admin/users/<id>`) deletes the account's sessions and known addresses in the
-  same transaction, and drops the retail login's `PERSISTENTEXPRESSLOGINDATA` pins to
+  same transaction, with its retail login's `active_user_sessions` row and its hosting
+  keys ("Listed servers and owners"), and drops the retail login's
+  `PERSISTENTEXPRESSLOGINDATA` pins to
   the account (which would resume a retail login with no password), so a reset locks
   out whoever held the old one and a lifted ban revives nothing. A session whose
   account went inactive any other way is refused and deleted when next used. An empty
@@ -283,4 +353,13 @@ the store and the roles on a migrated in-memory database) and `rate_limiter`
 ([`tests/novaworld/rate_limiter_test.cpp`](../../tests/novaworld/rate_limiter_test.cpp),
 the buckets on a hand-stepped clock and the trusted-proxy client address); the
 route harness drives the cookie, CSRF, rate-limit and admin-credential paths over
-the wire.
+the wire. The listing's owner: `host_key`
+([`tests/novaworld/host_key_test.cpp`](../../tests/novaworld/host_key_test.cpp), every
+build) drives the key store and the lobby session's links and strict refusal on a
+migrated in-memory database; the route harness pins `/NWHost.dll`'s recording (and its
+unchanged bytes), `GET /api/me/hosts` and `GET /api/admin/hosts`; and
+`nw_host_ownership_e2e`
+([`tests/novaworld/nw_host_ownership_e2e_test.cpp`](../../tests/novaworld/nw_host_ownership_e2e_test.cpp),
+`BUILD_NOVAWORLD_HTTP` only) runs two in-process services, one strict, against
+opennova-nw-lister's `Lister` with and without an account and hand-driven host
+sessions (the NWU reconnect, a second connection presenting a listed key).

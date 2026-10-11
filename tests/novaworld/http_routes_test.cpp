@@ -53,6 +53,7 @@
 #include <exception>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -826,6 +827,7 @@ int test_admin_routes_table(Harness &h) {
 		{"GET", "/api/admin/server-status", ""},
 		{"PUT", "/api/admin/server-status", "{\"maintenance_enabled\":false,\"message\":\"x\"}"},
 		{"POST", "/api/admin/hosts", "{\"rid\":4242}"},
+		{"GET", "/api/admin/hosts", ""},
 		{"GET", "/api/admin/connections", ""},
 		{"GET", "/api/admin/users", ""},
 		{"POST", "/api/admin/users", "{\"username\":\"never\",\"password\":\"p\",\"pcid\":\"0badbad0\","
@@ -1403,6 +1405,214 @@ int test_nwhost_first_call_mints_hostkey(Harness &h) {
 	return 0;
 }
 
+// A stock client's two /NWHost.dll calls: the page link's first call (its jar
+// in `cookies`), then the relay page's bare refresh with the NWJOINSESSIONTAG
+// it set. `key` is the HOSTKEY the session store minted for the tag.
+struct HostFetch {
+	net::HttpReply first;
+	net::HttpReply second;
+	std::string key;
+};
+
+HostFetch fetch_nwhost(Harness &h, const std::string &cookies) {
+	HostFetch f;
+	std::vector<std::string> headers;
+	if (!cookies.empty()) headers.push_back("Cookie: " + cookies);
+	f.first = h.send("GET", "/NWHost.dll?success=jop_2_host2.htm&pfid=28", headers);
+	const std::string tag = set_cookie_value(f.first, "NWJOINSESSIONTAG");
+	if (const auto session = h.sessions.get_host(tag)) f.key = session->host_key;
+	const std::string jar = (cookies.empty() ? "" : cookies + "; ") + "NWJOINSESSIONTAG=" + tag;
+	f.second = h.send("GET", "/NWHost.dll", {"Cookie: " + jar});
+	return f;
+}
+
+// The account host_keys records for `key` (by its hash), nullopt when none.
+std::optional<int64_t> key_owner(Harness &h, const std::string &key) {
+	const auto rows = h.pool.acquire()->query("SELECT user_id FROM host_keys WHERE key_hash = ?;",
+	                                          {opennova::db::BindValue(opennova::hostdb::host_key_hash(key))});
+	if (rows.empty()) return std::nullopt;
+	return rows.front().as_int(0);
+}
+
+// The cookie names a reply sets, in order.
+std::vector<std::string> set_cookie_names(const net::HttpReply &reply) {
+	std::vector<std::string> names;
+	for (const std::string &value : header_values(reply, "Set-Cookie")) {
+		names.push_back(value.substr(0, value.find('=')));
+	}
+	return names;
+}
+
+// /NWHost.dll records the HOSTKEY it mints, as its SHA-256, for the account the
+// request's own retail login names: the LOGINSESSIONTAG of a live retail login,
+// or the PERSISTENTEXPRESSLOGINDATA pin. No login (or only an NWHANDLE, which any
+// client can set to any account's, or a dead tag) records nothing. Either way the
+// relay page and the HOSTKEY page are the same bytes a stock client parses. A
+// password reset ends the retail login's row and the account's keys.
+int test_nwhost_records_owner(Harness &h) {
+	const int64_t id = make_account(h, "host_owner", "pw-owner");
+	TEST_EXPECT(id > 0);
+	const auto logged_in = nwlogin(h, "host_owner", "pw-owner",
+	                               {"Cookie: PERSISTENTEXPRESSLOGINDATA=pin-host-owner"});
+	TEST_EXPECT(nwlogin_succeeded(logged_in));
+	const std::string login_tag = set_cookie_value(logged_in, "LOGINSESSIONTAG");
+
+	// The jar a stock client carries after its login.
+	const auto owned = fetch_nwhost(h, "LOGINSESSIONTAG=" + login_tag + "; NWHANDLE=host_owner");
+	TEST_EXPECT(opennova::hostdb::is_host_key(owned.key));
+	TEST_EXPECT(key_owner(h, owned.key) == id);
+	TEST_EXPECT(h.pool.acquire()
+	                    ->query("SELECT 1 FROM host_keys WHERE key_hash = ?;",
+	                            {opennova::db::BindValue(owned.key)})
+	                    .empty());
+	const auto pinned = fetch_nwhost(h, "PERSISTENTEXPRESSLOGINDATA=pin-host-owner");
+	TEST_EXPECT(key_owner(h, pinned.key) == id);
+
+	const auto anonymous = fetch_nwhost(h, "");
+	TEST_EXPECT(opennova::hostdb::is_host_key(anonymous.key) && !key_owner(h, anonymous.key));
+	const auto forged = fetch_nwhost(h, "NWHANDLE=host_owner; CHAR=host_owner");
+	TEST_EXPECT(!forged.key.empty() && !key_owner(h, forged.key));
+	const auto dead = fetch_nwhost(h, "LOGINSESSIONTAG=NWServer:NWLogin.dll:SESSIONTAG:1:0badf00d; "
+	                                  "PERSISTENTEXPRESSLOGINDATA=pin-nobody");
+	TEST_EXPECT(!dead.key.empty() && !key_owner(h, dead.key));
+
+	// The same bytes whatever the login: the relay page whole, the HOSTKEY page
+	// as the template with the key, the same cookies in the same order.
+	const std::string host2 = test_io::read_file_text(
+			(std::filesystem::path(OPENNOVA_SOURCE_DIR) / "apps" / "novaworld_server" / "templates" /
+			 "jop_2_host2.htm")
+					.string());
+	auto with_key = [&host2](const std::string &key) {
+		std::string page = host2;
+		page.replace(page.find("{{HOSTKEY}}"), std::string("{{HOSTKEY}}").size(), key);
+		return page;
+	};
+	for (const HostFetch *f : {&owned, &pinned, &anonymous, &forged}) {
+		TEST_EXPECT(f->first.transport_ok && f->first.code == 200);
+		TEST_EXPECT(f->second.transport_ok && f->second.code == 200);
+		TEST_EXPECT(body_text(f->first) == body_text(anonymous.first));
+		TEST_EXPECT(body_text(f->second) == with_key(f->key));
+		TEST_EXPECT(set_cookie_names(f->first) == set_cookie_names(anonymous.first));
+		TEST_EXPECT(set_cookie_names(f->second) == set_cookie_names(anonymous.second));
+	}
+	TEST_EXPECT(body_text(anonymous.first).find("NWHost.dll") != std::string::npos);
+
+	// A password reset ends the retail login's row, the pin and the keys.
+	const auto reset = h.send("PUT", "/api/admin/users/" + std::to_string(id), {kJson, kBearer},
+	                          "{\"password\":\"pw-owner-2\"}");
+	TEST_EXPECT(reset.transport_ok && reset.code == 200);
+	TEST_EXPECT(!key_owner(h, owned.key) && !key_owner(h, pinned.key));
+	const auto after = fetch_nwhost(h, "LOGINSESSIONTAG=" + login_tag +
+	                                       "; PERSISTENTEXPRESSLOGINDATA=pin-host-owner");
+	TEST_EXPECT(!after.key.empty() && !key_owner(h, after.key));
+	return 0;
+}
+
+// GET /api/me/hosts lists the logged-in account's listed servers, and no
+// other's; with no live session it is 401. GET /api/admin/hosts lists every
+// listed server with its owner (null for an anonymous one), for an admin. The
+// public /api/lobbies and /api/hosts name no owner.
+int test_listed_server_owners(Harness &h) {
+	const int64_t me = make_account(h, "hosts_me", "pw-hosts-me");
+	const int64_t other = make_account(h, "hosts_other", "pw-hosts-other");
+	TEST_EXPECT(me > 0 && other > 0);
+
+	auto reply = h.send("GET", "/api/me/hosts");
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = h.send("GET", "/api/me/hosts", {with_session(std::string(64, 'a'))});
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	const std::string token = login_token(h, "10.22.0.1", "hosts_me", "pw-hosts-me");
+	TEST_EXPECT(!token.empty());
+	reply = h.send("GET", "/api/me/hosts", {with_session(token)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["hosts"].size() == 0);
+
+	struct Listed {
+		uint32_t rid;
+		const char *name;
+		std::optional<int64_t> owner;
+	};
+	const Listed listed[] = {{2001, "Mine", me}, {2002, "Theirs", other}, {2003, "Nobody's", {}}};
+	for (const Listed &l : listed) {
+		opennova::hostdb::HostRow row;
+		row.rid = l.rid;
+		row.gsid = "GSID-" + std::to_string(l.rid);
+		row.game = "jop_2_consumer";
+		row.server_name = l.name;
+		row.mission_name = "ASH_G11A";
+		row.game_type = "TDM";
+		row.host_ip = "10.0.0.9";
+		row.host_port = 32768;
+		row.player_count = 3;
+		row.max_players = 24;
+		row.peer_ip = "10.0.0.9";
+		row.host_user_id = l.owner;
+		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+	}
+
+	reply = h.send("GET", "/api/me/hosts", {with_session(token)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["hosts"].size() == 1);
+	const auto &mine = json["hosts"][0];
+	TEST_EXPECT(mine["rid"].i() == 2001);
+	TEST_EXPECT(str(mine["server_name"]) == "Mine");
+	TEST_EXPECT(str(mine["mission_name"]) == "ASH_G11A");
+	TEST_EXPECT(str(mine["game"]) == "jop_2_consumer");
+	TEST_EXPECT(mine["players"].i() == 3 && mine["max_players"].i() == 24);
+	TEST_EXPECT(str(mine["host_ip"]) == "10.0.0.9" && mine["host_port"].i() == 32768);
+	TEST_EXPECT(str(mine["peer_ip"]) == "10.0.0.9");
+	TEST_EXPECT(str(mine["created_at"]).size() == 19 && str(mine["updated_at"]).size() == 19);
+	TEST_EXPECT(!mine.has("owner"));
+
+	// The admin view: the Bearer token or an admin session; a player is refused.
+	reply = h.send("GET", "/api/admin/hosts");
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = h.send("GET", "/api/admin/hosts", {with_session(token)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 403);
+	reply = h.send("GET", "/api/admin/hosts", {kBearer});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["count"].i() == static_cast<int64_t>(json["hosts"].size()));
+	int seen = 0;
+	for (const auto &e : json["hosts"]) {
+		const int64_t rid = e["rid"].i();
+		if (rid == 2001 || rid == 2002) {
+			++seen;
+			TEST_EXPECT(e["owner"].t() == crow::json::type::Object);
+			TEST_EXPECT(e["owner"]["id"].i() == (rid == 2001 ? me : other));
+			TEST_EXPECT(str(e["owner"]["username"]) == (rid == 2001 ? "hosts_me" : "hosts_other"));
+		} else {
+			TEST_EXPECT(e["owner"].t() == crow::json::type::Null);
+			if (rid == 2003) ++seen;
+		}
+	}
+	TEST_EXPECT(seen == 3);
+
+	// The public lists name no owner.
+	for (const char *path : {"/api/lobbies", "/api/hosts"}) {
+		reply = h.send("GET", path);
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		const std::string text = body_text(reply);
+		TEST_EXPECT(text.find("Mine") != std::string::npos);
+		TEST_EXPECT(text.find("hosts_me") == std::string::npos);
+		TEST_EXPECT(text.find("hosts_other") == std::string::npos);
+		TEST_EXPECT(text.find("owner") == std::string::npos);
+		TEST_EXPECT(text.find("host_user_id") == std::string::npos);
+	}
+
+	// A deleted owner's listing stays listed, with no owner.
+	const auto deleted = h.send("DELETE", "/api/admin/users/" + std::to_string(other), {kBearer});
+	TEST_EXPECT(deleted.transport_ok && deleted.code == 204);
+	const auto orphan = opennova::hostdb::find_host_by_rid(*h.pool.acquire(), 2002);
+	TEST_EXPECT(orphan && !orphan->host_user_id);
+
+	for (const Listed &l : listed) opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), l.rid);
+	return 0;
+}
+
 // GET /nwprepare.dll renders the page it names with HOST_URL and GSB_SERVER
 // on the public host and the port Crow serves: the OS's pick here, where the
 // config's port is 0.
@@ -1658,6 +1868,8 @@ int run(Harness &h) {
 		{"retail_pin_revocation", test_retail_pin_revocation},
 		{"untrusted_proxy_header_ignored", test_untrusted_proxy_header_ignored},
 		{"nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey},
+		{"nwhost_records_owner", test_nwhost_records_owner},
+		{"listed_server_owners", test_listed_server_owners},
 		{"menu_urls_name_bound_port", test_menu_urls_name_bound_port},
 		{"unknown_path_404", test_unknown_path_404},
 		{"admin_host_push", test_admin_host_push},
@@ -1710,10 +1922,12 @@ int main() {
 		const std::string urls_page = "{{HOST_URL}}|{{GSB_SERVER}}";
 		TEST_EXPECT(test_io::write_file((config.templates_dir / kUrlsTemplate).string(),
 		                                std::vector<uint8_t>(urls_page.begin(), urls_page.end())));
-		// The retail message page POST /NWLogin.dll's failures render.
-		std::filesystem::copy_file(
-				source_dir / "apps" / "novaworld_server" / "templates" / "jop_2_msg.htm",
-				config.templates_dir / "jop_2_msg.htm");
+		// The retail message page POST /NWLogin.dll's failures render, and the
+		// relay and HOSTKEY pages /NWHost.dll renders.
+		for (const char *page : {"jop_2_msg.htm", "jop_2_relay.htm", "jop_2_host2.htm"}) {
+			std::filesystem::copy_file(source_dir / "apps" / "novaworld_server" / "templates" / page,
+			                           config.templates_dir / page);
+		}
 
 		// The harness talks to the listener from 127.0.0.1 and names each
 		// case's client address in X-Real-IP, the way nginx forwards it.

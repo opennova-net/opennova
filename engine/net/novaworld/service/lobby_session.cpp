@@ -1,5 +1,6 @@
 #include <net/novaworld/lobby_session.h>
 
+#include <net/napi/session.h>
 #include <net/novaworld/host_repository.h>
 
 #include <algorithm>
@@ -323,9 +324,33 @@ uint32_t LobbySession::mint_rid() {
 	return 0x0A000000u | suffix;
 }
 
+std::optional<int64_t> LobbySession::claim_host_owner(const std::string &host_key, uint32_t rid) {
+	if (db_ == nullptr) return std::nullopt;
+	try {
+		return hostdb::claim_host_key(*db_, host_key, rid);
+	} catch (const std::exception &e) {
+		opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[lobby] WARN host key claim rid=%u: %s", rid, e.what());
+		return std::nullopt;
+	}
+}
+
+bool LobbySession::present_host_key(LobbyState &state, const std::string &host_key) {
+	state.owner_key = host_key;
+	state.host_user_id = claim_host_owner(host_key, state.rid);
+	const bool admitted = state.host_user_id.has_value() || !require_host_key_;
+	opennova::io::logf(opennova::io::LogLevel::kInfo,
+		"[lobby] host key rid=%u -> %s%s", state.rid,
+	            state.host_user_id ? ("owner " + std::to_string(*state.host_user_id)).c_str()
+	                               : "no account",
+	            admitted ? "" : ", refused (ONNET_REQUIRE_HOST_KEY)");
+	return admitted;
+}
+
 void LobbySession::end_hosting(LobbyState &state, const char *reason) {
 	const uint32_t rid = state.rid;
 	state.hosting = false;
+	state.awaiting_host_key = false;
 	state.player_count = 0;
 	state.roster.clear();
 	if (db_ && rid != 0) {
@@ -411,7 +436,7 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		"[lobby] %s rid=%u slot=%d players=%d/%d",
 		            name == "ClientHostPlayerAdded" ? "player_added" : "player_removed",
 		            state.rid, slot.slot, state.player_count, state.max_players);
-		if (db_ && state.rid != 0) {
+		if (db_ && state.rid != 0 && !state.awaiting_host_key) {
 			persist_host(*db_, HostRowWrite::Update,
 			             hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0), state,
 			             "active_hosts roster update");
@@ -470,7 +495,9 @@ LobbyDispatchResult LobbySession::handle_client_request_verify_result(
 // jar plus CountryName/Language/TimeZoneBias), HostSetup, Host and
 // PlayerList [orig: CNapiGameSession_SendHostRequest @0x4d37b4..0x4d37f6] —
 // plus CurrentlyHosting (0 on a fresh host, 1 on a re-host) and VarCheck.
-// Neither Cookie nor CurrentlyHosting gates admission here. The reply is
+// Neither Cookie nor CurrentlyHosting gates admission here; a HostKey in the
+// Host list names the listing's owner, and gates admission only under
+// ONNET_REQUIRE_HOST_KEY (set_require_host_key). The reply is
 // ServerHostResult with Rid and the HostCommands ServerVarList (GSID,
 // HostRequiresJoinTicket), which the host stores
 // [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d59d0].
@@ -491,8 +518,39 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	std::string lobby_name = var_value(host_setup, "LobbyName");
 	if (lobby_name.empty()) lobby_name = var_value(host_info, "LobbyName");
 
+	// The listing's owner (service policy; the retail service's HostKey check is
+	// unwitnessed), decided afresh by each request. A stock host's fresh request
+	// carries no HostKey: BuildHostVarLists rebuilds its Host list without one
+	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50, the +532 run], and
+	// Lobby_UpdateServerInfo adds it [orig: @0x4fe8c0] for a later
+	// ClientHostUpdate (present_host_key there). A re-host after the NWU
+	// reconnect re-sends its kept Host list, key included, under the RID the
+	// parked lobby state kept, so its claim holds.
+	if (state.rid == 0) state.rid = rid_gen_ ? rid_gen_() : mint_rid();
+	state.owner_key.reset();
+	state.host_user_id.reset();
+	state.awaiting_host_key = false;
+	if (var_has(host_info, "HostKey")) {
+		if (!present_host_key(state, var_value(host_info, "HostKey"))) {
+			// A stock host takes Success=0 back to state 4 (a hosting word to 1, so
+			// a refused re-host's match exits) and shows the MsgCode's NWEC tag
+			// [orig: HandleHostVerifyResponse @0x4d5ad9..0x4d5b27; ConnectOrHost
+			//  @0x4d5207..0x4d52f1]; the connection leaves the browser with it.
+			if (state.hosting) end_hosting(state, "host-key-refused");
+			NapiMessage refusal;
+			refusal.name = "ServerHostResult";
+			set_field(refusal, "Success",   "0");
+			set_field(refusal, "MsgCode",   std::to_string(SERVER_MSG_CODE_NEED_TO_LOGIN));
+			set_field(refusal, "MsgParam1", "0");
+			set_field(refusal, "MsgParam2", "0");
+			return {{std::move(refusal)}, "ClientHostRequest:unknown-host-key"};
+		}
+	} else {
+		// ONNET_REQUIRE_HOST_KEY lists no host before a HostKey names its owner.
+		state.awaiting_host_key = require_host_key_;
+	}
+
 	if (state.gsid.empty()) state.gsid = gsid_gen_(app_id);
-	if (state.rid == 0)     state.rid  = rid_gen_ ? rid_gen_() : mint_rid();
 	state.game = lobby_name;
 	state.app_id = app_id;
 	state.hosting = true;
@@ -549,14 +607,19 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	reply.children.push_back(std::move(host_commands));
 
 	opennova::io::logf(opennova::io::LogLevel::kInfo,
-		"[lobby] started rid=%u gsid=%s server_name='%s' host=%s:%d game=%s app_id=%s pcid_key=%zuB roster=%zu",
+		"[lobby] started rid=%u gsid=%s server_name='%s' host=%s:%d game=%s app_id=%s pcid_key=%zuB roster=%zu owner=%s",
 	            state.rid, state.gsid.c_str(), state.server_name.c_str(),
 	            state.host_ip.c_str(), state.host_port, state.game.c_str(),
-	            state.app_id.c_str(), state.pcid_key.size(), state.roster.size());
+	            state.app_id.c_str(), state.pcid_key.size(), state.roster.size(),
+	            state.host_user_id            ? std::to_string(*state.host_user_id).c_str()
+	            : state.awaiting_host_key     ? "pending (unlisted until its HostKey)"
+	            : state.owner_key.has_value() ? "none"
+	                                          : "pending");
 
 	// Persist so /jop_2.gsb + /api/hosts query SQL rather than the in-memory
-	// snapshot. db_ is null in tests.
-	if (db_) {
+	// snapshot (a host awaiting its HostKey stays out of them). db_ is null in
+	// tests.
+	if (db_ && !state.awaiting_host_key) {
 		persist_host(*db_, HostRowWrite::Upsert,
 		             hostdb::row_from_lobby(state, remote_ip, remote_port), state,
 		             "active_hosts upsert");
@@ -577,6 +640,25 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	const VarList &host_vars  = state.last_host_update["Host"];
 	const VarList &host_setup = state.last_host_update["HostSetup"];
 	refresh_host_keys(state, host_vars);
+	// The update that carries a HostKey the connection has not presented yet (a
+	// stock host's first update after its mission starts, Lobby_UpdateServerInfo
+	// [orig: @0x4fe8c0]) decides the owner, as a request's key does; one that
+	// names no account under ONNET_REQUIRE_HOST_KEY ends the hosting with
+	// ServerStopHosting, the stock host's punt from hosting (no ServerHostResult
+	// answers an update) [orig: CNapiGameSession_HandleServerMessage @0x4d1c50].
+	bool first_listing = false;
+	if (state.hosting && update.count("Host") && var_has(update["Host"], "HostKey")) {
+		const std::string key = var_value(update["Host"], "HostKey");
+		if (!state.owner_key || *state.owner_key != key) {
+			if (!present_host_key(state, key)) {
+				end_hosting(state, "host-key-refused");
+				return {{make_server_stop_hosting(SERVER_MSG_CODE_NEED_TO_LOGIN)},
+				        "ClientHostUpdate:unknown-host-key"};
+			}
+			first_listing = state.awaiting_host_key;
+			state.awaiting_host_key = false;
+		}
+	}
 	{
 		std::string update_keys;
 		for (const auto &e : host_vars) { update_keys += e.name; update_keys += ' '; }
@@ -606,11 +688,13 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 
 	// Keep the DB row in sync. No peer_port in the update handler signature;
 	// pass 0 — the row already exists from the initial upsert with the right
-	// peer addr, and update_host() doesn't rely on peer_port for the WHERE.
-	if (db_) {
-		persist_host(*db_, HostRowWrite::Update,
+	// peer addr, and update_host() doesn't rely on peer_port for the WHERE. A
+	// host held out of the browser for its HostKey is listed by the update whose
+	// key names its owner.
+	if (db_ && !state.awaiting_host_key) {
+		persist_host(*db_, first_listing ? HostRowWrite::Upsert : HostRowWrite::Update,
 		             hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0), state,
-		             "active_hosts update");
+		             first_listing ? "active_hosts upsert" : "active_hosts update");
 	}
 
 	return {{}, "ClientHostUpdate"};
