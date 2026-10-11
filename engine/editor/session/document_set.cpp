@@ -1029,7 +1029,11 @@ void DocumentSet::create_string(const EditorRequest &request, const Document &do
 	set.address = request.address;
 	set.field = request.field;
 	set.value = number;
-	apply_edits(*edited, {set}, false);
+	if (!apply_edits(*edited, {set}, false)) return;
+	// What came of it, in its own words: the field's set words read the project's names before they have read the
+	// new key.
+	view_.activity.status = "Made " + made.target + " in " + basename_of(table_path) + "'s " + section + ": '" + text + "'.";
+	core_.touch(ViewConcern::Output);
 }
 
 void DocumentSet::revert_to_saved(const EditorRequest &request) {

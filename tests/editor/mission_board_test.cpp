@@ -294,6 +294,76 @@ int test_text_and_selection() {
 	return 0;
 }
 
+// S24 A8, the acceptance over the wire, as an editor MCP client sends it (handle_json, query): the viewport command
+// new_event over area X (the player's recipe), mission_logic add of Show text to the new event (kept selected),
+// set_string_text with create, edit_record of the wait, then the board's card reading it.
+int test_wire_acceptance() {
+	editor_test::TempProjectDir dir("opennova_mission_board_wire");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
+	const auto *m = dynamic_cast<const MissionDocument *>(session.document_for("missions/logic.bms"));
+	TEST_EXPECT(m);
+	if (!m) return 1;
+	const auto send = [&](const std::string &text) {
+		JsonValue json;
+		std::string error;
+		opennova::io::json_parse(text, json, error);
+		const JsonValue answer = session.handle_json(json);
+		session.run_operations();
+		if (!answer.get_bool("ok", false)) std::printf("  refused: %s\n%s\n", text.c_str(), opennova::io::json_write(answer).c_str());
+		return answer.get_bool("ok", false);
+	};
+	const auto ask = [&](const std::string &args) {
+		JsonValue parsed;
+		std::string error;
+		opennova::io::json_parse(args, parsed, error);
+		JsonValue answer = session.query("mission_logic", parsed, error);
+		if (!error.empty()) std::printf("  refused: %s\n", error.c_str());
+		return answer;
+	};
+	const Node *area = m->rows_of(MissionKind::Area)[0];
+	// 1. New event over area X.
+	TEST_EXPECT(send(R"({"kind": "edit_in_viewport", "path": "missions/logic.bms", "command": {"kind": "mission", "name": "new_event", "ids": [)" +
+	                 std::to_string(area->id) + R"(], "value": "player_in_area"}})"));
+	const std::vector<const Node *> events = m->rows_of(MissionKind::Event);
+	TEST_EXPECT(events.size() == 3 && session.view().workspace.document(m->path()).logic);
+	if (events.size() != 3) return 1;
+	const NodeId made = events.back()->id;
+	// 2. Show text added to it, the selection kept.
+	const JsonValue planned = ask(R"({"path": "missions/logic.bms", "op": "add", "id": )" + std::to_string(made) +
+	                              R"(, "list": "action", "type": 6})");
+	const JsonValue *edits = planned.get("edits");
+	TEST_EXPECT(edits && !edits->array.empty());
+	if (!edits) return 1;
+	TEST_EXPECT(send(R"({"kind": "edit_record", "path": "missions/logic.bms", "keep_selection": true, "edits": )" +
+	                 opennova::io::json_write(*edits) + "}"));
+	const std::vector<Document::Collection> lists = m->collections_of({made, node_kind(MissionKind::Event), 0});
+	TEST_EXPECT(lists.size() == 2 && lists[1].ids.size() == 1);
+	if (lists.size() != 2 || lists[1].ids.size() != 1) return 1;
+	// 3. Its text made.
+	TEST_EXPECT(send(R"({"kind": "set_string_text", "path": "missions/logic.bms", "address": {"row": )" + std::to_string(made) +
+	                 R"(, "kind": )" + std::to_string(node_kind(MissionKind::Action)) + R"(, "child": )" + std::to_string(lists[1].ids[0]) +
+	                 R"(}, "field": "param1", "values": {"text": "Get to the bridge"}, "create": true})"));
+	// 4. The wait: 5 s, 5 steps.
+	TEST_EXPECT(send(R"({"kind": "edit_record", "path": "missions/logic.bms", "keep_selection": true, "edits": [{"id": )" +
+	                 std::to_string(made) + R"(, "op": "set", "field": "delay", "value": 5}]})"));
+	// 5. The board's card reads it, once the project's names have read the table.
+	editor_test::handle_to_end(session, request::save_all());
+	const JsonValue board = ask(R"({"path": "missions/logic.bms", "op": "board", "filter": ""})");
+	std::string sentence;
+	if (const JsonValue *cards = board.get("cards"))
+		for (const JsonValue &card : cards->array)
+			if (card.get_number("event", 0) == double(made)) sentence = card.get_string("sentence", "");
+	TEST_EXPECT(same(sentence, "When the player is in Zone 20, then, after 5.1 s, show text 1: 'Get to the bridge'."));
+	return 0;
+}
+
 // The op table (S24 S0): the query's op param takes exactly the table's tokens, each answered by its own row.
 int test_op_table() {
 	const EditorQueryRow &row = editor_query_row(EditorQueryKind::MissionLogic);
@@ -408,6 +478,7 @@ int main(int argc, char **argv) {
 	if (test_variables() != 0) return 1;
 	if (test_board_op() != 0) return 1;
 	if (test_text_and_selection() != 0) return 1;
+	if (test_wire_acceptance() != 0) return 1;
 	if (test_op_table() != 0) return 1;
 	return test_retail();
 }
