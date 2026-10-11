@@ -6,7 +6,10 @@
 // runtime-gap census (the script commands the port has not witnessed yet).
 // The retail engine's script-state debug page showed the first compile error
 // [orig: Debug_DrawScriptState @0x4F64C0, the read @0x4f652a]; everything
-// else here is port-side tooling.
+// else here is port-side tooling. mission_logic_report is the BMS half alone
+// (the events with their trigger truth, the mission bank) for the readers
+// that poll it often: game_debug's mission_logic_snapshot row and, through
+// it, the editor's live board.
 #pragma once
 
 #include <runtime/world/mission_diagnostics.h>
@@ -42,6 +45,22 @@ struct ScriptBmsEventRow {
 	uint16_t repeat_reload = 0;
 	uint16_t activate_countdown = 0;
 	uint16_t activate_reload = 0;
+	// The live-logic trace (mission::EventTrace): each trigger's last term
+	// as the chain ran it (-1 not evaluated by the last run), the chain's
+	// last result (-1 never ran), the logic tick of that run (-1 never) and
+	// a fire_event request still waiting for the chain's next run.
+	std::vector<int8_t> trigger_truth;
+	int8_t chain = -1;
+	int64_t last_checked_tick = -1;
+	bool fire_pending = false;
+};
+
+struct MissionLogicReport {
+	std::string mission; // the mission's file basename
+	uint32_t logic_tick = 0;
+	std::vector<ScriptBmsEventRow> events;
+	// V0..V511 (the BMS misvar index addresses the same bank), raw 32-bit.
+	std::array<int32_t, 512> mission_vars{};
 };
 
 struct ScriptDebugReport {
@@ -74,5 +93,6 @@ struct ScriptDebugReport {
 };
 
 ScriptDebugReport script_debug_report(const MissionKernel &kernel);
+MissionLogicReport mission_logic_report(const MissionKernel &kernel);
 
 }  // namespace opennova::mission

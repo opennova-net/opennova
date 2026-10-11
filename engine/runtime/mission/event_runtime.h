@@ -47,6 +47,28 @@ struct ScriptedEvent {
     uint8_t active = 0;
 };
 
+// The live-logic trace of one event: port-side tooling (ADR 0039; the F3
+// Script window, game_debug's mission_logic_snapshot and the editor's live
+// board read it), with no counterpart in the original's 24-byte record and
+// no behaviour of its own. The chain RECORDS each term as it runs it, never
+// re-evaluates one: the input-bit triggers toggle the mirror when run
+// [orig: EventTrigger_EvaluateCondition @0x453bab].
+struct EventTrace {
+    // Per trigger of the slice: -1 the last run did not evaluate it (or the
+    // chain never ran), else the term the chain folded, after the trigger's
+    // own negation bit [orig: EventTrigger_EvaluateChain @0x454084/@0x4540ac],
+    // a nonzero raw result (Berserk's 0x200) read as 1.
+    std::vector<int8_t> trigger_truth;
+    // The chain's last result (nonzero read as 1) and the logic tick it ran
+    // on; -1 = the chain has not run since the load.
+    int8_t chain = -1;
+    int64_t last_checked_tick = -1;
+    // A requested fire (force_fire): the chain's next run reads true, so the
+    // activation delay, the latch and the repeat cooldown then run as the
+    // event's own.
+    bool fire_pending = false;
+};
+
 class BmsEventSystem : public opennova::world::ISystem, public opennova::world::IScriptEventQuery {
 public:
     const char *name() const override { return "bms_events"; }
@@ -104,6 +126,16 @@ public:
 
     const std::vector<ScriptedEvent> &events() const { return events_; }
 
+    // The live-logic trace, one per event (index-aligned with events()).
+    const std::vector<EventTrace> &traces() const { return traces_; }
+
+    // Debug control (game_debug fire_event): the event's chain reads true at
+    // its next run. The chain runs only while the event is idle (no delay or
+    // cooldown counting, the latch clear), so a latched fire-once event keeps
+    // the request until a ResetEvent clears its latch. Every predicate still
+    // runs (and records) as on any pass. False for an index outside the list.
+    bool force_fire(size_t index);
+
     // Test seams over the private evaluator/dispatcher and the raw 24-byte
     // record words (public API for the ctest suite; no behavior of their own).
     int32_t evaluate_trigger_for_test(opennova::world::World &w, const bms::Trigger &t) {
@@ -122,6 +154,7 @@ public:
 
 private:
     std::vector<ScriptedEvent> events_;
+    std::vector<EventTrace> traces_;
     int normal_gate_ = 0;    // every-16th-tick gate [orig: dword_C8D808 in Server_TickUpdate]
     int quarter_cursor_ = 0; // round-robin quarter index 0..3 [orig: dword_AE06FC]
     int32_t awol_64tick_count_ = 0; // [orig: dword_A89160] (D-EVT-2)
@@ -141,6 +174,8 @@ private:
     // the zone box: p1 = x_min, p3 = y_min, p4 = x_max, reserved1 = y_max, the
     // words the dispatch's bounds test and command arguments then read.
     void resolve_zone_refs(opennova::world::World &w);
+    // One cleared trace per event, its truth row sized to the trigger slice.
+    void reset_traces();
 
     void update_entry(opennova::world::World &w, ScriptedEvent &se);
     void fire(opennova::world::World &w, ScriptedEvent &se);

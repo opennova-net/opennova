@@ -318,6 +318,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_mission_variable", "index"), &Simulation::get_mission_variable);
 	ClassDB::bind_method(D_METHOD("has_event_fired", "index"), &Simulation::has_event_fired);
 	ClassDB::bind_method(D_METHOD("get_event_count"), &Simulation::get_event_count);
+	ClassDB::bind_method(D_METHOD("debug_fire_event", "event"), &Simulation::debug_fire_event);
 	ClassDB::bind_method(D_METHOD("get_logic_tick"), &Simulation::get_logic_tick);
 	ClassDB::bind_method(D_METHOD("get_panm_time_ms"),
 			&Simulation::get_panm_time_ms);

@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/mission/script_debug_report.h>
 
 #include "env/weather.h"
 #include "mission/mission_root.h"
@@ -14,6 +15,7 @@
 #include "player/player_weapon_effects.h"
 #include "simulation/simulation.h"
 #include "terrain/terrain.h"
+#include "util/string_convert.h"
 #include "world/game_world.h"
 
 #include <cmath>
@@ -115,6 +117,52 @@ PackedStringArray choices_of(std::initializer_list<const char *> p_choices) {
 	for (const char *choice : p_choices) {
 		out.push_back(choice);
 	}
+	return out;
+}
+
+// game_debug's mission_logic_snapshot wire record over the engine report
+// (mission::mission_logic_report): per event its latch, fired state,
+// countdowns with their reloads, each trigger's last truth (-1 not evaluated,
+// 0, 1), the chain's result and the tick it ran, a fire still pending; the
+// non-zero mission variables (an absent index reads 0). A joiner reports
+// authority false and no rows.
+Dictionary mission_logic_json(const opennova::mission::MissionLogicReport &p_report, bool p_authority) {
+	Dictionary out;
+	out["authority"] = p_authority;
+	out["mission"] = opennova::to_gd(p_report.mission);
+	out["tick"] = static_cast<int64_t>(p_report.logic_tick);
+	Array events;
+	for (const opennova::mission::ScriptBmsEventRow &row : p_report.events) {
+		Dictionary event;
+		event["index"] = row.index;
+		event["active"] = row.active;
+		event["fired"] = row.fired;
+		event["activate_countdown"] = row.activate_countdown;
+		event["activate_reload"] = row.activate_reload;
+		event["repeat_countdown"] = row.repeat_countdown;
+		event["repeat_reload"] = row.repeat_reload;
+		Array truth;
+		for (int8_t term : row.trigger_truth) {
+			truth.push_back(static_cast<int64_t>(term));
+		}
+		event["triggers"] = truth;
+		event["chain"] = static_cast<int64_t>(row.chain);
+		event["last_checked_tick"] = row.last_checked_tick;
+		event["fire_pending"] = row.fire_pending;
+		events.push_back(event);
+	}
+	out["events"] = events;
+	Array variables;
+	for (size_t i = 0; i < p_report.mission_vars.size(); ++i) {
+		if (p_report.mission_vars[i] == 0) {
+			continue;
+		}
+		Dictionary variable;
+		variable["index"] = static_cast<int64_t>(i);
+		variable["value"] = p_report.mission_vars[i];
+		variables.push_back(variable);
+	}
+	out["variables"] = variables;
 	return out;
 }
 
@@ -773,6 +821,28 @@ void DebugControlTable::register_runtime_rows() {
 					DebugArgSpec::integer("value")->between(kMissionVarValueMin, kMissionVarValueMax)));
 	authoritative(mission_variable);
 	bind_action(mission_variable, &DebugControlTable::sim, &Simulation::set_mission_variable);
+
+	// The BMS events' live logic (the editor's live board polls it during
+	// Play): a read, no authority needed, as the weather snapshot is.
+	Entry &logic_snapshot = action(control_id::kMissionLogicSnapshot, "Vars", "Mission logic snapshot",
+			"Read the BMS events' live logic: per event its latch, fired state, activation and repeat countdowns with their reloads, each trigger's last truth as the chain ran it (-1 not evaluated, 0, 1), the chain's result and the tick it ran; the non-zero mission variables; the logic tick and the mission.",
+			DebugControlRow::TARGET_SIM, DebugControlRow::OWNER_ENGINE);
+	logic_snapshot.invoke = [this](const Array &) -> Outcome {
+		Simulation *value = sim();
+		if (value == nullptr) {
+			return outcome_error(ERR_UNAVAILABLE);
+		}
+		opennova::mission::MissionLogicReport report;
+		const bool authority = value->native_mission_logic_report(report);
+		return outcome_result(mission_logic_json(report, authority));
+	};
+
+	Entry &fire_event = action(control_id::kFireEvent, "Vars", "Fire event",
+			"Make one BMS event's trigger chain read true at its next run, so its delay, latch and repeat then run as the event's own (a latched fire-once event waits until its latch clears).",
+			DebugControlRow::TARGET_SIM, DebugControlRow::OWNER_ENGINE,
+			args_of(DebugArgSpec::integer("event")->at_least(0)));
+	authoritative(fire_event);
+	bind_action(fire_event, &DebugControlTable::sim, &Simulation::debug_fire_event);
 }
 
 // The Environment rows: the hosted mission clock (GameWorld coordinates the

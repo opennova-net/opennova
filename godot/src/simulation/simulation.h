@@ -63,6 +63,7 @@ struct EntityMarkerQuery;
 namespace opennova::mission {
 struct DebugHitboxReport;
 struct ScriptDebugReport;
+struct MissionLogicReport;
 } // namespace opennova::mission
 namespace opennova::inmatch {
 struct NetDebugReport;
@@ -1953,6 +1954,7 @@ public:
 	int get_mission_variable(int index) const;
 	bool has_event_fired(int index) const;
 	int get_event_count() const;
+	Error debug_fire_event(int p_event); // game_debug fire_event (BmsEventSystem::force_fire)
 
 	// --- Read-only introspection (dev tools / MCP tooling) -----------------
 	// The world's logic tick counter (engine: base/io/tick_rate.h). The
@@ -1965,19 +1967,16 @@ public:
 	// The installed mounted-pose model sources (the seat/mount table's
 	// resolved graphics per type): the count the seat-install pins read.
 	int get_mounted_graphic_source_count() const;
-	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
-	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
-	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.
-	// Always bank-sized; all zeros when no mission is loaded.
+	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 / M0..M15 [orig:
+	// dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call for a low-Hz overlay refresh
+	// instead of hundreds of boxed scalar reads. Always bank-sized; zeros with no mission.
 	PackedInt32Array get_mission_variables_snapshot() const;
 	PackedInt32Array get_global_variables_snapshot() const;
 	void set_music_director(MusicDirector *director);
 	PackedInt32Array get_music_variables_snapshot() const;
-	// Globals (G#) round out the scalar var API (mission V# already bound).
-	void set_global_variable(int index, int value);
+	void set_global_variable(int index, int value); // G#, beside the scalar V# above
 	int get_global_variable(int index) const;
-	// [i] = 1 when event i has fired (active latch + delay elapsed): the bulk
-	// form of has_event_fired for an event readout. Empty when unloaded.
+	// [i] = 1 when event i has fired: the bulk has_event_fired. Empty when unloaded.
 	PackedByteArray get_fired_events_snapshot() const;
 	// The typed entity inspection API (world::inspect, ADR 0042 d5). The join
 	// and both card halves are computed engine-side; this binding forwards and
@@ -2299,6 +2298,7 @@ public:
 	bool native_hitbox_debug(const opennova::world::Vec3 &p_anchor, opennova::mission::DebugHitboxReport &r_out);
 	// The F3 Script / Player / Net windows' records (the engine reports).
 	bool native_script_report(opennova::mission::ScriptDebugReport &r_out) const;
+	bool native_mission_logic_report(opennova::mission::MissionLogicReport &r_out) const;
 	bool native_local_player_report(opennova::world::inspect::LocalPlayerReport &r_out) const;
 	bool native_net_report(opennova::inmatch::NetDebugReport &r_out) const;
 	// Engine ray-debug capture (CollisionWorld rings + engine-owned mask/TTL

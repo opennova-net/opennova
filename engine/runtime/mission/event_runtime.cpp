@@ -53,6 +53,19 @@ void BmsEventSystem::load(const std::vector<bms::Event> &events,
         }
         events_.push_back(std::move(se));
     }
+    reset_traces();
+}
+
+void BmsEventSystem::reset_traces() {
+    traces_.assign(events_.size(), EventTrace{});
+    for (size_t i = 0; i < events_.size(); ++i)
+        traces_[i].trigger_truth.assign(events_[i].triggers.size(), int8_t{-1});
+}
+
+bool BmsEventSystem::force_fire(size_t index) {
+    if (index >= traces_.size()) return false;
+    traces_[index].fire_pending = true;
+    return true;
 }
 
 void BmsEventSystem::resolve_zone_refs(World &w) {
@@ -147,6 +160,7 @@ void BmsEventSystem::on_load(World &w) {
         se.activate_countdown = 0;
         se.repeat_countdown = 0;
     }
+    reset_traces(); // the live-logic trace starts over with the state it reads
     normal_gate_ = 0;
     quarter_cursor_ = 0;
     // The AWOL counter zeroes at load too: FreeAll's tail jumps into the
@@ -477,22 +491,45 @@ int32_t BmsEventSystem::evaluate_chain(World &w, const ScriptedEvent &se) {
     // trigger 0 always runs and the count is read SIGNED for the rest, so
     // 128..255 evaluate trigger 0 alone (@0x45408c `jle`, @0x4540c7 movsx).
     // The loop stays within the loaded slice.
+    // The live-logic trace (EventTrace) records each term as it is folded and
+    // the result; a pending fire_event makes the result true once, after
+    // every predicate has run as usual.
+    EventTrace *trace = nullptr;
+    if (!events_.empty() && &se >= events_.data() && &se < events_.data() + events_.size() &&
+            traces_.size() == events_.size()) {
+        trace = &traces_[static_cast<size_t>(&se - events_.data())];
+        std::fill(trace->trigger_truth.begin(), trace->trigger_truth.end(), int8_t{-1});
+        trace->last_checked_tick = static_cast<int64_t>(w.logic_tick);
+    }
+    const auto record = [trace](size_t i, int32_t term) {
+        if (trace != nullptr && i < trace->trigger_truth.size())
+            trace->trigger_truth[i] = term != 0 ? 1 : 0;
+    };
+    const auto result = [trace](int32_t acc) -> int32_t {
+        if (trace == nullptr) return acc;
+        trace->chain = acc != 0 ? 1 : 0;
+        if (!trace->fire_pending) return acc;
+        trace->fire_pending = false;
+        return acc != 0 ? acc : 1;
+    };
     w.script.input_action_mirror = w.script.input_action_bits;
-    if (se.event.trigger_count == 0 || se.triggers.empty()) return 1;
+    if (se.event.trigger_count == 0 || se.triggers.empty()) return result(1);
     const std::vector<bms::Trigger> &triggers = se.triggers;
     int32_t acc = evaluate_trigger(w, triggers[0]);
     if (triggers[0].is_negated()) acc ^= 1; // [orig: @0x454084]
+    record(0, acc);
     const int count = se.event.trigger_count < 128
             ? se.event.trigger_count : static_cast<int>(se.event.trigger_count) - 256;
     for (int i = 1; i < count && static_cast<size_t>(i) < triggers.size(); ++i) {
         int32_t v = evaluate_trigger(w, triggers[static_cast<size_t>(i)]);
         if (triggers[static_cast<size_t>(i)].is_negated()) v ^= 1; // [orig: @0x4540ac]
+        record(static_cast<size_t>(i), v);
         const bms::Trigger &prev = triggers[static_cast<size_t>(i) - 1];
         if (prev.is_or()) acc |= v;       // [orig: @0x4540b8]
         else if (prev.is_xor()) acc ^= v; // [orig: @0x4540c1]
         else acc &= v;                    // [orig: @0x4540c5]
     }
-    return acc;
+    return result(acc);
 }
 
 void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t event, int32_t action) {

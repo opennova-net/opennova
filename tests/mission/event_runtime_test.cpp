@@ -305,6 +305,73 @@ static void test_activation_delay() {
     CHECK(sys.event_fired(0));
 }
 
+// The live-logic trace (port-side tooling, no behaviour): each trigger's term
+// is recorded as the chain folds it (after its own negation bit), a never-run
+// chain reads -1, and fire_event's one-shot makes the next run read true while
+// the delay and the latch then run as the event's own.
+static void test_live_logic_trace_and_fire() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+    bms::Event e{};
+    e.trigger_index = 0;
+    e.trigger_count = 3;
+    e.action_index = 0;
+    e.action_count = 1;
+    e.delay = 1; // one 64-tick step between the latch and the actions
+    const auto var_is = [](int var, int value, uint32_t flags) {
+        bms::Trigger t{};
+        t.condition_flags = flags;
+        t.main_type = bms::TriggerMainType::MissionVariable;
+        t.sub_type = static_cast<int32_t>(bms::MissionVariableTriggerType::MissionVariableIsEqual);
+        t.param1 = var;
+        t.param2 = value;
+        return t;
+    };
+    // V1 == 1 AND NOT (V2 == 5) AND V4 == 0.
+    const std::vector<bms::Trigger> triggers = {var_is(1, 1, 0), var_is(2, 5, 1), var_is(4, 0, 0)};
+    mission::BmsEventSystem sys;
+    sys.load({e}, triggers, {misvar(bms::MissionVariableActionSubType::Set, 3, 7)});
+    w.add_system(&sys);
+    w.load_systems();
+
+    CHECK(sys.traces().size() == 1);
+    CHECK((sys.traces()[0].trigger_truth == std::vector<int8_t>{-1, -1, -1}));
+    CHECK(sys.traces()[0].chain == -1 && sys.traces()[0].last_checked_tick == -1);
+    CHECK(!sys.force_fire(1)); // outside the list
+
+    tick_n(w, kPass); // the first pass runs the chain: false (V1 is 0)
+    const mission::EventTrace &trace = sys.traces()[0];
+    CHECK((trace.trigger_truth == std::vector<int8_t>{0, 1, 1})); // negation applied to term 1
+    CHECK(trace.chain == 0);
+    CHECK(trace.last_checked_tick >= 0 && trace.last_checked_tick <= int64_t(w.logic_tick));
+    CHECK(sys.events()[0].active == 0);
+
+    CHECK(sys.force_fire(0));
+    CHECK(sys.traces()[0].fire_pending);
+    tick_n(w, kCycle); // the next run reads true: latch + arm the delay, no actions yet
+    CHECK(!sys.traces()[0].fire_pending);
+    CHECK(sys.traces()[0].chain == 0); // the recorded chain is the real one
+    CHECK(sys.events()[0].active == 1 && !sys.event_fired(0));
+    CHECK(w.script.vars.get_mission(3) == 0);
+    tick_n(w, kCycle); // the delay runs out: the actions fire
+    CHECK(sys.event_fired(0) && w.script.vars.get_mission(3) == 7);
+    // A latched fire-once event never runs its chain again: the request waits.
+    const int64_t checked = sys.traces()[0].last_checked_tick;
+    CHECK(sys.force_fire(0));
+    tick_n(w, 4 * kCycle);
+    CHECK(sys.traces()[0].fire_pending && sys.traces()[0].last_checked_tick == checked);
+
+    // A reload starts the trace over; a natural pass records the true terms.
+    w.load_systems();
+    CHECK(!sys.traces()[0].fire_pending && sys.traces()[0].chain == -1);
+    CHECK((sys.traces()[0].trigger_truth == std::vector<int8_t>{-1, -1, -1}));
+    w.script.vars.set_mission(1, 1);
+    tick_n(w, kPass);
+    CHECK((sys.traces()[0].trigger_truth == std::vector<int8_t>{1, 1, 1}));
+    CHECK(sys.traces()[0].chain == 1 && sys.events()[0].active == 1);
+}
+
 // 16-bit signedness quirk [orig: unsigned word load, SIGNED 16-bit <=0 test @0x454cef]:
 // delay values >= 513 wrap negative on the first decrement and fire one pass after arming.
 static void test_activation_delay_signed_wrap() {
@@ -2609,6 +2676,7 @@ int main() {
 	test_wac_seatbelt_controls_local_use();
 	test_bms_increment_and_threshold();
     test_activation_delay();
+    test_live_logic_trace_and_fire();
     test_activation_delay_signed_wrap();
     test_repeat_cooldown();
     test_signed_action_count_immediate_and_delayed();

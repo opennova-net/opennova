@@ -19,6 +19,7 @@ void ScriptWindow::on_visibility(bool visible) {
 void ScriptWindow::wanted_controls(std::vector<const char *> &out) const {
 	out.push_back(control_id::kRuntimeWacPaused);
 	out.push_back(control_id::kSetMissionVariable);
+	out.push_back(control_id::kFireEvent);
 }
 
 void ScriptWindow::set_snapshot(ScriptSnapshot snapshot) {
@@ -31,6 +32,10 @@ void ScriptWindow::request_set_mission_variable(int32_t index, int32_t value) {
 			{ControlArg::integer(index), ControlArg::integer(value)}});
 }
 
+void ScriptWindow::request_fire_event(int32_t index) {
+	requests_.push_back({control_id::kFireEvent, {ControlArg::integer(index)}});
+}
+
 bool ScriptWindow::take_request(ControlRequest &request) {
 	if (requests_.empty()) return false;
 	request = requests_.front();
@@ -41,6 +46,17 @@ bool ScriptWindow::take_request(ControlRequest &request) {
 const char *ScriptWindow::gap_text(int row) const {
 	if (row < 0 || row >= gap_count()) return "";
 	return gap_rows_[static_cast<size_t>(row)].c_str();
+}
+
+std::string ScriptWindow::bms_truth_text(int row) const {
+	const std::vector<mission::ScriptBmsEventRow> &rows = snapshot_.report.bms_events;
+	if (!snapshot_.valid || row < 0 || row >= static_cast<int>(rows.size())) return std::string();
+	const mission::ScriptBmsEventRow &e = rows[static_cast<size_t>(row)];
+	if (e.trigger_truth.empty()) return "(no triggers)";
+	std::string out;
+	out.reserve(e.trigger_truth.size());
+	for (int8_t t : e.trigger_truth) out.push_back(t < 0 ? '-' : (t != 0 ? 'T' : 'F'));
+	return out;
 }
 
 void ScriptWindow::format() {
@@ -210,30 +226,56 @@ void ScriptWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	if (ImGui::CollapsingHeader(header)) {
 		ImGui::Text("AWOL quanta %d | second time through %s", r.awol_count,
 				r.second_time_through ? "yes" : "no");
-		if (ImGui::BeginTable("bms_events", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
+		const ControlState *fire_row = board_.state(control_id::kFireEvent);
+		const bool can_fire = snapshot_.authority && fire_row != nullptr && fire_row->writable;
+		if (ImGui::BeginTable("bms_events", 8, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
 					ImVec2(0.0f, 200.0f))) {
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableSetupColumn("event");
 			ImGui::TableSetupColumn("trig/act");
+			ImGui::TableSetupColumn("triggers");
+			ImGui::TableSetupColumn("checked");
 			ImGui::TableSetupColumn("latch");
-			ImGui::TableSetupColumn("fired");
 			ImGui::TableSetupColumn("repeat");
 			ImGui::TableSetupColumn("activate");
+			ImGui::TableSetupColumn("");
 			ImGui::TableHeadersRow();
-			for (const mission::ScriptBmsEventRow &e : r.bms_events) {
+			for (size_t i = 0; i < r.bms_events.size(); ++i) {
+				const mission::ScriptBmsEventRow &e = r.bms_events[i];
 				ImGui::TableNextRow();
 				ImGui::TableNextColumn();
 				ImGui::Text("%d", e.index);
 				ImGui::TableNextColumn();
 				ImGui::Text("%d / %d", e.trigger_count, e.action_count);
 				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(e.active ? "set" : "");
+				const std::string truth = bms_truth_text(static_cast<int>(i));
+				ImGui::TextUnformatted(truth.c_str());
+				if (ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("Each trigger's last term as the chain ran it (after its own negation):\n"
+									  "T true, F false, - not evaluated by the last run.");
+				}
 				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(e.fired ? "fired" : "");
+				if (e.last_checked_tick >= 0) {
+					ImGui::Text("%lld", static_cast<long long>(e.last_checked_tick));
+				}
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(e.fired ? "fired" : (e.active ? "set" : ""));
 				ImGui::TableNextColumn();
 				ImGui::Text("%u / %u", e.repeat_countdown, e.repeat_reload);
 				ImGui::TableNextColumn();
 				ImGui::Text("%u / %u", e.activate_countdown, e.activate_reload);
+				ImGui::TableNextColumn();
+				if (e.fire_pending) {
+					ImGui::TextDisabled("fire pending");
+				} else if (can_fire) {
+					ImGui::PushID(static_cast<int>(i));
+					if (ImGui::SmallButton("Fire")) request_fire_event(e.index);
+					if (ImGui::IsItemHovered()) {
+						ImGui::SetTooltip("The chain reads true at its next run; the delay, latch and repeat "
+										  "then run as the event's own.");
+					}
+					ImGui::PopID();
+				}
 			}
 			ImGui::EndTable();
 		}

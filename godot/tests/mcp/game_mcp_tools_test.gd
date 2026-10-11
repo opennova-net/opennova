@@ -212,6 +212,30 @@ func test_state_rows_reflect_the_callers_confirmed_authority() -> void:
 			"explicit confirmation cannot override joiner authority")
 
 
+func test_mission_logic_snapshot_reads_without_confirmation_and_fire_event_does_not() -> void:
+	# The editor's live board polls the read during Play; the fire is a write.
+	_sim.set_mission_variable(7, 3)
+	var read := await _call("game_debug", {"op": "invoke", "id": "mission_logic_snapshot"})
+	assert_false(read.is_error, "the read needs no confirm_authority")
+	var snapshot: Dictionary = read.structured["result"]
+	assert_true(snapshot.has("events") and snapshot.has("tick") and snapshot.has("mission"))
+	assert_true((snapshot["variables"] as Array).has({"index": 7, "value": 3}))
+
+	var refused := await _call("game_debug", {
+		"op": "invoke",
+		"id": "fire_event",
+		"args": {"event": 0},
+	})
+	assert_true(refused.is_error, "an unconfirmed fire is refused before the table")
+	var missing := await _call("game_debug", {
+		"op": "invoke",
+		"id": "fire_event",
+		"args": {"event": 0},
+		"confirm_authority": true,
+	})
+	assert_true(missing.is_error, "the default mission has no event 0: the engine refuses it")
+
+
 func test_authority_confirmation_requires_a_json_boolean() -> void:
 	var result := await _call("game_debug", {
 		"op": "set",
