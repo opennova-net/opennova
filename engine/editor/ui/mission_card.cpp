@@ -227,10 +227,13 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 	const bool marks = mission_pick_slot(context.mission, line.record, chip.slot, slot) && slot.marks;
 	const bool text = makes_text(use);
 	if (ImGui::BeginPopupContextItem("chip_menu")) {
-		if (ImGui::MenuItem("Pick in view", nullptr, false, marks && context.editable))
+		// An event is picked on the board: a card's title clicked answers the pick.
+		const bool event = slot.kind == mission::ParamKind::Event;
+		if (ImGui::MenuItem(event ? "Pick on the board" : "Pick in view", nullptr, false, (marks || event) && context.editable))
 			window_requests::pick_in_view(context.workspace, context.mission.path(), line.record, chip.slot);
-		ui_kit::tooltip(marks ? "Click " + slot.what + " in the 3D view or the map to set it (Esc cancels)."
-		                      : std::string("No mark in the views gives this value."));
+		ui_kit::tooltip(event   ? std::string("Click a card's title on the board to set it (Esc cancels).")
+		                : marks ? "Click " + slot.what + " in the 3D view or the map to set it (Esc cancels)."
+		                        : std::string("No mark in the views gives this value."));
 		if (text && ImGui::MenuItem("New text...", nullptr, false, context.editable)) context.state.open_new_text = true;
 		ImGui::EndPopup();
 	}

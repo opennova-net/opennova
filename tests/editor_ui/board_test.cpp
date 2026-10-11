@@ -209,6 +209,27 @@ void test_cards() {
 	text = logged_frame(run.ui);
 	CHECK(text.find("(5 steps)") != std::string::npos, "the card reads its wait in steps");
 
+	// A pick waiting on the second event's Event parameter: the second card's title answers it, the pick ended.
+	const std::vector<Document::Collection> second_lists = mission->collections_of({second->id, second->kind, 0});
+	CHECK(second_lists.size() == 2 && !second_lists[0].ids.empty(), "the second event's trigger");
+	if (second_lists.size() != 2 || second_lists[0].ids.empty()) return;
+	const NodeAddress fired{second->id, node_kind(MissionKind::Trigger), second_lists[0].ids[0]};
+	window_requests::pick_in_view(run.ui.windows, run.path, fired, 0);
+	run.settle();
+	run.take();
+	CHECK(v.workspace.document(run.path).pick.active(), "the pick waits");
+	run.ui.away();
+	text = logged_frame(run.ui);
+	CHECK(text.find("Click a card's title for") != std::string::npos, "the board says what to click");
+	cards = card_windows();
+	run.ui.activate(item_id(cards[1]->ID, {"Event 2"}));
+	run.settle();
+	raised = run.take();
+	const EditorRequest *picked = only(raised, EditorRequestKind::EditRecord);
+	CHECK(picked && picked->edits.size() == 1 && picked->edits[0].field == "param1" && picked->edits[0].value == Value(int64_t(1)),
+	      "the card's title: the parameter names its event");
+	CHECK(!v.workspace.document(run.path).pick.active(), "the pick ended");
+
 	// The filter as the workspace holds it; a card folded to its sentence.
 	run.session.handle(request::set_workspace(R"({"document": {"path": "missions/logic.bms", "logic_filter": "has fired"}})"));
 	run.settle();
@@ -223,7 +244,7 @@ void test_cards() {
 	CHECK(v.workspace.document(run.path).logic_folded == std::vector<NodeId>{second->id}, "the second card folded");
 	run.ui.away();
 	text = logged_frame(run.ui);
-	CHECK(text.find("When event 1 has fired, then, after 5.1 s, kill group 2.") != std::string::npos, "folded: its sentence");
+	CHECK(text.find("When event 2 has fired, then, after 5.1 s, kill group 2.") != std::string::npos, "folded: its sentence");
 	CHECK(overflowing().empty(), "nothing runs past its room");
 }
 

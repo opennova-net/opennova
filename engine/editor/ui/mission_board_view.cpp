@@ -12,6 +12,7 @@
 #include <editor/documents/mission_board.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
+#include <editor/documents/mission_links.h>
 #include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_variables.h>
@@ -290,6 +291,14 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 		++built_;
 	}
 	toolbar(workspace, *mission, shown, editable);
+	// A pick waiting on an event: the cards' titles answer it, Esc ends it.
+	MissionPickSlot picking;
+	if (shown.pick.active() && mission_pick_slot(*mission, shown.pick.record, shown.pick.slot, picking) &&
+	    picking.kind == mission::ParamKind::Event) {
+		ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Click a card's title for %s (Esc cancels).", picking.label.c_str());
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+			window_requests::pick_in_view(workspace, mission->path(), NodeAddress(), -1);
+	}
 	keys(workspace, *mission, shown, editable);
 	variables(workspace, *mission);
 	ImGui::Separator();
