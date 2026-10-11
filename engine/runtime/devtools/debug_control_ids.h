@@ -43,6 +43,8 @@ inline constexpr const char *kRuntimeTransport = "runtime_transport";
 inline constexpr const char *kRuntimeReturnToMenu = "runtime_return_to_menu";
 inline constexpr const char *kRuntimeWacPaused = "runtime_wac_paused";
 inline constexpr const char *kSetMissionVariable = "set_mission_variable";
+inline constexpr const char *kMissionLogicSnapshot = "mission_logic_snapshot";
+inline constexpr const char *kFireEvent = "fire_event";
 // Environment page: the clock, the wind, the lightning, the WAC weather
 // commands (world::WeatherState carries the handler cites) and the home read.
 inline constexpr const char *kEnvironmentTimeOfDay = "environment_time_of_day";

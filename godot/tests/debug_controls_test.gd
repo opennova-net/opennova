@@ -39,6 +39,8 @@ const EXPECTED_IDS: Array[StringName] = [
 	&"runtime_return_to_menu",
 	&"runtime_wac_paused",
 	&"set_mission_variable",
+	&"mission_logic_snapshot",
+	&"fire_event",
 	&"environment_time_of_day",
 	&"environment_wind_strength",
 	&"environment_lightning_short",
@@ -77,7 +79,7 @@ const WIRE_STATE_KEYS := ["id", "kind", "value", "desired_value", "available",
 		"writable", "authoritative", "reason"]
 # Engine rows end in a Simulation / Terrain / Weather / environment call;
 # device rows are viewport / audio / shell state.
-const ENGINE_ROWS := 44
+const ENGINE_ROWS := 46
 const DEVICE_ROWS := 14
 
 
@@ -206,6 +208,8 @@ func test_actions_validate_typed_arguments_before_the_engine() -> void:
 		[&"set_mission_variable", [17.5, -3]],
 		[&"deploy_pick", [-1]],
 		[&"kill_group", [0]],
+		[&"fire_event", [-1]],
+		[&"fire_event", ["3"]],
 		[&"crew_vehicle", [3]],
 		[&"crew_local_player", ["11"]],
 		[&"local_player_look", ["3", 1.0]],
@@ -247,6 +251,88 @@ func test_actions_validate_typed_arguments_before_the_engine() -> void:
 			"the engine's seat refusal propagates as the action result")
 	assert_eq(int(seat.error), int(ERR_INVALID_PARAMETER),
 			"the refusal is the mount command's, with a live local player to seat")
+
+
+func test_mission_logic_rows_read_the_events_and_gate_the_fire() -> void:
+	# The read needs no confirmation: the editor's live board polls it.
+	var read := _controls.invoke(&"mission_logic_snapshot", [])
+	assert_eq(int(read.error), OK)
+	var snapshot: Dictionary = read.result
+	assert_eq(snapshot.keys(), ["authority", "mission", "tick", "events", "variables"])
+	assert_true(snapshot["authority"])
+	assert_eq(snapshot["events"], [], "the default mission authors no events")
+	_sim.set_mission_variable(12, 5)
+	var variables: Array = _controls.invoke(&"mission_logic_snapshot", []).result["variables"]
+	assert_true(variables.has({"index": 12, "value": 5}),
+			"the non-zero mission variables ride the read: %s" % [variables])
+	assert_true(JSON.stringify(snapshot) != "", "the read is JSON-safe")
+
+	# The fire is authoritative, then the engine's own verdict.
+	assert_eq(int(_controls.invoke(&"fire_event", [0]).error), ERR_UNAUTHORIZED,
+			"an unconfirmed caller cannot fire an event")
+	var no_event := _controls.invoke(&"fire_event", [0], true)
+	assert_eq(int(no_event.error), ERR_INVALID_PARAMETER,
+			"no event 0 in the default mission: the engine refuses it")
+	assert_string_contains(String(no_event.result), "no event", "the refusal carries the engine's words")
+	_host.authority = false
+	assert_eq(int(_controls.invoke(&"fire_event", [0], true).error), ERR_UNAUTHORIZED,
+			"a joiner does not own the events")
+	assert_eq(int(_controls.invoke(&"mission_logic_snapshot", []).error), OK,
+			"the read stays open to a joiner")
+
+
+func test_fire_event_runs_the_events_own_chain() -> void:
+	# The engine's live-logic trace through the rows: each trigger's last
+	# truth as the chain ran it, and a fire that makes the next run read true.
+	var mission := WorldFixture.default_mission(0)
+	assert_gte(mission.add_event(0, 0, 0), 0)
+	# V1 == 1 (MissionVariable 4 / IsEqual 1), then V3 = 7 (MisvarChange 5 / Set 1).
+	assert_true(mission.add_event_trigger(0, 4, 1, 1, 1))
+	assert_true(mission.add_event_action(0, 5, 1, 3, 7))
+	# A pre-mission event (flags 2) beside it.
+	assert_gte(mission.add_event(2, 0, 0), 1)
+	var runtime := WorldFixture.boot_mission_data(self, mission)
+	var sim := runtime.get_sim()
+	var controls := DebugControlTable.new()
+	controls.setup(DebugHostFixture.for_runtime(runtime, self))
+	# Hold the script clock's gate open without a host roster (the
+	# simulation_test recipe), so the event pass runs.
+	assert_true(sim.compile_and_set_wac(PackedStringArray(["set(ticks,-1)"])))
+	var event: Dictionary = controls.invoke(&"mission_logic_snapshot", []).result["events"][0]
+	assert_eq(event["triggers"], [-1], "the chain has not run yet")
+	assert_eq(event["last_checked_tick"], -1)
+	for _i in range(64):
+		sim.step()
+		event = controls.invoke(&"mission_logic_snapshot", []).result["events"][0]
+		if int(event["last_checked_tick"]) >= 0:
+			break
+	assert_eq(event["triggers"], [0], "V1 is 0: the term read false")
+	assert_eq(event["chain"], 0)
+	assert_false(event["active"])
+
+	assert_eq(int(controls.invoke(&"fire_event", [2], true).error), ERR_INVALID_PARAMETER,
+			"the mission has two events")
+	# The pre-mission event ran in its one pass: refused, in the engine's words.
+	var pre := controls.invoke(&"fire_event", [1], true)
+	assert_eq(int(pre.error), ERR_INVALID_PARAMETER)
+	assert_string_contains(String(pre.result), "pre-mission")
+	assert_eq(int(controls.invoke(&"fire_event", [0], true).error), OK)
+	assert_true(controls.invoke(&"mission_logic_snapshot", []).result["events"][0]["fire_pending"])
+	for _i in range(64):
+		sim.step()
+	event = controls.invoke(&"mission_logic_snapshot", []).result["events"][0]
+	assert_true(event["fired"], "the forced run latched and fired the event")
+	assert_false(event["fire_pending"])
+	assert_eq(event["chain"], 0, "the recorded chain stays the real one")
+	assert_eq(sim.get_mission_variable(3), 7, "its action ran")
+	assert_true((controls.invoke(&"mission_logic_snapshot", []).result["variables"] as Array)
+			.has({"index": 3, "value": 7}))
+	# Fired once, its latch set: a second fire is refused until a ResetEvent clears it.
+	var again := controls.invoke(&"fire_event", [0], true)
+	assert_eq(int(again.error), ERR_INVALID_PARAMETER)
+	assert_string_contains(String(again.result), "ResetEvent")
+	assert_false(controls.invoke(&"mission_logic_snapshot", []).result["events"][0]["fire_pending"])
+	controls.clear()
 
 
 func test_action_args_marshal_by_name_and_publish_their_schema() -> void:

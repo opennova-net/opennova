@@ -53,6 +53,18 @@ bool Simulation::native_script_report(opennova::mission::ScriptDebugReport &r_ou
 	return true;
 }
 
+// game_debug's fire_event: the engine's request (BmsEventSystem::force_fire), refused off the authority (a
+// joiner runs no BMS events) and with the engine's words for a refused one.
+Error Simulation::debug_fire_event(int p_event, String &r_reason) {
+	r_reason = String();
+	if (!kernel_ || is_joiner()) return ERR_UNAVAILABLE;
+	const opennova::mission::FireRequest request =
+			p_event < 0 ? opennova::mission::FireRequest::NoEvent : kernel_->events.force_fire(static_cast<size_t>(p_event));
+	if (request == opennova::mission::FireRequest::Armed) return OK;
+	r_reason = String(opennova::mission::fire_request_words(request));
+	return ERR_INVALID_PARAMETER;
+}
+
 bool Simulation::native_local_player_report(opennova::world::inspect::LocalPlayerReport &r_out) const {
 	if (!kernel_) {
 		r_out = opennova::world::inspect::LocalPlayerReport{};

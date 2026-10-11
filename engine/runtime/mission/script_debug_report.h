@@ -6,10 +6,13 @@
 // runtime-gap census (the script commands the port has not witnessed yet).
 // The retail engine's script-state debug page showed the first compile error
 // [orig: Debug_DrawScriptState @0x4F64C0, the read @0x4f652a]; everything
-// else here is port-side tooling.
+// else here is port-side tooling. game_debug's mission_logic_snapshot row
+// reads its BMS half (the events with their trigger truth, the mission bank,
+// the tick and the mission), which the editor's live board polls.
 #pragma once
 
 #include <runtime/world/mission_diagnostics.h>
+#include <runtime/world/var_store.h>
 
 #include <array>
 #include <cstdint>
@@ -34,6 +37,7 @@ struct ScriptWacDiagnosticRow {
 
 struct ScriptBmsEventRow {
 	int32_t index = 0;
+	uint32_t flags = 0; // bms::EventFlags: repeat, pre-mission, post-mission
 	int32_t trigger_count = 0;
 	int32_t action_count = 0;
 	bool active = false;
@@ -42,6 +46,14 @@ struct ScriptBmsEventRow {
 	uint16_t repeat_reload = 0;
 	uint16_t activate_countdown = 0;
 	uint16_t activate_reload = 0;
+	// The live-logic trace (mission::EventTrace): each trigger's last term
+	// as the chain ran it (-1 not evaluated by the last run), the chain's
+	// last result (-1 never ran), the logic tick of that run (-1 never) and
+	// a fire_event request still waiting for the chain's next run.
+	std::vector<int8_t> trigger_truth;
+	int8_t chain = -1;
+	int64_t last_checked_tick = -1;
+	bool fire_pending = false;
 };
 
 struct ScriptDebugReport {
@@ -62,12 +74,14 @@ struct ScriptDebugReport {
 	int32_t current_event = 0;
 	std::vector<ScriptWacEventRow> wac_events;
 	// BMS.
+	std::string mission;     // the mission's file basename
+	uint32_t logic_tick = 0; // the world's tick at the report
 	std::vector<ScriptBmsEventRow> bms_events;
 	int32_t awol_count = 0;
 	bool second_time_through = false;
 	// The variable banks (V0..V511, G0..G255), raw 32-bit.
-	std::array<int32_t, 512> mission_vars{};
-	std::array<int32_t, 256> global_vars{};
+	std::array<int32_t, world::ScriptVarStore::kMissionVars> mission_vars{};
+	std::array<int32_t, world::ScriptVarStore::kGlobalVars> global_vars{};
 	// The runtime-gap census.
 	std::vector<world::RuntimeGap> runtime_gaps;
 	uint64_t runtime_gap_calls = 0;

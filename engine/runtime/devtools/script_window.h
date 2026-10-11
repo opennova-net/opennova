@@ -2,10 +2,11 @@
 // the embedder pushes (mission::script_debug_report, by value) — the WAC
 // program and VM (the first compile error, the retail script-state page's
 // line, then the diagnostics, the clock and per-event fired state), the BMS
-// events' latches and timers, the variable banks with inline editing of the
-// mission variables, and the runtime-gap census (the script commands the port
-// meets that are not witnessed yet). The script pause and a variable edit
-// leave as the runtime_wac_paused / set_mission_variable rows.
+// events' latches, timers and each trigger's last truth, the variable banks
+// with inline editing of the mission variables, and the runtime-gap census
+// (the script commands the port meets that are not witnessed yet). The script
+// pause, a variable edit and an event's Fire leave as the runtime_wac_paused /
+// set_mission_variable / fire_event rows.
 #pragma once
 
 #include <runtime/devtools/control_board.h>
@@ -45,6 +46,8 @@ public:
 
 	// A mission-variable edit (the set_mission_variable row).
 	void request_set_mission_variable(int32_t index, int32_t value);
+	// A BMS event's chain reads true at its next run (the fire_event row).
+	void request_fire_event(int32_t index);
 	bool take_request(ControlRequest &request);
 
 	// The formatted readings, for tests.
@@ -52,6 +55,10 @@ public:
 	const std::string &first_error_text() const { return snapshot_.report.first_error; }
 	int gap_count() const { return static_cast<int>(gap_rows_.size()); }
 	const char *gap_text(int row) const;
+	// One BMS event row's trigger truth as the window shows it: one mark per
+	// trigger of its slice, T true, F false, - not evaluated by the last run;
+	// "(no triggers)" for an empty chain; "" for a row outside the record.
+	std::string bms_truth_text(int row) const;
 
 private:
 	void format();

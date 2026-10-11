@@ -147,8 +147,9 @@ void test_domain_windows_gate_and_draw() {
 	};
 	CHECK(wants(control_id::kTerrainDrawMode) && wants(control_id::kViewportDebugDraw),
 			"the Render window reads its knobs through the board");
-	CHECK(wants(control_id::kSetMissionVariable) && wants(control_id::kForceFpArms) &&
-					wants(control_id::kHideParticles) && wants(control_id::kNetJoinerDiagnostics),
+	CHECK(wants(control_id::kSetMissionVariable) && wants(control_id::kFireEvent) &&
+					wants(control_id::kForceFpArms) && wants(control_id::kHideParticles) &&
+					wants(control_id::kNetJoinerDiagnostics),
 			"every window declares its rows");
 	CHECK(draw_once(tools, 1), "every window draws with no record");
 }
@@ -167,6 +168,10 @@ void test_script_window() {
 	snapshot.report.rng_seed = 0x12333333u;
 	snapshot.report.first_error = "mission.wac (12) unknown command";
 	snapshot.report.mission_vars[3] = 5;
+	opennova::mission::ScriptBmsEventRow bms_row;
+	bms_row.trigger_truth = {1, 0, -1};
+	snapshot.report.bms_events.push_back(bms_row);
+	snapshot.report.bms_events.push_back(opennova::mission::ScriptBmsEventRow{});
 	opennova::world::RuntimeGap gap;
 	gap.origin.kind = opennova::world::RuntimeGapKind::WacCommand;
 	gap.origin.code = 88;
@@ -179,11 +184,18 @@ void test_script_window() {
 	CHECK(window.first_error_text() == "mission.wac (12) unknown command", "the retail page's error line");
 	CHECK(window.gap_count() == 1 && std::strstr(window.gap_text(0), "WAC command 88/0") != nullptr,
 			"the runtime gaps list their site");
+	CHECK(window.bms_truth_text(0) == "TF-" && window.bms_truth_text(1) == "(no triggers)" &&
+					window.bms_truth_text(2).empty(),
+			"each trigger's last truth: T, F, - not evaluated");
 	window.request_set_mission_variable(3, 42);
+	window.request_fire_event(4);
 	ControlRequest request;
 	CHECK(window.take_request(request) && is_control(request, control_id::kSetMissionVariable) &&
 					request.args.size() == 2 && request.args[0].i == 3 && request.args[1].i == 42,
 			"a variable edit is the set_mission_variable row");
+	CHECK(window.take_request(request) && is_control(request, control_id::kFireEvent) &&
+					request.args.size() == 1 && request.args[0].i == 4,
+			"an event's Fire is the fire_event row");
 	window.on_visibility(false);
 	CHECK(!window.snapshot_valid(), "hiding drops the record");
 }

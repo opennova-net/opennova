@@ -305,6 +305,145 @@ static void test_activation_delay() {
     CHECK(sys.event_fired(0));
 }
 
+// The live-logic trace (port-side tooling, no behaviour): each trigger's term
+// is recorded as the chain folds it (after its own negation bit), a never-run
+// chain reads -1, and fire_event's one-shot makes the next run read true while
+// the delay and the latch then run as the event's own; a request the chain can
+// never take is refused.
+static void test_live_logic_trace_and_fire() {
+    using mission::FireRequest;
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+    bms::Event e{};
+    e.trigger_index = 0;
+    e.trigger_count = 3;
+    e.action_index = 0;
+    e.action_count = 1;
+    e.delay = 1; // one 64-tick step between the latch and the actions
+    const auto var_is = [](int var, int value, uint32_t flags) {
+        bms::Trigger t{};
+        t.condition_flags = flags;
+        t.main_type = bms::TriggerMainType::MissionVariable;
+        t.sub_type = static_cast<int32_t>(bms::MissionVariableTriggerType::MissionVariableIsEqual);
+        t.param1 = var;
+        t.param2 = value;
+        return t;
+    };
+    // V1 == 1 AND NOT (V2 == 5) AND V4 == 0.
+    const std::vector<bms::Trigger> triggers = {var_is(1, 1, 0), var_is(2, 5, 1), var_is(4, 0, 0)};
+    mission::BmsEventSystem sys;
+    sys.load({e}, triggers, {misvar(bms::MissionVariableActionSubType::Set, 3, 7)});
+    w.add_system(&sys);
+    w.load_systems();
+
+    CHECK(sys.traces().size() == 1);
+    CHECK((sys.traces()[0].trigger_truth == std::vector<int8_t>{-1, -1, -1}));
+    CHECK(sys.traces()[0].chain == -1 && sys.traces()[0].last_checked_tick == -1);
+    CHECK(sys.force_fire(1) == FireRequest::NoEvent); // outside the list
+    CHECK(std::string(mission::fire_request_words(FireRequest::NoEvent)).find("no event") != std::string::npos);
+
+    tick_n(w, kPass); // the first pass runs the chain: false (V1 is 0)
+    const mission::EventTrace &trace = sys.traces()[0];
+    CHECK((trace.trigger_truth == std::vector<int8_t>{0, 1, 1})); // negation applied to term 1
+    CHECK(trace.chain == 0);
+    CHECK(trace.last_checked_tick >= 0 && trace.last_checked_tick <= int64_t(w.logic_tick));
+    CHECK(sys.events()[0].active == 0);
+
+    CHECK(sys.force_fire(0) == FireRequest::Armed);
+    CHECK(sys.traces()[0].fire_pending);
+    tick_n(w, kCycle); // the next run reads true: latch + arm the delay, no actions yet
+    CHECK(!sys.traces()[0].fire_pending);
+    CHECK(sys.traces()[0].chain == 0); // the recorded chain is the real one
+    CHECK(sys.events()[0].active == 1 && !sys.event_fired(0));
+    CHECK(w.script.vars.get_mission(3) == 0);
+    // Latched (waiting on its delay or fired), a fire-once event runs no chain again: refused.
+    CHECK(sys.force_fire(0) == FireRequest::Latched && !sys.traces()[0].fire_pending);
+    tick_n(w, kCycle); // the delay runs out: the actions fire
+    CHECK(sys.event_fired(0) && w.script.vars.get_mission(3) == 7);
+    CHECK(sys.force_fire(0) == FireRequest::Latched && !sys.traces()[0].fire_pending);
+    CHECK(std::string(mission::fire_request_words(FireRequest::Latched)).find("ResetEvent") != std::string::npos);
+
+    // A reload starts the trace over and drops a pending request; a natural pass records the true terms.
+    w.load_systems();
+    CHECK(sys.force_fire(0) == FireRequest::Armed && sys.traces()[0].fire_pending);
+    w.load_systems();
+    CHECK(!sys.traces()[0].fire_pending && sys.traces()[0].chain == -1);
+    CHECK((sys.traces()[0].trigger_truth == std::vector<int8_t>{-1, -1, -1}));
+    w.script.vars.set_mission(1, 1);
+    tick_n(w, kPass);
+    CHECK((sys.traces()[0].trigger_truth == std::vector<int8_t>{1, 1, 1}));
+    CHECK(sys.traces()[0].chain == 1 && sys.events()[0].active == 1);
+
+    // A pre-mission and a post-mission event each run in their one pass: refused, nothing armed.
+    {
+        World pw;
+        pw.cached.humans = 1;
+        mission::BmsEventSystem passes;
+        passes.load({simple_event(bms::EventFlags::PreMission, 0), simple_event(bms::EventFlags::PostMission, 0)}, {},
+                    {output_text(1)});
+        pw.add_system(&passes);
+        pw.load_systems();
+        CHECK(passes.force_fire(0) == FireRequest::PreMission && passes.force_fire(1) == FireRequest::PostMission);
+        CHECK(!passes.traces()[0].fire_pending && !passes.traces()[1].fire_pending);
+    }
+
+    // A repeat event: forced, it fires and arms its cooldown as its own pass does; a request made during
+    // the cooldown waits for the idle branch, then fires it again. Its chain never holds (V9 == 1).
+    {
+        World rw;
+        rw.cached.humans = 1;
+        bms::Event repeat{};
+        repeat.flags = bms::EventFlags::ResetAfter;
+        repeat.reset_after = 2; // a 128-unit cooldown: two passes
+        repeat.trigger_index = 0;
+        repeat.trigger_count = 1;
+        repeat.action_index = 0;
+        repeat.action_count = 1;
+        mission::BmsEventSystem repeats;
+        repeats.load({repeat}, {var_is(9, 1, 0)}, {misvar(bms::MissionVariableActionSubType::Increment, 3, 0)});
+        rw.add_system(&repeats);
+        rw.load_systems();
+        CHECK(repeats.force_fire(0) == FireRequest::Armed);
+        tick_n(rw, kPass); // forced: fires, latches, arms the cooldown
+        CHECK(rw.script.vars.get_mission(3) == 1 && repeats.events()[0].active == 1 &&
+              repeats.events()[0].repeat_countdown == repeats.events()[0].repeat_reload &&
+              repeats.events()[0].repeat_reload != 0);
+        CHECK(repeats.force_fire(0) == FireRequest::Armed); // latched, but it clears itself
+        tick_n(rw, kCycle); // the cooldown counts
+        CHECK(repeats.traces()[0].fire_pending && rw.script.vars.get_mission(3) == 1);
+        tick_n(rw, kCycle); // the cooldown ends, the latch clears; no chain this pass
+        CHECK(repeats.traces()[0].fire_pending && repeats.events()[0].active == 0);
+        tick_n(rw, kCycle); // the idle branch runs the chain: forced again
+        CHECK(!repeats.traces()[0].fire_pending && rw.script.vars.get_mission(3) == 2);
+    }
+
+    // A forced fire commits the chain's input mirror as any fire does: the input bit the chain matched is
+    // consumed although the natural chain was false [orig: EventTrigger_UpdateEntry @0x454c8b].
+    {
+        World iw;
+        iw.cached.humans = 1;
+        bms::Event input{};
+        input.trigger_index = 0;
+        input.trigger_count = 2;
+        input.action_index = 0;
+        input.action_count = 1;
+        bms::Trigger bit{};
+        bit.main_type = bms::TriggerMainType::Player;
+        bit.sub_type = static_cast<int32_t>(bms::PlayerTriggerType::PlayerInputBit10);
+        mission::BmsEventSystem inputs;
+        inputs.load({input}, {bit, var_is(1, 1, 0)}, {output_text(2)}); // the bit AND V1 == 1
+        iw.add_system(&inputs);
+        iw.load_systems();
+        iw.script.input_action_bits = 0x400u;
+        tick_n(iw, kPass); // the natural chain: the bit matched, V1 is 0: false, nothing consumed
+        CHECK((inputs.traces()[0].trigger_truth == std::vector<int8_t>{1, 0}) && iw.script.input_action_bits == 0x400u);
+        CHECK(inputs.force_fire(0) == FireRequest::Armed);
+        tick_n(iw, kCycle);
+        CHECK(iw.out.effects.count("text") == 1 && iw.script.input_action_bits == 0u);
+    }
+}
+
 // 16-bit signedness quirk [orig: unsigned word load, SIGNED 16-bit <=0 test @0x454cef]:
 // delay values >= 513 wrap negative on the first decrement and fire one pass after arming.
 static void test_activation_delay_signed_wrap() {
@@ -2609,6 +2748,7 @@ int main() {
 	test_wac_seatbelt_controls_local_use();
 	test_bms_increment_and_threshold();
     test_activation_delay();
+    test_live_logic_trace_and_fire();
     test_activation_delay_signed_wrap();
     test_repeat_cooldown();
     test_signed_action_count_immediate_and_delayed();
