@@ -996,9 +996,9 @@ static int test_credits() {
 	std::unique_ptr<DocumentBase> again = type->make();
 	TEST_EXPECT(again->load_bytes(bytes_of(written.text), "nlist.kda", AssetKind::Credits, "jo", error) &&
 	            !again->blocked() && text_of(*again)->text() == credits.text());
-	// An entry of three values does not go in the form: a finding, its Save refused.
+	// An entry of three values goes in the form: the game's reader takes any value count (D-CBIN-3).
 	TEST_EXPECT(apply(*made, {TextDocument::replace(span(text_line, 1, 0), "text = a, b, c\r\n")}));
-	TEST_EXPECT(!made->serialize().ok() && has_code(type->validate_file(*made), "credits.unserializable"));
+	TEST_EXPECT(made->serialize().ok() && !has_code(type->validate_file(*made), "credits.unserializable"));
 	// A CBIN value its text form would read as two: held read only.
 	std::unique_ptr<DocumentBase> spaced = type->make();
 	TEST_EXPECT(spaced->load_bytes(bytes_of(repo_file("cbin/synth_nlist.kda")), "spaced.kda", AssetKind::Credits,
@@ -1061,7 +1061,6 @@ static int test_credits_unread() {
 	TEST_EXPECT(refused_at("before = 1\r\n", 1, "outside any section"));
 	TEST_EXPECT(refused_at("text =\r\n", text_line, "no value"));
 	TEST_EXPECT(refused_at("no equals here\r\n", text_line, "no '='"));
-	TEST_EXPECT(refused_at("text = a, b, c\r\n", text_line, "3 values"));
 	TEST_EXPECT(refused_at("text = a\rb\r\n", text_line, "CR alone"));
 	std::vector<SourceIssue> issues;
 	TEST_EXPECT(!credits_text_readable("[ENV]\r\nrate = 1\nmore = 2\r\n", issues) && issues.size() == 1 &&
