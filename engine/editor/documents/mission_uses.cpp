@@ -35,6 +35,32 @@ size_t place_of(const MissionDocument &document, const Node &row) {
 
 } // namespace
 
+bool mission_record_value(const MissionDocument &document, const NodeAddress &record, ParamKind &kind, int64_t &value) {
+	const Node *row = document.row(record.row);
+	if (!row) return false;
+	if (!record.child && is_entity_kind(row->kind)) {
+		kind = ParamKind::Entity;
+		value = static_cast<const EntityRow &>(*row).native.id;
+	} else if (!record.child && row->kind == k(MissionKind::Area)) {
+		kind = ParamKind::Zone;
+		value = static_cast<const AreaRow &>(*row).native.id;
+	} else if (!record.child && row->kind == k(MissionKind::WaypointPath)) {
+		kind = ParamKind::Path;
+		value = static_cast<const PathRow &>(*row).native.number;
+	} else if (!record.child && row->kind == k(MissionKind::Event)) {
+		kind = ParamKind::Event;
+		value = int64_t(place_of(document, *row));
+	} else if (record.child && record.kind == k(MissionKind::Group)) {
+		Document::Placement at;
+		if (!document.placement(record, at)) return false;
+		kind = ParamKind::Group;
+		value = int64_t(at.index);
+	} else {
+		return false;
+	}
+	return true;
+}
+
 MissionUses mission_uses(const MissionDocument &document, const NodeAddress &record, const MissionNames &names) {
 	MissionUses out;
 	const Node *row = document.row(record.row);
@@ -42,9 +68,8 @@ MissionUses mission_uses(const MissionDocument &document, const NodeAddress &rec
 	// What the record is to a parameter: its kind and the value naming it.
 	ParamKind kind = ParamKind::Unused;
 	int64_t value = 0;
-	if (!record.child && is_entity_kind(row->kind)) {
-		kind = ParamKind::Entity;
-		value = static_cast<const EntityRow &>(*row).native.id;
+	if (!mission_record_value(document, record, kind, value)) return out;
+	if (kind == ParamKind::Entity) {
 		out.what = names.entity(value);
 		if (document.entity_holder(value) != row->id)
 			out.inert = row->kind == k(MissionKind::Organic) || row->kind == k(MissionKind::Item)
@@ -52,34 +77,22 @@ MissionUses mission_uses(const MissionDocument &document, const NodeAddress &rec
 			                      "(organics, items, buildings, markers), though an area check tests this one too."
 			                    : "Another entity has this SSN: the game's lookups by SSN find the first in pool order "
 			                      "(organics, items, buildings, markers), never this one.";
-	} else if (!record.child && row->kind == k(MissionKind::Area)) {
-		kind = ParamKind::Zone;
-		value = static_cast<const AreaRow &>(*row).native.id;
+	} else if (kind == ParamKind::Zone) {
 		out.what = names.zone(value);
 		if (document.zone_holder(value) != row->id)
 			// The resolver takes the first area of the id, in file order [bms-event-runtime-re.md 7.3, the scan
 			// @0x453077].
 			out.inert = "An earlier area trigger has this zone id: the game's resolver takes the first of it, so no trigger "
 			            "or action names this one.";
-	} else if (!record.child && row->kind == k(MissionKind::WaypointPath)) {
-		kind = ParamKind::Path;
-		value = static_cast<const PathRow &>(*row).native.number;
+	} else if (kind == ParamKind::Path) {
 		out.what = names.path(value);
-	} else if (!record.child && row->kind == k(MissionKind::Event)) {
-		kind = ParamKind::Event;
-		value = int64_t(place_of(document, *row));
+	} else if (kind == ParamKind::Event) {
 		out.what = names.event(value);
-	} else if (record.child && record.kind == k(MissionKind::Group)) {
-		Document::Placement at;
-		if (!document.placement(record, at)) return out;
-		kind = ParamKind::Group;
-		value = int64_t(at.index);
+	} else {
 		out.what = names.group(value);
 		// Group 0 is none: what names it names no group [bms-event-runtime-re.md 3a: group 0 forced to
 		// count 0].
 		if (value == 0) return out;
-	} else {
-		return out;
 	}
 	const MissionRow *mission = document.mission_row();
 	const bms::Header *header = mission ? &mission->native.header : nullptr;

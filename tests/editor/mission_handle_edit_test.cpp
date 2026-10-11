@@ -16,6 +16,7 @@
 // moves eye and target together; the picture's middle meets the plane at the target; top is straight
 // down, north up; the wire form round-trips, and refuses what it does not take.
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -210,12 +211,17 @@ bool near(double a, double b, double slack = 1e-6) { return std::fabs(a - b) <= 
 
 int test_tokens() {
 	MissionHandle handle = MissionHandle::Move;
-	for (const char *token : { "move", "height", "yaw", "x_min", "x_max", "y_min", "y_max" }) {
+	for (const char *token : { "move", "height", "yaw", "x_min", "x_max", "y_min", "y_max", "x_min_y_min", "x_max_y_min",
+				"x_max_y_max", "x_min_y_max", "z_min", "z_max" }) {
 		TEST_EXPECT(mission_handle_from_token(token, handle) && std::string(mission_handle_token(handle)) == token);
 	}
 	TEST_EXPECT(!mission_handle_from_token("place", handle) && !mission_handle_from_token("", handle));
 	TEST_EXPECT(!mission_handle_is_edge(MissionHandle::Move) && !mission_handle_is_edge(MissionHandle::Yaw) &&
-			mission_handle_is_edge(MissionHandle::XMin) && mission_handle_is_edge(MissionHandle::YMax));
+			mission_handle_is_edge(MissionHandle::XMin) && mission_handle_is_edge(MissionHandle::YMax) &&
+			!mission_handle_is_edge(MissionHandle::XMinYMin) && !mission_handle_is_edge(MissionHandle::ZMax));
+	TEST_EXPECT(mission_handle_is_corner(MissionHandle::XMinYMax) && !mission_handle_is_corner(MissionHandle::ZMin) &&
+			mission_handle_is_level(MissionHandle::ZMin) && mission_handle_is_area(MissionHandle::ZMax) &&
+			mission_handle_is_area(MissionHandle::XMin) && !mission_handle_is_area(MissionHandle::Height));
 	std::printf("test_tokens passed\n");
 	return 0;
 }
@@ -372,23 +378,46 @@ int test_area_edges() {
 	const std::vector<MissionPressed> pressed = press_all(document);
 	const NodeAddress area = row_at(document, 2);
 	std::vector<Edit> edits;
-	TEST_EXPECT(mission_area_edge_edits(document, pressed[2], MissionHandle::XMin, 32.2, 0.0f, 3, edits));
+	// A point's x for the west and east edges, its y for the south and north ones, its z for the bottom and top.
+	const auto at = [](double x, double y, double z) { return std::array<double, 3>{ x, y, z }; };
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::XMin, at(32.2, 99.0, 99.0).data(), 0.0f, 3, edits));
 	TEST_EXPECT(edits.size() == 1 && near(set_of(edits, area, "x_min"), 32.2) && edits[0].gesture == 3);
 	// Snapped to 5, 32.2 is 30: what the row holds, so nothing is planned; 33 is 35.
-	TEST_EXPECT(mission_area_edge_edits(document, pressed[2], MissionHandle::XMin, 32.2, 5.0f, 3, edits) && edits.empty());
-	TEST_EXPECT(mission_area_edge_edits(document, pressed[2], MissionHandle::XMin, 33.0, 5.0f, 3, edits) &&
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::XMin, at(32.2, 0, 0).data(), 5.0f, 3, edits) && edits.empty());
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::XMin, at(33.0, 0, 0).data(), 5.0f, 3, edits) &&
 			near(set_of(edits, area, "x_min"), 35.0));
 	// Never past its opposite edge: x_min to 50 stops at x_max 40, y_max to -100 at y_min -20.
-	TEST_EXPECT(mission_area_edge_edits(document, pressed[2], MissionHandle::XMin, 50.0, 0.0f, 3, edits) &&
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::XMin, at(50.0, 0, 0).data(), 0.0f, 3, edits) &&
 			near(set_of(edits, area, "x_min"), 40.0));
-	TEST_EXPECT(mission_area_edge_edits(document, pressed[2], MissionHandle::YMax, -100.0, 0.0f, 3, edits) &&
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::YMax, at(0, -100.0, 0).data(), 0.0f, 3, edits) &&
 			near(set_of(edits, area, "y_max"), -20.0));
-	TEST_EXPECT(mission_area_edge_edits(document, pressed[2], MissionHandle::XMax, 41.0, 0.0f, 3, edits) &&
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::XMax, at(41.0, 0, 0).data(), 0.0f, 3, edits) &&
 			near(set_of(edits, area, "x_max"), 41.0));
-	TEST_EXPECT(mission_area_edge_edits(document, pressed[2], MissionHandle::YMin, -20.0, 0.0f, 3, edits) && edits.empty());
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::YMin, at(0, -20.0, 0).data(), 0.0f, 3, edits) && edits.empty());
+	// S24: a corner moves its two bounds (the south-west one its x_min and y_min; the north-east one past the
+	// south-west stops there), the bottom and the top their z bound (never past the other).
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::XMinYMin, at(25.0, -30.0, 99.0).data(), 0.0f, 3, edits) &&
+			edits.size() == 2 && near(set_of(edits, area, "x_min"), 25.0) && near(set_of(edits, area, "y_min"), -30.0));
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::XMaxYMax, at(0.0, -50.0, 0).data(), 0.0f, 3, edits) &&
+			edits.size() == 2 && near(set_of(edits, area, "x_max"), 30.0) && near(set_of(edits, area, "y_max"), -20.0));
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::XMaxYMin, at(44.0, -12.0, 0).data(), 1.0f, 3, edits) &&
+			edits.size() == 2 && near(set_of(edits, area, "x_max"), 44.0) && near(set_of(edits, area, "y_min"), -12.0));
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::ZMax, at(0, 0, 12.4).data(), 0.5f, 3, edits) &&
+			edits.size() == 1 && near(set_of(edits, area, "z_max"), 12.5));
+	TEST_EXPECT(mission_area_handle_edits(document, pressed[2], MissionHandle::ZMin, at(0, 0, 20.0).data(), 0.0f, 3, edits) &&
+			edits.size() == 1 && near(set_of(edits, area, "z_min"), 8.0));
+	// Esc mid-drag of the top or the bottom: the restore writes z back where the press found it (S24).
+	{
+		std::vector<MissionPressed> dragged = pressed;
+		dragged[2].min[2] = -3.0;
+		dragged[2].max[2] = 12.5;
+		mission_restore_edits(document, dragged, 5, edits);
+		TEST_EXPECT(edits.size() == 2 && near(set_of(edits, area, "z_min"), -3.0) && near(set_of(edits, area, "z_max"), 12.5) &&
+				edits[0].gesture == 5);
+	}
 	// An entity has no edge; a move is no edge.
-	TEST_EXPECT(!mission_area_edge_edits(document, pressed[0], MissionHandle::XMin, 1.0, 0.0f, 3, edits));
-	TEST_EXPECT(!mission_area_edge_edits(document, pressed[2], MissionHandle::Move, 1.0, 0.0f, 3, edits));
+	TEST_EXPECT(!mission_area_handle_edits(document, pressed[0], MissionHandle::XMin, at(1.0, 0, 0).data(), 0.0f, 3, edits));
+	TEST_EXPECT(!mission_area_handle_edits(document, pressed[2], MissionHandle::Move, at(1.0, 0, 0).data(), 0.0f, 3, edits));
 	std::printf("test_area_edges passed\n");
 	return 0;
 }

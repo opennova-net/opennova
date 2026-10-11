@@ -365,6 +365,12 @@ std::string zone_missing(const AssetGraph &, const GraphEdge &edge) {
 	       "action naming it do nothing.";
 }
 
+// A script's event(n) past the mission's events: the condition reads 0 [orig: WacCmd_Event @0x4ED1E0, the count
+// test @0x4ed1ea].
+std::string event_latch_missing(const AssetGraph &, const GraphEdge &) {
+	return ", an index past the mission's events: the script's event() reads it as not set.";
+}
+
 // The mission's tile placement the game reads loose first [orig: Terrain_LoadTileInfoFile @0x60a740];
 // without it the terrain's own tiles stand.
 std::string tiles_missing(const AssetGraph &, const GraphEdge &) {
@@ -555,6 +561,12 @@ struct Row {
 		out.row.missing_message = message;
 		return out;
 	}
+	// A name of the kind is never missing (no message: no finding, the graph's Missing for its badge alone).
+	constexpr Row never_missing() const {
+		Row out = *this;
+		out.row.missing_message = nullptr;
+		return out;
+	}
 	// A missing name of the kind is an error refusing no build, saying why in its own words.
 	constexpr Row says(ReferenceMissingMessage message) const {
 		Row out = *this;
@@ -571,6 +583,12 @@ struct Row {
 	constexpr Row message_reads_files() const {
 		Row out = *this;
 		out.row.message_reads_files = true;
+		return out;
+	}
+	// Its symbols reached only by a scope naming their section (ReferenceKindRow::section_only).
+	constexpr Row in_section() const {
+		Row out = *this;
+		out.row.section_only = true;
 		return out;
 	}
 	constexpr Row offers(ReferenceKind kind) const {
@@ -751,6 +769,25 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::Exact)
 	        .scoped(true)
 	        .tolerated(zone_missing)
+	        .row,
+	// A script's V#: a word of the mission's variable bank, the one the BMS variable trigger and action read
+	// and write too [orig: WacScript_ResolveParameter @0x4F2AA4..0x4F2B06, the cap at 255 @0x4f2ac5;
+	// EventTrigger_EvaluateCondition @0x453620 case 4, @0x453aac]. The bank holds every index the leg
+	// reaches, so a V# names its mission's word wherever that mission is (AssetGraph::resolve) and none is
+	// found missing; the mission defines no symbol for it, its uses read by name and scope (referrers_of).
+	Row(ReferenceKind::MissionVariable, "mission_variable", "the variable", "variable")
+	        .symbol(NameCase::Exact)
+	        .scoped(false)
+	        .never_missing()
+	        .row,
+	// A script's event(n): the event of that index, whose latch the condition reads; past the table it
+	// reads 0 [orig: WacCmd_Event @0x4ED1E0, the count test @0x4ed1ea, the latch @0x4ed1f8]. The mission
+	// defines one per event (mission_references), so the event's Used by lists the script lines.
+	Row(ReferenceKind::MissionEventLatch, "mission_event_latch", "the event", "event")
+	        .symbol(NameCase::Exact)
+	        .scoped(false)
+	        .in_section()
+	        .tolerated(event_latch_missing)
 	        .row,
 	// The files the game finds by a mission's name (documents/mission_file_set.h), each by the name
 	// its reader builds [orig: Game_StartMission @0x524360]: the script compiled after game.wac and

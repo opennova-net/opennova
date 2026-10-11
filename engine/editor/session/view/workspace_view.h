@@ -261,7 +261,21 @@ struct WorkspaceView {
 	// over the document's kinds, Document::kinds), whether it lists every row (the empty paths), sorts by
 	// name and filters every row's detail records (master and detail); the Inspector's filter over its
 	// fields; a menu's type for a new window and the screen whose Remove waits on its confirmation (0: none);
-	// a texture's palette remap, from and to. Closed with the document.
+	// a texture's palette remap, from and to. A mission's Logic pane beside its 3D view (S24, the Event board):
+	// whether it shows, the share of the tab its canvas keeps (kLogicSplitLeast to kLogicSplitMost; the pane the
+	// rest), the board's filter, the events it shows folded (by identity), whether it shows only the cards that
+	// need attention; and the pick a chip asked of the views (S24 pick mode): the record whose slot takes what is
+	// clicked in the 3D view or the map, and the slot (0 to 3), none while its record's row is 0. Closed with the
+	// document.
+	struct Pick {
+		NodeAddress record;
+		int slot = -1;
+		bool active() const { return record.row != 0; }
+		bool operator==(const Pick &other) const { return record == other.record && slot == other.slot; }
+		bool operator!=(const Pick &other) const { return !(*this == other); }
+	};
+	static constexpr float kLogicSplitLeast = 0.2f;
+	static constexpr float kLogicSplitMost = 0.8f;
 	struct DocumentView {
 		std::string filter;
 		uint64_t kinds = ~uint64_t(0);
@@ -272,6 +286,12 @@ struct WorkspaceView {
 		std::string new_window_type = "static";
 		uint64_t remove_screen = 0;
 		int remap_from = 0, remap_to = 0;
+		bool logic = false;
+		float logic_split = 0.6f;
+		std::string logic_filter;
+		std::vector<NodeId> logic_folded;
+		bool logic_attention = false;
+		Pick pick;
 	};
 	std::map<std::string, DocumentView> documents;
 

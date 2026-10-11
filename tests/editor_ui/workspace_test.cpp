@@ -2718,8 +2718,9 @@ void test_mission_view_placing() {
 	text = logged_frame(ui);
 	CHECK(in_order(text, { "Paste here", "Frame", "Drop to ground", "Duplicate", "Delete", "Go to item", "Go to model",
 	                         "Show model in Files", "Place another", "Select all like this", "Go to in outline", "Find usages",
-	                         "Show events using this" }),
-	      "the menu of what applies, the entity's jumps among it (DI-18)");
+	                         "Show events using this", "New event", "Add to group", "Select group members",
+	                         "Use in the selected event" }),
+	      "the menu of what applies, the entity's jumps among it (DI-18), the logic made from where it stands (S24)");
 	column = column_window();
 	if (!column) return;
 	ui.activate(popup_item(item_id(column->ID, { "mission_canvas_menu" }), "Select all like this"));
@@ -2970,6 +2971,62 @@ void test_canvas_fill_input() {
 	key(ImGuiKey_PageDown, true);
 	CHECK(in.keyboard.page == -1, "PgDn");
 	key(ImGuiKey_PageDown, false);
+}
+
+// The canvas's keys while the window it is drawn in has the keyboard, never while a pane beside it in the
+// same window has it (S24: the Document tab's Logic pane beside the 3D view, whose Delete is the board's).
+void test_canvas_keys_stay_in_its_window() {
+	NullBackend backend;
+	ViewportCanvas canvas;
+	CanvasInput in;
+	const auto frame = [&]() {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(400.0f, 300.0f));
+		ImGui::Begin("document", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
+		in = CanvasInput();
+		if (ImGui::BeginChild("canvas_column", ImVec2(200.0f, 0.0f))) {
+			if (canvas.begin(200.0f, 0, 0)) {
+				canvas.picture(
+						[](const ViewportPicture &picture) {
+							ImGui::Dummy(ImVec2(float(picture.width), float(picture.height)));
+						},
+						nullptr, false);
+				in = canvas.input();
+			}
+			canvas.end();
+		}
+		ImGui::EndChild();
+		ImGui::SameLine();
+		if (ImGui::BeginChild("logic_pane", ImVec2(0.0f, 0.0f))) ImGui::Button("card", ImVec2(150.0f, 200.0f));
+		ImGui::EndChild();
+		ImGui::End();
+		ImGui::Render();
+		canvas.end_frame();
+	};
+	ImGuiIO &io = ImGui::GetIO();
+	const auto click = [&](float x, float y) {
+		io.AddMousePosEvent(x, y);
+		frame();
+		io.AddMouseButtonEvent(0, true);
+		frame();
+		io.AddMouseButtonEvent(0, false);
+		frame();
+	};
+	const auto key = [&](ImGuiKey which, bool down) {
+		io.AddKeyEvent(which, down);
+		frame();
+	};
+	frame();
+	frame();
+	click(300.0f, 100.0f);
+	key(ImGuiKey_Delete, true);
+	CHECK(!in.keyboard.focused && !in.keyboard.remove, "the pane beside the canvas has the keyboard: its Delete");
+	key(ImGuiKey_Delete, false);
+	click(100.0f, 100.0f);
+	key(ImGuiKey_Delete, true);
+	CHECK(in.keyboard.focused && in.keyboard.remove, "the canvas's own window has it: the canvas's Delete");
+	key(ImGuiKey_Delete, false);
 }
 
 // The OS window's title: the product, the project's name before it, a bullet while a file has
@@ -3282,6 +3339,7 @@ void run_workspace_tests() {
 	test_mission_view_placing();
 	test_preview_steps_aside();
 	test_canvas_fill_input();
+	test_canvas_keys_stay_in_its_window();
 	test_window_title();
 	test_view_event_mailboxes();
 	test_view_event_mailbox_cap();

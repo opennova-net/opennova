@@ -2,6 +2,9 @@
 
 #include <memory>
 
+#include <string>
+
+#include <editor/model/value.h>
 #include <editor/ui/viewport_view.h>
 
 namespace opennova::editor {
@@ -36,12 +39,20 @@ public:
 	MissionViewportView();
 	~MissionViewportView() override;
 
+	// S24: a RevealRecord (a Go to, a Problems row) frames the camera on what the record names
+	// (documents/mission_links' mission_reveal_rows: a logic record every row it names) and centres the map there,
+	// at the next frame the view draws.
+	void reveal(const ViewEvent &event) override;
+
 protected:
 	void draw_ready(Workspace &workspace, const ViewportModel &model, ViewportContext &context) override;
 
 private:
 	struct Tools;
 	std::unique_ptr<Tools> tools_;
+	// The record a reveal asked to frame (row 0 none) and its document.
+	std::string reveal_path_;
+	NodeAddress reveal_;
 };
 
 } // namespace opennova::editor

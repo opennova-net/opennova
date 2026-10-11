@@ -24,6 +24,7 @@
 #include <editor/ui/field_widgets.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/project_find.h>
+#include <editor/ui/record_drag.h>
 #include <editor/ui/text_edit.h>
 #include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
@@ -75,6 +76,7 @@ bool row_line(Workspace &workspace, const Document &document, const RecordReveal
 	const bool selected = view.documents.selection.primary.row == line.address.row ||
 	                      view.documents.selection.holds(line.address);
 	const bool clicked = ImGui::Selectable((shown + id).c_str(), selected);
+	record_drag_source(document, line.address, line.text); // S24: dragged onto a value that names it
 	reveal.scroll_to(line.address, true);
 	const Document::RecordChange change = document.record_change(line.address);
 	ui_kit::change_dot(change, x);
@@ -505,6 +507,7 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		const NodeId id = line.address.child ? line.address.child : line.address.row;
 		ImGui::TreeNodeEx(reinterpret_cast<void *>(static_cast<uintptr_t>(id)), flags, "%s", label.c_str());
 		const bool toggled = ImGui::IsItemToggledOpen();
+		record_drag_source(document, line.address, line.text); // S24: dragged onto a value that names it
 		if (line.branch && toggled) model_.set_open(line, !line.open);
 		reveal_.scroll_to(line.address);
 		const Document::RecordChange change = document.record_change(line.address);
@@ -819,6 +822,7 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 		const float x = ImGui::GetCursorScreenPos().x;
 		if (ImGui::Selectable("##pick", on, ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
 			select(workspace, document, line.address);
+		record_drag_source(document, line.address, line.row_name); // S24: dragged onto a value that names it
 		reveal_.scroll_to(line.address);
 		const Document::RecordChange change = document.record_change(line.address);
 		ui_kit::change_dot(change, x);

@@ -284,6 +284,25 @@ constexpr RequestField kFields[] = {
 			"before the preference), grey (a mid grey, the default), light (a pale grey) or checker (two greys' "
 			"squares, through which alpha shows). A mission's, an environment's, a terrain's and a menu's picture "
 			"draws the game's own." },
+	{ F::KeepSelection, "keep_selection", J::Boolean,
+			"edit_record's batch leaves the selection as it is (S24: a value set from an Event board chip, a line "
+			"added between two): what it adds is not selected and its document not made the active one (left out: "
+			"what it adds is selected)." },
+	{ F::Create, "create", J::Boolean,
+			"set_string_text makes the string first (S24, Show text's New text...): the next free key of the field's "
+			"form (Triggered Text's ID%03i: the lowest number from 1 the section lacks) added to the section the game "
+			"looks it up in, in the mission's own table (<mission>.bin, made from the mission text blank where the "
+			"project has none; never MEDMSSN.BIN, the table the game reads in its place), its text values.text, and "
+			"the field set to that number." },
+	{ F::Event, "event", J::Integer,
+			"play_debug's event (S24 Live): the running game's event by its index (0 the first, as the board's cards "
+			"number it from 1), whose triggers read true at its next check (game_debug's fire_event). Refused "
+			"(play.debug) for an event the game does not report." },
+	{ F::Variable, "variable", J::Integer,
+			"play_debug's variable (S24 Live): the running game's mission variable V0 to V511 set to value "
+			"(game_debug's set_mission_variable)." },
+	{ F::Value, "value", J::Integer,
+			"play_debug's value for variable: a 32-bit whole number, negative too (0 when left out)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

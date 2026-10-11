@@ -10,6 +10,7 @@
 #include <editor/run/process_platform.h>
 #include <editor/session/clip_sounds.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/live_logic.h>
 #include <editor/session/view/workspace_view.h>
 
 namespace opennova::editor {
@@ -153,6 +154,17 @@ public:
 	// plays, it played through, it failed (`error` why). A report of a play stopped or replaced since is passed
 	// over; one that moves the sound moves the Workspace concern.
 	void report_sound(uint64_t serial, WorkspaceView::SoundState state, const std::string &error = std::string());
+	// The running game's mission logic (S24 Live, session/live_logic.h), as the Shell's link to the game's MCP
+	// endpoint drives it (session/live_logic_link.h): whether a game the editor can ask runs, whether to ask it for
+	// its logic (its mission's Logic pane shown), what the game reported (its snapshot's record: the view's live
+	// logic; false, `error` why, for one that is no snapshot), how long it has not answered, the calls play_debug
+	// asked after `after`, oldest first, and what became of one (`words`: the game's refusal), said in Output.
+	bool live_logic_reachable() const;
+	bool live_logic_polling() const;
+	bool report_live_logic(const io::JsonValue &snapshot, std::string &error);
+	void live_logic_quiet(int64_t ms);
+	std::vector<PlayDebugCall> play_debug_since(uint64_t after) const;
+	void answer_play_debug(uint64_t serial, PlayDebugAnswer answer, const std::string &words);
 
 private:
 	struct Impl;
