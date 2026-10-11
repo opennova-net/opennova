@@ -53,6 +53,9 @@ func before_each() -> void:
 	DirAccess.make_dir_recursive_absolute(_profile_dir)
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _profile_dir]))
 	PlayerProfile.load_for(null)
+	# The options' words live in the process's cfg block: a fresh one per case,
+	# its game.cfg in the run directory.
+	GameCfgStore.reset()
 
 
 func after_each() -> void:
@@ -62,8 +65,18 @@ func after_each() -> void:
 	# The live binding model is a static shared with the whole run: restore the
 	# catalog defaults even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
+	GameCfgStore.reset()
 	LaunchFlags.clear_args_override()
 	TestFs.remove_dir_recursive(_profile_dir)
+
+
+# A saved game.cfg in the run directory (version 29 and `lines`), which the
+# next use of the cfg block reads, as a fresh process's start does.
+func _write_cfg(lines: Array[String]) -> void:
+	var file := FileAccess.open(_profile_dir.path_join(GameCfgStore.FILE_NAME), FileAccess.WRITE)
+	file.store_string("version = 29\r\n" + "\r\n".join(lines) + "\r\n")
+	file.close()
+	GameCfgStore.reset()
 
 
 # Build a throwaway resource dir holding main.mnu (+ a sp.mnu jump target and a
@@ -140,11 +153,7 @@ func _cleanup(dir: String) -> void:
 
 
 func test_options_scrolls_seed_original_ranges_and_persisted_values() -> void:
-	var config := ConfigFile.new()
-	config.set_value("audio", "sound_fx_volume", 31)
-	config.set_value("audio", "dialog_volume", 93)
-	config.set_value("audio", "music_volume", 159)
-	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	_write_cfg(["SFXLevel = 31", "DialogueLevel = 93", "music_volume = 159"])
 	# The mouse words are the player profile's current record's.
 	assert_true(PlayerProfile.store().set_word("mouse_sensitivity", 287))
 	assert_true(PlayerProfile.store().set_word("invert_mouse", 1))
@@ -264,9 +273,7 @@ func test_video_options_are_highest_quality_and_read_only() -> void:
 
 
 func test_crosshair_spinlist_uses_shared_options_and_persists_immediately() -> void:
-	var config := ConfigFile.new()
-	config.set_value("player", "crosshair_style", 11)
-	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	_write_cfg(["xhair_appearance = 11"])
 	var options := PlayerOptions.new()
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir, options)
@@ -335,6 +342,8 @@ func test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio() -> void:
 	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1920, 1080)), 1,
 			"a widescreen desktop seeds the widescreen row")
 	var seeded := PlayerOptions.fresh_profile_aspect_mode(PlayerOptions.desktop_size())
+	# No game.cfg: the mount's read finds the defaults and the video test runs.
+	assert_true(GameCfgStore.read_for_mount(null))
 	var options := PlayerOptions.new()
 	assert_eq(options.current().aspect_mode, seeded,
 			"a fresh profile seeds the desktop's verdict")
@@ -361,9 +370,7 @@ func test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio() -> void:
 
 
 func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
-	var config := ConfigFile.new()
-	config.set_value("player", "crosshair_spread", false)
-	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
+	_write_cfg(["xhair_spread = 0"])
 	var options := PlayerOptions.new()
 	var dir := _make_runtime_dir()
 	var shell = _make_runtime_shell(dir, options)
@@ -454,7 +461,6 @@ func test_front_options_accept_keeps_immediate_changes_and_returns_to_main() -> 
 # BACK's pop_screen returns to main.mnu [orig: Options_HandleAcceptOrBack
 # @0x55adcf..0x55ae01; UI_RegisterOptionsCallbacks @0x55d629].
 func test_front_options_back_discards_the_screen_edits_and_returns_to_main() -> void:
-	var saved_config := TestFs.snapshot(PlayerOptions.CONFIG_PATH)
 	var options := PlayerOptions.new()
 	var entry := options.current()
 	entry.music_volume = 40
@@ -466,7 +472,6 @@ func test_front_options_back_discards_the_screen_edits_and_returns_to_main() -> 
 	if shell == null:
 		pending("temp resource root unavailable")
 		_cleanup(dir)
-		saved_config.restore()
 		return
 	var driver: MenuDriver = shell.get_driver()
 	driver.menu_requested.emit("options.mnu", "")
@@ -490,7 +495,6 @@ func test_front_options_back_discards_the_screen_edits_and_returns_to_main() -> 
 				SoundSelector.volume_db_from_255(40), 0.001,
 				"the live music preview is rolled back")
 	_cleanup(dir)
-	saved_config.restore()
 
 
 func test_pause_options_share_state_apply_accept_and_retain_cancel_changes() -> void:

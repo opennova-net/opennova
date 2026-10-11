@@ -1,9 +1,10 @@
 // game.cfg — the player's and the host's persisted settings.
 //
 // A plain-text file in the game's working directory, read at boot, again once
-// weapon.def has loaded, and at every main-menu entry
+// weapon.def has loaded, and at a menu expansion or mod reload
 // [orig: Game_LoadConfig @0x551480; called from Game_Run @0x4A7FBB,
-//  Game_InitSubsystems @0x4A70AB, Menu_InitShellResources @0x552534], and
+//  Game_InitSubsystems @0x4A70AB, Menu_InitShellResources @0x552534, whose one
+//  call is Game_ReloadExpansionAndMods' @0x55281A], and
 // written back whole at every exit and by every screen that changes a setting
 // [orig: Game_SaveConfig @0x54C490; Game_Run @0x4A7FFF among its 15 call sites].
 // The record is docs/gamecfg/game-cfg-re.md (D-GAMECFG-n).

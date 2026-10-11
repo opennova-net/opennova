@@ -4146,6 +4146,13 @@ add_executable(npruntime_host_config_test npruntime/host_config_test.cpp)
 target_link_libraries(npruntime_host_config_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_config_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_config COMMAND npruntime_host_config_test)
+# The process's cfg block (D-NET-335, inmatch/game_config_block.h): the start's,
+# the mount's and the reload's reads of game.cfg, the mpreset exit at a read,
+# the save, and a ServerCommand before and after the match binds (D-NET-383).
+add_executable(npruntime_game_config_block_test npruntime/game_config_block_test.cpp)
+target_link_libraries(npruntime_game_config_block_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_game_config_block_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_game_config_block COMMAND npruntime_game_config_block_test)
 # The host's map rotation (D-NET-331): the list ops and cursor rules, the
 # round-end advance and its REPLAY wrap, the host screen's seed, the round end's
 # exit reason under REPLAY / LASTGAME, and the map change's router over the

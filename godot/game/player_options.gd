@@ -2,24 +2,25 @@ class_name PlayerOptions
 extends RefCounted
 
 ## Process-lifetime owner for the player-facing options shared by the front-end
-## and pause menus (retail's game.cfg words). Values are normalized at the
-## boundary, saved together, and applied through one runtime seam so neither
-## menu needs its own settings copy. The controls words (the mouse, the
-## joystick, auto-reload, auto-medic) and the key bindings are the player
-## profile's instead: the Options screens edit the current player.sav record
-## (engine menu::OptionsScreen over runtime/profile/profile_controls.h).
+## and pause menus. They are retail's game.cfg words, held in the process's cfg
+## block (GameCfgStore) under the keys game.cfg spells them with, and written to
+## game.cfg at the block's save points (the in-game options' Accept, a mission
+## start, the exit; docs/gamecfg/game-cfg-re.md): the front-end Options edit the
+## block and their changes reach the file at the next save point, as retail's
+## do. Values are normalized at the boundary and applied through one runtime
+## seam so neither menu needs its own settings copy. The controls words (the
+## mouse, the joystick, auto-reload, auto-medic) and the key bindings are the
+## player profile's instead: the Options screens edit the current player.sav
+## record (engine menu::OptionsScreen over runtime/profile/profile_controls.h).
 
-const CONFIG_PATH := "user://opennova.cfg"
-
-const AUDIO_SECTION := "audio"
-const SOUND_FX_VOLUME_KEY := "sound_fx_volume"
-const DIALOG_VOLUME_KEY := "dialog_volume"
+const SOUND_FX_VOLUME_KEY := "SFXLevel"
+const DIALOG_VOLUME_KEY := "DialogueLevel"
 const MUSIC_VOLUME_KEY := "music_volume"
 
-const PLAYER_SECTION := "player"
-const CROSSHAIR_STYLE_KEY := "crosshair_style"
-const CROSSHAIR_COLOR_KEY := "crosshair_color"
-const CROSSHAIR_SPREAD_KEY := "crosshair_spread"
+# The crosshair's style (cross%02d.tga), colour and spread words.
+const CROSSHAIR_STYLE_KEY := "xhair_appearance"
+const CROSSHAIR_COLOR_KEY := "xhair_color"
+const CROSSHAIR_SPREAD_KEY := "xhair_spread"
 const ASPECT_MODE_KEY := "display_16x9"
 # The two tip options persist as retail's game.cfg words (default 1), which
 # the Options rows MR_CLIPPY_KEYBOARD / MR_CLIPPY_HINTS edit (engine
@@ -31,7 +32,6 @@ const GAMEPLAY_TIPS_KEY := "enable_gameplaytips"
 # (0..3), which the Options rows OBJECTPOLY / OBJECTDETAIL edit and the world
 # copies at each mission start (engine renderer/object_lod.h carries the
 # witness; GameWorld re-exports the fresh profile's word and the load clamp).
-const DISPLAY_SECTION := "display"
 const OBJECT_POLYDETAIL_KEY := "object_polydetail"
 # The texture filter persists as retail's game.cfg word `texfilter_level`
 # (0..3), which the front-end Options row TEXFILTER edits; the model effects
@@ -143,36 +143,38 @@ func current() -> State:
 	return _state.copy()
 
 
-## Normalize, atomically persist, apply the device settings, then publish the
-## new detached state. Live application is retail's preview behavior; the
-## pause dialog's OPT_CANCEL and the front-end OPTIONS BACK roll the model back
-## to its entry snapshot through OptionsMenuController (docs/mnu/menu-re.md
-## "The in-game options dialog").
+## Normalize, write the words into the cfg block, apply the device settings,
+## then publish the new detached state. Live application is retail's preview
+## behavior; the pause dialog's OPT_CANCEL and the front-end OPTIONS BACK roll
+## the model back to its entry snapshot through OptionsMenuController
+## (docs/mnu/menu-re.md "The in-game options dialog"). The block reaches
+## game.cfg at its next save point.
 func update(state: State) -> void:
 	if state == null:
 		return
 	_state = _normalized(state)
-	ConfigStore.update(CONFIG_PATH, func(config: ConfigFile) -> void:
-		config.set_value(AUDIO_SECTION, SOUND_FX_VOLUME_KEY,
-				_state.sound_fx_volume)
-		config.set_value(AUDIO_SECTION, DIALOG_VOLUME_KEY,
-				_state.dialog_volume)
-		config.set_value(AUDIO_SECTION, MUSIC_VOLUME_KEY,
-				_state.music_volume)
-		config.set_value(PLAYER_SECTION, CROSSHAIR_STYLE_KEY,
-				_state.crosshair_style)
-		config.set_value(PLAYER_SECTION, CROSSHAIR_COLOR_KEY,
-				_state.crosshair_color)
-		config.set_value(PLAYER_SECTION, CROSSHAIR_SPREAD_KEY,
-				_state.crosshair_spread)
-		config.set_value(PLAYER_SECTION, ASPECT_MODE_KEY, _state.aspect_mode)
-		config.set_value(PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1 if _state.keyboard_tips else 0)
-		config.set_value(PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1 if _state.gameplay_tips else 0)
-		config.set_value(DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, _state.object_polydetail)
-		config.set_value(DISPLAY_SECTION, TEXFILTER_LEVEL_KEY, _state.texfilter_level)
-		config.set_value(DISPLAY_SECTION, PARTICLE_DENSITY_KEY, _state.particle_density)
-		config.set_value(DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY, _state.texcompression_level)
-	)
+	var config := GameCfgStore.block()
+	config.set_word(SOUND_FX_VOLUME_KEY, _state.sound_fx_volume)
+	config.set_word(DIALOG_VOLUME_KEY, _state.dialog_volume)
+	config.set_word(MUSIC_VOLUME_KEY, _state.music_volume)
+	config.set_word(CROSSHAIR_STYLE_KEY, _state.crosshair_style)
+	config.set_word(CROSSHAIR_COLOR_KEY, _state.crosshair_color)
+	config.set_word(CROSSHAIR_SPREAD_KEY, 1 if _state.crosshair_spread else 0)
+	config.set_word(ASPECT_MODE_KEY, _state.aspect_mode)
+	config.set_word(KEYBOARD_TIPS_KEY, 1 if _state.keyboard_tips else 0)
+	config.set_word(GAMEPLAY_TIPS_KEY, 1 if _state.gameplay_tips else 0)
+	config.set_word(OBJECT_POLYDETAIL_KEY, _state.object_polydetail)
+	config.set_word(TEXFILTER_LEVEL_KEY, _state.texfilter_level)
+	config.set_word(PARTICLE_DENSITY_KEY, _state.particle_density)
+	config.set_word(TEXCOMPRESSION_LEVEL_KEY, _state.texcompression_level)
+	apply()
+	changed.emit(current())
+
+
+## Take the words from the cfg block again (after a read of game.cfg, or the
+## first launch's video test), apply them and publish the state.
+func reload() -> void:
+	_state = _load_state()
 	apply()
 	changed.emit(current())
 
@@ -211,86 +213,40 @@ static func desktop_size() -> Vector2i:
 
 
 func _load_state() -> State:
-	return _normalized(State.new(
-			int(ConfigStore.read(CONFIG_PATH, AUDIO_SECTION,
-					SOUND_FX_VOLUME_KEY, DEFAULT_VOLUME)),
-			int(ConfigStore.read(CONFIG_PATH, AUDIO_SECTION,
-					DIALOG_VOLUME_KEY, DEFAULT_VOLUME)),
-			int(ConfigStore.read(CONFIG_PATH, AUDIO_SECTION,
-					MUSIC_VOLUME_KEY, DEFAULT_VOLUME)),
-			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
-					CROSSHAIR_STYLE_KEY, DEFAULT_CROSSHAIR_STYLE)),
-			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
-					CROSSHAIR_COLOR_KEY, DEFAULT_CROSSHAIR_COLOR)),
-			bool(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
-					CROSSHAIR_SPREAD_KEY, DEFAULT_CROSSHAIR_SPREAD)),
-			_load_aspect_mode(),
-			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1)) != 0,
-			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1)) != 0,
-			_load_object_polydetail(),
-			_load_texfilter_level(),
-			_load_particle_density(),
-			_load_texcompression_level()))
+	var config := GameCfgStore.block()
+	return _normalized(
+		State.new(
+			config.get_word(SOUND_FX_VOLUME_KEY),
+			config.get_word(DIALOG_VOLUME_KEY),
+			config.get_word(MUSIC_VOLUME_KEY),
+			config.get_word(CROSSHAIR_STYLE_KEY),
+			config.get_word(CROSSHAIR_COLOR_KEY),
+			config.get_word(CROSSHAIR_SPREAD_KEY) != 0,
+			config.get_word(ASPECT_MODE_KEY),
+			config.get_word(KEYBOARD_TIPS_KEY) != 0,
+			config.get_word(GAMEPLAY_TIPS_KEY) != 0,
+			config.get_word(OBJECT_POLYDETAIL_KEY),
+			config.get_word(TEXFILTER_LEVEL_KEY),
+			config.get_word(PARTICLE_DENSITY_KEY),
+			config.get_word(TEXCOMPRESSION_LEVEL_KEY)
+		)
+	)
 
 
-# The persisted object detail, clamped as the config load clamps it, or the
-# fresh profile's word, written at once as the aspect seed is.
-static func _load_object_polydetail() -> int:
-	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY):
-		return GameWorld.clamp_object_detail(int(ConfigStore.read(CONFIG_PATH,
-				DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY,
-				GameWorld.object_detail_fresh_profile())))
-	var seeded := GameWorld.object_detail_fresh_profile()
-	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, OBJECT_POLYDETAIL_KEY, seeded)
-	return seeded
-
-
-# The persisted texture filter, clamped as the config load clamps it, or the
-# fresh profile's word, written at once as the video test saves it.
-static func _load_texfilter_level() -> int:
-	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, TEXFILTER_LEVEL_KEY):
-		return GameWorld.clamp_texfilter_level(int(ConfigStore.read(CONFIG_PATH,
-				DISPLAY_SECTION, TEXFILTER_LEVEL_KEY,
-				GameWorld.texfilter_level_fresh_profile())))
-	var seeded := GameWorld.texfilter_level_fresh_profile()
-	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, TEXFILTER_LEVEL_KEY, seeded)
-	return seeded
-
-
-# The persisted particle density, clamped as the config load clamps it, or the
-# fresh profile's word, written at once as the video test saves it.
-static func _load_particle_density() -> int:
-	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, PARTICLE_DENSITY_KEY):
-		return GameWorld.clamp_particle_density(int(ConfigStore.read(CONFIG_PATH,
-				DISPLAY_SECTION, PARTICLE_DENSITY_KEY,
-				GameWorld.particle_density_fresh_profile())))
-	var seeded := GameWorld.particle_density_fresh_profile()
-	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, PARTICLE_DENSITY_KEY, seeded)
-	return seeded
-
-
-# The persisted texture compression as written (the config load never clamps
-# it), or the fresh profile's word, written at once as the video test saves it.
-static func _load_texcompression_level() -> int:
-	if ConfigStore.has_key(CONFIG_PATH, DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY):
-		return int(ConfigStore.read(CONFIG_PATH, DISPLAY_SECTION,
-				TEXCOMPRESSION_LEVEL_KEY, GameWorld.texcompression_level_fresh_profile()))
-	var seeded := GameWorld.texcompression_level_fresh_profile()
-	ConfigStore.write(CONFIG_PATH, DISPLAY_SECTION, TEXCOMPRESSION_LEVEL_KEY, seeded)
-	return seeded
-
-
-# The persisted cfg word, or the one-time desktop seed a fresh profile writes
-# before anything reads it (retail saves the whole config right after the
-# video test decides the word).
-static func _load_aspect_mode() -> int:
-	# Any stored word (the native -1 included) wins; only an absent key seeds.
-	if ConfigStore.has_key(CONFIG_PATH, PLAYER_SECTION, ASPECT_MODE_KEY):
-		return int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
-				ASPECT_MODE_KEY, DEFAULT_ASPECT_MODE))
-	var seeded := fresh_profile_aspect_mode(desktop_size())
-	ConfigStore.write(CONFIG_PATH, PLAYER_SECTION, ASPECT_MODE_KEY, seeded)
-	return seeded
+## The first launch's video test over a fresh profile: the words it decides
+## written into `config` (GameCfgStore saves the block at once, as the test
+## does). The aspect word is the primary desktop's ratio, the graphics words the
+## fresh profile's rungs (GameWorld re-exports the engine's). Retail runs the
+## test when the cfg's adapter name or GUID differs from the device's, which a
+## missing game.cfg always does; OpenNova keeps no adapter identity, so the
+## fresh profile is the read that found no file or discarded it for its version
+## (docs/gamecfg/game-cfg-re.md "The process's block", D-GAMECFG-3).
+static func seed_fresh_profile(config: GameConfigBlock) -> void:
+	config.set_word(ASPECT_MODE_KEY, fresh_profile_aspect_mode(desktop_size()))
+	config.set_word(OBJECT_POLYDETAIL_KEY, GameWorld.object_detail_fresh_profile())
+	config.set_word(TEXFILTER_LEVEL_KEY, GameWorld.texfilter_level_fresh_profile())
+	config.set_word(PARTICLE_DENSITY_KEY, GameWorld.particle_density_fresh_profile())
+	config.set_word(TEXCOMPRESSION_LEVEL_KEY, GameWorld.texcompression_level_fresh_profile())
 
 
 static func _normalized(state: State) -> State:

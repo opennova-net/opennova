@@ -93,6 +93,7 @@ void NovaWorldClient::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("start"), &NovaWorldClient::start);
 	ClassDB::bind_method(D_METHOD("stop"), &NovaWorldClient::stop);
+	ClassDB::bind_method(D_METHOD("disconnect_at_exit"), &NovaWorldClient::disconnect_at_exit);
 	ClassDB::bind_method(D_METHOD("get_state"), &NovaWorldClient::get_state);
 	ClassDB::bind_method(D_METHOD("is_session_active"), &NovaWorldClient::is_session_active);
 	ClassDB::bind_method(D_METHOD("is_authenticated"), &NovaWorldClient::is_authenticated);
@@ -1129,6 +1130,16 @@ void NovaWorldClient::on_host_request_completed(int result, int response_code,
 	default:
 		fail_host_leg(opennova::cp1252_to_gd(r.reason));
 		return;
+	}
+}
+
+void NovaWorldClient::disconnect_at_exit() {
+	opennova::ClientSession *session = lobby_.session();
+	if (session == nullptr || !lobby_.is_open() || !session->is_verified())
+		return;
+	const std::vector<uint8_t> goodbye = session->build_goodbye();
+	for (size_t i = 0; i < session->disconnect_burst_count(); ++i) {
+		lobby_.send(goodbye);
 	}
 }
 

@@ -1,8 +1,13 @@
 #include <runtime/inmatch/host_config.h>
 
+#include <base/io/strutil.h>
+#include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/inmatch/host_settings.h>
+#include <runtime/inmatch/server_session.h>
+
+#include <memory>
 
 namespace opennova::inmatch {
 
@@ -27,6 +32,18 @@ gamecfg::WeaponRoster game_cfg_weapon_roster(const def::DefWeaponsFile &weapons)
 		// [orig: @0x54D7B8..0x54D7BF: the row's loadout_subclasses starts the countdown]
 		if (w.loadout_subclasses != 0) subclass_rows = w.loadout_subclasses;
 	}
+	return roster;
+}
+
+gamecfg::WeaponRoster game_cfg_weapon_roster(const ResourceIndex &index) {
+	std::vector<uint8_t> bytes;
+	if (!index.read_file("weapon.def", bytes))
+		return {};
+	def::DefWeaponsFile weapons = {};
+	gamecfg::WeaponRoster roster;
+	if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &weapons) == 0)
+		roster = game_cfg_weapon_roster(weapons);
+	def::def_free_weapons(&weapons);
 	return roster;
 }
 
@@ -177,6 +194,34 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// NapiNPServer_GetSendHoldoffTicks @0x4C4AD1, lanMode_544].
 	config.lan_mode = static_cast<uint32_t>(cfg.lanmode);
 	return host;
+}
+
+void store_server_command_config(
+		gamecfg::GameCfg &block, std::string_view verb, const GameConfig &config) {
+	// The executor capped the strings to the block's widths (31 / 127).
+	if (strutil::iequals(verb, "SetServerName"))
+		block.game_name = config.server_name; // @0x4D2CFC
+	else if (strutil::iequals(verb, "SetServerMsg"))
+		block.servermsg = config.custom_text; // @0x4D2DAD
+	else if (strutil::iequals(verb, "SetMPReset"))
+		block.mp_reset = config.multiplayer_reset; // @0x4D2E28
+}
+
+ServerCommandOutcome run_host_server_command(NapiNPServerCtx *ctx, world::World *world,
+		ConnectionMode pre_session_mode, gamecfg::GameCfg *block, std::string_view verb,
+		std::string_view target_suffix, const std::vector<std::string> &args) {
+	std::unique_ptr<NapiNPServerCtx> pre_session;
+	if (ctx == nullptr) {
+		pre_session = std::make_unique<NapiNPServerCtx>();
+		set_connection_mode(*pre_session, pre_session_mode);
+		ctx = pre_session.get();
+		world = nullptr;
+	}
+	const ServerCommandOutcome outcome =
+			Server_ExecuteServerCommand(*ctx, world, verb, target_suffix, args);
+	if (outcome.config_changed && block != nullptr)
+		store_server_command_config(*block, verb, ctx->config);
+	return outcome;
 }
 
 } // namespace opennova::inmatch

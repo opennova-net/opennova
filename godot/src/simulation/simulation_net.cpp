@@ -4,6 +4,7 @@
 #include "simulation/simulation_internal.h"
 #include "network/join_screen_status.h"
 #include "network/connection_error.h"
+#include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
 #include "network/udp_pump_datagram_socket.h"
@@ -72,6 +73,11 @@ opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type)
 		cfg.config = inmatch::singleplayer_game_config(p_game_type,
 				player_.profile_record_set ? &player_.profile_record : nullptr);
 	}
+	// Every session create reads the process's cfg block word, single player's
+	// and a host's alike (engine: inmatch/game_config_block.h; the create's
+	// ProcessExit, inmatch/server_session.h).
+	if (net_.game_config.is_valid())
+		cfg.config.multiplayer_reset = net_.game_config->native().cfg().mp_reset;
 	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
 	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
 	cfg.network_type = is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
@@ -351,17 +357,24 @@ Simulation::ServerCommandResult Simulation::execute_server_command(const String 
 		const String &p_target, const PackedStringArray &p_args) {
 	ServerCommandResult out;
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
-	if (ctx == nullptr) return out;
 	std::vector<std::string> args;
 	args.reserve(static_cast<size_t>(p_args.size()));
 	for (int i = 0; i < p_args.size(); ++i) args.push_back(opennova::to_std(p_args[i]));
+	// No host context yet: the session-less one, in the listen host's own mode
+	// (engine: inmatch/host_config.h run_host_server_command).
 	const opennova::inmatch::ServerCommandOutcome outcome =
-			opennova::inmatch::Server_ExecuteServerCommand(*ctx,
-					kernel_ != nullptr ? &kernel_->world : nullptr, opennova::to_std(p_verb),
-					opennova::to_std(p_target), args);
+			opennova::inmatch::run_host_server_command(ctx,
+					kernel_ != nullptr ? &kernel_->world : nullptr,
+					net_.host_serve_and_play ? opennova::inmatch::ConnectionMode::HostClient
+											 : opennova::inmatch::ConnectionMode::HostOnly,
+					net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr,
+					opennova::to_std(p_verb), opennova::to_std(p_target), args);
 	out.handled = outcome.handled;
 	out.stop_hosting = outcome.stop_hosting;
 	out.config_changed = outcome.config_changed;
+	if (ctx == nullptr)
+		return out;
+	out.has_config = true;
 	if (outcome.config_changed) {
 		// The sim's host session record is what the next session build reads.
 		net_.host_session_config.server_name = ctx->config.server_name;

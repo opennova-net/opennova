@@ -104,6 +104,7 @@ var _shutdown_resources_released := false
 var _quit_requested := false
 var _quit_drain_pending := false
 var _quit_policy_installed := false
+var _process_exit_pending := false  # exit_process ran: the process ends without a save
 var _previous_auto_accept_quit := true
 var _shell_presentation := ShellPresentationSessionScript.new()
 # One process-lifetime settings owner feeds both menu surfaces and every world
@@ -265,6 +266,12 @@ func _ready() -> void:
 		push_warning("OpenNova: --resource-dir needs a path. Usage: opennova.exe [-- --resource-dir <path> [--loose-root] [/d]]")
 		get_tree().quit(2)
 		return
+	# The start's read of game.cfg (GameCfgStore, the first use of the block):
+	# a file that sets mpreset ends the process here with exit code 0, before
+	# anything mounts and with nothing saved (docs/gamecfg/game-cfg-re.md).
+	if GameCfgStore.block().is_reset_exit():
+		exit_process(0)
+		return
 	_previous_auto_accept_quit = get_tree().auto_accept_quit
 	get_tree().auto_accept_quit = false
 	_quit_policy_installed = true
@@ -308,6 +315,10 @@ func _ready() -> void:
 			_hud if _hud != null else self, func() -> void: _state = State.DEPLOY,
 			_leave_screen.bind(State.DEPLOY))
 	_world.join_deploy_pick_required.connect(_on_join_deploy_pick_required)
+	# The process's cfg block every mission's session create reads, and the
+	# create's mpreset exit (docs/net/novaworld-net-re.md D-NET-385).
+	_world.set_game_config(GameCfgStore.block())
+	_world.process_exit_requested.connect(exit_process)
 	_world.join_admission_ready.connect(_on_join_admission_ready)
 	_world.session_lost.connect(_on_session_lost)
 	# The one interactive-music context is the shell's (MusicService); the
@@ -365,10 +376,12 @@ func _ready() -> void:
 		# No --resource-dir: OpenNova's own game (ADR 0048), whose build is game
 		# data as an install is, so the launch shortcuts below follow it too.
 		if not _enter_bundled_menu():
-			get_tree().quit(1)
+			_quit_failed_boot()
 			return
 	elif not _enter_menu(dir):
-		get_tree().quit(1)
+		_quit_failed_boot()
+		return
+	if _process_exit_pending:
 		return
 	# F6 is still the real standalone game and normal loading presentation; it
 	# only selects the exact saved top-level loose BMS instead of an archive row.
@@ -681,8 +694,17 @@ func _enter_menu(dir: String) -> bool:
 	# does not parse (every binding label then renders its literal fallback).
 	Strings.register_table(Strings.TABLE_KEYHELP, Strings.load_rtxt(_root, "keyhelp.bin"))
 	if not _menu_shell.setup(_root):
-		push_warning("MainGame: no menu found in resource dir (looked for %s)"
-				% _menu_shell.main_menu_file)
+		push_warning(
+			"MainGame: no menu found in resource dir (looked for %s)" % _menu_shell.main_menu_file
+		)
+	# game.cfg over the mount (GameCfgStore.read_for_mount): the first mount's
+	# read with its weapon table and gametext texts (and the first launch's
+	# video test on a fresh profile), another game's the reload; a read that
+	# sets mpreset ends the process with exit code 0.
+	if not GameCfgStore.read_for_mount(_root):
+		exit_process(0)
+		return true
+	_player_options.reload()
 	# The player profile loads after the menu's text tables, as the original's
 	# menu start loads game.bin before it (engine: runtime/profile/player_profiles.h).
 	refresh_local_profile_for_mount()
@@ -714,6 +736,8 @@ func _enter_bundled_menu() -> bool:
 	_root = root
 	if not _enter_menu(root.get_root_dir()):
 		return false
+	if _process_exit_pending:
+		return true
 	# The boot marker the CLI startup contract test reads (--verbose).
 	print_verbose("OpenNova: bundled menu up from %s" % root.get_root_dir())
 	return true
@@ -846,6 +870,12 @@ func _wire_shell() -> void:
 # took (the expansion's weapon.sav), the one the menu shows and the next spawn
 # uses (refresh_local_profile_for_mount hands it to PLAYER_INFO).
 func _on_game_reloaded() -> void:
+	# game.cfg is saved and read again over the switch, as the original's
+	# expansion reload does; a read that sets mpreset ends the process.
+	if not GameCfgStore.read_for_mount(_root):
+		exit_process(0)
+		return
+	_player_options.reload()
 	refresh_local_profile_for_mount()
 
 
@@ -860,6 +890,7 @@ func _on_ingame_controls_accepted() -> void:
 	if sim != null:
 		sim.apply_ingame_options(PlayerProfile.store())
 	PlayerProfile.save()
+	GameCfgStore.save()
 
 
 # PLAYER_INFO ACCEPT writes the name and both side records into the current
@@ -937,10 +968,13 @@ func _on_start_requested(bms_name: String) -> void:
 
 # The single-player start's profile legs: the started mission's campaign index
 # into the current record (the catalog's, -1 on every row), then the profile
-# saved ahead of the session (engine: PlayerProfiles.record_mission_start).
+# and game.cfg saved ahead of the session, whose create reads the cfg block's
+# mpreset word (engine: PlayerProfiles.record_mission_start;
+# docs/gamecfg/game-cfg-re.md, the save points).
 func _save_profile_for_single_player() -> void:
 	PlayerProfile.store().record_mission_start(-1)
 	PlayerProfile.save()
+	GameCfgStore.save()
 
 
 ## Boot an exact loose mission through the same loading
@@ -1004,7 +1038,49 @@ func request_quit() -> void:
 			_finish_quit()
 		return
 	_quit_requested = true
+	# The main loop's exit saves game.cfg before the shutdown
+	# (docs/gamecfg/game-cfg-re.md, the save points).
+	GameCfgStore.save()
 	_complete_runtime_shutdown(begin_runtime_shutdown())
+
+
+## The process exit on the cfg block's mpreset word: a read of game.cfg that
+## sets it (the start's, a mount's) or a session create that reads it
+## (GameWorld.process_exit_requested). The process ends with `code` 0 there:
+## nothing is saved (neither game.cfg nor the profile), the NovaWorld session
+## the shell holds sends its goodbye burst alone, and the runtime comes down
+## (docs/net/novaworld-net-re.md D-NET-385). Out of the tree only the latch
+## and the teardown run (the lifecycle tests' read seam).
+func exit_process(code := 0) -> void:
+	if _process_exit_pending:
+		return
+	_process_exit_pending = true
+	_quit_requested = true
+	var client: NovaWorldClient = null
+	if _world != null:
+		client = _world.release_novaworld_client() as NovaWorldClient
+	if client != null:
+		client.disconnect_at_exit()
+		client.queue_free()
+	if _net != null:
+		_net.disconnect_at_exit()
+	begin_runtime_shutdown()
+	finish_runtime_shutdown()
+	_restore_quit_policy()
+	if is_inside_tree():
+		get_tree().quit(code)
+
+
+## True once exit_process ran (ADR 0018 read seam for the lifecycle tests).
+func is_process_exit_pending() -> bool:
+	return _process_exit_pending
+
+
+# A boot whose mount failed ends with exit code 1 after the main loop's save
+# of game.cfg (the read already ran).
+func _quit_failed_boot() -> void:
+	GameCfgStore.save()
+	get_tree().quit(1)
 
 
 ## True while request_quit() is waiting for the music playbacks to drain
@@ -1056,6 +1132,10 @@ func start_world_load(load_info: LoadingScreenInfo, operation: Callable,
 	if load_info != null and not load_info.in_session:
 		_sp_restart_info = load_info
 		_sp_restart_loader = operation
+	elif load_info != null:
+		# Every multiplayer mission start saves game.cfg, the first and each
+		# map change's (docs/gamecfg/game-cfg-re.md, the save points).
+		GameCfgStore.save()
 	_world_load_pending = true
 	_world.set_local_player_spawn_loadout(PlayerSpawnLoadout.from_profile(_chosen_avatar))
 	_begin_world_load()
@@ -1076,6 +1156,8 @@ func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 	MusicService.stop_context()
 	if _lan_session != null:
 		_lan_session.stop()
+	# A join's mission start saves game.cfg as every multiplayer one does.
+	GameCfgStore.save()
 	_world_load_pending = true
 	_world.set_local_player_spawn_loadout(PlayerSpawnLoadout.from_profile(_chosen_avatar))
 	_begin_world_load()
@@ -1605,9 +1687,11 @@ static func post_mission_error_text(route: PostMissionRoute) -> String:
 # leave a frozen canvas, so the web build ignores EXIT (ADR 0049).
 func _on_exit_to_desktop() -> void:
 	if not OS.has_feature("web"):
-		# The main menu's EXIT saves the player profile before the game quits
-		# (engine: runtime/profile/player_profiles.h, the save points).
+		# The main menu's EXIT saves the player profile and game.cfg before the
+		# game quits (engine: runtime/profile/player_profiles.h, the save
+		# points; docs/gamecfg/game-cfg-re.md).
 		PlayerProfile.save()
+		GameCfgStore.save()
 		request_quit()
 
 

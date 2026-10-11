@@ -9,6 +9,7 @@
 #include "mission/mission_root.h"
 #include "network/novaworld_client.h"
 #include <net/npwire/peer_addr.h>
+#include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/mission_exit.h> // the post-mission router
 #include "object/avatar_database.h"
 #include "resource_index/launch_flags.h"
@@ -840,18 +841,41 @@ void SessionDrive::unbind_nw_host() {
 	}
 }
 
+// A ServerCommand the hosting NovaWorld session received. Before the match
+// has a host context (the hosting wait: the load before the session create)
+// it runs on a session-less one, where SetMPReset alone passes; a config
+// change lands in the process's cfg block, which is saved at once
+// (engine: inmatch/host_config.h run_host_server_command,
+// docs/net/novaworld-net-re.md D-NET-383).
 void SessionDrive::on_nw_host_server_command(const String &p_verb, const String &p_target,
 		const PackedStringArray &p_args) {
 	Ref<Simulation> sim = world_->get_sim();
-	if (sim.is_null()) {
-		return;
+	Ref<GameConfigBlock> block = world_->get_game_config();
+	Simulation::ServerCommandResult result;
+	if (sim.is_valid()) {
+		result = sim->execute_server_command(p_verb, p_target, p_args);
+	} else {
+		std::vector<std::string> args;
+		for (int i = 0; i < p_args.size(); ++i)
+			args.push_back(opennova::to_std(p_args[i]));
+		const bool dedicated = pending_host_.is_valid() && !pending_host_->get_serve_and_play();
+		const opennova::inmatch::ServerCommandOutcome outcome =
+				opennova::inmatch::run_host_server_command(nullptr, nullptr,
+						dedicated ? opennova::inmatch::ConnectionMode::HostOnly
+								  : opennova::inmatch::ConnectionMode::HostClient,
+						block.is_valid() ? &block->native().cfg() : nullptr,
+						opennova::to_std(p_verb), opennova::to_std(p_target), args);
+		result.handled = outcome.handled;
+		result.stop_hosting = outcome.stop_hosting;
+		result.config_changed = outcome.config_changed;
 	}
-	const Simulation::ServerCommandResult result =
-			sim->execute_server_command(p_verb, p_target, p_args);
 	if (!result.handled) {
 		UtilityFunctions::print_verbose(vformat(
 				"SessionDrive: NovaWorld ServerCommand '%s%s' was not executed", p_verb, p_target));
 		return;
+	}
+	if (result.config_changed && block.is_valid()) {
+		block->save();
 	}
 	NovaWorldClient *client = nw_client();
 	if (result.stop_hosting) {
@@ -863,7 +887,7 @@ void SessionDrive::on_nw_host_server_command(const String &p_verb, const String 
 		}
 		return;
 	}
-	if (result.config_changed && client != nullptr) {
+	if (result.config_changed && client != nullptr && result.has_config) {
 		// The changed columns ride the session's next refresh as its dirty delta.
 		client->host_role().set_server_name(opennova::to_std(result.server_name));
 		client->host_role().set_server_message(opennova::to_std(result.server_message));

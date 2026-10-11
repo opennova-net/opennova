@@ -624,6 +624,19 @@ func _adopt_held_novaworld_client() -> void:
 	_novaworld_client = null
 
 
+## The process exit's teardown of a NovaWorld session the controller holds
+## (MainGame.exit_process): its goodbye burst alone, no stop statement.
+func disconnect_at_exit() -> void:
+	var panel_client: NovaWorldClient = null
+	if _novaworld_panel != null:
+		panel_client = _novaworld_panel.release_client()
+	for client: NovaWorldClient in [_novaworld_client, panel_client]:
+		if client != null:
+			client.disconnect_at_exit()
+			client.queue_free()
+	_novaworld_client = null
+
+
 # An abandoned NovaWorld join leaves its play and the session.
 func _release_novaworld_client() -> void:
 	if _novaworld_client != null:

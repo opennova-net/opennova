@@ -1,19 +1,22 @@
 extends GutTest
 
-## Shared player options: one normalized persisted state feeds both menu
-## surfaces and the device/runtime application seams.
+## Shared player options: one normalized state over the process's cfg block
+## (GameCfgStore, retail's game.cfg words) feeds both menu surfaces and the
+## device/runtime application seams; the block reaches game.cfg at its save
+## points.
 
 const BUS_NAMES := [&"SFX", &"Ambient", &"Voice", &"Music"]
 
-var _config: TestFs.Snapshot
 var _saved_bus_volumes: Dictionary = {}
+var _run_dir := ""
 
 
 func before_each() -> void:
-	_config = TestFs.snapshot(PlayerOptions.CONFIG_PATH)
-	if _config.existed:
-		DirAccess.remove_absolute(
-				ProjectSettings.globalize_path(PlayerOptions.CONFIG_PATH))
+	# The block's game.cfg in a working directory of this test's own.
+	_run_dir = OS.get_cache_dir().path_join("opennova_player_options_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(_run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
+	GameCfgStore.reset()
 	_saved_bus_volumes.clear()
 	for bus_name: StringName in BUS_NAMES:
 		var bus := AudioServer.get_bus_index(bus_name)
@@ -22,11 +25,26 @@ func before_each() -> void:
 
 
 func after_each() -> void:
-	_config.restore()
+	GameCfgStore.reset()
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(_run_dir)
 	for bus_name: StringName in _saved_bus_volumes:
 		var bus := AudioServer.get_bus_index(bus_name)
 		if bus >= 0:
 			AudioServer.set_bus_volume_db(bus, float(_saved_bus_volumes[bus_name]))
+
+
+# A game.cfg in the run directory (version 29 and `lines`), read by the next
+# block: the start's read of a fresh process.
+func _write_cfg(lines: Array[String]) -> void:
+	var file := FileAccess.open(_run_dir.path_join(GameCfgStore.FILE_NAME), FileAccess.WRITE)
+	file.store_string("version = 29\r\n" + "\r\n".join(lines) + "\r\n")
+	file.close()
+	GameCfgStore.reset()
+
+
+func _saved_cfg() -> String:
+	return FileAccess.get_file_as_string(_run_dir.path_join(GameCfgStore.FILE_NAME))
 
 
 func test_defaults_and_current_snapshot_are_detached() -> void:
@@ -36,32 +54,30 @@ func test_defaults_and_current_snapshot_are_detached() -> void:
 	assert_eq(state.dialog_volume, 192)
 	assert_eq(state.music_volume, 192)
 	assert_eq(state.crosshair_style, 0)
-	assert_eq(state.crosshair_color, 0xFFFFFF,
-			"the retail default crosshair colour is white")
+	assert_eq(state.crosshair_color, 0xFFFFFF, "the retail default crosshair colour is white")
 	assert_true(state.crosshair_spread, "the retail default spread is on")
-	assert_eq(state.aspect_mode,
-			PlayerOptions.fresh_profile_aspect_mode(PlayerOptions.desktop_size()),
-			"a fresh profile seeds the cfg word from the desktop ratio, as the first launch's video test does")
+	assert_eq(state.aspect_mode, 0, "the defaults' memset placeholder, until the video test")
 
 	state.sound_fx_volume = 12
 	state.crosshair_style = 9
-	assert_eq(options.current().sound_fx_volume, 192,
-			"editing a snapshot cannot mutate the owner")
+	assert_eq(options.current().sound_fx_volume, 192, "editing a snapshot cannot mutate the owner")
 	assert_eq(options.current().crosshair_style, 0)
 
 
-func test_tip_options_default_on_and_persist_as_cfg_words() -> void:
+func test_tip_options_default_on_and_live_as_cfg_words() -> void:
 	var options := PlayerOptions.new()
 	var state := options.current()
 	assert_true(state.keyboard_tips, "enable_keyboardtips defaults to 1")
 	assert_true(state.gameplay_tips, "enable_gameplaytips defaults to 1")
 	state.keyboard_tips = false
 	options.update(state)
-	var config := ConfigFile.new()
-	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
-	assert_eq(int(config.get_value("player", "enable_keyboardtips", -1)), 0,
-			"the keyboard-tips word persists as retail's integer")
-	assert_eq(int(config.get_value("player", "enable_gameplaytips", -1)), 1)
+	var config := GameCfgStore.block()
+	assert_eq(
+		config.get_word("enable_keyboardtips"),
+		0,
+		"the keyboard-tips word is retail's integer in the block"
+	)
+	assert_eq(config.get_word("enable_gameplaytips"), 1)
 	var reloaded := PlayerOptions.new().current()
 	assert_false(reloaded.keyboard_tips)
 	assert_true(reloaded.gameplay_tips)
@@ -70,14 +86,10 @@ func test_tip_options_default_on_and_persist_as_cfg_words() -> void:
 	assert_true(copy.gameplay_tips)
 
 
-func test_update_clamps_persists_together_and_preserves_other_sections() -> void:
-	ConfigStore.write(PlayerOptions.CONFIG_PATH, "resources", "resource_dir",
-			"C:/Games/Joint Operations")
+func test_update_clamps_into_the_block_and_saves_at_the_save_point() -> void:
 	var options := PlayerOptions.new()
 	var emitted: Array[PlayerOptions.State] = []
-	options.changed.connect(func(state: PlayerOptions.State) -> void:
-		emitted.append(state)
-	)
+	options.changed.connect(func(state: PlayerOptions.State) -> void: emitted.append(state))
 
 	var state := options.current()
 	state.sound_fx_volume = -2
@@ -93,46 +105,44 @@ func test_update_clamps_persists_together_and_preserves_other_sections() -> void
 	assert_eq(current.dialog_volume, 93)
 	assert_eq(current.music_volume, 255)
 	assert_eq(current.crosshair_style, 24)
-	assert_eq(current.crosshair_color, 0xFF8040,
-			"the colour normalizes to its 24-bit RGB")
+	assert_eq(current.crosshair_color, 0xFF8040, "the colour normalizes to its 24-bit RGB")
 	assert_false(current.crosshair_spread)
 	assert_eq(emitted.size(), 1, "one atomic update publishes one state")
 	assert_eq(emitted[0].crosshair_style, 24)
 
-	var config := ConfigFile.new()
-	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
-	assert_eq(int(config.get_value("audio", "sound_fx_volume", -1)), 0)
-	assert_eq(int(config.get_value("audio", "dialog_volume", -1)), 93)
-	assert_eq(int(config.get_value("audio", "music_volume", -1)), 255)
-	assert_false(config.has_section("controls"),
-			"the mouse words are the player profile's, not the options file's")
-	assert_eq(int(config.get_value("player", "crosshair_style", -1)), 24)
-	assert_eq(int(config.get_value("player", "crosshair_color", -1)), 0xFF8040)
-	assert_false(bool(config.get_value("player", "crosshair_spread", true)))
-	assert_eq(String(config.get_value("resources", "resource_dir", "")),
-			"C:/Games/Joint Operations",
-			"the options transaction preserves unrelated runtime settings")
+	assert_false(
+		FileAccess.file_exists(_run_dir.path_join(GameCfgStore.FILE_NAME)),
+		"an edit reaches game.cfg only at a save point"
+	)
+	assert_eq(GameCfgStore.save(), OK)
+	var text := _saved_cfg()
+	assert_string_contains(text, "SFXLevel             = 0\r\n")
+	assert_string_contains(text, "DialogueLevel        = 93\r\n")
+	assert_string_contains(text, "music_volume         = 255\r\n")
+	assert_string_contains(text, "xhair_appearance        = 24\r\n")
+	assert_string_contains(text, "xhair_color             = %d\r\n" % 0xFF8040)
+	assert_string_contains(text, "xhair_spread            = 0\r\n")
 
 
-func test_load_normalizes_corrupt_persisted_values() -> void:
-	var config := ConfigFile.new()
-	config.set_value("audio", "sound_fx_volume", 260)
-	config.set_value("audio", "dialog_volume", -1)
-	config.set_value("audio", "music_volume", 71)
-	config.set_value("player", "crosshair_style", -7)
-	config.set_value("player", "crosshair_color", 0x7F123456)
-	assert_eq(config.save(PlayerOptions.CONFIG_PATH), OK)
-
+func test_load_normalizes_corrupt_saved_words() -> void:
+	_write_cfg(
+		[
+			"SFXLevel = 260",
+			"DialogueLevel = -1",
+			"music_volume = 71",
+			"xhair_appearance = -7",
+			"xhair_color = %d" % 0x7F123456
+		]
+	)
 	var state := PlayerOptions.new().current()
 	assert_eq(state.sound_fx_volume, 255)
 	assert_eq(state.dialog_volume, 0)
 	assert_eq(state.music_volume, 71)
 	assert_eq(state.crosshair_style, 0)
-	assert_eq(state.crosshair_color, 0x123456,
-			"an out-of-range colour masks down to its RGB")
+	assert_eq(state.crosshair_color, 0x123456, "an out-of-range colour masks down to its RGB")
 
 
-func test_native_aspect_mode_persists_as_the_cfg_word() -> void:
+func test_native_aspect_mode_lives_as_the_cfg_word() -> void:
 	# Any value outside 0..3 is retail's "the surface's own ratio": a cfg-only
 	# choice with no authored spin row, kept verbatim rather than clamped.
 	var options := PlayerOptions.new()
@@ -140,128 +150,137 @@ func test_native_aspect_mode_persists_as_the_cfg_word() -> void:
 	state.aspect_mode = -1
 	options.update(state)
 	assert_eq(PlayerOptions.new().current().aspect_mode, -1)
-	var config := ConfigFile.new()
-	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
-	assert_eq(int(config.get_value("player", "display_16x9", 0)), -1)
+	assert_eq(GameCfgStore.save(), OK)
+	assert_string_contains(_saved_cfg(), "display_16x9         = -1\r\n")
 
 
-func test_fresh_profile_seeds_the_aspect_word_from_the_desktop_once() -> void:
+func test_fresh_profile_seeds_the_video_test_words_once() -> void:
 	# Retail's first-launch video test writes display_16x9 from the primary
-	# desktop's ratio -- 1 (the widescreen row) past 1.34, else 0 -- and saves
-	# the config, so the desktop is sampled once. Headless has no desktop to
-	# vary: both branches go through the seed helper with explicit sizes.
+	# desktop's ratio -- 1 (the widescreen row) past 1.34, else 0 -- and the
+	# graphics rungs, and saves the config, so the desktop is sampled once.
+	# Headless has no desktop to vary: both branches go through the seed helper
+	# with explicit sizes.
 	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1024, 768)), 0)
 	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1280, 1024)), 0)
-	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1366, 1024)), 0,
-			"1.334 stays under the 1.34 line")
+	assert_eq(
+		PlayerOptions.fresh_profile_aspect_mode(Vector2i(1366, 1024)),
+		0,
+		"1.334 stays under the 1.34 line"
+	)
 	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1920, 1200)), 1)
 	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1920, 1080)), 1)
 	var seeded := PlayerOptions.fresh_profile_aspect_mode(PlayerOptions.desktop_size())
-	assert_eq(PlayerOptions.new().current().aspect_mode, seeded,
-			"a fresh profile carries the desktop's verdict")
-	var config := ConfigFile.new()
-	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK,
-			"the seed persists at once, as the video test's config save does")
-	assert_eq(int(config.get_value("player", "display_16x9", -9)), seeded)
-	# Persisted, the word is read back and the desktop never re-sampled: a
+	# No game.cfg: the mount's read finds the defaults, and the video test runs.
+	assert_true(GameCfgStore.read_for_mount(null))
+	var state := PlayerOptions.new().current()
+	assert_eq(state.aspect_mode, seeded, "a fresh profile carries the desktop's verdict")
+	assert_eq(state.object_polydetail, GameWorld.object_detail_fresh_profile())
+	assert_eq(state.texfilter_level, GameWorld.texfilter_level_fresh_profile())
+	assert_eq(state.particle_density, GameWorld.particle_density_fresh_profile())
+	assert_eq(state.texcompression_level, GameWorld.texcompression_level_fresh_profile())
+	var text := _saved_cfg()
+	assert_string_contains(
+		text,
+		"display_16x9         = %d\r\n" % seeded,
+		"the seed is saved at once, as the video test's config save does"
+	)
+	assert_string_contains(
+		text, "object_polydetail    = %d\r\n" % GameWorld.object_detail_fresh_profile()
+	)
+	# Saved, the words are read back and the desktop never re-sampled: a
 	# profile carrying the other row keeps it.
-	ConfigStore.write(PlayerOptions.CONFIG_PATH, "player", "display_16x9", 1 - seeded)
-	assert_eq(PlayerOptions.new().current().aspect_mode, 1 - seeded,
-			"a saved word wins over the desktop")
+	_write_cfg(["display_16x9 = %d" % (1 - seeded), "object_polydetail = 0"])
+	assert_true(GameCfgStore.read_for_mount(null))
+	assert_eq(
+		PlayerOptions.new().current().aspect_mode, 1 - seeded, "a saved word wins over the desktop"
+	)
+	assert_eq(PlayerOptions.new().current().object_polydetail, 0)
 
 
-func test_object_detail_seeds_persists_and_clamps_as_the_cfg_word() -> void:
-	# game.cfg's object_polydetail: a fresh profile starts at the video test's
-	# capable-device rung 2 and writes it at once; the load clamps a persisted
-	# word into 0..3 (the engine's renderer/object_lod.h through GameWorld).
+func test_object_detail_lives_and_clamps_as_the_cfg_word() -> void:
+	# game.cfg's object_polydetail: the video test's capable-device rung 2 on a
+	# fresh profile; the load clamps a saved word into 0..3 (the engine's
+	# renderer/object_lod.h through GameWorld).
 	assert_eq(GameWorld.object_detail_fresh_profile(), 2)
 	assert_eq(GameWorld.clamp_object_detail(-4), 0)
 	assert_eq(GameWorld.clamp_object_detail(7), 3)
 	var options := PlayerOptions.new()
-	assert_eq(options.current().object_polydetail, 2)
-	var config := ConfigFile.new()
-	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
-	assert_eq(int(config.get_value("display", "object_polydetail", -1)), 2,
-			"the fresh word persists at once")
 	var state := options.current()
 	state.object_polydetail = 3
 	options.update(state)
 	assert_eq(PlayerOptions.new().current().object_polydetail, 3)
 	assert_eq(state.copy().object_polydetail, 3, "the snapshot copy carries the word")
-	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "object_polydetail", 12)
-	assert_eq(PlayerOptions.new().current().object_polydetail, 3,
-			"a persisted word past the top rung loads as 3")
-	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "object_polydetail", 0)
+	_write_cfg(["object_polydetail = 12"])
+	assert_eq(
+		PlayerOptions.new().current().object_polydetail,
+		3,
+		"a saved word past the top rung loads as 3"
+	)
+	_write_cfg(["object_polydetail = 0"])
 	assert_eq(PlayerOptions.new().current().object_polydetail, 0)
 
 
-func test_texture_filter_seeds_persists_and_clamps_as_the_cfg_word() -> void:
-	# game.cfg's texfilter_level: a fresh profile starts at the video test's
-	# 1 (trilinear) and writes it at once; the load clamps a persisted word
-	# into 0..3 (the engine's renderer/texture_filter.h through GameWorld).
+func test_texture_filter_lives_and_clamps_as_the_cfg_word() -> void:
+	# game.cfg's texfilter_level: the video test's 1 (trilinear) on a fresh
+	# profile; the load clamps a saved word into 0..3 (the engine's
+	# renderer/texture_filter.h through GameWorld).
 	assert_eq(GameWorld.texfilter_level_fresh_profile(), 1)
 	assert_eq(GameWorld.clamp_texfilter_level(-4), 0)
 	assert_eq(GameWorld.clamp_texfilter_level(7), 3)
 	var options := PlayerOptions.new()
-	assert_eq(options.current().texfilter_level, 1)
-	var config := ConfigFile.new()
-	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
-	assert_eq(int(config.get_value("display", "texfilter_level", -1)), 1,
-			"the fresh word persists at once")
 	var state := options.current()
 	state.texfilter_level = 3
 	options.update(state)
 	assert_eq(PlayerOptions.new().current().texfilter_level, 3)
 	assert_eq(state.copy().texfilter_level, 3, "the snapshot copy carries the word")
-	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "texfilter_level", 12)
-	assert_eq(PlayerOptions.new().current().texfilter_level, 3,
-			"a persisted word past the top rung loads as 3")
-	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "texfilter_level", 0)
+	_write_cfg(["texfilter_level = 12"])
+	assert_eq(
+		PlayerOptions.new().current().texfilter_level,
+		3,
+		"a saved word past the top rung loads as 3"
+	)
+	_write_cfg(["texfilter_level = 0"])
 	assert_eq(PlayerOptions.new().current().texfilter_level, 0)
 
 
-func test_particle_density_seeds_persists_and_clamps_as_the_cfg_word() -> void:
-	# game.cfg's particle_density: a fresh profile starts at the video test's
-	# 2 (a CPU past its 2980 MHz mark) and writes it at once; the load clamps a
-	# persisted word into 0..2 (the engine's renderer/particle_density.h).
+func test_particle_density_lives_and_clamps_as_the_cfg_word() -> void:
+	# game.cfg's particle_density: the video test's 2 (a CPU past its 2980 MHz
+	# mark) on a fresh profile; the load clamps a saved word into 0..2 (the
+	# engine's renderer/particle_density.h).
 	assert_eq(GameWorld.particle_density_fresh_profile(), 2)
 	assert_eq(GameWorld.clamp_particle_density(-4), 0)
 	assert_eq(GameWorld.clamp_particle_density(7), 2)
 	var options := PlayerOptions.new()
-	assert_eq(options.current().particle_density, 2)
-	var config := ConfigFile.new()
-	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
-	assert_eq(int(config.get_value("display", "particle_density", -1)), 2,
-			"the fresh word persists at once")
 	var state := options.current()
 	state.particle_density = 0
 	options.update(state)
 	assert_eq(PlayerOptions.new().current().particle_density, 0)
 	assert_eq(state.copy().particle_density, 0, "the snapshot copy carries the word")
-	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "particle_density", 9)
-	assert_eq(PlayerOptions.new().current().particle_density, 2,
-			"a persisted word past the top rung loads as 2")
+	_write_cfg(["particle_density = 9"])
+	assert_eq(
+		PlayerOptions.new().current().particle_density,
+		2,
+		"a saved word past the top rung loads as 2"
+	)
 
 
-func test_texture_compression_seeds_and_persists_the_unclamped_cfg_word() -> void:
-	# game.cfg's texcompression_level: a fresh profile starts at the video
-	# test's 1 (a shader-model-2 card) and writes it at once; the load never
-	# clamps it (the engine's renderer/texture_compression.h).
+func test_texture_compression_lives_as_the_unclamped_cfg_word() -> void:
+	# game.cfg's texcompression_level: the video test's 1 (a shader-model-2
+	# card) on a fresh profile; the load never clamps it (the engine's
+	# renderer/texture_compression.h).
 	assert_eq(GameWorld.texcompression_level_fresh_profile(), 1)
 	var options := PlayerOptions.new()
-	assert_eq(options.current().texcompression_level, 1)
-	var config := ConfigFile.new()
-	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
-	assert_eq(int(config.get_value("display", "texcompression_level", -1)), 1,
-			"the fresh word persists at once")
 	var state := options.current()
 	state.texcompression_level = 2
 	options.update(state)
 	assert_eq(PlayerOptions.new().current().texcompression_level, 2)
 	assert_eq(state.copy().texcompression_level, 2, "the snapshot copy carries the word")
-	ConfigStore.write(PlayerOptions.CONFIG_PATH, "display", "texcompression_level", 7)
-	assert_eq(PlayerOptions.new().current().texcompression_level, 7,
-			"the load keeps a word past the rows as written")
+	_write_cfg(["texcompression_level = 7"])
+	assert_eq(
+		PlayerOptions.new().current().texcompression_level,
+		7,
+		"the load keeps a word past the rows as written"
+	)
 
 
 func test_update_maps_each_audio_option_to_its_runtime_buses() -> void:
@@ -282,7 +301,9 @@ func _assert_bus_volume(bus_name: StringName, volume: int) -> void:
 	var bus := AudioServer.get_bus_index(bus_name)
 	assert_gte(bus, 0, "%s bus exists" % bus_name)
 	if bus >= 0:
-		assert_almost_eq(AudioServer.get_bus_volume_db(bus),
-				float(SoundSelector.volume_db_from_255(volume)), 0.001,
-				"%s receives the 0..255 option through the shared conversion" \
-						% bus_name)
+		assert_almost_eq(
+			AudioServer.get_bus_volume_db(bus),
+			float(SoundSelector.volume_db_from_255(volume)),
+			0.001,
+			"%s receives the 0..255 option through the shared conversion" % bus_name
+		)

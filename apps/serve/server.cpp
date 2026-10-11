@@ -11,7 +11,6 @@
 #include <base/vfs/vfs.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/avatars/avatars.h>
-#include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/net_ports.h>
@@ -238,7 +237,7 @@ bool Server::start_session(std::string &error) {
 		error = "the server has not begun, or its session already stands";
 		return false;
 	}
-	host_ = inmatch::host_session_settings(cfg_);
+	host_ = inmatch::host_session_settings(config_.cfg());
 	if (!boot_mission(/*next_mission=*/false, error)) {
 		stop();
 		return false;
@@ -265,9 +264,7 @@ void Server::bind_listing() {
 // the process there [orig: Game_Run @0x4A7FBB -> Game_LoadConfig @0x551480,
 // crt_exit @0x5514A1..0x5514AC]; a missing file is the defaults.
 bool Server::read_boot_config(std::string &error) {
-	const gamecfg::LoadResult boot = gamecfg::load_file(gamecfg::kFileName, gamecfg::LoadOptions{});
-	cfg_ = boot.cfg;
-	if (boot.reset_exit) {
+	if (!config_.load()) {
 		reset_exit_ = true;
 		error = "game.cfg sets mpreset: the process exits";
 		return false;
@@ -322,28 +319,15 @@ bool Server::mount(std::string &error) {
 // (WeaponDef_LoadAll), @0x4A70AB (Game_LoadConfig); Config_SetDefaults keeps
 // the block's first word]. From here every return owes Game_Run's exit tail.
 bool Server::read_config_over_weapons(std::string &error) {
-	roster_.clear();
-	std::vector<uint8_t> bytes;
-	if (index_.read_file("weapon.def", bytes)) {
-		def::DefWeaponsFile weapons = {};
-		if (def::def_parse_weapons_memory(bytes.data(), bytes.size(), &weapons) == 0) {
-			roster_ = inmatch::game_cfg_weapon_roster(weapons);
-			def::def_free_weapons(&weapons);
-		}
-	}
+	config_.set_weapon_roster(inmatch::game_cfg_weapon_roster(index_));
 	gametext_ = rtxt::File{};
 	std::string gametext_error;
-	bytes.clear();
+	std::vector<uint8_t> bytes;
 	have_gametext_ = index_.read_file("gametext.bin", bytes) &&
 			rtxt::parse(bytes.data(), bytes.size(), gametext_, gametext_error);
-	gamecfg::LoadOptions load;
-	load.texts = inmatch::game_cfg_default_texts(have_gametext_ ? &gametext_ : nullptr);
-	load.weapons = roster_;
-	load.player_index = cfg_.player_index;
-	load.hw3d_deviceno = cfg_.hw3d_deviceno;
-	const gamecfg::LoadResult loaded = gamecfg::load_file(gamecfg::kFileName, load);
-	cfg_ = loaded.cfg;
-	if (loaded.reset_exit) {
+	config_.set_default_texts(
+			inmatch::game_cfg_default_texts(have_gametext_ ? &gametext_ : nullptr));
+	if (!config_.load()) {
 		reset_exit_ = true;
 		error = "game.cfg sets mpreset: the process exits";
 		return false;
@@ -372,7 +356,7 @@ bool Server::read_host_file(std::string &error) {
 		return false;
 	}
 	const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-	report_ = inmatch::read_host_file(text.data(), text.size(), cfg_, rotation_, catalog_);
+	report_ = inmatch::read_host_file(text.data(), text.size(), config_.cfg(), rotation_, catalog_);
 	for (const std::string &key : report_.unknown_keys)
 		io::logf(io::LogLevel::kWarn, "opennova-serve: the host file key '%s' is not a host setting",
 				key.c_str());
@@ -382,11 +366,11 @@ bool Server::read_host_file(std::string &error) {
 	if (!gamecfg::write_active_server_marker(gamecfg::kActiveServerMarkerFileName))
 		io::logf(io::LogLevel::kWarn, "opennova-serve: %s did not open for writing",
 				gamecfg::kActiveServerMarkerFileName);
-	cfg_.dedicated = 1;
+	config_.cfg().dedicated = 1;
 	(void)save_config();
-	host_ = inmatch::host_session_settings(cfg_);
-	novaworld_ = !options_.master_host.empty() && cfg_.networkconnecttype == 1;
-	if (options_.master_host.empty() && cfg_.networkconnecttype == 1)
+	host_ = inmatch::host_session_settings(config_.cfg());
+	novaworld_ = !options_.master_host.empty() && config_.cfg().networkconnecttype == 1;
+	if (options_.master_host.empty() && config_.cfg().networkconnecttype == 1)
 		io::logf(io::LogLevel::kInfo,
 				"opennova-serve: serving LAN; NovaWorld listing needs --master-host <gate>");
 	if (rotation_.list.current() == nullptr) {
@@ -538,7 +522,7 @@ bool Server::route_mission_exit(int32_t reason) {
 			!in_session ||
 			(reason != inmatch::kMissionExitMapCycle && reason != inmatch::kMissionExitRoundOver))
 		return false;
-	if (inmatch::begin_host_map_change(*role_, catalog_, &cfg_, &host_) ==
+	if (inmatch::begin_host_map_change(*role_, catalog_, &config_.cfg(), &host_) ==
 			inmatch::MapChangeStep::RotationEnded) {
 		rotation_ended_ = true;
 		end_message_ = "the map rotation ended";
@@ -570,12 +554,15 @@ bool Server::route_mission_exit(int32_t reason) {
 // mpnovaworldportrandom start (+0x234, off by default) is not ported. The
 // embedder owns the socket layer (net::startup), which is process-wide.
 bool Server::open_socket(std::string &error) {
-	const uint32_t first = options_.port ? *options_.port
-			: static_cast<uint32_t>(novaworld_ ? cfg_.mp_novaworld_port_min : cfg_.mp_lan_server_port_min);
+	const gamecfg::GameCfg &cfg = config_.cfg();
+	const uint32_t first = options_.port
+			? *options_.port
+			: static_cast<uint32_t>(
+					  novaworld_ ? cfg.mp_novaworld_port_min : cfg.mp_lan_server_port_min);
 	const uint32_t max = static_cast<uint32_t>(
-			novaworld_ ? cfg_.mp_novaworld_port_max : cfg_.mp_lan_server_port_max);
+			novaworld_ ? cfg.mp_novaworld_port_max : cfg.mp_lan_server_port_max);
 	const uint32_t delta = static_cast<uint32_t>(
-			novaworld_ ? cfg_.mp_novaworld_port_delta : cfg_.mp_lan_server_port_delta);
+			novaworld_ ? cfg.mp_novaworld_port_delta : cfg.mp_lan_server_port_delta);
 	for (const uint16_t port : lan_host_bind_ports(first, max, delta)) {
 		socket_ = net::udp_bind(port, &bound_port_);
 		if (socket_.is_valid()) break;
@@ -607,10 +594,10 @@ HostRegistration Server::listing_columns() const {
 	r.published_cap = static_cast<int>(config.player_slot_limit());
 	r.password = !config.server_password.empty();
 	r.listen_host = false;
-	r.lan_only = cfg_.mp_novaworld_host_lan_only != 0 ? 1 : 0;
-	r.allow_ping = cfg_.ping != 0;
-	r.send_player_list = cfg_.sendplayerlist != 0;
-	r.country = cfg_.country;
+	r.lan_only = config_.cfg().mp_novaworld_host_lan_only != 0 ? 1 : 0;
+	r.allow_ping = config_.cfg().ping != 0;
+	r.send_player_list = config_.cfg().sendplayerlist != 0;
+	r.country = config_.cfg().country;
 	r.expansion = index_.mounted_expansion();
 	r.tracers = (config.mp_attributes & inmatch::GameConfig::kMpAttribNoTracers) == 0;
 	r.game_type = game_text(have_gametext_ ? &gametext_ : nullptr, "GateTypeAbbrev",
@@ -637,7 +624,7 @@ bool Server::host_on_novaworld(std::string &error, const std::atomic<bool> *canc
 	// The admin console's save seam (bind_admin_console), for the service's SetServerName /
 	// SetServerMsg / SetMPReset.
 	ServeListing::Seams seams;
-	seams.config_block = &cfg_;
+	seams.config_block = &config_.cfg();
 	seams.save_config = [this] { (void)save_config(); };
 	listing_ = std::make_unique<ServeListing>(listing_columns(), std::move(seams));
 	nw_lister::ListerOptions lister_options;
@@ -787,7 +774,8 @@ bool Server::save_config() {
 	//  ServerCommand calls it @0x4D2DDF (SetServerName / SetServerMsg) and
 	//  @0x4D2E2D (SetMPReset), through ServeListing's seam]
 	std::string error;
-	if (gamecfg::save_file(gamecfg::kFileName, cfg_, roster_, error)) return true;
+	if (config_.save(error))
+		return true;
 	io::logf(io::LogLevel::kWarn, "opennova-serve: %s", error.c_str());
 	return false;
 }
@@ -821,7 +809,7 @@ void Server::open_admin() {
 				(void)files_.write(kAdminLogFileName, text, /*append=*/true);
 			});
 	admin_tcp_ = std::make_unique<net::AdminTcpServer>(*admin_server_);
-	const uint16_t port = static_cast<uint16_t>(cfg_.remote_admin_port);
+	const uint16_t port = static_cast<uint16_t>(config_.cfg().remote_admin_port);
 	if (port == 0) return;
 	if (admin_tcp_->listen(port))
 		io::logf(io::LogLevel::kInfo, "opennova-serve: remote admin on TCP %u", admin_tcp_->port());
@@ -836,7 +824,7 @@ void Server::open_admin() {
 void Server::bind_admin_console() {
 	rotation_admin_ = std::make_unique<inmatch::HostRotationAdmin>(rotation_, catalog_);
 	inmatch::AdminConsole::Seams seams;
-	seams.config_block = &cfg_;
+	seams.config_block = &config_.cfg();
 	seams.save_config = [this] { (void)save_config(); };
 	seams.rotation = rotation_admin_.get();
 	seams.game_text = [this](std::string_view section, std::string_view key) {
