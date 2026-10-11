@@ -1,17 +1,28 @@
 #include <net/napi/literal.h>
 
+#include <base/io/cp1252.h> // cp1252_isalpha_sign_extended
+
 #include <cctype>
 
 namespace opennova {
 namespace {
 
-// The process locale's classes, where retail's decimal arm calls the CRT _isdigit /
-// _isalpha under the game's ".ACP" LC_CTYPE [orig: NapiScript_ParseDecimalIntegerB
-// @0x62da61 / @0x62da97] (docs/net/novaworld-net-re.md D-NET-391, open).
+// The CRT _isalpha under the game's ".ACP" LC_CTYPE, pinned to cp1252 (D-NET-478), on the
+// sign-extended byte: the test of the byte after the run in the prefix forms of the hex,
+// octal and binary arms and in the decimal arm, where a letter other than the arm's own
+// h / o / b / d fails the literal, so a cp1252 high-byte letter does too and 0xFF, the EOF
+// row, does not (docs/net/novaworld-net-re.md D-NET-391).
+// [orig: NapiScript_ParseHexValue @0x62d610 (the _isalpha call @0x62d6fc);
+//  NapiScript_ParseOctalInteger @0x62d7b0 (@0x62d85f); NapiScript_ParseBinaryLiteral
+//  @0x62d900 (@0x62d9b1); NapiScript_ParseDecimalIntegerB @0x62da20 (@0x62da97) — each
+//  _isalpha @0x76b703 of a movsx'd byte]
 bool is_alpha(char c) {
-	return std::isalpha(static_cast<unsigned char>(c)) != 0;
+	return cp1252_isalpha_sign_extended(c);
 }
 
+// The process locale's digit class, where retail's arms call the CRT _isdigit under the
+// game's ".ACP" LC_CTYPE [orig: NapiScript_ParseDecimalIntegerB @0x62da20 (the call
+// @0x62da61)]; D-NET-391's digit half moves it to cp1252_isdigit.
 bool is_digit(char c) {
 	return std::isdigit(static_cast<unsigned char>(c)) != 0;
 }

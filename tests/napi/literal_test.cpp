@@ -35,9 +35,31 @@ bool expect_rejected(std::string_view input) {
 	return value == 0x12345678u && consumed == 77;
 }
 
+// The byte after a run is tested with the CRT isalpha under ".ACP", pinned to cp1252, on the
+// sign-extended byte, in the prefix forms of the hex, octal and binary arms and in the
+// decimal arm (D-NET-391, D-NET-478): a cp1252 high-byte letter fails the literal as an
+// ASCII one does, whatever the process locale; 0xFF (its -1 the EOF row) and the
+// multiplication / division signs 0xD7 / 0xF7 end the run as any non-letter does.
+// [orig: NapiScript_ParseHexValue @0x62d610 (the _isalpha call @0x62d6fc);
+//  NapiScript_ParseOctalInteger @0x62d7b0 (@0x62d85f); NapiScript_ParseBinaryLiteral
+//  @0x62d900 (@0x62d9b1); NapiScript_ParseDecimalIntegerB @0x62da20 (@0x62da97)]
+bool check_letter_class() {
+	// Rejected: e acute after a decimal run, A grave after a '$' hex run, S caron after a
+	// 0x hex run, sharp s after an octal run, Y diaeresis after a '%' binary run, the
+	// feminine ordinal and micro after a decimal run.
+	const bool letters = expect_rejected("12\xE9") && expect_rejected("$1F\xC0") &&
+			expect_rejected("0x1F\x8A") && expect_rejected("017\xDF") &&
+			expect_rejected("%101\x9F") && expect_rejected("7\xAA") && expect_rejected("7\xB5");
+	const bool non_letters = expect_literal("12\xFF", 12, 2) && expect_literal("12\xD7", 12, 2) &&
+			expect_literal("0x1F\xFF", 31, 4) && expect_literal("017\xF7", 15, 3) &&
+			expect_literal("%101\xFF", 5, 4);
+	return letters && non_letters;
+}
+
 } // namespace
 
 int main() {
+	if (!check_letter_class()) return 1;
 	if (!expect_literal("'x' tail", uint32_t('x'), 3)) return 1;
 	if (!expect_literal("$2A", 42, 3)) return 1;
 	if (!expect_literal("0x2Ah", 42, 4)) return 1;
