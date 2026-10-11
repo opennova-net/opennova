@@ -669,13 +669,19 @@ bool parse_cu_inner(const uint8_t *data, size_t len,
 } // namespace
 
 bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
-	if (!data) return false;
+	if (!data && len != 0) return false;
+	// The reader's defaults before the walk: every field zero but JFC, which reads 1, so an
+	// absent CR rejects and a rejection without JFC carries failure code 1. Clear exactly the
+	// builder defaults ServerAuth{} carries (MI's placeholder, CR's 1).
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - CK @0x629963, CR @0x629967, SK
+	//  @0x62996B, CI @0x62996F, MI @0x629973, JFC = 1 @0x629977, JFP @0x62997F]
 	out = ServerAuth{};
+	out.mi = 0;
+	out.cr = 0;
+	out.jfc = 1;
 	out.client_cs.clear();
 	out.server_cs.clear();
 	out.cu.clear();
-	bool saw_cr = false;
-	bool saw_rejection_detail = false;
 	size_t pos = 0;
 	while (pos < len) {
 		FlatTlvField field;
@@ -699,13 +705,10 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		if      (strutil::iequals(name, "CI"))  out.ci  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "MI"))  out.mi  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "CK"))  out.ck  = load_value_dword(value, end);
-		else if (strutil::iequals(name, "CR"))  { out.cr  = load_value_dword(value, end); saw_cr = true; }
-		else if (strutil::iequals(name, "JFC")) { out.jfc = load_value_dword(value, end); saw_rejection_detail = true; }
-		else if (strutil::iequals(name, "JFP")) { out.jfp = load_value_dword(value, end); saw_rejection_detail = true; }
-		else if (strutil::iequals(name, "JFS")) {
-			out.jfs = load_value_string(value, end, kLongStringBuffer);
-			saw_rejection_detail = true;
-		}
+		else if (strutil::iequals(name, "CR"))  out.cr  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "JFC")) out.jfc = load_value_dword(value, end);
+		else if (strutil::iequals(name, "JFP")) out.jfp = load_value_dword(value, end);
+		else if (strutil::iequals(name, "JFS")) out.jfs = copy_string(kLongStringBuffer);
 		else if (strutil::iequals(name, "SK"))  out.sk  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "CS")) {
 			// [direction][field_index][LE uint32], six bytes at the value pointer whatever the
@@ -735,9 +738,13 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
-	// Accepted ServerAuth carries SCRK for subsequent traffic. Rejected joins
-	// legitimately omit SCRK and instead carry JFC/JFP/JFS details.
-	return !out.scrk.empty() || (saw_cr && out.cr != 1 && saw_rejection_detail);
+	// No field is required: the reader takes any 0x82 from its connecting peer, and what the
+	// walk gathered decides it (the caller's CI / CK match, then CR's truth), so an accept
+	// without SCRK or a rejection without JFC, JFP or JFS parses like any other.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the connection lookup and state-3
+	//  gate @0x6298E0..0x629901, the CI / CK match @0x629CAC..0x629CBF, the CR split
+	//  @0x629CD2..0x629CD6]
+	return true;
 }
 
 // ---- ServerHello serializer (restored below) ---------------------------

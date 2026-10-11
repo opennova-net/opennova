@@ -743,6 +743,52 @@ int test_server_auth_rejection_roundtrip() {
 	return 0;
 }
 
+// The 0x82 reader requires no field: an accept without SCRK, one whose CR is 2
+// and a rejection without JFC, JFP or JFS all parse. An absent field reads zero
+// (CR, so a CR-less 0x82 rejects; MI) but JFC reads 1; the accept writer still
+// leaves a zero JFC out.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the defaults
+//  @0x629963..0x62997F (JFC = 1 @0x629977), the CI / CK match @0x629CAC..0x629CBF,
+//  the CR split @0x629CD2..0x629CD6]
+int test_server_auth_requires_no_field() {
+	std::vector<uint8_t> accept;
+	append_field(accept, "CI", {0x04, 0x00, 0x00, 0x00});
+	append_field(accept, "CK", {0xEF, 0xBE, 0xAD, 0xDE});
+	append_field(accept, "CR", {0x01, 0x00, 0x00, 0x00});
+	append_field(accept, "SK", {0x78, 0x56, 0x34, 0x12});
+	ServerAuth auth;
+	TEST_EXPECT(parse_server_auth(accept.data(), accept.size(), auth));
+	TEST_EXPECT(auth.ci == 4u && auth.ck == 0xDEADBEEFu && auth.cr == 1u);
+	TEST_EXPECT(auth.sk == 0x12345678u && auth.scrk.empty());
+	TEST_EXPECT(auth.mi == 0u && auth.jfc == 1u && auth.jfp == 0u && auth.jfs.empty());
+
+	std::vector<uint8_t> cr_two;
+	append_field(cr_two, "CR", {0x02, 0x00, 0x00, 0x00});
+	TEST_EXPECT(parse_server_auth(cr_two.data(), cr_two.size(), auth));
+	TEST_EXPECT(auth.cr == 2u);
+
+	std::vector<uint8_t> bare_reject;
+	append_field(bare_reject, "CI", {0x04, 0x00, 0x00, 0x00});
+	append_field(bare_reject, "CR", {0x00, 0x00, 0x00, 0x00});
+	TEST_EXPECT(parse_server_auth(bare_reject.data(), bare_reject.size(), auth));
+	TEST_EXPECT(auth.cr == 0u && auth.jfc == 1u && auth.jfp == 0u && auth.jfs.empty());
+
+	std::vector<uint8_t> no_cr;
+	append_field(no_cr, "CI", {0x04, 0x00, 0x00, 0x00});
+	TEST_EXPECT(parse_server_auth(no_cr.data(), no_cr.size(), auth));
+	TEST_EXPECT(auth.cr == 0u && auth.jfc == 1u);
+	TEST_EXPECT(parse_server_auth(nullptr, 0, auth) && auth.ci == 0u && auth.cr == 0u);
+	TEST_EXPECT(!parse_server_auth(nullptr, 4, auth));
+
+	ServerAuth written;
+	written.jfc = 0;
+	const auto bytes = server_auth_to_bytes(written);
+	TEST_EXPECT(!has_tlv_field(bytes, "JFC"));
+	TEST_EXPECT(parse_server_auth(bytes.data(), bytes.size(), auth));
+	TEST_EXPECT(auth.cr == 1u && auth.jfc == 1u);
+	return 0;
+}
+
 int test_server_hello_ut_is_nonzero_gated() {
 	ServerHello hello;
 	hello.ut = 0;
@@ -915,6 +961,7 @@ int main() {
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
+	if (test_server_auth_requires_no_field() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
 	if (test_server_hello_omitted_metadata_parses_empty() != 0) return 1;
 	if (test_server_hello_game_metadata_has_retail_order() != 0) return 1;

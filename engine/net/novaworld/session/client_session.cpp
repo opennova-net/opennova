@@ -420,18 +420,20 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 }
 
 void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
+	// Any 0x82 from the connecting peer is read; no field is required (parse_server_auth).
 	ServerAuth sa;
-	if (!parse_server_auth(body.data(), body.size(), sa)) {
-		fail("bad ServerAuth");
-		return;
-	}
+	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerAuth echoes both correlation values chosen by this client. Do not
-	// install a foreign connection's session/SCRK material.
+	// install a foreign connection's session/SCRK material: a mismatched 0x82 is
+	// dropped and the connection stays in the connect state. Then CR's truth
+	// splits it: any nonzero CR accepts, zero rejects.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
+	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
 	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
 	// The 0x82's reconnect count is kept (0 when absent) and rides the next re-join.
 	// [orig: NapiNP_HandleServerJoinResponse @0x629e2e]
 	rcnt_ = sa.rcnt;
-	if (sa.cr != 1) {
+	if (sa.cr == 0) {
 		fail("ServerAuth rejected (cr=" + std::to_string(sa.cr) + ")");
 		return;
 	}

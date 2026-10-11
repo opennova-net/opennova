@@ -826,6 +826,54 @@ void test_client_correlates_handshake_echoes() {
 	               client.state() == ClientSession::State::Auth &&
 	               client.server_key() == 0,
 	       "lobby ServerAuth with mismatched CK cannot install keys");
+
+	// D-NET-437: no field is required. An SCRK-less 0x82 with a foreign CI is dropped like any
+	// mismatch; one whose CR is 2 accepts, its empty SCRK kept; a CR 0 one without JFC, JFP or
+	// JFS rejects. [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
+	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
+	ServerAuth scrkless_foreign = build_server_auth(auth, 0x7F000001u, 5000, 0xAABBCCDDu, "");
+	scrkless_foreign.ci ^= 2u;
+	const std::vector<uint8_t> scrkless_foreign_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(scrkless_foreign));
+	out.clear();
+	expect(client.handle_datagram(
+			       scrkless_foreign_datagram.data(), scrkless_foreign_datagram.size(), out) &&
+	               client.state() == ClientSession::State::Auth && client.server_key() == 0,
+	       "lobby ServerAuth without SCRK and with a foreign CI is dropped, still connecting");
+	ServerAuth cr_two = build_server_auth(auth, 0x7F000001u, 5000, 0xAABBCCDDu, "");
+	cr_two.cr = 2;
+	const std::vector<uint8_t> cr_two_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(cr_two));
+	out.clear();
+	expect(client.handle_datagram(cr_two_datagram.data(), cr_two_datagram.size(), out) &&
+	               client.state() == ClientSession::State::Verifying &&
+	               client.server_key() == 0xAABBCCDDu && client.server_scrk().empty(),
+	       "lobby ServerAuth with CR 2 and no SCRK accepts");
+
+	ClientSession rejected(cfg);
+	const std::vector<uint8_t> rejected_hello = rejected.start();
+	ClientHello rejected_client_hello;
+	expect(server_decode_inbound(rejected_hello, opcode, body) &&
+	               parse_client_hello(body.data(), body.size(), rejected_client_hello),
+	       "reject leg parses lobby ClientHello");
+	const std::vector<uint8_t> rejected_server_hello = server_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO,
+			server_hello_to_bytes(build_server_hello(rejected_client_hello, 0x7F000001u, 5000)));
+	out.clear();
+	ClientAuth rejected_auth;
+	expect(rejected.handle_datagram(rejected_server_hello.data(), rejected_server_hello.size(), out) &&
+	               out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
+	               parse_client_auth(body.data(), body.size(), rejected_auth),
+	       "reject leg reaches Auth");
+	ServerAuth bare_reject = build_server_auth(rejected_auth, 0x7F000001u, 5000, 0, "");
+	bare_reject.cr = 0;
+	const std::vector<uint8_t> bare_reject_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(bare_reject));
+	out.clear();
+	expect(!rejected.handle_datagram(bare_reject_datagram.data(), bare_reject_datagram.size(), out) &&
+	               rejected.state() == ClientSession::State::Error &&
+	               rejected.last_error() == "ServerAuth rejected (cr=0)",
+	       "lobby ServerAuth with CR 0 and no JFC, JFP or JFS rejects");
 }
 
 // The browser completes NWJoin after the UDP session has already verified.

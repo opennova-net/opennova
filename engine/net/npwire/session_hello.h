@@ -446,7 +446,8 @@ struct ServerAuth {
 	                       // the 0x113f default is a placeholder for callers that don't set it. Retail
 	                       // LAN capture frame 28 = 3 (= the 0x48 ack = the 0x0C eFlags).
 	uint32_t ck = 0;      // echo client.ck
-	uint32_t cr = 1;      // Connection Result (1 = OK)
+	uint32_t cr = 1;      // Connection Result: the writers send 1 to accept, 0 to reject; the
+	                      // client accepts on any nonzero value [orig: @0x629CD2..0x629CD6]
 	uint32_t sk = 0;      // Server Key (server-generated)
 
 	std::vector<CsField> client_cs; // written with direction byte 1
@@ -467,8 +468,9 @@ struct ServerAuth {
 	//  store NapiNP_HandleServerJoinResponse @0x629840 @0x629e2e]
 	uint32_t rcnt = 0;
 
-	// Rejected-join fields. Retail can send these without SCRK when CR != 1;
-	// the packet is valid and should surface as a rejection, not malformed.
+	// Rejected-join fields. Retail sends these without SCRK when CR is 0; the
+	// packet is valid and surfaces as a rejection, not malformed. The reader
+	// takes an absent JFC as 1 (parse_server_auth); the writers keep 0 here.
 	uint32_t jfc = 0;     // Join failure code
 	uint32_t jfp = 0;     // Join failure parameter
 	std::string jfs;      // Join failure string
@@ -523,8 +525,13 @@ std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg);
 // nonzero direction byte joins client_cs, a zero one server_cs, and one whose
 // index is past 14 is dropped, as retail's reader does. JFS, SCRK and NA copy
 // from the value pointer up to the first NUL, at most 511 / 63 / 63 characters.
-// Returns true on success.
-// [orig: NapiNP_HandleServerJoinResponse @0x629840]
+// An absent field reads zero, but JFC reads 1. No field is required: the caller
+// drops a 0x82 whose CI or CK is not its connection's, then accepts on any
+// nonzero CR and rejects on zero. Returns false only for a null buffer with a
+// nonzero length.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the defaults
+//  @0x629963..0x62997F, the CI / CK match @0x629CAC..0x629CBF, the CR split
+//  @0x629CD2..0x629CD6]
 bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out);
 
 } // namespace opennova

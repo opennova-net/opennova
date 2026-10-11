@@ -9,6 +9,8 @@
 
 #include "host_test_setup.h"
 
+#include <base/io/le.h>
+#include <net/npwire/flat_tlv.h>
 #include <net/npwire/lan_discovery.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
@@ -299,6 +301,77 @@ bool run_discovered_row_join_skips_the_hello() {
 	inmatch::ClientRuntime bare("BareJoiner", [&now_ms] { return now_ms; });
 	return expect(is_opcode(bare.start(), SESSION_OPCODE_CLIENT_HELLO),
 	              "a bare dial (no row record) still sends the 0x41 first");
+}
+
+// D-NET-437: the joiner reads any 0x82 from its host, no field required. One whose CI or CK is
+// not its connection's is dropped and the connection stays in the connect state; then CR's truth
+// splits it: any nonzero CR accepts (an SCRK-less one too), and zero rejects with failure code 1
+// when the 0x82 carries no JFC.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - JFC = 1 @0x629977, the CI / CK match
+//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6, the reject's JFC store @0x629CF0]
+bool run_server_auth_acceptance_follows_retail() {
+	uint64_t now_ms = 9000;
+	const auto connect = [](inmatch::JoinerConnection &joiner, ClientAuth &auth) {
+		inmatch::JoinerConnection::DiscoveredSession session;
+		session.present = true;
+		session.host_key = 0x0FE0E115u;
+		joiner.set_discovered_session(session);
+		const std::vector<uint8_t> first = joiner.start();
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		return nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth) &&
+				joiner.phase() == inmatch::JoinerConnection::Phase::Auth;
+	};
+	// A 0x82 of dword fields only: no SCRK, and no JFC, JFP or JFS.
+	const auto server_auth = [](std::vector<std::pair<const char *, uint32_t>> dwords) {
+		std::vector<uint8_t> body;
+		for (const auto &field : dwords) {
+			uint8_t le[4];
+			io::write_u32_le(le, field.second);
+			append_flat_tlv(body, field.first, le, 4);
+		}
+		return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, std::move(body));
+	};
+
+	inmatch::JoinerConnection rejected("AuthRejected", [&now_ms] { return now_ms; });
+	ClientAuth auth;
+	if (!expect(connect(rejected, auth), "the joiner is connecting with its 0x42")) return false;
+	const std::vector<uint8_t> foreign_ci =
+			server_auth({{"CI", auth.ci ^ 0x10u}, {"CK", auth.ck}, {"CR", 1u}});
+	const std::vector<uint8_t> foreign_ck =
+			server_auth({{"CI", auth.ci}, {"CK", auth.ck ^ 0x01u}, {"CR", 0u}});
+	rejected.handle_datagram(foreign_ci.data(), foreign_ci.size());
+	rejected.handle_datagram(foreign_ck.data(), foreign_ck.size());
+	if (!expect(rejected.phase() == inmatch::JoinerConnection::Phase::Auth &&
+				rejected.last_error().empty() && !rejected.last_join_reject().set,
+			"an SCRK-less 0x82 with a foreign CI or CK is dropped; the join stays connecting"))
+		return false;
+	const std::vector<uint8_t> bare_reject =
+			server_auth({{"CI", auth.ci}, {"CK", auth.ck}, {"CR", 0u}});
+	rejected.handle_datagram(bare_reject.data(), bare_reject.size());
+	if (!expect(rejected.phase() == inmatch::JoinerConnection::Phase::Error &&
+				rejected.last_join_reject().set && rejected.last_join_reject().jfc == 1u &&
+				rejected.last_join_reject().jfp == 0u,
+			"a CR 0 0x82 without JFC rejects the join with failure code 1"))
+		return false;
+
+	inmatch::JoinerConnection accepted("AuthAccepted", [&now_ms] { return now_ms; });
+	if (!expect(connect(accepted, auth), "the second joiner is connecting with its 0x42"))
+		return false;
+	const std::vector<uint8_t> accept = server_auth(
+			{{"CI", auth.ci}, {"CK", auth.ck}, {"CR", 2u}, {"SK", 0x12345678u}});
+	accepted.handle_datagram(accept.data(), accept.size());
+	if (!expect(accepted.phase() == inmatch::JoinerConnection::Phase::Driving &&
+				!accepted.last_join_reject().set,
+			"a CR 2 0x82 without SCRK accepts the join"))
+		return false;
+	// The accepted session reloads into the host's next mission whatever its key: retail's
+	// reload legs test the session alone [orig: Game_StartMission @0x524360 -
+	// @0x5243E2..0x524400, @0x524532..0x524538, @0x5247F9..0x5247FF].
+	return expect(!accepted.begin_mission_reload().empty() && accepted.reloading(),
+			"the SCRK-less session's mission reload sends its first legs");
 }
 
 // D-NET-232: the joiner runs on its cs_dir0 block, overlaid by the host's 0x82 CS TLVs and by
@@ -749,6 +822,7 @@ int main() {
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
 	if (!run_discovered_row_join_skips_the_hello()) return 1;
+	if (!run_server_auth_acceptance_follows_retail()) return 1;
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;
 	if (!run_client_active_probe_recovers_join()) return 1;
 	if (!run_server_active_probe_recovers_settings()) return 1;
