@@ -437,7 +437,9 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	// retail SP discriminator.
 	const world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
-	const bool dead = !local->alive || (local->flags & 2u) != 0;
+	// The local player's dead bit alone, never its health word
+	// [orig: Server_CheckWinConditions `test byte ptr [eax+24h], 2` @0x51AD5E].
+	const bool dead = (local->flags & 2u) != 0;
 	if (dead && (world.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) == 0)
 		world.process_round_end(2);
 }

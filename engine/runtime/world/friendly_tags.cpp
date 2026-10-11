@@ -36,10 +36,10 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
     // The medic plate keys on the class's charattr ATTRIBUTES & 8
     // [orig: CharAttr_ClassHasAttribute(playerClass, 8) @0x4125e0].
     src.medic = world.tables.class_has_attribute(e.player_class, MissionTables::kCharAttrMedic);
-    // The dead latch the bad tier's downed legs read [orig: `Flags & 2`
-    // @0x5a3c1c..0x5a3c27]; our registry mirrors the kill's `|= 6` in both
-    // the flag word and `alive` [orig: @0x43fbf6].
-    src.dead = !e.alive || (e.flags & kEntityFlagDead) != 0;
+    // The dead latch the bad tier's downed legs read: the dead bit alone,
+    // never the health word or our `alive` latch [orig: `Flags & 2`
+    // @0x5a3c1c..0x5a3c27].
+    src.dead = (e.flags & kEntityFlagDead) != 0;
     // The radio-request icon's per-tag fold: the +885 latch, then the
     // carrier walk clears it [orig: `cmp byte ptr [ebx+375h], 0; jz`
     // @0x5a3bfe; Entity_FindChildByDefType(entity, 1, 1) @0x5a3c0e;

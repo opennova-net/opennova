@@ -1300,6 +1300,37 @@ void test_flag_timeout_wire_transaction() {
 
 } // namespace
 
+// D-NET-406: the SP auto-lose reads the local player's dead bit alone. A body
+// whose `alive` latch dropped with its health while the bit stays clear keeps
+// the round; the bit ends it, winner 2.
+// [orig: Server_CheckWinConditions @0x51AD5E, Server_ProcessRoundEnd(2) @0x51AD77]
+void test_sp_auto_lose_reads_the_dead_bit() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::Entity body;
+	body.kind = w::EntityKind::Organic;
+	body.team = 1;
+	body.flags = w::kEntityFlagPlayer;
+	body.alive = false;
+	body.health = -1;
+	const w::EntityHandle player = world.registry.spawn(0, body);
+	world.cached.local_player = player;
+	ns::LoopbackChannel loop;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 0;
+	ctx.np_protocol.connection_list.push_back(
+			make_conn(1, 2, &loop, ns::TransportMode::Loopback, player, true));
+	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx); // past a 1 Hz check
+	expect(!world.match.outcome().ended,
+			"a clear dead bit keeps the SP round whatever the health and the alive latch");
+	world.registry.get(player)->flags |= w::kEntityFlagDead;
+	for (int i = 0; i < 63; ++i) inmatch::Server_TickUpdate(ctx);
+	expect(world.match.outcome().ended && world.match.outcome().winner_team == 2,
+			"the dead bit alone ends it, winner 2");
+}
+
 // The 0x56 row's sixth i16 is stats field 11, the FLAGSAVE counter
 // [orig: CRenderState_GetFieldByIndex(stats, 0xA) @0x50918a -> the seventh
 // sub_455540 word @0x509509; field 11 = GameEvent_ProcessScoring case 8
@@ -1512,6 +1543,7 @@ void test_kill_event_unit_score_rides_every_session() {
 }
 
 int main() {
+	test_sp_auto_lose_reads_the_dead_bit();
 	test_end_round_row_flags_word_is_field_11();
 	test_org1_death_transaction_is_the_motor_edge();
 	test_kill_event_unit_score_rides_every_session();
