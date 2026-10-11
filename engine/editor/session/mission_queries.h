@@ -49,7 +49,7 @@ inline constexpr QueryParam kMissionLogicParams[] = {
 			"What is asked: form (an event's, or a trigger's or an action's: its words and what it holds), types "
 			"(what Add trigger or Add action offers, by name and group), add, retype, move, negate, join (the "
 			"edits that change the logic so, in the batch form an edit_record takes back), board (the Event board's "
-			"cards, S24)." },
+			"cards, S24), variables (the variables' names, S24)." },
 	{ "id", QueryJson::Integer, false, nullptr,
 			"The record: an event (form, add) or a trigger or an action (form, retype, move, negate, join), by "
 			"its identity." },
@@ -66,6 +66,9 @@ inline constexpr QueryParam kMissionLogicParams[] = {
 			"board's folded events, by their identities; left out, the Logic pane's." },
 	{ "attention", QueryJson::Boolean, false, nullptr,
 			"board's Needs attention: only the cards with notes; left out, the Logic pane's." },
+	{ "variable", QueryJson::Integer, false, nullptr,
+			"variables': the variable a name is given, V0 to V255 (its number); left out, the names alone." },
+	{ "name", QueryJson::String, false, nullptr, "variables': the name it is given; \"\" takes its name away." },
 	{ "offset", QueryJson::Integer, false, "0", kQueryOffsetDoc },
 	{ "limit", QueryJson::Integer, false, "100", kQueryLimitDoc },
 };
@@ -92,7 +95,11 @@ inline constexpr const char *kMissionLogicDoc =
 		"unset or naming nothing, an area the game drops, a wait past 512 steps, a value its type does not read) "
 		"and, while Play runs it, live; with common_triggers and common_actions (what the type picker offers "
 		"first, the shipped missions' most used) and recipes (what a new event is made from, each measured over "
-		"the shipped missions).";
+		"the shipped missions). variables (S24 Names): the names the mission gives its variables (names {index, "
+		"name}, kept in its layer table, which the game reads and drops), table (empty, names, or layer_names: the "
+		"original editor's layer names, which no name is written over), left (how many more take a name, 31 at "
+		"most); with variable (and name), the edits that give it the name, in the batch form an edit_record takes "
+		"back, or the refusal that says why none.";
 
 inline constexpr QueryParam kMissionUsesParams[] = {
 	{ "path", QueryJson::String, false, nullptr, "An open mission, as mission_logic takes it." },

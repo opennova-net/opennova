@@ -74,6 +74,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_reads.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_file_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_labels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_variable_names.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/name_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mns_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document.cpp

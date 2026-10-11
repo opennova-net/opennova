@@ -13,6 +13,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/mission_file_set.h>
 #include <editor/documents/mission_labels.h>
+#include <editor/documents/mission_variable_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
@@ -668,6 +669,16 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 				return false;
 			}
 		}
+		// A layer table holding the mission's variable names (S24 Names) changes as the names do
+		// (mission_variable_name_edits): a record edited as a layer name, the tag among them, would leave
+		// names the editor cannot read, or the table the original editor's for good.
+		if (swap.in_place() && swap.before->kind == k(K::Mission) &&
+		    !mission_variable_table_kept(static_cast<const MissionRow &>(*swap.before).native,
+		                                 static_cast<const MissionRow &>(*swap.after).native)) {
+			refusal.message = "This mission's layer table holds its variable names: name a variable (the variables' "
+			                  "names), or empty the table, rather than edit its records as layer names.";
+			return false;
+		}
 		const NodeKind kind = swap.before ? swap.before->kind : swap.after ? swap.after->kind : -1;
 		if ((kind != k(K::Mission) && kind != k(K::WaypointPath)) || swap.in_place()) continue;
 		refusal.message = kind == k(K::Mission) ? "A mission keeps its mission row where it is."
@@ -724,6 +735,10 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	if (is_entity_kind(address.kind) && address.child == 0 && id == "name1")
 		if (const Node *node = row(address.row); node && item_class(static_cast<const EntityRow &>(*node).native))
 			use.read_only = true; // its item's row sets it on every save (get)
+	// A layer table holding the variable names reads as them (mission_labels): its records are named
+	// through the variables, never as layer names (accept_step).
+	if (address.kind == k(K::Layer) && id == "name" && mission_variable_table(*this) == mission::LayerTable::VariableNames)
+		use.read_only = true;
 	if (address.kind == k(K::Trigger) && id == "sub_type") use.own_choices = true;
 	if (address.kind == k(K::Action) && id == "action_sub_type") use.own_choices = true;
 	const int slot = param_slot(id);

@@ -11,6 +11,7 @@
 #include <editor/documents/mission_logic.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
+#include <editor/documents/mission_variable_names.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/session/mission_board_json.h>
 #include <editor/session/mission_logic_json.h>
@@ -20,6 +21,8 @@ namespace opennova::editor {
 
 namespace {
 
+using io::json_number;
+using io::json_string;
 using io::JsonValue;
 
 // The mission and the record an op names by `id`, or false with `error`.
@@ -123,6 +126,33 @@ JsonValue answer_flag(const QueryContext &context, const QueryArgs &args, std::s
 	return planned_edits(*mission, ok, edits, "That is no trigger of the mission.");
 }
 
+// variables: the names the mission gives its variables, and with `variable` the edits naming one.
+JsonValue answer_variables(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const MissionDocument *mission = mission_of(context, args, error);
+	if (!mission) return JsonValue::make_null();
+	JsonValue out = JsonValue::make_object();
+	if (args.has("variable")) {
+		std::vector<Edit> edits;
+		std::string refusal;
+		const bool ok = mission_variable_name_edits(*mission, args.integer("variable"), args.text("name"), edits, refusal);
+		out = planned_edits(*mission, ok, edits, refusal);
+	}
+	JsonValue names = JsonValue::make_array();
+	for (const mission::VariableName &name : mission_variable_names(*mission)) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("index", json_number(double(name.index)));
+		entry.set("name", json_string(name.name));
+		names.push(std::move(entry));
+	}
+	out.set("names", std::move(names));
+	const mission::LayerTable table = mission_variable_table(*mission);
+	out.set("table", json_string(table == mission::LayerTable::Empty           ? "empty"
+	                             : table == mission::LayerTable::VariableNames ? "names"
+	                                                                           : "layer_names"));
+	out.set("left", json_number(double(mission_variable_names_left(*mission))));
+	return out;
+}
+
 // The ops, in the op param's order. S24 lanes append one row each here: the board's (lane A), the live
 // logic's (lane C).
 constexpr MissionLogicOp kMissionLogicOps[] = {
@@ -134,6 +164,7 @@ constexpr MissionLogicOp kMissionLogicOps[] = {
 	{ "negate", answer_flag },
 	{ "join", answer_flag },
 	{ "board", answer_mission_board },
+	{ "variables", answer_variables },
 };
 
 constexpr bool same_text(const char *a, const char *b) {

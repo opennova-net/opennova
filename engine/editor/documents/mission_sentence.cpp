@@ -13,6 +13,7 @@
 #include <base/io/tick_rate.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
+#include <editor/documents/mission_variable_names.h>
 #include <formats/mission/mission_field.h>
 #include <formats/mission/mission_params.h>
 
@@ -618,6 +619,20 @@ std::string DocumentMissionNames::zone(int64_t id) const {
 	if (!holder) return "zone " + number(id) + " (no area has it)";
 	const std::string title = document_.record_title({holder, node_kind(MissionKind::Area), 0});
 	return title.empty() ? MissionNames::zone(id) : title;
+}
+
+std::string DocumentMissionNames::group(int64_t group) const {
+	const MissionRow *mission = document_.mission_row();
+	if (mission && group > 0 && size_t(group) < mission->native.group_records.size()) {
+		const std::string name = bms::group_name(mission->native.group_records[size_t(group)]);
+		if (!name.empty()) return name;
+	}
+	return MissionNames::group(group);
+}
+
+std::string DocumentMissionNames::variable(int64_t index) const {
+	const std::string name = mission_variable_name(document_, index);
+	return name.empty() ? MissionNames::variable(index) : name;
 }
 
 std::string DocumentMissionNames::event(int64_t index) const {

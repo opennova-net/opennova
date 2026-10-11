@@ -13,6 +13,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/mission_sentence.h>
+#include <editor/documents/mission_variable_names.h>
 #include <editor/project/project_files.h>
 #include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
@@ -195,7 +196,12 @@ bool param_display(const MissionDocument &document, ParamKind kind, int64_t valu
 	case ParamKind::Group: out = mission_group_display(document, value); return true;
 	case ParamKind::Path: out = mission_path_display(document, value); return true;
 	case ParamKind::PathNode: out = stop_display(document, path, value, use, names); return true;
-	case ParamKind::MissionVar: out.text = "Variable " + std::to_string(value); break;
+	case ParamKind::MissionVar: {
+		// By the name the mission gives it (S24 Names), after its number, which the script spells V<n>.
+		const std::string name = mission_variable_name(document, value);
+		out.text = "Variable " + std::to_string(value) + (name.empty() ? std::string() : ": " + name);
+		break;
+	}
 	case ParamKind::Dialog: out.text = "Dialog " + std::to_string(value); break;
 	default: return false;
 	}
@@ -287,7 +293,13 @@ DisplayName mission_group_display(const MissionDocument &document, int64_t group
 		out.dangling = true;
 		return out;
 	}
-	out.text = "Group " + out.raw + " (" + counted_words(document.group_members(group), "entity", "entities") + ")";
+	// By the name the mission gives it (S24 Names: its record's dropped bytes), after its number.
+	const MissionRow *mission = document.mission_row();
+	const std::string name = mission && size_t(group) < mission->native.group_records.size()
+	        ? bms::group_name(mission->native.group_records[size_t(group)])
+	        : std::string();
+	out.text = "Group " + out.raw + (name.empty() ? std::string() : ": " + name) + " (" +
+	           counted_words(document.group_members(group), "entity", "entities") + ")";
 	return out;
 }
 
@@ -612,6 +624,22 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 	case K::Group: {
 		const DisplayName group = mission_group_display(*document, int64_t(index));
 		return index == 0 ? "Group 0 (no group)" : group.text;
+	}
+	case K::Layer: {
+		// A table holding the mission's variable names reads as them (S24 Names), its first record the tag
+		// that says so; any other as its layer names.
+		if (mission_variable_table(*document) != mission::LayerTable::VariableNames) break;
+		if (index == 0) return "Variable names (the editor's)";
+		const auto &layers = static_cast<const MissionRow &>(*row).native.layer_records;
+		if (index >= layers.size()) break;
+		size_t length = 0;
+		while (length < bms::kLayerRecordSize && layers[index].name[length] != 0) ++length;
+		const std::string text(layers[index].name, length);
+		if (text.empty()) return "No variable name";
+		for (const mission::VariableName &name : mission_variable_names(*document))
+			if (text == "V" + std::to_string(name.index) + " " + name.name)
+				return "Variable " + std::to_string(name.index) + ": " + name.name;
+		return "Not a variable name: " + text;
 	}
 	case K::Loadout: {
 		const auto &entries = static_cast<const MissionRow &>(*row).native.loadout.entries;

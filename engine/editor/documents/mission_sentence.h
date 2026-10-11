@@ -57,14 +57,18 @@ public:
 // The words a mission document gives what its records name: an entity by the record holding its SSN
 // (the first in the lookups' pool order, as the game finds it: MissionDocument::entity_holder), titled
 // as the document titles it (its kind and its SSN where the title is the bare number), an area by its
-// record, an event by its place; a value no record holds says so. It reads no string table: text() is
-// the base's. Made for one state of the document.
+// record, an event by its place, a group and a variable by the name the mission gives it (S24 Names: a
+// group's in its record's dropped bytes, a variable's in the tagged layer table), else the base's words;
+// a value no record holds says so. It reads no string table: text() is the base's. Made for one state of
+// the document.
 class DocumentMissionNames : public MissionNames {
 public:
 	explicit DocumentMissionNames(const MissionDocument &document) : document_(document) {}
 	std::string entity(int64_t ssn) const override;
 	std::string zone(int64_t id) const override;
+	std::string group(int64_t group) const override;
 	std::string event(int64_t index) const override;
+	std::string variable(int64_t index) const override;
 	bool zone_resolves(int64_t id) const override;
 
 private:
