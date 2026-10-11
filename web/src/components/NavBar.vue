@@ -24,13 +24,13 @@
               type="button"
               class="rounded-control border border-border-strong px-4 py-1 uppercase tracking-wider text-ink transition hover:border-accent disabled:opacity-50"
               :disabled="signingOut"
-              @click="handleSignOut"
+              @click="handleSignOut('desktop')"
             >
               Log out
             </button>
           </template>
           <template v-else>
-            <RouterLink class="hover:text-ink-bright transition" :to="loginLink">Log in</RouterLink>
+            <RouterLink ref="desktopLogin" class="hover:text-ink-bright transition" :to="loginLink">Log in</RouterLink>
             <RouterLink
               class="rounded-control border border-accent px-4 py-1 text-accent transition hover:bg-accent hover:text-on-accent"
               to="/register"
@@ -42,6 +42,7 @@
       </nav>
 
       <button
+        ref="menuToggle"
         class="inline-flex items-center justify-center rounded-control border border-border-strong p-2 text-ink transition hover:bg-hover md:hidden"
         type="button"
         :aria-expanded="isMenuOpen"
@@ -100,7 +101,7 @@
                 type="button"
                 class="rounded-control border border-border-strong px-4 py-2 text-center uppercase tracking-[0.2em] text-ink transition hover:border-accent disabled:opacity-50"
                 :disabled="signingOut"
-                @click="handleSignOut"
+                @click="handleSignOut('mobile')"
               >
                 Log out
               </button>
@@ -123,7 +124,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { useSession } from '../composables/useSession';
 
@@ -153,7 +154,14 @@ const loginLink = computed(() => {
   return { path: '/login', query: { redirect: route.fullPath } };
 });
 
-async function handleSignOut() {
+const desktopLogin = ref<{ $el: HTMLElement } | null>(null);
+const menuToggle = ref<HTMLButtonElement | null>(null);
+
+// Log out (which also forgets a stored admin token, useSession.signOut). The
+// button goes away with the session, so the keyboard moves to what takes
+// its place: the Log in link on desktop, the menu toggle on mobile (the menu
+// closes).
+async function handleSignOut(from: 'desktop' | 'mobile') {
   signingOut.value = true;
   const result = await signOut();
   signingOut.value = false;
@@ -166,5 +174,8 @@ async function handleSignOut() {
   if (route.matched.some((record) => record.meta.requiresUser)) {
     await router.push('/');
   }
+  await nextTick();
+  if (from === 'desktop') desktopLogin.value?.$el.focus();
+  else menuToggle.value?.focus();
 }
 </script>

@@ -75,11 +75,13 @@ const { user, isAdmin, signOut: endSession } = useSession();
 const signingOut = ref(false);
 
 // Which credentials the admin requests carry. With both, the server tries the
-// token first and falls back to the session when it does not match.
+// token first and falls back to the session when it does not match, so
+// while the session is an admin's a wrong token is never refused: the label
+// does not vouch for it.
 const credentialLabel = computed(() => {
   const session = isAdmin.value ? `Logged in as ${user.value?.username}` : '';
   if (!hasAdminToken.value) return session;
-  return session ? `${session} · admin token stored` : 'Admin token';
+  return session ? `${session} · stored admin token (unverified)` : 'Admin token';
 });
 
 // Drops every admin credential: the stored token and an admin session (a

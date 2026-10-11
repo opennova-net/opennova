@@ -67,7 +67,10 @@ export function onAdminCredentialRefused(listener: () => void): () => void {
 // 401: neither a Bearer token nor a session was accepted. 403 `forbidden`: a
 // player's session and no accepted token. Either way a token the request
 // carried was refused, so it is dropped (only if it is still the stored one:
-// a token entered while the request was in flight stays).
+// a token entered while the request was in flight stays). Beside an admin
+// session a wrong token is never refused (the server falls back to the
+// session), so it is found out only once the session stops being an admin's;
+// the users page asks again right after a change to its own role.
 adminClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {

@@ -1,10 +1,11 @@
 // The signed-in visitor, app-wide: one reactive current user, read from
-// GET /api/me once at app start (main.ts calls loadSession) and again after a
+// GET /api/me at app start (main.ts calls loadSession) and again after a
 // login, a logout, or an admin request the server refused (an expired
 // session, or a role changed under a live one). A 401 from /api/me means
 // logged out.
 
 import { computed, ref, shallowRef } from 'vue';
+import { clearAdminToken } from '../api/authToken';
 import { onAdminCredentialRefused } from '../api/client';
 import {
   login,
@@ -23,6 +24,9 @@ const ready = ref(false);
 // The last /api/me failure other than a 401 (the server unreachable, say).
 const loadError = shallowRef<SessionError | null>(null);
 
+// The load every caller of loadSession shares: set while one is in flight or
+// once one has answered; null again after a failed one, so the next caller
+// asks again.
 let initialLoad: Promise<void> | null = null;
 // Each refresh's ticket: only the latest one writes the state, so a slow
 // /api/me cannot overwrite a newer answer.
@@ -37,6 +41,8 @@ export async function refreshSession(): Promise<SessionResult<SessionUser | null
     if (result.ok) {
       user.value = result.value;
       loadError.value = null;
+      // An answer from any refresh settles the load.
+      if (!initialLoad) initialLoad = Promise.resolve();
     } else {
       loadError.value = result.error;
     }
@@ -45,10 +51,17 @@ export async function refreshSession(): Promise<SessionResult<SessionUser | null
   return result;
 }
 
-// The app-start load, run once; later callers (the router guard) wait on the
-// same request.
+// The app-start load; later callers (the router guard, on every navigation)
+// share it. A load that got no answer (the server unreachable, a 5xx, the
+// request timing out) is not kept: `ready` still turns true, showing the
+// visitor as logged out, and the next caller tries again.
 export function loadSession(): Promise<void> {
-  if (!initialLoad) initialLoad = refreshSession().then(() => undefined);
+  if (!initialLoad) {
+    const attempt: Promise<void> = refreshSession().then((result) => {
+      if (!result.ok && initialLoad === attempt) initialLoad = null;
+    });
+    initialLoad = attempt;
+  }
   return initialLoad;
 }
 
@@ -79,8 +92,11 @@ export async function signIn(
 }
 
 // POST /api/logout, then /api/me. The user is cleared as soon as the server
-// confirms the logout.
+// confirms the logout. A stored admin token is forgotten too, first and
+// whatever the server answers, so a shared browser keeps no admin access
+// after a Log out.
 export async function signOut(): Promise<SessionResult<void>> {
+  clearAdminToken();
   const result = await logout();
   if (result.ok) {
     latest++;

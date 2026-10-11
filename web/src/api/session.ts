@@ -174,11 +174,15 @@ export async function logout(): Promise<SessionResult<void>> {
   }
 }
 
+// How long GET /api/me may take before it counts as no answer (`network`):
+// the pages wait on it before they show who is logged in.
+export const ME_TIMEOUT_MS = 10_000;
+
 // GET /api/me: the signed-in account, or null when the browser holds no live
 // session (401).
 export async function me(signal?: AbortSignal): Promise<SessionResult<SessionUser | null>> {
   try {
-    const res = await apiClient.get<unknown>('/me', { signal });
+    const res = await apiClient.get<unknown>('/me', { signal, timeout: ME_TIMEOUT_MS });
     if (!isSessionUser(res.data)) return { ok: false, error: sessionError('unknown', res.status) };
     return { ok: true, value: res.data };
   } catch (err) {

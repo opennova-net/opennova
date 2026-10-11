@@ -15,10 +15,15 @@
       </button>
     </header>
 
-    <div v-if="message" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">
+    <!-- Live regions, always in the page so a screen reader hears what lands in
+         them (a role change's result, any action's failure); the boxes below
+         are their visible copies. -->
+    <div role="status" class="sr-only">{{ message }}</div>
+    <div role="alert" class="sr-only">{{ error }}</div>
+    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">
       {{ message }}
     </div>
-    <div v-if="error" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
+    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
       {{ error }}
     </div>
 
@@ -76,10 +81,9 @@
                     type="button"
                     class="ml-3 text-xs text-accent/80 hover:text-accent disabled:opacity-40"
                     :disabled="roleBusy[u.id]"
-                    :aria-label="u.role === 'admin' ? `Make ${u.username} a player` : `Make ${u.username} an admin`"
                     @click="changeRole(u, u.role === 'admin' ? 'player' : 'admin')"
                   >
-                    {{ u.role === 'admin' ? 'Make player' : 'Make admin' }}
+                    {{ u.role === 'admin' ? 'Make player' : 'Make admin' }}<span class="sr-only">, {{ u.username }}</span>
                   </button>
                 </td>
                 <td class="px-4 py-3 font-mono text-xs">{{ u.pcid }}</td>
@@ -243,10 +247,20 @@ async function remove(id: number) {
   }
 }
 
-// What the admin confirms before a role change. Demoting one's own account
-// says that the session loses these pages at once (unless the admin token is
-// also held), and demoting the last admin says how one comes back.
-function roleChangePrompt(u: User, role: Role): string {
+// An account that can log in: `active`, or a status stored empty (which the
+// server reads as active).
+function isActiveAccount(u: User): boolean {
+  return (u.account_status || 'active') === 'active';
+}
+
+// What the admin confirms before a role change, judged on `list`, the users
+// as the server has them now. Demoting one's own account says that the
+// session loses these pages at once (unless a valid admin token is also
+// held). Demoting the last admin who can log in says how one comes back:
+// ONNET_BOOTSTRAP_ADMIN promotes only while NO account holds the admin role
+// (bootstrap_admin in apps/novaworld_server/auth.cpp), so a banned or
+// restricted admin left behind blocks it and only the token remains.
+function roleChangePrompt(u: User, role: Role, list: User[]): string {
   if (role === 'admin') {
     return `Make ${u.username} an admin? An admin can manage every account and the server.`;
   }
@@ -255,34 +269,61 @@ function roleChangePrompt(u: User, role: Role): string {
     lines.push(`You are about to remove your own admin role (${u.username}).`);
     lines.push(
       hasAdminToken.value
-        ? 'Your session loses admin access at once; these pages stay open only through the admin token.'
+        ? 'Your session loses admin access at once; these pages stay open only if the stored admin token is valid.'
         : 'Your session loses admin access at once, and these pages close.',
     );
   } else {
     lines.push(`Make ${u.username} a player? Their session loses admin access at once.`);
   }
-  const otherAdmins = users.value.filter((x) => x.role === 'admin' && x.id !== u.id).length;
-  if (otherAdmins === 0) {
-    lines.push(
-      'No other account is an admin. Only the ADMIN_API_TOKEN, or ONNET_BOOTSTRAP_ADMIN at the next server start, can make one again.',
-    );
+  const otherAdmins = list.filter((x) => x.role === 'admin' && x.id !== u.id);
+  const inactiveAdmins = otherAdmins.filter((x) => !isActiveAccount(x));
+  if (otherAdmins.length === inactiveAdmins.length) {
+    if (inactiveAdmins.length === 0) {
+      lines.push(
+        'No other account is an admin. Only the ADMIN_API_TOKEN, or ONNET_BOOTSTRAP_ADMIN at the next server start, can make one again.',
+      );
+    } else {
+      const names = inactiveAdmins.map((x) => `${x.username} (${x.account_status})`).join(', ');
+      lines.push(
+        `No other admin can log in: ${names} ${inactiveAdmins.length === 1 ? 'holds' : 'hold'} the admin role but ${inactiveAdmins.length === 1 ? 'is' : 'are'} not active. ` +
+          'While any account holds the role, ONNET_BOOTSTRAP_ADMIN does nothing, so only the ADMIN_API_TOKEN can make a working admin again.',
+      );
+    }
   }
   return lines.join('\n\n');
 }
 
-// PUT /api/admin/users/<id> {role}, after the admin confirms.
+// PUT /api/admin/users/<id> {role}, after the admin confirms. The list is
+// read again first, so the confirm judges the server's current admins, not
+// the ones this page loaded.
 async function changeRole(u: User, role: Role) {
-  if (u.role === role || roleBusy[u.id]) return;
-  if (!confirm(roleChangePrompt(u, role))) return;
-  const self = isSelf(u);
+  if (roleBusy[u.id]) return;
   roleBusy[u.id] = true;
   try {
-    const updated = await updateUser(u.id, { role });
+    const list = await listUsers();
+    users.value = list;
+    const current = list.find((x) => x.id === u.id);
+    if (!current) {
+      flashError(new Error(`${u.username} no longer exists.`));
+      return;
+    }
+    if (current.role === role) {
+      flashMessage(`${current.username} is already ${role === 'admin' ? 'an admin' : 'a player'}.`);
+      return;
+    }
+    if (!confirm(roleChangePrompt(current, role, list))) return;
+    const self = isSelf(current);
+    const updated = await updateUser(current.id, { role });
     users.value = users.value.map((x) => (x.id === updated.id ? updated : x));
     flashMessage(`${updated.username} is now ${updated.role === 'admin' ? 'an admin' : 'a player'}.`);
-    // The gate follows the session's role: without the token, a demoted
-    // admin's pages close here.
-    if (self) await refreshSession();
+    if (self) {
+      // The gate follows the session's role: without the token, a demoted
+      // admin's pages close here. With a token stored, the list is asked for
+      // again at once, so a token the admin session was covering for is
+      // refused now (and dropped) rather than on some later request.
+      await refreshSession();
+      if (hasAdminToken.value) await refresh();
+    }
   } catch (e) {
     flashError(e);
   } finally {

@@ -1,8 +1,8 @@
 <template>
-  <div v-if="!ready" class="mx-auto max-w-md px-6 py-10 text-center text-sm text-ink-muted" role="status">
+  <slot v-if="isAdmin || hasAdminToken" />
+  <div v-else-if="!ready" class="mx-auto max-w-md px-6 py-10 text-center text-sm text-ink-muted" role="status">
     Checking your session…
   </div>
-  <slot v-else-if="isAdmin || hasAdminToken" />
   <div v-else class="mx-auto max-w-md px-6 py-10">
     <div class="space-y-6 rounded-panel border border-border bg-raised p-8">
       <div>
@@ -47,9 +47,10 @@
 // The /admin pages' gate. An admin-role session passes straight through (the
 // server reads the role on every /api/admin request). Anyone else is asked
 // for the server's ADMIN_API_TOKEN, the maintainer's machine credential,
-// kept in localStorage (api/authToken.ts). When the server refuses a
-// request, the adminClient drops a refused token and re-reads the session,
-// and the gate closes again on its own.
+// kept in localStorage (api/authToken.ts); a stored token passes at once,
+// without waiting on /api/me. When the server refuses a request, the
+// adminClient drops a refused token and re-reads the session, and the gate
+// closes again on its own.
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { hasAdminToken, setAdminToken } from '../api/authToken';
