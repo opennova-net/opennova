@@ -14,8 +14,8 @@ class MissionDocument;
 
 // The outline's row_menu over a mission's record: the logic's items, then the views'.
 void draw_mission_row_menu(Workspace &workspace, const Document &document, const NodeAddress &record);
-// The logic's items over a record (ui/mission_logic_view.cpp), and the views' (ui/mission_row_menu.cpp until
-// lane B's own file takes them); each draws nothing for a record it has nothing for.
+// The logic's items over a record (ui/mission_logic_view.cpp), and the views' (ui/mission_mark_menu.cpp: Frame in
+// the 3D view, Select group members); each draws nothing for a record it has nothing for.
 void mission_logic_row_items(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record);
 void mission_space_row_items(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record);
 

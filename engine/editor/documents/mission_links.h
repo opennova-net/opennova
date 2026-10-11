@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/mission_sentence.h>
 #include <editor/model/value.h>
 #include <formats/mission/mission_params.h>
 
@@ -87,6 +88,26 @@ std::vector<NodeId> mission_group_rows(const MissionDocument &document, int64_t 
 std::vector<NodeAddress> mission_group_members(const MissionDocument &document, const std::vector<NodeAddress> &records);
 // The group a record names as a member or is (an entity's group, a group record's index); -1 for neither.
 int64_t mission_group_of(const MissionDocument &document, const NodeAddress &record);
+// The record of the group of an index on the mission row (empty for none: no mission row, or past the 64).
+NodeAddress mission_group_address(const MissionDocument &document, int64_t group);
+
+// What a mark's record offers a new event or the selected one (S24, the views' right-click menu): the record
+// itself (an area, an entity) and, for an entity in a group, that group too, each with what it is to a parameter
+// (its kind and its value: mission_record_value). In that order.
+struct MissionSubject {
+	NodeAddress record;
+	mission::ParamKind kind = mission::ParamKind::Unused;
+	int64_t value = 0;
+};
+std::vector<MissionSubject> mission_subjects(const MissionDocument &document, const NodeAddress &record);
+// The types of trigger (`actions` false) or action whose parameters take a subject of `kind` (some slot of the
+// type's row is of the kind), in logic_types' order, each with the first such slot: what "Use in the selected
+// event" offers.
+struct MissionTypeSlot {
+	const LogicType *type = nullptr;
+	int slot = 0;
+};
+std::vector<MissionTypeSlot> mission_types_taking(mission::ParamKind kind, bool actions);
 
 // What a trigger's or an action's parameter takes when it is picked in the views (S24 pick mode, the workspace's
 // document `pick`): its kind and its label ("Zone"), what to click for it in words ("an area", "an entity in a

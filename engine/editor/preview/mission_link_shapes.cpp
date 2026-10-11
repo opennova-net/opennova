@@ -5,6 +5,7 @@
 #include <set>
 
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_model.h>
@@ -270,6 +271,52 @@ bool mission_pick_command(const ViewportContext &context, const Document &docume
 	}
 	mission_pick_requests(document.path(), pick, 0, out);
 	return true;
+}
+
+bool mission_new_event_requests(const MissionDocument &document, const std::string &token, const NodeAddress &subject,
+		CanvasRequests &out, std::string &error) {
+	const MissionRecipe *recipe = mission_recipe(token);
+	if (!recipe) {
+		error = "Unknown recipe \"" + token + "\" (the mission_logic query's board lists them).";
+		return false;
+	}
+	// The record itself, or for a recipe made over a group, the group an entity is in.
+	NodeAddress over;
+	for (const MissionSubject &each : mission_subjects(document, subject))
+		if (each.kind == recipe->subject && !over.row) over = each.record;
+	if (recipe->subject != mission::ParamKind::Unused && !over.row) {
+		error = std::string("\"") + recipe->title + "\" is made over " + mission::param_kind_label(recipe->subject) +
+				", which that record is not (nor its group).";
+		return false;
+	}
+	std::vector<Edit> edits;
+	if (!recipe_event_edits(document, *recipe, over, edits, error)) return false;
+	out.request(request::edit_record(document.path(), std::move(edits)));
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("path", io::JsonValue::make_string(document.path()));
+	members.set("logic", io::JsonValue::make_bool(true));
+	io::JsonValue change = io::JsonValue::make_object();
+	change.set("document", std::move(members));
+	out.request(request::set_workspace(io::json_write(change)));
+	return true;
+}
+
+bool mission_new_event_command(const ViewportContext &context, const Document &document, const std::vector<NodeId> &ids,
+		const std::string &token, CanvasRequests &out, std::string &error) {
+	const MissionDocument *mission = dynamic_cast<const MissionDocument *>(&document);
+	if (!mission) {
+		error = "The viewport shows no mission.";
+		return false;
+	}
+	if (!context.editable()) {
+		error = context.not_editable();
+		return false;
+	}
+	if (ids.size() != 1) {
+		error = "new_event takes the one record it is made over (ids: [its identity]) and the recipe (value).";
+		return false;
+	}
+	return mission_new_event_requests(*mission, token, document.address_of(ids.front()), out, error);
 }
 
 void mission_pick_candidate(CanvasPoint at, OverlayList &out) {

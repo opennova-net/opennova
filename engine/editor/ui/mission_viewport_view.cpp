@@ -26,6 +26,7 @@
 #include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/mission_mark_menu.h>
 #include <editor/ui/mission_palette_view.h>
 #include <editor/ui/project_find.h>
 #include <editor/ui/reference_picker.h>
@@ -109,6 +110,7 @@ struct MissionViewportView::Tools {
 	MissionPaletteView palette;
 	CanvasPoint menu_at;
 	NodeAddress menu_record;
+	NodeAddress menu_event; // S24: the event the selection held as the menu opened (Use in adds to it)
 	MissionItemFacts menu_facts; // the item of the entity the menu was opened on, read as it opened (DI-18)
 	// The last hint the canvas gave (what a click does now), and where the pointer was on the picture
 	// (Ctrl+V pastes there).
@@ -135,7 +137,6 @@ struct MissionViewportView::Tools {
 			const MissionCanvas &canvas);
 	void entity_jumps(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context,
 			const MissionEntityMark &entity);
-	void events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view);
 	void notes(const MissionViewport &mission);
 	void ground_line();
 	void legend(ViewportCanvas &ui, const MissionViewport &mission);
@@ -250,6 +251,8 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 					tools.menu_at = in.mouse;
 					tools.menu_record = NodeAddress();
 					tools.menu_facts = MissionItemFacts();
+					tools.menu_event = view.documents.active == path ? mission_menu_event(view.documents.selection.primary)
+					                                                 : NodeAddress();
 					const int mark = mission_canvas_under(canvas->frame(), in, MissionPick::Click);
 					if (mark >= 0) {
 						tools.menu_record = canvas->frame().marks[size_t(mark)].record;
@@ -698,28 +701,15 @@ void MissionViewportView::Tools::canvas_menu(Workspace &workspace, const Mission
 	const MissionEntityMark *entity = menu_record.row ? mission.scene().entity(menu_record.row) : nullptr;
 	// The entity's jumps (DI-18): what it is made of, Files on its model, more of it, who names it.
 	if (entity) entity_jumps(workspace, mission, context, *entity);
-	if (ImGui::MenuItem("Select all like this", nullptr, false, entity || selected))
-		viewport_command(workspace, mission, "select_same");
-	ui_kit::tooltip("Select every entity of the mission placed from the same item.");
-	const Document *document = context.input.document ? records_of(*context.input.document) : nullptr;
-	const std::string locator = document && menu_record.row ? document->locator(menu_record) : std::string();
-	if (ImGui::MenuItem("Go to in outline", nullptr, false, !locator.empty())) {
-		ReferenceTarget target;
-		target.label = mission.path();
-		target.file = mission.path();
-		target.locator = locator;
-		target.field = entity ? "item" : "id";
-		target.editable = true;
-		window_requests::go_to(workspace, target);
-	}
-	const bool finds = view.findings.graph && !locator.empty();
-	if (ImGui::MenuItem("Find usages", "Shift+F12", false, finds) && finds)
-		ProjectFind::open_usages(workspace, mission.path(), locator);
-	ui_kit::tooltip("Who names it (an entity by its SSN, an area by its zone): the events and the other files, each a "
-	                "Go to.");
-	if (ImGui::BeginMenu("Show events using this", menu_record.row != 0)) {
-		events_using(workspace, mission, view);
-		ImGui::EndMenu();
+	// The record's own items, the 3D view's and the map's alike (ui/mission_mark_menu: Select all like this, Go to in
+	// outline, Find usages, Show events using this; S24's New event, Add to group, Select group members, Use in).
+	const Document *records = context.input.document ? records_of(*context.input.document) : nullptr;
+	if (const auto *document = dynamic_cast<const MissionDocument *>(records)) {
+		MissionMarkMenu menu;
+		menu.record = menu_record;
+		menu.event = menu_event;
+		menu.selected = selected;
+		draw_mission_mark_items(workspace, *document, menu, edits);
 	}
 }
 
@@ -750,52 +740,6 @@ void MissionViewportView::Tools::entity_jumps(Workspace &workspace, const Missio
 	ui_kit::tooltip(places ? "The Place tool with " + (facts.name.empty() ? "item " + id : facts.name) +
 	                                 ": each click on the ground places one more."
 	                       : context.not_editable());
-}
-
-// The events (and any other record of the mission) that name the record the menu was opened on:
-// an entity by its SSN, an area by its zone id; each opens at its field.
-void MissionViewportView::Tools::events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view) {
-	const AssetGraph *graph = view.findings.graph.get();
-	const DocumentBase *base = nullptr;
-	for (const auto &open : view.documents.open)
-		if (open && open->path() == mission.path()) base = open.get();
-	const Document *document = base ? records_of(*base) : nullptr;
-	if (!graph || !document) {
-		ImGui::TextDisabled("Not known yet (the project is still being read).");
-		return;
-	}
-	ReferenceKind kind = ReferenceKind::MissionEntity;
-	std::string name;
-	if (const MissionEntityMark *entity = mission.scene().entity(menu_record.row)) {
-		Value ssn;
-		if (document->get(menu_record, "id", ssn) && std::holds_alternative<int64_t>(ssn))
-			name = std::to_string(std::get<int64_t>(ssn));
-		(void)entity;
-	} else if (const MissionAreaMark *area = mission.scene().area(menu_record.row)) {
-		kind = ReferenceKind::MissionZone;
-		name = std::to_string(area->zone);
-	}
-	const std::vector<const GraphEdge *> users =
-			name.empty() ? std::vector<const GraphEdge *>() : graph->referrers_of(kind, name, mission_scope(*document));
-	if (users.empty()) {
-		ImGui::TextDisabled("No event names it.");
-		return;
-	}
-	const GraphNameSource names(*graph);
-	for (size_t i = 0; i < users.size(); ++i) {
-		const GraphEdge &edge = *users[i];
-		std::string label = edge.record.empty() ? edge.source : edge.record;
-		if (edge.source == mission.path() && edge.address.row) {
-			// The event (its sentence) and the trigger or action, by the display names.
-			const NodeAddress row{ edge.address.row, edge.address.kind, 0 };
-			label = record_display(*document, row, &names);
-			if (edge.address.child) label += ": " + record_display(*document, edge.address, &names);
-		}
-		ImGui::PushID(int(i));
-		if (ImGui::MenuItem(ui_kit::fit(label, ImGui::GetFontSize() * 24.0f).c_str()))
-			window_requests::go_to(workspace, usage_target(*view.project.scan, edge));
-		ImGui::PopID();
-	}
 }
 
 void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {

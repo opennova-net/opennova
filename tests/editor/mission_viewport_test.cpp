@@ -540,6 +540,28 @@ static int test_links() {
 	gathered.requests.clear();
 	TEST_EXPECT(!viewport->command(rig.context(), "select_group", { zone.row }, gathered, error) &&
 	            error.find("group") != std::string::npos);
+	// S24 B4: new_event over the wire: the recipe made over the area (the player inside zone 20), one batch, then the
+	// Logic pane shown; an unknown recipe and a record the recipe is not made over refused.
+	{
+		ViewportCommand made;
+		made.name = "new_event";
+		made.kind = ViewportKind::Mission;
+		made.ids = { zone.row };
+		made.value = "player_in_area";
+		gathered.requests.clear();
+		TEST_EXPECT(viewport->command_of(rig.context(), made, gathered, error) && gathered.requests.size() == 2 &&
+		            gathered.requests[0].kind == EditorRequestKind::EditRecord &&
+		            gathered.requests[1].kind == EditorRequestKind::SetWorkspace);
+		made.value = "no_such_recipe";
+		TEST_EXPECT(!viewport->command_of(rig.context(), made, gathered, error) && error.find("Unknown recipe") != std::string::npos);
+		made.value = "destroyed";
+		TEST_EXPECT(!viewport->command_of(rig.context(), made, gathered, error) && error.find("made over") != std::string::npos);
+		// Over the walker, a group's recipe takes its group.
+		made.ids = { walker.row };
+		made.value = "group_wiped_out";
+		gathered.requests.clear();
+		TEST_EXPECT(viewport->command_of(rig.context(), made, gathered, error) && gathered.requests.size() == 2);
+	}
 	// A mark selected: no links.
 	rig.session.handle(request::select_record(kMission, walker));
 	rig.pump();

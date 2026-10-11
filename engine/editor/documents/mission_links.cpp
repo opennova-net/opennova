@@ -7,6 +7,7 @@
 
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
+#include <editor/documents/mission_uses.h>
 #include <formats/mission/bms.h>
 
 namespace opennova::editor {
@@ -213,36 +214,58 @@ std::vector<NodeAddress> mission_group_members(const MissionDocument &document, 
 }
 
 bool mission_record_value(const MissionDocument &document, const NodeAddress &record, ReferenceKind kind, int64_t &value) {
+	// What the record is to a parameter (mission_uses' reading), taken where the reference names that kind.
+	ParamKind is = ParamKind::Unused;
+	int64_t held = 0;
+	if (!mission_record_value(document, record, is, held)) return false;
+	const ReferenceKind names = is == ParamKind::Entity ? ReferenceKind::MissionEntity
+	                            : is == ParamKind::Zone ? ReferenceKind::MissionZone
+	                            : is == ParamKind::Path ? ReferenceKind::MissionPath
+	                            : is == ParamKind::Event ? ReferenceKind::MissionEvent
+	                            : is == ParamKind::Group ? ReferenceKind::MissionGroup
+	                                                     : ReferenceKind::None;
+	if (names != kind) return false;
+	value = held;
+	return true;
+}
+
+NodeAddress mission_group_address(const MissionDocument &document, int64_t group) {
+	const MissionRow *mission = document.mission_row();
+	if (!mission || group < 0 || mission->ids.lists.size() <= kGroupsList || size_t(group) >= mission->ids.lists[kGroupsList].size())
+		return NodeAddress();
+	return {mission->id, k(MissionKind::Group), mission->ids.lists[kGroupsList][size_t(group)].id};
+}
+
+std::vector<MissionSubject> mission_subjects(const MissionDocument &document, const NodeAddress &record) {
+	std::vector<MissionSubject> out;
+	MissionSubject own;
+	own.record = record;
+	if (!mission_record_value(document, record, own.kind, own.value)) return out;
+	out.push_back(own);
 	const Node *row = document.row(record.row);
-	if (!row) return false;
-	switch (kind) {
-	case ReferenceKind::MissionEntity:
-		if (record.child || !is_entity_kind(row->kind)) return false;
-		value = static_cast<const EntityRow &>(*row).native.id;
-		return true;
-	case ReferenceKind::MissionZone:
-		if (record.child || row->kind != k(MissionKind::Area)) return false;
-		value = static_cast<const AreaRow &>(*row).native.id;
-		return true;
-	case ReferenceKind::MissionPath:
-		if (record.child || row->kind != k(MissionKind::WaypointPath)) return false;
-		value = static_cast<const PathRow &>(*row).native.number;
-		return true;
-	case ReferenceKind::MissionEvent: {
-		if (record.child || row->kind != k(MissionKind::Event)) return false;
-		const size_t index = document.index_of(*row);
-		if (index == SIZE_MAX) return false;
-		value = int64_t(index);
-		return true;
+	if (own.kind == ParamKind::Entity && row && is_entity_kind(row->kind)) {
+		const int64_t group = static_cast<const EntityRow &>(*row).native.group_id;
+		MissionSubject in_group;
+		in_group.record = mission_group_address(document, group);
+		if (!mission::group_names_none(group) && in_group.record.row &&
+		    mission_record_value(document, in_group.record, in_group.kind, in_group.value))
+			out.push_back(in_group);
 	}
-	case ReferenceKind::MissionGroup: {
-		Document::Placement at;
-		if (!record.child || record.kind != k(MissionKind::Group) || !document.placement(record, at)) return false;
-		value = int64_t(at.index);
-		return true;
+	return out;
+}
+
+std::vector<MissionTypeSlot> mission_types_taking(ParamKind kind, bool actions) {
+	std::vector<MissionTypeSlot> out;
+	for (const LogicType &type : logic_types(actions)) {
+		const mission::ParamRow *row = actions ? mission::action_params(type.type, type.sub) : mission::trigger_params(type.type, type.sub);
+		if (!row) continue;
+		for (int slot = 0; slot < 4; ++slot)
+			if (row->p[slot] == kind) {
+				out.push_back({&type, slot});
+				break;
+			}
 	}
-	default: return false;
-	}
+	return out;
 }
 
 const char *mission_param_field(int slot) {

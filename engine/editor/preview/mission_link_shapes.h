@@ -115,6 +115,16 @@ void mission_pick_end(const std::string &path, CanvasRequests &out);
 // False, with why, where no pick waits, the context takes no edits, or the record fills no slot of it.
 bool mission_pick_command(const ViewportContext &context, const Document &document, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error);
+// The views' `new_event` command (S24, the right-click menu's New event): a new event of the recipe `token`
+// (documents/mission_recipes) made over the record `ids` names (an area, an entity, or for a group's recipe an
+// entity's group), one batch at the end of the events, and the Logic pane shown, where the board shows the new
+// card (the batch selects the event it made). False, with why, for an unknown recipe, a record it is not made
+// over, or a context that takes no edits.
+bool mission_new_event_command(const ViewportContext &context, const Document &document, const std::vector<NodeId> &ids,
+		const std::string &token, CanvasRequests &out, std::string &error);
+// The requests that make a recipe's event over `subject` (its batch, then the Logic pane shown); false with why.
+bool mission_new_event_requests(const MissionDocument &document, const std::string &token, const NodeAddress &subject,
+		CanvasRequests &out, std::string &error);
 // The ring a candidate of the pick is drawn with (each mark that fills the slot).
 void mission_pick_candidate(CanvasPoint at, OverlayList &out);
 

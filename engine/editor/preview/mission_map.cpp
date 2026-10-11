@@ -969,6 +969,18 @@ bool MissionMapViewport::command(const ViewportContext &context, const std::stri
 	return true;
 }
 
+bool MissionMapViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+		std::string &error) const {
+	if (command.name != "new_event") return ViewportModel::command_of(context, command, out, error);
+	const Document *document = planned(context, error);
+	if (!document) return false;
+	if (command.has_at || !command.by.empty() || !command.item.empty() || !command.handle.empty() || !command.field.empty()) {
+		error = "new_event takes ids (the record) and value (the recipe), nothing else.";
+		return false;
+	}
+	return mission_new_event_command(context, *document, command.ids, command.value, out, error);
+}
+
 io::JsonValue MissionMapViewport::options_json() const {
 	return mission_map_options_to_json(options_);
 }

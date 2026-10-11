@@ -382,6 +382,18 @@ int test_pick_values() {
 	TEST_EXPECT(mission_record_value(m, zone20, ReferenceKind::MissionZone, value) && value == 20);
 	TEST_EXPECT(mission_record_value(m, row_at(m, MissionKind::WaypointPath, 1), ReferenceKind::MissionPath, value) && value == 1);
 	TEST_EXPECT(mission_record_value(m, third, ReferenceKind::MissionEvent, value) && value == 2);
+	// B4: what a mark offers a new event or the selected one: the walker and its group 1; an area its zone alone.
+	const std::vector<MissionSubject> subjects = mission_subjects(m, walker);
+	TEST_EXPECT(subjects.size() == 2 && subjects[0].kind == mission::ParamKind::Entity && subjects[0].value == f.walker &&
+	            subjects[1].kind == mission::ParamKind::Group && subjects[1].value == 1 &&
+	            subjects[1].record == mission_group_address(m, 1));
+	TEST_EXPECT(mission_subjects(m, zone20).size() == 1 && mission_subjects(m, row_at(m, MissionKind::Item, 0)).size() == 1);
+	TEST_EXPECT(mission_subjects(m, first).size() == 1 && mission_subjects(m, first)[0].kind == mission::ParamKind::Event);
+	// The types taking a zone: Single and Group in an area among the triggers, each with its zone's slot (1).
+	bool single_in_area = false;
+	for (const MissionTypeSlot &use : mission_types_taking(mission::ParamKind::Zone, false))
+		single_in_area = single_in_area || (use.type->type == 2 && use.type->sub == 10 && use.slot == 1);
+	TEST_EXPECT(single_in_area && !mission_types_taking(mission::ParamKind::Entity, true).empty());
 	const NodeAddress group2 = mission_links(m, second).links[1].record;
 	TEST_EXPECT(mission_record_value(m, group2, ReferenceKind::MissionGroup, value) && value == 2 &&
 	            !mission_record_value(m, group2, ReferenceKind::MissionEntity, value));

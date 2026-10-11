@@ -2718,8 +2718,9 @@ void test_mission_view_placing() {
 	text = logged_frame(ui);
 	CHECK(in_order(text, { "Paste here", "Frame", "Drop to ground", "Duplicate", "Delete", "Go to item", "Go to model",
 	                         "Show model in Files", "Place another", "Select all like this", "Go to in outline", "Find usages",
-	                         "Show events using this" }),
-	      "the menu of what applies, the entity's jumps among it (DI-18)");
+	                         "Show events using this", "New event", "Add to group", "Select group members",
+	                         "Use in the selected event" }),
+	      "the menu of what applies, the entity's jumps among it (DI-18), the logic made from where it stands (S24)");
 	column = column_window();
 	if (!column) return;
 	ui.activate(popup_item(item_id(column->ID, { "mission_canvas_menu" }), "Select all like this"));

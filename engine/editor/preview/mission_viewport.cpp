@@ -19,6 +19,7 @@
 #include <editor/preview/mission_ground_check.h>
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_items.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_place.h>
@@ -1199,6 +1200,16 @@ bool MissionViewport::play_from_here_(const ViewportContext &context, const View
 bool MissionViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
 	if (command.name == "play_from_here") return play_from_here_(context, command, out, error);
+	if (command.name == "new_event") {
+		// S24: a recipe's event made over the record named (the right-click menu's New event).
+		const Document *document = planned_(context, error);
+		if (!document) return false;
+		if (command.has_at || !command.by.empty() || !command.item.empty() || !command.handle.empty() || !command.field.empty()) {
+			error = "new_event takes ids (the record) and value (the recipe), nothing else.";
+			return false;
+		}
+		return mission_new_event_command(context, *document, command.ids, command.value, out, error);
+	}
 	if (command.name == "shoot") return shoot_(context, command, out, error);
 	if (command.name != "duplicate" && command.name != "paste") return ViewportModel::command_of(context, command, out, error);
 	const Document *document = planned_(context, error);

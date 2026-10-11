@@ -227,6 +227,10 @@ public:
 	// ZOOMIN and ZOOMOUT steps): each a SetViewport of the camera. `select_group` (S24): the 3D view's.
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
+	// `new_event {ids: [record], value: recipe}` (S24): the 3D view's (mission_new_event_command); the rest as
+	// command() takes them.
+	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const override;
 	io::JsonValue options_json() const override;
 	io::JsonValue camera_json() const override;
 	io::JsonValue body_json(const ViewportInput &input) const override;
