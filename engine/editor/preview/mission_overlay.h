@@ -130,6 +130,8 @@ struct MissionOverlayInput {
 	const std::vector<size_t> *badges = nullptr;
 	// S24: a group's words in the legend (with options.color_by group; none: "Group N").
 	std::function<std::string(int)> group_title;
+	// S24 pick mode: which marks fill the slot a pick waits for (by mark index; null: no pick), each rung.
+	const std::vector<char> *pick = nullptr;
 };
 OverlayList mission_overlay_shapes(const MissionOverlayInput &in);
 

@@ -1385,6 +1385,16 @@ void workspace_tidies(SessionCore &core) {
 		moved = true;
 	}
 	for (auto &[path, shown] : workspace.documents) {
+		// S24: a pick whose trigger or action is gone (removed, or its document read again) ends.
+		if (shown.pick.active()) {
+			const DocumentBase *document = open_document(view, path);
+			const Document *records = document ? records_of(*document) : nullptr;
+			Document::Placement at;
+			if (!records || !records->placement(shown.pick.record, at)) {
+				shown.pick = WorkspaceView::Pick();
+				moved = true;
+			}
+		}
 		if (!shown.remove_screen) continue;
 		const DocumentBase *document = open_document(view, path);
 		if (document && removable_screen(*document, shown.remove_screen)) continue;

@@ -937,6 +937,11 @@ bool MissionMapViewport::command(const ViewportContext &context, const std::stri
 				if (const Selection *selection = selection_of(context.input, *document))
 					for (const NodeAddress &record : selection->records) of.push_back(record.row);
 		camera = framed(of, context.width, context.height);
+	} else if (name == "pick") {
+		// S24: the waiting pick given the named record, as a click on its pin gives it.
+		const Document *document = planned(context, error);
+		if (!document) return false;
+		return mission_pick_command(context, *document, ids, out, error);
 	} else if (name == "select_group") {
 		// S24: every entity of the named (else the selected) records' groups, as the 3D view's command.
 		const Document *document = document_of(context.input);
@@ -957,7 +962,7 @@ bool MissionMapViewport::command(const ViewportContext &context, const std::stri
 		camera.zoom = std::clamp(camera.zoom * (name == "zoom_in" ? hud::kMapViewZoomInStep : hud::kMapViewZoomOutStep),
 				kMissionMapZoomMin, kMissionMapZoomMax);
 	} else {
-		error = "The map's commands are frame, zoom_in, zoom_out and select_group.";
+		error = "The map's commands are frame, zoom_in, zoom_out, select_group and pick.";
 		return false;
 	}
 	out.request(request::set_viewport(path(), camera_change(camera)));

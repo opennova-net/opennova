@@ -52,6 +52,9 @@ struct MissionCanvasFrame {
 	std::vector<int> selected; // the other selected records' marks
 	std::vector<NodeAddress> records; // every selected record of the document (Delete's, a path's line)
 	NodeAddress logic; // S24: the primary record where it is an event, a trigger or an action (its links drawn)
+	// S24 pick mode: the slot a chip asked a click for and what each mark gives it (none while no pick waits, or
+	// the picture is not the document as it is, or it takes no edits).
+	MissionPickFrame pick;
 	bool current = false; // the picture shows the document as it is now
 	bool editable = true; // edits may be raised (ViewportContext::editable)
 	std::string not_editable; // why not

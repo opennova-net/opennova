@@ -7,6 +7,9 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/viewport_model.h>
+#include <editor/session/view/session_view.h>
+#include <base/io/json.h>
 #include <editor/session/request_factories.h>
 
 namespace opennova::editor {
@@ -198,6 +201,77 @@ bool mission_select_group(const MissionDocument &document, const std::vector<Nod
 	members.push_back(last);
 	out.request(request::select_record(document.path(), last, SelectMode::Replace, members));
 	return true;
+}
+
+MissionPickFrame mission_pick_frame(const MissionDocument &document, const NodeAddress &record, int slot,
+		const std::vector<NodeAddress> &marks) {
+	MissionPickFrame out;
+	if (!record.row || !mission_pick_slot(document, record, slot, out.takes)) return out;
+	out.record = record;
+	out.slot = slot;
+	out.fills.assign(marks.size(), 0);
+	out.values.assign(marks.size(), 0);
+	if (!out.takes.marks) return out;
+	for (size_t i = 0; i < marks.size(); ++i) out.fills[i] = mission_pick_value(document, out.takes, marks[i], out.values[i]);
+	return out;
+}
+
+std::string mission_pick_hint(const MissionPickFrame &pick) {
+	if (!pick.active()) return std::string();
+	if (!pick.takes.marks)
+		return pick.takes.label + " takes " + pick.takes.what + ": pick it in its list instead (Esc cancels).";
+	return "Click " + pick.takes.what + " for " + pick.takes.label + " (Esc cancels).";
+}
+
+void mission_pick_requests(const std::string &path, const MissionPickFrame &pick, int mark, CanvasRequests &out) {
+	if (!pick.fills_mark(mark)) return;
+	Edit edit;
+	edit.address = pick.record;
+	edit.field = mission_param_field(pick.slot);
+	edit.value = pick.values[size_t(mark)];
+	out.request(request::edit_record(path, std::vector<Edit>{ edit }));
+	mission_pick_end(path, out);
+}
+
+void mission_pick_end(const std::string &path, CanvasRequests &out) {
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("path", io::JsonValue::make_string(path));
+	members.set("pick", io::JsonValue::make_object());
+	io::JsonValue change = io::JsonValue::make_object();
+	change.set("document", std::move(members));
+	out.request(request::set_workspace(io::json_write(change)));
+}
+
+bool mission_pick_command(const ViewportContext &context, const Document &document, const std::vector<NodeId> &ids,
+		CanvasRequests &out, std::string &error) {
+	const MissionDocument *mission = dynamic_cast<const MissionDocument *>(&document);
+	const auto shown = context.input.view.workspace.documents.find(document.path());
+	if (!mission || shown == context.input.view.workspace.documents.end() || !shown->second.pick.active()) {
+		error = "No pick waits: a chip's Pick in view asks one (the workspace's document pick).";
+		return false;
+	}
+	if (!context.editable()) {
+		error = context.not_editable();
+		return false;
+	}
+	if (ids.size() != 1) {
+		error = "pick takes the one record clicked (ids: [its identity]).";
+		return false;
+	}
+	const MissionPickFrame pick = mission_pick_frame(*mission, shown->second.pick.record, shown->second.pick.slot,
+			{ document.address_of(ids.front()) });
+	if (!pick.fills_mark(0)) {
+		error = "Record " + std::to_string(ids.front()) + " gives " + (pick.takes.label.empty() ? std::string("the slot") : pick.takes.label) +
+				" nothing: it takes " + (pick.takes.what.empty() ? std::string("another record") : pick.takes.what) + ".";
+		return false;
+	}
+	mission_pick_requests(document.path(), pick, 0, out);
+	return true;
+}
+
+void mission_pick_candidate(CanvasPoint at, OverlayList &out) {
+	out.ring(at, 13.0f, OverlayRole::Normal, 3.0f, 0x000000, 110);
+	out.ring(at, 13.0f, OverlayRole::Normal, 1.5f, kMissionWatchedRgb, 200);
 }
 
 void mission_link_badge(CanvasPoint at, size_t count, OverlayList &out) {

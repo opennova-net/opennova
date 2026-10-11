@@ -282,13 +282,16 @@ void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in,
 		grab_ = mission_canvas_grab(frame_, context, in, under);
 		// What a click there takes: the press's, else (no device to say) the sphere about an entity.
 		grab_.click = under >= 0 ? under : mission_canvas_under(frame_, in, MissionPick::Click);
-		// Under a tool: a press takes no mark and draws no marquee (its click places, its drag draws the
-		// Area tool's box).
-		if (tool() != MissionTool::Select && grab_.what != MissionGrab::What::Pan && grab_.what != MissionGrab::What::Orbit) {
+		// Under a tool, or (S24) while a pick waits: a press takes no mark and draws no marquee (its click places or
+		// picks, its drag draws the Area tool's box).
+		if ((tool() != MissionTool::Select || frame_.pick.active()) && grab_.what != MissionGrab::What::Pan &&
+				grab_.what != MissionGrab::What::Orbit) {
 			const CanvasPoint from = grab_.from;
+			const int click = grab_.click;
 			grab_ = MissionGrab();
 			grab_.from = grab_.to = from;
-			if (tool() == MissionTool::Area) grab_.what = MissionGrab::What::Area;
+			grab_.click = click;
+			if (tool() == MissionTool::Area && !frame_.pick.active()) grab_.what = MissionGrab::What::Area;
 		}
 	}
 	if (gesture_.pressed() && !in.down) {
@@ -356,6 +359,11 @@ void MissionCanvas::keys_(const ViewportContext &, const CanvasInput &in, Canvas
 	const CanvasKeyboard &keyboard = in.keyboard;
 	if (!keyboard.focused || gesture_.pressed() || !frame_.document) return;
 	const std::string &path = frame_.document->path();
+	// S24: Esc while a pick waits ends it.
+	if (keyboard.escape && frame_.pick.active()) {
+		mission_pick_end(path, out);
+		return;
+	}
 	// Esc under a tool is the tool's (the view goes back to Select); else it selects nothing.
 	if (keyboard.escape && tool() == MissionTool::Select && !frame_.records.empty()) {
 		out.request(request::select_record(path, NodeAddress()));
@@ -476,6 +484,17 @@ void MissionCanvas::drag_(const ViewportContext &context, const CanvasInput &in,
 void MissionCanvas::release_(CanvasRequests &out) {
 	const std::string &path = gesture_.path();
 	const MissionTool now = tool();
+	if (frame_.pick.active() && grab_.what != MissionGrab::What::Pan && grab_.what != MissionGrab::What::Orbit) {
+		// S24 pick mode: a click on a mark that fills the slot sets it and ends the pick; a click on nothing ends it;
+		// a click on a mark that does not fill it, nothing (the hint says what to click).
+		if (!gesture_.dragging() && frame_.current) {
+			if (frame_.pick.fills_mark(grab_.click)) mission_pick_requests(path, frame_.pick, grab_.click, out);
+			else if (grab_.click < 0) mission_pick_end(path, out);
+		}
+		gesture_.release(out);
+		grab_ = MissionGrab();
+		return;
+	}
 	if (grab_.what == MissionGrab::What::Marquee && gesture_.dragging()) {
 		// The records in the box, one selection: nearest last, the primary; joined as the keys say. A
 		// box that takes nothing selects nothing.
@@ -629,7 +648,11 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 	overlay.marks = &frame_.marks;
 	// Nothing is under the pointer while it looks or drags.
 	const bool busy = looking_ || gesture_.dragging();
-	overlay.hover = busy || tool() != MissionTool::Select ? -1 : mission_canvas_under(frame_, in, MissionPick::Click);
+	overlay.hover = busy || (tool() != MissionTool::Select && !frame_.pick.active()) ? -1
+	                                                                                : mission_canvas_under(frame_, in, MissionPick::Click);
+	// S24 pick mode: a mark hovers only where it fills the slot; each candidate rung.
+	if (frame_.pick.active() && !frame_.pick.fills_mark(overlay.hover)) overlay.hover = -1;
+	overlay.pick = frame_.pick.active() ? &frame_.pick.fills : nullptr;
 	overlay.primary = frame_.primary;
 	overlay.selected = &frame_.selected;
 	std::vector<NodeId> rows;
@@ -816,6 +839,8 @@ std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInpu
 		hint.empty_mission = frame_.viewport->scene().entities().empty() && frame_.viewport->scene().areas().empty();
 	// While a drag writes, what it has come to.
 	std::string line = mission_canvas_hint(hint);
+	// S24: while a pick waits, what to click.
+	if (frame_.pick.active()) line = mission_pick_hint(frame_.pick);
 	if (gesture_.dragging() && grab_.what == MissionGrab::What::Handle && !grab_.pressed.empty() && frame_.viewport) {
 		const MissionPressed &held = grab_.pressed[grab_.grabbed];
 		std::string now;

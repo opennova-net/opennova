@@ -591,6 +591,84 @@ static int test_area_handles() {
 	return 0;
 }
 
+// S24 B2: pick mode in the 3D view: the frame carries the pick (each entity a candidate for an entity slot, no area),
+// only a candidate hovers, the hint says what to click; a click on a candidate's glyph sets the slot and ends the
+// pick (the canvas's release), a click on nothing ends it, Esc ends it.
+static int test_pick() {
+	Rig rig("opennova_editor_mission_viewport_pick");
+	TEST_EXPECT(rig.open());
+	const MissionViewport *viewport = rig.viewport();
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress event = first_of(mission, MissionKind::Event);
+	NodeAddress trigger;
+	for (const Document::Collection &list : mission.collections_of(event))
+		if (list.spec.kind == node_kind(MissionKind::Trigger)) trigger = { event.row, list.spec.kind, list.ids[0] };
+	rig.session.handle(request::set_workspace("{\"document\": {\"path\": \"" + rig.path + "\", \"pick\": {\"record\": " +
+			std::to_string(trigger.child) + ", \"slot\": 0}}}"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	std::unique_ptr<CanvasHalf> half = viewport->make_canvas();
+	auto *canvas = static_cast<MissionCanvas *>(half.get());
+	editor_test::Gathered gathered;
+	canvas->follow(*viewport, rig.context(), gathered);
+	const MissionCanvasFrame &frame = canvas->frame();
+	const ViewportContext context = rig.context();
+	const auto canvas_at = [&](float x, float y) {
+		CanvasInput in;
+		in.width = context.width;
+		in.height = context.height;
+		in.mouse = CanvasPoint{ x, y };
+		in.screen = CanvasPoint{ x, y };
+		in.hovered = true;
+		return in;
+	};
+	TEST_EXPECT(frame.pick.active() && frame.pick.takes.kind == opennova::mission::ParamKind::Entity);
+	size_t candidates = 0;
+	for (size_t i = 0; i < frame.marks.size(); ++i) {
+		candidates += frame.pick.fills_mark(int(i)) ? 1 : 0;
+		TEST_EXPECT(frame.pick.fills_mark(int(i)) == (frame.marks[i].area < 0));
+	}
+	TEST_EXPECT(candidates == viewport->scene().entities().size());
+	// A shown entity's glyph clicked: its SSN set, the pick ended.
+	int target = -1;
+	for (size_t i = 0; i < frame.marks.size() && target < 0; ++i)
+		if (frame.marks[i].shown && frame.marks[i].entity >= 0 &&
+				mission_canvas_under(frame, canvas_at(frame.marks[i].x, frame.marks[i].y), MissionPick::Click) == int(i))
+			target = int(i);
+	TEST_EXPECT(target >= 0);
+	if (target < 0) return 1;
+	CanvasInput in = canvas_at(frame.marks[size_t(target)].x, frame.marks[size_t(target)].y);
+	TEST_EXPECT(canvas->hint(rig.context(), in) == "Click an entity for Entity (Esc cancels).");
+	const NodeAddress picked = frame.marks[size_t(target)].record;
+	in.pressed = in.down = true;
+	canvas->input(rig.context(), in, gathered);
+	in.pressed = in.down = false;
+	canvas->input(rig.context(), in, gathered);
+	std::vector<EditorRequest> raised;
+	for (const EditorRequest &request : gathered.requests)
+		if (request.kind == EditorRequestKind::EditRecord || request.kind == EditorRequestKind::SetWorkspace) raised.push_back(request);
+	TEST_EXPECT(raised.size() == 2 && raised[0].kind == EditorRequestKind::EditRecord && raised[0].edits.size() == 1 &&
+	            raised[0].edits[0].field == "param1" && raised[0].edits[0].address == trigger);
+	TEST_EXPECT(editor_test::serve(rig.session, raised));
+	rig.pump();
+	Value ssn, held;
+	TEST_EXPECT(rig.document()->get(trigger, "param1", ssn) && rig.document()->get(picked, "id", held) && ssn == held);
+	TEST_EXPECT(!rig.session.view().workspace.document(rig.path).pick.active());
+	// Again; Esc ends it.
+	rig.session.handle(request::set_workspace("{\"document\": {\"path\": \"" + rig.path + "\", \"pick\": {\"record\": " +
+			std::to_string(trigger.child) + ", \"slot\": 1}}}"));
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	gathered.requests.clear();
+	CanvasInput escape = canvas_at(1.0f, 1.0f);
+	escape.keyboard.focused = true;
+	escape.keyboard.escape = true;
+	canvas->input(rig.context(), escape, gathered);
+	TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].kind == EditorRequestKind::SetWorkspace);
+	std::printf("test_pick passed\n");
+	return 0;
+}
+
 // The polish: an entity's bound sphere about its position (the model's GHDR radius by the item's SCALE,
 // padded, none without a collision block: mission_item_bound_radius, the game's entity+0), read once per
 // item while the graph and its files stand and again when a file it read moves (a SCALE edited in the
@@ -2282,6 +2360,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_hit_and_box() == 0);
 	TEST_EXPECT(test_links() == 0);
 	TEST_EXPECT(test_area_handles() == 0);
+	TEST_EXPECT(test_pick() == 0);
 	TEST_EXPECT(test_sphere_picking() == 0);
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_drop() == 0);

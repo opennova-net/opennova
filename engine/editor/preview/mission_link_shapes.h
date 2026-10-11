@@ -15,6 +15,7 @@
 
 namespace opennova::editor {
 
+class Document;
 class MissionDocument;
 class MissionScene;
 struct MissionUses;
@@ -89,6 +90,33 @@ void mission_link_badge(CanvasPoint at, size_t count, OverlayList &out);
 // `select_group` command (S24, In the views). False, with why, where they carry none.
 bool mission_select_group(const MissionDocument &document, const std::vector<NodeAddress> &records,
 		const NodeAddress &primary, CanvasRequests &out, std::string &error);
+
+// S24 pick mode (the workspace's document `pick`, which a board chip's Pick in view asks): what a click on a mark
+// gives the picked slot, by mark (`values` its value, `fills` whether it fills the slot), made once a frame over
+// the views' marks (an entity's or an area's record each); the hint the views show while the pick waits ("Click an
+// area for Zone (Esc cancels)"); the requests a click raises (the record's parameter set, then the pick ended) and
+// those Esc or a click on nothing raises (the pick ended).
+struct MissionPickFrame {
+	NodeAddress record;
+	int slot = -1;
+	MissionPickSlot takes;
+	std::vector<char> fills;
+	std::vector<int64_t> values;
+	bool active() const { return record.row != 0; }
+	bool fills_mark(int mark) const { return mark >= 0 && size_t(mark) < fills.size() && fills[size_t(mark)]; }
+};
+MissionPickFrame mission_pick_frame(const MissionDocument &document, const NodeAddress &record, int slot,
+		const std::vector<NodeAddress> &marks);
+std::string mission_pick_hint(const MissionPickFrame &pick);
+void mission_pick_requests(const std::string &path, const MissionPickFrame &pick, int mark, CanvasRequests &out);
+void mission_pick_end(const std::string &path, CanvasRequests &out);
+// The views' `pick` command (the wire's click of a mark while a pick waits): the record `ids` names given to the
+// pick the workspace holds for `document`, as a click on its mark gives it (the parameter set, the pick ended).
+// False, with why, where no pick waits, the context takes no edits, or the record fills no slot of it.
+bool mission_pick_command(const ViewportContext &context, const Document &document, const std::vector<NodeId> &ids,
+		CanvasRequests &out, std::string &error);
+// The ring a candidate of the pick is drawn with (each mark that fills the slot).
+void mission_pick_candidate(CanvasPoint at, OverlayList &out);
 
 // The hover's words for a record events name (its uses, documents/mission_uses): how many events, then
 // each one's sentence, at most `most` ("" for a record no event names).

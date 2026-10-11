@@ -27,6 +27,8 @@ namespace opennova::editor {
 // (pick_mission_map_mark); a box the pins in it and the footprints it meets. S24: with the links option, the
 // selected event's, trigger's or action's links (preview/mission_link_shapes; a reach is its circle seen from
 // above) over the boxes and under the pins, and a badge on each mark some event names, its hover listing them.
+// While a pick waits (the workspace's document `pick`), a click on a pin that fills its slot sets it and ends the
+// pick, a click on nothing or Esc ends it, and only its candidates hover, each rung.
 class MissionMapCanvas final : public CanvasHalf {
 public:
 	const CanvasGesture &gesture() const override { return gesture_; }
@@ -57,6 +59,8 @@ private:
 	std::vector<size_t> badges_;
 	MissionLinkCounts counts_;
 	mutable MissionUsesCache uses_;
+	// S24 pick mode: the slot a pick waits for and what each mark gives it.
+	MissionPickFrame pick_;
 	// What a press took: the mark under it (-1: a box from nothing), the records it moves as the press found them and
 	// the grabbed one's place among them, where it began in the mission, and the box's corners.
 	struct Press {

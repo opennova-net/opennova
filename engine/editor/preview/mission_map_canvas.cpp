@@ -56,8 +56,19 @@ void MissionMapCanvas::follow(const ViewportModel &viewport, const ViewportConte
 	primary_ = -1;
 	links_ = MissionLinkScene();
 	badges_.clear();
+	pick_ = MissionPickFrame();
 	const Document *document = document_of(context);
 	const bool current = document && viewport.current(context.input);
+	// S24 pick mode: the slot the workspace's pick names, each pin's value for it.
+	if (const MissionDocument *picked = dynamic_cast<const MissionDocument *>(document); picked && current && context.editable()) {
+		const auto shown = context.input.view.workspace.documents.find(document->path());
+		if (shown != context.input.view.workspace.documents.end() && shown->second.pick.active()) {
+			std::vector<NodeAddress> records;
+			records.reserve(marks_.size());
+			for (const MissionMapMark &mark : marks_) records.push_back(mark.record);
+			pick_ = mission_pick_frame(*picked, shown->second.pick.record, shown->second.pick.slot, records);
+		}
+	}
 	// S24: how many events name each mark.
 	const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document);
 	if (mission && current && viewport_->options().links) {
@@ -148,18 +159,24 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 		std::string error;
 		viewport.command(context, "frame", {}, out, error);
 	}
+	// S24: Esc while a pick waits ends it.
+	if (pick_.active() && in.keyboard.focused && in.keyboard.escape && !gesture_.pressed()) {
+		mission_pick_end(path, out);
+		return;
+	}
 
 	if (in.pressed && !in.middle && !in.panning && in.hovered) {
 		gesture_.press(subject, in.screen, out);
 		press_ = Press();
 		press_.box_from = in.mouse;
 		view.unproject(in.mouse.x, in.mouse.y, press_.from[0], press_.from[1]);
-		// S24: the primary area's edge or corner first (its own handles stand over its pin and its box).
-		if (current) press_.handle = handle_under_(context, view, in.mouse.x, in.mouse.y, press_.area);
+		// S24: the primary area's edge or corner first (its own handles stand over its pin and its box); none while a
+		// pick waits.
+		if (current && !pick_.active()) press_.handle = handle_under_(context, view, in.mouse.x, in.mouse.y, press_.area);
 		if (press_.handle != MissionHandle::Move)
 			mission_map_handle_point(press_.area, press_.handle, press_.handle_at[0], press_.handle_at[1]);
 		else press_.mark = pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y);
-		if (press_.mark >= 0 && current) {
+		if (press_.mark >= 0 && current && !pick_.active()) {
 			const NodeAddress &record = marks_[size_t(press_.mark)].record;
 			press_.taken = viewport.taken(context, *document, record, press_.grabbed);
 			const Selection *selection = selection_of(context, *document);
@@ -171,7 +188,13 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 		// Let go: a click selects the pin under it (joined as the keys say; nothing under it clears the selection), a
 		// box selects what it holds; a drag's end is its gesture's.
 		const CanvasJoin join = canvas_join(in.keys);
-		if (press_.handle != MissionHandle::Move) {
+		if (pick_.active()) {
+			// S24 pick mode: a click on a pin that fills the slot sets it and ends the pick; on nothing, ends it.
+			if (current && !gesture_.dragging()) {
+				if (pick_.fills_mark(press_.mark)) mission_pick_requests(path, pick_, press_.mark, out);
+				else if (press_.mark < 0) mission_pick_end(path, out);
+			}
+		} else if (press_.handle != MissionHandle::Move) {
 			// A tap or a drag of the primary area's handle: the selection stands.
 		} else if (current && !gesture_.dragging()) {
 			if (press_.mark >= 0)
@@ -190,6 +213,7 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 		return;
 	}
 	const bool began = gesture_.move(in.screen);
+	if (pick_.active()) return; // a pick drags nothing
 	if (gesture_.dragging() && press_.handle != MissionHandle::Move && current && context.editable()) {
 		// S24: the area's edge or corner as far as the pointer went, the area alone.
 		double at[2];
@@ -372,7 +396,13 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 			if (mission_map_handle_point(area, handle, hx, hy))
 				list.marker(at(hx, hy), OverlayGlyph::Square, mission_handle_is_corner(handle) ? 3.5f : 4.0f, OverlayRole::Selected);
 		}
-	const int hovered = in.hovered && !gesture_.dragging() ? pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y) : -1;
+	int hovered = in.hovered && !gesture_.dragging() ? pick_mission_map_mark(marks_, view, in.mouse.x, in.mouse.y) : -1;
+	// S24 pick mode: each candidate rung; only a candidate hovers.
+	if (pick_.active()) {
+		for (size_t i = 0; i < marks_.size(); ++i)
+			if (marks_[i].shown && pick_.fills_mark(int(i))) mission_pick_candidate(CanvasPoint{ marks_[i].px, marks_[i].py }, list);
+		if (!pick_.fills_mark(hovered)) hovered = -1;
+	}
 	if (hovered >= 0) {
 		const MissionMapMark &mark = marks_[size_t(hovered)];
 		if (mark.outlined) footprint(*mark.footprint, OverlayRole::Hover, 1.5f, false);
@@ -430,6 +460,8 @@ CanvasCursor MissionMapCanvas::cursor(const ViewportContext &context, const Canv
 
 std::string MissionMapCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	if (!viewport_ || gesture_.dragging() || !in.hovered) return std::string();
+	// S24: while a pick waits, what to click.
+	if (pick_.active()) return mission_pick_hint(pick_);
 	const int index = pick_mission_map_mark(marks_, viewport_->view(in.width, in.height), in.mouse.x, in.mouse.y);
 	if (index < 0) return std::string();
 	const MissionMapMark &mark = marks_[size_t(index)];

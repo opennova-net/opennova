@@ -347,6 +347,8 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 					list.marker(CanvasPoint{ hx, hy }, OverlayGlyph::Square, 4.0f, OverlayRole::Selected);
 			}
 		}
+		// S24: a candidate of the pick that waits.
+		if (in.pick && size_t(index) < in.pick->size() && (*in.pick)[size_t(index)]) mission_pick_candidate(at, list);
 		// S24: how many events name it.
 		if (in.options->links && in.badges && size_t(index) < in.badges->size())
 			mission_link_badge(at, (*in.badges)[size_t(index)], list);

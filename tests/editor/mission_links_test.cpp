@@ -336,12 +336,54 @@ int test_groups() {
 	return 0;
 }
 
+// S24 pick mode's model: what a slot takes from the views, and what a mark's record gives it.
+int test_pick_values() {
+	Fixture f;
+	TEST_EXPECT(f.load());
+	const MissionDocument &m = as_mission(*f.document);
+	const NodeAddress first = row_at(m, MissionKind::Event, 0), second = row_at(m, MissionKind::Event, 1),
+	                  third = row_at(m, MissionKind::Event, 2);
+	const NodeAddress walker = row_at(m, MissionKind::Organic, 0), zone20 = row_at(m, MissionKind::Area, 0);
+	MissionPickSlot slot;
+	int64_t value = 0;
+	// Event 1's trigger: param1 an entity, param2 a zone.
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, first, MissionKind::Trigger, 0), 0, slot) &&
+	            slot.kind == mission::ParamKind::Entity && slot.marks && slot.what == "an entity" && slot.label == "Entity");
+	TEST_EXPECT(mission_pick_value(m, slot, walker, value) && value == f.walker && !mission_pick_value(m, slot, zone20, value));
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, first, MissionKind::Trigger, 0), 1, slot) && slot.kind == mission::ParamKind::Zone &&
+	            slot.what == "an area" && mission_pick_value(m, slot, zone20, value) && value == 20 &&
+	            !mission_pick_value(m, slot, walker, value));
+	// Event 1's action re-arms an event: no mark gives one.
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, first, MissionKind::Action, 0), 0, slot) && slot.kind == mission::ParamKind::Event &&
+	            !slot.marks && !mission_pick_value(m, slot, walker, value));
+	// Event 2's KillGroup: an entity in a group gives its group; one in none, nothing.
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, second, MissionKind::Action, 0), 0, slot) && slot.kind == mission::ParamKind::Group &&
+	            mission_pick_value(m, slot, walker, value) && value == 1 &&
+	            !mission_pick_value(m, slot, row_at(m, MissionKind::Item, 0), value));
+	// Event 3's redirect: the path a stop's marker is on, and the stop's place on the record's path (path 1).
+	const NodeAddress redirect = child_at(m, third, MissionKind::Action, 0);
+	TEST_EXPECT(mission_pick_slot(m, redirect, 1, slot) && slot.kind == mission::ParamKind::Path &&
+	            mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 3), value) && value == 1 &&
+	            !mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 4), value));
+	TEST_EXPECT(mission_pick_slot(m, redirect, 2, slot) && slot.kind == mission::ParamKind::PathNode && slot.path == 1 &&
+	            slot.what == "a stop of path 1" && mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 2), value) && value == 2);
+	// The teleport's target: a numbered marker's wp_number; a waypoint marker gives none.
+	TEST_EXPECT(mission_pick_slot(m, child_at(m, third, MissionKind::Action, 1), 1, slot) &&
+	            slot.kind == mission::ParamKind::TeleportTarget && mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 6), value) &&
+	            value == 7 && !mission_pick_value(m, slot, row_at(m, MissionKind::Marker, 0), value));
+	// Refused: a record that is no trigger or action, a slot past 3.
+	TEST_EXPECT(!mission_pick_slot(m, walker, 0, slot) && !mission_pick_slot(m, redirect, 4, slot));
+	TEST_EXPECT(std::string(mission_param_field(2)) == "param3" && std::string(mission_param_field(4)).empty());
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_pick() != 0) return 1;
 	if (test_links() != 0) return 1;
 	if (test_groups() != 0) return 1;
+	if (test_pick_values() != 0) return 1;
 	if (test_counts() != 0) return 1;
 	std::printf("editor_mission_links: all tests passed\n");
 	return 0;

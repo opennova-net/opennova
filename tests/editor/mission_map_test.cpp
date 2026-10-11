@@ -468,6 +468,69 @@ static int test_area_handles() {
 	return 0;
 }
 
+// S24 B2: pick mode on the map: while the workspace's pick waits for event 1's zone, each area's pin is a candidate
+// (rung), the hover says what to click, a `pick` of zone 20 sets the trigger's zone and ends the pick (one batch,
+// then the workspace), and one of an entity is refused; the pick ends when its trigger goes.
+static int test_pick() {
+	Rig rig("opennova_editor_mission_map_pick");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress event = first_of(mission, MissionKind::Event);
+	NodeAddress trigger;
+	for (const Document::Collection &list : mission.collections_of(event))
+		if (list.spec.kind == node_kind(MissionKind::Trigger)) trigger = { event.row, list.spec.kind, list.ids[0] };
+	const std::vector<const Node *> areas = mission.rows_of(MissionKind::Area);
+	const auto ask_pick = [&](const std::string &pick) {
+		rig.session.handle(request::set_workspace("{\"document\": {\"path\": \"" + rig.path + "\", \"pick\": " + pick + "}}"));
+		return rig.session.outcome().done();
+	};
+	TEST_EXPECT(ask_pick("{\"record\": " + std::to_string(trigger.child) + ", \"slot\": 1}"));
+	rig.pump();
+	const ViewportContext context = rig.context();
+	std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+	editor_test::Gathered gathered;
+	half->follow(*rig.map(), context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	const OverlayList list = half->shapes(context, in);
+	TEST_EXPECT(std::count_if(list.shapes.begin(), list.shapes.end(), [](const OverlayShape &shape) {
+		return shape.kind == OverlayKind::Circle && shape.size == 13.0f && shape.rgb == kMissionWatchedRgb;
+	}) == long(areas.size()));
+	const std::vector<MissionMapMark> marks = rig.map()->marks(context.width, context.height);
+	const MissionMapMark &pin = marks[size_t(rig.map()->scene().mark_index(areas[0]->id))];
+	in.hovered = true;
+	in.mouse = CanvasPoint{ pin.px, pin.py };
+	TEST_EXPECT(half->hover_tip(context, in) == "Click an area for Zone (Esc cancels).");
+	// The wire's pick: an entity refused, zone 30's area taken.
+	std::string error;
+	TEST_EXPECT(!rig.map()->command(context, "pick", { first_of(mission, MissionKind::Organic).row }, gathered, error) &&
+	            error.find("an area") != std::string::npos);
+	gathered.requests.clear();
+	TEST_EXPECT(rig.map()->command(context, "pick", { areas[1]->id }, gathered, error) && gathered.requests.size() == 2 &&
+	            gathered.requests[0].kind == EditorRequestKind::EditRecord &&
+	            gathered.requests[1].kind == EditorRequestKind::SetWorkspace);
+	TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
+	rig.pump();
+	Value zone;
+	TEST_EXPECT(rig.document()->get(trigger, "param2", zone) && std::get<int64_t>(zone) == 30);
+	TEST_EXPECT(!rig.session.view().workspace.document(rig.path).pick.active());
+	// No pick waits: refused.
+	TEST_EXPECT(!rig.map()->command(rig.context(), "pick", { areas[0]->id }, gathered, error) &&
+	            error.find("No pick waits") != std::string::npos);
+	// A pick whose trigger goes ends with it.
+	TEST_EXPECT(ask_pick("{\"record\": " + std::to_string(trigger.child) + ", \"slot\": 0}"));
+	TEST_EXPECT(rig.session.view().workspace.document(rig.path).pick.active());
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = trigger;
+	rig.session.handle(request::edit_record(kMission, std::vector<Edit>{ remove }));
+	TEST_EXPECT(rig.session.outcome().done() && !rig.session.view().workspace.document(rig.path).pick.active());
+	std::printf("test_pick passed\n");
+	return 0;
+}
+
 // The commands (frame, the CMAP's zoom steps), each a SetViewport of the camera; the wire's camera and options, and
 // their refusals.
 static int test_commands_and_wire() {
@@ -906,6 +969,7 @@ int main(int argc, char **argv) {
 	failed += test_links();
 	failed += test_group_colours();
 	failed += test_area_handles();
+	failed += test_pick();
 	failed += test_commands_and_wire();
 	failed += test_grid_origin();
 	failed += test_outline_of_a_box();

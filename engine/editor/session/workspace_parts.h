@@ -86,7 +86,8 @@ void workspace_follows(SessionCore &core, const EditorRequest &request);
 void workspace_closes_for(SessionCore &core, const EditorRequest &request);
 // What the workspace holds kept true to the project after anything moved it (each request served, each
 // operation's end): a card, Rename... or Find usages whose file the files no longer have closes; a menu's Remove prompt
-// whose screen is gone (or is its menu's last) closes; Rename everywhere whose plan is no longer its name's
+// whose screen is gone (or is its menu's last) closes; a mission's pick whose trigger or action is gone ends (S24);
+// Rename everywhere whose plan is no longer its name's
 // (another rename planned in its place) closes, and so does Rename back once the plan is no longer a way back.
 void workspace_tidies(SessionCore &core);
 // The files a rename moved (each from, to): a card of one shows it at its new path, Find usages of one lists its

@@ -23,6 +23,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include <editor/model/value.h>
@@ -86,6 +87,28 @@ std::vector<NodeId> mission_group_rows(const MissionDocument &document, int64_t 
 std::vector<NodeAddress> mission_group_members(const MissionDocument &document, const std::vector<NodeAddress> &records);
 // The group a record names as a member or is (an entity's group, a group record's index); -1 for neither.
 int64_t mission_group_of(const MissionDocument &document, const NodeAddress &record);
+
+// What a trigger's or an action's parameter takes when it is picked in the views (S24 pick mode, the workspace's
+// document `pick`): its kind and its label ("Zone"), what to click for it in words ("an area", "an entity in a
+// group"), and for a stop the path whose stops it takes (the record's Path parameter; -1 none). A slot of a kind
+// no mark gives (an event, a number, a dialog) takes no click: `marks` false.
+struct MissionPickSlot {
+	mission::ParamKind kind = mission::ParamKind::Unused;
+	std::string label;
+	std::string what;
+	int64_t path = -1;
+	bool marks = false;
+};
+// False for a record that is no trigger or action of the document, or a slot past 3.
+bool mission_pick_slot(const MissionDocument &document, const NodeAddress &record, int slot, MissionPickSlot &out);
+// The value a mark's record (an entity's or an area's row) gives the slot, as the game reads the parameter: an
+// entity its SSN, an area its zone id, an entity in a group its group (group 0 none), a stop's marker its path's
+// number (the first path whose stops name it) or for a stop slot its place among the record's path's stops, a
+// numbered marker (record type 6088) its wp_number. False where the record fills none.
+bool mission_pick_value(const MissionDocument &document, const MissionPickSlot &slot, const NodeAddress &record,
+		int64_t &value);
+// The field a slot is set through ("param1" .. "param4").
+const char *mission_param_field(int slot);
 
 // Whether a record is an event, a trigger or an action of a mission.
 bool mission_logic_record(const NodeAddress &record);

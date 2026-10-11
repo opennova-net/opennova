@@ -676,6 +676,17 @@ MissionCanvasFrame MissionViewport::canvas_frame(const ViewportContext &context)
 	frame.document = reason_ == MissionViewStatus::Ready ? document_of(input) : nullptr;
 	frame.current = frame.document && current(input);
 	frame.marks = marks(context.width, context.height, context.device);
+	// S24 pick mode: the slot the workspace's pick names, each mark's value for it.
+	if (frame.current && frame.editable) {
+		const auto shown = input.view.workspace.documents.find(frame.document->path());
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(frame.document);
+		if (mission && shown != input.view.workspace.documents.end() && shown->second.pick.active()) {
+			std::vector<NodeAddress> records;
+			records.reserve(frame.marks.size());
+			for (const MissionMark &mark : frame.marks) records.push_back(mark.record);
+			frame.pick = mission_pick_frame(*mission, shown->second.pick.record, shown->second.pick.slot, records);
+		}
+	}
 	const Selection *selection = frame.current ? selection_of(input, *frame.document) : nullptr;
 	if (!selection) return frame;
 	frame.records = selection->records;
@@ -1263,9 +1274,9 @@ bool MissionViewport::command_of(const ViewportContext &context, const ViewportC
 bool MissionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error) const {
 	if (name != "frame" && name != "top" && name != "ground" && name != "select_same" && name != "select_group" &&
-			name != "duplicate" && name != "paste" && name != "play_from_here" && name != "clear_shots") {
+			name != "pick" && name != "duplicate" && name != "paste" && name != "play_from_here" && name != "clear_shots") {
 		error = "Unknown mission command \"" + name +
-				"\" (frame, top, ground, select_same, select_group, duplicate, paste, play_from_here, clear_shots; "
+				"\" (frame, top, ground, select_same, select_group, pick, duplicate, paste, play_from_here, clear_shots; "
 				"shoot takes at).";
 		return false;
 	}
@@ -1283,6 +1294,12 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 		whole.name = name;
 		whole.ids = ids;
 		return command_of(context, whole, out, error);
+	}
+	if (name == "pick") {
+		// S24: the waiting pick given the named record, as a click on its mark gives it.
+		const Document *document = planned_(context, error);
+		if (!document) return false;
+		return mission_pick_command(context, *document, ids, out, error);
 	}
 	if (name == "select_group") {
 		// S24: every entity of the named (else the selected) records' groups, the primary kept.

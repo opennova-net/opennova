@@ -212,6 +212,104 @@ std::vector<NodeAddress> mission_group_members(const MissionDocument &document, 
 	return out;
 }
 
+const char *mission_param_field(int slot) {
+	static const char *const kFields[4] = {"param1", "param2", "param3", "param4"};
+	return slot >= 0 && slot < 4 ? kFields[slot] : "";
+}
+
+bool mission_pick_slot(const MissionDocument &document, const NodeAddress &record, int slot, MissionPickSlot &out) {
+	out = MissionPickSlot();
+	if (slot < 0 || slot > 3 || !record.child) return false;
+	const Node *row = document.row(record.row);
+	Document::Placement at;
+	if (!row || row->kind != k(MissionKind::Event) || !document.placement(record, at)) return false;
+	const EventRow &event = static_cast<const EventRow &>(*row);
+	int64_t params[4] = {0, 0, 0, 0};
+	if (record.kind == k(MissionKind::Trigger) && at.index < event.native.triggers.size()) {
+		const bms::Trigger &trigger = event.native.triggers[at.index];
+		out.kind = mission::trigger_param_kind(trigger, slot);
+		out.label = mission::trigger_param_label(trigger, slot);
+		for (int i = 0; i < 4; ++i) params[i] = param_of(trigger, i);
+		for (int i = 0; i < 4; ++i)
+			if (mission::trigger_param_kind(trigger, i) == ParamKind::Path && out.path < 0) out.path = params[i];
+	} else if (record.kind == k(MissionKind::Action) && at.index < event.native.actions.size()) {
+		const bms::Action &action = event.native.actions[at.index];
+		out.kind = mission::action_param_kind(action, slot);
+		out.label = mission::action_param_label(action, slot);
+		for (int i = 0; i < 4; ++i) params[i] = param_of(action, i);
+		for (int i = 0; i < 4; ++i)
+			if (mission::action_param_kind(action, i) == ParamKind::Path && out.path < 0) out.path = params[i];
+	} else {
+		return false;
+	}
+	if (out.kind != ParamKind::PathNode) out.path = -1;
+	out.marks = true;
+	switch (out.kind) {
+	case ParamKind::Entity: out.what = "an entity"; break;
+	case ParamKind::Zone: out.what = "an area"; break;
+	case ParamKind::Group: out.what = "an entity in a group"; break;
+	case ParamKind::Path: out.what = "a stop of a path"; break;
+	case ParamKind::PathNode:
+		out.what = mission::path_names_none(out.path) ? std::string("a stop of its path (it names none yet)")
+		                                               : "a stop of path " + std::to_string(out.path);
+		out.marks = !mission::path_names_none(out.path);
+		break;
+	case ParamKind::TeleportTarget:
+	case ParamKind::WpNumber: out.what = "a numbered marker (record type 6088)"; break;
+	default:
+		out.what = "nothing in the view";
+		out.marks = false;
+		break;
+	}
+	return true;
+}
+
+bool mission_pick_value(const MissionDocument &document, const MissionPickSlot &slot, const NodeAddress &record,
+		int64_t &value) {
+	if (!slot.marks || record.child) return false;
+	const Node *row = document.row(record.row);
+	if (!row) return false;
+	const bool entity = is_entity_kind(row->kind);
+	switch (slot.kind) {
+	case ParamKind::Entity:
+		if (!entity) return false;
+		value = static_cast<const EntityRow &>(*row).native.id;
+		return true;
+	case ParamKind::Zone:
+		if (row->kind != k(MissionKind::Area)) return false;
+		value = static_cast<const AreaRow &>(*row).native.id;
+		return true;
+	case ParamKind::Group:
+		if (!entity || mission::group_names_none(static_cast<const EntityRow &>(*row).native.group_id)) return false;
+		value = static_cast<const EntityRow &>(*row).native.group_id;
+		return true;
+	case ParamKind::Path:
+	case ParamKind::PathNode: {
+		if (row->kind != k(MissionKind::Marker)) return false;
+		const size_t marker = document.index_of(*row);
+		for (const Node *path : document.rows_of(MissionKind::WaypointPath)) {
+			const PathRow &each = static_cast<const PathRow &>(*path);
+			if (slot.kind == ParamKind::PathNode && each.native.number != slot.path) continue;
+			for (size_t stop = 0; stop < each.native.stops.size(); ++stop)
+				if (each.native.stops[stop] == marker) {
+					value = slot.kind == ParamKind::Path ? int64_t(each.native.number) : int64_t(stop);
+					return true;
+				}
+		}
+		return false;
+	}
+	case ParamKind::TeleportTarget:
+	case ParamKind::WpNumber: {
+		if (row->kind != k(MissionKind::Marker)) return false;
+		const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
+		if (marker.type_id != kNumberedMarkerType) return false;
+		value = marker.wp_number;
+		return true;
+	}
+	default: return false;
+	}
+}
+
 bool mission_logic_record(const NodeAddress &record) {
 	if (!record.row) return false;
 	if (!record.child) return record.kind == k(MissionKind::Event);
