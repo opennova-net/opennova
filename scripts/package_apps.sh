@@ -15,7 +15,7 @@ build="$root/build/apps-package"
 
 # The apps/ directory of each shipped executable. An app in apps/<dir> builds
 # target opennova_<dir> as opennova-<dir, kebab-cased> (DEVELOPING.md).
-apps=(3di extract lan_probe novaworld_server nw_lister serve wire)
+apps=(3di extract lan_probe novaworld_server nw_lister parity serve wire)
 
 # The static MSVC runtime keeps the zip free of a VC++ runtime install, and a
 # separate build tree keeps it apart from development builds. No app links the
@@ -74,6 +74,12 @@ opennova-nw-lister.exe
     (listing.example.json), or from the game server's remote-admin port
     with --admin. Stopping it removes the row. It sends to 127.0.0.0/8
     only unless given --allow-public.
+
+opennova-parity.exe
+    The retail-LAN parity verdict: compares the run folders of one parity
+    case (retail against retail twice, then OpenNova as client, host or
+    both) and judges each wire metric against the retail-vs-retail noise.
+    The runs come from the repository's scripts/net/run_parity_suite.ps1.
 
 opennova-serve.exe
     The headless game server: the game's Serve Only host with no window,

@@ -19,19 +19,6 @@ health. Divergences from the original engine belong in
       `LAUNCHER_AWS_*` secrets and the `DOWNLOADS_BUCKET` variable on this repo and the five
       Actions secrets on revx02/onjo01/ondx01 (the repos stay); then drop the
       `us_east_1` provider alias in `infra/aws/main.tf`.
-- [ ] Retail-LAN parity four-topology verdict: the tracked 24-cell matrix harness
-      (`run_parity_matrix.ps1`/`generate_parity_manifest.ps1`/`verify_parity_matrix.ps1`
-      over `export_parity_corpus.py`) was retired with the Python FFI (ADR 0038; last
-      at 5820432c1), so no PARITY_STATUS verdict exists. To produce one: run the four
-      `scripts/net/run_parity_topology.ps1` cells (RR/RO/OR/OO) per case under one
-      RunId prefix (`.agents/retail-lan-parity.md`), gate each on the wire-ready witness,
-      and re-express the retired verifier's RO/OR/OO-vs-RR
-      comparison (both directions, packet grouping, 0x0A/0x0C state) as a ctest or
-      PowerShell verifier (ADR 0050 R4). Every cell runs on the pinned JO:CA reference
-      (`jox01`) with retail stock under onHook's StockObserver (opennova-int, bridge
-      protocol 1.8+). Open: optionally an `onhook_exercise_input` tool to retire
-      `exercise_retail_input.ps1`. Baseline: the 2026-08-05 suites captured 24/24 cells
-      cleanly, wire-ready + the since-retired `diff_vs_golden.ps1` (ca1cef465) GREEN.
 
 ## Project health follow-ups
 

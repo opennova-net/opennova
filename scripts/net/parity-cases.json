@@ -1,0 +1,57 @@
+{
+  "schema": "opennova.parity-cases.v1",
+  "expansion": "jox01",
+  "host_session_name": "Untitled ",
+  "cases": [
+    {
+      "id": "01tr-coop",
+      "mission": "01TR.bms",
+      "game_type": 65568,
+      "port": 32786,
+      "readiness": "in_match",
+      "steady_seconds": 80,
+      "exercise_input": true,
+      "auto_deploy": true
+    },
+    {
+      "id": "tdh-i3a-tdm",
+      "mission": "TDH_I3A.bms",
+      "game_type": 65536,
+      "port": 32787,
+      "readiness": "in_match",
+      "steady_seconds": 45,
+      "exercise_input": true,
+      "auto_deploy": true
+    },
+    {
+      "id": "03tr-dm",
+      "mission": "03TR.bms",
+      "game_type": 0,
+      "port": 32785,
+      "readiness": "in_match",
+      "steady_seconds": 45,
+      "exercise_input": true,
+      "auto_deploy": true
+    },
+    {
+      "id": "cp04-objcoop-deploy",
+      "mission": "CP04.bms",
+      "game_type": 196640,
+      "port": 32784,
+      "readiness": "deploy_hold",
+      "steady_seconds": 35,
+      "exercise_input": false,
+      "auto_deploy": false
+    },
+    {
+      "id": "ash-i5a-aas-deploy",
+      "mission": "ASH_I5A.BMS",
+      "game_type": 65552,
+      "port": 32787,
+      "readiness": "deploy_hold",
+      "steady_seconds": 35,
+      "exercise_input": false,
+      "auto_deploy": false
+    }
+  ]
+}
