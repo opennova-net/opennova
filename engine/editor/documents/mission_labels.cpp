@@ -267,12 +267,19 @@ DisplayName mission_zone_display(const MissionDocument &document, int64_t zone) 
 	return out;
 }
 
+// An event's heading: its number, what the triggers and the actions that name it say ("Event 7"), and the
+// name the mission gives it (S24 Names, the .mis), "Event 7 (Get to the bridge)".
+std::string event_heading(size_t index, const Node &event) {
+	const std::string &name = static_cast<const EventRow &>(event).name;
+	return "Event " + std::to_string(index + 1) + (name.empty() ? std::string() : " (" + name + ")");
+}
+
 DisplayName mission_event_display(const MissionDocument &document, int64_t index, const NameSource *names) {
 	DisplayName out;
 	out.raw = std::to_string(index);
 	const Node *event = index >= 0 ? document.row_of(K::Event, size_t(index)) : nullptr;
 	if (event) {
-		out.text = "Event " + std::to_string(index + 1) + ": " + mission_event_title(document, *event, names);
+		out.text = event_heading(size_t(index), *event) + ": " + mission_event_title(document, *event, names);
 		return out;
 	}
 	out.text = "No event " + std::to_string(index + 1) + " (the mission has " +
@@ -322,7 +329,7 @@ DisplayName mission_path_display(const MissionDocument &document, int64_t number
 		out.dangling = true;
 		return out;
 	}
-	out.text = mission_path_title(static_cast<const PathRow &>(*row).native);
+	out.text = mission_path_title(*row);
 	return out;
 }
 
@@ -540,11 +547,15 @@ bool mission_row_reads_others(const Document &, const Node &row) {
 	return row.kind == k(K::Event) || row.kind == k(K::WaypointPath);
 }
 
-std::string mission_path_title(const MissionPath &path) {
+std::string mission_path_title(const Node &row) {
+	const PathRow &path_row = static_cast<const PathRow &>(row);
+	const MissionPath &path = path_row.native;
 	if (path.number == 0) return "No path";
 	if (const char *command = path_command_name(path.number)) return command;
 	const size_t stops = path.stops.size();
-	return "Path " + std::to_string(path.number) + " (" + (stops ? counted_words(stops, "stop", "stops") : "no stops") + ")";
+	// By the description the mission gives it (S24 Names, the .mis), after its number.
+	return "Path " + std::to_string(path.number) + (path_row.description.empty() ? std::string() : ": " + path_row.description) +
+	       " (" + (stops ? counted_words(stops, "stop", "stops") : "no stops") + ")";
 }
 
 std::string mission_entity_title(const MissionDocument &document, const Node &row, const NameSource *names) {
@@ -586,14 +597,16 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 		case K::Building:
 		case K::Marker:
 		case K::Organic: return mission_entity_title(*document, *row, names);
-		case K::WaypointPath: return mission_path_title(static_cast<const PathRow &>(*row).native);
+		case K::WaypointPath: return mission_path_title(*row);
 		case K::Area: {
-			const bms::AreaTrigger &area = static_cast<const AreaRow &>(*row).native;
-			return "Zone " + std::to_string(area.id) + (area.is_active() ? " (mission area)" : "");
+			// By the description the mission gives it (S24 Names, the .mis), after its zone.
+			const AreaRow &area = static_cast<const AreaRow &>(*row);
+			return "Zone " + std::to_string(area.native.id) + (area.description.empty() ? std::string() : ": " + area.description) +
+			       (area.native.is_active() ? " (mission area)" : "");
 		}
-		// An event by its number, what the triggers and the actions that name it say ("event 7"), then its
-		// sentence (S15).
-		case K::Event: return "Event " + std::to_string(document->index_of(*row) + 1) + ": " + mission_event_title(*document, *row, names);
+		// An event by its number, what the triggers and the actions that name it say ("event 7"), and its name
+		// (S24 Names), then its sentence (S15).
+		case K::Event: return event_heading(document->index_of(*row), *row) + ": " + mission_event_title(*document, *row, names);
 		default: return document->record_name(address);
 		}
 	}
@@ -659,18 +672,31 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 namespace {
 
 // The words a brief takes what a parameter names in: an entity by its SSN alone ("#29"; the player as
-// the player), a group and a variable by the name the mission gives it (S24 Names: the board's words), else
-// as the base says a value by itself ("zone 3", "group 4", "V12"), short enough for the outline's column.
+// the player), a group, a variable, an area, a path and an event by the name the mission gives it (S24 Names:
+// the board's words), else as the base says a value by itself ("zone 3", "group 4", "V12"), short enough for
+// the outline's column.
 class BriefNames : public MissionNames {
 public:
-	explicit BriefNames(const MissionDocument &document) : named_(document) {}
+	explicit BriefNames(const MissionDocument &document) : document_(document), named_(document) {}
 	std::string entity(int64_t ssn) const override {
 		return ssn == kPlayerSsn ? MissionNames::entity(ssn) : "#" + std::to_string(ssn);
 	}
 	std::string group(int64_t group) const override { return named_.group(group); }
 	std::string variable(int64_t index) const override { return named_.variable(index); }
+	std::string zone(int64_t id) const override {
+		const Node *row = document_.row(document_.zone_holder(id));
+		const std::string *name = row ? mission_row_name(*row) : nullptr;
+		return name && !name->empty() ? *name : MissionNames::zone(id);
+	}
+	std::string path(int64_t number) const override { return named_.path(number); }
+	std::string event(int64_t index) const override {
+		const Node *row = index >= 0 ? document_.row_of(K::Event, size_t(index)) : nullptr;
+		const std::string *name = row ? mission_row_name(*row) : nullptr;
+		return name && !name->empty() ? *name : MissionNames::event(index);
+	}
 
 private:
+	const MissionDocument &document_;
 	DocumentMissionNames named_;
 };
 
@@ -710,9 +736,10 @@ std::string mission_record_brief(const Document &base, const NodeAddress &addres
 			return "#" + std::to_string(entity.id) + " " + what;
 		}
 		case K::Event: {
-			// Its number, then what waits first, else what it does first.
+			// Its number, then its name (S24 Names), else what waits first, else what it does first.
 			const mission::EventChain &chain = static_cast<const EventRow &>(*row).native;
 			const std::string number = "Event " + std::to_string(document->index_of(*row) + 1) + ": ";
+			if (const std::string &name = static_cast<const EventRow &>(*row).name; !name.empty()) return number + name;
 			if (!chain.triggers.empty()) return number + trigger_words(chain.triggers.front(), brief);
 			if (!chain.actions.empty()) return number + action_words(chain.actions.front(), brief, header_of(*document));
 			return number + "nothing";

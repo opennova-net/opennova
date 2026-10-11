@@ -75,7 +75,24 @@ std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan
 			break;
 		}
 	}
+	// The .mis of its name (S24 Names), the editor's names in it: no sidecar, no reference, but the mission's own.
+	const std::string names = mission::mission_base_name(mission) + ".mis";
+	if (const AssetEntry *entry = scan.find(names)) {
+		MissionFileSetMember member;
+		member.role = kMissionNamesRole;
+		member.path = entry->relative_path;
+		member.old_name = entry->logical_name;
+		const std::string extension = entry->logical_name.substr(mission::mission_base_name(entry->logical_name).size());
+		member.new_name = mission::mission_base_name(new_mission) + extension;
+		out.push_back(std::move(member));
+	}
 	return out;
+}
+
+std::string mission_member_words(const std::string &role) {
+	if (role == kMissionNamesRole) return "its names (the .mis)";
+	const MissionFileSetRow *row = mission_file_set_row(role);
+	return row ? row->words : "a file";
 }
 
 } // namespace opennova::editor

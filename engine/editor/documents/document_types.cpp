@@ -50,6 +50,19 @@ namespace {
 
 std::unique_ptr<DocumentBase> make_mission() { return std::make_unique<MissionDocument>(); }
 
+// The mission's companion (S24 Names): the .mis beside it, its names (documents/mission_names_file.h).
+void read_mission_names(DocumentBase &document, const std::vector<uint8_t> *bytes) {
+	if (auto *mission = dynamic_cast<MissionDocument *>(&document)) mission->take_names_file(bytes);
+}
+bool write_mission_names(DocumentBase &document, const std::vector<uint8_t> *now, std::string &text) {
+	auto *mission = dynamic_cast<MissionDocument *>(&document);
+	return mission && mission->names_file_text(now, text);
+}
+void mission_names_written(DocumentBase &document, bool ok, uint64_t fingerprint, const std::string &error) {
+	if (auto *mission = dynamic_cast<MissionDocument *>(&document)) mission->names_file_written(ok, fingerprint, error);
+}
+constexpr DocumentCompanions kMissionCompanions{".mis", read_mission_names, write_mission_names, mission_names_written};
+
 std::unique_ptr<DocumentBase> make_catalog() { return std::make_unique<DefCatalogDocument>(); }
 std::unique_ptr<DocumentBase> make_strings() { return std::make_unique<StringsDocument>(); }
 std::unique_ptr<DocumentBase> make_menu() { return std::make_unique<MnuDocument>(); }
@@ -103,10 +116,12 @@ constexpr DocumentType kTypes[] = {
 			nullptr, define_animation_slot },
 	// The mission (S14): its records' references no field's value is are its record_references (the
 	// text keys a record's number forms); its records and values in a modder's words, and briefly for a
-	// narrow column (S15); its project check, what the game grounds where (DI-28).
+	// narrow column (S15); its project check, what the game grounds where (DI-28); its companion, the .mis
+	// beside it with its names (S24).
 	{ DocumentTypeId::Mission, "mission", make_mission, validate_mission_file, MissionDocument::schema,
 			mission_finding_codes, make_mission_ground_check, nullptr, mission_references,
-			mission_record_label, mission_value_label, mission_record_brief, mission_game_choices },
+			mission_record_label, mission_value_label, mission_record_brief, mission_game_choices, nullptr, nullptr,
+			nullptr, nullptr, &kMissionCompanions },
 	// The text types (S13 D9): one TextDocument class, a row per behaviour, none with records
 	// (text_fields) or a project check; the script's text names references (its compiler's words are
 	// the script device's highlights, preview/script_viewport's table).

@@ -80,6 +80,12 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	                  "dispatches records from past the table's allocation, and the zone resolvers rewrite words in "
 	                  "place there [orig: EventTrigger_LoadAllData @ 0x453ff9, @ 0x45400a; "
 	                  "EventTrigger_ResolveZoneTriggerRefs @ 0x453095]") },
+	// The .mis beside the mission (S24 Names, mission_names_file.h), which the game never reads: what the editor
+	// took from it and what a save made of it, listed with the fixes its maker planned (Take the names that still
+	// match, Write it from the mission: edits of the mission, Diagnostic::planned).
+	{ MissionFinding::NamesUnmatched, listed_code("mission.names_unmatched", FindingFix::EditRecord) },
+	{ MissionFinding::NamesOutside, listed_code("mission.names_outside", FindingFix::EditRecord) },
+	{ MissionFinding::NamesUnwritten, listed_code("mission.names_unwritten") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(MissionFinding::kCount),
               "every MissionFinding has exactly one row");
@@ -536,6 +542,7 @@ std::vector<Diagnostic> validate_mission_file(const DocumentBase &document) {
 		}
 		findings.push_back(std::move(d));
 	}
+	names_file_findings(*mission, findings);
 	if (document.blocked()) return findings;
 	Checker checker{*mission, findings};
 	checker.header();

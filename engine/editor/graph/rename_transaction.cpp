@@ -439,12 +439,14 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 			if (std::any_of(plan.companions.begin(), plan.companions.end(),
 			                [&](const RenameOutput &companion) { return companion.path == stale.path; }))
 				continue;
-			const MissionFileSetRow *row = mission_file_set_row(stale.role);
-			std::string what = row ? row->words : "file";
+			std::string what = mission_member_words(stale.role);
 			if (what.rfind("its ", 0) == 0) what.erase(0, 4);
+			if (what.rfind("a ", 0) == 0) what.erase(0, 2);
+			// The .mis is the editor's (and the original editor's), never the game's.
+			const std::string whose = stale.role == kMissionNamesRole ? ", which would hold " : ", which the game would take as ";
 			plan.refusals.push_back(refusal(CoreFinding::RenameExists,
-			                                "The project already has " + stale.old_name + ", which the game would take as " + new_name +
-			                                        "'s " + what + ": rename or remove it first.",
+			                                "The project already has " + stale.old_name + whose + new_name + "'s " + what +
+			                                        ": rename or remove it first.",
 			                                stale.path));
 		}
 	}

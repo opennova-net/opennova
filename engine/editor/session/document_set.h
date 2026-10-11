@@ -207,6 +207,13 @@ private:
 	// A mission's records of an item take its catalog row (D-MIS-10): the AI class a save writes handed to the
 	// document, before an edit and a save (MissionDocument::set_item_classes); the rows read through `rows_`.
 	void hand_item_classes(DocumentBase &document);
+	// A document's companion (DocumentType::companions, S24 Names: a mission's .mis): where it is (the project's file
+	// of the document's base name and its extension, else beside the document's file), "" for a type with none;
+	// read and handed to the document before it reads its file (read_companion); written after its save where the
+	// document says to, `written` taking its path (write_companion: never failing the document's save).
+	std::string companion_path(const DocumentBase &document, const std::string &relative) const;
+	void read_companion(DocumentBase &document, AssetKind kind, const std::string &relative) const;
+	void write_companion(DocumentBase &document, std::vector<std::string> &written);
 
 	SessionCore &core_;
 	SessionView &view_;

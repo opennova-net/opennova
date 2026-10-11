@@ -9,6 +9,8 @@
 #include <system_error>
 #include <utility>
 
+#include <base/io/file_io.h>
+#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
@@ -25,6 +27,7 @@
 #include <editor/graph/file_plans.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/native_text_sites.h>
+#include <editor/graph/rename_transaction.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
@@ -175,10 +178,55 @@ std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, Ass
 		return nullptr;
 	}
 	std::shared_ptr<DocumentBase> document = type->make();
+	read_companion(*document, kind, relative);
 	if (!document->load(join_path(paths_.root, relative), relative, kind, view_.project.document->target_game,
 	                    error))
 		return nullptr;
 	return document;
+}
+
+std::string DocumentSet::companion_path(const DocumentBase &document, const std::string &relative) const {
+	const DocumentType *type = document_type_for(document.kind());
+	if (!type || !type->companions) return std::string();
+	const std::string name = mission::mission_base_name(basename_of(relative)) + type->companions->extension;
+	// The project's file of the name (the one the mission's set takes with it, mission_file_set_members), else
+	// beside the document's own.
+	if (view_.project.scan)
+		if (const AssetEntry *entry = view_.project.scan->find(name)) return entry->relative_path;
+	return join_path(folder_of_path(relative), name);
+}
+
+void DocumentSet::read_companion(DocumentBase &document, AssetKind kind, const std::string &relative) const {
+	const DocumentType *type = document_type_for(kind);
+	if (!type || !type->companions || !type->companions->read) return;
+	// The kind is the load's to set: the path is found by the type's own, before the document knows it.
+	const std::string name = mission::mission_base_name(basename_of(relative)) + type->companions->extension;
+	std::string path = join_path(folder_of_path(relative), name);
+	if (view_.project.scan)
+		if (const AssetEntry *entry = view_.project.scan->find(name)) path = entry->relative_path;
+	std::vector<uint8_t> bytes;
+	std::string message;
+	const bool read = io::read_file_bytes(join_path(paths_.root, path), bytes, message);
+	type->companions->read(document, read ? &bytes : nullptr);
+}
+
+void DocumentSet::write_companion(DocumentBase &document, std::vector<std::string> &written) {
+	const DocumentType *type = document_type_for(document.kind());
+	if (!type || !type->companions || !type->companions->write) return;
+	const std::string path = companion_path(document, document.path());
+	const std::string absolute = join_path(paths_.root, path);
+	std::vector<uint8_t> now;
+	std::string message;
+	const bool present = io::read_file_bytes(absolute, now, message);
+	std::string text;
+	if (!type->companions->write(document, present ? &now : nullptr, text)) return;
+	const bool ok = io::write_file_atomic(absolute, text.data(), text.size(), message);
+	if (type->companions->written)
+		type->companions->written(document, ok, ok ? io::fnv1a64_bytes(io::kFnv1a64Offset, text.data(), text.size()) : 0,
+		                          ok ? std::string() : message);
+	if (!ok) return;
+	written.push_back(path);
+	core_.note("Saved " + path + " beside " + document.path() + " (its names)");
 }
 
 // The open documents against their files (Rescan, an import, Build and Play, and what another
@@ -601,6 +649,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 			return;
 		}
 		std::shared_ptr<DocumentBase> document = type->make(); Diagnostic error;
+		read_companion(*document, asset.kind, asset.relative_path);
 		if (!document->load(join_path(paths_.root, asset.relative_path),
 					asset.relative_path, asset.kind, view_.project.document->target_game, error)) {
 			refuse(error);
@@ -1185,6 +1234,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		written.push_back(document->path());
 		core_.note("Saved " + document->path() + (outside ? " over what changed outside the editor" : ""));
 		noted += note_save(*document);
+		write_companion(*document, written);
 	}
 	// A Save ends the gesture of each document it saves (its save's checkpoint ended its group): a
 	// file written is validated as the scan reads it, and one not written now.
@@ -1239,7 +1289,9 @@ void DocumentSet::rewrite_file(const std::string &path) {
 	}
 	core_.note("Saved " + relative);
 	const size_t noted = note_save(*document);
-	core_.update_files({relative});
+	std::vector<std::string> written{relative};
+	write_companion(*document, written);
+	core_.update_files(written);
 	view_.activity.status = "Saved " + relative + (noted ? " (" + counted(noted, "note") + ": see Output)." : ".");
 	core_.touch(ViewConcern::Output);
 }

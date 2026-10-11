@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <base/io/json.h>
@@ -16,6 +18,22 @@
 namespace opennova::editor {
 
 class ProjectCheck;
+
+// A record type's companion (ADR 0046 S24, Names): a file the editor keeps beside a document's own file under its
+// base name with an extension of its own, never packed and never a reference the graph reads (a mission's .mis,
+// which the original editor reads and the game never does: documents/mission_names_file.h). The session reads it
+// before the document reads its file, each time it does (`read`: its bytes, null where the project has none), and
+// after each save of the document asks what to write there (`write`, given its bytes as they stand: true with
+// the text, which the session writes atomically after the document's own, never failing the document's save;
+// false: nothing, the document saying why in its own findings), then tells the document what came of the write
+// (`written`: the bytes' fingerprint, or the error). Rename, move, copy and delete take the file with its
+// document's (documents/mission_file_set.h).
+struct DocumentCompanions {
+	const char *extension = "";
+	void (*read)(DocumentBase &document, const std::vector<uint8_t> *bytes) = nullptr;
+	bool (*write)(DocumentBase &document, const std::vector<uint8_t> *now, std::string &text) = nullptr;
+	void (*written)(DocumentBase &document, bool ok, uint64_t fingerprint, const std::string &error) = nullptr;
+};
 
 // The registry of editable file kinds (ADR 0046 d9): one row per document type, one per
 // DocumentTypeId past None in its order (a static_assert checks it), saying how to make a
@@ -106,6 +124,8 @@ struct DocumentType {
 	// reads), which the ConfigFile pool rule's fix comments out (documents/config_overrun.h). Null for a type
 	// with no port of its loader's reads, whose overrun finding has no fix.
 	void (*config_idle_lines)(const TextDocument &document, std::vector<size_t> &line_starts) = nullptr;
+	// The file the type's documents keep beside their own (DocumentCompanions above); null for a type with none.
+	const DocumentCompanions *companions = nullptr;
 };
 
 // A record in its type's own words with no project names (its record_label with none, else the

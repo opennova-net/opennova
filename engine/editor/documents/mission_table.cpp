@@ -17,10 +17,12 @@
 #include <vector>
 
 #include <base/io/strutil.h>
+#include <editor/documents/mission_document.h>
 #include <formats/def/reserved_items.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_field.h>
+#include <formats/mission/mission_mis.h>
 #include <formats/mission/mission_params.h>
 
 namespace opennova::editor {
@@ -38,8 +40,11 @@ constexpr NodeKind k(K kind) { return node_kind(kind); }
 // other kind's native record is the format's own.
 void *self(void *native) { return native; }
 void *header_of(void *native) { return &static_cast<bms::File *>(native)->header; }
-void *path_record(void *native) { return &static_cast<MissionPath *>(native)->record; }
-void *chain_event(void *native) { return &static_cast<EventChain *>(native)->event; }
+// A path's, an area's and an event's record is its row (mission_document.h PathRow, AreaRow, EventRow: the
+// name the .bms has no room for beside the native record).
+void *path_record(void *row) { return &static_cast<PathRow *>(row)->native.record; }
+void *area_record(void *row) { return &static_cast<AreaRow *>(row)->native; }
+void *chain_event(void *row) { return &static_cast<EventRow *>(row)->native.event; }
 
 // Each kind's row: its token and label, what the outline's Add of a row of it says ("" = none: the
 // mission is one per file, its 128 paths are fixed, a nested record is added through its list),
@@ -67,7 +72,7 @@ constexpr KindRow kKinds[] = {
 	{K::Organic, "organic", "Organic", "Add organic", true, MissionRecord::Entity, self},
 	{K::WaypointPath, "waypoint_path", "Waypoint path", "", true, MissionRecord::WaypointPath, path_record},
 	{K::Stop, "stop", "Stop", "", false, MissionRecord::Stop, self},
-	{K::Area, "area", "Area trigger", "Add area trigger", true, MissionRecord::Area, self},
+	{K::Area, "area", "Area trigger", "Add area trigger", true, MissionRecord::Area, area_record},
 	{K::Event, "event", "Event", "Add event", true, MissionRecord::Event, chain_event},
 	{K::Trigger, "trigger", "Trigger", "", false, MissionRecord::Trigger, self},
 	{K::Action, "action", "Action", "", false, MissionRecord::Action, self},
@@ -761,26 +766,26 @@ template <class Record> ListOps fixed_list(K kind, std::vector<Record> &(*list)(
 // (mission.unserializable), which the save refuses.
 ListOps stop_list() {
 	ListOps ops;
-	ops.size = [](const RecordHandle &owner) { return owner.as<MissionPath>().stops.size(); };
+	ops.size = [](const RecordHandle &owner) { return owner.as<PathRow>().native.stops.size(); };
 	ops.at = [](const RecordHandle &owner, size_t index) {
-		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
+		std::vector<uint32_t> &stops = owner.as<PathRow>().native.stops;
 		return index < stops.size() ? RecordHandle{k(K::Stop), &stops[index]} : RecordHandle{};
 	};
 	ops.insert = [](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
 		if (!own_kind(record, K::Stop, error)) return false;
-		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
+		std::vector<uint32_t> &stops = owner.as<PathRow>().native.stops;
 		const uint32_t marker = record ? *static_cast<const uint32_t *>(record->data.get()) : 0;
 		stops.insert(stops.begin() + std::ptrdiff_t(std::min(index, stops.size())), marker);
 		return true;
 	};
 	ops.erase = [](const RecordHandle &owner, size_t index) {
-		std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
+		std::vector<uint32_t> &stops = owner.as<PathRow>().native.stops;
 		if (index >= stops.size()) return false;
 		stops.erase(stops.begin() + std::ptrdiff_t(index));
 		return true;
 	};
 	ops.copy = [](const RecordHandle &owner, size_t index) {
-		const std::vector<uint32_t> &stops = owner.as<MissionPath>().stops;
+		const std::vector<uint32_t> &stops = owner.as<PathRow>().native.stops;
 		return index < stops.size() ? detached(K::Stop, stops[index]) : DetachedRecord();
 	};
 	return ops;
@@ -789,7 +794,7 @@ ListOps stop_list() {
 // A new trigger or action: every word zero but its four parameters, each -1 as every shipped record
 // holds a parameter its type does not read (kUnreadParam); its type set by the Add's field, the
 // parameters its type reads by the logic's add (mission_logic's logic_add_edits).
-template <class Record> Record fresh_logic(const EventChain &, size_t) {
+template <class Record> Record fresh_logic(const EventRow &, size_t) {
 	Record made{};
 	made.param1 = made.param2 = made.param3 = made.param4 = kUnreadParam;
 	return made;
@@ -798,11 +803,11 @@ template <class Record> Record fresh_logic(const EventChain &, size_t) {
 // An event's triggers and its actions: the records its chain holds (a new one fresh_logic's), 20 at
 // most each.
 template <class Record>
-ListOps chain_list(K kind, std::vector<Record> &(*list)(EventChain &)) {
-	ListOps ops = vector_list<EventChain, Record>(k(kind), list, fresh_logic<Record>);
+ListOps chain_list(K kind, std::vector<Record> &(*list)(EventRow &)) {
+	ListOps ops = vector_list<EventRow, Record>(k(kind), list, fresh_logic<Record>);
 	const auto insert = ops.insert;
 	ops.insert = [insert, list](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
-		if (list(owner.as<EventChain>()).size() >= kMaxEventRecords) {
+		if (list(owner.as<EventRow>()).size() >= kMaxEventRecords) {
 			error = "An event holds " + std::to_string(kMaxEventRecords) + " of these at most.";
 			return false;
 		}
@@ -810,13 +815,56 @@ ListOps chain_list(K kind, std::vector<Record> &(*list)(EventChain &)) {
 	};
 	return ops;
 }
-std::vector<bms::Trigger> &triggers_of(EventChain &chain) { return chain.triggers; }
-std::vector<bms::Action> &actions_of(EventChain &chain) { return chain.actions; }
+std::vector<bms::Trigger> &triggers_of(EventRow &row) { return row.native.triggers; }
+std::vector<bms::Action> &actions_of(EventRow &row) { return row.native.actions; }
+
+// A path's and an area's description and an event's name (S24 Names): the row's own, which the .mis beside the
+// mission carries and the game never reads (MissionDocument reads and sets it on the row, the record holding
+// none; documents/mission_names_file.h), first among the kind's fields.
+LabelledField name_field(K kind) {
+	LabelledField out;
+	FieldSchema &entry = out.schema;
+	const bool event = kind == K::Event;
+	entry.id = event ? "name" : "description";
+	entry.type = FieldType::Text;
+	entry.width = (event ? kMisEventNameChars : kMisDescriptionChars) + 1;
+	entry.label = event ? "Name" : "Description";
+	entry.applies = Applicability::Ignored;
+	entry.description = std::string("The editor's name for it, kept in the .mis beside the mission (the original editor's ") +
+	                    (event ? "event name" : "description") +
+	                    "), which the game never reads: at most " +
+	                    std::to_string(event ? kMisEventNameChars : kMisDescriptionChars) +
+	                    " characters, the original editor's, and no double quote or ';', which its reader cannot take.";
+	// The row's own text (its record is the row), set as the .mis carries a name: refused, never rewritten, where
+	// it cannot (mission::mis_name_allowed: past the width, a control character, a double quote, a ';').
+	const auto name_of = [kind](void *row) -> std::string & {
+		return kind == K::Event ? static_cast<EventRow *>(row)->name
+		       : kind == K::Area ? static_cast<AreaRow *>(row)->description
+		                         : static_cast<PathRow *>(row)->description;
+	};
+	const size_t width = event ? kMisEventNameChars : kMisDescriptionChars;
+	out.value.get = [name_of](const RecordHandle &record, Value &value) {
+		value = name_of(record.data);
+		return true;
+	};
+	out.value.set = [name_of, width](const RecordHandle &record, const Value &value, std::string &error) {
+		const auto *text = std::get_if<std::string>(&value);
+		if (!text) {
+			error = "A name is a text.";
+			return false;
+		}
+		if (!mis_name_allowed(*text, width, error)) return false;
+		name_of(record.data) = *text;
+		return true;
+	};
+	return out;
+}
 
 RecordTable make_table() {
 	std::vector<TableKind> kinds;
 	for (const KindRow &row : kKinds) {
 		TableKind kind(RecordKindRow{k(row.kind), row.token, row.label, row.add_label, row.top});
+		if (row.kind == K::Event || row.kind == K::Area || row.kind == K::WaypointPath) kind.field(name_field(row.kind));
 		for (const MissionField &field : mission_fields(row.record))
 			if (!derived(field.record, field.key)) kind.field(labelled(row, field));
 		switch (row.kind) {
