@@ -603,7 +603,7 @@ bool loadout_has_fourth_field(const std::string& value) {
     // After one sign, any letter by the CRT isalpha under the ".ACP" LC_CTYPE, pinned to
     // cp1252 (D-NET-478), on the sign-extended byte: a cp1252 high-byte letter marks the
     // field missing too, and 0xFF, the EOF row, does not (docs/net/novaworld-net-re.md
-    // D-NET-391). [orig: AIProfile_SanitizeConfigData @0x40cfe0 — the sign @0x40d09b..0x40d0a3,
+    // D-NET-391). [orig: AIProfile_SanitizeConfigData @0x40cfe0 — the sign @0x40d098..0x40d0a3,
     //  _isalpha @0x76b703 of the movsx'd byte, the call @0x40d0b4]
     size_t pos = (value[0] == '-' || value[0] == '+') ? 1 : 0;
     for (; pos < value.size(); ++pos) {
