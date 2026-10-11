@@ -673,7 +673,7 @@ int main() {
 		TEST_EXPECT(foreign_rewritten == foreign);
 		std::string foreign_text;
 		TEST_EXPECT(opennova::mission::write_mis_text(foreign_file, foreign_text, group_error));
-		TEST_EXPECT(foreign_text.find("begin group 3\r\n") == std::string::npos); // no flags, no value, no name
+		TEST_EXPECT(foreign_text.find("begin group 3\r\n") == std::string::npos); // no member, no name
 
 		// A name set through the record lands in the same bytes, NUL-padded; equal() sees it.
 		opennova::bms::File renamed;

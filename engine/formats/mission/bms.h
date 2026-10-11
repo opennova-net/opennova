@@ -691,6 +691,13 @@ struct GroupRecord {
     int32_t value;
     char name[kGroupNameSize];
 };
+// A character a quoted .mis value carries as written: no control character, no double quote (both stock
+// readers toggle their quoting at one, with no escape) and no ';' (they cut the line at the first, quoted or
+// not) [orig: sub_10007AB0 @0x10007ab0 (the ';' @0x10007b25, the quote @0x10007b81), misldr.dll;
+// sub_463050 @0x463050 (@0x4630c9, @0x463131), JOTACmed.exe]. The one rule every name the .mis carries keeps:
+// a group's (set_group_name), a variable's (mission_var_names.h) and an event's, area's or path's
+// (mission_mis.h mis_name_allowed).
+bool mis_value_char(char ch);
 // Whether the 20 bytes are no name (all zero) or one set_group_name would write: printable characters other
 // than a double quote or a ';' up to the first NUL, zeros after it. Bytes of another tool (a control byte, a
 // high byte, a quote, anything after a NUL) are kept as read and are no name.

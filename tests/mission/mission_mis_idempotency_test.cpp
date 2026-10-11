@@ -152,6 +152,12 @@ int check(const std::string &path) {
 	std::string gen2;
 	TEST_EXPECT(write_mis_text(reparsed, gen2, error));
 	TEST_EXPECT(texts_equal(gen1, gen2));
+	// The areas come back by zone id, in id order, with their flags (the .mis holds no bounds: D-MIS-14).
+	std::vector<std::pair<int32_t, uint32_t>> areas_in, areas_back;
+	for (const bms::AreaTrigger &area : doc.area_triggers) areas_in.emplace_back(area.id, area.flags);
+	for (const bms::AreaTrigger &area : reparsed.area_triggers) areas_back.emplace_back(area.id, area.flags);
+	std::sort(areas_in.begin(), areas_in.end());
+	TEST_EXPECT(areas_back == areas_in);
 
 	// The variable names (mission_var_names.h) ride the layer table, which the .mis carries as
 	// `begin layer N / description`: the tagged table comes back record for record, and the text again.
@@ -214,5 +220,10 @@ int main(int argc, char **argv) {
 		return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bms/ash_i5b.reference.bms (the shipped mission)");
 	if (check(retail) != 0) return 1;
 	std::printf("retail leg: ash_i5b .mis export is idempotent\n");
+	// A shipped mission with areas (ash_i5b has none): 03TR, ten of them, constrain-Z among their flags.
+	const std::string areas = retail::asset_file("03TR.bms");
+	if (areas.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/03TR.bms (a shipped mission with areas)");
+	if (check(areas) != 0) return 1;
+	std::printf("retail leg: 03TR .mis export is idempotent, its areas by zone id\n");
 	return 0;
 }

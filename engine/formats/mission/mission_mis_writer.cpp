@@ -14,23 +14,36 @@ namespace opennova::mission::detail {
 
 namespace {
 
-// A name as its line carries it: at most `width` characters (the stock reader's slot,
-// kMisEventNameChars / kMisDescriptionChars), through mis_string.
-std::string mis_name(const std::string &name, size_t width) { return mis_string(name.substr(0, width)); }
+// A name as its line carries it: at most `width` bytes (kMisEventNameChars / kMisDescriptionChars, the original
+// editor's dialogs), cut before a UTF-8 character the width would split, through mis_string. A name
+// mis_name_allowed takes is written as it stands.
+std::string mis_name(const std::string &name, size_t width) {
+	size_t cut = std::min(name.size(), width);
+	while (cut > 0 && cut < name.size() && (static_cast<unsigned char>(name[cut]) & 0xC0) == 0x80) --cut;
+	return mis_string(name.substr(0, cut));
+}
 
 // A record's name from `names`' list, "" past it or with no names, as its line carries it.
 std::string listed_name(const std::vector<std::string> *list, size_t index, size_t width) {
 	return list != nullptr && index < list->size() ? mis_name((*list)[index], width) : std::string();
 }
 
-// How many of the mission's entities, in any pool, `holds`: the original editor counts its items whatever
-// their kind (its path and group rebuilds before it writes those sections).
-template <typename Holds> size_t entities_holding(const bms::File &file, Holds holds) {
-	size_t count = 0;
+// What the original editor's rebuilds count before it writes the path and group sections, over its items
+// whatever their kind: a path's stops, the waypoint items (type 6005) whose waypoint_id is the path [orig:
+// JOTACmed.exe sub_44CFD0 @0x44cfd0], and a group's members, the items whose group_id is the group [orig:
+// sub_44D160 @0x44d160]. One pass over the four pools.
+struct HeldCounts {
+	std::array<size_t, 256> stops{};
+	std::array<size_t, 256> members{};
+};
+HeldCounts held_counts(const bms::File &file) {
+	HeldCounts held;
 	for (const std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
-		for (const bms::Entity &entity : *pool)
-			if (holds(entity)) ++count;
-	return count;
+		for (const bms::Entity &entity : *pool) {
+			if (entity.type_id == def::DEF_TYPE_WAYPOINT) ++held.stops[entity.waypoint_id];
+			++held.members[entity.group_id];
+		}
+	return held;
 }
 
 void write_mis_general_information(const bms::File &file, std::string &out) {
@@ -134,18 +147,34 @@ void write_mis_briefing(const bms::File &file, std::string &out) {
 }
 
 // The original editor keeps an area in the slot its zone id names and writes slots 1..99 in order: an area its
-// type-6013 markers make (the slot's id word, which its rebuild sets from the markers' wpnumber), its
-// description, then its color and its attrib, the area's flags (MISSION_AREA 1, constrain-Z 2: the area
+// type-6013 markers make (the slot's id word, which its rebuild sets from a marker's wpnumber of 1..99 alone),
+// its description, then its color and its attrib, the area's flags (MISSION_AREA 1, constrain-Z 2: the area
 // dialog's 1175 and 1169, the word its .bms writer stores at @28), each when not zero [orig: JOTACmed.exe
-// MIS_SaveDocument @0x454630, the loop @0x454d11..0x454daf; sub_44D240 @0x44d240; sub_40F360 @0x40f360;
-// sub_44F920 @0x44f920, the area @0x450a16..0x450ab3]. So an area is written under its zone id, one per id,
-// in id order; the .bms holds no color. It also writes slot i when path i has a description, testing the path
-// table where it means the area's (@0x454d26..0x454d3f); this writer writes the areas there are (D-MIS-12).
-void write_mis_area_triggers(const bms::File &file, std::string &out, const MisNames *names) {
+// MIS_SaveDocument @0x454630, the loop @0x454d11..0x454daf; sub_44D240 @0x44d240, the range @0x44d2a9;
+// sub_40F360 @0x40f360; sub_44F920 @0x44f920, the area @0x450a16..0x450ab3]. So an area is written under its
+// zone id, in id order, and the .bms holds no color. An area whose id is outside 1..99, or a second area of an
+// id, has no slot in the original's .mis: the write is refused, naming it, rather than leaving it out. The
+// original also writes slot i when path i has a description, testing the path table where it means the
+// area's (@0x454d20..0x454d3f); this writer writes the areas there are (D-MIS-15).
+bool write_mis_area_triggers(const bms::File &file, std::string &out, const MisNames *names, std::string &error) {
 	std::array<const bms::AreaTrigger *, kMisAreaSlots> slots{};
-	for (const bms::AreaTrigger &area : file.area_triggers)
-		if (area.id > 0 && area.id < static_cast<int32_t>(kMisAreaSlots) && slots[static_cast<size_t>(area.id)] == nullptr)
-			slots[static_cast<size_t>(area.id)] = &area;
+	std::array<size_t, kMisAreaSlots> first{};
+	for (size_t i = 0; i < file.area_triggers.size(); ++i) {
+		const bms::AreaTrigger &area = file.area_triggers[i];
+		if (area.id < 1 || area.id >= static_cast<int32_t>(kMisAreaSlots)) {
+			error = "Area trigger " + std::to_string(i) + " has zone id " + std::to_string(area.id) +
+			        ": the .mis holds an area under a zone id of 1..99 alone";
+			return false;
+		}
+		const size_t id = static_cast<size_t>(area.id);
+		if (slots[id] != nullptr) {
+			error = "Area triggers " + std::to_string(first[id]) + " and " + std::to_string(i) + " share zone id " +
+			        std::to_string(id) + ": the .mis holds one area under a zone id";
+			return false;
+		}
+		slots[id] = &area;
+		first[id] = i;
+	}
 	for (size_t id = 1; id < kMisAreaSlots; ++id) {
 		const bms::AreaTrigger *area = slots[id];
 		if (area == nullptr) continue;
@@ -156,9 +185,10 @@ void write_mis_area_triggers(const bms::File &file, std::string &out, const MisN
 		append_line(out, "end areatrig");
 		append_line(out);
 	}
+	return true;
 }
 
-void write_mis_waypoints(const bms::File &file, std::string &out, const MisNames *names) {
+void write_mis_waypoints(const bms::File &file, const HeldCounts &held, std::string &out, const MisNames *names) {
 	for (size_t i = 1; i < file.waypoint_records.size(); ++i) {
 		const bms::WaypointRecord &record = file.waypoint_records[i];
 		const std::string description =
@@ -168,12 +198,9 @@ void write_mis_waypoints(const bms::File &file, std::string &out, const MisNames
 		// MIS_SaveDocument @0x454630, the loop @0x454dbe..0x454e5b; its rebuild sub_44CFD0 @0x44cfd0 counting
 		// them]. Path MEMBERSHIP never travels in this section: the .mis carries it on the marker items and a
 		// reader rebuilds the lists from them [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll]. So a
-		// path with flags and no stop nor description has no section (its flags are the .bms's alone), and the
-		// sections a read text writes again are the same (D-MIS-5, D-MIS-12).
-		const size_t stops = entities_holding(file, [i](const bms::Entity &entity) {
-			return entity.type_id == def::DEF_TYPE_WAYPOINT && size_t{entity.waypoint_id} == i;
-		});
-		if (stops == 0 && description.empty()) {
+		// path with flags and no stop nor description has no section and its flags do not reach the .mis, as the
+		// original's writer drops them (D-MIS-12); the sections a read text writes again are the same (D-MIS-5).
+		if (held.stops[i] == 0 && description.empty()) {
 			continue;
 		}
 		append_kv(out, "begin waypoint ", i);
@@ -193,14 +220,12 @@ void write_mis_waypoints(const bms::File &file, std::string &out, const MisNames
 // @0x450e50, the group keys @0x453d08..0x453de4; sub_44F920 @0x44f920, the record @0x450940..0x4509b4]. A
 // group's description is its name (the 20 bytes the game's loader drops, bms.h GroupRecord). The .bms holds no
 // color. The original writes the commander line with the color's word (`mov ecx, [edi+104h]` @0x454eea, the
-// commander being +108h), so its own save loses the commander; this writer writes the commander's (D-MIS-12).
-void write_mis_groups(const bms::File &file, std::string &out) {
+// commander being +108h), so its own save loses the commander; this writer writes the commander's (D-MIS-16).
+void write_mis_groups(const bms::File &file, const HeldCounts &held, std::string &out) {
 	for (size_t i = 1; i < file.group_records.size(); ++i) {
 		const bms::GroupRecord &record = file.group_records[i];
 		const std::string name = bms::group_name(record);
-		const size_t members = entities_holding(
-		    file, [i](const bms::Entity &entity) { return size_t{entity.group_id} == i; });
-		if (members == 0 && name.empty()) {
+		if ((i >= held.members.size() || held.members[i] == 0) && name.empty()) {
 			continue;
 		}
 		append_kv(out, "begin group ", i);
@@ -392,7 +417,6 @@ constexpr size_t kMisTextReserveBytes = 32u * 1024u;
 
 bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
                     const std::vector<int32_t> *base_heights, const MisNames *names) {
-	(void)error;
 	out.clear();
 	out.reserve(kMisTextReserveBytes);
 	append_line(out, "// mission metafile");
@@ -400,9 +424,13 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
 	write_mis_general_information(file, out);
 	write_mis_weapon_availability(out);
 	write_mis_briefing(file, out);
-	write_mis_area_triggers(file, out, names);
-	write_mis_waypoints(file, out, names);
-	write_mis_groups(file, out);
+	if (!write_mis_area_triggers(file, out, names, error)) {
+		out.clear();
+		return false;
+	}
+	const HeldCounts held = held_counts(file);
+	write_mis_waypoints(file, held, out, names);
+	write_mis_groups(file, held, out);
 	write_mis_layers(file, out);
 	write_mis_events(file, out, names);
 	write_mis_items(file, out, base_heights);

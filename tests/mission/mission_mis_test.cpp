@@ -338,18 +338,19 @@ int main() {
 
 	// --- The .mis names (MisNames, ADR 0046 S24 "Names"): an event's `name`, an area trigger's and a
 	// path's `description`, written from the names and read back by the indexes the parse gives the
-	// records; a described path with no flags is written, its attrib left out. -----------------------
+	// records (an area by its zone id); a path is written for a stop or a description, whatever its
+	// flags. ------------------------------------------------------------------------------------------
 	{
 		bms::File doc;
 		make_default(doc);
 		const size_t first = add_event(doc, MissionEventRecord{});
 		const size_t second = add_event(doc, MissionEventRecord{});
 		AreaTriggerRecord area;
-		area.wp_number = 4; // the zone id
+		area.wp_number = 9; // the zone id: the higher first, so the writer's id order shows
 		area.max_x = 10.0f;
 		area.max_y = 10.0f;
 		add_area_trigger(doc, area);
-		area.wp_number = 9;
+		area.wp_number = 4;
 		add_area_trigger(doc, area);
 		doc.waypoint_records[3].flags = static_cast<bms::WaypointFlags>(1);
 		sync_counts(doc);
@@ -395,7 +396,11 @@ int main() {
 		TEST_EXPECT(parse_mis_text(named_text, {}, records, error));
 		TEST_EXPECT(static_cast<uint32_t>(records.waypoint_records[7].flags) == 0 &&
 		            static_cast<uint32_t>(records.waypoint_records[3].flags) == 1);
-		TEST_EXPECT(records.events.size() == doc.events.size() && records.area_triggers.size() == 2);
+		TEST_EXPECT(records.events.size() == doc.events.size() && records.area_triggers.size() == 2 &&
+		            records.area_triggers[0].id == 4 && records.area_triggers[1].id == 9);
+		// A path with flags and neither a stop nor a description has no section, so its flags do not come back
+		// through the .mis: the original's writer drops them the same way (D-MIS-12).
+		TEST_EXPECT(static_cast<uint32_t>(records.waypoint_records[5].flags) == 0);
 		// Written again from what was read: the same text.
 		sync_counts(records);
 		std::string again;
@@ -427,7 +432,7 @@ int main() {
 		// An area's flags are its `attrib`, read back; an areatrig number past the original's 100 slots is
 		// refused by the names' reader.
 		bms::File flagged = doc;
-		flagged.area_triggers[0].flags = 3;
+		flagged.area_triggers[1].flags = 3; // zone 4
 		std::string flagged_text;
 		TEST_EXPECT(write_mis_text(flagged, flagged_text, error));
 		TEST_EXPECT(flagged_text.find("begin areatrig 4\r\n  description \"\"\r\n  attrib 3\r\nend areatrig\r\n") !=
@@ -436,12 +441,103 @@ int main() {
 		TEST_EXPECT(parse_mis_text(flagged_text, {}, flagged_back, error));
 		TEST_EXPECT(flagged_back.area_triggers.size() == 2 && flagged_back.area_triggers[0].id == 4 &&
 		            flagged_back.area_triggers[0].flags == 3 && flagged_back.area_triggers[1].flags == 0);
-		MisNames past;
-		TEST_EXPECT(!parse_mis_names("begin areatrig 100\r\n  description \"x\"\r\nend areatrig\r\n", past, error));
 		TEST_EXPECT(capped.find(';') == std::string::npos);
+
+		// The original's .mis has an area slot per zone id 1..99 alone: an area outside them, or a second of an
+		// id, is refused by the writer, naming it, never left out.
+		for (const int32_t bad : {0, 100}) {
+			bms::File off = doc;
+			off.area_triggers[0].id = bad;
+			std::string off_text, why;
+			TEST_EXPECT(!write_mis_text(off, off_text, why));
+			TEST_EXPECT(why.find("Area trigger 0 has zone id " + std::to_string(bad)) != std::string::npos);
+		}
+		bms::File twice = doc;
+		twice.area_triggers[0].id = 4;
+		std::string twice_text, twice_why;
+		TEST_EXPECT(!write_mis_text(twice, twice_text, twice_why));
+		TEST_EXPECT(twice_why.find("Area triggers 0 and 1 share zone id 4") != std::string::npos);
+		// The readers agree on 1..99: a number outside makes no area and no name, a second section of a number
+		// goes to the first's slot (its lines to the first's area, its description replacing the first's), each
+		// reported, never dropped in silence.
+		const std::string odd_areas = "begin areatrig 0\r\n  description \"zero\"\r\nend areatrig\r\n"
+		                              "begin areatrig 100\r\n  description \"past\"\r\nend areatrig\r\n"
+		                              "begin areatrig 7\r\n  description \"first\"\r\nend areatrig\r\n"
+		                              "begin areatrig 7\r\n  description \"second\"\r\n  attrib 2\r\nend areatrig\r\n";
+		bms::File odd;
+		std::vector<MisIssue> odd_issues;
+		TEST_EXPECT(parse_mis_text(odd_areas, {}, odd, error, &odd_issues));
+		TEST_EXPECT(odd.area_triggers.size() == 1 && odd.area_triggers[0].id == 7 && odd.area_triggers[0].flags == 2);
+		TEST_EXPECT(odd_issues.size() == 3 && odd_issues[0].line == 1 && odd_issues[1].line == 4 &&
+		            odd_issues[2].line == 10 && odd_issues[2].message.find("second section") != std::string::npos);
+		MisNames odd_names;
+		std::vector<MisIssue> name_issues;
+		TEST_EXPECT(parse_mis_names(odd_areas, odd_names, error, &name_issues));
+		TEST_EXPECT(odd_names.areas[0].empty() && odd_names.areas[7] == "second");
+		TEST_EXPECT(name_issues.size() == 3 && name_issues[0].line == 1 && name_issues[1].line == 4 &&
+		            name_issues[2].line == 10);
 		// An item's name and the mission's are not a record's: an unterminated section is refused.
 		MisNames broken;
 		TEST_EXPECT(!parse_mis_names("begin event 0\r\n  name \"x\"\r\n", broken, error));
+
+		// A cap never splits a UTF-8 character: 58 bytes then a two-byte character is written as the 58.
+		MisNames wide;
+		wide.events = {std::string(58, 'a') + "\xC3\xA9", ""};
+		std::string wide_text;
+		TEST_EXPECT(write_mis_text(doc, wide_text, error, nullptr, &wide));
+		TEST_EXPECT(wide_text.find("  name \"" + std::string(58, 'a') + "\"\r\n") != std::string::npos);
+	}
+
+	// --- One rule for a name the .mis carries (bms::mis_value_char): an event's, area's or path's name
+	// refuses a control character, a double quote, a ';' and a length past its slot, as a group's does;
+	// UTF-8 is taken. ----------------------------------------------------------------------------------
+	{
+		std::string why;
+		TEST_EXPECT(mis_name_allowed("Get to the bridge", kMisEventNameChars, why));
+		TEST_EXPECT(mis_name_allowed("Pont de l'\xC3\xA9t\xC3\xA9", kMisEventNameChars, why));
+		TEST_EXPECT(mis_name_allowed(std::string(kMisDescriptionChars, 'd'), kMisDescriptionChars, why));
+		TEST_EXPECT(!mis_name_allowed(std::string(kMisEventNameChars + 1, 'e'), kMisEventNameChars, why));
+		TEST_EXPECT(why.find("59 bytes") != std::string::npos);
+		TEST_EXPECT(!mis_name_allowed("north; south", kMisEventNameChars, why));
+		TEST_EXPECT(!mis_name_allowed("say \"hi\"", kMisEventNameChars, why));
+		TEST_EXPECT(!mis_name_allowed("two\nlines", kMisEventNameChars, why));
+	}
+
+	// --- What the reader does not keep is reported: a key the original editor's reader refuses in its
+	// section (the old group keys among them), and the original's teleport_target, wav_list and wind
+	// sections, walked. Keys and section names read without case, as both originals match them; the
+	// original's aliases (noloop, alignment, perception, perfectionist) read as its words. -------------
+	{
+		const std::string text =
+		    "BEGIN Group 2\r\n  Description \"Bravo\"\r\n  flags 1\r\n  value 2\r\n  ATTRIB 1\r\n  color 3\r\nEND GROUP\r\n"
+		    "begin waypoint 4\r\n  description \"\"\r\n  noloop 1\r\n  speed 3\r\n  bogus 1\r\nend waypoint\r\n"
+		    "begin areatrig 5\r\n  description \"\"\r\n  color 2\r\n  bounds 1\r\nend areatrig\r\n"
+		    "begin layer 1\r\n  description \"one\"\r\n  color \"0\"\r\n  bogus 1\r\nend layer\r\n"
+		    "begin teleport_target 1\r\n  description \"there\"\r\nend teleport_target\r\n"
+		    "begin wav_list 1\r\n  description \"d\"\r\n  file_name \"f.wav\"\r\nend wav_list\r\n"
+		    "begin wind 1\r\n  name \"w\"\r\nend wind\r\n"
+		    "begin event 0\r\n  name \"e\"\r\n  bogus 1\r\nend event\r\n"
+		    "begin item 0\r\n  type_id 1\r\n  id 1\r\n  alignment 2\r\n  perception 70\r\n  perfectionist 60\r\n"
+		    "  formation 1\r\n  bogus 1\r\nend item\r\n";
+		bms::File read;
+		std::vector<MisIssue> issues;
+		TEST_EXPECT(parse_mis_text(text, {}, read, error, &issues));
+		TEST_EXPECT(read.group_records[2].flags == 1 && read.group_records[2].value == 0 &&
+		            bms::group_name(read.group_records[2]) == "Bravo");
+		TEST_EXPECT(static_cast<uint32_t>(read.waypoint_records[4].flags) == 1);
+		TEST_EXPECT(read.area_triggers.size() == 1 && read.area_triggers[0].id == 5);
+		TEST_EXPECT(read.items.size() == 1 && read.items[0].team == 2 && read.items[0].perception2 == 70 &&
+		            read.items[0].perfectionist2 == 60);
+		// Reported: the group's flags and value, the waypoint's, area's, layer's, event's and item's bogus key,
+		// and the three sections.
+		std::vector<size_t> lines;
+		for (const MisIssue &issue : issues) lines.push_back(issue.line);
+		TEST_EXPECT((lines == std::vector<size_t>{3, 4, 12, 17, 22, 24, 27, 31, 36, 45}));
+		TEST_EXPECT(issues[0].message.find("group 2's key 'flags'") != std::string::npos);
+		TEST_EXPECT(issues[5].message.find("teleport_target") != std::string::npos);
+		MisNames names;
+		TEST_EXPECT(parse_mis_names(text, names, error));
+		TEST_EXPECT(names.events.size() == 1 && names.events[0] == "e");
 	}
 
 	return 0;

@@ -9,9 +9,12 @@
 
 #include <formats/mission/authoring.h> // entity_kind_for_item_type: items.def TYPE -> BMS pool
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace opennova::mission::detail {
@@ -75,9 +78,14 @@ std::vector<MisLine> tokenize_mis_text(const std::string &text) {
 		if (!raw.empty() && raw.back() == '\r') {
 			raw.pop_back();
 		}
-		const std::vector<std::string> tokens = tokenize_mis_line(trim_copy(raw));
+		std::vector<std::string> tokens = tokenize_mis_line(trim_copy(raw));
 		if (!tokens.empty()) {
-			lines.push_back({line_no, tokens});
+			// Both stock readers match a key and a section's name without case (_stricmp) [orig: MIS_ParseToken
+			// @0x450e50, JOTACmed.exe; MisLdr_ParseMisLine @0x100017b0, misldr.dll]: the first word is read
+			// lowered, and the second after `begin` or `end`; a value keeps its case.
+			tokens[0] = strutil::to_lower(tokens[0]);
+			if (tokens.size() > 1 && (tokens[0] == "begin" || tokens[0] == "end")) tokens[1] = strutil::to_lower(tokens[1]);
+			lines.push_back({line_no, std::move(tokens)});
 		}
 		if (line_end == std::string::npos) {
 			break;
@@ -144,6 +152,37 @@ bool token_float(const MisLine &line, size_t index, float &out, std::string &err
 		return false;
 	}
 	return true;
+}
+
+// The keys the original editor's reader takes in a section; any other it refuses, failing the load [orig:
+// JOTACmed.exe MIS_ParseToken @0x450e50: item @0x4536e7, event @0x453a7a, group @0x453de4, layer @0x453f37,
+// areatrig @0x454144, waypoint @0x4538e9]. Ours reads past such a key and reports it.
+bool key_in(const std::string &key, std::initializer_list<const char *> keys) {
+	for (const char *known : keys)
+		if (key == known) return true;
+	return false;
+}
+bool original_item_key(const std::string &key) {
+	return key_in(key, {"type_id", "name", "iai_name", "ai_textfile", "id", "position", "facing", "alignment", "team",
+	                    "ai_name", "name_index", "team_budget", "map_symbol", "bmsi_attributes", "nolessthan",
+	                    "nomorethan", "weapon_type", "sweapon_type", "grenades", "group_id", "group_rel", "waypoint_id",
+	                    "wpnumber", "wpdistance", "wp_adv_trigger", "wpgoal0", "wpgoal1", "wpgoal2", "wpgoal3",
+	                    "ttoolindex", "alert_state", "obliqueness", "waccuracy1", "waccuracy2", "perception",
+	                    "perception2", "perfectionist", "perfectionist2", "movetimer", "crouchtimer", "shoottimer",
+	                    "attention", "advancetimer", "edistances", "max_attack_distance", "attributes", "layer", "value",
+	                    "loadoutfile", "bumper", "camo_type", "speed", "ai", "advance", "formation", "icon_value",
+	                    "ammo_50_cal", "ammo_tow", "ammo_stinger", "ammo_grenade", "delay", "smoke_time",
+	                    "name_override", "blink_group", "blink_group_a", "blink_group_b", "blink_parent",
+	                    "blink_parent_a", "blink_parent_b", "extra_mlink", "extra_val1", "extra_val2", "extra_val3",
+	                    "extra_val4", "extra_val5", "extra_valmode", "extra_bheight", "gen_string", "next_ssn",
+	                    "lfp_group", "mission_critical", "height_lock", "color_override"});
+}
+void note(std::vector<MisIssue> *issues, size_t line, std::string message) {
+	if (issues != nullptr) issues->push_back({line, std::move(message)});
+}
+void unknown_key(std::vector<MisIssue> *issues, const MisLine &line, const std::string &where) {
+	note(issues, line.line_no,
+	     where + "'s key '" + line.tokens[0] + "' is none the original editor reads there (its reader refuses the file); skipped");
 }
 
 void initialize_mis_file(bms::File &file) {
@@ -330,7 +369,8 @@ bool skip_mis_section(const std::vector<MisLine> &lines, size_t &pos, const std:
 	return false;
 }
 
-bool parse_mis_waypoint(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
+bool parse_mis_waypoint(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error,
+                        std::vector<MisIssue> *issues) {
 	int32_t index = 0;
 	if (!token_i32(lines[pos], 2, index, error)) return false;
 	if (index < 0 || index >= bms::kWaypointRecordCount) {
@@ -346,10 +386,14 @@ bool parse_mis_waypoint(const std::vector<MisLine> &lines, size_t &pos, bms::Fil
 			++pos;
 			return true;
 		}
-		if (t.size() >= 2 && t[0] == "attrib") {
+		// `noloop` and `attrib` set the one word [orig: JOTACmed.exe MIS_ParseToken @0x450e50, the test @0x4538a5]; the
+		// description is the names' (parse_mis_names), the color and the speed the editor's alone.
+		if (t.size() >= 2 && (t[0] == "attrib" || t[0] == "noloop")) {
 			uint32_t flags = 0;
 			if (!token_u32(line, 1, flags, error)) return false;
 			record.flags = static_cast<bms::WaypointFlags>(flags);
+		} else if (!key_in(t[0], {"description", "color", "speed"})) {
+			unknown_key(issues, line, "waypoint " + std::to_string(index));
 		}
 	}
 	error = "MIS waypoint section is missing its end marker";
@@ -388,13 +432,16 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 		} else if (t.size() >= 2 && t[0] == "commander") {
 			if (!token_i32(line, 1, value, error)) return false;
 			record.value = value;
+		} else if (t[0] != "color") {
+			unknown_key(issues, line, "group " + std::to_string(index));
 		}
 	}
 	error = "MIS group section is missing its end marker";
 	return false;
 }
 
-bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
+bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error,
+                     std::vector<MisIssue> *issues) {
 	int32_t index = 0;
 	if (!token_i32(lines[pos], 2, index, error)) return false;
 	if (index < 0 || index >= bms::kLayerRecordCount) {
@@ -411,6 +458,8 @@ bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 		}
 		if (t.size() >= 2 && t[0] == "description") {
 			copy_fixed_field(record.name, sizeof(record.name), t[1]);
+		} else if (t[0] != "color") {
+			unknown_key(issues, line, "layer " + std::to_string(index));
 		}
 	}
 	error = "MIS layer section is missing its end marker";
@@ -420,22 +469,41 @@ bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 // `begin areatrig N`: N is the area's zone id, the original editor's slot, and `attrib` its flags (MISSION_AREA
 // 1, constrain-Z 2), which the original's .bms writer stores at @28; `color` is the editor's alone [orig:
 // JOTACmed.exe MIS_ParseToken @0x450e50, the section @0x4510a9, its keys @0x4540ac..0x454144; sub_44F920
-// @0x44f920, the area @0x450a16..0x450ab3].
-bool parse_mis_area_trigger(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
+// @0x44f920, the area @0x450a16..0x450ab3]. The original's .mis has a slot per zone id 1..99 (its writer's
+// loop @0x454d11..0x454daf, its rebuild's range sub_44D240 @0x44d2a9): a number outside them makes no area,
+// and a second section of a number goes to the first's area, as the original's slot, each reported. The area
+// has no bounds: the original makes them from its 6013 items, which this reader does not (D-MIS-14).
+bool parse_mis_area_trigger(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error,
+                            std::vector<MisIssue> *issues) {
+	const size_t begun = lines[pos].line_no;
 	int32_t id = 0;
 	if (!token_i32(lines[pos], 2, id, error)) return false;
-	bms::AreaTrigger trigger = {};
-	trigger.id = id;
+	const bool slotted = id >= 1 && id < static_cast<int32_t>(kMisAreaSlots);
+	bms::AreaTrigger made = {};
+	made.id = id;
+	bms::AreaTrigger *trigger = &made;
+	if (!slotted) {
+		note(issues, begun, "areatrig " + std::to_string(id) + " is no zone id of 1..99, the original editor's slots; no area made");
+	} else {
+		for (bms::AreaTrigger &area : file.area_triggers)
+			if (area.id == id) {
+				trigger = &area;
+				note(issues, begun, "areatrig " + std::to_string(id) + " is a second section of its zone id; its lines go to the first's area, as the original editor's slot");
+				break;
+			}
+	}
 	for (++pos; pos < lines.size(); ++pos) {
 		const MisLine &line = lines[pos];
 		const std::vector<std::string> &t = line.tokens;
 		if (t.size() >= 2 && t[0] == "end" && t[1] == "areatrig") {
-			file.area_triggers.push_back(trigger);
+			if (slotted && trigger == &made) file.area_triggers.push_back(made);
 			++pos;
 			return true;
 		}
 		if (t.size() >= 2 && t[0] == "attrib") {
-			if (!token_u32(line, 1, trigger.flags, error)) return false;
+			if (!token_u32(line, 1, trigger->flags, error)) return false;
+		} else if (!key_in(t[0], {"description", "color"})) {
+			unknown_key(issues, line, "areatrig " + std::to_string(id));
 		}
 	}
 	error = "MIS areatrig section is missing its end marker";
@@ -505,7 +573,9 @@ bool parse_mis_nested_records(const std::vector<MisLine> &lines,
 	return false;
 }
 
-bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
+bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error,
+                     std::vector<MisIssue> *issues) {
+	const size_t number = file.events.size();
 	bms::Event event = {};
 	event.trigger_index = static_cast<int32_t>(file.triggers.size());
 	event.action_index = static_cast<int32_t>(file.actions.size());
@@ -539,6 +609,7 @@ bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 			if (!token_i32(line, 2, value, error)) return false;
 			if (!parse_mis_nested_records(lines, pos, "actions", value, file, error)) return false;
 		} else {
+			if (t[0] != "name") unknown_key(issues, line, "event " + std::to_string(number));
 			++pos;
 		}
 	}
@@ -550,7 +621,8 @@ bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 
 bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
                     const MisItemTypeResolver &resolve_item_type, bms::File &file,
-                    std::string &error) {
+                    std::string &error, std::vector<MisIssue> *issues) {
+	const size_t begun = lines[pos].line_no;
 	bms::Entity entity = {};
 	entity.type = bms::ItemType::Item;
 	entity.perception2 = 100;
@@ -613,7 +685,7 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			entity.pitch = static_cast<int16_t>(v);
 			if (!token_i32(line, 3, v, error)) return false;
 			entity.roll = static_cast<int16_t>(v);
-		} else if (key == "team") {
+		} else if (key == "team" || key == "alignment") { // one word to the original [orig: MIS_ParseToken @0x4523bb]
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.team = static_cast<uint8_t>(std::clamp<int32_t>(v, 0, 255));
 		} else if (key == "map_symbol") {
@@ -679,9 +751,9 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 		} else if (key == "waccuracy2") {
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.w_accuracy2 = static_cast<int16_t>(v);
-		} else if (key == "perception2") {
+		} else if (key == "perception2" || key == "perception") { // one word each [orig: @0x452aad, @0x452b08]
 			if (!token_i32(line, 1, entity.perception2, error)) return false;
-		} else if (key == "perfectionist2") {
+		} else if (key == "perfectionist2" || key == "perfectionist") {
 			if (!token_i32(line, 1, entity.perfectionist2, error)) return false;
 		} else if (key == "movetimer") {
 			if (!token_i32(line, 1, v, error)) return false;
@@ -731,6 +803,8 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			if (t.size() > 1 && t[1] != "null") {
 				copy_fixed_field(entity.gen_string, sizeof(entity.gen_string), t[1]);
 			}
+		} else if (!original_item_key(key)) {
+			unknown_key(issues, line, "the item begun in line " + std::to_string(begun));
 		}
 	}
 	error = "MIS item section is missing its end marker";
@@ -756,17 +830,22 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		} else if (section == "briefing") {
 			if (!parse_mis_briefing(lines, pos, out, error)) return false;
 		} else if (section == "areatrig") {
-			if (!parse_mis_area_trigger(lines, pos, out, error)) return false;
+			if (!parse_mis_area_trigger(lines, pos, out, error, issues)) return false;
 		} else if (section == "waypoint") {
-			if (!parse_mis_waypoint(lines, pos, out, error)) return false;
+			if (!parse_mis_waypoint(lines, pos, out, error, issues)) return false;
 		} else if (section == "group") {
 			if (!parse_mis_group(lines, pos, out, error, issues)) return false;
 		} else if (section == "layer") {
-			if (!parse_mis_layer(lines, pos, out, error)) return false;
+			if (!parse_mis_layer(lines, pos, out, error, issues)) return false;
 		} else if (section == "event") {
-			if (!parse_mis_event(lines, pos, out, error)) return false;
+			if (!parse_mis_event(lines, pos, out, error, issues)) return false;
 		} else if (section == "item") {
-			if (!parse_mis_item(lines, pos, resolve_item_type, out, error)) return false;
+			if (!parse_mis_item(lines, pos, resolve_item_type, out, error, issues)) return false;
+		} else if (section == "teleport_target" || section == "wav_list" || section == "wind") {
+			// Sections the original editor writes and reads that the .bms has no room for [orig: MIS_ParseToken
+			// @0x450e50, the sections @0x450faa, @0x451004, @0x451119; MIS_SaveDocument @0x454f28..0x455015].
+			note(issues, lines[pos].line_no, "the " + section + " section is the original editor's; not kept here");
+			if (!skip_mis_section(lines, pos, section, error)) return false;
 		} else {
 			error = "Unsupported MIS section '" + section + "' in line " + std::to_string(lines[pos].line_no);
 			return false;
@@ -775,18 +854,20 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 	return true;
 }
 
-bool parse_mis_names(const std::string &text, MisNames &out, std::string &error) {
+bool parse_mis_names(const std::string &text, MisNames &out, std::string &error, std::vector<MisIssue> *issues) {
 	out = MisNames{};
 	const std::vector<MisLine> lines = tokenize_mis_text(text);
 	// The section a line is in: the three that carry a name kept, any other walked to its end (an item's
 	// `name` and general_information's are not these). An event by its place in the file, an area by its
-	// zone id (`begin areatrig N`, 0..99), a path by its record index (`begin waypoint N`).
+	// zone id (`begin areatrig N`, 1..99 as parse_mis_text reads it: another number's name skipped, a second
+	// section's replacing the first's), a path by its record index (`begin waypoint N`).
 	enum class Kind { None, Event, Area, Path, Other };
 	Kind kind = Kind::None;
 	std::string section;
 	size_t index = 0;
 	size_t begun_at = 0;
 	size_t events = 0;
+	std::array<bool, kMisAreaSlots> area_seen{};
 	for (const MisLine &line : lines) {
 		const std::vector<std::string> &t = line.tokens;
 		if (kind == Kind::None) {
@@ -799,10 +880,14 @@ bool parse_mis_names(const std::string &text, MisNames &out, std::string &error)
 			} else if (section == "areatrig") {
 				int32_t id = 0;
 				if (!token_i32(line, 2, id, error)) return false;
-				if (id < 0 || id >= static_cast<int32_t>(kMisAreaSlots)) {
-					error = "MIS areatrig zone id out of range in line " + std::to_string(line.line_no);
-					return false;
+				if (id < 1 || id >= static_cast<int32_t>(kMisAreaSlots)) {
+					note(issues, line.line_no, "areatrig " + std::to_string(id) + " is no zone id of 1..99, the original editor's slots; its name skipped");
+					kind = Kind::Other;
+					continue;
 				}
+				if (area_seen[static_cast<size_t>(id)])
+					note(issues, line.line_no, "areatrig " + std::to_string(id) + " is a second section of its zone id; its description replaces the first's, as the original editor's slot");
+				area_seen[static_cast<size_t>(id)] = true;
 				kind = Kind::Area;
 				index = static_cast<size_t>(id);
 			} else if (section == "waypoint") {

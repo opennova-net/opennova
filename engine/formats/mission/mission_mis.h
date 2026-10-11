@@ -39,16 +39,35 @@ inline constexpr size_t kMisAreaSlots = 100;
 // The names the .mis gives a mission's records where the .bms has no room for them (ADR 0046 S24
 // "Names"): an event's `name` and an area trigger's and a waypoint path's `description`. An event by its
 // number (`begin event N`, its place among the events), an area by its zone id (`begin areatrig N`, the
-// original editor's slot, 1..99), a path by its record index (`begin waypoint N`). An empty name is none;
-// an index past a list is none. A group's description is its name in the .bms record (bms.h GroupRecord),
-// so it is not here. The writer writes at most kMisEventNameChars of an event's name and
-// kMisDescriptionChars of a description, and a value as mis_string carries it (a ';' as ',', a double
-// quote as ').
+// original editor's slot, 1..99; slot 0 is never one), a path by its record index (`begin waypoint N`). An
+// empty name is none; an index past a list is none. A group's description is its name in the .bms record
+// (bms.h GroupRecord), so it is not here. A name is one mis_name_allowed takes; the writer writes at most
+// kMisEventNameChars of an event's name and kMisDescriptionChars of a description, cut before a UTF-8
+// character the width would split.
 struct MisNames {
 	std::vector<std::string> events;
 	std::array<std::string, kMisAreaSlots> areas{};
 	std::array<std::string, bms::kWaypointRecordCount> paths{};
 };
+
+// Whether `name` is one the .mis carries as written in a slot of `width` bytes (kMisEventNameChars for an
+// event's name, kMisDescriptionChars for an area's or a path's description): no longer than `width` and no
+// character bms::mis_value_char refuses (a control character, a double quote, a ';'), the rule a group's and
+// a variable's name keep. A byte past 0x7F (UTF-8) is taken: both readers keep bytes as read. Refused:
+// false, `error` says why. The editor's name setters refuse what this refuses; nothing rewrites a name.
+inline bool mis_name_allowed(const std::string &name, size_t width, std::string &error) {
+	if (name.size() > width) {
+		error = "A name holds " + std::to_string(width) + " bytes at most (the original editor's dialog)";
+		return false;
+	}
+	for (char ch : name) {
+		if (!bms::mis_value_char(ch)) {
+			error = "A name takes no control character, double quote or ';', which the .mis cannot carry";
+			return false;
+		}
+	}
+	return true;
+}
 
 } // namespace opennova::mission
 
@@ -56,7 +75,7 @@ namespace opennova::mission::detail {
 
 bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
                     const std::vector<int32_t> *base_heights = nullptr, const MisNames *names = nullptr);
-bool parse_mis_names(const std::string &text, MisNames &out, std::string &error);
+bool parse_mis_names(const std::string &text, MisNames &out, std::string &error, std::vector<MisIssue> *issues);
 
 // `resolve_item_type` classifies each `begin item` record into its BMS pool by
 // items.def TYPE (mission.h MisItemTypeResolver); empty = all records land in
@@ -78,21 +97,30 @@ namespace opennova::mission {
 // the entity's own mis_extra_bheight. See docs/mission/mis-format-re.md
 // (D-MIS-4).
 // `names` (optional): the names written into the events' `name` and the area triggers' and the
-// waypoint paths' `description` lines (empty strings without it); a path with a description is written
-// even with no flags.
+// waypoint paths' `description` lines (empty strings without it); a path is written for a stop or a
+// description, whatever its flags, as the original editor writes it. Refused (false, `error` names the area)
+// when an area's zone id is outside 1..99 or two areas share one: the original's .mis has an area slot per
+// zone id 1..99 alone (D-MIS-12).
 inline bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
                            const std::vector<int32_t> *base_heights = nullptr, const MisNames *names = nullptr) {
 	return detail::write_mis_text(file, out, error, base_heights, names);
 }
-// The names a .mis text holds (MisNames), read beside parse_mis_text's records by the same indexes.
-inline bool parse_mis_names(const std::string &text, MisNames &out, std::string &error) {
-	return detail::parse_mis_names(text, out, error);
+// The names a .mis text holds (MisNames), read beside parse_mis_text's records by the same indexes. `issues`
+// (optional) receives the lines read otherwise than written: an areatrig number outside 1..99 (its name
+// skipped) and a second section of a zone id (its description replacing the first's, as the original's slot).
+inline bool parse_mis_names(const std::string &text, MisNames &out, std::string &error,
+                            std::vector<MisIssue> *issues = nullptr) {
+	return detail::parse_mis_names(text, out, error, issues);
 }
 // `resolve_item_type` classifies each `begin item` record into its BMS pool by
 // items.def TYPE (MisItemTypeResolver); pass {} when no items.def is loaded
 // (all records land in the item pool). `issues` (optional) receives the lines
 // read otherwise than written: a group's description that is no group name
-// (bms::set_group_name's rules) is skipped.
+// (bms::set_group_name's rules) is skipped; an areatrig number outside 1..99 makes
+// no area and a second section of a zone id goes to the first's area, as the
+// original's slot; a key the original editor's reader refuses in its section is
+// skipped (the original fails the load); a teleport_target, wav_list or wind
+// section, which the original reads and the .bms has no room for, is walked.
 inline bool parse_mis_text(const std::string &text, const MisItemTypeResolver &resolve_item_type,
                            bms::File &out, std::string &error, std::vector<MisIssue> *issues = nullptr) {
 	return detail::parse_mis_text_to_bms(text, resolve_item_type, out, error, issues);

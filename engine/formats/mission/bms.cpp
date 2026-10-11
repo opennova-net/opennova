@@ -768,14 +768,17 @@ bool is_bms(const uint8_t* data, size_t size) {
 }
 
 namespace {
-// A character a group's name takes: printable, no double quote and no ';', which the .mis description
-// cannot carry: the stock reader's quote toggles wherever it stands and its ';' cuts the line, quoted or not
-// [orig: sub_10007AB0 @0x10007ab0 (the ';' cut @0x10007b25, the quote @0x10007b81), misldr.dll].
+// A character a group's name takes: printable ASCII (the .bms record's bytes) the .mis description carries.
 bool group_name_char(char ch) {
     const unsigned char c = static_cast<unsigned char>(ch);
-    return c >= 0x20 && c <= 0x7E && ch != '"' && ch != ';';
+    return c <= 0x7E && mis_value_char(ch);
 }
 } // namespace
+
+bool mis_value_char(char ch) {
+    const unsigned char c = static_cast<unsigned char>(ch);
+    return c >= 0x20 && c != 0x7F && ch != '"' && ch != ';';
+}
 
 bool group_name_readable(const GroupRecord& record) {
     size_t length = 0;
