@@ -329,9 +329,11 @@ bool find_best_vehicle_seat(
     int32_t best_weight = 65536000; // [orig: bestWeight sentinel @0x43520A]
     const auto consider = [&](const Entity &candidate, bool is_root) {
         // An unmodeled model pointer manifests as an empty seat vector in the
-        // portable world. Each root/child entry has its own dead gate.
+        // portable world. Each root/child entry has its own dead gate, and an
+        // entry with no ItemDef offers no seat (its seat table is the def's).
+        // [orig: Flags & 2 @0x4352c2..0x4352cd, the ItemDef @0x4352d3..0x4352d7]
         if (!candidate.alive || candidate.health <= 0 ||
-            (candidate.flags & kEntityFlagDead) != 0)
+            (candidate.flags & kEntityFlagDead) != 0 || !candidate.has_item_def)
             return;
         for (int i = 0; i < static_cast<int>(candidate.seats.size()); ++i) {
             const Seat &seat = candidate.seats[static_cast<size_t>(i)];
@@ -428,7 +430,12 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     World &world = world_;
     Entity *occ = world.registry.get(player);
     Entity *veh = world.registry.get(selection.vehicle);
-    if (occ == nullptr || veh == nullptr) return false;
+    // The process refuses every seat kind of a carrier with no ItemDef, and a
+    // dead carrier or requester, before anything: the enemy and seat tests,
+    // the old seat's detach and the attach.
+    // [orig: Entity_ProcessVehicleAttach @0x435ae5..0x435b01 (the ItemDef
+    //  @0x435aed..0x435af1), ahead of the detach @0x435bce]
+    if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
     if (occ->health <= 0 || !occ->alive ||
         (occ->flags & kEntityFlagDead) != 0)
         return false;
@@ -461,9 +468,8 @@ bool VehicleSystem::process_attach(EntityHandle player, EntityHandle vehicle, ui
     Entity *veh = world.registry.get(vehicle);
     // 1. Resolve + dead gates [orig: @0x435b01 — null vehicle/itemDef/player or either
     //    Flags & 2 reject]. Our authoritative dead store is health/alive; the flags bit-1
-    //    movement/spawn gate also rejects (a mid-spawn player cannot mount). The itemDef
-    //    leg is not tested: a def-less carrier still seats (D-NET-422).
-    if (occ == nullptr || veh == nullptr) return false;
+    //    movement/spawn gate also rejects (a mid-spawn player cannot mount).
+    if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
     if (occ->health <= 0 || !occ->alive || (occ->flags & 2u) != 0) return false;
     if (veh->health <= 0 || !veh->alive || (veh->flags & 2u) != 0) return false;
 
@@ -501,7 +507,10 @@ bool VehicleSystem::apply_confirmed_mount(
     if (occ == nullptr) return false;
     if (!vehicle.valid() || bone == 0) return detach(player);
     Entity *veh = world.registry.get(vehicle);
-    if (veh == nullptr || !occ->alive || occ->health <= 0 ||
+    // The process's gates, ahead of the previous holder's and the body's own
+    // detach [orig: Entity_ProcessVehicleAttach @0x435ae5..0x435b01, the ItemDef
+    // @0x435aed..0x435af1].
+    if (veh == nullptr || !veh->has_item_def || !occ->alive || occ->health <= 0 ||
         (occ->flags & kEntityFlagDead) != 0 || !veh->alive || veh->health <= 0 ||
         (veh->flags & kEntityFlagDead) != 0) return false;
 
@@ -647,6 +656,9 @@ bool scan_entity_rejected(const World &world, const Entity &cand, const Entity &
 	if (cand.handle == player.handle) return true;
     if (!cand.alive || cand.health <= 0) return true; // [orig: Flags & 2 skip]
     if ((cand.flags & 2u) != 0) return true;
+	// A candidate with no ItemDef offers nothing, seat or armory point [orig: the
+	// scan @0x435e35..0x435e3a, the labels @0x5a335a..0x5a335f].
+	if (!cand.has_item_def) return true;
 	if (hostile_mounts.blocks(cand.handle))
 		return true;
 	const Entity *ground = world.registry.get(cand.ground_target);

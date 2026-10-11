@@ -1081,6 +1081,7 @@ bool run_local_replica_turret_channel() {
  if (!expect(local != nullptr,"local turret fixture has L")) return false;
  w::Entity gun;
  gun.kind = w::EntityKind::Item;
+ gun.has_item_def = true; // seats need the def (D-NET-422)
  gun.item_id = 123;
  gun.spawn_origin = 1u << 24;
  gun.yaw = 90;

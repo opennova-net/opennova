@@ -314,6 +314,7 @@ void test_bike_crash_test_and_eject() {
 	World &w = *w_heap;
 	Entity bike;
 	bike.kind = EntityKind::Item;
+	bike.has_item_def = true; // seats need the def (D-NET-422)
 	bike.item_id = 1300;
 	bike.position = {100.0f, 200.0f, 10.0f};
 	bike.health = 500;

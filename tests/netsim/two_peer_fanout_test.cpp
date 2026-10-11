@@ -1936,6 +1936,7 @@ bool run_vehicle_drive_authority() {
 	{
 		w::Entity veh;
 		veh.kind = w::EntityKind::Item;
+		veh.has_item_def = true; // seats need the def (D-NET-422)
 		veh.item_id = 0x1004;
 		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
 		veh.item_attrib = w::kItemAttribPlayerControl;

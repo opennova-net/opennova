@@ -88,6 +88,7 @@ bool mount_on_test_emplacement(
 		world::EntityHandle &emplacement_out) {
 	world::Entity emplacement;
 	emplacement.kind = world::EntityKind::Item;
+	emplacement.has_item_def = true; // seats need the def (D-NET-422)
 	world::Seat gunner;
 	gunner.type = world::SeatType::Gunner;
 	gunner.bone_index = 6;

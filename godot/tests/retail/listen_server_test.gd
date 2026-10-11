@@ -94,11 +94,13 @@ func test_mounted_local_overlay_matches_packed_present_for_valid_zero_and_six() 
 		model_file.store_buffer(FileAccess.get_file_as_bytes(
 				"res://../fixtures/threedi/synth/mount.3di"))
 		model_file.close()
-		_install_native_seats(sim, dir, ItemDbFixture.fixture_text(self).replace(
+		var items := _install_native_seats(sim, dir, ItemDbFixture.fixture_text(self).replace(
 				"id 101294",
 				"id 101294\n  graphic mount\n  phrase_set %d" % config_value),
 				PackedInt32Array([1294]))
 		assert_true(sim.load_from_mission_data(md))
+		# The gun offers its seat only with its items.def row bound (D-NET-422).
+		sim.resolve_item_traits(items)
 		assert_true(sim.has_local_player())
 		# NAPI authority bypasses the offline player's null-EquippedSlot reject
 		# [orig: Entity_AttachToUseGunSlot @0x546c07], but this fixture has not
