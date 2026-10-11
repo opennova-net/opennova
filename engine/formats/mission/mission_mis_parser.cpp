@@ -356,7 +356,8 @@ bool parse_mis_waypoint(const std::vector<MisLine> &lines, size_t &pos, bms::Fil
 	return false;
 }
 
-bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
+bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error,
+                     std::vector<MisIssue> *issues) {
 	int32_t index = 0;
 	if (!token_i32(lines[pos], 2, index, error)) return false;
 	if (index < 0 || index >= bms::kGroupRecordCount) {
@@ -373,8 +374,12 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 		}
 		int32_t value = 0;
 		if (t.size() >= 2 && t[0] == "description") {
-			// The group's name, its first 20 characters (bms.h GroupRecord).
-			copy_fixed_field(record.name, sizeof(record.name), t[1]);
+			// The group's name (bms.h GroupRecord), by set_group_name's rules; a description that is no name
+			// is skipped, never stored as bytes.
+			std::string why;
+			if (!bms::set_group_name(record, t[1], why) && issues != nullptr)
+				issues->push_back({line.line_no, "group " + std::to_string(index) + "'s description \"" + t[1] +
+				                                         "\" is no group name: " + why});
 		} else if (t.size() >= 2 && t[0] == "flags") {
 			if (!token_i32(line, 1, value, error)) return false;
 			record.flags = value;
@@ -724,7 +729,7 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 } // namespace
 
 bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &resolve_item_type,
-                           bms::File &out, std::string &error) {
+                           bms::File &out, std::string &error, std::vector<MisIssue> *issues) {
 	initialize_mis_file(out);
 	const std::vector<MisLine> lines = tokenize_mis_text(text);
 	for (size_t pos = 0; pos < lines.size();) {
@@ -745,7 +750,7 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		} else if (section == "waypoint") {
 			if (!parse_mis_waypoint(lines, pos, out, error)) return false;
 		} else if (section == "group") {
-			if (!parse_mis_group(lines, pos, out, error)) return false;
+			if (!parse_mis_group(lines, pos, out, error, issues)) return false;
 		} else if (section == "layer") {
 			if (!parse_mis_layer(lines, pos, out, error)) return false;
 		} else if (section == "event") {

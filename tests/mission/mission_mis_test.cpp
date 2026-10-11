@@ -303,11 +303,22 @@ int main() {
 		std::string named_again;
 		TEST_EXPECT(write_mis_text(named_back, named_again, error));
 		TEST_EXPECT(named_again == named_text);
-		// A longer description (hand-written) keeps its first 20 characters.
+		// A description that is no group name (past 20 characters, a control character) is skipped with an issue,
+		// never stored as bytes; the group's flags still read.
 		bms::File long_name;
-		TEST_EXPECT(parse_mis_text("begin group 2\r\n  description \"The northern ridge sentries\"\r\nend group\r\n",
-		                           {}, long_name, error));
-		TEST_EXPECT(bms::group_name(long_name.group_records[2]) == "The northern ridge s");
+		std::vector<MisIssue> issues;
+		TEST_EXPECT(parse_mis_text("begin group 2\r\n  description \"The northern ridge sentries\"\r\n  flags 1\r\n"
+		                           "end group\r\nbegin group 3\r\n  description \"tab\there\"\r\nend group\r\n",
+		                           {}, long_name, error, &issues));
+		TEST_EXPECT(bms::group_name(long_name.group_records[2]).empty() && long_name.group_records[2].flags == 1);
+		TEST_EXPECT(bms::group_name_readable(long_name.group_records[2]) && bms::group_name_readable(long_name.group_records[3]));
+		TEST_EXPECT(issues.size() == 2 && issues[0].line == 2 && issues[1].line == 6 &&
+		            issues[0].message.find("group 2") != std::string::npos &&
+		            issues[0].message.find("20 characters") != std::string::npos);
+		// The same text read with no issues list still reads.
+		bms::File quiet;
+		TEST_EXPECT(parse_mis_text("begin group 2\r\n  description \"The northern ridge sentries\"\r\nend group\r\n", {}, quiet,
+		                           error));
 	}
 
 	return 0;

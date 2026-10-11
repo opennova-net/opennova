@@ -649,6 +649,30 @@ int main() {
 		std::vector<uint8_t> group_rewritten;
 		TEST_EXPECT(opennova::bms::write(grouped, group_rewritten, group_error));
 		TEST_EXPECT(group_rewritten == group_bytes); // the name's bytes go back where they were read
+		TEST_EXPECT(opennova::bms::group_name_readable(grouped.group_records[3]) &&
+		            opennova::bms::group_name_readable(grouped.group_records[2]));
+
+		// Bytes another tool left (a byte after the NUL, a control byte, a quote) load as the game loads them
+		// and write back as read, but are no name: group_name() reads none, so the .mis claims none.
+		std::vector<uint8_t> foreign = original;
+		const uint8_t after_nul[] = {'A', 0, 0, 0};
+		std::memcpy(foreign.data() + named + 4, after_nul, 4);
+		foreign[named + 16] = 'X';
+		foreign[named + 32 + 4] = 0x07;                // group 4: a control byte
+		foreign[named + 64 + 4] = '"';                 // group 5: a quote
+		foreign[named + 96 + 4] = static_cast<uint8_t>(0xE9); // group 6: a high byte
+		opennova::bms::File foreign_file;
+		TEST_EXPECT(opennova::bms::parse(foreign.data(), foreign.size(), foreign_file, group_error));
+		for (size_t g = 3; g <= 6; ++g) {
+			TEST_EXPECT(!opennova::bms::group_name_readable(foreign_file.group_records[g]));
+			TEST_EXPECT(opennova::bms::group_name(foreign_file.group_records[g]).empty());
+		}
+		std::vector<uint8_t> foreign_rewritten;
+		TEST_EXPECT(opennova::bms::write(foreign_file, foreign_rewritten, group_error));
+		TEST_EXPECT(foreign_rewritten == foreign);
+		std::string foreign_text;
+		TEST_EXPECT(opennova::mission::write_mis_text(foreign_file, foreign_text, group_error));
+		TEST_EXPECT(foreign_text.find("begin group 3\r\n") == std::string::npos); // no flags, no value, no name
 
 		// A name set through the record lands in the same bytes, NUL-padded; equal() sees it.
 		opennova::bms::File renamed;

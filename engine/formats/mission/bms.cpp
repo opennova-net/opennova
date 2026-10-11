@@ -767,7 +767,27 @@ bool is_bms(const uint8_t* data, size_t size) {
     return data[0] == 'B' && data[1] == 'M' && data[2] == 'S';
 }
 
+namespace {
+// A character a group's name takes: printable, and no double quote (the .mis description is quoted).
+bool group_name_char(char ch) {
+    const unsigned char c = static_cast<unsigned char>(ch);
+    return c >= 0x20 && c <= 0x7E && ch != '"';
+}
+} // namespace
+
+bool group_name_readable(const GroupRecord& record) {
+    size_t length = 0;
+    while (length < kGroupNameSize && record.name[length] != 0) {
+        if (!group_name_char(record.name[length])) return false;
+        ++length;
+    }
+    for (size_t i = length; i < kGroupNameSize; ++i)
+        if (record.name[i] != 0) return false;
+    return true;
+}
+
 std::string group_name(const GroupRecord& record) {
+    if (!group_name_readable(record)) return std::string();
     size_t length = 0;
     while (length < kGroupNameSize && record.name[length] != 0) ++length;
     return std::string(record.name, length);
@@ -779,8 +799,7 @@ bool set_group_name(GroupRecord& record, const std::string& name, std::string& e
         return false;
     }
     for (char ch : name) {
-        const unsigned char c = static_cast<unsigned char>(ch);
-        if (c < 0x20 || c > 0x7E || ch == '"') {
+        if (!group_name_char(ch)) {
             error = "A group's name takes printable characters other than a double quote";
             return false;
         }

@@ -11,6 +11,16 @@
 #include <string>
 #include <vector>
 
+namespace opennova::mission {
+
+// A line of a .mis the reader takes otherwise than it reads: its line (1-based) and why, in words.
+struct MisIssue {
+	size_t line = 0;
+	std::string message;
+};
+
+} // namespace opennova::mission
+
 namespace opennova::mission::detail {
 
 bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
@@ -20,7 +30,7 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
 // items.def TYPE (mission.h MisItemTypeResolver); empty = all records land in
 // the generic item pool.
 bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &resolve_item_type,
-                           bms::File &out, std::string &error);
+                           bms::File &out, std::string &error, std::vector<MisIssue> *issues = nullptr);
 
 } // namespace opennova::mission::detail
 
@@ -41,10 +51,12 @@ inline bool write_mis_text(const bms::File &file, std::string &out, std::string 
 }
 // `resolve_item_type` classifies each `begin item` record into its BMS pool by
 // items.def TYPE (MisItemTypeResolver); pass {} when no items.def is loaded
-// (all records land in the item pool).
+// (all records land in the item pool). `issues` (optional) receives the lines
+// read otherwise than written: a group's description that is no group name
+// (bms::set_group_name's rules) is skipped.
 inline bool parse_mis_text(const std::string &text, const MisItemTypeResolver &resolve_item_type,
-                           bms::File &out, std::string &error) {
-	return detail::parse_mis_text_to_bms(text, resolve_item_type, out, error);
+                           bms::File &out, std::string &error, std::vector<MisIssue> *issues = nullptr) {
+	return detail::parse_mis_text_to_bms(text, resolve_item_type, out, error, issues);
 }
 
 } // namespace opennova::mission
