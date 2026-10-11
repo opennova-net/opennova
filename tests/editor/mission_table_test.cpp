@@ -385,9 +385,9 @@ int test_complete() {
 	if (coverage(MissionKind::Trigger, 0, bytes({{28, 4}}), "trigger") != 0) return 1;
 	if (coverage(MissionKind::Action, 0, bytes({{0, 4}, {28, 4}}), "action") != 0) return 1;
 	if (coverage(MissionKind::Area, 0, {}, "area trigger", with_area) != 0) return 1;
-	// A group: the words the writer writes as constants (@4 zero, @12 ten, @16..31 zero) and its flags
-	// word past bits 0 and 1.
-	if (coverage(MissionKind::Group, 0, bytes({{1, 3}, {4, 4}, {12, 20}}), "group") != 0) return 1;
+	// A group: the word the writer writes as a constant (@12 ten) and its flags word past bits 0 and 1; the bytes
+	// the loader drops (@4..7, @16..31) are its name.
+	if (coverage(MissionKind::Group, 0, bytes({{1, 3}, {12, 4}}), "group") != 0) return 1;
 	if (coverage(MissionKind::Layer, 0, {}, "layer") != 0) return 1;
 	// A bounding box: every word a field's, the reserved word a Mission box's name's last four characters.
 	if (coverage(MissionKind::BoundingBox, 0, {}, "bounding box", with_box) != 0) return 1;
