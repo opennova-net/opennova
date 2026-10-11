@@ -6,6 +6,7 @@
 // loader records (a dialog line's hold reads them).
 #include <formats/lwf/wav_pcm.h>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -494,13 +495,13 @@ int main() {
 		if (!expect(opennova::lwf::wav_decode_pcm16_lenient(aud.data(), aud.size(), lenient, error) &&
 				lenient.sample_rate == 86, "the lenient decode plays AUD1 pitch 0 at the least step")) return 1;
 		// Whatever the voice's play factor: the step composes it with the wave's pitch, so a pitch
-		// of 0 keeps the least step and its player takes the scale 1 over any composed one; a wave
-		// of any other pitch keeps the composed scale (AudioChannel_ComputeMixCoefficients
-		// @ 0x7bd603, @ 0x7bd619..0x7bd61d).
-		if (!expect(opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, 2.0) == 1.0 &&
-				opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, 0.5) == 1.0 &&
-				opennova::lwf::wave_pitch_scale(0x8000, 2.0) == 2.0 &&
-				opennova::lwf::wave_pitch_scale(1, 0.5) == 0.5,
+		// of 0 keeps the least step, its player taking 86.13 / 86 over the stream's whole 86 whatever
+		// the composed scale; a wave of any other pitch keeps the composed scale
+		// (AudioChannel_ComputeMixCoefficients @ 0x7bd603, @ 0x7bd619..0x7bd61d).
+		if (!expect(opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, 86, 86, 2.0) == 44100.0 / 512.0 / 86.0 &&
+				opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, 86, 86, 0.5) == 44100.0 / 512.0 / 86.0 &&
+				opennova::lwf::wave_pitch_scale(0x8000, 22050, 22050, 2.0) == 2.0 &&
+				opennova::lwf::wave_pitch_scale(0x8000, 22050, 22050, 0.5) == 0.5,
 				"a pitch-0 wave's player keeps the least step over any voice pitch")) return 1;
 	}
 	// A RIFF wave of rate 0, whose ratio ((0 << 16) + 22050) / 44100 is 0, plays at the
@@ -514,6 +515,102 @@ int main() {
 		if (!expect(wav_decode_pcm16(rateless.data(), rateless.size(), out, error) &&
 				out.loader_pitch_q16 == 0 && out.sample_rate == 86 && out.pcm16.size() == 4,
 				"RIFF rate 0 plays at the least step")) return 1;
+	}
+	// A rate past INT32_MAX (D-SND-52). An AUD1 pitch is taken as it is, its rate the inverse
+	// (pitch * 44100 + 0x8000) >> 16, past INT32_MAX from 0xBE37C63A; the shell's player boxes its
+	// whole mix rate at INT32_MAX and takes the rest as scale, wave_pitch_scale's rate over the box
+	// (AudioChannel_ComputeMixCoefficients @ 0x7bd5f6..0x7bd60e steps such a pitch at about
+	// (pitch + 64) >> 7, the rate within the step's quantum, D-SND-50).
+	{
+		std::vector<uint8_t> aud;
+		push_tag(aud, "AUD1"); push_u32(aud, 2); push_u32(aud, 0xFFFFFFFFu); push_u32(aud, 2);
+		push_u16(aud, 0x1234); push_u16(aud, 0x4321);
+		WavPcm out;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) &&
+				out.loader_pitch_q16 == 0xFFFFFFFFu && out.sample_rate == 2890137599u,
+				"AUD1 pitch 0xFFFFFFFF is its rate, past INT32_MAX")) return 1;
+		const uint32_t box = 0x7FFFFFFFu;
+		const double scale = opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, out.sample_rate, box, 1.0);
+		if (!expect(scale > 1.0 && std::fabs(scale * box - 2890137599.0) < 1.0 &&
+				opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, out.sample_rate, box, 0.5) == scale * 0.5,
+				"a rate past INT32_MAX plays at its own rate over the box, the voice pitch on it")) return 1;
+		if (!expect(opennova::lwf::wave_pitch_scale(0x8000, 22050, 22050, 2.0) == 2.0,
+				"a rate inside the box keeps the voice pitch")) return 1;
+		aud[8] = 0x39; aud[9] = 0xC6; aud[10] = 0x37; aud[11] = 0xBE;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.sample_rate == 0x7FFFFFFFu,
+				"AUD1 pitch 0xBE37C639 is INT32_MAX")) return 1;
+		aud[8] = 0x3A;
+		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.sample_rate == 0x80000000u,
+				"AUD1 pitch 0xBE37C63A passes INT32_MAX")) return 1;
+	}
+	// The step a player's scale follows (D-SND-53): the mixer composes the voice's play factor (Q16)
+	// with the wave's pitch, (((play * factor) >> 16) * pitch + 0x400000) >> 23 at the 44100 Hz
+	// device's factor 0x10000, and forces a step of 0 to 1, the least step, 44100 / 512 = 86.13 Hz
+	// (AudioChannel_ComputeMixCoefficients @ 0x7bd5f6..0x7bd60e, @ 0x7bd619..0x7bd61d): a play factor
+	// of 0 whatever the wave and any product under half a step; ours takes a scale below 0 as 0 too.
+	// Any other step keeps the play factor, its 1/512 quantum unported (D-SND-50).
+	{
+		using opennova::lwf::wave_pitch_scale;
+		const double least = 44100.0 / 512.0;
+		if (!expect(wave_pitch_scale(0x8000, 22050, 22050, 0.0) == least / 22050.0 &&
+				wave_pitch_scale(0x10000, 44100, 44100, 0.0) == least / 44100.0 &&
+				wave_pitch_scale(0x8000, 22050, 22050, -1.0) == least / 22050.0,
+				"a play factor of 0 plays at the least step whatever the wave")) return 1;
+		// At pitch 0x10000 the step is (play + 64) >> 7: a play word of 63 steps at 0, forced to the
+		// least step.
+		if (!expect(wave_pitch_scale(0x10000, 44100, 44100, 63.0 / 65536.0) == least / 44100.0,
+				"a product under half a step plays at the least step")) return 1;
+		// A play word of 64 steps at 1 in retail too, the least step's 86.13 Hz; ours keeps its own
+		// scale, 43 Hz: this pins D-SND-50's unported quantum, not retail.
+		if (!expect(wave_pitch_scale(0x10000, 44100, 44100, 64.0 / 65536.0) == 64.0 / 65536.0,
+				"D-SND-50: a step of 1 plays at the factor's own scale")) return 1;
+		// A play factor of 0.01 (655) at pitch 0x8000 steps at 3, its own scale, not 1.
+		if (!expect(wave_pitch_scale(0x8000, 22050, 22050, 655.0 / 65536.0) == 655.0 / 65536.0,
+				"a small play factor keeps its own scale")) return 1;
+		// A wave of pitch 62, a RIFF rate of 42 Hz, steps at 0 at a play factor of 1.
+		std::vector<uint8_t> data;
+		push_u16(data, 0x1234);
+		const std::vector<uint8_t> slow = make_wav(1, 1, 42, 2, 16, data);
+		WavPcm out;
+		if (!expect(wav_decode_pcm16(slow.data(), slow.size(), out, error) && out.loader_pitch_q16 == 62 &&
+				wave_pitch_scale(out.loader_pitch_q16, out.sample_rate, out.sample_rate, 1.0) == least / 42.0,
+				"a wave whose step is 0 at a play factor of 1 plays at the least step")) return 1;
+		// A boxed rate at a play factor of 0: the least step over the box.
+		if (!expect(wave_pitch_scale(0xFFFFFFFFu, 2890137599u, 0x7FFFFFFFu, 0.0) == least / 2147483647.0,
+				"a boxed rate's play factor of 0 plays at the least step")) return 1;
+	}
+	// A RIFF rate is the loader's to divide, ((rate << 16) + 22050) / 44100, edx:eax by 44100 after
+	// every other test [orig: Audio_LoadWavFileFromArchive @ 0x76662b, @ 0x766730, @ 0x7667dc]: up to
+	// 0xAC43FFFF the quotient fits 32 bits (0xFFFFFFFF there) and the wave plays at its rate (16-bit
+	// waves at 0x80000000 and 0xAC43FFFF); from 0xAC440000 (44100 << 16) the division faults, which
+	// ours refuses (D-SND-54): 0xAC440000 at 16, 8 and 4 bits, 0xFFFFFFFF at 8.
+	{
+		std::vector<uint8_t> data;
+		push_u16(data, 0x1234);
+		const auto walk_of = [](const std::vector<uint8_t> &wav) {
+			return opennova::lwf::wave_loader_walk(wav.data(), wav.size());
+		};
+		WavPcm out;
+		const std::vector<uint8_t> past = make_wav(1, 1, 0x80000000u, 2, 16, data);
+		if (!expect(wav_decode_pcm16(past.data(), past.size(), out, error) && out.sample_rate == 0x80000000u &&
+				out.loader_pitch_q16 == 0xBE37C63Bu, "RIFF rate 0x80000000 plays at its rate")) return 1;
+		const std::vector<uint8_t> most = make_wav(1, 1, 0xAC43FFFFu, 2, 16, data);
+		if (!expect(wav_decode_pcm16(most.data(), most.size(), out, error) && out.sample_rate == 0xAC43FFFFu &&
+				out.loader_pitch_q16 == 0xFFFFFFFFu, "RIFF rate 0xAC43FFFF's ratio is 0xFFFFFFFF")) return 1;
+		const std::vector<uint8_t> faults[] = {
+			make_wav(1, 1, 0xAC440000u, 2, 16, data),
+			make_wav(1, 1, 0xAC440000u, 1, 8, {128, 129}),
+			make_wav(1, 1, 0xFFFFFFFFu, 1, 8, {128, 129}),
+			with_fact(make_wav(0x11, 1, 0xAC440000u, 8, 4, std::vector<uint8_t>(8, 0)), 9),
+		};
+		for (const std::vector<uint8_t> &wav : faults) {
+			if (!expect(!wav_decode_pcm16(wav.data(), wav.size(), out, error) && out.pcm16.empty() &&
+					!error.empty() && walk_of(wav).refusal == opennova::lwf::WaveRefusal::RatioFaults,
+					"a RIFF rate from 0xAC440000 faults the loader's ratio division")) return 1;
+		}
+		// The refusal is the walk's last: a stereo wave at that rate is refused for its channels.
+		if (!expect(walk_of(make_wav(1, 2, 0xAC440000u, 4, 16, data)).refusal ==
+				opennova::lwf::WaveRefusal::Channels, "the channel test precedes the ratio")) return 1;
 	}
 	// The width byte: 2 is 16-bit, any other 8-bit [orig: sub_7BD671 @ 0x7bd692].
 	for (const uint8_t width : {uint8_t(0), uint8_t(3), uint8_t(0xFF)}) {

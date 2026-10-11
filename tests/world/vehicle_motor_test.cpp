@@ -122,6 +122,8 @@ struct Rig {
         veh.kind = EntityKind::Item;
         veh.item_id = 1291; // wire type of the dune buggy (items.def id - 100000)
         veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
+        // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+        veh.item_attrib = kItemAttribPlayerControl;
         veh.position = {100.0f, 200.0f, 10.0f};
         veh.yaw = 0;
         veh.health = 3000;
@@ -441,38 +443,39 @@ void test_stale_driver_publishes_control_stop() {
     CHECK(r.w.out.effects.entries().size() == 1); // cleared once, never repeated
 }
 
-// The +368 claimant protocol: the FIRST control occupant claims; losing THE claimant
-// stops the engine effect even while a second, valid Controller/Driver occupant remains
-// — the survivor does not inherit the claim (retail re-arms only on a fresh attach).
-// [orig: Entity_AttachToVehicleSlot @0x4946d0 empty-or-same claim; Entity_DetachFromVehicle
-// @0x4356e9 claimant-only stop leg]
-void test_stale_claimant_stops_despite_second_controller() {
+// The +368 claimant protocol: the FIRST control occupant claims, and a second
+// control seat refuses while that claim stands, seating nothing and publishing
+// nothing (D-NET-398). Losing THE claimant (a stale handle the mover validates)
+// stops the engine effect once; the claim then re-arms only on a fresh attach.
+// [orig: Entity_AttachToVehicleSlot @0x4946d0 empty-or-same claim, the drvrx
+// refusal @0x4948c5; Entity_UpdateTankVehiclePhysics @0x489484..0x4894BE]
+void test_second_control_seat_waits_for_the_claim() {
     Rig r;
     const VehicleTraits t = buggy_traits();
     const EntityHandle second = add_second_control_occupant(r);
     r.mount();
-    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
-    CHECK(r.w.out.effects.entries().size() == 1); // one started for the first claim only
+    CHECK(r.w.out.effects.entries().size() == 1); // the first claim's start
     r.w.out.effects.clear();
+    CHECK(!r.w.vehicles.process_attach(second, r.veh_h, 2));
+    CHECK(!r.w.registry.get(second)->mounted);
+    CHECK(!r.veh().seats[1].occupant.valid());
+    CHECK(r.veh().primary_occupant == r.drv_h);
+    CHECK(r.w.out.effects.entries().empty());
 
     r.w.registry.despawn(r.drv_h); // the claimant goes away
     r.tick(1, t);
     CHECK(!r.veh().seats[0].occupant.valid());
-    CHECK(r.veh().seats[1].occupant == second);
     CHECK(r.w.out.effects.entries().size() == 1);
     if (r.w.out.effects.entries().size() == 1)
         CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_stopped");
     CHECK(!r.veh().primary_occupant.valid());
-
-    // The surviving second controller never re-claims in place...
     r.w.out.effects.clear();
     r.tick(1, t);
-    CHECK(r.w.out.effects.entries().empty());
+    CHECK(r.w.out.effects.entries().empty()); // the stop never repeats
 
-    // ...but a fresh attach does [orig: the +368 claim runs at attach time only].
-    CHECK(r.w.vehicles.detach(second));
-    r.w.out.effects.clear();
+    // A fresh attach claims [orig: the +368 claim runs at attach time only].
     CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
+    CHECK(r.veh().primary_occupant == second);
     CHECK(r.w.out.effects.entries().size() == 1);
     if (r.w.out.effects.entries().size() == 1) {
         CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_started");
@@ -480,26 +483,11 @@ void test_stale_claimant_stops_despite_second_controller() {
     }
 }
 
-// A non-claimant control occupant leaving publishes nothing; only the claimant's
-// departure is the stop edge.
-void test_second_controller_departure_is_silent() {
-    Rig r;
-    const VehicleTraits t = buggy_traits();
-    const EntityHandle second = add_second_control_occupant(r);
-    r.mount();
-    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
-    r.w.out.effects.clear();
-
-    CHECK(r.w.vehicles.detach(second));
-    r.tick(1, t);
-    CHECK(r.w.out.effects.entries().empty());
-    CHECK(r.veh().primary_occupant == r.drv_h);
-}
-
 // A gun user on an EMPTY vehicle claims +368 and starts the engine effect; the pilot
-// arriving later does not re-claim, so the GUNNER leaving is the stop edge even while
-// the pilot keeps flying. [orig: the UseGun empty-only claim @0x494944..0x49495e; the
-// claimant-only stop leg @0x4356e9]
+// arriving later is refused while the gunner holds the claim (D-NET-398), so the
+// GUNNER leaving is the stop edge, and only then does the pilot board and claim.
+// [orig: the UseGun claim Entity_AttachToUseGunSlot @0x546c6d; the ctrlx refusal
+// Entity_AttachToVehicleSlot @0x4947bf; the claimant-only stop leg @0x4356e9]
 void test_gunner_first_claims_and_stops() {
     Rig r;
     const VehicleTraits t = buggy_traits();
@@ -525,7 +513,9 @@ void test_gunner_first_claims_and_stops() {
         CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_started");
     r.w.out.effects.clear();
 
-    r.mount(); // the driver arrives second: no re-claim, no event
+    // The driver arrives second: refused, unseated, no event.
+    CHECK(!r.w.vehicles.process_attach(r.drv_h, r.veh_h, 1));
+    CHECK(!r.drv().mounted && !r.veh().seats[0].occupant.valid());
     CHECK(r.veh().primary_occupant == gunner);
     CHECK(r.w.out.effects.entries().empty());
 
@@ -536,29 +526,9 @@ void test_gunner_first_claims_and_stops() {
         CHECK(r.w.out.effects.entries()[0].d == r.veh_h.packed);
     }
     CHECK(!r.veh().primary_occupant.valid());
-    CHECK(r.veh().seats[0].occupant == r.drv_h); // the driver still flies
-}
-
-// Several control slots can go stale in one pass; the claimant edge still publishes
-// exactly one stop.
-void test_multiple_stale_controls_publish_one_stop() {
-    Rig r;
-    const VehicleTraits t = buggy_traits();
-    const EntityHandle second = add_second_control_occupant(r);
-    r.mount();
-    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
-    r.w.out.effects.clear();
-
-    r.w.registry.despawn(r.drv_h);
-    r.w.registry.despawn(second);
-    r.tick(1, t);
-    CHECK(!r.veh().seats[0].occupant.valid());
-    CHECK(!r.veh().seats[1].occupant.valid());
-    CHECK(r.w.out.effects.entries().size() == 1);
-    if (r.w.out.effects.entries().size() == 1)
-        CHECK(r.w.out.effects.entries()[0].kind == "vehicle_control_stopped");
-    r.tick(1, t);
-    CHECK(r.w.out.effects.entries().size() == 1);
+    r.mount(); // now the driver boards and claims
+    CHECK(r.veh().primary_occupant == r.drv_h);
+    CHECK(r.w.out.effects.entries().size() == 2);
 }
 
 // A dead vehicle stops responding to the driver [orig: the wreck/dead gates
@@ -865,21 +835,19 @@ void test_npc_claimant_registers_stationary_idle_sound() {
     }
 }
 
-// +368 is the engine-running claimant. A valid second Controller/Driver does not
-// inherit it when the claimant leaves, so the surviving seat occupant must not keep
-// a vehicle loop alive until a fresh attach claims the vehicle.
-// [orig: Entity_DetachFromVehicle @0x4356e9 claimant-only stop/clear leg]
+// +368 is the engine-running claimant, not the control seat's occupant: a seated
+// controller without the claim keeps no vehicle loop alive. An attach no longer
+// builds that state (a control seat claims or refuses, D-NET-398), so the claim
+// is cleared by hand. [orig: Entity_DetachFromVehicle @0x4356e9 claimant-only
+// stop/clear leg; Entity_AttachToVehicleSlot @0x4947b3..0x4947d2]
 void test_controller_without_claimant_is_silent() {
     Rig r;
     VehicleTraits t = buggy_traits();
     t.sound_profile = "SP_Transport";
     load_transport_sound_profile(r.w);
-    const EntityHandle second = add_second_control_occupant(r);
     r.mount();
-    CHECK(r.w.vehicles.process_attach(second, r.veh_h, 2));
-    CHECK(r.w.vehicles.detach(r.drv_h));
-    CHECK(!r.veh().primary_occupant.valid());
-    CHECK(r.veh().seats[1].occupant == second);
+    r.veh().primary_occupant = EntityHandle{};
+    CHECK(r.veh().seats[0].occupant == r.drv_h);
 
     r.w.out.sound_emitters.clear();
     r.w.vehicles.tick_motor(r.veh(), t);
@@ -2842,10 +2810,8 @@ int main() {
 	test_ground_crash_and_settle_hold_yaw_rate();
 	test_no_driver_coasts();
 	test_stale_driver_publishes_control_stop();
-    test_stale_claimant_stops_despite_second_controller();
-    test_second_controller_departure_is_silent();
+    test_second_control_seat_waits_for_the_claim();
     test_gunner_first_claims_and_stops();
-    test_multiple_stale_controls_publish_one_stop();
     test_dead_vehicle_holds();
     test_physics_selector_gate();
 	test_simple_motors_and_contact();

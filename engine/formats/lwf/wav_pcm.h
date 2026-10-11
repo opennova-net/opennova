@@ -16,7 +16,9 @@ namespace lwf {
 
 struct WavPcm {
 	std::vector<uint8_t> pcm16;  // interleaved signed 16-bit LE frames
-	uint32_t sample_rate = 0;  // the shell player's rate: a pitch of 0 the mixer's least step, 86
+	// The shell player's rate: a pitch of 0 the mixer's least step, 86; past INT32_MAX from an AUD1 pitch of
+	// 0xBE37C63A or a RIFF rate of 0x80000000, which the shell boxes (wave_pitch_scale).
+	uint32_t sample_rate = 0;
 	uint16_t channels = 0;  // 1 (2 only from wav_decode_pcm16_lenient)
 	// What the game's wave loader records for the wave, its AUD1 buffer's +4 and +8 (a dialog line's
 	// hold reads both, audio::dialog_clip_hold): the sample count, the data chunk's size as it says
@@ -44,6 +46,9 @@ enum class WaveRefusal : uint8_t {
 	Channels,       // more than one channel (@ 0x7665e3, @ 0x7666db, @ 0x76676a)
 	NoFact,         // 4-bit samples with no fact chunk (@ 0x766772)
 	NotImaAdpcm,    // 4-bit samples of another format than IMA ADPCM, 0x11 (@ 0x76677d)
+	RatioFaults,    // a rate from 0xAC440000, whose pitch ratio's division faults after every test above
+	                // (@ 0x76662b, @ 0x766730, @ 0x7667dc): an original bug, the game's loader faulting
+	                // where ours refuses the wave (D-SND-54)
 };
 
 // The game's wave loader's walk of a RIFF WAVE (BFC1 undone; an AUD1 buffer is the caller's) to its
@@ -95,12 +100,18 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 		std::string &r_error);
 
 // The pitch scale a player of a decoded wave takes over the one its voice composes (`play_scale`,
-// the play factor): the mixer's step composes the play factor with the wave's own pitch,
-// (((play * factor) >> 16) * pitch + 0x400000) >> 23, so a wave of pitch 0 steps at 0 whatever the
-// play factor and is forced to the least step [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd4b0,
-// the pitch's mul @ 0x7bd603, the force @ 0x7bd619..0x7bd61d]: the rate its decode already hands the
-// player, so 1. Any other wave keeps `play_scale`.
-double wave_pitch_scale(uint32_t loader_pitch_q16, double play_scale);
+// the play factor), on a stream whose mix rate is `mix_rate`, the wave's own rate `sample_rate`
+// (WavPcm's) as the shell's player holds it: the player's whole mix rate holds INT32_MAX, so a rate
+// past it is boxed there and its scale carries the rest, sample_rate / mix_rate. The mixer's step
+// composes the play factor with the wave's own pitch, (((play * factor) >> 16) * pitch + 0x400000)
+// >> 23, and forces a step of 0 to 1, the least step [orig: AudioChannel_ComputeMixCoefficients
+// @ 0x7bd4b0, the step @ 0x7bd5f6..0x7bd60e, the pitch's mul @ 0x7bd603, the force
+// @ 0x7bd619..0x7bd61d]: a step of 0 (a wave of pitch 0 whatever the play factor, a play factor of 0
+// whatever the wave, or any product of the two under half a step) plays at the least step's rate,
+// 44100 / 512 = 86.13 Hz exactly, over the stream's mix rate (a wave of pitch 0's stream holds the
+// whole 86, so 86.13 / 86). Any other step keeps `play_scale` over the wave's own rate (its 1/512
+// quantum, D-SND-50).
+double wave_pitch_scale(uint32_t loader_pitch_q16, uint32_t sample_rate, uint32_t mix_rate, double play_scale);
 
 // The plain RIFF/WAVE the game's wave loader reads (docs/audio/lwf-dbf-sound-re.md, "The wave
 // loader's rules" [orig: Audio_LoadWavFileFromArchive @ 0x766480]): RIFF..WAVE, one 16-byte `fmt `
@@ -108,7 +119,8 @@ double wave_pitch_scale(uint32_t loader_pitch_q16, double play_scale);
 // else, the data padded to an even size. `data` is the samples as stored, `bits` 8 (unsigned) or 16
 // (signed little-endian), at `rate` per second. False with `error` for no sample (the loader steps over
 // an empty data chunk and walks past the file's end, @ 0x76659b..0x7665a5), a 16-bit data of an odd size,
-// other bits, or a rate of 0.
+// other bits, a rate of 0, or a rate from 0xAC440000 (the loader's ratio division faults on it,
+// WaveRefusal::RatioFaults).
 bool wav_write_pcm_mono(const uint8_t *data, size_t size, uint32_t rate, uint16_t bits,
 		std::vector<uint8_t> &out, std::string &error);
 

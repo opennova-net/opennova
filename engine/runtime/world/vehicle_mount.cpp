@@ -55,13 +55,18 @@ void VehicleSystem::emit_control_stopped(uint16_t target_net_id, int32_t target_
 bool VehicleSystem::claim_primary_occupant(Entity &vehicle, EntityHandle occupant, SeatType seat) {
     World &world = world_;
     // [orig: Entity_AttachToVehicleSlot @0x4946d0] ctrlx(2)/drvrx(5) claim +368 when it is
-    // empty or already theirs (@0x4947b3..0x4947d2 / @0x4948b9..0x4948d8); UseGun(3) claims
-    // only when empty (@0x494944..0x49495e); sitex passengers never touch +368.
+    // empty or already theirs and the carrier's def has PlayerControl (0x40)
+    // (@0x4947b3..0x4947d2 / @0x4948b9..0x4948d8). UseGun(3) claims through
+    // Entity_AttachToUseGunSlot @0x546B80 (the test @0x546bb6..0x546bc6, the store
+    // @0x546c6d): ours only when empty (D-NET-420). This function's own type-3 leg
+    // (@0x494944..0x49495e, empty only) is unreachable: the one caller sends UseGun seats to
+    // Entity_AttachToUseGunSlot (@0x435c9f / @0x435caa). Sitex passengers never touch +368.
     const bool was_empty = !vehicle.primary_occupant.valid();
     switch (seat) {
         case SeatType::Controller:
         case SeatType::Driver:
             if (!was_empty && vehicle.primary_occupant != occupant) return false;
+            if ((vehicle.item_attrib & kItemAttribPlayerControl) == 0) return false;
             break;
         case SeatType::Gunner:
             if (!was_empty) return vehicle.primary_occupant == occupant;

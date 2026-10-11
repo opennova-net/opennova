@@ -66,10 +66,12 @@ struct HostBringup {
 // Outside a session the session words a host takes from game.cfg come from
 // the current player profile record instead: the four charattr restriction
 // words (the record's +1352..+1364; null = a fresh profile's, every one 0)
-// [orig: Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F]. The
-// difficulty byte is the word the mission start leaves out of a session
-// (world::mission_start_difficulty), which overwrites the profile's +1380
-// before any serializer reads it [orig: Game_StartMission @0x525CDD].
+// [orig: Game_ApplySessionSettingsToGlobals @0x551F15..0x551F3F] and the
+// difficulty word, +1380 (profile_difficulty, which the bring-up seeds the
+// world's word with, @0x551F6F..0x551F75). The difficulty byte is the word
+// the mission start leaves out of a session (world::mission_start_difficulty),
+// which overwrites the profile's before any serializer reads it [orig:
+// Game_StartMission @0x525CDD].
 GameConfig singleplayer_game_config(uint32_t game_type,
 		const playersav::ProfileRecord *profile = nullptr);
 
@@ -117,8 +119,9 @@ public:
 	void set_item_catalog(std::shared_ptr<const replication::ItemReplicationCatalog> catalog);
 
 	// The SP listen server: SINGLEPLAYERGAME, one player, the mission's own
-	// game type, socketless [orig: SinglePlayer_StartMission @0x561af0].
-	void bring_up_singleplayer();
+	// game type, socketless, its session words the profile record's
+	// (singleplayer_game_config) [orig: SinglePlayer_StartMission @0x561af0].
+	void bring_up_singleplayer(const playersav::ProfileRecord *profile = nullptr);
 	// The shell's general bring-up (the LAN host or its SP listen server with
 	// the shell's mission text and terrain tiles).
 	void bring_up(const HostBringup &bringup);
@@ -178,6 +181,9 @@ private:
 	void reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
 	// The rule words the world reads at tick time, from the session config.
 	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
+	// The context's spawn-time body bind over this role's kernel
+	// (NapiNPServerCtx::bind_spawned_body), installed after a bring-up's own spawn.
+	void install_spawned_body_bind();
 	void make_client_runtime(uint32_t game_type);
 	// The map change's bring-up: the kept session onto the next mission's
 	// kernel (map_change.h).

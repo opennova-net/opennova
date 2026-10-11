@@ -411,10 +411,14 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         //  @0x53BF10 (switches on +0x270 @0x53BF31 / @0x53BFE0);
         //  BoneCallback_gnrc_World @0x4E2860; event row 'psec' @0x813288 -> @0x406FF0]
         // Recomputed both ways on every resolve, so a def edit that drops the
-        // tag drops the draw; the palm fragment keeps its seed's (D-ITEMDEF-20).
+        // tag drops the draw. A palm fragment's draw is item 900's own too: its
+        // spawn stores the sector builder into the model's collision and scar
+        // callbacks, not the draw's (palm_fragment).
+        // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6; Render_SectorEntity
+        //  @0x5C431B..0x5C4372]
         const std::string_view render =
                 def != nullptr ? render_tag(def->render_function) : std::string_view();
-        e->palm_sections = e->palm_fragment || render == "psec" || render == "cesp";
+        e->palm_sections = render == "psec" || render == "cesp";
         // The ai_function palm row's callback is WeaponOverlay_HandleDamage and
         // the move_function psec row's update is Entity_UpdatePhysicsStep: the two
         // callbacks the load serializers test before streaming entity+0x270.

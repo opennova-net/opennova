@@ -495,6 +495,8 @@ bool run_mounted_moving_carrier_roundtrip() {
 	w::Entity carrier_seed;
 	carrier_seed.kind = w::EntityKind::Item;
 	carrier_seed.item_id = 0x1004;
+	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+	carrier_seed.item_attrib = w::kItemAttribPlayerControl;
 	carrier_seed.position = {10.0f, 20.0f, 2.0f};
 	carrier_seed.yaw = 90;
 	carrier_seed.health = 3000;

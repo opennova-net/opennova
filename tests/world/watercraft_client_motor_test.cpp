@@ -84,6 +84,8 @@ void make_rig(Rig &r) {
 	w::Entity seed;
 	seed.kind = w::EntityKind::Item;
 	seed.item_id = 0x050D; // Drivable Zodiac wire type
+	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+	seed.item_attrib = w::kItemAttribPlayerControl;
 	seed.position = {100.0f, 200.0f, 10.0f};
 	seed.yaw = 90; // mission 90 deg = engine heading BAM 0 = +X forward
 	r.boat = r.world.registry.spawn(1, seed);

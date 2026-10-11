@@ -77,6 +77,8 @@ void player_motor_vectors() {
     Entity vehicle;
     vehicle.kind = EntityKind::Item;
     vehicle.has_item_def = true;
+    // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+    vehicle.item_attrib = kItemAttribPlayerControl;
     vehicle.health = vehicle.health_max = 3000;
     vehicle.alive = true;
     vehicle.position.z = 10.0f;

@@ -3394,6 +3394,8 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	vehicle_seed.kind = opennova::world::EntityKind::Item;
 	vehicle_seed.has_item_def = true;
 	vehicle_seed.item_type = 1;
+	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+	vehicle_seed.item_attrib = opennova::world::kItemAttribPlayerControl;
 	vehicle_seed.is_spawn_point = true;
 	vehicle_seed.team = 1;
 	vehicle_seed.alive = true;

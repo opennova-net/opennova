@@ -3605,6 +3605,8 @@ int mounted_blast_health(SeatType seat_type, int seat_index, bool gun_on_vehicle
     vehicle.kind = EntityKind::Item;
     vehicle.has_item_def = true;
     vehicle.item_type = 1;
+    // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+    vehicle.item_attrib = kItemAttribPlayerControl;
     vehicle.health = 200;
     vehicle.position = {0,0,0};
     if (gun_on_vehicle) vehicle.ground_target = w.registry.spawn(1, vehicle);

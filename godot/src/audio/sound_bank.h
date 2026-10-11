@@ -139,12 +139,14 @@ public:
 	bool play_interface_oneshot(Node *p_parent, const String &p_name, const StringName &p_bus);
 	AudioStreamPlayer *spawn_oneshot_2d(Node *p_parent, const String &p_name, const StringName &p_bus);
 
-	// An LWF member's / layer descriptor's base pitch as the player plays it: an
-	// unauthored or degenerate value (<= 0.01) plays at unity.
+	// An ambient layer's member pitch (its member 0's) or a dialog line's as the
+	// shell composes it: an unauthored or degenerate value (<= 0.01) plays at
+	// unity. Neither is a play factor the game composes: an emitter's channel
+	// plays its emitter word alone (D-SND-56) and a dialog line its dialog
+	// module's frequency. A voice's composed play factor (a trigger set's, a
+	// script voice's, a menu row's) is never floored: the player's scale forces a
+	// step of 0 to the mixer's least step (WavLoader::pitch_scale_for, D-SND-53).
 	static double effective_base_pitch(double p_base_pitch);
-	// The same of a Q16 pitch (lwf::pitch_from_q16, 0x10000 = 1.0): a voice's
-	// pitch scale.
-	static double pitch_scale_from_q16(uint32_t p_pitch_q16);
 	// A looping copy of a decoded one-shot stream, the whole buffer forward
 	// (the cached stream stays a one-shot's): loop_end is an absolute frame
 	// index that playback wraps at, so 0 would pin the voice at sample 0.
@@ -212,7 +214,7 @@ private:
 	static String _member_wav_path(const opennova::lwf::File &p_bank,
 			const opennova::lwf::Sndparm &p_member);
 	static double _member_base_pitch(const opennova::lwf::Sndparm &p_member);
-	AudioStreamPlayer3D *_make_player(const Ref<AudioStreamWAV> &p_stream, double p_base_pitch,
+	AudioStreamPlayer3D *_make_player(const Ref<AudioStreamWAV> &p_stream, double p_play_scale,
 			const StringName &p_bus, bool p_loop, int p_vol255);
     bool _play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,
             const opennova::lwf::File &p_bank, const opennova::audio::OneshotPlan &p_plan,

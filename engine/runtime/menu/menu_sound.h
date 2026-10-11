@@ -62,12 +62,20 @@ inline int menu_channel_volume(int master_volume, int member_volume,
 	return att;
 }
 
-// Set-level pitch composes multiplicatively with the member pitch (Q16;
-// 0xFFFF ~ 1.0) [orig: (member * set) >> 16 @ 0x75c0be]; a degenerate
-// product resets to 1.0.
-inline double menu_effective_pitch(double member_pitch, double set_pitch) {
-	const double pitch = member_pitch * set_pitch;
-	return pitch <= 0.01 ? 1.0 : pitch;
+// Set-level pitch composes with the member pitch (Q16; 0xFFFF ~ 1.0) into one
+// truncated Q16 word [orig: SoundBank_PlayTriggerEntries @ 0x75cef3..0x75cefd,
+// a signed imul of the two, the product's bits 16..47 kept], then with the
+// menu's emitter word 0x10000 [orig: CWnd_ProcessMouseEvent @ 0x647c41], taken
+// the same way @ 0x75ceff..0x75cf09, an identity: the voice's play factor as
+// the mixer reads it, 0 among them, which the mixer steps at its least step
+// where the step is 0 [orig: AudioChannel_ComputeMixCoefficients
+// @ 0x7bd619..0x7bd61d] (the player's scale, lwf::wave_pitch_scale; D-SND-53).
+// The word's fraction is dropped here, as retail drops it, so a product just
+// under half a step keeps its step of 0.
+inline double menu_effective_pitch(uint32_t member_q16, uint32_t set_q16) {
+	const int64_t product = static_cast<int64_t>(static_cast<int32_t>(member_q16)) *
+			static_cast<int64_t>(static_cast<int32_t>(set_q16));
+	return lwf::pitch_from_q16(static_cast<uint32_t>(static_cast<uint64_t>(product) >> 16));
 }
 
 // The menu's bank collection: one entry per bank a SOUND row names, the names

@@ -192,10 +192,24 @@ int main() {
         const EntityHandle h = spawn_remote_player(w, PlayerSpawn{});
         const Entity *e = w.registry.get(h);
         CHECK(e != nullptr);
-        CHECK(e->health == -1 && e->health_max == -1);
+        // The authority's spawn zeroes the row and raises it to the ceiling, a
+        // signed word compare: a -1 ceiling leaves it at 0, in a session or out
+        // [orig: the memset @0x43C3FE, the raises @0x4B112B / @0x43C557..0x43C56B]
+        // (D-PWR-6).
+        CHECK(e->health == 0 && e->health_max == -1);
         CHECK(e->armor_impact == 10 && e->armor_kz == -1);
         const AiEntity *ae = ai.at(0);
-        CHECK(ae->health == -1 && ae->inf.max_health == -1);
+        CHECK(ae->health == 0 && ae->inf.max_health == -1);
+        w.rules.mp_session = true;
+        const Entity *in_session = w.registry.get(spawn_remote_player(w, PlayerSpawn{}));
+        CHECK(in_session != nullptr && in_session->health == 0);
+        // A joiner's own body from its record keeps the item init's def word: the
+        // class init's raise to that same word leaves it [orig: Entity_InitFromItemDef
+        // @0x49E5B9..0x49E5C0 from NapiNPClientMsg_0x00C @0x42E84D].
+        PlayerSpawn record;
+        record.from_wire_record = true;
+        const Entity *client = w.registry.get(spawn_player(w, record));
+        CHECK(client != nullptr && client->health == -1 && client->health_max == -1);
     }
     {
         World w; // item-less world: the spawn-seed fallback still spawns AT FULL (100/100)

@@ -462,6 +462,16 @@ struct NapiNPServerCtx {
 	// handler refuses the spawn when unset. Returns the new pool-1 handle.
 	std::function<world::EntityHandle(world::World &, uint16_t item_id, uint8_t team,
 			const int32_t position[3])> deployable_spawner;
+	// The embedder's definition bind for a player body the authority spawns,
+	// run at the spawn (Server_BuildPlayerInfoAndAdd): its items.def row's
+	// traits, sound-profile pair, organic weapons and collision instance
+	// (mission::MissionKernel::bind_spawned_body), as retail's spawn binds every
+	// body to its row [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -- the
+	// ItemList_FindIndexByTypeId call @0x43C3CA, EntityDef_LoadModelsAndCallbacks
+	// @0x43C45F, Entity_InitFromModel @0x43C492]. The HostRole installs it after
+	// its bring-up's own spawn, whose body the boot's later steps bind; unset =
+	// no bind (a bare test host).
+	std::function<void(world::EntityHandle)> bind_spawned_body;
 
 	// The host process's log devices — the /PROFILE recorder and the punt
 	// logs — installed from HostConfig::logs at the session start; a null

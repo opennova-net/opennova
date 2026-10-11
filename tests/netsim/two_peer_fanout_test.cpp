@@ -1436,6 +1436,8 @@ bool run_0x26_attach_mounted_echo() {
 		veh.has_item_def = true;
 		veh.item_type = 1;
 		veh.item_attrib |= w::kItemAttribEweap;
+		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+		veh.item_attrib |= w::kItemAttribPlayerControl;
 		veh.position = {12.0f, 20.0f, 3.0f};
 		veh.yaw = 0;
 		veh.health = 3000;
@@ -1888,6 +1890,8 @@ bool run_vehicle_drive_authority() {
 		w::Entity veh;
 		veh.kind = w::EntityKind::Item;
 		veh.item_id = 0x1004;
+		// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+		veh.item_attrib = w::kItemAttribPlayerControl;
 		veh.position = {12.0f, 20.0f, 3.0f};
 		veh.yaw = 0;
 		veh.health = 3000;

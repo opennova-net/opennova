@@ -32,6 +32,20 @@ using opennova::server_hello_to_bytes;
 
 namespace {
 
+// One flat-TLV field as a stock peer writes it: name, NUL, u16 size, value.
+void append_field(std::vector<uint8_t> &out, const char *name, const std::vector<uint8_t> &value) {
+	out.insert(out.end(), name, name + std::strlen(name) + 1);
+	out.push_back(static_cast<uint8_t>(value.size()));
+	out.push_back(static_cast<uint8_t>(value.size() >> 8));
+	out.insert(out.end(), value.begin(), value.end());
+}
+
+std::vector<uint8_t> cstr_value(const std::string &s) {
+	std::vector<uint8_t> v(s.begin(), s.end());
+	v.push_back(0);
+	return v;
+}
+
 bool has_tlv_field(const std::vector<uint8_t> &bytes, const std::string &wanted) {
 	size_t pos = 0;
 	while (pos < bytes.size()) {
@@ -255,6 +269,131 @@ int test_cs_field13_follows_the_mpmaxpacketsize_clamp() {
 	TEST_EXPECT(field13(opennova::novaworld_service_cs_fields(70000)) == 65536u);
 	TEST_EXPECT(field13(opennova::novaworld_service_cs_fields(7)) == 100u);
 	TEST_EXPECT(field13(opennova::novaworld_service_cs_fields(-5)) == 100u);
+	return 0;
+}
+
+// A dword field shorter than four bytes loads a whole dword from its value
+// pointer, so it takes the bytes that follow it in the datagram; past the
+// datagram's end ours reads zero (D-NET-410).
+// [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - CI @0x62171E, PM @0x62173C,
+//  EIP @0x621756, EPN @0x621774, ET @0x621792; NapiNP_ReadTLV @0x61DBE0 hands
+//  back the value pointer for any length @0x61DCF7]
+int test_client_hello_short_dword_takes_the_following_bytes() {
+	// A two-byte CI, then a one-byte zero PM, then a four-byte EIP.
+	std::vector<uint8_t> bytes;
+	append_field(bytes, "CI", {0x05, 0x00});
+	append_field(bytes, "PM", {0x00});
+	append_field(bytes, "EIP", {0x11, 0x22, 0x33, 0x44});
+	ClientHello parsed;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), parsed));
+	// CI: its two bytes, then the PM field's name 'P' 'M'.
+	TEST_EXPECT(parsed.ci == (0x05u | (uint32_t('P') << 16) | (uint32_t('M') << 24)));
+	// PM: its zero byte, then 'E' 'I' 'P' of the next name: nonzero, so the
+	// identity check is skipped [orig: @0x6217C2].
+	TEST_EXPECT(parsed.pm ==
+			((uint32_t('E') << 8) | (uint32_t('I') << 16) | (uint32_t('P') << 24)));
+	TEST_EXPECT(opennova::client_hello_admits(parsed));
+	TEST_EXPECT(parsed.eip == 0x44332211u);
+
+	// A zero-length field still loads four bytes: here the next field's name and
+	// its NUL, "EPN\0".
+	bytes.clear();
+	append_field(bytes, "ET", {});
+	append_field(bytes, "EPN", {0x34, 0x12});
+	ClientHello empty_value;
+	TEST_EXPECT(parse_client_hello(bytes.data(), bytes.size(), empty_value));
+	TEST_EXPECT(empty_value.et ==
+			(uint32_t('E') | (uint32_t('P') << 8) | (uint32_t('N') << 16)));
+	// The last field: its two bytes, then the two past the datagram's end,
+	// which ours reads as zero (retail's stack decrypt buffer, D-NET-410).
+	TEST_EXPECT(empty_value.epn == 0x1234u);
+	return 0;
+}
+
+// The 0x42's dword fields load four bytes whatever their length, as the 0x41's
+// do: a short value takes the bytes that follow it, zero past the datagram's
+// end (D-NET-410).
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - CI @0x62BAE7, HK @0x62BB08,
+//  CK @0x62BB29, SIP @0x62BBA9, SPN @0x62BBCA, NF @0x62BC6B, DCNT @0x62BC89,
+//  RCNT @0x62BCA7]
+int test_client_auth_short_dword_takes_the_following_bytes() {
+	std::vector<uint8_t> bytes;
+	append_field(bytes, "CK", {0xEF, 0xBE, 0xAD, 0xDE});
+	append_field(bytes, "HK", {0x12, 0x34});
+	append_field(bytes, "CI", {0x07});
+	append_field(bytes, "SIP", {0x01, 0x02, 0x03, 0x04});
+	append_field(bytes, "NF", {});
+	append_field(bytes, "DCNT", {0x02, 0x00, 0x00, 0x00});
+	append_field(bytes, "RCNT", {0x05});
+	ClientAuth parsed;
+	TEST_EXPECT(parse_client_auth(bytes.data(), bytes.size(), parsed));
+	TEST_EXPECT(parsed.ck == 0xDEADBEEFu);
+	// HK: its two bytes, then the CI field's name.
+	TEST_EXPECT(parsed.hk == (0x3412u | (uint32_t('C') << 16) | (uint32_t('I') << 24)));
+	// CI: its byte, then 'S' 'I' 'P'.
+	TEST_EXPECT(parsed.ci ==
+			(0x07u | (uint32_t('S') << 8) | (uint32_t('I') << 16) | (uint32_t('P') << 24)));
+	TEST_EXPECT(parsed.sip == 0x04030201u);
+	// NF, empty: the next field's name.
+	TEST_EXPECT(parsed.nf == (uint32_t('D') | (uint32_t('C') << 8) | (uint32_t('N') << 16) |
+			(uint32_t('T') << 24)));
+	TEST_EXPECT(parsed.dcnt == 2u);
+	// RCNT, the last field: its byte, then zero past the end.
+	TEST_EXPECT(parsed.rcnt == 5u);
+	return 0;
+}
+
+// A PG of any length gives the 16 bytes at its value pointer, in the 0x41 and
+// the 0x42 alike: a 15-byte PG followed by a field named "hk" takes the 'h'
+// (0x68, the JO GUID's last byte) and passes the identity; a 17-byte PG
+// compares its first 16. An absent PG still fails it (retail's block stays
+// zeroed). [orig: NapiNPProtocol_HandleClientHello @0x62165E..0x621672;
+//  NapiNPProtocol_HandleClientJoin @0x62BA24..0x62BA38; NapiVarBlock_Init
+//  @0x62E710]
+int test_pg_of_any_length_loads_sixteen_bytes() {
+	const opennova::ClientHello retail = opennova::make_jointoperations_client_hello(3);
+	const std::vector<uint8_t> guid(retail.pg.begin(), retail.pg.end());
+	TEST_EXPECT(guid[15] == 'h');
+	const auto identity = [&retail](std::vector<uint8_t> &out) {
+		append_field(out, "NVS", cstr_value(retail.nvs));
+		append_field(out, "PN", cstr_value(retail.pn));
+	};
+
+	std::vector<uint8_t> short_pg;
+	identity(short_pg);
+	append_field(short_pg, "PG", std::vector<uint8_t>(guid.begin(), guid.begin() + 15));
+	append_field(short_pg, "hk", {0x44, 0x33, 0x22, 0x11});
+	append_field(short_pg, "PV1", cstr_value(retail.pv1));
+	ClientHello hello;
+	TEST_EXPECT(parse_client_hello(short_pg.data(), short_pg.size(), hello));
+	TEST_EXPECT(hello.pg_present && hello.pg == retail.pg);
+	TEST_EXPECT(opennova::matches_jointoperations_identity(hello));
+	ClientAuth auth;
+	append_field(short_pg, "CK", {0x01, 0x00, 0x00, 0x00});
+	TEST_EXPECT(parse_client_auth(short_pg.data(), short_pg.size(), auth));
+	TEST_EXPECT(auth.pg_present && auth.pg == retail.pg && auth.hk == 0x11223344u);
+	TEST_EXPECT(opennova::matches_jointoperations_identity(auth));
+
+	std::vector<uint8_t> long_pg;
+	identity(long_pg);
+	std::vector<uint8_t> seventeen = guid;
+	seventeen.push_back(0xFF);
+	append_field(long_pg, "PG", seventeen);
+	append_field(long_pg, "PV1", cstr_value(retail.pv1));
+	append_field(long_pg, "CK", {0x01, 0x00, 0x00, 0x00});
+	TEST_EXPECT(parse_client_hello(long_pg.data(), long_pg.size(), hello));
+	TEST_EXPECT(hello.pg == retail.pg && opennova::matches_jointoperations_identity(hello));
+	TEST_EXPECT(parse_client_auth(long_pg.data(), long_pg.size(), auth));
+	TEST_EXPECT(auth.pg == retail.pg && opennova::matches_jointoperations_identity(auth));
+
+	std::vector<uint8_t> no_pg;
+	identity(no_pg);
+	append_field(no_pg, "PV1", cstr_value(retail.pv1));
+	TEST_EXPECT(parse_client_hello(no_pg.data(), no_pg.size(), hello));
+	TEST_EXPECT(!hello.pg_present && !opennova::matches_jointoperations_identity(hello));
+	append_field(no_pg, "CK", {0x01, 0x00, 0x00, 0x00});
+	TEST_EXPECT(parse_client_auth(no_pg.data(), no_pg.size(), auth));
+	TEST_EXPECT(!auth.pg_present && !opennova::matches_jointoperations_identity(auth));
 	return 0;
 }
 
@@ -499,6 +638,9 @@ int main() {
 	if (test_client_hello_minimal() != 0) return 1;
 	if (test_client_hello_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_client_hello_admits_nonzero_pm_without_identity() != 0) return 1;
+	if (test_client_hello_short_dword_takes_the_following_bytes() != 0) return 1;
+	if (test_client_auth_short_dword_takes_the_following_bytes() != 0) return 1;
+	if (test_pg_of_any_length_loads_sixteen_bytes() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;

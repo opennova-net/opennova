@@ -534,6 +534,8 @@ bool test_joiner_palm_source_and_local_fragment() {
     w::Entity piece;
     piece.kind = w::EntityKind::Building; piece.item_id = 900;
     piece.position = {10, 20, 7}; piece.yaw = 90;
+    // An item 900 whose render tag is the psec row: the fragment draws its palm
+    // state through it (its collision callback, palm_fragment, plays no part here).
     piece.palm_sections = true; piece.item_section_piece = true; piece.palm_state = 17;
     piece.alive = false;
     const auto h = kernel.world.registry.spawn(2, piece);
@@ -551,7 +553,7 @@ bool test_joiner_palm_source_and_local_fragment() {
     ok = expect(row_at(rows, 1)[w::PF_WIRE_HANDLE] == h.packed &&
             row_at(rows, 1)[w::PF_POS_Y] == 3 &&
             row_at(rows, 1)[w::PF_SECTION_MASK_LO] == 0x3B,
-            "fragment retains its CXLT pivot and one visible section") && ok;
+            "a psec-drawn fragment keeps its CXLT pivot and one visible section") && ok;
     // Only the fragment rides the pool-row writer: the decoded source keeps
     // its wire lifecycle and never enters the shared pool lifecycle map.
     ok = expect(lifecycle.find(h.packed) != lifecycle.end() &&

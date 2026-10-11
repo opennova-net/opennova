@@ -319,6 +319,8 @@ void test_bike_crash_test_and_eject() {
 	bike.health = 500;
 	bike.health_max = 500;
 	bike.alive = true;
+	// Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+	bike.item_attrib = kItemAttribPlayerControl;
 	Seat ctrl;
 	ctrl.type = SeatType::Controller;
 	ctrl.bone_index = 1;

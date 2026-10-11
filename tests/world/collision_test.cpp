@@ -13,6 +13,7 @@
 //     the local player's LocalResolveDebug capture).
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -6094,6 +6095,59 @@ void test_run_over_spares_a_protected_player() {
 	}
 }
 
+// The sector builder is collision's callback (the scar cache's too) where it
+// is the model's own: a palm fragment's, whose spawn stores it into item 900's
+// model, hiding the palm state's sections and pivoting on the CXLT translation
+// whatever item 900's render tag. The render tag binds only the draw: a
+// psec-drawn palm collides through every section, its section mask included
+// (D-ITEMDEF-20). [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6;
+// CTerrainMap_BuildSectorTransformMatrices @0x53BF10, the switches @0x53BF31 /
+// @0x53BFE0; EntityDef_InitAllCallbacks @0x4A5AF5..0x4A5B03]
+void test_palm_sector_collision_is_the_fragments() {
+    auto heap = std::make_unique<World>();
+    World &w = *heap;
+    w.registry.configure_pool(2, 4);
+    CollisionWorld cw;
+    CollisionModel model = box_model(1, 0, 1.0, 1.0, 2.0);
+    for (int i = 1; i < 6; ++i) model.sections.push_back(model.sections[0]);
+    const int32_t mid = cw.add_model(std::move(model));
+    ItemDeathTraits traits;
+    traits.model_pivots_q16 = {{{0, 0, 2 * 65536}}, {{0, 0, 4 * 65536}}};
+    w.tables.item_death_traits.set(900, traits);
+
+    Entity fragment;
+    fragment.kind = EntityKind::Building;
+    fragment.item_id = 900;
+    fragment.position = {8.0f, 16.0f, 7.0f};
+    fragment.yaw = 90;
+    fragment.item_section_piece = true;
+    fragment.palm_fragment = true; // item 900's own render tag names no section row
+    fragment.palm_state = 17;
+    const EntityHandle fh = w.registry.spawn(2, fragment);
+    cw.assign_entity(fh, mid);
+
+    Entity palm;
+    palm.kind = EntityKind::Building;
+    palm.item_id = 21;
+    palm.position = {20.0f, 16.0f, 0.0f};
+    palm.yaw = 90;
+    palm.alive = true;
+    palm.palm_sections = true; // the render tag's psec row
+    palm.palm_state = 0;
+    palm.section_mask = 0x1;
+    const EntityHandle ph = w.registry.spawn(2, palm);
+    cw.assign_entity(ph, mid);
+
+    for (int s = 0; s < 6; ++s) {
+        CollisionMatrix m;
+        CHECK(cw.entity_section_matrix(w, fh, s, m));
+        CHECK(((m.m[15] & 1) != 0) == (((0x3Bu >> s) & 1u) != 0)); // state 17: 0,1,3,4,5
+        CHECK(m.m[11] == 3 * 65536); // the pivot: z 7 less the second CXLT row's 4
+        CHECK(cw.entity_section_matrix(w, ph, s, m));
+        CHECK((m.m[15] & 1) == 0);
+    }
+}
+
 int main() {
 	test_run_over_kills_an_enemy_and_plays_the_bump();
 	test_run_over_spares_a_protected_player();
@@ -6194,6 +6248,7 @@ int main() {
     test_projectile_trace_domain_switches_preserve_farther_pool_hit();
     test_idle_round_tick_clears_stale_terrain();
     test_entity_sun_visibility_rays_and_eligibility();
+    test_palm_sector_collision_is_the_fragments();
     if (failures == 0) std::printf("collision_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

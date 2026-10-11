@@ -809,13 +809,15 @@ struct Entity {
     // it takes item 900's own callbacks [orig: Projectile_SpawnFromTile
     //  @0x53C35D / @0x53C36F].
     bool section_clone = false;
-    // The palm fragment (item 900) a palm transition seeds [orig:
-    // Projectile_SpawnFromTile @0x53C1C0]: its palm_sections is the seed's,
-    // kept through every def resolve (D-ITEMDEF-20).
+    // The palm fragment (item 900) a palm transition seeds: its spawn stores
+    // the sector builder into item 900's model +0xA8 / +0xAC, so it collides
+    // and scars through its palm state, whatever its draw [orig:
+    // Projectile_SpawnFromTile @0x53C1C0, the stores @0x53C3B0 / @0x53C3C6].
     bool palm_fragment = false;
     // The palm-state (+0x270) section draw: the render tag's psec / cesp bone
     // row [orig: BoneCallback_psec_World @0x53C130 -> @0x53BF10], recomputed
-    // on every def resolve; the palm fragment's seed forces it on (D-ITEMDEF-20).
+    // on every def resolve. The draw alone: collision follows the model's
+    // callback (palm_fragment).
     bool palm_sections = false;
     int32_t palm_state = 0; // entity+0x270
     // The def's damage callback is the palm row's (WeaponOverlay_HandleDamage)
@@ -1061,11 +1063,12 @@ struct Entity {
     //  Entity_ResolveBoneUserpoints @0x545940]
     uint8_t weapon_userpoint_bytes[4][3] = {};
     // The single tracked FIRST occupant (entity+368 occupantEntity): claimed at attach by
-    // ctrlx/drvrx (empty-or-same) and UseGun (only when empty), never by sitex; cleared only
-    // when THE claimant detaches — a remaining second controller does not inherit it. This
+    // ctrlx/drvrx (empty-or-same, else the attach refuses, D-NET-398) and UseGun (ours only
+    // when empty, D-NET-420), never by sitex; cleared only when THE claimant detaches. This
     // is the retail engine-running latch: the PlayerControl occupancy effect (and the engine
     // start/stop sounds) key off it, not off any-control-seat occupancy.
-    // [orig: Entity_AttachToVehicleSlot @0x4946d0 writes +368 @0x4947d2/@0x4948d8/@0x49495e;
+    // [orig: Entity_AttachToVehicleSlot @0x4946d0 writes +368 @0x4947d2/@0x4948d8;
+    //  Entity_AttachToUseGunSlot @0x546c6d;
     //  Entity_DetachFromVehicle @0x4355f0 stop leg @0x4356e9..0x435759 + clear @0x43577c;
     //  spawner gate @0x48faad in Entity_UpdateHeloRotorSpin (ex entity_update_damage_accumulator_and_shadow) Entity_UpdateHeloRotorSpin @0x48fa70]
     // On a person the same word is the ride link: the same-team occupant of the

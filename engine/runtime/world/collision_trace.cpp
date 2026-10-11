@@ -65,24 +65,31 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // [orig: model+168 callback; BoneCallback_Simple @ 0x4e2600;
     // Physics_RaycastAgainstBoneCollision @ 0x4e4cb0 advances matrix+64 and
     // COBJ+108 in lockstep.]
-    if (e->section_clone && !e->palm_sections) {
-        const Vec3 render_pos = item_section_render_position(world, *e);
-        world_mat.m[3] = int32_t(render_pos.x * 65536);
-        world_mat.m[7] = int32_t(render_pos.y * 65536);
-        world_mat.m[11] = int32_t(render_pos.z * 65536);
-    }
-    if (e->palm_sections) {
-        const Vec3 render_pos = item_section_render_position(world, *e);
-        const int32_t pos[3] = {int32_t(render_pos.x * 65536),
-                int32_t(render_pos.y * 65536), int32_t(render_pos.z * 65536)};
+    // The sector builder is collision's callback where it is the model's +0xA8:
+    // item 900's model, which every palm fragment spawn stores, as it stores the
+    // scar cache's +0xAC. The render tag binds only the draw. (A model whose own
+    // first RMDL tag is a section row binds it too, and a husked fragment takes
+    // its husk model's callback: D-ITEMDEF-20.)
+    // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6; EntityDef_LoadModelsAndCallbacks
+    //  @0x43A03C..0x43A047; EntityDef_InitAllCallbacks @0x4A5AF5..0x4A5B03]
+    const bool sector_callback = e->palm_fragment;
+    if (sector_callback) {
+        const Vec3 sector_pos = palm_sector_position(world, *e);
+        const int32_t pos[3] = {int32_t(sector_pos.x * 65536),
+                int32_t(sector_pos.y * 65536), int32_t(sector_pos.z * 65536)};
         world_mat = collision_matrix_from_euler(heading,
                 bam_from_degrees_wrapped(e->pitch), bam_from_degrees_wrapped(e->roll), pos);
+    } else if (e->section_clone) {
+        const Vec3 clone_pos = section_clone_position(world, *e);
+        world_mat.m[3] = int32_t(clone_pos.x * 65536);
+        world_mat.m[7] = int32_t(clone_pos.y * 65536);
+        world_mat.m[11] = int32_t(clone_pos.z * 65536);
     }
-    bool live_pose = !e->palm_sections && !e->item_section_piece &&
+    bool live_pose = !sector_callback && !e->item_section_piece &&
             instance->section_matrices.size() == m->sections.size();
     if (live_pose) {
         mats = instance->section_matrices;
-    } else if (!e->palm_sections && !e->item_section_piece && pose_provider_ != nullptr) {
+    } else if (!sector_callback && !e->item_section_piece && pose_provider_ != nullptr) {
         mats.clear();
         live_pose = pose_provider_->build_section_matrices(
                 const_cast<World &>(world), h, model_id, world_mat, *m, mats) &&
@@ -90,7 +97,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     }
     if (!live_pose)
         mats.assign(m->sections.size(), world_mat);
-    const uint32_t hidden_sections = (e->palm_sections ? item_hidden_sections(*e) : 0) |
+    const uint32_t hidden_sections = (sector_callback ? palm_sector_hidden_sections(*e) : 0) |
             (using_husk ? e->spawned_piece_mask : 0);
     if (hidden_sections != 0) {
         // Sections that launched as death pieces no longer belong to the wreck.

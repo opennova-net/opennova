@@ -68,6 +68,8 @@ struct Rig {
         veh.bms_id = 11;
         veh.kind = EntityKind::Item;
         veh.has_item_def = true; // pool-1 sources need an ItemDef (retail gate)
+        // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+        veh.item_attrib = kItemAttribPlayerControl;
         veh.item_id = 1294;
         veh.item_type_index = 7; // the def row's ordinal, the script gates' +0x1C
         veh.position = {100.0f, 200.0f, 10.0f};
@@ -268,6 +270,8 @@ void test_remote_player_control_seat_preserves_wire_look() {
 
         Entity vehicle;
         vehicle.kind = EntityKind::Item;
+        // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+        vehicle.item_attrib = kItemAttribPlayerControl;
         vehicle.position = {10.0f, 20.0f, 30.0f};
         vehicle.yaw = 0;
         vehicle.health = 100;
@@ -1209,8 +1213,12 @@ void test_ai_authored_entry_claim_and_stages() {
 	CHECK(!r.player().mounted);
 	r.sys.infantry_think(brain, r.w);
 	CHECK(brain.inf.board_entry_stage == 7);
-	// UseGun bypasses the staging sequence and admits an EWeap on arrival.
+	// UseGun bypasses the staging sequence and admits an EWeap on arrival. The
+	// seat it takes is the gun's UseGun: a ctrlx seat on a carrier without
+	// PlayerControl refuses (D-NET-398) [orig: Entity_AttachToVehicleSlot @0x4947cc].
 	r.veh().item_attrib = kItemAttribEweap;
+	r.veh().seats[0].type = SeatType::Gunner;
+	r.veh().seats[0].source_name = "UseGun";
 	pose.points.push_back({ "UseGun", { 101, 210, 10 } });
 	r.sys.infantry_think(brain, r.w);
 	CHECK(r.player().mounted);
@@ -3477,8 +3485,18 @@ static void test_claimant_detach_cuts_vehicle_slot_action() {
     CHECK(r.w.vehicles.detach(r.player_h));
     CHECK(r.veh().primary_weapon_slot.counter == 40);
 
+    // Without the attrib a ctrlx attach refuses (D-NET-398), so the claimant
+    // that keeps the counter is a UseGun gunner's.
+    // [orig: Entity_AttachToVehicleSlot @0x4947cc; the gate @0x4356EF..0x4356F4]
     r.veh().item_attrib &= ~kItemAttribPlayerControl;
-    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+    CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, 1));
+    CHECK(!r.veh().primary_occupant.valid() && !r.player().mounted);
+    Seat gun;
+    gun.type = SeatType::Gunner;
+    gun.bone_index = 3;
+    gun.source_name = "UseGun";
+    r.veh().seats.push_back(gun);
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 3));
     CHECK(r.veh().primary_occupant == r.player_h);
     CHECK(r.w.vehicles.detach(r.player_h));
     CHECK(r.veh().primary_weapon_slot.counter == 40);
@@ -3720,6 +3738,8 @@ static void test_npc_seat_bone_failure_kills_boarders_and_detaches() {
         vehicle.health = 100;
         vehicle.alive = true;
         vehicle.has_item_def = item_def;
+        // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+        vehicle.item_attrib = kItemAttribPlayerControl;
         vehicle.ground_target = deck_h;
         vehicle.last_attacker = attacker_h;
         Seat seat;

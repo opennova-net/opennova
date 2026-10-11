@@ -20,6 +20,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/server_admin_command.h>
+#include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/world/world.h>
@@ -362,11 +363,43 @@ void test_play_host_map_change() {
 	std::printf("map_change: the listen host's own player respawned once, bound, A&D latched\n");
 }
 
+// A joiner the host admits mid-match: the spawn pump's body binds its items.def
+// row at its spawn, as every retail body does, so it carries its row's sound
+// profile (the chute slot sounds' source). (D-NET-395)
+// [orig: CNapiServer_ProcessPendingPlayerSpawns @0x4c8dc0 -> Server_BuildPlayerInfoAndAdd
+//  @0x51d560 -> Server_PlayerAdd -> Entity_SpawnFromAnimSlotProperty @0x43C390 ->
+//  Entity_InitFromModel, the call @0x43C492]
+void test_play_host_mid_match_join_binds_body() {
+	PlayHost host;
+	CHECK(host.boot_map(/*next_mission=*/false));
+	if (host.kernel == nullptr) return;
+	for (int f = 0; f < 120; ++f) {
+		inmatch::FrameInput input;
+		input.delta_seconds = kFrame;
+		(void)host.session.advance(input);
+		host.kernel->world.out.discard_presentation();
+	}
+	inmatch::NapiNPServerCtx &ctx = host.role.state.host_owner.ctx;
+	inmatch::NapiNPConnection joining;
+	joining.type = inmatch::NapiNPConnection::kTypeServerSide;
+	joining.connection_id = inmatch::kFirstJoinerDcb;
+	joining.self_id_seen = true;
+	joining.phase = inmatch::ConnectionPhase::Joined;
+	ctx.np_protocol.connection_list.push_back(joining);
+	CHECK(inmatch::Server_ProcessPendingPlayerSpawns(ctx, host.kernel->world) == 1);
+	const world::EntityHandle body_handle = ctx.np_protocol.connection_list.back().link.owned_entity;
+	CHECK(body_handle.valid() && body_handle != host.kernel->world.cached.local_player);
+	const world::AiEntity *body = host.kernel->world.ai.for_handle(body_handle);
+	CHECK(body != nullptr && body->profile.sound_profile == 1);
+	std::printf("map_change: a mid-match joiner's body bound at its spawn\n");
+}
+
 } // namespace
 
 int main() {
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
 	test_play_host_map_change();
+	test_play_host_mid_match_join_binds_body();
 	Host host;
 	CHECK(host.start());
 	if (host.kernel == nullptr) return 1;

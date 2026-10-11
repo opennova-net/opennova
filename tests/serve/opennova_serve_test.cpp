@@ -164,6 +164,8 @@ int main() {
 	CHECK(server.role().client_runtime() == nullptr);
 	CHECK(!server.kernel().local.has_local_player());
 	CHECK(server.kernel().world.rules.mp_session);
+	// A joiner's body binds its items.def row at its spawn (D-NET-395).
+	CHECK(static_cast<bool>(server.role().state.host_owner.ctx.bind_spawned_body));
 	CHECK(server.bound_port() != 0);
 	// No game.cfg: remote_admin_port is 0, so no admin listener; the launch still truncates
 	// admin_log.txt, as retail's static construction opens it [orig: Game_InitSubsystems

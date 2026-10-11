@@ -11,8 +11,9 @@ namespace opennova::lwf {
 // or a script plays, through one loader [orig: Audio_LoadWavFileFromArchive @ 0x766480]
 // (docs/audio/lwf-dbf-sound-re.md "The wave loader's rules"): BFC1-compressed or not, an AUD1 buffer
 // (the loader's own form) taken as it is, else a RIFF WAVE walked chunk by chunk to its data, whose
-// samples are mono 8-bit or 16-bit PCM or mono 4-bit IMA ADPCM with a fact chunk, at any rate (played
-// at rate / 44100 of the device's). The rest is refused and the sound plays nothing. That walk is
+// samples are mono 8-bit or 16-bit PCM or mono 4-bit IMA ADPCM with a fact chunk, at any rate under
+// 0xAC440000 (played at rate / 44100 of the device's; from there its pitch ratio's division faults the
+// game). The rest is refused and the sound plays nothing. That walk is
 // wav_pcm.h's wave_loader_walk, which the runtime's decode (wav_decode_pcm16) walks and wave_retail_check
 // words.
 // The rest of this file is tooling, not a port: a modder's wave (a DAW's 24-bit stereo with its
@@ -26,7 +27,8 @@ namespace opennova::lwf {
 // walk stepping 4 bytes into it and reading its list type as a size (@ 0x766570); a second fmt chunk
 // (@ 0x766589); no fmt ahead of the data (@ 0x7665cb); samples of other than 8, 16 or 4 bits (@ 0x76675f);
 // more than one channel (@ 0x7665e3, @ 0x7666db, @ 0x76676a); 4-bit samples with no fact chunk or of another
-// format than IMA ADPCM (0x11) (@ 0x766772, @ 0x76677d).
+// format than IMA ADPCM (0x11) (@ 0x766772, @ 0x76677d); a rate from 0xAC440000, whose pitch ratio's division
+// faults the game (@ 0x76662b, @ 0x766730, @ 0x7667dc).
 struct WaveRetailCheck {
 	bool plays = false;
 	std::string why;

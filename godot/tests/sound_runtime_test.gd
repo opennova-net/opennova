@@ -477,9 +477,10 @@ func _build_aud1(count: int, pitch_q16: int) -> PackedByteArray:
 
 # A wave of pitch 0 plays at the mixer's least step whatever the voice pitch:
 # the step composes the play factor with the wave's pitch, so a pitch of 0 is
-# forced to the least step (44100 / 512, the stream's 86 Hz) and the voice's
-# pitch never scales it, where a wave of its own rate takes the voice pitch
-# (D-SND-49; opennova::lwf::wave_pitch_scale carries the witness).
+# forced to the least step (44100 / 512, 86.13 Hz: the stream's whole 86, its
+# player's scale 86.13 / 86) and the voice's pitch never scales it, where a wave
+# of its own rate takes the voice pitch (D-SND-49, D-SND-53;
+# opennova::lwf::wave_pitch_scale carries the witness).
 func test_zero_pitch_wave_ignores_the_voice_pitch() -> void:
 	var root := _real_root({
 		"zero.wav": _build_aud1(64, 0),
@@ -498,22 +499,53 @@ func test_zero_pitch_wave_ignores_the_voice_pitch() -> void:
 	var zero := parent.get_child(0) as AudioStreamPlayer3D
 	var rate := parent.get_child(1) as AudioStreamPlayer3D
 	assert_eq((zero.stream as AudioStreamWAV).mix_rate, 86, "a pitch-0 wave's stream runs at the least step")
-	assert_almost_eq(zero.pitch_scale, 1.0, 0.00001, "the one-shot's voice pitch never scales it")
+	assert_almost_eq(zero.pitch_scale, 44100.0 / 512.0 / 86.0, 0.00001, "the one-shot's voice pitch never scales it")
 	assert_almost_eq(rate.pitch_scale, 4.0, 0.00001, "a wave of its own rate takes the voice pitch")
 	var holder: Node3D = bank.spawn_ambient(parent, Vector3.ZERO, "ZERO", &"Ambient")
 	assert_not_null(holder)
 	if holder != null:
 		var ambient := holder.get_child(0) as AudioStreamPlayer3D
-		assert_almost_eq(ambient.pitch_scale, 1.0, 0.00001, "nor does an ambient layer's member pitch")
+		assert_almost_eq(ambient.pitch_scale, 44100.0 / 512.0 / 86.0, 0.00001,
+				"nor does an ambient layer's member pitch")
 		var looped := ambient.stream as WaveStream
 		assert_not_null(looped, "the ambient loop copy stays a decoded wave's stream")
 		if looped != null:
 			assert_eq(looped.loader_pitch_q16, 0, "the copy keeps the loader pitch word the channel updates read")
-			assert_eq(WavLoader.pitch_scale_for(looped, 3.0), 1.0, "so a channel update keeps the least step")
+			assert_almost_eq(WavLoader.pitch_scale_for(looped, 3.0), 44100.0 / 512.0 / 86.0, 0.0000001,
+					"so a channel update keeps the least step")
 	var voice: AudioStreamPlayer = bank.spawn_oneshot_2d(parent, "ZERO", StringName())
 	assert_not_null(voice)
 	if voice != null:
-		assert_almost_eq(voice.pitch_scale, 1.0, 0.00001, "nor a 2D voice's member pitch")
+		assert_almost_eq(voice.pitch_scale, 44100.0 / 512.0 / 86.0, 0.00001, "nor a 2D voice's member pitch")
+
+
+# A rate past INT32_MAX: the player's whole mix rate holds INT32_MAX, so the
+# stream boxes its rate there and keeps its own, which every player scales the
+# box back up to through WavLoader.pitch_scale_for (D-SND-52;
+# opennova::lwf::wave_pitch_scale). An AUD1 pitch of 0xFFFFFFFF plays at
+# (pitch * 44100 + 0x8000) >> 16 = 2890137599 Hz, a RIFF rate of 0x80000000 at
+# its own; a RIFF rate from 0xAC440000 faults the game's loader, which ours
+# refuses (D-SND-54).
+func test_rate_past_int32_max_is_boxed() -> void:
+	var aud := WavLoader.from_bytes(_build_aud1(4, 0xFFFFFFFF)) as WaveStream
+	assert_not_null(aud)
+	if aud != null:
+		assert_eq(aud.mix_rate, 2147483647, "the stream's mix rate is boxed at INT32_MAX")
+		assert_eq(aud.wave_rate, 2890137599, "the stream keeps its own rate")
+		assert_almost_eq(aud.mix_rate * WavLoader.pitch_scale_for(aud, 1.0), 2890137599.0, 1.0,
+				"its player plays at its own rate")
+		assert_almost_eq(aud.mix_rate * WavLoader.pitch_scale_for(aud, 0.5), 1445068799.5, 1.0,
+				"and takes the voice pitch on it")
+		var looped := aud.duplicate() as WaveStream
+		assert_eq(looped.wave_rate, 2890137599, "a loop copy keeps the rate its channel updates read")
+	var samples := PackedByteArray([0, 0, 0, 0])
+	var riff := WavLoader.from_bytes(_build_wav(samples, 1, 0x80000000, 16))
+	assert_not_null(riff)
+	if riff != null:
+		assert_eq(riff.mix_rate, 2147483647)
+		assert_almost_eq(riff.mix_rate * WavLoader.pitch_scale_for(riff, 1.0), 2147483648.0, 1.0)
+	assert_null(WavLoader.from_bytes(_build_wav(samples, 1, 0xAC440000, 16)),
+			"a RIFF rate from 0xAC440000 is refused where the game's loader faults")
 
 
 func test_entity_refire_retakes_its_own_channel() -> void:
@@ -616,3 +648,44 @@ func test_oneshot_layers_follow_the_live_simulation_view() -> void:
 	bank.set_occlusion_provider(null)
 	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "INTERNAL_ONLY", &"SFX"),
 			"an isolated menu bank retains the neutral both-views listener")
+
+# A play factor whose step is 0 plays at the mixer's least step, whatever the
+# wave: the step composes the voice's play factor with the wave's pitch, so a
+# factor of 0 (a set or member pitch of 0, as game.lwf's ENV_MOSQUITO_1 authors
+# three silent members) steps at 0, forced to 1/512 of a sample a device frame,
+# the least step, 44100 / 512 = 86.13 Hz; a small factor whose step is not 0
+# plays at its own scale, not floored to 1 (D-SND-53;
+# opennova::lwf::wave_pitch_scale).
+func test_zero_play_factor_plays_at_the_least_step() -> void:
+	var samples := PackedByteArray()
+	samples.resize(64)
+	var zero := _profile_with_set("ZERO", "rate.wav")
+	zero.set_member_field(0, 0, 0, "base_pitch", 0.0)
+	var small := _profile_with_set("SMALL", "rate.wav")
+	small.set_member_field(0, 0, 0, "base_pitch", 0.01)
+	var root := _real_root({
+		"rate.wav": _build_wav(samples, 1, 22050, 16),
+		"menu.lwf": zero.to_bytes(),
+	})
+	var bank = SoundBank.create(root)
+	bank.add_bank(zero)
+	bank.add_bank(small)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "ZERO", StringName(), Vector3.ZERO))
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "SMALL", StringName(), Vector3.ZERO))
+	var zero_voice := parent.get_child(0) as AudioStreamPlayer3D
+	var small_voice := parent.get_child(1) as AudioStreamPlayer3D
+	assert_almost_eq(zero_voice.pitch_scale, 44100.0 / 512.0 / 22050.0, 0.000001,
+			"a play factor of 0 plays the 22050 Hz wave at the least step")
+	assert_almost_eq(small_voice.pitch_scale, 0.01, 0.0002,
+			"a play factor of 0.01 steps at 3/512 and keeps its own scale")
+	# The menu's SOUND row composes its member's pitch with its set's the same way.
+	var menu := MenuAudio.new()
+	add_child_autofree(menu)
+	menu.set_resource_root(root)
+	assert_true(menu.play_widget_sound("ZERO", "menu.lwf"))
+	var click := menu.get_node_or_null("_MenuSound0") as AudioStreamPlayer
+	assert_not_null(click)
+	if click != null:
+		assert_almost_eq(click.pitch_scale, 44100.0 / 512.0 / 22050.0, 0.000001, "the menu voice alike")

@@ -383,6 +383,8 @@ static void test_mounted_attention_respects_vehicle_motion() {
             vehicle.kind = EntityKind::Item;
             vehicle.item_id = 2;
             vehicle.has_item_def = true;
+            // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
+            vehicle.item_attrib = kItemAttribPlayerControl;
             vehicle.health = 100;
             vehicle.position = {0, 0, 2};
             vehicle.yaw = 90;

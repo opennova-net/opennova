@@ -7,6 +7,8 @@
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/core/object.hpp>
 
+#include <formats/lwf/lwf.h>
+
 using namespace godot;
 
 void MissionAudio::_install_voice_resolver() {
@@ -61,13 +63,13 @@ void MissionAudio::sync_script_voice() {
             auto *voice = memnew(AudioStreamPlayer);
             voice->set_stream(stream);
             voice->set_pitch_scale(WavLoader::pitch_scale_for(stream,
-                    SoundBank::pitch_scale_from_q16(frame.state.pitch_q16)));
+                    opennova::lwf::pitch_from_q16(frame.state.pitch_q16)));
             node = voice;
         } else {
             auto *voice = memnew(AudioStreamPlayer3D);
             voice->set_stream(stream);
             voice->set_pitch_scale(WavLoader::pitch_scale_for(stream,
-                    SoundBank::pitch_scale_from_q16(frame.state.pitch_q16)));
+                    opennova::lwf::pitch_from_q16(frame.state.pitch_q16)));
             SoundBank::configure_unattenuated_3d(voice);
             node = voice;
         }

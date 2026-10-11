@@ -22,11 +22,11 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // slot so a missing AiSystem never leaks a half-initialized 0x14B9 entity into the pool (the
     // per-tick spawn retry would otherwise orphan one every tick until the pool is exhausted).
 
-    // Spawn at FULL health [orig: Entity_InitFromItemDef @0x49e550 — Health = healthMax]: the
-    // items.def Player hp when the host's traits sweep resolved it (class-8 Player = 150), else
-    // the spawn seed's fallback. health_max is stamped alongside so the §5.10 field-17 tier
-    // denominator reads the spawn value (full => tier 2 => the golden 0x28) even for a joiner
-    // spawning AFTER the mission-load sweep. (D-NET-144)
+    // The def hp word (itemDef+0x17C) when the host's traits sweep resolved the Player def
+    // (class-8 Player = 150), else the spawn seed's fallback (a def hp of 0 included: D-PWR-10).
+    // health_max is stamped alongside so the §5.10 field-17 tier denominator reads the spawn
+    // value (full => tier 2 => the golden 0x28) even for a joiner spawning AFTER the
+    // mission-load sweep. (D-NET-144)
     const int32_t hp = retail_signed_i16(
         (world.tables.player.has_item_def && world.tables.player.item_hp != 0)
             ? world.tables.player.item_hp
@@ -64,7 +64,9 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     seed.pitch = spawn.pitch;
     seed.roll = spawn.roll;
     seed.team = spawn.team;
-    seed.health = hp;     // [orig: Entity_InitFromItemDef @0x49e550 — healthMax -> Health]
+    // The wire record's item init stores the def word [orig: Entity_InitFromItemDef @0x49e550:
+    // healthMax -> Health]; the authority's spawn zeroes it below.
+    seed.health = hp;
     seed.critical_hp = retail_signed_i16(world.tables.player.critical_hp);
     seed.health_max = hp; // the §5.10 field-17 tier denominator (D-NET-144)
     seed.equipped_adm_index = spawn.equipped_adm_index; // entity+0x2B0 spawn default (D-NET-143)
@@ -92,9 +94,23 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     if (!h.valid()) return h;
     Entity *ent = world.registry.get(h);
 
+    // Publish the local-player handle ONLY for the host's own player: the net anchor + present
+    // resolve it. A remote peer never becomes the local player. [ADR 0012] The class init points
+    // it at the new body ahead of its health raise [orig: PlayerClass_InitEntity @0x4B1124].
+    if (is_local) world.cached.local_player = h;
+    // The authority's spawn zeroes the row (a joiner's own body keeps its record's def word),
+    // then the class init and the spawn each raise the health to the ceiling, a signed word
+    // compare: the def word in a session, out of one the local player's with the difficulty
+    // word a fresh SP start's bring-up seeded from the profile (D-PWR-6). [orig:
+    //  Entity_SpawnFromAnimSlotProperty @0x43C390 - the memset @0x43C3FE, the class init called
+    //  @0x43C4FE (PlayerClass_InitEntity's raise @0x4B112B), the raise @0x43C557..0x43C56B]
+    const int32_t ceiling = max_health_with_difficulty(world, *ent, hp);
+    if (!spawn.from_wire_record) ent->health = 0;
+    if (retail_signed_i16(ent->health) < ceiling) ent->health = ceiling;
+
     // §5.2b step 5: clear the entity+36 bit-1 movement gate + back up the spawn position.
     // [orig: Entity_ResetToSpawnState @0x4B9610]
-    entity_reset_to_spawn_state(*ent);
+    entity_reset_to_spawn_state(*ent, ceiling);
 
     // Mount the infantry motor — same motor as an NPC organic. The host's own player is ordered
     // from input and never AI-think/routed; a remote peer is snapped from the wire and the motor
@@ -110,7 +126,7 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     ae.heading = player_spawn_heading(spawn);
     ae.team = spawn.team;
     ae.net_id = spawn.net_id;
-    ae.health = static_cast<int16_t>(hp); // hp was explicitly narrowed/sign-extended above
+    ae.health = static_cast<int16_t>(ent->health); // a signed 16-bit value above
     ae.inf.active = true;
     ae.inf.is_local_player = is_local;
     // The shared spawn/revive body reset (fresh attach: everything is default
@@ -120,14 +136,10 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
     // [orig: Entity_SpawnFromAnimSlotProperty @0x43C54F]
     if (spawn.berserk) ae.slot.f[AiSlot::kBehaviorFlags] |= 0x200;
 
-    // Publish the local-player handle ONLY for the host's own player — the net anchor + present
-    // resolve it. A remote peer never becomes the local player. [ADR 0012]
-    if (is_local) {
-        world.cached.local_player = h;
-        // The player class init zeroes the incoming-lock tone for the local
-        // player's entity [orig: PlayerClass_InitEntity @0x4b10d0..0x4b10de].
-        if (world.local_player_state != nullptr) world.local_player_state->radar.lock_tone = 0;
-    }
+    // The player class init zeroes the incoming-lock tone for the local
+    // player's entity [orig: PlayerClass_InitEntity @0x4b10d0..0x4b10de].
+    if (is_local && world.local_player_state != nullptr)
+        world.local_player_state->radar.lock_tone = 0;
     if (world.collision != nullptr)
         world.collision->refresh_after_registry_change(world);
     return h;

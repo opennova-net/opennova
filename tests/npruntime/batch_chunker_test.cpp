@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -53,23 +54,80 @@ int main() {
 			ok = expect(p.size() <= 25, "no page exceeds the byte cap") && ok;
 	}
 
-	// Retail pool-3 guard: record 62 crosses written+30 > 650 but remains in the page.
+	// Retail pool-3 guard: record 62 (index 61) crosses written+30 > 650 but remains in the page, and
+	// the cursor stays on it, so page 2 starts with it again: records 61..64, 4+4*10 = 44 B (D-NET-397).
+	// [orig: NetPacket_SerializeEntityPoolToPacket @0x503460 — the count @0x503687, `jg` @0x503694
+	//  past the cursor step]
 	{
 		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
 				65, inmatch::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{10, 4}, 0, 100);
-		ok = (r.pages.size() == 2) && ok;
-		ok = (r.pages[0].size() == 624) && ok;
-		ok = (r.pages[1].size() == 34) && ok;
-		ok = (r.next_cursor == 65 && r.exhausted) && ok;
+		ok = expect(r.pages.size() == 2, "pool-3: two pages") && ok;
+		ok = expect(r.pages.size() == 2 && r.pages[0].size() == 624, "pool-3: page 1 holds 62 records") && ok;
+		ok = expect(r.pages.size() == 2 && r.pages[1].size() == 44,
+				"pool-3: page 2 repeats the crossing record (61..64)") && ok;
+		ok = expect(r.next_cursor == 65 && r.exhausted, "pool-3: exhausted") && ok;
 	}
 
-	// The retail comparison is strict: 610 written + 40 margin == 650 continues one more record.
+	// The retail comparison is strict: 610 written + 40 margin == 650 continues one more record. Record
+	// 102 (index 101) crosses; page 2 repeats it: records 101..102, 4+2*6 = 16 B.
 	{
 		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
 				103, inmatch::initial_state_page_limits::pool2_static(), FixedRecordEncoder{6, 4}, 0, 100);
-		ok = (r.pages.size() == 2) && ok;
-		ok = (r.pages[0].size() == 616) && ok;
-		ok = (r.pages[1].size() == 10) && ok;
+		ok = expect(r.pages.size() == 2, "pool-2: two pages") && ok;
+		ok = expect(r.pages.size() == 2 && r.pages[0].size() == 616, "pool-2: page 1 holds 102 records") && ok;
+		ok = expect(r.pages.size() == 2 && r.pages[1].size() == 16,
+				"pool-2: page 2 repeats the crossing record (101..102)") && ok;
+	}
+
+	// Each page after the first starts with its predecessor's last record: record the (off, cnt) of
+	// every page. 0x0C, 2-byte header, 50-byte records: 2+50k+100 > 650 at k = 11, so each page holds
+	// 11 records and the next starts at its last one (0..10, 10..20, 20..29). [orig:
+	// NetPacket_SerializeEntityStatesToBuffer @0x5030A0 — the count @0x5033F7, `jg` @0x50340D]
+	{
+		std::vector<std::pair<std::size_t, std::size_t>> spans;
+		auto encoder = [&spans](std::size_t off, std::size_t cnt) {
+			if (!spans.empty() && spans.back().first == off) spans.back().second = cnt;
+			else spans.emplace_back(off, cnt);
+			return std::vector<uint8_t>(2 + cnt * 50, 0);
+		};
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
+				30, inmatch::initial_state_page_limits::pool0_organics(), encoder, 0, 100);
+		ok = expect(r.pages.size() == 3 && spans.size() == 3, "pool-0: three pages") && ok;
+		ok = expect(spans.size() == 3 && spans[0] == std::pair<std::size_t, std::size_t>(0, 11) &&
+		                    spans[1] == std::pair<std::size_t, std::size_t>(10, 11) &&
+		                    spans[2] == std::pair<std::size_t, std::size_t>(20, 10),
+		            "pool-0: each page starts at its predecessor's last record") && ok;
+		ok = expect(r.exhausted && r.next_cursor == 30, "pool-0: exhausted") && ok;
+	}
+
+	// The test runs after the pool's last record too: 62 pool-3 records cross on the last one, so it is
+	// sent again as a page of its own (4+10 = 14 B), which does not cross and ends the pool.
+	{
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
+				62, inmatch::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{10, 4}, 0, 100);
+		ok = expect(r.pages.size() == 2 && r.pages[0].size() == 624 && r.pages[1].size() == 14,
+				"a crossing last record is sent again alone") && ok;
+		ok = expect(r.exhausted && r.next_cursor == 62, "the lone repeat ends the pool") && ok;
+	}
+
+	// One page a call: the saved cursor is the crossing record, not the one after it.
+	{
+		inmatch::BatchPageResult a = inmatch::slice_batch_pages(
+				65, inmatch::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{10, 4}, 0, 1);
+		ok = expect(a.pages.size() == 1 && a.next_cursor == 61 && !a.exhausted,
+				"call 1: the cursor stays on the crossing record") && ok;
+		inmatch::BatchPageResult b = inmatch::slice_batch_pages(
+				65, inmatch::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{10, 4},
+				a.next_cursor, 1);
+		ok = expect(b.pages.size() == 1 && b.pages[0].size() == 44 && b.exhausted,
+				"call 2: the page restarts at the crossing record") && ok;
+	}
+
+	// A record that crosses alone still moves the stream on (one record a page), or it would never end.
+	{
+		inmatch::BatchPageResult r = inmatch::slice_batch_pages(
+				3, inmatch::initial_state_page_limits::pool3_markers(), FixedRecordEncoder{700, 4}, 0, 100);
+		ok = expect(r.pages.size() == 3 && r.exhausted, "a lone crossing record steps on") && ok;
 	}
 
 	// The named production policies pin every witnessed entity-pool margin and the tile pre-check.

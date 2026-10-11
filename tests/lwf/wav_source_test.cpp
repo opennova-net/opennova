@@ -115,6 +115,20 @@ int test_waves() {
 	adpcm[34] = 4;
 	TEST_EXPECT(wave_retail_check(adpcm).why.find("fact") != std::string::npos);
 	TEST_EXPECT(!wave_retail_check(text_bytes("not a wave")).plays);
+	// A rate from 0xAC440000 puts the loader's pitch ratio, ((rate << 16) + 22050) / 44100, past 32 bits and
+	// its division faults [orig: Audio_LoadWavFileFromArchive @ 0x76662b, @ 0x766730, @ 0x7667dc]; a rate
+	// below it plays. The writer writes no such wave.
+	const WaveRetailCheck faulting = wave_retail_check(wave_of(1, 16, 0xAC440000u, 4));
+	TEST_EXPECT(!faulting.plays && faulting.why.find("2890137600 Hz") != std::string::npos);
+	TEST_EXPECT(wave_retail_check(wave_of(1, 16, 0xAC43FFFFu, 4)).plays);
+	{
+		std::vector<uint8_t> written;
+		std::string written_error;
+		const uint8_t two[] = {0x00, 0x10};
+		TEST_EXPECT(!wav_write_pcm_mono(two, 2, 0xAC440000u, 16, written, written_error) && !written_error.empty());
+		TEST_EXPECT(wav_write_pcm_mono(two, 2, 0xAC43FFFFu, 16, written, written_error) &&
+		            wave_retail_check(written).plays);
+	}
 	// The loader's own buffer, AUD1, is taken unchecked; an AOA1 one is refused at the RIFF compare [orig:
 	// Audio_LoadWavFileFromArchive @ 0x7664e2, @ 0x766523]. Its samples read as the mixer reads them: 16-bit
 	// where its width byte is 2, else 8-bit [orig: sub_7BD671 @ 0x7bd692].

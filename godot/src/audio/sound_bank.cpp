@@ -179,7 +179,8 @@ Node3D *SoundBank::spawn_ambient(Node3D *p_parent, const Vector3 &p_world_pos, c
 			holder->set_position(p_world_pos);
 			p_parent->add_child(holder);
 		}
-		AudioStreamPlayer3D *player = _make_player(stream, _member_base_pitch(member), p_bus, true, 0);
+		AudioStreamPlayer3D *player = _make_player(stream,
+				effective_base_pitch(_member_base_pitch(member)), p_bus, true, 0);
 		holder->add_child(player);
 		player->play();
 		// Ambient candidates are data until the top-eight mixer selects them.
@@ -308,12 +309,13 @@ bool SoundBank::_play_oneshot_plan(Node *p_parent, const Vector3 &p_world_pos,
 				static_cast<uint8_t>(voice.vol255), p_plan.sound_id);
 		if (slot < 0) continue;
 		stop_oneshot(Object::cast_to<Node>(ObjectDB::get_instance(oneshots_[slot])));
+		// The composed play factor as it is, 0 among them: the player's scale forces a step of 0 to
+		// the least step (WavLoader::pitch_scale_for).
 		const double pitch = opennova::lwf::pitch_from_q16(voice.pitch_q16);
 		if (p_interface) {
 			auto *player = memnew(AudioStreamPlayer);
 			player->set_stream(stream);
-			player->set_pitch_scale(
-					WavLoader::pitch_scale_for(stream, pitch_scale_from_q16(voice.pitch_q16)));
+			player->set_pitch_scale(WavLoader::pitch_scale_for(stream, pitch));
 			player->set_volume_db(volume_db_from_255(voice.vol255));
 			if (p_bus != StringName() && AudioServer::get_singleton()->get_bus_index(p_bus) >= 0)
 				player->set_bus(p_bus);
@@ -433,7 +435,7 @@ double SoundBank::_member_base_pitch(const opennova::lwf::Sndparm &p_member) {
 	return opennova::lwf::pitch_from_q16(p_member.pitch_scaled);
 }
 
-AudioStreamPlayer3D *SoundBank::_make_player(const Ref<AudioStreamWAV> &p_stream, double p_base_pitch,
+AudioStreamPlayer3D *SoundBank::_make_player(const Ref<AudioStreamWAV> &p_stream, double p_play_scale,
 		const StringName &p_bus, bool p_loop, int p_vol255) {
 	AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
 	// Loop the stream copy (not the cached one's loop flag for one-shots): duplicate
@@ -450,17 +452,13 @@ AudioStreamPlayer3D *SoundBank::_make_player(const Ref<AudioStreamWAV> &p_stream
 	if (p_bus != StringName() && AudioServer::get_singleton()->get_bus_index(p_bus) >= 0) {
 		player->set_bus(p_bus);
 	}
-	player->set_pitch_scale(WavLoader::pitch_scale_for(p_stream, effective_base_pitch(p_base_pitch)));
+	player->set_pitch_scale(WavLoader::pitch_scale_for(p_stream, p_play_scale));
 	player->set_volume_db(volume_db_from_255(p_vol255));
 	return player;
 }
 
 double SoundBank::effective_base_pitch(double p_base_pitch) {
 	return p_base_pitch > 0.01 ? p_base_pitch : 1.0;
-}
-
-double SoundBank::pitch_scale_from_q16(uint32_t p_pitch_q16) {
-	return effective_base_pitch(opennova::lwf::pitch_from_q16(p_pitch_q16));
 }
 
 Ref<AudioStreamWAV> SoundBank::loop_copy(const Ref<AudioStreamWAV> &p_stream) {
