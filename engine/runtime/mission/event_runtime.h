@@ -47,6 +47,39 @@ struct ScriptedEvent {
     uint8_t active = 0;
 };
 
+// The live-logic trace of one event: port-side tooling (ADR 0039; the F3
+// Script window, game_debug's mission_logic_snapshot and the editor's live
+// board read it), with no counterpart in the original's 24-byte record and
+// no behaviour of its own. The chain RECORDS each term as it runs it, never
+// re-evaluates one: the input-bit triggers toggle the mirror when run
+// [orig: EventTrigger_EvaluateCondition @0x453bab].
+struct EventTrace {
+    // Per trigger of the slice: -1 the last run did not evaluate it (or the
+    // chain never ran), else the term the chain folded, after the trigger's
+    // own negation bit [orig: EventTrigger_EvaluateChain @0x454084/@0x4540ac],
+    // a nonzero raw result (Berserk's 0x200) read as 1.
+    std::vector<int8_t> trigger_truth;
+    // The chain's last result (nonzero read as 1) and the logic tick it ran
+    // on; -1 = the chain has not run since the load.
+    int8_t chain = -1;
+    int64_t last_checked_tick = -1;
+    // A requested fire (force_fire): the chain's next run reads true, so the
+    // activation delay, the latch and the repeat cooldown then run as the
+    // event's own. Cleared with the trace at each load.
+    bool fire_pending = false;
+};
+
+// What a fire request (BmsEventSystem::force_fire) came to.
+enum class FireRequest {
+    Armed,       // the chain reads true at its next run
+    NoEvent,     // no event of that index
+    PreMission,  // its one pass ran at the mission start
+    PostMission, // its one pass runs at the teardown
+    Latched,     // a fire-once event whose latch is set: its chain runs no more
+};
+// The refusal in a sentence ("" for Armed).
+const char *fire_request_words(FireRequest request);
+
 class BmsEventSystem : public opennova::world::ISystem, public opennova::world::IScriptEventQuery {
 public:
     const char *name() const override { return "bms_events"; }
@@ -104,16 +137,32 @@ public:
 
     const std::vector<ScriptedEvent> &events() const { return events_; }
 
+    // The live-logic trace, one per event (index-aligned with events()).
+    const std::vector<EventTrace> &traces() const { return traces_; }
+
+    // Debug control (game_debug fire_event): the event's chain reads true at
+    // its next run, after every predicate has run (and recorded) as on any
+    // pass. The chain runs only while the event is idle (no delay or cooldown
+    // counting, the latch clear), so a request on a repeat event waits for
+    // that. Refused, nothing armed: an index past the list; a PreMission or
+    // PostMission event, whose one pass runs at the mission's start or its
+    // teardown [orig: EventTrigger_UpdateAllWithFlag2 @0x454dc0, Game_StartMission
+    // @0x525b86; EventTrigger_UpdateAllWithFlag4 @0x454e00, Game_TeardownMission
+    // @0x52266c]; a fire-once event whose latch is set, which runs its chain
+    // again only after a ResetEvent clears the latch [orig: EventTrigger_UpdateEntry
+    // @0x454c63; EventAction_Dispatch case 0x22 @0x454974].
+    FireRequest force_fire(size_t index);
+
     // Test seams over the private evaluator/dispatcher and the raw 24-byte
     // record words (public API for the ctest suite; no behavior of their own).
     int32_t evaluate_trigger_for_test(opennova::world::World &w, const bms::Trigger &t) {
         return evaluate_trigger(w, t);
     }
     int32_t evaluate_chain_for_test(opennova::world::World &w, size_t index) {
-        return evaluate_chain(w, events_[index]);
+        return evaluate_chain(w, index);
     }
     void update_entry_for_test(opennova::world::World &w, size_t index) {
-        update_entry(w, events_[index]);
+        update_entry(w, index);
     }
     void dispatch_action_for_test(opennova::world::World &w, const bms::Action &a) {
         dispatch_action(w, a);
@@ -122,6 +171,7 @@ public:
 
 private:
     std::vector<ScriptedEvent> events_;
+    std::vector<EventTrace> traces_;
     int normal_gate_ = 0;    // every-16th-tick gate [orig: dword_C8D808 in Server_TickUpdate]
     int quarter_cursor_ = 0; // round-robin quarter index 0..3 [orig: dword_AE06FC]
     int32_t awol_64tick_count_ = 0; // [orig: dword_A89160] (D-EVT-2)
@@ -141,14 +191,17 @@ private:
     // the zone box: p1 = x_min, p3 = y_min, p4 = x_max, reserved1 = y_max, the
     // words the dispatch's bounds test and command arguments then read.
     void resolve_zone_refs(opennova::world::World &w);
+    // One cleared trace per event, its truth row sized to the trigger slice.
+    void reset_traces();
 
-    void update_entry(opennova::world::World &w, ScriptedEvent &se);
-    void fire(opennova::world::World &w, ScriptedEvent &se);
+    // Each by the event's index in events_ (the record's place in g_Events).
+    void update_entry(opennova::world::World &w, size_t index);
+    void fire(opennova::world::World &w, size_t index);
     // Both return the original's raw ints: every evaluator answers 0/1 except
     // the Berserk read (the 0x200 bit) and the load-parity word, and the chain
     // folds them bitwise. [orig: EventTrigger_EvaluateCondition @0x453620;
     //  EventTrigger_EvaluateChain @0x454050]
-    int32_t evaluate_chain(opennova::world::World &w, const ScriptedEvent &se);
+    int32_t evaluate_chain(opennova::world::World &w, size_t index);
     int32_t evaluate_trigger(opennova::world::World &w, const bms::Trigger &t);
     void dispatch_action(opennova::world::World &w, const bms::Action &a, int32_t event = -1, int32_t action = -1);
 };

@@ -58,6 +58,7 @@ struct ContactDebugRow;
 namespace inspect {
 struct EntityMarker;
 struct EntityMarkerQuery;
+struct LocalPlayerReport;
 } // namespace inspect
 } // namespace opennova::world
 namespace opennova::mission {
@@ -67,9 +68,6 @@ struct ScriptDebugReport;
 namespace opennova::inmatch {
 struct NetDebugReport;
 } // namespace opennova::inmatch
-namespace opennova::world::inspect {
-struct LocalPlayerReport;
-} // namespace opennova::world::inspect
 
 namespace godot {
 
@@ -1953,6 +1951,8 @@ public:
 	int get_mission_variable(int index) const;
 	bool has_event_fired(int index) const;
 	int get_event_count() const;
+	// game_debug's fire_event (BmsEventSystem::force_fire): `r_reason` says why a request is refused.
+	Error debug_fire_event(int p_event, String &r_reason);
 
 	// --- Read-only introspection (dev tools / MCP tooling) -----------------
 	// The world's logic tick counter (engine: base/io/tick_rate.h). The

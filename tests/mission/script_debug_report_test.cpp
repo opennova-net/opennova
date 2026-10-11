@@ -1,6 +1,7 @@
 // mission::script_debug_report (the F3 Script window's record) over the
 // synthetic mission: the WAC program and VM state, the per-event fired
-// state, the BMS events, the variable banks the script writes, and the
+// state, the BMS events with their live-logic trace, the mission and the
+// tick, the variable banks the script writes, and the
 // first compile error (the retail script-state page's line) for a script
 // that does not compile; and the local player report beside it.
 #include "common/boot_file_source.h"
@@ -54,6 +55,16 @@ int main() {
 		CHECK(r.wac_events.size() == 2 && r.wac_events[0].ever_fired && r.wac_events[0].fired_count > 0);
 		CHECK(r.mission_vars[1] != 0);            // the script wrote V1
 		CHECK(r.bms_events.size() == 1);          // the synthetic mission's one event
+		// Its empty chain ran (true, no terms) and latched the fire-once event.
+		CHECK(r.bms_events.size() == 1 && r.bms_events[0].trigger_truth.empty() &&
+				r.bms_events[0].chain == 1 && r.bms_events[0].last_checked_tick >= 0 &&
+				r.bms_events[0].active && !r.bms_events[0].fire_pending);
+		// What game_debug's mission_logic_snapshot reads beside: the mission and the tick; the fire-once
+		// event, latched, takes no fire request.
+		CHECK(r.mission == "synth" && r.logic_tick == kernel.world.logic_tick && r.bms_events[0].flags == 0);
+		CHECK(kernel.events.force_fire(0) == mission::FireRequest::Latched);
+		CHECK(kernel.events.force_fire(1) == mission::FireRequest::NoEvent);
+		CHECK(!mission::script_debug_report(kernel).bms_events[0].fire_pending);
 		CHECK(r.dispatch_count > 0);
 		CHECK(r.wac_initial_executed);
 

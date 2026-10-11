@@ -221,7 +221,10 @@ func _tool_game_debug(args: Dictionary, _ctx: McpToolContext) -> Variant:
 				return McpToolResult.error(marshalled.reason)
 			var outcome: DebugInvokeResult = controls.invoke(id, marshalled.args, confirmed)
 			if outcome.error != OK:
-				return McpToolResult.error(_debug_error(id, outcome.error as Error))
+				# A row that refuses with the engine's words carries them as its result.
+				var why := String(outcome.result) if outcome.result is String else ""
+				return McpToolResult.error(_debug_error(id, outcome.error as Error)
+						+ ("" if why.is_empty() else " " + why))
 			return outcome.to_json_value()
 		"snapshot":
 			# The table's JSON snapshot plus the shell's runtime block: the

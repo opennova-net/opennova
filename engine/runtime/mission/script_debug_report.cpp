@@ -2,6 +2,8 @@
 
 #include <runtime/mission/mission_kernel.h>
 
+#include <utility>
+
 namespace opennova::mission {
 
 ScriptDebugReport script_debug_report(const MissionKernel &kernel) {
@@ -33,11 +35,16 @@ ScriptDebugReport script_debug_report(const MissionKernel &kernel) {
 		out.wac_events.push_back({e.last_fired_tick, e.fired_count, e.ever_fired, e.active});
 	}
 
+	out.mission = kernel.mission_basename;
+	out.logic_tick = kernel.world.logic_tick;
 	const auto &events = kernel.events.events();
+	const auto &traces = kernel.events.traces();
+	out.bms_events.reserve(events.size());
 	for (size_t i = 0; i < events.size(); ++i) {
 		const ScriptedEvent &e = events[i];
 		ScriptBmsEventRow row;
 		row.index = static_cast<int32_t>(i);
+		row.flags = static_cast<uint32_t>(e.event.flags);
 		row.trigger_count = static_cast<int32_t>(e.triggers.size());
 		row.action_count = static_cast<int32_t>(e.actions.size());
 		row.active = e.active != 0;
@@ -46,7 +53,14 @@ ScriptDebugReport script_debug_report(const MissionKernel &kernel) {
 		row.repeat_reload = e.repeat_reload;
 		row.activate_countdown = e.activate_countdown;
 		row.activate_reload = e.activate_reload;
-		out.bms_events.push_back(row);
+		if (i < traces.size()) {
+			const EventTrace &trace = traces[i];
+			row.trigger_truth = trace.trigger_truth;
+			row.chain = trace.chain;
+			row.last_checked_tick = trace.last_checked_tick;
+			row.fire_pending = trace.fire_pending;
+		}
+		out.bms_events.push_back(std::move(row));
 	}
 	out.awol_count = kernel.events.awol_count();
 	out.second_time_through = BmsEventSystem::second_time_through();
