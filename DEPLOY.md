@@ -17,8 +17,9 @@ use. The original games reach your server through a hosts-file line that points
   recommended for TLS).
 
 No secret is ever committed to the repository or written to your disk outside a
-container's in-memory tmpfs. The only secret you handle directly is a 1Password
-service-account token.
+container's in-memory tmpfs, except what the Terraform state holds (the edge
+authentication secret, once that is on; section 3). The only secret you handle
+directly is a 1Password service-account token.
 
 ## 1. Create the vault
 
@@ -105,11 +106,21 @@ drift never replaces your instance and releases the EIP.
 Set `ONNET_PUBLIC_HOST` in `deploy/env/app.prod.env` to the EIP that
 `infra apply` reports (`terraform output public_ip`).
 
-The same file sets the website login's `ONNET_COOKIE_SECURE=1` and
-`ONNET_TRUSTED_PROXIES=127.0.0.1` (apps/novaworld_server/README.md). The Secure
-session cookie needs the site served over https only: keep the web records proxied
-(`cloudflare_web_proxied`, the default) and turn on Cloudflare's "Always Use HTTPS",
-or a visitor on plain http cannot stay logged in.
+The same file sets the website login's `ONNET_COOKIE_SECURE=1`,
+`ONNET_TRUSTED_PROXIES=127.0.0.1` and `ONNET_API_PROXY_ONLY=1`
+(apps/novaworld_server/README.md). The Secure session cookie needs the site served
+over https only: keep the web records proxied (`cloudflare_web_proxied`, the default)
+and turn on Cloudflare's "Always Use HTTPS", or a visitor on plain http cannot stay
+logged in.
+
+The server's own HTTP port (8080) is open to the internet: a stock client fetches the
+`NW*.dll` pages and the `.gsb` server lists from it directly, through no proxy. Its
+`/api/` is the website's, though, and `ONNET_API_PROXY_ONLY=1` answers it only to the
+portal's nginx, which reaches the server from `127.0.0.1` (host networking, with
+`host.docker.internal` mapped to the loopback in `docker-compose.prod.yml`): any other
+peer gets 403, so the website's API is reached only through nginx and the checks it
+applies. Check after a deploy: `curl -i http://<EIP>:8080/api/health` answers 403, and
+`curl -i http://<EIP>:8080/jop_2.gsb` still answers 200.
 
 Behind the proxied records every request reaches nginx from a Cloudflare edge, so the
 portal's nginx takes the visitor's address from `CF-Connecting-IP`, for a peer in
@@ -130,32 +141,70 @@ website side.
 
 With it on, a Cloudflare Transform Rule on our zone stamps a secret header,
 `X-OpenNova-Edge`, on every request for the web hostnames, and the portal's nginx
-answers `/api/` only to requests carrying it (403 otherwise, and the header is not
-forwarded to the server), so only requests that came through our own zone, where
-Cloudflare sets `CF-Connecting-IP` itself, reach the server. It stays off while
-`EDGE_AUTH_SECRET` is unset (web/docker-entrypoint.sh, `infra/aws`
-`cloudflare_ruleset.edge_auth`). To turn it on:
+forwards `/api/` only for requests carrying it (403 otherwise, and the header is not
+forwarded to the server), so the requests nginx passes on came through our own zone,
+where Cloudflare sets `CF-Connecting-IP` itself. It guards nginx only; the server's own
+port refuses `/api/` to anyone but nginx through `ONNET_API_PROXY_ONLY`, above. It stays
+off while `EDGE_AUTH_SECRET` is unset (web/docker-entrypoint.sh, `infra/aws`
+`cloudflare_ruleset.edge_auth`). Terraform creates the rule only while the web records
+are proxied (`cloudflare_web_proxied`), and its plan warns about a secret without them:
+unproxied records reach the origin through no Transform Rule, so with
+`EDGE_AUTH_SECRET` set nginx would refuse every `/api/` request. Keep the web records
+proxied while it is on. To turn it on:
 
-1. Add an `edge_auth_secret` field to the `app-prod` vault item: letters and digits, at
-   least 32 (`openssl rand -hex 32`).
+1. Add an `edge_auth_secret` field to the `app-prod` vault item: lowercase hex, at
+   least 32 characters (`openssl rand -hex 32` gives 64). The entrypoint and Terraform
+   accept letters and digits, but nginx compares the header without regard to case,
+   so mixed case adds no strength.
 2. Give the Cloudflare API token in the `cloudflare` item the extra permission
    Zone / Transform Rules / Edit.
 3. Add `TF_VAR_edge_auth_secret=op://OpenNova-Deploy/app-prod/edge_auth_secret` to
    `deploy/env/terraform.env.tpl` and run `./deploy/run.sh infra plan`, then
-   `infra apply`: it creates the late-transform ruleset (a zone holds one per phase,
-   so import an existing one first). The dashboard alternative: Rules, Transform
-   Rules, Modify Request Header, "Set static" `X-OpenNova-Edge` to the secret for the
-   root and `www` hostnames.
+   `infra apply`: it creates the late-transform ruleset. A zone holds one entrypoint
+   ruleset per phase, so if the zone has one already, import it first; Terraform is
+   then authoritative over all of its rules, and the apply replaces whatever rules it
+   held with this one (copy any you need into `infra/aws/main.tf` before applying).
+   The dashboard alternative: Rules, Transform Rules, Modify Request Header, "Set
+   static" `X-OpenNova-Edge` to the secret for the root and `www` hostnames.
 4. Add `EDGE_AUTH_SECRET=op://OpenNova-Deploy/app-prod/edge_auth_secret` to
    `deploy/env/app.prod.env.tpl` and deploy (`./deploy/run.sh app deploy`). The web
    container logs `edge authentication: ON`.
-5. Check: `curl -i https://<domain>/api/health` answers 200, and the same request
-   straight to the origin IP (`curl -i -H 'Host: <domain>' http://<EIP>/api/health`)
-   answers 403.
+5. Check: `curl -i https://<domain>/api/health` answers 200, the same request
+   straight to the origin's nginx (`curl -i -H 'Host: <domain>' http://<EIP>/api/health`)
+   answers 403, and so does the server's own port (`curl -i http://<EIP>:8080/api/health`).
 
 Order matters: apply the rule (step 3) before deploying the secret (step 4), or the
-site's API answers 403 in between. To rotate, change the vault field and run both
-steps again.
+site's API answers 403 in between.
+
+The secret lands in the Terraform state in plain text (`sensitive` only keeps it out of
+plan output): in the vault's `tfstate` document, and in `infra/aws/terraform.tfstate`,
+which every `infra` run pulls into the working copy the toolbox mounts and leaves there
+(gitignored, but on your disk). Treat the `tfstate` document as a secret, and delete the
+local file after a run on any machine others can read.
+
+**Rotating.** nginx accepts a second value, `EDGE_AUTH_SECRET_PREVIOUS`, beside the
+current one while a rotation runs, so the rule can move without a window of 403s:
+
+1. In the `app-prod` vault item, copy the current `edge_auth_secret` into a new field
+   `edge_auth_secret_previous`, then set `edge_auth_secret` to the new secret
+   (`openssl rand -hex 32`).
+2. Add `EDGE_AUTH_SECRET_PREVIOUS=op://OpenNova-Deploy/app-prod/edge_auth_secret_previous`
+   to `deploy/env/app.prod.env.tpl` and deploy the app. nginx now accepts both (the web
+   container logs that the previous secret is accepted too); the rule still stamps
+   the old one.
+3. `./deploy/run.sh infra apply`: the rule stamps the new secret.
+4. Remove the `EDGE_AUTH_SECRET_PREVIOUS` line (and the vault field) and deploy the app
+   again: only the new secret passes. Run step 5's checks.
+
+The previous secret takes the same rule as the current one (the container stops on a
+malformed one, one set without `EDGE_AUTH_SECRET`, or one equal to it).
+
+**Turning it off.** Unset the environment first, then remove the rule, or the site's
+API answers 403 in between: remove the `EDGE_AUTH_SECRET` (and any
+`EDGE_AUTH_SECRET_PREVIOUS`) line from `deploy/env/app.prod.env.tpl` and deploy the app
+(the web container logs `edge authentication: OFF`), then remove the
+`TF_VAR_edge_auth_secret` line from `deploy/env/terraform.env.tpl` and run
+`infra apply`, which deletes the ruleset.
 
 To make the first site admin, register the account, then add a `bootstrap_admin` field
 holding its username to the `app-prod` vault item and the line

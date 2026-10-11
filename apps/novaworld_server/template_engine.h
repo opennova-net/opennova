@@ -24,12 +24,28 @@ namespace opennova::novaworld_server {
 //   - Scans for `{{` and matching `}}`.
 //   - Trims interior whitespace from the key (e.g. `{{ FOO }}` → key="FOO").
 //   - Looks up the key in `vars` (case-sensitive). On hit, substitutes the
-//     value. On miss, leaves the literal `{{KEY}}` text in place
-//     (matches net2 behavior; surfaces unset vars during dev).
-//   - Does NOT do HTML escaping (templates are pre-trusted; user-supplied
-//     vars never injected for Phase E).
+//     value, escaped for HTML (html_escape). On miss, leaves the literal
+//     `{{KEY}}` text in place (matches net2 behavior; surfaces unset vars
+//     during dev).
+//
+// Every value is text, never markup: the page names a request carries (IN,
+// OUT, MSGBASE), a listed server's own name (SERVER_NAME), an admin's
+// maintenance message (MESSAGE) and the rest reach the page as the characters
+// they hold, in an element's text or a quoted attribute alike. No template
+// variable carries markup; one that had to would need its own raw opt-in.
 
 using TemplateVars = std::map<std::string, std::string>;
+
+// `text` with each of & < > " ' as its entity (&amp; &lt; &gt; &quot; &#39;)
+// and every other byte as it is. A stock client's page parser turns those
+// entities back into the characters they name [orig:
+// xml_decode_entity_reference @0x655330, the named table at 0x84C1E8 holding
+// &quot; &amp; &lt; &gt;, and &#NN; through atol, called from
+// build_content_node_from_html @0x656161 for each '&' in the page text], so a
+// value shows as itself. Every value the service fills in for a stock client
+// (A-P keys, session tags, page names, numbers, addresses and URLs, names with
+// spaces) holds none of the five and goes out byte for byte.
+std::string html_escape(std::string_view text);
 
 std::string render_template(std::string_view tmpl, const TemplateVars &vars);
 

@@ -115,6 +115,14 @@ struct ServerConfig {
 	// the TCP peer is the client, and those headers are ignored.
 	std::vector<std::string> trusted_proxies;
 
+	// ONNET_API_PROXY_ONLY=1: the website's API (/api and everything under it)
+	// answers 403 to any TCP peer not in trusted_proxies, so it is reached only
+	// through the proxy that applies the site's edge checks (prod's nginx on
+	// 127.0.0.1, DEPLOY.md). The retail routes a stock client reaches on this
+	// port directly (NW*.dll, the .gsb feeds, templates, static files) stay
+	// open. Off by default (the dev site's Vite proxy is in no trusted list).
+	bool api_proxy_only = false;
+
 	// ONNET_BOOTSTRAP_ADMIN: an existing account main() gives the admin role
 	// at boot, the way the first site admin is made. A name no account has is
 	// a warning.

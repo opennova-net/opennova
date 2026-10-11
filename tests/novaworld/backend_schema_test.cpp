@@ -265,7 +265,8 @@ int test_web_sessions_and_roles() {
 
 // 0008 over a database that already holds accounts (every deployment before
 // it): the migrations up to 0007 and the seed, then the full set, which
-// applies 0008 alone and gives every existing account the 'player' role.
+// applies 0008 (and 0010 after it) and gives every existing account the
+// 'player' role.
 int test_web_sessions_migration_over_existing_accounts() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
@@ -289,12 +290,44 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 1);
+	TEST_EXPECT(second.applied.size() == 2);
 	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
+	TEST_EXPECT(second.applied[1] == "0010_credentials_generation.sql");
 	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player') FROM players;");
 	TEST_EXPECT(roles[0].as_int(0).value() == 5);
 	TEST_EXPECT(roles[0].as_int(1).value() == 5);
 	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
+	return 0;
+}
+
+// 0010: a new account starts at credentials generation 0, a retail login's
+// session row carries one, and neither column takes NULL.
+int test_credentials_generation() {
+	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
+	Database db(":memory:");
+	run_migrations(db, source_dir / "backend" / "migrations");
+
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+			"VALUES ('gen', 'x', '0000bbbb', '1', 'Gen');");
+	TEST_EXPECT(db.query("SELECT credentials_gen FROM players WHERE username = 'gen';")
+						.front()
+						.as_int(0)
+						.value() == 0);
+	db.exec("INSERT INTO active_user_sessions (user_id, username, session_tag, credentials_gen) "
+			"SELECT id, username, 'tag-gen', credentials_gen FROM players WHERE username = 'gen';");
+	TEST_EXPECT(db.query("SELECT 1 FROM active_user_sessions WHERE session_tag = 'tag-gen' "
+						 "AND credentials_gen = 0;")
+						.size() == 1);
+	for (const char *sql : { "UPDATE players SET credentials_gen = NULL WHERE username = 'gen';",
+				 "UPDATE active_user_sessions SET credentials_gen = NULL;" }) {
+		bool caught = false;
+		try {
+			db.exec(sql);
+		} catch (const opennova::db::SqliteError &) {
+			caught = true;
+		}
+		TEST_EXPECT(caught);
+	}
 	return 0;
 }
 
@@ -307,7 +340,9 @@ int main() {
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
 	if (test_web_sessions_migration_over_existing_accounts() != 0) return 1;
+	if (test_credentials_generation() != 0)
+		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
-	            "web sessions + roles)\n");
+				"web sessions + roles, credentials generation)\n");
 	return 0;
 }

@@ -1,5 +1,6 @@
 #include "nw_udp_listener.h"
 
+#include "loggable.h"
 #include "server_config.h"
 
 #include <net_datagram_socket.h>
@@ -418,8 +419,8 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 		parked_lobby_states_[peer] = ParkedLobbyState{it->second.client_ci, it->second.lobby, now};
 		if (was_hosting) {
 			std::printf("[lobby] stopped addr=%s rid=%u server_name='%s' reason=%s\n",
-			            peer_addr_to_string(peer).c_str(), it->second.lobby.rid,
-			            it->second.lobby.server_name.c_str(), reason);
+					peer_addr_to_string(peer).c_str(), it->second.lobby.rid,
+					loggable(it->second.lobby.server_name).c_str(), reason);
 		}
 		lobby_states_.erase(it);
 	}
@@ -695,8 +696,8 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			}
 			const SessionProtocolKind protocol = classify_session_protocol(hello.pn);
 			if (protocol == SessionProtocolKind::Unsupported) {
-				std::fprintf(stderr, "[nwudp] %s — refusing PN='%s'\n",
-				             client_label.c_str(), hello.pn.c_str());
+				std::fprintf(stderr, "[nwudp] %s — refusing PN='%s'\n", client_label.c_str(),
+						loggable(hello.pn).c_str());
 				if (tracker_) {
 					tracker_->record("pn", hello.pn, body.data(), body.size(),
 					                 client_label, now_ms());
@@ -727,8 +728,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			opennova::net::udp_send_to(socket.get(), from, packet.data(),
 			                           packet.size());
 			std::printf("[nwudp] HELLO from %s ci=0x%08x pn=%s -> ServerHello (%zu B)\n",
-			            client_label.c_str(), hello.ci, hello.pn.c_str(),
-			            packet.size());
+					client_label.c_str(), hello.ci, loggable(hello.pn).c_str(), packet.size());
 			break;
 		}
 
@@ -800,10 +800,9 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			if (!hello_identity_matches ||
 			    (hello_owner->state != ConnectionState::Handshaking &&
 			     hello_owner->state != ConnectionState::Active)) {
-				std::printf(
-						"[nwudp] AUTH without matching lobby Hello from %s"
-						" ci=0x%08x pn=%s; dropped\n",
-						client_label.c_str(), auth.ci, auth.pn.c_str());
+				std::printf("[nwudp] AUTH without matching lobby Hello from %s"
+							" ci=0x%08x pn=%s; dropped\n",
+						client_label.c_str(), auth.ci, loggable(auth.pn).c_str());
 				break;
 			}
 
@@ -903,8 +902,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			opennova::net::udp_send_to(socket.get(), from, packet.data(),
 			                           packet.size());
 			std::printf("[nwudp] AUTH from %s ci=0x%08x na='%s' -> ServerAuth (%zu B)\n",
-			            client_label.c_str(), auth.ci, auth.na.c_str(),
-			            packet.size());
+					client_label.c_str(), auth.ci, loggable(auth.na).c_str(), packet.size());
 			break;
 		}
 
@@ -1051,8 +1049,8 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 						}
 						if (!result.label.empty()) {
 							std::printf("[nwudp] %s SESSION recv name=%s -> %zu replies\n",
-							            client_label.c_str(), result.label.c_str(),
-							            result.reply_containers.size());
+									client_label.c_str(), loggable(result.label).c_str(),
+									result.reply_containers.size());
 							// lobby_session.cpp returns "unknown:<name>" for any
 							// container it has no handler for (lobby_session.cpp:258).
 							static constexpr char kUnknownPrefix[] = "unknown:";
@@ -1074,7 +1072,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 				}
 			} else {
 				std::fprintf(stderr, "[nwudp] %s — unsupported SESSION PN='%s'\n",
-				             client_label.c_str(), conn_opt->pn.c_str());
+						client_label.c_str(), loggable(conn_opt->pn).c_str());
 				if (tracker_) {
 					tracker_->record("pn", conn_opt->pn, body.data(), body.size(),
 					                 client_label, now_ms());

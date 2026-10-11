@@ -316,14 +316,18 @@ resource "cloudflare_record" "game" {
 }
 
 # Edge authentication (DEPLOY.md), created only once var.edge_auth_secret is
-# set: a request-header Transform Rule stamps X-OpenNova-Edge: <secret> on
-# every request Cloudflare forwards for the web hostnames, so the portal's
-# nginx (EDGE_AUTH_SECRET) can refuse /api/ requests that reached it any other
-# way, a Cloudflare Worker on someone else's zone fetching this origin with a
-# CF-Connecting-IP of its choosing included. A zone holds one entrypoint
-# ruleset per phase: import an existing late-transform ruleset before applying.
+# set and the web records are proxied: a request-header Transform Rule stamps
+# X-OpenNova-Edge: <secret> on every request Cloudflare forwards for the web
+# hostnames, so the portal's nginx (EDGE_AUTH_SECRET) can refuse /api/
+# requests that reached it any other way, a Cloudflare Worker on someone else's
+# zone fetching this origin with a CF-Connecting-IP of its choosing included.
+# Unproxied records reach the origin with no Transform Rule, so the rule (and
+# the secret beside it) would only refuse every /api/ request. A zone holds one
+# entrypoint ruleset per phase: import an existing late-transform ruleset
+# before applying, and Terraform then owns all its rules (this one replaces
+# them).
 resource "cloudflare_ruleset" "edge_auth" {
-  count       = local.dns_enabled && var.edge_auth_secret != "" ? 1 : 0
+  count       = local.dns_enabled && var.cloudflare_web_proxied && var.edge_auth_secret != "" ? 1 : 0
   zone_id     = var.cloudflare_zone_id
   name        = "opennova-edge-auth"
   description = "Stamps the edge-authentication header the portal's nginx checks"
@@ -343,6 +347,15 @@ resource "cloudflare_ruleset" "edge_auth" {
         value     = var.edge_auth_secret
       }
     }
+  }
+}
+
+# A secret with unproxied web records makes no rule (above); the plan says so,
+# since the web container given the same secret would then refuse every /api/.
+check "edge_auth_needs_proxied_web_records" {
+  assert {
+    condition     = var.edge_auth_secret == "" || var.cloudflare_web_proxied
+    error_message = "edge_auth_secret is set but cloudflare_web_proxied is false: no Transform Rule is made, so keep EDGE_AUTH_SECRET out of the web container's environment (DEPLOY.md, Edge authentication)."
   }
 }
 
