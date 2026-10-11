@@ -101,12 +101,28 @@ const char *mask_kind_name(MaskKind kind) {
 			return "handshake_field";
 		case MaskKind::HandshakeCu:
 			return "handshake_cu";
+		case MaskKind::HandshakeCuLow16:
+			return "handshake_cu_low16";
+		case MaskKind::HandshakeLength:
+			return "handshake_length";
 		case MaskKind::InitialBody:
 			return "initial_body";
+		case MaskKind::InitialSet:
+			return "initial_set";
+		case MaskKind::InitialRecords:
+			return "initial_records";
+		case MaskKind::LengthExempt:
+			return "length_exempt";
 		case MaskKind::BodyPrefix:
 			return "body_prefix";
 		case MaskKind::FirstOrder:
 			return "first_order";
+		case MaskKind::GroupLength:
+			return "group_length";
+		case MaskKind::GroupReply:
+			return "group_reply";
+		case MaskKind::GroupBoundary:
+			return "group_boundary";
 		case MaskKind::Field:
 			return "field";
 	}
@@ -125,6 +141,11 @@ Verdict judge(const RunFacts &rr, const RunFacts &rr_aa, const std::vector<Subje
 
 	CompareOptions aa_options;
 	aa_options.host_rows = true;
+	aa_options.retail_host = true;
+	// RR-aa's rows join the subjects' oracle when it ran the same corpus profile.
+	static_assert(has_normalization("integrity.oracle"));
+	const bool pool = !rr.info.integrity_profile.empty() &&
+			rr.info.integrity_profile == rr_aa.info.integrity_profile;
 	std::map<std::string, const MetricValue *> aa_index;
 	const std::vector<MetricValue> aa_values = compare_runs(rr, rr_aa, aa_options);
 	for (const MetricValue &value : aa_values) {
@@ -144,6 +165,8 @@ Verdict judge(const RunFacts &rr, const RunFacts &rr_aa, const std::vector<Subje
 	for (const SubjectRun &subject : subjects) {
 		CompareOptions options;
 		options.host_rows = subject.topology == "OR" || subject.topology == "OO";
+		options.retail_host = subject.topology == "RO" || subject.topology == "RR";
+		options.oracle_pool = pool ? &rr_aa : nullptr;
 		for (MetricValue &value : compare_runs(rr, *subject.facts, options)) {
 			VerdictRow row;
 			row.topology = subject.topology;

@@ -14,13 +14,18 @@
 
 #include <base/io/json.h>
 #include <net/npwire/flat_tlv.h>
+#include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -76,6 +81,31 @@ void tlv_u32(std::vector<uint8_t> &out, const char *name, uint32_t v) {
 void tlv_text(std::vector<uint8_t> &out, const char *name, const std::string &text) {
 	const std::vector<uint8_t> value = text_bytes(text);
 	append_flat_tlv(out, name, value.data(), uint16_t(value.size()));
+}
+
+// A session crypt key as the manager LCG draws it: from draw index `start`, each
+// next index 17x + 1 mod 32, index 31 (the charset's NUL) appending nothing.
+std::string lcg_key(uint32_t start, size_t chars) {
+	static const char kCharset[] = "0123456789BCDFGHJKLMNPQRSTVWXYZ";
+	std::string out;
+	uint32_t x = start & 31u;
+	while (out.size() < chars) {
+		if (x != 31u)
+			out.push_back(kCharset[x]);
+		x = (17u * x + 1u) & 31u;
+	}
+	return out;
+}
+
+// The trace builder's world fields (parity_trace.cpp): the decompressed code plus
+// the frame anchor.
+void place(wire::ParityEntity &e, const wire::ParityFrameState &frame) {
+	e.offset_x = network_decompress_fixedpoint(uint16_t(e.pos_x));
+	e.offset_y = network_decompress_fixedpoint(uint16_t(e.pos_y));
+	e.offset_z = network_decompress_fixedpoint(uint16_t(e.pos_z));
+	e.world_x = frame.anchor_x + e.offset_x;
+	e.world_y = frame.anchor_y + e.offset_y;
+	e.world_z = frame.anchor_z + e.offset_z;
 }
 
 void tlv_cu(
@@ -245,14 +275,14 @@ private:
 		f.decoded = true;
 		f.length = 84;
 		f.sub_block = uint32_t(tick % 4);
-		f.flags2 = f.sub_block;
+		f.flags2 = uint32_t(tick) & 0xFFu; // the per-slot send counter; its low bits route
 		f.anchor_x = int32_t(1000 * 65536 + tick * 16384 + int32_t(seed_) * 65536);
 		f.anchor_y = 2000 * 65536;
 		f.anchor_z = 50 * 65536;
 		f.local_tail = true;
 		f.health = 100;
-		f.records = 2;
-		f.players = 1;
+		f.records = 3;
+		f.players = 2;
 		f.vehicles = 1;
 		f.carried = 0xFFFF;
 		f.weapon_present = f.sub_block == 0;
@@ -275,12 +305,28 @@ private:
 		if (f.objective_present)
 			f.objective[0] = 1;
 		trace.frames.push_back(f);
+		// The recipient's own record (its uplink handle) against the eye anchor:
+		// -CameraOffset, z code 0x6801 = -0xD001.
+		wire::ParityEntity self;
+		self.frame = frame;
+		self.ts_ns = at;
+		self.session = kClientPort;
+		self.cls = 'P';
+		self.handle = 0x1000;
+		self.type_id = 5305;
+		self.pos_z = 0x6801;
+		self.orient_a = (tick * 5) % 256;
+		self.orient_b = 2;
+		self.state_a = 4;
+		self.vital = 100;
+		place(self, f);
+		trace.entities.push_back(self);
 		wire::ParityEntity p;
 		p.frame = frame;
 		p.ts_ns = at;
 		p.session = kClientPort;
 		p.cls = 'P';
-		p.handle = 0x1000;
+		p.handle = 0x1001;
 		p.type_id = 5305;
 		p.pos_x = uint32_t(tick * 64 % 60000);
 		p.pos_y = 3000 + seed_;
@@ -289,6 +335,7 @@ private:
 		p.orient_b = 2;
 		p.state_a = 4;
 		p.vital = 100;
+		place(p, f);
 		trace.entities.push_back(p);
 		wire::ParityEntity v = p;
 		v.cls = 'V';
@@ -299,6 +346,7 @@ private:
 		v.orient_a = (tick * 40) % 65536;
 		v.state_a = 0;
 		v.vital = 3000;
+		place(v, f);
 		trace.entities.push_back(v);
 	}
 
@@ -309,6 +357,17 @@ private:
 
 constexpr uint64_t kSteadyStart = 5 * kSec;
 constexpr double kSteadySeconds = 15.0;
+
+// A S2C 0x46 slot record with the name, quality and NovaWorld squad id fields
+// (mask 0x0C01); the squad id is per account (initial.S.0x46.timer_score).
+std::vector<uint8_t> player_sync(int slot, int entity, int quality, uint32_t squad) {
+	std::vector<uint8_t> body = bytes({ slot, 0x01, 0x0C, entity });
+	const std::vector<uint8_t> name = text_bytes("Host");
+	body.insert(body.end(), name.begin(), name.end());
+	body.push_back(uint8_t(quality));
+	put_u32(body, squad);
+	return body;
+}
 
 std::vector<uint8_t> world_state_load(uint32_t seed) {
 	std::vector<uint8_t> body;
@@ -327,8 +386,8 @@ wire::ParityTrace scripted(uint32_t seed) {
 		tlv_text(b, "NVS", "NAPI NP Version 0.0.1");
 		tlv_text(b, "PN", "JointOperations");
 		tlv_u32(b, "CI", seed * 11);
-		tlv_u32(b, "EIP", 0x0100007F + seed);
-		tlv_u32(b, "EPN", 30000 + seed);
+		tlv_u32(b, "EIP", 0xFFFFFFFFu); // the LAN browse's broadcast target
+		tlv_u32(b, "EPN", kServerPort); // the enumerated host port
 		s.handshake(t, 0x41, b);
 	}
 	{
@@ -345,9 +404,12 @@ wire::ParityTrace scripted(uint32_t seed) {
 		tlv_u32(b, "CI", seed * 11);
 		tlv_u32(b, "HK", 0x0FE0E112 ^ seed);
 		tlv_u32(b, "CK", 0xC0FFEE00 + seed);
-		tlv_text(b, "SCRK", "K" + std::to_string(100000 + seed * 31337));
+		// 61 or 62 characters by where the draw falls (handshake.0x42.SCRK.length).
+		tlv_text(b, "SCRK", lcg_key(seed * 7, 61 + seed % 2));
 		tlv_cu(b, 1, "UdpCode1", std::to_string(1000 + seed * 7));
 		tlv_cu(b, 2, "Callsign", "ParityJoin");
+		// The u16 character id printed from a stack dword: the high word is residue.
+		tlv_cu(b, 3, "CI0", std::to_string(0x0200u | (seed << 16)));
 		s.handshake(t + 20 * kMs, 0x42, b);
 	}
 	{
@@ -355,7 +417,7 @@ wire::ParityTrace scripted(uint32_t seed) {
 		tlv_u32(b, "CI", seed * 11);
 		tlv_u32(b, "MI", seed);
 		tlv_u32(b, "SK", 0xABC00000 + seed);
-		tlv_text(b, "SCRK", "S" + std::to_string(10000 + seed * 4241));
+		tlv_text(b, "SCRK", lcg_key(seed * 5 + 3, 61 + (seed + 1) % 2));
 		tlv_cu(b, 3, "NWUID", std::to_string(1000 + seed));
 		tlv_cu(b, 3, "NovaworldName", "NWServer");
 		s.handshake(t + 30 * kMs, 0x82, b);
@@ -371,7 +433,7 @@ wire::ParityTrace scripted(uint32_t seed) {
 					{ 0x016, bytes({ 7, 7, 7 }) } });
 	s.send('C', step(), { { 0x022, bytes({ 1 }) }, { 0x009, bytes({ 2, 2 }) } });
 	s.send('S', step(),
-			{ { 0x046, bytes({ int(seed), 0, 1 }) }, { 0x02C, bytes({ 5, 5, 5, 5 }) } });
+			{ { 0x046, player_sync(0, 5, 1, seed) }, { 0x02C, bytes({ 5, 5, 5, 5 }) } });
 	s.send('S', step(), { { 0x008, bytes({ 0x20, 0x00, 0x01, 0x00, 0x05 }) } });
 	for (int i = 0; i < 3; ++i)
 		s.send('S', step(), { { 0x02A, bytes({ i, 1, 2, 3 }) } });
@@ -425,6 +487,7 @@ RunInfo info_for(const char *label, const char *topology) {
 	info.run_id = label;
 	info.mission = "TEST.BMS";
 	info.game_type = "65568";
+	info.integrity_profile = "retail-test-profile";
 	info.port = kServerPort;
 	info.capture = std::string("synthetic/") + label + ".pcap";
 	info.perspective = "retail-client";
@@ -796,18 +859,58 @@ void test_integrity() {
 		expect_row(c, 'B', "integrity_punt", "", "fail", "INTEGRITY_PUNT");
 	}
 	{
-		// The host challenges another ammo row: unwitnessed for any subject, and a
-		// row-set mismatch only where the host is OpenNova.
+		// The host challenges another ammo row. A retail host that punts nothing is
+		// the oracle for it; an OpenNova host's row is unwitnessed and off RR's set.
 		wire::ParityTrace subject = scripted(3);
 		for_events(subject, 'S', 0x031, [](wire::ParityEvent &e) { e.body[0] = 0x19; });
 		for_events(subject, 'C', 0x021, [](wire::ParityEvent &e) { e.body[0] = 0x19; });
 		const Case ro = judge_case(scripted(1), scripted(2), subject, "RO");
-		expect_row(
-				ro, 'B', "integrity_row_unwitnessed", "ammo", "fail", "INTEGRITY_ROW_UNWITNESSED");
+		expect_row(ro, 'B', "integrity_row_unwitnessed", "ammo", "pass");
 		check(find_row(ro.verdict.rows, 'B', "integrity_rows", "ammo") == nullptr,
 				"a retail host's rows are not the subject's");
 		const Case oo = judge_case(scripted(1), scripted(2), subject, "OO");
+		expect_row(
+				oo, 'B', "integrity_row_unwitnessed", "ammo", "fail", "INTEGRITY_ROW_UNWITNESSED");
 		expect_row(oo, 'B', "integrity_rows", "ammo", "fail", "HOST_AMMO_ROW_MISMATCH");
+
+		// A retail host that punted is no oracle.
+		wire::ParityEvent punt = subject.events.back();
+		punt.dir = 'S';
+		punt.full_tag = 0x103;
+		punt.settings_update = true;
+		punt.material = true;
+		punt.body = text_bytes("PUNT ACRC ParityJoin");
+		punt.length = punt.body.size();
+		subject.events.push_back(punt);
+		const Case punted = judge_case(scripted(1), scripted(2), subject, "RO");
+		expect_row(punted, 'B', "integrity_row_unwitnessed", "ammo", "fail",
+				"INTEGRITY_ROW_UNWITNESSED");
+	}
+	{
+		// RR-aa's rows of the same integrity profile join the oracle: a row RR never
+		// challenged is witnessed by RR-aa's reply, and a CRC off it still fails.
+		wire::ParityTrace aa = scripted(2), subject = scripted(3), wrong = scripted(3);
+		for (wire::ParityTrace *trace : { &aa, &subject, &wrong }) {
+			for_events(*trace, 'S', 0x031, [](wire::ParityEvent &e) { e.body[0] = 0x19; });
+			for_events(*trace, 'C', 0x021, [](wire::ParityEvent &e) { e.body[0] = 0x19; });
+		}
+		for_events(wrong, 'C', 0x021, [](wire::ParityEvent &e) { e.body[2] ^= 0x10; });
+		const Case pooled = judge_case(scripted(1), aa, subject, "OO");
+		expect_row(pooled, 'B', "integrity_row_unwitnessed", "ammo", "pass");
+		expect_row(pooled, 'B', "integrity_crc", "ammo", "pass");
+		const Case off = judge_case(scripted(1), aa, wrong, "OO");
+		expect_row(off, 'B', "integrity_crc", "ammo", "fail", "INTEGRITY_CRC_MISMATCH");
+
+		Case other_profile;
+		other_profile.rr = make_run_facts(info_for("rr", "RR"), scripted(1));
+		RunInfo aa_info = info_for("rr_aa", "RR");
+		aa_info.integrity_profile = "another-corpus";
+		other_profile.aa = make_run_facts(aa_info, aa);
+		other_profile.subject = make_run_facts(info_for("subject", "OO"), subject);
+		other_profile.verdict =
+				judge(other_profile.rr, other_profile.aa, { { "OO", &other_profile.subject } });
+		expect_row(other_profile, 'B', "integrity_row_unwitnessed", "ammo", "fail",
+				"INTEGRITY_ROW_UNWITNESSED");
 	}
 	{
 		wire::ParityTrace subject = scripted(3);
@@ -1011,6 +1114,454 @@ void test_document() {
 	check(json.get("aa") && json.get("aa")->is_array(), "the aa sanity section");
 }
 
+// ---------------------------------------------------------------------------
+// The retail-LAN triage's rules: each mask holds against retail-shaped noise, and
+// each real divergence it could hide stays visible through a row.
+
+wire::ParityHandshake &handshake_of(wire::ParityTrace &trace, uint8_t opcode) {
+	for (wire::ParityHandshake &h : trace.handshakes)
+		if (h.opcode == opcode)
+			return h;
+	return trace.handshakes.front();
+}
+
+// Replace one flat-TLV field's value (by name), the others kept in order.
+void set_tlv(wire::ParityHandshake &h, std::string_view name, const std::vector<uint8_t> &value) {
+	std::vector<uint8_t> body;
+	size_t pos = 0;
+	while (pos < h.body.size()) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(h.body.data(), h.body.size(), pos, field);
+		if (next == kFlatTlvEnd)
+			break;
+		if (field.name == name)
+			append_flat_tlv(body, field.name, value.data(), uint16_t(value.size()));
+		else
+			append_flat_tlv(body, field.name, field.value, field.size);
+		pos = next;
+	}
+	h.body = std::move(body);
+}
+
+void set_cu(wire::ParityHandshake &h, const std::string &cu_name, const std::string &text) {
+	std::vector<uint8_t> body;
+	size_t pos = 0;
+	while (pos < h.body.size()) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(h.body.data(), h.body.size(), pos, field);
+		if (next == kFlatTlvEnd)
+			break;
+		const std::string inner(reinterpret_cast<const char *>(field.value), field.size);
+		if (field.name == "CU" && inner.compare(1, cu_name.size() + 1, cu_name + '\0') == 0)
+			tlv_cu(body, uint8_t(field.value[0]), cu_name, text);
+		else
+			append_flat_tlv(body, field.name, field.value, field.size);
+		pos = next;
+	}
+	h.body = std::move(body);
+}
+
+void test_handshake_rules() {
+	{
+		// EIP/EPN are the announce's destination: deterministic, so compared.
+		wire::ParityTrace subject = scripted(3);
+		std::vector<uint8_t> loopback;
+		put_u32(loopback, 0x0100007F);
+		set_tlv(handshake_of(subject, 0x41), "EIP", loopback);
+		expect_row(judge_case(scripted(1), scripted(2), subject), 'C', "handshake", "0x41", "fail",
+				"HANDSHAKE_MISMATCH");
+	}
+	{
+		// CU CI0 keeps its low 16 bits: the residue high word never compares, the id does.
+		wire::ParityTrace bare = scripted(3), other_id = scripted(3);
+		set_cu(handshake_of(bare, 0x42), "CI0", "512");
+		set_cu(handshake_of(other_id, 0x42), "CI0", "513");
+		expect_row(judge_case(scripted(1), scripted(2), bare), 'C', "handshake", "0x42", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), other_id), 'C', "handshake", "0x42", "fail",
+				"HANDSHAKE_MISMATCH");
+	}
+	{
+		// SCRK: 62 or 63 bytes is one class; an LCG walk is the retail generator.
+		wire::ParityTrace lcg = scripted(3), drawn = scripted(3), short_key = scripted(3);
+		set_tlv(handshake_of(lcg, 0x82), "SCRK", text_bytes(lcg_key(9, 62)));
+		set_tlv(handshake_of(drawn, 0x82), "SCRK", text_bytes(std::string(61, 'B')));
+		set_tlv(handshake_of(short_key, 0x82), "SCRK", text_bytes(lcg_key(9, 59)));
+		const Case a = judge_case(scripted(1), scripted(2), lcg, "OR");
+		expect_row(a, 'S', "handshake", "0x82", "pass");
+		expect_row(a, 'S', "handshake_key_lcg", "0x82", "pass");
+		const Case b = judge_case(scripted(1), scripted(2), drawn, "OR");
+		expect_row(b, 'S', "handshake", "0x82", "pass");
+		expect_row(b, 'S', "handshake_key_lcg", "0x82", "fail", "HANDSHAKE_KEY_GENERATOR");
+		expect_row(judge_case(scripted(1), scripted(2), short_key, "OR"), 'S', "handshake", "0x82",
+				"fail", "HANDSHAKE_MISMATCH");
+	}
+	{
+		// One announce per session: a second hello is a second leg.
+		wire::ParityTrace subject = scripted(3);
+		wire::ParityHandshake again = handshake_of(subject, 0x41);
+		again.frame = 0;
+		subject.handshakes.insert(subject.handshakes.begin(), again);
+		const Case c = judge_case(scripted(1), scripted(2), subject);
+		expect_row(c, 'C', "handshake_count", "0x41", "fail", "HANDSHAKE_COUNT_MISMATCH");
+		expect_row(c, 'C', "handshake_count", "0x42", "pass");
+	}
+}
+
+// One more message in the initial stream, riding the packet that opens with
+// `host` (every run of a case gets the same, so the grouping stays equal).
+void add_initial(wire::ParityTrace &trace, char dir, uint16_t host, uint16_t identity,
+		const std::vector<uint8_t> &body) {
+	for (wire::ParityPacket &p : trace.packets) {
+		if (p.dir != dir || p.tags.empty() || p.tags[0] != host)
+			continue;
+		p.tags.push_back(identity);
+		wire::ParityWireRecord record;
+		record.full_tag = identity;
+		record.raw_flags = 0x20;
+		record.encoded_length = uint32_t(body.size());
+		p.records.push_back(record);
+		wire::ParityEvent e;
+		e.frame = p.frame;
+		e.ts_ns = p.ts_ns;
+		e.dir = dir;
+		e.session = kClientPort;
+		e.participant = 1;
+		e.full_tag = identity;
+		e.length = body.size();
+		e.material = true;
+		e.body = body;
+		trace.events.push_back(e);
+		return;
+	}
+}
+
+void test_initial_rules() {
+	{
+		// S2C 0x16 rides the scoreboard clock: leaving the 0x75/0x64 packet (its first
+		// list now the first steady one) moves no group and no first-occurrence order.
+		wire::ParityTrace subject = scripted(3);
+		for (wire::ParityPacket &packet : subject.packets)
+			if (packet.dir == 'S' && packet.tags.size() == 3 && packet.tags[2] == 0x016) {
+				packet.tags.pop_back();
+				packet.records.pop_back();
+			}
+		erase_events(subject, 'S', 0x016, [](size_t i) { return i == 0; });
+		const Case c = judge_case(scripted(1), scripted(2), subject);
+		expect_row(c, 'S', "initial_grouping", "", "pass");
+		expect_row(c, 'S', "first_order", "", "pass");
+	}
+	{
+		// The client's send pump batches by load timing: a split packet is no
+		// difference, an extra record is.
+		wire::ParityTrace split = scripted(3), extra = scripted(3);
+		for (wire::ParityPacket &p : split.packets)
+			if (p.dir == 'C' && p.tags.size() == 2 && p.tags[1] == 0x009) {
+				wire::ParityPacket second = p;
+				second.seq = 9999;
+				second.tags = { 0x009 };
+				second.records = { p.records[1] };
+				p.tags.pop_back();
+				p.records.pop_back();
+				split.packets.push_back(second);
+				wire::ParityDatagram d = split.datagrams.front();
+				d.frame = p.frame;
+				d.datagram_class = CaptureDatagramClass::ClientProtocol;
+				split.datagrams.push_back(d);
+				break;
+			}
+		std::stable_sort(split.packets.begin(), split.packets.end(),
+				[](const auto &x, const auto &y) { return x.frame < y.frame; });
+		add_initial(extra, 'C', 0x022, 0x022, bytes({ 1 }));
+		expect_row(judge_case(scripted(1), scripted(2), split), 'C', "initial_grouping", "",
+				"pass");
+		expect_row(judge_case(scripted(1), scripted(2), extra), 'C', "initial_grouping", "",
+				"fail", "INITIAL_PACKET_GROUPING");
+	}
+	{
+		// A gameplay or world-page record's length and a fragment's length leave the
+		// grouping key; any other record's length stays in it.
+		wire::ParityTrace masked = scripted(3), framed = scripted(3);
+		for (wire::ParityPacket &p : masked.packets)
+			for (wire::ParityWireRecord &r : p.records) {
+				if (p.dir == 'S' && r.full_tag == 0x00A)
+					r.encoded_length += 7;
+				if (p.dir == 'S' && r.full_tag == 0x00F) {
+					r.raw_flags |= 0x04; // a first fragment: the packet's remaining room
+					r.encoded_length += 9;
+				}
+			}
+		for (wire::ParityTrace *trace : { &framed })
+			for (wire::ParityPacket &p : trace->packets)
+				for (wire::ParityWireRecord &r : p.records)
+					if (p.dir == 'S' && r.full_tag == 0x011)
+						r.encoded_length += 1;
+		wire::ParityTrace rr = scripted(1), aa = scripted(2);
+		for (wire::ParityTrace *trace : { &rr, &aa })
+			for (wire::ParityPacket &p : trace->packets)
+				for (wire::ParityWireRecord &r : p.records)
+					if (p.dir == 'S' && r.full_tag == 0x00F)
+						r.raw_flags |= 0x04;
+		expect_row(judge_case(rr, aa, masked), 'S', "initial_grouping", "", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), framed), 'S', "initial_grouping", "",
+				"fail", "INITIAL_PACKET_GROUPING");
+	}
+	{
+		// Bodies compare over the common prefix; a count difference is the count rule's.
+		wire::ParityTrace one = scripted(3), three = scripted(3);
+		add_initial(one, 'S', 0x07B, 0x011, bytes({ 3 }));
+		for (int i = 0; i < 3; ++i)
+			add_initial(three, 'S', 0x07B, 0x011, bytes({ 3 }));
+		const Case c1 = judge_case(scripted(1), scripted(2), one);
+		expect_row(c1, 'S', "initial_body", "0x11:0", "pass");
+		expect_row(c1, 'S', "initial_count", "0x11:0", "pass");
+		const Case c3 = judge_case(scripted(1), scripted(2), three);
+		expect_row(c3, 'S', "initial_body", "0x11:0", "pass");
+		expect_row(c3, 'S', "initial_count", "0x11:0", "fail", "INITIAL_COUNT_MISMATCH");
+	}
+	{
+		// S2C 0x16's initial bodies compare as a set: a repeat is the boundary phase,
+		// a new body (the in-game count) is not.
+		wire::ParityTrace repeat = scripted(3), other = scripted(3);
+		add_initial(repeat, 'S', 0x07B, 0x016, bytes({ 7, 7, 7 }));
+		add_initial(other, 'S', 0x07B, 0x016, bytes({ 7, 7, 8 }));
+		expect_row(judge_case(scripted(1), scripted(2), repeat), 'S', "initial_body_set", "0x16:0",
+				"pass");
+		expect_row(judge_case(scripted(1), scripted(2), other), 'S', "initial_body_set", "0x16:0",
+				"fail", "INITIAL_BODY_MISMATCH");
+		check(find_row(judge_case(scripted(1), scripted(2), repeat).verdict.rows, 'S',
+					  "initial_body", "0x16:0") == nullptr,
+				"S2C 0x16 leaves the position-by-position comparison");
+	}
+	{
+		// S2C 0x46: the squad id is per account (it already differs per seed); the
+		// quality byte is the case's.
+		wire::ParityTrace subject = scripted(3);
+		for_events(subject, 'S', 0x046,
+				[](wire::ParityEvent &e) { e.body = player_sync(0, 5, 0, 3); });
+		expect_row(judge_case(scripted(1), scripted(2), subject), 'S', "initial_body_set", "0x46:0",
+				"fail", "INITIAL_BODY_MISMATCH");
+	}
+}
+
+std::vector<uint8_t> organics(int32_t live_x, int32_t hidden_x, uint16_t ai_net_id) {
+	OrganicSpawnBatch batch;
+	OrganicSpawnRecord live; // a deployed body: its owner's input moves it
+	live.slot_id = 0;
+	live.def_type = 3;
+	live.item_type_id = 5305;
+	live.entity_name = "ParityHost";
+	live.minimap_flags = 0x0100;
+	live.pos_x = live_x;
+	live.orientation = live_x * 3;
+	live.net_id = ai_net_id;
+	OrganicSpawnRecord hidden = live; // an unjoined body at its placement
+	hidden.slot_id = 1;
+	hidden.entity_name = "ParityJoin";
+	hidden.minimap_flags = 0x0101;
+	hidden.pos_x = hidden_x;
+	hidden.orientation = 0x40000000;
+	hidden.net_id = 0;
+	batch.records = { live, hidden };
+	batch.entity_count = 2;
+	return encode_organic_spawn_batch(batch);
+}
+
+std::vector<uint8_t> statics(uint8_t zone_byte, uint16_t radius, uint32_t flags) {
+	StaticEntityBatch batch;
+	StaticEntityRecord record;
+	record.item_type_id = 1435;
+	record.field_flags = kStaticEntityHasEntityFlags;
+	record.pos_x = 57610843;
+	record.entity_flags = flags;
+	record.weapon_byte = zone_byte;
+	record.attach_ref = radius;
+	StaticEntityRecord empty;
+	empty.item_type_id = 0;
+	empty.is_empty_slot = true;
+	batch.start_index = 4;
+	batch.records = { record, empty };
+	batch.entity_count = 2;
+	return encode_static_entity_batch(batch);
+}
+
+void test_world_records() {
+	auto with = [](uint32_t seed, const std::vector<uint8_t> &organic,
+						const std::vector<uint8_t> &statics_body) {
+		wire::ParityTrace trace = scripted(seed);
+		add_initial(trace, 'S', 0x07B, 0x00C, organic);
+		add_initial(trace, 'S', 0x07B, 0x010, statics_body);
+		return trace;
+	};
+	const std::vector<uint8_t> base_statics = statics(0, 0, 0x08020000);
+	{
+		// A live record's pose is its owner's; a hidden record's pose and every other
+		// field are the case's.
+		const Case live = judge_case(with(1, organics(100, 5, 0), base_statics),
+				with(2, organics(200, 5, 0), base_statics),
+				with(3, organics(300, 5, 0), base_statics));
+		expect_row(live, 'S', "initial_records", "0x0c:0", "pass");
+		check(find_row(live.verdict.rows, 'S', "initial_body", "0x0c:0") == nullptr,
+				"S2C 0x0C compares as records, not bytes");
+		const Case hidden = judge_case(with(1, organics(100, 5, 0), base_statics),
+				with(2, organics(200, 5, 0), base_statics),
+				with(3, organics(300, 6, 0), base_statics));
+		expect_row(hidden, 'S', "initial_records", "0x0c:0", "fail", "INITIAL_RECORD_MISMATCH");
+		const Case net_id = judge_case(with(1, organics(100, 5, 0), base_statics),
+				with(2, organics(200, 5, 0), base_statics),
+				with(3, organics(300, 5, 6), base_statics));
+		expect_row(net_id, 'S', "initial_records", "0x0c:0", "fail", "INITIAL_RECORD_MISMATCH");
+	}
+	{
+		// The zone byte and radius are stack residue; the static's flags are not.
+		const std::vector<uint8_t> organic = organics(100, 5, 0);
+		const Case residue = judge_case(with(1, organic, statics(0x80, 10, 0x08020000)),
+				with(2, organic, base_statics), with(3, organic, statics(0x40, 7, 0x08020000)));
+		expect_row(residue, 'S', "initial_records", "0x10:0", "pass");
+		check(find_row(residue.verdict.rows, 'S', "length_set", "0x10:0") == nullptr,
+				"S2C 0x10's length set follows the residue: left out");
+		const Case flags = judge_case(with(1, organic, base_statics),
+				with(2, organic, base_statics), with(3, organic, statics(0, 0, 0x00020000)));
+		expect_row(flags, 'S', "initial_records", "0x10:0", "fail", "INITIAL_RECORD_MISMATCH");
+	}
+}
+
+void test_reply_rules() {
+	auto page = [](uint32_t start, size_t dwords) {
+		std::vector<uint8_t> body;
+		put_u32(body, start);
+		for (size_t i = 0; i < dwords; ++i)
+			put_u32(body, 0);
+		return body;
+	};
+	using Pages = std::initializer_list<std::pair<uint32_t, size_t>>;
+	auto with_pages = [&page](uint32_t seed, Pages pages) {
+		wire::ParityTrace trace = scripted(seed);
+		for (const auto &entry : pages)
+			add_initial(trace, 'C', 0x047, 0x03D, page(entry.first, entry.second));
+		return trace;
+	};
+	{
+		// C2S 0x3D: a start only the run asked is the host's cadence; a common start's
+		// length is the snapshot's.
+		const Case extra = judge_case(with_pages(1, { { 50, 50 }, { 100, 50 } }),
+				with_pages(2, { { 50, 50 }, { 100, 50 } }),
+				with_pages(3, { { 50, 50 }, { 100, 50 }, { 150, 5 } }));
+		expect_row(extra, 'C', "reply_length", "0x3d:0", "pass");
+		check(find_row(extra.verdict.rows, 'C', "length_set", "0x3d:0") == nullptr,
+				"C2S 0x3D's length set is replaced by the per-start rule");
+		const Case shorter = judge_case(with_pages(1, { { 50, 50 }, { 100, 50 } }),
+				with_pages(2, { { 50, 50 }, { 100, 50 } }),
+				with_pages(3, { { 50, 50 }, { 100, 16 } }));
+		expect_row(shorter, 'C', "reply_length", "0x3d:0", "fail", "REPLY_LENGTH_MISMATCH");
+	}
+	{
+		// The RTT pong echoes a host ping; a pong of another stamp is a fault.
+		auto with_rtt = [](uint32_t seed, uint32_t pong) {
+			wire::ParityTrace trace = scripted(seed);
+			std::vector<uint8_t> ping, echo;
+			put_u32(ping, 0x1A578416 + seed);
+			ping.push_back(1);
+			put_u32(echo, pong == 0 ? 0x1A578416 + seed : pong);
+			echo.push_back(0);
+			add_initial(trace, 'S', 0x07B, 0x057, ping);
+			add_initial(trace, 'C', 0x00B, 0x02C, echo);
+			return trace;
+		};
+		expect_row(judge_case(with_rtt(1, 0), with_rtt(2, 0), with_rtt(3, 0)), 'C', "rtt_echo",
+				"0x2c:0", "pass");
+		expect_row(judge_case(with_rtt(1, 0), with_rtt(2, 0), with_rtt(3, 0x12345678)), 'C',
+				"rtt_echo", "0x2c:0", "fail", "RTT_ECHO_MISMATCH");
+	}
+}
+
+void test_order_rules() {
+	{
+		// S2C 0x46 is no milestone (the scoreboard's phase); C2S 0x09 -> S2C 0x2C is.
+		wire::ParityTrace early = scripted(3), late = scripted(3);
+		for_events(early, 'S', 0x046, [](wire::ParityEvent &e) { e.frame = 0; });
+		expect_row(judge_case(scripted(1), scripted(2), early), 'B', "milestones", "", "pass");
+		int frame_0f = 0;
+		for_events(late, 'S', 0x00F, [&frame_0f](wire::ParityEvent &e) { frame_0f = e.frame; });
+		for_events(late, 'C', 0x009, [frame_0f](wire::ParityEvent &e) { e.frame = frame_0f; });
+		expect_row(judge_case(scripted(1), scripted(2), late), 'B', "milestones", "", "fail",
+				"MILESTONE_MISMATCH");
+	}
+	{
+		// The integrity replies follow the host's process-global phase.
+		wire::ParityTrace subject = scripted(3);
+		size_t first_20 = 0, first_21 = 0;
+		for (size_t i = 0; i < subject.events.size(); ++i) {
+			const wire::ParityEvent &e = subject.events[i];
+			if (e.dir == 'C' && e.full_tag == 0x020 && !first_20)
+				first_20 = i;
+			if (e.dir == 'C' && e.full_tag == 0x021 && !first_21)
+				first_21 = i;
+		}
+		std::swap(subject.events[first_20], subject.events[first_21]);
+		expect_row(judge_case(scripted(1), scripted(2), subject), 'C', "first_order", "", "pass");
+	}
+	{
+		// Off the scoreboard clock: a list under 4 s after the one before it, on the
+		// external capture's wire time.
+		auto judge_external = [](const wire::ParityTrace &subject_external) {
+			Case c;
+			c.rr = make_run_facts(info_for("rr", "RR"), scripted(1));
+			c.aa = make_run_facts(info_for("rr_aa", "RR"), scripted(2));
+			c.subject = make_run_facts(info_for("subject", "OR"), scripted(3));
+			attach_external(c.rr, scripted(1));
+			attach_external(c.aa, scripted(2));
+			attach_external(c.subject, subject_external);
+			c.verdict = judge(c.rr, c.aa, { { "OR", &c.subject } });
+			return c;
+		};
+		expect_row(judge_external(scripted(3)), 'S', "scoreboard_cadence", "0x16:0", "pass");
+		wire::ParityTrace pushed = scripted(3);
+		wire::ParityEvent extra;
+		for_events(pushed, 'S', 0x016, [&extra](wire::ParityEvent &e) {
+			if (extra.full_tag == 0)
+				extra = e;
+		});
+		extra.ts_ns += 1 * kSec; // a list one second after the first
+		check(extra.full_tag == 0x016, "the scripted case carries a S2C 0x16");
+		pushed.events.push_back(extra);
+		std::stable_sort(pushed.events.begin(), pushed.events.end(),
+				[](const auto &x, const auto &y) { return x.ts_ns < y.ts_ns; });
+		expect_row(judge_external(pushed), 'S', "scoreboard_cadence", "0x16:0", "fail",
+				"SCOREBOARD_OFF_CADENCE");
+		const Case none = judge_case(scripted(1), scripted(2), scripted(3));
+		expect_row(none, 'S', "scoreboard_cadence", "0x16:0", "skip");
+	}
+}
+
+void test_steady_rules() {
+	{
+		// A steady packet groups as its record multiset, without the RTT replies its
+		// gameplay record carries; a packet of replies alone keeps them.
+		wire::ParityTrace reordered = scripted(3), alone = scripted(3);
+		for (wire::ParityPacket &p : reordered.packets)
+			if (p.dir == 'S' && p.tags.size() == 2 && p.tags[0] == 0x00A && p.tags[1] == 0x02C) {
+				std::swap(p.tags[0], p.tags[1]);
+				std::swap(p.records[0], p.records[1]);
+			}
+		for (wire::ParityPacket &p : reordered.packets)
+			if (p.dir == 'S' && p.tags.size() == 1 && p.tags[0] == 0x00A && p.frame % 3 == 0) {
+				p.tags.push_back(0x057);
+				p.records.push_back(p.records.front());
+				p.records.back().full_tag = 0x057;
+				p.records.back().encoded_length = 5;
+			}
+		for (wire::ParityPacket &p : alone.packets)
+			if (p.dir == 'S' && p.tags.size() == 1 && p.tags[0] == 0x00A && p.frame % 3 == 0) {
+				p.tags[0] = 0x057;
+				p.records.front().full_tag = 0x057;
+			}
+		expect_row(judge_case(scripted(1), scripted(2), reordered), 'S',
+				"steady_group_distribution", "", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), alone), 'S', "steady_group_distribution",
+				"", "fail", "GAMEPLAY_GROUP_DISTRIBUTION");
+	}
+}
+
 } // namespace
 
 int main() {
@@ -1027,6 +1578,12 @@ int main() {
 	test_state();
 	test_evidence();
 	test_document();
+	test_handshake_rules();
+	test_initial_rules();
+	test_world_records();
+	test_reply_rules();
+	test_order_rules();
+	test_steady_rules();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return 1;

@@ -47,22 +47,45 @@ struct CompareOptions {
 	// The compared run's host is OpenNova (OR, OO; the A/A computes it too): its
 	// integrity challenge rows must be RR's own.
 	bool host_rows = false;
+	// The compared run's host is retail (RR-aa, RO, an RR subject): a reply it did
+	// not punt is witnessed even for a row RR never challenged.
+	bool retail_host = false;
+	// Another retail run of the same integrity profile (RR-aa) whose valid replies
+	// join RR's row->CRC oracle.
+	const RunFacts *oracle_pool = nullptr;
 };
 
 // Every metric of `other` against the reference `rr`, both directions.
 std::vector<MetricValue> compare_runs(
 		const RunFacts &rr, const RunFacts &other, const CompareOptions &options);
 
-// The two families (metric_wire.cpp, metric_state.cpp).
+// The families (metric_wire.cpp, metric_initial.cpp, metric_state.cpp).
 void compare_wire(const RunFacts &rr, const RunFacts &other, const CompareOptions &options,
 		std::vector<MetricValue> &out);
+// The initial reliable stream of one direction: its grouping, its bodies by
+// position, as sets and as decoded records.
+void compare_initial(
+		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out);
 void compare_state(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out);
 
 // --- shared helpers (metric_math.cpp)
 
+MetricValue make_metric(char dir, std::string name, std::string key, const char *code);
+
 // A 9-bit message identity rendered "0x0a:0" (tag : settings bit).
 std::string identity_key(uint16_t identity);
 uint16_t event_identity(const wire::ParityEvent &event);
+// The direction's gameplay identity: C2S 0x0C, S2C 0x0A.
+uint16_t gameplay_identity(char dir);
+// A stable body's comparison key: the registered prefix (S2C 0x0F's live tick)
+// stripped.
+std::string stable_body_key(char dir, uint16_t identity, const std::string &raw);
+// One physical record's framing key; a registered grouping length renders `len=*`.
+std::string wire_key(char dir, const wire::ParityWireRecord &record);
+// A packet's grouping key: its flags, identities and framing.
+std::string group_key(const wire::ParityPacket &packet);
+bool carries_low_tag(const wire::ParityPacket &packet, uint16_t identity);
+bool carries_identity(const wire::ParityPacket &packet, uint16_t identity);
 double jaccard_distance(const std::set<std::string> &a, const std::set<std::string> &b);
 // Pairwise order inversions between the items `a` and `b` share.
 size_t order_inversions(const std::vector<std::string> &a, const std::vector<std::string> &b);

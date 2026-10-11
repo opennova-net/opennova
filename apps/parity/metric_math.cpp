@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <string>
+#include <utility>
 
 namespace opennova::parity {
 
@@ -17,6 +19,15 @@ std::vector<MetricValue> compare_runs(
 	return out;
 }
 
+MetricValue make_metric(char dir, std::string name, std::string key, const char *code) {
+	MetricValue value;
+	value.direction = dir;
+	value.metric = std::move(name);
+	value.key = std::move(key);
+	value.code = code;
+	return value;
+}
+
 std::string identity_key(uint16_t identity) {
 	char buf[16];
 	std::snprintf(buf, sizeof(buf), "0x%02x:%u", unsigned(identity & 0xFFu),
@@ -26,6 +37,65 @@ std::string identity_key(uint16_t identity) {
 
 uint16_t event_identity(const wire::ParityEvent &event) {
 	return identity_of(static_cast<uint8_t>(event.full_tag & 0xFFu), event.settings_update);
+}
+
+uint16_t gameplay_identity(char dir) {
+	return dir == 'C' ? 0x00C : 0x00A;
+}
+
+std::string stable_body_key(char dir, uint16_t identity, const std::string &raw) {
+	const std::string hex = hex_of(std::vector<uint8_t>(raw.begin(), raw.end()));
+	const uint32_t prefix = stable_body_prefix(dir, identity);
+	if (prefix == 0)
+		return hex;
+	if (raw.size() < prefix)
+		return "short:" + hex;
+	return hex.substr(size_t(prefix) * 2);
+}
+
+std::string wire_key(char dir, const wire::ParityWireRecord &record) {
+	static_assert(has_normalization("group.S.0x0a.length"));
+	static_assert(has_normalization("group.fragment_length"));
+	constexpr uint8_t kFragment = 0x04 | 0x02; // FRAG_CONT | FRAG_END (protocol_message.h)
+	char buf[64];
+	if (group_length_masked(dir, record.full_tag))
+		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=*|skip=", unsigned(record.raw_flags));
+	else if (record.raw_flags & kFragment)
+		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=frag|skip=", unsigned(record.raw_flags));
+	else
+		std::snprintf(buf, sizeof(buf), "|raw=%02x|len=%u|skip=", unsigned(record.raw_flags),
+				unsigned(record.encoded_length));
+	return identity_key(record.full_tag) + buf +
+			(record.skip_bytes.empty() ? std::string("-") : hex_of(record.skip_bytes));
+}
+
+std::string group_key(const wire::ParityPacket &packet) {
+	char flags[8];
+	std::snprintf(flags, sizeof(flags), "0x%02x", unsigned(packet.flags));
+	std::string identities, wires;
+	for (size_t i = 0; i < packet.records.size(); ++i) {
+		if (i != 0) {
+			identities += ",";
+			wires += ",";
+		}
+		identities += identity_key(packet.records[i].full_tag);
+		wires += wire_key(packet.dir, packet.records[i]);
+	}
+	return std::string(flags) + "|" + identities + "|wire=" + wires;
+}
+
+bool carries_low_tag(const wire::ParityPacket &packet, uint16_t identity) {
+	for (const uint16_t tag : packet.tags)
+		if ((tag & 0xFFu) == (identity & 0xFFu))
+			return true;
+	return false;
+}
+
+bool carries_identity(const wire::ParityPacket &packet, uint16_t identity) {
+	for (const uint16_t tag : packet.tags)
+		if (tag == identity)
+			return true;
+	return false;
 }
 
 double jaccard_distance(const std::set<std::string> &a, const std::set<std::string> &b) {

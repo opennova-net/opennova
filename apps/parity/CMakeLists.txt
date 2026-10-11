@@ -5,9 +5,10 @@
 # each distance against the retail-vs-retail A/A noise floor. Tooling, not a port.
 add_library(opennova_parity_core STATIC
     cli.cpp
+    metric_initial.cpp   # the initial reliable stream: grouping, bodies, world records
     metric_math.cpp
     metric_state.cpp     # the decoded C2S 0x0C / S2C 0x0A state metrics
-    metric_wire.cpp      # the histogram, initial stream, envelope, handshake, integrity
+    metric_wire.cpp      # the histogram, envelope, handshake, integrity, milestones
     run_facts.cpp        # run-summary.json, the session binding, the windows
     verdict.cpp
 )

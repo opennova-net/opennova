@@ -1,8 +1,10 @@
-// The wire metrics: the per-direction tag histogram, the initial reliable stream,
-// the steady gameplay distributions, the session packet envelope, the outer
-// handshake, the integrity stream, the session milestones, bandwidth and
-// gameplay cadence. Rules and tolerances are the retired verify_parity_matrix.ps1's
-// (git show 5820432c1^:scripts/net/verify_parity_matrix.ps1), recast as distances.
+// The wire metrics: the per-direction tag histogram, the steady gameplay
+// distributions, the session packet envelope, the outer handshake, the
+// request/reply checks (C2S 0x3D pages, the RTT echo), the integrity stream, the
+// session milestones, bandwidth, gameplay cadence and the scoreboard's clock (the
+// initial reliable stream is metric_initial.cpp). Rules and tolerances are the
+// retired verify_parity_matrix.ps1's (git show
+// 5820432c1^:scripts/net/verify_parity_matrix.ps1), recast as distances.
 
 #include "metric.h"
 
@@ -37,10 +39,6 @@ bool stable_identity(char dir, uint16_t identity) {
 	return std::find(std::begin(kStableS), std::end(kStableS), identity) != std::end(kStableS);
 }
 
-uint16_t gameplay_identity(char dir) {
-	return dir == 'C' ? 0x00C : 0x00A;
-}
-
 MetricValue metric(char dir, const char *name, std::string key, const char *code) {
 	MetricValue value;
 	value.direction = dir;
@@ -48,21 +46,6 @@ MetricValue metric(char dir, const char *name, std::string key, const char *code
 	value.key = std::move(key);
 	value.code = code;
 	return value;
-}
-
-std::string hex_key(const std::string &raw) {
-	return hex_of(std::vector<uint8_t>(raw.begin(), raw.end()));
-}
-
-// A stable body's comparison key: the registered prefix (S2C 0x0F's live tick)
-// stripped.
-std::string stable_body_key(char dir, uint16_t identity, const std::string &raw) {
-	const uint32_t prefix = stable_body_prefix(dir, identity);
-	if (prefix == 0)
-		return hex_key(raw);
-	if (raw.size() < prefix)
-		return "short:" + hex_key(raw);
-	return hex_key(raw.substr(prefix));
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +142,7 @@ void compare_tags(
 			constant.subject = std::to_string(sb.lengths.size()) + " lengths";
 			constant.reference = std::to_string(sa.lengths.size()) + " lengths";
 			out.push_back(constant);
-		} else {
+		} else if (!length_set_exempt(dir, identity)) {
 			MetricValue lengths = metric(dir, "length_set", key, "LENGTH_SET_MISMATCH");
 			const std::set<std::string> la = length_keys(sa.lengths), lb = length_keys(sb.lengths);
 			lengths.distance = jaccard_distance(la, lb);
@@ -213,137 +196,88 @@ void compare_tags(
 	out.push_back(order);
 }
 
-// ---------------------------------------------------------------------------
-// The initial reliable stream
-
-std::string wire_key(const wire::ParityWireRecord &record) {
-	char buf[64];
-	std::snprintf(buf, sizeof(buf), "|raw=%02x|len=%u|skip=", unsigned(record.raw_flags),
-			unsigned(record.encoded_length));
-	return identity_key(record.full_tag) + buf +
-			(record.skip_bytes.empty() ? std::string("-") : hex_of(record.skip_bytes));
+uint32_t u32_at(const std::vector<uint8_t> &b, size_t at) {
+	return b[at] | (uint32_t(b[at + 1]) << 8) | (uint32_t(b[at + 2]) << 16) |
+			(uint32_t(b[at + 3]) << 24);
 }
 
-std::string group_key(const wire::ParityPacket &packet) {
-	char flags[8];
-	std::snprintf(flags, sizeof(flags), "0x%02x", unsigned(packet.flags));
-	std::string identities, wires;
-	for (size_t i = 0; i < packet.records.size(); ++i) {
-		if (i != 0) {
-			identities += ",";
-			wires += ",";
-		}
-		identities += identity_key(packet.records[i].full_tag);
-		wires += wire_key(packet.records[i]);
-	}
-	return std::string(flags) + "|" + identities + "|wire=" + wires;
-}
-
-bool carries_low_tag(const wire::ParityPacket &packet, uint16_t identity) {
-	for (const uint16_t tag : packet.tags)
-		if ((tag & 0xFFu) == (identity & 0xFFu))
-			return true;
-	return false;
-}
-
-bool carries_identity(const wire::ParityPacket &packet, uint16_t identity) {
-	for (const uint16_t tag : packet.tags)
-		if (tag == identity)
-			return true;
-	return false;
-}
-
-// Each origin packet's grouping, through the first gameplay packet. A NACK
-// replay repeats an earlier (SID, sequence); only the origin counts.
-std::vector<std::string> initial_groups(const RunFacts &run, char dir) {
-	static_assert(has_normalization("packet.sid_seq_ack"));
-	std::map<std::pair<uint32_t, uint32_t>, int> earliest;
-	for (const wire::ParityPacket &packet : run.trace.packets) {
-		if (packet.dir != dir)
+// C2S 0x3D answers S2C 0x68's `[u32 start]` with that start and up to 50 dwords
+// (NetPacket_WriteEntityIndexList @0x42d950, the `current < count` gate @0x42d9c3):
+// a reply's length compares for each start both runs answered.
+void compare_page_replies(
+		const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
+	static_assert(has_normalization("reply.C.0x3d.start"));
+	auto lengths = [](const RunFacts &run) {
+		std::map<uint32_t, std::set<std::string>> by_start;
+		for (const wire::ParityEvent &event : run.trace.events)
+			if (event.dir == 'C' && event_identity(event) == 0x03D && event.material &&
+					event.body.size() >= 4 && run.in_comparison(event.ts_ns))
+				by_start[u32_at(event.body, 0)].insert(std::to_string(event.body.size()));
+		return by_start;
+	};
+	const auto a = lengths(rr), b = lengths(other);
+	if (a.empty() && b.empty())
+		return;
+	size_t common = 0, differing = 0;
+	std::string detail;
+	for (const auto &entry : a) {
+		const auto found = b.find(entry.first);
+		if (found == b.end())
 			continue;
-		const auto key = std::make_pair(packet.sid, packet.seq);
-		const auto found = earliest.find(key);
-		if (found == earliest.end() || packet.frame < found->second)
-			earliest[key] = packet.frame;
-	}
-	std::vector<std::string> groups;
-	for (const wire::ParityPacket &packet : run.trace.packets) {
-		if (packet.dir != dir || packet.records.empty())
+		++common;
+		if (found->second == entry.second)
 			continue;
-		if (earliest[std::make_pair(packet.sid, packet.seq)] != packet.frame)
-			continue;
-		groups.push_back(group_key(packet));
-		if (carries_low_tag(packet, gameplay_identity(dir)))
-			break;
+		++differing;
+		detail += (detail.empty() ? "start " : "; start ") + std::to_string(entry.first) + ": RR " +
+				render_set(entry.second) + " vs " + render_set(found->second);
 	}
-	return groups;
+	MetricValue value = metric('C', "reply_length", identity_key(0x03D), "REPLY_LENGTH_MISMATCH");
+	value.distance = double(differing);
+	value.subject = std::to_string(b.size()) + " starts";
+	value.reference = std::to_string(a.size()) + " starts";
+	value.detail = detail.empty() ? std::to_string(common) + " common starts agree" : detail;
+	out.push_back(value);
 }
 
-// The frames of each direction's packets through its first gameplay packet.
-std::set<int> initial_frames(const RunFacts &run) {
-	std::set<int> frames;
-	for (const char dir : { 'C', 'S' }) {
-		for (const wire::ParityPacket &packet : run.trace.packets) {
-			if (packet.dir != dir)
-				continue;
-			frames.insert(packet.frame);
-			if (carries_identity(packet, gameplay_identity(dir)))
-				break;
-		}
-	}
-	return frames;
-}
-
-void compare_initial(
-		const RunFacts &rr, const RunFacts &other, char dir, std::vector<MetricValue> &out) {
-	const std::vector<std::string> ga = initial_groups(rr, dir), gb = initial_groups(other, dir);
-	MetricValue grouping = metric(dir, "initial_grouping", "", "INITIAL_PACKET_GROUPING");
-	grouping.distance = double(edit_distance(ga, gb));
-	grouping.subject = std::to_string(gb.size()) + " groups";
-	grouping.reference = std::to_string(ga.size()) + " groups";
-	for (size_t i = 0; i < std::max(ga.size(), gb.size()); ++i) {
-		const std::string x = i < ga.size() ? ga[i] : "-", y = i < gb.size() ? gb[i] : "-";
-		if (x == y)
-			continue;
-		grouping.detail = "first difference at group " + std::to_string(i + 1) + ": RR " +
-				x.substr(0, 120) + " vs " + y.substr(0, 120);
-		break;
-	}
-	out.push_back(grouping);
-
-	// The initial material bodies, byte for byte, but for the registered dynamic ones.
-	auto sequences = [dir](const RunFacts &run) {
-		const std::set<int> frames = initial_frames(run);
-		std::map<uint16_t, std::vector<std::string>> by_identity;
+// The RTT exchange (§5.34): S2C 0x57 / C2S 0x2C are `[u32 stamp][u8 flag]`, flag 1
+// a ping stamped with the sender's GetTickCount, flag 0 the pong echoing the
+// other side's ping (Client_ProcessNetworkFrame @0x42c41c, NapiNPClientMsg_0x057_RTT
+// @0x432210). The 0x2C bodies are wall clocks (initial.C.0x2c): each pong must
+// echo a host ping already seen, and the client's own pings must not run backward.
+void compare_rtt_echo(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
+	static_assert(has_normalization("initial.C.0x2c"));
+	auto faults = [](const RunFacts &run, size_t &bad, size_t &pongs) {
+		bad = pongs = 0;
+		std::set<uint32_t> host_pings;
+		bool have_ping = false;
+		uint32_t last_ping = 0;
 		for (const wire::ParityEvent &event : run.trace.events) {
-			if (event.dir != dir || !event.material || !frames.count(event.frame))
+			if (!event.material || event.body.size() != 5 || !run.in_comparison(event.ts_ns))
 				continue;
 			const uint16_t identity = event_identity(event);
-			if (initial_body_exempt(dir, identity))
-				continue;
-			by_identity[identity].push_back(stable_body_key(
-					dir, identity, std::string(event.body.begin(), event.body.end())));
+			const uint32_t stamp = u32_at(event.body, 0);
+			const uint8_t flag = event.body[4];
+			if (event.dir == 'S' && identity == 0x057 && flag == 1) {
+				host_pings.insert(stamp);
+			} else if (event.dir == 'C' && identity == 0x02C && flag == 0) {
+				++pongs;
+				bad += host_pings.count(stamp) ? 0 : 1;
+			} else if (event.dir == 'C' && identity == 0x02C && flag == 1) {
+				bad += have_ping && int32_t(stamp - last_ping) < 0 ? 1 : 0;
+				have_ping = true;
+				last_ping = stamp;
+			}
 		}
-		return by_identity;
 	};
-	const auto sa = sequences(rr), sb = sequences(other);
-	for (const auto &entry : sa) {
-		const auto found = sb.find(entry.first);
-		if (found == sb.end())
-			continue; // presence is the histogram's
-		const std::vector<std::string> &x = entry.second, &y = found->second;
-		size_t differing = std::max(x.size(), y.size()) - std::min(x.size(), y.size());
-		for (size_t i = 0; i < std::min(x.size(), y.size()); ++i)
-			if (x[i] != y[i])
-				++differing;
-		MetricValue body =
-				metric(dir, "initial_body", identity_key(entry.first), "INITIAL_BODY_MISMATCH");
-		body.distance = double(differing);
-		body.subject = render_list(y, 160);
-		body.reference = render_list(x, 160);
-		body.detail = "bodies differing from RR's initial sequence, position by position";
-		out.push_back(body);
-	}
+	size_t bad_a, pongs_a, bad_b, pongs_b;
+	faults(rr, bad_a, pongs_a);
+	faults(other, bad_b, pongs_b);
+	MetricValue value = metric('C', "rtt_echo", identity_key(0x02C), "RTT_ECHO_MISMATCH");
+	value.distance = double(bad_b);
+	value.subject = std::to_string(bad_b) + " faults, " + std::to_string(pongs_b) + " pongs";
+	value.reference = std::to_string(bad_a) + " faults, " + std::to_string(pongs_a) + " pongs";
+	value.detail = "pongs echoing no earlier S2C 0x57 ping, and client pings running backward";
+	out.push_back(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +336,24 @@ MetricValue distribution_metric(char dir, const char *name, const char *code, co
 	return value;
 }
 
+// A steady packet's grouping: its flags and record multiset (each record's
+// framing key, sorted). Where a reply lands among the tick's records is arrival
+// phase; the order distribution judges order. A gameplay packet keys without the
+// replies riding it (group.S.0x57.reply); a packet of replies alone keeps them.
+std::string steady_group_key(const wire::ParityPacket &packet) {
+	static_assert(has_normalization("group.steady_order"));
+	static_assert(has_normalization("group.S.0x57.reply"));
+	const bool gameplay = carries_low_tag(packet, gameplay_identity(packet.dir));
+	std::vector<std::string> wires;
+	for (const wire::ParityWireRecord &record : packet.records)
+		if (!gameplay || !group_reply(packet.dir, record.full_tag))
+			wires.push_back(wire_key(packet.dir, record));
+	std::sort(wires.begin(), wires.end());
+	char flags[8];
+	std::snprintf(flags, sizeof(flags), "0x%02x", unsigned(packet.flags));
+	return std::string(flags) + "|" + render_list(wires, 0);
+}
+
 void steady_profile(const RunFacts &run, char dir, Distribution &groups, Distribution &orders) {
 	std::map<uint32_t, std::vector<const wire::ParityPacket *>> connections;
 	for (const wire::ParityPacket &packet : run.trace.packets)
@@ -423,7 +375,7 @@ void steady_profile(const RunFacts &run, char dir, Distribution &groups, Distrib
 		for (size_t i = boundary + 1; i < origin.size(); ++i) {
 			if (origin[i]->records.empty())
 				continue;
-			tally(groups, group_key(*origin[i]));
+			tally(groups, steady_group_key(*origin[i]));
 			for (const wire::ParityWireRecord &record : origin[i]->records) {
 				const std::string identity = identity_key(record.full_tag);
 				if (!previous.empty())
@@ -516,11 +468,33 @@ void compare_envelope(
 // ---------------------------------------------------------------------------
 // The outer handshake
 
-// One flat-TLV field's comparison key, its value masked when the registry names it.
+// A CU chunk's decimal text value reduced to its low 16 bits ("" when it is not
+// one decimal number).
+std::string low16_of_decimal(const std::vector<uint8_t> &text) {
+	uint64_t value = 0;
+	size_t digits = 0;
+	for (const uint8_t c : text) {
+		if (c == 0)
+			break;
+		if (c < '0' || c > '9' || ++digits > 18)
+			return {};
+		value = value * 10 + uint64_t(c - '0');
+	}
+	return digits == 0 ? std::string() : "low16:" + std::to_string(value & 0xFFFFu);
+}
+
+// One flat-TLV field's comparison key, its value masked or reduced when the
+// registry names it.
 std::string handshake_field_key(uint8_t opcode, const FlatTlvField &field) {
+	static_assert(has_normalization("handshake.0x42.CU.CI0"));
 	const std::string name(field.name);
 	const std::vector<uint8_t> value(field.value, field.value + field.size);
-	std::string key = name + "|" + std::to_string(field.size);
+	const uint32_t size_class = handshake_length_class(opcode, name);
+	const bool in_class = size_class != 0 &&
+			(field.size == size_class || field.size == size_class + 1);
+	std::string key = name + "|" +
+			(in_class ? std::to_string(size_class) + "-" + std::to_string(size_class + 1)
+					  : std::to_string(field.size));
 	if (name == "CU" && field.size >= 5) {
 		// [u8 type][name\0][u16 len][value]
 		const uint8_t type = value[0];
@@ -531,14 +505,86 @@ std::string handshake_field_key(uint8_t opcode, const FlatTlvField &field) {
 			const std::string cu_name(reinterpret_cast<const char *>(value.data() + 1), p - 1);
 			const size_t length = size_t(value[p + 1]) | (size_t(value[p + 2]) << 8);
 			const std::vector<uint8_t> cu_value(value.begin() + long(p + 3), value.end());
+			std::string rendered = hex_of(cu_value);
+			std::string rendered_length = std::to_string(length);
+			if (handshake_cu_masked(opcode, cu_name)) {
+				rendered = "<dynamic>";
+			} else if (handshake_cu_low16(opcode, cu_name)) {
+				// The printed decimal's width follows the residue's high word.
+				const std::string low = low16_of_decimal(cu_value);
+				if (!low.empty()) {
+					rendered = low;
+					rendered_length = "*";
+					key = name + "|*";
+				}
+			}
 			return key + "|type=" + std::to_string(type) + "|name=" + cu_name +
-					"|value_length=" + std::to_string(length) + "|value=" +
-					(handshake_cu_masked(opcode, cu_name) ? std::string("<dynamic>")
-														  : hex_of(cu_value));
+					"|value_length=" + rendered_length + "|value=" + rendered;
 		}
 	}
 	return key + "|value=" +
 			(handshake_field_masked(opcode, name) ? std::string("<dynamic>") : hex_of(value));
+}
+
+// Whether a session crypt key walks the manager LCG's cycle. Every draw is
+// NapiPRNG_NextInRange(0, strlen(charset)) over the 16-bit LCG state' = state *
+// 0x04B05731 + 1 (@0x62e450), whose low five bits step x' = 17x + 1 (0x5731 = 17
+// mod 32), a full-period 32-cycle; index 31 is the charset's NUL and appends
+// nothing (CNapiNPConnection_GenerateTxKey @0x61dfe0, charset g_TxKeyCharset
+// @0x849f10). So every next character is the cycle successor of the one before,
+// one NUL slot skipped.
+constexpr char kTxKeyCharset[] = "0123456789BCDFGHJKLMNPQRSTVWXYZ";
+constexpr uint32_t kTxKeyNulSlot = sizeof(kTxKeyCharset) - 1; // 31: the charset's NUL
+static_assert(kTxKeyNulSlot == 31);
+
+int tx_key_index(uint8_t c) {
+	for (uint32_t i = 0; i < kTxKeyNulSlot; ++i)
+		if (uint8_t(kTxKeyCharset[i]) == c)
+			return int(i);
+	return -1;
+}
+
+bool follows_key_cycle(const std::vector<uint8_t> &value) {
+	constexpr uint32_t kNulSlot = kTxKeyNulSlot;
+	const char *const kCharset = kTxKeyCharset;
+	auto index_of = tx_key_index;
+	size_t length = value.size();
+	while (length > 0 && value[length - 1] == 0)
+		--length;
+	if (length < 2)
+		return false;
+	for (size_t i = 0; i + 1 < length; ++i) {
+		const int from = index_of(value[i]);
+		if (from < 0 || index_of(value[i + 1]) < 0)
+			return false;
+		uint32_t next = (17u * uint32_t(from) + 1u) & 31u;
+		if (next == kNulSlot)
+			next = (17u * next + 1u) & 31u;
+		if (uint8_t(kCharset[next]) != value[i + 1])
+			return false;
+	}
+	return true;
+}
+
+// The first handshake's SCRK, classified: "lcg-cycle", "other", or "absent".
+std::string key_generator(const wire::ParityHandshake *handshake) {
+	if (!handshake)
+		return "absent";
+	const uint8_t *data = handshake->body.data();
+	const size_t len = handshake->body.size();
+	size_t pos = 0;
+	while (pos < len) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(data, len, pos, field);
+		if (next == kFlatTlvEnd || field.name.empty())
+			break;
+		if (field.name == "SCRK")
+			return follows_key_cycle(std::vector<uint8_t>(field.value, field.value + field.size))
+					? "lcg-cycle"
+					: "other";
+		pos = next;
+	}
+	return "absent";
 }
 
 const wire::ParityHandshake *first_handshake(const RunFacts &run, uint8_t opcode) {
@@ -600,6 +646,41 @@ void compare_handshakes(
 		}
 		out.push_back(value);
 	}
+
+	// The auth key's generator (handshake.0x42.SCRK.length masks only its length):
+	// a retail key walks the manager LCG's cycle, an independently drawn one does not.
+	const uint8_t auth = opcodes[1];
+	char auth_key[8];
+	std::snprintf(auth_key, sizeof(auth_key), "0x%02x", unsigned(auth));
+	const std::string ga = key_generator(first_handshake(rr, auth));
+	const std::string gb = key_generator(first_handshake(other, auth));
+	MetricValue generator = metric(dir, "handshake_key_lcg", auth_key, "HANDSHAKE_KEY_GENERATOR");
+	generator.distance = ga == gb ? 0.0 : 1.0;
+	generator.subject = gb;
+	generator.reference = ga;
+	generator.detail = "SCRK as a walk of the 16-bit manager LCG (GenerateTxKey @0x61dfe0)";
+	out.push_back(generator);
+
+	// One enumerate announce and one join per session: retail joins on the
+	// connection it enumerated from (CNapiNetwork_StartClientConnection @0x4ca160 ->
+	// CNapiNPConnection_InitFromSession @0x626320), so a second hello is a second leg.
+	for (const uint8_t opcode : opcodes) {
+		auto count = [opcode](const RunFacts &run) {
+			size_t n = 0;
+			for (const wire::ParityHandshake &handshake : run.trace.handshakes)
+				n += handshake.opcode == opcode && run.in_comparison(handshake.ts_ns) ? 1 : 0;
+			return n;
+		};
+		char key[8];
+		std::snprintf(key, sizeof(key), "0x%02x", unsigned(opcode));
+		const size_t na = count(rr), nb = count(other);
+		MetricValue value = metric(dir, "handshake_count", key, "HANDSHAKE_COUNT_MISMATCH");
+		value.distance = double(nb > na ? nb - na : na - nb);
+		value.subject = std::to_string(nb);
+		value.reference = std::to_string(na);
+		value.detail = "handshake datagrams of the bound session";
+		out.push_back(value);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -613,10 +694,6 @@ struct Transaction {
 
 uint32_t u16_at(const std::vector<uint8_t> &b, size_t at) {
 	return b[at] | (uint32_t(b[at + 1]) << 8);
-}
-uint32_t u32_at(const std::vector<uint8_t> &b, size_t at) {
-	return b[at] | (uint32_t(b[at + 1]) << 8) | (uint32_t(b[at + 2]) << 16) |
-			(uint32_t(b[at + 3]) << 24);
 }
 
 // S2C 0x31 -> C2S 0x21 (ammo, the reply echoes the key) and S2C 0x30 -> C2S 0x20
@@ -655,8 +732,27 @@ std::vector<Transaction> transactions(const RunFacts &run, bool ammo) {
 	return out;
 }
 
+// A PUNT for a failed CRC: the reliable H:0x03 (identity 0x103) description.
+size_t integrity_punts(const RunFacts &run) {
+	size_t n = 0;
+	for (const wire::ParityEvent &event : run.trace.events) {
+		if (event_identity(event) != 0x103 || !event.material)
+			continue;
+		const std::string body(event.body.begin(), event.body.end());
+		if (body.find("PUNT WCRC") != std::string::npos ||
+				body.find("PUNT ACRC") != std::string::npos)
+			++n;
+	}
+	return n;
+}
+
 void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareOptions &options,
 		std::vector<MetricValue> &out) {
+	static_assert(has_normalization("integrity.oracle"));
+	// A retail host validates every reply it receives and punts a bad one
+	// (NapiNPServerMsg_HandleAntiCheatCRCCheck @0x502050, @0x5021da): with no PUNT in
+	// the session it is the oracle for a row RR never challenged.
+	const bool retail_oracle = options.retail_host && integrity_punts(other) == 0;
 	for (const bool ammo : { true, false }) {
 		const char *family = ammo ? "ammo" : "entity";
 		const std::vector<Transaction> ta = transactions(rr, ammo), tb = transactions(other, ammo);
@@ -667,6 +763,10 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 				oracle[t.row].insert(t.base_crc);
 				rows_a.insert(std::to_string(t.row));
 			}
+		if (options.oracle_pool)
+			for (const Transaction &t : transactions(*options.oracle_pool, ammo))
+				if (t.valid)
+					oracle[t.row].insert(t.base_crc);
 		size_t invalid_a = 0, invalid_b = 0, crc_mismatch = 0, unwitnessed = 0;
 		for (const Transaction &t : ta)
 			invalid_a += t.valid ? 0 : 1;
@@ -678,7 +778,7 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 			rows_b.insert(std::to_string(t.row));
 			const auto found = oracle.find(t.row);
 			if (found == oracle.end())
-				++unwitnessed;
+				unwitnessed += retail_oracle ? 0 : 1;
 			else if (!found->second.count(t.base_crc))
 				++crc_mismatch;
 		}
@@ -693,15 +793,17 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 				ammo ? "INTEGRITY_CRC_MISMATCH" : "ENTITY_INTEGRITY_CRC_MISMATCH");
 		crc.distance = double(crc_mismatch);
 		crc.subject = std::to_string(crc_mismatch) + " mismatched";
-		crc.reference = std::to_string(oracle.size()) + " RR rows";
-		crc.detail = "replies whose key-free CRC differs from RR's for the same row";
+		crc.reference = std::to_string(oracle.size()) + " oracle rows";
+		crc.detail = "replies whose key-free CRC differs from the retail oracle's for the row";
 		out.push_back(crc);
 		MetricValue unseen =
 				metric('B', "integrity_row_unwitnessed", family, "INTEGRITY_ROW_UNWITNESSED");
 		unseen.distance = double(unwitnessed);
 		unseen.subject = render_set(rows_b);
 		unseen.reference = render_set(rows_a);
-		unseen.detail = "answered rows RR never challenged (no CRC oracle)";
+		unseen.detail = retail_oracle
+				? "a retail host accepted every reply (no PUNT): every row is witnessed"
+				: "answered rows no retail run challenged (no CRC oracle)";
 		out.push_back(unseen);
 		if (options.host_rows) {
 			MetricValue rows = metric('B', "integrity_rows", family,
@@ -758,21 +860,8 @@ void compare_integrity(const RunFacts &rr, const RunFacts &other, const CompareO
 	scoreboard.reference = std::to_string(ua) + "/" + std::to_string(ca) + " without 0x16";
 	out.push_back(scoreboard);
 
-	// A PUNT for a failed CRC: the reliable H:0x03 (identity 0x103) description.
-	auto punts = [](const RunFacts &run) {
-		size_t n = 0;
-		for (const wire::ParityEvent &event : run.trace.events) {
-			if (event_identity(event) != 0x103 || !event.material)
-				continue;
-			const std::string body(event.body.begin(), event.body.end());
-			if (body.find("PUNT WCRC") != std::string::npos ||
-					body.find("PUNT ACRC") != std::string::npos)
-				++n;
-		}
-		return n;
-	};
 	MetricValue punt = metric('B', "integrity_punt", "", "INTEGRITY_PUNT");
-	const size_t pa = punts(rr), pb = punts(other);
+	const size_t pa = integrity_punts(rr), pb = integrity_punts(other);
 	punt.distance = double(pb);
 	punt.subject = std::to_string(pb);
 	punt.reference = std::to_string(pa);
@@ -790,15 +879,22 @@ std::vector<std::string> milestones(const RunFacts &run) {
 		uint16_t selector;
 		bool handshake;
 	};
+	// S2C 0x46 is no milestone: a joiner's first one answers the C2S 0x22 its first
+	// 0x16 provokes, so it rides the scoreboard's phase (order.S.0x46). The player-sync
+	// track's C2S 0x09 -> S2C 0x2C is one: the host runs the track only in slot state
+	// 2, which the 0x09 sets (NapiNPServerMsg_0x009 @0x513200, @0x513249;
+	// Server_SendInitialGameStateToPlayer @0x51BBB4..0x51BBBB, its 0x2C @0x51BF5D).
+	static_assert(has_normalization("order.S.0x46"));
 	static const Milestone kMilestones[] = {
 		{ "C:0x41", 'C', 0x41, true },
 		{ "S:0x81", 'S', 0x81, true },
 		{ "C:0x42", 'C', 0x42, true },
 		{ "S:0x82", 'S', 0x82, true },
 		{ "S:0x7b", 'S', 0x07B, false },
+		{ "C:0x09", 'C', 0x009, false },
+		{ "S:0x2c", 'S', 0x02C, false },
 		{ "S:0x08", 'S', 0x008, false },
 		{ "S:0x0b", 'S', 0x00B, false },
-		{ "S:0x46", 'S', 0x046, false },
 		{ "C:0x0b", 'C', 0x00B, false },
 		{ "S:0x0f", 'S', 0x00F, false },
 		{ "C:0x0c", 'C', 0x00C, false },
@@ -885,6 +981,48 @@ void compare_rates(
 	out.push_back(cadence);
 }
 
+// The scoreboard's one clock: S2C 0x16's only producer is Server_TickUpdate's
+// boundary (@0x51D90D, the sole caller of Server_BuildAndBroadcastScoreboard
+// @0x50D960) when g_ScoreboardBroadcastTimer passes 0x136 (@0x51D8F9..0x51D917):
+// 311 ticks, ~4,976 ms. A list under 4,000 ms after the one before it (a send
+// boundary of jitter allowed) rode another trigger. Wire time: the external capture.
+constexpr uint64_t kScoreboardMinGapNs = 4000000000ull;
+
+void compare_scoreboard_cadence(
+		const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
+	static_assert(has_normalization("trace.read_time"));
+	auto off_clock = [](const RunFacts &run, size_t &lists) {
+		size_t n = 0;
+		lists = 0;
+		uint64_t previous = 0;
+		for (const WireTimedEvent &event : run.external_events) {
+			if (event.dir != 'S' || event.identity != 0x016)
+				continue;
+			if (lists++ > 0 && event.ts_ns - previous < kScoreboardMinGapNs)
+				++n;
+			previous = event.ts_ns;
+		}
+		return n;
+	};
+	MetricValue value =
+			metric('S', "scoreboard_cadence", identity_key(0x016), "SCOREBOARD_OFF_CADENCE");
+	value.detail = "S2C 0x16 lists under 4,000 ms after the previous one (external capture)";
+	if (!rr.external_loaded || !other.external_loaded) {
+		value.comparable = false;
+		value.reference_short = !rr.external_loaded;
+		value.subject = other.external_loaded ? "external capture" : "no external capture";
+		value.reference = rr.external_loaded ? "external capture" : "no external capture";
+		out.push_back(value);
+		return;
+	}
+	size_t lists_a = 0, lists_b = 0;
+	const size_t a = off_clock(rr, lists_a), b = off_clock(other, lists_b);
+	value.distance = double(b > a ? b - a : a - b);
+	value.subject = std::to_string(b) + " off-clock of " + std::to_string(lists_b);
+	value.reference = std::to_string(a) + " off-clock of " + std::to_string(lists_a);
+	out.push_back(value);
+}
+
 } // namespace
 
 void compare_wire(const RunFacts &rr, const RunFacts &other, const CompareOptions &options,
@@ -897,8 +1035,11 @@ void compare_wire(const RunFacts &rr, const RunFacts &other, const CompareOption
 		compare_handshakes(rr, other, dir, out);
 		compare_rates(rr, other, dir, out);
 	}
+	compare_page_replies(rr, other, out);
+	compare_rtt_echo(rr, other, out);
 	compare_integrity(rr, other, options, out);
 	compare_milestones(rr, other, out);
+	compare_scoreboard_cadence(rr, other, out);
 }
 
 } // namespace opennova::parity
