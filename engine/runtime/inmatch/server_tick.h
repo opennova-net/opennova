@@ -80,6 +80,14 @@ bool Server_AcceptsPlayerFireTick(const NapiNPConnection &connection,
 // connection_list; the parallel NetSystem-as-ISystem owner was removed at P8.
 void Server_TickUpdate(NapiNPServerCtx &ctx);
 
+// The frame tail after the host's S2C flush: retail's entity update follows
+// Server_TickUpdate's send pump and precedes the next receive pump, so a
+// player body's death edge on a Health store the tick made (the flag reset's
+// -1, RoundDeath::frame_tail_edge), tested ahead of this frame's entity pass,
+// raises its transaction here once that pass ran; its sends lead the next
+// frame. host_session_pump calls it after its flush.
+void Server_RouteFrameTailEdges(NapiNPServerCtx &ctx);
+
 // One transport-free RoundDeath through the one retail player-death
 // transaction: 0x13 remote fan, victim 0x61 seed, victim 0x52 camera, optional
 // 0x1E active-player feed, conditional 0x54 Medic state, scoring, and respawn

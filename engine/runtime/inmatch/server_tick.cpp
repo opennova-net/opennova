@@ -442,6 +442,10 @@ void route_round_deaths(NapiNPServerCtx &ctx, world::World &world,
 		EdgeDrain edges = EdgeDrain::Route) {
 	std::vector<world::RoundDeath> held;
 	for (const world::RoundDeath &d : world.round_sim.deaths) {
+		if (d.frame_tail_edge) { // the frame tail's (Server_RouteFrameTailEdges)
+			held.push_back(d);
+			continue;
+		}
 		if (d.player_edge && edges == EdgeDrain::AfterConverts) {
 			// The edge's hidden bit and dead bit [orig: @0x4B411E..0x4B4127,
 			// @0x4B4BFE].
@@ -715,10 +719,13 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 				const world::EntityHandle flag = player->mounted_child;
 				world.match.drop_carried_object(world, player->handle);
 				world.match.sync_flag_to_authored_pose(world, flag);
-				// Health = -1; a body that is still alive enters the same death
-				// transaction the breath kill uses (the retail entity death path
-				// picks the store up on its next update; an already-dead body only
-				// keeps the store).
+				// Health = -1 is the store alone: the player body's death edge picks
+				// it up in this frame's entity update, after the tick's send pump and
+				// ahead of the next receive pump; an already-dead body only keeps the
+				// store. Ours raises a player body's transaction from the death queue
+				// (D-AI-9), so a body still alive queues the edge's death for the
+				// host's frame tail: the edge's test runs ahead of the frame's entity
+				// pass (arm_frame_tail_edges), and the tail raises what it kept.
 				const bool was_alive = player->alive && player->health > 0 &&
 						((player->flags | player->engine_flags) &
 								world::kEntityFlagDead) == 0u;
@@ -728,6 +735,7 @@ void check_player_violations(NapiNPServerCtx &ctx, world::World &world) {
 					death.victim = player->handle;
 					death.victim_handle = player->handle.packed;
 					death.event_flags = player->cause_flags & 0xF00u;
+					death.frame_tail_edge = true;
 					world.round_sim.deaths.push_back(death);
 				}
 			}
@@ -1668,6 +1676,27 @@ void Server_RecalculateAllPlayerKitWeights(
 //  follows Server_TickUpdate's send pump @0x51E487; Projectile_ProcessExplosionQueue
 //  @0x4EADFC -> GameEvent_HandleMedicInteraction @0x4E6790 ->
 //  GameEvent_RevivePlayer @0x517CD0 / GameEvent_HealPlayer @0x50DE30]
+// The frame tail's player-body edges as this frame's entity update meets them:
+// an unhidden body at Health <= 0 whose dead bit is clear. Tested ahead of the
+// pass, whose local motor leg latches the dead bit as the edge does while the
+// remote leg (a body that uplinked) latches nothing, and a record whose edge
+// is shut is dropped: a body another transaction killed while the record
+// waited for an entity update (a 0x4D in a pre-round frame) dies once.
+// [orig: Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
+//  Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE]
+static void arm_frame_tail_edges(world::World &world) {
+	std::vector<world::RoundDeath> &deaths = world.round_sim.deaths;
+	deaths.erase(std::remove_if(deaths.begin(), deaths.end(),
+			[&world](const world::RoundDeath &d) {
+				if (!d.frame_tail_edge) return false;
+				const world::Entity *body = world.registry.get(d.victim);
+				return body == nullptr || body->health > 0 ||
+						((body->flags | body->engine_flags) &
+								(world::kEntityFlagCarried | world::kEntityFlagDead)) != 0u;
+			}),
+			deaths.end());
+}
+
 static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
 	route_throwable_events(ctx, world);
@@ -2391,12 +2420,54 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// through this seam (world/powerup.cpp).
 	ServerRemoteWeaponTables remote_weapon_tables(ctx.np_protocol.connection_list);
 	world.remote_weapon_tables = &remote_weapon_tables;
+	ctx.entity_update_ran = tick.phase == world::TickPhase::Gameplay &&
+			world.entity_update_admitted(/*is_authority=*/true);
+	if (ctx.entity_update_ran) arm_frame_tail_edges(world);
 	world.run_entity_pass(tick);
 	world.remote_weapon_tables = nullptr;
 
 	// (5) flush is implicit: host_send staged each 0x0A on its transport. The loopback's local client
 	// reads it via client_recv / ClientReplicaPipeline::pump; a remote peer's transport outbound_ is popped +
 	// framed into a 0x83 SESSION by the owner (frame_in_match_s2c). No socket I/O in engine/.
+}
+
+// See header. Retail's player-body edge latches the dead bit and raises the
+// transaction in one step; in ours the local motor leg latches the bit in the
+// pass (infantry_death.cpp) and the remote leg latches nothing, so the edge's
+// test runs ahead of the pass (arm_frame_tail_edges, which drops a record whose
+// edge is shut) and this tail raises the transaction for every record left;
+// with no entity update this frame each waits.
+// [orig: Game_ProcessMainFrame -- Server_TickUpdate's send pump @0x51E487,
+//  then the gated Entity_UpdateAllEntities call @0x52674B; the edge
+//  Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
+//  Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE, its latch @0x4B4CB5..0x4B4CDB,
+//  Entity_CheckAndProcessDeath @0x4B4CEA]
+void Server_RouteFrameTailEdges(NapiNPServerCtx &ctx) {
+	if (ctx.world == nullptr || ctx.is_authority == 0 || !ctx.entity_update_ran) return;
+	world::World &world = *ctx.world;
+	if (std::none_of(world.round_sim.deaths.begin(), world.round_sim.deaths.end(),
+				[](const world::RoundDeath &d) { return d.frame_tail_edge; }))
+		return;
+	std::vector<world::RoundDeath> queued = std::move(world.round_sim.deaths);
+	world.round_sim.deaths.clear();
+	for (const world::RoundDeath &d : queued) {
+		if (!d.frame_tail_edge) {
+			world.round_sim.deaths.push_back(d);
+			continue;
+		}
+		const world::Entity *body = world.registry.get(d.victim);
+		if (body == nullptr) continue;
+		world::RoundDeath death = d;
+		death.frame_tail_edge = false;
+		// The transaction credits the body's +0x178 as the edge leaves it: the
+		// pass's edge cleared it unless a non-lethal hit had staged the death
+		// selection (+0x2C0) [orig: Entity_UpdateInfantryPlayerBody @0x4B4C72
+		//  .. @0x4B4C8D; GameEvent_PlayerDeath reads +0x178 @0x516F47, the
+		//  scoring @0x516FB0].
+		death.killer = body->last_attacker;
+		death.killer_handle = body->last_attacker.valid() ? body->last_attacker.packed : 0xFFFFu;
+		Server_ProcessPlayerDeath(ctx, world, death);
+	}
 }
 
 } // namespace opennova::inmatch
