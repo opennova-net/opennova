@@ -168,8 +168,10 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg);
 // AFTER NWU-decryption) into a zeroed record: the tags are walked
 // case-insensitively, the walk stops at the first malformed or empty-named
 // tag and keeps what it gathered, and an absent tag reads as zero/empty.
-// There is one flat tag set, the writer's. Returns true when HK was seen
-// (the value the client echoes in ClientAuth).
+// There is one flat tag set, the writer's. Every dword and the PG's 16 bytes
+// load at the field's value pointer whatever its length, so a short value takes
+// the bytes that follow it (zero past the buffer's end). Returns true when HK
+// was seen (the value the client echoes in ClientAuth).
 // [orig: Nwu_HandleServerHello @0x626d20]
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out);
 
@@ -335,8 +337,11 @@ std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const Disconnec
 // true for every non-null body, because the retail receiver records the description and moves the
 // connection to state 6 no matter what the walk yielded — a body carrying none of the seven names,
 // or a valid run with a truncated tail, still disconnects. The dispatcher gates on the H:0x03 tag
-// alone. [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 — walk exits on read failure
-//  @0x621b8c, terminal SetState(6) @0x621d59 unconditional on the parsed content]
+// alone. The same walk reads a 0x46 / 0x86 goodbye's record after its key dword. DC, DP1, DP2 and
+// DPC load a whole dword at the value pointer whatever the field's length.
+// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 - walk exits on read failure
+//  @0x621b8c, terminal SetState(6) @0x621d59 unconditional on the parsed content;
+//  Nwu_HandleDisconnect @0x623CE0]
 bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &out);
 
 // ---- ClientAuth character_id bit-pack (the CI0/CI1 join vars) ----------
@@ -510,7 +515,11 @@ std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg);
 // session_id on the client's outbound 0x43 ProtocolMessages), and the
 // server-side `scrk` (which decrypts inbound 0x83 ProtocolMessages). Also
 // recovers the CS/CU control fields for round-trip fidelity. Inverse of
-// server_auth_to_bytes; ignores unknown tags. Returns true on success.
+// server_auth_to_bytes; ignores unknown tags. Every dword, and a CS field's six
+// bytes, load at the value pointer whatever the field's length; a CS with a
+// nonzero direction byte joins client_cs, a zero one server_cs, and one whose
+// index is past 14 is dropped, as retail's reader does. Returns true on success.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840]
 bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out);
 
 } // namespace opennova

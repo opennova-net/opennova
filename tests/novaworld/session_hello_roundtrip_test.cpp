@@ -9,9 +9,11 @@
 // having to launch retail every iteration.
 
 #include <net/npwire/session_hello.h>
+#include <net/npwire/session_ping.h>
 
 #include "../common/test_expect.h"
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -461,6 +463,96 @@ int test_hello_and_auth_strings_copy_to_the_first_nul() {
 	return 0;
 }
 
+// The client-side readers load each fixed-width field at its value pointer
+// whatever its TLV length, as the 0x41 / 0x42 handlers do: a short value takes
+// the bytes that follow it in the body, zero past its end (D-NET-410).
+// [orig: Nwu_HandleServerHello @0x626D20 - CI @0x626F63, PG @0x62707A..0x627097,
+//  HK @0x627146, TZB @0x6271F7, SF @0x627218, NP @0x627341, ET @0x627504;
+//  NapiNP_HandleServerJoinResponse @0x629840 - CI @0x629A34, CK @0x629A76, CR
+//  @0x629A97, the CS loads @0x629B4C..0x629B55 and tests @0x629B4F..0x629B6F, RIP
+//  @0x629C3E, RCNT @0x629C7A; CNapiNPConnection_HandleDescriptionPacket @0x621AE0
+//  - DC @0x621BCB, DP1 @0x621BEC, DPC @0x621C51; Nwu_HandlePing @0x623A70 - WR
+//  @0x623C0F, MS @0x623C2A]
+int test_client_side_readers_load_short_fields_whole() {
+	// 0x81: a two-byte CI takes the next name "HK"; a 15-byte PG takes the 'S'
+	// of "SN"; an empty TZB takes "SF", its NUL and SF's size byte; a one-byte
+	// SF takes "NP" and its NUL; the last field, a one-byte ET, reads zero past
+	// the end.
+	const std::array<uint8_t, 16> guid = opennova::jointoperations_protocol_guid();
+	std::vector<uint8_t> sh;
+	append_field(sh, "CI", {0x09, 0x00});
+	append_field(sh, "HK", {0x44, 0x33, 0x22, 0x11});
+	append_field(sh, "PG", std::vector<uint8_t>(guid.begin(), guid.begin() + 15));
+	append_field(sh, "SN", cstr_value("Host"));
+	append_field(sh, "TZB", {});
+	append_field(sh, "SF", {0x00});
+	append_field(sh, "NP", {0x05, 0x00, 0x00, 0x00});
+	append_field(sh, "ET", {0x07});
+	ServerHello hello;
+	TEST_EXPECT(parse_server_hello(sh.data(), sh.size(), hello));
+	TEST_EXPECT(hello.ci == (0x09u | (uint32_t('H') << 16) | (uint32_t('K') << 24)));
+	TEST_EXPECT(hello.hk == 0x11223344u && hello.sn == "Host");
+	std::array<uint8_t, 16> short_pg = guid;
+	short_pg[15] = 'S';
+	TEST_EXPECT(hello.pg == short_pg);
+	TEST_EXPECT(hello.tzb == (uint32_t('S') | (uint32_t('F') << 8) | (0x01u << 24)));
+	TEST_EXPECT(hello.sf == ((uint32_t('N') << 8) | (uint32_t('P') << 16)));
+	TEST_EXPECT(hello.np == 5u && hello.et == 7u);
+
+	// 0x82: a one-byte CI takes "CK"; a two-byte CS takes its dword from the
+	// next name, "RIP\0"; a direction byte of 2 files the client block; an index
+	// of 15 is dropped; a seven-byte CS loads its first six; the last field, a
+	// one-byte RCNT, reads zero past the end.
+	std::vector<uint8_t> sa;
+	append_field(sa, "CI", {0x04});
+	append_field(sa, "CK", {0xEF, 0xBE, 0xAD, 0xDE});
+	append_field(sa, "CR", {0x01, 0x00, 0x00, 0x00});
+	append_field(sa, "CS", {0x01, 0x0D});
+	append_field(sa, "RIP", {0x01, 0x02, 0x03, 0x04});
+	append_field(sa, "CS", {0x02, 0x00, 0x10, 0x27, 0x00, 0x00});
+	append_field(sa, "CS", {0x01, 0x0F, 0x01, 0x00, 0x00, 0x00});
+	append_field(sa, "CS", {0x00, 0x05, 0xE8, 0x03, 0x00, 0x00, 0xFF});
+	append_field(sa, "SCRK", cstr_value("KEY"));
+	append_field(sa, "RCNT", {0x03});
+	ServerAuth auth;
+	TEST_EXPECT(parse_server_auth(sa.data(), sa.size(), auth));
+	TEST_EXPECT(auth.ci == (0x04u | (uint32_t('C') << 8) | (uint32_t('K') << 16)));
+	TEST_EXPECT(auth.ck == 0xDEADBEEFu && auth.cr == 1u && auth.rip == 0x04030201u);
+	TEST_EXPECT(auth.client_cs.size() == 2 && auth.server_cs.size() == 1);
+	TEST_EXPECT(auth.client_cs[0].field_index == 13 &&
+			auth.client_cs[0].value ==
+					(uint32_t('R') | (uint32_t('I') << 8) | (uint32_t('P') << 16)));
+	TEST_EXPECT(auth.client_cs[1].field_index == 0 && auth.client_cs[1].value == 10000u);
+	TEST_EXPECT(auth.server_cs[0].field_index == 5 && auth.server_cs[0].value == 1000u);
+	TEST_EXPECT(auth.scrk == "KEY" && auth.rcnt == 3u);
+
+	// The description record (and a goodbye's, the same walk): a two-byte DC
+	// takes "DP"; the last field, a one-byte DPC, reads zero past the end.
+	std::vector<uint8_t> desc;
+	append_field(desc, "DC", {0x02, 0x00});
+	append_field(desc, "DP1", {0x01, 0x00, 0x00, 0x00});
+	append_field(desc, "DPC", {0x21});
+	opennova::DisconnectEvent event;
+	TEST_EXPECT(opennova::parse_disconnect_event(desc.data(), desc.size(), event));
+	TEST_EXPECT(event.dc == (0x02u | (uint32_t('D') << 16) | (uint32_t('P') << 24)));
+	TEST_EXPECT(event.dp1 == 1u && event.dpc == 0x21u);
+
+	// The ping: an empty WR takes the 'M' of "MS" (a reply is wanted); the last
+	// field, a two-byte MS, reads zero past the end. An empty last WR reads zero.
+	std::vector<uint8_t> ping = {0x78, 0x56, 0x34, 0x12};
+	append_field(ping, "WR", {});
+	append_field(ping, "MS", {0x34, 0x12});
+	opennova::SessionPingBody body;
+	TEST_EXPECT(opennova::parse_session_ping_body(ping.data(), ping.size(), body));
+	TEST_EXPECT(body.receiver_local_key == 0x12345678u && body.wants_reply &&
+			body.timestamp_ms == 0x1234u);
+	std::vector<uint8_t> last_wr = {0x78, 0x56, 0x34, 0x12};
+	append_field(last_wr, "WR", {});
+	TEST_EXPECT(opennova::parse_session_ping_body(last_wr.data(), last_wr.size(), body));
+	TEST_EXPECT(!body.wants_reply);
+	return 0;
+}
+
 int test_client_hello_tag_names_are_case_insensitive() {
 	ClientHello src;
 	src.pn = "NOVAWORLDUDP";
@@ -732,6 +824,7 @@ int main() {
 	if (test_client_auth_short_dword_takes_the_following_bytes() != 0) return 1;
 	if (test_pg_of_any_length_loads_sixteen_bytes() != 0) return 1;
 	if (test_hello_and_auth_strings_copy_to_the_first_nul() != 0) return 1;
+	if (test_client_side_readers_load_short_fields_whole() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_client_auth_zero_ck_parses() != 0) return 1;

@@ -809,11 +809,14 @@ bool check_session_ping_codec() {
 					parsed.timestamp_ms == 0x01020304u,
 			"the body round-trips"))
 		return false;
-	// Tags compare case-insensitively; a value short of its width reads zero.
+	// Tags compare case-insensitively; a value short of its width loads its bytes and those
+	// after it, zero past the body's end (D-NET-415) [orig: Nwu_HandlePing @0x623A70 - MS
+	// @0x623C2A].
 	const std::vector<uint8_t> odd = {1, 0, 0, 0, 'w', 'r', 0, 1, 0, 0, 'm', 's', 0, 2, 0, 9, 9};
 	if (!expect(parse_session_ping_body(odd.data(), odd.size(), parsed) &&
-					parsed.receiver_local_key == 1 && !parsed.wants_reply && parsed.timestamp_ms == 0,
-			"lower-case tags parse, a two-byte MS reads zero"))
+					parsed.receiver_local_key == 1 && !parsed.wants_reply &&
+					parsed.timestamp_ms == 0x0909u,
+			"lower-case tags parse, a two-byte MS loads its bytes and zero past the end"))
 		return false;
 	const std::vector<uint8_t> tiny = {1, 2, 3};
 	return expect(!parse_session_ping_body(tiny.data(), tiny.size(), parsed),
