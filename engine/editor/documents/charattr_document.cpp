@@ -14,8 +14,6 @@
 #include <editor/documents/noted_file_state.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
-#include <formats/cbin/binary_config.h>
-#include <formats/cbin/binary_config_text.h>
 #include <formats/configfile/config_file.h>
 #include <formats/def/reserved_items.h>
 
@@ -258,31 +256,20 @@ bool CharAttrDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std:
 	auto notes = std::make_shared<textlayout::Notes>();
 	charattr::Table table;
 	charattr::Reading reading;
-	binary_form_ = false;
-	if (!charattr::read_table(bytes.data(), bytes.size(), table, &reading, *notes)) {
-		// A CBIN-form file the ConfigFile loader reads through its binary reader [orig: ConfigFile_LoadFromFile @
-		// 0x760aa3, on the "CBIN" magic]: what the game reads of it is its text form as the text reader reads it
-		// (formats/cbin/binary_config_text.h). The document holds those classes read only (charattr.binary_form): it
-		// writes the text form alone, and no shipped charattr.def is a CBIN one. A file of no bytes reads as no class
-		// (the game's own error, a required file's).
-		if (configfile::data_strings_pool(bytes.data(), bytes.size()).binary) {
-			binary_form_ = true;
-			cbin::BinaryConfig config;
-			std::string text, why;
-			notes = std::make_shared<textlayout::Notes>();
-			table = charattr::Table();
-			reading = charattr::Reading();
-			const bool shown = cbin::decode_binary_config(bytes.data(), bytes.size(), config, why) &&
-			                   cbin::binary_config_text(config, text, why) &&
-			                   charattr::read_table(reinterpret_cast<const uint8_t *>(text.data()), text.size(), table,
-			                                        &reading, *notes);
-			if (!shown) reading = charattr::Reading();
-			issues.push_back({true, 0, std::string(), std::string(),
-			                  shown ? "This charattr.def is in the ConfigFile's binary (CBIN) form: the editor shows the "
-			                          "classes the game reads of it, read only."
-			                        : "This charattr.def is in the ConfigFile's binary (CBIN) form, which the editor cannot "
-			                          "show (" + why + "); it holds the file read only."});
-		}
+	// A CBIN-form file the ConfigFile loader reads through its binary reader [orig: ConfigFile_LoadFromFile @
+	// 0x760aa3, on the "CBIN" magic], which the format's reader takes as its text twin (D-CBIN-4), its notes empty.
+	// The document holds those classes read only (charattr.binary_form): it writes the text form alone, and no
+	// shipped charattr.def is a CBIN one. A file of no bytes reads as no class (the game's own error, a required
+	// file's).
+	binary_form_ = configfile::data_strings_pool(bytes.data(), bytes.size()).binary;
+	const bool read = charattr::read_table(bytes.data(), bytes.size(), table, &reading, *notes);
+	if (binary_form_) {
+		if (!read) reading = charattr::Reading();
+		issues.push_back({true, 0, std::string(), std::string(),
+		                  read ? "This charattr.def is in the ConfigFile's binary (CBIN) form: the editor shows the "
+		                         "classes the game reads of it, read only."
+		                       : "This charattr.def is in the ConfigFile's binary (CBIN) form, which the editor cannot "
+		                         "read; it holds the file read only."});
 	}
 	for (size_t index = 0; index < reading.classes && index < charattr::kClassCount; ++index) {
 		auto row = std::make_shared<CharAttrRow>();
