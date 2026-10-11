@@ -20,7 +20,6 @@ trees or the corpus the way the retired manifest did.
 | `capture.ps1` | Start or stop a tagged local packet capture. |
 | `decode.ps1` | Decode a capture with the native `opennova-wire` application. |
 | `diff_0a.py` | Per-FIELD shape diff of the S2C 0x0A stream vs a retail-host golden (sub-block cycle, record-class mix, field population); caches `<golden>.0a.json` beside the input. |
-| `exercise_retail_input.ps1` | Drive the bounded Windows input trajectory used by live probes. |
 | `host_opennova.ps1` | Start an OpenNova LAN host on launch flags, await LAN discovery and its MCP endpoint. |
 | `join_opennova.ps1` | Start an OpenNova LAN joiner on launch flags with its MCP endpoint. |
 | `run_lan_pair.ps1` | Start a local OpenNova host/joiner pair (MCP ports 8975/8976). |

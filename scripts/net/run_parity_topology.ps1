@@ -250,6 +250,23 @@ $RetailClientExeSha256 = (Get-FileHash -LiteralPath (Join-Path $ClientDir "Joint
 if ($RetailServerExeSha256 -ne $RetailClientExeSha256) {
     throw "RetailServerRoot and RetailClientRoot hold different Jointops.exe images."
 }
+# The jox01 reference is one exact executable (ADR 0050 decision 2); a stock
+# jox01 run on any other image is not evidence for it.
+$PinnedJox01ExeSha256 = "9a1035440a53af2057ce0995ac42dced840d3b9fd53c04dc86041a962b84fe57"
+if ($Expansion -eq "jox01" -and -not $AllowModifiedRetail -and
+        $RetailServerExeSha256 -ne $PinnedJox01ExeSha256) {
+    throw "Jointops.exe $RetailServerExeSha256 is not the pinned jox01 reference ($PinnedJox01ExeSha256)."
+}
+# What built the OpenNova side: this checkout's commit (and whether it was
+# clean), its GDExtension and the Godot binary, recorded with every run.
+function Get-FileSha256OrNull {
+    param([string] $Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+$RepoCommit = (& git -C $Repo rev-parse HEAD 2>$null)
+$RepoDirty = [bool] (& git -C $Repo status --porcelain --untracked-files=no 2>$null)
+$GdextensionDll = Join-Path $Repo "godot\bin\libopennova.windows.template_debug.x86_64.dll"
 # A retail host advertises its game.cfg game_name verbatim (S2C 0x2C/0x7B), so
 # the session name every cell expects is the SERVER copy's own, exactly.
 $serverGameName = Select-String -LiteralPath (Join-Path $ServerDir "game.cfg") `
@@ -268,12 +285,11 @@ $HostScript = Join-Path $Repo "scripts\net\host_opennova.ps1"
 $JoinScript = Join-Path $Repo "scripts\net\join_opennova.ps1"
 $NetLib = Join-Path $Repo "scripts\net\lib.ps1"
 $ProbeExe = Join-Path $Repo "build\apps\lan_probe\Release\opennova-lan-probe.exe"
-$InputExerciseScript = Join-Path $Repo "scripts\net\exercise_retail_input.ps1"
 $WireReadyScript = Join-Path $Repo "scripts\net\wait_parity_wire_ready.ps1"
 
 foreach ($required in @(
     $ServerDir, $ClientDir, $McpExe, $GodotLauncher, $CaptureScript, $HostScript,
-    $JoinScript, $NetLib, $ProbeExe, $InputExerciseScript,
+    $JoinScript, $NetLib, $ProbeExe,
     $WireReadyScript
 )) {
     if (-not (Test-Path -LiteralPath $required)) {
@@ -547,49 +563,87 @@ function Send-ExternalCaptureTailMarker {
     Start-Sleep -Milliseconds $script:CaptureTailMarker.flush_wait_ms
 }
 
+# The retail joiner's motion exercise on exercised RR/OR runs: forward with a
+# right turn, strafe right with a left turn, strafe left with half a right turn
+# (the catalog codes forward 152, strafe_right 157, strafe_left 156;
+# engine/runtime/controls/controls.cpp), played tick-exact through onHook's
+# focus-free scripted input (onhook_play_input, bridge 1.9) rather than
+# foreground SendInput. Each leg holds its key and spreads its turn over 20
+# relative mouse samples.
+$script:RetailInputLegs = @(
+    [pscustomobject]@{ name = "forward"; code = 152; ticks = 112; turn_pixels = 320 },
+    [pscustomobject]@{ name = "strafe"; code = 157; ticks = 75; turn_pixels = -320 },
+    [pscustomobject]@{ name = "return"; code = 156; ticks = 56; turn_pixels = 160 }
+)
+
+function Get-RetailInputSteps {
+    $steps = [System.Collections.Generic.List[object]]::new()
+    $tick = 10
+    foreach ($leg in $script:RetailInputLegs) {
+        $steps.Add([pscustomobject]@{ tick = $tick; down = $leg.code })
+        $samples = 20
+        $per = [int][Math]::Truncate($leg.turn_pixels / $samples)
+        $remainder = $leg.turn_pixels - $per * $samples
+        for ($i = 0; $i -lt $samples; ++$i) {
+            $dx = $per + $(if ($i -eq $samples - 1) { $remainder } else { 0 })
+            $at = $tick + [int][Math]::Floor($i * $leg.ticks / $samples)
+            $steps.Add([pscustomobject]@{ tick = $at; look_px = @($dx, 0) })
+        }
+        $tick += $leg.ticks
+        $steps.Add([pscustomobject]@{ tick = $tick; up = $leg.code })
+        $tick += 1
+    }
+    $steps.Add([pscustomobject]@{ tick = $tick + 5; end = $true })
+    return $steps.ToArray()
+}
+
 function Invoke-RetailInputExercise {
-    param([Parameter(Mandatory = $true)] [int] $ProcessId)
+    param(
+        [Parameter(Mandatory = $true)] [string] $InstanceId,
+        [Parameter(Mandatory = $true)] [int] $ProcessId
+    )
     if (-not $ExerciseInput -or $Topology -notin @("RR", "OR")) {
         throw "Retail input witnesses are valid only for exercised RR/OR runs"
     }
     $path = Join-Path $RunRoot "retail-input.json"
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass `
-        -File $InputExerciseScript -ProcessId $ProcessId `
-        -Topology $Topology -RunId $RunId -Output $path
-    if ($LASTEXITCODE -ne 0) {
-        throw "Retail input exercise failed for exact PID ${ProcessId}: $LASTEXITCODE"
+    if (Test-Path -LiteralPath $path) {
+        throw "Retail input witness must be create-new: $path"
     }
-    $detail = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
-    $actualProperties = @($detail.PSObject.Properties.Name | Sort-Object)
-    $expectedProperties = @(
-        "schema", "complete", "run_id", "topology", "pid",
-        "process_start_utc", "window_handle", "started_utc", "completed_utc",
-        "forward_ms", "strafe_ms", "return_ms", "turn_pixels",
-        "injected_events", "focus_attempts", "foreground_checks"
-    ) | Sort-Object
-    if (($actualProperties -join ',') -cne ($expectedProperties -join ',') -or
-            [string] $detail.schema -cne "opennova.retail-input.v1" -or
-            $detail.complete -isnot [bool] -or -not [bool] $detail.complete -or
-            [string] $detail.run_id -cne $RunId -or
-            [string] $detail.topology -cne $Topology -or
-            [int] $detail.pid -ne $ProcessId -or
-            [int64] $detail.window_handle -le 0 -or
-            [int] $detail.forward_ms -ne 1800 -or
-            [int] $detail.strafe_ms -ne 1200 -or
-            [int] $detail.return_ms -ne 900 -or
-            [int] $detail.turn_pixels -ne 320 -or
-            [int] $detail.injected_events -ne 66 -or
-            [int] $detail.focus_attempts -lt 3 -or
-            [int] $detail.focus_attempts -gt 30 -or
-            [int] $detail.foreground_checks -lt 195 -or
-            [int] $detail.foreground_checks -gt 222) {
-        throw "Retail input exercise emitted an invalid witness: $path"
+    $steps = Get-RetailInputSteps
+    $started = [DateTime]::UtcNow
+    $played = Get-StructuredResult (Invoke-OnHookTool -Name "onhook_play_input" -Arguments @{
+        instance_id = $InstanceId
+        steps = $steps
+        wait = $true
+        # Generous: two retail windows on one machine tick well below 62 Hz.
+        timeout_ms = 60000
+    })
+    $unapplied = @($played.steps | Where-Object {
+        [string] $_.kind -ne "end" -and $null -eq $_.applied_logic_tick
+    })
+    if ([string] $played.state -ne "done" -or $unapplied.Count -gt 0) {
+        throw "Retail input exercise did not play on instance ${InstanceId}: state=$($played.state) result=$($played.result) unapplied=$($unapplied.Count)"
     }
+    [pscustomobject]@{
+        schema = "opennova.retail-input.v2"
+        run_id = $RunId
+        topology = $Topology
+        instance_id = $InstanceId
+        pid = $ProcessId
+        driver = "onhook_play_input"
+        started_utc = $started.ToString("o")
+        completed_utc = [DateTime]::UtcNow.ToString("o")
+        legs = $script:RetailInputLegs
+        steps = $steps
+        record = $played
+    } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
     $script:InputWitness = [pscustomobject]@{
         path = $path
         sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         pid = $ProcessId
-        detail = $detail
+        instance_id = $InstanceId
+        state = [string] $played.state
+        applied_steps = @($played.steps).Count
     }
 }
 
@@ -1679,7 +1733,8 @@ try {
             Invoke-ScenarioIfRequested -RetailJoinerInstanceId ([string] $pair.joiner.instance_id) `
                 -RetailHostInstanceId ([string] $pair.host.instance_id)
             if ($ExerciseInput) {
-                Invoke-RetailInputExercise -ProcessId ([int] $pair.joiner.pid)
+                Invoke-RetailInputExercise -InstanceId ([string] $pair.joiner.instance_id) `
+                    -ProcessId ([int] $pair.joiner.pid)
             }
             Wait-UntilSteadyDeadline
             $hostStatus = Wait-RetailRunForPeer -OwnedRunId ([string] $pair.host.run_id)
@@ -1919,7 +1974,8 @@ try {
                 Begin-SteadyWindow
                 Invoke-ScenarioIfRequested -RetailJoinerInstanceId $script:RetailInstanceId
                 if ($ExerciseInput) {
-                    Invoke-RetailInputExercise -ProcessId $script:RetailProcess.Id
+                    Invoke-RetailInputExercise -InstanceId $script:RetailInstanceId `
+                        -ProcessId $script:RetailProcess.Id
                 }
                 Wait-UntilSteadyDeadline
                 $script:RetailProcess.Refresh()
@@ -2226,6 +2282,10 @@ $summary = [pscustomobject]@{
     retail_exe_sha256 = $RetailServerExeSha256
     retail_stock_observer = [bool] $StockObserver
     onhook_mcp_sha256 = (Get-FileHash -LiteralPath $McpExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    repo_commit = [string] $RepoCommit
+    repo_dirty = $RepoDirty
+    gdextension_sha256 = Get-FileSha256OrNull $GdextensionDll
+    godot_launcher_sha256 = Get-FileSha256OrNull $GodotLauncher
     run_id = $RunId
     suite_id = $SuiteId
     corpus_fingerprint = $CorpusFingerprint
