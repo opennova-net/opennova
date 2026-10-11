@@ -83,7 +83,9 @@ public:
     // (1), any other attacks (2) [orig: `test [eax+54h], 8000h` @0x524160 /
     // @0x524190; `cmp al, [edx+162h]; setnz; add ecx, 1` @0x5241A3..0x5241AC].
     // Retail dereferences g_LocalPlayerEntity unguarded; with no local player
-    // yet (a joiner's pre-spawn start) the word stays 0.
+    // yet (a joiner's pre-spawn start) the word stays 0, and the joiner
+    // latches on its spawn frame, after that frame's team mirror
+    // (JoinerRole::pump).
     void latch_attack_defend_role(uint32_t game_type);
 
     bool has_local_player() const;

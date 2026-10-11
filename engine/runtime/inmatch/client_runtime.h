@@ -448,10 +448,11 @@ public:
 	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte. [ROADMAP "Determinism"]
 	// `tick_seed` is the capture's live network-role tick (the value its S2C 0x61 seeded);
 	// without it a replayed client's clock stays parked at zero and stamps 0 into every 0x06.
+	// `self_team` is the captured self record's team byte, the team L spawns with.
 	void seed_session(uint32_t session_id, uint32_t client_key, std::string client_scrk,
 	                  std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
 	                  uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
-	                  uint32_t tick_seed = 0, bool replay_mode = true);
+	                  uint32_t tick_seed = 0, bool replay_mode = true, uint8_t self_team = 0);
 
 	// The shell's kit for the 0x1A-released loadout-submission pair (Joiner only; see
 	// JoinerConnection::set_loadout_kit). HostClient has no 0x2F leg — its player fills

@@ -902,7 +902,7 @@ void ClientRuntime::seed_session(uint32_t session_id, uint32_t client_key,
                                  uint32_t next_seq, uint32_t last_ack,
                                  uint16_t self_handle, uint16_t self_type,
                                   uint32_t game_type, uint32_t tick_seed,
-                                  bool replay_mode) {
+                                  bool replay_mode, uint8_t self_team) {
 	if (role_ != Role::Joiner) return;
 	// A replayed client is mid-session: its network-role clock was already seeded by the
 	// capture's S2C 0x61, so seed it here too or the tick stays parked at zero and every
@@ -911,7 +911,7 @@ void ClientRuntime::seed_session(uint32_t session_id, uint32_t client_key,
 	last_keepalive_tick_ = tick_seed;
 	joiner_->seed_in_match(session_id, client_key, std::move(client_scrk),
 	                       std::move(server_scrk), next_seq, last_ack, self_handle, self_type,
-	                       game_type);
+	                       game_type, self_team);
 	view_.set_game_type(game_type);
 	view_.set_mp_session(true);
 	deployed_ = true;     // a seeded replay is post-deploy (the captured client was uplinking)

@@ -2029,7 +2029,7 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
                                      std::string client_scrk, std::string server_scrk,
                                      uint32_t next_seq, uint32_t last_ack,
                                      uint16_t self_handle, uint16_t self_type,
-                                     uint32_t game_type) {
+                                     uint32_t game_type, uint8_t self_team) {
 	conn_.server_sk = session_id;            // 0x43 header session_id (= ServerAuth.sk)
 	// The captured ClientAuth.ck: the inbound S2C admission gate validates every 0x83
 	// header against the client-local key, so without this a seeded replay silently
@@ -2043,6 +2043,7 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	self_handle_ = self_handle;
 	has_self_handle_ = true;
 	spawn_.item_type_id = self_type;
+	spawn_.team = self_team;
 	game_type_ = game_type;
 	mp_attributes_ = 0;
 	session_max_players_ = 0;
