@@ -372,38 +372,34 @@ void write_waypoint_record(io::ByteWriter& w, const WaypointRecord& wp) {
 
 bool parse_group_record(io::ByteReader& r, GroupRecord& gr, std::string& error) {
     const int32_t flags = r.read_i32();
-    const int32_t zero_after_flags = r.read_i32();
+    char name[kGroupNameSize] = {};
+    r.read_bytes(reinterpret_cast<uint8_t*>(name), 4); // @4..7: the name's first 4 characters
     const int32_t value = r.read_i32();
     const int32_t constant10 = r.read_i32();
-    int32_t tail[4] = {};
-    for (int i = 0; i < 4; ++i) {
-        tail[i] = r.read_i32();
-    }
+    r.read_bytes(reinterpret_cast<uint8_t*>(name) + 4, kGroupNameSize - 4); // @16..31: the other 16
     if ((flags & ~0x3) != 0) {
         error = "BMS group record has unsupported flag bits";
         return false;
     }
-    if (zero_after_flags != 0 || tail[0] != 0 || tail[1] != 0 || tail[2] != 0 || tail[3] != 0) {
-        error = "BMS group record has nonzero reserved bytes";
-        return false;
-    }
-    const bool empty_record = flags == 0 && zero_after_flags == 0 && value == 0 && constant10 == 0 &&
-                              tail[0] == 0 && tail[1] == 0 && tail[2] == 0 && tail[3] == 0;
+    bool unnamed = true;
+    for (char ch : name) unnamed = unnamed && ch == 0;
+    const bool empty_record = flags == 0 && value == 0 && constant10 == 0 && unnamed;
     if (constant10 != 10 && !empty_record) {
         error = "BMS group record constant is not 10";
         return false;
     }
     gr.flags = flags;
     gr.value = value;
+    std::memcpy(gr.name, name, kGroupNameSize);
     return true;
 }
 
 void write_group_record(io::ByteWriter& w, const GroupRecord& gr) {
     w.write_i32(gr.flags & 0x3);
-    w.write_i32(0);
+    w.write_raw(gr.name, 4);
     w.write_i32(gr.value);
     w.write_i32(10);
-    w.write_zeros(16);
+    w.write_raw(gr.name + 4, kGroupNameSize - 4);
 }
 
 bool parse_layer_record(io::ByteReader& r, LayerRecord& lr, std::string& /*error*/) {
@@ -769,6 +765,29 @@ bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first) {
 bool is_bms(const uint8_t* data, size_t size) {
     if (size < 4) return false;
     return data[0] == 'B' && data[1] == 'M' && data[2] == 'S';
+}
+
+std::string group_name(const GroupRecord& record) {
+    size_t length = 0;
+    while (length < kGroupNameSize && record.name[length] != 0) ++length;
+    return std::string(record.name, length);
+}
+
+bool set_group_name(GroupRecord& record, const std::string& name, std::string& error) {
+    if (name.size() > kGroupNameSize) {
+        error = "A group's name holds 20 characters at most";
+        return false;
+    }
+    for (char ch : name) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        if (c < 0x20 || c > 0x7E || ch == '"') {
+            error = "A group's name takes printable characters other than a double quote";
+            return false;
+        }
+    }
+    std::memset(record.name, 0, kGroupNameSize);
+    std::memcpy(record.name, name.data(), name.size());
+    return true;
 }
 
 bool is_player_route(const WaypointRecord& record) {

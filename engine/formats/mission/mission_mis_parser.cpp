@@ -372,7 +372,10 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 			return true;
 		}
 		int32_t value = 0;
-		if (t.size() >= 2 && t[0] == "flags") {
+		if (t.size() >= 2 && t[0] == "description") {
+			// The group's name, its first 20 characters (bms.h GroupRecord).
+			copy_fixed_field(record.name, sizeof(record.name), t[1]);
+		} else if (t.size() >= 2 && t[0] == "flags") {
 			if (!token_i32(line, 1, value, error)) return false;
 			record.flags = value;
 		} else if (t.size() >= 2 && t[0] == "value") {

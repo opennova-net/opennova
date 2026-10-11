@@ -279,5 +279,36 @@ int main() {
 		TEST_EXPECT(back.reverb == 44);
 	}
 
+	// --- A group's name (bms.h GroupRecord, the 20 bytes the game's loader drops) is its .mis
+	// `description`; a named group is written even with no flags and no value. ---------------------
+	{
+		bms::File named;
+		make_default(named);
+		TEST_EXPECT(bms::set_group_name(named.group_records[5], "Bridge guards", error));
+		named.group_records[6].flags = 1;
+		TEST_EXPECT(bms::set_group_name(named.group_records[6], "Convoy", error));
+		std::string named_text;
+		TEST_EXPECT(write_mis_text(named, named_text, error));
+		TEST_EXPECT(named_text.find("begin group 5\r\n  description \"Bridge guards\"\r\nend group\r\n") !=
+		            std::string::npos);
+		TEST_EXPECT(named_text.find("begin group 6\r\n  description \"Convoy\"\r\n  flags 1\r\n") !=
+		            std::string::npos);
+		TEST_EXPECT(named_text.find("begin group 4\r\n") == std::string::npos); // no name, flags or value
+		bms::File named_back;
+		TEST_EXPECT(parse_mis_text(named_text, {}, named_back, error));
+		TEST_EXPECT(bms::group_name(named_back.group_records[5]) == "Bridge guards");
+		TEST_EXPECT(bms::group_name(named_back.group_records[6]) == "Convoy" &&
+		            named_back.group_records[6].flags == 1);
+		TEST_EXPECT(bms::group_name(named_back.group_records[4]).empty());
+		std::string named_again;
+		TEST_EXPECT(write_mis_text(named_back, named_again, error));
+		TEST_EXPECT(named_again == named_text);
+		// A longer description (hand-written) keeps its first 20 characters.
+		bms::File long_name;
+		TEST_EXPECT(parse_mis_text("begin group 2\r\n  description \"The northern ridge sentries\"\r\nend group\r\n",
+		                           {}, long_name, error));
+		TEST_EXPECT(bms::group_name(long_name.group_records[2]) == "The northern ridge s");
+	}
+
 	return 0;
 }

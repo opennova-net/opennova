@@ -672,10 +672,26 @@ size_t player_route_stop_count(const WaypointRecord& record);
 // [orig editor: Med_WriteBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the editor
 //  group flags), @4=0, @8 = a value, @12 = constant 10, @16..28 = 0. The JO loader keeps @0/@8/@12; @12 is
 //  the literal 10, @0 a 2-bit flags, @8 the only free int (2026-06-06 grill).]
+// The loader reads each record into a stack buffer and copies only @0, @8 and @12 into the 48-byte runtime
+// group (+0, +0x20, +0x24); @4..7 and @16..31 go nowhere, and the buffer is overwritten by the layer reads
+// that follow [orig: Mission_LoadBMSFile @0x40f4e0, the group loop @0x40fbbb..0x40fc03: the reads
+// @0x40fbe6/@0x40fbea/@0x40fbee, the stores @0x40fbf2/@0x40fbf5/@0x40fbf7]. Nothing else reads a file's
+// group bytes: the runtime array's writers are the load reset's memset and the save game, which writes the
+// runtime records [orig: Mission_ResetBmsState @0x40DB80 @0x40dba9; the save writer @0x4aab10, @0x4aab58].
+// So those 20 bytes hold the group's NAME (ADR 0046 S24 "Names"): a fixed-width name, NUL-padded, the
+// first 4 characters at @4..7 and the next 16 at @16..31, a full 20 with no terminator.
+constexpr size_t kGroupNameSize = 20;
 struct GroupRecord {
     int32_t flags;
     int32_t value;
+    char name[kGroupNameSize];
 };
+// The group's name: its bytes up to the first NUL (all 20 when none).
+std::string group_name(const GroupRecord& record);
+// Sets the name, NUL-padding the rest. Refused (false, `error` says why, the record untouched) past 20
+// characters, or with a character outside printable ASCII or a double quote, which the .mis text's
+// quoted `description` cannot carry.
+bool set_group_name(GroupRecord& record, const std::string& name, std::string& error);
 
 // [orig editor: Med_WriteBmsFile @0x44f920 copies the editor LAYER NAME (a string) into this 20-byte record.
 //  JO reads-and-discards it, but the editor-authored bytes are a fixed-width name, not an opaque payload.]

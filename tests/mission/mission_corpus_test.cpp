@@ -116,6 +116,7 @@ bool differing_sections(const std::vector<uint8_t> &a, const std::vector<uint8_t
 struct Counts {
 	size_t missions = 0, identical = 0, failed = 0;
 	size_t paths = 0, stops = 0, over_slots = 0; // the waypoint paths every one its markers' (D-MIS-6)
+	size_t named_groups = 0; // groups whose dropped bytes hold a name (bms.h GroupRecord)
 	std::vector<std::string> differing; // "NAME: section, section"
 };
 
@@ -208,6 +209,9 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 		    laid.waypoint_records[path].padding != record.padding)
 			return fail("path " + std::to_string(path) + " laid out from its markers differs from the record read");
 	}
+
+	for (const bms::GroupRecord &group : parsed.group_records)
+		if (!bms::group_name(group).empty()) ++counts.named_groups;
 
 	std::vector<uint8_t> encoded;
 	if (!bms::write(parsed, encoded, error)) return fail("write failed: " + error);
@@ -394,6 +398,7 @@ int test_retail() {
 	            counts.missions, counts.identical, counts.differing.size(), met.size(), damaged.size(), counts.failed);
 	std::printf("retail: %zu paths, %zu stops, every one its markers' (%zu counted past their 32 slots)\n", counts.paths,
 	            counts.stops, counts.over_slots);
+	std::printf("retail: %zu groups carry a name in the bytes the game drops\n", counts.named_groups);
 	return counts.failed == 0 ? 0 : 1;
 }
 
