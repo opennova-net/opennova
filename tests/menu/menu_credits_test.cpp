@@ -4,7 +4,8 @@
 // table itself, so a string value of that very string reads lowercased (one of the same text elsewhere in
 // the table does not); a value of flags none of an integer, a float or a string read as the number 0 and
 // as no text; a null text the reader would read through, and a file laid out otherwise, not loaded and the
-// credits left as they were. The minted synth_nlist trio loads with its
+// credits left as they were. CENTER_X and VERTICAL_SPACE read through the reader's binary entry read, so a CBIN
+// entry of no value reads the next value laid out. The minted synth_nlist trio loads with its
 // [ENV] values and its lines and fonts as the credits view reads them. The retail leg (OPENNOVA_JO_ASSETS):
 // the shipped JO, JOX01 and BHD lists each load as their text form does, their counts pinned.
 #include <cstdio>
@@ -182,6 +183,52 @@ int test_not_loaded() {
 	marked.labels[1].entries[6].values[0].flags = 4 | 1;
 	MarqueeCredits read;
 	TEST_EXPECT(load(encoded(marked), read) && read.nodes.size() == 4 && read.nodes[3].line == "Credits");
+	return 0;
+}
+
+// CENTER_X and VERTICAL_SPACE read through the reader's binary entry, which reads an entry's first value through
+// its value pointer with no count check [orig: CMarqueeWnd_LoadCreditsFromIni @ 0x65c67e / @ 0x65c696 ->
+// ConfigFile_ReadFromSectionGlobal @ 0x75f540 -> ConfigFile_ReadString @ 0x75f2b0 -> ConfigFile_ReadBinaryEntry
+// @ 0x75f060, @ 0x75f10b..0x75f164]. A CBIN entry of no value points at the next value the parse laid out
+// [orig: ConfigFile_ParseBinary @ 0x75eb1e], in its label or a later one; past the last value, at indeterminate
+// heap bytes (the allocation's slack, or the next block's header), ours reads none (D-CBIN-7). A text entry of no value points at none: it reads 0, and a walk past it stops.
+int test_entry_of_no_value() {
+	const uint32_t kInt = BinaryConfig::kInteger, kFlt = BinaryConfig::kFloat, kStr = BinaryConfig::kString;
+	// [ENV]: SCROLL_RATE 0.5, CENTER_X of no value, VERTICAL_SPACE 12: CENTER_X reads VERTICAL_SPACE's 12.
+	BinaryConfig config;
+	config.strings = {"env", "text", "scroll_rate", "center_x", "vertical_space", "Credits"};
+	config.xor_key = 0x0BADCAFEu;
+	config.labels = {{1, {{3, {value(bits_of(0.5f), kFlt)}}, {4, {}}, {5, {value(12, kInt)}}}},
+			{2, {{2, {value(6, kStr)}}}}};
+	MarqueeCredits credits;
+	TEST_EXPECT(load(encoded(config), credits));
+	TEST_EXPECT(credits.scroll_rate == 0.5f && credits.center_x == 12 && credits.vertical_space == 12 &&
+	            credits.nodes.size() == 1);
+	// A float there truncates [orig: the _ftol2_sse call @ 0x75f159].
+	config.labels[0].entries[2].values[0] = value(bits_of(7.9f), kFlt);
+	MarqueeCredits truncated;
+	TEST_EXPECT(load(encoded(config), truncated) && truncated.center_x == 7 && truncated.vertical_space == 7);
+	// The last entry of [ENV]: past its terminator (no value) into the next label's first value.
+	BinaryConfig across;
+	across.strings = {"env", "text", "center_x", "misc", "x", "Credits"};
+	across.xor_key = 0x600DF00Du;
+	across.labels = {{1, {{3, {}}}}, {4, {{5, {value(77, kInt)}}}}, {2, {{2, {value(6, kStr)}}}}};
+	MarqueeCredits run_on;
+	TEST_EXPECT(load(encoded(across), run_on) && run_on.center_x == 77 && run_on.vertical_space == 0 &&
+	            run_on.nodes.size() == 1);
+	// No value after it at all: ours reads none, and the credits load.
+	BinaryConfig last;
+	last.strings = {"env", "text", "vertical_space", "center_x", "Credits"};
+	last.xor_key = 0x13572468u;
+	last.labels = {{2, {{2, {value(5, kStr)}}}}, {1, {{3, {value(12, kInt)}}, {4, {}}}}};
+	MarqueeCredits slack;
+	TEST_EXPECT(load(encoded(last), slack) && slack.center_x == 0 && slack.vertical_space == 12 &&
+	            slack.nodes.size() == 1);
+	// The text form: CENTER_X of no value reads 0, and VERTICAL_SPACE's walk stops at it [orig:
+	// ConfigFile_ParseValues @ 0x760754, no pointer for no value; ConfigFile_ReadBinaryEntry @ 0x75f0e3].
+	MarqueeCredits text;
+	TEST_EXPECT(load_text("[ENV]\r\nCENTER_X= ,\r\nVERTICAL_SPACE=12\r\n[TEXT]\r\nTEXT=Credits\r\n", text) &&
+	            text.center_x == 0 && text.vertical_space == 0 && text.nodes.size() == 1);
 	return 0;
 }
 
@@ -369,6 +416,7 @@ int main(int argc, char **argv) {
 	failures += test_forms_agree();
 	failures += test_label_lowercased_in_place();
 	failures += test_not_loaded();
+	failures += test_entry_of_no_value();
 	failures += test_empty_label();
 	failures += test_markup_and_empty_line();
 	failures += test_minted();
