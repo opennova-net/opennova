@@ -212,6 +212,39 @@ std::vector<NodeAddress> mission_group_members(const MissionDocument &document, 
 	return out;
 }
 
+bool mission_record_value(const MissionDocument &document, const NodeAddress &record, ReferenceKind kind, int64_t &value) {
+	const Node *row = document.row(record.row);
+	if (!row) return false;
+	switch (kind) {
+	case ReferenceKind::MissionEntity:
+		if (record.child || !is_entity_kind(row->kind)) return false;
+		value = static_cast<const EntityRow &>(*row).native.id;
+		return true;
+	case ReferenceKind::MissionZone:
+		if (record.child || row->kind != k(MissionKind::Area)) return false;
+		value = static_cast<const AreaRow &>(*row).native.id;
+		return true;
+	case ReferenceKind::MissionPath:
+		if (record.child || row->kind != k(MissionKind::WaypointPath)) return false;
+		value = static_cast<const PathRow &>(*row).native.number;
+		return true;
+	case ReferenceKind::MissionEvent: {
+		if (record.child || row->kind != k(MissionKind::Event)) return false;
+		const size_t index = document.index_of(*row);
+		if (index == SIZE_MAX) return false;
+		value = int64_t(index);
+		return true;
+	}
+	case ReferenceKind::MissionGroup: {
+		Document::Placement at;
+		if (!record.child || record.kind != k(MissionKind::Group) || !document.placement(record, at)) return false;
+		value = int64_t(at.index);
+		return true;
+	}
+	default: return false;
+	}
+}
+
 const char *mission_param_field(int slot) {
 	static const char *const kFields[4] = {"param1", "param2", "param3", "param4"};
 	return slot >= 0 && slot < 4 ? kFields[slot] : "";

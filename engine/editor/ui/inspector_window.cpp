@@ -1323,8 +1323,13 @@ void breadcrumb(Workspace &workspace, const Document &document, const NodeAddres
 		const bool last = i + 1 == chain.size();
 		const std::string shown = ui_kit::fit(title, room - (last ? 0.0f : ImGui::GetStyle().FramePadding.x * 2.0f));
 		row.next(last ? ui_kit::text_width(shown.c_str()) : ui_kit::button_width(shown.c_str()));
-		if (last) ImGui::TextUnformatted(shown.c_str());
-		else if (ImGui::SmallButton((shown + "###crumb").c_str())) select(workspace, document, chain[i]);
+		if (last) {
+			ImGui::TextUnformatted(shown.c_str());
+			// S24: the record itself dragged from its heading onto a value that names it.
+			record_drag_source(document, chain[i], title, true);
+		} else if (ImGui::SmallButton((shown + "###crumb").c_str())) {
+			select(workspace, document, chain[i]);
+		}
 		std::string tip = document.kind_label(chain[i].kind);
 		if (shown != title) tip += "\n" + title;
 		if (name != title) tip += "\n" + name;

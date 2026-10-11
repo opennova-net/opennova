@@ -107,6 +107,11 @@ bool mission_pick_slot(const MissionDocument &document, const NodeAddress &recor
 // numbered marker (record type 6088) its wp_number. False where the record fills none.
 bool mission_pick_value(const MissionDocument &document, const MissionPickSlot &slot, const NodeAddress &record,
 		int64_t &value);
+// What a record dropped on a field naming records of the mission gives it (S24, a record dragged from an outline
+// line, the Inspector's heading or a board card): an entity's SSN for an entity reference, an area's zone id for a
+// zone, a group's index for a group, a waypoint path's number for a path, an event's index for an event. False for
+// a record of another kind than the reference names (an entity on a zone, an entity on a group).
+bool mission_record_value(const MissionDocument &document, const NodeAddress &record, ReferenceKind kind, int64_t &value);
 // The field a slot is set through ("param1" .. "param4").
 const char *mission_param_field(int slot);
 

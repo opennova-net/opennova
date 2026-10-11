@@ -70,7 +70,8 @@ public:
 	// A record of `document` dropped on the item just drawn, the value of `field` of `record` (ADR 0046 S24,
 	// ui/record_drag.h: an outline row, the Inspector's heading, a board card): true when the record is one the
 	// field names, `picked` the value it gives the field (an entity its SSN, an area its zone id, a group, a path,
-	// an event its index); a record that does not fit is never accepted. Lane B's conversion: none fits yet.
+	// an event its index: documents/mission_links' mission_record_value); a record of another document, or of a
+	// kind the field does not name, is never accepted. draw_field takes drops through it.
 	static bool accept_record(const SessionView &view, const Document &document, const NodeAddress &record,
 	                          const FieldUse &field, std::string &picked);
 	// A missing value's fixes from the dot its state shows (ADR 0046 DI-15: a click on the Inspector's red dot

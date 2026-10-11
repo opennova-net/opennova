@@ -374,6 +374,17 @@ int test_pick_values() {
 	// Refused: a record that is no trigger or action, a slot past 3.
 	TEST_EXPECT(!mission_pick_slot(m, walker, 0, slot) && !mission_pick_slot(m, redirect, 4, slot));
 	TEST_EXPECT(std::string(mission_param_field(2)) == "param3" && std::string(mission_param_field(4)).empty());
+	// B3: what a dropped record gives a reference field: an entity its SSN, an area its zone, a path its number,
+	// an event its index, a group record its index; another kind nothing.
+	TEST_EXPECT(mission_record_value(m, walker, ReferenceKind::MissionEntity, value) && value == f.walker);
+	TEST_EXPECT(!mission_record_value(m, walker, ReferenceKind::MissionZone, value) &&
+	            !mission_record_value(m, walker, ReferenceKind::MissionGroup, value));
+	TEST_EXPECT(mission_record_value(m, zone20, ReferenceKind::MissionZone, value) && value == 20);
+	TEST_EXPECT(mission_record_value(m, row_at(m, MissionKind::WaypointPath, 1), ReferenceKind::MissionPath, value) && value == 1);
+	TEST_EXPECT(mission_record_value(m, third, ReferenceKind::MissionEvent, value) && value == 2);
+	const NodeAddress group2 = mission_links(m, second).links[1].record;
+	TEST_EXPECT(mission_record_value(m, group2, ReferenceKind::MissionGroup, value) && value == 2 &&
+	            !mission_record_value(m, group2, ReferenceKind::MissionEntity, value));
 	return 0;
 }
 

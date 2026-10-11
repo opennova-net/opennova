@@ -1,5 +1,7 @@
 #include "reference_picker.h"
 
+#include <editor/documents/mission_document.h>
+#include <editor/documents/mission_links.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/problem_confirmation.h>
@@ -259,6 +261,8 @@ bool ReferencePicker::draw_field(Workspace &workspace, const Document &document,
 		ImGui::EndComboPreview();
 		GImGui->LastItemData = frame_item;
 	}
+	// S24: a record of the document dropped on the frame (ui/record_drag.h) gives the field what it is to it.
+	if (!done && accept_record(workspace.view(), document, record, field, picked)) done = true;
 	ui_kit::tooltip_lazy([&] {
 		std::string tip = shown;
 		if (!raw.empty() && raw != shown) tip += "\nThe file holds " + raw;
@@ -573,9 +577,28 @@ bool ReferencePicker::accept_file(const SessionView &view, const FieldUse &field
 	return dropped;
 }
 
-bool ReferencePicker::accept_record(const SessionView &, const Document &, const NodeAddress &, const FieldUse &,
-                                    std::string &) {
-	return false;
+bool ReferencePicker::accept_record(const SessionView &, const Document &document, const NodeAddress &,
+                                    const FieldUse &field, std::string &picked) {
+	const MissionDocument *mission = dynamic_cast<const MissionDocument *>(&document);
+	if (!mission || field.read_only || !ImGui::BeginDragDropTarget()) return false;
+	bool dropped = false;
+	// The record looked at before the drop is accepted: one of another document, or of a kind the field does not
+	// name, is never accepted (nothing highlights).
+	const ImGuiPayload *dragged = ImGui::GetDragDropPayload();
+	if (dragged && dragged->IsDataType(kRecordDragPayload) && dragged->Data && dragged->DataSize == int(sizeof(RecordDrag))) {
+		RecordDrag drag;
+		std::memcpy(&drag, dragged->Data, sizeof(drag));
+		// What the field names: its reference, or what it is picked by (an SSN that may be the player's).
+		const ReferenceKind kind = field.reference != ReferenceKind::None ? field.reference : field.picks;
+		int64_t value = 0;
+		if (drag.document == document.identity() && mission_record_value(*mission, drag.record, kind, value) &&
+		    ImGui::AcceptDragDropPayload(kRecordDragPayload)) {
+			picked = std::to_string(value);
+			dropped = true;
+		}
+	}
+	ImGui::EndDragDropTarget();
+	return dropped;
 }
 
 } // namespace opennova::editor
