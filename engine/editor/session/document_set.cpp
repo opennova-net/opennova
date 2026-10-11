@@ -9,6 +9,7 @@
 #include <system_error>
 #include <utility>
 
+#include <base/io/crt_ftol.h>
 #include <base/io/file_io.h>
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
@@ -44,9 +45,10 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 #include <editor/session/workspace_parts.h>
+#include <formats/mission/mission_mis.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/trn/trn_io.h>
 #include <runtime/mission/mission_sidecars.h>
-#include <runtime/world/collision.h>
 
 namespace fs = std::filesystem;
 
@@ -257,24 +259,42 @@ void DocumentSet::hand_base_heights(DocumentBase &document) {
 	if (!mission) return;
 	bms::File file;
 	if (!mission->compose(file)) return;
-	// The ground as the DI-28 check reads it (preview/mission_ground_check.cpp): the mission's header through its
-	// scene's source, the project's files as the game would read them, the mission's own name for its .til.
-	const terrain::TerrainHeightField *field = nullptr;
+	// The terrain as the original editor reads it (mission::MisTerrain): the .cpt's height atlas the game loads, as
+	// the DI-28 ground check reads it (preview/mission_ground_check.cpp: the mission's header through its scene's
+	// source, the project's files as the game would read them), and the .trn's own sector grid, origin, wraps and
+	// polytrn_scale, read from the .trn alone as the original editor reads it (the game's load reads overcast.def
+	// and the mission's .env after it).
+	mission::MisTerrain terrain;
+	TrnConfig trn;
 	const std::unique_ptr<MissionSceneSource> source = mission_scene_source(*mission);
 	MissionSceneHeader header;
 	if (source && source->header(header) && view_.findings.assets) {
 		if (!ground_) ground_ = std::make_unique<MissionGround>();
 		ground_->follow(view_.findings.assets, view_.findings.assets->generation(), header,
 		                mission::mission_base_name(mission->path()));
-		field = ground_->height_field();
+		const terrain::TerrainHeightField *field = ground_->height_field();
+		std::vector<uint8_t> bytes;
+		std::string error;
+		if (field && field->dim == 1024 && view_.findings.assets->read(header.terrain + ".trn", bytes)) {
+			const std::string text(bytes.begin(), bytes.end());
+			if (load_mission_trn(text, TrnLaterTexts{}, trn, error)) {
+				terrain.heights = field->heightmap;
+				terrain.sectors = &trn.sector_grid[0][0];
+				terrain.origin_x = trn.origin_x;
+				terrain.origin_y = trn.origin_y;
+				terrain.wrap_x = trn.wrap_x != 0;
+				terrain.wrap_y = trn.wrap_y != 0;
+				// Its last polytrn_scale line, by the CRT's atol, as the original editor's parser takes it [orig:
+				// JOTACmed.exe sub_463C90 @ 0x464a38].
+				for (const TrnKeyLine &line : read_trn_key_lines(text))
+					if (line.key == "polytrn_scale" && !line.values.empty())
+						terrain.scale = io::retail_atol(line.values.front().c_str());
+			}
+		}
 	}
 	std::vector<int32_t> heights;
 	for (const std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
-		for (const bms::Entity &entity : *pool) {
-			int32_t height = 0;
-			if (!world::terrain_column_height(field, entity.x, entity.y, height)) height = 0;
-			heights.push_back(height);
-		}
+		for (const bms::Entity &entity : *pool) heights.push_back(mission::mis_terrain_height(terrain, entity.x, entity.y));
 	mission->set_base_heights(std::move(heights));
 }
 

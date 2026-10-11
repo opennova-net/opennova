@@ -42,6 +42,7 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 #include <formats/mission/mission_mis.h>
+#include <formats/trn/trn_io.h>
 #include <runtime/world/collision.h>
 
 #include "common/file_io.h"
@@ -1329,14 +1330,16 @@ private:
 	uint64_t serial_ = 0;
 };
 
-// Each entity's base height in the .mis a save writes is the terrain's height under it, as the game's collision
-// samples it over the mission's terrain (M4): every pool's, a marker's and an itemless entity's too.
+// Each entity's base height in the .mis a save writes is the terrain's height under it, as the original editor
+// samples it over the mission's terrain (M4: mission::mis_terrain_height, the .cpt's atlas the game loads blended
+// bilinearly over the .trn's own sector grid): every pool's, a marker's and an itemless entity's too.
 int test_names_base_heights() {
 	NamesProject p("opennova_mission_names_heights");
 	const std::string tmap = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/terrain/tmap/";
 	const std::vector<uint8_t> trn = test_io::read_file(tmap + "Tmap.trn"), cpt = test_io::read_file(tmap + "Tmap.cpt");
 	TEST_EXPECT(!trn.empty() && !cpt.empty() && p.put("Tmap.trn", trn) && p.put("Tmap.cpt", cpt));
-	// The terrain as the session's ground reads it, sampled where the entities stand.
+	// The terrain as the original editor reads it: the .cpt's atlas as the session's ground reads it, the .trn's own
+	// sector grid, origin and wraps.
 	auto files = std::make_shared<MemoryFiles>();
 	files->put("Tmap.trn", trn);
 	files->put("Tmap.cpt", cpt);
@@ -1344,17 +1347,30 @@ int test_names_base_heights() {
 	MissionSceneHeader header;
 	header.terrain = "Tmap";
 	ground.follow(files, 1, header, "missions/heights");
-	TEST_EXPECT(ground.terrain());
+	TEST_EXPECT(ground.terrain() && ground.height_field()->dim == 1024);
 	if (!ground.terrain()) return 1;
-	// Four places on the island (about the origin), each at a height of its own.
+	opennova::TrnConfig config;
+	std::string trn_error;
+	TEST_EXPECT(opennova::load_mission_trn(std::string(trn.begin(), trn.end()), opennova::TrnLaterTexts{}, config, trn_error));
+	mission::MisTerrain terrain;
+	terrain.heights = ground.height_field()->heightmap;
+	terrain.sectors = &config.sector_grid[0][0];
+	terrain.origin_x = config.origin_x;
+	terrain.origin_y = config.origin_y;
+	terrain.wrap_x = config.wrap_x != 0;
+	terrain.wrap_y = config.wrap_y != 0;
+	// Four places on the island (about the origin) inside their texels, so each blends four, each at a height of its
+	// own, and each where the original editor's blend and the game's column (world::terrain_column_height) round
+	// apart: the same atlas, bilinear both, a few 16.16 units apart in about a quarter of the island's places.
 	std::vector<std::pair<int32_t, int32_t>> spots;
 	std::vector<int32_t> seen;
-	for (double y = -300.0; y <= 300.0 && spots.size() < 4; y += 75.0)
-		for (double x = -300.0; x <= 300.0 && spots.size() < 4; x += 75.0) {
+	for (double y = -300.61; y <= 300.0 && spots.size() < 4; y += 25.0)
+		for (double x = -300.37; x <= 300.0 && spots.size() < 4; x += 25.0) {
 			const int32_t fx = bms::to_fixed_16_16(x), fy = bms::to_fixed_16_16(y);
-			int32_t h = 0;
-			if (!opennova::world::terrain_column_height(ground.height_field(), fx, fy, h) || h == 0 ||
-			    std::find(seen.begin(), seen.end(), h) != seen.end())
+			const int32_t h = mission::mis_terrain_height(terrain, fx, fy);
+			int32_t column = 0;
+			if (h == 0 || std::find(seen.begin(), seen.end(), h) != seen.end() ||
+			    !opennova::world::terrain_column_height(ground.height_field(), fx, fy, column) || column == h)
 				continue;
 			seen.push_back(h);
 			spots.emplace_back(fx, fy);
@@ -1396,11 +1412,12 @@ int test_names_base_heights() {
 		locks.push_back(std::stoll(text.substr(at + 15, text.find('\r', at) - at - 15)));
 	TEST_EXPECT(bases.size() == 4 && locks.size() == 4);
 	if (bases.size() != 4 || locks.size() != 4) return 1;
+	// Pinned: the original editor's blend over Tmap there (its sampler's, not the game's column).
+	const int64_t pinned[4] = {5079735, 6308535, 4977335, 6206135};
 	for (size_t i = 0; i < 4; ++i) {
-		int32_t h = 0;
-		TEST_EXPECT(opennova::world::terrain_column_height(ground.height_field(), spots[i].first, spots[i].second, h));
-		TEST_EXPECT(bases[i] == h && locks[i] == 1);
-		if (bases[i] != h) std::printf("  entity %zu: extra_bheight %lld, terrain %d\n", i, (long long)bases[i], int(h));
+		if (bases[i] != pinned[i]) std::printf("  entity %zu: extra_bheight %lld\n", i, static_cast<long long>(bases[i]));
+		TEST_EXPECT(bases[i] == mission::mis_terrain_height(terrain, spots[i].first, spots[i].second) &&
+		            bases[i] == pinned[i] && locks[i] == 1);
 	}
 	return 0;
 }

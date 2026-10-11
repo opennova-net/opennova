@@ -35,10 +35,10 @@
 // to the terrain, and its save writes a height-locked item's both absolute, the terrain's height under it added,
 // its read taking it off again [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5;
 // sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @ 0x45460e; the base set at placement, MissionItem_AppendByTypeId
-// @ 0x455a16], so an entity of a .bms, which stands at its z over no base of its own, writes the terrain's height.
-// The original samples its own height grid there (sub_4226D0 @ 0x4226d0, bilinear between the grid's points); the
-// session samples the game's column (world::terrain_column_height) instead, which a point inside a grid cell may
-// find a little apart from it (ADR 0046 S24 Names).
+// @ 0x455a16], so an entity of a .bms, which stands at its z over no base of its own, writes the terrain's height,
+// sampled as the original editor samples it (mission::mis_terrain_height, its sampler sub_4226D0 @ 0x4226d0: the
+// .cpt's height atlas the game loads, bilinear, over the .trn's own sector grid), so the original editor reads the
+// item back on no base of its own and at the height it stands.
 
 #include <array>
 #include <cstdint>

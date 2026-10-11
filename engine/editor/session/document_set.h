@@ -220,9 +220,9 @@ private:
 	void read_companion(DocumentBase &document, AssetKind kind, const std::string &relative) const;
 	void write_companion(DocumentBase &document, std::vector<std::string> &written);
 	// A mission's base heights for its .mis, handed to the document before the write (MissionDocument::
-	// set_base_heights): each entity's, in the writer's order, the terrain's height under it as the game's collision
-	// samples it (world::terrain_column_height) over the mission's terrain read as the DI-28 ground check reads it
-	// (MissionGround), 0 where no terrain lies under it or none reads.
+	// set_base_heights): each entity's, in the writer's order, the terrain's height under it as the original editor
+	// samples it (mission::mis_terrain_height) over the .cpt's atlas read as the DI-28 ground check reads it
+	// (MissionGround) and the .trn's own sector grid, 0 where no sector lies under it or no terrain reads.
 	void hand_base_heights(DocumentBase &document);
 
 	SessionCore &core_;
