@@ -922,8 +922,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	const bool mobile_spawn = target != nullptr && target->is_spawn_point &&
 			target->item_type == 1;
 	if (mobile_spawn) {
+		// The root's dead bit, then its +0x170, then the walk [orig: Server_ProcessPlayerDeath
+		//  @0x5177CB / @0x5177CF, @0x5177D5 / @0x5177DB, @0x5177EA / @0x5177F4].
 		world::VehicleSeatSelection selected;
-		if (!target->primary_occupant.valid() ||
+		if (((target->flags | target->engine_flags) & world::kEntityFlagDead) != 0 ||
+				!target->primary_occupant.valid() ||
 				!world::find_best_vehicle_seat(
 						world, target_zone, player->handle, selected))
 			return replies;
@@ -1698,13 +1701,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					if (conn.link.respawn_delay_seconds != 0) break;
 					if (target != nullptr && target->item_type == 1 &&
 							target->is_spawn_point) {
-						// A vehicle target is selectable only while alive (ours tests each
-						// walked entry, not the root first: D-NET-480) and while its weighted
-						// root/child seat walk finds a free slot. The +0x170 gate is release's.
-						// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34]
+						// A vehicle target is selectable only while its root's dead bit is
+						// clear, and while its weighted root/child seat walk finds a free slot.
+						// The root test refuses a dead root even when a live child would offer
+						// a seat; the walk gates only each entry it visits. The +0x170 gate is
+						// release's.
+						// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34 - the
+						//  root's dead bit @0x519D19 / @0x519D1D, the walk @0x519D2A]
 						world::VehicleSeatSelection selected;
-						if (!world::find_best_vehicle_seat(
-								*world, target->handle, player->handle, selected))
+						if (((target->flags | target->engine_flags) & world::kEntityFlagDead) != 0 ||
+								!world::find_best_vehicle_seat(
+										*world, target->handle, player->handle, selected))
 							break;
 					}
 					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
