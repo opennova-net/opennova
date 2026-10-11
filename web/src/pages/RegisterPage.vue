@@ -26,22 +26,56 @@
                 class="rounded-control bg-accent px-6 py-3 font-semibold text-on-accent hover:bg-accent/90 disabled:opacity-50">
           {{ busy ? 'Creating account…' : 'Register Account' }}
         </button>
-        <p v-if="success" class="rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online">
-          Account created! Username <code class="font-mono">{{ success.username }}</code>, PCID
-          <code class="font-mono">{{ success.pcid }}</code>. You can now log in via Joint Operations.
-        </p>
-        <p v-if="error" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
+        <div
+          v-if="success"
+          role="status"
+          class="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-online/40 bg-online/10 p-3 text-sm text-online"
+        >
+          <p>
+            Account created! Username <code class="font-mono">{{ success.username }}</code>, PCID
+            <code class="font-mono">{{ success.pcid }}</code>. You can now log in via Joint Operations,
+            or log in to this site.
+          </p>
+          <RouterLink
+            ref="loginOffer"
+            :to="loginLink(success.username)"
+            class="rounded-control bg-accent px-4 py-2 font-semibold text-on-accent hover:bg-accent/90"
+          >
+            Log in
+          </RouterLink>
+        </div>
+        <p v-if="error" role="alert" class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
           {{ error }}
         </p>
       </form>
+      <p class="mt-6 text-sm text-ink-muted">
+        Already have an account?
+        <RouterLink :to="loginLink()" class="text-accent hover:text-ink-bright">Log in</RouterLink>
+      </p>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { nextTick, reactive, ref } from 'vue';
+import { RouterLink, useRoute, type RouteLocationRaw } from 'vue-router';
 import { registerUser } from '../api/users';
+import { safeRedirect } from '../router/guards';
 import type { User } from '../types/users';
+
+const route = useRoute();
+
+// The login page, carrying on the ?redirect= this page was opened with and,
+// after a registration, the new username.
+function loginLink(username?: string): RouteLocationRaw {
+  const query: Record<string, string> = {};
+  const redirect = safeRedirect(route.query.redirect);
+  if (redirect !== '/') query.redirect = redirect;
+  if (username) query.username = username;
+  return { path: '/login', query };
+}
+
+const loginOffer = ref<{ $el: HTMLElement } | null>(null);
 
 const form = reactive({ username: '', nwhandle: '', password: '' });
 const busy = ref(false);
@@ -61,6 +95,9 @@ async function handleSubmit() {
     form.username = '';
     form.nwhandle = '';
     form.password = '';
+    // The next step is the login: put the keyboard on it.
+    await nextTick();
+    loginOffer.value?.$el.focus();
   } catch (e) {
     const detail = (e as { response?: { data?: { error?: string; message?: string } } })
       ?.response?.data;

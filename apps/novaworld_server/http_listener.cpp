@@ -123,10 +123,12 @@ std::map<std::string, std::string> parse_form_body(std::string_view body) {
 }
 
 // Crow doesn't have a first-class set_cookie helper across all versions;
-// use add_header to append a Set-Cookie line. Multiple Set-Cookies are
-// allowed (crow::response stores headers in a multimap).
+// append a Set-Cookie line (crow::response stores headers in a multimap).
+// Through add_set_cookie (http_cookies.h): a value from a query, a form, a
+// cookie or a stored account that holds a byte that could split the response
+// or forge a cookie goes out empty.
 void add_cookie(crow::response &res, const std::string &name, const std::string &value) {
-	res.add_header("Set-Cookie", name + "=" + value + "; Path=/");
+	add_set_cookie(res, name, value, "Path=/");
 }
 
 void add_standard_headers(crow::response &res) {
@@ -1216,9 +1218,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string cc    = req.url_params.get("cc")   ? req.url_params.get("cc")   : "";
 
 		const std::string epask = opennova::epask_to_string(epask_params_);
-		std::printf("[http] GET %s url=%s gt=%s ver=%s/%s cookies=[%s]\n",
-		            req.url.c_str(), url.c_str(), gt.c_str(), ver1.c_str(), ver2.c_str(),
-		            cookie_summary(request_cookie_header(req)).c_str());
+		std::printf("[http] GET %s url=%s gt=%s ver=%s/%s cookies=[%s]\n", req.url.c_str(),
+				loggable(url).c_str(), loggable(gt).c_str(), loggable(ver1).c_str(),
+				loggable(ver2).c_str(), cookie_summary(request_cookie_header(req)).c_str());
 
 		TemplateVars vars{
 			{"HOST_URL",     host_url()},
@@ -1248,9 +1250,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		const auto epask = cookies.count("EPASK") ? cookies.at("EPASK") : opennova::epask_to_string(epask_params_);
 
-		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n",
-		            req.url.c_str(), in_p.c_str(), out_p.c_str(), msgbase.c_str(),
-		            cookie_summary(request_cookie_header(req)).c_str());
+		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n", req.url.c_str(),
+				loggable(in_p).c_str(), loggable(out_p).c_str(), loggable(msgbase).c_str(),
+				cookie_summary(request_cookie_header(req)).c_str());
 
 		// Hardcoded version-OK; render OUT (the login page).
 		TemplateVars vars{
@@ -1528,11 +1530,10 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 
 		std::printf("[http] POST %s body=%zuB user=%s relay->%s success->%s -> tag %s\n",
-		            req.url.c_str(), req.body.size(),
-		            loggable(sessions_.get_login(tag).value().username).c_str(),
-		            relay_template.c_str(),
-		            sessions_.get_login(tag).value().success.c_str(),
-		            tag.c_str());
+				req.url.c_str(), req.body.size(),
+				loggable(sessions_.get_login(tag).value().username).c_str(),
+				loggable(relay_template).c_str(),
+				loggable(sessions_.get_login(tag).value().success).c_str(), tag.c_str());
 
 		// Relay refresh target is the BARE "NWLogin.dll" — matching onnet AND
 		// the genuine NovaLogic server (Wireshark capture, docs/net/
@@ -1706,20 +1707,16 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string success_tpl = req.url_params.get("success")
 		                                  ? req.url_params.get("success")
 		                                  : "jop_2_login.htm";
-		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n",
-		            tag.c_str(),
-		            persist_it != cookies.end() ? 1 : 0,
-		            success_tpl.c_str());
+		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n", loggable(tag).c_str(),
+				persist_it != cookies.end() ? 1 : 0, loggable(success_tpl).c_str());
 
-		const std::filesystem::path tpl_path =
-			std::filesystem::path(templates_dir) / success_tpl;
 		TemplateVars vars{
 			{"HOST_URL",    host_url()},
 			{"GSB_SERVER",  gsb_url()},
 			{"JOINLAN_URL", ""},
 		};
 		crow::response res(200);
-		if (std::filesystem::exists(tpl_path)) {
+		if (template_file(templates_dir, success_tpl)) {
 			res.body = render_template_file(templates_dir, success_tpl, vars);
 			res.set_header("Content-Type", "text/html");
 		} else {
@@ -1753,8 +1750,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string tpl = req.url_params.get("success")
 		                          ? req.url_params.get("success")
 		                          : "jop_2_main.htm";
-		const auto tpl_path = std::filesystem::path(templates_dir) / tpl;
-		const bool exists = std::filesystem::exists(tpl_path);
+		const bool exists = template_file(templates_dir, tpl).has_value();
 
 		// Resolve identity. Best-effort — if neither cookie resolves we
 		// just render with empty identity vars (the template can still
@@ -1776,13 +1772,13 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 				if (pinned_id != 0) user = get_user_by_id(*db_conn, pinned_id);
 			}
 		}
-		std::printf("[http] %s -> %s%s user=%s\n",
-		            req.url.c_str(), tpl.c_str(),
-		            exists ? "" : " (MISSING — 404)",
-		            user ? loggable(user->username).c_str() : "(unknown)");
+		std::printf("[http] %s -> %s%s user=%s\n", req.url.c_str(), loggable(tpl).c_str(),
+				exists ? "" : " (MISSING — 404)",
+				user ? loggable(user->username).c_str() : "(unknown)");
 		if (!exists) {
 			crow::response res(404);
-			res.body = "template not found: " + tpl;
+			// The name is echoed only when it is one a template may have.
+			res.body = "template not found: " + (is_bare_file_name(tpl) ? tpl : std::string());
 			res.set_header("Content-Type", "text/plain");
 			return res;
 		}
@@ -1906,11 +1902,13 @@ void HttpListener::register_legacy_host_join_routes(
 			const std::string tag = s.session_tag;
 			sessions_.put_join(tag, std::move(s));
 
-			std::printf("[http] /NWJoin.dll (first call) rid=%s success=%s -> tag %s cookies=[%s]\n",
-			            req.url_params.get("rid") ? req.url_params.get("rid") : "(none)",
-			            req.url_params.get("success") ? req.url_params.get("success") : "(default)",
-			            tag.c_str(),
-			            cookie_summary(request_cookie_header(req)).c_str());
+			std::printf(
+					"[http] /NWJoin.dll (first call) rid=%s success=%s -> tag %s cookies=[%s]\n",
+					req.url_params.get("rid") ? loggable(req.url_params.get("rid")).c_str()
+											  : "(none)",
+					req.url_params.get("success") ? loggable(req.url_params.get("success")).c_str()
+												  : "(default)",
+					tag.c_str(), cookie_summary(request_cookie_header(req)).c_str());
 
 			// Bare "NWJoin.dll" refresh — matches onnet and the genuine server;
 			// the NWJOINSESSIONTAG cookie carries the tag (see the /NWLogin.dll
@@ -2289,7 +2287,7 @@ void HttpListener::register_legacy_host_join_routes(
 		}
 
 		std::printf("[http] /NWHost.dll (second call) tag=%s -> %s with HOSTKEY=%.6s...\n",
-		            tag.c_str(), session->success.c_str(), session->host_key.c_str());
+		            tag.c_str(), loggable(session->success).c_str(), session->host_key.c_str());
 
 		TemplateVars vars{
 			{"HOSTKEY",     session->host_key},
@@ -2380,14 +2378,19 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 			return res;
 		}
 
+		// Every file below is reached through file_under_root / template_file
+		// (template_engine.h): '/'-separated bare file names that stay under
+		// their root, so no absolute path ("//etc/..."), backslash, dot segment
+		// or symlink out of the root is served. Crow hands `subpath` over
+		// undecoded, so a %2e%2e or %2f is a literal '%' the rule refuses.
+
 		// /static/* — game-client assets (.tga login backgrounds, etc.)
 		// served from apps/novaworld_server/static/.
 		if (subpath.rfind("static/", 0) == 0) {
-			const auto path = std::filesystem::path(static_dir) / subpath.substr(7);
-			if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
+			if (const auto path = file_under_root(static_dir, subpath.substr(7))) {
 				res.code = 200;
-				res.set_header("Content-Type", content_type_for(path));
-				res.body = read_file_text(path);
+				res.set_header("Content-Type", content_type_for(*path));
+				res.body = read_file_text(*path);
 				return res;
 			}
 			record_http_404();
@@ -2401,20 +2404,19 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 		// after the relay refresh).
 		const auto ext = std::filesystem::path(subpath).extension().string();
 		if (ext == ".htm" || ext == ".mnx" || ext == ".joi") {
-			const auto path = std::filesystem::path(templates_dir) / subpath;
-			if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
+			if (const auto path = template_file(templates_dir, subpath)) {
 				res.code = 200;
-				res.set_header("Content-Type", content_type_for(path));
-				res.body = read_file_text(path);
+				res.set_header("Content-Type", content_type_for(*path));
+				res.body = read_file_text(*path);
 				return res;
 			}
 		}
 
 		// Fallback — Vue SPA assets from web/dist/.
-		const auto path = web_dist / subpath;
-		if (!std::filesystem::exists(path) || !std::filesystem::is_regular_file(path)) {
+		const auto path = file_under_root(web_dist, subpath);
+		if (!path) {
 			std::printf("[http] 404 /%s (no match in static/, templates/, web/dist/)\n",
-			            subpath.c_str());
+					loggable(subpath).c_str());
 			record_http_404();
 			res.code = 404;
 			res.body = "not found: " + subpath;
@@ -2422,8 +2424,8 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 			return res;
 		}
 		res.code = 200;
-		res.set_header("Content-Type", content_type_for(path));
-		res.body = read_file_text(path);
+		res.set_header("Content-Type", content_type_for(*path));
+		res.body = read_file_text(*path);
 		return res;
 	});
 }
