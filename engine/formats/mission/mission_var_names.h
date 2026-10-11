@@ -19,15 +19,16 @@ namespace opennova::mission {
 
 // The tag record: 20 printable characters filling the record with no terminator, spelling the project,
 // what the table holds and the layout's version. No layer a designer names reads like it, and no shipped
-// mission's table holds a layer name at all (mission_corpus_retail counts them: none), so a table whose
-// first record is this is the editor's.
+// mission's table holds a layer name at all (mission_corpus_retail asserts it), so a table whose first
+// record is this is the editor's.
 inline constexpr char kVariableNamesTag[bms::kLayerRecordSize + 1] = "OPENNOVA-VAR-NAMES-1";
 // The names a table holds: one per record after the tag.
 inline constexpr size_t kMaxVariableNames = size_t(bms::kLayerRecordCount) - 1;
-// The variables a name may be given: the 2048-byte mission bank's 512 words, V0..V511, which the BMS
-// variable trigger and action index [orig: EventTrigger_EvaluateCondition @0x453620, case 4
-// @0x453aac; EventAction_Dispatch @0x4542e0, case 5].
-inline constexpr int32_t kVariableNameIndexMax = 511;
+// The variables a name may be given: V0..V255, the numbered words a script's V# reaches (the compiler caps a
+// V# at 255 [orig: WacScript_ResolveParameter @0x4F2AA4..0x4F2B06, "V# too big" @0x4f2ac5]) and the mission's
+// variable trigger and action name by the same number. The bank's words past them hold the script's own VAR
+// declarations, which the script names itself (runtime/world/var_store.h).
+inline constexpr int32_t kVariableNameIndexMax = 255;
 
 struct VariableName {
 	int32_t index = 0;
@@ -43,7 +44,8 @@ enum class LayerTable {
 LayerTable layer_table(const bms::File &file);
 
 // The names a tagged table holds, in record order; none for an empty table or one of layer names. A
-// record that does not read as `V<index> <name>` names nothing.
+// record that does not read as `V<index> <name>` by set_variable_names' rules names nothing, nor does a
+// second record of an index (the first stands).
 std::vector<VariableName> variable_names(const bms::File &file);
 
 // The longest name variable `index` takes: its record's 20 bytes less `V<index> `.

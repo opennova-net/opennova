@@ -90,7 +90,10 @@ std::vector<VariableName> variable_names(const bms::File &file) {
 	if (layer_table(file) != LayerTable::VariableNames) return out;
 	for (size_t i = 1; i < file.layer_records.size(); ++i) {
 		VariableName entry;
-		if (parse_entry(record_text(file.layer_records[i]), entry)) out.push_back(std::move(entry));
+		std::string why;
+		if (!parse_entry(record_text(file.layer_records[i]), entry) || name_refused(entry, why)) continue;
+		const bool named = std::any_of(out.begin(), out.end(), [&](const VariableName &n) { return n.index == entry.index; });
+		if (!named) out.push_back(std::move(entry));
 	}
 	return out;
 }

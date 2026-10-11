@@ -656,17 +656,17 @@ int main() {
 		TEST_EXPECT(opennova::mission::layer_table(named) == LayerTable::Empty);
 		TEST_EXPECT(opennova::mission::variable_names(named).empty());
 		TEST_EXPECT(opennova::mission::variable_name_room(5) == 17 && opennova::mission::variable_name_room(12) == 16 &&
-		            opennova::mission::variable_name_room(511) == 15);
-		const std::vector<VariableName> wanted = {{12, "alarm_raised"}, {3, "bridge blown"}, {511, "fifteen chars.."}};
+		            opennova::mission::variable_name_room(255) == 15);
+		const std::vector<VariableName> wanted = {{12, "alarm_raised"}, {3, "bridge blown"}, {255, "fifteen chars.."}};
 		TEST_EXPECT(opennova::mission::set_variable_names(named, wanted, names_error));
 		TEST_EXPECT(opennova::mission::layer_table(named) == LayerTable::VariableNames);
 		TEST_EXPECT(std::memcmp(named.layer_records[0].name, "OPENNOVA-VAR-NAMES-1", 20) == 0);
 		TEST_EXPECT(std::memcmp(named.layer_records[1].name, "V3 bridge blown\0\0\0\0\0", 20) == 0);
 		TEST_EXPECT(std::memcmp(named.layer_records[2].name, "V12 alarm_raised\0\0\0\0", 20) == 0);
-		TEST_EXPECT(std::memcmp(named.layer_records[3].name, "V511 fifteen chars..", 20) == 0); // full width
+		TEST_EXPECT(std::memcmp(named.layer_records[3].name, "V255 fifteen chars..", 20) == 0); // full width
 		const std::vector<VariableName> read = opennova::mission::variable_names(named);
 		TEST_EXPECT(read.size() == 3 && read[0].index == 3 && read[0].name == "bridge blown" && read[1].index == 12 &&
-		            read[1].name == "alarm_raised" && read[2].index == 511 && read[2].name == "fifteen chars..");
+		            read[1].name == "alarm_raised" && read[2].index == 255 && read[2].name == "fifteen chars..");
 		// The bytes round-trip through the .bms writer; only the layer table changed.
 		std::vector<uint8_t> named_bytes;
 		TEST_EXPECT(opennova::bms::write(named, named_bytes, names_error));
@@ -677,7 +677,9 @@ int main() {
 		// Refused, the table untouched: an index past the bank, twice, a name past its room, empty, a quote,
 		// an edge space, 32 names.
 		const opennova::bms::File before = named;
-		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{512, "x"}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{256, "x"}}, names_error)); // the script's VAR words
+		TEST_EXPECT(names_error.find("V0..V255") != std::string::npos);
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "eighteen character"}}, names_error)); // 18 > 17
 		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{-1, "x"}}, names_error));
 		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "a"}, {4, "b"}}, names_error));
 		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "eighteen characters"}}, names_error));
@@ -708,8 +710,19 @@ int main() {
 		TEST_EXPECT(opennova::mission::set_variable_names(odd, {{7, "seven"}}, names_error));
 		std::memcpy(odd.layer_records[2].name, "V07 leading zero", 16);
 		std::memcpy(odd.layer_records[3].name, "Vx junk", 7);
+		// Nor one the writer would refuse (an edge space, a control byte, past V255), nor a second record of an
+		// index: the first stands.
+		std::memcpy(odd.layer_records[4].name, "V3  edge", 8);
+		std::memcpy(odd.layer_records[5].name, "V5 tab\there", 11);
+		std::memcpy(odd.layer_records[6].name, "V300 past", 9);
+		std::memcpy(odd.layer_records[7].name, "V7 again", 8);
 		const std::vector<VariableName> odd_read = opennova::mission::variable_names(odd);
 		TEST_EXPECT(odd_read.size() == 1 && odd_read[0].index == 7 && odd_read[0].name == "seven");
+		// The room's edge for a one-digit index: 17 characters fit, 18 do not.
+		opennova::bms::File room = bms_file;
+		TEST_EXPECT(opennova::mission::variable_name_room(4) == 17);
+		TEST_EXPECT(opennova::mission::set_variable_names(room, {{4, "seventeen chars.."}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(room, {{4, "eighteen chars...."}}, names_error));
 	}
 
 	// --- Phase 0: area-trigger 32-byte record is interleaved per axis (x_min,x_max,y_min,y_max,

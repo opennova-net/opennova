@@ -156,8 +156,9 @@ int check(const std::string &path) {
 	// The variable names (mission_var_names.h) ride the layer table, which the .mis carries as
 	// `begin layer N / description`: the tagged table comes back record for record, and the text again.
 	bms::File named = doc;
-	if (layer_table(named) != LayerTable::LayerNames) {
-		const std::vector<VariableName> names = {{2, "alarm"}, {9, "bridge blown"}, {300, "fifteen chars.."}};
+	TEST_EXPECT(layer_table(named) != LayerTable::LayerNames); // the fixtures' tables are empty, as shipped
+	{
+		const std::vector<VariableName> names = {{2, "alarm"}, {9, "bridge blown"}, {200, "fifteen chars.."}};
 		TEST_EXPECT(set_variable_names(named, names, error));
 		std::string named1;
 		TEST_EXPECT(write_mis_text(named, named1, error));

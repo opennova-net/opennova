@@ -392,6 +392,11 @@ int test_retail() {
 	if (counts.missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
 	if (check_new_records(tally) != 0) ++counts.failed;
 	std::printf("retail: %zu missions hold anything in their layer table\n", counts.layer_named);
+	// The variable names' premise (mission_var_names.h): no shipped table holds anything.
+	if (counts.layer_named != 0) {
+		std::fprintf(stderr, "  FAIL shipped missions hold bytes in their layer table\n");
+		++counts.failed;
+	}
 	for (const std::string &line : counts.differing) std::printf("  differs: %s\n", line.c_str());
 	std::printf("retail: %zu missions, %zu rewritten to their own bytes, %zu differing in the loadout chunk alone "
 	            "(%zu of the %zu named are in this install), %zu failed\n",
