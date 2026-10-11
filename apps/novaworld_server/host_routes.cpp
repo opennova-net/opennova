@@ -4,11 +4,14 @@
 #include "http_json.h"
 #include "nw_udp_listener.h"
 
+#include <base/io/cp1252.h>
 #include <net/novaworld/host_repository.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <map>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -47,18 +50,45 @@ crow::response push_reply(
 	return json_error(404, host_push_result_name(HostPushResult::UnknownRid), unknown);
 }
 
+// Whether UTF-8 `text` holds a C1 control (U+0080..U+009F, 0xC2 then 0x80..0x9F).
+bool has_c1_control(std::string_view text) {
+	for (size_t i = 0; i + 1 < text.size(); ++i) {
+		const auto lead = static_cast<uint8_t>(text[i]);
+		const auto next = static_cast<uint8_t>(text[i + 1]);
+		if (lead == 0xC2 && next >= 0x80 && next <= 0x9F)
+			return true;
+	}
+	return false;
+}
+
+// "U+1F600" for each codepoint, comma-separated (the first four, then "and more").
+std::string codepoint_names(const std::u32string &codepoints) {
+	std::string out;
+	for (size_t i = 0; i < codepoints.size() && i < 4; ++i) {
+		char name[16];
+		std::snprintf(name, sizeof(name), "U+%04X", static_cast<unsigned>(codepoints[i]));
+		if (!out.empty())
+			out += ", ";
+		out += name;
+	}
+	if (codepoints.size() > 4)
+		out += " and more";
+	return out;
+}
+
 // A listed server for its owner (GET /api/me/hosts) or an admin (GET
 // /api/admin/hosts): its browser columns, the endpoint joiners are sent to and
 // the address its session comes from, and the row's UTC times. The public
-// /api/lobbies and /api/hosts name no owner.
+// /api/lobbies and /api/hosts name no owner. A host's text comes in its own code
+// page (a stock host's cp1252), so it goes out as UTF-8 (retail_text_to_utf8).
 crow::json::wvalue listed_host_json(const hostdb::HostRow &h) {
 	crow::json::wvalue e;
 	e["rid"] = h.rid;
 	e["gsid"] = h.gsid;
 	e["game"] = h.game;
-	e["server_name"] = h.server_name;
-	e["mission_name"] = h.mission_name;
-	e["game_type"] = h.game_type;
+	e["server_name"] = retail_text_to_utf8(h.server_name);
+	e["mission_name"] = retail_text_to_utf8(h.mission_name);
+	e["game_type"] = retail_text_to_utf8(h.game_type);
 	e["players"] = h.player_count;
 	e["max_players"] = h.max_players;
 	e["host_ip"] = h.host_ip;
@@ -69,13 +99,19 @@ crow::json::wvalue listed_host_json(const hostdb::HostRow &h) {
 	return e;
 }
 
+// A composed Cmd line (the host's cp1252 bytes) as UTF-8, for a reply or a log.
+std::string line_text(const std::string &cmd) {
+	return cp1252_to_utf8(cmd);
+}
+
 // One line per owner push, whatever its answer: the account, the RID, the
-// composed line (control bytes escaped, whole: the composer caps it at 511),
-// and the outcome.
+// composed line (as UTF-8, control bytes escaped, whole: the composer caps it
+// at 511 bytes), and the outcome.
 void log_owner_push(const WebSessionUser &user, uint64_t rid, const char *what,
 		const std::string &line, const char *outcome) {
+	const std::string text = line_text(line);
 	const std::string shown =
-			line.empty() ? std::string() : " '" + loggable(line, line.size()) + "'";
+			text.empty() ? std::string() : " '" + loggable(text, text.size()) + "'";
 	std::printf("[http] owner '%s' (id=%lld) %s rid=%llu%s -> %s\n",
 			loggable(user.username).c_str(), static_cast<long long>(user.id), what,
 			static_cast<unsigned long long>(rid), shown.c_str(), outcome);
@@ -111,15 +147,41 @@ ComposedServerCommand compose_server_command(const std::string &text) {
 			body->text_list("args").value_or(std::vector<std::string>{});
 	if (body->wrong_type())
 		return refused("invalid_command", "\"args\" is a list of strings");
+	// Each arg in the host's code page, the bytes its reader keeps.
+	std::vector<std::string> host_args;
+	host_args.reserve(args.size());
 	for (const std::string &arg : args) {
-		if (has_control_byte(arg)) {
+		if (has_control_byte(arg) || has_c1_control(arg)) {
 			return refused("invalid_command",
-					"an arg holds a control byte (below 0x20, or 0x7F), which a stock host "
-					"would carry into its game.cfg or its chat");
+					"an arg holds a control byte (below 0x20, 0x7F, or a C1 control U+0080 to "
+					"U+009F), which a stock host would carry into its game.cfg or its chat");
+		}
+		std::string bytes;
+		std::u32string unstorable;
+		if (!utf8_to_cp1252(arg, bytes, &unstorable)) {
+			if (!is_valid_utf8(arg))
+				return refused("invalid_command", "an arg is not UTF-8");
+			return refused("invalid_command",
+					"an arg holds " + codepoint_names(unstorable) +
+							", which the host's code page (cp1252) has no character for");
+		}
+		host_args.push_back(std::move(bytes));
+	}
+	// The widths a stock host keeps of a name and a message, counted in its own bytes.
+	if (!host_args.empty()) {
+		const size_t kept = out.verb == ServerCommandVerb::SetServerName
+				? SERVER_COMMAND_NAME_CAP - 1
+				: out.verb == ServerCommandVerb::SetServerMsg ? SERVER_COMMAND_MSG_CAP - 1
+															  : 0;
+		if (kept != 0 && host_args[0].size() > kept) {
+			return refused("invalid_command",
+					"the text is " + std::to_string(host_args[0].size()) +
+							" characters in the host's code page (cp1252); a stock host keeps " +
+							std::to_string(kept));
 		}
 	}
 	const char *refusal = nullptr;
-	out.cmd = server_command_text(out.verb, target, args, &refusal);
+	out.cmd = server_command_text(out.verb, target, host_args, &refusal);
 	if (out.cmd.empty())
 		return refused("invalid_command", refusal != nullptr ? refusal : "");
 	return out;
@@ -220,13 +282,14 @@ crow::response HostRoutes::admin_command(const crow::request &req, uint64_t rid)
 		return no_listener();
 	const uint32_t rid32 = rid_of(rid);
 	const HostPushResult result = nw_udp_->push_server_command(rid32, command.cmd);
-	// The whole line (server_command_text caps it at 511), control bytes escaped.
+	// The whole line (server_command_text caps it at 511 bytes) as UTF-8, control bytes escaped.
+	const std::string text = line_text(command.cmd);
 	std::printf("[http] POST /api/admin/hosts/%llu/command '%s' -> %s\n",
-			static_cast<unsigned long long>(rid), loggable(command.cmd, command.cmd.size()).c_str(),
+			static_cast<unsigned long long>(rid), loggable(text, text.size()).c_str(),
 			host_push_result_name(result));
 	crow::json::wvalue out;
 	out["statement"] = "ServerCommand";
-	out["cmd"] = command.cmd;
+	out["cmd"] = text;
 	return push_reply(result, rid32, std::move(out), kNoConnection);
 }
 
@@ -274,14 +337,14 @@ crow::response HostRoutes::owner_hosts(const crow::request &req) {
 			if (!hostdb::listing_owned_by(*db_conn, h.rid, access.user->id))
 				continue;
 			crow::json::wvalue e = listed_host_json(h);
-			e["msg"] = h.msg;
+			e["msg"] = retail_text_to_utf8(h.msg);
 			std::vector<crow::json::wvalue> roster;
 			for (const auto &s : hostdb::list_roster(*db_conn, h.rid)) {
 				crow::json::wvalue r;
 				r["slot"] = s.slot;
-				r["player_name"] = s.player_name;
-				r["team"] = s.team;
-				r["type"] = s.type;
+				r["player_name"] = retail_text_to_utf8(s.player_name);
+				r["team"] = retail_text_to_utf8(s.team);
+				r["type"] = retail_text_to_utf8(s.type);
 				roster.push_back(std::move(r));
 			}
 			e["roster"] = std::move(roster);
@@ -355,12 +418,13 @@ crow::response HostRoutes::owner_command(const crow::request &req, uint64_t rid)
 	if (!owner_may_send(command.verb)) {
 		log_owner_push(user, rid, "command", command.cmd, "verb_not_allowed");
 		return json_error(403, "verb_not_allowed",
-				"SetMPReset is an admin's verb: it would end the server's process at its "
-				"next map and stay saved in its game.cfg");
+				"SetMPReset is an admin's verb: it would end the server's process the next "
+				"time it creates a session (a map change creates none), and it stays saved "
+				"in its game.cfg");
 	}
 	crow::json::wvalue out;
 	out["statement"] = "ServerCommand";
-	out["cmd"] = command.cmd;
+	out["cmd"] = line_text(command.cmd);
 	return push_as_owner(
 			user, rid, "command", command.cmd,
 			[this, &command, &user](uint32_t rid32) {

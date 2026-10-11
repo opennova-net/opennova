@@ -500,11 +500,26 @@ HostPushResult NwUdpListener::queue_host_push(uint32_t rid, NapiMessage statemen
 	return known ? HostPushResult::NotHosted : HostPushResult::UnknownRid;
 }
 
+void NwUdpListener::forget_owner(int64_t user_id) {
+	std::lock_guard<std::mutex> lk(lobby_states_mu_);
+	for (auto &[peer, state] : lobby_states_) {
+		if (state.lobby.host_user_id != user_id) continue;
+		state.lobby.host_user_id.reset();
+		std::printf("[nwudp] rid=%u addr=%s no longer names account %lld as its owner\n",
+		            state.lobby.rid, peer_addr_to_string(peer).c_str(),
+		            static_cast<long long>(user_id));
+	}
+	for (auto &[peer, parked] : parked_lobby_states_) {
+		if (parked.lobby.host_user_id == user_id) parked.lobby.host_user_id.reset();
+	}
+}
+
 // Each push goes out as its own send build, in queue order, on the connection the RID resolved
 // to; one replaced (a fresh 0x42 mints a new SK) or dropped since is skipped, and so is one that
 // stopped hosting since, as the queue would have refused it (NotHosted), and an owner's push to a
-// listing no longer that account's.
+// listing no longer that account's (a re-host's key, or forget_owner).
 void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
+	if (push_drain_paused_.load()) return;
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);
 	if (host_pushes_.empty()) return;
 	std::vector<HostPush> pushes;

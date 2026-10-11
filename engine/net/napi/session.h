@@ -399,6 +399,13 @@ bool parse_server_command(const NapiMessage &container, ServerCommand &out);
 // The reader's Cmd buffer: Napi_CopyString(buf, value, 0x200) keeps at most 511 characters.
 // [orig: CNapiGameSession_HandleServerCommand @0x4d2345..0x4d2356]
 inline constexpr size_t SERVER_COMMAND_CMD_CAP = 512;
+// The buffers SetServerName and SetServerMsg copy their token into: Napi_CopyString(..., 32) and
+// (..., 128) keep at most 31 and 127 bytes of it, in the host's code page (cp1252 for JO's
+// audience, D-NET-382), and drop the rest.
+// [orig: CNapiGameSession_HandleServerCommand — SetServerName's copy @0x4D2CF5, SetServerMsg's
+//  @0x4D2D8A]
+inline constexpr size_t SERVER_COMMAND_NAME_CAP = 32;
+inline constexpr size_t SERVER_COMMAND_MSG_CAP = 128;
 // True for the player-targeted verbs, which the reader matches by prefix and then requires one
 // of the four target suffixes; false for the verbs it compares as a whole token.
 // [orig: CNapiGameSession_HandleServerCommand — StrStartsWithNoCase vs Napi_StrCaseEqual per verb]

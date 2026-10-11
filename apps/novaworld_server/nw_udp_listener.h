@@ -193,6 +193,19 @@ public:
 	                                 int msg_param2 = 0,
 	                                 std::optional<int64_t> owner = std::nullopt);
 
+	// Takes `user_id` off every lobby connection (and parked lobby state) whose listing it owns
+	// (LobbyState::host_user_id): an admin password reset, an inactive status or a delete takes
+	// the account's keys, and with them the stored owner (service policy). Taking the in-memory
+	// owner too means an owner push already queued for one of its servers is dropped by the
+	// drain's owner re-check, and none resolves after. The listing stays listed; its next write
+	// stores no owner. Thread-safe.
+	void forget_owner(int64_t user_id);
+
+	// Leaves queued pushes on the queue while `paused` (the receive thread skips its drain leg),
+	// so a test can change a connection between a push's queue and its send. Never paused in
+	// service. Thread-safe.
+	void pause_push_drain(bool paused) { push_drain_paused_.store(paused); }
+
 	// Drop the per-connection lobby state for the connection at `peer`.
 	// Called from main()'s ConnectionManager::on_lost handler so
 	// heartbeat-timeouts free the lobby (otherwise hosts would persist
@@ -270,6 +283,7 @@ private:
 	std::unordered_map<PeerAddr, ParkedLobbyState, PeerAddrHash> parked_lobby_states_;
 	// The pushes waiting for the receive thread, in queue order. Guarded by lobby_states_mu_.
 	std::vector<HostPush> host_pushes_;
+	std::atomic<bool> push_drain_paused_{false}; // pause_push_drain
 	opennova::db::ConnectionPool *db_pool_ = nullptr;
 	opennova::UnknownTracker *tracker_ = nullptr;
 };

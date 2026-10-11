@@ -4,7 +4,7 @@
       <header class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p class="text-sm uppercase tracking-[0.3em] text-accent">NovaWorld</p>
-          <h1 class="text-3xl font-semibold text-ink">My servers</h1>
+          <h1 ref="heading" tabindex="-1" class="text-3xl font-semibold text-ink focus:outline-none">My servers</h1>
           <p class="mt-1 text-sm text-ink-muted">
             The game servers listed under
             <span class="font-medium text-ink">{{ user?.username ?? 'your account' }}</span>.
@@ -78,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import MyServerCard from '../components/MyServerCard.vue';
 import { listMyServers } from '../api/myServers';
@@ -96,6 +96,7 @@ const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
 const pageStatus = ref('');
 const pageError = ref('');
+const heading = ref<HTMLElement | null>(null);
 
 // The list refreshes itself on this period (a server's columns and roster
 // come with its own updates), and on demand.
@@ -144,10 +145,21 @@ function refreshSoon() {
   soonTimer = setTimeout(() => void load(true), 1500);
 }
 
-function onStopped(name: string) {
-  pageStatus.value = `Stopped hosting ${name || 'the server'}. It leaves the list as the match ends.`;
+// The stop went out: the card goes at once (the service takes the row out as
+// the statement is sent, which a list read right now could still beat), a
+// list read already in flight is dropped for the same reason, the list is read
+// again shortly, and the keyboard goes to the page heading, the confirm form it
+// was on having gone with the card; the status line says what happened.
+async function onStopped(rid: number, name: string) {
+  pageStatus.value = `Stopped hosting ${name || 'the server'}. Its match ends for everyone on it.`;
   pageError.value = '';
-  void load(false);
+  if (servers.value !== null) servers.value = servers.value.filter((s) => s.rid !== rid);
+  inFlight?.abort();
+  inFlight = null;
+  loading.value = false;
+  refreshSoon();
+  await nextTick();
+  heading.value?.focus();
 }
 
 onMounted(() => {

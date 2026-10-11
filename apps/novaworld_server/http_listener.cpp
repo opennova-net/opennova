@@ -4,6 +4,7 @@
 #include "catalog_repository.h"
 #include "host_routes.h"
 #include "http_cookies.h"
+#include "nw_udp_listener.h"
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
@@ -384,11 +385,14 @@ bool HttpListener::start(const ServerConfig &config) {
 // The port is Crow's: its run() stores the port it bound (the OS's pick for
 // port 0) in the app before it accepts the first connection, so every handler
 // reads it settled, and with a nonzero port it is the configured one.
-void HttpListener::forget_persistent_pins(int64_t user_id) {
-	std::lock_guard<std::mutex> lock(persistent_user_mu_);
-	for (auto it = persistent_to_user_id_.begin(); it != persistent_to_user_id_.end();) {
-		it = it->second == user_id ? persistent_to_user_id_.erase(it) : std::next(it);
+void HttpListener::forget_revoked_account(int64_t user_id) {
+	{
+		std::lock_guard<std::mutex> lock(persistent_user_mu_);
+		for (auto it = persistent_to_user_id_.begin(); it != persistent_to_user_id_.end();) {
+			it = it->second == user_id ? persistent_to_user_id_.erase(it) : std::next(it);
+		}
 	}
+	if (nw_udp_ != nullptr) nw_udp_->forget_owner(user_id);
 }
 
 std::optional<int64_t> HttpListener::retail_login_owner(
@@ -639,7 +643,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		auto result = delete_user(*db_conn, id);
-		if (result.ok) forget_persistent_pins(id);
+		if (result.ok) forget_revoked_account(id);
 		crow::response res(result.ok ? 204 :
 		                   result.error_code == "not_found" ? 404 : 500);
 		if (!result.ok) {
@@ -672,7 +676,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_user(*db_conn, id, p);
-		if (result.ok && update_revokes_sessions(p)) forget_persistent_pins(id);
+		if (result.ok && update_revokes_sessions(p)) forget_revoked_account(id);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;

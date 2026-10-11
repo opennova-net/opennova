@@ -40,10 +40,23 @@ class NwUdpListener;
 // into the host's game.cfg unescaped (Game_SaveConfig @0x54C490, `game_name =
 // "%s"\n`; ours engine/formats/gamecfg/game_cfg_write.cpp), so a CR or LF
 // would inject a line into a third party's config, and the chat verbs would
-// relay the byte to every player.
+// relay the byte to every player. The C1 controls (U+0080..U+009F) count as
+// control bytes too.
+//
+// The args come as UTF-8 (JSON) and the host reads its Cmd in its own code
+// page, cp1252 for JO's audience (D-NET-382), so each arg is converted to
+// cp1252 before the line is composed (utf8_to_cp1252): "café" goes out as
+// 0x63 0x61 0x66 0xE9. An arg holding a character cp1252 has no byte for (an
+// emoji, a CJK character) is refused with its codepoints rather than
+// substituted, and one that is not UTF-8 at all is refused. A SetServerName or
+// SetServerMsg text past what the host keeps (SERVER_COMMAND_NAME_CAP /
+// SERVER_COMMAND_MSG_CAP less the terminator: 31 and 127 cp1252 bytes) is
+// refused too, rather than clipped by the host.
 struct ComposedServerCommand {
 	ServerCommandVerb verb = ServerCommandVerb::None;
-	std::string cmd; // the composed Cmd line, when accepted
+	// The composed Cmd line, when accepted, in the host's cp1252 bytes (shown to
+	// a reply or a log through cp1252_to_utf8).
+	std::string cmd;
 	// Set: the 400 the route answers, pushing nothing.
 	std::optional<crow::response> refusal;
 };

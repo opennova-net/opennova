@@ -85,7 +85,9 @@
           <button type="submit" :disabled="busy" :class="primaryButton">Rename</button>
         </div>
         <p :id="ids.nameHint" class="text-xs text-ink-muted">
-          31 characters at most. The server saves it in its game.cfg; the browser shows it after the server's next update.
+          {{ cp1252Length(name) }} of 31 characters, in the game's Windows-1252 text (accented
+          Latin letters work; emoji and most other scripts do not). The server saves it in its
+          game.cfg; the browser shows it after the server's next update.
         </p>
       </form>
 
@@ -109,7 +111,9 @@
           />
           <button type="submit" :disabled="busy" :class="primaryButton">Set</button>
         </div>
-        <p :id="ids.msgHint" class="text-xs text-ink-muted">127 characters at most, saved in the server's game.cfg.</p>
+        <p :id="ids.msgHint" class="text-xs text-ink-muted">
+          {{ cp1252Length(message) }} of 127 characters, in Windows-1252, saved in the server's game.cfg.
+        </p>
       </form>
 
       <!-- Cycle / EndMission / GameOver -->
@@ -180,7 +184,9 @@
       <p v-if="server.roster.length === 0" class="text-sm text-ink-muted">
         No players in the game, as of the server's last update.
       </p>
-      <div v-else class="overflow-x-auto rounded-panel border border-border">
+      <!-- relative: the rows' sr-only spans are absolutely positioned, and without a
+           positioned ancestor they escape this scroller and widen the page on a phone. -->
+      <div v-else class="relative overflow-x-auto rounded-panel border border-border">
         <table class="min-w-full divide-y divide-border text-sm text-ink">
           <caption class="sr-only">Players on {{ server.server_name }}, as of the server's last update</caption>
           <thead>
@@ -261,6 +267,7 @@
 import { computed, nextTick, ref } from 'vue';
 import { sendServerCommand, stopHosting, type HostError } from '../api/myServers';
 import type { MyServer, OwnerVerb, RosterSlot, ServerCommandBody } from '../types/myServers';
+import { cp1252Length, cp1252Problem } from '../utils/cp1252';
 
 const props = defineProps<{
   server: MyServer;
@@ -272,7 +279,7 @@ const emit = defineEmits<{
   // A push may change the listing (or showed it gone): refresh the list.
   (e: 'changed'): void;
   // The stop went out; the server leaves the list.
-  (e: 'stopped', name: string): void;
+  (e: 'stopped', rid: number, name: string): void;
   // A push answered 401.
   (e: 'session-ended'): void;
 }>();
@@ -313,7 +320,9 @@ const TEAM_NAMES: Record<string, string> = { '1': 'Blue', '2': 'Red', '3': 'Yell
 const busy = ref(false);
 const status = ref('');
 const alertText = ref('');
-// Which form the last refusal belongs to (its field is marked invalid).
+// The form whose field the last refusal was about (a 400 invalid_command, or
+// the page's own check): its field is marked invalid. A 429, a 404 or a
+// network failure says nothing about what was typed, so it marks none.
 const failedForm = ref<string | null>(null);
 
 const chat = ref('');
@@ -359,9 +368,20 @@ function ago(utc: string): string {
 function fail(form: string, error: HostError) {
   status.value = '';
   alertText.value = error.message;
-  failedForm.value = form;
+  failedForm.value = error.code === 'invalid_command' ? form : null;
   if (error.code === 'unauthorized') emit('session-ended');
   if (error.code === 'unknown_rid' || error.code === 'not_hosting') emit('changed');
+}
+
+// The page's own check of a text before it is sent (what the service would
+// refuse): false, with the reason shown and the field marked, when it fails.
+function textFits(form: string, text: string, cap?: number): boolean {
+  const problem = cp1252Problem(text, cap);
+  if (problem === null) return true;
+  status.value = '';
+  alertText.value = problem;
+  failedForm.value = form;
+  return false;
 }
 
 // One push; true once the service queued it.
@@ -384,7 +404,7 @@ async function push(form: string, body: ServerCommandBody, done: string): Promis
 
 async function sendChat() {
   const text = chat.value.trim();
-  if (!text) return;
+  if (!text || !textFits('chat', text)) return;
   if (await push('chat', { verb: 'TextChatServer', args: [text] }, `Sent to everyone on ${serverLabel()}: “${text}”.`)) {
     chat.value = '';
   }
@@ -392,7 +412,7 @@ async function sendChat() {
 
 async function sendName() {
   const text = name.value.trim();
-  if (!text) return;
+  if (!text || !textFits('name', text, 31)) return;
   if (await push('name', { verb: 'SetServerName', args: [text] }, `Asked ${serverLabel()} to rename itself “${text}”.`)) {
     name.value = '';
   }
@@ -400,7 +420,7 @@ async function sendName() {
 
 async function sendMessage() {
   const text = message.value.trim();
-  if (!text) return;
+  if (!text || !textFits('msg', text, 127)) return;
   if (await push('msg', { verb: 'SetServerMsg', args: [text] }, `Asked ${serverLabel()} to set its message to “${text}”.`)) {
     message.value = '';
   }
@@ -480,6 +500,7 @@ async function confirmStop() {
     return;
   }
   confirmingStop.value = false;
-  emit('stopped', props.server.server_name);
+  // The page drops this card and takes the keyboard to its own status.
+  emit('stopped', props.server.rid, props.server.server_name);
 }
 </script>

@@ -115,11 +115,14 @@ private:
 	// the joiner's PCID when NWHANDLE doesn't arrive (G.8).
 	mutable std::mutex persistent_user_mu_;
 	std::unordered_map<std::string, int64_t> persistent_to_user_id_;
-	// Drops every PERSISTENTEXPRESSLOGINDATA pin to `user_id`: an admin
-	// password reset, a status other than 'active' and a deleted account end
-	// the retail logins a pin would resume with no password, as the same
-	// update ends the account's website sessions (update_revokes_sessions).
-	void forget_persistent_pins(int64_t user_id);
+	// The in-memory half of an account's revocation (an admin password reset,
+	// a status other than 'active', a delete; the same update ends the
+	// account's website sessions and keys, update_revokes_sessions): drops
+	// every PERSISTENTEXPRESSLOGINDATA pin to `user_id`, which would resume a
+	// retail login with no password, and takes the account off its listings'
+	// in-memory owner (NwUdpListener::forget_owner), so an owner push already
+	// queued for one of them is dropped.
+	void forget_revoked_account(int64_t user_id);
 	// The account a retail request's own login names, for the HOSTKEY
 	// /NWHost.dll mints (hostdb::record_host_key): the LOGINSESSIONTAG cookie
 	// of a live retail login (its active_user_sessions row), else the

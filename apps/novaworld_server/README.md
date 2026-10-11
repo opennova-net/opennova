@@ -122,8 +122,20 @@ its `WebAccess`). Both families compose a command through one helper,
 `compose_server_command`: the body `{"verb", "target", "args"}` (`target` one of
 `None`, `ByIndex`, `ByIpAndPort`, `ByName`, `ByPCID`, or absent) goes through
 `server_command_text`, so a line the host's reader would drop is a 400 with the
-composer's reason, and so is an arg holding a control byte (below 0x20, or 0x7F, which a
-host would save into its `game.cfg` or relay in chat).
+composer's reason, and so is an arg holding a control byte (below 0x20, 0x7F, or a C1
+control U+0080 to U+009F, which a host would save into its `game.cfg` or relay in chat).
+
+The body is UTF-8 (JSON) and a stock host reads its `Cmd` in its own code page, cp1252
+for JO's audience (D-NET-382), so the composer converts each arg to cp1252 first
+(`utf8_to_cp1252`, `base/io/cp1252.h`): "café" reaches the host as `caf` and 0xE9. An
+arg holding a character cp1252 has none for (an emoji, CJK) is a 400 naming its
+codepoints (`U+1F600`), never substituted, and bytes that are not UTF-8 are a 400 too.
+`SetServerName` and `SetServerMsg` texts are counted in the host's bytes: a stock host
+keeps 31 and 127 of them (`SERVER_COMMAND_NAME_CAP` / `SERVER_COMMAND_MSG_CAP`,
+`Napi_CopyString`'s 32 and 128), so a longer one is a 400 rather than clipped there. A
+reply's `cmd` and the log show the composed line back in UTF-8, and the listed servers'
+text (`GET /api/me/hosts`, `GET /api/admin/hosts`) goes out as UTF-8 from whatever the
+host sent (`retail_text_to_utf8`).
 
 **The admin's pushes** (the Bearer `ADMIN_API_TOKEN`, or an admin-role website session
 with the CSRF header; see "Website sessions and roles"), each logged with its actor and
@@ -156,7 +168,10 @@ servers and owners" below) administers that server, and only it, from the websit
   `NwUdpListener`, which resolves the RID only to a connection whose
   `LobbyState::host_user_id` is that account, under its lobby lock, and the receive
   thread drops the statement if the connection's owner changed before it went out (a
-  re-host whose key names another account or none). That miss is the same 404.
+  re-host whose key names another account or none). That miss is the same 404. An
+  admin password reset, an inactive status or a delete also takes the account off its
+  listings' in-memory owner (`NwUdpListener::forget_owner`, beside the retail login
+  pins), so a push the account queued just before is dropped there too, not sent.
 - **The rate limit.** Each owner push, command or stop, takes one token from the
   account's bucket (`HostRoutes::kOwnerPushPerUser`, in memory): 8 at once, then one
   every 2 s. Past it: 429 `rate_limited` with `Retry-After` in seconds. The token is
@@ -228,11 +243,14 @@ HostKey is unwitnessed.
     (refused under strict mode), and a banned account's key claims nothing.
   - A deleted account takes its keys (`ON DELETE CASCADE`), and its listings' owner and
     its rows in servers' player lists are set NULL (`ON DELETE SET NULL`). The listing
-    stays listed with no owner, and its later writes store none though the lobby still
-    holds the id. `players.id` is `AUTOINCREMENT`, so no later account gets that id.
+    stays listed with no owner, and its later writes store none. `players.id` is
+    `AUTOINCREMENT`, so no later account gets that id.
   - In each case `POST /api/admin/hosts/<rid>/stop` ends the listing at once, and the
     account's own `GET /api/me/hosts` and push routes drop it at once: they read the
-    live claim (`hostdb::listing_owned_by`), not the row.
+    live claim (`hostdb::listing_owned_by`), not the row. A reset, a status change or a
+    delete made through `PUT` / `DELETE /api/admin/users/<id>` also takes the account
+    off its listings' in-memory owner (`NwUdpListener::forget_owner`), so an owner push
+    it queued just before is dropped by the receive thread rather than sent.
 - **Strict mode.** `ONNET_REQUIRE_HOST_KEY=1` lists no server whose `HostKey` claims no
   account (empty, unknown, expired, revoked, or held by another listing). The code is
   200, the retail table's `NWUSERVERMSGCODE_NEEDTOLOGIN`.
@@ -440,7 +458,10 @@ tests build their service from
 The owner's pushes: the route harness's `owner_host_push` case (its NW UDP listener
 writes the pool, so a host's key links its row) drives the 401 / 403 / 404 / 400 /
 429 answers, the same 404 for another account's RID and a free one, the push-time
-re-check, the roster and the stop against hand-driven hosts; and `nw_owner_admin_e2e`
+re-check, the drain's re-check after a ban (the drain held with
+`NwUdpListener::pause_push_drain`), the 409, "café" arriving as cp1252, the roster and
+the stop against hand-driven hosts (the admin case adds the encoding refusals and the
+byte caps); and `nw_owner_admin_e2e`
 ([`tests/novaworld/nw_owner_admin_e2e_test.cpp`](../../tests/novaworld/nw_owner_admin_e2e_test.cpp),
 `BUILD_NOVAWORLD_HTTP` only) lists an in-process `opennova-serve` with an account and
 administers it from the website's routes: its match takes the owner's
