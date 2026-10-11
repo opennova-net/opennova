@@ -18,6 +18,7 @@
 #include <editor/session/project_session.h>
 
 #include "authoring/child_process.h"
+#include "authoring/play_logic_link.h"
 #include "authoring/preview_sound_player.h"
 #include "authoring/thumbnail_images.h"
 #include "devtools/imgui_pass_node.h"
@@ -112,6 +113,9 @@ public:
 	// viewport is read through query_json's `viewport` and changed through request_json's
 	// set_viewport and edit_in_viewport (S13 V7).
 	SubViewport *get_viewport_device(const String &p_path, const String &p_kind) const;
+	// Where the canvas last drew that device's picture, its top-left corner in the screen's pixels (S24 B8: a windowed
+	// test's mark pixel in the window); zero for no device.
+	Vector2 get_viewport_canvas_at(const String &p_path, const String &p_kind) const;
 	// The GPU texture of a texture file's thumbnail (ADR 0046 S18) as `p_transform` makes it (a
 	// texture_thumbnail query's transform token), made and uploaded now: for the thumbnail device's
 	// test alone (the windows draw it through the ImGui pass). Null for a file that is no texture of the
@@ -264,6 +268,8 @@ private:
 	std::unique_ptr<PreviewSoundVoices> clip_voices_;
 	uint64_t clip_sound_seq_ = 0;
 	std::weak_ptr<const opennova::editor::AssetScan> clip_wave_scan_;
+	// The running game's logic (S24 Live): the link to its MCP endpoint, stepped each pump.
+	PlayLogicLink play_link_;
 	Node *mcp_service_ = nullptr;
 	int mcp_port_ = 0;
 	String window_title_; // the title last set on the OS window

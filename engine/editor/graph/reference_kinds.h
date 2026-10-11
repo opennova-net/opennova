@@ -128,6 +128,10 @@ struct ReferenceKindRow {
 	bool scope_names_file = false;
 	// The picker offers only the symbols the reference's scope matches (scope_matches).
 	bool picker_scoped = false;
+	// A symbol found only by a scope naming its section (a mission's events by their index, "<MISSION>.BMS/EVENTS",
+	// apart from the zone ids and SSNs the same numbers are): a lookup of its file's scope alone, or of none, does
+	// not reach it (find_definition).
+	bool section_only = false;
 	// The kind of file a symbol goes in when no file of the project defines one yet (the
 	// Problems row's Open fix); Unknown for one the file its scope names holds.
 	AssetKind defined_in = AssetKind::Unknown;

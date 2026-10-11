@@ -799,6 +799,12 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 	// their records is compared by (renumber): none for a document of a kind no Record reference
 	// names, which pays nothing for them.
 	const std::vector<TargetedCollection> targets = targeted_collections();
+	// The row an edit adds, removes or moves records of, with its place lists as the edit found them
+	// (place_lists, S24): what renumber_place_lists compares after it.
+	struct Placed {
+		NodeId row = 0;
+		std::vector<std::vector<NodeId>> before;
+	} placed;
 	// One edit staged against the rows as the edits before it left them; false, with `error`, when
 	// it is refused.
 	const auto stage_one = [&](size_t i) -> bool {
@@ -978,6 +984,10 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 
 		// A record inside the row: the row's clone changed (the row cloned on its first touch).
 		Node *updated = staged.touch(row_id);
+		if (structural(edit.operation) && edit.operation != EditOperation::Apply) {
+			placed.before = place_lists(*updated);
+			if (!placed.before.empty()) placed.row = row_id;
+		}
 		// A nested record's placement: the committed row's index until an edit of this batch
 		// changes the row's shape (or the batch made the row), then the batch's own index of the
 		// clone, made by one walk (placement_in, as path_in reads it).
@@ -1167,8 +1177,10 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		const bool reorders = !targets.empty() && structural(edits[i].operation);
 		const std::vector<std::vector<NodeId>> before =
 		        reorders ? collection_orders(targets, staged) : std::vector<std::vector<NodeId>>();
+		placed = Placed();
 		if (!stage_one(i)) return false;
 		if (reorders && !renumber(targets, before, staged, error)) return false;
+		if (placed.row && !renumber_place_lists(placed.row, placed.before, staged, error)) return false;
 	}
 	made_by_edit.assign(edits.size(), 0);
 	for (size_t i = 0; i < edits.size(); ++i) made_by_edit[i] = made[i].id;
@@ -1228,6 +1240,35 @@ bool Document::renumber_references(const StagedRows &, const RecordShift &shift,
 	error = std::string("Other records name each ") + reference_row(shift.reference).label +
 	        " by its index, which this document does not renumber.";
 	return false;
+}
+
+bool Document::renumber_place_lists(NodeId row, const std::vector<std::vector<NodeId>> &before, StagedRows &staged,
+                                    Diagnostic &error) {
+	const Node *now = staged.find(row);
+	if (!now) return true;
+	const std::vector<std::vector<NodeId>> after = place_lists(*now);
+	for (size_t list = 0; list < before.size() && list < after.size(); ++list) {
+		if (after[list] == before[list]) continue;
+		// Where each record the edit found stands now, as renumber's RecordShift says it.
+		RecordShift shift;
+		shift.after = after[list].size();
+		std::unordered_map<NodeId, size_t> at;
+		for (size_t k = 0; k < after[list].size(); ++k) at.emplace(after[list][k], k);
+		shift.to.reserve(before[list].size());
+		for (const NodeId id : before[list]) {
+			const auto found = at.find(id);
+			shift.to.push_back(found == at.end() ? RecordShift::kRemoved : found->second);
+		}
+		if (!shift.moves()) continue;
+		std::vector<Edit> sites;
+		std::string message;
+		if (!renumber_places(staged, row, list, shift, sites, message))
+			return fail(error, path(), CoreFinding::DocumentCollection,
+			            message.empty() ? "This collection cannot accept that edit." : message);
+		std::vector<NodeId> made, added;
+		if (!sites.empty() && !stage_edits(sites, staged, made, added, error)) return false;
+	}
+	return true;
 }
 
 std::vector<std::vector<NodeId>> Document::collection_orders(

@@ -159,6 +159,29 @@ inline void focus(Workspace &workspace, const char *window) {
 	workspace.request(request::set_workspace(io::json_write(change)));
 }
 
+// A mission's Logic pane (S24, the Event board) shown beside its 3D view or hidden: the 3D view's Logic tool,
+// Ctrl+L, the Windows menu's tick.
+inline void show_logic(Workspace &workspace, const std::string &path, bool shown) {
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("path", io::JsonValue::make_string(path));
+	members.set("logic", io::JsonValue::make_bool(shown));
+	set_workspace(workspace, "document", std::move(members));
+}
+
+// Pick in view (S24): what is clicked next in the mission's 3D view or its map is picked for `record`'s parameter
+// `slot` (0 to 3, a trigger's or an action's); a record of row 0 ends the pick.
+inline void pick_in_view(Workspace &workspace, const std::string &path, const NodeAddress &record, int slot) {
+	io::JsonValue pick = io::JsonValue::make_object();
+	if (record.row) {
+		pick.set("record", io::JsonValue::make_number(double(record.child ? record.child : record.row)));
+		pick.set("slot", io::JsonValue::make_number(double(slot)));
+	}
+	io::JsonValue members = io::JsonValue::make_object();
+	members.set("path", io::JsonValue::make_string(path));
+	members.set("pick", std::move(pick));
+	set_workspace(workspace, "document", std::move(members));
+}
+
 // True when `name` contains `filter`, compared as the game compares names.
 inline bool matches(const std::string &name, const char *filter) {
 	return pff::normalized_logical_name(name).find(pff::normalized_logical_name(filter)) != std::string::npos;

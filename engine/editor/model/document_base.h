@@ -87,6 +87,9 @@ public:
 	// True while the file holds the bytes this document was loaded from or last saved (the
 	// conflict check Save makes); false once it changed outside the editor or is gone.
 	bool matches_file() const;
+	// The fingerprint of the bytes as stored this document was loaded from or last saved (FNV-1a 64 over the
+	// file's bytes, the conflict check's): what another reader of the file compares a file it read with.
+	uint64_t file_fingerprint() const { return file_fingerprint_; }
 	// True once Save wrote the file since the load: the file then holds bytes serialize()
 	// made, not the bytes the document was read from (a type whose writer normalizes what
 	// it read tells the two apart by it).

@@ -3,8 +3,10 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/mission_links.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_map.h>
 
 namespace opennova::editor {
@@ -21,7 +23,12 @@ namespace opennova::editor {
 // each area's box, each entity with no wireframe its pin by its pool ringed in its team's map colour, the hovered and
 // the selected rings (a wireframe's: its footprint outlined), the labels (the hovered and the selected, every shown
 // mark's with the labels option), the box being dragged. A press takes a pin, else the model under it seen from above
-// (pick_mission_map_mark); a box the pins in it and the footprints it meets.
+// (pick_mission_map_mark); a box the pins in it and the footprints it meets. S24: with the links option, the
+// selected event's, trigger's or action's links (preview/mission_link_shapes; a reach is its circle seen from
+// above) over the boxes and under the pins, and a badge on each mark some event names, its hover listing them.
+// While a pick waits (the workspace's document `pick`), a click on a pin that fills its slot sets it and ends the
+// pick, a click on nothing or Esc ends it, and only its candidates hover, each rung. B7: the 3D view's keys, Delete,
+// Ctrl+D and the arrows' nudge by the snap (F frames already).
 class MissionMapCanvas final : public CanvasHalf {
 public:
 	const CanvasGesture &gesture() const override { return gesture_; }
@@ -36,16 +43,36 @@ public:
 private:
 	// The camera moved to `camera`, raised as a SetViewport once a frame at most.
 	void camera_(const MissionMapCamera &camera, CanvasRequests &out);
+	// S24 B7, the 3D view's keys on the map: Delete removes the selection (a stop its marker), Ctrl+D copies it a snap
+	// step east, the arrows nudge it a snap step (Shift a tenth) on the map's axes, one gesture while an arrow is held.
+	void keys_(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out);
+	// S24: the primary area's edge or corner within the pick slop of (x, y) on a view (Move: none), with the area as
+	// a press finds it.
+	MissionHandle handle_under_(const ViewportContext &context, const MissionMapView &view, float x, float y,
+			MissionPressed &area) const;
 
 	CanvasGesture gesture_;
 	const MissionMapViewport *viewport_ = nullptr; // the frame's, from follow
 	std::vector<MissionMapMark> marks_; // the frame's, at its picture's size
 	std::vector<int> selected_; // the frame's selected marks
 	int primary_ = -1;
+	// S24: the selected logic record's links, how many events name each mark (by mark index), the counts kept
+	// while the document stands, and the hovered record's uses.
+	MissionLinkScene links_;
+	std::vector<size_t> badges_;
+	MissionLinkCounts counts_;
+	mutable MissionLinkHover hover_;
+	// S24 pick mode: the slot a pick waits for and what each mark gives it.
+	MissionPickFrame pick_;
 	// What a press took: the mark under it (-1: a box from nothing), the records it moves as the press found them and
 	// the grabbed one's place among them, where it began in the mission, and the box's corners.
 	struct Press {
 		int mark = -1;
+		// S24: the primary area's edge or corner the press took (Move: none), the area as pressed and where the
+		// handle stood (mission x and y).
+		MissionHandle handle = MissionHandle::Move;
+		MissionPressed area;
+		double handle_at[2] = { 0.0, 0.0 };
 		std::vector<MissionPressed> taken;
 		size_t grabbed = 0;
 		double from[2] = { 0.0, 0.0 };
@@ -53,6 +80,10 @@ private:
 		bool selected = false; // the grabbed record selected before it moved
 	};
 	Press press_;
+	// A nudge: the records as it began, how far it has gone (metres east and north), and the selection it took.
+	std::vector<MissionPressed> nudge_;
+	std::vector<NodeAddress> nudged_;
+	double nudge_by_[2] = { 0.0, 0.0 };
 	// A pan by the right or middle button: the camera as it began and where the pointer was.
 	bool panning_ = false;
 	MissionMapCamera pan_from_;

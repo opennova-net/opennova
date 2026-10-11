@@ -108,6 +108,8 @@ bool find_definition(const AssetGraph &graph, const Document &document, const st
 	const auto consider = [&](const GraphSymbol &defined, bool inert) {
 		// A record of a record set goes by its index in its own file, which no other names.
 		if (reference_row(defined.kind).resolution == ReferenceResolution::Record) return;
+		// A symbol of its section alone (a mission's events by their index) only where the scope names a section.
+		if (reference_row(defined.kind).section_only && scope.find('/') == std::string::npos) return;
 		// A style variable is found by its NAME or by the %NAME% a menu writes it as.
 		const std::string name =
 		        reference_row(defined.kind).spell == NameSpelling::StyleVariable ? mns::variable_name(symbol) : symbol;

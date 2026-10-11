@@ -77,7 +77,7 @@ std::string play_mission_for(const SessionView &view) {
 	return std::string();
 }
 
-PlayController::PlayController(SessionCore &core) : core_(core), view_(core.view()), play_(core.platform()) {}
+PlayController::PlayController(SessionCore &core) : core_(core), view_(core.view()), play_(core.platform()), live_(core) {}
 
 PlayController::~PlayController() {
 	// A game left running outlives the editor on purpose (a modder may keep playing);
@@ -392,7 +392,10 @@ void PlayController::start(const PlayIntent &intent) {
 		core_.report(error);
 		view_.activity.status = "The game could not be started.";
 		core_.touch(ViewConcern::Output);
+		return;
 	}
+	// Its logic, once it reports (S24 Live): the mission's document as it was played.
+	live_.started(view_.activity.play_mission, mode);
 }
 
 bool PlayController::launch(const LaunchPlan &plan, Diagnostic &error) {
@@ -499,9 +502,13 @@ void PlayController::poll() {
 		}
 		view_.activity.play_state = play_.state();
 		view_.activity.play_pid = play_.pid();
-		if (play_.state() == PlayState::Stopped) view_.activity.play_mcp_port = 0;
+		if (play_.state() == PlayState::Stopped) {
+			view_.activity.play_mcp_port = 0;
+			live_.ended();
+		}
 		core_.touch(ViewConcern::Run);
 	}
+	live_.follow();
 	if (start_again_pending_ && play_.state() == PlayState::Stopped) step_start_again();
 }
 
@@ -604,6 +611,7 @@ void PlayController::step_start_again() {
 }
 
 void PlayController::forget_project() {
+	live_.ended();
 	start_again_pending_ = false;
 	view_.activity.boot_missing.clear();
 	boot_project_.clear();

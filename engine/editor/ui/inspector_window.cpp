@@ -333,16 +333,8 @@ void reference_status(Workspace &workspace, ReferencePicker &picker, const Docum
 bool is_reference(const FieldUse &field, const Value &value) {
 	return value_reference(field, value) != ReferenceKind::None;
 }
-// A number naming a definition or a record of its own file (an item id, an SSN, a zone, an event, a
-// group, a path, a register by its index): picked by name in the value's place (ReferencePicker::
-// draw_field, ADR 0046 S15), never typed as a number; one whose value the game resolves itself (the
-// player's SSN) picked as what it would name otherwise (FieldUse::picks; graph/display_names' picked_as).
-bool picks_by_name(const FieldUse &field) {
-	const ReferenceKind kind = field.reference != ReferenceKind::None ? field.reference : field.picks;
-	if (kind == ReferenceKind::None || field.schema->type == FieldType::Text) return false;
-	const ReferenceResolution resolution = reference_row(kind).resolution;
-	return resolution == ReferenceResolution::Symbol || resolution == ReferenceResolution::Record;
-}
+using field_widgets::picked_value;
+using field_widgets::picks_by_name;
 // A text reference: typed in its box, or picked (its Pick).
 bool picks_reference(const FieldUse &field) {
 	return field.reference != ReferenceKind::None && field.schema->type == FieldType::Text;
@@ -379,13 +371,6 @@ void value_words(const DisplayName &words, FieldColor color = FieldColor::None) 
 	if (!words.raw.empty()) tip += "\nThe file holds " + words.raw;
 	if (!words.source.empty()) tip += "\nFrom " + words.source;
 	ui_kit::tooltip(tip);
-}
-// What a name picked sets the field to: the text, or the index a Record reference's name is (a
-// name that is no index stays the text, which the field refuses).
-Value picked_value(const FieldUse &field, const std::string &picked) {
-	if (field.schema->type == FieldType::Text) return picked;
-	const std::optional<int> index = strutil::parse_int(picked);
-	return index ? Value(int64_t(*index)) : Value(picked);
 }
 
 // The width a reference's tools take beside its value: Pick (a text's), the widest word and
@@ -1323,8 +1308,13 @@ void breadcrumb(Workspace &workspace, const Document &document, const NodeAddres
 		const bool last = i + 1 == chain.size();
 		const std::string shown = ui_kit::fit(title, room - (last ? 0.0f : ImGui::GetStyle().FramePadding.x * 2.0f));
 		row.next(last ? ui_kit::text_width(shown.c_str()) : ui_kit::button_width(shown.c_str()));
-		if (last) ImGui::TextUnformatted(shown.c_str());
-		else if (ImGui::SmallButton((shown + "###crumb").c_str())) select(workspace, document, chain[i]);
+		if (last) {
+			ImGui::TextUnformatted(shown.c_str());
+			// S24: the record itself dragged from its heading onto a value that names it.
+			record_drag_source(document, chain[i], title, true);
+		} else if (ImGui::SmallButton((shown + "###crumb").c_str())) {
+			select(workspace, document, chain[i]);
+		}
 		std::string tip = document.kind_label(chain[i].kind);
 		if (shown != title) tip += "\n" + title;
 		if (name != title) tip += "\n" + name;

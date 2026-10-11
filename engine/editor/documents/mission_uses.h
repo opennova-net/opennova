@@ -17,6 +17,7 @@
 
 #include <editor/documents/mission_sentence.h>
 #include <editor/model/value.h>
+#include <formats/mission/mission_params.h>
 
 namespace opennova::editor {
 
@@ -45,6 +46,13 @@ struct MissionUses {
 	std::vector<MissionUse> uses;
 };
 MissionUses mission_uses(const MissionDocument &document, const NodeAddress &record, const MissionNames &names);
+
+// What a record is to a parameter that names it (S24: a recipe's subject, a record dropped on a chip): an
+// entity its SSN (Entity), an area trigger its zone id (Zone), a waypoint path its number (Path), an event its
+// index among the events (Event), a record of the mission row's Groups its index (Group; 0 is none). False for
+// a record no parameter names.
+bool mission_record_value(const MissionDocument &document, const NodeAddress &record, mission::ParamKind &kind,
+                          int64_t &value);
 
 // The uses of one record kept while the document (its identity, load and revision), the record and the
 // names (their source's generation, `names_generation`, 0 for none) stand: the Inspector asks every

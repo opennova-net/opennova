@@ -72,5 +72,9 @@ struct MissionScript {
 	std::string create_at;
 };
 MissionScript mission_script(const SessionView &view, const std::string &mission_path);
+// The events of the mission at `mission_path` its script reads by their number (event(n), S24 C4: the graph's
+// MissionEventLatch edges in the mission's events' scope), each once, in order; none where the project has no
+// script for it or the graph is not read yet.
+std::vector<size_t> mission_script_events(const SessionView &view, const std::string &mission_path);
 
 } // namespace opennova::editor
