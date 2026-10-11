@@ -16,19 +16,14 @@ allowed_cidrs    = ["0.0.0.0/0"] # game-service ingress CIDRs
 instance_type    = "c7i.large"
 instance_name    = "opennova-server"
 
-# The downloads bucket name doubles as its public hostname: it is served via
-# CloudFront + an ACM cert on this name + a Cloudflare CNAME (downloads ->
-# CloudFront). So name it for the domain you front it with.
-downloads_bucket_name = "downloads.opennova.net"
-backup_bucket_name    = "opennova-backups"
-create_ci_user        = true
+backup_bucket_name = "opennova-backups"
 
 allocate_eip = true
 
 # Cloudflare: domain + zone_id come from the vault (TF_VAR_cloudflare_domain /
 # TF_VAR_cloudflare_zone_id), NOT this file. Only the proxied toggle lives here
 # (it has no vault field). NOTE: onnet called this cloudflare_proxied.
-cloudflare_web_proxied = true   # web @/www behind Cloudflare TLS; nw is always unproxied
+cloudflare_web_proxied = true   # web @/www behind Cloudflare TLS
 
 # Optional overrides
 # game_http_port = 8080

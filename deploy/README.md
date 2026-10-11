@@ -5,7 +5,6 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 
 - `run.sh` / `run.ps1` — wrappers that run the toolbox container.
 - `bin/on-deploy` — the orchestrator: `secrets check`, `infra plan|apply|destroy|output|list`,
-  `github import|plan|apply` (pending retirement, see `TODO.md` and `infra/github/README.md`),
   `aws <args...>`, `app deploy|status|logs|restart|down|sql`, `backup now|list`,
   `state push|pull`.
 - `Dockerfile`, `docker-compose.deploy.yml` — the toolbox image.
