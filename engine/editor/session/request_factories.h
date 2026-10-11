@@ -324,6 +324,18 @@ inline EditorRequest export_project(std::string export_dir = std::string(), bool
 inline EditorRequest stop_play() {
 	return of(EditorRequestKind::StopPlay);
 }
+// S24 Live: the running game's event fired (its index, 0 the first), or its mission variable set.
+inline EditorRequest play_debug_fire(int64_t event) {
+	EditorRequest request = of(EditorRequestKind::PlayDebug);
+	request.event = event;
+	return request;
+}
+inline EditorRequest play_debug_set(int64_t variable, int64_t value) {
+	EditorRequest request = of(EditorRequestKind::PlayDebug);
+	request.variable = variable;
+	request.value = value;
+	return request;
+}
 inline EditorRequest cancel_operation() {
 	return of(EditorRequestKind::CancelOperation);
 }

@@ -2401,10 +2401,11 @@ int test_mission_labels_held() {
 	const NodeAddress a = marks[size_t(picks[0])].record, b = marks[size_t(picks[1])].record, c = marks[size_t(picks[2])].record;
 	rig.session.handle(request::select_record(rig.path, c, SelectMode::Replace, { a, b, c }));
 	TEST_EXPECT(rig.view.documents.selection.primary == c && rig.view.documents.selection.records.size() == 3);
+	// The labels: the white texts (S24's stop numbers and event badges are drawn in their own colours).
 	const auto texts = [](const OverlayList &list) {
 		std::vector<std::string> out;
 		for (const OverlayShape &shape : list.shapes)
-			if (shape.kind == OverlayKind::Text) out.push_back(shape.text);
+			if (shape.kind == OverlayKind::Text && shape.rgb == 0xFFFFFF) out.push_back(shape.text);
 		return out;
 	};
 	const auto frame = [&](const CanvasInput &in) {

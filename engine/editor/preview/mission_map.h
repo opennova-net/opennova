@@ -9,6 +9,7 @@
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_map_outline.h>
+#include <editor/preview/mission_options.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -76,17 +77,20 @@ float mission_map_zoom_for(double metres, int width);
 
 // The map's options: the marks by kind and the labels (the 3D view's), the CMAP's grid and text toggles (the
 // commander map's GRID and TEXT, which the device's compile draws), stick (a moved entity keeps its height over the
-// ground) and the grid a drag snaps to (metres; 0 free).
+// ground) and the grid a drag snaps to (metres; 0 free). S24: the selected event's links, the reaches and the
+// badges (the 3D view's links).
 struct MissionMapOptions {
 	bool items = true, buildings = true, markers = true, organics = true;
-	bool areas = true, paths = true, labels = false;
+	bool areas = true, paths = true, labels = false, links = true;
+	MissionColorBy color_by = MissionColorBy::Team;
 	bool grid = true, text = true;
 	bool stick = true;
 	float snap = 1.0f;
 	bool operator==(const MissionMapOptions &o) const;
 	bool operator!=(const MissionMapOptions &o) const { return !(*this == o); }
 };
-// {marks: {items, buildings, markers, organics, areas, paths, labels}, grid, text, stick, snap}.
+// {marks: {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), grid, text,
+// stick, snap}.
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 
@@ -95,8 +99,9 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 inline constexpr float kMissionMapOutlinePx = 4.0f;
 
 // The colour the map draws an entity in, its pin and its wireframe: its team's map colour (team 1 the HUD's light blue,
-// team 2 its salmon: mission_overlay.h), else its pool's.
-uint32_t mission_map_rgb(MissionPool pool, int team);
+// team 2 its salmon: mission_overlay.h), else its pool's; coloured by group (S24), its group's (mission_group_rgb),
+// else its pool's.
+uint32_t mission_map_rgb(MissionPool pool, int team, int group = 0, MissionColorBy by = MissionColorBy::Team);
 
 // A record as the map shows it: an entity at its position, an area at its middle (its box beside), a pixel each.
 struct MissionMapMark {
@@ -125,6 +130,13 @@ int pick_mission_map_mark(const std::vector<MissionMapMark> &marks, const Missio
 // The records of the shown marks a box from `a` to `b` takes: a pin inside it, a wireframe whose footprint meets it.
 std::vector<NodeAddress> mission_map_box_records(const std::vector<MissionMapMark> &marks, const MissionMapView &view,
 		CanvasPoint a, CanvasPoint b);
+
+// Where an area's edge or corner handle stands on the map, mission x and y (S24: the 3D view's edges and corners;
+// its bottom and top are the 3D view's alone); false for any other handle.
+bool mission_map_handle_point(const MissionPressed &area, MissionHandle handle, double &x, double &y);
+// The map's handles of an area: its four edges and its four corners.
+inline constexpr MissionHandle kMissionMapAreaHandles[] = { MissionHandle::XMin, MissionHandle::XMax, MissionHandle::YMin,
+	MissionHandle::YMax, MissionHandle::XMinYMin, MissionHandle::XMaxYMin, MissionHandle::XMaxYMax, MissionHandle::XMinYMax };
 
 // The player's route (the first path whose flags carry PlayerRoute, the route the game's single player follows:
 // documents' mission_reads), -1 for none.
@@ -206,13 +218,19 @@ public:
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
 	// A drag of a record's `move` handle: the 3D view's move (mission_move_edits) to the point under the pointer,
-	// the selected records with it, with stick over the device's ground; one batch a sample under one gesture.
+	// the selected records with it, with stick over the device's ground; one batch a sample under one gesture. S24:
+	// an area's edge or corner (x_min .. x_min_y_max) as far as the pointer went, the area alone
+	// (mission_area_handle_edits).
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	// `frame` (the named records, else the selection, else everything), `zoom_in` and `zoom_out` (the CMAP's
-	// ZOOMIN and ZOOMOUT steps): each a SetViewport of the camera.
+	// ZOOMIN and ZOOMOUT steps): each a SetViewport of the camera. `select_group` (S24): the 3D view's.
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
+	// `new_event {ids: [record], value: recipe}` (S24): the 3D view's (mission_new_event_command); the rest as
+	// command() takes them.
+	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const override;
 	io::JsonValue options_json() const override;
 	io::JsonValue camera_json() const override;
 	io::JsonValue body_json(const ViewportInput &input) const override;
@@ -252,7 +270,7 @@ private:
 	struct Placed {
 		NodeId row = 0;
 		uint32_t stamp = 0;
-		int team = 0;
+		uint32_t rgb = 0; // its edges' colour (its team's or its group's)
 		const MissionModelOutline *outline = nullptr;
 		int32_t scale_q16 = 0;
 		bool shown = false;

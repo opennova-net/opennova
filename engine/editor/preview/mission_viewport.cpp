@@ -19,6 +19,7 @@
 #include <editor/preview/mission_ground_check.h>
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_items.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_place.h>
@@ -203,11 +204,13 @@ bool MissionViewport::handle_at(const MissionMark &mark, MissionHandle handle, P
 			out = mark.at;
 			return true;
 		}
-		if (!mission_handle_is_edge(handle)) return false;
-		// At the anchor's height: the ground under its middle, or its z_min (the mark's own).
+		const MissionAreaMark &area = scene_.areas()[size_t(mark.area)];
+		if (!mission_handle_is_area(handle) || (mission_handle_is_level(handle) && !area.constrains_z)) return false;
+		// At the anchor's height: the ground under its middle, or its z_min (the mark's own); its bottom and top
+		// at its z bounds.
 		double anchor[3];
 		preview_to_mission(mark.at, anchor);
-		out = mission_area_edge_middle(scene_.areas()[size_t(mark.area)], handle, anchor[2]);
+		out = mission_area_handle_point(area, handle, anchor[2]);
 		return true;
 	}
 	if (mark.entity < 0) return false;
@@ -674,9 +677,23 @@ MissionCanvasFrame MissionViewport::canvas_frame(const ViewportContext &context)
 	frame.document = reason_ == MissionViewStatus::Ready ? document_of(input) : nullptr;
 	frame.current = frame.document && current(input);
 	frame.marks = marks(context.width, context.height, context.device);
+	// S24 pick mode: the slot the workspace's pick names, each mark's value for it; held (shown, no mark filling it)
+	// while the context takes no edits.
+	if (frame.current) {
+		const auto shown = input.view.workspace.documents.find(frame.document->path());
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(frame.document);
+		if (mission && shown != input.view.workspace.documents.end() && shown->second.pick.active()) {
+			std::vector<NodeAddress> records;
+			records.reserve(frame.marks.size());
+			for (const MissionMark &mark : frame.marks) records.push_back(mark.record);
+			frame.pick = mission_pick_frame(*mission, shown->second.pick.record, shown->second.pick.slot, records);
+			if (!frame.editable) frame.pick.hold(frame.not_editable);
+		}
+	}
 	const Selection *selection = frame.current ? selection_of(input, *frame.document) : nullptr;
 	if (!selection) return frame;
 	frame.records = selection->records;
+	if (mission_logic_record(selection->primary)) frame.logic = selection->primary;
 	for (const NodeAddress &record : selection->records) {
 		const int mark = mark_of_(frame.marks, record.row);
 		if (mark < 0) continue;
@@ -781,7 +798,9 @@ bool MissionViewport::handle_point(const ViewportContext &context, NodeId id, co
 		float &y, std::string &error) const {
 	MissionHandle held = MissionHandle::Move;
 	if (!mission_handle_from_token(handle.c_str(), held)) {
-		error = "Unknown handle \"" + handle + "\" (move, height, yaw, x_min, x_max, y_min, y_max).";
+		error = "Unknown handle \"" + handle +
+				"\" (move, height, yaw, x_min, x_max, y_min, y_max, x_min_y_min, x_max_y_min, x_max_y_max, x_min_y_max, z_min, "
+				"z_max).";
 		return false;
 	}
 	if (!planned_(context, error)) return false;
@@ -793,7 +812,9 @@ bool MissionViewport::handle_point(const ViewportContext &context, NodeId id, co
 	}
 	PreviewVec3 at;
 	if (!handle_at(shown[size_t(index)], held, at)) {
-		error = shown[size_t(index)].area >= 0 ? "An area has no " + handle + " handle (move, x_min, x_max, y_min, y_max)."
+		error = shown[size_t(index)].area >= 0 ? "An area has no " + handle +
+				" handle (move, its edges x_min, x_max, y_min, y_max, its corners x_min_y_min, x_max_y_min, x_max_y_max, "
+				"x_min_y_max, and where its flags bound z, z_min and z_max)."
 											   : "An entity has no " + handle + " handle (move, height, yaw).";
 		return false;
 	}
@@ -811,8 +832,8 @@ std::vector<MissionPressed> MissionViewport::taken_(const ViewportContext &conte
 	MissionPressed own;
 	if (!pressed(record, own)) return out;
 	const Selection *selection = selection_of(context.input, document);
-	// An edge is its area's alone; a record not selected moves alone.
-	if (mission_handle_is_edge(handle) || !selection || !selection->holds(record)) {
+	// An area's edge, corner, bottom or top is its alone; a record not selected moves alone.
+	if (mission_handle_is_area(handle) || !selection || !selection->holds(record)) {
 		out.push_back(own);
 		return out;
 	}
@@ -908,14 +929,27 @@ bool MissionViewport::drag(const ViewportContext &context, const ViewportDrag &d
 				options_.stick, context.device);
 		break;
 	}
+	case MissionHandle::ZMin:
+	case MissionHandle::ZMax: {
+		// In the plane through the handle that faces the eye: the bound's height there.
+		const PreviewVec3 through = mission_scene_point((held.min[0] + held.max[0]) * 0.5, (held.min[1] + held.max[1]) * 0.5,
+				handle == MissionHandle::ZMin ? held.min[2] : held.max[2]);
+		PreviewVec3 at;
+		if (!camera_.on_view_plane(x, y, context.width, context.height, through, at)) {
+			error = "The point is not over the area's height.";
+			return false;
+		}
+		const double to[3] = { 0.0, 0.0, double(at.y) };
+		planned = mission_area_handle_edits(*document, held, handle, to, drag.snap, gesture, edits);
+		break;
+	}
 	default: {
 		double to[3];
 		if (!mission_ground_point(context, camera_, x, y, held.z, to)) {
 			error = "The point is not over the ground.";
 			return false;
 		}
-		const bool east = handle == MissionHandle::XMin || handle == MissionHandle::XMax;
-		planned = mission_area_edge_edits(*document, held, handle, to[east ? 0 : 1], drag.snap, gesture, edits);
+		planned = mission_area_handle_edits(*document, held, handle, to, drag.snap, gesture, edits);
 		break;
 	}
 	}
@@ -1052,7 +1086,12 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 	}
 	std::vector<Edit> edits;
 	if (path) {
-		if (!mission_stop_edits(mission, path, item, facts.pool, at, yaw, edits, error)) return false;
+		// S24: a drop on the path's line puts the stop between the two it lies between.
+		const size_t position = mission_stop_place(scene_, path, drop.x, drop.y, kMissionPickSlop,
+				[&](const MissionEntityMark &marker, float &px, float &py) {
+					return camera_.project(marker.at, context.width, context.height, px, py);
+				});
+		if (!mission_stop_edits(mission, path, item, facts.pool, at, yaw, edits, error, position)) return false;
 		out.request(request::edit_record(document->path(), std::move(edits)));
 		return true;
 	}
@@ -1163,6 +1202,16 @@ bool MissionViewport::play_from_here_(const ViewportContext &context, const View
 bool MissionViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
 	if (command.name == "play_from_here") return play_from_here_(context, command, out, error);
+	if (command.name == "new_event") {
+		// S24: a recipe's event made over the record named (the right-click menu's New event).
+		const Document *document = planned_(context, error);
+		if (!document) return false;
+		if (command.has_at || !command.by.empty() || !command.item.empty() || !command.handle.empty() || !command.field.empty()) {
+			error = "new_event takes ids (the record) and value (the recipe), nothing else.";
+			return false;
+		}
+		return mission_new_event_command(context, *document, command.ids, command.value, out, error);
+	}
 	if (command.name == "shoot") return shoot_(context, command, out, error);
 	if (command.name != "duplicate" && command.name != "paste") return ViewportModel::command_of(context, command, out, error);
 	const Document *document = planned_(context, error);
@@ -1237,10 +1286,11 @@ bool MissionViewport::command_of(const ViewportContext &context, const ViewportC
 
 bool MissionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error) const {
-	if (name != "frame" && name != "top" && name != "ground" && name != "select_same" && name != "duplicate" &&
-			name != "paste" && name != "play_from_here" && name != "clear_shots") {
+	if (name != "frame" && name != "top" && name != "ground" && name != "select_same" && name != "select_group" &&
+			name != "pick" && name != "duplicate" && name != "paste" && name != "play_from_here" && name != "clear_shots") {
 		error = "Unknown mission command \"" + name +
-				"\" (frame, top, ground, select_same, duplicate, paste, play_from_here, clear_shots; shoot takes at).";
+				"\" (frame, top, ground, select_same, select_group, pick, duplicate, paste, play_from_here, clear_shots; "
+				"shoot takes at).";
 		return false;
 	}
 	if (reason_ != MissionViewStatus::Ready) {
@@ -1257,6 +1307,24 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 		whole.name = name;
 		whole.ids = ids;
 		return command_of(context, whole, out, error);
+	}
+	if (name == "pick") {
+		// S24: the waiting pick given the named record, as a click on its mark gives it.
+		const Document *document = planned_(context, error);
+		if (!document) return false;
+		return mission_pick_command(context, *document, ids, out, error);
+	}
+	if (name == "select_group") {
+		// S24: every entity of the named (else the selected) records' groups, the primary kept.
+		const Document *document = planned_(context, error);
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document);
+		if (!mission) return false;
+		const Selection *selection = selection_of(context.input, *document);
+		std::vector<NodeAddress> of;
+		for (const NodeId id : ids) of.push_back(document->address_of(id));
+		if (ids.empty() && selection) of = selection->records;
+		const NodeAddress primary = !ids.empty() ? of.front() : selection ? selection->primary : NodeAddress();
+		return mission_select_group(*mission, of, primary, out, error);
 	}
 	if (name == "select_same") {
 		// Every entity of the named (else the selected) entities' items, the primary kept.
@@ -1334,17 +1402,19 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 		out.request(request::set_viewport(path(), mission_camera_change(camera)));
 		return true;
 	}
-	// The first record named (one that is no entity or area refused), else the selection, else
-	// everything.
+	// The records named (one that is no entity or area refused; S24: every one of them, what a revealed event
+	// names), else the selection, else everything.
 	const std::vector<MissionMark> shown = marks(context.width, context.height, context.device);
 	std::vector<int> of;
 	if (!ids.empty()) {
-		const int index = mark_of_(shown, ids.front());
-		if (index < 0) {
-			error = "Record " + std::to_string(ids.front()) + " is no entity or area the viewport shows.";
-			return false;
+		for (const NodeId id : ids) {
+			const int index = mark_of_(shown, id);
+			if (index < 0) {
+				error = "Record " + std::to_string(id) + " is no entity or area the viewport shows.";
+				return false;
+			}
+			of.push_back(index);
 		}
-		of.push_back(index);
 	} else if (const Document *document = document_of(context.input)) {
 		if (const Selection *selection = selection_of(context.input, *document))
 			for (const NodeAddress &record : selection->records)

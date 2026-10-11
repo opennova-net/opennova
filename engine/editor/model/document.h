@@ -605,6 +605,29 @@ protected:
 	// refuses: a type whose records a Record reference names renumbers them.
 	virtual bool renumber_references(const StagedRows &rows, const RecordShift &shift,
 	                                 std::vector<Edit> &sites, std::string &error) const;
+	// The lists of `row` whose records other records name by their place in the list rather than by
+	// a Record reference (a mission path's stops, ADR 0046 S24): each list's identities in order;
+	// none by default, which a type of no such list pays nothing for. An edit of the batch that adds,
+	// removes or moves records of the row compares them (renumber_places).
+	virtual std::vector<std::vector<NodeId>> place_lists(const Node &row) const {
+		(void)row;
+		return {};
+	}
+	// A list place_lists names of the row `row` came out of an edit of the batch in another order:
+	// `shift` says where each of its records stands now (its reference None, its kind 0). The type
+	// adds to `sites` the Sets that keep each reference by place naming the record it named, which
+	// the base applies in the same step right after the edit, as renumber_references' are. False,
+	// with `error`, refuses the edit (document.collection). The default adds none.
+	virtual bool renumber_places(const StagedRows &rows, NodeId row, size_t list, const RecordShift &shift,
+	                             std::vector<Edit> &sites, std::string &error) const {
+		(void)rows;
+		(void)row;
+		(void)list;
+		(void)shift;
+		(void)sites;
+		(void)error;
+		return true;
+	}
 
 	NodeId allocate_id() { return next_id_++; }
 
@@ -651,6 +674,10 @@ private:
 	bool renumber(const std::vector<TargetedCollection> &targets,
 	              const std::vector<std::vector<NodeId>> &before, StagedRows &staged,
 	              Diagnostic &error);
+	// After an edit of the row `row`, whose place lists were `before` (place_lists'): each list
+	// that came out in another order renumbered, the type's Sets (renumber_places) staged.
+	bool renumber_place_lists(NodeId row, const std::vector<std::vector<NodeId>> &before, StagedRows &staged,
+	                          Diagnostic &error);
 	// The rows and the file-wide state as they stand become the saved baseline.
 	void set_baseline();
 	// The committed row, or the baseline's, of identity `id` (null when that side has none).

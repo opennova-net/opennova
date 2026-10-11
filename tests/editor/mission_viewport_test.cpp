@@ -36,6 +36,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_canvas.h>
+#include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_palette.h>
@@ -52,7 +53,11 @@
 #include <formats/til/til_io.h>
 #include <formats/trn/charmap_legend.h>
 #include <runtime/audio/sound_profile.h>
+#include <base/gameprofile/game_type.h>
+#include <editor/documents/mission_links.h>
+#include <formats/mission/mission_params.h>
 #include <runtime/world/ammo_table.h>
+#include <runtime/world/spawn_select.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_kinds.h>
@@ -467,6 +472,266 @@ static int test_hit_and_box() {
 		TEST_EXPECT(now[size_t(boxed[i - 1].index)].depth <= now[size_t(boxed[i].index)].depth);
 	}
 	std::printf("test_hit_and_box passed\n");
+	return 0;
+}
+
+// S24: the 3D canvas over the selected logic record: its links placed in the scene (event 1 watches the walker
+// in zone 20; a trigger of it selected, the event's links with that trigger's own bold), the badges by mark
+// (the walker's and zone 20's: one event each), drawn by the overlay; nothing selected or a mark selected,
+// no links; the hover over the walker's glyph names the event.
+static int test_links() {
+	Rig rig("opennova_editor_mission_viewport_links");
+	TEST_EXPECT(rig.open());
+	const MissionViewport *viewport = rig.viewport();
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress event = first_of(mission, MissionKind::Event);
+	const NodeAddress walker = first_of(mission, MissionKind::Organic);
+	const NodeAddress zone = first_of(mission, MissionKind::Area);
+	std::unique_ptr<CanvasHalf> half = viewport->make_canvas();
+	auto *canvas = static_cast<MissionCanvas *>(half.get());
+	editor_test::Gathered gathered;
+	canvas->follow(*viewport, rig.context(), gathered);
+	TEST_EXPECT(!canvas->links().any() && canvas->frame().logic.row == 0);
+	// The badges: one event names the walker, one zone 20 (by mark index); the guard none (event 2 names its group).
+	const std::vector<size_t> &badges = canvas->badges();
+	const int walker_mark = viewport->scene().mark_index(walker.row), zone_mark = viewport->scene().mark_index(zone.row);
+	TEST_EXPECT(badges.size() == canvas->frame().marks.size() && walker_mark >= 0 && zone_mark >= 0);
+	if (walker_mark < 0 || zone_mark < 0 || badges.size() != canvas->frame().marks.size()) return 1;
+	TEST_EXPECT(badges[size_t(walker_mark)] == 1 && badges[size_t(zone_mark)] == 1);
+	size_t named = 0;
+	for (const size_t count : badges) named += count ? 1 : 0;
+	TEST_EXPECT(named == 2);
+	// The event selected: the walker and zone 20 watched, nothing acted on (event 2 has no place).
+	rig.session.handle(request::select_record(kMission, event));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	TEST_EXPECT(canvas->frame().logic == event && canvas->links().spots.size() == 2 && canvas->links().lines.empty());
+	for (const MissionLinkSpot &spot : canvas->links().spots) TEST_EXPECT(spot.watched && spot.selected);
+	TEST_EXPECT(canvas->links().spots[0].record == walker && canvas->links().spots[1].record == zone &&
+	            canvas->links().spots[1].area);
+	CanvasInput in;
+	in.width = rig.context().width;
+	in.height = rig.context().height;
+	OverlayList list = canvas->shapes(rig.context(), in);
+	TEST_EXPECT(std::count_if(list.shapes.begin(), list.shapes.end(), [](const OverlayShape &shape) {
+		return shape.kind == OverlayKind::Circle && shape.rgb == kMissionWatchedRgb;
+	}) == 2);
+	// Its trigger selected: the same links, the trigger's own.
+	NodeAddress trigger;
+	for (const Document::Collection &list_of : mission.collections_of(event))
+		if (list_of.spec.kind == node_kind(MissionKind::Trigger)) trigger = { event.row, list_of.spec.kind, list_of.ids[0] };
+	rig.session.handle(request::select_record(kMission, trigger));
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	TEST_EXPECT(canvas->frame().logic == trigger && canvas->links().spots.size() == 2 && canvas->links().spots[0].selected);
+	// The hover over the walker's glyph, the camera framed on it: the event that names it, as its badge counts.
+	gathered.requests.clear();
+	std::string error;
+	TEST_EXPECT(viewport->command(rig.context(), "frame", { walker.row }, gathered, error) &&
+	            editor_test::serve(rig.session, gathered.requests));
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	const MissionMark &glyph = canvas->frame().marks[size_t(walker_mark)];
+	in.hovered = true;
+	in.mouse = CanvasPoint{ glyph.x, glyph.y };
+	const std::string tip = canvas->hover_tip(rig.context(), in);
+	TEST_EXPECT(glyph.shown && tip.find("Named by 1 event:") == 0 && tip.find("Event 1: When ") != std::string::npos);
+	// S24 B5: select_group, the walker's group's members (the walker alone), the primary last.
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->command(rig.context(), "select_group", { walker.row }, gathered, error) &&
+	            gathered.requests.size() == 1 && gathered.requests[0].kind == EditorRequestKind::SelectRecord);
+	gathered.requests.clear();
+	TEST_EXPECT(!viewport->command(rig.context(), "select_group", { zone.row }, gathered, error) &&
+	            error.find("group") != std::string::npos);
+	// S24 B4: new_event over the wire: the recipe made over the area (the player inside zone 20), one batch, then the
+	// Logic pane shown; an unknown recipe and a record the recipe is not made over refused.
+	{
+		ViewportCommand made;
+		made.name = "new_event";
+		made.kind = ViewportKind::Mission;
+		made.ids = { zone.row };
+		made.value = "player_in_area";
+		gathered.requests.clear();
+		TEST_EXPECT(viewport->command_of(rig.context(), made, gathered, error) && gathered.requests.size() == 2 &&
+		            gathered.requests[0].kind == EditorRequestKind::EditRecord &&
+		            gathered.requests[1].kind == EditorRequestKind::SetWorkspace);
+		made.value = "no_such_recipe";
+		TEST_EXPECT(!viewport->command_of(rig.context(), made, gathered, error) && error.find("Unknown recipe") != std::string::npos);
+		made.value = "destroyed";
+		TEST_EXPECT(!viewport->command_of(rig.context(), made, gathered, error) && error.find("made over") != std::string::npos);
+		// Over the walker, a group's recipe takes its group.
+		made.ids = { walker.row };
+		made.value = "group_wiped_out";
+		gathered.requests.clear();
+		TEST_EXPECT(viewport->command_of(rig.context(), made, gathered, error) && gathered.requests.size() == 2);
+	}
+	// S24: a distance about the player (Single sub 43, param1 the player's SSN): with no start marker in the mission
+	// no ring, and the other entity's hover saying the player's place is not known; a start marker of the type the
+	// single player deploys at placed, a ring about it.
+	{
+		const int32_t walker_ssn = static_cast<const EntityRow &>(*mission.row(walker.row)).native.id;
+		const auto set = [&](const char *field, int64_t value) {
+			Edit edit;
+			edit.address = trigger;
+			edit.field = field;
+			edit.value = value;
+			return edit;
+		};
+		rig.session.handle(request::edit_record(kMission, { set("main_type", int64_t(bms::TriggerMainType::Single)),
+				set("sub_type", 43), set("param1", mission::kPlayerSsn), set("param2", walker_ssn), set("param3", 20) }));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.session.handle(request::select_record(kMission, trigger));
+		rig.pump();
+		canvas->follow(*viewport, rig.context(), gathered);
+		TEST_EXPECT(mission_player_starts(mission).empty() && canvas->links().rings.empty() &&
+		            canvas->links().note(walker.row).find("not known in the editor") != std::string::npos);
+		const std::string noted = canvas->hover_tip(rig.context(), in);
+		TEST_EXPECT(noted.find("the player's place is not known") != std::string::npos);
+		const opennova::world::StartMarkerTypes starts = opennova::world::start_marker_types(opennova::game_type::for_mission_attribs(uint32_t(
+				mission.mission_row()->native.header.attrib_flags)), 1);
+		Edit start;
+		start.operation = EditOperation::Add;
+		start.address = NodeAddress{ 0, node_kind(MissionKind::Marker), 0 };
+		start.field = "item";
+		start.value = int64_t(mission::kItemIdOffset + starts.primary);
+		rig.session.handle(request::edit_record(kMission, start));
+		TEST_EXPECT(rig.session.outcome().done());
+		rig.session.handle(request::select_record(kMission, trigger));
+		rig.pump();
+		canvas->follow(*viewport, rig.context(), gathered);
+		TEST_EXPECT(mission_player_starts(mission).size() == 1 && canvas->links().rings.size() == 1 &&
+		            canvas->links().notes.empty());
+		rig.session.handle(request::undo(kMission));
+		rig.session.handle(request::undo(kMission));
+		rig.pump();
+	}
+	// A mark selected: no links.
+	rig.session.handle(request::select_record(kMission, walker));
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	TEST_EXPECT(!canvas->links().any() && canvas->frame().logic.row == 0);
+	std::printf("test_links passed\n");
+	return 0;
+}
+
+// S24 B6: an area's corner, bottom and top handles over the wire's drag: a corner moves two bounds, the bottom and the
+// top only where the area's flags bound z (else refused); the handles' tokens in the refusal's list.
+static int test_area_handles() {
+	Rig rig("opennova_editor_mission_viewport_area_handles");
+	TEST_EXPECT(rig.open());
+	const MissionViewport *viewport = rig.viewport();
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress zone = first_of(mission, MissionKind::Area);
+	float x = 0.0f, y = 0.0f;
+	std::string error;
+	TEST_EXPECT(viewport->handle_point(rig.context(), zone.row, "x_min_y_min", x, y, error));
+	TEST_EXPECT(!viewport->handle_point(rig.context(), zone.row, "z_max", x, y, error) && error.find("z_min and z_max") != std::string::npos);
+	TEST_EXPECT(!viewport->handle_point(rig.context(), zone.row, "x_min_y", x, y, error) && error.find("x_min_y_max") != std::string::npos);
+	// The south-west corner dragged 20 px right and 10 px up: x_min and y_min both move, one batch.
+	ViewportDrag drag;
+	drag.id = zone.row;
+	drag.handle = "x_min_y_min";
+	drag.by = true;
+	drag.x = 20.0f;
+	drag.y = -10.0f;
+	drag.end = true;
+	editor_test::Gathered gathered;
+	TEST_EXPECT(viewport->drag(rig.context(), drag, gathered, error) && !gathered.requests.empty() &&
+			gathered.requests[0].kind == EditorRequestKind::EditRecord && gathered.requests[0].edits.size() == 2 &&
+			gathered.requests[0].edits[0].field == "x_min" && gathered.requests[0].edits[1].field == "y_min");
+	// Its flags bound z: the top dragged up 30 px raises z_max.
+	rig.session.handle(request::edit_record(kMission, set_of(zone, "flags", int64_t(opennova::bms::AreaTrigger::kFlagConstrainZ))));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	TEST_EXPECT(viewport->scene().area(zone.row) && viewport->scene().area(zone.row)->constrains_z);
+	drag.handle = "z_max";
+	drag.x = 0.0f;
+	drag.y = -30.0f;
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->drag(rig.context(), drag, gathered, error) && !gathered.requests.empty() &&
+			gathered.requests[0].edits.size() == 1 && gathered.requests[0].edits[0].field == "z_max");
+	const MissionAreaMark *area = viewport->scene().area(zone.row);
+	TEST_EXPECT(area && std::get<double>(gathered.requests[0].edits[0].value) > area->max[2]);
+	std::printf("test_area_handles passed\n");
+	return 0;
+}
+
+// S24 B2: pick mode in the 3D view: the frame carries the pick (each entity a candidate for an entity slot, no area),
+// only a candidate hovers, the hint says what to click; a click on a candidate's glyph sets the slot and ends the
+// pick (the canvas's release), a click on nothing ends it, Esc ends it.
+static int test_pick() {
+	Rig rig("opennova_editor_mission_viewport_pick");
+	TEST_EXPECT(rig.open());
+	const MissionViewport *viewport = rig.viewport();
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress event = first_of(mission, MissionKind::Event);
+	NodeAddress trigger;
+	for (const Document::Collection &list : mission.collections_of(event))
+		if (list.spec.kind == node_kind(MissionKind::Trigger)) trigger = { event.row, list.spec.kind, list.ids[0] };
+	rig.session.handle(request::set_workspace("{\"document\": {\"path\": \"" + rig.path + "\", \"pick\": {\"record\": " +
+			std::to_string(trigger.child) + ", \"slot\": 0}}}"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	std::unique_ptr<CanvasHalf> half = viewport->make_canvas();
+	auto *canvas = static_cast<MissionCanvas *>(half.get());
+	editor_test::Gathered gathered;
+	canvas->follow(*viewport, rig.context(), gathered);
+	const MissionCanvasFrame &frame = canvas->frame();
+	const ViewportContext context = rig.context();
+	const auto canvas_at = [&](float x, float y) {
+		CanvasInput in;
+		in.width = context.width;
+		in.height = context.height;
+		in.mouse = CanvasPoint{ x, y };
+		in.screen = CanvasPoint{ x, y };
+		in.hovered = true;
+		return in;
+	};
+	TEST_EXPECT(frame.pick.active() && frame.pick.takes.kind == opennova::mission::ParamKind::Entity);
+	size_t candidates = 0;
+	for (size_t i = 0; i < frame.marks.size(); ++i) {
+		candidates += frame.pick.fills_mark(int(i)) ? 1 : 0;
+		TEST_EXPECT(frame.pick.fills_mark(int(i)) == (frame.marks[i].area < 0));
+	}
+	TEST_EXPECT(candidates == viewport->scene().entities().size());
+	// A shown entity's glyph clicked: its SSN set, the pick ended.
+	int target = -1;
+	for (size_t i = 0; i < frame.marks.size() && target < 0; ++i)
+		if (frame.marks[i].shown && frame.marks[i].entity >= 0 &&
+				mission_canvas_under(frame, canvas_at(frame.marks[i].x, frame.marks[i].y), MissionPick::Click) == int(i))
+			target = int(i);
+	TEST_EXPECT(target >= 0);
+	if (target < 0) return 1;
+	CanvasInput in = canvas_at(frame.marks[size_t(target)].x, frame.marks[size_t(target)].y);
+	TEST_EXPECT(canvas->hint(rig.context(), in) == "Click an entity for Entity (Esc cancels).");
+	const NodeAddress picked = frame.marks[size_t(target)].record;
+	in.pressed = in.down = true;
+	canvas->input(rig.context(), in, gathered);
+	in.pressed = in.down = false;
+	canvas->input(rig.context(), in, gathered);
+	std::vector<EditorRequest> raised;
+	for (const EditorRequest &request : gathered.requests)
+		if (request.kind == EditorRequestKind::EditRecord || request.kind == EditorRequestKind::SetWorkspace) raised.push_back(request);
+	TEST_EXPECT(raised.size() == 2 && raised[0].kind == EditorRequestKind::EditRecord && raised[0].edits.size() == 1 &&
+	            raised[0].edits[0].field == "param1" && raised[0].edits[0].address == trigger);
+	TEST_EXPECT(editor_test::serve(rig.session, raised));
+	rig.pump();
+	Value ssn, held;
+	TEST_EXPECT(rig.document()->get(trigger, "param1", ssn) && rig.document()->get(picked, "id", held) && ssn == held);
+	TEST_EXPECT(!rig.session.view().workspace.document(rig.path).pick.active());
+	// Again; Esc ends it.
+	rig.session.handle(request::set_workspace("{\"document\": {\"path\": \"" + rig.path + "\", \"pick\": {\"record\": " +
+			std::to_string(trigger.child) + ", \"slot\": 1}}}"));
+	rig.pump();
+	canvas->follow(*viewport, rig.context(), gathered);
+	gathered.requests.clear();
+	CanvasInput escape = canvas_at(1.0f, 1.0f);
+	escape.keyboard.focused = true;
+	escape.keyboard.escape = true;
+	canvas->input(rig.context(), escape, gathered);
+	TEST_EXPECT(gathered.requests.size() == 1 && gathered.requests[0].kind == EditorRequestKind::SetWorkspace);
+	std::printf("test_pick passed\n");
 	return 0;
 }
 
@@ -1181,6 +1446,48 @@ static int test_placing() {
 	rig.session.handle(request::undo(kMission));
 	TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
 	rig.pump();
+	// S24 B6: a drop on the path's line between its stops 0 and 1 puts the new stop between them (its place 1), the
+	// marker added after the last; a stop selected and deleted takes its marker (mission_view_removals).
+	{
+		const MissionPathMark *one = nullptr;
+		for (const MissionPathMark &each : viewport->scene().paths())
+			if (each.index == 1) one = &each;
+		const MissionEntityMark *a = one ? viewport->scene().entity(one->stops[0]) : nullptr;
+		const MissionEntityMark *b = one ? viewport->scene().entity(one->stops[1]) : nullptr;
+		float ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
+		TEST_EXPECT(a && b && viewport->camera().project(a->at, context.width, context.height, ax, ay) &&
+				viewport->camera().project(b->at, context.width, context.height, bx, by));
+		gathered.requests.clear();
+		drop.name = "1";
+		drop.x = (ax + bx) * 0.5f;
+		drop.y = (ay + by) * 0.5f;
+		TEST_EXPECT(viewport->drop(context, drop, gathered, error) && gathered.requests.size() == 1 &&
+				gathered.requests[0].edits.back().position == 1);
+		TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
+		rig.pump();
+		const auto &inserted = static_cast<const MissionDocument &>(*rig.document());
+		one = nullptr;
+		for (const MissionPathMark &each : viewport->scene().paths())
+			if (each.index == 1) one = &each;
+		TEST_EXPECT(one && one->stops.size() == 5 && one->stops[1] == inserted.rows_of(MissionKind::Marker).back()->id);
+		// The stop selected and deleted: its marker removed (and with it the stop).
+		const Node *path_row = nullptr;
+		for (const Node *each : inserted.rows_of(MissionKind::WaypointPath))
+			if (static_cast<const PathRow &>(*each).native.number == 1) path_row = each;
+		NodeAddress stop;
+		if (path_row)
+			for (const Document::Collection &list : inserted.collections_of(NodeAddress{ path_row->id, path_row->kind, 0 }))
+				if (list.spec.kind == node_kind(MissionKind::Stop) && list.ids.size() > 1)
+					stop = NodeAddress{ path_row->id, list.spec.kind, list.ids[1] };
+		const NodeAddress made{ inserted.rows_of(MissionKind::Marker).back()->id, node_kind(MissionKind::Marker), 0 };
+		const std::vector<NodeAddress> removals = mission_view_removals(inserted, { stop, made });
+		TEST_EXPECT(stop.child != 0 && removals.size() == 1 && removals[0] == made);
+		rig.session.handle(request::undo(kMission));
+		TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
+		rig.pump();
+		drop.x = float(context.width) * 0.5f;
+		drop.y = float(context.height) * 0.5f;
+	}
 	// Refused: a command path.
 	drop.name = "124";
 	TEST_EXPECT(!viewport->drop(context, drop, gathered, error) && error.find("command") != std::string::npos);
@@ -2117,6 +2424,9 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_camera_frame() == 0);
 	TEST_EXPECT(test_fog_reach() == 0);
 	TEST_EXPECT(test_hit_and_box() == 0);
+	TEST_EXPECT(test_links() == 0);
+	TEST_EXPECT(test_area_handles() == 0);
+	TEST_EXPECT(test_pick() == 0);
 	TEST_EXPECT(test_sphere_picking() == 0);
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_drop() == 0);

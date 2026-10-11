@@ -43,6 +43,9 @@ public:
 	virtual std::string path(int64_t number) const;
 	// An event by its index in the event table (0 the first).
 	virtual std::string event(int64_t index) const;
+	// A mission variable by its index, as the mission's script names it ("V12"; past V255, which a script's V#
+	// cannot reach, "variable 300"; S24 Names: a name the mission gives it overrides).
+	virtual std::string variable(int64_t index) const;
 	// A text key's string in the shown language, "" where none is known (the base knows none).
 	virtual std::string text(const std::string &section, const std::string &key) const;
 	// Whether a zone id resolves at the mission's start: an area has it and its box is not flat (the
@@ -54,14 +57,18 @@ public:
 // The words a mission document gives what its records name: an entity by the record holding its SSN
 // (the first in the lookups' pool order, as the game finds it: MissionDocument::entity_holder), titled
 // as the document titles it (its kind and its SSN where the title is the bare number), an area by its
-// record, an event by its place; a value no record holds says so. It reads no string table: text() is
-// the base's. Made for one state of the document.
+// record, an event by its place, a group and a variable by the name the mission gives it (S24 Names: a
+// group's in its record's dropped bytes, a variable's in the tagged layer table), else the base's words;
+// a value no record holds says so. It reads no string table: text() is the base's. Made for one state of
+// the document.
 class DocumentMissionNames : public MissionNames {
 public:
 	explicit DocumentMissionNames(const MissionDocument &document) : document_(document) {}
 	std::string entity(int64_t ssn) const override;
 	std::string zone(int64_t id) const override;
+	std::string group(int64_t group) const override;
 	std::string event(int64_t index) const override;
+	std::string variable(int64_t index) const override;
 	bool zone_resolves(int64_t id) const override;
 
 private:
@@ -76,6 +83,19 @@ enum class LogicJoin : uint8_t { And, Or, Xor };
 LogicJoin trigger_join(const bms::Trigger &trigger);
 // "and", "or", "or else" (exclusive: one of the two, not both).
 const char *logic_join_words(LogicJoin join);
+
+// A trigger's or an action's words in runs (S24, the board's chips): each run its text and what it is, a
+// parameter's words (`slot` 0 to 3, its param1 to param4: the value a chip there picks), the type's own words
+// (kLogicTypeSlot: what a retype changes), or a note on what the game makes of it (-1). Joined
+// (logic_runs_text) they are trigger_words' and action_words': the words are made from them.
+inline constexpr int kLogicTypeSlot = 4;
+struct LogicRun {
+	std::string text;
+	int slot = -1;
+};
+std::vector<LogicRun> trigger_runs(const bms::Trigger &trigger, const MissionNames &names);
+std::vector<LogicRun> action_runs(const bms::Action &action, const MissionNames &names, const bms::Header *header);
+std::string logic_runs_text(const std::vector<LogicRun> &runs);
 
 // One trigger in words, its negation in them ("Hostage #10034 is not destroyed"). Whether an SSN slot keys
 // a relation record the game never writes for it is the engine's (mission::trigger_ssn_unrecorded).
@@ -115,6 +135,12 @@ double logic_units_seconds(int64_t units);
 // What a count of steps comes to in the game: "614.4 s", or past 512 steps "about 1.0 s (past 512 steps
 // the game's countdown wraps)".
 std::string logic_steps_words(int64_t steps);
+// What a wait comes to in the game, without the wrap's aside: its steps' seconds ("5.1 s"), past 512 steps
+// "about 1.0 s" (the countdown wraps and ends on the pass after it is armed).
+std::string logic_wait_words(int64_t steps);
+// When a repeating event is checked again after its triggers held, as its sentence says it: its repeat's steps
+// and the pass after ("about 6.1 s" for 5 steps), past 512 steps "about 2.0 s".
+std::string logic_repeat_words(int64_t steps);
 
 // A type of trigger or of action as "Add trigger" and "Add action" offer it: its type and sub-type (a
 // trigger's main type and sub-type, an action's type and sub-type), what it is called by itself ("Entity
@@ -130,6 +156,10 @@ struct LogicType {
 // Every trigger type the evaluator has a case for, and every action type the dispatcher has one for
 // (and each AI command of the four AI actions), in their groups' order.
 const std::vector<LogicType> &logic_types(bool actions);
+// The types the shipped missions use most, the most first (S24: what the type picker offers as Common): the
+// eight trigger types and the eight action types the install's 115 missions hold the most records of (measured
+// over their 3,858 triggers and 4,971 actions; the editor_mission_logic ctest's retail leg pins the ranking).
+const std::vector<const LogicType *> &logic_common_types(bool actions);
 // The row of a trigger's or an action's type and sub-type (null: none: an unknown type).
 const LogicType *logic_type(bool action, int32_t type, int32_t sub);
 // An action type's own title whatever its sub-type ("Change group AI"); null for a type the dispatcher has
