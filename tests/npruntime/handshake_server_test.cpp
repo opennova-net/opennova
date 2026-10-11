@@ -1889,6 +1889,15 @@ bool run_expansion_join_reasons_and_tlv_order() {
 	if (!drive(retail_join_request("wrong", "wrong"), 47)) return false;
 	if (!drive(retail_join_request("jox01", "0"), 48)) return false;
 	if (!drive(retail_join_request("jox01", "55"), 0)) return false;
+	// D-NET-435: EXP copies from its value to the first NUL whatever the field's length, so a
+	// "jox01" without its NUL runs on into the next field's name: "jox01VERSIONCRCSTRING" fails
+	// the expansion compare with 47 though the VERSIONCRCSTRING that follows matches.
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - Napi_CopyString into 32 bytes
+	//  @0x512BFF; Server_ValidatePlayerJoinRequest @0x512100 - the compare @0x5122F0]
+	std::vector<uint8_t> run_on = {'E', 'X', 'P', 0, 5, 0, 'j', 'o', 'x', '0', '1'};
+	const auto crc = retail_join_request("", "55");
+	run_on.insert(run_on.end(), crc.begin(), crc.end());
+	if (!drive(std::move(run_on), 47)) return false;
 	std::vector<uint8_t> ordered = retail_join_request("wrong", "1");
 	const auto last = retail_join_request("jox01", "55suffix");
 	ordered.insert(ordered.end(), last.begin(), last.end());

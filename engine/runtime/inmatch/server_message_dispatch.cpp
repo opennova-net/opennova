@@ -244,19 +244,21 @@ uint32_t validate_join_request(
 	std::size_t pos = 0;
 	std::string expansion;
 	std::string version_crc;
-	// The TLV walk accepts unknown fields, uses the last matching value, and
-	// stops at its first short field or an empty name. String copies stop at
-	// the first NUL; tag names compare through Napi_StrCaseEqual @0x616e70.
-	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
+	// The TLV walk accepts unknown fields, uses the last matching value, and stops at its first
+	// short field or an empty name; tag names compare through Napi_StrCaseEqual @0x616e70. Each
+	// string copies from its value to the first NUL whatever its length (load_value_string).
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0 - EXP into 32 bytes @0x512BFF,
+	//  VERSIONCRCSTRING into 512 @0x512C31]
 	while (pos < payload.size()) {
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(payload.data(), payload.size(), pos, field);
 		if (next == kFlatTlvEnd || field.name.empty()) break;
 		pos = next;
-		const std::string value(field.value,
-				std::find(field.value, field.value + field.size, uint8_t{0}));
-		if (strutil::iequals(field.name, "EXP")) expansion = value.substr(0, 31);
-		else if (strutil::iequals(field.name, "VERSIONCRCSTRING")) version_crc = value.substr(0, 511);
+		const uint8_t *end = payload.data() + payload.size();
+		if (strutil::iequals(field.name, "EXP"))
+			expansion = load_value_string(field.value, end, 32);
+		else if (strutil::iequals(field.name, "VERSIONCRCSTRING"))
+			version_crc = load_value_string(field.value, end, 512);
 	}
 	// [orig: Server_ValidatePlayerJoinRequest @0x5122fc..0x512349]
 	if (expansion != config.expansion) return 47;

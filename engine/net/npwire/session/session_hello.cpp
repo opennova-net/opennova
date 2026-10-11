@@ -47,20 +47,6 @@ void load_value_guid(const uint8_t *value, const uint8_t *end, std::array<uint8_
 	load_value_bytes(value, end, out.data(), out.size());
 }
 
-// A string field: the 0x41 / 0x42 handlers copy from the value pointer up to
-// the first NUL and at most `buffer` less one characters, whatever the field's
-// length, so an inner NUL ends the string and a value without its NUL runs on
-// into the bytes that follow it (the next field's name, up to that name's NUL).
-// Past the datagram's `end` ours reads zero, which ends the copy (D-NET-410).
-// [orig: Napi_CopyString @0x617E10 - the NUL test @0x617E32, the `buffer - 1`
-//  bound @0x617E41..0x617E44]
-std::string load_value_string(const uint8_t *value, const uint8_t *end, size_t buffer) {
-	std::string out;
-	for (const uint8_t *p = value; p < end && *p != 0 && out.size() + 1 < buffer; ++p)
-		out.push_back(static_cast<char>(*p));
-	return out;
-}
-
 // The handlers' string buffers: NVS 128 bytes, PW 512, every other 64.
 // [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - `push 80h` @0x621562;
 //  NapiNPProtocol_HandleClientJoin @0x62B750 - `push 80h` @0x62B925, `push 200h`
