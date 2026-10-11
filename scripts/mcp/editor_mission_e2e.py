@@ -11,6 +11,7 @@ ended (the editor with its tree) when it does not: only the pids this run record
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations"
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations" --mission ASH_I1gA.bms --windowed
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations" --whole-install
+    python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations" --mission 04TR.bms --live
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations Combined Arms" \
         --builds-on jox01 --expansion jxm --mission 07TR.bms
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations Combined Arms" \
@@ -32,6 +33,14 @@ game wrote (/FRISK), which must show the build's archives read (an expansion's o
 game's window starts behind the others (Play's `behind`), so the run takes no focus; a strict run directory
 with no game.cfg of its own opens the game's device dialog first, which waits behind the others until the
 game is stopped.
+
+With --live (ADR 0046 S24 Live) an event is made before the build as the Event board makes one (New event over
+the mission's first area, the player's recipe; an action setting a mission variable; a wait of 5 steps), and once
+the game has loaded the mission the editor's Logic pane is shown, the editor's live op reports the game, the player
+is deployed (deploy_pick) and teleported into the area (teleport_local_player) and the event is seen active, then
+fired about 5.1 s later, the editor's report and the game's own mission_logic_snapshot agreeing. A single-player
+mission with a loading image holds its reveal on the start-mission splash until a key or a click in the game's
+window, which no MCP verb gives yet: the run says so and waits for whoever runs it to dismiss it.
 
 Local only: it needs a game install and starts the game, so no CI job runs it and it reads
 no environment variable. Standard library only; the clients are editor_mcp.py's and
@@ -225,6 +234,174 @@ def launch_namespace(args: argparse.Namespace, pid_file: Path) -> argparse.Names
     return launch
 
 
+def mission_rows(client: GameMcp, path: str, kind_label: str) -> list[dict]:
+    """The document's rows whose kind reads `kind_label` (the document query's kind_label: "Area trigger",
+    "Event"), in order, each {id, ...}."""
+    rows: list[dict] = []
+    offset = 0
+    while True:
+        page = query(client, "document", path=path, offset=offset, limit=200)
+        for row in page.get("rows", []):
+            if row.get("kind_label") == kind_label and "id" in row:
+                rows.append(row)
+        next_offset = page.get("next_offset")
+        if not page.get("rows") or next_offset is None or next_offset <= offset:
+            return rows
+        offset = next_offset
+
+
+def add_live_event(client: GameMcp, path: str, variable: int) -> tuple[int, tuple[float, float, float]]:
+    """The live leg's event (S24 Live), made as the board makes one: New event over the mission's first area that
+    is not flat (the player's recipe, "When the player is inside this area"), then an action setting V<variable>
+    to 1, then its wait set to 5 steps (64 ticks each: about 5.1 s). Its id, and a point inside the area to
+    teleport the player to (the box's middle, mission metres)."""
+    area_id = 0
+    centre = (0.0, 0.0, 0.0)
+    for row in mission_rows(client, path, "Area trigger"):
+        box = fields_of(query(client, "record", path=path, id=int(row["id"])))
+        x0, x1 = float(box.get("x_min", 0)), float(box.get("x_max", 0))
+        y0, y1 = float(box.get("y_min", 0)), float(box.get("y_max", 0))
+        z0, z1 = float(box.get("z_min", 0)), float(box.get("z_max", 0))
+        if x1 - x0 >= 2.0 and y1 - y0 >= 2.0:
+            area_id = int(row["id"])
+            centre = ((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2)
+            say(f"   area {area_id}: x {x0:g}..{x1:g}, y {y0:g}..{y1:g}, z {z0:g}..{z1:g}")
+            break
+    expect(area_id != 0, f"{path} has no area trigger to stand in")
+    before = {int(row["id"]) for row in mission_rows(client, path, "Event")}
+    request(client, "edit_in_viewport", path=path,
+            command={"kind": "mission", "name": "new_event", "ids": [area_id], "value": "player_in_area"})
+    made = [int(row["id"]) for row in mission_rows(client, path, "Event") if int(row["id"]) not in before]
+    expect(len(made) == 1, f"New event over area {area_id} made {len(made)} events")
+    event = made[0]
+    # Set V<variable> to 1 (Misvar change 5 / Set 1): the add's edits as planned, then its parameters.
+    planned = query(client, "mission_logic", path=path, op="add", id=event, list="action", type=5, sub=1)
+    expect(not planned.get("refusal") and planned.get("edits"), f"the action could not be added: {json.dumps(planned)}")
+    added = request(client, "edit_record", path=path, keep_selection=True, edits=planned["edits"])
+    action = 0
+    for made_id in added.get("outcome", {}).get("added", []):
+        action = int(made_id)
+    expect(action != 0, f"the action was not added: {json.dumps(added.get('outcome', {}))}")
+    request(client, "edit_record", path=path, keep_selection=True,
+            edits=[{"op": "set", "id": action, "field": "param1", "value": variable},
+                   {"op": "set", "id": action, "field": "param2", "value": 1}])
+    request(client, "edit_record", path=path, keep_selection=True,
+            edits=[{"op": "set", "id": event, "field": "delay", "value": 5}])
+    form = query(client, "mission_logic", path=path, op="form", id=event)
+    say(f"   event {event}: {form.get('sentence', '')}")
+    return event, centre
+
+
+def live_leg(client: GameMcp, game: GameMcp, path: str, event: int, centre: tuple[float, float, float],
+             variable: int, timeout_s: float) -> None:
+    """The game's logic seen running in the editor (S24 Live): the mission's Logic pane shown, the editor's live
+    op reporting the game; the player teleported into the area, the event active (its wait counting), then fired
+    about 5.1 s later, its action's variable set; the editor's live op agreeing with the game's own snapshot."""
+    say("10. the game's logic in the editor")
+    request(client, "set_workspace", workspace={"document": {"path": path, "logic": True}})
+
+    def live() -> dict:
+        return query(client, "mission_logic", path=path, op="live")
+
+    def ours(report: dict) -> dict | None:
+        for entry in report.get("events", []):
+            if int(entry.get("event", 0)) == event:
+                return entry
+        return None
+
+    deadline = time.monotonic() + timeout_s
+    report: dict = {}
+    while time.monotonic() < deadline:
+        report = live()
+        if report.get("playing") and ours(report) is not None:
+            break
+        time.sleep(0.25)
+    expect(bool(report.get("playing")), f"the editor reports no live logic: {json.dumps(report)[:600]}")
+    entry = ours(report)
+    expect(entry is not None, f"the editor's report names no played event {event}: {json.dumps(report)[:600]}")
+    expect(not entry.get("active") and not entry.get("fired"), f"the event ran before the player came: {entry}")
+    index = int(entry["index"])
+    say(f"   the editor reports {len(report.get('events', []))} events at tick {report.get('tick')}; ours is "
+        f"event {index + 1}")
+
+    # The world done loading (its clock starts then), the player deployed (the deploy screen's Default Spawn), the
+    # clock running, then the player moved into the area.
+    # A single-player mission with a loading image holds its reveal on the start-mission splash until a fresh key or
+    # click in the game's window (main_game.gd's start splash); no MCP verb dismisses it yet (the game's probes call
+    # the shell's dismiss_start_mission_splash in-process), so the run asks whoever runs it to.
+    if game.structured("game_state").get("shell", {}).get("world_loading", True):
+        say("   the game holds its start-mission splash: press a key or click in the game's window to dismiss it")
+    while time.monotonic() < deadline and game.structured("game_state").get("shell", {}).get("world_loading", True):
+        time.sleep(1.0)
+    shell_now = game.structured("game_state").get("shell", {})
+    expect(not shell_now.get("world_loading", True),
+           f"the world was not revealed (its start-mission splash not dismissed): {json.dumps(shell_now)}")
+    say("   deploying the player (Default Spawn)")
+    present = False
+    while time.monotonic() < deadline and not present:
+        picked = game.call("game_debug", {"op": "invoke", "id": "deploy_pick", "confirm_authority": True,
+                                          "args": {"zone": 0}})
+        expect(not picked.get("isError"), f"the deploy pick was refused: {text_of(picked)}")
+        time.sleep(1.0)
+        present = bool(game.structured("game_state").get("player", {}).get("present"))
+    expect(present, "the player was never deployed")
+    # The world's clock running (the shell hands play back once the deploy screen is answered).
+    tick0 = int(game.structured("game_state").get("runtime", {}).get("logic_tick", 0))
+    while time.monotonic() < deadline:
+        if int(game.structured("game_state").get("runtime", {}).get("logic_tick", 0)) > tick0 + 62:
+            break
+        time.sleep(0.5)
+    ticking = int(game.structured("game_state").get("runtime", {}).get("logic_tick", 0))
+    expect(ticking > tick0 + 62, f"the game's clock does not run (tick {ticking})")
+    say(f"   teleporting the player to {centre}")
+    teleported = game.call("game_debug", {"op": "invoke", "id": "teleport_local_player", "confirm_authority": True,
+                                          "args": {"position": list(centre)}})
+    expect(not teleported.get("isError"), f"the teleport was refused: {text_of(teleported)}")
+    player = game.structured("game_state").get("player", {})
+    say(f"   the player stands at {player.get('position')}")
+    active_at = fired_at = None
+    report = {}
+    while time.monotonic() < deadline and fired_at is None:
+        report = live()
+        entry = ours(report) or {}
+        now = time.monotonic()
+        if active_at is None and (entry.get("active") or entry.get("fired")):
+            active_at = now
+            say(f"   active: its wait {entry.get('activate_countdown')} ticks")
+        if entry.get("fired"):
+            fired_at = now
+        time.sleep(0.1)
+    if active_at is None:
+        snapshot = game.structured("game_debug", {"op": "invoke", "id": "mission_logic_snapshot"}).get("result", {})
+        game_entry = next((e for e in snapshot.get("events", []) if int(e.get("index", -1)) == index), {})
+        state = game.structured("game_state")
+        raise StepFailed(f"the event never became active (the player in the area): the editor's report at tick "
+                         f"{report.get('tick')} (serial {report.get('serial')}, quiet {report.get('quiet_ms')} ms) "
+                         f"holds {json.dumps(ours(report))}; the game's own at tick {snapshot.get('tick')} holds "
+                         f"{json.dumps(game_entry)}; the player at {state.get('player', {}).get('position')}; the "
+                         f"shell {json.dumps(state.get('shell', {}))[:400]}; the runtime "
+                         f"{json.dumps(state.get('runtime', {}))[:400]}")
+    expect(fired_at is not None, "the event never fired")
+    waited = fired_at - active_at
+    say(f"   fired {waited:.1f} s after it became active")
+    expect(3.5 <= waited <= 8.0, f"the event fired {waited:.1f} s after it became active, not about 5.1 s")
+
+    # The game's own snapshot agrees with the editor's report.
+    snapshot = game.structured("game_debug", {"op": "invoke", "id": "mission_logic_snapshot"}).get("result", {})
+    game_entry = next((e for e in snapshot.get("events", []) if int(e.get("index", -1)) == index), {})
+    expect(bool(game_entry.get("fired")), f"the game does not say event {index + 1} fired: {game_entry}")
+    game_value = next((int(v.get("value", 0)) for v in snapshot.get("variables", [])
+                       if int(v.get("index", -1)) == variable), 0)
+    expect(game_value == 1, f"the game's V{variable} is {game_value}, not 1")
+    deadline = time.monotonic() + 10.0
+    editor_value = 0
+    while time.monotonic() < deadline and editor_value != 1:
+        editor_value = next((int(v.get("value", 0)) for v in live().get("variables", [])
+                             if int(v.get("index", -1)) == variable), 0)
+        time.sleep(0.25)
+    expect(editor_value == 1, f"the editor's report has V{variable} at {editor_value}")
+    say(f"   the game and the editor agree: event {index + 1} fired, V{variable} = 1")
+
 def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: dict) -> None:
     install = str(Path(args.install).resolve())
     launch = launch_namespace(args, pid_file)
@@ -316,6 +493,12 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     redone = fields_of(query(client, "record", path=path, id=record_id))
     expect(abs(float(redone["x"]) - new[0]) < 1e-3, f"the redo did not move it again (x={redone.get('x')})")
 
+    live_event = 0
+    live_centre = (0.0, 0.0, 0.0)
+    if args.live:
+        say(f"   the live leg's event: the player in an area sets V{args.live_variable} after 5 steps")
+        live_event, live_centre = add_live_event(client, path, args.live_variable)
+
     say("7. saving and building")
     request(client, "save_all")
     expect(not document_state(client, path).get("dirty", True), "the mission is still unsaved")
@@ -406,12 +589,14 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     say(f"   {len(entities)} entities; on the ground plane the nearest to where the record was put is {to_new:.2f} away, "
         f"to where it was {to_old:.2f}")
     expect(to_new <= args.tolerance, f"no entity stands where the record was moved to (nearest {to_new:.2f})")
+    if args.live:
+        live_leg(client, game, path, live_event, live_centre, args.live_variable, args.game_timeout)
     if args.windowed and args.screenshots:
         shots = Path(args.screenshots)
         shots.mkdir(parents=True, exist_ok=True)
         editor_mcp.cmd_screenshot(argparse.Namespace(port=args.port, url=None, out=str(shots / "editor.png"),
                                                      format="png", max_dim=1600, quality=None))
-    say("10. every step held")
+    say("11. every step held" if args.live else "10. every step held")
 
 
 def play_in_install(args: argparse.Namespace, client: GameMcp, started_pids: dict) -> None:
@@ -498,7 +683,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="how Play runs the game (the project's play_mode; default: the OpenNova runtime)")
     parser.add_argument("--install-run", dest="install_run", type=float, default=30.0,
                         help="with --play-mode install or strict: seconds the game runs before it is stopped")
+    parser.add_argument("--live", action="store_true",
+                        help="the live logic leg (S24 Live; the OpenNova runtime only): an event made over an area "
+                             "before the build, then in the game the player teleported into the area and the event "
+                             "seen active, then fired about 5.1 s later, in the editor's live op and the game's own "
+                             "snapshot alike")
+    parser.add_argument("--live-variable", dest="live_variable", type=int, default=250,
+                        help="with --live: the mission variable the event sets (V0..V255; default 250)")
     args = parser.parse_args(argv)
+    if args.live and args.play_mode in ("install", "strict"):
+        print("editor_mission_e2e: --live needs the OpenNova runtime (no --play-mode install or strict)", file=sys.stderr)
+        return EXIT_NOT_READ
 
     made_temp = args.project is None
     holder = Path(tempfile.mkdtemp(prefix="opennova-mission-e2e-")) if made_temp else None
