@@ -50,6 +50,33 @@ crow::response push_reply(
 	return json_error(404, host_push_result_name(HostPushResult::UnknownRid), unknown);
 }
 
+// Crow's JSON reader decodes each \uXXXX escape on its own, so an escaped character past
+// U+FFFF ("\ud83d\ude00") arrives as its two surrogate halves, each spelled as a 3-byte
+// sequence (0xED 0xA0..0xAF xx, then 0xED 0xB0..0xBF xx), which is not UTF-8. This joins each
+// such pair into the character's 4-byte UTF-8; an unpaired half is left as it is, for the
+// UTF-8 check to refuse.
+std::string join_surrogate_pairs(std::string_view text) {
+	const auto at = [&text](size_t i) { return static_cast<uint8_t>(text[i]); };
+	const auto half = [&](size_t i, uint8_t lo, uint8_t hi) {
+		return at(i) == 0xED && at(i + 1) >= lo && at(i + 1) <= hi && (at(i + 2) & 0xC0) == 0x80;
+	};
+	std::string out;
+	out.reserve(text.size());
+	size_t i = 0;
+	while (i < text.size()) {
+		if (i + 6 <= text.size() && half(i, 0xA0, 0xAF) && half(i + 3, 0xB0, 0xBF)) {
+			const char32_t high = 0xD000 | ((at(i + 1) & 0x3F) << 6) | (at(i + 2) & 0x3F);
+			const char32_t low = 0xD000 | ((at(i + 4) & 0x3F) << 6) | (at(i + 5) & 0x3F);
+			utf8_append(out, 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00));
+			i += 6;
+			continue;
+		}
+		out.push_back(text[i]);
+		++i;
+	}
+	return out;
+}
+
 // Whether UTF-8 `text` holds a C1 control (U+0080..U+009F, 0xC2 then 0x80..0x9F).
 bool has_c1_control(std::string_view text) {
 	for (size_t i = 0; i + 1 < text.size(); ++i) {
@@ -150,7 +177,8 @@ ComposedServerCommand compose_server_command(const std::string &text) {
 	// Each arg in the host's code page, the bytes its reader keeps.
 	std::vector<std::string> host_args;
 	host_args.reserve(args.size());
-	for (const std::string &arg : args) {
+	for (const std::string &json_arg : args) {
+		const std::string arg = join_surrogate_pairs(json_arg);
 		if (has_control_byte(arg) || has_c1_control(arg)) {
 			return refused("invalid_command",
 					"an arg holds a control byte (below 0x20, 0x7F, or a C1 control U+0080 to "
@@ -159,8 +187,11 @@ ComposedServerCommand compose_server_command(const std::string &text) {
 		std::string bytes;
 		std::u32string unstorable;
 		if (!utf8_to_cp1252(arg, bytes, &unstorable)) {
-			if (!is_valid_utf8(arg))
-				return refused("invalid_command", "an arg is not UTF-8");
+			if (!is_valid_utf8(arg)) {
+				return refused("invalid_command",
+						"an arg is not UTF-8 (bytes in another encoding, or an unpaired "
+						"surrogate escape)");
+			}
 			return refused("invalid_command",
 					"an arg holds " + codepoint_names(unstorable) +
 							", which the host's code page (cp1252) has no character for");

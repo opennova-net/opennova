@@ -32,6 +32,7 @@
 #include "template_engine.h"
 #include "web_session.h"
 
+#include <base/io/cp1252.h>
 #include <base/io/sha256.h>
 #include <net/novacrypto/epask.h>
 #include <net/napi/session.h>
@@ -1791,6 +1792,10 @@ int test_admin_host_push(Harness &h) {
 		// The host reads cp1252 (D-NET-382): a character it has no byte for is refused by name.
 		{"{\"verb\":\"TextChatServer\",\"args\":[\"hi \xF0\x9F\x98\x80\"]}", "U+1F600"},
 		{"{\"verb\":\"SetServerMsg\",\"args\":[\"\xE4\xB8\xAD\"]}", "U+4E2D"},
+		// An escaped surrogate pair (Crow decodes each half on its own) is joined and named; an
+		// unpaired half is no UTF-8.
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"gg \\ud83d\\ude00\"]}", "U+1F600"},
+		{"{\"verb\":\"TextChatServer\",\"args\":[\"gg \\ud83d\"]}", "not UTF-8"},
 		// What the host keeps of a name and a message, counted in its bytes.
 		{"{\"verb\":\"SetServerName\",\"args\":[\"abcdefghijklmnopqrstuvwxyz012345\"]}", "keeps 31"},
 	};
@@ -1861,6 +1866,27 @@ int test_admin_host_push(Harness &h) {
 	cmd = host.wait_notice(PushHost::Notice::Kind::Command, 3000);
 	TEST_EXPECT(cmd != nullptr);
 	TEST_EXPECT(cmd->command.args == std::vector<std::string>{std::string(31, '\xE9')});
+
+	// cp1252's printable 0x80..0x9F characters are no C1 controls: "€ ™" reaches the host as
+	// 0x80, a space and 0x99.
+	host.clear_notices();
+	reply = command(rid_text, "{\"verb\":\"TextChatServer\",\"args\":[\"\xE2\x82\xAC \xE2\x84\xA2\"]}");
+	if (reply.code != 202) std::fprintf(stderr, "  euro, tm: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	cmd = host.wait_notice(PushHost::Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"\x80 \x99"});
+
+	// A message of 127 host bytes, the most a stock host keeps (126 letters and an "é", 128
+	// bytes of UTF-8), is accepted whole.
+	host.clear_notices();
+	reply = command(rid_text, "{\"verb\":\"SetServerMsg\",\"args\":[\"" + std::string(126, 'm') +
+	                                  "\xC3\xA9\"]}");
+	if (reply.code != 202) std::fprintf(stderr, "  127-byte message: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	cmd = host.wait_notice(PushHost::Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{std::string(126, 'm') + "\xE9"});
 
 	// An admin's website session pushes too, with the CSRF header (the
 	// bootstrap case made web_boss the admin).
@@ -2201,6 +2227,50 @@ int test_owner_host_push(Harness &h) {
 	TEST_EXPECT(wait_until([&] {
 		return !row_named(h, "Anonymous Push Host") && !row_named(h, "Erin Push Host");
 	}));
+	return 0;
+}
+
+// A host's own text comes in its code page (a stock host's cp1252) and the public JSON sends it
+// as UTF-8: a server whose session names it "Café" with the byte 0xE9 (as a stock host reports
+// a name its owner set to "café") is "Café" in /api/lobbies and /api/hosts, and both bodies are
+// valid UTF-8. The GSB, which stock clients read, keeps the host's byte.
+int test_host_text_utf8(Harness &h) {
+	const std::string cp1252_name = "Caf\xE9 Lobby";
+	const std::string utf8_name = "Caf\xC3\xA9 Lobby";
+	PushHost host(h.nw_udp.bound_port(), 0x55544638u);
+	TEST_EXPECT(host.host(cp1252_name));
+	TEST_EXPECT(wait_until([&] { return row_named(h, cp1252_name).has_value(); }));
+
+	for (const char *path : {"/api/lobbies", "/api/hosts"}) {
+		const auto reply = h.send("GET", path);
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		const std::string text = body_text(reply);
+		if (!opennova::is_valid_utf8(text)) std::fprintf(stderr, "  %s is not UTF-8\n", path);
+		TEST_EXPECT(opennova::is_valid_utf8(text));
+	}
+	bool in_lobbies = false;
+	const auto lobbies = crow::json::load(body_text(h.send("GET", "/api/lobbies")));
+	TEST_EXPECT(lobbies);
+	for (const auto &game : lobbies["games"]) {
+		for (const auto &e : game["hosts"]) in_lobbies = in_lobbies || str(e["serverName"]) == utf8_name;
+	}
+	TEST_EXPECT(in_lobbies);
+	bool in_hosts = false;
+	const auto hosts = crow::json::load(body_text(h.send("GET", "/api/hosts")));
+	TEST_EXPECT(hosts);
+	for (const auto &e : hosts["hosts"]) in_hosts = in_hosts || str(e["server_name"]) == utf8_name;
+	TEST_EXPECT(in_hosts);
+
+	const auto gsb = h.send("GET", "/jop_2.gsb");
+	TEST_EXPECT(gsb.transport_ok && gsb.code == 200);
+	opennova::GsbResponse parsed;
+	TEST_EXPECT(opennova::gsb_parse_response(gsb.body.data(), gsb.body.size(), parsed));
+	bool raw_in_gsb = false;
+	for (const auto &s : parsed.servers) raw_in_gsb = raw_in_gsb || s.server_name == cp1252_name;
+	TEST_EXPECT(raw_in_gsb);
+
+	host.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, cp1252_name); }));
 	return 0;
 }
 
@@ -2704,6 +2774,7 @@ int run(Harness &h) {
 		{ "unknown_path_404", test_unknown_path_404 },
 		{ "admin_host_push", test_admin_host_push },
 		{ "owner_host_push", test_owner_host_push },
+		{ "host_text_utf8", test_host_text_utf8 },
 		{ "name_and_value_rules", test_name_and_value_rules },
 		{ "template_names_refused", test_template_names_refused },
 		{ "retail_templates_render", test_retail_templates_render },

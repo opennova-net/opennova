@@ -48,7 +48,9 @@ class NwUdpListener;
 // cp1252 before the line is composed (utf8_to_cp1252): "café" goes out as
 // 0x63 0x61 0x66 0xE9. An arg holding a character cp1252 has no byte for (an
 // emoji, a CJK character) is refused with its codepoints rather than
-// substituted, and one that is not UTF-8 at all is refused. A SetServerName or
+// substituted, and one that is not UTF-8 at all is refused. A JSON-escaped
+// surrogate pair ("\ud83d\ude00"), which Crow decodes half by half, is joined
+// into its character first, so it too is refused by name. A SetServerName or
 // SetServerMsg text past what the host keeps (SERVER_COMMAND_NAME_CAP /
 // SERVER_COMMAND_MSG_CAP less the terminator: 31 and 127 cp1252 bytes) is
 // refused too, rather than clipped by the host.

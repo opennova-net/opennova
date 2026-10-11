@@ -130,12 +130,18 @@ for JO's audience (D-NET-382), so the composer converts each arg to cp1252 first
 (`utf8_to_cp1252`, `base/io/cp1252.h`): "café" reaches the host as `caf` and 0xE9. An
 arg holding a character cp1252 has none for (an emoji, CJK) is a 400 naming its
 codepoints (`U+1F600`), never substituted, and bytes that are not UTF-8 are a 400 too.
+Crow's JSON reader decodes each `\uXXXX` escape on its own, so an escaped surrogate pair
+arrives as two halves; the composer joins them into the character first, so an escaped
+emoji is named like a raw one, and an unpaired half is refused as not UTF-8.
 `SetServerName` and `SetServerMsg` texts are counted in the host's bytes: a stock host
 keeps 31 and 127 of them (`SERVER_COMMAND_NAME_CAP` / `SERVER_COMMAND_MSG_CAP`,
 `Napi_CopyString`'s 32 and 128), so a longer one is a 400 rather than clipped there. A
-reply's `cmd` and the log show the composed line back in UTF-8, and the listed servers'
-text (`GET /api/me/hosts`, `GET /api/admin/hosts`) goes out as UTF-8 from whatever the
-host sent (`retail_text_to_utf8`).
+reply's `cmd` and the log show the composed line back in UTF-8. A host reports its text
+back the same way (a name set to "café" comes back with 0xE9), so every JSON list of
+listed servers (`/api/lobbies`, `/api/hosts`, `GET /api/me/hosts`, `GET /api/admin/hosts`)
+sends a host's text as UTF-8 (`retail_text_to_utf8`: valid UTF-8 as it is, anything else
+read as cp1252). The GSB browser blobs and every other retail wire output keep the host's
+bytes, which stock clients read as cp1252.
 
 **The admin's pushes** (the Bearer `ADMIN_API_TOKEN`, or an admin-role website session
 with the CSRF header; see "Website sessions and roles"), each logged with its actor and
@@ -460,8 +466,10 @@ writes the pool, so a host's key links its row) drives the 401 / 403 / 404 / 400
 429 answers, the same 404 for another account's RID and a free one, the push-time
 re-check, the drain's re-check after a ban (the drain held with
 `NwUdpListener::pause_push_drain`), the 409, "café" arriving as cp1252, the roster and
-the stop against hand-driven hosts (the admin case adds the encoding refusals and the
-byte caps); and `nw_owner_admin_e2e`
+the stop against hand-driven hosts (the admin case adds the encoding refusals, an escaped
+surrogate pair named, "€ ™" arriving as 0x80 and 0x99, and the byte caps at and past them);
+`host_text_utf8`, a host-reported cp1252 name coming back as UTF-8 in `/api/lobbies` and
+`/api/hosts` and as the host's byte in the GSB; and `nw_owner_admin_e2e`
 ([`tests/novaworld/nw_owner_admin_e2e_test.cpp`](../../tests/novaworld/nw_owner_admin_e2e_test.cpp),
 `BUILD_NOVAWORLD_HTTP` only) lists an in-process `opennova-serve` with an account and
 administers it from the website's routes: its match takes the owner's

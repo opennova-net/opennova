@@ -20,6 +20,7 @@
 #include <net/novaworld/relay_request.h>
 #include <net/novaworld/unknown_tracker.h>
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
@@ -759,15 +760,17 @@ void HttpListener::register_public_api_routes() {
 					// camelCase to match the web LobbyHost type (snake_case here rendered
 					// every host as "Unnamed Server 0/0" — the Vue card reads
 					// serverName/maxPlayers). hostIp/hostPort surface the join
-					// address so a host is identifiable, not just named.
+					// address so a host is identifiable, not just named. The host's own
+					// text comes in its code page (a stock host's cp1252) and goes out
+					// as UTF-8; the GSB keeps the host's bytes for stock clients.
 					crow::json::wvalue hj;
 					hj["id"]          = h.rid;
-					hj["serverName"]  = h.server_name;
-					hj["hostIp"]      = h.host_ip;
+					hj["serverName"]  = retail_text_to_utf8(h.server_name);
+					hj["hostIp"]      = retail_text_to_utf8(h.host_ip);
 					hj["hostPort"]    = h.host_port;
 					hj["players"]     = h.player_count;
 					hj["maxPlayers"]  = h.max_players;
-					hj["region"]      = h.region;
+					hj["region"]      = retail_text_to_utf8(h.region);
 					hosts.push_back(std::move(hj));
 				}
 				game["hosts"] = std::move(hosts);
@@ -901,30 +904,33 @@ void HttpListener::register_public_api_routes() {
 			db::ReadSnapshot snapshot(*db_conn);
 			auto rows = hostdb::list_hosts(*db_conn);
 			entries.reserve(rows.size());
+			// The host's own text comes in its code page (a stock host's cp1252)
+			// and goes out as UTF-8; the GSB keeps the host's bytes.
+			const auto text = [](const std::string &s) { return retail_text_to_utf8(s); };
 			for (const auto &h : rows) {
 				crow::json::wvalue e;
 				e["rid"]          = h.rid;
-				e["gsid"]         = h.gsid;
-				e["game"]         = h.game;
-				e["app_id"]       = h.app_id;
-				e["server_name"]  = h.server_name;
-				e["host_ip"]      = h.host_ip;
+				e["gsid"]         = text(h.gsid);
+				e["game"]         = text(h.game);
+				e["app_id"]       = text(h.app_id);
+				e["server_name"]  = text(h.server_name);
+				e["host_ip"]      = text(h.host_ip);
 				e["host_port"]    = h.host_port;
 				e["players"]      = h.player_count;
 				e["max_players"]  = h.max_players;
-				e["region"]       = h.region;
-				e["game_type"]    = h.game_type;
-				e["mission_name"] = h.mission_name;
-				e["country"]      = h.country;
-				e["exp"]          = h.exp;
-				e["exp_bits"]     = h.exp_bits;
-				e["ver1"]         = h.ver1;
-				e["time_left"]    = h.time_left;
-				e["time_of_day"]  = h.time_of_day;
-				e["msg"]          = h.msg;
-				e["mod"]          = h.mod;
-				e["age"]          = h.age;
-				e["pb_server"]    = h.pb_server;
+				e["region"]       = text(h.region);
+				e["game_type"]    = text(h.game_type);
+				e["mission_name"] = text(h.mission_name);
+				e["country"]      = text(h.country);
+				e["exp"]          = text(h.exp);
+				e["exp_bits"]     = text(h.exp_bits);
+				e["ver1"]         = text(h.ver1);
+				e["time_left"]    = text(h.time_left);
+				e["time_of_day"]  = text(h.time_of_day);
+				e["msg"]          = text(h.msg);
+				e["mod"]          = text(h.mod);
+				e["age"]          = text(h.age);
+				e["pb_server"]    = text(h.pb_server);
 				// The host-reported PlayerList (one entry per slot).
 				std::vector<crow::json::wvalue> roster_entries;
 				try {
@@ -933,9 +939,9 @@ void HttpListener::register_public_api_routes() {
 					for (const auto &s : roster) {
 						crow::json::wvalue re;
 						re["slot"]        = s.slot;
-						re["player_name"] = s.player_name;
-						re["team"]        = s.team;
-						re["type"]        = s.type;
+						re["player_name"] = text(s.player_name);
+						re["team"]        = text(s.team);
+						re["type"]        = text(s.type);
 						roster_entries.push_back(std::move(re));
 					}
 				} catch (const db::SqliteError &) { /* ignore */ }
@@ -946,9 +952,9 @@ void HttpListener::register_public_api_routes() {
 					player_entries.reserve(players.size());
 					for (const auto &p : players) {
 						crow::json::wvalue pe;
-						pe["nwhandle"] = p.nwhandle;
+						pe["nwhandle"] = text(p.nwhandle);
 						if (p.user_id) pe["user_id"] = static_cast<int64_t>(*p.user_id);
-						pe["peer_ip"]  = p.peer_ip;
+						pe["peer_ip"]  = text(p.peer_ip);
 						player_entries.push_back(std::move(pe));
 					}
 				} catch (const db::SqliteError &) { /* ignore */ }
