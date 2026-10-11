@@ -7,9 +7,11 @@ extends GameProbe
 ## player, (2) movement, view and stance, (3) the walk from spawn to the truck
 ## `truck_ssn`, (4) boarding it with USE, (5) the instructor-driven ride with
 ## its area-triggered text, (6) arrival and dismount, (7) the armory zone,
-## (8) the authored friendly-fire failure, (9) the clean exit to the menu,
-## (10) the repeat launch from the menu, (11) the in-game RESTART (the pause
-## menu's RESTART button: the same mission again with no menu between).
+## (8) the protected pair (rounds at the friendly instructor do no damage and
+## the round stays live), (9) the clean exit to the menu through the in-game
+## menu's ABORT and its confirmation, (10) the repeat launch from the menu,
+## (11) the in-game RESTART (the pause menu's RESTART button: the same mission
+## again with no menu between).
 ## `auto` drives every key and look itself; `observe` only watches the
 ## maintainer play and advances a gate when the world reaches it. `travel`
 ## selects how the probe gets from place to place between gates: `teleport`
@@ -30,8 +32,11 @@ const WALK_TIMEOUT_MS := 240_000
 const RIDE_TIMEOUT_MS := 300_000
 const ARRIVAL_STILL_MS := 6_000
 const OBSERVE_GATE_TIMEOUT_MS := 900_000
-const FAILURE_TIMEOUT_MS := 420_000
-const END_SCREEN_WAIT_MS := 20_000
+const PIN_TIMEOUT_MS := 180_000
+const PIN_BEARINGS := 2
+const PIN_MIN_ROUNDS := 5
+const PIN_SETTLE_MS := 2_000
+const CONFIRM_WAIT_MS := 10_000
 const MENU_WAIT_MS := 60_000
 const FRESH_WORLD_MAX_TICKS := 62 * 5
 const BOARD_SCAN_RANGE := 3.5
@@ -115,7 +120,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 		if _mode != "observe" and start_gate > 2:
 			gate_error = await _calibrate_look()
 	var gates: Array[Callable] = [_gate_1_load, _gate_2_movement, _gate_3_walk_to_truck, _gate_4_board,
-			_gate_5_ride, _gate_6_arrival_dismount, _gate_7_armory, _gate_8_friendly_fire_failure,
+			_gate_5_ride, _gate_6_arrival_dismount, _gate_7_armory, _gate_8_protected_pair,
 			_gate_9_clean_exit, _gate_10_repeat_launch, _gate_11_ingame_restart]
 	for i in gates.size():
 		if not gate_error.is_empty():
@@ -409,58 +414,101 @@ func _gate_7_armory() -> String:
 			str(in_zone), str(opened), str(closed), weapon], started)
 
 
-## The authored failure: real rounds at a blue person until the WAC
-## `true(bluekills) -> Lose(1)` ends the round with winner 2, the lose and
-## round_end effects arrive, and the shell parks gameplay input.
-func _gate_8_friendly_fire_failure() -> String:
+## The protected pair. Retail protects every same-team pair out of a session
+## (D-WPN-42, D-NET-333; world-wac-ai-re.md §40.5), so 00TRa's authored
+## `true(bluekills) -> Lose(1)` never fires from the player's rounds: real
+## rounds at the friendly instructor from the staged bearings (the bearings
+## that killed him before the protection landed) spend ammunition while his
+## health, his AI health and the round's blue kills stay put, no lose or
+## round_end effect arrives, and the round stays live with gameplay input on.
+func _gate_8_protected_pair() -> String:
 	var started := Time.get_ticks_msec()
-	var ended := false
-	if _mode == "observe":
-		_ctx.log("gate 8: shoot a friendly (blue) soldier until the mission fails")
-		ended = await _wait_until(_round_ended, OBSERVE_GATE_TIMEOUT_MS, "observe: round ended")
-	else:
-		ended = await _fire_at_blue_until_ended(FAILURE_TIMEOUT_MS)
-	await _sample("gate8_failure")
-	await _capture("gate8_failed")
 	var sim := _ctx.sim()
-	var outcome: RoundOutcome = sim.get_round_outcome_debug() if sim != null else null
-	if not ended or outcome == null:
-		return _gate_done(8, "friendly_fire_failure", false, "the round did not end (%s)" % _outcome_text(), started)
+	var target := _nearest_blue_person([]) if sim != null else null
+	if target == null:
+		return _gate_done(8, "protected_pair", false, "no blue person to fire at", started)
+	var ai_index := target.get_ai_index()
+	var net_id := target.get_net_id()
+	var hp0 := target.get_health()
+	var ai_hp0 := target.get_ai_health()
+	var before: RoundOutcome = sim.get_round_outcome_debug()
+	var bluekills0 := before.get_bluekills() if before != null else 0
+	var ammo0 := _ammo_total()
+	var bearings := 0
+	if _mode == "observe":
+		_ctx.log("gate 8: shoot the friendly instructor (net=%d): he takes no damage, the round stays live" % net_id)
+		await _wait_until(func() -> bool: return ammo0 - _ammo_total() >= PIN_MIN_ROUNDS,
+				OBSERVE_GATE_TIMEOUT_MS, "observe: rounds fired")
+	else:
+		bearings = await _fire_at_protected(target, PIN_TIMEOUT_MS)
+	# The WAC's `true(bluekills)` poll and the effect drain get their time.
+	await _wait_sampling(PIN_SETTLE_MS)
+	await _capture("gate8_protected")
+	var card := _ctx.sim().entity_card_by_ai_index(ai_index)
+	var alive := card != null and card.is_alive()
+	var hp := card.get_health() if card != null else -1
+	var ai_hp := card.get_ai_health() if card != null else -1
+	var spent := ammo0 - _ammo_total()
+	var outcome: RoundOutcome = _ctx.sim().get_round_outcome_debug()
+	var live := outcome != null and not outcome.get_ended()
+	var bluekills := outcome.get_bluekills() if outcome != null else -1
 	var lose := _effect_count("lose") > 0
 	var round_end := _effect_count("round_end") > 0
-	var input_parked := await _wait_until(func() -> bool:
-		var g := _ctx.game()
-		return g != null and not g.is_gameplay_input_active(), 5000, "gameplay input parked")
-	var screen := await _wait_until(func() -> bool: return _end_screen() != null, END_SCREEN_WAIT_MS, "end screen")
-	await _wait_sampling(1500)
-	await _capture("gate8_end_screen")
-	var banner := _ctx.hud_presenter().endround_banner_line() if _ctx.hud_presenter() != null else ""
-	var detail := "%s; lose=%s round_end=%s input_parked=%s end_screen=%s banner=%s" % [
-			_outcome_text(), str(lose), str(round_end), str(input_parked), str(screen), banner]
-	var ok := outcome.get_winner_team() == 2 and outcome.get_bluekills() >= 1 and lose and round_end \
-			and input_parked and screen
-	return _gate_done(8, "friendly_fire_failure", ok, detail, started)
+	var g := _ctx.game()
+	var playing := g != null and g.shell_state_name() == "world" and g.is_gameplay_input_active()
+	var detail := ("net=%d hp %d -> %d, ai %d -> %d, alive=%s; %d round(s) from %d bearing(s); %s;"
+			+ " lose=%s round_end=%s playing=%s") % [net_id, hp0, hp, ai_hp0, ai_hp, str(alive), spent,
+			bearings, _outcome_text(), str(lose), str(round_end), str(playing)]
+	var ok := alive and hp >= hp0 and ai_hp >= ai_hp0 and spent >= PIN_MIN_ROUNDS and live \
+			and bluekills == bluekills0 and not lose and not round_end and playing
+	return _gate_done(8, "protected_pair", ok, detail, started)
 
 
-## The clean exit: ESC on the end screen returns to the menu with the world
-## unloaded and no script errors in the run's log.
+## The clean exit through the in-game menu: ESC opens it, ABORT raises the
+## authored CONFIRM_EXIT "Are you sure?" panel (ABORT alone leaves the mission
+## alive), and CONFIRM_YES returns to the menu with the world unloaded
+## (menu_shell.gd's return-control seam; docs/mnu/menu-re.md "The in-game exit
+## confirmation"). The confirmation's own ENTER hotkey stands in when the
+## press does not land.
 func _gate_9_clean_exit() -> String:
 	var started := Time.get_ticks_msec()
+	var path := "observe"
 	if _mode == "observe":
-		_ctx.log("gate 9: leave the end screen to the menu")
+		_ctx.log("gate 9: ESC, ABORT, then confirm the exit to the menu")
 	else:
 		await _tap(KEY_ESCAPE)
-	var menu := await _wait_until(func() -> bool:
-		var g := _ctx.game()
-		var w := _ctx.world()
-		return g != null and g.shell_state_name() == "menu" and (w == null or not w.is_loaded()),
+		var paused := await _wait_until(func() -> bool:
+			var g := _ctx.game()
+			return g != null and g.shell_state_name() == "paused", 5000, "in-game menu")
+		var shell := _ctx.menu_shell()
+		if not paused or shell == null or not shell.menu_press("ABORT"):
+			return _gate_done(9, "clean_exit", false,
+					"paused=%s: the ABORT control was not pressed" % str(paused), started)
+		await _ctx.wait_ms(500)
+		await _capture("gate9_confirm")
+		if _ctx.world() == null or not _ctx.world().is_loaded():
+			return _gate_done(9, "clean_exit", false, "ABORT left the mission without the confirmation",
+					started)
+		path = "CONFIRM_YES press"
+		shell.menu_press("CONFIRM_YES")
+		var left := await _wait_until(_at_menu, CONFIRM_WAIT_MS, "menu after CONFIRM_YES")
+		if not left:
+			path = "ENTER (CONFIRM_YES hotkey)"
+			await _tap(KEY_ENTER)
+	var menu := await _wait_until(_at_menu,
 			OBSERVE_GATE_TIMEOUT_MS if _mode == "observe" else MENU_WAIT_MS, "menu")
 	await _ctx.wait_ms(1000)
 	await _capture("gate9_menu")
 	var g := _ctx.game()
-	return _gate_done(9, "clean_exit", menu, "shell=%s world_loaded=%s" % [
+	return _gate_done(9, "clean_exit", menu, "via %s; shell=%s world_loaded=%s" % [path,
 			g.shell_state_name() if g != null else "?",
 			str(_ctx.world() != null and _ctx.world().is_loaded())], started)
+
+
+func _at_menu() -> bool:
+	var g := _ctx.game()
+	var w := _ctx.world()
+	return g != null and g.shell_state_name() == "menu" and (w == null or not w.is_loaded())
 
 
 ## The repeat launch (retry stand-in): the same mission again from the menu
@@ -798,78 +846,53 @@ func _search_armory_zone(timeout_ms: int) -> bool:
 
 ## Real rounds at the nearest blue person until the round ends. Retargets a
 ## person whose health does not move (scripted indestructibles).
-func _fire_at_blue_until_ended(timeout_ms: int) -> bool:
+## Volleys at the target from up to PIN_BEARINGS reachable bearings around it
+## (the lose_flow ctest's staging, walked to instead of teleported; positions
+## inside a seated person's mount footprint are skipped). Stops early if the
+## target dies or the round ends, which the gate then reports. Returns the
+## bearings fired from.
+func _fire_at_protected(target: EntityCard, timeout_ms: int) -> int:
 	var deadline := Time.get_ticks_msec() + timeout_ms
-	var blacklist: Array[int] = []
-	while Time.get_ticks_msec() < deadline and not _ctx.cancelled:
-		if _round_ended():
-			return true
-		var target := _nearest_blue_person(blacklist)
-		if target == null:
-			_ctx.log("failure gate: no blue person available (blacklist %s)" % str(blacklist))
-			await _wait_sampling(2000)
+	var ai_index := target.get_ai_index()
+	var net_id := target.get_net_id()
+	_ctx.log("protected pair: targeting blue person net=%d ai=%d hp=%d at %s mounted=%s on %d" % [
+			net_id, ai_index, target.get_health(), str(target.get_position()), str(target.is_mounted()),
+			target.get_mount_target_net_id()])
+	var mount_pos := Vector3.INF
+	if target.is_mounted():
+		var mount := _ctx.sim().entity_card_by_net_id(target.get_mount_target_net_id())
+		if mount != null:
+			mount_pos = mount.get_position()
+	var fired := 0
+	for k in FIRE_BEARINGS:
+		if fired >= PIN_BEARINGS or Time.get_ticks_msec() >= deadline or _ctx.cancelled:
+			break
+		var card := _ctx.sim().entity_card_by_ai_index(ai_index)
+		if card == null or not card.is_alive() or _round_ended():
+			break
+		var angle := float(k) * TAU / float(FIRE_BEARINGS)
+		var goal := card.get_position() + Vector3(cos(angle), 0.0, sin(angle)) * FIRE_STAGE_DISTANCE
+		if mount_pos != Vector3.INF and _planar(goal, mount_pos) < FIRE_HULL_CLEARANCE:
 			continue
-		# A person riding a moving vehicle is no target for a staged volley:
-		# leave it for later and take the next one.
-		var pos_before := target.get_position()
-		await _wait_sampling(600)
-		var moved_card := _ctx.sim().entity_card_by_ai_index(target.get_ai_index())
-		if moved_card != null and _planar(moved_card.get_position(), pos_before) > 0.5:
-			_ctx.log("failure gate: net=%d is moving (%.1f u in 0.6 s); deferring it" % [
-					target.get_net_id(), _planar(moved_card.get_position(), pos_before)])
-			blacklist.append(target.get_ai_index())
+		var there := await _go_to(func() -> Vector3: return goal, 1.2,
+				mini(FIRE_BEARING_WALK_MS, deadline - Time.get_ticks_msec()))
+		if not there:
+			_ctx.log("protected pair: bearing %d not reachable" % k)
 			continue
-		var ai_index := target.get_ai_index()
-		var net_id := target.get_net_id()
-		_ctx.log("failure gate: targeting blue person net=%d ai=%d hp=%d at %s mounted=%s on %d" % [
-				net_id, ai_index, target.get_health(), str(target.get_position()), str(target.is_mounted()),
-				target.get_mount_target_net_id()])
-		var hp0 := target.get_health()
-		# The firing positions: eight bearings around the person at a few
-		# units (the lose_flow ctest's staging, walked to instead of teleported);
-		# a seated person's mount hull hides it from some of them, so a bearing
-		# that lands no round yields to the next. Positions inside the mount's
-		# own footprint are skipped.
-		var mount_pos := Vector3.INF
-		if target.is_mounted():
-			var mount := _ctx.sim().entity_card_by_net_id(target.get_mount_target_net_id())
-			if mount != null:
-				mount_pos = mount.get_position()
-		var outcome := ""
-		for k in FIRE_BEARINGS:
-			if Time.get_ticks_msec() >= deadline or _ctx.cancelled:
-				break
-			var card := _ctx.sim().entity_card_by_ai_index(ai_index)
-			if card == null or not card.is_alive():
-				break
-			var angle := float(k) * TAU / float(FIRE_BEARINGS)
-			var goal := card.get_position() + Vector3(cos(angle), 0.0, sin(angle)) * FIRE_STAGE_DISTANCE
-			if mount_pos != Vector3.INF and _planar(goal, mount_pos) < FIRE_HULL_CLEARANCE:
-				continue
-			var there := await _go_to(func() -> Vector3: return goal, 1.2,
-					mini(FIRE_BEARING_WALK_MS, deadline - Time.get_ticks_msec()))
-			if not there:
-				_ctx.log("failure gate: bearing %d not reachable" % k)
-				continue
-			outcome = await _volley_at(ai_index, net_id, deadline)
-			_ctx.log("failure gate: bearing %d -> %s" % [k, outcome])
-			if outcome == "ended" or outcome == "dead":
-				break
-		if outcome == "ended" or _round_ended():
-			return true
-		var after := _ctx.sim().entity_card_by_ai_index(ai_index)
-		if after != null and after.is_alive() and after.get_health() >= hp0:
-			_ctx.log("failure gate: net=%d took no damage from any bearing; retargeting" % net_id)
-			blacklist.append(ai_index)
-			continue
-		# Dead or damaged: give the WAC tick its second.
-		var ended := await _wait_until(_round_ended, 4000, "round end after the kill")
-		if ended:
-			return true
-		if after == null or not after.is_alive():
-			_ctx.log("failure gate: net=%d died but the round did not end (%s)" % [net_id, _outcome_text()])
-			blacklist.append(ai_index)
-	return _round_ended()
+		var outcome := await _volley_at(ai_index, net_id, deadline)
+		fired += 1
+		_ctx.log("protected pair: bearing %d -> %s" % [k, outcome])
+		if outcome == "ended" or outcome == "dead":
+			break
+	return fired
+
+
+## The player's rounds, magazine plus reserve: a reload moves rounds between
+## the two, so only firing lowers the sum.
+func _ammo_total() -> int:
+	var sim := _ctx.sim()
+	var weapon: PlayerWeaponView = sim.get_local_player_weapon_state() if sim != null else null
+	return weapon.get_clip() + weapon.get_reserve() if weapon != null else 0
 
 
 ## Bursts at the person from where the player stands until the round ends
@@ -908,7 +931,7 @@ func _volley_at(ai_index: int, net_id: int, deadline: int) -> String:
 		else:
 			dry = 0
 		if dry > 0 and dry % 3 == 0 and reloads < 3:
-			_ctx.log("failure gate: %d dry bursts at net=%d, reloading" % [dry, net_id])
+			_ctx.log("volley: %d dry bursts at net=%d, reloading" % [dry, net_id])
 			await _tap(KEY_R)
 			await _wait_sampling(3500)
 			reloads += 1
@@ -1022,12 +1045,6 @@ func _outcome_text() -> String:
 		return "no outcome"
 	return "ended=%s winner=%d bluekills=%d greenkills=%d enemy=%d" % [
 			str(o.get_ended()), o.get_winner_team(), o.get_bluekills(), o.get_greenkills(), o.get_enemy_kills()]
-
-
-func _end_screen() -> Node:
-	if _ctx.tree == null:
-		return null
-	return _ctx.tree.root.find_child("MissionEndScreen", true, false)
 
 
 func _fired_count() -> int:
