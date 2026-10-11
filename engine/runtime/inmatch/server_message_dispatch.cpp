@@ -1639,6 +1639,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						: 0;
 				const world::Entity *target = nullptr;
 				const bool revive_latch = conn.reply.revive_pose_valid; // +89932
+				const uint8_t request_team = world::deploy_request_team(*world, player->team,
+						conn.link.spectator, pick, config.game_type); // [orig: @0x519B7A..0x519BC1]
 				if (pick == world::kDeployPickAutoTeam) {
 					// Conquer & Control rejects the auto pick outright, before the frontier
 					// resolve: no deploy, no wave queue, no reply.
@@ -1649,7 +1651,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// as a revived player always does [orig: the latch @0x519c3d..0x519c4b].
 					if (!revive_latch)
 						target = world->zones.find_spawn_zone_for_team(
-								player->team, config.game_type);
+								request_team, config.game_type);
 				} else if (pick != world::kDeployPickNone) {
 					if (revive_latch) break; // a revived player's pick [orig: @0x519c5a]
 					// Only 0xFFFF is the no-target (Default Spawn) pick. Handle 0 — and the
@@ -1671,7 +1673,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
 					// control(+540) >= 0x10000].
 					if (target->zone_number != 0 &&
-					    (target->team != player->team || target->zone_control < 0x10000))
+					    (target->team != request_team || target->zone_control < 0x10000))
 						break;
 				}
 				// Retail's `nodefaultspawnpoints` option is named after its UI,
@@ -1682,7 +1684,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Entity_HasAliveEntityOfTeam @0x4FC7B0; the revive latch @0x519c97]
 				if (config.default_spawn_requires_no_team_zone != 0 &&
 						!revive_latch && target == nullptr &&
-						world->zones.team_has_available_spawn_zone(player->team))
+						world->zones.team_has_available_spawn_zone(request_team))
 					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
 				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
@@ -1702,7 +1704,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							*world, target->handle, player->handle, selected))
 						break;
 				}
-				if (target != nullptr) {
+				// A spectator skips the wave [orig: @0x519D65..0x519D7F].
+				if (target != nullptr && !conn.link.spectator) {
 					if (world->zones.spawn_waves.try_queue(
 							*world, target->handle, player->handle)) {
 						ProtocolMessage status = make_protocol_message(

@@ -1574,6 +1574,117 @@ bool check_revived_pick_takes_no_target() {
 			"the revive latch passes nodefaultspawnpoints");
 }
 
+// D-NET-434: a spectator slot's C2S 0x0E. Its no-target and auto picks take a
+// substitute team in place of its team 0: 1 under the objective bit (Objective
+// Co-op, 0x20000), 2 - (tick & 1) in any other team mode; that team feeds the
+// auto pick's zone, `nodefaultspawnpoints` and the numbered zone's team match.
+// With a target it skips the wave and deploys at once.
+// [orig: Server_ProcessClientRequestRespawn @0x519AF0, the spectator latch
+//  @0x519B7A, the slot team @0x519B88, the objective bit's 1 @0x519BA8, the
+//  parity @0x519BB4..0x519BC1, Spawn_FindEntityForTeam @0x519BDE,
+//  Entity_HasAliveEntityOfTeam @0x519CA8, the zone team @0x519D4A, the
+//  spectator's deploy @0x519D65..0x519D7F against SpawnWaveList_TryQueuePlayer
+//  @0x519D8F]
+bool check_spectator_pick_legs() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(2, 4);
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.team = 0;
+	player_seed.alive = false;
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	w::Entity zone_seed;
+	zone_seed.kind = w::EntityKind::Item;
+	zone_seed.team = 1;
+	zone_seed.alive = true;
+	zone_seed.is_spawn_point = true;
+	zone_seed.zone_control = 0x10000;
+	zone_seed.position = {50.0f, 60.0f, 0.0f};
+	const w::EntityHandle zone = world.registry.spawn(2, zone_seed);
+	world.zones.spawn_waves.build_from_mission(world, 5, 5); // the zone's wave row
+
+	inmatch::GameConfig config;
+	config.game_type = game_type::kObjectiveCoop;
+	config.default_spawn_requires_no_team_zone = 1;
+	std::vector<inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.link.spectator = true;
+	conn.reply.player_slot = 0;
+	auto reset_player = [&]() {
+		w::Entity *entity = world.registry.get(player);
+		entity->alive = false;
+		entity->health = 0;
+		entity->team = 0;
+		entity->position = {0.0f, 0.0f, 0.0f};
+		entity->flags |= w::kEntityFlagDead;
+		entity->engine_flags |= w::kEntityFlagDead;
+		conn.link.respawn_pending = true;
+		conn.link.respawn_delay_seconds = 0;
+		conn.link.spawn_target_hold_seconds = 0;
+		world.zones.spawn_waves.remove_player(player);
+	};
+	auto dispatch = [&](uint16_t pick) {
+		return inmatch::dispatch_session_replies(config, conn,
+				{make_protocol_message(c2s::RESPAWN_REQUEST,
+						{static_cast<uint8_t>(pick), static_cast<uint8_t>(pick >> 8)})},
+				100, roster, &world);
+	};
+	auto has_tag = [](const std::vector<ProtocolMessage> &replies, uint8_t tag) {
+		for (const ProtocolMessage &m : replies)
+			if (m.tag == tag) return true;
+		return false;
+	};
+	auto queued = [&]() {
+		for (const w::SpawnWaveEntry &entry : world.zones.spawn_waves.entries())
+			for (const w::EntityHandle member : entry.queued)
+				if (member == player) return true;
+		return false;
+	};
+
+	// Objective Co-op: Default Spawn asks as team 1, which holds an available zone.
+	reset_player();
+	if (!expect(dispatch(w::kDeployPickNone).empty() && world.registry.get(player)->health == 0,
+			"an Objective Co-op spectator's Default Spawn is refused by team 1's zone"))
+		return false;
+	// The auto pick takes team 1's zone and deploys there at once, outside its wave.
+	reset_player();
+	std::vector<ProtocolMessage> replies = dispatch(w::kDeployPickAutoTeam);
+	const w::Entity *body = world.registry.get(player);
+	if (!expect(body->health > 0 && !queued() && !has_tag(replies, s2c::SPAWN_WAVE_STATUS) &&
+			body->position.x == 50.0f && body->position.y == 60.0f,
+			"an Objective Co-op spectator's auto pick deploys at team 1's zone at once"))
+		return false;
+	// A picked zone (resolved with the spectator's team 0) skips the wave too.
+	reset_player();
+	replies = dispatch(zone.packed);
+	if (!expect(world.registry.get(player)->health > 0 && !queued() &&
+			!has_tag(replies, s2c::SPAWN_WAVE_STATUS),
+			"a spectator's zone pick deploys at once, outside the zone's wave"))
+		return false;
+	// A team mode takes the tick parity: odd -> 1, even -> 2.
+	config.game_type = game_type::kTeamDeathmatch;
+	world.registry.get(zone)->team = 2;
+	world.logic_tick = 8;
+	reset_player();
+	if (!expect(dispatch(w::kDeployPickNone).empty() && world.registry.get(player)->health == 0,
+			"on an even tick the spectator asks as team 2, which holds the zone"))
+		return false;
+	world.logic_tick = 9;
+	reset_player();
+	(void)dispatch(w::kDeployPickNone);
+	return expect(world.registry.get(player)->health > 0,
+			"on an odd tick it asks as team 1, which holds none");
+}
+
 bool check_shared_loaded_ammo_fire_and_reload() {
     w::World world;
     world.rules.mp_session = true;
@@ -1782,6 +1893,7 @@ int main() {
 	ok = check_try_queue_evicts_on_failed_pick() && ok;
 	ok = check_respawn_pick_admission() && ok;
 	ok = check_revived_pick_takes_no_target() && ok;
+	ok = check_spectator_pick_legs() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }
