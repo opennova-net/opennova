@@ -2053,12 +2053,23 @@ int test_owner_host_push(Harness &h) {
 	TEST_EXPECT(cmd->command.target == opennova::ServerCommandTarget::ByIndex);
 	mine.clear_notices();
 
-	// The push-time check: a row that names Alice over a connection that does not (the anonymous
-	// host's) passes the route's look-up, and the listener refuses it with the same 404.
+	// The route reads the live claim, not the row: a row that names Alice with no key of hers
+	// claimed for it is a 404 at the route.
 	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = ? WHERE rid = ?;",
 	                       {BindValue(alice), BindValue(static_cast<int64_t>(anon->rid))});
-	const auto tampered = opennova::hostdb::find_host_by_rid(*h.pool.acquire(), anon->rid);
-	TEST_EXPECT(tampered && tampered->host_user_id == alice);
+	TEST_EXPECT(!opennova::hostdb::listing_owned_by(*h.pool.acquire(), anon->rid, alice));
+	reply = command(alice_s, anon_rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+	TEST_EXPECT(body_text(reply) == body_text(free_command));
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = NULL WHERE rid = ?;",
+	                       {BindValue(static_cast<int64_t>(anon->rid))});
+	// The push-time check: a key of Alice's claimed for the anonymous host's RID passes the
+	// route's look-up, but that connection never presented it (its lobby names no owner), so the
+	// listener refuses the push with the same 404 and nothing reaches the host.
+	const std::string stray = "PPPPOOOONNNNMMMMLLLLKKKKJJJJIIIIHHHHGGGGFFFFEEEE";
+	opennova::hostdb::record_host_key(*h.pool.acquire(), stray, alice);
+	TEST_EXPECT(opennova::hostdb::claim_host_key(*h.pool.acquire(), stray, anon->rid) == alice);
+	TEST_EXPECT(opennova::hostdb::listing_owned_by(*h.pool.acquire(), anon->rid, alice));
 	bool lobby_unowned = false;
 	for (const auto &entry : h.nw_udp.snapshot_hosted()) {
 		if (entry.lobby.rid == anon->rid) lobby_unowned = !entry.lobby.host_user_id.has_value();
@@ -2068,8 +2079,8 @@ int test_owner_host_push(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 404);
 	TEST_EXPECT(body_text(reply) == body_text(free_command));
 	TEST_EXPECT(theirs.wait_notice(Notice::Kind::Command, 500) == nullptr);
-	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = NULL WHERE rid = ?;",
-	                       {BindValue(static_cast<int64_t>(anon->rid))});
+	h.pool.acquire()->exec("DELETE FROM host_keys WHERE key_hash = ?;",
+	                       {BindValue(opennova::hostdb::host_key_hash(stray))});
 
 	// The bucket, per account: Dave's runs dry (the stop draws on it too); Alice's is her own.
 	net::HttpReply refusal;

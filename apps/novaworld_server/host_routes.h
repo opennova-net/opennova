@@ -82,8 +82,9 @@ private:
 	crow::response owner_command(const crow::request &req, uint64_t rid);
 	crow::response owner_stop(const crow::request &req, uint64_t rid);
 	// An owner's push once the body is composed: 404 unless the listing under
-	// `rid` is `user`'s (active_hosts.host_user_id), then the push scoped to that
-	// account, which the listener checks again (NwUdpListener's `owner`).
+	// `rid` is `user`'s (hostdb::listing_owned_by: listed, with one of the
+	// account's keys claimed for the RID), then the push scoped to that account,
+	// which the listener checks against the connection (NwUdpListener's `owner`).
 	// `push` is the statement's push for the 32-bit RID; `line` names it in the
 	// log.
 	template <typename Push>

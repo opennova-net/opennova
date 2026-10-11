@@ -145,11 +145,14 @@ servers and owners" below) administers that server, and only it, from the websit
 
 - **Who.** `require_user`: a live website session of an active account (401 otherwise,
   and a session whose account went inactive is deleted as it is used), with the CSRF
-  header (403 `csrf_header_required`). The listing must name the caller now:
-  `active_hosts.host_user_id` for the RID is the caller's account. A RID no listing
-  holds and another account's listing get the same 404 body (`unknown_rid`, "no server
-  of yours is listed under this RID"), so the routes never tell one from the other.
-  Ownership is checked again at push time: the push carries the caller's account to
+  header (403 `csrf_header_required`). The listing must be the caller's now
+  (`hostdb::listing_owned_by`): the RID is listed and one of the caller's keys stands
+  claimed for it, the live claim `active_hosts.host_user_id` follows, read at the
+  request rather than as of the row's last write (so a reset, a ban or a delete, each
+  taking the account's keys, closes the routes at once). A RID no listing holds and
+  another account's listing get the same 404 body (`unknown_rid`, "no server of yours
+  is listed under this RID"), so the routes never tell one from the other. Ownership is
+  checked again at push time: the push carries the caller's account to
   `NwUdpListener`, which resolves the RID only to a connection whose
   `LobbyState::host_user_id` is that account, under its lobby lock, and the receive
   thread drops the statement if the connection's owner changed before it went out (a
@@ -227,7 +230,9 @@ HostKey is unwitnessed.
     its rows in servers' player lists are set NULL (`ON DELETE SET NULL`). The listing
     stays listed with no owner, and its later writes store none though the lobby still
     holds the id. `players.id` is `AUTOINCREMENT`, so no later account gets that id.
-  - In each case `POST /api/admin/hosts/<rid>/stop` ends the listing at once.
+  - In each case `POST /api/admin/hosts/<rid>/stop` ends the listing at once, and the
+    account's own `GET /api/me/hosts` and push routes drop it at once: they read the
+    live claim (`hostdb::listing_owned_by`), not the row.
 - **Strict mode.** `ONNET_REQUIRE_HOST_KEY=1` lists no server whose `HostKey` claims no
   account (empty, unknown, expired, revoked, or held by another listing). The code is
   200, the retail table's `NWUSERVERMSGCODE_NEEDTOLOGIN`.

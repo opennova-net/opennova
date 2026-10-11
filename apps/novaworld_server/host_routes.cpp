@@ -259,7 +259,9 @@ crow::response HostRoutes::admin_stop(const crow::request &req, uint64_t rid) {
 // or 401: {"hosts": [...]}, each listed_host_json plus "msg" (the server's
 // message) and "roster", the host's PlayerList ({slot, player_name, team,
 // type}, the slot being what a player verb's ByIndex target names), read in one
-// snapshot so no roster goes out beside another commit's row.
+// snapshot so no roster goes out beside another commit's row. A listing whose
+// row still names the account but whose claim is gone (a reset, a ban or a
+// delete since its last write) is left out, as the push routes refuse it.
 crow::response HostRoutes::owner_hosts(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal)
@@ -269,6 +271,8 @@ crow::response HostRoutes::owner_hosts(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		for (const auto &h : hostdb::list_hosts_by_owner(*db_conn, access.user->id)) {
+			if (!hostdb::listing_owned_by(*db_conn, h.rid, access.user->id))
+				continue;
 			crow::json::wvalue e = listed_host_json(h);
 			e["msg"] = h.msg;
 			std::vector<crow::json::wvalue> roster;
@@ -295,25 +299,26 @@ crow::response HostRoutes::owner_hosts(const crow::request &req) {
 }
 
 // The owner pushes (service policy): the account that listed a server (its
-// HostKey, active_hosts.host_user_id) pushes to that server alone. In order:
-// require_user (401 with no live session of an active account, 403 without
-// the CSRF header), then one token from the account's kOwnerPushPerUser bucket
-// (429 with Retry-After), then the body (400, compose_server_command), then
-// the verb (403 verb_not_allowed: owner_may_send), then the listing: 404 unless
-// the row under the RID names the caller, the same reply for a free RID and
-// another account's; then the push, scoped to the caller, which the listener
-// checks under its lobby lock and again as the statement goes out (a changed
-// owner is 404 too); 409 for the caller's listing whose connection is not
-// hosting. Every request past require_user is logged with the account, the RID
-// and the outcome.
+// HostKey's live claim, which active_hosts.host_user_id follows) pushes to that
+// server alone. In order: require_user (401 with no live session of an active
+// account, 403 without the CSRF header), then one token from the account's
+// kOwnerPushPerUser bucket (429 with Retry-After), then the body (400,
+// compose_server_command), then the verb (403 verb_not_allowed:
+// owner_may_send), then the listing: 404 unless the RID is listed with one of
+// the caller's keys claimed for it (hostdb::listing_owned_by), the same reply
+// for a free RID and another account's; then the push, scoped to the caller,
+// which the listener checks against the connection's own owner under its
+// lobby lock and again as the statement goes out (a changed owner is 404
+// too); 409 for the caller's listing whose connection is not hosting. Every
+// request past require_user is logged with the account, the RID and the
+// outcome.
 template <typename Push>
 crow::response HostRoutes::push_as_owner(const WebSessionUser &user, uint64_t rid, const char *what,
 		const std::string &line, Push push, crow::json::wvalue out) {
 	const uint32_t rid32 = rid_of(rid);
 	bool owned = false;
 	try {
-		const auto row = hostdb::find_host_by_rid(*pool_.acquire(), rid32);
-		owned = row && row->host_user_id == user.id;
+		owned = hostdb::listing_owned_by(*pool_.acquire(), rid32, user.id);
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[http] owner %s lookup failed: %s\n", what, e.what());
 		return json_error(500, "db_error");
