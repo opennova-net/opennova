@@ -1,5 +1,6 @@
-// Admin endpoints — token-gated. See `client.ts` for the bearer-token
-// interceptor; the call sites here look like plain GETs/POSTs.
+// Admin endpoints: an admin-role session or the bearer token. See
+// `client.ts` for the bearer-token interceptor; the call sites here look like
+// plain GETs/POSTs.
 
 import { adminClient } from './client';
 import type { ConnectionsResponse, ServerStatus } from '../types/admin';

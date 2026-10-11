@@ -5,13 +5,17 @@
         <div class="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-ink-muted">
           <span>Admin</span>
         </div>
-        <button
-          type="button"
-          class="rounded-control border border-danger/40 bg-danger/10 px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/20"
-          @click="signOut"
-        >
-          Sign out
-        </button>
+        <div class="flex items-center gap-4">
+          <span class="hidden text-xs text-ink-muted sm:inline">{{ credentialLabel }}</span>
+          <button
+            type="button"
+            class="rounded-control border border-danger/40 bg-danger/10 px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/20 disabled:opacity-50"
+            :disabled="signingOut"
+            @click="signOut"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
       <div class="flex flex-col gap-8 md:flex-row">
@@ -40,9 +44,11 @@
 </template>
 
 <script setup lang="ts">
+import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import AdminGate from '../../components/AdminGate.vue';
-import { clearAdminToken } from '../../api/authToken';
+import { clearAdminToken, hasAdminToken } from '../../api/authToken';
+import { useSession } from '../../composables/useSession';
 
 interface AdminSection {
   to: string;
@@ -65,8 +71,27 @@ function isActive(item: AdminSection): boolean {
   return route.path === item.to;
 }
 
-function signOut() {
+const { user, isAdmin, signOut: endSession } = useSession();
+const signingOut = ref(false);
+
+// Which credentials the admin requests carry. With both, the server tries the
+// token first and falls back to the session when it does not match.
+const credentialLabel = computed(() => {
+  const session = isAdmin.value ? `Logged in as ${user.value?.username}` : '';
+  if (!hasAdminToken.value) return session;
+  return session ? `${session} · admin token stored` : 'Admin token';
+});
+
+// Drops every admin credential: the stored token and an admin session (a
+// player's session is not an admin credential and stays). The gate then asks
+// again.
+async function signOut() {
+  signingOut.value = true;
   clearAdminToken();
-  window.location.reload();
+  if (isAdmin.value) {
+    const result = await endSession();
+    if (!result.ok) window.alert(result.error.message);
+  }
+  signingOut.value = false;
 }
 </script>

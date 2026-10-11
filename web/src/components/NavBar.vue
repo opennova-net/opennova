@@ -14,18 +14,37 @@
       <nav class="hidden items-center gap-6 text-sm uppercase tracking-wider text-ink md:flex">
         <RouterLink class="hover:text-ink-bright transition" to="/lobby">Lobbies</RouterLink>
         <RouterLink class="hover:text-ink-bright transition" to="/admin">Admin</RouterLink>
-        <RouterLink
-          class="rounded-control border border-accent px-4 py-1 text-accent transition hover:bg-accent hover:text-on-accent"
-          to="/register"
-        >
-          Register
-        </RouterLink>
+        <template v-if="ready">
+          <template v-if="user">
+            <span class="text-ink-muted">
+              <span class="sr-only">Logged in as </span>
+              <span class="normal-case tracking-normal font-medium text-ink">{{ user.username }}</span>
+            </span>
+            <button
+              type="button"
+              class="rounded-control border border-border-strong px-4 py-1 uppercase tracking-wider text-ink transition hover:border-accent disabled:opacity-50"
+              :disabled="signingOut"
+              @click="handleSignOut"
+            >
+              Log out
+            </button>
+          </template>
+          <template v-else>
+            <RouterLink class="hover:text-ink-bright transition" :to="loginLink">Log in</RouterLink>
+            <RouterLink
+              class="rounded-control border border-accent px-4 py-1 text-accent transition hover:bg-accent hover:text-on-accent"
+              to="/register"
+            >
+              Register
+            </RouterLink>
+          </template>
+        </template>
       </nav>
 
       <button
         class="inline-flex items-center justify-center rounded-control border border-border-strong p-2 text-ink transition hover:bg-hover md:hidden"
         type="button"
-        :aria-expanded="isMenuOpen.toString()"
+        :aria-expanded="isMenuOpen"
         aria-controls="primary-navigation"
         @click="toggleMenu"
       >
@@ -71,13 +90,32 @@
         <div class="flex flex-col gap-2 text-sm uppercase tracking-[0.2em] text-ink">
           <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/lobby" @click="closeMenu">Lobbies</RouterLink>
           <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/admin" @click="closeMenu">Admin</RouterLink>
-          <RouterLink
-            class="rounded-control border border-accent px-4 py-2 text-center text-accent transition hover:bg-accent hover:text-on-accent"
-            to="/register"
-            @click="closeMenu"
-          >
-            Register
-          </RouterLink>
+          <template v-if="ready">
+            <template v-if="user">
+              <p class="px-3 py-2 text-ink-muted">
+                Logged in as
+                <span class="normal-case tracking-normal font-medium text-ink">{{ user.username }}</span>
+              </p>
+              <button
+                type="button"
+                class="rounded-control border border-border-strong px-4 py-2 text-center uppercase tracking-[0.2em] text-ink transition hover:border-accent disabled:opacity-50"
+                :disabled="signingOut"
+                @click="handleSignOut"
+              >
+                Log out
+              </button>
+            </template>
+            <template v-else>
+              <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" :to="loginLink" @click="closeMenu">Log in</RouterLink>
+              <RouterLink
+                class="rounded-control border border-accent px-4 py-2 text-center text-accent transition hover:bg-accent hover:text-on-accent"
+                to="/register"
+                @click="closeMenu"
+              >
+                Register
+              </RouterLink>
+            </template>
+          </template>
         </div>
       </nav>
     </Transition>
@@ -85,8 +123,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
-import { RouterLink, useRoute } from 'vue-router';
+import { computed, ref, watch } from 'vue';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
+import { useSession } from '../composables/useSession';
 
 const isMenuOpen = ref(false);
 const toggleMenu = () => {
@@ -97,10 +136,35 @@ const closeMenu = () => {
 };
 
 const route = useRoute();
+const router = useRouter();
 watch(
   () => route.fullPath,
   () => {
     isMenuOpen.value = false;
   }
 );
+
+const { user, ready, signOut } = useSession();
+const signingOut = ref(false);
+
+// The login link brings the visitor back to the page they were on.
+const loginLink = computed(() => {
+  if (route.path === '/' || route.path === '/login' || route.path === '/register') return '/login';
+  return { path: '/login', query: { redirect: route.fullPath } };
+});
+
+async function handleSignOut() {
+  signingOut.value = true;
+  const result = await signOut();
+  signingOut.value = false;
+  closeMenu();
+  if (!result.ok) {
+    window.alert(result.error.message);
+    return;
+  }
+  // A page only a logged-in visitor may see is left for the home page.
+  if (route.matched.some((record) => record.meta.requiresUser)) {
+    await router.push('/');
+  }
+}
 </script>
