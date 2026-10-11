@@ -122,6 +122,17 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 		kernel.world.rules.difficulty = config.profile_difficulty;
 }
 
+// Every body the session spawns from here on (a mid-match join, a map change's
+// kept slots, whose context the session keeps) binds its items.def row at its
+// spawn, through the kernel the role is bound to at that time; the bodies the
+// bring-up spawned are the boot's later steps' (D-NET-395).
+// [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 -> Entity_InitFromModel @0x40DC30]
+void HostRole::install_spawned_body_bind() {
+	state.host_owner.ctx.bind_spawned_body = [this](world::EntityHandle body) {
+		kernel_->bind_spawned_body(body);
+	};
+}
+
 // The HostClient replica pipeline (recv-fold only, 0x0C suppressed): it folds
 // the loopback's whole-world 0x0A into the ClientState the host's own view
 // renders from.
@@ -184,6 +195,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	host_cfg.session_seed_id = state.session_seed_id;
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	install_spawned_body_bind();
 	make_client_runtime(config.game_type);
 	// Seed the look heading from the auto-spawned player's facing.
 	kernel.local.reset_local_player_input_to_player_facing();
@@ -209,6 +221,7 @@ void HostRole::bring_up(const HostBringup &bringup) {
 	if (rotation_ != nullptr) rotation_->round_count = 0;
 	session_create_ = inmatch::start_host_session(state.host_owner, host_cfg);
 	if (session_create_ == CreateSessionResult::ProcessExit) return; // the process ends
+	install_spawned_body_bind();
 	if (host_cfg.serve_and_play) {
 		make_client_runtime(host_cfg.config.game_type);
 		kernel.local.reset_local_player_input_to_player_facing();
@@ -255,10 +268,10 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 // The map change's round init, after the kernel boot's PreMission pass and
 // the round counters' reset: a new entity for every kept slot, the host's own
 // included, each bound to its items.def row at its spawn as the boot's steps
-// bound the bodies that existed then (MissionKernel::bind_spawned_body: the
-// traits, the sound-profile pair, the organic weapons, the collision
-// instance) [orig: Entity_SpawnFromAnimSlotProperty @0x43C390 ->
-// Entity_InitFromModel @0x40DC30], then on serve-and-play Player_InitPlayer's
+// bound the bodies that existed then (the context's bind_spawned_body:
+// MissionKernel::bind_spawned_body, the traits, the sound-profile pair, the
+// organic weapons, the collision instance) [orig: Entity_SpawnFromAnimSlotProperty
+// @0x43C390 -> Entity_InitFromModel @0x40DC30], then on serve-and-play Player_InitPlayer's
 // weapon leg over the host's own new entity, its client's load-time stream
 // over the loopback (as a fresh session's bring-up queues it) and its look
 // heading.
@@ -270,8 +283,6 @@ void HostRole::init_round_after_premission() {
 	mission::MissionKernel &kernel = *kernel_;
 	kernel.boot_trace.emplace_back("round_init");
 	init_all_player_entities_for_round(*this);
-	for (const inmatch::NapiNPConnection &conn : state.host_owner.ctx.np_protocol.connection_list)
-		if (conn.link.owned_entity.valid()) kernel.bind_spawned_body(conn.link.owned_entity);
 	if (!staged_bringup_.host_cfg.serve_and_play) return;
 	world::local_loadout_rebuild(kernel.world, kernel.local.loadout, kernel.local.weapon,
 			kernel.local.inventory, kernel.local.inventory_valid, /*select_spawn_default=*/true);

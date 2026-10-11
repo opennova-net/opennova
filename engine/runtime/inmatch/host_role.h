@@ -181,6 +181,9 @@ private:
 	void reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
 	// The rule words the world reads at tick time, from the session config.
 	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
+	// The context's spawn-time body bind over this role's kernel
+	// (NapiNPServerCtx::bind_spawned_body), installed after a bring-up's own spawn.
+	void install_spawned_body_bind();
 	void make_client_runtime(uint32_t game_type);
 	// The map change's bring-up: the kept session onto the next mission's
 	// kernel (map_change.h).

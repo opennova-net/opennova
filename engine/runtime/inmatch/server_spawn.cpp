@@ -373,6 +373,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	const world::EntityHandle h =
 			is_host_own ? world::spawn_player(world, spawn) : world::spawn_remote_player(world, spawn);
 	if (!h.valid()) return h;
+	// The body binds its items.def row at its spawn: a mid-match join's and a
+	// map change's kept slot's alike (D-NET-395) [orig: the Server_PlayerAdd
+	// call @0x51D7A7 -> its Entity_SpawnFromAnimSlotProperty call @0x51D056 (the
+	// round init's @0x516B67) -> the Entity_InitFromModel call @0x43C492].
+	if (ctx.bind_spawned_body) ctx.bind_spawned_body(h);
 	// The Co-op marker arm's survivors land on the fresh entity: the marker's
 	// chute bit and, for a team-2 marker, the queued 0x200 mount onto its
 	// carrier (+0x16C/+0x180). [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
