@@ -235,7 +235,7 @@ constexpr WorkspaceMember kDocument[] = {
 	{ "logic_attention", J::Boolean, "Needs attention: the Event board shows only the cards it notes something on." },
 	{ "pick", J::Object,
 			"Pick in view (S24): {record, slot}, a trigger's or an action's parameter (slot 0 to 3) that what is clicked "
-			"next in the 3D view or the map is picked for; {} ends it." },
+			"next in the 3D view or the map is picked for; {} or null (as the view reports none) ends it." },
 };
 
 constexpr WorkspacePartRow kParts[] = {
@@ -969,7 +969,10 @@ bool set_document(Change &change, const JsonValue &part) {
 			if (member.key != "record" && member.key != "slot")
 				return change.refuse("document.pick takes a record and a slot, not \"" + member.key + "\".", at);
 		const JsonValue *record = pick->get("record");
-		if (record && record->is_number() && record->number != 0.0) {
+		if (record && !record->is_number())
+			return change.refuse("document.pick's record is a trigger's or an action's identity, a number.", at);
+		if (!record && pick->get("slot")) return change.refuse("document.pick's slot goes with its record.", at);
+		if (record && record->number != 0.0) {
 			const Document *records = records_of(*document);
 			const NodeAddress address = records ? records->address_of(NodeId(record->number)) : NodeAddress{};
 			if (!address.child || (address.kind != node_kind(MissionKind::Trigger) && address.kind != node_kind(MissionKind::Action)))
@@ -1197,7 +1200,9 @@ bool check_workspace_change(const JsonValue &json, std::string &error) {
 				error = "\"workspace." + member.key + "\" takes no \"" + value.key + "\" (it takes " + tokens_of(*part) + ").";
 				return false;
 			}
-			if (!typed(value.value, row->json)) {
+			// A pick none: null, as the view reports it, is {} (its member's words say so).
+			const bool none = value.value.is_null() && std::string(row->token) == "pick";
+			if (!none && !typed(value.value, row->json)) {
 				error = "\"workspace." + member.key + "." + value.key + "\" must be " + type_words(row->json) + ".";
 				return false;
 			}

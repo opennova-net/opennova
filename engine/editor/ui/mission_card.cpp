@@ -25,6 +25,8 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/problem_fixes.h>
+#include <editor/ui/document_views.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
 #include <editor/ui/mission_board_live.h>
@@ -117,7 +119,27 @@ void new_text_popup(CardContext &context, const BoardLine &line, const BoardChip
 	const std::string table = use.scope.substr(0, slash);
 	const SessionView &view = context.workspace.view();
 	const bool held = view.project.scan && view.project.scan->find(table);
+	// The game install's table of the mission's name: imported (with what it needs), never shadowed by a new one.
+	const std::string installed = held ? std::string() : install_file_name(view, table);
 	ImGui::TextUnformatted("New text");
+	if (!installed.empty()) {
+		ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + em * 24.0f);
+		ImGui::TextColored(kWarn, "The project has no %s, but the game install has one: the mission's title and its other "
+		                          "texts. Import it into the project first; a new %s would hide it.",
+		                   table.c_str(), table.c_str());
+		ImGui::PopTextWrapPos();
+		ImGui::BeginDisabled(!view.allows(EditorRequestKind::PreviewInstallImport));
+		if (ImGui::Button(("Import " + installed + "...").c_str())) {
+			context.workspace.request(request::preview_install_import({installed}, view.project.import_dependencies));
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndDisabled();
+		ui_kit::tooltip("Opens the import dialog on the game's own " + installed +
+		                (view.project.import_dependencies ? ", with the files it needs." : "."));
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+		return;
+	}
 	if (ImGui::IsWindowAppearing()) {
 		context.state.new_text[0] = '\0';
 		ImGui::SetKeyboardFocusHere();
@@ -127,8 +149,9 @@ void new_text_popup(CardContext &context, const BoardLine &line, const BoardChip
 	                                      ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + em * 24.0f);
 	if (held)
-		ImGui::TextDisabled("Added to %s's %s under the next free key, and the %s set to its number.", table.c_str(),
-		                    use.scope.substr(slash + 1).c_str(), chip.label.c_str());
+		ImGui::TextDisabled("Added to %s's %s under the next free key, and the %s set to its number: two files changed, "
+		                    "which Save All writes.",
+		                    table.c_str(), use.scope.substr(slash + 1).c_str(), chip.label.c_str());
 	else
 		ImGui::TextColored(kWarn, "The mission has no text table of its own: the game reads %s in its place, which the editor "
 		                          "never writes. Enter makes %s, which the game then reads for this mission instead (its "
@@ -171,18 +194,20 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		if (ImGui::BeginCombo("##variable", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
 			// The events' and the script's, by number.
 			std::map<int64_t, size_t> used;
+			const std::map<int64_t, std::vector<ScriptUse>> scripted = script_variable_uses(view, context.mission);
 			for (const MissionVariable &variable : mission_variables(context.mission, *names)) used[variable.index] += variable.uses.size();
-			for (const auto &[index, lines] : script_variable_uses(view, context.mission)) used[index] += lines.size();
+			for (const auto &[index, lines] : scripted) used[index] += lines.size();
 			for (const auto &[index, count] : used) {
 				ImGui::PushID(int(index));
 				const std::string label = names->variable(index) + "  (" + std::to_string(count) + " use" + (count == 1 ? ")" : "s)");
 				if (ImGui::Selectable(label.c_str(), index == chip.value)) set_field(context, line.record, chip.field, index);
 				ImGui::PopID();
 			}
-			const int64_t fresh = new_variable_index(view, context.mission);
+			const int64_t fresh = mission_new_variable(context.mission, script_variable_indexes(scripted));
 			const std::string label = "New variable: " + names->variable(fresh);
 			if (ImGui::Selectable(label.c_str())) set_field(context, line.record, chip.field, fresh);
-			ui_kit::tooltip("The lowest number neither a trigger or an action nor the mission's script uses.");
+			ui_kit::tooltip("The lowest number no trigger or action uses, the mission names none, and the mission's script "
+			                "does not use.");
 			ImGui::EndCombo();
 		}
 	} else if (by_name) {
@@ -209,18 +234,15 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		flow.place(width, style.ItemSpacing.x * 0.5f);
 		ImGui::SetNextItemWidth(width);
 		field_widgets::Edited edited;
-		static std::string typed;
 		if (choices.empty()) edited = field_widgets::number(*schema, value, true);
-		else edited = field_widgets::choice(*schema, choices, value, typed);
+		else edited = field_widgets::choice(*schema, choices, value, context.state.choice_typed);
 		if (edited.changed) set_field(context, line.record, chip.field, value, edited.coalesce);
 		if (edited.finished) window_requests::end_edit(context.workspace, context.mission.path());
 	}
 	ImGui::EndDisabled();
 	if (chip.unset) ImGui::PopStyleColor();
-	// A record dropped on it (an outline row, a card, the Inspector's heading): what it is to the slot.
-	std::string dropped;
-	if (by_name && context.editable && ReferencePicker::accept_record(view, context.mission, line.record, use, dropped))
-		set_field(context, line.record, chip.field, field_widgets::picked_value(use, dropped));
+	// A record dropped on a by-name chip (an outline row, a card, the Inspector's heading) is the picker's frame's to
+	// take (ReferencePicker::draw_field accepts it): what it is to the slot, one set.
 	ui_kit::tooltip_lazy([&] {
 		return chip.label + ": " + (chip.unset ? std::string("not set") : words) + (by_name ? "\nThe file holds " + raw : std::string()) +
 		       (chip.missing ? "\nIt names nothing the mission holds." : std::string()) + "\nRight-click for more.";
@@ -232,8 +254,12 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 	if (ImGui::BeginPopupContextItem("chip_menu")) {
 		// An event is picked on the board: a card's title clicked answers the pick.
 		const bool event = slot.kind == mission::ParamKind::Event;
-		if (ImGui::MenuItem(event ? "Pick on the board" : "Pick in view", nullptr, false, (marks || event) && context.editable))
+		if (ImGui::MenuItem(event ? "Pick on the board" : "Pick in view", nullptr, false, (marks || event) && context.editable)) {
+			// The board shown where it is hidden: its cards' titles answer the pick, and its Esc ends it.
+			if (event && !view.workspace.document(context.mission.path()).logic)
+				window_requests::show_logic(context.workspace, context.mission.path(), true);
 			window_requests::pick_in_view(context.workspace, context.mission.path(), line.record, chip.slot);
+		}
 		ui_kit::tooltip(event   ? std::string("Click a card's title on the board to set it (Esc cancels).")
 		                : marks ? "Click " + slot.what + " in the 3D view or the map to set it (Esc cancels)."
 		                        : std::string("No mark in the views gives this value."));
@@ -334,11 +360,31 @@ void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t
 		if (fits) {
 			const std::unique_ptr<MissionNames> names = mission_label_names(context.mission, context.names);
 			const std::string sentence = logic_move_sentence(context.mission, drag.record, card.event.row, to, *names);
+			// The event it leaves, as the move leaves it: a trigger-less one holds on its first check.
+			bool untriggered = false;
+			const std::string left = logic_move_left_sentence(context.mission, drag.record, card.event.row, to, *names, &untriggered);
 			if (!sentence.empty()) {
 				ImGui::BeginTooltip();
 				ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
 				ImGui::TextDisabled("%s then reads:", card.title.c_str());
 				ImGui::TextUnformatted(sentence.c_str());
+				if (!left.empty()) {
+					size_t from = 0;
+					const std::vector<const Node *> events = context.mission.rows_of(MissionKind::Event);
+					for (size_t i = 0; i < events.size(); ++i)
+						if (events[i]->id == drag.record.row) from = i;
+					const std::string title = "Event " + std::to_string(from + 1);
+					ImGui::Spacing();
+					ImGui::TextDisabled("%s then reads:", title.c_str());
+					ImGui::TextUnformatted(left.c_str());
+					if (untriggered) {
+						const Node *row = context.mission.row(drag.record.row);
+						const bool waits = row && row->kind == k(MissionKind::Event) &&
+						                   static_cast<const EventRow *>(row)->native.event.delay > 0;
+						ImGui::TextColored(kWarn, "%s is left with no trigger: it %s, as the mission runs.", title.c_str(),
+						                   waits ? "acts after its wait" : "fires right away");
+					}
+				}
 				ImGui::PopTextWrapPos();
 				ImGui::EndTooltip();
 			}
@@ -443,7 +489,8 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 	line_menu(context, line, line.action ? card.actions.size() : card.triggers.size());
 	// The chip its add asked for, opened as its line first draws.
 	CardState &state = context.state;
-	if (state.open_event == card.event.row && state.open_action == line.action && state.open_index == line.index) {
+	if (state.open_event == card.event.row && state.open_action == line.action && state.open_index == line.index &&
+	    context.mission.revision() != state.open_revision) {
 		state.open_event = 0;
 		if (state.open_new_text) {
 			for (const BoardChip &chip : line.chips) {
@@ -459,9 +506,10 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 	ImGui::PopID();
 }
 
-// A wait as a chip: seconds typed (Enter or leaving it sets it), the steps the game counts beside them.
-void wait_chip(CardContext &context, ui_kit::WrapRow &row, const BoardCard &card, const char *id, const char *field,
-               int64_t steps, const char *tip) {
+// A wait as a chip: seconds typed, set once it is left (Enter, Tab or a click elsewhere; Esc puts back what it
+// held), the steps the game counts beside them.
+void wait_chip(CardContext &context, ui_kit::WrapRow &row, const BoardCard &card, bool repeat, const char *id,
+               const char *field, int64_t steps, const char *tip) {
 	const float em = ImGui::GetFontSize();
 	CardState &state = context.state;
 	row.next(em * 4.0f);
@@ -469,15 +517,19 @@ void wait_chip(CardContext &context, ui_kit::WrapRow &row, const BoardCard &card
 	double seconds = held ? state.waiting_seconds : std::round(logic_units_seconds(steps) * 10.0) / 10.0;
 	ImGui::SetNextItemWidth(em * 4.0f);
 	ImGui::BeginDisabled(!context.editable);
-	const bool entered = ImGui::InputDouble(id, &seconds, 0.0, 0.0, "%.1f", ImGuiInputTextFlags_EnterReturnsTrue);
-	if (ImGui::IsItemActive()) {
+	// No EnterReturnsTrue (InputScalar asserts on it): the seconds are written as they are typed and kept here while
+	// it is active (Esc's revert written too), and set as one edit once it is left.
+	const bool typed = ImGui::InputDouble(id, &seconds, 0.0, 0.0, "%.1f");
+	if (typed || ImGui::IsItemActive()) {
 		state.waiting_event = card.event.row;
 		state.waiting_field = field;
 		state.waiting_seconds = seconds;
 	}
-	if (entered || ImGui::IsItemDeactivatedAfterEdit()) {
+	if (ImGui::IsItemDeactivatedAfterEdit()) {
 		const int64_t to = logic_seconds_steps(seconds);
 		if (to != steps) set_field(context, card.event, field, to);
+		state.waiting_event = 0;
+	} else if (ImGui::IsItemDeactivated()) {
 		state.waiting_event = 0;
 	}
 	ImGui::EndDisabled();
@@ -489,7 +541,7 @@ void wait_chip(CardContext &context, ui_kit::WrapRow &row, const BoardCard &card
 	if (bms::event_steps_wrap(steps)) {
 		row.next(ui_kit::text_width("(!)"));
 		ImGui::TextColored(kWarn, "(!)");
-		ui_kit::tooltip("Past 512 steps the game's countdown wraps: " + logic_steps_words(steps) + ".");
+		ui_kit::tooltip(board_wrap_words(repeat, steps));
 	}
 }
 
@@ -522,19 +574,30 @@ void move_event_popup(CardContext &context, const BoardCard &card) {
 			ImGui::PopID();
 		}
 	}
-	ImGui::TextColored(kWarn, "Every event after the place it leaves or takes is renumbered too: the triggers and actions "
-	                          "follow, a script's numbers do not.");
+	ImGui::TextColored(kWarn, "The events between the place it leaves and the place it takes are renumbered too (each place "
+	                          "says which): the triggers and actions follow, a script's numbers do not.");
 	ImGui::PopTextWrapPos();
 	ImGui::Separator();
 	const size_t count = mission.count_of(MissionKind::Event);
 	if (ImGui::BeginChild("places", ImVec2(em * 26.0f, std::min(em * 16.0f, ImGui::GetFrameHeightWithSpacing() * float(count + 1))))) {
 		for (size_t to = 0; to < count; ++to) {
 			if (to == card.index) continue;
-			const std::string label = "To place " + std::to_string(to + 1) + (to == 0 ? " (first)" : to + 1 == count ? " (last)" : "");
+			// The others it renumbers: those between its place and `to` (numbers, 1 first), each one down for a move
+			// later, one up for a move earlier.
+			const size_t others = to > card.index ? to - card.index : card.index - to;
+			const size_t first = to > card.index ? card.index + 2 : to + 1, last = to > card.index ? to + 1 : card.index;
+			const std::string label = "To place " + std::to_string(to + 1) + (to == 0 ? " (first)" : to + 1 == count ? " (last)" : "") +
+			                          ", " + std::to_string(others) + (others == 1 ? " other renumbered" : " others renumbered");
+			ImGui::PushID(int(to));
 			if (ImGui::Selectable(label.c_str())) {
 				window_requests::edit(context.workspace, mission, EditOperation::Move, card.event, to);
 				ImGui::CloseCurrentPopup();
 			}
+			const int shift = to > card.index ? -1 : 1;
+			ui_kit::tooltip(first == last ? "Event " + std::to_string(first) + " becomes event " + std::to_string(int(first) + shift) + "."
+			                              : "Events " + std::to_string(first) + " to " + std::to_string(last) + " become " +
+			                                        std::to_string(int(first) + shift) + " to " + std::to_string(int(last) + shift) + ".");
+			ImGui::PopID();
 		}
 	}
 	ImGui::EndChild();
@@ -578,14 +641,14 @@ std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionD
 	return script_uses_of(graph->referrers_of(ReferenceKind::MissionEventLatch, std::to_string(index), mission_event_scope(mission.path())));
 }
 
-int64_t new_variable_index(const SessionView &view, const MissionDocument &mission) {
-	const std::map<int64_t, std::vector<ScriptUse>> scripted = script_variable_uses(view, mission);
-	std::vector<int64_t> events;
-	const std::unique_ptr<MissionNames> base = std::make_unique<MissionNames>();
-	for (const MissionVariable &variable : mission_variables(mission, *base)) events.push_back(variable.index);
-	int64_t index = 0;
-	while (scripted.count(index) || std::find(events.begin(), events.end(), index) != events.end()) ++index;
-	return index;
+std::vector<int64_t> script_variable_indexes(const std::map<int64_t, std::vector<ScriptUse>> &uses) {
+	std::vector<int64_t> out;
+	for (const auto &[index, lines] : uses) out.push_back(index);
+	return out;
+}
+
+bool logic_editable(const SessionView &view, const DocumentBase &document) {
+	return view.allows(EditorRequestKind::EditRecord) && !document.blocked() && !made_by_import(view, document);
 }
 
 bool raise_logic_add(CardContext &context, NodeId event, const LogicType &type, size_t position,
@@ -633,7 +696,11 @@ bool draw_type_picker(CardContext &context, bool actions) {
 		ImGui::PopID();
 		return picked;
 	};
-	if (ImGui::BeginChild("types", ImVec2(em * 24.0f, em * 24.0f))) {
+	// Common and the recipes in sight, every type under its group's header, folded until it is opened (with a filter,
+	// every match under its group's name); the list as tall as it is, the screen's room at most.
+	const float most = std::max(em * 12.0f, ImGui::GetMainViewport()->WorkSize.y - em * 8.0f);
+	ImGui::SetNextWindowSizeConstraints(ImVec2(em * 24.0f, 0.0f), ImVec2(em * 24.0f, most));
+	if (ImGui::BeginChild("types", ImVec2(em * 24.0f, 0.0f), ImGuiChildFlags_AutoResizeY)) {
 		size_t shown = 0;
 		bool header = false;
 		for (const LogicType *type : logic_common_types(actions)) {
@@ -661,14 +728,18 @@ bool draw_type_picker(CardContext &context, bool actions) {
 				ImGui::PopID();
 			}
 		const char *group = nullptr;
+		bool open = false;
+		const bool filtering = state.filter[0] != 0;
+		if (!filtering) ImGui::SeparatorText("By group");
 		for (const LogicType &type : logic_types(actions)) {
 			if (!matches(std::string(type.title) + " " + type.group)) continue;
 			if (group != type.group) {
 				group = type.group;
-				ImGui::SeparatorText(group);
+				if (filtering) ImGui::SeparatorText(group);
+				open = filtering || ImGui::CollapsingHeader(group);
 			}
 			++shown;
-			if (row(type, "all")) chosen = &type;
+			if (open && row(type, "all")) chosen = &type;
 		}
 		if (!shown) ui_kit::empty_state("No type matches the filter.");
 	}
@@ -689,6 +760,7 @@ bool draw_type_picker(CardContext &context, bool actions) {
 			const auto *event = row && row->kind == k(MissionKind::Event) ? static_cast<const EventRow *>(row) : nullptr;
 			const size_t count = event ? event->native.actions.size() : 0;
 			state.open_event = state.add_event;
+			state.open_revision = context.mission.revision();
 			state.open_action = true;
 			state.open_index = state.add_position == SIZE_MAX || state.add_position > count ? count : state.add_position;
 			state.open_new_text = true;
@@ -708,8 +780,15 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 	ImGui::PushID(static_cast<int>(card.event.row));
 	const bool selected = context.selected.row == card.event.row;
 	if (selected) ImGui::PushStyleColor(ImGuiCol_Border, ImGui::GetStyleColorVec4(ImGuiCol_NavCursor));
-	ImGui::BeginChild("card", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
+	const bool in_sight = ImGui::BeginChild("card", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
 	if (selected) ImGui::PopStyleColor();
+	// Out of sight (scrolled past): nothing drawn, its height kept from when it was; what it was asked (its picker,
+	// its Move event..., a chip to open) waits in the state until it is in sight.
+	if (!in_sight) {
+		ImGui::EndChild();
+		ImGui::PopID();
+		return asked;
+	}
 	const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
 
 	// The header: fold, the title (a click selects the event, or answers a pick waiting on an event), the live
@@ -730,7 +809,7 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 	ImGui::SameLine();
 	// The title cut to the room (a long name in a narrow pane), its id the whole title's.
 	const std::string fitted = ui_kit::fit(card.title, std::max(1.0f, ImGui::GetContentRegionAvail().x));
-	const std::string title = fitted == card.title ? card.title : fitted + "###" + card.title;
+	const std::string title = fitted + "###" + card.title;
 	if (ImGui::Selectable(title.c_str(), selected, ImGuiSelectableFlags_AllowOverlap,
 	                      ImVec2(ui_kit::text_width(fitted.c_str()), 0.0f))) {
 		asked.selected = true;
@@ -774,7 +853,8 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		ImGui::EndDisabled();
 		ui_kit::tooltip(tip);
 	};
-	flag("Repeats", bms::EventFlags::ResetAfter, card.repeats, "Checked again after it acts, its repeat's wait later.");
+	flag("Repeats", bms::EventFlags::ResetAfter, card.repeats,
+	     "Checked again its repeat's wait after its triggers held: the wait and the repeat count down together.");
 	flag("At start", bms::EventFlags::PreMission, card.at_start, "Checked once, as the mission starts.");
 	flag("At end", bms::EventFlags::PostMission, card.at_end, "Checked once, as the mission ends.");
 	// The type picker an add or a retype of this card asked for (the board's keys too), drawn at the card's end.
@@ -807,11 +887,13 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 	waits.next(ui_kit::text_width("Wait"));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("Wait");
-	wait_chip(context, waits, card, "##delay", "delay", card.delay_steps, "How long after its triggers hold it acts.");
+	wait_chip(context, waits, card, false, "##delay", "delay", card.delay_steps, "How long after its triggers hold it acts.");
 	if (card.repeats) {
 		waits.next(ui_kit::text_width("again after"));
 		ImGui::TextDisabled("again after");
-		wait_chip(context, waits, card, "##repeat", "reset_after", card.repeat_steps, "How long after it acts it is checked again.");
+		wait_chip(context, waits, card, true, "##repeat", "reset_after", card.repeat_steps,
+		          "How long after its triggers held it is checked again: it counts down with the wait, and the game checks it on "
+		          "the pass after it ends.");
 	}
 
 	// The triggers, then the actions.
@@ -838,7 +920,12 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		          ImGui::GetID(actions ? "drop_actions" : "drop_triggers"));
 	};
 	add_button(false);
-	if (card.actions.empty()) ImGui::TextDisabled("Then nothing.");
+	if (card.actions.empty()) {
+		ImGui::PushTextWrapPos(0.0f);
+		ImGui::TextDisabled("Then no action: as it fires it is only marked fired, which a trigger's \"has fired\", a waypoint "
+		                    "marker advancing on it and the script's event() read.");
+		ImGui::PopTextWrapPos();
+	}
 	for (const BoardLine &line : card.actions) draw_line(context, card, line, line.index == 0 ? "Then" : "", lead, right, asked);
 	add_button(true);
 	// The notes: the editor's reading, never gating.

@@ -127,13 +127,18 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 // for a move logic_move_edits refuses.
 std::string logic_move_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event, size_t position,
                                 const MissionNames &names);
-// The Set of a trigger's condition flags that negates it or not, and the one that joins it to the next
-// by `join`, each keeping the flag word's other bits.
+// The other half of that preview: what the event the record leaves reads once it moved to another event, and
+// whether that leaves it no trigger as the mission runs (`untriggered`: the game then holds it on its first check).
+// "" for a move within one event, or one logic_move_edits refuses.
+std::string logic_move_left_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event,
+                                     size_t position, const MissionNames &names, bool *untriggered = nullptr);
 // The steps a wait of `seconds` comes to, as a delay or a repeat holds it: round(seconds / 1.024), a step being
 // bms::kEventStepTicks (64) ticks of the 62.5 Hz clock [docs/mission/bms-event-runtime-re.md 1.6]; 0 at least, 1023
 // at most (ten bits on disk). Past bms::kEventStepsUnwrapped (512) steps the game's countdown wraps and ends on
 // the next pass (bms::event_steps_wrap; logic_steps_words says so).
 int64_t logic_seconds_steps(double seconds);
+// The Set of a trigger's condition flags that negates it or not, and the one that joins it to the next
+// by `join`, each keeping the flag word's other bits.
 bool logic_negate_edit(const MissionDocument &document, const NodeAddress &trigger, bool negated, Edit &out);
 bool logic_join_edit(const MissionDocument &document, const NodeAddress &trigger, LogicJoin join, Edit &out);
 

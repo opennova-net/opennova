@@ -18,6 +18,7 @@
 #include <editor/documents/mission_uses.h>
 #include <editor/graph/display_names.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_card.h>
@@ -160,7 +161,8 @@ void event_form(Workspace &workspace, const MissionDocument &mission, NodeId eve
 	const SessionView &view = workspace.view();
 	const ViewNames names(view, mission);
 	BoardCard card;
-	if (!mission_board_card(mission, event, *names, card, view.activity.live_logic.empty() ? nullptr : &view.activity.live_logic))
+	if (!mission_board_card(mission, event, *names, card, view.activity.live_logic.empty() ? nullptr : &view.activity.live_logic,
+	                        mission_script_events(view, mission.path())))
 		return;
 	taken.fields = {"flags", "reset_after", "delay"};
 	taken.collections = {k(MissionKind::Trigger), k(MissionKind::Action)};
@@ -169,6 +171,7 @@ void event_form(Workspace &workspace, const MissionDocument &mission, NodeId eve
 	CardContext context{workspace, mission, names.source(), editable, view.documents.selection.primary,
 	                    view.workspace.document(mission.path()).pick, inspector_cards()};
 	draw_mission_card(context, card);
+	inspector_cards().settle_open(mission.revision());
 }
 
 void record_form(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record, InspectorTaken &taken,
@@ -276,7 +279,7 @@ void record_form(Workspace &workspace, const MissionDocument &mission, const Nod
 bool draw_mission_inspector(Workspace &workspace, const Document &document, const NodeAddress &record, InspectorTaken &taken) {
 	const MissionDocument *mission = mission_of(document);
 	if (!mission) return false;
-	const bool editable = workspace.view().allows(EditorRequestKind::EditRecord) && !document.blocked();
+	const bool editable = logic_editable(workspace.view(), document);
 	if (!record.child && record.kind == k(MissionKind::Event)) {
 		ImGui::PushID("mission_event");
 		event_form(workspace, *mission, record.row, taken, editable);
@@ -385,7 +388,7 @@ void mission_logic_row_items(Workspace &workspace, const MissionDocument &missio
 	const bool trigger = record.child && record.kind == k(MissionKind::Trigger);
 	const bool action = record.child && record.kind == k(MissionKind::Action);
 	if (!event && !trigger && !action) return;
-	const bool editable = workspace.view().allows(EditorRequestKind::EditRecord) && !mission.blocked();
+	const bool editable = logic_editable(workspace.view(), mission);
 	// An event's Add trigger and Add action, each its types by name (the event selected stays so).
 	if (event)
 		for (const bool actions : {false, true}) {

@@ -6,6 +6,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_table.h>
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms.h>
 
 namespace opennova::editor {
@@ -94,17 +95,44 @@ BoardLine line_of(const MissionDocument &document, const EventRow &event, const 
 	return line;
 }
 
-void wait_note(std::vector<BoardNote> &notes, const NodeAddress &event, const char *what, int64_t steps) {
+void wait_note(std::vector<BoardNote> &notes, const NodeAddress &event, bool repeat, int64_t steps) {
 	if (!bms::event_steps_wrap(steps)) return;
-	notes.push_back({event, kBoardWaitWraps,
-	                 std::string("Its ") + what + " of " + std::to_string(steps) + " steps is past 512: the game's countdown wraps, so "
-	                 "it comes to " + logic_steps_words(steps) + "."});
+	notes.push_back({event, kBoardWaitWraps, board_wrap_words(repeat, steps)});
+}
+
+// Whether anything reads that the event at `index` fired (its latch): a trigger's Event parameter naming it (the
+// cat-3 triggers read the latch window [bms-event-runtime-re.md 7.4]), a type-6005 marker advancing on it (the
+// spawn-point hook runs as it fires, its actions or none [orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0;
+// D-EVT-9]), or the mission's script's event(n) (`script`, its caller's: the graph's).
+bool firing_read(const MissionDocument &document, size_t index, const std::vector<size_t> &script) {
+	if (std::find(script.begin(), script.end(), index) != script.end()) return true;
+	for (const Node *row : document.rows_of(MissionKind::Event)) {
+		const EventRow &event = static_cast<const EventRow &>(*row);
+		for (const bms::Trigger &trigger : event.native.triggers) {
+			const int32_t params[] = {trigger.param1, trigger.param2, trigger.param3, trigger.param4};
+			for (int slot = 0; slot < 4; ++slot)
+				if (mission::trigger_param_kind(trigger, slot) == ParamKind::Event && params[slot] == int32_t(index)) return true;
+		}
+	}
+	for (const auto &row : document.rows()) {
+		if (!row || !is_entity_kind(row->kind)) continue;
+		const bms::Entity &marker = static_cast<const EntityRow &>(*row).native;
+		if (marker.type_id == def::DEF_TYPE_WAYPOINT && marker.wp_adv_trigger == int32_t(index)) return true;
+	}
+	return false;
 }
 
 } // namespace
 
+std::string board_wrap_words(bool repeat, int64_t steps) {
+	const std::string past = std::string("Its ") + (repeat ? "repeat" : "wait") + " of " + std::to_string(steps) +
+	                         " steps is past 512, where the game's countdown wraps: ";
+	return past + (repeat ? "it is checked again " + logic_repeat_words(steps) + " after its triggers held."
+	                      : "it acts " + logic_wait_words(steps) + " after its triggers hold.");
+}
+
 bool mission_board_card(const MissionDocument &document, NodeId event, const MissionNames &names, BoardCard &out,
-                        const LiveLogic *live) {
+                        const LiveLogic *live, const std::vector<size_t> &script_events) {
 	LogicEventForm form;
 	if (!logic_event_form(document, event, names, form)) return false;
 	const Node *row = document.row(event);
@@ -133,12 +161,24 @@ bool mission_board_card(const MissionDocument &document, NodeId event, const Mis
 			if (out.actions.size() < native.native.actions.size())
 				out.actions.push_back(line_of(document, native, {event, k(MissionKind::Action), id.id}, names, header, out.notes));
 	}
-	if (out.actions.empty()) out.notes.insert(out.notes.begin(), {out.event, kBoardNoActions, "It does nothing: it has no action."});
-	if (out.triggers.empty() && !out.at_start && !out.at_end)
+	// An event with no action still fires: it is marked fired and advances the waypoint markers waiting on it
+	// [bms-event-runtime-re.md 1.2, D-EVT-9]. Noted only where nothing reads that.
+	if (out.actions.empty() && !firing_read(document, out.index, script_events))
 		out.notes.insert(out.notes.begin(),
-		                 {out.event, kBoardRightAway, "It has no trigger: it fires right away, as the mission runs."});
-	wait_note(out.notes, out.event, "wait", out.delay_steps);
-	if (out.repeats) wait_note(out.notes, out.event, "repeat", out.repeat_steps);
+		                 {out.event, kBoardNoActions,
+		                  "It has no action, and nothing reads that it fired: no trigger names it, no waypoint marker advances "
+		                  "on it, no line of the mission's script reads its event()."});
+	// No trigger: the chain holds on its first check [orig: EventTrigger_EvaluateChain, zero triggers true;
+	// 1.3], its actions after its wait [1.2].
+	if (out.triggers.empty() && !out.at_start && !out.at_end) {
+		std::string when = out.delay_steps > 0 ? "It has no trigger: it holds on its first check, as the mission runs, and acts after its "
+		                                         "wait (" + logic_wait_words(out.delay_steps) + ")"
+		                                       : "It has no trigger: it fires right away, as the mission runs";
+		if (out.repeats) when += ", and again each time its repeat ends";
+		out.notes.insert(out.notes.begin(), {out.event, kBoardRightAway, when + "."});
+	}
+	wait_note(out.notes, out.event, false, out.delay_steps);
+	if (out.repeats) wait_note(out.notes, out.event, true, out.repeat_steps);
 	if (live && live->mission == document.path()) out.live = live->event(out.index);
 	return true;
 }
@@ -150,7 +190,7 @@ MissionBoard mission_board(const MissionDocument &document, const MissionNames &
 	for (const Node *row : document.rows_of(MissionKind::Event)) {
 		++out.events;
 		BoardCard card;
-		if (!mission_board_card(document, row->id, names, card, live)) continue;
+		if (!mission_board_card(document, row->id, names, card, live, query.script_events)) continue;
 		out.noted += !card.notes.empty();
 		if (query.attention && card.notes.empty()) continue;
 		if (!filter.empty() && lowered(card.title).find(filter) == std::string::npos &&

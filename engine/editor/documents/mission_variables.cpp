@@ -69,9 +69,10 @@ std::vector<MissionVariable> mission_variables(const MissionDocument &document, 
 	return out;
 }
 
-int64_t mission_new_variable(const MissionDocument &document) {
-	std::set<int64_t> used;
+int64_t mission_new_variable(const MissionDocument &document, const std::vector<int64_t> &script) {
+	std::set<int64_t> used(script.begin(), script.end());
 	each_variable(document, [&](const EventRow &, size_t, bool, size_t, int, int64_t value) { used.insert(value); });
+	for (const mission::VariableName &name : mission_variable_names(document)) used.insert(name.index);
 	int64_t index = 0;
 	while (used.count(index)) ++index;
 	return index;

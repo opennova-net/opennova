@@ -135,6 +135,12 @@ double logic_units_seconds(int64_t units);
 // What a count of steps comes to in the game: "614.4 s", or past 512 steps "about 1.0 s (past 512 steps
 // the game's countdown wraps)".
 std::string logic_steps_words(int64_t steps);
+// What a wait comes to in the game, without the wrap's aside: its steps' seconds ("5.1 s"), past 512 steps
+// "about 1.0 s" (the countdown wraps and ends on the pass after it is armed).
+std::string logic_wait_words(int64_t steps);
+// When a repeating event is checked again after its triggers held, as its sentence says it: its repeat's steps
+// and the pass after ("about 6.1 s" for 5 steps), past 512 steps "about 2.0 s".
+std::string logic_repeat_words(int64_t steps);
 
 // A type of trigger or of action as "Add trigger" and "Add action" offer it: its type and sub-type (a
 // trigger's main type and sub-type, an action's type and sub-type), what it is called by itself ("Entity

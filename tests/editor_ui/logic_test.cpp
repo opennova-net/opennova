@@ -108,9 +108,11 @@ void test_event_inspector() {
 	const ImGuiID popup = ImHashStr("types", 0, card->ID);
 	CHECK(ImGui::IsPopupOpen(popup, ImGuiPopupFlags_None), "+ action opens the types");
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"Common", "Objectives and the end", "Win a sub-goal", "Blue team wins"}) &&
-	              text.find("Group AI: Red alert") != std::string::npos,
-	      "the types by name, Common first, then their groups");
+	CHECK(in_order(text, {"Common", "By group", "Objectives and the end"}) && text.find("Blue team wins") == std::string::npos,
+	      "the types by name, Common first, then their groups folded");
+	ui.activate(ImHashStr("Objectives and the end", 0, popup_child(popup, "types")));
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Objectives and the end", "Win a sub-goal", "Blue team wins"}), "a group opened: its types");
 	const int blue = int(opennova::bms::ActionType::BlueWin);
 	ui.activate(ImHashStr("Blue team wins", 0, pushed(pushed(ImHashStr("all", 0, popup_child(popup, "types")), blue), 0)));
 	run.settle();

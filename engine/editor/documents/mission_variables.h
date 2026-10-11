@@ -37,7 +37,8 @@ struct MissionVariable {
 // The variables the events use, and those the mission names (S24 Names) though no event uses them, by number,
 // each with its uses in the events' order.
 std::vector<MissionVariable> mission_variables(const MissionDocument &document, const MissionNames &names);
-// The number a new variable takes: the lowest no trigger or action uses, from 0.
-int64_t mission_new_variable(const MissionDocument &document);
+// The number a new variable takes: the lowest, from 0, that no trigger or action uses, the mission names none
+// (S24 Names), and the mission's script does not use (`script`: its V#, the graph's, given by the caller).
+int64_t mission_new_variable(const MissionDocument &document, const std::vector<int64_t> &script = {});
 
 } // namespace opennova::editor

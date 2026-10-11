@@ -159,6 +159,50 @@ struct Ui {
 		ImGui::ActivateItemByID(id);
 		frames(2);
 	}
+	// Where an item is drawn, by ImGui's own item locator (DebugLocateItem: resolved as the item is added, and only
+	// where its rect meets its window's clip rect; an item scrolled out of sight, or not drawn, never resolves): false
+	// where it is not in sight this frame. The rect is the locator's outline, read off the foreground draw list (its
+	// opaque green vertices; the line it draws from the mouse, kept away, is left out), a pixel or so out of the
+	// item's own all round, so its middle is the item's.
+	bool locate(ImGuiID id, ImRect &rect) {
+		away();
+		ImGui::DebugLocateItem(id);
+		frames(1);
+		if (GImGui->DebugLocateId == id) return false;
+		const ImDrawList *list = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
+		bool found = false;
+		for (const ImDrawVert &vertex : list->VtxBuffer) {
+			if (vertex.col != IM_COL32(0, 255, 0, 255) || vertex.pos.x < -500.0f || vertex.pos.y < -500.0f) continue;
+			if (!found) rect = ImRect(vertex.pos, vertex.pos);
+			else rect.Add(vertex.pos);
+			found = true;
+		}
+		return found;
+	}
+	// A click as a person makes one: the item found in sight (locate), the mouse moved to its middle, where it must be
+	// the item hovered (nothing over it), then pressed and let go. False, nothing pressed, where it is not in sight or
+	// something else takes the mouse there.
+	bool click_item(ImGuiID id, ImGuiMouseButton which = ImGuiMouseButton_Left) {
+		ImRect rect;
+		if (!locate(id, rect)) return false;
+		const ImVec2 at = rect.GetCenter();
+		mouse(at.x, at.y);
+		frames(1);
+		if (GImGui->HoveredId != id) return false;
+		button(true, which);
+		button(false, which);
+		return true;
+	}
+	// The mouse moved onto an item in sight and left there (a submenu opened by hovering it): false where it is not in
+	// sight or something else takes the mouse there.
+	bool hover_item(ImGuiID id) {
+		ImRect rect;
+		if (!locate(id, rect)) return false;
+		const ImVec2 at = rect.GetCenter();
+		mouse(at.x, at.y);
+		frames(3);
+		return GImGui->HoveredId == id;
+	}
 	// A key chord: the keys pressed in order, released in reverse; the requests it raised.
 	std::vector<EditorRequest> chord(std::initializer_list<ImGuiKey> keys) {
 		for (const ImGuiKey k : keys) key(k, true);

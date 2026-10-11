@@ -3,6 +3,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/session/mission_logic_json.h>
 #include <editor/session/mission_queries.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/session_core.h>
 #include <editor/session/view/session_view.h>
 
@@ -156,6 +157,7 @@ JsonValue answer_mission_board(const QueryContext &context, const QueryArgs &arg
 	} else {
 		query.folded = shown.logic_folded;
 	}
+	query.script_events = mission_script_events(view, mission->path());
 	const LiveLogic *live = view.activity.live_logic.empty() ? nullptr : &view.activity.live_logic;
 	const MissionBoard board = mission_board(*mission, *MissionWords(context, *mission), query, live);
 	const JsonPage page = page_of(args);

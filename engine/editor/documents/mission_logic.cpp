@@ -356,7 +356,8 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 	}
 	error = logic_add_refusal(document, to_event, at.action);
 	if (!error.empty()) return false;
-	// Added there with every field it holds, then removed here: one batch, one undo step.
+	// Added there with every field it holds, then removed here: one batch, one undo step. (An action's reserved
+	// words and a trigger's last word are always 0 in a document: the format reads no other and writes 0.)
 	const NodeKind kind = record.kind;
 	Edit add;
 	add.operation = EditOperation::Add;
@@ -404,6 +405,27 @@ std::string logic_move_sentence(const MissionDocument &document, const NodeAddre
 	};
 	if (at.action) place(chain.actions, at.event->native.actions[at.index]);
 	else place(chain.triggers, at.event->native.triggers[at.index]);
+	return event_words(chain, names, header_of(document)).sentence;
+}
+
+std::string logic_move_left_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event,
+                                     size_t position, const MissionNames &names, bool *untriggered) {
+	if (untriggered) *untriggered = false;
+	std::vector<Edit> edits;
+	std::string error;
+	Located at;
+	if (to_event == record.row || !logic_move_edits(document, record, to_event, position, edits, error) ||
+	    !locate(document, record, at))
+		return std::string();
+	mission::EventChain chain = at.event->native;
+	if (at.action) chain.actions.erase(chain.actions.begin() + std::ptrdiff_t(at.index));
+	else chain.triggers.erase(chain.triggers.begin() + std::ptrdiff_t(at.index));
+	// No trigger left: the chain holds on its first check [orig: EventTrigger_EvaluateChain @0x454050, zero triggers
+	// true], unless a start or an end pass alone checks it.
+	const uint32_t flags = uint32_t(chain.event.flags);
+	if (untriggered)
+		*untriggered = !at.action && chain.triggers.empty() &&
+		               !(flags & (uint32_t(bms::EventFlags::PreMission) | uint32_t(bms::EventFlags::PostMission)));
 	return event_words(chain, names, header_of(document)).sentence;
 }
 

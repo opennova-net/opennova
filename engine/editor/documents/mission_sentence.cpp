@@ -845,6 +845,17 @@ std::string logic_steps_words(int64_t steps) {
 	return seconds_words(steps);
 }
 
+std::string logic_wait_words(int64_t steps) {
+	return bms::event_steps_wrap(steps) ? "about " + seconds_words(1) : seconds_words(steps);
+}
+
+std::string logic_repeat_words(int64_t steps) {
+	// The cooldown is armed in the call that latches and not counted down there; its last step clears the latch
+	// and the chain is checked on the pass after [orig: EventTrigger_UpdateEntry @0x454c30; bms-event-runtime-re.md
+	// 1.2]: its steps and one, a wrapped one's one and one.
+	return "about " + seconds_words((bms::event_steps_wrap(steps) ? 1 : steps) + 1);
+}
+
 EventWords event_words(const mission::EventChain &chain, const MissionNames &names, const bms::Header *header) {
 	EventWords out;
 	const uint32_t flags = uint32_t(chain.event.flags);
@@ -920,7 +931,7 @@ EventWords event_words(const mission::EventChain &chain, const MissionNames &nam
 		const bool wraps = bms::event_steps_wrap(reset);
 		if (reset == 0) out.repeat = "Checked again each pass after its triggers held.";
 		else
-			out.repeat = "Checked again about " + seconds_words((wraps ? 1 : reset) + 1) + " after its triggers held" +
+			out.repeat = "Checked again " + logic_repeat_words(reset) + " after its triggers held" +
 			             (wraps ? " (past 512 steps the game's countdown wraps)." : ".");
 	}
 	out.sentence = out.when + ", " + (out.delay.empty() ? std::string("then ") : "then, " + out.delay + ", ") + out.then + ".";

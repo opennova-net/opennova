@@ -377,6 +377,12 @@ int test_move_preview_and_event_move() {
 	                 "When event 1 has fired and " + walker + " is in Zone 20, then, after 5.1 s, kill group 2."));
 	// Within its own event: the event as it reads (one trigger, nowhere else to go).
 	TEST_EXPECT(same(logic_move_sentence(m, f.trigger, f.first.row, 0, names), "When " + walker + " is in Zone 20, then re-arm event 2."));
+	// The event it leaves: its only trigger gone, it holds on its first check as the mission runs (said by the flag);
+	// none for a move within one event.
+	bool untriggered = false;
+	TEST_EXPECT(same(logic_move_left_sentence(m, f.trigger, f.second.row, 0, names, &untriggered), "Right away, then re-arm event 2.") &&
+	            untriggered);
+	TEST_EXPECT(logic_move_left_sentence(m, f.trigger, f.first.row, 0, names, &untriggered).empty() && !untriggered);
 	// The second event moved first: the first's re-arm names it still (now event 1), its trigger the other (now event 2).
 	Edit move;
 	move.operation = EditOperation::Move;

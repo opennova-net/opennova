@@ -49,20 +49,6 @@ constexpr const char *kNotUndoable = " It cannot be undone with Undo.";
 // A fix that edits a document is one step its Undo takes back, and its Save writes.
 constexpr const char *kUndoable = " Undo takes it back, and Save writes it.";
 
-// The game install's spelling of a file it has (view.project.retail_files is sorted by the
-// normalized name), or "" when it has none of that name.
-std::string retail_name(const SessionView &view, const std::string &name) {
-	const std::string wanted = pff::normalized_logical_name(name);
-	const auto found =
-			std::lower_bound(view.project.retail_files.begin(), view.project.retail_files.end(),
-					wanted, [](const std::string &file, const std::string &key) {
-						return pff::normalized_logical_name(file) < key;
-					});
-	return found != view.project.retail_files.end() && pff::normalized_logical_name(*found) == wanted
-			? *found
-			: std::string();
-}
-
 // The import dialog on a file of the game install, planned with the files it needs when the
 // editor's setting says so (SessionView::import_dependencies). Named as the finding names it (`named`,
 // a required file's name as the manifest spells it; the install's spelling when none), the install's
@@ -106,7 +92,7 @@ void requirement_fixes(const RequirementSubject &subject, const SessionView &vie
 	// The game's own file first where the install has it (Fix all and the banner take a finding's first
 	// fix): a placeholder makes a game that starts empty; it is the fix only where the install lacks the
 	// file.
-	const std::string retail = retail_name(view, row->name);
+	const std::string retail = install_file_name(view, row->name);
 	if (!retail.empty()) out.push_back(import_fix(view, retail, row->name));
 	if (const BlankFactory *factory = find_blank_factory_for_role(row->role)) {
 		std::string detail = placeholder(*factory);
@@ -157,7 +143,7 @@ void wrong_kind_fixes(const RequirementSubject &subject, const SessionView &view
 	for (const RequirementRow &candidate : view.project.requirements->rows)
 		if (candidate.role == subject.role) row = &candidate;
 	if (!row || row->state != RequirementState::WrongKind) return;
-	const std::string retail = retail_name(view, row->name);
+	const std::string retail = install_file_name(view, row->name);
 	if (!retail.empty()) out.push_back(import_fix(view, retail, row->name));
 	if (!row->asset_path.empty()) out.push_back(rename_fix(row->asset_path));
 }
@@ -205,6 +191,19 @@ const AssetEntry *sound_bank_for(const ReferenceSubject &missing, const SessionV
 }
 
 } // namespace
+
+// The game install's spelling of a file it has (view.project.retail_files is sorted by the normalized name).
+std::string install_file_name(const SessionView &view, const std::string &name) {
+	const std::string wanted = pff::normalized_logical_name(name);
+	const auto found =
+			std::lower_bound(view.project.retail_files.begin(), view.project.retail_files.end(),
+					wanted, [](const std::string &file, const std::string &key) {
+						return pff::normalized_logical_name(file) < key;
+					});
+	return found != view.project.retail_files.end() && pff::normalized_logical_name(*found) == wanted
+			? *found
+			: std::string();
+}
 
 const AssetEntry *defining_file(const ReferenceSubject &missing, const SessionView &view) {
 	if (!view.project.scan) return nullptr;
@@ -504,12 +503,12 @@ void reference_fixes(const ReferenceSubject &missing, const SessionView &view, c
 	if (reference_row(missing.kind).names_symbol()) return symbol_fixes(missing, view, index, plan, out);
 	const AssetKind kind = reference_row(missing.kind).file;
 	if (kind == AssetKind::Unknown || missing.target.empty()) return;
-	const auto in_game = [&view](const std::string &name) { return !retail_name(view, name).empty(); };
+	const auto in_game = [&view](const std::string &name) { return !install_file_name(view, name).empty(); };
 	std::vector<std::string> names;
 	for (const std::string &name : reference_file_candidates(missing.kind, missing.target, missing.loader_arg, in_game))
 		if (asset_name_fits_kind(name, kind)) names.push_back(name);
 	for (const std::string &name : names) {
-		const std::string retail = retail_name(view, name);
+		const std::string retail = install_file_name(view, name);
 		if (retail.empty()) continue;
 		out.push_back(import_fix(view, retail));
 		break;

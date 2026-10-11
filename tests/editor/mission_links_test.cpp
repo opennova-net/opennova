@@ -98,12 +98,17 @@ int test_pick() {
 	TEST_EXPECT(set("{\"record\": " + std::to_string(organic->id) + ", \"slot\": 0}").size() == 1);
 	TEST_EXPECT(set("{\"record\": " + std::to_string(trigger) + ", \"slot\": 4}").size() == 1);
 	TEST_EXPECT(set("{\"record\": " + std::to_string(trigger) + "}").size() == 1);
+	// A record that is no number, a slot with no record: refused, never taken as an end.
+	TEST_EXPECT(set("{\"record\": \"x\", \"slot\": 0}").size() == 1);
+	TEST_EXPECT(set("{\"slot\": 2}").size() == 1);
 	TEST_EXPECT(session.view().workspace.document(path).pick.slot == 1);
-	// Ended.
+	// Ended: by {}, or by null as the view reports none (its report echoed back).
 	TEST_EXPECT(set("{}").empty());
 	TEST_EXPECT(!session.view().workspace.document(path).pick.active());
 	entry = document_entry(session.view(), path);
 	TEST_EXPECT(entry.get("pick") && entry.get("pick")->is_null());
+	TEST_EXPECT(set("{\"record\": " + std::to_string(trigger) + ", \"slot\": 1}").empty() && set("null").empty());
+	TEST_EXPECT(!session.view().workspace.document(path).pick.active());
 	// S24: a stop removed that a record names by its place: the record keeps that number, and the status line counts
 	// it (the organic walking path 1 from its stop 1, that stop taken out).
 	{

@@ -32,6 +32,7 @@
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_chores.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
@@ -949,7 +950,8 @@ std::string DocumentSet::make_mission_text_table(const std::string &mission) {
 	blank.logical_name = table;
 	blank.role = kBlankMissionTextRole;
 	blank.project_title = view_.project.document->title;
-	blank.values = {{"title", basename_of(mission)}};
+	// Its title the mission's name without its extension, as a new mission's table has it (blank_mission_title).
+	blank.values = {{"title", utf8_of(path_of(basename_of(mission)).stem())}};
 	const std::string relative = placement_path(*view_.project.scan, table, AssetKind::Strings);
 	const auto target = path_of(paths_.root) / path_of(relative);
 	std::vector<uint8_t> bytes;
@@ -981,6 +983,15 @@ void DocumentSet::create_string(const EditorRequest &request, const Document &do
 		return refuse("This field forms no string key: there is no string to make for it.");
 	const std::string table_name = use.scope.substr(0, slash), section = use.scope.substr(slash + 1);
 	const AssetEntry *held = view_.project.scan ? view_.project.scan->find(table_name) : nullptr;
+	// The game install's table of the mission's name is imported first, never hidden by a new one: it holds the
+	// mission's title and its other texts.
+	if (!held) {
+		const std::string installed = install_file_name(view_, table_name);
+		if (!installed.empty())
+			return refuse("The project has no " + table_name + ", but the game install has " + installed +
+			              ", the mission's title and its other texts: import it into the project first (Import, from the game "
+			              "data), then add the text there. A new " + table_name + " would hide it.");
+	}
 	const std::string table_path = held ? held->relative_path : make_mission_text_table(document.path());
 	if (table_path.empty()) return;
 	if (!document_for(table_path)) {
@@ -1033,7 +1044,8 @@ void DocumentSet::create_string(const EditorRequest &request, const Document &do
 	if (!apply_edits(*edited, {set}, false)) return;
 	// What came of it, in its own words: the field's set words read the project's names before they have read the
 	// new key.
-	view_.activity.status = "Made " + made.target + " in " + basename_of(table_path) + "'s " + section + ": '" + text + "'.";
+	view_.activity.status = "Made " + made.target + " in " + basename_of(table_path) + "'s " + section + " ('" + text + "') and set " +
+	                        basename_of(request.path) + "'s " + request.field + " to it: both files changed, unsaved; Save All writes both.";
 	core_.touch(ViewConcern::Output);
 }
 

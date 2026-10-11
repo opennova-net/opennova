@@ -18,6 +18,7 @@
 #include <editor/documents/mission_variables.h>
 #include <editor/graph/display_names.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/editor_requests.h>
@@ -56,6 +57,7 @@ public:
 	void rebind(const DocumentBase &) override {
 		revealing_ = false;
 		key_.reset();
+		state_.forget();
 	}
 	void reveal(const ViewEvent &event) override {
 		if (!logic_record(event.address)) return;
@@ -86,6 +88,8 @@ private:
 	bool revealing_ = false;
 	int reveal_frames_ = 0;
 	uint64_t selection_serial_ = 0;
+	// A popup open last frame takes this frame's Esc (a waiting pick is not ended by it).
+	bool popup_last_frame_ = false;
 };
 
 void MissionBoardPane::set_shown(Workspace &workspace, const MissionDocument &mission, const char *member, io::JsonValue value) {
@@ -128,7 +132,8 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 		ImGui::SetKeyboardFocusHere();
 		focus_filter_ = false;
 	}
-	if (ui_kit::filter_box("##board_filter", filter_, sizeof(filter_), "Filter the events (Ctrl+F)", filter_width)) {
+	// Its Ctrl+F is keys()'s, routed with the board's other keys (the box's own would take it a second time).
+	if (ui_kit::filter_box("##board_filter", filter_, sizeof(filter_), "Filter the events (Ctrl+F)", filter_width, nullptr, false)) {
 		filter_held_ = filter_;
 		set_shown(workspace, mission, "logic_filter", io::JsonValue::make_string(filter_));
 	}
@@ -140,8 +145,8 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 	row.next(ui_kit::checkbox_width(attention.c_str()));
 	bool attend = shown.logic_attention;
 	if (ImGui::Checkbox(attention.c_str(), &attend)) set_shown(workspace, mission, "logic_attention", io::JsonValue::make_bool(attend));
-	ui_kit::tooltip("Only the events the board notes something on (an event that does nothing, a value not set, an area "
-	                "the game drops...): the editor's reading, never a build's refusal.");
+	ui_kit::tooltip("Only the events the board notes something on (an event with no action whose firing nothing reads, a "
+	                "value not set, an area the game drops...): the editor's reading, never a build's refusal.");
 	const bool all_folded = !board_.cards.empty() &&
 	                        std::all_of(board_.cards.begin(), board_.cards.end(), [](const BoardCard &card) { return card.folded; });
 	const char *fold = all_folded ? "Unfold all" : "Fold all";
@@ -183,6 +188,7 @@ void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mi
 		if (ImGui::TreeNode((label + "###variable").c_str())) {
 			draw_variable_name_field(workspace, mission, index, editable);
 			draw_variable_live(workspace, mission, index);
+			ImGui::PushID("events");
 			if (event != events.end())
 				for (size_t i = 0; i < event->second->uses.size(); ++i) {
 					const MissionVariableUse &use = event->second->uses[i];
@@ -193,16 +199,19 @@ void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mi
 					ui_kit::tooltip(line);
 					ImGui::PopID();
 				}
+			ImGui::PopID();
+			ImGui::PushID("script");
 			if (scripted != script_variables_.end())
 				for (size_t i = 0; i < scripted->second.size(); ++i) {
 					const ScriptUse &use = scripted->second[i];
-					ImGui::PushID(int(1000 + i));
+					ImGui::PushID(int(i));
 					const std::string line = use.file + ", line " + std::to_string(use.line);
 					if (ImGui::Selectable(ui_kit::fit(line, ImGui::GetContentRegionAvail().x).c_str()))
 						workspace.request(request::open_document(use.file, use.locator));
 					ui_kit::tooltip("The mission's script uses it there: open it.");
 					ImGui::PopID();
 				}
+			ImGui::PopID();
 			ImGui::TreePop();
 		}
 		ImGui::PopID();
@@ -213,7 +222,7 @@ void MissionBoardPane::variables(Workspace &workspace, const MissionDocument &mi
 
 void MissionBoardPane::keys(Workspace &workspace, const MissionDocument &mission, const WorkspaceView::DocumentView &shown,
                             bool editable) {
-	if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || ImGui::GetIO().WantTextInput) return;
+	if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) || ImGui::GetIO().WantTextInput) return;
 	const SessionView &view = workspace.view();
 	const NodeAddress selected = view.documents.active == mission.path() ? view.documents.selection.primary : NodeAddress();
 	const auto card_of = [&](NodeId event) -> const BoardCard * {
@@ -274,7 +283,7 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 	if (!mission) return;
 	const SessionView &view = workspace.view();
 	const WorkspaceView::DocumentView &shown = view.workspace.document(mission->path());
-	const bool editable = view.allows(EditorRequestKind::EditRecord) && !made_by_import(view, document);
+	const bool editable = logic_editable(view, document);
 	// The board, built again only when what it reads moved.
 	BoardKey key;
 	key.document = mission->identity();
@@ -292,11 +301,12 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 		query.filter = key.filter;
 		query.folded = key.folded;
 		query.attention = key.attention;
+		query.script_events = mission_script_events(view, mission->path());
 		const std::unique_ptr<MissionNames> names = mission_label_names(*mission, source ? &*source : nullptr);
 		board_ = mission_board(*mission, *names, query, view.activity.live_logic.empty() ? nullptr : &view.activity.live_logic);
 		variables_ = mission_variables(*mission, *names);
 		script_variables_ = script_variable_uses(view, *mission);
-		new_variable_ = names->variable(new_variable_index(view, *mission));
+		new_variable_ = names->variable(mission_new_variable(*mission, script_variable_indexes(script_variables_)));
 		variable_names_.clear();
 		for (const auto &[index, lines] : script_variables_) variable_names_[index] = names->variable(index);
 		key_ = key;
@@ -308,7 +318,7 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 	if (shown.pick.active() && mission_pick_slot(*mission, shown.pick.record, shown.pick.slot, picking) &&
 	    picking.kind == mission::ParamKind::Event) {
 		ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Click a card's title for %s (Esc cancels).", picking.label.c_str());
-		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+		if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !popup_last_frame_ && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows))
 			window_requests::pick_in_view(workspace, mission->path(), NodeAddress(), -1);
 	}
 	keys(workspace, *mission, shown, editable);
@@ -347,6 +357,10 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 		if (!found) revealing_ = false;
 	}
 	ImGui::EndChild();
+	// A chip an add asked to open had its frame once the add applied: one its card did not draw then (folded,
+	// filtered, the add refused and an edit since) is not opened later on another line.
+	state_.settle_open(mission->revision());
+	popup_last_frame_ = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
 }
 
 } // namespace

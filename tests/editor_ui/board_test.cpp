@@ -3,10 +3,12 @@
 // the canvas (both drawn, nothing past its room); Ctrl+L hides it again, as the Windows menu's Logic tick does.
 // The cards (ui/mission_card): each event a card, its title, its triggers and actions as lines of words and chips;
 // a card's title clicked selects its event; Down the next; "+ action" opens the type picker, Common first, then
-// the groups, and a type chosen there is one edit_record that keeps the selection; Show text's chip then opens on
-// New text, whose words typed make the mission's text table's next key (set_string_text's create) and the line
-// reads them; the wait chip takes seconds (5 typed is 5 steps); the filter as the workspace holds it, and a card
-// folded to its sentence.
+// the groups folded under their headers, and a type chosen there is one edit_record that keeps the selection; Show
+// text's chip then opens on New text, whose words typed make the mission's text table's next key (set_string_text's
+// create) and the line reads them; the wait chip takes seconds (5 typed is 5 steps), set as it is left by Enter or a
+// click elsewhere, Esc putting it back; the filter as the workspace holds it, and a card folded to its sentence. The
+// board's keys each raise their one request with the board focused, and none of the board's own with the outline
+// focused; a waiting event pick ends on Esc only with the board focused, and Pick on the board shows the board.
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -97,7 +99,7 @@ void test_logic_pane() {
 	const std::vector<const ImGuiWindow *> cards = card_windows();
 	CHECK(cards.size() == 2, "two cards drawn");
 	if (cards.size() == 2) {
-		run.ui.activate(item_id(cards[0]->ID, {"Event 1"}));
+		run.ui.activate(item_id(cards[0]->ID, {"###Event 1"}));
 		run.settle();
 		const Node *first = mission->rows_of(MissionKind::Event)[0];
 		const std::vector<EditorRequest> clicked = run.take();
@@ -137,7 +139,7 @@ void test_cards() {
 	std::vector<const ImGuiWindow *> cards = card_windows();
 	CHECK(cards.size() == 2, "two cards");
 	if (cards.size() != 2) return;
-	run.ui.activate(item_id(cards[0]->ID, {"Event 1"}));
+	run.ui.activate(item_id(cards[0]->ID, {"###Event 1"}));
 	run.settle();
 	run.take();
 
@@ -152,7 +154,7 @@ void test_cards() {
 
 	// + action on the first card: the type picker, Common first; Show text chosen is one edit_record kept.
 	cards = card_windows();
-	run.ui.activate(item_id(cards[0]->ID, {"Event 1"}));
+	run.ui.activate(item_id(cards[0]->ID, {"###Event 1"}));
 	run.settle();
 	run.take();
 	cards = card_windows();
@@ -160,7 +162,12 @@ void test_cards() {
 	const ImGuiID types = ImHashStr("types", 0, cards[0]->ID);
 	CHECK(ImGui::IsPopupOpen(types, ImGuiPopupFlags_None), "+ action opens the type picker");
 	std::string text = logged_frame(run.ui);
-	CHECK(in_order(text, {"Common", "Send group along a path", "Show text"}), "Common first, then the groups");
+	CHECK(in_order(text, {"Common", "Send group along a path", "By group", "Text and sound"}) && text.find("Show text") == std::string::npos,
+	      "Common first, then the groups, folded");
+	run.ui.activate(ImHashStr("Text and sound", 0, popup_child(types, "types")));
+	text = logged_frame(run.ui);
+	CHECK(in_order(text, {"By group", "Text and sound", "Show text"}), "a group's header opens it");
+	CHECK(overflowing().empty(), "the picker fits its room");
 	const int show = int(opennova::bms::ActionType::OutputText);
 	run.ui.activate(ImHashStr("Show text", 0, pushed(pushed(ImHashStr("all", 0, popup_child(types, "types")), show), 0)));
 	run.settle();
@@ -208,6 +215,29 @@ void test_cards() {
 	run.ui.away();
 	text = logged_frame(run.ui);
 	CHECK(text.find("(5 steps)") != std::string::npos, "the card reads its wait in steps");
+	// Typed and left by a click elsewhere: set all the same (no Enter needed); typed and Esc: nothing set.
+	cards = card_windows();
+	run.ui.activate(item_id(cards[0]->ID, {"##delay"}));
+	ImGui::GetIO().AddInputCharactersUTF8("7");
+	run.ui.frames(1);
+	run.ui.click(ImVec2(cards[0]->Pos.x + cards[0]->Size.x - 6.0f, cards[0]->Pos.y + cards[0]->Size.y - 4.0f));
+	raised = run.ui.drain();
+	const EditorRequest *left = only(raised, EditorRequestKind::EditRecord);
+	CHECK(left && left->edits.size() == 1 && left->edits[0].field == "delay" && left->edits[0].value == Value(int64_t(7)),
+	      "the wait chip left by a click: 7 s set (7 steps)");
+	for (const EditorRequest &request : raised) run.session.handle(request);
+	run.settle();
+	cards = card_windows();
+	run.ui.activate(item_id(cards[0]->ID, {"##delay"}));
+	ImGui::GetIO().AddInputCharactersUTF8("9");
+	run.ui.frames(1);
+	raised = run.ui.chord({ImGuiKey_Escape});
+	run.ui.frames(1);
+	for (EditorRequest &request : run.ui.drain()) raised.push_back(std::move(request));
+	CHECK(!only(raised, EditorRequestKind::EditRecord), "Esc: nothing set");
+	run.ui.away();
+	text = logged_frame(run.ui);
+	CHECK(text.find("(7 steps)") != std::string::npos, "the card reads the wait it holds");
 
 	// A pick waiting on the second event's Event parameter: the second card's title answers it, the pick ended.
 	const std::vector<Document::Collection> second_lists = mission->collections_of({second->id, second->kind, 0});
@@ -221,8 +251,14 @@ void test_cards() {
 	run.ui.away();
 	text = logged_frame(run.ui);
 	CHECK(text.find("Click a card's title for") != std::string::npos, "the board says what to click");
+	// Esc in another window (Files) is that window's: the pick still waits.
+	run.ui.focus("Files");
+	run.ui.chord({ImGuiKey_Escape});
+	run.settle();
+	CHECK(v.workspace.document(run.path).pick.active(), "Esc elsewhere: the pick still waits");
+	run.ui.focus("Document");
 	cards = card_windows();
-	run.ui.activate(item_id(cards[1]->ID, {"Event 2"}));
+	run.ui.activate(item_id(cards[1]->ID, {"###Event 2"}));
 	run.settle();
 	raised = run.take();
 	const EditorRequest *picked = only(raised, EditorRequestKind::EditRecord);
@@ -347,7 +383,7 @@ void test_script_uses() {
 	const std::vector<const ImGuiWindow *> cards = card_windows();
 	CHECK(cards.size() == 2, "two cards");
 	if (cards.size() != 2) return;
-	run.ui.activate(item_id(cards[1]->ID, {"Event 2"}));
+	run.ui.activate(item_id(cards[1]->ID, {"###Event 2"}));
 	run.settle();
 	run.take();
 	run.ui.mouse(cards[1]->Pos.x + ImGui::GetStyle().WindowPadding.x + ImGui::GetFrameHeight() * 2.0f, cards[1]->Pos.y +
@@ -361,18 +397,185 @@ void test_script_uses() {
 	run.ui.frames(2);
 	run.ui.away();
 	text = logged_frame(run.ui);
-	CHECK(in_order(text, {"Move Event 2", "Named by 1 trigger", "names it by its number on 1 line", "logic.wac, line 1", "To place 1"}),
-	      "Move event...: what names it, the script's line, the places");
+	CHECK(in_order(text, {"Move Event 2", "Named by 1 trigger", "names it by its number on 1 line", "logic.wac, line 1",
+	                      "To place 1 (first), 1 other renumbered"}),
+	      "Move event...: what names it, the script's line, the places and what each renumbers");
 	ImGui::ClosePopupsExceptModals();
 	run.ui.frames(1);
 }
 
+// A chord pressed (its keys in order, let go in reverse) and the requests it raised.
+std::vector<EditorRequest> press_chord(Ui &ui, const std::vector<ImGuiKey> &keys) {
+	for (const ImGuiKey key : keys) ui.key(key, true);
+	for (auto key = keys.rbegin(); key != keys.rend(); ++key) ui.key(*key, false);
+	return ui.drain();
+}
+
+// m13: the board's keys, a card selected and the board focused: each raises its one request (or opens its one thing),
+// no other window answering it too; with the outline focused, none of the board's own.
+void test_board_keys() {
+	MissionRun run("opennova_editor_ui_board_keys");
+	CHECK(run.open(), "the mission open");
+	const MissionDocument *mission = run.mission();
+	if (!mission) return;
+	show_logic(run);
+	const Node *first = mission->rows_of(MissionKind::Event)[0];
+	// A second action on the first event, so its first can move down.
+	const LogicType *blue = logic_type(true, int32_t(opennova::bms::ActionType::BlueWin), 0);
+	std::vector<Edit> edits;
+	std::string error;
+	CHECK(blue && logic_add_edits(*mission, first->id, *blue, SIZE_MAX, edits, error), "a second action planned");
+	run.session.handle(request::edit_record(run.path, edits));
+	run.session.handle(request::select_record(run.path, {first->id, first->kind, 0}));
+	run.settle();
+	run.take();
+	std::vector<const ImGuiWindow *> cards = card_windows();
+	CHECK(cards.size() == 2, "two cards");
+	if (cards.size() != 2) return;
+	const auto focus_card = [&] {
+		cards = card_windows();
+		ImGui::FocusWindow(const_cast<ImGuiWindow *>(cards[0]));
+		run.ui.frames(1);
+		run.ui.drain();
+	};
+	struct Key {
+		std::vector<ImGuiKey> chord;
+		EditorRequestKind kind;
+		const char *what;
+	};
+	const Key keys[] = {
+	        {{ImGuiKey_Space}, EditorRequestKind::SetWorkspace, "Space folds the card"},
+	        {{ImGuiKey_Enter}, EditorRequestKind::SetWorkspace, "Enter brings the Inspector"},
+	        {{ImGuiMod_Ctrl, ImGuiKey_C}, EditorRequestKind::Copy, "Ctrl+C copies"},
+	        {{ImGuiMod_Ctrl, ImGuiKey_X}, EditorRequestKind::Cut, "Ctrl+X cuts"},
+	        {{ImGuiMod_Ctrl, ImGuiKey_V}, EditorRequestKind::Paste, "Ctrl+V pastes"},
+	        {{ImGuiMod_Ctrl, ImGuiKey_D}, EditorRequestKind::Duplicate, "Ctrl+D duplicates"},
+	        {{ImGuiKey_Delete}, EditorRequestKind::EditRecord, "Delete removes"},
+	        {{ImGuiKey_DownArrow}, EditorRequestKind::SelectRecord, "Down selects the next card"},
+	};
+	for (const Key &key : keys) {
+		focus_card();
+		const std::vector<EditorRequest> raised = press_chord(run.ui, key.chord);
+		CHECK(raised.size() == 1 && raised[0].kind == key.kind, key.what);
+		ImGui::ClosePopupsExceptModals();
+		run.ui.frames(1);
+	}
+	// The picker's keys: no request, the card's type picker open.
+	for (const bool actions : {false, true}) {
+		focus_card();
+		const std::vector<EditorRequest> raised =
+		        press_chord(run.ui, {ImGuiMod_Ctrl, ImGuiMod_Shift, actions ? ImGuiKey_A : ImGuiKey_T});
+		run.ui.frames(1);
+		CHECK(raised.empty() && ImGui::IsPopupOpen(ImHashStr("types", 0, card_windows()[0]->ID), ImGuiPopupFlags_None),
+		      actions ? "Ctrl+Shift+A opens the action types" : "Ctrl+Shift+T opens the trigger types");
+		ImGui::ClosePopupsExceptModals();
+		run.ui.frames(1);
+	}
+	// Ctrl+F: the filter takes the keyboard, nothing raised.
+	focus_card();
+	std::vector<EditorRequest> raised = press_chord(run.ui, {ImGuiMod_Ctrl, ImGuiKey_F});
+	run.ui.frames(1);
+	CHECK(raised.empty() && ImGui::GetIO().WantTextInput, "Ctrl+F: the board's filter has the keyboard");
+	ImGui::ClearActiveID();
+	run.ui.frames(1);
+	// Alt+Down and Alt+Up on the first action: one Move down; none up from the first place.
+	const std::vector<Document::Collection> lists = mission->collections_of({first->id, first->kind, 0});
+	CHECK(lists.size() == 2 && lists[1].ids.size() == 2, "two actions");
+	if (lists.size() != 2 || lists[1].ids.size() != 2) return;
+	run.session.handle(request::select_record(run.path, {first->id, node_kind(MissionKind::Action), lists[1].ids[0]}));
+	run.settle();
+	run.take();
+	focus_card();
+	raised = press_chord(run.ui, {ImGuiMod_Alt, ImGuiKey_DownArrow});
+	const EditorRequest *move = only(raised, EditorRequestKind::EditRecord);
+	CHECK(raised.size() == 1 && move && move->edits.size() == 1 && move->edits[0].operation == EditOperation::Move &&
+	              move->edits[0].position == 1,
+	      "Alt+Down moves the action down, one request");
+	focus_card();
+	CHECK(press_chord(run.ui, {ImGuiMod_Alt, ImGuiKey_UpArrow}).empty(), "Alt+Up from the first place: nothing");
+	// The outline focused: none of the board's own keys answers.
+	run.session.handle(request::select_record(run.path, {first->id, first->kind, 0}));
+	run.settle();
+	run.take();
+	const ImGuiWindow *outline = MissionRun::drawn_window("/outline_column_");
+	CHECK(outline != nullptr, "the outline");
+	if (!outline) return;
+	ImGui::FocusWindow(const_cast<ImGuiWindow *>(outline));
+	run.ui.frames(1);
+	run.ui.drain();
+	raised = press_chord(run.ui, {ImGuiKey_Space});
+	CHECK(workspace_sets(raised, "document", "logic_folded").empty(), "Space in the outline folds no card");
+	for (const ImGuiKey letter : {ImGuiKey_T, ImGuiKey_A}) {
+		ImGui::FocusWindow(const_cast<ImGuiWindow *>(MissionRun::drawn_window("/outline_column_")));
+		run.ui.frames(1);
+		press_chord(run.ui, {ImGuiMod_Ctrl, ImGuiMod_Shift, letter});
+		run.ui.frames(1);
+		cards = card_windows();
+		CHECK(!cards.empty() && !ImGui::IsPopupOpen(ImHashStr("types", 0, cards[0]->ID), ImGuiPopupFlags_None),
+		      "the board's picker keys in the outline: no picker");
+	}
+}
+
+// m9: an Event value's Pick on the board, from the Inspector with the board hidden, shows the board (its cards' titles
+// answer the pick, its Esc ends it) along with the pick.
+void test_pick_shows_board() {
+	MissionRun run("opennova_editor_ui_board_pick");
+	CHECK(run.open(), "the mission open");
+	const MissionDocument *mission = run.mission();
+	if (!mission) return;
+	const SessionView &v = run.session.view();
+	CHECK(!v.workspace.document(run.path).logic, "the board hidden");
+	const Node *second = mission->rows_of(MissionKind::Event)[1];
+	const std::vector<Document::Collection> lists = mission->collections_of({second->id, second->kind, 0});
+	CHECK(lists.size() == 2 && !lists[0].ids.empty(), "the second event's trigger");
+	if (lists.size() != 2 || lists[0].ids.empty()) return;
+	const NodeAddress fired{second->id, node_kind(MissionKind::Trigger), lists[0].ids[0]};
+	run.session.handle(request::select_record(run.path, fired));
+	run.settle();
+	run.take();
+	// The Inspector's line: its "+" found in sight, then along its row the value whose menu offers Pick on the board.
+	const ImGuiID base = pushed(item_id(Ui::window_id("Inspector"), {"mission_record", "line"}), static_cast<int>(fired.child));
+	ImRect plus;
+	CHECK(run.ui.locate(ImHashStr("+", 0, base), plus), "the Inspector's line in sight");
+	const ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
+	if (!inspector || plus.Min.x == plus.Max.x) return;
+	std::vector<EditorRequest> raised;
+	bool found = false;
+	std::vector<ImGuiID> tried;
+	for (float x = plus.Max.x + 4.0f; x < inspector->Pos.x + inspector->Size.x - 4.0f && !found; x += 4.0f) {
+		run.ui.mouse(x, plus.GetCenter().y);
+		run.ui.frames(1);
+		const ImGuiID hovered = GImGui->HoveredId;
+		if (!hovered || std::find(tried.begin(), tried.end(), hovered) != tried.end()) continue;
+		tried.push_back(hovered);
+		run.ui.button(true, ImGuiMouseButton_Right);
+		run.ui.button(false, ImGuiMouseButton_Right);
+		const ImGuiWindow *menu = GImGui->OpenPopupStack.Size ? GImGui->OpenPopupStack.back().Window : nullptr;
+		if (menu && run.ui.locate(item_id(menu->ID, {"Pick on the board"}), plus)) {
+			found = run.ui.click_item(item_id(menu->ID, {"Pick on the board"}));
+			run.settle();
+			raised = run.take();
+		} else {
+			ImGui::ClosePopupsExceptModals();
+			run.ui.frames(1);
+		}
+	}
+	CHECK(found, "the event value's menu: Pick on the board");
+	CHECK(workspace_sets(raised, "document", "logic").size() == 1 && workspace_sets(raised, "document", "pick").size() == 1,
+	      "Pick on the board: the board shown, the pick set");
+	CHECK(v.workspace.document(run.path).logic && v.workspace.document(run.path).pick.active(), "the session holds both");
+	run.ui.away();
+	CHECK(logged_frame(run.ui).find("Click a card's title for") != std::string::npos, "the board says what to click");
+}
+
 // A8, the round's acceptance: area X exists, the mission open. Right-click X in the 3D view, New event, "When the
-// player is inside this area" (2 clicks: the board opens on the new card); "+ action", "Show text" (2: its chip
-// opens on New text); "Get to the bridge" typed, Enter; the wait chip, 5 typed, Enter (1 click). A ledger counts
-// what a person does: a click (or right-click) of an item, a submenu opened by hovering it (no click), a text typed
-// with its Enter one entry. 5 clicks, 2 typed entries, no Inspector; the requests each step raises; the card then
-// reads "When the player is in Zone 20, then, after 5.1 s, show text 1: 'Get to the bridge'.".
+// player is inside this area" (2 clicks: the board opens on the new card); "+ action", the "Text and sound" header,
+// "Show text" (3: its chip opens on New text); "Get to the bridge" typed, Enter; the wait chip, 5 typed, Enter (1
+// click). A ledger counts what a person does, each with the mouse where a person sees it: a click (or right-click) of
+// an item drawn in sight and hovered at its middle (Ui::click_item: never an item scrolled out of sight), a submenu
+// opened by hovering it (no click), a text typed with its Enter one entry. 6 clicks, 2 typed entries, no Inspector;
+// the requests each step raises; the card then reads "When the player is in Zone 20, then, after 5.1 s, show text 1:
+// 'Get to the bridge'.".
 struct Ledger {
 	MissionRun &run;
 	int clicks = 0;
@@ -382,10 +585,12 @@ struct Ledger {
 		run.settle();
 		for (EditorRequest &request : run.take()) raised.push_back(std::move(request));
 	}
-	void click(ImGuiID id) {
+	bool click(ImGuiID id, const char *what) {
 		++clicks;
-		run.ui.activate(id);
+		const bool clicked = run.ui.click_item(id);
+		CHECK(clicked, (std::string(what) + ": in sight, under the mouse, clicked").c_str());
 		pump();
+		return clicked;
 	}
 	void right_click(ImVec2 at) {
 		++clicks;
@@ -395,7 +600,11 @@ struct Ledger {
 		pump();
 	}
 	// A submenu opened by hovering it: no click.
-	void hover_open(ImGuiID id) { run.ui.activate(id); }
+	bool hover_open(ImGuiID id, const char *what) {
+		const bool hovered = run.ui.hover_item(id);
+		CHECK(hovered, (std::string(what) + ": in sight, hovered").c_str());
+		return hovered;
+	}
 	void type(const char *text) {
 		++typed;
 		ImGui::GetIO().AddInputCharactersUTF8(text);
@@ -452,14 +661,14 @@ void test_acceptance() {
 	const ImGuiWindow *column = MissionRun::drawn_window("/viewport_column_");
 	CHECK(column != nullptr, "the 3D view's column");
 	if (!column) return;
-	ledger.hover_open(popup_item(item_id(column->ID, {"mission_canvas_menu"}), "New event"));
+	ledger.hover_open(popup_item(item_id(column->ID, {"mission_canvas_menu"}), "New event"), "New event");
 	const std::vector<const MissionRecipe *> recipes = mission_recipes_for(opennova::mission::ParamKind::Zone);
 	int offer = -1;
 	for (size_t i = 0; i < recipes.size(); ++i)
 		if (std::string(recipes[i]->token) == "player_in_area") offer = int(i);
 	CHECK(offer >= 0, "the area's recipes hold the player's");
 	if (offer < 0) return;
-	ledger.click(item_id(pushed(ImHashStr("##Menu_00"), offer), {"When the player is inside this area"}));
+	ledger.click(item_id(pushed(ImHashStr("##Menu_00"), offer), {"When the player is inside this area"}), "the player's recipe");
 	std::vector<EditorRequest> raised = ledger.take();
 	CHECK(count_kind(raised, EditorRequestKind::EditRecord) == 1 && workspace_sets(raised, "document", "logic").size() == 1,
 	      "New event: the recipe's batch, the Logic pane shown");
@@ -474,12 +683,13 @@ void test_acceptance() {
 	CHECK(card != nullptr && !card->Hidden, "the board shows its card, in sight");
 	if (!card) return;
 
-	// + action, Show text (in its group): its chip opens on New text.
-	ledger.click(item_id(card->ID, {"+ action"}));
+	// + action, the Text and sound header, Show text: its chip opens on New text.
+	ledger.click(item_id(card->ID, {"+ action"}), "+ action");
 	const ImGuiID types = ImHashStr("types", 0, card->ID);
 	CHECK(ImGui::IsPopupOpen(types, ImGuiPopupFlags_None), "the type picker open");
+	ledger.click(ImHashStr("Text and sound", 0, popup_child(types, "types")), "the Text and sound header");
 	const int show = int(opennova::bms::ActionType::OutputText);
-	ledger.click(ImHashStr("Show text", 0, pushed(pushed(ImHashStr("all", 0, popup_child(types, "types")), show), 0)));
+	ledger.click(ImHashStr("Show text", 0, pushed(pushed(ImHashStr("all", 0, popup_child(types, "types")), show), 0)), "Show text");
 	raised = ledger.take();
 	const EditorRequest *add = only(raised, EditorRequestKind::EditRecord);
 	CHECK(add && add->keep_selection, "Show text added, the card kept selected");
@@ -498,7 +708,7 @@ void test_acceptance() {
 	run.ui.frames(1);
 	card = card_of(made->id);
 	if (!card) return;
-	ledger.click(item_id(card->ID, {"##delay"}));
+	ledger.click(item_id(card->ID, {"##delay"}), "the wait chip");
 	ledger.type("5");
 	raised = ledger.take();
 	const EditorRequest *wait = only(raised, EditorRequestKind::EditRecord);
@@ -506,9 +716,9 @@ void test_acceptance() {
 	              wait->edits[0].value == Value(int64_t(5)),
 	      "the wait: 5 s is 5 steps");
 
-	// The ledger: 5 clicks, 2 typed entries, and the Inspector never brought forward.
+	// The ledger: 6 clicks, 2 typed entries, and the Inspector never brought forward.
 	std::printf("acceptance: %d clicks, %d typed entries\n", ledger.clicks, ledger.typed);
-	CHECK(ledger.clicks <= 6 && ledger.clicks == 5 && ledger.typed == 2, "5 clicks, 2 typed entries");
+	CHECK(ledger.clicks <= 6 && ledger.clicks == 6 && ledger.typed == 2, "6 clicks, 2 typed entries");
 	// The card reads it, the text by its words once the project's names have read the table.
 	run.session.handle(request::save_all());
 	run.session.run_operations();
@@ -533,6 +743,8 @@ void run_board_tests() {
 	test_cards();
 	test_line_drag();
 	test_script_uses();
+	test_board_keys();
+	test_pick_shows_board();
 	test_acceptance();
 }
 

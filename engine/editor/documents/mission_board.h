@@ -3,8 +3,8 @@
 // The Event board's portable half (ADR 0046 S24, The board): a mission's events as cards, each reading as its
 // sentence, its triggers and actions as lines of words whose values are chips. Built from the logic's forms
 // (documents/mission_logic.h) and the words' runs (mission_sentence.h), so the board says what the Inspector and
-// the outline say. Its notes are the editor's own reading of a card for the author (an event that does nothing,
-// a value left unset, a zone the game drops): listed, never gating (the build gate is retail's alone).
+// the outline say. Its notes are the editor's own reading of a card for the author (an event with no action whose
+// firing nothing reads, a value left unset, a zone the game drops): listed, never gating (the build gate is retail's alone).
 
 #include <cstddef>
 #include <cstdint>
@@ -82,6 +82,9 @@ struct BoardQuery {
 	std::string filter;
 	std::vector<NodeId> folded;
 	bool attention = false;
+	// The events the mission's script reads by their number (its event(n): the graph's MissionEventLatch edges,
+	// session/script_assist.h mission_script_events), which a card's notes count as reading its firing.
+	std::vector<size_t> script_events;
 };
 
 // The cards shown, in the events' order, and how many events the mission holds and how many of its cards have
@@ -107,6 +110,9 @@ MissionBoard mission_board(const MissionDocument &document, const MissionNames &
                            const LiveLogic *live = nullptr);
 // One event's card (no filter), false for a record that is no event of the mission.
 bool mission_board_card(const MissionDocument &document, NodeId event, const MissionNames &names, BoardCard &out,
-                        const LiveLogic *live = nullptr);
+                        const LiveLogic *live = nullptr, const std::vector<size_t> &script_events = {});
+// What a wait or a repeat past 512 steps comes to, as the card's sentence says it (logic_wait_words,
+// logic_repeat_words): its note's words and its chip's.
+std::string board_wrap_words(bool repeat, int64_t steps);
 
 } // namespace opennova::editor

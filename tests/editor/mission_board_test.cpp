@@ -34,8 +34,12 @@
 #include <editor/session/editor_queries.h>
 #include <editor/session/mission_queries.h>
 #include <editor/session/preferences_store.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
+#include <editor/blank/blank_factory.h>
 #include <editor/session/request_factories.h>
+#include <formats/def/reserved_items.h>
+#include <formats/pff/pff.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
@@ -107,8 +111,8 @@ int test_cards() {
 	const BoardCard &second = board.cards[1];
 	TEST_EXPECT(same(second.title, "Event 2") && second.delay_steps == 5 && same(second.words.delay, "after 5.1 s"));
 
-	// An event of no trigger and no action: fires right away, does nothing; a trigger whose entity is unset; a
-	// wait past 512 steps; a value its type does not read.
+	// An event of no trigger and no action whose firing nothing reads: it fires right away, and is noted for that and
+	// for its no action; a trigger whose entity is unset; a wait past 512 steps; a value its type does not read.
 	std::vector<Edit> edits;
 	std::string error;
 	TEST_EXPECT(recipe_event_edits(m, *mission_recipe("right_away"), NodeAddress(), edits, error) && apply_edits(*document, edits));
@@ -125,9 +129,78 @@ int test_cards() {
 	const BoardCard &noted = board.cards[1];
 	TEST_EXPECT(noted.triggers.size() == 2 && noted.triggers[1].chips.size() == 1 && noted.triggers[1].chips[0].unset);
 	TEST_EXPECT(note_of(noted, kBoardUnset) && same(note_of(noted, kBoardUnset)->words, "Trigger 2: its entity is not set."));
-	TEST_EXPECT(note_of(noted, kBoardWaitWraps) && note_of(noted, kBoardWaitWraps)->words.find("past 512") != std::string::npos);
+	// The wrap said as the sentence says it: the wait ends about 1.0 s after its triggers hold.
+	TEST_EXPECT(note_of(noted, kBoardWaitWraps) &&
+	            same(note_of(noted, kBoardWaitWraps)->words,
+	                 "Its wait of 600 steps is past 512, where the game's countdown wraps: it acts about 1.0 s after its triggers hold."));
+	TEST_EXPECT(noted.words.delay.find("after about 1.0 s") == 0);
 	const BoardCard &empty = board.cards[2];
 	TEST_EXPECT(note_of(empty, kBoardNoActions) && note_of(empty, kBoardRightAway) && empty.notes[0].code == kBoardRightAway);
+	TEST_EXPECT(same(note_of(empty, kBoardRightAway)->words, "It has no trigger: it fires right away, as the mission runs."));
+	TEST_EXPECT(same(note_of(empty, kBoardNoActions)->words,
+	                 "It has no action, and nothing reads that it fired: no trigger names it, no waypoint marker advances on it, "
+	                 "no line of the mission's script reads its event()."));
+	const NodeId third_event = m.rows_of(MissionKind::Event)[2]->id;
+	{
+		// What reads its firing (its latch, set as it fires with no action [bms-event-runtime-re.md 1.2, D-EVT-9]): the
+		// script's event(2), a trigger naming it, a waypoint marker advancing on it; each takes its no-action note away.
+		BoardQuery read;
+		read.script_events = {2};
+		BoardCard card;
+		TEST_EXPECT(mission_board_card(m, third_event, names, card, nullptr, read.script_events) && !note_of(card, kBoardNoActions));
+		TEST_EXPECT(mission_board(m, names, read).noted == 2);
+		const LogicType *fired = logic_type(false, int32_t(bms::TriggerMainType::Event), 0);
+		const NodeId first_event = m.rows_of(MissionKind::Event)[0]->id;
+		TEST_EXPECT(fired && logic_add_edits(m, first_event, *fired, SIZE_MAX, edits, error, {{0, 2}}) && apply_edits(*document, edits));
+		TEST_EXPECT(mission_board_card(m, third_event, names, card) && !note_of(card, kBoardNoActions) && note_of(card, kBoardRightAway));
+		TEST_EXPECT(document->can_undo());
+		document->undo();
+		TEST_EXPECT(mission_board_card(m, third_event, names, card) && note_of(card, kBoardNoActions));
+		const Node *marker = nullptr;
+		for (const Node *row : m.rows_of(MissionKind::Marker))
+			if (static_cast<const EntityRow &>(*row).native.type_id == opennova::def::DEF_TYPE_WAYPOINT) marker = row;
+		TEST_EXPECT(marker != nullptr);
+		if (marker) {
+			Edit advance;
+			advance.address = {marker->id, marker->kind, 0};
+			advance.field = "wp_adv_trigger";
+			advance.value = int64_t(2);
+			TEST_EXPECT(apply_edits(*document, {advance}));
+			TEST_EXPECT(mission_board_card(m, third_event, names, card) && !note_of(card, kBoardNoActions));
+			TEST_EXPECT(document->can_undo());
+			document->undo();
+		}
+		// A wait: no longer "right away", but after it; a repeat, again each time it ends.
+		Edit waits;
+		waits.address = {third_event, node_kind(MissionKind::Event), 0};
+		waits.field = "delay";
+		waits.value = int64_t(5);
+		TEST_EXPECT(apply_edits(*document, {waits}));
+		TEST_EXPECT(mission_board_card(m, third_event, names, card) &&
+		            same(note_of(card, kBoardRightAway)->words,
+		                 "It has no trigger: it holds on its first check, as the mission runs, and acts after its wait (5.1 s)."));
+		// A repeat past 512 steps: its note says when it is checked again as its sentence does (the pass after it ends).
+		Edit repeats = waits;
+		repeats.field = "flags";
+		repeats.value = int64_t(bms::EventFlags::ResetAfter);
+		Edit cooldown = waits;
+		cooldown.field = "reset_after";
+		cooldown.value = int64_t(600);
+		TEST_EXPECT(apply_edits(*document, {repeats, cooldown}));
+		TEST_EXPECT(mission_board_card(m, third_event, names, card));
+		const BoardNote *wrapped = nullptr;
+		for (const BoardNote &note : card.notes)
+			if (note.code == std::string(kBoardWaitWraps)) wrapped = &note;
+		TEST_EXPECT(wrapped && same(wrapped->words, "Its repeat of 600 steps is past 512, where the game's countdown wraps: it is "
+		                                            "checked again about 2.0 s after its triggers held."));
+		TEST_EXPECT(card.words.repeat.find("Checked again about 2.0 s after its triggers held") == 0);
+		TEST_EXPECT(same(note_of(card, kBoardRightAway)->words,
+		                 "It has no trigger: it holds on its first check, as the mission runs, and acts after its wait (5.1 s), and "
+		                 "again each time its repeat ends."));
+		TEST_EXPECT(document->can_undo());
+		document->undo();
+		document->undo();
+	}
 
 	// Needs attention, the filter, the folds.
 	BoardQuery query;
@@ -178,6 +251,8 @@ int test_variables() {
 	TEST_EXPECT(variables[0].uses[1].event_index == 1 && !variables[0].uses[1].action && same(variables[0].uses[1].words, "V0 equals 1"));
 	TEST_EXPECT(variables[1].index == 2 && variables[1].uses.size() == 1);
 	TEST_EXPECT(mission_new_variable(m) == 1);
+	// The script's V1 taken too (its caller's): the next free one.
+	TEST_EXPECT(mission_new_variable(m, {1}) == 3);
 	return 0;
 }
 
@@ -366,17 +441,76 @@ int test_wire_acceptance() {
 	TEST_EXPECT(send(R"({"kind": "set_string_text", "path": "missions/logic.bms", "address": {"row": )" + std::to_string(made) +
 	                 R"(, "kind": )" + std::to_string(node_kind(MissionKind::Action)) + R"(, "child": )" + std::to_string(lists[1].ids[0]) +
 	                 R"(}, "field": "param1", "values": {"text": "Get to the bridge"}, "create": true})"));
+	// Two files changed, its status says so: the table made (logic.bin, opened) and the mission, both unsaved until Save All.
+	const AssetEntry *made_table = session.view().project.scan ? session.view().project.scan->find("logic.bin") : nullptr;
+	TEST_EXPECT(made_table);
+	if (!made_table) return 1;
+	const std::string table_path = made_table->relative_path;
+	const DocumentBase *table = session.document_for(table_path);
+	TEST_EXPECT(table && table->dirty() && m->dirty());
+	const std::string table_name = table_path.substr(table_path.find_last_of('/') + 1);
+	TEST_EXPECT(same(session.view().activity.status,
+	                 "Made ID001 in " + table_name + "'s Triggered Text ('Get to the bridge') and set logic.bms's param1 to it: both "
+	                 "files changed, unsaved; Save All writes both."));
 	// 4. The wait: 5 s, 5 steps.
 	TEST_EXPECT(send(R"({"kind": "edit_record", "path": "missions/logic.bms", "keep_selection": true, "edits": [{"id": )" +
 	                 std::to_string(made) + R"(, "op": "set", "field": "delay", "value": 5}]})"));
 	// 5. The board's card reads it, once the project's names have read the table.
 	editor_test::handle_to_end(session, request::save_all());
+	TEST_EXPECT(!m->dirty() && session.document_for(table_path) && !session.document_for(table_path)->dirty());
 	const JsonValue board = ask(R"({"path": "missions/logic.bms", "op": "board", "filter": ""})");
 	std::string sentence;
 	if (const JsonValue *cards = board.get("cards"))
 		for (const JsonValue &card : cards->array)
 			if (card.get_number("event", 0) == double(made)) sentence = card.get_string("sentence", "");
 	TEST_EXPECT(same(sentence, "When the player is in Zone 20, then, after 5.1 s, show text 1: 'Get to the bridge'."));
+	return 0;
+}
+
+// New text where the project has no table of the mission's name but the game install has one (a mod of a shipped
+// mission): refused, its words saying to import the install's (it holds the mission's title and its other texts),
+// and no table made that would hide it.
+int test_new_text_install() {
+	editor_test::TempProjectDir dir("opennova_mission_board_install");
+	const std::string retail = dir.file("game");
+	TEST_EXPECT(editor_test::write_text(retail + "/readme.txt", "game"));
+	std::vector<uint8_t> table;
+	Diagnostic error;
+	BlankRequest blank;
+	blank.logical_name = "logic.bin";
+	blank.project_title = "Retail";
+	TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
+	const opennova::pff::PffWriteEntry entries[] = {{"logic.bin", table.data(), uint32_t(table.size()), 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive((retail + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Board"));
+	editor_test::create_missing_files(session);
+	editor_test::set_game_install(session, retail);
+	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
+	const auto *m = dynamic_cast<const MissionDocument *>(session.document_for("missions/logic.bms"));
+	TEST_EXPECT(m && install_file_name(session.view(), "LOGIC.BIN") == "logic.bin");
+	if (!m) return 1;
+	const Node *first = m->rows_of(MissionKind::Event)[0];
+	const LogicType *show = logic_type(true, int32_t(bms::ActionType::OutputText), 0);
+	std::vector<Edit> edits;
+	std::string reason;
+	TEST_EXPECT(show && logic_add_edits(*m, first->id, *show, SIZE_MAX, edits, reason));
+	editor_test::handle_to_end(session, request::edit_record(m->path(), edits));
+	const std::vector<Document::Collection> lists = m->collections_of({first->id, first->kind, 0});
+	TEST_EXPECT(lists.size() == 2 && lists[1].ids.size() == 2);
+	if (lists.size() != 2 || lists[1].ids.size() != 2) return 1;
+	EditorRequest create = request::set_string_text(m->path(), {first->id, node_kind(MissionKind::Action), lists[1].ids[1]}, "param1",
+	                                                "Get to the bridge");
+	create.create = true;
+	editor_test::handle_to_end(session, create);
+	const std::string &status = session.view().activity.status;
+	TEST_EXPECT(status.find("the game install has logic.bin") != std::string::npos && status.find("import it") != std::string::npos);
+	TEST_EXPECT(!session.view().project.scan->find("logic.bin"));
 	return 0;
 }
 
@@ -495,6 +629,7 @@ int main(int argc, char **argv) {
 	if (test_board_op() != 0) return 1;
 	if (test_text_and_selection() != 0) return 1;
 	if (test_wire_acceptance() != 0) return 1;
+	if (test_new_text_install() != 0) return 1;
 	if (test_op_table() != 0) return 1;
 	return test_retail();
 }

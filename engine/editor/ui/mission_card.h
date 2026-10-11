@@ -46,6 +46,8 @@ struct CardState {
 	size_t open_index = SIZE_MAX;
 	int open_slot = -1;
 	bool open_new_text = false;
+	// The document's revision when the add was raised: the line opens once an edit applied after it.
+	uint64_t open_revision = 0;
 	// The type picker: its filter, and the event, the list and the place an add goes (SIZE_MAX the end); the
 	// line it retypes (none: an add).
 	char filter[64] = {};
@@ -58,6 +60,8 @@ struct CardState {
 	bool picker_actions = false;
 	// The words of a Show text's New text.
 	char new_text[256] = {};
+	// What is typed into a choice chip's list while it is open (one list opens at a time).
+	std::string choice_typed;
 	// A wait typed and not yet set: its field's record and the seconds.
 	NodeId waiting_event = 0;
 	const char *waiting_field = "";
@@ -66,6 +70,30 @@ struct CardState {
 	NodeId move_event = 0;
 	// The picker the chips pick names with (one per board).
 	ReferencePicker picker;
+
+	// The chip an add asked to open, once an edit applied since (`revision` moved): its line drew this frame and
+	// took it, or it is not opened.
+	void settle_open(uint64_t revision) {
+		if (open_event && revision != open_revision) {
+			open_event = 0;
+			open_new_text = false;
+		}
+	}
+	// What it held of a document no longer standing (another load of it, or another document): the records it
+	// named, gone.
+	void forget() {
+		open_event = 0;
+		open_index = SIZE_MAX;
+		open_slot = -1;
+		open_new_text = false;
+		add_event = 0;
+		retype = NodeAddress();
+		picker_event = 0;
+		waiting_event = 0;
+		waiting_field = "";
+		move_event = 0;
+		choice_typed.clear();
+	}
 };
 
 // What a card draws over: the session's workspace and the mission, the words of its values, whether its
@@ -101,8 +129,13 @@ struct ScriptUse {
 std::map<int64_t, std::vector<ScriptUse>> script_variable_uses(const SessionView &view, const MissionDocument &mission);
 // The script lines that name the event at `index` by its number (event(n)).
 std::vector<ScriptUse> script_event_uses(const SessionView &view, const MissionDocument &mission, size_t index);
-// The number a new variable takes: the lowest neither an event nor the mission's script uses.
-int64_t new_variable_index(const SessionView &view, const MissionDocument &mission);
+// The numbers of the mission's script's variables (the keys of script_variable_uses): what mission_new_variable
+// passes over.
+std::vector<int64_t> script_variable_indexes(const std::map<int64_t, std::vector<ScriptUse>> &uses);
+// Whether the logic's views take edits of a mission: the session takes an edit_record (no operation holds it),
+// the document is not blocked (a reload pending, its file's changes), and an import did not make it (its import
+// writes it again).
+bool logic_editable(const SessionView &view, const DocumentBase &document);
 
 // One line of a card alone (S24 A7: the Inspector over a trigger or an action), the card's width: its lead, its
 // runs and chips, its retype picker.
