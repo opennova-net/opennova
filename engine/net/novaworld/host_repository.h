@@ -81,8 +81,11 @@ struct HostRow {
 	std::string tracers;
 	std::string pix;
 	// The account that hosted it (claim_host_key), unset for a listing whose
-	// HostKey names no account. A write stores NULL for an account deleted
-	// since, so a live listing's refresh never trips the players key.
+	// HostKey names no account. A write stores it only while one of that
+	// account's keys stands claimed for the row's RID, else NULL: a password
+	// reset or an inactive status deletes the keys, a deleted account takes
+	// them (and its rows' column is set NULL), and a row written with no claim
+	// (the dev inject) has none.
 	std::optional<int64_t> host_user_id;
 	std::string peer_ip;
 	int         peer_port = 0;

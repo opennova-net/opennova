@@ -546,8 +546,17 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 			return {{std::move(refusal)}, "ClientHostRequest:unknown-host-key"};
 		}
 	} else {
-		// ONNET_REQUIRE_HOST_KEY lists no host before a HostKey names its owner.
+		// ONNET_REQUIRE_HOST_KEY lists no host before a HostKey names its owner;
+		// a connection already listed leaves the browser (its row and roster)
+		// until one does.
 		state.awaiting_host_key = require_host_key_;
+		if (state.awaiting_host_key && db_) {
+			try { hostdb::remove_host_by_rid(*db_, state.rid); }
+			catch (const std::exception &e) {
+				opennova::io::logf(opennova::io::LogLevel::kWarn,
+		"[lobby] WARN held-host remove: %s", e.what());
+			}
+		}
 	}
 
 	if (state.gsid.empty()) state.gsid = gsid_gen_(app_id);

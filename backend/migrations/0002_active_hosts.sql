@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS active_hosts (
     player_count     INTEGER NOT NULL DEFAULT 0,
     max_players      INTEGER NOT NULL DEFAULT 0,
     region           TEXT,
-    host_user_id     INTEGER REFERENCES players(id),
+    host_user_id     INTEGER REFERENCES players(id) ON DELETE SET NULL, -- the owner (host_keys, 0009)
     peer_ip          TEXT NOT NULL,            -- the host's UDP source IP (a.b.c.d)
     peer_port        INTEGER NOT NULL,
     created_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS idx_active_hosts_peer ON active_hosts(peer_ip, peer_p
 -- instead of just a player_count integer.
 CREATE TABLE IF NOT EXISTS host_players (
     host_rid       INTEGER NOT NULL REFERENCES active_hosts(rid) ON DELETE CASCADE,
-    user_id        INTEGER REFERENCES players(id),
+    user_id        INTEGER REFERENCES players(id) ON DELETE SET NULL,
     nwhandle       TEXT NOT NULL,
     peer_ip        TEXT NOT NULL,
     peer_port      INTEGER NOT NULL,

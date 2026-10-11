@@ -18,11 +18,14 @@
 //     statements keep the link, a parked connection's re-host keeps it, another
 //     connection presenting the key gets none, and a deleted owner leaves the
 //     row refreshing with no owner;
+//   * a row names its owner only while the owner's key stands claimed for its
+//     RID: a revoked key drops the owner at the next write, and a deleted
+//     account's listing names no one, whatever id the lobby still holds;
 //   * ONNET_REQUIRE_HOST_KEY refuses a request carrying a key that names no
 //     account with ServerHostResult Success=0 / MsgCode 200 (NWEC58), holds a
-//     keyless request out of the browser until an update's key names its owner,
-//     and ends a held host whose key names none with ServerStopHosting
-//     (NWUSERVERMSGCODE_NEEDTOLOGIN).
+//     keyless request (a listed connection's too, its row withdrawn) out of the
+//     browser until an update's key names its owner, and ends a held host whose
+//     key names none with ServerStopHosting (NWUSERVERMSGCODE_NEEDTOLOGIN).
 
 #include <base/io/sha256.h>
 #include <net/napi/session.h>
@@ -429,15 +432,69 @@ int test_lobby_links() {
 	TEST_EXPECT(parked.rid == rid && parked.host_user_id == alice);
 	TEST_EXPECT(row_owner(db, rid) == alice);
 
-	// The owner deleted while listed (delete_user unlinks the row first): the
+	// The owner deleted while listed (the row's owner is set NULL with it): the
 	// connection's next update writes no owner rather than tripping the key.
-	db.exec("UPDATE active_hosts SET host_user_id = NULL WHERE host_user_id = ?;",
-	        {BindValue(alice)});
 	db.exec("DELETE FROM players WHERE id = ?;", {BindValue(alice)});
+	TEST_EXPECT(!row_owner(db, rid).has_value());
 	sess.dispatch(host_update("After Delete"), parked, "10.0.0.7", 40000);
 	const auto after = hostdb::find_host_by_rid(db, rid);
 	TEST_EXPECT(after && after->server_name == "After Delete");
 	TEST_EXPECT(!after->host_user_id.has_value());
+	return 0;
+}
+
+// A row names its owner only while one of the owner's keys stands claimed for
+// the row's RID. A revoked key (a password reset or a ban deletes the account's
+// keys) drops the owner at the listing's next write; a deleted account's keys
+// cascade away and its rows' owner is set NULL, a newcomer never gets its id
+// (players.id is AUTOINCREMENT), and the listing's next write (the lobby still
+// holding the old id) names no one; a row written with an owner but no claim
+// (the dev inject) names no one.
+int test_owner_needs_live_claim() {
+	Database db(":memory:");
+	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	const int64_t alice = make_player(db, "alice");
+	hostdb::record_host_key(db, key_of('A'), alice);
+	hostdb::record_host_key(db, key_of('B'), alice);
+
+	LobbySession sess;
+	sess.set_database(&db);
+	LobbyState revoked;
+	TEST_EXPECT(answered_hosting(sess.dispatch(fresh_request("Revoked"), revoked, "10.0.0.7", 40000)));
+	sess.dispatch(key_update(key_of('A')), revoked, "10.0.0.7", 40000);
+	TEST_EXPECT(row_owner(db, revoked.rid) == alice);
+	db.exec("DELETE FROM host_keys WHERE key_hash = ?;", {BindValue(hostdb::host_key_hash(key_of('A')))});
+	sess.dispatch(host_update("Revoked Renamed"), revoked, "10.0.0.7", 40000);
+	TEST_EXPECT(revoked.host_user_id == alice); // the lobby's memory; the row is what is read
+	TEST_EXPECT(!row_owner(db, revoked.rid).has_value());
+
+	LobbyState owned;
+	TEST_EXPECT(answered_hosting(sess.dispatch(fresh_request("Owned"), owned, "10.0.0.8", 40000)));
+	sess.dispatch(key_update(key_of('B')), owned, "10.0.0.8", 40000);
+	TEST_EXPECT(row_owner(db, owned.rid) == alice);
+
+	// The owner deleted, and a newcomer registered: never with the deleted id.
+	db.exec("DELETE FROM players WHERE id = ?;", {BindValue(alice)});
+	TEST_EXPECT(!row_owner(db, owned.rid).has_value());
+	const int64_t newcomer = make_player(db, "newcomer");
+	TEST_EXPECT(newcomer > alice);
+	sess.dispatch(host_update("Owned Renamed"), owned, "10.0.0.8", 40000);
+	sess.dispatch(player_added(1, "joiner"), owned, "10.0.0.8", 40000);
+	const auto refreshed = hostdb::find_host_by_rid(db, owned.rid);
+	TEST_EXPECT(refreshed && refreshed->server_name == "Owned Renamed");
+	TEST_EXPECT(!refreshed->host_user_id.has_value());
+	TEST_EXPECT(hostdb::list_hosts_by_owner(db, alice).empty());
+
+	// An owner with no claim behind it is not stored.
+	hostdb::HostRow injected;
+	injected.rid = 0x0B000001u;
+	injected.gsid = "GSID-INJECTED";
+	injected.game = "jop_2_consumer";
+	injected.host_ip = "10.0.0.9";
+	injected.peer_ip = "10.0.0.9";
+	injected.host_user_id = newcomer;
+	hostdb::upsert_host(db, injected);
+	TEST_EXPECT(!row_owner(db, injected.rid).has_value());
 	return 0;
 }
 
@@ -516,6 +573,18 @@ int test_require_host_key() {
 	                                              "10.0.0.67", 40000)));
 	TEST_EXPECT(!late_thief.hosting && hostdb::list_hosts(db).size() == 1);
 
+	// A keyless request on the listed connection holds it again: its row and
+	// roster leave the browser until a key names the owner once more.
+	sess.dispatch(player_added(2, "joiner"), a, "10.0.0.7", 40000);
+	TEST_EXPECT(hostdb::list_roster(db, a.rid).size() == 1);
+	r = sess.dispatch(fresh_request("Owned Again"), a, "10.0.0.7", 40000);
+	TEST_EXPECT(answered_hosting(r) && a.hosting && a.awaiting_host_key);
+	TEST_EXPECT(!hostdb::find_host_by_rid(db, a.rid).has_value());
+	TEST_EXPECT(hostdb::list_roster(db, a.rid).empty() && hostdb::list_hosts(db).empty());
+	sess.dispatch(key_update(key_of('A')), a, "10.0.0.7", 40000);
+	TEST_EXPECT(!a.awaiting_host_key && row_owner(db, a.rid) == alice);
+	TEST_EXPECT(hostdb::find_host_by_rid(db, a.rid)->server_name == "Owned Again");
+
 	// The key revoked (a password reset deletes the account's keys); the same
 	// connection's re-request is refused and the row leaves the browser.
 	db.exec("DELETE FROM host_keys WHERE user_id = ?;", {BindValue(alice)});
@@ -540,6 +609,7 @@ int main() {
 	if (test_claim() != 0) return 1;
 	if (test_prune() != 0) return 1;
 	if (test_lobby_links() != 0) return 1;
+	if (test_owner_needs_live_claim() != 0) return 1;
 	if (test_require_host_key() != 0) return 1;
 	std::printf("OK: host keys (the store, the claims, the sweep, the lobby's links, "
 	            "ONNET_REQUIRE_HOST_KEY)\n");

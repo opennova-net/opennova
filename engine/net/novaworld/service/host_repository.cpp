@@ -81,10 +81,15 @@ constexpr const char *HOST_COLUMNS =
 	"skins, tracers, pix, "
 	"host_user_id, peer_ip, peer_port, created_at, updated_at";
 
-// The host_user_id bind's expression: the account while it exists, else NULL,
-// so a listing whose owner was deleted since keeps refreshing (the column
-// references players with no ON DELETE action).
-constexpr const char *HOST_OWNER_VALUE = "(SELECT id FROM players WHERE id=?)";
+// The host_user_id binds' expression (the owner, then the row's RID): the
+// account only while one of its keys stands claimed for this RID, else NULL.
+// So the stored owner follows the live claim: a password reset or an inactive
+// status deletes the account's keys and its listing's next write stores no
+// owner (the lobby still holding the id), a deleted account's keys cascade
+// with it (its rows' column is set NULL at once), and a write with no claim
+// behind it (the dev inject) stores none.
+constexpr const char *HOST_OWNER_VALUE =
+	"(SELECT user_id FROM host_keys WHERE user_id=? AND claimed_rid=?)";
 
 // The SQLite datetime() modifier `seconds` before now.
 std::string seconds_ago(int64_t seconds) { return "-" + std::to_string(seconds) + " seconds"; }
@@ -101,7 +106,7 @@ std::vector<opennova::db::BindValue> host_binds(const HostRow &h) {
 		str(h.time_left), str(h.time_of_day), str(h.msg), str(h.mod), str(h.age),
 		str(h.pb_server), str(h.level_range), str(h.bb_mode),
 		str(h.skins), str(h.tracers), str(h.pix),
-		opt_int(h.host_user_id), str(h.peer_ip), i64(h.peer_port),
+		opt_int(h.host_user_id), i64(h.rid), str(h.peer_ip), i64(h.peer_port),
 	};
 }
 

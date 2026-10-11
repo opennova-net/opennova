@@ -1556,8 +1556,17 @@ int test_listed_server_owners(Harness &h) {
 		row.player_count = 3;
 		row.max_players = 24;
 		row.peer_ip = "10.0.0.9";
-		row.host_user_id = l.owner;
-		opennova::hostdb::upsert_host(*h.pool.acquire(), row);
+		// The owner as the lobby stores one: a key minted for it, claimed for
+		// the row's RID.
+		auto conn = h.pool.acquire();
+		if (l.owner) {
+			const std::string key(opennova::hostdb::kHostKeyChars,
+			                      static_cast<char>('A' + (l.rid - 2001)));
+			opennova::hostdb::record_host_key(*conn, key, *l.owner);
+			row.host_user_id = opennova::hostdb::claim_host_key(*conn, key, l.rid);
+			TEST_EXPECT(row.host_user_id == l.owner);
+		}
+		opennova::hostdb::upsert_host(*conn, row);
 	}
 
 	reply = h.send("GET", "/api/me/hosts", {with_session(token)});

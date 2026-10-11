@@ -205,19 +205,29 @@ HostKey is unwitnessed.
   rebuilt without one), so such a host is listed with no owner until the first
   `ClientHostUpdate` that carries the key (the full `Host` list a stock host sends at
   its mission's start; opennova-nw-lister and `opennova-serve` send theirs right after
-  the host result). A key backs one listed server at a time: another connection
+  the host result, which a fresh stock host does not, D-NET-465). A key backs one
+  listed server at a time: another connection
   presenting it while that listing lives links to no account. A dropped connection
   parks its lobby state and RID (`kParkedLobbyTtlMs`, 240 s), and its re-host after the
   NWU reconnect (`CurrentlyHosting=1`) re-sends its kept `Host` list, key included, so
   it claims the same key under the same RID and keeps the owner; a key whose listing
   is gone can be claimed again. A boot releases every claim with the previous run's
   rows.
-- **Expiry.** A key lasts 24 h from its last use, its `ClientHostRequest` or the main
-  tick's sweep while a listed server holds it (counted at most once an hour); the sweep
-  deletes the rest. An admin password reset or a status other than `active` deletes the
-  account's keys (with its retail login's `active_user_sessions` row); a banned account's
-  key claims nothing; a deleted account takes its keys, and its listed servers stay
-  listed with no owner.
+- **Expiry.** A key lasts 24 h from its last use, its claim or the main tick's sweep
+  while a listed server holds it (counted at most once an hour); the sweep deletes the
+  rest.
+- **Revocation.** A row stores its owner only while one of the owner's keys stands
+  claimed for the row's RID; every write (a `ClientHostUpdate`, a roster statement, the
+  gate's status blob) checks it, else stores no owner. What that does to a live listing:
+  - An admin password reset or a status other than `active` deletes the account's keys
+    (with its retail login's `active_user_sessions` row). The listing stays listed; its
+    next write stores no owner, its next re-host after an NWU reconnect links to no one
+    (refused under strict mode), and a banned account's key claims nothing.
+  - A deleted account takes its keys (`ON DELETE CASCADE`), and its listings' owner and
+    its rows in servers' player lists are set NULL (`ON DELETE SET NULL`). The listing
+    stays listed with no owner, and its later writes store none though the lobby still
+    holds the id. `players.id` is `AUTOINCREMENT`, so no later account gets that id.
+  - In each case `POST /api/admin/hosts/<rid>/stop` ends the listing at once.
 - **Strict mode.** `ONNET_REQUIRE_HOST_KEY=1` lists no server whose `HostKey` claims no
   account (empty, unknown, expired, revoked, or held by another listing). The code is
   200, the retail table's `NWUSERVERMSGCODE_NEEDTOLOGIN`.
@@ -229,7 +239,8 @@ HostKey is unwitnessed.
     match, as any failed re-host does.
   - A request carrying no key (a stock host's fresh one) is answered as usual, since
     the key has not come yet, but held out of the browser (no `active_hosts` row, no
-    roster) until an update presents a key. A key that claims an account lists it with
+    roster; a connection already listed has its row withdrawn) until an update
+    presents a key. A key that claims an account lists it with
     the owner; one that claims none ends the hosting with `ServerStopHosting`
     `MsgCode=200` (a stock host latches `NWUSERVERMSGCODE_NEEDTOLOGIN`; in a match it
     ends the match at the next exit check and returns to the menu).
@@ -301,7 +312,8 @@ shares only the login brake's per-username cap and known addresses below.
   An admin password reset or a status other than `active` (`PUT
   /api/admin/users/<id>`) deletes the account's sessions and known addresses in the
   same transaction, with its retail login's `active_user_sessions` row and its hosting
-  keys ("Listed servers and owners"), and drops the retail login's
+  keys (a server it listed loses its owner at its next refresh; "Listed servers and
+  owners"), and drops the retail login's
   `PERSISTENTEXPRESSLOGINDATA` pins to
   the account (which would resume a retail login with no password), so a reset locks
   out whoever held the old one and a lifted ban revives nothing. A session whose

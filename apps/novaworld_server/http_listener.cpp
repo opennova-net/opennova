@@ -2088,7 +2088,7 @@ void HttpListener::register_legacy_host_join_routes(
 		}
 
 		std::printf("[http] /NWHost.dll (second call) tag=%s -> %s with HOSTKEY=%.6s...\n",
-		            tag.c_str(), loggable(session->success).c_str(), session->host_key.c_str());
+				tag.c_str(), loggable(session->success).c_str(), session->host_key.c_str());
 
 		TemplateVars vars{
 			{"HOSTKEY",     session->host_key},
