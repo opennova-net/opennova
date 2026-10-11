@@ -11,6 +11,7 @@
 
 #include <editor/documents/music_bank_document.h>
 #include <editor/project/project_files.h>
+#include <formats/lwf/lwf.h>
 #include <runtime/audio/volume_law.h>
 
 #include "audio/sound_bank.h"
@@ -80,7 +81,7 @@ PreviewSoundPlayer::State PreviewSoundPlayer::pump(std::string &r_error) {
 			// Each its own name, in the voices' order (a dialog's lines, DI-32): PreviewSound, PreviewSound2, ...
 			voice.player->set_name(made ? String("PreviewSound") + String::num_int64(int64_t(made) + 1) : String("PreviewSound"));
 			voice.player->set_stream(stream);
-			voice.player->set_pitch_scale(SoundBank::pitch_scale_from_q16(voice.voice.pitch_q16));
+			voice.player->set_pitch_scale(WavLoader::pitch_scale_for(stream, opennova::lwf::pitch_from_q16(voice.voice.pitch_q16)));
 			voice.player->set_volume_db(opennova::audio::volume_db_from_byte(voice.voice.volume));
 			parent_->add_child(voice.player);
 			++made;
@@ -148,7 +149,7 @@ void PreviewSoundVoices::pump() {
 		AudioStreamPlayer *player = memnew(AudioStreamPlayer);
 		player->set_name("ClipSound");
 		player->set_stream(stream);
-		player->set_pitch_scale(SoundBank::pitch_scale_from_q16(ready.voice.pitch_q16));
+		player->set_pitch_scale(WavLoader::pitch_scale_for(stream, opennova::lwf::pitch_from_q16(ready.voice.pitch_q16)));
 		player->set_volume_db(opennova::audio::volume_db_from_byte(ready.voice.volume));
 		parent_->add_child(player);
 		player->play();
@@ -244,7 +245,7 @@ void PreviewSoundLoops::follow(const std::string &p_root, const std::vector<Chan
 		const double linear = double(std::max(channel.volume, 0)) / double(opennova::audio::kVolumeByteMax) * master;
 		player->set_volume_db(float(linear > 0.0 ? opennova::audio::volume_db_from_byte(int32_t(std::lround(linear * 255.0)))
 		                                         : opennova::audio::kVolumeSilentDb));
-		player->set_pitch_scale(float(SoundBank::pitch_scale_from_q16(channel.pitch_q16)));
+		player->set_pitch_scale(float(WavLoader::pitch_scale_for(player->get_stream(), opennova::lwf::pitch_from_q16(channel.pitch_q16))));
 		// Held or let go each frame: a 3D player's playback starts at its next physics step, and a pause asked of one
 		// not started yet is not kept.
 		player->set_stream_paused(!p_audible);
