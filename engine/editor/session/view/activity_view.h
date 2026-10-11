@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/mission_live.h>
 #include <editor/model/value.h>
 #include <editor/run/launch_plan.h>
 #include <editor/run/play_start.h>
@@ -112,6 +113,9 @@ struct ActivityView {
 	std::vector<std::string> boot_missing;
 	// True when the last boot report named `name`, compared as the game compares names.
 	bool missing_at_boot(const std::string &name) const;
+	// The mission logic of the game Play runs in the runtime, as it last reported it (S24 Live,
+	// documents/mission_live.h): empty while no such game runs.
+	LiveLogic live_logic;
 
 	OutputLog output;   // what the editor said and the running game's log, oldest first
 	std::string status; // the last thing that happened, one line

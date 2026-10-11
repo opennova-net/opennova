@@ -87,6 +87,22 @@ private:
 	ViewEventMailbox<> events_;
 };
 
+// A pane a Main-role view draws beside its viewport while its document's workspace flag says so (ADR 0046
+// S24: a mission's Logic pane, the Event board, beside its 3D view while the document view's `logic` is on;
+// ui/main_viewport_view splits the viewport's column for it, the canvas and the pane side by side, stacked in
+// a narrow tab). Made with the view from its row's make_pane, and kept with all it holds while the document is
+// open there.
+class DocumentPane {
+public:
+	virtual ~DocumentPane() = default;
+	// Into the room the view gives it, over the document open at the view's path.
+	virtual void draw(Workspace &workspace, const DocumentBase &document) = 0;
+	// The document read again (DocumentView::rebind): what names its old records by identity goes.
+	virtual void rebind(const DocumentBase &document) { (void)document; }
+	// A RevealRecord the view was sent, held until the pane draws: it shows the record there.
+	virtual void reveal(const ViewEvent &event) { (void)event; }
+};
+
 // What a type's own part of the Inspector drew of a record (ADR 0046 S15): the fields it shows
 // itself and the collections it lists itself, which the generic form then leaves out, and whether it
 // listed the record's uses inside its own document (the generic Referenced by then lists the other
@@ -114,8 +130,8 @@ using InspectorText = void (*)(Workspace &workspace, const DocumentBase &documen
 // view it makes: an outline in the mode its OutlineSpec gives (ui/outline_view; for a MainViewport
 // row, the outline beside the viewport, ui/main_viewport_view), or a view of its own, which its
 // make makes (one of the two; a MainViewport row's draws the viewport itself, the text types'
-// script view, S13 V10); and its part of the Inspector (S15: a mission's logic in words), null for
-// none.
+// script view, S13 V10); its part of the Inspector (S15: a mission's logic in words), null for
+// none; and a MainViewport row's pane beside the viewport (S24), null for none.
 struct DocumentViewRow {
 	DocumentTypeId type = DocumentTypeId::None;
 	DocumentViewRole role = DocumentViewRole::Records;
@@ -125,6 +141,9 @@ struct DocumentViewRow {
 	InspectorBottom inspector_bottom = nullptr;
 	InspectorNamesInBreadcrumb breadcrumb_names = nullptr;
 	InspectorText inspector_text = nullptr;
+	// A MainViewport row's pane beside its viewport (S24: the mission's Logic pane), made with its view; null
+	// for none.
+	std::unique_ptr<DocumentPane> (*make_pane)() = nullptr;
 };
 
 // A type's row; null for None and past the last.

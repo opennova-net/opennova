@@ -1,6 +1,7 @@
 #include "field_widgets.h"
 
 #include <base/io/strutil.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/model/field_text.h>
 #include <editor/ui/inspector_layout.h>
@@ -14,12 +15,26 @@
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <system_error>
 #include <vector>
 
 #include <imgui.h>
 
 namespace opennova::editor::field_widgets {
+
+bool picks_by_name(const FieldUse &field) {
+	const ReferenceKind kind = field.reference != ReferenceKind::None ? field.reference : field.picks;
+	if (kind == ReferenceKind::None || field.schema->type == FieldType::Text) return false;
+	const ReferenceResolution resolution = reference_row(kind).resolution;
+	return resolution == ReferenceResolution::Symbol || resolution == ReferenceResolution::Record;
+}
+
+Value picked_value(const FieldUse &field, const std::string &picked) {
+	if (field.schema->type == FieldType::Text) return picked;
+	const std::optional<int> index = strutil::parse_int(picked);
+	return index ? Value(int64_t(*index)) : Value(picked);
+}
 namespace {
 
 // A list longer than this gets a box that narrows it.

@@ -226,11 +226,11 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 	right_clicked_ = false;
 	input_ = CanvasInput();
 	const ImGuiIO &io = ImGui::GetIO();
-	// The keys the kinds act on, while the canvas's window (the pane's, its canvas among its
-	// children) has the keyboard and no text field takes it.
+	// The keys the kinds act on, while the window the canvas is drawn in (or one it holds: its
+	// toolbar's popup) has the keyboard and no text field takes it; never while a pane beside it in
+	// the same window has it (the Document tab's outline, its Logic pane: S24), whose keys are its own.
 	CanvasKeyboard &keyboard = input_.keyboard;
-	keyboard.focused =
-			ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput;
+	keyboard.focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && !io.WantTextInput;
 	if (keyboard.focused) {
 		// An arrow with Alt held is Back's or Forward's (the navigation history: EditorWindows' shortcuts),
 		// never a nudge.

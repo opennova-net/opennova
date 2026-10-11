@@ -221,6 +221,16 @@ JsonValue run_section(const SessionView &view) {
 	out.set("pid", json_number(double(activity.play_pid)));
 	out.set("mcp_port", json_number(double(activity.play_mcp_port)));
 	out.set("mission", json_string(activity.play_mission));
+	// The game's logic, once it reports it (S24 Live): mission_logic's live op says it record by record.
+	if (!activity.live_logic.empty()) {
+		JsonValue live = JsonValue::make_object();
+		live.set("mission", json_string(activity.live_logic.mission));
+		live.set("tick", json_number(double(activity.live_logic.tick)));
+		live.set("events", json_number(double(activity.live_logic.events.size())));
+		live.set("stale", boolean(activity.live_logic.stale));
+		live.set("serial", json_number(double(activity.live_logic.serial)));
+		out.set("live", std::move(live));
+	}
 	out.set("behind", boolean(activity.play_behind));
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("run_dir", json_string(activity.play_run_dir));
@@ -618,7 +628,8 @@ constexpr ViewSectionRow kSections[] = {
 			"confirm {group | required | finding, label, proposal {lines, requests, findings} or {gone}: what "
 			"apply_confirmation raises}, confirm_serial}) and each open document's views "
 			"(documents [{path, active, filter, kinds, all_rows, sort, every, inspector_filter, new_window_type, "
-			"remove_screen, remap_from, remap_to}])." },
+			"remove_screen, remap_from, remap_to, map; a mission's logic, logic_split, logic_filter, logic_folded, "
+			"logic_attention and pick {record, slot} or null, S24}])." },
 	{ S::Navigation, "navigation", concern_set({ C::Navigation }), navigation_section,
 			"The navigation history (Back and Forward: navigate_back, navigate_forward): can_back, can_forward, "
 			"and the places each goes to, nearest first (back, forward: [{pane: document, page or files, path, "

@@ -34,7 +34,7 @@ void set_field(Workspace &workspace, const HudViewport &model, const HudPreviewE
 }
 
 std::string tip_of(const HudField &field) {
-	return field.words + ": " + field.range + ".\n" + field.cite + "\nEnter sets it, one undo step, on its line (" +
+	return field.words + ": " + field.range + ".\n" + field.cite + "\nEnter, or leaving it, sets it, one undo step, on its line (" +
 	       field.key + ").";
 }
 
@@ -85,10 +85,22 @@ void draw_hud_layout_inspector(Workspace &workspace, const DocumentBase &documen
 		ImGui::SetNextItemWidth(width);
 		switch (field.kind) {
 		case HudFieldKind::Number: {
-			int value = std::atoi(field.value.c_str());
-			if (ImGui::InputInt("##value", &value, 1, 8, ImGuiInputTextFlags_EnterReturnsTrue)) {
-				value = std::clamp(value, field.least, field.most);
+			// The value as it is typed or stepped, held while the field is active and set once it is left (Enter, Tab,
+			// a click elsewhere, a step button let go): one edit a gesture. No EnterReturnsTrue: InputScalar asserts on
+			// it, and with it a value typed and clicked away from was never set.
+			static std::string held_id;
+			static int held_value = 0;
+			int value = held_id == field.id ? held_value : std::atoi(field.value.c_str());
+			if (ImGui::InputInt("##value", &value, 1, 8) || ImGui::IsItemActive()) {
+				held_id = field.id;
+				held_value = value;
+			}
+			if (ImGui::IsItemDeactivatedAfterEdit() && held_id == field.id) {
+				value = std::clamp(held_value, field.least, field.most);
+				held_id.clear();
 				if (std::to_string(value) != field.value) set_field(workspace, *model, *picked, field, std::to_string(value));
+			} else if (ImGui::IsItemDeactivated()) {
+				held_id.clear();
 			}
 			break;
 		}

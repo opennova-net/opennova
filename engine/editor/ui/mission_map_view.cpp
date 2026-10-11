@@ -7,10 +7,15 @@
 
 #include <imgui.h>
 
+#include <editor/documents/mission_document.h>
+#include <editor/preview/canvas_half.h>
 #include <editor/preview/mission_map.h>
+#include <editor/preview/mission_place.h>
 #include <editor/preview/mission_options.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/mission_mark_menu.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
 
@@ -24,6 +29,53 @@ void command(Workspace &workspace, const ViewportModel &model, const char *name)
 	asked.name = name;
 	asked.kind = ViewportKind::Map;
 	workspace.request(request::edit_in_viewport(model.path(), std::move(asked)));
+}
+
+// The map's right-click menu: Frame (the record, else the selection), Duplicate (the selection a snap step east, as
+// Ctrl+D), Delete (the selection; a stop its marker), then the record's own items (ui/mission_mark_menu).
+void map_menu(Workspace &workspace, const MissionMapViewport &model, const ViewportContext &context, const NodeAddress &record,
+		const NodeAddress &event) {
+	const SessionView &view = workspace.view();
+	const Document *records = context.input.document ? records_of(*context.input.document) : nullptr;
+	const auto *mission = dynamic_cast<const MissionDocument *>(records);
+	if (!mission) {
+		ImGui::TextDisabled("No mission.");
+		return;
+	}
+	const bool edits = context.editable();
+	const bool selected = view.documents.active == model.path() && !view.documents.selection.empty();
+	if (ImGui::MenuItem("Frame", "F")) {
+		ViewportCommand frame;
+		frame.name = "frame";
+		frame.kind = ViewportKind::Map;
+		if (record.row) frame.ids = { record.row };
+		workspace.request(request::edit_in_viewport(model.path(), std::move(frame)));
+	}
+	if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, edits && selected)) {
+		const double step = model.options().snap > 0.0f ? double(model.options().snap) : 1.0;
+		ViewportCommand duplicate;
+		duplicate.name = "duplicate";
+		duplicate.kind = ViewportKind::Mission;
+		duplicate.by = { step, 0.0 };
+		workspace.request(request::edit_in_viewport(model.path(), std::move(duplicate)));
+	}
+	ui_kit::tooltip("A copy of the selection a snap step east (Ctrl+D).");
+	if (ImGui::MenuItem("Delete", "Delete", false, edits && selected)) {
+		std::vector<Edit> removes;
+		for (const NodeAddress &each : mission_view_removals(*mission, view.documents.selection.records)) {
+			Edit edit;
+			edit.operation = EditOperation::Remove;
+			edit.address = each;
+			removes.push_back(std::move(edit));
+		}
+		workspace.request(request::edit_record(model.path(), std::move(removes)));
+	}
+	ImGui::Separator();
+	MissionMarkMenu menu;
+	menu.record = record;
+	menu.event = event;
+	menu.selected = selected;
+	draw_mission_mark_items(workspace, *mission, menu, edits);
 }
 
 } // namespace
@@ -62,11 +114,28 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		{ "Areas", &options.areas, "The area triggers' boxes." },
 		{ "Paths", &options.paths, "The paths through their stops, the player's route numbered." },
 		{ "Labels", &options.labels, "Every pin's name, beside the hovered and the selected ones' always." },
+		{ "Links", &options.links,
+		  "The selected event's links: what its triggers watch and what its actions act on, ringed, a line from one "
+		  "to the other, and a distance trigger's reach seen from above. And on each pin some event names, how many "
+		  "events name it." },
 	};
 	for (const Kind &kind : kinds) {
 		row.next(ui_kit::checkbox_width(kind.label));
 		ImGui::Checkbox(kind.label, kind.shown);
 		ui_kit::tooltip(kind.tip);
+	}
+	{
+		const char *const words[] = { "Team", "Group" };
+		const float width = ui_kit::text_width("Group") + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2.0f;
+		row.next(ui_kit::field_width(width, "Colour"));
+		ImGui::SetNextItemWidth(width);
+		if (ImGui::BeginCombo("Colour", words[size_t(options.color_by)])) {
+			for (size_t i = 0; i < 2; ++i)
+				if (ImGui::Selectable(words[i], size_t(options.color_by) == i)) options.color_by = MissionColorBy(i);
+			ImGui::EndCombo();
+		}
+		ui_kit::tooltip("What the pins and the wireframes are coloured by: the team (the game's map colours) or the "
+		                "group (the editor's own colours, group 0 none, with a legend of the groups in view).");
 	}
 	row.next(ui_kit::checkbox_width("Stick"));
 	ImGui::Checkbox("Stick", &options.stick);
@@ -95,7 +164,24 @@ void MissionMapViewportView::draw_ready(Workspace &workspace, const ViewportMode
 		workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Map, "options",
 		                                                                      mission_map_options_to_json(options))));
 	snap = options.snap;
-	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y));
+	const SessionView &view = workspace.view();
+	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y), [&](const CanvasInput &in) {
+		// S24: the right button's click: the pin under it selected unless it already is, and the menu over it.
+		if (canvas_ui().right_clicked() && !(half() && half()->gesture().pressed())) {
+			const std::vector<MissionMapMark> marks = model.marks(in.width, in.height);
+			const int mark = pick_mission_map_mark(marks, model.view(in.width, in.height), in.mouse.x, in.mouse.y);
+			menu_record_ = mark >= 0 ? marks[size_t(mark)].record : NodeAddress();
+			menu_event_ = view.documents.active == model.path() ? mission_menu_event(view.documents.selection.primary)
+			                                                    : NodeAddress();
+			if (menu_record_.row && !view.documents.selection.holds(menu_record_))
+				workspace.request(request::select_record(model.path(), menu_record_));
+			ImGui::OpenPopup("mission_map_menu");
+		}
+		if (ImGui::BeginPopup("mission_map_menu")) {
+			map_menu(workspace, model, context, menu_record_, menu_event_);
+			ImGui::EndPopup();
+		}
+	});
 }
 
 } // namespace opennova::editor
