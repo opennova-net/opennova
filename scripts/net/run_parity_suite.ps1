@@ -264,13 +264,27 @@ foreach ($case in $selectedCases) {
                 $status = "failed"
             }
             else {
-                Write-Host "PARITY_SUITE_RUN case=$($case.id) topology=$($cell.Name) run=$runId"
-                $arguments = Get-CellArguments $table $case $cell $runId $artifact $sha256
-                & powershell.exe @arguments
-                $exitCode = $LASTEXITCODE
-                $status = if ($exitCode -eq 0 -and (Test-Path -LiteralPath $summary -PathType Leaf)) {
-                    "ran"
-                } else { "failed" }
+                # One retry: a cell started right after the previous one occasionally
+                # fails on a port or process the last cell is still releasing, and
+                # passes when run again (seen on deploy-hold RO and OO cells).
+                for ($attempt = 1; $attempt -le 2; ++$attempt) {
+                    if ($attempt -gt 1) {
+                        $aside = "$runId.failed-" + (Get-Date -Format "yyyyMMddTHHmmss")
+                        if (Test-Path -LiteralPath $runRoot) {
+                            Rename-Item -LiteralPath $runRoot -NewName $aside
+                        }
+                        Write-Host "PARITY_SUITE_NOTE case=$($case.id) topology=$($cell.Name) retrying after a failed attempt ($aside)"
+                        Start-Sleep -Seconds 20
+                    }
+                    Write-Host "PARITY_SUITE_RUN case=$($case.id) topology=$($cell.Name) run=$runId attempt=$attempt"
+                    $arguments = Get-CellArguments $table $case $cell $runId $artifact $sha256
+                    & powershell.exe @arguments
+                    $exitCode = $LASTEXITCODE
+                    $status = if ($exitCode -eq 0 -and (Test-Path -LiteralPath $summary -PathType Leaf)) {
+                        "ran"
+                    } else { "failed" }
+                    if ($status -eq "ran") { break }
+                }
             }
             if ($status -eq "failed") { $cellFailures++ }
         }

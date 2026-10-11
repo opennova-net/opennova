@@ -314,6 +314,16 @@ if (Test-Path -LiteralPath $RunRoot) {
     throw "Run output already exists; choose a create-new RunId: $RunRoot"
 }
 New-Item -ItemType Directory -Path $RunRoot | Out-Null
+# The cell's own console output, errors included, beside its evidence: a suite
+# runs cells as child processes whose console it does not keep.
+$script:RunnerTranscript = $false
+try {
+    Start-Transcript -LiteralPath (Join-Path $RunRoot "runner.log") | Out-Null
+    $script:RunnerTranscript = $true
+}
+catch {
+    Write-Warning "No runner transcript: $($_.Exception.Message)"
+}
 
 $script:Mcp = $null
 $script:McpRequestId = 0
@@ -2338,3 +2348,4 @@ $summaryJson = $summary | ConvertTo-Json -Depth 30
 $summaryJson | Set-Content -LiteralPath (Join-Path $RunRoot "run-summary.json") -Encoding UTF8
 Write-Host ("PARITY_SUMMARY_JSON=" + ($summary | ConvertTo-Json -Depth 30 -Compress))
 Write-Host "PARITY_RUN_COMPLETE topology=$Topology mission=$Mission run=$RunId"
+if ($script:RunnerTranscript) { Stop-Transcript | Out-Null }
