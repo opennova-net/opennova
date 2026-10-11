@@ -14,6 +14,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/mission_card.h>
 
 #include "editor_ui_test_support.h"
 
@@ -208,11 +209,67 @@ void test_cards() {
 	CHECK(overflowing().empty(), "nothing runs past its room");
 }
 
+// A6: a trigger's line dragged by its grip onto the other card's "+ trigger" moves it there: one edit_record (added
+// there, removed here, one undo step), the selection kept; a card's title is a record drag of its event.
+void test_line_drag() {
+	MissionRun run("opennova_editor_ui_board_drag");
+	CHECK(run.open(), "the mission open");
+	const MissionDocument *mission = run.mission();
+	if (!mission) return;
+	show_logic(run);
+	run.ui.away();
+	std::vector<const ImGuiWindow *> cards = card_windows();
+	CHECK(cards.size() == 2, "two cards");
+	if (cards.size() != 2) return;
+	const Node *first = mission->rows_of(MissionKind::Event)[0];
+	const Node *second = mission->rows_of(MissionKind::Event)[1];
+	// Where the second card's + trigger is: the point the mouse hovers it at.
+	const ImGuiID plus = item_id(cards[1]->ID, {"+ trigger"});
+	ImVec2 target(-1.0f, -1.0f);
+	for (float y = cards[1]->Pos.y; y < cards[1]->Pos.y + cards[1]->Size.y && target.x < 0.0f; y += 2.0f)
+		for (float x = cards[1]->Pos.x + 4.0f; x < cards[1]->Pos.x + 120.0f && target.x < 0.0f; x += 4.0f) {
+			run.ui.mouse(x, y);
+			if (GImGui->HoveredId == plus) target = ImVec2(x, y);
+		}
+	CHECK(target.x >= 0.0f, "the second card's + trigger found");
+	// The first card's trigger grip: pressed and dragged, it carries the line.
+	const float grip_x = cards[0]->Pos.x + ImGui::GetStyle().WindowPadding.x + ImGui::GetFrameHeight() +
+	                     ImGui::GetStyle().ItemSpacing.x + 3.0f;
+	bool dragging = false;
+	for (float y = cards[0]->Pos.y + 4.0f; y < cards[0]->Pos.y + cards[0]->Size.y && !dragging; y += 3.0f) {
+		run.ui.mouse(grip_x, y);
+		run.ui.button(true);
+		run.ui.mouse(grip_x + 12.0f, y + 12.0f);
+		run.ui.mouse(grip_x + 20.0f, y + 20.0f);
+		const ImGuiPayload *payload = ImGui::GetDragDropPayload();
+		dragging = payload && payload->IsDataType(kLogicLineDragPayload);
+		if (!dragging) {
+			run.ui.button(false);
+			run.take();
+		}
+	}
+	CHECK(dragging, "the trigger's grip drags its line");
+	if (!dragging || target.x < 0.0f) return;
+	run.ui.mouse(target.x, target.y);
+	run.ui.mouse(target.x + 1.0f, target.y);
+	run.ui.button(false);
+	run.settle();
+	const std::vector<EditorRequest> raised = run.take();
+	const EditorRequest *move = only(raised, EditorRequestKind::EditRecord);
+	CHECK(move && move->keep_selection && move->edits.size() >= 2 && move->edits.front().operation == EditOperation::Add &&
+	              move->edits.back().operation == EditOperation::Remove,
+	      "dropped: one edit_record, added there and removed here");
+	const std::vector<Document::Collection> one = mission->collections_of({first->id, first->kind, 0});
+	const std::vector<Document::Collection> two = mission->collections_of({second->id, second->kind, 0});
+	CHECK(one.size() == 2 && one[0].ids.empty() && two.size() == 2 && two[0].ids.size() == 2, "the trigger moved to the second event");
+}
+
 } // namespace
 
 void run_board_tests() {
 	test_logic_pane();
 	test_cards();
+	test_line_drag();
 }
 
 } // namespace editor_ui_test

@@ -362,6 +362,34 @@ int test_recipes_and_steps() {
 	return 0;
 }
 
+// S24 A6: a drop's preview reads the event as the move leaves it (a trigger read with the join its new place
+// gives it); a whole event moved (the board's Move event...) renumbers the Event parameters that name the events.
+int test_move_preview_and_event_move() {
+	Fixture f;
+	TEST_EXPECT(f.load());
+	const MissionDocument &m = as_mission(*f.document);
+	const DocumentMissionNames names(m);
+	const std::string walker = "Organic #" + std::to_string(f.ssn);
+	// The walker's trigger moved to the second event, first: its sentence reads it and the join it then has.
+	TEST_EXPECT(same(logic_move_sentence(m, f.trigger, f.second.row, 0, names),
+	                 "When " + walker + " is in Zone 20 and event 1 has fired, then, after 5.1 s, kill group 2."));
+	TEST_EXPECT(same(logic_move_sentence(m, f.trigger, f.second.row, SIZE_MAX, names),
+	                 "When event 1 has fired and " + walker + " is in Zone 20, then, after 5.1 s, kill group 2."));
+	// Within its own event: the event as it reads (one trigger, nowhere else to go).
+	TEST_EXPECT(same(logic_move_sentence(m, f.trigger, f.first.row, 0, names), "When " + walker + " is in Zone 20, then re-arm event 2."));
+	// The second event moved first: the first's re-arm names it still (now event 1), its trigger the other (now event 2).
+	Edit move;
+	move.operation = EditOperation::Move;
+	move.address = f.second;
+	move.position = 0;
+	TEST_EXPECT(f.apply({move}));
+	const std::vector<const Node *> events = m.rows_of(MissionKind::Event);
+	TEST_EXPECT(events.size() == 2 && events[0]->id == f.first.row);
+	TEST_EXPECT(same(m.record_title({events[0]->id, events[0]->kind, 0}), "Event 1: When event 2 has fired, then, after 5.1 s, kill group 2."));
+	TEST_EXPECT(same(m.record_title({events[1]->id, events[1]->kind, 0}), "Event 2: When " + walker + " is in Zone 20, then re-arm event 1."));
+	return 0;
+}
+
 // The two queries over a session: the event's form, the types, an add planned and applied through
 // edit_record, a refusal answered, a record's uses.
 int test_wire() {
@@ -645,6 +673,7 @@ int main(int argc, char **argv) {
 	if (test_retype_move_negate() != 0) return 1;
 	if (test_uses() != 0) return 1;
 	if (test_recipes_and_steps() != 0) return 1;
+	if (test_move_preview_and_event_move() != 0) return 1;
 	if (test_wire() != 0) return 1;
 	if (test_retail() != 0) return 1;
 	return test_retail_common_and_recipes();

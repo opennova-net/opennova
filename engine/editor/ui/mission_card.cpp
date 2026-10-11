@@ -7,8 +7,11 @@
 #include <vector>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_labels.h>
+#include <editor/documents/mission_uses.h>
 #include <editor/documents/mission_links.h>
 #include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
@@ -17,6 +20,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
 #include <editor/ui/mission_board_live.h>
+#include <editor/ui/record_drag.h>
 #include <editor/ui/ui_kit.h>
 #include <formats/mission/bms.h>
 
@@ -269,6 +273,45 @@ void line_menu(CardContext &context, const BoardLine &line, size_t count) {
 	ImGui::EndPopup();
 }
 
+// A line dragged over `rect` (a line of the card, its insertion before `position`; or its "+ trigger" / "+ action",
+// SIZE_MAX the end): the card's sentence as the move would leave it shown while it hovers, the move raised as it
+// drops (one batch). A trigger goes among triggers alone, an action among actions; another document's takes
+// nothing.
+void drop_line(CardContext &context, const BoardCard &card, bool actions, size_t position, const ImRect &rect, ImGuiID id) {
+	if (!context.editable || !ImGui::BeginDragDropTargetCustom(rect, id)) return;
+	const ImGuiPayload *held = ImGui::GetDragDropPayload();
+	if (held && held->IsDataType(kLogicLineDragPayload) && held->Data && size_t(held->DataSize) == sizeof(LogicLineDrag)) {
+		const LogicLineDrag drag = *static_cast<const LogicLineDrag *>(held->Data);
+		const bool fits = drag.document == context.mission.identity() &&
+		                  drag.record.kind == k(actions ? MissionKind::Action : MissionKind::Trigger);
+		// Within its own list, the place it takes once it has left its own.
+		size_t to = position;
+		if (fits && drag.record.row == card.event.row && position != SIZE_MAX) {
+			const std::vector<BoardLine> &lines = actions ? card.actions : card.triggers;
+			for (const BoardLine &line : lines)
+				if (line.record == drag.record && line.index < position) to = position - 1;
+		}
+		if (fits) {
+			const std::unique_ptr<MissionNames> names = mission_label_names(context.mission, context.names);
+			const std::string sentence = logic_move_sentence(context.mission, drag.record, card.event.row, to, *names);
+			if (!sentence.empty()) {
+				ImGui::BeginTooltip();
+				ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
+				ImGui::TextDisabled("%s then reads:", card.title.c_str());
+				ImGui::TextUnformatted(sentence.c_str());
+				ImGui::PopTextWrapPos();
+				ImGui::EndTooltip();
+			}
+			if (ImGui::AcceptDragDropPayload(kLogicLineDragPayload, ImGuiDragDropFlags_AcceptNoPreviewTooltip)) {
+				std::vector<Edit> edits;
+				std::string error;
+				if (logic_move_edits(context.mission, drag.record, card.event.row, to, edits, error)) raise_kept(context, std::move(edits));
+			}
+		}
+	}
+	ImGui::EndDragDropTarget();
+}
+
 // One trigger or action line: its "+" (add before it), its lead word ("When", the join to the one before,
 // "Then"), its runs and chips; the line selected is outlined.
 void draw_line(CardContext &context, const BoardCard &card, const BoardLine &line, const char *lead, float lead_width,
@@ -290,6 +333,19 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 	                                : refusal);
 	ImGui::SameLine();
 	ImGui::SetCursorPosX(x0 + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x);
+	// The grip: dragged, the line moves to where it is dropped (before another line, or on a "+ trigger" or "+
+	// action"), its card's sentence as it would then read shown there.
+	ImGui::TextDisabled("::");
+	if (context.editable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+		LogicLineDrag drag;
+		drag.document = context.mission.identity();
+		drag.record = line.record;
+		ImGui::SetDragDropPayload(kLogicLineDragPayload, &drag, sizeof(drag));
+		ImGui::TextUnformatted(ui_kit::fit(logic_runs_text(line.runs), ImGui::GetFontSize() * 24.0f).c_str());
+		ImGui::EndDragDropSource();
+	}
+	ui_kit::tooltip("Drag to move it: before another line, or onto + trigger or + action.");
+	ImGui::SameLine();
 	// The lead: a trigger's join to the one before is the one before's (the chain's fold reads the previous
 	// trigger's join), chosen from its menu.
 	ImGui::TextDisabled("%s", lead);
@@ -309,7 +365,7 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 			ImGui::EndPopup();
 		}
 	}
-	const float left = x0 + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x + lead_width;
+	const float left = x0 + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x * 2.0f + ui_kit::text_width("::") + lead_width;
 	ImGui::SameLine();
 	ImGui::SetCursorPosX(left);
 	Flow flow(left, right);
@@ -332,6 +388,8 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 	if (context.selected == line.record)
 		ImGui::GetWindowDrawList()->AddRect(ImVec2(top.x - 2.0f, top.y - 1.0f), ImVec2(bottom.x, bottom.y + 1.0f),
 		                                    ImGui::GetColorU32(ImGuiCol_NavCursor), 3.0f);
+	// A line dropped on this one goes before it.
+	drop_line(context, card, line.action, line.index, ImRect(top, ImVec2(bottom.x, bottom.y)), ImGui::GetID("drop"));
 	// A right click anywhere on the line opens its menu.
 	if (ImGui::IsMouseHoveringRect(top, ImVec2(bottom.x, bottom.y)) && ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) &&
 	    ImGui::IsMouseClicked(ImGuiMouseButton_Right) && !ImGui::IsAnyItemHovered())
@@ -383,6 +441,42 @@ void wait_chip(CardContext &context, const BoardCard &card, const char *id, cons
 		ImGui::TextColored(kWarn, "(!)");
 		ui_kit::tooltip("Past 512 steps the game's countdown wraps: " + logic_steps_words(steps) + ".");
 	}
+}
+
+// Move event...: an event's index is its number (an Event parameter names it by it, a script's event(n) too), so
+// it moves as a command: what names it listed first (the Event parameters, which the document renumbers with
+// the move; a script's numbers it does not follow), then the place chosen, one Move of its row.
+void move_event_popup(CardContext &context, const BoardCard &card) {
+	if (!ImGui::BeginPopup("move_event")) return;
+	const MissionDocument &mission = context.mission;
+	const float em = ImGui::GetFontSize();
+	const std::unique_ptr<MissionNames> names = mission_label_names(mission, context.names);
+	const MissionUses uses = mission_uses(mission, card.event, *names);
+	ImGui::TextUnformatted(("Move " + card.title).c_str());
+	ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + em * 26.0f);
+	if (uses.uses.empty()) ImGui::TextDisabled("No trigger or action names it.");
+	else
+		ImGui::TextDisabled("Named by %zu trigger%s or action%s, renumbered with it:", uses.uses.size(), uses.uses.size() == 1 ? "" : "s",
+		                    uses.uses.size() == 1 ? "" : "s");
+	for (const MissionUse &use : uses.uses) ImGui::BulletText("Event %zu: %s", use.event_index + 1, use.words.c_str());
+	ImGui::TextColored(kWarn, "Every event after the place it leaves or takes is renumbered too. The mission's script, which "
+	                          "may name events by number, is not followed: check it.");
+	ImGui::PopTextWrapPos();
+	ImGui::Separator();
+	const size_t count = mission.count_of(MissionKind::Event);
+	if (ImGui::BeginChild("places", ImVec2(em * 26.0f, std::min(em * 16.0f, ImGui::GetFrameHeightWithSpacing() * float(count + 1))))) {
+		for (size_t to = 0; to < count; ++to) {
+			if (to == card.index) continue;
+			const std::string label = "To place " + std::to_string(to + 1) + (to == 0 ? " (first)" : to + 1 == count ? " (last)" : "");
+			if (ImGui::Selectable(label.c_str())) {
+				window_requests::edit(context.workspace, mission, EditOperation::Move, card.event, to);
+				ImGui::CloseCurrentPopup();
+			}
+		}
+	}
+	ImGui::EndChild();
+	if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+	ImGui::EndPopup();
 }
 
 } // namespace
@@ -527,6 +621,19 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		}
 	}
 	ui_kit::tooltip(card.words.sentence);
+	// Dragged, the card carries its event onto a value that names events (an Event parameter's chip).
+	record_drag_source(mission, card.event, card.title);
+	if (ImGui::BeginPopupContextItem("card_menu")) {
+		if (ImGui::MenuItem("Select")) window_requests::select(context.workspace, mission, card.event);
+		if (ImGui::MenuItem("Move event...", nullptr, false, context.editable)) context.state.move_event = card.event.row;
+		ui_kit::tooltip("Gives it another place among the events, which is its number.");
+		ImGui::EndPopup();
+	}
+	if (context.state.move_event == card.event.row) {
+		context.state.move_event = 0;
+		ImGui::OpenPopup("move_event");
+	}
+	move_event_popup(context, card);
 	if (!view.activity.live_logic.empty() && view.activity.live_logic.mission == mission.path()) {
 		ImGui::SameLine();
 		draw_card_live(context.workspace, mission.path(), view.activity.live_logic, CardLiveSpot{card.index, -1});
@@ -603,6 +710,8 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		ImGui::EndDisabled();
 		ui_kit::tooltip(refusal.empty() ? std::string(actions ? "Add an action, last (Ctrl+Shift+A)." : "Add a trigger, last (Ctrl+Shift+T).")
 		                                : refusal);
+		drop_line(context, card, actions, SIZE_MAX, ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax()),
+		          ImGui::GetID(actions ? "drop_actions" : "drop_triggers"));
 	};
 	add_button(false);
 	if (card.actions.empty()) ImGui::TextDisabled("Then nothing.");

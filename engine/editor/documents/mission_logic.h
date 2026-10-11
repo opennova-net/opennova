@@ -121,6 +121,12 @@ bool logic_retype_edits(const MissionDocument &document, const NodeAddress &reco
 // and removes it from its own (one undo step). False, with why, where the other event takes no more.
 bool logic_move_edits(const MissionDocument &document, const NodeAddress &record, NodeId to_event, size_t position,
                       std::vector<Edit> &out, std::string &error);
+// What `to_event` reads once a trigger or an action moved there at `position` (SIZE_MAX the end) as
+// logic_move_edits leaves it (S24: the board's drop preview): its sentence, a moved trigger read with the joins its
+// place gives it (a trigger's join is the previous trigger's flags, which move with the trigger before it). ""
+// for a move logic_move_edits refuses.
+std::string logic_move_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event, size_t position,
+                                const MissionNames &names);
 // The Set of a trigger's condition flags that negates it or not, and the one that joins it to the next
 // by `join`, each keeping the flag word's other bits.
 // The steps a wait of `seconds` comes to, as a delay or a repeat holds it: round(seconds / 1.024), a step being

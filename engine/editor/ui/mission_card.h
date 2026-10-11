@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 
 #include <editor/documents/mission_board.h>
 #include <editor/graph/display_names.h>
@@ -21,6 +22,16 @@
 namespace opennova::editor {
 
 class MissionDocument;
+
+// What a trigger or an action line carries while it is dragged (S24 A6): its document (the instance) and the
+// record. Dropped before a line of a card, or on a card's "+ trigger" or "+ action", it moves there
+// (logic_move_edits: one batch, one undo step).
+inline constexpr const char *kLogicLineDragPayload = "opennova.logic_line";
+struct LogicLineDrag {
+	uint64_t document = 0;
+	NodeAddress record;
+};
+static_assert(std::is_trivially_copyable<LogicLineDrag>::value, "Dear ImGui copies a payload by its bytes");
 
 // What a board keeps for its cards between frames: the chip a line's add opens (the line added asked for it,
 // shown on the frame its line first draws), the type picker's filter and what it adds where, and the new
@@ -49,6 +60,8 @@ struct CardState {
 	NodeId waiting_event = 0;
 	const char *waiting_field = "";
 	double waiting_seconds = 0.0;
+	// The card whose Move event... was asked for (its popup opened as it draws).
+	NodeId move_event = 0;
 	// The picker the chips pick names with (one per board).
 	ReferencePicker picker;
 };

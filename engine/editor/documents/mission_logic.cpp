@@ -1,6 +1,8 @@
 #include "mission_logic.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
@@ -384,6 +386,25 @@ bool logic_move_edits(const MissionDocument &document, const NodeAddress &record
 	remove.address = record;
 	out.push_back(remove);
 	return true;
+}
+
+std::string logic_move_sentence(const MissionDocument &document, const NodeAddress &record, NodeId to_event, size_t position,
+                                const MissionNames &names) {
+	std::vector<Edit> edits;
+	std::string error;
+	if (!logic_move_edits(document, record, to_event, position, edits, error)) return std::string();
+	Located at;
+	const EventRow *to = event_row(document, to_event);
+	if (!locate(document, record, at) || !to) return std::string();
+	mission::EventChain chain = to->native;
+	const auto place = [&](auto &list, const auto &moved) {
+		if (to_event == record.row) list.erase(list.begin() + std::ptrdiff_t(at.index));
+		const size_t index = std::min(position, list.size());
+		list.insert(list.begin() + std::ptrdiff_t(index), moved);
+	};
+	if (at.action) place(chain.actions, at.event->native.actions[at.index]);
+	else place(chain.triggers, at.event->native.triggers[at.index]);
+	return event_words(chain, names, header_of(document)).sentence;
 }
 
 bool logic_negate_edit(const MissionDocument &document, const NodeAddress &trigger, bool negated, Edit &out) {
