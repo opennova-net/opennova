@@ -148,8 +148,9 @@ world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
 //   desyncs the retail client mid-frame (retail-join v13, 2026-07-02).
 // - Entity::health_max (+ health lift) from items.def hp (itemDef+0x17C healthMax): the original
 //   spawns Health = healthMax [orig: Entity_InitFromItemDef @0x49e550]; entities still at the
-//   promotion default (100) are lifted to full health. Feeds the §5.13 vehicle health word (a
-//   too-small value renders every vehicle burning) and the §5.10 field-17 tier denominator.
+//   promotion default (100) are lifted to full health, a player body excepted (D-PWR-9). Feeds
+//   the §5.13 vehicle health word (a too-small value renders every vehicle burning) and the
+//   §5.10 field-17 tier denominator.
 //
 // The registry's for_each is const-only, so collect the live handles first, then re-fetch each as
 // a mutable Entity*.
@@ -302,9 +303,25 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // radarSig (primary-FOV cap), entity+420 = def+378 heatSig (secondary)].
         e->radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
         e->heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
+        // The lift is the mission start's reload over the loaded pools, which
+        // runs ahead of the round init's player spawn, so no player body takes
+        // it on any path ported here: a player's health is its spawn's raises
+        // to the ceiling, which a difficulty word can halve or double to
+        // exactly 100 (D-PWR-9), and which every sweep after its spawn would
+        // otherwise meet (the boot's, bind_spawned_body's, a joiner's on each
+        // streamed topology change). Retail's save-game restore, unported,
+        // stores a restored body's ceiling instead.
+        // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 - Health =
+        //  healthMax @0x522A07 / @0x522B65, pool 0's ceiling store called
+        //  @0x522CE9 - called @0x52550E, ahead of the
+        //  Server_InitAllPlayerEntitiesForRound call @0x525BAF;
+        //  SaveFile_ReadOrWriteEntityRecord @0x4AC0C0 ->
+        //  Entity_ReloadItemDefAndReinit, called @0x4AC157, the ceiling store
+        //  called @0x4A9F3A]
         if (hp != 0) {
             e->health_max = hp;
-            if (e->health == 100) e->health = hp; // still at the promotion default
+            if (e->health == 100 && ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
+                e->health = hp; // still at the promotion default
         }
         // Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
         // the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
