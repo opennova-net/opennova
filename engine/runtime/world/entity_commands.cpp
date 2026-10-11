@@ -1911,8 +1911,8 @@ bool EntityCommands::group_dead(int group) const {
 // --- mount / emplacement (AttachToEmplaced) ---
 
 bool EntityCommands::mount(EntityTarget occupant_ssn, EntityTarget target_ssn, SeatSelectionMode mode) {
-    // [orig: WacScript_TryMountEntityToVehicle @0x4f70f0] resolve both; reject already-mounted /
-    // seatless; pick the best seat; write both sides; pose now.
+    // The AI board's mount: resolve both; reject already-mounted / seatless; pick
+    // the best seat; request it [orig: Entity_UpdateInfantryAI @0x4BBDD4 -> @0x4BBDF2].
     EntityHandle oh = resolve_target(occupant_ssn);
     EntityHandle th = resolve_target(target_ssn);
     Entity *occ = world_.registry.get(oh);
@@ -1920,7 +1920,9 @@ bool EntityCommands::mount(EntityTarget occupant_ssn, EntityTarget target_ssn, S
     if (!occ || !tgt || occ->mounted) return false;
     VehicleSeatSelection selection;
     if (!find_best_vehicle_seat(world_, th, oh, selection, mode)) return false;
-    return world_.vehicles.attach_to_seat(oh, selection);
+    // The request [orig: @0x4BBDF2]. The shell's debug crew seams
+    // (Simulation::debug_crew_*) request through here too, a path retail lacks.
+    return world_.vehicles.request_attach(oh, selection);
 }
 
 bool EntityCommands::mount_boarding_command(EntityTarget occupant_ssn, EntityTarget target_ssn,
@@ -1979,7 +1981,8 @@ bool EntityCommands::use_boarding_target(EntityTarget occupant) {
     VehicleSeatSelection selected;
     const bool available = find_best_vehicle_seat(world_, target, handle, selected, mode);
     ai->slot.f[36] = available ? int32_t(selected.vehicle.packed) + 1 : 0;
-    if (available) world_.vehicles.attach_to_seat(handle, selected);
+    // The script mount's request [orig: WacScript_TryMountEntityToVehicle @0x4F7186].
+    if (available) world_.vehicles.request_attach(handle, selected);
     if (entity->mount_target.valid()) return true;
     entity->flags &= ~kEntityFlagMounted;
     entity->engine_flags &= ~kEntityFlagMounted;

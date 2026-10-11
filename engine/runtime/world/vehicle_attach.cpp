@@ -125,7 +125,6 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
             world.local_player_state != nullptr)
         local_player_camera_reset(&world, world.local_player_state->weapon,
                                   world.local_player_state->view);
-    world.vehicles.presnap_attach_heading(occ, veh, veh.seats[seat_idx]);
     // A control seat claims +368 or refuses: another entity holds it, or the
     // carrier's def lacks PlayerControl (0x40). A refusal writes no seat
     // handle, parent, slot type or Flags, and the caller then skips the
@@ -460,6 +459,34 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     world.out.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
     raise_boarding_tip(world, player, *veh, selection.type);
     return true;
+}
+
+// The request snaps the requester's yaw to the seat whenever the carrier's bone
+// lookup answers, before the authority's process or a client's C2S 0x26, so a
+// request the process then refuses has turned the body all the same. The process
+// itself (attach_to_seat, process_attach, apply_confirmed_mount) writes no yaw.
+// [orig: Entity_RequestVehicleAttach @0x4364A0 -- the
+//  Entity_GetBoneTransformAndOrientation call @0x436540, its test @0x436548..0x43654a;
+//  the UseGun yaw @0x43656E and local look yaw @0x436579, any other seat's @0x4365C3 /
+//  @0x4365CE; then the process @0x4365E4 or the 0x26 @0x436602]
+void VehicleSystem::request_attach_heading(EntityHandle player,
+        const VehicleSeatSelection &selection) {
+    World &world = world_;
+    Entity *occ = world.registry.get(player);
+    const Entity *veh = world.registry.get(selection.vehicle);
+    if (occ == nullptr || veh == nullptr || selection.seat_index < 0 ||
+            selection.seat_index >= static_cast<int>(veh->seats.size()))
+        return;
+    const Seat &seat = veh->seats[static_cast<size_t>(selection.seat_index)];
+    if (world.pose_provider != nullptr &&
+            !world.pose_provider->resolve_seat_bone(world, *veh, seat.bone_index))
+        return;
+    world.vehicles.presnap_attach_heading(*occ, *veh, seat);
+}
+
+bool VehicleSystem::request_attach(EntityHandle player, const VehicleSeatSelection &selection) {
+    request_attach_heading(player, selection);
+    return attach_to_seat(player, selection); // [orig: @0x4365E4]
 }
 
 bool VehicleSystem::process_attach(EntityHandle player, EntityHandle vehicle, uint8_t bone) {
@@ -900,12 +927,12 @@ bool VehicleSystem::player_toggle_mount(EntityHandle player) {
             Entity *g = world.registry.get(p->ground_target);
             VehicleSeatSelection selection;
             if (g != nullptr && find_best_vehicle_seat(world, g->handle, player, selection))
-                return world.vehicles.attach_to_seat(player, selection);
+                return world.vehicles.request_attach(player, selection); // [orig: @0x4368F6]
             return false;
         }
         VehicleSeatSelection hit;
         if (world.vehicles.find_nearest_free_seat(*p, hit, false))
-            return world.vehicles.attach_to_seat(player, hit);
+            return world.vehicles.request_attach(player, hit); // [orig: @0x436931]
         return false;
     }
 
@@ -914,7 +941,7 @@ bool VehicleSystem::player_toggle_mount(EntityHandle player) {
     // directly through the same server leg].
     VehicleSeatSelection hit;
     if (world.vehicles.find_nearest_free_seat(*p, hit, false))
-        return world.vehicles.attach_to_seat(player, hit);
+        return world.vehicles.request_attach(player, hit);
     return world.vehicles.detach(player);
 }
 

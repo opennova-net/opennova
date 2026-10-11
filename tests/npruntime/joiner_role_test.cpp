@@ -26,6 +26,7 @@
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
@@ -659,6 +660,71 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 			"confirmed dismount releases the local seat and controller");
 }
 
+
+// A joiner's own request turns L to the seat before it queues the C2S 0x26, as
+// the retail client's request does; the host's echo then seats L and turns
+// nothing (D-NET-421). [orig: Entity_RequestVehicleAttach @0x43655F..0x4365CE,
+// the queue @0x436602; the client's receive arm Entity_TryAttachOrDetach
+// @0x4366E8 -> Entity_ProcessVehicleAttach, which writes no yaw]
+bool run_request_turns_l_before_the_0x26() {
+	Harness h;
+	w::World &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	world.load_systems();
+	h.role.poll_preload();
+	constexpr uint16_t self_handle = 0x0005;
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, self_handle, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	w::Entity *local = h.kernel->local.player();
+	w::AiEntity *body = local != nullptr ? world.ai.for_handle(local->handle) : nullptr;
+	if (!expect(body != nullptr, "request fixture has L and its body")) return false;
+	w::Entity vehicle;
+	vehicle.kind = w::EntityKind::Item;
+	vehicle.has_item_def = true;
+	vehicle.position = local->position;
+	vehicle.position.x += 1.0f; // a step away: the scan aims from the eye at the seat point
+	vehicle.health = vehicle.health_max = 100;
+	vehicle.team = local->team;
+	w::Seat seat;
+	seat.type = w::SeatType::Passenger;
+	seat.bone_index = 2;
+	seat.retail_slot = 0;
+	seat.source_name = "sitex00";
+	seat.yaw_offset = 30;
+	vehicle.seats.push_back(seat);
+	const auto vh = world.registry.spawn(1, vehicle);
+	look_at(world, local->handle, vehicle.position.x, vehicle.position.y, vehicle.position.z);
+	body->inf.target_heading = body->heading;
+	h.kernel->local.input.look_heading = body->heading;
+	const int32_t turned = opennova::io::bam_sub(
+			w::emplaced_gun_frame_heading(*world.registry.get(vh)), w::bam_from_degrees_wrapped(30));
+	if (!expect(body->heading != turned, "fixture: L faces away from the seat's yaw")) return false;
+	h.socket.datagrams.clear();
+	if (!expect(h.role.queue_mount_toggle(), "Use queues the seat request")) return false;
+	if (!expect(body->heading == turned && body->inf.target_heading == turned &&
+			!h.kernel->local.player()->mounted,
+			"the request turns L to the seat before the host answers")) return false;
+	h.role.run_tick(h.input);
+	ProtocolMessage request;
+	if (!expect(h.socket.last_message(0x26, request) &&
+			h.kernel->local.input.look_heading == turned,
+			"the 0x26 leaves and the frame folds the turned look into L's input")) return false;
+	// The echo seats L and keeps a look the player moved since.
+	constexpr int32_t moved = 0x0F000000;
+	h.kernel->local.input.look_heading = moved;
+	auto &self = h.role.runtime->state().upsert(self_handle);
+	self.cls = EntityClass::Player;
+	self.type_id = w::kPlayerInfantryTypeId;
+	self.carrier_handle = vh.packed;
+	self.mount_bone = 2;
+	self.state_flags = w::kEntityFlagMounted;
+	self.state_flags_known = true;
+	h.role.run_tick(h.input);
+	return expect(h.kernel->local.player()->mount_target == vh &&
+			h.kernel->local.input.look_heading == moved,
+			"the host's echo seats L and writes no yaw");
+}
 
 // A remote player has only a decoded pool-0 row on a joiner. Its current
 // carrier/bone must still occupy the seat for both Use and the health panel.
@@ -1607,6 +1673,7 @@ int main() {
 	ok &= run_spawn_stamps_equipped_adm_from_midframe_grant();
 	ok &= run_reset_for_join();
 	ok &= run_remote_vehicle_occupancy();
+	ok &= run_request_turns_l_before_the_0x26();
 	ok &= run_confirmed_vehicle_drive(0);
 	ok &= run_confirmed_vehicle_drive(1);
 	ok &= run_confirmed_vehicle_drive(2);

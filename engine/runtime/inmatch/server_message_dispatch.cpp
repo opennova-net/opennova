@@ -1009,7 +1009,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		world::VehicleSeatSelection selected;
 		if (world::find_best_vehicle_seat(
 					world, target_zone, player->handle, selected))
-			world.vehicles.attach_to_seat(player->handle, selected);
+			world.vehicles.request_attach(player->handle, selected);
 	}
 	// Never on a revive deploy, whose client leaves the deploy wait on its record's
 	// respawn edge (D-NET-379) [orig: @0x5178F2, under the @0x5178C5 test].

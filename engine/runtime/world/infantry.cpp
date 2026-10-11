@@ -1480,7 +1480,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
 			const EntityHandle target{ static_cast<uint16_t>(e.slot.f[36] - 1) };
 			if (find_best_vehicle_seat(world, target, e.handle, selected) &&
 					selected.type != tick_entity->mount_type)
-				world.vehicles.attach_to_seat(e.handle, selected);
+				world.vehicles.request_attach(e.handle, selected);
 		}
 		thought = infantry_think(e, world);
 	}

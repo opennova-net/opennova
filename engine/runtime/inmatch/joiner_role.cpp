@@ -330,7 +330,8 @@ void JoinerRole::collect_hostile_mounts(const world::Entity &requester,
 }
 
 // The non-authority use-item action queues the request and waits for the
-// compact relationship echo before changing the local body.
+// compact relationship echo before changing the local body's relation; an
+// attach request turns the body to the seat first.
 // [orig: Entity_ToggleVehicleMount @0x436950;
 // Entity_RequestVehicleAttach @0x4364A0; Entity_SendDetachPacket @0x435510]
 bool JoinerRole::queue_mount_toggle() {
@@ -342,16 +343,20 @@ bool JoinerRole::queue_mount_toggle() {
 		return false;
 	world::VehicleSeatSelection hit;
 	// Mounted Use first scans for an alternative seat, then falls back to
-	// detach. Both requests wait for the host echo; neither edits L here.
-	// [orig: Entity_ToggleVehicleMount @0x4369AC..0x4369C7]
+	// detach. Both relations wait for the host echo; only the attach request's
+	// yaw leg edits L here. [orig: Entity_ToggleVehicleMount @0x4369AC..0x4369C7]
 	if (!world.vehicles.find_mount_toggle_candidate(*player, hit, this))
 		return player->mounted &&
 				runtime->queue_vehicle_detach(player->mount_target.packed);
 	const world::Entity *vehicle = world.registry.get(hit.vehicle);
 	if (vehicle == nullptr || hit.seat_index < 0 ||
 			hit.seat_index >= static_cast<int>(vehicle->seats.size())) return false;
-	return runtime->queue_vehicle_attach(hit.vehicle.packed,
-			vehicle->seats[static_cast<size_t>(hit.seat_index)].bone_index);
+	const uint8_t bone = vehicle->seats[static_cast<size_t>(hit.seat_index)].bone_index;
+	// The request turns L to the seat before it queues the 0x26; the host's
+	// confirm writes no yaw. [orig: Entity_RequestVehicleAttach @0x43655F..0x4365CE
+	//  ahead of the queue @0x436602]
+	world.vehicles.request_attach_heading(player->handle, hit);
+	return runtime->queue_vehicle_attach(hit.vehicle.packed, bone);
 }
 
 // [orig: Entity_FindAvailableSeat @0x436790 -> Entity_RequestVehicleAttach @0x436602]
@@ -360,8 +365,10 @@ bool JoinerRole::queue_numbered_seat(int index) {
 	world::VehicleSeatSelection selected;
 	if (!kernel_->local.find_numbered_seat(index, selected, this)) return false;
 	const world::Entity *carrier = kernel_->world.registry.get(selected.vehicle);
-	return carrier != nullptr && runtime->queue_vehicle_attach(selected.vehicle.packed,
-			carrier->seats[static_cast<size_t>(selected.seat_index)].bone_index);
+	if (carrier == nullptr) return false;
+	const uint8_t bone = carrier->seats[static_cast<size_t>(selected.seat_index)].bone_index;
+	kernel_->world.vehicles.request_attach_heading(kernel_->world.cached.local_player, selected);
+	return runtime->queue_vehicle_attach(selected.vehicle.packed, bone);
 }
 
 bool JoinerRole::queue_stance_change(uint16_t action_id) {

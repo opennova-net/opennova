@@ -19,6 +19,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_mount.h>
+#include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading
 #include <runtime/world/mounted_pose.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/vehicle_part_anim.h>
@@ -240,7 +241,7 @@ void test_usegun_attach_presnaps_local_look() {
     body.inf.target_heading = body.heading;
     body.inf.look_pitch = 0x12345678;
 
-    CHECK(w.vehicles.process_attach(player_h, gun_h, 6));
+    CHECK(w.vehicles.request_attach(player_h, {gun_h, 0, SeatType::Gunner}));
     const int16_t expected_yaw = 23; // the carried frame: vehicle yaw 35 - UseGun offset 12
     // The unmoved gun's spawn heading ((55 << 16) / 360) << 16 = 656146432 less
     // 0x0400 << 16. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
@@ -255,6 +256,107 @@ void test_usegun_attach_presnaps_local_look() {
     // The unmoved gun's spawn heading ((55 << 16) / 360) << 16 = 656146432, turned by the
     // 12-degree seat offset. [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66]
     CHECK(body.inf.body_heading == 799312009);
+}
+
+// The attach yaw snap is the request's alone (D-NET-421). A request turns the
+// requester to the seat whenever the carrier's bone lookup answers, ahead of
+// every gate of the process, so a request the process refuses has turned the
+// body all the same; the process itself (the C2S 0x26 handler, the vehicle
+// spawn, a client's decoded relation) writes no yaw.
+// [orig: Entity_RequestVehicleAttach @0x4364A0 -- the lookup @0x436540..0x43654a,
+//  the stores @0x43655F..0x4365CE, then the process @0x4365E4; the 0x26 handler
+//  NapiNPServerMsg_HandleVehicleAttach @0x5023ED / @0x502418 and a client's
+//  Entity_TryAttachOrDetach @0x4366E8 reach Entity_ProcessVehicleAttach directly;
+//  the AI board's request Entity_UpdateInfantryAI @0x4BBDF2 (EntityCommands::mount); the
+//  enemy refusal Entity_ProcessVehicleAttach @0x435b40]
+void test_attach_yaw_snaps_at_the_request_alone() {
+	constexpr int32_t kStart = 0x10000000;
+	struct Npc {
+		EntityHandle handle;
+		AiEntity *body = nullptr;
+	};
+	const auto stage = [&](Rig &r) {
+		for (Seat &seat : r.veh().seats) seat.yaw_offset = 30;
+		Entity npc;
+		npc.kind = EntityKind::Organic;
+		npc.net_id = 50;
+		npc.health = 100;
+		npc.alive = true;
+		npc.team = 1;
+		npc.position = r.player().position;
+		Npc out;
+		out.handle = r.w.registry.spawn(0, npc);
+		out.body = r.sys.at(r.sys.attach(out.handle));
+		out.body->inf.active = true;
+		out.body->health = 100;
+		out.body->heading = kStart;
+		return out;
+	};
+	// Every seat here turns 30 degrees off the carrier's frame.
+	const auto seat_heading = [](const Rig &r) {
+		return opennova::io::bam_sub(emplaced_gun_frame_heading(
+				*r.w.registry.get(r.veh_h)), bam_from_degrees_wrapped(30));
+	};
+	{
+		// The AI board's mount is a request: a free seat turns and seats the body.
+		Rig r;
+		const Npc npc = stage(r);
+		CHECK(r.w.commands.mount(50, 11));
+		CHECK(r.w.registry.get(npc.handle)->mount_target == r.veh_h);
+		CHECK(npc.body->heading == seat_heading(r));
+	}
+	{
+		// (a) The process refuses a carrier an enemy rides, after the request
+		// turned the body.
+		Rig r;
+		const Npc npc = stage(r);
+		Entity enemy;
+		enemy.kind = EntityKind::Organic;
+		enemy.health = 100;
+		enemy.alive = true;
+		enemy.team = 2;
+		enemy.mounted = true;
+		enemy.mount_target = r.veh_h;
+		r.w.registry.spawn(0, enemy);
+		CHECK(!r.w.commands.mount(50, 11));
+		CHECK(!r.w.registry.get(npc.handle)->mounted);
+		CHECK(npc.body->heading == seat_heading(r));
+	}
+	{
+		// The request writes no yaw where the carrier's bone lookup fails.
+		struct NoSeatBone final : IPoseProvider {
+			bool resolve_seat_bone(World &, const Entity &, int) override { return false; }
+		} no_bone;
+		Rig r;
+		const Npc npc = stage(r);
+		r.w.pose_provider = &no_bone;
+		CHECK(r.w.commands.mount(50, 11));
+		CHECK(npc.body->heading == kStart);
+	}
+	{
+		// (b) The C2S 0x26 process seats the body and turns nothing.
+		Rig r;
+		const Npc npc = stage(r);
+		CHECK(r.w.vehicles.process_attach(npc.handle, r.veh_h, 2));
+		CHECK(r.w.registry.get(npc.handle)->mount_target == r.veh_h);
+		CHECK(npc.body->heading == kStart);
+	}
+	{
+		// (c) A client's decoded relation seats its own player and leaves the
+		// body heading and the look target where they were.
+		Rig r;
+		AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
+		body.inf.active = true;
+		body.inf.is_local_player = true;
+		body.health = 150;
+		body.heading = kStart;
+		body.inf.target_heading = kStart;
+		r.veh().seats[1].yaw_offset = 30;
+		CHECK(r.w.vehicles.apply_confirmed_mount(r.player_h, r.veh_h, 2));
+		CHECK(r.player().mount_target == r.veh_h);
+		CHECK(body.heading == kStart);
+		CHECK(body.inf.target_heading == kStart);
+	}
 }
 
 // A remote player's LOOK is still independent in either vehicle-control seat.
@@ -4046,6 +4148,7 @@ int main() {
 	test_scan_uses_live_eye_offset();
 	test_enemy_on_carried_gun_blocks_root_and_sibling();
 	test_carrier_without_a_def_takes_no_rider();
+	test_attach_yaw_snaps_at_the_request_alone();
 	test_vehicle_admission_stationary_threshold_and_deck();
 	test_seated_board_any_upgrades_on_64_tick_phase();
 	test_ai_authored_entry_claim_and_stages();
