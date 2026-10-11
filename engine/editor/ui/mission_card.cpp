@@ -64,6 +64,8 @@ void set_field(CardContext &context, const NodeAddress &record, const std::strin
 class Flow {
 public:
 	Flow(float left, float right) : left_(left), right_(right) {}
+	// How wide a line of it is.
+	float room() const { return std::max(1.0f, right_ - left_); }
 	void place(float width, float gap = 0.0f) {
 		if (started_) {
 			ImGui::SameLine(0.0f, gap);
@@ -163,7 +165,7 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		// A variable: picked from those the events use, by name, or a new one (the lowest no event uses).
 		const std::unique_ptr<MissionNames> names = mission_label_names(context.mission, context.names);
 		const std::string preview = names->variable(chip.value);
-		const float width = ui_kit::text_width(preview.c_str()) + ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f;
+		const float width = std::min(ui_kit::text_width(preview.c_str()) + ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f, flow.room());
 		flow.place(width, style.ItemSpacing.x * 0.5f);
 		ImGui::SetNextItemWidth(width);
 		if (ImGui::BeginCombo("##variable", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
@@ -188,9 +190,9 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 		shown.text = chip.unset ? "(" + chip.label + ": not set)" : words;
 		shown.raw = raw;
 		shown.dangling = chip.missing;
-		const float width = std::min(ui_kit::text_width(shown.text.c_str()) + ui_kit::text_width(raw.c_str()) + style.ItemSpacing.x +
-		                                     ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f,
-		                             ImGui::GetFontSize() * 22.0f);
+		const float width = std::min({ui_kit::text_width(shown.text.c_str()) + ui_kit::text_width(raw.c_str()) + style.ItemSpacing.x +
+		                                      ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f,
+		                              ImGui::GetFontSize() * 22.0f, flow.room()});
 		flow.place(width, style.ItemSpacing.x * 0.5f);
 		ImGui::SetNextItemWidth(width);
 		std::string picked;
@@ -200,9 +202,10 @@ void draw_chip(CardContext &context, Flow &flow, const BoardLine &line, const Bo
 	} else {
 		std::vector<FieldChoice> own;
 		const std::vector<FieldChoice> &choices = context.mission.choices_on(line.record, use, own);
-		const float width = choices.empty() ? ImGui::GetFontSize() * 4.5f + (*chip.unit ? ui_kit::text_width(chip.unit) + style.ItemSpacing.x : 0.0f)
-		                                    : std::min(ui_kit::text_width(words.c_str()) + ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f,
-		                                               ImGui::GetFontSize() * 16.0f);
+		const float width = std::min(choices.empty() ? ImGui::GetFontSize() * 4.5f + (*chip.unit ? ui_kit::text_width(chip.unit) + style.ItemSpacing.x : 0.0f)
+		                                             : std::min(ui_kit::text_width(words.c_str()) + ImGui::GetFrameHeight() + style.FramePadding.x * 2.0f,
+		                                                        ImGui::GetFontSize() * 16.0f),
+		                             flow.room());
 		flow.place(width, style.ItemSpacing.x * 0.5f);
 		ImGui::SetNextItemWidth(width);
 		field_widgets::Edited edited;
@@ -266,7 +269,9 @@ void draw_runs(CardContext &context, Flow &flow, const BoardLine &line, bool &re
 		const bool type_words = run.slot == kLogicTypeSlot;
 		ImGui::PushStyleColor(ImGuiCol_Text, type_words ? kTypeWords : run.slot < 0 ? kNote : ImGui::GetStyleColorVec4(ImGuiCol_Text));
 		int index = 0;
-		for (const std::string &word : words_of(run.text)) {
+		for (const std::string &whole : words_of(run.text)) {
+			// A word wider than a whole line is cut to it (its run's words whole in the line's tooltip).
+			const std::string word = ui_kit::text_width(whole.c_str()) > flow.room() ? ui_kit::fit(whole, flow.room()) : whole;
 			flow.place(ui_kit::text_width(word.c_str()));
 			ImGui::PushID(int(r) * 1000 + index++);
 			ImGui::TextUnformatted(word.c_str());
@@ -281,7 +286,7 @@ void draw_runs(CardContext &context, Flow &flow, const BoardLine &line, bool &re
 	}
 	for (const BoardChip &chip : line.chips) {
 		if (drawn[size_t(chip.slot)]) continue;
-		const std::string label = chip.label + ":";
+		const std::string label = ui_kit::fit(chip.label + ":", flow.room());
 		flow.place(ui_kit::text_width(label.c_str()), ImGui::GetStyle().ItemSpacing.x);
 		ImGui::TextDisabled("%s", label.c_str());
 		draw_chip(context, flow, line, chip, chip.words);
@@ -400,9 +405,15 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 			ImGui::EndPopup();
 		}
 	}
-	const float left = x0 + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x * 2.0f + ui_kit::text_width("::") + lead_width;
-	ImGui::SameLine();
-	ImGui::SetCursorPosX(left);
+	float left = x0 + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x * 2.0f + ui_kit::text_width("::") + lead_width;
+	// Too narrow beside its lead (a narrow pane, the Inspector): the words under it, from the line's start.
+	if (right - left < ImGui::GetFontSize() * 8.0f) {
+		left = x0 + ImGui::GetFrameHeight();
+		ImGui::SetCursorPosX(left);
+	} else {
+		ImGui::SameLine();
+		ImGui::SetCursorPosX(left);
+	}
 	Flow flow(left, right);
 	bool retype = false;
 	draw_runs(context, flow, line, retype);
@@ -449,9 +460,11 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 }
 
 // A wait as a chip: seconds typed (Enter or leaving it sets it), the steps the game counts beside them.
-void wait_chip(CardContext &context, const BoardCard &card, const char *id, const char *field, int64_t steps, const char *tip) {
+void wait_chip(CardContext &context, ui_kit::WrapRow &row, const BoardCard &card, const char *id, const char *field,
+               int64_t steps, const char *tip) {
 	const float em = ImGui::GetFontSize();
 	CardState &state = context.state;
+	row.next(em * 4.0f);
 	const bool held = state.waiting_event == card.event.row && std::string(state.waiting_field) == field;
 	double seconds = held ? state.waiting_seconds : std::round(logic_units_seconds(steps) * 10.0) / 10.0;
 	ImGui::SetNextItemWidth(em * 4.0f);
@@ -469,10 +482,12 @@ void wait_chip(CardContext &context, const BoardCard &card, const char *id, cons
 	}
 	ImGui::EndDisabled();
 	ui_kit::tooltip(std::string(tip) + " In seconds; the game counts steps of 1.024 s (64 ticks), at most 1023.");
-	ImGui::SameLine();
-	ImGui::TextDisabled("s (%lld %s)", static_cast<long long>(steps), steps == 1 ? "step" : "steps");
+	char counted[48];
+	std::snprintf(counted, sizeof(counted), "s (%lld %s)", static_cast<long long>(steps), steps == 1 ? "step" : "steps");
+	row.next(ui_kit::text_width(counted));
+	ImGui::TextDisabled("%s", counted);
 	if (bms::event_steps_wrap(steps)) {
-		ImGui::SameLine();
+		row.next(ui_kit::text_width("(!)"));
 		ImGui::TextColored(kWarn, "(!)");
 		ui_kit::tooltip("Past 512 steps the game's countdown wraps: " + logic_steps_words(steps) + ".");
 	}
@@ -713,8 +728,11 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 	}
 	ui_kit::tooltip(card.folded ? "Unfold it (Space)." : "Fold it to its sentence (Space).");
 	ImGui::SameLine();
-	if (ImGui::Selectable(card.title.c_str(), selected, ImGuiSelectableFlags_AllowOverlap,
-	                      ImVec2(ui_kit::text_width(card.title.c_str()), 0.0f))) {
+	// The title cut to the room (a long name in a narrow pane), its id the whole title's.
+	const std::string fitted = ui_kit::fit(card.title, std::max(1.0f, ImGui::GetContentRegionAvail().x));
+	const std::string title = fitted == card.title ? card.title : fitted + "###" + card.title;
+	if (ImGui::Selectable(title.c_str(), selected, ImGuiSelectableFlags_AllowOverlap,
+	                      ImVec2(ui_kit::text_width(fitted.c_str()), 0.0f))) {
 		asked.selected = true;
 		// A pick waiting on an event (an Event parameter's chip) takes this one.
 		MissionPickSlot slot;
@@ -746,17 +764,16 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 	}
 	const Node *row = mission.row(card.event.row);
 	const uint32_t flags = row && row->kind == k(MissionKind::Event) ? uint32_t(static_cast<const EventRow *>(row)->native.event.flags) : 0;
+	ui_kit::WrapRow flags_row;
+	flags_row.next(0.0f);
 	const auto flag = [&](const char *label, bms::EventFlags bit, bool on, const char *tip) {
-		ImGui::SameLine();
+		flags_row.next(ui_kit::checkbox_width(label));
 		bool value = on;
 		ImGui::BeginDisabled(!context.editable);
 		if (ImGui::Checkbox(label, &value)) set_field(context, card.event, "flags", int64_t(value ? flags | uint32_t(bit) : flags & ~uint32_t(bit)));
 		ImGui::EndDisabled();
 		ui_kit::tooltip(tip);
 	};
-	const float flags_width = ui_kit::checkbox_width("Repeats") + ui_kit::checkbox_width("At start") + ui_kit::checkbox_width("At end") +
-	                          ImGui::GetStyle().ItemSpacing.x * 3.0f;
-	if (ImGui::GetContentRegionAvail().x < flags_width) ImGui::NewLine();
 	flag("Repeats", bms::EventFlags::ResetAfter, card.repeats, "Checked again after it acts, its repeat's wait later.");
 	flag("At start", bms::EventFlags::PreMission, card.at_start, "Checked once, as the mission starts.");
 	flag("At end", bms::EventFlags::PostMission, card.at_end, "Checked once, as the mission ends.");
@@ -786,14 +803,15 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 		finish();
 		return asked;
 	}
+	ui_kit::WrapRow waits;
+	waits.next(ui_kit::text_width("Wait"));
+	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("Wait");
-	ImGui::SameLine();
-	wait_chip(context, card, "##delay", "delay", card.delay_steps, "How long after its triggers hold it acts.");
+	wait_chip(context, waits, card, "##delay", "delay", card.delay_steps, "How long after its triggers hold it acts.");
 	if (card.repeats) {
-		ImGui::SameLine();
+		waits.next(ui_kit::text_width("again after"));
 		ImGui::TextDisabled("again after");
-		ImGui::SameLine();
-		wait_chip(context, card, "##repeat", "reset_after", card.repeat_steps, "How long after it acts it is checked again.");
+		wait_chip(context, waits, card, "##repeat", "reset_after", card.repeat_steps, "How long after it acts it is checked again.");
 	}
 
 	// The triggers, then the actions.

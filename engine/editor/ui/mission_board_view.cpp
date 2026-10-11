@@ -122,16 +122,21 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 		filter_held_ = shown.logic_filter;
 		std::snprintf(filter_, sizeof(filter_), "%s", shown.logic_filter.c_str());
 	}
-	row.next(em * 12.0f);
+	const float filter_width = std::min(em * 12.0f, ImGui::GetContentRegionAvail().x);
+	row.next(filter_width);
 	if (focus_filter_) {
 		ImGui::SetKeyboardFocusHere();
 		focus_filter_ = false;
 	}
-	if (ui_kit::filter_box("##board_filter", filter_, sizeof(filter_), "Filter the events (Ctrl+F)", em * 12.0f)) {
+	if (ui_kit::filter_box("##board_filter", filter_, sizeof(filter_), "Filter the events (Ctrl+F)", filter_width)) {
 		filter_held_ = filter_;
 		set_shown(workspace, mission, "logic_filter", io::JsonValue::make_string(filter_));
 	}
-	const std::string attention = "Needs attention (" + std::to_string(board_.noted) + ")";
+	// Its words cut to the room in a narrow pane, its id the same (###attention).
+	std::string attention = "Needs attention (" + std::to_string(board_.noted) + ")";
+	if (ui_kit::checkbox_width(attention.c_str()) > ImGui::GetContentRegionAvail().x)
+		attention = "(" + std::to_string(board_.noted) + ")";
+	attention += "###attention";
 	row.next(ui_kit::checkbox_width(attention.c_str()));
 	bool attend = shown.logic_attention;
 	if (ImGui::Checkbox(attention.c_str(), &attend)) set_shown(workspace, mission, "logic_attention", io::JsonValue::make_bool(attend));
@@ -147,7 +152,9 @@ void MissionBoardPane::toolbar(Workspace &workspace, const MissionDocument &miss
 			for (const Node *event : mission.rows_of(MissionKind::Event)) ids.push(io::JsonValue::make_number(double(event->id)));
 		set_shown(workspace, mission, "logic_folded", std::move(ids));
 	}
-	ImGui::TextDisabled("%zu of %zu events", board_.cards.size(), board_.events);
+	const std::string counted = std::to_string(board_.cards.size()) + " of " + std::to_string(board_.events) + " events";
+	row.next(ui_kit::text_width(counted.c_str()));
+	ImGui::TextDisabled("%s", counted.c_str());
 }
 
 // The variables the events use (S24 A7), folded at first: each by its name with where it is used, a click there
