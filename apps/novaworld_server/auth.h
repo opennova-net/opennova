@@ -16,8 +16,8 @@ namespace opennova::novaworld_server {
 inline constexpr size_t kUsernameMaxBytes = 64;
 
 // Whether `s` holds a control byte (below 0x20, or 0x7F). Usernames may hold
-// none; nor may an admin ServerCommand arg (http_listener.cpp, where the
-// reason is spelled out).
+// none; nor may a pushed ServerCommand arg (compose_server_command,
+// host_routes.h, where the reason is spelled out).
 bool has_control_byte(std::string_view s);
 
 // Resolved player record returned by authenticate_user / get_user_by_*.

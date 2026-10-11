@@ -172,8 +172,15 @@ public:
 	// send-interval leg makes a gap visible when nothing follows). A connection replaced or
 	// dropped, or no longer hosting, by the drain loses the push. Thread-safe; nothing is sent
 	// from the caller.
+	// `owner` scopes a push to the listing's owner (POST /api/me/hosts/<rid>/..., service
+	// policy): set, the RID resolves only to a connection whose listing that account owns
+	// (LobbyState::host_user_id), checked here under the lobby lock and again by the drain as the
+	// statement goes out, so an owner changed or cleared in between (a re-host whose key names
+	// another account or none) loses the push. A connection another account owns, or none, is
+	// then UnknownRid, the answer for a RID no connection holds.
 	// ServerCommand: one Cmd param carrying `cmd` verbatim (compose it with server_command_text).
-	HostPushResult push_server_command(uint32_t rid, const std::string &cmd);
+	HostPushResult push_server_command(uint32_t rid, const std::string &cmd,
+	                                   std::optional<int64_t> owner = std::nullopt);
 	// ServerStopHosting: MsgCode / MsgParam1 / MsgParam2, the sysop punt from the host's side. A
 	// stock host drops to verified with no ClientStopHosting [orig:
 	// CNapiGameSession_HandleServerMessage @0x4d1c50 — state 4, the word to 1], and in a
@@ -183,7 +190,8 @@ public:
 	// Once the record went out framed the connection also leaves the browser
 	// (LobbySession::end_hosting).
 	HostPushResult push_stop_hosting(uint32_t rid, int msg_code, int msg_param1 = 0,
-	                                 int msg_param2 = 0);
+	                                 int msg_param2 = 0,
+	                                 std::optional<int64_t> owner = std::nullopt);
 
 	// Drop the per-connection lobby state for the connection at `peer`.
 	// Called from main()'s ConnectionManager::on_lost handler so
@@ -207,8 +215,10 @@ private:
 		uint32_t server_sk = 0; // the connection the RID resolved to: a re-auth drops the push
 		NapiMessage statement;
 		bool ends_hosting = false;
+		std::optional<int64_t> owner; // an owner's push: the drain re-checks the listing's owner
 	};
-	HostPushResult queue_host_push(uint32_t rid, NapiMessage statement, bool ends_hosting);
+	HostPushResult queue_host_push(uint32_t rid, NapiMessage statement, bool ends_hosting,
+	                               std::optional<int64_t> owner);
 	// The receive thread's legs between receive batches: the queued pushes, then the
 	// send-interval leg over every lobby connection.
 	void drain_host_pushes(opennova::net::Socket &socket);

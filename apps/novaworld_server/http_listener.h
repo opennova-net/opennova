@@ -26,15 +26,18 @@ struct ServerConfig;
 class SessionStore;
 class NwUdpListener;
 
-// Crow-backed HTTP listener. start() registers five route families, each in
-// its own private registrar (bodies in http_listener.cpp):
-//   admin REST API      — /api/admin/* + dev host inject, the listed servers
-//                         with their owners, and the ServerCommand /
-//                         ServerStopHosting pushes, for the Bearer
+// Crow-backed HTTP listener. start() registers six route families, each in
+// its own registrar (bodies in http_listener.cpp, the listed servers' in
+// host_routes.cpp):
+//   admin REST API      — /api/admin/* + dev host inject, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
 //   public JSON API     — /api/* for the web portal, with the website's
-//                         login / logout / me session routes and the
-//                         logged-in account's listed servers
+//                         login / logout / me session routes
+//   listed servers      — HostRoutes: GET /api/admin/hosts and GET
+//                         /api/me/hosts, and the ServerCommand /
+//                         ServerStopHosting pushes for an admin
+//                         (/api/admin/hosts/<rid>/...) and for the
+//                         server's owner (/api/me/hosts/<rid>/...)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -55,8 +58,9 @@ public:
 	// the live snapshot. Null is safe (the routes degrade to empty / no-op).
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
-	// The NovaWorld UDP listener the admin host routes push statements through
-	// (/api/admin/hosts/<rid>/command and /stop). Set before start(); it must
+	// The NovaWorld UDP listener the host routes push statements through
+	// (/api/admin/hosts/<rid>/command and /stop, and the owner's
+	// /api/me/hosts/<rid>/command and /stop). Set before start(); it must
 	// outlive the HTTP listener. Null answers those routes 503.
 	void set_nw_udp_listener(NwUdpListener *listener) { nw_udp_ = listener; }
 
@@ -137,8 +141,8 @@ private:
 	// Optional unknown-message tracker (set via set_unknown_tracker). Read
 	// by /api/unknowns; written by the catch-all 404 path. Null in tests.
 	opennova::UnknownTracker *tracker_ = nullptr;
-	// The push channel to listed servers (set_nw_udp_listener); null in tests
-	// that do not wire one.
+	// The push channel to listed servers (set_nw_udp_listener), handed to the
+	// host routes at start(); null in tests that do not wire one.
 	NwUdpListener *nw_udp_ = nullptr;
 	// config.public_host, set in start() before Crow runs (host_url() /
 	// gsb_url()).

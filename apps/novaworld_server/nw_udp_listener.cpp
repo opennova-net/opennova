@@ -467,30 +467,34 @@ std::vector<NwUdpListener::HostedSnapshot> NwUdpListener::snapshot_hosted() cons
 	return out;
 }
 
-HostPushResult NwUdpListener::push_server_command(uint32_t rid, const std::string &cmd) {
-	return queue_host_push(rid, make_server_command(cmd), /*ends_hosting=*/false);
+HostPushResult NwUdpListener::push_server_command(uint32_t rid, const std::string &cmd,
+                                                  std::optional<int64_t> owner) {
+	return queue_host_push(rid, make_server_command(cmd), /*ends_hosting=*/false, owner);
 }
 
 HostPushResult NwUdpListener::push_stop_hosting(uint32_t rid, int msg_code, int msg_param1,
-                                                int msg_param2) {
+                                                int msg_param2, std::optional<int64_t> owner) {
 	return queue_host_push(rid, make_server_stop_hosting(msg_code, msg_param1, msg_param2),
-	                       /*ends_hosting=*/true);
+	                       /*ends_hosting=*/true, owner);
 }
 
 // The RID is the service's own (LobbySession::mint_rid), kept by a connection after its hosting
-// ends and carried across a reconnect; a hosting connection holds it at most once.
+// ends and carried across a reconnect; a hosting connection holds it at most once. An owner's
+// push sees only the connections whose listing that account owns.
 HostPushResult NwUdpListener::queue_host_push(uint32_t rid, NapiMessage statement,
-                                              bool ends_hosting) {
+                                              bool ends_hosting, std::optional<int64_t> owner) {
 	if (rid == 0) return HostPushResult::UnknownRid;
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);
 	bool known = false;
 	for (const auto &[peer, state] : lobby_states_) {
 		if (state.lobby.rid != rid) continue;
+		if (owner && state.lobby.host_user_id != owner) continue;
 		known = true;
 		if (!state.lobby.hosting) continue;
-		std::printf("[nwudp] PUSH %s queued for rid=%u addr=%s\n", statement.name.c_str(), rid,
-		            peer_addr_to_string(peer).c_str());
-		host_pushes_.push_back(HostPush{peer, state.server_sk, std::move(statement), ends_hosting});
+		std::printf("[nwudp] PUSH %s queued for rid=%u addr=%s%s\n", statement.name.c_str(), rid,
+		            peer_addr_to_string(peer).c_str(), owner ? " (the owner's)" : "");
+		host_pushes_.push_back(
+				HostPush{peer, state.server_sk, std::move(statement), ends_hosting, owner});
 		return HostPushResult::Queued;
 	}
 	return known ? HostPushResult::NotHosted : HostPushResult::UnknownRid;
@@ -498,7 +502,8 @@ HostPushResult NwUdpListener::queue_host_push(uint32_t rid, NapiMessage statemen
 
 // Each push goes out as its own send build, in queue order, on the connection the RID resolved
 // to; one replaced (a fresh 0x42 mints a new SK) or dropped since is skipped, and so is one that
-// stopped hosting since, as the queue would have refused it (NotHosted).
+// stopped hosting since, as the queue would have refused it (NotHosted), and an owner's push to a
+// listing no longer that account's.
 void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);
 	if (host_pushes_.empty()) return;
@@ -517,6 +522,11 @@ void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
 		if (!state.lobby.hosting) {
 			std::printf("[nwudp] PUSH %s to %s dropped: the connection no longer hosts\n",
 			            name.c_str(), addr.c_str());
+			continue;
+		}
+		if (push.owner && state.lobby.host_user_id != push.owner) {
+			std::printf("[nwudp] PUSH %s to %s dropped: the listing's owner changed\n", name.c_str(),
+			            addr.c_str());
 			continue;
 		}
 		std::optional<ProtocolMessage> record = lobby_record(std::move(push.statement));

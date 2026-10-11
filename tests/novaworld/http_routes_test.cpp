@@ -1575,6 +1575,7 @@ int test_listed_server_owners(Harness &h) {
 	TEST_EXPECT(str(mine["peer_ip"]) == "10.0.0.9");
 	TEST_EXPECT(str(mine["created_at"]).size() == 19 && str(mine["updated_at"]).size() == 19);
 	TEST_EXPECT(!mine.has("owner"));
+	TEST_EXPECT(mine["roster"].t() == crow::json::type::List && mine["roster"].size() == 0);
 
 	// The admin view: the Bearer token or an admin session; a player is refused.
 	reply = h.send("GET", "/api/admin/hosts");
@@ -1640,7 +1641,10 @@ int test_menu_urls_name_bound_port(Harness &h) {
 // verified and hosting, pumped by the test while it waits for what the service pushes.
 class PushHost {
 public:
-	explicit PushHost(uint16_t service_port) : session_(config()) {
+	// `client_index` tells several hosts' sessions apart in the service's log (each has its own
+	// socket, which is what the service keys a connection by).
+	explicit PushHost(uint16_t service_port, uint32_t client_index = 0x48545450u)
+		: session_(config(client_index)) {
 		socket_ = net::ScopedSocket(net::udp_bind(0));
 		service_.ip = {127, 0, 0, 1};
 		service_.port = service_port;
@@ -1668,11 +1672,17 @@ public:
 	}
 	void clear_notices() { notices_.clear(); }
 	void goodbye() { send(session_.build_goodbye()); }
+	// The ClientHostUpdate that first carries the HostKey, as a stock host's at its mission's
+	// start (the key names the listing's owner), pumped while it goes out and is ACKed.
+	void present_key(const std::string &key) {
+		session_.send_host_update({{0, "HostKey", key}}, {});
+		pump_until(300, [] { return false; });
+	}
 
 private:
-	static opennova::ClientSession::Config config() {
+	static opennova::ClientSession::Config config(uint32_t client_index) {
 		opennova::ClientSession::Config cfg;
-		cfg.client_index = 0x48545450u;
+		cfg.client_index = client_index;
 		cfg.client_key = 0x50555348u;
 		cfg.na = "http:push";
 		cfg.cookie_vars = []() {
@@ -1840,6 +1850,244 @@ int test_admin_host_push(Harness &h) {
 	reply = command(rid_text, valid);
 	TEST_EXPECT(reply.transport_ok && reply.code == 409);
 	host.goodbye();
+	return 0;
+}
+
+// Polls `done` every 20 ms for up to `ms`; its last answer.
+template <typename Done>
+bool wait_until(Done done, int ms = 3000) {
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+	while (!done() && std::chrono::steady_clock::now() < deadline) {
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	return done();
+}
+
+// The browser's row (active_hosts) of the server named `name`.
+std::optional<opennova::hostdb::HostRow> row_named(Harness &h, const std::string &name) {
+	for (auto &row : opennova::hostdb::list_hosts(*h.pool.acquire())) {
+		if (row.server_name == name) return row;
+	}
+	return std::nullopt;
+}
+
+// POST /api/me/hosts/<rid>/command and /stop: the account that listed a server (its HostKey,
+// active_hosts.host_user_id) pushes to that server alone. GET /api/me/hosts carries the roster the
+// player verbs target. Logged out is 401 and a missing CSRF header 403, before any bucket. Another
+// account's RID and a free one get the same 404 and push nothing; a body the composer refuses is a
+// 400 (read before the listing), SetMPReset a 403 even for the owner; the owner's pushes are 202
+// and reach the host's session. The listener re-checks the owner at push time: a row that names
+// the caller over a connection that does not is a 404. Every push draws one token from the
+// account's bucket (8 at once, 429 with Retry-After past them), and the stop ends the listing.
+// Each account below keeps to its bucket's eight.
+int test_owner_host_push(Harness &h) {
+	using opennova::db::BindValue;
+	using Notice = PushHost::Notice;
+	const int64_t alice = make_account(h, "owner_alice", "pw-owner-alice");
+	TEST_EXPECT(alice > 0);
+	TEST_EXPECT(make_account(h, "owner_bob", "pw-owner-bob") > 0);
+	TEST_EXPECT(make_account(h, "owner_carol", "pw-owner-carol") > 0);
+	TEST_EXPECT(make_account(h, "owner_dave", "pw-owner-dave") > 0);
+	const std::string alice_s = login_token(h, "10.31.0.1", "owner_alice", "pw-owner-alice");
+	const std::string bob_s = login_token(h, "10.31.0.2", "owner_bob", "pw-owner-bob");
+	const std::string carol_s = login_token(h, "10.31.0.3", "owner_carol", "pw-owner-carol");
+	const std::string dave_s = login_token(h, "10.31.0.4", "owner_dave", "pw-owner-dave");
+	TEST_EXPECT(!alice_s.empty() && !bob_s.empty() && !carol_s.empty() && !dave_s.empty());
+
+	auto command = [&h](const std::string &session, const std::string &rid, const std::string &body,
+	                    bool csrf = true) {
+		std::vector<std::string> headers = {kJson, with_session(session)};
+		if (csrf) headers.push_back(kCsrf);
+		return h.send("POST", "/api/me/hosts/" + rid + "/command", headers, body);
+	};
+	auto stop = [&h](const std::string &session, const std::string &rid, bool csrf = true) {
+		std::vector<std::string> headers = {with_session(session)};
+		if (csrf) headers.push_back(kCsrf);
+		return h.send("POST", "/api/me/hosts/" + rid + "/stop", headers);
+	};
+	auto error_of = [](const net::HttpReply &reply) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("error") ? str(json["error"]) : std::string("<none>");
+	};
+	auto message_of = [](const net::HttpReply &reply) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("message") ? str(json["message"]) : std::string();
+	};
+	const std::string rename = "{\"verb\":\"SetServerName\",\"args\":[\"Owner Renamed\"]}";
+
+	// Alice's server: listed with no owner by its request, then hers once its update presents a
+	// key minted for her (as /NWHost.dll records one for her retail login).
+	const std::string key = "PONMLKJIHGFEDCBAAAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH";
+	TEST_EXPECT(opennova::hostdb::is_host_key(key));
+	opennova::hostdb::record_host_key(*h.pool.acquire(), key, alice);
+	PushHost mine(h.nw_udp.bound_port(), 0x4f574e31u);
+	TEST_EXPECT(mine.host("Owner Push Host"));
+	mine.present_key(key);
+	std::optional<opennova::hostdb::HostRow> row;
+	TEST_EXPECT(wait_until([&] {
+		row = row_named(h, "Owner Push Host");
+		return row && row->host_user_id == alice;
+	}));
+	const std::string rid = std::to_string(row->rid);
+	// Another server, listed with no owner (its update never presents a key).
+	PushHost theirs(h.nw_udp.bound_port(), 0x414e4f4eu);
+	TEST_EXPECT(theirs.host("Anonymous Push Host"));
+	std::optional<opennova::hostdb::HostRow> anon;
+	TEST_EXPECT(wait_until([&] {
+		anon = row_named(h, "Anonymous Push Host");
+		return anon.has_value();
+	}));
+	TEST_EXPECT(!anon->host_user_id);
+	const std::string anon_rid = std::to_string(anon->rid);
+
+	// The owner's list: her server with its roster (the host's PlayerList); Bob's has none of it.
+	auto reply = h.send("GET", "/api/me/hosts", {with_session(alice_s)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["hosts"].size() == 1);
+	TEST_EXPECT(json["hosts"][0]["rid"].i() == static_cast<int64_t>(row->rid));
+	TEST_EXPECT(str(json["hosts"][0]["server_name"]) == "Owner Push Host");
+	const auto &roster = json["hosts"][0]["roster"];
+	TEST_EXPECT(roster.t() == crow::json::type::List && roster.size() == 1);
+	TEST_EXPECT(roster[0]["slot"].i() == 0 && str(roster[0]["player_name"]) == "Host");
+	TEST_EXPECT(json["hosts"][0].has("msg"));
+	reply = h.send("GET", "/api/me/hosts", {with_session(bob_s)});
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(crow::json::load(body_text(reply))["hosts"].size() == 0);
+
+	// Logged out, a dead session, and no CSRF header: refused before anything else.
+	reply = h.send("POST", "/api/me/hosts/" + rid + "/command", {kJson, kCsrf}, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = h.send("POST", "/api/me/hosts/" + rid + "/stop", {kCsrf});
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = command(std::string(64, 'a'), rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 401);
+	reply = command(alice_s, rid, rename, /*csrf=*/false);
+	TEST_EXPECT(reply.transport_ok && reply.code == 403);
+	TEST_EXPECT(error_of(reply) == "csrf_header_required");
+	reply = stop(alice_s, rid, /*csrf=*/false);
+	TEST_EXPECT(reply.transport_ok && reply.code == 403);
+
+	// Another account's server and a free RID: the same 404, and nothing reaches either host.
+	const auto others_command = command(bob_s, rid, rename);
+	const auto free_command = command(bob_s, "999999", rename);
+	TEST_EXPECT(others_command.transport_ok && others_command.code == 404);
+	TEST_EXPECT(error_of(others_command) == "unknown_rid");
+	TEST_EXPECT(body_text(others_command) == body_text(free_command) && free_command.code == 404);
+	const auto others_stop = stop(bob_s, rid);
+	const auto free_stop = stop(bob_s, "999999");
+	TEST_EXPECT(others_stop.transport_ok && others_stop.code == 404);
+	TEST_EXPECT(body_text(others_stop) == body_text(free_stop) && free_stop.code == 404);
+	TEST_EXPECT(body_text(others_stop) == body_text(others_command));
+	reply = command(bob_s, anon_rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 404 && body_text(reply) == body_text(free_command));
+	TEST_EXPECT(mine.wait_notice(Notice::Kind::Command, 300) == nullptr);
+	TEST_EXPECT(mine.wait_notice(Notice::Kind::StopHosting, 100) == nullptr);
+	TEST_EXPECT(theirs.wait_notice(Notice::Kind::Command, 100) == nullptr);
+	TEST_EXPECT(row_named(h, "Owner Push Host").has_value());
+
+	// The composer's refusals, the admin route's rule (a non-owner's too: the body is read first).
+	struct Refused {
+		const char *body;
+		const char *error;
+		const char *reason; // a substring of the message
+	};
+	const Refused refused[] = {
+		{"not json", "invalid_json", ""},
+		{"{\"args\":[\"x\"]}", "invalid_command", "verb"},
+		{"{\"verb\":\"Nope\"}", "invalid_command", "no ServerCommand verb"},
+		{"{\"verb\":\"KillPlayer\",\"args\":[\"1\"]}", "invalid_command", "needs a target suffix"},
+		{"{\"verb\":\"TextChatServer\"}", "invalid_command", "token-count gate"},
+		{"{\"verb\":\"SetServerMsg\",\"args\":[\"a\\nb\"]}", "invalid_command", "control byte"},
+	};
+	for (const Refused &r : refused) {
+		reply = command(carol_s, rid, r.body);
+		if (!reply.transport_ok || reply.code != 400 || error_of(reply) != r.error ||
+		    message_of(reply).find(r.reason) == std::string::npos) {
+			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
+		}
+		TEST_EXPECT(reply.transport_ok && reply.code == 400);
+		TEST_EXPECT(error_of(reply) == r.error);
+		TEST_EXPECT(message_of(reply).find(r.reason) != std::string::npos);
+	}
+	// SetMPReset is an admin's verb, the owner's own server or not.
+	reply = command(alice_s, rid, "{\"verb\":\"SetMPReset\",\"args\":[\"1\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 403);
+	TEST_EXPECT(error_of(reply) == "verb_not_allowed");
+	TEST_EXPECT(mine.wait_notice(Notice::Kind::Command, 300) == nullptr);
+
+	// The owner: each push is queued and reaches the host's session.
+	reply = command(alice_s, rid, rename);
+	if (reply.code != 202) std::fprintf(stderr, "  owner command: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["status"]) == "queued" && str(json["statement"]) == "ServerCommand");
+	TEST_EXPECT(json && json["rid"].i() == static_cast<int64_t>(row->rid));
+	TEST_EXPECT(json && str(json["cmd"]) == "SetServerName \"Owner Renamed\"");
+	const Notice *cmd = mine.wait_notice(Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr);
+	TEST_EXPECT(cmd->command.verb == opennova::ServerCommandVerb::SetServerName);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"Owner Renamed"});
+	mine.clear_notices();
+	reply = command(alice_s, rid, "{\"verb\":\"TextChatServer\",\"args\":[\"hello from the site\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	cmd = mine.wait_notice(Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr && cmd->command.verb == opennova::ServerCommandVerb::TextChatServer);
+	TEST_EXPECT(cmd->command.args == std::vector<std::string>{"hello from the site"});
+	mine.clear_notices();
+	// A player verb, aimed at a roster slot.
+	reply = command(alice_s, rid, "{\"verb\":\"KillPlayer\",\"target\":\"ByIndex\",\"args\":[\"0\"]}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	TEST_EXPECT(str(crow::json::load(body_text(reply))["cmd"]) == "KillPlayerByIndex 0");
+	cmd = mine.wait_notice(Notice::Kind::Command, 3000);
+	TEST_EXPECT(cmd != nullptr && cmd->command.verb == opennova::ServerCommandVerb::KillPlayer);
+	TEST_EXPECT(cmd->command.target == opennova::ServerCommandTarget::ByIndex);
+	mine.clear_notices();
+
+	// The push-time check: a row that names Alice over a connection that does not (the anonymous
+	// host's) passes the route's look-up, and the listener refuses it with the same 404.
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = ? WHERE rid = ?;",
+	                       {BindValue(alice), BindValue(static_cast<int64_t>(anon->rid))});
+	const auto tampered = opennova::hostdb::find_host_by_rid(*h.pool.acquire(), anon->rid);
+	TEST_EXPECT(tampered && tampered->host_user_id == alice);
+	bool lobby_unowned = false;
+	for (const auto &entry : h.nw_udp.snapshot_hosted()) {
+		if (entry.lobby.rid == anon->rid) lobby_unowned = !entry.lobby.host_user_id.has_value();
+	}
+	TEST_EXPECT(lobby_unowned);
+	reply = command(alice_s, anon_rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+	TEST_EXPECT(body_text(reply) == body_text(free_command));
+	TEST_EXPECT(theirs.wait_notice(Notice::Kind::Command, 500) == nullptr);
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = NULL WHERE rid = ?;",
+	                       {BindValue(static_cast<int64_t>(anon->rid))});
+
+	// The bucket, per account: Dave's runs dry (the stop draws on it too); Alice's is her own.
+	net::HttpReply refusal;
+	const int accepted = accepted_before_429(
+			[&](int) { return command(dave_s, "999999", rename); }, 40, refusal);
+	if (accepted < 8) std::fprintf(stderr, "  dave's bucket: %d before the 429\n", accepted);
+	TEST_EXPECT(accepted >= 8);
+	TEST_EXPECT(error_of(refusal) == "rate_limited" && is_retry_after(refusal));
+	reply = stop(dave_s, "999999");
+	TEST_EXPECT(reply.transport_ok && reply.code == 429);
+
+	// The stop: the sysop punt reaches the host and the listing leaves the browser; the RID is
+	// then no server of Alice's.
+	reply = stop(alice_s, rid);
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["statement"]) == "ServerStopHosting" && json["msg_code"].i() == 7);
+	const Notice *stopped = mine.wait_notice(Notice::Kind::StopHosting, 3000);
+	TEST_EXPECT(stopped != nullptr);
+	TEST_EXPECT(stopped->msg_key == "NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT");
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "Owner Push Host"); }));
+	reply = command(alice_s, rid, rename);
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+
+	mine.goodbye();
+	theirs.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "Anonymous Push Host"); }));
 	return 0;
 }
 
@@ -2342,6 +2590,7 @@ int run(Harness &h) {
 		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
 		{ "unknown_path_404", test_unknown_path_404 },
 		{ "admin_host_push", test_admin_host_push },
+		{ "owner_host_push", test_owner_host_push },
 		{ "name_and_value_rules", test_name_and_value_rules },
 		{ "template_names_refused", test_template_names_refused },
 		{ "retail_templates_render", test_retail_templates_render },
@@ -2409,12 +2658,14 @@ int main() {
 
 		opennova::ConnectionManager manager;
 		// The push routes' channel, as main() wires it: a real NW UDP listener on a port the
-		// OS picks, with no DB pool (the hosted row lives in its memory only, so the host
-		// cases leave active_hosts as the other cases expect it).
+		// OS picks, over the same pool, so a hosting connection's row (and its owner, which an
+		// owner's push is checked against) lands in active_hosts. The host cases end their
+		// listings, so they leave active_hosts as the other cases expect it.
 		nws::NwUdpListener nw_udp(manager);
 		manager.on_lost([&nw_udp](const opennova::Connection &c, opennova::DropReason r) {
 			nw_udp.erase_lobby_state(c.addr, opennova::drop_reason_name(r));
 		});
+		nw_udp.set_db_pool(&pool);
 		nws::ServerConfig udp_config;
 		udp_config.nw_udp_port = 0;
 		TEST_EXPECT(nw_udp.start(udp_config));
