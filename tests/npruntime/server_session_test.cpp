@@ -1941,6 +1941,7 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	opennova::world::World sparse_world;
 	sparse_world.registry.configure_pool(0, 1024);
 	opennova::world::Entity seed;
+	seed.item_type_index = 1; // a typed row: the sweep lists only index-0 rows
 	const auto low = sparse_world.registry.spawn(0, seed);
 	const auto high = sparse_world.registry.spawn_from(0, 1023, seed);
 	if (!expect(low.valid() && low.slot() == 0 && high.valid() && high.slot() == 1023,

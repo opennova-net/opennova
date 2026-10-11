@@ -1961,6 +1961,10 @@ bool run_roundtrip() {
 	// Server_ProcessPendingPlayerSpawns spawns the joiner's pool-0 entity (binding conn.link.owned_entity).
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	// The player row's items.def ordinal: the joiner's C2S 0x32 sweep lists a
+	// pool-0 row whose ItemTypeIndex is 0 (D-NET-486), so a typeless body would
+	// be destroyed on the joiner.
+	world.tables.player.item_type_index = 7;
 	w::AiSystem &ai = world.ai;
 	world.script.subgoals.won = 0x12u;
 	world.script.subgoals.lost = 0x24u;

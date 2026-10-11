@@ -811,6 +811,8 @@ bool run_host_answers_the_sweep_request() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
 	w::AiSystem &ai = world.ai;
+	// The player row's items.def ordinal, which the sweep's empty test reads.
+	world.tables.player.item_type_index = 7;
 
 	w::PlayerSpawn spawn;
 	spawn.position = {0, 0, 0};
@@ -853,6 +855,30 @@ bool run_host_answers_the_sweep_request() {
 		}
 		if (!expect(sweeps == 1, "sweep-host: exactly one 0x5D reply")) return false;
 	}
+
+	// The empty test is the row's ItemTypeIndex (+0x1C) alone (D-NET-486): a LIVE
+	// row of a type items.def lacks (index 0, the lookup's miss) is listed, a live
+	// row with a nonzero index is not. [orig: Server_CollectEmptyPool0Slots
+	// @0x5160F0 -- `cmp dword ptr [eax+1Ch], 0` @0x516123, no def test]
+	world.registry.get(b)->item_type_index = 0;
+	{
+		std::vector<uint16_t> listed;
+		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
+					inmatch::GameConfig{}, roster[1], request, 100, roster, &world)) {
+			if (m.tag != 0x5D) continue;
+			DestroyEntityList decoded;
+			if (!expect(decode_destroy_entity_list(
+						m.payload.data(), m.payload.size(), decoded),
+					"sweep-host: the reply body decodes with a typeless row"))
+				return false;
+			listed = decoded.pool0_indices;
+		}
+		if (!expect(world.registry.get(b) != nullptr &&
+					listed == std::vector<uint16_t>{static_cast<uint16_t>(b.slot())},
+				"sweep-host: a live row whose ItemTypeIndex is 0 is listed, not the typed rows"))
+			return false;
+	}
+	world.registry.get(b)->item_type_index = 7;
 
 	// Free the MIDDLE slot: only that index may be listed (never the trailing
 	// unused capacity above the high-water mark).

@@ -2380,7 +2380,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// g_SpawnSuccessGate (round over) is set — our reachable analog of the
 				// latter is world->match.outcome().ended. The walk covers pool 0's used
 				// count, its allocation high-water mark (D-NET-417); its empty test is the
-				// ItemTypeIndex (+0x1C) alone, ours a free slot (D-NET-486).
+				// ItemTypeIndex (+0x1C) alone, with no def test: a free row, or a live one
+				// of a type items.def lacks (the lookup's miss answers row 0).
 				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0,
 				//  the used read @0x5160FF, the +0x1C test @0x516123]
 				std::size_t consumed = 0;
@@ -2393,8 +2394,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const std::size_t used = world->registry.pool_used(0);
 				DestroyEntityList sweep;
 				for (std::size_t slot = 0; slot < used; ++slot) {
-					const world::EntityHandle h{static_cast<uint16_t>(slot)};
-					if (world->registry.get(h) == nullptr)
+					const world::Entity *e =
+							world->registry.get(world::EntityHandle{static_cast<uint16_t>(slot)});
+					if (e == nullptr || e->item_type_index == 0)
 						sweep.pool0_indices.push_back(static_cast<uint16_t>(slot));
 				}
 				replies.push_back(make_protocol_message(
