@@ -436,6 +436,22 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         const std::string_view render =
                 def != nullptr ? render_tag(def->render_function) : std::string_view();
         e->palm_sections = render == "psec" || render == "cesp";
+        // The death-section draw: the world callbacks of the bone table's
+        // `cveh`, `chel`, `tank` and `cpln` rows, bound by the render tag, each
+        // pivot around the first husk section +0x138 leaves (the model at +0x38,
+        // else +0x34), the def's callback overriding the husk model's. Each
+        // row's third column, which a model's own first tag binds into the
+        // collision callback, is the simple one.
+        // [orig: row 'cveh' @0x82CFE0 -> Entity_BuildDeathSectionTransforms
+        //  @0x492AF0; row 'chel' @0x82CFD0 -> Entity_BuildAndApplyBoneMatrices
+        //  @0x48F210; row 'tank' @0x82CFF0 -> Render_DestroyedSections @0x449EF0;
+        //  row 'cpln' @0x82D000 -> BoneCallback_cpln_World @0x48FE90; their
+        //  third columns BoneCallback_Simple @0x4E2600 (cveh's @0x82CFEC);
+        //  Render_SectorEntity @0x5C431B]
+        // A model whose own LOD tag is one of these rows binds it too
+        // (D-ITEMDEF-18); the `bldg` row pivots by another rule (D-ITEMDEF-23).
+        e->death_section_pivot =
+                render == "cveh" || render == "chel" || render == "tank" || render == "cpln";
         // The ai_function palm row's callback is WeaponOverlay_HandleDamage and
         // the move_function psec row's update is Entity_UpdatePhysicsStep: the two
         // callbacks the load serializers test before streaming entity+0x270.

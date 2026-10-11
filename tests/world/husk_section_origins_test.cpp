@@ -2,7 +2,8 @@
 // husk_section_origins_q16) is mined from the PRIMARY husk's COBJ list: a
 // spawned section is Entity_SpawnSectionEntity's memset template, which
 // stores only +0x34 huskModel (never +0x38 huskFinalModel), so the death
-// renderer's +0x38 ?: +0x34 pick always lands on the primary husk
+// renderer's +0x38 ?: +0x34 pick lands on the parent's +0x34, the primary
+// husk until the parent's own draw promotes its final husk (D-ITEMDEF-22)
 // [orig: Entity_SpawnSectionEntity @0x440322 / @0x440343;
 //  Entity_BuildDeathSectionTransforms @0x492B46 / @0x492B4D]. The final husk
 // stands in only where retail would dereference a null +0x34. Driven by a

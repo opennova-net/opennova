@@ -820,8 +820,11 @@ int resolve_collision_instances(world::World &world, const DefItemsFile &items,
 				// (Entity_SpawnSectionEntity's memset template @0x440322 stores
 				// only [13] = +0x34 huskModel @0x440343), so the +0x38 ?: +0x34
 				// pick lands on +0x34; the final husk stands in only where
-				// retail would dereference a null +0x34.
-				// [orig: Entity_BuildDeathSectionTransforms @0x492B46 / @0x492B4D]
+				// retail would dereference a null +0x34. (The clone's +0x34 is its
+				// parent's, which the parent's own draw promotes to the final
+				// husk: D-ITEMDEF-22.)
+				// [orig: Entity_BuildDeathSectionTransforms @0x492B46 / @0x492B4D;
+				//  Render_SectorEntity @0x5C423E..0x5C4244]
 				if (t->husk_section_origins_q16.empty()) {
 					const Threedi3di3 *piece = first_husk_m3 != nullptr ? first_husk_m3 : final_husk_m3;
 					if (piece && piece->collision) {

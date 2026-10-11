@@ -813,6 +813,38 @@ int main() {
 		}
 	}
 
+	// The death-section draw binds through the render tag's cveh, chel, tank
+	// and cpln bone rows, each by its first four bytes with their case kept:
+	// `cvehX` is the cveh row, `CHel`, `psec` and `bldg` are none of them, and
+	// a def edited to `Cveh` or `TANK` loses the draw on the next resolve.
+	// [orig: rows 'cveh' @0x82cfe0 -> Entity_BuildDeathSectionTransforms
+	//  @0x492af0, 'chel' @0x82cfd0 -> Entity_BuildAndApplyBoneMatrices @0x48f210,
+	//  'tank' @0x82cff0 -> Render_DestroyedSections @0x449ef0, 'cpln' @0x82d000
+	//  -> BoneCallback_cpln_World @0x48fe90; BoneCallback_LookupByTag @0x4e32c6]
+	{
+		CHECK(w.registry.get(tank_h)->death_section_pivot);
+		CHECK(w.registry.get(prefix_tank_h)->death_section_pivot);
+		CHECK(!w.registry.get(helo_h)->death_section_pivot);
+		CHECK(!w.registry.get(psec_palm_h)->death_section_pivot);
+		DefItemDef *truck_def = entry_for(file, 100503);
+		CHECK(truck_def != nullptr);
+		if (truck_def != nullptr) {
+			const struct { const char *tag; bool pivots; } tags[] = {
+				{"chel", true}, {"tank", true}, {"cpln", true}, {"cplnX", true},
+				{"CHel", false}, {"Cveh", false}, {"TANK", false}, {"bldg", false},
+			};
+			for (const auto &tag : tags) {
+				std::snprintf(truck_def->render_function, sizeof(truck_def->render_function),
+						"%s", tag.tag);
+				mission::resolve_item_traits(w, file, wire_class);
+				CHECK(w.registry.get(truck_h)->death_section_pivot == tag.pivots);
+			}
+			std::snprintf(truck_def->render_function, sizeof(truck_def->render_function), "cveh");
+			mission::resolve_item_traits(w, file, wire_class);
+			CHECK(w.registry.get(truck_h)->death_section_pivot);
+		}
+	}
+
 	// ---- the throwable class scan ----
     const ThrowableClassRow *frag = w.throwables.classes.get(600);
     CHECK(frag != nullptr);
