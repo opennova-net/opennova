@@ -55,7 +55,8 @@ size_t variable_name_room(int32_t index);
 // table. Refused (false, `error` says why, the file untouched) when the table holds the original
 // editor's layer names, past kMaxVariableNames names, for an index outside 0..kVariableNameIndexMax or
 // named twice, and for a name that is empty, longer than its room, or holds a character outside
-// printable ASCII, a double quote (the .mis layer `description` is quoted) or a space at either end.
+// printable ASCII, a double quote or a ';' (the .mis layer `description` cannot carry them: bms.h
+// set_group_name) or a space at either end.
 bool set_variable_names(bms::File &file, const std::vector<VariableName> &names, std::string &error);
 
 } // namespace opennova::mission

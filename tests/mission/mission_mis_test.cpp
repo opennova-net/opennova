@@ -382,6 +382,21 @@ int main() {
 		MisNames none;
 		TEST_EXPECT(parse_mis_names(unnamed, none, error));
 		TEST_EXPECT(none.events.size() == doc.events.size() && none.events[first].empty());
+		// What the stock reader cannot take is not written: a ';' (it cuts the line there, quoted or not) as a
+		// ',', and a name past the reader's slot cut to it (an event's 63 characters, a description's 255).
+		MisNames long_names;
+		long_names.events = {std::string(70, 'e'), "north; south"};
+		long_names.areas = {std::string(300, 'a')};
+		long_names.paths[3] = std::string(256, 'p');
+		std::string capped;
+		TEST_EXPECT(write_mis_text(doc, capped, error, nullptr, &long_names));
+		TEST_EXPECT(capped.find("  name \"" + std::string(63, 'e') + "\"\r\n") != std::string::npos);
+		TEST_EXPECT(capped.find("  name \"north, south\"\r\n") != std::string::npos);
+		TEST_EXPECT(capped.find("begin areatrig 1\r\n  description \"" + std::string(255, 'a') + "\"\r\n") !=
+		            std::string::npos);
+		TEST_EXPECT(capped.find("begin waypoint 3\r\n  description \"" + std::string(255, 'p') + "\"\r\n") !=
+		            std::string::npos);
+		TEST_EXPECT(capped.find(';') == std::string::npos);
 		// An item's name and the mission's are not a record's: an unterminated section is refused.
 		MisNames broken;
 		TEST_EXPECT(!parse_mis_names("begin event 0\r\n  name \"x\"\r\n", broken, error));

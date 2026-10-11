@@ -694,12 +694,14 @@ int main() {
 		TEST_EXPECT(only_the_name);
 		TEST_EXPECT(opennova::bms::set_group_name(renamed.group_records[3], "", group_error));
 		TEST_EXPECT(opennova::bms::equal(renamed, bms_file)); // an empty name is the shipped zeros
-		// Refused: past 20 characters, a control character, a double quote; the record untouched.
+		// Refused: past 20 characters, a control character, a double quote, a ';' (the stock .mis reader cuts
+		// its line there); the record untouched.
 		opennova::bms::GroupRecord kept = renamed.group_records[4];
 		TEST_EXPECT(opennova::bms::set_group_name(kept, "Kept", group_error));
 		TEST_EXPECT(!opennova::bms::set_group_name(kept, "Twenty-one characters", group_error));
 		TEST_EXPECT(!opennova::bms::set_group_name(kept, "tab\there", group_error));
 		TEST_EXPECT(!opennova::bms::set_group_name(kept, "say \"hi\"", group_error));
+		TEST_EXPECT(!opennova::bms::set_group_name(kept, "north; south", group_error));
 		TEST_EXPECT(opennova::bms::group_name(kept) == "Kept");
 
 		// The field row the editor edits: "name" on the group record, refusing past the width.
@@ -756,7 +758,7 @@ int main() {
 		TEST_EXPECT(opennova::bms::equal(named_back, named));
 		TEST_EXPECT(opennova::mission::variable_names(named_back).size() == 3);
 		// Refused, the table untouched: an index past the bank, twice, a name past its room, empty, a quote,
-		// an edge space, 32 names.
+		// a ';', an edge space, 32 names.
 		const opennova::bms::File before = named;
 		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{256, "x"}}, names_error)); // the script's VAR words
 		TEST_EXPECT(names_error.find("V0..V255") != std::string::npos);
@@ -766,6 +768,7 @@ int main() {
 		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "eighteen characters"}}, names_error));
 		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, ""}}, names_error));
 		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "say \"hi\""}}, names_error));
+		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, "a;b"}}, names_error));
 		TEST_EXPECT(!opennova::mission::set_variable_names(named, {{4, " lead"}}, names_error));
 		std::vector<VariableName> too_many;
 		for (int32_t i = 0; i < 32; ++i) too_many.push_back({i, "n"});

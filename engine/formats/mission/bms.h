@@ -688,13 +688,13 @@ struct GroupRecord {
     char name[kGroupNameSize];
 };
 // Whether the 20 bytes are no name (all zero) or one set_group_name would write: printable characters other
-// than a double quote up to the first NUL, zeros after it. Bytes of another tool (a control byte, a high byte,
-// a quote, anything after a NUL) are kept as read and are no name.
+// than a double quote or a ';' up to the first NUL, zeros after it. Bytes of another tool (a control byte, a
+// high byte, a quote, anything after a NUL) are kept as read and are no name.
 bool group_name_readable(const GroupRecord& record);
 // The group's name: its bytes up to the first NUL when group_name_readable, else "".
 std::string group_name(const GroupRecord& record);
 // Sets the name, NUL-padding the rest. Refused (false, `error` says why, the record untouched) past 20
-// characters, or with a character outside printable ASCII or a double quote, which the .mis text's
+// characters, or with a character outside printable ASCII, a double quote or a ';', which the .mis text's
 // quoted `description` cannot carry.
 bool set_group_name(GroupRecord& record, const std::string& name, std::string& error);
 

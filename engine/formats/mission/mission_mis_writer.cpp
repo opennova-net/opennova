@@ -13,9 +13,13 @@ namespace opennova::mission::detail {
 
 namespace {
 
-// A record's name from `names`' list, "" past it or with no names.
-std::string listed_name(const std::vector<std::string> *list, size_t index) {
-	return list != nullptr && index < list->size() ? (*list)[index] : std::string();
+// A name as its line carries it: at most `width` characters (the stock reader's slot,
+// kMisEventNameChars / kMisDescriptionChars), through mis_string.
+std::string mis_name(const std::string &name, size_t width) { return mis_string(name.substr(0, width)); }
+
+// A record's name from `names`' list, "" past it or with no names, as its line carries it.
+std::string listed_name(const std::vector<std::string> *list, size_t index, size_t width) {
+	return list != nullptr && index < list->size() ? mis_name((*list)[index], width) : std::string();
 }
 
 void write_mis_general_information(const bms::File &file, std::string &out) {
@@ -121,7 +125,7 @@ void write_mis_briefing(const bms::File &file, std::string &out) {
 void write_mis_area_triggers(const bms::File &file, std::string &out, const MisNames *names) {
 	for (size_t i = 0; i < file.area_triggers.size(); ++i) {
 		append_kv(out, "begin areatrig ", i + 1);
-		append_kv(out, "  description \"", mis_string(listed_name(names ? &names->areas : nullptr, i)), "\"");
+		append_kv(out, "  description \"", listed_name(names ? &names->areas : nullptr, i, kMisDescriptionChars), "\"");
 		append_line(out, "end areatrig");
 		append_line(out);
 	}
@@ -130,7 +134,8 @@ void write_mis_area_triggers(const bms::File &file, std::string &out, const MisN
 void write_mis_waypoints(const bms::File &file, std::string &out, const MisNames *names) {
 	for (size_t i = 1; i < file.waypoint_records.size(); ++i) {
 		const bms::WaypointRecord &record = file.waypoint_records[i];
-		const std::string description = names != nullptr && i < names->paths.size() ? names->paths[i] : std::string();
+		const std::string description =
+		    names != nullptr && i < names->paths.size() ? mis_name(names->paths[i], kMisDescriptionChars) : std::string();
 		// Emit a waypoint section only when it carries information (its flags). Path MEMBERSHIP
 		// never travels in this section: the .mis text carries it on the marker items themselves
 		// and the original importer rebuilds the lists from the type-6005 pair ids
@@ -142,7 +147,7 @@ void write_mis_waypoints(const bms::File &file, std::string &out, const MisNames
 			continue;
 		}
 		append_kv(out, "begin waypoint ", i);
-		append_kv(out, "  description \"", mis_string(description), "\"");
+		append_kv(out, "  description \"", description, "\"");
 		if (static_cast<uint32_t>(record.flags) != 0) {
 			append_kv(out, "  attrib ", static_cast<uint32_t>(record.flags));
 		}
@@ -190,7 +195,7 @@ void write_mis_events(const bms::File &file, std::string &out, const MisNames *n
 	for (size_t i = 0; i < file.events.size(); ++i) {
 		const bms::Event &event = file.events[i];
 		append_kv(out, "begin event ", i);
-		append_kv(out, "  name \"", mis_string(listed_name(names ? &names->events : nullptr, i)), "\"");
+		append_kv(out, "  name \"", listed_name(names ? &names->events : nullptr, i, kMisEventNameChars), "\"");
 		if (static_cast<uint32_t>(event.flags) != 0) {
 			append_kv(out, "  attrib ", static_cast<uint32_t>(event.flags));
 		}
