@@ -1395,6 +1395,19 @@ void workspace_tidies(SessionCore &core) {
 				moved = true;
 			}
 		}
+		// S24: an event folded on the board that is gone (removed, or its document read again) leaves the folds.
+		if (!shown.logic_folded.empty()) {
+			const DocumentBase *document = open_document(view, path);
+			const Document *records = document ? records_of(*document) : nullptr;
+			const size_t held = shown.logic_folded.size();
+			shown.logic_folded.erase(std::remove_if(shown.logic_folded.begin(), shown.logic_folded.end(),
+			                                        [&](NodeId id) {
+				                                        const NodeAddress event = records ? records->address_of(id) : NodeAddress();
+				                                        return !event.row || event.child || event.kind != node_kind(MissionKind::Event);
+			                                        }),
+			                         shown.logic_folded.end());
+			moved = moved || shown.logic_folded.size() != held;
+		}
 		if (!shown.remove_screen) continue;
 		const DocumentBase *document = open_document(view, path);
 		if (document && removable_screen(*document, shown.remove_screen)) continue;

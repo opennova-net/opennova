@@ -220,6 +220,22 @@ int test_board_op() {
 	board = ask("{\"op\": \"board\", \"filter\": \"\", \"limit\": 1, \"offset\": 1}");
 	TEST_EXPECT(board.get("cards") && board.get("cards")->array.size() == 1 &&
 	            board.get("cards")->array[0].get_number("index", -1) == 1);
+	// A folded event removed leaves the folds (the workspace tidied after the request).
+	const auto *m = dynamic_cast<const MissionDocument *>(session.document_for("missions/logic.bms"));
+	TEST_EXPECT(m);
+	if (!m) return 1;
+	std::vector<Edit> made;
+	std::string why;
+	TEST_EXPECT(recipe_event_edits(*m, *mission_recipe("right_away"), NodeAddress(), made, why));
+	editor_test::handle_to_end(session, request::edit_record("missions/logic.bms", made));
+	const NodeId fresh = m->rows_of(MissionKind::Event).back()->id;
+	session.handle(request::set_workspace(R"({"document": {"path": "missions/logic.bms", "logic_folded": [)" + std::to_string(fresh) + "]}}"));
+	TEST_EXPECT(session.view().workspace.document("missions/logic.bms").logic_folded == std::vector<NodeId>{fresh});
+	Edit remove;
+	remove.operation = EditOperation::Remove;
+	remove.address = {fresh, node_kind(MissionKind::Event), 0};
+	editor_test::handle_to_end(session, request::edit_record("missions/logic.bms", remove));
+	TEST_EXPECT(m->rows_of(MissionKind::Event).size() == 2 && session.view().workspace.document("missions/logic.bms").logic_folded.empty());
 	return 0;
 }
 
