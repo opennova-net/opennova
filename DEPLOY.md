@@ -213,3 +213,52 @@ docker run --rm -p 8090:8090 opennova-game          # http://localhost:8090
 ```
 
 A backup sidecar also runs nightly (see `deploy/backup/`).
+
+## Resetting the service database
+
+The service's SQLite database is disposable. A schema fix edits a migration in
+`backend/migrations` in place, and the server records the migrations it applied by
+file name only, so an edited file never runs again on an existing database. A deploy
+whose PR notes say "the service DB must be reset" (an edited migration) therefore
+starts from an empty database:
+
+```bash
+./deploy/run.sh app reset-db --yes-drop-database --tag sha-abc1234
+```
+
+Without `--yes-drop-database` it prints what it would do and refuses. With it:
+
+1. It pulls the images for `--tag` (and `--game-tag`, default `latest`, as in
+   `app deploy`), so a mistyped tag fails before anything changes.
+2. It stops `novaworld` and the backup sidecar. The portal stays up; its API fails
+   until step 5.
+3. It takes a final backup to S3, as `backup now`. If that fails it starts both
+   services again and stops, having deleted nothing. `--no-backup` skips this step.
+4. It deletes `novaworld.db` and its `-wal`, `-shm` and `-journal` files from the
+   `nw_data` volume, through a one-off backup-sidecar container on that volume.
+5. It deploys into a fresh `novaworld` container, then prints the server's
+   `[boot] migrations:` line, which on the empty database reads `N applied, 0 skipped`;
+   any other line, or none within a minute, makes it exit non-zero.
+
+It deploys the tag itself rather than leaving the server stopped: the first server to
+boot on the empty database applies and records every migration, so that boot must be
+the image carrying the edit. An `app restart` or a deploy of an older tag in between
+writes the old schema under the same file names, and nothing reports it. If step 5
+fails, rerun `app deploy` with the same tag.
+
+The final backup is on by default because the nightly one can be a day old; skip it
+only when the database is known to be worthless or the backup path is what is broken.
+Everything the database holds goes with the reset (accounts, website sessions, host
+keys); the boot's seed puts back only the game rows. With no accounts left there is
+no site admin either: make the first one again as section 3 describes
+(`ONNET_BOOTSTRAP_ADMIN`). If that setting is still in the vault-injected secrets when
+you reset, remove it first: on the empty database its username is free, and whoever
+registers it first is made admin at the next boot. Register the account yourself, then
+set it and deploy once.
+
+The backups from before the reset stay in S3 (the bucket expires objects after 90
+days). Each one records every migration it ran, so undoing the reset takes both steps:
+restore a pre-reset backup (`deploy/backup/README.md`) AND deploy the server tag that
+ran before the reset, which the plan prints as `novaworld now:`. A newer server on a
+restored backup skips every migration and runs on the old schema, and nothing reports
+it.

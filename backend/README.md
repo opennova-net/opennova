@@ -15,5 +15,11 @@ Contents:
 
 Schema is derived from `onnet/alembic/versions/*` (PostgreSQL) collapsed to a
 single SQLite-flavored baseline. We don't need history compatibility with the
-Postgres deployment — this is a clean SQLite-backed start. New schema
-changes go in new files, not by editing `0001_initial.sql`.
+Postgres deployment — this is a clean SQLite-backed start.
+
+The service database is disposable. A new table or feature goes in a new file; a fix
+to an existing table edits the migration that made it, in place. Migrations are
+tracked by file name only, so an edited file never runs again on an existing
+database: the PR says "the service DB must be reset" in its notes, and its deploy is
+`./deploy/run.sh app reset-db` ([DEPLOY.md](../DEPLOY.md), "Resetting the service
+database").
