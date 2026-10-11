@@ -29,4 +29,6 @@ edited in place, which never runs again on an existing database. Deploy it with:
 
 It takes a final backup (skip with `--no-backup`), deletes the SQLite files from
 the `nw_data` volume and deploys that tag onto the empty database. Earlier backups
-stay in S3. Details: [DEPLOY.md](../DEPLOY.md), "Resetting the service database".
+stay in S3; undoing a reset means restoring one AND deploying the server tag that ran
+before it (the plan prints it), since a newer server skips every migration a restored
+backup records. Details: [DEPLOY.md](../DEPLOY.md), "Resetting the service database".

@@ -251,6 +251,14 @@ only when the database is known to be worthless or the backup path is what is br
 Everything the database holds goes with the reset (accounts, website sessions, host
 keys); the boot's seed puts back only the game rows. With no accounts left there is
 no site admin either: make the first one again as section 3 describes
-(`ONNET_BOOTSTRAP_ADMIN`). The backups from before the reset stay in S3 (the bucket
-expires objects after 90 days) and hold the old schema: restoring one
-(`deploy/backup/README.md`) undoes the reset.
+(`ONNET_BOOTSTRAP_ADMIN`). If that setting is still in the vault-injected secrets when
+you reset, remove it first: on the empty database its username is free, and whoever
+registers it first is made admin at the next boot. Register the account yourself, then
+set it and deploy once.
+
+The backups from before the reset stay in S3 (the bucket expires objects after 90
+days). Each one records every migration it ran, so undoing the reset takes both steps:
+restore a pre-reset backup (`deploy/backup/README.md`) AND deploy the server tag that
+ran before the reset, which the plan prints as `novaworld now:`. A newer server on a
+restored backup skips every migration and runs on the old schema, and nothing reports
+it.

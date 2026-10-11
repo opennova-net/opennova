@@ -206,6 +206,21 @@ app_up() {
   app_compose up -d --remove-orphans --build
 }
 
+# The novaworld image the target holds now (running or stopped), with the tag its
+# build revision publishes under: what undoing a reset deploys again.
+running_server() {
+  local cid image rev
+  if ! cid="$(app_compose ps --all -q novaworld 2>/dev/null)"; then
+    printf 'unknown (compose ps failed)'; return
+  fi
+  cid="${cid%%$'\n'*}"
+  [ -n "$cid" ] || { printf 'none'; return; }
+  image="$(docker inspect -f '{{.Config.Image}}' "$cid" 2>/dev/null || true)"
+  rev="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$cid" 2>/dev/null || true)"
+  printf '%s' "${image:-unknown}"
+  if [ -n "$rev" ]; then printf ', revision %s (--tag sha-%s)' "$rev" "${rev:0:7}"; fi
+}
+
 # app reset-db: delete the service's SQLite database and deploy onto an empty
 # one. The database is disposable: a schema fix edits a migration in place,
 # and the server records applied migrations by file name only
@@ -238,9 +253,12 @@ app_reset_db() {
 
   app_images "$tag" "$game_tag"
   remote_compose
-  local project volume
-  project="$(app_compose config 2>/dev/null | sed -n 's/^name: //p' | head -n 1)"
+  # Read-only lookups for the plan. A compose file that does not parse leaves
+  # them blank here, and the pull below fails with compose's own error.
+  local project volume running
+  project="$(app_compose config 2>/dev/null | sed -n 's/^name: //p' | head -n 1 || true)"
   volume="${project:+${project}_}nw_data"
+  running="$(running_server)"
 
   log "app reset-db on $(target_ip) will:"
   log "  1. pull $SERVER_IMAGE + $WEB_IMAGE + $GAME_IMAGE (a bad tag stops here, before anything changes)"
@@ -252,7 +270,10 @@ app_reset_db() {
   fi
   log "  4. delete novaworld.db and its -wal, -shm and -journal files from the volume $volume"
   log "  5. deploy into a fresh novaworld container (compose up): its first boot applies every migration to the empty database"
-  log "Earlier backups stay in S3 (90-day lifecycle) and hold the old schema: restoring one undoes the reset."
+  log "novaworld now: $running"
+  log "Earlier backups stay in S3 (90-day lifecycle). Each records every migration it ran, so undoing"
+  log "the reset takes both: restore one AND deploy the server tag above (a newer server on it skips"
+  log "every migration and runs the old schema without a word)."
   [ "$confirmed" -eq 1 ] || die "refusing to drop the database without --yes-drop-database"
 
   check_target
@@ -291,7 +312,9 @@ app_reset_db() {
     || die "removing the stopped novaworld container failed; the database is deleted and nothing was deployed; run: $redeploy"
   log "deploying onto the empty database…"
   app_up || die "the deploy onto the empty database failed; rerun: $redeploy"
-  # The first boot logs its migration count; on an empty database nothing is skipped.
+  # The first boot logs its migration count; on an empty database every file
+  # applies and none is skipped. "0 applied, 0 skipped" means the server found
+  # no migrations at all (run_migrations on a missing MIGRATIONS_DIR).
   local line="" _
   for _ in $(seq 1 30); do
     line="$(app_compose logs --no-log-prefix novaworld 2>/dev/null \
@@ -300,9 +323,9 @@ app_reset_db() {
     sleep 2
   done
   case "$line" in
-    *" 0 skipped"*) log "novaworld: $line" ;;
+    *": "[1-9]*" applied, 0 skipped"*) log "novaworld: $line" ;;
     "") die "novaworld logged no '[boot] migrations:' line in 60 s; check: app logs novaworld" ;;
-    *) die "novaworld: $line (expected 0 skipped on an empty database; check: app logs novaworld)" ;;
+    *) die "novaworld: $line (expected at least one applied and 0 skipped on an empty database; check: app logs novaworld)" ;;
   esac
   log "reset-db complete."
 }
@@ -348,8 +371,8 @@ cmd_backup() {
   [ -n "$BACKUP_BUCKET" ] || die "no backup_bucket_name output; run 'infra apply' first"
   export BACKUP_BUCKET
   case "${1:-now}" in
-    now)  remote_compose; docker compose "${COMPOSE_ARGS[@]}" run --rm backup /backup/backup.sh ;;
-    list) remote_compose; docker compose "${COMPOSE_ARGS[@]}" run --rm backup /backup/list.sh ;;
+    now)  remote_compose; app_compose run --rm backup /backup/backup.sh ;;
+    list) remote_compose; app_compose run --rm backup /backup/list.sh ;;
     *) die "unknown: backup $1 (try: now|list)" ;;
   esac
 }
