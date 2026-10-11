@@ -8,6 +8,7 @@
 // this alone.
 // [orig: CWnd_ProcessMouseEvent @ 0x647a00; CUIElement_ParseXMLDefinition @ 0x648120, the
 //  SOUND arm @ 0x648a68..0x648ac0; CWnd_IsVisibleInHierarchy @ 0x646290]
+#include <formats/lwf/wav_pcm.h>
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_sound.h>
 
@@ -201,6 +202,22 @@ void test_plan_menu_sound() {
 	      second[1].volume == 50);
 	CHECK(plan_menu_sound(bank, 1, "NONE", 255, selector).empty());
 	CHECK(plan_menu_sound(bank, 1, "", 255, selector).empty());
+	// A product of 0, or under 0.01, is the voice's play factor as it is, never 1: the mixer plays
+	// a factor whose step is 0 at its least step (lwf::wave_pitch_scale, D-SND-53).
+	bank.sndparms[0].pitch_scaled = 0;
+	bank.multis[0].pitch_base = 0x8000;
+	const std::vector<MenuSoundVoice> zero = plan_menu_sound(bank, 1, "CLICK", 255, selector);
+	CHECK(zero.size() == 2 && zero[0].pitch == 0.0);
+	bank.sndparms[1].pitch_scaled = 1000;
+	const std::vector<MenuSoundVoice> small = plan_menu_sound(bank, 1, "CLICK", 255, selector);
+	CHECK(small.size() == 2 && small[0].pitch == 1000.0 / 65536.0 * 0.5);
+	// The product is one truncated Q16 word [orig: @ 0x75cef3..0x75cefd]: 127 x 0x8000 >> 16 is 63,
+	// not 63.5, so a 44.1 kHz wave's step is 0 and it plays at the least step, as retail's does; the
+	// fraction kept would round to 64, a step of 1, and play at its own 42.7 Hz.
+	bank.sndparms[0].pitch_scaled = 127;
+	const std::vector<MenuSoundVoice> edge = plan_menu_sound(bank, 1, "CLICK", 255, selector);
+	CHECK(edge.size() == 2 && edge[0].pitch == 63.0 / 65536.0);
+	CHECK(lwf::wave_pitch_scale(lwf::kPitchUnityQ16, 44100, 44100, edge[0].pitch) == (44100.0 / 512.0) / 44100.0);
 }
 
 int main() {

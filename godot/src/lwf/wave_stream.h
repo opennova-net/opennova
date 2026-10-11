@@ -10,9 +10,9 @@ namespace godot {
 // (opennova::lwf::WavPcm::loader_pitch_q16, Q16) its decode recorded and the wave's own rate
 // (WavPcm::sample_rate), which the stream's whole mix rate holds up to INT32_MAX. Every player of a
 // decoded wave sets the pitch scale WavLoader::pitch_scale_for gives over the one its voice composes,
-// which reads both (opennova::lwf::wave_pitch_scale: a wave of pitch 0 keeps the mixer's least step
-// whatever the voice pitch, a rate boxed at INT32_MAX plays at its own). A stream that is not a
-// WaveStream keeps the composed scale.
+// which reads both (opennova::lwf::wave_pitch_scale: a step of 0, a wave of pitch 0 whatever the
+// voice pitch or a play factor of 0 whatever the wave, plays at the mixer's least step, a rate boxed
+// at INT32_MAX at its own). A stream that is not a WaveStream keeps the composed scale.
 class WaveStream : public AudioStreamWAV {
 	GDCLASS(WaveStream, AudioStreamWAV);
 

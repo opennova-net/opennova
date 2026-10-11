@@ -1251,12 +1251,16 @@ void MissionAudio::_release_retired_candidate_ids() {
 	retired_candidate_ids_ = still_retired;
 }
 
-// The player's pitch: the layer's authored base pitch times the emitter's
-// 16.16 pitch word (the native mix row's pitch_q16).
+// The player's pitch: the layer's authored base pitch (D-SND-56) times the
+// emitter's 16.16 pitch word (the native mix row's pitch_q16), the channel's play
+// factor [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528943..0x528949, into the
+// channel's +4 through the AudioChannel_OpenSlotChecked call @ 0x528ae3 and the
+// AudioChannel_SetAndPlay call @ 0x528a5c], unfloored: a word whose step is 0 plays
+// at the mixer's least step through the player's scale (WavLoader::pitch_scale_for).
 double MissionAudio::_pitch_scale(const Ref<AmbientLayer> &p_descriptor, int p_pitch_q16) {
 	const double base_pitch = p_descriptor.is_valid() ? p_descriptor->get_base_pitch() : 1.0;
 	return SoundBank::effective_base_pitch(base_pitch) *
-			MAX(static_cast<double>(AmbientMixer::q16_to_float(p_pitch_q16)), 0.0001);
+			static_cast<double>(AmbientMixer::q16_to_float(p_pitch_q16));
 }
 
 // HHMM (MissionEnvironment.time_of_day) -> hours, through the engine's

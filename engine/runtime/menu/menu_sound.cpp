@@ -53,8 +53,7 @@ std::vector<MenuSoundVoice> plan_menu_sound(const lwf::File &bank, int32_t bank_
 		if (member.single_index < bank.singles.size()) voice.path = bank.singles[member.single_index].path;
 		voice.volume = menu_channel_volume(master_volume, static_cast<int>(member.volume),
 				static_cast<int>(member.clamp_volume), static_cast<int>(layer.falloff_radius));
-		voice.pitch = menu_effective_pitch(lwf::pitch_from_q16(member.pitch_scaled),
-				lwf::pitch_from_q16(set.pitch_base));
+		voice.pitch = menu_effective_pitch(member.pitch_scaled, set.pitch_base);
 		out.push_back(std::move(voice));
 	}
 	return out;

@@ -777,3 +777,44 @@ func _emitter_row(source_spawn_id: int, pos: Vector3, pitch_q16: int, volume_q8_
 		emitted_tick: int = 0) -> SoundEmitterRow:
 	return SoundEmitterRow.make(source_spawn_id, 0x10001, 42, pos, 0, 0, 30, emitted_tick,
 			pitch_q16, volume_q8_8, false, "V_TRUCK_ILP")
+
+
+# An emitter word is the channel's play factor [orig: SoundEmitter_UpdateAndMixTop8
+# @ 0x528943..0x528949, into the channel's +4 through the AudioChannel_OpenSlotChecked
+# call @ 0x528ae3 and the AudioChannel_SetAndPlay call @ 0x528a5c], which the mixer's step
+# composes with the wave's pitch: a word whose step is 0 plays at the least
+# step, 1/512 of a sample a device frame (44100 / 512 = 86.13 Hz), not floored
+# at 0.0001 of the wave's rate (D-SND-53; opennova::lwf::wave_pitch_scale).
+func test_emitter_word_of_step_zero_plays_at_the_least_step() -> void:
+	var fixture_dir := OS.get_cache_dir().path_join(
+		"mission_audio_least_step_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(fixture_dir), OK)
+	TestFs.write_bytes(self, fixture_dir.path_join("tone.wav"),
+		FileAccess.get_file_as_bytes(
+			ProjectSettings.globalize_path(
+				"res://../fixtures/lwf/tone.wav")))
+	var lwf := LwfData.new()
+	lwf.create_empty()
+	_add_lwf_set(lwf, "V_TRUCK_ILP", "tone.wav", 2000)
+	assert_eq(lwf.save_file(fixture_dir.path_join("game.LWF")), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture_dir), OK)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	var container := Node3D.new()
+	add_child_autofree(container)
+	var audio = MissionAudio.create(root, null)
+	audio.setup(mission, "least_step_probe.bms", container)
+
+	# tone.wav is 22050 Hz, its ratio 0x8000: a word of 1 steps at
+	# (1 * 0x8000 + 0x400000) >> 23 = 0.
+	var pos := Vector3(900, 4, -300)
+	audio.apply_sound_emitters([_emitter_row(77, pos, 1, 0xFFFF)])
+	audio.tick(pos, 0.2)
+	var voice := _player_at_position(container, pos)
+	assert_not_null(voice, "the emitter takes a channel")
+	if voice != null:
+		assert_almost_eq(voice.pitch_scale, 44100.0 / 512.0 / 22050.0, 0.000001,
+			"a word whose step is 0 plays at the least step")
+	audio.teardown()
+	TestFs.remove_dir_recursive(fixture_dir)

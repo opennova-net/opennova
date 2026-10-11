@@ -30,9 +30,10 @@ public:
 	// is boxed at INT32_MAX, the stream keeping its own rate (WaveStream::wave_rate).
 	static Ref<AudioStreamWAV> from_pcm(const opennova::lwf::WavPcm &decoded);
 	// Every decoded stream is a WaveStream carrying its loader pitch word and its own rate, and every
-	// player of one sets the pitch scale this gives over the one its voice composes: a wave of pitch 0
-	// plays at the mixer's least step whatever the voice pitch, a boxed rate at its own rate
-	// (opennova::lwf::wave_pitch_scale carries the witness); any other stream keeps `p_pitch_scale`.
+	// player of one sets the pitch scale this gives over the one its voice composes: a step of 0 (a
+	// wave of pitch 0 whatever the voice pitch, a play factor of 0 whatever the wave) plays at the
+	// mixer's least step, 86.13 Hz, a boxed rate at its own rate (opennova::lwf::wave_pitch_scale
+	// carries the witness); any other stream keeps `p_pitch_scale`.
 	static double pitch_scale_for(const Ref<AudioStream> &p_stream, double p_pitch_scale);
 };
 

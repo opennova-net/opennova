@@ -104,10 +104,13 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 // (WavPcm's) as the shell's player holds it: the player's whole mix rate holds INT32_MAX, so a rate
 // past it is boxed there and its scale carries the rest, sample_rate / mix_rate. The mixer's step
 // composes the play factor with the wave's own pitch, (((play * factor) >> 16) * pitch + 0x400000)
-// >> 23, so a wave of pitch 0 steps at 0 whatever the play factor and is forced to the least step
-// [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd4b0, the pitch's mul @ 0x7bd603, the force
-// @ 0x7bd619..0x7bd61d]: the rate its decode already hands the player, so 1. Any other wave keeps
-// `play_scale` over its own rate.
+// >> 23, and forces a step of 0 to 1, the least step [orig: AudioChannel_ComputeMixCoefficients
+// @ 0x7bd4b0, the step @ 0x7bd5f6..0x7bd60e, the pitch's mul @ 0x7bd603, the force
+// @ 0x7bd619..0x7bd61d]: a step of 0 (a wave of pitch 0 whatever the play factor, a play factor of 0
+// whatever the wave, or any product of the two under half a step) plays at the least step's rate,
+// 44100 / 512 = 86.13 Hz exactly, over the stream's mix rate (a wave of pitch 0's stream holds the
+// whole 86, so 86.13 / 86). Any other step keeps `play_scale` over the wave's own rate (its 1/512
+// quantum, D-SND-50).
 double wave_pitch_scale(uint32_t loader_pitch_q16, uint32_t sample_rate, uint32_t mix_rate, double play_scale);
 
 // The plain RIFF/WAVE the game's wave loader reads (docs/audio/lwf-dbf-sound-re.md, "The wave

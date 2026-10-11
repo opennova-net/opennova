@@ -68,11 +68,19 @@ uint32_t loader_pitch_q16(uint32_t rate) {
 // pitch of 0 plays 1/512 of a sample a device frame, whatever the play factor. The device runs at
 // the config's audio_rate, 44100 by default [orig: Config_SetDefaults @ 0x54d15b;
 // Game_InitSubsystems @ 0x4a727e] (the Options' WDM_RATE radio, which can pick 22050, is not
-// serviced, D-MNU-21): 44100 / 512, 86.13 Hz, truncated to the shell's whole mix rate. Every other
+// serviced, D-MNU-21): 44100 / 512, 86.13 Hz, which the decode hands the shell's stream as its whole
+// mix rate, 86, every player's scale making up the rest (kLeastStepRate, wave_pitch_scale). Every other
 // pitch hands the shell its own rate, not the step's 1/512 quantum (D-SND-50), past INT32_MAX from an
 // AUD1 pitch of 0xBE37C63A or a RIFF rate of 0x80000000, which the shell's player boxes
 // (wave_pitch_scale).
 constexpr uint32_t kPitchZeroRate = 44100u / 512u;
+// The least step as a rate, 1/512 of a sample a frame of the 44100 Hz device: 86.1328125 Hz, exact in
+// a player's scale. A wave of pitch 0 and a play factor of 0 step alike at it.
+constexpr double kLeastStepRate = 44100.0 / 512.0;
+
+// The mixer's device factor, (44100 << 16) / device [orig: AudioMixer_Init @ 0x7bd381..0x7bd393]:
+// 0x10000 on the config's default 44100 Hz device (the Options' WDM_RATE radio is unserviced, D-MNU-21).
+constexpr uint32_t kDeviceFactor = 0x10000u;
 
 // The loader's own form, an AUD1 buffer (bytes 41 55 44 31), which it copies as it is, unchecked
 // [orig: Audio_LoadWavFileFromArchive @ 0x766480, the magic @ 0x7664e2, the copy @ 0x7664e9..0x766511]:
@@ -558,10 +566,27 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 }
 
 double wave_pitch_scale(uint32_t loader_pitch_q16, uint32_t sample_rate, uint32_t mix_rate, double play_scale) {
-	if (loader_pitch_q16 == 0) return 1.0;
+	if (mix_rate == 0) return play_scale;
+	// The play factor as the channel's +4 word holds it, Q16, rounded, and the step the mixer takes from
+	// it, (((play * factor) >> 16) * pitch + 0x400000) >> 23, each product 64-bit and each shrd keeping
+	// 32 bits [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5f6..0x7bd60e]. The mixer reads the word
+	// unsigned (`mul` @ 0x7bd5f9); ours takes a scale of 0 or below as the word 0 and holds one past the
+	// word's range at 0xFFFFFFFF. Every scale the shell composes is a word's own (lwf::pitch_from_q16 of
+	// a uint32) but an emitter's, which MissionAudio::_pitch_scale reads as an int: a word with bit 31
+	// set would come out below 0 and play at the least step, where the game steps it enormously fast.
+	// No shipped registration makes one.
+	const double play_q16 = play_scale * 65536.0;
+	const uint32_t play = !(play_scale > 0.0) ? 0u
+			: play_q16 >= 4294967295.0 ? 0xFFFFFFFFu : static_cast<uint32_t>(play_q16 + 0.5);
+	const uint32_t scaled = static_cast<uint32_t>((static_cast<uint64_t>(play) * kDeviceFactor) >> 16);
+	const uint32_t step = static_cast<uint32_t>((static_cast<uint64_t>(scaled) * loader_pitch_q16 + 0x400000u) >> 23);
+	// A step of 0 is forced to 1, the least step [orig: @ 0x7bd619..0x7bd61d], whatever the wave's rate:
+	// a play factor of 0, a wave of pitch 0, or any product of the two under half a step, 86.13 Hz over
+	// the stream's mix rate (a wave of pitch 0's stream holds the whole 86, its scale 86.13 / 86).
+	if (step == 0) return kLeastStepRate / static_cast<double>(mix_rate);
 	// A rate the player's mix rate holds plays at the play factor; one boxed at INT32_MAX at the play
 	// factor of the rest.
-	return mix_rate == 0 || mix_rate == sample_rate
+	return mix_rate == sample_rate
 			? play_scale
 			: play_scale * (static_cast<double>(sample_rate) / static_cast<double>(mix_rate));
 }
