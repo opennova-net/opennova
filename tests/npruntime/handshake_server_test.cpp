@@ -2553,6 +2553,48 @@ bool run_retransmit_0x42_keeps_keys() {
 	return true;
 }
 
+// A 0x42 whose CK is zero (no CK tag, as retail's builder writes a zero key) is admitted like
+// any other: the 0x82 echoes CK 0, a retransmit with CI 1 and CK 0 replays it, and the node's
+// teardown burst is keyed by CK 0. Retail stores CK as the remote key and gates nothing on it.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - CK @0x62BB29, the retransmit match
+//  @0x62BEE0..0x62BEE6, the store @0x62BF7F; CNapiNPConnection_SendSessionInit @0x620EF0 - CK
+//  @0x620FF1; CNapiNPConnection_SendDisconnectPacket @0x61F2A0 - the key @0x61F3AF]
+bool run_zero_ck_join_is_admitted() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	world::World w;
+	w.registry.configure_pool(0, 8);
+	w.registry.configure_pool(1, 8);
+	ctx.world = &w;
+	const PeerAddr peer{0x0100007Fu, 30810};
+	const std::string scrk = "ZEROCKCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+	const auto auth = craft_auth("JOINTOPERATIONS", kHostKey, /*ck=*/0, scrk);
+	auto join = [&](uint32_t now, ServerAuth &out_sa) -> bool {
+		auto r = inmatch::handle_server_datagram(ctx, peer, auth.data(), auth.size(), now);
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		return expect(!r.outbound.empty() &&
+		                      nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
+		                      op == SESSION_OPCODE_SERVER_AUTH &&
+		                      parse_server_auth(body.data(), body.size(), out_sa),
+		              "a zero-CK 0x42 draws a 0x82");
+	};
+	ServerAuth sa1, sa2;
+	if (!join(1, sa1)) return false;
+	if (!expect(sa1.cr == 1 && sa1.ck == 0 && inmatch::connection_count(ctx) == 1,
+	            "the zero-CK join is accepted and its 0x82 echoes CK 0")) return false;
+	if (!join(2, sa2)) return false;
+	if (!expect(sa2.sk == sa1.sk && sa2.scrk == sa1.scrk && inmatch::connection_count(ctx) == 1,
+	            "a retransmit with CK 0 replays the same 0x82")) return false;
+	const DisconnectEvent leave = make_disconnect_event(2, 2, 0, 0, "I.C:CIDEMIS", 0, "");
+	auto bye = craft(SESSION_OPCODE_CLIENT_GOODBYE, client_goodbye_to_bytes(sa1.sk, leave));
+	auto bye_result = inmatch::handle_server_datagram(ctx, peer, bye.data(), bye.size(), 3);
+	return expect(bye_result.outbound.size() == 4 &&
+	                      check_server_goodbye_burst(bye_result.outbound, 0, 0u, leave,
+	                              "the zero-CK node's teardown bursts 0x86 keyed by CK 0"),
+	              "the zero-CK node's goodbye draws the 0x86 burst");
+}
+
 // The reconnect counters: a 0x42 hands the node DCNT as sent and RCNT one past the client's when
 // it counted a disconnect (DCNT > 0, a signed compare); the 0x82 echoes RCNT only when nonzero.
 // [orig: NapiNPProtocol_HandleClientJoin @0x62c28d..0x62c2a3; SendSessionInit @0x62125d]
@@ -3866,6 +3908,7 @@ int main(int argc, char **argv) {
 	ok = run_full_player_info_is_recipient_scoped_lan_metadata() && ok;
 	ok = run_full_player_info_selects_retail_mission_title_branch() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
+	ok = run_zero_ck_join_is_admitted() && ok;
 	ok = run_reconnect_counters_echo_rcnt() && ok;
 	ok = run_game_host_server_auth_carries_no_cu() && ok;
 	ok = run_host_server_hello_writes_its_own_identity() && ok;

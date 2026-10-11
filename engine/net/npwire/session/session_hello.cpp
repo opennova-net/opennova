@@ -292,8 +292,15 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		// Unknown tags (DE/PV3/etc.) intentionally ignored.
 		pos = next;
 	}
-	// Minimum sanity: CK should be nonzero for a valid ClientAuth.
-	return out.ck != 0;
+	// No field is required: a zero (or absent) CK is the connection's remote key
+	// like any other, and the gates that follow the walk never test it. Only a
+	// non-stock peer sends one: a stock client draws a nonzero key and writes CK
+	// only when nonzero.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - CK @0x62BB29 to the
+	//  connection's remote key @0x62BF7F, compared only by the retransmit match
+	//  @0x62BEE0..0x62BEE6; NapiNP_GenerateSessionKey @0x61EA70 redraws a zero
+	//  @0x61EAC3; CNapiNPConnection_SendClientJoin @0x61fe20 gates CK @0x620119]
+	return true;
 }
 
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {

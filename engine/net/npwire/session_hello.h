@@ -224,8 +224,9 @@ struct ClientAuth {
 
 // Parse a ClientAuth TLV payload (the 0x42's, after NWU-decryption). Its dword
 // fields shorter than four bytes and its PG load as parse_client_hello's do.
-// False for a null buffer or a zero CK.
-// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 TLV walk]
+// False only for a null buffer: no field is required, and a zero or absent CK
+// parses as 0, the remote key retail stores without a test.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 TLV walk; CK @0x62BB29]
 bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 
 // Serialize a ClientAuth to flat-TLV bytes (inverse of parse_client_auth).

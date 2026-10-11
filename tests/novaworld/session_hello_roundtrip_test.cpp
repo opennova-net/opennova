@@ -443,7 +443,6 @@ int test_client_auth_roundtrip() {
 }
 
 int test_client_auth_minimum_for_acceptance() {
-	// parse_client_auth requires ck != 0; everything else can be defaulted.
 	ClientAuth src;
 	src.ci = 1;
 	src.ck = 0xCAFE0001u;
@@ -453,6 +452,33 @@ int test_client_auth_minimum_for_acceptance() {
 	TEST_EXPECT(parse_client_auth(bytes.data(), bytes.size(), round));
 	TEST_EXPECT(round.ci == 1);
 	TEST_EXPECT(round.ck == 0xCAFE0001u);
+	return 0;
+}
+
+// No field is required, CK included: a 0x42 whose CK is zero (an explicit zero
+// dword, or no CK tag at all, which is how retail's builder writes a zero key)
+// parses with CK 0, the remote key retail stores without a test.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - CK @0x62BB29, stored
+//  @0x62BF7F; CNapiNPConnection_SendClientJoin @0x61fe20 gates the CK tag on
+//  nonzero]
+int test_client_auth_zero_ck_parses() {
+	ClientAuth src = opennova::make_jointoperations_client_auth(
+			1, /*client_key=*/0, 0x0FE0E112u, "ZeroKey", "SCRK");
+	const auto absent = client_auth_to_bytes(src);
+	TEST_EXPECT(!has_tlv_field(absent, "CK"));
+	ClientAuth round;
+	round.ck = 0xFFFFFFFFu;
+	TEST_EXPECT(parse_client_auth(absent.data(), absent.size(), round));
+	TEST_EXPECT(round.ck == 0 && round.na == "ZeroKey" && round.ci == 1);
+	TEST_EXPECT(opennova::matches_jointoperations_identity(round));
+
+	std::vector<uint8_t> explicit_zero;
+	append_field(explicit_zero, "CI", {0x02, 0x00, 0x00, 0x00});
+	append_field(explicit_zero, "CK", {0x00, 0x00, 0x00, 0x00});
+	round.ck = 0xFFFFFFFFu;
+	TEST_EXPECT(parse_client_auth(explicit_zero.data(), explicit_zero.size(), round));
+	TEST_EXPECT(round.ck == 0 && round.ci == 2);
+	TEST_EXPECT(!parse_client_auth(nullptr, 0, round));
 	return 0;
 }
 
@@ -643,6 +669,7 @@ int main() {
 	if (test_pg_of_any_length_loads_sixteen_bytes() != 0) return 1;
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
+	if (test_client_auth_zero_ck_parses() != 0) return 1;
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
