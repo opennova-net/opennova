@@ -454,16 +454,9 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 MutationResult delete_user(opennova::db::Database &db, int64_t id) {
 	if (id <= 0) return err("not_found", "invalid id");
 	try {
-		// The account's listed servers stay listed, with no owner: their
-		// host_user_id references players with no ON DELETE action (its
-		// host_keys and sessions cascade).
-		opennova::db::Transaction tx(db);
-		db.exec("UPDATE active_hosts SET host_user_id = NULL WHERE host_user_id = ?;",
-		        {opennova::db::BindValue(id)});
 		db.exec("DELETE FROM players WHERE id = ?;",
 		        {opennova::db::BindValue(id)});
 		if (db.changes() == 0) return err("not_found", "no such user");
-		tx.commit();
 	} catch (const opennova::db::SqliteError &e) {
 		return err("db_error", e.what());
 	}
@@ -492,7 +485,10 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 	// sessions, its retail login's session row and its hosting keys, and
 	// forgets its known login addresses, in the same transaction as the
 	// update: a reset locks out whoever held the old one, and a ban lifted
-	// later revives no session.
+	// later revives no session. A server the account has listed stays listed;
+	// its next refresh stores no owner (the claim went with the keys), its next
+	// re-host links to no one (refused under ONNET_REQUIRE_HOST_KEY), and POST
+	// /api/admin/hosts/<rid>/stop ends it at once.
 	const bool revoke_sessions = update_revokes_sessions(p);
 
 	std::string sets;

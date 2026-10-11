@@ -19,7 +19,10 @@
 -- takes its keys. Times are UTC CURRENT_TIMESTAMP text
 -- ('YYYY-MM-DD HH:MM:SS'), compared as strings against datetime('now').
 --
--- Forward-only, like 0005..0008: applies exactly once on fresh and existing DBs.
+-- Landed with 0001 (players.id AUTOINCREMENT) and 0002 (ON DELETE SET NULL on
+-- active_hosts.host_user_id and host_players.user_id) edited in place, which a
+-- database already past them never re-runs (migrations are tracked by file
+-- name): the service database is reset on that deploy.
 
 CREATE TABLE host_keys (
     key_hash     TEXT PRIMARY KEY,

@@ -126,8 +126,11 @@ struct CreateUserParams {
 // A username of at most kUsernameMaxBytes bytes with no control byte, else
 // invalid_field.
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
-// Deletes the account with its sessions and hosting keys; a server it has
-// listed stays listed with no owner.
+// Deletes the account with its sessions and hosting keys (ON DELETE CASCADE).
+// A server it has listed stays listed with no owner, and its rows in listed
+// servers' player lists stay with no account (ON DELETE SET NULL); the
+// listing's later refreshes store no owner, the claim having gone with the
+// keys. POST /api/admin/hosts/<rid>/stop ends such a listing.
 MutationResult delete_user(opennova::db::Database &db, int64_t id);
 
 // Optional fields (only those passed-in by the admin) are updated.
@@ -145,7 +148,9 @@ struct UpdateUserParams {
 // sets a password or a status other than 'active' ends the account's website
 // sessions, its retail login's active_user_sessions row and its hosting keys
 // (host_keys), and forgets its known login addresses, in the same transaction
-// (update_revokes_sessions; the HTTP layer drops the retail login pins too).
+// (update_revokes_sessions; the HTTP layer drops the retail login pins too). A
+// server the account has listed stays listed and loses its owner at its next
+// refresh (the claim went with the keys).
 MutationResult update_user(opennova::db::Database &db, int64_t id,
                            const UpdateUserParams &p);
 bool update_revokes_sessions(const UpdateUserParams &p);
