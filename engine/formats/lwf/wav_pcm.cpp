@@ -70,12 +70,13 @@ uint32_t loader_pitch_q16(uint32_t rate) {
 // Game_InitSubsystems @ 0x4a727e] (the Options' WDM_RATE radio, which can pick 22050, is not
 // serviced, D-MNU-21): 44100 / 512, 86.13 Hz, which the decode hands the shell's stream as its whole
 // mix rate, 86, every player's scale making up the rest (kLeastStepRate, wave_pitch_scale). Every other
-// pitch hands the shell its own rate, not the step's 1/512 quantum (D-SND-50), past INT32_MAX from an
-// AUD1 pitch of 0xBE37C63A or a RIFF rate of 0x80000000, which the shell's player boxes
-// (wave_pitch_scale).
+// pitch hands the shell its own rate, past INT32_MAX from an AUD1 pitch of 0xBE37C63A or a RIFF rate of
+// 0x80000000, which the shell's player boxes, every player's scale stepping it at the step's 1/512
+// quantum (wave_pitch_scale).
 constexpr uint32_t kPitchZeroRate = 44100u / 512u;
 // The least step as a rate, 1/512 of a sample a frame of the 44100 Hz device: 86.1328125 Hz, exact in
-// a player's scale. A wave of pitch 0 and a play factor of 0 step alike at it.
+// a player's scale. A wave of pitch 0 and a play factor of 0 step alike at it, and every step is a whole
+// number of it.
 constexpr double kLeastStepRate = 44100.0 / 512.0;
 
 // The mixer's device factor, (44100 << 16) / device [orig: AudioMixer_Init @ 0x7bd381..0x7bd393]:
@@ -565,7 +566,7 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	return true;
 }
 
-double wave_pitch_scale(uint32_t loader_pitch_q16, uint32_t sample_rate, uint32_t mix_rate, double play_scale) {
+double wave_pitch_scale(uint32_t loader_pitch_q16, uint32_t mix_rate, double play_scale) {
 	if (mix_rate == 0) return play_scale;
 	// The play factor as the channel's +4 word holds it, Q16, rounded, and the step the mixer takes from
 	// it, (((play * factor) >> 16) * pitch + 0x400000) >> 23, each product 64-bit and each shrd keeping
@@ -579,14 +580,15 @@ double wave_pitch_scale(uint32_t loader_pitch_q16, uint32_t sample_rate, uint32_
 	const uint32_t scaled = static_cast<uint32_t>((static_cast<uint64_t>(play) * kDeviceFactor) >> 16);
 	const uint32_t step = static_cast<uint32_t>((static_cast<uint64_t>(scaled) * loader_pitch_q16 + 0x400000u) >> 23);
 	// A step of 0 is forced to 1, the least step [orig: @ 0x7bd619..0x7bd61d], whatever the wave's rate:
-	// a play factor of 0, a wave of pitch 0, or any product of the two under half a step, 86.13 Hz over
-	// the stream's mix rate (a wave of pitch 0's stream holds the whole 86, its scale 86.13 / 86).
-	if (step == 0) return kLeastStepRate / static_cast<double>(mix_rate);
-	// A rate the player's mix rate holds plays at the play factor; one boxed at INT32_MAX at the play
-	// factor of the rest.
-	return mix_rate == sample_rate
-			? play_scale
-			: play_scale * (static_cast<double>(sample_rate) / static_cast<double>(mix_rate));
+	// a play factor of 0, a wave of pitch 0, or any product of the two under half a step (a wave of
+	// pitch 0's stream holds the whole 86, its scale 86.13 / 86).
+	const uint32_t steps = step == 0 ? 1u : step;
+	// The mix loop adds the step to the channel's position each device frame and reads the sample at the
+	// position >> 9 (channel 0's self-patched `add eax, step` @ 0x7bdd9e, `sar eax, 9` @ 0x7bddc6), so the
+	// wave plays steps / 512 samples a frame of the 44100 Hz device, steps * 86.13 Hz whatever its own
+	// rate (D-SND-50), over the stream's mix rate: its own rate, a boxed one's INT32_MAX. The product is
+	// exact in a double (under 2^46) and the one rounding is the division's.
+	return static_cast<double>(steps) * kLeastStepRate / static_cast<double>(mix_rate);
 }
 
 bool wav_write_pcm_mono(const uint8_t *data, size_t size, uint32_t rate, uint16_t bits,
