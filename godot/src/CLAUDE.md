@@ -66,12 +66,18 @@ Gotchas:
   this tree. A binding that starts using a class the list lacks fails with a missing
   `godot_cpp/classes/*.hpp` (or a missing method): run
   `python scripts/lint/godot_cpp_profile.py --write` and commit the regenerated list.
+- PR CI builds only the `template_debug` desktop GDExtension and packages debug-mode exports
+  (`-ExportMode debug`); `template_release` + release-mode packaging run on master
+  pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
+  `scripts/package_godot_windows.ps1` when touching build glue here. The engine test job
+  runs Ninja + sccache (the VS generator is local-only).
 - The web build (ADR 0049) compiles this tree as a wasm32 threads side module
-  (`scripts/build_godot_web.sh`, Emscripten 4.0.20 only; `ci.yml`'s
-  `build-gdextension-web` builds it on every PR) with `OPENNOVA_DEVTOOLS` off, as in
-  the release flavour. The templates abort on a throw, so no exceptions as control
-  flow, and a device that starts threads sizes them for the page's fixed pthread pool
-  under `OS::has_feature("web")` (`terrain/terrain_tile_cache_device.cpp`).
+  (`scripts/build_godot_web.sh`, Emscripten 4.0.20 only) with `OPENNOVA_DEVTOOLS` off, as
+  in the release flavour. Its CI jobs (`build-gdextension-web` in `ci.yml`, and
+  `game-web.yml`'s push/PR triggers) are paused while the web build is on hold; ADR 0049
+  d5's rules (no exceptions as control flow, ILP32-safe layout guards) still apply, but no
+  CI checks them. A device that starts threads sizes them for the page's fixed pthread
+  pool under `OS::has_feature("web")` (`terrain/terrain_tile_cache_device.cpp`).
 - godot-cpp `Basis(axis, angle)` diverges from core Godot for negative-component axes.
   When porting GDScript Basis math to C++, add a parity test first.
 - `ResourceRoot::set_root_dir` clears the dir index and texture caches — a 94s -> 2s
