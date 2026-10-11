@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/mission_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/reference_queries.h>
 #include <base/io/json.h>
@@ -157,6 +158,50 @@ struct Ui {
 	void activate(ImGuiID id) {
 		ImGui::ActivateItemByID(id);
 		frames(2);
+	}
+	// Where an item is drawn, by ImGui's own item locator (DebugLocateItem: resolved as the item is added, and only
+	// where its rect meets its window's clip rect; an item scrolled out of sight, or not drawn, never resolves): false
+	// where it is not in sight this frame. The rect is the locator's outline, read off the foreground draw list (its
+	// opaque green vertices; the line it draws from the mouse, kept away, is left out), a pixel or so out of the
+	// item's own all round, so its middle is the item's.
+	bool locate(ImGuiID id, ImRect &rect) {
+		away();
+		ImGui::DebugLocateItem(id);
+		frames(1);
+		if (GImGui->DebugLocateId == id) return false;
+		const ImDrawList *list = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
+		bool found = false;
+		for (const ImDrawVert &vertex : list->VtxBuffer) {
+			if (vertex.col != IM_COL32(0, 255, 0, 255) || vertex.pos.x < -500.0f || vertex.pos.y < -500.0f) continue;
+			if (!found) rect = ImRect(vertex.pos, vertex.pos);
+			else rect.Add(vertex.pos);
+			found = true;
+		}
+		return found;
+	}
+	// A click as a person makes one: the item found in sight (locate), the mouse moved to its middle, where it must be
+	// the item hovered (nothing over it), then pressed and let go. False, nothing pressed, where it is not in sight or
+	// something else takes the mouse there.
+	bool click_item(ImGuiID id, ImGuiMouseButton which = ImGuiMouseButton_Left) {
+		ImRect rect;
+		if (!locate(id, rect)) return false;
+		const ImVec2 at = rect.GetCenter();
+		mouse(at.x, at.y);
+		frames(1);
+		if (GImGui->HoveredId != id) return false;
+		button(true, which);
+		button(false, which);
+		return true;
+	}
+	// The mouse moved onto an item in sight and left there (a submenu opened by hovering it): false where it is not in
+	// sight or something else takes the mouse there.
+	bool hover_item(ImGuiID id) {
+		ImRect rect;
+		if (!locate(id, rect)) return false;
+		const ImVec2 at = rect.GetCenter();
+		mouse(at.x, at.y);
+		frames(3);
+		return GImGui->HoveredId == id;
 	}
 	// A key chord: the keys pressed in order, released in reverse; the requests it raised.
 	std::vector<EditorRequest> chord(std::initializer_list<ImGuiKey> keys) {
@@ -662,6 +707,78 @@ inline ImGuiID import_table_item(const char *table, int index, const char *label
 	return item_id(pushed(item_id(import_body_id(), {table}), index), {label});
 }
 
+// A mission open in a real session as the Shell drives it (ADR 0046 S24's groups: board, space, live): the minted
+// synth_logic mission written into a new project and opened, the active document; its 3D view drawn through the
+// test's devices. After each frame the requests the windows raised go to the session (kept, for a test to take;
+// a set_workspace among them, served there as the Shell serves it), and the devices follow the viewports.
+struct MissionRun {
+	editor_test::TempProjectDir dir;
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	DrawnDevices devices;
+	Ui ui;
+	std::vector<EditorRequest> raised;
+	std::string path;
+
+	explicit MissionRun(const char *name) : dir(name) { ui.serve_workspace = false; }
+	// The project made, the mission opened and drawn in its tab: false where any step fails.
+	bool open() {
+		if (!session.handle(request::new_project(dir.file("project"), "Logic"))) return false;
+		session.run_operations();
+		editor_test::create_missing_files(session);
+		const SessionView &v = session.view();
+		const std::string repo = test_paths_repo_root(__FILE__);
+		if (!editor_test::write_bytes(v.project.root + "/missions/logic.bms",
+		                              test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")))
+			return false;
+		session.handle(request::rescan());
+		session.run_operations();
+		ui.windows.set_view(&v);
+		ui.windows.set_devices(&devices.cache);
+		session.handle(request::open_document("missions/logic.bms"));
+		session.run_operations();
+		const DocumentBase *open = session.document_for("missions/logic.bms");
+		if (!open) return false;
+		path = open->path();
+		ui.focus("Document");
+		settle();
+		take();
+		return devices.held(path, ViewportKind::Mission) != nullptr;
+	}
+	const MissionDocument *mission() { return dynamic_cast<const MissionDocument *>(session.document_for(path)); }
+	void pump() {
+		for (const EditorRequest &request : ui.drain()) {
+			raised.push_back(request);
+			session.handle(request);
+		}
+		session.run_operations();
+		devices.sync(session.viewports(), session.view());
+	}
+	void settle(int rounds = 3) {
+		for (int i = 0; i < rounds; ++i) {
+			pump();
+			ui.frames(1);
+		}
+		pump();
+	}
+	std::vector<EditorRequest> take() {
+		std::vector<EditorRequest> out;
+		out.swap(raised);
+		return out;
+	}
+	// The window drawn last frame whose own name is `part` ("/logic_pane_": the last step of its name, never a child
+	// of it, whose name holds its parent's), null for none.
+	static const ImGuiWindow *drawn_window(const char *part) {
+		const ImGuiWindow *found = nullptr;
+		for (const ImGuiWindow *window : GImGui->Windows) {
+			const char *at = window->Active && !window->Hidden ? std::strstr(window->Name, part) : nullptr;
+			if (at && !std::strchr(at + 1, '/')) found = window;
+		}
+		return found;
+	}
+};
+
 // The workspace's tests (workspace_test.cpp): the six-window shell of S11d.
 void run_workspace_tests();
 // The change marks, the reveal, Output and the shortcuts (markers_test.cpp), and the
@@ -695,5 +812,10 @@ void run_navigation_tests();
 // usages, the Go menu, and the right-click menus of the mission view, the Inspector, Files, Problems and the
 // outline.
 void run_shortcuts_tests();
+// ADR 0046 S24, the mission logic: the Event board (board_test.cpp), the logic in the views (space_test.cpp), the
+// live logic during Play (live_test.cpp).
+void run_board_tests();
+void run_space_tests();
+void run_live_tests();
 
 } // namespace editor_ui_test

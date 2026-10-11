@@ -12,6 +12,7 @@
 #include <editor/run/play_session.h>
 #include <editor/run/play_start.h>
 #include <editor/session/build_operation.h>
+#include <editor/session/live_logic.h>
 #include <editor/session/play_log.h>
 #include <formats/filelog/file_access_log.h>
 
@@ -96,6 +97,9 @@ public:
 	ProtectedDirs protected_dirs(const std::string &output_root);
 	// The directory the running game uses ("" when none).
 	std::string running_build_dir() const { return play_.running_build_dir(); }
+	// The running game's mission logic and the calls asked of it (S24 Live).
+	LiveLogicSession &live() { return live_; }
+	const LiveLogicSession &live() const { return live_; }
 
 private:
 	void follow_launcher(const PlayLauncher &launcher);
@@ -183,6 +187,7 @@ private:
 	// write): one the game install's game left as it was is a run before's, never read.
 	int64_t graphics_log_size_ = -1;
 	int64_t graphics_log_time_ = 0;
+	LiveLogicSession live_;
 };
 
 } // namespace opennova::editor

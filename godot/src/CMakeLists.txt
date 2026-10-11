@@ -413,6 +413,7 @@ if(OPENNOVA_EDITOR)
         authoring/mission_placed_tiles.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
+        authoring/play_logic_link.cpp
         authoring/preview_backdrop.cpp
         authoring/preview_sound_player.cpp
         authoring/script_device.cpp

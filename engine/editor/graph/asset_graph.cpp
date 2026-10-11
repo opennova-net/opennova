@@ -951,6 +951,15 @@ ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name,
 		return ReferenceStatus::Present;
 	}
 	if (resolution == ReferenceResolution::Symbol) {
+		// A mission variable is a word of its mission's bank, which holds every index a script's V# reaches
+		// [orig: WacScript_ResolveParameter @0x4F2AA4..0x4F2B06]: there wherever the mission is, which no
+		// symbol stands for.
+		if (kind == ReferenceKind::MissionVariable) {
+			const GraphSlot *mission = file_named(key(scope));
+			if (!mission) return ReferenceStatus::Unverified;
+			if (file_out) *file_out = mission->path;
+			return ReferenceStatus::Present;
+		}
 		// A screen's own lookup, which no column describes: of a menu file the project does
 		// not have, that file's own edge says so.
 		if (kind == ReferenceKind::MenuScreen) {
