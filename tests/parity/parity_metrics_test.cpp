@@ -1036,10 +1036,14 @@ void test_state() {
 		expect_row(c, 'S', "entity_field_population", "", "fail", "ENTITY_FIELD_EMPTY");
 	}
 	{
+		// A player that never moves in world units, whatever its codes do.
 		wire::ParityTrace subject = scripted(3);
 		for (wire::ParityEntity &e : subject.entities)
-			if (e.cls == 'P')
-				e.pos_x = 777;
+			if (e.cls == 'P') {
+				e.world_x = 777 * 65536;
+				e.world_y = 888 * 65536;
+				e.world_z = 50 * 65536;
+			}
 		const Case c = judge_case(scripted(1), scripted(2), subject);
 		expect_row(c, 'S', "entity_motion", "P", "fail", "FRAME_ENTITY_CONSTANT");
 	}
@@ -1533,6 +1537,98 @@ void test_order_rules() {
 	}
 }
 
+void test_frame_rules() {
+	{
+		// flags2 counts sends: an offset counter passes, a step of two does not.
+		wire::ParityTrace offset = scripted(3), doubled = scripted(3);
+		for (wire::ParityFrameState &f : offset.frames)
+			f.flags2 = (f.flags2 + 64) & 0xFFu;
+		uint32_t n = 0;
+		for (wire::ParityFrameState &f : doubled.frames)
+			f.flags2 = (2 * n++) & 0xFFu;
+		expect_row(judge_case(scripted(1), scripted(2), offset), 'S', "frame_flags2", "", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), offset), 'S', "frame_phase_step", "",
+				"pass");
+		expect_row(judge_case(scripted(1), scripted(2), doubled), 'S', "frame_phase_step", "",
+				"fail", "FRAME_HEADER_FLAGS_MISMATCH");
+	}
+	{
+		// The fps and CPU bytes are measurements; a CPU byte never written is not.
+		auto cpu = [](uint32_t seed, uint32_t fps, uint32_t share) {
+			wire::ParityTrace trace = scripted(seed);
+			for (wire::ParityFrameState &f : trace.frames)
+				if (f.timer_present) {
+					f.timer_state[2] = fps;
+					f.timer_state[3] = share;
+				}
+			return trace;
+		};
+		const Case fps = judge_case(cpu(1, 54, 2), cpu(2, 41, 1), cpu(3, 33, 3));
+		expect_row(fps, 'S', "frame_timer", "", "pass");
+		expect_row(fps, 'S', "frame_server_cpu_fill", "", "pass");
+		expect_row(judge_case(cpu(1, 54, 2), cpu(2, 41, 1), cpu(3, 33, 0)), 'S',
+				"frame_server_cpu_fill", "", "fail", "FRAME_TIMER_PHASE_MISMATCH");
+	}
+	{
+		// The anchor's own offset: retail's recipient record sits at -CameraOffset.
+		wire::ParityTrace body = scripted(3);
+		for (wire::ParityEntity &e : body.entities)
+			if (e.handle == 0x1000) {
+				e.pos_z = 0;
+				e.offset_z = 0;
+			}
+		const Case c = judge_case(scripted(1), scripted(2), body, "OR");
+		expect_row(c, 'S', "frame_self_offset", "", "fail", "FRAME_ANCHOR_OFFSET_MISMATCH");
+		expect_row(judge_case(scripted(1), scripted(2), scripted(3)), 'S', "frame_self_offset", "",
+				"pass");
+	}
+	{
+		// Positions compare in world units: a vehicle parked in the world while the
+		// recipient (the anchor) moves changes its codes every frame, and is no motion.
+		auto parked = [](uint32_t seed) {
+			wire::ParityTrace trace = scripted(seed);
+			std::map<int, const wire::ParityFrameState *> frames;
+			for (const wire::ParityFrameState &f : trace.frames)
+				frames[f.frame] = &f;
+			for (wire::ParityEntity &e : trace.entities) {
+				if (e.cls != 'V')
+					continue;
+				const wire::ParityFrameState &f = *frames[e.frame];
+				e.pos_x = network_compress_fixedpoint(1100 * 65536 - f.anchor_x);
+				e.pos_y = network_compress_fixedpoint(2010 * 65536 - f.anchor_y);
+				e.pos_z = network_compress_fixedpoint(0);
+				place(e, f);
+				e.world_x = 1100 * 65536; // the decompressor's rounding aside
+				e.world_y = 2010 * 65536;
+			}
+			return trace;
+		};
+		const Case c = judge_case(parked(1), parked(2), parked(3));
+		const VerdictRow *motion = find_row(c.verdict.rows, 'S', "entity_motion", "V");
+		check(motion && motion->value.reference == "never filled" && motion->status == "pass",
+				"a parked vehicle's codes move with the anchor; its world position does not");
+	}
+	{
+		// The priority scores are continuous weights: occupancy exact, medians banded.
+		wire::ParityTrace near = scripted(3), far = scripted(3), occupied = scripted(3);
+		for (wire::ParityUplinkState &u : near.uplinks)
+			u.priority_score[0] = 105;
+		for (wire::ParityUplinkState &u : far.uplinks)
+			u.priority_score[0] = 2000;
+		for (wire::ParityUplinkState &u : occupied.uplinks)
+			u.priority_handle[1] = 0x2004;
+		expect_row(judge_case(scripted(1), scripted(2), near), 'C', "uplink_priority_score_p50",
+				"0", "pass");
+		expect_row(judge_case(scripted(1), scripted(2), far), 'C', "uplink_priority_score_p50",
+				"0", "fail", "UPLINK_PRIORITY_MISMATCH");
+		expect_row(judge_case(scripted(1), scripted(2), occupied), 'C', "uplink_priority", "",
+				"fail", "UPLINK_PRIORITY_MISMATCH");
+	}
+	check(p90({ 1.0, 2.0 }) == 2.0 && p90({ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }) == 9.0 &&
+					p90({ 4.0 }) == 4.0 && p90({}) == 0.0,
+			"p90 is the nearest rank: two samples report the larger");
+}
+
 void test_steady_rules() {
 	{
 		// A steady packet groups as its record multiset, without the RTT replies its
@@ -1584,6 +1680,7 @@ int main() {
 	test_reply_rules();
 	test_order_rules();
 	test_steady_rules();
+	test_frame_rules();
 	if (g_failures) {
 		std::fprintf(stderr, "%d failure(s)\n", g_failures);
 		return 1;

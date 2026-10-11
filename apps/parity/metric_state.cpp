@@ -2,20 +2,25 @@
 // S2C 0x0A frame header and per-entity records (the 0x0A shape report diff_0a.py
 // printed, folded in and made failing). A documented subset of the retired
 // verifier's Compare-SemanticDirection:
-//   exact value sets   uplink shape/ADM/state/move/carrier/priority; frame
-//                      sub-block, flags, record classes, local state, health,
-//                      state word, carried, weapon/timer/env/objective/mount
-//                      blocks; entity class:type coverage
+//   exact value sets   uplink shape/ADM/state/move/carrier/priority occupancy;
+//                      frame sub-block, flags (flags2's route nibble and modal
+//                      step), record classes, local state, health, state word,
+//                      carried, weapon/timer/env/objective/mount blocks; entity
+//                      class:type coverage; the anchor's own record offset
 //   zero / constant    a field RR fills that the run leaves all zero, or a
 //                      position RR changes that the run never does
 //   field population   per entity class, the fields RR ever fills (diff_0a)
-//   dynamic vectors    origin-normalized range, displacement and step p90 within
-//                      1/8x..8x of RR; initial position/anchor within 64 units
+//   dynamic vectors    origin-normalized range, displacement and step p90
+//                      (nearest rank) within 1/8x..8x of RR, entity positions in
+//                      world units; priority scores' per-slot median likewise;
+//                      initial position/anchor within 64 units
 // Session-local handles reduce to none/bound (normalization.h).
 
 #include "metric.h"
 
 #include "normalization.h"
+
+#include <net/npwire/ingame_decode.h>
 
 #include <algorithm>
 #include <cmath>
@@ -92,13 +97,6 @@ double wrapped(double delta, double modulus) {
 	while (delta < -half)
 		delta += modulus;
 	return delta;
-}
-
-double p90(std::vector<double> values) {
-	if (values.empty())
-		return 0.0;
-	std::sort(values.begin(), values.end());
-	return values[size_t(std::floor(double(values.size() - 1) * 0.9))];
 }
 
 // `samples` in capture order.
@@ -211,8 +209,39 @@ size_t changing_handles(const std::vector<const T *> &records,
 	return changing;
 }
 
+double median(std::vector<double> values) {
+	if (values.empty())
+		return 0.0;
+	std::sort(values.begin(), values.end());
+	return values[(values.size() - 1) / 2];
+}
+
 // ---------------------------------------------------------------------------
 // C2S 0x0C
+
+void priority_score_metric(std::vector<MetricValue> &out, int slot, const std::vector<double> &a,
+		const std::vector<double> &b) {
+	static_assert(has_normalization("uplink.priority_score"));
+	const double ma = median(a);
+	if (a.size() < kDynamicMinSamples || !(ma > 0.0))
+		return;
+	MetricValue value = metric('C', "uplink_priority_score_p50", std::to_string(slot),
+			"UPLINK_PRIORITY_MISMATCH");
+	value.floor = kDynamicRatioFloor;
+	value.reference = render_number(ma);
+	if (b.size() < kDynamicMinSamples) {
+		value.comparable = false;
+		value.subject = std::to_string(b.size()) + " samples";
+		value.detail = "fewer than 8 occupied samples";
+		out.push_back(value);
+		return;
+	}
+	const double mb = median(b);
+	value.distance = mb > 0.0 ? std::fabs(std::log2(mb / ma)) : 64.0;
+	value.subject = render_number(mb);
+	value.detail = "|log2(subject / RR)| of the slot's median score; 3 is the 1/8x..8x band";
+	out.push_back(value);
+}
 
 std::vector<const wire::ParityUplinkState *> steady_uplinks(const RunFacts &run) {
 	std::vector<const wire::ParityUplinkState *> out;
@@ -250,15 +279,27 @@ void compare_uplinks(const RunFacts &rr, const RunFacts &other, std::vector<Metr
 	both("uplink_move", "UPLINK_MOVE_MISMATCH", [](const U &s) { return std::to_string(s.move); });
 	both("uplink_carrier", "UPLINK_CARRIER_MISMATCH",
 			[](const U &s) { return std::string(s.carrier == 0xFFFF ? "none" : "bound"); });
-	both("uplink_priority", "UPLINK_PRIORITY_MISMATCH", [](const U &s) {
+	auto occupied = [](const U &s, int slot) {
+		return s.priority_handle[slot] != 0 || s.priority_score[slot] != 0;
+	};
+	both("uplink_priority", "UPLINK_PRIORITY_MISMATCH", [&occupied](const U &s) {
 		std::string key;
-		for (int slot = 0; slot < 4; ++slot) {
-			const bool occupied = s.priority_handle[slot] != 0 || s.priority_score[slot] != 0;
-			key += (slot ? "," : "") + std::string(occupied ? "occupied:" : "empty:") +
-					std::to_string(s.priority_score[slot]);
-		}
+		for (int slot = 0; slot < 4; ++slot)
+			key += (slot ? "," : "") + std::string(occupied(s, slot) ? "occupied" : "empty");
 		return key;
 	});
+	// The scores are continuous distance/view weights (uplink.priority_score): each
+	// slot's median within the 1/8x..8x band of RR's.
+	for (int slot = 0; slot < 4; ++slot) {
+		auto scores = [&occupied, slot](const std::vector<const U *> &states) {
+			std::vector<double> out;
+			for (const U *s : states)
+				if (occupied(*s, slot))
+					out.push_back(double(s->priority_score[slot]));
+			return out;
+		};
+		priority_score_metric(out, slot, scores(a), scores(b));
+	}
 
 	auto any = [](const std::vector<const U *> &states, const std::function<bool(const U &)> &f) {
 		for (const U *state : states)
@@ -315,10 +356,25 @@ std::vector<const wire::ParityFrameState *> steady_frames(const RunFacts &run) {
 	return out;
 }
 
+// The modal step between consecutive frames' flags2 (the per-slot send counter):
+// a capture drop makes a step of 2, so only the mode compares.
+std::set<std::string> phase_step(const std::vector<const wire::ParityFrameState *> &frames) {
+	std::map<uint32_t, size_t> steps;
+	for (size_t i = 1; i < frames.size(); ++i)
+		++steps[(frames[i]->flags2 - frames[i - 1]->flags2) & 0xFFu];
+	if (steps.empty())
+		return {};
+	const auto mode = std::max_element(steps.begin(), steps.end(),
+			[](const auto &x, const auto &y) { return x.second < y.second; });
+	return { std::to_string(mode->first) };
+}
+
 void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
 	static_assert(has_normalization("frame.carried"));
 	static_assert(has_normalization("frame.mount_handle"));
 	static_assert(has_normalization("frame.timer_seconds"));
+	static_assert(has_normalization("frame.server_stats"));
+	static_assert(has_normalization("frame.phase_counter"));
 	static_assert(has_normalization("frame.env_tod"));
 	const auto a = steady_frames(rr), b = steady_frames(other);
 	if (a.empty() && b.empty())
@@ -339,8 +395,11 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 			[](const F &f) { return std::to_string(f.sub_block); });
 	both("frame_flags1", "FRAME_HEADER_FLAGS_MISMATCH",
 			[](const F &f) { return std::to_string(f.flags1); });
+	// flags2 counts sends: the client routes on its low nibble (D-NET-75).
 	both("frame_flags2", "FRAME_HEADER_FLAGS_MISMATCH",
-			[](const F &f) { return std::to_string(f.flags2); });
+			[](const F &f) { return std::to_string(f.flags2 & kFrameFlags2RouteMask); });
+	set_metric(out, 'S', "frame_phase_step", "FRAME_HEADER_FLAGS_MISMATCH", phase_step(a),
+			phase_step(b));
 	both("frame_record_classes", "FRAME_RECORD_CLASS_MISMATCH", [](const F &f) {
 		std::string key;
 		if (f.players)
@@ -366,8 +425,9 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 				? "1:" + join(f.weapon, 7) + "," + std::to_string(f.weapon_uniform_team_mask)
 				: std::string("0");
 	});
+	// breathtime and fallmps; the fps and CPU bytes are machine-load measurements.
 	both("frame_timer", "FRAME_TIMER_PHASE_MISMATCH", [](const F &f) {
-		return f.timer_present ? "1:" + join(f.timer_state, 4) : std::string("0");
+		return f.timer_present ? "1:" + join(f.timer_state, 2) : std::string("0");
 	});
 	both("frame_env", "FRAME_ENV_PHASE_MISMATCH", [](const F &f) {
 		if (!f.env_present)
@@ -397,6 +457,12 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 	};
 	auto anchor = [](const F &f) { return f.anchor_x != 0 || f.anchor_y != 0 || f.anchor_z != 0; };
 	fill_metric(out, 'S', "frame_anchor_fill", "FRAME_ANCHOR_ZERO", any(a, anchor), any(b, anchor));
+	// The CPU share is a measurement, but a host that never writes one is not
+	// (Server_TickUpdate @0x51D7EA..0x51D7FB, NetPacket_WritePlayerState
+	// @0x4FFA76..0x4FFA7C).
+	auto cpu = [](const F &f) { return f.timer_present && f.timer_state[3] != 0; };
+	fill_metric(out, 'S', "frame_server_cpu_fill", "FRAME_TIMER_PHASE_MISMATCH", any(a, cpu),
+			any(b, cpu));
 	auto samples = [](const std::vector<const F *> &frames) {
 		std::vector<Sample> out;
 		for (const F *f : frames)
@@ -457,25 +523,35 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 	population.detail = empty.empty() ? "" : "RR fills, the run leaves empty: " + render_set(empty);
 	out.push_back(population);
 
+	// Positions compare in world 16.16: a compact code is sign/exponent/mantissa
+	// relative to the recipient's eye anchor (state.position), so code arithmetic is
+	// no distance and every code moves with the recipient. A carrier-local record is
+	// relative to its carrier: left out of the position samples.
 	for (const char cls : { 'P', 'V', 'I' }) {
-		std::vector<const E *> ca, cb;
+		std::vector<const E *> ca, cb, wa, wb;
 		for (const E *e : a)
-			if (e->cls == cls)
+			if (e->cls == cls) {
 				ca.push_back(e);
+				if (!e->carrier_local)
+					wa.push_back(e);
+			}
 		for (const E *e : b)
-			if (e->cls == cls)
+			if (e->cls == cls) {
 				cb.push_back(e);
+				if (!e->carrier_local)
+					wb.push_back(e);
+			}
 		if (ca.empty() && cb.empty())
 			continue;
 		const std::string key(1, cls);
 		const std::function<uint32_t(const E &)> handle = [](const E &e) { return e.handle; };
 		const std::function<std::string(const E &)> position = [](const E &e) {
-			return std::to_string(e.pos_x) + "," + std::to_string(e.pos_y) + "," +
-					std::to_string(e.pos_z);
+			return std::to_string(e.world_x) + "," + std::to_string(e.world_y) + "," +
+					std::to_string(e.world_z);
 		};
 		fill_metric(out, 'S', "entity_motion", "FRAME_ENTITY_CONSTANT",
-				changing_handles(ca, handle, position) > 0,
-				changing_handles(cb, handle, position) > 0, key);
+				changing_handles(wa, handle, position) > 0,
+				changing_handles(wb, handle, position) > 0, key);
 		auto samples = [](const std::vector<const E *> &entities, bool orientation) {
 			std::vector<Sample> out;
 			for (const E *e : entities) {
@@ -484,17 +560,68 @@ void compare_entities(const RunFacts &rr, const RunFacts &other, std::vector<Met
 				if (orientation)
 					sample.axes = { double(e->orient_a), double(e->orient_b) };
 				else
-					sample.axes = { double(e->pos_x), double(e->pos_y), double(e->pos_z) };
+					sample.axes = { double(e->world_x), double(e->world_y), double(e->world_z) };
 				out.push_back(sample);
 			}
 			return out;
 		};
 		const double modulus = cls == 'V' ? 65536.0 : 256.0;
-		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_position", samples(ca, false),
-				samples(cb, false), 0.0, false);
+		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_position", samples(wa, false),
+				samples(wb, false), 0.0, false);
 		dynamic_metrics(out, 'S', std::string("entity_") + cls + "_orientation", samples(ca, true),
 				samples(cb, true), modulus, false);
 	}
+}
+
+// The recipient's own entity: the handle its C2S 0x0C uplinks name (the modal one).
+bool own_handle(const RunFacts &run, uint32_t &handle) {
+	std::map<uint32_t, size_t> handles;
+	for (const wire::ParityUplinkState &state : run.trace.uplinks)
+		if (state.decoded && run.in_comparison(state.ts_ns))
+			++handles[state.handle];
+	if (handles.empty())
+		return false;
+	handle = std::max_element(handles.begin(), handles.end(), [](const auto &x, const auto &y) {
+		return x.second < y.second;
+	})->first;
+	return true;
+}
+
+// The anchor's own offset: the recipient's own record, decompressed, in 1/16 units.
+// Retail anchors every frame at the recipient's Position + CameraOffset
+// (Server_SendEntityStateToPlayer @0x517BEF..0x517C13), so its own record encodes
+// -CameraOffset (the standing eye: z -0xD001); positions in world units no longer
+// show where the anchor sits, this does.
+void compare_self_offset(const RunFacts &rr, const RunFacts &other, std::vector<MetricValue> &out) {
+	static_assert(has_normalization("state.position"));
+	auto offsets = [](const RunFacts &run, bool &known) {
+		std::set<std::string> out;
+		uint32_t handle = 0;
+		known = own_handle(run, handle);
+		if (!known)
+			return out;
+		auto sixteenths = [](int32_t v) { return std::to_string(std::lround(double(v) / 4096.0)); };
+		for (const wire::ParityEntity &e : run.trace.entities)
+			if (e.cls == 'P' && e.handle == handle && !e.carrier_local && run.in_steady(e.ts_ns))
+				out.insert(sixteenths(e.offset_x) + "," + sixteenths(e.offset_y) + "," +
+						sixteenths(e.offset_z));
+		return out;
+	};
+	bool known_a = false, known_b = false;
+	const std::set<std::string> a = offsets(rr, known_a), b = offsets(other, known_b);
+	if (!known_a || a.empty())
+		return;
+	MetricValue value = metric('S', "frame_self_offset", "", "FRAME_ANCHOR_OFFSET_MISMATCH");
+	value.subject = render_set(b);
+	value.reference = render_set(a);
+	value.detail = "the recipient's own record against the anchor, 1/16 units";
+	if (!known_b || b.empty()) {
+		value.comparable = false;
+		value.detail = "the run's recipient record is not in its steady frames";
+	} else {
+		value.distance = jaccard_distance(a, b);
+	}
+	out.push_back(value);
 }
 
 } // namespace
@@ -503,6 +630,7 @@ void compare_state(const RunFacts &rr, const RunFacts &other, std::vector<Metric
 	compare_uplinks(rr, other, out);
 	compare_frames(rr, other, out);
 	compare_entities(rr, other, out);
+	compare_self_offset(rr, other, out);
 }
 
 } // namespace opennova::parity

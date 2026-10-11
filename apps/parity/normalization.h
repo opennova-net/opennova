@@ -301,7 +301,11 @@ inline constexpr Normalization kNormalizations[] = {
 	{ "uplink.carrier", MaskKind::Field, 'C', 0x00C, "carrier", 0,
 			"the ground entity handle is session-local: compared as none/bound" },
 	{ "uplink.priority_handle", MaskKind::Field, 'C', 0x00C, "priority_handle", 0,
-			"priority handles are session-local: compared as occupied/empty, scores exact" },
+			"priority handles are session-local: compared as occupied/empty" },
+	{ "uplink.priority_score", MaskKind::Field, 'C', 0x00C, "priority_score", 0,
+			"a score is a per-frame distance/view weight to moving entities "
+			"(Server_BuildEntityPriorityListForPlayer's top-4 interest pairs): compared as "
+			"per-slot distributions, the occupancy exact" },
 	{ "frame.carried", MaskKind::Field, 'S', 0x00A, "carried", 0,
 			"the carried object handle is session-local: compared as none/bound" },
 	{ "frame.mount_handle", MaskKind::Field, 'S', 0x00A, "mount_handle", 0,
@@ -309,6 +313,16 @@ inline constexpr Normalization kNormalizations[] = {
 	{ "frame.timer_seconds", MaskKind::Field, 'S', 0x00A, "timer_seconds", 0,
 			"the round timer counts with the session clock: the timer block compares its "
 			"state bytes" },
+	{ "frame.server_stats", MaskKind::Field, 'S', 0x00A, "timer_state[2..3]", 0,
+			"the server-status block's fps and CPU bytes are the host's measured main-loop "
+			"frame rate and CPU share (g_StatsAvgFps / g_StatsCpuPercent, copied every "
+			"Server_TickUpdate @0x51D7E0..0x51D7FB): machine-load measurements; "
+			"frame_server_cpu_fill keeps a never-written CPU byte visible" },
+	{ "frame.phase_counter", MaskKind::Field, 'S', 0x00A, "flags2", 0,
+			"flags2 is the per-slot send counter (++ before every 0x0A, 1 at the first: "
+			"Server_SendEntityStateToPlayer @0x517BE8): which 8-bit values fall in the "
+			"steady window depends on how many frames preceded it, so the route nibble and "
+			"the modal step compare" },
 	{ "frame.env_tod", MaskKind::Field, 'S', 0x00A, "tod_fixed", 0,
 			"the time of day advances with the session clock: the env block compares the "
 			"weather fields" },
@@ -317,7 +331,11 @@ inline constexpr Normalization kNormalizations[] = {
 			"number" },
 	{ "state.position", MaskKind::Field, '*', 0, "position/orientation/analog", 0,
 			"motion follows independent input: origin-normalized range and step within 8x "
-			"of RR, and a 64-unit initial baseline" },
+			"of RR, and a 64-unit initial baseline. Entity positions compare decompressed "
+			"and anchor-added in world 16.16 (a compact code is sign/exponent/mantissa "
+			"relative to the recipient's eye anchor, Network_CompressFixedPoint @0x4C2780, "
+			"not a linear coordinate), carrier-local records skipped; frame_self_offset "
+			"keeps the anchor's own offset visible" },
 	{ "integrity.key", MaskKind::Field, '*', 0, "challenge key", 0,
 			"each integrity challenge's key is random per request: CRCs compare with the "
 			"key XORed out" },

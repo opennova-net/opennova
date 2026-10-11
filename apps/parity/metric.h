@@ -100,5 +100,8 @@ double relative_distance(double subject, double reference);
 // has at least 20, with the max(1, ceil 20%) floor.
 void count_metric(
 		MetricValue &value, double rr_count, double rr_ms, double other_count, double other_ms);
+// The nearest-rank 90th percentile (the ceil(0.9 n)-th smallest): two samples give
+// the larger, never the minimum. 0 for none.
+double p90(std::vector<double> values);
 
 } // namespace opennova::parity

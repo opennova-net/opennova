@@ -98,6 +98,14 @@ bool carries_identity(const wire::ParityPacket &packet, uint16_t identity) {
 	return false;
 }
 
+double p90(std::vector<double> values) {
+	if (values.empty())
+		return 0.0;
+	std::sort(values.begin(), values.end());
+	const size_t rank = (values.size() * 9 + 9) / 10; // ceil(0.9 n), at least 1
+	return values[rank - 1];
+}
+
 double jaccard_distance(const std::set<std::string> &a, const std::set<std::string> &b) {
 	if (a.empty() && b.empty())
 		return 0.0;
