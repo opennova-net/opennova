@@ -59,6 +59,7 @@ public:
 		if (!logic_record(event.address)) return;
 		revealed_ = event.address;
 		revealing_ = true;
+		reveal_frames_ = 3;
 	}
 
 private:
@@ -81,6 +82,7 @@ private:
 	bool focus_filter_ = false;
 	NodeAddress revealed_;
 	bool revealing_ = false;
+	int reveal_frames_ = 0;
 	uint64_t selection_serial_ = 0;
 };
 
@@ -299,6 +301,7 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 		if (logic_record(selected)) {
 			revealed_ = selected;
 			revealing_ = true;
+			reveal_frames_ = 3;
 		}
 	}
 	CardContext context{workspace, *mission, source ? &*source : nullptr, editable, selected, shown.pick, state_};
@@ -306,14 +309,21 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 		if (board_.cards.empty())
 			ui_kit::empty_state(board_.events ? "No event matches the filter." : "The mission has no event yet.",
 			                    board_.events ? "Clear the filter, or Needs attention." : "New event adds one.");
+		bool found = false;
 		for (const BoardCard &card : board_.cards) {
+			const float top = ImGui::GetCursorPosY();
 			draw_mission_card(context, card);
+			// The revealed card's top brought to the top of the room, for a few frames: a card drawn for the first
+			// time has no height yet, so the room cannot scroll to it on its first frame.
 			if (revealing_ && revealed_.row == card.event.row) {
-				ImGui::SetScrollHereY(0.0f);
-				revealing_ = false;
+				found = true;
+				const float bottom = ImGui::GetCursorPosY();
+				const float shown = ImGui::GetScrollY(), room = ImGui::GetWindowHeight();
+				if (top < shown || bottom > shown + room) ImGui::SetScrollY(top - ImGui::GetStyle().ItemSpacing.y);
+				if (--reveal_frames_ <= 0) revealing_ = false;
 			}
 		}
-		revealing_ = false;
+		if (!found) revealing_ = false;
 	}
 	ImGui::EndChild();
 }

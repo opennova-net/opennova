@@ -12,7 +12,10 @@
 #include <vector>
 
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_recipes.h>
 #include <editor/documents/mission_table.h>
+#include <editor/preview/mission_scene.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_card.h>
 
@@ -30,6 +33,20 @@ std::vector<const ImGuiWindow *> card_windows() {
 			out.push_back(window);
 	std::sort(out.begin(), out.end(), [](const ImGuiWindow *a, const ImGuiWindow *b) { return a->Pos.y < b->Pos.y; });
 	return out;
+}
+
+// The board's card of an event (by its row), drawn last frame: the cards' child named for the event's PushID.
+const ImGuiWindow *card_of(NodeId event) {
+	const ImGuiWindow *cards = MissionRun::drawn_window("/cards_");
+	if (!cards) return nullptr;
+	const ImGuiID id = ImHashStr("card", 0, pushed(cards->ID, static_cast<int>(event)));
+	char suffix[32];
+	std::snprintf(suffix, sizeof(suffix), "/card_%08X", id);
+	for (const ImGuiWindow *window : GImGui->Windows) {
+		const char *at = window->Active ? std::strstr(window->Name, suffix) : nullptr;
+		if (at && std::strstr(window->Name, "/logic_pane_")) return window;
+	}
+	return nullptr;
 }
 
 // A popup's child, as ImGui names it: the popup's window, then "<child>_<its id>".
@@ -329,6 +346,165 @@ void test_script_uses() {
 	run.ui.frames(1);
 }
 
+// A8, the round's acceptance: area X exists, the mission open. Right-click X in the 3D view, New event, "When the
+// player is inside this area" (2 clicks: the board opens on the new card); "+ action", "Show text" (2: its chip
+// opens on New text); "Get to the bridge" typed, Enter; the wait chip, 5 typed, Enter (1 click). A ledger counts
+// what a person does: a click (or right-click) of an item, a submenu opened by hovering it (no click), a text typed
+// with its Enter one entry. 5 clicks, 2 typed entries, no Inspector; the requests each step raises; the card then
+// reads "When the player is in Zone 20, then, after 5.1 s, show text 1: 'Get to the bridge'.".
+struct Ledger {
+	MissionRun &run;
+	int clicks = 0;
+	int typed = 0;
+	std::vector<EditorRequest> raised;
+	void pump() {
+		run.settle();
+		for (EditorRequest &request : run.take()) raised.push_back(std::move(request));
+	}
+	void click(ImGuiID id) {
+		++clicks;
+		run.ui.activate(id);
+		pump();
+	}
+	void right_click(ImVec2 at) {
+		++clicks;
+		run.ui.mouse(at.x, at.y);
+		run.ui.button(true, ImGuiMouseButton_Right);
+		run.ui.button(false, ImGuiMouseButton_Right);
+		pump();
+	}
+	// A submenu opened by hovering it: no click.
+	void hover_open(ImGuiID id) { run.ui.activate(id); }
+	void type(const char *text) {
+		++typed;
+		ImGui::GetIO().AddInputCharactersUTF8(text);
+		run.ui.frames(1);
+		std::vector<EditorRequest> keys = run.ui.chord({ImGuiKey_Enter});
+		for (const EditorRequest &request : keys) run.session.handle(request);
+		for (EditorRequest &request : keys) raised.push_back(std::move(request));
+		pump();
+	}
+	std::vector<EditorRequest> take() {
+		std::vector<EditorRequest> out;
+		out.swap(raised);
+		return out;
+	}
+};
+
+size_t count_kind(const std::vector<EditorRequest> &requests, EditorRequestKind kind) {
+	size_t count = 0;
+	for (const EditorRequest &request : requests) count += request.kind == kind ? 1 : 0;
+	return count;
+}
+
+void test_acceptance() {
+	MissionRun run("opennova_editor_ui_board_acceptance");
+	CHECK(run.open(), "the mission open, its 3D view drawn");
+	const MissionDocument *mission = run.mission();
+	if (!mission) return;
+	const SessionView &v = run.session.view();
+	// Area X: zone 20, its mark east of the middle where nothing else stands over it.
+	const Node *area = mission->rows_of(MissionKind::Area)[0];
+	std::vector<Edit> moved;
+	for (const auto &[field, value] : std::vector<std::pair<const char *, double>>{{"x_min", 120.0}, {"x_max", 180.0}}) {
+		Edit edit;
+		edit.address = {area->id, area->kind, 0};
+		edit.field = field;
+		edit.value = value;
+		moved.push_back(edit);
+	}
+	run.session.handle(request::edit_record(run.path, moved));
+	run.settle();
+	run.take();
+	const auto *viewport = static_cast<const MissionViewport *>(run.session.viewports().find(run.path, ViewportKind::Mission));
+	const DrawnDevice *device = run.devices.held(run.path, ViewportKind::Mission);
+	CHECK(viewport && device, "the 3D view and its device");
+	if (!viewport || !device) return;
+	const std::vector<MissionMark> marks = viewport->marks(device->width, device->height, device);
+	const int mark = viewport->scene().mark_index(area->id);
+	CHECK(mark >= 0 && marks[size_t(mark)].shown, "area X's mark shown");
+	if (mark < 0 || !marks[size_t(mark)].shown) return;
+	Ledger ledger{run, 0, 0, {}};
+
+	// Right-click X, New event (hovered open), the player's recipe.
+	ledger.right_click(ImVec2(device->origin.x + marks[size_t(mark)].x, device->origin.y + marks[size_t(mark)].y));
+	const ImGuiWindow *column = MissionRun::drawn_window("/viewport_column_");
+	CHECK(column != nullptr, "the 3D view's column");
+	if (!column) return;
+	ledger.hover_open(popup_item(item_id(column->ID, {"mission_canvas_menu"}), "New event"));
+	const std::vector<const MissionRecipe *> recipes = mission_recipes_for(opennova::mission::ParamKind::Zone);
+	int offer = -1;
+	for (size_t i = 0; i < recipes.size(); ++i)
+		if (std::string(recipes[i]->token) == "player_in_area") offer = int(i);
+	CHECK(offer >= 0, "the area's recipes hold the player's");
+	if (offer < 0) return;
+	ledger.click(item_id(pushed(ImHashStr("##Menu_00"), offer), {"When the player is inside this area"}));
+	std::vector<EditorRequest> raised = ledger.take();
+	CHECK(count_kind(raised, EditorRequestKind::EditRecord) == 1 && workspace_sets(raised, "document", "logic").size() == 1,
+	      "New event: the recipe's batch, the Logic pane shown");
+	std::vector<const Node *> events = mission->rows_of(MissionKind::Event);
+	CHECK(events.size() == 3 && v.documents.selection.primary == NodeAddress({events.back()->id, events.back()->kind, 0}),
+	      "the new event made, selected");
+	if (events.size() != 3) return;
+	const Node *made = events.back();
+	run.ui.away();
+	run.ui.frames(2);
+	const ImGuiWindow *card = card_of(made->id);
+	CHECK(card != nullptr && !card->Hidden, "the board shows its card, in sight");
+	if (!card) return;
+
+	// + action, Show text (in its group): its chip opens on New text.
+	ledger.click(item_id(card->ID, {"+ action"}));
+	const ImGuiID types = ImHashStr("types", 0, card->ID);
+	CHECK(ImGui::IsPopupOpen(types, ImGuiPopupFlags_None), "the type picker open");
+	const int show = int(opennova::bms::ActionType::OutputText);
+	ledger.click(ImHashStr("Show text", 0, pushed(pushed(ImHashStr("all", 0, popup_child(types, "types")), show), 0)));
+	raised = ledger.take();
+	const EditorRequest *add = only(raised, EditorRequestKind::EditRecord);
+	CHECK(add && add->keep_selection, "Show text added, the card kept selected");
+	run.ui.frames(1);
+	CHECK(GImGui->OpenPopupStack.Size == 1, "New text open");
+
+	// The words, Enter: the mission's table's next key, the chip set to it.
+	ledger.type("Get to the bridge");
+	raised = ledger.take();
+	const EditorRequest *create = only(raised, EditorRequestKind::SetStringText);
+	CHECK(create && create->create && create->values.size() == 1 && create->values[0].second == "Get to the bridge",
+	      "New text: one set_string_text that makes the string");
+
+	// The wait chip, 5, Enter.
+	run.ui.away();
+	run.ui.frames(1);
+	card = card_of(made->id);
+	if (!card) return;
+	ledger.click(item_id(card->ID, {"##delay"}));
+	ledger.type("5");
+	raised = ledger.take();
+	const EditorRequest *wait = only(raised, EditorRequestKind::EditRecord);
+	CHECK(wait && wait->keep_selection && wait->edits.size() == 1 && wait->edits[0].field == "delay" &&
+	              wait->edits[0].value == Value(int64_t(5)),
+	      "the wait: 5 s is 5 steps");
+
+	// The ledger: 5 clicks, 2 typed entries, and the Inspector never brought forward.
+	std::printf("acceptance: %d clicks, %d typed entries\n", ledger.clicks, ledger.typed);
+	CHECK(ledger.clicks <= 6 && ledger.clicks == 5 && ledger.typed == 2, "5 clicks, 2 typed entries");
+	// The card reads it, the text by its words once the project's names have read the table.
+	run.session.handle(request::save_all());
+	run.session.run_operations();
+	run.settle();
+	opennova::io::JsonValue args;
+	std::string error;
+	opennova::io::json_parse(R"({"path": "missions/logic.bms", "op": "board", "filter": ""})", args, error);
+	const opennova::io::JsonValue board = run.session.query("mission_logic", args, error);
+	const opennova::io::JsonValue *listed = board.get("cards");
+	std::string sentence;
+	if (listed)
+		for (const opennova::io::JsonValue &card : listed->array)
+			if (card.get_number("event", 0) == double(made->id)) sentence = card.get_string("sentence", "");
+	CHECK(sentence == "When the player is in Zone 20, then, after 5.1 s, show text 1: 'Get to the bridge'.",
+	      ("the card reads it: " + sentence).c_str());
+}
+
 } // namespace
 
 void run_board_tests() {
@@ -336,6 +512,7 @@ void run_board_tests() {
 	test_cards();
 	test_line_drag();
 	test_script_uses();
+	test_acceptance();
 }
 
 } // namespace editor_ui_test
