@@ -23,7 +23,6 @@ HOST_SESSION_TEXT_IMPL(mission_file)
 HOST_SESSION_TEXT_IMPL(custom_text)
 HOST_SESSION_TEXT_IMPL(player_name)
 HOST_SESSION_TEXT_IMPL(expansion)
-HOST_SESSION_TEXT_IMPL(integrity_profile)
 HOST_SESSION_TEXT_IMPL(spectator_password)
 #undef HOST_SESSION_TEXT_IMPL
 
@@ -92,7 +91,6 @@ Dictionary HostSessionOptions::to_json_value() const {
 	out["custom_text"] = get_custom_text();
 	out["player_name"] = get_player_name();
 	out["expansion"] = get_expansion();
-	out["integrity_profile"] = get_integrity_profile();
 	out["spectator_slots"] = get_spectator_slots();
 	out["spectator_password"] = get_spectator_password();
 	out["game_type"] = get_game_type();
@@ -194,7 +192,6 @@ void HostSessionOptions::_bind_methods() {
 	HOST_SESSION_PROPERTY(Variant::STRING, custom_text)
 	HOST_SESSION_PROPERTY(Variant::STRING, player_name)
 	HOST_SESSION_PROPERTY(Variant::STRING, expansion)
-	HOST_SESSION_PROPERTY(Variant::STRING, integrity_profile)
 	HOST_SESSION_PROPERTY(Variant::STRING, spectator_password)
 	HOST_SESSION_PROPERTY(Variant::INT, spectator_slots)
 	HOST_SESSION_PROPERTY(Variant::INT, game_type)

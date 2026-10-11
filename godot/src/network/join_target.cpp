@@ -36,7 +36,6 @@ void JoinTarget::_bind_methods() {
 	JOIN_TARGET_PROPERTY(Variant::STRING, player_name)
 	JOIN_TARGET_PROPERTY(Variant::STRING, mission)
 	JOIN_TARGET_PROPERTY(Variant::STRING, dir)
-	JOIN_TARGET_PROPERTY(Variant::STRING, integrity_profile)
 	JOIN_TARGET_PROPERTY(Variant::STRING, app_id)
 	JOIN_TARGET_PROPERTY(Variant::PACKED_BYTE_ARRAY, cd_cookie)
 	JOIN_TARGET_PROPERTY(Variant::STRING, server_name)

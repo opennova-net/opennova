@@ -64,8 +64,6 @@ public:
 	JOIN_TARGET_TEXT(mission)
 	// Resource-dir override (dev/tests); empty = the persisted directory.
 	JOIN_TARGET_TEXT(dir)
-	// Explicit registered retail corpus; empty = safe CRC silence.
-	JOIN_TARGET_TEXT(integrity_profile)
 	// The game-session APPID join token the client recovers from the NWJoin
 	// .joi CK; a NovaWorld host validates it in ClientAuth (reject code 9).
 	// "0" = the LAN default.
@@ -182,7 +180,6 @@ private:
 	String player_name_;
 	String mission_;
 	String dir_;
-	String integrity_profile_;
 	String app_id_ = "0";
 	PackedByteArray cd_cookie_;
 	String server_name_;

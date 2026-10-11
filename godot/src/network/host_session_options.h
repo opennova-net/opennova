@@ -65,7 +65,6 @@ public:
 	HOST_SESSION_TEXT(custom_text)
 	HOST_SESSION_TEXT(player_name)
 	HOST_SESSION_TEXT(expansion)
-	HOST_SESSION_TEXT(integrity_profile)
 	HOST_SESSION_TEXT(spectator_password)
 #undef HOST_SESSION_TEXT
 

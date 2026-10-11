@@ -382,12 +382,6 @@ func test_host_session_carries_retail_rule_defaults() -> void:
 	assert_eq(options.start_delay, 0)
 	assert_eq(options.destroy_buildings, 0)
 	assert_eq(options.death_messages, 1)
-	assert_eq(options.integrity_profile, "",
-			"ordinary hosts do not infer an integrity corpus from expansion")
-	config.integrity_profile = "retail-revx02-024f56f2-2d087374"
-	assert_eq(config.to_session_options().integrity_profile,
-			config.integrity_profile,
-			"parity automation can bind both host and client to one witnessed corpus")
 	config.class_allow_mask = 1 << 6
 	assert_eq(config.to_session_options().class_allow_mask, 1 << 6,
 			"the typed host request forwards a map-specific Soldier Class policy")

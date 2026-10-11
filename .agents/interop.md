@@ -36,8 +36,8 @@ Godot direct-launch flags, passed after `--` (the full table is
   `--lan-mode`, `--lan-max-players`
 - Joiner: `--lan-join <ip[:port]>`, `--callsign` (the mission comes from the wire,
   D-NET-194)
-- Both: `--resource-dir`, `/exp`, `--integrity-profile`, `--capture-pcap`,
-  `--mcp-port` (the `opennova-game` endpoint, [docs/mcp.md](../docs/mcp.md))
+- Both: `--resource-dir`, `/exp`, `--capture-pcap`, `--mcp-port` (the
+  `opennova-game` endpoint, [docs/mcp.md](../docs/mcp.md))
 
 ## What Can Be Automated Today
 

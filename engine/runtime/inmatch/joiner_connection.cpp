@@ -191,11 +191,6 @@ JoinerConnection::JoinerConnection(std::string player_name,
 	conn_.player_name = player_name_;
 }
 
-bool JoinerConnection::set_integrity_challenge_profile(std::string_view id) {
-	integrity_challenge_profile_ = find_integrity_challenge_profile(id);
-	return integrity_challenge_profile_ != nullptr;
-}
-
 std::vector<uint8_t> JoinerConnection::start() {
 	conn_.client_scrk = make_dev_scrk();
 	// Fresh per-connection numeric key, like the per-connection key material
@@ -1616,48 +1611,43 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			periodic_replies.push_back(
 					make_protocol_message(c2s::CHARATTR_CRC_REPLY, le32_value(checksum)));
 		} else if (m.tag == s2c::ENTITY_CHECKSUM_REQ) {
-			// Anti-cheat ANIMATION-DEFINITION checksum challenge. The reply is one 5-byte
-			// C2S 0x20: [u8 echoed id][u32 challenge ^ source]. The source is selected by
-			// the id: 0xFF asks for the whole loaded weapon-slot table, any other value
-			// for that one .adm entry — and 0xFF with a NONZERO challenge short-circuits
-			// to the literal 42 without touching state at all.
-			// Both real sources CRC retail's in-memory 1120-byte .adm image (the
-			// weapon-slot form concatenates every loaded entry after overwriting its
-			// volatile fields with sentinels), a byte layout OpenNova does not model.
+			// Anti-cheat weapon-definition checksum challenge. The reply is one 5-byte
+			// C2S 0x20: [u8 echoed id][u32 challenge ^ source]. Id 0xFF with a NONZERO
+			// challenge short-circuits to the literal 42 without reading the table; with
+			// challenge zero (the only form a stock host sends) the source is the
+			// sanitized CRC of the whole loaded weapon.def table; any other id is one
+			// row's CRC, 0 for a row with no name.
 			// [orig: NapiNPClientMsg_HandleChecksumRequest @0x431170 (dispatch row 0x30
 			//  @0x82b1a8; reply tag 0x20 @0x4311d7) -> NetPacket_WriteEntityChecksum
-			//  @0x42afb0 — the 42 arm @0x42afcc, AnimDef_ComputeChecksum @0x541ef0,
-			//  WeaponSlotDef_ComputeSanitizedChecksum @0x53f8f0]
+			//  @0x42afb0 — the 42 arm @0x42afcc, AnimDef_ComputeChecksum @0x541ef0 (the
+			//  no-name arm @0x541f30), WeaponSlotDef_ComputeSanitizedChecksum @0x53f8f0]
 			//
-			// The default remains deliberately silent: a guessed value can only mismatch,
-			// and the host punts on a difference [orig:
-			// NapiNPServerMsg_HandleAntiCheatCRCCheck @0x502050, "PUNT ACRC"]. A named profile may
-			// answer only sources independently reproduced from that exact retail corpus.
-			// Uncovered individual ADM rows remain silent. This preserves the 2026-07-26
-			// live safety witness while allowing the revx02 table CRC proved on 2026-08-01
-			// (D-NET-181; net-re section 5.65).
+			// The table CRC comes from this peer's own loaded weapon.def, computed as
+			// retail computes it (integrity_sources.h). A named row's own CRC hashes
+			// process pointers and is never computable, and a table the sources could
+			// not compute is unknown: both stay silent, since a guessed value can only
+			// mismatch and the host punts on a difference [orig:
+			// Server_ValidateWeaponCRC @0x501F70, "PUNT WCRC"] (D-NET-181; net-re
+			// section 5.65).
 			EntityChecksumRequest request;
 			std::size_t consumed = 0;
 			++challenge_diagnostics_.entity_checksum_seen;
-			if (integrity_challenge_profile_ != nullptr &&
-			    decode_entity_checksum_request(m.payload.data(), m.payload.size(),
+			if (decode_entity_checksum_request(m.payload.data(), m.payload.size(),
 					request, consumed) &&
 			    consumed == m.payload.size()) {
 				uint32_t source_crc = 0;
-				bool source_witnessed = false;
-				if (request.entity_id == 0xFFu) {
-					// The nonzero-challenge branch is a literal retail
-					// short-circuit and never reads the ADM table.
-					source_crc = request.checksum != 0
-							? 42u
-							: integrity_challenge_profile_->weapon_slot_table_crc;
-					source_witnessed = true;
+				bool source_known = false;
+				if (request.entity_id == 0xFFu && request.checksum != 0) {
+					source_crc = 42u;
+					source_known = true;
+				} else if (request.entity_id == 0xFFu) {
+					source_crc = integrity_sources_.weapon_table_crc;
+					source_known = integrity_sources_.weapon_table_known;
 				} else {
-					source_witnessed = integrity_challenge_profile_->
-							find_animation_definition_crc(
-									request.entity_id, source_crc);
+					source_known = integrity_sources_.weapon_row_crc(
+							request.entity_id, source_crc);
 				}
-				if (source_witnessed) {
+				if (source_known) {
 					std::vector<uint8_t> body{request.entity_id};
 					const std::vector<uint8_t> value = le32_value(
 							static_cast<uint32_t>(request.checksum) ^ source_crc);
@@ -1668,46 +1658,32 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				}
 			}
 		} else if (m.tag == s2c::LOADOUT_CRC_REQ) {
-			// Anti-cheat AMMO-DEFINITION CRC challenge. The reply is one 9-byte C2S 0x21:
+			// Anti-cheat ammo-definition CRC challenge. The reply is one 9-byte C2S 0x21:
 			// [u8 echoed index][u32 crc][u32 echoed key]. Retail CRCs the indexed 276-byte
-			// in-memory ammo record with six volatile dwords zeroed and ships key ^ crc —
-			// again a byte image OpenNova does not model. Its own out-of-range arm is the
-			// witnessed form for a table that holds nothing at that index, and that arm
-			// writes a ZERO crc dword rather than key ^ 0, so the key echo is the only
-			// challenge-derived field here. The unmodeled image is D-NET-181
-			// (docs/net/novaworld-net-re.md §5.65).
-			// [orig: NapiNPClientMsg_0x031 @0x4311e0 (dispatch row 0x31 @0x82b1b8; reply
-			//  tag 0x21 @0x431245) -> NetPacket_WriteEntityCRCChecksum @0x42b020 — the
-			//  out-of-range arm @0x42b114, the key echo @0x42b14d]
+			// in-memory ammo.def row with six pointer dwords zeroed and ships key ^ crc;
+			// an index outside [0, capacity), read as a signed char, writes a ZERO crc
+			// dword rather than key ^ 0, so the key echo is then the only
+			// challenge-derived field. The rows come from this peer's own loaded
+			// ammo.def (integrity_sources.h); with none computed the challenge stays
+			// unanswered (D-NET-181; net-re section 5.65).
+			// [orig: NapiNPClientMsg_0x031 @0x4311e0 (dispatch row 0x31 @0x82b1b8, the
+			//  signed index; reply tag 0x21 @0x431245) -> NetPacket_WriteEntityCRCChecksum
+			//  @0x42b020 — the range gate @0x42b038, the out-of-range arm @0x42b114, the
+			//  key echo @0x42b14d]
 			LoadoutCrcRequest crc_request;
 			std::size_t crc_consumed = 0;
 			++challenge_diagnostics_.loadout_crc_seen;
-			// As above, no profile means silence and an uncovered in-range record stays
-			// silent. A selected profile may answer only CRCs reproduced from retail's
-			// sanitized 276-byte record image. The independently witnessed table count also
-			// permits retail's exact out-of-range zero arm; neither case invents a CRC
-			// (D-NET-181; net-re section 5.65).
-			if (integrity_challenge_profile_ != nullptr &&
-			    decode_loadout_crc_request(m.payload.data(), m.payload.size(),
+			if (decode_loadout_crc_request(m.payload.data(), m.payload.size(),
 					crc_request, crc_consumed) &&
 			    crc_consumed == m.payload.size()) {
-				uint32_t reply_crc = 0;
-				bool source_witnessed = false;
-				if (crc_request.ammo_index >=
-				    integrity_challenge_profile_->ammo_definition_count) {
-					// Retail writes literal zero here, not xor_key ^ 0.
-					source_witnessed = true;
-				} else {
-					uint32_t source_crc = 0;
-					source_witnessed = integrity_challenge_profile_->
-							find_ammo_definition_crc(
-									crc_request.ammo_index, source_crc);
-					if (source_witnessed) {
-						reply_crc = static_cast<uint32_t>(crc_request.xor_key) ^
-								source_crc;
-					}
-				}
-				if (source_witnessed) {
+				uint32_t source_crc = 0;
+				const IntegritySources::AmmoRow ammo_row =
+						integrity_sources_.ammo_row(crc_request.ammo_index, source_crc);
+				// Retail writes literal zero out of range, not xor_key ^ 0.
+				const uint32_t reply_crc = ammo_row == IntegritySources::AmmoRow::Crc
+						? static_cast<uint32_t>(crc_request.xor_key) ^ source_crc
+						: 0u;
+				if (ammo_row != IntegritySources::AmmoRow::Silent) {
 					std::vector<uint8_t> body{crc_request.ammo_index};
 					const std::vector<uint8_t> crc_bytes = le32_value(reply_crc);
 					const std::vector<uint8_t> key_bytes =

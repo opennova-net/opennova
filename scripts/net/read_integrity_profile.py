@@ -1,7 +1,10 @@
 """Read a live retail process's ammo-definition CRC rows (D-NET-181).
 
-Reproduces the ammo half of an integrity-challenge profile from one running
-Jointops.exe in a mission, read-only (PROCESS_VM_READ):
+The live witness for the anti-cheat challenge sources OpenNova computes from
+its own loaded corpus (engine/runtime/inmatch/integrity_sources.h): its output
+is the oracle the computed ammo rows must reproduce for that corpus
+(tests/npruntime/integrity_oracles.h, the npruntime_integrity_sources ctest).
+It reads one running Jointops.exe in a mission, read-only (PROCESS_VM_READ):
 
   g_AmmoDefTable @0xA2ECE8 (a pointer to the 276-byte rows) and
   g_AmmoDefCapacity @0xA2ECEC, read as NetPacket_WriteEntityCRCChecksum
@@ -10,16 +13,18 @@ Jointops.exe in a mission, read-only (PROCESS_VM_READ):
   copy run through CRC_ComputeCustomTable @0x53C820 (CRC-32/MPEG-2,
   engine/base/io/crc32_mpeg2.h).
 
-The whole-WeaponSlotDef CRC (the S2C 0x30 source) is not read here: a retail
-joiner's C2S 0x20 reply to a stock host's {FF,00,00} challenge carries it.
+The whole weapon.def table CRC (the S2C 0x30 source, the other oracle) is not
+read here: a retail joiner's C2S 0x20 reply to a stock host's {FF,00,00}
+challenge carries it.
 
 Usage:
     python scripts/net/read_integrity_profile.py --pid <Jointops.exe pid>
         [--expect ROW=CRC ...] [--json <out.json>]
 
-Prints the rows as C++ IntegrityCrcEntry initializers plus the row count, the
-executable's SHA-256 and the FNV-1a 64 digest host_punt_test pins. Exits 1 when
-an --expect anchor disagrees. Stdlib only; Windows only.
+Prints the rows as the oracle header's initializers (one CRC per row, in row
+order) plus the row count, the executable's SHA-256 and the FNV-1a 64 digest
+over `[u8 row][u32 crc LE]` the tests pin. Exits 1 when an --expect anchor
+disagrees. Stdlib only; Windows only.
 """
 
 import argparse
@@ -127,7 +132,7 @@ def main():
           f"{'' if exe_sha256 == PINNED_JOX01_SHA256 else '  (NOT the pinned jox01 exe)'}")
     print(f"// ammo rows {capacity}, fnv1a64 0x{fnv1a64(rows):016X}")
     for index, crc in rows:
-        print(f"\t\t{{0x{index:02X}, 0x{crc:08X}u}},")
+        print(f"\t\t0x{crc:08X}u, // 0x{index:02X}")
 
     failed = False
     by_index = dict(rows)

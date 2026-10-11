@@ -13,7 +13,7 @@
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/host_session.h>
-#include <runtime/inmatch/integrity_challenge_profile.h>
+#include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -30,6 +30,8 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
+
+#include "integrity_oracles.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -1557,15 +1559,18 @@ bool reply_body(const inmatch::JoinerConnection::PollResult &result, uint8_t tag
 	return false;
 }
 
-// The anti-cheat CRC challenges stay SILENT unless an exact, named corpus profile is
-// selected. A guessed value cannot be right, and this is the one challenge pair whose
-// mismatch arm disconnects: the host recomputes the checksum over its own tables and punts
-// on a difference [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck @0x502050], where an unanswered
-// challenge costs nothing. Witnessed live 2026-07-26 against a stock retail co-op host —
-// a single placeholder C2S 0x20 / 0x21 drew "PUNT WCRC" / "PUNT ACRC" (DC=2, DPC=46) and
-// ended the session mid-join, while the same client sending nothing stayed connected.
-// This pins the default SILENCE so a future "helpful" reply cannot regress joining
-// (D-NET-181).
+// The anti-cheat CRC challenges stay SILENT while the joiner holds no computed
+// source (no mission loaded, or a corpus the sources could not compute). A
+// guessed value cannot be right, and this is the one challenge pair whose
+// mismatch arm disconnects: the host recomputes the checksum over its own tables
+// and punts on a difference [orig: NapiNPServerMsg_HandleAntiCheatCRCCheck
+// @0x502050], where an unanswered challenge costs nothing. Witnessed live
+// 2026-07-26 against a stock retail co-op host: a single placeholder C2S 0x20 /
+// 0x21 drew "PUNT WCRC" / "PUNT ACRC" (DC=2, DPC=46) and ended the session
+// mid-join, while the same client sending nothing stayed connected. The one
+// form answered regardless is id 0xFF with a nonzero key, whose reply is
+// retail's literal 42 ^ key and reads no table [orig: NetPacket_WriteEntityChecksum
+// @0x42AFB0, the 42 arm @0x42AFCC] (D-NET-181).
 bool check_crc_challenges_are_not_answered() {
 	inmatch::JoinerConnection joiner("ChallengeSilence");
 	seed_joiner(joiner);
@@ -1573,7 +1578,6 @@ bool check_crc_challenges_are_not_answered() {
 
 	const std::vector<uint8_t> forms[] = {
 			frame_s2c(server_tx, {make_protocol_message(0x30, {0x02, 0xEF, 0xBE})}),
-			frame_s2c(server_tx, {make_protocol_message(0x30, {0xFF, 0x01, 0x00})}),
 			frame_s2c(server_tx, {make_protocol_message(0x30, {0xFF, 0x00, 0x00})}),
 			frame_s2c(server_tx, {make_protocol_message(0x31, {0x07, 0x34, 0x12})}),
 	};
@@ -1582,7 +1586,7 @@ bool check_crc_challenges_are_not_answered() {
 				joiner.handle_datagram(challenge.data(), challenge.size());
 		std::vector<uint8_t> body;
 		if (!expect(!reply_body(result, 0x20, body) && !reply_body(result, 0x21, body),
-		            "an anti-cheat CRC challenge draws no reply while its image is unmodelled"))
+		            "an anti-cheat CRC challenge draws no reply without a computed source"))
 			return false;
 		// Silence here must not be silence everywhere: the connection is still live and
 		// still answers the challenges whose honest values we DO produce.
@@ -1590,13 +1594,22 @@ bool check_crc_challenges_are_not_answered() {
 		            "and the unanswered challenge does not itself end the session"))
 			return false;
 	}
+	const std::vector<uint8_t> literal =
+			frame_s2c(server_tx, {make_protocol_message(0x30, {0xFF, 0x01, 0x00})});
+	const inmatch::JoinerConnection::PollResult literal_result =
+			joiner.handle_datagram(literal.data(), literal.size());
+	std::vector<uint8_t> body;
+	if (!expect(reply_body(literal_result, 0x20, body) &&
+					body == std::vector<uint8_t>{0xFF, 0x2B, 0x00, 0x00, 0x00},
+			"the literal-42 form answers 42 ^ key without any table"))
+		return false;
 	// The diagnostics counters record the silent traffic: what a live-join
 	// punt investigation reads back to distinguish "challenges never arrived"
 	// from "challenges arrived and the deliberate-silence policy held".
 	const inmatch::JoinerConnection::ChallengeDiagnostics &challenges =
 			joiner.challenge_diagnostics();
 	return expect(challenges.entity_checksum_seen == 3 &&
-	                      challenges.entity_checksum_answered == 0 &&
+	                      challenges.entity_checksum_answered == 1 &&
 	                      challenges.loadout_crc_seen == 1 &&
 	                      challenges.loadout_crc_answered == 0,
 	              "the challenge counters record the seen-but-unanswered traffic");
@@ -1705,20 +1718,28 @@ bool check_pv2_mismatch_reports_an_incompatible_version() {
 			"JFC=7 names the incompatible-game entry NCC007");
 }
 
-// A named, independently witnessed retail-corpus profile may answer only the
-// checksum sources it proves. These values were reproduced from all 102 live
-// ammo-definition rows in one revx02 process, independently of packet captures:
-//   - the sanitized 140-entry ADM/weapon-slot walk => 0x024F56F2
-//   - sanitized ammo record 0x18 (AMMO_M16_556MM) => 0x2D087374
-//   - sanitized ammo record 0x1A => 0x616CD2EE
-// The same witness proved the table capacity is 102, so every index 0..101 is
-// covered and index 102 takes retail's exact out-of-range zero-CRC arm.
-bool check_verified_revx02_profile_answers_exact_crc_challenges() {
+// The sources a peer computes from its own loaded corpus
+// (inmatch/integrity_sources.h), here the live witnesses' values
+// (integrity_oracles.h), drive the joiner's exact replies. revx02's:
+//   - the sanitized 140-row weapon.def walk => 0x024F56F2
+//   - ammo row 0x18 (AMMO_M16_556MM) => 0x2D087374; row 0x1A => 0x616CD2EE
+// The capacity is 102, so every index 0..101 is a row and index 102 takes
+// retail's exact out-of-range zero-CRC arm.
+inmatch::IntegritySources oracle_sources(uint32_t table_crc, int32_t named_rows,
+		const uint32_t *rows, size_t row_count) {
+	inmatch::IntegritySources sources;
+	sources.weapon_table_known = true;
+	sources.weapon_table_crc = table_crc;
+	sources.weapon_named_rows = named_rows;
+	sources.ammo_known = true;
+	sources.ammo_row_crcs.assign(rows, rows + row_count);
+	return sources;
+}
+
+bool check_revx02_sources_answer_exact_crc_challenges() {
 	inmatch::JoinerConnection joiner("VerifiedChallenge");
-	if (!expect(joiner.set_integrity_challenge_profile(
-				"retail-revx02-024f56f2-2d087374"),
-			"the witnessed revx02 integrity profile is registered"))
-		return false;
+	joiner.set_integrity_sources(oracle_sources(integrity_oracle::kRevx02WeaponTableCrc, 140,
+			integrity_oracle::kRevx02AmmoRowCrcs, std::size(integrity_oracle::kRevx02AmmoRowCrcs)));
 	seed_joiner(joiner);
 	SessionSequencing server_tx{1, 0};
 
@@ -1730,26 +1751,31 @@ bool check_verified_revx02_profile_answers_exact_crc_challenges() {
 	};
 	const std::vector<Case> cases = {
 		// Golden retail request/reply pair: challenge zero asks for the whole
-		// sanitized weapon-slot table.
+		// sanitized weapon.def table.
 		{0x30, {0xFF, 0x00, 0x00}, 0x20,
 		 {0xFF, 0xF2, 0x56, 0x4F, 0x02}},
 		// The id=0xFF/nonzero branch XORs the u16 challenge with literal 42.
 		{0x30, {0xFF, 0x34, 0x12}, 0x20,
 		 {0xFF, 0x1E, 0x12, 0x00, 0x00}},
+		// A row past the 140 named ones has no name: its CRC is 0, key ^ 0.
+		{0x30, {0x8C, 0x34, 0x12}, 0x20,
+		 {0x8C, 0x34, 0x12, 0x00, 0x00}},
 		// Golden ammo record 0x18, key zero.
 		{0x31, {0x18, 0x00, 0x00}, 0x21,
 		 {0x18, 0x74, 0x73, 0x08, 0x2D, 0x00, 0x00, 0x00, 0x00}},
-		// A different equipped weapon may select any witnessed row; this
-		// independently cross-checks the sanitizer against a second definition.
+		// A different equipped weapon may select any row; this cross-checks a
+		// second definition.
 		{0x31, {0x1A, 0x00, 0x00}, 0x21,
 		 {0x1A, 0xEE, 0xD2, 0x6C, 0x61, 0x00, 0x00, 0x00, 0x00}},
-		// An ordinary non-capture row is covered too: the profile is the full
-		// corpus, not a hard-coded exception for row 0x18.
+		// An ordinary non-capture row.
 		{0x31, {0x07, 0x00, 0x00}, 0x21,
 		 {0x07, 0xC6, 0x73, 0x13, 0xBB, 0x00, 0x00, 0x00, 0x00}},
-		// First index beyond the witnessed 102-record table: zero CRC, key echo.
+		// First index beyond the 102-row table: zero CRC, key echo.
 		{0x31, {0x66, 0x34, 0x12}, 0x21,
 		 {0x66, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00}},
+		// An index read as a negative signed char is out of range too.
+		{0x31, {0x80, 0x34, 0x12}, 0x21,
+		 {0x80, 0x00, 0x00, 0x00, 0x00, 0x34, 0x12, 0x00, 0x00}},
 	};
 	for (const Case &c : cases) {
 		const std::vector<uint8_t> challenge = frame_s2c(
@@ -1758,15 +1784,22 @@ bool check_verified_revx02_profile_answers_exact_crc_challenges() {
 				joiner.handle_datagram(challenge.data(), challenge.size());
 		std::vector<uint8_t> body;
 		if (!expect(reply_body(result, c.reply_tag, body) && body == c.reply_body,
-				"the verified profile emits the exact witnessed integrity reply"))
+				"the computed sources emit the exact witnessed integrity reply"))
 			return false;
 	}
 
 	std::vector<uint8_t> body;
-	// Compact whole-corpus pin: FNV-1a over each `[row][crc32-le]` tuple.
-	// This catches an omitted, reordered, or mistyped row without duplicating the
-	// 102-entry source table in the test. The digest was computed from the same
-	// sanitized live-process witness as the two human-readable anchors above.
+	// A named row's own CRC hashes process pointers: never answered.
+	const std::vector<uint8_t> named_row = frame_s2c(
+			server_tx, {make_protocol_message(0x30, {0x05, 0x00, 0x00})});
+	const inmatch::JoinerConnection::PollResult named_row_result =
+			joiner.handle_datagram(named_row.data(), named_row.size());
+	if (!expect(!reply_body(named_row_result, 0x20, body),
+			"a named weapon row's CRC challenge stays unanswered"))
+		return false;
+
+	// Compact whole-corpus pin: FNV-1a over each `[row][crc32-le]` reply tuple
+	// catches an omitted, reordered, or mistyped row.
 	uint64_t corpus_digest = 14695981039346656037ull;
 	for (uint16_t row = 0; row < 102; ++row) {
 		const std::vector<uint8_t> request = frame_s2c(
@@ -1778,15 +1811,15 @@ bool check_verified_revx02_profile_answers_exact_crc_challenges() {
 		body.clear();
 		if (!expect(reply_body(result, 0x21, body) && body.size() == 9 &&
 					body[0] == row,
-				"the verified profile covers every witnessed ammo row"))
+				"the computed sources cover every ammo row"))
 			return false;
 		for (const uint8_t byte : {body[0], body[1], body[2], body[3], body[4]}) {
 			corpus_digest ^= byte;
 			corpus_digest *= 1099511628211ull;
 		}
 	}
-	if (!expect(corpus_digest == 0xCAED42DE09D8AD38ull,
-			"all 102 indexed CRC constants match the live revx02 witness digest"))
+	if (!expect(corpus_digest == integrity_oracle::kRevx02RowDigest,
+			"all 102 replies match the live revx02 witness digest"))
 		return false;
 
 	const std::vector<uint8_t> trailing = frame_s2c(
@@ -1797,42 +1830,50 @@ bool check_verified_revx02_profile_answers_exact_crc_challenges() {
 			"a checksum request with trailing bytes is not answered"))
 		return false;
 
-	// Answered traffic shows up in the diagnostics counters: 3 x 0x30 (two
-	// answered by the profile, the trailing-bytes form not), and 4 + 102
+	// Answered traffic shows up in the diagnostics counters: 5 x 0x30 (three
+	// answered; the named row and the trailing-bytes form not), and 5 + 102
 	// 0x31s all answered.
 	const inmatch::JoinerConnection::ChallengeDiagnostics &challenges =
 			joiner.challenge_diagnostics();
-	if (!expect(challenges.entity_checksum_seen == 3 &&
-	                    challenges.entity_checksum_answered == 2 &&
-	                    challenges.loadout_crc_seen == 106 &&
-	                    challenges.loadout_crc_answered == 106,
-	            "the challenge counters record the profile-answered traffic"))
+	if (!expect(challenges.entity_checksum_seen == 5 &&
+	                    challenges.entity_checksum_answered == 3 &&
+	                    challenges.loadout_crc_seen == 107 &&
+	                    challenges.loadout_crc_answered == 107,
+	            "the challenge counters record the answered traffic"))
 		return false;
 
-	if (!expect(!joiner.set_integrity_challenge_profile("not-a-profile"),
-			"an unknown integrity profile is rejected"))
-		return false;
-	const std::vector<uint8_t> after_clear = frame_s2c(
-			server_tx, {make_protocol_message(0x30, {0xFF, 0x00, 0x00})});
+	// With no computed sources the table and the rows are silent; the
+	// literal-42 arm reads no table and still answers.
+	joiner.clear_integrity_sources();
+	const std::vector<uint8_t> after_clear = frame_s2c(server_tx,
+			{make_protocol_message(0x30, {0xFF, 0x00, 0x00}),
+			 make_protocol_message(0x31, {0x18, 0x00, 0x00}),
+			 make_protocol_message(0x31, {0x66, 0x00, 0x00}),
+			 make_protocol_message(0x30, {0x8C, 0x00, 0x00})});
 	const inmatch::JoinerConnection::PollResult after_clear_result =
 			joiner.handle_datagram(after_clear.data(), after_clear.size());
-	return expect(!reply_body(after_clear_result, 0x20, body),
-			"rejecting an unknown profile clears a previously selected corpus");
+	if (!expect(!reply_body(after_clear_result, 0x20, body) &&
+					!reply_body(after_clear_result, 0x21, body),
+			"no computed source leaves the table and the rows unanswered"))
+		return false;
+	const std::vector<uint8_t> literal = frame_s2c(
+			server_tx, {make_protocol_message(0x30, {0xFF, 0x34, 0x12})});
+	const inmatch::JoinerConnection::PollResult literal_result =
+			joiner.handle_datagram(literal.data(), literal.size());
+	return expect(reply_body(literal_result, 0x20, body) &&
+					body == std::vector<uint8_t>{0xFF, 0x1E, 0x12, 0x00, 0x00},
+			"the literal-42 arm answers without a table");
 }
 
-// The pinned JO:CA reference's corpus (jox01): all 75 ammo rows read from one
-// live stock host per mission (01TR, ASH_I5A; scripts/net/read_integrity_profile.py),
-// cross-checked against the retail client's replies in
-// fixtures/novaworld/run_20260426_120859:
+// The pinned JO:CA reference's corpus (jox01), its witnesses cross-checked
+// against the retail client's replies in fixtures/novaworld/run_20260426_120859:
 //   - C2S 0x20 to {FF,00,00} => the whole-table CRC 0x47724F02
 //   - C2S 0x21 to {16,00,00} => ammo row 0x16 0xB4D3A790
-// Row 0x18 (0x6422E3A9) names the profile; index 75 takes the zero-CRC arm.
-bool check_verified_jox01_profile_answers_exact_crc_challenges() {
+// Row 0x18 is 0x6422E3A9; index 75 takes the zero-CRC arm.
+bool check_jox01_sources_answer_exact_crc_challenges() {
 	inmatch::JoinerConnection joiner("Jox01Challenge");
-	if (!expect(joiner.set_integrity_challenge_profile(
-				inmatch::kRetailJox01IntegrityProfileId),
-			"the witnessed jox01 integrity profile is registered"))
-		return false;
+	joiner.set_integrity_sources(oracle_sources(integrity_oracle::kJox01WeaponTableCrc, 95,
+			integrity_oracle::kJox01AmmoRowCrcs, std::size(integrity_oracle::kJox01AmmoRowCrcs)));
 	seed_joiner(joiner);
 	SessionSequencing server_tx{1, 0};
 
@@ -1858,11 +1899,11 @@ bool check_verified_jox01_profile_answers_exact_crc_challenges() {
 		const inmatch::JoinerConnection::PollResult result =
 				joiner.handle_datagram(challenge.data(), challenge.size());
 		if (!expect(reply_body(result, c.reply_tag, body) && body == c.reply_body,
-				"the jox01 profile emits the exact witnessed integrity reply"))
+				"the jox01 sources emit the exact witnessed integrity reply"))
 			return false;
 	}
 
-	// The live witness's digest over every `[row][crc32-le]` tuple.
+	// The live witness's digest over every `[row][crc32-le]` reply tuple.
 	uint64_t corpus_digest = 14695981039346656037ull;
 	for (uint16_t row = 0; row < 75; ++row) {
 		const std::vector<uint8_t> request = frame_s2c(
@@ -1874,15 +1915,15 @@ bool check_verified_jox01_profile_answers_exact_crc_challenges() {
 		body.clear();
 		if (!expect(reply_body(result, 0x21, body) && body.size() == 9 &&
 					body[0] == row,
-				"the jox01 profile covers every witnessed ammo row"))
+				"the jox01 sources cover every ammo row"))
 			return false;
 		for (const uint8_t byte : {body[0], body[1], body[2], body[3], body[4]}) {
 			corpus_digest ^= byte;
 			corpus_digest *= 1099511628211ull;
 		}
 	}
-	return expect(corpus_digest == 0x7B7F326C906F274Bull,
-			"all 75 indexed CRC constants match the live jox01 witness digest");
+	return expect(corpus_digest == integrity_oracle::kJox01RowDigest,
+			"all 75 replies match the live jox01 witness digest");
 }
 
 } // namespace
@@ -1908,7 +1949,7 @@ int main() {
 	ok = check_crc_challenges_are_not_answered() && ok;
 	ok = check_join_rejection_retains_the_raw_reject_record() && ok;
 	ok = check_pv2_mismatch_reports_an_incompatible_version() && ok;
-	ok = check_verified_revx02_profile_answers_exact_crc_challenges() && ok;
-	ok = check_verified_jox01_profile_answers_exact_crc_challenges() && ok;
+	ok = check_revx02_sources_answer_exact_crc_challenges() && ok;
+	ok = check_jox01_sources_answer_exact_crc_challenges() && ok;
 	return ok ? 0 : 1;
 }
