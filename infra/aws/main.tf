@@ -261,6 +261,15 @@ resource "aws_instance" "server" {
   tags = merge(var.tags, {
     Name = local.name
   })
+
+  # The AMI only seeds a new instance. data.aws_ami.ubuntu is most_recent, so
+  # without this every plan after Canonical publishes an image would replace
+  # the live server (downtime, and the instance's sqlite DB gone). An OS
+  # upgrade is a deliberate replace: terraform apply -replace=aws_instance.server
+  # (a changed var.ami_id also waits for that).
+  lifecycle {
+    ignore_changes = [ami]
+  }
 }
 
 resource "aws_eip" "server" {
