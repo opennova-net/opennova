@@ -138,7 +138,8 @@ struct ServerHello {
 // PM-only announce is a valid hello — see client_hello_admits). Returns
 // false only for a null buffer. Ignores unknown tags. A CI/PM/EIP/EPN/ET
 // shorter than four bytes takes the bytes that follow it, as retail's dword
-// load does (zero past the buffer's end).
+// load does (zero past the buffer's end), and a PG of any length gives the 16
+// bytes at its value.
 // [orig: NapiNPProtocol_HandleClientHello @0x6213b0 TLV walk]
 bool parse_client_hello(const uint8_t *data, size_t len, ClientHello &out);
 
@@ -221,6 +222,10 @@ struct ClientAuth {
 	uint32_t rcnt = 0;
 };
 
+// Parse a ClientAuth TLV payload (the 0x42's, after NWU-decryption). Its dword
+// fields shorter than four bytes and its PG load as parse_client_hello's do.
+// False for a null buffer or a zero CK.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 TLV walk]
 bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 
 // Serialize a ClientAuth to flat-TLV bytes (inverse of parse_client_auth).

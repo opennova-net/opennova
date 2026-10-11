@@ -6,7 +6,9 @@
 // carries the 0x41/0x42/0x81/0x82 hello/auth fields, the H:0x03 description,
 // the 0x45/0x85 ping body and the C2S 0x00 JOIN body.
 // [orig: NapiNP_WriteTLV @0x61DD60 (name, NUL, u16 size, value);
-//  NapiNP_ReadTLV @0x61DBE0 (the walk, <0 on a short field)]
+//  NapiNP_ReadTLV @0x61DBE0 (the walk: it returns 0 for every cursor but a
+//  null one, -1 @0x61DC40, so retail's walk ends only on an empty name; a field
+//  that does not fit ends ours, D-NET-412)]
 // Header-only so every consumer (npwire, runtime/inmatch) shares one reader.
 
 #include <base/io/le.h>
@@ -28,7 +30,9 @@ inline constexpr size_t kFlatTlvEnd = static_cast<size_t>(-1);
 
 // Read the field at `pos`. Returns the position after it, or kFlatTlvEnd when
 // the name is unterminated, the size prefix is missing, or the value does not
-// fit (retail's ReadTLV returns <0 and its callers stop the walk).
+// fit. Retail's ReadTLV still returns 0 there, hands the field back and leaves
+// its cursor at the value, so its callers handle that field and read on
+// (D-NET-412); ours stops the walk.
 inline size_t read_flat_tlv(const uint8_t *data, size_t len, size_t pos, FlatTlvField &out) {
 	size_t p = pos;
 	while (p < len && data[p] != 0) ++p;
