@@ -1148,6 +1148,7 @@ private:
 				index = 255;
 			}
 			out_type = 1;
+			if (f.decl_mode == 0) note_operand(f, ParamType::Variable, 1, index);
 			return Operand{encode_operand(OperandKind::MissionVar, static_cast<uint32_t>(index)), {}};
 		}
 		if (s[0] == 'G' && digit_next) {
@@ -1318,6 +1319,10 @@ private:
 		const int32_t whole = io::retail_ftol_sse2(value);
 		if (f.decl_mode == 0 && (expected == int(ParamType::Area) || expected == int(ParamType::WpList)))
 			note_operand(f, ParamType(expected), 0, whole);
+		// The event condition's number: the BMS event whose latch it reads [orig: WacCmd_Event @0x4ED1E0].
+		static const int event_command = wac_command_index("event");
+		if (f.decl_mode == 0 && expected == int(ParamType::Number) && f.action == event_command)
+			note_operand(f, ParamType::Number, 0, whole);
 		return pooled(f, whole, kind, expected);
 	}
 

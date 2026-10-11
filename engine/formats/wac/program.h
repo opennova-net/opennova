@@ -78,11 +78,14 @@ struct FileUse {
 // token, or one past the SSN_ prefix in any slot), the value the leg looks the entity up by, atol of the token
 // past the prefix and its low 16 bits [orig: WacScript_ResolveParameter @0x4F2E97..0x4F2EED -> EntityPool_FindByNetId
 // @0x4F0A20]; an area by its zone id (an Area slot's number) or a waypoint path by its number (a WpList slot's),
-// the number leg's value as the slot stores it [orig: @0x4F2CEF..0x4F2D9E, the _ftol2_sse @0x4F2D8C]. Only a token
-// that is a number: a variable, an IF's name or a word names no record. `offset` and `length` are the number's
-// bytes in its source, as written (past a prefix).
+// the number leg's value as the slot stores it [orig: @0x4F2CEF..0x4F2D9E, the _ftol2_sse @0x4F2D8C]; a mission
+// variable by its index (Variable: a V# token in any slot, the number past the V, capped at 255 as the leg caps it
+// [orig: @0x4F2AA4..0x4F2B06], the word the BMS events read and write too); a mission event by its index (Number:
+// the event condition's number, the event whose latch it reads [orig: WacCmd_Event @0x4ED1E0, g_Events + 24 * n
+// + 20 @0x4ed1f8]). Only a token that is a number: a variable's name, an IF's name or a word names no record.
+// `offset` and `length` are the number's bytes in its source, as written (past a prefix).
 struct OperandUse {
-    ParamType kind = ParamType::Null; // Ssn, Area or WpList
+    ParamType kind = ParamType::Null; // Ssn, Area, WpList, Variable or Number (an event)
     int32_t value = 0;
     uint32_t source = 0; // Program::source_names index
     size_t offset = 0, length = 0;
