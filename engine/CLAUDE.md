@@ -146,15 +146,10 @@
   `io::append_*_le` and exists only for the witnessed `cstr`/`cstr_capped` wire string
   forms over an external buffer; `formats/bad` and `formats/rtxt` read through
   offset-indexed wrappers over `io::read_*_le` plus a NUL-string scanner, not cursors.
-- Ports are faithful structural translations of the original engine — implementing "our
-  own version" of engine behavior is never allowed unless a tracked decision (ADR or an
-  RE-record divergence entry) says otherwise. CRT/OS/platform primitives (strcpy/sprintf/
-  memcpy, D3D, file I/O) are excluded — use standard equivalents. Cite the original inline
-  at the port site: `[orig: Name @ 0xADDR]`. Engine-wide conventions: docs/engine-primer.md.
-- Parity writers are built from scratch. Never smuggle raw input bytes through a writer to
-  turn a parity test green (docs/adr/0003-no-raw-passthrough-create-from-scratch.md).
-  The full writer-parity gate is writer from scratch + roundtrip test + retail-corpus
-  byte sweep where a corpus exists + a ledgered D-entry when output legitimately differs.
+- The parity rules (faithful ports cited `[orig: Name @ 0xADDR]`, writers from scratch, ADR
+  0003) are the root CLAUDE.md's Conventions and docs/engine-primer.md. The full
+  writer-parity gate is writer from scratch + roundtrip test + retail-corpus byte sweep
+  where a corpus exists + a ledgered D-entry when output legitimately differs.
 - The protocol libs (`engine/net/novacrypto`, `engine/net/napi`, `engine/net/npwire`, `engine/net/novaworld`,
   `engine/net/admin`) and the
   replication seam (`engine/runtime/replication`) are

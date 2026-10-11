@@ -20,15 +20,9 @@ easier to relay than to rediscover.
   `web/` (the `OpenNova Web` export's page shell; the site image is
   `deploy/game/`, ADR 0049), `tests/` (GUT suite).
 - `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
-  `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"): `3di/` (`opennova-3di`,
-  ADR 0047), `extract/` (`opennova-extract`, ADR 0040), `lan_probe/`
-  (`opennova-lan-probe`), `novaworld_server/` (`opennova-novaworld-server`, the NovaWorld
-  service; its sources build as `opennova_novaworld_server_core`, mirroring
-  `opennova_serve_core`, and the exe is `main.cpp` alone), `nw_lister/` (`opennova-nw-lister`: lists one server on a NovaWorld master
-  without the game), `serve/` (`opennova-serve`, the headless game server with retail's
-  remote admin, ADR 0051; its files live in its working directory), `wire/`
-  (`opennova-wire`, the capture decoder), and `common/` (shared socket helpers and the
-  remote-admin TCP pump, deliberately app-layer; pcap I/O lives in `engine/base/pcapio`).
+  `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"). `common/` is the shared
+  socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap I/O lives in
+  `engine/base/pcapio`); `serve/` (ADR 0051) keeps its files in its working directory.
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
   `scripts/package_blender_addon.sh` zips it with `opennova-3di`).
 - `web/` — NovaWorld web portal (Vue 3 + TS); `backend/` + `deploy/` + `infra/` — service
@@ -58,15 +52,10 @@ easier to relay than to rediscover.
   so public clones and CI never try it); a maintainer clone opts in once with
   `git config submodule.docs.update checkout`, which every worktree shares. Edits land
   with `scripts/land_docs.sh` (Git, PRs, CI below).
-- `third_party/` — vendored submodules (godot-cpp and gut; never edit in
-  place — bump submodules upstream) plus two vendored in-tree C sources (bcrypt,
-  and miniz — the BFC1 decoder's inflate, target `opennova_miniz`) and three
-  hash-pinned FetchContents: sqlite (bump by editing the URL/URL_HASH in
-  `third_party/sqlite/CMakeLists.txt`), Dear ImGui (`third_party/imgui/`,
-  pinned to the commit the imgui-godot addon bundles — bump it and
-  `scripts/bootstrap_imgui_godot.sh` together, never one alone) and rgbcx
-  (`third_party/rgbcx/`, the tools' authoring DXT encoder; bump the commit and
-  URL_HASH together).
+- `third_party/` — never edit a submodule in place (bump it upstream). Dear ImGui
+  (`third_party/imgui/`) is pinned to the commit the imgui-godot addon bundles: bump it
+  and `scripts/bootstrap_imgui_godot.sh` together, never one alone; sqlite and rgbcx
+  bump their URL/commit and URL_HASH together.
 
 ## Build & test
 
@@ -90,11 +79,8 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   SSH; an empty `docs/` means the opt-in is missing, so never write into it. Then build
   the GDExtension (`godot/bin/` has no DLL in a fresh worktree) and run
   `"$GODOT_BIN" --headless --path godot --import` once, or engine classes appear missing.
-- `scripts/test_godot.sh` needs `GODOT_BIN` or a `Godot_v4.6.1-stable_*` binary in
-  `.godot-bin/` (the resolver, `scripts/godot_bin.sh`, walks parent directories, so a
-  worktree borrows the main checkout's; export `GODOT_BIN` yourself for direct GUT runs).
-- The GUT suite shares `user://` state and is flaky in full runs. Before believing a
-  failure, re-run that one file in isolation (see `godot/tests/CLAUDE.md`).
+- GUT specifics (how `GODOT_BIN` resolves, the flaky-full-run protocol) live in
+  `godot/tests/CLAUDE.md` and the `gut` skill.
 - Full ctest is ~90 s. Scope during focused work:
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.
@@ -173,14 +159,6 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   (every pointer this repo recorded must stay reachable). Two PRs that both move the
   pointer conflict on it; `scripts/land_docs.sh --sync` resolves that (docs `master` holds
   both). `git grep` skips the submodule unless given `--recurse-submodules`.
-- PR CI builds only the `template_debug` desktop GDExtension and packages debug-mode exports
-  (`-ExportMode debug`); `template_release` + release-mode packaging run on master
-  pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
-  `scripts/package_godot_windows.ps1` when touching `godot/src` build glue. The web jobs
-  (`build-gdextension-web` in `ci.yml`, and `game-web.yml`'s push/PR triggers) are paused
-  while the web build is on hold; ADR 0049 d5's rules (no exceptions as control flow,
-  ILP32-safe layout guards) still apply, but no CI checks them. The engine test job runs
-  Ninja + sccache (the VS generator is local-only).
 
 ## Deeper docs
 
