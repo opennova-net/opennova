@@ -3,6 +3,7 @@
 #include <runtime/inmatch/server_visible_players.h>
 #include <runtime/inmatch/server_doors.h>
 #include <runtime/inmatch/server_team_change.h>
+#include <runtime/inmatch/server_death_timeout_reset.h>
 #include <runtime/inmatch/server_kill_page.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
@@ -1212,6 +1213,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world != nullptr && inputs.server_ctx != nullptr)
 					Server_HandleTeamChangeRequest(*inputs.server_ctx, conn, *world,
 							io::host_milliseconds_for_logic_tick(now_tick));
+				break;
+			case c2s::DEATH_TIMEOUT_RESET: // [orig: NapiNPServerMsg_ResetPlayerAmmo @0x510540]
+				if (world != nullptr && inputs.server_ctx != nullptr)
+					Server_HandleDeathTimeoutReset(*inputs.server_ctx, conn, *world);
 				break;
 			case c2s::RADIO_CALL_REQUEST: { // [orig: NapiNPServerMsg_HandleRadioCall @0x514330]
 				if (world == nullptr) break;
