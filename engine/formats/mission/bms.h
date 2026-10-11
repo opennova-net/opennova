@@ -681,20 +681,31 @@ size_t player_route_stop_count(const WaypointRecord& record);
 // SaveFile_WritePaletteBlock @0x4a9e60, the WriteFile @0x4a9e91]. So the parse keeps whatever those bytes
 // hold, as the game loads such a file, and they hold the group's NAME (ADR 0046 S24 "Names"): a fixed-width
 // name, NUL-padded, the first 4 characters at @4..7 and the next 16 at @16..31, a full 20 with no terminator.
+// The original editor's .bms writer writes those bytes as zero on every save (@4 and @16..31, @12 the 10,
+// @0 its attrib's two bits, @8 its commander) [orig: JOTACmed.exe sub_44F920 @0x44f920, the group
+// @0x450940..0x4509b4], so a name survives the original editor in the .mis `description` it reads and
+// writes back (mission_mis.h), not in its .bms.
 constexpr size_t kGroupNameSize = 20;
 struct GroupRecord {
     int32_t flags;
     int32_t value;
     char name[kGroupNameSize];
 };
+// A character a quoted .mis value carries as written: no control character, no double quote (both stock
+// readers toggle their quoting at one, with no escape) and no ';' (they cut the line at the first, quoted or
+// not) [orig: sub_10007AB0 @0x10007ab0 (the ';' @0x10007b25, the quote @0x10007b81), misldr.dll;
+// sub_463050 @0x463050 (@0x4630c9, @0x463131), JOTACmed.exe]. The one rule every name the .mis carries keeps:
+// a group's (set_group_name), a variable's (mission_var_names.h) and an event's, area's or path's
+// (mission_mis.h mis_name_allowed).
+bool mis_value_char(char ch);
 // Whether the 20 bytes are no name (all zero) or one set_group_name would write: printable characters other
-// than a double quote up to the first NUL, zeros after it. Bytes of another tool (a control byte, a high byte,
-// a quote, anything after a NUL) are kept as read and are no name.
+// than a double quote or a ';' up to the first NUL, zeros after it. Bytes of another tool (a control byte, a
+// high byte, a quote, anything after a NUL) are kept as read and are no name.
 bool group_name_readable(const GroupRecord& record);
 // The group's name: its bytes up to the first NUL when group_name_readable, else "".
 std::string group_name(const GroupRecord& record);
 // Sets the name, NUL-padding the rest. Refused (false, `error` says why, the record untouched) past 20
-// characters, or with a character outside printable ASCII or a double quote, which the .mis text's
+// characters, or with a character outside printable ASCII, a double quote or a ';', which the .mis text's
 // quoted `description` cannot carry.
 bool set_group_name(GroupRecord& record, const std::string& name, std::string& error);
 

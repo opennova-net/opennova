@@ -67,8 +67,8 @@ bool name_refused(const VariableName &entry, std::string &error) {
 	}
 	for (char ch : name) {
 		const unsigned char c = static_cast<unsigned char>(ch);
-		if (c < 0x20 || c > 0x7E || ch == '"') {
-			error = "A variable's name takes printable characters other than a double quote";
+		if (c > 0x7E || !bms::mis_value_char(ch)) {
+			error = "A variable's name takes printable characters other than a double quote or a ';'";
 			return true;
 		}
 	}

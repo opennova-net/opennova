@@ -26,12 +26,21 @@ namespace opennova::mission::detail {
 
 using strutil::fixed_string;
 
+// A value as a quoted .mis value carries it. The stock reader has no escape: a double quote toggles the
+// quoting wherever it stands, and the line is cut at its first ';' before the quotes are looked at, so a
+// ';' in a quoted value ends the value and the line there [orig: sub_10007AB0 @0x10007ab0 (the ';' cut
+// @0x10007b25, the quote @0x10007b81), misldr.dll]; a line break ends the line. So a line break is written
+// as '|', a double quote as a single one and a ';' as a ','. Only a briefing's '|' is turned back into a line
+// feed [orig: MisLdr_ParseMisLine @0x100017b0 (the '|' @0x10004408), misldr.dll], and a CR LF goes out as
+// "||"; any other value keeps the '|'. A name the editor sets never needs any of this (mis_name_allowed).
 inline std::string mis_string(std::string value) {
 	for (char &ch : value) {
 		if (ch == '\r' || ch == '\n') {
 			ch = '|';
 		} else if (ch == '"') {
 			ch = '\'';
+		} else if (ch == ';') {
+			ch = ',';
 		}
 	}
 	return value;

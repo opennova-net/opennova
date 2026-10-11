@@ -665,7 +665,7 @@ bool set_group_flags(void *record, const MissionValue &value, std::string &error
 	return true;
 }
 
-// The name in the 20 bytes the game's loader drops (bms.h GroupRecord): printable, no double quote,
+// The name in the 20 bytes the game's loader drops (bms.h GroupRecord): printable, no double quote or ';',
 // 20 at most, refused past them.
 bool get_group_name(const void *record, MissionValue &out) {
 	out = bms::group_name(as<G>(record));

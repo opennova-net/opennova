@@ -152,6 +152,12 @@ int check(const std::string &path) {
 	std::string gen2;
 	TEST_EXPECT(write_mis_text(reparsed, gen2, error));
 	TEST_EXPECT(texts_equal(gen1, gen2));
+	// The areas come back by zone id, in id order, with their flags (the .mis holds no bounds: D-MIS-14).
+	std::vector<std::pair<int32_t, uint32_t>> areas_in, areas_back;
+	for (const bms::AreaTrigger &area : doc.area_triggers) areas_in.emplace_back(area.id, area.flags);
+	for (const bms::AreaTrigger &area : reparsed.area_triggers) areas_back.emplace_back(area.id, area.flags);
+	std::sort(areas_in.begin(), areas_in.end());
+	TEST_EXPECT(areas_back == areas_in);
 
 	// The variable names (mission_var_names.h) ride the layer table, which the .mis carries as
 	// `begin layer N / description`: the tagged table comes back record for record, and the text again.
@@ -179,6 +185,29 @@ int check(const std::string &path) {
 		TEST_EXPECT(texts_equal(named1, named2));
 	}
 
+	// With names (MisNames): every event named, every area described by its zone id and every path by its
+	// index, the paths with no stop among them written for their description; the names read back are the
+	// names written, and the text written from them again is the same.
+	MisNames names;
+	for (size_t i = 0; i < doc.events.size(); ++i) names.events.push_back("event " + std::to_string(i));
+	for (const bms::AreaTrigger &area : doc.area_triggers)
+		if (area.id > 0 && area.id < static_cast<int32_t>(kMisAreaSlots))
+			names.areas[static_cast<size_t>(area.id)] = "area " + std::to_string(area.id);
+	for (size_t i = 1; i < names.paths.size(); ++i) names.paths[i] = "path " + std::to_string(i);
+	std::string named1;
+	TEST_EXPECT(write_mis_text(doc, named1, error, nullptr, &names));
+	MisNames names_back;
+	TEST_EXPECT(parse_mis_names(named1, names_back, error));
+	TEST_EXPECT(names_back.events == names.events);
+	TEST_EXPECT(names_back.areas == names.areas);
+	TEST_EXPECT(names_back.paths == names.paths);
+	bms::File named_back;
+	TEST_EXPECT(parse_mis_text(named1, resolver, named_back, error));
+	sync_counts(named_back);
+	std::string named2;
+	TEST_EXPECT(write_mis_text(named_back, named2, error, nullptr, &names_back));
+	TEST_EXPECT(texts_equal(named1, named2));
+
 	return 0;
 }
 
@@ -191,5 +220,10 @@ int main(int argc, char **argv) {
 		return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/bms/ash_i5b.reference.bms (the shipped mission)");
 	if (check(retail) != 0) return 1;
 	std::printf("retail leg: ash_i5b .mis export is idempotent\n");
+	// A shipped mission with areas (ash_i5b has none): 03TR, ten of them, constrain-Z among their flags.
+	const std::string areas = retail::asset_file("03TR.bms");
+	if (areas.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/03TR.bms (a shipped mission with areas)");
+	if (check(areas) != 0) return 1;
+	std::printf("retail leg: 03TR .mis export is idempotent, its areas by zone id\n");
 	return 0;
 }
