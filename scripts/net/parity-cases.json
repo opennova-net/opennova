@@ -34,14 +34,14 @@
       "auto_deploy": true
     },
     {
-      "id": "cp04-objective-coop",
+      "id": "cp04-objcoop-deploy",
       "mission": "CP04.bms",
       "game_type": 196640,
       "port": 32784,
-      "readiness": "in_match",
-      "steady_seconds": 45,
-      "exercise_input": true,
-      "auto_deploy": true
+      "readiness": "deploy_hold",
+      "steady_seconds": 35,
+      "exercise_input": false,
+      "auto_deploy": false
     },
     {
       "id": "ash-i5a-aas-deploy",
