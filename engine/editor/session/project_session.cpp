@@ -293,18 +293,22 @@ void ProjectSession::report_sound(uint64_t serial, WorkspaceView::SoundState sta
 		impl_->core.touch(ViewConcern::Workspace);
 }
 
+bool ProjectSession::live_logic_reachable() const { return impl_->play.live().reachable(); }
+
 bool ProjectSession::live_logic_polling() const { return impl_->play.live().polling(); }
 
-bool ProjectSession::report_live_logic(const std::string &snapshot, std::string &error) {
+bool ProjectSession::report_live_logic(const io::JsonValue &snapshot, std::string &error) {
 	return impl_->play.live().report(snapshot, error);
 }
+
+void ProjectSession::live_logic_quiet(int64_t ms) { impl_->play.live().quiet(ms); }
 
 std::vector<PlayDebugCall> ProjectSession::play_debug_since(uint64_t after) const {
 	return impl_->play.live().calls_since(after);
 }
 
-void ProjectSession::answer_play_debug(uint64_t serial, bool ok, const std::string &words) {
-	impl_->play.live().answered(serial, ok, words);
+void ProjectSession::answer_play_debug(uint64_t serial, PlayDebugAnswer answer, const std::string &words) {
+	impl_->play.live().answered(serial, answer, words);
 }
 
 // --- what is asked without a request -------------------------------------------------------------

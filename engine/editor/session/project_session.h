@@ -155,13 +155,16 @@ public:
 	// over; one that moves the sound moves the Workspace concern.
 	void report_sound(uint64_t serial, WorkspaceView::SoundState state, const std::string &error = std::string());
 	// The running game's mission logic (S24 Live, session/live_logic.h), as the Shell's link to the game's MCP
-	// endpoint drives it (session/live_logic_link.h): whether to ask the game for it, what the game reported (its
-	// snapshot's JSON: the view's live logic; false, `error` why, for one that does not read), the calls play_debug
-	// asked after `after`, oldest first, and what the game made of one (`ok`, else its words), said in Output.
+	// endpoint drives it (session/live_logic_link.h): whether a game the editor can ask runs, whether to ask it for
+	// its logic (its mission's Logic pane shown), what the game reported (its snapshot's record: the view's live
+	// logic; false, `error` why, for one that is no snapshot), how long it has not answered, the calls play_debug
+	// asked after `after`, oldest first, and what became of one (`words`: the game's refusal), said in Output.
+	bool live_logic_reachable() const;
 	bool live_logic_polling() const;
-	bool report_live_logic(const std::string &snapshot, std::string &error);
+	bool report_live_logic(const io::JsonValue &snapshot, std::string &error);
+	void live_logic_quiet(int64_t ms);
 	std::vector<PlayDebugCall> play_debug_since(uint64_t after) const;
-	void answer_play_debug(uint64_t serial, bool ok, const std::string &words);
+	void answer_play_debug(uint64_t serial, PlayDebugAnswer answer, const std::string &words);
 
 private:
 	struct Impl;

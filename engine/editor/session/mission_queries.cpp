@@ -132,6 +132,10 @@ JsonValue answer_variables(const QueryContext &context, const QueryArgs &args, s
 	const MissionDocument *mission = mission_of(context, args, error);
 	if (!mission) return JsonValue::make_null();
 	JsonValue out = JsonValue::make_object();
+	if (args.has("variable") && !args.has("name")) {
+		error = "op variables with \"variable\" needs \"name\" (\"\" takes its name away).";
+		return JsonValue::make_null();
+	}
 	if (args.has("variable")) {
 		std::vector<Edit> edits;
 		std::string refusal;
@@ -164,20 +168,25 @@ JsonValue answer_live(const QueryContext &context, const QueryArgs &args, std::s
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(mission->path()));
 	out.set("playing", JsonValue::make_bool(reported));
+	out.set("reachable", JsonValue::make_bool(context.core.play().live().reachable()));
 	out.set("polling", JsonValue::make_bool(context.core.play().live().polling()));
 	if (!reported) return out;
 	out.set("tick", json_number(double(live.tick)));
 	out.set("played_revision", json_number(double(live.played_revision)));
 	out.set("revision", json_number(double(mission->revision())));
 	out.set("stale", JsonValue::make_bool(live.stale));
+	out.set("quiet_ms", json_number(double(live.quiet_ms)));
+	out.set("serial", json_number(double(live.serial)));
 	const MissionWords names(context, *mission);
 	JsonValue events = JsonValue::make_array();
 	const std::vector<const Node *> rows = mission->rows_of(MissionKind::Event);
 	for (const LiveEvent &event : live.events) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("index", json_number(double(event.index)));
-		// The document's event of that place, where the document has one (a stale report may hold more).
-		const EventRow *row = event.index < rows.size() ? static_cast<const EventRow *>(rows[event.index]) : nullptr;
+		// The document's event of that place where it is the played one (moved or removed since Play: none).
+		const EventRow *row = event.index < rows.size() && live.event_of(rows[event.index]->id, event.index)
+		                              ? static_cast<const EventRow *>(rows[event.index])
+		                              : nullptr;
 		if (row) entry.set("event", json_number(double(row->id)));
 		entry.set("active", JsonValue::make_bool(event.active));
 		entry.set("fired", JsonValue::make_bool(event.fired));
@@ -189,7 +198,9 @@ JsonValue answer_live(const QueryContext &context, const QueryArgs &args, std::s
 		for (size_t i = 0; i < event.truth.size(); ++i) {
 			JsonValue term = JsonValue::make_object();
 			term.set("truth", json_number(double(event.truth[i])));
-			if (row && row->ids.lists.size() > 0 && i < row->ids.lists[0].size())
+			// The trigger of that place where it is the played one.
+			if (row && row->ids.lists.size() > 0 && i < row->ids.lists[0].size() &&
+			    live.trigger_truth(row->id, event.index, row->ids.lists[0][i].id, i) >= -1)
 				term.set("trigger", json_number(double(row->ids.lists[0][i].id)));
 			triggers.push(std::move(term));
 		}

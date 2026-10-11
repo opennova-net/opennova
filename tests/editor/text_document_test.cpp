@@ -1421,6 +1421,7 @@ static int test_retail() {
 	TEST_EXPECT(view.open(install_spec(install, project), view_error));
 	const opennova::Vfs &mount = view.vfs();
 	size_t scripts = 0, compiled = 0, findings = 0, references = 0, operands = 0, music = 0, credits = 0, shaders = 0;
+	size_t variable_operands = 0, event_operands = 0;
 	size_t witnessed = 0, alone = 0, shader_tags = 0, credit_fonts = 0, credit_images = 0;
 	for (const opennova::VfsFileLocation &location : mount.list_files()) {
 		const std::string &name = location.logical_name;
@@ -1487,13 +1488,13 @@ static int test_retail() {
 			std::vector<TextReference> named;
 			type->references(*text_of(*document), named);
 			references += named.size();
-			// The mission's entities and areas its literal operands name (S23 B), and its variables and events (S24 C4).
-			for (const TextReference &each : named)
-				operands += each.kind == ReferenceKind::MissionEntity || each.kind == ReferenceKind::MissionZone ||
-				                            each.kind == ReferenceKind::MissionVariable ||
-				                            each.kind == ReferenceKind::MissionEventLatch
-				                    ? 1
-				                    : 0;
+			// The mission's entities and areas its literal operands name (S23 B); its variables and events, apart
+			// (S24 C4: a script's V# and event() index).
+			for (const TextReference &each : named) {
+				operands += each.kind == ReferenceKind::MissionEntity || each.kind == ReferenceKind::MissionZone ? 1 : 0;
+				variable_operands += each.kind == ReferenceKind::MissionVariable ? 1 : 0;
+				event_operands += each.kind == ReferenceKind::MissionEventLatch ? 1 : 0;
+			}
 			break;
 		}
 		case AssetKind::MusicScript:
@@ -1522,13 +1523,17 @@ static int test_retail() {
 		}
 	}
 	std::printf("retail: %zu scripts (%zu with the original compiler's listing matched, %zu running no other "
-	            "file; %zu compiler reports, %zu findings, %zu references, %zu of them operands), %zu music scripts, "
-	            "%zu credits files (%zu fonts and %zu images named), %zu shaders (%zu shader tags)\n",
-	            scripts, witnessed, alone, compiled, findings, references, operands, music, credits, credit_fonts,
-	            credit_images, shaders, shader_tags);
+	            "file; %zu compiler reports, %zu findings, %zu references, %zu of them entity and area operands, %zu "
+	            "variable and %zu event operands), %zu music scripts, %zu credits files (%zu fonts and %zu images "
+	            "named), %zu shaders (%zu shader tags)\n",
+	            scripts, witnessed, alone, compiled, findings, references, operands, variable_operands, event_operands,
+	            music, credits, credit_fonts, credit_images, shaders, shader_tags);
 	// The install's counts, pinned (Joint Operations: Combined Arms).
 	TEST_EXPECT(scripts == 23 && witnessed == 23 && alone == 23 && compiled == 47 && findings == 11 &&
-	            references == 141 && operands == 105 && music == 2 && credits == 1 && shaders == 44);
+	            references == 141 && operands == 61 && music == 2 && credits == 1 && shaders == 44);
+	// The scripts' V# (44) and event() (none ships) operands, apart from the entities' and areas' (S24 C4): the 44
+	// references they added are theirs.
+	TEST_EXPECT(variable_operands == 44 && event_operands == 0);
 	// The credits' names: each text line's font (every one of the 231 writes one) and its 19 images (17 fading,
 	// 2 spacing).
 	TEST_EXPECT(credit_fonts == 231 && credit_images == 19);

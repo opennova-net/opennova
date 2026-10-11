@@ -179,7 +179,8 @@ bool mission_board_card(const MissionDocument &document, NodeId event, const Mis
 	}
 	wait_note(out.notes, out.event, false, out.delay_steps);
 	if (out.repeats) wait_note(out.notes, out.event, true, out.repeat_steps);
-	if (live && live->mission == document.path()) out.live = live->event(out.index);
+	// The game's report of this event only where it is the played event at this place (moved or removed since: none).
+	if (live && live->mission == document.path()) out.live = live->event_of(out.event.row, out.index);
 	return true;
 }
 

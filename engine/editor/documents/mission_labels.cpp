@@ -659,12 +659,19 @@ std::string mission_record_label(const Document &base, const NodeAddress &addres
 namespace {
 
 // The words a brief takes what a parameter names in: an entity by its SSN alone ("#29"; the player as
-// the player), everything else as the base says a value by itself ("zone 3", "group 4").
+// the player), a group and a variable by the name the mission gives it (S24 Names: the board's words), else
+// as the base says a value by itself ("zone 3", "group 4", "V12"), short enough for the outline's column.
 class BriefNames : public MissionNames {
 public:
+	explicit BriefNames(const MissionDocument &document) : named_(document) {}
 	std::string entity(int64_t ssn) const override {
 		return ssn == kPlayerSsn ? MissionNames::entity(ssn) : "#" + std::to_string(ssn);
 	}
+	std::string group(int64_t group) const override { return named_.group(group); }
+	std::string variable(int64_t index) const override { return named_.variable(index); }
+
+private:
+	DocumentMissionNames named_;
 };
 
 } // namespace
@@ -686,7 +693,7 @@ std::string mission_record_brief(const Document &base, const NodeAddress &addres
 	const auto *document = dynamic_cast<const MissionDocument *>(&base);
 	const Node *row = document ? document->row(address.row) : nullptr;
 	if (!row) return std::string();
-	const BriefNames brief;
+	const BriefNames brief(*document);
 	if (!address.child) {
 		switch (static_cast<K>(row->kind)) {
 		case K::Item:

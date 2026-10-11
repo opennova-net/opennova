@@ -43,8 +43,8 @@ public:
 	virtual std::string path(int64_t number) const;
 	// An event by its index in the event table (0 the first).
 	virtual std::string event(int64_t index) const;
-	// A mission variable by its index, as the mission's script names it ("V12"; S24 Names: a name the
-	// mission gives it overrides).
+	// A mission variable by its index, as the mission's script names it ("V12"; past V255, which a script's V#
+	// cannot reach, "variable 300"; S24 Names: a name the mission gives it overrides).
 	virtual std::string variable(int64_t index) const;
 	// A text key's string in the shown language, "" where none is known (the base knows none).
 	virtual std::string text(const std::string &section, const std::string &key) const;

@@ -103,12 +103,49 @@ bool request_field_from_token(const std::string &token, RequestFieldId &out);
 // A JSON type's word: "string", "boolean", "string[]", "object", "object[]".
 const char *request_json_token(RequestJson json);
 
-// A set of fields, one bit each.
-using RequestFieldSet = uint64_t;
-static_assert(kRequestFieldCount <= 64, "a RequestFieldSet holds every request field");
+// A set of fields, one bit each, in two words (the fields outgrew one, S24).
+struct RequestFieldSet {
+	uint64_t words[2] = {0, 0};
+	constexpr RequestFieldSet() = default;
+	// 0, the empty set (`RequestFieldSet set = 0;`).
+	constexpr RequestFieldSet(int) {}
+	constexpr RequestFieldSet operator|(const RequestFieldSet &o) const {
+		RequestFieldSet out;
+		out.words[0] = words[0] | o.words[0];
+		out.words[1] = words[1] | o.words[1];
+		return out;
+	}
+	constexpr RequestFieldSet operator&(const RequestFieldSet &o) const {
+		RequestFieldSet out;
+		out.words[0] = words[0] & o.words[0];
+		out.words[1] = words[1] & o.words[1];
+		return out;
+	}
+	constexpr RequestFieldSet operator~() const {
+		RequestFieldSet out;
+		out.words[0] = ~words[0];
+		out.words[1] = ~words[1];
+		return out;
+	}
+	constexpr RequestFieldSet &operator|=(const RequestFieldSet &o) {
+		words[0] |= o.words[0];
+		words[1] |= o.words[1];
+		return *this;
+	}
+	constexpr bool any() const { return (words[0] | words[1]) != 0; }
+	constexpr explicit operator bool() const { return any(); }
+	constexpr bool operator!() const { return !any(); }
+	// Compared with 0: whether the set is empty.
+	constexpr bool operator==(int) const { return !any(); }
+	constexpr bool operator!=(int) const { return any(); }
+};
+static_assert(kRequestFieldCount <= 128, "a RequestFieldSet holds every request field");
 
 constexpr RequestFieldSet field_bit(RequestFieldId id) {
-	return RequestFieldSet(1) << static_cast<unsigned>(id);
+	RequestFieldSet out;
+	const unsigned bit = static_cast<unsigned>(id);
+	out.words[bit / 64] = uint64_t(1) << (bit % 64);
+	return out;
 }
 
 // The fields a request kind takes (its row's params column): those a request of the kind may

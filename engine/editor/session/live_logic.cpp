@@ -4,8 +4,12 @@
 #include <cmath>
 #include <utility>
 
+#include <base/io/file_io.h>
+#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/mission_document.h>
+#include <editor/documents/mission_table.h>
 #include <editor/model/document_base.h>
 #include <editor/project/project_files.h>
 #include <editor/run/run_directory.h>
@@ -113,13 +117,34 @@ void LiveLogicSession::started(const std::string &mission, const std::string &mo
 	const AssetEntry *entry = mission.empty() ? nullptr : core_.project_file(mission);
 	mission_ = entry ? entry->relative_path : mission;
 	mode_ = mode;
-	played_known_ = false;
 	if (mission_.empty()) return;
-	if (const DocumentBase *document = core_.documents().document_for(mission_)) {
-		played_known_ = true;
-		played_document_ = document->identity();
-		played_load_ = document->load_generation();
-		played_revision_ = document->revision();
+	// The file as the game loads it (Play saved it first), and the open document of it, its rows the played ones.
+	std::vector<uint8_t> bytes;
+	std::string error;
+	played_fingerprint_ = io::read_file_bytes(core_.view().project.root + "/" + mission_, bytes, error)
+	                              ? io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size())
+	                              : 0;
+	if (const DocumentBase *document = core_.documents().document_for(mission_); document && !document->dirty())
+		adopt(*document);
+	follow();
+}
+
+void LiveLogicSession::adopt(const DocumentBase &document) {
+	played_known_ = true;
+	played_document_ = document.identity();
+	played_load_ = document.load_generation();
+	played_revision_ = document.revision();
+	played_.clear();
+	const auto *mission = dynamic_cast<const MissionDocument *>(records_of(document));
+	if (!mission) return;
+	for (const Node *row : mission->rows_of(MissionKind::Event)) {
+		PlayedEvent event;
+		event.row = row->id;
+		const EventRow &chain = static_cast<const EventRow &>(*row);
+		if (!chain.ids.lists.empty())
+			for (size_t i = 0; i < chain.native.triggers.size() && i < chain.ids.lists[0].size(); ++i)
+				event.triggers.push_back(chain.ids.lists[0][i].id);
+		played_.push_back(std::move(event));
 	}
 }
 
@@ -127,25 +152,30 @@ void LiveLogicSession::ended() {
 	const bool had = !core_.view().activity.live_logic.empty();
 	mission_.clear();
 	mode_.clear();
+	played_fingerprint_ = 0;
 	played_known_ = false;
+	played_.clear();
+	checked_open_ = false;
+	stale_ = false;
+	said_quiet_ = false;
 	calls_.clear();
 	core_.view().activity.live_logic = LiveLogic();
 	if (had) core_.touch(ViewConcern::Run);
 }
 
-bool LiveLogicSession::polling() const {
+bool LiveLogicSession::reachable() const {
 	const ActivityView &activity = core_.view().activity;
 	return !mission_.empty() && mode_ == kRunModeRuntime && activity.play_state == PlayState::Running &&
 	       activity.play_mcp_port != 0;
 }
 
-bool LiveLogicSession::report(const std::string &text, std::string &error) {
+bool LiveLogicSession::polling() const {
+	return reachable() && core_.documents().document_for(mission_) != nullptr &&
+	       core_.view().workspace.document(mission_).logic;
+}
+
+bool LiveLogicSession::report(const JsonValue &snapshot, std::string &error) {
 	if (!polling()) return true;
-	JsonValue snapshot;
-	if (!io::json_parse(text, snapshot, error)) {
-		error = "The game's report does not read: " + error;
-		return false;
-	}
 	LiveLogic &live = core_.view().activity.live_logic;
 	LiveLogic read = live;
 	std::string game_mission;
@@ -159,47 +189,80 @@ bool LiveLogicSession::report(const std::string &text, std::string &error) {
 		return true;
 	}
 	read.mission = mission_;
-	read.played_revision = played_revision_;
-	read.serial = live.serial + 1;
+	read.quiet_ms = 0;
+	read.serial = ++report_serial_;
 	live = std::move(read);
+	said_quiet_ = false;
+	checked_open_ = false; // weighed again with the report
 	follow();
 	core_.touch(ViewConcern::Run);
 	return true;
 }
 
-void LiveLogicSession::follow() {
+void LiveLogicSession::quiet(int64_t ms) {
+	LiveLogic &live = core_.view().activity.live_logic;
+	if (live.empty() || live.quiet_ms == ms) return;
+	live.quiet_ms = ms;
+	if (ms >= 2000 && !said_quiet_) {
+		said_quiet_ = true;
+		core_.note("The game has not answered the editor for 2 s: the board shows its last report until it does.");
+	}
+	core_.touch(ViewConcern::Run);
+}
+
+void LiveLogicSession::publish() {
 	LiveLogic &live = core_.view().activity.live_logic;
 	if (live.empty()) return;
-	const DocumentBase *document = core_.documents().document_for(mission_);
-	bool stale = live.stale;
-	if (!document) {
-		stale = false; // the file on disk is what played (Play saved it)
-	} else if (!played_known_) {
-		// Opened since it was played: what it read then is what played, until it is edited.
-		if (!document->dirty()) {
-			played_known_ = true;
-			played_document_ = document->identity();
-			played_load_ = document->load_generation();
-			played_revision_ = document->revision();
-			live.played_revision = played_revision_;
-		}
-		stale = document->dirty();
-	} else {
-		stale = document->identity() != played_document_ || document->load_generation() != played_load_ ||
-		        document->revision() != played_revision_;
-	}
-	if (stale != live.stale) {
-		live.stale = stale;
+	const auto same = [](const PlayedEvent &a, const PlayedEvent &b) { return a.row == b.row && a.triggers == b.triggers; };
+	const bool changed = live.stale != stale_ || live.played_revision != played_revision_ ||
+	                     live.played.size() != played_.size() ||
+	                     !std::equal(played_.begin(), played_.end(), live.played.begin(), same);
+	if (!changed) return;
+	live.stale = stale_;
+	live.played_revision = played_revision_;
+	live.played = played_;
+	core_.touch(ViewConcern::Run);
+}
+
+void LiveLogicSession::follow() {
+	if (mission_.empty()) return;
+	// Nothing asked of the game: its last report goes (the pane that showed it closed).
+	LiveLogic &live = core_.view().activity.live_logic;
+	if (!polling() && !live.empty()) {
+		live = LiveLogic();
 		core_.touch(ViewConcern::Run);
 	}
+	const DocumentBase *document = core_.documents().document_for(mission_);
+	const uint64_t now[3] = {document ? document->identity() : 0, document ? document->load_generation() : 0,
+	                         document ? document->revision() : 0};
+	const bool dirty = document && document->dirty();
+	if (checked_open_ && std::equal(now, now + 3, checked_) && dirty == checked_dirty_) return publish();
+	std::copy(now, now + 3, checked_);
+	checked_dirty_ = dirty;
+	checked_open_ = true;
+	if (!document) {
+		stale_ = false; // the file is what played (Play saved it), whatever document reads it later
+	} else if (played_known_ && document->identity() == played_document_ && document->load_generation() == played_load_) {
+		stale_ = document->revision() != played_revision_;
+	} else if (!dirty && played_fingerprint_ != 0 && document->file_fingerprint() == played_fingerprint_) {
+		// Read since from the played bytes, unedited: the played one now, its rows recorded.
+		adopt(*document);
+		stale_ = false;
+	} else {
+		// Another document of the mission (edited, or read from other bytes): none of its rows are the played ones.
+		played_known_ = false;
+		played_.clear();
+		stale_ = true;
+	}
+	publish();
 }
 
 void LiveLogicSession::serve(const EditorRequest &request) {
 	const LiveLogic &live = core_.view().activity.live_logic;
-	if (!polling() || live.empty()) {
+	if (!reachable() || live.empty()) {
 		core_.refuse_request(CoreFinding::PlayDebug,
 		                     "No game Play runs reports this mission's logic: play_debug asks a game of the OpenNova "
-		                     "runtime (play_mode runtime) started in a mission, once it reports.");
+		                     "runtime (play_mode runtime) started in a mission, once it reports (its Logic pane shown).");
 		return;
 	}
 	const bool fire = request.event >= 0, set = request.variable >= 0;
@@ -210,10 +273,27 @@ void LiveLogicSession::serve(const EditorRequest &request) {
 	}
 	PlayDebugCall call;
 	if (fire) {
-		if (!live.event(size_t(request.event))) {
-			core_.refuse_request(CoreFinding::PlayDebug, "The game reports no event " + std::to_string(request.event + 1) +
-			                                                     " (" + std::to_string(live.events.size()) + " events).");
+		const size_t index = size_t(request.event);
+		const std::string number = std::to_string(request.event + 1);
+		if (!live.event(index)) {
+			core_.refuse_request(CoreFinding::PlayDebug, "The game reports no event " + number + " (" +
+			                                                     std::to_string(live.events.size()) + " events).");
 			return;
+		}
+		// The game's event of that index is the played one: refused where the document has removed or moved it
+		// since, so what is fired is never another than the one the person means.
+		const DocumentBase *open = core_.documents().document_for(mission_);
+		const auto *mission = open ? dynamic_cast<const MissionDocument *>(records_of(*open)) : nullptr;
+		if (mission && (stale_ || !played_.empty())) {
+			const std::vector<const Node *> rows = mission->rows_of(MissionKind::Event);
+			const NodeId played = index < played_.size() ? played_[index].row : 0;
+			const bool held =
+			        played != 0 && std::any_of(rows.begin(), rows.end(), [played](const Node *row) { return row->id == played; });
+			if (!held || index >= rows.size() || rows[index]->id != played) {
+				core_.refuse_request(CoreFinding::PlayDebug, "Event " + number + (held || played == 0 ? " moved" : " was removed") +
+				                                                     " since Play started: Play again to fire it.");
+				return;
+			}
 		}
 		call.op = PlayDebugOp::FireEvent;
 		call.event = request.event;
@@ -241,15 +321,28 @@ std::vector<PlayDebugCall> LiveLogicSession::calls_since(uint64_t after) const {
 	return out;
 }
 
-void LiveLogicSession::answered(uint64_t serial, bool ok, const std::string &words) {
+void LiveLogicSession::answered(uint64_t serial, PlayDebugAnswer answer, const std::string &words) {
 	const auto at = std::find_if(calls_.begin(), calls_.end(), [serial](const PlayDebugCall &c) { return c.serial == serial; });
 	if (at == calls_.end()) return;
 	const std::string what = play_debug_words(*at);
 	const bool fire = at->op == PlayDebugOp::FireEvent;
 	calls_.erase(at);
-	const std::string line = ok ? "The game took the call to " + what +
-	                                      (fire ? ": its triggers read true at its next check." : ".")
-	                            : "The game refused to " + what + (words.empty() ? std::string(".") : ": " + words);
+	std::string line;
+	switch (answer) {
+	case PlayDebugAnswer::Taken:
+		line = "The game took the call to " + what + (fire ? ": its triggers read true at its next check." : ".");
+		break;
+	case PlayDebugAnswer::Refused:
+		line = "The game refused to " + what + (words.empty() ? std::string(".") : ": " + words);
+		break;
+	case PlayDebugAnswer::NoAnswer:
+		line = "The game did not answer the call to " + what + " within 3 s; it may still make it" +
+		       (fire ? " (the board shows when it fires)." : ".");
+		break;
+	case PlayDebugAnswer::Gone:
+		line = "The game went away before it answered the call to " + what + ".";
+		break;
+	}
 	core_.note(line);
 	core_.view().activity.status = line;
 	core_.touch(ViewConcern::Output);

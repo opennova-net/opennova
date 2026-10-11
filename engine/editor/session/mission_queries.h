@@ -100,12 +100,14 @@ inline constexpr const char *kMissionLogicDoc =
 		"original editor's layer names, which no name is written over), left (how many more take a name, 31 at "
 		"most); with variable (and name), the edits that give it the name, in the batch form an edit_record takes "
 		"back, or the refusal that says why none. live (S24 Live): what the game Play runs last reported of this "
-		"mission's logic: playing (whether it reports this mission), polling (whether the editor asks a game for "
-		"it: the OpenNova runtime's, started in a mission), tick, played_revision and revision (the document's "
-		"now; stale once it moved on), events {index, event (the document's event of that place), active, fired, "
-		"activate_countdown and repeat_countdown with their reloads (64-tick steps), triggers {truth: 1, 0, -1 not "
-		"checked yet, trigger}, chain, last_checked_tick, fire_pending} and variables {index, value, name} (those "
-		"holding a value or a name).";
+		"mission's logic: playing (whether it reports this mission), reachable (whether a game the editor can ask "
+		"runs: the OpenNova runtime's, started in a mission), polling (whether it is asked: while the mission's "
+		"Logic pane is shown, set_workspace's logic), tick, played_revision and revision (the document's now; stale "
+		"once it moved on), quiet_ms (how long the game has not answered), serial (the report's), events {index, "
+		"event (the document's event of that place where it is the played one; none once moved or removed since "
+		"Play started), active, fired, activate_countdown and repeat_countdown with their reloads (ticks, 64 a "
+		"step), triggers {truth: 1, 0, -1 not checked yet; trigger, where it is the played one}, chain, "
+		"last_checked_tick, fire_pending} and variables {index, value, name} (those holding a value or a name).";
 
 inline constexpr QueryParam kMissionUsesParams[] = {
 	{ "path", QueryJson::String, false, nullptr, "An open mission, as mission_logic takes it." },

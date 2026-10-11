@@ -20,7 +20,8 @@ namespace opennova::editor {
 
 class ProjectSession;
 
-// A byte stream to the game's endpoint on this machine, the embedder's (non-blocking: each call returns at once).
+// A byte stream to the game's endpoint on this machine, the embedder's: each call returns at once but send, which
+// may wait until its bytes are written (a few hundred to the loopback; the Shell's StreamPeerTCP put_data).
 class GameMcpChannel {
 public:
 	enum class State { Closed, Connecting, Connected, Failed };
@@ -55,17 +56,22 @@ bool game_mcp_tool_result(const std::string &body, io::JsonValue &out, std::stri
 
 class LiveLogicLink {
 public:
-	// How often the snapshot is asked while nothing else waits.
+	// How often the snapshot is asked while the session polls (its mission's Logic pane shown) and nothing else
+	// waits; none is asked otherwise.
 	static constexpr int64_t kPollMs = 250;
-	// An exchange the game has not answered by then is given up (the stream closed, opened again).
+	// An exchange the game has not answered by then is given up (the stream closed, opened again): a call is
+	// said not answered, the game perhaps still making it.
 	static constexpr int64_t kAnswerMs = 3000;
+	// The game silent this long while polled: the session is told how long (the board says so).
+	static constexpr int64_t kQuietMs = 2000;
 
-	// One step at `now_ms` (the Shell's frame): connects while the session polls and closes when it stops; sends
-	// the next exchange when none waits (a queued call first, else the snapshot when it is due); reads an answer
-	// and hands it on.
+	// One step at `now_ms` (the Shell's frame): connects while a game the editor can ask runs and there is
+	// something to ask (the session polls, or a call is queued) and closes otherwise; sends the next exchange when
+	// none waits (a queued call first, else the snapshot when it is due); reads an answer and hands it on. A call
+	// in flight when the stream drops, or when the game ends, is answered as gone.
 	void step(ProjectSession &session, GameMcpChannel &channel, int64_t now_ms);
-	// What the link has done (for the tests and the Shell's log): snapshots read, calls answered, exchanges given
-	// up or refused.
+	// What the link has done (for the tests; what the person needs to know of it Output says: a call's fate, the
+	// game falling silent): snapshots read, calls answered, exchanges given up or refused.
 	struct Stats {
 		size_t snapshots = 0;
 		size_t calls = 0;
@@ -76,6 +82,7 @@ public:
 private:
 	enum class Waiting { None, Initialize, Snapshot, Call };
 	void reset(GameMcpChannel &channel);
+	void drop_waiting(ProjectSession &session, PlayDebugAnswer answer, const char *words);
 	void answered(ProjectSession &session, const GameMcpResponse &response);
 
 	int port_ = 0;
@@ -85,6 +92,7 @@ private:
 	Waiting waiting_ = Waiting::None;
 	PlayDebugCall call_;          // the call waiting, when one is
 	int64_t sent_ms_ = 0;
+	int64_t answered_ms_ = 0; // the game's last answer (or the stream's opening)
 	int64_t next_poll_ms_ = 0;
 	uint64_t calls_after_ = 0;    // the last call taken from the session
 	std::deque<PlayDebugCall> queued_;

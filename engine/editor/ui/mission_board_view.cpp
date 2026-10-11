@@ -38,15 +38,16 @@ bool logic_record(const NodeAddress &address) {
 }
 
 // What the board was built over, so it is built again only when one of them moves: the document (its
-// instance, load and revision), the names (the graph's revision), what the pane shows (its filter, its folds,
-// Needs attention) and the running game's report.
+// instance, load and revision), the names (the graph's revision) and what the pane shows (its filter, its folds,
+// Needs attention). The running game's report is not the board's: the cards' live hooks read it from the view as
+// they draw (S24 Live), so a report is no rebuild.
 struct BoardKey {
-	uint64_t document = 0, load = 0, revision = 0, names = 0, live = 0;
+	uint64_t document = 0, load = 0, revision = 0, names = 0;
 	std::string filter;
 	std::vector<NodeId> folded;
 	bool attention = false;
 	bool operator==(const BoardKey &o) const {
-		return document == o.document && load == o.load && revision == o.revision && names == o.names && live == o.live &&
+		return document == o.document && load == o.load && revision == o.revision && names == o.names &&
 		       filter == o.filter && folded == o.folded && attention == o.attention;
 	}
 };
@@ -290,7 +291,6 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 	key.load = mission->load_generation();
 	key.revision = mission->revision();
 	key.names = view.revisions.stamp_of(concern_set({ViewConcern::Graph}));
-	key.live = view.activity.live_logic.empty() ? 0 : view.activity.live_logic.serial + 1;
 	key.filter = shown.logic_filter;
 	key.folded = shown.logic_folded;
 	key.attention = shown.logic_attention;
@@ -303,7 +303,7 @@ void MissionBoardPane::draw(Workspace &workspace, const DocumentBase &document) 
 		query.attention = key.attention;
 		query.script_events = mission_script_events(view, mission->path());
 		const std::unique_ptr<MissionNames> names = mission_label_names(*mission, source ? &*source : nullptr);
-		board_ = mission_board(*mission, *names, query, view.activity.live_logic.empty() ? nullptr : &view.activity.live_logic);
+		board_ = mission_board(*mission, *names, query, nullptr);
 		variables_ = mission_variables(*mission, *names);
 		script_variables_ = script_variable_uses(view, *mission);
 		new_variable_ = names->variable(mission_new_variable(*mission, script_variable_indexes(script_variables_)));

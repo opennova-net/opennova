@@ -32,7 +32,15 @@ void test_board_with_a_report() {
 	live.mission = run.path;
 	live.played_revision = mission->revision();
 	live.tick = 620;
-	for (size_t i = 0; i < mission->rows_of(MissionKind::Event).size(); ++i) {
+	const std::vector<const Node *> rows = mission->rows_of(MissionKind::Event);
+	for (size_t i = 0; i < rows.size(); ++i) {
+		// The played event at this place: its row and its triggers' records.
+		PlayedEvent played;
+		played.row = rows[i]->id;
+		const EventRow &chain = static_cast<const EventRow &>(*rows[i]);
+		for (size_t t = 0; t < chain.native.triggers.size() && !chain.ids.lists.empty() && t < chain.ids.lists[0].size(); ++t)
+			played.triggers.push_back(chain.ids.lists[0][t].id);
+		live.played.push_back(std::move(played));
 		LiveEvent event;
 		event.index = i;
 		event.active = i == 0;
@@ -79,6 +87,23 @@ void test_board_with_a_report() {
 	run.ui.away();
 	text = logged_frame(run.ui);
 	CHECK(in_order(text, {"Event 2", "Fired", "stale", "fire asked"}), "the fire asked, the report stale");
+	// The game silent a while: its last report, said so.
+	live.quiet_ms = 3500;
+	++live.serial;
+	run.settle();
+	run.ui.away();
+	text = logged_frame(run.ui);
+	CHECK(in_order(text, {"Event 1", "no report for 3 s", "Waiting"}), "the game's silence said on the card");
+	live.quiet_ms = 0;
+	// An event not at its played place (added, moved or removed since Play started): none of the game's state.
+	std::swap(live.played[0], live.played[1]);
+	++live.serial;
+	run.settle();
+	run.ui.away();
+	text = logged_frame(run.ui);
+	CHECK(in_order(text, {"Event 1", "not as played", "Event 2", "not as played"}) && text.find("Waiting") == std::string::npos &&
+	              text.find("Fire") == std::string::npos,
+	      "a card of another row than the played one at its place shows none of the game's state, no Fire");
 	v.activity.live_logic = LiveLogic();
 }
 

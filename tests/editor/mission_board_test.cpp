@@ -215,15 +215,20 @@ int test_cards() {
 	board = mission_board(m, names, query);
 	TEST_EXPECT(!board.cards[0].folded && board.cards[1].folded);
 
-	// A running game's report: its event's state on the card.
+	// A running game's report: its event's state on the card that is the played event at its place (S24 Live).
 	LiveLogic live;
 	live.mission = m.path();
+	for (const Node *row : m.rows_of(MissionKind::Event)) live.played.push_back({row->id, {}});
 	LiveEvent fired;
 	fired.index = 1;
 	fired.fired = true;
 	live.events.push_back(fired);
 	board = mission_board(m, names, BoardQuery(), &live);
 	TEST_EXPECT(!board.cards[0].live && board.cards[1].live && board.cards[1].live->fired);
+	// Another row at that place than the played one (moved since Play started): none of the game's state.
+	std::swap(live.played[1], live.played[2]);
+	board = mission_board(m, names, BoardQuery(), &live);
+	TEST_EXPECT(!board.cards[1].live);
 	return 0;
 }
 

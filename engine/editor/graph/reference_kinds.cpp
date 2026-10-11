@@ -585,6 +585,12 @@ struct Row {
 		out.row.message_reads_files = true;
 		return out;
 	}
+	// Its symbols reached only by a scope naming their section (ReferenceKindRow::section_only).
+	constexpr Row in_section() const {
+		Row out = *this;
+		out.row.section_only = true;
+		return out;
+	}
 	constexpr Row offers(ReferenceKind kind) const {
 		Row out = *this;
 		out.row.also_offers = kind;
@@ -780,6 +786,7 @@ constexpr ReferenceKindRow kRows[] = {
 	Row(ReferenceKind::MissionEventLatch, "mission_event_latch", "the event", "event")
 	        .symbol(NameCase::Exact)
 	        .scoped(false)
+	        .in_section()
 	        .tolerated(event_latch_missing)
 	        .row,
 	// The files the game finds by a mission's name (documents/mission_file_set.h), each by the name

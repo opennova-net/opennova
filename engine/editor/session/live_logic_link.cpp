@@ -130,10 +130,21 @@ void LiveLogicLink::reset(GameMcpChannel &channel) {
 	waiting_ = Waiting::None;
 }
 
+// The exchange waiting given up: a call is answered with what became of it.
+void LiveLogicLink::drop_waiting(ProjectSession &session, PlayDebugAnswer answer, const char *words) {
+	if (waiting_ == Waiting::None) return;
+	++stats_.failures;
+	if (waiting_ == Waiting::Call) session.answer_play_debug(call_.serial, answer, words);
+	waiting_ = Waiting::None;
+}
+
 void LiveLogicLink::step(ProjectSession &session, GameMcpChannel &channel, int64_t now_ms) {
 	const int port = session.view().activity.play_mcp_port;
-	if (!session.live_logic_polling()) {
-		if (port_ != 0) reset(channel);
+	if (!session.live_logic_reachable()) {
+		if (port_ != 0) {
+			drop_waiting(session, PlayDebugAnswer::Gone, "");
+			reset(channel);
+		}
 		queued_.clear();
 		calls_after_ = 0;
 		return;
@@ -143,19 +154,28 @@ void LiveLogicLink::step(ProjectSession &session, GameMcpChannel &channel, int64
 		calls_after_ = call.serial;
 		queued_.push_back(std::move(call));
 	}
+	const bool polling = session.live_logic_polling();
+	// Nothing to ask (no call, the Logic pane closed): no stream.
+	if (!polling && queued_.empty() && waiting_ == Waiting::None) {
+		if (port_ != 0) reset(channel);
+		return;
+	}
 	if (port_ != port) {
 		reset(channel);
 		port_ = port;
 		channel.connect(port);
 		next_poll_ms_ = now_ms;
+		answered_ms_ = now_ms;
 	}
+	// The game silent for a while (a stall, a long serial tool of another client's): the board says how long.
+	if (polling) session.live_logic_quiet(now_ms - answered_ms_ >= kQuietMs ? now_ms - answered_ms_ : 0);
 	switch (channel.state()) {
 	case GameMcpChannel::State::Connecting: return;
 	case GameMcpChannel::State::Closed:
 	case GameMcpChannel::State::Failed:
-		// Not up yet (the game is still starting its endpoint), or the stream dropped: try again shortly.
-		if (waiting_ != Waiting::None) ++stats_.failures;
-		waiting_ = Waiting::None;
+		// Not up yet (the game is still starting its endpoint), or the stream dropped: a call in flight went with
+		// it; try again shortly.
+		drop_waiting(session, PlayDebugAnswer::Gone, "");
 		initialized_ = false;
 		session_id_.clear();
 		received_.clear();
@@ -172,10 +192,12 @@ void LiveLogicLink::step(ProjectSession &session, GameMcpChannel &channel, int64
 		const GameMcpRead read = read_game_mcp_response(received_, response);
 		if (read == GameMcpRead::Whole) {
 			received_.erase(0, response.consumed);
+			answered_ms_ = now_ms;
 			answered(session, response);
 		} else if (read == GameMcpRead::Malformed || now_ms - sent_ms_ > kAnswerMs) {
-			++stats_.failures;
-			if (waiting_ == Waiting::Call) session.answer_play_debug(call_.serial, false, "the game did not answer");
+			// No answer in time: the game may still make the call (its tools run one at a time).
+			drop_waiting(session, read == GameMcpRead::Malformed ? PlayDebugAnswer::Refused : PlayDebugAnswer::NoAnswer,
+			             read == GameMcpRead::Malformed ? "its answer did not read" : "");
 			reset(channel);
 			port_ = port; // connected again on the next step
 			channel.connect(port);
@@ -194,7 +216,7 @@ void LiveLogicLink::step(ProjectSession &session, GameMcpChannel &channel, int64
 		queued_.pop_front();
 		body = game_mcp_debug_body(next_id_++, play_debug_arguments(call_));
 		waiting_ = Waiting::Call;
-	} else if (now_ms >= next_poll_ms_) {
+	} else if (polling && now_ms >= next_poll_ms_) {
 		body = game_mcp_debug_body(next_id_++, live_snapshot_arguments());
 		waiting_ = Waiting::Snapshot;
 		next_poll_ms_ = now_ms + kPollMs;
@@ -202,9 +224,7 @@ void LiveLogicLink::step(ProjectSession &session, GameMcpChannel &channel, int64
 		return;
 	}
 	if (!channel.send(game_mcp_post(port_, session_id_, body))) {
-		++stats_.failures;
-		if (waiting_ == Waiting::Call) session.answer_play_debug(call_.serial, false, "the game's endpoint closed");
-		waiting_ = Waiting::None;
+		drop_waiting(session, PlayDebugAnswer::Gone, "");
 		return;
 	}
 	sent_ms_ = now_ms;
@@ -225,7 +245,7 @@ void LiveLogicLink::answered(ProjectSession &session, const GameMcpResponse &res
 	if (response.status != 200 && error.empty()) error = "the game answered HTTP " + std::to_string(response.status);
 	if (was == Waiting::Call) {
 		++stats_.calls;
-		session.answer_play_debug(call_.serial, ok, error);
+		session.answer_play_debug(call_.serial, ok ? PlayDebugAnswer::Taken : PlayDebugAnswer::Refused, error);
 		return;
 	}
 	if (!ok) {
@@ -233,7 +253,7 @@ void LiveLogicLink::answered(ProjectSession &session, const GameMcpResponse &res
 		return;
 	}
 	std::string report_error;
-	if (session.report_live_logic(io::json_write(result), report_error)) ++stats_.snapshots;
+	if (session.report_live_logic(result, report_error)) ++stats_.snapshots;
 	else ++stats_.failures;
 }
 

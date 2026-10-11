@@ -587,7 +587,11 @@ std::string MissionNames::path(int64_t number_) const {
 
 std::string MissionNames::event(int64_t index) const { return "event " + number(index + 1); }
 
-std::string MissionNames::variable(int64_t index) const { return "V" + number(index); }
+std::string MissionNames::variable(int64_t index) const {
+	// A script's V# reaches V0..V255 (the compiler caps it); a word past them is one of its own VAR declarations,
+	// which no V# names.
+	return index >= 0 && index <= 255 ? "V" + number(index) : "variable " + number(index);
+}
 
 std::string MissionNames::text(const std::string &, const std::string &) const { return std::string(); }
 

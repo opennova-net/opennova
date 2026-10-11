@@ -474,7 +474,7 @@ void draw_line(CardContext &context, const BoardCard &card, const BoardLine &lin
 	if (!line.action && !view.activity.live_logic.empty() && view.activity.live_logic.mission == context.mission.path()) {
 		ImGui::SameLine();
 		draw_card_live(context.workspace, context.mission.path(), view.activity.live_logic,
-		               CardLiveSpot{card.index, int(line.index)});
+		               CardLiveSpot{card.index, card.event.row, int(line.index), line.record.child});
 	}
 	const ImVec2 bottom(top.x + (right - x0), ImGui::GetItemRectMax().y);
 	if (context.selected == line.record)
@@ -839,7 +839,7 @@ CardAsked draw_mission_card(CardContext &context, const BoardCard &card) {
 	move_event_popup(context, card);
 	if (!view.activity.live_logic.empty() && view.activity.live_logic.mission == mission.path()) {
 		ImGui::SameLine();
-		draw_card_live(context.workspace, mission.path(), view.activity.live_logic, CardLiveSpot{card.index, -1});
+		draw_card_live(context.workspace, mission.path(), view.activity.live_logic, CardLiveSpot{card.index, card.event.row, -1, 0});
 	}
 	const Node *row = mission.row(card.event.row);
 	const uint32_t flags = row && row->kind == k(MissionKind::Event) ? uint32_t(static_cast<const EventRow *>(row)->native.event.flags) : 0;

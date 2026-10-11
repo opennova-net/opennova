@@ -13,10 +13,14 @@
 namespace opennova::editor {
 
 // Where on a card: its heading (the event's, `trigger` -1), or beside one trigger's line (`trigger` its place in
-// the event).
+// the event, `trigger_record` its record). The card's event by its place now and its row: the game's state is
+// drawn only where that row is the played event at that place (LiveLogic::event_of), a trigger's where it is the
+// played trigger at its place.
 struct CardLiveSpot {
 	size_t event = 0;
+	NodeId event_row = 0;
 	int trigger = -1;
+	NodeId trigger_record = 0;
 };
 
 // The live state at a spot of the card of the mission at `path`, drawn inline after what the card drew there.

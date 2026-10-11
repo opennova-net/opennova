@@ -54,6 +54,13 @@ std::string state_words(const LiveEvent &event) {
 
 void heading(Workspace &workspace, const LiveLogic &live, const LiveEvent &event) {
 	const std::string words = state_words(event);
+	// The game silent a while: its last report, said so.
+	if (live.quiet_ms >= 2000) {
+		ImGui::TextColored(kWarn, "no report for %d s", int(live.quiet_ms / 1000));
+		ui_kit::tooltip("The game has not answered the editor for a while (a stall, or another client's long call): "
+		                "what follows is its last report.");
+		ImGui::SameLine();
+	}
 	const ImVec4 colour = event.fired ? kTrue : event.activate_countdown > 0 || event.active ? kWarn
 	                                                                                     : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
 	ImGui::TextColored(colour, "%s", words.c_str());
@@ -82,8 +89,7 @@ void heading(Workspace &workspace, const LiveLogic &live, const LiveEvent &event
 	                "event that already fired.");
 }
 
-void trigger(const LiveLogic &live, const LiveEvent &event, size_t index) {
-	const int8_t truth = index < event.truth.size() ? event.truth[index] : int8_t(-1);
+void trigger(const LiveLogic &live, const LiveEvent &event, int truth) {
 	dot(truth == 1 ? kTrue : truth == 0 ? kFalse : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), truth >= 0);
 	ui_kit::tooltip(truth < 0 ? std::string("Not checked yet in the running game.")
 	                          : std::string(truth == 1 ? "Held" : "Did not hold") + " when the game last checked it (tick " +
@@ -93,11 +99,22 @@ void trigger(const LiveLogic &live, const LiveEvent &event, size_t index) {
 } // namespace
 
 void draw_card_live(Workspace &workspace, const std::string &, const LiveLogic &live, const CardLiveSpot &spot) {
-	const LiveEvent *event = live.event(spot.event);
-	if (!event) return;
+	const LiveEvent *event = live.event_of(spot.event_row, spot.event);
 	ImGui::PushID("live");
-	if (spot.trigger < 0) heading(workspace, live, *event);
-	else trigger(live, *event, size_t(spot.trigger));
+	if (!event) {
+		// Not the event the game runs at this place (added, moved or removed since Play started, or the document
+		// read from other bytes): none of the game's state is its.
+		if (spot.trigger < 0) {
+			ImGui::TextDisabled("not as played");
+			ui_kit::tooltip("The game runs the mission as it was when Play started: this event is not at this place "
+			                "there (it was added, moved or edited in place of another since). Play again to run it.");
+		}
+	} else if (spot.trigger < 0) {
+		heading(workspace, live, *event);
+	} else {
+		const int truth = live.trigger_truth(spot.event_row, spot.event, spot.trigger_record, size_t(spot.trigger));
+		if (truth >= -1) trigger(live, *event, truth);
+	}
 	ImGui::PopID();
 }
 
