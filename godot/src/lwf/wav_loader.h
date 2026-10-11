@@ -27,6 +27,11 @@ public:
 	static Ref<AudioStreamWAV> from_bytes(const PackedByteArray &p_bytes);
 	// Box an engine-decoded clip without decoding/caching a second copy.
 	static Ref<AudioStreamWAV> from_pcm(const opennova::lwf::WavPcm &decoded);
+	// Every decoded stream is a WaveStream carrying its loader pitch word, and every player of one
+	// sets the pitch scale this gives over the one its voice composes: a wave of pitch 0 plays at the
+	// mixer's least step whatever the voice pitch (opennova::lwf::wave_pitch_scale carries the
+	// witness); any other stream keeps `p_pitch_scale`.
+	static double pitch_scale_for(const Ref<AudioStream> &p_stream, double p_pitch_scale);
 };
 
 } // namespace godot

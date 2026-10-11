@@ -293,7 +293,8 @@ struct WeaponSlotState {
     int32_t reserve = 0;       // carried pool, in rounds (the per-class pool via
                                // Entity_GetScoreValueBySlotType @ 0x5406e0; single-class
                                // model, D-WPN-2)
-    // Scope stash across a reload: reload unscoped us, rescope when it completes.
+    // Scope stash across a reload: the promoted byte when the reload began, the
+    // rescope when it completes (a ForceScoped def never rescopes).
     // [orig: g_RescopeAfterReload @ 0xB7647C; write @ 0x54312f, consume @ 0x54139e]
     bool rescope_after_reload = false;
     // The deferred fire re-queue — the port's slot for the original's
@@ -344,6 +345,25 @@ int32_t weapon_slot_world_heat_glow(const WeaponFsmDef &def,
 bool weapon_sights_card_eligible(const WeaponFsmDef &def,
                                  const WeaponSlotState &slot);
 
+// The local owner's scope, as the handlers reach it: they call it INLINE where
+// retail calls Player_ToggleWeaponScope or writes g_WeaponScopeActive, so the
+// SCOPEUP / SCOPEDOWN a toggle queues on the slot lands before the pump's
+// transition reads `next` [orig: WeaponSlot_TryQueueScopeUp @0x53f050 /
+// ..ScopeDown @0x53f080, writing slot+0x30]. The local player's pump alone
+// supplies one; the events record each call either way.
+class WeaponFsmScope {
+public:
+    // The whole toggle, its entry gates included [orig: Player_ToggleWeaponScope
+    // @0x4df0c0].
+    virtual void toggle(WeaponSlotState &slot) = 0;
+    // The bare promoted-byte clear: no ease, no FOV write, no tip
+    // [orig: g_WeaponScopeActive = 0 @0x5429f0 / @0x542ad3 / @0x5413a0].
+    virtual void clear_promoted() = 0;
+
+protected:
+    ~WeaponFsmScope() = default;
+};
+
 // Per-tick inputs (the input-dispatcher writers run before the pump).
 struct WeaponFsmInputs {
     bool fire_pressed = false;  // the binding-149 activation edge
@@ -357,7 +377,8 @@ struct WeaponFsmInputs {
     bool is_local = true;        // owner == g_LocalPlayerEntity paths
     bool is_authority = true;    // listen-host/SP: reload requests apply immediately
     bool auto_reload = true;     // [orig: g_AutoReloadEnabled @ 0x24D2118]
-    bool scope_active = false;   // g_WeaponScopeActive at reload time (the stash source)
+    bool scope_active = false;   // g_WeaponScopeActive, the promoted byte, at the pump
+    WeaponFsmScope *scope = nullptr; // the local owner's scope (null: no scope legs run)
     // SWITCHFROM bypasses its 30/tick holster timer when either the outgoing
     // or pending definition is Emplaced (Flags 0x80). The pending-slot owner
     // computes this because the standalone slot does not know its target def.
@@ -437,8 +458,15 @@ struct WeaponFsmEvents {
     bool dry_fired = false;        // the EMPTY one-shot entered
     bool reload_requested = false; // C2S 0x25 seam [orig: @ 0x5430ff; net-re §5.58]
     bool reload_applied = false;   // authority refill ran (WeaponSlot_ReloadAmmo shape)
-    bool unscope = false;          // g_WeaponScopeActive = 0 writes (one-shot/empty paths)
-    bool rescope = false;          // the pump's rescope-after-reload block [orig: @ 0x54139e]
+    // The handlers' scope legs, recorded whether or not a WeaponFsmScope ran them:
+    bool unscope = false;          // a toggle call over the promoted sight: the one-shot's
+                                   // last recoil [orig: @ 0x54305d] and the reload stash
+                                   // [orig: @ 0x543136]
+    bool rescope = false;          // the pump's rescope-after-reload block, the promoted
+                                   // byte cleared, then the toggle [orig: @ 0x5413a0 /
+                                   // @ 0x5413a6]
+    bool scope_cleared = false;    // the one-shot's empty Idle / EmptyIdle bare
+                                   // g_WeaponScopeActive = 0 [orig: @ 0x5429f0 / @ 0x542ad3]
 };
 
 // Apply the kick/heat legs of one direct receive-side action. The caller owns

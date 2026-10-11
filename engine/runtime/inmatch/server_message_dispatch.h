@@ -30,8 +30,8 @@ struct EntityHandle;
 // player-add [orig: Server_OnPlayerJoin @0x51a680 → Server_SendInitialGameStateToPlayer @0x51bba0];
 // the inmatch equivalent is `Server_SendInitialGameStateToPlayer` over `conn.burst`. An empirical
 // per-tick phase machine (queue_mission_bootstrap / queue_state4_loading_gate / the
-// 0x10/0x0A/0x57 tick cadence) has no original-engine counterpart, so there is none here (net-re §5.45 / D-NET-127). Reply BODIES are carried verbatim from the old
-// builders (captured-from-observation fixtures, D-NET-127) pending the per-body grill wave.
+// 0x10/0x0A/0x57 tick cadence) has no original-engine counterpart, so there is none here (net-re §5.45 / D-NET-127). The reply
+// bodies, once captured-from-observation fixtures, are each their witnessed serializer's port (D-NET-127 closed with D-NET-295).
 namespace opennova::inmatch {
 
 struct HostRotation;
@@ -43,9 +43,11 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 
 // Build the session-owned S2C 0x64 raw content. The two random regions and
 // nonzero session id are minted once by create_session; callers then retain the
-// returned block for every chunk request. [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
+// returned block for every chunk request. `mp_session_peer` is the host's
+// connection mode (false for a dedicated host, whose own slot +36 drops).
+// [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
-MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config);
+MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer);
 
 // The recipient's S2C 0x7B session summary (its name and PCID, the server
 // name, the advertised mission, the map file, the game type, the expansion).

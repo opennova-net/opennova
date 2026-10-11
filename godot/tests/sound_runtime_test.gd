@@ -461,6 +461,61 @@ func test_oneshots_share_fourteen_unreserved_channels_and_apply_pitch() -> void:
 	assert_eq(live, 14, "channels 0 through 11 remain reserved in the 26-channel device")
 
 
+# The game's own AUD1 buffer: the sample count, the Q16 pitch ratio, the width
+# byte (2 = 16-bit) and its signed samples (engine/formats/lwf/wav_pcm.cpp).
+func _build_aud1(count: int, pitch_q16: int) -> PackedByteArray:
+	var buf := StreamPeerBuffer.new()
+	buf.big_endian = false
+	buf.put_data("AUD1".to_ascii_buffer())
+	buf.put_u32(count)
+	buf.put_u32(pitch_q16)
+	buf.put_u32(2)
+	for _i in range(count):
+		buf.put_16(0)
+	return buf.data_array
+
+
+# A wave of pitch 0 plays at the mixer's least step whatever the voice pitch:
+# the step composes the play factor with the wave's pitch, so a pitch of 0 is
+# forced to the least step (44100 / 512, the stream's 86 Hz) and the voice's
+# pitch never scales it, where a wave of its own rate takes the voice pitch
+# (D-SND-49; opennova::lwf::wave_pitch_scale carries the witness).
+func test_zero_pitch_wave_ignores_the_voice_pitch() -> void:
+	var root := _real_root({
+		"zero.wav": _build_aud1(64, 0),
+		"rate.wav": _build_wav(PackedByteArray([0, 0, 0, 0]), 1, 22050, 16),
+	})
+	var bank = SoundBank.create(root)
+	for pair in [["ZERO", "zero.wav"], ["RATE", "rate.wav"]]:
+		var profile := _profile_with_set(pair[0], pair[1])
+		profile.set_set_field(0, "pitch_base", 131072)  # the voice pitch 2.0
+		profile.set_member_field(0, 0, 0, "base_pitch", 2.0)
+		bank.add_bank(profile)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "ZERO", StringName(), Vector3.ZERO))
+	assert_true(bank.play_oneshot_3d(parent, Vector3.ZERO, "RATE", StringName(), Vector3.ZERO))
+	var zero := parent.get_child(0) as AudioStreamPlayer3D
+	var rate := parent.get_child(1) as AudioStreamPlayer3D
+	assert_eq((zero.stream as AudioStreamWAV).mix_rate, 86, "a pitch-0 wave's stream runs at the least step")
+	assert_almost_eq(zero.pitch_scale, 1.0, 0.00001, "the one-shot's voice pitch never scales it")
+	assert_almost_eq(rate.pitch_scale, 4.0, 0.00001, "a wave of its own rate takes the voice pitch")
+	var holder: Node3D = bank.spawn_ambient(parent, Vector3.ZERO, "ZERO", &"Ambient")
+	assert_not_null(holder)
+	if holder != null:
+		var ambient := holder.get_child(0) as AudioStreamPlayer3D
+		assert_almost_eq(ambient.pitch_scale, 1.0, 0.00001, "nor does an ambient layer's member pitch")
+		var looped := ambient.stream as WaveStream
+		assert_not_null(looped, "the ambient loop copy stays a decoded wave's stream")
+		if looped != null:
+			assert_eq(looped.loader_pitch_q16, 0, "the copy keeps the loader pitch word the channel updates read")
+			assert_eq(WavLoader.pitch_scale_for(looped, 3.0), 1.0, "so a channel update keeps the least step")
+	var voice: AudioStreamPlayer = bank.spawn_oneshot_2d(parent, "ZERO", StringName())
+	assert_not_null(voice)
+	if voice != null:
+		assert_almost_eq(voice.pitch_scale, 1.0, 0.00001, "nor a 2D voice's member pitch")
+
+
 func test_entity_refire_retakes_its_own_channel() -> void:
 	# Retail keys the open call on the source entity: a channel already playing
 	# the same wave for the same entity scores zero and is retaken, so a body

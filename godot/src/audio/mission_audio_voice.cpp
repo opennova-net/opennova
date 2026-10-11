@@ -60,12 +60,14 @@ void MissionAudio::sync_script_voice() {
         if (frame.local) {
             auto *voice = memnew(AudioStreamPlayer);
             voice->set_stream(stream);
-            voice->set_pitch_scale(SoundBank::pitch_scale_from_q16(frame.state.pitch_q16));
+            voice->set_pitch_scale(WavLoader::pitch_scale_for(stream,
+                    SoundBank::pitch_scale_from_q16(frame.state.pitch_q16)));
             node = voice;
         } else {
             auto *voice = memnew(AudioStreamPlayer3D);
             voice->set_stream(stream);
-            voice->set_pitch_scale(SoundBank::pitch_scale_from_q16(frame.state.pitch_q16));
+            voice->set_pitch_scale(WavLoader::pitch_scale_for(stream,
+                    SoundBank::pitch_scale_from_q16(frame.state.pitch_q16)));
             SoundBank::configure_unattenuated_3d(voice);
             node = voice;
         }

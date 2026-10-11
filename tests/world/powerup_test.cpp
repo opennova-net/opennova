@@ -9,6 +9,7 @@
 #include <runtime/world/powerup.h>
 
 #include <formats/def/def.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/weapon_inventory.h>
@@ -299,6 +300,42 @@ void test_med_pack_one_shot() {
     CHECK(sounds.size() == 1);
     if (!sounds.empty()) CHECK(std::string(sounds[0].set_name) == "HEALTH_UP");
     CHECK(rig.world.out.powerup_grants.empty());
+}
+
+// The ceiling is Entity_GetMaxHealthWithDifficulty's: out of a session the
+// LOCAL player's def hp doubles at the difficulty word -1 (a 16-bit sum) and
+// halves toward zero at 1; a remote player, any player in a session, and the
+// word 0 keep the def hp; no definition is 0.
+// [orig: Entity_GetMaxHealthWithDifficulty @0x43B8A0 -- @0x43B8AB, @0x43B8AD,
+//  @0x43B8C0, @0x43B8CE..0x43B8D8, @0x43B8DC..0x43B8E9]
+void test_ceiling_difficulty() {
+    Rig rig;
+    const EntityHandle remote = rig.spawn_player(false);
+    const Entity &local = *rig.get(rig.picker);
+    const Entity &other = *rig.get(remote);
+    rig.world.rules.difficulty = -1;
+    CHECK(max_health_with_difficulty(rig.world, local) == 200);
+    CHECK(max_health_with_difficulty(rig.world, other) == 100);
+    CHECK(max_health_with_difficulty(rig.world, local, 20000) == -25536); // (int16)40000
+    rig.world.rules.difficulty = 1;
+    CHECK(max_health_with_difficulty(rig.world, local) == 50);
+    CHECK(max_health_with_difficulty(rig.world, local, 101) == 50);
+    CHECK(max_health_with_difficulty(rig.world, local, -3) == -1); // toward zero
+    CHECK(max_health_with_difficulty(rig.world, other) == 100);
+    rig.world.rules.difficulty = 0;
+    CHECK(max_health_with_difficulty(rig.world, local) == 100);
+    rig.world.rules.difficulty = -1;
+    rig.world.rules.mp_session = true;
+    CHECK(max_health_with_difficulty(rig.world, local) == 100);
+    rig.world.rules.mp_session = false;
+    Entity bare = local;
+    bare.has_item_def = false;
+    CHECK(max_health_with_difficulty(rig.world, bare) == 0);
+    // The med pack raises the local player to the doubled ceiling.
+    const EntityHandle med = rig.spawn_powerup(1);
+    powerup_bind_entities(rig.world, rig.items);
+    powerup_pickup(rig.world, med, rig.picker, rig.ctx(true));
+    CHECK(rig.get(rig.picker)->health == 200);
 }
 
 // A client's copy of a REMOTE player's pickup (the joiner's wire-replica
@@ -934,6 +971,7 @@ int main() {
     test_bind();
     test_bind_without_table();
     test_med_pack_one_shot();
+    test_ceiling_difficulty();
     test_med_pack_refuses_when_full();
     test_remote_body_pickup_on_a_client();
     test_infinite_med_pack_respawns();

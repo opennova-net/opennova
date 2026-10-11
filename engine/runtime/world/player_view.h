@@ -627,13 +627,22 @@ bool player_view_scope_ease_active(const PlayerViewState &v);
 // The PROMOTED scope byte [orig: g_WeaponScopeActive @0xB76478]: set only by
 // the settle promoter (= the engaged target when the interp lands @0x4de4f7)
 // and by the mount stamp, cleared by both toggle branches (@0x4df20c /
-// @0x4df31d) and by the auto-re-raise (@0x4df609). It holds through the
+// @0x4df31d), by the auto-re-raise (@0x4df609) and by the weapon FSM's bare
+// writes (below). It holds through the
 // settled drop-with-memory ease (@0x4df5ae) and NOT through a raise, so it is
 // no function of engaged + active. The camera reset clears only the target;
 // a same-category mount retains this byte, and ForceScoped stamps it itself.
 // [orig: reset @0x4DE275; mount @0x4DFB31..0x4DFB66]
 inline bool player_view_scope_settled(const PlayerViewState &v) {
     return v.scope_settled;
+}
+
+// The weapon FSM's bare `g_WeaponScopeActive = 0`: the promoted byte alone,
+// the target, the interp and the hipfire latch untouched (no ease, no FOV
+// write, no tip). [orig: WeaponAction_Idle @0x5429f0; WeaponAction_EmptyIdle
+//  @0x542ad3; WeaponAction_ProcessFrame @0x5413a0, ahead of its toggle]
+inline void player_view_clear_scope_promoted(PlayerViewState &v) {
+    v.scope_settled = false;
 }
 
 // Discard the scope state when no held weapon/round remains. A weapon mount
@@ -667,6 +676,12 @@ bool player_view_scope_request_pending(const PlayerViewState &v, bool engaged);
 // when refused mid-ease; true for a no-op request. [orig: Player_ToggleWeaponScope
 // @0x4df177; disengage @0x4df1b3..0x4df212; engage @0x4df31d..0x4df373]
 bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon);
+// The toggle's leg itself, with no "already there" test and no ease gate (the
+// toggle's own gates precede it): retail's legs run whatever the target, so a
+// promoted sight whose target a camera reset cleared still disengages.
+// [orig: Player_ToggleWeaponScope -- disengage @0x4df185..0x4df212, engage
+//  @0x4df2a2..0x4df373; no early-out between @0x4df17f and either Setup]
+void player_view_run_scope_leg(PlayerViewState &v, bool engaged, bool inset_weapon);
 
 // A DERIVED hip (0) .. tpos (1) progress readout for probes and tests; retail
 // has no such scalar (its consumers read the promoted byte and the published

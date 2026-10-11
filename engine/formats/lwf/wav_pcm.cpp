@@ -54,6 +54,22 @@ uint32_t loader_pitch_q16(uint32_t rate) {
 	return static_cast<uint32_t>(((static_cast<uint64_t>(rate) << 16) + 22050u) / 44100u);
 }
 
+// The rate a pitch of 0 plays at. The mixer steps a channel each device frame by
+// (((play * factor) >> 16) * pitch + 0x400000) >> 23, the factor (44100 << 16) / device, and forces a
+// step of 0 to 1 [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5f6..0x7bd60e, @ 0x7bd619..0x7bd61d;
+// AudioMixer_Init @ 0x7bd381..0x7bd393], a step counted in 1/512 of a sample: the position starts at
+// -(count << 9) - step [orig: sub_7BD671 @ 0x7bd684..0x7bd689], the mix loop adds the step to it each
+// device frame (channel 0's self-patched `add eax, step` @ 0x7bdd9e, the step stored through
+// off_79CBFC at 0x7bdd9f) and reads the sample at the position >> 9 (`sar eax, 9` @ 0x7bddc6). A
+// pitch of 0 plays 1/512 of a sample a device frame, whatever the play factor. The device runs at
+// the config's audio_rate, 44100 by default [orig: Config_SetDefaults @ 0x54d15b;
+// Game_InitSubsystems @ 0x4a727e] (the Options' WDM_RATE radio, which can pick 22050, is not
+// serviced, D-MNU-21): 44100 / 512, 86.13 Hz, truncated to the shell's whole mix rate. Every other
+// pitch hands the shell its own rate, not the step's 1/512 quantum (D-SND-50), and a rate past
+// INT32_MAX (an AUD1 pitch from 0xBE37C63A, a RIFF rate from 0x80000000) reaches the shell's player
+// as a negative mix rate (D-SND-52).
+constexpr uint32_t kPitchZeroRate = 44100u / 512u;
+
 // The loader's own form, an AUD1 buffer (bytes 41 55 44 31), which it copies as it is, unchecked
 // [orig: Audio_LoadWavFileFromArchive @ 0x766480, the magic @ 0x7664e2, the copy @ 0x7664e9..0x766511]:
 // the header its RIFF decodes write (@ 0x766603..0x76663c, @ 0x766708..0x766745,
@@ -61,8 +77,8 @@ uint32_t loader_pitch_q16(uint32_t rate) {
 // [orig: sub_7BD671 @ 0x7bd67f], the pitch ratio to the 44100 Hz device in Q16 at +8
 // [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd603] and the samples from +16, signed (the
 // RIFF form's 8-bit bias already taken off), 16-bit where the byte at +12 is 2 and 8-bit for any
-// other byte there [orig: sub_7BD671 @ 0x7bd692]. The byte at +13, which the mixer shifts the
-// channel's volume by, is not read (D-SND-46). The copy is the bytes' own size; where they end inside
+// other byte there [orig: sub_7BD671 @ 0x7bd692], their volume shifted down by the byte at +13 [orig:
+// AudioChannel_ComputeMixCoefficients @ 0x7bd5e6]. The copy is the bytes' own size; where they end inside
 // the header or before the count's samples the loader's pad and the mixer read on past them
 // (unwitnessed): ours refuses the first and plays the samples present of the second, the count
 // recorded as it says.
@@ -98,10 +114,31 @@ bool decode_aud1(const uint8_t *bytes, size_t size, WavPcm &out, std::string &er
 		if (first > -0x800 && first < 0x800)
 			std::fill(out.pcm16.begin(), out.pcm16.begin() + std::min<size_t>(8, present) * 2, uint8_t(0));
 	}
+	// The byte at +13: the mixer shifts the channel's three mix coefficient quadwords right by it,
+	// arithmetically (movzx ecx, byte [edi+0Dh]; movd mm4, ecx; psraw mm5 / mm6 / mm7, mm4 [orig:
+	// AudioChannel_ComputeMixCoefficients @ 0x7bd5e6..0x7bd5f3]), each unit halving the channel's
+	// volume; a count of 15 or more leaves no coefficient above 0 (each at most 0x7FFF; psraw past 15
+	// fills a word with its sign), so the channel plays silent for its length. Ours shifts the samples
+	// alike, s >> n, silence from 15 on. Retail scales each sample by the shifted coefficient,
+	// (s * (c >> n)) >> 16, where the shell's mixer scales by its volume (D-SND-8), so the low bits
+	// round apart, and mm6's negative words (the 2-channel blend table's +/-(80 * w) >> 7 pair and
+	// its 0xD500 constant, channels 1 and 2's fixed quadwords in the 4- to 8-channel modes) shifted
+	// 15 or more stay -1, a delayed tap of -1 for each sample above 0 (D-SND-51).
+	const uint8_t shift = bytes[13];
+	if (shift != 0) {
+		for (size_t i = 0; i < present; ++i) {
+			const int16_t s = static_cast<int16_t>(io::read_u16_le(out.pcm16.data() + 2 * i));
+			const int16_t shifted = shift >= 15 ? int16_t(0) : static_cast<int16_t>(s >> shift);
+			out.pcm16[2 * i] = static_cast<uint8_t>(uint16_t(shifted) & 0xFF);
+			out.pcm16[2 * i + 1] = static_cast<uint8_t>(uint16_t(shifted) >> 8);
+		}
+	}
 	// The rate the ratio is nearest, for the shell's player (the mixer steps by the ratio itself): the
 	// inverse the dialog line's hold takes, (pitch * 44100 + 0x8000) >> 16 [orig: Dialog_LoadAudioClip
-	// @ 0x44dd8e..0x44dd9f, a signed imul; ours unsigned, the same below a pitch of 2^31].
-	out.sample_rate = static_cast<uint32_t>((uint64_t(pitch_q16) * 44100 + 0x8000) >> 16);
+	// @ 0x44dd8e..0x44dd9f, a signed imul; ours unsigned, the same below a pitch of 2^31]; a pitch of 0
+	// the mixer's least step [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd619..0x7bd61d].
+	out.sample_rate = pitch_q16 == 0 ? kPitchZeroRate
+	                                 : static_cast<uint32_t>((uint64_t(pitch_q16) * 44100 + 0x8000) >> 16);
 	out.channels = 1;
 	out.loader_samples = samples;
 	out.loader_pitch_q16 = pitch_q16;
@@ -387,9 +424,11 @@ bool wav_decode_pcm16(const uint8_t *bytes, size_t size, WavPcm &r_out,
 				walk.block_align);
 		r_out.loader_samples = count;
 	}
-	r_out.sample_rate = walk.rate;
 	r_out.channels = 1;
 	r_out.loader_pitch_q16 = loader_pitch_q16(walk.rate);
+	// The wave's own rate; a rate of 0, whose ratio is 0, the mixer's least step
+	// [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd619..0x7bd61d].
+	r_out.sample_rate = r_out.loader_pitch_q16 == 0 ? kPitchZeroRate : walk.rate;
 	return true;
 }
 
@@ -501,6 +540,10 @@ bool wav_decode_pcm16_lenient(const uint8_t *bytes, size_t size, WavPcm &r_out,
 	}
 	r_out.loader_pitch_q16 = loader_pitch_q16(sample_rate);
 	return true;
+}
+
+double wave_pitch_scale(uint32_t loader_pitch_q16, double play_scale) {
+	return loader_pitch_q16 == 0 ? 1.0 : play_scale;
 }
 
 bool wav_write_pcm_mono(const uint8_t *data, size_t size, uint32_t rate, uint16_t bits,

@@ -22,6 +22,7 @@
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/pose_provider.h>
 #include <runtime/world/death_camera.h>
+#include <runtime/world/entity_spawn.h> // max_health_with_difficulty
 #include <runtime/world/geom.h>
 #include <runtime/world/tp_camera_mount.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed
@@ -30,6 +31,7 @@
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
 #include <base/io/strutil.h>
+#include <runtime/hud/scope_circle_mask.h> // sighted_selector_from_def
 #include <runtime/hud/tip_system.h>
 
 using namespace opennova::def;
@@ -108,13 +110,14 @@ bool suppress_view_bias(const LocalPlayerWeapon &w, const WeaponSlotState *slot,
 
 } // namespace
 
-void local_player_camera_reset(World *world, const LocalPlayerWeapon &w, PlayerViewState &v) {
+void local_player_camera_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v) {
     // [orig: Player_ResetCameraAndMovementState @0x4DE1F0]
     player_view_weapon_switch_reset(v);
     v.weapon_pose_bound = w.active && (w.def.flags & 3) != 0; // @0x4de287..0x4de2a7
     if (world != nullptr) world->weather.core.scalar_channels.camera_fov_target_fp = 80 << 16;
     v.binoculars_view_active = false; // @0x4de2ad
     v.binoculars_requested = false;   // @0x4de2b3
+    w.nvg_scope_restore = false;      // dword_B76554 = 0 @0x4de2b9
 }
 
 void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState &v,
@@ -131,7 +134,6 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
     v.nvg_active = world != nullptr &&
                    (world->tables.mission_attrib_flags &
                     static_cast<uint32_t>(bms::AttribFlags::StartWithNVGOn)) != 0;
-    w.nvg_scope_restore = false;
     local_player_view_refresh(world, v);
 }
 
@@ -393,28 +395,40 @@ void raise_scope_tips(World &world, const LocalPlayerWeapon &w, bool engaged) {
 
 } // namespace
 
-bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
-                            WeaponSlotState &slot, bool engaged) {
-    if (!player_view_scope_request_pending(v, engaged)) return true;
-    if (!player_view_set_engaged(v, engaged, (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0))
-        return false;
+namespace {
+
+// One toggle leg with its fov write and its tips, whatever the target.
+// [orig: Player_ToggleWeaponScope @0x4df185..0x4df282 / @0x4df2a2..0x4df3de,
+//  the Sighted fov @0x4df3ea..0x4df430]
+void run_scope_leg(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
+                   WeaponSlotState &slot, bool engaged) {
+    player_view_run_scope_leg(v, engaged, (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0);
     auto &target = world.weather.core.scalar_channels.camera_fov_target_fp;
     if (!engaged) target = 80 << 16; // [orig: @0x4DF218]
     if ((w.def.flags & DEF_WEAPON_FLAG_SIGHTED) != 0)
         target = engaged && v.camera_mode == 0
             ? sighted_fov_target(local_player_scope_zoom(w, slot)) : 80 << 16;
     raise_scope_tips(world, w, engaged);
+}
+
+} // namespace
+
+bool local_player_set_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
+                            WeaponSlotState &slot, bool engaged) {
+    if (!player_view_scope_request_pending(v, engaged)) return true;
+    if (player_view_scope_ease_active(v)) return false; // [orig: @0x4df177]
+    run_scope_leg(world, w, v, slot, engaged);
     return true;
 }
 
-namespace {
-
 // Player_ToggleWeaponScope itself: its entry gates, then the leg the PROMOTED
-// byte picks. The input toggle reaches it behind its own currentAction gate,
-// the forced callers (the local death, the camera switch) without one.
+// byte picks. The input toggle reaches it behind its own currentAction gate;
+// the forced callers (the local death, the camera switch), the NVG action and
+// the weapon FSM's legs without one.
 // [orig: Player_ToggleWeaponScope @0x4df0c0]
-bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
-                         WeaponSlotState &active_slot) {
+bool local_player_toggle_weapon_scope(World &world, const LocalPlayerWeapon &w,
+                                      PlayerViewState &v, WeaponSlotState &active_slot,
+                                      const ScopeToggleCallFlags *at_call) {
     // The local player and its equipped slot's def [orig: @0x4df0cf,
     //  @0x4df0eb..0x4df0f6].
     const Entity *player = world.registry.get(world.cached.local_player);
@@ -422,12 +436,13 @@ bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewSta
     // An airborne or swimming (the deep-water 0x8000) body refuses either way
     // [orig: (Flags & 0xA000) == 0 @0x4df0dc]. The airborne bit shares retail
     // storage with the motor's mirror, which may not be published back yet
-    // this tick.
+    // this tick; a deferred call reads both as its caller saw them.
     const AiEntity *body = world.ai.for_handle(player->handle);
-    const uint32_t flags = player->flags | player->engine_flags;
-    if ((flags & (kEntityFlagInAir | kEntityFlagDrowning)) != 0 ||
-        (body != nullptr && body->inf.airborne))
-        return false;
+    const uint32_t flags =
+            at_call != nullptr ? at_call->flags : player->flags | player->engine_flags;
+    const bool airborne =
+            at_call != nullptr ? at_call->airborne : body != nullptr && body->inf.airborne;
+    if ((flags & (kEntityFlagInAir | kEntityFlagDrowning)) != 0 || airborne) return false;
     // The toggle branches on the PROMOTED byte, not the target: a promoted
     // sight disengages, anything else engages [orig: the g_WeaponScopeActive
     // branch @0x4df17f].
@@ -448,10 +463,12 @@ bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewSta
     // Scope-UP is refused while a movement key is held on a Scoped weapon
     // [orig: the engage branch's g_MovementKeyHeld && (flags & 1) -> return @0x4df29c].
     if (!promoted && player_view_scope_up_blocked(v, w.def.flags)) return false;
-    // The toggle latches this ease's step count (7 for Inset weapons, else 15;
-    // 1 on the hipfire-return leg) [orig: Setup @0x4df1b3..0x4df36e].
-    if (!local_player_set_scope(world, w, v, active_slot, !promoted))
-        return false;
+    // The leg the promoted byte picks runs whatever the target: a camera reset
+    // clears the target and keeps the promoted byte, and the disengage leg
+    // still lowers that sight. It latches this ease's step count (7 for Inset
+    // weapons, else 15; 1 on the hipfire-return leg) [orig: the branch
+    // @0x4df17f, no early-out before Setup @0x4df1b3..0x4df36e].
+    run_scope_leg(world, w, v, active_slot, !promoted);
     // The engage leg forces the promoted byte to 1 around its seat-flag
     // queries, so an OnlyScoped AbsorbPitch weapon levels the body pitch as
     // the sight comes up; the tube elevation then rides the offset alone.
@@ -466,6 +483,42 @@ bool toggle_weapon_scope(World &world, const LocalPlayerWeapon &w, PlayerViewSta
     return true;
 }
 
+namespace {
+
+// Player_IsEquippedWeaponScoped: a promoted sight on a Scoped def
+// [orig: @0x4dcc80 -- EquippedSlot and its Def @0x4dcc85..0x4dcc94, Def+8 & 1
+//  @0x4dcc99, g_WeaponScopeActive @0x4dcca5].
+bool equipped_weapon_scoped(const LocalPlayerWeapon &w, const PlayerViewState &v) {
+    return w.active && (w.def.flags & DEF_WEAPON_FLAG_SCOPED) != 0 &&
+           player_view_scope_settled(v);
+}
+
+// Player_IsVehicleGunnerScoped: a promoted sight on a Sighted def whose slot
+// is not in SWITCHFROM, the def and slot half shared with the frame's sighted
+// selector [orig: @0x4dcd30 -- EquippedSlot and its Def @0x4dcd35..0x4dcd44,
+// Def+8 & 2 @0x4dcd49, slot+0x2C != 7 @0x4dcd55..0x4dcd5d, g_WeaponScopeActive
+// @0x4dcd5f].
+bool gunner_weapon_scoped(const LocalPlayerWeapon &w, const PlayerViewState &v,
+                          const WeaponSlotState &slot) {
+    return w.active && player_view_scope_settled(v) &&
+           hud::sighted_selector_from_def(static_cast<uint32_t>(w.def.flags),
+                                          slot.current == weapon_action::kSwitchFrom);
+}
+
+// The body's water legs, in call order, each running the toggle over a sight
+// either query answers with the Flags word its call saw; a toggle that
+// disengages clears the promoted byte, so a later leg's queries refuse
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b8316..0x4b8328 /
+//  @0x4b8342..0x4b835b / @0x4b8391..0x4b83a3; WaterScopeLegs in world.h].
+void run_water_scope_legs(World &world, LocalPlayerWeapon &w, PlayerViewState &v) {
+    const WaterScopeLegs &legs = world.out.water_scope_legs;
+    for (int i = 0; i < legs.count; ++i) {
+        WeaponSlotState &slot = *active_local_weapon_slot(world, w);
+        if (equipped_weapon_scoped(w, v) || gunner_weapon_scoped(w, v, slot))
+            local_player_toggle_weapon_scope(world, w, v, slot, &legs.legs[i].at_call);
+    }
+}
+
 } // namespace
 
 bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerViewState &v,
@@ -475,7 +528,7 @@ bool local_player_scope_toggle(World &world, const LocalPlayerWeapon &w, PlayerV
     // [orig: Input_HandleActionBinding_0 @0x4e052b..0x4e0537, the toggle call
     //  @0x4e053d].
     if (!weapon_fsm_scope_toggle_allowed(w.def, active_slot)) return false;
-    return toggle_weapon_scope(world, w, v, active_slot);
+    return local_player_toggle_weapon_scope(world, w, v, active_slot);
 }
 
 bool local_player_forced_scope_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v) {
@@ -483,7 +536,7 @@ bool local_player_forced_scope_toggle(World &world, LocalPlayerWeapon &w, Player
     // toggle takes its disengage leg when its entry gates pass.
     if (!player_view_scope_settled(v)) return false;
     WeaponSlotState *active_slot = active_local_weapon_slot(world, w);
-    return active_slot != nullptr && toggle_weapon_scope(world, w, v, *active_slot);
+    return active_slot != nullptr && local_player_toggle_weapon_scope(world, w, v, *active_slot);
 }
 
 bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
@@ -539,14 +592,20 @@ void play_nvg_interface_set(World &world, const char *set) {
 }
 } // namespace
 
-bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v,
-                             const std::function<bool()> &scope_toggle) {
+bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState &v) {
     if (world.registry.get(world.cached.local_player) == nullptr) return false;
+    WeaponSlotState &active_slot = *active_local_weapon_slot(world, w);
     if (!v.nvg_active) {
-        w.nvg_scope_restore = false;
-        if (w.active && player_view_scope_settled(v) &&
-            (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0) {
-            w.nvg_scope_restore = scope_toggle();
+        // A promoted Scoped Inset sight runs the toggle itself, NVG still off,
+        // and the restore latches whatever the toggle did [orig: case 41 --
+        //  the Player_IsEquippedWeaponScoped call @0x4e06b3, the
+        //  Player_IsVehicleHasAutoAim call (the def's Inset bit, flags2 0x200,
+        //  Player_IsVehicleHasAutoAim @0x4dccb0) @0x4e06bc, the
+        //  Player_ToggleWeaponScope call @0x4e06c5, dword_B76554 = 1 @0x4e06ca,
+        //  g_NVGActive = 1 @0x4e06d7].
+        if (equipped_weapon_scoped(w, v) && (w.def.flags2 & DEF_WEAPON_FLAG2_INSET) != 0) {
+            local_player_toggle_weapon_scope(world, w, v, active_slot);
+            w.nvg_scope_restore = true;
         }
         const bool on = player_view_toggle_nvg(v);
         // NV_ON after the scope drop [orig: case 41's on branch — `mov edx,
@@ -557,12 +616,16 @@ bool local_player_nvg_toggle(World &world, LocalPlayerWeapon &w, PlayerViewState
         world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventNvgOn));
         return on;
     }
-    // Clear NVG before the normal scope-up request so the Inset refusal no
-    // longer applies, then consume the one-shot restore latch.
+    // NVG clears first, so the toggle's Inset refusal no longer applies; then
+    // a latched restore runs the toggle whatever the sight's state, and the
+    // latch clears [orig: g_NVGActive = 0 @0x4e067e; the latch test @0x4e0678 /
+    // @0x4e0684; the Player_ToggleWeaponScope call @0x4e0686; dword_B76554 = 0
+    // @0x4e068b].
     player_view_toggle_nvg(v);
-    const bool restore_scope = w.nvg_scope_restore;
-    w.nvg_scope_restore = false;
-    if (restore_scope && !v.scope_engaged) scope_toggle();
+    if (w.nvg_scope_restore) {
+        local_player_toggle_weapon_scope(world, w, v, active_slot);
+        w.nvg_scope_restore = false;
+    }
     // NV_OFF after the scope restore [orig: case 41's off branch — `mov ecx,
     // g_SndNvOff` @0x4e0691, Sound_PlayInterfaceTriggerSet @0x4e0698].
     play_nvg_interface_set(world, kNvgOffSoundset);
@@ -588,10 +651,14 @@ void local_player_view_tick(World *world, PlayerViewState &v,
         player_view_update_effective_modes(v, false,
                                            world != nullptr && world->match.outcome().ended);
         v.tp_anchor_valid = false;
+        if (world != nullptr) world->out.water_scope_legs.count = 0; // consumed unrun
         return;
     }
     const Entity *e = world->registry.get(world->cached.local_player);
-    if (!e) return;
+    if (!e) {
+        world->out.water_scope_legs.count = 0; // consumed unrun
+        return;
+    }
     // The mounted camera's carrier read, refreshed every tick: only a CONTROL
     // seat (the retail parentSlot 2/5 test) takes the mounted leg, and the
     // carrier's pose/radius/class feed the chase target, the back-off and the
@@ -703,10 +770,15 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     // @0x42ec15..0x42ec19], the body's death [orig: Entity_UpdateAllEntities
     // @0x52674b, after Client_ProcessNetworkFrame @0x526692; @0x4b4d1d..0x4b4d25]
     // and the render's camera switch. Each toggles only a promoted sight.
+    // The body's water legs follow its death in the entity update, ahead of
+    // the render's camera switch [orig: Entity_UpdateInfantryPlayerBody
+    // @0x4b4d25 before @0x4b8304..0x4b83a3]; they are consumed either way.
     if (weapon != nullptr) {
         if (death_edge) local_player_forced_scope_toggle(*world, *weapon, v);
+        run_water_scope_legs(*world, *weapon, v);
         if (camera_switch) local_player_forced_scope_toggle(*world, *weapon, v);
     }
+    world->out.water_scope_legs.count = 0;
 }
 
 bool local_view_draws_virtual_display(const World &world, const PlayerViewState &v,
@@ -1254,9 +1326,8 @@ int local_player_health(const World &world) {
 
 int local_player_max_health(const World &world) {
     if (!world.cached.local_player.valid()) return 100;
-    const AiEntity *p = world.ai.for_handle(world.cached.local_player);
-    if (!p || p->inf.max_health <= 0) return 100;
-    return p->inf.max_health;
+    const Entity *e = world.registry.get(world.cached.local_player);
+    return e != nullptr ? max_health_with_difficulty(world, *e) : 100;
 }
 
 } // namespace opennova::world

@@ -1,10 +1,29 @@
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/world.h>
 #include <algorithm>
 
 namespace opennova::world {
 
+int32_t max_health_with_difficulty(const World &world, const Entity &e) {
+    if (!e.has_item_def) return 0; // @0x43B8AB
+    return max_health_with_difficulty(world, e, e.health_max);
+}
+
+int32_t max_health_with_difficulty(const World &world, const Entity &e, int32_t hp) {
+    hp = retail_signed_i16(hp); // movzx @0x43B8B4, movsx @0x43B8EC
+    if (world.rules.mp_session || !e.handle.valid() || e.handle != world.cached.local_player)
+        return hp; // @0x43B8AD, @0x43B8C0
+    if (world.rules.difficulty == -1) return retail_signed_i16(hp + hp); // @0x43B8CE..0x43B8D8
+    if (world.rules.difficulty == 1) return retail_signed_i16(hp / 2);   // @0x43B8DC..0x43B8E9
+    return hp;
+}
+
 void entity_reset_to_spawn_state(Entity &e) {
+    entity_reset_to_spawn_state(e, e.health_max);
+}
+
+void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling) {
     // [orig: Entity_ResetToSpawnState @0x4B9610] Save the current pose and
     // flags before clearing death state.
     e.spawn_position = e.position;
@@ -17,7 +36,9 @@ void entity_reset_to_spawn_state(Entity &e) {
     // calls this reset seeds its 620-tick spawn protection afterwards
     // [orig: no [esi+124h] store anywhere in @0x4B9610; the seed is
     //  Server_ProcessPlayerDeath @0x517937/@0x517952/@0x517960].
-    e.health = std::max(e.health, e.health_max);
+    // The reset's one raise [orig: Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax
+    // @0x43C290: `if (Health < max) Health = max`, a signed word compare].
+    if (retail_signed_i16(e.health) < health_ceiling) e.health = health_ceiling;
     e.alive = e.health > 0;
     e.mana = e.mana_max;
     e.section_mask = 0;

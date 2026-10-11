@@ -2,6 +2,7 @@
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 #include <base/io/fixed.h>
+#include <runtime/world/entity_spawn.h>
 #include <cstdio>
 #include <memory>
 
@@ -54,6 +55,19 @@ int main() {
         if (field->section_mask & 1u) return 1;
         const auto *approaching = rig->world.registry.get(rig->world.cached.local_player);
         if (!approaching || approaching->health <= 0) return 1;
+        // CP09 is an objective Co-op mission: offline its player starts at the doubled ceiling
+        // (D-PWR-2 [orig: Game_StartMission @0x525CC2..0x525D12]), which one small mine does not
+        // empty. Pin that start, then bring the player to its def hp so the kill below is the
+        // mine's alone.
+        if (rig->world.rules.difficulty == -1) {
+            if (approaching->health != world::max_health_with_difficulty(rig->world, *approaching) ||
+                    approaching->health != 2 * approaching->health_max) {
+                std::fprintf(stderr, "FAIL %s: the Co-op start is not the doubled ceiling (%d)\n",
+                        mission.first, approaching->health);
+                return 1;
+            }
+            rig->world.registry.get(rig->world.cached.local_player)->health = approaching->health_max;
+        }
         rig->local.teleport_local_player({point.x * io::kInvFp16One,
                 point.y * io::kInvFp16One, point.z * io::kInvFp16One + 1.0f}, 0, 0);
         const auto before = rig->world.out.rounds.last_stat();

@@ -84,8 +84,13 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config) {
 					: GameSessionChannel::Lan;
 	ctx.config.send_holdoff_ticks =
 			config.effective_send_holdoff_ticks(transport_fallback);
-	ctx.mission_metadata_blob = build_mission_metadata_blob(ctx.config);
+	ctx.mission_metadata_blob =
+			build_mission_metadata_blob(ctx.config, ctx.is_mp_session_peer != 0);
 	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
+	// The MP TLV (the 0x82 and the LAN discovery 0x81) carries the session's
+	// cap, never the slot limit's dedicated slot [orig: protocol +0x524 =
+	// ctx+0xF28, CNapiGameSession_CreateSession @0x4C9A80;
+	// NapiNPProtocol_SendServerInfoPacket @0x6209FF].
 	ctx.np_protocol.max_players = config.max_players;
 	// The original snapshots both advertised flag words while building the
 	// session config. P2 and the S2C 0x08 tail are the same BuildFlags value;

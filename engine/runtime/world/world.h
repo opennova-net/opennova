@@ -533,10 +533,12 @@ struct MissionTables {
     terrain::SurfaceTypeMap surface_map;
     PlayerTemplate player;
     // The mission header's attribute flags, stamped by the host at mission load
-    // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn). Read by the
-    // SP auto-lose win-condition leg and by the infantry death scream's night
-    // gate (0x100000 EnableNVG -> slot 8 SSNightDead @ 0x4b9ca3).
-    // [orig: g_BmsAttribFlags @0xa76258]
+    // (bms::AttribFlags as a raw dword; 0x40 = SinglePlayerRespawn), the
+    // objective Co-op mission start out of a session adding 0x40. Read by the
+    // SP auto-lose win-condition leg, the deploy keys and death menu, and by
+    // the infantry death scream's night gate (0x100000 EnableNVG -> slot 8
+    // SSNightDead @ 0x4b9ca3).
+    // [orig: g_BmsAttribFlags @0xa76258; the 0x40 OR Game_StartMission @0x525CF2]
     // The named bits below mirror bms::AttribFlags (engine/runtime/world stays
     // mission-parser-free; parity pinned by static_asserts in
     // engine/runtime/mission/promote.cpp).
@@ -661,7 +663,24 @@ struct SessionRules {
     // (@0x4E07A4) and Game_StartMission zeroes it (@0x525B25); no net wire
     // carries it. Defaults clear.
     bool ai_rules_skip_local_player = false;
+    // The difficulty word: outside a session the local player's health
+    // ceiling doubles at -1 and halves at 1 (max_health_with_difficulty,
+    // entity_spawn.h). Every mission start out of a session leaves it at
+    // mission_start_difficulty's word (MissionKernel::complete_mission_start);
+    // a session's is the config's byte, which no in-session reader of this
+    // word needs. [orig: dword_24D2110; Game_StartMission @0x525CDD /
+    //  @0x525CFA; Entity_GetMaxHealthWithDifficulty @0x43B8C8]
+    int32_t difficulty = 0;
 };
+
+// The difficulty word a mission start leaves outside a session: 0, and -1
+// under the objective Co-op game type (the 0x10020 family with the 0x20000
+// bit, 0x30020). [orig: Game_StartMission - `and ecx, 0FFFDFFFFh; cmp ecx,
+//  10020h` @0x525CD1..0x525CD7, the 0 @0x525CDD, `test eax, 20000h`
+//  @0x525CE5, the -1 @0x525CFA]
+constexpr int32_t mission_start_difficulty(uint32_t game_type) {
+    return (game_type & 0xFFFDFFFFu) == 0x10020u && (game_type & 0x20000u) != 0 ? -1 : 0;
+}
 
 // A HUD relay the authority sends the joiners as S2C 0x3F, in the order the
 // sim produced them: kind 0 is an objective notification (slot, is_win,
@@ -678,6 +697,36 @@ struct HudRelay {
     uint8_t flag = 0;
     int32_t team = 0;
     std::string key;
+};
+
+// The body state a deferred scope toggle call saw: the entity Flags word and
+// the motor's airborne mirror (the 0x2000 bit's other half), read by the
+// toggle's 0xA000 gate in place of the live ones.
+struct ScopeToggleCallFlags {
+    uint32_t flags = 0;
+    bool airborne = false;
+};
+
+// The local body's water-block scope legs this tick, in call order. Each calls
+// Player_ToggleWeaponScope when Player_IsEquippedWeaponScoped or
+// Player_IsVehicleGunnerScoped answers; the local view tick runs them after its
+// settle promoter, as retail's entity update follows Player_UpdatePerFrame,
+// with the Flags word each call saw (world/local_player_view.h).
+// [orig: Entity_UpdateInfantryPlayerBody -- the entry @0x4b8316..0x4b8328, the
+//  swim @0x4b8342..0x4b8360, the eye @0x4b837b..0x4b83a3]
+struct WaterScopeLeg {
+    enum class Kind : uint8_t { Entry, Swim, Eye };
+    Kind kind = Kind::Entry;
+    ScopeToggleCallFlags at_call;
+};
+struct WaterScopeLegs {
+    // The entry or the swim leg, then the eye leg.
+    static constexpr int kCapacity = 2;
+    std::array<WaterScopeLeg, kCapacity> legs{};
+    int count = 0;
+    void push(WaterScopeLeg::Kind kind, uint32_t flags, bool airborne) {
+        if (count < kCapacity) legs[count++] = {kind, {flags, airborne}};
+    }
 };
 
 // What the sim produced this tick for someone else to drain: the wire (entity
@@ -713,6 +762,9 @@ struct WorldOutbox {
 	// Water-surface crossings recorded this tick; the host fan drains them
 	// into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
 	WaterCrossQueue water_crossings;
+	// The local body's water-block scope legs (WaterScopeLegs above): the
+	// body's water block records them, the local view tick runs and clears them.
+	WaterScopeLegs water_scope_legs;
 	// The local player's tip events (hud/tip_system.h TipEvent) in the order
 	// they were raised — boarding and leaving a seat, the scope and NVG
 	// toggles, the binocular edge, and a client's spectator begin (the

@@ -68,6 +68,12 @@ void HudFrameCompiler::element_service_prompt(const HudFrameState &s, float w, f
 	// [orig: HUD_DrawGameplayOverlays -- slot 0xB4C3A0 pushed @0x5BDFD7 (armory /
 	//  vehicle bay), @0x5BE0AA (FARP wait), @0x5BE0F7 (FARP reloading);
 	//  HUD_DrawTextAtVirtualPos @0x5D3EC0 -> sub_5D2EA0 mode 2 @0x5D2ECE]
+	// The armory line alone yields to an open menu screen: the preround branch
+	// tests the flag before it formats STROVER_ARMORY_INFO, and the bay and
+	// FARP lines never test it. [orig: HUD_DrawGameplayOverlays, `call
+	//  sub_54B970` @0x5BDF09, `jnz` past the draw @0x5BDF10]
+	if (c.service_prompt == 1 && s.menu_screen_open)
+		return;
 	if (c.service_prompt && (s.hud_detail_level < 3 || c.service_above_declutter))
 		emit_slot_text(label_font_large_, label_large_scale_, c.service_text.c_str(),
 				sx(512, w), sy(280, h), half_bright_argb(active_color(s)), kFontAlignCenter);

@@ -282,6 +282,7 @@ void NwUdpListener::initialize_jo_host() {
 	inmatch::HostConfig config;
 	config.config.server_name = "OpenNova";
 	config.config.max_players = 64;
+	config.config.dedicated_server = true;
 	config.socket_mode = inmatch::SocketMode::Lan;
 	config.serve_and_play = false;
 	inmatch::start_host_session(*jo_owner_, config);

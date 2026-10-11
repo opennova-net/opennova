@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <formats/def/def.h>
+#include <runtime/world/entity_spawn.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
 #include <runtime/world/weapon_fsm.h>
@@ -44,20 +45,12 @@ PowerupAction make_action(const def::DefPowerupAction &row, const char *default_
     return out;
 }
 
-// The picker's health ceiling [orig: Entity_GetMaxHealthWithDifficulty
-// @0x43B8A0 -- the def hp (itemDef+0x17C) @0x43B8B4; outside a session the
-// LOCAL player's ceiling doubles at difficulty -1 and halves at 1
-// (dword_24D2110 @0x43B8D1..0x43B8E9)]. The single-player difficulty word has
-// no home here yet (docs/world/powerup-re.md D-PWR-2), so the ceiling is the
-// def hp on every peer.
-int32_t max_health(const World &, const Entity &e) {
-    if (!e.has_item_def) return 0; // @0x43B8AB
-    return retail_signed_i16(e.health_max);
-}
-
-// [orig: Entity_RaiseHealthToMax @0x43C290 -- `if (Health < max) Health = max`]
+// [orig: Entity_RaiseHealthToMax @0x43C290 -- `if (Health < max) Health = max`,
+//  the picker's ceiling Entity_GetMaxHealthWithDifficulty @0x43B8A0
+//  (max_health_with_difficulty: the local player's doubles out of a session at
+//  difficulty -1, the objective Co-op mission start's word)]
 void raise_health_to_max(const World &world, Entity &e) {
-    const int32_t max = max_health(world, e);
+    const int32_t max = max_health_with_difficulty(world, e);
     if (retail_signed_i16(e.health) < max) e.health = max;
 }
 

@@ -142,11 +142,12 @@ suite unaffected.
 > `build_server_auth`), not in the promoted legs. The golden test therefore asserts the field-level
 > parity the legs *control* (0x81 HK/PN/PG; 0x82 CI/CK/CR/SK/SCRK/NA, seed-injecting host_key/SK/SCRK)
 > and logs the deferred builder gap rather than inventing values (faithful-port rule). Measured vs a
-> LAN host: 0x81 — retail `ServerHello.CI` = host node index (2, not the client echo), the
+> LAN host: 0x81: retail `ServerHello.CI` = 2 (read then as the host node index; since corrected
+> below: it is the joiner's own CI echoed), the
 > game-server field block (`is_game_server`: SF/P1/P2/NP/MP) is present, identity strings are the
 > retail build's; 0x82 — `MI` is host-specific (retail 3 vs our 0x113f default), the CS control-field
 > *values* are the retail set (ours are onnet's `[UNVERIFIED]` values), and a LAN host emits **no CU**
-> block (we append novaworld name/url/nwuid). **Follow-up (tracked in TODO.md § Project health follow-ups):** the session-builder grill
+> block (we append novaworld name/url/nwuid). **Follow-up (done: Wave 3 below; the residue closed 2026-10-10):** the session-builder grill
 > (witness CI/MI/CS/game-server-block/LAN-CU-suppression in IDA) to reach full 0x81/0x82 byte-parity.
 >
 > **GRILLED 2026-06-27 (D-NET Wave 3):** 0x81 `NapiNPProtocol_SendServerInfoPacket @0x6204b0` —
@@ -160,6 +161,13 @@ suite unaffected.
 > the "[UNVERIFIED] onnet" note was stale). **0x82 is now faithful**; the residual golden byte-diff is
 > only host-specific seed values (CI host-node-index / MI host dcb / identity strings / live UT), not
 > builder logic. **Wave 3 (0x81 + 0x82 session builders) DONE.**
+> *(Since corrected 2026-10-10: none of that residue remains. The 0x81 `CI` is the prober's
+> own: `NapiNPProtocol_HandleClientHello @0x6213B0` reads it from the 0x41's `CI` TLV
+> (@0x621720) and passes it to `NapiNPProtocol_SendServerInfoPacket` (the call @0x6218FC), which
+> writes it as its first, unconditional TLV (@0x620563..0x62057E). The golden never captured the
+> 0x41, so "the 2 was the joiner's CI" is a deduction from that single caller, not a capture;
+> either way `build_server_hello`'s echo is retail's. `MI` is the assigned dcb (D-NET-105);
+> the identity strings and the live `UT` are the host's own (D-NET-265).)*
 > *(Since corrected 2026-09-10, D-NET-1: that CS template is the NOVAWORLDUDP service
 > block; a game host's 0x82 carries the JOINTOPERATIONS template, `jointoperations_cs_fields`,
 > which `make_server_auth_datagram` now feeds.)*
@@ -213,7 +221,7 @@ unaffected; full ctest 223/223.
 > Refinement vs plan (scope): **structural P3** — the ~8 §5.2a serializers with no witnessed byte
 > format (`0x2C/0x08/0x2A/0x66/0x76/0x45/0x7E/0x1A`) are **emitted as nothing + logged once**, never
 > faked (faithful-port rule; mirrors P2's deferred-builder-gap). Full burst byte-parity is the
-> follow-up grill wave tracked in TODO.md § Project health follow-ups (witness each serializer @ the addresses cited in `server_initial_state.cpp` →
+> follow-up grill wave (since done: the §5.2a serializers were ported by D-NET Wave 1; the TODO.md row is gone) (witness each serializer @ the addresses cited in `server_initial_state.cpp` →
 > `ingame_encode`, land via `re-doc`). The fixture burst in `game_session.cpp`
 > (`queue_mission_bootstrap` / `queue_state4_loading_gate`) is no longer on the npruntime spawn/burst
 > path; its full deletion is P8, once `game_runtime`'s §5.1 reply role is also grilled.
@@ -414,7 +422,7 @@ the new `engine/runtime/inmatch/server_message_dispatch.{h,cpp}` (`dispatch_sess
 `ctx.session_config` + the per-connection `NapiNPConnection.reply` state). Reply BODIES are carried
 verbatim (captured-from-observation fixtures, D-NET-127); the faithful per-body serializer port + the
 `Server_OnPlayerJoin` join-burst tail (the deferred §5.2a serializer half closed at P8.2 below) (`0x42/0x0F/0x4D/seed/0x3E`,
-to fold into `Server_SendInitialGameStateToPlayer`) stay part of that grill wave, tracked in TODO.md § Project health follow-ups.
+to fold into `Server_SendInitialGameStateToPlayer`) stay part of that grill wave (since done: the bodies are their serializers' ports, D-NET-127 closed with D-NET-295, and the TODO.md row is gone).
 
 Migrations the deletion forced: `napi_np_protocol.cpp` (drop `ctx.game_runtime` + the mirror; reactive
 replies via `dispatch_session_replies`); the per-frame `0x0A` adapter (`build_tag_0a_world_reference`)

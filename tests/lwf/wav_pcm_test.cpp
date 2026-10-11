@@ -484,11 +484,36 @@ int main() {
 		aud[4] = 0; aud[5] = aud[6] = aud[7] = 0;
 		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.pcm16.empty() &&
 				out.loader_samples == 0, "AUD1 count 0 plays no sample")) return 1;
-		// A pitch of 0 is taken as it is, the rate it rounds to 0.
+		// A pitch of 0 is taken as it is and plays at the mixer's least step, 1/512 of a
+		// sample a frame of the 44100 Hz device (AudioChannel_ComputeMixCoefficients
+		// @ 0x7bd619..0x7bd61d): 86 Hz, not a rate of 0; the lenient decode alike.
 		aud[4] = 3;
 		aud[8] = aud[9] = aud[10] = aud[11] = 0;
 		if (!expect(wav_decode_pcm16(aud.data(), aud.size(), out, error) && out.loader_pitch_q16 == 0 &&
-				out.sample_rate == 0, "AUD1 pitch 0 is taken")) return 1;
+				out.sample_rate == 86 && out.pcm16.size() == 6, "AUD1 pitch 0 plays at the least step")) return 1;
+		if (!expect(opennova::lwf::wav_decode_pcm16_lenient(aud.data(), aud.size(), lenient, error) &&
+				lenient.sample_rate == 86, "the lenient decode plays AUD1 pitch 0 at the least step")) return 1;
+		// Whatever the voice's play factor: the step composes it with the wave's pitch, so a pitch
+		// of 0 keeps the least step and its player takes the scale 1 over any composed one; a wave
+		// of any other pitch keeps the composed scale (AudioChannel_ComputeMixCoefficients
+		// @ 0x7bd603, @ 0x7bd619..0x7bd61d).
+		if (!expect(opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, 2.0) == 1.0 &&
+				opennova::lwf::wave_pitch_scale(out.loader_pitch_q16, 0.5) == 1.0 &&
+				opennova::lwf::wave_pitch_scale(0x8000, 2.0) == 2.0 &&
+				opennova::lwf::wave_pitch_scale(1, 0.5) == 0.5,
+				"a pitch-0 wave's player keeps the least step over any voice pitch")) return 1;
+	}
+	// A RIFF wave of rate 0, whose ratio ((0 << 16) + 22050) / 44100 is 0, plays at the
+	// least step too.
+	{
+		std::vector<uint8_t> data;
+		push_u16(data, 0x1234);
+		push_u16(data, 0xFEDC);
+		const std::vector<uint8_t> rateless = make_wav(1, 1, 0, 2, 16, data);
+		WavPcm out;
+		if (!expect(wav_decode_pcm16(rateless.data(), rateless.size(), out, error) &&
+				out.loader_pitch_q16 == 0 && out.sample_rate == 86 && out.pcm16.size() == 4,
+				"RIFF rate 0 plays at the least step")) return 1;
 	}
 	// The width byte: 2 is 16-bit, any other 8-bit [orig: sub_7BD671 @ 0x7bd692].
 	for (const uint8_t width : {uint8_t(0), uint8_t(3), uint8_t(0xFF)}) {
@@ -529,6 +554,45 @@ int main() {
 					got[1] == static_cast<int16_t>(static_cast<int8_t>(word.second) * 256) &&
 					got[2] == (3 << 8) && got[9] == (10 << 8),
 					"AUD1 width 0: a first word of 0x800 or more in size leaves them")) return 1;
+		}
+	}
+	// The byte at +13 shifts the channel's mix coefficients right, arithmetically (psraw
+	// [orig: AudioChannel_ComputeMixCoefficients @ 0x7bd5e6..0x7bd5f3]): each unit halves the
+	// volume, floored, and 15 or more leaves every coefficient of 0 or more (each at most 0x7FFF)
+	// at 0, a silent channel of the buffer's length; the lenient decode alike.
+	{
+		const auto shifted = [&](uint8_t shift, uint8_t width, std::vector<int16_t> &r) {
+			std::vector<uint8_t> aud;
+			push_tag(aud, "AUD1"); push_u32(aud, 5); push_u32(aud, 32768);
+			aud.insert(aud.end(), {width, shift, 0, 0});
+			if (width == 2) {
+				for (const uint16_t s : {uint16_t(0x7FFF), uint16_t(0x8000), uint16_t(1000), uint16_t(0xFC18), uint16_t(0xFFFF)})
+					push_u16(aud, s);
+			} else {
+				aud.insert(aud.end(), {0x7F, 0x80, 0x10, 0xF0, 0xFF});
+			}
+			WavPcm out, lenient;
+			if (!wav_decode_pcm16(aud.data(), aud.size(), out, error) ||
+					!opennova::lwf::wav_decode_pcm16_lenient(aud.data(), aud.size(), lenient, error) ||
+					lenient.pcm16 != out.pcm16 || out.loader_samples != 5 || out.sample_rate != 22050)
+				return false;
+			r = samples_of(out);
+			return true;
+		};
+		std::vector<int16_t> got;
+		if (!expect(shifted(1, 2, got) && got == std::vector<int16_t>({16383, -16384, 500, -500, -1}),
+				"AUD1 +13 of 1 halves a 16-bit buffer, floored")) return 1;
+		if (!expect(shifted(1, 1, got) && got == std::vector<int16_t>({16256, -16384, 2048, -2048, -128}),
+				"AUD1 +13 of 1 halves an 8-bit buffer")) return 1;
+		if (!expect(shifted(14, 2, got) && got == std::vector<int16_t>({1, -2, 0, -1, -1}),
+				"AUD1 +13 of 14 keeps the top bits")) return 1;
+		if (!expect(shifted(14, 1, got) && got == std::vector<int16_t>({1, -2, 0, -1, -1}),
+				"AUD1 +13 of 14 keeps the top bits of an 8-bit buffer")) return 1;
+		for (const uint8_t silent : {uint8_t(15), uint8_t(16), uint8_t(255)}) {
+			for (const uint8_t width : {uint8_t(1), uint8_t(2)}) {
+				if (!expect(shifted(silent, width, got) && got == std::vector<int16_t>(5, 0),
+						"AUD1 +13 of 15 or more is a silent buffer of its length")) return 1;
+			}
 		}
 	}
 

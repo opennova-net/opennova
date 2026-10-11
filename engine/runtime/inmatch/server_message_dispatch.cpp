@@ -167,7 +167,7 @@ uint32_t validate_side_password(const GameConfig &config, const NapiNPConnection
 
 } // namespace
 
-MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config) {
+MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer) {
 	MissionMetadataBlob blob{};
 	auto write_u32 = [&](std::size_t offset, uint32_t value) {
 		opennova::io::write_u32_le(blob.data() + offset, value);
@@ -184,14 +184,14 @@ MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config) {
 	while (mission_session_id == 0)
 		mission_session_id = make_random_session_u32() & 0xFFFFu;
 	write_u32(32, mission_session_id);
-	// Offset 36 carries the session's max players verbatim — the only
-	// capture-verified form (handshake goldens: le32 == max_players). An
-	// earlier serve-mode decrement here was pure inference with no witness;
-	// the dedicated-host form remains unwitnessed either way.
-	write_u32(36, std::min<uint32_t>(config.max_players, 251u));
+	// +36: the slot limit less a non-peer (dedicated) host's own slot, at most 251: the
+	// session's cap on every host; +48: the cfg's raw unlimited-vehicles word dword_24D2258.
+	// [orig: Client_BuildMissionDataRequestBlock @0x51E897..0x51E8B9, @0x51E8C5..0x51E8CB]
+	const int32_t players = static_cast<int32_t>(config.player_slot_limit()) - !mp_session_peer;
+	write_u32(36, static_cast<uint32_t>(players > 251 ? 251 : players));
 	write_u32(40, config.game_type);
 	write_u32(44, config.mp_attributes);
-	write_u32(48, 1u);
+	write_u32(48, static_cast<uint32_t>(config.unlimited_vehicles));
 	write_fixed_string(52, config.server_name);
 	write_fixed_string(84, config.mission_file);
 	// The 00TRg LAN oracle carries the map filename in both mission slots.
@@ -203,11 +203,11 @@ namespace {
 
 // ---------------------------------------------------------------------------
 // Byte helpers. The §5.1
-// identity bodies (0x7A PCID, 0x7B session info) are now FAITHFUL ports of the witnessed serializers
+// identity bodies (0x7A PCID, 0x7B session info) are FAITHFUL ports of the witnessed serializers
 // (NetPacket_WritePCID @0x5076e0, NapiNPMsg_0x7B_BuildPayload @0x507740; net-re §5.45, grilled
-// 2026-06-27). The remaining reply bodies (0x46 NetPacket_SerializePlayerSync0x46 @0x505e80 —
-// a flag-driven slot-state record, and 0x51 NetPacket_WriteEntityPacket @0x506bb0) carry approximations
-// pending slot-state modeling; the witnessed field maps are landed in net-re §5.45 (D-NET-127).
+// 2026-06-27), and so are the 0x46 slot-state record (NetPacket_SerializePlayerSync0x46 @0x505e80,
+// npwire encode_player_sync) and the 0x51 team-change confirm (NetPacket_WriteEntityPacket
+// @0x506bb0): D-NET-127 closed, its last 0x46 fields with D-NET-295 (net-re §8).
 // ---------------------------------------------------------------------------
 
 void append_u16_le(std::vector<uint8_t> &out, uint16_t v) {
@@ -393,7 +393,7 @@ std::vector<uint8_t> build_tag64_mission_metadata(
 		uint32_t transfer_id, uint32_t offset) {
 	MissionMetadataBlob fallback{};
 	if (session_blob == nullptr) {
-		fallback = build_mission_metadata_blob(cfg);
+		fallback = build_mission_metadata_blob(cfg, !cfg.dedicated_server); // no ctx: cfg mode
 		session_blob = &fallback;
 	}
 	return build_transfer_chunk(transfer_id, session_blob->data(),
@@ -962,11 +962,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// spawn-state reset below (it clears only the dead bit).
 	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
 	world::apply_spawn_point_latches(*player, pose);
-	world::entity_reset_to_spawn_state(*player);
+	world::entity_reset_to_spawn_state(*player); // [orig: Entity_RaiseHealthToMax @0x51782F, @0x4B97BC]
 	if (world.tables.player.has_item_def && world.tables.player.item_hp != 0)
-		player->health = world::retail_signed_i16(world.tables.player.item_hp);
+		player->health = world::max_health_with_difficulty(world, *player, world.tables.player.item_hp);
 	else if (player->health_max > 0)
-		player->health = player->health_max;
+		player->health = world::max_health_with_difficulty(world, *player, player->health_max);
 	else
 		player->health = 100;
 	player->alive = true;

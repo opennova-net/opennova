@@ -335,7 +335,12 @@ void entity_reset_to_spawn_state(World &world, AiSystem &ai, Entity &entity) {
         clear_target(world, ai, *body);
     }
 
-    entity_reset_to_spawn_state(entity);
+    // The reset's one raise is to the ceiling with the difficulty term (the local
+    // player's out of a session), no def-word raise ahead of it [orig:
+    // Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 ->
+    // Entity_GetMaxHealthWithDifficulty]; a row with no definition keeps the def word.
+    entity_reset_to_spawn_state(entity, entity.has_item_def
+            ? max_health_with_difficulty(world, entity) : entity.health_max);
     // The backup precedes collision correction in the original reset.
     entity.spawn_position = origin;
     entity.spawn_heading = heading;

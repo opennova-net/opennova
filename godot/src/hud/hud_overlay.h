@@ -149,6 +149,10 @@ public:
 	// The /NOHUD launch flag's overlay master word (hud_frame.h
 	// hud_overlay_master): true clears it for the process.
 	void set_no_hud(bool p_no_hud);
+	// Whether an in-game menu screen is open over the HUD (hud_frame.h
+	// HudFrameState::menu_screen_open carries the witness): the preround
+	// armory line yields to it.
+	void set_menu_screen_open(bool p_open);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
 	// The Tab board: whether it is held open, the frame counter its 4-team page

@@ -127,7 +127,7 @@ Dictionary HostSessionOptions::to_json_value() const {
 	out["game_type_auto"] = game_type_auto_;
 	out["fat_bullets"] = config_.fat_bullets != 0;
 	out["one_shot_kill"] = config_.one_shot_kill != 0;
-	out["unlimited_vehicles"] = config_.unlimited_vehicles;
+	out["unlimited_vehicles"] = config_.unlimited_vehicles != 0;
 	out["spawn_x"] = get_spawn_x();
 	out["spawn_y"] = get_spawn_y();
 	out["spawn_z"] = get_spawn_z();

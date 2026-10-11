@@ -599,6 +599,8 @@ int Server_ProcessPendingPlayerSpawns(NapiNPServerCtx &ctx, world::World &world)
 	bool restart = true;
 	while (restart) {
 		restart = false;
+		// Against the session's cap, not the slot limit [orig: `cmp eax,
+		// [ecx+0F28h]` @0x4C8E13].
 		const bool has_spawn_slots = count_alive_players(ctx) < ctx.config.max_players;
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			// Spawn an accepted-but-unspawned player: the host loopback (self_id_seen latched at

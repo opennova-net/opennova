@@ -139,6 +139,7 @@
 #include "simulation/simulation.h"
 #include "lwf/lwf_data.h"
 #include "lwf/wav_loader.h"
+#include "lwf/wave_stream.h"
 #include "audio/ambient_mixer.h"
 #include "audio/sound_selector.h"
 #include "audio/ambient_layer.h"
@@ -359,6 +360,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(Simulation);
 	GDREGISTER_CLASS(LwfData);
 	GDREGISTER_CLASS(WavLoader);
+	GDREGISTER_CLASS(WaveStream);
 	GDREGISTER_CLASS(AmbientMixer);
 	GDREGISTER_CLASS(SoundSelector);
 	GDREGISTER_CLASS(DbfData);

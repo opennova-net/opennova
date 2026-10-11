@@ -74,8 +74,7 @@ bool Simulation::request_local_player_binoculars_toggle() {
 bool Simulation::request_local_player_nvg_toggle() {
 	if (kernel_ == nullptr) return false;
 	return opennova::world::local_player_nvg_toggle(
-			kernel_->world, kernel_->local.weapon, kernel_->local.view,
-			[this]() { return request_local_player_scope_toggle(); });
+			kernel_->world, kernel_->local.weapon, kernel_->local.view);
 }
 
 int Simulation::request_local_player_nvg_gain(int p_delta) {

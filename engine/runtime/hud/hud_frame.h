@@ -893,6 +893,12 @@ struct HudFrameState {
 	// `test dword_840B18, 2` @0x5A81CE]; the whole word gates
 	// HUD_DrawGameplayOverlays [orig: `cmp dword_840B18, 0` @0x5BDE9B].
 	uint32_t overlay_master = kHudOverlayMasterDefault;
+	// An in-game .mnu screen is open (the in-game menu, the armory, the
+	// deploy screen, the end-round board, the command map): the preround
+	// armory line yields to it (element_service_prompt). [orig: dword_255110C,
+	// set by UI_OpenMenuScreen @0x54E59E, cleared by its close @0x54E60A,
+	// read through sub_54B970 @0x54B970]
+	bool menu_screen_open = false;
 	HudSessionState session;
 	// The two squad order lines S2C 0x72 wrote (replication ClientState
 	// squad_orders) [orig: byte_2721DB8, two 128-byte lines].

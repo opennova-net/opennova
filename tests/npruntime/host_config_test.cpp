@@ -118,7 +118,7 @@ int main() {
 		TEST_EXPECT(host.lineup_queue_size == stock.lineup_queue_size);
 		TEST_EXPECT(host.game_type_setting == stock.game_type_setting);
 		TEST_EXPECT(c.server_name == "Untitled");
-		TEST_EXPECT(c.max_players == 64u);
+		TEST_EXPECT(c.max_players == 64u && !c.dedicated_server && c.player_slot_limit() == 64u);
 		// Config_SetDefaults' join balance (balance_join 1, 0.5) and vote words.
 		TEST_EXPECT(c.balance_join && c.balance_join_percent == 0.5f);
 		TEST_EXPECT(!c.voting_enabled && c.voting_min_players == 6 && c.voting_percent == 0.66f);
@@ -192,7 +192,10 @@ int main() {
 		const GameConfig &c = host.config;
 		TEST_EXPECT(cfg.mp_max_players == 65); // the in-session cap, written back
 		TEST_EXPECT(host.player_limit == 65 && !host.serve_and_play);
-		TEST_EXPECT(c.max_players == 66u);      // 65 plus the dedicated slot
+		// The session's cap is the advertised and admitted one; only the slot
+		// limit carries the dedicated host's own slot.
+		TEST_EXPECT(c.max_players == 65u && c.dedicated_server);
+		TEST_EXPECT(c.player_slot_limit() == 66u); // 65 plus the dedicated slot
 		TEST_EXPECT(host.game_type_setting == 65540);
 		TEST_EXPECT(host.use_lineup_queue == 0 && host.lineup_queue_size == 12);
 		TEST_EXPECT(c.server_name == "A name of thirty-one characters"); // 31 bytes
@@ -205,7 +208,7 @@ int main() {
 		TEST_EXPECT(c.connection_speed == 7 && !c.allow_ai);
 		TEST_EXPECT(c.max_friendly_kills == 9 && c.time_of_day_continuity == 1);
 		TEST_EXPECT(c.num_teams == 4 && c.mp_attributes == 0x8004u);
-		TEST_EXPECT(c.fat_bullets && c.one_shot_kill && !c.unlimited_vehicles);
+		TEST_EXPECT(c.fat_bullets && c.one_shot_kill && c.unlimited_vehicles == 0);
 		TEST_EXPECT(c.voting_enabled);
 		TEST_EXPECT(c.change_team_interval_seconds == 120 && c.change_team_penalty_seconds == 20);
 		TEST_EXPECT(c.auto_balance_enabled && c.auto_balance_min_difference == 2 &&
@@ -228,12 +231,15 @@ int main() {
 		TEST_EXPECT(c.lan_mode == 3u);
 		TEST_EXPECT(c.effective_send_holdoff_ticks(GameSessionChannel::Lan) == 4u);
 
-		// A blank cap is 1 in session (2 with the dedicated slot).
+		// A blank cap is 1 in session (a slot limit of 2 with the dedicated slot).
 		gamecfg::GameCfg blank = gamecfg::defaults();
 		blank.mp_max_players = 0;
 		blank.dedicated = 1;
+		blank.unlimited_vehicles = 7; // the raw word, as retail's block carries it
 		const HostScreenState blank_host = host_session_settings(blank);
-		TEST_EXPECT(blank.mp_max_players == 1 && blank_host.config.max_players == 2u);
+		TEST_EXPECT(blank.mp_max_players == 1 && blank_host.config.max_players == 1u);
+		TEST_EXPECT(blank_host.config.player_slot_limit() == 2u);
+		TEST_EXPECT(blank_host.config.unlimited_vehicles == 7);
 	}
 
 	std::printf("host_config: ok\n");

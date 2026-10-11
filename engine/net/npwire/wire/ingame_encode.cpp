@@ -772,7 +772,8 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 // [orig: NapiNPServerMsg_0x029 @0x514F10 -> NetPacket_WriteEntityPacket @0x506bb0], and the client
 // FIELD-PARSES it (NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 rebinds CharacterEntity from
 // the packed char id) — a zeroed id re-bound the joiner to a vehicle archetype: the DBuggy1
-// shadow. Port the real record from @0x506bb0 when the team-change flow lands.)
+// shadow. The real record from @0x506bb0 is encode_team_change_confirm, below, which the
+// team-change list walk sends.)
 
 // [orig: NetPacket_SerializeScoreboard0x16 @0x504b80 (write) / NapiNPClientMsg_PlayerList
 // @0x42FAE0 (read)] — round-trips through decode_player_list. Byte 0 is a FLAGS byte (bit0

@@ -266,12 +266,13 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 				from->category == to->category;
 	};
 	const auto stage_parent = [&](Entity &p_mount, uint8_t target_adm) {
-        // The local attach resets before its mount; a detach does not take this
-        // leg. The reset includes the binocular clears, so a wire-echoed attach
-        // drops a raised toggle too. [orig: Entity_AttachToUseGunSlot @0x546B80
-        // (the Player_ResetCameraAndMovementState call @0x546ba4); the ctrlx
-        // attach's local reset @0x4947AE]
-		local_player_camera_reset(&world, w, view);
+        // The local UseGun attach resets before its mount; a detach does not take
+        // this leg. The reset includes the binocular clears, so a wire-echoed
+        // attach drops a raised toggle too. A control seat's reset ran at its
+        // attach, EWeap or not (vehicle_attach.cpp attach_apply).
+        // [orig: Entity_AttachToUseGunSlot @0x546B80 (the
+        //  Player_ResetCameraAndMovementState call @0x546ba4)]
+		if (player->mount_type == SeatType::Gunner) local_player_camera_reset(&world, w, view);
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
 		w.usegun_pending_mount = p_mount.handle;
@@ -293,7 +294,8 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 		w.usegun_pending_mount = EntityHandle{};
 		w.usegun_pending_weapon_adm = 0xFF;
 		w.usegun_switch = LocalUseGunSwitch::kDetach;
-		// Seats 2 and 3 share the detach restore through Player_MountWeaponSlot.
+		// Seats 2 and 3 share the detach restore through Player_MountWeaponSlot
+		// (its NVG latch clear ran at the detach, local_weapon_detach_mount).
 		// [orig: Entity_DetachFromVehicle @0x43562A..0x43565F]
 		queue_local_usegun_weapon_switch(world, w,
 				same_category(from_adm, w.usegun_saved_adm));
@@ -325,14 +327,45 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 		stage_personal();
 }
 
+void local_weapon_detach_mount(World &world, LocalPlayerWeapon &w,
+		const WeaponInventory *inventory) {
+	// The equipped slot and its def [orig: @0x4dfa5e..0x4dfa74].
+	if (!w.active) return;
+	// The detach mounts entity+0x308, else (no def of category < 11 there) the
+	// current slot [orig: +0x308 read @0x43563a, the fallback
+	// @0x43564e..0x435658]. A borrowed seat's +0x308 is the personal slot its
+	// attach saved [orig: @0x494831; @0x546c31 / @0x546c48]. An unborrowed
+	// seat's is the last SELECTED slot, stale after a key switch or a cycle,
+	// which mount without selecting [orig: Player_SelectWeaponSlot's writes
+	// @0x4dd6da / @0x4dd7a8 / @0x4dd81c are its only others]; the port does not
+	// model it and clears whenever the weapon is active, which differs only
+	// where neither +0x308 nor the current slot has a def (D-WPN-48).
+	if (w.usegun_slot_active || w.usegun_switch != LocalUseGunSwitch::kNone) {
+		const WeaponTable &table = world.tables.weapons;
+		const WeaponTableEntry *target = table.by_index(w.usegun_saved_adm);
+		if (target == nullptr || target->category >= 11) {
+			const WeaponInventorySlot *current =
+					inventory != nullptr ? inventory->slot(inventory->equipped_combo) : nullptr;
+			target = current != nullptr && current->adm_index >= 0
+					? table.by_index(static_cast<uint8_t>(current->adm_index))
+					: nullptr;
+		}
+		if (target == nullptr) return; // the target's def [orig: @0x4dfa53..0x4dfa58]
+	}
+	w.nvg_scope_restore = false; // [orig: dword_B76554 = 0 @0x4dfb75]
+}
+
 void commit_pending_weapon_switch(World &world, LocalPlayerWeapon &w,
 		WeaponInventory *inventory) {
 	// The pending -> equipped commit [orig: the switchfrom/switchrank completion
 	// consumes g_PendingWeaponSlot; EquippedSlot swap + the equippedAdmIndex stamp
 	// @ 0x4dd727; the FP model re-resolve runs shell-side off the event].
+	// The completion leaves the NVG restore latch alone: the request's reset /
+	// mount / select cleared it [orig: WeaponAction_SwitchFrom @0x5433b0 and
+	// WeaponAction_SwitchRank @0x543500 call none of Player_SelectWeaponSlot,
+	// Player_ResetCameraAndMovementState, Player_MountWeaponSlot].
 	w.switch_in_flight = false;
 	w.switch_deferred_action = -1;
-	w.nvg_scope_restore = false;
 	if (inventory == nullptr) return;
 	Entity *e = world.registry.get(world.cached.local_player);
 	const int32_t combo = inventory->pending_combo;
@@ -397,6 +430,10 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
 				commit_pending_weapon_switch(world, w, inventory);
 				break;
 			}
+			// The mount clears the NVG restore latch at the request, past its
+			// early-outs (no equipped slot or def) [orig: @0x4dfa4d..0x4dfa74,
+			// dword_B76554 = 0 @0x4dfb75].
+			w.nvg_scope_restore = false;
 			w.switch_in_flight = true;
 			WeaponSlotState *active_slot = active_local_weapon_slot(world, w);
 			const int32_t action = out.same_category
@@ -627,9 +664,11 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	const bool same_weapon_rebake = allow_same_weapon_rebake && w.active &&
 			!w.start_in_switchto && !data.name.empty() &&
 			strutil::iequals(data.name, w.def_name);
-	// A real mount invalidates the one-shot scope restore latch. The late
-	// first-person-model rebake is render-side only and must not mutate view state.
-	if (!same_weapon_rebake) w.nvg_scope_restore = false;
+	// The NVG scope restore latch is the switch request's to clear (the reset,
+	// the mount, the select); the install that follows a committed switch, and
+	// the render-side rebake, leave it [orig: dword_B76554's writers
+	// @0x4dd730 / @0x4dd7fe / @0x4de2b9 / @0x4dfb75; WeaponAction_SwitchFrom
+	// @0x5433b0 / SwitchRank @0x543500 write none].
 	// A mount is a new presentation epoch: no payload from the previous weapon may
 	// cross this seam, even though its strings were copied into the pending records.
 	// The same-weapon rebake is NOT an epoch — undrained records (including a
@@ -1040,6 +1079,23 @@ void weapon_trace_record(LocalPlayerWeapon &w, const WeaponSlotState &slot,
 	if (w.trace_head == 0) w.trace_wrapped = true;
 }
 
+// The local player's scope as the weapon FSM's legs reach it, inline: the
+// whole toggle, or the bare promoted-byte clear (weapon_fsm.h WeaponFsmScope).
+class LocalWeaponScope final : public WeaponFsmScope {
+public:
+	LocalWeaponScope(World &world, const LocalPlayerWeapon &w, PlayerViewState &view)
+			: world_(world), w_(w), view_(view) {}
+	void toggle(WeaponSlotState &slot) override {
+		local_player_toggle_weapon_scope(world_, w_, view_, slot);
+	}
+	void clear_promoted() override { player_view_clear_scope_promoted(view_); }
+
+private:
+	World &world_;
+	const LocalPlayerWeapon &w_;
+	PlayerViewState &view_;
+};
+
 } // namespace
 
 // The C2S 0x25 a local reload request ships. A UseGun seat (parentSlot 3)
@@ -1176,6 +1232,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	// pump in retail and only promotes g_WeaponScopeActive after the ease has
 	// completed [orig: promoter @ 0x4de4f7; weapon pump @ 0x526786].
 	in.scope_active = player_view_scope_settled(view);
+	// The FSM's scope legs run the toggle, or clear the promoted byte, where
+	// its handlers do [orig: Player_ToggleWeaponScope @0x4df0c0 called
+	// @0x543136 / @0x54305d / @0x5413a6; g_WeaponScopeActive = 0 @0x5429f0 /
+	// @0x542ad3 / @0x5413a0].
+	LocalWeaponScope scope(world, w, view);
+	in.scope = &scope;
 	in.instant_emplaced_switch = local_usegun_switch_is_instant(world, w);
 	// The heat window is a deadline against the logic tick, not a stored level.
 	// [orig: current_tick @ 0x24C1968]
@@ -1539,20 +1601,10 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 			commit_pending_weapon_switch(world, w, io.inventory);
 		}
 	}
-	// The FSM's scope side effects land on the sim-owned engaged bit: forced
-	// unscope (one-shot / reload stash) and the pump's rescope-after-reload
-	// [orig: g_WeaponScopeActive writes; the rescope block @ 0x54139e].
-	if (ev.unscope) {
-		++w.unscope_serial;
-		// The forced paths run the same refusing toggle — a mid-ease unscope keeps
-		// the scope (rare: a reload requested inside the raise ease)
-		// [orig: @ 0x543136 calls Player_ToggleWeaponScope, activeFlag-gated].
-		local_player_set_scope(world, w, view, active_slot, false);
-	}
-	if (ev.rescope) {
-		++w.rescope_serial;
-		local_player_set_scope(world, w, view, active_slot, true);
-	}
+	// The FSM's scope legs already ran inside the tick (LocalWeaponScope);
+	// the serials count the calls for the dev tools.
+	if (ev.unscope) ++w.unscope_serial;
+	if (ev.rescope) ++w.rescope_serial;
 	// Devtools instrumentation, last: the slot has finished mirroring, so the
 	// sample is the state this tick actually ends on.
 	weapon_trace_record(w, active_slot, ev, world.logic_tick);

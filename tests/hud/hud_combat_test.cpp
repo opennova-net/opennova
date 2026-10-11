@@ -233,6 +233,20 @@ static void combat_text_font_slots() {
 	}
 	CHECK(std::abs((left + right) / 2 - 512) < 4);
 
+	// An open menu screen hides the preround armory line (prompt 1) alone;
+	// the bay and FARP lines (2, 3, 4) still draw.
+	// [orig: HUD_DrawGameplayOverlays @0x5BDF09..0x5BDF10 (sub_54B970 =
+	//  dword_255110C, set by UI_OpenMenuScreen @0x54E59E)]
+	for (int service = 1; service <= 4; ++service) {
+		s = {};
+		s.combat.service_prompt = service;
+		s.combat.service_text = "Gear";
+		CHECK(pages(compiler.compile(s, 1024, 768), kHudFontSlotLabelLarge) == 4);
+		s.menu_screen_open = true;
+		CHECK(pages(compiler.compile(s, 1024, 768), kHudFontSlotLabelLarge) ==
+				(service == 1 ? 0 : 4));
+	}
+
 	s = {};
 	s.weapon.active = true;
 	s.combat.inset = true;

@@ -642,7 +642,7 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// value after installing GameConfig; never substitute a captured constant.
 	reply.p2 = ctx.np_protocol.build_flags;
 	reply.np = occupied_player_count(ctx);
-	reply.mp = ctx.np_protocol.max_players;
+	reply.mp = ctx.np_protocol.max_players; // the session's cap [orig: protocol +0x524 @0x6209FF]
 	// SUS1 is the protocol's server_user_string1: the GSID a NovaWorld
 	// ServerHostResult handed this host, copied into the protocol block and
 	// written whenever non-empty. A pure LAN host never ran that leg, so fresh
@@ -737,17 +737,17 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, registered as the join-validate callback by
 	// CNapiGameSession_CreateSession @0x4c97c0 and invoked at the 0x42 join]. Reject when the session
-	// is already full. The witnessed gate is ONE shared count — players AND
-	// spectators against max_players plus positive spectator-only slots (a -1
-	// setting shares the ordinary cap; ordinary players may occupy spectator
-	// headroom — retail has no separate ordinary cap, here or at the game-layer
-	// join gate @0x512aa0). The count is the host's own type-2 loopback (when
-	// present) plus already-admitted (>= Joined) joiners — matching
-	// networkCtx[11]. The reject is the CR=0 0x82 with the validate-callback
-	// family JFC=14 and reason JFP=4, or JFP=5 when spectator-only slots exist
-	// (@0x4c624c). Spectator-specific validation (codes 14/15/16) is NOT this
-	// leg: it runs at the game-layer 0x00 join message and punts through the
-	// connection-description record (server_message_dispatch.cpp).
+	// is already full. The witnessed gate is ONE count, players and spectators alike: the host's
+	// own type-2 loopback (when present) plus the already-admitted (>= Joined) joiners, matching
+	// networkCtx[11], against the session's cap (ctx+0xF28, never the slot limit's dedicated slot)
+	// plus, while the session's lineup queue is on, its positive size (game_settings +0xC4 / +0xC8
+	// at ctx+0xF2C / +0xF30, stock 1 / 100; @0x4c6220..0x4c623f). The reject is the CR=0 0x82 with
+	// the validate-callback family JFC=14 and reason JFP=4, or JFP=5 under that same lineup test
+	// (@0x4c6241..0x4c624e, the JFP 5 store @0x4c624c). Ours adds the positive spectator-only
+	// slots and keys JFP 5 on them instead (GameConfig::join_capacity, D-NET-403).
+	// Spectator-specific validation (codes 14/15/16) is NOT this leg: it runs at the game-layer
+	// 0x00 join message and punts through the connection-description record
+	// (server_message_dispatch.cpp).
 	if (ctx.is_in_session && ctx.join_locked) {
 		reject_client_join(auth, peer, 14, 2, out);
 		return;
@@ -764,7 +764,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		return;
 	}
 	const uint32_t occupied = occupied_player_count(ctx);
-	if (occupied >= ctx.config.total_player_slot_capacity()) {
+	if (occupied >= ctx.config.join_capacity()) { // [orig: @0x4C6220..0x4C623F]
 		reject_client_join(auth, peer, 14,
 				ctx.config.spectator_slots > 0 ? 5u : 4u, out);
 		return;

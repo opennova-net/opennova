@@ -117,7 +117,7 @@ bool MenuAudio::play_member_sound_(const String &p_wav_path, int p_vol255,
 	AudioStreamPlayer *player = sound_players_[next_sound_player_];
 	next_sound_player_ = (next_sound_player_ + 1) % sound_players_.size();
 	player->set_stream(stream);
-	player->set_pitch_scale((float)p_pitch_scale);
+	player->set_pitch_scale((float)WavLoader::pitch_scale_for(stream, p_pitch_scale));
 	double lin = (double)p_vol255 / 255.0;
 	lin = lin < 0.0 ? 0.0 : (lin > 1.0 ? 1.0 : lin);
 	player->set_volume_db(p_vol255 > 0

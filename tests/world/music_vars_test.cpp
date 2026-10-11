@@ -1,7 +1,8 @@
 // The gamemus var pump from the local player (world/music_vars.h), pinned
 // where it used to live in the Godot world node (ADR 0040 ladder E0): Var7 =
-// health percent from the entity's health over the body's authored max
-// (100 without one), Var10 = team; no local player pumps 0 / 0.
+// health percent from the entity's health over its ceiling with the
+// difficulty term (100 at or above it), Var10 = team; no local player pumps
+// 0 / 0.
 // [orig: Entity_UpdateInfantryPlayerBody @ 0x4b40e0; @ 0x4b6315-0x4b6324;
 //  @ 0x4b62fc]
 #include <runtime/world/music_vars.h>
@@ -42,22 +43,37 @@ int main() {
 	seed.team = 2;
 	const EntityHandle local = w.registry.spawn(0, seed);
 	w.cached.local_player = local;
-	// An entity without a body reads the default max of 100.
+	// An entity without a definition has the ceiling 0, so the percent pins to
+	// 100 [orig: Entity_GetMaxHealthWithDifficulty @0x43B8AB].
 	{
+		CHECK(local_player_max_health(w) == 0);
 		const auto writes = game_music_var_writes(w);
-		CHECK(writes[0].value == 50);
+		CHECK(writes[0].value == 100);
 		CHECK(writes[1].value == 2);
 	}
-	// The body's authored max drives the percent; a non-positive max falls back.
-	w.ai.attach(local);
-	w.ai.for_handle(local)->inf.max_health = 200;
+	// The definition's hp drives the percent.
+	w.registry.get(local)->has_item_def = true;
+	w.registry.get(local)->health_max = 100;
 	CHECK(local_player_health(w) == 50);
+	CHECK(local_player_max_health(w) == 100);
+	CHECK(game_music_var_writes(w)[0].value == 50);
+	// Out of a session the difficulty word -1 doubles the local player's
+	// ceiling (the objective Co-op mission start's), 1 halves it; a session
+	// keeps the def hp [orig: @0x4B6302 -> Entity_GetMaxHealthWithDifficulty
+	// @0x43B8A0].
+	w.rules.difficulty = -1;
 	CHECK(local_player_max_health(w) == 200);
 	CHECK(game_music_var_writes(w)[0].value == 25);
-	w.ai.for_handle(local)->inf.max_health = 0;
-	CHECK(game_music_var_writes(w)[0].value == 50);
+	w.rules.difficulty = 1;
+	CHECK(local_player_max_health(w) == 50);
+	CHECK(game_music_var_writes(w)[0].value == 100);
+	w.rules.difficulty = -1;
+	w.rules.mp_session = true;
+	CHECK(local_player_max_health(w) == 100);
+	w.rules.mp_session = false;
+	w.rules.difficulty = 0;
 	// Health at or above the max pins to 100.
-	w.ai.for_handle(local)->inf.max_health = 40;
+	w.registry.get(local)->health_max = 40;
 	CHECK(game_music_var_writes(w)[0].value == 100);
 
 	if (failures != 0) {

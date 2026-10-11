@@ -402,6 +402,11 @@ bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon
     // Every toggle is refused while the previous ease still runs.
     // [orig: the !activeFlag gate @ 0x4df177 — both directions]
     if (player_view_scope_ease_active(v)) return false;
+    player_view_run_scope_leg(v, engaged, inset_weapon);
+    return true;
+}
+
+void player_view_run_scope_leg(PlayerViewState &v, bool engaged, bool inset_weapon) {
     const int32_t full = inset_weapon ? kScopeEaseStepsInset : kScopeEaseSteps;
     if (engaged) {
         // [orig: g_WeaponScopeActive = 0 @0x4df31d; g_ScopeEngaged = 1 @0x4df323;
@@ -421,7 +426,6 @@ bool player_view_set_engaged(PlayerViewState &v, bool engaged, bool inset_weapon
         v.scope_settled = false;
         v.scope_hipfire = true;
     }
-    return true;
 }
 
 bool player_view_move_input(PlayerViewState &v, bool move_held, int32_t def_flags) {

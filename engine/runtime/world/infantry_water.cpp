@@ -37,6 +37,22 @@ constexpr int32_t kWaterRiseBias = 0x70;          // [orig: @0x4B811D `+ 112`]
 constexpr int32_t kWaterPitchTermBase = 0x1000;   // [orig: @0x4B80D4 `+ 4096`]
 constexpr int32_t kWaterPitchTermClamp = 0x800;   // [orig: @0x4B80F3..0x4B810E `2048`]
 
+// The local body's eye leg, reached from the afloat paths and from the exit:
+// an eye below the water calls the scope toggle, recorded with the Flags word
+// it sees (afloat, the 0x8000 just written refuses it) for the view tick to
+// run [orig: `cmp esi, g_LocalPlayerEntity` @0x4b837b; `[esi+74h] + [esi+0Ch]`
+// against g_EnvWaterHeightFixed @0x4b8383..0x4b838f, the eye being this
+// tick's +0x74 restamp; the Player_IsEquippedWeaponScoped /
+// Player_IsVehicleGunnerScoped calls @0x4b8391 / @0x4b839a, the
+// Player_ToggleWeaponScope call @0x4b83a3].
+void record_eye_scope_leg(World &world, const AiEntity &e, const Entity &body, int32_t water) {
+    if (e.handle != world.cached.local_player) return;
+    const int32_t eye_z = static_cast<int32_t>(uint32_t(e.pos[2]) + uint32_t(e.inf.eye_offset_z));
+    if (eye_z >= water) return;
+    world.out.water_scope_legs.push(WaterScopeLeg::Kind::Eye, body.flags | body.engine_flags,
+                                    e.inf.airborne);
+}
+
 } // namespace
 
 // The org1 water block: an AI body that meets the water plane FLOATS on it
@@ -121,6 +137,8 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
                                   uint32_t logic_tick) {
     if (tick_entity == nullptr) return;
     InfantryState &inf = e.inf;
+    // This tick's scope legs replace the last's (the view tick drains them).
+    world.out.water_scope_legs.count = 0;
     const int32_t water = world.env.water_z;
     if (water == 0) {
         // Our no-water-world sentinel: the channel is off, and stale float/dive
@@ -137,6 +155,9 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
     if (entry_z >= water || (flags & kEntityFlagLadderContact) != 0) {
         tick_entity->flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
         tick_entity->engine_flags &= ~(kEntityFlagDrowning | kEntityFlagDiveLatch);
+        // The exit falls into the eye leg [orig: loc_4B8373 @0x4b8373..0x4b8378
+        //  -> @0x4b837b], so a shallow body whose eye is under still toggles.
+        record_eye_scope_leg(world, e, *tick_entity, water);
         return;
     }
 
@@ -178,8 +199,10 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
 
     // The surface line, clamped from above; the dive bit below it - 0x2000 with
     // the dive splash once (the non-airborne sound; the overlay fan rides the
-    // crossing queue). [orig: @0x4b8169-0x4b81f5]
-    const int32_t surf = water + (base >> 1) - (tick_entity->eye_offset_z >> 1);
+    // crossing queue). The eye is this tick's +0x74 restamp, not the registry
+    // mirror the tick publishes after this block. [orig: `mov edx, [esi+74h]`
+    // @0x4b8146, the line @0x4b815b..0x4b8169; @0x4b8169-0x4b81f5]
+    const int32_t surf = water + (base >> 1) - (inf.eye_offset_z >> 1);
     if (e.pos[2] < surf) {
         if (e.pos[2] < surf - kWaterDiveDepth &&
             (flags & kEntityFlagDiveLatch) == 0) {
@@ -194,17 +217,35 @@ void AiSystem::player_water_block(AiEntity &e, World &world, Entity *tick_entity
     }
 
     // The entry splash, once, selected by the was-airborne bit; then the latch
-    // `(Flags & ~0x2000) | 0x8000` -- swimming overrides airborne. The local
-    // scope auto-untoggle that sits between them (@0x4b8304-0x4b8360) is
-    // presentation and is not modeled here. [orig: @0x4b8182 / @0x4b8363]
+    // `(Flags & ~0x2000) | 0x8000` -- swimming overrides airborne.
+    // [orig: @0x4b8182 / @0x4b8363]
     if (!was_afloat) {
         world.out.water_crossings.add(e.pos[0], e.pos[1], water,
                                   /*airborne=*/(flags & kEntityFlagInAir) != 0);
+    }
+    // Between them the local body's scope legs, each a toggle call the view
+    // tick runs with the Flags word recorded here [orig: `cmp
+    // g_LocalPlayerEntity, esi` @0x4b8304]. Entering (0x8000 still clear):
+    // the toggle BEFORE the latch, so a body that jumped in still carries
+    // 0x2000 and the toggle's 0xA000 gate refuses it [orig: @0x4b8311,
+    // @0x4b8316..0x4b8328, the latch @0x4b832d..0x4b8338]. Afloat: 0x8000
+    // masked off around the call, so the gate passes [orig: @0x4b8342..0x4b834b,
+    // `and [esi+24h], 0FFFF7FFFh` @0x4b8354, the call @0x4b835b, `or` @0x4b8360].
+    if (e.handle == world.cached.local_player) {
+        const uint32_t live = tick_entity->flags | tick_entity->engine_flags;
+        if (!was_afloat)
+            world.out.water_scope_legs.push(WaterScopeLeg::Kind::Entry, live, inf.airborne);
+        else
+            world.out.water_scope_legs.push(WaterScopeLeg::Kind::Swim, live & ~kEntityFlagDrowning,
+                                            inf.airborne);
     }
     tick_entity->flags = (tick_entity->flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
     tick_entity->engine_flags =
             (tick_entity->engine_flags & ~kEntityFlagInAir) | kEntityFlagDrowning;
     inf.airborne = false; // the motor-side mirror of the 0x2000 clear
+    // Then the eye leg, afloat: the 0x8000 just written refuses its toggle
+    // [orig: @0x4b833b / @0x4b8371 -> @0x4b837b].
+    record_eye_scope_leg(world, e, *tick_entity, water);
 }
 
 } // namespace opennova::world

@@ -36,11 +36,12 @@ inline constexpr std::size_t kMaxFrameUpdateBodyBytes =
 		kProtocolMessageLen16Bytes;
 static_assert(kMaxFrameUpdateBodyBytes == 1278);
 
-// The advertised player-cap ceiling: a dialog cap above 65 publishes 65 (the
-// test is on the PRE-increment cap, so a dedicated 65 publishes 66); there is
-// no lower clamp. The dialog itself caps its edit at 64.
-// [orig: Game_ApplySessionSettingsToGlobals @0x551b43..0x551b48 -> game_settings
-//  +0xC0; HostDialog_ReadSettings @0x555c25..0x555c2d — see host_player_slot_limit]
+// The player-cap ceiling: a dialog cap above 65 makes a slot limit of 65 (the
+// test is on the PRE-increment cap, so a dedicated 65 makes 66); there is no
+// lower clamp there. The session create's own clamp is 1..65
+// (session_player_cap). The dialog itself caps its edit at 64.
+// [orig: Game_ApplySessionSettingsToGlobals @0x551b43..0x551b48 -> dword_24D211C;
+//  HostDialog_ReadSettings @0x555c25..0x555c2d; see host_player_slot_limit]
 inline constexpr uint32_t kMaxPlayersCap = 65;
 
 // The session family that selects retail's default send divider. `Automatic`
@@ -94,9 +95,27 @@ struct GameConfig {
 	int32_t no_weapon_recoil = 0;
 	int32_t no_crosshair_spread = 0;
 	int32_t no_scope_drift = 0;
-	// (retail game_settings +0x80 internet_address, +0xC4 use_lineup_queue and
-	//  +0xC8 lineup_queue_size have no reader here and are not modelled.)
-	uint32_t max_players = 1;                   // [orig game_settings +0xC0] host_player_slot_limit's published cap (0..66)
+	// (retail game_settings +0x80 internet_address has no reader here; +0xC4
+	//  use_lineup_queue and +0xC8 lineup_queue_size, which the join gate reads,
+	//  are not modelled: join_capacity, D-NET-403.)
+	// The session's player cap: the cfg max the session create put into 1..65
+	// (session_player_cap), without the dedicated host's own slot. The MP TLV,
+	// the LAN discovery reply, the join gate, the spawn pump and the status
+	// report advertise or admit against it; player_slot_limit() adds the slot.
+	// [orig: game_settings +0xC0 = maxPlayers_3F4,
+	//  CNapiGameSession_BuildAndCreateSession @0x569621..0x56963F; the session's
+	//  copy ctx+0xF28 clamped 1..251, CNapiGameSession_CreateSession
+	//  @0x4C988D..0x4C98D8 -> protocol +0x524 @0x4C9A80]
+	uint32_t max_players = 1;
+	// The cfg's dedicated word (Serve Only, SERVERTYPE 1): the session's
+	// player-slot limit carries the host's own slot on top of max_players.
+	// HostConfig::serve_and_play carries the same fact for the role (HostOnly
+	// against HostClient): two sources, which every producer sets from one
+	// (host_session_settings, Simulation::configure_host_session and
+	// host_session_cfg, the NovaWorld service's own host).
+	// [orig: g_GameConfigState.dedicatedServer_400, read by
+	//  Game_ApplySessionSettingsToGlobals @0x551B20]
+	bool dedicated_server = false;
 
 	// g_GameType @0x24D2128 — the ONE gametype global. Read by the 0x08 block dword[3], the 0x7B/0x60
 	// reply bodies, the BuildFlags team-gate (game_settings.game_type copy, equal in a live session),
@@ -149,7 +168,9 @@ struct GameConfig {
 	// respawns instead of being removed (World::Rules::vehicle_respawns), the
 	// S2C 0x70 vehicle-spawn availability rows read unlimited, and an accepted
 	// C2S 0x40 skips the EntityLimit table. The config word reaches its readers
-	// through the mission-data block every Game_StartMission rebuilds.
+	// through the mission-data block every Game_StartMission rebuilds, raw: the
+	// S2C 0x64 +0x30 dword a joiner stores and never reads (every reader is
+	// the authority's).
 	// [orig: g_GameConfigState.unlimitedVehicles_4D0 (Config_SetDefaults
 	//  @0x54D352, Config_ParseSettingsLine @0x551297, Game_SaveConfig
 	//  @0x54CBEB) -> dword_24D2258 (Game_ApplySessionSettingsToGlobals
@@ -159,8 +180,9 @@ struct GameConfig {
 	//  @0x5248A7); readers AI_TickState_VehicleDead @0x467EE9,
 	//  Entity_UpdateVehicleAIMovement @0x461246,
 	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105F5,
-	//  NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C5E2]
-	bool unlimited_vehicles = true;
+	//  NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C5E2; the joiner's copy
+	//  NapiNPClientMsg_HandleMissionDataChunk @0x432470]
+	int32_t unlimited_vehicles = 1;
 	// The PLAYERS tab's punt vote: game.cfg voting off by default, at least 6
 	// active slots, a 0.66 share of them. [orig: g_GameConfigState.votingEnabled_4E0
 	//  / votingMinPlayers_4E4 / votingPercent_4E8 (Config_SetDefaults) ->
@@ -376,14 +398,37 @@ struct GameConfig {
 	uint32_t lan_mode = 1;
 	std::optional<uint32_t> send_holdoff_ticks;
 
-	// The fixed player-slot table grows only for a positive spectator limit.
-	// -1 enables spectators inside max_players; 0 disables them. Retail's
-	// network validation performs the same signed add before its 251-row slot
-	// table clamp. [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0]
+	// The live player-slot limit: max_players plus the dedicated host's own
+	// slot (host_player_slot_limit). The slot table is allocated with it, the
+	// BMS placements are gated by it and the lobby publishes it, less that
+	// slot for a dedicated host; nothing advertises or admits against it.
+	// [orig: dword_24D211C, Game_ApplySessionSettingsToGlobals
+	//  @0x551B20..0x551B48; Server_InitNewRoundState @0x51C976;
+	//  Server_InitPlayerSlotSystem @0x4243B2; Entity_SpawnFromBMSRecord @0x40EA86]
+	uint32_t player_slot_limit() const;
+
+	// The fixed player-slot table: the slot limit, grown by the positive
+	// spectator-only slots ours admits (join_capacity) and clamped to 251
+	// rows. Retail's table is the slot limit alone (D-NET-401), and a limit
+	// past 65 allocates none (D-NET-402).
+	// [orig: g_PlayerSlotCapacity @0x24C0CA4 = the slot limit,
+	//  Server_InitNewRoundState @0x51C976..0x51C97B]
 	uint32_t total_player_slot_capacity() const {
-		const uint64_t total = static_cast<uint64_t>(max_players) +
+		const uint64_t total = static_cast<uint64_t>(player_slot_limit()) +
 				(spectator_slots > 0 ? static_cast<uint32_t>(spectator_slots) : 0u);
 		return static_cast<uint32_t>(total < 251u ? total : 251u);
+	}
+
+	// The join gate's capacity: ONE count of players and spectators against
+	// the session's cap (never the slot limit, so a dedicated host admits
+	// max_players joiners) plus a positive spectator limit; -1 shares the cap,
+	// 0 adds nothing. The add has no clamp. Retail adds the lineup queue's
+	// size there instead, while the queue is on (game_settings +0xC8 under
+	// +0xC4, stock 1 / 100), which this config does not model (D-NET-403).
+	// [orig: CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C623F]
+	uint32_t join_capacity() const {
+		return max_players +
+				(spectator_slots > 0 ? static_cast<uint32_t>(spectator_slots) : 0u);
 	}
 
 	uint32_t effective_send_holdoff_ticks(

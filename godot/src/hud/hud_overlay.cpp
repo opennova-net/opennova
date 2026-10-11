@@ -248,6 +248,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_weapon_ammo_key", "ammo_bucket", "ammo_class_id"),
 			&HudOverlay::set_weapon_ammo_key);
 	ClassDB::bind_method(D_METHOD("set_no_hud", "no_hud"), &HudOverlay::set_no_hud);
+	ClassDB::bind_method(D_METHOD("set_menu_screen_open", "open"), &HudOverlay::set_menu_screen_open);
 	ClassDB::bind_method(D_METHOD("set_end_round_overlay", "shown", "top", "bottom",
 								  "texts", "ys"),
 			&HudOverlay::set_end_round_overlay);
@@ -999,6 +1000,12 @@ void HudOverlay::set_weapon_ammo_key(int p_ammo_bucket, int p_ammo_class_id) {
 
 void HudOverlay::set_no_hud(bool p_no_hud) {
 	state_.overlay_master = opennova::hud::hud_overlay_master(p_no_hud);
+	queue_redraw();
+}
+
+void HudOverlay::set_menu_screen_open(bool p_open) {
+	if (state_.menu_screen_open == p_open) return;
+	state_.menu_screen_open = p_open;
 	queue_redraw();
 }
 

@@ -820,7 +820,51 @@ static void test_teleport_walk_gates_inside() {
     CHECK(w.registry.get(only_gated)->position.x == 1.0f);
 }
 
+// The BMS teleport's spawn reset raises the local player's health once, to the
+// ceiling with the difficulty term, a signed word compare: no def-word raise
+// runs ahead of it, so out of a session at the objective Co-op word -1 a def hp
+// of 20000 keeps its wrapped ceiling -25536 instead of rising to 20000; a def hp
+// of 100 raises a hurt local player to 200 and a remote row to its 100.
+// [orig: EventAction_TeleportEntityToSpawn @0x43DFC0 -> Entity_ResetToSpawnState
+//  @0x4B97BC -> Entity_RaiseHealthToMax @0x43C290 -> Entity_GetMaxHealthWithDifficulty
+//  @0x43B8A0] (D-PWR-2)
+static void test_teleport_reset_raises_through_the_difficulty_ceiling() {
+    ScriptWorld w;
+    Entity marker;
+    marker.item_id = kParticleEffectMarkerTypeId;
+    marker.has_item_def = true;
+    marker.wp_number = 5;
+    marker.position = {10.0f, 20.0f, 30.0f};
+    w.registry.spawn(3, marker);
+    w.rules.difficulty = -1;
+    Entity row;
+    row.item_id = 1001;
+    row.has_item_def = true;
+    row.item_type_index = 4;
+    row.alive = true;
+    row.net_id = 270;
+    row.health_max = 20000;
+    row.health = -25536;
+    const EntityHandle wrapped = w.registry.spawn(0, row);
+    w.cached.local_player = wrapped;
+    CHECK(w.commands.teleport_ssn_to_marker(270, 5));
+    CHECK(w.registry.get(wrapped)->position.x == 10.0f);
+    CHECK(w.registry.get(wrapped)->health == -25536);
+    row.net_id = 271;
+    row.health_max = 100;
+    row.health = 50;
+    const EntityHandle local = w.registry.spawn(0, row);
+    w.cached.local_player = local;
+    CHECK(w.commands.teleport_ssn_to_marker(271, 5));
+    CHECK(w.registry.get(local)->health == 200);
+    row.net_id = 272;
+    const EntityHandle remote = w.registry.spawn(0, row);
+    CHECK(w.commands.teleport_ssn_to_marker(272, 5));
+    CHECK(w.registry.get(remote)->health == 100);
+}
+
 int main() {
+    test_teleport_reset_raises_through_the_difficulty_ceiling();
     test_wac_kill_ssn_clears_and_alerts();
     test_wac_kill_ssn_queues_brain_event();
     test_bms_kill_single_pool0();

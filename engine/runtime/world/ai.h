@@ -1245,8 +1245,10 @@ public:
     // The org1 float/splash block — body and witness in infantry.cpp.
     // The org2 (player body) water block — the buoyant-rise float form with the
     // local-only surface bob, the look-pitch dive/rise term, the velocity drags,
-    // the surface clamp and the dive bit 0x200000. Body in infantry.cpp.
-    // [orig: Entity_UpdateInfantryPlayerBody @0x4b8020-0x4b8373]
+    // the surface clamp and the dive bit 0x200000, and the local body's scope
+    // toggle calls it records for the view tick (world.h WaterScopeLegs).
+    // Body in infantry_water.cpp.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b8020-0x4b83a3]
     void player_water_block(AiEntity &e, World &world, Entity *tick_entity,
                             int32_t capsule_bottom, bool is_authority, uint32_t logic_tick);
     void infantry_water_block(AiEntity &e, World &world, Entity *tick_entity,
