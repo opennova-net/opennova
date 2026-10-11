@@ -67,11 +67,28 @@ bool copy_name_free(const ProjectPaths *paths, const AssetScan &scan, const Asse
 		return false;
 	}
 	if (file.kind == AssetKind::Mission) {
-		for (const MissionFileSetMember &member : mission_file_set_members(scan, file.logical_name, name))
+		const std::string folder = folder_of_path(file.relative_path);
+		for (const MissionFileSetMember &member : mission_file_set_members(scan, file.logical_name, name, folder)) {
+			// The copy's .mis lies beside it, in this folder: a .mis of its name elsewhere is another mission's.
+			if (member.role == kMissionNamesRole) {
+				const std::string beside = join_path(folder, member.new_name);
+				if (scan.named(beside) || (paths && on_disk(*paths, beside))) {
+					if (why) *why = "The copy's companion " + member.new_name + " is a file of the project already.";
+					return false;
+				}
+				continue;
+			}
 			if (taken(member.new_name, "The copy's companion ")) return false;
-		// A file the game would take as the copy's own (its text table) that is no copy of the mission's set.
-		if (!mission_file_set_members(scan, name, name).empty()) {
-			if (why) *why = "The project has files the game would take as " + name + "'s own.";
+		}
+		// A file the game would take as the copy's own (its text table), or a .mis beside it that would hold its
+		// names, that is no copy of the mission's set.
+		for (const MissionFileSetMember &stale : mission_file_set_members(scan, name, name, folder)) {
+			if (why) {
+				std::string what = mission_member_words(stale.role);
+				if (what.rfind("its ", 0) == 0) what.erase(0, 4);
+				const std::string whose = stale.role == kMissionNamesRole ? ", which would hold " : ", which the game would take as ";
+				*why = "The project already has " + stale.old_name + whose + name + "'s " + what + ": rename or remove it first.";
+			}
 			return false;
 		}
 	}
@@ -120,7 +137,8 @@ DeletePlan plan_delete(const ProjectPaths &paths, const AssetScan &scan, const s
 	// A mission takes the files the game finds by its name (ADR 0046 S14), as a rename takes them: left behind,
 	// they would be another mission's of the same name.
 	if (asset->kind == AssetKind::Mission)
-		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, asset->logical_name)) {
+		for (const MissionFileSetMember &member :
+		     mission_file_set_members(scan, asset->logical_name, asset->logical_name, folder_of_path(asset->relative_path))) {
 			const AssetEntry *entry = scan.at_path(member.path);
 			if (entry && entry->imported_from.empty() && entry != asset) plan.files.push_back(entry->relative_path);
 		}
@@ -237,7 +255,8 @@ DuplicatePlan plan_duplicate(const ProjectPaths &paths, const AssetScan &scan, c
 	plan.new_path = join_path(folder, plan.new_name);
 	plan.copies.emplace_back(asset->relative_path, plan.new_path);
 	if (asset->kind == AssetKind::Mission)
-		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, plan.new_name)) {
+		for (const MissionFileSetMember &member :
+		     mission_file_set_members(scan, asset->logical_name, plan.new_name, folder_of_path(asset->relative_path))) {
 			const AssetEntry *entry = scan.at_path(member.path);
 			if (!entry || entry == asset) continue;
 			if (!entry->imported_from.empty()) {

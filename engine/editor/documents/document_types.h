@@ -19,19 +19,20 @@ namespace opennova::editor {
 
 class ProjectCheck;
 
-// A record type's companion (ADR 0046 S24, Names): a file the editor keeps beside a document's own file under its
-// base name with an extension of its own, never packed and never a reference the graph reads (a mission's .mis,
-// which the original editor reads and the game never does: documents/mission_names_file.h). The session reads it
-// before the document reads its file, each time it does (`read`: its bytes, null where the project has none), and
-// after each save of the document asks what to write there (`write`, given its bytes as they stand: true with
-// the text, which the session writes atomically after the document's own, never failing the document's save;
-// false: nothing, the document saying why in its own findings), then tells the document what came of the write
-// (`written`: the bytes' fingerprint, or the error). Rename, move, copy and delete take the file with its
-// document's (documents/mission_file_set.h).
+// A record type's companion (ADR 0046 S24, Names): a file the editor keeps beside a document's own file, in its
+// folder under its base name with an extension of its own, never packed and never a reference the graph reads (a
+// mission's .mis, which the original editor reads and the game never does: documents/mission_names_file.h). The
+// session reads it before the document reads its file, each time it does (`read`: none there, its bytes, or one
+// the file system would not read), and after each save of the document asks whether to write there (`due`,
+// given the file as it stands), then for the text (`write`: false where the document refuses, saying why in its
+// own findings), which it writes atomically after the document's own, never failing the document's save, and
+// tells the document what came of the write (`written`: the bytes' fingerprint, or the file system's error).
+// Rename, move, copy and delete take the file with its document's (documents/mission_file_set.h).
 struct DocumentCompanions {
 	const char *extension = "";
-	void (*read)(DocumentBase &document, const std::vector<uint8_t> *bytes) = nullptr;
-	bool (*write)(DocumentBase &document, const std::vector<uint8_t> *now, std::string &text) = nullptr;
+	void (*read)(DocumentBase &document, const CompanionFile &file) = nullptr;
+	bool (*due)(DocumentBase &document, const CompanionFile &now) = nullptr;
+	bool (*write)(DocumentBase &document, std::string &text) = nullptr;
 	void (*written)(DocumentBase &document, bool ok, uint64_t fingerprint, const std::string &error) = nullptr;
 };
 

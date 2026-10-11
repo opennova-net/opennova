@@ -15,6 +15,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/assets/project_layout.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
@@ -32,6 +33,9 @@
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/mission_items.h>
+#include <editor/preview/mission_source.h>
+#include <editor/preview/mission_scene.h>
+#include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_chores.h>
@@ -42,6 +46,7 @@
 #include <editor/session/workspace_parts.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/mission/mission_sidecars.h>
+#include <runtime/world/collision.h>
 
 namespace fs = std::filesystem;
 
@@ -91,10 +96,15 @@ bool DocumentSet::documents_dirty() const {
 	return false;
 }
 
-std::vector<std::string> DocumentSet::dirty_files() const {
+bool DocumentSet::documents_unsaved() const {
+	for (const auto &document : documents_) if (document->unsaved()) return true;
+	return false;
+}
+
+std::vector<std::string> DocumentSet::dirty_files(bool companions) const {
 	std::vector<std::string> files;
 	for (const auto &document : documents_)
-		if (document->dirty()) files.push_back(document->path());
+		if (document->dirty() || (companions && document->companion_unsaved())) files.push_back(document->path());
 	return files;
 }
 
@@ -170,6 +180,27 @@ void DocumentSet::select_first_screen() {
 
 // --- the files -------------------------------------------------------------------------------
 
+namespace {
+
+// A companion as it stands on disk: none there, its bytes, or there and refused by the file system.
+CompanionFile companion_file(const std::string &absolute) {
+	CompanionFile out;
+	std::error_code ec;
+	const bool there = std::filesystem::exists(system_path(absolute), ec);
+	if (!there && !ec) return out;
+	std::string message;
+	if (there && io::read_file_bytes(absolute, out.bytes, message)) {
+		out.state = CompanionFile::State::Read;
+		return out;
+	}
+	out.state = CompanionFile::State::Unreadable;
+	out.bytes.clear();
+	out.error = ec ? ec.message() : message;
+	return out;
+}
+
+} // namespace
+
 std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, AssetKind kind,
                                                 Diagnostic &error) const {
 	const DocumentType *type = document_type_for(kind);
@@ -185,41 +216,33 @@ std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, Ass
 	return document;
 }
 
-std::string DocumentSet::companion_path(const DocumentBase &document, const std::string &relative) const {
-	const DocumentType *type = document_type_for(document.kind());
+std::string DocumentSet::companion_path(AssetKind kind, const std::string &relative) const {
+	const DocumentType *type = document_type_for(kind);
 	if (!type || !type->companions) return std::string();
-	const std::string name = mission::mission_base_name(basename_of(relative)) + type->companions->extension;
-	// The project's file of the name (the one the mission's set takes with it, mission_file_set_members), else
-	// beside the document's own.
+	// Beside the document's own file: two documents of one name in two folders each have their own.
+	const std::string beside =
+	        join_path(folder_of_path(relative), mission::mission_base_name(basename_of(relative)) + type->companions->extension);
 	if (view_.project.scan)
-		if (const AssetEntry *entry = view_.project.scan->find(name)) return entry->relative_path;
-	return join_path(folder_of_path(relative), name);
+		if (const AssetEntry *entry = view_.project.scan->named(beside)) return entry->relative_path;
+	return beside;
 }
 
 void DocumentSet::read_companion(DocumentBase &document, AssetKind kind, const std::string &relative) const {
 	const DocumentType *type = document_type_for(kind);
 	if (!type || !type->companions || !type->companions->read) return;
 	// The kind is the load's to set: the path is found by the type's own, before the document knows it.
-	const std::string name = mission::mission_base_name(basename_of(relative)) + type->companions->extension;
-	std::string path = join_path(folder_of_path(relative), name);
-	if (view_.project.scan)
-		if (const AssetEntry *entry = view_.project.scan->find(name)) path = entry->relative_path;
-	std::vector<uint8_t> bytes;
-	std::string message;
-	const bool read = io::read_file_bytes(join_path(paths_.root, path), bytes, message);
-	type->companions->read(document, read ? &bytes : nullptr);
+	type->companions->read(document, companion_file(join_path(paths_.root, companion_path(kind, relative))));
 }
 
 void DocumentSet::write_companion(DocumentBase &document, std::vector<std::string> &written) {
 	const DocumentType *type = document_type_for(document.kind());
-	if (!type || !type->companions || !type->companions->write) return;
-	const std::string path = companion_path(document, document.path());
+	if (!type || !type->companions || !type->companions->due || !type->companions->write) return;
+	const std::string path = companion_path(document.kind(), document.path());
 	const std::string absolute = join_path(paths_.root, path);
-	std::vector<uint8_t> now;
-	std::string message;
-	const bool present = io::read_file_bytes(absolute, now, message);
-	std::string text;
-	if (!type->companions->write(document, present ? &now : nullptr, text)) return;
+	if (!type->companions->due(document, companion_file(absolute))) return;
+	hand_base_heights(document);
+	std::string text, message;
+	if (!type->companions->write(document, text)) return;
 	const bool ok = io::write_file_atomic(absolute, text.data(), text.size(), message);
 	if (type->companions->written)
 		type->companions->written(document, ok, ok ? io::fnv1a64_bytes(io::kFnv1a64Offset, text.data(), text.size()) : 0,
@@ -227,6 +250,32 @@ void DocumentSet::write_companion(DocumentBase &document, std::vector<std::strin
 	if (!ok) return;
 	written.push_back(path);
 	core_.note("Saved " + path + " beside " + document.path() + " (its names)");
+}
+
+void DocumentSet::hand_base_heights(DocumentBase &document) {
+	auto *mission = dynamic_cast<MissionDocument *>(&document);
+	if (!mission) return;
+	bms::File file;
+	if (!mission->compose(file)) return;
+	// The ground as the DI-28 check reads it (preview/mission_ground_check.cpp): the mission's header through its
+	// scene's source, the project's files as the game would read them, the mission's own name for its .til.
+	const terrain::TerrainHeightField *field = nullptr;
+	const std::unique_ptr<MissionSceneSource> source = mission_scene_source(*mission);
+	MissionSceneHeader header;
+	if (source && source->header(header) && view_.findings.assets) {
+		if (!ground_) ground_ = std::make_unique<MissionGround>();
+		ground_->follow(view_.findings.assets, view_.findings.assets->generation(), header,
+		                mission::mission_base_name(mission->path()));
+		field = ground_->height_field();
+	}
+	std::vector<int32_t> heights;
+	for (const std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
+		for (const bms::Entity &entity : *pool) {
+			int32_t height = 0;
+			if (!world::terrain_column_height(field, entity.x, entity.y, height)) height = 0;
+			heights.push_back(height);
+		}
+	mission->set_base_heights(std::move(heights));
 }
 
 // The open documents against their files (Rescan, an import, Build and Play, and what another
@@ -248,7 +297,8 @@ void DocumentSet::reload_changed() {
 			forget_file_state(path);
 			continue;
 		}
-		if (document->dirty()) {
+		// Read again, names a save left out of the .mis beside it would be lost too (companion_unsaved).
+		if (document->unsaved()) {
 			stale_.erase(path);
 			if (conflicts_.insert(path).second) {
 				core_.note(path + " changed outside the editor while it has unsaved edits: Problems offers to reload "
@@ -1191,7 +1241,7 @@ void DocumentSet::save(const std::string &path, bool over) {
 }
 
 void DocumentSet::save_all() {
-	save_documents(dirty_files(), false);
+	save_documents(dirty_files(true), false);
 }
 
 // Writes each open document at `paths` that has unsaved edits (`rewrite`: an explicit Save,
@@ -1207,14 +1257,15 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	for (const std::string &path : paths)
 		for (const auto &document : documents_)
 			if (document->path() == path &&
-			    (document->dirty() || (rewrite && document->rewrite_need() != DocumentBase::RewriteNeed::None)))
+			    (document->dirty() || document->companion_unsaved() ||
+			     (rewrite && document->rewrite_need() != DocumentBase::RewriteNeed::None)))
 				writes.push_back(document.get());
 	if (writes.empty()) {
 		view_.activity.status = paths.size() == 1 ? paths.front() + " has no changes to save." : "No file has unsaved changes.";
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
-	size_t saved = 0, noted = 0;
+	size_t saved = 0, noted = 0, left = 0;
 	std::vector<Diagnostic> failures;
 	std::vector<std::string> written;
 	for (DocumentBase *document : writes) {
@@ -1224,7 +1275,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		if (!document->save(error, over)) {
 			// A file changed outside the editor under unsaved edits: the conflict is a row
 			// until the document is read again (its Reload fix) or saved over it (Keep my edits).
-			if (error.row() == &finding_code(CoreFinding::DocumentConflict) && document->dirty())
+			if (error.row() == &finding_code(CoreFinding::DocumentConflict) && document->unsaved())
 				conflicts_.insert(document->path());
 			failures.push_back(error);
 			continue;
@@ -1235,6 +1286,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		core_.note("Saved " + document->path() + (outside ? " over what changed outside the editor" : ""));
 		noted += note_save(*document);
 		write_companion(*document, written);
+		if (document->companion_unsaved()) ++left;
 	}
 	// A Save ends the gesture of each document it saves (its save's checkpoint ended its group): a
 	// file written is validated as the scan reads it, and one not written now.
@@ -1244,7 +1296,9 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	core_.update_files(written);
 	// Reported after the scan's update, which leaves the validation that rebuilds the rows due.
 	for (const Diagnostic &d : failures) core_.report(d);
+	// A file whose companion the save left (a mission's .mis: DocumentBase::companion_unsaved) keeps what it holds unsaved.
 	view_.activity.status = "Saved " + counted(saved, "file") + (noted ? " (" + counted(noted, "note") + ": see Output)" : std::string()) +
+	               (left ? "; " + counted(left, "file") + (left == 1 ? " keeps its" : " keep their") + " names unsaved: see Problems" : std::string()) +
 	               (failures.empty() ? "." : "; " + std::to_string(failures.size()) + " could not be saved: see Problems.");
 	core_.touch(ViewConcern::Output);
 	return failures.empty();

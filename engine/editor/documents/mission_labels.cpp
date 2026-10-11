@@ -736,10 +736,11 @@ std::string mission_record_brief(const Document &base, const NodeAddress &addres
 			return "#" + std::to_string(entity.id) + " " + what;
 		}
 		case K::Event: {
-			// Its number, then its name (S24 Names), else what waits first, else what it does first.
+			// Its heading with its name (S24 Names: "Event 3 (Get to the bridge)"), else its number and what waits
+			// first, else what it does first.
 			const mission::EventChain &chain = static_cast<const EventRow &>(*row).native;
+			if (!static_cast<const EventRow &>(*row).name.empty()) return event_heading(document->index_of(*row), *row);
 			const std::string number = "Event " + std::to_string(document->index_of(*row) + 1) + ": ";
-			if (const std::string &name = static_cast<const EventRow &>(*row).name; !name.empty()) return number + name;
 			if (!chain.triggers.empty()) return number + trigger_words(chain.triggers.front(), brief);
 			if (!chain.actions.empty()) return number + action_words(chain.actions.front(), brief, header_of(*document));
 			return number + "nothing";

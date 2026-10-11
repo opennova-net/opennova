@@ -457,11 +457,12 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 	case EditorRequestKind::MoveAsset: {
 		// The moved file's own document with unsaved edits (it closes and opens again at its new path); none
 		// when the move is refused anyway (it then says why, with nothing to save first).
-		if (!view_.project.open || !documents.documents_dirty()) return;
+		if (!view_.project.open || !documents.documents_unsaved()) return;
 		const RenamePlan plan = plan_move(paths_, *view_.project.document, *view_.project.scan, request.path,
 		                                  request.folder, view_.project.imports.get());
 		if (!plan.ok()) return;
-		if (const DocumentBase *open = documents.document_for(plan.path); open && open->dirty()) files.push_back(plan.path);
+		// Its names a save left out of the .mis beside it too (companion_unsaved): the reopen reads the .mis.
+		if (const DocumentBase *open = documents.document_for(plan.path); open && open->unsaved()) files.push_back(plan.path);
 		// A mission's companions beside it move with it.
 		for (const RenameOutput &companion : plan.companions)
 			if (const DocumentBase *open = documents.document_for(companion.path); open && open->dirty())
@@ -529,13 +530,15 @@ bool RenameController::unsaved_while_due(std::vector<std::string> &files) {
 // validation is due (else unsaved_while_due).
 void RenameController::rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
-	if (!view_.project.open || !documents.documents_dirty()) return;
+	if (!view_.project.open || !documents.documents_unsaved()) return;
 	if (unsaved_while_due(files)) return;
 	const RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), file, new_name);
 	if (!plan.ok()) return;
 	for (const auto &document : documents.documents()) {
-		if (!document->dirty()) continue;
 		const std::string &path = document->path();
+		// The renamed file's own document opens again at its new path, its .mis read again: names a save left out of
+		// it (companion_unsaved) would be lost with it.
+		if (!document->dirty() && !(path == plan.path && document->companion_unsaved())) continue;
 		if (path == plan.path ||
 		    std::any_of(plan.sites.begin(), plan.sites.end(), [&path](const RenameSite &site) { return site.file == path; }) ||
 		    std::any_of(plan.companions.begin(), plan.companions.end(),

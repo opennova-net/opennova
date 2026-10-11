@@ -1,6 +1,8 @@
 // The .mis beside a mission (mission_names_file.h).
 #include "mission_names_file.h"
 
+#include <algorithm>
+#include <array>
 #include <set>
 #include <string>
 #include <utility>
@@ -11,6 +13,7 @@
 #include <editor/project/project_files.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <formats/mission/mission_var_names.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
@@ -53,12 +56,96 @@ std::string counted(size_t count, const char *one, const char *many) {
 	return std::to_string(count) + " " + (count == 1 ? one : many);
 }
 
+// A reason as a sentence: its full stop where it has none.
+std::string sentence(std::string words) {
+	if (!words.empty() && words.back() != '.' && words.back() != '!' && words.back() != '?') words += '.';
+	return words;
+}
+
+uint64_t bytes_fingerprint(const std::vector<uint8_t> &bytes) {
+	return io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+}
+
+// What the mission takes of a matching .mis: each name its setter takes (mission_table's name field:
+// mission::mis_name_allowed; a group's, bms::set_group_name where the group's record names none), each it would
+// refuse said in words.
+void take_kept(const bms::File &mission, size_t event_count, MissionNamesFile &out) {
+	std::string why;
+	out.kept.events.assign(event_count, std::string());
+	for (size_t i = 0; i < event_count && i < out.names.events.size(); ++i) {
+		const std::string &name = out.names.events[i];
+		if (name.empty()) continue;
+		if (mission::mis_name_allowed(name, mission::kMisEventNameChars, why)) out.kept.events[i] = name;
+		else out.refused.push_back("event " + std::to_string(i + 1) + "'s name (" + why + ")");
+	}
+	for (size_t id = 1; id < out.names.areas.size(); ++id) {
+		const std::string &name = out.names.areas[id];
+		if (name.empty()) continue;
+		if (mission::mis_name_allowed(name, mission::kMisDescriptionChars, why)) out.kept.areas[id] = name;
+		else out.refused.push_back("zone " + std::to_string(id) + "'s description (" + why + ")");
+	}
+	if (!out.names.paths[0].empty()) out.refused.push_back("path 0's description (path 0 is no path)");
+	for (size_t n = 1; n < out.names.paths.size(); ++n) {
+		const std::string &name = out.names.paths[n];
+		if (name.empty()) continue;
+		if (mission::mis_name_allowed(name, mission::kMisDescriptionChars, why)) out.kept.paths[n] = name;
+		else out.refused.push_back("path " + std::to_string(n) + "'s description (" + why + ")");
+	}
+	for (size_t g = 1; g < out.groups.size() && g < mission.group_records.size(); ++g) {
+		const std::string &name = out.groups[g];
+		bms::GroupRecord probe = mission.group_records[g];
+		if (name.empty() || !name_bytes_empty(probe)) continue;
+		if (bms::set_group_name(probe, name, why)) out.kept_groups[g] = name;
+		else out.refused.push_back("group " + std::to_string(g) + "'s description (" + why + ")");
+	}
+}
+
+// The Set of a row's name field.
+Edit set_name(const NodeAddress &address, const char *field, const std::string &value) {
+	Edit edit;
+	edit.operation = EditOperation::Set;
+	edit.address = address;
+	edit.field = field;
+	edit.value = value;
+	return edit;
+}
+
+Edit file_value(const char *field, uint64_t fingerprint) {
+	Edit edit;
+	edit.operation = EditOperation::SetFileValue;
+	edit.field = field;
+	edit.value = fingerprint_hex(fingerprint);
+	return edit;
+}
+
 } // namespace
+
+std::string fingerprint_hex(uint64_t fingerprint) {
+	static const char digits[] = "0123456789abcdef";
+	std::string out(16, '0');
+	for (int i = 15; i >= 0; --i, fingerprint >>= 4) out[size_t(i)] = digits[fingerprint & 0xF];
+	return out;
+}
+
+bool fingerprint_from_hex(const std::string &text, uint64_t &out) {
+	if (text.size() != 16) return false;
+	uint64_t value = 0;
+	for (const char ch : text) {
+		int digit = -1;
+		if (ch >= '0' && ch <= '9') digit = ch - '0';
+		else if (ch >= 'a' && ch <= 'f') digit = ch - 'a' + 10;
+		else if (ch >= 'A' && ch <= 'F') digit = ch - 'A' + 10;
+		if (digit < 0) return false;
+		value = (value << 4) | uint64_t(digit);
+	}
+	out = value;
+	return true;
+}
 
 MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mission::EventChain> &events,
                                  const std::vector<uint8_t> &bytes) {
 	MissionNamesFile out;
-	out.fingerprint = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+	out.fingerprint = bytes_fingerprint(bytes);
 	const std::string text(bytes.begin(), bytes.end());
 	bms::File read;
 	std::string error;
@@ -77,7 +164,9 @@ MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mis
 		return out;
 	}
 	// The editor's own: what it reads, written again, is the bytes read (a file the original editor wrote says when
-	// it saved it in its first line, and writes keys the editor's writer does not).
+	// it saved it in its first line, and writes keys the editor's writer does not). Each entity's base height is the
+	// one read (the writer writes an entity's own where it is given none), so a file the editor wrote over the
+	// terrain it sampled reads as its own whatever the terrain.
 	{
 		bms::File again = read;
 		mission::sync_counts(again);
@@ -105,48 +194,86 @@ MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mis
 			return out;
 		}
 	out.found = Found::Matched;
+	take_kept(mission, events.size(), out);
 	return out;
+}
+
+MissionNamesFile read_names_file(const MissionDocument &document, const std::vector<uint8_t> &bytes) {
+	bms::File file;
+	if (!document.compose(file)) {
+		MissionNamesFile out;
+		out.found = Found::Unreadable;
+		out.fingerprint = bytes_fingerprint(bytes);
+		out.why = "the mission could not be composed to read it against";
+		return out;
+	}
+	std::vector<mission::EventChain> events;
+	for (const Node *row : document.rows_of(K::Event)) events.push_back(static_cast<const EventRow &>(*row).native);
+	return read_names_file(file, events, bytes);
 }
 
 mission::MisNames mission_names(const MissionDocument &document) {
 	mission::MisNames out;
-	for (const Node *row : document.rows_of(K::Event)) out.events.push_back(static_cast<const EventRow &>(*row).name);
-	for (const Node *row : document.rows_of(K::Area)) {
-		const AreaRow &area = static_cast<const AreaRow &>(*row);
-		// The first area of a zone id: the original's slot holds one (a second of the id the writer refuses).
-		if (area.native.id > 0 && size_t(area.native.id) < out.areas.size() && out.areas[size_t(area.native.id)].empty())
-			out.areas[size_t(area.native.id)] = area.description;
-	}
-	for (const Node *row : document.rows_of(K::WaypointPath)) {
-		const PathRow &path = static_cast<const PathRow &>(*row);
-		if (path.native.number >= 0 && size_t(path.native.number) < out.paths.size())
-			out.paths[size_t(path.native.number)] = path.description;
+	std::array<bool, mission::kMisAreaSlots> seen{};
+	for (const auto &row : document.rows()) {
+		if (!row) continue;
+		if (row->kind == k(K::Event)) {
+			out.events.push_back(static_cast<const EventRow &>(*row).name);
+		} else if (row->kind == k(K::Area)) {
+			// The first area of a zone id: the original's slot holds one (a second of the id the writer refuses).
+			const AreaRow &area = static_cast<const AreaRow &>(*row);
+			const int32_t id = area.native.id;
+			if (id > 0 && size_t(id) < out.areas.size() && !seen[size_t(id)]) {
+				seen[size_t(id)] = true;
+				out.areas[size_t(id)] = area.description;
+			}
+		} else if (row->kind == k(K::WaypointPath)) {
+			const PathRow &path = static_cast<const PathRow &>(*row);
+			if (path.native.number > 0 && size_t(path.native.number) < out.paths.size())
+				out.paths[size_t(path.native.number)] = path.description;
+		}
 	}
 	return out;
 }
 
-bool mission_names_text(const MissionDocument &document, std::string &text, std::string &error) {
+bool same_names(const mission::MisNames &a, const mission::MisNames &b) {
+	const std::string empty;
+	const size_t events = std::max(a.events.size(), b.events.size());
+	for (size_t i = 0; i < events; ++i) {
+		const std::string &x = i < a.events.size() ? a.events[i] : empty, &y = i < b.events.size() ? b.events[i] : empty;
+		if (x != y) return false;
+	}
+	return a.areas == b.areas && a.paths == b.paths;
+}
+
+bool mission_holds_names(const MissionDocument &document) {
+	const mission::MisNames names = mission_names(document);
+	const auto any = [](const auto &list) {
+		return std::any_of(list.begin(), list.end(), [](const std::string &name) { return !name.empty(); });
+	};
+	if (any(names.events) || any(names.areas) || any(names.paths)) return true;
+	if (const MissionRow *mission = document.mission_row()) {
+		for (const bms::GroupRecord &group : mission->native.group_records)
+			if (!bms::group_name(group).empty()) return true;
+		if (!mission::variable_names(mission->native).empty()) return true;
+	}
+	return false;
+}
+
+bool mission_names_text(const MissionDocument &document, const std::vector<int32_t> *base_heights, std::string &text,
+                        std::string &error) {
 	bms::File file;
 	if (!document.compose(file)) {
 		error = "The mission could not be composed.";
 		return false;
 	}
 	const mission::MisNames names = mission_names(document);
-	return mission::write_mis_text(file, text, error, nullptr, &names);
+	return mission::write_mis_text(file, text, error, base_heights, &names);
 }
 
-std::vector<Edit> take_matching_names(const MissionDocument &document) {
+std::vector<Edit> take_matching_names(const MissionDocument &document, const MissionNamesFile &file) {
 	std::vector<Edit> out;
-	const MissionNamesFile &file = document.names_file();
 	if (file.found != Found::Unmatched && file.found != Found::Matched) return out;
-	const auto set = [&](const NodeAddress &address, const char *field, const std::string &value) {
-		Edit edit;
-		edit.operation = EditOperation::Set;
-		edit.address = address;
-		edit.field = field;
-		edit.value = value;
-		out.push_back(std::move(edit));
-	};
 	std::string refused;
 	const std::vector<const Node *> events = document.rows_of(K::Event);
 	for (size_t i = 0; i < events.size() && i < file.events.size() && i < file.names.events.size(); ++i) {
@@ -155,7 +282,7 @@ std::vector<Edit> take_matching_names(const MissionDocument &document) {
 		if (name.empty() || name == row.name || !same_lines(file.events[i], row.native) ||
 		    !mission::mis_name_allowed(name, mission::kMisEventNameChars, refused))
 			continue;
-		set({row.id, row.kind, 0}, "name", name);
+		out.push_back(set_name({row.id, row.kind, 0}, "name", name));
 	}
 	std::set<int32_t> seen;
 	for (const Node *node : document.rows_of(K::Area)) {
@@ -165,15 +292,15 @@ std::vector<Edit> take_matching_names(const MissionDocument &document) {
 		const std::string &name = file.names.areas[size_t(id)];
 		if (name.empty() || name == row.description || !mission::mis_name_allowed(name, mission::kMisDescriptionChars, refused))
 			continue;
-		set({row.id, row.kind, 0}, "description", name);
+		out.push_back(set_name({row.id, row.kind, 0}, "description", name));
 	}
 	for (const Node *node : document.rows_of(K::WaypointPath)) {
 		const PathRow &row = static_cast<const PathRow &>(*node);
-		if (row.native.number < 0 || size_t(row.native.number) >= file.names.paths.size()) continue;
+		if (row.native.number <= 0 || size_t(row.native.number) >= file.names.paths.size()) continue;
 		const std::string &name = file.names.paths[size_t(row.native.number)];
 		if (name.empty() || name == row.description || !mission::mis_name_allowed(name, mission::kMisDescriptionChars, refused))
 			continue;
-		set({row.id, row.kind, 0}, "description", name);
+		out.push_back(set_name({row.id, row.kind, 0}, "description", name));
 	}
 	// A group the .bms names none of, by the description the .mis gives it (what the original editor's .bms writer
 	// drops, bms.h GroupRecord).
@@ -185,63 +312,163 @@ std::vector<Edit> take_matching_names(const MissionDocument &document) {
 				const std::string &name = file.groups[g];
 				bms::GroupRecord probe = mission->native.group_records[g];
 				if (name.empty() || !name_bytes_empty(probe) || !bms::set_group_name(probe, name, refused)) continue;
-				set({mission->id, k(K::Group), collection.ids[g]}, "name", name);
+				out.push_back(set_name({mission->id, k(K::Group), collection.ids[g]}, "name", name));
 			}
 		}
 	}
 	return out;
 }
 
+namespace {
+
+// Read the names again: the rows' names made the ones a matching .mis holds (every name of the rows, those it holds
+// none of emptied; a group's where its record names none), and the file-wide value naming those bytes the ones the
+// names were read from. How many names change: `changed`.
+std::vector<Edit> read_again_edits(const MissionDocument &document, const MissionNamesFile &file, size_t &changed) {
+	std::vector<Edit> out;
+	std::array<bool, mission::kMisAreaSlots> seen{};
+	size_t event = 0;
+	for (const auto &node : document.rows()) {
+		if (!node) continue;
+		if (node->kind == k(K::Event)) {
+			const EventRow &row = static_cast<const EventRow &>(*node);
+			const std::string name = event < file.kept.events.size() ? file.kept.events[event] : std::string();
+			++event;
+			if (name != row.name) out.push_back(set_name({row.id, row.kind, 0}, "name", name));
+		} else if (node->kind == k(K::Area)) {
+			const AreaRow &row = static_cast<const AreaRow &>(*node);
+			const int32_t id = row.native.id;
+			const bool first = id > 0 && size_t(id) < seen.size() && !seen[size_t(id)];
+			if (first) seen[size_t(id)] = true;
+			const std::string name = first ? file.kept.areas[size_t(id)] : std::string();
+			if (name != row.description) out.push_back(set_name({row.id, row.kind, 0}, "description", name));
+		} else if (node->kind == k(K::WaypointPath)) {
+			const PathRow &row = static_cast<const PathRow &>(*node);
+			if (row.native.number <= 0 || size_t(row.native.number) >= file.kept.paths.size()) continue;
+			const std::string &name = file.kept.paths[size_t(row.native.number)];
+			if (name != row.description) out.push_back(set_name({row.id, row.kind, 0}, "description", name));
+		}
+	}
+	if (const MissionRow *mission = document.mission_row()) {
+		const NodeAddress owner{mission->id, mission->kind, 0};
+		for (const Document::Collection &collection : document.collections_of(owner)) {
+			if (collection.spec.kind != k(K::Group)) continue;
+			for (size_t g = 1; g < collection.ids.size() && g < file.kept_groups.size() && g < mission->native.group_records.size(); ++g)
+				if (!file.kept_groups[g].empty() && bms::group_name(mission->native.group_records[g]) != file.kept_groups[g])
+					out.push_back(set_name({mission->id, k(K::Group), collection.ids[g]}, "name", file.kept_groups[g]));
+		}
+	}
+	changed = out.size();
+	out.push_back(file_value(kMisKnownField, file.fingerprint));
+	return out;
+}
+
+// What Write it from the mission writes over, by whose the file there is.
+enum class Over { Original, Unmatched, Unreadable, Outside };
+
+std::string write_over_detail(const std::string &mis, Over over) {
+	std::string lost;
+	switch (over) {
+	case Over::Original:
+		lost = ", which the original editor wrote: what the editor's writer does not write goes with it (its weapon "
+		       "availability, teleport targets, wav list and wind, the areas', paths' and groups' colours and speeds, the "
+		       "item keys the .bms has no field for, a group's description past the 20 bytes of its name, and each item's "
+		       "base height as the original editor sampled it)";
+		break;
+	case Over::Unmatched: lost = ", whose names of the events that no longer match go with it"; break;
+	case Over::Unreadable: lost = ", which does not read as a mission's text"; break;
+	case Over::Outside: lost = ", which another program saved there"; break;
+	}
+	return "The next Save writes " + mis + " from the mission, its names as the mission holds them, over what the file "
+	       "holds now" + lost + ". An edit of the mission, which Undo takes back until then; once written, a later "
+	       "change to the file is left as it is again.";
+}
+
+} // namespace
+
 void names_file_findings(const MissionDocument &document, std::vector<Diagnostic> &out) {
 	const MissionNamesFile &file = document.names_file();
+	if (file.found == Found::Unread) return;
+	const MissionNamesLeft &left = document.names_left();
+	const MissionNamesFile &outside = document.names_outside_file();
 	const std::string mis = mission::mission_base_name(basename_of(document.path())) + ".mis";
 	const uint64_t overwrite = document.names_file_overwrite();
+	const bool unsaved = document.companion_unsaved();
+	// What a save that leaves the file means for the names the mission holds.
+	const std::string kept =
+	        unsaved ? " The names the mission holds are not in it: they stay unsaved until it is written, and the unsaved "
+	                  "prompt asks before the mission is closed."
+	                : std::string();
 	// Write it from the mission: the bytes a save then writes over.
-	const auto write_over = [&](Diagnostic &d, uint64_t fingerprint) {
+	const auto write_over = [&](Diagnostic &d, uint64_t fingerprint, Over over) {
 		if (fingerprint == 0 || overwrite == fingerprint) return;
-		Edit edit;
-		edit.operation = EditOperation::SetFileValue;
-		edit.field = kMisOverwriteField;
-		edit.value = int64_t(fingerprint);
-		d.planned.push_back({"Write it from the mission",
-		                     "The next Save writes " + mis + " from the mission, its names as the mission holds them, over "
-		                     "what the file holds now (an edit of the mission, which Undo takes back until then).",
-		                     {edit}});
+		d.planned.push_back({"Write it from the mission", write_over_detail(mis, over), {file_value(kMisOverwriteField, fingerprint)}});
 	};
 	const auto take = [&](Diagnostic &d) {
-		std::vector<Edit> edits = take_matching_names(document);
+		std::vector<Edit> edits = take_matching_names(document, file);
 		if (edits.empty()) return;
 		const size_t count = edits.size();
 		d.planned.push_back({"Take the names that still match",
 		                     "Gives the mission the " + counted(count, "name", "names") + " of " + mis +
 		                     " whose records the mission still holds alike: an event's where its triggers and actions are "
-		                     "the same, an area's by its zone id, a path's, a group's where the mission names it none.",
+		                     "the same, an area's by its zone id, a path's, a group's where the mission names it none. An "
+		                     "edit of the mission, one step Undo takes back; the file is written over only by Write it from "
+		                     "the mission.",
 		                     std::move(edits)});
 	};
-	if (file.outside) {
-		Diagnostic d = make_finding(MissionFinding::NamesOutside, DiagnosticSeverity::Warning,
-		                            mis + " changed outside the editor since it was read: the last Save left it as it is, "
-		                                  "and the names the mission holds are not in it.",
-		                            document.path());
-		write_over(d, file.outside_fingerprint);
+	if (left.outside && outside.found != Found::Unread && outside.fingerprint != file.fingerprint &&
+	    overwrite != outside.fingerprint) {
+		std::string said = mis + " changed outside the editor since the editor read or wrote it: the last Save left it as it is.";
+		if (outside.found == Found::Unmatched) said += " It holds other events than the mission now (" + outside.why + ").";
+		if (outside.found == Found::Unreadable) said += " It does not read as a mission's text now (" + outside.why + ").";
+		Diagnostic d = make_finding(MissionFinding::NamesOutside, DiagnosticSeverity::Warning, said + kept, document.path());
+		if (outside.found == Found::Matched) {
+			size_t changed = 0;
+			std::vector<Edit> edits = read_again_edits(document, outside, changed);
+			d.planned.push_back({"Read the names again",
+			                     "Gives the mission the names " + mis + " holds now, as the other program saved them, in "
+			                     "place of those it holds (" + counted(changed, "name changes", "names change") +
+			                     "). An edit of the mission, one step Undo takes back.",
+			                     std::move(edits)});
+		}
+		write_over(d, outside.fingerprint, Over::Outside);
 		out.push_back(std::move(d));
-	} else if ((file.found == Found::Unmatched || file.found == Found::Unreadable) && overwrite != file.fingerprint) {
-		const bool unread = file.found == Found::Unreadable;
-		const std::string said =
-		        unread ? mis + " does not read as a mission's text (" + file.why + "): the editor takes no name from it"
-		               : mis + " holds another mission's events (" + file.why + "): the editor takes no name from it";
+	} else if ((file.found == Found::Unmatched || file.found == Found::Unreadable || file.found == Found::Unopened) &&
+	           (file.fingerprint == 0 || overwrite != file.fingerprint)) {
+		std::string said;
+		switch (file.found) {
+		case Found::Unmatched: said = mis + " holds another mission's events (" + file.why + ")"; break;
+		case Found::Unreadable: said = mis + " does not read as a mission's text (" + file.why + ")"; break;
+		default: said = mis + " could not be read (" + file.why + ")"; break;
+		}
 		Diagnostic d = make_finding(MissionFinding::NamesUnmatched, DiagnosticSeverity::Warning,
-		                            said + (file.ours ? ", and Save writes it from the mission (the editor made it)."
-		                                              : ", and Save leaves it as it is."),
+		                            said + ": the editor took no name from it, and Save leaves it as it is." + kept,
 		                            document.path());
-		if (!unread) take(d);
-		if (!file.ours) write_over(d, file.fingerprint);
+		if (file.found == Found::Unmatched) take(d);
+		if (file.found != Found::Unopened)
+			write_over(d, file.fingerprint,
+			           file.found == Found::Unreadable ? Over::Unreadable : file.ours ? Over::Unmatched : Over::Original);
+		out.push_back(std::move(d));
+	} else if (file.found == Found::Matched && !file.ours && unsaved && overwrite != file.fingerprint) {
+		Diagnostic d = make_finding(MissionFinding::NamesForeign, DiagnosticSeverity::Warning,
+		                            mis + " is the original editor's (it writes what the editor's writer does not): Save "
+		                                  "leaves it as it is." + kept,
+		                            document.path());
+		write_over(d, file.fingerprint, Over::Original);
 		out.push_back(std::move(d));
 	}
-	if (!file.unwritten.empty())
+	if (!left.unwritten.empty() && unsaved)
 		out.push_back(make_finding(MissionFinding::NamesUnwritten, DiagnosticSeverity::Warning,
-		                           mis + " was not written: " + file.unwritten + " The mission's own file was saved.",
+		                           mis + " was not written: " + sentence(left.unwritten) + " The mission's own file was saved." + kept,
 		                           document.path()));
+	if (!file.refused.empty()) {
+		std::string what;
+		for (size_t i = 0; i < file.refused.size(); ++i)
+			what += (i == 0 ? "" : i + 1 == file.refused.size() ? " and " : ", ") + file.refused[i];
+		out.push_back(make_finding(MissionFinding::NamesRefused, DiagnosticSeverity::Warning,
+		                           mis + " names what the mission does not take, which the editor left out: " + what + ".",
+		                           document.path()));
+	}
 }
 
 } // namespace opennova::editor

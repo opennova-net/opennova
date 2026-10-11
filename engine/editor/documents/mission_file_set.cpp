@@ -49,7 +49,7 @@ const MissionFileSetRow *mission_file_set_row(const std::string &role) {
 }
 
 std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan, const std::string &mission,
-                                                           const std::string &new_mission) {
+                                                           const std::string &new_mission, const std::string &folder) {
 	std::vector<MissionFileSetMember> out;
 	for (const MissionFileSetRow &row : mission_file_set()) {
 		const mission::Sidecar *sidecar = mission::sidecar_for_role(row.role);
@@ -75,9 +75,10 @@ std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan
 			break;
 		}
 	}
-	// The .mis of its name (S24 Names), the editor's names in it: no sidecar, no reference, but the mission's own.
+	// The .mis of its name beside it (S24 Names), the editor's names in it: no sidecar, no reference, but the
+	// mission's own.
 	const std::string names = mission::mission_base_name(mission) + ".mis";
-	if (const AssetEntry *entry = scan.find(names)) {
+	if (const AssetEntry *entry = scan.named(folder.empty() ? names : folder + "/" + names)) {
 		MissionFileSetMember member;
 		member.role = kMissionNamesRole;
 		member.path = entry->relative_path;

@@ -574,19 +574,24 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	const bool names_read = names_file_pending_;
 	MissionNamesFile names;
 	if (names_read) {
-		if (pending_names_file_) names = read_names_file(file, chains, *pending_names_file_);
-		else names.found = MissionNamesFile::Found::None;
+		const CompanionFile *beside = pending_names_file_.get();
+		if (beside && beside->state == CompanionFile::State::Read) {
+			names = read_names_file(file, chains, beside->bytes);
+		} else if (beside && beside->state == CompanionFile::State::Unreadable) {
+			names.found = MissionNamesFile::Found::Unopened;
+			names.why = beside->error;
+		} else {
+			names.found = MissionNamesFile::Found::None;
+		}
 		names_file_pending_ = false;
 		pending_names_file_.reset();
 	}
+	// What the mission takes of a matching one (MissionNamesFile::kept: what the setters take; the rest listed).
 	const bool take = names.found == MissionNamesFile::Found::Matched;
 	if (take)
-		for (size_t g = 1; g < file.group_records.size() && g < names.groups.size(); ++g) {
-			bms::GroupRecord &record = file.group_records[g];
-			bool empty = true;
-			for (const char byte : record.name) empty = empty && byte == 0;
+		for (size_t g = 1; g < file.group_records.size() && g < names.kept_groups.size(); ++g) {
 			std::string refused;
-			if (empty && !names.groups[g].empty()) bms::set_group_name(record, names.groups[g], refused);
+			if (!names.kept_groups[g].empty()) bms::set_group_name(file.group_records[g], names.kept_groups[g], refused);
 		}
 
 	auto mission = std::make_shared<MissionRow>(k(K::Mission));
@@ -617,25 +622,30 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		MissionPath path{file.waypoint_records[i], int(i), {}};
 		for (const int marker : mission::waypoint_path_markers(file, i)) path.stops.push_back(uint32_t(marker));
 		auto row = std::make_shared<PathRow>(k(K::WaypointPath), std::move(path));
-		if (take && i < names.names.paths.size()) row->description = names.names.paths[i];
+		if (take && i < names.kept.paths.size()) row->description = names.kept.paths[i];
 		shape(*row);
 		rows.push_back(row);
 	}
 	std::set<int32_t> described; // an area of a zone id the first of it the .mis's description goes to
 	for (const bms::AreaTrigger &area : file.area_triggers) {
 		auto row = std::make_shared<AreaRow>(k(K::Area), area);
-		if (take && area.id > 0 && size_t(area.id) < names.names.areas.size() && described.insert(area.id).second)
-			row->description = names.names.areas[size_t(area.id)];
+		if (take && area.id > 0 && size_t(area.id) < names.kept.areas.size() && described.insert(area.id).second)
+			row->description = names.kept.areas[size_t(area.id)];
 		shape(*row);
 		rows.push_back(row);
 	}
 	for (size_t i = 0; i < chains.size(); ++i) {
 		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chains[i]));
-		if (take && i < names.names.events.size()) row->name = names.names.events[i];
+		if (take && i < names.kept.events.size()) row->name = names.kept.events[i];
 		shape(*row);
 		rows.push_back(row);
 	}
-	if (names_read) names_file_ = std::move(names);
+	if (names_read) {
+		names_file_ = std::move(names);
+		outside_names_ = MissionNamesFile();
+		names_left_ = MissionNamesLeft();
+		spent_overwrite_ = 0;
+	}
 	return true;
 }
 
@@ -647,71 +657,116 @@ uint64_t bytes_fingerprint(const std::vector<uint8_t> &bytes) {
 	return io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
 }
 
+const MissionFileState *mission_file_state(const FileState *state) { return dynamic_cast<const MissionFileState *>(state); }
+
 } // namespace
 
-void MissionDocument::take_names_file(const std::vector<uint8_t> *bytes) {
+void MissionDocument::take_names_file(const CompanionFile &file) {
+	++names_state_;
 	names_file_pending_ = true;
-	pending_names_file_ = bytes ? std::make_shared<const std::vector<uint8_t>>(*bytes) : nullptr;
+	pending_names_file_ = std::make_shared<const CompanionFile>(file);
+}
+
+const MissionNamesFile &MissionDocument::names_file() const {
+	// Read the names again named the bytes the last save found in its place: those are the mission's now.
+	const MissionFileState *state = mission_file_state(file_state());
+	if (state && state->mis_known != 0 && outside_names_.found != MissionNamesFile::Found::Unread &&
+	    state->mis_known == outside_names_.fingerprint)
+		return outside_names_;
+	return names_file_;
 }
 
 uint64_t MissionDocument::names_file_overwrite() const {
-	const auto *state = dynamic_cast<const MissionFileState *>(file_state());
-	return state ? state->mis_overwrite : 0;
+	const MissionFileState *state = mission_file_state(file_state());
+	return state && state->mis_overwrite != spent_overwrite_ ? state->mis_overwrite : 0;
 }
 
-bool MissionDocument::names_file_text(const std::vector<uint8_t> *now, std::string &text) {
-	MissionNamesFile &names = names_file_;
-	names.outside = false;
-	names.outside_fingerprint = 0;
-	names.unwritten.clear();
-	if (names.found == MissionNamesFile::Found::Unread) return false; // no file beside: read from bytes
-	const uint64_t at = now ? bytes_fingerprint(*now) : 0;
-	const uint64_t overwrite = names_file_overwrite();
-	if (now && !(overwrite != 0 && overwrite == at)) {
-		// Bytes other than those read or last written: another program's, left as they are.
-		if (at != names.fingerprint) {
-			names.outside = true;
-			names.outside_fingerprint = at;
-			return false;
-		}
-		// Read, not matching, not the editor's: listed (mission.names_unmatched), left as it is.
-		if (!names.ours && names.found != MissionNamesFile::Found::Matched) return false;
+bool MissionDocument::companion_unsaved() const {
+	const MissionNamesFile &known = names_file();
+	return known.found != MissionNamesFile::Found::Unread && !same_names(mission_names(*this), known.kept);
+}
+
+bool MissionDocument::names_file_due(const CompanionFile &now) {
+	++names_state_;
+	names_left_ = MissionNamesLeft();
+	writing_over_ = 0;
+	const MissionNamesFile &known = names_file();
+	if (known.found == MissionNamesFile::Found::Unread) return false; // read from bytes alone: nothing beside it known
+	switch (now.state) {
+	case CompanionFile::State::Absent:
+		// None there, or gone since: the editor's to make where the mission holds a name the .mis carries.
+		return mission_holds_names(*this);
+	case CompanionFile::State::Unreadable:
+		names_left_.unwritten = "the file system would not read it to see what it holds (" + now.error + ")";
+		return false;
+	case CompanionFile::State::Read: break;
 	}
-	std::string error;
-	if (!mission_names_text(*this, text, error)) {
-		names.unwritten = error;
+	const uint64_t at = bytes_fingerprint(now.bytes);
+	const uint64_t overwrite = names_file_overwrite();
+	if (overwrite != 0 && overwrite == at) {
+		writing_over_ = at;
+		return true;
+	}
+	if (at != known.fingerprint) {
+		// Bytes other than those read or written: another program's, left as they are, read for what they hold.
+		names_left_.outside = true;
+		outside_names_ = read_names_file(*this, now.bytes);
 		return false;
 	}
-	return true;
+	// The editor's own, matching the mission: written. The original editor's, one that does not match, one that does
+	// not read: left as they are (names_file_findings lists each).
+	return known.ours && known.found == MissionNamesFile::Found::Matched;
+}
+
+bool MissionDocument::names_file_text(std::string &text) {
+	std::string error;
+	const bool made = mission_names_text(*this, &base_heights_, text, error);
+	base_heights_.clear();
+	++names_state_;
+	if (!made) {
+		names_left_.unwritten = error;
+		writing_over_ = 0;
+	}
+	return made;
 }
 
 void MissionDocument::names_file_written(bool ok, uint64_t fingerprint, const std::string &error) {
-	MissionNamesFile &names = names_file_;
+	++names_state_;
 	if (!ok) {
-		names.unwritten = error;
+		names_left_.unwritten = "the file system would not write it (" + error + ")";
+		writing_over_ = 0;
 		return;
 	}
-	// Written from the mission: its names the mission's now, nothing more to take from it.
-	names.found = MissionNamesFile::Found::Matched;
-	names.ours = true;
-	names.fingerprint = fingerprint;
-	names.why.clear();
-	names.names = mission::MisNames{};
-	names.groups = {};
-	names.events.clear();
-	names.outside = false;
-	names.outside_fingerprint = 0;
-	names.unwritten.clear();
+	// Written from the mission: its names the mission's now. Write it from the mission is spent by the write it
+	// was for: a later change to the file is left as it is again.
+	if (writing_over_ != 0) spent_overwrite_ = writing_over_;
+	writing_over_ = 0;
+	MissionNamesFile written;
+	written.found = MissionNamesFile::Found::Matched;
+	written.ours = true;
+	written.fingerprint = fingerprint;
+	written.kept = mission_names(*this);
+	names_file_ = std::move(written);
+	outside_names_ = MissionNamesFile();
+	names_left_ = MissionNamesLeft();
 }
 
 bool MissionDocument::set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) {
-	const auto *fingerprint = std::get_if<int64_t>(&edit.value);
-	if (edit.field != kMisOverwriteField || !fingerprint) {
+	const bool overwrite = edit.field == kMisOverwriteField, known = edit.field == kMisKnownField;
+	if (!overwrite && !known) {
 		error = make_finding(CoreFinding::DocumentValue, DiagnosticSeverity::Error, "A mission has no such file-wide value.", path());
 		return false;
 	}
+	const auto *text = std::get_if<std::string>(&edit.value);
+	uint64_t fingerprint = 0;
+	if (!text || !fingerprint_from_hex(*text, fingerprint)) {
+		error = make_finding(CoreFinding::DocumentValue, DiagnosticSeverity::Error,
+		                     std::string(edit.field) + " names a .mis by its bytes' fingerprint: 16 hex digits.", path());
+		return false;
+	}
 	auto made = std::make_shared<MissionFileState>();
-	made->mis_overwrite = uint64_t(*fingerprint);
+	if (const MissionFileState *was = mission_file_state(state.get())) *made = *was;
+	(overwrite ? made->mis_overwrite : made->mis_known) = fingerprint;
 	state = std::move(made);
 	return true;
 }

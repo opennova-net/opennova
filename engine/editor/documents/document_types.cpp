@@ -51,17 +51,22 @@ namespace {
 std::unique_ptr<DocumentBase> make_mission() { return std::make_unique<MissionDocument>(); }
 
 // The mission's companion (S24 Names): the .mis beside it, its names (documents/mission_names_file.h).
-void read_mission_names(DocumentBase &document, const std::vector<uint8_t> *bytes) {
-	if (auto *mission = dynamic_cast<MissionDocument *>(&document)) mission->take_names_file(bytes);
+void read_mission_names(DocumentBase &document, const CompanionFile &file) {
+	if (auto *mission = dynamic_cast<MissionDocument *>(&document)) mission->take_names_file(file);
 }
-bool write_mission_names(DocumentBase &document, const std::vector<uint8_t> *now, std::string &text) {
+bool mission_names_due(DocumentBase &document, const CompanionFile &now) {
 	auto *mission = dynamic_cast<MissionDocument *>(&document);
-	return mission && mission->names_file_text(now, text);
+	return mission && mission->names_file_due(now);
+}
+bool write_mission_names(DocumentBase &document, std::string &text) {
+	auto *mission = dynamic_cast<MissionDocument *>(&document);
+	return mission && mission->names_file_text(text);
 }
 void mission_names_written(DocumentBase &document, bool ok, uint64_t fingerprint, const std::string &error) {
 	if (auto *mission = dynamic_cast<MissionDocument *>(&document)) mission->names_file_written(ok, fingerprint, error);
 }
-constexpr DocumentCompanions kMissionCompanions{".mis", read_mission_names, write_mission_names, mission_names_written};
+constexpr DocumentCompanions kMissionCompanions{".mis", read_mission_names, mission_names_due, write_mission_names,
+                                                mission_names_written};
 
 std::unique_ptr<DocumentBase> make_catalog() { return std::make_unique<DefCatalogDocument>(); }
 std::unique_ptr<DocumentBase> make_strings() { return std::make_unique<StringsDocument>(); }

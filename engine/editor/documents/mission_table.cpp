@@ -834,7 +834,9 @@ LabelledField name_field(K kind) {
 	                    (event ? "event name" : "description") +
 	                    "), which the game never reads: at most " +
 	                    std::to_string(event ? kMisEventNameChars : kMisDescriptionChars) +
-	                    " characters, the original editor's, and no double quote or ';', which its reader cannot take.";
+	                    " bytes, the original editor's (fewer characters with accents, each two bytes or more), and no "
+	                    "double quote or ';', which its reader cannot take." +
+	                    (kind == K::WaypointPath ? " Path 0 is no path, and takes none." : "");
 	// The row's own text (its record is the row), set as the .mis carries a name: refused, never rewritten, where
 	// it cannot (mission::mis_name_allowed: past the width, a control character, a double quote, a ';').
 	const auto name_of = [kind](void *row) -> std::string & {
@@ -847,10 +849,16 @@ LabelledField name_field(K kind) {
 		value = name_of(record.data);
 		return true;
 	};
-	out.value.set = [name_of, width](const RecordHandle &record, const Value &value, std::string &error) {
+	out.value.set = [name_of, width, kind](const RecordHandle &record, const Value &value, std::string &error) {
 		const auto *text = std::get_if<std::string>(&value);
 		if (!text) {
 			error = "A name is a text.";
+			return false;
+		}
+		// Path 0 is no path (a waypoint marker on it follows none): the .mis describes the paths from 1
+		// (mission::write_mis_text).
+		if (kind == K::WaypointPath && static_cast<PathRow *>(record.data)->native.number == 0 && !text->empty()) {
+			error = "Path 0 is no path: it takes no description.";
 			return false;
 		}
 		if (!mis_name_allowed(*text, width, error)) return false;

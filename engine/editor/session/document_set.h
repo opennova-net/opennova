@@ -18,6 +18,7 @@
 
 namespace opennova::editor {
 
+class MissionGround;
 class MissionItemCache;
 class SessionCore;
 struct ProjectPaths;
@@ -48,8 +49,11 @@ public:
 	Document *records_for(const std::string &path = {});
 	const std::vector<std::shared_ptr<DocumentBase>> &documents() const { return documents_; }
 	bool documents_dirty() const;
+	// documents_dirty(), or a document whose companion holds what it does not (DocumentBase::companion_unsaved).
+	bool documents_unsaved() const;
 	// The paths of the open documents with unsaved edits, in the order they were opened.
-	std::vector<std::string> dirty_files() const;
+	// `companions`: a document whose companion holds what it does not (DocumentBase::companion_unsaved) too.
+	std::vector<std::string> dirty_files(bool companions) const;
 	// True when the last EditRecord, Copy, Cut, Paste or Duplicate went through (a Move that left a
 	// record where it is included: it changed nothing, and nothing was wrong).
 	bool last_edit_ok() const { return last_edit_ok_; }
@@ -207,18 +211,26 @@ private:
 	// A mission's records of an item take its catalog row (D-MIS-10): the AI class a save writes handed to the
 	// document, before an edit and a save (MissionDocument::set_item_classes); the rows read through `rows_`.
 	void hand_item_classes(DocumentBase &document);
-	// A document's companion (DocumentType::companions, S24 Names: a mission's .mis): where it is (the project's file
-	// of the document's base name and its extension, else beside the document's file), "" for a type with none;
-	// read and handed to the document before it reads its file (read_companion); written after its save where the
+	// A document's companion (DocumentType::companions, S24 Names: a mission's .mis): where it is (beside the
+	// document's file, in its folder: the project's file there of the document's base name and its extension, in
+	// any case, else that name), "" for a type with none; read and handed to the document before it reads its file
+	// (read_companion: none there, its bytes, or the file system's refusal); written after its save where the
 	// document says to, `written` taking its path (write_companion: never failing the document's save).
-	std::string companion_path(const DocumentBase &document, const std::string &relative) const;
+	std::string companion_path(AssetKind kind, const std::string &relative) const;
 	void read_companion(DocumentBase &document, AssetKind kind, const std::string &relative) const;
 	void write_companion(DocumentBase &document, std::vector<std::string> &written);
+	// A mission's base heights for its .mis, handed to the document before the write (MissionDocument::
+	// set_base_heights): each entity's, in the writer's order, the terrain's height under it as the game's collision
+	// samples it (world::terrain_column_height) over the mission's terrain read as the DI-28 ground check reads it
+	// (MissionGround), 0 where no terrain lies under it or none reads.
+	void hand_base_heights(DocumentBase &document);
 
 	SessionCore &core_;
 	SessionView &view_;
 	const ProjectPaths &paths_;
 	std::unique_ptr<MissionItemCache> rows_;
+	// The terrain the last mission's base heights were sampled over, read again where its mission's terrain moved.
+	std::unique_ptr<MissionGround> ground_;
 	std::vector<std::shared_ptr<DocumentBase>> documents_;
 	// Each open document's instance and whether it has unsaved edits, as the view last listed
 	// them: DocumentSet moves when they differ (update_view).

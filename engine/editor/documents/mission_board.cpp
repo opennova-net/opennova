@@ -142,9 +142,10 @@ bool mission_board_card(const MissionDocument &document, NodeId event, const Mis
 	out = BoardCard();
 	out.event = form.event;
 	out.index = form.index;
-	// Its number, and the name the mission's names give it where they give one.
+	// Its number, and the name the mission's names give it where they give one, as every heading says it ("Event 3
+	// (Get to the bridge)", mission_labels' event heading).
 	const std::string base = MissionNames().event(int64_t(form.index)), given = names.event(int64_t(form.index));
-	out.title = "Event " + std::to_string(form.index + 1) + (given != base ? ": " + given : std::string());
+	out.title = "Event " + std::to_string(form.index + 1) + (given != base ? " (" + given + ")" : std::string());
 	out.words = form.words;
 	out.repeats = form.repeats;
 	out.at_start = form.at_start;

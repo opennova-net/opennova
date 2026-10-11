@@ -292,7 +292,8 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::EditRecord) ==
 	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.config_overrun", "document.line_ends",
 	                     "menu.duplicate_screen",
-	                     "menu.duplicate_window", "mission.names_outside", "mission.names_unmatched", "mission.off_ground",
+	                     "menu.duplicate_window", "mission.names_foreign", "mission.names_outside", "mission.names_unmatched",
+	                     "mission.off_ground",
 	                     "mission.ssn_duplicate", "mission.zone_duplicate",
 	                     "strings.key_duplicate", "terrain.foliage_inert", "terrain.no_width", "terrain.refused" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
@@ -365,8 +366,8 @@ static int test_columns() {
 	                     "font.glyph_height", "font.glyph_outside", "hudfx.name_runs", "hudfx.never_read",
 	                     "hudfx.no_model", "hudfx.power_unseen",
 	                     "menu.variable_number", "mission.event_missing",
-	                     "mission.group_range", "mission.invalid_input", "mission.names_outside", "mission.names_unmatched",
-	                     "mission.names_unwritten", "mission.path_rebuilt",
+	                     "mission.group_range", "mission.invalid_input", "mission.names_foreign", "mission.names_outside",
+	                     "mission.names_refused", "mission.names_unmatched", "mission.names_unwritten", "mission.path_rebuilt",
 	                     "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "music_bank.stream_silent",
 	                     "particle.duplicate_effect", "particle.unreadable",

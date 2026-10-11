@@ -54,7 +54,9 @@ enum class MissionFinding {
 	RunsPastTable,  // an event's run past its table, read unbounded by the game (gates; blocks the save)
 	NamesUnmatched, // the .mis beside it holds another mission's events, or does not read (S24 Names: listed)
 	NamesOutside,   // the .mis changed outside the editor since it was read: a save left it as it is (listed)
-	NamesUnwritten, // the .mis a save would write, refused by its writer (an area's zone id past 1..99: listed)
+	NamesUnwritten, // the .mis a save would write, refused by its writer or the file system (listed)
+	NamesForeign,   // the .mis is the original editor's: a save leaves it, the mission's names unsaved (listed)
+	NamesRefused,   // names the .mis gives that the editor's setters refuse, left out of the mission (listed)
 	kCount
 };
 const FindingCodeRow &finding_code(MissionFinding code);
