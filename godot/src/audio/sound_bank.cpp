@@ -124,7 +124,6 @@ TypedArray<AmbientLayer> SoundBank::describe_ambient(const String &p_name) {
 		row->set_min_distance(static_cast<int>(layer.min_u));
 		row->set_volume(static_cast<int>(layer.volume));
 		row->set_clamp_volume(static_cast<int>(layer.clamp));
-		row->set_base_pitch(opennova::lwf::pitch_from_q16(layer.pitch_q16));
 		out.push_back(row);
 	}
 	return out;
@@ -138,8 +137,7 @@ Ref<AudioStreamWAV> SoundBank::resolve_ambient_stream(const Ref<AmbientLayer> &p
 }
 
 void SoundBank::configure_ambient_player(AudioStreamPlayer3D *p_player,
-		const Ref<AudioStreamWAV> &p_stream, const Ref<AmbientLayer> &p_layer,
-		const StringName &p_bus) {
+		const Ref<AudioStreamWAV> &p_stream, const StringName &p_bus) {
 	if (p_player == nullptr || p_stream.is_null()) {
 		return;
 	}
@@ -148,8 +146,6 @@ void SoundBank::configure_ambient_player(AudioStreamPlayer3D *p_player,
 	if (p_bus != StringName() && AudioServer::get_singleton()->get_bus_index(p_bus) >= 0) {
 		p_player->set_bus(p_bus);
 	}
-	p_player->set_pitch_scale(WavLoader::pitch_scale_for(p_stream,
-			effective_base_pitch(p_layer.is_valid() ? p_layer->get_base_pitch() : 1.0)));
 }
 
 Node3D *SoundBank::spawn_ambient(Node3D *p_parent, const Vector3 &p_world_pos, const String &p_name,
@@ -179,8 +175,8 @@ Node3D *SoundBank::spawn_ambient(Node3D *p_parent, const Vector3 &p_world_pos, c
 			holder->set_position(p_world_pos);
 			p_parent->add_child(holder);
 		}
-		AudioStreamPlayer3D *player = _make_player(stream,
-				effective_base_pitch(_member_base_pitch(member)), p_bus, true, 0);
+		// The placed set's emitter word, 0x10000, is the voice's play factor alone.
+		AudioStreamPlayer3D *player = _make_player(stream, 1.0, p_bus, true, 0);
 		holder->add_child(player);
 		player->play();
 		// Ambient candidates are data until the top-eight mixer selects them.
@@ -378,9 +374,10 @@ AudioStreamPlayer *SoundBank::spawn_oneshot_2d(Node *p_parent, const String &p_n
 		// to one wave entry by name and plays it at the dialog module's fixed
 		// frequency, with no set/member pitch composition and none of its two
 		// ROL3 draws; the per-layer member pick above still draws for random
-		// layers (docs/audio/lwf-dbf-sound-re.md, Dialog_LoadAudioClip).
-		player->set_pitch_scale(WavLoader::pitch_scale_for(stream,
-				effective_base_pitch(_member_base_pitch(member))));
+		// layers (docs/audio/lwf-dbf-sound-re.md, Dialog_LoadAudioClip). The voice
+		// plays at the play hook's word, 0x10000, as MissionAudio's dialog voice
+		// does [orig: sub_527560 @ 0x52757c, called through dword_A8A23C @ 0x44de50].
+		player->set_pitch_scale(WavLoader::pitch_scale_for(stream, 1.0));
 		player->set_volume_db(volume_db_from_255(static_cast<int>(member.volume)));
 		player->set_stream(stream);
 		p_parent->add_child(player);
@@ -430,11 +427,6 @@ String SoundBank::_member_wav_path(const opennova::lwf::File &p_bank,
 	return opennova::to_gd(p_bank.singles[p_member.single_index].path);
 }
 
-double SoundBank::_member_base_pitch(const opennova::lwf::Sndparm &p_member) {
-	// Q16 (0x10000 = 1.0), the one engine pitch scale (lwf.h).
-	return opennova::lwf::pitch_from_q16(p_member.pitch_scaled);
-}
-
 AudioStreamPlayer3D *SoundBank::_make_player(const Ref<AudioStreamWAV> &p_stream, double p_play_scale,
 		const StringName &p_bus, bool p_loop, int p_vol255) {
 	AudioStreamPlayer3D *player = memnew(AudioStreamPlayer3D);
@@ -455,10 +447,6 @@ AudioStreamPlayer3D *SoundBank::_make_player(const Ref<AudioStreamWAV> &p_stream
 	player->set_pitch_scale(WavLoader::pitch_scale_for(p_stream, p_play_scale));
 	player->set_volume_db(volume_db_from_255(p_vol255));
 	return player;
-}
-
-double SoundBank::effective_base_pitch(double p_base_pitch) {
-	return p_base_pitch > 0.01 ? p_base_pitch : 1.0;
 }
 
 Ref<AudioStreamWAV> SoundBank::loop_copy(const Ref<AudioStreamWAV> &p_stream) {

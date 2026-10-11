@@ -11,6 +11,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/local_player.h> // the local look the request snaps
 #include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading, emplaced_word_bam
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/weapon_inventory.h> // weapon_slot_initial_zoom
@@ -278,6 +279,11 @@ void VehicleSystem::presnap_attach_heading(Entity &occupant, const Entity &vehic
             : io::bam_sub(carrier, bam_from_degrees_wrapped(seat.yaw_offset));
     occupant.yaw = static_cast<int16_t>(
             std::lround(mission_yaw_deg_from_bam_heading(seat_heading)));
+    // The local player's look yaw takes the same value: the request runs outside
+    // the tick, so the input-owned look carries it into the next one.
+    // [orig: g_LocalPlayerLookYaw @0x436579 / @0x4365CE]
+    if (occupant.handle == world.cached.local_player && world.local_player_state != nullptr)
+        world.local_player_state->input.look_heading = seat_heading;
     AiEntity *body = world.ai.for_handle(occupant.handle);
     if (body == nullptr) return;
 

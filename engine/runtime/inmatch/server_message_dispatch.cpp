@@ -924,50 +924,22 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 						world, target_zone, player->handle, selected))
 			return replies;
 	}
-	// The no-pick arm reads the slot's spectator latch/restore team beside the
-	// team byte [orig: Server_ProcessPlayerDeath @0x517863 ->
-	// Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6].
-	const world::SpawnSlotState slot_state{
-			conn.link.spectator, conn.spectator_restore_team};
-	world::SpawnPointResult pose = world::resolve_player_spawn_pose(
-			world, player->handle, target_zone, conn.reply.player_slot,
-			player->team, config.game_type, slot_state);
-	// A medic revive lands the player on the position the revive saved (its
-	// death position raised 0x4000) after the placement ran, so the angles stay
-	// the placement's: the picked marker's words, or the body's own when nothing
-	// was picked (D-NET-377). The revive latch (+89932) also skips the spawn
-	// protection. [orig: Server_PositionPlayerForSpawn @0x50D60A..0x50D62A;
-	//  GameEvent_RevivePlayer @0x517DCD..0x517E09 saves; the latch @0x51791C]
+	// The revive latch (+89932) skips the spawn protection and the kit rebuild below;
+	// the placement lands a revive on its saved position (server_spawn.h). [orig: the
+	//  latch @0x51791C; GameEvent_RevivePlayer @0x517DCD..0x517E09 saves]
 	const bool revive_deploy = conn.reply.revive_pose_valid;
-	if (pose.found) {
-		player->position = pose.position;
-		player->yaw = pose.yaw;
-		player->pitch = pose.pitch;
-		player->roll = pose.roll;
-	}
-	if (revive_deploy) {
-		player->position.x = opennova::io::fp16_16_to_float(conn.reply.revive_pos[0]);
-		player->position.y = opennova::io::fp16_16_to_float(conn.reply.revive_pos[1]);
-		player->position.z = opennova::io::fp16_16_to_float(conn.reply.revive_pos[2]);
-		conn.reply.revive_pose_valid = false;
-	} else if (!pose.found) {
-		// No authored marker: the deploy transaction restores the position
-		// recorded by the previous Entity_ResetToSpawnState. Keeping this in the
-		// shared release makes C2S, wave, and listen-host paths identical.
-		// [orig: Server_ProcessPlayerDeath @0x517740 ->
-		// Entity_ResetToSpawnState @0x4B9610; D-NET-66]
-		player->position = player->spawn_position;
-	}
+	const world::SpawnPointResult pose =
+			Server_PositionDeployingPlayer(config, conn, world, *player, target_zone);
 	// The Co-op marker arm's chute bit and queued carrier mount survive the
 	// spawn-state reset below (it clears only the dead bit).
 	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
 	world::apply_spawn_point_latches(*player, pose);
-	// Two signed raises to the difficulty-aware ceiling, the deploy's and the reset's; one that
-	// wraps negative leaves a dead player's health alone [orig: Server_ProcessPlayerDeath ->
+	// The deploy's and the reset's signed raises to the row's difficulty-aware ceiling: 0 leaves
+	// the hp-0 body's 1, a wrapped one a dead player's health [orig: Server_ProcessPlayerDeath ->
 	// Entity_RaiseHealthToMax @0x51782F; Entity_ResetToSpawnState @0x4B97BC].
-	const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp != 0;
+	const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp.has_value();
 	const int32_t ceiling = def_hp || player->health_max > 0 ? world::max_health_with_difficulty(
-			world, *player, def_hp ? world.tables.player.item_hp : player->health_max) : 100;
+			world, *player, def_hp ? *world.tables.player.item_hp : player->health_max) : 100;
 	if (world::retail_signed_i16(player->health) < ceiling) player->health = ceiling;
 	world::entity_reset_to_spawn_state(*player, ceiling);
 	// Spawn protection: every deploy of a non-bot slot whose revive latch (+89932)
@@ -1026,7 +998,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	conn.link.armory_reuse_seconds = 0;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
-	player->flags &= ~1u;
+	// The next 0x0A clears the hide bit and re-sets a spectator's, so a deployed
+	// spectator stays hidden [orig: NetPacket_WritePlayerState @0x4FF6D7, @0x4FF7A1].
+	if (!conn.link.spectator) player->flags &= ~1u;
 	server_logs_deploy(server_log, *player); // /PROFILE's PBRK [orig: Server_ProcessPlayerDeath @0x517a27..0x517a37]
 	if (mobile_spawn) {
 		// Retail repeats FindBestSeatSlot after the reset, then requests the
@@ -1035,7 +1009,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		world::VehicleSeatSelection selected;
 		if (world::find_best_vehicle_seat(
 					world, target_zone, player->handle, selected))
-			world.vehicles.attach_to_seat(player->handle, selected);
+			world.vehicles.request_attach(player->handle, selected);
 	}
 	// Never on a revive deploy, whose client leaves the deploy wait on its record's
 	// respawn edge (D-NET-379) [orig: @0x5178F2, under the @0x5178C5 test].

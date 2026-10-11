@@ -471,6 +471,7 @@ bool run_non_drivable_hover_seed() {
 		w::Seat seat;
 		seat.type = w::SeatType::Gunner;
 		seat.bone_index = 6;
+		heli->has_item_def = true; // seats need the def (D-NET-422)
 		heli->seats.push_back(seat);
 		w::Entity gunner;
 		gunner.kind = w::EntityKind::Organic;

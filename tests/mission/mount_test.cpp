@@ -51,6 +51,7 @@ static Entity make_gun(uint16_t ssn, float x, float y, float z, int16_t yaw) {
     Entity e;
     e.net_id = ssn;
     e.kind = EntityKind::Item;
+    e.has_item_def = true; // seats need the def (D-NET-422)
     e.position = {x, y, z};
     e.yaw = yaw;
     Seat s;
@@ -73,6 +74,7 @@ static Entity make_vehicle(uint16_t ssn, SeatType seat_type) {
     e.bms_id = 77;
     e.spawn_origin = (1u << 24) | 3u;
     e.kind = EntityKind::Item;
+    e.has_item_def = true; // seats need the def (D-NET-422)
     // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
     e.item_attrib = world::kItemAttribPlayerControl;
     Seat seat;
@@ -527,6 +529,7 @@ int main() {
         Entity vehicle;
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
+        vehicle.has_item_def = true; // seats need the def (D-NET-422)
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].
         vehicle.item_attrib = world::kItemAttribPlayerControl;
         vehicle.position = {100.f, 200.f, 7.f};
@@ -753,6 +756,7 @@ int main() {
         Entity vehicle;
         vehicle.net_id = 200;
         vehicle.kind = EntityKind::Item;
+        vehicle.has_item_def = true; // seats need the def (D-NET-422)
         vehicle.position = {10.f, 20.f, 5.f};
         vehicle.yaw = 15;
         Seat passenger;

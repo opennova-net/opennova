@@ -12,10 +12,10 @@ namespace godot {
 
 // One LWF layer as ambient candidate data (SoundBank.describe_ambient's row,
 // the former layer-descriptor Dictionary, ADR 0017): member 0's wave and its
-// volume / clamp / base pitch, the layer's two radii, the stable
-// `candidate_id` the mission audio stamps for the mission's lifetime, and an
-// injected `stream` a test hands in place of a resolved wave (read before the
-// bank's resolve). Read-write so a test authors one.
+// volume / clamp (its pitch is no play factor, D-SND-56), the layer's two
+// radii, the stable `candidate_id` the mission audio stamps for the mission's
+// lifetime, and an injected `stream` a test hands in place of a resolved wave
+// (read before the bank's resolve). Read-write so a test authors one.
 class AmbientLayer : public RefCounted {
 	GDCLASS(AmbientLayer, RefCounted)
 
@@ -24,7 +24,6 @@ class AmbientLayer : public RefCounted {
 	int min_distance_ = 0;
 	int volume_ = opennova::audio::kVolumeByteMax;
 	int clamp_volume_ = opennova::audio::kVolumeByteMax;
-	double base_pitch_ = 1.0;
 	int candidate_id_ = 0;
 	Ref<AudioStreamWAV> stream_;
 
@@ -42,8 +41,6 @@ public:
 	void set_volume(int p_value) { volume_ = p_value; }
 	int get_clamp_volume() const { return clamp_volume_; }
 	void set_clamp_volume(int p_value) { clamp_volume_ = p_value; }
-	double get_base_pitch() const { return base_pitch_; }
-	void set_base_pitch(double p_value) { base_pitch_ = p_value; }
 	// 0 = not yet stamped (ids start at 1).
 	int get_candidate_id() const { return candidate_id_; }
 	void set_candidate_id(int p_value) { candidate_id_ = p_value; }

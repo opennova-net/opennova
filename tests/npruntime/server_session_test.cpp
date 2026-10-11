@@ -106,7 +106,7 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 
 	opennova::inmatch::GameConfig config;
 	config.num_teams = 4;
-	auto board = [&](uint32_t game_type) {
+	auto board = [&](uint32_t game_type, uint8_t blue_proximity_mask = 0) {
 		config.game_type = game_type;
 		opennova::world::MatchRules rules;
 		rules.game_type = game_type;
@@ -114,6 +114,7 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 		world.match.configure(rules);
 		world.match.upsert_player({blue, 0, "Blue", {}});
 		world.match.upsert_player({red, 1, "Red", {}});
+		world.match.player(blue)->objective_proximity_mask = blue_proximity_mask;
 		const opennova::ProtocolMessage message =
 				opennova::inmatch::build_player_list_message(config, roster, &world);
 		opennova::PlayerList decoded;
@@ -158,11 +159,17 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 			return false;
 	}
 	{
-		const opennova::PlayerList decoded =
+		// The team KOTH byte is Game_CountAlivePlayersPerTeam's count: the live
+		// non-spectators in the hill (proximity bit 0), the dead red never.
+		// [orig: Server_BuildAndBroadcastScoreboard @0x50D9B5, @0x50DC62..0x50DC85;
+		//  Game_CountAlivePlayersPerTeam @0x500235]
+		const opennova::PlayerList outside =
 				board(opennova::game_type::kTeamKingOfTheHill);
-		if (!expect(decoded.team_count == 4 && decoded.teams[1].koth_hold == 1 &&
-		                    decoded.teams[2].koth_hold == 0,
-		            "team KOTH rows carry each team's live-player count"))
+		const opennova::PlayerList decoded =
+				board(opennova::game_type::kTeamKingOfTheHill, 0x01);
+		if (!expect(outside.team_count == 4 && outside.teams[1].koth_hold == 0 &&
+		                    decoded.teams[1].koth_hold == 1 && decoded.teams[2].koth_hold == 0,
+		            "team KOTH rows carry each team's live hill holders"))
 			return false;
 	}
 	{

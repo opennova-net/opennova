@@ -314,7 +314,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 					s.team = row->team_known ? row->team : 0;
 					s.spectated_name = row->display_name;
 					health = row->health_known ? static_cast<int16_t>(row->health_word) : 0;
-					max_hp = std::max<int32_t>(1, w.tables.player.item_hp);
+					max_hp = std::max<int32_t>(1, w.tables.player.item_hp.value_or(0));
 				}
 			} else if (const world::Entity *e =
 								w.registry.get(world::EntityHandle{cs.spectate_target})) {
@@ -437,7 +437,7 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 		// Both walks compare with the local player's entity Team, not the S2C
 		// latch; spawn_from_self seeds it before any 0x04/0x50 lands
 		// [orig: g_LocalPlayerEntity+0x162 @0x5a455c / @0x5a3c71].
-		const int32_t player_hp = w.tables.player.item_hp;
+		const int32_t player_hp = w.tables.player.item_hp.value_or(0);
 		replication::collect_roster_tags(view.runtime->state(),
 				view.runtime->has_self_handle() ? view.runtime->self_handle() : 0xFFFFu,
 				player->team, ctx.death_screen, ctx.game_type, out,

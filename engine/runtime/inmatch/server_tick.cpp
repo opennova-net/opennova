@@ -437,7 +437,9 @@ void check_win_conditions(NapiNPServerCtx &ctx, world::World &world) {
 	// retail SP discriminator.
 	const world::Entity *local = world.registry.get(world.cached.local_player);
 	if (local == nullptr) return;
-	const bool dead = !local->alive || (local->flags & 2u) != 0;
+	// The local player's dead bit alone, never its health word
+	// [orig: Server_CheckWinConditions `test byte ptr [eax+24h], 2` @0x51AD5E].
+	const bool dead = (local->flags & 2u) != 0;
 	if (dead && (world.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) == 0)
 		world.process_round_end(2);
 }
@@ -2183,6 +2185,21 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// [orig: Server_SendEntityStateToPlayer @0x517BA0 state==6 gate, recipient
 	// eye stores @0x517BF5..0x517C13, phase increment @0x517BE8]
 	if (ctx.is_in_session && !world.match.outcome().ended) {
+		// Every 0x0A written for a spectator slot first restamps its body: the
+		// hide bit, damage disabled and Health 1, whatever a deploy left (the
+		// hide bytes are the latch here, replication_model.h owner_hidden). Done
+		// ahead of the snapshot: the slot's own records read the body after it.
+		// [orig: NetPacket_WritePlayerState @0x4FF6FA..0x4FF728, called from
+		//  Server_SendEntityStateToPlayer @0x517C76 before its records @0x517C81]
+		for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+			if (!is_in_match(conn) || !conn.link.spectator) continue;
+			if (conn.type == NapiNPConnection::kTypeServerSide && !conn.s2c_send_boundary_open) continue;
+			world::Entity *body = world.registry.get(conn.link.owned_entity);
+			if (body == nullptr) continue;
+			body->flags |= 1u;          // @0x4FF71B
+			body->damage_state = -1;    // @0x4FF71E
+			body->health = 1;           // @0x4FF728
+		}
 		// The priority build runs only for recipients that take entity records:
 		// the listen host's own player gets the header-only frame and never
 		// walks the pools [orig: Server_SendEntityStateToPlayer @0x517c1b skips

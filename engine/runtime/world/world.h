@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <runtime/world/mission_diagnostics.h>
 #include <string>
 #include <vector>
@@ -437,7 +438,12 @@ struct PlayerTemplate {
     // has_item_def [orig: Entity_InitFromModel @0x40df06; the gate
     // @0x43CC19].
     bool has_graphic_model = true;
-    int32_t item_hp = 0;
+    // The Player row's hp word (itemDef+0x17C healthMax), 0 a real word: unset
+    // until the traits sweep stores it (or a harness seeds one), and while unset
+    // the spawn and the deploy take their fallbacks. A word of 0 makes the
+    // class init's model init mark the body indestructible (D-PWR-10)
+    // [orig: Entity_InitFromModel @0x40DC85].
+    std::optional<int32_t> item_hp;
     int32_t critical_hp = 0;
     // The rest of the same Player items.def template, cached for host/late-join
     // entities allocated after the mission-wide trait sweep.

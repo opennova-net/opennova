@@ -7,12 +7,14 @@
 namespace godot {
 
 // A decoded wave's stream: an AudioStreamWAV that carries the game's wave loader pitch word
-// (opennova::lwf::WavPcm::loader_pitch_q16, Q16) its decode recorded and the wave's own rate
-// (WavPcm::sample_rate), which the stream's whole mix rate holds up to INT32_MAX. Every player of a
-// decoded wave sets the pitch scale WavLoader::pitch_scale_for gives over the one its voice composes,
-// which reads both (opennova::lwf::wave_pitch_scale: a step of 0, a wave of pitch 0 whatever the
-// voice pitch or a play factor of 0 whatever the wave, plays at the mixer's least step, a rate boxed
-// at INT32_MAX at its own). A stream that is not a WaveStream keeps the composed scale.
+// (opennova::lwf::WavPcm::loader_pitch_q16, Q16) its decode recorded, its whole mix rate the wave's
+// own rate up to INT32_MAX (WavPcm::sample_rate). Every player of a decoded wave sets the pitch scale
+// WavLoader::pitch_scale_for gives over the one its voice composes, which reads the word and the mix
+// rate (opennova::lwf::wave_pitch_scale: the wave plays at the mixer's step, a whole number of 1/512
+// samples a device frame, a step of 0 at the least step). A stream that is not a WaveStream keeps
+// the composed scale. Only WavLoader::from_pcm builds one; a WaveStream built otherwise keeps the
+// default word 0x10000, which a play factor of 1 steps at 512, 44100 Hz, whatever its mix rate (no
+// such caller exists).
 class WaveStream : public AudioStreamWAV {
 	GDCLASS(WaveStream, AudioStreamWAV);
 
@@ -22,13 +24,9 @@ protected:
 public:
 	void set_loader_pitch_q16(int64_t p_pitch_q16);
 	int64_t get_loader_pitch_q16() const;
-	// 0 (a stream made elsewhere): its mix rate.
-	void set_wave_rate(int64_t p_rate);
-	int64_t get_wave_rate() const;
 
 private:
 	int64_t loader_pitch_q16_ = 0x10000;
-	int64_t wave_rate_ = 0;
 };
 
 } // namespace godot

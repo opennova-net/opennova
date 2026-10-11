@@ -884,6 +884,7 @@ void test_vehicle_seats_clear_the_nvg_restore_latch() {
             lw.w.registry.configure_pool(1, 4);
             Entity carrier;
             carrier.kind = EntityKind::Item;
+            carrier.has_item_def = true; // seats need the def (D-NET-422)
             carrier.health = 100;
             carrier.alive = true;
             carrier.item_attrib = attrib;
@@ -1024,6 +1025,7 @@ void test_scope_press_after_a_reset_runs_its_leg() {
         lw.w.registry.configure_pool(1, 4);
         Entity carrier;
         carrier.kind = EntityKind::Item;
+        carrier.has_item_def = true; // seats need the def (D-NET-422)
         carrier.health = 100;
         carrier.alive = true;
         // Control seats need PlayerControl [orig: Entity_AttachToVehicleSlot @0x4947cc].

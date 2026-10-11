@@ -47,6 +47,31 @@ inline size_t read_flat_tlv(const uint8_t *data, size_t len, size_t pos, FlatTlv
 	return p + out.size;
 }
 
+// A field's fixed-width load: `n` bytes from the value pointer whatever the
+// field's length, so a short value takes the bytes that follow it (the start of
+// the next field: its name, then its NUL and size) and a long one gives its
+// first `n`. Every reader of the grammar loads this way: the 0x41 / 0x42
+// handlers, the 0x81 / 0x82 readers, the description and goodbye walks and the
+// ping. Past the body's `end` retail reads on into whatever follows it: the 64
+// KiB stack decrypt buffer the handlers, the 0x81 / 0x82 readers, the goodbye
+// walk and the ping copy their datagram into, or for the description walk its
+// message's own buffer; ours reads zero there (D-NET-410).
+// [orig: NapiNP_ReadTLV @0x61DBE0 returns the value pointer for any length
+//  @0x61DCF7]
+inline void load_value_bytes(const uint8_t *value, const uint8_t *end, uint8_t *out, size_t n) {
+	const size_t avail = static_cast<size_t>(end - value);
+	for (size_t i = 0; i < n; ++i) out[i] = i < avail ? value[i] : 0;
+}
+
+// A dword field. [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - `mov ecx,
+//  [eax]` CI @0x62171E; NapiNPProtocol_HandleClientJoin @0x62B750 - `mov ecx,
+//  [eax]` CI @0x62BAE7]
+inline uint32_t load_value_dword(const uint8_t *value, const uint8_t *end) {
+	uint8_t le[4];
+	load_value_bytes(value, end, le, sizeof(le));
+	return io::read_u32_le(le);
+}
+
 // Append one field. `size` is the raw value length: a string value carries its
 // NUL inside the size, a binary value is written as-is.
 inline void append_flat_tlv(std::vector<uint8_t> &out, std::string_view name,

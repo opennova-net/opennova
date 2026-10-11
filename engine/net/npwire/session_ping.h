@@ -31,8 +31,11 @@ struct SessionPingBody {
 
 // False only when the body cannot carry the key dword. The TLV walk is
 // lenient like retail's: a field that does not fit ends the walk with the
-// fields read so far, and a value shorter than its width reads as zero (the
-// bounds check stands in for retail's unguarded `*(_DWORD *)value`).
+// fields read so far, and WR's byte and MS's dword load at the field's value
+// pointer whatever its length, so a short value takes the bytes that follow it
+// (zero past the body's end, D-NET-410).
+// [orig: Nwu_HandlePing @0x623A70 - WR `movzx ebx, byte ptr [eax]` @0x623C0F,
+//  MS `mov ebp, [ecx]` @0x623C2A]
 inline bool parse_session_ping_body(const uint8_t *data, size_t len, SessionPingBody &out) {
 	if (data == nullptr || len < 4) return false;
 	out.receiver_local_key = io::read_u32_le(data);
@@ -44,9 +47,11 @@ inline bool parse_session_ping_body(const uint8_t *data, size_t len, SessionPing
 		const size_t next = read_flat_tlv(data, len, pos, field);
 		if (next == kFlatTlvEnd || field.name.empty()) break;
 		if (strutil::iequals(field.name, "WR")) {
-			out.wants_reply = field.size >= 1 && field.value[0] != 0;
+			uint8_t wr = 0;
+			load_value_bytes(field.value, data + len, &wr, 1);
+			out.wants_reply = wr != 0;
 		} else if (strutil::iequals(field.name, "MS")) {
-			out.timestamp_ms = field.size >= 4 ? io::read_u32_le(field.value) : 0u;
+			out.timestamp_ms = load_value_dword(field.value, data + len);
 		}
 		pos = next;
 	}

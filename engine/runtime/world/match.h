@@ -528,6 +528,13 @@ class Match {
     void return_flag_home(World &world, EntityHandle flag, MatchGameplayEventKind kind,
                           EntityHandle actor = EntityHandle{});
     void update_objective_proximity(const World &world);
+    // Per team: the non-spectator players whose dead bit is clear and whose
+    // last proximity mask holds bit 0 (the 4095 objective, a team-0 hill or
+    // capturable, any hill outside the team modes), none past the round end.
+    // Both the hold timer and the TKOTH 0x16 byte read it. [orig: Game_CountAlivePlayersPerTeam
+    // @0x5001C0; its callers Game_AccumulateTeamScores @0x508D82 and
+    // Server_BuildAndBroadcastScoreboard @0x50D9B5]
+    std::array<int32_t, 5> count_alive_players_per_team(const World &world) const;
     void accumulate_team_scores(const World &world);
     void update_flag_objectives(World &world);
     int32_t team_objective_ticks(const World &world, uint8_t team) const;

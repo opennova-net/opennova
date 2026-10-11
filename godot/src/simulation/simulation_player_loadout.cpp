@@ -64,8 +64,9 @@ bool Simulation::local_player_toggle_mount() {
 	// The witnessed non-authority path queues C2S 0x26 (attach) /
 	// sends 0x27 (detach) and waits for the 0x0A stream to confirm [orig:
 	// Entity_RequestVehicleAttach @0x4364a0 / Entity_SendDetachPacket @0x435510].
-	// Joiners therefore choose a candidate locally but never mutate L until the
-	// authoritative relationship echo arrives.
+	// Joiners therefore choose a candidate locally and change L's relation only
+	// when the authoritative echo arrives; the attach request turns L to the
+	// seat before it queues the 0x26, as retail's does.
 	// A missing EquippedSlot passes the retail action gate; active_local_weapon_slot
 	// supplies the inert slot state used by the modeled gate below.
 	const opennova::world::Entity *toggle_player =

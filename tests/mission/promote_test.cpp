@@ -518,13 +518,13 @@ static void test_friendly_tag_names_and_gather() {
     // A dead entity STAYS labelled, carrying the dead latch the bad tier's
     // downed legs read [orig: `Flags & 2` @0x5a3c1c; the entry bails only
     // test Flags & 1 @0x5a39eb]; a CARRIED one drops.
-    named->alive = false;
+    named->flags |= kEntityFlagDead;
     tags.clear();
     collect_friendly_tags(*w, viewer, tags, ctx);
     CHECK(tags.size() == 2);
     for (const FriendlyTagSource &t : tags)
         CHECK(t.dead == (t.net_id == 21));
-    named->alive = true;
+    named->flags &= ~kEntityFlagDead;
     named->flags |= kEntityFlagCarried;
     tags.clear();
     collect_friendly_tags(*w, viewer, tags, ctx);

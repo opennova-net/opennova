@@ -280,6 +280,8 @@ void AmbientMixer::register_set(int32_t marker_index, int32_t region, int32_t vo
         }
         s->lifetime = m.lifetime_ticks;
         s->vol_byte = vol_byte;
+        // A placed marker registers the emitter word 0x10000
+        // [orig: Entity_UpdateEnvSoundEmitter @ 0x4a815a].
         s->pitch_q16 = 0x10000;
         s->refreshed_tick = clock_tick_;
     }

@@ -1361,6 +1361,54 @@ void test_end_result_freezes_team_hold_timer() {
     CHECK(!result.draw);
 }
 
+// D-NET-406: the proximity pass and the per-team count read the dead bit
+// alone. A body at or below 0 health with the bit clear (a deploy whose
+// ceiling wrapped negative) still holds the hill, while a set bit drops a body
+// whose latch still reads alive; the TKOTH 0x16 byte is that same count, so a
+// live player outside the hill is not in it. Past the round end no slot is in
+// state 6: the count is 0 and the hold decays by min(hold, koth_delta).
+// [orig: Server_UpdateCaptureZoneProximity @0x5087AD, @0x508A77, @0x508C59;
+//  Game_CountAlivePlayersPerTeam @0x500208, @0x500214, @0x50022F, @0x500235;
+//  Server_BuildAndBroadcastScoreboard @0x50D9B5, @0x50DC62..0x50DC85;
+//  Server_ProcessRoundEnd @0x51685E; Game_AccumulateTeamScores @0x508DB2..0x508DC2]
+void test_alive_readers_take_the_dead_bit_alone() {
+    auto world = std::make_unique<World>();
+    world->registry.configure_pool(0, 8);
+    world->registry.configure_pool(3, 4);
+    MatchRules tkoth;
+    tkoth.game_type = gt::kTeamKingOfTheHill;
+    tkoth.game_time_minutes = 10;
+    tkoth.hill_limit_minutes = 99;
+    world->match.configure(tkoth);
+    const EntityHandle holder = player(*world, 0, 1, "Holder");
+    const EntityHandle out_a = player(*world, 1, 1, "OutA");
+    const EntityHandle out_b = player(*world, 2, 1, "OutB");
+    const EntityHandle red = player(*world, 3, 2, "Red");
+    Entity *wrapped = world->registry.get(holder);
+    wrapped->position = {0.0f, 0.0f, 0.0f};
+    wrapped->health = -1;
+    wrapped->alive = false;
+    world->registry.get(out_a)->position = {100.0f, 0.0f, 0.0f};
+    world->registry.get(out_b)->position = {100.0f, 0.0f, 0.0f};
+    Entity *dead_red = world->registry.get(red);
+    dead_red->position = {0.0f, 0.0f, 0.0f};
+    dead_red->flags |= kEntityFlagDead;
+    spawn_hill(*world);
+    advance_initial_periodic_passes(*world, 3);
+    CHECK(world->match.player(holder)->objective_ticks == 3);
+    CHECK(world->match.player(red)->objective_ticks == 0);
+    CHECK(world->match.team_primary_score(1) == 3);
+    CHECK(world->match.team_primary_score(2) == 0);
+    const MatchLiveScoreboard board = world->match.live_scoreboard(*world);
+    CHECK(board.teams[1].alive_players == 1);
+    CHECK(board.teams[2].alive_players == 0);
+
+    world->process_round_end(1);
+    advance_initial_periodic_passes(*world, 2); // the next pass, 62 ticks on
+    CHECK(world->match.team_hold_ticks(1) == 0);  // 3 - min(3, koth_delta 5)
+    CHECK(world->match.live_scoreboard(*world).teams[1].alive_players == 0);
+}
+
 // Non-team boards: the frozen order follows the game-type primary
 // (Player_ComputeScore), the draw byte is the all-tied test, and the winner
 // marker goes to every non-spectator row whose key equals row 0's unless the
@@ -1552,6 +1600,7 @@ int main() {
     test_end_result_is_frozen_in_retail_board_order();
     test_end_round_team_row_count_rule();
     test_end_result_freezes_team_hold_timer();
+    test_alive_readers_take_the_dead_bit_alone();
     test_nonteam_board_order_draw_and_winner_marker();
     test_coop_remains_script_owned();
     if (failures != 0) {
