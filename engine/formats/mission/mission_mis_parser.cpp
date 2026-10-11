@@ -380,10 +380,12 @@ bool parse_mis_group(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 			if (!bms::set_group_name(record, t[1], why) && issues != nullptr)
 				issues->push_back({line.line_no, "group " + std::to_string(index) + "'s description \"" + t[1] +
 				                                         "\" is no group name: " + why});
-		} else if (t.size() >= 2 && t[0] == "flags") {
+		} else if (t.size() >= 2 && t[0] == "attrib") {
+			// The record's flags @0 and its value @8, as the original editor's .bms writer stores a group's
+			// attrib and commander [orig: JOTACmed.exe sub_44F920 @0x44f920, the group @0x450940..0x4509b4].
 			if (!token_i32(line, 1, value, error)) return false;
 			record.flags = value;
-		} else if (t.size() >= 2 && t[0] == "value") {
+		} else if (t.size() >= 2 && t[0] == "commander") {
 			if (!token_i32(line, 1, value, error)) return false;
 			record.value = value;
 		}
@@ -415,17 +417,25 @@ bool parse_mis_layer(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 	return false;
 }
 
+// `begin areatrig N`: N is the area's zone id, the original editor's slot, and `attrib` its flags (MISSION_AREA
+// 1, constrain-Z 2), which the original's .bms writer stores at @28; `color` is the editor's alone [orig:
+// JOTACmed.exe MIS_ParseToken @0x450e50, the section @0x4510a9, its keys @0x4540ac..0x454144; sub_44F920
+// @0x44f920, the area @0x450a16..0x450ab3].
 bool parse_mis_area_trigger(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
 	int32_t id = 0;
 	if (!token_i32(lines[pos], 2, id, error)) return false;
 	bms::AreaTrigger trigger = {};
 	trigger.id = id;
 	for (++pos; pos < lines.size(); ++pos) {
-		const std::vector<std::string> &t = lines[pos].tokens;
+		const MisLine &line = lines[pos];
+		const std::vector<std::string> &t = line.tokens;
 		if (t.size() >= 2 && t[0] == "end" && t[1] == "areatrig") {
 			file.area_triggers.push_back(trigger);
 			++pos;
 			return true;
+		}
+		if (t.size() >= 2 && t[0] == "attrib") {
+			if (!token_u32(line, 1, trigger.flags, error)) return false;
 		}
 	}
 	error = "MIS areatrig section is missing its end marker";
@@ -769,14 +779,14 @@ bool parse_mis_names(const std::string &text, MisNames &out, std::string &error)
 	out = MisNames{};
 	const std::vector<MisLine> lines = tokenize_mis_text(text);
 	// The section a line is in: the three that carry a name kept, any other walked to its end (an item's
-	// `name` and general_information's are not these). The indexes are parse_mis_text's: events and area
-	// triggers by their place in the file, a path by its record index.
+	// `name` and general_information's are not these). An event by its place in the file, an area by its
+	// zone id (`begin areatrig N`, 0..99), a path by its record index (`begin waypoint N`).
 	enum class Kind { None, Event, Area, Path, Other };
 	Kind kind = Kind::None;
 	std::string section;
 	size_t index = 0;
 	size_t begun_at = 0;
-	size_t events = 0, areas = 0;
+	size_t events = 0;
 	for (const MisLine &line : lines) {
 		const std::vector<std::string> &t = line.tokens;
 		if (kind == Kind::None) {
@@ -787,8 +797,14 @@ bool parse_mis_names(const std::string &text, MisNames &out, std::string &error)
 				kind = Kind::Event;
 				index = events++;
 			} else if (section == "areatrig") {
+				int32_t id = 0;
+				if (!token_i32(line, 2, id, error)) return false;
+				if (id < 0 || id >= static_cast<int32_t>(kMisAreaSlots)) {
+					error = "MIS areatrig zone id out of range in line " + std::to_string(line.line_no);
+					return false;
+				}
 				kind = Kind::Area;
-				index = areas++;
+				index = static_cast<size_t>(id);
 			} else if (section == "waypoint") {
 				int32_t number = 0;
 				if (!token_i32(line, 2, number, error)) return false;
@@ -814,7 +830,6 @@ bool parse_mis_names(const std::string &text, MisNames &out, std::string &error)
 			if (out.events.size() <= index) out.events.resize(index + 1);
 			out.events[index] = t[1];
 		} else if (kind == Kind::Area && t[0] == "description") {
-			if (out.areas.size() <= index) out.areas.resize(index + 1);
 			out.areas[index] = t[1];
 		} else if (kind == Kind::Path && t[0] == "description") {
 			out.paths[index] = t[1];
@@ -825,7 +840,6 @@ bool parse_mis_names(const std::string &text, MisNames &out, std::string &error)
 		return false;
 	}
 	out.events.resize(events);
-	out.areas.resize(areas);
 	return true;
 }
 

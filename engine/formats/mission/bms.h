@@ -681,6 +681,10 @@ size_t player_route_stop_count(const WaypointRecord& record);
 // SaveFile_WritePaletteBlock @0x4a9e60, the WriteFile @0x4a9e91]. So the parse keeps whatever those bytes
 // hold, as the game loads such a file, and they hold the group's NAME (ADR 0046 S24 "Names"): a fixed-width
 // name, NUL-padded, the first 4 characters at @4..7 and the next 16 at @16..31, a full 20 with no terminator.
+// The original editor's .bms writer writes those bytes as zero on every save (@4 and @16..31, @12 the 10,
+// @0 its attrib's two bits, @8 its commander) [orig: JOTACmed.exe sub_44F920 @0x44f920, the group
+// @0x450940..0x4509b4], so a name survives the original editor in the .mis `description` it reads and
+// writes back (mission_mis.h), not in its .bms.
 constexpr size_t kGroupNameSize = 20;
 struct GroupRecord {
     int32_t flags;

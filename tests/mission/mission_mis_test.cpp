@@ -8,6 +8,7 @@
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include <formats/def/reserved_items.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -280,25 +281,39 @@ int main() {
 	}
 
 	// --- A group's name (bms.h GroupRecord, the 20 bytes the game's loader drops) is its .mis
-	// `description`; a named group is written even with no flags and no value. ---------------------
+	// `description`. The original editor writes groups 1..63, each one an item names or one with a
+	// description, its flags as `attrib` and its value as `commander` (the keys its reader takes). ------
 	{
 		bms::File named;
 		make_default(named);
 		TEST_EXPECT(bms::set_group_name(named.group_records[5], "Bridge guards", error));
 		named.group_records[6].flags = 1;
+		named.group_records[6].value = 3;
 		TEST_EXPECT(bms::set_group_name(named.group_records[6], "Convoy", error));
+		named.group_records[7].flags = 2; // flags, no member, no name: no section
+		named.group_records[0].flags = 1; // group 0 is no group
+		bms::Entity member{};
+		member.type_id = 1;
+		member.id = 1;
+		member.group_id = 8; // a member, no name: a section with an empty description
+		named.items.push_back(member);
+		sync_counts(named);
 		std::string named_text;
 		TEST_EXPECT(write_mis_text(named, named_text, error));
 		TEST_EXPECT(named_text.find("begin group 5\r\n  description \"Bridge guards\"\r\nend group\r\n") !=
 		            std::string::npos);
-		TEST_EXPECT(named_text.find("begin group 6\r\n  description \"Convoy\"\r\n  flags 1\r\n") !=
-		            std::string::npos);
-		TEST_EXPECT(named_text.find("begin group 4\r\n") == std::string::npos); // no name, flags or value
+		TEST_EXPECT(named_text.find("begin group 6\r\n  description \"Convoy\"\r\n  attrib 1\r\n  commander 3\r\n"
+		                            "end group\r\n") != std::string::npos);
+		TEST_EXPECT(named_text.find("begin group 8\r\n  description \"\"\r\nend group\r\n") != std::string::npos);
+		TEST_EXPECT(named_text.find("begin group 4\r\n") == std::string::npos); // no name, no member
+		TEST_EXPECT(named_text.find("begin group 7\r\n") == std::string::npos);
+		TEST_EXPECT(named_text.find("begin group 0\r\n") == std::string::npos);
+		TEST_EXPECT(named_text.find("  flags ") == std::string::npos && named_text.find("  value ") == std::string::npos);
 		bms::File named_back;
 		TEST_EXPECT(parse_mis_text(named_text, {}, named_back, error));
 		TEST_EXPECT(bms::group_name(named_back.group_records[5]) == "Bridge guards");
 		TEST_EXPECT(bms::group_name(named_back.group_records[6]) == "Convoy" &&
-		            named_back.group_records[6].flags == 1);
+		            named_back.group_records[6].flags == 1 && named_back.group_records[6].value == 3);
 		TEST_EXPECT(bms::group_name(named_back.group_records[4]).empty());
 		std::string named_again;
 		TEST_EXPECT(write_mis_text(named_back, named_again, error));
@@ -307,7 +322,7 @@ int main() {
 		// never stored as bytes; the group's flags still read.
 		bms::File long_name;
 		std::vector<MisIssue> issues;
-		TEST_EXPECT(parse_mis_text("begin group 2\r\n  description \"The northern ridge sentries\"\r\n  flags 1\r\n"
+		TEST_EXPECT(parse_mis_text("begin group 2\r\n  description \"The northern ridge sentries\"\r\n  attrib 1\r\n"
 		                           "end group\r\nbegin group 3\r\n  description \"tab\there\"\r\nend group\r\n",
 		                           {}, long_name, error, &issues));
 		TEST_EXPECT(bms::group_name(long_name.group_records[2]).empty() && long_name.group_records[2].flags == 1);
@@ -339,9 +354,17 @@ int main() {
 		doc.waypoint_records[3].flags = static_cast<bms::WaypointFlags>(1);
 		sync_counts(doc);
 
+		doc.waypoint_records[5].flags = static_cast<bms::WaypointFlags>(2); // flags, no stop, no description
+		bms::Entity stop{};
+		stop.type_id = opennova::def::DEF_TYPE_WAYPOINT;
+		stop.id = 1;
+		stop.waypoint_id = 6; // a stop, no flags, no description: a section with an empty description
+		doc.markers.push_back(stop);
+		sync_counts(doc);
+
 		MisNames names;
 		names.events = {"Get to the bridge", ""};
-		names.areas = {"", "The bridge"};
+		names.areas[9] = "The bridge";
 		names.paths[3] = "Patrol \"north\"";
 		names.paths[7] = "Escape route";
 		std::string named_text;
@@ -349,19 +372,23 @@ int main() {
 		TEST_EXPECT(named_text.find("begin event " + std::to_string(first) + "\r\n  name \"Get to the bridge\"\r\n") !=
 		            std::string::npos);
 		TEST_EXPECT(named_text.find("begin event " + std::to_string(second) + "\r\n  name \"\"\r\n") != std::string::npos);
-		TEST_EXPECT(named_text.find("begin areatrig 2\r\n  description \"The bridge\"\r\n") != std::string::npos);
+		// An area is written under its zone id, in id order.
+		TEST_EXPECT(named_text.find("begin areatrig 9\r\n  description \"The bridge\"\r\n") != std::string::npos);
+		TEST_EXPECT(named_text.find("begin areatrig 4\r\n") < named_text.find("begin areatrig 9\r\n"));
 		// A double quote cannot ride a quoted value: it is written as a single one.
 		TEST_EXPECT(named_text.find("begin waypoint 3\r\n  description \"Patrol 'north'\"\r\n  attrib 1\r\n") !=
 		            std::string::npos);
 		TEST_EXPECT(named_text.find("begin waypoint 7\r\n  description \"Escape route\"\r\nend waypoint\r\n") !=
 		            std::string::npos);
 		TEST_EXPECT(named_text.find("begin waypoint 8\r\n") == std::string::npos);
+		TEST_EXPECT(named_text.find("begin waypoint 5\r\n") == std::string::npos);
+		TEST_EXPECT(named_text.find("begin waypoint 6\r\n  description \"\"\r\nend waypoint\r\n") != std::string::npos);
 
 		MisNames back;
 		TEST_EXPECT(parse_mis_names(named_text, back, error));
 		TEST_EXPECT(back.events.size() == doc.events.size() && back.events[first] == "Get to the bridge" &&
 		            back.events[second].empty());
-		TEST_EXPECT(back.areas.size() == 2 && back.areas[0].empty() && back.areas[1] == "The bridge");
+		TEST_EXPECT(back.areas[9] == "The bridge" && back.areas[4].empty());
 		TEST_EXPECT(back.paths[3] == "Patrol 'north'" && back.paths[7] == "Escape route" && back.paths[8].empty());
 		// The records parse as before beside them: path 7 without flags, path 3 with its attrib.
 		bms::File records;
@@ -378,24 +405,39 @@ int main() {
 		std::string unnamed;
 		TEST_EXPECT(write_mis_text(doc, unnamed, error));
 		TEST_EXPECT(unnamed.find("begin waypoint 7\r\n") == std::string::npos);
-		TEST_EXPECT(unnamed.find("begin areatrig 2\r\n  description \"\"\r\n") != std::string::npos);
+		TEST_EXPECT(unnamed.find("begin areatrig 9\r\n  description \"\"\r\n") != std::string::npos);
 		MisNames none;
 		TEST_EXPECT(parse_mis_names(unnamed, none, error));
 		TEST_EXPECT(none.events.size() == doc.events.size() && none.events[first].empty());
-		// What the stock reader cannot take is not written: a ';' (it cuts the line there, quoted or not) as a
-		// ',', and a name past the reader's slot cut to it (an event's 63 characters, a description's 255).
+		// What the stock readers cannot take is not written: a ';' (they cut the line there, quoted or not) as a
+		// ',', and a name past the original editor's dialog cut to it (an event's 59 characters, a
+		// description's 249).
 		MisNames long_names;
 		long_names.events = {std::string(70, 'e'), "north; south"};
-		long_names.areas = {std::string(300, 'a')};
+		long_names.areas[4] = std::string(300, 'a');
 		long_names.paths[3] = std::string(256, 'p');
 		std::string capped;
 		TEST_EXPECT(write_mis_text(doc, capped, error, nullptr, &long_names));
-		TEST_EXPECT(capped.find("  name \"" + std::string(63, 'e') + "\"\r\n") != std::string::npos);
+		TEST_EXPECT(capped.find("  name \"" + std::string(59, 'e') + "\"\r\n") != std::string::npos);
 		TEST_EXPECT(capped.find("  name \"north, south\"\r\n") != std::string::npos);
-		TEST_EXPECT(capped.find("begin areatrig 1\r\n  description \"" + std::string(255, 'a') + "\"\r\n") !=
+		TEST_EXPECT(capped.find("begin areatrig 4\r\n  description \"" + std::string(249, 'a') + "\"\r\n") !=
 		            std::string::npos);
-		TEST_EXPECT(capped.find("begin waypoint 3\r\n  description \"" + std::string(255, 'p') + "\"\r\n") !=
+		TEST_EXPECT(capped.find("begin waypoint 3\r\n  description \"" + std::string(249, 'p') + "\"\r\n") !=
 		            std::string::npos);
+		// An area's flags are its `attrib`, read back; an areatrig number past the original's 100 slots is
+		// refused by the names' reader.
+		bms::File flagged = doc;
+		flagged.area_triggers[0].flags = 3;
+		std::string flagged_text;
+		TEST_EXPECT(write_mis_text(flagged, flagged_text, error));
+		TEST_EXPECT(flagged_text.find("begin areatrig 4\r\n  description \"\"\r\n  attrib 3\r\nend areatrig\r\n") !=
+		            std::string::npos);
+		bms::File flagged_back;
+		TEST_EXPECT(parse_mis_text(flagged_text, {}, flagged_back, error));
+		TEST_EXPECT(flagged_back.area_triggers.size() == 2 && flagged_back.area_triggers[0].id == 4 &&
+		            flagged_back.area_triggers[0].flags == 3 && flagged_back.area_triggers[1].flags == 0);
+		MisNames past;
+		TEST_EXPECT(!parse_mis_names("begin areatrig 100\r\n  description \"x\"\r\nend areatrig\r\n", past, error));
 		TEST_EXPECT(capped.find(';') == std::string::npos);
 		// An item's name and the mission's are not a record's: an unterminated section is refused.
 		MisNames broken;

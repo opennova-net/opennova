@@ -20,26 +20,33 @@ struct MisIssue {
 	std::string message;
 };
 
-// The room the stock reader gives a name, less its terminator: it copies the value with no bound into a
-// fixed slot of the record, an event's `name` 64 bytes (its `attrib` @+64 of the 732-byte record), an
-// area trigger's `description` 256 (its `attrib` @+256 of 312), a group's 256 (of 272), a layer's 256
-// (of 260) and a path's 1280 (its `attrib` @+1280 of 1548), so a longer value runs into the fields after
-// it [orig: MisLdr_ParseMisLine @0x100017b0 (the strcpys @0x10003d58 event, @0x10004328 areatrig,
-// @0x100040b8 group, @0x1000427a layer, @0x10003c1f waypoint), misldr.dll]. A description takes the
-// narrowest.
-inline constexpr size_t kMisEventNameChars = 63;
-inline constexpr size_t kMisDescriptionChars = 255;
+// The room a name has, less its terminator. Both stock readers copy the value with no bound into a fixed
+// slot of the record, an event's `name` 64 bytes (its `attrib` @+64), an area trigger's, a group's and a
+// layer's `description` 256 and a path's 1280, so a longer value runs into the fields after it [orig:
+// MisLdr_ParseMisLine @0x100017b0 (the strcpys @0x10003d58 event, @0x10004328 areatrig, @0x100040b8 group,
+// @0x1000427a layer, @0x10003c1f waypoint), misldr.dll; MIS_ParseToken @0x450e50 (the copies @0x453962
+// event, @0x4540da areatrig, @0x453d35 group, @0x453f12 layer, @0x453802 waypoint), JOTACmed.exe]. The
+// original editor's dialogs take less: an event's name 59 characters, an area's, a path's and a group's
+// description 249 [orig: JOTACmed.exe sub_4118D0 @0x411917 (60), sub_40F360 @0x40f37f, sub_40EA10
+// @0x40ea30, sub_40FC60 @0x40fc7f (250)], so a longer name loses its tail at the dialog's next OK. A name is
+// written to the narrower.
+inline constexpr size_t kMisEventNameChars = 59;
+inline constexpr size_t kMisDescriptionChars = 249;
+// The original editor's area slots, an area's zone id naming its slot; it writes slots 1..99 [orig:
+// JOTACmed.exe MIS_SaveDocument @0x454630, the loop @0x454daf; sub_44D240 @0x44d240, the 100 slots].
+inline constexpr size_t kMisAreaSlots = 100;
 
 // The names the .mis gives a mission's records where the .bms has no room for them (ADR 0046 S24
-// "Names"): an event's `name` and an area trigger's and a waypoint path's `description`, by the index
-// the parse gives the record (an event by its place in the file's events, an area trigger by its place
-// in the file's areatrig sections, a path by its record index). An empty name is none; an index past
-// a list is none. A group's description is its name in the .bms record (bms.h GroupRecord), so it is
-// not here. The writer writes at most kMisEventNameChars of an event's name and kMisDescriptionChars of
-// a description, and a value as mis_string carries it (a ';' as ',', a double quote as ').
+// "Names"): an event's `name` and an area trigger's and a waypoint path's `description`. An event by its
+// number (`begin event N`, its place among the events), an area by its zone id (`begin areatrig N`, the
+// original editor's slot, 1..99), a path by its record index (`begin waypoint N`). An empty name is none;
+// an index past a list is none. A group's description is its name in the .bms record (bms.h GroupRecord),
+// so it is not here. The writer writes at most kMisEventNameChars of an event's name and
+// kMisDescriptionChars of a description, and a value as mis_string carries it (a ';' as ',', a double
+// quote as ').
 struct MisNames {
 	std::vector<std::string> events;
-	std::vector<std::string> areas;
+	std::array<std::string, kMisAreaSlots> areas{};
 	std::array<std::string, bms::kWaypointRecordCount> paths{};
 };
 

@@ -179,12 +179,14 @@ int check(const std::string &path) {
 		TEST_EXPECT(texts_equal(named1, named2));
 	}
 
-	// With names (MisNames): every event named, every area and every path described, the flag-less
-	// paths among them written for their description; the names read back are the names written, and the
-	// text written from them again is the same.
+	// With names (MisNames): every event named, every area described by its zone id and every path by its
+	// index, the paths with no stop among them written for their description; the names read back are the
+	// names written, and the text written from them again is the same.
 	MisNames names;
 	for (size_t i = 0; i < doc.events.size(); ++i) names.events.push_back("event " + std::to_string(i));
-	for (size_t i = 0; i < doc.area_triggers.size(); ++i) names.areas.push_back("area " + std::to_string(i));
+	for (const bms::AreaTrigger &area : doc.area_triggers)
+		if (area.id > 0 && area.id < static_cast<int32_t>(kMisAreaSlots))
+			names.areas[static_cast<size_t>(area.id)] = "area " + std::to_string(area.id);
 	for (size_t i = 1; i < names.paths.size(); ++i) names.paths[i] = "path " + std::to_string(i);
 	std::string named1;
 	TEST_EXPECT(write_mis_text(doc, named1, error, nullptr, &names));
