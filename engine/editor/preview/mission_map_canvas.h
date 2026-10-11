@@ -28,7 +28,8 @@ namespace opennova::editor {
 // selected event's, trigger's or action's links (preview/mission_link_shapes; a reach is its circle seen from
 // above) over the boxes and under the pins, and a badge on each mark some event names, its hover listing them.
 // While a pick waits (the workspace's document `pick`), a click on a pin that fills its slot sets it and ends the
-// pick, a click on nothing or Esc ends it, and only its candidates hover, each rung.
+// pick, a click on nothing or Esc ends it, and only its candidates hover, each rung. B7: the 3D view's keys, Delete,
+// Ctrl+D and the arrows' nudge by the snap (F frames already).
 class MissionMapCanvas final : public CanvasHalf {
 public:
 	const CanvasGesture &gesture() const override { return gesture_; }
@@ -43,6 +44,9 @@ public:
 private:
 	// The camera moved to `camera`, raised as a SetViewport once a frame at most.
 	void camera_(const MissionMapCamera &camera, CanvasRequests &out);
+	// S24 B7, the 3D view's keys on the map: Delete removes the selection (a stop its marker), Ctrl+D copies it a snap
+	// step east, the arrows nudge it a snap step (Shift a tenth) on the map's axes, one gesture while an arrow is held.
+	void keys_(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out);
 	// S24: the primary area's edge or corner within the pick slop of (x, y) on a view (Move: none), with the area as
 	// a press finds it.
 	MissionHandle handle_under_(const ViewportContext &context, const MissionMapView &view, float x, float y,
@@ -77,6 +81,10 @@ private:
 		bool selected = false; // the grabbed record selected before it moved
 	};
 	Press press_;
+	// A nudge: the records as it began, how far it has gone (metres east and north), and the selection it took.
+	std::vector<MissionPressed> nudge_;
+	std::vector<NodeAddress> nudged_;
+	double nudge_by_[2] = { 0.0, 0.0 };
 	// A pan by the right or middle button: the camera as it began and where the pointer was.
 	bool panning_ = false;
 	MissionMapCamera pan_from_;

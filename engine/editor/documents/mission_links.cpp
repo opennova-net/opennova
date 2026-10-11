@@ -366,6 +366,49 @@ bool mission_pick_value(const MissionDocument &document, const MissionPickSlot &
 	}
 }
 
+std::vector<NodeId> mission_reveal_rows(const MissionDocument &document, const NodeAddress &record) {
+	std::vector<NodeId> out;
+	const auto add = [&](NodeId row) {
+		if (row && std::find(out.begin(), out.end(), row) == out.end()) out.push_back(row);
+	};
+	const Node *row = document.row(record.row);
+	if (!row) return out;
+	if (mission_logic_record(record)) {
+		// The whole event's names for an event; a trigger's or an action's own.
+		const MissionLinks links = mission_links(document, record);
+		for (const MissionLink &link : links.links) {
+			for (const NodeId each : link.rows) add(each);
+			if (link.kind == ParamKind::Zone) add(link.record.row);
+		}
+		for (const MissionReach &reach : links.reaches) {
+			add(reach.subject);
+			add(reach.other);
+		}
+		return out;
+	}
+	if (record.child && record.kind == k(MissionKind::Group)) {
+		for (const NodeId each : mission_group_rows(document, mission_group_of(document, record))) add(each);
+		return out;
+	}
+	if (record.child && record.kind == k(MissionKind::Stop)) {
+		Document::Placement at;
+		if (row->kind == k(MissionKind::WaypointPath) && document.placement(record, at)) {
+			const std::vector<uint32_t> &stops = static_cast<const PathRow &>(*row).native.stops;
+			if (at.index < stops.size())
+				if (const Node *marker = document.row_of(MissionKind::Marker, stops[at.index])) add(marker->id);
+		}
+		return out;
+	}
+	if (record.child) return out;
+	if (row->kind == k(MissionKind::WaypointPath)) {
+		for (const uint32_t stop : static_cast<const PathRow &>(*row).native.stops)
+			if (const Node *marker = document.row_of(MissionKind::Marker, stop)) add(marker->id);
+		return out;
+	}
+	if (is_entity_kind(row->kind) || row->kind == k(MissionKind::Area)) add(row->id);
+	return out;
+}
+
 bool mission_logic_record(const NodeAddress &record) {
 	if (!record.row) return false;
 	if (!record.child) return record.kind == k(MissionKind::Event);

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <set>
 #include <string>
@@ -531,6 +532,53 @@ static int test_pick() {
 	return 0;
 }
 
+// S24 B7: the 3D view's keys on the map: Delete removes the selection (one batch), Ctrl+D copies it a snap step east
+// (the 3D view's duplicate), an arrow nudges it a snap step on the map's axes (one gesture while it is held).
+static int test_keys() {
+	Rig rig("opennova_editor_mission_map_keys");
+	TEST_EXPECT(rig.open());
+	if (!rig.map()) return 1;
+	const MissionDocument &mission = static_cast<const MissionDocument &>(*rig.document());
+	const NodeAddress item = first_of(mission, MissionKind::Item);
+	rig.session.handle(request::select_record(kMission, item));
+	rig.pump();
+	std::unique_ptr<CanvasHalf> half = rig.map()->make_canvas();
+	editor_test::Gathered gathered;
+	const ViewportContext context = rig.context();
+	half->follow(*rig.map(), context, gathered);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	in.keyboard.focused = true;
+	const auto keyed = [&](const std::function<void(CanvasKeyboard &)> &set) {
+		CanvasInput frame = in;
+		set(frame.keyboard);
+		gathered.requests.clear();
+		half->input(context, frame, gathered);
+		return gathered.requests;
+	};
+	std::vector<EditorRequest> raised = keyed([](CanvasKeyboard &k) { k.remove = true; });
+	TEST_EXPECT(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditRecord && raised[0].edits.size() == 1 &&
+	            raised[0].edits[0].operation == EditOperation::Remove && raised[0].edits[0].address == item);
+	raised = keyed([](CanvasKeyboard &k) { k.duplicate = true; });
+	TEST_EXPECT(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditInViewport &&
+	            raised[0].command.name == "duplicate" && raised[0].command.by.size() == 2 &&
+	            raised[0].command.by[0] == double(rig.map()->options().snap));
+	MissionPressed held;
+	TEST_EXPECT(rig.map()->pressed(item, held));
+	raised = keyed([](CanvasKeyboard &k) {
+		k.arrow_x = 1;
+		k.arrow_held = true;
+	});
+	bool east = false;
+	for (const EditorRequest &request : raised)
+		for (const Edit &edit : request.edits)
+			east = east || (edit.field == "x" && std::fabs(std::get<double>(edit.value) - (held.x + double(rig.map()->options().snap))) < 1e-3);
+	TEST_EXPECT(east);
+	std::printf("test_keys passed\n");
+	return 0;
+}
+
 // The commands (frame, the CMAP's zoom steps), each a SetViewport of the camera; the wire's camera and options, and
 // their refusals.
 static int test_commands_and_wire() {
@@ -970,6 +1018,7 @@ int main(int argc, char **argv) {
 	failed += test_group_colours();
 	failed += test_area_handles();
 	failed += test_pick();
+	failed += test_keys();
 	failed += test_commands_and_wire();
 	failed += test_grid_origin();
 	failed += test_outline_of_a_box();

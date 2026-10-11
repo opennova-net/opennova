@@ -284,12 +284,40 @@ void test_mark_menu() {
 	      "Select group members: one SelectRecord, the item and the walker of group 1");
 }
 
+// S24 B7: a record revealed (a Go to, a Problems row: open_record with a field) frames the 3D view on what it names:
+// a trigger the walker and the zone its parameters name; an area itself.
+void test_reveal_frames() {
+	MissionRun run("opennova_editor_ui_navigation_reveal");
+	CHECK(run.open(), "the mission open");
+	const MissionDocument *mission = run.mission();
+	if (!mission) return;
+	const Node *event = mission->rows_of(MissionKind::Event)[0];
+	const std::vector<Document::Collection> lists = mission->collections_of({event->id, event->kind, 0});
+	if (lists.empty() || lists[0].ids.empty()) return;
+	const NodeAddress trigger{event->id, node_kind(MissionKind::Trigger), lists[0].ids[0]};
+	const Node *walker = mission->rows_of(MissionKind::Organic)[0];
+	const Node *zone = mission->rows_of(MissionKind::Area)[0];
+	const auto framed = [&](const NodeAddress &record, const char *field) {
+		EditorRequest go = request::open_record(run.path, record, field);
+		run.session.handle(go);
+		run.settle();
+		std::vector<NodeId> ids;
+		for (const EditorRequest &request : run.take())
+			if (request.kind == EditorRequestKind::EditInViewport && request.command.name == "frame")
+				ids = request.command.ids;
+		return ids;
+	};
+	CHECK((framed(trigger, "param2") == std::vector<NodeId>{walker->id, zone->id}), "a trigger revealed: the walker and its zone framed");
+	CHECK((framed({zone->id, zone->kind, 0}, "x_min") == std::vector<NodeId>{zone->id}), "an area revealed: itself framed");
+}
+
 } // namespace
 
 void run_space_tests() {
 	test_pick_and_row_menu();
 	test_record_drops();
 	test_mark_menu();
+	test_reveal_frames();
 }
 
 } // namespace editor_ui_test

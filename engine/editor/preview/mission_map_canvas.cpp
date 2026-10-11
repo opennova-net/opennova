@@ -10,6 +10,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/model/document.h>
+#include <editor/preview/mission_place.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/selection.h>
@@ -164,6 +165,12 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 		mission_pick_end(path, out);
 		return;
 	}
+	// A nudge lasts while an arrow is held on the canvas that has the keyboard.
+	if (gesture_.nudging() && (!in.keyboard.arrow_held || !in.keyboard.focused)) {
+		gesture_.end(out);
+		nudge_.clear();
+	}
+	keys_(context, in, out);
 
 	if (in.pressed && !in.middle && !in.panning && in.hovered) {
 		gesture_.press(subject, in.screen, out);
@@ -248,10 +255,72 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 	gesture_.sent();
 }
 
+void MissionMapCanvas::keys_(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out) {
+	const CanvasKeyboard &keyboard = in.keyboard;
+	if (!viewport_ || !keyboard.focused || gesture_.pressed() || pick_.active()) return;
+	const Document *document = document_of(context);
+	const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document);
+	if (!mission || !viewport_->current(context.input) || !context.editable()) return;
+	const Selection *selection = selection_of(context, *document);
+	if (!selection || selection->records.empty()) return;
+	const std::string &path = viewport_->path();
+	const float snap = viewport_->options().snap > 0.0f ? viewport_->options().snap : 1.0f;
+	if (keyboard.remove) {
+		std::vector<Edit> edits;
+		for (const NodeAddress &record : mission_view_removals(*mission, selection->records)) {
+			Edit edit;
+			edit.operation = EditOperation::Remove;
+			edit.address = record;
+			edits.push_back(std::move(edit));
+		}
+		out.request(request::edit_record(path, std::move(edits)));
+		return;
+	}
+	if (keyboard.duplicate) {
+		ViewportCommand command;
+		command.name = "duplicate";
+		command.kind = ViewportKind::Mission;
+		command.by = { double(snap), 0.0 };
+		out.request(request::edit_in_viewport(path, std::move(command)));
+		return;
+	}
+	if (!keyboard.arrow_x && !keyboard.arrow_y) return;
+	// A step on the map's axes as the picture shows them: right east, up north (a RotateMap180 mission's the other
+	// way), Shift a tenth.
+	const double step = double(in.keys.shift ? snap * 0.1f : snap);
+	const double turn = viewport_->ground().flip_180 ? -1.0 : 1.0;
+	const double east = turn * double(keyboard.arrow_x) * step, north = turn * double(keyboard.arrow_y) * step;
+	if (!gesture_.nudging()) {
+		nudge_.clear();
+		MissionPressed held;
+		if (viewport_->pressed(selection->primary, held)) nudge_.push_back(held);
+		for (const NodeAddress &record : selection->records)
+			if (record != selection->primary && viewport_->pressed(record, held)) nudge_.push_back(held);
+		if (nudge_.empty()) return;
+		CanvasSubject subject;
+		subject.path = path;
+		subject.identity = document->identity();
+		gesture_.nudge(subject, out);
+		nudged_ = selection->records;
+		nudge_by_[0] = nudge_by_[1] = 0.0;
+	}
+	nudge_by_[0] += east;
+	nudge_by_[1] += north;
+	const double to[2] = { nudge_.front().x + nudge_by_[0], nudge_.front().y + nudge_by_[1] };
+	std::vector<Edit> edits;
+	if (mission_move_edits(*document, nudge_, 0, to, 0.0f, viewport_->options().stick, context.device, gesture_.token(),
+				edits) &&
+			!edits.empty()) {
+		out.request(request::edit_record(path, std::move(edits)));
+		gesture_.sent();
+	}
+}
+
 void MissionMapCanvas::end(CanvasRequests &out) {
 	gesture_.end(out);
 	press_ = Press();
 	panning_ = false;
+	nudge_.clear();
 }
 
 void MissionMapCanvas::end_frame(CanvasRequests &out) {

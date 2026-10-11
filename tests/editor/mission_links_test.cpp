@@ -394,6 +394,13 @@ int test_pick_values() {
 	for (const MissionTypeSlot &use : mission_types_taking(mission::ParamKind::Zone, false))
 		single_in_area = single_in_area || (use.type->type == 2 && use.type->sub == 10 && use.slot == 1);
 	TEST_EXPECT(single_in_area && !mission_types_taking(mission::ParamKind::Entity, true).empty());
+	// B7: what a revealed record frames: an entity itself, a path its stops' markers, a group its members, an event
+	// (or its trigger) every row it names.
+	TEST_EXPECT(mission_reveal_rows(m, walker) == std::vector<NodeId>{walker.row});
+	TEST_EXPECT(mission_reveal_rows(m, row_at(m, MissionKind::WaypointPath, 1)).size() == 4);
+	TEST_EXPECT((mission_reveal_rows(m, first) == std::vector<NodeId>{walker.row, zone20.row}));
+	TEST_EXPECT(mission_reveal_rows(m, child_at(m, first, MissionKind::Action, 0)).empty());
+	TEST_EXPECT(mission_reveal_rows(m, mission_group_address(m, 1)) == std::vector<NodeId>{walker.row});
 	const NodeAddress group2 = mission_links(m, second).links[1].record;
 	TEST_EXPECT(mission_record_value(m, group2, ReferenceKind::MissionGroup, value) && value == 2 &&
 	            !mission_record_value(m, group2, ReferenceKind::MissionEntity, value));

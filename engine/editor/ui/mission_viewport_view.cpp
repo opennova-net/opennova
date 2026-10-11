@@ -14,6 +14,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_links.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/preview/mission_canvas.h>
@@ -21,6 +22,7 @@
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_viewport.h>
+#include <editor/preview/viewports.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/script_assist.h>
@@ -147,10 +149,50 @@ MissionViewportView::MissionViewportView() : ViewportView(ViewportKind::Mission)
 
 MissionViewportView::~MissionViewportView() = default;
 
+void MissionViewportView::reveal(const ViewEvent &event) {
+	reveal_path_ = event.path;
+	reveal_ = event.address;
+}
+
 void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &viewport, ViewportContext &context) {
 	const auto &mission = static_cast<const MissionViewport &>(viewport);
 	Tools &tools = *tools_;
 	const SessionView &view = workspace.view();
+	// S24: a reveal frames what the record names, and centres the map there where the mission's map is kept.
+	if (reveal_.row && reveal_path_ == mission.path()) {
+		const Document *records = context.input.document ? records_of(*context.input.document) : nullptr;
+		const auto *document = dynamic_cast<const MissionDocument *>(records);
+		const std::vector<NodeId> rows = document ? mission_reveal_rows(*document, reveal_) : std::vector<NodeId>();
+		if (!rows.empty()) {
+			ViewportCommand frame;
+			frame.name = "frame";
+			frame.kind = ViewportKind::Mission;
+			frame.ids = rows;
+			workspace.request(request::edit_in_viewport(mission.path(), std::move(frame)));
+			double sum[2] = { 0.0, 0.0 };
+			size_t count = 0;
+			for (const NodeId row : rows) {
+				if (const MissionEntityMark *entity = mission.scene().entity(row)) {
+					sum[0] += entity->x;
+					sum[1] += entity->y;
+					++count;
+				} else if (const MissionAreaMark *area = mission.scene().area(row)) {
+					sum[0] += (area->min[0] + area->max[0]) * 0.5;
+					sum[1] += (area->min[1] + area->max[1]) * 0.5;
+					++count;
+				}
+			}
+			if (count && view.documents.viewports && view.documents.viewports->find(mission.path(), ViewportKind::Map)) {
+				io::JsonValue centre = io::JsonValue::make_array();
+				centre.push(io::JsonValue::make_number(sum[0] / double(count)));
+				centre.push(io::JsonValue::make_number(sum[1] / double(count)));
+				io::JsonValue camera = io::JsonValue::make_object();
+				camera.set("center", std::move(centre));
+				workspace.request(request::set_viewport(mission.path(), viewport_change(ViewportKind::Map, "camera", std::move(camera))));
+			}
+		}
+		reveal_ = NodeAddress();
+	}
 	// Esc under a tool goes back to Select once the canvas has read this frame (where it is not taken
 	// as "select nothing").
 	const MissionTool tool = mission.options().tool;

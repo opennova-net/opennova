@@ -136,6 +136,12 @@ bool mission_record_value(const MissionDocument &document, const NodeAddress &re
 // The field a slot is set through ("param1" .. "param4").
 const char *mission_param_field(int slot);
 
+// The rows a revealed record is framed by in the views (S24, a Go to or a Problems row landing in the 3D view and
+// the map): an entity or an area itself; a path its stops' markers; a group its members; a stop its marker; an
+// event, a trigger or an action every row it names (mission_links: what its parameters name and the subjects of its
+// distances). None for a record with no place.
+std::vector<NodeId> mission_reveal_rows(const MissionDocument &document, const NodeAddress &record);
+
 // Whether a record is an event, a trigger or an action of a mission.
 bool mission_logic_record(const NodeAddress &record);
 MissionLinks mission_links(const MissionDocument &document, const NodeAddress &record);
