@@ -71,6 +71,7 @@ enum class QueryJson : uint8_t {
 	Number, // a number a float holds, finite (a point on a picture)
 	Boolean, // true or false
 	Strings, // an array of strings
+	Integers, // an array of whole numbers, 0 or more (identities)
 };
 
 // A string param that takes one of a list of tokens (S13 V7: the viewport query's op and kind): its
@@ -114,6 +115,7 @@ public:
 	double number(const char *name) const;
 	bool boolean(const char *name) const;
 	std::vector<std::string> strings(const char *name) const;
+	std::vector<int64_t> integers(const char *name) const;
 	// A paged row's page: from `offset` (a list in order) or `cursor` (a list by absolute index or
 	// sequence number, which moves on while it is read), `limit` entries at most.
 	size_t offset() const { return size_t(integer("offset")); }
@@ -160,7 +162,7 @@ struct EditorQueryRow {
 const EditorQueryRow &editor_query_row(EditorQueryKind kind);
 // The kind a wire token names ("files"); false for none.
 bool editor_query_from_token(std::string_view token, EditorQueryKind &out);
-// A param type's word: "string", "integer", "number", "boolean", "string[]".
+// A param type's word: "string", "integer", "number", "boolean", "string[]", "integer[]".
 const char *query_json_token(QueryJson type);
 
 // The query `name` answered over the session's core: its row found, its args checked (an object

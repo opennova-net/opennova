@@ -840,6 +840,11 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::PlayMode: out.play_mode = PlayMode::Install; break;
 		case F::SaveBeforePlay: out.save_before_play = false; break;
 		case F::PreviewBackground: out.preview_background = PreviewBackground::Checker; break;
+		case F::KeepSelection: out.keep_selection = true; break;
+		case F::Create: out.create = true; break;
+		case F::Event: out.event = 3; break;
+		case F::Variable: out.variable = 12; break;
+		case F::Value: out.value = -5; break;
 		case F::kCount: break;
 		}
 	}

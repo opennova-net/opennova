@@ -17,7 +17,9 @@
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_inspector.h>
 #include <editor/ui/menu_view.h>
+#include <editor/ui/mission_board_view.h>
 #include <editor/ui/mission_logic_view.h>
+#include <editor/ui/mission_row_menu.h>
 #include <editor/ui/model_inspector_view.h>
 #include <editor/ui/outline_view.h>
 #include <editor/ui/particle_key_inspector.h>
@@ -114,9 +116,12 @@ constexpr OutlineSpec kCatalogOutline{OutlineMode::List,
 // triggers and actions added by type (S15: the "+" offers the types by name); under headings that
 // read like the mission (S15: each pool, then its teams and groups where they tell rows apart; the
 // paths, the areas, the events).
+// A record's line's right-click menu offers the logic's and the views' items after the jumps (S24,
+// ui/mission_row_menu).
 constexpr OutlineSpec kMissionOutline{OutlineMode::Tree, "", nullptr, true, mission_row_listed, "Empty paths",
                                       mission_adds_by_menu, draw_mission_add_menu, mission_row_headings,
-                                      mission_row_reads_others};
+                                      mission_row_reads_others, nullptr, nullptr, "", "", "", false,
+                                      draw_mission_row_menu};
 // A string table's sections, each added by its name (one the table has selected, as a lookup reads the
 // first section of a name), its strings moved to another section.
 constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nullptr, false, nullptr, "", nullptr, nullptr,
@@ -152,9 +157,10 @@ constexpr DocumentViewRow kViews[] = {
 	 draw_animation_map_inspector},
 	// A mission's 3D viewport fills the tab beside its outline (ADR 0046 S14: the Main role,
 	// ui/main_viewport_view over the Mission viewport kind); its logic in words heads the Inspector,
-	// what names a record closes it (S15, ui/mission_logic_view).
+	// what names a record closes it (S15, ui/mission_logic_view); its Logic pane, the Event board, shares
+	// the viewport's column (S24, ui/mission_board_view).
 	{DocumentTypeId::Mission, DocumentViewRole::MainViewport, &kMissionOutline, nullptr, draw_mission_inspector,
-	 draw_mission_uses, mission_logic_by_name},
+	 draw_mission_uses, mission_logic_by_name, nullptr, make_mission_board_pane},
 	{DocumentTypeId::Script, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::MusicScript, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::Credits, DocumentViewRole::MainViewport, nullptr, make_script_view},
@@ -241,7 +247,7 @@ std::unique_ptr<DocumentView> make_view(const DocumentBase &document) {
 	// view of its own that draws it (a text's script view).
 	const ViewportKind main = main_viewport_kind(type);
 	if (row->role == DocumentViewRole::MainViewport && row->outline && main != ViewportKind::kCount)
-		return std::make_unique<MainViewportView>(*row->outline, main);
+		return std::make_unique<MainViewportView>(*row->outline, main, row->make_pane ? row->make_pane() : nullptr);
 	if (row->outline) return std::make_unique<OutlineView>(*row->outline);
 	return row->make();
 }

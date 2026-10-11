@@ -199,14 +199,15 @@ public:
 	// for a move), one that is not moves alone. Its snap is metres, degrees for a turn.
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
-	// `frame` (the first named record, else the selection, else everything) and `top` (straight down
+	// `frame` (the named records, S24 every one, else the selection, else everything) and `top` (straight down
 	// over the target, north up): each a SetViewport of the camera. `ground`: each named entity (else
 	// each selected one) set down on the device's ground under it, its z the ground's less its model's
 	// anchor height (preview/mission_items), one batch; refused with no ground under one.
 	// `select_same` (S15): one SelectRecord of every entity whose item is a named (else a selected)
 	// entity's, the primary kept where it is among them. `play_from_here` (DI-26): Play started in this
 	// mission with its player on the ground under the camera, facing the way it looks (command_of takes it
-	// at a picture point too).
+	// at a picture point too). `select_group` (S24): one SelectRecord of every entity of the groups the named
+	// (else the selected) records carry or are, the primary kept where it is among them.
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
 	// The commands that take more than their records (S15): `duplicate {ids?, by?: [east, north]}`
