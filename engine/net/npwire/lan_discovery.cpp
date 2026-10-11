@@ -1,6 +1,5 @@
 #include <net/npwire/lan_discovery.h>
 
-#include <base/io/strutil.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
@@ -27,6 +26,8 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client
 		return false;
 	}
 
+	// No field is required: an HK-less reply lists with host key 0, which a join
+	// from the row carries into a 0x42 that omits it (parse_server_hello).
 	ServerHello hello;
 	if (!parse_server_hello(body.data(), body.size(), hello)) return false;
 
@@ -49,9 +50,8 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client
 	// bytewise; PV2 is parsed and stored but is not a discovery gate (it is the
 	// host's 0x42-time check, not the browser's). [orig: Nwu_HandleServerHello
 	//  @0x626d20 — PN @0x62758b, PG @0x627591..0x627620, PV1 @0x627639]
-	const ClientHello retail = make_jointoperations_client_hello(0);
-	if (!hello.is_game_server || !strutil::iequals(hello.pn, retail.pn) ||
-	    hello.pg != retail.pg || !strutil::iequals(hello.pv1, retail.pv1)) {
+	if (!hello.is_game_server ||
+	    !server_hello_matches_identity(hello, make_jointoperations_client_hello(0))) {
 		return false;
 	}
 

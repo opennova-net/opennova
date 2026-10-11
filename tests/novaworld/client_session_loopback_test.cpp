@@ -23,6 +23,7 @@
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/nwu_host_role.h>
+#include <net/npwire/flat_tlv.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/protocol_message.h>
@@ -36,11 +37,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace opennova;
@@ -876,6 +879,83 @@ void test_client_correlates_handshake_echoes() {
 	       "lobby ServerAuth with CR 0 and no JFC, JFP or JFS rejects");
 }
 
+// A flat-TLV body with every field named `unwanted` left out, the rest as written.
+std::vector<uint8_t> without_field(const std::vector<uint8_t> &body, std::string_view unwanted) {
+	std::vector<uint8_t> out;
+	size_t pos = 0;
+	while (pos < body.size()) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) break;
+		if (field.name != unwanted)
+			out.insert(out.end(), body.begin() + static_cast<std::ptrdiff_t>(pos),
+			           body.begin() + static_cast<std::ptrdiff_t>(next));
+		pos = next;
+	}
+	return out;
+}
+
+bool has_field(const std::vector<uint8_t> &body, std::string_view wanted) {
+	size_t pos = 0;
+	while (pos < body.size()) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) return false;
+		if (field.name == wanted) return true;
+		pos = next;
+	}
+	return false;
+}
+
+// D-NET-452: the lobby session reads any 0x81 with its CI; one whose PN, PG or PV1 is not the
+// session's protocol's is dropped, and one without HK joins with a 0x42 that carries none.
+// [orig: Nwu_HandleServerHello @0x626D20 - HK zeroed @0x626E97, the CI lookup @0x627533, PN
+//  @0x62758B, PG @0x627591..0x627624, PV1 @0x627643; CNapiNPConnection_SendClientJoin
+//  @0x61FE20 - the HK gate @0x6200F2]
+void test_client_reads_the_server_hello_as_retail() {
+	ClientSession::Config cfg;
+	cfg.client_index = 0x3D3D3D3Du;
+	cfg.client_key = 0x3E3E3E3Eu;
+	ClientSession client(cfg);
+	const std::vector<uint8_t> hello_datagram = client.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello hello;
+	if (!expect(server_decode_inbound(hello_datagram, opcode, body) &&
+	                    parse_client_hello(body.data(), body.size(), hello),
+	            "identity: the lobby ClientHello parses")) return;
+	std::vector<std::vector<uint8_t>> out;
+	const auto deliver = [&](const ServerHello &reply, bool keep_hk) {
+		std::vector<uint8_t> bytes = server_hello_to_bytes(reply);
+		if (!keep_hk) bytes = without_field(bytes, "HK");
+		const std::vector<uint8_t> datagram =
+				server_encode_outbound(SESSION_OPCODE_SERVER_HELLO, std::move(bytes));
+		out.clear();
+		return client.handle_datagram(datagram.data(), datagram.size(), out);
+	};
+	ServerHello foreign_pn = build_server_hello(hello, 0x7F000001u, 5000);
+	foreign_pn.pn = "JOINTOPERATIONS";
+	ServerHello foreign_pg = build_server_hello(hello, 0x7F000001u, 5000);
+	foreign_pg.pg[0] ^= 1u;
+	ServerHello foreign_pv1 = build_server_hello(hello, 0x7F000001u, 5000);
+	foreign_pv1.pv1 = "1.0.0";
+	for (const ServerHello *foreign : {&foreign_pn, &foreign_pg, &foreign_pv1}) {
+		expect(deliver(*foreign, false) && out.empty() &&
+		               client.state() == ClientSession::State::Hello,
+		       "identity: an HK-less 0x81 with its CI but a foreign PN, PG or PV1 is dropped");
+	}
+	ServerHello no_hk = build_server_hello(hello, 0x7F000001u, 5000);
+	no_hk.pn = "novaworldudp";
+	ClientAuth auth;
+	if (!expect(deliver(no_hk, false) && out.size() == 1 &&
+	                    client.state() == ClientSession::State::Auth &&
+	                    server_decode_inbound(out[0], opcode, body) &&
+	                    parse_client_auth(body.data(), body.size(), auth),
+	            "identity: an HK-less 0x81 whose PN differs only in case joins")) return;
+	expect(!has_field(body, "HK") && auth.hk == 0 && auth.ci == cfg.client_index,
+	       "identity: the 0x42 from an HK-less 0x81 carries no HK");
+}
+
 // The browser completes NWJoin after the UDP session has already verified.
 // Its newly issued cookies must survive the next encoded ClientPlayRequest.
 void test_play_uses_current_http_cookies() {
@@ -1634,6 +1714,7 @@ int main() {
 	test_reconnect_schedule();
 	test_reconnect_replay();
 	test_reconnect_redraws_a_zero_client_key();
+	test_client_reads_the_server_hello_as_retail();
 	test_reconnect_rehost();
 	test_reconnect_join_timeout();
 	test_reconnect_verified_word();

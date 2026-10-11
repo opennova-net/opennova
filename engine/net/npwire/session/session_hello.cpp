@@ -829,12 +829,13 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 // [orig: Nwu_HandleServerHello @0x626d20 — every tag compared through
 //  Napi_StrCaseEqual, zero defaults, the walk stops at an empty name]
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
-	if (!data) return false;
+	if (!data && len != 0) return false;
 	// The reader zeroes EVERY field before the walk, so an absent tag reads as
 	// zero/empty: clear exactly the builder defaults ServerHello{} carries (the
-	// numeric fields and the other strings already default to zero/empty).
+	// numeric fields and the other strings already default to zero/empty). No
+	// field is required: an absent HK reads 0, which the 0x42 then omits.
 	// [orig: Nwu_HandleServerHello @0x626d20 — every field zeroed before the walk
-	//  @0x626E3B..0x626F20]
+	//  @0x626E3B..0x626F20, HK @0x626E97]
 	out = ServerHello{};
 	out.co.clear();
 	out.ap.clear();
@@ -845,7 +846,6 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 	out.pv3.clear();
 	out.hk = 0;
 	out.sn.clear();
-	bool saw_hk = false;
 	size_t pos = 0;
 	while (pos < len) {
 		FlatTlvField field;
@@ -883,7 +883,7 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 		else if (strutil::iequals(name, "PV1"))  out.pv1  = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "PV2"))  out.pv2  = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "PV3"))  out.pv3  = copy_string(kStringBuffer);
-		else if (strutil::iequals(name, "HK")) { out.hk = load_value_dword(value, end); saw_hk = true; }
+		else if (strutil::iequals(name, "HK"))   out.hk   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "SN"))   out.sn   = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "CN")) {
 			out.cn = copy_string(kLongStringBuffer);
@@ -919,8 +919,12 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
-	// The host key is the one field the client must echo back in ClientAuth.
-	return saw_hk;
+	return true;
+}
+
+bool server_hello_matches_identity(const ServerHello &hello, const ClientHello &local) {
+	return strutil::iequals(hello.pn, local.pn) && hello.pg == local.pg &&
+			strutil::iequals(hello.pv1, local.pv1);
 }
 
 } // namespace opennova

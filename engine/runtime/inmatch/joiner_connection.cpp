@@ -517,14 +517,18 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 }
 
 void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollResult &out) {
+	// Any 0x81 from the host is read; no field is required (parse_server_hello).
 	ServerHello sh;
-	if (!parse_server_hello(body.data(), body.size(), sh)) {
-		fail("bad ServerHello");
-		return;
-	}
+	if (!parse_server_hello(body.data(), body.size(), sh)) return;
 	// Correlate the reply with the outstanding ClientHello before accepting host material. A
 	// phase-correct stale/spoofed 0x81 from another handshake must not advance this connection.
+	// Then the host's identity block must be the JO protocol's, else the reply is dropped.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533, the identity compares
+	//  @0x62758B / @0x627624 / @0x627643]
 	if (sh.ci != client_index_) return;
+	if (!server_hello_matches_identity(sh, make_jointoperations_client_hello(client_index_))) return;
+	// An absent HK reads 0, and the 0x42 then omits it. [orig: Nwu_HandleServerHello @0x626D20 -
+	//  HK @0x626E97; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK gate @0x6200F2]
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk
 	server_password_required_ = (sh.sf & 1u) != 0;
 	// The host's ADVERTISED expansion: learned here and echoed in the C2S JOIN EXP TLV below,

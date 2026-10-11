@@ -486,6 +486,15 @@ int main() {
 
 		const CaptureDecodeResult auth = decoder.push_detailed(crafted[1]);
 		EXPECT(auth.datagrams.size() == 1 && auth.datagrams[0].decoded);
+		// D-NET-452: the client reads an 0x81 with no field required, so one carrying
+		// its CI alone, no HK, decodes. [orig: Nwu_HandleServerHello @0x626D20 - HK zeroed
+		//  @0x626E97]
+		const std::vector<uint8_t> ci_only = {'C', 'I', 0x00, 0x04, 0x00, 0x07, 0x00, 0x00, 0x00};
+		const CaptureDecodeResult hk_less = decoder.push_detailed(
+				{54, 32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_HELLO, ci_only)});
+		EXPECT(hk_less.datagrams.size() == 1 && hk_less.datagrams[0].outer_decoded &&
+		       hk_less.datagrams[0].opcode == SESSION_OPCODE_SERVER_HELLO &&
+		       hk_less.datagrams[0].decoded);
 		const CaptureDecodeResult invalid_protocol = decoder.push_detailed(
 				{53, 32769, 32768,
 				 nwu_outer_encode(SESSION_OPCODE_PROTOCOL_MESSAGE, {0x01, 0x02})});
