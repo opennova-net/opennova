@@ -637,11 +637,13 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 		return false;
 	};
 	ViewportDrag drag;
-	const JsonValue *id = json.get("id");
-	if (!id || !io::json_exact_whole(*id, drag.id) || drag.id == 0) return refuse("id", "a record identity");
 	const JsonValue *handle = json.get("handle");
 	if (!handle || !handle->is_string() || handle->string.empty()) return refuse("handle", "a handle's token");
 	drag.handle = handle->string;
+	// The terrain brush's drag names no record (S25: id 0, handle "brush").
+	const JsonValue *id = json.get("id");
+	if (!id || !io::json_exact_whole(*id, drag.id) || (drag.id == 0 && drag.handle != "brush"))
+		return refuse("id", drag.handle == "brush" ? "0 (the brush names no record)" : "a record identity");
 	const JsonValue *by = json.get("by"), *to = json.get("to");
 	if ((by != nullptr) == (to != nullptr)) {
 		error = "\"drag\" goes by [dx, dy] or to [x, y], one of them.";

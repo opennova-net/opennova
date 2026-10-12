@@ -347,6 +347,58 @@ int test_stroke_follows() {
 	session.handle(request::end_edit(mission, gesture));
 	const auto ended = frame();
 	TEST_EXPECT(ended.first == ViewportAction::Rebuild && ended.second == ViewportAction::Rebuild);
+	// The brush's drag over the wire names no record (id 0): a sample of a stroke at the map's pixel, its gesture
+	// answered; a move's id 0 still refused.
+	{
+		JsonValue brush;
+		std::string error;
+		TEST_EXPECT(opennova::io::json_parse(R"({"kind": "edit_in_viewport", "path": ")" + mission +
+		                                             R"(", "drag": {"id": 0, "handle": "brush", "to": [40, 40], "end": true, "kind": "map"}})",
+		                                     brush, error));
+		const JsonValue answer = session.handle_json(brush);
+		const JsonValue *outcome = answer.get("outcome");
+		const JsonValue *done = outcome ? outcome->get("done") : nullptr;
+		const JsonValue *token = outcome ? outcome->get("gesture") : nullptr;
+		TEST_EXPECT(done && done->is_bool() && done->boolean && token && token->is_number() && token->number > 0);
+		JsonValue move;
+		TEST_EXPECT(opennova::io::json_parse(R"({"kind": "edit_in_viewport", "path": ")" + mission +
+		                                             R"(", "drag": {"id": 0, "handle": "move", "to": [40, 40], "kind": "map"}})",
+		                                     move, error));
+		const JsonValue moved = session.handle_json(move);
+		const JsonValue *refused = moved.get("error");
+		TEST_EXPECT(refused && contains(refused->string, "must be a record identity"));
+		// A stroke of several samples over the wire, in the 3D view and on the map, each tool's: one gesture, each
+		// sample going on with the one before.
+		for (const char *tool : {"surface", "raise"}) {
+			session.handle(request::set_workspace(std::string(R"({"terrain_brush":{"tool":")") + tool + R"("}})"));
+			for (const char *kind : {"map", "mission"}) {
+				// The pixels over the island's middle: the map's projection of the origin, the 3D view's middle.
+				float px = 0.0f, py = 0.0f;
+				const bool map = std::string(kind) == "map";
+				const ViewportModel *model = viewports.find(mission, map ? ViewportKind::Map : ViewportKind::Mission);
+				TEST_EXPECT(model != nullptr);
+				if (!model) return 1;
+				if (map) static_cast<const MissionMapViewport *>(model)->view(model->size().width, model->size().height).project(0.0, 0.0, px, py);
+				else px = float(model->size().width) * 0.5f, py = float(model->size().height) * 0.5f;
+				double token = 0.0;
+				for (int i = 0; i < 4; ++i) {
+					JsonValue sample;
+					const std::string text = R"({"kind": "edit_in_viewport", "path": ")" + mission +
+					                         R"(", "drag": {"id": 0, "handle": "brush", "to": [)" + std::to_string(px + 4.0f * float(i)) +
+					                         R"(, )" + std::to_string(py) + R"(], "gesture": )" + std::to_string(uint64_t(token)) + R"(, "end": )" +
+					                         (i == 3 ? "true" : "false") + R"(, "kind": ")" + kind + R"("}})";
+					TEST_EXPECT(opennova::io::json_parse(text, sample, error));
+					const JsonValue answer = session.handle_json(sample);
+					const JsonValue *outcome = answer.get("outcome");
+					const JsonValue *done = outcome ? outcome->get("done") : nullptr;
+					const JsonValue *gesture = outcome ? outcome->get("gesture") : nullptr;
+					if (!done || !done->boolean) std::printf("  %s %s sample %d: %s\n", tool, kind, i, opennova::io::json_write(answer).c_str());
+					TEST_EXPECT(done && done->boolean && gesture && (i == 0 || gesture->number == token));
+					if (i == 0) token = gesture->number;
+				}
+			}
+		}
+	}
 	// A client gone: ten seconds with no sample end its gesture; its token's next sample begins one of its own.
 	const uint64_t second = sample(0, 20.0, false);
 	TEST_EXPECT(second != 0 && second != gesture);

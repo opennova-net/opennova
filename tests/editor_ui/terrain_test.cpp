@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/ui/editor_requests.h>
 
 #include "editor_ui_test_support.h"
@@ -96,11 +97,59 @@ void test_sculpt_parts() {
 	CHECK(run.ui.windows.pending_requests() == 0, "drawing the parts raises nothing");
 }
 
+// The mission's project on its terrain (Tmap: its .trn, heights and maps), the mission open and drawn.
+bool open_on_terrain(MissionRun &run) {
+	if (!run.open()) return false;
+	const std::string root = run.session.view().project.root;
+	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/terrain/tmap/";
+	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
+		if (!editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixtures + name))) return false;
+	run.session.handle(request::rescan());
+	run.session.run_operations();
+	run.settle();
+	run.take();
+	return true;
+}
+
+// The brush's drag over the wire while the windows draw between its samples (S25): one gesture, each sample going on
+// with the one before, in the mission's 3D view.
+void test_wire_brush_drag() {
+	MissionRun run("opennova_editor_ui_terrain_wire_drag");
+	CHECK(open_on_terrain(run), "the mission open on its terrain");
+	run.session.handle(request::set_workspace(R"({"document": {"terrain": true}, "terrain_brush": {"tool": "raise", "radius": 20}})"));
+	run.settle();
+	run.take();
+	const ViewportModel *model = run.session.viewports().find(run.path, ViewportKind::Mission);
+	CHECK(model != nullptr, "the 3D view");
+	if (!model) return;
+	const float x = float(model->size().width) * 0.5f, y = float(model->size().height) * 0.5f;
+	double token = 0.0;
+	for (int i = 0; i < 4; ++i) {
+		opennova::io::JsonValue sample;
+		std::string error;
+		const std::string text = R"({"kind": "edit_in_viewport", "path": ")" + run.path +
+		                         R"(", "drag": {"id": 0, "handle": "brush", "to": [)" + std::to_string(x + 4.0f * float(i)) +
+		                         ", " + std::to_string(y) + R"(], "gesture": )" + std::to_string(uint64_t(token)) +
+		                         R"(, "end": )" + (i == 3 ? "true" : "false") + R"(, "kind": "mission"}})";
+		CHECK(opennova::io::json_parse(text, sample, error), "the sample reads");
+		const opennova::io::JsonValue answer = run.session.handle_json(sample);
+		const opennova::io::JsonValue *outcome = answer.get("outcome");
+		const opennova::io::JsonValue *done = outcome ? outcome->get("done") : nullptr;
+		const opennova::io::JsonValue *gesture = outcome ? outcome->get("gesture") : nullptr;
+		if (!done || !done->boolean) std::printf("  sample %d: %s\n", i, opennova::io::json_write(answer).c_str());
+		CHECK(done && done->boolean && gesture && (i == 0 || gesture->number == token), "a sample of the one gesture");
+		if (i == 0 && gesture) token = gesture->number;
+		run.settle();
+		run.take();
+	}
+}
+
 } // namespace
 
 void run_terrain_tests() {
 	test_terrain_pane();
 	test_sculpt_parts();
+	test_wire_brush_drag();
 }
 
 } // namespace editor_ui_test
