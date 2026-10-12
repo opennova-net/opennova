@@ -380,6 +380,17 @@ public:
 	// backgrounds (ADR 0046 S25: a height, delta or flatness view of the
 	// terrain). Null restores the colour map the last set_minimap_terrain
 	// installed; the next set_minimap_terrain installs its own colour map.
+	// The picture's contract is the colour map's, which the slot assumes:
+	// - a 2x2 quadrant atlas laid as the colour map is, about 1024 pixels a
+	//   side: the compile maps each sector's id to a fixed 512-pixel quadrant
+	//   of a 1024-pixel atlas with a half-texel inset of 0.5 / 1024
+	//   (HudMinimapTerrain::atlas_px, cell_px), so a smaller picture samples
+	//   across its quadrants' edges;
+	// - its alpha is drawn as it is (the colour map is converted to RGB8 so
+	//   authored alpha cannot ghost the backing; a picture is not);
+	// - it takes the map's terrain tint, and the water cutout of the mask
+	//   set_minimap_terrain installed is drawn over it (install the terrain
+	//   with a null mask for none).
 	void set_minimap_terrain_picture(const Ref<Texture2D> &p_picture);
 	// What the map draws under its marks now (the picture, else the colour map).
 	Ref<Texture2D> get_minimap_terrain_picture() const;

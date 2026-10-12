@@ -527,6 +527,9 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	root_ = p_root;
 	layout_ = HudLayout{};
 	textures_ = {};
+	// The colour map a terrain picture gives back goes with the slots, so a
+	// picture set null before the next set_minimap_terrain restores nothing.
+	minimap_colormap_.unref();
 	combat_texture_names_ = {};
 	combat_texture_loaders_ = {};
 	texture_material_words_.clear();
