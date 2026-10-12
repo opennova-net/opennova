@@ -235,4 +235,38 @@ bool terrain_tile_page_samples(const TerrainTileQuadrantChange &change, const Te
 	return across.first < r.x1 && across.second >= r.x0 && down.first < r.y1 && down.second >= r.y0;
 }
 
+unsigned update_terrain_tile_quadrants(TerrainTileQuadrantSource &source, const Rgba8Image &atlas,
+		const std::vector<CoordsRect> &rects, std::vector<TerrainTileQuadrantChange> &changed) {
+	changed.clear();
+	// Refused whole before anything is made: a rect outside the atlas, an atlas of another size.
+	if (!atlas.is_valid() || atlas.width < 2 || atlas.height < 2) return 0;
+	for (const CoordsRect &rect : rects)
+		if (rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.z < 0 || int64_t(rect.x) + rect.w > int64_t(atlas.width) ||
+		    int64_t(rect.z) + rect.h > int64_t(atlas.height))
+			return 0;
+	TerrainTileQuadrantSource made = source;
+	unsigned quadrants = 0;
+	for (const CoordsRect &rect : rects) {
+		TerrainTileQuadrantChange change;
+		const unsigned each = update_terrain_tile_quadrants(made, atlas, rect.x, rect.z, rect.w, rect.h, &change);
+		if (each == 0) {
+			changed.clear();
+			return 0;
+		}
+		quadrants |= each;
+		changed.push_back(std::move(change));
+	}
+	source = std::move(made);
+	return quadrants;
+}
+
+bool terrain_tile_page_samples_any(const std::vector<TerrainTileQuadrantChange> &changes,
+		const TerrainTileQuadrantSource &source, uint8_t page_lod_level, int32_t source_origin_x,
+		int32_t source_origin_z, int dimension) {
+	for (const TerrainTileQuadrantChange &change : changes)
+		if (terrain_tile_page_samples(change, source, page_lod_level, source_origin_x, source_origin_z, dimension))
+			return true;
+	return false;
+}
+
 } // namespace opennova::terrain

@@ -19,6 +19,7 @@
 #include <runtime/terrain/quadtree.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/terrain_atlas_rects.h>
 
 #include <array>
 #include <cstdint>
@@ -96,6 +97,44 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 // whole.
 bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
 		const TrnConfig &trn, const std::vector<int> &tiles, const terrain::CoordsRect &rect);
+
+// The tiles of `cpt` whose device vertices (build_terrain_tile_vertices: the
+// height under each vertex and the four the vertex normal takes around it,
+// each through the tile's own quadrant's taps) may read a texel of the atlas
+// rect `rect`, in index order; the root tile (the 1024 one, which the sector
+// walk never draws: it starts at the level-1 children) left out. A superset
+// of the tiles whose vertices change when only that rect's heights do.
+std::vector<int> terrain_tiles_reading(const CptFile &cpt, const TrnConfig &trn,
+		const terrain::CoordsRect &rect);
+
+// What a terrain shows again over changed regions of its heights (ADR 0046 S25,
+// the OpenNova Editor's sculpt; editor tooling, not a port): the tiles whose
+// device meshes it makes again and the plane's rects where a height lookup
+// reads a changed texel. Godot's terrain uploads what it names.
+struct TerrainRegionRefresh {
+	struct Remesh {
+		int tile = 0;
+		bool flat = false; // its flat variant too (a replaced tile of quadrant 0, which draws one)
+	};
+	std::vector<Remesh> remesh;              // in index order
+	std::vector<terrain::CoordsRect> rects;  // the changed atlas rects that have a size
+	std::vector<terrain::TerrainWorldRect> world;
+};
+// `rects`: the atlas rects the heights changed over (the region contract
+// refresh_mipchain's: each inside the atlas, a change across its wrap arriving
+// as several; one of no size changes nothing); `tiles`: the tiles a bake's
+// landing replaced. Remade: a replaced tile's variants (its flat one where it
+// has one), and the heights variant of every tile whose vertices read a rect
+// (terrain_tiles_reading); the root never (the sector walk starts at its
+// children, so its meshes are never drawn). `world`: every rect of the plane
+// over the grid's sectors and the five past them each way (the window a
+// camera there draws: the routing's repeats on a wrapping axis, the edge
+// cell's quadrant on another), whose height lookups (kTerrainHeightTaps
+// under the .trn's locks) read a changed texel. False, `out` empty, for a
+// tile index that is no tile or a rect not inside the atlas.
+bool plan_terrain_region_refresh(const CptFile &cpt, const TrnConfig &trn,
+		const std::vector<terrain::CoordsRect> &rects, const std::vector<int> &tiles,
+		TerrainRegionRefresh &out);
 
 // Orthonormal camera state in world space (column-major world-to-view, -Z
 // forward) plus the scalars retail's terrain context carries: the horizontal
