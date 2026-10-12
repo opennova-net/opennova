@@ -87,6 +87,13 @@ public:
 	// Mission/replay reset: remove the permanent list and make every resident
 	// page cold so no prior compiled scorch survives the lifecycle boundary.
 	void clear_terrain_scorches();
+	// The placed tiles replaced in place (an editor's tile edit, ADR 0046 S25):
+	// the composition sources take `p_file` and only the resident pages a
+	// changed record's square overlaps recompose
+	// (terrain_tile_overlay_changes); the pages retired. nullopt, nothing
+	// changed, where the sources cannot take it in place (none ready, or tiles
+	// over sources built with no tile set): the caller rebuilds them.
+	std::optional<std::size_t> set_tile_entries(const opennova::TilFile &p_file);
 
 	// The frame's page sweep over its draw list, composed and uploaded before
 	// the terrain draws; one binding per patch, not ready where the patch
@@ -136,6 +143,8 @@ private:
 	uint64_t cache_hits_ = 0;
 	uint64_t cache_misses_ = 0;
 	uint64_t upload_failures_ = 0;
+	uint64_t tile_entry_updates_ = 0;
+	uint64_t tile_entry_pages_retired_ = 0;
 	opennova::terrain::TerrainScorchRegistry scorch_registry_;
 	bool scorch_textures_ready_ = false;
 	uint64_t scorch_records_rejected_ = 0;

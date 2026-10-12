@@ -225,6 +225,9 @@ private:
 	void _load_textures();
 	void _clear_derived_textures();
 	void _rebuild_tile_overlay_pages();
+	// The placed tiles changed (a new override, or its entries edited): the pages whose squares changed recompose in
+	// place (TerrainTileCacheDevice::set_tile_entries), else the overlay pages are built again.
+	void _update_tile_overlay_pages();
 	void _clear_terrain();
 	void _hide_visible_patches();
 	void _clear_patch_pool();

@@ -253,6 +253,8 @@ void TerrainTileCacheDevice::clear() {
 	cache_hits_ = 0;
 	cache_misses_ = 0;
 	upload_failures_ = 0;
+	tile_entry_updates_ = 0;
+	tile_entry_pages_retired_ = 0;
 	scorch_registry_.clear();
 	scorch_textures_ready_ = false;
 	scorch_records_rejected_ = 0;
@@ -359,6 +361,38 @@ std::size_t TerrainTileCacheDevice::invalidate_region(
 		int32_t p_maximum_x_q16, int32_t p_maximum_z_q16) {
 	return cache_.invalidate_overlapping_q16(p_minimum_x_q16, p_minimum_z_q16,
 			p_maximum_x_q16, p_maximum_z_q16);
+}
+
+std::optional<std::size_t> TerrainTileCacheDevice::set_tile_entries(const opennova::TilFile &p_file) {
+	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot> current =
+			sources_ready_ ? async_->sources() : nullptr;
+	if (!current) {
+		return std::nullopt;
+	}
+	// Tiles over sources built without the tile set (a terrain drawn with none) need it built: a rebuild.
+	if (!p_file.entries.empty() && !current->tile_overlay_ready) {
+		return std::nullopt;
+	}
+	const std::vector<opennova::terrain::TerrainTileSquareQ16> squares =
+			opennova::terrain::terrain_tile_overlay_changes(current->tile_info, p_file);
+	if (squares.empty()) {
+		return std::size_t{0};
+	}
+	auto next = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>(*current);
+	next->tile_info = p_file;
+	async_->install_sources(std::move(next));
+	// A page composing from the old placement now holds a retired generation: its completion is dropped.
+	const auto clamp = [](int64_t value) {
+		return static_cast<int32_t>(std::clamp<int64_t>(value, INT32_MIN, INT32_MAX));
+	};
+	std::size_t retired = 0;
+	for (const opennova::terrain::TerrainTileSquareQ16 &square : squares) {
+		retired += cache_.invalidate_overlapping_q16(clamp(square.minimum_x), clamp(square.minimum_z),
+				clamp(square.maximum_x), clamp(square.maximum_z));
+	}
+	++tile_entry_updates_;
+	tile_entry_pages_retired_ += retired;
+	return retired;
 }
 
 void TerrainTileCacheDevice::clear_terrain_scorches() {
@@ -731,6 +765,8 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 	diagnostics["frame_output_hash"] =
 			static_cast<int64_t>(frame_output_hash_);
 	diagnostics["source_revision"] = static_cast<int64_t>(source_revision_);
+	diagnostics["tile_entry_updates"] = static_cast<int64_t>(tile_entry_updates_);
+	diagnostics["tile_entry_pages_retired"] = static_cast<int64_t>(tile_entry_pages_retired_);
 	diagnostics["tile_overlay_required"] = tile_overlay_required_;
 	diagnostics["tile_overlay_available"] = tile_overlay_ready_;
 	return diagnostics;
