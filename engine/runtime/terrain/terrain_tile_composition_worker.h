@@ -65,27 +65,30 @@ public:
 
 	// The immutable page sources one mission's cache composes from, already
 	// split into the retail quadrant textures and level sets.
+	// The sources a page composes from. Each large part is shared between the snapshots that hold it, so an
+	// edit (an editor's tile edit, a painted colour region: ADR 0046 S25) installs a new snapshot that copies
+	// the part it changes alone and holds the others' pointers.
 	struct SourceSnapshot {
-		TerrainTileQuadrantSource colormap;
-		TerrainTileQuadrantSource heightfield_normal;
-		std::vector<Rgba8Image> tilestrip;
+		std::shared_ptr<const TerrainTileQuadrantSource> colormap;
+		std::shared_ptr<const TerrainTileQuadrantSource> heightfield_normal;
+		std::shared_ptr<const std::vector<Rgba8Image>> tilestrip;
 		TilFile tile_info;
 		bool tile_overlay_ready = false;
-		std::array<TerrainScorchTexture, kTerrainScorchTextureSlots> scorch_textures;
+		std::shared_ptr<const std::array<TerrainScorchTexture, kTerrainScorchTextureSlots>> scorch_textures;
 
 		TerrainTilePageSourceView view(const std::array<float, 3> &tint,
 				const TerrainTileLightEpoch &light, const TerrainScorchPagePlan *scorch) const {
 			TerrainTilePageSourceView result;
-			result.colormap = &colormap;
-			result.heightfield_normal = &heightfield_normal;
+			result.colormap = colormap.get();
+			result.heightfield_normal = heightfield_normal.get();
 			if (tile_overlay_ready) {
 				result.tile_info = &tile_info;
-				result.tilestrip = &tilestrip;
+				result.tilestrip = tilestrip.get();
 			}
 			result.tile_overlay_tint = tint;
 			result.light_bytes = light;
 			result.scorch_plan = scorch;
-			result.scorch_textures = &scorch_textures;
+			result.scorch_textures = scorch_textures.get();
 			return result;
 		}
 	};

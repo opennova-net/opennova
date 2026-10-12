@@ -1275,6 +1275,12 @@ target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
 
+# Every shipped char and foliage map read with its carried form and written again the same bytes.
+add_executable(pcx_retail_maps_test pcx/pcx_retail_maps_test.cpp)
+target_link_libraries(pcx_retail_maps_test PRIVATE opennova_formats)
+target_include_directories(pcx_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(pcx_retail_maps COMMAND pcx_retail_maps_test)
+
 # The 256-colour quantizer an 8-bit PCX is written through (formats/pcx/pcx_quantize.h).
 add_executable(pcx_quantize_test pcx/pcx_quantize_test.cpp)
 target_link_libraries(pcx_quantize_test PRIVATE opennova_formats)
@@ -1310,6 +1316,20 @@ add_executable(tga_write_test tga/tga_write_test.cpp)
 target_link_libraries(tga_write_test PRIVATE opennova_formats)
 target_include_directories(tga_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_write COMMAND tga_write_test)
+
+# A true-colour TGA's carried form (formats/tga TgaForm): the depth, the descriptor and the TGA 2.0 footer read
+# back and written again the same bytes; files the writer does not make read no form.
+add_executable(tga_roundtrip_test tga/tga_roundtrip_test.cpp)
+target_link_libraries(tga_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(tga_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_roundtrip COMMAND tga_roundtrip_test)
+
+# Every shipped terrain colour map, detail blend map and tile atlas read with its form and written again the
+# same bytes.
+add_executable(tga_retail_maps_test tga/tga_retail_maps_test.cpp)
+target_link_libraries(tga_retail_maps_test PRIVATE opennova_formats)
+target_include_directories(tga_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(tga_retail_maps COMMAND tga_retail_maps_test)
 
 add_executable(dds_write_test dds/dds_write_test.cpp)
 target_link_libraries(dds_write_test PRIVATE opennova_formats)
@@ -1418,6 +1438,12 @@ add_executable(cpt_trngen_heightmap_depth_test cpt/trngen_heightmap_depth_test.c
 target_link_libraries(cpt_trngen_heightmap_depth_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_heightmap_depth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cpt_trngen_heightmap_depth COMMAND cpt_trngen_heightmap_depth_test)
+# A sculpted heightmap written again: every height under its white read back exactly through a
+# 16-bit grey PNG (formats/cpt/trngen heightmap_depth.h encode_heightmap_depth16).
+add_executable(heightmap_depth_encode16_test cpt/trngen_heightmap_encode_test.cpp)
+target_link_libraries(heightmap_depth_encode16_test PRIVATE opennova_formats)
+target_include_directories(heightmap_depth_encode16_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME heightmap_depth_encode16 COMMAND heightmap_depth_encode16_test)
 
 # ENV environment/time-of-day format tests
 add_executable(env_unit_test env/env_unit_test.cpp)
@@ -1612,6 +1638,14 @@ add_executable(terrain_frame_compiler_test terrain/terrain_frame_compiler_test.c
 target_link_libraries(terrain_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(terrain_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_frame_compiler COMMAND terrain_frame_compiler_test)
+
+# The terrain's load-time derivations made again over a region (the scene
+# snapshot, the height mip chain, the heightfield normal atlas), each equal to
+# a fresh build over fixtures/terrain/tmap/Tmap.cpt and synthetic atlases.
+add_executable(terrain_scene_snapshot_refresh_test terrain/terrain_scene_snapshot_refresh_test.cpp)
+target_link_libraries(terrain_scene_snapshot_refresh_test PRIVATE opennova_runtime)
+target_include_directories(terrain_scene_snapshot_refresh_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_scene_snapshot_refresh COMMAND terrain_scene_snapshot_refresh_test)
 
 add_executable(terrain_tile_composition_cache_test terrain/terrain_tile_composition_cache_test.cpp)
 target_link_libraries(terrain_tile_composition_cache_test PRIVATE opennova_runtime)
@@ -2102,6 +2136,14 @@ add_executable(terrain_field_store_test terrain_query/terrain_field_store_test.c
 target_link_libraries(terrain_field_store_test PRIVATE opennova_runtime)
 target_include_directories(terrain_field_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_field_store COMMAND terrain_field_store_test)
+
+# TerrainFieldStore::patch_heights: a rect of the store's heights written in
+# place, every copy of the height view reading the new ground (an editor's
+# sculpt stroke); refusals write nothing.
+add_executable(terrain_field_store_patch_test terrain_query/terrain_field_store_patch_test.cpp)
+target_link_libraries(terrain_field_store_patch_test PRIVATE opennova_runtime)
+target_include_directories(terrain_field_store_patch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_field_store_patch COMMAND terrain_field_store_patch_test)
 
 # The foliage map as the game's load keeps it (its codes and their slot masks)
 # and its sampler over a terrain's grid (terrain_query/foliage_mask_raster).

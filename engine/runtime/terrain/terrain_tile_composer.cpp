@@ -458,4 +458,30 @@ Rgba8Image compose_terrain_tile_page(
 	return output;
 }
 
+static TerrainTileSquareQ16 terrain_tile_square_q16(const TilOverlayEntry &entry) {
+	// The page pass's rectangle for a record: x raw, z negated on read, a cell's span each way.
+	TerrainTileSquareQ16 out;
+	out.minimum_x = entry.x_fixed;
+	out.minimum_z = -static_cast<int64_t>(entry.z_fixed);
+	out.maximum_x = out.minimum_x + TIL_FIXED_CELL_UNITS;
+	out.maximum_z = out.minimum_z + TIL_FIXED_CELL_UNITS;
+	return out;
+}
+
+std::vector<TerrainTileSquareQ16> terrain_tile_overlay_changes(const TilFile &before, const TilFile &after) {
+	std::vector<TerrainTileSquareQ16> out;
+	const std::size_t common = std::min(before.entries.size(), after.entries.size());
+	for (std::size_t i = 0; i < common; ++i) {
+		const TilOverlayEntry &was = before.entries[i], &now = after.entries[i];
+		if (was.x_fixed == now.x_fixed && was.z_fixed == now.z_fixed && was.tile_index == now.tile_index &&
+				was.flags == now.flags)
+			continue;
+		out.push_back(terrain_tile_square_q16(was));
+		out.push_back(terrain_tile_square_q16(now));
+	}
+	for (std::size_t i = common; i < before.entries.size(); ++i) out.push_back(terrain_tile_square_q16(before.entries[i]));
+	for (std::size_t i = common; i < after.entries.size(); ++i) out.push_back(terrain_tile_square_q16(after.entries[i]));
+	return out;
+}
+
 } // namespace opennova::terrain
