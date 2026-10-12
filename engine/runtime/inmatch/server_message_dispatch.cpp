@@ -461,10 +461,10 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	std::vector<ScoredPlayerListEntry> rows;
 	for (const NapiNPConnection &c : roster) {
 		if (c.phase < ConnectionPhase::PlayerAdded || !c.link.owned_entity.valid()) continue;
-		// Rows carry only IN-GAME players — a still-loading joiner (mid world-stream) is
-		// excluded until its burst completes, matching the golden 31 B -> 39 B grow right
-		// as the joiner enters the match [orig: the scoreboard rows exclude slots with the
-		// not-yet-in-game byte slot+100579; Server_BuildAndBroadcastScoreboard @0x50D960].
+		// Rows carry slots in state 6 with a bound entity, so a still-loading joiner (mid
+		// world-stream) is no row until its burst completes (the golden 31 B -> 39 B grow);
+		// the row's +100579 test is dead, the byte never set [orig:
+		// Server_BuildAndBroadcastScoreboard @0x50D960 - state 6 @0x50d9f6, +100579 @0x50da73].
 		if (!is_in_match(c)) continue;
 		// team @entity+344 read THROUGH owned_entity (D-NET-132); the World-less path defaults to 1.
 		uint8_t team = 1;
@@ -539,14 +539,17 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 		frame.teams[team].ctf_flag = source.authored_objectives;
 	}
 	// The in-game count is its own slot walk, not the row count: every active
-	// slot past its load (slot+100579 clear), the host's own slot (+5) counted
-	// only by a session peer — a dedicated host carries no own connection
-	// here, so the walk reduces to the in-match test.
-	// [orig: Server_BuildAndBroadcastScoreboard @0x50dd5b..0x50dda9 ->
-	//  packet dword 1031, serialized as the trailer's first byte @0x504cda]
+	// slot (+4) whose +100579 byte is clear, the host's own slot (+5) only on a
+	// session peer. +100579 is never set in JO, so a joiner counts from its
+	// add and a punted slot until its teardown's row memset; a Serve Only
+	// host's own row has no connection here, so the walk is the active test.
+	// [orig: Server_BuildAndBroadcastScoreboard @0x50dd5b..0x50dda9 (+4
+	//  @0x50dd82, +100579 @0x50dd8b, +5 @0x50dd90..0x50dd9a) -> packet dword
+	//  1031, the trailer's first byte @0x504cda; Server_PlayerAdd stores
+	//  +100579 = 0 @0x51CD5D; Server_HandlePlayerDisconnect's memset @0x51b87d]
 	frame.in_game_count = static_cast<uint8_t>(std::min<size_t>(
 			static_cast<size_t>(std::count_if(roster.begin(), roster.end(),
-					[](const NapiNPConnection &c) { return is_in_match(c); })),
+					[](const NapiNPConnection &c) { return player_slot_active(c); })),
 			0xFFu));
 	// The spectator count rides the row loop: each emitted row whose spectator
 	// latch (slot+100567) is set, the same byte the row's bit 0 carries
@@ -608,10 +611,11 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.account_squad_id = conn.account.squad_id; // field 0x0800 [orig: player+0x270 @0x506257]
 		ctx.squad_leader = conn.squad_leader; // +100576 (field 0x0040)
 		ctx.fireteam = conn.fireteam;         // +100577 (field 0x0080)
-		// Field 0x1000: the spectator latch of a slot past its load, the
-		// loading byte being the port's incomplete initial-state burst
-		// [orig: NetPacket_SerializePlayerSync0x46 @0x506199..0x5061bc].
-		ctx.spectator_in_game = conn.link.spectator && is_in_match(conn) ? 1 : 0;
+		// Field 0x1000: an active slot (+4) whose spectator latch (+100567) is
+		// set; the +100579 test is dead (never set in JO), so a loading or punted
+		// spectator sends 1 [orig: NetPacket_SerializePlayerSync0x46 @0x506199..0x5061AF
+		//  (+100579 @0x5061A8), the 1 @0x5061bc; the latch @0x51CD7D..0x51CD83].
+		ctx.spectator_in_game = conn.link.spectator && player_slot_active(conn) ? 1 : 0;
 		if (world != nullptr) {
 			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) {
 				ctx.team = e->team;

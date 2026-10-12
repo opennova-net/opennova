@@ -231,6 +231,22 @@ bool check_host_scoreboard_status_and_counts() {
 	roster[1].link.owned_entity = spawn_player(0);
 	roster[1].link.spectator = true;
 	// roster[2] is in game but binds no entity: counted, not a row.
+	// The in-game walk reads the active byte (+4) alone (+100579 is never
+	// set): a joiner counts from its add, still loading and no row yet, and a
+	// punted slot until its teardown; a connection holding only its slot's
+	// reservation, below PlayerAdded, is not active (D-NET-505) [orig:
+	// @0x50dd82, @0x50dd8b].
+	roster.resize(6);
+	roster[3].phase = opennova::inmatch::ConnectionPhase::PlayerAdded;
+	roster[3].reply.player_slot = 3;
+	roster[3].link.owned_entity = spawn_player(2);
+	roster[4].phase = opennova::inmatch::ConnectionPhase::PendingSpawn;
+	roster[4].reply.player_slot = 4;
+	roster[4].reply.player_slot_reserved = true;
+	roster[5].phase = opennova::inmatch::ConnectionPhase::InMatch;
+	roster[5].burst.spawned = true;
+	roster[5].reply.player_slot = 5;
+	roster[5].host_disconnect_sent = true;
 	const opennova::ProtocolMessage message =
 			opennova::inmatch::build_player_list_message(config, roster, &world);
 	opennova::PlayerList list;
@@ -238,9 +254,9 @@ bool check_host_scoreboard_status_and_counts() {
 	                    message.payload.data(), message.payload.size(), list),
 	            "host 0x16 decodes"))
 		return false;
-	if (!expect(list.players.size() == 2 && list.in_game_count == 3 &&
+	if (!expect(list.players.size() == 2 && list.in_game_count == 5 &&
 	                    list.spectator_count == 1,
-	            "the in-game count walks the slots; the spectator count rides the rows"))
+	            "the in-game count walks the active slots; the spectator count rides the rows"))
 		return false;
 	bool status_zero = true;
 	uint8_t spectator_flags = 0xFF;

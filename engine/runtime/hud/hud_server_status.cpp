@@ -313,7 +313,7 @@ ServerStatusScoreRow server_status_score_row(const ServerStatusPageState &page, 
 	char buf[160];
 	const long i = index;
 	if (slot.spectator) {
-		// A spectator row; one still loading turns auxiliaryColors[0]
+		// A spectator row; +0x188E3 set (never in JO) turns auxiliaryColors[0]
 		// [orig: `cmp [slot+0x188D7]` @0x50043f, `cmp [slot+0x188E3]`
 		//  @0x500448, "%2i --- %s" @0x50045b, auxiliaryColors[0] 0xFFFF40FF
 		//  @0x500468].

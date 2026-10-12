@@ -1,7 +1,8 @@
 // D-NET-127 — the S2C 0x46 per-field values the host's player-slot table
 // carries. Field 0x1000 is 1 for an active slot whose spectator latch
-// (slot+100567) is set and whose loading byte (slot+100579) is clear, else 0;
-// the client lands it as the roster slot's spectator byte.
+// (slot+100567) is set and whose slot+100579 byte is clear, else 0; the byte
+// is never set in JO, so a spectator still loading sends 1 too (D-NET-505).
+// The client lands it as the roster slot's spectator byte.
 // [orig: NetPacket_SerializePlayerSync0x46 @0x505E80 (@0x506197..0x5061cc);
 //  NapiNPClientMsg_PlayerSync @0x431370; NapiNPServerMsg_0x022 @0x514C90]
 #include <runtime/inmatch/napi_np_connection.h>
@@ -77,7 +78,7 @@ void test_spectator_field_follows_the_slot() {
 	};
 	CHECK(field_1000(0) == 0);
 	CHECK(field_1000(1) == 1);
-	CHECK(field_1000(2) == 0); // the loading byte is still set
+	CHECK(field_1000(2) == 1); // still loading: the +100579 test is dead
 	CHECK(field_1000(3) == 0);
 }
 
