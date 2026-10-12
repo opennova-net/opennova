@@ -135,6 +135,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mus/mus.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/cpt/cpt_io.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/sbf/sbf.h>
 #include <formats/scr/scr.h>
@@ -330,6 +331,19 @@ std::vector<uint8_t> til_with_a_foreign_header() {
 	return bytes;
 }
 
+// A .cpt whose depth stands past 128 units over a corner (heights TrnGen's draw-back writes no ground over: the
+// heights' terrain_heights.over_rasterizer), written by our writer.
+std::vector<uint8_t> heights_past_the_rasterizer(const std::vector<uint8_t> &cpt_bytes) {
+	opennova::CptFile cpt;
+	std::string why;
+	if (!opennova::load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, why)) return {};
+	for (int y = 0; y < 4; ++y)
+		for (int x = 0; x < 4; ++x) cpt.depth_buffer[size_t(y) * 1024 + size_t(x)] = 40000;
+	std::vector<uint8_t> out;
+	opennova::save_cpt(cpt, out, why);
+	return out;
+}
+
 std::vector<uint8_t> minted_pcx() {
 	opennova::IndexedImage8 image;
 	image.width = 4;
@@ -429,6 +443,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n")},
 	        // The tile placement (S25): three tiles.
 	        {AssetKind::TileInfo, "00TRa.til", minted_til()},
+	        // The terrain's heights (S25): the minted map's .cpt.
+	        {AssetKind::TerrainPolyData, "Tmap.cpt", file("terrain/tmap/Tmap.cpt")},
 	        // The score table (S23 B): one game type's columns and points.
 	        {AssetKind::Score, "score.ini",
 	         text_bytes("VERSION 40\r\nEXP_FANFARE 0 0\r\nGAMETYPE \"TDM\"\r\nFIELD \"NUMENEMYKILLS\" 1\r\nVAR \"ENEMYKILL\" 5\r\n")},
@@ -657,6 +673,10 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n3DIPower3 p3.3di\r\n")},
 	        // A tile placement whose header's +8 MED would not write (S25: til.ignored_input).
 	        {AssetKind::TileInfo, "foreign.til", til_with_a_foreign_header()},
+	        // Heights past 128 units, which TrnGen's bake draws no ground back over (S25:
+	        // terrain_heights.over_rasterizer), and a file the editor's .cpt reader refuses (terrain_heights.unread).
+	        {AssetKind::TerrainPolyData, "high.cpt", heights_past_the_rasterizer(file("terrain/tmap/Tmap.cpt"))},
+	        {AssetKind::TerrainPolyData, "torn.cpt", std::vector<uint8_t>(1, 0)},
 	        // A score table of a version the game does not read (score.version).
 	        {AssetKind::Score, "score.ini", text_bytes("VERSION 39\r\nGAMETYPE \"TDM\"\r\nVAR \"ENEMYKILL\" 5\r\n")},
 	};
@@ -1842,9 +1862,11 @@ size_t g_bytes_files = 0;
 
 void check_bytes_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	std::unique_ptr<DocumentBase> made = type.make();
-	check(made && made->holds_bytes() && !records_of(*made) && !text_of(*made), fixture.name,
-	      "make gives a DocumentBase that holds its file's bytes, neither records nor a text");
-	if (!made || !made->holds_bytes()) return;
+	// A file held whole (S18, S23) or as planes of texels (S25: a terrain's heights).
+	const auto whole = [](const DocumentBase &document) { return document.holds_bytes() || document.as_raster(); };
+	check(made && whole(*made) && !records_of(*made) && !text_of(*made), fixture.name,
+	      "make gives a DocumentBase that holds its file's bytes or planes, neither records nor a text");
+	if (!made || !whole(*made)) return;
 	DocumentBase &document = *made;
 	Diagnostic error;
 	const bool loaded = document.load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
@@ -1882,7 +1904,7 @@ void check_bytes_fixture(const DocumentType &type, const Fixture &fixture, TypeC
 	const std::unique_ptr<DocumentBase> snapshot = document.snapshot();
 	check(snapshot && snapshot->is_snapshot() && snapshot->identity() == document.identity() &&
 	              snapshot->load_generation() == document.load_generation() &&
-	              snapshot->revision() == document.revision() && snapshot->holds_bytes() &&
+	              snapshot->revision() == document.revision() && whole(*snapshot) &&
 	              snapshot->serialize().text == stored,
 	      fixture.name, "a snapshot shares the document's identity, load generation and revision, and its bytes");
 	refused = Diagnostic();
@@ -1900,7 +1922,8 @@ void check_bytes_fixture(const DocumentType &type, const Fixture &fixture, TypeC
 
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	if (document_content(type) == DocumentContent::Text) return check_text_fixture(type, fixture, counts);
-	if (document_content(type) == DocumentContent::Bytes) return check_bytes_fixture(type, fixture, counts);
+	if (document_content(type) == DocumentContent::Bytes || document_content(type) == DocumentContent::Raster)
+		return check_bytes_fixture(type, fixture, counts);
 	std::unique_ptr<DocumentBase> made = type.make();
 	check(made && made->as_records() == made.get() && records_of(*made) == made->as_records(),
 	      fixture.name, "make gives a DocumentBase whose record document (as_records) is itself");

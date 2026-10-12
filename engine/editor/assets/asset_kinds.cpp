@@ -133,6 +133,7 @@ constexpr AssetKindRow kRows[] = {
 	        .folder("terrain")
 	        .row,
 	Kind(AssetKind::TerrainPolyData, "terrain_polydata", "Terrain height data")
+	        .edited_by(DocumentTypeId::TerrainHeights)
 	        .folder("terrain")
 	        .row,
 	// Beside the missions: the game finds a mission's by its name (mission::sidecars).

@@ -153,6 +153,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        // The terrain (DI-30): its row, its grid rows and its foliage definitions as a tree, the import that
 	        // makes it and the missions that run on it heading the Inspector.
 	        {AssetKind::Terrain, "Tmap.trn", file("terrain/tmap/Tmap.trn")},
+	        // The terrain's heights (S25): their file page.
+	        {AssetKind::TerrainPolyData, "Tmap.cpt", file("terrain/tmap/Tmap.cpt")},
 	        // The dialog bank (DI-32): its dialogs and their lines as a tree, a dialog's Play heading the Inspector.
 	        {AssetKind::DialogBank, "synth_bank.dbf", file("dbf/synth_bank.dbf")},
 	};
@@ -206,8 +208,9 @@ void draw_frames(TestWorkspace &workspace, DocumentView &view, const DocumentBas
 // items, a stylesheet's variables rather than its comments): what its view shows first; a text's
 // first line that is not blank.
 std::string first_title(const DocumentBase &document) {
-	// A file held whole (S18 a texture, S23 a wave): its file's name, which heads its facts.
-	if (document.holds_bytes()) return document.path().substr(document.path().find_last_of('/') + 1);
+	// A file held whole (S18 a texture, S23 a wave) or as planes (S25 a terrain's heights): its file's name, which
+	// heads its facts.
+	if (document.holds_bytes() || document.as_raster()) return document.path().substr(document.path().find_last_of('/') + 1);
 	if (const TextDocument *text = text_of(document)) {
 		for (size_t line = 1; line <= text->line_count(); ++line)
 			if (text->line(line).find_first_not_of(" \t") != std::string_view::npos) return std::string(text->line(line));

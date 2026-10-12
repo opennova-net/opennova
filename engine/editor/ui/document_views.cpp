@@ -25,6 +25,7 @@
 #include <editor/ui/particle_key_inspector.h>
 #include <editor/ui/script_view.h>
 #include <editor/ui/music_bank_inspector.h>
+#include <editor/ui/terrain_heights_view.h>
 #include <editor/ui/wave_inspector.h>
 #include <editor/ui/sound_inspector.h>
 #include <editor/ui/styles_view.h>
@@ -217,6 +218,9 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Avatars, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	// A tile placement's tiles as a list in their order, the game's draw order (S25).
 	{DocumentTypeId::TilePlacement, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// The terrain's heights: their file page, what they span and what the game makes of them (S25,
+	// ui/terrain_heights_view); they are sculpted in a mission's or the terrain's view.
+	{DocumentTypeId::TerrainHeights, DocumentViewRole::Records, nullptr, make_terrain_heights_view},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

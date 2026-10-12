@@ -35,6 +35,7 @@
 #include <editor/documents/text_types.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_document.h>
+#include <editor/documents/terrain_heights_document.h>
 #include <editor/documents/til_document.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
@@ -92,6 +93,7 @@ std::unique_ptr<DocumentBase> make_charattr() { return std::make_unique<CharAttr
 std::unique_ptr<DocumentBase> make_score() { return std::make_unique<ScoreDocument>(); }
 std::unique_ptr<DocumentBase> make_avatars() { return std::make_unique<AvatarsDocument>(); }
 std::unique_ptr<DocumentBase> make_til() { return std::make_unique<TilDocument>(); }
+std::unique_ptr<DocumentBase> make_terrain_heights() { return std::make_unique<TerrainHeightsDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -224,6 +226,11 @@ constexpr DocumentType kTypes[] = {
 	// orientation, MED's layer carried.
 	{ DocumentTypeId::TilePlacement, "tile_placement", make_til, validate_til_file, TilDocument::schema,
 			til_finding_codes },
+	// The terrain's heights (S25): a .cpt's CDEP atlas (or an imported terrain's heightmap) as the planes a brush
+	// sculpts, the rest of the .cpt its side state; it names nothing.
+	{ DocumentTypeId::TerrainHeights, "terrain_heights", make_terrain_heights, validate_terrain_heights_file,
+			terrain_heights_fields, terrain_heights_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+			nullptr, terrain_heights_content_json },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its

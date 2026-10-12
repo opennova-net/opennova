@@ -14,10 +14,6 @@
 
 namespace opennova::editor {
 
-// STAGED, NOT WIRED: its owners are the terrain heights document (documents/terrain_heights_document, S25 lane
-// A2), which reads a .cpt or a heightmap image into a raster, and the texture document (documents/texture_document,
-// S25 lane B3), which moves onto it; both derive from RasterDocument. Remove this paragraph when the first lands.
-
 // What a raster edit writes (RasterEditPayload::apply): the document's planes, each through a writer made
 // on its first write (copy-on-write, the tiles it touches recorded), its side state, or the whole content.
 class RasterCanvas {

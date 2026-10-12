@@ -75,6 +75,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::ScoreTables, "score", "Score tables" },
 	{ G::AvatarTables, "avatars", "Avatar tables" },
 	{ G::TilePlacements, "til", "Tile placements" },
+	{ G::TerrainHeights, "terrain_heights", "Terrain heights" },
 };
 
 constexpr bool groups_well_formed() {

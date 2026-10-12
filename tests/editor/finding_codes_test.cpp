@@ -381,7 +381,8 @@ static int test_columns() {
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
 	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.invalid_input", "terrain.no_width",
-	                     "texture.tga_unfilled", "til.ignored_input", "til.invalid_input", "til.unread" }));
+	                     "terrain_heights.multiplayer", "terrain_heights.over_rasterizer", "terrain_heights.steep_block",
+	                     "terrain_heights.unread", "texture.tga_unfilled", "til.ignored_input", "til.invalid_input", "til.unread" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader

@@ -108,6 +108,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/line_ends.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/config_overrun.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/terrain_heights_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/til_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
@@ -478,6 +479,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/font_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/music_bank_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/particle_key_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_heights_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/wave_inspector.cpp
         # round S24 (ADR 0046, the mission logic): the Logic pane, the outline's row menu, the live hook (S0);
         # each lane's own files under its line

@@ -62,6 +62,7 @@ enum class DocumentTypeId {
 	ScoreTable,  // score.ini: each game type's scoreboard columns and points (ADR 0046 S23 B)
 	Avatars,     // Avatars.def: the player characters' parts, nationalities, divisions and combinations (ADR 0046 S23 B)
 	TilePlacement, // a .til: a mission's (or a terrain's) tiles, each its cell, corner and orientation (ADR 0046 S25)
+	TerrainHeights, // a .cpt (or an imported terrain's heightmap): the heights a brush sculpts, baked by TrnGen's bake (S25)
 	kCount, // the number of values, None among them
 };
 
