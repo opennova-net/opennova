@@ -322,8 +322,21 @@ void Supervisor::on_machine_down(db::Database &db, const HostedServer &s, Runtim
 					: std::string("its machine is gone"));
 }
 
+MachineStatus Supervisor::describe(db::Database &db, const HostedServer &s) {
+	MachineStatus status = provider_.describe(s.machine_id);
+	// A machine may have no address yet right after its launch (a cloud machine
+	// is given one as it boots): the first describe that names one writes it, so
+	// the admin link and the views have it from then on.
+	if (s.machine_address.empty() && !status.address.empty() && status.state != MachineState::Gone) {
+		set_machine(db, s.id, s.provider, s.machine_id, status.address);
+		std::printf("[hosted] server %lld: machine %s at %s\n", static_cast<long long>(s.id),
+				loggable(s.machine_id).c_str(), loggable(status.address).c_str());
+	}
+	return status;
+}
+
 void Supervisor::on_booting(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = provider_.describe(s.machine_id);
+	const MachineStatus status = describe(db, s);
 	switch (status.state) {
 		case MachineState::Running:
 			move(db, s, rt, now_ms, State::Listing, "opennova-serve runs");
@@ -342,7 +355,7 @@ void Supervisor::on_booting(db::Database &db, const HostedServer &s, Runtime &rt
 }
 
 void Supervisor::on_listing(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = provider_.describe(s.machine_id);
+	const MachineStatus status = describe(db, s);
 	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
 		on_machine_down(db, s, rt, now_ms, status);
 		return;
@@ -358,7 +371,7 @@ void Supervisor::on_listing(db::Database &db, const HostedServer &s, Runtime &rt
 }
 
 void Supervisor::on_running(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = provider_.describe(s.machine_id);
+	const MachineStatus status = describe(db, s);
 	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
 		on_machine_down(db, s, rt, now_ms, status);
 		return;

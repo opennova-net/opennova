@@ -702,7 +702,8 @@ void test_reply_plan() {
 	                         "PLAYER LIST", "PLAYER PUNT", "PLAYER KILL 7", "PLAYER BAN 7", "PLAYER FROB 1",
 	                         "PLAYER FROB 7", "PLAYER SWAPTEAM 1", "PLAYER CEASEFIRE ALL", "PLAYER BAN 2",
 	                         "WEAPON LIST", "CMD", "CHAT", "CHAT GET", "CHAT SEND hello there", "GOTO",
-	                         "ADMINUSER LIST", "BANLIST", "PETERRABBIT", "NOSUCHVERB"}) {
+	                         "ADMINUSER LIST", "BANLIST", "PETERRABBIT", "NOSUCHVERB", "MISSION CYCLE",
+	                         "MISSION CLEAR"}) {
 		expect_plan(c, line);
 	}
 	// A NovaWorld host's ban list: BAN draws two.

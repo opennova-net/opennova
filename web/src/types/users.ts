@@ -10,6 +10,8 @@ export interface User {
   nwhandle: string;
   account_status: string;
   role: Role;
+  // An admin approved the account for a hosted server (players.can_host).
+  can_host: boolean;
 }
 
 export interface UsersListResponse {

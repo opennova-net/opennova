@@ -3,7 +3,10 @@
     <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-3xl font-semibold text-ink">Users</h1>
-        <p class="text-sm text-ink-muted">Create, edit, and remove player accounts, and choose who is an admin.</p>
+        <p class="text-sm text-ink-muted">
+          Create, edit, and remove player accounts, choose who is an admin, and approve who may have a hosted
+          server.
+        </p>
       </div>
       <button
         type="button"
@@ -36,6 +39,7 @@
               <th class="px-4 py-3">ID</th>
               <th class="px-4 py-3">Username</th>
               <th class="px-4 py-3">Role</th>
+              <th class="px-4 py-3">Hosting</th>
               <th class="px-4 py-3">PCID</th>
               <th class="px-4 py-3">NW Handle</th>
               <th class="px-4 py-3">NWH</th>
@@ -44,10 +48,10 @@
           </thead>
           <tbody class="divide-y divide-border text-sm text-ink">
             <tr v-if="loading">
-              <td colspan="7" class="px-4 py-6 text-center text-ink-muted">Loading…</td>
+              <td colspan="8" class="px-4 py-6 text-center text-ink-muted">Loading…</td>
             </tr>
             <tr v-else-if="users.length === 0">
-              <td colspan="7" class="px-4 py-6 text-center text-ink-muted">No users yet.</td>
+              <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No users yet.</td>
             </tr>
             <tr v-for="u in users" :key="u.id" class="hover:bg-hover align-top">
               <td class="px-4 py-3 font-mono text-xs">{{ u.id }}</td>
@@ -56,7 +60,10 @@
                 <td class="px-4 py-3">
                   <span :class="roleBadgeClass(u.role)">{{ u.role }}</span>
                 </td>
-                <td class="px-4 py-3"><input v-model="edits[u.id].pcid"     class="w-full rounded-control border border-border bg-surface px-2 py-1 font-mono text-xs text-ink"/></td>
+                <td class="px-4 py-3">
+                  <span :class="hostBadgeClass(u.can_host)">{{ u.can_host ? 'approved' : 'no' }}</span>
+                </td>
+                <td class="px-4 py-3"><input v-model="edits[u.id].pcid"    class="w-full rounded-control border border-border bg-surface px-2 py-1 font-mono text-xs text-ink"/></td>
                 <td class="px-4 py-3"><input v-model="edits[u.id].nwhandle" class="w-full rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink"/></td>
                 <td class="px-4 py-3"><input v-model="edits[u.id].nwh"      class="w-16 rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink"/></td>
                 <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
@@ -84,6 +91,18 @@
                     @click="changeRole(u, u.role === 'admin' ? 'player' : 'admin')"
                   >
                     {{ u.role === 'admin' ? 'Make player' : 'Make admin' }}<span class="sr-only">, {{ u.username }}</span>
+                  </button>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap">
+                  <span :class="hostBadgeClass(u.can_host)">{{ u.can_host ? 'approved' : 'no' }}</span>
+                  <button
+                    type="button"
+                    class="ml-3 text-xs disabled:opacity-40"
+                    :class="u.can_host ? 'text-danger/80 hover:text-danger' : 'text-accent/80 hover:text-accent'"
+                    :disabled="hostBusy[u.id]"
+                    @click="changeCanHost(u, !u.can_host)"
+                  >
+                    {{ u.can_host ? 'Withdraw' : 'Approve' }}<span class="sr-only"> hosting, {{ u.username }}</span>
                   </button>
                 </td>
                 <td class="px-4 py-3 font-mono text-xs">{{ u.pcid }}</td>
@@ -139,9 +158,12 @@ import {
   deleteUser,
   listUsers,
   registerUser,
+  setCanHost,
   updateUser,
 } from '../../api/users';
+import { fetchHostedFleet } from '../../api/admin';
 import { hasAdminToken } from '../../api/authToken';
+import { stateLabel } from '../../utils/hostedState';
 import { useSession } from '../../composables/useSession';
 import type { Role, User } from '../../types/users';
 
@@ -160,6 +182,62 @@ function roleBadgeClass(role: Role): string {
 
 function isSelf(u: User): boolean {
   return sessionUser.value?.id === u.id;
+}
+
+const hostBusy = reactive<Record<number, boolean>>({});
+
+function hostBadgeClass(canHost: boolean): string {
+  const base = 'rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
+  return canHost ? `${base} bg-online/15 text-online` : `${base} bg-hover text-ink-muted`;
+}
+
+// What the admin confirms before withdrawing an approval: the service stops
+// the account's live hosted server (the supervisor's brake, as for a ban),
+// named when the fleet view shows one.
+async function withdrawPrompt(u: User): Promise<string> {
+  const lines = [`Withdraw ${u.username}'s approval to host?`];
+  const fleet = await fetchHostedFleet();
+  const live = fleet.ok ? fleet.value.servers.find((s) => s.live && s.owner?.id === u.id) : undefined;
+  if (live) {
+    const players = live.listing ? `, ${live.listing.players} player(s) on it` : '';
+    lines.push(
+      `Their hosted server "${live.settings.game_name}" is ${stateLabel(live.state).toLowerCase()}${players}. ` +
+        'The service stops it at once: its match ends for everyone and its machine shuts down.',
+    );
+  } else if (fleet.ok) {
+    lines.push('They have no hosted server live now, and cannot start one after this.');
+  } else {
+    lines.push(
+      'If they have a hosted server running, the service stops it at once: its match ends for everyone and its machine shuts down.',
+    );
+  }
+  return lines.join('\n\n');
+}
+
+// PUT /api/admin/users/<id>/can-host. Approving takes effect at once;
+// withdrawing is confirmed first, since it stops the account's server.
+async function changeCanHost(u: User, canHost: boolean) {
+  if (hostBusy[u.id]) return;
+  hostBusy[u.id] = true;
+  try {
+    if (!canHost && !confirm(await withdrawPrompt(u))) return;
+    const result = await setCanHost(u.id, canHost);
+    if (!result.ok) {
+      // The mapped message, never the server's own text.
+      flashError(new Error(result.error.message));
+      if (result.error.code === 'not_found') await refresh();
+      return;
+    }
+    const updated = result.value;
+    users.value = users.value.map((x) => (x.id === updated.id ? updated : x));
+    flashMessage(
+      updated.can_host
+        ? `${updated.username} may now start a hosted server.`
+        : `${updated.username} may no longer host; any hosted server of theirs is being stopped.`,
+    );
+  } finally {
+    hostBusy[u.id] = false;
+  }
 }
 
 const editing = reactive<Record<number, boolean>>({});

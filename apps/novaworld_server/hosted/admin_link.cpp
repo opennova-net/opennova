@@ -120,7 +120,11 @@ AdminCommandResult AdminLink::run(const std::string &command, const AdminCommand
 		const auto byte = static_cast<unsigned char>(c);
 		return byte < 0x20 || byte == 0x7F;
 	});
-	if (command.empty() || command.size() > kCommandMaxBytes || control) {
+	// QUIT (the one command that draws no reply: the server closes) is the link's own, which
+	// ends the session when the link ends. [orig: CAdminServer_DispatchCommand @0x406811]
+	const AdminReplyPlan plan = admin_reply_plan(command);
+	const bool quit = plan.framing == AdminReplyFraming::Exact && plan.count == 0;
+	if (command.empty() || command.size() > kCommandMaxBytes || control || quit) {
 		out.outcome = AdminCommandOutcome::Refused;
 		return out;
 	}
@@ -355,8 +359,11 @@ bool AdminLink::drain_unsolicited(std::string &error) {
 		if (ready == 0) return true;
 		std::string text;
 		if (!read_packet(text, error)) return false;
-		log("a reply no command asked for (" + std::to_string(text.size()) + " bytes)");
-		record("reply", "", text);
+		// A stray packet belongs to the command before it, as far as anything can tell: it goes
+		// to the console only when that command was recorded (a read the site polls is not,
+		// and neither are its replies).
+		log("a stray packet, after a command's counted replies (" + std::to_string(text.size()) + " bytes)");
+		if (last_command_recorded_) record("status", "", "a stray reply after the last command: " + text);
 	}
 }
 
@@ -391,7 +398,9 @@ bool AdminLink::exchange(const std::string &command, std::vector<std::string> &r
 
 bool AdminLink::poll_status(std::string &error) {
 	std::vector<std::string> replies;
-	if (!exchange(kStatusCommand, replies, error)) return false;
+	const bool ok = exchange(kStatusCommand, replies, error);
+	last_command_recorded_ = false;
+	if (!ok) return false;
 	std::string scene = "Unknown";
 	if (!replies.empty() && strutil::starts_with_icase(replies[0], kGameStatePrefix))
 		scene = replies[0].substr(std::char_traits<char>::length(kGameStatePrefix));
@@ -415,6 +424,7 @@ void AdminLink::execute(Pending &pending, bool &session_ok, std::string &error) 
 	if (pending.options.record) record("command", pending.options.actor, pending.command);
 	std::vector<std::string> replies;
 	session_ok = exchange(pending.command, replies, error);
+	last_command_recorded_ = pending.options.record;
 	if (pending.options.record) {
 		for (const std::string &reply : replies) record("reply", "", reply);
 		// Written before the caller hears back, so a console read after the
@@ -455,6 +465,7 @@ void AdminLink::thread_main() {
 				}
 				backoff = config_.reconnect_min_ms;
 				last_recorded_error_.clear();
+				last_command_recorded_ = false;
 				set_state(AdminLinkState::Up, {});
 				log("logged in as " + target_.user);
 				record("status", "", "the admin session is up");
