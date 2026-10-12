@@ -36,8 +36,9 @@ const DocumentBase *view_document(const TerrainViewContext &view, std::string &e
 
 // The .til the view's tiles go to: its path, and its document where it is open (null where not, or not made yet).
 bool tiles_of(const TerrainViewContext &view, const DocumentBase &document, std::string &path, const TilDocument *&tiles,
-              std::string &error) {
+              std::string &error, bool *missing = nullptr) {
 	tiles = nullptr;
+	if (missing) *missing = false;
 	TerrainFamily family;
 	if (!resolve_terrain_family(view.context.input.view, document, family)) {
 		error = family.error;
@@ -52,6 +53,7 @@ bool tiles_of(const TerrainViewContext &view, const DocumentBase &document, std:
 		return false;
 	}
 	path = family.tiles.path;
+	if (missing) *missing = family.tiles.missing;
 	for (const auto &open : view.context.input.view.documents.open)
 		if (open->path() == path) tiles = dynamic_cast<const TilDocument *>(open.get());
 	return true;
@@ -251,7 +253,16 @@ bool plan_tile_select(const TerrainViewContext &view, const ViewportCommand &cli
 	}
 	std::string path;
 	const TilDocument *tiles = nullptr;
-	if (!tiles_of(view, *document, path, tiles, error)) return false;
+	bool missing = false;
+	if (!tiles_of(view, *document, path, tiles, error, &missing)) return false;
+	if (!tiles && missing) {
+		// Not made yet: nothing to select in it, and nothing made (the first stamp makes it, seeded with what the game
+		// draws there now).
+		out.served(basename_of(path) + " is not made yet: stamp a tile to make it (with the tiles the game draws there "
+		                               "now), then select",
+		           0);
+		return true;
+	}
 	if (!tiles) {
 		// Not open: opened (a batch of none), its tiles selected by the next click.
 		out.request(tile_edit(view, path, {}));

@@ -186,10 +186,13 @@ int test_source_notes() {
 	add.operation = EditOperation::Add;
 	add.address.kind = kTile;
 	TEST_EXPECT(!unread.apply(add, error));
+	// It stands in as read (what the game reads), never as a valid empty placement the rows would write.
+	TEST_EXPECT(unread.serialize().text == std::string(unmarked.begin(), unmarked.end()));
 	// Under 16 bytes: alike.
 	TilDocument short_file;
 	TEST_EXPECT(short_file.load_bytes(std::vector<uint8_t>(10, 0), "c.til", AssetKind::TileInfo, "jo", error));
 	TEST_EXPECT(short_file.blocked() && validate_til_file(short_file)[0].code() == "til.unread");
+	TEST_EXPECT(short_file.serialize().text == std::string(10, '\0'));
 
 	// A count past the bytes: the whole records there are, read only, an error the save is refused for.
 	std::vector<uint8_t> over = minted(three());
@@ -199,6 +202,7 @@ int test_source_notes() {
 	TEST_EXPECT(past.blocked() && past.rows().size() == 3 && past.unread().empty());
 	const std::vector<Diagnostic> count = validate_til_file(past);
 	TEST_EXPECT(count.size() == 1 && count[0].code() == "til.invalid_input" && count[0].severity == DiagnosticSeverity::Error);
+	TEST_EXPECT(past.serialize().text == std::string(over.begin(), over.end()));
 	std::printf("source notes: MED's header written, trailing bytes dropped; no til0, short, a count past the bytes read only\n");
 	return 0;
 }

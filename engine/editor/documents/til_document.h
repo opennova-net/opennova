@@ -49,6 +49,7 @@ public:
 	static const std::vector<FieldSchema> &schema(NodeKind kind) { return til_table().fields(kind); }
 	// A tile by its cell and corner ("Tile 12 at (1024, -512)").
 	std::string record_title(const NodeAddress &address) const override;
+	// The rows as MED writes them; a file held read only (unread(), a count past its bytes) as it was read.
 	SerializeResult serialize() const override;
 	std::string save_words() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<TilDocument>(*this); }
@@ -72,6 +73,10 @@ protected:
 
 private:
 	std::string unread_;
+	// A file the game reads otherwise than the rows hold it (no placement at all, or a count past its bytes): held
+	// read only, and its bytes stand in for it as read (a preview reads what the game reads), never a file the rows make.
+	bool as_read_ = false;
+	std::vector<uint8_t> read_bytes_;
 };
 
 bool is_til_kind(AssetKind kind);

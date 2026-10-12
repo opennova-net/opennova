@@ -266,6 +266,24 @@ int test_imported_source() {
 	for (int y = 0; y < kMap; ++y)
 		for (int x = 0; x < kMap; ++x) twos += painted->plane(0).u8(x, y) == 2 ? 1 : 0;
 	TEST_EXPECT(twos == size_t(kMap) * kMap - 1);
+	// A gesture's later samples lay nothing: a drag (the wire's too) fills only where it was pressed.
+	ask.brush.surface = 11;
+	ask.points = {{100.0, 100.0}};
+	ask.gesture = 0;
+	ask.end = false;
+	session.handle(request::terrain_stroke(m, ask));
+	const uint64_t held = session.outcome().gesture;
+	TEST_EXPECT(session.outcome().done() && held != 0);
+	ask.gesture = held;
+	ask.points = {{8.0, 8.0}};
+	ask.end = true;
+	session.handle(request::terrain_stroke(m, ask));
+	size_t elevens = 0;
+	for (int y = 0; y < kMap; ++y)
+		for (int x = 0; x < kMap; ++x) elevens += painted->plane(0).u8(x, y) == 11 ? 1 : 0;
+	TEST_EXPECT(session.outcome().done() && elevens == size_t(kMap) * kMap - 1);
+	session.handle(request::undo(m));
+	ask.gesture = 0;
 	ask.brush.fill = false;
 	// Written again in its form: a palette PNG whose indices the import reads as the classes.
 	const SerializeResult saved = painted->serialize();

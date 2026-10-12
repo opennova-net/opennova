@@ -92,8 +92,9 @@ private:
 			findings_.push_back(make_finding(finding_code(TilFinding::Empty), DiagnosticSeverity::Warning,
 			                                 "It holds no tile, and the game reads it in place of " + terrain_name + "'s " +
 			                                         std::to_string(terrains.entries.size()) +
-			                                         " tiles: the mission draws none of them. Delete it to draw the terrain's "
-			                                         "tiles, or lay tiles in it.",
+			                                         " tiles: the mission draws none of them. Delete it to draw what the game "
+			                                         "reads in its place (a " + own_name + " the game install ships, else "
+			                                         "the terrain's tiles), or lay tiles in it.",
 			                                 path_of_(input, own_name)));
 		// The placement the mission draws and the tile set it draws from.
 		const TilFile &drawn = own_read ? own : terrains;

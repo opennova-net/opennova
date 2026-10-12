@@ -6,6 +6,7 @@
 // commands and a drag as those requests; the terrain query's tiles and tiles_at ops answer the view's tiles; the type's
 // project check notes tiles past their set's cells and an empty .til hiding the terrain's tiles.
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/pff/pff.h>
 #include <formats/tga/tga.h>
 #include <formats/til/til_io.h>
 
@@ -133,6 +135,10 @@ int test_tiles_in_a_mission() {
 	TEST_EXPECT(tiles.get("tiles") && tiles.get("tiles")->array.size() == 2);
 	const std::string til = tiles.get_string("path", "");
 	TEST_EXPECT(contains(til, "m.til") && tiles.get_string("tile_set", "") == "mnml_t.tga");
+	// The Tiles tool's first look (a batch of none) makes nothing: the first tile laid makes the file.
+	session.handle(request::tile_edit(m, til, {}));
+	TEST_EXPECT(session.outcome().done() && !std::filesystem::exists(root + "/" + til) &&
+	            session.document_base_for(til) == nullptr);
 
 	// A stamp: the mission's .til made (the terrain's two tiles in it), opened quietly, the stamp over them unsaved.
 	session.handle(request::tile_edit(m, til, plan_tile_stamp(5, 0, 100.3, 50.6, false)));
@@ -254,8 +260,65 @@ int test_tiles_in_a_mission() {
 
 } // namespace
 
+// The mission's .til seeded with what the game draws for it (S25, the review's M2): the project holds the mission and
+// its terrain, the game install a <mission>.til of three tiles (the terrain's own the project holds, two, hidden by it):
+// the first stamp's file holds the install's three and the stamp, never the terrain's two.
+int test_seeded_from_the_install() {
+	editor_test::TempProjectDir dir("opennova_editor_tile_edit_install");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Tiles"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	for (const char *name : {"Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
+		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
+	std::vector<uint8_t> trn = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+	const std::string tileinfo = "\r\npolytrn_tileinfo        Tmap_t\r\n";
+	trn.insert(trn.end(), tileinfo.begin(), tileinfo.end());
+	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.trn", trn));
+	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap_t.til", two_tiles()));
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	// The install: m.til, three tiles.
+	TilFile shipped;
+	shipped.entries = {make_til_entry(0, 64 << 16, 1, 0, 0), make_til_entry(16 << 16, 64 << 16, 2, 0, 0),
+	                   make_til_entry(32 << 16, 64 << 16, 3, 0, 0)};
+	std::vector<uint8_t> shipped_bytes;
+	std::string error;
+	TEST_EXPECT(save_til(shipped, shipped_bytes, error));
+	const std::string install = dir.file("install");
+	std::error_code ec;
+	std::filesystem::create_directories(install, ec);
+	const opennova::pff::PffWriteEntry entries[] = {
+		{"m.til", shipped_bytes.data(), uint32_t(shipped_bytes.size()), 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                             entries, 1) == opennova::pff::PFF_WRITE_OK);
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
+	const AssetEntry *entry = v.project.scan->find("m.bms");
+	TEST_EXPECT(entry != nullptr);
+	if (!entry) return 1;
+	const std::string m = entry->relative_path;
+	session.handle(request::open_document(m));
+	const std::string til = m.substr(0, m.find_last_of('.')) + ".til";
+	session.handle(request::tile_edit(m, til, plan_tile_stamp(5, 0, 100.0, 50.0, false)));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done());
+	TilFile made;
+	const std::vector<uint8_t> on_disk = test_io::read_file(root + "/" + til);
+	TEST_EXPECT(load_til(on_disk.data(), on_disk.size(), made, error) && made.entries.size() == 3 &&
+	            made.entries[2].tile_index == 3);
+	const auto *document = dynamic_cast<const TilDocument *>(session.document_base_for(til));
+	TEST_EXPECT(document && document->rows().size() == 4 && document->file().entries.back().tile_index == 5);
+	TEST_EXPECT(contains(v.activity.status, "Laid tiles"));
+	std::printf("seeded from the install: the game's own m.til, not the terrain's tiles it hid\n");
+	return 0;
+}
+
 int main() {
-	const int failures = test_tiles_in_a_mission();
+	const int failures = test_tiles_in_a_mission() + test_seeded_from_the_install();
 	if (failures == 0) std::printf("editor_tile_edit: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

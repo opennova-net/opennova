@@ -135,7 +135,7 @@ constexpr FindingCodeEntry<TilFinding> kFindingEntries[] = {
 	{ TilFinding::MedCap, listed_code("til.med_cap") },
 	// S25 B5, the type's project check (documents/til_project_check.h): a mission's empty .til hiding its terrain's
 	// tiles, tiles naming cells past their set; the game draws both, nothing refused.
-	{ TilFinding::Empty, listed_code("til.empty") },
+	{ TilFinding::Empty, listed_code("til.empty", FindingFix::DeleteFile) },
 	{ TilFinding::IndexPastAtlas, listed_code("til.index_past_atlas") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(TilFinding::kCount), "every TilFinding has exactly one row");
@@ -174,7 +174,11 @@ bool TilDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 		return false;
 	}
 	unread_.clear();
+	as_read_ = false;
+	read_bytes_.clear();
 	if (!til_load_accepts(bytes.data(), bytes.size())) {
+		as_read_ = true;
+		read_bytes_ = bytes;
 		// The game's load refuses it as it refuses a missing file: the terrain's own tile placement stands.
 		unread_ = bytes.size() < 16 ? "it is under 16 bytes" : "it does not open with the til0 mark";
 		SourceIssue issue{true, 0, std::string(), std::string(),
@@ -198,6 +202,8 @@ bool TilDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 			                     "The tile placement could not be read: " + why + ".", path());
 			return false;
 		}
+		as_read_ = true;
+		read_bytes_ = bytes;
 		SourceIssue issue{true, 0, std::string(), std::string(),
 		                  "The header counts " + std::to_string(count) + " tiles and the file holds " +
 		                          std::to_string(present) + ": the game takes the count as it stands and reads past the "
@@ -230,6 +236,11 @@ bool TilDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 
 SerializeResult TilDocument::serialize() const {
 	SerializeResult result;
+	if (as_read_) {
+		// Read only: what the game reads is the file as it is, which a write from the rows would not be.
+		result.text.assign(read_bytes_.begin(), read_bytes_.end());
+		return result;
+	}
 	std::vector<uint8_t> bytes;
 	std::string error;
 	if (!save_til(file(), bytes, error)) {

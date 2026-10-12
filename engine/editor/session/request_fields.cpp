@@ -320,10 +320,11 @@ constexpr RequestField kFields[] = {
 			"as it found them, no redo left of it." },
 	{ F::TerrainView, "terrain_view", J::String,
 			"edit_record's terrain_view (S25 B2: a batch of the Tiles tools): the mission or terrain whose view made it. "
-			"Its edits go to the tile placement that view's tiles go to (a mission's <mission>.til, made first where the "
-			"project has none, seeded with the terrain's own tiles, which the game reads only where the mission has no "
-			".til; a terrain's own under no mission), opened quietly; path, when given, must name that file. The batch "
-			"is a step of the view's undo, save and close scope; an empty batch opens the file alone." },
+			"Its edits go to the tile placement that view's tiles go to (a mission's <mission>.til, made at the first "
+			"edit where the project has none, seeded with what the game draws for the mission now through the project's "
+			"files and then the game install's: the mission's own .til, else the terrain's own; a terrain's own under no "
+			"mission), opened quietly; path, when given, must name that file. The batch is a step of the view's undo, save "
+			"and close scope; an empty batch opens the file alone, and makes nothing where it is not made yet." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

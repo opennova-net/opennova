@@ -2,7 +2,12 @@
 // mission has none, opened quietly and edited in the view's scope.
 #include <editor/session/terrain_tiles.h>
 
+#include <filesystem>
+#include <memory>
+#include <system_error>
+
 #include <base/io/file_io.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mission_document.h>
 #include <editor/model/document_base.h>
@@ -32,25 +37,54 @@ std::string environment_of(const DocumentBase &view) {
 	return std::string();
 }
 
-// The mission's .til made where the project has none: the terrain's own tiles where it has some (the game reads one
-// placement, the mission's in place of the terrain's [orig: PolyTrn_LoadTerrainConfig @ 0x60E6D2..0x60E6E5], so a
-// mission's file that held none would hide them), else no tile; written in the original editor's form, one step of
-// the file history. False, refused with why.
+// The mission's .til made where the project has none, seeded with what the game draws for the mission now: its load
+// reads <mission>.til, else the terrain's own polytrn_tileinfo [orig: PolyTrn_LoadTerrainConfig @ 0x60E6D2..0x60E6E5],
+// each through the project's files and then the game install's (the game plays the project over its install: a
+// shipped mission's own .til, the terrain's own), so the file made hides nothing it drew. Written in the original
+// editor's form, one step of the file history. A file of that name on the disk the scan has not seen yet is taken as
+// it stands (the game reads it). Refused, nothing made, where the install is set but does not open (what it holds for
+// the mission cannot be read); with no install set the project's files alone are read, and the words say so. False,
+// refused with why.
 bool make_tiles(SessionCore &core, const DocumentBase &view, const TerrainFamily &family) {
 	const std::string &path = family.tiles.path;
-	TilFile file;
-	std::string own;
-	if (const std::shared_ptr<const ProjectAssetSource> files = core.view().findings.assets) {
-		const terrain::TerrainFileReader read = [&files](const std::string &name, std::vector<uint8_t> &out) {
-			return files->read(name, out);
-		};
-		std::vector<uint8_t> bytes;
-		own = terrain::read_placed_tile_bytes(read, read, std::string(), family.terrain_name, environment_of(view), bytes);
-		std::string why;
-		if (!own.empty() && !load_til(bytes.data(), bytes.size(), file, why)) {
-			file = TilFile();
-			own.clear();
+	const std::string target = join_path(core.paths().root, path);
+	std::error_code exists_error;
+	if (std::filesystem::exists(system_path(target), exists_error)) {
+		core.update_files({path});
+		return true;
+	}
+	const std::shared_ptr<const ProjectAssetSource> files = core.view().findings.assets;
+	// The game install, opened at its first read.
+	std::unique_ptr<InstallView> install;
+	bool install_tried = false;
+	std::string install_why;
+	const std::string install_root = core.base_game();
+	const terrain::TerrainFileReader read = [&](const std::string &name, std::vector<uint8_t> &out) {
+		if (files && files->read(name, out)) return true;
+		if (!install_tried) {
+			install_tried = true;
+			if (!install_root.empty() && core.view().project.document) {
+				install = std::make_unique<InstallView>();
+				if (!install->open(install_spec(install_root, *core.view().project.document), install_why)) install.reset();
+			}
 		}
+		const InstallFile *served = install ? install->find(name) : nullptr;
+		return served && install->read(*served, out);
+	};
+	TilFile file;
+	std::vector<uint8_t> seed;
+	std::string own = terrain::read_placed_tile_bytes(read, read, family.tiles.name, family.terrain_name,
+	                                                  environment_of(view), seed);
+	std::string why;
+	if (!own.empty() && !load_til(seed.data(), seed.size(), file, why)) {
+		file = TilFile();
+		own.clear();
+	}
+	if (!install_root.empty() && install_tried && !install) {
+		refuse(core, path + " is not made: the game install could not be read (" + install_why + "), so what it draws "
+		                    "for the mission is unknown and a new file would hide it.",
+		       view.path());
+		return false;
 	}
 	std::vector<uint8_t> bytes;
 	std::string error;
@@ -58,16 +92,16 @@ bool make_tiles(SessionCore &core, const DocumentBase &view, const TerrainFamily
 		refuse(core, path + " could not be made: " + error + ".", view.path());
 		return false;
 	}
-	const std::string target = join_path(core.paths().root, path);
 	if (!io::ensure_directory(utf8_of(path_of(target).parent_path()), error) ||
 	    !io::write_file_atomic(target, bytes.data(), bytes.size(), error)) {
 		refuse(core, path + " could not be made: " + error, view.path());
 		return false;
 	}
-	const std::string said = file.entries.empty()
-	                                 ? "New file " + path
-	                                 : "New file " + path + ", holding " + own + "'s " + std::to_string(file.entries.size()) +
-	                                           " tiles (the game reads the mission's tiles in place of the terrain's)";
+	std::string said = file.entries.empty()
+	                           ? "New file " + path
+	                           : "New file " + path + ", holding " + own + "'s " + std::to_string(file.entries.size()) +
+	                                     " tiles (the game reads the mission's tiles in place of the terrain's)";
+	if (install_root.empty()) said += " (no game install is set: only the project's files were read for its tiles)";
 	core.note(said);
 	core.update_files({path});
 	core.chores().made(said, {path});
@@ -111,6 +145,11 @@ void serve_terrain_tiles_edit(SessionCore &core, const EditorRequest &request) {
 		return refuse(core, basename_of(view->path()) + "'s tiles go to " + tiles.path + ", not " + request.path + ".",
 		              view->path());
 	const std::string view_path = view->path();
+	// A batch of none (the Tiles tool's first look) on a placement not made yet makes nothing: the first edit does.
+	if (tiles.missing && request.edits.empty()) {
+		core.note(basename_of(tiles.path) + " is not made yet: the first tile laid makes it.");
+		return;
+	}
 	if (tiles.missing && !make_tiles(core, *view, family)) return;
 	DocumentBase *target = documents.open_quietly(tiles.path, "the tile tools in " + basename_of(view_path) + " edit it");
 	if (!target) return refuse(core, "Could not open " + tiles.path + " to lay tiles in it.", view_path);

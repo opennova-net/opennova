@@ -47,6 +47,8 @@ enum class FindingFix {
 	                   // each an edit_record of the file, opened first, one undo step
 	UnusedVariable,    // a stylesheet variable no menu names (style.unused): Remove its line, where no
 	                   // menu's text names it inside a longer text either (DI-11)
+	DeleteFile,        // a file of the project that hides what the game reads in its place (til.empty, S25):
+	                   // Delete it (to the project's trash: Undo file brings it back)
 };
 
 // Where Problems takes a finding of the code: what the file holds (its document opened on the

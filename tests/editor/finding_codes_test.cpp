@@ -298,6 +298,8 @@ static int test_columns() {
 	                     "mission.ssn_duplicate", "mission.zone_duplicate",
 	                     "strings.key_duplicate", "terrain.foliage_inert", "terrain.no_width", "terrain.refused" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
+	// S25: an empty <mission>.til hiding the terrain's tiles: Delete it.
+	TEST_EXPECT(fixed_by(FindingFix::DeleteFile) == Tokens({ "til.empty" }));
 	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
 	// A finished normal map a normal-map slot's row loads as a diffuse: its row given type 4.
 	TEST_EXPECT(fixed_by(FindingFix::NormalRowType) == Tokens({ "texture.normal_slot_loader" }));

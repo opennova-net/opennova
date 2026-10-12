@@ -142,6 +142,7 @@ const char *finding_fix_token(FindingFix fixes) {
 	case F::SetAsideUnread: return "set_aside_unread";
 	case F::EditRecord: return "edit_record";
 	case F::UnusedVariable: return "unused_variable";
+	case F::DeleteFile: return "delete_file";
 	}
 	return "none";
 }
