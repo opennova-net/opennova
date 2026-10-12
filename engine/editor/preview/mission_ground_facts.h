@@ -128,8 +128,11 @@ public:
 	void restamp(const FileSource &files, const std::vector<std::string> &names);
 	// S25: what a stroke changed of a file it read, patched in place from the open document that holds it (a region of
 	// the heights: the live atlas there; a map's texels), never reading the files again per dab; false where it cannot
-	// (the caller reads them again: follow).
-	bool patch(const TerrainPatch &patch, const DocumentBase &document);
+	// (the caller reads them again: follow). `stands_for` names the map an import makes from the document (an imported
+	// terrain's surface or foliage source, TerrainFamilyFile::import_output's name; "" none): its texels patch that map
+	// through the import's translation (an index or a grey level the class or code, a legend colour its class: runtime/
+	// terrain decode_charmap_source, decode_foliage_map_source, which keep the side).
+	bool patch(const TerrainPatch &patch, const DocumentBase &document, const std::string &stands_for = std::string());
 	// S25: the placed tiles alone moved (a tile tool's edit): the file the game takes now (`took`, "" none) and its bytes
 	// read in place of the tiles held, and the files `names` names take their stamps in `files` now; the terrain read
 	// stands. Nothing where no terrain was read (its next follow reads them all).

@@ -95,9 +95,12 @@ bool TerrainMapsFollow::take(const SessionView &view, const DocumentBase &docume
 			TerrainFamily family;
 			const bool resolved = resolve_terrain_family(view, document, family) && family.trn;
 			const TerrainFamilyFile &file = family.plane(TerrainPlane::Foliage);
+			// The foliage map itself, or an imported terrain's source in its output's place (its indices or grey levels
+			// the codes, the side kept: decode_foliage_map_source).
+			const bool own = file.import_output.empty() && strutil::iequals(name, basename_of(file.name));
+			const bool source = !file.import_output.empty() && file.path == patch.path;
 			if (!raster || raster->plane_count() != 1 || raster->plane(0).format() != RasterFormat::U8 || !resolved ||
-			    !file.import_output.empty() || !strutil::iequals(name, basename_of(file.name)) ||
-			    !map_rect(patch, raster->plane(0), made.x, made.y, made.w, made.h)) {
+			    !(own || source) || !map_rect(patch, raster->plane(0), made.x, made.y, made.w, made.h)) {
 				stale_ = true;
 				names.push_back(name);
 				continue;

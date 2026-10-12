@@ -58,7 +58,8 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 	patches_.clear();
 	TerrainFamily family;
 	std::vector<std::pair<TerrainPlane, std::string>> planes;
-	if (resolve_terrain_family(view, document, family))
+	const bool resolved = resolve_terrain_family(view, document, family);
+	if (resolved)
 		for (size_t i = 0; i < kTerrainPlaneCount; ++i)
 			if (!family.planes[i].path.empty() && !family.planes[i].missing)
 				planes.emplace_back(static_cast<TerrainPlane>(i), family.planes[i].path);
@@ -75,7 +76,13 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 		const DocumentBase *open = nullptr;
 		for (const auto &each : view.documents.open)
 			if (each && each->path() == patch.path) open = each.get();
-		if (!open || !ground.patch(patch, *open)) {
+		// An imported terrain's source stands for the map its import makes (the map the ground read).
+		std::string stands_for;
+		if (resolved && patch.plane != TerrainPlane::Heights) {
+			const TerrainFamilyFile &file = family.plane(patch.plane);
+			if (!file.import_output.empty() && file.path == patch.path) stands_for = basename_of(file.import_output);
+		}
+		if (!open || !ground.patch(patch, *open, stands_for)) {
 			if (stroking) return false;
 			continue;
 		}

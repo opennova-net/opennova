@@ -5,6 +5,7 @@
 // files they account for at their stamps; the picture's files take those stamps, so the device's read of them does not
 // find them moved. A foliage stroke is an Update too: its patch the codes and the plane's rects whose foliage reads them.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/png/png_encode.h>
 #include <formats/tga/tga.h>
 
 #include "common/file_io.h"
@@ -222,11 +224,100 @@ int test_view() {
 	return 0;
 }
 
+// An imported terrain (S25, the review's M5): its surface and foliage maps are painted in their source images, which
+// stand for the maps the import makes. A surface stroke on the source reaches the view's ground (its class there, an
+// Update), and a foliage stroke is an Update whose device patch holds the codes, nothing built again at its end.
+int test_imported() {
+	editor_test::TempProjectDir dir("opennova_editor_terrain_maps_view_import");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::FakeDevices devices;
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Isle"));
+	const SessionView &v = session.view();
+	const std::string images = dir.file("images");
+	constexpr int kSide = 1024, kMap = 512;
+	std::vector<uint8_t> heights(size_t(kSide) * kSide), colours(size_t(kSide) * kSide * 4, 120), classes(size_t(kMap) * kMap, 2),
+	        codes(size_t(kMap) * kMap, 0);
+	for (int y = 0; y < kSide; ++y)
+		for (int x = 0; x < kSide; ++x)
+			heights[size_t(y) * kSide + x] = uint8_t(std::max(0.0, 200.0 * (1.0 - std::hypot(x - 512.0, y - 512.0) / 400.0)));
+	std::vector<uint8_t> ramp;
+	for (int i = 0; i < 256; ++i) ramp.insert(ramp.end(), 3, uint8_t(i));
+	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/foliage.png", png::encode_png_gray(codes.data(), kMap, kMap)));
+	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_terrain("isle",
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/surface.png"},
+	         {"foliagemap", images + "/foliage.png"}}));
+	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(!outcome.refused);
+	editor_test::handle_to_end(session, request::create_file("isle.env", "environment"));
+	editor_test::set_missions(session, true);
+	outcome = editor_test::handle_to_end(session,
+	        request::create_file("isle1.bms", "mission", {{"terrain", "isle.trn"}, {"environment", "isle.env"}}));
+	const AssetEntry *entry = v.project.scan->find("isle1.bms");
+	TEST_EXPECT(entry != nullptr);
+	if (!entry) return 1;
+	const std::string m = entry->relative_path;
+	session.handle(request::open_document(m));
+	devices.sync(session);
+	const auto *mission = static_cast<const MissionViewport *>(session.viewports().find(m, ViewportKind::Mission));
+	editor_test::FakeDevice *device = devices.held(m, ViewportKind::Mission);
+	TEST_EXPECT(mission && device);
+	if (!mission || !device) return 1;
+	device->reads = {"isle_c.tga", "isle_m.pcx", "isle_f.pcx", "isle1.til"};
+	devices.sync(session);
+	TEST_EXPECT(mission->followed_ground(v).terrain());
+	const uint64_t builds = mission->builds();
+	const auto updated_since = [&](size_t from) {
+		const std::vector<ViewportAction> taken = device->since(from);
+		return !taken.empty() && mission->builds() == builds &&
+		       std::all_of(taken.begin(), taken.end(), [](ViewportAction a) { return a == ViewportAction::Update; });
+	};
+	// A surface stroke on the source: the view's ground reads its class there, an Update.
+	TerrainStrokeAsk ask;
+	ask.plane = TerrainPlane::Surface;
+	ask.brush.tool = TerrainTool::Surface;
+	ask.brush.surface = 5;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushSurface | kBrushRadius;
+	ask.points = {{8.0, 8.0}};
+	size_t mark = device->taken.size();
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && contains(session.outcome().stroke.changed.front().path, "isle_surface.png"));
+	devices.sync(session);
+	devices.sync(session);
+	TEST_EXPECT(updated_since(mark) && mission->followed_ground(v).terrain_at(8.0, 8.0, 0.0).surface == 5);
+	// A foliage stroke on the source: an Update, its device patch the codes, nothing built again at its end.
+	ask.plane = TerrainPlane::Foliage;
+	ask.brush.tool = TerrainTool::Foliage;
+	ask.brush.foliage = 3;
+	ask.brush_named = kBrushTool | kBrushFoliage | kBrushRadius;
+	ask.gesture = 7373;
+	ask.end = true;
+	mark = device->taken.size();
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done());
+	devices.sync(session);
+	devices.sync(session);
+	TEST_EXPECT(updated_since(mark));
+	const MapsDevicePatch *foliage = last_of(*mission, MapsDevicePatch::Kind::Foliage);
+	TEST_EXPECT(foliage && std::count(foliage->indices.begin(), foliage->indices.end(), uint8_t(3)) == 1 &&
+	            !foliage->world.empty());
+	std::printf("imported: a surface source's stroke reaches the ground, a foliage source's is an Update with its codes\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
 	failures += test_view();
+	failures += test_imported();
 	if (failures == 0) std::printf("editor_terrain_maps_view: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

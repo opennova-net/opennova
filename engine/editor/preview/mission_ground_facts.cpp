@@ -287,7 +287,7 @@ terrain::FoliageMaskMap MissionGround::foliage_sampler(bool codes) const {
 	return terrain::foliage_mask_map(foliage_, store_.height_field(), codes);
 }
 
-bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &document) {
+bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &document, const std::string &stands_for) {
 	const std::string name = patch.path.substr(patch.path.find_last_of('/') + 1);
 	// The colour and blend maps are no part of the ground the game reads (S25 B4): nothing to patch.
 	if (patch.plane == TerrainPlane::Colour || patch.plane == TerrainPlane::Blend) return true;
@@ -325,15 +325,30 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 	// A ground not read yet holds nothing to patch: its first follow reads the document's state.
 	if (!read_once_) return true;
 	const RasterDocument *raster = document.as_raster();
-	if (patch.whole || !raster || raster->plane_count() != 1 || raster->plane(0).format() != RasterFormat::U8) return false;
+	if (patch.whole || !raster || raster->plane_count() != 1) return false;
 	const RasterPlane &plane = raster->plane(0);
 	const bool surface = patch.plane == TerrainPlane::Surface;
 	const std::string &read = surface ? surface_map_ : foliage_map_;
-	if (!strutil::iequals(name, read.substr(read.find_last_of('/') + 1))) return false;
+	const std::string read_name = read.substr(read.find_last_of('/') + 1);
+	const bool source = !stands_for.empty() && strutil::iequals(stands_for, read_name);
+	if (!source && !strutil::iequals(name, read_name)) return false;
+	// The texels as the map holds them: its own 8-bit indices, or a source's through the import's translation (an
+	// index or grey level as it stands; a surface source's legend colour its class).
+	const bool colours = source && surface && (plane.format() == RasterFormat::Rgb8 || plane.format() == RasterFormat::Rgba8);
+	if (plane.format() != RasterFormat::U8 && !colours) return false;
 	for (const RasterRegion &region : patch.regions) {
 		if (region.width <= 0 || region.height <= 0) continue;
 		std::vector<uint8_t> texels(size_t(region.width) * size_t(region.height));
-		plane.copy_rect(region.x, region.y, region.width, region.height, texels.data());
+		if (colours) {
+			for (int y = 0; y < region.height; ++y)
+				for (int x = 0; x < region.width; ++x) {
+					const uint8_t *c = plane.texel(region.x + x, region.y + y);
+					const int cls = charmap_legend_class(c[0], c[1], c[2]);
+					texels[size_t(y) * size_t(region.width) + size_t(x)] = uint8_t(cls < 0 ? 0 : cls);
+				}
+		} else {
+			plane.copy_rect(region.x, region.y, region.width, region.height, texels.data());
+		}
 		const terrain::CoordsRect rect{region.x, region.y, region.width, region.height};
 		const bool written = surface ? store_.patch_charmap(rect, texels.data(), size_t(region.width))
 		                             : terrain::patch_foliage_mask_raster(foliage_, rect, texels.data(), size_t(region.width));
