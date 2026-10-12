@@ -70,9 +70,10 @@ public:
 	// CNapiNPConnection_RequestDisconnect / CNapiNPConnection_Destroy ->
 	// CNapiNPConnection_TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 	void disconnect();
-	// The server-info update outside the refresh timer: the source's columns and roster at once,
-	// then the Host list's dirty delta (a mission start on a listed server). Nothing while not
-	// hosting.
+	// The mission start's server-info update: the source's columns and roster at once, then both
+	// lists in full (NwuHostRole::publish_mission_start). An embedder whose source starts missions
+	// runs it at each one; for a source without missions the lister runs it at its host result
+	// (ListingSource::starts_missions, D-NET-488). Nothing while not hosting.
 	void publish_server_info();
 
 	int exit_code() const { return exit_code_; }
@@ -91,6 +92,7 @@ private:
 	       IDatagramSocket *session_socket);
 
 	void on_verified();
+	void on_listed();
 	void on_http_reply(const net::HttpReply &reply);
 	void ship(const HttpRequestSpec &spec);
 	void request_host();

@@ -22,7 +22,8 @@ namespace opennova {
 // [orig: CNapiGameSession_ConnectOrHost @0x4d4f10 (the teamId != 0 leg);
 //  CNapiGameSession_BuildHostVarLists @0x4d0b50; CNapiGameSession_SendHostRequest @0x4d3700;
 //  CNapiGameSession_SendHostUpdate @0x4d3860; CNapiGameSession_HandleHostVerifyResponse
-//  @0x4d59d0; Server_TickUpdate @0x51d7e0 (the 0x744 refresh); Server_PlayerAdd @0x51d3f0]
+//  @0x4d59d0; Server_TickUpdate @0x51d7e0 (the 0x744 refresh); Server_PlayerAdd @0x51d3f0;
+//  Game_StartMission @0x5248c6..0x524903 (the mission start's update)]
 class NwuHostRole {
 public:
 	// Where the hosting leg stands: retail's session states 5 (host requested) and 6 (hosting),
@@ -59,12 +60,15 @@ public:
 	// The 60 s host poll and, while hosting, the Host-list refresh on the logic clock. Call every
 	// tick after the lobby's tick, with the same clock.
 	void tick(uint32_t now_ms);
-	// The server-info update outside the 1860-tick timer: the Host list's dirty delta (and the
-	// status heartbeat where no NWU session is in use) now, the cookie-key ring left alone. A
-	// mission start on a NovaWorld authority in session runs it.
-	// [orig: Game_StartMission @0x5248f5 -> Lobby_UpdateServerInfo @0x4fe8c0 ->
-	//  CPlayerManager_RebuildLists @0x4d45b5 -> CNapiGameSession_SendHostUpdate]
-	void update_server_info();
+	// The mission start's server-info update on a NovaWorld authority in session, outside the
+	// 1860-tick timer: both lists marked changed, the server-info update, whose tail sends the
+	// marked lists, then in state 6 the lists forced out once more (two ClientHostUpdates, each
+	// with the whole Host list and PlayerList); the cookie-key ring is left alone. A fresh host's
+	// first full Host list, its HostKey included, goes out here: its host result publishes
+	// nothing (handle_notice, D-NET-465). The embedder runs it at every mission start.
+	// [orig: Game_StartMission @0x5248c6..0x524903 — the marks @0x5248e4 / @0x5248ef,
+	//  Lobby_UpdateServerInfo @0x5248f5, CPlayerManager_RebuildLists(1) @0x524903]
+	void publish_mission_start();
 	// Route one session notice. True when the notice was a host-direction one.
 	bool handle_notice(const ClientSession::Notice &notice);
 
@@ -105,6 +109,14 @@ private:
 	HostRegistration host_cfg() const;
 	std::vector<ClientVar> player_list_vars() const;
 	void send_host_request(uint32_t currently_hosting);
+	void handle_host_result(const ClientSession::Notice &notice);
+	// The server-info update: the lists' changed vars (and the status heartbeat where no NWU
+	// session is in use). [orig: Lobby_UpdateServerInfo @0x4fe8c0, its tail
+	//  CPlayerManager_RebuildLists(0) @0x4ff63a]
+	void update_server_info();
+	// Both lists marked changed, the server-info update, then in state 6 the full lists and the
+	// marks cleared: the block a mission start and a re-host's result share.
+	void republish_lists();
 	void send_host_update(bool full);
 	void send_status_blob();
 

@@ -381,7 +381,10 @@ public:
 	uint32_t disconnect_count() const { return dcnt_; }
 	uint32_t reconnect_count() const { return rcnt_; }
 	// The HostSetup ReconnectCounter (session+0x500): 0 on a fresh host request, one up per
-	// re-host.
+	// re-host. The host result's republish runs only while it is above 0 (NwuHostRole).
+	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50 (the zero @0x4d0b7b);
+	//  CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 (the count @0x4d5968);
+	//  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the read @0x4d5c52)]
 	int host_reconnect_counter() const { return reconnect_counter_; }
 	// The teardown's disconnect-packet burst: CS recv_max_per_tick clamped to 0..32, the first
 	// send always going. [orig: TeardownActiveConnection @0x6253ef..0x625424]

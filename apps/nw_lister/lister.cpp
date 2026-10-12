@@ -107,13 +107,8 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
           }()),
       role_(lobby_, [this]() {
 	      NwuHostRole::Hooks hooks;
-	      hooks.on_hosting = [this]() {
-		      phase_ = Phase::Hosting;
-		      io::logf(LogLevel::kInfo, "[host] listed: '%s', %zu player(s)", registration().server_name.c_str(),
-		               role_.roster().size());
-		      source_->on_host_result(true, std::string());
-	      };
-	      hooks.on_failed = [this](const std::string &tag) {
+		  hooks.on_hosting = [this]() { on_listed(); };
+		  hooks.on_failed = [this](const std::string &tag) {
 		      io::logf(LogLevel::kError, "[host] the host request failed: %s", tag.c_str());
 		      source_->on_host_result(false, tag);
 		      end(kExitFailed);
@@ -198,7 +193,7 @@ bool Lister::tick(uint32_t now_ms) {
 void Lister::publish_server_info() {
 	if (phase_ != Phase::Hosting || ending_) return;
 	refresh_listing(true);
-	role_.update_server_info();
+	role_.publish_mission_start();
 }
 
 void Lister::stop() {
@@ -213,6 +208,21 @@ void Lister::disconnect() {
 	io::logf(LogLevel::kInfo, "[main] disconnecting");
 	end(kExitStopped);
 	teardown(/*stop_hosting=*/false);
+}
+
+// ServerHostResult success: the listing is up. A fresh host's result publishes nothing (its first
+// full Host list, HostKey included, goes with its mission start's update, D-NET-465), so an
+// embedder whose source starts missions publishes at each one; a source with no mission behind
+// it never has that start, and its listing starts here instead (D-NET-488, PERMANENT).
+// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c58; Game_StartMission
+//  @0x5248c6..0x524903]
+void Lister::on_listed() {
+	phase_ = Phase::Hosting;
+	io::logf(LogLevel::kInfo, "[host] listed: '%s', %zu player(s)",
+			registration().server_name.c_str(), role_.roster().size());
+	source_->on_host_result(true, std::string());
+	if (!source_->starts_missions())
+		publish_server_info();
 }
 
 // Verified: the account login first when there is one (the hosting page needs it), else the host
@@ -298,7 +308,8 @@ void Lister::ship(const HttpRequestSpec &spec) {
 }
 
 // The hosting leg of ConnectOrHost: its session and gate checks, then the request; the roster
-// follows it (the request clears the role's), and its players announce once hosting.
+// follows it (the request clears the role's), and its players ride the first full PlayerList
+// (ClientHostPlayerAdded goes only in state 6).
 void Lister::request_host() {
 	const ClientSession *session = lobby_.session();
 	const GateResponse &gate = lobby_.gate_response();
