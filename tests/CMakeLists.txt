@@ -1354,6 +1354,11 @@ target_link_libraries(til_render_uv_test PRIVATE opennova_formats)
 target_include_directories(til_render_uv_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME til_render_uv COMMAND til_render_uv_test)
 
+add_executable(til_retail_sweep_test til/til_retail_sweep_test.cpp)
+target_link_libraries(til_retail_sweep_test PRIVATE opennova_formats)
+target_include_directories(til_retail_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(til_retail_sweep COMMAND til_retail_sweep_test)
+
 add_executable(foliage_map_test foliage/foliage_map_test.cpp)
 target_link_libraries(foliage_map_test PRIVATE opennova_formats)
 target_include_directories(foliage_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2104,6 +2109,14 @@ add_executable(foliage_mask_raster_test terrain_query/foliage_mask_raster_test.c
 target_link_libraries(foliage_mask_raster_test PRIVATE opennova_runtime)
 target_include_directories(foliage_mask_raster_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME foliage_mask_raster COMMAND foliage_mask_raster_test)
+
+# The atlas routing a mission position takes to a texel of the terrain's 1024-unit atlas, and its inverse
+# over the sector grid's cells (terrain_query/atlas_routing.h): an island, a tiled layout, the wraps and
+# clamps past the grid, empty sectors; the char and foliage map samplers read the routed texel.
+add_executable(terrain_atlas_routing_test terrain_query/terrain_atlas_routing_test.cpp)
+target_link_libraries(terrain_atlas_routing_test PRIVATE opennova_runtime)
+target_include_directories(terrain_atlas_routing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_atlas_routing COMMAND terrain_atlas_routing_test)
 
 # fixtures/particle/synth_*.ptl: the five synthetic particle files the focused
 # tests read, written by save_particles from integer data (the shipped corpus

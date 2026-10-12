@@ -8,8 +8,10 @@
 #include <runtime/terrain_query/surface_tiles.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 
 namespace opennova::terrain {
 
@@ -22,6 +24,19 @@ void TerrainFieldStore::clear() {
 	trn_water_height_ = 0.0f;
 	tilestrip_.clear();
 	attach_placed_tiles();
+}
+
+bool TerrainFieldStore::patch_charmap(const CoordsRect &rect, const uint8_t *src, size_t stride) {
+	const int32_t width = surface_map_.width, height = surface_map_.height;
+	if (surface_indices_.empty() || src == nullptr || rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.z < 0 ||
+			rect.x > width - rect.w || rect.z > height - rect.h || stride < static_cast<size_t>(rect.w))
+		return false;
+	for (int32_t row = 0; row < rect.h; ++row) {
+		const uint8_t *from = src + static_cast<size_t>(row) * stride;
+		std::copy(from, from + rect.w,
+				surface_indices_.begin() + static_cast<ptrdiff_t>(rect.z + row) * width + rect.x);
+	}
+	return true;
 }
 
 void TerrainFieldStore::set_placed_tiles(std::vector<SurfaceTileEntry> tiles) {
