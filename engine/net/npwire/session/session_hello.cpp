@@ -47,20 +47,6 @@ void load_value_guid(const uint8_t *value, const uint8_t *end, std::array<uint8_
 	load_value_bytes(value, end, out.data(), out.size());
 }
 
-// A string field: the 0x41 / 0x42 handlers copy from the value pointer up to
-// the first NUL and at most `buffer` less one characters, whatever the field's
-// length, so an inner NUL ends the string and a value without its NUL runs on
-// into the bytes that follow it (the next field's name, up to that name's NUL).
-// Past the datagram's `end` ours reads zero, which ends the copy (D-NET-410).
-// [orig: Napi_CopyString @0x617E10 - the NUL test @0x617E32, the `buffer - 1`
-//  bound @0x617E41..0x617E44]
-std::string load_value_string(const uint8_t *value, const uint8_t *end, size_t buffer) {
-	std::string out;
-	for (const uint8_t *p = value; p < end && *p != 0 && out.size() + 1 < buffer; ++p)
-		out.push_back(static_cast<char>(*p));
-	return out;
-}
-
 // The handlers' string buffers: NVS 128 bytes, PW 512, every other 64.
 // [orig: NapiNPProtocol_HandleClientHello @0x6213B0 - `push 80h` @0x621562;
 //  NapiNPProtocol_HandleClientJoin @0x62B750 - `push 80h` @0x62B925, `push 200h`
@@ -68,6 +54,17 @@ std::string load_value_string(const uint8_t *value, const uint8_t *end, size_t b
 constexpr size_t kNvsBuffer = 128;
 constexpr size_t kPwBuffer = 512;
 constexpr size_t kStringBuffer = 64;
+
+// The client-side readers' long buffers, 512 bytes: the 0x81's CN, LNG and
+// SUS1..SUS4, the 0x82's JFS, and the description and goodbye records' DSTR and
+// DDSTR (latched afterwards at 128 / 32, make_disconnect_event). Their other
+// strings take kStringBuffer.
+// [orig: Nwu_HandleServerHello @0x626D20 - `push 200h` for CN @0x6271A3, LNG
+//  @0x6271D4, SUS1..SUS4 @0x627415..0x6274A8, `push 40h` for the rest;
+//  NapiNP_HandleServerJoinResponse @0x629840 - JFS @0x629B29;
+//  CNapiNPConnection_HandleDescriptionPacket @0x621AE0 - @0x621C7D;
+//  Nwu_HandleDisconnect @0x623CE0 - @0x623F91]
+constexpr size_t kLongStringBuffer = 512;
 
 } // namespace
 
@@ -346,7 +343,12 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	if (!msg.pw.empty()) append_string_field(buf, "PW", msg.pw);
 	if (msg.sip) append_u32_field(buf, "SIP", msg.sip);
 	if (msg.spn) append_u32_field(buf, "SPN", msg.spn);
+	// A CU entry of kCuSlotBytes or more is left out, the rest written; there
+	// is no count bound. [orig: CNapiNPConnection_SendClientJoin @0x61fe20 -
+	//  the entry length @0x62023E, `cmp ebp, 800h` / `jge` @0x620242..0x620248,
+	//  the write @0x6202B0]
 	for (const auto &blob : msg.cu) {
+		if (blob.size() >= kCuSlotBytes) continue;
 		append_bytes_field(buf, "CU", blob.data(), blob.size());
 	}
 	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
@@ -412,10 +414,12 @@ std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const Disconnec
 // deliberately dropped: the receiver re-derives the role from its own connection. The 0x46 / 0x86
 // goodbye walk is the same shape. DC, DP1, DP2 and DPC each load a whole dword at the field's
 // value pointer whatever its length (load_value_dword), so a short value takes the bytes that
-// follow it, zero past the body's end (D-NET-410).
+// follow it, zero past the body's end (D-NET-410). DSTR and DDSTR copy from the value pointer up
+// to the first NUL, at most 511 characters, whatever the field's length (load_value_string); the
+// record latch (make_disconnect_event) then keeps 127 / 31.
 // [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 - DC @0x621BCB, DP1 @0x621BEC, DP2
-//  @0x621C0D, DPC @0x621C51; Nwu_HandleDisconnect @0x623CE0 - DC @0x623EF9, DP1 @0x623F1A, DP2
-//  @0x623F34, DPC @0x623F69]
+//  @0x621C0D, DPC @0x621C51, DSTR and DDSTR @0x621C7D; Nwu_HandleDisconnect @0x623CE0 - DC
+//  @0x623EF9, DP1 @0x623F1A, DP2 @0x623F34, DPC @0x623F69, DSTR and DDSTR @0x623F91]
 bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &out) {
 	if (!data) return false;
 	out = DisconnectEvent{};
@@ -439,11 +443,11 @@ bool parse_disconnect_event(const uint8_t *data, size_t len, DisconnectEvent &ou
 		} else if (strutil::iequals(name, "DP2")) {
 			out.dp2 = load_value_dword(value, end);
 		} else if (strutil::iequals(name, "DSTR")) {
-			out.dstr = strip_nul(value, size);
+			out.dstr = load_value_string(value, end, kLongStringBuffer);
 		} else if (strutil::iequals(name, "DPC")) {
 			out.dpc = load_value_dword(value, end);
 		} else if (strutil::iequals(name, "DDSTR")) {
-			out.ddstr = strip_nul(value, size);
+			out.ddstr = load_value_string(value, end, kLongStringBuffer);
 		}
 		pos = next;
 	}
@@ -592,6 +596,10 @@ void append_cu_field(std::vector<uint8_t> &buf, const std::string &name, const s
 	io::append_u16_le(inner, static_cast<uint16_t>(value.size() + 1));
 	inner.insert(inner.end(), value.begin(), value.end());
 	inner.push_back(0);
+	// An entry of kCuSlotBytes or more is left out; there is no count bound.
+	// [orig: CNapiNPConnection_SendSessionInit @0x620ef0 - the entry length
+	//  @0x621120, `cmp ebx, 800h` / `jge` @0x621124..0x62112A, the write @0x621193]
+	if (inner.size() >= kCuSlotBytes) return;
 	append_flat_tlv(buf, "CU", inner.data(), static_cast<uint16_t>(inner.size()));
 }
 
@@ -670,13 +678,20 @@ bool parse_cu_inner(const uint8_t *data, size_t len,
 } // namespace
 
 bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
-	if (!data) return false;
+	if (!data && len != 0) return false;
+	// The reader's defaults before the walk: every field zero but JFC, which reads 1, so an
+	// absent CR rejects and a rejection without JFC carries failure code 1. Clear exactly the
+	// builder defaults ServerAuth{} carries (MI's placeholder, CR's 1).
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - CK @0x629963, CR @0x629967, SK
+	//  @0x62996B, CI @0x62996F, MI @0x629973, JFC = 1 @0x629977, JFP @0x62997F]
 	out = ServerAuth{};
+	out.mi = 0;
+	out.cr = 0;
+	out.jfc = 1;
 	out.client_cs.clear();
 	out.server_cs.clear();
 	out.cu.clear();
-	bool saw_cr = false;
-	bool saw_rejection_detail = false;
+	size_t cu_count = 0;
 	size_t pos = 0;
 	while (pos < len) {
 		FlatTlvField field;
@@ -686,19 +701,24 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		const uint8_t *value = field.value;
 		const uint16_t size = field.size;
 		const uint8_t *end = data + len;
+		const auto copy_string = [value, end](size_t buffer) {
+			return load_value_string(value, end, buffer);
+		};
 		// Case-insensitive tag walk, as the retail 0x82 reader does
 		// [orig: NapiNP_HandleServerJoinResponse @0x629840 via Napi_StrCaseEqual @0x616e70].
-		// Every dword loads whatever the field's length (load_value_dword).
+		// Every dword loads whatever the field's length (load_value_dword), and every string
+		// copies from the value pointer up to the first NUL, JFS into 512 bytes and SCRK and NA
+		// into 64, whatever the field's length (load_value_string).
 		// [orig: NapiNP_HandleServerJoinResponse @0x629840 - CI @0x629A34, MI @0x629A55, CK
 		//  @0x629A76, CR @0x629A97, SK @0x629AB8, JFC @0x629AD9, JFP @0x629AFA, RIP @0x629C3E,
-		//  RPN @0x629C5C, RCNT @0x629C7A]
+		//  RPN @0x629C5C, RCNT @0x629C7A; JFS @0x629B29, SCRK @0x629BF0, NA @0x629C1E]
 		if      (strutil::iequals(name, "CI"))  out.ci  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "MI"))  out.mi  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "CK"))  out.ck  = load_value_dword(value, end);
-		else if (strutil::iequals(name, "CR"))  { out.cr  = load_value_dword(value, end); saw_cr = true; }
-		else if (strutil::iequals(name, "JFC")) { out.jfc = load_value_dword(value, end); saw_rejection_detail = true; }
-		else if (strutil::iequals(name, "JFP")) { out.jfp = load_value_dword(value, end); saw_rejection_detail = true; }
-		else if (strutil::iequals(name, "JFS")) { out.jfs = strip_nul(value, size); saw_rejection_detail = true; }
+		else if (strutil::iequals(name, "CR"))  out.cr  = load_value_dword(value, end);
+		else if (strutil::iequals(name, "JFC")) out.jfc = load_value_dword(value, end);
+		else if (strutil::iequals(name, "JFP")) out.jfp = load_value_dword(value, end);
+		else if (strutil::iequals(name, "JFS")) out.jfs = copy_string(kLongStringBuffer);
 		else if (strutil::iequals(name, "SK"))  out.sk  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "CS")) {
 			// [direction][field_index][LE uint32], six bytes at the value pointer whatever the
@@ -715,22 +735,37 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 			}
 		}
 		else if (strutil::iequals(name, "CU")) {
+			// Every CU counts, whatever its shape, into its own 2048-byte slot: a CU of 2048 bytes
+			// or more, or a 65th, ends the walk, and on the socket pass that leg returns without
+			// queuing the 0x82, before the CI / CK match, so the client drops it. The JFC 9 / 10
+			// legs behind the test run only on the queued pass, which never sees it.
+			// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the length bound
+			//  @0x629B97..0x629B9D, the count bound @0x629BA3..0x629BA6, the copy @0x629BB7, the
+			//  socket-pass return @0x629F0B..0x629F12; NapiNPManager_HandlePacket @0x622F10 -
+			//  the flag 0 @0x622F8E]
+			if (size >= kCuSlotBytes || cu_count >= kCuSlots) return false;
+			++cu_count;
 			std::string cu_name, cu_value;
 			if (parse_cu_inner(value, size, cu_name, cu_value)) {
 				out.cu.emplace_back(std::move(cu_name), std::move(cu_value));
 			}
 		}
-		else if (strutil::iequals(name, "SCRK")) out.scrk = strip_nul(value, size);
-		else if (strutil::iequals(name, "NA"))   out.na   = strip_nul(value, size);
+		else if (strutil::iequals(name, "SCRK")) out.scrk = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "NA"))   out.na   = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "RIP"))  out.rip  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "RPN"))  out.rpn  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "RCNT")) out.rcnt = load_value_dword(value, end);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
-	// Accepted ServerAuth carries SCRK for subsequent traffic. Rejected joins
-	// legitimately omit SCRK and instead carry JFC/JFP/JFS details.
-	return !out.scrk.empty() || (saw_cr && out.cr != 1 && saw_rejection_detail);
+	// No field is required: the reader takes any 0x82 from its connecting peer whose CUs stay
+	// in bounds, and what the walk gathered decides it (the caller's CI / CK match, then CR's
+	// truth), so an accept without SCRK or a rejection without JFC, JFP or JFS parses like any
+	// other.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the connection lookup and state-3
+	//  gate @0x6298E0..0x629901, the CI / CK match @0x629CAC..0x629CBF, the CR split
+	//  @0x629CD2..0x629CD6]
+	return true;
 }
 
 // ---- ServerHello serializer (restored below) ---------------------------
@@ -815,12 +850,13 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg) {
 // [orig: Nwu_HandleServerHello @0x626d20 — every tag compared through
 //  Napi_StrCaseEqual, zero defaults, the walk stops at an empty name]
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
-	if (!data) return false;
+	if (!data && len != 0) return false;
 	// The reader zeroes EVERY field before the walk, so an absent tag reads as
 	// zero/empty: clear exactly the builder defaults ServerHello{} carries (the
-	// numeric fields and the other strings already default to zero/empty).
+	// numeric fields and the other strings already default to zero/empty). No
+	// field is required: an absent HK reads 0, which the 0x42 then omits.
 	// [orig: Nwu_HandleServerHello @0x626d20 — every field zeroed before the walk
-	//  @0x626E3B..0x626F20]
+	//  @0x626E3B..0x626F20, HK @0x626E97]
 	out = ServerHello{};
 	out.co.clear();
 	out.ap.clear();
@@ -831,7 +867,6 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 	out.pv3.clear();
 	out.hk = 0;
 	out.sn.clear();
-	bool saw_hk = false;
 	size_t pos = 0;
 	while (pos < len) {
 		FlatTlvField field;
@@ -840,31 +875,47 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 		if (field.name.empty()) break;
 		const std::string_view name = field.name;
 		const uint8_t *value = field.value;
-		const uint16_t size = field.size;
 		const uint8_t *end = data + len;
+		const auto copy_string = [value, end](size_t buffer) {
+			return load_value_string(value, end, buffer);
+		};
 		// Every dword, and the PG's 16 bytes, load whatever the field's length
 		// (load_value_dword / load_value_guid).
 		// [orig: Nwu_HandleServerHello @0x626d20 - CI @0x626F63, DE @0x62700A, UT @0x62702B, PG
 		//  @0x62707A..0x627097, HK @0x627146, TZB @0x6271F7, SF @0x627218, P1..P8
 		//  @0x627239..0x627320, NP @0x627341, MP @0x627362, NPW @0x627383, NC @0x6273A4, RIP
 		//  @0x6273C5, RPN @0x6273E6, EIP @0x6274C8, EPN @0x6274E6, ET @0x627504]
+		// The string fields copy whatever the field's length (load_value_string), CN, LNG and
+		// SUS1..SUS4 into 512 bytes and the rest into 64. Retail's session record then keeps CN
+		// and LNG at 64 (@0x62778B, @0x6277A1 on the new-session path); nothing of ours reads
+		// either past this parse.
+		// [orig: Nwu_HandleServerHello @0x626d20 - CO @0x626F8B, AP @0x626FB9, BDAT @0x626FE7,
+		//  PN @0x627057, PV1 @0x6270C7, PV2 @0x6270F5, PV3 @0x627123, SN @0x627172, CN
+		//  @0x6271A3, LNG @0x6271D4, SUS1 @0x627415, SUS2 @0x627446, SUS3 @0x627477, SUS4
+		//  @0x6274A8]
 		if      (strutil::iequals(name, "CI"))   out.ci   = load_value_dword(value, end);
-		else if (strutil::iequals(name, "CO"))   out.co   = strip_nul(value, size);
-		else if (strutil::iequals(name, "AP"))   out.ap   = strip_nul(value, size);
-		else if (strutil::iequals(name, "BDAT")) out.bdat = strip_nul(value, size);
+		else if (strutil::iequals(name, "CO"))   out.co   = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "AP"))   out.ap   = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "BDAT")) out.bdat = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "DE"))   out.de   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "UT"))   out.ut   = load_value_dword(value, end);
-		else if (strutil::iequals(name, "PN"))   out.pn   = strip_nul(value, size);
+		else if (strutil::iequals(name, "PN"))   out.pn   = copy_string(kStringBuffer);
 		else if (strutil::iequals(name, "PG"))   load_value_guid(value, end, out.pg);
-		else if (strutil::iequals(name, "PV1"))  out.pv1  = strip_nul(value, size);
-		else if (strutil::iequals(name, "PV2"))  out.pv2  = strip_nul(value, size);
-		else if (strutil::iequals(name, "PV3"))  out.pv3  = strip_nul(value, size);
-		else if (strutil::iequals(name, "HK")) { out.hk = load_value_dword(value, end); saw_hk = true; }
-		else if (strutil::iequals(name, "SN"))   out.sn   = strip_nul(value, size);
-		else if (strutil::iequals(name, "CN")) { out.cn = strip_nul(value, size); out.locale_block = true; }
-		else if (strutil::iequals(name, "LNG")) { out.lng = strip_nul(value, size); out.locale_block = true; }
+		else if (strutil::iequals(name, "PV1"))  out.pv1  = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "PV2"))  out.pv2  = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "PV3"))  out.pv3  = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "HK"))   out.hk   = load_value_dword(value, end);
+		else if (strutil::iequals(name, "SN"))   out.sn   = copy_string(kStringBuffer);
+		else if (strutil::iequals(name, "CN")) {
+			out.cn = copy_string(kLongStringBuffer);
+			out.locale_block = true;
+		}
+		else if (strutil::iequals(name, "LNG")) {
+			out.lng = copy_string(kLongStringBuffer);
+			out.locale_block = true;
+		}
 		else if (strutil::iequals(name, "TZB")) { out.tzb = load_value_dword(value, end); out.locale_block = true; }
-		else if (strutil::iequals(name, "SF")) { out.sf = load_value_dword(value, end); out.is_game_server = true; }
+		else if (strutil::iequals(name, "SF"))   out.sf   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P1"))   out.p1   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P2"))   out.p2   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "P3"))   out.p3   = load_value_dword(value, end);
@@ -879,18 +930,22 @@ bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out) {
 		else if (strutil::iequals(name, "NC"))   out.nc   = load_value_dword(value, end);
 		else if (strutil::iequals(name, "RIP"))  out.rip  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "RPN"))  out.rpn  = load_value_dword(value, end);
-		else if (strutil::iequals(name, "SUS1")) out.sus1 = strip_nul(value, size);
-		else if (strutil::iequals(name, "SUS2")) out.sus2 = strip_nul(value, size);
-		else if (strutil::iequals(name, "SUS3")) out.sus3 = strip_nul(value, size);
-		else if (strutil::iequals(name, "SUS4")) out.sus4 = strip_nul(value, size);
+		else if (strutil::iequals(name, "SUS1")) out.sus1 = copy_string(kLongStringBuffer);
+		else if (strutil::iequals(name, "SUS2")) out.sus2 = copy_string(kLongStringBuffer);
+		else if (strutil::iequals(name, "SUS3")) out.sus3 = copy_string(kLongStringBuffer);
+		else if (strutil::iequals(name, "SUS4")) out.sus4 = copy_string(kLongStringBuffer);
 		else if (strutil::iequals(name, "EIP"))  out.eip  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "EPN"))  out.epn  = load_value_dword(value, end);
 		else if (strutil::iequals(name, "ET"))   out.et   = load_value_dword(value, end);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}
-	// The host key is the one field the client must echo back in ClientAuth.
-	return saw_hk;
+	return true;
+}
+
+bool server_hello_matches_identity(const ServerHello &hello, const ClientHello &local) {
+	return strutil::iequals(hello.pn, local.pn) && hello.pg == local.pg &&
+			strutil::iequals(hello.pv1, local.pv1);
 }
 
 } // namespace opennova

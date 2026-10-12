@@ -1,5 +1,7 @@
 #include <net/novaworld/lobby_vars.h>
 
+#include <net/napi/literal.h>
+
 #include <base/io/strutil.h>
 
 #include <algorithm>
@@ -323,18 +325,19 @@ std::vector<std::pair<std::string, std::string>> make_lobby_identity_vars(const 
 	};
 }
 
-// [orig: the inline UDPNOVAWORLD split in NovaWorldClient/Host::poll_gate]
-bool parse_host_port(const std::string &in, std::string &host, uint16_t &port) {
-	const std::size_t colon = in.find(':');
-	if (colon == std::string::npos) {
-		return false;
-	}
-	host = in.substr(0, colon);
-	const auto parsed = strutil::parse_int(in.substr(colon + 1));
-	if (!parsed) {
-		return false;
-	}
-	port = static_cast<uint16_t>(*parsed);
+// [orig: Network_ParseHostAndPort @0x62E200 - strlen > 511 fails @0x62E260; Napi_CopyString
+//  into the 512-byte buffer @0x62E288; strstr(":") @0x62E297, the colon zeroed and
+//  NapiScript_ParseLiteralValue on the rest @0x62E2B1, else port 0 @0x62E2BD]
+bool parse_host_and_port(const std::string &in, std::string &host, uint32_t &port) {
+	const std::string text = in.substr(0, in.find('\0'));
+	if (text.size() > 511) return false;
+	const std::size_t colon = text.find(':');
+	uint32_t parsed = 0;
+	if (colon == std::string::npos ||
+	    !napi_parse_literal_value(std::string_view(text).substr(colon + 1), parsed))
+		parsed = 0;
+	host = text.substr(0, colon);
+	port = parsed;
 	return true;
 }
 

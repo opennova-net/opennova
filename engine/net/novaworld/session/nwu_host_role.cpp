@@ -169,9 +169,9 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 		refresh_ticks_ = 0.0;
 		hosting_started_ms_ = lobby_.clock_ms();
 		fresh = true;
-		io::logf(io::LogLevel::kInfo, "[NovaWorld] hosting '%s' gsid=%s -> %s:%u",
-				cfg_.server_name.c_str(), gsid().c_str(), lobby_.nw_udp_host().c_str(),
-				static_cast<unsigned>(lobby_.nw_udp_port()));
+		io::logf(io::LogLevel::kInfo, "[NovaWorld] hosting '%s' gsid=%s -> %s",
+				cfg_.server_name.c_str(), gsid().c_str(),
+				peer_addr_to_string(lobby_.nw_peer()).c_str());
 	}
 	const ClientSession *session = lobby_.session();
 	if (session != nullptr && session->host_reconnect_counter() > 0)

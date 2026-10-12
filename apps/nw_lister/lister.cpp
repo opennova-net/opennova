@@ -81,8 +81,11 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
           [this]() {
 	          NwuLobbySession::Hooks hooks;
 	          hooks.on_gate_response = [](const GateResponse &gate) {
+		          std::string addresses;
+		          for (const std::string &address : gate.udp_novaworld)
+			          addresses += (addresses.empty() ? "" : ", ") + address;
 		          io::logf(LogLevel::kInfo, "[gate] lobby %s, NovaWorld %s", gate.lobby_name.c_str(),
-		                   gate.udp_novaworld.c_str());
+		                   addresses.c_str());
 	          };
 	          hooks.cookie_vars = [this]() { return cookie_vars(); };
 	          hooks.on_fatal = [this](const std::string &message) {
@@ -228,7 +231,7 @@ void Lister::on_listed() {
 // Verified: the account login first when there is one (the hosting page needs it), else the host
 // request straight away.
 void Lister::on_verified() {
-	io::logf(LogLevel::kInfo, "[session] verified at %s:%u", lobby_.nw_udp_host().c_str(), lobby_.nw_udp_port());
+	io::logf(LogLevel::kInfo, "[session] verified at %s", peer_addr_to_string(lobby_.nw_peer()).c_str());
 	if (!options_.credentials.present()) {
 		io::logf(LogLevel::kInfo, "[http] no account: hosting without a HOSTKEY");
 		request_host();

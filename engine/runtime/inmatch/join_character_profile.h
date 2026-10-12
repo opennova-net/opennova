@@ -3,9 +3,10 @@
 // The profile-to-wire projection a joiner's ClientAuth uploads: retail does
 // not invent a network-only player id — it packs the two profile character
 // selections from Avatars.def (CI0/CI1), stamps the two class bytes
-// (CTA/CTB) and the two avatar bytes (VCA/VCB, each the selected combo's head
-// voice). A side that is absent or no longer resolves takes the retail
-// default: the first combo of its alignment, class 8 (rifleman).
+// (CTA/CTB) and the two avatar bytes (VCA/VCB, each the profile's voice
+// override for the side where nonzero, else the selected combo's head voice).
+// A side that is absent or no longer resolves takes the retail default: the
+// first combo of its alignment, class 8 (rifleman).
 // [orig: PlayerProfile_InitDefaults @0x54BB40 (the fresh profile),
 //  EntitySlot_LookupAndPackEntry @0x57AD40 (the per-side default),
 //  Avatars_ResolveSelectionIndex @0x57AE60,
@@ -34,14 +35,28 @@ struct JoinSideSelection {
 	int division_index = -1;
 	int combo_index = -1;
 	int player_class = kJoinDefaultPlayerClass;
+	// The current profile record's voice override byte for the side, +1532
+	// blue / +1533 red (profile::voice_override); 0 = none. It stands whether
+	// or not the side's character was saved.
+	int voice_override = 0;
 };
 
 struct JoinCharacterProfile {
 	uint16_t character_ids[2] = { 0, 0 }; // CI0 / CI1
 	int player_classes[2] = { kJoinDefaultPlayerClass, kJoinDefaultPlayerClass };
 	int avatars[2] = { kJoinDefaultAvatar, kJoinDefaultAvatar };
-	int team_request = -1; // the companion assigns the side
 };
+
+// The join's side requirement, the TR byte: the join copies the low byte of
+// the config block's +0x424 (GameCfg::side_req) into the session info +0xF4,
+// and only -1 is ever stored there (the defaults, every pre-game pass; the
+// game.cfg `side_req` key is never read back, and PRE.MNU has no team
+// control: the side comes from the side password, JSP). Every join sends
+// the automatic TR=-1 (D-NET-590).
+// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23;
+//  CNapiGameSession_BuildAndCreateSession @0x56979f / @0x5697c3;
+//  Config_SetDefaults @0x54d1fa; UI_PreGameMenuStateMachine @0x568c55]
+inline constexpr int8_t kJoinSideRequirement = -1;
 
 // The selected side character when the saved tree indices still resolve to a
 // combo of the side's alignment: its packed id and head voice.
@@ -67,25 +82,37 @@ inline JoinCharacterProfile join_character_profile(
 			profile.character_ids[side] = first->packed_id;
 			profile.avatars[side] = first->head_voice;
 		}
-		if (!saved[side].present) continue;
-		uint16_t packed = 0;
-		int avatar = 0;
-		if (join_side_character(registry, side, saved[side].nationality_index,
-					saved[side].division_index, saved[side].combo_index, packed,
-					avatar)) {
-			profile.character_ids[side] = packed;
-			profile.avatars[side] = avatar;
+		if (saved[side].present) {
+			uint16_t packed = 0;
+			int avatar = 0;
+			if (join_side_character(registry, side, saved[side].nationality_index,
+						saved[side].division_index, saved[side].combo_index, packed,
+						avatar)) {
+				profile.character_ids[side] = packed;
+				profile.avatars[side] = avatar;
+			}
+			if (saved[side].player_class >= kJoinPlayerClassMin &&
+					saved[side].player_class <= kJoinPlayerClassMax)
+				profile.player_classes[side] = saved[side].player_class;
 		}
-		if (saved[side].player_class >= kJoinPlayerClassMin &&
-				saved[side].player_class <= kJoinPlayerClassMax)
-			profile.player_classes[side] = saved[side].player_class;
+		// The session start's avatar byte: the record's voice override where
+		// nonzero, else the side's character's own voice. A join uploads the
+		// pair as VCA / VCB and the local player takes its team's as its
+		// entity +0x374 (Entity::anim_slot).
+		// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - +1532
+		//  @0x551735..0x551769 -> g_AvatarTeam1, +1533 @0x55176e..0x5517a2 ->
+		//  g_AvatarTeam2, a zero byte Avatars_ResolveSelectionIndex @0x57ae60;
+		//  UI_JoinSelectedSession @0x569c2a / @0x569c46;
+		//  CNapiServerInfo_SerializeToSession @0x4c3bb4 / @0x4c3c04;
+		//  Player_InitPlayer @0x4e1838 / @0x4e1825, the store @0x4e1843]
+		if (saved[side].voice_override != 0) profile.avatars[side] = saved[side].voice_override;
 	}
 	return profile;
 }
 
 // The profile as the ClientAuth tag block carries it (CharacterJoinVars): the
 // two packed ids, the two class bytes and the two avatar bytes narrowed to
-// their wire widths; a side request outside {0, 1} is the absent 0xFF.
+// their wire widths, and the side requirement's byte (0xFF, TR=-1).
 inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile &profile) {
 	inmatch::CharacterJoinVars vars{};
 	for (int side = 0; side < 2; ++side) {
@@ -94,9 +121,8 @@ inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile
 				std::clamp(profile.player_classes[side], 0, 0xFF));
 		vars.avatar[side] = static_cast<uint8_t>(std::clamp(profile.avatars[side], 0, 0xFF));
 	}
-	vars.team_request = (profile.team_request == 0 || profile.team_request == 1)
-			? static_cast<uint8_t>(profile.team_request)
-			: 0xFF;
+	// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23]
+	vars.team_request = static_cast<uint8_t>(kJoinSideRequirement);
 	return vars;
 }
 

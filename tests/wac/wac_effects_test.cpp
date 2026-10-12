@@ -189,6 +189,7 @@ static void test_rain_random_and_exact_motor_pose() {
     const Program program = f.compile_script("fxrain(FLASH) store(v1)\n");
     WacVm vm; vm.load(program);
     const auto baseline = vm.capture_runtime_state();
+    const auto wac_baseline = f.world.script.vars.wac; // the DORND seed is the world's
     vm.execute(f.world);
     const auto rain = f.world.out.script_effects.back();
     CHECK(f.world.script.vars.get_mission(1) == 0);
@@ -197,12 +198,13 @@ static void test_rain_random_and_exact_motor_pose() {
     CHECK(rain.position[1] == 20 * 65536 + 9 + 156888);
     CHECK(rain.position[2] == 38 * 65536 + 11);
     CHECK(rain.direction[0] == 0 && rain.direction[1] == 0 && rain.direction[2] == -32768);
-    CHECK(vm.capture_runtime_state().rng_seed == 0x66666624u && f.world.ai.prng_a == 0);
-    vm.restore_runtime_state(program, baseline); vm.execute(f.world);
+    CHECK(f.world.script.vars.wac.dornd_seed == 0x66666624u && f.world.ai.prng_a == 0);
+    vm.restore_runtime_state(program, baseline); f.world.script.vars.wac = wac_baseline;
+    vm.execute(f.world);
     CHECK(f.world.out.script_effects.back().position == rain.position);
     const Program zero = f.compile_script("v2=0\nfxrain(v2) store(v3)\n");
-    vm.load(zero); vm.execute(f.world);
-    CHECK(f.world.script.vars.get_mission(3) == 1 && vm.capture_runtime_state().rng_seed == 0x12333333u);
+    vm.load(zero); f.world.script.vars.reset_wac_load_state(); vm.execute(f.world);
+    CHECK(f.world.script.vars.get_mission(3) == 1 && f.world.script.vars.wac.dornd_seed == 0x12333333u);
     f.world.commands.rain_effect(1, "FLASH", 0x8000FFFFu);
     CHECK(f.world.out.script_effects.back().position[0] == 10 * 65536 + 7 - 196608);
     CHECK(f.world.out.script_effects.back().position[1] == 20 * 65536 + 9 - 6);

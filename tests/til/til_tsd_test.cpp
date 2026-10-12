@@ -1,7 +1,7 @@
 // The tileset .TSD surface-definition parse (D-SND-15): CRLF-strict lines,
 // the retail tokenizer's delimiters/comments, INDEX_ rows into the 256-entry
 // table, case-insensitive TSD-name resolution, unknown names -> 0.
-// [orig: File_ParseASCIIFile @ 0x53d810; Terrain_TokenizeConfigLine
+// [orig: File_ParseASCIIFile @ 0x53d810; Config_TokenizeLine
 // @ 0x53cb60; Terrain_ParseTsdRow @ 0x604c00]
 #include <formats/til/til_tsd.h>
 

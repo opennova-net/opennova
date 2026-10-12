@@ -315,6 +315,37 @@ bool test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint() {
 	return true;
 }
 
+// The Respawn row (catalog 68): Ctrl+R's modifier pass claims R, so the key
+// edges the respawn and not the reload; a held key edges once; an inactive
+// gameplay frame or the death screen (an alive-mode row) admits no edge, and
+// the latch follows the keys behind them. [orig: Input_HandleActionBinding
+// case 55 @0x49B20B; the row's code @0x817658]
+bool test_respawn_edges_on_ctrl_r() {
+	PlayerActions actions;
+	BoundKeys keys;
+	keys.down = {17, 'R'};
+	auto frame = actions.poll(keys, kLive);
+	CHECK(frame.respawn_edge && !frame.reload_edge);
+	CHECK(!actions.poll(keys, kLive).respawn_edge);
+	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down = {'R'};
+	frame = actions.poll(keys, kLive);
+	CHECK(!frame.respawn_edge && frame.reload_edge);
+	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down = {17, 'R'};
+	CHECK(!actions.poll(keys, {false, true, true}).respawn_edge);
+	CHECK(!actions.poll(keys, kLive).respawn_edge); // the latch followed the hold
+	keys.down.clear(); actions.poll(keys, kLive);
+	PlayerActionPoll dead = kLive;
+	dead.death_screen = true;
+	keys.down = {17, 'R'};
+	CHECK(!actions.poll(keys, dead).respawn_edge);
+	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down = {17, 'R'};
+	CHECK(actions.poll(keys, kLive).respawn_edge);
+	return true;
+}
+
 bool test_wheel_subset_and_repeated_events() {
 	struct WheelCase { const char *token; Action action; int value; };
 	for (const auto &row : {WheelCase{"cycleweaponP", Action::WeaponCycle, 1},
@@ -482,7 +513,7 @@ int main() {
 			test_wheel_remainder_dispatches_whole_notches,
 			test_spectator_rows_edge_to_their_codes,
 			test_voice_menu_digits_pick_and_swallow_the_rows,
-			test_to_special_dispatches_both_edges})
+			test_to_special_dispatches_both_edges, test_respawn_edges_on_ctrl_r})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

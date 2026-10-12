@@ -124,6 +124,8 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 	w::World world;
 	w::AiSystem &ai = world.ai;
 	world.registry.configure_pool(0, 16);
+	// The trait sweep's player row: a typed body is no empty slot (D-NET-486).
+	world.tables.player.item_type_index = 1;
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
 	{
@@ -132,6 +134,8 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		start.item_id = 6002;
 		start.position = {50.0f, 60.0f, 1.0f};
 		start.yaw = 0;
+		start.item_type_index = 1; // the trait sweep's row: not an empty slot (D-NET-416)
+		start.has_item_def = true;
 		world.registry.spawn(3, start);
 	}
 	{
@@ -143,6 +147,8 @@ bool run_session(std::vector<CaptureDatagram> &recorded) {
 		bld.engine_flags = 0x04020400u;
 		bld.ammo_count = 0xFF;
 		bld.sub_type = 0xFF;
+		bld.item_type_index = 1; // the trait sweep's row: not an empty slot (D-NET-417)
+		bld.has_item_def = true;
 		world.registry.spawn(2, bld);
 	}
 	bms::File mission;

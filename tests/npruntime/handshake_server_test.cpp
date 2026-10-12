@@ -38,6 +38,7 @@
 #include <runtime/inmatch/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
 #include <runtime/inmatch/udp_session_transport.h>
 
+#include <net/npwire/flat_tlv.h> // append_flat_tlv (a raw CU field)
 #include <net/npwire/ingame_decode.h> // WeaponLoadout / decode_weapon_loadout (the 0x5A reply check)
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
@@ -1330,7 +1331,7 @@ bool run_disconnect_removes_leaver_from_spawn_waves() {
 	if (!handshake(ctx, peer, client_scrk, 0xC0FFEE44u, server_scrk, &server_sk)) return false;
 	if (!expect(inmatch::bind_connection_player(ctx, peer, 1, h.packed),
 	            "spawn-wave fixture binds the player entity")) return false;
-	if (!expect(w.zones.spawn_waves.try_queue(w, zone_handle, h) &&
+	if (!expect(w.zones.spawn_waves.try_queue(zone_handle, h, 1) &&
 	                    w.zones.spawn_waves.entries()[0].queued.size() == 1 &&
 	                    w.zones.spawn_waves.entries()[0].queued[0] == h,
 	            "the player queues into the zone's spawn-wave row")) return false;
@@ -1889,6 +1890,15 @@ bool run_expansion_join_reasons_and_tlv_order() {
 	if (!drive(retail_join_request("wrong", "wrong"), 47)) return false;
 	if (!drive(retail_join_request("jox01", "0"), 48)) return false;
 	if (!drive(retail_join_request("jox01", "55"), 0)) return false;
+	// D-NET-435: EXP copies from its value to the first NUL whatever the field's length, so a
+	// "jox01" without its NUL runs on into the next field's name: "jox01VERSIONCRCSTRING" fails
+	// the expansion compare with 47 though the VERSIONCRCSTRING that follows matches.
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - Napi_CopyString into 32 bytes
+	//  @0x512BFF; Server_ValidatePlayerJoinRequest @0x512100 - the compare @0x5122F0]
+	std::vector<uint8_t> run_on = {'E', 'X', 'P', 0, 5, 0, 'j', 'o', 'x', '0', '1'};
+	const auto crc = retail_join_request("", "55");
+	run_on.insert(run_on.end(), crc.begin(), crc.end());
+	if (!drive(std::move(run_on), 47)) return false;
 	std::vector<uint8_t> ordered = retail_join_request("wrong", "1");
 	const auto last = retail_join_request("jox01", "55suffix");
 	ordered.insert(ordered.end(), last.begin(), last.end());
@@ -2004,12 +2014,33 @@ bool run_client_join_rejects_match_retail() {
 	ctx.np_protocol.reject_new_connections = true;
 	if (!rejected(bad, 5) || !rejected(auth, 6)) return false;
 	ctx.np_protocol.reject_new_connections = false;
+	// A CU of 2048 bytes or a 65th CU ends the walk, and the socket pass drops the 0x42
+	// unanswered, ahead of every gate after the walk: no JFC 9 / 10 rejection is sent.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - @0x62BBEB..0x62BBFA, the socket-pass
+	//  return @0x62C32A..0x62C331]
+	// A stock writer leaves a CU of 2048 bytes out (D-NET-603), so that one rides as a raw
+	// field appended to the written 0x42.
+	auto dropped = [&](const ClientAuth &request, const std::vector<uint8_t> &raw_cu,
+			const char *message) {
+		std::vector<uint8_t> body = client_auth_to_bytes(request);
+		if (!raw_cu.empty())
+			append_flat_tlv(body, "CU", raw_cu.data(), static_cast<uint16_t>(raw_cu.size()));
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, body);
+		const auto result = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		return expect(result.outbound.empty() && inmatch::connection_count(ctx) == 0, message);
+	};
 	bad = auth;
-	bad.cu = {std::vector<uint8_t>(2048)};
-	bad.pn.clear();
-	if (!rejected(bad, 9)) return false; // CU bounds precede identity.
+	const std::vector<uint8_t> long_cu(2048);
+	if (!dropped(bad, long_cu, "a 0x42 with a 2048-byte CU is dropped unanswered")) return false;
+	bad.hk ^= 1;
+	if (!dropped(bad, long_cu, "the CU drop precedes the HK rejection")) return false;
+	bad = auth;
 	bad.cu.assign(65, std::vector<uint8_t>{1});
-	if (!rejected(bad, 10)) return false;
+	if (!dropped(bad, {}, "a 0x42 with a 65th CU is dropped unanswered")) return false;
+	bad.cu.assign(63, std::vector<uint8_t>{1});
+	bad.cu.push_back(std::vector<uint8_t>(2047, 1));
+	bad.hk ^= 1;
+	if (!rejected(bad, 3)) return false; // 64 CUs, one of 2047 bytes, pass the walk.
 	ctx.join_locked = true;
 	ctx.bans.addresses.entries.push_back({peer.ip, "?"});
 	if (!rejected(auth, 14, 2)) return false;

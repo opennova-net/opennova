@@ -70,6 +70,16 @@ std::optional<HostSession> SessionStore::get_host(const std::string &tag) const 
 	return it->second.s;
 }
 
+std::optional<HostSession> SessionStore::take_host(const std::string &tag) {
+	std::lock_guard<std::mutex> lk(mu_);
+	auto it = host_.find(tag);
+	if (it == host_.end())
+		return std::nullopt;
+	HostSession session = std::move(it->second.s);
+	host_.erase(it);
+	return session;
+}
+
 std::size_t SessionStore::evict_older_than(uint64_t max_age_ms) {
 	const uint64_t now = now_ms();
 	const uint64_t cutoff = (now > max_age_ms) ? (now - max_age_ms) : 0;

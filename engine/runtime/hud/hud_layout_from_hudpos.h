@@ -45,7 +45,7 @@ struct HudLayoutAssets {
 	std::string hudls_moreav;
 
 	// The mode the HUD's loader loads each name above in, as its texture role
-	// (sub_591750's alpha mode: HudColour mode 0, HudAlphaOnly mode 1; docs/
+	// (HUD_LoadTextureWithInfo's alpha mode: HudColour mode 0, HudAlphaOnly mode 1; docs/
 	// interface/hud-re.md "The HUD texture loader"): the static frame and the
 	// HUDLS bar's two in colour [orig: HUD_LoadAllTextures @0x59DF69, @0x59DF0F /
 	// @0x59DF39], each HUDSTANCE frame and the parachute and armor icons alpha

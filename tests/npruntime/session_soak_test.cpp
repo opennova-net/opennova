@@ -231,6 +231,8 @@ bool run_soak(const SoakCase &soak) {
 	// in-memory mission ----
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	// The trait sweep's player row: a typed body is no empty slot (D-NET-486).
+	world.tables.player.item_type_index = 1;
 	world.registry.configure_pool(3, static_cast<std::size_t>(16 + soak.world_markers));
 	{
 		w::Entity start;

@@ -43,11 +43,11 @@ public:
     void on_load(opennova::world::World &world) override;
     // Publish the mutable VM clock before World's shared script admission.
     void prepare_tick(opennova::world::World &world) override;
-    // Live program replacement also publishes the reset clock immediately.
-    void set_program(Program program, opennova::world::World &world) {
-        set_program(std::move(program));
-        prepare_tick(world);
-    }
+    // Live program replacement also publishes the reset clock immediately and
+    // runs a load's clears of the world's WAC state: the per-IF words, the DO
+    // counters and the DORND seed, not the DO choices or RND
+    // (world::ScriptVarStore::reset_wac_load_state).
+    void set_program(Program program, opennova::world::World &world);
 
 	// WacScript_InitAndLoad executes the freshly loaded bytecode once before
 	// the environment's 255-tick startup settle. This does not consume a logic

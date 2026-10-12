@@ -90,7 +90,7 @@ struct ServerHello {
 	// The locale block: CN (country name), LNG (language) and TZB (time-zone
 	// bias) are written together, unconditionally, when the protocol object's
 	// enable at +0xD48 is set; the two strings ship their NUL even when empty.
-	// [orig: @0x6207e2 gate; CN @0x62081a, LNG (byte_7CA07C) @0x62084a, TZB @0x62086a]
+	// [orig: @0x6207e2 gate; CN @0x62081a, LNG (aLng) @0x62084a, TZB @0x62086a]
 	bool locale_block = false;
 	std::string cn;
 	std::string lng;
@@ -103,8 +103,8 @@ struct ServerHello {
 	uint32_t et = 0;  // external type (echo of ClientHello.et), nonzero-gated @0x620bf6
 
 	// Game-server fields. The flat retail builder emits SF unconditionally and
-	// gates the remaining numeric/string fields individually; `is_game_server`
-	// is therefore a parse-side marker rather than an encoder switch. The
+	// gates the remaining numeric/string fields individually; the reader
+	// requires none of them (an absent one reads 0, D-NET-468). The
 	// SF/P1..P8/NP/MP/NPW fields appear between SN and NC, and SUS1..SUS4
 	// appear between RPN and EIP. Witnessed in the retail capture
 	// (docs/net/novaworld-net-re.md §5.9) — the host's
@@ -113,7 +113,6 @@ struct ServerHello {
 	// and game-session id. Without them the client receives a generic
 	// matchmaking-shaped Hello and never enters the gametype-specific
 	// game UI (e.g. cmap.mnu spawn-selection).
-	bool is_game_server = false;
 	uint32_t sf = 0;          // server flags; retail observed = 0
 	uint32_t p1 = 0;          // gametype; supplied by the live host configuration
 	uint32_t p2 = 0;          // game-config; live CNapiServerConfig_BuildFlags snapshot
@@ -170,10 +169,26 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg);
 // tag and keeps what it gathered, and an absent tag reads as zero/empty.
 // There is one flat tag set, the writer's. Every dword and the PG's 16 bytes
 // load at the field's value pointer whatever its length, so a short value takes
-// the bytes that follow it (zero past the buffer's end). Returns true when HK
-// was seen (the value the client echoes in ClientAuth).
-// [orig: Nwu_HandleServerHello @0x626d20]
+// the bytes that follow it (zero past the buffer's end), and every string copies
+// from it up to the first NUL, at most its buffer less one (CN, LNG and
+// SUS1..SUS4 511, the rest 63). No field is required: an absent HK reads 0,
+// the value the client then carries into a 0x42 that omits it. The caller
+// drops a 0x81 whose CI is not its connection's, or whose PN, PG or PV1 is not
+// its protocol's. Returns false only for a null buffer with a nonzero length.
+// [orig: Nwu_HandleServerHello @0x626d20 - HK zeroed @0x626E97, the CI lookup
+//  @0x627533, the identity compares @0x62758B / @0x627624 / @0x627643]
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out);
+
+// The 0x81's identity test on the client, after its CI resolved the connection:
+// PN and PV1 compared case-insensitively and PG bytewise against the receiving
+// protocol's own, the identity block of the 0x41 it sends (`local`); a mismatch
+// drops the reply. Retail skips the three when the connection's enumerator has
+// its +0x24 byte set and its +0x25 byte clear (@0x627562..0x62756C); JO writes
+// that byte only as 0 (NapiNPEnumerator_Create @0x625FB8, the two enumerator
+// setups @0x4C9F64 / @0x4D4251), so the compare always runs.
+// [orig: Nwu_HandleServerHello @0x626D20 - PN @0x627581 (the drop @0x62758B),
+//  PG @0x627591..0x627624, PV1 @0x627639 (the drop @0x627643)]
+bool server_hello_matches_identity(const ServerHello &hello, const ClientHello &local);
 
 // ---- ClientAuth / ServerAuth (NP connection admission) -----------------
 //
@@ -239,8 +254,9 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 // Serialize a ClientAuth to flat-TLV bytes (inverse of parse_client_auth).
 // Field order mirrors retail's 0x42 builder CNapiNPConnection_SendClientJoin
 // @ 0x61fe20: the identity block NVS/CO/AP/BDAT/PN/PG/PV1/PV2 FIRST, then
-// CI/HK/CK/NA/PW, SIP/SPN (each omitted when 0, as retail does), the CU blobs,
-// and SCRK last. The identity block is MANDATORY: the real NovaWorld server
+// CI/HK/CK/NA/PW, SIP/SPN (each omitted when 0, as retail does), the CU blobs
+// (one of kCuSlotBytes or more left out, as retail's writer does), and SCRK
+// last. The identity block is MANDATORY: the real NovaWorld server
 // validates it in HandleClientJoin @ 0x62B750 and drops the join without it
 // (the original "real NW never sends ServerAuth" bug — RE doc NW-S2).
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);
@@ -338,7 +354,8 @@ std::vector<uint8_t> server_goodbye_to_bytes(uint32_t client_ck, const Disconnec
 // connection to state 6 no matter what the walk yielded — a body carrying none of the seven names,
 // or a valid run with a truncated tail, still disconnects. The dispatcher gates on the H:0x03 tag
 // alone. The same walk reads a 0x46 / 0x86 goodbye's record after its key dword. DC, DP1, DP2 and
-// DPC load a whole dword at the value pointer whatever the field's length.
+// DPC load a whole dword at the value pointer whatever the field's length, and DSTR and DDSTR
+// copy from it up to the first NUL, at most 511 characters (a latch then keeps 127 / 31).
 // [orig: CNapiNPConnection_HandleDescriptionPacket @0x621ae0 - walk exits on read failure
 //  @0x621b8c, terminal SetState(6) @0x621d59 unconditional on the parsed content;
 //  Nwu_HandleDisconnect @0x623CE0]
@@ -439,11 +456,12 @@ struct ServerAuth {
 	                       // NapiNP_GetLocalConnectionId @0x4c6d40) and the host stamps it into the
 	                       // joiner's 0x0C ownerConnectionId (+0x78) for Player_FindLocalPlayerEntity
 	                       // @0x4e0090. Host-assigned join-order on LAN [orig: ++protocol[947] @
-	                       // NapiNPConnection_Create 0x62acb0; emitted by SendSessionInit @0x620ef0];
+	                       // CNapiNPConnection_Create 0x62acb0; emitted by SendSessionInit @0x620ef0];
 	                       // the 0x113f default is a placeholder for callers that don't set it. Retail
 	                       // LAN capture frame 28 = 3 (= the 0x48 ack = the 0x0C eFlags).
 	uint32_t ck = 0;      // echo client.ck
-	uint32_t cr = 1;      // Connection Result (1 = OK)
+	uint32_t cr = 1;      // Connection Result: the writers send 1 to accept, 0 to reject; the
+	                      // client accepts on any nonzero value [orig: @0x629CD2..0x629CD6]
 	uint32_t sk = 0;      // Server Key (server-generated)
 
 	std::vector<CsField> client_cs; // written with direction byte 1
@@ -464,8 +482,9 @@ struct ServerAuth {
 	//  store NapiNP_HandleServerJoinResponse @0x629840 @0x629e2e]
 	uint32_t rcnt = 0;
 
-	// Rejected-join fields. Retail can send these without SCRK when CR != 1;
-	// the packet is valid and should surface as a rejection, not malformed.
+	// Rejected-join fields. Retail sends these without SCRK when CR is 0; the
+	// packet is valid and surfaces as a rejection, not malformed. The reader
+	// takes an absent JFC as 1 (parse_server_auth); the writers keep 0 here.
 	uint32_t jfc = 0;     // Join failure code
 	uint32_t jfp = 0;     // Join failure parameter
 	std::string jfs;      // Join failure string
@@ -499,7 +518,8 @@ ServerAuth build_server_auth(const ClientAuth &client,
                              bool include_novaworld_cu = true);
 
 // Serialize a ServerAuth to flat-TLV bytes (ready to opcode-prefix +
-// NWU-encrypt + CRC-envelope).
+// NWU-encrypt + CRC-envelope). A CU entry of kCuSlotBytes or more is left out,
+// as retail's writer does [orig: CNapiNPConnection_SendSessionInit @0x62112A].
 std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg);
 
 // The 0x42-time join-REJECTION form of the 0x82: exactly CI, CK, CR(=0), JFC
@@ -508,6 +528,16 @@ std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg);
 // 5 full-with-positive-spectator-slots. [orig: NapiNPProtocol_SendJoinRejection
 // @0x620cd0; reasons CNapiNetwork_ValidateJoinRequest @0x4c61b0]
 std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg);
+
+// The CU walk's bounds, the 0x42's and the 0x82's: each CU is copied into its
+// own 2048-byte slot, 64 of them, so a CU of 2048 bytes or more, or a 65th,
+// ends the walk, and on the socket pass the packet is dropped unqueued.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - `cmp esi, 800h`
+//  @0x629B97, `cmp edi, 40h` @0x629BA3, the slot step @0x629BC2;
+//  NapiNPProtocol_HandleClientJoin @0x62B750 - @0x62BBEB, @0x62BBF7, the slot
+//  step @0x62BC1D]
+inline constexpr size_t kCuSlotBytes = 2048;
+inline constexpr size_t kCuSlots = 64;
 
 // Parse a ServerAuth TLV payload (the bytes AFTER the 0x82 opcode and
 // AFTER NWU-decryption). The client uses this to recover the connection
@@ -518,8 +548,19 @@ std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg);
 // server_auth_to_bytes; ignores unknown tags. Every dword, and a CS field's six
 // bytes, load at the value pointer whatever the field's length; a CS with a
 // nonzero direction byte joins client_cs, a zero one server_cs, and one whose
-// index is past 14 is dropped, as retail's reader does. Returns true on success.
-// [orig: NapiNP_HandleServerJoinResponse @0x629840]
+// index is past 14 is dropped, as retail's reader does. JFS, SCRK and NA copy
+// from the value pointer up to the first NUL, at most 511 / 63 / 63 characters.
+// An absent field reads zero, but JFC reads 1. No field is required: the caller
+// drops a 0x82 whose CI or CK is not its connection's, then accepts on any
+// nonzero CR and rejects on zero. Returns false for a null buffer with a
+// nonzero length, and for a 0x82 whose walk meets a CU of kCuSlotBytes or more
+// or a CU past kCuSlots (every CU tag counts, whatever its inner shape): the
+// client's socket pass returns without queuing that 0x82, so it is dropped
+// before the CI / CK match.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the defaults
+//  @0x629963..0x62997F, the CU bounds @0x629B97..0x629BA6 and their socket-pass
+//  return @0x629F0B..0x629F12, the CI / CK match @0x629CAC..0x629CBF, the CR
+//  split @0x629CD2..0x629CD6]
 bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out);
 
 } // namespace opennova

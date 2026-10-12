@@ -81,6 +81,12 @@ struct PlayerActionFrame {
 	// @0x49D249..0x49D2B9 (release) / @0x49D42F (press); row flags 0x8C000801].
 	bool to_special_held = false;
 	bool to_special_edge = false;
+	// The Respawn row (catalog row 68, Ctrl+R, dispatch 55): its press edge
+	// with gameplay input live. An alive-mode row, so the death screen's scan
+	// never admits it; the live-player, round and session gates are the
+	// role's (inmatch::Role::request_respawn) [orig: Input_HandleActionBinding
+	// case 55 @0x49B20B; the row's code @0x817658].
+	bool respawn_edge = false;
 	// Apply in order: the USE special-key/release arm precedes binding rows.
 	std::vector<PlayerActionRequest> requests;
 };
@@ -131,6 +137,7 @@ private:
 	bool fire_was_held_ = false;
 	bool reload_was_down_ = false;
 	bool medic_was_down_ = false;
+	bool respawn_was_down_ = false;
 	bool to_special_was_down_ = false;
 	bool use_latched_ = false;
 	bool use_held_prev_ = false;

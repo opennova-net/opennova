@@ -4,7 +4,7 @@
 // packet never lands on a client), and every record that completes with its
 // own 1-based number, both to every in-match remote but never the listen host
 // (mask 0x90).
-// [orig: Entity_ProcessSectionDamageTransition @0x43F370 (the send @0x43f462);
+// [orig: DoorClass_HandleEvent @0x43F370 (the send @0x43f462);
 //  FadeEffect_UpdateAll @0x44E920 (the send @0x44e982);
 //  Server_SendWeaponSlotActionPacket @0x50F9A0]
 #include <runtime/inmatch/server_tick.h>
@@ -218,7 +218,7 @@ void test_host_answers_door_requests() {
 
 // A client's door command asks the host for every selected section but
 // section 0, each carrying the record before it, after this command's own
-// transitions. [orig: Entity_ProcessSectionDamageTransition @0x43f482 ->
+// transitions. [orig: DoorClass_HandleEvent @0x43f482 ->
 //  NetPacket_SendWeaponSwitch @0x42D0C0]
 void test_client_command_raises_requests() {
 	auto heap = std::make_unique<w::World>();
@@ -279,6 +279,7 @@ void test_static_batch_carries_door_sections() {
 	e.kind = w::EntityKind::Building;
 	e.item_id = 700;
 	e.has_item_def = true;
+	e.item_type_index = 1;   // the trait sweep's row: not an empty slot
 	e.item_attrib = 0x80u;   // Door
 	e.deathtime_ticks = 3;    // def+0x890's low byte: three doors
 	e.door_count = 3;

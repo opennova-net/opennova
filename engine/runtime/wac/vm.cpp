@@ -41,11 +41,7 @@ int32_t power_fold(int32_t base, int32_t exponent) {
 
 void WacVm::load(const Program &program) {
     prog_ = &program;
-    events_.assign(static_cast<size_t>(program.event_count > 0 ? program.event_count : 1),
-                   EventState{});
-    loop_counters_.assign(program.loop_count, 0);
-    loop_choices_.assign(program.loop_count, 0);
-    rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b]
+    fired_counts_.assign(static_cast<size_t>(program.event_count > 0 ? program.event_count : 1), 0u);
     acc_ = 0;
     cur_event_ = 0;
     time_ = 0;
@@ -57,10 +53,7 @@ void WacVm::load(const Program &program) {
 
 WacVm::RuntimeState WacVm::capture_runtime_state() const {
     RuntimeState state;
-    state.events = events_;
-    state.loop_counters = loop_counters_;
-    state.loop_choices = loop_choices_;
-    state.rng_seed = rng_seed_;
+    state.fired_counts = fired_counts_;
     state.accumulator = acc_;
     state.current_event = cur_event_;
     state.time = time_;
@@ -72,10 +65,7 @@ WacVm::RuntimeState WacVm::capture_runtime_state() const {
 void WacVm::restore_runtime_state(const Program &program,
                                   const RuntimeState &state) {
     prog_ = &program;
-    events_ = state.events;
-    loop_counters_ = state.loop_counters;
-    loop_choices_ = state.loop_choices;
-    rng_seed_ = state.rng_seed;
+    fired_counts_ = state.fired_counts;
     acc_ = state.accumulator;
     cur_event_ = state.current_event;
     time_ = state.time;
@@ -84,13 +74,14 @@ void WacVm::restore_runtime_state(const Program &program,
     groups_.clear();
 }
 
-uint32_t WacVm::next_rand() {
+uint32_t WacVm::next_rand(opennova::world::World &w) {
     // [orig: WacScript_ExecuteBytecode DORND @ 0x4f5a83..0x4f5a91 — rol 9,
     //  then the SIGNED carry: sar edx,1Fh; and edx,1ABB09h; add. Same idiom
     //  (and same seed) as the weather PRNG @ 0x57e9fc (env #22/#25).]
-    uint32_t v = rol32(rng_seed_, 9);
+    uint32_t &seed = w.script.vars.wac.dornd_seed;
+    uint32_t v = rol32(seed, 9);
     v += static_cast<uint32_t>(static_cast<int32_t>(v) >> 31) & 0x1ABB09u;
-    rng_seed_ = v;
+    seed = v;
     return v;
 }
 
@@ -111,15 +102,16 @@ int32_t WacVm::read(opennova::world::World &w, uint32_t ref) const {
         case OperandKind::MusicVar:
             return prog_->music_globals ? mus::mus_globals_read(*prog_->music_globals, operand_index(ref)) : 0;
         case OperandKind::EventFired: {
+            // The named IF's ever-fired dword. [orig: g_WacEventEverFired @0xC6CE40]
             const uint32_t i = operand_index(ref);
-            return i < events_.size() && events_[i].ever_fired;
+            return i < uint32_t(world::ScriptVarStore::kWacIfs) ? w.script.vars.wac.ever_fired[i] : 0;
         }
         case OperandKind::Builtin: {
             switch (static_cast<Builtin>(operand_index(ref))) {
                 case Builtin::AutoItem: return static_cast<int32_t>(auto_item_);
                 case Builtin::SquadSSN: return w.script.squad_events.selected_ssn;
                 case Builtin::SquadWho: return w.script.squad_events.selected_who;
-                case Builtin::RandomResult: return w.script.wac_values.random_result;
+                case Builtin::RandomResult: return w.script.vars.wac.rnd;
                 case Builtin::Ticks: return static_cast<int32_t>(time_); // VM executions [orig: g_WacVarTicks]
                 case Builtin::Result: return acc_;
                 case Builtin::Health: return w.cached.local_health;
@@ -166,7 +158,7 @@ void WacVm::write(opennova::world::World &w, uint32_t ref, int32_t v) {
                 case Builtin::AutoItem: auto_item_ = static_cast<uint32_t>(v); break; // [orig: WacCmd_Set @0x4ED520]
                 case Builtin::SquadSSN: w.script.squad_events.selected_ssn = v; break;
                 case Builtin::SquadWho: w.script.squad_events.selected_who = v; break;
-                case Builtin::RandomResult: w.script.wac_values.random_result = v; break;
+                case Builtin::RandomResult: w.script.vars.wac.rnd = v; break;
                 case Builtin::Ticks: time_ = static_cast<uint32_t>(v); break;   // [orig: g_WacVarTicks 0xC6EAD8]
                 case Builtin::Result: acc_ = v; break;                           // [orig: g_WacVarResult 0xC6EB24]
                 case Builtin::Health: w.cached.local_health = v; break;
@@ -283,7 +275,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         if (i >= argc || !args || i >= 4) return std::string();
         return operand_string(w, args[i], def.params[i]);
     };
-    EventState &es = events_[(cur_event_ >= 0 && cur_event_ < static_cast<int>(events_.size())) ? cur_event_ : 0];
+    world::ScriptVarStore::WacState &wac = w.script.vars.wac;
+    const int ce = cur_event_ >= 0 && cur_event_ < world::ScriptVarStore::kWacIfs ? cur_event_ : 0;
     auto &cmds = w.commands;
     const auto FX = [&](int i) -> std::string {
         const int32_t handle = A(i);
@@ -292,15 +285,26 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     };
 
     // [orig: WacCmd_Reset @0x4ED300] Reset this event and its descendants;
-    // adjacent events at the same depth retain their history.
+    // adjacent events at the same depth retain their history. The named
+    // event's three words clear for any index in the IF space, past the
+    // program's events too; retail bounds it by nothing, so an index outside
+    // 0..1023 clears other words of the arrays' contiguous run (D-EVT-16). The
+    // walk stops at the program's event count.
     if (ieq(n, "reset")) {
         const int event = A(0);
-        if (event >= 0 && size_t(event) < prog_->event_depths.size()) {
-            const uint16_t depth = prog_->event_depths[event];
-            events_[event] = {};
-            for (size_t i = size_t(event) + 1; i < events_.size() &&
+        const auto clear = [&](size_t i) {
+            wac.ever_fired[i] = 0;
+            wac.fired_tick[i] = 0;
+            wac.active[i] = 0;
+            if (i < fired_counts_.size()) fired_counts_[i] = 0;
+        };
+        if (event >= 0 && event < world::ScriptVarStore::kWacIfs) {
+            clear(size_t(event));
+            const uint16_t depth = size_t(event) < prog_->event_depths.size()
+                    ? prog_->event_depths[event] : uint16_t(0);
+            for (size_t i = size_t(event) + 1; i < size_t(prog_->event_count) &&
                     i < prog_->event_depths.size() && prog_->event_depths[i] > depth; ++i)
-                events_[i] = {};
+                clear(i);
         }
         return 1;
     }
@@ -309,7 +313,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "blockfire")) return w.script.weapon_input.set_fire_blocked(A(0), A(1) != 0);
 
     // ---- temporal / event conditions ----
-    if (ieq(n, "never")) return es.ever_fired ? 0 : 1;
+    if (ieq(n, "never")) return wac.ever_fired[ce] == 0 ? 1 : 0; // [orig: WacCmd_Never @0x4ED2E0]
     // Subtract in unsigned storage before the signed comparison, as the
     // retail dword arithmetic does across the tick counter's wrap.
     // [orig: WacCmd_Past @0x4ED010; WacCmd_Before @0x4ED030]
@@ -330,8 +334,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "elapse")) {
         // An event which has never fired is immediately eligible.
         // [orig: WacCmd_Elapse @0x4ECEF0]
-        return !es.ever_fired ||
-                static_cast<int32_t>(time_ - es.last_fired_tick - uint32_t(A(0))) >= 0;
+        return wac.ever_fired[ce] == 0 ||
+                static_cast<int32_t>(time_ - wac.fired_tick[ce] - uint32_t(A(0))) >= 0;
     }
     if (ieq(n, "previous") || ieq(n, "chain")) {
         // Skip descendants of the preceding event. The predecessor must
@@ -344,13 +348,13 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         };
         int preceding = cur_event_ - 1;
         while (preceding >= 0 && depth(preceding) > depth(cur_event_)) --preceding;
-        if (preceding < 0 || size_t(preceding) >= events_.size()) return 0;
-        const EventState &prior = events_[preceding];
-        if (!prior.ever_fired ||
-                static_cast<int32_t>(es.last_fired_tick - prior.last_fired_tick) >= 0)
+        if (preceding < 0 || preceding >= world::ScriptVarStore::kWacIfs) return 0;
+        const uint32_t prior_tick = wac.fired_tick[size_t(preceding)];
+        if (wac.ever_fired[size_t(preceding)] == 0 ||
+                static_cast<int32_t>(wac.fired_tick[ce] - prior_tick) >= 0)
             return 0;
         const uint32_t delay = ieq(n, "chain") ? uint32_t(A(0)) : 0u;
-        return static_cast<int32_t>(time_ - prior.last_fired_tick - delay) >= 0;
+        return static_cast<int32_t>(time_ - prior_tick - delay) >= 0;
     }
 
     // ---- group / entity state conditions ----
@@ -360,12 +364,12 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "SSNalive")) return cmds.wac_ssn_alive(H(0)) ? 1 : 0;
     if (ieq(n, "SSNexists")) return cmds.ssn_exists(H(0)) ? 1 : 0;
     if (ieq(n, "SSNLeadSSN2SSN")) return cmds.ssn_leads_target(H(0), H(1), H(2), A(3));
-    if (ieq(n, "fxrain")) return A(0) != 0 ? cmds.rain_effect(A(0), FX(0), next_rand()) : 1;
+    if (ieq(n, "fxrain")) return A(0) != 0 ? cmds.rain_effect(A(0), FX(0), next_rand(w)) : 1;
     if (ieq(n, "ammo2tgt")) return cmds.fire_ammo_at_target(A(0), A(1));
     if (ieq(n, "ammo2ssn")) return cmds.fire_ammo_from_ssn(A(0), H(1), H(2));
     if (ieq(n, "ammoarea")) return cmds.fire_ammo_in_area(A(0), A(1));
     if (ieq(n, "ammorain"))
-        return A(0) != 0 ? cmds.rain_ammo_near_player(A(0), next_rand()) : 1;
+        return A(0) != 0 ? cmds.rain_ammo_near_player(A(0), next_rand(w)) : 1;
     if (ieq(n, "teleport")) { cmds.teleport_group_to_marker(A(0), A(1)); return 0; }
     if (ieq(n, "SSNcritical")) return cmds.ssn_critical(H(0));
     if (ieq(n, "SSNride")) return cmds.ssn_has_rider(H(0));
@@ -431,9 +435,9 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     if (ieq(n, "random")) {
         // [orig: WacCmd_Random @0x4ED280] Always advance, including zero or
         // negative limits. Signed 64-bit IMUL, rounded SHRD, then low-word +1.
-        const int64_t product = int64_t(A(0)) * int64_t(next_rand() & 0xFFFFu) + 0x8000;
+        const int64_t product = int64_t(A(0)) * int64_t(next_rand(w) & 0xFFFFu) + 0x8000;
         const int32_t result = int32_t(uint32_t(uint64_t(product) >> 16) + 1u);
-        w.script.wac_values.random_result = result;
+        w.script.vars.wac.rnd = result;
         return result == 1 ? 1 : 0;
     }
     if (ieq(n, "squadevent")) return w.script.squad_events.query(A(0));
@@ -842,9 +846,9 @@ void WacVm::execute(opennova::world::World &w) {
     size_t group_index = 0;
     int32_t group_remaining = 0;
 
-    auto ev = [&](int i) -> EventState & {
-        if (i < 0 || i >= static_cast<int>(events_.size())) i = 0;
-        return events_[i];
+    world::ScriptVarStore::WacState &wac = w.script.vars.wac;
+    auto ev = [&](int i) -> size_t {
+        return i < 0 || i >= world::ScriptVarStore::kWacIfs ? 0u : size_t(i);
     };
     bool arithmetic_fault = false;
     auto apply_fold = [&](Op op, int32_t result) {
@@ -899,15 +903,19 @@ void WacVm::execute(opennova::world::World &w) {
             case Op::MarkFired: // THEN [orig: @0x4F5984]
             case Op::AndChain:  // ENTER [orig: @0x4F59CF]
             case Op::OrChain: { // LEAVE [orig: @0x4F5A09]
-                EventState &es = ev(cur_event_);
+                // The fire stores the tick, the ever-fired dword 1 and the
+                // active byte; a pass that does not fire stores the byte alone.
+                // [orig: @0x4F5995 / @0x4F599F / @0x4F59AA; @0x4F59C4]
+                const size_t e = ev(cur_event_);
                 const bool cond = acc_ != 0;
                 const bool fire = op == Op::MarkFired ? cond
-                        : op == Op::AndChain ? cond && !es.active : !cond && es.active;
-                es.active = cond;
+                        : op == Op::AndChain ? cond && wac.active[e] == 0
+                                             : !cond && wac.active[e] != 0;
+                wac.active[e] = cond ? 1 : 0;
                 if (fire) {
-                    es.last_fired_tick = time_;
-                    es.ever_fired = true;
-                    ++es.fired_count;
+                    wac.fired_tick[e] = time_;
+                    wac.ever_fired[e] = 1;
+                    if (e < fired_counts_.size()) ++fired_counts_[e];
                     ++ip;
                 } else {
                     ip = operand;
@@ -923,7 +931,7 @@ void WacVm::execute(opennova::world::World &w) {
                 if (ip + 1 >= n) { ip = n; break; }
                 const uint32_t params = code[ip + 1];
                 const uint32_t loop = params >> 16, count = params & 0xFFFF;
-                if (loop >= loop_counters_.size()) {
+                if (loop >= uint32_t(world::ScriptVarStore::kWacDos)) {
                     w.diagnostics.record({world::RuntimeGapKind::WacOpcode, int32_t(op), 0, cur_event_, int32_t(ip)}, w.logic_tick);
                     ip = operand;
                     break;
@@ -934,25 +942,25 @@ void WacVm::execute(opennova::world::World &w) {
                     // [orig: WacScript_ExecuteBytecode @0x4F5A7E (the step),
                     //  @0x4F5AB8..0x4F5AC4 (imul, round, shrd), @0x4F5AD0 (the
                     //  choice byte)]
-                    const uint32_t v = next_rand();
-                    loop_choices_[loop] = uint8_t((count * (v & 0xFFFFu) + 0x8000u) >> 16);
+                    const uint32_t v = next_rand(w);
+                    wac.do_choice[loop] = uint8_t((count * (v & 0xFFFFu) + 0x8000u) >> 16);
                 } else {
-                    if (loop_counters_[loop] >= count) loop_counters_[loop] = 0;
-                    loop_choices_[loop] = loop_counters_[loop]++;
+                    if (wac.do_counter[loop] >= count) wac.do_counter[loop] = 0;
+                    wac.do_choice[loop] = wac.do_counter[loop]++;
                 }
-                ip = loop_choices_[loop] == 0 ? ip + 2 : operand;
+                ip = wac.do_choice[loop] == 0 ? ip + 2 : operand;
                 break;
             }
             case Op::NextDo: {
                 // [orig: WacScript_ExecuteBytecode @0x4F5AEA..0x4F5AFC]
                 if (ip + 1 >= n) { ip = n; break; }
                 const uint32_t loop = code[ip + 1];
-                if (loop >= loop_choices_.size()) {
+                if (loop >= uint32_t(world::ScriptVarStore::kWacDos)) {
                     w.diagnostics.record({world::RuntimeGapKind::WacOpcode, int32_t(op), 0, cur_event_, int32_t(ip)}, w.logic_tick);
                     ip = operand;
                     break;
                 }
-                ip = loop_choices_[loop]-- == 1 ? ip + 2 : operand;
+                ip = wac.do_choice[loop]-- == 1 ? ip + 2 : operand;
                 break;
             }
             case Op::GroupIter: // [orig: WacScript_ExecuteBytecode case 10 @0x4F5B11]

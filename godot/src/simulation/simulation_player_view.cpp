@@ -54,7 +54,7 @@ bool Simulation::request_local_player_scope_toggle() {
 					opennova::encode_mounted_weapon_slot_selection(selection));
 			return true;
 		}
-		opennova::world::local_player_apply_mount_slot_select(kernel_->world, kernel_->local.weapon, req, kernel_->local.view);
+		opennova::world::local_player_apply_mount_slot_select(kernel_->world, kernel_->local.weapon, req);
 		return true;
 	}
 	opennova::world::WeaponSlotState *active_slot = active_local_weapon_slot();

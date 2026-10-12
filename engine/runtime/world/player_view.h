@@ -532,7 +532,7 @@ void player_view_chase_action(PlayerViewState &v, int action, uint32_t *input_ac
 
 // The mouse onto the orbit in the death screen's chase sub-mode: the yaw
 // takes the look yaw delta, the pitch the look pitch delta clamped to
-// +-0x38E38E00. [orig: sub_52AD50 @0x52ae4f..0x52ae99 — actions 0xA4/0xA5
+// +-0x38E38E00. [orig: DeathScreen_FilterInputAction @0x52ae4f..0x52ae99 — actions 0xA4/0xA5
 //  (pitch) and 0xA6/0xA7 (yaw)]
 void player_view_chase_orbit_look(PlayerViewState &v, int32_t yaw_delta, int32_t pitch_delta);
 

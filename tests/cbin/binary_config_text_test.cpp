@@ -386,6 +386,56 @@ int test_sections_storage_is_linear() {
 	return 0;
 }
 
+// ConfigFile_ReadString's read of a parsed file [orig: ConfigFile_ReadBinaryEntry @ 0x75f060]: the first value
+// the entry's pointer meets, whatever its count, a CBIN entry of none meeting the next value laid out [orig:
+// ConfigFile_ParseBinary @ 0x75eb1e] and past the last value none (heap bytes the parse never wrote,
+// D-CBIN-7); a match moves the next cursor and leaves the current one [orig: @ 0x75f27b]; a walk's stop at a
+// text entry of no value (no pointer) clears the next cursor [orig: @ 0x75f0e3, @ 0x75f132..0x75f135], and a
+// matched one reads 0.
+int test_binary_entry_read() {
+	const std::vector<uint8_t> bytes = encoded(walked());
+	BinaryConfig read;
+	std::string error;
+	std::vector<configfile::ConfigSection> sections;
+	TEST_EXPECT(cbin::decode_binary_config(bytes.data(), bytes.size(), read, error) &&
+	            cbin::binary_config_sections(read, sections));
+	configfile::ConfigSection *env = configfile::find_config_section(sections, "env");
+	TEST_EXPECT(env != nullptr);
+	if (env == nullptr) return 1;
+	// skip has no value: its pointer meets rate's, a NaN float, which _ftol2_sse truncates to the indefinite.
+	int32_t integer = 5;
+	TEST_EXPECT(configfile::read_binary_entry(*env, "skip", &integer) && integer == INT32_MIN &&
+	            env->current == 0 && env->next == 1);
+	TEST_EXPECT(configfile::read_binary_entry(*env, "tail", &integer) && integer == 42 && env->current == 1 &&
+	            env->next == 3);
+	// A last entry of no value: past the last value, no value read.
+	BinaryConfig last;
+	last.strings = {"env", "rate"};
+	last.xor_key = 0x2468ACE0u;
+	last.labels = {{1, {{2, {}}}}};
+	const std::vector<uint8_t> last_bytes = encoded(last);
+	TEST_EXPECT(cbin::decode_binary_config(last_bytes.data(), last_bytes.size(), read, error) &&
+	            cbin::binary_config_sections(read, sections));
+	env = configfile::find_config_section(sections, "env");
+	integer = 5;
+	TEST_EXPECT(env != nullptr && !configfile::read_binary_entry(*env, "rate", &integer) && integer == 0 &&
+	            !configfile::config_faulted(sections));
+	// The text form: A has no value, so no pointer.
+	const std::string ini = "[ENV]\r\nX=1\r\nA= ,\r\nB=12\r\n";
+	sections = configfile::parse_config_text(reinterpret_cast<const uint8_t *>(ini.data()), ini.size());
+	env = configfile::find_config_section(sections, "env");
+	TEST_EXPECT(env != nullptr && configfile::read_binary_entry(*env, "X", &integer) && integer == 1 &&
+	            env->next == 1);
+	if (env == nullptr) return 1;
+	TEST_EXPECT(!configfile::read_binary_entry(*env, "B", &integer) && integer == 0 && env->current == 1 &&
+	            env->next == SIZE_MAX);
+	integer = 5;
+	TEST_EXPECT(configfile::read_binary_entry(*env, "A", &integer) && integer == 0 && env->next == 2);
+	TEST_EXPECT(configfile::read_binary_entry(*env, "B", &integer) && integer == 12);
+	std::printf("binary entry: an entry of no value reads the next value laid out; the cursors as retail's\n");
+	return 0;
+}
+
 // The sections hold their names and string values as indices into the block's one string table, as the reader
 // holds pointers into its table [orig: ConfigFile_ParseBinary @ 0x75e8a0 -- the label @ 0x75e9d2, the name
 // @ 0x75ea8e, the string @ 0x75eb5a]: one 64 KiB string that 2000 labels, 2000 entries and 2000 string values
@@ -442,6 +492,7 @@ int main() {
 	failures += test_every_word_round_trips();
 	failures += test_sections_walk();
 	failures += test_sections_storage_is_linear();
+	failures += test_binary_entry_read();
 	failures += test_sections_strings_are_shared();
 	if (failures == 0) std::printf("cbin_binary_config_text: all passed\n");
 	return failures == 0 ? 0 : 1;

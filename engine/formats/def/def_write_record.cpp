@@ -16,7 +16,7 @@ namespace opennova::def {
 namespace {
 
 // The values an `attrib:` line holds: no more than the game's tokenizer keeps after the key (29, the
-// last running on to the line's end, where the writer's line ends [orig: Terrain_TokenizeConfigLine @
+// last running on to the line's end, where the writer's line ends [orig: Config_TokenizeLine @
 // 0x53CB60, its 30-token cap @ 0x53CC8C..0x53CC93]), which our items parser reads as the game does
 // (defscan::kMaxValueTokens).
 constexpr size_t kDefAttribTokensPerLine = size_t(defscan::kMaxValueTokens);
@@ -262,7 +262,7 @@ std::string token(const DefValue &v) {
 // puts it down. Every family's lines go through the retail tokenizer
 // (defscan::for_each_def_line), which ends an unquoted token at a space, comma or tab and the
 // line at ';', while a quoted run is one token, its quotes dropped [orig:
-// Terrain_TokenizeConfigLine @0x53CB60, delimiters @0x53CC33..0x53CC4C, ';' @0x53CC2A..0x53CC31,
+// Config_TokenizeLine @0x53CB60, delimiters @0x53CC33..0x53CC4C, ';' @0x53CC2A..0x53CC31,
 // quote @0x53CC4E..0x53CC70]: a text holding one of them is written quoted ("//" is refused
 // before).
 std::string written_word(DefRecordKind, const DefValue &v) {
@@ -488,7 +488,7 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 		// lines add up [orig: ItemDef_ParseProperty @ 0x49EB00, the attrib arm @ 0x4A06A8, `or [..+54h]` /
 		// `or [..+58h]` per token, Parent's byte @ 0x4A0CE2, the token loop @ 0x4A0F42]. A line holds no more
 		// values than the game's tokenizer keeps after the key (kDefAttribTokensPerLine, 29 [orig:
-		// Terrain_TokenizeConfigLine @ 0x53CB60, its 30-token cap @ 0x53CC93]).
+		// Config_TokenizeLine @ 0x53CB60, its 30-token cap @ 0x53CC93]).
 		if (property.encoding == DefEncoding::ItemAttrib2 || property.encoding == DefEncoding::ItemParent) continue;
 		if (property.encoding == DefEncoding::ItemAttrib) {
 			const auto &item = *static_cast<const DefItemDef *>(value);
@@ -576,7 +576,7 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 		// line, which copies the effect and an empty userpoint and leaves the secondary alone
 		// (read only past three tokens) [orig: ItemDef_ParseProperty @ 0x4A140B..0x4A1488
 		// particlefxs, the secondary under count > 3 @ 0x4A145E; w1 @ 0x4A14DE, w2 @ 0x4A155E;
-		// Terrain_TokenizeConfigLine @ 0x53CB71..0x53CB81 resetting tokens 1 and 2].
+		// Config_TokenizeLine @ 0x53CB71..0x53CB81 resetting tokens 1 and 2].
 		if (property.encoding == DefEncoding::ParticleSlot && values.size() >= 3) {
 			const std::string &effect = std::get<std::string>(values[0]);
 			const std::string &userpoint = std::get<std::string>(values[1]);
@@ -774,7 +774,7 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 		if (!items) { fail(name, key, "Missing file-wide vehicle spawn registry."); return false; }
 		for (int i = 0; i < items->vehicle_spawn_id_count; ++i) if (uint32_t(n(0)) & (uint32_t(1) << i)) args.push_back(std::to_string(items->vehicle_spawn_ids[i]));
 		// One line sets the whole mask, and it holds no more ids than the tokenizer keeps after
-		// the key [orig: Terrain_TokenizeConfigLine @0x53CB60, the 30-token cap @0x53CC8C..0x53CC93].
+		// the key [orig: Config_TokenizeLine @0x53CB60, the 30-token cap @0x53CC8C..0x53CC93].
 		if (args.size() > size_t(defscan::kMaxValueTokens))
 			fail(name, key, "A vehicle spawn list holds at most 29 ids.");
 		break;

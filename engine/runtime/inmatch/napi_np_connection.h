@@ -187,7 +187,8 @@ struct PreSpawnJoinerPose {
 // The joiner's character/profile join vars, uploaded as CU chunks in its game-session 0x42
 // ClientAuth: the per-SIDE character selection (side A = teams 1/3, side B = teams 2/4).
 //   CI0/CI1 = per-side minimap/character-slot ids (u16 truncation of retail's atol),
-//   TR      = requested side (0 = A, 1 = B; anything else clamps to 0xFF = auto),
+//   TR      = requested side (0 = A, 1 = B; anything else clamps to 0xFF = auto; a stock
+//             joiner always sends -1, its side requirement, D-NET-590),
 //   CTA/CTB = per-side soldier class, VCA/VCB = per-side avatar byte (-> entity+0x374 animSlot).
 // 0 everywhere = "tag absent" (retail's zero-initialized NapiNetConfig). The player add picks the
 // side by the ASSIGNED team and stamps the entity. [orig: client emit
@@ -261,10 +262,11 @@ struct SessionReplyState {
 	uint16_t max_ping_strikes = 0;
 	// The client's reported connection-quality level (C2S 0x4C, clamped 0..4)
 	// and the dirty flag the 1 Hz S2C 0x46 quality resend consumes. A fresh
-	// slot advertises 1 (the witnessed join-broadcast value).
-	// [orig: slot+418 / slot+89860, sub_5006E0 @0x5006E0; the resend walk
-	//  Server_TickUpdate @0x51DE79..0x51DF4A]
-	uint8_t client_quality = 1;
+	// slot holds 0, clean, so its first report of any level above 0 dirties it.
+	// [orig: slot+418 / slot+89860, PlayerSlot_SetClientQuality @0x5006E0; the
+	//  resend walk Server_TickUpdate @0x51DE79..0x51DF4A; Server_PlayerAdd @0x51CBC0 - the
+	//  slot memset @0x51CD06, +418 = 0 @0x51CD40, +89860 = 0 @0x51CD46]
+	uint8_t client_quality = 0;
 	bool client_quality_dirty = false;
 	// The host frame clock stamped by the C2S 0x3D loaded-model page reply; the
 	// reply carries no payload the host reads. [orig: NapiNPServerMsg_0x03D
@@ -286,7 +288,7 @@ struct SessionReplyState {
 	// The convert's hold latch: set when its request named no target (0xFFFF),
 	// read and cleared by the deploy leg the convert runs, which then places
 	// nothing (Server_PositionDeployingPlayer). [orig: slot+0x188D9 -
-	//  Server_KillPlayerAndNotify @0x519EC8; Server_ProcessPlayerDeath @0x517837]
+	//  Server_ConvertPlayerToSpectator @0x519EC8; Server_DeployPlayer @0x517837]
 	bool convert_holds_pose = false;
 	// Host ms of this player's last accepted chat (the 1000 ms per-sender
 	// throttle; 0 = never). The same slot word is the refused-capture-touch
@@ -306,7 +308,7 @@ struct SessionReplyState {
 	// a refused touch sets both, the deploy leg's whole-byte write clears both.
 	// [orig: CNetPlayer_SetGameState @0x4C4213..0x4C421F; Server_OnPlayerJoin
 	//  @0x51A730..0x51A73A; Server_OnPlayerTouchCaptureZone @0x500C35;
-	//  GameEvent_FlagCapture @0x50F7A0; Server_ProcessPlayerDeath @0x517803;
+	//  GameEvent_FlagCapture @0x50F7A0; Server_DeployPlayer @0x517803;
 	//  Server_UpdateAllActivePlayerSlots @0x5189A6]
 	bool frontier_hint_pending = false; // bit 0x04
 	bool capture_nag_held = false;      // bit 0x08
@@ -320,7 +322,7 @@ struct SessionReplyState {
 	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
 	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy
 	// UN-LATCHER — it resets dword_81474C (set by the 0x0E pick) on completion, which is what
-	// resumes the client's per-frame C2S 0x0C uplink [orig: Server_ProcessPlayerDeath's tail
+	// resumes the client's per-frame C2S 0x0C uplink [orig: Server_DeployPlayer's tail
 	// calls Server_SendWeaponSlotListToPlayer @0x502550; client NapiNPClientMsg_
 	// HandleWeaponLoadoutSync @0x4290E0 resets 81474C, §5.30; golden deploy frame 240018 =
 	// 0x5A + 0x61 + 0x1E in one datagram; v32: without it both joiners' uplinks stopped

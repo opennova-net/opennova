@@ -164,9 +164,10 @@ public:
 		// [orig: CNapiGameSession_InitNPConnection @0x4d3df4..0x4d3eb8]
 		int32_t max_packet_size = 0;
 
-		// The fresh CK and SCRK a reconnect's re-join mints. Unset, the engine's own random
-		// draws (make_random_session_u32 / make_dev_scrk) stand; the owner injects its
-		// generator, a test a deterministic one.
+		// The fresh CK and SCRK a reconnect's re-join mints, the CK drawn from next_client_key
+		// until nonzero (make_session_key). Unset, the engine's own random draws
+		// (make_random_session_u32 / make_dev_scrk) stand; the owner injects its generator, a
+		// test a deterministic one.
 		// [orig: CNapiNPConnection_InitFromSession @0x626320 — NapiNP_GenerateSessionKey
 		//  @0x6263fb (CK), CNapiNPConnection_GenerateTxKey @0x626401 (SCRK)]
 		std::function<uint32_t()> next_client_key;
@@ -396,6 +397,22 @@ public:
 	const DisconnectEvent &disconnect_event() const { return disconnect_event_; }
 	// Datagrams tossed at the envelope/NWU layer (retail's "NAPI TOSSED" log line).
 	uint32_t tossed_datagrams() const { return tossed_datagrams_; }
+	// Whether this connection takes the 0x81 datagram `data`, whoever sent it: it is probing (a
+	// reconnect's probe window, never the re-join's 0x42 leg or the gap between windows; the
+	// first connect's Hello state, D-NET-571), the reply's CI is its own and the identity
+	// block its protocol's. A reply it does not take is the next protocol's to read.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533
+	//  (NapiNPProtocol_FindConnectionByIndex @0x6227F0 over the protocol's connections, no
+	//  address), the enumerator gates @0x627547..0x62755C and the
+	//  identity compares @0x62758B / @0x627624 / @0x627643 each returning 0 @0x626DCB, so
+	//  NapiNPManager_HandlePacket @0x622F10 offers it on (@0x622F9F)]
+	bool takes_server_hello(const uint8_t *data, size_t len) const;
+	// The 0x81s this connection has taken (the first connect's and each re-join's). The connect
+	// leg points the connection at the reply's sender. [orig: Nwu_HandleServerHello - the
+	//  session record's address and port @0x62769D / @0x6276A1, the connect legs @0x627E8C /
+	//  @0x627EE5 -> CNapiNPConnection_InitFromSession @0x626320 (the connection's address
+	//  @0x6263B4 / @0x6263B7)]
+	uint32_t server_hellos_taken() const { return server_hellos_taken_; }
 
 	State state() const { return state_; }
 	bool is_verified() const { return state_ == State::Verified; }
@@ -445,6 +462,8 @@ private:
 	// pool bounds from cs_ (fields 10/11).
 	void reset_sequencing();
 
+	// The 0x81's CI is this connection's and its identity block this protocol's.
+	bool server_hello_is_ours(const ServerHello &sh) const;
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
 	void on_server_auth(const std::vector<uint8_t> &body);
@@ -501,6 +520,7 @@ private:
 	bool disconnect_latched_ = false;
 	bool disconnected_by_peer_ = false;
 	uint32_t tossed_datagrams_ = 0;
+	uint32_t server_hellos_taken_ = 0;
 
 	// The clocks (all in the owner's ms clock).
 	uint32_t clock_ms_ = 0;

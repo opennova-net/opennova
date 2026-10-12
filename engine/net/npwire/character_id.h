@@ -12,7 +12,7 @@
 // fixed 32/16-entry arrays), the combo field the authored `combo <id>`; the
 // registry lookup matches all three plus the alignment bit against the combo
 // entry (+0/+4/+8/+276) [orig: packer EntitySlot_LookupAndPackEntry
-// @0x57AD40 (@0x57ae47); decoder MinimapSlot_FindByPackedId @0x57a270;
+// @0x57AD40 (@0x57ae47); decoder CAvatarDefs_FindComboByPackedId @0x57a270;
 // PlayerProfile_InitDefaults @0x54BB40; serialized by
 // CNapiServerInfo_SerializeToSession @0x4C3650]. The companion avatar byte is
 // the selected combo's head voice unless the profile carries an explicit

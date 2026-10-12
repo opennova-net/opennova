@@ -2525,6 +2525,39 @@ func test_first_person_without_character_arms_submits_the_gun_alone() -> void:
 			"the gun alone satisfies the first-person model gate")
 
 
+# The session start's avatar byte for each side is the profile record's voice
+# override where nonzero, else the side's character's own head voice, and the
+# local player takes its side's as its entity +0x374 (Entity::anim_slot): the
+# staged loadout's voice pair reaches the spawned body
+# [orig: Game_ApplySessionSettingsToGlobals @0x551735..0x5517a2;
+# Player_InitPlayer @0x4e1843].
+func test_voice_override_is_the_local_players_avatar_byte() -> void:
+	var root_dir := _stage_viewmodel_fixture("voice_override", true)
+	# [blue override, expected anim slot]: STAGED_HEAD's own voice is 1.
+	for case in [[0, 1], [7, 7]]:
+		var world := WorldFixture.make_world(self)
+		var loadout := PlayerSpawnLoadout.new()
+		loadout.set_side_voice(PlayerSpawnLoadout.SIDE_BLUE, case[0])
+		loadout.set_side_voice(PlayerSpawnLoadout.SIDE_RED, 9)
+		world.set_local_player_spawn_loadout(loadout)
+		assert_eq(WorldFixture.load_mission(world, root_dir), OK)
+		var sim := world.get_sim()
+		assert_true(sim.has_local_player(), "the playable load spawns the local player")
+		var player: EntityCard = null
+		for ai_index in range(sim.get_entity_count()):
+			var card: EntityCard = sim.entity_card_by_ai_index(ai_index)
+			if card.get_item_id() == 0x14B9:
+				player = card
+				break
+		assert_not_null(player, "the local player's body is in the registry")
+		if player != null:
+			assert_eq(player.get_character_anim_slot(), case[1],
+					"a blue override of %d gives the blue local player avatar byte %d"
+					% [case[0], case[1]])
+		world.queue_free()
+		await get_tree().process_frame
+
+
 func test_joiner_challenge_prewarm_loads_player_and_current_viewmodels_before_freeze() -> void:
 	var root_dir := _stage_viewmodel_fixture("challenge_prewarm", true)
 	var world := WorldFixture.boot_minimal(self, root_dir)

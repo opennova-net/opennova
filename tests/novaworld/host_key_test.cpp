@@ -5,12 +5,16 @@
 // the whole flow over the wire is nw_host_ownership_e2e's).
 //
 //   * the store keeps only a key's SHA-256, never the key, and records only a
-//     48-letter A..P key; an account keeps its newest kHostKeysPerUser keys and
+//     48-letter A..P key, for an active account still at the credentials
+//     generation its login read; an account keeps its newest kHostKeysPerUser keys and
 //     every key a listed server holds;
 //   * a claim names the account for a live key of an active account; a key
 //     backs one listed RID at a time, a gone listing frees it, an idle or
 //     revoked key and a banned account claim nothing, a boot's clear_all
 //     releases every claim, and the sweep keeps a listed server's key;
+//   * listing_owned_by (the owner's push routes) holds only for a listed RID
+//     with one of the account's keys claimed for it, read live: a row naming
+//     the account with no claim, or after its keys are revoked, is not its;
 //   * a HostKey links the row where the connection presents it: a stock host's
 //     fresh ClientHostRequest carries none (listed with no owner) and its first
 //     ClientHostUpdate carrying one links it; a request carrying one (a
@@ -239,7 +243,7 @@ int test_record() {
 	const int64_t alice = make_player(db, "alice");
 	const int64_t bob = make_player(db, "bob");
 
-	hostdb::record_host_key(db, key_of('A'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
 	const auto rows = db.query("SELECT key_hash, user_id, claimed_rid FROM host_keys;");
 	TEST_EXPECT(rows.size() == 1);
 	TEST_EXPECT(rows[0].as_text(0).value() == hostdb::host_key_hash(key_of('A')));
@@ -249,8 +253,27 @@ int test_record() {
 	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE key_hash = ?;", {BindValue(key_of('A'))})
 	                    .empty());
 
-	hostdb::record_host_key(db, "HK-NOT-A-KEY", alice);
-	hostdb::record_host_key(db, std::string(48, 'a'), alice);
+	TEST_EXPECT(!hostdb::record_host_key(db, "HK-NOT-A-KEY", alice, 0));
+	TEST_EXPECT(!hostdb::record_host_key(db, std::string(48, 'a'), alice, 0));
+	TEST_EXPECT(db.query("SELECT COUNT(*) FROM host_keys;").front().as_int(0).value() == 1);
+
+	// Only at the account's credentials generation, and only for an active
+	// account: a login whose generation a reset has since moved records
+	// nothing (the race between /NWHost.dll's lookup and this insert), and
+	// neither does a banned account; nor does an account that is gone.
+	db.exec("UPDATE players SET credentials_gen = credentials_gen + 1 WHERE id = ?;",
+			{ BindValue(alice) });
+	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), alice, 0));
+	TEST_EXPECT(!key_stored(db, key_of('O')));
+	TEST_EXPECT(hostdb::record_host_key(db, key_of('O'), alice, 1));
+	TEST_EXPECT(key_stored(db, key_of('O')));
+	db.exec("DELETE FROM host_keys WHERE key_hash = ?;",
+			{ BindValue(hostdb::host_key_hash(key_of('O'))) });
+	db.exec("UPDATE players SET credentials_gen = 0, account_status = 'banned' WHERE id = ?;",
+			{ BindValue(alice) });
+	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), alice, 0));
+	db.exec("UPDATE players SET account_status = 'active' WHERE id = ?;", { BindValue(alice) });
+	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), 9999, 0));
 	TEST_EXPECT(db.query("SELECT COUNT(*) FROM host_keys;").front().as_int(0).value() == 1);
 
 	// The cap: alice's 'A' key backs a listed server, then 24 more keys.
@@ -262,9 +285,9 @@ int test_record() {
 		key[0] = static_cast<char>('A' + i % 16);
 		key[1] = static_cast<char>('A' + i / 16);
 		later.push_back(key);
-		hostdb::record_host_key(db, key, alice);
+		hostdb::record_host_key(db, key, alice, 0);
 	}
-	hostdb::record_host_key(db, key_of('P'), bob);
+	hostdb::record_host_key(db, key_of('P'), bob, 0);
 	const auto counts = db.query("SELECT user_id, COUNT(*) FROM host_keys GROUP BY user_id "
 	                             "ORDER BY user_id;");
 	TEST_EXPECT(counts.size() == 2);
@@ -285,7 +308,7 @@ int test_claim() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	hostdb::record_host_key(db, key_of('A'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
 
 	TEST_EXPECT(!hostdb::claim_host_key(db, key_of('B'), 0x0A000001u));  // unknown
 	TEST_EXPECT(!hostdb::claim_host_key(db, "", 0x0A000001u));
@@ -320,7 +343,7 @@ int test_claim() {
 	age_key(db, key_of('A'), "-86401 seconds");
 	TEST_EXPECT(!hostdb::claim_host_key(db, key_of('A'), 0x0A000004u));
 	// A claim moves last_used_at forward.
-	hostdb::record_host_key(db, key_of('C'), alice);
+	hostdb::record_host_key(db, key_of('C'), alice, 0);
 	age_key(db, key_of('C'), "-86000 seconds");
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('C'), 0x0A000005u) == alice);
 	TEST_EXPECT(!db.query("SELECT 1 FROM host_keys WHERE key_hash = ? "
@@ -334,13 +357,58 @@ int test_claim() {
 	return 0;
 }
 
+// What the owner's push routes ask (listing_owned_by): the RID is listed and one
+// of the account's keys stands claimed for it, read live, so a row that names
+// the account without a claim answers false, and so does a claim once its keys
+// are revoked, before the row's next write drops the owner.
+int test_listing_owned_by() {
+	Database db(":memory:");
+	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	const int64_t alice = make_player(db, "alice");
+	const int64_t bob = make_player(db, "bob");
+	constexpr uint32_t kRid = 0x0A000011u;
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
+
+	// A claim with no listing, then a listing with no claim: neither.
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), kRid) == alice);
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
+	hostdb::remove_host_by_rid(db, kRid);
+	db.exec("UPDATE host_keys SET claimed_rid = NULL;");
+	list_rid(db, kRid);
+	db.exec("UPDATE active_hosts SET host_user_id = ? WHERE rid = ?;",
+	        {BindValue(alice), BindValue(static_cast<int64_t>(kRid))});
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
+
+	// Listed and claimed: Alice's, nobody else's, and no other RID.
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), kRid) == alice);
+	TEST_EXPECT(hostdb::listing_owned_by(db, kRid, alice));
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, bob));
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid + 1, alice));
+	TEST_EXPECT(!hostdb::listing_owned_by(db, 0, alice));
+
+	// The keys revoked (an admin reset deletes them): not hers at once, though
+	// the row still names her until its next write.
+	db.exec("DELETE FROM host_keys WHERE user_id = ?;", {BindValue(alice)});
+	TEST_EXPECT(row_owner(db, kRid) == alice);
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
+
+	// Claimed again, then the listing gone: not hers.
+	hostdb::record_host_key(db, key_of('B'), alice, 0);
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('B'), kRid) == alice);
+	TEST_EXPECT(hostdb::listing_owned_by(db, kRid, alice));
+	hostdb::remove_host_by_rid(db, kRid);
+	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
+	return 0;
+}
+
 // The sweep keeps a listed server's key however long ago it was claimed, and
 // deletes every other key idle for a day.
 int test_prune() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	for (char c : {'A', 'B', 'C', 'D'}) hostdb::record_host_key(db, key_of(c), alice);
+	for (char c : { 'A', 'B', 'C', 'D' })
+		hostdb::record_host_key(db, key_of(c), alice, 0);
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), 0x0A000001u) == alice);  // listed
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('B'), 0x0A000002u) == alice);  // gone
 	list_rid(db, 0x0A000001u);
@@ -365,7 +433,7 @@ int test_lobby_links() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	hostdb::record_host_key(db, key_of('A'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
 
 	LobbySession sess;
 	sess.set_database(&db);
@@ -454,8 +522,8 @@ int test_owner_needs_live_claim() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	hostdb::record_host_key(db, key_of('A'), alice);
-	hostdb::record_host_key(db, key_of('B'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
+	hostdb::record_host_key(db, key_of('B'), alice, 0);
 
 	LobbySession sess;
 	sess.set_database(&db);
@@ -515,8 +583,8 @@ int test_require_host_key() {
 	Database db(":memory:");
 	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
 	const int64_t alice = make_player(db, "alice");
-	hostdb::record_host_key(db, key_of('A'), alice);
-	hostdb::record_host_key(db, key_of('B'), alice);
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
+	hostdb::record_host_key(db, key_of('B'), alice, 0);
 
 	LobbySession sess;
 	sess.set_database(&db);
@@ -607,6 +675,7 @@ int main() {
 	if (test_key_form_and_hash() != 0) return 1;
 	if (test_record() != 0) return 1;
 	if (test_claim() != 0) return 1;
+	if (test_listing_owned_by() != 0) return 1;
 	if (test_prune() != 0) return 1;
 	if (test_lobby_links() != 0) return 1;
 	if (test_owner_needs_live_claim() != 0) return 1;

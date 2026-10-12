@@ -444,14 +444,14 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	kernel.refresh_collision_instances();
 }
 
-// The authoritative mount relation changed: the binocular latch dies, the
-// view effects refresh, and the mounted input heading follows the relation.
+// The authoritative mount relation changed: the view effects refresh and the
+// mounted input heading follows the relation. The binoculars toggle and its
+// sway ride through; the attach's own camera reset clears the toggle where
+// retail's does (attach_apply) [orig: Player_ResetCameraAndMovementState
+// @0x4DE2B3; the sway's writer Binoculars_RandomizeSwayOffsets @0x4dd830].
 void JoinerRole::on_mount_changed() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::LocalPlayer &lp = kernel.local;
-	lp.view.binoculars_requested = false;
-	lp.view_tracker.binocular_yaw_offset_deg = 0.0f;
-	lp.view_tracker.binocular_pitch_offset_deg = 0.0f;
 	world::local_player_view_refresh(&kernel.world, lp.view);
 	lp.sync_local_mounted_input_heading();
 }
@@ -667,9 +667,9 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	spawn.heading_bam = s.orientation;
 	spawn.team = s.team;
 	// The named player record carries the host-stamped character selector and
-	// packed minimap/character id. Preserve both on local L just as retail's
-	// Player_InitPlayer does; dropping animSlot recreated the D-NET-146
-	// DBuggy-shadow association on the joiner's own presentation.
+	// packed minimap/character id; L keeps both (a zero animSlot recreated D-NET-146's
+	// DBuggy shadow), where retail's Player_InitPlayer keeps the NetId but restamps animSlot
+	// by Team (D-NET-570) [orig: Player_InitPlayer @0x4E15F0 - @0x4E1817..0x4E1843].
 	spawn.anim_slot = s.anim_slot;
 	spawn.minimap_net_id = s.net_id;
 	// [D-NET-112] The packed id belongs to the wire NetId ONLY. A player carries no SSN, so L
@@ -734,6 +734,7 @@ void JoinerRole::pump() {
 			rt.state().preround_delay_seconds;
 	lap.restart(); // the wire leg has its own rows
 	materialize_replica_world();
+	const bool had_local = local_spawned_;
 	spawn_and_arm_local_player();
 	apply_world_state_load();
 	apply_replica_track(world, rt.state(), rt.view().game_type(), true, track_seen_);
@@ -761,6 +762,15 @@ void JoinerRole::pump() {
 	apply_mounted_ammo_update();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 	mirror_mission_entities();
+	// The Attack & Defend latch the boot ran with no L, on L's spawn frame
+	// once the mirror applied the frame's teams, as retail's joiner latches
+	// after its mission start pumped every message, the last drain after
+	// Player_InitPlayer [orig: Game_StartMission @0x524360 -- the
+	//  NapiClient_WaitForGameStart call @0x524E29, the Player_InitPlayer call
+	//  @0x525BBC, the receive drain @0x525BD9 (gated @0x525BC4 / @0x525BCC),
+	//  the non-authority jz @0x525E29 / @0x525E58 to @0x52609A, the Game_LatchAttackDefendRole
+	//  call @0x5260C1].
+	if (!had_local && local_spawned_) lp.latch_attack_defend_role(rt.game_type());
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
 
 	// Received projectile/reload gameplay and the decoded remote collision
@@ -1230,9 +1240,9 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	if (kit_seams.reseed_on_side_change && kit_seams.reseed_on_side_change())
 		if (kit_seams.push) kit_seams.push();
 	// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
-	// (the join-time 0x0C record's team byte); a later assignment must move both the
+	// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
 	// entity's Team and the round sim's presenting-client team, or friend/foe styling
-	// keeps rendering the old side. Retail does the same two writes: byte_A85B48 for
+	// keeps rendering the old side. Retail does the same two writes: g_LocalTeam for
 	// the latch and entity->Team for the entity itself.
 	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
 	//  style select reads the local player's Team @0x4ec740]
@@ -1322,14 +1332,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 
 world::Entity *JoinerRole::replica_world_entity(
 		world::World &world, world::EntityHandle handle) {
-	if (!handle.valid()) return nullptr;
-	if (kernel_->wire_header_world)
-		return materializer_.owned(world, handle);
-	world::Entity *entity = world.registry.get(handle);
-	return entity != nullptr &&
-			entity->spawn_origin != world::kSpawnOriginNone
-			? entity
-			: nullptr;
+	return materializer_.replica_world_entity(world, handle, kernel_->wire_header_world);
 }
 
 void JoinerRole::materialize_replica_world() {
@@ -1757,11 +1760,11 @@ void JoinerRole::sync_authoritative_mount() {
 	}
 	if (!changed && !route_changed) return;
 	if (changed) {
-		// The embedder refreshes its view effects (binocular latch) and the
-		// mounted input heading for the new relation.
+		// The embedder refreshes its view effects and the mounted input
+		// heading for the new relation.
 		on_mount_changed();
 	}
-	world::sync_local_usegun_weapon_transition(world, lp.weapon, lp.view);
+	world::sync_local_usegun_weapon_transition(world, lp.weapon);
 }
 
 // Fold the latest complete phase-8 mounted-ammo sample into the exact

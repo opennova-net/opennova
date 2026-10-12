@@ -196,9 +196,12 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
     auto &cmds = w.commands;
     switch (t.main_type) {
         case bms::TriggerMainType::MissionVariable: {
-            // [orig: EventTrigger_EvaluateCondition cat 4 — dword_C6B240[param1] <op> param2.]
-            // THE shared variable store (same array WAC V# uses).
-            int32_t v = w.script.vars.get_mission(t.param1);
+            // [orig: EventTrigger_EvaluateCondition cat 4 — g_WacMissionVars[param1] <op> param2.]
+            // THE shared variable store (same array WAC V# uses), indexed with
+            // no bound: 512..767 read the G bank (D-EVT-12), 768..3584 and
+            // index -1 WAC's own state (D-EVT-13, var_store.h).
+            // [orig: the reads @0x453AAC / @0x453AC3 / @0x453ADC / @0x453AF5 / @0x453B0E]
+            int32_t v = w.script.vars.get_bank_word(t.param1);
             switch (static_cast<bms::MissionVariableTriggerType>(t.sub_type)) {
                 case bms::MissionVariableTriggerType::MissionVariableIsEqual: return v == t.param2;
                 case bms::MissionVariableTriggerType::MissionVariableIsLessThan: return v < t.param2;
@@ -605,18 +608,22 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
                                         a.param2);
             break;
         case bms::ActionType::MisvarChange: {
-            // [orig: case 5 — writes dword_C6B240[param1]; the shared var store.]
+            // [orig: case 5 — writes g_WacMissionVars[param1]; the shared var store.]
             // The arithmetic is the dword add/sub, so it wraps at the 32-bit
             // edge [orig: EventAction_Dispatch case 5 @0x45437e, subs 1..5
-            //  @0x454394..0x454406].
-            const uint32_t cur = static_cast<uint32_t>(w.script.vars.get_mission(a.param1));
+            //  @0x454394..0x454406]. The index has no bound: 512..767 write
+            //  the G bank (D-EVT-12), 768..3584 and index -1 WAC's own state
+            //  (D-EVT-13) [orig: the stores @0x45439A / @0x4543B7 /
+            //  @0x4543D4 / @0x4543EE / @0x454409].
+            auto &vars = w.script.vars;
+            const uint32_t cur = static_cast<uint32_t>(vars.get_bank_word(a.param1));
             const uint32_t arg = static_cast<uint32_t>(a.param2);
             switch (static_cast<bms::MissionVariableActionSubType>(a.action_sub_type)) {
-                case bms::MissionVariableActionSubType::Set: w.script.vars.set_mission(a.param1, a.param2); break;
-                case bms::MissionVariableActionSubType::Add: w.script.vars.set_mission(a.param1, static_cast<int32_t>(cur + arg)); break;
-                case bms::MissionVariableActionSubType::Subtract: w.script.vars.set_mission(a.param1, static_cast<int32_t>(cur - arg)); break;
-                case bms::MissionVariableActionSubType::Increment: w.script.vars.set_mission(a.param1, static_cast<int32_t>(cur + 1u)); break;
-                case bms::MissionVariableActionSubType::Decrement: w.script.vars.set_mission(a.param1, static_cast<int32_t>(cur - 1u)); break;
+                case bms::MissionVariableActionSubType::Set: vars.set_bank_word(a.param1, a.param2); break;
+                case bms::MissionVariableActionSubType::Add: vars.set_bank_word(a.param1, static_cast<int32_t>(cur + arg)); break;
+                case bms::MissionVariableActionSubType::Subtract: vars.set_bank_word(a.param1, static_cast<int32_t>(cur - arg)); break;
+                case bms::MissionVariableActionSubType::Increment: vars.set_bank_word(a.param1, static_cast<int32_t>(cur + 1u)); break;
+                case bms::MissionVariableActionSubType::Decrement: vars.set_bank_word(a.param1, static_cast<int32_t>(cur - 1u)); break;
                 default: break;
             }
             break;

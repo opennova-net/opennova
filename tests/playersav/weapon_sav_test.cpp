@@ -417,6 +417,14 @@ int test_update_avatar_selection()
     TEST_EXPECT(f.slots[1].blue.avatar_packed == 0x1234);
     TEST_EXPECT(!update_avatar_selection(
         f, kProfileSlots, SideId::Red, 8, 0, 0, 0));
+
+    // The class loop alone, for a dialog with no character to write: both
+    // sides, neither side's character.
+    TEST_EXPECT(update_player_class(f, 0, 9));
+    TEST_EXPECT(f.slots[0].blue.player_class == 9 && f.slots[0].red.player_class == 9);
+    TEST_EXPECT(f.slots[0].blue.avatar_packed == 0x0A63 && f.slots[0].red.avatar_packed == 0x8207);
+    TEST_EXPECT(f.slots[1].blue.player_class == 8);
+    TEST_EXPECT(!update_player_class(f, kProfileSlots, 5));
     return 0;
 }
 

@@ -62,26 +62,29 @@ var _ammo_sec: Dictionary = {}
 # [orig: g_PlayerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68].
 var _ammo_type: Dictionary = {}         # "PRIMARY"/"SECONDARY" -> {team -> int}
 var _grenade_rows: Array[WeaponDef] = []  # the first 3 class-3 defs, table order
+# The three grenade slots the last populate's kit restore filled, as weapon.def
+# rows (-1 = "None"): a slot the class/team filter leaves past _grenade_rows
+# keeps the page's (engine menu::player_info_restore_kit).
+var _restored_grenades := PackedInt32Array([-1, -1, -1])
+# The class whose page of the shown side the last populate restored: the page
+# the dialog's next save writes back.
+var _kit_page_class := 0
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
 var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
 # NAME (upper) -> Callable(row, value), dispatched by combo value changes.
 var _combo_handlers: Dictionary = {}
 var _character_state := PlayerCharacterSelectionStateScript.new()
-# The persisted voice override per side, 0 = DEFAULT_VOICE.
-# retail: the profile bytes g_CurPlayerProfile[teamIndex + 1532] @ 0x25510FC.
-var _voice_override: Dictionary = {}
+# While a build or a side switch restores the shown side, the cascade's voice
+# results are held here and only the last, the fill against the restored
+# selection, is written (_populate_side).
+var _restoring_side := false
+var _restored_voice := 0
 signal avatar_chosen(profile: Dictionary)
 
 
 ## Install the active + per-side weapon.sav character snapshot before the next build.
 func set_persisted_profile(profile: Dictionary) -> void:
 	_character_state.set_persisted_profile(profile)
-	# Retail keeps one override BYTE per side (profile+1532 and profile+1533);
-	# our saved profile carries a single "voice", so both sides start from it
-	# and then diverge per side exactly as retail's pair does. The per-side
-	# persistence of the pair is the remaining D-PLAYERINFO-9 residual.
-	var voice := int(profile.get("voice", WeaponDatabase.DEFAULT_VOICE_VALUE))
-	_voice_override = {0: voice, 1: voice}
 
 
 # True for the JO PLAYER_INFO screen's unique avatar controls.
@@ -133,8 +136,7 @@ func _wire(_file: String, _screen: String) -> void:
 		_driver.set_widget_checked(blue_radio, _team == 0)
 	if red_radio >= 0:
 		_driver.set_widget_checked(red_radio, _team == 1)
-	_populate_nationalities()  # cascades into divisions -> combos -> voice
-	_restore_character_selection(_team)
+	_populate_side()
 	_wire_preview()
 	# Loadout: PLAYERCLASS drives the class mask, the team radios the team mask; both
 	# filter the weapon slot lists [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430].
@@ -153,10 +155,7 @@ func _wire(_file: String, _screen: String) -> void:
 		_connect_combo(GRENADE_CONTROLS[i], _on_grenade_selected.bind(i))
 	_restore_player_class()
 	_populate_loadout()
-	var saved_name := _character_state.persisted_name()
-	var name_edit := _id("PLAYERNAME")
-	if name_edit >= 0 and not saved_name.is_empty():
-		_driver.set_widget_text(name_edit, saved_name)
+	_populate_name()
 	# The auto-reload / auto-medic boxes show the current record's words
 	# (engine profile_controls.h).
 	var auto_reload := _id(AUTO_RELOAD_CONTROL)
@@ -213,11 +212,11 @@ func _restore_player_class() -> void:
 	var combo := _id("PLAYERCLASS")
 	if combo < 0:
 		return
-	# The remembered per-side class (weapon.sav's side block, or an edit made
-	# before a team switch); nothing remembered keeps player.mnu's authored row
+	# The current record's class byte of the BLUE side, whichever side is shown
+	# (the dialog's save writes the class to both)
 	# [orig: PlayerInfo_PopulateAllControls @0x5606f0 selects PLAYERCLASS from
-	# g_CharSelClass].
-	var player_class := _character_state.player_class(_team)
+	# g_CharSelClass with no side term, @0x560782].
+	var player_class := PlayerProfile.store().character_summary().blue.player_class
 	if player_class < 5 or player_class > 9:
 		return
 	for row in _driver.item_count(combo):
@@ -290,6 +289,7 @@ func _populate_loadout() -> void:
 	_fill_weapon_slot("PRIMARY", WeaponDatabase.SLOT_PRIMARY, class_mask, team_mask)
 	_fill_weapon_slot("SECONDARY", WeaponDatabase.SLOT_SECONDARY, class_mask, team_mask)
 	_fill_weapon_slot("ACCESSORY", WeaponDatabase.SLOT_ACCESSORY, class_mask, team_mask)
+	_restore_kit()
 	for control in PARENT_SLOTS:
 		_populate_slot_ammo(control)
 	_populate_grenades(class_mask, team_mask)
@@ -297,17 +297,71 @@ func _populate_loadout() -> void:
 	_update_icons()
 
 
+# The shown side's saved kit page, the one its class byte picks in the current
+# record, into the lists and the picks the ammo fills then read: every count
+# pair reset and the page's restored, each category list selected by the
+# weapon the page names (a weapon the list lacks leaves it with none), the
+# team's ammo-type bytes and the grenade slots (engine
+# menu::player_info_restore_kit). Catalog rows come back; weapon.def's row is one
+# less, the "None" row -1.
+func _restore_kit() -> void:
+	var restored := PlayerProfile.store().restore_player_info_kit(_team, _weapons)
+	_kit_page_class = restored.page_class
+	_ammo_pri.clear()
+	_ammo_sec.clear()
+	var primary := restored.ammo_primary
+	var secondary := restored.ammo_secondary
+	for row in primary.size():
+		if primary[row] != -1:
+			_ammo_pri[row - 1] = primary[row]
+		if secondary[row] != -1:
+			_ammo_sec[row - 1] = secondary[row]
+	for i in KIT_SLOT_ORDER.size():
+		var asked := restored.get_selection(i)
+		if asked >= 0:
+			_select_slot_weapon(KIT_SLOT_ORDER[i], asked - 1)
+	for i in TYPE_SLOTS.size():
+		if restored.has_ammo_type(i):
+			_slot_type_store(TYPE_SLOTS[i])[_team] = restored.get_ammo_type(i)
+	var slots := restored.grenade_slots
+	for i in GRENADE_CONTROLS.size():
+		_restored_grenades[i] = slots[i] - 1
+
+
+# Select the list row carrying a weapon.def row, or no row when the list lacks it.
+func _select_slot_weapon(control: String, weapon_row: int) -> void:
+	var combo := _id(control)
+	if combo < 0:
+		return
+	var defs: Array = _slot_rows.get(control, [])
+	var found := -1
+	for row in defs.size():
+		var w: WeaponDef = defs[row]
+		if w != null and w.index == weapon_row:
+			found = row
+			break
+	_driver.select_row(combo, found, false)
+
+
+# The rows take the engine's order, the WEAPON screen's too: case-insensitive
+# ascending by label, each row keeping its weapon, then NONE goes in at row 0
+# (loadout_labels.h armory_slot_order carries the witness; D-PLAYERINFO-21). The
+# grenade fill sorts nothing.
 func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: int) -> void:
 	var combo := _id(control)
 	if combo < 0:
 		return
+	var weapons := _weapons.get_slot_weapons(slot, class_mask, team_mask)
+	var labels := PackedStringArray()
+	for w: WeaponDef in weapons:
+		labels.append(_weapons.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT)))
 	var rows := PackedStringArray()
 	var defs: Array[WeaponDef] = []
 	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
 	defs.append(null)
-	for w: WeaponDef in _weapons.get_slot_weapons(slot, class_mask, team_mask):
-		rows.append(_weapons.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT)))
-		defs.append(w)
+	for i in WeaponDatabase.armory_slot_order(labels):
+		rows.append(labels[i])
+		defs.append(weapons[i])
 	_slot_rows[control] = defs
 	_set_combo_items(combo, rows)
 
@@ -355,10 +409,14 @@ func _selected_player_class() -> int:
 	return fallback if fallback >= 5 and fallback <= 9 else 8
 
 
+# A class pick: the dialog saved into the record, the picked class to both
+# sides and the kit into the page of the class it leaves, then the screen
+# populated from the record, the picked class's page restored.
 func _on_class_selected(_row: int, _value: String) -> void:
 	if _populating:
 		return
-	_populate_loadout()  # the class mask re-filters the weapon slot lists
+	_save_from_dialog()
+	_populate_all_controls()
 
 
 # --- Loadout ammo combos (D-PLAYERINFO-11) --------------------------------------
@@ -493,20 +551,43 @@ func _populate_nationalities() -> void:
 	_update_avatars(MenuDriver.AVATAR_TEAM, 0)
 
 
+# The shown side's lists filled and its saved selection restored, as the
+# screen's build and a side switch do. The cascade runs through the first rows
+# on its way to the restored ones; each of its legs reads the profile's byte as
+# it stands, and only the last leg's voice, the fill against the restored
+# selection, is written (engine profile::set_voice_override).
+func _populate_side() -> void:
+	_restoring_side = true
+	_restored_voice = selected_voice()
+	_populate_nationalities()  # cascades into divisions -> combos -> voice
+	_restore_character_selection(_team)
+	_restoring_side = false
+	PlayerProfile.store().set_voice(_team, _restored_voice)
+
+
+# The voice the cascade leaves selected (a pick, or the fill's reset of a value
+# the list does not carry) is the shown side's override byte in the current
+# profile record, written at once for a user's pick (engine
+# profile::set_voice_override); a side's restore writes only its last leg's.
 func _update_avatars(change: int, value: int) -> void:
 	_populating = true
-	_voice_override[_team] = _driver.update_player_info_avatars(_db, change, value,
-			_team, selected_voice(), Strings.get_table(Strings.TABLE_GAMEUI),
+	var voice := _driver.update_player_info_avatars(_db, change, value, _team,
+			selected_voice(), Strings.get_table(Strings.TABLE_GAMEUI),
 			Strings.get_table(Strings.TABLE_MENUTXT))
 	_populating = false
+	if _restoring_side:
+		_restored_voice = voice
+	else:
+		PlayerProfile.store().set_voice(_team, voice)
 	if _driver.player_info_avatar_preview_changed():
 		_refresh_preview()
 
 
-## The persisted voice override for the shown side; 0 = DEFAULT_VOICE, otherwise
-## the CHARVOICE id the PLAYERVOICE list carries as that row's value.
+## The shown side's voice override in the current profile record; 0 =
+## DEFAULT_VOICE, otherwise the CHARVOICE id the PLAYERVOICE list carries as
+## that row's value.
 func selected_voice() -> int:
-	return int(_voice_override.get(_team, WeaponDatabase.DEFAULT_VOICE_VALUE))
+	return PlayerProfile.store().get_voice(_team)
 
 
 func _on_voice_selected(row: int, _value: String) -> void:
@@ -565,14 +646,6 @@ func _refresh_preview() -> void:
 		# The portrait stops at the resolved part geometry; D-PLAYERINFO-1
 		# tracks the separate spawned-player model seam.
 		_preview.load_combo(combo)
-
-
-func _selected_combo_index() -> int:
-	var combo := _id("COMBO_LIST")
-	if combo < 0:
-		return -1
-	var idx := _driver.selected_row(combo)
-	return idx if idx >= 0 else 0
 
 
 # --- Frame mounts (icons + preview) ---------------------------------------------
@@ -637,11 +710,11 @@ func _on_side_red() -> void:
 	_set_team(1)
 
 
-# Apply the native team cascade, then restore the shell's saved side picks.
+# A side radio's click, the shown side's as well: the dialog saved into the
+# record, the side it leaves with its kit page included, then the screen
+# populated for the clicked side from the record.
 func _set_team(team: int) -> void:
-	if team == _team:
-		return
-	_remember_current_character_selection()
+	_save_from_dialog()
 	_team = team
 	var blue_radio := _id("SIDE_BLUE")
 	var red_radio := _id("SIDE_RED")
@@ -649,40 +722,40 @@ func _set_team(team: int) -> void:
 		_driver.set_widget_checked(blue_radio, team == 0)
 	if red_radio >= 0:
 		_driver.set_widget_checked(red_radio, team == 1)
-	_populate_nationalities()
-	_restore_character_selection(team)
+	_populate_all_controls()
+
+
+# The screen populated for the shown side from the record, as a side radio and a
+# class pick do after their save: the side's character and voice, the class, the
+# boxes and the name, then the loadout (the team and class masks re-filter the
+# lists) and its kit page.
+func _populate_all_controls() -> void:
+	_populate_side()
 	_restore_player_class()
-	_populate_loadout()  # the team mask re-filters the weapon slot lists
+	var auto_reload := _id(AUTO_RELOAD_CONTROL)
+	if auto_reload >= 0:
+		_driver.set_widget_checked(auto_reload, PlayerProfile.store().is_auto_reload_checked())
+	var auto_medic := _id(AUTO_MEDIC_CONTROL)
+	if auto_medic >= 0:
+		_driver.set_widget_checked(auto_medic, PlayerProfile.store().is_auto_medic_checked())
+	_populate_name()
+	_populate_loadout()
 
 
 # --- ACCEPT seam (Phase 5) ----------------------------------------------------
 
-func _current_character_selection() -> PlayerCharacterSelectionState.Selection:
-	return _character_state.make_selection(_team,
-			_driver.player_info_avatar_nationality(), _driver.player_info_avatar_division(),
-			_selected_combo_index(), _selected_player_class())
-
-
-func _remember_current_character_selection() -> void:
-	var current := _current_character_selection()
-	if current != null:
-		_character_state.remember(current)
-
-
-# The current selection, including both side records, for main_game to persist
-# on ACCEPT. Class is stamped across both side snapshots because retail's dialog
+# The current selection, including both side records, for the dialog's save
+# and the shell's next spawn. Class is stamped across both side snapshots because retail's dialog
 # walks both 0x8006 blocks before serializing; character bytes remain per-side
 # [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EF38].
 func snapshot() -> Dictionary:
 	var combo := _id("COMBO_LIST")
 	var player_class := _selected_player_class()
-	# The persisted voice is the picked row's VALUE, not its position: retail
-	# stores the notification's value byte into the profile and re-selects the
-	# list by that value on the next populate.
+	# The voice is not here: its pick already wrote the profile record.
 	var profile := _character_state.snapshot(
 			_team, _driver.player_info_avatar_nationality(), _driver.player_info_avatar_division(),
 			_driver.selected_row(combo) if combo >= 0 else -1,
-			player_class, _edit_text("PLAYERNAME"), selected_voice())
+			player_class, _edit_text("PLAYERNAME"))
 	# No table (no root) means there was no loadout choice to commit. Keep that
 	# distinct from a loaded screen whose three selected rows are explicitly
 	# NONE, as a missing or empty weapon.def's are (D-MNU-27).
@@ -704,6 +777,8 @@ func snapshot() -> Dictionary:
 			"accessory": accessory.name if accessory != null else "",
 			"accessory_clips": selected_clips("ACCESSORY"),
 			"kit": kit_entries(),
+			# The page the populate restored, which a class pick has already left.
+			"kit_class": _kit_page_class,
 		})
 	return profile
 
@@ -728,8 +803,8 @@ func kit_entries() -> Array[Dictionary]:
 	# slots are the engine's page builder; this companion supplies its picks:
 	# the three category selections with their recorded count pairs (-1 =
 	# untouched) and the team's ammo-type byte for PRIMARY/SECONDARY, then the
-	# three grenade positions (-1, the "None" row, when the class/team filter
-	# left one empty).
+	# three grenade slots: the class/team filter's, and past them the slot the
+	# kit restore left (-1, the "None" row, unless the page named a grenade there).
 	var indices := PackedInt32Array()
 	var pri := PackedInt32Array()
 	var sec := PackedInt32Array()
@@ -744,7 +819,7 @@ func kit_entries() -> Array[Dictionary]:
 	var grenade_pri := PackedInt32Array()
 	var grenade_sec := PackedInt32Array()
 	for i in GRENADE_CONTROLS.size():
-		var index := _grenade_rows[i].index if i < _grenade_rows.size() else -1
+		var index := _grenade_rows[i].index if i < _grenade_rows.size() else _restored_grenades[i]
 		grenade_indices.append(index)
 		grenade_pri.append(int(_ammo_pri.get(index, -1)))
 		grenade_sec.append(int(_ammo_sec.get(index, -1)))
@@ -765,16 +840,34 @@ func _slot_weapon_index(control: String) -> int:
 	return w.index if w != null else -1
 
 
+# The ACCEPT: the dialog saved into the current record, then the selection
+# handed to the shell for the next spawn.
 func commit() -> void:
-	# The two boxes the ACCEPT writes into the current record, each when
-	# authored, the medic box inverted (engine profile_controls.h).
+	avatar_chosen.emit(_save_from_dialog())
+
+
+# The dialog read back into the current record in memory, as the ACCEPT, a side
+# radio and a class pick each do first: the two boxes (each when authored, the
+# medic box inverted; engine profile_controls.h), the name when PLAYERNAME is
+# authored, the class to both sides, the character, and the kit into the page
+# the last populate restored (PlayerProfile.accept_player_info).
+func _save_from_dialog() -> Dictionary:
 	var auto_reload := _id(AUTO_RELOAD_CONTROL)
 	if auto_reload >= 0:
 		PlayerProfile.store().set_auto_reload_checked(_driver.is_widget_checked(auto_reload))
 	var auto_medic := _id(AUTO_MEDIC_CONTROL)
 	if auto_medic >= 0:
 		PlayerProfile.store().set_auto_medic_checked(_driver.is_widget_checked(auto_medic))
-	avatar_chosen.emit(snapshot())
+	var profile := snapshot()
+	var saved := profile
+	if _id("PLAYERNAME") < 0:
+		saved = profile.duplicate()
+		saved.erase("name")
+	var error := PlayerProfile.accept_player_info(saved)
+	if error != OK:
+		push_warning("PlayerInfoMenuCompanion: the dialog was not saved into the profile (error %d)"
+				% error)
+	return profile
 
 
 # --- Helpers ------------------------------------------------------------------
@@ -801,6 +894,18 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 	var handler: Callable = _combo_handlers.get(widget_name.to_upper(), Callable())
 	if handler.is_valid():
 		handler.call(index, value)
+
+
+# The PLAYERNAME edit set from the current record's name, as every populate
+# sets it: the set's change notice runs the name rule on it once, so a kept name
+# renames the record and clears its no-name flag, and a refused last character
+# is cut from the edit alone (engine: PlayerProfiles::set_name_edit). An
+# unauthored edit sets nothing.
+func _populate_name() -> void:
+	var id := _id("PLAYERNAME")
+	if id >= 0:
+		_driver.set_widget_text(id,
+				PlayerProfile.store().set_name_edit(PlayerProfile.store().get_player_name()))
 
 
 # The PLAYERNAME edit's change names the current profile record as the player

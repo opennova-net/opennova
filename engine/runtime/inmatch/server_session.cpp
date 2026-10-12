@@ -175,7 +175,7 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		// the loopback). Joiners are assigned from kFirstJoinerDcb up so they never collide with it.
 		self.connection_id = kHostPlayerDcb;
 		self.self_id_seen = true;
-		self.type = 2;          // client-side connection [orig: NapiNPConnection_Create type 2]
+		self.type = 2;          // client-side connection [orig: CNapiNPConnection_Create type 2]
 		self.phase = ConnectionPhase::New; // advanced by the host's own-player spawn flow (P3)
 		self.link.transport = local_client;
 		self.link.mode = replication::TransportMode::Loopback; // socketless mode 1

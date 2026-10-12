@@ -289,7 +289,7 @@ int main(int argc, char **argv) {
     // An empty field ahead of a filled one is refused, nothing written: the
     // `""` the writer spells it with is no token to the game's tokenizer, so
     // the flags would read back as the name key and the body as the head.
-    // [orig: Terrain_TokenizeConfigLine @0x53CB60, the quote arm
+    // [orig: Config_TokenizeLine @0x53CB60, the quote arm
     //  @0x53CC4E..0x53CC70]
     {
         char *rb = nullptr;

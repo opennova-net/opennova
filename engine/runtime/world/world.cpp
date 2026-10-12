@@ -422,7 +422,7 @@ void World::update_all_entities(const TickContext &ctx) {
         if (Entity *e = registry.get(EntityHandle::make(1, static_cast<int>(slot))))
             e->pool1_visited = false;
     // The powerup rows' +0x1C4 update callback is the respawn countdown
-    // [orig: Entity_TickFireTimer @0x442850, installed by sub_442D00 @0x442D20].
+    // [orig: Powerup_TickRespawn @0x442850, installed by PowerupEntity_InitFromDef @0x442D20].
     powerup_tick(*this, ctx);
     auto unvisited_parent = [this](const Entity *e) -> Entity * {
         if (e == nullptr) return nullptr;

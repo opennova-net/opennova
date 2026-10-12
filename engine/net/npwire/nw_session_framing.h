@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,14 @@ std::string make_dev_nwuid();
 // Per-connection ServerAuth.SK. Retail's value is unique per session; a single
 // hardcoded constant aliases two concurrent sessions to outside observers.
 uint32_t make_random_session_u32();
+
+// A session key: the host key, a joined connection's SK, a connecting client's CK. Retail
+// draws until the key is nonzero, zero being no key; `draw` stands in for its PRNG's four
+// bytes (unset: make_random_session_u32), a test injecting its own.
+// [orig: NapiNP_GenerateSessionKey @0x61EA70 - the jz @0x61EAC3; its sites
+//  NapiNPProtocol_StartServer @0x62B5F5, NapiNPProtocol_HandleClientJoin @0x62BF5E,
+//  CNapiNPConnection_InitFromSession @0x6263F4]
+uint32_t make_session_key(const std::function<uint32_t()> &draw = {});
 
 // Decode an inbound NW-UDP datagram. On success, populates `opcode_out`
 // (byte 0 of the CRC-stripped packet, plaintext) and `body_out` (the

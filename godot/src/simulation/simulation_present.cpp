@@ -784,7 +784,7 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	frame.door_phases.clear();
 	if (runtime_ && kernel_) {
 		const opennova::inmatch::PresentRowsContext context{*kernel_, runtime_, is_joiner(),
-				host_ctx()};
+				host_ctx(), joiner_role_ != nullptr ? &joiner_role_->materializer() : nullptr};
 		if (is_joiner()) {
 			opennova::inmatch::build_client_replica_present_rows(
 					context, present_.pool_lifecycle, frame.rows, frame.door_phases);

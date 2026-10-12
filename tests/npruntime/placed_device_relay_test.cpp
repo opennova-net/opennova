@@ -334,7 +334,7 @@ std::vector<uint16_t> queued_removals(const w::World &world) {
 // owner. The deploy that follows removes them, each through the notifying
 // removal, unless it is a medic revive or the slot is a spectator; a leaver's
 // teardown removes them too.
-// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Server_ProcessPlayerDeath @0x517740
+// [orig: Entity_UpdatePool1Slot @0x4B8DD0; Server_DeployPlayer @0x517740
 //  — the revive latch test @0x5178C5, the spectator latch test @0x5178CD, the
 //  Entity_RemovePlacedDevicesByOwner call @0x5178D8; Server_HandlePlayerDisconnect
 //  @0x51B5C0 — the Server_RemoveEntityAndNotify call @0x51B82E]
@@ -370,20 +370,20 @@ bool run_owner_devices_live_until_the_deploy() {
 		return false;
 
 	conn.reply.revive_pose_valid = true;
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
 	if (!expect(world.registry.get(satchel) != nullptr && world.registry.get(claymore) != nullptr &&
 			queued_removals(world).empty(),
 			"a medic revive deploy keeps the devices"))
 		return false;
 
 	conn.link.spectator = true;
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
 	if (!expect(world.registry.get(satchel) != nullptr && queued_removals(world).empty(),
 			"a spectator slot's deploy keeps the devices"))
 		return false;
 	conn.link.spectator = false;
 
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
 	if (!expect(world.registry.get(satchel) == nullptr && world.registry.get(claymore) == nullptr,
 			"the next deploy removes the devices") ||
 		!expect(queued_removals(world) == (std::vector<uint16_t>{satchel.packed, claymore.packed}),

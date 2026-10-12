@@ -3,6 +3,7 @@
 #include <runtime/inmatch/server_visible_players.h>
 #include <runtime/inmatch/server_doors.h>
 #include <runtime/inmatch/server_team_change.h>
+#include <runtime/inmatch/server_death_timeout_reset.h>
 #include <runtime/inmatch/server_kill_page.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
@@ -244,19 +245,21 @@ uint32_t validate_join_request(
 	std::size_t pos = 0;
 	std::string expansion;
 	std::string version_crc;
-	// The TLV walk accepts unknown fields, uses the last matching value, and
-	// stops at its first short field or an empty name. String copies stop at
-	// the first NUL; tag names compare through Napi_StrCaseEqual @0x616e70.
-	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
+	// The TLV walk accepts unknown fields, uses the last matching value, and stops at its first
+	// short field or an empty name; tag names compare through Napi_StrCaseEqual @0x616e70. Each
+	// string copies from its value to the first NUL whatever its length (load_value_string).
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0 - EXP into 32 bytes @0x512BFF,
+	//  VERSIONCRCSTRING into 512 @0x512C31]
 	while (pos < payload.size()) {
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(payload.data(), payload.size(), pos, field);
 		if (next == kFlatTlvEnd || field.name.empty()) break;
 		pos = next;
-		const std::string value(field.value,
-				std::find(field.value, field.value + field.size, uint8_t{0}));
-		if (strutil::iequals(field.name, "EXP")) expansion = value.substr(0, 31);
-		else if (strutil::iequals(field.name, "VERSIONCRCSTRING")) version_crc = value.substr(0, 511);
+		const uint8_t *end = payload.data() + payload.size();
+		if (strutil::iequals(field.name, "EXP"))
+			expansion = load_value_string(field.value, end, 32);
+		else if (strutil::iequals(field.name, "VERSIONCRCSTRING"))
+			version_crc = load_value_string(field.value, end, 512);
 	}
 	// [orig: Server_ValidatePlayerJoinRequest @0x5122fc..0x512349]
 	if (expansion != config.expansion) return 47;
@@ -559,7 +562,7 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 }
 
 // tag=0x1E GAME-EVENT ev 0x3A (58) — the private deploy-screen frontier hint: "go capture zone N".
-// attacker byte = the requester team's frontier zone number [orig: Server_ProcessPlayerDeath
+// attacker byte = the requester team's frontier zone number [orig: Server_DeployPlayer
 // @0x517740 — GameEvent_BuildPayload(0x3A, ZoneSlotChain_FindFrontierZone(team), 0xFF, 0xFF, 0, 0)
 // @0x517A1D, mask 0x20; §5.26 8-B body via GameEvent_BuildPayload @0x5054E0]. The golden retail
 // frame-82540 body was {0x3a, 0x04, ...} — the retail host's live frontier at that moment; a
@@ -656,7 +659,7 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t pla
 // S2C 0x75 is the requesting player's live slot state, not a fixed
 // "spectator flags" fixture. Byte 0 is the spectator/death-screen bit and byte
 // 1 is playerSlot+416 (team), written straight into the retail client's
-// byte_A85B48 loadout selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890;
+// g_LocalTeam loadout selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890;
 // NapiNPClientMsg_SetSpectatorMode @0x4259E0]
 std::vector<uint8_t> build_tag75_player_state(
 		const NapiNPConnection &conn, const world::World *world) {
@@ -866,14 +869,14 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 }
 
 std::vector<uint8_t> build_spawn_wave_status_body(
-		const world::World &world, world::EntityHandle requester) {
+		const world::World &world, const NapiNPConnection &conn) {
 	std::vector<uint8_t> body;
-	const world::Entity *recipient = world.registry.get(requester);
-	const uint8_t team = recipient != nullptr ? recipient->team : 0;
+	const world::EntityHandle requester = conn.link.owned_entity;
+	const uint8_t team = conn.assigned_team; // the slot team (D-NET-581) [orig: @0x5074CF]
 	const world::SpawnZoneRegistry zones = world.zones.build_spawn_zone_list();
 	std::vector<const world::SpawnWaveEntry *> visible;
 	for (const world::SpawnWaveEntry &entry : world.zones.spawn_waves.entries())
-		if (entry.team == team && visible.size() < 0xFFu)
+		if (entry.team == team && visible.size() < 0xFFu) // [orig: @0x507539]
 			visible.push_back(&entry);
 	body.reserve(1 + visible.size() * 9);
 	body.push_back(static_cast<uint8_t>(visible.size()));
@@ -903,26 +906,39 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone, ServerLogRecorder *server_log) {
+		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
+		ServerLogRecorder *server_log) {
 	std::vector<ProtocolMessage> replies;
+	// The hold (slot state) clears first, ahead of the body's def test, so a refused
+	// mobile spawn below leaves the slot unheld (D-NET-552) [orig: Server_DeployPlayer
+	//  @0x517791 `and byte ptr [esi+15F38h], 0EFh`, the def test @0x517798].
+	conn.link.respawn_pending = false;
+	world.match.set_player_respawn_pending(conn.link.owned_entity, false);
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (player == nullptr) return replies;
-	// Server_ProcessPlayerDeath always releases the old seat before inspecting
+	// Server_DeployPlayer always releases the old seat before inspecting
 	// a requested mobile spawn. If the requester was the vehicle's primary
 	// occupant, this clears +0x170 and the subsequent mobile-spawn gate rejects.
-	// [orig: Server_ProcessPlayerDeath @0x5177A9..0x5177DB]
+	// [orig: Server_DeployPlayer @0x5177A9..0x5177DB]
 	if (player->mounted)
 		world.vehicles.detach(player->handle);
 	const world::Entity *target = world.registry.get(target_zone);
 	const bool mobile_spawn = target != nullptr && target->is_spawn_point &&
 			target->item_type == 1;
 	if (mobile_spawn) {
+		// The root's dead bit, then its +0x170, then the walk [orig: Server_DeployPlayer
+		//  @0x5177CB / @0x5177CF, @0x5177D5 / @0x5177DB, @0x5177EA / @0x5177F4].
 		world::VehicleSeatSelection selected;
-		if (!target->primary_occupant.valid() ||
+		if (((target->flags | target->engine_flags) & world::kEntityFlagDead) != 0 ||
+				!target->primary_occupant.valid() ||
 				!world::find_best_vehicle_seat(
-						world, target_zone, player->handle, selected))
+						world, target_zone, player->handle, selected)) {
+			// Each a bare return [orig: @0x517A7C]; the next 0x0A shows the unheld slot, as
+			// the deploy's below [orig: NetPacket_WritePlayerState @0x4FF6D7, the hold @0x4FF7AA].
+			if (!conn.link.spectator) player->flags &= ~1u;
 			return replies;
+		}
 	}
 	// The revive latch (+89932) skips the spawn protection and the kit rebuild below;
 	// the placement lands a revive on its saved position (server_spawn.h). [orig: the
@@ -935,7 +951,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: Server_PositionPlayerForSpawn @0x50D424..0x50D45A]
 	world::apply_spawn_point_latches(*player, pose);
 	// The deploy's and the reset's signed raises to the row's difficulty-aware ceiling: 0 leaves
-	// the hp-0 body's 1, a wrapped one a dead player's health [orig: Server_ProcessPlayerDeath ->
+	// the hp-0 body's 1, a wrapped one a dead player's health [orig: Server_DeployPlayer ->
 	// Entity_RaiseHealthToMax @0x51782F; Entity_ResetToSpawnState @0x4B97BC].
 	const bool def_hp = world.tables.player.has_item_def && world.tables.player.item_hp.has_value();
 	const int32_t ceiling = def_hp || player->health_max > 0 ? world::max_health_with_difficulty(
@@ -948,7 +964,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// validated fire clears it, and Projectile_ProcessDamageOnTarget zeroes damage
 	// while it is nonzero. The bot (+96483) and revive-latch 0-stores have no
 	// roster feature to reach them here.
-	// [orig: Server_ProcessPlayerDeath @0x517740 — 620 @0x517937/@0x517952/
+	// [orig: Server_DeployPlayer @0x517740 — 620 @0x517937/@0x517952/
 	//  @0x517960; 0 @0x51790a (bot) / @0x51791c (revive)]
 	player->damage_state = revive_deploy ? 0 : 620;
 	if (world::AiEntity *motor =
@@ -964,14 +980,14 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const int32_t heading = pose.found ? pose.heading_bam : motor->heading;
 		world::infantry_respawn_snap(*motor, motor_position, heading, player->health);
 	}
-	// [orig: Server_ProcessPlayerDeath @0x5178aa]
+	// [orig: Server_DeployPlayer @0x5178aa]
     if (player->handle == world.cached.local_player && world.local_player_state != nullptr)
         world.local_player_state->reset_for_new_round();
 	// A deploy that is not a medic revive removes the devices a non-spectator
 	// placed in its last life (each through the notifying removal; they stay
 	// armed from the death until here), then rebuilds the slot's kit from its
 	// loadout buffer; a revived player keeps the kit it died with (D-NET-378).
-	// [orig: Server_ProcessPlayerDeath @0x517740 — the revive latch test
+	// [orig: Server_DeployPlayer @0x517740 — the revive latch test
 	//  @0x5178C5, the spectator latch test @0x5178CD, the
 	//  Entity_RemovePlacedDevicesByOwner call @0x5178D8, the
 	//  PlayerSlot_InitWeaponsFromLoadout call @0x5178E1]
@@ -980,17 +996,16 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		PlayerSlot_InitWeaponsFromLoadout(config, conn, world.tables.weapons);
 	}
 	conn.discard_pre_deploy_uplinks = true;
-	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
-	conn.link.respawn_pending = false;
-	world.match.set_player_respawn_pending(player->handle, false);
-	conn.link.respawn_delay_seconds = 0;
-	conn.link.spawn_target_hold_seconds = 0;
+	// No +360 store; the +364 hold clears only for a raw handle other than
+	// 0xFFFF, resolvable or not [orig: Server_DeployPlayer @0x51786B..0x517872].
+	if (requested_handle != world::EntityHandle::kInvalid)
+		conn.link.spawn_target_hold_seconds = 0;
 	conn.link.downed_revive_seconds = 0;
 	conn.link.medic_request_active = false;
 	conn.link.death_cause_revivable = false;
 	// The deploy leg overwrites the whole +89912 state byte (1, or 3 while the
 	// pre-round timer runs: bit 1 is the pre-round loadout latch) and zeroes the
-	// +356 armory cooldown. [orig: Server_ProcessPlayerDeath @0x517803/@0x517812;
+	// +356 armory cooldown. [orig: Server_DeployPlayer @0x517803/@0x517812;
 	//  slot+0x164 = 0 @0x517900]
 	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
 	conn.reply.frontier_hint_pending = false; // bits 0x04/0x08 of the same byte
@@ -1001,25 +1016,26 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// The next 0x0A clears the hide bit and re-sets a spectator's, so a deployed
 	// spectator stays hidden [orig: NetPacket_WritePlayerState @0x4FF6D7, @0x4FF7A1].
 	if (!conn.link.spectator) player->flags &= ~1u;
-	server_logs_deploy(server_log, *player); // /PROFILE's PBRK [orig: Server_ProcessPlayerDeath @0x517a27..0x517a37]
+	server_logs_deploy(server_log, *player); // /PROFILE's PBRK [orig: Server_DeployPlayer @0x517a27..0x517a37]
 	if (mobile_spawn) {
 		// Retail repeats FindBestSeatSlot after the reset, then requests the
 		// authoritative attach against the returned root/child seat owner.
-		// [orig: Server_ProcessPlayerDeath @0x517A3E..0x517A74]
+		// [orig: Server_DeployPlayer @0x517A3E..0x517A74]
 		world::VehicleSeatSelection selected;
 		if (world::find_best_vehicle_seat(
 					world, target_zone, player->handle, selected))
 			world.vehicles.request_attach(player->handle, selected);
 	}
 	// Never on a revive deploy, whose client leaves the deploy wait on its record's
-	// respawn edge (D-NET-379) [orig: @0x5178F2, under the @0x5178C5 test].
-	if (!revive_deploy)
+	// respawn edge (D-NET-379), nor out of a session (world.rules.mp_session)
+	// [orig: @0x5178F2, under the @0x5178C5 test and is_in_session @0x5178E9 / @0x5178EF].
+	if (!revive_deploy && world.rules.mp_session)
 		replies.push_back(make_protocol_message(
 				0x5A, build_current_loadout_reply(
 						conn.reply.last_loadout_reply, player->player_class)));
-	replies.push_back(make_protocol_message(
-			0x61, Server_RerollPlayerTickSeed(conn)));
-	const uint8_t frontier = world.zones.frontier_zone(player->team);
+	replies.push_back(make_protocol_message(0x61, Server_RerollPlayerTickSeed(conn)));
+	// The slot team's frontier (D-NET-583) [orig: @0x5179BA, the call @0x5179D9]
+	const uint8_t frontier = world.zones.frontier_zone(conn.assigned_team);
 	if (frontier != 0)
 		replies.push_back(make_protocol_message(
 				s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));
@@ -1206,6 +1222,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world != nullptr && inputs.server_ctx != nullptr)
 					Server_HandleTeamChangeRequest(*inputs.server_ctx, conn, *world,
 							io::host_milliseconds_for_logic_tick(now_tick));
+				break;
+			case c2s::DEATH_TIMEOUT_RESET: // [orig: NapiNPServerMsg_DeathTimeoutReset @0x510540]
+				if (world != nullptr && inputs.server_ctx != nullptr)
+					Server_HandleDeathTimeoutReset(*inputs.server_ctx, conn, *world);
 				break;
 			case c2s::RADIO_CALL_REQUEST: { // [orig: NapiNPServerMsg_HandleRadioCall @0x514330]
 				if (world == nullptr) break;
@@ -1613,7 +1633,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// wave row: position at the pick (including §5.61's shared-counter 6007 scatter;
 				// only the runtime-named model userpoint remains open) else the per-team marker chain,
 				// reset-to-spawn-state, template health —
-				// Server_ProcessPlayerDeath's deploy leg [orig: @0x517740 -> Server_PositionPlayerForSpawn
+				// Server_DeployPlayer's deploy leg [orig: @0x517740 -> Server_PositionPlayerForSpawn
 				// @0x50cf60 -> Entity_ResetToSpawnState @0x4B9610]. Deploy-time 0x61 seed re-send and
 				// the 0x1D overlay stay burst-only (tracked §5.61 deferral). A newly queued pick
 				// receives requester-local unreliable 0x6E immediately; immediate and wave release
@@ -1634,6 +1654,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						: 0;
 				const world::Entity *target = nullptr;
 				const bool revive_latch = conn.reply.revive_pose_valid; // +89932
+				// The base is the slot team (+416), not the entity's (D-NET-464) [orig: @0x519B88;
+				//  the spectator legs @0x519B7A..0x519BC1].
+				const uint8_t request_team = world::deploy_request_team(*world, conn.assigned_team,
+						conn.link.spectator, pick, config.game_type);
+				uint16_t handle = pick;
 				if (pick == world::kDeployPickAutoTeam) {
 					// Conquer & Control rejects the auto pick outright, before the frontier
 					// resolve: no deploy, no wave queue, no reply.
@@ -1642,32 +1667,22 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// Auto-deploy: the team's frontier zone; null falls back to the marker chain
 					// [orig: Spawn_FindEntityForTeam @0x4fc810 -> requestedHandle -1 on miss],
 					// as a revived player always does [orig: the latch @0x519c3d..0x519c4b].
-					if (!revive_latch)
-						target = world->zones.find_spawn_zone_for_team(
-								player->team, config.game_type);
-				} else if (pick != world::kDeployPickNone) {
-					if (revive_latch) break; // a revived player's pick [orig: @0x519c5a]
-					// Only 0xFFFF is the no-target (Default Spawn) pick. Handle 0 — and the
-					// absent-body default above — resolves pool 0 index 0 through the ordinary
-					// spawn-point attrib/team test like any other handle, so it deploys only
-					// when that entity is a same-team spawn point (a player never is).
-					// [orig: @0x519c58..0x519c88 resolve then return on null;
+					const world::Entity *frontier = revive_latch ? nullptr
+							: world->zones.find_spawn_zone_for_team(request_team, config.game_type);
+					handle = frontier != nullptr ? frontier->handle.packed : world::kDeployPickNone;
+				}
+				if (handle != world::kDeployPickNone) {
+					// Every handle but 0xFFFF, the frontier's included: a revived player's pick,
+					// then +364, then the resolve against the requester entity's team, each
+					// refusing. Handle 0, and the absent-body default above, resolves pool 0
+					// index 0 like any other handle, so it deploys only when that entity is a
+					// same-team spawn point (a player never is). [orig: @0x519c5a; @0x519c67;
+					//  @0x519c58..0x519c88 resolve then return on null;
 					//  Server_ResolveSpawnTargetHandle @0x4FE110 — pool/index decode
 					//  @0x4fe13f..0x4fe159, attrib 0x40000 @0x4fe16f, team @0x4fe181]
-					target = world->zones.resolve_spawn_target(player->team, pick);
-					if (target == nullptr) break; // invalid pick: silent no-op [orig: @0x519c88]
-				}
-				// +364 is tested only after the requested handle resolves to a
-				// real target. Default Spawn, and an auto pick with no frontier,
-				// bypass it. [orig: Server_ProcessClientRequestRespawn @0x519c67]
-				if (target != nullptr && conn.link.spawn_target_hold_seconds != 0)
-					break;
-				if (target != nullptr) {
-					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
-					// control(+540) >= 0x10000].
-					if (target->zone_number != 0 &&
-					    (target->team != player->team || target->zone_control < 0x10000))
-						break;
+					if (revive_latch || conn.link.spawn_target_hold_seconds != 0) break;
+					target = world->zones.resolve_spawn_target(player->team, handle);
+					if (target == nullptr) break; // a silent no-op [orig: @0x519c88]
 				}
 				// Retail's `nodefaultspawnpoints` option is named after its UI,
 				// not its actual predicate. It applies only to a target-less pick
@@ -1677,44 +1692,61 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Entity_HasAliveEntityOfTeam @0x4FC7B0; the revive latch @0x519c97]
 				if (config.default_spawn_requires_no_team_zone != 0 &&
 						!revive_latch && target == nullptr &&
-						world->zones.team_has_available_spawn_zone(player->team))
+						world->zones.team_has_available_spawn_zone(request_team))
 					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
-				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
-				// player's request is a no-op; an alive-but-undeployed joiner deploys now.
-				if (!conn.link.respawn_pending && player->health > 0) break;
-				// +360 follows the dead-or-pending test and silently rejects every
-				// pick, including Default Spawn. [orig: @0x519cf2]
-				if (conn.link.respawn_delay_seconds != 0) break;
-				if (target != nullptr && target->item_type == 1 &&
-						target->is_spawn_point) {
-					// A vehicle target is selectable only while alive and while its
-					// weighted root/child seat walk finds a free slot. The separate
-					// +0x170 primary-occupant gate belongs to release, below.
-					// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34]
-					world::VehicleSeatSelection selected;
-					if (!world::find_best_vehicle_seat(
-							*world, target->handle, player->handle, selected))
-						break;
-				}
-				if (target != nullptr) {
-					if (world->zones.spawn_waves.try_queue(
-							*world, target->handle, player->handle)) {
-						ProtocolMessage status = make_protocol_message(
-								s2c::SPAWN_WAVE_STATUS,
-								build_spawn_wave_status_body(*world, player->handle));
-						status.reliable = false;
-						replies.push_back(std::move(status));
-						break;
+				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive, unheld
+				// player's request is refused in a session; out of one (world.rules.mp_session)
+				// it deploys at once, ahead of +360, the seat, the zone and the wave
+				// [orig: is_in_session @0x519cd0 / @0x519cd7, the deploy @0x519cdd..0x519ce3].
+				const bool deploy_now = !conn.link.respawn_pending && player->health > 0;
+				if (deploy_now && world->rules.mp_session) break;
+				if (!deploy_now) {
+					// +360 follows the dead-or-pending test and silently rejects every
+					// pick, including Default Spawn. [orig: @0x519cf2]
+					if (conn.link.respawn_delay_seconds != 0) break;
+					if (target != nullptr && target->item_type == 1 &&
+							target->is_spawn_point) {
+						// A vehicle target is selectable only while its root's dead bit is
+						// clear, and while its weighted root/child seat walk finds a free slot.
+						// The root test refuses a dead root even when a live child would offer
+						// a seat; the walk gates only each entry it visits. The +0x170 gate is
+						// release's.
+						// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34 - the
+						//  root's dead bit @0x519D19 / @0x519D1D, the walk @0x519D2A]
+						world::VehicleSeatSelection selected;
+						if (((target->flags | target->engine_flags) & world::kEntityFlagDead) != 0 ||
+								!world::find_best_vehicle_seat(
+										*world, target->handle, player->handle, selected))
+							break;
 					}
-					if (world->zones.spawn_waves.has_entry(target->handle)) break;
+					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
+					// control(+540) >= 0x10000].
+					if (target != nullptr && target->zone_number != 0 &&
+					    (target->team != request_team || target->zone_control < 0x10000))
+						break;
+					// A spectator skips the wave [orig: @0x519D65..0x519D7F]; the queue asks as the
+					// slot team (D-NET-581) [orig: the TryQueuePlayer call @0x519D8F].
+					if (target != nullptr && !conn.link.spectator) {
+						if (world->zones.spawn_waves.try_queue(
+								target->handle, player->handle, conn.assigned_team)) {
+							ProtocolMessage status = make_protocol_message(s2c::SPAWN_WAVE_STATUS,
+									build_spawn_wave_status_body(*world, conn));
+							status.reliable = false;
+							replies.push_back(std::move(status));
+							break;
+						}
+						if (world->zones.spawn_waves.has_entry(target->handle)) break;
+					}
+					world->zones.spawn_waves.remove_player(player->handle);
 				}
-				world->zones.spawn_waves.remove_player(player->handle);
 				const world::EntityHandle target_handle = target != nullptr
 						? target->handle
 						: world::EntityHandle{};
+				// The leg takes the stored handle [orig: Server_ProcessClientRequestRespawn,
+				//  the Server_DeployPlayer calls @0x519CE3/@0x519D7F/@0x519DC8/@0x519DE8].
 				std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
-						config, conn, *world, target_handle,
+						config, conn, *world, target_handle, target_handle.packed,
 						inputs.server_ctx != nullptr ? inputs.server_ctx->logs.profile : nullptr);
 				replies.insert(replies.end(),
 				               std::make_move_iterator(deployment.begin()),
@@ -1944,7 +1976,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::SPECTATOR_RESPAWN: { // [orig: Server_ProcessClientRequestSpectatorRespawn @0x51C840]
 				// Gates in order: no spawn gate, authority, permanent death on, a
 				// spectator capacity, a player, not already a spectator; then
-				// Server_KillPlayerAndNotify(player, packet i16, 1). The conversion
+				// Server_ConvertPlayerToSpectator(player, packet i16, 1). The conversion
 				// needs the owning context, so it is staged for the host tick.
 				if (inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;
 				if (!config.permanent_death || config.spectator_slots == 0) break;
@@ -2352,14 +2384,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// @0x429730). The handler reads NO fields from the request, is
 				// authority-gated, and is SKIPPED while g_NetSpawnSuspended or
 				// g_SpawnSuccessGate (round over) is set — our reachable analog of the
-				// latter is world->match.outcome().ended.
-				// Documented delta (D-NET-176, FIXED — entry (b) of its ledger row): retail
-				// walks the pool's fixed entry count. Our
-				// pool-0 capacity is an OpenNova sizing choice (1024 by default), so the
-				// walk stops at the highest OCCUPIED slot: a slot above that high-water
-				// mark was never streamed to any client, so listing it is a no-op that
-				// would only inflate the datagram.
-				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0]
+				// latter is world->match.outcome().ended. The walk covers pool 0's used
+				// count, its allocation high-water mark (D-NET-417); its empty test is the
+				// ItemTypeIndex (+0x1C) alone, with no def test: a free row, or a live one
+				// of a type items.def lacks (the lookup's miss answers row 0).
+				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0,
+				//  the used read @0x5160FF, the +0x1C test @0x516123]
 				std::size_t consumed = 0;
 				if (world == nullptr ||
 				    !decode_empty_slots_request(
@@ -2367,16 +2397,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				    world->match.outcome().ended) {
 					break;
 				}
-				const std::size_t capacity = world->registry.pool_capacity(0);
-				std::size_t high_water = 0;
-				for (std::size_t slot = 0; slot < capacity; ++slot) {
-					const world::EntityHandle h{static_cast<uint16_t>(slot)};
-					if (world->registry.get(h) != nullptr) high_water = slot + 1;
-				}
+				const std::size_t used = world->registry.pool_used(0);
 				DestroyEntityList sweep;
-				for (std::size_t slot = 0; slot < high_water; ++slot) {
-					const world::EntityHandle h{static_cast<uint16_t>(slot)};
-					if (world->registry.get(h) == nullptr)
+				for (std::size_t slot = 0; slot < used; ++slot) {
+					const world::Entity *e =
+							world->registry.get(world::EntityHandle{static_cast<uint16_t>(slot)});
+					if (e == nullptr || e->item_type_index == 0)
 						sweep.pool0_indices.push_back(static_cast<uint16_t>(slot));
 				}
 				replies.push_back(make_protocol_message(

@@ -33,8 +33,8 @@ bool slot_active(const NapiNPConnection &conn) {
 // Otherwise every live slot's team swaps 1 <-> 2 (its side's avatar and spawn
 // selection follow the team at its next spawn), the side-to-team map swaps,
 // and a set latch then sets the toggle and clears itself. The slot's pending
-// team byte (+100568), which the swap takes first when nonzero, has no
-// writer in the port.
+// team byte (+100568), which the swap takes first when nonzero, is the
+// convert's `spectator_restore_team`; this swap does not read it (D-NET-591).
 // [orig: Game_TeardownMission @0x522435..0x522520 -- the latch test
 //  @0x522448..0x522457, the slot walk @0x52245D..0x5224F4 (live: +4 and the
 //  entity pointer @0x522470..0x522479; the pending team @0x52247B..0x522485;
