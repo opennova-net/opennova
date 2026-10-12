@@ -9,6 +9,8 @@
 #include <utility>
 
 #include <base/io/strutil.h>
+#include <formats/pcx/pcx_io.h>
+#include <formats/trn/charmap_legend.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/texture_budget.h>
@@ -92,6 +94,39 @@ const TextureHeader *kept_header(const std::string &root, const AssetEntry *entr
 
 const TextureHeader *header_of(const ValidationInput &input, const std::string &relative, TextureReader reader) {
 	return kept_header(input.paths.root, input.scan.at_path(relative), reader);
+}
+
+// A char map's classes at or past the twenty the tile set tables name (TSD_NULL to TSD_*, formats/trn
+// charmap_legend.h): how many texels hold one and the highest, as its 8-bit PCX decodes, kept while the file's stamp
+// stands (g_mutex held). None for a file that is no 8-bit PCX.
+struct KeptClasses {
+	uint64_t size = 0;
+	int64_t modified = 0;
+	size_t past = 0;
+	int highest = -1;
+};
+std::map<std::string, KeptClasses> g_classes;
+
+const KeptClasses *char_map_classes(const ValidationInput &input, const std::string &relative) {
+	const AssetEntry *entry = input.scan.at_path(relative);
+	if (!entry) return nullptr;
+	const std::string path = join_path(input.paths.root, entry->relative_path);
+	const auto found = g_classes.find(path);
+	if (found != g_classes.end() && found->second.size == entry->size_bytes && found->second.modified == entry->modified_ticks)
+		return &found->second;
+	KeptClasses kept;
+	kept.size = entry->size_bytes;
+	kept.modified = entry->modified_ticks;
+	std::vector<uint8_t> bytes;
+	std::string error;
+	IndexedImage8 image;
+	if (io::read_file_bytes(path, bytes, error) && decode_pcx_indexed(bytes.data(), bytes.size(), image, error))
+		for (const uint8_t index : image.indices)
+			if (index >= kCharmapLegendCount) {
+				++kept.past;
+				kept.highest = std::max(kept.highest, int(index));
+			}
+	return &(g_classes[path] = kept);
 }
 
 // Where a use is, in words: "the terrain colour map of isle.trn".
@@ -377,6 +412,18 @@ void check_use(const AssetGraph &graph, const ValidationInput &input, const Grap
 	}
 	check_sizes(role, basename_of(served), *header, where, context, add);
 	check_budget(role, served, *header, where, context, costed, add);
+	// A char map's classes past the twenty the tile set tables name: the game reads the byte as it stands
+	// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x6065C6], and what reads the class bounds it alone (docs/tiles/til-re.md
+	// "A char-map class at or past 20"): listed, never gated.
+	if (role == R::TerrainCharMap && reader == TextureReader::Pcx)
+		if (const KeptClasses *classes = char_map_classes(input, served); classes && classes->past > 0)
+			add(F::TextureCharMapClass, DiagnosticSeverity::Warning,
+			    basename_of(served) + ", " + where + ", holds " + std::to_string(classes->past) + " texel" +
+			            (classes->past == 1 ? "" : "s") + " of a class at or past 20 (the highest " +
+			            std::to_string(classes->highest) +
+			            "), past the twenty surface classes the tile set tables name: the game reads them as they stand, "
+			            "its footsteps and weather treat them as no class they name, and a round striking there takes an "
+			            "impact row no shipped table authors (classes 20 to 23) or the ammo's obj row (24 and past).");
 	// A material that cuts out by this texture's alpha (the row its technique tests, TextureRowContext) over a
 	// texture of none: a PCX the game loads with every texel opaque [orig: Texture_LoadPCXFromPFF32 @
 	// 0x56EC98..0x56ECF3], or a file of no alpha, read as 255. The test keeps a texel whose alpha is above the
