@@ -11,8 +11,11 @@ namespace opennova {
 
 // What a .til's header says beside its records: read for a document's source notes, never written
 // back (save_til computes the header). MED writes +8 = 12 * count + 16 and +12 = 0 [orig: JOTACmed
-// MapTileStore_Serialize @ 0x433F44..0x433F50]; the game reads neither and no byte past the count's
-// records [orig: Terrain_LoadTileInfoFile @ 0x60A7E6..0x60A7EF].
+// MapTileStore_Serialize @ 0x433F44..0x433F50]. The game reads no byte past the count's records and
+// draws, collides and places nothing by the two words [orig: Terrain_LoadTileInfoFile @
+// 0x60A7E6..0x60A7EF]: a host copies them onto the S2C 0x45 wire as the file holds them [orig:
+// Terrain_SerializeTiles @ 0x60815A..0x608166], and a joiner rebuilds the header as MED writes it,
+// 12 * count + 16 and 0 [orig: PolyTrn_LoadTileData @ 0x608209..0x60823D].
 struct TilHeaderFacts {
 	uint32_t size_word = 0;
 	uint32_t word12 = 0;

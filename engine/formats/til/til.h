@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -86,17 +87,18 @@ inline int til_cell_z_from_world(double world_z) {
 	return til_cell_from_world(world_z);
 }
 
+// The tile set's cells: width / 64 columns, one at least (a set narrower than a cell is one column as
+// wide as itself, its every index drawn), and height / 64 rows [orig: Terrain_LoadTileSetAtlas @
+// 0x604B8A..0x604B97, the column count forced to 1 @ 0x604B97]. A set under 64 texels tall has no
+// row: the game's row step is then 1 / 0 and its quads' V infinite (@ 0x604BC2), which the port does
+// not draw (docs/tiles/til-re.md D-TIL-8).
 inline TilAtlasLayout til_make_atlas_layout(int atlas_width, int atlas_height) {
 	TilAtlasLayout layout;
-	if (atlas_width < TIL_ATLAS_TILE_PIXELS || atlas_height < TIL_ATLAS_TILE_PIXELS) {
+	if (atlas_width <= 0 || atlas_height < TIL_ATLAS_TILE_PIXELS) {
 		return layout;
 	}
-	layout.tiles_x = atlas_width / TIL_ATLAS_TILE_PIXELS;
+	layout.tiles_x = std::max(1, atlas_width / TIL_ATLAS_TILE_PIXELS);
 	layout.tiles_y = atlas_height / TIL_ATLAS_TILE_PIXELS;
-	if (layout.tiles_x <= 0 || layout.tiles_y <= 0) {
-		layout = TilAtlasLayout{};
-		return layout;
-	}
 	layout.step_u = 1.0f / static_cast<float>(layout.tiles_x);
 	layout.step_v = 1.0f / static_cast<float>(layout.tiles_y);
 	return layout;
@@ -148,7 +150,8 @@ inline TilUvQuad til_build_entry_uv_quad(uint8_t tile_index,
 	// cells lies below it, and the atlas's CLAMP addressing draws that quad from the atlas's last
 	// texel row [orig: PolyTrn_RenderTile @ 0x60DEBF..0x60DF05 (idiv by g_TerrainTileSetTilesX, the
 	// row times flt_319F7C4); Terrain_LoadTileSetAtlas @ 0x604B4E (flags 0x100203: CLAMP) and
-	// @ 0x604B8A..0x604BC2 (tiles = width / 64, height / 64)]. docs/tiles/til-re.md D-TIL-7.
+	// @ 0x604B8A..0x604BC2 (tiles = width / 64 (one at least, @ 0x604B97), height / 64)].
+	// docs/tiles/til-re.md D-TIL-7.
 	const int tile_col = tile_index % layout.tiles_x;
 	const int tile_row = tile_index / layout.tiles_x;
 
@@ -276,7 +279,7 @@ inline TilOverlayEntry make_til_entry(int32_t x_fixed,
 	return entry;
 }
 
-// A record on the 16-unit grid (the cell's corner), layer 0.
+// A record on the 16-unit grid (the cell's corner), layer 0: the tests' way of placing a tile by its cell.
 inline TilOverlayEntry make_til_overlay_entry(int cell_x,
 	                                          int cell_z,
 	                                          uint8_t tile_index,

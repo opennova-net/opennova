@@ -488,7 +488,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		case InitialStateBurst::kStreamTerrainTiles: { // 0x45 terrain-tile (.til) load [orig: Terrain_SerializeTiles @0x6080F0, §5.37/D-NET-83]
 			// Stream the mission's terrain-tile array so the joiner's g_LoadingProgress climbs 5 -> 6 and
 			// its terrain finishes loading. The raw .til header maps 1:1 onto the 0x45 header
-			// (`[u32 'til0'][u32 count][u32 res0][u32 res1]` then count × 12-B entries). EMPTY .til =>
+			// (`[u32 'til0'][u32 count][u32 size_word][u32 word12]` then count × 12-B entries, the two
+			// words as the file holds them, formats/til TilHeaderFacts). EMPTY .til =>
 			// faithfully skip (Terrain_SerializeTiles returns 0 with no tile data). Page boundaries are set
 			// by the shared byte-budget chunker (client reassembles by start/end index, so the split is
 			// transport-transparent — not a byte-parity field like the entity pools).
@@ -503,8 +504,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				break;
 			}
 			const uint32_t total_count = rd_u32(til.data() + 4);
-			const uint32_t res0 = rd_u32(til.data() + 8);
-			const uint32_t res1 = rd_u32(til.data() + 12);
+			const uint32_t size_word = rd_u32(til.data() + 8);
+			const uint32_t word12 = rd_u32(til.data() + 12);
 			std::size_t avail = (til.size() - kTilHeaderBytes) / kTilEntryBytes;
 			std::size_t n_tiles = total_count < avail ? total_count : avail; // bound to actual bytes
 			if (n_tiles == 0) { // no tiles -> Terrain_SerializeTiles returns 0 (emit nothing), not an empty marker
@@ -520,8 +521,8 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 				if (batch.has_header) {
 					batch.magic = kTerrainTileMagic;
 					batch.tile_count = total_count;   // TOTAL set size (drives the client's alloc)
-					batch.header_field2 = res0;
-					batch.header_field3 = res1;
+					batch.header_field2 = size_word;
+					batch.header_field3 = word12;
 				}
 				batch.tiles.reserve(cnt);
 				for (std::size_t i = 0; i < cnt; ++i) {
