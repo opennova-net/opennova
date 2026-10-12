@@ -12,7 +12,9 @@
 //   - phase B completes the mission start and only then the session's load,
 //     and the 0x0A view distance is the world's fog distance (D-NET-139);
 //   - a set mpreset word refuses the session create and phase A reports the
-//     process exit to the embedder (D-NET-385).
+//     process exit to the embedder (D-NET-385);
+//   - the host's session config carries the anti-cheat sources the boot
+//     computed from the mount (D-NET-181).
 #include <runtime/inmatch/host_boot.h>
 
 #include <base/gameprofile/game_type.h>
