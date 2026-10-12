@@ -1031,8 +1031,8 @@ int test_names_file() {
 }
 
 // The editor's own .mis of a mission with entities in every pool: what it reads, written again, is the bytes read
-// (the fixed point, each entity's base height the one read), and a save over another terrain moves the base
-// heights alone, the file written still the editor's own.
+// (the fixed point, each entity's heights as read), and a save over another terrain moves the unlocked entities'
+// heights alone (their z less the terrain's height under them, D-MIS-4), the file written still the editor's own.
 int test_names_file_entities() {
 	bms::File file = names_mission();
 	const mission::EntityKind kinds[] = {mission::EntityKind::Item, mission::EntityKind::Building, mission::EntityKind::Marker,
@@ -1065,8 +1065,10 @@ int test_names_file_entities() {
 	std::vector<int32_t> moved = heights;
 	for (int32_t &height : moved) height += bms::to_fixed_16_16(1.0);
 	m.set_base_heights(moved);
+	const bms::Entity &last = file.organics.back();
 	TEST_EXPECT(save_text(m, beside(&mis), text) && text != mis_text &&
-	            text.find("extra_bheight " + std::to_string(moved[3])) != std::string::npos);
+	            text.find("  position " + std::to_string(last.x) + " " + std::to_string(last.y) + " " +
+	                      std::to_string(last.z - moved[3]) + "\r\n") != std::string::npos);
 	const std::vector<uint8_t> written = bytes_of(text);
 	document = read_with(bms_bytes, &written);
 	TEST_EXPECT(document && dynamic_cast<MissionDocument &>(*document).names_file().ours);
@@ -1492,9 +1494,11 @@ private:
 	uint64_t serial_ = 0;
 };
 
-// Each entity's base height in the .mis a save writes is the terrain's height under it, as the original editor
+// Each entity's height in the .mis a save writes is taken off the terrain's height under it, as the original editor
 // samples it over the mission's terrain (M4: mission::mis_terrain_height, the .cpt's atlas the game loads blended
-// bilinearly over the .trn's own sector grid): every pool's, a marker's and an itemless entity's too.
+// bilinearly over the .trn's own sector grid): every pool's, a marker's and an itemless entity's too, each unlocked
+// (D-MIS-4: its z less the height, its base as it stands, no height_lock line). Where the terrain does not read, each
+// is written locked at its z (D-MIS-17).
 int test_names_base_heights() {
 	NamesProject p("opennova_mission_names_heights");
 	const std::string tmap = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/terrain/tmap/";
@@ -1564,23 +1568,43 @@ int test_names_base_heights() {
 	if (!p.mission("missions/heights.bms")) return 1;
 	p.name_event("missions/heights.bms", 0, "Start");
 	p.run(request::save("missions/heights.bms"));
-	// The items' sections in the writer's order (items, buildings, markers, organics), each its extra_bheight and
-	// height_lock (the reader sorts an item into its pool by its type, not by the section's place).
-	const std::string text = p.text("missions/heights.mis");
-	std::vector<int64_t> bases, locks;
-	for (size_t at = 0; (at = text.find("\n  extra_bheight ", at)) != std::string::npos; ++at)
-		bases.push_back(std::stoll(text.substr(at + 17, text.find('\r', at) - at - 17)));
-	for (size_t at = 0; (at = text.find("\n  height_lock ", at)) != std::string::npos; ++at)
-		locks.push_back(std::stoll(text.substr(at + 15, text.find('\r', at) - at - 15)));
-	TEST_EXPECT(bases.size() == 4 && locks.size() == 4);
-	if (bases.size() != 4 || locks.size() != 4) return 1;
+	// The items' sections in the writer's order (items, buildings, markers, organics), each its position's z, its
+	// extra_bheight and no height_lock (the reader sorts an item into its pool by its type, not by the section's
+	// place).
+	const auto heights_of = [](const std::string &text, std::vector<int64_t> &zs, std::vector<int64_t> &bases) {
+		zs.clear();
+		bases.clear();
+		for (size_t at = 0; (at = text.find("\n  position ", at)) != std::string::npos; ++at) {
+			const std::string line = text.substr(at + 1, text.find('\r', at + 1) - at - 1);
+			zs.push_back(std::stoll(line.substr(line.rfind(' ') + 1)));
+		}
+		for (size_t at = 0; (at = text.find("\n  extra_bheight ", at)) != std::string::npos; ++at)
+			bases.push_back(std::stoll(text.substr(at + 17, text.find('\r', at) - at - 17)));
+	};
+	std::string text = p.text("missions/heights.mis");
+	std::vector<int64_t> zs, bases;
+	heights_of(text, zs, bases);
+	TEST_EXPECT(zs.size() == 4 && bases.size() == 4 && text.find("height_lock") == std::string::npos);
+	if (zs.size() != 4 || bases.size() != 4) return 1;
 	// Pinned: the original editor's blend over Tmap there (its sampler's, not the game's column).
 	const int64_t pinned[4] = {5079735, 6308535, 4977335, 6206135};
 	for (size_t i = 0; i < 4; ++i) {
-		if (bases[i] != pinned[i]) std::printf("  entity %zu: extra_bheight %lld\n", i, static_cast<long long>(bases[i]));
-		TEST_EXPECT(bases[i] == mission::mis_terrain_height(terrain, spots[i].first, spots[i].second) &&
-		            bases[i] == pinned[i] && locks[i] == 1);
+		const int64_t under = int64_t(bms::to_fixed_16_16(1.0)) - zs[i];
+		if (under != pinned[i]) std::printf("  entity %zu: the terrain's height %lld\n", i, static_cast<long long>(under));
+		TEST_EXPECT(under == mission::mis_terrain_height(terrain, spots[i].first, spots[i].second) && under == pinned[i] &&
+		            bases[i] == 0);
 	}
+	// The terrain gone: no height read, each entity written locked at its z.
+	TEST_EXPECT(p.put("Tmap.trn", std::string("garbage")));
+	p.run(request::rescan());
+	p.name_event("missions/heights.bms", 0, "Started");
+	p.run(request::save("missions/heights.bms"));
+	text = p.text("missions/heights.mis");
+	heights_of(text, zs, bases);
+	size_t locks = 0;
+	for (size_t at = 0; (at = text.find("\n  height_lock 1\r", at)) != std::string::npos; ++at) ++locks;
+	TEST_EXPECT(zs.size() == 4 && locks == 4);
+	for (size_t i = 0; i < zs.size(); ++i) TEST_EXPECT(zs[i] == bms::to_fixed_16_16(1.0) && bases[i] == 0);
 	return 0;
 }
 
