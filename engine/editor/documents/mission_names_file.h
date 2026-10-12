@@ -29,16 +29,16 @@
 // one id: the original's .mis has a slot per zone id 1..99 alone) and what the file system refuses are listed
 // (mission.names_unwritten), never a failed save of the mission.
 //
-// Each item's base height (extra_bheight) is the terrain's height under it, which the session samples at the save
-// (MissionDocument::set_base_heights), every entity's, a marker's and an itemless one's too, with height_lock 1:
-// the original editor keeps an item's height and its base (where it was placed, extra_building_height) relative
-// to the terrain, and its save writes a height-locked item's both absolute, the terrain's height under it added,
-// its read taking it off again [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5;
-// sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @ 0x45460e; the base set at placement, MissionItem_AppendByTypeId
-// @ 0x455a16], so an entity of a .bms, which stands at its z over no base of its own, writes the terrain's height,
-// sampled as the original editor samples it (mission::mis_terrain_height, its sampler sub_4226D0 @ 0x4226d0: the
-// .cpt's height atlas the game loads, bilinear, over the .trn's own sector grid), so the original editor reads the
-// item back on no base of its own and at the height it stands.
+// Each entity's heights are written as the original editor's save writes them over the terrain's height under it,
+// which the session samples at the save (MissionDocument::set_base_heights), every entity's, a marker's and an
+// itemless one's too: the original editor keeps an item's height and its base relative to the terrain and writes a
+// height-locked item's both absolute, an unlocked one's relative with no height_lock line [orig: JOTACmed.exe
+// sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5; @ 0x455889..0x45589a], so an entity of a .bms (unlocked:
+// mission_mis.h's frames, D-MIS-4) writes its z less the terrain's height there, sampled as the original editor
+// samples it (mission::mis_terrain_height, its sampler sub_4226D0 @ 0x4226d0: the .cpt's height atlas the game
+// loads, bilinear, over the .trn's own sector grid), and the original editor reads it back at the height it
+// stands. Where the mission's terrain does not read, no height is handed and each entity is written locked, its z
+// absolute, exact there over whatever terrain it loads (D-MIS-17).
 
 #include <array>
 #include <cstdint>
