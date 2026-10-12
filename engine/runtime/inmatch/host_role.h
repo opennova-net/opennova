@@ -123,7 +123,9 @@ public:
 	// (singleplayer_game_config) [orig: SinglePlayer_StartMission @0x561af0].
 	void bring_up_singleplayer(const playersav::ProfileRecord *profile = nullptr);
 	// The shell's general bring-up (the LAN host or its SP listen server with
-	// the shell's mission text and terrain tiles).
+	// the shell's mission text and terrain tiles). The rules word is the
+	// config's mpattrib in a session and 0x4204 for a socketless host, the
+	// shell's single player (D-NET-405).
 	void bring_up(const HostBringup &bringup);
 	// The embedder's bring-up record for the next boot-hook bring_up(): staged
 	// right before the kernel boots (the text, tiles and config are final by
