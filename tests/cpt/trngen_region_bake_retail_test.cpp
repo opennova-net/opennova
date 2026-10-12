@@ -7,11 +7,15 @@
 //   draws them, odd triangles reversed [orig: Terrain_RenderSectorBatch @ 0x609b7e..0x609bd4]) at the atlas
 //   heights, under its .trn's locks, against the atlas: printed (W3), the leaves' triangles all facing the
 //   draw-back's way but where a tile holds a flipped face;
-// - every file: the cold bake it is sculpted from (input := atlas, its .trn's locks) bakes;
-// - three files (one unlocked, two locked): a cold bake's state from the atlas; a region bake of nothing
-//   leaves the file's bytes as they were; a one-leaf edit remakes that leaf and its three ancestors (and the
-//   root's tile at leaf (0, 0)), every other tile and every texel outside the leaf's footprint as shipped, and
-//   the file still writes and reads back.
+// - three files (Dvxi5 an island, Dvxg3 a tiled map, g14 locked): a cold bake's state from the atlas; a region
+//   bake of nothing leaves the file's bytes as they were; a one-leaf edit remakes that leaf and its three
+//   ancestors (and the root's tile at leaf (0, 0)), every other tile and every texel outside the leaf's footprint
+//   as shipped, and the file still writes and reads back;
+// - the other two whose tiles hold flipped faces (Dvxi4 an island, dvxg9 locked; Dvxg3 the third): the cold bake
+//   they are sculpted from (input := atlas, its .trn's locks) bakes.
+//
+// By hand, `cpt_region_bake_retail_test <dir>` cold-bakes every .cpt under <dir> as well (JO:CA's 23 bake,
+// about ten minutes on eight threads).
 #include <formats/cpt/cpt_io.h>
 #include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/cpt/trngen/terrain_bake_state.h>
@@ -21,6 +25,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -226,8 +231,9 @@ void check_region(const std::string &name, const CptFile &shipped, const std::ve
 
 } // namespace
 
-int main() {
-	const std::string assets = retail::assets();
+int main(int argc, char **argv) {
+	const bool every = argc > 1;
+	const std::string assets = every ? std::string(argv[1]) : retail::assets();
 	if (assets.empty()) return retail::skip("OPENNOVA_JO_ASSETS (the extracted retail tree with its loose .cpt polydata)");
 	const std::map<std::string, Locks> locks = trn_locks(assets);
 	std::vector<std::filesystem::path> cpts;
@@ -235,6 +241,11 @@ int main() {
 		if (entry.is_regular_file() && lower(entry.path().extension().string()) == ".cpt") cpts.push_back(entry.path());
 	std::sort(cpts.begin(), cpts.end());
 	expect(cpts.size() >= 23u, "the shipped .cpt files are there (" + std::to_string(cpts.size()) + ")");
+	const std::vector<std::string> region_legs = {"dvxi5.cpt", "dvxg3.cpt", "g14.cpt"};
+	const std::vector<std::string> flipped = {"dvxi4.cpt", "dvxg9.cpt"};
+	const auto among = [](const std::vector<std::string> &names, const std::string &key) {
+		return std::find(names.begin(), names.end(), key) != names.end();
+	};
 	int regions = 0, cold = 0;
 	for (const auto &path : cpts) {
 		const std::string name = path.filename().string();
@@ -245,21 +256,26 @@ int main() {
 			expect(false, name + ": reads with 341 tiles: " + error);
 			continue;
 		}
-		const auto at = locks.find(lower(name));
+		const std::string key = lower(name);
+		const auto at = locks.find(key);
 		const Locks lock = at == locks.end() ? Locks{} : at->second;
 		check_draw_back(name, cpt, lock);
-		const std::string key = lower(name);
-		if (key == "dvxi5.cpt" || key == "dvxg8.cpt" || key == "g14.cpt") {
+		const auto start = std::chrono::steady_clock::now();
+		if (among(region_legs, key)) {
 			check_region(name, cpt, bytes, lock);
 			++regions;
-		} else {
+		} else if (every || among(flipped, key)) {
 			check_cold_bake(name, cpt, lock);
+		} else {
+			continue;
 		}
 		++cold;
+		std::printf("  %-10s baked cold in %.1f s\n", name.c_str(),
+		            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
 	}
-	expect(regions == 3, "the region legs ran on Dvxi5, dvxg8 and g14");
-	expect(cold == static_cast<int>(cpts.size()), "every shipped file's cold bake ran");
+	expect(regions == 3, "the region legs ran on Dvxi5, Dvxg3 and g14");
+	expect(cold == (every ? static_cast<int>(cpts.size()) : 5), "the cold bakes ran (" + std::to_string(cold) + ")");
 	if (failures) return 1;
-	std::printf("OK: region bakes over the shipped .cpt files\n");
+	std::printf("OK: region bakes over the shipped .cpt files, %d of %zu baked cold\n", cold, cpts.size());
 	return 0;
 }
