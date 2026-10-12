@@ -3198,6 +3198,8 @@ bool check_spawn_wave_queue_and_release_wire() {
 		conn.link.transport = i == 0 ? &first_transport : &second_transport;
 		conn.link.owned_entity = i == 0 ? first : second;
 		conn.link.respawn_pending = true;
+		conn.assigned_team = 1; // the slot team (+416) the 0x0E reads
+		conn.assigned_team_valid = true;
 	}
 	const std::vector<uint8_t> pick{
 			static_cast<uint8_t>(zone_handle.packed),
@@ -3328,6 +3330,8 @@ bool check_default_spawn_requires_no_team_zone() {
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
 	conn.link.owned_entity = player;
+	conn.assigned_team = 1; // the slot team (+416) the 0x0E reads
+	conn.assigned_team_valid = true;
 	conn.reply.player_slot = 0;
 
 	const std::vector<opennova::ProtocolMessage> default_pick{

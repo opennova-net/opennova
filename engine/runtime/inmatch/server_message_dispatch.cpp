@@ -1654,8 +1654,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						: 0;
 				const world::Entity *target = nullptr;
 				const bool revive_latch = conn.reply.revive_pose_valid; // +89932
-				const uint8_t request_team = world::deploy_request_team(*world, player->team,
-						conn.link.spectator, pick, config.game_type); // [orig: @0x519B7A..0x519BC1]
+				// The base is the slot team (+416), not the entity's (D-NET-464) [orig: @0x519B88;
+				//  the spectator legs @0x519B7A..0x519BC1].
+				const uint8_t request_team = world::deploy_request_team(*world, conn.assigned_team,
+						conn.link.spectator, pick, config.game_type);
+				uint16_t handle = pick;
 				if (pick == world::kDeployPickAutoTeam) {
 					// Conquer & Control rejects the auto pick outright, before the frontier
 					// resolve: no deploy, no wave queue, no reply.
@@ -1664,26 +1667,23 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// Auto-deploy: the team's frontier zone; null falls back to the marker chain
 					// [orig: Spawn_FindEntityForTeam @0x4fc810 -> requestedHandle -1 on miss],
 					// as a revived player always does [orig: the latch @0x519c3d..0x519c4b].
-					if (!revive_latch)
-						target = world->zones.find_spawn_zone_for_team(
-								request_team, config.game_type);
-				} else if (pick != world::kDeployPickNone) {
-					if (revive_latch) break; // a revived player's pick [orig: @0x519c5a]
-					// Only 0xFFFF is the no-target (Default Spawn) pick. Handle 0 — and the
-					// absent-body default above — resolves pool 0 index 0 through the ordinary
-					// spawn-point attrib/team test like any other handle, so it deploys only
-					// when that entity is a same-team spawn point (a player never is).
-					// [orig: @0x519c58..0x519c88 resolve then return on null;
+					const world::Entity *frontier = revive_latch ? nullptr
+							: world->zones.find_spawn_zone_for_team(request_team, config.game_type);
+					handle = frontier != nullptr ? frontier->handle.packed : world::kDeployPickNone;
+				}
+				if (handle != world::kDeployPickNone) {
+					// Every handle but 0xFFFF, the frontier's included: a revived player's pick,
+					// then +364, then the resolve against the requester entity's team, each
+					// refusing. Handle 0, and the absent-body default above, resolves pool 0
+					// index 0 like any other handle, so it deploys only when that entity is a
+					// same-team spawn point (a player never is). [orig: @0x519c5a; @0x519c67;
+					//  @0x519c58..0x519c88 resolve then return on null;
 					//  Server_ResolveSpawnTargetHandle @0x4FE110 — pool/index decode
 					//  @0x4fe13f..0x4fe159, attrib 0x40000 @0x4fe16f, team @0x4fe181]
-					target = world->zones.resolve_spawn_target(player->team, pick);
-					if (target == nullptr) break; // invalid pick: silent no-op [orig: @0x519c88]
+					if (revive_latch || conn.link.spawn_target_hold_seconds != 0) break;
+					target = world->zones.resolve_spawn_target(player->team, handle);
+					if (target == nullptr) break; // a silent no-op [orig: @0x519c88]
 				}
-				// +364 is tested only after the requested handle resolves to a
-				// real target. Default Spawn, and an auto pick with no frontier,
-				// bypass it. [orig: Server_ProcessClientRequestRespawn @0x519c67]
-				if (target != nullptr && conn.link.spawn_target_hold_seconds != 0)
-					break;
 				// Retail's `nodefaultspawnpoints` option is named after its UI,
 				// not its actual predicate. It applies only to a target-less pick
 				// and walks SpawnZoneList for an unnumbered or fully controlled

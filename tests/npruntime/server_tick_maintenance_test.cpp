@@ -1642,6 +1642,8 @@ bool check_respawn_pick_admission() {
 	conn.burst.spawned = true;
 	conn.link.owned_entity = player;
 	conn.link.respawn_pending = true;
+	conn.assigned_team = 1; // the slot team (+416) the handler reads
+	conn.assigned_team_valid = true;
 	conn.reply.player_slot = 0;
 	auto reset_player = [&]() {
 		w::Entity *entity = world.registry.get(player);
@@ -1734,6 +1736,8 @@ bool check_revived_pick_takes_no_target() {
 	conn.phase = inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
 	conn.link.owned_entity = player;
+	conn.assigned_team = 1; // the slot team (+416) the handler reads
+	conn.assigned_team_valid = true;
 	conn.reply.player_slot = 0;
 	auto reset_player = [&](bool revived) {
 		w::Entity *entity = world.registry.get(player);
@@ -1845,6 +1849,8 @@ bool check_spectator_pick_legs() {
 	conn.burst.spawned = true;
 	conn.link.owned_entity = player;
 	conn.link.spectator = true;
+	conn.assigned_team = 0; // a spectator slot's +416
+	conn.assigned_team_valid = true;
 	conn.reply.player_slot = 0;
 	auto reset_player = [&]() {
 		w::Entity *entity = world.registry.get(player);
@@ -1910,6 +1916,93 @@ bool check_spectator_pick_legs() {
 	(void)dispatch(w::kDeployPickNone);
 	return expect(world.registry.get(player)->health > 0,
 			"on an odd tick it asks as team 1, which holds none");
+}
+
+// D-NET-464: the C2S 0x0E's team base is the slot team (+416), not the entity's,
+// and the auto pick's frontier runs through the pick's resolve against the
+// requester entity's team like any handle, a miss refusing. A script team write
+// to a player body splits the two (Entity_SetTeamByNetId stores the entity byte
+// alone). [orig: Server_ProcessClientRequestRespawn @0x519B88, the auto pick's
+//  zone @0x519BDE, the frontier's handle @0x519C3D..0x519C54, the resolve
+//  @0x519C7C and its miss @0x519C88, Entity_HasAliveEntityOfTeam @0x519CA8, the
+//  zone team @0x519D4A; Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
+bool check_split_slot_team_pick_legs() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(2, 4);
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	auto make_zone = [&](uint8_t team, uint8_t number, float x) {
+		w::Entity z;
+		z.kind = w::EntityKind::Item;
+		z.team = team;
+		z.alive = true;
+		z.is_spawn_point = true;
+		z.zone_number = number;
+		z.zone_control = 0x10000;
+		z.position = {x, 60.0f, 0.0f};
+		return world.registry.spawn(2, z);
+	};
+	make_zone(1, 0, 50.0f); // the slot team's unnumbered zone (no wave rows)
+	const w::EntityHandle other = make_zone(2, 0, 70.0f);
+	const w::EntityHandle numbered = make_zone(1, 3, 90.0f);
+	inmatch::GameConfig config;
+	config.game_type = game_type::kObjectiveCoop; // the auto pick takes the unnumbered zone
+	std::vector<inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.assigned_team = 1;
+	conn.assigned_team_valid = true;
+	auto reset_player = [&](uint8_t entity_team) {
+		w::Entity *entity = world.registry.get(player);
+		entity->alive = false;
+		entity->health = 0;
+		entity->team = entity_team;
+		entity->position = {0.0f, 0.0f, 0.0f};
+		entity->flags |= w::kEntityFlagDead;
+		entity->engine_flags |= w::kEntityFlagDead;
+		conn.link.respawn_pending = true;
+		conn.link.respawn_delay_seconds = 0;
+		conn.link.spawn_target_hold_seconds = 0;
+	};
+	auto dispatch = [&](uint16_t pick) {
+		return inmatch::dispatch_session_replies(config, conn,
+				{make_protocol_message(c2s::RESPAWN_REQUEST,
+						{static_cast<uint8_t>(pick), static_cast<uint8_t>(pick >> 8)})},
+				100, roster, &world);
+	};
+	const w::Entity *body = world.registry.get(player);
+	// Slot team 1, entity team 2: the frontier is team 1's zone, which the resolve refuses.
+	reset_player(2);
+	if (!expect(dispatch(w::kDeployPickAutoTeam).empty() && body->health == 0,
+			"the auto pick looks up the slot team's zone and the entity team refuses it"))
+		return false;
+	// A teamless entity passes the resolve: the slot team's zone deploys.
+	reset_player(0);
+	(void)dispatch(w::kDeployPickAutoTeam);
+	if (!expect(body->health > 0 && body->position.x == 50.0f,
+			"a teamless entity's auto pick deploys at the slot team's zone"))
+		return false;
+	// The numbered zone's team match reads the slot team.
+	reset_player(0);
+	(void)dispatch(numbered.packed);
+	if (!expect(body->health > 0, "a picked numbered zone matches the slot team"))
+		return false;
+	// `nodefaultspawnpoints` asks for the slot team's zones, not the entity team's.
+	config.default_spawn_requires_no_team_zone = 1;
+	world.registry.get(other)->zone_number = 2;
+	world.registry.get(other)->zone_control = 0;
+	reset_player(2);
+	return expect(dispatch(w::kDeployPickNone).empty() && body->health == 0,
+			"Default Spawn is refused while the slot team holds a zone");
 }
 
 bool check_shared_loaded_ammo_fire_and_reload() {
@@ -2130,6 +2223,7 @@ int main() {
 	ok = check_respawn_pick_admission() && ok;
 	ok = check_revived_pick_takes_no_target() && ok;
 	ok = check_spectator_pick_legs() && ok;
+	ok = check_split_slot_team_pick_legs() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }
