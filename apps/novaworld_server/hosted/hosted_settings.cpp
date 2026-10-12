@@ -31,17 +31,6 @@ std::optional<SettingsRefusal> out_of_range(const char *field, int value, int mi
 		"must be " + std::to_string(min) + " to " + std::to_string(max) };
 }
 
-bool is_mission_name(std::string_view name) {
-	if (name.size() < 5 || name.size() > kMissionNameMaxBytes) return false;
-	if (!strutil::ends_with_icase(name, ".bms")) return false;
-	for (const char c : name.substr(0, name.size() - 4)) {
-		const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-				c == '_' || c == '-';
-		if (!ok) return false;
-	}
-	return true;
-}
-
 // A host-file value: quoted, in the host's code page (check_settings has
 // refused anything a quote cannot carry). Text that does not convert (never
 // after check_settings) goes as it is.
@@ -52,6 +41,17 @@ std::string quoted(const std::string &utf8) {
 }
 
 } // namespace
+
+bool is_mission_file_name(std::string_view name) {
+	if (name.size() < 5 || name.size() > kMissionNameMaxBytes) return false;
+	if (!strutil::ends_with_icase(name, ".bms")) return false;
+	for (const char c : name.substr(0, name.size() - 4)) {
+		const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+				c == '_' || c == '-';
+		if (!ok) return false;
+	}
+	return true;
+}
 
 std::optional<SettingsRefusal> check_settings(const HostedSettings &s) {
 	{
@@ -91,7 +91,7 @@ std::optional<SettingsRefusal> check_settings(const HostedSettings &s) {
 		return SettingsRefusal{ "missions",
 			"names more than " + std::to_string(kMissionsMax) + " missions" };
 	for (const std::string &m : s.missions) {
-		if (!is_mission_name(m))
+		if (!is_mission_file_name(m))
 			return SettingsRefusal{ "missions",
 				"names \"" + loggable(m, 40) +
 						"\", which is no .bms file name of letters, digits, _ and -" };

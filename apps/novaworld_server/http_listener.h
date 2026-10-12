@@ -27,6 +27,7 @@ namespace opennova::novaworld_server {
 struct ServerConfig;
 class SessionStore;
 class NwUdpListener;
+namespace hosted { class AdminLinks; }
 
 // Crow-backed HTTP listener. start() registers six route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -65,6 +66,11 @@ public:
 	// /api/me/hosts/<rid>/command and /stop). Set before start(); it must
 	// outlive the HTTP listener. Null answers those routes 503.
 	void set_nw_udp_listener(NwUdpListener *listener) { nw_udp_ = listener; }
+
+	// The hosted servers' admin links the console routes run their commands on
+	// (hosted/console_routes.h). Set before start(); they must outlive the HTTP
+	// listener. Null answers every console command 503.
+	void set_admin_links(hosted::AdminLinks *links) { admin_links_ = links; }
 
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
@@ -161,6 +167,9 @@ private:
 	// The push channel to listed servers (set_nw_udp_listener), handed to the
 	// host routes at start(); null in tests that do not wire one.
 	NwUdpListener *nw_udp_ = nullptr;
+	// The console routes' admin links (set_admin_links); null in tests that do
+	// not wire them.
+	hosted::AdminLinks *admin_links_ = nullptr;
 	// config.public_host, set in start() before Crow runs (host_url() /
 	// gsb_url()).
 	std::string public_host_;

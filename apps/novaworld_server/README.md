@@ -488,6 +488,47 @@ service's own message, never database text.
 | `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
 
+**The console routes** (`hosted/console_routes.*`) run the curated commands on a hosted
+server's admin link. The owner's act on the caller's own live server, which its session
+resolves (no route names a server, so no owner reaches another's); the admin's take the
+id. In order: the session (401; 403 without the CSRF header on a `POST`) or the admin
+check; the arguments (400, before anything is read or sent); the server (the owner's: 404
+`no_live_server`; the admin's: 404 `not_found`, 409 `not_live`), running (409
+`server_stopping` while it stops, 409 `server_not_running` before it runs); for an owner, a
+token from the account's read bucket (30, then two a second) or, for a command that
+changes the server, its write bucket (8, then one every 2 s, as the owner's pushes; 429
+with `Retry-After`); then the link: 503 `admin_unavailable` with none up, 503
+`admin_busy`, 504 `admin_timeout` (with `sent`) past the 3 s a request has for all its
+commands, and the command's own refusals below. Every refusal is an error code with the
+service's own words, never the server's text. The reads answer `Cache-Control: no-store`.
+
+| Route (owner; the admin's: `/api/admin/hosted/<id>/...`) | Command | Replies |
+| --- | --- | --- |
+| `GET /api/me/server/players` | `PLAYER LIST` | `{"server_id", "players"}`: `slot`, `name`, `team`, `class`, `kills`, `deaths`, `ping` (the server's own slot-0 row left out); 409 `not_in_game` |
+| `POST /api/me/server/players/<slot>/punt`, `/ban`, `/swap`, `/kill` | `PLAYER PUNT` / `BAN` / `SWAPTEAM` / `KILL <slot>` | `{"server_id", "slot", "result"}` (`punted`, `banned` with `listed`: the PCID listed, a NovaWorld host's, `swapped`, `killed`); 400 `invalid_slot` (1..255), 404 `player_not_found`, 409 `no_pcid` or `not_connected` (a ban) |
+| `GET /api/me/server/missions` | `MISSION AVAILABLE` | `{"server_id", "missions"}`: `index`, `file`, `title` |
+| `GET /api/me/server/rotation` | `MISSION LIST` | `{"server_id", "rotation"}`: `index`, `file`, `swap_sides`, `flipped`, `one_shot`, `current`, `next` |
+| `POST /api/me/server/rotation` | `MISSION ADD <file> <0\|1>` | body `{"mission": "<file>.bms", "swap_sides": false}`, appended; `{"result": "added"}`; 400 `invalid_mission`, `missing_field`, `invalid_field`; 404 `mission_not_found` |
+| `POST /api/me/server/rotation/<index>/remove`, `/next` | `MISSION LIST`, then `MISSION REMOVE` / `SETNEXT <index>` | `{"result": "removed"}` / `"next_set"`; 400 `invalid_index` (0..255); 404 `no_such_entry` (the server answers OK for any index, so the rotation is read first); 409 `last_mission` (the last map stays: an empty rotation ends the session at the round's end) |
+| `POST /api/me/server/rotation/cycle` | `MISSION CYCLE` | `{"result": "cycling"}`: the round ends now and the next map loads; 409 `not_in_game` |
+| `GET /api/me/server/chat` | `CHAT GET` | `{"server_id", "lines"}`, the server's chat window oldest first |
+| `POST /api/me/server/chat` | `CHAT SEND <text>` | body `{"text"}`: cp1252 text, no control character, not blank, at most 59 characters (all a server chat line keeps); `{"result": "sent"}` (a repeat within about 20 s is dropped by the server's flood control, and the server answers OK all the same); 400 `invalid_text` |
+| `GET /api/me/server/console` | none | the console ring of the account's newest server (any state): `{"server_id", "link", "lines"}`, `link` its link's `state`, `game_state`, `last_poll_at`, `up_since` and `error` (null with none), `lines` the newest `limit` (200; at most 500) with an id past `after` (0), oldest first: `id`, `kind`, `actor`, `text`, `at`; 404 `no_server` |
+| `GET /api/admin/hosted/<id>/settings` (admin only) | `GET GAMESETTINGS` | `{"server_id", "settings"}`: `key`, `value`, in the server's order (the game and side passwords among them) |
+
+**The console's commands are a curated list (policy, ADR 0053 d9;
+`hosted/console_commands.h`).** Owners get exactly the commands above but `GET
+GAMESETTINGS`; admins get that one wider read besides. There is no passthrough of an
+arbitrary admin line: every line is composed from checked arguments (a slot 1..255, since
+the server compares `(u8)atol` and 256 would be its own slot 0; an index 0..255; a mission
+a `.bms` name of letters, digits, `_` and `-`; chat text as above), so nothing reaches the
+server's files or config (`SET`, `WEAPON SET`, `CMD`), its admin users or ban files
+(`ADMINUSER`, `BANLIST`), or its session's end (`GOTO`, `MISSION CLEAR`, `QUIT`) outside the
+supervisor's stop. `MISSION ADD` takes no insert position (retail's insert leaves the
+next-map cursor unset when the list grows) and no `ONESHOT`, and a `PLAYER ... ALL` form
+is not on the list. The commands that change the server are recorded in the console with
+their sender; the reads are not.
+
 ## Configuration
 
 All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
@@ -741,7 +782,15 @@ orderly stop); `app_process`
 ([`tests/novaworld/app_process_test.cpp`](../../tests/novaworld/app_process_test.cpp),
 every build) the child-process helper against itself; the route harness's
 `hosted_server_routes` and `hosted_listing_owner` cases the routes' refusals, approval,
-cap and stops and the owner rule against a hand-driven host listing as a service account;
+cap and stops and the owner rule against a hand-driven host listing as a service account,
+and its `hosted_console_routes` case the console routes over a real admin link to a
+scripted remote-admin server on loopback (the session, CSRF and owner refusals, every
+command and its reply, the arguments refused before a byte is sent, the rotation's
+checks, the write bucket, the console ring, the admin's routes, the refusals before
+running, with no link and while stopping, and no line off the curated list reaching the
+server); `hosted_console_commands`
+([`tests/novaworld/hosted_console_commands_test.cpp`](../../tests/novaworld/hosted_console_commands_test.cpp),
+every build) the curated list itself, its compositions and its reply mapping;
 and `hosted_local_e2e`
 ([`tests/novaworld/hosted_local_e2e_test.cpp`](../../tests/novaworld/hosted_local_e2e_test.cpp),
 `BUILD_NOVAWORLD_HTTP` only) a real `opennova-serve` child run by the supervisor through

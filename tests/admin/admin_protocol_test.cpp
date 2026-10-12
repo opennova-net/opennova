@@ -192,6 +192,54 @@ int main() {
 		expect(admin_parse_time_left_minutes("Tracers              = 1\n") == -1, "no GameTime row");
 	}
 
+	// PLAYER LIST's numeric columns; MISSION AVAILABLE, MISSION LIST, CHAT GET and GET
+	// GAMESETTINGS as the console routes read them.
+	{
+		const auto rows = admin_parse_player_list("NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n"
+		                                          "Host            \t 0\t 0\t0\t0\t0\t0\n"
+		                                          "Ann Lee         \t 3\t 1\t2\t5\t1\t40\n");
+		expect(rows.size() == 1 && rows[0].slot == 3 && rows[0].name == "Ann Lee" && rows[0].team == "1" &&
+		               rows[0].player_class == 2 && rows[0].kills == 5 && rows[0].deaths == 1 && rows[0].ping == 40,
+		       "a PLAYER LIST row's columns");
+
+		const auto catalog = admin_parse_mission_available("0. ALPHA.BMS (Alpha Base)\n"
+		                                                   "1. AS - Black Rock TAC.npj (Black Rock (TAC))\n"
+		                                                   "2. ODD (Odd)\n");
+		expect(catalog.size() == 3 && catalog[0].index == 0 && catalog[0].file == "ALPHA.BMS" &&
+		               catalog[0].title == "Alpha Base",
+		       "MISSION AVAILABLE: the index, the file and the title");
+		expect(catalog.size() == 3 && catalog[1].file == "AS - Black Rock TAC.npj" &&
+		               catalog[1].title == "Black Rock (TAC)",
+		       "a file holding spaces and a title holding parentheses");
+		expect(catalog.size() == 3 && catalog[2].file == "ODD" && catalog[2].title == "Odd", "no known extension");
+		expect(admin_parse_mission_available("").empty(), "an empty catalog");
+
+		const auto rotation = admin_parse_mission_list("0: ALPHA.BMS - () () () <CURRENT MISSION> <>\n"
+		                                               "1: AS - Black Rock TAC.npj - (2x) (IS FLIPPED) (ONE_SHOT) <> "
+		                                               "<NEXT MISSION>\n");
+		expect(rotation.size() == 2 && rotation[0].index == 0 && rotation[0].file == "ALPHA.BMS" &&
+		               rotation[0].current && !rotation[0].next && !rotation[0].swap_sides,
+		       "MISSION LIST: the current entry");
+		expect(rotation.size() == 2 && rotation[1].file == "AS - Black Rock TAC.npj" && rotation[1].swap_sides &&
+		               rotation[1].flipped && rotation[1].one_shot && !rotation[1].current && rotation[1].next,
+		       "the marks, the file found before them from the end");
+		expect(admin_parse_mission_list("No missions in queue.").empty(), "no rotation");
+
+		const auto chat = admin_parse_chat_window("Server: hello \r\n  continued\r\nAnn: hi\r\n");
+		expect(chat == std::vector<std::string>({"Server: hello ", "  continued", "Ann: hi"}),
+		       "CHAT GET: the lines, a continuation's two spaces kept");
+		expect(admin_parse_chat_window("").empty(), "an empty window");
+
+		const auto settings = admin_parse_game_settings("AutoBalanceOnRecycle = 1\n"
+		                                                "VotePercent          = 0.600000\n"
+		                                                "ServerName           = My = Server\n"
+		                                                "ServerPassword       = \n");
+		expect(settings.size() == 4 && settings[0] == std::make_pair(std::string("AutoBalanceOnRecycle"), std::string("1")) &&
+		               settings[2].second == "My = Server" && settings[3].first == "ServerPassword" &&
+		               settings[3].second.empty(),
+		       "GET GAMESETTINGS: each key and value");
+	}
+
 	// The reply plan: how many packets each command draws (§6.9's dispatcher), split as it
 	// splits, its verbs case aside.
 	{
