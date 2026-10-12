@@ -97,13 +97,16 @@ private:
 	crow::response owner_command(const crow::request &req, uint64_t rid);
 	crow::response owner_stop(const crow::request &req, uint64_t rid);
 	// An owner's push once the body is composed: 404 unless the listing under
-	// `rid` is `user`'s (hostdb::listing_owned_by: listed, with one of the
-	// account's keys claimed for the RID), then the push scoped to that account,
+	// `rid` is `user`'s (hosted::owned_listing_account: listed, with one of the
+	// account's keys claimed for the RID, or one of its hosted servers' service
+	// accounts' keys), then the push scoped to the account holding the claim,
 	// which the listener checks against the connection (NwUdpListener's `owner`).
-	// `push` is the statement's push for the 32-bit RID; `line` names it in the
-	// log.
+	// On a live hosted server's listing a Stop is that hosted server's stop
+	// instead, and a Command to one that is stopping is refused.
+	// `push(rid32, account)` is the statement's push; `line` names it in the log.
+	enum class OwnerPush { Command, Stop };
 	template <typename Push>
-	crow::response push_as_owner(const WebSessionUser &user, uint64_t rid, const char *what,
+	crow::response push_as_owner(const WebSessionUser &user, uint64_t rid, OwnerPush kind,
 			const std::string &line, Push push, crow::json::wvalue out);
 
 	WebAccess &access_;

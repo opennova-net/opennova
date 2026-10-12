@@ -21,6 +21,7 @@ if(BUILD_NOVAWORLD_HTTP)
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
         # renders, and the local MachineProvider.
         hosted/hosted_repository.cpp
+        hosted/hosted_routes.cpp
         hosted/hosted_settings.cpp
         hosted/local_process_provider.cpp
         hosted/supervisor.cpp

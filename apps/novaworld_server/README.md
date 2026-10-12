@@ -370,6 +370,20 @@ An account an admin approved (`players.can_host`) can have the service run one
   website session is ever minted or resolved for one, the admin users list hides them,
   `PUT` / `DELETE /api/admin/users/<id>` answer 404 for one, and no person may register,
   or rename to, a username or handle starting with `srv-` (400 `invalid_field`).
+- **A hosted listing's owner.** One rule, in `hosted/hosted_repository.h`: a listing
+  belongs to the account whose HostKey it holds now (`hostdb::listing_owned_by`), except
+  that a live hosted server's service account stands for that hosted server's owner.
+  `GET /api/me/hosts` lists the caller's own listings and its live hosted servers' (each
+  with `hosted_server_id`, null on one of its own); the owner pushes (`POST
+  /api/me/hosts/<rid>/command`) resolve the RID to the account holding the claim and push
+  scoped to it, and refuse a hosted server that is stopping (409 `server_stopping`); `GET
+  /api/admin/hosts` names the hosted server's owner (and its `hosted_server_id`). The stop
+  of a live hosted server's listing (`POST /api/me/hosts/<rid>/stop` or
+  `/api/admin/hosts/<rid>/stop`) is the hosted server's stop, 202 `{"rid",
+  "hosted_server_id", "state", "status": "hosted_stop"}`: no bare `ServerStopHosting`
+  goes out, since the supervisor would read the server's exit as a crash and restart it.
+  Any other listing, an ended hosted server's lingering one included, takes the plain
+  push.
 - **The working directory** is rendered from scratch at every start
   (`hosted/hosted_settings.*`), in retail's formats: the host file (`server.host`:
   `GameName`, `MaxPlayers`, `MPHostGamePassword`, `Time_Limit`, `KillLimit`, `MaxScore`,
@@ -421,6 +435,21 @@ An account an admin approved (`players.can_host`) can have the service run one
 | `ONNET_HOSTED_RESOURCE_DIR` | none | The game data the local provider's servers serve (their `--resource-dir`). Never licensed data in a repository: a Joint Operations install, or a synthetic loose directory. |
 | `ONNET_HOSTED_LOOSE_ROOT` | off | `1` adds `--loose-root` (a directory with no game archives, mounted as loose files). |
 | `ONNET_HOSTED_WORK_DIR` | `backend/data/hosted` | The root of the local provider's working directories. |
+| `ONNET_HOSTED_MISSIONS` | none | Comma-separated `.bms` names, the rotation a start takes when its request names none (the first the starting map). Unset, a start must name its missions. |
+
+The routes (`hosted/hosted_routes.*`, and the approval with the admin user routes), behind
+`ONNET_API_PROXY_ONLY` like every `/api` route. Every refusal is an error code with the
+service's own message, never database text.
+
+| Route | Access | Replies |
+| --- | --- | --- |
+| `GET /api/me/server` | a website session | `{"enabled", "can_host", "server"}`: the account's live server, else its newest ended one, else null: `id`, `state`, `live`, `settings` (`game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set), `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null) and `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); `Cache-Control: no-store` |
+| `POST /api/me/server/start` | a website session, the CSRF header | the settings as JSON (`game_name` required; `missions` defaults to `ONNET_HOSTED_MISSIONS`; every other field to its default). 503 `hosting_disabled` with no provider; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_approved` without `can_host`; 409 `already_live` (with `server_id`) or `at_capacity`; 202 `{"server"}`, `requested` |
+| `POST /api/me/server/stop` | a website session, the CSRF header | 404 `no_live_server`; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
+| `PUT /api/admin/users/<id>/can-host` | admin | `{"can_host": true\|false}`; 200 `{"user"}` (which carries `can_host`); 400 `invalid_json`, `invalid_field` (not a boolean) or `missing_field`; 404 for an unknown id or a service account. Withdrawing it stops the account's hosted server, as a ban does |
+| `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "servers"}`, the newest 100, live first, each as above plus `owner` and `service_account` (`{id, username}` or null), `provider`, `machine_id`, `machine_address` and `admin_port`. Never the admin password |
+| `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
+| `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
 
 ## Configuration
 
@@ -669,6 +698,14 @@ health checks, the owners' changes including a withdrawn approval, the reconcili
 the periodic sweep), then `LocalProcessProvider` against the test binary itself as its
 server (the files, the environment allowlist against a planted secret, the secrets
 deleted at terminate, and its children outliving the supervisor's thread to get an
-orderly stop); and `app_process`
+orderly stop); `app_process`
 ([`tests/novaworld/app_process_test.cpp`](../../tests/novaworld/app_process_test.cpp),
-every build) the child-process helper against itself.
+every build) the child-process helper against itself; the route harness's
+`hosted_server_routes` and `hosted_listing_owner` cases the routes' refusals, approval,
+cap and stops and the owner rule against a hand-driven host listing as a service account;
+and `hosted_local_e2e`
+([`tests/novaworld/hosted_local_e2e_test.cpp`](../../tests/novaworld/hosted_local_e2e_test.cpp),
+`BUILD_NOVAWORLD_HTTP` only) a real `opennova-serve` child run by the supervisor through
+`LocalProcessProvider` over a synthetic loose game directory: started from the site,
+listed as its service account and shown as the owner's, renamed by the owner's
+`SetServerName` (its `game.cfg` saved), and stopped from the site.

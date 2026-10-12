@@ -3,6 +3,7 @@
 #include "auth.h"
 #include "catalog_repository.h"
 #include "host_routes.h"
+#include "hosted/hosted_routes.h"
 #include "http_cookies.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
@@ -263,7 +264,8 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 } // namespace
 
 struct HttpListener::Impl {
-	explicit Impl(db::ConnectionPool &pool) : access(app, pool), hosts(access, pool) {}
+	explicit Impl(db::ConnectionPool &pool) :
+			access(app, pool), hosts(access, pool), hosted_servers(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -280,6 +282,8 @@ struct HttpListener::Impl {
 	WebAccess access;
 	// The listed servers' routes (host_routes.h), over `access`.
 	HostRoutes hosts;
+	// The hosted servers' routes (hosted/hosted_routes.h), over `access`.
+	hosted::HostedRoutes hosted_servers;
 };
 
 HttpListener::HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
@@ -321,6 +325,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	register_admin_api_routes(public_host);
 	register_public_api_routes();
 	impl_->hosts.register_routes(impl_->app, nw_udp_);
+	impl_->hosted_servers.configure(config);
+	impl_->hosted_servers.register_routes(impl_->app);
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a
@@ -708,6 +714,33 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
+	});
+
+	// PUT /api/admin/users/<id>/can-host — {"can_host": true|false}: the account's
+	// approval for a hosted server (players.can_host, migration 0011), answered
+	// with the account. 400 invalid_json / invalid_field / missing_field, 404 for
+	// an unknown id and for a hosted server's service account. Withdrawing it
+	// stops the account's hosted server, as a ban does (the supervisor's next
+	// pass; hosted/supervisor.h).
+	CROW_ROUTE(app, "/api/admin/users/<int>/can-host").methods("PUT"_method)(
+	    [this](const crow::request &req, int64_t id) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
+		const auto can_host = body->flag("can_host");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
+		if (!can_host) return json_error(400, "missing_field", "can_host (true or false) is required");
+		auto db_conn = db_pool_.acquire();
+		const auto result = set_can_host(*db_conn, id, *can_host);
+		if (!result.ok) {
+			return json_error(result.error_code == "not_found" ? 404 : 500,
+			                  result.error_code.c_str(), result.error_message);
+		}
+		const auto updated = get_user_by_id(*db_conn, id);
+		crow::json::wvalue out;
+		out["user"] = updated ? user_to_json(*updated) : crow::json::wvalue{};
+		return json_reply(200, out);
 	});
 
 	// PUT /api/admin/users/<id>/game-access — per-game expansion/access gate.
