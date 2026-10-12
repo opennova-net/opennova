@@ -580,6 +580,16 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "through the seam the window's checkbox and game_debug share; captures the "
 				+ "workspace.",
 				RUNTIME + "entity_pick_probe.gd", {}, [], true, true, 120_000),
+		ProbeDef.make("terrain_ground",
+				"The ground the game reads at a mission point (x east, y north, metres) on the live "
+				+ "process: the engine's pick ray dropped straight down there meets the terrain (its "
+				+ "height, the surface class the hit reads: the char map's or a placed tile's), the "
+				+ "terrain data's own height there, and the placed tiles whose drawn square holds the "
+				+ "point (cell, flags, layer); the OpenNova Editor's terrain end to end reads it (ADR 0046 S25).",
+				RUNTIME + "terrain_ground_probe.gd", {
+					"x": { "type": "number", "default": 0.0 },
+					"y": { "type": "number", "default": 0.0 },
+				}, ["x", "y"], false, true, 60_000),
 		ProbeDef.make("dev_tools_tour",
 				"The F3 workspace on the live process: every inspection window opened in "
 				+ "turn and captured, the Game window's session readout, every Game-view "
