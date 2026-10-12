@@ -1033,9 +1033,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		replies.push_back(make_protocol_message(
 				0x5A, build_current_loadout_reply(
 						conn.reply.last_loadout_reply, player->player_class)));
-	replies.push_back(make_protocol_message(
-			0x61, Server_RerollPlayerTickSeed(conn)));
-	const uint8_t frontier = world.zones.frontier_zone(player->team);
+	replies.push_back(make_protocol_message(0x61, Server_RerollPlayerTickSeed(conn)));
+	// The slot team's frontier (D-NET-583) [orig: @0x5179BA, the call @0x5179D9]
+	const uint8_t frontier = world.zones.frontier_zone(conn.assigned_team);
 	if (frontier != 0)
 		replies.push_back(make_protocol_message(
 				s2c::GAME_EVENT, build_tag_1e_frontier_hint(frontier)));

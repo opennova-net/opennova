@@ -4529,6 +4529,8 @@ struct FrontierHintFixture {
 		conn.link.mode = opennova::replication::TransportMode::Client;
 		conn.link.transport = &transport;
 		conn.link.owned_entity = player;
+		conn.assigned_team = 1; // the slot team (+416) the hints read
+		conn.assigned_team_valid = true;
 		ctx.np_protocol.connection_list.push_back(std::move(conn));
 	}
 	opennova::inmatch::NapiNPConnection &conn() {
@@ -4574,6 +4576,38 @@ bool check_frontier_hint_waits_for_the_play_ticks() {
 	opennova::inmatch::Server_TickUpdate(bare.ctx);
 	ok = expect(bare.hints().empty() && !bare.conn().reply.frontier_hint_pending,
 	            "no frontier: the bit clears without a record") && ok;
+	return ok;
+}
+
+// D-NET-583: both frontier hints look the frontier up for the slot team (+416),
+// not the entity's: the deploy leg's, and the play-tick walk's own and enemy
+// (team 1 -> 2, else 1) frontiers. A script team write to a player body splits
+// the two (Entity_SetTeamByNetId stores the entity byte alone).
+// [orig: Server_ProcessPlayerDeath @0x5179BA, the call @0x5179D9;
+//  Server_UpdateAllActivePlayerSlots @0x518929, @0x51893B..0x51894A]
+bool check_frontier_hints_read_the_slot_team() {
+	FrontierHintFixture f(/*with_chain=*/true);
+	const uint8_t blue = f.world.zones.frontier_zone(1);
+	const uint8_t red = f.world.zones.frontier_zone(2);
+	if (!expect(blue != 0 && red != 0 && blue != red,
+	            "the fixture chain gives each team its own frontier"))
+		return false;
+	f.conn().assigned_team = 2; // the entity stays on team 1
+	const std::vector<opennova::ProtocolMessage> deploy =
+			opennova::inmatch::Server_ReleasePlayerDeployment(
+					f.ctx.config, f.conn(), f.world, opennova::world::EntityHandle{}, 0xFFFF);
+	const std::vector<uint8_t> deploy_hint = {0x3A, red, 0xFF, 0xFF, 0, 0, 0, 0};
+	bool ok = expect(!deploy.empty() && deploy.back().tag == opennova::s2c::GAME_EVENT &&
+	                         deploy.back().payload == deploy_hint,
+	                 "the deploy leg hints the slot team's frontier");
+	f.conn().reply.frontier_hint_pending = true;
+	f.world.match.player(f.player)->play_ticks = 1240;
+	opennova::inmatch::Server_TickUpdate(f.ctx);
+	const std::vector<uint8_t> want = {0x3A, red, blue, 0xFF, 0, 0, 0, 0};
+	const auto sent = f.hints();
+	ok = expect(sent.size() == 1 && sent[0] == want,
+	            "the walk hints the slot team's frontier and the other team's as the enemy's") &&
+	     ok;
 	return ok;
 }
 
@@ -5020,6 +5054,7 @@ int main() {
 	ok = check_capture_pass_runs_in_every_mode_and_after_the_round() && ok;
 	ok = check_roster_mirrors_the_undeployed_bit() && ok;
 	ok = check_frontier_hint_waits_for_the_play_ticks() && ok;
+	ok = check_frontier_hints_read_the_slot_team() && ok;
 	ok = check_refused_touch_arms_the_nag() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
 	ok = check_minimap_overlay_zone_capture_bits() && ok;

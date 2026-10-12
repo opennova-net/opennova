@@ -609,18 +609,18 @@ void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
 }
 
 // The frontier-hint arm of the same walk: a state-6 slot whose bit 0x04 is set
-// and which has played 1240 ticks gets S2C 0x1E event 58 [its team's frontier
-// zone][the enemy's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
-// frontier is 0; either way the bit clears.
-// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6]
+// and which has played 1240 ticks gets S2C 0x1E event 58 [its slot team's frontier
+// zone][the enemy team's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
+// frontier is 0; either way the bit clears. Both read the slot team (D-NET-583).
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6, @0x518929..0x51894A]
 void emit_frontier_hints(NapiNPServerCtx &ctx, world::World &world) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!is_in_match(conn) || !conn.reply.frontier_hint_pending) continue;
 		const world::Entity *player = world.registry.get(conn.link.owned_entity);
 		const world::MatchPlayer *slot = world.match.player(conn.link.owned_entity);
 		if (player == nullptr || slot == nullptr || slot->play_ticks < 1240u) continue;
-		const uint8_t own = world.zones.frontier_zone(player->team);
-		uint8_t enemy = world.zones.frontier_zone(player->team == 1 ? 2 : 1);
+		const uint8_t own = world.zones.frontier_zone(conn.assigned_team);
+		uint8_t enemy = world.zones.frontier_zone(conn.assigned_team == 1 ? 2 : 1);
 		if (enemy == own) enemy = 0;
 		if (own != 0 && conn.link.transport != nullptr)
 			conn.link.transport->host_send(s2c::GAME_EVENT,
