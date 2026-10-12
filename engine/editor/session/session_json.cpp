@@ -940,6 +940,12 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	}
 	case F::Edits: {
+		// An edit_record's empty batch with a terrain_view opens the view's tile placement alone, as the Tiles part's Open
+		// does (S25); editor_request_from_json refuses one without.
+		if (request.kind == EditorRequestKind::EditRecord && json.is_array() && json.array.empty()) {
+			request.edits.clear();
+			return true;
+		}
 		RecordBatch batch;
 		if (!record_batch_from_json(
 					json, names, batch_form(request.kind, text), batch, error, !unresolved))
@@ -1333,6 +1339,12 @@ bool editor_request_from_json(
 					text, labels, error))
 			return false;
 		carried |= field_bit(id);
+	}
+	const JsonValue *edits = json.get("edits");
+	if (request.kind == EditorRequestKind::EditRecord && edits && edits->is_array() && edits->array.empty() &&
+		request.terrain_view.empty()) {
+		error = "\"edits\" is a list of one edit or more (none only with a terrain_view: the view's tiles opened alone).";
+		return false;
 	}
 	for (size_t i = 0; i < kRequestFieldCount; ++i) {
 		const auto id = static_cast<RequestFieldId>(i);
