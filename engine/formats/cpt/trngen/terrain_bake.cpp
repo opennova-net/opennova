@@ -210,17 +210,19 @@ bool bake(const TerrainBakeInput &input, CptFile &out, TerrainBakeState *state, 
 		ctx.output_prefix = kPrefix;
 		ctx.base = &base;
 		ctx.files = &files;
-		std::vector<NodeBakeState> nodes;
+		std::vector<std::shared_ptr<const NodeBakeState>> nodes;
 		if (state) {
 			nodes.resize(kCptTileCount);
 			ctx.node_made = [&nodes](const QuadtreeNode &node) {
-				capture_node_state(node, nodes[static_cast<size_t>(cpt_tile_index(node.depth, node.x, node.y))]);
+				auto kept = std::make_shared<NodeBakeState>();
+				capture_node_state(node, *kept);
+				nodes[static_cast<size_t>(cpt_tile_index(node.depth, node.x, node.y))] = std::move(kept);
 			};
 		}
 		if (!process_quadtree(root.get(), ctx, input.threads, why)) return fail(why);
 		if (state) {
 			state->nodes = std::move(nodes);
-			state->base = base;
+			state->base = std::make_shared<const BaseMeshSet>(base);
 		}
 	}
 	MeshSimp_FreeAll();

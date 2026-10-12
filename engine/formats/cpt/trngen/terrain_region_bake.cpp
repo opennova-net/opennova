@@ -105,7 +105,7 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 		error = "the depth map is not 1024 x 1024";
 		return false;
 	}
-	const std::vector<int> leaves = leaves_tapping(input.dirty, state.base.locks);
+	const std::vector<int> leaves = leaves_tapping(input.dirty, state.base->locks);
 	if (leaves.empty()) return true;
 
 	// The nodes to make: the leaves tapping the edit and their ancestors below the root.
@@ -122,14 +122,14 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 	std::vector<std::vector<QuadtreeNode *>> by_depth;
 	collect(*root, by_depth);
 
-	BaseMeshSet base = state.base;
+	BaseMeshSet base = *state.base;
 	QuadtreeContext ctx;
 	ctx.tile_size = kRootSize;
 	ctx.min_tile_size = kLeafSize;
 	ctx.depth_buffer = input.depth16->data();
 	ctx.base = &base;
 
-	std::vector<NodeBakeState> made(static_cast<size_t>(kCptTileCount));
+	std::vector<std::shared_ptr<NodeBakeState>> made(static_cast<size_t>(kCptTileCount));
 	// The remade nodes' .tml bytes (index, size), made into tiles once every level is made.
 	struct Made {
 		int index = 0;
@@ -149,7 +149,7 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 				                            node->child_se.get()}) {
 					if (child->mesh_data) continue;
 					child->mesh_data = std::make_unique<LODMeshData>();
-					load_section_mesh(state.nodes[static_cast<size_t>(tile_of(*child))].section, *child->mesh_data);
+					load_section_mesh(state.nodes[static_cast<size_t>(tile_of(*child))]->section, *child->mesh_data);
 				}
 		}
 		const auto start = std::chrono::steady_clock::now();
@@ -161,7 +161,9 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 		out.cost[static_cast<size_t>(depth)] = {static_cast<int>(level.size()), seconds_since(start)};
 		for (QuadtreeNode *node : level) {
 			const int index = tile_of(*node);
-			capture_node_state(*node, made[static_cast<size_t>(index)]);
+			auto kept = std::make_shared<NodeBakeState>();
+			capture_node_state(*node, *kept);
+			made[static_cast<size_t>(index)] = std::move(kept);
 			tmls.push_back({index, node->size, std::move(node->tile_bytes)});
 			// The root's tile is leaf (0, 0)'s, sized as the root (the export reads the leaves' level for it).
 			if (index == kLeafTile) tmls.push_back({0, kRootSize, tmls.back().tml});
@@ -205,8 +207,8 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 		bool meets = false;
 		for (const DepthRect &r : out.footprints) meets = meets || footprint.meets(r);
 		if (!meets) continue;
-		const LeafDrawBack &draw = remake[static_cast<size_t>(index)] ? made[static_cast<size_t>(index)].draw_back
-		                                                              : state.nodes[static_cast<size_t>(index)].draw_back;
+		const LeafDrawBack &draw = remake[static_cast<size_t>(index)] ? made[static_cast<size_t>(index)]->draw_back
+		                                                              : state.nodes[static_cast<size_t>(index)]->draw_back;
 		rasterize_terrain_faces(draw.positions.data(), 3, draw.faces.data(), static_cast<int>(draw.faces.size() / 3u),
 		                        drawn);
 	}
@@ -223,7 +225,7 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 		const int index = tmls[i].index;
 		out.rebuilt.push_back(index);
 		out.tiles.push_back(std::move(tiles[i]));
-		out.nodes.push_back(index == 0 ? NodeBakeState{} : std::move(made[static_cast<size_t>(index)]));
+		out.nodes.push_back(index == 0 ? nullptr : std::move(made[static_cast<size_t>(index)]));
 	}
 	out.seconds = seconds_since(began);
 	return true;
