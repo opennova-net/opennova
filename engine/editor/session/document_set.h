@@ -182,6 +182,9 @@ public:
 	// name its step (what Undo says). False when refused.
 	bool apply_terrain_edits(DocumentBase &document, const std::vector<Edit> &edits, const std::string &view,
 	                         const std::string &words);
+	// A heights bake's landing (session/terrain_sculpt, S25): its edit applied to the heights document as part of the
+	// stroke's step it bakes (it amends that step), the view updated; false where the document refuses it (its step gone).
+	bool apply_bake_landing(DocumentBase &document, const std::vector<Edit> &edits);
 	// The documents the batches of the gesture `gesture` changed, in the order they did (S25: a link's), open as the
 	// instances it changed (`gone`: those closed or read again since, which hold none of its steps).
 	std::vector<std::string> linked(uint64_t gesture, std::vector<std::string> *gone = nullptr) const;

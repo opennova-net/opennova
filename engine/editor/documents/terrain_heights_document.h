@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -12,6 +13,7 @@
 #include <editor/model/raster_document.h>
 #include <editor/model/value.h>
 #include <formats/cpt/cpt.h>
+#include <formats/cpt/trngen/terrain_bake_state.h>
 
 namespace opennova::editor {
 
@@ -51,6 +53,7 @@ struct HeightsRect {
 inline constexpr uint32_t kHeightsTilesPart = 1;   // a tile of the .cpt replaced
 inline constexpr uint32_t kHeightsUnbakedPart = 2; // the regions whose bake is due
 inline constexpr uint32_t kHeightsFormPart = 4;    // the form, the header, the depth section's form
+inline constexpr uint32_t kHeightsBakePart = 8;    // the bake state, the input it was made from
 
 struct HeightsState : RasterSideState {
 	HeightsForm form = HeightsForm::Cpt;
@@ -63,6 +66,12 @@ struct HeightsState : RasterSideState {
 	DepthFormat depth_format = DepthFormat::CDEP;
 	std::vector<std::shared_ptr<const CptTile>> tiles;
 	std::vector<HeightsRect> unbaked;
+	// What a region bake starts from (formats/cpt/trngen terrain_region_bake.h): the bake state the tiles and the
+	// baked atlas were made with, null before the editor's first bake of the file (a .cpt's then comes from a cold
+	// in-memory bake of its atlas: D-TERRAIN-22), and the input they were made from (a .cpt's atlas as read). Shared:
+	// a step keeps the nodes its landing remade.
+	std::shared_ptr<const trngen::TerrainBakeState> bake;
+	RasterPlane baked_input;
 
 	size_t footprint() const override;
 	uint32_t parts_changed(const RasterSideState &before) const override;
@@ -94,11 +103,32 @@ public:
 	// live atlas its depth. False before an image's first bake.
 	bool compose_cpt(CptFile &out) const;
 	HeightsFacts facts() const;
+	// The quadrant lock flags the bake takes (the .trn's lock_* pairs, top-left, top-right, bottom-left,
+	// bottom-right: a locked axis keeps a leaf's height taps inside its 512 quadrant), handed by the session from
+	// the first .trn naming the file; none by default. Not an edit: no step, no revision.
+	const std::array<trngen::CornerLockFlags, 4> &bake_locks() const { return locks_; }
+	void set_bake_locks(const std::array<trngen::CornerLockFlags, 4> &locks) { locks_ = locks; }
 
 	std::unique_ptr<DocumentBase> snapshot() const override;
 
 private:
 	TerrainHeightsDocument(const TerrainHeightsDocument &other) = default;
+	std::array<trngen::CornerLockFlags, 4> locks_{};
+};
+
+// A bake's landing (the session's terrain sculpt, ADR 0046 S25): the remade leaves' footprints and the atlas over
+// them, the remade tiles, the bake state after and the input it baked, and the regions it settles. It joins the
+// step of the stroke it bakes (amends; refused, document.stale, once that step is undone or edited after).
+struct HeightsBakeLanding : RasterEditPayload {
+	std::vector<HeightsRect> footprints;
+	std::vector<std::vector<uint16_t>> atlas; // each footprint's texels, its rows top first
+	std::vector<std::pair<int, CptTile>> tiles;
+	std::shared_ptr<const trngen::TerrainBakeState> bake;
+	RasterPlane input;
+	std::vector<HeightsRect> settled;
+	const char *token() const override { return "heights.bake"; }
+	bool amends() const override { return true; }
+	bool apply(RasterCanvas &canvas, Diagnostic &error) const override;
 };
 
 // The heights' findings (ADR 0046 S25). None gates (the game loads both [orig: Terrain_LoadLodStorage @

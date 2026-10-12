@@ -25,6 +25,7 @@
 #include <editor/documents/texture_document.h>
 #include <editor/documents/wave_document.h>
 #include <editor/documents/texture_operations.h>
+#include <editor/documents/terrain_heights_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/file_plans.h>
@@ -43,6 +44,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/terrain_sculpt.h>
 #include <formats/cpt/cpt.h>
 #include <formats/cpt/cpt_io.h>
 #include <formats/mission/bms_edit.h>
@@ -1306,6 +1308,13 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	size_t saved = 0, noted = 0, left = 0;
 	std::vector<Diagnostic> failures;
 	std::vector<std::string> written;
+	// S25: the heights' bakes due land first (the regions a stroke sculpted, baked again by TrnGen's bake), the
+	// caller waiting; one that cannot bake leaves its regions written with the sculpted heights over its old tiles.
+	for (DocumentBase *document : writes)
+		if (dynamic_cast<const TerrainHeightsDocument *>(document)) {
+			std::string why;
+			if (!core_.sculpt().settle(document->path(), why)) core_.note("Saving " + document->path() + " unbaked: " + why);
+		}
 	for (DocumentBase *document : writes) {
 		Diagnostic error;
 		hand_item_classes(*document); // a mission's AI classes as its items' rows hold them now

@@ -64,6 +64,7 @@ public:
 		state->depth_format = cpt.depth_format;
 		state->tiles.reserve(cpt.tiles.size());
 		for (CptTile &tile : cpt.tiles) state->tiles.push_back(std::make_shared<const CptTile>(std::move(tile)));
+		state->baked_input = atlas;
 		out.side = std::move(state);
 		return true;
 	}
@@ -79,14 +80,18 @@ public:
 		CptFile cpt;
 		cpt.header = heights->header;
 		cpt.depth_format = heights->depth_format;
+		// The live atlas: the baked atlas, the input over the regions whose bake is due.
 		cpt.depth_buffer.resize(kTexels);
 		const RasterPlane &input = state.planes[kHeightsInput], &atlas = state.planes[kHeightsAtlas];
-		for (int y = 0; y < kHeightsSide; ++y)
-			for (int x = 0; x < kHeightsSide; ++x) {
-				bool due = false;
-				for (const HeightsRect &rect : heights->unbaked) due = due || rect.contains(x, y);
-				cpt.depth_buffer[size_t(y) * kHeightsSide + size_t(x)] = due ? input.u16(x, y) : atlas.u16(x, y);
-			}
+		atlas.copy_rect(0, 0, kHeightsSide, kHeightsSide, reinterpret_cast<uint8_t *>(cpt.depth_buffer.data()));
+		std::vector<uint16_t> region;
+		for (const HeightsRect &rect : heights->unbaked) {
+			region.resize(size_t(rect.w) * size_t(rect.h));
+			input.copy_rect(rect.x, rect.y, rect.w, rect.h, reinterpret_cast<uint8_t *>(region.data()));
+			for (int row = 0; row < rect.h; ++row)
+				std::copy_n(region.begin() + std::ptrdiff_t(row) * rect.w, rect.w,
+				            cpt.depth_buffer.begin() + std::ptrdiff_t(rect.y + row) * kHeightsSide + rect.x);
+		}
 		cpt.tiles.reserve(heights->tiles.size());
 		for (const auto &tile : heights->tiles) cpt.tiles.push_back(*tile);
 		std::vector<uint8_t> bytes;
@@ -146,7 +151,35 @@ uint32_t HeightsState::parts_changed(const RasterSideState &before) const {
 	if (form != other->form || top != other->top || baked != other->baked || depth_format != other->depth_format ||
 	    std::memcmp(&header, &other->header, sizeof(header)) != 0)
 		parts |= kHeightsFormPart;
+	if (bake != other->bake || !baked_input.shares_tiles_with(other->baked_input)) parts |= kHeightsBakePart;
 	return parts;
+}
+
+bool HeightsBakeLanding::apply(RasterCanvas &canvas, Diagnostic &error) const {
+	const auto *now = dynamic_cast<const HeightsState *>(canvas.side());
+	if (!now || canvas.plane_count() < 2) {
+		error = make_finding(CoreFinding::DocumentPayload, DiagnosticSeverity::Error, "A bake lands only in the heights.");
+		return false;
+	}
+	RasterWriter &atlas = canvas.write(kHeightsAtlas);
+	for (size_t i = 0; i < footprints.size() && i < this->atlas.size(); ++i) {
+		const HeightsRect &r = footprints[i];
+		for (int row = 0; row < r.h; ++row)
+			for (int col = 0; col < r.w; ++col)
+				atlas.set_u16(r.x + col, r.y + row, this->atlas[i][size_t(row) * size_t(r.w) + size_t(col)]);
+	}
+	auto state = std::make_shared<HeightsState>(*now);
+	for (const auto &[index, tile] : tiles)
+		if (index >= 0 && size_t(index) < state->tiles.size()) state->tiles[size_t(index)] = std::make_shared<const CptTile>(tile);
+	state->bake = bake;
+	state->baked_input = input;
+	state->baked = true;
+	std::vector<HeightsRect> due;
+	for (const HeightsRect &rect : state->unbaked)
+		if (std::find(settled.begin(), settled.end(), rect) == settled.end()) due.push_back(rect);
+	state->unbaked = std::move(due);
+	canvas.set_side(std::move(state));
+	return true;
 }
 
 TerrainHeightsDocument::TerrainHeightsDocument(HistoryBudget budget) : RasterDocument(pick_heights_codec, budget) {}

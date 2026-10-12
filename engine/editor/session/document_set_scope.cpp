@@ -108,6 +108,12 @@ bool DocumentSet::apply_terrain_edits(DocumentBase &document, const std::vector<
 	return true;
 }
 
+bool DocumentSet::apply_bake_landing(DocumentBase &document, const std::vector<Edit> &edits) {
+	if (!apply_edits(document, edits, false)) return false;
+	update_step_next();
+	return true;
+}
+
 std::vector<std::string> DocumentSet::linked(uint64_t gesture, std::vector<std::string> *gone) const {
 	std::vector<std::string> out;
 	const auto found = links_.find(gesture);

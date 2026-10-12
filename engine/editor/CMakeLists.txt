@@ -109,6 +109,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/config_overrun.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_raster.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/terrain_heights_brush.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/terrain_heights_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/til_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/til_project_check.cpp
@@ -329,6 +330,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_queries_heights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_queries_maps.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_sculpt.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_heights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_json.cpp
