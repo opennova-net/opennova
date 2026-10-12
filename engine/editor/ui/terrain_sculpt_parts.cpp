@@ -70,11 +70,21 @@ void draw_sculpt_part(TerrainPaneContext &context) {
 
 // The heights file's bake (S25 lane A): running, the regions it waits on, or done.
 void draw_bake_part(TerrainPaneContext &context) {
-	const TerrainHeightsDocument *heights = open_heights(context);
-	if (!heights || heights->blocked()) return;
 	const SessionView &view = context.workspace.view();
+	const TerrainHeightsDocument *heights = open_heights(context);
+	if (!heights) {
+		// Prepared before the file opens (Sculpt picked over the terrain).
+		const std::string &path = context.family.plane(TerrainPlane::Heights).path;
+		if (!path.empty() && view.documents.preparing == path)
+			ImGui::Text("Preparing %s for sculpting...", basename_of(path).c_str());
+		return;
+	}
+	if (heights->blocked()) return;
 	const std::string name = basename_of(heights->path());
-	if (view.documents.baking == heights->path()) {
+	if (view.documents.preparing == heights->path()) {
+		ImGui::Text("Preparing %s for sculpting...", name.c_str());
+		ui_kit::tooltip("Its bake state is made once, in the background: strokes go on meanwhile, their bake after it.");
+	} else if (view.documents.baking == heights->path()) {
 		ImGui::Text("Baking %s...", name.c_str());
 	} else if (const size_t due = heights->heights().unbaked.size()) {
 		ImGui::TextWrapped("%zu %s for the bake (it starts as the stroke ends).", due,

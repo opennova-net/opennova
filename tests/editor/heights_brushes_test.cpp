@@ -326,10 +326,84 @@ int test_view() {
 	return 0;
 }
 
+// A project with the Tmap terrain and a mission on it, the mission open (the view a stroke brushes in).
+struct SeedRig {
+	editor_test::TempProjectDir dir;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	std::string m, cpt;
+	explicit SeedRig(const char *name) : dir(name) {
+		editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Heights"));
+		const SessionView &v = session.view();
+		const std::string root = v.project.root;
+		editor_test::write_bytes(root + "/terrain/Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
+		editor_test::write_bytes(root + "/terrain/Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
+		editor_test::write_text(root + "/day.env", "env");
+		editor_test::handle_to_end(session, request::rescan());
+		editor_test::set_missions(session, true);
+		editor_test::handle_to_end(session,
+		        request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
+		m = v.project.scan->find("m.bms")->relative_path;
+		cpt = v.project.scan->find("Tmap.cpt")->relative_path;
+		session.handle(request::open_document(m));
+	}
+	// One sample of a Raise in the mission's view; seconds it took to serve.
+	double sample(double x, double y, bool end) {
+		TerrainStrokeAsk ask;
+		ask.plane = TerrainPlane::Heights;
+		ask.brush.tool = TerrainTool::Raise;
+		ask.brush.radius = 8.0f;
+		ask.brush.strength = 1.0f;
+		ask.brush_named = kBrushTool | kBrushRadius | kBrushStrength;
+		ask.points = {{x, y}};
+		ask.gesture = 9191;
+		ask.end = end;
+		const auto start = std::chrono::steady_clock::now();
+		session.handle(request::terrain_stroke(m, ask));
+		return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+	}
+	const TerrainHeightsDocument *heights() {
+		for (const auto &document : session.view().documents.open)
+			if (document->path() == cpt) return dynamic_cast<const TerrainHeightsDocument *>(document.get());
+		return nullptr;
+	}
+};
+
+// The seed (the first bake's state) made in the background as Sculpt is picked over the mission's terrain, before
+// its heights file opens: a stroke started while it runs is served at once, its bake landing after it, the same
+// bytes a stroke whose seed is made at its end lands.
+int test_seed() {
+	SeedRig early("opennova_editor_heights_seed_early");
+	early.session.handle(request::set_workspace(R"({"terrain_brush": {"tool": "raise"}})"));
+	early.session.poll();
+	const SessionView &v = early.session.view();
+	TEST_EXPECT(v.documents.preparing == early.cpt);
+	const bool seeding = !v.documents.preparing.empty();
+	double slowest = early.sample(-200.0, 200.0, false);
+	slowest = std::max(slowest, early.sample(-196.0, 200.0, false));
+	slowest = std::max(slowest, early.sample(-192.0, 200.0, true));
+	TEST_EXPECT(early.session.outcome().done() && early.heights() && early.heights()->dirty());
+	TEST_EXPECT(slowest < 1.0);
+	std::printf("  seed: the strokes served in at most %.3f s, the seed %s\n", slowest,
+	            seeding && !v.documents.preparing.empty() ? "still running" : "done");
+	TEST_EXPECT(settled(early.session, early.cpt, 180.0));
+
+	// The same strokes with no seed made ahead (the file's seed made as the stroke ends).
+	SeedRig late("opennova_editor_heights_seed_late");
+	late.sample(-200.0, 200.0, false);
+	late.sample(-196.0, 200.0, false);
+	late.sample(-192.0, 200.0, true);
+	TEST_EXPECT(settled(late.session, late.cpt, 180.0));
+	TEST_EXPECT(early.heights() && late.heights() && early.heights()->serialize().text == late.heights()->serialize().text);
+	std::printf("seed: prepared in the background as Sculpt is picked, a stroke served meanwhile, its bake landing after\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_operators() + test_dabs() + test_session() + test_view();
+	const int failures = test_operators() + test_dabs() + test_session() + test_view() + test_seed();
 	if (failures == 0) std::printf("editor_heights_brushes: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -56,6 +56,15 @@ private:
 	// The job a document's state asks for now; null where nothing is due or it cannot bake (a blocked or read-only
 	// document, one with no planes).
 	std::unique_ptr<Job> make_job(const TerrainHeightsDocument &document) const;
+	// The seed kept for a document's file whose input it was made from (by its tiles, else by its texels' hash) under
+	// `locks`; null none.
+	std::shared_ptr<const trngen::TerrainBakeState> seed_for_(const TerrainHeightsDocument &document,
+			const std::array<trngen::CornerLockFlags, 4> &locks) const;
+	// A seed of `path` from `input` (null: one made already), and the next seed to make: an open heights document's
+	// with no state, else, Sculpt picked over the active view's terrain, its heights file's from the file.
+	std::unique_ptr<Job> seed_job_(const std::string &path, const RasterPlane &input,
+			const std::array<trngen::CornerLockFlags, 4> &locks) const;
+	std::unique_ptr<Job> next_seed_();
 	void start(std::unique_ptr<Job> job);
 	// The job's bake, on whichever thread runs it.
 	static void run(Job &job);
@@ -73,15 +82,20 @@ private:
 	std::unique_ptr<Job> finished_; // back from the worker, to land
 	std::atomic<bool> cancel_{false};
 	std::string running_path_;
+	bool running_seed_ = false; // the job running is a seed (no stroke stops it)
 	size_t landed_ = 0;
-	// The bake state a dropped first bake made, kept for the file's next attempt (its identity and load, and the
-	// input it was made from, must match).
+	// The seeds made: each file's bake state from the input its tiles were made from (a .cpt's atlas), its texels'
+	// hash and the locks it was baked under, the last few files'.
 	struct Seed {
-		uint64_t identity = 0, generation = 0;
+		std::string path;
+		uint64_t content = 0;
+		std::array<trngen::CornerLockFlags, 4> locks{};
 		RasterPlane input;
 		std::shared_ptr<const trngen::TerrainBakeState> state;
 	};
 	std::vector<Seed> seeds_;
+	// The heights files seeded from their file (by path and stamp), not read again.
+	std::vector<std::pair<std::string, uint64_t>> tried_;
 	std::vector<std::pair<uint64_t, int32_t>> flatten_; // the last few strokes' targets
 };
 

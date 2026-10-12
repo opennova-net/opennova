@@ -101,8 +101,9 @@ struct DocumentsView {
 	// follow, S13 V8, the Shell's pump each frame).
 	std::vector<OpenGesture> gestures;
 	// The heights file whose bake runs now (S25: the session's terrain sculpt, on its own thread), "" none: the
-	// Terrain pane's bake line.
+	// Terrain pane's bake line; and the one being prepared for sculpting (its bake state seeded in the background).
 	std::string baking;
+	std::string preparing;
 	// The gesture open in the document at `path` (one whose token is 0 for none).
 	const OpenGesture &gesture_in(const std::string &path) const {
 		static const OpenGesture kNone;
