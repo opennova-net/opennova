@@ -14,6 +14,7 @@
 #include <formats/cpt/trngen/lod_mesh_data.h>
 #include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/cpt/trngen/tristrip.h>
+#include <base/io/sha256.h>
 #include <formats/cpt/cpt_io.h>
 
 #include <cmath>
@@ -134,6 +135,36 @@ void test_bake_reads_back() {
 	wrong.depth8.assign(16, 0);
 	expect(!bake_terrain_bytes(wrong, bytes, error) && error.find("1024") != std::string::npos,
 	       "a map of another size is refused in words: " + error);
+}
+
+// The bake's bytes pinned: the island (8-bit, TrnGen's own path) and rolling hills (16-bit) hashed, as master made
+// them before the region bake (#1062), so a change that shifts any bake's bytes fails here (the byte parity with
+// TrnGen.exe's own .cpt files is the by-hand corpus leg below).
+void test_bake_pinned() {
+	TerrainBakeInput island;
+	island.depth8 = island_depth8();
+	island.terrain_name = "Island";
+	island.creator = "OpenNova";
+	island.version = "opennova";
+	island.threads = 4;
+	std::vector<uint8_t> bytes;
+	std::string error;
+	expect(bake_terrain_bytes(island, bytes, error) &&
+	               io::sha256_hex(bytes.data(), bytes.size()) ==
+	                       "16f080a9f58e86a309e59c6c5992e346e9e132b48a64de8cf64b7e49f8b71b35",
+	       "the island's .cpt keeps its bytes (sha256)");
+	TerrainBakeInput hills;
+	hills.depth16.resize(static_cast<size_t>(kDepthSide) * kDepthSide);
+	for (int y = 0; y < kDepthSide; ++y)
+		for (int x = 0; x < kDepthSide; ++x)
+			hills.depth16[static_cast<size_t>(y) * kDepthSide + x] = static_cast<uint16_t>(
+					8000.0 + 3000.0 * std::sin(x / 37.0) * std::cos(y / 53.0) + 1500.0 * std::sin((x + y) / 91.0));
+	hills.terrain_name = "Hills";
+	hills.threads = 4;
+	expect(bake_terrain_bytes(hills, bytes, error) &&
+	               io::sha256_hex(bytes.data(), bytes.size()) ==
+	                       "66b56daa3d5aac3a09821d92562f88b1cbe3ae10d3b039e7b6ed3e387d44055f",
+	       "the hills' .cpt keeps its bytes (sha256)");
 }
 
 void test_bake_16bit() {
@@ -261,6 +292,7 @@ void test_rough_ground_refused() {
 
 int main(int argc, char **argv) {
 	test_bake_reads_back();
+	test_bake_pinned();
 	test_bake_16bit();
 	test_refusals();
 	test_rough_ground_refused();

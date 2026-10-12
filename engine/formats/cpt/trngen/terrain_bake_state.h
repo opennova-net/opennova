@@ -56,11 +56,14 @@ struct NodeBakeState {
 
 // A bake's state: the base meshes and the lock flags it was made with, and every node's section (and a
 // leaf's draw-back) by .cpt tile index. Its parts are immutable and shared: a copy of the state shares them, and a
-// region bake's landing (apply_region_bake) replaces only the nodes it remade, so a history keeping a state per
+// region bake's landing (apply_region_bake_state) replaces only the nodes it remade, so a history keeping a state per
 // step (the editor's sculpting) keeps each node once.
 struct TerrainBakeState {
 	std::shared_ptr<const BaseMeshSet> base;
 	std::vector<std::shared_ptr<const NodeBakeState>> nodes;
+	// Whether its bake drew the leaves back over the atlas (TerrainBakeInput::rasterize_depth): a region bake
+	// draws back, so it takes only a state that did.
+	bool rasterize_depth = true;
 
 	bool empty() const noexcept {
 		return !base || !base->generated || nodes.size() != static_cast<size_t>(kCptTileCount);

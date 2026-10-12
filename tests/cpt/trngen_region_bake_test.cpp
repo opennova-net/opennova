@@ -2,9 +2,10 @@
 // kept (bake_terrain_state, the same bytes as bake_terrain), then edited in places and baked again over the
 // edited region alone, lands the bytes and the state a whole bake of the edited map makes: an edit inside one
 // leaf, on a 64 edge, at a four-leaf corner, across the map's wrap, along a locked quadrant's seam, at leaf
-// (0, 0) (whose tile is the root's too), several at once, and two region bakes in a row. One thread or many
-// make the same; a cancel stops it with the state as it was; a state not made and a map of the wrong size are
-// refused in words.
+// (0, 0) (whose tile is the root's too), across the map's vertical wrap, along its bottom row, several at once, and
+// two region bakes in a row. One thread or many make the same tiles; a cancel stops it with the state as it was; a
+// state not made, one made without the draw-back, a map of the wrong size, a changed rect not inside the map and
+// ground the whole bake refuses are refused in words; a .cpt not the bake's is refused by the .cpt landing.
 #include <formats/cpt/cpt_io.h>
 #include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/cpt/trngen/terrain_bake_state.h>
@@ -119,7 +120,8 @@ std::vector<uint16_t> check_region(Baked &from, std::vector<uint16_t> map, const
 	if (want_leaves) expect(result.footprints.size() == want_leaves, what + ": " + std::to_string(want_leaves) +
 	                                                                   " leaves remade, got " +
 	                                                                   std::to_string(result.footprints.size()));
-	apply_region_bake(result, from.state, from.cpt);
+	apply_region_bake_state(result, from.state);
+	expect(apply_region_bake_cpt(result, from.cpt, error), what + ": the .cpt landing: " + error);
 	if (!compare) return map;
 	const Baked whole = bake_whole(map, locks);
 	const std::vector<uint8_t> got = bytes_of(from.cpt), want = bytes_of(whole.cpt);
@@ -134,6 +136,7 @@ std::vector<uint16_t> check_region(Baked &from, std::vector<uint16_t> map, const
 }
 
 void test_threads_cancel_refusals(const Baked &baked);
+void test_rough_ground(const Baked &baked);
 
 void test_regions() {
 	const std::array<CornerLockFlags, 4> none{};
@@ -152,6 +155,7 @@ void test_regions() {
 	expect(baked.state.nodes[1]->draw_back.faces.empty(), "a branch keeps no draw-back");
 
 	test_threads_cancel_refusals(baked);
+	test_rough_ground(baked);
 
 	map = check_region(baked, map, {{270, 140, 30, 30}}, 3.0, none, "inside a leaf", 1, false);
 	map = check_region(baked, map, {{300, 300, 40, 12}}, -2.0, none, "across a 64 edge", 2, false);
@@ -159,6 +163,9 @@ void test_regions() {
 	                   "at a four-leaf corner (after a leaf and an edge)", 4);
 	map = check_region(baked, map, {{1016, 200, 8, 10}, {0, 200, 6, 10}}, 2.5, none, "across the wrap", 0, false);
 	map = check_region(baked, map, {{4, 6, 20, 20}}, 5.0, none, "at leaf (0, 0), the root's tile", 1, false);
+	map = check_region(baked, map, {{300, 1018, 10, 6}, {300, 0, 10, 4}}, 2.0, none,
+	                   "across the vertical wrap (after leaf (0, 0))");
+	map = check_region(baked, map, {{700, 1020, 12, 4}}, -2.0, none, "along the bottom row", 0, false);
 	map = check_region(baked, map, {{100, 700, 10, 10}, {800, 100, 12, 12}, {500, 500, 3, 3}}, -1.5, none,
 	                   "several regions at once (after the wrap and leaf (0, 0))");
 }
@@ -188,12 +195,12 @@ void test_threads_cancel_refusals(const Baked &baked) {
 	expect(bake_terrain_region(baked.state, input, one, error), "one thread: " + error);
 	input.threads = 7;
 	expect(bake_terrain_region(baked.state, input, many, error), "seven threads: " + error);
-	bool same = one.rebuilt == many.rebuilt && one.atlas == many.atlas && one.tiles.size() == many.tiles.size();
-	for (size_t i = 0; same && i < one.tiles.size(); ++i)
-		same = one.tiles[i].vertex_indices == many.tiles[i].vertex_indices &&
-		       one.tiles[i].lods[0].indices == many.tiles[i].lods[0].indices &&
-		       one.tiles[i].lods[7].indices == many.tiles[i].lods[7].indices;
-	expect(same, "one thread and seven make the same region");
+	// Every tile whole (all eight LODs, their strip flags and highest indices): the .cpt bytes each lands.
+	CptFile landed_one = baked.cpt, landed_many = baked.cpt;
+	expect(apply_region_bake_cpt(one, landed_one, error) && apply_region_bake_cpt(many, landed_many, error),
+	       "both land: " + error);
+	expect(one.rebuilt == many.rebuilt && one.atlas == many.atlas && bytes_of(landed_one) == bytes_of(landed_many),
+	       "one thread and seven make the same region, every tile whole");
 	expect(one.cost[4].nodes == 4 && one.cost[3].nodes >= 1 && one.cost[1].nodes == 1 && one.cost[0].nodes == 0,
 	       "the cost counts the leaves, their ancestors and no root");
 
@@ -216,10 +223,40 @@ void test_threads_cancel_refusals(const Baked &baked) {
 	TerrainBakeState empty;
 	expect(!bake_terrain_region(empty, input, none_out, error) && error.find("state") != std::string::npos,
 	       "a state not made is refused in words: " + error);
+	TerrainBakeState flat = baked.state;
+	flat.rasterize_depth = false;
+	expect(!bake_terrain_region(flat, input, none_out, error) && error.find("draw-back") != std::string::npos,
+	       "a state made without the draw-back is refused in words: " + error);
+	RegionBakeInput past = input;
+	past.dirty = {{1016, 200, 16, 10}};
+	expect(!bake_terrain_region(baked.state, past, none_out, error) && error.find("inside") != std::string::npos,
+	       "a changed rect past the map's edge is refused in words: " + error);
+	CptFile short_file;
+	expect(!apply_region_bake_cpt(one, short_file, error) && error.find("341") != std::string::npos,
+	       "a .cpt not the bake's is refused by the landing: " + error);
 	std::vector<uint16_t> small(16, 0);
 	input.depth16 = &small;
 	expect(!bake_terrain_region(baked.state, input, none_out, error) && error.find("1024") != std::string::npos,
 	       "a map of another size is refused in words: " + error);
+}
+
+// Ground the whole bake refuses (every texel at random over the 16-bit range, D-TERRAIN-22) is refused by a region
+// bake of the whole map too, its state as it was.
+void test_rough_ground(const Baked &baked) {
+	std::vector<uint16_t> rough(static_cast<size_t>(kDepthSide) * kDepthSide);
+	uint32_t seed = 0x2545F491u;
+	for (uint16_t &h : rough) {
+		seed = seed * 1664525u + 1013904223u;
+		h = static_cast<uint16_t>(seed >> 16);
+	}
+	RegionBakeInput input;
+	input.depth16 = &rough;
+	input.dirty = {{0, 0, kDepthSide, kDepthSide}};
+	input.threads = TerrainBakeInput::for_hardware();
+	RegionBakeResult out;
+	std::string error;
+	expect(!bake_terrain_region(baked.state, input, out, error) && error.find("too rough") != std::string::npos,
+	       "ground the whole bake refuses is refused by the region bake: " + error);
 }
 
 } // namespace

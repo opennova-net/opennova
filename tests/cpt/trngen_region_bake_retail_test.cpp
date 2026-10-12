@@ -7,6 +7,7 @@
 //   draws them, odd triangles reversed [orig: Terrain_RenderSectorBatch @ 0x609b7e..0x609bd4]) at the atlas
 //   heights, under its .trn's locks, against the atlas: printed (W3), the leaves' triangles all facing the
 //   draw-back's way but where a tile holds a flipped face;
+// - every file: the cold bake it is sculpted from (input := atlas, its .trn's locks) bakes;
 // - three files (one unlocked, two locked): a cold bake's state from the atlas; a region bake of nothing
 //   leaves the file's bytes as they were; a one-leaf edit remakes that leaf and its three ancestors (and the
 //   root's tile at leaf (0, 0)), every other tile and every texel outside the leaf's footprint as shipped, and
@@ -140,6 +141,18 @@ void check_draw_back(const std::string &name, const CptFile &cpt, const Locks &l
 	expect(facing > 0 && flipped * 1000 < facing, name + ": the strips' triangles face the draw-back's way");
 }
 
+// The cold bake every shipped file is sculpted from (input := atlas, its .trn's locks) bakes: the 341 nodes' state.
+void check_cold_bake(const std::string &name, const CptFile &shipped, const Locks &locks) {
+	TerrainBakeInput input;
+	input.depth16 = shipped.depth_buffer;
+	input.locks = locks;
+	input.threads = TerrainBakeInput::for_hardware();
+	CptFile cold;
+	TerrainBakeState state;
+	std::string error;
+	expect(bake_terrain_state(input, cold, state, error) && !state.empty(), name + ": the cold bake: " + error);
+}
+
 void check_region(const std::string &name, const CptFile &shipped, const std::vector<uint8_t> &bytes,
                   const Locks &locks) {
 	TerrainBakeInput input;
@@ -158,7 +171,8 @@ void check_region(const std::string &name, const CptFile &shipped, const std::ve
 	       name + ": a region bake of nothing remakes nothing");
 	CptFile same = shipped;
 	TerrainBakeState same_state = state;
-	apply_region_bake(nothing, same_state, same);
+	apply_region_bake_state(nothing, same_state);
+	expect(apply_region_bake_cpt(nothing, same, error), "the no-op landing: " + error);
 	std::vector<uint8_t> again;
 	expect(save_cpt(same, again, error) && again == bytes, name + ": an unedited file writes its bytes again");
 
@@ -179,7 +193,8 @@ void check_region(const std::string &name, const CptFile &shipped, const std::ve
 	expect(result.footprints.size() == 1 && result.rebuilt.size() == 4,
 	       name + ": one leaf and its three ancestors are remade (" + std::to_string(result.rebuilt.size()) + ")");
 	CptFile edited = shipped;
-	apply_region_bake(result, state, edited);
+	apply_region_bake_state(result, state);
+	expect(apply_region_bake_cpt(result, edited, error), "the landing: " + error);
 	int other_tiles = 0;
 	for (size_t i = 0; i < edited.tiles.size(); ++i) {
 		if (std::find(result.rebuilt.begin(), result.rebuilt.end(), static_cast<int>(i)) != result.rebuilt.end()) continue;
@@ -220,7 +235,7 @@ int main() {
 		if (entry.is_regular_file() && lower(entry.path().extension().string()) == ".cpt") cpts.push_back(entry.path());
 	std::sort(cpts.begin(), cpts.end());
 	expect(cpts.size() >= 23u, "the shipped .cpt files are there (" + std::to_string(cpts.size()) + ")");
-	int regions = 0;
+	int regions = 0, cold = 0;
 	for (const auto &path : cpts) {
 		const std::string name = path.filename().string();
 		const std::vector<uint8_t> bytes = test_io::read_file(path.string());
@@ -237,9 +252,13 @@ int main() {
 		if (key == "dvxi5.cpt" || key == "dvxg8.cpt" || key == "g14.cpt") {
 			check_region(name, cpt, bytes, lock);
 			++regions;
+		} else {
+			check_cold_bake(name, cpt, lock);
 		}
+		++cold;
 	}
 	expect(regions == 3, "the region legs ran on Dvxi5, dvxg8 and g14");
+	expect(cold == static_cast<int>(cpts.size()), "every shipped file's cold bake ran");
 	if (failures) return 1;
 	std::printf("OK: region bakes over the shipped .cpt files\n");
 	return 0;

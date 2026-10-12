@@ -77,6 +77,12 @@ struct QuadtreeContext {
 // Frees a node's LOD mesh (its buffers, then the mesh).
 void free_node_mesh(std::unique_ptr<LODMeshData>& mesh);
 
+// A merged mesh's faces as the reduction can take them: false, with `error` (the ground "too rough"), where a face
+// names one point twice (D-TERRAIN-22: every map that merges such a face, a superset of those whose reduction
+// corrupts TrnGen's heap). make_node_mesh checks every merged node with it; a region bake checks the root's merge
+// with it too.
+bool merged_faces_sound(const LODMeshData& mesh, std::string& error);
+
 // One node made (QuadtreeNode_Process's work once its children are done): a leaf's mesh from its
 // base mesh and the depth map, a branch's from its children's LOD 14 sections, simplified into its
 // LOD levels, its tile file made (`tile_name`, `tile_bytes`) and its children's meshes freed. False,

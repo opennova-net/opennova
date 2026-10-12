@@ -223,6 +223,7 @@ bool bake(const TerrainBakeInput &input, CptFile &out, TerrainBakeState *state, 
 		if (state) {
 			state->nodes = std::move(nodes);
 			state->base = std::make_shared<const BaseMeshSet>(base);
+			state->rasterize_depth = input.rasterize_depth;
 		}
 	}
 	MeshSimp_FreeAll();
