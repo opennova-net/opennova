@@ -14,6 +14,11 @@ web/dist/
 __pycache__/
 *.pyc
 .scratch/
+# Agent worktrees (.claude/worktrees/, each a whole checkout) and the
+# machine-local settings file live here; no image reads any of it. libs/ is
+# a stale pre-ADR-0028 tree a maintainer checkout can still hold.
+.claude/
+libs/
 fixtures/
 infra/aws/.terraform/
 # Terraform state + operator var-files hold real secrets — never into any build

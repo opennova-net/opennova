@@ -27,6 +27,35 @@ bool tga_write_rgba32(const uint8_t *rgba, uint32_t width, uint32_t height, std:
 bool tga_write_rgb24(const uint8_t *rgba, uint32_t width, uint32_t height, std::vector<uint8_t> &out,
                      std::string &error);
 
+// The TGA 2.0 footer's 26 bytes: the extension and developer areas' offsets, then the signature
+// "TRUEVISION-XFILE", '.' and a NUL (the Truevision TGA 2.0 specification). No game reader looks past
+// the pixels; every shipped terrain colour map, detail blend map and tile atlas ends with it, both
+// offsets 0.
+inline constexpr size_t TGA_FOOTER_SIZE = 26;
+
+// The form of an uncompressed true-colour TGA, as the writer makes one: its depth (24 or 32 bits), its
+// descriptor byte (written as it was read: no game reader honours its origin bit, so the rows stay
+// bottom-up), and whether it ends with the TGA 2.0 footer (offsets 0, no extension or developer area).
+// The defaults are tga_write_rgba32's form.
+struct TgaForm {
+	uint8_t bits = 32;
+	uint8_t descriptor = TGA_DESCRIPTOR_ALPHA_8;
+	bool footer = false;
+};
+
+// The form a file holds, when the writer makes it again byte for byte from its pixels: image type 2, no
+// image ID, no colour map, the origin (0, 0), 24 or 32 bits, the pixels exactly, then nothing or the
+// TGA 2.0 footer with both offsets 0. False for any other file, which a writer saves in its own form.
+bool tga_read_form(const uint8_t *bytes, size_t size, TgaForm &out);
+
+// `rgba` as tga_write_rgba32, written in `form`: the header (type 2, the depth, the descriptor as the form
+// carries it), the rows from the bottom up (B, G, R and, at 32 bits, A), then the footer when the form has
+// one. Refused as tga_write_rgba32 is, for a depth other than 24 or 32, and for a 24-bit form over pixels
+// that are not all opaque (the depth holds no alpha: a painted weight would be lost; tga_write_rgb24 is the
+// writer that leaves alpha out by design).
+bool tga_write(const uint8_t *rgba, uint32_t width, uint32_t height, const TgaForm &form, std::vector<uint8_t> &out,
+               std::string &error);
+
 // The size a TGA's 18-byte header states: the width and height at bytes 12 and 14 (tga.cpp
 // holds the witnesses). False when `size` is shorter than the header or the image type at
 // byte 2 is none of the TGA format's image forms: colour-mapped (1), true-colour (2) and grey

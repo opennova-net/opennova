@@ -70,9 +70,11 @@ public:
 	// CNapiNPConnection_RequestDisconnect / CNapiNPConnection_Destroy ->
 	// CNapiNPConnection_TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 	void disconnect();
-	// The server-info update outside the refresh timer: the source's columns and roster at once,
-	// then the Host list's dirty delta (a mission start on a listed server). Nothing while not
-	// hosting.
+	// The mission start's server-info update: the source's columns and roster at once, then both
+	// lists in full (NwuHostRole::publish_mission_start). An embedder whose source starts missions
+	// runs it at each one; for a source without missions the lister runs it at its host result
+	// and the update again at each mission change the source shows it
+	// (ListingSource::starts_missions, D-NET-488). Nothing while not hosting.
 	void publish_server_info();
 
 	int exit_code() const { return exit_code_; }
@@ -91,12 +93,13 @@ private:
 	       IDatagramSocket *session_socket);
 
 	void on_verified();
+	void on_listed();
 	void on_http_reply(const net::HttpReply &reply);
 	void ship(const HttpRequestSpec &spec);
 	void request_host();
 	void sync_flow_context();
 	std::vector<std::pair<std::string, std::string>> cookie_vars();
-	void refresh_listing(bool force);
+	bool refresh_listing(bool force);
 	HostRegistration registration() const;
 	void sync_roster();
 	// Record the outcome; the teardown runs at the end of the tick, outside the driver's hooks.
@@ -130,6 +133,7 @@ private:
 	std::vector<std::pair<std::string, std::string>> identity_vars_;
 	std::future<net::HttpReply> http_;
 	std::string host_key_;
+	std::string listed_mission_; // the mission the last refresh listed
 };
 
 } // namespace opennova::nw_lister

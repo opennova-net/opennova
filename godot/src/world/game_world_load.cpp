@@ -43,6 +43,7 @@ namespace {
 
 constexpr const char *kSignalWorldLoaded = "world_loaded";
 constexpr const char *kSignalLoadFailed = "load_failed";
+constexpr const char *kSignalProcessExitRequested = "process_exit_requested";
 constexpr const char *kSignalLoadProgress = "load_progress";
 constexpr const char *kSignalMinimapWaterChanged = "minimap_water_changed";
 constexpr const char *kSignalMusicContextOpened = "music_context_opened";
@@ -1021,6 +1022,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	opts->set_item_db(placer_.is_valid() ? placer_->get_item_db() : Ref<ItemDatabase>());
 	opts->set_local_character_profile(local_character_profile_);
 	opts->set_player_profiles(player_profiles_);
+	opts->set_game_config(game_config_);
 	// Serve-and-play hosts run the listen server AND spawn their own player
 	// (ADR 0011/0012, net-re §5.2b/§5.38). A DEDICATED host (config
 	// "dedicated") serves WITHOUT a local player — same listen server, just no
@@ -1053,6 +1055,7 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 	runtime->setup(p_mission, container, opts);
 	if (runtime->get_sim().is_null()) {
 		const int setup_error = runtime->get_setup_error();
+		const bool process_exit = runtime->is_process_exit();
 		const bool lan_bind_failure = opts->get_net_transport() == "lan";
 		const int bind_port = opts->get_bind_port();
 		// Free before emitting: a load_failed handler may synchronously tear
@@ -1063,7 +1066,11 @@ int GameWorld::start_runtime(const Ref<MissionData> &p_mission, const String &p_
 		// nothing may present a half-built mission before the handler runs.
 		runtime_id_ = ObjectID();
 		memdelete(runtime);
-		if (lan_bind_failure) {
+		if (process_exit) {
+			// The session create ended the process (exit code 0): no load
+			// failure to show, the shell exits.
+			emit_signal(kSignalProcessExitRequested, 0);
+		} else if (lan_bind_failure) {
 			emit_signal(kSignalLoadFailed, vformat("host start: could not bind LAN UDP port %d", bind_port));
 		} else {
 			emit_signal(kSignalLoadFailed, "failed to start mission runtime");

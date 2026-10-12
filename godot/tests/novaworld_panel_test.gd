@@ -16,6 +16,7 @@ var _root_dirs: Array[String] = []
 
 
 func after_each() -> void:
+	LaunchFlags.clear_args_override()
 	for dir in _root_dirs:
 		TestFs.remove_dir_recursive(dir)
 	_root_dirs.clear()
@@ -349,6 +350,24 @@ func test_host_request_waits_for_the_service() -> void:
 	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE,
 		"a session that is not set up fails the hosting leg")
 	assert_string_contains(panel.message_text(), "NWEC01")
+
+
+# The NovaWorld page's launch saves the player profile, then game.cfg, before
+# its host leg, whatever the hosting answers (here the unstarted session's
+# NWEC01).
+func test_host_press_saves_the_profile_first() -> void:
+	var run_dir := OS.get_cache_dir().path_join("opennova_nw_panel_run_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	_root_dirs.append(run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	var panel := _make_panel(PackedStringArray(["alpha.bms"]))
+	panel.select_mission(0)
+	panel.press_host()
+	assert_true(FileAccess.file_exists(run_dir.path_join("player.sav")),
+		"the launch saved player.sav in the working directory")
+	assert_true(FileAccess.file_exists(run_dir.path_join(GameCfgStore.FILE_NAME)),
+		"and game.cfg beside it")
+	assert_string_contains(panel.message_text(), "NWEC01", "before the host leg failed")
 
 
 func test_hosting_started_hands_the_request_up() -> void:

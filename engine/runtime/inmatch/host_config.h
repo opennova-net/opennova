@@ -8,11 +8,19 @@
 // [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0 calls
 //  Game_ApplySessionSettingsToGlobals @0x551500 at @0x5695B8;
 //  Game_StartMission calls it at @0x524662]. opennova-serve runs the dead
-// /HOST path over it (ADR 0051 d2); opennova.exe's hosts still seed their
-// session from the host screen alone (D-NET-335's open half).
+// /HOST path over it (ADR 0051 d2). The game shell keeps the block too
+// (game_config_block.h): its session creates take the mpreset word from it and
+// a ServerCommand's config change lands in it, but its hosts still seed their
+// session from the host screen, which neither reads nor writes the block
+// (D-NET-335's open half).
 
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/host_file.h>
+#include <runtime/inmatch/server_admin_command.h>
+
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace opennova::def {
 struct DefWeaponsFile;
@@ -20,6 +28,10 @@ struct DefWeaponsFile;
 
 namespace opennova::rtxt {
 struct File;
+}
+
+namespace opennova {
+class ResourceIndex;
 }
 
 namespace opennova::inmatch {
@@ -37,6 +49,9 @@ namespace opennova::inmatch {
 //  the subclass skip @0x54D8F1, loadout_selectable @0x54D9F0,
 //  loadout_subclasses @0x54DA1E]
 gamecfg::WeaponRoster game_cfg_weapon_roster(const def::DefWeaponsFile &weapons);
+// The same table from the mounted install's weapon.def, read through the
+// index (empty when the mount has none or it does not parse).
+gamecfg::WeaponRoster game_cfg_weapon_roster(const ResourceIndex &index);
 
 // The defaults' two localized strings from the mounted gametext.bin: its
 // Menu/UNTITLED and Menu/USERMESSAGE entries, each falling back to the `!`
@@ -59,5 +74,42 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext);
 // [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0;
 //  Game_ApplySessionSettingsToGlobals @0x551500; per field in host_config.cpp]
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg);
+
+// The cfg block's side of a ServerCommand that changed the config: the verb's
+// block field takes the value the executor left in the session config
+// (SetServerName game_name +0x3A5, SetServerMsg servermsg +0x560, SetMPReset
+// mpreset +0x344), which the caller then saves; SetMPReset touches only the
+// block. Any other verb writes nothing.
+// [orig: CNapiGameSession_HandleServerCommand — SetServerName's block copy
+//  @0x4D2CFC, SetServerMsg's @0x4D2DAD, SetMPReset's @0x4D2E28; Game_SaveConfig
+//  @0x4D2DDF and @0x4D2E2D]
+void store_server_command_config(
+		gamecfg::GameCfg &block, std::string_view verb, const GameConfig &config);
+
+// A ServerCommand at a host, over its cfg block. Once the host's match is
+// bound, the command runs on its hosting context `ctx` and its `world`; before
+// that (the hosting wait, from the hosting request until the session create:
+// `ctx` null) it runs on a session-less context, because retail's statement
+// dispatch hands every ServerCommand to the handler whatever the session's
+// state. That context holds `pre_session_mode` (the host's connection mode)
+// and a clear is_in_session (the executor's stand-in for ctx+0x68, which only
+// CNapiGameSession_CreateSession sets), so every verb's gate refuses it but
+// SetMPReset's token count. A config change lands in `block` (null: none) by
+// store_server_command_config; the caller saves it (Game_SaveConfig) and
+// republishes the changed columns.
+// [orig: CNapiGameSession_DispatchServerStatement @0x4D18A0 (no state test);
+//  CNapiGameSession_HandleServerCommand @0x4D22F0 — SetMPReset's lone token
+//  count @0x4D2E12, the other verbs' ctx+0x68 tests (SetServerName's
+//  @0x4D2CE9); the latch CNapiGameSession_CreateSession sets @0x4C9D16]
+// A host's connection mode by its server type: a serve-and-play listen host
+// is host and client (3), a Serve Only host host alone (1)
+// [orig: CGameSession_SetConnectionMode @0x4c49f0; napi_np_server_ctx.h
+//  ConnectionMode]. The mode a session-less context takes before the match
+// binds (run_host_server_command).
+ConnectionMode host_connection_mode(bool serve_and_play);
+
+ServerCommandOutcome run_host_server_command(NapiNPServerCtx *ctx, world::World *world,
+		ConnectionMode pre_session_mode, gamecfg::GameCfg *block, std::string_view verb,
+		std::string_view target_suffix, const std::vector<std::string> &args);
 
 } // namespace opennova::inmatch

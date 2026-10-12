@@ -27,11 +27,11 @@ namespace opennova::inmatch {
 // player-targeted verbs and ChangeTeam / SwapTeam also need the player table
 // (a World here); a verb that reads an argument it cannot default needs its
 // token; SetMPReset needs only its argument, so it runs on any receiver this
-// executor is handed. opennova-serve hands it a session-less context for a
-// command that arrives before its match binds (ServeListing::on_command), where
-// only SetMPReset passes, as retail's hosting wait runs it; the game shell's
-// Simulation::execute_server_command needs a host context, which stays a
-// residual, where retail would still store and save a SetMPReset. The World-acting verbs
+// executor is handed. Both hosts hand it a session-less context for a command
+// that arrives before their match binds (host_config.h run_host_server_command:
+// opennova-serve's ServeListing::on_command, the game shell's
+// SessionDrive / Simulation::execute_server_command), where only SetMPReset
+// passes, as retail's hosting wait runs it. The World-acting verbs
 // retail leaves off the player-table gate (Cycle / EndMission / GameOver,
 // Earthquake, Lightning, TimeOfDay) still need a World to act on
 // (docs/net/novaworld-net-re.md D-NET-383). Numbers are the CRT atol's, 32-bit

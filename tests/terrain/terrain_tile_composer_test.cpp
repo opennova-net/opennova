@@ -1025,9 +1025,51 @@ bool test_map_split_rules() {
 			"a map shorter than its even width overruns the split");
 }
 
+// An editor's tile edit retires only the pages its changed records' squares overlap: a record changed in place
+// names its old and new squares, an added or removed one its own, an unchanged one none; a reorder names every
+// index it moved past.
+bool test_overlay_changes() {
+	using opennova::terrain::TerrainTileSquareQ16;
+	using opennova::terrain::terrain_tile_overlay_changes;
+	opennova::TilFile before;
+	before.entries.resize(3);
+	before.entries[0].x_fixed = 0;
+	before.entries[0].z_fixed = 0;
+	before.entries[1].x_fixed = 32 << 16;
+	before.entries[1].z_fixed = -(16 << 16);
+	before.entries[1].tile_index = 4;
+	before.entries[2].x_fixed = 64 << 16;
+	before.entries[2].tile_index = 9;
+	if (!expect(terrain_tile_overlay_changes(before, before).empty(), "the same placement changes no square")) return false;
+	opennova::TilFile turned = before;
+	turned.entries[1].flags = 4;
+	std::vector<TerrainTileSquareQ16> squares = terrain_tile_overlay_changes(before, turned);
+	if (!expect(squares.size() == 2 && squares[0].minimum_x == (32 << 16) && squares[0].minimum_z == (16 << 16) &&
+			squares[0].maximum_x == (48 << 16) && squares[0].maximum_z == (32 << 16), "a turn names the record's square, z negated"))
+		return false;
+	opennova::TilFile moved = before;
+	moved.entries[0].x_fixed = 100 << 16;
+	squares = terrain_tile_overlay_changes(before, moved);
+	if (!expect(squares.size() == 2 && squares[0].minimum_x == 0 && squares[1].minimum_x == (100 << 16),
+			"a move names the square it left and the one it took"))
+		return false;
+	opennova::TilFile added = before;
+	added.entries.push_back(before.entries[0]);
+	added.entries.back().x_fixed = 200 << 16;
+	squares = terrain_tile_overlay_changes(before, added);
+	if (!expect(squares.size() == 1 && squares[0].minimum_x == (200 << 16), "an added record names its own square")) return false;
+	squares = terrain_tile_overlay_changes(added, before);
+	if (!expect(squares.size() == 1 && squares[0].minimum_x == (200 << 16), "a removed record names its own square")) return false;
+	opennova::TilFile reordered = before;
+	std::swap(reordered.entries[0], reordered.entries[2]);
+	squares = terrain_tile_overlay_changes(before, reordered);
+	return expect(squares.size() == 4, "a reorder names every index it moved past, the unmoved middle none");
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	if (!test_map_split_rules()) return 1;
+	if (!test_overlay_changes()) return 1;
 	if (!test_colormap_quadrants_follow_texcompression()) return 1;
 	if (!test_tile_set_levels_are_the_dxt5_decode()) return 1;
 	if (!test_level_density()) return 1;

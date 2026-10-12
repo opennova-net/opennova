@@ -17,8 +17,8 @@ const HudHiddenCaptureWitness := preload(
 #  Game_ApplySessionSettingsToGlobals @0x55154d from the config struct that
 #  Game_SaveConfig @0x54c80d persists; the first-match key scan @0x49d42f]
 #
-# user:// settings hygiene: every test wraps its cycles back to the starting
-# value so the shared settings.cfg survives (the hud_color tests' pattern).
+# The config value is the process's cfg block word (GameCfgStore); every test
+# wraps its cycles back to the starting value (the hud_color tests' pattern).
 
 var _staged_dir := ""
 
@@ -30,10 +30,7 @@ func after_each() -> void:
 
 
 func _persisted_hud_detail() -> int:
-	return int(ConfigStore.read(
-			GameHudPresenter.HUD_COLOR_CONFIG_PATH,
-			GameHudPresenter.HUD_COLOR_SECTION,
-			GameHudPresenter.HUD_DETAIL_CONFIG_KEY, 0))
+	return GameCfgStore.block().get_word(GameHudPresenter.HUD_DETAIL_CONFIG_KEY)
 
 
 func test_huddetail_edge_cycles_and_wraps_the_live_level() -> void:

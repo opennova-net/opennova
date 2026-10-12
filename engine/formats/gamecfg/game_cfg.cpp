@@ -582,6 +582,38 @@ void apply_line(GameCfg &cfg, const io::ConfigTokens &line, const WeaponRoster &
 	}
 }
 
+namespace {
+
+// int_word for a block of either constness: the cfg table's rows first, then
+// the switch key in its own letter's arm, as apply_line finds them.
+template <typename Cfg>
+auto find_int_word(Cfg &cfg, const char *key) -> decltype(&(cfg.*kConfigVarRows[0].int_field)) {
+	if (key == nullptr || key[0] == '\0') return nullptr;
+	for (size_t i = 0; i < kConfigVarRowCount; ++i) {
+		const ConfigVarRow &row = kConfigVarRows[i];
+		if (!equal_nocase(row.name, key)) continue;
+		const bool int_row = row.type == ConfigVarType::Int32 || row.type == ConfigVarType::UInt32 ||
+				row.type == ConfigVarType::Bool;
+		return int_row && row.int_field != nullptr ? &(cfg.*row.int_field) : nullptr;
+	}
+	const char arm = ascii_lower(key[0]);
+	for (const SwitchKey &k : kSwitchKeys) {
+		if (k.arm != arm || !equal_nocase(key, k.name)) continue;
+		return k.int_field != nullptr ? &(cfg.*k.int_field) : nullptr;
+	}
+	return nullptr;
+}
+
+} // namespace
+
+int32_t *int_word(GameCfg &cfg, const char *key) {
+	return find_int_word(cfg, key);
+}
+
+const int32_t *int_word(const GameCfg &cfg, const char *key) {
+	return find_int_word(cfg, key);
+}
+
 void parse(const char *text, size_t size, GameCfg &cfg, const WeaponRoster &weapons) {
 	io::for_each_config_file_line(text, size, [&](io::ConfigTokens &line) { apply_line(cfg, line, weapons); });
 }
