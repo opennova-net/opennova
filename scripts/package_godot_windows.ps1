@@ -349,7 +349,7 @@ function Test-GodotAppBoot {
     Write-Host "=== Boot smoke: opennova-runtime ==="
     # No arguments: the bundled game's menu (ADR 0048), from the base game's
     # build in assets/ (its archives mounted, not a loose folder).
-    $bundled = Invoke-GodotAppBoot -ExePath $ExePath -ExtraArgs "" -ExpectedExit 0
+    $bundled = Invoke-GodotAppBoot -ExePath $ExePath -UserArgs "" -ExpectedExit 0
     if ($bundled -match "bundled assets not found|no menu found in resource dir") {
         Write-Host $bundled.TrimEnd()
         throw "Boot smoke did not reach the bundled game's menu"
@@ -373,13 +373,13 @@ function Test-EditorAppBoot {
     param([string]$EditorExe, [string]$PlayExe)
 
     Write-Host "=== Boot smoke: opennova-play-runtime ==="
-    $usage = Invoke-GodotAppBoot -ExePath $PlayExe -ExtraArgs "-- --resource-dir" -ExpectedExit 2
+    $usage = Invoke-GodotAppBoot -ExePath $PlayExe -UserArgs "--resource-dir" -ExpectedExit 2
     if ($usage -notmatch "--resource-dir needs a path") {
         Write-Host $usage.TrimEnd()
         throw "Boot smoke did not report the Play runtime's --resource-dir usage error"
     }
     Write-Host "=== Boot smoke: opennova-editor ==="
-    $editor = Invoke-GodotAppBoot -ExePath $EditorExe -ExtraArgs "-- --editor-smoke" -ExpectedExit 0
+    $editor = Invoke-GodotAppBoot -ExePath $EditorExe -UserArgs "--editor-smoke" -ExpectedExit 0
     if ($editor -notmatch "OpenNova Editor: smoke ok") {
         Write-Host $editor.TrimEnd()
         throw "Boot smoke did not report 'OpenNova Editor: smoke ok'"
@@ -414,7 +414,6 @@ function Copy-TrackedProject {
         $dst = Join-Path $StageDir $rel
         New-Item -ItemType Directory -Force -Path (Split-Path $dst -Parent) | Out-Null
         Copy-Item -LiteralPath $src -Destination $dst -Force
-        $copied.Add($rel)
     }
     Write-Host "    staged $($names.Count) tracked files of $Folder/"
 }
@@ -499,12 +498,50 @@ function New-StageDir {
 }
 
 # The ImGui addon's native library the export placed beside an exe (the game's
-# debug tools; the editor's windows in every mode).
+# debug tools; the editor's windows in every mode). Returns each file's name.
 function Copy-ImGuiLibs {
     param([string]$ExeDir, [string]$Destination, [bool]$Required)
     $imguiLibs = @(Get-ChildItem -LiteralPath $ExeDir -Filter "libimgui-godot-native.*" -File)
     if ($Required -and $imguiLibs.Count -eq 0) { throw "Export in $ExeDir is missing the ImGui addon library" }
-    foreach ($lib in $imguiLibs) { Copy-Item -LiteralPath $lib.FullName -Destination $Destination }
+    $copied = New-Object System.Collections.Generic.List[string]
+    foreach ($lib in $imguiLibs) {
+        Copy-Item -LiteralPath $lib.FullName -Destination $Destination
+        $copied.Add($lib.Name)
+    }
+    return $copied
+}
+
+# The zip ships exactly the files this script staged. Anything else in the
+# stage fails the package, named: a save or log the boot smoke wrote (the
+# 0.0.16 and 0.0.17 zips shipped the CI runner's player.sav and weapon.sav,
+# which also overwrite a player's own on unzipping over an install) or a file
+# any other step left there. $Staged holds paths relative to $StageDir.
+function Assert-StageHoldsOnly {
+    param([string]$StageDir, [string[]]$Staged)
+
+    $prefix = [IO.Path]::GetFullPath($StageDir).TrimEnd('\') + '\'
+    $files = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $dirs = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    foreach ($rel in $Staged) {
+        $rel = $rel -replace '/', '\'
+        [void]$files.Add($rel)
+        for ($dir = Split-Path $rel -Parent; $dir; $dir = Split-Path $dir -Parent) { [void]$dirs.Add($dir) }
+    }
+    $unexpected = @(Get-ChildItem -LiteralPath $StageDir -Recurse -Force | ForEach-Object {
+        $rel = $_.FullName.Substring($prefix.Length)
+        if ($_.PSIsContainer) {
+            if (-not $dirs.Contains($rel)) { "$rel\" }
+        }
+        elseif (-not $files.Contains($rel)) { $rel }
+    })
+    if ($unexpected.Count -gt 0) {
+        throw "The game stage holds files this script did not stage, which the zip would ship: $($unexpected -join ', ')"
+    }
+    $missing = @($files | Where-Object { -not (Test-Path -LiteralPath (Join-Path $StageDir $_) -PathType Leaf) })
+    if ($missing.Count -gt 0) {
+        throw "Files this script staged are gone from the game stage: $($missing -join ', ')"
+    }
+    Write-Host "    the stage holds exactly the $($files.Count) files staged"
 }
 
 Write-Host "=== Exporting opennova.exe ==="
@@ -520,13 +557,24 @@ Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
 $stagePath = New-StageDir ".stage-opennova-game-windows"
 try {
     # Each file staged, as its path in the stage: the only files the zip may
-    # hold (Assert-StageHoldsOnly).
+    # hold (Assert-StageHoldsOnly). The base game's export is staged by this
+    # script too: every file Export-BaseGame put in assets\, listed before the
+    # boot smoke runs.
     $staged = New-Object System.Collections.Generic.List[string]
     $stagedExe = Join-Path $stagePath "opennova.exe"
     Copy-Item -LiteralPath $RUNTIME_EXE -Destination $stagedExe
+    $staged.Add("opennova.exe")
     Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $stagePath
-    Copy-ImGuiLibs -ExeDir $DIST -Destination $stagePath -Required ($ExportMode -eq "debug")
-    Export-BaseGame -GameDir (Join-Path $stagePath "assets")
+    $staged.Add((Split-Path $SHIPPED_RUNTIME_DLL -Leaf))
+    foreach ($name in @(Copy-ImGuiLibs -ExeDir $DIST -Destination $stagePath -Required ($ExportMode -eq "debug"))) {
+        $staged.Add($name)
+    }
+    $gameDir = Join-Path $stagePath "assets"
+    Export-BaseGame -GameDir $gameDir
+    $stagePrefix = [IO.Path]::GetFullPath($stagePath).TrimEnd('\') + '\'
+    foreach ($file in @(Get-ChildItem -LiteralPath $gameDir -Recurse -File -Force)) {
+        $staged.Add($file.FullName.Substring($stagePrefix.Length))
+    }
     $launchHelp = @"
 OpenNova
 
@@ -566,10 +614,10 @@ try {
     $stagedPlayExe = Join-Path $runtimeDir "opennova.exe"
     Copy-Item -LiteralPath $EDITOR_EXE -Destination $stagedEditorExe
     Copy-Item -LiteralPath $SHIPPED_EDITOR_DLL -Destination $editorDir
-    Copy-ImGuiLibs -ExeDir (Split-Path $EDITOR_EXE -Parent) -Destination $editorDir -Required $true
+    Copy-ImGuiLibs -ExeDir (Split-Path $EDITOR_EXE -Parent) -Destination $editorDir -Required $true | Out-Null
     Copy-Item -LiteralPath $PLAY_EXE -Destination $stagedPlayExe
     Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $runtimeDir
-    Copy-ImGuiLibs -ExeDir (Split-Path $PLAY_EXE -Parent) -Destination $runtimeDir -Required ($ExportMode -eq "debug")
+    Copy-ImGuiLibs -ExeDir (Split-Path $PLAY_EXE -Parent) -Destination $runtimeDir -Required ($ExportMode -eq "debug") | Out-Null
     $editorHelp = @"
 OpenNova Editor (experimental).
 
