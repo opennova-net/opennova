@@ -251,9 +251,9 @@ void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in,
 	const MissionViewport &viewport = *frame_.viewport;
 	// S25: the terrain brush, while it is live, takes the left button and its keys before the tools (the camera's
 	// buttons and keys stay the canvas's: what it leaves goes on below).
-	if (brush_.live() && !gesture_.nudging() && (brush_.stroking() || !gesture_.pressed())) {
+	if (brush_.live() && !gesture_.nudging() && (brush_.pressing() || !gesture_.pressed())) {
 		const CameraBrushSpace space(context, viewport.camera(), &viewport.followed_ground(context.input.view));
-		if (brush_.input(gesture_, subject_of(frame_), &space, in, out)) return;
+		if (brush_.input(gesture_, subject_of(frame_), &space, in, out, &context)) return;
 	}
 	// What a press takes: a glyph, else what the device's ray meets (an entity's surface), never more.
 	const int under = in.pressed ? mission_canvas_under(frame_, in, MissionPick::Press) : -1;

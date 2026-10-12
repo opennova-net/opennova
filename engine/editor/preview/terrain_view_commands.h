@@ -39,10 +39,9 @@ bool terrain_view_drag(const TerrainViewContext &view, const ViewportDrag &drag,
 bool terrain_view_drop(const TerrainViewContext &view, const ViewportDrop &drop, CanvasRequests &out, std::string &error,
                        bool &handled);
 
-// The tile tools' planners (the maps' and the tiles' lane, preview/tile_tools; stand-ins refusing "not ready yet" in
-// preview/terrain_tile_stubs.cpp until then): what a view's tile command, its tile drop (a Stamp) and its tile drag
-// plan as requests over the .til its tiles go to (session/terrain_family's tiles), and a click's select of the tile
-// under the point. False, nothing planned, with why. The commands are the original tools' (Rotate CW/CCW, Flip H/V,
+// The tile tools' planners over preview/tile_tools (preview/terrain_tile_view.cpp): what a view's tile command, its
+// tile drop (a Stamp) and its tile drag plan as requests over the .til its tiles go to (session/terrain_family's
+// tiles), and a click's select of the tile under the point (the document view's `tiles`). False, nothing planned, with why. The commands are the original tools' (Rotate CW/CCW, Flip H/V,
 // Tile Layer Up/Down, Delete, a group's rotation about its centroid).
 bool plan_tile_command(const TerrainViewContext &view, const ViewportCommand &command, CanvasRequests &out,
                        std::string &error);

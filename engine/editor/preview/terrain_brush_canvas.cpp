@@ -5,12 +5,18 @@
 #include <cstdio>
 
 #include <base/io/json.h>
+#include <editor/documents/til_document.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/terrain_brush_shapes.h>
+#include <editor/preview/terrain_view_commands.h>
+#include <editor/preview/tile_tools.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/terrain_family.h>
 #include <editor/session/terrain_tools_parts.h>
 #include <editor/session/view/session_view.h>
+#include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/height_field.h>
 
 namespace opennova::editor {
 
@@ -37,7 +43,44 @@ std::string metres(double value) {
 	return buffer;
 }
 
+// A placed tile's corner on the mission's plane (x east, y north: the stored z negated).
+TerrainPoint tile_corner(const TilOverlayEntry &entry) {
+	return TerrainPoint{double(entry.x_fixed) / 65536.0, -double(entry.z_fixed) / 65536.0};
+}
+
+// The quarter turns and the flip across a tile's orientation bits are, as a stamp makes them (tile_stamp_flags), for
+// the corner tick its square shows.
+void tile_turn_of(uint8_t flags, int &rotation, bool &flip_h) {
+	rotation = 0;
+	flip_h = false;
+	for (int r = 0; r < 4; ++r)
+		for (int h = 0; h < 2; ++h)
+			if (tile_stamp_flags(r, h != 0, false) == (flags & 7u)) {
+				rotation = r;
+				flip_h = h != 0;
+				return;
+			}
+}
+
 } // namespace
+
+bool med_depth_pixel(const terrain::SectorLayout &layout, bool wrap_x, bool wrap_z, TerrainPoint at, int &x, int &y) {
+	if (!layout.sector_grid) return false;
+	// MED's map: x east, its second axis down the map (the stored frame's z, the mission's y negated), whole units; a
+	// sector 512 of them.
+	const int ux = int(std::floor(at.x)), uz = int(std::floor(-at.y));
+	const terrain::CoordsSectorResolve sector = terrain::coords_resolve_sector(
+			layout, int(std::floor(at.x / 512.0)), int(std::floor(-at.y / 512.0)), terrain::coords_runtime_options(wrap_x, wrap_z));
+	if (!sector.valid) {
+		x = y = 0; // [@ 0x422a55: an empty sector reads (0, 0)]
+		return true;
+	}
+	// Each wrapped into the sector's 512 (@ 0x4229ed..0x422a4e), the second one further (@ 0x4229e8), then the
+	// quadrant's halves: bit 2 of the sector's id - 1 the right (@ 0x422a76), bit 1 the lower (@ 0x422a6c).
+	x = (ux & 511) + sector.quadrant_x;
+	y = ((uz + 1) & 511) + sector.quadrant_z;
+	return true;
+}
 
 void TerrainBrushHalf::follow(const SessionView &view, const DocumentBase *document) {
 	brush_ = view.workspace.terrain_brush;
@@ -45,8 +88,96 @@ void TerrainBrushHalf::follow(const SessionView &view, const DocumentBase *docum
 	live_ = document && terrain_brush_live(view, *document);
 	if (!live_) {
 		stroking_ = false;
+		tile_pressing_ = false;
 		dabs_.reset();
 	}
+	tiles_.entries.clear();
+	tile_ids_.clear();
+	tile_selected_.clear();
+	if (live_ && brush_.tool == TerrainTool::Tiles) follow_tiles_(view, *document);
+}
+
+void TerrainBrushHalf::follow_tiles_(const SessionView &view, const DocumentBase &document) {
+	TerrainFamily family;
+	if (!resolve_terrain_family(view, document, family) || family.tiles.path.empty()) return;
+	const TilDocument *placement = nullptr;
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == family.tiles.path) placement = dynamic_cast<const TilDocument *>(open.get());
+	if (!placement) return;
+	tiles_ = placement->file();
+	const std::vector<std::shared_ptr<const Node>> &rows = placement->rows();
+	const std::vector<NodeId> &selected = view.workspace.document(document.path()).tiles;
+	for (size_t i = 0; i < rows.size() && i < tiles_.entries.size(); ++i) {
+		tile_ids_.push_back(rows[i]->id);
+		tile_selected_.push_back(std::find(selected.begin(), selected.end(), rows[i]->id) != selected.end());
+	}
+	tiles_.entries.resize(tile_ids_.size());
+}
+
+void TerrainBrushHalf::select_(CanvasPoint at, CanvasJoin join, CanvasRequests &out) const {
+	ViewportCommand click;
+	click.name = "click";
+	click.kind = kind_;
+	click.has_at = true;
+	click.at_x = at.x;
+	click.at_y = at.y;
+	click.mode = select_mode(join);
+	out.request(request::edit_in_viewport(view_path_, click));
+}
+
+bool TerrainBrushHalf::tile_input_(CanvasGesture &gesture, const CanvasSubject &subject, const TerrainBrushSpace *space,
+                                   const CanvasInput &in, CanvasRequests &out, const ViewportContext *context) {
+	// A press under way: its drag moves the grabbed tile (the selection with it), its release ends the move, or a click
+	// on a selected tile selects it alone.
+	if (tile_pressing_) {
+		if (gesture.pressed() && in.down) {
+			gesture.move(in.screen);
+			if (context && space && gesture.dragging() && (!tile_sent_ || in.delta.x != 0.0f || in.delta.y != 0.0f)) {
+				// Planned here, as the host plans its own drags: a batch on the .til under the gesture's token (the
+				// wire's drag is the same planner's, terrain_view_drag).
+				ViewportDrag drag;
+				drag.id = tile_grab_;
+				drag.handle = "tile";
+				drag.by = false;
+				drag.x = in.mouse.x - grab_offset_.x;
+				drag.y = in.mouse.y - grab_offset_.y;
+				drag.snap = in.keys.shift ? 16.0f : 0.0f;
+				drag.gesture = gesture.token();
+				drag.end = false;
+				drag.kind = kind_;
+				const TerrainViewContext view{*context, *space, view_path_, kind_, nullptr};
+				std::string error;
+				if (plan_tile_drag(view, drag, out, error)) gesture.sent();
+				tile_sent_ = true;
+			}
+			return true;
+		}
+		const bool click = gesture.release(out);
+		if (click && select_on_click_) select_(press_mouse_, CanvasJoin::Replace, out);
+		tile_pressing_ = false;
+		select_on_click_ = false;
+		return true;
+	}
+	TerrainPoint at;
+	double height = 0.0;
+	const bool on_ground = space && space->pointer_ground(in.mouse.x, in.mouse.y, at, height);
+	const size_t under = on_ground ? tile_at(tiles_, at.x, at.y) : size_t(-1);
+	const bool grabbed = under < tile_ids_.size();
+	const CanvasJoin join = canvas_join(in.keys);
+	select_on_click_ = grabbed && tile_selected_[under] && join == CanvasJoin::Replace;
+	if (!select_on_click_) select_(in.mouse, join, out);
+	if (!grabbed) return true;
+	gesture.press(subject, in.screen, out);
+	tile_pressing_ = true;
+	tile_sent_ = false;
+	tile_grab_ = tile_ids_[under];
+	press_mouse_ = in.mouse;
+	const TerrainPoint corner = tile_corner(tiles_.entries[under]);
+	CanvasPoint shown;
+	grab_offset_ = space->to_picture(corner, space->planar() ? 0.0 : space->height(corner), shown.x, shown.y)
+	                       ? CanvasPoint{in.mouse.x - shown.x, in.mouse.y - shown.y}
+	                       : CanvasPoint{};
+	return true;
 }
 
 TerrainStrokeAsk TerrainBrushHalf::stroke_ask(const TerrainBrush &brush, bool invert) {
@@ -157,11 +288,12 @@ void TerrainBrushHalf::keys_(CanvasGesture &gesture, const CanvasInput &in, Canv
 }
 
 bool TerrainBrushHalf::input(CanvasGesture &gesture, const CanvasSubject &subject, const TerrainBrushSpace *space,
-                             const CanvasInput &in, CanvasRequests &out) {
+                             const CanvasInput &in, CanvasRequests &out, const ViewportContext *context) {
 	if (!live_) return false;
 	bool took = false;
 	keys_(gesture, in, out, took);
 	const bool camera = in.middle || in.keys.alt || in.right_pressed || in.right_down || in.panning;
+	if (tile_pressing_) return tile_input_(gesture, subject, space, in, out, context);
 	// A stroke under way: its drag lays the dabs its path passes, its release ends it.
 	if (stroking_) {
 		if (gesture.pressed() && in.down) {
@@ -215,23 +347,20 @@ bool TerrainBrushHalf::input(CanvasGesture &gesture, const CanvasSubject &subjec
 		out.request(request::edit_in_viewport(view_path_, drop));
 		return true;
 	}
-	if (brush_.tool == TerrainTool::Tiles) {
-		// A click selects the tile under the pointer (the viewport's click while the brush is live).
-		ViewportCommand click;
-		click.name = "click";
-		click.kind = kind_;
-		click.has_at = true;
-		click.at_x = in.mouse.x;
-		click.at_y = in.mouse.y;
-		click.mode = select_mode(canvas_join(in.keys));
-		out.request(request::edit_in_viewport(view_path_, click));
-		return true;
-	}
+	if (brush_.tool == TerrainTool::Tiles) return tile_input_(gesture, subject, space, in, out, context);
 	return took;
 }
 
 void TerrainBrushHalf::shapes(const TerrainBrushSpace *space, const CanvasInput &in, OverlayList &out) const {
 	if (!live_ || !space) return;
+	// The selected tiles, wherever the pointer is.
+	for (size_t i = 0; i < tile_ids_.size(); ++i) {
+		if (!tile_selected_[i]) continue;
+		int rotation = 0;
+		bool flip_h = false;
+		tile_turn_of(tiles_.entries[i].flags, rotation, flip_h);
+		terrain_tile_square(*space, tile_corner(tiles_.entries[i]), rotation, flip_h, false, OverlayRole::Selected, out);
+	}
 	TerrainPoint at;
 	double height = 0.0;
 	bool shown = in.hovered && space->pointer_ground(in.mouse.x, in.mouse.y, at, height);
@@ -243,7 +372,13 @@ void TerrainBrushHalf::shapes(const TerrainBrushSpace *space, const CanvasInput 
 	}
 	if (!shown) return;
 	if (brush_.tool == TerrainTool::Stamp) {
-		terrain_tile_square(*space, at, brush_.rotation, brush_.flip_h, brush_.flip_v, OverlayRole::Normal, out);
+		// Where the stamp lays the tile: its corner as the click would place it (Shift the 16 grid).
+		int32_t x = 0, z = 0;
+		tile_corner_at(at.x, at.y, in.keys.shift, x, z);
+		TilOverlayEntry corner;
+		corner.x_fixed = x;
+		corner.z_fixed = z;
+		terrain_tile_square(*space, tile_corner(corner), brush_.rotation, brush_.flip_h, brush_.flip_v, OverlayRole::Normal, out);
 		return;
 	}
 	if (!strokes(brush_.tool)) return;
@@ -262,8 +397,17 @@ std::string terrain_brush_hint(const TerrainBrush &brush, bool on_ground, Terrai
 	if (!on_ground) return std::string(terrain_tool_label(brush.tool)) + ": point at the ground.";
 	switch (family) {
 	case TerrainToolFamily::Sculpt: {
-		// The original editor's depth-pixel readout [orig: JOTACmed.exe sub_417B30].
-		std::string line = "Height " + metres(height) + " m";
+		// The original editor's depth-pixel readout (med_depth_pixel), then the height there.
+		std::string line;
+		int px = 0, py = 0;
+		const terrain::TerrainHeightField *field = ground ? ground->height_field() : nullptr;
+		if (field && med_depth_pixel(field->layout, field->wrap_x, field->wrap_z, at, px, py)) {
+			char readout[64];
+			std::snprintf(readout, sizeof readout, "Depth Pixel X: %3d Y: %3d", px, py);
+			line = std::string(readout) + " - height " + metres(height) + " m";
+		} else {
+			line = "Height " + metres(height) + " m";
+		}
 		if (brush.tool == TerrainTool::Set) line += ": drag to set it to " + metres(brush.height) + " m";
 		else if (brush.tool == TerrainTool::Flatten) line += ": drag to flatten to the height under the press";
 		else line += std::string(": drag to ") + (brush.tool == TerrainTool::Raise ? "raise" : brush.tool == TerrainTool::Lower ? "lower" : "smooth") + " it (Shift the other way)";

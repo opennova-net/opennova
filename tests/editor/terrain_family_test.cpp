@@ -9,6 +9,7 @@
 // the .til; a Close of the mission lists it and Don't save leaves it open with its edits; a drag of a tile is one
 // step; a tile command turns the selected tiles.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -17,6 +18,8 @@
 #include <editor/documents/til_document.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_map.h>
+#include <editor/preview/terrain_brush_canvas.h>
+#include <editor/preview/terrain_brush_spaces.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -33,6 +36,12 @@ using namespace opennova::editor;
 using opennova::io::JsonValue;
 
 namespace {
+
+// The requests a canvas raised.
+struct Gathered final : CanvasRequests {
+	std::vector<EditorRequest> requests;
+	void request(EditorRequest each) override { requests.push_back(std::move(each)); }
+};
 
 std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
 
@@ -205,6 +214,54 @@ int test_tiles_scope() {
 	turn.by = {1.0};
 	session.handle(request::edit_in_viewport(mission, turn));
 	TEST_EXPECT(session.outcome().done() && session.document_base_for(tiles)->dirty());
+	// The canvas: a press on the selected tile keeps the selection for its drag, the drag moves the tile's corner by
+	// the pointer's travel (whole units), the release ends it by its token; one step, which the mission's Undo takes.
+	{
+		const DocumentBase *view_document = session.document_base_for(mission);
+		TerrainBrushHalf half(ViewportKind::Map);
+		half.follow(v, view_document);
+		TEST_EXPECT(half.live());
+		const MapBrushSpace space(map_view, nullptr);
+		CanvasGesture gesture;
+		CanvasSubject subject;
+		subject.path = mission;
+		subject.identity = view_document->identity();
+		Gathered out;
+		const int32_t before = placement->file().entries[0].x_fixed;
+		CanvasInput in;
+		in.width = map_model->size().width;
+		in.height = map_model->size().height;
+		in.hovered = true;
+		in.mouse = CanvasPoint{click.at_x, click.at_y};
+		in.screen = in.mouse;
+		in.pressed = true;
+		in.down = true;
+		const ViewportContext context = viewport_context(v, *map_model);
+		TEST_EXPECT(half.input(gesture, subject, &space, in, out, &context) && out.requests.empty());
+		in.pressed = false;
+		in.mouse.x += 40.0f;
+		in.screen = in.mouse;
+		in.delta = CanvasPoint{40.0f, 0.0f};
+		// The drag planned as the canvas plans its own: a batch on the .til under the gesture's token.
+		TEST_EXPECT(half.input(gesture, subject, &space, in, out, &context) && out.requests.size() == 1 &&
+		            out.requests[0].kind == EditorRequestKind::EditRecord && out.requests[0].path == tiles &&
+		            !out.requests[0].edits.empty() && out.requests[0].edits.front().gesture != 0);
+		in.down = false;
+		in.delta = CanvasPoint{};
+		TEST_EXPECT(half.input(gesture, subject, &space, in, out, &context) && out.requests.size() == 2 &&
+		            out.requests[1].kind == EditorRequestKind::EndEdit &&
+		            out.requests[1].gesture == out.requests[0].edits.front().gesture);
+		for (const EditorRequest &each : out.requests) {
+			session.handle(each);
+			TEST_EXPECT(session.outcome().done());
+		}
+		const double moved = double(placement->file().entries[0].x_fixed - before) / 65536.0;
+		TEST_EXPECT(std::fabs(moved - 40.0 * double(map_view.scale)) <= 1.0 && moved != 0.0);
+		session.handle(request::undo(mission));
+		TEST_EXPECT(placement->file().entries[0].x_fixed == before);
+		session.handle(request::redo(mission));
+		TEST_EXPECT(placement->file().entries[0].x_fixed != before);
+	}
 	// A Close of the mission lists the .til's unsaved turn; Don't save drops the mission alone, the .til kept open.
 	session.handle(request::close_document(mission));
 	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.target == mission &&

@@ -22,7 +22,7 @@ void TerrainCanvas::input(const ViewportContext &context, const CanvasInput &in,
 	if (brush_.live() && viewport_) {
 		const auto &terrain = static_cast<const TerrainViewport &>(*viewport_);
 		const CameraBrushSpace space(context, terrain.camera(), &terrain.followed_ground(context.input.view));
-		if (brush_.input(gesture_, subject_, &space, in, out)) return;
+		if (brush_.input(gesture_, subject_, &space, in, out, &context)) return;
 	}
 	orbit_.input(context, in, out);
 }

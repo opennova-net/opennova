@@ -130,9 +130,9 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 	const bool current = document && viewport.current(context.input);
 	// S25: the terrain brush, while it is live, takes the left button and its keys before the map's own (the camera's
 	// buttons stay the map's).
-	if (brush_.live() && (brush_.stroking() || !gesture_.pressed())) {
+	if (brush_.live() && (brush_.pressing() || !gesture_.pressed())) {
 		const MapBrushSpace space(view, nullptr);
-		if (brush_.input(gesture_, subject, &space, in, out)) return;
+		if (brush_.input(gesture_, subject, &space, in, out, &context)) return;
 	}
 
 	// The right or the middle button pans: the mission point under the pointer as it began stays under it.
@@ -569,6 +569,12 @@ CanvasCursor MissionMapCanvas::cursor(const ViewportContext &context, const Canv
 
 std::string MissionMapCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	if (!viewport_ || gesture_.dragging() || !in.hovered) return std::string();
+	// S25: while the brush is live, its own line over the mission's ground.
+	if (brush_.live()) {
+		const MissionGround &ground = viewport_->followed_terrain(context.input.view);
+		const MapBrushSpace space(viewport_->view(in.width, in.height), &ground);
+		return brush_.hint(&space, in, &ground);
+	}
 	const int index = pick_mission_map_mark(marks_, viewport_->view(in.width, in.height), in.mouse.x, in.mouse.y);
 	// S24: while a pick waits, what to click (over a pin that names another record, why it gives nothing).
 	if (pick_.active()) return mission_pick_hint(pick_, index);

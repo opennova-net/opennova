@@ -1,7 +1,8 @@
 // The terrain brush (ADR 0046 S25): its tools' tokens, families and planes; a dab's weight (full inside the falloff,
 // a smoothstep to the rim, hard-edged on a categorical plane, one texel at radius 0); the dabs along a pointer's path
 // (the press's point one, then one every step, the walk carried across frames, none for a pointer held still); and
-// the brush on the wire (written and read back, its bounds refused).
+// the brush on the wire (written and read back, its bounds refused); the stamp's square where the click lays the tile;
+// the original editor's depth pixel under a point.
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -13,6 +14,8 @@
 #include <editor/preview/terrain_brush_canvas.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view/terrain_tools_view.h>
+
+#include <runtime/terrain_query/coords.h>
 
 #include "common/test_expect.h"
 
@@ -201,6 +204,10 @@ int test_half() {
 	TEST_EXPECT(half.input(gesture, subject, &space, pointer(30.0f, 40.0f, true, true), out) && out.requests.size() == 1 &&
 	            out.requests[0].kind == EditorRequestKind::EditInViewport && out.requests[0].drop.reference == "tile" &&
 	            out.requests[0].drop.name == "12" && out.requests[0].drop.x == 30.0f);
+	// Its square where the click lays the tile: the corner Nile's stamp rounds the point to (30.4, 40.6 -> 30, 41).
+	OverlayList ghost;
+	half.shapes(&space, pointer(30.4f, 40.6f, false, false), ghost);
+	TEST_EXPECT(!ghost.shapes.empty() && ghost.shapes[0].points[0].x == 30.0f && ghost.shapes[0].points[0].y == 41.0f);
 	view.workspace.terrain_brush.tool = TerrainTool::Tiles;
 	half.follow(view, &mission);
 	out.requests.clear();
@@ -213,6 +220,33 @@ int test_half() {
 	return 0;
 }
 
+// The original editor's depth pixel [orig: JOTACmed.exe sub_4228B0]: the column's texel in its sector, the second axis
+// down the map one further (wrapping in the sector), the quadrant the sector's id places; (0, 0) over an empty sector.
+int test_depth_pixel() {
+	int grid[16 * 16] = {};
+	grid[0] = 1;  // row 0, column 0: the top-left quadrant
+	grid[1] = 3;  // column 1: the right half
+	grid[16] = 2; // row 1: the lower half
+	grid[17] = 4;
+	opennova::terrain::SectorLayout layout;
+	layout.sector_grid = grid;
+	layout.sector_count = 2;
+	layout.sector_rows = 2;
+	int x = -1, y = -1;
+	TEST_EXPECT(med_depth_pixel(layout, true, true, TerrainPoint{10.4, -20.6}, x, y) && x == 10 && y == 21);
+	TEST_EXPECT(med_depth_pixel(layout, true, true, TerrainPoint{600.0, -5.0}, x, y) && x == 600 && y == 6);
+	TEST_EXPECT(med_depth_pixel(layout, true, true, TerrainPoint{10.0, -600.0}, x, y) && x == 10 && y == 601);
+	TEST_EXPECT(med_depth_pixel(layout, true, true, TerrainPoint{700.0, -700.0}, x, y) && x == 700 && y == 701);
+	TEST_EXPECT(med_depth_pixel(layout, true, true, TerrainPoint{10.0, -511.5}, x, y) && x == 10 && y == 0); // the last row wraps
+	TEST_EXPECT(med_depth_pixel(layout, true, true, TerrainPoint{5.0, 100.0}, x, y) && x == 0 && y == 0); // an empty sector
+	// Past the grid on an axis the terrain does not wrap: the first row's sector, the texel wrapped in it.
+	TEST_EXPECT(med_depth_pixel(layout, true, false, TerrainPoint{5.0, 100.0}, x, y) && x == 5 && y == 413);
+	opennova::terrain::SectorLayout none;
+	TEST_EXPECT(!med_depth_pixel(none, true, true, TerrainPoint{1.0, 1.0}, x, y));
+	std::printf("depth pixel: the texel, its quadrant, the second axis one further, an empty sector\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -220,5 +254,6 @@ int main() {
 	if (test_weight() != 0) return 1;
 	if (test_dabs() != 0) return 1;
 	if (test_half() != 0) return 1;
+	if (test_depth_pixel() != 0) return 1;
 	return test_wire();
 }
