@@ -1725,12 +1725,14 @@ void test_options_screen() {
 	CHECK(options.is_surface() && menu.table_row_count(table) > 40);
 	CHECK(menu.table_cell_text(table, 0, 2) == "W or Up");
 	options.arm(menu, table, 0);
-	CHECK(menu.table_cell_text(table, 0, 2).empty());
+	// The armed cell reads "???" (D-MNU-48) [orig: UI_ControlsRemapArmHandler
+	// @0x55d560 - the push @0x55d5c8, the SetCellText call @0x55d5d0].
+	CHECK(menu.table_cell_text(table, 0, 2) == "???");
 	RemapInput input;
 	input.kind = RemapInput::Kind::Key;
 	input.vk = 'Y';
 	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
-	CHECK(menu.table_cell_text(table, 0, 2).empty()); // key release keeps capture
+	CHECK(menu.table_cell_text(table, 0, 2) == "???"); // key release keeps capture
 	input.pressed = true;
 	input.vk = 0; // unmapped device key
 	CHECK(options.consume(menu, input) == OptionsScreen::Consumed);
