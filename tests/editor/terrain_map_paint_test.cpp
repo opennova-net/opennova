@@ -172,7 +172,7 @@ int test_strokes() {
 	ask.brush.layer = 3;
 	ask.brush_named = kBrushTool | kBrushLayer;
 	session.handle(request::terrain_stroke(m, ask));
-	TEST_EXPECT(!session.outcome().done() && contains(session.outcome().findings.back().message, "holds 3 layers"));
+	TEST_EXPECT(!session.outcome().done() && contains(session.outcome().findings.back().message, "three detail layers"));
 	std::vector<uint8_t> rle = colour_map;
 	rle[2] = 10;
 	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_d1.tga", rle));
@@ -293,7 +293,8 @@ int test_imported_source() {
 	for (int y = 0; blended && y < kMap; ++y)
 		for (int x = 0; x < kMap; ++x) {
 			const uint8_t *texel = blended->plane(0).texel(x, y);
-			layered += texel[0] == 0 && texel[1] == 255 && texel[2] == 0 ? 1 : 0;
+			// The layer's channel full, the others empty, the alpha (which no splat reads) as it was.
+			layered += texel[0] == 0 && texel[1] == 255 && texel[2] == 0 && texel[3] == 255 ? 1 : 0;
 		}
 	TEST_EXPECT(layered == 1);
 	// Add (S25 B4): the set names no foliagemap, so the terrain has none: Add makes isle_foliagemap.png beside the set

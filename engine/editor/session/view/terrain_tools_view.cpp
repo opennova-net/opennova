@@ -60,7 +60,7 @@ constexpr MemberRow kMembers[] = {
 	{"surface", kBrushSurface, MemberKind::Whole, 0, 255, true},
 	{"foliage", kBrushFoliage, MemberKind::Whole, 0, 255, true},
 	{"colour", kBrushColour, MemberKind::Colour, 0, 0, true},
-	{"layer", kBrushLayer, MemberKind::Whole, 0, 3, true},
+	{"layer", kBrushLayer, MemberKind::Whole, 0, 2, true},
 	{"cell", kBrushCell, MemberKind::Whole, 0, 255, false},
 	{"rotation", kBrushRotation, MemberKind::Whole, 0, 3, false},
 	{"flip_h", kBrushFlipH, MemberKind::Flag, 0, 0, false},

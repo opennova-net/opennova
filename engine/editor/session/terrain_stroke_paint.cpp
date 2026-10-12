@@ -45,9 +45,12 @@ bool form_fits(TerrainPlane plane, const RasterPlane &texels, int layer, bool so
 			why = "the detail blend map is a true-colour image, a layer's weight a channel";
 			return false;
 		}
-		if (layer < 0 || layer >= texels.texel_bytes()) {
-			why = "this blend map holds " + std::to_string(texels.texel_bytes()) + " layers (0 to " +
-			      std::to_string(texels.texel_bytes() - 1) + ")";
+		// Three layers whatever the depth: the splat weighs the three detail textures by the map's red, green and blue,
+		// normalised over those three alone [orig: PolyTrn_InitTextures @ 0x60b216..0x60b24d (the normalisation,
+		// texture_preprocess normalize_detail_blend_map); g_PolyTrnPS14SplatNormalMap @ 0x7dece0 (c1 R + c2 G + c3 B)];
+		// a 32-bit map's alpha is read by nothing.
+		if (layer < 0 || layer > 2) {
+			why = "the game blends three detail layers by the map's red, green and blue (layers 0 to 2)";
 			return false;
 		}
 		return true;
@@ -78,14 +81,13 @@ void lay(TerrainPlane plane, const TerrainBrush &brush, float weight, uint8_t *t
 		// Toward the target by the dab's weight and the brush's strength: the colour (its alpha kept), or the layer's
 		// channel full and the others empty.
 		uint8_t target[4] = {0, 0, 0, 0};
-		int channels = 3;
+		const int channels = 3; // a blend map's alpha, which no splat reads, kept as it is
 		if (plane == TerrainPlane::Colour) {
 			target[0] = uint8_t((brush.colour >> 16) & 0xFF);
 			target[1] = uint8_t((brush.colour >> 8) & 0xFF);
 			target[2] = uint8_t(brush.colour & 0xFF);
 		} else {
-			channels = bytes;
-			target[std::clamp(brush.layer, 0, 3)] = 255;
+			target[std::clamp(brush.layer, 0, 2)] = 255;
 		}
 		const double share = std::clamp(double(weight) * double(brush.strength), 0.0, 1.0);
 		for (int c = 0; c < channels && c < bytes; ++c)
@@ -144,68 +146,75 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 	const TerrainMapTarget target = terrain_map_target(*context.family.trn, context.plane, texels.width(), texels.height());
 	const bool categorical = terrain_plane_categorical(context.plane);
 	const int bytes = texels.texel_bytes();
-	// The dabs in order over the texels as they stand, each dab seeing the ones before it.
-	std::unordered_map<uint32_t, std::vector<uint8_t>> painted;
+	// The texels reached, in the order first reached, and their values as laid (`bytes` each, in that order).
 	std::vector<uint32_t> order;
+	std::vector<uint8_t> values;
 	bool filled = false;
 	if (context.brush.fill && !context.points.empty()) {
 		// Fill (S25 B4): the texels 4-connected to the one under the first point that hold its value exactly, each laid
-		// at full weight, over the map's own texels (a texel the terrain draws at several places changes at each).
-		int sx = 0, sy = 0;
-		if (!terrain_map_texel(target, context.points.front().first, context.points.front().second, sx, sy)) {
-			error = "No texel of " + file + " lies under that point: the terrain's grid maps no sector there.";
-			return false;
-		}
-		const int w = texels.width(), h = texels.height();
-		const uint8_t *seed = texels.texel(sx, sy);
-		const std::vector<uint8_t> value(seed, seed + bytes);
-		std::vector<uint8_t> seen(size_t(w) * size_t(h), 0);
-		std::vector<uint32_t> stack{uint32_t(sy) * uint32_t(w) + uint32_t(sx)};
-		seen[stack.back()] = 1;
-		while (!stack.empty()) {
-			const uint32_t index = stack.back();
-			stack.pop_back();
+		// at full weight, over the map's own texels (a texel the terrain draws at several places changes at each). The
+		// press's alone: a gesture's later samples lay nothing, so a drag fills only where it was pressed.
+		filled = true;
+		if (context.first) {
+			int sx = 0, sy = 0;
+			if (!terrain_map_texel(target, context.points.front().first, context.points.front().second, sx, sy)) {
+				error = "No texel of " + file + " lies under that point: the terrain's grid maps no sector there.";
+				return false;
+			}
+			const int w = texels.width(), h = texels.height();
+			const uint8_t *seed = texels.texel(sx, sy);
+			const std::vector<uint8_t> value(seed, seed + bytes);
 			std::vector<uint8_t> laid = value;
 			lay(context.plane, context.brush, 1.0f, laid.data(), bytes);
-			painted.emplace(index, std::move(laid));
-			order.push_back(index);
-			const int x = int(index % uint32_t(w)), y = int(index / uint32_t(w));
-			const int next[4][2] = {{x - 1, y}, {x + 1, y}, {x, y - 1}, {x, y + 1}};
-			for (const auto &n : next) {
-				if (n[0] < 0 || n[1] < 0 || n[0] >= w || n[1] >= h) continue;
-				const uint32_t at = uint32_t(n[1]) * uint32_t(w) + uint32_t(n[0]);
-				if (seen[at] || std::memcmp(texels.texel(n[0], n[1]), value.data(), size_t(bytes)) != 0) continue;
-				seen[at] = 1;
-				stack.push_back(at);
+			std::vector<uint8_t> seen(size_t(w) * size_t(h), 0);
+			std::vector<uint32_t> stack{uint32_t(sy) * uint32_t(w) + uint32_t(sx)};
+			seen[stack.back()] = 1;
+			while (!stack.empty()) {
+				const uint32_t index = stack.back();
+				stack.pop_back();
+				order.push_back(index);
+				const int x = int(index % uint32_t(w)), y = int(index / uint32_t(w));
+				const int next[4][2] = {{x - 1, y}, {x + 1, y}, {x, y - 1}, {x, y + 1}};
+				for (const auto &n : next) {
+					if (n[0] < 0 || n[1] < 0 || n[0] >= w || n[1] >= h) continue;
+					const uint32_t at = uint32_t(n[1]) * uint32_t(w) + uint32_t(n[0]);
+					if (seen[at] || std::memcmp(texels.texel(n[0], n[1]), value.data(), size_t(bytes)) != 0) continue;
+					seen[at] = 1;
+					stack.push_back(at);
+				}
 			}
+			std::sort(order.begin(), order.end());
+			values.reserve(order.size() * size_t(bytes));
+			for (size_t i = 0; i < order.size(); ++i) values.insert(values.end(), laid.begin(), laid.end());
 		}
-		std::sort(order.begin(), order.end());
-		filled = true;
+	} else {
+		// The dabs in order over the texels as they stand, each dab seeing the ones before it.
+		std::unordered_map<uint32_t, size_t> slot_of;
+		for (const auto &point : context.points)
+			for (const TerrainMapTexel &texel : terrain_map_dab(target, point.first, point.second, context.brush, categorical)) {
+				auto found = slot_of.find(texel.index);
+				if (found == slot_of.end()) {
+					const int x = int(texel.index % uint32_t(texels.width())), y = int(texel.index / uint32_t(texels.width()));
+					const uint8_t *now = texels.texel(x, y);
+					found = slot_of.emplace(texel.index, order.size()).first;
+					order.push_back(texel.index);
+					values.insert(values.end(), now, now + bytes);
+				}
+				lay(context.plane, context.brush, texel.weight, &values[found->second * size_t(bytes)], bytes);
+			}
 	}
-	for (const auto &point : context.points)
-		for (const TerrainMapTexel &texel : filled ? std::vector<TerrainMapTexel>()
-		                                           : terrain_map_dab(target, point.first, point.second, context.brush,
-		                                                             categorical)) {
-			auto found = painted.find(texel.index);
-			if (found == painted.end()) {
-				const int x = int(texel.index % uint32_t(texels.width())), y = int(texel.index / uint32_t(texels.width()));
-				const uint8_t *now = texels.texel(x, y);
-				found = painted.emplace(texel.index, std::vector<uint8_t>(now, now + bytes)).first;
-				order.push_back(texel.index);
-			}
-			lay(context.plane, context.brush, texel.weight, found->second.data(), bytes);
-		}
 	auto edit = std::make_shared<TexturePaintEdit>();
 	edit->format = texels.format();
 	edit->width = texels.width();
 	edit->height = texels.height();
 	int x0 = texels.width(), y0 = texels.height(), x1 = 0, y1 = 0;
-	for (const uint32_t index : order) {
+	for (size_t i = 0; i < order.size(); ++i) {
+		const uint32_t index = order[i];
 		const int x = int(index % uint32_t(texels.width())), y = int(index / uint32_t(texels.width()));
-		const std::vector<uint8_t> &value = painted[index];
-		if (std::memcmp(texels.texel(x, y), value.data(), size_t(bytes)) == 0) continue;
+		const uint8_t *value = &values[i * size_t(bytes)];
+		if (std::memcmp(texels.texel(x, y), value, size_t(bytes)) == 0) continue;
 		edit->at.push_back(index);
-		edit->values.insert(edit->values.end(), value.begin(), value.end());
+		edit->values.insert(edit->values.end(), value, value + bytes);
 		x0 = std::min(x0, x);
 		y0 = std::min(y0, y);
 		x1 = std::max(x1, x + 1);

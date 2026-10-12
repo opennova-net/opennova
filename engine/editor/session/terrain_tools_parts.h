@@ -29,7 +29,7 @@ inline constexpr WorkspaceMember kTerrainBrushMembers[] = {
 	{"surface", WorkspaceJson::Integer, "The surface class Surface paints, 0 to 255 (1 the game's default)."},
 	{"foliage", WorkspaceJson::Integer, "The foliage code Foliage paints, 0 to 255 (0 grows nothing)."},
 	{"colour", WorkspaceJson::String, "The colour Colour paints, \"#RRGGBB\"."},
-	{"layer", WorkspaceJson::Integer, "The detail layer Detail paints, 0 to 3."},
+	{"layer", WorkspaceJson::Integer, "The detail layer Detail paints, 0 to 2 (the blend map's red, green, blue)."},
 	{"cell", WorkspaceJson::Integer, "The tile set's cell Stamp places, 0 to 255."},
 	{"rotation", WorkspaceJson::Integer, "The stamped tile's quarter turns clockwise (north up), 0 to 3."},
 	{"flip_h", WorkspaceJson::Boolean, "The stamped tile flipped across."},

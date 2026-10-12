@@ -265,8 +265,8 @@ void draw_paint_part(TerrainPaneContext &context) {
 	}
 	case TerrainTool::Detail: {
 		ImGui::TextUnformatted("Detail layer");
-		static const char *const kLayers[] = {"1 (red)", "2 (green)", "3 (blue)", "4 (alpha)"};
-		for (int layer = 0; layer < 4; ++layer) {
+		static const char *const kLayers[] = {"1 (red)", "2 (green)", "3 (blue)"};
+		for (int layer = 0; layer < 3; ++layer) {
 			ImGui::SameLine();
 			if (ImGui::RadioButton(kLayers[layer], brush.layer == layer)) set("layer", io::json_number(layer));
 		}
