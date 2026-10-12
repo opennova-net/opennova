@@ -15,9 +15,127 @@ bool expect(bool condition, const char *message) {
 	return false;
 }
 
+// An indexed PCX's carried form (PcxIndexedForm): the header bytes the image does not decide, and the coding
+// of the rows, the shipped coder's or JO's mission editor's [orig: JOTACmed sub_45EB60, sub_45E8A0].
+int test_forms() {
+	// Rows that tell the coders apart: a row ending in a single byte below 0xC0, a row ending in a run, a row
+	// holding a run of 70 (63 + 7), a lone 0xC5.
+	opennova::IndexedImage8 image;
+	image.width = 80;
+	image.height = 3;
+	image.indices.assign(size_t(80) * 3, 0);
+	for (int x = 0; x < 80; ++x) image.indices[size_t(x)] = static_cast<uint8_t>(x % 7);
+	for (int x = 0; x < 80; ++x) image.indices[size_t(80 + x)] = x < 10 ? 0xC5 : 4;
+	for (int x = 0; x < 80; ++x) image.indices[size_t(160 + x)] = x < 70 ? 9 : static_cast<uint8_t>(x);
+	image.palette[9][1] = 200;
+	std::string error;
+
+	// The default form is the shipped one, the bytes the writer has always written.
+	std::vector<uint8_t> shipped;
+	if (!expect(opennova::encode_pcx_indexed(image, shipped, error), "the shipped form should encode")) return 1;
+	if (!expect(shipped[1] == 5 && shipped[2] == 1 && shipped[3] == 8 && shipped[12] == 72 && shipped[14] == 72 &&
+	            shipped[16] == 0xFF && shipped[63] == 0xFF && shipped[64] == 0 && shipped[65] == 1 &&
+	            shipped[66] == 80 && shipped[68] == 1 && shipped[74] == 0,
+	            "the shipped header: version 5, 72 dpi, the EGA bytes 0xFF, one plane, the width a line")) return 1;
+	// Row 0 ends in the single byte 3 (79 % 7 = 2: ... 1, 2): written alone.
+	opennova::IndexedImage8 back;
+	opennova::PcxIndexedForm form;
+	if (!expect(opennova::decode_pcx_indexed(shipped.data(), shipped.size(), back, error, &form),
+	            "the shipped bytes should decode")) return 1;
+	if (!expect(back.indices == image.indices && form.coding == opennova::PcxCoding::Shipped && form.hdpi == 72,
+	            "a shipped file reads as the shipped coding")) return 1;
+
+	// MED's form: the header zero but for 0A 05 01 08, the window, one plane, the bytes a line, palette info 1;
+	// each row's last run a count pair.
+	const opennova::PcxIndexedForm med_form = opennova::pcx_med_form();
+	std::vector<uint8_t> med;
+	if (!expect(opennova::encode_pcx_indexed(image, med, error, &med_form), "MED's form should encode")) return 1;
+	bool header_zero = true;
+	for (size_t i = 12; i < 128; ++i)
+		if (i != 65 && i != 66 && i != 68 && med[i] != 0) header_zero = false;
+	if (!expect(med[0] == 0x0A && med[1] == 5 && med[2] == 1 && med[3] == 8 && med[8] == 79 && med[10] == 2 &&
+	            med[65] == 1 && med[66] == 80 && med[68] == 1 && header_zero,
+	            "MED's header: zero but the mark, the window, one plane, the bytes a line, palette info 1")) return 1;
+	// Row 0's last byte (79 % 7 = 2) is a single byte below 0xC0: shipped writes 0x02, MED 0xC1 0x02.
+	const size_t shipped_row0 = [&] {
+		size_t pos = 128, got = 0;
+		while (got < 80) {
+			const uint8_t b = shipped[pos++];
+			if ((b & 0xC0) == 0xC0) { got += b & 0x3F; ++pos; } else ++got;
+		}
+		return pos;
+	}();
+	if (!expect(shipped[shipped_row0 - 1] == 2 && shipped[shipped_row0 - 2] != 0xC1, "shipped writes the last byte alone")) return 1;
+	if (!expect(med.size() == shipped.size() + 2, "MED's rows cost a count byte where a row ends in a lone byte")) return 1;
+	if (!expect(med[shipped_row0 - 1] == 0xC1 && med[shipped_row0] == 2, "MED writes the last byte as a pair")) return 1;
+	if (!expect(opennova::decode_pcx_indexed(med.data(), med.size(), back, error, &form), "MED's bytes should decode")) return 1;
+	if (!expect(back.indices == image.indices && form.coding == opennova::PcxCoding::Med && form.hdpi == 0 &&
+	            form.ega[0] == 0, "a MED file reads as MED's coding and header")) return 1;
+	std::vector<uint8_t> again;
+	if (!expect(opennova::encode_pcx_indexed(back, again, error, &form) && again == med,
+	            "a MED file written again in its form is the same bytes")) return 1;
+
+	// Every carried byte comes back.
+	opennova::PcxIndexedForm odd;
+	odd.version = 3;
+	odd.window_x = 4;
+	odd.window_y = 6;
+	odd.hdpi = 300;
+	odd.vdpi = 150;
+	for (size_t i = 0; i < odd.ega.size(); ++i) odd.ega[i] = static_cast<uint8_t>(i * 5);
+	odd.reserved = 7;
+	odd.palette_info = 2;
+	odd.hscreen = 640;
+	odd.vscreen = 480;
+	for (size_t i = 0; i < odd.filler.size(); ++i) odd.filler[i] = static_cast<uint8_t>(i + 1);
+	std::vector<uint8_t> carried;
+	if (!expect(opennova::encode_pcx_indexed(image, carried, error, &odd), "an odd form should encode")) return 1;
+	opennova::PcxIndexedForm read;
+	if (!expect(opennova::decode_pcx_indexed(carried.data(), carried.size(), back, error, &read) &&
+	            back.width == 80 && back.height == 3, "an odd form should decode at its size")) return 1;
+	if (!expect(read.version == 3 && read.window_x == 4 && read.window_y == 6 && read.hdpi == 300 && read.vdpi == 150 &&
+	            read.ega == odd.ega && read.reserved == 7 && read.palette_info == 2 && read.hscreen == 640 &&
+	            read.vscreen == 480 && read.filler == odd.filler && read.coding == opennova::PcxCoding::Shipped,
+	            "every carried header byte reads back")) return 1;
+	if (!expect(opennova::encode_pcx_indexed(back, again, error, &read) && again == carried,
+	            "an odd form written again is the same bytes")) return 1;
+
+	// Rows neither coder writes: a run split in two (2 x 0xC2 0x05 for four 5s) reads as Other and is written
+	// again in the shipped coding.
+	opennova::IndexedImage8 four;
+	four.width = 4;
+	four.height = 1;
+	four.indices = {5, 5, 5, 5};
+	std::vector<uint8_t> split;
+	if (!expect(opennova::encode_pcx_indexed(four, split, error), "four 5s should encode")) return 1;
+	if (!expect(split[128] == 0xC4 && split[129] == 5, "four 5s are one run")) return 1;
+	split.erase(split.begin() + 128, split.begin() + 130);
+	const uint8_t halves[4] = {0xC2, 5, 0xC2, 5};
+	split.insert(split.begin() + 128, halves, halves + 4);
+	if (!expect(opennova::decode_pcx_indexed(split.data(), split.size(), back, error, &read) &&
+	            back.indices == four.indices && read.coding == opennova::PcxCoding::Other,
+	            "a split run reads as another program's coding")) return 1;
+	if (!expect(opennova::encode_pcx_indexed(back, again, error, &read) && again.size() == split.size() - 2 &&
+	            again[128] == 0xC4, "another program's rows are written again in the shipped coding")) return 1;
+
+	// Rows both coders write alike (each ending in a run): the header decides, MED's zero resolution MED's.
+	std::vector<uint8_t> tie;
+	if (!expect(opennova::encode_pcx_indexed(four, tie, error, &med_form), "four 5s in MED's form should encode")) return 1;
+	if (!expect(opennova::decode_pcx_indexed(tie.data(), tie.size(), back, error, &read) &&
+	            read.coding == opennova::PcxCoding::Med, "alike rows under MED's header read as MED's")) return 1;
+	if (!expect(opennova::encode_pcx_indexed(four, tie, error) &&
+	            opennova::decode_pcx_indexed(tie.data(), tie.size(), back, error, &read) &&
+	            read.coding == opennova::PcxCoding::Shipped, "alike rows under the shipped header read as shipped")) return 1;
+
+	std::printf("OK: the indexed form carries every header byte and the rows' coding, MED's coder ported\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
+	if (test_forms() != 0) return 1;
+
 	opennova::IndexedImage8 source;
 	source.width = 4;
 	source.height = 2;

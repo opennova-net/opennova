@@ -1275,6 +1275,12 @@ target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
 
+# Every shipped char and foliage map read with its carried form and written again the same bytes.
+add_executable(pcx_retail_maps_test pcx/pcx_retail_maps_test.cpp)
+target_link_libraries(pcx_retail_maps_test PRIVATE opennova_formats)
+target_include_directories(pcx_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(pcx_retail_maps COMMAND pcx_retail_maps_test)
+
 # The 256-colour quantizer an 8-bit PCX is written through (formats/pcx/pcx_quantize.h).
 add_executable(pcx_quantize_test pcx/pcx_quantize_test.cpp)
 target_link_libraries(pcx_quantize_test PRIVATE opennova_formats)
