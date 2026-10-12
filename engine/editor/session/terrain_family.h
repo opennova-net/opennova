@@ -22,6 +22,8 @@ struct TerrainFamilyFile {
 	std::string import_output;
 	std::string refusal;
 	std::string words;
+	// The terrain names no file for it, or one the project lacks (the pane's Add action; a mission's .til not made yet).
+	bool missing = false;
 	bool resolved() const { return !path.empty() && refusal.empty(); }
 };
 

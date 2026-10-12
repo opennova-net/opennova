@@ -17,6 +17,8 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/preview/terrain_brush_spaces.h>
+#include <editor/preview/terrain_view_commands.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
 #include <runtime/hud/hud_map_view.h>
@@ -895,6 +897,12 @@ bool MissionMapViewport::handle_point(const ViewportContext &context, NodeId id,
 
 bool MissionMapViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MapBrushSpace terrain_space(view(context.width, context.height), nullptr);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, nullptr};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drag(terrain, drag, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	float hx = 0.0f, hy = 0.0f;
 	if (!handle_point(context, drag.id, drag.handle, hx, hy, error)) return false;
 	const Document *document = planned(context, error);
@@ -998,8 +1006,25 @@ bool MissionMapViewport::command(const ViewportContext &context, const std::stri
 	return true;
 }
 
+bool MissionMapViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MapBrushSpace terrain_space(view(context.width, context.height), nullptr);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, nullptr};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drop(terrain, drop, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	return ViewportModel::drop(context, drop, out, error);
+}
+
 bool MissionMapViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MapBrushSpace terrain_space(view(context.width, context.height), nullptr);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, nullptr};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_command(terrain, command, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	if (command.name != "new_event") return ViewportModel::command_of(context, command, out, error);
 	const Document *document = planned(context, error);
 	if (!document) return false;

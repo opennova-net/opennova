@@ -30,6 +30,8 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/preview/terrain_brush_spaces.h>
+#include <editor/preview/terrain_view_commands.h>
 #include <formats/env/env.h>
 #include <formats/env/env_weather.h>
 #include <formats/env/tod_clock.h>
@@ -849,6 +851,13 @@ std::vector<MissionPressed> MissionViewport::taken_(const ViewportContext &conte
 
 bool MissionViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h): the brush's drag, a click while it is live, the eyedropper and
+	// the tile commands, drops and drags.
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Mission, &terrain_ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drag(terrain, drag, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	float hx = 0.0f, hy = 0.0f;
 	// The handle where the picture shows it now: what a `by` goes from, and what refuses a handle the
 	// record has not. A drag to a point takes a handle that is off the picture.
@@ -965,6 +974,13 @@ bool MissionViewport::drag(const ViewportContext &context, const ViewportDrag &d
 
 bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h): the brush's drag, a click while it is live, the eyedropper and
+	// the tile commands, drops and drags.
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Mission, &terrain_ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drop(terrain, drop, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	const Document *document = planned_(context, error);
 	if (!document) return false;
 	if (!context.editable()) {
@@ -1201,6 +1217,13 @@ bool MissionViewport::play_from_here_(const ViewportContext &context, const View
 
 bool MissionViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h): the brush's drag, a click while it is live, the eyedropper and
+	// the tile commands, drops and drags.
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Mission, &terrain_ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_command(terrain, command, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
 	if (command.name == "play_from_here") return play_from_here_(context, command, out, error);
 	if (command.name == "new_event") {
 		// S24: a recipe's event made over the record named (the right-click menu's New event).

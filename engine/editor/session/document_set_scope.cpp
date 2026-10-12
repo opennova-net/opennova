@@ -154,6 +154,13 @@ DocumentsView::StepNext DocumentSet::next_step(const std::string &view, bool und
 void DocumentSet::update_step_next() {
 	view_.documents.undo_next = next_step(view_.documents.active, true);
 	view_.documents.redo_next = next_step(view_.documents.active, false);
+	view_.documents.edited_from.clear();
+	for (const auto &[view, edited] : edited_from_) {
+		std::vector<std::string> open;
+		for (const std::string &path : edited)
+			if (open_at(path)) open.push_back(path);
+		if (!open.empty()) view_.documents.edited_from[view] = std::move(open);
+	}
 }
 
 void DocumentSet::undo_redo(const EditorRequest &request) {

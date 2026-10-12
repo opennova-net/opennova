@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -151,6 +152,9 @@ struct DocumentsView {
 		bool any() const { return !path.empty(); }
 	};
 	StepNext undo_next, redo_next;
+	// The files each view's terrain tools edited (S25: by the view document's path, in the order they were noted),
+	// open: what its Terrain pane lists unsaved and what its Save and Close take with it.
+	std::map<std::string, std::vector<std::string>> edited_from;
 };
 
 } // namespace opennova::editor

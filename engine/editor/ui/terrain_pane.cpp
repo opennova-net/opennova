@@ -4,6 +4,7 @@
 #include <string>
 
 #include <editor/model/document_base.h>
+#include <editor/project/project_files.h>
 #include <editor/session/terrain_family.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -61,6 +62,19 @@ public:
 		resolve_terrain_family(view, document, family);
 		TerrainPaneContext context{workspace, document, family, brush};
 		ImGui::TextUnformatted("Terrain");
+		if (!family.error.empty()) ImGui::TextWrapped("%s", family.error.c_str());
+		// The terrain files this view's brush edited that keep unsaved edits, each with its dirty dot (its Save saves
+		// them with the view's document; its Close asks about them).
+		if (const auto edited = view.documents.edited_from.find(document.path()); edited != view.documents.edited_from.end()) {
+			std::string unsaved;
+			for (const std::string &path : edited->second)
+				for (const auto &open : view.documents.open)
+					if (open->path() == path && open->unsaved()) unsaved += (unsaved.empty() ? "" : ", ") + basename_of(path) + " *";
+			if (!unsaved.empty()) {
+				ImGui::TextWrapped("Unsaved: %s", unsaved.c_str());
+				ui_kit::tooltip("Saving this view (Ctrl+S) saves them with it; closing it asks about them.");
+			}
+		}
 		// Where the edits go and why.
 		TerrainPlane plane = TerrainPlane::Heights;
 		if (terrain_tool_plane(brush.tool, plane)) {

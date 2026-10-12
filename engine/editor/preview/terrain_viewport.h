@@ -83,6 +83,11 @@ public:
 	const std::string &mission_name() const { return mission_name_; }
 	// The ground as the game reads it (the terrain, its tiles, its water), for the readout and the overlay.
 	const MissionGround &ground() const { return ground_; }
+	// The ground followed over the project's files first (S25: the terrain brush's space and hints).
+	const MissionGround &followed_ground(const SessionView &view) const {
+		follow_ground_(view);
+		return ground_;
+	}
 	// The overlay the options ask (DI-29) and its serial (moves each time it is made again: the device's Update).
 	const MissionOverlayImage &overlay() const { return overlay_; }
 	uint64_t overlay_serial() const { return overlay_serial_; }
@@ -114,7 +119,11 @@ public:
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
+	// The terrain tools' drags (the brush's, a tile's), drops (a Stamp's) and commands (S25, terrain_view_commands.h).
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
+			std::string &error) const override;
+	bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out, std::string &error) const override;
+	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 			std::string &error) const override;
 	// "frame" (the camera on the mapped cells) and "top" (straight down over its target, north up).
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,

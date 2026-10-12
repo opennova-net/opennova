@@ -8,7 +8,10 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/model/text_document.h>
 #include <editor/preview/terrain_brush.h>
+#include <editor/preview/terrain_brush_canvas.h>
+#include <editor/session/view/session_view.h>
 #include <editor/session/view/terrain_tools_view.h>
 
 #include "common/test_expect.h"
@@ -93,11 +96,129 @@ int test_wire() {
 	return 0;
 }
 
+// A flat ground under a picture one pixel a metre, 10 m high.
+struct FlatSpace final : TerrainBrushSpace {
+	bool pointer_ground(float x, float y, TerrainPoint &at, double &height) const override {
+		at = TerrainPoint{double(x), double(y)};
+		height = 10.0;
+		return true;
+	}
+	bool to_picture(TerrainPoint at, double, float &x, float &y) const override {
+		x = float(at.x);
+		y = float(at.y);
+		return true;
+	}
+	double height(TerrainPoint) const override { return 10.0; }
+};
+
+struct Recorder final : CanvasRequests {
+	std::vector<EditorRequest> requests;
+	void request(EditorRequest each) override { requests.push_back(std::move(each)); }
+};
+
+// The member `key` of the terrain_brush a set_workspace sets (null: none).
+JsonValue brush_member(const EditorRequest &request, const char *key) {
+	JsonValue json;
+	std::string error;
+	if (!opennova::io::json_parse(request.workspace, json, error)) return JsonValue();
+	const JsonValue *brush = json.get("terrain_brush");
+	const JsonValue *member = brush ? brush->get(key) : nullptr;
+	return member ? *member : JsonValue();
+}
+
+CanvasInput pointer(float x, float y, bool pressed, bool down) {
+	CanvasInput in;
+	in.width = in.height = 100;
+	in.mouse = CanvasPoint{x, y};
+	in.screen = in.mouse;
+	in.hovered = true;
+	in.pressed = pressed;
+	in.down = down;
+	return in;
+}
+
+// The brush half over a canvas: live with the pane shown and a tool; a press lays the first dab, a drag the dabs its
+// path passes (one stroke a frame, under the gesture's token), the release ends it by its token, Esc cancels it; Shift
+// inverts; the keys set the brush; a stamp is a tile's drop, the tile keys the tile commands.
+int test_half() {
+	TextDocument mission;
+	Diagnostic error;
+	const std::string text = "x";
+	TEST_EXPECT(mission.load_bytes(std::vector<uint8_t>(text.begin(), text.end()), "m.bms", AssetKind::Mission, "jo", error));
+	SessionView view;
+	TerrainBrushHalf half(ViewportKind::Mission);
+	half.follow(view, &mission);
+	TEST_EXPECT(!half.live()); // the pane hidden
+	view.workspace.documents["m.bms"].terrain = true;
+	view.workspace.terrain_brush.radius = 4.0f;
+	view.workspace.terrain_brush.spacing = 0.25f; // a dab a metre
+	half.follow(view, &mission);
+	TEST_EXPECT(half.live());
+	const FlatSpace space;
+	CanvasGesture gesture;
+	CanvasSubject subject;
+	subject.path = "m.bms";
+	subject.identity = mission.identity();
+	Recorder out;
+	TEST_EXPECT(half.input(gesture, subject, &space, pointer(10.0f, 20.0f, true, true), out) && half.stroking());
+	TEST_EXPECT(out.requests.size() == 1 && out.requests[0].kind == EditorRequestKind::TerrainStroke);
+	const TerrainStrokeAsk &first = out.requests[0].stroke;
+	TEST_EXPECT(first.plane == TerrainPlane::Heights && first.points.size() == 1 && first.points[0].first == 10.0 &&
+	            first.gesture != 0 && !first.end && first.brush_named == 0);
+	const uint64_t token = first.gesture;
+	CanvasInput drag = pointer(13.0f, 20.0f, false, true);
+	drag.keys.shift = true;
+	TEST_EXPECT(half.input(gesture, subject, &space, drag, out));
+	TEST_EXPECT(out.requests.size() == 2 && out.requests[1].stroke.points.size() == 3 && out.requests[1].stroke.gesture == token);
+	TEST_EXPECT((out.requests[1].stroke.brush_named & kBrushTool) && out.requests[1].stroke.brush.tool == TerrainTool::Lower);
+	TEST_EXPECT(half.input(gesture, subject, &space, pointer(13.0f, 20.0f, false, false), out) && !half.stroking());
+	TEST_EXPECT(out.requests.size() == 3 && out.requests[2].kind == EditorRequestKind::EndEdit &&
+	            out.requests[2].gesture == token && !out.requests[2].cancel);
+	// Esc during a press: the stroke cancelled by its token.
+	out.requests.clear();
+	TEST_EXPECT(half.input(gesture, subject, &space, pointer(5.0f, 5.0f, true, true), out));
+	CanvasInput escape = pointer(5.0f, 5.0f, false, true);
+	escape.keyboard.focused = true;
+	escape.keyboard.escape = true;
+	TEST_EXPECT(half.input(gesture, subject, &space, escape, out) && !half.stroking());
+	TEST_EXPECT(out.requests.size() >= 2 && out.requests[1].kind == EditorRequestKind::EndEdit && out.requests[1].cancel &&
+	            out.requests[1].gesture == out.requests[0].stroke.gesture);
+	// The keys: ] grows the radius by a quarter, Shift+[ lowers the strength; Esc with no press puts the brush down.
+	out.requests.clear();
+	CanvasInput keys = pointer(0.0f, 0.0f, false, false);
+	keys.keyboard.focused = true;
+	keys.keyboard.bracket = 1;
+	TEST_EXPECT(half.input(gesture, subject, &space, keys, out) && out.requests.size() == 1 &&
+	            out.requests[0].kind == EditorRequestKind::SetWorkspace && brush_member(out.requests[0], "radius").number == 5.0);
+	keys.keyboard.bracket = 0;
+	keys.keyboard.escape = true;
+	TEST_EXPECT(half.input(gesture, subject, &space, keys, out) && brush_member(out.requests.back(), "tool").string == "none");
+	// A stamp: the tile's drop at the pointer; the tile keys: the tile commands.
+	view.workspace.terrain_brush.tool = TerrainTool::Stamp;
+	view.workspace.terrain_brush.cell = 12;
+	half.follow(view, &mission);
+	out.requests.clear();
+	TEST_EXPECT(half.input(gesture, subject, &space, pointer(30.0f, 40.0f, true, true), out) && out.requests.size() == 1 &&
+	            out.requests[0].kind == EditorRequestKind::EditInViewport && out.requests[0].drop.reference == "tile" &&
+	            out.requests[0].drop.name == "12" && out.requests[0].drop.x == 30.0f);
+	view.workspace.terrain_brush.tool = TerrainTool::Tiles;
+	half.follow(view, &mission);
+	out.requests.clear();
+	CanvasInput turn = pointer(0.0f, 0.0f, false, false);
+	turn.keyboard.focused = true;
+	turn.keyboard.rotate = true;
+	TEST_EXPECT(half.input(gesture, subject, &space, turn, out) && out.requests.size() == 1 &&
+	            out.requests[0].command.name == "tile_rotate" && out.requests[0].command.by == std::vector<double>{1.0});
+	std::printf("half: the press, the path's dabs, the release and the cancel by token, Shift, the keys, a stamp\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_tools() != 0) return 1;
 	if (test_weight() != 0) return 1;
 	if (test_dabs() != 0) return 1;
+	if (test_half() != 0) return 1;
 	return test_wire();
 }

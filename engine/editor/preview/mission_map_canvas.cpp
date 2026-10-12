@@ -1,5 +1,7 @@
 #include <editor/preview/mission_map_canvas.h>
 
+#include <editor/preview/terrain_brush_spaces.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -52,6 +54,7 @@ void MissionMapCanvas::follow(const ViewportModel &viewport, const ViewportConte
 	subject.path = viewport.path();
 	if (context.input.document) subject.identity = uint64_t(context.input.document->identity());
 	gesture_.frame(subject, out);
+	brush_.follow(context.input.view, context.input.document); // S25
 	marks_ = viewport_->marks(context.width, context.height);
 	selected_.clear();
 	primary_ = -1;
@@ -125,6 +128,12 @@ void MissionMapCanvas::input(const ViewportContext &context, const CanvasInput &
 	if (context.input.document) subject.identity = uint64_t(context.input.document->identity());
 	const Document *document = document_of(context);
 	const bool current = document && viewport.current(context.input);
+	// S25: the terrain brush, while it is live, takes the left button and its keys before the map's own (the camera's
+	// buttons stay the map's).
+	if (brush_.live() && (brush_.stroking() || !gesture_.pressed())) {
+		const MapBrushSpace space(view, nullptr);
+		if (brush_.input(gesture_, subject, &space, in, out)) return;
+	}
 
 	// The right or the middle button pans: the mission point under the pointer as it began stays under it.
 	if ((in.right_pressed || (in.pressed && in.middle)) && in.hovered && !gesture_.pressed()) {
@@ -523,6 +532,11 @@ OverlayList MissionMapCanvas::shapes(const ViewportContext &context, const Canva
 		CanvasPoint a = press_.box_from, b = in.mouse;
 		list.rect(CanvasPoint{ std::min(a.x, b.x), std::min(a.y, b.y) }, CanvasPoint{ std::max(a.x, b.x), std::max(a.y, b.y) },
 				OverlayRole::Marquee);
+	}
+	// S25: the brush's circle over the map's marks.
+	if (brush_.live()) {
+		const MapBrushSpace space(view, nullptr);
+		brush_.shapes(&space, in, list);
 	}
 	return list;
 }

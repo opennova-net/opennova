@@ -110,6 +110,11 @@ public:
 	// What that reads of the mission's files (its terrain, its char map, its tiles and its water plane), as
 	// last asked.
 	const MissionGround &ground_reader() const { return terrain_ground_; }
+	// The ground followed over the project's files first (S25: the terrain brush's space and hints).
+	const MissionGround &followed_ground(const SessionView &view) const {
+		follow_ground_(view);
+		return terrain_ground_;
+	}
 	// The ground overlay its options ask (DI-29, mission_ground_overlay.h: the surface classes or the foliage the
 	// game reads at each point), made over the ground as last followed; its kind None with the option's. Its
 	// serial moves each time it is made again (what the device takes it again by).

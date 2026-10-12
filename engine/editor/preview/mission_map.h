@@ -239,6 +239,8 @@ public:
 			CanvasRequests &out, std::string &error) const override;
 	// `new_event {ids: [record], value: recipe}` (S24): the 3D view's (mission_new_event_command); the rest as
 	// command() takes them.
+	// S25: a tile's drop (the Stamp's), the terrain tools' (terrain_view_commands.h).
+	bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out, std::string &error) const override;
 	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 			std::string &error) const override;
 	io::JsonValue options_json() const override;

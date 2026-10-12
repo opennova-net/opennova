@@ -8,6 +8,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_map.h>
+#include <editor/preview/terrain_brush_canvas.h>
 
 namespace opennova::editor {
 
@@ -52,6 +53,7 @@ private:
 			MissionPressed &area) const;
 
 	CanvasGesture gesture_;
+	TerrainBrushHalf brush_{ViewportKind::Map}; // S25: the terrain brush, while live, before the map's own grammar
 	const MissionMapViewport *viewport_ = nullptr; // the frame's, from follow
 	std::vector<MissionMapMark> marks_; // the frame's, at its picture's size
 	std::vector<int> selected_; // the frame's selected marks

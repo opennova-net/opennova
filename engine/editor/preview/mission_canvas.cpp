@@ -1,5 +1,7 @@
 #include <editor/preview/mission_canvas.h>
 
+#include <editor/preview/terrain_brush_spaces.h>
+
 #include <algorithm>
 #include <iterator>
 #include <cmath>
@@ -220,6 +222,7 @@ void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext 
 			item_name_ = symbol->record;
 	}
 	gesture_.frame(subject_of(frame_), out);
+	brush_.follow(context.input.view, frame_.document); // S25
 	// A nudge is of the selection it began on.
 	if (gesture_.nudging() && nudged_ != frame_.records) gesture_.end(out);
 	if (!gesture_.pressed()) grab_ = MissionGrab();
@@ -246,6 +249,12 @@ void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext 
 void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out) {
 	if (!frame_.viewport) return;
 	const MissionViewport &viewport = *frame_.viewport;
+	// S25: the terrain brush, while it is live, takes the left button and its keys before the tools (the camera's
+	// buttons and keys stay the canvas's: what it leaves goes on below).
+	if (brush_.live() && !gesture_.nudging() && (brush_.stroking() || !gesture_.pressed())) {
+		const CameraBrushSpace space(context, viewport.camera(), &viewport.followed_ground(context.input.view));
+		if (brush_.input(gesture_, subject_of(frame_), &space, in, out)) return;
+	}
 	// What a press takes: a glyph, else what the device's ray meets (an entity's surface), never more.
 	const int under = in.pressed ? mission_canvas_under(frame_, in, MissionPick::Press) : -1;
 	// Esc while a press is down cancels it (S15), the tool kept: what its release would raise (an Area
@@ -805,6 +814,12 @@ const MissionGroundFacts &MissionCanvas::ground(const ViewportContext &context, 
 }
 
 std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInput &in) const {
+	// S25: while the brush is live, its own line.
+	if (brush_.live() && frame_.viewport) {
+		const MissionGround &ground = frame_.viewport->followed_ground(context.input.view);
+		const CameraBrushSpace space(context, frame_.viewport->camera(), &ground);
+		return brush_.hint(&space, in, &ground);
+	}
 	MissionHintInput hint;
 	hint.tool = tool();
 	hint.item = item_name_.empty() && item_ ? "item " + std::to_string(item_) : item_name_;

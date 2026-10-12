@@ -15,6 +15,8 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/preview/terrain_brush_spaces.h>
+#include <editor/preview/terrain_view_commands.h>
 #include <formats/env/env.h>
 #include <formats/env/env_weather.h>
 #include <runtime/environment/environment_state.h>
@@ -477,9 +479,39 @@ bool TerrainViewport::handle_point(const ViewportContext &, NodeId, const std::s
 	return false;
 }
 
-bool TerrainViewport::drag(const ViewportContext &, const ViewportDrag &, CanvasRequests &, std::string &error) const {
-	error = "Nothing is dragged in a terrain's picture: its camera is set with set_viewport.";
+bool TerrainViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Terrain, &ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drag(terrain, drag, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	error = "Nothing but the terrain brush (handle \"brush\") and a tile (handle \"tile\") is dragged in a terrain's "
+	        "picture: its camera is set with set_viewport.";
 	return false;
+}
+
+bool TerrainViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Terrain, &ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drop(terrain, drop, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	return ViewportModel::drop(context, drop, out, error);
+}
+
+bool TerrainViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const CameraBrushSpace terrain_space(context, camera_, &followed_ground(context.input.view));
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Terrain, &ground_};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_command(terrain, command, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	return ViewportModel::command_of(context, command, out, error);
 }
 
 bool TerrainViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &,

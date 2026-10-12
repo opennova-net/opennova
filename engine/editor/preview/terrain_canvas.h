@@ -25,12 +25,15 @@ public:
 	OverlayList shapes(const ViewportContext &context, const CanvasInput &in) const override;
 	CanvasCursor cursor(const ViewportContext &context, const CanvasInput &in) const override;
 	std::string hover_tip(const ViewportContext &context, const CanvasInput &in) const override;
+	// The line under the picture while the brush is live (its hint), "" otherwise.
+	std::string hint(const ViewportContext &context, const CanvasInput &in) const;
 
 private:
 	OrbitCanvas orbit_;
-	TerrainBrushHalf brush_;
+	TerrainBrushHalf brush_{ViewportKind::Terrain};
 	CanvasGesture gesture_; // the brush's strokes'
 	CanvasSubject subject_;
+	const ViewportModel *viewport_ = nullptr; // the frame's, from follow
 };
 
 } // namespace opennova::editor
