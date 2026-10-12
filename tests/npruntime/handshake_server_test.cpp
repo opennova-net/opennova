@@ -2627,6 +2627,40 @@ bool run_zero_ck_join_is_admitted() {
 	              "the zero-CK node's goodbye draws the 0x86 burst");
 }
 
+// D-NET-450: a 0x42 without SCRK hands the node an empty key, and the host decrypts that
+// joiner's 0x43 record regions with it (the seed-50 chain) like any other key, so the admission
+// exchange framed under the empty key runs to the join. The 0x43 gate is the node whose 0x42 was
+// accepted, never its key: a 0x43 from an address with no accepted 0x42 is dropped.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - SCRK @0x62BC4B, into +0x10C @0x62BFAF;
+//  NapiNPProtocol_HandleSessionPacket @0x626A00 - conn_flag0 @0x626AD7..0x626AE4, the local-key
+//  match @0x626B72; CNapiNPConnection_ParseMessages @0x625BC0 - @0x625DDF]
+bool run_scrkless_join_keys_the_session_crypt() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	const PeerAddr stranger{0x0100007Fu, 30815};
+	ClientHello hello = make_jointoperations_client_hello(1);
+	auto hello_dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+	(void)inmatch::handle_server_datagram(ctx, stranger, hello_dg.data(), hello_dg.size(), 1);
+	auto early = craft_session("", 0, 1,
+			{make_protocol_message(0x00, retail_join_request(ctx.config.expansion))});
+	const auto early_result =
+			inmatch::handle_server_datagram(ctx, stranger, early.data(), early.size(), 2);
+	if (!expect(early_result.outbound.empty() && early_result.events.empty() &&
+	                    inmatch::connection_count(ctx) == 0,
+	            "a 0x43 before any 0x42 accept is dropped"))
+		return false;
+
+	const PeerAddr peer{0x0100007Fu, 30816};
+	std::string server_scrk;
+	if (!handshake(ctx, peer, /*client_scrk=*/"", 0x5C2C0001u, server_scrk)) return false;
+	const inmatch::NapiNPConnection *conn = nullptr;
+	for (const auto &c : ctx.np_protocol.connection_list)
+		if (c.peer == peer) conn = &c;
+	return expect(conn != nullptr && conn->client_scrk.empty() && !server_scrk.empty() &&
+	                      conn->admission_stage == inmatch::GameAdmissionStage::Complete,
+	              "the SCRK-less joiner's empty-key 0x43s run the admission exchange");
+}
+
 // The reconnect counters: a 0x42 hands the node DCNT as sent and RCNT one past the client's when
 // it counted a disconnect (DCNT > 0, a signed compare); the 0x82 echoes RCNT only when nonzero.
 // [orig: NapiNPProtocol_HandleClientJoin @0x62c28d..0x62c2a3; SendSessionInit @0x62125d]
@@ -3962,6 +3996,7 @@ int main(int argc, char **argv) {
 	ok = run_full_player_info_selects_retail_mission_title_branch() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_zero_ck_join_is_admitted() && ok;
+	ok = run_scrkless_join_keys_the_session_crypt() && ok;
 	ok = run_reconnect_counters_echo_rcnt() && ok;
 	ok = run_game_host_server_auth_carries_no_cu() && ok;
 	ok = run_host_server_hello_writes_its_own_identity() && ok;

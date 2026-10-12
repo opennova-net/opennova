@@ -175,7 +175,11 @@ uint32_t nwu_compute_seed(std::string_view key) {
 size_t nwu_encrypt(uint8_t *buf, size_t len, std::string_view key) {
 	// [orig: NapiNP_DecryptBuffer @ 0x618880 (retail) | Crypto_DecryptBuffer @ 0x5e5230 (demo)]
 	// SUBTRACT chain. Retail/onnet call this the *decrypt* entry (name-swap).
-	if (!buf || len == 0 || key.empty()) {
+	// The chain runs for any buffer of a byte or more, whatever the key: an
+	// empty key seeds 50 and skips only the key-byte pass (D-NET-450).
+	// [orig: `cmp esi, 1` / `jl` @0x618895..0x618898; Crypto_SubKeyBytes
+	//  @0x618340 skips an empty key @0x61836E..0x618370]
+	if (!buf || len == 0) {
 		return 0;
 	}
 	const uint32_t seed = nwu_compute_seed(key);
@@ -192,7 +196,10 @@ size_t nwu_encrypt(uint8_t *buf, size_t len, std::string_view key) {
 size_t nwu_decrypt(uint8_t *buf, size_t len, std::string_view key) {
 	// [orig: NapiNP_EncryptBuffer @ 0x6187b0 (retail) | PFF_EncryptBuffer @ 0x5e5300 (demo)]
 	// ADD chain. Retail/onnet call this the *encrypt* entry (name-swap).
-	if (!buf || len == 0 || key.empty()) {
+	// The same gate as the SUBTRACT chain's: a byte or more, any key.
+	// [orig: `cmp ebx, 1` / `jl` @0x6187C5..0x6187C8; Crypto_AddWithKey
+	//  @0x6182D0 skips an empty key @0x6182FE..0x618300]
+	if (!buf || len == 0) {
 		return 0;
 	}
 	const uint32_t seed = nwu_compute_seed(key);

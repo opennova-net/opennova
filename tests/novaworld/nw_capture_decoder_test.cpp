@@ -310,6 +310,32 @@ std::vector<CaptureDatagram> craft_fallback_latch_capture() {
 	return t.caps;
 }
 
+// An auth pair without SCRK keys both directions with the empty key, which each peer decrypts
+// with like any other key (the seed-50 chain), so the session's 0x43 and 0x83 decode.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - SCRK into +0x10C @0x62BFAF;
+//  NapiNP_HandleServerJoinResponse @0x629840 - the key @0x629D53;
+//  CNapiNPConnection_ParseMessages @0x625BC0 - @0x625DDF]
+std::vector<CaptureDatagram> craft_empty_key_capture() {
+	ClientAuth ca;
+	ca.na = "charlie";
+	ca.ci = 5;
+	ca.ck = 6;
+	const ServerAuth sa = build_server_auth(ca, 0x7F000001u, 32768, 0x57, "");
+	std::vector<CaptureDatagram> caps;
+	int f = 1;
+	caps.push_back({f++, 32771, 32768,
+			nwu_outer_encode(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(ca))});
+	caps.push_back({f++, 32768, 32771,
+			nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa))});
+	caps.push_back({f++, 32771, 32768,
+			make_proto_payload(SESSION_OPCODE_PROTOCOL_MESSAGE, 0x0C,
+					std::vector<uint8_t>(33, 0x91), "", 0x57, 3, 2)});
+	caps.push_back({f++, 32768, 32771,
+			make_proto_payload(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0x0D,
+					std::vector<uint8_t>(17, 0x92), "", 6, 4, 3)});
+	return caps;
+}
+
 } // namespace
 
 int main() {
@@ -416,6 +442,20 @@ int main() {
 					overrun_detail.datagrams[1].decoded &&
 					overrun_detail.datagrams[2].decoded);
 		EXPECT(streaming_equals_batch(overrun, "overrun-server-auth"));
+	}
+
+	// --- an empty SCRK is a key, not "no key" (D-NET-450) ---------------------
+	{
+		const std::vector<CaptureDatagram> empty_key = craft_empty_key_capture();
+		const std::vector<InGameMessage> empty_batch = decode_capture_to_messages(empty_key);
+		EXPECT(empty_batch.size() == 2);
+		if (empty_batch.size() == 2) {
+			EXPECT(empty_batch[0].dir == 'C' &&
+					empty_batch[0].payload == std::vector<uint8_t>(33, 0x91));
+			EXPECT(empty_batch[1].dir == 'S' &&
+					empty_batch[1].payload == std::vector<uint8_t>(17, 0x92));
+		}
+		EXPECT(streaming_equals_batch(empty_key, "empty-key"));
 	}
 
 	// The detailed capture seam reports every decrypted 0x43/0x83 datagram,
