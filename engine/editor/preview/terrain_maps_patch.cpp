@@ -8,8 +8,10 @@
 #include <editor/model/document_base.h>
 #include <editor/model/raster_document.h>
 #include <editor/preview/mission_ground_facts.h>
+#include <editor/preview/terrain_map_target.h>
 #include <editor/preview/terrain_patch.h>
 #include <editor/project/project_files.h>
+#include <editor/session/terrain_family.h>
 #include <editor/session/view/session_view.h>
 #include <formats/til/til_io.h>
 #include <runtime/terrain_query/terrain_field_build.h>
@@ -66,24 +68,51 @@ void TerrainMapsFollow::read_tiles_(const std::shared_ptr<const ProjectAssetSour
 	stamps = stamped->stamps();
 }
 
-bool TerrainMapsFollow::take(const SessionView &view, const TerrainPatches &patches, const TilesRead &read,
-                             MissionGround &ground, std::vector<std::string> &names) {
+bool TerrainMapsFollow::take(const SessionView &view, const DocumentBase &document, const TerrainPatches &patches,
+                             const TilesRead &read, MissionGround &ground, std::vector<std::string> &names) {
 	const std::shared_ptr<const ProjectAssetSource> &assets = view.findings.assets;
 	if (!assets) return false;
 	bool queued = false;
-	// The maps the stroke follow patched in its ground: the colour and the detail blend maps' texels, the surface map's
-	// stamp (the device draws nothing of it). The heights are the heights lane's (HeightsTilesFollow); a foliage map's
-	// patch makes the picture again at the stroke's end (TerrainStrokeFollow::patched).
+	// The maps the stroke follow patched in its ground: the colour and the detail blend maps' texels, the foliage map's
+	// codes, the surface map's stamp (the device draws nothing of it). The heights are the heights lane's
+	// (HeightsTilesFollow).
 	for (const TerrainPatch &patch : patches.patches) {
 		MapsDevicePatch made;
 		switch (patch.plane) {
 		case TerrainPlane::Colour: made.kind = MapsDevicePatch::Kind::Colour; break;
 		case TerrainPlane::Blend: made.kind = MapsDevicePatch::Kind::Blend; break;
 		case TerrainPlane::Surface: made.kind = MapsDevicePatch::Kind::Surface; break;
+		case TerrainPlane::Foliage: made.kind = MapsDevicePatch::Kind::Foliage; break;
 		default: continue;
 		}
 		const std::string name = basename_of(patch.path);
-		if (made.kind != MapsDevicePatch::Kind::Surface) {
+		if (made.kind == MapsDevicePatch::Kind::Foliage) {
+			// The codes of the foliage map the terrain names (not an import's source), as an 8-bit plane, and where its
+			// foliage reads them: the foliage map's lookup routes a position as the char map's, the texel alone [orig:
+			// Foliage_SampleFoliageMapMask @ 0x606620], over every sector drawing the quadrant.
+			const DocumentBase *open = open_document(view, patch.path);
+			const RasterDocument *raster = open ? open->as_raster() : nullptr;
+			TerrainFamily family;
+			const bool resolved = resolve_terrain_family(view, document, family) && family.trn;
+			const TerrainFamilyFile &file = family.plane(TerrainPlane::Foliage);
+			if (!raster || raster->plane_count() != 1 || raster->plane(0).format() != RasterFormat::U8 || !resolved ||
+			    !file.import_output.empty() || !strutil::iequals(name, basename_of(file.name)) ||
+			    !map_rect(patch, raster->plane(0), made.x, made.y, made.w, made.h)) {
+				stale_ = true;
+				names.push_back(name);
+				continue;
+			}
+			const RasterPlane &plane = raster->plane(0);
+			made.width = plane.width();
+			made.height = plane.height();
+			made.indices.resize(size_t(made.w) * size_t(made.h));
+			plane.copy_rect(made.x, made.y, made.w, made.h, made.indices.data());
+			const TerrainMapTarget target = terrain_map_target(*family.trn, TerrainPlane::Foliage, made.width, made.height);
+			const terrain::TerrainAtlasRouting routing{target.grid.data(), target.origin_x, target.origin_y, target.wrap_x,
+			                                           target.wrap_z};
+			made.world = terrain::terrain_atlas_world_rects(
+			        routing, terrain::terrain_map_atlas_rect(terrain::CoordsRect{made.x, made.y, made.w, made.h}, made.width));
+		} else if (made.kind != MapsDevicePatch::Kind::Surface) {
 			const DocumentBase *open = open_document(view, patch.path);
 			const RasterDocument *raster = open ? open->as_raster() : nullptr;
 			if (!raster || !texture_paintable(raster->state()) ||

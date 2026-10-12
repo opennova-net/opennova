@@ -2,9 +2,10 @@ extends GutTest
 
 ## The maps and the tiles shown in the mission's 3D view as they are made (ADR 0046 S25, the maps and the tiles: the
 ## device patches), headless over the editor-enabled GDExtension: a tile stamped through the Tiles tool's request and
-## a colour stroke are each an Update of the picture (its builds stand, the device's Terrain node and its data stay the
-## ones it built), the device's terrain takes them in place (its tile override holds the stamped tile, its colour map
-## image the painted texels, its tile cache's pages recomposed with the art), and the mission's Undo puts each back.
+## a colour stroke and a foliage stroke are each an Update of the picture (its builds stand, the device's Terrain node
+## and its data stay the ones it built), the device's terrain takes them in place (its tile override holds the stamped
+## tile, its colour map image the painted texels, its tile cache's pages recomposed with the art, its foliage map the
+## painted codes), and the mission's Undo puts each back.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -266,3 +267,41 @@ func test_a_colour_stroke_is_an_update_its_pages_draw() -> void:
 	assert_eq(int(_state().get("builds", 0)), builds, "the undo is an Update")
 	assert_eq(int(undone.get("resident_output_hash", 0)), int(before.get("resident_output_hash", 0)),
 			"the pages as the terrain built them")
+
+
+func test_a_foliage_stroke_is_an_update_its_codes_in_place() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	_look_at_corner()
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var builds := int(state.get("builds", 0))
+	var terrain := _terrain(state)
+	assert_not_null(terrain, "the device built its terrain")
+	if terrain == null:
+		return
+	var data := terrain.get_terrain_data()
+	# The device's foliage map at the point: the terrain's plane takes the mission's -y.
+	var before := data.get_foliage_index_world(AT.x, -AT.y)
+
+	var answer: Dictionary = _seam.request({"kind": "terrain_stroke", "path": MISSION, "stroke": {"plane": "foliage",
+			"brush": {"tool": "foliage", "foliage": 77, "radius": 6}, "points": [[AT.x, AT.y]], "gesture": 4545,
+			"end": true}})
+	assert_true(bool(answer.get("outcome", {}).get("done", false)), str(answer.get("outcome")))
+	for _frame in 30:
+		_app.pump()
+		await get_tree().process_frame
+	state = _state()
+	assert_eq(int(state.get("builds", 0)), builds, "a foliage stroke is an Update: nothing builds again")
+	assert_eq(_terrain(state), terrain, "the device's terrain stands")
+	assert_eq(terrain.get_terrain_data(), data, "with its data")
+	assert_ne(before, 77, "the point held another code")
+	assert_eq(data.get_foliage_index_world(AT.x, -AT.y), 77, "the stroke's code in the device's foliage map")
+
+	assert_true(bool(_seam.request({"kind": "undo", "path": MISSION}).get("outcome", {}).get("done", false)))
+	for _frame in 30:
+		_app.pump()
+		await get_tree().process_frame
+	assert_eq(int(_state().get("builds", 0)), builds, "the undo is an Update")
+	assert_eq(data.get_foliage_index_world(AT.x, -AT.y), before, "the code as the terrain loaded it")

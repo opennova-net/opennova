@@ -264,6 +264,12 @@ public:
 	// reads them (get_colormap: the foliage's tint, the minimap) keeps the map as loaded until the next load.
 	void set_colormap_image(const Ref<Image> &p_image) { colormap_image = p_image; }
 	void set_blendmap_image(const Ref<Image> &p_image) { blendmap_image = p_image; }
+	// The foliage map's codes over a rect of it as an editor's paint left them (ADR 0046 S25; `codes` w x h, row-major,
+	// the top row first): written in place into the codes every foliage lookup reads (get_foliage_index_world,
+	// get_detail_foliage_index_fixed). No change is published (a published change grows every foliage cell again): the
+	// caller drops the cells over the rect's ground (FoliageDispatcher::invalidate_cells). The loaded indexed texture
+	// nothing samples stays as loaded. False, nothing written, for a map of no codes or a rect past it.
+	bool write_foliagemap_rect(int p_x, int p_y, int p_w, int p_h, const uint8_t *p_codes);
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;

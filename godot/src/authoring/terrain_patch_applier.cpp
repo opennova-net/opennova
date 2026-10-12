@@ -1,5 +1,6 @@
 #include "authoring/terrain_patch_applier.h"
 
+#include "terrain/foliage_dispatcher.h"
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
 #include "terrain/terrain_tile_info.h"
@@ -50,7 +51,7 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 }
 
 bool TerrainPatchApplier::apply_maps(const std::vector<opennova::editor::MapsDevicePatch> &patches, Terrain &terrain,
-		const std::function<void(const std::string &name, uint64_t stamp)> &took) {
+		FoliageDispatcher *foliage, const std::function<void(const std::string &name, uint64_t stamp)> &took) {
 	using Kind = opennova::editor::MapsDevicePatch::Kind;
 	maps_applied_ = 0;
 	for (const opennova::editor::MapsDevicePatch &patch : patches) {
@@ -69,6 +70,15 @@ bool TerrainPatchApplier::apply_maps(const std::vector<opennova::editor::MapsDev
 			done = region.is_valid() &&
 					(patch.kind == Kind::Colour ? terrain.update_colormap_region(region, Vector2i(patch.x, patch.y))
 												: terrain.update_blendmap_region(region, Vector2i(patch.x, patch.y)));
+		} else if (patch.kind == Kind::Foliage) {
+			// The codes into the foliage map the terrain's foliage reads, then the cells over the ground that reads them
+			// grown again (every sector drawing the quadrant: the patch's world rects, the Godot plane's).
+			const Ref<TerrainData> data = terrain.get_terrain_data();
+			done = data.is_valid() && patch.indices.size() == size_t(patch.w) * size_t(patch.h) &&
+					data->write_foliagemap_rect(patch.x, patch.y, patch.w, patch.h, patch.indices.data());
+			if (done && foliage != nullptr)
+				for (const opennova::terrain::TerrainWorldRect &rect : patch.world)
+					foliage->invalidate_cells(Rect2i(rect.x0, rect.z0, rect.x1 - rect.x0, rect.z1 - rect.z0));
 		} else if (patch.kind == Kind::Tiles) {
 			// The override the terrain draws its tiles from, its entries replaced in place (its `changed`: the
 			// terrain's pages and the foliage's blocker follow it); one made where it held none.

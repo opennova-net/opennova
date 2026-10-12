@@ -3,7 +3,7 @@
 // (its builds stand, nothing read again whole), the view's device patches holding what changed (the colour map's
 // texels as the device's loader takes them, the surface map's stamp, the placed tiles the game reads now) and the
 // files they account for at their stamps; the picture's files take those stamps, so the device's read of them does not
-// find them moved. A foliage stroke's end makes the picture again (its device takes no foliage patch yet).
+// find them moved. A foliage stroke is an Update too: its patch the codes and the plane's rects whose foliage reads them.
 #include <algorithm>
 #include <cstdio>
 #include <string>
@@ -188,7 +188,9 @@ int test_view() {
 	placed = last_of(*mission, MapsDevicePatch::Kind::Tiles);
 	TEST_EXPECT(placed && placed->tiles.entries.empty());
 
-	// A foliage stroke's end: the picture made again (no device patch takes a foliage map yet).
+	// A foliage stroke: an Update, its patch the codes of the foliage map the ground read and the plane's rects whose
+	// foliage reads them (the sector at grid (3, 3) drawing quadrant 1, around (-256, 256): the plane's z is -y).
+	const uint64_t built = mission->builds();
 	ask = TerrainStrokeAsk();
 	ask.plane = TerrainPlane::Foliage;
 	ask.brush.tool = TerrainTool::Foliage;
@@ -203,9 +205,20 @@ int test_view() {
 	TEST_EXPECT(session.outcome().done());
 	devices.sync(session);
 	devices.sync(session);
-	TEST_EXPECT(mission->builds() > builds);
-	std::printf("view: a colour stroke, its end, its undo, a surface stroke and a stamp each an Update with its patch; "
-	            "a foliage stroke's end a Rebuild\n");
+	TEST_EXPECT(updated_since(mark) && mission->builds() == built);
+	const MapsDevicePatch *foliage = last_of(*mission, MapsDevicePatch::Kind::Foliage);
+	TEST_EXPECT(foliage != nullptr);
+	if (foliage) {
+		TEST_EXPECT(foliage->width == 256 && foliage->indices.size() == size_t(foliage->w) * size_t(foliage->h) &&
+		            accounts_for(*foliage, "Tmap_f.pcx"));
+		TEST_EXPECT(std::count(foliage->indices.begin(), foliage->indices.end(), uint8_t(254)) > 0);
+		bool over = false;
+		for (const opennova::terrain::TerrainWorldRect &rect : foliage->world)
+			over = over || (rect.x0 <= -256 && -256 < rect.x1 && rect.z0 <= -256 && -256 < rect.z1);
+		TEST_EXPECT(!foliage->world.empty() && over);
+	}
+	std::printf("view: a colour stroke, its end, its undo, a surface stroke, a stamp and a foliage stroke each an Update "
+	            "with its patch\n");
 	return 0;
 }
 

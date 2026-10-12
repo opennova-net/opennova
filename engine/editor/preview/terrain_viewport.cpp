@@ -363,7 +363,7 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	// S25 (the maps and the tiles): the colour, blend and surface maps the follow patched and the placed tiles' move,
 	// queued for the device with their files' stamps, the picture taking them: an Update.
 	std::vector<std::string> mapped;
-	const bool painted = maps_.take(view, stroke_.patches(), tiles_read_(), ground_, mapped);
+	const bool painted = maps_.take(view, *terrain, stroke_.patches(), tiles_read_(), ground_, mapped);
 	if (!mapped.empty()) picture_.restamp(*view.findings.assets, mapped);
 	const bool overlaid = follow_overlay_(view);
 	// Framed once the ground is read; framed again where the fog it was framed in moved (the project's references

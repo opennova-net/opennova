@@ -1393,6 +1393,19 @@ PackedInt32Array TerrainData::get_sector_grid() const {
 	return sector_grid;
 }
 
+bool TerrainData::write_foliagemap_rect(int p_x, int p_y, int p_w, int p_h, const uint8_t *p_codes) {
+	if (p_codes == nullptr || p_x < 0 || p_y < 0 || p_w <= 0 || p_h <= 0 || p_x + p_w > foliagemap_width ||
+			p_y + p_h > foliagemap_height ||
+			foliagemap_indices.size() != size_t(foliagemap_width) * size_t(foliagemap_height))
+		return false;
+	if (foliage_map_resource.is_null()) _sync_foliage_map_resource_from_slot();
+	if (!foliage_map_resource->write_rect(p_x, p_y, p_w, p_h, p_codes)) return false;
+	for (int row = 0; row < p_h; ++row)
+		std::memcpy(&foliagemap_indices[size_t(p_y + row) * size_t(foliagemap_width) + size_t(p_x)],
+				p_codes + size_t(row) * size_t(p_w), size_t(p_w));
+	return true;
+}
+
 Ref<TerrainFoliageMap> TerrainData::get_foliage_map() const {
 	if (foliage_map_resource.is_null()) {
 		const_cast<TerrainData *>(this)->_sync_foliage_map_resource_from_slot();

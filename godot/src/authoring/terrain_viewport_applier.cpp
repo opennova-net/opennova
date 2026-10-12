@@ -463,7 +463,7 @@ void TerrainViewportApplier::update(const opennova::editor::ViewportModel &viewp
 	// file's read taking the stamp it was patched at (so its move does not build the terrain again); one not taken is
 	// reported and the picture made again.
 	if (terrain_built_ && !build_ && terrain_data_.is_valid() && !terrain_->is_building()) {
-		terrain_patches_.apply_maps(terrain_of(viewport).maps_patches(), *terrain_,
+		terrain_patches_.apply_maps(terrain_of(viewport).maps_patches(), *terrain_, foliage_data_.is_valid() ? foliage_ : nullptr,
 				[this](const std::string &name, uint64_t stamp) {
 					if (stamped_) stamped_->restamp(name, stamp);
 					for (opennova::FileStamps &files : layer_files_) files.restamp(name, stamp);

@@ -546,7 +546,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// queued for the device with their files' stamps, the picture taking them: an Update, the device patching its
 	// terrain in place.
 	std::vector<std::string> mapped;
-	const bool painted = maps_.take(view, stroke_.patches(), tiles_read_(), terrain_ground_, mapped);
+	const bool painted = maps_.take(view, *document, stroke_.patches(), tiles_read_(), terrain_ground_, mapped);
 	if (!mapped.empty()) picture_.restamp(files, mapped);
 	if (!stroking && stroke_.patched()) {
 		stroke_.made();

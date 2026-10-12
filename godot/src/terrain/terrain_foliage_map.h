@@ -27,6 +27,9 @@ public:
 	uint8_t sample_detail_flat_wrap(int32_t atlas_x_fixed, int32_t atlas_z_fixed) const;
 
 	void copy_from_native(const opennova::FoliageMap &map);
+	// The codes of a rect of the map written in place (`codes` w x h, row-major, the top row first): an editor's paint
+	// (ADR 0046 S25). False, nothing written, for a rect past the map.
+	bool write_rect(int x, int y, int w, int h, const uint8_t *codes);
 };
 
 } // namespace godot

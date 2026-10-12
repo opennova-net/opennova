@@ -10,6 +10,7 @@
 
 namespace godot {
 
+class FoliageDispatcher;
 class Terrain;
 class TerrainData;
 
@@ -35,14 +36,16 @@ public:
 
 	// The maps' and the placed tiles' patches (S25, the maps lane: MapsDevicePatch) past the last serial taken, applied
 	// in place to `terrain`: a colour map's region (Terrain::update_colormap_region: its tile pages that sample it
-	// recompose), a detail blend map's (update_blendmap_region), the placed tiles (the override's entries replaced,
+	// recompose), a detail blend map's (update_blendmap_region), a foliage map's codes (TerrainData::
+	// write_foliagemap_rect, then `foliage`'s cells over the ground that reads them dropped and grown again when next
+	// visible: FoliageDispatcher::invalidate_cells), the placed tiles (the override's entries replaced,
 	// TerrainTileInfo::copy_from_native: the tile pages over the changed squares recompose and the foliage that reads the
 	// override places again; a new override where the terrain held none), and the surface map's move (nothing drawn).
 	// `took` hears each file a patch accounts for, at its stamp: the caller's read of it holds that stamp now, so the
 	// file's move does not build the terrain again. False where one could not be taken (a map of another size, a
 	// region outside it, a terrain not built): maps_refused says so once, and the caller's picture is made again.
 	bool apply_maps(const std::vector<opennova::editor::MapsDevicePatch> &patches, Terrain &terrain,
-			const std::function<void(const std::string &name, uint64_t stamp)> &took);
+			FoliageDispatcher *foliage, const std::function<void(const std::string &name, uint64_t stamp)> &took);
 	// The terrain built again (or none): the maps' patches up to `serial` stand in it.
 	void maps_built(uint64_t serial) { maps_taken_ = serial; }
 	uint64_t maps_taken() const { return maps_taken_; }
