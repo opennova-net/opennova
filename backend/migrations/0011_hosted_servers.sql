@@ -14,7 +14,8 @@
 -- starting with srv- (apps/novaworld_server/auth.h).
 --
 -- players.can_host is 1 once an admin approves the account for a hosted server
--- (PUT /api/admin/users/<id>/can-host).
+-- (PUT /api/admin/users/<id>/can-host); withdrawing it stops the account's
+-- server, as a ban does.
 --
 -- hosted_servers holds one row per start an owner asks for, walked through
 -- requested -> provisioning -> booting -> listing -> running -> stopping ->
@@ -78,6 +79,7 @@ CREATE TABLE hosted_servers (
 );
 CREATE UNIQUE INDEX idx_hosted_servers_one_live ON hosted_servers(owner_user_id)
     WHERE state NOT IN ('stopped', 'failed');
+CREATE INDEX idx_hosted_servers_owner ON hosted_servers(owner_user_id);
 CREATE INDEX idx_hosted_servers_state ON hosted_servers(state);
 CREATE INDEX idx_hosted_servers_service_user ON hosted_servers(service_user_id);
 

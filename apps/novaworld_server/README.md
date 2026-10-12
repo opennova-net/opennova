@@ -331,7 +331,8 @@ An account an admin approved (`players.can_host`) can have the service run one
   next pass.
 - **A stop** is the supervisor's own act: the row goes to `stopping` (asked by the owner
   or an admin, or by the supervisor when the owner's account is deleted or no longer
-  active), the supervisor pushes `ServerStopHosting` to the listing (the sysop punt's
+  active or its approval, `can_host`, is withdrawn: the brake, read every pass and again
+  right before a start mints credentials), the supervisor pushes `ServerStopHosting` to the listing (the sysop punt's
   MsgCode 7, scoped to the service account), and ends the machine itself once the
   listing has left the browser, or 60 s after the push. `opennova-serve` exiting while
   the row is `stopping`, whatever its code, finishes the stop and is never restarted.
@@ -341,7 +342,11 @@ An account an admin approved (`players.can_host`) can have the service run one
 - **A crash** is any exit while the server should run (any code), its machine gone, a
   launch that fails, a machine not running `opennova-serve` within 5 min, or no listing
   within 3 min. The machine is ended and the row goes back to `provisioning`, 15 s
-  later, while it has restarts left (3); then `failed`.
+  later, while it has restarts left: 3 within the restart window, since an hour of
+  `running` in one go sets the count back to 0 (an always-on server that crashes now and
+  then over weeks is never failed for it); then `failed`. The launch's own error text
+  (a path, a system error) goes to the server log; the event the owner reads says "the
+  launch failed".
 - **Health.** While `running`, every pass checks the process and every 20 s the
   listing; three missing listings in a row end the machine and fail the server. Always
   on: nothing reaps an idle server or ends one for its age.
@@ -349,12 +354,15 @@ An account an admin approved (`players.can_host`) can have the service run one
   row names is ended; a live row whose machine runs resumes where it was (a running one
   gets the listing timeout for its lister to re-host before the health checks count,
   since the boot cleared the previous run's listings); a live row whose machine is gone
-  is launched again without counting a restart (a `stopping` one is stopped).
+  is launched again without counting a restart (a `stopping` one is stopped). Every 5
+  min a sweep ends the machines no live row names again (a launch whose row write
+  failed).
 - **Service accounts.** Each hosted server lists itself with an account of its own,
   `srv-<id>` (`players.kind = 'service'`), minted at its first start with a 32-character
   password from the OS CSPRNG (bcrypt, as every account), whose password is set again at
   every start (the credentials generation moves, its retail login and its keys go), and
-  deleted once the server has stopped or failed. Its lister logs in through the
+  deleted in the transaction that ends the server (stopped or failed). Its lister logs
+  in through the
   unchanged `/NWLogin.dll` and `/NWHost.dll`, so the listing's HostKey is the service
   account's. The website's login answers a service account the wrong password's 401, no
   website session is ever minted or resolved for one, the admin users list hides them,
@@ -369,8 +377,10 @@ An account an admin approved (`players.can_host`) can have the service run one
   the NovaWorld network type, `mpnovaworldportmin` = `max` = the provider's port and
   `remote_admin_port`), `admin.cfg` (user `svc`, a 31-character random password, rights
   `7F`, `ip_restrict` the service's address as the machine sees it) and the
-  `--credentials` file (`NOVAWORLD_USER` / `NOVAWORLD_PASS`). The last two are secret:
-  written owner-only and never logged. `opennova-serve` runs with `/HOST server.host
+  `--credentials` file (`NOVAWORLD_USER` / `NOVAWORLD_PASS`). All but `game.cfg` are
+  secret (the host file carries the game password): written owner-only and never logged.
+  The admin login lives in the row's own columns, read by `hosted::admin_login_of` alone:
+  `HostedServer` has no field for it, so no reply can carry it. `opennova-serve` runs with `/HOST server.host
   --credentials credentials.txt --master-host <host> --master-gate-port <port>` and
   `/exp jox01` for Escalation. The settings' ranges: a name of 1..31 cp1252 bytes with
   no control character or double quote, a password of up to 16 printable ASCII
@@ -388,9 +398,18 @@ An account an admin approved (`players.can_host`) can have the service run one
   ONNET_HOSTED_RESOURCE_DIR` (and `--loose-root` with `ONNET_HOSTED_LOOSE_ROOT=1`),
   started from an argv array with no shell (`apps/common/child_process.h`), its output in
   `console.log` there, listing on this service over loopback with free loopback ports.
-  The children end with the service (a kill-on-close job on Windows, the parent-death
-  signal on Linux) and at its orderly shutdown, so the next boot launches them again.
-  The cloud provider comes with the infrastructure.
+  Its environment is an allowlist (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `TMPDIR`; on
+  Windows `PATH`, `SystemRoot`, `SystemDrive`, `windir`, `TEMP`, `TMP`), so none of the
+  service's own variables (`ADMIN_API_TOKEN`, `DATABASE_PATH`, every `ONNET_*`) reaches
+  it. Its secret files are deleted once the process has ended (`console.log` stays);
+  what `opennova-serve` writes there itself (`admin_log.txt` with the admin password,
+  as retail's, and `game.cfg` with the game password) is covered only by the directory.
+  The children are started from the provider's own spawner thread, so on Linux their
+  parent-death signal follows the provider, not the supervisor's thread. They end with
+  the service (a kill-on-close job on Windows, the parent-death signal on Linux) and at
+  its orderly shutdown, where the provider asks each to stop (SIGTERM, on which
+  `opennova-serve` deregisters) before it kills it, so the next boot launches them
+  again. The cloud provider comes with the infrastructure.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -643,8 +662,11 @@ account's push is a 404, and the owner's stop ends the listing. The hosted serve
 every build; it compiles `auth`, `web_session` and `hosted/` straight in) drives the
 settings' rules and renders, the service accounts, the request's checks and every
 transition on a fake provider and a hand-stepped clock (the stops, any exit while
-stopping, the crash restarts and their limit, the timeouts, the health checks, the
-owners' changes, the reconciliation), then `LocalProcessProvider` against the test
-binary itself as its server; and `app_process`
+stopping, the crash restarts, their limit and the restart window, the timeouts, the
+health checks, the owners' changes including a withdrawn approval, the reconciliation and
+the periodic sweep), then `LocalProcessProvider` against the test binary itself as its
+server (the files, the environment allowlist against a planted secret, the secrets
+deleted at terminate, and its children outliving the supervisor's thread to get an
+orderly stop); and `app_process`
 ([`tests/novaworld/app_process_test.cpp`](../../tests/novaworld/app_process_test.cpp),
 every build) the child-process helper against itself.

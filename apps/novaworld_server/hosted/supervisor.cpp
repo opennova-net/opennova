@@ -73,24 +73,29 @@ void Supervisor::run() {
 	}
 }
 
-void Supervisor::reconcile(uint64_t now_ms) {
-	auto lease = pool_.acquire();
-	db::Database &db = *lease;
-	const std::vector<HostedServer> live = list_live(db);
+std::set<std::string> Supervisor::end_untracked(const std::vector<HostedServer> &live, const char *when) {
 	std::map<int64_t, const HostedServer *> by_id;
 	for (const HostedServer &s : live) by_id[s.id] = &s;
-
 	std::set<std::string> running;
 	for (const TaggedMachine &m : provider_.list_tagged()) {
 		const auto it = by_id.find(m.server_id);
 		if (it == by_id.end() || it->second->machine_id != m.machine_id) {
-			std::printf("[hosted] reconcile: machine %s (server %lld) is no live server's; ending it\n",
+			std::printf("[hosted] %s: machine %s (server %lld) is no live server's; ending it\n", when,
 					loggable(m.machine_id).c_str(), static_cast<long long>(m.server_id));
 			provider_.terminate(m.machine_id);
 			continue;
 		}
 		running.insert(m.machine_id);
 	}
+	return running;
+}
+
+void Supervisor::reconcile(uint64_t now_ms) {
+	auto lease = pool_.acquire();
+	db::Database &db = *lease;
+	const std::vector<HostedServer> live = list_live(db);
+	const std::set<std::string> running = end_untracked(live, "reconcile");
+	last_orphan_sweep_ms_ = now_ms;
 
 	for (const HostedServer &s : live) {
 		if (s.machine_id.empty()) continue; // requested, or provisioning before a launch
@@ -110,6 +115,12 @@ void Supervisor::reconcile(uint64_t now_ms) {
 			finish(db, s, State::Stopped, "its machine was gone at the service's start");
 			continue;
 		}
+		if (s.state == State::Provisioning) {
+			// Launched just before the service went: launched again, the same
+			// state, no event.
+			set_machine(db, s.id, s.provider, "", "");
+			continue;
+		}
 		// A service restart is no crash: launched again, no restart counted.
 		move(db, s, rt, now_ms, State::Provisioning, "its machine was gone at the service's start",
 				TransitionOptions{ false, true });
@@ -119,7 +130,13 @@ void Supervisor::reconcile(uint64_t now_ms) {
 void Supervisor::tick(uint64_t now_ms) {
 	auto lease = pool_.acquire();
 	db::Database &db = *lease;
-	const std::vector<HostedServer> live = list_live(db);
+	std::vector<HostedServer> live = list_live(db);
+	if (now_ms - last_orphan_sweep_ms_ >= config_.orphan_sweep_interval_ms) {
+		// A machine no live row names (a launch whose row write failed, a row
+		// ended while its machine lived on) is ended between the boots too.
+		last_orphan_sweep_ms_ = now_ms;
+		end_untracked(live, "sweep");
+	}
 	std::set<int64_t> seen;
 	for (const HostedServer &s : live) {
 		seen.insert(s.id);
@@ -155,6 +172,11 @@ bool Supervisor::owner_active(db::Database &db, const HostedServer &s, std::stri
 	}
 	if (owner->account_status != "active") {
 		why = "its owner's account is " + loggable(owner->account_status, 32);
+		return false;
+	}
+	// The approval is the brake (ADR 0053 d6): withdrawn, the server stops.
+	if (!owner->can_host) {
+		why = "its owner's approval to host was withdrawn";
 		return false;
 	}
 	return true;
@@ -196,11 +218,7 @@ bool Supervisor::move(db::Database &db, const HostedServer &s, Runtime &rt, uint
 }
 
 void Supervisor::on_requested(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const auto owner = s.owner_user_id ? get_user_by_id(db, *s.owner_user_id) : std::nullopt;
-	if (!owner || !owner->can_host) {
-		finish(db, s, State::Failed, "its owner is no longer approved to host");
-		return;
-	}
+	// step() checked the owner (active, approved) in this pass.
 	move(db, s, rt, now_ms, State::Provisioning, "picked up");
 }
 
@@ -212,6 +230,17 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		return;
 	}
 	if (now_ms < rt.not_before_ms) return; // a restart's backoff
+
+	// The owner read again right before credentials are minted (a crash
+	// restart's backoff gives an admin time to withdraw the approval).
+	std::string why;
+	if (!owner_active(db, s, why)) {
+		if (request_stop(db, s.id, why)) {
+			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),
+					why.c_str());
+		}
+		return;
+	}
 
 	// The service account, with a new password at every start.
 	const std::string username = service_username(s.id);
@@ -241,7 +270,11 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	std::string error;
 	const std::optional<std::string> machine = provider_.launch(spec, error);
 	if (!machine) {
-		attempt_failed(db, s, rt, now_ms, "the launch failed: " + error);
+		// The provider's own text (a path, a system error) goes to the log alone;
+		// the event, which the owner reads, says what happened.
+		std::fprintf(stderr, "[hosted] server %lld: the launch failed: %s\n", static_cast<long long>(s.id),
+				error.c_str());
+		attempt_failed(db, s, rt, now_ms, "the launch failed");
 		return;
 	}
 	const MachineStatus status = provider_.describe(*machine);
@@ -306,6 +339,13 @@ void Supervisor::on_running(db::Database &db, const HostedServer &s, Runtime &rt
 	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
 		on_machine_down(db, s, rt, now_ms, status);
 		return;
+	}
+	// The restart window: restart_reset_ms of running in one go and the
+	// crashes before it are forgiven, so an always-on server that crashes now
+	// and then is restarted every time.
+	if (s.restarts > 0 && now_ms - rt.since_ms >= config_.restart_reset_ms && reset_restarts(db, s.id)) {
+		std::printf("[hosted] server %lld: ran %s, its %d restart(s) forgiven\n", static_cast<long long>(s.id),
+				seconds_text(config_.restart_reset_ms).c_str(), s.restarts);
 	}
 	if (now_ms < rt.grace_until_ms || now_ms - rt.last_check_ms < config_.health_interval_ms) return;
 	rt.last_check_ms = now_ms;
@@ -372,18 +412,16 @@ void Supervisor::attempt_failed(db::Database &db, const HostedServer &s, Runtime
 
 void Supervisor::finish(db::Database &db, const HostedServer &s, State to, const std::string &detail) {
 	if (!s.machine_id.empty()) provider_.terminate(s.machine_id);
-	if (!transition(db, s.id, s.state, to, detail, TransitionOptions{ false, true })) return;
+	// The end and the service account's delete commit together: no ended row
+	// keeps an account, so nothing still resolves its listing to the owner.
+	TransitionOptions options;
+	options.clear_machine = true;
+	options.end_service_account = true;
+	if (!transition(db, s.id, s.state, to, detail, options)) return;
 	// Its runtime goes at the next pass, which no longer sees it live (the caller
 	// may still hold it).
 	std::printf("[hosted] server %lld: %s -> %s (%s)\n", static_cast<long long>(s.id), state_name(s.state),
 			state_name(to), detail.c_str());
-	if (s.service_user_id) {
-		const MutationResult deleted = delete_service_account(db, *s.service_user_id);
-		if (!deleted.ok && deleted.error_code != "not_found") {
-			std::fprintf(stderr, "[hosted] WARN server %lld: its service account stays (%s)\n",
-					static_cast<long long>(s.id), deleted.error_code.c_str());
-		}
-	}
 }
 
 } // namespace opennova::novaworld_server::hosted

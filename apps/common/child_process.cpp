@@ -1,7 +1,10 @@
 #include "child_process.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <cwchar>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -74,6 +77,35 @@ std::string windows_error(const char *what, DWORD code) {
 
 HANDLE handle_of(void *h) { return static_cast<HANDLE>(h); }
 
+wchar_t upper(wchar_t c) { return (c >= L'a' && c <= L'z') ? static_cast<wchar_t>(c - L'a' + L'A') : c; }
+
+// CreateProcessW's environment block: each NAME=value in UTF-16, sorted by name
+// case aside (the order an environment block keeps), each ended by a NUL, the
+// block by one more.
+std::vector<wchar_t> environment_block(const std::vector<std::string> &entries) {
+	std::vector<std::wstring> wide;
+	wide.reserve(entries.size());
+	for (const std::string &e : entries) wide.push_back(io::widen_utf8(e));
+	std::sort(wide.begin(), wide.end(), [](const std::wstring &a, const std::wstring &b) {
+		const size_t an = a.find(L'=');
+		const size_t bn = b.find(L'=');
+		const std::wstring_view na(a.data(), an == std::wstring::npos ? a.size() : an);
+		const std::wstring_view nb(b.data(), bn == std::wstring::npos ? b.size() : bn);
+		for (size_t i = 0; i < na.size() && i < nb.size(); ++i) {
+			if (upper(na[i]) != upper(nb[i])) return upper(na[i]) < upper(nb[i]);
+		}
+		return na.size() < nb.size();
+	});
+	std::vector<wchar_t> block;
+	for (const std::wstring &w : wide) {
+		block.insert(block.end(), w.begin(), w.end());
+		block.push_back(L'\0');
+	}
+	if (block.empty()) block.push_back(L'\0');
+	block.push_back(L'\0');
+	return block;
+}
+
 #else
 
 // `fd` moved past the standard three (close-on-exec), so the child's dup2 onto
@@ -88,7 +120,56 @@ int above_standard(int fd) {
 
 #endif
 
+// Whether `entry`'s name (before its '=') is `name`, or begins with it when
+// `name` ends in '*'; case aside on Windows.
+bool name_matches(const std::string &entry, const std::string &name) {
+	const size_t eq = entry.find('=');
+	const std::string entry_name = entry.substr(0, eq);
+	const bool prefix = !name.empty() && name.back() == '*';
+	const std::string want = prefix ? name.substr(0, name.size() - 1) : name;
+	if (prefix ? entry_name.size() < want.size() : entry_name.size() != want.size()) return false;
+	for (size_t i = 0; i < want.size(); ++i) {
+		char a = entry_name[i];
+		char b = want[i];
+#ifdef _WIN32
+		if (a >= 'a' && a <= 'z') a = static_cast<char>(a - 'a' + 'A');
+		if (b >= 'a' && b <= 'z') b = static_cast<char>(b - 'a' + 'A');
+#endif
+		if (a != b) return false;
+	}
+	return true;
+}
+
 } // namespace
+
+std::vector<std::string> current_environment() {
+	std::vector<std::string> out;
+#ifdef _WIN32
+	wchar_t *block = GetEnvironmentStringsW();
+	if (block == nullptr) return out;
+	for (const wchar_t *entry = block; *entry != L'\0'; entry += std::wcslen(entry) + 1) {
+		if (entry[0] == L'=') continue; // the per-drive current directories
+		out.push_back(io::narrow_utf8(entry));
+	}
+	FreeEnvironmentStringsW(block);
+#else
+	for (char **entry = ::environ; entry != nullptr && *entry != nullptr; ++entry) out.emplace_back(*entry);
+#endif
+	return out;
+}
+
+std::vector<std::string> filter_environment(const std::vector<std::string> &names) {
+	std::vector<std::string> out;
+	for (const std::string &entry : current_environment()) {
+		for (const std::string &name : names) {
+			if (name_matches(entry, name)) {
+				out.push_back(entry);
+				break;
+			}
+		}
+	}
+	return out;
+}
 
 ChildProcess::ChildProcess() = default;
 
@@ -219,9 +300,13 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	if (options.end_with_parent) flags |= CREATE_SUSPENDED;
 	std::vector<wchar_t> command(command_line.begin(), command_line.end());
 	command.push_back(L'\0');
+	// The environment the options name, else this process's (null).
+	std::vector<wchar_t> environment;
+	if (options.environment) environment = environment_block(*options.environment);
 	PROCESS_INFORMATION info{};
 	const BOOL created = CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, TRUE,
-			flags, nullptr, cwd.empty() ? nullptr : cwd.c_str(), &startup.StartupInfo, &info);
+			flags, options.environment ? environment.data() : nullptr,
+			cwd.empty() ? nullptr : cwd.c_str(), &startup.StartupInfo, &info);
 	const DWORD create_error = GetLastError();
 	DeleteProcThreadAttributeList(attributes);
 	close_std();
@@ -292,6 +377,13 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	argv.reserve(args.size() + 1);
 	for (std::string &arg : args) argv.push_back(arg.data());
 	argv.push_back(nullptr);
+	// The environment the options name (execve), else this process's (execv).
+	std::vector<std::string> env_entries = options.environment.value_or(std::vector<std::string>{});
+	std::vector<char *> envp;
+	envp.reserve(env_entries.size() + 1);
+	for (std::string &entry : env_entries) envp.push_back(entry.data());
+	envp.push_back(nullptr);
+	const bool own_environment = options.environment.has_value();
 	const char *cwd = options.working_dir.empty() ? nullptr : options.working_dir.c_str();
 	const int in_fd = above_standard(::open("/dev/null", O_RDONLY | O_CLOEXEC));
 	const int out_fd = above_standard(options.output_path.empty()
@@ -374,7 +466,10 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 				if (fd != report_fd) ::close(fd);
 			}
 		}
-		::execv(argv[0], argv.data());
+		if (own_environment)
+			::execve(argv[0], argv.data(), envp.data());
+		else
+			::execv(argv[0], argv.data());
 		fail(errno);
 	}
 	const int fork_errno = errno;

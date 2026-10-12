@@ -115,9 +115,9 @@ std::string render_admin_cfg(const MachinePlan &plan, const std::string &admin_p
 // The --credentials file: NOVAWORLD_USER and NOVAWORLD_PASS.
 std::string render_credentials(const std::string &username, const std::string &password);
 
-// The whole start: the four files (the credentials and admin.cfg secret) and
-// opennova-serve's arguments (/HOST, --credentials, --master-host,
-// --master-gate-port, and /exp for an expansion).
+// The whole start: the four files (every one but game.cfg secret: the host file
+// carries the game password) and opennova-serve's arguments (/HOST, --credentials,
+// --master-host, --master-gate-port, and /exp for an expansion).
 LaunchSpec render_launch(const HostedSettings &settings, const RenderInputs &inputs);
 
 // `length` letters and digits from the OS CSPRNG.

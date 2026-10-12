@@ -40,6 +40,9 @@ std::optional<State> state_from_name(std::string_view name);
 // machine, counts against the cap and is its owner's one live server.
 bool is_live(State state);
 
+// A hosted server's row. It carries no admin credential: that is AdminLogin's,
+// read by admin_login_of alone, so nothing that serializes a HostedServer can
+// emit one.
 struct HostedServer {
 	int64_t id = 0;
 	std::optional<int64_t> owner_user_id;
@@ -50,8 +53,6 @@ struct HostedServer {
 	std::string machine_id;
 	std::string machine_address;
 	int admin_port = 0;
-	std::string admin_user;
-	std::string admin_password;
 	int restarts = 0;
 	std::string failure_reason;
 	// UTC 'YYYY-MM-DD HH:MM:SS'; running_at / ended_at empty until set.
@@ -69,9 +70,20 @@ struct HostedEvent {
 	std::string at;
 };
 
+// The remote-admin login the rendered admin.cfg grants the service (K's admin
+// link logs in with it). Never part of a reply.
+struct AdminLogin {
+	int port = 0;
+	std::string user;
+	std::string password;
+};
+// The server's admin login; nullopt for no such server or one not yet rendered.
+std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id);
+
 // What a start request came to.
 enum class RequestOutcome : uint8_t {
 	Created,
+	InvalidSettings, // check_settings refused them (the routes check first)
 	NoSuchUser,  // no player account by that id
 	NotApproved, // the account is not approved (can_host) or not active
 	AlreadyLive, // the account has a live server (`id` names it)
@@ -82,9 +94,10 @@ struct RequestResult {
 	int64_t id = 0;
 };
 
-// A start the owner asks for, with settings check_settings accepted: in one
-// transaction the account's approval, its one live server and the global cap
-// are checked and the row is written (state requested, its event beside it).
+// A start the owner asks for: the settings checked again (check_settings, as
+// the routes do first), then in one transaction the account's approval, its one
+// live server and the global cap, and the row written (state requested, its
+// event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id,
 		const HostedSettings &settings, int cap);
 
@@ -103,10 +116,13 @@ std::vector<HostedEvent> list_events(db::Database &db, int64_t id, size_t limit)
 // otherwise. Running sets running_at; Stopped and Failed set ended_at, and
 // Failed the failure reason (`detail`). `count_restart` adds one to restarts.
 // `clear_machine` empties the machine's id and address (a crash restart's
-// relaunch, an end).
+// relaunch, an end). `end_service_account` deletes the server's service
+// account in the same transaction (an end: its sessions and keys cascade, and
+// the row's service_user_id goes NULL), so no ended row keeps an account.
 struct TransitionOptions {
 	bool count_restart = false;
 	bool clear_machine = false;
+	bool end_service_account = false;
 };
 bool transition(db::Database &db, int64_t id, State from, State to, const std::string &detail,
 		TransitionOptions options = {});
@@ -115,6 +131,9 @@ bool transition(db::Database &db, int64_t id, State from, State to, const std::s
 bool request_stop(db::Database &db, int64_t id, const std::string &detail);
 // Every live server's stop (the admin's kill switch); how many it asked.
 size_t request_stop_all(db::Database &db, const std::string &detail);
+// A running server's restarts back to 0 (its healthy run outlasted the
+// supervisor's restart window); false when it was not running or had none.
+bool reset_restarts(db::Database &db, int64_t id);
 
 // The fields a start writes beside the state.
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id);

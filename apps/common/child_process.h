@@ -10,12 +10,15 @@
 // elsewhere.
 //
 // The child inherits none of this process's handles or descriptors beyond the
-// three standard ones (a service's listening sockets stay its own), and with
+// three standard ones (a service's listening sockets stay its own), with
+// `environment` set none of its environment either but what that names (a
+// service's secrets in its variables stay its own), and with
 // `end_with_parent` it ends when this process does: a kill-on-close job object
-// on Windows, the parent-death signal on Linux (which the kernel sends when the
-// THREAD that started the child exits, so start children from a thread that
-// lives as long as they should). A ChildProcess owns its child: destroying one
-// whose child still runs kills the child and reaps it.
+// on Windows, the parent-death signal on Linux. The kernel sends that signal
+// when the THREAD that started the child exits, so start children from a
+// thread that lives as long as they should (LocalProcessProvider keeps a
+// spawner thread of its own for this). A ChildProcess owns its child:
+// destroying one whose child still runs kills the child and reaps it.
 
 #include <cstdint>
 #include <optional>
@@ -33,8 +36,19 @@ struct SpawnOptions {
 	// The file the child's standard output and standard error are appended to
 	// (created when missing; owner-only on POSIX); empty discards them.
 	std::string output_path;
+	// The child's whole environment, NAME=value entries (filter_environment
+	// picks them from this process's); unset, the child inherits this process's.
+	std::optional<std::vector<std::string>> environment;
 	bool end_with_parent = true;
 };
+
+// This process's environment as NAME=value entries (Windows' hidden
+// "=C:"-style entries left out). Reads no variable by name.
+std::vector<std::string> current_environment();
+// The entries of current_environment() whose name is one of `names` (case
+// aside on Windows, where names are case-insensitive); a name ending in '*'
+// matches every name it begins (LC_* is every locale variable).
+std::vector<std::string> filter_environment(const std::vector<std::string> &names);
 
 class ChildProcess {
 public:
