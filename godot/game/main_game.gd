@@ -886,16 +886,12 @@ func _on_ingame_controls_accepted() -> void:
 	PlayerProfile.save()
 
 
-# PLAYER_INFO ACCEPT writes the name and both side records into the current
+# PLAYER_INFO's ACCEPT: the companion has saved the dialog into the current
 # profile record in memory, as the original's dialog does (the next save point
-# writes the files), while the selected loadout continues through the existing
+# writes the files); the selected loadout continues through the existing
 # spawn-kit seam.
 func _on_avatar_chosen(profile: Dictionary) -> void:
 	set_local_player_profile(profile)
-	var accept_error := PlayerProfile.accept_player_info(profile)
-	if accept_error != OK:
-		push_warning("MainGame: the PLAYER_INFO selection was not taken (error %d)"
-				% accept_error)
 
 
 ## Load the player profile (player.sav, and the mounted expansion's weapon.sav)
