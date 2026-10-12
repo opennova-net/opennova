@@ -438,3 +438,48 @@ bool write_mis_text(const bms::File &file, std::string &out, std::string &error,
 }
 
 } // namespace opennova::mission::detail
+
+namespace opennova::mission {
+
+// [orig: JOTACmed.exe sub_4226D0 @ 0x4226d0, the original editor's terrain height, reached through sub_433690 @
+// 0x433690 from its save's height-lock pass sub_44E640 @ 0x44e640]
+int32_t mis_terrain_height(const MisTerrain &terrain, int32_t x, int32_t y) {
+	if (terrain.heights == nullptr || terrain.sectors == nullptr) return 0;
+	// The sector cell: x and the negated y in 512-unit steps less the origin, a cell off the grid clamped to its
+	// edge where the axis does not wrap (the mask -16), else wrapped by the & 15 [@ 0x4226dc..0x42271e; the masks
+	// polytrn_wrapx ? 0 : -16, sub_464BD0 @ 0x464dc9].
+	const uint32_t south = 0u - static_cast<uint32_t>(y);
+	int32_t cell_x = (x >> 25) - terrain.origin_x;
+	int32_t cell_y = (static_cast<int32_t>(south) >> 25) - terrain.origin_y;
+	if ((cell_x & (terrain.wrap_x ? 0 : -16)) != 0) cell_x = ~(cell_x >> 31);
+	if ((cell_y & (terrain.wrap_y ? 0 : -16)) != 0) cell_y = ~(cell_y >> 31);
+	const int32_t sector = terrain.sectors[(cell_y & 15) * 16 + (cell_x & 15)] - 1;
+	if (sector < 0) return 0;
+	// The point within its sector's quadrant of the atlas: bit 0 of the sector (less one) the atlas's second 512
+	// rows, bit 1 its second 512 columns [@ 0x422733..0x42275E].
+	uint32_t row_at = south & 0x01FFFFFFu, column_at = static_cast<uint32_t>(x) & 0x01FFFFFFu;
+	if ((sector & 1) != 0) row_at += 0x02000000u;
+	if ((sector & 2) != 0) column_at += 0x02000000u;
+	const uint32_t row = (row_at >> 16) & 0x3FFu, column = (column_at >> 16) & 0x3FFu;
+	const uint32_t next_row = ((row + 1u) << 10) & 0xFFC00u, next_column = (column + 1u) & 0x3FFu;
+	// A texel as the original editor holds it, twice the depth word, shifted to 16.16 [@ 0x4227ba..0x422811].
+	const auto texel = [&terrain](uint32_t index) { return (static_cast<uint32_t>(terrain.heights[index]) * 2u) << 7; };
+	const uint32_t here = texel((row << 10) + column), east = texel((row << 10) + next_column),
+	               south_of = texel(next_row + column), south_east = texel(next_row + next_column);
+	// The bilinear weights in 16-bit fractions, and the sum in two halves of each texel, in 32-bit words
+	// [@ 0x4227c5..0x42285d].
+	const uint32_t down = row_at & 0xFFFFu, across = column_at & 0xFFFFu;
+	const uint32_t both = (down * across) >> 16;
+	const uint32_t w_here = both - down - across + 0x10000u, w_east = across - both, w_south = down - both;
+	const uint32_t low = (east & 0xFFFFu) * w_east + (south_of & 0xFFFFu) * w_south + (here & 0xFFFFu) * w_here +
+	                     (south_east & 0xFFFFu) * both;
+	const uint32_t sum = (low >> 16) + (east >> 16) * w_east + (south_of >> 16) * w_south + (here >> 16) * w_here +
+	                     (south_east >> 16) * both;
+	// Times scale / 128 on the FPU, the sum read unsigned and the product truncated (the control word's chop); a
+	// product past the word is the FPU's integer indefinite [@ 0x422865..0x42289f].
+	const double height = static_cast<double>(sum) * (static_cast<double>(terrain.scale) * 0.0078125);
+	if (!(height > -2147483649.0 && height < 2147483648.0)) return INT32_MIN;
+	return static_cast<int32_t>(height);
+}
+
+} // namespace opennova::mission

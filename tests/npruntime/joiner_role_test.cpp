@@ -710,7 +710,15 @@ bool run_request_turns_l_before_the_0x26() {
 	if (!expect(h.socket.last_message(0x26, request) &&
 			h.kernel->local.input.look_heading == turned,
 			"the 0x26 leaves and the frame folds the turned look into L's input")) return false;
-	// The echo seats L and keeps a look the player moved since.
+	// The echo seats L and keeps a look the player moved since. Its success
+	// copies L's Yaw into the look (D-NET-447), but the frame's input carried
+	// the moved look into the Yaw before the receive, as the look arms write
+	// both, so the copy is the identity here. [orig: Input_HandleActionBinding_0
+	//  cases 166 / 167 @0x4E10A7..0x4E10AA / @0x4E110C..0x4E110F, queued by
+	//  Input_ProcessMouseAxisBindings @0x499680 and run in Input_ProcessFrame (the
+	//  call @0x52661D), ahead of Client_ProcessNetworkFrame @0x526692 ->
+	//  CNapiNetwork_PumpClientProtocolRecv @0x42C228; Entity_ProcessVehicleAttach
+	//  @0x435c5e..0x435c61]
 	constexpr int32_t moved = 0x0F000000;
 	h.kernel->local.input.look_heading = moved;
 	auto &self = h.role.runtime->state().upsert(self_handle);
@@ -722,7 +730,7 @@ bool run_request_turns_l_before_the_0x26() {
 	self.state_flags_known = true;
 	h.role.run_tick(h.input);
 	return expect(h.kernel->local.player()->mount_target == vh &&
-			h.kernel->local.input.look_heading == moved,
+			body->heading == moved && h.kernel->local.input.look_heading == moved,
 			"the host's echo seats L and writes no yaw");
 }
 

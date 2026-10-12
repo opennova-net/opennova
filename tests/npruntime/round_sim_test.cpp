@@ -2176,8 +2176,10 @@ int main() {
 		conn.reply.last_loadout_reply = {8, 2, 255, 0, 0, 0xFF}; // a granted 0x5A body
 
 		// +364 gates only a pick that resolves to a real target. A Default
-		// Spawn pick bypasses it, then clears both counters in the release.
-		// [orig: Server_ProcessClientRequestRespawn @0x519c67/@0x519cf2]
+		// Spawn pick bypasses it, and its release (handle 0xFFFF) leaves the
+		// hold running (D-NET-430).
+		// [orig: Server_ProcessClientRequestRespawn @0x519c67/@0x519cf2;
+		//  Server_ProcessPlayerDeath @0x51786B..0x517872]
 		world.registry.configure_pool(2, 8);
 		w::Entity spawn_zone;
 		spawn_zone.kind = w::EntityKind::Item;
@@ -2234,6 +2236,8 @@ int main() {
 		if (!expect(saw_5a, "deploy release emits the 0x5A un-latcher")) return 1;
 		if (!expect(saw_61, "deploy release emits the 0x61 seed")) return 1;
 		if (!expect(!conn.link.respawn_pending, "deploy clears respawn_pending")) return 1;
+		if (!expect(conn.link.spawn_target_hold_seconds == 2,
+		            "the Default Spawn deploy leaves the +364 hold")) return 1;
 		je = world.registry.get(jb);
 		if (!expect((je->flags & 1u) == 0, "deploy clears the hidden bit")) return 1;
 		if (!expect(je->health > 0, "deploy restores health")) return 1;

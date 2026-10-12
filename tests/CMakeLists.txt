@@ -3935,6 +3935,19 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(nw_host_ownership_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME nw_host_ownership_e2e COMMAND nw_host_ownership_e2e_test)
     set_tests_properties(nw_host_ownership_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+
+    # The owner's pushes end to end: an in-process opennova-serve hosting with an account on an
+    # in-process service (the same nw_service_harness.h), administered from the website's routes
+    # (POST /api/login, GET /api/me/hosts, POST /api/me/hosts/<rid>/command and /stop): the
+    # owner's SetServerName renames the match and saves game.cfg, its TextChatServer runs, another
+    # account's push is a 404, and the stop ends the listing. Serial, like the other serve e2e.
+    add_executable(nw_owner_admin_e2e_test novaworld/nw_owner_admin_e2e_test.cpp)
+    target_link_libraries(nw_owner_admin_e2e_test PRIVATE
+        opennova_novaworld_server_core opennova_serve_core opennova_novaworld_service)
+    target_include_directories(nw_owner_admin_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(nw_owner_admin_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME nw_owner_admin_e2e COMMAND nw_owner_admin_e2e_test)
+    set_tests_properties(nw_owner_admin_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s

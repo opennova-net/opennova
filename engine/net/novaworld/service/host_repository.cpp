@@ -505,6 +505,14 @@ std::optional<int64_t> claim_host_key(opennova::db::Database &db, std::string_vi
 	return owner;
 }
 
+bool listing_owned_by(opennova::db::Database &db, uint32_t rid, int64_t user_id) {
+	return !db.query("SELECT 1 FROM active_hosts WHERE rid = ? AND EXISTS "
+	                 "(SELECT 1 FROM host_keys WHERE user_id = ? AND claimed_rid = active_hosts.rid) "
+	                 "LIMIT 1;",
+	                 {i64(rid), i64(user_id)})
+	            .empty();
+}
+
 std::size_t prune_host_keys(opennova::db::Database &db) {
 	opennova::db::Transaction tx(db);
 	db.exec(

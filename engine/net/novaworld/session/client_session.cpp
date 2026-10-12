@@ -420,18 +420,20 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 }
 
 void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
+	// Any 0x82 from the connecting peer is read; no field is required (parse_server_auth).
 	ServerAuth sa;
-	if (!parse_server_auth(body.data(), body.size(), sa)) {
-		fail("bad ServerAuth");
-		return;
-	}
+	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerAuth echoes both correlation values chosen by this client. Do not
-	// install a foreign connection's session/SCRK material.
+	// install a foreign connection's session/SCRK material: a mismatched 0x82 is
+	// dropped and the connection stays in the connect state. Then CR's truth
+	// splits it: any nonzero CR accepts, zero rejects.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
+	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
 	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
 	// The 0x82's reconnect count is kept (0 when absent) and rides the next re-join.
 	// [orig: NapiNP_HandleServerJoinResponse @0x629e2e]
 	rcnt_ = sa.rcnt;
-	if (sa.cr != 1) {
+	if (sa.cr == 0) {
 		fail("ServerAuth rejected (cr=" + std::to_string(sa.cr) + ")");
 		return;
 	}
@@ -491,7 +493,11 @@ void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body,
 	DisconnectEvent event;
 	if (!parse_disconnect_event(body.data() + 4, body.size() - 4, event)) return;
 	last_receive_ms_ = clock_ms_;
-	latch_disconnect(event);
+	// The record is latched with the PEER role 1 and retail's 128 / 32 string buffers.
+	// [orig: Nwu_HandleDisconnect @0x623CE0 - the role @0x624065, DSTR @0x624079, DDSTR
+	//  @0x624097, the latch @0x6240A8..0x6240BA]
+	latch_disconnect(make_disconnect_event(1, event.dc, event.dp1, event.dp2, event.dstr,
+			event.dpc, event.ddstr));
 	disconnected_by_peer_ = true;
 	teardown_connection(out);
 }
@@ -878,7 +884,12 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 			if (pm.flags.settings_update && pm.full_tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
 				DisconnectEvent event;
 				parse_disconnect_event(pm.payload.data(), pm.payload.size(), event);
-				latch_disconnect(event);
+				// Latched with the LOCAL role, a client connection's 2, and the 128 / 32
+				// string buffers. [orig: HandleDescriptionPacket @0x621ae0 - the role
+				//  @0x621CC4..0x621CDE (is_client, set on a type-2 connection by
+				//  CNapiNPConnection_Create @0x62AE95), DSTR @0x621D0C, DDSTR @0x621D2E]
+				latch_disconnect(make_disconnect_event(2, event.dc, event.dp1, event.dp2,
+						event.dstr, event.dpc, event.ddstr));
 				disconnected_by_peer_ = true;
 				teardown_connection(out);
 				return;

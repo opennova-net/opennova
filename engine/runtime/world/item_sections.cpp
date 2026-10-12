@@ -378,10 +378,20 @@ uint32_t item_hidden_sections(const Entity &entity) {
     return mask;
 }
 Vec3 section_clone_position(const World &world, const Entity &entity) {
-    if (entity.section_clone && entity.spawned_piece_mask) {
+    if (entity.section_clone && entity.death_section_pivot && entity.spawned_piece_mask) {
         // The death render callback pivots around the first surviving HUSK
-        // section, not the intact-model pivot used by the spawn.
-        // [orig: Entity_BuildDeathSectionTransforms @ 0x492AF0]
+        // section, not the intact-model pivot used by the spawn. It is the
+        // world callback of the cveh, chel, tank and cpln rows alike, which a
+        // clone reaches through its def's render tag (or its model's LOD tag,
+        // D-ITEMDEF-18); a tag naming no row takes row 0's generic callback,
+        // which draws at the entity position (the bldg row's pivot is
+        // another: D-ITEMDEF-23).
+        // [orig: Entity_BuildDeathSectionTransforms @ 0x492AF0, row 'cveh'
+        //  @ 0x82CFE0; Entity_BuildAndApplyBoneMatrices @ 0x48F210 ('chel'
+        //  @ 0x82CFD0); Render_DestroyedSections @ 0x449EF0 ('tank' @ 0x82CFF0);
+        //  BoneCallback_cpln_World @ 0x48FE90 ('cpln' @ 0x82D000);
+        //  Render_SectorEntity @ 0x5C431B; BoneCallback_LookupByTag @ 0x4E32B0,
+        //  the miss @ 0x4E32D4 -> BoneCallback_gnrc_World @ 0x4E2860]
         const auto *traits = world.tables.item_death_traits.get(entity.item_id);
         if (traits) {
             size_t first = 0;

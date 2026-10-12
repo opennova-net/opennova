@@ -975,10 +975,12 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 				? nullptr
 				: world.zones.resolve_spawn_target(player->team, request);
 		// Server_ProcessPlayerDeath(player, handle) @0x519ECE: the deploy leg, its
-		// raises, placement, reset and private replies, before the 0x32.
+		// raises, placement, reset and private replies, before the 0x32. The leg
+		// takes the request's raw handle, resolved or not.
 		std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
 				ctx.config, conn, world,
-				target != nullptr ? target->handle : world::EntityHandle{}, ctx.logs.profile);
+				target != nullptr ? target->handle : world::EntityHandle{}, request,
+				ctx.logs.profile);
 		if (conn.link.transport != nullptr) {
 			for (ProtocolMessage &message : deployment)
 				conn.link.transport->host_send(

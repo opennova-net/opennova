@@ -370,20 +370,20 @@ bool run_owner_devices_live_until_the_deploy() {
 		return false;
 
 	conn.reply.revive_pose_valid = true;
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
 	if (!expect(world.registry.get(satchel) != nullptr && world.registry.get(claymore) != nullptr &&
 			queued_removals(world).empty(),
 			"a medic revive deploy keeps the devices"))
 		return false;
 
 	conn.link.spectator = true;
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
 	if (!expect(world.registry.get(satchel) != nullptr && queued_removals(world).empty(),
 			"a spectator slot's deploy keeps the devices"))
 		return false;
 	conn.link.spectator = false;
 
-	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {});
+	(void)inmatch::Server_ReleasePlayerDeployment(config, conn, world, {}, 0xFFFF);
 	if (!expect(world.registry.get(satchel) == nullptr && world.registry.get(claymore) == nullptr,
 			"the next deploy removes the devices") ||
 		!expect(queued_removals(world) == (std::vector<uint16_t>{satchel.packed, claymore.packed}),
