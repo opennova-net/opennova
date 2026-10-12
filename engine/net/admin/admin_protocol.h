@@ -73,6 +73,44 @@ bool admin_login_accepted(std::string_view reply);
 // An "ERROR - " or "USAGE - " reply rather than the command's answer.
 bool admin_reply_is_error(std::string_view reply);
 
+// How many reply packets one command draws: the server's dispatcher answers each command line
+// with zero or more packets and marks no end, so a client that keeps a session open must know
+// the count, or it reads the next command's replies as this one's (RAT.exe reads exactly one
+// packet and desyncs on the others). Witnessed in docs/net/novaworld-net-re.md §6.9 ("The
+// command set, the server view").
+enum class AdminReplyFraming : uint8_t {
+	// Exactly `count` packets (0: QUIT, after which the server closes the connection).
+	Exact,
+	// PLAYER BAN <#>: one packet, and a second after `OK - Banned Player #...` (the PCID ban
+	// list exists, a NovaWorld host's). [orig: CAdminServer_HandlePlayer @0x404516 (the
+	// Banned Player reply), the punt @0x40452B, `OK - Player Banned.` @0x404533 -> @0x40456F]
+	BanTarget,
+	// GOTO MENUSTATE: one packet (the cycle tail), and the tail after
+	// `ERROR - Already in 'Menu' State` in the main menu.
+	// [orig: CAdminServer_HandleGotoCommand @0x404A47 (the main menu's ERROR), @0x404A4E..0x404A65
+	//  (the quit, no reply of its own), the tail @0x404A74..0x404AAF]
+	MenuState,
+	// The count depends on server state the line does not name (PLAYER BAN ALL: per banned
+	// slot; a PLAYER sub-verb the server does not know with a target it finds: none, with one
+	// it does not find: one). The client reads until the server stays quiet.
+	QuietGap,
+};
+struct AdminReplyPlan {
+	AdminReplyFraming framing = AdminReplyFraming::QuietGap;
+	int count = 0; // Exact's packets
+};
+// The plan for one command line, split as the dispatcher splits it (isspace: ' ' and
+// '\t'..'\r'; a cp1252 byte >= 0x80 never splits) with its verbs and sub-verbs compared case
+// aside. Every verb not named below, and every verb a session's rights do not open, draws the
+// one usage reply. [orig: CAdminServer_DispatchCommand @0x406720 — the split @0x4067AD..0x4067EB
+//  (movsx -> isspace @0x76B964, the C locale's _pctype[c] & 8, the 256 bytes before the table
+//  at 0x806DA0 all zero), QUIT @0x406811, the usage @0x406A8D..0x406D58]
+AdminReplyPlan admin_reply_plan(std::string_view command);
+// Whether `replies` (the packets read so far, in order) are all `plan` draws. Exact: `count`
+// read; BanTarget / MenuState: one read, or two when the first says a second follows;
+// QuietGap: never (the caller's quiet gap ends it).
+bool admin_replies_complete(const AdminReplyPlan &plan, const std::vector<std::string> &replies);
+
 // One PLAYER LIST row a listing carries.
 struct AdminPlayer {
 	int slot = 0;

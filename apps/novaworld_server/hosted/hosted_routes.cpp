@@ -253,8 +253,13 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 			case RequestOutcome::Created:
 				log_owner(user, "start", "server " + std::to_string(result.id) + " requested");
 				return server_reply(202, *db_conn, result.id, false);
-			case RequestOutcome::InvalidSettings: // check_settings refused them above already
-				return json_error(400, "invalid_settings");
+			case RequestOutcome::InvalidSettings:
+				// check_settings passed above, and request_server runs the same
+				// check: unreachable, so a fault of the service's own.
+				std::fprintf(stderr,
+						"[hosted] ERROR the start request refused settings check_settings passed\n");
+				log_owner(user, "start", "internal_error");
+				return json_error(500, "internal_error");
 			case RequestOutcome::NoSuchUser:
 			case RequestOutcome::NotApproved:
 				log_owner(user, "start", "not_approved");

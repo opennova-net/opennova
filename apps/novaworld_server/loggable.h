@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace opennova::novaworld_server {
 
@@ -58,6 +60,50 @@ inline std::string loggable_secret(std::string_view secret) {
 	if (secret.empty())
 		return "(none)";
 	return "<redacted #" + io::sha256_hex(io::sha256(secret)).substr(0, 8) + ">";
+}
+
+// The process's log secrets: values no log line may show, each registered while it is live
+// (a hosted server's remote-admin password, for as long as its admin link holds it; ADR 0053
+// d5). main()'s engine log sink masks every line it prints, and a holder masks its own lines
+// (mask_log_secrets). A registration counts: a value registered twice stays masked until it
+// is removed twice. A value under 8 bytes is not registered: masking it would shred the log,
+// and no secret the service mints is that short.
+namespace log_secrets_detail {
+struct Registry {
+	std::mutex mu;
+	std::vector<std::string> values;
+};
+inline Registry &registry() {
+	static Registry r;
+	return r;
+}
+} // namespace log_secrets_detail
+
+inline void add_log_secret(const std::string &secret) {
+	if (secret.size() < 8)
+		return;
+	auto &r = log_secrets_detail::registry();
+	std::lock_guard<std::mutex> lock(r.mu);
+	r.values.push_back(secret);
+}
+
+inline void remove_log_secret(const std::string &secret) {
+	auto &r = log_secrets_detail::registry();
+	std::lock_guard<std::mutex> lock(r.mu);
+	const auto it = std::find(r.values.begin(), r.values.end(), secret);
+	if (it != r.values.end())
+		r.values.erase(it);
+}
+
+// `line` with every registered secret replaced by "***".
+inline std::string mask_log_secrets(std::string line) {
+	auto &r = log_secrets_detail::registry();
+	std::lock_guard<std::mutex> lock(r.mu);
+	for (const std::string &secret : r.values) {
+		for (size_t at = line.find(secret); at != std::string::npos; at = line.find(secret, at + 3))
+			line.replace(at, secret.size(), "***");
+	}
+	return line;
 }
 
 // Whether a cookie (or form field) named `name` carries a bearer secret: a

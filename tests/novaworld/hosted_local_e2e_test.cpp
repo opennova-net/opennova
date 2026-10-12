@@ -14,12 +14,18 @@
 //     service account's claim resolved to its owner);
 //   * the owner's SetServerName (POST /api/me/hosts/<rid>/command) reaches the
 //     server, which saves game.cfg in its working directory with the name;
+//   * the supervisor's admin link comes up once the server runs: it logs in on
+//     the server's remote-admin port with the rendered svc login, runs PLAYER
+//     LIST and a recorded CHAT SEND, and the console ring (migration 0012) holds
+//     the session's line, the command and its reply, never the password;
 //   * POST /api/me/server/stop: the supervisor pushes ServerStopHosting, the
 //     listing leaves the browser, the process is gone, the row is stopped and
-//     the service account deleted.
+//     the service account deleted; the admin link went down at stopping (QUIT,
+//     the console's closing line).
 
 #include "nw_service_harness.h"
 
+#include "hosted/admin_link.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/local_process_provider.h"
 #include "hosted/supervisor.h"
@@ -46,6 +52,8 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -225,6 +233,18 @@ int main(int argc, char **argv) {
 		config.listing_timeout_ms = 60 * 1000;
 		config.restart_limit = 0; // a crash fails it at once, with its reason
 		hosted::Supervisor supervisor(service.pool, provider, config);
+		// The admin links, their log lines kept for the secret check.
+		std::mutex link_log_mu;
+		std::vector<std::string> link_log;
+		hosted::AdminLinkConfig link_config;
+		link_config.status_interval_ms = 1000;
+		link_config.log = [&](const std::string &line) {
+			std::printf("%s\n", line.c_str());
+			std::lock_guard<std::mutex> lock(link_log_mu);
+			link_log.push_back(line);
+		};
+		hosted::AdminLinks links(&service.pool, link_config);
+		supervisor.set_admin_links(&links);
 		supervisor.set_stop_listing([&service](uint32_t rid, int64_t account) {
 			return service.nwudp.push_stop_hosting(rid, opennova::SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0,
 						   0, account) == nws::HostPushResult::Queued;
@@ -301,6 +321,48 @@ int main(int argc, char **argv) {
 			if (!renamed) dump(service, provider, id);
 			expect(renamed, "the server takes the owner's name and saves game.cfg");
 
+			// The admin link: up from running, logged in with the rendered login.
+			const auto login = hosted::admin_login_of(*service.pool.acquire(), id);
+			expect(login && login->user == "svc" && login->password.size() == hosted::kAdminPasswordChars,
+					"the start rendered the admin login");
+			std::shared_ptr<hosted::AdminLink> link;
+			const bool link_up = wait_for([&] {
+				link = links.find(id);
+				return link && link->status().state == hosted::AdminLinkState::Up;
+			}, 30);
+			if (!link_up) dump(service, provider, id);
+			expect(link_up, "the admin link logs in on the running server");
+			if (link_up) {
+				hosted::AdminCommandOptions read;
+				read.actor = "owner";
+				read.record = false;
+				const auto players = link->run("PLAYER LIST", read, std::chrono::milliseconds(3000));
+				expect(players.outcome == hosted::AdminCommandOutcome::Answered && players.replies.size() == 1 &&
+								players.replies[0].rfind("NAME            \t #\tTEAM", 0) == 0,
+						"PLAYER LIST answers on the link");
+				hosted::AdminCommandOptions say;
+				say.actor = "owner";
+				const auto chat = link->run("CHAT SEND hello from the service", say, std::chrono::milliseconds(3000));
+				expect(chat.outcome == hosted::AdminCommandOutcome::Answered &&
+								chat.replies == std::vector<std::string>{ "OK - Chat sent." },
+						"CHAT SEND answers on the link");
+				const bool recorded = wait_for([&] {
+					bool up_line = false;
+					bool command = false;
+					bool reply = false;
+					for (const auto &line : hosted::list_console(*service.pool.acquire(), id, 0, 100)) {
+						up_line = up_line || (line.kind == "status" && line.text == "the admin session is up");
+						command = command ||
+								(line.kind == "command" && line.actor == "owner" &&
+										line.text == "CHAT SEND hello from the service");
+						reply = reply || (line.kind == "reply" && line.text == "OK - Chat sent.");
+					}
+					return up_line && command && reply;
+				}, 10);
+				expect(recorded, "the console ring holds the session, the command and its reply");
+			}
+			link.reset();
+
 			// The stop.
 			reply = send(service, "POST", "/api/me/server/stop", as_owner(session, true));
 			json = crow::json::load(body_text(reply));
@@ -329,11 +391,32 @@ int main(int argc, char **argv) {
 				if (e.from_state == "running" && e.to_state == "stopping") pushed_stop = true;
 			}
 			expect(pushed_stop, "the timeline runs through running -> stopping");
+			expect(!links.find(id), "the admin link went down at stopping");
+			// Its QUIT and the server's own exit on the ServerStopHosting race, so either
+			// line ends the session (hosted_admin_link pins the QUIT).
+			const bool ended = wait_for([&] {
+				for (const auto &line : hosted::list_console(*service.pool.acquire(), id, 0, 100)) {
+					if (line.kind == "status" &&
+							(line.text == "the admin session is closed" ||
+									line.text.rfind("the admin session was lost", 0) == 0))
+						return true;
+				}
+				return false;
+			}, 10);
+			expect(!link_up || ended, "the admin link's session ended with the server's run");
+			if (login) {
+				for (const auto &line : hosted::list_console(*service.pool.acquire(), id, 0, hosted::kConsoleKeep))
+					expect(line.text.find(login->password) == std::string::npos, "no console line has the password");
+				std::lock_guard<std::mutex> lock(link_log_mu);
+				for (const std::string &line : link_log)
+					expect(line.find(login->password) == std::string::npos, "no link log line has the password");
+			}
 			std::printf("hosted_local_e2e: server %lld ran as RID %u, took its owner's name and stopped\n",
 					static_cast<long long>(id), rid);
 		}
 
 		supervisor.stop();
+		links.stop_all();
 		service.stop();
 	}
 	net::shutdown();

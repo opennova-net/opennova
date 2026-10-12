@@ -3648,14 +3648,16 @@ set_tests_properties(app_process PROPERTIES TIMEOUT 120)
 # the settings and their renders, the service accounts, the start request's
 # checks, the whole lifecycle on a FakeProvider and a hand-stepped clock (the
 # stops, the crash restarts and their limit, the timeouts, the health checks,
-# the owners' changes, the reconciliation), and LocalProcessProvider against the
-# test binary itself as its opennova-serve. Compiles the server's auth.cpp,
-# web_session.cpp and the hosted sources directly, as web_session_test does, so
-# it runs on every build, not only under BUILD_NOVAWORLD_HTTP.
+# the owners' changes, the reconciliation, the admin links following the running
+# servers), and LocalProcessProvider against the test binary itself as its
+# opennova-serve. Compiles the server's auth.cpp, web_session.cpp and the hosted
+# sources directly, as web_session_test does, so it runs on every build, not
+# only under BUILD_NOVAWORLD_HTTP.
 add_executable(hosted_supervisor_test
     novaworld/hosted_supervisor_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/web_session.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/admin_link.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/local_process_provider.cpp
@@ -3672,6 +3674,30 @@ target_compile_definitions(hosted_supervisor_test PRIVATE OPENNOVA_SOURCE_DIR="$
 add_test(NAME hosted_supervisor
     COMMAND hosted_supervisor_test $<TARGET_FILE:hosted_supervisor_test>)
 set_tests_properties(hosted_supervisor PROPERTIES TIMEOUT 300)
+
+# The service's admin link (apps/novaworld_server/hosted/admin_link.h) against a real
+# opennova-serve child on the LAN network type with its remote-admin port open, over a
+# synthetic loose game directory and the hosted renders' admin.cfg: the login, PLAYER LIST,
+# CHAT SEND read back by CHAT GET, the per-verb reply framing (two packets, one, the quiet
+# gap), the status poll, the reconnect after the child is killed and started again on the
+# same port, QUIT at the end, and the admin password in no log or console line. Compiles the
+# hosted sources it needs directly, as hosted_supervisor_test does, so it runs on every
+# build; ctest passes the opennova-serve binary. Serial: the child holds one TCP port across
+# its restart.
+add_executable(hosted_admin_link_test
+    novaworld/hosted_admin_link_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/admin_link.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp)
+target_link_libraries(hosted_admin_link_test
+    PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
+target_include_directories(hosted_admin_link_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(hosted_admin_link_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_dependencies(hosted_admin_link_test opennova_serve)
+add_test(NAME hosted_admin_link COMMAND hosted_admin_link_test $<TARGET_FILE:opennova_serve>)
+set_tests_properties(hosted_admin_link PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 
 # The credential routes' brake: token buckets on a hand-stepped clock and the
 # trusted-proxy client address. The server's rate_limiter.cpp compiled in

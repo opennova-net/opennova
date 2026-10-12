@@ -192,6 +192,65 @@ int main() {
 		expect(admin_parse_time_left_minutes("Tracers              = 1\n") == -1, "no GameTime row");
 	}
 
+	// The reply plan: how many packets each command draws (§6.9's dispatcher), split as it
+	// splits, its verbs case aside.
+	{
+		const auto plan_is = [](const char *line, AdminReplyFraming framing, int count) {
+			const AdminReplyPlan p = admin_reply_plan(line);
+			return p.framing == framing && (framing != AdminReplyFraming::Exact || p.count == count);
+		};
+		using F = AdminReplyFraming;
+		expect(plan_is("QUIT", F::Exact, 0) && plan_is("quit now", F::Exact, 0), "QUIT draws none");
+		expect(plan_is("", F::Exact, 1) && plan_is("   ", F::Exact, 1) && plan_is("NOSUCHVERB", F::Exact, 1),
+		       "an empty line and an unknown verb draw the usage");
+		for (const char *line : {"GET", "GET GAMESTATE", "get gamesettings", "MISSION", "MISSION LIST",
+		                         "MISSION AVAILABLE", "MISSION ADD a.bms 1", "MISSION REMOVE 2", "MISSION CLEAR",
+		                         "MISSION CYCLE", "MISSION SETNEXT 1", "WEAPON LIST", "CMD say hi", "CHAT",
+		                         "CHAT GET", "CHAT SEND hello there", "ADMINUSER LIST", "BANLIST", "PETERRABBIT",
+		                         "PLAYER", "PLAYER LIST", "player list", "PLAYER PUNT", "PLAYER PUNT 3",
+		                         "PLAYER PUNT ALL", "PLAYER SWAPTEAM 2", "PLAYER KILL ALL", "PLAYER ZEROSCORE 4",
+		                         "PLAYER CEASEFIRE 1", "GOTO", "SET", "SET ServerPassword", "SET Bogus",
+		                         "SET ServerName a b c", "set killlimit 20"}) {
+			expect(plan_is(line, F::Exact, 1), line);
+		}
+		expect(plan_is("SET Bogus 1", F::Exact, 2) && plan_is("SET LevelRestrict 1", F::Exact, 2),
+		       "SET with a key it does not write draws the usage and Setting Not Found");
+		expect(plan_is("GOTO GAMESTATE", F::Exact, 2) && plan_is("GOTO ELSEWHERE", F::Exact, 2),
+		       "GOTO's other forms draw their reply and the cycle tail");
+		expect(plan_is("GOTO MENUSTATE", F::MenuState, 0) && plan_is("goto menustate", F::MenuState, 0),
+		       "GOTO MENUSTATE: the first reply decides");
+		expect(plan_is("PLAYER BAN 3", F::BanTarget, 0), "PLAYER BAN <#>: the first reply decides");
+		expect(plan_is("PLAYER BAN ALL", F::QuietGap, 0) && plan_is("PLAYER BAN all", F::QuietGap, 0),
+		       "PLAYER BAN ALL: per banned slot");
+		expect(plan_is("PLAYER WAVE 3", F::QuietGap, 0), "a PLAYER sub-verb the server does not know");
+		expect(plan_is("PLAYER\tLIST", F::Exact, 1) && plan_is("  PLAYER  BAN\t3 ", F::BanTarget, 0),
+		       "tabs and runs of spaces split as the dispatcher's isspace does");
+		// A cp1252 byte >= 0x80 is no separator: "PLAYER\xA0LIST" is one token, an unknown verb.
+		expect(plan_is("PLAYER\xA0LIST", F::Exact, 1), "a high byte does not split");
+
+		const AdminReplyPlan ban = admin_reply_plan("PLAYER BAN 3");
+		expect(!admin_replies_complete(ban, {}), "BAN: none read yet");
+		expect(admin_replies_complete(ban, {"OK - Player Banned."}), "BAN with no ban list: the punt's reply");
+		expect(admin_replies_complete(ban, {"ERROR - Player Not Found."}), "BAN on no slot");
+		expect(admin_replies_complete(ban, {"ERROR - Player #3 \"x\" doesn't have a PCID."}), "BAN with no PCID");
+		expect(!admin_replies_complete(ban, {"OK - Banned Player #3 \"x\"."}), "BAN listed: a second follows");
+		expect(admin_replies_complete(ban, {"OK - Banned Player #3 \"x\".", "OK - Player Banned."}),
+		       "BAN listed: both read");
+		const AdminReplyPlan menu = admin_reply_plan("GOTO MENUSTATE");
+		expect(admin_replies_complete(menu, {"OK - Server is cycling..."}), "MENUSTATE in a match: the tail");
+		expect(!admin_replies_complete(menu, {"ERROR - Already in 'Menu' State"}), "MENUSTATE in the menu");
+		expect(admin_replies_complete(menu, {"ERROR - Already in 'Menu' State",
+		                                     "ERROR - Must be in Game State to cycle server."}),
+		       "MENUSTATE in the menu: its error and the tail");
+		const AdminReplyPlan two = admin_reply_plan("SET Bogus 1");
+		expect(!admin_replies_complete(two, {"USAGE -  SET [...]"}) &&
+		               admin_replies_complete(two, {"USAGE -  SET [...]", "ERROR - Setting Not Found."}),
+		       "an exact count");
+		expect(!admin_replies_complete(admin_reply_plan("PLAYER BAN ALL"), {"a", "b", "c"}),
+		       "the quiet gap is never complete by count");
+		expect(admin_replies_complete(admin_reply_plan("QUIT"), {}), "QUIT is complete at once");
+	}
+
 	if (g_failures == 0) {
 		std::printf("admin_protocol: OK\n");
 		return 0;

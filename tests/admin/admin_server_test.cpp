@@ -666,6 +666,58 @@ void test_framing() {
 	}
 }
 
+// The client's reply plan (admin_reply_plan, the count a client that keeps its session reads
+// each command's replies by) against this console's own replies: every line draws what the
+// plan says, the first reply deciding where the plan lets it.
+void expect_plan(Client &c, const std::string &line) {
+	const AdminReplyPlan plan = admin_reply_plan(line);
+	const std::vector<std::string> replies = c.command(line);
+	bool ok = true;
+	switch (plan.framing) {
+		case AdminReplyFraming::Exact:
+			ok = replies.size() == static_cast<size_t>(plan.count);
+			break;
+		case AdminReplyFraming::BanTarget:
+		case AdminReplyFraming::MenuState:
+			ok = !replies.empty() &&
+					replies.size() == (admin_replies_complete(plan, {replies.front()}) ? 1u : 2u) &&
+					admin_replies_complete(plan, replies);
+			break;
+		case AdminReplyFraming::QuietGap:
+			break;
+	}
+	if (!ok) std::fprintf(stderr, "  %s drew %zu replies\n", line.c_str(), replies.size());
+	expect(ok, ("the reply plan counts `" + line + "`").c_str());
+}
+
+void test_reply_plan() {
+	Host host;
+	io::CrtRand rand;
+	AdminServer server(users_config(), *host.console, rand);
+	Client c = logged_in(server, "boss");
+	for (const char *line : {"GET", "GET GAMESTATE", "GET GAMESETTINGS", "GET NOTHING", "SET", "SET Bogus 1",
+	                         "SET LevelRestrict 1", "SET KillLimit 20", "SET ServerPassword", "SET Tracers",
+	                         "MISSION", "MISSION LIST", "MISSION AVAILABLE", "MISSION SETNEXT 1",
+	                         "MISSION ADD CTF02.BMS 0", "MISSION ADD NOPE.BMS", "MISSION REMOVE 9", "PLAYER",
+	                         "PLAYER LIST", "PLAYER PUNT", "PLAYER KILL 7", "PLAYER BAN 7", "PLAYER FROB 1",
+	                         "PLAYER FROB 7", "PLAYER SWAPTEAM 1", "PLAYER CEASEFIRE ALL", "PLAYER BAN 2",
+	                         "WEAPON LIST", "CMD", "CHAT", "CHAT GET", "CHAT SEND hello there", "GOTO",
+	                         "ADMINUSER LIST", "BANLIST", "PETERRABBIT", "NOSUCHVERB"}) {
+		expect_plan(c, line);
+	}
+	// A NovaWorld host's ban list: BAN draws two.
+	host.conn(0).account.pcid = "A-MM-WXXIB2";
+	host.ctx.bans.pcids = banlist::PcidBanList{};
+	expect_plan(c, "PLAYER BAN 1");
+	// GOTO MENUSTATE in the main menu: its error and the tail; in a match the tail alone.
+	host.console->set_scene(inmatch::AdminScene::MainMenu);
+	expect_plan(c, "GOTO MENUSTATE");
+	expect_plan(c, "GOTO GAMESTATE");
+	host.console->set_scene(inmatch::AdminScene::GameLoop);
+	expect_plan(c, "GOTO MENUSTATE");
+	expect(host.quits == 1, "the match's MENUSTATE quits");
+}
+
 void test_query_report() {
 	Host host;
 	const std::string report = host.console->status_report();
@@ -690,6 +742,7 @@ int main() {
 	test_player();
 	test_weapon_cmd_goto_chat();
 	test_framing();
+	test_reply_plan();
 	test_query_report();
 	if (g_failures == 0) {
 		std::printf("admin_server: OK\n");
