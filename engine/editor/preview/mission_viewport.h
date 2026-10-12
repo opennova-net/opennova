@@ -381,6 +381,9 @@ private:
 	TerrainMapsFollow maps_; // S25: the maps' and the placed tiles' device patches
 	MissionOverlayImage overlay_;
 	uint64_t overlay_serial_ = 0;
+	// The overlay over the regions the stroke follow patched since `ground_before` (the ground's revision before it), in
+	// place where it was current then.
+	void patch_overlay_(uint64_t ground_before);
 	// The Shoot tool's (DI-23).
 	MissionShots shots_;
 	uint64_t shots_key_ = 0;

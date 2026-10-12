@@ -358,8 +358,17 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	// device did not patch makes it again.
 	const bool stroking = gesture_held_(input) != 0;
 	std::vector<std::string> patched;
+	const uint64_t ground_before = ground_.revision();
 	if (stroke_.follow(view, *terrain, stroking, ground_, *view.findings.assets, patched) && !patched.empty())
 		picture_.restamp(*view.findings.assets, patched);
+	// S25: an overlay current before the stroke's patches takes their regions of its map in place.
+	if (!overlay_.empty() && overlay_ground_ == ground_before && ground_.revision() != ground_before) {
+		const std::vector<MissionOverlayRect> rects = mission_overlay_patch_rects(ground_, overlay_.kind, stroke_.patches());
+		if (rects.empty() || mission_ground_overlay_patch(ground_, overlay_, rects)) {
+			overlay_ground_ = ground_.revision();
+			if (!rects.empty()) ++overlay_serial_;
+		}
+	}
 	// The heights the follow patched (a stroke's samples, a bake's landing, an undo or redo of them), queued for the
 	// device with the tiles a landing replaced: an Update, the device patching its terrain (the mission view's leg).
 	const bool sculpted = take_heights_(view);

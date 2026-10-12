@@ -333,6 +333,16 @@ void MissionViewport::follow_ground_(const SessionView &view) const {
 			scene_.header(), mission::mission_base_name(path()));
 }
 
+void MissionViewport::patch_overlay_(uint64_t ground_before) {
+	// S25: an overlay current before the stroke's patches takes their regions of its map in place (another plane's
+	// patch leaves it as it is), never the whole picture made again per dab.
+	if (overlay_.empty() || overlay_ground_ != ground_before || terrain_ground_.revision() == ground_before) return;
+	const std::vector<MissionOverlayRect> rects = mission_overlay_patch_rects(terrain_ground_, overlay_.kind, stroke_.patches());
+	if (!rects.empty() && !mission_ground_overlay_patch(terrain_ground_, overlay_, rects)) return;
+	overlay_ground_ = terrain_ground_.revision();
+	if (!rects.empty()) ++overlay_serial_;
+}
+
 bool MissionViewport::follow_overlay_(const SessionView &view) {
 	const MissionGroundOverlay kind = options_.overlay;
 	if (kind == MissionGroundOverlay::None) {
@@ -541,7 +551,9 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// makes it again.
 	const bool stroking = gesture_held_(input) != 0;
 	std::vector<std::string> patched;
+	const uint64_t ground_before = terrain_ground_.revision();
 	if (stroke_.follow(view, *document, stroking, terrain_ground_, files, patched) && !patched.empty()) picture_.restamp(files, patched);
+	patch_overlay_(ground_before);
 	// S25 (the maps and the tiles): the colour, blend and surface maps the follow patched and the placed tiles' move,
 	// queued for the device with their files' stamps, the picture taking them: an Update, the device patching its
 	// terrain in place.

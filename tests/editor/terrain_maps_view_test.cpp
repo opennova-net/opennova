@@ -12,6 +12,7 @@
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
+#include <editor/preview/mission_ground_overlay.h>
 #include <editor/preview/mission_map.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/terrain_maps_patch.h>
@@ -161,6 +162,39 @@ int test_view() {
 	TEST_EXPECT(updated_since(mark));
 	const MapsDevicePatch *surface = last_of(*mission, MapsDevicePatch::Kind::Surface);
 	TEST_EXPECT(surface && surface->rgba.empty() && accounts_for(*surface, "Tmap_m.pcx"));
+	// The ground overlays take a stroke's region in place (the review's m5), and what they show is what a whole
+	// rebuild over the same ground shows: its texels and its legend's shares.
+	const auto same_overlay = [&](const MissionOverlayImage &a, const MissionOverlayImage &b) {
+		if (a.kind != b.kind || a.width != b.width || a.height != b.height || a.rgba != b.rgba || a.legend.size() != b.legend.size())
+			return false;
+		for (size_t i = 0; i < a.legend.size(); ++i)
+			if (a.legend[i].key != b.legend[i].key || std::abs(a.legend[i].share - b.legend[i].share) > 1e-12) return false;
+		return true;
+	};
+	for (const char *kind : {"surfaces", "foliage"}) {
+		session.handle(request::set_viewport(m, std::string(R"({"kind": "mission", "options": {"overlay": ")") + kind + "\"}}"));
+		devices.sync(session);
+		const uint64_t made = mission->overlay_serial();
+		const bool surfaces = std::string(kind) == "surfaces";
+		TerrainStrokeAsk dab;
+		dab.plane = surfaces ? TerrainPlane::Surface : TerrainPlane::Foliage;
+		dab.brush.tool = surfaces ? TerrainTool::Surface : TerrainTool::Foliage;
+		dab.brush.surface = 9;
+		dab.brush.foliage = 253;
+		dab.brush.radius = 6.0f;
+		dab.brush_named = kBrushTool | kBrushSurface | kBrushFoliage | kBrushRadius;
+		dab.points = {{-240.0, 240.0}};
+		session.handle(request::terrain_stroke(m, dab));
+		TEST_EXPECT(session.outcome().done());
+		devices.sync(session);
+		devices.sync(session);
+		const MissionOverlayImage whole = mission_ground_overlay(mission->ground_reader(), mission->overlay().kind);
+		const bool same = mission->overlay_serial() > made && same_overlay(mission->overlay(), whole);
+		if (!same) std::fprintf(stderr, "  the %s overlay patched differs from it made whole\n", kind);
+		TEST_EXPECT(same);
+	}
+	session.handle(request::set_viewport(m, R"({"kind": "mission", "options": {"overlay": "none"}})"));
+	devices.sync(session);
 
 	// A stamp: the mission's .til made and opened, the tile laid; an Update whose patch is the placement the game reads.
 	std::string error;
