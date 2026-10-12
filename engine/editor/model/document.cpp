@@ -716,6 +716,9 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 		staged_source_.reset();
 		return refused();
 	}
+	// The rows the batch put in place, settled by the type's order rule before anything derives from them.
+	const std::vector<NodeId> placed = staged.placed();
+	if (!placed.empty()) settle_placed_rows(staged, placed);
 	staged.for_each_changed([this](Node &row) { after_edit(row); });
 	EditStep step = staged.step();
 	// A batch that read the source again carries what the content was read from on both sides.

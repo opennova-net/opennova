@@ -137,6 +137,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	// Beside the missions: the game finds a mission's by its name (mission::sidecars).
 	Kind(AssetKind::TileInfo, "tile_info", "Tile placement")
+	        .edited_by(DocumentTypeId::TilePlacement)
 	        .folder("missions")
 	        .new_name("newmission.til")
 	        .row,

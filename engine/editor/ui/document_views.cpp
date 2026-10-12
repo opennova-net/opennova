@@ -215,6 +215,8 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::ScoreTable, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	// Avatars.def's parts and nationalities, each nationality its divisions and their combinations under it (S23 B).
 	{DocumentTypeId::Avatars, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// A tile placement's tiles as a list in their order, the game's draw order (S25).
+	{DocumentTypeId::TilePlacement, DocumentViewRole::Records, &kTreeOutline, nullptr},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

@@ -307,7 +307,7 @@ static int test_columns() {
 	                     "face_animation.ignored_input", "font.ignored_input", "mission.event_order",
 	                     "mission.rewrite_differs", "music_bank.ignored_input", "script.line_ending",
 	                     "shader.form", "sound_bank.ignored_input", "strings.regrouped", "style.line_ending",
-	                     "terrain.ignored_input" }));
+	                     "terrain.ignored_input", "til.ignored_input" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "dialog_bank.ignored_input", "without the input the game ignores" },
@@ -323,6 +323,7 @@ static int test_columns() {
 		{ "strings.regrouped", "with its strings grouped by section the way the game reads them" },
 		{ "style.line_ending", "with every line ending CR LF" },
 		{ "terrain.ignored_input", "with each line as the game reads it" },
+		{ "til.ignored_input", "without the input the game ignores" },
 	};
 	for (const auto &[token, does] : rewrites) {
 		const FindingCodeRow *row = finding_row(token);
@@ -338,7 +339,7 @@ static int test_columns() {
 	                     "mission.unserializable",
 	                     "music_bank.invalid_input", "music_script.invalid_input", "music_script.unserializable", "sound_bank.invalid_input",
 	                     "sound_bank.unserializable", "sound_profiles.unserializable", "strings.invalid_input",
-	                     "terrain.invalid_input" }));
+	                     "terrain.invalid_input", "til.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.expansion.mission_twice", "build.expansion.mission_untitled", "build.expansion.root_only",
@@ -380,7 +381,7 @@ static int test_columns() {
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
 	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.invalid_input", "terrain.no_width",
-	                     "texture.tga_unfilled" }));
+	                     "texture.tga_unfilled", "til.ignored_input", "til.invalid_input", "til.unread" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader

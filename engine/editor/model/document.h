@@ -563,6 +563,15 @@ protected:
 	// is built here or when the row is made, never inside a const query (the thread
 	// confinement above).
 	virtual void after_edit(Node &row) { (void)row; }
+	// The rows a batch put in place (added, duplicated, pasted at the top level or moved: StagedRows::placed), in
+	// their order among the rows, before after_edit and the step: a type whose rows keep an order rule of their
+	// own over a value no field shows settles each there (a tile placement's layer, each tile taking the layer of
+	// the row before it, ADR 0046 S25), touching and changing the rows it changes (StagedRows::touch,
+	// mark_changed). The default changes nothing.
+	virtual void settle_placed_rows(StagedRows &rows, const std::vector<NodeId> &placed) {
+		(void)rows;
+		(void)placed;
+	}
 	// A row a Duplicate made of `original`, before it goes in beside it (`rows`, the rows as its
 	// batch has left them, still hold the original): the type may tell the copy apart (a menu names
 	// the screen anew, since the game finds the last of two screens of one name; a mission's event

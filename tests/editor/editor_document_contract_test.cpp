@@ -98,6 +98,8 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/environment_document.h>
+#include <editor/documents/til_document.h>
+#include <formats/til/til_io.h>
 #include <editor/documents/hudfx_document.h>
 #include <editor/documents/line_ends.h>
 #include <editor/documents/terrain_document.h>
@@ -205,7 +207,7 @@ const RowObject kRowObjects[] = {
         {&typeid(AiProfileRow), sizeof(AiProfileRow)}, {&typeid(HudFxRow), sizeof(HudFxRow)},
         {&typeid(ScoreHeaderRow), sizeof(ScoreHeaderRow)}, {&typeid(ScoreBlockRow), sizeof(ScoreBlockRow)},
         {&typeid(AvatarPartRow), sizeof(AvatarPartRow)}, {&typeid(AvatarNationalityRow), sizeof(AvatarNationalityRow)},
-        {&typeid(CharAttrRow), sizeof(CharAttrRow)},
+        {&typeid(CharAttrRow), sizeof(CharAttrRow)}, {&typeid(TilRow), sizeof(TilRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
 // clip's bone table, a def catalog's records, a mission's header and entity slots), or hold none (the
@@ -310,6 +312,24 @@ std::vector<uint8_t> minted_dds() {
 	opennova::dds::dds_write_a8r8g8b8(minted_rgba().data(), 4, 4, out, error);
 	return out;
 }
+// A tile placement of three tiles (S25): whole and fractional corners, an orientation byte past the game's three
+// bits, MED's layers ascending; and the same with a header MED would not write (til.ignored_input).
+std::vector<uint8_t> minted_til() {
+	opennova::TilFile file;
+	file.entries = {opennova::make_til_entry(16 << 16, -(32 << 16), 7, 0x05, 0),
+	                opennova::make_til_entry((48 << 16) + 0x8000, -(8 << 16), 19, 0x0A, 0),
+	                opennova::make_til_entry(-(5 << 16), 7 << 16, 63, 0x03, 2)};
+	std::vector<uint8_t> out;
+	std::string why;
+	opennova::save_til(file, out, why);
+	return out;
+}
+std::vector<uint8_t> til_with_a_foreign_header() {
+	std::vector<uint8_t> bytes = minted_til();
+	bytes[8] = 0x44;
+	return bytes;
+}
+
 std::vector<uint8_t> minted_pcx() {
 	opennova::IndexedImage8 image;
 	image.width = 4;
@@ -407,6 +427,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	         text_bytes("type\tGROUND\r\nview_dist\t500\r\npatrol_speed\t3\r\nprimary_weap\tAI_LAW\r\n")},
 	        // The HUD effects (S23 B): the power slot's model.
 	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n")},
+	        // The tile placement (S25): three tiles.
+	        {AssetKind::TileInfo, "00TRa.til", minted_til()},
 	        // The score table (S23 B): one game type's columns and points.
 	        {AssetKind::Score, "score.ini",
 	         text_bytes("VERSION 40\r\nEXP_FANFARE 0 0\r\nGAMETYPE \"TDM\"\r\nFIELD \"NUMENEMYKILLS\" 1\r\nVAR \"ENEMYKILL\" 5\r\n")},
@@ -633,6 +655,8 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        // file of two lines, the second never read (hudfx.never_read).
 	        {AssetKind::AiProfile, "early.aip", text_bytes("view_dist\t500\r\ntype\tGROUND\r\n")},
 	        {AssetKind::HudFxDefs, "hudfx.def", text_bytes("3DIPower2 p2.3di\r\n3DIPower3 p3.3di\r\n")},
+	        // A tile placement whose header's +8 MED would not write (S25: til.ignored_input).
+	        {AssetKind::TileInfo, "foreign.til", til_with_a_foreign_header()},
 	        // A score table of a version the game does not read (score.version).
 	        {AssetKind::Score, "score.ini", text_bytes("VERSION 39\r\nGAMETYPE \"TDM\"\r\nVAR \"ENEMYKILL\" 5\r\n")},
 	};

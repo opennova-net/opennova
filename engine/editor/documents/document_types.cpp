@@ -35,6 +35,7 @@
 #include <editor/documents/text_types.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_document.h>
+#include <editor/documents/til_document.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
 #include <editor/preview/make_menu_render_check.h>
@@ -90,6 +91,7 @@ std::unique_ptr<DocumentBase> make_hudfx() { return std::make_unique<HudFxDocume
 std::unique_ptr<DocumentBase> make_charattr() { return std::make_unique<CharAttrDocument>(); }
 std::unique_ptr<DocumentBase> make_score() { return std::make_unique<ScoreDocument>(); }
 std::unique_ptr<DocumentBase> make_avatars() { return std::make_unique<AvatarsDocument>(); }
+std::unique_ptr<DocumentBase> make_til() { return std::make_unique<TilDocument>(); }
 
 constexpr DocumentType kTypes[] = {
 	// The catalogs: a weapon, an ammo, a mounted gun by the names the player sees (the plain-words lane).
@@ -218,6 +220,10 @@ constexpr DocumentType kTypes[] = {
 	// names, its shown name a key of Game.bin's Avatars section, its models files.
 	{ DocumentTypeId::Avatars, "avatars", make_avatars, validate_avatars_file, AvatarsDocument::schema,
 			avatars_finding_codes },
+	// The tile placement (S25): a .til's tiles in their order (the game's draw order), each its cell, corner and
+	// orientation, MED's layer carried.
+	{ DocumentTypeId::TilePlacement, "tile_placement", make_til, validate_til_file, TilDocument::schema,
+			til_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its

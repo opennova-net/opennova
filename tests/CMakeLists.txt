@@ -6052,7 +6052,8 @@ target_link_libraries(editor_height_lock_follow_test PRIVATE opennova_editor)
 target_include_directories(editor_height_lock_follow_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_height_lock_follow COMMAND editor_height_lock_follow_test)
 
-# The .til document (S25); the retail twin opens and saves all 116 shipped .til byte for byte.
+# The .til document (S25): a .til's tiles over formats/til, their layers kept ascending, the source notes and
+# the files read only; the retail twin opens and saves all 116 shipped .til byte for byte.
 add_executable(editor_til_document_test editor/til_document_test.cpp)
 target_link_libraries(editor_til_document_test PRIVATE opennova_editor)
 target_include_directories(editor_til_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

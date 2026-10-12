@@ -112,6 +112,7 @@ enum class FindingGroup {
 	HudEffects, // hudfx.def, as the HUD's init reads it (ADR 0046 S23 B)
 	ScoreTables, // score.ini, through the game's score table reader (ADR 0046 S23 B)
 	AvatarTables, // Avatars.def, through the game's avatar reader (ADR 0046 S23 B)
+	TilePlacements, // a .til, through the game's tile placement load (ADR 0046 S25)
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
