@@ -253,7 +253,9 @@ int64_t WebAccess::take_register(const std::string &ip) {
 // password is right. An unknown username and a wrong password get the same
 // 401, cost the same bcrypt run and keep the same tokens spent; only the
 // right password learns that an account is banned or restricted (403, as the
-// game login's NWEC11 / NWEC12). Success mints a session (the session cookie)
+// game login's NWEC11 / NWEC12). A hosted server's service account
+// (players.kind 'service') is answered the wrong password's 401 whatever the
+// password: it logs in to NovaWorld alone. Success mints a session (the session cookie)
 // and answers {id, username, role}; the session the browser held before, if
 // any, is ended. A password reset or a ban that commits while the password is
 // being checked leaves the session unminted (create_web_session tests the
@@ -286,6 +288,14 @@ crow::response WebAccess::login(const crow::request &req) {
 		if (!user) {
 			std::printf("[http] /api/login refused from %s: bad credentials\n",
 			            loggable(ip).c_str());
+			return json_error(401, "invalid_credentials");
+		}
+		// A hosted server's service account logs in to NovaWorld alone (its
+		// lister's /NWLogin.dll), never to the site: answered as a wrong
+		// password, its tokens kept spent.
+		if (user->kind != "player") {
+			std::printf("[http] /api/login refused from %s: service account %lld\n",
+					loggable(ip).c_str(), static_cast<long long>(user->id));
 			return json_error(401, "invalid_credentials");
 		}
 		password_accepted(ticket, user->id, user->credentials_gen);

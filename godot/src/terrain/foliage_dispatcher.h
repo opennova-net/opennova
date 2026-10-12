@@ -10,6 +10,7 @@
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/callable.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -247,6 +248,11 @@ public:
   bool is_inset_frame_live() const { return inset_live_; }
 
   void reset();
+  // The foliage cells whose instances read a ground or map texel `p_rect` changed (an editor's sculpt or paint,
+  // ADR 0046 S25; on the Godot plane, x and z, whole units) dropped and grown again when next visible
+  // (opennova::foliage::Runtime::invalidate_cells); how many. A terrain this dispatcher draws over hands it the
+  // regions its refresh_region showed again by itself (Terrain::get_refreshed_world_rects).
+  int64_t invalidate_cells(const Rect2i &p_rect);
   int get_total_instances() const;
   // One snapshot of this frame's counters (terrain/foliage_frame_stats.h).
   Ref<FoliageFrameStats> get_frame_stats() const;
@@ -362,6 +368,8 @@ private:
   int disabled_slot_count_ = 0;
 
   Terrain *terrain_ = nullptr;
+  // The terrain's refreshed regions taken so far (Terrain::get_refresh_serial).
+  uint64_t terrain_refresh_taken_ = 0;
   // The weather by instance id: the node may go before the dispatcher.
   ObjectID weather_id_;
   Weather *_weather() const;

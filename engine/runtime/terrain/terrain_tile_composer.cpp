@@ -48,14 +48,8 @@ RgbaF lerp(RgbaF a, RgbaF b, float t) {
 	};
 }
 
-// MIPFILTER POINT: the level nearest the footprint's log2 texel density.
-// A magnified or zero footprint stays on level 0.
 std::size_t nearest_mip_level(float texels_per_pixel, std::size_t levels) {
-	if (levels == 0 || !(texels_per_pixel > 1.0f)) return 0;
-	const int level = static_cast<int>(
-			std::floor(std::log2(texels_per_pixel) + 0.5f));
-	return static_cast<std::size_t>(
-			std::clamp(level, 0, static_cast<int>(levels) - 1));
+	return terrain_tile_nearest_level(texels_per_pixel, levels);
 }
 
 // LINEAR min/mag filter under CLAMP addressing: the 2x2 footprint around
@@ -161,6 +155,46 @@ bool power_of_two(uint32_t value) {
 	return value != 0 && (value & (value - 1)) == 0;
 }
 
+// A quadrant texture as the device makes it: its levels as their texels read back, and a DXT texture's blocks (the
+// texels' source, pixel_device_texture_levels' DXT path kept whole). A halved texture keeps no blocks; a synthetic
+// one whose sides are not powers of two its single base level.
+TerrainTileQuadrantChain quadrant_device_chain(const Rgba8Image &base, uint32_t creation_flags) {
+	TerrainTileQuadrantChain chain;
+	chain.creation_flags = creation_flags;
+	if (!base.is_valid()) return chain;
+	if (!power_of_two(base.width) || !power_of_two(base.height)) {
+		chain.levels.push_back(base);
+		return chain;
+	}
+	const renderer::TextureDxtFormat format =
+			renderer::select_texture_dxt_format(creation_flags, renderer::kReferenceTextureDxtCaps);
+	if (format == renderer::TextureDxtFormat::None ||
+			renderer::pixel_texture_halvings(base.width, base.height, creation_flags,
+					renderer::kReferenceMaxTextureSide) != 0) {
+		for (renderer::DeviceTextureLevel &level : renderer::pixel_device_texture_levels(
+					 base.pixels.data(), base.width, base.height, creation_flags)) {
+			Rgba8Image image;
+			image.width = level.width;
+			image.height = level.height;
+			image.pixels = std::move(level.rgba);
+			chain.levels.push_back(std::move(image));
+		}
+		return chain;
+	}
+	// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801 (the count), @ 0x6878A0 (level 0),
+	//  @ 0x6878B5..0x6878BE (each later level the box filter of the one before)]
+	chain.dxt = renderer::build_dxt_texture_levels(base.pixels.data(), base.width, base.height, format,
+			renderer::texture_level_count(base.width, base.height, creation_flags));
+	for (const renderer::DxtSurface &surface : chain.dxt) {
+		Rgba8Image image;
+		image.width = surface.width;
+		image.height = surface.height;
+		image.pixels = renderer::encode_rgba8(renderer::decode_dxt_surface(surface));
+		chain.levels.push_back(std::move(image));
+	}
+	return chain;
+}
+
 // A quadrant texture's levels as the device reads them back; a synthetic
 // texture whose sides are not powers of two keeps its single base level.
 std::vector<Rgba8Image> quadrant_device_levels(const Rgba8Image &base,
@@ -203,8 +237,23 @@ Rgba8Image quadrant_block(const Rgba8Image &atlas, int quadrant) {
 
 } // namespace
 
+std::size_t terrain_tile_nearest_level(float texels_per_pixel, std::size_t levels) {
+	if (levels == 0 || !(texels_per_pixel > 1.0f)) return 0;
+	const int level = static_cast<int>(
+			std::floor(std::log2(texels_per_pixel) + 0.5f));
+	return static_cast<std::size_t>(
+			std::clamp(level, 0, static_cast<int>(levels) - 1));
+}
+
+const std::vector<Rgba8Image> &TerrainTileQuadrantSource::levels(size_t quadrant) const noexcept {
+	static const std::vector<Rgba8Image> none;
+	return quadrant < quadrants.size() && quadrants[quadrant] ? quadrants[quadrant]->levels : none;
+}
+
 bool TerrainTileQuadrantSource::is_valid() const noexcept {
-	return std::all_of(quadrants.begin(), quadrants.end(), valid_chain);
+	for (size_t quadrant = 0; quadrant < quadrants.size(); ++quadrant)
+		if (!valid_chain(levels(quadrant))) return false;
+	return true;
 }
 
 uint32_t terrain_colormap_quadrant_flags(int32_t session_texcompression_level) {
@@ -217,29 +266,17 @@ TerrainTileQuadrantSource build_terrain_tile_quadrant_source(
 	TerrainTileQuadrantSource result;
 	if (!atlas.is_valid() || atlas.width < 2 || atlas.height < 2) return result;
 	for (int quadrant = 0; quadrant < 4; ++quadrant) {
-		result.quadrants[static_cast<size_t>(quadrant)] =
-				quadrant_device_levels(quadrant_block(atlas, quadrant), creation_flags);
+		result.quadrants[static_cast<size_t>(quadrant)] = std::make_shared<const TerrainTileQuadrantChain>(
+				build_terrain_tile_quadrant_chain(atlas, quadrant, creation_flags));
 	}
 	return result;
 }
 
-bool refresh_terrain_tile_quadrant_source(TerrainTileQuadrantSource &source,
-		const Rgba8Image &atlas, const std::array<bool, 4> &quadrants,
-		uint32_t creation_flags) {
-	if (!atlas.is_valid() || atlas.width < 2 || atlas.height < 2 || !source.is_valid()) return false;
-	const uint32_t half_width = atlas.width / 2;
-	const uint32_t half_height = atlas.height / 2;
-	for (const std::vector<Rgba8Image> &levels : source.quadrants) {
-		if (levels.front().width != half_width || levels.front().height != half_height) return false;
-	}
-	for (int lock_order = 0; lock_order < 4; ++lock_order) {
-		if (!quadrants[static_cast<size_t>(lock_order)]) continue;
-		// The source's quadrant index: bit 1 the right half, bit 0 the bottom (quadrant_block).
-		const int quadrant = ((lock_order & 1) << 1) | (lock_order >> 1);
-		source.quadrants[static_cast<size_t>(quadrant)] =
-				quadrant_device_levels(quadrant_block(atlas, quadrant), creation_flags);
-	}
-	return true;
+TerrainTileQuadrantChain build_terrain_tile_quadrant_chain(
+		const Rgba8Image &atlas, int quadrant, uint32_t creation_flags) {
+	if (!atlas.is_valid() || atlas.width < 2 || atlas.height < 2 || quadrant < 0 || quadrant > 3)
+		return TerrainTileQuadrantChain{};
+	return quadrant_device_chain(quadrant_block(atlas, quadrant), creation_flags);
 }
 
 Rgba8Image terrain_colormap_device_image(const Rgba8Image &atlas,
@@ -339,9 +376,9 @@ Rgba8Image compose_terrain_tile_page(
 	const int quadrant = (job.source_origin_x >= 512 ? 2 : 0) +
 			(job.source_origin_z >= 512 ? 1 : 0);
 	const std::vector<Rgba8Image> &color_levels =
-			sources.colormap->quadrants[static_cast<size_t>(quadrant)];
+			sources.colormap->levels(static_cast<size_t>(quadrant));
 	const std::vector<Rgba8Image> &normal_levels =
-			sources.heightfield_normal->quadrants[static_cast<size_t>(quadrant)];
+			sources.heightfield_normal->levels(static_cast<size_t>(quadrant));
 	const double local_x = flat_page ? 0.0 : job.source_origin_x & 511;
 	const double local_z = flat_page ? 0.0 : job.source_origin_z & 511;
 	const double uv_per_pixel = flat_page ? 0.0 : world_per_pixel / 512.0;
@@ -475,6 +512,32 @@ Rgba8Image compose_terrain_tile_page(
 	}
 	add_dot3_alpha(output, dot3_alpha);
 	return output;
+}
+
+static TerrainTileSquareQ16 terrain_tile_square_q16(const TilOverlayEntry &entry) {
+	// The page pass's rectangle for a record: x raw, z negated on read, a cell's span each way.
+	TerrainTileSquareQ16 out;
+	out.minimum_x = entry.x_fixed;
+	out.minimum_z = -static_cast<int64_t>(entry.z_fixed);
+	out.maximum_x = out.minimum_x + TIL_FIXED_CELL_UNITS;
+	out.maximum_z = out.minimum_z + TIL_FIXED_CELL_UNITS;
+	return out;
+}
+
+std::vector<TerrainTileSquareQ16> terrain_tile_overlay_changes(const TilFile &before, const TilFile &after) {
+	std::vector<TerrainTileSquareQ16> out;
+	const std::size_t common = std::min(before.entries.size(), after.entries.size());
+	for (std::size_t i = 0; i < common; ++i) {
+		const TilOverlayEntry &was = before.entries[i], &now = after.entries[i];
+		if (was.x_fixed == now.x_fixed && was.z_fixed == now.z_fixed && was.tile_index == now.tile_index &&
+				was.flags == now.flags)
+			continue;
+		out.push_back(terrain_tile_square_q16(was));
+		out.push_back(terrain_tile_square_q16(now));
+	}
+	for (std::size_t i = common; i < before.entries.size(); ++i) out.push_back(terrain_tile_square_q16(before.entries[i]));
+	for (std::size_t i = common; i < after.entries.size(); ++i) out.push_back(terrain_tile_square_q16(after.entries[i]));
+	return out;
 }
 
 } // namespace opennova::terrain

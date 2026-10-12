@@ -1390,6 +1390,13 @@ target_include_directories(foliage_runtime_vectors_test PRIVATE ${CMAKE_CURRENT_
 target_compile_features(foliage_runtime_vectors_test PRIVATE cxx_std_17)
 add_test(NAME foliage_runtime_vectors COMMAND foliage_runtime_vectors_test)
 
+# foliage::Runtime::invalidate_cells (ADR 0046 S25): the cached cells over a changed region dropped, reported
+# evicted and generated again; the rest kept.
+add_executable(foliage_runtime_invalidate_test foliage/foliage_runtime_invalidate_test.cpp)
+target_link_libraries(foliage_runtime_invalidate_test PRIVATE opennova_formats)
+target_include_directories(foliage_runtime_invalidate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME foliage_runtime_invalidate COMMAND foliage_runtime_invalidate_test)
+
 add_executable(trn_roundtrip_test trn/trn_roundtrip_test.cpp)
 target_link_libraries(trn_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(trn_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3633,6 +3640,46 @@ target_include_directories(web_session_test PRIVATE
 target_compile_definitions(web_session_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME web_session COMMAND web_session_test)
 
+# apps/common/child_process.h: a child from an argv array with no shell, run against
+# the test binary itself (its path is the argument; `--child <mode>` makes it the
+# child): exit codes, every argument whole, the working directory, stdin and the
+# output file, terminate and kill, the refusals, and on POSIX no inherited
+# descriptor. Runs on every build.
+add_executable(app_process_test novaworld/app_process_test.cpp)
+target_link_libraries(app_process_test PRIVATE opennova_app_common)
+target_include_directories(app_process_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME app_process COMMAND app_process_test $<TARGET_FILE:app_process_test>)
+set_tests_properties(app_process PROPERTIES TIMEOUT 120)
+
+# The hosted servers' supervisor (apps/novaworld_server/hosted, migration 0011):
+# the settings and their renders, the service accounts, the start request's
+# checks, the whole lifecycle on a FakeProvider and a hand-stepped clock (the
+# stops, the crash restarts and their limit, the timeouts, the health checks,
+# the owners' changes, the reconciliation), and LocalProcessProvider against the
+# test binary itself as its opennova-serve. Compiles the server's auth.cpp,
+# web_session.cpp and the hosted sources directly, as web_session_test does, so
+# it runs on every build, not only under BUILD_NOVAWORLD_HTTP.
+add_executable(hosted_supervisor_test
+    novaworld/hosted_supervisor_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/web_session.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/local_process_provider.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/supervisor.cpp)
+target_link_libraries(hosted_supervisor_test
+    PRIVATE opennova_novaworld_service opennova_bcrypt opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(hosted_supervisor_test PRIVATE advapi32)
+endif()
+target_include_directories(hosted_supervisor_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(hosted_supervisor_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME hosted_supervisor
+    COMMAND hosted_supervisor_test $<TARGET_FILE:hosted_supervisor_test>)
+set_tests_properties(hosted_supervisor PROPERTIES TIMEOUT 300)
+
 # The credential routes' brake: token buckets on a hand-stepped clock and the
 # trusted-proxy client address. The server's rate_limiter.cpp compiled in
 # directly, so it runs on every build.
@@ -4023,6 +4070,21 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(nw_owner_admin_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME nw_owner_admin_e2e COMMAND nw_owner_admin_e2e_test)
     set_tests_properties(nw_owner_admin_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+
+    # A hosted server end to end (apps/novaworld_server/hosted): an in-process service with
+    # hosted servers on (the same nw_service_harness.h) and its
+    # supervisor running a real opennova-serve child through LocalProcessProvider over a
+    # synthetic loose game directory: started from POST /api/me/server/start, listed as its
+    # service account and shown as the owner's, renamed by the owner's SetServerName (game.cfg
+    # saved), and stopped from POST /api/me/server/stop. ctest passes the opennova-serve binary.
+    add_executable(hosted_local_e2e_test novaworld/hosted_local_e2e_test.cpp)
+    target_link_libraries(hosted_local_e2e_test PRIVATE
+        opennova_novaworld_server_core opennova_novaworld_service)
+    target_include_directories(hosted_local_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(hosted_local_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_dependencies(hosted_local_e2e_test opennova_serve)
+    add_test(NAME hosted_local_e2e COMMAND hosted_local_e2e_test $<TARGET_FILE:opennova_serve>)
+    set_tests_properties(hosted_local_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s
@@ -4234,6 +4296,13 @@ add_executable(npruntime_host_config_test npruntime/host_config_test.cpp)
 target_link_libraries(npruntime_host_config_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_config_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_config COMMAND npruntime_host_config_test)
+# The process's cfg block (D-NET-335, inmatch/game_config_block.h): the start's,
+# the mount's and the reload's reads of game.cfg, the mpreset exit at a read,
+# the save, and a ServerCommand before and after the match binds (D-NET-383).
+add_executable(npruntime_game_config_block_test npruntime/game_config_block_test.cpp)
+target_link_libraries(npruntime_game_config_block_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_game_config_block_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_game_config_block COMMAND npruntime_game_config_block_test)
 # The host's map rotation (D-NET-331): the list ops and cursor rules, the
 # round-end advance and its REPLAY wrap, the host screen's seed, the round end's
 # exit reason under REPLAY / LASTGAME, and the map change's router over the

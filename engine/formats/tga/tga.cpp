@@ -22,9 +22,10 @@ namespace {
 constexpr char kTgaSignature[18] = "TRUEVISION-XFILE.";
 
 // The writer of both depths: the header, then the rows from the bottom up, B, G, R and, at 32 bits, A,
-// then the TGA 2.0 footer where the form has one.
+// then the TGA 2.0 footer where the form has one. `keep_alpha`: a 24-bit form over pixels not all opaque
+// is refused rather than written without their alpha.
 bool write_true_colour(const uint8_t *rgba, uint32_t width, uint32_t height, const TgaForm &form,
-                       std::vector<uint8_t> &out, std::string &error) {
+                       std::vector<uint8_t> &out, std::string &error, bool keep_alpha) {
 	out.clear();
 	if (rgba == nullptr || width == 0 || height == 0) {
 		error = "A TGA needs at least one pixel.";
@@ -40,6 +41,13 @@ bool write_true_colour(const uint8_t *rgba, uint32_t width, uint32_t height, con
 	}
 	const uint8_t bits = form.bits;
 	const bool alpha = bits == 32;
+	if (!alpha && keep_alpha) {
+		for (size_t i = 0, n = size_t(width) * height; i < n; ++i)
+			if (rgba[i * 4 + 3] != 255) {
+				error = "A 24-bit TGA holds no alpha: the image's alpha would be lost (write it at 32 bits).";
+				return false;
+			}
+	}
 	out.reserve(TGA_HEADER_SIZE + size_t(width) * height * (alpha ? 4 : 3) + (form.footer ? TGA_FOOTER_SIZE : 0));
 	io::append_u8(out, 0);                   // no image ID
 	io::append_u8(out, 0);                   // no colour map
@@ -73,7 +81,7 @@ bool write_true_colour(const uint8_t *rgba, uint32_t width, uint32_t height, con
 
 bool tga_write(const uint8_t *rgba, uint32_t width, uint32_t height, const TgaForm &form, std::vector<uint8_t> &out,
                std::string &error) {
-	return write_true_colour(rgba, width, height, form, out, error);
+	return write_true_colour(rgba, width, height, form, out, error, true);
 }
 
 bool tga_read_form(const uint8_t *bytes, size_t size, TgaForm &out) {
@@ -84,10 +92,11 @@ bool tga_read_form(const uint8_t *bytes, size_t size, TgaForm &out) {
 	    header.map_first != 0 || header.map_length != 0 || header.map_entry_bits != 0 || header.x_origin != 0 ||
 	    header.y_origin != 0 || header.width == 0 || header.height == 0 || (header.bits != 24 && header.bits != 32))
 		return false;
-	const size_t pixels = TGA_HEADER_SIZE + size_t(header.width) * header.height * (header.bits / 8);
-	if (size == pixels) {
+	// In 64 bits: a 32-bit size_t (a wasm32 build) wraps near the sides' 65535.
+	const uint64_t pixels = TGA_HEADER_SIZE + uint64_t(header.width) * header.height * (header.bits / 8);
+	if (uint64_t(size) == pixels) {
 		out.footer = false;
-	} else if (size == pixels + TGA_FOOTER_SIZE && io::read_u32_le(bytes + pixels) == 0 &&
+	} else if (uint64_t(size) == pixels + TGA_FOOTER_SIZE && io::read_u32_le(bytes + pixels) == 0 &&
 	           io::read_u32_le(bytes + pixels + 4) == 0 &&
 	           std::equal(kTgaSignature, kTgaSignature + sizeof(kTgaSignature), bytes + pixels + 8)) {
 		out.footer = true;
@@ -101,14 +110,14 @@ bool tga_read_form(const uint8_t *bytes, size_t size, TgaForm &out) {
 
 bool tga_write_rgba32(const uint8_t *rgba, uint32_t width, uint32_t height, std::vector<uint8_t> &out,
                       std::string &error) {
-	return write_true_colour(rgba, width, height, TgaForm{32, TGA_DESCRIPTOR_ALPHA_8, false}, out, error);
+	return write_true_colour(rgba, width, height, TgaForm{32, TGA_DESCRIPTOR_ALPHA_8, false}, out, error, false);
 }
 
 // A 24-bit image reads opaque in every game reader: the true-colour copy of three bytes a pixel, A set
 // to 255 [orig: CTerrainTileData_LoadTGAFromArchive @ 0x56E570, the switch @ 0x56E6C2].
 bool tga_write_rgb24(const uint8_t *rgba, uint32_t width, uint32_t height, std::vector<uint8_t> &out,
                      std::string &error) {
-	return write_true_colour(rgba, width, height, TgaForm{24, 0, false}, out, error);
+	return write_true_colour(rgba, width, height, TgaForm{24, 0, false}, out, error, false);
 }
 
 // The header the game's readers take (above): the image type at byte 2, the sides at 12

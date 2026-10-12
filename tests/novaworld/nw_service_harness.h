@@ -57,8 +57,11 @@ struct Service {
 	explicit Service(const std::filesystem::path &db_path) :
 			pool(db_path), http(manager, pool, sessions), nwudp(manager) {}
 
+	// `tweak`, when set, edits the config the listeners start with (the hosted
+	// servers' settings, say) after the harness has set its own.
 	bool start(const std::filesystem::path &source_dir, const std::filesystem::path &scratch,
-			bool require_host_key) {
+			bool require_host_key,
+			const std::function<void(opennova::novaworld_server::ServerConfig &)> &tweak = {}) {
 		{
 			auto boot = pool.acquire();
 			opennova::db::run_migrations(*boot, source_dir / "backend" / "migrations");
@@ -87,6 +90,7 @@ struct Service {
 		config.web_dist_dir = scratch / "web_dist";
 		config.static_dir = scratch / "static";
 		config.require_host_key = require_host_key;
+		if (tweak) tweak(config);
 		nwudp.set_db_pool(&pool);
 		gate.set_db_pool(&pool);
 		http.set_nw_udp_listener(&nwudp);

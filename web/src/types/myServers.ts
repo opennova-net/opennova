@@ -31,6 +31,9 @@ export interface MyServer {
   // The server's message.
   msg: string;
   roster: RosterSlot[];
+  // The account's hosted server this listing is (listed by its service
+  // account, srv-<id>), or null for a server the account hosted itself.
+  hosted_server_id: number | null;
 }
 
 export interface MyServersResponse {
@@ -76,4 +79,14 @@ export interface PushQueued {
   cmd?: string;
   // The stop's MsgCode (7, the sysop punt).
   msg_code?: number;
+}
+
+// The stop of a hosted server's listing (202): the hosted server's own stop,
+// which its supervisor carries out, never a bare push.
+export interface HostedStopQueued {
+  rid: number;
+  status: 'hosted_stop';
+  hosted_server_id: number;
+  // The hosted server's state after the request: 'stopping', or 'stopped'.
+  state: string;
 }

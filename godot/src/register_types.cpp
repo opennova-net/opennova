@@ -186,6 +186,7 @@
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
+#include "player/game_config_block.h"
 #include "player/gameplay_camera.h"
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
@@ -309,6 +310,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponProfileSummary);
 	GDREGISTER_CLASS(PlayerInfoKitRestore);
 	GDREGISTER_CLASS(PlayerProfiles);
+	GDREGISTER_CLASS(GameConfigBlock);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);

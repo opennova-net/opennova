@@ -10,7 +10,9 @@
 //   3. refresh_heightfield_normal_map: the region form of
 //      build_heightfield_normal_map [orig: Terrain_GenerateNormalMap @ 0x603210]
 //      under no locks, every lock and mixed locks, rects inside, on a quadrant
-//      edge, on the atlas's edges, and the whole atlas.
+//      edge, on the atlas's edges, and the whole atlas; the boxes it reports
+//      tight and inside one quadrant each.
+//   4. plan_terrain_region_refresh: every tile whose vertices change is remade.
 
 #include <formats/cpt/cpt.h>
 #include <formats/trn/trn.h>
@@ -18,6 +20,8 @@
 #include <runtime/terrain/terrain_frame.h>
 #include <runtime/terrain/texture_preprocess.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/terrain_field_store.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 #include "common/test_paths.h"
 
 #include <array>
@@ -265,7 +269,7 @@ void test_normals() {
 				terrain::Rgba8Image normals = terrain::build_heightfield_normal_map(depth, dim, dim, lock_sets[l]);
 				const terrain::Rgba8Image before = normals;
 				sculpt(depth, static_cast<int>(dim), rect, 3u + static_cast<uint32_t>(rect.z));
-				std::array<bool, 4> written{};
+				std::vector<terrain::CoordsRect> written;
 				const bool ok =
 						terrain::refresh_heightfield_normal_map(normals, depth, dim, dim, lock_sets[l], rect, &written);
 				const terrain::Rgba8Image fresh = terrain::build_heightfield_normal_map(depth, dim, dim, lock_sets[l]);
@@ -273,18 +277,35 @@ void test_normals() {
 						std::to_string(rect.x) + "," + std::to_string(rect.z) + " " + std::to_string(rect.w) + "x" +
 						std::to_string(rect.h) + ")";
 				check(ok && normals.pixels == fresh.pixels, "the refreshed normal map equals a fresh build " + where);
-				// A quadrant not reported written kept every byte.
+				// Each box lies inside one quadrant, and every changed texel inside a box.
+				const int quadrant_side = static_cast<int>(dim / 2);
+				int64_t area = 0;
+				for (const terrain::CoordsRect &box : written) {
+					const int qx = box.x >= quadrant_side ? quadrant_side : 0, qz = box.z >= quadrant_side ? quadrant_side : 0;
+					check(box.w > 0 && box.h > 0 && box.x >= 0 && box.z >= 0 && box.x + box.w <= qx + quadrant_side &&
+								  box.z + box.h <= qz + quadrant_side,
+							"a written box lies inside one quadrant " + where);
+					area += int64_t(box.w) * box.h;
+				}
 				for (uint32_t y = 0; y < dim; ++y) {
 					for (uint32_t x = 0; x < dim; ++x) {
-						const size_t q = (x >= dim / 2 ? 1u : 0u) + (y >= dim / 2 ? 2u : 0u);
+						bool inside = false;
+						for (const terrain::CoordsRect &box : written)
+							inside = inside || (static_cast<int>(x) >= box.x && static_cast<int>(x) < box.x + box.w &&
+							                    static_cast<int>(y) >= box.z && static_cast<int>(y) < box.z + box.h);
 						const size_t at = (static_cast<size_t>(y) * dim + x) * 4;
-						if (!written[q] && std::memcmp(&before.pixels[at], &fresh.pixels[at], 4) != 0) {
-							check(false, "a changed texel lies in a quadrant not reported written " + where);
+						if (!inside && std::memcmp(&before.pixels[at], &fresh.pixels[at], 4) != 0) {
+							check(false, "a changed texel lies outside every written box " + where);
 							y = dim;
 							break;
 						}
 					}
 				}
+				// Tight: a rect's boxes hold its own texels and their taps' (the rect widened by one each way, and a
+				// wrapped tap's column or row), never the band a wrap would span were it one box.
+				const int64_t tight = int64_t(rect.w + 2) * (rect.h + 2) + 2 * (rect.w + rect.h + 4);
+				check(area <= std::max<int64_t>(tight, int64_t(dim) * dim / 4 * (rect.w >= quadrant_side || rect.h >= quadrant_side ? 4 : 0)),
+				      "the written boxes are tight " + where);
 			}
 		}
 	}
@@ -298,7 +319,136 @@ void test_normals() {
 	check(small.pixels == before, "a refused refresh writes nothing");
 }
 
+// The region contract the four share: a change across the atlas's wrap arrives as two rects, each refreshed in turn,
+// and the result is a fresh build's; a rect past the edge is refused by each with nothing changed.
+void test_contract(const CptFile &source) {
+	const TrnConfig trn = make_trn(false);
+	CptFile cpt = source;
+	TerrainSceneSnapshot scene = build_terrain_scene_snapshot(cpt, trn);
+	terrain::Rgba8Image normals = terrain::build_heightfield_normal_map(cpt.depth_buffer, 1024, 1024, trn.get_quadrant_locks());
+	const terrain::CoordsRect east{1016, 300, 8, 20}, west{0, 300, 8, 20};
+	// Refused: one rect across the edge, nothing changed.
+	const terrain::CoordsRect across{1016, 300, 16, 20};
+	const TerrainSceneSnapshot kept = scene;
+	const terrain::Rgba8Image kept_normals = normals;
+	check(!refresh_terrain_scene_snapshot(scene, cpt, trn, {}, across), "the snapshot refuses a rect past the edge");
+	check(snapshot_difference(scene, kept).empty(), "and keeps itself");
+	check(!refresh_mipchain(scene.mipchain, cpt.depth_buffer, across.x, across.z, across.w, across.h),
+	      "the mip chain refuses it");
+	check(!terrain::refresh_heightfield_normal_map(normals, cpt.depth_buffer, 1024, 1024, trn.get_quadrant_locks(), across),
+	      "the normal map refuses it");
+	check(normals.pixels == kept_normals.pixels, "and keeps itself");
+	terrain::TerrainFieldStore store;
+	terrain::terrain_field_store_build(store, cpt, trn);
+	const std::vector<uint16_t> src(size_t(16) * 20, 7);
+	check(!store.patch_heights(across, src.data(), 16), "the field store refuses it");
+	// The wrapped brush as its two rects.
+	sculpt(cpt.depth_buffer, 1024, east, 31u);
+	sculpt(cpt.depth_buffer, 1024, west, 37u);
+	for (const terrain::CoordsRect &rect : {east, west}) {
+		check(refresh_terrain_scene_snapshot(scene, cpt, trn, {}, rect), "the snapshot takes each rect");
+		check(terrain::refresh_heightfield_normal_map(normals, cpt.depth_buffer, 1024, 1024, trn.get_quadrant_locks(), rect),
+		      "the normal map takes each rect");
+	}
+	check(snapshot_difference(scene, build_terrain_scene_snapshot(cpt, trn)).empty(),
+	      "a wrapped brush's two rects refresh the snapshot to a fresh build");
+	check(normals.pixels == terrain::build_heightfield_normal_map(cpt.depth_buffer, 1024, 1024, trn.get_quadrant_locks()).pixels,
+	      "and the normal map");
+	// A rect of no size: nothing to make again.
+	check(refresh_terrain_scene_snapshot(scene, cpt, trn, {}, terrain::CoordsRect{}), "a rect of no size changes nothing");
+}
+
+// The .trn's locks moved since the snapshot was built: built whole, a fresh build's.
+void test_lock_change(const CptFile &source) {
+	TerrainSceneSnapshot scene = build_terrain_scene_snapshot(source, make_trn(false));
+	const TrnConfig locked = make_trn(true);
+	check(refresh_terrain_scene_snapshot(scene, source, locked, {}, terrain::CoordsRect{}), "a lock change refreshes");
+	check(snapshot_difference(scene, build_terrain_scene_snapshot(source, locked)).empty(),
+	      "a lock change builds the snapshot whole");
+}
+
+// A copied mip chain reads its own bytes once its source is gone.
+void test_mipchain_copy(const CptFile &source) {
+	Mipchain copy;
+	{
+		const Mipchain built = build_mipchain(source.depth_buffer);
+		copy = built;
+		check(copy.levels[0] != built.levels[0], "the copy's levels are its own");
+	}
+	const Mipchain fresh = build_mipchain(source.depth_buffer);
+	bool same = copy.level_count == fresh.level_count;
+	for (int level = 0; same && level < fresh.level_count; ++level) {
+		const size_t side = size_t(1) << level;
+		same = std::memcmp(copy.levels[level], fresh.levels[level], side * side * 2) == 0;
+	}
+	check(same, "the copy's levels read what a fresh build holds");
+}
+
 } // namespace
+
+// The region refresh's plan (plan_terrain_region_refresh, the device's portable half): every tile whose device
+// vertices change when a rect's heights do (build_terrain_tile_vertices before and after, the heights variant) is
+// remade, inside a leaf, on a 64 edge, across a quadrant seam and at the atlas's wrap, under no locks and under
+// locks; a replaced tile's flat variant too where it has one (quadrant 0's), the root never; the plane rects lie in
+// the grid's sectors and the window past them, none for a rect of no size; a tile index that is no tile, or a rect
+// past the atlas, refused with nothing planned.
+void test_region_plan(const CptFile &source) {
+	for (const bool locked : {false, true}) {
+		const TrnConfig trn = make_trn(locked);
+		const terrain::CoordsRect rects[] = {{300, 300, 24, 20}, {60, 70, 8, 6},   {508, 509, 6, 6},
+		                                     {0, 200, 2, 10},     {1022, 0, 2, 3}, {511, 0, 2, 1024}};
+		for (const terrain::CoordsRect &rect : rects) {
+			CptFile after = source;
+			sculpt(after.depth_buffer, 1024, rect, 11u + static_cast<uint32_t>(rect.x));
+			TerrainRegionRefresh plan;
+			const std::string where = std::string(locked ? "locked" : "unlocked") + " rect " + std::to_string(rect.x) +
+					"," + std::to_string(rect.z) + " " + std::to_string(rect.w) + "x" + std::to_string(rect.h);
+			check(plan_terrain_region_refresh(after, trn, {rect}, {}, plan), "the plan is made (" + where + ")");
+			std::vector<uint8_t> named(source.tiles.size(), 0);
+			for (const TerrainRegionRefresh::Remesh &remesh : plan.remesh) {
+				named[static_cast<size_t>(remesh.tile)] = 1;
+				check(!remesh.flat, "a region alone remakes the heights variant (" + where + ")");
+			}
+			for (size_t ti = 0; ti < source.tiles.size(); ++ti) {
+				if (source.tiles[ti].tile_size >= 1024) {
+					check(!named[ti], "the root is never remade (" + where + ")");
+					continue;
+				}
+				const auto was = build_terrain_tile_vertices(source, trn, static_cast<int>(ti), false);
+				const auto now = build_terrain_tile_vertices(after, trn, static_cast<int>(ti), false);
+				bool same = was.size() == now.size();
+				for (size_t v = 0; same && v < was.size(); ++v)
+					same = was[v].position == now[v].position && was[v].normal == now[v].normal;
+				if (!same && !named[ti]) {
+					check(false, "tile " + std::to_string(ti) + " changed and is not remade (" + where + ")");
+					break;
+				}
+			}
+			check(!plan.world.empty(), "the rect shows somewhere on the plane (" + where + ")");
+			const int32_t x0 = (trn.origin_x - 5) * 512, z0 = (trn.origin_y - 5) * 512;
+			const int32_t x1 = (trn.origin_x + 21) * 512, z1 = (trn.origin_y + 21) * 512;
+			bool inside = true;
+			for (const terrain::TerrainWorldRect &world : plan.world)
+				inside = inside && world.x0 >= x0 && world.z0 >= z0 && world.x1 <= x1 && world.z1 <= z1 &&
+						world.x0 < world.x1 && world.z0 < world.z1;
+			check(inside, "the plane rects lie in the grid and its window (" + where + ")");
+		}
+	}
+	const TrnConfig trn = make_trn(false);
+	TerrainRegionRefresh plan;
+	const int quadrant0 = tile_at(source, 0, 0, 64), quadrant3 = tile_at(source, 960, 960, 64);
+	check(quadrant0 > 0 && quadrant3 > 0, "the fixture has its corner leaves");
+	check(plan_terrain_region_refresh(source, trn, {terrain::CoordsRect{}}, {quadrant0, quadrant3}, plan) &&
+	              plan.remesh.size() == 2 && plan.world.empty() && plan.rects.empty(),
+	      "replaced tiles alone: their meshes, no plane rect");
+	for (const TerrainRegionRefresh::Remesh &remesh : plan.remesh)
+		check(remesh.flat == (remesh.tile == quadrant0), "a replaced tile's flat variant where it has one");
+	check(!plan_terrain_region_refresh(source, trn, {}, {static_cast<int>(source.tiles.size())}, plan) &&
+	              plan.remesh.empty(),
+	      "an index that is no tile is refused, nothing planned");
+	check(!plan_terrain_region_refresh(source, trn, {terrain::CoordsRect{1020, 0, 8, 2}}, {}, plan) && plan.remesh.empty(),
+	      "a rect past the atlas is refused, nothing planned");
+}
 
 int main() {
 	const std::filesystem::path path =
@@ -317,6 +467,10 @@ int main() {
 	test_snapshot(source);
 	test_mipchain(source);
 	test_normals();
+	test_contract(source);
+	test_lock_change(source);
+	test_mipchain_copy(source);
+	test_region_plan(source);
 	if (g_fail == 0) std::printf("terrain_scene_snapshot_refresh: all tests passed\n");
 	return g_fail;
 }

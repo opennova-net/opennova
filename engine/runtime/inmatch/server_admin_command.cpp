@@ -209,8 +209,8 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	//   player-targeted verbs and ChangeTeam / SwapTeam;
 	// - the token count, every verb that reads an argument it cannot default.
 	// SetMPReset tests the token count alone, so it runs on any receiver this
-	// executor is handed (the game shell hands it only a hosting context: a
-	// residual of D-NET-383). The verbs that act on the World without
+	// executor is handed (a host's session-less context before its match
+	// binds, host_config.h run_host_server_command). The verbs that act on the World without
 	// retail's player-table gate (Cycle / EndMission / GameOver, Earthquake,
 	// Lightning, TimeOfDay) need one to act on here: retail's globals they
 	// write always exist.

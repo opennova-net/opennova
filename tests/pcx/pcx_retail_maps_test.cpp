@@ -1,7 +1,7 @@
 // Retail terrain maps through the indexed PCX form: every char map (_m.pcx) and foliage map (_f.pcx) directly
-// under the extracted asset tree reads with its carried form (the shipped maps' coding, the _f maps' leftover
-// header bytes 16..63 among the carried bytes) and, written again in that form, is the same bytes. Reports
-// Skipped without OPENNOVA_JO_ASSETS.
+// under the extracted asset tree reads with its carried form (the _f maps' leftover EGA entries among the carried
+// fields; rows both coders write alike, the header picking the shipped coding) and, written again in that form, is
+// the same bytes. Reports Skipped without OPENNOVA_JO_ASSETS.
 
 #include <formats/pcx/pcx.h>
 #include <formats/pcx/pcx_io.h>
@@ -53,8 +53,14 @@ int main() {
 		}
 		++swept;
 		if (lower(name).find("_f.pcx") != std::string::npos) ++foliage;
-		if (form.coding != opennova::PcxCoding::Shipped) {
-			std::printf("FAIL: %s: its rows are not the shipped coding\n", name.c_str());
+		// The shipped maps' rows: each ends in a run, so both coders write them alike (the shipped tool's own tail
+		// rule is unwitnessed) and the header (72 dpi, not MED's) reads them as the shipped coding.
+		opennova::PcxIndexedForm as_med = form;
+		as_med.coding = opennova::PcxCoding::Med;
+		std::vector<uint8_t> med_again;
+		if (form.coding != opennova::PcxCoding::Shipped || !opennova::encode_pcx_indexed(image, med_again, error, &as_med) ||
+		    med_again != bytes) {
+			std::printf("FAIL: %s: its rows are not the coding both coders write alike\n", name.c_str());
 			++failures;
 		}
 		std::vector<uint8_t> again;

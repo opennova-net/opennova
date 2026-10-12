@@ -4,7 +4,7 @@ extends GutTest
 # replaces tiles' LOD lists keeping each one's place and vertices (TerrainData::replace_tiles), with no
 # terrain_changed, and Terrain.refresh_region with their indices makes their meshes again (both variants where the
 # tile has the flat one), the terrain then equal to a fresh build of the same data; an index that is no tile, a
-# count that differs or a tile without its eight lists is refused with nothing replaced.
+# count that differs, a tile without its eight lists or a list naming a vertex past its own is refused with nothing replaced.
 
 var _root_dir := ""
 
@@ -89,7 +89,7 @@ func test_replaced_tiles_show_as_a_fresh_build_would() -> void:
 	assert_eq(changes[0], 0, "no terrain_changed")
 	for i in range(indices.size()):
 		assert_eq(data.get_tile_lod_indices(indices[i], 0), lods[i][0], "the tile holds its new lists")
-	assert_true(terrain.refresh_region(Rect2i(), indices), "the built terrain takes them")
+	assert_true(terrain.refresh_region([], indices), "the built terrain takes them")
 	assert_eq(terrain.get_refresh_tiles_remeshed(), indices.size(), "their meshes alone made again")
 	assert_ne(terrain.get_tile_lod_mesh(indices[0], 0, false), before, "the replaced tile's mesh is new")
 
@@ -115,5 +115,11 @@ func test_a_replacement_that_names_no_tile_is_refused() -> void:
 	var short := lods.duplicate()
 	short[3] = (lods[3] as Array).slice(1)
 	assert_false(data.replace_tile_lods(indices, short), "a tile without its eight lists is refused")
+	# A list naming a vertex past the tile's own: the device would read it, refused.
+	var past_vertex := lods.duplicate(true)
+	var first: PackedInt32Array = past_vertex[0][0]
+	first[0] = 65535
+	past_vertex[0][0] = first
+	assert_false(data.replace_tile_lods(indices, past_vertex), "an index past the tile's vertices is refused")
 	for i in range(indices.size()):
 		assert_eq(data.get_tile_lod_indices(indices[i], 0), kept[i], "nothing replaced")

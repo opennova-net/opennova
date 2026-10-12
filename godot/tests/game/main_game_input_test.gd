@@ -10,20 +10,17 @@ extends GutTest
 # (NVG), and the shell's own state.
 
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
-# The huddetail cycle persists its level here like retail's config token
-# round trip (GameHudPresenter.HUD_COLOR_CONFIG_PATH): saved and restored
-# around every case so a cycled level never leaks into the user's settings.
-const HUD_CONFIG_PATH := GameHudPresenter.HUD_COLOR_CONFIG_PATH
 
 var _config: TestFs.Snapshot
-var _hud_config: TestFs.Snapshot
 var _temp_dir := ""
 var _shell: MainGame = null
 
 
 func before_each() -> void:
 	_config = TestFs.snapshot(STATE_CONFIG_PATH)
-	_hud_config = TestFs.snapshot(HUD_CONFIG_PATH)
+	# The HUD's colour and declutter words live in the process's cfg block: a
+	# fresh block per case, so a cycled word never leaks into the next.
+	GameCfgStore.reset()
 	# A shell booted here sees only the launch flags a case sets through the
 	# override (the GUT process carries none; no sibling leftovers).
 	LaunchFlags.set_args_override(PackedStringArray([]))
@@ -37,7 +34,7 @@ func after_each() -> void:
 		_temp_dir = ""
 	LaunchFlags.clear_args_override()
 	_config.restore()
-	_hud_config.restore()
+	GameCfgStore.reset()
 
 
 # The shell in the minimal mission with gameplay input live (null when the

@@ -235,21 +235,15 @@ Mipchain build_mipchain(const std::vector<uint16_t>& heightmap) {
 	return mc;
 }
 
-void refresh_mipchain(Mipchain& mc, const std::vector<uint16_t>& heightmap,
+bool refresh_mipchain(Mipchain& mc, const std::vector<uint16_t>& heightmap,
                       int x, int z, int w, int h) {
+	if (w <= 0 || h <= 0) return true;
+	if (x < 0 || z < 0 || x > 1024 - w || z > 1024 - h) return false;
 	if (mc.level_count != kMipLevelCount || mc.data.size() != kMipDataBytes ||
 			heightmap.size() != static_cast<size_t>(1024) * 1024) {
 		mc = build_mipchain(heightmap);
-		return;
+		return true;
 	}
-	// The levels over this chain's own bytes, finest first in memory and
-	// coarsest first in the table (build_mipchain's order).
-	size_t offset = 0;
-	for (int i = kMipLevelCount - 1, side = kMipFinestSide; i >= 0; --i, side >>= 1) {
-		mc.levels[i] = mc.data.data() + offset;
-		offset += static_cast<size_t>(side) * side * 2;
-	}
-	if (w <= 0 || h <= 0) return;
 
 	// A finest cell r reads rows 2r, 2r+1 and 2r+2 (wrapping), likewise columns:
 	// it changes only where both meet the rect.
@@ -280,6 +274,7 @@ void refresh_mipchain(Mipchain& mc, const std::vector<uint16_t>& heightmap,
 			}
 		}
 	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------

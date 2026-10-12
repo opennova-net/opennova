@@ -177,8 +177,8 @@ bool refresh_heightfield_normal_map(
 		uint32_t height,
 		const TerrainQuadrantLocks &locks,
 		const terrain::CoordsRect &rect,
-		std::array<bool, 4> *quadrants_written) {
-	if (quadrants_written != nullptr) quadrants_written->fill(false);
+		std::vector<terrain::CoordsRect> *written) {
+	if (written != nullptr) written->clear();
 	if (!is_power_of_two(width) || !is_power_of_two(height) ||
 			width < 2 || height < 2 ||
 			depth.size() != static_cast<size_t>(width) * height ||
@@ -186,19 +186,35 @@ bool refresh_heightfield_normal_map(
 			normals.pixels.size() != static_cast<size_t>(width) * height * 4) {
 		return false;
 	}
-	const int64_t x0 = std::max<int64_t>(rect.x, 0);
-	const int64_t z0 = std::max<int64_t>(rect.z, 0);
-	const int64_t x1 = std::min<int64_t>(static_cast<int64_t>(rect.x) + rect.w, width);
-	const int64_t z1 = std::min<int64_t>(static_cast<int64_t>(rect.z) + rect.h, height);
-	if (x0 >= x1 || z0 >= z1) return true;
+	if (rect.w <= 0 || rect.h <= 0) return true;
+	if (rect.x < 0 || rect.z < 0 || static_cast<int64_t>(rect.x) + rect.w > width ||
+			static_cast<int64_t>(rect.z) + rect.h > height) {
+		return false;
+	}
+	const int64_t x0 = rect.x, z0 = rect.z;
+	const int64_t x1 = static_cast<int64_t>(rect.x) + rect.w, z1 = static_cast<int64_t>(rect.z) + rect.h;
 	const auto column_in = [&](uint32_t v) { return v >= x0 && v < x1; };
 	const auto row_in = [&](uint32_t v) { return v >= z0 && v < z1; };
 	const HeightfieldNormalKernel kernel{depth, width, height, locks};
+	// The boxes of the texels written, [x0, x1) x [z0, z1) each inside one quadrant: a texel joins a box of its
+	// quadrant it touches (or is inside), else opens one; touching boxes merge at the end.
+	struct Box {
+		uint32_t quadrant, x0, z0, x1, z1;
+	};
+	std::vector<Box> boxes;
 	const auto write = [&](uint32_t x, uint32_t y) {
 		kernel.write(x, y, normals.pixels.data());
-		if (quadrants_written != nullptr) {
-			(*quadrants_written)[(x >= (width >> 1) ? 1u : 0u) + (y >= (height >> 1) ? 2u : 0u)] = true;
+		if (written == nullptr) return;
+		const uint32_t quadrant = (x >= (width >> 1) ? 1u : 0u) + (y >= (height >> 1) ? 2u : 0u);
+		for (Box &box : boxes) {
+			if (box.quadrant != quadrant || x + 1 < box.x0 || x > box.x1 || y + 1 < box.z0 || y > box.z1) continue;
+			box.x0 = std::min(box.x0, x);
+			box.z0 = std::min(box.z0, y);
+			box.x1 = std::max(box.x1, x + 1);
+			box.z1 = std::max(box.z1, y + 1);
+			return;
 		}
+		boxes.push_back(Box{quadrant, x, y, x + 1, y + 1});
 	};
 	// The rect's rows: a texel whose left or right tap is one of its columns.
 	for (uint32_t y = static_cast<uint32_t>(z0); y < static_cast<uint32_t>(z1); ++y) {
@@ -215,6 +231,27 @@ bool refresh_heightfield_normal_map(
 				write(x, y);
 			}
 		}
+	}
+	if (written != nullptr) {
+		// Boxes of a quadrant that touch merge, until none do.
+		for (bool merged = true; merged;) {
+			merged = false;
+			for (size_t i = 0; i < boxes.size() && !merged; ++i)
+				for (size_t j = i + 1; j < boxes.size() && !merged; ++j) {
+					Box &a = boxes[i];
+					const Box &b = boxes[j];
+					if (a.quadrant != b.quadrant || b.x0 > a.x1 || a.x0 > b.x1 || b.z0 > a.z1 || a.z0 > b.z1) continue;
+					a.x0 = std::min(a.x0, b.x0);
+					a.z0 = std::min(a.z0, b.z0);
+					a.x1 = std::max(a.x1, b.x1);
+					a.z1 = std::max(a.z1, b.z1);
+					boxes.erase(boxes.begin() + static_cast<std::ptrdiff_t>(j));
+					merged = true;
+				}
+		}
+		for (const Box &box : boxes)
+			written->push_back(terrain::CoordsRect{static_cast<int32_t>(box.x0), static_cast<int32_t>(box.z0),
+					static_cast<int32_t>(box.x1 - box.x0), static_cast<int32_t>(box.z1 - box.z0)});
 	}
 	return true;
 }

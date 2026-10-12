@@ -6,6 +6,7 @@
 // `apiClient` so anonymous browsers can call it.
 
 import { adminClient, apiClient } from './client';
+import { describeAdminError, malformedAdminReply, type AdminResult } from './admin';
 import type {
   CreateUserPayload,
   RegisterPayload,
@@ -28,6 +29,20 @@ export async function createUserAdmin(payload: CreateUserPayload): Promise<User>
 export async function updateUser(id: number, payload: UpdateUserPayload): Promise<User> {
   const res = await adminClient.put<UserResponse>(`/users/${id}`, payload);
   return res.data.user;
+}
+
+// PUT /api/admin/users/<id>/can-host: the account's approval for a hosted
+// server. Withdrawing it makes the service stop the account's live hosted
+// server, as a ban does. 404 (`not_found`) for an unknown account.
+export async function setCanHost(id: number, canHost: boolean): Promise<AdminResult<User>> {
+  try {
+    const res = await adminClient.put<UserResponse>(`/users/${id}/can-host`, { can_host: canHost });
+    const user = res.data?.user;
+    if (typeof user?.id !== 'number' || typeof user.can_host !== 'boolean') return malformedAdminReply(res.status);
+    return { ok: true, value: user };
+  } catch (err) {
+    return { ok: false, error: describeAdminError(err) };
+  }
 }
 
 export async function deleteUser(id: number): Promise<void> {

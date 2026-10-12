@@ -19,6 +19,7 @@
 #include <runtime/terrain/quadtree.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/terrain_atlas_rects.h>
 
 #include <array>
 #include <cstdint>
@@ -69,6 +70,8 @@ struct TerrainSceneSnapshot {
 	int origin_y = 0;
 	bool wrap_x = false;
 	bool wrap_y = false;
+	// The .trn's quadrant locks the tiles' bounds were tapped with.
+	terrain::CoordsQuadrantLocks locks;
 
 	bool valid() const { return root_node >= 0 && !quad_nodes.empty(); }
 };
@@ -85,9 +88,14 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 // bounds of every other tile whose vertices may read the rect, the mip chain
 // cells over the rect and the nodes; equal to a fresh
 // build_terrain_scene_snapshot(cpt, trn) (an editor's sculpt stroke and the
-// bake that lands it). A layout the snapshot was not built from (a tile moved
-// or resized, a count changed) is built whole.
-void refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
+// bake that lands it). The rect is the terrain's region contract (quadtree.h
+// refresh_mipchain's): inside the 1024 atlas, a change across its wrap arriving
+// as several rects, each refreshed in turn; one of no size (tiles alone
+// replaced) changes no height; one not inside is refused (false, nothing
+// changed). A layout the snapshot was not built from (a tile moved or resized,
+// a count changed) or `trn`'s quadrant locks moved since it was built: built
+// whole.
+bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
 		const TrnConfig &trn, const std::vector<int> &tiles, const terrain::CoordsRect &rect);
 
 // The tiles of `cpt` whose device vertices (build_terrain_tile_vertices: the
@@ -98,6 +106,35 @@ void refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &
 // of the tiles whose vertices change when only that rect's heights do.
 std::vector<int> terrain_tiles_reading(const CptFile &cpt, const TrnConfig &trn,
 		const terrain::CoordsRect &rect);
+
+// What a terrain shows again over changed regions of its heights (ADR 0046 S25,
+// the OpenNova Editor's sculpt; editor tooling, not a port): the tiles whose
+// device meshes it makes again and the plane's rects where a height lookup
+// reads a changed texel. Godot's terrain uploads what it names.
+struct TerrainRegionRefresh {
+	struct Remesh {
+		int tile = 0;
+		bool flat = false; // its flat variant too (a replaced tile of quadrant 0, which draws one)
+	};
+	std::vector<Remesh> remesh;              // in index order
+	std::vector<terrain::CoordsRect> rects;  // the changed atlas rects that have a size
+	std::vector<terrain::TerrainWorldRect> world;
+};
+// `rects`: the atlas rects the heights changed over (the region contract
+// refresh_mipchain's: each inside the atlas, a change across its wrap arriving
+// as several; one of no size changes nothing); `tiles`: the tiles a bake's
+// landing replaced. Remade: a replaced tile's variants (its flat one where it
+// has one), and the heights variant of every tile whose vertices read a rect
+// (terrain_tiles_reading); the root never (the sector walk starts at its
+// children, so its meshes are never drawn). `world`: every rect of the plane
+// over the grid's sectors and the five past them each way (the window a
+// camera there draws: the routing's repeats on a wrapping axis, the edge
+// cell's quadrant on another), whose height lookups (kTerrainHeightTaps
+// under the .trn's locks) read a changed texel. False, `out` empty, for a
+// tile index that is no tile or a rect not inside the atlas.
+bool plan_terrain_region_refresh(const CptFile &cpt, const TrnConfig &trn,
+		const std::vector<terrain::CoordsRect> &rects, const std::vector<int> &tiles,
+		TerrainRegionRefresh &out);
 
 // Orthonormal camera state in world space (column-major world-to-view, -Z
 // forward) plus the scalars retail's terrain context carries: the horizontal

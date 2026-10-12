@@ -84,6 +84,7 @@ private:
 	// Monotonic identity for every terrain_changed publication. Zero is kept
 	// as the never-observed sentinel used by dependent page caches.
 	uint64_t change_revision_ = 0;
+	uint64_t heights_serial_ = 0;
 	Ref<ResourceRoot> resource_root;
 
 	// Palette + indices for PCX-backed runtime map data.
@@ -256,6 +257,13 @@ public:
 	Ref<Image> get_heightmap_image() const;
 	Ref<Image> get_colormap_image() const;
 	Ref<Image> get_blendmap_image() const;
+	// The colour map and the detail blend map as an editor's paint left them (ADR 0046 S25): the live images every
+	// later build of the tile cache and the surface inputs reads in place of the loaded textures, until the data is
+	// loaded again (a load drops them). No change is published: the Terrain that draws them is told the region
+	// (Terrain::update_colormap_region, update_blendmap_region), never a rebuild. The loaded textures stand: what
+	// reads them (get_colormap: the foliage's tint, the minimap) keeps the map as loaded until the next load.
+	void set_colormap_image(const Ref<Image> &p_image) { colormap_image = p_image; }
+	void set_blendmap_image(const Ref<Image> &p_image) { blendmap_image = p_image; }
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
@@ -293,18 +301,23 @@ public:
 	// height query reads the new ground at once; what the terrain built from the heights shows it after
 	// Terrain::refresh_region. No terrain_changed (that remakes every derived texture). False, nothing
 	// written, with no heights loaded or a rect not inside them. A live heightmap image, where one is
-	// set, is not patched (it stands for the heights the editor's sculpt does not use).
+	// set, is not patched (it stands for the heights the editor's sculpt does not use). Each patch moves
+	// get_heights_serial(), which what keeps heights of its own follows (the static terrain shadows' casters'
+	// ground, the slot shadows' drapes).
 	bool patch_heights(const opennova::terrain::CoordsRect &p_rect, const uint16_t *p_src, size_t p_stride);
+	uint64_t get_heights_serial() const { return heights_serial_; }
 	// The same from GDScript: little-endian raw16, the rect's width a row.
 	bool patch_heights_raw16(const Rect2i &p_rect, const PackedByteArray &p_raw16);
 	// The tiles at `p_indices` replaced by `p_tiles` (a region bake's remade tiles, in the same order),
 	// each keeping its tile's place (x, y, size), in place, with no terrain_changed; the terrain shows them
 	// after Terrain::refresh_region. False, nothing replaced, where an index is not a tile, the counts
-	// differ or a replacement moves its tile.
+	// differ, a replacement moves its tile or a list names a vertex past its vertices.
 	bool replace_tiles(const std::vector<int> &p_indices, const std::vector<opennova::CptTile> &p_tiles);
 	// GDScript's view of a tile's LOD index lists (strips or lists as the tile stores them; empty for an
 	// index that is no tile), and replace_tiles from it: each tile at `p_indices` takes the eight lists of
-	// `p_lods` (an Array per tile of eight PackedInt32Array), its place, vertices and strip flags kept.
+	// `p_lods` (an Array per tile of eight PackedInt32Array), its place, vertices and strip flags kept and each
+	// list's max_index taken from it. A test seam: a bake's landing changes a tile's vertices too, and lands
+	// through replace_tiles.
 	PackedInt32Array get_tile_lod_indices(int p_index, int p_lod) const;
 	bool replace_tile_lods(const PackedInt32Array &p_indices, const Array &p_lods);
 

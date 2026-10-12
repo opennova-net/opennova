@@ -46,14 +46,18 @@ int main() {
 	TEST_EXPECT(tga_write(rgba.data(), 5, 3, TgaForm{32, TGA_DESCRIPTOR_ALPHA_8, true}, footed, error));
 	TEST_EXPECT(footed.size() == TGA_HEADER_SIZE + 5 * 3 * 4 + TGA_FOOTER_SIZE);
 	const size_t at = TGA_HEADER_SIZE + 5 * 3 * 4;
-	TEST_EXPECT(footed[at] == 0 && footed[at + 7] == 0 && std::string(footed.begin() + at + 8, footed.end()) ==
-	                                                          std::string("TRUEVISION-XFILE.\0", 18));
+	for (size_t i = 0; i < 8; ++i) TEST_EXPECT(footed[at + i] == 0);
+	TEST_EXPECT(std::string(footed.begin() + at + 8, footed.end()) == std::string("TRUEVISION-XFILE.\0", 18));
 	// Without the footer the writer is tga_write_rgba32.
 	std::vector<uint8_t> plain, legacy;
 	TEST_EXPECT(tga_write(rgba.data(), 5, 3, TgaForm{}, plain, error) && tga_write_rgba32(rgba.data(), 5, 3, legacy, error) &&
 	            plain == legacy);
 	TEST_EXPECT(tga_write(opaque.data(), 5, 3, TgaForm{24, 0, false}, plain, error) &&
 	            tga_write_rgb24(opaque.data(), 5, 3, legacy, error) && plain == legacy);
+	// A 24-bit form refuses pixels with alpha (a painted weight would be lost on save); tga_write_rgb24 leaves it
+	// out by design.
+	TEST_EXPECT(!tga_write(rgba.data(), 5, 3, TgaForm{24, 0, true}, plain, error) && !error.empty());
+	TEST_EXPECT(tga_write_rgb24(rgba.data(), 5, 3, legacy, error));
 
 	// Each form reads back and writes again the same bytes: 32 and 24 bits, with and without the footer, a
 	// descriptor carried as it was (the origin bit no game reader honours included).

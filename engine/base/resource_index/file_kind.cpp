@@ -318,11 +318,11 @@ constexpr bool share_a_name(const FileKindFacts &a, const FileKindFacts &b) {
 }
 
 // One row per kind, at the kind's own index; no two rows share a catalog token, a whole name or an
-// extension (a name gives one kind); an archive, an import source and an import's input, the
-// original mission editor's text, a project's notes and a file of no kind the game knows are read
-// from nowhere, every other kind from somewhere; a loose kind, and no other, says where an
-// expansion's game reads it; no name gives an import source, an import's input or a material chunk
-// (a record beside the file does, or its bytes).
+// extension (a name gives one kind); an archive, an import source, an import's input and a terrain
+// set's heightmap input, the original mission editor's text, a project's notes and a file of no kind
+// the game knows are read from nowhere, every other kind from somewhere; a loose kind, and no other,
+// says where an expansion's game reads it; no name gives an import source, an import's input, a
+// heightmap input or a material chunk (a record beside the file does, or its bytes).
 constexpr bool rows_well_formed() {
 	for (size_t i = 0; i < kFileKindCount; ++i) {
 		const FileKindFacts &row = kRows[i];

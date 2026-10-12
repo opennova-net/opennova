@@ -161,12 +161,12 @@ PcxIndexedForm read_indexed_form(const uint8_t *data, size_t size, size_t rows_e
 	form.window_y = u16_at(data, 6);
 	form.hdpi = u16_at(data, 12);
 	form.vdpi = u16_at(data, 14);
-	std::copy(data + 16, data + 64, form.ega.begin());
+	for (size_t entry = 0; entry < form.ega.size(); ++entry)
+		std::copy(data + 16 + entry * 3, data + 19 + entry * 3, form.ega[entry].begin());
 	form.reserved = data[64];
 	form.palette_info = u16_at(data, 68);
 	form.hscreen = u16_at(data, 70);
 	form.vscreen = u16_at(data, 72);
-	std::copy(data + 74, data + 128, form.filler.begin());
 	form.coding = PcxCoding::Other;
 	const bool plain = data[2] == 1 && data[3] == 8 && data[65] == 1 &&
 	                   u16_at(data, 66) == static_cast<uint16_t>(image.width) && rows_end == size - 769;
@@ -179,7 +179,7 @@ PcxIndexedForm read_indexed_form(const uint8_t *data, size_t size, size_t rows_e
 	const bool shipped = matches(PcxCoding::Shipped);
 	const bool med = matches(PcxCoding::Med);
 	if (shipped && med)
-		form.coding = form.hdpi == 0 && form.vdpi == 0 ? PcxCoding::Med : PcxCoding::Shipped;
+		form.coding = form.same_header(pcx_med_form()) ? PcxCoding::Med : PcxCoding::Shipped;
 	else if (shipped)
 		form.coding = PcxCoding::Shipped;
 	else if (med)
@@ -189,13 +189,19 @@ PcxIndexedForm read_indexed_form(const uint8_t *data, size_t size, size_t rows_e
 
 } // namespace
 
+PcxEgaPalette pcx_ega_filled(uint8_t value) {
+	PcxEgaPalette out{};
+	for (std::array<uint8_t, 3> &entry : out) entry.fill(value);
+	return out;
+}
+
 PcxIndexedForm pcx_med_form() {
 	// [orig: JOTACmed sub_45EB60 @ 0x45EBA0 (the 128 bytes zeroed), 0x45EBDA (0A 05), 0x45EBE4 (01 08),
 	//  0x45EBEE (one plane), 0x45EBF3 (palette info 1), 0x45EBFF (the bytes a line)]
 	PcxIndexedForm form;
 	form.hdpi = 0;
 	form.vdpi = 0;
-	form.ega.fill(0);
+	form.ega = pcx_ega_filled(0);
 	form.palette_info = 1;
 	form.coding = PcxCoding::Med;
 	return form;
@@ -615,14 +621,15 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 	put_u16(header, 10, static_cast<uint16_t>(f.window_y + image.height - 1));
 	put_u16(header, 12, f.hdpi);
 	put_u16(header, 14, f.vdpi);
-	std::copy(f.ega.begin(), f.ega.end(), header + 16);
+	for (size_t entry = 0; entry < f.ega.size(); ++entry)
+		std::copy(f.ega[entry].begin(), f.ega[entry].end(), header + 16 + entry * 3);
 	header[64] = f.reserved;
 	header[65] = 1;
 	put_u16(header, 66, static_cast<uint16_t>(image.width));
 	put_u16(header, 68, f.palette_info);
 	put_u16(header, 70, f.hscreen);
 	put_u16(header, 72, f.vscreen);
-	std::copy(f.filler.begin(), f.filler.end(), header + 74);
+	// Bytes 74..127, the filler: zero, as every shipped map and MED's writer hold it.
 
 	const std::vector<uint8_t> rows = coded_rows(image, f.coding);
 	out.reserve(128 + rows.size() + 769);

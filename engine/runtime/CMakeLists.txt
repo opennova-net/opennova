@@ -218,6 +218,7 @@ add_library(opennova_runtime STATIC
 	${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_scorch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_quadrant_update.cpp # a painted colour region through the quadrants, and the pages that sample it
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_worker.cpp # the page-composition thread pool (demand / completion queues) and the rasters' shared lane pool
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     # terrain_query — the world->terrain seam leaf (ADR 0020): height query +
@@ -434,6 +435,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_file.cpp              # the retail /HOST host file (opennova-serve, ADR 0051)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_config.cpp            # game.cfg onto the host session (opennova-serve, ADR 0051 d2)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/game_config_block.cpp      # the process's game.cfg block, both embedders (D-NET-335)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_boot.cpp              # the one host boot, both phases (ADR 0051 d4)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/mission_rotation.cpp       # the map rotation and its session words (D-NET-331)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/rotation_admin.cpp         # the admin MISSION verbs over the rotation (ADR 0051 PR5b)
@@ -591,6 +593,7 @@ set(_opennova_terrain_fp_sources
 	${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_scorch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_quadrant_update.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_raycast.cpp

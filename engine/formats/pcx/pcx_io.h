@@ -37,7 +37,9 @@ PcxRowFit pcx_row_fit(const PcxHeader &header);
 // How an 8-bit indexed PCX's rows are run-length coded, as a file shows it. Each row is coded alone, a run
 // of 2 to 63 equal bytes as a count byte (0xC0 | n) and the byte, a byte with its top two bits set as a
 // count of 1 and the byte, and:
-//   Shipped  any other byte alone: every char and foliage map JO ships, and the import's writer.
+//   Shipped  any other byte alone: the import's writer. Every char and foliage map JO ships ties between this
+//            coder and MED's (every row ends in a run, none in a lone byte), so the shipped tool's own tail
+//            rule is unwitnessed; a shipped map's header (72 dpi) reads it as this one.
 //   Med      the same, but each row's LAST run always a count pair, a single byte below 0xC0 included:
 //            JO's mission editor, which writes the char map it paints [orig: JOTACmed sub_45E8A0 @
 //            0x45E8A0, the tail @ 0x45E9BF..0x45E9E7; the rows a row at a time, sub_45EA00 @ 0x45EA2B].
@@ -45,30 +47,36 @@ PcxRowFit pcx_row_fit(const PcxHeader &header);
 //            run across rows): read whole, written again in the shipped coding.
 enum class PcxCoding : uint8_t { Shipped, Med, Other };
 
-// An 8-bit indexed PCX's form: every header byte its image does not decide, as the file holds it, and the
+// A PCX header's 16-colour (EGA) palette, bytes 16..63: 16 entries of R, G, B.
+using PcxEgaPalette = std::array<std::array<uint8_t, 3>, 16>;
+// Every entry's every byte `value` (the shipped char maps' 0xFF, MED's 0).
+PcxEgaPalette pcx_ega_filled(uint8_t value);
+
+// An 8-bit indexed PCX's form: every header field its image does not decide, as the file holds it, and the
 // coding of its rows. The image decides the manufacturer mark (0x0A), the RLE flag (1), the bits a plane
 // (8), the window's far corner (the origin plus the size less one), the one plane, the bytes a line (the
 // width) and the palette's 0x0C mark; a writer computes those and takes the rest from here, so a file
-// read and written again is the same bytes (the shipped _f maps' leftover bytes 16..63 included). The
+// read and written again is the same bytes (the shipped _f maps' leftover EGA entries included). The
+// filler, bytes 74..127, is zero in every shipped map and in MED's writer, and is written zero. The
 // defaults are the shipped maps' form.
 struct PcxIndexedForm {
-	uint8_t version = 5;             // byte 1
-	uint16_t window_x = 0;           // bytes 4..5, the window's xmin
-	uint16_t window_y = 0;           // bytes 6..7, ymin
-	uint16_t hdpi = 72;              // bytes 12..13
-	uint16_t vdpi = 72;              // bytes 14..15
-	std::array<uint8_t, 48> ega = filled_ega(0xFF); // bytes 16..63, the 16-colour palette
-	uint8_t reserved = 0;            // byte 64
-	uint16_t palette_info = 1;       // bytes 68..69
-	uint16_t hscreen = 0;            // bytes 70..71
-	uint16_t vscreen = 0;            // bytes 72..73
-	std::array<uint8_t, 54> filler{}; // bytes 74..127
+	uint8_t version = 5;                         // byte 1
+	uint16_t window_x = 0;                       // bytes 4..5, the window's xmin
+	uint16_t window_y = 0;                       // bytes 6..7, ymin
+	uint16_t hdpi = 72;                          // bytes 12..13
+	uint16_t vdpi = 72;                          // bytes 14..15
+	PcxEgaPalette ega = pcx_ega_filled(0xFF);    // bytes 16..63, the 16-colour palette
+	uint8_t reserved = 0;                        // byte 64
+	uint16_t palette_info = 1;                   // bytes 68..69
+	uint16_t hscreen = 0;                        // bytes 70..71
+	uint16_t vscreen = 0;                        // bytes 72..73
 	PcxCoding coding = PcxCoding::Shipped;
 
-	static std::array<uint8_t, 48> filled_ega(uint8_t value) {
-		std::array<uint8_t, 48> out{};
-		out.fill(value);
-		return out;
+	// The same header fields (the coding aside).
+	bool same_header(const PcxIndexedForm &other) const {
+		return version == other.version && window_x == other.window_x && window_y == other.window_y &&
+		       hdpi == other.hdpi && vdpi == other.vdpi && ega == other.ega && reserved == other.reserved &&
+		       palette_info == other.palette_info && hscreen == other.hscreen && vscreen == other.vscreen;
 	}
 };
 
@@ -79,7 +87,7 @@ PcxIndexedForm pcx_med_form();
 
 bool decode_pcx_rgb(const uint8_t *data, size_t size, RgbImage &out, std::string &error);
 // `form`, where the caller asks it: the file's form, its coding the one its rows show (where both coders
-// write them alike, MED's when the header has MED's zero resolution, else the shipped).
+// write them alike, MED's when the header is MED's header, pcx_med_form's, else the shipped).
 bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error,
                         PcxIndexedForm *form = nullptr);
 // An 8-bit indexed PCX in `form` (the shipped form when none is given): the header from the form and the

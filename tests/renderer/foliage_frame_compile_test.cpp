@@ -394,9 +394,48 @@ void test_entity_water_side() {
 	CHECK(r::foliage_entity_far_side(0.99f, 20.0f, 0.0f));
 }
 
+// A region's invalidation reaches as far as a detail cell's expanded geometry reads the ground (ADR 0046 S25): every
+// source vertex sits at its planar offset from its instance and samples the ground there and one unit about it, so a
+// slot reaches its vertices' largest planar radius, whole, plus one past an instance, beyond the cell's own
+// bilinear tap. Cell 0x00100030 spans Godot x [16, 32), z [48, 64).
+void test_invalidation_reaches_the_detail_geometry() {
+	r::FoliageFrameCompiler narrow = one_triangle_compiler();
+	CHECK(narrow.detail_reach(0) == 2); // radius 1, the normal's tap
+	std::array<f::RuntimeSlot, opennova::FOLIAGE_MAX_DEFS> slots{};
+	std::array<r::FoliageSlotGeometry, opennova::FOLIAGE_MAX_DEFS> geometry{};
+	slots[0].enabled = true;
+	slots[0].model_radius = 1.0f;
+	slots[0].source_vertex_count = 3;
+	geometry[0].vertices = {
+		{3.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+		{0.0f, 0.0f, 2.5f, 1.0f, 0.0f},
+		{0.0f, 2.0f, 0.0f, 0.0f, 1.0f},
+	};
+	geometry[0].indices = {0, 1, 2};
+	geometry[0].radius = 3.0f;
+	geometry[0].valid = true;
+	r::FoliageFrameCompiler wide;
+	wide.configure_slots(slots, geometry);
+	CHECK(wide.detail_reach(0) == 4); // radius 3, the normal's tap
+	CHECK(first_detail_build(narrow.compile(detail_view(), flat_world(), r::FoliageExpansionSamplers{})) != nullptr);
+	CHECK(first_detail_build(wide.compile(detail_view(), flat_world(), r::FoliageExpansionSamplers{})) != nullptr);
+	// A rect 3 units past the cell's east edge: the wide model's vertices read it (its reach 1 + 4), the narrow
+	// model's do not (1 + 2).
+	CHECK(narrow.invalidate_cells(35, 50, 36, 51) == 0);
+	CHECK(wide.invalidate_cells(35, 50, 36, 51) == 1);
+	// And one 4 units past its west edge, the same.
+	CHECK(narrow.invalidate_cells(11, 50, 12, 51) == 0);
+	CHECK(wide.invalidate_cells(11, 50, 12, 51) == 0); // dropped above, nothing left to drop
+	r::FoliageFrameCompiler again;
+	again.configure_slots(slots, geometry);
+	CHECK(first_detail_build(again.compile(detail_view(), flat_world(), r::FoliageExpansionSamplers{})) != nullptr);
+	CHECK(again.invalidate_cells(11, 50, 12, 51) == 1);
+}
+
 } // namespace
 
 int main() {
+	test_invalidation_reaches_the_detail_geometry();
 	test_entity_water_side();
 	test_model_mesh_is_the_normalized_instanced_vb();
 	test_model_commands_carry_retail_instance_blocks();

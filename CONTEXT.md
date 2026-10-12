@@ -483,6 +483,22 @@ Retail's dedicated-server config, the file `/HOST <file>` names: `<Key> <value>`
 its reader; `opennova-serve` reads it (`engine/runtime/inmatch/host_file.h`).
 _Avoid_: server config, server.cfg, dedicated.cfg
 
+**Hosted server**:
+An `opennova-serve` that an approved account starts from the NovaWorld site (ADR 0053):
+one per account, each on a **machine** of its own, running the published
+`opennova-serve` image over the licensed game data. It lists on our NovaWorld under a
+service account of its own, and its owner administers it from the site, through the
+service only. It stays up until its owner stops it.
+_Avoid_ (for this product only; the words keep their meanings elsewhere): hosted host,
+game host, instance, dedicated server
+
+**Machine**:
+The virtual machine a **hosted server** runs on, one per server (an EC2 instance,
+ADR 0053), which the NovaWorld service launches and terminates. Never "host": that word
+is the authoritative session side alone (**Host / Joiner**).
+_Avoid_: host, server (for the VM), box, node; "instance" alone (say "EC2 instance"
+when naming the AWS resource)
+
 **Title**:
 A NovaLogic game identity (JO, DFX2, BHD...) — near-identical engine skins over different
 data and configuration. OpenNova currently ships title-agnostic; per-title products are a

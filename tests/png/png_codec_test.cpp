@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -169,14 +170,35 @@ int test_png_encode() {
 	IndexedImage8 read;
 	TEST_EXPECT(decode_png(indexed, back, error, &read) && read.width == 5 && read.height == 2 && read.indices == indices);
 	TEST_EXPECT(read.palette[19][0] == 190 && read.palette[19][1] == 181 && read.palette[19][2] == 57);
+	// The PLTE chunk right after the 25-byte IHDR chunk: 20 entries, 60 bytes; no tRNS where none is given.
+	const auto chunk_at = [](const std::vector<uint8_t> &png, size_t at, const char *type, uint32_t &length) {
+		if (png.size() < at + 8) return false;
+		length = (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) | (uint32_t(png[at + 2]) << 8) | png[at + 3];
+		return std::memcmp(&png[at + 4], type, 4) == 0;
+	};
+	uint32_t length = 0;
+	TEST_EXPECT(chunk_at(indexed, 33, "PLTE", length) && length == 60);
+	TEST_EXPECT(chunk_at(indexed, 33 + 12 + 60, "IDAT", length));
 	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 0).empty() &&
 	            encode_png_indexed(indices.data(), 5, 2, palette.data(), 257).empty());
-	// A grey image (colour type 0): its levels read back as written.
-	const std::vector<uint8_t> grey = encode_png_grey(indices.data(), 5, 2);
+	// An index past the palette's entries writes nothing (decode_png refuses such a file).
+	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 19).empty());
+	// The transparency kept: a tRNS of 3 entries after the PLTE, read back as those entries' alpha (the rest opaque).
+	const uint8_t alpha[3] = {0, 128, 255};
+	const std::vector<uint8_t> clear = encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, alpha, 3);
+	TEST_EXPECT(chunk_at(clear, 33 + 12 + 60, "tRNS", length) && length == 3);
+	TEST_EXPECT(decode_png(clear, back, error) && back.pixels[3] == 0 && back.pixels[4 + 3] == 128 &&
+	            back.pixels[2 * 4 + 3] == 255 && back.pixels[8 * 4 + 3] == 255);
+	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, alpha, 21).empty() &&
+	            encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, nullptr, 3).empty());
+	// A grey image (colour type 0, 8 bits a sample): its levels read back as written.
+	const std::vector<uint8_t> grey = encode_png_gray(indices.data(), 5, 2);
 	GrayImage levels;
-	TEST_EXPECT(!grey.empty() && grey[25] == 0 && decode_png_gray(grey, levels, error) && levels.width == 5 &&
-	            levels.max_value == 255 && levels.samples[4] == 19 && levels.samples[8] == 7);
-	std::printf("encode: an RGBA image, a palette image and a grey image written and read back as they were\n");
+	TEST_EXPECT(!grey.empty() && grey[24] == 8 && grey[25] == 0 && decode_png_gray(grey, levels, error) &&
+	            levels.width == 5 && levels.max_value == 255 && levels.samples[4] == 19 && levels.samples[8] == 7);
+	TEST_EXPECT(encode_png_gray(nullptr, 5, 2).empty() && encode_png_gray(indices.data(), 0, 2).empty());
+	std::printf("encode: an RGBA image, a palette image (its PLTE, its tRNS) and a grey image written and read back "
+	            "as they were\n");
 	return 0;
 }
 
@@ -199,16 +221,7 @@ int test_png_encode_gray16() {
 	for (size_t i = 0; same && i < samples.size(); ++i) same = back.samples[i] == samples[i];
 	TEST_EXPECT(same);
 	TEST_EXPECT(encode_png_gray16(samples.data(), 0, 4).empty() && encode_png_gray16(nullptr, 6, 4).empty());
-	// And 8 bits: colour type 0 at 8 bits, read back as it was.
-	std::vector<uint8_t> grey8;
-	for (int i = 0; i < 6 * 4; ++i) grey8.push_back(uint8_t(i * 11));
-	const std::vector<uint8_t> bytes8 = encode_png_grey(grey8.data(), 6, 4);
-	TEST_EXPECT(png_header_size(bytes8, width, height) && width == 6 && bytes8[24] == 8 && bytes8[25] == 0);
-	GrayImage back8;
-	TEST_EXPECT(decode_png_gray(bytes8, back8, error) && back8.max_value == 255 && back8.samples.size() == grey8.size());
-	for (size_t i = 0; i < grey8.size(); ++i) TEST_EXPECT(back8.samples[i] == grey8[i]);
-	TEST_EXPECT(encode_png_grey(nullptr, 6, 4).empty());
-	std::printf("encode: a 16-bit and an 8-bit grey image written and read back as they were\n");
+	std::printf("encode: a 16-bit grey image written and read back as it was\n");
 	return 0;
 }
 

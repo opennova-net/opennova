@@ -11,12 +11,13 @@
         ></span>
       </div>
 
-      <nav class="hidden items-center gap-6 text-sm uppercase tracking-wider text-ink md:flex">
+      <nav class="hidden items-center gap-6 text-sm uppercase tracking-wider text-ink lg:flex">
         <RouterLink class="hover:text-ink-bright transition" to="/lobby">Lobbies</RouterLink>
         <RouterLink class="hover:text-ink-bright transition" to="/admin">Admin</RouterLink>
         <template v-if="ready">
           <template v-if="user">
             <RouterLink class="hover:text-ink-bright transition" to="/me/servers">My servers</RouterLink>
+            <RouterLink class="hover:text-ink-bright transition" to="/me/server">Hosted server</RouterLink>
             <span class="text-ink-muted">
               <span class="sr-only">Logged in as </span>
               <span class="normal-case tracking-normal font-medium text-ink">{{ user.username }}</span>
@@ -44,7 +45,7 @@
 
       <button
         ref="menuToggle"
-        class="inline-flex items-center justify-center rounded-control border border-border-strong p-2 text-ink transition hover:bg-hover md:hidden"
+        class="inline-flex items-center justify-center rounded-control border border-border-strong p-2 text-ink transition hover:bg-hover lg:hidden"
         type="button"
         :aria-expanded="isMenuOpen"
         aria-controls="primary-navigation"
@@ -87,7 +88,7 @@
       <nav
         v-if="isMenuOpen"
         id="primary-navigation"
-        class="border-t border-border bg-surface/95 px-4 pb-4 pt-2 md:hidden"
+        class="border-t border-border bg-surface/95 px-4 pb-4 pt-2 lg:hidden"
       >
         <div class="flex flex-col gap-2 text-sm uppercase tracking-[0.2em] text-ink">
           <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/lobby" @click="closeMenu">Lobbies</RouterLink>
@@ -95,6 +96,7 @@
           <template v-if="ready">
             <template v-if="user">
               <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/me/servers" @click="closeMenu">My servers</RouterLink>
+              <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/me/server" @click="closeMenu">Hosted server</RouterLink>
               <p class="px-3 py-2 text-ink-muted">
                 Logged in as
                 <span class="normal-case tracking-normal font-medium text-ink">{{ user.username }}</span>
