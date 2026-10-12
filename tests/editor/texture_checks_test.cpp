@@ -166,8 +166,8 @@ int test_checks() {
 		            editor_test::write_bytes(t + "dotnorm.mdt", rgb));
 	}
 	TEST_EXPECT(editor_test::write_text(root + "/terrains/a.trn", trn("polytrn_colormap small.tga\n")) &&
-	            editor_test::write_text(root + "/terrains/b.trn", trn("polytrn_colormap wide.tga\npolytrn_foliagemap fol.pcx\n")) &&
-	            editor_test::write_text(root + "/terrains/c.trn", trn("polytrn_colormap tall.tga\npolytrn_foliagemap fol48.pcx\n")) &&
+	            editor_test::write_text(root + "/terrains/b.trn", trn("polytrn_colormap wide.tga\npolytrn_foliagemap fol.pcx\npolytrn_charmap fol.pcx\n")) &&
+	            editor_test::write_text(root + "/terrains/c.trn", trn("polytrn_colormap tall.tga\npolytrn_foliagemap fol48.pcx\npolytrn_charmap fol48.pcx\n")) &&
 	            editor_test::write_text(root + "/terrains/d.trn", trn("polytrn_colormap map.pcx\npolytrn_tilestrip tiles.tga\n")) &&
 	            editor_test::write_text(root + "/terrains/e.trn", trn("polytrn_colormap colour.tga\n")) &&
 	            editor_test::write_text(root + "/terrains/f.trn", trn("polytrn_colormap colour.tga\npolytrn_detailblendmap blendw.tga\n"
@@ -245,6 +245,9 @@ int test_checks() {
 			TEST_EXPECT(f.message.find("loads the terrain without one") != std::string::npos);
 	TEST_EXPECT(has("texture.foliage_map_overrun", "terrains/b.trn", S::Error, true));
 	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/c.trn", S::Warning, false));
+	// A char map is sampled as the foliage map is (S25 B5): the same files as char maps, the same rule.
+	TEST_EXPECT(has("texture.char_map_overrun", "terrains/b.trn", S::Error, true));
+	TEST_EXPECT(has("texture.char_map_shape", "terrains/c.trn", S::Warning, false));
 	// A foliage map wider than 1024 reads its first texel everywhere: its shape, no overrun.
 	TEST_EXPECT(has("texture.foliage_map_shape", "terrains/f.trn", S::Warning, false));
 	// A blend map wider than tall overruns the split; a taller one does not.

@@ -276,7 +276,8 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::TextureRows) == Tokens({ "texture.tga_upside_down" }));
 	TEST_EXPECT(fixed_by(FindingFix::SetAsideUnread) == Tokens({ "texture.not_read" }));
 	TEST_EXPECT(fixed_by(FindingFix::ImportFitsUse) ==
-	            Tokens({ "texture.alpha_not_loaded", "texture.blend_map_size", "texture.colormap_size", "texture.foliage_map_overrun",
+	            Tokens({ "texture.alpha_not_loaded", "texture.blend_map_size", "texture.char_map_overrun", "texture.char_map_shape",
+	                     "texture.colormap_size", "texture.foliage_map_overrun",
 	                     "texture.foliage_map_shape", "texture.height_wrap", "texture.loading_screen_size", "texture.memory",
 	                     "texture.mfd_not_pow2", "texture.normal_map_halved", "texture.particle_too_big",
 	                     "texture.tile_atlas_cells", "texture.wrong_reader" }));
@@ -382,7 +383,8 @@ static int test_columns() {
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",
 	                     "style.value_is_directive", "terrain.foliage_inert", "terrain.invalid_input", "terrain.no_width",
 	                     "terrain_heights.multiplayer", "terrain_heights.over_rasterizer", "terrain_heights.steep_block",
-	                     "terrain_heights.unread", "texture.tga_unfilled", "til.ignored_input", "til.invalid_input", "til.unread" }));
+	                     "terrain_heights.unread", "texture.tga_unfilled", "til.ignored_input", "til.invalid_input", "til.layer_order",
+	                     "til.med_cap", "til.unread" }));
 	TEST_EXPECT(finding_row("model.light_no_registers") && finding_row("model.light_no_registers")->gates_build &&
 	            finding_row("style.hangs")->gates_build && finding_row("style.line_ending")->gates_build);
 	// A ConfigFile past its reader's pool gates, the game's own failure, which its row says and cites: the reader

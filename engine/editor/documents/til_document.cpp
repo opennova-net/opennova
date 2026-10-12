@@ -129,6 +129,11 @@ constexpr FindingCodeEntry<TilFinding> kFindingEntries[] = {
 	// file [orig: @ 0x60A7EF]; the editor holds the whole records there are, read only.
 	{ TilFinding::InvalidInput, unwritable_code("til.invalid_input") },
 	{ TilFinding::IgnoredInput, listed_code("til.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput) },
+	// S25 B5: what JO's mission editor makes of the file, never the game's: its save groups the tiles by layer
+	// [orig: JOTACmed MapTileStore_Serialize @ 0x433EC0], and it holds 6144 tiles at most [orig: JOTACmed
+	// MapTileStore_Append @ 0x433B59; MapTileStore_RemoveAt @ 0x433BE0].
+	{ TilFinding::LayerOrder, listed_code("til.layer_order") },
+	{ TilFinding::MedCap, listed_code("til.med_cap") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(TilFinding::kCount), "every TilFinding has exactly one row");
 static_assert(finding_entries_well_formed(kFindingEntries), "the tile placement's rows follow TilFinding's order, each token its own");
@@ -288,6 +293,25 @@ std::vector<Diagnostic> validate_til_file(const DocumentBase &document) {
 		finding.line = issue.line;
 		findings.push_back(std::move(finding));
 	}
+	if (!til->unread().empty()) return findings;
+	// What JO's mission editor makes of the file (S25 B5): notes, the game drawing the file as it stands.
+	const TilFile file = til->file();
+	size_t out_of_order = 0;
+	for (size_t i = 1; i < file.entries.size(); ++i) out_of_order += file.entries[i].layer < file.entries[i - 1].layer ? 1 : 0;
+	if (out_of_order)
+		findings.push_back(make_finding(TilFinding::LayerOrder, DiagnosticSeverity::Info,
+		                                "Its tiles' layers are not in ascending order (" + std::to_string(out_of_order) +
+		                                        (out_of_order == 1 ? " tile follows" : " tiles follow") +
+		                                        " a higher layer). The game draws the file's order; JO's mission editor writes "
+		                                        "its tiles grouped by layer, so a save there draws them in another order.",
+		                                document.path()));
+	constexpr size_t kMedTiles = 6144;
+	if (file.entries.size() > kMedTiles)
+		findings.push_back(make_finding(TilFinding::MedCap, DiagnosticSeverity::Info,
+		                                "It holds " + std::to_string(file.entries.size()) +
+		                                        " tiles. The game draws them all; JO's mission editor holds 6144 at most and "
+		                                        "fails on a file past them.",
+		                                document.path()));
 	return findings;
 }
 

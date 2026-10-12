@@ -170,6 +170,23 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 			         "its codes land on the wrong ground.");
 		break;
 	}
+	case R::TerrainCharMap: {
+		// Sampled as the foliage map is, at (c & 1023) >> (10 - log2(width)) on both axes, its byte the class
+		// (terrain::surface_sample_extent) [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510..0x6065C6].
+		const uint32_t side = uint32_t(terrain::surface_sample_extent(int32_t(std::min<uint32_t>(w, 0x7FFFFFFF))));
+		if (w <= 1024 && h < side)
+			add(F::TextureCharMapOverrun, DiagnosticSeverity::Error,
+			    is + ": the game's surface lookup reads " + std::to_string(side) + " rows of it, past its last.");
+		else if (w > 1024)
+			add(F::TextureCharMapShape, DiagnosticSeverity::Warning,
+			    is + ": the game's surface lookup reads its first texel everywhere once it is wider than 1024, so one "
+			         "class covers the whole map. Make it a square whose side is a power of two, at most 1024.");
+		else if (w != h || !power_of_two(w))
+			add(F::TextureCharMapShape, DiagnosticSeverity::Warning,
+			    is + ": the game's surface lookup takes it as a square whose side is a power of two, at most 1024, so "
+			         "its classes land on the wrong ground.");
+		break;
+	}
 	case R::TerrainTileAtlas: {
 		// Cut in 64-texel cells [orig: Terrain_LoadTileSetAtlas @ 0x604B7C] (TIL_ATLAS_TILE_PIXELS).
 		constexpr uint32_t cell = uint32_t(TIL_ATLAS_TILE_PIXELS);

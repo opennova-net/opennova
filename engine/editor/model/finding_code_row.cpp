@@ -389,6 +389,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// A terrain_stroke the session cannot take (S25): a view with no terrain, a plane whose file is refused (a base
 	// layer's, an import's output with no source to paint), a gesture not open, a plane not edited yet.
 	{ C::TerrainStroke, code("terrain.stroke", G::Terrains) },
+	// A char map's shape as the game's surface lookup samples it (S25 B5): the foliage map's rule.
+	{ C::TextureCharMapOverrun, code("texture.char_map_overrun", G::Textures, F::ImportFitsUse) },
+	{ C::TextureCharMapShape, code("texture.char_map_shape", G::Textures, F::ImportFitsUse) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

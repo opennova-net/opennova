@@ -203,6 +203,26 @@ int test_source_notes() {
 	return 0;
 }
 
+// What JO's mission editor makes of a file (S25 B5): notes, never the game's failure. Layers out of ascending
+// order (its save regroups them, so the game then draws another order), and a file past its 6144 tiles.
+int test_med_notes() {
+	TilFile file;
+	file.entries = {make_til_entry(0, 0, 1, 0, 2), make_til_entry(16 << 16, 0, 2, 0, 0)};
+	TilDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(minted(file), "a.til", AssetKind::TileInfo, "jo", error));
+	std::vector<Diagnostic> findings = validate_til_file(document);
+	TEST_EXPECT(findings.size() == 1 && findings[0].code() == "til.layer_order" && findings[0].severity == DiagnosticSeverity::Info);
+	TilFile many;
+	many.entries.assign(6145, make_til_entry(0, 0, 1, 0, 0));
+	TilDocument large;
+	TEST_EXPECT(large.load_bytes(minted(many), "b.til", AssetKind::TileInfo, "jo", error));
+	findings = validate_til_file(large);
+	TEST_EXPECT(findings.size() == 1 && findings[0].code() == "til.med_cap" && findings[0].severity == DiagnosticSeverity::Info);
+	std::printf("MED's notes: layers out of its order, past its 6144 tiles\n");
+	return 0;
+}
+
 int test_blank() {
 	const BlankFactory *factory = find_blank_factory_for_kind(AssetKind::TileInfo);
 	TEST_EXPECT(factory != nullptr);
@@ -248,7 +268,7 @@ int test_retail() {
 
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	const int failures = test_fields() + test_layers() + test_source_notes() + test_blank() + test_retail();
+	const int failures = test_fields() + test_layers() + test_source_notes() + test_med_notes() + test_blank() + test_retail();
 	if (failures == 0) std::printf("editor_til_document: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
