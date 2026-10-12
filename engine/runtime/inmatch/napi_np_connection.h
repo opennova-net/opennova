@@ -261,10 +261,11 @@ struct SessionReplyState {
 	uint16_t max_ping_strikes = 0;
 	// The client's reported connection-quality level (C2S 0x4C, clamped 0..4)
 	// and the dirty flag the 1 Hz S2C 0x46 quality resend consumes. A fresh
-	// slot advertises 1 (the witnessed join-broadcast value).
-	// [orig: slot+418 / slot+89860, sub_5006E0 @0x5006E0; the resend walk
-	//  Server_TickUpdate @0x51DE79..0x51DF4A]
-	uint8_t client_quality = 1;
+	// slot holds 0, clean, so its first report of any level above 0 dirties it.
+	// [orig: slot+418 / slot+89860, PlayerSlot_SetClientQuality @0x5006E0; the
+	//  resend walk Server_TickUpdate @0x51DE79..0x51DF4A; Server_PlayerAdd @0x51CBC0 - the
+	//  slot memset @0x51CD06, +418 = 0 @0x51CD40, +89860 = 0 @0x51CD46]
+	uint8_t client_quality = 0;
 	bool client_quality_dirty = false;
 	// The host frame clock stamped by the C2S 0x3D loaded-model page reply; the
 	// reply carries no payload the host reads. [orig: NapiNPServerMsg_0x03D

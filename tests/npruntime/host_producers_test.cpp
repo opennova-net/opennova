@@ -2,7 +2,8 @@
 // parity audit (plan PR 9):
 //   - the C2S 0x2C return leg: the RTT ring with its aliasing cursor and the
 //     min/max-ping strike punts [orig: NapiNPServerMsg_HandlePingResponse @0x515070];
-//   - C2S 0x4C store + dirty-on-change [orig: NapiNPServerMsg_0x04C @0x5111B0 -> sub_5006E0];
+//   - C2S 0x4C store + dirty-on-change [orig: NapiNPServerMsg_0x04C @0x5111B0 ->
+//     PlayerSlot_SetClientQuality @0x5006E0];
 //   - the 1 Hz S2C 0x46 quality resend, eight per second with a persisting
 //     cursor [orig: Server_TickUpdate @0x51DE79..0x51DF4A];
 //   - the host CNetQuality send window behind S2C 0x79 [orig: CNetQuality_UpdateMetrics @0x4C52C0];
@@ -218,6 +219,30 @@ bool check_ping_dispatch_return_leg() {
 
 bool check_client_quality_store_and_resend() {
 	HostFixture f(10);
+	// A fresh slot holds level 0, clean: the joiner's first report of level 1 dirties it and
+	// the next walk broadcasts the 5-byte field-0x0400 0x46 carrying 1.
+	// [orig: Server_PlayerAdd @0x51CD06 / @0x51CD40 / @0x51CD46; Server_TickUpdate
+	//  @0x51DEC6..0x51DF10]
+	if (!expect(f.conn(2).reply.client_quality == 0 && !f.conn(2).reply.client_quality_dirty,
+			"a fresh slot's quality is 0 and clean"))
+		return false;
+	for (auto &t : f.transports) (void)drain(t);
+	(void)f.dispatch(2, c2s::CLIENT_QUALITY, {1});
+	if (!expect(f.conn(2).reply.client_quality == 1 && f.conn(2).reply.client_quality_dirty,
+			"the first level-1 report dirties a fresh slot"))
+		return false;
+	inmatch::Server_EmitQualityResends(f.ctx, f.world);
+	{
+		std::vector<ns::Datagram> resent = drain(f.transports[0]);
+		PlayerSync first;
+		if (!expect(count_tag(resent, s2c::PLAYER_SYNC) == 1 &&
+						resent[0].tag == s2c::PLAYER_SYNC && resent[0].body.size() == 5 &&
+						decode_player_sync(resent[0].body.data(), resent[0].body.size(), first) &&
+						first.field_bitmask == kPlayerSyncHasQuality && first.quality == 1,
+				"the walk resends the fresh slot's level as the 5-byte 0x46"))
+			return false;
+	}
+	f.ctx.quality_broadcast_slot_cursor = 0;
 	inmatch::Server_StoreClientQuality(f.conn(0), 9);
 	if (!expect(f.conn(0).reply.client_quality == 4 && f.conn(0).reply.client_quality_dirty,
 			"0x4C clamps to 4 and dirties on change"))

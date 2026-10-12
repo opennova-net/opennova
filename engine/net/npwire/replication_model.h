@@ -52,10 +52,10 @@ struct PlayerReplicationState {
 	uint8_t fireteam = 0;
 	// The player slot's connection-quality LEVEL (slot+418, 0..4): the C2S 0x4C
 	// report the host clamps and stores, serialized by field bit 0x0400. A fresh
-	// slot advertises 1 (the witnessed join-broadcast value) until the client's
-	// first report. [orig: sub_5006E0 @0x5006E0 store; NetPacket_SerializePlayerSync0x46
-	//  @0x506213 read]
-	uint8_t quality = 1;
+	// slot reads 0 until the client's first report. [orig:
+	//  PlayerSlot_SetClientQuality @0x5006E0 store; NetPacket_SerializePlayerSync0x46
+	//  @0x506213 read; Server_PlayerAdd @0x51CD06 / @0x51CD40 zero it]
+	uint8_t quality = 0;
 	// Field 0x1000: 1 for an active slot whose spectator latch (slot+100567) is
 	// set and whose loading byte (slot+100579) is clear, else 0; the client
 	// lands it as the roster slot's spectator byte.

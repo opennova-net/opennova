@@ -488,7 +488,7 @@ const Vector kExpected[] = {
 	{"guided_attach_offsets", 12u, 0xe468f48f6e088e53ull},
 	{"entity_packet_sub_header", 5u, 0xdd69bfc265f5ae43ull},
 	{"player_extended_uplink", 43u, 0x6d73bfd35efb4ac5ull},
-	{"player_sync_default_mask", 32u, 0xa53c98b5b727a16eull},
+	{"player_sync_default_mask", 32u, 0xb1eb7be034770bd1ull},
 	{"player_sync_removal", 3u, 0xb1ee804f3f7b976cull},
 	{"player_list", 47u, 0x2fcbe1019372dd9full},
 	{"script_remote_command_ssnwave", 15u, 0x422ee4f143405f15ull},
