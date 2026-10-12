@@ -154,11 +154,12 @@ bool TerrainTileCacheDevice::rebuild(
 	// The colormap quadrants under the session's texcompression_level (DXT1
 	// below 2 on the reference card, D-RMAT-24); the heightfield normals stay
 	// 0x100001.
-	snapshot->colormap = opennova::terrain::build_terrain_tile_quadrant_source(colormap,
-			opennova::terrain::terrain_colormap_quadrant_flags(p_surface_inputs->get_texcompression_level()));
-	snapshot->heightfield_normal =
-			opennova::terrain::build_terrain_tile_quadrant_source(heightfield_normal);
-	if (!snapshot->colormap.is_valid() || !snapshot->heightfield_normal.is_valid()) {
+	snapshot->colormap = std::make_shared<const opennova::terrain::TerrainTileQuadrantSource>(
+			opennova::terrain::build_terrain_tile_quadrant_source(colormap,
+					opennova::terrain::terrain_colormap_quadrant_flags(p_surface_inputs->get_texcompression_level())));
+	snapshot->heightfield_normal = std::make_shared<const opennova::terrain::TerrainTileQuadrantSource>(
+			opennova::terrain::build_terrain_tile_quadrant_source(heightfield_normal));
+	if (!snapshot->colormap->is_valid() || !snapshot->heightfield_normal->is_valid()) {
 		return false;
 	}
 	// Scorch decals are an OPTIONAL overlay source, not a base page source.
@@ -171,6 +172,8 @@ bool TerrainTileCacheDevice::rebuild(
 	// record on scorch_textures_ready_, so an unresolved set simply means "no
 	// scorch overlay this mission".
 	bool scorch_ready = true;
+	auto scorch_textures = std::make_shared<
+			std::array<opennova::terrain::TerrainScorchTexture, opennova::terrain::kTerrainScorchTextureSlots>>();
 	for (const uint8_t texture_index :
 			{uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{4}}) {
 		const std::string_view name =
@@ -184,18 +187,19 @@ bool TerrainTileCacheDevice::rebuild(
 			scorch_ready = false;
 			break;
 		}
-		snapshot->scorch_textures[texture_index] =
+		(*scorch_textures)[texture_index] =
 				opennova::terrain::build_terrain_scorch_texture(base);
-		if (!snapshot->scorch_textures[texture_index].is_valid()) {
+		if (!(*scorch_textures)[texture_index].is_valid()) {
 			scorch_ready = false;
 			break;
 		}
 	}
 	if (!scorch_ready) {
-		for (auto &slot : snapshot->scorch_textures) {
+		for (auto &slot : *scorch_textures) {
 			slot = opennova::terrain::TerrainScorchTexture{};
 		}
 	}
+	snapshot->scorch_textures = std::move(scorch_textures);
 	Ref<TerrainTileInfo> tile_info = p_tile_info_override;
 	const bool tile_info_declared = tile_info.is_valid() ||
 			!p_data->get_tileinfo_filename().strip_edges().is_empty();
@@ -215,9 +219,9 @@ bool TerrainTileCacheDevice::rebuild(
 		if (!texture_to_rgba8(p_data->get_tilestrip_tex(), tilestrip)) {
 			return false;
 		}
-		snapshot->tilestrip =
-				opennova::terrain::build_terrain_tile_set_mips(tilestrip);
-		if (snapshot->tilestrip.empty()) {
+		snapshot->tilestrip = std::make_shared<const std::vector<opennova::terrain::Rgba8Image>>(
+				opennova::terrain::build_terrain_tile_set_mips(tilestrip));
+		if (snapshot->tilestrip->empty()) {
 			return false;
 		}
 		snapshot->tile_info = tile_info->to_native();
@@ -378,8 +382,10 @@ std::optional<std::size_t> TerrainTileCacheDevice::set_tile_entries(const openno
 	if (squares.empty()) {
 		return std::size_t{0};
 	}
+	// The parts shared (their pointers copied), the placement alone new.
 	auto next = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>(*current);
 	next->tile_info = p_file;
+	tile_overlay_required_ = !p_file.entries.empty();
 	async_->install_sources(std::move(next));
 	// A page composing from the old placement now holds a retired generation: its completion is dropped.
 	const auto clamp = [](int64_t value) {

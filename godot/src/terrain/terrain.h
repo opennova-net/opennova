@@ -302,6 +302,11 @@ public:
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;
 
+	// The placed tiles the terrain draws in place of its own (a mission's .til, as the game's load takes it). A new
+	// override, or an edit of its entries (its `changed`), recomposes the pages whose squares changed in place
+	// (_update_tile_overlay_pages). The terrain's own tiles (TerrainData's resource, cached by its path) are read at
+	// a build and never watched: an editor's tile edits go through an override it keeps (ADR 0046 S25), whatever
+	// file they edit.
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;
 
