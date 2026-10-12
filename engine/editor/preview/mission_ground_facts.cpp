@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdio>
 
+#include <base/io/strutil.h>
+#include <editor/model/raster_document.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/terrain_patch.h>
 #include <formats/env/env.h>
@@ -279,10 +281,29 @@ terrain::FoliageMaskMap MissionGround::foliage_sampler(bool codes) const {
 }
 
 bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &document) {
-	// The heights' and the maps' patches are the round's to give (S25 lanes A and B): none yet, so the caller reads again.
-	(void)patch;
-	(void)document;
-	return false;
+	// The colour and blend maps are no part of the ground the game reads (S25 B4): nothing to patch.
+	if (patch.plane == TerrainPlane::Colour || patch.plane == TerrainPlane::Blend) return true;
+	// The surface and foliage maps (S25 B4): the regions written into what the game's load keeps of them, in place
+	// (TerrainFieldStore::patch_charmap, patch_foliage_mask_raster), never reading the files again per dab. The
+	// heights' patches are lane A's: none yet, so the caller reads again.
+	if (patch.plane != TerrainPlane::Surface && patch.plane != TerrainPlane::Foliage) return false;
+	const RasterDocument *raster = document.as_raster();
+	if (patch.whole || !raster || raster->plane_count() != 1 || raster->plane(0).format() != RasterFormat::U8) return false;
+	const RasterPlane &plane = raster->plane(0);
+	const std::string name = patch.path.substr(patch.path.find_last_of('/') + 1);
+	const bool surface = patch.plane == TerrainPlane::Surface;
+	const std::string &read = surface ? surface_map_ : foliage_map_;
+	if (!strutil::iequals(name, read.substr(read.find_last_of('/') + 1))) return false;
+	for (const RasterRegion &region : patch.regions) {
+		if (region.width <= 0 || region.height <= 0) continue;
+		std::vector<uint8_t> texels(size_t(region.width) * size_t(region.height));
+		plane.copy_rect(region.x, region.y, region.width, region.height, texels.data());
+		const terrain::CoordsRect rect{region.x, region.y, region.width, region.height};
+		const bool written = surface ? store_.patch_charmap(rect, texels.data(), size_t(region.width))
+		                             : terrain::patch_foliage_mask_raster(foliage_, rect, texels.data(), size_t(region.width));
+		if (!written) return false;
+	}
+	return true;
 }
 
 int MissionGround::foliage_kept_off(double x, double y, int mask) const {

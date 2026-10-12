@@ -1,6 +1,7 @@
 {
     "_comment": "scripts/lint/orphan_header_check.py: engine/godot-src headers included by nothing outside tests/ and their own unit that are NOT staged policy code. Each entry names why it has no include consumer. The 2026-08-25 census debt was burned down on 2026-08-27 (threedi_compare moved to tests/threedi/, terrain/types.h deleted, serializing_sink.h STAGED with its owner named); never grow this list without a reason that names the consumer.",
     "allow": {
-        "godot/src/register_types.h": "The GDExtension entry-point declaration: consumed by its own register_types.cpp plus the .gdextension config's entry_symbol resolution at load time - the linker/loader is the consumer, not an #include."
+        "godot/src/register_types.h": "The GDExtension entry-point declaration: consumed by its own register_types.cpp plus the .gdextension config's entry_symbol resolution at load time - the linker/loader is the consumer, not an #include.",
+        "engine/runtime/terrain_query/terrain_atlas_rects.h": "Where a change to a terrain's atlas shows (the atlas routing's inverse with each lookup's taps, the map rects), which the editor's views patch their device pictures by once a stroke changes a map or the heights (the S25 terrain round's device regions, master's BM5b); delete this entry when they include it."
     }
 }

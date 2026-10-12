@@ -3,8 +3,7 @@
 // the .cpt the .trn names, another terrain's where it names one (D-TERRAIN-17), its tiles its own <mission>.til; a
 // plane the .trn names no file for, or one the project lacks, refused with the fix (the pane's Add or Import); a
 // terrain's own tiles under no mission. The terrain query's family, brush and sample ops answer them; a stroke on a
-// plane resolves its file and opens it quietly (its planner not in yet: refused, the file open, the active document
-// kept). The tile tools in the mission's map: a stamp lays a tile in the mission's .til, opened quietly and noted as
+// plane resolves its file and opens it quietly (the active document kept). The tile tools in the mission's map: a stamp lays a tile in the mission's .til, opened quietly and noted as
 // edited from the mission; an Undo in the mission takes it back and a Redo makes it again; a Save of the mission saves
 // the .til; a Close of the mission lists it and Don't save leaves it open with its edits; a drag of a tile is one
 // step; a tile command turns the selected tiles.
@@ -123,13 +122,13 @@ int test_routes() {
 	const JsonValue sample = session.query("terrain", args, error);
 	TEST_EXPECT(error.empty() && sample.get("ground") && sample.get("ground")->is_object());
 
-	// A stroke on the surface map: its file opened quietly (the mission kept active), the stroke refused while the maps'
-	// planner is not in.
+	// A stroke on the surface map: its file opened quietly (the mission kept active), the stroke laid by the maps'
+	// planner (S25 B4: editor_terrain_map_paint).
 	TerrainStrokeAsk stroke;
 	stroke.plane = TerrainPlane::Surface;
 	stroke.points = {{-256.0, 256.0}};
 	session.handle(request::terrain_stroke(m->relative_path, stroke));
-	TEST_EXPECT(!session.outcome().done() && session.outcome().findings.back().code() == "terrain.stroke");
+	TEST_EXPECT(session.outcome().done());
 	TEST_EXPECT(session.document_base_for("terrain/Tmap_m.pcx") != nullptr && v.documents.active == m->relative_path);
 	// A plane the project has no file of: refused with the fix, nothing opened.
 	stroke.plane = TerrainPlane::Colour;

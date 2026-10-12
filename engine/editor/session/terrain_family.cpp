@@ -176,6 +176,7 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 	}
 	// [orig: Terrain_LoadEnvironmentConfig @ 0x6109C8..0x6109EE; formats/trn trn_mission_tilestrip]
 	out.tile_set = trn_mission_tilestrip(trn, tile_set);
+	out.trn = std::make_shared<const TrnConfig>(trn);
 	const TerrainImport import = out.terrain.empty() ? TerrainImport() : terrain_uses(view, out.terrain).import;
 	for (size_t i = 0; i < kTerrainPlaneCount; ++i) {
 		const TerrainPlane plane = static_cast<TerrainPlane>(i);

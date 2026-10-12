@@ -1,6 +1,8 @@
 #include <editor/ui/terrain_pane_parts.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -8,6 +10,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/til_document.h>
 #include <editor/model/document_base.h>
+#include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/texture_thumbnail_images.h>
 #include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/tile_tools.h>
@@ -17,6 +20,8 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
+#include <formats/foliage/foliage.h>
+#include <formats/trn/charmap_legend.h>
 
 #include <imgui.h>
 
@@ -168,10 +173,80 @@ void draw_selected(TerrainPaneContext &context, const TilDocument *placement) {
 
 } // namespace
 
-// The maps' parts of the Terrain pane (S25 lane B): not drawn yet in this build.
+// The Paint tools' values (S25 B4): the surface class from the char map's legend, in the game's words; the foliage
+// code from the terrain's definitions (0 grows nothing); the colour; the detail blend map's layer. Each a member of
+// the session's brush (set_workspace's terrain_brush).
 void draw_paint_part(TerrainPaneContext &context) {
-	(void)context;
-	ImGui::TextDisabled("Painting the maps is not ready yet in this build.");
+	Workspace &workspace = context.workspace;
+	const TerrainBrush &brush = context.brush;
+	const auto set = [&](const char *member, io::JsonValue value) {
+		window_requests::set_workspace(workspace, "terrain_brush", member, std::move(value));
+	};
+	switch (brush.tool) {
+	case TerrainTool::Surface: {
+		ImGui::TextUnformatted("Surface class");
+		ui_kit::tooltip("The class the game reads under a body or a round there: its footsteps, its impacts, its tyres.");
+		for (int surface = 0; surface < kCharmapLegendCount; ++surface) {
+			const CharmapLegendColour &c = kCharmapLegend[surface];
+			ImGui::PushID(surface);
+			ImGui::ColorButton("##legend", ImVec4(c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, 1.0f), ImGuiColorEditFlags_NoTooltip,
+			                   ImVec2(ImGui::GetFontSize(), ImGui::GetFontSize()));
+			ImGui::SameLine();
+			const std::string label = std::to_string(surface) + "  " + mission_surface_words(surface);
+			if (ImGui::Selectable(label.c_str(), brush.surface == surface)) set("surface", io::json_number(surface));
+			if (const char *name = mission_surface_name(surface); name && *name) ui_kit::tooltip(name);
+			ImGui::PopID();
+		}
+		int held = brush.surface;
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+		ImGui::InputInt("Class", &held);
+		ui_kit::tooltip("Any class, 0 to 255: the game's table names the first 20 (one past them reads as its last).");
+		if (ImGui::IsItemDeactivatedAfterEdit()) set("surface", io::json_number(std::clamp(held, 0, 255)));
+		break;
+	}
+	case TerrainTool::Foliage: {
+		ImGui::TextUnformatted("Foliage code");
+		if (ImGui::Selectable("0  grows nothing", brush.foliage == 0)) set("foliage", io::json_number(0));
+		if (context.family.trn)
+			for (const FoliageDef &def : context.family.trn->foliage_defs)
+				for (const int code : def.match) {
+					if (code == FOLIAGE_MATCH_UNSET || code < 0 || code > 255) continue;
+					const std::string label = std::to_string(code) + "  " + (def.graphic.empty() ? std::string("(no model)") : def.graphic);
+					ImGui::PushID(code);
+					if (ImGui::Selectable(label.c_str(), brush.foliage == code)) set("foliage", io::json_number(code));
+					ImGui::PopID();
+				}
+		int held = brush.foliage;
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+		ImGui::InputInt("Code", &held);
+		ui_kit::tooltip("Any code, 0 to 255: a definition whose match lists it grows there.");
+		if (ImGui::IsItemDeactivatedAfterEdit()) set("foliage", io::json_number(std::clamp(held, 0, 255)));
+		break;
+	}
+	case TerrainTool::Colour: {
+		float rgb[3] = {((brush.colour >> 16) & 0xFF) / 255.0f, ((brush.colour >> 8) & 0xFF) / 255.0f, (brush.colour & 0xFF) / 255.0f};
+		ImGui::ColorEdit3("Colour", rgb);
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			char hex[8];
+			std::snprintf(hex, sizeof hex, "#%02X%02X%02X", int(std::lround(rgb[0] * 255.0f)), int(std::lround(rgb[1] * 255.0f)),
+			              int(std::lround(rgb[2] * 255.0f)));
+			set("colour", io::json_string(hex));
+		}
+		ui_kit::tooltip("The colour the brush lays, its strength the share it covers (Ctrl+click the ground: the colour there).");
+		break;
+	}
+	case TerrainTool::Detail: {
+		ImGui::TextUnformatted("Detail layer");
+		static const char *const kLayers[] = {"1 (red)", "2 (green)", "3 (blue)", "4 (alpha)"};
+		for (int layer = 0; layer < 4; ++layer) {
+			ImGui::SameLine();
+			if (ImGui::RadioButton(kLayers[layer], brush.layer == layer)) set("layer", io::json_number(layer));
+		}
+		ui_kit::tooltip("The detail texture whose weight the brush raises, the others' falling: the blend map's channel.");
+		break;
+	}
+	default: ImGui::TextDisabled("Pick a Paint tool: Surface, Foliage, Colour or Detail."); break;
+	}
 }
 
 void draw_tiles_part(TerrainPaneContext &context) {
