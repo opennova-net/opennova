@@ -833,6 +833,12 @@ struct Entity {
     // recomputed on every def resolve. The draw alone: each row's collision
     // column is BoneCallback_Simple @0x4E2600.
     bool death_section_pivot = false;
+    // The bldg draw: the render tag's bldg bone row, whose world callback
+    // translates whatever it draws by the negated graphic-model COBJ origin of
+    // the section byte +0x2C1 names (a section clone's own; 0 draws in place)
+    // [orig: BoneCallback_bldg_World @0x4E21A0, the byte @0x4E2214, the
+    // translate @0x4E221E..0x4E2247], recomputed on every def resolve.
+    bool bldg_section_pivot = false;
     int32_t palm_state = 0; // entity+0x270
     // The def's damage callback is the palm row's (WeaponOverlay_HandleDamage)
     // or its update is psec's physics step (Entity_UpdatePhysicsStep): the load

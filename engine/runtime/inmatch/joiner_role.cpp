@@ -1332,14 +1332,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 
 world::Entity *JoinerRole::replica_world_entity(
 		world::World &world, world::EntityHandle handle) {
-	if (!handle.valid()) return nullptr;
-	if (kernel_->wire_header_world)
-		return materializer_.owned(world, handle);
-	world::Entity *entity = world.registry.get(handle);
-	return entity != nullptr &&
-			entity->spawn_origin != world::kSpawnOriginNone
-			? entity
-			: nullptr;
+	return materializer_.replica_world_entity(world, handle, kernel_->wire_header_world);
 }
 
 void JoinerRole::materialize_replica_world() {

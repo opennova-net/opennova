@@ -491,6 +491,34 @@ int test_tower_sections() {
     CHECK(item_section_render_position(w, piece).z == 3);
     CHECK(cw.entity_section_matrix(w, spawner.pieces[0], 0, placed) && placed.m[11] == 11 * 65536);
     piece.death_section_pivot = false;
+    // The bldg row's world callback translates whatever it draws by the
+    // negated origin of the section +0x2C1 names in the GRAPHIC model's COBJ
+    // (the clone's own section 2, 8 u up, not the husk's 2 u), so the section
+    // draws where it stood; section 0 draws in place, and so does the tower
+    // itself until its own byte names a section.
+    // [orig: row 'bldg' @0x82CF10 -> BoneCallback_bldg_World @0x4E21A0, the
+    //  byte @0x4E2214, the translate @0x4E221E..0x4E2247; Entity_SpawnSectionEntity
+    //  @0x4404C1]
+    {
+        const auto husk_origins = t->husk_section_origins_q16;
+        t->husk_section_origins_q16 = {{{0,0,0}},{{0,0,65536}},{{0,0,2*65536}},{{0,0,3*65536}}};
+        piece.bldg_section_pivot = true;
+        CHECK(item_section_render_position(w, piece).z == 3);
+        const int32_t state = piece.death_anim_state;
+        piece.death_anim_state &= 0xFF;
+        CHECK(item_section_render_position(w, piece).z == 11);
+        piece.death_anim_state = state;
+        piece.bldg_section_pivot = false;
+        const int32_t tower_state = e.death_anim_state;
+        e.bldg_section_pivot = true;
+        e.death_anim_state = 0;
+        CHECK(item_section_render_position(w, e).z == 3);
+        e.death_anim_state = 1 << 8;
+        CHECK(item_section_render_position(w, e).z == -1);
+        e.death_anim_state = tower_state;
+        e.bldg_section_pivot = false;
+        t->husk_section_origins_q16 = husk_origins;
+    }
     CHECK(e.health == 100 && (e.engine_flags & 6) == 4);
     CHECK(item_hidden_sections(e) == 12);
     destruction_notify_item_damage(w, e, 1, {1,1});

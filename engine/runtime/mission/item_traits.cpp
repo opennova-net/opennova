@@ -476,9 +476,17 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         //  third columns BoneCallback_Simple @0x4E2600 (cveh's @0x82CFEC);
         //  Render_SectorEntity @0x5C431B]
         // A model whose own LOD tag is one of these rows binds it too
-        // (D-ITEMDEF-18); the `bldg` row pivots by another rule (D-ITEMDEF-23).
+        // (D-ITEMDEF-18); the `bldg` row pivots by its own rule, below.
         e->death_section_pivot =
                 render == "cveh" || render == "chel" || render == "tank" || render == "cpln";
+        // The `bldg` row's world callback translates the draw of whatever it
+        // draws by the negated origin, in the graphic model's COBJ, of the
+        // section the byte +0x2C1 names; section 0 draws in place. A section
+        // clone carries its own section there.
+        // [orig: row 'bldg' @0x82CF10 -> BoneCallback_bldg_World @0x4E21A0,
+        //  the byte @0x4E2214, the translate @0x4E221E..0x4E2247;
+        //  Entity_SpawnSectionEntity's store @0x4404C1]
+        e->bldg_section_pivot = render == "bldg";
         // The ai_function palm row's callback is WeaponOverlay_HandleDamage and
         // the move_function psec row's update is Entity_UpdatePhysicsStep: the two
         // callbacks the load serializers test before streaming entity+0x270.

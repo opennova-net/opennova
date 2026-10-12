@@ -858,19 +858,26 @@ int main() {
 		DefItemDef *truck_def = entry_for(file, 100503);
 		CHECK(truck_def != nullptr);
 		if (truck_def != nullptr) {
-			const struct { const char *tag; bool pivots; } tags[] = {
-				{"chel", true}, {"tank", true}, {"cpln", true}, {"cplnX", true},
-				{"CHel", false}, {"Cveh", false}, {"TANK", false}, {"bldg", false},
+			// The bldg row's section offset binds the same way: `bldg` and
+			// `bldgX` are its row, `Bldg` and `BLDG` none.
+			// [orig: row 'bldg' @0x82cf10 -> BoneCallback_bldg_World @0x4e21a0]
+			const struct { const char *tag; bool pivots; bool bldg; } tags[] = {
+				{"chel", true, false}, {"tank", true, false}, {"cpln", true, false},
+				{"cplnX", true, false}, {"CHel", false, false}, {"Cveh", false, false},
+				{"TANK", false, false}, {"bldg", false, true}, {"bldgX", false, true},
+				{"Bldg", false, false}, {"BLDG", false, false},
 			};
 			for (const auto &tag : tags) {
 				std::snprintf(truck_def->render_function, sizeof(truck_def->render_function),
 						"%s", tag.tag);
 				mission::resolve_item_traits(w, file, wire_class);
 				CHECK(w.registry.get(truck_h)->death_section_pivot == tag.pivots);
+				CHECK(w.registry.get(truck_h)->bldg_section_pivot == tag.bldg);
 			}
 			std::snprintf(truck_def->render_function, sizeof(truck_def->render_function), "cveh");
 			mission::resolve_item_traits(w, file, wire_class);
 			CHECK(w.registry.get(truck_h)->death_section_pivot);
+			CHECK(!w.registry.get(truck_h)->bldg_section_pivot);
 		}
 	}
 
