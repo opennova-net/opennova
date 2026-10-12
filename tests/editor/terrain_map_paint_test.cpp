@@ -319,13 +319,41 @@ int test_imported_source() {
 	// (grey, every level 0), writes the key, and the import made again makes isle_f.pcx and names it in the .trn; a
 	// stroke then paints the source in its place.
 	TEST_EXPECT(v.project.scan->find("isle_f.pcx") == nullptr);
+	const AssetEntry *set_entry = v.project.scan->find("isle.tset");
+	TEST_EXPECT(set_entry != nullptr);
+	if (!set_entry) return 1;
+	const std::string set_path = v.project.root + "/" + set_entry->relative_path;
+	// The set as the modder keeps it: a comment of their own, which Add leaves as it is.
+	std::vector<uint8_t> set_before = test_io::read_file(set_path);
+	const std::string note = "; my island, by hand\r\n";
+	set_before.insert(set_before.end(), note.begin(), note.end());
+	TEST_EXPECT(editor_test::write_bytes(set_path, set_before));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
 	TerrainStrokeAsk add;
 	add.plane = TerrainPlane::Foliage;
 	add.add = true;
 	outcome = editor_test::handle_to_end(session, request::terrain_stroke(m, add));
 	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	session.run_operations();
 	TEST_EXPECT(!outcome.refused && v.project.scan->find("isle_foliagemap.png") != nullptr &&
 	            v.project.scan->find("isle_f.pcx") != nullptr);
+	// The key one line of the set's own text, the rest as it was.
+	const std::vector<uint8_t> set_after = test_io::read_file(set_path);
+	const std::string after_text(set_after.begin(), set_after.end());
+	TEST_EXPECT(contains(after_text, "foliagemap isle_foliagemap.png\r\n") && contains(after_text, note) &&
+	            set_after.size() == set_before.size() + std::string("foliagemap isle_foliagemap.png\r\n").size());
+	// Undo file takes the whole Add back: the set's bytes as they were, the image in the trash, the import clean
+	// (it makes no foliage map again); Redo file does it again.
+	outcome = editor_test::handle_to_end(session, request::undo_file());
+	session.run_operations();
+	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(!outcome.refused && test_io::read_file(set_path) == set_before &&
+	            v.project.scan->find("isle_foliagemap.png") == nullptr && v.project.scan->find("isle_f.pcx") == nullptr);
+	outcome = editor_test::handle_to_end(session, request::redo_file());
+	session.run_operations();
+	TEST_EXPECT(!outcome.refused && test_io::read_file(set_path) == set_after &&
+	            v.project.scan->find("isle_foliagemap.png") != nullptr && v.project.scan->find("isle_f.pcx") != nullptr);
 	ask.plane = TerrainPlane::Foliage;
 	ask.brush.tool = TerrainTool::Foliage;
 	ask.brush.foliage = 3;

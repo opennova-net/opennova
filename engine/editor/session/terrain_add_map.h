@@ -15,10 +15,12 @@ struct TerrainFamily;
 // code 0: grows nothing) or <terrain>_d1.tga (32-bit, the first detail layer everywhere, as the terrain import makes
 // one from no blendmap), one step of the file history, then the .trn's field naming it (polytrn_charmap,
 // polytrn_foliagemap, polytrn_detailblendmap) set on its document as an edit from the view, which the view's Undo
-// takes back; a file of that name the project holds already is named as it stands. An imported terrain: the image
-// made beside its set as <set>_<key>.png (the blend map's seeded from the import's output, the others as above), the
-// set's key written (surface, foliagemap, blendmap) and the set imported again, so the import makes the map and names
-// it in the .trn. False, refused (terrain.stroke) with why, nothing changed.
+// takes back; a file of that name the project holds already (in the scan or on the disk) is named as it stands. An
+// imported terrain: the image made beside its set as <set>_<key>.png (the blend map's seeded from the import's output,
+// the others as above; one there already taken as it stands) and the set's key written as an edit of the set's own text
+// (terrain_set_with_key: its comments and layout kept), the two one step of the file history (FileChores::write_files:
+// Undo file puts the set's bytes back and the image in the trash, Redo file the other way), the set imported again each
+// way, so the import makes the map and names it in the .trn. False, refused (terrain.stroke) with why, nothing changed.
 bool add_terrain_map(SessionCore &core, const DocumentBase &view, const TerrainFamily &family, TerrainPlane plane);
 
 } // namespace opennova::editor

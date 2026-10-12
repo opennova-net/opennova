@@ -135,14 +135,25 @@ bool write_new(SessionCore &core, const std::string &path, const std::vector<uin
 	       io::write_file_atomic(target, bytes.data(), bytes.size(), error);
 }
 
-// An authored terrain's: the map made beside the .trn (or the project's file of its name kept), then the .trn's field
-// naming it, an edit from the view.
+// Whether a project-relative path holds a file on the disk (the scan may not have seen it yet).
+bool on_disk(const SessionCore &core, const std::string &path) {
+	std::error_code ec;
+	return std::filesystem::is_regular_file(system_path(join_path(core.paths().root, path)), ec);
+}
+
+// An authored terrain's: the map made beside the .trn (or the project's file of its name kept, on the disk or in the
+// scan), then the .trn's field naming it, an edit from the view. Two undo homes, which the words name: the view's Undo
+// takes the name back, Undo file the file.
 bool add_authored(SessionCore &core, const DocumentBase &view, const TerrainFamily &family, TerrainPlane plane) {
 	const std::string view_path = view.path();
 	const std::string name = family.terrain_name + suffix(plane);
+	const std::string path = in_folder(folder_of(family.terrain), name);
 	const AssetEntry *held = core.view().project.scan ? core.view().project.scan->find(name) : nullptr;
+	if (!held && on_disk(core, path)) {
+		core.update_files({path});
+		held = core.view().project.scan ? core.view().project.scan->find(name) : nullptr;
+	}
 	if (!held) {
-		const std::string path = in_folder(folder_of(family.terrain), name);
 		std::vector<uint8_t> bytes;
 		std::string error;
 		if (!game_form(plane, bytes, error) || !write_new(core, path, bytes, error)) {
@@ -150,7 +161,7 @@ bool add_authored(SessionCore &core, const DocumentBase &view, const TerrainFami
 			return false;
 		}
 		const std::string said = "New file " + path + ", " + terrain_plane_words(plane) + " of " +
-		                         basename_of(family.terrain);
+		                         basename_of(family.terrain) + " (Undo file takes it back; the view's Undo its name)";
 		core.note(said);
 		core.update_files({path});
 		core.chores().made(said, {path});
@@ -171,7 +182,9 @@ bool add_authored(SessionCore &core, const DocumentBase &view, const TerrainFami
 	                                             (terrain_plane_words(plane) + 4));
 }
 
-// An imported terrain's: the source image made beside the set, its key written, the set imported again.
+// An imported terrain's: the source image made beside the set (or one of its name already there taken as it stands)
+// and the set's key written as an edit of its own text, one step of the file history that Undo file takes back whole
+// (the set's bytes as they were, the image to the trash) and Redo file does again, the set imported again each way.
 bool add_imported(SessionCore &core, const DocumentBase &view, const TerrainFamily &family, TerrainPlane plane,
                   const TerrainImport &import) {
 	const std::string view_path = view.path();
@@ -182,12 +195,7 @@ bool add_imported(SessionCore &core, const DocumentBase &view, const TerrainFami
 	const std::string name = set_stem + "_" + key + ".png";
 	const std::string path = in_folder(folder_of(import.source), name);
 	const AssetScan *scan = core.view().project.scan.get();
-	if (scan && scan->at_path(path)) {
-		refuse(core, "The project has " + path + " already: name it in " + basename_of(import.source) + "'s " + key +
-		                     " key, or move it aside first.",
-		       view_path);
-		return false;
-	}
+	const bool adopted = (scan && scan->at_path(path)) || on_disk(core, path);
 	std::vector<uint8_t> set_bytes;
 	std::string error;
 	TerrainSet set;
@@ -196,35 +204,29 @@ bool add_imported(SessionCore &core, const DocumentBase &view, const TerrainFami
 		refuse(core, import.source + " does not read: " + error + ".", view_path);
 		return false;
 	}
-	// The blend map seeded from the import's output (the weights the terrain draws now).
-	RgbaImage seed;
-	const TerrainFamilyFile &file = family.plane(plane);
-	if (plane == TerrainPlane::Blend && !file.import_output.empty()) {
-		std::vector<uint8_t> output;
-		std::string why;
-		if (!io::read_file_bytes(join_path(core.paths().root, file.import_output), output, why) ||
-		    !decode_terrain_image("blendmap", basename_of(file.import_output), output, seed, why))
-			seed = RgbaImage();
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> make;
+	if (!adopted) {
+		// The blend map seeded from the import's output (the weights the terrain draws now).
+		RgbaImage seed;
+		const TerrainFamilyFile &file = family.plane(plane);
+		if (plane == TerrainPlane::Blend && !file.import_output.empty()) {
+			std::vector<uint8_t> output;
+			std::string why;
+			if (!io::read_file_bytes(join_path(core.paths().root, file.import_output), output, why) ||
+			    !decode_terrain_image("blendmap", basename_of(file.import_output), output, seed, why))
+				seed = RgbaImage();
+		}
+		std::vector<uint8_t> bytes = source_form(plane, &seed);
+		if (bytes.empty()) {
+			refuse(core, path + " could not be made: the encoder refused it.", view_path);
+			return false;
+		}
+		make.emplace_back(path, std::move(bytes));
 	}
-	const std::vector<uint8_t> bytes = source_form(plane, &seed);
-	if (bytes.empty() || !write_new(core, path, bytes, error)) {
-		refuse(core, path + " could not be made: " + (error.empty() ? "the encoder refused it" : error) + ".", view_path);
-		return false;
-	}
-	(plane == TerrainPlane::Surface ? set.surface : plane == TerrainPlane::Foliage ? set.foliagemap : set.blendmap) = name;
-	const std::vector<uint8_t> written = write_terrain_set(set);
-	if (!io::write_file_atomic(join_path(core.paths().root, import.source), written.data(), written.size(), error)) {
-		std::error_code ec;
-		std::filesystem::remove(system_path(join_path(core.paths().root, path)), ec);
-		refuse(core, import.source + " could not be written: " + error + ".", view_path);
-		return false;
-	}
-	const std::string said = "New file " + path + ", " + terrain_plane_words(plane) + " of " +
-	                         basename_of(import.source) + " (its " + key + " key): importing it again makes the map";
-	core.note(said);
-	core.update_files({path, import.source});
-	core.chores().made(said, {path});
-	core.imports().reimport(import.source, true);
+	const std::string words = std::string(adopted ? "Named " : "Made ") + name + " " + basename_of(import.source) + "'s " +
+	                          key + " (" + (terrain_plane_words(plane) + 4) + ")";
+	if (!core.chores().write_files(words, {{import.source, terrain_set_with_key(set_bytes, key, name)}}, make)) return false;
+	core.note(words + ": importing the set again makes the map. Undo file takes it back.");
 	return true;
 }
 

@@ -93,6 +93,11 @@ struct TerrainSet {
 bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::string &why);
 // The set as a file (CRLF lines, a comment heading it).
 std::vector<uint8_t> write_terrain_set(const TerrainSet &set);
+// The set's own text with one image key set to `value` (S25, Add a map): the key's line, outside the foliage blocks,
+// rewritten to `key value` with its comment kept, else a new line after the last image key's (the file's line ending);
+// every other byte as it was, comments, blank lines and foliage blocks included.
+std::vector<uint8_t> terrain_set_with_key(const std::vector<uint8_t> &bytes, const std::string &key,
+                                          const std::string &value);
 
 // Foliage definitions on one line, as the new_terrain request takes them: each the foliage block's keys and
 // their values in a row (`graphic onfern1.3di match 253 color_upper 2`), several split by `|`. False, with

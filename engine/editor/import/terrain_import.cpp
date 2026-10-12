@@ -290,6 +290,65 @@ std::vector<uint8_t> write_terrain_set(const TerrainSet &set) {
 	return text_bytes(text);
 }
 
+std::vector<uint8_t> terrain_set_with_key(const std::vector<uint8_t> &bytes, const std::string &key,
+                                          const std::string &value) {
+	const std::string text(bytes.begin(), bytes.end());
+	const std::string eol = text.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+	// The lines, each with its own ending.
+	std::vector<std::string> lines;
+	for (size_t start = 0; start < text.size();) {
+		const size_t end = text.find('\n', start);
+		const size_t next = end == std::string::npos ? text.size() : end + 1;
+		lines.push_back(text.substr(start, next - start));
+		start = next;
+	}
+	const auto key_of = [](const std::string &line, std::string &comment) {
+		const size_t at = line.find(';');
+		comment = at == std::string::npos ? std::string() : line.substr(at);
+		while (!comment.empty() && (comment.back() == '\n' || comment.back() == '\r')) comment.pop_back();
+		const std::string body = strutil::trim(at == std::string::npos ? line : line.substr(0, at));
+		return strutil::to_lower(body.substr(0, body.find_first_of(" \t")));
+	};
+	const auto ending_of = [&](const std::string &line) {
+		return line.size() >= 2 && line.compare(line.size() - 2, 2, "\r\n") == 0 ? std::string("\r\n")
+		       : !line.empty() && line.back() == '\n'                            ? std::string("\n")
+		                                                                           : std::string();
+	};
+	bool block = false;
+	size_t last_image = std::string::npos;
+	for (size_t i = 0; i < lines.size(); ++i) {
+		std::string comment;
+		const std::string found = key_of(lines[i], comment);
+		if (block) {
+			if (found == "end") block = false;
+			continue;
+		}
+		if (found == "foliage") {
+			block = true;
+			continue;
+		}
+		if (std::find(std::begin(kSetKeys), std::end(kSetKeys), found) == std::end(kSetKeys)) continue;
+		if (found == key) {
+			lines[i] = key + " " + value + (comment.empty() ? std::string() : " " + comment) + ending_of(lines[i]);
+			std::string out;
+			for (const std::string &line : lines) out += line;
+			return std::vector<uint8_t>(out.begin(), out.end());
+		}
+		last_image = i;
+	}
+	const std::string added = key + " " + value + eol;
+	if (last_image == std::string::npos) {
+		if (!lines.empty() && ending_of(lines.back()).empty()) lines.back() += eol;
+		lines.push_back(added);
+	} else {
+		if (ending_of(lines[last_image]).empty()) lines[last_image] += eol;
+		lines.insert(lines.begin() + std::ptrdiff_t(last_image + 1), added);
+	}
+	std::string out;
+	for (const std::string &line : lines) out += line;
+	return std::vector<uint8_t>(out.begin(), out.end());
+}
+
 bool parse_foliage_definitions(const std::string &text, std::vector<FoliageDef> &out, std::string &why) {
 	out.clear();
 	size_t start = 0;
