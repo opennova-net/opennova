@@ -202,8 +202,13 @@ int test_imported_source() {
 	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_grey(heights.data(), kSide, kSide)));
 	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)));
 	TEST_EXPECT(editor_test::write_bytes(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)));
+	// A detail blend map's weights (the .tset's blendmap key, S25 B4): the first layer full everywhere.
+	std::vector<uint8_t> weights;
+	for (int i = 0; i < kMap * kMap; ++i) weights.insert(weights.end(), {255, 0, 0, 255});
+	TEST_EXPECT(editor_test::write_bytes(images + "/blend.png", png::encode_png_rgba(weights.data(), kMap, kMap)));
 	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_terrain("isle",
-	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/surface.png"}}));
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/surface.png"},
+	         {"blendmap", images + "/blend.png"}}));
 	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(!outcome.refused);
 	editor_test::handle_to_end(session, request::create_file("isle.env", "environment"));
@@ -237,7 +242,34 @@ int test_imported_source() {
 	// Written again in its form: a palette PNG whose indices the import reads as the classes.
 	const SerializeResult saved = painted->serialize();
 	TEST_EXPECT(saved.text.size() > 26 && uint8_t(saved.text[25]) == 3);
-	std::printf("imported: the surface map's palette source painted with a class, written again as a palette PNG\n");
+	// The blend map made from the set's blendmap, 32-bit at its own size; a Detail stroke paints its source's layer.
+	const AssetEntry *made = v.project.scan->find("isle_d1.tga");
+	TEST_EXPECT(made != nullptr);
+	if (!made) return 1;
+	const std::vector<uint8_t> d1 = test_io::read_file(v.project.root + "/" + made->relative_path);
+	std::vector<uint8_t> expected;
+	std::string why;
+	TEST_EXPECT(tga::tga_write_rgba32(weights.data(), kMap, kMap, expected, why) && d1 == expected);
+	ask.plane = TerrainPlane::Blend;
+	ask.brush.tool = TerrainTool::Detail;
+	ask.brush.layer = 1;
+	ask.brush.strength = 1.0f;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushLayer | kBrushStrength | kBrushRadius;
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && session.outcome().stroke.changed.size() == 1 &&
+	            contains(session.outcome().stroke.changed.front().path, "isle_blendmap.png"));
+	const auto *blended = dynamic_cast<const TextureDocument *>(session.document_base_for(session.outcome().stroke.changed.front().path));
+	size_t layered = 0;
+	for (int y = 0; blended && y < kMap; ++y)
+		for (int x = 0; x < kMap; ++x) {
+			const uint8_t *texel = blended->plane(0).texel(x, y);
+			layered += texel[0] == 0 && texel[1] == 255 && texel[2] == 0 ? 1 : 0;
+		}
+	TEST_EXPECT(layered == 1);
+	std::printf("imported: the surface map's palette source painted with a class, written again as a palette PNG; the "
+	            "blendmap's source painted with a layer\n");
 	return 0;
 }
 

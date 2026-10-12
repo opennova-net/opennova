@@ -79,7 +79,8 @@ void read_import(const SessionView &view, const AssetEntry &entry, TerrainImport
 	                                {"detail", &set.detail},
 	                                {"tiles", &set.tiles},
 	                                {"surface", &set.surface},
-	                                {"foliagemap", &set.foliagemap}}) {
+	                                {"foliagemap", &set.foliagemap},
+	                                {"blendmap", &set.blendmap}}) {
 		if (name->empty()) continue;
 		TerrainSetImage image;
 		image.key = key;

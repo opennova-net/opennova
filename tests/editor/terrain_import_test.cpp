@@ -246,6 +246,17 @@ int test_set_text() {
 		const std::vector<uint8_t> written = write_terrain_set(set);
 		TEST_EXPECT(std::string(written.begin(), written.end()).find("\r\nsurface isle_surface.png\r\n") != std::string::npos);
 	}
+	// The detail blend map's image (S25 B4): its key written last, read back; one wider than tall refused, as the game's
+	// quadrant split runs past it.
+	set.blendmap = "isle_blend.png";
+	TEST_EXPECT(parse_terrain_set(write_terrain_set(set), back, why) && back.blendmap == "isle_blend.png");
+	{
+		const std::vector<uint8_t> wide(size_t(64) * 32 * 4, 200);
+		RgbaImage refused;
+		TEST_EXPECT(!decode_terrain_image("blendmap", "wide.png", encode_png_rgba(wide.data(), 64, 32), refused, why) &&
+		            why.find("at least as tall as it is wide") != std::string::npos);
+	}
+	set.blendmap.clear();
 	const std::string text = "; a comment\r\nheightmap h.png ; the heights\r\ncolormap  c.png\r\nSurface m.pcx\r\n";
 	TEST_EXPECT(parse_terrain_set(std::vector<uint8_t>(text.begin(), text.end()), back, why) && back.heightmap == "h.png" &&
 	            back.colormap == "c.png" && back.surface == "m.pcx");

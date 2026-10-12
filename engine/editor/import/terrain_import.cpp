@@ -32,7 +32,7 @@ constexpr int kSide = trngen::kDepthSide; // 1024: the colour map's and the heig
 constexpr int kDetailSide = 512;          // a made detail's side (the shipped Det_*.tga's)
 constexpr uint8_t kNeutralGrey = 128;     // the detail's modulate x2 leaves a colour as it is at 128
 
-const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap"};
+const char *const kSetKeys[] = {"heightmap", "colormap", "detail", "tiles", "surface", "foliagemap", "blendmap"};
 constexpr size_t kSetKeyCount = sizeof(kSetKeys) / sizeof(kSetKeys[0]);
 // A foliage block's keys, the .trn's own (formats/trn trn_parser_key's block arms, `end` aside) [orig:
 // Terrain_ParseConfigCallback @ 0x60F330]. A definition holds graphic, match, color_lower, color_upper and
@@ -254,10 +254,11 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 		                    : key == "tiles"      ? &out.tiles
 		                    : key == "surface"    ? &out.surface
 		                    : key == "foliagemap" ? &out.foliagemap
+		                    : key == "blendmap"   ? &out.blendmap
 		                                          : nullptr;
 		if (!slot) {
 			why = at + " names '" + key + "', which a terrain set does not take (it takes heightmap, colormap, detail, " +
-			      "tiles, surface, foliagemap and foliage blocks)";
+			      "tiles, surface, foliagemap, blendmap and foliage blocks)";
 			return false;
 		}
 		if (value.empty()) {
@@ -279,7 +280,8 @@ bool parse_terrain_set(const std::vector<uint8_t> &bytes, TerrainSet &out, std::
 
 std::vector<uint8_t> write_terrain_set(const TerrainSet &set) {
 	std::string text = "; A terrain set: the images the editor's terrain importer makes a terrain from (ADR 0046 S20).\r\n";
-	const std::string *values[] = {&set.heightmap, &set.colormap, &set.detail, &set.tiles, &set.surface, &set.foliagemap};
+	const std::string *values[] = {&set.heightmap, &set.colormap, &set.detail, &set.tiles, &set.surface, &set.foliagemap,
+	                               &set.blendmap};
 	static_assert(sizeof(values) / sizeof(values[0]) == kSetKeyCount, "a value per set key");
 	for (size_t i = 0; i < kSetKeyCount; ++i)
 		if (!values[i]->empty()) text += std::string(kSetKeys[i]) + " " + *values[i] + "\r\n";
@@ -437,6 +439,13 @@ bool decode_terrain_image(const std::string &key, const std::string &name, const
 		why = sides + ": the game makes a detail's coefficients over sides that are powers of two";
 		return false;
 	}
+	// Loaded whole, then split in quadrants at its width into a buffer of its own size [orig: PolyTrn_InitTextures @
+	// 0x60B1B8, @ 0x60B29C, @ 0x60B2C1]: a map wider than tall runs past both.
+	if (key == "blendmap" && w > h) {
+		why = sides + ": the game splits a detail blend map in quadrants of half its width into a buffer of its own size, "
+		              "so it is at least as tall as it is wide";
+		return false;
+	}
 	if (key == "tiles" && (w < 64 || h < 64 || w % 64 || h % 64)) {
 		why = sides + ": the game cuts a tile set's atlas in 64-texel cells, so its sides are multiples of 64";
 		return false;
@@ -514,6 +523,13 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 		if (!terrain::decode_charmap_source(set.surface, bytes, surface, why)) return refuse(why + ".");
 	}
 
+	// The detail blend map's weights (S25 B4), else the first layer everywhere.
+	RgbaImage blend = flat_image(kSide, 255, 0, 0);
+	if (!set.blendmap.empty()) {
+		if (!context.read(set.blendmap, bytes)) return false;
+		if (!decode_terrain_image("blendmap", set.blendmap, bytes, blend, why)) return refuse(why + ".");
+	}
+
 	IndexedImage8 foliage;
 	if (!set.foliagemap.empty()) {
 		if (!context.read(set.foliagemap, bytes)) return false;
@@ -574,7 +590,7 @@ bool run_terrain_import(ImportContext &context, ImportProduct &out) {
 	if (!tga(stem + "_c.tga", colour, false)) return false;
 	if (!tga(stem + "_dt.tga", detail, false)) return false;
 	if (!tga(stem + "_dm.tga", detail, false)) return false;
-	if (!tga(stem + "_d1.tga", flat_image(kSide, 255, 0, 0), true)) return false;
+	if (!tga(stem + "_d1.tga", blend, true)) return false;
 	if (!tiles.empty() && !tga(stem + "_t.tga", tiles, true)) return false;
 
 	ImportOutput til;

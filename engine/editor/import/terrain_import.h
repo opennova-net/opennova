@@ -78,6 +78,9 @@ struct TerrainSet {
 	std::string tiles;
 	std::string surface;
 	std::string foliagemap;
+	// S25 B4: the detail blend map's image, its RGBA the detail layers' weights (`<stem>_d1.tga`, 32-bit; none: the
+	// first layer everywhere, as before).
+	std::string blendmap;
 	std::vector<FoliageDef> foliage; // the .trn's foliage blocks, in their order (their slots)
 };
 
