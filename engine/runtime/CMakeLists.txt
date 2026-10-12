@@ -228,6 +228,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/surface_tiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_field_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_atlas_rects.cpp # where a change to the atlas shows
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_raycast.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_scorch_record.cpp
     # wac — the WAC compiler (binds names/vars against the live world) + the VM;
