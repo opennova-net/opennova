@@ -36,7 +36,7 @@ struct TilSurfaceTable {
 // [orig: File_ParseASCIIFile @ 0x53d8de-0x53d8ec]; each line tokenizes on
 // space/comma/tab with '"' quoting, cut by unquoted "//" or ';', clamped to
 // 1000 chars and 30 tokens, missing tokens reading as empty strings
-// [orig: Terrain_TokenizeConfigLine @ 0x53cb60]; a line whose first token
+// [orig: Config_TokenizeLine @ 0x53cb60]; a line whose first token
 // starts with '/' is skipped [orig: @ 0x53d91e]. Per line, token 2 is matched
 // case-insensitively against the TSD name table (no match -> 0) and, when
 // token 1 carries the case-insensitive "INDEX_" prefix, the ordinal lands at

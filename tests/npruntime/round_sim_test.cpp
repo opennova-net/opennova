@@ -2161,7 +2161,7 @@ int main() {
 	// --- 5. The 0x0E deploy of a RESPAWN-PENDING joiner emits the DEPLOY-RELEASE bundle
 	// (0x5A + 0x61 + optional 0x1E) and clears the pending/hidden pair — the client's 0x5A
 	// apply resets its dword_81474C wait-gate (set by the pick) and resumes the C2S 0x0C
-	// uplink [orig: Server_ProcessPlayerDeath deploy tail: Server_SendWeaponSlotListToPlayer
+	// uplink [orig: Server_DeployPlayer deploy tail: Server_SendWeaponSlotListToPlayer
 	// @0x502550 + Server_SendRandomSeedToPlayer @0x5101a0; client un-latch §5.30
 	// @0x4290E0; golden deploy frame 240018 = 0x5A + 0x61 + 0x1E one datagram; the v32
 	// rubber-band]. (D-NET-156 tail) ---
@@ -2179,7 +2179,7 @@ int main() {
 		// Spawn pick bypasses it, and its release (handle 0xFFFF) leaves the
 		// hold running (D-NET-430).
 		// [orig: Server_ProcessClientRequestRespawn @0x519c67/@0x519cf2;
-		//  Server_ProcessPlayerDeath @0x51786B..0x517872]
+		//  Server_DeployPlayer @0x51786B..0x517872]
 		world.registry.configure_pool(2, 8);
 		w::Entity spawn_zone;
 		spawn_zone.kind = w::EntityKind::Item;
@@ -2254,7 +2254,7 @@ int main() {
 		// +360 delay untested and left as it stood (D-NET-460); the deploy sends
 		// its 0x61 and, out of a session, no 0x5A.
 		// [orig: Server_ProcessClientRequestRespawn @0x519CD0..0x519CE3;
-		//  Server_ProcessPlayerDeath -- is_in_session @0x5178E9 / @0x5178EF ahead
+		//  Server_DeployPlayer -- is_in_session @0x5178E9 / @0x5178EF ahead
 		//  of the 0x5A @0x5178F2, the Server_SendRandomSeedToPlayer call @0x51796D]
 		world.rules.mp_session = false;
 		conn.link.respawn_delay_seconds = 5;

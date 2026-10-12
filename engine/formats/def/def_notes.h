@@ -77,7 +77,7 @@ struct DefNotedLine {
 
 // A line's text cut into its parts (the inverse of DefNotedLine::text): its ending, its blanks, its words
 // (a quoted run one word, a comma or a blank ending one outside quotes, as the game's tokenizer ends a
-// token [orig: Terrain_TokenizeConfigLine @ 0x53CB60, delimiters @ 0x53CC33..0x53CC4C, quote @
+// token [orig: Config_TokenizeLine @ 0x53CB60, delimiters @ 0x53CC33..0x53CC4C, quote @
 // 0x53CC4E..0x53CC70]) and its comment (`//` or `;` outside quotes, where the tokenizer cuts the line).
 DefNotedLine def_noted_line(const char *text, size_t length);
 

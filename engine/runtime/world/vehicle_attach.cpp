@@ -118,10 +118,17 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     // carrier or not, ahead of the +368 claim test: the scope target and
     // ease, the fov, the binoculars and the NVG restore latch. (The function's
     // type-3 reset @0x494959 is unreachable: its one caller sends UseGun seats
-    // to Entity_AttachToUseGunSlot @0x435c9f / @0x435caa.)
+    // to Entity_AttachToUseGunSlot @0x435c9f / @0x435caa.) The UseGun attach
+    // resets as well, past its refusal (attach_to_seat), ahead of its claim and
+    // its mount, whatever the gun's slot; a sitex attach does not, and the
+    // reset's callers are these and the category key alone, so neither a
+    // detach nor a designated-G route switch resets (D-WPN-49).
     // [orig: Entity_AttachToVehicleSlot -- ctrlx @0x4947ac..0x4947ae ahead of
-    //  @0x4947bf, drvrx @0x4948b2..0x4948b4 ahead of @0x4948d2]
-    if (control_seat && occ.handle == world.cached.local_player &&
+    //  @0x4947bf, drvrx @0x4948b2..0x4948b4 ahead of @0x4948d2;
+    //  Entity_AttachToUseGunSlot @0x546ba2..0x546ba4, after the gate @0x546c07
+    //  and ahead of @0x546bb6 / the mount @0x546c38]
+    if ((control_seat || veh.seats[seat_idx].type == SeatType::Gunner) &&
+            occ.handle == world.cached.local_player &&
             world.local_player_state != nullptr)
         local_player_camera_reset(&world, world.local_player_state->weapon,
                                   world.local_player_state->view);

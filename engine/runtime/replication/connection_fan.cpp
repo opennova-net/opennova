@@ -589,11 +589,11 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	// state) OR the deploy-hold bit slot+89912 & 0x10 [orig: @0x50e677..
 	// 0x50e693]. The hold is set ONCE at join whenever the mission has spawn
 	// zones [orig: Server_OnPlayerJoin @0x51a6f2] and cleared only by the
-	// deploy leg of Server_ProcessPlayerDeath [orig: @0x517791], so it covers
+	// deploy leg of Server_DeployPlayer [orig: @0x517791], so it covers
 	// BOTH a never-deploying spectator and an ordinary joiner still on the
 	// deploy screen. A runtime-converted (permadeath) spectator carries neither:
 	// its convert ends in that deploy leg, which clears the hold and the dead
-	// bit [orig: Server_KillPlayerAndNotify @0x519ECE; @0x51787A].
+	// bit [orig: Server_ConvertPlayerToSpectator @0x519ECE; @0x51787A].
 	const bool self_dead_or_spectator =
 			conn.respawn_pending ||
 			(self != nullptr && (self->state_flags & 0x02) != 0);

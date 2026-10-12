@@ -345,7 +345,7 @@ bool LocalPlayer::toggle_mount() {
 	World &world = world_;
 	const w::Entity *toggle_player = player();
 	if (toggle_player == nullptr || !toggle_player->alive || toggle_player->health <= 0) return false;
-	w::sync_local_usegun_weapon_transition(world, weapon, view);
+	w::sync_local_usegun_weapon_transition(world, weapon);
 	const w::WeaponSlotState *active_slot = w::active_local_weapon_slot(world, weapon);
 	if (active_slot != nullptr &&
 			!w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next))
@@ -357,10 +357,14 @@ bool LocalPlayer::toggle_mount() {
 	// g_NapiNPCtx.is_in_session` @0x546BF6, the slot test @0x546c07].
 	const bool changed = world.vehicles.player_toggle_mount(world.cached.local_player);
 	if (changed) {
-		view.binoculars_requested = false; // on any relation change, ours alone (D-WPN-49)
+		// The binoculars toggle rides through a relation change: its one writer on
+		// a mount is the camera reset the control-seat and UseGun attaches run
+		// (attach_apply) [orig: Player_ResetCameraAndMovementState @0x4DE2B3;
+		// Entity_DetachFromVehicle @0x4355F0 and Entity_ProcessVehicleAttach
+		// @0x435AA0 write no toggle].
 		w::local_player_view_refresh(&world, view);
 		sync_local_mounted_input_heading();
-		w::sync_local_usegun_weapon_transition(world, weapon, view);
+		w::sync_local_usegun_weapon_transition(world, weapon);
 	}
 	return changed;
 }
@@ -371,7 +375,7 @@ bool LocalPlayer::find_numbered_seat(int index, VehicleSeatSelection &out,
 	out = {};
 	const w::Entity *local = player();
 	if (local == nullptr || !local->alive || local->health <= 0) return false;
-	w::sync_local_usegun_weapon_transition(world_, weapon, view);
+	w::sync_local_usegun_weapon_transition(world_, weapon);
 	const w::WeaponSlotState *slot = w::active_local_weapon_slot(world_, weapon);
 	// This is currentAction == 11, not the USE toggle's pending-action gate.
 	if (weapon.active && slot != nullptr && slot->current >= 2 && slot->current != w::weapon_action::kOverheated)
@@ -387,10 +391,9 @@ bool LocalPlayer::select_numbered_seat(int index) {
 	// the USE toggle's is [orig: Entity_AttachToUseGunSlot @0x546c07].
 	const bool changed = world_.vehicles.request_attach(world_.cached.local_player, selected);
 	if (changed) {
-		view.binoculars_requested = false; // on any relation change, ours alone (D-WPN-49)
 		w::local_player_view_refresh(&world_, view);
 		sync_local_mounted_input_heading();
-		w::sync_local_usegun_weapon_transition(world_, weapon, view);
+		w::sync_local_usegun_weapon_transition(world_, weapon);
 	}
 	return changed;
 }

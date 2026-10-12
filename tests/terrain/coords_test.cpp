@@ -56,8 +56,9 @@ static RefSample ref_resolve_world_sample(const int *grid, int origin_x, int ori
     }
     const float local_x = world_x - static_cast<float>(sector_sx * 512);
     const float local_z = world_z - static_cast<float>(sector_sz * 512);
-    const float quadrant_x = (sector_id == 3 || sector_id == 4) ? 512.0f : 0.0f;
-    const float quadrant_z = (sector_id == 2 || sector_id == 4) ? 512.0f : 0.0f;
+    // The id less one's bits (D-TERRAIN-21) [orig: Terrain_SampleHeightBilinear @ 0x6068B7..0x6068C4].
+    const float quadrant_x = ((sector_id - 1) & 2) != 0 ? 512.0f : 0.0f;
+    const float quadrant_z = ((sector_id - 1) & 1) != 0 ? 512.0f : 0.0f;
     out.sector_id = sector_id;
     out.source_x = quadrant_x + local_x;
     out.source_z = quadrant_z + local_z;
@@ -72,7 +73,7 @@ int main() {
     //   (row 1, col 0) id 3   -> quadrant (512,0)
     //   (row 1, col 1) id 4   -> quadrant (512,512)
     //   (row 0, col 2) id 0   -> empty (reject)
-    //   (row 0, col 3) id 7   -> over-range (editor clamps to 4; runtime keeps 7)
+    //   (row 0, col 3) id 7   -> over-range (editor clamps to 4; runtime keeps 7, slot 6: +512 x)
     // every other cell is id 1.
     std::vector<int> grid(256, 1);
     grid[0 * 16 + 0] = 1;
@@ -137,7 +138,7 @@ int main() {
 
         CoordsResult<float> r6 = coords_world_to_source<float>(layout, -300.0f, -2000.0f, coords_runtime_options());
         check(r6.valid && r6.sector_id == 7, "R6 raw id7 kept");
-        check_close(r6.source_x, 212.0, 0.0, "R6 source_x (quadrant 0 for raw 7)");
+        check_close(r6.source_x, 724.0, 0.0, "R6 source_x (raw 7: slot 6's bit 1, +512 on x)");
         check_close(r6.source_z, 48.0, 0.0, "R6 source_z");
 
         CoordsResult<float> r7 = coords_world_to_source<float>(layout, -5000.0f, -2000.0f, coords_runtime_options());

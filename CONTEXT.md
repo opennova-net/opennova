@@ -300,7 +300,7 @@ read in order to the first the file lacks), its ATTRIBUTES words (Medic and Knif
 reads) and its three camouflage items (the item a player of the class spawns as by the mission's camouflage),
 with per-property disable latches a session's mp_No* words raise. The other fields (STEALTH, HPBONUS, the
 `*_MUTE` scales, RUN_MODIFIER) reach only the anti-cheat row's CRC.
-_Avoid_: anim slot, AnimMap slot (the IDB's misnomer), input state flags (S2C 0x42 carries the latches)
+_Avoid_: anim slot, AnimMap slot (the IDB's former misnomer), input state flags (S2C 0x42 carries the latches)
 
 **Placed device**:
 A thrown or emplaced explosive converted to its own pool-1 Entity (satchel, claymore, AV mine), replicated via S2C `0x59`/`0x12`.

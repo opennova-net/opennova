@@ -186,7 +186,8 @@ std::vector<uint8_t> ClientSession::start() {
 	host_list_.clear();
 	player_list_.clear();
 	play_setup_.clear();
-	reconnect_counter_ = 0;
+	// ReconnectCounter (session+0x500) is not a connection's: its only writers are the host
+	// request's zero and the re-verify's count (request_hosting, dispatch_server_container).
 	return build_client_hello();
 }
 
@@ -450,7 +451,8 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 }
 
 void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
-	// Any 0x82 from the connecting peer is read; no field is required (parse_server_auth).
+	// Any 0x82 from the connecting peer is read; no field is required, and one whose CUs overrun
+	// the walk's bounds is dropped here, before the CI / CK match (parse_server_auth).
 	ServerAuth sa;
 	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerAuth echoes both correlation values chosen by this client. Do not

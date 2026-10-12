@@ -226,7 +226,8 @@ bool AiSystem::acquire_target_from(AiEntity &e, const std::vector<AiCandidate> &
         if (c.health <= 0) continue;                              // [orig: *(cand+286) > 0]
         // [orig: (cand+530 <= 16 || def+100 & 8)] stealth pre-gate
         if (!(c.visibility <= 16 || (e.profile.flags100 & 8) != 0)) continue;
-        if ((c.flags & 0x8000000) != 0) continue;                 // [orig: flags & 0x8000000 -> skip]
+        // NoTarget [orig: flags & 0x8000000 -> skip, @0x465C07 / @0x467117]
+        if ((static_cast<uint32_t>(c.flags) & kEntityFlagNoTarget) != 0) continue;
         // [orig: team check with self aiSlot+4 & 0x200 see-all]
         bool team_ok = (c.team != 0 || see_all) && (c.team != e.team || see_all);
         if (!team_ok) continue;

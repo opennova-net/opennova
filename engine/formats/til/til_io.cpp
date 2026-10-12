@@ -29,9 +29,10 @@ int32_t read_i32_le(const uint8_t *data) {
 
 } // namespace
 
-bool load_til(const uint8_t *data, size_t size, TilFile &out, std::string &error) {
+bool load_til(const uint8_t *data, size_t size, TilFile &out, std::string &error, TilHeaderFacts *facts) {
 	out = TilFile{};
 	error.clear();
+	if (facts != nullptr) *facts = TilHeaderFacts{};
 
 	if (data == nullptr) {
 		error = "til data pointer is null";
@@ -54,7 +55,7 @@ bool load_til(const uint8_t *data, size_t size, TilFile &out, std::string &error
 		error = "til entry count overflow";
 		return false;
 	}
-	if (size < TIL_HEADER_SIZE + payload_bytes) {
+	if (size - TIL_HEADER_SIZE < payload_bytes) {
 		error = "til payload truncated";
 		return false;
 	}
@@ -68,12 +69,15 @@ bool load_til(const uint8_t *data, size_t size, TilFile &out, std::string &error
 		entry.z_fixed = read_i32_le(cursor + 4);
 		entry.tile_index = cursor[8];
 		entry.flags = cursor[9];
-		entry.reserved = read_u16_le(cursor + 10);
-		entry = til_normalize_overlay_entry(entry);
+		entry.layer = read_u16_le(cursor + 10);
 		cursor += TIL_ENTRY_SIZE;
 	}
 
-	out = til_normalize_file(out);
+	if (facts != nullptr) {
+		facts->size_word = read_u32_le(data + 8);
+		facts->word12 = read_u32_le(data + 12);
+		facts->trailing = size - TIL_HEADER_SIZE - payload_bytes;
+	}
 	return true;
 }
 
@@ -85,32 +89,28 @@ bool save_til(const TilFile &til, std::vector<uint8_t> &out, std::string &error)
 	error.clear();
 	out.clear();
 
-	const TilFile normalized = til_normalize_file(til);
-
-	if (normalized.entries.size() > static_cast<size_t>(std::numeric_limits<uint32_t>::max())) {
-		error = "til entry count exceeds 32-bit header field";
+	// The header's size word is 32 bits: refuse a count whose 12 * count + 16 does not fit it.
+	const size_t count = til.entries.size();
+	if (count > (static_cast<size_t>(std::numeric_limits<uint32_t>::max()) - TIL_HEADER_SIZE) / TIL_ENTRY_SIZE) {
+		error = "til entry count exceeds the header's 32-bit size word";
 		return false;
 	}
+	const size_t total_size = TIL_HEADER_SIZE + count * TIL_ENTRY_SIZE;
 
-	const size_t total_size = TIL_HEADER_SIZE + normalized.entries.size() * TIL_ENTRY_SIZE;
-	if (total_size < TIL_HEADER_SIZE) {
-		error = "til size overflow";
-		return false;
-	}
-
+	// [orig: JOTACmed MapTileStore_Serialize @ 0x433F39..0x433F50: til0, the count, 12 * count + 16, 0]
 	out.resize(total_size, 0);
 	write_u32_le(out.data() + 0, TIL_MAGIC);
-	write_u32_le(out.data() + 4, static_cast<uint32_t>(normalized.entries.size()));
-	write_u32_le(out.data() + 8, normalized.reserved0);
-	write_u32_le(out.data() + 12, normalized.reserved1);
+	write_u32_le(out.data() + 4, static_cast<uint32_t>(count));
+	write_u32_le(out.data() + 8, static_cast<uint32_t>(total_size));
+	write_u32_le(out.data() + 12, 0);
 
 	uint8_t *cursor = out.data() + TIL_HEADER_SIZE;
-	for (const TilOverlayEntry &entry : normalized.entries) {
+	for (const TilOverlayEntry &entry : til.entries) {
 		write_u32_le(cursor + 0, static_cast<uint32_t>(entry.x_fixed));
 		write_u32_le(cursor + 4, static_cast<uint32_t>(entry.z_fixed));
 		cursor[8] = entry.tile_index;
 		cursor[9] = entry.flags;
-		write_u16_le(cursor + 10, entry.reserved);
+		write_u16_le(cursor + 10, entry.layer);
 		cursor += TIL_ENTRY_SIZE;
 	}
 

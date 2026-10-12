@@ -16,6 +16,7 @@ private:
 	int32_t z_fixed = 0;
 	int tile_index = 0;
 	int flags = 0;
+	int layer = 0;
 
 protected:
 	static void _bind_methods();
@@ -28,9 +29,15 @@ public:
 	int get_z_fixed() const;
 
 	void set_tile_index(int value);
+	int get_tile_index() const;
 
+	// The whole flags byte (bits 0-2 the flips and rotate the game draws, the rest carried).
 	void set_flags(int value);
 	int get_flags() const;
+
+	// MED's layer, the record's +10 word: carried, never read by the game.
+	void set_layer(int value);
+	int get_layer() const;
 
 	void set_cell_x(int value);
 	int get_cell_x() const;

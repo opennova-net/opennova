@@ -723,7 +723,7 @@ private:
 	}
 	void sync_local_usegun_weapon_transition() {
 		opennova::world::sync_local_usegun_weapon_transition(
-				kernel_->world, kernel_->local.weapon, kernel_->local.view);
+				kernel_->world, kernel_->local.weapon);
 	}
 	void commit_local_usegun_weapon_switch() {
 		opennova::world::commit_local_usegun_weapon_switch(

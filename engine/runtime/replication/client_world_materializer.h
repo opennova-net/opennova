@@ -60,6 +60,11 @@ public:
 	world::Entity *owned(world::World &world, world::EntityHandle handle) const;
 	const world::Entity *owned(
 			const world::World &world, world::EntityHandle handle) const;
+	// A decoded handle's own native row, as every joiner per-row read takes
+	// it: a header-only world's owned row (this materializer's lifetime), a
+	// full-BMS join's promoted registry row (spawn-origin gated).
+	world::Entity *replica_world_entity(world::World &world, world::EntityHandle handle,
+			bool wire_header_world) const;
 	void clear() {
 		materialized_rows_.clear();
 		retired_placement_ids_.clear();

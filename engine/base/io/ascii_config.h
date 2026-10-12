@@ -21,7 +21,7 @@
 // ConfigTokens::slot note). At most 30 tokens:
 // the walk stops at the 30th without cutting it, so that one also runs to the
 // end of the line (its separators, quotes and comment included).
-// [orig: Terrain_TokenizeConfigLine @0x53CB60 — the skip @0x53CB90..0x53CB9E,
+// [orig: Config_TokenizeLine @0x53CB60 — the skip @0x53CB90..0x53CB9E,
 //  clamp @0x53CBBB, "//" @0x53CC16..0x53CC28, ';' @0x53CC2A..0x53CC31,
 //  delimiters @0x53CC33..0x53CC4C, quote @0x53CC4E..0x53CC70, token start
 //  @0x53CC72..0x53CC83, the 30 cap @0x53CC8C..0x53CC93]
@@ -54,7 +54,7 @@ struct ConfigTokens {
 	// put them, pointing into the reused line buffer, so a short line reads
 	// whatever an earlier, longer one left at that offset (the current line's
 	// bytes up to its terminator, the older bytes past it)
-	// [orig: Terrain_TokenizeConfigLine @0x53CB71..0x53CB81; the static buffer
+	// [orig: Config_TokenizeLine @0x53CB71..0x53CB81; the static buffer
 	// g_TokenizeConfigLineBuffer and slots dword_24E61E4]. A slot no line has set is NULL
 	// (the zeroed static), and so is the one past the last: the dword after
 	// slot 29 has no writer. The state lives as long as its ConfigTokens: a
@@ -244,7 +244,7 @@ inline constexpr size_t kConfigFileReadChars = 0x400 - 1;
 // [orig: File_ParseASCIIFileWithCallback @0x53D980 — fopen(path, "r")
 //  @0x53D9A3..0x53D9B7 (a file that does not open returns 1 @0x53D9C9),
 //  fgets(line, 0x400) @0x53D9E2..0x53D9EF, strchr(line, '\n') cut
-//  @0x53D9FB..0x53DA11, Terrain_TokenizeConfigLine @0x53DA24, the count and
+//  @0x53D9FB..0x53DA11, Config_TokenizeLine @0x53DA24, the count and
 //  '/' gate @0x53DA39..0x53DA47, the callback @0x53DA53 and its stop
 //  @0x53DA61, the end-of-file callback @0x53DA6F..0x53DA7A]
 template <typename Apply>

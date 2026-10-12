@@ -207,7 +207,7 @@ const SoundProfile *item_sound_profile(const std::vector<SoundProfile> &profiles
 // and 4 with no count check, so a shorter line would take what an earlier
 // line, of this file or of any file the game tokenized before it, left there
 // [orig: SoundProfile_ParseLineCallback @ 0x526fc0, the param stores
-// @ 0x527122..0x52718b; Terrain_TokenizeConfigLine @ 0x53cb60 resets only
+// @ 0x527122..0x52718b; Config_TokenizeLine @ 0x53cb60 resets only
 // slots 0..2 @ 0x53cb71..0x53cb81]. A slot with no set but a column-3/4
 // value is a bare keyword line that reads them from a '/' line just ahead,
 // which the walk tokenizes and never hands the callback. A column-2/3 value

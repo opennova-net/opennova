@@ -3,19 +3,19 @@
 #include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
 
-#include <cctype>
-
 namespace opennova {
 namespace {
 
-// The process locale's letter class, where the prefix forms of the hex, octal and binary arms
-// and the decimal arm call the CRT _isalpha on the byte after the run under the game's ".ACP"
-// LC_CTYPE [orig: NapiScript_ParseHexValue @0x62d6fc; NapiScript_ParseOctalInteger @0x62d85f;
-// NapiScript_ParseBinaryLiteral @0x62d9b1; NapiScript_ParseDecimalIntegerB @0x62da97]; the
-// suffix forms test h / o / b directly [orig: @0x62d6e7, @0x62d835, @0x62d98e]
-// (docs/net/novaworld-net-re.md D-NET-391, open for the letter class).
+// The CRT _isalpha the prefix forms of the hex, octal and binary arms and the decimal arm call
+// on the byte after the run under the ".ACP" LC_CTYPE, pinned to cp1252 (D-NET-478), on the
+// sign-extended byte: a letter other than the arm's own h / o / b / d fails the literal, so a
+// cp1252 high-byte letter does too, and 0xFF, the EOF row, does not; the suffix forms test
+// h / o / b directly (docs/net/novaworld-net-re.md D-NET-391).
+// [orig: _isalpha @0x76b703 of a movsx'd byte, called @0x62d6fc (hex), @0x62d85f (octal),
+//  @0x62d9b1 (binary) and @0x62da97 (decimal); the suffix tests @0x62d6e7, @0x62d835,
+//  @0x62d98e]
 bool is_alpha(char c) {
-	return std::isalpha(static_cast<unsigned char>(c)) != 0;
+	return cp1252_isalpha_sign_extended(c);
 }
 
 // The CRT _isdigit every arm calls on the sign-extended byte under the ".ACP" LC_CTYPE: the
@@ -172,6 +172,13 @@ bool parse_decimal(std::string_view input, uint32_t &value, size_t &consumed) {
 
 } // namespace
 
+// Retail's arms each copy their run into a 256-byte stack buffer with no length check, the /GS
+// cookie right after it, so a run past 255 bytes (256 in the decimal arm, whose NUL lands on
+// the cookie) fails the cookie check and ends the process; ours reads the whole run
+// (D-NET-564, PERMANENT class D: a crash is not ported). [orig: NapiScript_ParseHexValue
+//  @0x62d610 (the copy @0x62d6bd); NapiScript_ParseOctalInteger @0x62d7b0 (@0x62d81d);
+//  NapiScript_ParseBinaryLiteral @0x62d900 (@0x62d962); NapiScript_ParseDecimalIntegerB
+//  @0x62da20 (@0x62da77, the NUL @0x62dab2); __security_check_cookie @0x76aa7b]
 bool napi_parse_literal_value(std::string_view input, uint32_t &value,
 		size_t *consumed) {
 	uint32_t parsed = 0;

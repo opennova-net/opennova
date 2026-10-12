@@ -362,12 +362,14 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	}
 	// Retail serializes the live profile's per-side character block between the
 	// environment strings and the trailing locale/packet scalars. A zero value is
-	// absent, matching CNapiServerInfo's per-field guards. TR uses signed decimal:
-	// 0xFF is the profile's -1/automatic-team sentinel. CTA/CTB print their bytes
+	// absent, matching CNapiServerInfo's per-field guards. TR prints its byte
+	// sign-extended, the join's side requirement 0xFF going up as -1 on every
+	// join (kJoinSideRequirement, D-NET-590). CTA/CTB print their bytes
 	// zero-extended, VCA/VCB sign-extended, so an avatar byte past 0x7F goes up
 	// negative (0xC8 as -56).
-	// [orig: CNapiServerInfo_SerializeToSession @0x4c3a1b..0x4c3c4c - movzx
-	//  @0x4c3b1e / @0x4c3b6e, movsx @0x4c3bbe / @0x4c3c0e]
+	// [orig: CNapiServerInfo_SerializeToSession @0x4c3a1b..0x4c3c4c - TR
+	//  @0x4c3ac7..0x4c3b0c (movsx @0x4c3ad1), movzx @0x4c3b1e / @0x4c3b6e, movsx
+	//  @0x4c3bbe / @0x4c3c0e]
 	auto append_profile_value = [&](const char *name, int value, bool present) {
 		if (!present) return;
 		auth.cu.push_back(make_client_cu_chunk(
@@ -377,10 +379,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.char_id[0] != 0);
 	append_profile_value("CI1", character_join_vars_.char_id[1],
 			character_join_vars_.char_id[1] != 0);
-	append_profile_value("TR",
-			character_join_vars_.team_request == 0xFF
-					? -1
-					: character_join_vars_.team_request,
+	append_profile_value("TR", static_cast<int8_t>(character_join_vars_.team_request),
 			character_join_vars_.team_request != 0);
 	append_profile_value("CTA", character_join_vars_.char_class[0],
 			character_join_vars_.char_class[0] != 0);
@@ -582,7 +581,8 @@ ConnectionErrorRecord JoinerConnection::connection_error_record() const {
 
 void JoinerConnection::on_server_auth(
 		const std::vector<uint8_t> &body, PollResult & /*out*/) {
-	// Any 0x82 from the connecting host is read; no field is required (parse_server_auth).
+	// Any 0x82 from the connecting host is read; no field is required, and one whose CUs overrun
+	// the walk's bounds is dropped here, before the CI / CK match (parse_server_auth).
 	ServerAuth sa;
 	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerSessionInit echoes both client identifiers. Correlate before even
@@ -1614,7 +1614,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// authoritative 0x5A class; absent/inactive/mismatched rows return zero.
 			// [orig: NapiNPClientMsg_HandleChecksumChallenge @0x42E6D0 (reply tag 0x1C,
 			//  len 4 @0x42e723); CharAttr_GetClassChecksum @0x412aa0 (IDB
-			//  AnimMap_GetSlotChecksum until 2026-10-07) — the `return 0` arm
+			//  AnimMap_GetSlotChecksum until 2026-10-12) — the `return 0` arm
 			//  @0x412abf; the host's discard + counter reset
 			//  NapiNPServerMsg_AnimChecksumRequest @0x501D40 @0x501d71/@0x501d79]
 			uint32_t challenge_seed = 0;

@@ -372,7 +372,7 @@ bool EntityPoseProvider::resolve_userpoint_pivot(
 	return true;
 }
 
-// [orig: Entity_ProcessSectionDamageTransition @0x43F496..0x43F501]
+// [orig: DoorClass_HandleEvent @0x43F496..0x43F501]
 bool EntityPoseProvider::resolve_section_pivot(world::World &world,
 		world::EntityHandle entity, int part, int32_t out[3]) {
 	if (out == nullptr || part < 0 || world.collision == nullptr) return false;

@@ -262,8 +262,12 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 	}
 	case SESSION_OPCODE_SERVER_AUTH: {
 		ServerAuth a;
-		result.decoded = parse_server_auth(body.data(), body.size(), a);
-		if (result.decoded) {
+		// Every 0x82 is decoded: the client reads every one. Like the 0x82s
+		// it drops at the CI / CK match or out of the connect state, one
+		// whose CUs overrun the walk's bounds binds nothing; the client
+		// drops it earlier, at the walk (parse_server_auth refuses it).
+		result.decoded = true;
+		if (parse_server_auth(body.data(), body.size(), a)) {
 			// ServerAuth echoes the client key and carries the server key, so
 			// this is where both directions' routing is bound, as the client
 			// keeps its key: only from an 0x82 that reaches a connecting
@@ -273,7 +277,8 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 			// the capture has no CI to correlate: its first 0x82 binds on a
 			// nonzero CR alone, and later ones drop until a 0x42 reopens it.
 			// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the state-3
-			//  lookup @0x6298E0..0x629901, the CI / CK match @0x629CAC..0x629CBF,
+			//  lookup @0x6298E0..0x629901, the CU bounds' socket-pass return
+			//  @0x629F0B..0x629F12, the CI / CK match @0x629CAC..0x629CBF,
 			//  the CR split @0x629CD2..0x629CD6, the key @0x629D53]
 			const uint64_t id = a.ck ? auth_identity(session_key, a.ck)
 			                         : uint64_t(session_key);

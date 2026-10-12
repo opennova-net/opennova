@@ -136,7 +136,7 @@ int PlayerInfoAvatars::update(MenuRuntime &menu, const avatars::AvatarsFile &fil
 			fill.combos();
 			break;
 		case Change::Combo:
-			// [orig: PlayerInfo_HandleVoiceSelect @0x55fe00, COMBO_LIST registration @0x5615a6]
+			// [orig: PlayerInfo_HandleComboListSelect @0x55fe00, COMBO_LIST registration @0x5615a6]
 			fill.voices();
 			preview_changed = true;
 			break;

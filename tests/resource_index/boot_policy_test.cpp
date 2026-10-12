@@ -83,7 +83,7 @@ void test_mod_is_exp_and_the_name_keeps_32_bytes() {
     CHECK(kExpansionNameMax == 31 && kExpansionNameMax + 1 == kExpansionNameBytes);
 }
 
-// What ends an /exp token on the command line [orig: Terrain_TokenizeConfigLine @ 0x53cb60]: a
+// What ends an /exp token on the command line [orig: Config_TokenizeLine @ 0x53cb60]: a
 // space, tab or comma, a quote, a semicolon; nothing else a name holds.
 void test_launch_token_breaks() {
     for (const char c : {' ', '\t', ',', '"', ';'}) CHECK(launch_token_breaks_at(c));

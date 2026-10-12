@@ -73,14 +73,16 @@ inline int coords_clampi(int v, int lo, int hi) {
 	return v < lo ? lo : (v > hi ? hi : v);
 }
 
-// Quadrant offsets: ids 3,4 sit in the right half (+512 X); ids 2,4 in the
-// bottom half (+512 Z).
+// The quadrant a sector id draws: the id less one, bit 1 the right half (+512 X), bit 0 the bottom half
+// (+512 Z), so ids 3, 4 sit right and 2, 4 at the bottom; a larger id takes its bits as they are
+// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606590..0x60659D; Terrain_GetHeightAtPosition @ 0x60678A;
+// Terrain_SampleHeightBilinear @ 0x6068B7..0x6068C4] (D-TERRAIN-21). No id below 1 draws a quadrant.
 inline int coords_quadrant_offset_x(int sector_id) {
-	return (sector_id == 3 || sector_id == 4) ? COORDS_SECTOR_SIZE : 0;
+	return sector_id > 0 && ((sector_id - 1) & 2) != 0 ? COORDS_SECTOR_SIZE : 0;
 }
 
 inline int coords_quadrant_offset_z(int sector_id) {
-	return (sector_id == 2 || sector_id == 4) ? COORDS_SECTOR_SIZE : 0;
+	return sector_id > 0 && ((sector_id - 1) & 1) != 0 ? COORDS_SECTOR_SIZE : 0;
 }
 
 // Per-quadrant neighbour-tap locks, from the .trn's lock_topleft / lock_topright /
