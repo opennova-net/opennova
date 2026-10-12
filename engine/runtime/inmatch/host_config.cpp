@@ -207,6 +207,10 @@ void store_server_command_config(
 		block.mp_reset = config.multiplayer_reset; // @0x4D2E28
 }
 
+ConnectionMode host_connection_mode(bool serve_and_play) {
+	return serve_and_play ? ConnectionMode::HostClient : ConnectionMode::HostOnly;
+}
+
 ServerCommandOutcome run_host_server_command(NapiNPServerCtx *ctx, world::World *world,
 		ConnectionMode pre_session_mode, gamecfg::GameCfg *block, std::string_view verb,
 		std::string_view target_suffix, const std::vector<std::string> &args) {

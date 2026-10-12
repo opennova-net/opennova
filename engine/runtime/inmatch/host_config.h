@@ -101,6 +101,13 @@ void store_server_command_config(
 //  CNapiGameSession_HandleServerCommand @0x4D22F0 — SetMPReset's lone token
 //  count @0x4D2E12, the other verbs' ctx+0x68 tests (SetServerName's
 //  @0x4D2CE9); the latch CNapiGameSession_CreateSession sets @0x4C9D16]
+// A host's connection mode by its server type: a serve-and-play listen host
+// is host and client (3), a Serve Only host host alone (1)
+// [orig: CGameSession_SetConnectionMode @0x4c49f0; napi_np_server_ctx.h
+//  ConnectionMode]. The mode a session-less context takes before the match
+// binds (run_host_server_command).
+ConnectionMode host_connection_mode(bool serve_and_play);
+
 ServerCommandOutcome run_host_server_command(NapiNPServerCtx *ctx, world::World *world,
 		ConnectionMode pre_session_mode, gamecfg::GameCfg *block, std::string_view verb,
 		std::string_view target_suffix, const std::vector<std::string> &args);

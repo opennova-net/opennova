@@ -150,7 +150,7 @@ void ServeListing::on_command(const ServerCommand &command) {
 	const bool bound = role_ != nullptr && kernel_ != nullptr;
 	const inmatch::ServerCommandOutcome outcome =
 			inmatch::run_host_server_command(bound ? &role_->state.host_owner.ctx : nullptr,
-					bound ? &kernel_->world : nullptr, inmatch::ConnectionMode::HostOnly,
+					bound ? &kernel_->world : nullptr, inmatch::host_connection_mode(false),
 					seams_.config_block, server_command_verb_name(command.verb),
 					server_command_target_name(command.target), command.args);
 	if (!outcome.handled) {

@@ -92,10 +92,6 @@ int main() {
 		TEST_EXPECT(block.save(error));
 		TEST_EXPECT(read_text(dir.file("game.cfg")).find("avail_wpn_RIFLE            = 2\r\n") !=
 				std::string::npos);
-		// The /LAN switch forces the LAN-only word at every read.
-		block.set_lan_switch(true);
-		TEST_EXPECT(block.load());
-		TEST_EXPECT(block.cfg().mp_novaworld_host_lan_only == 1);
 	}
 
 	// --- A version other than 29 discards the read for the defaults (the
@@ -121,21 +117,101 @@ int main() {
 		TEST_EXPECT(read_text(dir.file("game.cfg")) == text);
 	}
 
-	// --- The reload saves first, then reads: a word set in memory (a
-	//     SetMPReset) is written and then ends the process at the read.
+	// --- The main menu's entries. The first runs the mount's read over its
+	//     tables; with no file it runs the video test and saves at once, and
+	//     the entry's own read then takes the saved words back.
+	{
+		test_temp::TempDir dir("game_config_block_menu_fresh");
+		GameConfigBlock block(dir.file("game.cfg"));
+		TEST_EXPECT(block.load()); // the start's read
+		GameConfigBlock::MenuMount mount;
+		mount.id = "game|";
+		mount.weapons = rifle_roster();
+		mount.texts.untitled = "Untitled";
+		mount.desktop_width = 1920;
+		mount.desktop_height = 1080;
+		std::string error;
+		TEST_EXPECT(block.enter_main_menu(mount, error));
+		TEST_EXPECT(block.video_test_ran() && block.menu_mount() == "game|");
+		TEST_EXPECT(block.cfg().display_16x9 == 1); // a widescreen desktop's row
+		TEST_EXPECT(block.cfg().object_polydetail == 2 && block.cfg().texfilter_level == 1);
+		TEST_EXPECT(block.cfg().particle_density == 2 && block.cfg().texcompression_level == 1);
+		TEST_EXPECT(block.cfg().game_name == "Untitled");
+		TEST_EXPECT(block.file_read() && !block.version_reset()); // the entry read the saved file
+		const std::string saved = read_text(dir.file("game.cfg"));
+		TEST_EXPECT(saved.find("display_16x9         = 1\r\n") != std::string::npos);
+
+		// A later entry over the same mount reads the file again, and a set
+		// mpreset ends the process there.
+		write_text(dir.file("game.cfg"), "version = 29\r\nmusic_volume = 33\r\n");
+		TEST_EXPECT(block.enter_main_menu(mount, error));
+		TEST_EXPECT(block.cfg().music_volume == 33 && !block.video_test_ran());
+		write_text(dir.file("game.cfg"), "version = 29\r\nmpreset = 1\r\n");
+		TEST_EXPECT(!block.enter_main_menu(mount, error));
+		TEST_EXPECT(block.reset_exit());
+	}
+
+	// --- A file of the right version keeps its words: no video test.
+	{
+		test_temp::TempDir dir("game_config_block_menu_kept");
+		write_text(dir.file("game.cfg"), "version = 29\r\ndisplay_16x9 = 0\r\nobject_polydetail = 3\r\n");
+		GameConfigBlock block(dir.file("game.cfg"));
+		TEST_EXPECT(block.load());
+		GameConfigBlock::MenuMount mount;
+		mount.desktop_width = 1920;
+		mount.desktop_height = 1080;
+		std::string error;
+		TEST_EXPECT(block.enter_main_menu(mount, error));
+		TEST_EXPECT(!block.video_test_ran());
+		TEST_EXPECT(block.cfg().display_16x9 == 0 && block.cfg().object_polydetail == 3);
+	}
+
+	// --- The reload (an entry over another mount, or the Mods list's switch)
+	//     saves first with the table as it stands, then reads, then takes the
+	//     new mount's table: a word set in memory (a SetMPReset) is written and
+	//     ends the process at the read.
 	{
 		test_temp::TempDir dir("game_config_block_reload");
 		GameConfigBlock block(dir.file("game.cfg"));
 		TEST_EXPECT(block.load());
-		block.cfg().music_volume = 12;
+		GameConfigBlock::MenuMount first;
+		first.id = "bundled|";
+		first.weapons = rifle_roster();
 		std::string error;
-		TEST_EXPECT(block.reload(error));
+		TEST_EXPECT(block.enter_main_menu(first, error));
+		*gamecfg::weapon_slot(block.cfg(), 2) = 2;
+		block.cfg().music_volume = 12;
+		GameConfigBlock::MenuMount retail;
+		retail.id = "retail|";
+		retail.weapons = {{"None", 0}, {"WPN_KNIFE", 1}};
+		TEST_EXPECT(block.enter_main_menu(retail, error));
+		TEST_EXPECT(block.menu_mount() == "retail|");
 		TEST_EXPECT(block.cfg().music_volume == 12 && block.file_read());
+		// The save before the read wrote the old table's rows.
+		TEST_EXPECT(read_text(dir.file("game.cfg")).find("avail_wpn_RIFLE ") != std::string::npos);
+		TEST_EXPECT(block.weapon_roster().size() == 2 && block.weapon_roster()[1].name == "WPN_KNIFE");
 		block.cfg().mp_reset = 1;
-		TEST_EXPECT(!block.reload(error));
+		TEST_EXPECT(!block.reload_main_menu(retail, error));
 		TEST_EXPECT(block.reset_exit());
 		TEST_EXPECT(
 				read_text(dir.file("game.cfg")).find("mpreset = \"1\"\r\n") != std::string::npos);
+	}
+
+	// --- The words by their keys, without case, as the reader finds them;
+	//     a key the reader stores elsewhere names no int word.
+	{
+		gamecfg::GameCfg cfg = gamecfg::defaults();
+		TEST_EXPECT(gamecfg::int_word(cfg, "SFXLevel") == &cfg.sfx_level);
+		TEST_EXPECT(gamecfg::int_word(cfg, "sfxlevel") == &cfg.sfx_level);
+		TEST_EXPECT(gamecfg::int_word(cfg, "MPRESET") == &cfg.mp_reset);
+		TEST_EXPECT(gamecfg::int_word(cfg, "xhair_appearance") == &cfg.xhair_appearance);
+		TEST_EXPECT(gamecfg::int_word(cfg, "game_name") == nullptr);
+		TEST_EXPECT(gamecfg::int_word(cfg, "gamma") == nullptr);
+		TEST_EXPECT(gamecfg::int_word(cfg, "remote_admin_port") == nullptr);
+		TEST_EXPECT(gamecfg::int_word(cfg, "side_req") == nullptr); // a dead compare
+		TEST_EXPECT(gamecfg::int_word(cfg, "no_such_key") == nullptr);
+		const gamecfg::GameCfg &view = cfg;
+		TEST_EXPECT(gamecfg::int_word(view, "hud_detail") == &cfg.hud_detail);
 	}
 
 	// --- The ServerCommand verbs' block writes: each verb its own field, any

@@ -105,6 +105,9 @@ var _quit_requested := false
 var _quit_drain_pending := false
 var _quit_policy_installed := false
 var _process_exit_pending := false  # exit_process ran: the process ends without a save
+## How the process ends with an exit code: empty quits the SceneTree with it.
+## A driver that hosts the shell in its own process (the GUT suite) sets one.
+var process_exit_handler := Callable()
 var _previous_auto_accept_quit := true
 var _shell_presentation := ShellPresentationSessionScript.new()
 # One process-lifetime settings owner feeds both menu surfaces and every world
@@ -697,17 +700,19 @@ func _enter_menu(dir: String) -> bool:
 		push_warning(
 			"MainGame: no menu found in resource dir (looked for %s)" % _menu_shell.main_menu_file
 		)
-	# game.cfg over the mount (GameCfgStore.read_for_mount): the first mount's
-	# read with its weapon table and gametext texts (and the first launch's
-	# video test on a fresh profile), another game's the reload; a read that
-	# sets mpreset ends the process with exit code 0.
-	if not GameCfgStore.read_for_mount(_root):
+	# Every main-menu entry reads game.cfg (GameCfgStore.enter_main_menu): the
+	# first one over the mount's tables, with the first launch's video test on a
+	# fresh profile; an entry over another game is the reload. A read that sets
+	# mpreset ends the process with exit code 0 (docs/gamecfg/game-cfg-re.md,
+	# "The process's block").
+	if not GameCfgStore.enter_main_menu(_root):
 		exit_process(0)
 		return true
 	_player_options.reload()
-	# The player profile loads after the menu's text tables, as the original's
-	# menu start loads game.bin before it (engine: runtime/profile/player_profiles.h).
-	refresh_local_profile_for_mount()
+	# The player profile loads after the menu's text tables and game.cfg, at
+	# every main-menu entry, as the original's menu init loads it
+	# (engine: runtime/profile/player_profiles.h).
+	refresh_local_profile_for_mount(true)
 	_run_intro_tail()
 	_menu_shell.show_menu()
 	return true
@@ -872,11 +877,11 @@ func _wire_shell() -> void:
 func _on_game_reloaded() -> void:
 	# game.cfg is saved and read again over the switch, as the original's
 	# expansion reload does; a read that sets mpreset ends the process.
-	if not GameCfgStore.read_for_mount(_root):
+	if not GameCfgStore.reload_main_menu(_root):
 		exit_process(0)
 		return
 	_player_options.reload()
-	refresh_local_profile_for_mount()
+	refresh_local_profile_for_mount(true)
 
 
 # The in-game options Accept wrote the dialog into the current profile record:
@@ -906,17 +911,17 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 
 
 ## Load the player profile (player.sav, and the mounted expansion's weapon.sav)
-## again when the mounted root or its expansion changed, as the original's menu
-## start loads it; the menu entry and a join's pre-dial switch to the host's
-## expansion both land here, so the next spawn kit and the join's character vars
-## come from the mounted expansion's profile. The menu's text tables must be
-## registered first: a fresh record's macros are the menu table's.
-func refresh_local_profile_for_mount() -> void:
+## again: at every main-menu entry (`force`), as the original's menu init loads
+## it, and at a join's pre-dial switch to the host's expansion when the mounted
+## root or its expansion changed, so the next spawn kit and the join's
+## character vars come from the mounted expansion's profile. The menu's text
+## tables must be registered first: a fresh record's macros are the menu table's.
+func refresh_local_profile_for_mount(force := false) -> void:
 	if _root == null:
 		return
 	var profile_root_key := "%s|%s|%s" % [String(_root.get_root_dir()),
 			String(_root.get_expansion()).to_lower(), String(LaunchFlags.working_dir())]
-	if profile_root_key != _profile_root_key:
+	if force or profile_root_key != _profile_root_key:
 		var load_error := PlayerProfile.load_for(_root)
 		if load_error != OK:
 			push_warning("MainGame: the player profile could not be read (error %d); defaults stand"
@@ -1067,7 +1072,9 @@ func exit_process(code := 0) -> void:
 	begin_runtime_shutdown()
 	finish_runtime_shutdown()
 	_restore_quit_policy()
-	if is_inside_tree():
+	if process_exit_handler.is_valid():
+		process_exit_handler.call(code)
+	elif is_inside_tree():
 		get_tree().quit(code)
 
 
@@ -1076,8 +1083,9 @@ func is_process_exit_pending() -> bool:
 	return _process_exit_pending
 
 
-# A boot whose mount failed ends with exit code 1 after the main loop's save
-# of game.cfg (the read already ran).
+# A mount that failed (at the boot or a return to the menu) ends with exit code
+# 1 after the main loop's save of game.cfg, which every end of the scene loop
+# runs (docs/gamecfg/game-cfg-re.md, the save points).
 func _quit_failed_boot() -> void:
 	GameCfgStore.save()
 	get_tree().quit(1)
@@ -1576,13 +1584,21 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 		novaworld_client = _world.release_novaworld_client() as NovaWorldClient
 	_teardown_world(false)
 	if _root != null and _enter_menu(_root.get_root_dir()):
+		if _process_exit_pending:
+			# The menu entry's read ended the process: the session this exit
+			# kept goes as the exit's teardown takes it, its goodbye burst
+			# alone, and no NovaWorld menu follows.
+			if novaworld_client != null:
+				novaworld_client.disconnect_at_exit()
+				novaworld_client.free()
+			return
 		_net.return_from_mission(novaworld_client, route.error, post_mission_error_text(route))
 		return
 	if novaworld_client != null:
 		novaworld_client.stop()
 		novaworld_client.free()
 	push_warning("OpenNova: the game-data directory is no longer mountable")
-	get_tree().quit(1)
+	_quit_failed_boot()
 
 
 # The world and every presenter over it come down: the menu teardown's head, and

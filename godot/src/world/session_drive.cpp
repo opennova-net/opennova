@@ -858,11 +858,10 @@ void SessionDrive::on_nw_host_server_command(const String &p_verb, const String 
 		std::vector<std::string> args;
 		for (int i = 0; i < p_args.size(); ++i)
 			args.push_back(opennova::to_std(p_args[i]));
-		const bool dedicated = pending_host_.is_valid() && !pending_host_->get_serve_and_play();
+		const bool serve_and_play = pending_host_.is_null() || pending_host_->get_serve_and_play();
 		const opennova::inmatch::ServerCommandOutcome outcome =
 				opennova::inmatch::run_host_server_command(nullptr, nullptr,
-						dedicated ? opennova::inmatch::ConnectionMode::HostOnly
-								  : opennova::inmatch::ConnectionMode::HostClient,
+						opennova::inmatch::host_connection_mode(serve_and_play),
 						block.is_valid() ? &block->native().cfg() : nullptr,
 						opennova::to_std(p_verb), opennova::to_std(p_target), args);
 		result.handled = outcome.handled;

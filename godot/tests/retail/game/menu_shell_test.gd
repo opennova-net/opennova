@@ -343,7 +343,7 @@ func test_fresh_profile_seeds_the_aspect_row_from_the_desktop_ratio() -> void:
 			"a widescreen desktop seeds the widescreen row")
 	var seeded := PlayerOptions.fresh_profile_aspect_mode(PlayerOptions.desktop_size())
 	# No game.cfg: the mount's read finds the defaults and the video test runs.
-	assert_true(GameCfgStore.read_for_mount(null))
+	assert_true(GameCfgStore.enter_main_menu(null))
 	var options := PlayerOptions.new()
 	assert_eq(options.current().aspect_mode, seeded,
 			"a fresh profile seeds the desktop's verdict")

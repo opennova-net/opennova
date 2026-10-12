@@ -335,6 +335,9 @@ static func stage_shell_archives(test: GutTest, dir: String,
 ## caller saves and restores the settings file around the test). The shell is
 ## a plain child: pair with release_shell() in after_each.
 static func boot_shell(test: GutTest) -> MainGame:
+	# A fresh process cfg block: one an earlier test left (an mpreset read
+	# among them) must not end this shell's boot.
+	GameCfgStore.reset()
 	_last_shell_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	test.assert_eq(DirAccess.make_dir_recursive_absolute(_last_shell_dir), OK)

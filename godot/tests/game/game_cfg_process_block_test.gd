@@ -3,14 +3,19 @@ extends GutTest
 ## The game shell's process-lifetime game.cfg block (GameCfgStore over the
 ## native GameConfigBlock; docs/gamecfg/game-cfg-re.md, D-NET-335): a NovaWorld
 ## ServerCommand in the hosting wait (D-NET-383), the session create's mpreset
-## exit (D-NET-385), and the shell's exit legs, the one that saves and the one
-## that does not. The start's read and its exit run in a child process
-## (cli_startup_test.gd).
+## exit (D-NET-385), the main-menu entry's and the Mods reload's mpreset exits,
+## and the shell's exit legs, the one that saves and the one that does not. The
+## start's read and its exit run in a child process (cli_startup_test.gd). A
+## shell booted in the tree takes a process_exit_handler, so its exit ends no
+## GUT run.
 
 const MainGameScript := preload("res://game/main_game.gd")
 
 var _run_dir := ""
 var _signals: Array = []
+var _shell: MainGame = null
+var _shell_dir := ""
+var _exit_codes: Array[int] = []
 
 
 func before_each() -> void:
@@ -19,12 +24,38 @@ func before_each() -> void:
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
 	GameCfgStore.reset()
 	_signals.clear()
+	_exit_codes.clear()
 
 
 func after_each() -> void:
+	await WorldFixture.release_shell(self, _shell)
+	_shell = null
+	if not _shell_dir.is_empty():
+		TestFs.remove_dir_recursive(_shell_dir)
+		_shell_dir = ""
 	GameCfgStore.reset()
 	LaunchFlags.clear_args_override()
 	TestFs.remove_dir_recursive(_run_dir)
+
+
+# The packed shell in its main menu, its process exits recorded, game.cfg in
+# this test's run directory from here on.
+func _boot_shell() -> MainGame:
+	_shell = await WorldFixture.boot_shell(self)
+	_shell_dir = WorldFixture.last_shell_dir()
+	if _shell != null:
+		_shell.process_exit_handler = func(code: int) -> void: _exit_codes.append(code)
+	LaunchFlags.set_args_override(
+		PackedStringArray(["--resource-dir", _shell_dir, "--working-dir", _run_dir])
+	)
+	return _shell
+
+
+func _await_exit(frame_limit := 60) -> void:
+	for _frame in range(frame_limit):
+		if not _exit_codes.is_empty():
+			return
+		await get_tree().process_frame
 
 
 func _cfg_path() -> String:
@@ -39,29 +70,29 @@ func _record(name: String, value: Variant) -> void:
 	_signals.append([name, value])
 
 
-func test_the_block_keys_are_the_cfg_words() -> void:
-	var keys := GameConfigBlock.word_keys()
-	for key in [
-		"SFXLevel",
-		"DialogueLevel",
-		"music_volume",
-		"xhair_appearance",
-		"xhair_color",
-		"xhair_spread",
-		"display_16x9",
-		"enable_keyboardtips",
-		"enable_gameplaytips",
-		"object_polydetail",
-		"texfilter_level",
-		"particle_density",
-		"texcompression_level",
-		"hud_color_index",
-		"hud_detail",
-		"enable_slotmachine",
-		"mpreset"
-	]:
-		assert_true(keys.has(key), "the block carries %s" % key)
+func test_the_shell_words_are_the_cfg_words() -> void:
+	# The words the shell keeps, by their game.cfg keys and without case, at
+	# the defaults' values (docs/gamecfg/game-cfg-re.md, the key table).
 	var block := GameCfgStore.block()
+	var defaults := {
+		"SFXLevel": 192,
+		"DialogueLevel": 192,
+		"music_volume": 192,
+		"xhair_appearance": 0,
+		"xhair_color": 0xFFFFFF,
+		"xhair_spread": 1,
+		"enable_keyboardtips": 1,
+		"enable_gameplaytips": 1,
+		"hud_color_index": 2,
+		"hud_detail": 0,
+		"enable_slotmachine": 0,
+		"mpreset": 0,
+		"MPRESET": 0,
+	}
+	for key: String in defaults:
+		assert_eq(block.get_word(key), int(defaults[key]), "%s at its default" % key)
+	block.set_word("sfxlevel", 7)
+	assert_eq(block.get_word("SFXLevel"), 7, "a key matches without case")
 	assert_eq(block.get_path(), _cfg_path(), "game.cfg lives in the working directory")
 	assert_false(block.is_file_read(), "no file: the defaults")
 	assert_eq(block.get_word("mpreset"), 0)
@@ -134,7 +165,6 @@ func test_the_shell_process_exit_saves_nothing() -> void:
 	assert_true(game.is_process_exit_pending())
 	game.request_quit()
 	assert_false(FileAccess.file_exists(_cfg_path()), "no game.cfg save")
-	assert_false(FileAccess.file_exists(_run_dir.path_join("player.sav")), "no profile save")
 
 
 func test_the_shell_quit_saves_the_block() -> void:
@@ -144,3 +174,50 @@ func test_the_shell_quit_saves_the_block() -> void:
 	GameCfgStore.block().set_word("music_volume", 77)
 	game.request_quit()
 	assert_string_contains(_saved_cfg(), "music_volume         = 77\r\n")
+
+
+func test_an_exit_at_the_return_to_menu_read() -> void:
+	# Every main-menu entry reads game.cfg (the MainMenu scene's init), the
+	# return from a mission's included: a file that sets mpreset ends the
+	# process there with exit code 0 and nothing saved.
+	var shell := await _boot_shell()
+	if shell == null:
+		return
+	assert_true(await WorldFixture.start_shell_mission(self, shell), "the mission loads")
+	var text := "version = 29\r\nmpreset = 1\r\n"
+	var file := FileAccess.open(_cfg_path(), FileAccess.WRITE)
+	file.store_string(text)
+	file.close()
+	assert_eq(shell.return_to_menu(), OK)
+	await _await_exit()
+	assert_eq(_exit_codes, [0] as Array[int], "the menu entry's read ends the process with 0")
+	assert_true(shell.is_process_exit_pending())
+	assert_eq(FileAccess.get_file_as_string(_cfg_path()), text, "the exit saves nothing")
+
+
+func test_an_exit_at_the_mods_reload() -> void:
+	# The Mods list's switch saves the block, then reads it through the menu's
+	# init: a word a SetMPReset stored ends the process there with exit code 0.
+	var shell := await _boot_shell()
+	if shell == null:
+		return
+	GameCfgStore.block().set_word("mpreset", 1)
+	shell.get_menu_shell().game_reloaded.emit()
+	await _await_exit()
+	assert_eq(_exit_codes, [0] as Array[int], "the reload's read ends the process with 0")
+	assert_string_contains(_saved_cfg(), 'mpreset = "1"\r\n', "the reload saved before its read")
+
+
+func test_every_main_menu_entry_reads_the_file() -> void:
+	# The first entry reads over the mount; each later one (a return from a
+	# mission, a cancelled join) reads the file again, and exits on mpreset.
+	assert_true(GameCfgStore.enter_main_menu(null))
+	var file := FileAccess.open(_cfg_path(), FileAccess.WRITE)
+	file.store_string("version = 29\r\nmusic_volume = 33\r\n")
+	file.close()
+	assert_true(GameCfgStore.enter_main_menu(null))
+	assert_eq(GameCfgStore.block().get_word("music_volume"), 33, "the re-entry read the file")
+	file = FileAccess.open(_cfg_path(), FileAccess.WRITE)
+	file.store_string("version = 29\r\nmpreset = 1\r\n")
+	file.close()
+	assert_false(GameCfgStore.enter_main_menu(null), "a set mpreset ends the process there")

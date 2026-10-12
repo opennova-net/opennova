@@ -365,8 +365,7 @@ Simulation::ServerCommandResult Simulation::execute_server_command(const String 
 	const opennova::inmatch::ServerCommandOutcome outcome =
 			opennova::inmatch::run_host_server_command(ctx,
 					kernel_ != nullptr ? &kernel_->world : nullptr,
-					net_.host_serve_and_play ? opennova::inmatch::ConnectionMode::HostClient
-											 : opennova::inmatch::ConnectionMode::HostOnly,
+					opennova::inmatch::host_connection_mode(net_.host_serve_and_play),
 					net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr,
 					opennova::to_std(p_verb), opennova::to_std(p_target), args);
 	out.handled = outcome.handled;

@@ -233,22 +233,6 @@ func _load_state() -> State:
 	)
 
 
-## The first launch's video test over a fresh profile: the words it decides
-## written into `config` (GameCfgStore saves the block at once, as the test
-## does). The aspect word is the primary desktop's ratio, the graphics words the
-## fresh profile's rungs (GameWorld re-exports the engine's). Retail runs the
-## test when the cfg's adapter name or GUID differs from the device's, which a
-## missing game.cfg always does; OpenNova keeps no adapter identity, so the
-## fresh profile is the read that found no file or discarded it for its version
-## (docs/gamecfg/game-cfg-re.md "The process's block", D-GAMECFG-3).
-static func seed_fresh_profile(config: GameConfigBlock) -> void:
-	config.set_word(ASPECT_MODE_KEY, fresh_profile_aspect_mode(desktop_size()))
-	config.set_word(OBJECT_POLYDETAIL_KEY, GameWorld.object_detail_fresh_profile())
-	config.set_word(TEXFILTER_LEVEL_KEY, GameWorld.texfilter_level_fresh_profile())
-	config.set_word(PARTICLE_DENSITY_KEY, GameWorld.particle_density_fresh_profile())
-	config.set_word(TEXCOMPRESSION_LEVEL_KEY, GameWorld.texcompression_level_fresh_profile())
-
-
 static func _normalized(state: State) -> State:
 	return State.new(
 			_clamp_to_control(state.sound_fx_volume, SOUND_FX_VOLUME_CONTROL),

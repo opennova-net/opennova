@@ -171,7 +171,7 @@ func test_fresh_profile_seeds_the_video_test_words_once() -> void:
 	assert_eq(PlayerOptions.fresh_profile_aspect_mode(Vector2i(1920, 1080)), 1)
 	var seeded := PlayerOptions.fresh_profile_aspect_mode(PlayerOptions.desktop_size())
 	# No game.cfg: the mount's read finds the defaults, and the video test runs.
-	assert_true(GameCfgStore.read_for_mount(null))
+	assert_true(GameCfgStore.enter_main_menu(null))
 	var state := PlayerOptions.new().current()
 	assert_eq(state.aspect_mode, seeded, "a fresh profile carries the desktop's verdict")
 	assert_eq(state.object_polydetail, GameWorld.object_detail_fresh_profile())
@@ -190,7 +190,7 @@ func test_fresh_profile_seeds_the_video_test_words_once() -> void:
 	# Saved, the words are read back and the desktop never re-sampled: a
 	# profile carrying the other row keeps it.
 	_write_cfg(["display_16x9 = %d" % (1 - seeded), "object_polydetail = 0"])
-	assert_true(GameCfgStore.read_for_mount(null))
+	assert_true(GameCfgStore.enter_main_menu(null))
 	assert_eq(
 		PlayerOptions.new().current().aspect_mode, 1 - seeded, "a saved word wins over the desktop"
 	)
