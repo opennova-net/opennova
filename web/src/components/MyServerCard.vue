@@ -8,6 +8,14 @@
         <h2 :id="ids.name" class="truncate text-2xl font-semibold text-ink">
           {{ server.server_name || 'Unnamed server' }}
         </h2>
+        <p v-if="isHosted" class="mt-1 text-sm">
+          <RouterLink
+            to="/me/server"
+            class="inline-flex items-center gap-2 rounded-control bg-accent/15 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-accent hover:bg-accent/25"
+          >
+            Your hosted server<span class="sr-only">: open its page</span>
+          </RouterLink>
+        </p>
         <p class="mt-1 text-sm text-ink-muted">
           <span class="text-ink">{{ server.mission_name || 'No mission yet' }}</span>
           <span v-if="server.game_type"> · {{ server.game_type }}</span>
@@ -219,8 +227,22 @@
       </div>
     </section>
 
+    <!-- A hosted server's listing: its stop is the hosted server's own, from its page. -->
+    <section
+      v-if="isHosted"
+      class="space-y-3 rounded-panel border border-border p-4"
+      :aria-labelledby="ids.stop"
+    >
+      <h3 :id="ids.stop" class="text-lg font-semibold text-ink">Stop hosting</h3>
+      <p class="text-sm text-ink-muted">
+        This listing is your hosted server. Stop it from its page, where you can follow it until its
+        machine has shut down.
+      </p>
+      <RouterLink to="/me/server" :class="secondaryButton" class="inline-block">Open my hosted server</RouterLink>
+    </section>
+
     <!-- ServerStopHosting (MsgCode 7) -->
-    <section class="space-y-3 rounded-panel border border-danger/40 p-4" :aria-labelledby="ids.stop">
+    <section v-else class="space-y-3 rounded-panel border border-danger/40 p-4" :aria-labelledby="ids.stop">
       <h3 :id="ids.stop" class="text-lg font-semibold text-danger">Stop hosting</h3>
       <p class="text-sm text-ink-muted">
         Ends the running match for everyone on the server: every player is dropped, the server
@@ -265,9 +287,11 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 import { sendServerCommand, stopHosting, type HostError } from '../api/myServers';
 import type { MyServer, OwnerVerb, RosterSlot, ServerCommandBody } from '../types/myServers';
 import { cp1252Length, cp1252Problem } from '../utils/cp1252';
+import { ago as agoAt, isoOf, localOf } from '../utils/utcTime';
 
 const props = defineProps<{
   server: MyServer;
@@ -345,24 +369,12 @@ function teamLabel(team: string): string {
   return TEAM_NAMES[team] ?? team;
 }
 
-// 'YYYY-MM-DD HH:MM:SS' UTC as an ISO instant.
-function isoOf(utc: string): string {
-  return `${utc.replace(' ', 'T')}Z`;
-}
-
-function localOf(utc: string): string {
-  const t = Date.parse(isoOf(utc));
-  return Number.isNaN(t) ? utc : new Date(t).toLocaleString();
-}
+// A listing of one of the account's hosted servers (its service account's):
+// its stop is the hosted server's own, from /me/server.
+const isHosted = computed(() => props.server.hosted_server_id != null);
 
 function ago(utc: string): string {
-  const t = Date.parse(isoOf(utc));
-  if (Number.isNaN(t)) return utc;
-  const seconds = Math.max(0, Math.round((props.now - t) / 1000));
-  if (seconds < 60) return `${seconds} s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
-  return `${Math.floor(seconds / 86400)} d ago`;
+  return agoAt(utc, props.now);
 }
 
 function fail(form: string, error: HostError) {

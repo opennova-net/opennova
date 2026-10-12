@@ -4,10 +4,12 @@ import LoginPage from '../pages/LoginPage.vue';
 import RegisterPage from '../pages/RegisterPage.vue';
 import LobbyPage from '../pages/LobbyPage.vue';
 import MyServersPage from '../pages/MyServersPage.vue';
+import HostedServerPage from '../pages/HostedServerPage.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
 import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
+import HostedSection from '../pages/admin/HostedSection.vue';
 import { requireUser } from './guards';
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
@@ -20,6 +22,7 @@ const router = createRouter({
     { path: '/register', component: RegisterPage },
     { path: '/lobby', component: LobbyPage },
     { path: '/me/servers', component: MyServersPage, meta: { requiresUser: true } },
+    { path: '/me/server', component: HostedServerPage, meta: { requiresUser: true } },
     {
       path: '/admin',
       component: AdminLayout,
@@ -27,7 +30,8 @@ const router = createRouter({
         { path: '', redirect: '/admin/users' },
         { path: 'users', component: UsersSection },
         { path: 'server', component: ServerStatusSection },
-        { path: 'connections', component: ConnectionsSection }
+        { path: 'connections', component: ConnectionsSection },
+        { path: 'hosted', component: HostedSection }
       ]
     }
   ],

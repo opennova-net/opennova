@@ -26,6 +26,17 @@ void text_or_null(crow::json::wvalue &out, const char *key, const std::string &t
 		out[key] = text;
 }
 
+// A JSON list of strings.
+std::vector<crow::json::wvalue> text_list(const std::vector<std::string> &texts) {
+	std::vector<crow::json::wvalue> out;
+	for (const std::string &t : texts) {
+		crow::json::wvalue item;
+		item = t;
+		out.push_back(std::move(item));
+	}
+	return out;
+}
+
 crow::json::wvalue settings_json(const HostedSettings &s) {
 	crow::json::wvalue out;
 	out["game_name"] = s.game_name;
@@ -38,13 +49,7 @@ crow::json::wvalue settings_json(const HostedSettings &s) {
 	out["start_delay"] = s.start_delay;
 	out["team_ff"] = s.team_ff;
 	out["expansion"] = s.expansion;
-	std::vector<crow::json::wvalue> missions;
-	for (const std::string &m : s.missions) {
-		crow::json::wvalue item;
-		item = m;
-		missions.push_back(std::move(item));
-	}
-	out["missions"] = std::move(missions);
+	out["missions"] = text_list(s.missions);
 	return out;
 }
 
@@ -152,7 +157,9 @@ void HostedRoutes::register_routes(WebApp &app) {
 
 // GET /api/me/server — the logged-in account's hosted server: {"enabled" (this
 // service runs hosted servers), "can_host" (an admin approved the account),
-// "server"}, the server its live one, else its newest ended one, else null:
+// "default_missions" (ONNET_HOSTED_MISSIONS: the rotation a start takes when it
+// names none, and the missions the site's rotation picker offers), "server"},
+// the server its live one, else its newest ended one, else null:
 // {id, state, live, settings, restarts, failure_reason, created_at, updated_at,
 // running_at, ended_at (UTC, null until set), listing ({rid, server_name,
 // mission_name, players, max_players, host_ip, host_port} while listed, else
@@ -168,6 +175,7 @@ crow::response HostedRoutes::me_server(const crow::request &req) {
 		out["enabled"] = enabled_;
 		const auto user = get_user_by_id(*db_conn, access.user->id);
 		out["can_host"] = user && user->can_host;
+		out["default_missions"] = text_list(default_missions_);
 		if (const auto server = latest_server_of(*db_conn, access.user->id)) {
 			crow::json::wvalue e = server_json(*db_conn, *server, false);
 			std::vector<crow::json::wvalue> events;
