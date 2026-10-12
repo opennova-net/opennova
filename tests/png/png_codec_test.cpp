@@ -160,7 +160,18 @@ int test_png_encode() {
 	std::string error;
 	TEST_EXPECT(decode_png(bytes, back, error) && back.width == 5 && back.height == 3 && back.pixels == image.pixels);
 	TEST_EXPECT(encode_png_rgba(image.pixels.data(), 0, 3).empty() && encode_png_rgba(nullptr, 5, 3).empty());
-	std::printf("encode: an RGBA image written and read back as it was\n");
+	// A palette image (colour type 3): its indices and its palette's entries read back as written.
+	const std::vector<uint8_t> indices = {0, 1, 2, 3, 19, 2, 1, 0, 7, 7};
+	std::vector<uint8_t> palette;
+	for (int i = 0; i < 20; ++i) palette.insert(palette.end(), {uint8_t(i * 10), uint8_t(200 - i), uint8_t(i * 3)});
+	const std::vector<uint8_t> indexed = encode_png_indexed(indices.data(), 5, 2, palette.data(), 20);
+	TEST_EXPECT(png_header_size(indexed, width, height) && width == 5 && height == 2 && indexed[25] == 3);
+	IndexedImage8 read;
+	TEST_EXPECT(decode_png(indexed, back, error, &read) && read.width == 5 && read.height == 2 && read.indices == indices);
+	TEST_EXPECT(read.palette[19][0] == 190 && read.palette[19][1] == 181 && read.palette[19][2] == 57);
+	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 0).empty() &&
+	            encode_png_indexed(indices.data(), 5, 2, palette.data(), 257).empty());
+	std::printf("encode: an RGBA image and a palette image written and read back as they were\n");
 	return 0;
 }
 
