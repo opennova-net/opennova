@@ -66,6 +66,10 @@ struct ViewportDeviceReport {
 	io::JsonValue drawn;
 	// The last heights patch it took (a mission's terrain, S25: MissionViewport::heights_patches), 0 none.
 	uint64_t heights_taken = 0;
+	// The last maps patch it took (a terrain's maps and placed tiles, S25: MapsDevicePatch), 0 none, and whether one
+	// could not be taken (its picture is made again).
+	uint64_t maps_taken = 0;
+	bool maps_refused = false;
 };
 
 // Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas

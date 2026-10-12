@@ -318,6 +318,8 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 	// The surface and foliage maps (S25 B4): the regions written into what the game's load keeps of them, in place
 	// (TerrainFieldStore::patch_charmap, patch_foliage_mask_raster), never reading the files again per dab.
 	if (patch.plane != TerrainPlane::Surface && patch.plane != TerrainPlane::Foliage) return false;
+	// A ground not read yet holds nothing to patch: its first follow reads the document's state.
+	if (!read_once_) return true;
 	const RasterDocument *raster = document.as_raster();
 	if (patch.whole || !raster || raster->plane_count() != 1 || raster->plane(0).format() != RasterFormat::U8) return false;
 	const RasterPlane &plane = raster->plane(0);
@@ -335,6 +337,22 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 	}
 	if (!patch.regions.empty()) ++revision_;
 	return true;
+}
+
+void MissionGround::retile(const FileSource &files, const std::string &took, const std::vector<uint8_t> &bytes,
+                           const std::vector<std::string> &names) {
+	if (!store_.valid()) return;
+	// As read_ takes them: the char map's tiles (terrain::surface_tiles_from_til_bytes) and the foliage blocker's.
+	tiles_.clear();
+	placed_ = TilFile();
+	tiles_file_ = took;
+	if (!took.empty()) {
+		tiles_ = terrain::surface_tiles_from_til_bytes(bytes);
+		std::string til_error;
+		if (!load_til(bytes.data(), bytes.size(), placed_, til_error)) placed_ = TilFile();
+	}
+	restamp(files, names);
+	++revision_;
 }
 
 void MissionGround::restamp(const FileSource &files, const std::vector<std::string> &names) {

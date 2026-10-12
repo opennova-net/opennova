@@ -310,8 +310,9 @@ int test_stroke(const std::string &repo) {
 	TEST_EXPECT(viewport->followed_ground(view).terrain_at(8.0, 0.0, 0.0).surface == 12);
 	rig.session.handle(request::end_edit("Tmap.trn", gesture));
 	frame();
-	TEST_EXPECT(viewport->builds() == builds + 1);
-	std::printf("stroke: an Update while it goes (no serialization, no build), the ground patched; a build at its end\n");
+	// None at its end either: the device takes the surface map in place (S25, the maps and the tiles).
+	TEST_EXPECT(viewport->builds() == builds);
+	std::printf("stroke: an Update while it goes (no serialization, no build), the ground patched; none at its end\n");
 	return 0;
 }
 

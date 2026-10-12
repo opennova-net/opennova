@@ -220,6 +220,11 @@ public:
 	const FileStamps *picture_reads() const override { return &picture_.files(); }
 	// S25: the map's last follow's patches of the terrain files it reads, during a stroke (TerrainStrokeFollow).
 	const TerrainPatches &terrain_patches() const { return stroke_.patches(); }
+	// S25 (the maps and the tiles): the placed tiles the game reads for the mission (its <mission>.til, else the
+	// terrain's own: its ground's read), in file order, which the device draws over the map as MED's 2D view draws
+	// them; and a serial that moves when they do (an Update).
+	const TilFile &placed_tiles() const { return terrain_.placed(); }
+	uint64_t tiles_serial() const { return tiles_serial_; }
 	const char *units() const override { return "pixels"; }
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
@@ -283,6 +288,8 @@ private:
 	mutable MissionGround terrain_;
 	MissionMapTerrainView terrain_view_;
 	TerrainStrokeFollow stroke_; // S25: the ground patched in place during a stroke
+	uint64_t tiles_serial_ = 0;  // S25: moves with the placed tiles drawn
+	uint64_t tiles_hash_ = 0;    // what they were when it last moved
 	MissionOutlineCache outlines_;
 	std::vector<MissionMapFootprint> footprints_;
 	std::vector<float> lines_;

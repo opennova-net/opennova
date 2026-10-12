@@ -250,6 +250,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_patch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_heights_patch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_maps_patch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_map_target.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/tile_commands.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_view_commands.cpp

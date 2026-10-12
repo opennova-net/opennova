@@ -83,10 +83,16 @@ private:
 // gesture_feeding_), patches its ground in place from the documents' changes (MissionGround::patch) and takes their new
 // stamps, never reading them again whole per dab; the frame's patches kept for its device. Where a change cannot be
 // patched (read again, a whole change, a plane the ground cannot patch) the caller reads the files again as before.
-// Out of a stroke it follows the documents' states, patching the heights alone (a bake's landing, an undo or redo of a
-// sculpt: the device patches its terrain, S25 A4), so a stroke's first patch is against the state drawn.
+// Out of a stroke it follows the documents' states, patching the planes its device patches in place alone (a bake's
+// landing, an undo or redo of a sculpt or a paint: the device patches its terrain, S25 A4 and the maps), so a stroke's
+// first patch is against the state drawn.
 class TerrainStrokeFollow {
 public:
+	// `in_place`: the planes (a bit each, terrain_plane_bit) the view's device patches in place, in a stroke and out of
+	// one (an undo, a redo, a bake's landing): the heights (S25 A4), and for the mission's and the terrain's 3D views
+	// the colour, blend and surface maps too (S25, the maps: TerrainMapsFollow). A patch of another plane makes the
+	// picture again at the stroke's end (patched()), and out of a stroke is read again as before.
+	explicit TerrainStrokeFollow(uint32_t in_place = terrain_plane_bit(TerrainPlane::Heights)) : in_place_(in_place) {}
 	// The family of `document` (its view: a mission or a terrain) followed; `stroking`: a gesture feeds the picture now.
 	// True when the ground holds every change since (each patched, or none), the patched files' names in `names` (for
 	// the picture's own stamps: PreviewFollow::restamp). False: the caller reads again.
@@ -95,8 +101,8 @@ public:
 	// The last follow's patches (each file once, its regions), and a serial that moves with each patch: the device takes
 	// a frame's once.
 	const TerrainPatches &patches() const { return patches_; }
-	// A map's patch went in since the picture was last made: the stroke's end makes it again (the heights' the device
-	// patches).
+	// A patch of a plane the device does not patch in place went in since the picture was last made: the stroke's end
+	// makes it again.
 	bool patched() const { return patched_; }
 	void made() { patched_ = false; }
 	void clear() {
@@ -106,6 +112,7 @@ public:
 	}
 
 private:
+	uint32_t in_place_;
 	TerrainFamilyFollow follow_;
 	TerrainPatches patches_;
 	bool patched_ = false;

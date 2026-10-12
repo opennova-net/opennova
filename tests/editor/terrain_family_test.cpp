@@ -344,10 +344,11 @@ int test_stroke_follows() {
 	TEST_EXPECT(assets->serializations() == serialized && !rebuilt && view3d->ground_reader().reads() == reads);
 	TEST_EXPECT(!view3d->terrain_patches().empty());
 	TEST_EXPECT(view3d->ground_reader().terrain_at(8.0, 0.0, 0.0).surface == 12);
-	// The stroke's end: the pictures made again.
+	// The stroke's end: the 3D view's device took the surface map in place (S25, the maps and the tiles: no build); the
+	// 2D map makes its picture again.
 	session.handle(request::end_edit(mission, gesture));
 	const auto ended = frame();
-	TEST_EXPECT(ended.first == ViewportAction::Rebuild && ended.second == ViewportAction::Rebuild);
+	TEST_EXPECT(ended.first != ViewportAction::Rebuild && ended.second == ViewportAction::Rebuild);
 	// The brush's drag over the wire names no record (id 0): a sample of a stroke at the map's pixel, its gesture
 	// answered; a move's id 0 still refused.
 	{

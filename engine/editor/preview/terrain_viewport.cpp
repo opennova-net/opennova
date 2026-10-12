@@ -360,6 +360,11 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	if (stroke_.follow(view, *terrain, stroking, ground_, *view.findings.assets, patched) && !patched.empty())
 		picture_.restamp(*view.findings.assets, patched);
 	follow_ground_(view);
+	// S25 (the maps and the tiles): the colour, blend and surface maps the follow patched and the placed tiles' move,
+	// queued for the device with their files' stamps, the picture taking them: an Update.
+	std::vector<std::string> mapped;
+	const bool painted = maps_.take(view, stroke_.patches(), tiles_read_(), ground_, mapped);
+	if (!mapped.empty()) picture_.restamp(*view.findings.assets, mapped);
 	const bool overlaid = follow_overlay_(view);
 	// Framed once the ground is read; framed again where the fog it was framed in moved (the project's references
 	// read after the first follow name the mission and its environment) while no one moved the camera since.
@@ -377,9 +382,9 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	const uint64_t generation = view.findings.assets->generation();
 	const PreviewFollow::Key key{ 0, layout_serial_ };
 	const bool moved = input.change != ChangeClass::None || edited;
-	// The stroke ended over a picture its device did not patch: made again now.
-	if (!stroking && stroke_.patched()) {
-		stroke_.made();
+	// The stroke ended over a picture its device did not patch, or the device could not take a patch: made again now.
+	if (!stroking && (stroke_.patched() || maps_.stale())) {
+		made_(view);
 		options_moved_ = false;
 		missing_.clear();
 		return picture_.built(FileStamps());
@@ -387,7 +392,7 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	switch (picture_.follow(key, moved, files, generation)) {
 	case PreviewFollow::Found::Same:
 		shown(*terrain);
-		if (options_moved_ || overlaid) {
+		if (options_moved_ || overlaid || painted) {
 			options_moved_ = false;
 			return ViewportAction::Update;
 		}
@@ -395,16 +400,21 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	case PreviewFollow::Found::Files:
 		options_moved_ = false;
 		missing_.clear();
-		stroke_.made();
+		made_(view);
 		return picture_.built(FileStamps());
 	case PreviewFollow::Found::Anew: break;
 	}
 	picture_.show(key, generation);
 	shown(*terrain);
-	stroke_.made();
+	made_(view);
 	options_moved_ = false;
 	missing_.clear();
 	return picture_.built(FileStamps());
+}
+
+void TerrainViewport::made_(const SessionView &view) {
+	stroke_.made();
+	maps_.built(view, tiles_read_());
 }
 
 bool TerrainViewport::takes_(const std::string &member) const {
@@ -436,6 +446,8 @@ void TerrainViewport::apply_(const io::JsonValue &json, PreviewClock &) {
 
 bool TerrainViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
+	// The maps' and the tiles' patches the device took (S25); one it could not take makes the picture again.
+	maps_.taken(report.maps_taken, report.maps_refused);
 	bool moved = surface_ != report.surface;
 	surface_ = report.surface;
 	drawn_ = report.drawn;

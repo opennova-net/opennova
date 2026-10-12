@@ -50,6 +50,12 @@ bool texture_paintable(const RasterState &state);
 // What the form is in a modder's words where no brush paints it ("" where one does): why the brush is refused.
 std::string texture_unpaintable_words(const std::string &path, const RasterState &state);
 
+// A rectangle of a paintable texture's plane as 8-bit RGBA texels, row-major, the top row first (S25: what a device
+// patches into the map it loaded): true colour as it stands (alpha 255 where the plane holds none), an index its
+// palette's colour (a PCX's, a palette PNG's), a grey level that grey. False, `out` empty, where no brush paints the
+// form or the rectangle leaves the plane.
+bool texture_rgba_rect(const RasterState &state, int x, int y, int w, int h, std::vector<uint8_t> &out);
+
 // The texture's file read into a state (`path` picks the reader the game's loaders pick by name) and written back.
 // Every file reads (Whole where no plane holds it); a write of a Whole state is its bytes.
 RasterState read_texture_state(const std::string &path, const std::vector<uint8_t> &bytes);

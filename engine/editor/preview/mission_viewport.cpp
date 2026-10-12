@@ -542,6 +542,12 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	const bool stroking = gesture_held_(input) != 0;
 	std::vector<std::string> patched;
 	if (stroke_.follow(view, *document, stroking, terrain_ground_, files, patched) && !patched.empty()) picture_.restamp(files, patched);
+	// S25 (the maps and the tiles): the colour, blend and surface maps the follow patched and the placed tiles' move,
+	// queued for the device with their files' stamps, the picture taking them: an Update, the device patching its
+	// terrain in place.
+	std::vector<std::string> mapped;
+	const bool painted = maps_.take(view, stroke_.patches(), tiles_read_(), terrain_ground_, mapped);
+	if (!mapped.empty()) picture_.restamp(files, mapped);
 	if (!stroking && stroke_.patched()) {
 		stroke_.made();
 		fog_reach_ = mission_fog_reach(files, scene_.header());
@@ -571,7 +577,8 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// What the mission sounds like at the camera (DI-36): the device plays the channels as they stand each frame.
 	follow_listen_(view, document, clock);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
-	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files || (heights_stale_ && !stroking)) {
+	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files ||
+			((heights_stale_ || maps_.stale()) && !stroking)) {
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		options_moved_ = false;
 		heights_built_(view, *document);
@@ -583,7 +590,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		heights_built_(view, *document);
 		return ViewportAction::Rebuild;
 	}
-	if (!delta.moved && !options_moved_ && !posed && !overlaid && !sculpted) return ViewportAction::Keep;
+	if (!delta.moved && !options_moved_ && !posed && !overlaid && !sculpted && !painted) return ViewportAction::Keep;
 	options_moved_ = false;
 	return ViewportAction::Update;
 }
@@ -707,6 +714,13 @@ void MissionViewport::heights_built_(const SessionView &view, const DocumentBase
 	heights_patches_.clear();
 	heights_built_serial_ = heights_serial_;
 	heights_stale_ = false;
+	// The maps' and the placed tiles' too (S25: the device reads the files as they stand).
+	maps_.built(view, tiles_read_());
+}
+
+TilesRead MissionViewport::tiles_read_() const {
+	// The mission's own name: the game reads <mission>.til, the name cut at its first dot (mission_base_name).
+	return TilesRead{mission::mission_base_name(path()), scene_.header().terrain, scene_.header().environment};
 }
 
 bool MissionViewport::report_(const ViewportDeviceReport &report) {
@@ -715,6 +729,8 @@ bool MissionViewport::report_(const ViewportDeviceReport &report) {
 	heights_patches_.erase(std::remove_if(heights_patches_.begin(), heights_patches_.end(),
 			[&](const HeightsDevicePatch &patch) { return patch.serial <= report.heights_taken; }),
 			heights_patches_.end());
+	// The maps' and the tiles' (S25); one it could not take makes the picture again.
+	maps_.taken(report.maps_taken, report.maps_refused);
 	missing_ = report.missing;
 	ground_ = report.surface;
 	// What it drew this frame (the foliage, the lights): read on the wire, moving nothing.

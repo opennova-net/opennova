@@ -195,6 +195,41 @@ std::string texture_unpaintable_words(const std::string &path, const RasterState
 	return "a form no brush paints";
 }
 
+bool texture_rgba_rect(const RasterState &state, int x, int y, int w, int h, std::vector<uint8_t> &out) {
+	out.clear();
+	if (!texture_paintable(state)) return false;
+	const RasterPlane &plane = state.planes.front();
+	if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > plane.width() || y + h > plane.height()) return false;
+	const TextureSide &side = *texture_side(state);
+	// An index plane's colours: a PCX's palette and a palette PNG's; a grey PNG's levels.
+	const bool grey = side.form == TextureSide::Form::Png && side.png_colour == 0;
+	std::vector<uint8_t> texels(size_t(w) * size_t(h) * size_t(plane.texel_bytes()));
+	plane.copy_rect(x, y, w, h, texels.data());
+	out.resize(size_t(w) * size_t(h) * 4);
+	for (size_t i = 0, n = size_t(w) * size_t(h); i < n; ++i) {
+		uint8_t *rgba = &out[i * 4];
+		switch (plane.format()) {
+		case RasterFormat::Rgb8:
+			rgba[0] = texels[i * 3];
+			rgba[1] = texels[i * 3 + 1];
+			rgba[2] = texels[i * 3 + 2];
+			rgba[3] = 255;
+			break;
+		case RasterFormat::Rgba8: std::copy_n(&texels[i * 4], 4, rgba); break;
+		case RasterFormat::U8: {
+			const uint8_t index = texels[i];
+			for (int c = 0; c < 3; ++c) rgba[c] = grey ? index : side.palette[size_t(index) * 3 + size_t(c)];
+			rgba[3] = 255;
+			break;
+		}
+		default:
+			out.clear();
+			return false;
+		}
+	}
+	return true;
+}
+
 RasterState read_texture_state(const std::string &path, const std::vector<uint8_t> &bytes) {
 	RasterState out;
 	std::vector<SourceIssue> issues;

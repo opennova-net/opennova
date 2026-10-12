@@ -6,6 +6,7 @@
 #include <variant>
 
 #include <base/io/fixed.h>
+#include <base/io/hash.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
@@ -580,6 +581,22 @@ std::string MissionMapViewport::camera_change(const MissionMapCamera &camera) co
 
 void MissionMapViewport::follow_ground_(const SessionView &view) {
 	followed_terrain(view);
+	// S25: the placed tiles the device draws over the map, followed by what they hold (the file taken, each record).
+	uint64_t hash = io::kFnv1a64Offset;
+	const auto mix = [&hash](uint64_t value) {
+		for (int i = 0; i < 8; ++i) hash = (hash ^ ((value >> (8 * i)) & 0xFFu)) * io::kFnv1a64Prime;
+	};
+	for (const char c : terrain_.tiles_file()) mix(uint8_t(c));
+	for (const TilOverlayEntry &entry : terrain_.placed().entries) {
+		mix(uint32_t(entry.x_fixed));
+		mix(uint32_t(entry.z_fixed));
+		mix(uint64_t(entry.tile_index) | uint64_t(entry.flags) << 8);
+	}
+	if (hash != tiles_hash_) {
+		tiles_hash_ = hash;
+		++tiles_serial_;
+		moved_ = true;
+	}
 	MissionMapGround ground;
 	ground.terrain = scene_.header().terrain;
 	// The header's RotateMap180: the CMAP turned half a turn (MissionMapView::flip_180).

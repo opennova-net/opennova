@@ -226,7 +226,9 @@ void TerrainViewportApplier::plan_(Build &build, const TerrainViewport &model) {
 		build.units.push_back(Unit{ Unit::Kind::Environment });
 	}
 	if (build.terrain) {
-		// The .trn parsed as the load begins (its units planned then); a terrain that does not load is a note.
+		// The .trn parsed as the load begins (its units planned then); a terrain that does not load is a note. The maps
+		// and tiles it reads hold every paint's and tile edit's patch the viewport made so far (S25).
+		terrain_patches_.maps_built(model.maps_built_serial());
 		layer_missing_[kTerrain].clear();
 		loading_.unref();
 		const String trn = opennova::to_gd(terrain_key.terrain) + ".trn";
@@ -457,6 +459,19 @@ opennova::editor::OperationProgress TerrainViewportApplier::progress() const {
 // --- the state -----------------------------------------------------------------------------------
 
 void TerrainViewportApplier::update(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &) {
+	// S25 (the maps and the tiles): a paint's regions and the placed tiles into the terrain built, in place, each
+	// file's read taking the stamp it was patched at (so its move does not build the terrain again); one not taken is
+	// reported and the picture made again.
+	if (terrain_built_ && !build_ && terrain_data_.is_valid() && !terrain_->is_building()) {
+		terrain_patches_.apply_maps(terrain_of(viewport).maps_patches(), *terrain_,
+				[this](const std::string &name, uint64_t stamp) {
+					if (stamped_) stamped_->restamp(name, stamp);
+					for (opennova::FileStamps &files : layer_files_) files.restamp(name, stamp);
+				});
+		// The foliage keeps candidates off the tiles the terrain draws (a new override where it held none).
+		if (foliage_data_.is_valid() && foliage_->get_tile_info() != terrain_->get_tile_info_override())
+			foliage_->set_tile_info(terrain_->get_tile_info_override());
+	}
 	apply_state_(terrain_of(viewport));
 }
 
@@ -523,6 +538,8 @@ void TerrainViewportApplier::apply(const opennova::editor::ViewportModel &viewpo
 	report.surface = terrain_built_ && terrain_data_.is_valid();
 	if (stamped_) report.files = stamped_->stamps();
 	report.drawn = drawn_json_();
+	report.maps_taken = terrain_patches_.maps_taken();
+	report.maps_refused = terrain_patches_.take_maps_refused();
 	if (build_) return;
 	apply_state_(terrain_of(viewport));
 }

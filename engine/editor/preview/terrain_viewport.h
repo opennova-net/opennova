@@ -10,6 +10,7 @@
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/viewport_follow.h>
+#include <editor/preview/terrain_maps_patch.h>
 #include <editor/preview/terrain_patch.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/terrain_uses.h>
@@ -89,6 +90,11 @@ public:
 		follow_ground_(view);
 		return ground_;
 	}
+	// S25 (the maps and the tiles): what a paint stroke (or its undo) changed of the colour, blend and surface maps,
+	// and each move of the placed tiles, since the picture was last made, as its device takes them in place
+	// (terrain_maps_patch.h); the device says how far it took them (ViewportDeviceReport::maps_taken).
+	const std::vector<MapsDevicePatch> &maps_patches() const { return maps_.patches(); }
+	uint64_t maps_built_serial() const { return maps_.built_serial(); }
 	// The overlay the options ask (DI-29) and its serial (moves each time it is made again: the device's Update).
 	const MissionOverlayImage &overlay() const { return overlay_; }
 	uint64_t overlay_serial() const { return overlay_serial_; }
@@ -154,6 +160,10 @@ private:
 	// made from (the environment, the tile set, the tiles, the overrides) moved.
 	bool place_(const SessionView &view);
 	void follow_ground_(const SessionView &view) const;
+	// The names its picture reads the placed tiles by (the mission drawn under, the header's terrain and environment).
+	TilesRead tiles_read_() const { return TilesRead{mission_name_, header_.terrain, header_.environment}; }
+	// The picture made from the files: its stroke and maps follows start again from them.
+	void made_(const SessionView &view);
 	// The overlay made again where the option or the ground moved; true when it did.
 	bool follow_overlay_(const SessionView &view);
 
@@ -177,7 +187,11 @@ private:
 	std::string mission_name_;
 	std::string mission_path_; // the use drawn ("" none)
 	mutable MissionGround ground_;
-	TerrainStrokeFollow stroke_; // S25: the ground patched in place during a stroke
+	// S25: the ground patched in place during a stroke; its device patches the colour, blend and surface maps in place
+	// (TerrainPatchApplier), the heights' and the foliage map's making the picture again at the stroke's end (the
+	// terrain view's device takes no heights patch).
+	TerrainStrokeFollow stroke_{kMapsDevicePlanes};
+	TerrainMapsFollow maps_; // S25: the maps' and the placed tiles' device patches
 	MissionOverlayImage overlay_;
 	uint64_t overlay_ground_ = UINT64_MAX;
 	uint64_t overlay_serial_ = 0;

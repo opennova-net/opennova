@@ -13,17 +13,20 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include <base/vfs/file_stamps.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
+#include <formats/til/til.h>
 #include <runtime/hud/hud_minimap.h>
 
 #include "hud/hud_pos.h"
 #include "mission/mission_object_placer.h"
 #include "render/d3d9_raster_device.h"
+#include "terrain/terrain_image_convert.h"
 #include "util/string_convert.h"
 
 namespace godot {
@@ -68,6 +71,12 @@ MissionMapViewportApplier::MissionMapViewportApplier(SubViewport &viewport) {
 	canvas->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	viewport.add_child(canvas);
 	canvas_id_ = canvas->get_instance_id();
+	// S25: the placed tiles over the pass (MED's 2D view draws them over its map), under the wireframes.
+	Control *tiles = memnew(Control);
+	tiles->set_name("Tiles");
+	tiles->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+	tiles->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+	viewport.add_child(tiles);
 	// The wireframes over the pass, in a canvas item of their own under a node of their own (a redraw of the node
 	// clears the node's item, never a child item).
 	Control *outlines = memnew(Control);
@@ -78,6 +87,10 @@ MissionMapViewportApplier::MissionMapViewportApplier(SubViewport &viewport) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	outline_item_ = rs->canvas_item_create();
 	rs->canvas_item_set_parent(outline_item_, outlines->get_canvas_item());
+	// Each tile's cell sampled nearest over its square (MED's 2D view).
+	tiles_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(tiles_item_, tiles->get_canvas_item());
+	rs->canvas_item_set_default_texture_filter(tiles_item_, RenderingServer::CANVAS_ITEM_TEXTURE_FILTER_NEAREST);
 	root_.instantiate();
 	cmap_.on_load();
 }
@@ -86,6 +99,7 @@ MissionMapViewportApplier::~MissionMapViewportApplier() {
 	renderer_.release();
 	for (const RID &chunk : chunk_items_) RenderingServer::get_singleton()->free_rid(chunk);
 	if (outline_item_.is_valid()) RenderingServer::get_singleton()->free_rid(outline_item_);
+	if (tiles_item_.is_valid()) RenderingServer::get_singleton()->free_rid(tiles_item_);
 }
 
 HudOverlay *MissionMapViewportApplier::overlay() const {
@@ -191,6 +205,11 @@ void MissionMapViewportApplier::clear() {
 	chunk_drawn_.clear();
 	outline_serial_ = UINT64_MAX;
 	outline_edges_ = 0;
+	if (tiles_item_.is_valid()) RenderingServer::get_singleton()->canvas_item_clear(tiles_item_);
+	tile_set_.unref();
+	tile_set_from_ = 0;
+	tiles_serial_ = UINT64_MAX;
+	tiles_drawn_ = 0;
 	stamped_.reset();
 	pass_visible_ = false;
 	pass_terrain_tris_ = pass_sprites_ = pass_labels_ = 0;
@@ -279,16 +298,74 @@ void MissionMapViewportApplier::draw_(const opennova::editor::MissionMapViewport
 	pass_labels_ = int(draw->pass.map.labels.size());
 }
 
-void MissionMapViewportApplier::draw_outlines_(const opennova::editor::MissionMapViewport &map) {
-	RenderingServer *rs = RenderingServer::get_singleton();
+Transform2D MissionMapViewportApplier::map_transform_(const opennova::editor::MissionMapViewport &map) const {
 	// The camera's transform: a mission point (metres, x east, y north) to the picture's pixel (MissionMapView::project).
 	const opennova::editor::MissionMapView view = map.view(width_, height_);
 	// Turned half a turn about the centre for a RotateMap180 mission (MissionMapView::flip_180).
 	const double inv = (view.flip_180 ? -1.0 : 1.0) / double(view.scale);
-	rs->canvas_item_set_transform(outline_item_,
-			Transform2D(Vector2(float(inv), 0.0f), Vector2(0.0f, float(-inv)),
-					Vector2(float(double(view.middle_x) - view.center[0] * inv),
-							float(double(view.middle_y) + view.center[1] * inv))));
+	return Transform2D(Vector2(float(inv), 0.0f), Vector2(0.0f, float(-inv)),
+			Vector2(float(double(view.middle_x) - view.center[0] * inv), float(double(view.middle_y) + view.center[1] * inv)));
+}
+
+void MissionMapViewportApplier::draw_tiles_(const opennova::editor::MissionMapViewport &map) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->canvas_item_set_transform(tiles_item_, map_transform_(map));
+	// The tile set as the terrain loaded it, made once a load: each texel's alpha 0 (not drawn) or opaque, as MED's 2D
+	// view writes a texel whose alpha byte is not 0 with its alpha cleared [orig: JOTACmed sub_417D30, the texel test
+	// and the & 0x00FFFFFF; docs/tiles/til-re.md "The editors' tile tools"].
+	const uint64_t from = terrain_data_.is_valid() ? terrain_data_->get_instance_id() : 0;
+	bool remade = false;
+	if (from != tile_set_from_) {
+		tile_set_from_ = from;
+		tile_set_.unref();
+		tile_set_width_ = tile_set_height_ = 0;
+		opennova::terrain::Rgba8Image texels;
+		if (terrain_data_.is_valid() && texture_to_rgba8(terrain_data_->get_tilestrip_tex(), texels)) {
+			for (size_t i = 3; i < texels.pixels.size(); i += 4) texels.pixels[i] = texels.pixels[i] ? 255 : 0;
+			PackedByteArray bytes;
+			bytes.resize(int64_t(texels.pixels.size()));
+			std::memcpy(bytes.ptrw(), texels.pixels.data(), texels.pixels.size());
+			const Ref<Image> image = Image::create_from_data(int(texels.width), int(texels.height), false,
+					Image::FORMAT_RGBA8, bytes);
+			if (image.is_valid()) {
+				tile_set_ = ImageTexture::create_from_image(image);
+				tile_set_width_ = int(texels.width);
+				tile_set_height_ = int(texels.height);
+			}
+		}
+		remade = true;
+	}
+	if (!remade && map.tiles_serial() == tiles_serial_) return;
+	tiles_serial_ = map.tiles_serial();
+	rs->canvas_item_clear(tiles_item_);
+	tiles_drawn_ = 0;
+	if (tile_set_.is_null()) return;
+	++tiles_redrawn_;
+	// Each record in file order (MED draws its layers in ascending order, the order it writes them in, which is the
+	// file's), its cell over its 16-unit square, the cell's corners where the game's drawing puts them: the square from
+	// the record's corner (x, the stored z: its north-west) 16 units east and south, the cell's first row along its
+	// north edge, turned and flipped by the record's flags (til_build_entry_uv_quad).
+	const PackedColorArray white = PackedColorArray({ Color(1.0f, 1.0f, 1.0f, 1.0f) });
+	for (const opennova::TilOverlayEntry &entry : map.placed_tiles().entries) {
+		const opennova::TilUvQuad quad =
+				opennova::til_build_entry_uv_quad(entry.tile_index, entry.flags, tile_set_width_, tile_set_height_);
+		if (!quad.valid) continue;
+		// The square's north-west corner the record's (x, stored z), its first texel's (preview/tile_tools.h).
+		const float x0 = float(double(entry.x_fixed) / 65536.0), north = float(double(entry.z_fixed) / 65536.0);
+		const float side = float(opennova::TIL_CELL_WORLD_UNITS);
+		const PackedVector2Array points = PackedVector2Array({ Vector2(x0, north), Vector2(x0 + side, north),
+				Vector2(x0 + side, north - side), Vector2(x0, north - side) });
+		const auto uv = [&](size_t corner) { return Vector2(quad.corners[corner].u, quad.corners[corner].v); };
+		// The corners in order round the square: north-west (the cell's first texel), north-east, south-east, south-west.
+		const PackedVector2Array uvs = PackedVector2Array({ uv(0), uv(1), uv(3), uv(2) });
+		rs->canvas_item_add_primitive(tiles_item_, points, white, uvs, tile_set_->get_rid());
+		++tiles_drawn_;
+	}
+}
+
+void MissionMapViewportApplier::draw_outlines_(const opennova::editor::MissionMapViewport &map) {
+	RenderingServer *rs = RenderingServer::get_singleton();
+	rs->canvas_item_set_transform(outline_item_, map_transform_(map));
 	if (map.outline_serial() == outline_serial_) return;
 	outline_serial_ = map.outline_serial();
 	const std::vector<float> &lines = map.outline_lines();
@@ -340,8 +417,10 @@ void MissionMapViewportApplier::apply(const opennova::editor::ViewportModel &mod
 	report.surface = terrain_data_.is_valid();
 	apply_picture_(map_of(model));
 	draw_(map_of(model));
+	draw_tiles_(map_of(model));
 	draw_outlines_(map_of(model));
 	opennova::io::JsonValue drawn = opennova::io::JsonValue::make_object();
+	drawn.set("tiles", opennova::io::json_number(tiles_drawn_));
 	drawn.set("visible", opennova::io::JsonValue::make_bool(pass_visible_));
 	drawn.set("terrain_tris", opennova::io::json_number(pass_terrain_tris_));
 	drawn.set("sprites", opennova::io::json_number(pass_sprites_));
@@ -356,6 +435,7 @@ void MissionMapViewportApplier::tick(const opennova::editor::ViewportModel &mode
 	if (loading_.is_null()) {
 		apply_picture_(map_of(model));
 		draw_(map_of(model));
+		draw_tiles_(map_of(model));
 		draw_outlines_(map_of(model));
 	}
 }

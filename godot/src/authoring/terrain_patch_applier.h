@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 #include <editor/preview/terrain_heights_patch.h>
+#include <editor/preview/terrain_maps_patch.h>
 
 namespace godot {
 
@@ -30,10 +33,35 @@ public:
 	int regions_applied() const { return regions_; }
 	int tiles_applied() const { return tiles_; }
 
+	// The maps' and the placed tiles' patches (S25, the maps lane: MapsDevicePatch) past the last serial taken, applied
+	// in place to `terrain`: a colour map's region (Terrain::update_colormap_region: its tile pages that sample it
+	// recompose), a detail blend map's (update_blendmap_region), the placed tiles (the override's entries replaced,
+	// TerrainTileInfo::copy_from_native: the tile pages over the changed squares recompose and the foliage that reads the
+	// override places again; a new override where the terrain held none), and the surface map's move (nothing drawn).
+	// `took` hears each file a patch accounts for, at its stamp: the caller's read of it holds that stamp now, so the
+	// file's move does not build the terrain again. False where one could not be taken (a map of another size, a
+	// region outside it, a terrain not built): maps_refused says so once, and the caller's picture is made again.
+	bool apply_maps(const std::vector<opennova::editor::MapsDevicePatch> &patches, Terrain &terrain,
+			const std::function<void(const std::string &name, uint64_t stamp)> &took);
+	// The terrain built again (or none): the maps' patches up to `serial` stand in it.
+	void maps_built(uint64_t serial) { maps_taken_ = serial; }
+	uint64_t maps_taken() const { return maps_taken_; }
+	// Whether a patch could not be taken since this was last asked (the report's maps_refused).
+	bool take_maps_refused() {
+		const bool refused = maps_refused_;
+		maps_refused_ = false;
+		return refused;
+	}
+	// What the last apply_maps did (a test's count): the patches applied.
+	int maps_applied() const { return maps_applied_; }
+
 private:
 	uint64_t taken_ = 0;
 	int regions_ = 0;
 	int tiles_ = 0;
+	uint64_t maps_taken_ = 0;
+	bool maps_refused_ = false;
+	int maps_applied_ = 0;
 };
 
 } // namespace godot

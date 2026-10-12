@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/control.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
+#include <godot_cpp/variant/transform2d.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/variant/rid.hpp>
 
@@ -72,6 +73,9 @@ public:
 	// S25: the map's background picture the overlay holds (null: the colour map), and how many it has uploaded.
 	Ref<ImageTexture> background_picture() const { return picture_; }
 	int background_uploads() const { return picture_uploads_; }
+	// The placed tiles drawn over the map (S25), and the times they were drawn again.
+	int tiles_drawn() const { return tiles_drawn_; }
+	int tiles_redrawn() const { return tiles_redrawn_; }
 
 private:
 	// The terrain and its water mask given the overlay; the grid's origin.
@@ -82,6 +86,10 @@ private:
 	void draw_outlines_(const opennova::editor::MissionMapViewport &map);
 	// S25: the map's background (MissionMapTerrainView) given the overlay, once a serial.
 	void apply_picture_(const opennova::editor::MissionMapViewport &map);
+	// S25: the placed tiles drawn again where they moved (or the tile set did); their transform the camera's.
+	void draw_tiles_(const opennova::editor::MissionMapViewport &map);
+	// The camera's transform: a mission point (metres, x east, y north) to the picture's pixel.
+	Transform2D map_transform_(const opennova::editor::MissionMapViewport &map) const;
 
 	uint64_t overlay_id_ = 0;
 	uint64_t canvas_id_ = 0;
@@ -91,6 +99,14 @@ private:
 	std::vector<uint64_t> chunk_drawn_; // each chunk's serial drawn
 	int chunks_uploaded_ = 0;
 	int outline_edges_ = 0;
+	// S25: the placed tiles over the map, MED's 2D view's way: a canvas item of their quads under the wireframes, the
+	// tile set (the terrain's tilestrip as it loaded) with each texel's alpha 0 or opaque, sampled nearest.
+	RID tiles_item_;
+	Ref<ImageTexture> tile_set_;
+	uint64_t tile_set_from_ = 0; // the terrain data it was made from
+	int tile_set_width_ = 0, tile_set_height_ = 0;
+	uint64_t tiles_serial_ = UINT64_MAX; // the viewport's tiles serial drawn
+	int tiles_drawn_ = 0, tiles_redrawn_ = 0;
 	Ref<ResourceRoot> root_;
 	std::shared_ptr<opennova::StampedFiles> stamped_;
 	Ref<TerrainData> loading_; // the terrain a build loads

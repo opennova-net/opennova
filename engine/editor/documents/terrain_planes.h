@@ -21,6 +21,9 @@ enum class TerrainPlane : uint8_t {
 };
 inline constexpr size_t kTerrainPlaneCount = static_cast<size_t>(TerrainPlane::kCount);
 
+// A set of planes, a bit each.
+inline constexpr uint32_t terrain_plane_bit(TerrainPlane plane) { return 1u << static_cast<uint32_t>(plane); }
+
 // A plane's token on the wire ("heights", "surface", "foliage", "colour", "blend"), and the plane a token names.
 inline const char *terrain_plane_token(TerrainPlane plane) {
 	switch (plane) {

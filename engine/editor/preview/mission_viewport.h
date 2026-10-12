@@ -22,6 +22,7 @@
 #include <editor/preview/terrain_patch.h>
 #include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/terrain_heights_patch.h>
+#include <editor/preview/terrain_maps_patch.h>
 #include <editor/preview/terrain_patch.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -132,6 +133,12 @@ public:
 	// The device says how far it took them (ViewportDeviceReport::heights_taken), and those are dropped.
 	const std::vector<HeightsDevicePatch> &heights_patches() const { return heights_patches_; }
 	uint64_t heights_built_serial() const { return heights_built_serial_; }
+	// S25 (the maps and the tiles): what a paint stroke (or its undo) changed of the colour, blend and surface maps its
+	// terrain reads, and each move of the placed tiles the game reads for it, since the picture was last made, as its
+	// device takes them (terrain_maps_patch.h), each with a serial; the device says how far it took them
+	// (ViewportDeviceReport::maps_taken), and those are dropped.
+	const std::vector<MapsDevicePatch> &maps_patches() const { return maps_.patches(); }
+	uint64_t maps_built_serial() const { return maps_.built_serial(); }
 
 	// The Shoot tool's shots (DI-23, preview/mission_shots): the run on the preview clock (its effects spawned in the
 	// items' effect scene, effects(), while that layer shows), its scars in the presentation frame (the device's),
@@ -282,6 +289,8 @@ private:
 	// heights_built_: the picture made again from the files, which hold every change so far.
 	bool take_heights_(const SessionView &view);
 	void heights_built_(const SessionView &view, const DocumentBase &document);
+	// The names its picture reads the placed tiles by (the mission's own, the header's terrain and environment).
+	TilesRead tiles_read_() const;
 	// The posed people stood on that ground (MissionPoses::stand) where a record, a pose (`posed`) or
 	// the terrain moved; true when a person's lift moved.
 	bool stand_people_(const SessionView &view, bool posed);
@@ -364,7 +373,10 @@ private:
 	bool ground_ = false;
 	// Mutable: the ground's facts read through it, its files read once while they stand (DI-07).
 	mutable MissionGround terrain_ground_;
-	TerrainStrokeFollow stroke_; // S25: the ground patched in place during a stroke
+	// S25: the ground patched in place during a stroke; its device patches the heights, the colour, blend and surface
+	// maps in place (TerrainPatchApplier), the foliage map's making the picture again at the stroke's end.
+	TerrainStrokeFollow stroke_{terrain_plane_bit(TerrainPlane::Heights) | kMapsDevicePlanes};
+	TerrainMapsFollow maps_; // S25: the maps' and the placed tiles' device patches
 	MissionOverlayImage overlay_;
 	uint64_t overlay_serial_ = 0;
 	// The Shoot tool's (DI-23).

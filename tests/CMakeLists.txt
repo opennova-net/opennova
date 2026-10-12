@@ -6211,6 +6211,13 @@ target_link_libraries(editor_tile_edit_test PRIVATE opennova_editor)
 target_include_directories(editor_tile_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_tile_edit COMMAND editor_tile_edit_test)
 
+# The maps and the tiles in the mission's 3D view as they are made: each paint and tile edit an Update with its device
+# patch (S25).
+add_executable(editor_terrain_maps_view_test editor/terrain_maps_view_test.cpp)
+target_link_libraries(editor_terrain_maps_view_test PRIVATE opennova_editor)
+target_include_directories(editor_terrain_maps_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_terrain_maps_view COMMAND editor_terrain_maps_view_test)
+
 # Painting a texture used as a terrain map (S25); the retail twin paints every shipped map, undoes it and saves it
 # identical.
 add_executable(editor_texture_paint_test editor/texture_paint_test.cpp)

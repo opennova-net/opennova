@@ -127,6 +127,11 @@ public:
 	// the heights: the live atlas there; a map's texels), never reading the files again per dab; false where it cannot
 	// (the caller reads them again: follow).
 	bool patch(const TerrainPatch &patch, const DocumentBase &document);
+	// S25: the placed tiles alone moved (a tile tool's edit): the file the game takes now (`took`, "" none) and its bytes
+	// read in place of the tiles held, and the files `names` names take their stamps in `files` now; the terrain read
+	// stands. Nothing where no terrain was read (its next follow reads them all).
+	void retile(const FileSource &files, const std::string &took, const std::vector<uint8_t> &bytes,
+	            const std::vector<std::string> &names);
 
 	// The game's own samplers over what it read (DI-29): the char map's, with the placed tiles and their
 	// table (terrain::surface_type_at_fixed), and the foliage map's, its codes (`codes` true) or its texels
@@ -141,6 +146,8 @@ public:
 	const std::vector<FoliageDef> &foliage_defs() const { return foliage_defs_; }
 	// The placed tiles' squares, as the game keeps them (x and z 16.16, z the negated mission y).
 	const std::vector<terrain::SurfaceTileEntry> &placed_tiles() const { return tiles_; }
+	// The placed tiles' records, in file order (the foliage blocker's and the map's 2D tile view's read).
+	const TilFile &placed() const { return placed_; }
 	// The definition slots (a mask) a placed tile's square keeps a candidate at mission (x, y) off: every
 	// slot without forceon where the candidate's square (2 units each way) meets a tile's [orig:
 	// Foliage_PathBlockedByPlacedTile @ 0x606490; til_blocks_foliage], 0 for none.

@@ -67,10 +67,11 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 	if (!told) return !stroking;
 	bool maps = false;
 	for (const TerrainPatch &patch : now.patches) {
-		// Out of a stroke only the heights are patched (a bake's landing, an undo or a redo of a sculpt: the device
-		// patches its terrain, S25 A4); a map's change there is read again as before.
-		const bool heights = patch.plane == TerrainPlane::Heights;
-		if (!stroking && !heights) continue;
+		// Out of a stroke only the planes the device patches in place are (a bake's landing, an undo or a redo of a
+		// sculpt or a paint: the device patches its terrain, S25 A4 and the maps); another's change there is read again
+		// as before.
+		const bool in_place = (in_place_ & terrain_plane_bit(patch.plane)) != 0;
+		if (!stroking && !in_place) continue;
 		const DocumentBase *open = nullptr;
 		for (const auto &each : view.documents.open)
 			if (each && each->path() == patch.path) open = each.get();
@@ -80,15 +81,15 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 		}
 		names.push_back(basename_of(patch.path));
 		// A heightmap image's stroke moves the .cpt it stands in for (S25 A2b): that file's stamp is the picture's.
-		if (heights)
+		if (patch.plane == TerrainPlane::Heights)
 			if (const auto *document = dynamic_cast<const TerrainHeightsDocument *>(open); document && document->image())
 				names.push_back(basename_of(document->cpt_path()));
-		maps = maps || !heights;
+		maps = maps || !in_place;
 		if (patch.whole) patches_.add(patch.plane, patch.path, RasterRegion(), true);
 		for (const RasterRegion &region : patch.regions) patches_.add(patch.plane, patch.path, region);
 	}
 	if (!names.empty()) ground.restamp(files, names);
-	// The heights' patches are the device's (the mission's terrain): only a map's makes the picture again at the end.
+	// The in-place planes' patches are the device's: only another's makes the picture again at the end.
 	if (maps) patched_ = true;
 	return true;
 }

@@ -2,8 +2,12 @@
 
 #include "terrain/terrain.h"
 #include "terrain/terrain_data.h"
+#include "terrain/terrain_tile_info.h"
+
+#include <godot_cpp/classes/image.hpp>
 
 #include <algorithm>
+#include <cstring>
 
 namespace godot {
 
@@ -43,6 +47,60 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 	replaced.erase(std::unique(replaced.begin(), replaced.end()), replaced.end());
 	// The foliage grows again with a landing (its tiles: the stroke's end, an undo, a redo), not every sample.
 	return terrain.refresh_region(rects, replaced, !replaced.empty());
+}
+
+bool TerrainPatchApplier::apply_maps(const std::vector<opennova::editor::MapsDevicePatch> &patches, Terrain &terrain,
+		const std::function<void(const std::string &name, uint64_t stamp)> &took) {
+	using Kind = opennova::editor::MapsDevicePatch::Kind;
+	maps_applied_ = 0;
+	for (const opennova::editor::MapsDevicePatch &patch : patches) {
+		if (patch.serial <= maps_taken_) continue;
+		maps_taken_ = patch.serial;
+		bool done = true;
+		if (patch.kind == Kind::Colour || patch.kind == Kind::Blend) {
+			// The changed texels as a picture of their own, put in the live map at their place.
+			PackedByteArray bytes;
+			bytes.resize(int64_t(patch.rgba.size()));
+			if (!patch.rgba.empty()) std::memcpy(bytes.ptrw(), patch.rgba.data(), patch.rgba.size());
+			const Ref<Image> region = patch.w > 0 && patch.h > 0 &&
+							patch.rgba.size() == size_t(patch.w) * size_t(patch.h) * 4
+					? Image::create_from_data(patch.w, patch.h, false, Image::FORMAT_RGBA8, bytes)
+					: Ref<Image>();
+			done = region.is_valid() &&
+					(patch.kind == Kind::Colour ? terrain.update_colormap_region(region, Vector2i(patch.x, patch.y))
+												: terrain.update_blendmap_region(region, Vector2i(patch.x, patch.y)));
+		} else if (patch.kind == Kind::Tiles) {
+			// The override the terrain draws its tiles from, its entries replaced in place (its `changed`: the
+			// terrain's pages and the foliage's blocker follow it); one made where it held none.
+			Ref<TerrainTileInfo> tiles = terrain.get_tile_info_override();
+			if (tiles.is_valid()) {
+				// The same placement (a file opened or saved, no record moved) changes nothing drawn: no `changed`,
+				// which would place the foliage again.
+				const opennova::TilFile held = tiles->to_native();
+				const std::vector<opennova::TilOverlayEntry> &was = held.entries;
+				const std::vector<opennova::TilOverlayEntry> &now = patch.tiles.entries;
+				const bool same = was.size() == now.size() &&
+						std::equal(was.begin(), was.end(), now.begin(),
+								[](const opennova::TilOverlayEntry &a, const opennova::TilOverlayEntry &b) {
+									return a.x_fixed == b.x_fixed && a.z_fixed == b.z_fixed &&
+											a.tile_index == b.tile_index && a.flags == b.flags && a.layer == b.layer;
+								});
+				if (!same) tiles->copy_from_native(patch.tiles);
+			} else {
+				tiles.instantiate();
+				tiles->copy_from_native(patch.tiles);
+				terrain.set_tile_info_override(tiles);
+			}
+		}
+		if (!done) {
+			// The file's read keeps its old stamp: the caller's next build reads it again.
+			maps_refused_ = true;
+			continue;
+		}
+		for (const opennova::FileStamp &file : patch.files) took(file.name, file.stamp);
+		++maps_applied_;
+	}
+	return !maps_refused_;
 }
 
 } // namespace godot
