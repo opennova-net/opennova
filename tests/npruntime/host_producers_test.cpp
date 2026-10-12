@@ -614,6 +614,56 @@ bool check_spectator_convert_humans_count() {
 			"the convert's own tick counts one human fewer");
 }
 
+// D-NET-584: the convert stores the slot team (+416) in the restore byte
+// (+100568), 0 included, and the deploy's no-pick arm positions a latched,
+// dead-flagged body in a team mode as that byte, else by the tick parity. A
+// script team write to a player body splits the slot and entity teams
+// (Entity_SetTeamByNetId stores the entity byte alone).
+// [orig: Server_KillPlayerAndNotify @0x519E55, the store @0x519E5B;
+//  Server_PositionPlayerForSpawn @0x50D1A6..0x50D1C3, the markers @0x50D266]
+bool check_spectator_convert_stores_the_slot_team() {
+	HostFixture f(2);
+	f.ctx.config.game_type = 0x10000u; // TDM
+	f.ctx.config.permanent_death = true;
+	f.ctx.config.spectator_slots = 2;
+	for (const int32_t item_id : {6096, 6097}) { // team 1's start marker, team 2's
+		w::Entity start;
+		start.kind = w::EntityKind::Marker;
+		start.item_id = item_id;
+		start.position = {item_id == 6096 ? 100.0f : 200.0f, 0.0f, 0.0f};
+		f.world.registry.spawn(3, start);
+	}
+	// Each request names the requester's own body, which resolves to nothing, so
+	// the convert's deploy positions through the no-pick arm.
+	auto convert = [&f](size_t i, uint8_t slot_team, uint8_t entity_team) {
+		f.conn(i).assigned_team = slot_team;
+		f.conn(i).assigned_team_valid = true;
+		w::Entity *body = f.world.registry.get(f.players[i]);
+		body->team = entity_team;
+		body->flags |= w::kEntityFlagDead;
+		body->health = 0;
+		body->alive = false;
+		const uint16_t own = f.players[i].packed;
+		(void)f.dispatch(i, c2s::SPECTATOR_RESPAWN,
+				{static_cast<uint8_t>(own), static_cast<uint8_t>(own >> 8)});
+		inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
+		return body;
+	};
+	f.world.logic_tick = 2; // an even tick: the parity names team 2
+	const w::Entity *split = convert(0, 1, 2);
+	if (!expect(f.conn(0).link.spectator && f.conn(0).spectator_restore_team == 1 &&
+					split->position.x == 100.0f,
+			"a split slot restores as its slot team and lands on that team's marker"))
+		return false;
+	// A team-0 slot stores 0 over a stale byte; the placement takes the parity.
+	f.conn(1).spectator_restore_team = 2;
+	f.world.logic_tick = 1; // an odd tick: the parity names team 1
+	const w::Entity *teamless = convert(1, 0, 0);
+	return expect(f.conn(1).link.spectator && f.conn(1).spectator_restore_team == 0 &&
+					teamless->position.x == 100.0f,
+			"a team-0 slot stores 0, so the placement takes the tick parity");
+}
+
 // The S2C 0x32 join and leave lines: [1][name][team] from the player add,
 // [2][name][team] from the disconnect, each to every OTHER in-match
 // connection [orig: Server_PlayerAdd @0x51d21e..0x51d291;
@@ -1660,6 +1710,7 @@ int main() {
 	ok = check_spectator_respawn_request() && ok;
 	ok = check_spectator_convert_deploys() && ok;
 	ok = check_spectator_convert_humans_count() && ok;
+	ok = check_spectator_convert_stores_the_slot_team() && ok;
 	ok = check_join_leave_lines() && ok;
 	ok = check_medic_revive_transaction() && ok;
 	ok = check_medic_revive_gates() && ok;

@@ -663,9 +663,10 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	// [orig: Server_ProcessPlayerDeath @0x517791 `and 0xEF`].
 
 	if (spectator) {
-		const uint8_t current_team =
-				player->team != 0 ? player->team : conn.assigned_team;
-		if (current_team != 0) conn.spectator_restore_team = current_team;
+		// The restore byte (+100568) takes the slot team, 0 included, ahead of the
+		// latch and the slot team's clear (D-NET-584) [orig: Server_KillPlayerAndNotify
+		//  @0x519E55, the store @0x519E5B; the latch @0x519E61, the clear @0x519E6E]
+		conn.spectator_restore_team = conn.assigned_team;
 		conn.link.spectator = true;
 		// [orig: Server_KillPlayerAndNotify @0x519E76 — the runtime convert
 		//  writes the same slot latch the roster row mirrors]
