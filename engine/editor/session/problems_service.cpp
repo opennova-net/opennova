@@ -20,16 +20,17 @@ namespace {
 
 // What a validation reads of an open document: it starts again when one of these moved.
 struct DocumentState {
-	uint64_t identity = 0, load_generation = 0, revision = 0;
+	uint64_t identity = 0, load_generation = 0, revision = 0, companion = 0;
 	bool dirty = false, wrote_file = false;
 	bool operator==(const DocumentState &o) const {
 		return identity == o.identity && load_generation == o.load_generation && revision == o.revision &&
-		       dirty == o.dirty && wrote_file == o.wrote_file;
+		       companion == o.companion && dirty == o.dirty && wrote_file == o.wrote_file;
 	}
 };
 
 DocumentState state_of(const DocumentBase &document) {
-	return {document.identity(), document.load_generation(), document.revision(), document.dirty(), document.wrote_file()};
+	return {document.identity(), document.load_generation(), document.revision(), document.companion_state(),
+	        document.dirty(), document.wrote_file()};
 }
 
 } // namespace

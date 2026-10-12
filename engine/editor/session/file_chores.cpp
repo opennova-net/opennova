@@ -904,9 +904,14 @@ void FileChores::redo() {
 
 // --- the unsaved guard -------------------------------------------------------------------------
 
+// A chore that moves files closes their documents and opens them again (FileChores::follow, a folder's move, a step
+// taken back): what one holds unsaved is lost with it, a mission's names a save left out of its .mis among it
+// (DocumentBase::unsaved). A delete or a copy reads none again: its documents' own unsaved edits alone.
 void FileChores::unsaved_files(const EditorRequest &request, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
-	if (!view_.project.open || !documents.documents_dirty()) return;
+	const bool reopens = request.kind == EditorRequestKind::MoveAsset || request.kind == EditorRequestKind::RenameFolder ||
+	                     request.kind == EditorRequestKind::UndoFile || request.kind == EditorRequestKind::RedoFile;
+	if (!view_.project.open || !(reopens ? documents.documents_unsaved() : documents.documents_dirty())) return;
 	std::vector<std::string> touched;
 	switch (request.kind) {
 	case EditorRequestKind::DeleteAsset: {
@@ -961,7 +966,7 @@ void FileChores::unsaved_files(const EditorRequest &request, std::vector<std::st
 	default: break;
 	}
 	for (const auto &document : documents.documents()) {
-		if (!document->dirty()) continue;
+		if (!(reopens ? document->unsaved() : document->dirty())) continue;
 		for (const std::string &path : touched)
 			if (within(document->path(), path)) {
 				files.push_back(document->path());

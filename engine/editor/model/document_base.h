@@ -18,6 +18,15 @@ namespace opennova::editor {
 class Document;
 class TextDocument;
 
+// A file beside a document as the session found it (DocumentType::companions): none there, its bytes, or there
+// and unreadable (the file system's words: a file another program holds open, one the editor may not read).
+struct CompanionFile {
+	enum class State { Absent, Read, Unreadable };
+	State state = State::Absent;
+	std::vector<uint8_t> bytes; // Read
+	std::string error;          // Unreadable
+};
+
 // The line-ends rule's fix (documents/line_ends.h) as an edit: an Apply naming no record whose
 // payload is this, alone in its batch, which the batch form names by its op alone ({op:
 // "restore_line_ends"}), made by line_ends_restore(). Each line an LF ends alone made to end CR LF,
@@ -128,6 +137,17 @@ public:
 	// larger one, and an undo gives the earlier state's back; a load starts it again at 0), and
 	// how many bytes the history keeps (what its budget measures, S13 D7).
 	virtual bool dirty() const = 0;
+	// What the document keeps for a file beside its own (DocumentType::companions: a mission's names, kept in its
+	// .mis) that the file does not hold, a save having left that file as it is (changed outside the editor, not
+	// the editor's to write, refused): unsaved as an edit is for what would drop the document (Close, Reload, a
+	// project switch, Quit: the unsaved prompt, which a Save that leaves it again asks once more), though Build
+	// and Play, which read the document's own file, never wait on it. unsaved(): either.
+	virtual bool companion_unsaved() const { return false; }
+	bool unsaved() const { return dirty() || companion_unsaved(); }
+	// A count that moves whenever what the document knows of its companion moves (the file read, a save's look at
+	// it, its write): beside the revision, what a validation of the document was made from (its findings on the
+	// companion: documents/validation_cache, the Problems service's states).
+	virtual uint64_t companion_state() const { return 0; }
 	virtual bool can_undo() const = 0;
 	virtual bool can_redo() const = 0;
 	virtual uint64_t revision() const = 0;

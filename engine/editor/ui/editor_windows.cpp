@@ -1000,7 +1000,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (!v.project.open) return;
 	std::vector<const DocumentBase *> unsaved;
 	for (const auto &document : v.documents.open)
-		if (document->dirty()) unsaved.push_back(document.get());
+		if (document->unsaved()) unsaved.push_back(document.get());
 	// The modder's findings: those about the game's own data (S15) are counted apart, in the tooltip, as
 	// Problems and the view's problem_counts count them.
 	const ProblemCounts counted = count_problems(v);

@@ -670,7 +670,7 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 	ImGui::TableNextRow();
 	ImGui::TableNextColumn();
 	const DocumentBase *open = open_document(view, entry.relative_path);
-	const bool dirty = open && open->dirty();
+	const bool dirty = open && open->unsaved();
 	const auto found = counts_.find(entry.relative_path);
 	const Counts counts = found != counts_.end() ? found->second : Counts();
 	if (in_tree) rows_drawing_.push_back(entry.relative_path);

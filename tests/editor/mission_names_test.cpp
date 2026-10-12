@@ -6,7 +6,11 @@
 // words, labels and values say them; the edits that name a variable (one batch), the 31 the table takes, a table
 // of the original editor's layer names never written over, and a tagged table's records never edited as layer
 // names (read-only, refused).
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
+#include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,17 +23,28 @@
 #include <editor/documents/mission_variable_names.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/mission_scene.h>
+#include <editor/preview/mission_ground_facts.h>
+#include <base/io/hash.h>
 #include <base/io/json.h>
+#include <base/io/strutil.h>
+#include <base/vfs/file_source.h>
+#include <editor/project/project_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/live_logic.h>
 #include <editor/session/live_logic_link.h>
+#include <editor/session/problem_fixes.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/session_json.h>
 #include <editor/session/view_json.h>
 #include <editor/session/view/activity_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <formats/mission/mission_mis.h>
+#include <formats/trn/trn_io.h>
+#include <runtime/world/collision.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -620,6 +635,982 @@ int test_live_session() {
 	return 0;
 }
 
+
+// --- the names the .bms has no room for (S24 Names: an event's name, an area's and a path's description) --
+
+// An event's name and an area's and a path's description: undoable fields of the rows, which the .bms written
+// does not change, the mission's names in every word that names them; what the .mis cannot carry refused.
+int test_row_names() {
+	std::unique_ptr<Document> document = open_mission();
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const MissionDocument &m = dynamic_cast<const MissionDocument &>(*document);
+	const std::string written = document->serialize().text;
+	const std::vector<const Node *> events = m.rows_of(MissionKind::Event), areas = m.rows_of(MissionKind::Area),
+	                                paths = m.rows_of(MissionKind::WaypointPath);
+	TEST_EXPECT(events.size() == 2 && !areas.empty() && paths.size() == bms::kWaypointRecordCount);
+	if (events.size() != 2 || areas.empty()) return 1;
+	const NodeAddress event{events[0]->id, events[0]->kind, 0}, area{areas[0]->id, areas[0]->kind, 0},
+	                  path{paths[3]->id, paths[3]->kind, 0};
+	const int32_t zone = static_cast<const AreaRow &>(*areas[0]).native.id;
+	TEST_EXPECT(same(DocumentMissionNames(m).event(0), "event 1") && same(DocumentMissionNames(m).path(3), "path 3"));
+	TEST_EXPECT(apply_edits(*document, {set_of(event, "name", "Get to the bridge"), set_of(area, "description", "The bridge"),
+	                                    set_of(path, "description", "North road")}));
+	Value value;
+	TEST_EXPECT(document->get(event, "name", value) && value == Value(std::string("Get to the bridge")));
+	TEST_EXPECT(document->get(area, "description", value) && value == Value(std::string("The bridge")));
+	// The rows' own: the .bms the same bytes.
+	TEST_EXPECT(document->dirty() && document->serialize().text == written);
+	const DocumentMissionNames names(m);
+	TEST_EXPECT(same(names.event(0), "Get to the bridge") && same(names.event(1), "event 2") &&
+	            same(names.zone(zone), "The bridge") && same(names.path(3), "North road") && same(names.path(4), "path 4"));
+	TEST_EXPECT(mission_record_label(m, event, nullptr).rfind("Event 1 (Get to the bridge): ", 0) == 0);
+	TEST_EXPECT(mission_record_label(m, area, nullptr).rfind("Zone " + std::to_string(zone) + ": The bridge", 0) == 0);
+	TEST_EXPECT(mission_record_label(m, path, nullptr).rfind("Path 3: North road (", 0) == 0);
+	TEST_EXPECT(same(mission_record_brief(m, event, nullptr), "Event 1 (Get to the bridge)"));
+	// What the .mis cannot carry is refused (mis_name_allowed), never rewritten: a ';', a double quote, a name past
+	// the original editor's dialog (59 for an event, 249 for a description).
+	TEST_EXPECT(!apply_edits(*document, {set_of(event, "name", "north; south")}));
+	TEST_EXPECT(!apply_edits(*document, {set_of(event, "name", "say \"hi\"")}));
+	TEST_EXPECT(!apply_edits(*document, {set_of(event, "name", std::string(60, 'e'))}));
+	TEST_EXPECT(!apply_edits(*document, {set_of(area, "description", std::string(250, 'a'))}));
+	TEST_EXPECT(apply_edits(*document, {set_of(event, "name", std::string(59, 'e'))}));
+	TEST_EXPECT(apply_edits(*document, {set_of(area, "description", "Pont de l'\xC3\xA9t\xC3\xA9")}));
+	// Undo takes each step back.
+	document->undo();
+	document->undo();
+	TEST_EXPECT(document->get(event, "name", value) && value == Value(std::string("Get to the bridge")));
+	document->undo();
+	TEST_EXPECT(document->get(event, "name", value) && value == Value(std::string()) && !document->dirty());
+	return 0;
+}
+
+// A mission of two events (the first waiting on V1, the second showing a text), zone 4 and group 2's member,
+// and the names its .mis holds.
+bms::File names_mission() {
+	bms::File file;
+	mission::make_default(file);
+	mission::add_event(file, mission::MissionEventRecord{});
+	mission::add_event(file, mission::MissionEventRecord{});
+	mission::MissionTriggerRecord trigger;
+	trigger.main_type = 4; // MissionVariable
+	trigger.sub_type = 1;  // equals
+	trigger.param1 = 1;
+	trigger.param2 = 1;
+	mission::MissionActionRecord action;
+	action.action_type = 5;
+	action.action_sub_type = 1;
+	action.param1 = 3;
+	std::string made;
+	mission::insert_event_trigger(file, 0, 0, trigger, made);
+	mission::insert_event_action(file, 1, 0, action, made);
+	mission::AreaTriggerRecord area;
+	area.wp_number = 4;
+	area.max_x = 10.0f;
+	area.max_y = 10.0f;
+	mission::add_area_trigger(file, area);
+	mission::sync_counts(file);
+	return file;
+}
+mission::MisNames file_names() {
+	mission::MisNames names;
+	names.events = {"Get to the bridge", ""};
+	names.areas[4] = "The bridge";
+	names.paths[3] = "North road";
+	return names;
+}
+// The mission with event 2 holding one more action: another mission's events.
+bms::File other_mission(const bms::File &from) {
+	bms::File other = from;
+	mission::MissionActionRecord extra;
+	extra.action_type = 5;
+	extra.param1 = 7;
+	std::string made;
+	mission::insert_event_action(other, 1, 1, extra, made);
+	mission::sync_counts(other);
+	return other;
+}
+std::vector<uint8_t> bytes_of(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
+uint64_t fingerprint_of(const std::vector<uint8_t> &bytes) {
+	return opennova::io::fnv1a64_bytes(opennova::io::kFnv1a64Offset, bytes.data(), bytes.size());
+}
+// A .mis as the original editor saves it: its first line says when (the rest as written).
+std::string original_editors(const std::string &text) {
+	return "// mission metafile, saved on 10/11/2026, 12:00" + text.substr(text.find("\r\n"));
+}
+// The .mis as the session finds it: its bytes (null: none there), or one the file system would not read.
+CompanionFile beside(const std::vector<uint8_t> *bytes) {
+	CompanionFile out;
+	if (bytes) {
+		out.state = CompanionFile::State::Read;
+		out.bytes = *bytes;
+	}
+	return out;
+}
+CompanionFile refused_by_disk(const std::string &why) {
+	CompanionFile out;
+	out.state = CompanionFile::State::Unreadable;
+	out.error = why;
+	return out;
+}
+// The mission's bytes read as the session reads a mission: the .mis handed over first.
+std::unique_ptr<Document> read_with(const std::vector<uint8_t> &bms_bytes, const CompanionFile &mis) {
+	std::unique_ptr<Document> document = records_of(document_type_for(AssetKind::Mission)->make());
+	auto *m = dynamic_cast<MissionDocument *>(document.get());
+	if (!m) return nullptr;
+	m->take_names_file(mis);
+	Diagnostic error;
+	if (!document->load_bytes(bms_bytes, "names.bms", AssetKind::Mission, "jo", error)) return nullptr;
+	return document;
+}
+std::unique_ptr<Document> read_with(const std::vector<uint8_t> &bms_bytes, const std::vector<uint8_t> *mis) {
+	return read_with(bms_bytes, beside(mis));
+}
+std::vector<Diagnostic> names_findings(const MissionDocument &m) {
+	std::vector<Diagnostic> out;
+	names_file_findings(m, out);
+	return out;
+}
+// What a save writes over `now`, where it writes there.
+bool save_text(MissionDocument &m, const CompanionFile &now, std::string &text) {
+	return m.names_file_due(now) && m.names_file_text(text);
+}
+NodeAddress event_at(const MissionDocument &m, size_t index) {
+	const std::vector<const Node *> events = m.rows_of(MissionKind::Event);
+	return index < events.size() ? NodeAddress{events[index]->id, events[index]->kind, 0} : NodeAddress{};
+}
+
+// The .mis read with the mission: its names the rows' where it matches (a group the .bms names none of among
+// them), what the setters refuse left out and listed, what does not match listed with its fixes, and where a save
+// writes it: the editor's own alone, never the original editor's, one that does not match, one changed outside.
+int test_names_file() {
+	const bms::File plain = names_mission();
+	bms::File grouped = plain;
+	std::string error, mis_text, text;
+	TEST_EXPECT(bms::set_group_name(grouped.group_records[2], "Bravo", error));
+	const mission::MisNames names = file_names();
+	TEST_EXPECT(mission::write_mis_text(grouped, mis_text, error, nullptr, &names));
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(plain, bms_bytes, error));
+	const std::vector<uint8_t> mis = bytes_of(mis_text);
+
+	// Matched, and the editor's own: the names taken, the group's among them, the document clean; a save writes it
+	// again, the same text.
+	std::unique_ptr<Document> document = read_with(bms_bytes, &mis);
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	auto &m = dynamic_cast<MissionDocument &>(*document);
+	TEST_EXPECT(m.names_file().found == MissionNamesFile::Found::Matched && m.names_file().ours && !document->dirty() &&
+	            !m.companion_unsaved());
+	const DocumentMissionNames read(m);
+	TEST_EXPECT(same(read.event(0), "Get to the bridge") && same(read.event(1), "event 2") && same(read.zone(4), "The bridge") &&
+	            same(read.path(3), "North road") && same(read.group(2), "Bravo"));
+	TEST_EXPECT(names_findings(m).empty());
+	TEST_EXPECT(save_text(m, beside(&mis), text) && text == mis_text);
+
+	// The original editor's .mis of the same mission (B1): its names read, the file never written by a save (it writes
+	// what the editor's writer does not). A name edited stays unsaved, listed with Write it from the mission, whose
+	// words say what the rewrite loses; the write spends it.
+	const std::vector<uint8_t> original = bytes_of(original_editors(mis_text));
+	document = read_with(bms_bytes, &original);
+	auto &f = dynamic_cast<MissionDocument &>(*document);
+	TEST_EXPECT(f.names_file().found == MissionNamesFile::Found::Matched && !f.names_file().ours &&
+	            same(DocumentMissionNames(f).event(0), "Get to the bridge") && same(DocumentMissionNames(f).group(2), "Bravo"));
+	TEST_EXPECT(!f.names_file_due(beside(&original)) && !f.companion_unsaved() && names_findings(f).empty());
+	TEST_EXPECT(apply_edits(*document, {set_of(event_at(f, 1), "name", "Hold the bridge")}));
+	TEST_EXPECT(f.companion_unsaved() && !f.names_file_due(beside(&original)) && !f.names_left().outside);
+	std::vector<Diagnostic> found = names_findings(f);
+	TEST_EXPECT(found.size() == 1 && found[0].code() == "mission.names_foreign" && found[0].planned.size() == 1 &&
+	            found[0].message.find("stay unsaved") != std::string::npos);
+	if (found.size() != 1 || found[0].planned.size() != 1 || found[0].planned[0].edits.size() != 1) return 1;
+	const PlannedFix &write = found[0].planned[0];
+	TEST_EXPECT(write.label == "Write it from the mission" && write.detail.find("weapon availability") != std::string::npos &&
+	            write.detail.find("base height") != std::string::npos);
+	const Edit &over = write.edits[0];
+	const auto *hex = std::get_if<std::string>(&over.value);
+	TEST_EXPECT(over.operation == EditOperation::SetFileValue && over.field == kMisOverwriteField && hex &&
+	            *hex == fingerprint_hex(fingerprint_of(original)));
+	TEST_EXPECT(apply_edits(*document, write.edits) && names_findings(f).empty() &&
+	            f.names_file_overwrite() == fingerprint_of(original));
+	TEST_EXPECT(save_text(f, beside(&original), text) && text.find("Hold the bridge") != std::string::npos);
+	f.names_file_written(true, fingerprint_of(bytes_of(text)), std::string());
+	TEST_EXPECT(f.names_file().ours && !f.companion_unsaved() && f.names_file_overwrite() == 0);
+	// The original's bytes put back after the write it was for: another program's, left as they are (m6).
+	TEST_EXPECT(!f.names_file_due(beside(&original)) && f.names_left().outside);
+	// The value names its bytes as 16 hex digits (a number past 2^53 does not survive JSON); a number is refused.
+	uint64_t back = 0;
+	TEST_EXPECT(fingerprint_from_hex(fingerprint_hex(0xfedcba9876543210ull), back) && back == 0xfedcba9876543210ull);
+	TEST_EXPECT(!fingerprint_from_hex("12", back) && !fingerprint_from_hex("zzzzzzzzzzzzzzzz", back));
+	Edit number = over;
+	number.value = int64_t(42);
+	Diagnostic refused;
+	TEST_EXPECT(!document->apply({number}, refused) && refused.message.find("16 hex digits") != std::string::npos);
+
+	// The original editor's .mis left by a save after the mission's records moved under it (an area's zone id): it no
+	// longer matches, so the next open takes none of its names, which the row says (N2), Write it from the mission
+	// saying what it loses.
+	document = read_with(bms_bytes, &original);
+	auto &g = dynamic_cast<MissionDocument &>(*document);
+	{
+		const std::vector<const Node *> zones = g.rows_of(MissionKind::Area);
+		TEST_EXPECT(zones.size() == 1);
+		if (zones.size() != 1) return 1;
+		Edit moved_zone;
+		moved_zone.address = {zones[0]->id, zones[0]->kind, 0};
+		moved_zone.field = "id";
+		moved_zone.value = int64_t(5);
+		TEST_EXPECT(apply_edits(*document, {moved_zone}));
+	}
+	TEST_EXPECT(!g.names_file_due(beside(&original)) && g.names_left().stale.find("describes zone 4") != std::string::npos);
+	found = names_findings(g);
+	TEST_EXPECT(found.size() == 1 && found[0].code() == "mission.names_unmatched" &&
+	            found[0].message.find("no longer matches the mission") != std::string::npos &&
+	            found[0].message.find("next open takes none of its names") != std::string::npos &&
+	            found[0].planned.size() == 1 && found[0].planned[0].detail.find("weapon availability") != std::string::npos);
+
+	// The editor's own .mis gone since it was read, every name cleared: nothing to write, the names saved as none, the
+	// mission no longer unsaved for them (N3).
+	{
+		std::string plain_text;
+		TEST_EXPECT(mission::write_mis_text(plain, plain_text, error, nullptr, &names));
+		const std::vector<uint8_t> own = bytes_of(plain_text);
+		document = read_with(bms_bytes, &own);
+		auto &c = dynamic_cast<MissionDocument &>(*document);
+		TEST_EXPECT(c.names_file().found == MissionNamesFile::Found::Matched && c.names_file().ours);
+		const std::vector<const Node *> zones = c.rows_of(MissionKind::Area), paths = c.rows_of(MissionKind::WaypointPath);
+		TEST_EXPECT(apply_edits(*document, {set_of(event_at(c, 0), "name", ""),
+		                                    set_of({zones[0]->id, zones[0]->kind, 0}, "description", ""),
+		                                    set_of({paths[3]->id, paths[3]->kind, 0}, "description", "")}));
+		TEST_EXPECT(c.companion_unsaved() && !c.names_file_due(CompanionFile()));
+		TEST_EXPECT(c.names_file().found == MissionNamesFile::Found::None && !c.companion_unsaved() &&
+		            names_findings(c).empty());
+	}
+
+	// Another mission's .mis, the original editor's (event 2's lines differ): no name taken, listed with what still
+	// matches and Write it from the mission; a save never writes it, the names taken staying unsaved (M2).
+	const std::vector<uint8_t> foreign = [&] {
+		std::string other_text;
+		mission::write_mis_text(other_mission(grouped), other_text, error, nullptr, &names);
+		return bytes_of(original_editors(other_text));
+	}();
+	document = read_with(bms_bytes, &foreign);
+	auto &u = dynamic_cast<MissionDocument &>(*document);
+	TEST_EXPECT(u.names_file().found == MissionNamesFile::Found::Unmatched && !u.names_file().ours &&
+	            u.names_file().why.find("event 2") != std::string::npos);
+	TEST_EXPECT(same(DocumentMissionNames(u).event(0), "event 1") && same(DocumentMissionNames(u).group(2), "group 2"));
+	found = names_findings(u);
+	TEST_EXPECT(found.size() == 1 && found[0].code() == "mission.names_unmatched" && found[0].planned.size() == 2 &&
+	            found[0].message.find("Save leaves it as it is") != std::string::npos);
+	if (found.size() != 1 || found[0].planned.size() != 2) return 1;
+	TEST_EXPECT(found[0].planned[0].label == "Take the names that still match" && found[0].planned[0].edits.size() == 4 &&
+	            found[0].planned[1].label == "Write it from the mission" &&
+	            found[0].planned[1].detail.find("weapon availability") != std::string::npos);
+	TEST_EXPECT(!u.names_file_due(beside(&foreign)));
+	// Take the names that still match: the first event's (the second's lines differ), the area's, the path's, the
+	// group's; one step Undo takes back. Taken, they stay unsaved: the save still leaves the file.
+	TEST_EXPECT(apply_edits(*document, found[0].planned[0].edits));
+	TEST_EXPECT(same(DocumentMissionNames(u).event(0), "Get to the bridge") && same(DocumentMissionNames(u).zone(4), "The bridge") &&
+	            same(DocumentMissionNames(u).path(3), "North road") && same(DocumentMissionNames(u).group(2), "Bravo"));
+	TEST_EXPECT(u.companion_unsaved() && !u.names_file_due(beside(&foreign)));
+	found = names_findings(u);
+	TEST_EXPECT(found.size() == 1 && found[0].message.find("stay unsaved") != std::string::npos);
+	document->undo();
+	TEST_EXPECT(same(DocumentMissionNames(u).event(0), "event 1") && !document->dirty() && !u.companion_unsaved());
+	// Write it from the mission: a file-wide value, the bytes a save writes over; the listing gone.
+	found = names_findings(u);
+	TEST_EXPECT(found.size() == 1 && found[0].planned.size() == 2 && apply_edits(*document, found[0].planned[1].edits));
+	TEST_EXPECT(u.names_file_overwrite() == fingerprint_of(foreign) && document->dirty() && names_findings(u).empty());
+	TEST_EXPECT(save_text(u, beside(&foreign), text) && text.find("Get to the bridge") == std::string::npos);
+	u.names_file_written(true, fingerprint_of(bytes_of(text)), std::string());
+	TEST_EXPECT(u.names_file().found == MissionNamesFile::Found::Matched && u.names_file().ours);
+
+	// The editor's own .mis of the mission as it was, its events no longer the mission's (M2): nothing taken, never
+	// written over by a save, listed with the names that still match and Write it from the mission, whose words say
+	// the names of the events that no longer match go with it.
+	const std::vector<uint8_t> stale = [&] {
+		std::string other_text;
+		mission::write_mis_text(other_mission(grouped), other_text, error, nullptr, &names);
+		return bytes_of(other_text);
+	}();
+	document = read_with(bms_bytes, &stale);
+	auto &e = dynamic_cast<MissionDocument &>(*document);
+	TEST_EXPECT(e.names_file().found == MissionNamesFile::Found::Unmatched && e.names_file().ours &&
+	            !e.names_file_due(beside(&stale)) && same(DocumentMissionNames(e).event(0), "event 1"));
+	found = names_findings(e);
+	TEST_EXPECT(found.size() == 1 && found[0].planned.size() == 2 &&
+	            found[0].planned[1].detail.find("no longer match") != std::string::npos);
+
+	// Changed outside the editor since it was read (another OpenNova's names): a save leaves it, listed with Read the
+	// names again (it still matches) and Write it from the mission. Read again: its names the mission's, the mission
+	// measured against those bytes, which are the editor's own to write again; Undo takes it back.
+	document = read_with(bms_bytes, &mis);
+	auto &o = dynamic_cast<MissionDocument &>(*document);
+	mission::MisNames renamed = names;
+	renamed.events = {"Cross the river", "Hold"};
+	renamed.paths[3].clear();
+	std::string renamed_text;
+	TEST_EXPECT(mission::write_mis_text(grouped, renamed_text, error, nullptr, &renamed));
+	const std::vector<uint8_t> changed = bytes_of(renamed_text);
+	TEST_EXPECT(!o.names_file_due(beside(&changed)) && o.names_left().outside);
+	found = names_findings(o);
+	TEST_EXPECT(found.size() == 1 && found[0].code() == "mission.names_outside" && found[0].planned.size() == 2);
+	if (found.size() != 1 || found[0].planned.size() != 2) return 1;
+	TEST_EXPECT(found[0].planned[0].label == "Read the names again" && found[0].planned[1].label == "Write it from the mission");
+	TEST_EXPECT(apply_edits(*document, found[0].planned[0].edits));
+	TEST_EXPECT(same(DocumentMissionNames(o).event(0), "Cross the river") && same(DocumentMissionNames(o).event(1), "Hold") &&
+	            same(DocumentMissionNames(o).path(3), "path 3") && names_findings(o).empty() && !o.companion_unsaved());
+	TEST_EXPECT(save_text(o, beside(&changed), text) && text == renamed_text);
+	document->undo();
+	TEST_EXPECT(same(DocumentMissionNames(o).event(0), "Get to the bridge") && !o.names_file_due(beside(&changed)));
+	// Gone since it was read: the editor's to make again, the mission holding names.
+	TEST_EXPECT(o.names_file_due(CompanionFile()));
+
+	// None beside the mission: one holding no name makes none (M4); one naming an event makes it.
+	document = read_with(bms_bytes, nullptr);
+	auto &n = dynamic_cast<MissionDocument &>(*document);
+	TEST_EXPECT(n.names_file().found == MissionNamesFile::Found::None && !n.names_file_due(CompanionFile()));
+	TEST_EXPECT(apply_edits(*document, {set_of(event_at(n, 0), "name", "Start")}) && n.companion_unsaved() &&
+	            save_text(n, CompanionFile(), text) && text.find("\"Start\"") != std::string::npos);
+	// What the writer refuses (a zone id outside 1..99) is listed while the names stay unsaved, never written; the
+	// mission's own file is not the .mis's to fail.
+	const std::vector<const Node *> areas = n.rows_of(MissionKind::Area);
+	TEST_EXPECT(areas.size() == 1);
+	if (areas.size() != 1) return 1;
+	Edit zero;
+	zero.address = {areas[0]->id, areas[0]->kind, 0};
+	zero.field = "id";
+	zero.value = int64_t(0);
+	TEST_EXPECT(apply_edits(*document, {zero}) && n.names_file_due(CompanionFile()) && !n.names_file_text(text));
+	found = names_findings(n);
+	TEST_EXPECT(found.size() == 1 && found[0].code() == "mission.names_unwritten" &&
+	            found[0].message.find("zone id 0") != std::string::npos &&
+	            found[0].message.find("alone. The mission's own file was saved.") != std::string::npos);
+	TEST_EXPECT(document->serialize().ok());
+
+	// A .mis that does not read: listed with Write it from the mission alone.
+	const std::vector<uint8_t> broken = bytes_of("begin event 0\r\n  name \"x\"\r\n");
+	document = read_with(bms_bytes, &broken);
+	auto &b = dynamic_cast<MissionDocument &>(*document);
+	found = names_findings(b);
+	TEST_EXPECT(b.names_file().found == MissionNamesFile::Found::Unreadable && found.size() == 1 &&
+	            found[0].code() == "mission.names_unmatched" && found[0].planned.size() == 1 &&
+	            found[0].planned[0].label == "Write it from the mission");
+	// One the file system would not read: listed, never taken for none (m5); a save that cannot read it either
+	// leaves it.
+	document = read_with(bms_bytes, refused_by_disk("in use by another program"));
+	auto &l = dynamic_cast<MissionDocument &>(*document);
+	found = names_findings(l);
+	TEST_EXPECT(l.names_file().found == MissionNamesFile::Found::Unopened && found.size() == 1 &&
+	            found[0].code() == "mission.names_unmatched" && found[0].planned.empty() &&
+	            found[0].message.find("could not be read (in use by another program)") != std::string::npos);
+	TEST_EXPECT(!l.names_file_due(refused_by_disk("in use by another program")) && !l.names_left().unwritten.empty());
+
+	// A name the setters refuse (an event's past the dialog's 59 bytes, written by hand), and path 0's description
+	// (no path): left out of the mission, listed (m2).
+	std::string long_text = mis_text;
+	long_text.replace(long_text.find("Get to the bridge"), std::string("Get to the bridge").size(), std::string(60, 'n'));
+	long_text += "begin waypoint 0\r\n  description \"Nowhere\"\r\nend waypoint\r\n";
+	const std::vector<uint8_t> hand = bytes_of(long_text);
+	document = read_with(bms_bytes, &hand);
+	auto &h = dynamic_cast<MissionDocument &>(*document);
+	found = names_findings(h);
+	TEST_EXPECT(h.names_file().found == MissionNamesFile::Found::Matched && same(DocumentMissionNames(h).event(0), "event 1") &&
+	            same(DocumentMissionNames(h).zone(4), "The bridge") && !h.companion_unsaved());
+	TEST_EXPECT(found.size() == 1 && found[0].code() == "mission.names_refused" &&
+	            found[0].message.find("event 1's name (A name holds 59 bytes at most") != std::string::npos &&
+	            found[0].message.find("path 0's description (path 0 is no path)") != std::string::npos);
+
+	// A read from bytes alone (no .mis handed over: a closed file's validation, an import's read): nothing beside.
+	std::unique_ptr<Document> alone = records_of(document_type_for(AssetKind::Mission)->make());
+	Diagnostic load_error;
+	TEST_EXPECT(alone && alone->load_bytes(bms_bytes, "names.bms", AssetKind::Mission, "jo", load_error));
+	auto &a = dynamic_cast<MissionDocument &>(*alone);
+	TEST_EXPECT(a.names_file().found == MissionNamesFile::Found::Unread && !a.names_file_due(CompanionFile()) &&
+	            names_findings(a).empty() && !a.companion_unsaved());
+	return 0;
+}
+
+// The editor's own .mis of a mission with entities in every pool: what it reads, written again, is the bytes read
+// (the fixed point, each entity's base height the one read), and a save over another terrain moves the base
+// heights alone, the file written still the editor's own.
+int test_names_file_entities() {
+	bms::File file = names_mission();
+	const mission::EntityKind kinds[] = {mission::EntityKind::Item, mission::EntityKind::Building, mission::EntityKind::Marker,
+	                                     mission::EntityKind::Organic};
+	int32_t ssn = 1;
+	for (const mission::EntityKind kind : kinds) {
+		bms::Entity entity = mission::new_entity(kind, 106102, ssn);
+		entity.x = bms::to_fixed_16_16(10.0 * ssn);
+		entity.y = bms::to_fixed_16_16(-5.0 * ssn);
+		entity.z = bms::to_fixed_16_16(2.5 * ssn);
+		mission::entities(file, kind)->push_back(entity);
+		++ssn;
+	}
+	mission::sync_counts(file);
+	const std::vector<int32_t> heights = {bms::to_fixed_16_16(12.5), bms::to_fixed_16_16(3.0), bms::to_fixed_16_16(-1.25),
+	                                      bms::to_fixed_16_16(40.0)};
+	const mission::MisNames names = file_names();
+	std::string error, mis_text, text;
+	TEST_EXPECT(mission::write_mis_text(file, mis_text, error, &heights, &names));
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(file, bms_bytes, error));
+	const std::vector<uint8_t> mis = bytes_of(mis_text);
+	std::unique_ptr<Document> document = read_with(bms_bytes, &mis);
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	auto &m = dynamic_cast<MissionDocument &>(*document);
+	TEST_EXPECT(m.names_file().found == MissionNamesFile::Found::Matched && m.names_file().ours);
+	m.set_base_heights(heights);
+	TEST_EXPECT(save_text(m, beside(&mis), text) && same(text, mis_text));
+	std::vector<int32_t> moved = heights;
+	for (int32_t &height : moved) height += bms::to_fixed_16_16(1.0);
+	m.set_base_heights(moved);
+	TEST_EXPECT(save_text(m, beside(&mis), text) && text != mis_text &&
+	            text.find("extra_bheight " + std::to_string(moved[3])) != std::string::npos);
+	const std::vector<uint8_t> written = bytes_of(text);
+	document = read_with(bms_bytes, &written);
+	TEST_EXPECT(document && dynamic_cast<MissionDocument &>(*document).names_file().ours);
+	return 0;
+}
+
+// Copy, Cut and Paste carry an event's name and an area's description (m1).
+int test_names_clipboard() {
+	const bms::File plain = names_mission();
+	std::string error;
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(plain, bms_bytes, error));
+	std::unique_ptr<Document> document = read_with(bms_bytes, nullptr);
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	auto &m = dynamic_cast<MissionDocument &>(*document);
+	const NodeAddress event = event_at(m, 1);
+	const std::vector<const Node *> areas = m.rows_of(MissionKind::Area);
+	const NodeAddress area{areas[0]->id, areas[0]->kind, 0};
+	TEST_EXPECT(apply_edits(*document, {set_of(event, "name", "Hold the bridge"), set_of(area, "description", "The bridge")}));
+	const std::string payload = document->copy({area, event});
+	TEST_EXPECT(!payload.empty() && document->pastes_rows(payload));
+	Edit paste;
+	paste.operation = EditOperation::Paste;
+	paste.value = payload;
+	paste.position = SIZE_MAX;
+	TEST_EXPECT(apply_edits(*document, {paste}));
+	const std::vector<const Node *> events = m.rows_of(MissionKind::Event), pasted_areas = m.rows_of(MissionKind::Area);
+	TEST_EXPECT(events.size() == 3 && pasted_areas.size() == 2);
+	if (events.size() != 3 || pasted_areas.size() != 2) return 1;
+	TEST_EXPECT(same(static_cast<const EventRow &>(*events[2]).name, "Hold the bridge") &&
+	            same(static_cast<const AreaRow &>(*pasted_areas[1]).description, "The bridge"));
+	return 0;
+}
+
+const Diagnostic *finding_of(const SessionView &view, const char *code, const std::string &asset) {
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == code && d.asset == asset) return &d;
+	return nullptr;
+}
+
+// A session over a new project for the .mis: missions written into it, read, edited and saved.
+struct NamesProject {
+	editor_test::TempProjectDir dir;
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	std::string root;
+	explicit NamesProject(const char *name) : dir(name) {
+		editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Names"));
+		editor_test::create_missing_files(session);
+		root = session.view().project.root;
+	}
+	const SessionView &view() const { return session.view(); }
+	void run(const EditorRequest &request) { editor_test::handle_to_end(session, request); }
+	bool put(const std::string &file, const std::vector<uint8_t> &bytes) { return editor_test::write_bytes(root + "/" + file, bytes); }
+	bool put(const std::string &file, const std::string &text) { return put(file, bytes_of(text)); }
+	std::string text(const std::string &file) const { return test_io::read_file_text(root + "/" + file); }
+	bool exists(const std::string &file) const {
+		std::error_code ec;
+		return std::filesystem::exists(system_path(root + "/" + file), ec);
+	}
+	const MissionDocument *mission(const std::string &path) { return dynamic_cast<const MissionDocument *>(session.document_for(path)); }
+	mission::MisNames names_in(const std::string &file) const {
+		mission::MisNames read;
+		std::string why;
+		mission::parse_mis_names(text(file), read, why);
+		return read;
+	}
+	// The open mission's event `index` named `name` (an edit of the mission).
+	void name_event(const std::string &path, size_t index, const std::string &name) {
+		run(request::edit_record(path, set_of(event_at(*mission(path), index), "name", name)));
+	}
+};
+
+// The .mis through the session: read on open, written after the mission's save where it is the editor's own, an
+// outside change listed and left (its names unsaved, the close prompt asking) until Write it from the mission, sent
+// over the wire as an MCP client sends it, writes over it; a rename taking it with the mission; what the writer
+// refuses listed while the mission saves, its names unsaved; a mission with none beside it and no name makes none.
+int test_names_file_session() {
+	NamesProject p("opennova_mission_names_file");
+	const SessionView &v = p.view();
+	const bms::File plain = names_mission();
+	std::string error, mis_text;
+	const mission::MisNames names = file_names();
+	TEST_EXPECT(mission::write_mis_text(plain, mis_text, error, nullptr, &names));
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(plain, bms_bytes, error));
+	TEST_EXPECT(p.put("missions/names.bms", bms_bytes) && p.put("missions/names.mis", mis_text));
+	p.run(request::rescan());
+	const std::string path = "missions/names.bms";
+	p.run(request::open_document(path));
+	const MissionDocument *m = p.mission(path);
+	TEST_EXPECT(m && m->names_file().found == MissionNamesFile::Found::Matched);
+	if (!m) return 1;
+	TEST_EXPECT(same(DocumentMissionNames(*m).event(0), "Get to the bridge"));
+	// A name edited and saved: the .bms as it was, the .mis with the name.
+	p.name_event(path, 1, "Hold the bridge");
+	p.run(request::save(path));
+	TEST_EXPECT(test_io::read_file(p.root + "/" + path) == bms_bytes);
+	TEST_EXPECT(p.names_in("missions/names.mis").events == std::vector<std::string>({"Get to the bridge", "Hold the bridge"}));
+	TEST_EXPECT(!p.session.document_for(path)->unsaved());
+	// Another program's .mis since: the next save leaves it, the names unsaved (the close prompt asks), listed with
+	// Read the names again and Write it from the mission.
+	const std::string outside = mis_text + "// a note\r\n";
+	TEST_EXPECT(p.put("missions/names.mis", outside));
+	p.name_event(path, 1, "Take the bridge");
+	p.run(request::save(path));
+	TEST_EXPECT(p.text("missions/names.mis") == outside);
+	TEST_EXPECT(!p.session.document_for(path)->dirty() && p.session.document_for(path)->companion_unsaved() &&
+	            v.activity.status.find("keeps its names unsaved") != std::string::npos);
+	p.run(request::close_document(path));
+	TEST_EXPECT(v.dialogs.unsaved_prompt.open && p.session.document_for(path) != nullptr);
+	p.run(request::resolve_unsaved(UnsavedChoice::Cancel));
+	const Diagnostic *listed = finding_of(v, "mission.names_outside", path);
+	TEST_EXPECT(listed && listed->planned.size() == 2);
+	if (!listed || listed->planned.size() != 2) return 1;
+	const std::vector<ProblemFix> fixes = fixes_for(*listed, v);
+	TEST_EXPECT(fixes.size() == 2 && fixes[0].label == "Read the names again" && fixes[1].label == "Write it from the mission");
+	if (fixes.size() != 2) return 1;
+	// The file there now is no editor's own: what Write it from the mission loses of it is said (N4).
+	TEST_EXPECT(fixes[1].detail.find("weapon availability") != std::string::npos);
+	// Write it from the mission over the wire (M3): the request as JSON text, read back as an MCP client sends it.
+	JsonValue sent;
+	std::string parse_error;
+	TEST_EXPECT(opennova::io::json_parse(opennova::io::json_write(editor_request_to_json(fixes[1].request, p.session.document_for(path))),
+	                                     sent, parse_error));
+	TEST_EXPECT(p.session.handle_json(sent).get_bool("ok", false));
+	p.session.run_operations();
+	p.run(request::save(path));
+	TEST_EXPECT(p.names_in("missions/names.mis").events == std::vector<std::string>({"Get to the bridge", "Take the bridge"}) &&
+	            !finding_of(v, "mission.names_outside", path) && !p.session.document_for(path)->unsaved());
+	// A rename takes the .mis with the mission.
+	p.run(request::rename_asset("names.bms", "renamed.bms"));
+	TEST_EXPECT(p.exists("missions/renamed.bms") && p.exists("missions/renamed.mis") && !p.exists("missions/names.mis"));
+	const std::string renamed = "missions/renamed.bms";
+	// What the writer refuses (an area's zone id 0, its description then in no slot): the mission saved, the .mis
+	// left, listed, the names unsaved (M1).
+	const MissionDocument *r = p.mission(renamed);
+	TEST_EXPECT(r != nullptr);
+	if (!r) return 1;
+	const std::vector<const Node *> areas = r->rows_of(MissionKind::Area);
+	Edit zero;
+	zero.address = {areas[0]->id, areas[0]->kind, 0};
+	zero.field = "id";
+	zero.value = int64_t(0);
+	const std::string before = p.text("missions/renamed.mis");
+	p.run(request::edit_record(renamed, zero));
+	p.run(request::save(renamed));
+	TEST_EXPECT(!p.session.document_for(renamed)->dirty() && p.session.document_for(renamed)->companion_unsaved() &&
+	            p.text("missions/renamed.mis") == before);
+	TEST_EXPECT(finding_of(v, "mission.names_unwritten", renamed) != nullptr);
+	// A mission with none beside it: a save that holds no name makes none; one naming an event makes it.
+	TEST_EXPECT(p.put("missions/fresh.bms", bms_bytes));
+	p.run(request::rescan());
+	p.run(request::open_document("missions/fresh.bms"));
+	const MissionDocument *fresh = p.mission("missions/fresh.bms");
+	TEST_EXPECT(fresh && fresh->names_file().found == MissionNamesFile::Found::None);
+	if (!fresh) return 1;
+	Edit hidden;
+	hidden.address = {fresh->mission_row()->id, fresh->mission_row()->kind, 0};
+	hidden.field = "start_time";
+	hidden.value = int64_t(600);
+	p.run(request::edit_record("missions/fresh.bms", hidden));
+	p.run(request::save("missions/fresh.bms"));
+	TEST_EXPECT(!p.exists("missions/fresh.mis"));
+	p.name_event("missions/fresh.bms", 0, "Start");
+	p.run(request::save("missions/fresh.bms"));
+	TEST_EXPECT(p.names_in("missions/fresh.mis").events == std::vector<std::string>({"Start", ""}));
+	return 0;
+}
+
+// The original editor's .mis through the session (B1): its names read, a save of the open mission and a closed
+// file's rewrite both leave it byte for byte; the editor's own one beside a closed mission is written again.
+int test_names_file_original() {
+	NamesProject p("opennova_mission_names_original");
+	const SessionView &v = p.view();
+	bms::File plain = names_mission();
+	std::string error, mis_text;
+	const mission::MisNames names = file_names();
+	TEST_EXPECT(mission::write_mis_text(plain, mis_text, error, nullptr, &names));
+	const std::string original = original_editors(mis_text);
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(plain, bms_bytes, error));
+	TEST_EXPECT(p.put("missions/orig.bms", bms_bytes) && p.put("missions/orig.mis", original));
+	// A closed mission whose save rewrites it (a path record listing a stop no marker carries: path_rebuilt).
+	bms::File rebuilt = plain;
+	bms::WaypointRecord &record = rebuilt.waypoint_records[3];
+	TEST_EXPECT(record.waypoint_numbers.empty() && record.padding.size() == 128);
+	record.waypoint_numbers.push_back(5); // a slot word out of the record's 128 bytes
+	record.padding.erase(record.padding.begin(), record.padding.begin() + 4);
+	record.marker_count = 1;
+	std::vector<uint8_t> rebuilt_bytes;
+	TEST_EXPECT(bms::write(rebuilt, rebuilt_bytes, error));
+	TEST_EXPECT(p.put("missions/closed.bms", rebuilt_bytes) && p.put("missions/closed.mis", original));
+	TEST_EXPECT(p.put("missions/ours.bms", rebuilt_bytes) && p.put("missions/ours.mis", mis_text));
+	p.run(request::rescan());
+	p.run(request::open_document("missions/orig.bms"));
+	const MissionDocument *m = p.mission("missions/orig.bms");
+	TEST_EXPECT(m && m->names_file().found == MissionNamesFile::Found::Matched && !m->names_file().ours);
+	if (!m) return 1;
+	TEST_EXPECT(same(DocumentMissionNames(*m).event(0), "Get to the bridge"));
+	p.name_event("missions/orig.bms", 1, "Hold the bridge");
+	TEST_EXPECT(finding_of(v, "mission.names_foreign", "missions/orig.bms") != nullptr);
+	p.run(request::save("missions/orig.bms"));
+	TEST_EXPECT(p.text("missions/orig.mis") == original && p.session.document_for("missions/orig.bms")->companion_unsaved());
+	TEST_EXPECT(finding_of(v, "mission.names_foreign", "missions/orig.bms") != nullptr);
+	// Its names alone unsaved, the file gone since: Save writes the mission's (a save of names alone, the
+	// listing gone with it).
+	std::error_code gone;
+	std::filesystem::remove(system_path(p.root + "/missions/orig.mis"), gone);
+	TEST_EXPECT(!p.session.document_for("missions/orig.bms")->dirty());
+	p.run(request::save("missions/orig.bms"));
+	TEST_EXPECT(p.names_in("missions/orig.mis").events == std::vector<std::string>({"Get to the bridge", "Hold the bridge"}) &&
+	            !p.session.document_for("missions/orig.bms")->unsaved() &&
+	            !finding_of(v, "mission.names_foreign", "missions/orig.bms"));
+	// The closed files' saves: the original editor's left, the editor's own written again from the mission.
+	p.run(request::save("missions/closed.bms"));
+	if (test_io::read_file(p.root + "/missions/closed.bms") == rebuilt_bytes) std::printf("  status: %s\n", v.activity.status.c_str());
+	TEST_EXPECT(test_io::read_file(p.root + "/missions/closed.bms") != rebuilt_bytes);
+	TEST_EXPECT(p.text("missions/closed.mis") == original);
+	// The editor's own: its bytes the same (the same names, no terrain), its last write moved (it was written).
+	namespace fs = std::filesystem;
+	std::error_code stamp_error;
+	const fs::path ours_mis = system_path(p.root + "/missions/ours.mis");
+	const fs::file_time_type long_ago = fs::last_write_time(ours_mis, stamp_error) - std::chrono::hours(48);
+	fs::last_write_time(ours_mis, long_ago, stamp_error);
+	p.run(request::save("missions/ours.bms"));
+	TEST_EXPECT(test_io::read_file(p.root + "/missions/ours.bms") != rebuilt_bytes &&
+	            p.names_in("missions/ours.mis").events == std::vector<std::string>({"Get to the bridge", ""}) &&
+	            p.text("missions/ours.mis") == mis_text && fs::last_write_time(ours_mis, stamp_error) > long_ago);
+	// The closed original editor's .mis was left: its stamp is the one it had.
+	const fs::path closed_mis = system_path(p.root + "/missions/closed.mis");
+	const fs::file_time_type closed_at = fs::last_write_time(closed_mis, stamp_error);
+	p.run(request::save("missions/closed.bms"));
+	TEST_EXPECT(fs::last_write_time(closed_mis, stamp_error) == closed_at);
+	// Our own write of an open mission's .mis is no change outside the editor: a look for changes reads nothing again.
+	p.run(request::open_document("missions/ours.bms"));
+	const DocumentBase *open = p.session.document_for("missions/ours.bms");
+	TEST_EXPECT(open != nullptr);
+	if (!open) return 1;
+	const uint64_t loaded = open->load_generation();
+	p.name_event("missions/ours.bms", 1, "Hold the bridge");
+	p.run(request::save("missions/ours.bms"));
+	p.run(request::rescan());
+	TEST_EXPECT(p.session.document_for("missions/ours.bms") == open && open->load_generation() == loaded &&
+	            !open->unsaved() && !finding_of(v, "document.conflict", "missions/ours.bms") &&
+	            same(DocumentMissionNames(*p.mission("missions/ours.bms")).event(1), "Hold the bridge"));
+	return 0;
+}
+
+// A mission whose file another program rewrote (M2): read again, its events no longer the .mis's, nothing taken and
+// nothing written over by a later save; two missions of one name in two folders each with the .mis beside it (m4);
+// move, duplicate and delete taking the .mis with the mission.
+int test_names_file_chores() {
+	NamesProject p("opennova_mission_names_chores");
+	const SessionView &v = p.view();
+	const bms::File plain = names_mission();
+	std::string error, mis_text;
+	const mission::MisNames names = file_names();
+	TEST_EXPECT(mission::write_mis_text(plain, mis_text, error, nullptr, &names));
+	std::vector<uint8_t> bms_bytes, other_bytes;
+	TEST_EXPECT(bms::write(plain, bms_bytes, error) && bms::write(other_mission(plain), other_bytes, error));
+	TEST_EXPECT(p.put("missions/a/x.bms", bms_bytes) && p.put("missions/a/x.mis", mis_text) &&
+	            p.put("missions/b/x.bms", bms_bytes));
+	p.run(request::rescan());
+	// Each its own: b's mission has none beside it; its name saved makes b's .mis, a's as it was.
+	p.run(request::open_document("missions/b/x.bms"));
+	const MissionDocument *b = p.mission("missions/b/x.bms");
+	TEST_EXPECT(b && b->names_file().found == MissionNamesFile::Found::None);
+	p.name_event("missions/b/x.bms", 0, "Elsewhere");
+	p.run(request::save("missions/b/x.bms"));
+	TEST_EXPECT(p.names_in("missions/b/x.mis").events == std::vector<std::string>({"Elsewhere", ""}) &&
+	            p.text("missions/a/x.mis") == mis_text);
+	// a's mission read again after another program rewrote it (its events no longer the .mis's): nothing taken, a
+	// save of another edit leaves the .mis, listed with Take and Write.
+	p.run(request::open_document("missions/a/x.bms"));
+	TEST_EXPECT(p.mission("missions/a/x.bms") && same(DocumentMissionNames(*p.mission("missions/a/x.bms")).event(0), "Get to the bridge"));
+	TEST_EXPECT(p.put("missions/a/x.bms", other_bytes));
+	p.run(request::rescan());
+	const MissionDocument *a = p.mission("missions/a/x.bms");
+	TEST_EXPECT(a && a->names_file().found == MissionNamesFile::Found::Unmatched && a->names_file().ours &&
+	            same(DocumentMissionNames(*a).event(0), "event 1"));
+	if (!a) return 1;
+	Edit hidden;
+	hidden.address = {a->mission_row()->id, a->mission_row()->kind, 0};
+	hidden.field = "start_time";
+	hidden.value = int64_t(600);
+	p.run(request::edit_record("missions/a/x.bms", hidden));
+	p.run(request::save("missions/a/x.bms"));
+	TEST_EXPECT(p.text("missions/a/x.mis") == mis_text);
+	const Diagnostic *listed = finding_of(v, "mission.names_unmatched", "missions/a/x.bms");
+	TEST_EXPECT(listed && listed->planned.size() == 2);
+	p.run(request::close_document("missions/a/x.bms"));
+	p.run(request::close_document("missions/b/x.bms"));
+	// Moved, duplicated, deleted: the .mis goes with the mission.
+	std::error_code made;
+	std::filesystem::create_directories(system_path(p.root + "/missions/c"), made);
+	p.run(request::rescan());
+	p.run(request::move_asset("missions/a/x.bms", "missions/c"));
+	TEST_EXPECT(p.exists("missions/c/x.bms") && p.exists("missions/c/x.mis") && !p.exists("missions/a/x.mis"));
+	p.run(request::duplicate_asset("missions/c/x.bms", "y.bms"));
+	TEST_EXPECT(p.exists("missions/c/y.bms") && p.exists("missions/c/y.mis") && p.text("missions/c/y.mis") == mis_text);
+	p.run(request::delete_asset("missions/c/y.bms", true));
+	TEST_EXPECT(!p.exists("missions/c/y.bms") && !p.exists("missions/c/y.mis") && p.exists("missions/c/x.mis"));
+	// A mission at the top level has none beside it though a folder holds a .mis of its name (m4): never that one.
+	TEST_EXPECT(p.put("x.bms", bms_bytes));
+	p.run(request::rescan());
+	p.run(request::open_document("x.bms"));
+	TEST_EXPECT(p.mission("x.bms") && p.mission("x.bms")->names_file().found == MissionNamesFile::Found::None);
+	p.run(request::close_document("x.bms"));
+	// A move onto a .mis of its name, none going with it, is refused: that file would hold its names.
+	TEST_EXPECT(p.put("missions/d/z.mis", mis_text) && p.put("missions/z.bms", bms_bytes));
+	p.run(request::rescan());
+	const ActionOutcome moved = editor_test::handle_to_end(p.session, request::move_asset("missions/z.bms", "missions/d"));
+	const bool said = std::any_of(moved.findings.begin(), moved.findings.end(), [](const Diagnostic &d) {
+		return d.message.find("missions/d/z.mis, which would hold z.bms's names") != std::string::npos;
+	});
+	if (!said)
+		for (const Diagnostic &d : moved.findings) std::printf("  refused: %s\n", d.message.c_str());
+	TEST_EXPECT(moved.refused && said && p.exists("missions/z.bms") && !p.exists("missions/d/z.bms"));
+	return 0;
+}
+
+// The paths that close a mission and open it again, or read it again, each ask first where its names are unsaved
+// (a save left them out of the original editor's .mis beside it: N1): a folder renamed, several files moved, a move
+// taken back, a rename taken back, a rename while the validation runs, a rename of a file the mission names; and
+// Quit and a project closed.
+int test_names_unsaved_paths() {
+	NamesProject p("opennova_mission_names_unsaved");
+	const SessionView &v = p.view();
+	bms::File plain = names_mission();
+	std::string error, mis_text;
+	TEST_EXPECT(mission::set_header_string(plain, "terrain", "Tmap", error));
+	const mission::MisNames names = file_names();
+	TEST_EXPECT(mission::write_mis_text(plain, mis_text, error, nullptr, &names));
+	const std::string original = original_editors(mis_text);
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(plain, bms_bytes, error));
+	const std::string tmap = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/terrain/tmap/";
+	TEST_EXPECT(p.put("Tmap.trn", test_io::read_file(tmap + "Tmap.trn")) && p.put("Tmap.cpt", test_io::read_file(tmap + "Tmap.cpt")));
+	for (const char *mission_path : {"missions/f/a.bms", "missions/b.bms", "missions/u.bms", "missions/r.bms"}) {
+		const std::string bms_path = mission_path;
+		TEST_EXPECT(p.put(bms_path, bms_bytes) && p.put(bms_path.substr(0, bms_path.size() - 4) + ".mis", original));
+	}
+	TEST_EXPECT(p.put("missions/c.bms", bms_bytes) && p.put("missions/v.bms", bms_bytes));
+	std::error_code made;
+	std::filesystem::create_directories(system_path(p.root + "/missions/h"), made);
+	p.run(request::rescan());
+	// A mission's names left unsaved: one renamed and saved, the original editor's .mis left as it is.
+	const auto leave_names = [&](const std::string &path) {
+		p.run(request::open_document(path));
+		if (!p.mission(path)) return false;
+		p.name_event(path, 1, "Hold the bridge");
+		p.run(request::save(path));
+		const DocumentBase *open = p.session.document_for(path);
+		return open && !open->dirty() && open->companion_unsaved();
+	};
+	// The prompt open over the request, naming the mission; then cancelled.
+	const auto asks = [&](const std::string &path) {
+		const DialogsView::UnsavedPrompt &prompt = v.dialogs.unsaved_prompt;
+		const bool named = prompt.open && std::find(prompt.files.begin(), prompt.files.end(), path) != prompt.files.end();
+		if (!named) std::printf("  no prompt naming %s (status: %s)\n", path.c_str(), v.activity.status.c_str());
+		if (prompt.open) p.run(request::resolve_unsaved(UnsavedChoice::Cancel));
+		return named;
+	};
+	// A rename taken back: the rename of a clean mission, its names then left unsaved, Rename back.
+	p.run(request::rename_asset("missions/r.bms", "r2.bms"));
+	TEST_EXPECT(p.exists("missions/r2.bms") && p.exists("missions/r2.mis"));
+	TEST_EXPECT(leave_names("missions/r2.bms"));
+	p.run(request::rename_back());
+	TEST_EXPECT(asks("missions/r2.bms") && p.exists("missions/r2.bms"));
+	// A folder renamed.
+	TEST_EXPECT(leave_names("missions/f/a.bms"));
+	p.run(request::rename_folder("missions/f", "g"));
+	TEST_EXPECT(asks("missions/f/a.bms") && p.exists("missions/f/a.bms"));
+	// Several files moved together.
+	TEST_EXPECT(leave_names("missions/b.bms"));
+	p.run(request::move_assets("missions/b.bms", {"missions/c.bms"}, "missions/h"));
+	TEST_EXPECT(asks("missions/b.bms") && p.exists("missions/b.bms"));
+	// A move taken back: a clean mission moved with another file (a file chore), its names then left unsaved, file Undo.
+	p.run(request::move_assets("missions/u.bms", {"missions/v.bms"}, "missions/h"));
+	TEST_EXPECT(p.exists("missions/h/u.bms") && p.exists("missions/h/u.mis"));
+	TEST_EXPECT(leave_names("missions/h/u.bms"));
+	p.run(request::undo_file());
+	TEST_EXPECT(asks("missions/h/u.bms") && p.exists("missions/h/u.bms"));
+	// A rename of the terrain the mission names: the mission is read again with its new name.
+	p.run(request::rename_asset("Tmap.trn", "Tmap2.trn"));
+	TEST_EXPECT(asks("missions/b.bms") && p.exists("Tmap.trn"));
+	// A rename while the validation runs (an edit just made, not validated yet): every unsaved mission is named.
+	p.run(request::open_document("missions/c.bms"));
+	p.session.handle(request::edit_record("missions/c.bms", set_of(event_at(*p.mission("missions/c.bms"), 0), "name", "Start")));
+	p.session.handle(request::rename_asset("missions/c.bms", "c2.bms"));
+	TEST_EXPECT(asks("missions/b.bms"));
+	p.session.run_operations();
+	// Quit, and the project closed.
+	p.run(request::quit());
+	TEST_EXPECT(asks("missions/b.bms"));
+	p.run(request::close_project());
+	TEST_EXPECT(asks("missions/b.bms") && v.project.open);
+	return 0;
+}
+
+// Files by name, each put with a stamp of its own (the ground's files in a test).
+class MemoryFiles : public opennova::FileSource {
+public:
+	void put(const std::string &name, std::vector<uint8_t> bytes) {
+		files_[opennova::strutil::to_lower(name)] = {std::move(bytes), ++serial_};
+	}
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
+		const auto found = files_.find(opennova::strutil::to_lower(name));
+		if (found == files_.end()) return false;
+		out = found->second.first;
+		return true;
+	}
+	uint64_t stamp(const std::string &name) const override {
+		const auto found = files_.find(opennova::strutil::to_lower(name));
+		return found == files_.end() ? 0 : found->second.second;
+	}
+
+private:
+	std::map<std::string, std::pair<std::vector<uint8_t>, uint64_t>> files_;
+	uint64_t serial_ = 0;
+};
+
+// Each entity's base height in the .mis a save writes is the terrain's height under it, as the original editor
+// samples it over the mission's terrain (M4: mission::mis_terrain_height, the .cpt's atlas the game loads blended
+// bilinearly over the .trn's own sector grid): every pool's, a marker's and an itemless entity's too.
+int test_names_base_heights() {
+	NamesProject p("opennova_mission_names_heights");
+	const std::string tmap = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/terrain/tmap/";
+	const std::vector<uint8_t> trn = test_io::read_file(tmap + "Tmap.trn"), cpt = test_io::read_file(tmap + "Tmap.cpt");
+	TEST_EXPECT(!trn.empty() && !cpt.empty() && p.put("Tmap.trn", trn) && p.put("Tmap.cpt", cpt));
+	// The terrain as the original editor reads it: the .cpt's atlas as the session's ground reads it, the .trn's own
+	// sector grid, origin and wraps.
+	auto files = std::make_shared<MemoryFiles>();
+	files->put("Tmap.trn", trn);
+	files->put("Tmap.cpt", cpt);
+	MissionGround ground;
+	MissionSceneHeader header;
+	header.terrain = "Tmap";
+	ground.follow(files, 1, header, "missions/heights");
+	TEST_EXPECT(ground.terrain() && ground.height_field()->dim == 1024);
+	if (!ground.terrain()) return 1;
+	opennova::TrnConfig config;
+	std::string trn_error;
+	TEST_EXPECT(opennova::load_mission_trn(std::string(trn.begin(), trn.end()), opennova::TrnLaterTexts{}, config, trn_error));
+	mission::MisTerrain terrain;
+	terrain.heights = ground.height_field()->heightmap;
+	terrain.sectors = &config.sector_grid[0][0];
+	terrain.origin_x = config.origin_x;
+	terrain.origin_y = config.origin_y;
+	terrain.wrap_x = config.wrap_x != 0;
+	terrain.wrap_y = config.wrap_y != 0;
+	// Four places on the island (about the origin) inside their texels, so each blends four, each at a height of its
+	// own, and each where the original editor's blend and the game's column (world::terrain_column_height) round
+	// apart: the same atlas, bilinear both, a few 16.16 units apart in about a quarter of the island's places.
+	std::vector<std::pair<int32_t, int32_t>> spots;
+	std::vector<int32_t> seen;
+	for (double y = -300.61; y <= 300.0 && spots.size() < 4; y += 25.0)
+		for (double x = -300.37; x <= 300.0 && spots.size() < 4; x += 25.0) {
+			const int32_t fx = bms::to_fixed_16_16(x), fy = bms::to_fixed_16_16(y);
+			const int32_t h = mission::mis_terrain_height(terrain, fx, fy);
+			int32_t column = 0;
+			if (h == 0 || std::find(seen.begin(), seen.end(), h) != seen.end() ||
+			    !opennova::world::terrain_column_height(ground.height_field(), fx, fy, column) || column == h)
+				continue;
+			seen.push_back(h);
+			spots.emplace_back(fx, fy);
+		}
+	TEST_EXPECT(spots.size() == 4);
+	if (spots.size() != 4) return 1;
+	bms::File file;
+	std::string error;
+	mission::BlankMission blank;
+	blank.name = "Heights";
+	blank.terrain = "Tmap";
+	TEST_EXPECT(mission::make_blank(file, blank, error));
+	const mission::EntityKind kinds[] = {mission::EntityKind::Item, mission::EntityKind::Building, mission::EntityKind::Marker,
+	                                     mission::EntityKind::Organic};
+	for (size_t i = 0; i < 4; ++i) {
+		bms::Entity entity = mission::new_entity(kinds[i], i == 3 ? 0 : 106102, int32_t(i) + 1);
+		entity.x = spots[i].first;
+		entity.y = spots[i].second;
+		entity.z = bms::to_fixed_16_16(1.0);
+		mission::entities(file, kinds[i])->push_back(entity);
+	}
+	mission::add_event(file, mission::MissionEventRecord{});
+	mission::sync_counts(file);
+	std::vector<uint8_t> bytes;
+	TEST_EXPECT(bms::write(file, bytes, error) && p.put("missions/heights.bms", bytes));
+	p.run(request::rescan());
+	p.run(request::open_document("missions/heights.bms"));
+	TEST_EXPECT(p.mission("missions/heights.bms") != nullptr);
+	if (!p.mission("missions/heights.bms")) return 1;
+	p.name_event("missions/heights.bms", 0, "Start");
+	p.run(request::save("missions/heights.bms"));
+	// The items' sections in the writer's order (items, buildings, markers, organics), each its extra_bheight and
+	// height_lock (the reader sorts an item into its pool by its type, not by the section's place).
+	const std::string text = p.text("missions/heights.mis");
+	std::vector<int64_t> bases, locks;
+	for (size_t at = 0; (at = text.find("\n  extra_bheight ", at)) != std::string::npos; ++at)
+		bases.push_back(std::stoll(text.substr(at + 17, text.find('\r', at) - at - 17)));
+	for (size_t at = 0; (at = text.find("\n  height_lock ", at)) != std::string::npos; ++at)
+		locks.push_back(std::stoll(text.substr(at + 15, text.find('\r', at) - at - 15)));
+	TEST_EXPECT(bases.size() == 4 && locks.size() == 4);
+	if (bases.size() != 4 || locks.size() != 4) return 1;
+	// Pinned: the original editor's blend over Tmap there (its sampler's, not the game's column).
+	const int64_t pinned[4] = {5079735, 6308535, 4977335, 6206135};
+	for (size_t i = 0; i < 4; ++i) {
+		if (bases[i] != pinned[i]) std::printf("  entity %zu: extra_bheight %lld\n", i, static_cast<long long>(bases[i]));
+		TEST_EXPECT(bases[i] == mission::mis_terrain_height(terrain, spots[i].first, spots[i].second) &&
+		            bases[i] == pinned[i] && locks[i] == 1);
+	}
+	return 0;
+}
+
+// The name fields and Duplicate's wording: path 0 takes no description (m3); a Duplicate refused by a .mis of the
+// copy's name says it would hold the copy's names, never that the game would take it (m8).
+int test_names_refusals() {
+	std::unique_ptr<Document> document = open_mission();
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const MissionDocument &m = dynamic_cast<const MissionDocument &>(*document);
+	const std::vector<const Node *> paths = m.rows_of(MissionKind::WaypointPath);
+	TEST_EXPECT(!paths.empty() && static_cast<const PathRow &>(*paths[0]).native.number == 0);
+	if (paths.empty()) return 1;
+	Diagnostic refused;
+	TEST_EXPECT(!document->apply({set_of({paths[0]->id, paths[0]->kind, 0}, "description", "Nowhere")}, refused) &&
+	            refused.message.find("Path 0 is no path") != std::string::npos);
+	TEST_EXPECT(apply_edits(*document, {set_of({paths[1]->id, paths[1]->kind, 0}, "description", "Somewhere")}));
+
+	NamesProject p("opennova_mission_names_refusals");
+	const bms::File plain = names_mission();
+	std::string error;
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(plain, bms_bytes, error) && p.put("missions/x.bms", bms_bytes) && p.put("missions/y.mis", "stray"));
+	p.run(request::rescan());
+	p.run(request::duplicate_asset("missions/x.bms", "y.bms"));
+	TEST_EXPECT(!p.exists("missions/y.bms") && p.view().activity.status.find("which would hold y.bms's names") != std::string::npos);
+	if (p.view().activity.status.find("which would hold") == std::string::npos)
+		std::printf("  status: %s\n", p.view().activity.status.c_str());
+	return 0;
+}
 } // namespace
 
 int main() {
@@ -630,6 +1621,16 @@ int main() {
 	if (test_variable_names() != 0) return 1;
 	if (test_variables_wire() != 0) return 1;
 	if (test_live_session() != 0) return 1;
+	if (test_row_names() != 0) return 1;
+	if (test_names_file() != 0) return 1;
+	if (test_names_file_entities() != 0) return 1;
+	if (test_names_clipboard() != 0) return 1;
+	if (test_names_file_session() != 0) return 1;
+	if (test_names_file_original() != 0) return 1;
+	if (test_names_file_chores() != 0) return 1;
+	if (test_names_base_heights() != 0) return 1;
+	if (test_names_refusals() != 0) return 1;
+	if (test_names_unsaved_paths() != 0) return 1;
 	std::printf("editor_mission_names: all tests passed\n");
 	return 0;
 }

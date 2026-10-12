@@ -160,7 +160,7 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 		// unsaved changes keeps its tab while the session asks (UnsavedDocument), a saved one
 		// always closes.
 		ImGuiTabItemFlags flags = ImGuiTabItemFlags_NoTooltip;
-		if (document->dirty()) flags |= ImGuiTabItemFlags_UnsavedDocument;
+		if (document->unsaved()) flags |= ImGuiTabItemFlags_UnsavedDocument;
 		if ((follow && path == view.documents.active) || path == tab_asked_)
 			flags |= ImGuiTabItemFlags_SetSelected;
 		const std::string name = basename_of(path);
