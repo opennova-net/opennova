@@ -1,16 +1,22 @@
 // The atlas routing (runtime/terrain_query atlas_routing.h): a mission position routes through the .trn's
 // sector grid to a texel of the 1024-unit atlas the terrain's heights and maps lie over, as the game's
 // lookups route it [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606530..0x60659D; Foliage_SampleFoliageMapMask
-// @ 0x606620], and the inverse names every grid cell where a change to an atlas rect shows: an island (one
-// mapped cell), a tiled layout (a quadrant repeated), the wraps and clamps past the grid (the cell masks,
-// D-TERRAIN-16) and empty sectors (routed nowhere, painting nothing). The char map's and the foliage map's
-// samplers route through it as their inline routing did.
+// @ 0x606620; Terrain_SampleHeightBilinear @ 0x6067BD..0x6068C4], and its inverse (terrain_atlas_rects.h):
+// where a change to an atlas rect shows, for the one-texel lookups (the char and foliage maps) and for every
+// height lookup (the bilinear ground's t and t + 1, the gradient's t - 1 and t + 1, past a quadrant's edge
+// kept in the quadrant where the .trn locks the axis and run across the atlas where it does not [orig: @
+// 0x6068FA..0x60694E]): an island, a tiled layout, the wraps and clamps past the grid (the edge cell's
+// quadrant repeating in every sector past a clamped edge), empty sectors, both inverses against a brute
+// walk of every unit through the routing and the shared tap kernel (coords_taps_for_quadrant); the map rect
+// of every map width; INT32_MIN routed without UB.
 #include <runtime/terrain_query/atlas_routing.h>
 #include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/surface_type_map.h>
+#include <runtime/terrain_query/terrain_atlas_rects.h>
 
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 #include "common/test_expect.h"
@@ -23,7 +29,8 @@ constexpr int32_t kQ16 = 65536;
 
 int32_t fx(int32_t units) { return units * kQ16; }
 
-// The routing as surface_type_at_fixed held it before the lift, verbatim, for the sampler comparison.
+// The routing as surface_type_at_fixed held it before the lift, verbatim: a regression pin that the lift
+// changed no sampler (the retail pins are the hand-routed cases of test_island and test_wraps).
 bool old_route(const int *grid, int32_t ox, int32_t oy, bool wx, bool wz, int32_t x, int32_t y, int32_t &fine_x,
                int32_t &fine_z) {
 	const auto clamp = [](int32_t v, bool wrap) { return (!wrap && (v & ~0xF) != 0) ? (v < 0 ? 0 : 15) : v; };
@@ -39,7 +46,7 @@ bool old_route(const int *grid, int32_t ox, int32_t oy, bool wx, bool wz, int32_
 }
 
 bool rect_inside(const TerrainWorldRect &r, const CoordsRect &atlas, const TerrainAtlasRouting &routing) {
-	// Every corner texel of the world rect routes into the atlas rect (x right, z = -mission y down).
+	// Every corner unit of the world rect routes into the atlas rect (x right, z = -mission y down).
 	const int32_t xs[2] = {r.x0, r.x1 - 1}, zs[2] = {r.z0, r.z1 - 1};
 	for (int32_t x : xs)
 		for (int32_t z : zs) {
@@ -48,6 +55,47 @@ bool rect_inside(const TerrainWorldRect &r, const CoordsRect &atlas, const Terra
 				return false;
 		}
 	return true;
+}
+
+// The units of `bounds` (sizes up to a few sectors) as a bitmap, set by the inverse's rects.
+struct UnitMap {
+	TerrainWorldRect bounds;
+	std::vector<uint8_t> set;
+	explicit UnitMap(const TerrainWorldRect &b)
+	    : bounds(b), set(size_t(b.x1 - b.x0) * size_t(b.z1 - b.z0), 0) {}
+	uint8_t &at(int32_t x, int32_t z) { return set[size_t(z - bounds.z0) * size_t(bounds.x1 - bounds.x0) + size_t(x - bounds.x0)]; }
+};
+
+// The inverse against a brute walk: every unit of the bounds routed (terrain_atlas_texel_at) and its taps
+// taken through the shared tap kernel (coords_taps_for_quadrant, the heights' samplers' own), hit where a tap
+// on each axis lands in the atlas rect; the rects must cover exactly those units, each once.
+bool inverse_matches_walk(const TerrainAtlasRouting &routing, const CoordsQuadrantLocks &locks, const CoordsRect &atlas,
+                          const TerrainWorldRect &bounds, TerrainAtlasTaps taps) {
+	UnitMap want(bounds), got(bounds);
+	for (int32_t z = bounds.z0; z < bounds.z1; ++z)
+		for (int32_t x = bounds.x0; x < bounds.x1; ++x) {
+			const TerrainAtlasTexel t = terrain_atlas_texel_at(routing, fx(x), -fx(z));
+			if (!t.mapped) continue;
+			const int qx = (t.slot & 2) != 0 ? 512 : 0, qz = (t.slot & 1) != 0 ? 512 : 0;
+			const CoordsTaps kernel = coords_taps_for_quadrant(locks, qx, qz, COORDS_ATLAS_SIZE);
+			bool hit_x = false, hit_z = false;
+			for (int32_t k = -taps.before; k <= taps.after; ++k) {
+				const int tx = kernel.x(t.x + k), tz = kernel.z(t.z + k);
+				hit_x |= atlas.x <= tx && tx < atlas.x + atlas.w;
+				hit_z |= atlas.z <= tz && tz < atlas.z + atlas.h;
+			}
+			if (hit_x && hit_z) want.at(x, z) = 1;
+		}
+	for (const TerrainWorldRect &r : terrain_atlas_world_rects(routing, atlas, bounds, taps, locks)) {
+		if (r.x0 < bounds.x0 || r.z0 < bounds.z0 || r.x1 > bounds.x1 || r.z1 > bounds.z1 || r.x0 >= r.x1 || r.z0 >= r.z1)
+			return false;
+		for (int32_t z = r.z0; z < r.z1; ++z)
+			for (int32_t x = r.x0; x < r.x1; ++x) {
+				if (got.at(x, z)) return false; // each unit once
+				got.at(x, z) = 1;
+			}
+	}
+	return got.set == want.set;
 }
 
 int test_island() {
@@ -91,7 +139,7 @@ int test_tiled() {
 	const std::vector<TerrainWorldRect> repeats = terrain_atlas_world_rects(routing, texel);
 	TEST_EXPECT(repeats.size() == 16);
 	for (const TerrainWorldRect &r : repeats) TEST_EXPECT(r.x1 - r.x0 == 1 && r.z1 - r.z0 == 1 && rect_inside(r, texel, routing));
-	// Grid order: the first repeat is cell (0, 0), the last cell (3, 3).
+	// Sector order: the first repeat is cell (0, 0), the last cell (3, 3).
 	TEST_EXPECT(repeats.front().x0 == 10 && repeats.front().z0 == 20 && repeats.back().x0 == 3 * 512 + 10 &&
 	            repeats.back().z0 == 3 * 512 + 20);
 	// The other quadrants are drawn nowhere.
@@ -101,31 +149,101 @@ int test_tiled() {
 }
 
 int test_wraps() {
-	// Cells (0, 0) = 1 and (15, 15) = 4, the grid from (0, 0).
+	// Cells (0, 0) = 1, (0, 15) = 1 and (15, 15) = 4, the grid from (0, 0).
 	int grid[16][16] = {};
 	grid[0][0] = 1;
+	grid[0][15] = 1;
 	grid[15][15] = 4;
 	const TerrainAtlasRouting wrapped{&grid[0][0], 0, 0, true, true};
 	const TerrainAtlasRouting clamped{&grid[0][0], 0, 0, false, false};
-	// Column 16, row 0: wraps to column 0 (mapped); clamps to column 15 (row 0: empty).
+	// Column 16, row 0: wraps to column 0; clamps to column 15 (mapped too, the same quadrant).
 	const TerrainAtlasTexel w16 = terrain_atlas_texel_at(wrapped, fx(16 * 512 + 5), -fx(7));
 	TEST_EXPECT(w16.mapped && w16.cell_col == 0 && w16.cell_row == 0 && w16.x == 5 && w16.z == 7);
 	const TerrainAtlasTexel c16 = terrain_atlas_texel_at(clamped, fx(16 * 512 + 5), -fx(7));
-	TEST_EXPECT(!c16.mapped && c16.cell_col == 15 && c16.cell_row == 0);
-	// Column -1, row -1: wraps to (15, 15) (mapped); clamps to (0, 0) (mapped).
+	TEST_EXPECT(c16.mapped && c16.cell_col == 15 && c16.cell_row == 0 && c16.x == 5);
+	// Column -1, row -1: wraps to (15, 15); clamps to (0, 0).
 	const TerrainAtlasTexel wm = terrain_atlas_texel_at(wrapped, fx(-512 + 3), -fx(-512 + 9));
 	TEST_EXPECT(wm.mapped && wm.cell_col == 15 && wm.cell_row == 15 && wm.x == 512 + 3 && wm.z == 512 + 9);
 	const TerrainAtlasTexel cm = terrain_atlas_texel_at(clamped, fx(-512 + 3), -fx(-512 + 9));
 	TEST_EXPECT(cm.mapped && cm.cell_col == 0 && cm.cell_row == 0 && cm.x == 3 && cm.z == 9);
-	// The inverse names the grid's own cells, wrap or not.
-	TEST_EXPECT(terrain_atlas_world_rects(wrapped, CoordsRect{0, 0, 1024, 1024}).size() == 2);
-	std::printf("wraps: a wrapped axis takes the low four bits, a clamped one the edge cell\n");
+	// The grid's own sectors: three mapped cells.
+	TEST_EXPECT(terrain_atlas_world_rects(wrapped, CoordsRect{0, 0, 1024, 1024}).size() == 3);
+	// Past a clamped edge the edge cell's quadrant repeats in every sector (the routing keeps x & 511): texel
+	// 100 shows at x 7780 (sector 15, in the grid), 8292, 8804 and 10340 (sectors 16, 17, 20) alike.
+	const CoordsRect t100{100, 0, 1, 1};
+	const TerrainWorldRect past{15 * 512, 0, 21 * 512, 512};
+	const std::vector<TerrainWorldRect> repeats = terrain_atlas_world_rects(clamped, t100, past);
+	TEST_EXPECT(repeats.size() == 6);
+	for (const TerrainWorldRect &r : repeats) TEST_EXPECT(r.x1 - r.x0 == 1 && (r.x0 - 100) % 512 == 0 && r.z0 == 0);
+	for (const int32_t x : {7780, 8292, 8804, 10340})
+		TEST_EXPECT(terrain_atlas_texel_at(clamped, fx(x), 0).mapped && terrain_atlas_texel_at(clamped, fx(x), 0).x == 100);
+	// Past a wrapped edge the grid repeats: sectors 16..20 are cells 0..4, only cell 0 mapped on row 0.
+	const std::vector<TerrainWorldRect> wrapped_repeats = terrain_atlas_world_rects(wrapped, t100, past);
+	TEST_EXPECT(wrapped_repeats.size() == 2 && wrapped_repeats[0].x0 == 15 * 512 + 100 && wrapped_repeats[1].x0 == 16 * 512 + 100);
+	std::printf("wraps: a wrapped axis repeats the grid, a clamped one the edge cell's quadrant\n");
+	return 0;
+}
+
+int test_inverse_against_walk() {
+	// The four quadrants over a 2 x 2 block from (0, 0), quadrant 0 locked on x, quadrant 3 on z; the rects
+	// against the walk for the one-texel lookups and every height lookup, at a quadrant's first column (the
+	// unlocked neighbour's last unit reads it), at the atlas's first column (the wrap of 1023 + 1), across the
+	// z seam, at the atlas's last column, and inside a quadrant.
+	int grid[16][16] = {};
+	grid[0][0] = 1; // quadrant (0, 0)
+	grid[0][1] = 3; // (512, 0)
+	grid[1][0] = 2; // (0, 512)
+	grid[1][1] = 4; // (512, 512)
+	const TerrainAtlasRouting routing{&grid[0][0], 0, 0, false, false};
+	CoordsQuadrantLocks locks;
+	locks.set(0, true, false);
+	locks.set(3, false, true);
+	const TerrainWorldRect bounds{-20, -20, 1100, 1100};
+	for (const CoordsRect &atlas : {CoordsRect{512, 100, 1, 1}, CoordsRect{0, 0, 2, 2}, CoordsRect{200, 510, 5, 4},
+	                                CoordsRect{1023, 300, 1, 1}, CoordsRect{700, 700, 30, 20}, CoordsRect{511, 0, 2, 1024}}) {
+		TEST_EXPECT(inverse_matches_walk(routing, locks, atlas, bounds, kTerrainNearestTaps));
+		TEST_EXPECT(inverse_matches_walk(routing, locks, atlas, bounds, kTerrainHeightTaps));
+	}
+	// A height change at quadrant (512, 512)'s first column (atlas x 512, z 600) shows in the last unit of the
+	// sector drawing unlocked quadrant (0, 512), whose bilinear x + 1 tap runs across the atlas into it; quadrant
+	// (0, 0), locked on x, reads its own first column there instead.
+	TerrainHeightField field;
+	field.layout.sector_grid = &grid[0][0];
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+	field.wrap_x = false;
+	field.wrap_z = true;
+	field.locks = locks;
+	const TerrainAtlasRouting from_field = terrain_atlas_routing(field);
+	TEST_EXPECT(from_field.sector_grid == &grid[0][0] && from_field.origin_x == 0 && from_field.origin_y == 0 &&
+	            !from_field.wrap_x && from_field.wrap_z);
+	field.layout.origin_x = 3;
+	field.layout.origin_y = -2;
+	field.wrap_x = true;
+	field.wrap_z = false;
+	const TerrainAtlasRouting swapped = terrain_atlas_routing(field);
+	TEST_EXPECT(swapped.origin_x == 3 && swapped.origin_y == -2 && swapped.wrap_x && !swapped.wrap_z);
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+	field.wrap_x = false;
+	const CoordsRect seam{512, 600, 1, 1};
+	const std::vector<TerrainWorldRect> heights = terrain_height_world_rects(field, seam, bounds);
+	const std::vector<TerrainWorldRect> same =
+	        terrain_atlas_world_rects(terrain_atlas_routing(field), seam, bounds, kTerrainHeightTaps, locks);
+	TEST_EXPECT(heights.size() == same.size() && !heights.empty());
+	bool neighbour = false, locked_own = false;
+	for (const TerrainWorldRect &r : heights) {
+		neighbour |= r.x0 == 511 && r.x1 == 512 && r.z0 == 512 + 87 && r.z1 == 512 + 90; // (0, 512)'s last column
+		locked_own |= r.x0 == 511 && r.z1 <= 512; // (0, 0)'s last column: none
+	}
+	TEST_EXPECT(neighbour && !locked_own);
+	std::printf("inverse: the rects are exactly the units the walk finds, one-texel and height taps, locks and seams\n");
 	return 0;
 }
 
 int test_samplers() {
 	// A mixed layout with empty cells, both wraps, and maps of 256 and 1024: the samplers read the texel the
-	// routing names, as the inline routing they replace did.
+	// routing names, as the inline routing they replace did (a regression pin, old_route above).
 	int grid[16][16] = {};
 	for (int r = 0; r < 16; ++r)
 		for (int c = 0; c < 16; ++c) grid[r][c] = (r * 7 + c * 3) % 5; // 0 (empty) .. 4
@@ -169,21 +287,45 @@ int test_samplers() {
 			TEST_EXPECT(foliage_mask_at_fixed(foliage, x_fixed, y_fixed) == foliage_want);
 		}
 	}
-	// A map's rect in atlas texels: 256 wide shifts by 2, 512 by 1, 1024 by 0.
+	// INT32_MIN on both axes routes without UB, as retail's NEG/SAR has it: -y stays INT32_MIN, both cells
+	// -64 (the grid's cell 0 under a wrap from origin 0), both offsets 0.
+	int one[16][16] = {};
+	one[0][0] = 4;
+	const int32_t lowest = std::numeric_limits<int32_t>::min();
+	const TerrainAtlasTexel low = terrain_atlas_texel_at(TerrainAtlasRouting{&one[0][0], 0, 0, true, true}, lowest, lowest);
+	TEST_EXPECT(low.mapped && low.cell_col == 0 && low.cell_row == 0 && low.x == 512 && low.z == 512);
+	std::printf("samplers: the char map and the foliage map read the routed texel under every wrap; INT32_MIN routed\n");
+	return 0;
+}
+
+int test_map_rects() {
+	// A map's rect in atlas texels: 256 wide shifts by 2, 512 by 1, 1024 by 0, clipped to the atlas.
 	const CoordsRect r256 = terrain_map_atlas_rect(CoordsRect{1, 2, 3, 4}, 256);
 	TEST_EXPECT(r256.x == 4 && r256.z == 8 && r256.w == 12 && r256.h == 16);
 	const CoordsRect r512 = terrain_map_atlas_rect(CoordsRect{1, 2, 3, 4}, 512);
 	TEST_EXPECT(r512.x == 2 && r512.w == 6);
 	const CoordsRect r1024 = terrain_map_atlas_rect(CoordsRect{1, 2, 3, 4}, 1024);
 	TEST_EXPECT(r1024.x == 1 && r1024.h == 4);
-	std::printf("samplers: the char map and the foliage map read the routed texel under every wrap\n");
+	// 600 wide samples as 512 (shift 1): texel 300 is read, texel 520 never.
+	const CoordsRect r600 = terrain_map_atlas_rect(CoordsRect{300, 0, 1, 1}, 600);
+	TEST_EXPECT(r600.x == 600 && r600.w == 2);
+	TEST_EXPECT(terrain_map_atlas_rect(CoordsRect{520, 0, 1, 1}, 600).w == 0);
+	// 2048 wide or more: every position reads texel (0, 0), which covers the atlas; any other texel nothing.
+	const CoordsRect r2048 = terrain_map_atlas_rect(CoordsRect{0, 0, 1, 1}, 2048);
+	TEST_EXPECT(r2048.x == 0 && r2048.z == 0 && r2048.w == 1024 && r2048.h == 1024);
+	TEST_EXPECT(terrain_map_atlas_rect(CoordsRect{1, 0, 1, 1}, 4096).w == 0);
+	// A negative origin or no size: nothing.
+	TEST_EXPECT(terrain_map_atlas_rect(CoordsRect{-1, 0, 2, 2}, 256).w == 0);
+	TEST_EXPECT(terrain_map_atlas_rect(CoordsRect{0, 0, 0, 2}, 256).w == 0);
+	std::printf("map rects: every width's shift, the 2048-wide texel 0, refusals\n");
 	return 0;
 }
 
 } // namespace
 
 int main() {
-	const int failures = test_island() + test_tiled() + test_wraps() + test_samplers();
+	const int failures = test_island() + test_tiled() + test_wraps() + test_inverse_against_walk() + test_samplers() +
+	                     test_map_rects();
 	if (failures == 0) std::printf("terrain_atlas_routing: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
