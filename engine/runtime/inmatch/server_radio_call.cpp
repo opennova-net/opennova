@@ -244,7 +244,8 @@ std::vector<ProtocolMessage> Server_HandleRadioCall(NapiNPServerCtx *ctx,
 	// [orig: @0x5143fb..0x514494].
 	call.location = static_cast<int16_t>(nearest_location_index(world, *entity));
 	const std::vector<uint8_t> body = encode_tracked_player_voice(call);
-	const uint8_t team = entity->team;
+	// Both fans read slot teams (+0x1A0), never the bodies' (D-NET-636).
+	const uint8_t team = sender.assigned_team;
 	const auto send = [&](NapiNPConnection &recipient) {
 		// msgClass 0: the unreliable class [orig: SendFiltered(0x6D, 0, 1)
 		// @0x5144c8 / @0x51480e].
@@ -262,33 +263,39 @@ std::vector<ProtocolMessage> Server_HandleRadioCall(NapiNPServerCtx *ctx,
 	};
 
 	if (rule == nullptr) {
-		// No rule: the sender's team, mask 0x180 (slot state 6/7 and the team
-		// byte), the sender included [orig: @0x51449d..0x5144c8].
+		// No rule: the sender's slot team, mask 0x180 (slot state 6/7 and each
+		// candidate's slot team byte; no entity read), the sender included
+		// [orig: @0x51449d..0x5144c8: `movzx ecx, [ebx+1A0h]` @0x51449f, the
+		//  filter @0x5144b1, the mask @0x5144be; NapiNPServer_SendFiltered
+		//  @0x4C896A..0x4C8977].
 		for (NapiNPConnection &recipient : roster) {
-			if (!active_player_recipient(recipient)) continue;
-			const world::Entity *other = recipient_entity(recipient);
-			if (other != nullptr && other->team == team) send(recipient);
+			if (active_player_recipient(recipient) && recipient.assigned_team == team)
+				send(recipient);
 		}
 		sender.link.radio_call_cooldown_seconds = kRadioCallCooldownSeconds; // @0x5144d0
 		return replies;
 	}
 
-	// The per-slot fan: an active slot on the sender's team whose NetPlayer is
-	// in state 10 (the port's in-match connection short of the round-end
-	// state 11), the sender always, any other slot as its rule admits, each
-	// unicast (mask 0x20). A recipient without a player is skipped (retail
-	// reads its entity unconditionally). [orig: @0x5144e6..0x51480e — the
-	// sender's carrier Entity_FindChildByDefType @0x5144e6, active +4
-	// @0x514510, team +0x1A0 @0x51451a, NetPlayer +0xA0 == 10 @0x514537, the
-	// sender @0x514544]
+	// The per-slot fan: an active slot on the sender's slot team whose
+	// NetPlayer is in state 10 (the port's in-match connection short of the
+	// round-end state 11), the sender always, any other slot as its rule
+	// admits, each unicast (mask 0x20). Another recipient without a player is
+	// skipped (retail reads its entity unconditionally). [orig:
+	// @0x5144e6..0x51480e: the sender's carrier Entity_FindChildByDefType
+	// @0x5144e6, active +4 @0x514510, the slot teams `mov cl, [ebx+1A0h]`
+	// @0x51451a / `cmp cl, [edi+1A0h]` @0x514520, NetPlayer +0xA0 == 10
+	// @0x514537, the sender @0x514544, the recipient's entity @0x51454c]
 	const world::EntityHandle sender_carrier = carrier_vehicle(world, *entity);
 	for (NapiNPConnection &recipient : roster) {
-		if (!is_in_match(recipient) || recipient.burst.game_state == 11) continue;
-		const world::Entity *other = recipient_entity(recipient);
-		if (other == nullptr || other->team != team) continue;
-		if (&recipient != &sender &&
-				!rule_admits(*rule, world, *entity, sender_carrier, *other))
+		if (!is_in_match(recipient) || recipient.burst.game_state == 11 ||
+				recipient.assigned_team != team)
 			continue;
+		if (&recipient != &sender) {
+			const world::Entity *other = recipient_entity(recipient);
+			if (other == nullptr ||
+					!rule_admits(*rule, world, *entity, sender_carrier, *other))
+				continue;
+		}
 		send(recipient);
 	}
 	// A mode-3 rule marks the sender's aim point for its seconds

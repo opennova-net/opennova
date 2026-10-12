@@ -802,15 +802,17 @@ void refresh_next_flag_state(NapiNPServerCtx &ctx, world::World &world) {
 // team bit, a 62-tick countdown (fires when zero or when a positive value
 // decrements to zero, then reloads 62) walks every active slot with an entity
 // and, for each one whose entity is dead (Health <= 0 and Flags 0x2) of a
-// revivable cause, sends the 0x46 field-0x0008 form — [u8 slot][u16 0x0008]
-// [u8 pool-0 index][u8 downedState] — to every state-6/7 slot on the victim's
-// team, the listen host included. downedState is the dead-and-(auto-medic or
-// requested) packing of the revive window and the request bit, else 0.
+// revivable cause, sends the 0x46 field-0x0008 form, [u8 slot][u16 0x0008]
+// [u8 pool-0 index][u8 downedState], to every state-6/7 slot whose own team
+// byte is the victim SLOT's (no entity read on either side), the listen host
+// included. downedState is the dead-and-(auto-medic or requested) packing of
+// the revive window and the request bit, else 0.
 // Retail's SendFiltered(0x46, msgClass 1, userParam 1) maps to this port's
 // transient send, as the 0x57 pong and the 0x16 list do.
 // [orig: Server_TickUpdate @0x51E2D0..0x51E378 — team test @0x51e2d0, timer
 //  @0x51e2db..0x51e307, predicate @0x51e333, form 8 @0x51e352, mask 0x180
-//  @0x51e357, team filter @0x51e36d, send @0x51e373;
+//  @0x51e357, `movzx edx, [esi+1A0h]` @0x51e35d, team filter @0x51e36d,
+//  send @0x51e373;
 //  NetPacket_SerializePlayerSync0x46 @0x505E80 downedState @0x5060e6..0x506131;
 //  NapiNPServer_SendFiltered @0x4C87E0 masks 0x80/0x100 @0x4c8948/@0x4c8964]
 void emit_team_downed_resend(NapiNPServerCtx &ctx, world::World &world) {
@@ -843,10 +845,9 @@ void emit_team_downed_resend(NapiNPServerCtx &ctx, world::World &world) {
 		const std::vector<uint8_t> body =
 				encode_player_sync(rep, kPlayerSyncHasDownedState);
 		for (NapiNPConnection &recipient : ctx.np_protocol.connection_list) {
-			if (!active_player_recipient(recipient)) continue;
-			const world::Entity *member =
-					world.registry.get(recipient.link.owned_entity);
-			if (member == nullptr || member->team != victim->team) continue;
+			if (!active_player_recipient(recipient) ||
+					recipient.assigned_team != conn.assigned_team)
+				continue;
 			recipient.link.transport->host_send(
 					s2c::PLAYER_SYNC, body, /*reliable=*/false);
 		}
@@ -2063,18 +2064,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				conn.link.transport->host_send(tag, body, reliable);
 			}
 		};
-		auto connection_team = [&](const NapiNPConnection &conn) -> uint8_t {
-			if (!conn.link.owned_entity.valid()) return 0;
-			const world::Entity *entity =
-					world.registry.get(conn.link.owned_entity);
-			return entity != nullptr ? entity->team : 0;
-		};
-		// Mask 0x180: in-match slots whose team is the filter team.
-		// [orig: NapiNPServer_SendFiltered bits 0x80/0x100]
-		auto send_team = [&](uint8_t team, const std::vector<uint8_t> &body) {
+		// Mask 0x180: in-match slots whose own team byte, zero-extended, is the
+		// filter dword (no entity read). [orig: NapiNPServer_SendFiltered bits
+		//  0x80/0x100, `movzx eax, [esi+1A0h]` @0x4C896A..0x4C8977]
+		auto send_team = [&](int32_t filter, const std::vector<uint8_t> &body) {
 			for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 				if (!is_in_match(conn) || conn.link.transport == nullptr ||
-						connection_team(conn) != team)
+						static_cast<int32_t>(conn.assigned_team) != filter)
 					continue;
 				conn.link.transport->host_send(0x1E, body);
 			}
@@ -2206,8 +2202,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 					conn.reply.capture_nag_held = false;
 			}
 			if (!flip->decided && flip->capturer_is_player) {
-				const uint8_t own_team = flip->capturer_team;
-				const uint8_t enemy_team = own_team == 1 ? 2 : 1;
+				// The capturer ENTITY's team byte, sign-extended, then 2 for
+				// team 1 and 1 otherwise [orig: `movsx ecx, [esi+162h]`
+				//  @0x50F7D6; `sub cl,1 / neg cl / sbb / add 2` @0x50F83B..0x50F84E].
+				const int32_t own_team = static_cast<int8_t>(flip->capturer_team);
+				const int32_t enemy_team = flip->capturer_team == 1 ? 2 : 1;
 				send_team(own_team, flip->unchanged
 						? event_body(51, flip->zone_number, flip->rank)
 						: event_body(53, flip->zone_number, flip->frontier));

@@ -82,9 +82,11 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 			reply.minimap_initial_scan_pending = false;
 		}
 
-		uint8_t recipient_team = 0; // retail's player slot byte +416
-		if (const world::Entity *recipient = world.registry.get(conn.link.owned_entity))
-			recipient_team = recipient->team;
+		// The recipient SLOT's team byte (+0x1A0), never its body's (D-NET-636):
+		// the capture bits and the vehicle filter below read it [orig: `movzx eax,
+		//  [ebx+1A0h]` @0x51820C (pool 2), `movzx ecx, [ebx+1A0h]` @0x51835C
+		//  (pool 1), `movzx edx, [ecx+1A0h]` @0x5184D7 (the vehicle filter)].
+		const uint8_t recipient_team = conn.assigned_team;
 		// SpawnPoint rows from both static and actor pools are persistent and
 		// refreshed on every invocation. A numbered zone's source byte ORs the
 		// recipient's capture bits: 0x80 when its team may take the zone, 0x40
@@ -119,8 +121,11 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 			if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
 					(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
 				continue;
-			// In a live MP session retail suppresses occupied enemy vehicles.
-			if (e->item_type == 1 && e->team != 0 && e->team != recipient_team)
+			// In a live MP session retail suppresses occupied enemy vehicles: a
+			// teamed one whose team byte, sign-extended, is not the recipient
+			// slot's [orig: `movsx eax, al` @0x5184DE, the compare @0x5184E1..0x5184E3].
+			if (e->item_type == 1 && e->team != 0 &&
+					static_cast<int8_t>(e->team) != static_cast<int32_t>(recipient_team))
 				continue;
 			// A child EWEAP mounted under a non-Building parent is represented
 			// by that carrier rather than as an independent map blip.
@@ -131,6 +136,9 @@ void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
 						carrier != nullptr && carrier->item_type != 5)
 					continue;
 			}
+			// Not ported: FlagBall's carried-flag filter (a carried flag only to
+			// its carrier's team by the recipient slot's byte) and its carrier
+			// slot pass after this loop (D-NET-660).
 			append(*e, false);
 		}
 
