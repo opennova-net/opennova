@@ -283,6 +283,12 @@ void draw_paint_part(TerrainPaneContext &context) {
 		if (ImGui::Checkbox("Fill", &fill)) set("fill", io::JsonValue::make_bool(fill));
 		ui_kit::tooltip("A click fills the texels joined to the one under it that hold its value, wherever the terrain "
 		                "draws them (a drag fills where it was pressed).");
+		ImGui::SameLine();
+		bool erase = brush.erase;
+		if (ImGui::Checkbox("Erase", &erase)) set("erase", io::JsonValue::make_bool(erase));
+		ui_kit::tooltip("Lay the game's default in place of the brush's value: class 1 (dirt, the game's class where a "
+		                "terrain names no surface map), foliage code 0 (grows nothing), the first detail layer, the colour "
+		                "map as last saved.");
 	}
 }
 

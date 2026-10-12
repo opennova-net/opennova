@@ -228,6 +228,27 @@ int test_strokes() {
 		for (const EditorRequest &each : out.requests) session.handle(each);
 		TEST_EXPECT(v.workspace.terrain_brush.colour == 0xFF2000);
 	}
+	// Erase (the review's m11): the game's default in place of the brush's value: the colour map's texel as last saved,
+	// the surface map's class 1, the foliage map's code 0.
+	ask.brush.erase = true;
+	ask.brush_named = kBrushTool | kBrushColour | kBrushStrength | kBrushRadius | kBrushErase;
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done() && colours->plane(0).texel(256, 256)[0] == 128 &&
+	            colours->plane(0).texel(256, 256)[1] == 128 && contains(v.activity.status, "Erased the colour map"));
+	TerrainStrokeAsk erase;
+	erase.plane = TerrainPlane::Surface;
+	erase.brush.tool = TerrainTool::Surface;
+	erase.brush.erase = true;
+	erase.brush.radius = 0.0f;
+	erase.brush_named = kBrushTool | kBrushRadius | kBrushErase;
+	erase.points = {{-256.0, 256.0}};
+	session.handle(request::terrain_stroke(m, erase));
+	TEST_EXPECT(session.outcome().done() && chars->plane(0).u8(64, 64) == 1);
+	erase.plane = TerrainPlane::Foliage;
+	erase.brush.tool = TerrainTool::Foliage;
+	session.handle(request::terrain_stroke(m, erase));
+	TEST_EXPECT(session.outcome().done() && codes->plane(0).u8(64, 64) == 0);
+	ask.brush.erase = false;
 	// A layer the blend map does not hold, and a map no brush paints: refused, saying why.
 	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_d1.tga", colour_map));
 	editor_test::handle_to_end(session, request::rescan());

@@ -61,21 +61,28 @@ bool form_fits(TerrainPlane plane, const RasterPlane &texels, int layer, bool so
 	return false;
 }
 
-// The value a dab of weight `weight` leaves on a texel holding `texel` (bytes of the plane's format).
-void lay(TerrainPlane plane, const TerrainBrush &brush, float weight, uint8_t *texel, int bytes) {
+// The game's class where a terrain names no char map [orig: sub_605A10], what an Erase of the surface map lays.
+constexpr int kDefaultClass = 1;
+
+// The value a dab of weight `weight` leaves on a texel holding `texel` (bytes of the plane's format). An Erase lays the
+// game's default: class 1, code 0, the first detail layer, the colour map's texel as last saved (`saved`).
+void lay(TerrainPlane plane, const TerrainBrush &brush, float weight, uint8_t *texel, int bytes,
+         const uint8_t *saved = nullptr) {
 	switch (plane) {
-	case TerrainPlane::Surface:
+	case TerrainPlane::Surface: {
+		const int surface = brush.erase ? kDefaultClass : brush.surface;
 		if (bytes == 1) {
-			texel[0] = uint8_t(std::clamp(brush.surface, 0, 255));
+			texel[0] = uint8_t(std::clamp(surface, 0, 255));
 		} else {
 			// A colour source: the class's legend colour, its alpha kept (the import reads the colours alone).
-			const CharmapLegendColour &c = kCharmapLegend[std::clamp(brush.surface, 0, kCharmapLegendCount - 1)];
+			const CharmapLegendColour &c = kCharmapLegend[std::clamp(surface, 0, kCharmapLegendCount - 1)];
 			texel[0] = c.r;
 			texel[1] = c.g;
 			texel[2] = c.b;
 		}
 		return;
-	case TerrainPlane::Foliage: texel[0] = uint8_t(std::clamp(brush.foliage, 0, 255)); return;
+	}
+	case TerrainPlane::Foliage: texel[0] = uint8_t(brush.erase ? 0 : std::clamp(brush.foliage, 0, 255)); return;
 	case TerrainPlane::Colour:
 	case TerrainPlane::Blend: {
 		// Toward the target by the dab's weight and the brush's strength: the colour (its alpha kept), or the layer's
@@ -83,11 +90,17 @@ void lay(TerrainPlane plane, const TerrainBrush &brush, float weight, uint8_t *t
 		uint8_t target[4] = {0, 0, 0, 0};
 		const int channels = 3; // a blend map's alpha, which no splat reads, kept as it is
 		if (plane == TerrainPlane::Colour) {
-			target[0] = uint8_t((brush.colour >> 16) & 0xFF);
-			target[1] = uint8_t((brush.colour >> 8) & 0xFF);
-			target[2] = uint8_t(brush.colour & 0xFF);
+			if (brush.erase && saved) {
+				target[0] = saved[0];
+				target[1] = saved[1];
+				target[2] = saved[2];
+			} else {
+				target[0] = uint8_t((brush.colour >> 16) & 0xFF);
+				target[1] = uint8_t((brush.colour >> 8) & 0xFF);
+				target[2] = uint8_t(brush.colour & 0xFF);
+			}
 		} else {
-			target[std::clamp(brush.layer, 0, 2)] = 255;
+			target[brush.erase ? 0 : std::clamp(brush.layer, 0, 2)] = 255;
 		}
 		const double share = std::clamp(double(weight) * double(brush.strength), 0.0, 1.0);
 		for (int c = 0; c < channels && c < bytes; ++c)
@@ -125,7 +138,18 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 		error = file + " cannot take this paint: " + why + ".";
 		return false;
 	}
-	if (context.plane == TerrainPlane::Surface && texels.format() != RasterFormat::U8 &&
+	// An Erase of the colour map lays it as last saved: that state's texels, of this size and form.
+	const RasterState &saved_state = texture->saved_state();
+	const RasterPlane *saved = context.brush.erase && context.plane == TerrainPlane::Colour && !saved_state.planes.empty()
+	                                   ? &saved_state.planes.front()
+	                                   : nullptr;
+	if (context.brush.erase && context.plane == TerrainPlane::Colour &&
+	    (!saved || saved->width() != texels.width() || saved->height() != texels.height() ||
+	     saved->format() != texels.format())) {
+		error = file + " holds no saved colour map of its size and form to erase to (save it first).";
+		return false;
+	}
+	if (context.plane == TerrainPlane::Surface && texels.format() != RasterFormat::U8 && !context.brush.erase &&
 	    (context.brush.surface < 0 || context.brush.surface >= kCharmapLegendCount)) {
 		error = file + " holds the legend's colours, its twenty classes: class " + std::to_string(context.brush.surface) +
 		        " has no colour there (paint it into an indexed picture).";
@@ -136,7 +160,9 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 	const TextureSide *side = texture_side(texture->state());
 	if (side && side->form == TextureSide::Form::Png && side->png_colour == 3 &&
 	    (context.plane == TerrainPlane::Surface || context.plane == TerrainPlane::Foliage)) {
-		const int value = context.plane == TerrainPlane::Surface ? context.brush.surface : context.brush.foliage;
+		const int value = context.brush.erase ? (context.plane == TerrainPlane::Surface ? kDefaultClass : 0)
+		                  : context.plane == TerrainPlane::Surface ? context.brush.surface
+		                                                           : context.brush.foliage;
 		if (value < 0 || uint32_t(value) >= side->png_entries) {
 			error = file + " holds a palette of " + std::to_string(side->png_entries) + " entries: " +
 			        std::to_string(value) + " is past it (add the entry to its palette in a paint program first).";
@@ -185,7 +211,17 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 			}
 			std::sort(order.begin(), order.end());
 			values.reserve(order.size() * size_t(bytes));
-			for (size_t i = 0; i < order.size(); ++i) values.insert(values.end(), laid.begin(), laid.end());
+			for (const uint32_t index : order) {
+				if (saved) {
+					// An Erase of the colour map: each texel toward its own colour as last saved.
+					std::vector<uint8_t> own = value;
+					lay(context.plane, context.brush, 1.0f, own.data(), bytes,
+					    saved->texel(int(index % uint32_t(w)), int(index / uint32_t(w))));
+					values.insert(values.end(), own.begin(), own.end());
+				} else {
+					values.insert(values.end(), laid.begin(), laid.end());
+				}
+			}
 		}
 	} else {
 		// The dabs in order over the texels as they stand, each dab seeing the ones before it.
@@ -200,7 +236,10 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 					order.push_back(texel.index);
 					values.insert(values.end(), now, now + bytes);
 				}
-				lay(context.plane, context.brush, texel.weight, &values[found->second * size_t(bytes)], bytes);
+				const uint8_t *was = saved ? saved->texel(int(texel.index % uint32_t(texels.width())),
+				                                          int(texel.index / uint32_t(texels.width())))
+				                           : nullptr;
+				lay(context.plane, context.brush, texel.weight, &values[found->second * size_t(bytes)], bytes, was);
 			}
 	}
 	auto edit = std::make_shared<TexturePaintEdit>();
@@ -220,7 +259,9 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 		x1 = std::max(x1, x + 1);
 		y1 = std::max(y1, y + 1);
 	}
-	plan.words = std::string(filled ? "Filled " : "Painted ") + terrain_plane_words(context.plane) + " in " + file;
+	plan.words = std::string(context.brush.erase ? (filled ? "Filled with the default " : "Erased ")
+	                                             : (filled ? "Filled " : "Painted ")) +
+	             terrain_plane_words(context.plane) + " in " + file;
 	if (filled) {
 		// A map whose quadrants the grid draws at more than one place (or wraps) changes at each of them.
 		int places[5] = {0, 0, 0, 0, 0};

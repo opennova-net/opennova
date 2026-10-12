@@ -37,6 +37,9 @@ inline constexpr WorkspaceMember kTerrainBrushMembers[] = {
 	{"cursor", WorkspaceJson::Numbers,
 			"Where the brush's ring shows with no pointer over a view, [x, y] in mission metres (an MCP client's "
 			"screenshot); null for none."},
+	{"erase", WorkspaceJson::Boolean,
+			"The Paint tools erase: a dab lays the game's default in place of the brush's value (class 1, foliage code "
+			"0, the first detail layer, the colour map as last saved)."},
 	{"fill", WorkspaceJson::Boolean,
 			"The Paint tools fill: a click fills the texels joined to the one under it (left, right, up, down) that hold "
 			"its value, wherever the terrain draws them."},

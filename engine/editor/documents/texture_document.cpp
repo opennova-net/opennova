@@ -153,6 +153,11 @@ std::shared_ptr<const TextureImage> TextureDocument::painted_image_() const {
 	return retexel_texture(*read_image_, std::move(rgba), std::move(indices), std::move(luminance));
 }
 
+void TextureDocument::on_saved() {
+	RasterDocument::on_saved();
+	saved_state_ = state();
+}
+
 SerializeResult TextureDocument::serialize() const {
 	SerializeResult out;
 	out.text.assign(bytes().begin(), bytes().end());
@@ -199,6 +204,7 @@ bool TextureDocument::read_source(const std::vector<uint8_t> &decoded, bool adop
 	if (!adopt) return true;
 	read_bytes_ = std::make_shared<const std::vector<uint8_t>>(decoded);
 	read_state_ = state();
+	saved_state_ = state();
 	whole_bytes_.clear();
 	loaded_ = true;
 	bytes_.reset();

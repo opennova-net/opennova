@@ -52,6 +52,8 @@ public:
 	const std::vector<uint8_t> &bytes() const;
 	// Whether a brush paints it (one plane of its texels: texture_raster.h's paintable forms).
 	bool paintable() const { return texture_paintable(state()); }
+	// Its texels as its file holds them (read, or last saved): what an Erase of a colour map lays (S25 B4).
+	const RasterState &saved_state() const { return saved_state_; }
 
 	SerializeResult serialize() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override;
@@ -61,8 +63,10 @@ protected:
 	bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) override;
 	bool read_source(const std::vector<uint8_t> &decoded, bool adopt, std::vector<SourceIssue> &issues,
 	                 Diagnostic &error) override;
+	void on_saved() override;
 
 private:
+	RasterState saved_state_;
 	// What the document read (the bytes and the state they made), and its bytes and image as they stand.
 	std::shared_ptr<const std::vector<uint8_t>> read_bytes_;
 	RasterState read_state_;

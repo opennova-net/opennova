@@ -78,13 +78,16 @@ struct TerrainBrush {
 	bool flip_v = false;
 	// The Paint tools' Fill (S25 B4): a click fills the texels 4-connected to the one under it that hold its value.
 	bool fill = false;
+	// The Paint tools' Erase (S25 B4): the dab lays the game's default in place of the brush's value (class 1, code 0,
+	// the first detail layer, the colour map as last saved).
+	bool erase = false;
 	bool has_cursor = false;
 	double cursor[2] = {0.0, 0.0};
 	bool operator==(const TerrainBrush &o) const {
 		return tool == o.tool && radius == o.radius && strength == o.strength && falloff == o.falloff &&
 		       spacing == o.spacing && height == o.height && surface == o.surface && foliage == o.foliage &&
 		       colour == o.colour && layer == o.layer && cell == o.cell && rotation == o.rotation &&
-		       flip_h == o.flip_h && flip_v == o.flip_v && fill == o.fill && has_cursor == o.has_cursor &&
+		       flip_h == o.flip_h && flip_v == o.flip_v && fill == o.fill && erase == o.erase && has_cursor == o.has_cursor &&
 		       cursor[0] == o.cursor[0] &&
 		       cursor[1] == o.cursor[1];
 	}
@@ -92,7 +95,7 @@ struct TerrainBrush {
 };
 
 // The brush's members by their tokens (tool, radius, strength, falloff, spacing, height, surface, foliage, colour,
-// layer, cell, rotation, flip_h, flip_v, cursor, fill), one bit each: what a stroke's brush names of its own (the
+// layer, cell, rotation, flip_h, flip_v, cursor, fill, erase), one bit each: what a stroke's brush names of its own (the
 // rest the workspace's).
 enum TerrainBrushMember : uint32_t {
 	kBrushTool = 1u << 0,
@@ -111,9 +114,10 @@ enum TerrainBrushMember : uint32_t {
 	kBrushFlipV = 1u << 13,
 	kBrushCursor = 1u << 14,
 	kBrushFill = 1u << 15,
+	kBrushErase = 1u << 16,
 };
 // The brush on the wire: {tool, radius, strength, falloff, spacing, height, surface, foliage, colour "#RRGGBB",
-// layer, cell, rotation, flip_h, flip_v, cursor [x, y] | null, fill}; `only` (bits) writes those members alone.
+// layer, cell, rotation, flip_h, flip_v, cursor [x, y] | null, fill, erase}; `only` (bits) writes those members alone.
 io::JsonValue terrain_brush_to_json(const TerrainBrush &brush, uint32_t only = ~0u);
 // The members `json` names set in `brush` (each checked first: nothing set when one is refused), `named` taking
 // their bits; false with why for a member it has not, a value of another type or past its bounds. `strokes`: a

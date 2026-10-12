@@ -67,6 +67,7 @@ constexpr MemberRow kMembers[] = {
 	{"flip_v", kBrushFlipV, MemberKind::Flag, 0, 0, false},
 	{"cursor", kBrushCursor, MemberKind::Cursor, 0, 0, false},
 	{"fill", kBrushFill, MemberKind::Flag, 0, 0, true},
+	{"erase", kBrushErase, MemberKind::Flag, 0, 0, true},
 };
 
 std::string bounds_words(double least, double most) {
@@ -153,6 +154,7 @@ JsonValue terrain_brush_to_json(const TerrainBrush &brush, uint32_t only) {
 	put(kBrushFlipH, "flip_h", JsonValue::make_bool(brush.flip_h));
 	put(kBrushFlipV, "flip_v", JsonValue::make_bool(brush.flip_v));
 	put(kBrushFill, "fill", JsonValue::make_bool(brush.fill));
+	put(kBrushErase, "erase", JsonValue::make_bool(brush.erase));
 	if (only & kBrushCursor) {
 		if (brush.has_cursor) {
 			JsonValue at = JsonValue::make_array();
@@ -233,7 +235,10 @@ bool read_terrain_brush(const JsonValue &json, TerrainBrush &brush, uint32_t &na
 				error = at + " is true or false.";
 				return false;
 			}
-			(row->bit == kBrushFlipH ? read.flip_h : row->bit == kBrushFill ? read.fill : read.flip_v) = value.boolean;
+			(row->bit == kBrushFlipH   ? read.flip_h
+			 : row->bit == kBrushFill  ? read.fill
+			 : row->bit == kBrushErase ? read.erase
+			                           : read.flip_v) = value.boolean;
 			break;
 		case MemberKind::Cursor: {
 			if (value.is_null()) {
@@ -278,6 +283,7 @@ TerrainBrush terrain_stroke_brush(const TerrainBrush &workspace, const TerrainSt
 	if (n & kBrushColour) out.colour = b.colour;
 	if (n & kBrushLayer) out.layer = b.layer;
 	if (n & kBrushFill) out.fill = b.fill;
+	if (n & kBrushErase) out.erase = b.erase;
 	return out;
 }
 
