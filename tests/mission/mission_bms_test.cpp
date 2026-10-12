@@ -330,7 +330,7 @@ int main() {
 		TEST_EXPECT(made.crouch_timer == 3 && made.unk15a == 0 && made.shoot_timer == 5 && made.wp_adv_trigger == -1);
 		TEST_EXPECT(made.attention == 30 && made.obliqueness == 15 && made.advancetimer == 10 && made.map_symbol == 0);
 		TEST_EXPECT(std::string(made.gen_string) == "null" && made.name1[0] == 0 && made.name2[0] == 0);
-		TEST_EXPECT(made.mis_height_lock == 1 && made.get_x() == 1.0f && made.yaw == 90);
+		TEST_EXPECT(made.mis_height_lock == 0 && made.get_x() == 1.0f && made.yaw == 90); // the original's new item: unlocked
 		const opennova::bms::Entity marker = new_entity(EntityKind::Marker, 100001, 77);
 		TEST_EXPECT(marker.type == opennova::bms::ItemType::Marker && marker.id == 77 && marker.type_id == 1 &&
 		            marker.x == 0 && marker.attention == 30);
@@ -1477,6 +1477,26 @@ int main() {
 		            parsed.loadout.entries[0].ammo_primary.empty() &&
 		            parsed.loadout.entries[0].ammo_secondary.empty() &&
 		            parsed.loadout.entries[0].flags == "-1");
+		// The letter test is the CRT isalpha under ".ACP", pinned to cp1252, on the sign-extended
+		// byte [orig: AIProfile_SanitizeConfigData @0x40cfe0 — the call @0x40d0b4]
+		// (D-NET-391, D-NET-478): a high-byte letter (0xE9, 0xC0 after a sign) marks the field
+		// missing like an ASCII one, while 0xFF (its -1 the EOF row) and the multiplication
+		// sign 0xD7 keep it.
+		TEST_EXPECT(parse_loadout({"WPN_ACUTE", "1", "2", "0\xE9", "3", "4"}, parsed));
+		TEST_EXPECT(parsed.loadout.entries.size() == 2 && !parsed.loadout.entries[0].has_flags &&
+		            parsed.loadout.entries[0].flags == "-1" &&
+		            parsed.loadout.entries[1].name == "0\xE9" &&
+		            parsed.loadout.entries[1].ammo_primary == "3");
+		TEST_EXPECT(parse_loadout({"WPN_GRAVE", "1", "2", "+\xC0", "5", "6"}, parsed));
+		TEST_EXPECT(parsed.loadout.entries.size() == 2 && !parsed.loadout.entries[0].has_flags &&
+		            parsed.loadout.entries[1].name == "+\xC0");
+		TEST_EXPECT(parse_loadout({"WPN_YUML", "1", "2", "0\xFF", "WPN_TIMES", "5", "6", "-\xD7"},
+		                          parsed));
+		TEST_EXPECT(parsed.loadout.entries.size() == 2 && parsed.loadout.entries[0].has_flags &&
+		            parsed.loadout.entries[0].flags == "0\xFF" &&
+		            parsed.loadout.entries[1].name == "WPN_TIMES" &&
+		            parsed.loadout.entries[1].has_flags &&
+		            parsed.loadout.entries[1].flags == "-\xD7");
 
 		// A record that wrote three strings writes three (has_flags, bms.h): the chunk comes back as
 		// its own bytes, where the writer once gave every record a fourth. flags still reads the "-1"

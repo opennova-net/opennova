@@ -66,8 +66,7 @@ void NwuHostRole::tick(uint32_t now_ms) {
 		refresh_ticks_ -= static_cast<double>(SESSION_HOST_INFO_REFRESH_TICKS);
 		pcid_ring_.advance(now_ms, static_cast<int>(lobby_.random_u32() & 0x7FFFu));
 		cfg_.pcid_key = pcid_ring_.current();
-		send_host_update(/*full=*/false);
-		send_status_blob();
+		update_server_info();
 	}
 }
 
@@ -77,50 +76,46 @@ void NwuHostRole::update_server_info() {
 	send_status_blob();
 }
 
+// The mission start runs its update only on a NovaWorld authority in session; while the request
+// is out the marks stay and the first refresh in state 6 carries the whole lists.
+// [orig: Game_StartMission @0x5248c6..0x5248dc (the NovaWorld session gates)]
+void NwuHostRole::publish_mission_start() {
+	if (phase_ == Phase::Idle)
+		return;
+	republish_lists();
+}
+
+// Retail marks every var of both lists changed, runs the server-info update (whose tail,
+// CPlayerManager_RebuildLists(0), sends the marked lists: the whole of both), then in state 6
+// sends both lists in full once more and clears the marks. Ours mark by emptying the dirty-delta
+// baselines, against which every var is dirty.
+// [orig: Game_StartMission — the marks on the Host list (session+0x214) @0x5248e4 and the
+//  PlayerList (+0x25c) @0x5248ef, Lobby_UpdateServerInfo(0) @0x5248f5,
+//  CPlayerManager_RebuildLists @0x4d4590 called with 1 @0x524903: the state-6 test @0x4d4593,
+//  CNapiGameSession_SendHostUpdate @0x4d45b5, the marks cleared @0x4d45c2 / @0x4d45cf.
+//  CNapiGameSession_HandleHostVerifyResponse runs the same block: the marks @0x4d5c63 /
+//  @0x4d5c71, Lobby_UpdateServerInfo(0) @0x4d5c78, the state-6 test @0x4d5c80..0x4d5c87,
+//  CNapiGameSession_SendHostUpdate(1) @0x4d5c8c, the marks cleared @0x4d5c95 / @0x4d5c9e]
+void NwuHostRole::republish_lists() {
+	last_sent_host_.clear();
+	last_sent_players_.clear();
+	update_server_info();
+	// The state-6 test is send_host_update's, as it is for every send.
+	send_host_update(/*full=*/true);
+}
+
 // The host-direction notices (ServerHostResult, ServerStopHosting, ServerCommand,
 // ServerPlayerEnterResult: the client msginfo rows ClientSession dispatches).
 bool NwuHostRole::handle_notice(const ClientSession::Notice &notice) {
 	using Notice = ClientSession::Notice;
-	ClientSession *session = lobby_.session();
+	if (notice.kind == Notice::Kind::HostResult) {
+		handle_host_result(notice);
+		return true;
+	}
 	switch (notice.kind) {
 	case Notice::Kind::Rehost:
 		// A reconnect's re-verify re-sent the hosting request itself (CurrentlyHosting = 1);
 		// the hosting stands while its answer is out.
-		return true;
-	case Notice::Kind::HostResult:
-		if (phase_ == Phase::Hosting) {
-			// A re-host's answer: a refusal ends the hosting (the session's word drops, and the
-			// hosted match exits on it). Retail's success also republishes the full Host list
-			// here, ours does not (D-NET-465, OPEN). [orig: HandleHostVerifyResponse @0x4d59d0,
-			//  the ReconnectCounter gate @0x4d5c58, SendHostUpdate(1) @0x4d5c8c]
-			if (!notice.fields.success) phase_ = Phase::Idle;
-			return true;
-		}
-		if (phase_ != Phase::Requested) return true;
-		if (notice.fields.success) {
-			// Hosting (state 6): the refresh clock starts. Ours republishes the full Host list
-			// at once, where a fresh retail host does not: HandleHostVerifyResponse's republish
-			// runs only while ReconnectCounter (session+0x500, zeroed by BuildHostVarLists) is
-			// above 0, so a fresh stock host's first full list is its mission start's
-			// (D-NET-465, OPEN). [orig: HandleHostVerifyResponse @0x4d59d0 — state 6 @0x4d5c1b,
-			//  the gate @0x4d5c58; Game_StartMission @0x5248f5 -> Lobby_UpdateServerInfo
-			//  @0x4fe8c0]
-			phase_ = Phase::Hosting;
-			refresh_ticks_ = 0.0;
-			hosting_started_ms_ = lobby_.clock_ms();
-			send_host_update(/*full=*/true);
-			if (session != nullptr) {
-				for (const auto &entry : players_) session->send_host_player_added(entry.second);
-			}
-			io::logf(io::LogLevel::kInfo, "[NovaWorld] hosting '%s' gsid=%s -> %s",
-			         cfg_.server_name.c_str(), gsid().c_str(),
-			         peer_addr_to_string(lobby_.nw_peer()).c_str());
-			if (hooks_.on_hosting) hooks_.on_hosting();
-		} else {
-			// Rejected: the MsgCode maps through the host switch (NWEC53..60).
-			phase_ = Phase::Idle;
-			if (hooks_.on_failed) hooks_.on_failed(novaworld_host_error_tag(notice.fields.msg_code));
-		}
 		return true;
 	case Notice::Kind::StopHosting:
 		if (phase_ != Phase::Idle) {
@@ -139,12 +134,58 @@ bool NwuHostRole::handle_notice(const ClientSession::Notice &notice) {
 	}
 }
 
+// ServerHostResult: a fresh host's (the request out) or a re-host's after the NWU reconnect (the
+// hosting standing). The success republishes both lists only while ReconnectCounter
+// (session+0x500) is above 0: a re-host, whose re-verify counted it up. A fresh host's request
+// zeroed it, so a fresh host publishes nothing here, and the players added while its request was
+// out ride the next full PlayerList; its first full Host list, HostKey included, is its
+// embedder's mission start's (publish_mission_start).
+// [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 — state 6 @0x4d5c1b, the gate
+//  `cmp [esi+0x500], ebp; jle` @0x4d5c52..0x4d5c58 (ebp zeroed @0x4d5acd), the republish
+//  @0x4d5c5a..0x4d5c9e; the counter's two writers: CNapiGameSession_BuildHostVarLists @0x4d0b50
+//  (the zero @0x4d0b7b), CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 (the count
+//  @0x4d5968)]
+void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
+	bool fresh = false;
+	if (phase_ == Phase::Hosting) {
+		// A re-host's answer: a refusal ends the hosting (the session's word drops, and the
+		// hosted match exits on it).
+		if (!notice.fields.success) {
+			phase_ = Phase::Idle;
+			return;
+		}
+	} else if (phase_ != Phase::Requested) {
+		return;
+	} else if (!notice.fields.success) {
+		// Rejected: the MsgCode maps through the host switch (NWEC53..60).
+		phase_ = Phase::Idle;
+		if (hooks_.on_failed)
+			hooks_.on_failed(novaworld_host_error_tag(notice.fields.msg_code));
+		return;
+	} else {
+		// Hosting (state 6): the refresh clock starts.
+		phase_ = Phase::Hosting;
+		refresh_ticks_ = 0.0;
+		hosting_started_ms_ = lobby_.clock_ms();
+		fresh = true;
+		io::logf(io::LogLevel::kInfo, "[NovaWorld] hosting '%s' gsid=%s -> %s",
+				cfg_.server_name.c_str(), gsid().c_str(),
+				peer_addr_to_string(lobby_.nw_peer()).c_str());
+	}
+	const ClientSession *session = lobby_.session();
+	if (session != nullptr && session->host_reconnect_counter() > 0)
+		republish_lists();
+	if (fresh && hooks_.on_hosting)
+		hooks_.on_hosting();
+}
+
 // A changed column is dirty in the Host var-list and rides the next refresh (the dirty delta):
 // retail republishes on its 1860-tick timer, not on the edit.
 void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 	players_[slot.slot] = slot;
 	cfg_.player_count = static_cast<int>(players_.size());
-	// ClientHostPlayerAdded fires immediately while hosting is established (state 6).
+	// ClientHostPlayerAdded fires immediately while hosting is established (state 6). Retail then
+	// sends the PlayerList delta at once as well, ours at the next refresh (D-NET-490).
 	// [orig: Server_PlayerAdd @0x51d3f0 @0x51d421..0x51d4b5]
 	ClientSession *session = lobby_.session();
 	if (phase_ == Phase::Hosting && session != nullptr) session->send_host_player_added(slot);
@@ -234,12 +275,19 @@ void NwuHostRole::send_host_request(uint32_t currently_hosting) {
 	phase_ = Phase::Requested;
 }
 
+// Every update goes in state 6 alone: CPlayerManager_RebuildLists tests it ahead of its send (the
+// refresh's, the mission start's, the server-info update's tail) and the host result's includeAll
+// send has its own test, so with a re-host's request out (state 5) no update leaves until its
+// result. includeAll at a mission start and a re-host's result, else only the vars whose value
+// changed (dirty_client_vars), and nothing at all when none did.
+// [orig: CPlayerManager_RebuildLists @0x4d4590 — `cmp [esi+0x11c], 6` @0x4d4593;
+//  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the test @0x4d5c80..0x4d5c87);
+//  CNapiGameSession_SendHostUpdate @0x4d3860]
 void NwuHostRole::send_host_update(bool full) {
 	ClientSession *session = lobby_.session();
-	if (session == nullptr || !session->is_verified()) return;
-	// includeAll right after registration, else only the vars whose value changed
-	// (dirty_client_vars), and nothing at all when none did.
-	// [orig: CNapiGameSession_SendHostUpdate @0x4d3860]
+	if (session == nullptr || !session->is_verified() ||
+			session->host_state() != ClientSession::HostState::Established)
+		return;
 	const std::vector<ClientVar> host = make_host_var_list(host_cfg(), lobby_text_, /*full=*/true);
 	const std::vector<ClientVar> players = player_list_vars();
 	const std::vector<ClientVar> dirty_host = full ? host : dirty_client_vars(last_sent_host_, host);

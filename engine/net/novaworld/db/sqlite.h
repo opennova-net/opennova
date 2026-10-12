@@ -18,16 +18,36 @@ struct sqlite3_stmt;
 
 namespace opennova::db {
 
-// Thrown for any sqlite_*() call that returns an error. `code` is the raw
-// SQLITE_* return; `message` is the sqlite3_errmsg() text plus a context
-// hint (statement text, file path, etc.) when the wrapper has it.
+// How long a statement waits on another connection's lock before it fails
+// SQLITE_BUSY, unless the connection's opener names another timeout.
+inline constexpr int kDefaultBusyTimeoutMs = 5000;
+
+// Thrown for any sqlite_*() call that returns an error. code() is the primary
+// SQLITE_* result the call returned (the wrapper leaves extended result codes
+// off); extended_code() is sqlite3_extended_errcode() beside it, which tells
+// apart failures that share a primary code (SQLITE_BUSY_SNAPSHOT, 517: a read
+// transaction tried to write after another connection committed, from a plain
+// SQLITE_BUSY, 5). For a busy or locked failure of one statement (exec(),
+// query()), elapsed_ms() is how long its failing prepare or step ran, which
+// tells a busy timeout that ran out (about the whole timeout) from a lock
+// sqlite refused without waiting (about none); otherwise it is empty. A failed
+// sqlite call's what() reads "sqlite error <code> (<sqlite3_errmsg>)
+// [extended <extended_code>, after <elapsed_ms> ms] — <context>", the "after"
+// part only when elapsed_ms() is set and the context the statement text or
+// file path.
 class SqliteError : public std::runtime_error {
 public:
 	SqliteError(int code, std::string message);
+	SqliteError(
+			int code, int extended_code, std::optional<int64_t> elapsed_ms, std::string message);
 	int code() const noexcept { return code_; }
+	int extended_code() const noexcept { return extended_code_; }
+	std::optional<int64_t> elapsed_ms() const noexcept { return elapsed_ms_; }
 
 private:
 	int code_;
+	int extended_code_;
+	std::optional<int64_t> elapsed_ms_;
 };
 
 // Cell value for a row scanned out of a query. Matches SQLite's storage
@@ -59,13 +79,16 @@ using BindValue = std::variant<std::monostate, int64_t, double, std::string, std
 class Database {
 public:
 	// Open or create the database at `path`, with foreign keys on, WAL
-	// journaling and a 5 s busy timeout. ":memory:" is an in-memory database
+	// journaling at synchronous=NORMAL (the WAL syncs at checkpoints, not at
+	// every commit; sqlite.cpp says why) and a busy timeout of
+	// `busy_timeout_ms`. ":memory:" is an in-memory database
 	// private to this connection (handy for tests); a database several
 	// connections share in memory takes a shared-cache URI,
 	// "file:<name>?mode=memory&cache=shared". Shared cache locks per table
 	// and its SQLITE_LOCKED skips the busy timeout, so a test that writes
 	// from several threads at once uses a file. Throws SqliteError on failure.
-	explicit Database(const std::filesystem::path &path);
+	explicit Database(
+			const std::filesystem::path &path, int busy_timeout_ms = kDefaultBusyTimeoutMs);
 
 	~Database();
 	Database(const Database &) = delete;
@@ -108,7 +131,13 @@ public:
 	bool in_transaction() const;
 
 private:
+	friend class Transaction;
+	friend class ReadSnapshot;
+
 	sqlite3 *handle_ = nullptr;
+	// Set while a ReadSnapshot holds this connection's transaction open, so a
+	// Transaction opened inside it is refused.
+	bool in_read_snapshot_ = false;
 };
 
 // Scoped write transaction: BEGIN IMMEDIATE on construction, COMMIT on
@@ -120,6 +149,12 @@ private:
 // transaction or none of it. Opened inside another transaction on the same
 // connection it is a SAVEPOINT: commit() releases it into the outer
 // transaction, and destroying it uncommitted undoes only its own writes.
+// Never inside a ReadSnapshot: there the SAVEPOINT's first write would upgrade
+// the snapshot's read, and sqlite upgrades a read without calling the busy
+// handler, so it fails at once with SQLITE_BUSY (another connection holds the
+// write lock) or SQLITE_BUSY_SNAPSHOT (another connection committed since the
+// snapshot began). The constructor refuses it with SqliteError (SQLITE_MISUSE);
+// take the Transaction first, or end the snapshot before writing.
 class Transaction {
 public:
 	explicit Transaction(Database &db);
@@ -141,7 +176,9 @@ private:
 // write lock (a Transaction does), so it never waits on a writer. A read
 // that spans statements and must agree with itself (host rows and their
 // rosters) takes one. Inside an open transaction it does nothing: that
-// transaction already reads one snapshot.
+// transaction already reads one snapshot. It is for reads only: a write
+// inside it, a Transaction (refused, see above) or a bare exec(), upgrades
+// its read without waiting on the busy timeout.
 class ReadSnapshot {
 public:
 	explicit ReadSnapshot(Database &db);
@@ -184,12 +221,14 @@ public:
 		std::unique_ptr<Database> db_;
 	};
 
-	// `path` as Database takes it. A path every connection would open as its
+	// `path` as Database takes it, and the busy timeout every connection the
+	// pool opens gets. A path every connection would open as its
 	// own private database is refused with SqliteError: ":memory:", an empty
 	// path or file: URI name (a private temporary file), and an in-memory
 	// file: URI (":memory:" as the name, or mode=memory) without
 	// cache=shared. Use "file:<name>?mode=memory&cache=shared" instead.
-	explicit ConnectionPool(std::filesystem::path path);
+	explicit ConnectionPool(
+			std::filesystem::path path, int busy_timeout_ms = kDefaultBusyTimeoutMs);
 	ConnectionPool(const ConnectionPool &) = delete;
 	ConnectionPool &operator=(const ConnectionPool &) = delete;
 
@@ -203,6 +242,7 @@ private:
 	void release(std::unique_ptr<Database> db);
 
 	std::filesystem::path path_;
+	int busy_timeout_ms_;
 	std::mutex mu_;
 	std::vector<std::unique_ptr<Database>> idle_;
 };
