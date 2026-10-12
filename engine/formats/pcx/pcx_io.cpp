@@ -78,7 +78,128 @@ bool decode_scanline_rle(const uint8_t *data,
 	return true;
 }
 
+// One plane's row, run-length coded as the readers decode it: a run of 2 to 63 equal bytes, or a byte with
+// its top two bits set, a count byte (0xC0 | n) and the byte; any other a byte alone (PcxCoding::Shipped).
+void append_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
+	int pos = 0;
+	while (pos < length) {
+		const uint8_t value = row[pos];
+		int run = 1;
+		while (pos + run < length && run < 63 && row[pos + run] == value) ++run;
+		if (run > 1 || (value & 0xC0) == 0xC0) {
+			out.push_back(static_cast<uint8_t>(0xC0 | run));
+			out.push_back(value);
+		} else {
+			out.push_back(value);
+		}
+		pos += run;
+	}
+}
+
+// JO's mission editor's row coder (PcxCoding::Med): the shipped coding but for the row's last run, which it
+// writes as a count pair whatever it holds [orig: JOTACmed sub_45E8A0 @ 0x45E8A0: a full run of 63 written
+// as 0xFF and the byte, the current byte opening the next run (@ 0x45E8EB..0x45E913); a run of one below
+// 0xC0 alone, any other a pair (@ 0x45E946..0x45E980); the tail pair @ 0x45E9BF..0x45E9E7].
+void append_med_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
+	if (length <= 0) return;
+	uint8_t value = row[0];
+	int run = 1;
+	for (int i = 1; i < length; ++i) {
+		if (row[i] == value) {
+			if (run == 63) {
+				out.push_back(0xFF);
+				out.push_back(value);
+				run = 1;
+			} else {
+				++run;
+			}
+			continue;
+		}
+		if (run != 1 || (value & 0xC0) == 0xC0) {
+			out.push_back(static_cast<uint8_t>(0xC0 | run));
+			out.push_back(value);
+		} else {
+			out.push_back(value);
+		}
+		value = row[i];
+		run = 1;
+	}
+	out.push_back(static_cast<uint8_t>(0xC0 | run));
+	out.push_back(value);
+}
+
+// The rows of an indexed image, each `width` bytes, in a coding (Other codes as Shipped).
+std::vector<uint8_t> coded_rows(const IndexedImage8 &image, PcxCoding coding) {
+	std::vector<uint8_t> out;
+	out.reserve(static_cast<size_t>(image.width) * static_cast<size_t>(image.height) / 2u + 16u);
+	for (int y = 0; y < image.height; ++y) {
+		const uint8_t *row = image.indices.data() + static_cast<size_t>(y) * static_cast<size_t>(image.width);
+		if (coding == PcxCoding::Med)
+			append_med_rle_row(row, image.width, out);
+		else
+			append_rle_row(row, image.width, out);
+	}
+	return out;
+}
+
+uint16_t u16_at(const uint8_t *data, size_t at) {
+	return static_cast<uint16_t>(data[at] | (data[at + 1] << 8));
+}
+
+void put_u16(uint8_t *data, size_t at, uint16_t value) {
+	data[at] = static_cast<uint8_t>(value & 0xFF);
+	data[at + 1] = static_cast<uint8_t>(value >> 8);
+}
+
+// The form a decoded indexed image's file holds: its header bytes, and the coding its rows show. The rows
+// can be either coder's only where the header says one 8-bit plane of RLE rows exactly the width long and
+// the palette follows them.
+PcxIndexedForm read_indexed_form(const uint8_t *data, size_t size, size_t rows_end, const IndexedImage8 &image) {
+	PcxIndexedForm form;
+	form.version = data[1];
+	form.window_x = u16_at(data, 4);
+	form.window_y = u16_at(data, 6);
+	form.hdpi = u16_at(data, 12);
+	form.vdpi = u16_at(data, 14);
+	std::copy(data + 16, data + 64, form.ega.begin());
+	form.reserved = data[64];
+	form.palette_info = u16_at(data, 68);
+	form.hscreen = u16_at(data, 70);
+	form.vscreen = u16_at(data, 72);
+	std::copy(data + 74, data + 128, form.filler.begin());
+	form.coding = PcxCoding::Other;
+	const bool plain = data[2] == 1 && data[3] == 8 && data[65] == 1 &&
+	                   u16_at(data, 66) == static_cast<uint16_t>(image.width) && rows_end == size - 769;
+	if (!plain) return form;
+	const size_t body = rows_end - 128;
+	const auto matches = [&](PcxCoding coding) {
+		const std::vector<uint8_t> rows = coded_rows(image, coding);
+		return rows.size() == body && std::equal(rows.begin(), rows.end(), data + 128);
+	};
+	const bool shipped = matches(PcxCoding::Shipped);
+	const bool med = matches(PcxCoding::Med);
+	if (shipped && med)
+		form.coding = form.hdpi == 0 && form.vdpi == 0 ? PcxCoding::Med : PcxCoding::Shipped;
+	else if (shipped)
+		form.coding = PcxCoding::Shipped;
+	else if (med)
+		form.coding = PcxCoding::Med;
+	return form;
+}
+
 } // namespace
+
+PcxIndexedForm pcx_med_form() {
+	// [orig: JOTACmed sub_45EB60 @ 0x45EBA0 (the 128 bytes zeroed), 0x45EBDA (0A 05), 0x45EBE4 (01 08),
+	//  0x45EBEE (one plane), 0x45EBF3 (palette info 1), 0x45EBFF (the bytes a line)]
+	PcxIndexedForm form;
+	form.hdpi = 0;
+	form.vdpi = 0;
+	form.ega.fill(0);
+	form.palette_info = 1;
+	form.coding = PcxCoding::Med;
+	return form;
+}
 
 bool pcx_read_header(const uint8_t *data, size_t size, PcxHeader &out) {
 	out = PcxHeader{};
@@ -110,8 +231,10 @@ PcxRowFit pcx_row_fit(const PcxHeader &header) {
 	return header.bytes_per_line < width ? PcxRowFit::Short : PcxRowFit::Exact;
 }
 
-bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error) {
+bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, std::string &error,
+                        PcxIndexedForm *form) {
 	out = IndexedImage8{};
+	if (form != nullptr) *form = PcxIndexedForm{};
 
 	int width = 0;
 	int height = 0;
@@ -157,6 +280,7 @@ bool decode_pcx_indexed(const uint8_t *data, size_t size, IndexedImage8 &out, st
 		out.palette[i][2] = palette[i * 3 + 2];
 	}
 
+	if (form != nullptr) *form = read_indexed_form(data, size, pos, out);
 	return true;
 }
 
@@ -422,28 +546,6 @@ bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std:
 	return true;
 }
 
-namespace {
-
-// One plane's row, run-length coded as the readers decode it: a run of 2 to 63 equal bytes, or a byte with
-// its top two bits set, a count byte (0xC0 | n) and the byte; any other a byte alone.
-void append_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
-	int pos = 0;
-	while (pos < length) {
-		const uint8_t value = row[pos];
-		int run = 1;
-		while (pos + run < length && run < 63 && row[pos + run] == value) ++run;
-		if (run > 1 || (value & 0xC0) == 0xC0) {
-			out.push_back(static_cast<uint8_t>(0xC0 | run));
-			out.push_back(value);
-		} else {
-			out.push_back(value);
-		}
-		pos += run;
-	}
-}
-
-} // namespace
-
 // [orig: Texture_LoadPCXFromPFF32 @ 0x56EB31 — the 24-bit path, 3 * BytesPerLine RLE bytes a row, the
 // planes `width` apart; load_pcx_to_argb @ 0x664cc0 likewise]
 bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::string &error) {
@@ -482,14 +584,18 @@ bool encode_pcx_rgb(const RgbImage &image, std::vector<uint8_t> &out, std::strin
 	return true;
 }
 
-bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error) {
+bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error,
+                        const PcxIndexedForm *form) {
 	out.clear();
 
-	if (image.width <= 0 || image.height <= 0) {
+	const PcxIndexedForm shipped;
+	const PcxIndexedForm &f = form != nullptr ? *form : shipped;
+	if (image.width <= 0 || image.height <= 0 || image.width > 0xFFFF || image.height > 0xFFFF ||
+	    f.window_x + image.width - 1 > 0xFFFF || f.window_y + image.height - 1 > 0xFFFF) {
 		error = "Invalid PCX dimensions";
 		return false;
 	}
-	if (image.indices.size() < static_cast<size_t>(image.width * image.height)) {
+	if (image.indices.size() < static_cast<size_t>(image.width) * static_cast<size_t>(image.height)) {
 		error = "PCX indexed payload too small";
 		return false;
 	}
@@ -498,51 +604,30 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 	// a stride of the width, so a padded odd row spills into the next and the last past the buffer [orig:
 	// Texture_LoadPCXFromPFF32 @ 0x56ED70..0x56EDFC; load_pcx_to_argb @ 0x664cc0], and every PCX the game
 	// ships holds rows of its width.
-	const int bytes_per_line = image.width;
-	out.reserve(static_cast<size_t>(128 + image.height * bytes_per_line + 769));
-
 	uint8_t header[128] = {};
 	header[0] = 0x0A;
-	header[1] = 5;
+	header[1] = f.version;
 	header[2] = 1;
 	header[3] = 8;
-	std::fill(header + 16, header + 64, 0xFF);
-	header[8] = static_cast<uint8_t>((image.width - 1) & 0xFF);
-	header[9] = static_cast<uint8_t>(((image.width - 1) >> 8) & 0xFF);
-	header[10] = static_cast<uint8_t>((image.height - 1) & 0xFF);
-	header[11] = static_cast<uint8_t>(((image.height - 1) >> 8) & 0xFF);
-	header[12] = 72;
-	header[14] = 72;
+	put_u16(header, 4, f.window_x);
+	put_u16(header, 6, f.window_y);
+	put_u16(header, 8, static_cast<uint16_t>(f.window_x + image.width - 1));
+	put_u16(header, 10, static_cast<uint16_t>(f.window_y + image.height - 1));
+	put_u16(header, 12, f.hdpi);
+	put_u16(header, 14, f.vdpi);
+	std::copy(f.ega.begin(), f.ega.end(), header + 16);
+	header[64] = f.reserved;
 	header[65] = 1;
-	header[66] = static_cast<uint8_t>(bytes_per_line & 0xFF);
-	header[67] = static_cast<uint8_t>((bytes_per_line >> 8) & 0xFF);
-	header[68] = 1;
+	put_u16(header, 66, static_cast<uint16_t>(image.width));
+	put_u16(header, 68, f.palette_info);
+	put_u16(header, 70, f.hscreen);
+	put_u16(header, 72, f.vscreen);
+	std::copy(f.filler.begin(), f.filler.end(), header + 74);
+
+	const std::vector<uint8_t> rows = coded_rows(image, f.coding);
+	out.reserve(128 + rows.size() + 769);
 	out.insert(out.end(), header, header + 128);
-
-	std::vector<uint8_t> row(static_cast<size_t>(bytes_per_line), 0);
-	for (int y = 0; y < image.height; ++y) {
-		for (int x = 0; x < image.width; ++x) {
-			row[static_cast<size_t>(x)] = image.indices[static_cast<size_t>(y * image.width + x)];
-		}
-
-		int pos = 0;
-		while (pos < bytes_per_line) {
-			const uint8_t value = row[static_cast<size_t>(pos)];
-			int run = 1;
-			while (pos + run < bytes_per_line && run < 63 && row[static_cast<size_t>(pos + run)] == value) {
-				++run;
-			}
-
-			if (run > 1 || (value & 0xC0) == 0xC0) {
-				out.push_back(static_cast<uint8_t>(0xC0 | run));
-				out.push_back(value);
-			} else {
-				out.push_back(value);
-			}
-			pos += run;
-		}
-	}
-
+	out.insert(out.end(), rows.begin(), rows.end());
 	out.push_back(0x0C);
 	for (int i = 0; i < 256; ++i) {
 		out.push_back(image.palette[i][0]);
