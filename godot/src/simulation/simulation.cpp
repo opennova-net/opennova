@@ -118,9 +118,9 @@ opennova::bms::File make_demo_mission() {
 
 // The bring-up's session create refused on the mpreset word
 // (inmatch::HostRole::session_create): the in-memory loads fail as the file
-// boot's phase A does (inmatch::HostBoot::session_create). The shell keeps no
-// process-lifetime cfg block that would carry the word here, and quits on
-// nothing yet (docs/net/novaworld-net-re.md D-NET-385, the open half).
+// boot's phase A does (inmatch::HostBoot::session_create), and
+// session_create_ended_process() tells the embedder, which ends the process
+// with exit code 0 (the game shell's GameWorld.process_exit_requested).
 bool session_create_refused(const opennova::inmatch::HostRole *p_role, std::string &r_error) {
 	if (p_role == nullptr ||
 			p_role->session_create() != opennova::inmatch::CreateSessionResult::ProcessExit)

@@ -347,8 +347,10 @@ struct GameConfig {
 	int32_t do_max_ping_check = 0;
 	uint32_t max_ping = 0;
 	// game.cfg `mpreset`: the NovaWorld ServerCommand SetMPReset stores its
-	// argument here and saves the config; the shell persists it. Its reader is
-	// the session create: nonzero, the create refuses and the process ends
+	// argument here, and the host writes it into its process's cfg block and
+	// saves it (host_config.h store_server_command_config,
+	// game_config_block.h); each session create takes the block's word here.
+	// Its reader is the session create: nonzero, the create refuses and the process ends
 	// with code 0 (create_session's ProcessExit); the map change creates no
 	// session and reads nothing.
 	// [orig: g_GameConfigState.multiplayerReset_344; the SetMPReset arm of the
