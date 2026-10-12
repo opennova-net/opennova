@@ -275,9 +275,9 @@
 <script setup lang="ts">
 // A running hosted server's console (ADR 0053 d5): its players, its rotation,
 // its chat and its console log, read through the service's console routes
-// (api/hostedServer.ts) by useHostedConsole, every call in the page's one
-// console queue (useConsoleQueue: the service runs one console request per
-// account at once). The owner's view (HostedServerStatus, on /me/server) has
+// (api/hostedServer.ts) by useHostedConsole, every call the service admits in
+// the page's one console queue (useConsoleQueue: the service runs one console
+// request per account at once). The owner's view (HostedServerStatus, on /me/server) has
 // every command the owner's routes offer: kick, ban, swap and kill a player,
 // add, remove and play-next a map, cycle, and chat. The admin's view
 // (HostedSection, on /admin/hosted) reads the same panels and cycles.

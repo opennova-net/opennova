@@ -228,8 +228,9 @@ export function stopHostedServer(): Promise<HostedResult<HostedServer | null>> {
 // stored Bearer token). The service runs at most one console request per
 // account at once (an admin session's account; the Bearer token counts as one
 // account) and answers a second 429 console_busy at once, so a page sends
-// every one of these calls through its one ConsoleQueue
-// (utils/consoleQueue.ts).
+// every one of these calls the service admits through its one ConsoleQueue
+// (utils/consoleQueue.ts); the console log's read, which it does not admit,
+// keeps out of it.
 
 // Where a console call goes: the owner's own server, or server `id` for an
 // admin.
@@ -349,10 +350,12 @@ export function isConsoleGone(code: ConsoleErrorCode): boolean {
   );
 }
 
+// `read`: the call only reads (a poll), so nothing it asked can have taken
+// effect.
 function consoleMessageFor(
   code: ConsoleErrorCode,
   target: ConsoleTarget,
-  extra: { retryAfterSeconds?: number; sent?: boolean } = {},
+  extra: { retryAfterSeconds?: number; sent?: boolean; read?: boolean } = {},
 ): string {
   switch (code) {
     case 'unauthorized':
@@ -392,6 +395,9 @@ function consoleMessageFor(
         ? `Too many console requests. Try again in ${formatRetryAfter(extra.retryAfterSeconds)}.`
         : 'Too many console requests. Try again in a little while.';
     case 'admin_timeout':
+      if (extra.read) {
+        return 'The game server did not answer in time (a map load holds its console up for a few seconds). The console reads it again shortly.';
+      }
       if (extra.sent === true) {
         return 'The game server did not answer in time. The command went out, so it may still take effect: check before sending it again.';
       }
@@ -439,8 +445,13 @@ function consoleMessageFor(
   }
 }
 
-// Any failure of a console call, as a ConsoleError.
-export function describeConsoleError(err: unknown, target: ConsoleTarget): ConsoleError {
+// Any failure of a console call, as a ConsoleError; `call` says whether it
+// was a read or a command (which words a timeout).
+export function describeConsoleError(
+  err: unknown,
+  target: ConsoleTarget,
+  call: 'read' | 'command' = 'command',
+): ConsoleError {
   if (!isAxiosError(err)) {
     return { code: 'unknown', status: null, message: consoleMessageFor('unknown', target) };
   }
@@ -471,7 +482,7 @@ export function describeConsoleError(err: unknown, target: ConsoleTarget): Conso
     message:
       code === 'unknown'
         ? `${consoleMessageFor('unknown', target)} (HTTP ${response.status})`
-        : consoleMessageFor(code, target, { retryAfterSeconds, sent }),
+        : consoleMessageFor(code, target, { retryAfterSeconds, sent, read: call === 'read' }),
     ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
     ...(sent !== undefined ? { sent } : {}),
   };
@@ -529,12 +540,15 @@ function isRotationEntry(value: unknown): value is RotationEntry {
   );
 }
 
+const LINK_STATES: ReadonlySet<unknown> = new Set<ConsoleLink['state']>(['connecting', 'up', 'down', 'stopped']);
+const LINE_KINDS: ReadonlySet<unknown> = new Set<ConsoleLine['kind']>(['command', 'reply', 'status']);
+
 function isConsoleLink(value: unknown): value is ConsoleLink {
   const v = value as Record<string, unknown> | null;
   return (
     typeof v === 'object' &&
     v !== null &&
-    isString(v.state) &&
+    LINK_STATES.has(v.state) &&
     isString(v.game_state) &&
     isString(v.last_poll_at) &&
     isString(v.up_since) &&
@@ -548,7 +562,7 @@ function isConsoleLine(value: unknown): value is ConsoleLine {
     typeof v === 'object' &&
     v !== null &&
     isNumber(v.id) &&
-    isString(v.kind) &&
+    LINE_KINDS.has(v.kind) &&
     isString(v.actor) &&
     isString(v.text) &&
     isString(v.at)
@@ -569,7 +583,7 @@ async function getList<T>(
     if (!Array.isArray(list) || !list.every(isItem)) return malformedConsole(res.status, target);
     return { ok: true, value: list };
   } catch (err) {
-    return { ok: false, error: describeConsoleError(err, target) };
+    return { ok: false, error: describeConsoleError(err, target, 'read') };
   }
 }
 
@@ -609,7 +623,8 @@ export function fetchConsoleChat(target: ConsoleTarget, signal?: AbortSignal): P
 // GET .../console: the console ring's lines with an id past `after`, the
 // newest `limit` of them (at most CONSOLE_KEEP), oldest first, and the link's
 // status. It reads the service's database alone: no command reaches the
-// server.
+// server, and the service admits it outside the one-request-per-account rule,
+// so it needs no turn in the page's console queue.
 export async function fetchConsoleLog(
   target: ConsoleTarget,
   query: { after?: number; limit?: number },
@@ -633,7 +648,7 @@ export async function fetchConsoleLog(
     }
     return { ok: true, value: { server_id: serverId, link, lines } };
   } catch (err) {
-    return { ok: false, error: describeConsoleError(err, target) };
+    return { ok: false, error: describeConsoleError(err, target, 'read') };
   }
 }
 

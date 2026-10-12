@@ -185,6 +185,7 @@
         :server-name="s.listing?.server_name || s.settings.game_name"
         :heading-level="3"
         @gone="load(true)"
+        @unauthorized="onConsoleRefused(s.id)"
       />
     </section>
 
@@ -250,9 +251,10 @@
 // /api/admin/hosted/stop-all) behind a typed confirmation. The list refreshes
 // itself, faster while a server is changing state. A running server's console
 // opens below the list (HostedServerConsole, read-only plus cycle, on
-// /api/admin/hosted/<id>/...); every open console makes its calls through this
-// page's one console queue, since the service runs one console request per
-// admin account at once (the Bearer token counting as one account).
+// /api/admin/hosted/<id>/...); every open console makes its admitted calls
+// through this page's one console queue, each under its own scope, since the
+// service runs one console request per admin account at once (the Bearer
+// token counting as one account).
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { fetchHostedFleet, stopAllFleetServers, stopFleetServer } from '../../api/admin';
 import HostedServerConsole from '../../components/HostedServerConsole.vue';
@@ -320,6 +322,14 @@ async function toggleConsole(id: number) {
   openIds.value = [...openIds.value, id];
   await nextTick();
   document.getElementById(consolePanelId(id))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// A console's credentials were refused (the client's interceptor has already
+// dropped a refused token and told the gate): that console stopped reading,
+// so it closes, and opening it again once the admin is back starts it fresh.
+function onConsoleRefused(id: number) {
+  openIds.value = openIds.value.filter((open) => open !== id);
+  fail(`The admin credentials were refused, so the console of server #${id} closed. Open it again once you are signed in.`);
 }
 
 // Since when a server has been in its state: running since it first ran, an

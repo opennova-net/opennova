@@ -1,11 +1,16 @@
 // One hosted server's console (components/HostedServerConsole.vue): its
 // players, its rotation, the missions it has, its chat window and its console
-// log, each read through the page's console queue (useConsoleQueue), and the
-// commands that change the server. The reads repeat every few seconds while
+// log, and the commands that change the server. The reads the service admits
+// (one console request per account at once) go through the page's console
+// queue (useConsoleQueue) under this console's own scope, so two consoles on
+// one page (the admin's) never drop each other's; the log's read, which the
+// service does not admit (GET .../console reads its database alone), runs
+// beside the queue, one at a time. The reads repeat every few seconds while
 // the tab is shown: the players, the chat and the log every tick, the rotation
 // every third, the mission catalog until it is read once. A read still waiting
 // from the last tick is not asked again. A command takes the queue's next turn,
-// ahead of the waiting reads, and the panels it changed are read again after it.
+// ahead of the waiting reads, and the panels it changed are read again after
+// it. When the console goes, its waiting reads leave the queue.
 
 import { onMounted, onUnmounted, ref, shallowRef } from 'vue';
 import {
@@ -22,6 +27,7 @@ import {
   rotationEntryAction,
   sendConsoleChat,
   type ConsoleError,
+  type ConsoleErrorCode,
   type ConsoleResult,
   type ConsoleTarget,
 } from '../api/hostedServer';
@@ -41,6 +47,20 @@ import type { ConsoleQueue } from '../utils/consoleQueue';
 // second, README "Hosted servers").
 export const CONSOLE_TICK_MS = 5_000;
 const ROTATION_EVERY_TICKS = 3;
+
+// The refusals a read meets in the normal run of things and is asked again
+// for: a map load stalls the server's console for a few seconds (504
+// admin_timeout), the link's queue or the service's console fills under load
+// (503 admin_busy, console_full), and another tab of the account has its turn
+// (429 console_busy). A read shows one only once it has met them this many
+// times in a row.
+const TRANSIENT_READ_CODES: ReadonlySet<ConsoleErrorCode> = new Set<ConsoleErrorCode>([
+  'admin_timeout',
+  'admin_busy',
+  'console_full',
+  'console_busy',
+]);
+const TRANSIENT_READS_SHOWN_AFTER = 3;
 
 // The panels a command reports on.
 export type ConsolePanel = 'players' | 'rotation' | 'chat';
@@ -64,7 +84,13 @@ export interface HostedConsoleOptions {
 
 type ReadKey = 'players' | 'rotation' | 'missions' | 'chat' | 'log';
 
+// The console's scope in the page's queue: one per server on the admin's page.
+function scopeOf(target: ConsoleTarget): string {
+  return target.kind === 'admin' ? `admin:${target.id}` : 'owner';
+}
+
 export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, options: HostedConsoleOptions) {
+  const scope = scopeOf(target);
   // Null until first read.
   const players = shallowRef<ConsolePlayer[] | null>(null);
   const rotation = shallowRef<RotationEntry[] | null>(null);
@@ -99,6 +125,10 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
   let holdUntil = 0;
   // The reads have ended: the credentials were refused, or the console unmounted.
   let stopped = false;
+  // Each read's transient refusals in a row.
+  const transientRuns: Record<ReadKey, number> = { players: 0, rotation: 0, missions: 0, chat: 0, log: 0 };
+  // The log's read in flight (it runs beside the queue): its abort.
+  let logInFlight: AbortController | null = null;
 
   function stop() {
     stopped = true;
@@ -130,27 +160,34 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
     if (error.code === 'rate_limited') {
       holdUntil = Date.now() + (error.retryAfterSeconds ?? CONSOLE_TICK_MS / 1000) * 1000;
     }
-    // Another tab of this account had the console: the next tick reads again.
-    if (error.code === 'console_busy') return;
+    // A stall or a full queue: the next tick asks again, and it shows only
+    // once it keeps happening.
+    if (TRANSIENT_READ_CODES.has(error.code)) {
+      transientRuns[key]++;
+      if (transientRuns[key] < TRANSIENT_READS_SHOWN_AFTER) return;
+    } else {
+      transientRuns[key] = 0;
+    }
     troubles.value = { ...troubles.value, [key]: error.message };
   }
 
   // A read answered: its trouble goes, and a console the server's state shut
   // is open again (the log's read answers in any state, so not it).
   function readOk(key: ReadKey) {
+    transientRuns[key] = 0;
     if (troubles.value[key]) troubles.value = { ...troubles.value, [key]: '' };
     if (key !== 'log' && ended.value) ended.value = '';
   }
 
-  // One read through the queue: its answer, or null when it did not run (the
-  // same read still waits, the tab is hidden, the page has gone) or the reads
-  // have stopped.
+  // One read through the queue, in this console's scope: its answer, or null
+  // when it did not run (the same read still waits, the tab is hidden, the
+  // page or this console has gone) or the reads have stopped.
   async function read<T>(
-    key: ReadKey,
+    key: Exclude<ReadKey, 'log'>,
     fetch: (signal: AbortSignal) => Promise<ConsoleResult<T>>,
   ): Promise<ConsoleResult<T> | null> {
     if (stopped) return null;
-    const outcome = await queue.poll(key, fetch);
+    const outcome = await queue.poll(scope, key, fetch);
     if (!outcome.ran || stopped) return null;
     return outcome.value;
   }
@@ -202,12 +239,17 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
     readFailed('chat', result.error);
   }
 
-  // The lines past the last one read (the whole ring the first time).
+  // The lines past the last one read (the whole ring the first time). Beside
+  // the queue (the service admits no console turn for it), one at a time, and
+  // like the queue's reads never while the tab is hidden or once the page has
+  // gone.
   async function readLog() {
-    const result = await read('log', (signal) =>
-      fetchConsoleLog(target, { after: lastLineId, limit: CONSOLE_KEEP }, signal),
-    );
-    if (!result) return;
+    if (stopped || logInFlight || queue.pollsPaused) return;
+    const controller = new AbortController();
+    logInFlight = controller;
+    const result = await fetchConsoleLog(target, { after: lastLineId, limit: CONSOLE_KEEP }, controller.signal);
+    if (logInFlight === controller) logInFlight = null;
+    if (stopped || controller.signal.aborted) return;
     if (!result.ok) {
       readFailed('log', result.error);
       return;
@@ -242,8 +284,9 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
   }
 
   // One command through the queue's next turn. `done` words its success;
-  // `reread` names the reads it changed (the log always: a command is
-  // recorded there).
+  // `reread` names the reads it changes (the log too, always: a command is
+  // recorded there), read again after it answers, and after a refusal that
+  // leaves the server's state unknown or changed under the page.
   async function command<T>(
     panel: ConsolePanel,
     run: () => Promise<ConsoleResult<T>>,
@@ -255,14 +298,21 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
     setNotice(panel, null);
     announcement.value = '';
     alertText.value = '';
-    const result = await queue.action(run);
-    acting.value = false;
+    let result: ConsoleResult<T>;
+    try {
+      result = await queue.action(run);
+    } finally {
+      acting.value = false;
+    }
+    const readAgain = () => {
+      for (const again of reread) void again();
+      void readLog();
+    };
     if (result.ok) {
       const text = done(result.value);
       setNotice(panel, { tone: 'ok', text });
       announcement.value = text;
-      for (const again of reread) void again();
-      void readLog();
+      readAgain();
       return true;
     }
     const error = result.error;
@@ -276,12 +326,14 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
     }
     setNotice(panel, { tone: 'error', text: error.message });
     alertText.value = error.message;
-    // What a refusal says changed under the page: read it again.
+    // What a refusal says changed under the page, or left unknown (a command
+    // that timed out may have gone out; another edit of the rotation was
+    // running): read it again.
+    if (error.code === 'admin_timeout' || error.code === 'rotation_busy') readAgain();
     if (error.code === 'player_not_found') void readPlayers();
     if (error.code === 'no_such_entry' || error.code === 'rotation_full' || error.code === 'last_mission') {
       void readRotation();
     }
-    if (error.code === 'admin_timeout') void readLog();
     return false;
   }
 
@@ -352,9 +404,14 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
     document.addEventListener('visibilitychange', onVisibility);
   });
 
+  // The console has gone: its reads leave the page's queue (the other
+  // consoles' stay), and its log read is dropped.
   onUnmounted(() => {
     stop();
     document.removeEventListener('visibilitychange', onVisibility);
+    queue.cancel(scope);
+    logInFlight?.abort();
+    logInFlight = null;
   });
 
   return {

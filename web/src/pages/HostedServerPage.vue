@@ -121,8 +121,8 @@
 // (requested to running, and a stop), backing off to a minute while it runs,
 // none once it has ended; a hidden tab skips its polls and refreshes when it
 // is shown again. The running server's console (HostedServerConsole) makes
-// its calls through this page's one console queue, so no two of them overlap
-// (the service runs one console request per account at once).
+// its admitted calls through this page's one console queue, so no two of them
+// overlap (the service runs one console request per account at once).
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import HostedServerStatus from '../components/HostedServerStatus.vue';
