@@ -158,6 +158,23 @@ public:
         for (int i = kNumberedMissionVars; i < kMissionVars; ++i) mission_[i] = prev.mission_[i];
     }
 
+    // Carry the previous mission's DO choices and RND: no mission load stores to
+    // either (the mission start's WAC load clears the IF state and the DO
+    // counters and seeds DORND, reset_wac_load_state), so the next mission
+    // reads both at the previous run's values until it writes them. A
+    // save-game load copies the choices from its file but not RND, which lies
+    // below the copied run (unported). The restart's rewind restores the
+    // sealed start instead (D-EVT-15).
+    // [orig: g_WacLoopChoices @0xC6E640, written by WacScript_ExecuteBytecode
+    //  alone (@0x4F5A48 / @0x4F5AD0 / @0x4F5AF0) and the bank words;
+    //  g_WacVarRND @0xC6B23C, stored by WacCmd_Random @0x4ED2C8;
+    //  WacScript_LoadVarState @0x4EE520, the 0x38AC-byte copy to 0xC6B240
+    //  called @0x4EE52F]
+    void carry_wac_kept_from(const ScriptVarStore &prev) {
+        wac.do_choice = prev.wac.do_choice;
+        wac.rnd = prev.wac.rnd;
+    }
+
 private:
     static bool in_range(int i, int n) { return i >= 0 && i < n; }
     // The index's low 30 bits, 0..0x3FFFFFFF.
