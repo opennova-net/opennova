@@ -394,7 +394,7 @@ int main(int argc, char **argv) {
 			expect(!links.find(id), "the admin link went down at stopping");
 			// Its QUIT and the server's own exit on the ServerStopHosting race, so either
 			// line ends the session (hosted_admin_link pins the QUIT).
-			const bool ended = wait_for([&] {
+			const bool session_ended = wait_for([&] {
 				for (const auto &line : hosted::list_console(*service.pool.acquire(), id, 0, 100)) {
 					if (line.kind == "status" &&
 							(line.text == "the admin session is closed" ||
@@ -403,7 +403,7 @@ int main(int argc, char **argv) {
 				}
 				return false;
 			}, 10);
-			expect(!link_up || ended, "the admin link's session ended with the server's run");
+			expect(!link_up || session_ended, "the admin link's session ended with the server's run");
 			if (login) {
 				for (const auto &line : hosted::list_console(*service.pool.acquire(), id, 0, hosted::kConsoleKeep))
 					expect(line.text.find(login->password) == std::string::npos, "no console line has the password");
