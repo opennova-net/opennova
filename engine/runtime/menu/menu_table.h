@@ -38,11 +38,12 @@ namespace opennova::menu {
 //   @0x63f724, then frees the old @0x63f737].
 // - `defined`: an init set the record up. It writes the label, the width, the
 //   header justification (-1: 1 / 16) and the cell justification after it, the
-//   sort compare, the direction (ascending) and zeroes +4..+104; the cell type
-//   (+108), the cell offsets (+152 / +156), the SUBST rows (+164) and the bitmap
-//   scale (+168 / +172) stay the record's [orig: CTableWnd_InitRow @0x63f9c0 —
-//   the writes @0x63fa27..0x63fc10, none to +108 / +152..+172; the BODY sets
-//   those @0x643811..0x643870, a SUBST row @0x643a71].
+//   sort compare, the direction (ascending), the sort's cell (+160, the column's
+//   own index) and zeroes +4..+104; the cell type (+108), the cell offsets
+//   (+152 / +156), the SUBST rows (+164) and the bitmap scale (+168 / +172) stay
+//   the record's [orig: CTableWnd_InitRow @0x63f9c0 - the writes
+//   @0x63fa27..0x63fc10, +160 @0x63fb89, none to +108, +152 / +156 or
+//   +164..+172; the BODY sets those @0x643811..0x643870, a SUBST row @0x643a71].
 // The frame draws an undefined record as it is (the kept authored column, or a
 // zeroed one, width 0); `cell_type` is the record's as far as the runtime knows
 // it (a fresh record's 0) and orders its sort.
@@ -56,6 +57,12 @@ struct MenuTableColumn {
 	int cell_type = 0;
 	bool numeric_sort = false;
 	bool ascending = true;
+	// The cell the sort compares (+160): the column's own index once an init set
+	// the record up, 0 in a record no init reached (a growing count's zeroing, or
+	// an authored column no HEADER set up) [orig: CTableWnd_InitRow @0x63f9c0 -
+	// @0x63fb89; CTableWnd_CompareRows @0x63e9c0 - the reads @0x63ea5f /
+	// @0x63ea78 / @0x63eabf / @0x63eb0d / @0x63eb7d] (D-MNU-43).
+	int sort_cell = 0;
 	bool kept = false;
 	bool defined = true;
 };
@@ -67,10 +74,11 @@ void table_push_sort_key(std::vector<int> &keys, int column, int column_count);
 
 // The rows' order after a sort over `keys` [orig: CTableWnd_CompareRows @ 0x63e9c0,
 // key by key until one is -1: the column's direction (+1 ascending, -1
-// descending); a numeric column compares the atol of a cell that starts with a
-// digit (or '-' and a digit) and 0x7FFFFFFF for any other; else the cells compare
-// by stricmp; a missing cell answers the column's direction, whichever row
-// lacks it]. Returns the permutation (new row r is old row order[r]) the
+// descending) over the cell its record names (`sort_cell`); a numeric column
+// compares the atol of a cell that starts with a digit (or '-' and a digit) and
+// 0x7FFFFFFF for any other; else the cells compare by stricmp; a missing cell
+// (MenuTableRow::cell_text) answers the column's direction, whichever row lacks
+// it]. Returns the permutation (new row r is old row order[r]) the
 // list widgets' quicksort leaves, so rows that compare equal stand where its
 // swaps put them [orig: CTableWnd_SortByColumn -> Utility_SortDualArray (the
 // call @0x640991) -> Utility_QuickSortDualArray @0x651AB0] (D-MNU-40, list_sort.h).

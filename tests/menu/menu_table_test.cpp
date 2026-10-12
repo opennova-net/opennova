@@ -65,6 +65,14 @@ MenuTableRow row_of(std::initializer_list<std::string> cells, int32_t value0 = 0
 	return row;
 }
 
+// Columns as code's inits leave them: each record's sort cell its own index
+// [orig: CTableWnd_InitRow @0x63f9c0 - +160 @0x63fb89].
+std::vector<MenuTableColumn> inited_columns(size_t count) {
+	std::vector<MenuTableColumn> columns(count);
+	for (size_t i = 0; i < count; ++i) columns[i].sort_cell = static_cast<int>(i);
+	return columns;
+}
+
 // A cmap.mnu-shaped table: a scaled checkbox column (CUSTOM_DRAW first, so
 // custom drawn), a plain BITMAP_DRAW checkbox column, a centred text column.
 const char *kTableXml = R"(
@@ -449,7 +457,7 @@ void test_custom_draw_slot(const fnt_font_t *font) {
 //  @0x640991) -> Utility_QuickSortDualArray @0x651AB0; CTableWnd_CompareRows
 //  @0x63e9c0 - the answers @0x63eaa1 / @0x63eab1 -> @0x63ec1b]
 void test_sort_order_is_the_quicksorts() {
-	std::vector<MenuTableColumn> columns(2);
+	std::vector<MenuTableColumn> columns = inited_columns(2);
 	columns[0].label = "Name";
 	columns[1].label = "Kills";
 	columns[1].numeric_sort = true;
@@ -486,7 +494,7 @@ void test_sort_order_is_the_quicksorts() {
 // [orig: CTableWnd_CompareRows @0x63e9c0 - the stricmp @0x63eaf2 ->
 //  _stricmp_l @0x76fd23]
 void test_text_arm_folds_through_cp1252() {
-	std::vector<MenuTableColumn> columns(2);
+	std::vector<MenuTableColumn> columns = inited_columns(2);
 	columns[1].numeric_sort = true;
 	const std::vector<int> by_name_then_kills = { 0, 1 };
 	CHECK(table_sort_order({ row_of({ "\xC3\x89", "2" }), row_of({ "\xC3\xA9", "1" }) }, columns,
@@ -496,6 +504,125 @@ void test_text_arm_folds_through_cp1252() {
 	CHECK(table_sort_order({ row_of({ "\xC3\x89" "b" }), row_of({ "\xC3\xA9" "a" }), row_of({ "\xC5\x92" }) },
 				  columns, by_name) == (std::vector<int>{ 2, 1, 0 }),
 			"OE sorts before e-acute a, which sorts before E-acute b");
+}
+
+// A cell no write reached is missing (D-MNU-43): the insert sets the first
+// cell alone and a set the one it names, so a gap below a later set column is
+// NULL, which the sort answers with the column's direction whichever row lacks
+// it, where an empty text would sort first. And the sort reads the cell its
+// record names (+160): a record a growing count zeroed and no init set up reads
+// cell 0, with its zeroed direction (descending).
+// [orig: CTableWnd_InsertRow @0x641c30 - the zeroing @0x641dd5, the first cell
+//  @0x641ee2; CTableWnd_SetCellText @0x63edf0 - @0x63efb2; CTableWnd_CompareRows
+//  @0x63e9c0 - +160 @0x63ea78, the answers @0x63eaa1 / @0x63eab1]
+void test_unset_cells_are_missing() {
+	std::vector<MenuTableRow> rows;
+	table_insert_row(rows, "a", 0, 0, -1);
+	CHECK(table_set_cell_text(rows, 0, 2, 3, "x"), "a set past the row's cells");
+	table_insert_row(rows, "b", 0, 0, -1);
+	CHECK(table_set_cell_text(rows, 1, 1, 3, "m") && table_set_cell_text(rows, 1, 2, 3, "y"),
+			"the second row's sets");
+	CHECK(rows[0].cell_text(1) == nullptr && rows[0].cell(1).empty() &&
+					rows[0].cell_text(2) != nullptr && *rows[0].cell_text(2) == "x" &&
+					rows[0].cell_text(3) == nullptr && rows[1].cell_text(1) != nullptr,
+			"the gap and the cell past the last set are missing, read as empty");
+	std::vector<MenuTableColumn> columns = inited_columns(3);
+	const std::vector<int> by_middle = { 1, -1, -1 };
+	CHECK(table_sort_order(rows, columns, by_middle) == (std::vector<int>{ 1, 0 }),
+			"ascending, the gap answers +1, so the swap puts the set row first");
+	columns[1].ascending = false;
+	CHECK(table_sort_order(rows, columns, by_middle) == (std::vector<int>{ 0, 1 }),
+			"descending, the gap answers -1, so the rows stand");
+	std::vector<MenuTableColumn> grown = inited_columns(3);
+	MenuTableColumn zeroed;
+	zeroed.justify = zeroed.vjustify = zeroed.body_justify = zeroed.body_vjustify = 0;
+	zeroed.ascending = false;
+	zeroed.defined = false;
+	grown[1] = zeroed;
+	CHECK(table_sort_order({ row_of({ "b", "x" }), row_of({ "a", "y" }) }, grown, by_middle) ==
+					(std::vector<int>{ 0, 1 }),
+			"a zeroed record sorts on cell 0, descending");
+}
+
+// A missing cell has no image: the game resolves a cell's image only at a set,
+// and the insert's zeroed row holds none, so a SUBST row with no VALUE (its
+// value "") gives its image to a cell set to "" and not to one no write reached
+// (D-MNU-43).
+// [orig: CTableWnd_SetCellText @0x63edf0 - the texture load @0x63eefd;
+//  CTableWnd_InsertRow @0x641c30 - the image array's zeroing @0x641df2;
+//  CTableWnd_ParseXMLContentDefinition - the SUBST value's L"" default @0x64389d]
+void test_missing_cell_takes_no_image(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>SUB</NAME>
+  <WINDOW type="window" name="ROOT">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
+    <FONT><NAME>f.fnt</NAME><DEFAULT_FG>AAAAAA</DEFAULT_FG></FONT>
+    <WINDOW type="table" name="LIST">
+      <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>200</BOTTOM></POSITION>
+      <COLUMN count="2" spacing="0">
+        <HEADER column="0" width="50">A</HEADER>
+        <HEADER column="1" width="50">B</HEADER>
+        <BODY column="1" BITMAP_DRAW></BODY>
+        <SUBST column="1" FILE>blank.tga</SUBST>
+      </COLUMN>
+      <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
+	const int32_t blank = slot_of(c, "blank.tga");
+	CHECK(blank >= 0, "configure interns the SUBST image");
+	c.set_texture_size(blank, 16, 16);
+	MenuWidgetState ws;
+	ws.index = c.widget_index("LIST");
+	table_insert_row(ws.table_rows, "a", 0, 0, -1);
+	table_insert_row(ws.table_rows, "b", 0, 0, -1);
+	CHECK(table_set_cell_text(ws.table_rows, 1, 1, 2, ""), "row 1's image cell is set to \"\"");
+	MenuFrameState state;
+	state.widgets.push_back(ws);
+	int quads = 0;
+	for (const MenuQuad &q : c.compile(state, 1.0f, 1.0f).quads)
+		if (q.texture == blank) ++quads;
+	CHECK(quads == 1, "only the cell set to \"\" draws the no-VALUE SUBST image");
+}
+
+// The SUBST match is the game's stricmp under the ".ACP" locale (D-MNU-39): a
+// value "\xC9" (E-acute) gives its image to a cell "\xE9" (e-acute) and to the
+// UTF-8 "\xC3\x89", where an ASCII fold matches neither.
+// [orig: CTableWnd_SetCellText @0x63edf0 - the stricmp @0x63ee50]
+void test_subst_match_folds_through_cp1252(const fnt_font_t *font) {
+	const char *xml = "<SCREEN><NAME>SUB</NAME><WINDOW type=\"window\" name=\"ROOT\">"
+			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>"
+			"<FONT><NAME>f.fnt</NAME><DEFAULT_FG>AAAAAA</DEFAULT_FG></FONT>"
+			"<WINDOW type=\"table\" name=\"LIST\">"
+			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>200</BOTTOM></POSITION>"
+			"<COLUMN count=\"1\" spacing=\"0\"><HEADER column=\"0\" width=\"50\">A</HEADER>"
+			"<BODY column=\"0\" BITMAP_DRAW></BODY>"
+			"<SUBST column=\"0\" value=\"\xC9\" FILE>e.tga</SUBST></COLUMN>"
+			"<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT></WINDOW></WINDOW></SCREEN>";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
+	const int32_t e = slot_of(c, "e.tga");
+	CHECK(e >= 0, "configure interns the SUBST image");
+	c.set_texture_size(e, 16, 16);
+	MenuWidgetState ws;
+	ws.index = c.widget_index("LIST");
+	ws.table_rows.push_back(row_of({ "\xE9" }));
+	ws.table_rows.push_back(row_of({ "\xC3\x89" }));
+	ws.table_rows.push_back(row_of({ "x" }));
+	MenuFrameState state;
+	state.widgets.push_back(ws);
+	int quads = 0;
+	for (const MenuQuad &q : c.compile(state, 1.0f, 1.0f).quads)
+		if (q.texture == e) ++quads;
+	CHECK(quads == 2, "both case forms of the value take the image, the other row none");
 }
 
 } // namespace
@@ -511,6 +638,9 @@ int main() {
 	test_custom_draw_slot(&font);
 	test_sort_order_is_the_quicksorts();
 	test_text_arm_folds_through_cp1252();
+	test_unset_cells_are_missing();
+	test_missing_cell_takes_no_image(&font);
+	test_subst_match_folds_through_cp1252(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

@@ -70,8 +70,8 @@ std::vector<int> table_sort_order(const std::vector<MenuTableRow> &rows,
 				static_cast<uint32_t>(direction) * static_cast<uint32_t>(value));
 	};
 	const auto compare = [&](int x, int y) -> int32_t {
-		const std::vector<std::string> &a = rows[static_cast<size_t>(x)].cells;
-		const std::vector<std::string> &b = rows[static_cast<size_t>(y)].cells;
+		const MenuTableRow &a = rows[static_cast<size_t>(x)];
+		const MenuTableRow &b = rows[static_cast<size_t>(y)];
 		for (size_t i = 0; i < depth && i < keys.size(); ++i) {
 			const int key = keys[i];
 			if (key < 0 || key >= static_cast<int>(columns.size())) {
@@ -79,9 +79,11 @@ std::vector<int> table_sort_order(const std::vector<MenuTableRow> &rows,
 			}
 			const MenuTableColumn &column = columns[static_cast<size_t>(key)];
 			const int32_t direction = column.ascending ? 1 : -1;
-			const size_t cell = static_cast<size_t>(key);
-			const std::string *ca = cell < a.size() ? &a[cell] : nullptr;
-			const std::string *cb = cell < b.size() ? &b[cell] : nullptr;
+			// The cell the record names (+160), each row's NULL until a write
+			// reached it [orig: the reads @0x63ea5f / @0x63ea78 / @0x63eabf]
+			// (D-MNU-43).
+			const std::string *ca = a.cell_text(column.sort_cell);
+			const std::string *cb = b.cell_text(column.sort_cell);
 			// A text column (and a custom one whose first row has the cell):
 			// two missing cells pass to the next key; one missing cell answers
 			// the column's direction, whichever row lacks it, which leaves the

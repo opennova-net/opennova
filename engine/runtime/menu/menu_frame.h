@@ -1018,7 +1018,7 @@ private:
 	std::vector<TableColumnSetup> table_columns_(const WidgetNode &node,
 			const MenuWidgetState *ws) const;
 	int32_t table_cell_image_(const std::vector<TableColumnSetup> &columns, int column,
-			const std::string &text) const;
+			const std::string *text) const;
 	static int table_pitch_(const std::vector<TableColumnSetup> &columns,
 			const mnu::RectEdges &rect, int row_h);
 	// Rows the body shows [orig: CTableWnd_RecalcLayout @ 0x63f1a0].
