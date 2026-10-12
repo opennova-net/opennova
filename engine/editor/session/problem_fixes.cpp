@@ -751,10 +751,13 @@ void collect(const Diagnostic &d, const SessionView &view, const ProblemFixIndex
 		               "Reads " + d.asset + " again from its file, which changed outside the editor: its unsaved "
 		               "edits are lost (it asks first) and its history starts again." + kNotUndoable,
 		               request::reload_document(d.asset), false});
-		if ((*open)->dirty())
+		// A mission whose names alone are unsaved (a save left them out of its .mis) keeps them by a save too.
+		if ((*open)->unsaved())
 			out.push_back({"Keep my edits and save over it",
-			               "Writes " + d.asset + " with your unsaved edits over its file: what the other program "
-			               "saved there is lost." + kNotUndoable,
+			               "Writes " + d.asset +
+			                       ((*open)->dirty() ? std::string(" with your unsaved edits")
+			                                         : std::string(" as the editor holds it, its names unsaved,")) +
+			                       " over its file: what the other program saved there is lost." + kNotUndoable,
 			               request::save_over(d.asset), false});
 		return;
 	}
