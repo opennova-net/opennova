@@ -310,6 +310,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WeaponProfileSummary);
 	GDREGISTER_CLASS(PlayerInfoKitRestore);
 	GDREGISTER_CLASS(PlayerProfiles);
+	GDREGISTER_CLASS(GameConfigBlock);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
