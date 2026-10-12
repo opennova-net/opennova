@@ -1,6 +1,6 @@
 #include <runtime/world/deploy_screen_feed.h>
 
-#include <base/io/strutil.h>
+#include <runtime/menu/list_sort.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -8,18 +8,6 @@
 #include <vector>
 
 namespace opennova::world {
-
-namespace {
-
-// ListWidget_SortRows(list, 0, 1): the qsort comparator with sortParams
-// {0 = string mode, 1 = ascending} is stricmp(a.text, b.text); NULL text
-// sorts last [orig: cmp @0x6448a0 — the null tests @0x6448a9..0x6448b6,
-// the ascending arm @0x644915].
-bool row_text_less(const DeployListRow &a, const DeployListRow &b) {
-    return strutil::iless(a.text, b.text);
-}
-
-} // namespace
 
 std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in) {
     std::vector<DeployListRow> rows;
@@ -41,14 +29,16 @@ std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in) {
         rows.push_back(row);
     }
     // ListWidget_SortRows(list, 0, 1) over the whole list — the Default row
-    // included [orig: @0x553c5a]. Rows whose texts tie stand where the list
-    // sort's quicksort leaves them [orig: Utility_QuickSortDualArray @0x651AB0];
-    // std::stable_sort keeps them in order. Duplicate rows (unregistered zones,
-    // each '@' with STRWPNAME000 and value 0) are identical in every field, so
-    // their order shows nowhere; any other tie, two zones 32 indices apart
-    // (their letters fold together) under one name or the Default row matching
-    // a zone's text, is D-MNU-40's.
-    std::stable_sort(rows.begin(), rows.end(), row_text_less);
+    // included [orig: @0x553c5a]: {0 = string mode, 1 = ascending}, so the
+    // compare is stricmp over the rows' texts [orig: cmp @0x6448a0], and
+    // rows whose texts tie (two zones 32 indices apart, whose letters fold
+    // together, under one name, or the Default row matching a zone's text)
+    // stand where the list sort's quicksort leaves them
+    // [orig: ListWidget_SortRows @0x644990 -> Utility_SortDualArray (the call
+    // @0x6449c0) -> Utility_QuickSortDualArray @0x651AB0] (D-MNU-40).
+    menu::sort_dual_array(rows, [](const DeployListRow &a, const DeployListRow &b) {
+        return menu::list_text_compare(a.text, b.text);
+    });
     // The second loop: EVERY team zone (team byte, def attrib 0x40000, in the
     // spawn-zone list — NO secured gate and NO occupant gate) inserts its
     // members after the row valued index + 1, else at position 0, then appends
