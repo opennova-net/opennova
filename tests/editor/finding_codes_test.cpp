@@ -287,11 +287,14 @@ static int test_columns() {
 	// DI-11: what a finding's maker planned with its file at hand (Diagnostic::planned): an id, a name or a key
 	// of its own for a record no lookup finds, an end pose's trigger moved, an entity set where the game grounds it
 	// (DI-28); a variable no menu names, removed; a file's line ends restored to CR LF (the line-ends rule); a
-	// ConfigFile's lines its loader reads the same without, commented out under the reader's pool (the pool rule).
+	// ConfigFile's lines its loader reads the same without, commented out under the reader's pool (the pool rule);
+	// the .mis beside a mission (S24 Names): the names that still match taken, or the file written from the mission.
 	TEST_EXPECT(fixed_by(FindingFix::EditRecord) ==
 	            Tokens({ "animation.end_pose_trigger", "catalog.name_duplicate", "document.config_overrun", "document.line_ends",
 	                     "menu.duplicate_screen",
-	                     "menu.duplicate_window", "mission.off_ground", "mission.ssn_duplicate", "mission.zone_duplicate",
+	                     "menu.duplicate_window", "mission.names_foreign", "mission.names_outside", "mission.names_unmatched",
+	                     "mission.off_ground",
+	                     "mission.ssn_duplicate", "mission.zone_duplicate",
 	                     "strings.key_duplicate", "terrain.foliage_inert", "terrain.no_width", "terrain.refused" }));
 	TEST_EXPECT(fixed_by(FindingFix::UnusedVariable) == Tokens({ "style.unused" }));
 	TEST_EXPECT(fixed_by(FindingFix::FallbackRow) == Tokens({ "catalog.first_row" }));
@@ -363,7 +366,8 @@ static int test_columns() {
 	                     "font.glyph_height", "font.glyph_outside", "hudfx.name_runs", "hudfx.never_read",
 	                     "hudfx.no_model", "hudfx.power_unseen",
 	                     "menu.variable_number", "mission.event_missing",
-	                     "mission.group_range", "mission.invalid_input", "mission.path_rebuilt",
+	                     "mission.group_range", "mission.invalid_input", "mission.names_foreign", "mission.names_outside",
+	                     "mission.names_refused", "mission.names_unmatched", "mission.names_unwritten", "mission.path_rebuilt",
 	                     "model.frame_missing", "model.light_part", "model.register_missing",
 	                     "music_bank.stream_silent",
 	                     "particle.duplicate_effect", "particle.unreadable",

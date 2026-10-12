@@ -59,7 +59,7 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 		same = entry.identity == open->identity() &&
 				entry.load_generation == open->load_generation() &&
 				entry.revision == open->revision() && entry.dirty == open->dirty() &&
-				entry.wrote_file == open->wrote_file();
+				entry.wrote_file == open->wrote_file() && entry.companion == open->companion_state();
 	else if (same)
 		same = entry.size == asset.size_bytes && entry.modified == asset.modified_ticks &&
 				entry.kind == asset.kind && entry.game == input.project.target_game;
@@ -103,6 +103,7 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 		entry.revision = open->revision();
 		entry.dirty = open->dirty();
 		entry.wrote_file = open->wrote_file();
+		entry.companion = open->companion_state();
 		if (type && !records)
 			entry.findings.push_back(no_records(asset));
 		else if (type && !silent)

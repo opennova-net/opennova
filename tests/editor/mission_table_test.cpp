@@ -244,7 +244,10 @@ int coverage(MissionKind kind, size_t index, const std::set<size_t> &excluded, c
 	int failures = 0;
 	const TableKind &table = *T().kind(k(kind));
 	for (const FieldSchema &field : table.fields()) {
+		// A field no byte holds: one derived, and the name the .bms has no room for (S24 Names: the row's own,
+		// written to the .mis beside it).
 		if (field.read_only) continue;
+		if (const char *name = mission_name_field(k(kind)); name && field.id == name) continue;
 		Loaded edited;
 		TEST_EXPECT(load(edited));
 		if (prepare) prepare(edited);
@@ -493,7 +496,7 @@ int test_fields() {
 	TEST_EXPECT(!set(layer, "name", std::string(21, 'L'), error));
 
 	const RecordHandle event = rows_of(m, MissionKind::Event)[1];
-	bms::Event &native = event.as<mission::EventChain>().event;
+	bms::Event &native = event.as<EventRow>().native.event;
 	TEST_EXPECT(!set(event, "delay", int64_t(2000), error) && set(event, "delay", int64_t(1023), error) && native.delay == 1023);
 	// The internal bits the event holds stay; the author's are the value's; a bit no name says (the
 	// writer would drop it) is refused.
@@ -549,7 +552,7 @@ int test_lists() {
 	// waypoint marker of one path from 1), a new one visiting the first marker. The record stays as read
 	// (the mission document's save lays it out from the stops).
 	const RecordHandle path = rows_of(m, MissionKind::WaypointPath)[1];
-	MissionPath &route = path.as<MissionPath>();
+	MissionPath &route = path.as<PathRow>().native;
 	const uint32_t count = route.record.marker_count;
 	const size_t markers = rows_of(m, MissionKind::Marker).size();
 	const ListOps &stops = list_of(MissionKind::WaypointPath, MissionKind::Stop).ops;
