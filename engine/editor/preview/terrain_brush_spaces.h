@@ -13,10 +13,10 @@ class MissionGround;
 // shows on its picture.
 
 // A 3D view's (the mission's, the terrain's): the camera's ray through the pixel, met where the device's terrain
-// meets it (ViewportDevice::surface_between, its height ground_at's), else, with no device, where the game's own
-// terrain raycast meets the mission's height field [orig: Terrain_RaycastHeightmapHiRes_0 @ 0x60e710, through
-// world::terrain_clip_segment], so an editor drawing no picture (the null backend, a headless MCP) lays the same points
-// whatever drew them before; nothing where neither has a ground.
+// meets it (ViewportDevice::surface_between, its height ground_at's), else, with no device, where the same raycast the
+// Shell's device runs meets the mission's height field [orig: Terrain_RaycastHeightmapHiRes_0 @ 0x60e710, over the
+// editor's coords and samples as TerrainData::raycast_terrain takes them], so an editor drawing no picture (the null
+// backend, a headless MCP) lays the points a picture would; nothing where neither has a ground.
 class CameraBrushSpace final : public TerrainBrushSpace {
 public:
 	CameraBrushSpace(const ViewportContext &context, const OrbitCamera &camera, const MissionGround *ground)
@@ -48,7 +48,7 @@ private:
 };
 
 // The mission ground's height at a point (metres; false where it holds no terrain): the game's column height [orig:
-// Terrain_RaycastHeightmapHiRes_0 @ 0x60e710 down the column, world::terrain_column_height].
+// Terrain_RaycastHeightmapLoRes @ 0x60cc12 down the column, world::terrain_column_height].
 bool mission_ground_height(const MissionGround &ground, TerrainPoint at, double &height);
 
 } // namespace opennova::editor

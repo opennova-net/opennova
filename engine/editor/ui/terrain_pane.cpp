@@ -72,15 +72,19 @@ void draw_lock_line(TerrainPaneContext &context) {
 		follow += under.follow;
 		locked += under.locked;
 	}
+	// Where it counts: the view's own mission, or the open missions on the view's terrain (a sculpt's follow moves every
+	// mission on the heights, closed ones and those of another terrain naming the .cpt among them).
+	const bool mission = dynamic_cast<const MissionDocument *>(&context.document) != nullptr;
+	const char *where = mission ? "in this mission" : "in the open missions on it";
 	if (follow + locked == 0) {
-		ImGui::TextDisabled("Under the brush: no entity.");
+		ImGui::TextDisabled("Under the brush %s: no entity.", where);
 	} else {
 		const std::string follows = std::to_string(follow) + (follow == 1 ? " entity follows" : " entities follow");
 		const std::string held = std::to_string(locked) + (locked == 1 ? " is" : " are");
-		ImGui::TextWrapped("Under the brush: %s the ground, %s height locked.", follows.c_str(), held.c_str());
+		ImGui::TextWrapped("Under the brush %s: %s the ground, %s height locked.", where, follows.c_str(), held.c_str());
 	}
-	ui_kit::tooltip("A sculpt moves an entity that follows the ground with the ground under it; a height-locked one keeps "
-	                "its height (its Height lock, beside its z).");
+	ui_kit::tooltip("A sculpt moves an entity that follows the ground with the ground under it, in every mission on these "
+	                "heights; a height-locked one keeps its height (its Height lock, beside its z).");
 }
 
 // One of the brush's numbers as a slider, set once as the drag lets go.
@@ -104,13 +108,21 @@ public:
 		TerrainPaneContext context{workspace, document, family, brush};
 		ImGui::TextUnformatted("Terrain");
 		if (!family.error.empty()) ImGui::TextWrapped("%s", family.error.c_str());
-		// The terrain files this view's brush edited that keep unsaved edits, each with its dirty dot (its Save saves
-		// them with the view's document; its Close asks about them).
-		if (const auto edited = view.documents.edited_from.find(document.path()); edited != view.documents.edited_from.end()) {
+		// The files a Save of this view writes beside it that keep unsaved edits, each with its dirty dot: the terrain
+		// files its brush edited and the missions that followed their strokes (its Save saves them with the view's
+		// document; its Close asks about them).
+		{
+			std::vector<std::string> scope;
+			if (view.documents.active == document.path()) {
+				scope = view.documents.active_scope_unsaved;
+			} else if (const auto edited = view.documents.edited_from.find(document.path());
+			           edited != view.documents.edited_from.end()) {
+				for (const std::string &path : edited->second)
+					for (const auto &open : view.documents.open)
+						if (open->path() == path && open->unsaved()) scope.push_back(path);
+			}
 			std::string unsaved;
-			for (const std::string &path : edited->second)
-				for (const auto &open : view.documents.open)
-					if (open->path() == path && open->unsaved()) unsaved += (unsaved.empty() ? "" : ", ") + basename_of(path) + " *";
+			for (const std::string &path : scope) unsaved += (unsaved.empty() ? "" : ", ") + basename_of(path) + " *";
 			if (!unsaved.empty()) {
 				ImGui::TextWrapped("Unsaved: %s", unsaved.c_str());
 				ui_kit::tooltip("Saving this view (Ctrl+S) saves them with it; closing it asks about them.");

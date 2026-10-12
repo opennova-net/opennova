@@ -229,21 +229,39 @@ void MissionMapViewportApplier::apply_picture_(const opennova::editor::MissionMa
 	if (pixels.size() != size_t(kSide) * kSide) {
 		if (picture_.is_valid()) hud->set_minimap_terrain_picture(Ref<Texture2D>());
 		picture_.unref();
+		picture_bytes_ = PackedByteArray();
+		picture_whole_ = UINT64_MAX;
 		return;
 	}
 	// The picture's 0xAARRGGBB words as RGBA bytes, in the atlas's own rows (the colour map's layout: the CMAP's
-	// compile lays both over the sector grid alike).
-	PackedByteArray bytes;
-	bytes.resize(int64_t(pixels.size()) * 4);
-	uint8_t *out = bytes.ptrw();
-	for (size_t i = 0; i < pixels.size(); ++i) {
-		const uint32_t p = pixels[i];
-		out[4 * i] = uint8_t(p >> 16);
-		out[4 * i + 1] = uint8_t(p >> 8);
-		out[4 * i + 2] = uint8_t(p);
-		out[4 * i + 3] = uint8_t(p >> 24);
+	// compile lays both over the sector grid alike): all of them for a whole make, else the rects its patches changed
+	// since the last upload alone (S25: a stroke's dab converts its region, not the 1M texels). Godot takes the
+	// texture's bytes whole (ImageTexture::update has no sub-rect), one upload a frame at most.
+	const auto convert = [&](uint8_t *out, int x0, int y0, int x1, int y1) {
+		for (int y = y0; y < y1; ++y)
+			for (int x = x0; x < x1; ++x) {
+				const size_t i = size_t(y) * kSide + size_t(x);
+				const uint32_t p = pixels[i];
+				out[4 * i] = uint8_t(p >> 16);
+				out[4 * i + 1] = uint8_t(p >> 8);
+				out[4 * i + 2] = uint8_t(p);
+				out[4 * i + 3] = uint8_t(p >> 24);
+			}
+		picture_converted_ += (x1 - x0) * (y1 - y0);
+	};
+	if (picture_whole_ != view.whole_serial() || picture_bytes_.size() != int64_t(pixels.size()) * 4) {
+		picture_bytes_.resize(int64_t(pixels.size()) * 4);
+		convert(picture_bytes_.ptrw(), 0, 0, kSide, kSide);
+		picture_whole_ = view.whole_serial();
+		picture_rects_ = view.dirty().size();
+	} else {
+		uint8_t *out = picture_bytes_.ptrw();
+		const std::vector<opennova::editor::MissionMapAtlasRect> &rects = view.dirty();
+		for (size_t i = picture_rects_; i < rects.size(); ++i)
+			convert(out, std::max(rects[i].x0, 0), std::max(rects[i].y0, 0), std::min(rects[i].x1, kSide), std::min(rects[i].y1, kSide));
+		picture_rects_ = rects.size();
 	}
-	const Ref<Image> image = Image::create_from_data(kSide, kSide, false, Image::FORMAT_RGBA8, bytes);
+	const Ref<Image> image = Image::create_from_data(kSide, kSide, false, Image::FORMAT_RGBA8, picture_bytes_);
 	if (picture_.is_valid()) picture_->update(image);
 	else picture_ = ImageTexture::create_from_image(image);
 	++picture_uploads_;
@@ -428,6 +446,9 @@ void MissionMapViewportApplier::apply(const opennova::editor::ViewportModel &mod
 	drawn.set("terrain", opennova::io::JsonValue::make_bool(terrain_data_.is_valid()));
 	drawn.set("outline_edges", opennova::io::json_number(outline_edges_));
 	drawn.set("background", opennova::io::JsonValue::make_bool(picture_.is_valid()));
+	// S25: the background's uploads and the texels converted for them (a stroke's patch its rects alone).
+	drawn.set("background_uploads", opennova::io::json_number(double(picture_uploads_)));
+	drawn.set("background_converted", opennova::io::json_number(double(picture_converted_)));
 	report.drawn = std::move(drawn);
 }
 

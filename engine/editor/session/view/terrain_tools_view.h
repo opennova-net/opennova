@@ -126,6 +126,8 @@ bool read_terrain_brush(const io::JsonValue &json, TerrainBrush &brush, uint32_t
 // answer names the token), a token the stroke goes on with; `end` ends it with this sample (its steps one undo
 // step), `cancel` ends it dropping what it did.
 inline constexpr size_t kTerrainStrokePoints = 256;
+// The farthest a stroke's point lies from the mission's origin on either axis (metres): the 16.16 word's.
+inline constexpr double kTerrainPointMost = 32767.0;
 struct TerrainStrokeAsk {
 	TerrainPlane plane = TerrainPlane::Heights;
 	TerrainBrush brush;
@@ -137,6 +139,10 @@ struct TerrainStrokeAsk {
 	// Add (S25 B4, session/terrain_add_map.h): the plane's map made where the terrain has none its brush paints,
 	// and named; no points.
 	bool add = false;
+	// Asked over the wire (the JSON form read it): its gesture lapses after 10 s with no sample and ends at another
+	// request on its view, and a nonzero gesture must be one open (a canvas's own stroke lives until its release). How
+	// the ask came, not what it asks: no part of its equality, nor of its wire form.
+	bool wire = false;
 	bool operator==(const TerrainStrokeAsk &o) const {
 		return plane == o.plane && brush_named == o.brush_named && (brush_named == 0 || brush == o.brush) &&
 		       points == o.points && gesture == o.gesture && end == o.end && cancel == o.cancel && add == o.add;

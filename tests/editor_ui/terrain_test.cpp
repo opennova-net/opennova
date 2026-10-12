@@ -3,6 +3,7 @@
 // Logic pane as it shows), draws its tool tabs with nothing raised by drawing and nothing past its room, and a tool
 // pressed there is one set_workspace of the brush. A tab pressed picks its family's first tool where the brush has
 // another family's (Paint: Surface, its legend then shown); the tab of the brush's own family picks nothing.
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -338,7 +339,7 @@ void test_ledger() {
 	const double tank_z = item_z(run, tank);
 	const std::string bms_loaded = test_io::read_file_text(root + "/" + run.path);
 	const std::string under = lock_line(run);
-	CHECK(under == "Under the brush: 1 entity follows the ground, 0 are height locked.", ("1. the lock line: " + under).c_str());
+	CHECK(under == "Under the brush in this mission: 1 entity follows the ground, 0 are height locked.", ("1. the lock line: " + under).c_str());
 
 	// 2. A drag across the middle: one gesture of the heights' strokes, the heights opened beside the mission.
 	picture_drag(run, *device, ImVec2(w * 0.42f, h * 0.5f), ImVec2(w * 0.58f, h * 0.5f), 8);
@@ -427,6 +428,9 @@ void test_ledger() {
 	const Document *placement = tiles ? records_of(*tiles) : nullptr;
 	CHECK(placement && placement->rows().size() == 1 && tiles->dirty(), "6. a tile laid in the mission's .til");
 	if (!placement || placement->rows().size() != 1) return;
+	const std::string til_stamped = tiles->serialize().text;
+	const std::string pcx_painted = surface ? surface->serialize().text : std::string();
+	const std::string cpt_sculpted = heights ? open_at(v, cpt)->serialize().text : std::string();
 
 	// 7. Select, the stamped tile, then R: the tile turned. A stamp leaves its tile unselected, as the original tools'
 	// insert does (Nile's appends the tile with its flags 0, the selection being their bit 3 [orig: gobj.dll
@@ -476,20 +480,49 @@ void test_ledger() {
 		    request.command.by == std::vector<double>{1.0})
 			rotate = true;
 	CHECK(rotate, "7. R: tile_rotate by 1, the keys the view's after a click in the pane");
+	CHECK(open_at(v, til) && open_at(v, til)->serialize().text != til_stamped, "7. the tile turned");
 
-	// 8. Ctrl+Z four times: every file back to the bytes it was loaded with, the .til to no tile.
-	for (int i = 0; i < 4; ++i) run.ui.chord({ImGuiMod_Ctrl, ImGuiKey_Z});
-	run.settle();
-	run.take();
+	// 8. Ctrl+Z four times, each one step, byte-checked as it goes: the turn, the stamp, the paint, then the sculpt with
+	// its bake and the tank's follow, every file back to the bytes it was loaded with, the .til to no tile; the Edit
+	// menu's next step (DocumentsView::undo_next) names each before its Ctrl+Z.
+	const auto text_of = [&v](const std::string &path) {
+		const DocumentBase *open = open_at(v, path);
+		return open ? open->serialize().text : std::string("(closed)");
+	};
+	const auto tile_rows = [&v, &til]() -> size_t {
+		const DocumentBase *open = open_at(v, til);
+		const Document *records = open ? records_of(*open) : nullptr;
+		return records ? records->rows().size() : size_t(-1);
+	};
+	const auto undo_once = [&](int step, const std::string &names) {
+		const DocumentsView::StepNext next = v.documents.undo_next;
+		std::printf("  undo %d: %s (%s, %zu linked)\n", step, next.words.c_str(), next.path.c_str(), next.linked.size());
+		CHECK(next.path == names || std::find(next.linked.begin(), next.linked.end(), names) != next.linked.end(),
+		      ("8. the Edit menu's undo " + std::to_string(step) + " names " + names + ": " + next.path).c_str());
+		CHECK(!next.words.empty(), ("8. undo " + std::to_string(step) + " has its words").c_str());
+		run.ui.chord({ImGuiMod_Ctrl, ImGuiKey_Z});
+		run.settle();
+		run.take();
+		return next;
+	};
+	undo_once(1, til);
+	CHECK(text_of(til) == til_stamped && tile_rows() == 1, "8.1 the turn taken back: the tile as stamped");
+	CHECK(text_of(pcx) == pcx_painted && text_of(cpt) == cpt_sculpted, "8.1 the paint and the sculpt stand");
+	undo_once(2, til);
+	CHECK(tile_rows() == 0, "8.2 the stamp taken back: the .til with no tile");
+	CHECK(text_of(pcx) == pcx_painted && text_of(cpt) == cpt_sculpted, "8.2 the paint and the sculpt stand");
+	undo_once(3, pcx);
+	CHECK(text_of(pcx) == pcx_loaded, "8.3 the paint taken back whole: Tmap_m.pcx's bytes as loaded");
+	CHECK(text_of(cpt) == cpt_sculpted && item_z(run, tank) == tank_followed, "8.3 the sculpt and the follow stand");
+	const DocumentsView::StepNext sculpt = undo_once(4, cpt);
+	CHECK((sculpt.path == cpt || sculpt.path == run.path) && sculpt.linked.size() == 1,
+	      "8.4 the sculpt's step names its linked file (the heights and the mission's follow)");
+	CHECK(text_of(cpt) == cpt_loaded, "8.4 Tmap.cpt's bytes as loaded");
+	CHECK(text_of(run.path) == bms_loaded && item_z(run, tank) == tank_z, "8.4 the mission's bytes as loaded, the tank back");
+	CHECK(text_of(pcx) == pcx_loaded && tile_rows() == 0, "8.4 every other file as the undos left it");
 	heights = open_at(v, cpt);
 	surface = open_at(v, pcx);
-	tiles = open_at(v, til);
-	placement = tiles ? records_of(*tiles) : nullptr;
-	CHECK(heights && heights->serialize().text == cpt_loaded, "8. Tmap.cpt's bytes as loaded");
-	CHECK(surface && surface->serialize().text == pcx_loaded, "8. Tmap_m.pcx's bytes as loaded");
-	CHECK(placement && placement->rows().empty(), "8. the .til with no tile");
 	const DocumentBase *mission = open_at(v, run.path);
-	CHECK(mission && mission->serialize().text == bms_loaded, "8. the mission's bytes as loaded");
 
 	// 9. Ctrl+Y four times, Ctrl+S: the files written, one status line.
 	for (int i = 0; i < 4; ++i) run.ui.chord({ImGuiMod_Ctrl, ImGuiKey_Y});
@@ -525,6 +558,25 @@ void test_ledger() {
 // The Terrain pane's lock line (S25 C1, the terrain query's lock op): under the brush where it meets the ground, the
 // entities a sculpt moves and those height locked; the tank's lock moving it from one to the other; with the pointer
 // off the picture, the cursor an MCP client placed.
+// A popup opened from the Terrain pane stays open: the keys go back to the picture once a click in the pane is over,
+// never while a popup is open (focusing the picture closes it), Colour's picker among them.
+void test_colour_picker() {
+	MissionRun run("opennova_editor_ui_terrain_colour_picker");
+	CHECK(open_on_terrain(run), "the mission open on its terrain");
+	run.session.handle(request::set_workspace(R"({"document": {"terrain": true}, "terrain_brush": {"tool": "colour"}})"));
+	run.settle();
+	run.take();
+	const ImGuiWindow *body = tab_body();
+	CHECK(body != nullptr, "Paint's body drawn, Colour's picker in it");
+	if (!body) return;
+	const ImGuiID swatch = item_id(body->ID, {"Colour", "##ColorButton"});
+	CHECK(wheel_to(run.ui, "/terrain_tab_body_", swatch), "Colour's swatch in sight");
+	CHECK(run.ui.click_item(swatch), "Colour's swatch clicked");
+	CHECK(GImGui->OpenPopupStack.Size > 0, "its picker opened");
+	run.ui.frames(4);
+	CHECK(GImGui->OpenPopupStack.Size > 0, "its picker still open four frames after the click");
+}
+
 void test_lock_line() {
 	MissionRun run("opennova_editor_ui_terrain_lock_line");
 	CHECK(open_on_terrain(run), "the mission open on its terrain");
@@ -547,7 +599,7 @@ void test_lock_line() {
 	CHECK(tank != 0, "the tank under the picture's middle");
 	run.ui.mouse(device->origin.x + w * 0.5f, device->origin.y + h * 0.5f);
 	std::string line = lock_line(run);
-	CHECK(line == "Under the brush: 1 entity follows the ground, 0 are height locked.", ("the tank follows: " + line).c_str());
+	CHECK(line == "Under the brush in this mission: 1 entity follows the ground, 0 are height locked.", ("the tank follows: " + line).c_str());
 	// Locked: kept where it stands.
 	const MissionDocument *mission = run.mission();
 	const Node *row = nullptr;
@@ -565,7 +617,7 @@ void test_lock_line() {
 	run.take();
 	run.ui.mouse(device->origin.x + w * 0.5f, device->origin.y + h * 0.5f);
 	line = lock_line(run);
-	CHECK(line == "Under the brush: 0 entities follow the ground, 1 is height locked.", ("the tank locked: " + line).c_str());
+	CHECK(line == "Under the brush in this mission: 0 entities follow the ground, 1 is height locked.", ("the tank locked: " + line).c_str());
 	// Off the picture: nothing to count, until an MCP client places the brush's cursor.
 	run.ui.away();
 	line = lock_line(run);
@@ -576,7 +628,7 @@ void test_lock_line() {
 	run.take();
 	run.ui.away();
 	line = lock_line(run);
-	CHECK(line == "Under the brush: 0 entities follow the ground, 1 is height locked.", ("at the cursor: " + line).c_str());
+	CHECK(line == "Under the brush in this mission: 0 entities follow the ground, 1 is height locked.", ("at the cursor: " + line).c_str());
 }
 
 } // namespace
@@ -587,6 +639,7 @@ void run_terrain_tests() {
 	test_wire_brush_drag();
 	test_ledger();
 	test_lock_line();
+	test_colour_picker();
 }
 
 } // namespace editor_ui_test

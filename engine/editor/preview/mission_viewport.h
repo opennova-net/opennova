@@ -117,9 +117,11 @@ public:
 	// S25: what the last follow patched in place of the terrain files its picture reads, during a stroke (each file's
 	// regions; a serial moving with each): the device patches them over its picture (TerrainStrokeFollow).
 	const TerrainPatches &terrain_patches() const { return stroke_.patches(); }
-	// The ground followed over the project's files first (S25: the terrain brush's space and hints).
+	// The ground followed over the project's files first (S25: the terrain brush's space and hints); while a stroke
+	// feeds a file it read, as it stands: the view's own follow patches it in place (a read here, the first of a frame,
+	// would read the files the stroke changed again whole per sample).
 	const MissionGround &followed_ground(const SessionView &view) const {
-		follow_ground_(view);
+		if (!terrain_ground_.terrain() || !gesture_reading_(view, terrain_ground_.stamps())) follow_ground_(view);
 		return terrain_ground_;
 	}
 	// The ground overlay its options ask (DI-29, mission_ground_overlay.h: the surface classes or the foliage the

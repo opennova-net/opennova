@@ -159,6 +159,9 @@ struct DocumentsView {
 	// The files each view's terrain tools edited (S25: by the view document's path, in the order they were noted),
 	// open: what its Terrain pane lists unsaved and what its Save and Close take with it.
 	std::map<std::string, std::vector<std::string>> edited_from;
+	// S25: the files a Save of the active document writes beside it, unsaved now (its view's terrain files and the
+	// documents a gesture of theirs changed: DocumentSet::save_scope), what the Terrain pane lists.
+	std::vector<std::string> active_scope_unsaved;
 };
 
 } // namespace opennova::editor

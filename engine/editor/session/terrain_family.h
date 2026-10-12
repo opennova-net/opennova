@@ -35,9 +35,15 @@ struct TerrainFamilyFile {
 // The terrain files a view's brush edits (S25): for a mission, as the game resolves them for it (the header's
 // terrain, the .trn's .cpt and maps, which another .trn may name: D-TERRAIN-17; the environment's overrides:
 // D-TERRAIN-18) and its <mission>.til (the game reads it in place of the terrain's own); for a terrain under the
-// mission its viewport draws it with (none: the terrain's own .til). `error` says why nothing resolves.
+// mission its viewport draws it with (WorkspaceView's terrain_mission, the viewport's option: that mission's
+// environment, tile set and .til; none: the terrain's .trn alone and its own .til). `error` says why nothing resolves.
 struct TerrainFamily {
 	std::string view;
+	// A terrain's: the mission its viewport draws it under ("" none).
+	std::string mission;
+	// The environment the view's terrain is read under (its mission's header's, "" none): the .trn's overrides and the tile
+	// layout read where a mission has no .til of its own.
+	std::string environment;
 	std::string terrain;
 	std::string terrain_name;
 	std::array<TerrainFamilyFile, kTerrainPlaneCount> planes;

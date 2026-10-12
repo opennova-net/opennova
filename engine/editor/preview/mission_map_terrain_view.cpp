@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <initializer_list>
 
 namespace opennova::editor {
 
@@ -52,10 +53,12 @@ Range range_of(const std::vector<uint32_t> &words) {
 	return out;
 }
 
-// A word's brightness: its height above the lowest (read unsigned) times the scale, truncated [@ 0x10010853..0x10010869].
+// A word's brightness: its height above the lowest (read unsigned) times the scale, truncated [@ 0x10010853..0x10010869];
+// a word past a range kept over a stroke (S25) shown at its end.
 uint32_t brightness(uint32_t word, const Range &range) {
+	if (word < range.lowest) return 0;
 	const uint32_t above = word - range.lowest;
-	return uint32_t(uint64_t(double(above) * double(range.scale)));
+	return std::min<uint32_t>(255u, uint32_t(uint64_t(double(above) * double(range.scale))));
 }
 
 // The same range over the atlas itself (the words alike, in another order).
@@ -199,8 +202,20 @@ void MissionMapTerrainView::make_() {
 			scale_ = range.scale;
 		}
 	}
+	stale_ = false;
+	dirty_.clear();
 	++serial_;
+	whole_serial_ = serial_;
 	++made_;
+}
+
+void MissionMapTerrainView::settle(const uint16_t *atlas) {
+	if (!followed_ || atlas != atlas_ || !stale_) return;
+	stale_ = false;
+	if (!atlas || picture_.size() != size_t(1024) * 1024) return;
+	if (background_ != MissionMapBackground::Height && background_ != MissionMapBackground::Delta) return;
+	const Range range = range_of_atlas(atlas, size_t(1024) * 1024);
+	if (range.lowest != lowest_ || range.scale != scale_) make_();
 }
 
 void MissionMapTerrainView::patch(const uint16_t *atlas, const std::vector<MissionMapAtlasRect> &regions, uint64_t revision) {
@@ -208,15 +223,12 @@ void MissionMapTerrainView::patch(const uint16_t *atlas, const std::vector<Missi
 	revision_ = revision;
 	if (!atlas || picture_.size() != size_t(1024) * 1024 || regions.empty()) return;
 	constexpr int kSide = 1024;
-	// Height and Delta scale by the heights' lowest and highest: where either moved, the whole picture.
+	// Height and Delta scale by the heights' lowest and highest: kept as the picture was made over them while a stroke
+	// patches it (settle takes them again at its end).
 	Range range;
-	if (background_ == MissionMapBackground::Height || background_ == MissionMapBackground::Delta) {
-		range = range_of_atlas(atlas, size_t(kSide) * kSide);
-		if (range.lowest != lowest_ || range.scale != scale_) {
-			make_();
-			return;
-		}
-	}
+	range.lowest = lowest_;
+	range.scale = scale_;
+	if (background_ == MissionMapBackground::Height || background_ == MissionMapBackground::Delta) stale_ = true;
 	const uint32_t water = water_ && water_1616_ != 0 ? uint32_t(water_1616_ >> 15) : 0u;
 	const auto set = [&](size_t index, uint32_t pixel) {
 		picture_[index] = water ? watered(atlas[index], water, pixel) : pixel;
@@ -258,6 +270,20 @@ void MissionMapTerrainView::patch(const uint16_t *atlas, const std::vector<Missi
 		case MissionMapBackground::None:
 		case MissionMapBackground::kCount: return;
 		}
+		// The pixels it set: the rect grown by a texel (flatness's ring, Delta's neighbours), clamped; where those wrap
+		// (flatness at the atlas's edge, Delta at a quadrant's: its neighbours lie over the quadrant-major copy), the
+		// whole picture.
+		const auto touches = [](int from, int to, std::initializer_list<int> edges) {
+			for (const int edge : edges)
+				if (edge >= from && edge < to) return true;
+			return false;
+		};
+		const bool wraps = background_ == MissionMapBackground::Flatness
+		                           ? touches(x0, x1, {0, kSide - 1}) || touches(y0, y1, {0, kSide - 1})
+		                           : background_ == MissionMapBackground::Delta &&
+		                                     (touches(x0, x1, {0, 511, 512, kSide - 1}) || touches(y0, y1, {0, 511, 512, kSide - 1}));
+		if (wraps) dirty_.push_back({0, 0, kSide, kSide});
+		else dirty_.push_back({std::max(x0 - 1, 0), std::max(y0 - 1, 0), std::min(x1 + 1, kSide), std::min(y1 + 1, kSide)});
 	}
 	++serial_;
 	++patched_;

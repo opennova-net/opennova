@@ -86,9 +86,11 @@ public:
 	const std::string &mission_name() const { return mission_name_; }
 	// The ground as the game reads it (the terrain, its tiles, its water), for the readout and the overlay.
 	const MissionGround &ground() const { return ground_; }
-	// The ground followed over the project's files first (S25: the terrain brush's space and hints).
+	// The ground followed over the project's files first (S25: the terrain brush's space and hints); while a stroke
+	// feeds a file it read, as it stands: the view's own follow patches it in place (a read here, the first of a frame,
+	// would read the files the stroke changed again whole per sample).
 	const MissionGround &followed_ground(const SessionView &view) const {
-		follow_ground_(view);
+		if (!ground_.terrain() || !gesture_reading_(view, ground_.stamps())) follow_ground_(view);
 		return ground_;
 	}
 	// S25 (the maps and the tiles): what a paint stroke (or its undo) changed of the colour, blend and surface maps,

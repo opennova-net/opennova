@@ -53,12 +53,12 @@ bool view_tiles(const TerrainQueryView &query, ViewTiles &out, std::string &erro
 	const terrain::TerrainFileReader read = [&files](const std::string &name, std::vector<uint8_t> &bytes) {
 		return files->read(name, bytes);
 	};
-	std::string environment;
-	if (const auto *mission = dynamic_cast<const MissionDocument *>(&query.view))
-		if (const MissionRow *row = mission->mission_row()) environment = mission::mission_info(row->native).environment;
+	// Under the view's mission (a mission's own, or the one a terrain's viewport draws it under): its .til, else the
+	// terrain's own as that mission's environment reads it.
 	const std::string mission_til = tiles.missing || tiles.path.empty() ? std::string() : tiles.name;
 	std::vector<uint8_t> bytes;
-	out.from = terrain::read_placed_tile_bytes(read, read, mission_til, out.family.terrain_name, environment, bytes);
+	out.from = terrain::read_placed_tile_bytes(read, read, mission_til, out.family.terrain_name, out.family.environment,
+	                                           bytes);
 	std::string why;
 	if (!out.from.empty() && !load_til(bytes.data(), bytes.size(), out.file, why)) out.file = TilFile();
 	out.ids.assign(out.file.entries.size(), 0);

@@ -8,12 +8,15 @@
 // the .til; a Close of the mission lists it and Don't save leaves it open with its edits; a drag of a tile is one
 // step; a tile command turns the selected tiles.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/documents/terrain_heights_document.h>
 #include <editor/documents/til_document.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_map.h>
@@ -33,6 +36,7 @@
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/viewport_test_support.h"
 
 using namespace opennova::editor;
 using opennova::io::JsonValue;
@@ -317,13 +321,14 @@ int test_stroke_follows() {
 	const auto *assets = v.findings.assets.get();
 	TEST_EXPECT(assets != nullptr);
 	if (!assets) return 1;
-	// A sample's point on the island.
-	const auto sample = [&](uint64_t gesture, double x, bool end) {
+	// A sample's point on the island: a canvas's (the Shell's own request), or the wire's (its JSON form read it).
+	const auto sample = [&](uint64_t gesture, double x, bool end, bool wire = false) {
 		TerrainStrokeAsk ask;
 		ask.plane = TerrainPlane::Surface;
 		ask.points.emplace_back(x, 0.0);
 		ask.gesture = gesture;
 		ask.end = end;
+		ask.wire = wire;
 		session.handle(request::terrain_stroke(mission, ask));
 		return session.outcome().done() ? session.outcome().gesture : 0;
 	};
@@ -345,10 +350,70 @@ int test_stroke_follows() {
 	TEST_EXPECT(!view3d->terrain_patches().empty());
 	TEST_EXPECT(view3d->ground_reader().terrain_at(8.0, 0.0, 0.0).surface == 12);
 	// The stroke's end: the 3D view's device took the surface map in place (S25, the maps and the tiles: no build); the
-	// 2D map makes its picture again.
+	// 2D map draws no surface map: nothing of it made again either.
 	session.handle(request::end_edit(mission, gesture));
 	const auto ended = frame();
-	TEST_EXPECT(ended.first != ViewportAction::Rebuild && ended.second == ViewportAction::Rebuild);
+	TEST_EXPECT(ended.first != ViewportAction::Rebuild && ended.second != ViewportAction::Rebuild);
+	// Until no heights' bake is due (a stroke's landing joins its step: the steps after wait for it here, so an Undo
+	// takes the step a test means).
+	const auto baked = [&]() {
+		for (int i = 0; i < 9000; ++i) {
+			session.poll();
+			bool due = false;
+			for (const auto &open : v.documents.open)
+				if (const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(open.get()))
+					due = due || !heights->heights().unbaked.empty();
+			if (!due) return true;
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+		return false;
+	};
+	// Heights likewise, the case the plan names, and the canvas reading its ground BEFORE the viewports follow (the
+	// first read of a Shell's frame, its hint and ring): no sample has the .cpt serialized again, no Rebuild is held,
+	// the 3D view's ground takes each sample's heights in place, its files never read again.
+	{
+		const auto canvas_first = [&]() {
+			if (const auto *drawn = static_cast<const MissionViewport *>(viewports.find(mission, ViewportKind::Mission)))
+				drawn->followed_ground(v);
+			viewports.follow(v);
+			const ViewportAction drawn = viewports.take_action(mission, ViewportKind::Mission);
+			const ViewportAction map = viewports.take_action(mission, ViewportKind::Map);
+			return drawn == ViewportAction::Rebuild || map == ViewportAction::Rebuild;
+		};
+		const auto raise = [&](uint64_t token, double x, bool end) {
+			TerrainStrokeAsk ask;
+			ask.plane = TerrainPlane::Heights;
+			ask.brush.tool = TerrainTool::Raise;
+			ask.brush.radius = 4.0f;
+			ask.brush.strength = 1.0f;
+			ask.brush_named = kBrushTool | kBrushRadius | kBrushStrength;
+			ask.points.emplace_back(x, -12.0);
+			ask.gesture = token;
+			ask.end = end;
+			session.handle(request::terrain_stroke(mission, ask));
+			return session.outcome().done() ? session.outcome().gesture : 0;
+		};
+		const uint64_t lifting = raise(0, 0.0, false);
+		TEST_EXPECT(lifting != 0);
+		canvas_first(); // the .cpt opened quietly for the stroke: read once, as it now stands
+		const uint64_t before = assets->serializations();
+		const int read = view3d->ground_reader().reads();
+		const uint64_t heights_seen = view3d->ground_reader().heights_revision();
+		bool held = false;
+		for (int i = 1; i <= 4; ++i) {
+			TEST_EXPECT(raise(lifting, 2.0 * i, false) == lifting);
+			held = canvas_first() || held;
+		}
+		if (assets->serializations() != before || held || view3d->ground_reader().reads() != read)
+			std::printf("  heights: %llu serializations, %d reads, held %d\n",
+			            static_cast<unsigned long long>(assets->serializations() - before),
+			            view3d->ground_reader().reads() - read, held ? 1 : 0);
+		TEST_EXPECT(assets->serializations() == before && !held && view3d->ground_reader().reads() == read);
+		TEST_EXPECT(view3d->ground_reader().heights_revision() > heights_seen);
+		TEST_EXPECT(raise(lifting, 10.0, true) == lifting);
+		canvas_first();
+		TEST_EXPECT(baked());
+	}
 	// The brush's drag over the wire names no record (id 0): a sample of a stroke at the map's pixel, its gesture
 	// answered; a move's id 0 still refused.
 	{
@@ -401,13 +466,158 @@ int test_stroke_follows() {
 			}
 		}
 	}
-	// A client gone: ten seconds with no sample end its gesture; its token's next sample begins one of its own.
-	const uint64_t second = sample(0, 20.0, false);
+	TEST_EXPECT(baked());
+	// A wire client gone: ten seconds with no sample end its gesture, and its token is refused after (no other stroke
+	// takes it up); gesture 0 begins a stroke of its own.
+	std::string surface;
+	for (const std::string &path : v.documents.edited_from.at(mission))
+		if (dynamic_cast<const TerrainHeightsDocument *>(session.document_base_for(path)) == nullptr && surface.empty())
+			surface = path;
+	const uint64_t second = sample(0, 20.0, false, true);
 	TEST_EXPECT(second != 0 && second != gesture);
 	platform.clock += kWireGestureLapseMs;
 	session.poll();
-	TEST_EXPECT(!v.documents.gesture_in(v.documents.edited_from.at(mission).front()).open());
-	TEST_EXPECT(sample(second, 22.0, true) == second);
+	TEST_EXPECT(!v.documents.gesture_in(surface).open());
+	TEST_EXPECT(sample(second, 22.0, true, true) == 0 && session.outcome().refused &&
+	            contains(session.outcome().findings.back().message, "No open gesture"));
+	// A token the session never handed out, likewise: two strokes never share a link.
+	TEST_EXPECT(sample(987654321, 22.0, true, true) == 0 && session.outcome().refused);
+	const uint64_t third = sample(0, 22.0, true, true);
+	TEST_EXPECT(third != 0 && third != second);
+	// A canvas's stroke lives until its release: 10 s held still, or a bracket key's set_workspace on its view, end
+	// nothing of it; its release ends it, one step that one undo takes back whole.
+	const DocumentBase *map_document = session.document_base_for(surface);
+	TEST_EXPECT(map_document != nullptr);
+	if (!map_document) return 1;
+	const std::string before_canvas = map_document->serialize().text;
+	const uint64_t canvas = sample(0, 24.0, false);
+	TEST_EXPECT(canvas != 0);
+	platform.clock += 3 * kWireGestureLapseMs;
+	session.poll();
+	TEST_EXPECT(v.documents.gesture_in(surface).token == canvas);
+	session.handle(request::set_workspace(R"({"terrain_brush":{"radius":5}})"));
+	TEST_EXPECT(v.documents.gesture_in(surface).token == canvas && v.documents.gesture_in(mission).token == canvas);
+	TEST_EXPECT(sample(canvas, 26.0, false) == canvas && sample(canvas, 28.0, true) == canvas);
+	session.handle(request::undo(mission));
+	TEST_EXPECT(session.outcome().stepped.size() == 1 && map_document->serialize().text == before_canvas);
+	// The wire's brush drag lays the canvas's dab path (M6): the same drag over the map's pixels, a person's from the
+	// canvas and two samples over the wire, paints the same bytes.
+	{
+		session.handle(request::set_workspace(R"({"terrain_brush":{"tool":"surface","surface":5,"radius":3}})"));
+		const ViewportModel *model = viewports.find(mission, ViewportKind::Map);
+		TEST_EXPECT(model != nullptr);
+		if (!model) return 1;
+		const int width = model->size().width, height = model->size().height;
+		const MissionMapView map_view = static_cast<const MissionMapViewport *>(model)->view(width, height);
+		float ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
+		map_view.project(-30.0, 10.0, ax, ay);
+		map_view.project(30.0, 10.0, bx, by);
+		ax = std::round(ax), ay = std::round(ay), bx = std::round(bx), by = std::round(by);
+		const std::string unpainted = map_document->serialize().text;
+		const DocumentBase *view_document = session.document_base_for(mission);
+		TerrainBrushHalf half(ViewportKind::Map);
+		half.follow(v, view_document);
+		TEST_EXPECT(half.live());
+		const MapBrushSpace space(map_view, nullptr);
+		const ViewportContext context = viewport_context(v, *model);
+		CanvasGesture gesture;
+		CanvasSubject subject;
+		subject.path = mission;
+		subject.identity = view_document->identity();
+		Gathered out;
+		CanvasInput in;
+		in.width = width;
+		in.height = height;
+		in.hovered = true;
+		in.mouse = CanvasPoint{ax, ay};
+		in.screen = in.mouse;
+		in.pressed = true;
+		in.down = true;
+		half.input(gesture, subject, &space, in, out, &context);
+		in.pressed = false;
+		in.mouse = CanvasPoint{bx, by};
+		in.screen = in.mouse;
+		in.delta = CanvasPoint{bx - ax, by - ay};
+		half.input(gesture, subject, &space, in, out, &context);
+		in.down = false;
+		in.delta = CanvasPoint{};
+		half.input(gesture, subject, &space, in, out, &context);
+		size_t laid = 0;
+		for (const EditorRequest &each : out.requests) {
+			if (each.kind == EditorRequestKind::TerrainStroke) laid += each.stroke.points.size();
+			session.handle(each);
+		}
+		const std::string by_canvas = map_document->serialize().text;
+		TEST_EXPECT(by_canvas != unpainted && laid > 2);
+		session.handle(request::undo(mission));
+		TEST_EXPECT(session.outcome().stepped.size() == 1 && map_document->serialize().text == unpainted);
+		double token = 0.0;
+		for (int i = 0; i < 2; ++i) {
+			JsonValue drag;
+			std::string error;
+			const std::string text = R"({"kind": "edit_in_viewport", "path": ")" + mission +
+			                         R"(", "drag": {"id": 0, "handle": "brush", "to": [)" + std::to_string(i ? bx : ax) + R"(, )" +
+			                         std::to_string(i ? by : ay) + R"(], "gesture": )" + std::to_string(uint64_t(token)) +
+			                         R"(, "end": )" + (i ? "true" : "false") + R"(, "kind": "map"}})";
+			TEST_EXPECT(opennova::io::json_parse(text, drag, error));
+			const JsonValue answer = session.handle_json(drag);
+			const JsonValue *outcome = answer.get("outcome");
+			const JsonValue *done = outcome ? outcome->get("done") : nullptr;
+			const JsonValue *named = outcome ? outcome->get("gesture") : nullptr;
+			TEST_EXPECT(done && done->boolean && named);
+			if (i == 0 && named) token = named->number;
+		}
+		TEST_EXPECT(map_document->serialize().text == by_canvas);
+		session.handle(request::undo(mission));
+		TEST_EXPECT(session.outcome().stepped.size() == 1 && map_document->serialize().text == unpainted);
+	}
+	// A wire point past the 16.16 word is refused as it is read.
+	{
+		JsonValue far;
+		std::string error;
+		TEST_EXPECT(opennova::io::json_parse(R"({"kind": "terrain_stroke", "path": ")" + mission +
+		                                             R"(", "stroke": {"plane": "surface", "points": [[40000, 0]]}})",
+		                                     far, error));
+		const JsonValue refused = session.handle_json(far);
+		const JsonValue *said = refused.get("error");
+		TEST_EXPECT(said && contains(said->string, "32767"));
+	}
+	// The brush's ground with no device (a headless editor: the terrain raycast the Shell's device runs, down the camera's
+	// ray over the mission's heights) against a device's for the same pixels (one whose ground is the mission's heights,
+	// met where the camera's ray first crosses it, its height the game's there): the same points, so a stroke over the
+	// wire lays where a picture shows its ring (the Shell's device: editor_heights_device_test.gd). The pixels stand off
+	// the column over x = 0, a sector seam, where the retail raycast's coarse point test lands up to a metre late (its
+	// floor texel the next sector's), the device's as much: it runs the same raycast over the same samples.
+	{
+		const MissionGround &ground = view3d->followed_ground(v);
+		editor_test::FakeDevice device;
+		device.ground = [&ground](double x, double y) {
+			double height = 0.0;
+			return mission_ground_height(ground, TerrainPoint{x, y}, height) ? height : -1.0e9;
+		};
+		ViewportContext bare = viewport_context(v, *view3d);
+		bare.device = nullptr;
+		ViewportContext drawn = bare;
+		drawn.device = &device;
+		const CameraBrushSpace without(bare, view3d->camera(), &ground);
+		const CameraBrushSpace with(drawn, view3d->camera(), &ground);
+		int met = 0;
+		double most = 0.0;
+		for (int row = 1; row < 8; ++row)
+			for (int col = 1; col < 8; ++col) {
+				const float x = float(bare.width) * float(col) / 8.0f + 3.0f, y = float(bare.height) * float(row) / 8.0f;
+				TerrainPoint a, b;
+				double ha = 0.0, hb = 0.0;
+				const bool on_a = without.pointer_ground(x, y, a, ha);
+				const bool on_b = with.pointer_ground(x, y, b, hb);
+				TEST_EXPECT(on_a == on_b);
+				if (!on_a || !on_b) continue;
+				++met;
+				most = std::max({most, std::fabs(a.x - b.x), std::fabs(a.y - b.y), std::fabs(ha - hb)});
+			}
+		std::printf("  brush spaces: %d pixels met the ground, the most apart %.4f m\n", met, most);
+		TEST_EXPECT(met > 0 && most < 0.05);
+	}
 	std::printf("stroke follows: no serialization per sample, no Rebuild, the ground patched; the end's Rebuild; a lapse\n");
 	return 0;
 }

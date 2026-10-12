@@ -55,11 +55,19 @@ public:
 	// The same atlas changed in place within `regions` (a stroke's patch), its revision now `revision`: the picture made
 	// again there alone, each pixel whose background reads a changed texel (Height the texel's own; Delta the texel and
 	// Nile's four neighbours of it, over his quadrant-major copy; flatness the region and a texel around it, wrapped;
-	// the water over each), or whole where the heights' lowest or highest moved (Height and Delta scale by them). A
-	// follow with that revision then keeps it. Nothing for an atlas it does not show.
+	// the water over each), Height and Delta over the scale the picture was made with (settle takes the heights' lowest
+	// and highest again). A follow with that revision then keeps it. Nothing for an atlas it does not show.
 	void patch(const uint16_t *atlas, const std::vector<MissionMapAtlasRect> &regions, uint64_t revision);
+	// A stroke's end (S25): Height and Delta keep the scale they were made over while a stroke patches them (a texel
+	// past it shown at its end, none of 1M words scanned per dab); here the picture takes the scale the heights' lowest
+	// and highest give it now, made again whole where it moved.
+	void settle(const uint16_t *atlas);
 	const std::vector<uint32_t> &picture() const { return picture_; }
 	uint64_t serial() const { return serial_; }
+	// The serial of its last whole make, and the atlas rects its patches changed since (a device uploads them alone
+	// where it holds the picture of that make).
+	uint64_t whole_serial() const { return whole_serial_; }
+	const std::vector<MissionMapAtlasRect> &dirty() const { return dirty_; }
 	// How many times it made the picture whole, and patched it (a test's counts).
 	int made() const { return made_; }
 	int patched() const { return patched_; }
@@ -75,6 +83,9 @@ private:
 	bool followed_ = false;
 	std::vector<uint32_t> picture_;
 	uint64_t serial_ = 0;
+	uint64_t whole_serial_ = 0;
+	std::vector<MissionMapAtlasRect> dirty_;
+	bool stale_ = false; // a patch kept a scale the heights may have moved past
 	int made_ = 0;
 	int patched_ = 0;
 	// The heights' lowest and scale the picture was made over (Height, Delta).

@@ -317,11 +317,35 @@ uint64_t ViewportModel::gesture_held_(const ViewportInput &input) const {
 uint64_t ViewportModel::gesture_feeding_(const ViewportInput &input, const FileStamps *reads) const {
 	for (const OpenGesture &gesture : input.view.documents.gestures) {
 		if (!gesture.open()) continue;
-		if (gesture.path == path_) return gesture.token;
+		// Its own document's gesture holds it where its kind's row says so (S13 V8); else a gesture is one in a file its
+		// picture reads (S25: a terrain stroke's), by the file's name or a name it stands in for (a heightmap image's
+		// stroke feeds the .cpt its import makes).
+		if (gesture.path == path_) {
+			if (row().holds_for_gesture) return gesture.token;
+			continue;
+		}
 		if (!reads) continue;
-		const std::string file = basename_of(gesture.path);
+		std::vector<std::string> names{basename_of(gesture.path)};
+		for (const auto &open : input.view.documents.open)
+			if (open && open->path() == gesture.path)
+				for (const std::string &stand_in : open->stand_in_paths()) names.push_back(basename_of(stand_in));
 		for (const FileStamp &read : reads->files())
-			if (strutil::iequals(read.name, file)) return gesture.token;
+			for (const std::string &name : names)
+				if (strutil::iequals(read.name, name)) return gesture.token;
+	}
+	return 0;
+}
+
+uint64_t ViewportModel::gesture_reading_(const SessionView &view, const FileStamps &reads) {
+	for (const OpenGesture &gesture : view.documents.gestures) {
+		if (!gesture.open()) continue;
+		std::vector<std::string> names{basename_of(gesture.path)};
+		for (const auto &open : view.documents.open)
+			if (open && open->path() == gesture.path)
+				for (const std::string &stand_in : open->stand_in_paths()) names.push_back(basename_of(stand_in));
+		for (const FileStamp &read : reads.files())
+			for (const std::string &name : names)
+				if (strutil::iequals(read.name, name)) return gesture.token;
 	}
 	return 0;
 }

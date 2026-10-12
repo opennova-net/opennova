@@ -2,7 +2,8 @@
 // no, unlocked for a .bms entity); a lock alone makes the .mis due, its save writing the locked entity's z as it stands
 // with the terrain's height as its base and height_lock 1, an unlocked one's z less that height and no height_lock line;
 // the lock read back from the .mis on the next open; a lock the file gives an SSN the mission lacks listed and left off;
-// and a lock the original editor's .mis does not hold staying unsaved, said in its words.
+// a lock the original editor's .mis does not hold staying unsaved, said in its words; and a building's, a marker's and
+// an organic's lock read back as an item's (the .mis read with no items.def: every entity in its item pool).
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -86,9 +87,11 @@ struct Project {
 	std::string root;
 
 	MissionDocument *mission() { return dynamic_cast<MissionDocument *>(session.document_for(kMission)); }
-	std::vector<const Node *> items() { return mission() ? mission()->rows_of(MissionKind::Item) : std::vector<const Node *>(); }
-	bool set_lock(size_t item, int64_t on) {
-		const std::vector<const Node *> rows = items();
+	std::vector<const Node *> items(MissionKind kind = MissionKind::Item) {
+		return mission() ? mission()->rows_of(kind) : std::vector<const Node *>();
+	}
+	bool set_lock(size_t item, int64_t on, MissionKind kind = MissionKind::Item) {
+		const std::vector<const Node *> rows = items(kind);
 		if (item >= rows.size()) return false;
 		Edit edit;
 		edit.address = NodeAddress{rows[item]->id, rows[item]->kind, 0};
@@ -97,8 +100,8 @@ struct Project {
 		session.handle(request::edit_record(kMission, edit));
 		return session.outcome().done();
 	}
-	int64_t lock_of(size_t item) {
-		const std::vector<const Node *> rows = items();
+	int64_t lock_of(size_t item, MissionKind kind = MissionKind::Item) {
+		const std::vector<const Node *> rows = items(kind);
 		Value value;
 		if (item >= rows.size() || !mission()->get(NodeAddress{rows[item]->id, rows[item]->kind, 0}, "height_lock", value)) return -1;
 		return std::get<int64_t>(value);
@@ -213,7 +216,7 @@ int main() {
 		bool listed = false;
 		for (const Diagnostic &d : p.session.view().findings.diagnostics)
 			listed = listed || (d.code() == "mission.names_refused" && d.asset == kMission &&
-			                    d.message.find("item SSN 9's height lock (the mission has no item of that SSN") != std::string::npos);
+			                    d.message.find("SSN 9's height lock (the mission has no entity of that SSN") != std::string::npos);
 		TEST_EXPECT(listed);
 	}
 
@@ -234,6 +237,55 @@ int main() {
 			                d.message.find("The height locks the mission holds are not in it") != std::string::npos);
 		TEST_EXPECT(said);
 	}
-	std::printf("height lock: the field, a lock alone written, read back, an SSN the mission lacks, the original's\n");
+	// Every pool's lock read back: an item, a building, a marker and an organic, the last three locked, saved, the
+	// mission opened again. The .mis names no pool (each entity a `begin item`), so the lock goes to the mission's entity
+	// of its SSN, whichever pool holds it.
+	{
+		// (The lock the original's .mis keeps unsaved: closed without it.)
+		p.session.handle(request::close_document(kMission));
+		if (p.session.view().dialogs.unsaved_prompt.open) p.session.handle(request::resolve_unsaved(UnsavedChoice::Discard));
+		TEST_EXPECT(p.mission() == nullptr);
+		std::filesystem::remove(p.root + "/" + kMis);
+		bms::File pools;
+		TEST_EXPECT(mission::make_blank(pools, blank, error));
+		const std::pair<mission::EntityKind, int32_t> kinds[] = {{mission::EntityKind::Item, 106102},
+		                                                         {mission::EntityKind::Building, 100701},
+		                                                         {mission::EntityKind::Marker, 6001},
+		                                                         {mission::EntityKind::Organic, 2001}};
+		int32_t id = 1;
+		for (const auto &[kind, ssn] : kinds) {
+			bms::Entity entity = mission::new_entity(kind, ssn, id);
+			entity.x = bms::to_fixed_16_16(-120.37 + 30.0 * id);
+			entity.y = bms::to_fixed_16_16(40.61 - 20.0 * id);
+			entity.z = mission::mis_terrain_height(terrain, entity.x, entity.y) + bms::to_fixed_16_16(2.0);
+			mission::entities(pools, kind)->push_back(entity);
+			++id;
+		}
+		mission::sync_counts(pools);
+		std::vector<uint8_t> pool_bytes;
+		TEST_EXPECT(bms::write(pools, pool_bytes, error) && editor_test::write_bytes(p.root + "/" + kMission, pool_bytes));
+		editor_test::handle_to_end(p.session, request::rescan());
+		editor_test::handle_to_end(p.session, request::open_document(kMission));
+		const MissionKind locked[] = {MissionKind::Building, MissionKind::Marker, MissionKind::Organic};
+		for (const MissionKind kind : locked) {
+			const size_t count = p.items(kind).size();
+			const bool set = p.set_lock(0, 1, kind);
+			if (count != 1 || !set)
+				std::printf("  kind %d: %zu rows, set %d (items %zu, buildings %zu, markers %zu, organics %zu): %s\n", int(kind),
+				            count, set ? 1 : 0, p.items(MissionKind::Item).size(), p.items(MissionKind::Building).size(),
+				            p.items(MissionKind::Marker).size(), p.items(MissionKind::Organic).size(),
+				            p.session.outcome().findings.empty() ? "" : p.session.outcome().findings[0].message.c_str());
+			TEST_EXPECT(count == 1 && set);
+		}
+		editor_test::handle_to_end(p.session, request::save(kMission));
+		TEST_EXPECT(values_of(p.mis(), "height_lock").size() == 3);
+		p.reopen();
+		TEST_EXPECT(p.mission() && p.mission()->names_file().found == MissionNamesFile::Found::Matched &&
+		            p.mission()->names_file().refused.empty());
+		TEST_EXPECT(p.lock_of(0) == 0);
+		for (const MissionKind kind : locked) TEST_EXPECT(p.lock_of(0, kind) == 1);
+	}
+	std::printf("height lock: the field, a lock alone written, read back, an SSN the mission lacks, the original's, every "
+	            "pool's\n");
 	return 0;
 }

@@ -10,6 +10,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/model/document_base.h>
+#include <editor/preview/terrain_viewport.h>
 #include <editor/project/project_files.h>
 #include <editor/session/terrain_uses.h>
 #include <editor/session/view/session_view.h>
@@ -97,6 +98,7 @@ TerrainFamilyFile family_file(const SessionView &view, const std::string &name, 
 
 struct Cached {
 	std::string path;
+	std::string under; // a terrain's: the mission its viewport draws it under (its option)
 	uint64_t identity = 0, load = 0, revision = 0, generation = 0;
 	const void *scan = nullptr;
 	bool ok = false;
@@ -146,7 +148,45 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 	} else if (const auto *terrain = dynamic_cast<const TerrainDocument *>(&document)) {
 		out.terrain = document.path();
 		out.terrain_name = stem(basename_of(document.path()));
-		if (const TrnConfig *config = terrain->config()) {
+		// The mission its viewport draws it under (its option, as TerrainViewport picks it: the one named where it runs
+		// on the terrain, else the first; none for "none"): the files that mission's load reads, its environment's
+		// overrides and tile set, and its own .til, so the brush edits what the picture and the game draw.
+		const std::string option = view.workspace.document(document.path()).terrain_mission;
+		TerrainMissionUse use;
+		bool under = false;
+		if (option != kTerrainNeutral) {
+			const TerrainUses uses = terrain_uses(view, document.path());
+			for (const TerrainMissionUse &each : uses.missions)
+				if (!option.empty() && each.mission == option) {
+					use = each;
+					under = true;
+				}
+			if (!under && !uses.missions.empty()) {
+				use = uses.missions.front();
+				under = true;
+			}
+		}
+		if (under) {
+			environment = use.environment;
+			tile_set = use.tile_set;
+			out.mission = use.mission;
+			if (const mission::Sidecar *tiles = mission::sidecar_for_role("tiles")) {
+				const std::string name = mission::sidecar_name(basename_of(use.mission), *tiles);
+				out.tiles.name = name;
+				const AssetEntry *entry = view.project.scan ? view.project.scan->find(name) : nullptr;
+				if (entry) {
+					out.tiles.path = entry->relative_path;
+					out.tiles.words = basename_of(entry->relative_path);
+				} else {
+					const std::string folder = use.mission.find('/') == std::string::npos
+					                                   ? std::string()
+					                                   : use.mission.substr(0, use.mission.rfind('/') + 1);
+					out.tiles.path = folder + name;
+					out.tiles.missing = true;
+					out.tiles.words = name + ", made with its first tile";
+				}
+			}
+		} else if (const TrnConfig *config = terrain->config()) {
 			trn = *config;
 			read = true;
 		}
@@ -177,6 +217,7 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 		out.error = "The project has no terrain " + out.terrain_name + ".trn to brush.";
 		return false;
 	}
+	out.environment = environment;
 	// [orig: Terrain_LoadEnvironmentConfig @ 0x6109C8..0x6109EE; formats/trn trn_mission_tilestrip]
 	out.tile_set = trn_mission_tilestrip(trn, tile_set);
 	out.trn = std::make_shared<const TrnConfig>(trn);
@@ -198,7 +239,7 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 			               "game install), then add one.";
 	}
 	// A terrain under no mission: its own tiles (an import's output refused: its import makes them).
-	if (dynamic_cast<const TerrainDocument *>(&document)) {
+	if (dynamic_cast<const TerrainDocument *>(&document) && out.mission.empty()) {
 		const std::string own = terrain::terrain_tileinfo_name(trn.tileinfo);
 		out.tiles = family_file(view, own, TerrainImport(), nullptr, "tile layout");
 		if (!out.tiles.import_output.empty())
@@ -215,7 +256,8 @@ bool resolve_terrain_family(const SessionView &view, const DocumentBase &documen
 	{
 		std::lock_guard<std::mutex> lock(g_cache_mutex);
 		for (const Cached &cached : g_cache)
-			if (cached.path == document.path() && cached.identity == document.identity() &&
+			if (cached.path == document.path() && cached.under == view.workspace.document(document.path()).terrain_mission &&
+			    cached.identity == document.identity() &&
 			    cached.load == document.load_generation() && cached.revision == document.revision() &&
 			    cached.generation == generation && cached.scan == scan && cached.identity != 0) {
 				out = cached.family;
@@ -226,6 +268,7 @@ bool resolve_terrain_family(const SessionView &view, const DocumentBase &documen
 	std::lock_guard<std::mutex> lock(g_cache_mutex);
 	Cached &slot = g_cache[g_cache_next++ % std::size(g_cache)];
 	slot.path = document.path();
+	slot.under = view.workspace.document(document.path()).terrain_mission;
 	slot.identity = document.identity();
 	slot.load = document.load_generation();
 	slot.revision = document.revision();

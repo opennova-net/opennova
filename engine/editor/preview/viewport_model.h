@@ -395,6 +395,9 @@ protected:
 	// A gesture open in its own document or in one whose file its picture read (`reads`, by file name), 0 none: what a
 	// kind whose picture reads a terrain's files answers (the mission's 3D view, the terrain's).
 	uint64_t gesture_feeding_(const ViewportInput &input, const FileStamps *reads) const;
+	// A gesture open in a document whose file `reads` names (by its name or a name it stands in for), 0 none: a stroke
+	// feeding a ground the view's own follow patches in place (S25).
+	static uint64_t gesture_reading_(const SessionView &view, const FileStamps &reads);
 
 	ViewportState state_;
 

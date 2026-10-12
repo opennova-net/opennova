@@ -14,6 +14,7 @@
 #include <editor/session/session_core.h>
 #include <editor/session/terrain_family.h>
 #include <editor/session/terrain_tools_parts.h>
+#include <editor/session/terrain_uses.h>
 
 namespace opennova::editor {
 
@@ -91,6 +92,26 @@ JsonValue answer_sample(const TerrainQueryView &query, std::string &error) {
 	} else {
 		const std::string name = basename_of(query.view.path());
 		header.terrain = name.substr(0, name.rfind('.'));
+		// Under the mission its viewport draws it with (the brush's family's): that mission's environment, tile set and
+		// .til, as TerrainViewport reads them.
+		TerrainFamily family;
+		if (resolve_terrain_family(view, query.view, family) && !family.mission.empty())
+			for (const TerrainMissionUse &use : terrain_uses(view, query.view.path()).missions)
+				if (use.mission == family.mission) {
+					header.environment = use.environment;
+					header.tile_set = use.tile_set;
+					header.start_time = use.start_time;
+					header.minutes_per_day = use.minutes_per_day;
+					header.attrib_flags = use.attrib_flags;
+					header.water_override = use.water_override;
+					header.fog_override = use.fog_override;
+					header.water_murk = use.water_murk;
+					for (int i = 0; i < 3; ++i) {
+						header.fog_color[i] = use.fog_color[i];
+						header.water_color[i] = use.water_color[i];
+					}
+					mission = use.name;
+				}
 	}
 	MissionGround ground;
 	ground.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, header, mission);

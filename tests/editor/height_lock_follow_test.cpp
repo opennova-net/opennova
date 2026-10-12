@@ -2,7 +2,9 @@
 // ground (each z moved by the change of the ground under it, as the original editor samples it); a mission open and one
 // closed (opened in the background, only where an entity moves); one Undo takes the stroke, its bake and the entities
 // that followed it, one Redo brings them back; a follower edited since keeps its later edit. Every entity here is
-// unlocked but one, whose Height lock keeps it where it stands.
+// unlocked but one, whose Height lock keeps it where it stands. Then the links over the heights' raster history: a
+// redo whose stroke a later stroke dropped is refused, named; a follower's undo under a later stroke names the .cpt as
+// keeping it.
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_reads.h>
 #include <editor/documents/terrain_heights_document.h>
@@ -74,6 +76,8 @@ std::vector<double> heights_of(ProjectSession &session, const std::string &path)
 }
 
 // Polls until the heights at `path` have no region due and a bake state, at most `seconds`.
+bool has(const std::string &text, const char *part) { return text.find(part) != std::string::npos; }
+
 bool settled(ProjectSession &session, const std::string &path, double seconds) {
 	const auto start = std::chrono::steady_clock::now();
 	while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
@@ -231,6 +235,39 @@ int test_follow() {
 	TEST_EXPECT(heights_of(session, m) == open_before);
 	closed_mission = dynamic_cast<const MissionDocument *>(open_at(session, closed));
 	TEST_EXPECT(closed_mission && mission_entities(*closed_mission).front().x == -150.0);
+
+	// A stroke where no entity stands drops the .cpt's redo of the first: a Redo in the open mission's view would make
+	// its follow again over ground that is gone, so it is refused and names the .cpt; nothing moves.
+	TerrainStrokeAsk elsewhere = ask;
+	elsewhere.points = {{-104.0, 100.0}, {-96.0, 100.0}};
+	elsewhere.gesture = 7272;
+	session.handle(request::terrain_stroke(m, elsewhere));
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(settled(session, cpt, 180.0));
+	TEST_EXPECT(heights_of(session, m) == open_before);
+	session.handle(request::redo(m));
+	TEST_EXPECT(session.outcome().stepped.empty() && heights_of(session, m) == open_before);
+	TEST_EXPECT(has(v.activity.status, "Nothing redone") && has(v.activity.status, "Tmap.cpt"));
+
+	// A follower's own undo under a later stroke: a raise under the moved building follows it, a stroke elsewhere
+	// lands on the .cpt after; an Undo in the follower's tab takes its follow and names the .cpt as keeping the stroke.
+	const std::vector<double> closed_before = heights_of(session, closed);
+	TerrainStrokeAsk under = ask;
+	under.points = {{-154.0, 201.0}, {-146.0, 201.0}};
+	under.gesture = 7373;
+	session.handle(request::terrain_stroke(m, under));
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(settled(session, cpt, 180.0));
+	const std::vector<double> closed_raised = heights_of(session, closed);
+	TEST_EXPECT(closed_raised.size() == 1 && closed_before.size() == 1 && closed_raised[0] > closed_before[0]);
+	TerrainStrokeAsk later = elsewhere;
+	later.gesture = 7474;
+	session.handle(request::terrain_stroke(m, later));
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(settled(session, cpt, 180.0));
+	session.handle(request::undo(closed));
+	TEST_EXPECT(heights_of(session, closed) == closed_before);
+	TEST_EXPECT(has(v.activity.status, "Tmap.cpt was edited since and keeps its later edits"));
 	std::printf("follow: an open and a closed mission's entities followed the ground, one Undo and Redo for all, an "
 	            "edited follower kept\n");
 	return 0;

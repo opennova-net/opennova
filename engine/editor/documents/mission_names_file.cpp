@@ -116,32 +116,30 @@ void take_kept(const bms::File &mission, size_t event_count, MissionNamesFile &o
 	}
 }
 
-// The locks a matching .mis gives the mission (S25): each locked item of the file to the mission's first entity of
-// its pool and SSN not given one yet, flat in the writer's order; one the mission has no entity of said in words.
+// The locks a matching .mis gives the mission (S25): each locked entity of the file, in its order, to the mission's
+// first entity of its SSN not given one yet, over the four pools flat in the writer's order (items, buildings,
+// markers, organics); one the mission has none of said in words. The .mis is read with no items.def at hand, so every
+// `begin item` lands in the read's item pool whatever its TYPE; an SSN's TYPE puts all its entities in one pool, so
+// the n-th of an SSN in the file is the n-th of it in the mission, a building's, a marker's or an organic's as an
+// item's.
 void take_locks(const bms::File &mission, MissionNamesFile &out) {
-	const std::vector<bms::Entity> *pools[4] = {&mission.items, &mission.buildings, &mission.markers, &mission.organics};
-	const char *const words[4] = {"item", "building", "marker", "organic"};
-	size_t first[4] = {};
-	size_t total = 0;
-	for (int p = 0; p < 4; ++p) {
-		first[p] = total;
-		total += pools[p]->size();
-	}
-	out.kept_locks.assign(total, 0);
-	std::vector<bool> given(total, false);
+	std::vector<int32_t> ids;
+	for (const std::vector<bms::Entity> *pool : {&mission.items, &mission.buildings, &mission.markers, &mission.organics})
+		for (const bms::Entity &entity : *pool) ids.push_back(entity.id);
+	out.kept_locks.assign(ids.size(), 0);
+	std::vector<bool> given(ids.size(), false);
 	for (const MissionNamesFile::Lock &lock : out.locks) {
-		if (!lock.lock || lock.pool < 0 || lock.pool > 3) continue;
-		const std::vector<bms::Entity> &pool = *pools[lock.pool];
+		if (!lock.lock) continue;
 		bool found = false;
-		for (size_t i = 0; i < pool.size() && !found; ++i)
-			if (pool[i].id == lock.id && !given[first[lock.pool] + i]) {
-				given[first[lock.pool] + i] = true;
-				out.kept_locks[first[lock.pool] + i] = lock.lock;
+		for (size_t i = 0; i < ids.size() && !found; ++i)
+			if (ids[i] == lock.id && !given[i]) {
+				given[i] = true;
+				out.kept_locks[i] = lock.lock;
 				found = true;
 			}
 		if (!found)
-			out.refused.push_back(std::string(words[lock.pool]) + " SSN " + std::to_string(lock.id) +
-			                      "'s height lock (the mission has no " + words[lock.pool] + " of that SSN: left unlocked)");
+			out.refused.push_back("SSN " + std::to_string(lock.id) +
+			                      "'s height lock (the mission has no entity of that SSN: left unlocked)");
 	}
 }
 
@@ -550,12 +548,15 @@ void names_file_findings(const MissionDocument &document, std::vector<Diagnostic
 	if (!left.locked.empty()) {
 		// D-MIS-17: no height under them known, so written locked at their heights, which the original editor reads
 		// exact over whatever terrain it loads (a note: the save stands).
+		// The first titles alone, the rest counted (a mission of thousands on a terrain that does not read).
+		const size_t more = left.locked_count > left.locked.size() ? left.locked_count - left.locked.size() : 0;
 		std::string what;
 		for (size_t i = 0; i < left.locked.size(); ++i)
-			what += (i == 0 ? "" : i + 1 == left.locked.size() ? " and " : ", ") + left.locked[i];
+			what += (i == 0 ? "" : i + 1 == left.locked.size() && !more ? " and " : ", ") + left.locked[i];
+		if (more) what += " and " + std::to_string(more) + " more";
 		out.push_back(make_finding(MissionFinding::NamesLocked, DiagnosticSeverity::Info,
-		                           mis + " was written with " + counted(left.locked.size(), "entity", "entities") +
-		                                   " height locked at " + (left.locked.size() == 1 ? "its height" : "their heights") +
+		                           mis + " was written with " + counted(left.locked_count, "entity", "entities") +
+		                                   " height locked at " + (left.locked_count == 1 ? "its height" : "their heights") +
 		                                   " (" + what + "): the mission's terrain did not read, so the height of the "
 		                                   "ground under them was not known. The original editor reads them at these "
 		                                   "heights whatever terrain it loads; once the terrain reads, a save writes them "

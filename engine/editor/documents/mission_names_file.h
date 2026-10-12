@@ -115,8 +115,11 @@ struct MissionNamesLeft {
 	// Why the file it left as it is no longer matches the mission (names_file_stale), "" where it does: the next open
 	// of the mission takes none of its names (mission.names_unmatched, with Write it from the mission).
 	std::string stale;
-	// The unlocked entities the last write wrote height locked at their heights, each its title ("Item #12"): the
-	// terrain's height under them was not known, the mission's terrain not reading (D-MIS-17; mission.names_locked).
+	// The unlocked entities the last write wrote height locked at their heights: how many, and the first
+	// kLockedNamed's titles ("Item #12"): the terrain's height under them was not known, the mission's terrain not
+	// reading (D-MIS-17; mission.names_locked).
+	static constexpr size_t kLockedNamed = 12;
+	size_t locked_count = 0;
 	std::vector<std::string> locked;
 };
 

@@ -287,7 +287,11 @@ private:
 	// The terrain and water as the game reads them (DI-07), which the brush and the background read too.
 	mutable MissionGround terrain_;
 	MissionMapTerrainView terrain_view_;
-	TerrainStrokeFollow stroke_; // S25: the ground patched in place during a stroke
+	// S25: the ground patched in place during a stroke: the heights (its backgrounds patched with them), and the planes
+	// it does not draw (the surface, foliage and blend maps: nothing of its picture to make again); a colour stroke
+	// makes the commander map's colours again at its end.
+	TerrainStrokeFollow stroke_{terrain_plane_bit(TerrainPlane::Heights) | terrain_plane_bit(TerrainPlane::Surface) |
+	                            terrain_plane_bit(TerrainPlane::Foliage) | terrain_plane_bit(TerrainPlane::Blend)};
 	uint64_t tiles_serial_ = 0;  // S25: moves with the placed tiles drawn
 	uint64_t tiles_hash_ = 0;    // what they were when it last moved
 	MissionOutlineCache outlines_;

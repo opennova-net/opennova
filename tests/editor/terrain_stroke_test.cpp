@@ -1,14 +1,16 @@
 // The terrain tools' shared seams (ADR 0046 S25): the undo across documents over the history's step marks (each
 // step a process-wide serial, its gesture its link), an Undo in a view taking with its step the top step of every
 // other document carrying the same link and a Redo making them again, an EndEdit by a gesture's token ending it in
-// every document its batches changed and its cancel dropping them, the terrain_stroke request on the wire (read
-// back as written) and its refusals while no plane's planner is in, and the workspace's terrain brush and Terrain
+// every document its batches changed and its cancel dropping them, Keep my edits in a view writing over its own
+// file's outside change alone (a linked file's conflict refused and named), the terrain_stroke request on the wire
+// (read back as written) and its refusals while no plane's planner is in, and the workspace's terrain brush and Terrain
 // pane as set_workspace sets them.
 #include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <base/io/file_io.h>
 #include <base/io/json.h>
 #include <editor/model/text_document.h>
 #include <editor/session/preferences_store.h>
@@ -133,6 +135,42 @@ int test_linked_undo() {
 	return 0;
 }
 
+// Keep my edits on a view's file (its conflict's fix, save_over) writes over that file's outside change alone: a file
+// its Save writes beside it (one gesture's link) that changed outside the editor too is refused, named in the status,
+// its own conflict deciding it; nothing the other program saved there is lost unasked.
+int test_scope_save_over() {
+	editor_test::TempProjectDir dir("opennova_editor_terrain_save_over");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Over"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(editor_test::write_text(root + "/scripts/a.wac", "aaa\r\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/scripts/b.wac", "bbb\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	const SessionView &v = session.view();
+	const std::string a = v.project.scan->find("a.wac")->relative_path, b = v.project.scan->find("b.wac")->relative_path;
+	session.handle(request::open_document(a));
+	session.handle(request::open_document(b));
+	const uint64_t gesture = next_edit_gesture();
+	session.handle(request::edit_record(a, span(1, 1, 3, "AAA", gesture)));
+	session.handle(request::edit_record(b, span(1, 1, 3, "BBB", gesture)));
+	session.handle(request::end_edit(std::string(), gesture));
+	// Another program saves over both.
+	TEST_EXPECT(editor_test::write_text(root + "/" + a, "outside a, longer\r\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/" + b, "outside b, longer\r\n"));
+	session.handle(request::open_document(a));
+	editor_test::handle_to_end(session, request::save_over(a));
+	std::string on_disk, error;
+	TEST_EXPECT(opennova::io::read_file_text(root + "/" + a, on_disk, error) && on_disk == "AAA\r\n");
+	TEST_EXPECT(opennova::io::read_file_text(root + "/" + b, on_disk, error) && on_disk == "outside b, longer\r\n");
+	const DocumentBase *b_document = session.document_base_for(b);
+	TEST_EXPECT(b_document && b_document->unsaved());
+	TEST_EXPECT(contains(v.activity.status, "1 could not be saved (b.wac)"));
+	std::printf("save over: Keep my edits wrote its own file alone, the linked file's conflict refused and named\n");
+	return 0;
+}
+
 // The stroke on the wire, its refusals while no planner is in, the brush and the pane.
 int test_wire_and_workspace() {
 	TerrainStrokeAsk ask;
@@ -199,5 +237,6 @@ int test_wire_and_workspace() {
 int main() {
 	if (test_marks() != 0) return 1;
 	if (test_linked_undo() != 0) return 1;
+	if (test_scope_save_over() != 0) return 1;
 	return test_wire_and_workspace();
 }

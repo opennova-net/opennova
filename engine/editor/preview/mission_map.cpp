@@ -287,6 +287,18 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 			return false;
 		}
 	}
+	// Water is the original mission editor's over its heights' views; the colour map shows the commander map's own
+	// (its water cut as the game's map cuts it): asked over the colour map or none it is refused, and a background
+	// taken back to them drops it.
+	if (out.water && (out.background == MissionMapBackground::Colour || out.background == MissionMapBackground::None)) {
+		const JsonValue *asked = json.get("water");
+		if (asked && asked->is_bool() && asked->boolean) {
+			error = "options.water lays the original mission editor's water over the height, delta or flatness background; "
+			        "the colour map shows the commander map's own.";
+			return false;
+		}
+		out.water = false;
+	}
 	held = out;
 	return true;
 }
@@ -764,7 +776,7 @@ bool MissionMapViewport::follow_terrain_view_(const SessionView &view) {
 		const terrain::TerrainHeightField *field = ground.height_field();
 		if (field && field->dim == 1024) {
 			atlas = field->heightmap;
-			revision = ground.revision();
+			revision = ground.heights_revision();
 		}
 		if (ground.water()) water = int32_t(ground.water_height() * 65536.0);
 	}
@@ -830,7 +842,15 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 	if (!heights.empty())
 		if (const terrain::TerrainHeightField *field = terrain_.height_field()) {
 			const uint64_t serial = terrain_view_.serial();
-			terrain_view_.patch(field->heightmap, heights, terrain_.revision());
+			terrain_view_.patch(field->heightmap, heights, terrain_.heights_revision());
+			if (terrain_view_.serial() != serial) moved_ = true;
+		}
+	// Out of a stroke, the heights' picture takes the scale their lowest and highest give it now (kept while one went,
+	// S25; an undo's, a redo's or a landing's patch settled at once): a scan of them only where a patch moved them.
+	if (!stroking)
+		if (const terrain::TerrainHeightField *field = terrain_.height_field()) {
+			const uint64_t serial = terrain_view_.serial();
+			terrain_view_.settle(field->heightmap);
 			if (terrain_view_.serial() != serial) moved_ = true;
 		}
 	if (!stroking && stroke_.patched()) {

@@ -78,6 +78,14 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 	ImGui::TextUnformatted(sentence.c_str());
 	for (const std::string &file : prompt.files) ImGui::BulletText("%s", file.c_str());
 	const bool one_file = row.guard == GuardScope::Document;
+	// S25: a Close whose list holds the files its view's terrain tools edited: Don't save drops the closed file's own
+	// edits alone, the others staying open with theirs (never dropped silently).
+	const bool others = one_file && prompt.action == EditorRequestKind::CloseDocument &&
+	                    std::any_of(prompt.files.begin(), prompt.files.end(),
+	                                [&](const std::string &file) { return file != prompt.target; });
+	if (others && prompt.can_discard)
+		ImGui::TextWrapped("Don't save closes %s without its own edits; the other files stay open with theirs.",
+		                   basename_of(prompt.target).c_str());
 	const char *save = row.save_label ? row.save_label : "Save all";
 	const auto answer = [&](UnsavedChoice choice) {
 		workspace.request(request::resolve_unsaved(choice));
@@ -605,12 +613,18 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 	const DocumentsView::StepNext &undo = v.documents.undo_next, &redo = v.documents.redo_next;
 	const bool undoes = document && (undo.any() || document->can_undo());
 	const bool redoes = document && (redo.any() || document->can_redo());
+	// The step's own words, and the other files it takes with it (a stroke's followers and its bake's file).
+	const auto with_linked = [](const DocumentsView::StepNext &next) {
+		if (next.linked.empty()) return next.words;
+		return next.words + " (and " + std::to_string(next.linked.size()) +
+		       (next.linked.size() == 1 ? " linked file)" : " linked files)");
+	};
 	if (menu_item("Undo", "Ctrl+Z", undoes && v.allows(EditorRequestKind::Undo)))
 		request(request::undo());
-	if (document) step_words(undo.any() ? undo.words : document->undo_words());
+	if (document) step_words(undo.any() ? with_linked(undo) : document->undo_words());
 	if (menu_item("Redo", "Ctrl+Y", redoes && v.allows(EditorRequestKind::Redo)))
 		request(request::redo());
-	if (document) step_words(redo.any() ? redo.words : document->redo_words());
+	if (document) step_words(redo.any() ? with_linked(redo) : document->redo_words());
 	// A rename is no step of a document's history: it rewrites files. Its way back is its true inverse (only
 	// the sites it rewrote), shown before it commits, offered while its name is still where it put it.
 	if (v.activity.last_rename.made && rename_back_offered(v)) {

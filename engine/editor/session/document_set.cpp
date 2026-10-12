@@ -1244,7 +1244,9 @@ void DocumentSet::save(const std::string &path, bool over) {
 	if (DocumentBase *document = document_for(path)) {
 		// S25: the view's scope with it (the terrain files its tools edited, the missions that followed them).
 		const std::vector<std::string> scope = save_scope(document->path());
-		save_documents(scope, true, over, scope.size() > 1);
+		// Keep my edits saves over the named document's outside change alone: a file of its scope that changed outside
+		// the editor too is refused and listed, its own conflict deciding it.
+		save_documents(scope, true, over ? document->path() : std::string(), scope.size() > 1);
 	} else if (view_.project.open) {
 		// A file that is not open (a Rewrite fix names one) is rewritten closed.
 		if (path.empty()) core_.refuse_request(CoreFinding::DocumentNotOpen, "Open a file before saving it.");
@@ -1262,9 +1264,10 @@ void DocumentSet::save_all() {
 // files written read into the scan alone (SessionCore::update_files, S13 A3: no import pass, no
 // other file read), then one finding per file that could not be, the status counting both. False
 // when one could not be. (A save while a build packs never reaches here: the busy gate refused
-// it.) `over`: written over a file changed outside the editor (DocumentBase::save's), what the other
-// program saved there lost (DI-01: a conflict's Keep my edits).
-bool DocumentSet::save_documents(const std::vector<std::string> &asked, bool rewrite, bool over, bool name_files) {
+// it.) `over`: the one document written over its file's change outside the editor (DocumentBase::save's), what the
+// other program saved there lost (DI-01: a conflict's Keep my edits, its own file's alone); "" none.
+bool DocumentSet::save_documents(const std::vector<std::string> &asked, bool rewrite, const std::string &over,
+                                 bool name_files) {
 	// S25: the heights' bakes due land first (the regions a stroke sculpted, baked again by TrnGen's bake), the caller
 	// waiting, and the missions their landings moved join what is written (the ground and the entities on it on disk
 	// together). A heights document whose bake cannot land is not written: its sculpted heights over its old tiles would
@@ -1307,17 +1310,20 @@ bool DocumentSet::save_documents(const std::vector<std::string> &asked, bool rew
 	}
 	size_t saved = 0, noted = 0, left = 0;
 	std::vector<Diagnostic> failures = unbaked;
-	std::vector<std::string> written;
+	std::vector<std::string> written, unwritten;
+	for (const Diagnostic &refused : unbaked) unwritten.push_back(basename_of(refused.asset));
 	for (DocumentBase *document : writes) {
 		Diagnostic error;
 		hand_item_classes(*document); // a mission's AI classes as its items' rows hold them now
-		const bool outside = over && !document->matches_file();
-		if (!document->save(error, over)) {
+		const bool over_it = !over.empty() && document->path() == over;
+		const bool outside = over_it && !document->matches_file();
+		if (!document->save(error, over_it)) {
 			// A file changed outside the editor under unsaved edits: the conflict is a row
 			// until the document is read again (its Reload fix) or saved over it (Keep my edits).
 			if (error.row() == &finding_code(CoreFinding::DocumentConflict) && document->unsaved())
 				conflicts_.insert(document->path());
 			failures.push_back(error);
+			unwritten.push_back(basename_of(document->path()));
 			continue;
 		}
 		forget_file_state(document->path());
@@ -1341,9 +1347,13 @@ bool DocumentSet::save_documents(const std::vector<std::string> &asked, bool rew
 	std::string names;
 	if (name_files && saved > 1)
 		for (const std::string &path : written) names += (names.empty() ? ": " : ", ") + basename_of(path);
+	std::string refused;
+	for (size_t i = 0; i < unwritten.size(); ++i) refused += (i ? ", " : "") + unwritten[i];
 	view_.activity.status = "Saved " + counted(saved, "file") + names + (noted ? " (" + counted(noted, "note") + ": see Output)" : std::string()) +
 	               (left ? "; " + counted(left, "file") + (left == 1 ? " keeps its" : " keep their") + " names unsaved: see Problems" : std::string()) +
-	               (failures.empty() ? "." : "; " + std::to_string(failures.size()) + " could not be saved: see Problems.");
+	               (failures.empty() ? "."
+	                                 : "; " + std::to_string(failures.size()) + " could not be saved" +
+	                                           (name_files ? " (" + refused + ")" : std::string()) + ": see Problems.");
 	core_.touch(ViewConcern::Output);
 	return failures.empty();
 }

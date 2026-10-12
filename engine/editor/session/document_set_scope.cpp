@@ -145,7 +145,8 @@ DocumentsView::StepNext DocumentSet::next_step(const std::string &view, bool und
 	uint64_t best_serial = 0;
 	for (const std::string &path : scope_of(view)) {
 		const DocumentBase *document = open_at(path);
-		if (!document || !can(*document)) continue;
+		// A blocked document (its file changed outside the editor under its edits) takes no step: the others' go on.
+		if (!document || !can(*document) || document->blocked()) continue;
 		const uint64_t serial = mark(*document).serial;
 		const bool better = !best || (serial != 0 && (best_serial == 0 || (undo ? serial > best_serial : serial < best_serial)));
 		if (better) {
@@ -169,6 +170,8 @@ DocumentsView::StepNext DocumentSet::next_step(const std::string &view, bool und
 void DocumentSet::update_step_next() {
 	view_.documents.undo_next = next_step(view_.documents.active, true);
 	view_.documents.redo_next = next_step(view_.documents.active, false);
+	view_.documents.active_scope_unsaved = view_.documents.active.empty() ? std::vector<std::string>()
+	                                                                        : scope_unsaved(view_.documents.active);
 	view_.documents.edited_from.clear();
 	for (const auto &[view, edited] : edited_from_) {
 		std::vector<std::string> open;
@@ -196,7 +199,26 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 	}
 	const DocumentBase *own = open_at(next.path);
 	const uint64_t link = own ? (undo ? own->undo_mark() : own->redo_mark()).link : 0;
-	std::vector<std::string> said, moved;
+	// A redo makes again what its link's undo took back together, or nothing: a document of that undo that no longer
+	// holds the step (an edit after the undo dropped its redo) leaves the others' steps alone, so entities never follow a
+	// stroke that is gone.
+	if (!undo && link) {
+		std::vector<std::string> lost;
+		if (const auto found = undone_.find(link); found != undone_.end())
+			for (const LinkedDocument &each : found->second) {
+				const DocumentBase *other = open_at(each.path);
+				if (other && other->identity() == each.identity && !other->holds_link(link)) lost.push_back(basename_of(each.path));
+			}
+		if (!lost.empty()) {
+			view_.activity.status = "Nothing redone: " + (next.words.empty() ? std::string("the step") : next.words) +
+			                        " goes with " + listed(lost) + "'s, which " + (lost.size() == 1 ? "was" : "were") +
+			                        " edited after the undo and no longer " + (lost.size() == 1 ? "holds" : "hold") + " it.";
+			core_.outcome().stepped.clear();
+			core_.touch(ViewConcern::Output);
+			return;
+		}
+	}
+	std::vector<std::string> said, moved, stuck;
 	for (const std::string &path : taken) {
 		DocumentBase *each = document_for(path);
 		if (!each) continue;
@@ -204,7 +226,10 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 		// What the step did, said as it is taken back or made again (the UX round's problems lane).
 		const std::string words = undo ? each->undo_words() : each->redo_words();
 		if (undo) each->undo(); else each->redo();
-		if (each->revision() == before) continue;
+		if (each->revision() == before) {
+			stuck.push_back(basename_of(each->path()));
+			continue;
+		}
 		if (each->path() == view_.documents.active) repair_selection(*each, generation, before, NodeAddress());
 		moved.push_back(each->path());
 		said.push_back(words.empty() ? "an edit of " + basename_of(each->path()) : words);
@@ -233,7 +258,23 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 		if (!closed.empty())
 			status += "; " + listed(closed) + (closed.size() == 1 ? " was" : " were") + " closed or read again since and " +
 			          (closed.size() == 1 ? "keeps its" : "keep their") + " edits as saved";
+		if (!stuck.empty())
+			status += "; " + listed(stuck) + " did not take " + (stuck.size() == 1 ? "its step" : "their steps") +
+			          " (blocked: " + (stuck.size() == 1 ? "its file" : "their files") + " changed outside the editor)";
 		view_.activity.status = status + ".";
+	}
+	// What a link's undo took back together, for its redo; a redo made it again.
+	if (link && !moved.empty()) {
+		if (undo) {
+			std::vector<LinkedDocument> together;
+			for (const std::string &path : moved)
+				if (const DocumentBase *each = open_at(path)) together.push_back(LinkedDocument{path, each->identity()});
+			undone_[link] = std::move(together);
+			constexpr size_t kUndoneKept = 4096;
+			while (undone_.size() > kUndoneKept) undone_.erase(undone_.begin());
+		} else {
+			undone_.erase(link);
+		}
 	}
 	core_.outcome().stepped = moved;
 	core_.touch(ViewConcern::Output);

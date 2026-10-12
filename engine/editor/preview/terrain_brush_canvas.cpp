@@ -438,7 +438,7 @@ std::string terrain_brush_hint(const TerrainBrush &brush, bool on_ground, Terrai
 		if (brush.tool == TerrainTool::Colour) {
 			char rgb[16];
 			std::snprintf(rgb, sizeof rgb, "#%06X", unsigned(brush.colour & 0xFFFFFFu));
-			return std::string("Paint the colour map ") + rgb + " (Ctrl+click picks the colour under the pointer).";
+			return std::string("Paint the colour map ") + rgb + ".";
 		}
 		return "Paint detail layer " + std::to_string(brush.layer + 1) + " into the blend map.";
 	}

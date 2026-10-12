@@ -90,7 +90,9 @@ void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &docu
 	const float least = WorkspaceView::kLogicSplitLeast, most = WorkspaceView::kLogicSplitMost;
 	const float kept = std::clamp(dragged_share_ >= 0.0f ? dragged_share_ : share, least, most);
 	const float canvas = std::floor(length * kept);
-	if (keys_to_canvas_) ImGui::SetNextWindowFocus();
+	// (Never while a popup is open: focusing the picture closes it, a picker opened from the pane among them.)
+	if (keys_to_canvas_ && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+		ImGui::SetNextWindowFocus();
 	keys_to_canvas_ = false;
 	if (ImGui::BeginChild("canvas_column", stacked ? ImVec2(0.0f, canvas) : ImVec2(canvas, 0.0f)))
 		main_viewport(workspace, document);
@@ -119,7 +121,8 @@ void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &docu
 		// The Terrain pane is the picture's palette: once a click in it is over, with no field taking text, the keys
 		// go back to the picture, so a tool picked there and the view's keys (R, H, V, [ and ]) follow one another.
 		if (terrain && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
-		    !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput)
+		    !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
+		    !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
 			keys_to_canvas_ = true;
 	}
 	ImGui::EndChild();

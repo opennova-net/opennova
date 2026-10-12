@@ -68,6 +68,11 @@ bool terrain_stroke_from_json(const JsonValue &json, TerrainStrokeAsk &ask, std:
 				error = "stroke.points is [[x, y], ...] in mission metres.";
 				return false;
 			}
+			// A point the 16.16 word holds (the planners' and the files' arithmetic).
+			if (std::fabs(point.array[0].number) > kTerrainPointMost || std::fabs(point.array[1].number) > kTerrainPointMost) {
+				error = "stroke.points lie within 32767 m of the mission's origin.";
+				return false;
+			}
 			read.points.emplace_back(point.array[0].number, point.array[1].number);
 		}
 	if (read.points.size() > kTerrainStrokePoints) {
@@ -82,6 +87,7 @@ bool terrain_stroke_from_json(const JsonValue &json, TerrainStrokeAsk &ask, std:
 		error = "stroke.points names at least one point (a cancel or an add alone names none).";
 		return false;
 	}
+	read.wire = true;
 	ask = std::move(read);
 	return true;
 }

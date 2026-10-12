@@ -196,6 +196,7 @@ void MissionGround::follow(const std::shared_ptr<const FileSource> &files, uint6
 void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const MissionSceneHeader &header) {
 	++reads_;
 	++revision_;
+	++heights_revision_;
 	store_.clear();
 	error_.clear();
 	surface_map_.clear();
@@ -312,7 +313,10 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 			                                          size_t(rect.w)))
 				return false;
 		}
-		if (!regions.empty()) ++revision_;
+		if (!regions.empty()) {
+			++revision_;
+			++heights_revision_;
+		}
 		return true;
 	}
 	// The surface and foliage maps (S25 B4): the regions written into what the game's load keeps of them, in place

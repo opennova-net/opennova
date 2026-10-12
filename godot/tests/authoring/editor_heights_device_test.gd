@@ -176,3 +176,45 @@ func test_a_sculpt_is_an_update_of_the_missions_view() -> void:
 		if absf(wanted - before) < 0.001:
 			break
 	assert_almost_eq(_ground(data, AT), before, 0.001, "the shipped ground back")
+
+
+## The device's ground under the camera's ray, where the brush meets it with a picture (ViewportDevice::surface_between):
+## each point the mission view's hit answers over the terrain lies on its pixel's ray and at the game's own height there
+## (the terrain query's sample), the crossing the brush's headless space finds with no device for the same pixel
+## (editor_terrain_family's brush-space leg), so a stroke over the wire lands where the ring shows.
+func test_the_devices_ground_is_the_games_under_the_ray() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device: SubViewport = _app.get_viewport_device(MISSION, "mission")
+	assert_not_null(device, "the mission's device")
+	if device == null:
+		return
+	var camera := device.get_camera_3d()
+	assert_not_null(camera, "its camera")
+	if camera == null:
+		return
+	var width := float(state.get("device", {}).get("width", 0))
+	var height := float(state.get("device", {}).get("height", 0))
+	assert_gt(width, 0.0, str(state.get("device")))
+	var scale := Vector2(device.size) / Vector2(maxf(width, 1.0), maxf(height, 1.0))
+	var met := 0
+	for row in range(1, 6):
+		for col in range(1, 6):
+			# Off the column over the picture's middle (x = 0, a sector seam: editor_terrain_family's note).
+			var pixel := Vector2(width * col / 6.0 + 3.0, height * row / 6.0)
+			var hit: Dictionary = _seam.query("viewport", {"op": "hit", "path": MISSION, "kind": "mission",
+					"x": pixel.x, "y": pixel.y})
+			var ground: Dictionary = hit.get("ground", {}) if hit.get("ground") is Dictionary else {}
+			if String(ground.get("on", "")) != "terrain":
+				continue
+			var at: Array = ground.get("at", [])
+			var point := Vector3(float(at[0]), float(at[1]), float(at[2]))
+			var sample: Dictionary = _seam.query("terrain", {"op": "sample", "path": MISSION, "x": point.x, "y": point.y})
+			assert_almost_eq(point.z, float(sample.get("height", INF)), 0.01, "the device's ground at %s the game's height" % str(point))
+			var shown := camera.unproject_position(MissionObjectPlacer.bms_to_godot_position(point)) / scale
+			assert_lt(shown.distance_to(pixel), 2.0, "the device's ground at %s on the ray of %s (shown at %s)" % [str(point), str(pixel), str(shown)])
+			met += 1
+	assert_gt(met, 0, "the camera's rays met the terrain")

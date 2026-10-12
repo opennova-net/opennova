@@ -11,6 +11,7 @@
 
 #include <editor/import/import_run.h>
 #include <editor/model/diagnostic.h>
+#include <editor/preview/terrain_brush.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
@@ -399,6 +400,8 @@ private:
 		std::string handle;
 		float x = 0.0f;
 		float y = 0.0f;
+		// S25: a brush drag's dab path, its walk carried from sample to sample as a canvas carries a person's.
+		TerrainDabPath dabs;
 	};
 	// The wire's drag in the document at `path` while its gesture is open there (null for none; one
 	// whose gesture ended another way forgotten).

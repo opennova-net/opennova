@@ -739,12 +739,16 @@ bool MissionDocument::names_file_text(std::string &text) {
 	// The unlocked entities past the heights handed (all of them where the terrain did not read): written height locked
 	// at their heights (mission::write_mis_text, D-MIS-17), listed.
 	names_left_.locked.clear();
+	names_left_.locked_count = 0;
 	if (made) {
 		size_t at = 0;
 		for (const K kind : {K::Item, K::Building, K::Marker, K::Organic})
 			for (const Node *row : rows_of(kind)) {
-				if (at >= base_heights_.size() && static_cast<const EntityRow &>(*row).native.mis_height_lock == 0)
-					names_left_.locked.push_back(mission_entity_title(*this, *row, nullptr));
+				if (at >= base_heights_.size() && static_cast<const EntityRow &>(*row).native.mis_height_lock == 0) {
+					++names_left_.locked_count;
+					if (names_left_.locked.size() < MissionNamesLeft::kLockedNamed)
+						names_left_.locked.push_back(mission_entity_title(*this, *row, nullptr));
+				}
 				++at;
 			}
 	}
@@ -781,8 +785,10 @@ void MissionDocument::names_file_written(bool ok, uint64_t fingerprint, const st
 	outside_names_ = MissionNamesFile();
 	// The entities it was written with height locked (D-MIS-17) stay listed until the next write.
 	std::vector<std::string> locked = std::move(names_left_.locked);
+	const size_t locked_count = names_left_.locked_count;
 	names_left_ = MissionNamesLeft();
 	names_left_.locked = std::move(locked);
+	names_left_.locked_count = locked_count;
 }
 
 bool MissionDocument::set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) {

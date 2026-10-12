@@ -1964,6 +1964,27 @@ func test_the_map_draws_a_background_of_the_heights() -> void:
 			assert_almost_eq(texel.b, 0.0, 0.001)
 			lit += 1 if texel.g > 0.0 else 0
 	assert_gt(lit, 0, "the heights drawn in green")
+	# A sculpt's samples patch the picture where they fell: no whole make per dab, each upload converting the texels
+	# its patches changed (a dab's square, not the 1M).
+	var drawn: Dictionary = state.get("body", {}).get("drawn", {})
+	var uploads := int(drawn.get("background_uploads", 0))
+	var converted := int(drawn.get("background_converted", 0))
+	assert_gt(uploads, 0, str(drawn))
+	var gesture := 0
+	for i in 4:
+		var sample: Dictionary = _seam.request({"kind": "terrain_stroke", "path": "missions/synth_logic.bms",
+				"stroke": {"plane": "heights", "brush": {"tool": "raise", "radius": 6, "strength": 1},
+				"points": [[-200.0 + 3.0 * i, 200.0]], "gesture": gesture, "end": false}})
+		assert_true(bool(sample.get("outcome", {}).get("done", false)), str(sample.get("outcome")))
+		gesture = int(sample.get("outcome", {}).get("gesture", 0))
+		for _frame in 2:
+			_app.pump()
+			await get_tree().process_frame
+	drawn = _map_state().get("body", {}).get("drawn", {})
+	assert_gt(int(drawn.get("background_uploads", 0)), uploads, "the samples uploaded: %s" % str(drawn))
+	assert_lt(int(drawn.get("background_converted", 0)) - converted, 1024 * 1024,
+			"four samples converted less than one whole picture: %s" % str(drawn))
+	_seam.request({"kind": "end_edit", "path": "missions/synth_logic.bms", "gesture": gesture})
 	assert_true(_change({"kind": "map", "options": {"background": "colour"}}))
 	for _frame in 5:
 		_app.pump()

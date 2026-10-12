@@ -297,6 +297,10 @@ struct WorkspaceView {
 		Pick pick;
 		bool terrain = false;
 		std::vector<NodeId> tiles;
+		// S25: the mission a terrain's viewport draws it under, its `mission` option as the session took it ("" the
+		// first that runs on it; "none" none: the terrain's own files), which its brush's files follow
+		// (session/terrain_family).
+		std::string terrain_mission;
 	};
 	std::map<std::string, DocumentView> documents;
 

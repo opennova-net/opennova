@@ -103,8 +103,9 @@ int test_follow() {
 	return 0;
 }
 
-// A patch of the atlas in place: the picture made again where the changed texels read, the same as a whole make;
-// whole where the lowest or the highest moved.
+// A patch of the atlas in place: the picture made again where the changed texels read, the same as a whole make; the
+// rects it changed for a device's upload; Height and Delta over the scale they were made with while the lowest or the
+// highest moves, the stroke's settle making them whole again then.
 int test_patch() {
 	struct Case {
 		MissionMapBackground background;
@@ -131,17 +132,24 @@ int test_patch() {
 			for (int x = 0; x < 3; ++x) atlas[size_t(y) * kSide + size_t(x)] = 6000;
 		view.patch(atlas.data(), {{500, 500, 530, 530}, {0, 1020, 3, 1024}}, 2);
 		TEST_EXPECT(view.made() == made && view.patched() == 1 && view.serial() != serial);
+		TEST_EXPECT(view.whole_serial() == serial && view.dirty().size() == 2);
+		// The settle of a stroke that moved neither the lowest nor the highest: nothing made again.
+		view.settle(atlas.data());
+		TEST_EXPECT(view.made() == made);
 		MissionMapTerrainView whole;
 		whole.follow(each.background, each.water, atlas.data(), 2, 25 << 16);
 		TEST_EXPECT(view.picture() == whole.picture());
 		// The follow at the patched revision keeps it.
 		view.follow(each.background, each.water, atlas.data(), 2, 25 << 16);
 		TEST_EXPECT(view.made() == made);
-		// The highest moved: Height and Delta made whole, the others patched.
+		// The highest moved: every background patched in the stroke (Height and Delta over the scale they had, no 1M
+		// words scanned per dab); its settle makes Height and Delta whole over the new range.
 		atlas[size_t(600) * kSide + 600] = 0x7800;
 		view.patch(atlas.data(), {{600, 600, 601, 601}}, 3);
 		const bool scaled = each.background != MissionMapBackground::Flatness;
-		TEST_EXPECT(view.made() == made + (scaled ? 1 : 0) && view.patched() == (scaled ? 1 : 2));
+		TEST_EXPECT(view.made() == made && view.patched() == 2);
+		view.settle(atlas.data());
+		TEST_EXPECT(view.made() == made + (scaled ? 1 : 0));
 		whole.follow(each.background, each.water, atlas.data(), 3, 25 << 16);
 		TEST_EXPECT(view.picture() == whole.picture());
 	}

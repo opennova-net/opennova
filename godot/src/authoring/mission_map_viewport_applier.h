@@ -73,6 +73,8 @@ public:
 	// S25: the map's background picture the overlay holds (null: the colour map), and how many it has uploaded.
 	Ref<ImageTexture> background_picture() const { return picture_; }
 	int background_uploads() const { return picture_uploads_; }
+	// Texels converted to the texture's bytes since the applier began (S25: a stroke's patch converts its rects alone).
+	int background_converted() const { return picture_converted_; }
 	// The placed tiles drawn over the map (S25), and the times they were drawn again.
 	int tiles_drawn() const { return tiles_drawn_; }
 	int tiles_redrawn() const { return tiles_redrawn_; }
@@ -125,6 +127,12 @@ private:
 	Ref<ImageTexture> picture_;
 	uint64_t picture_serial_ = UINT64_MAX;
 	int picture_uploads_ = 0;
+	// The picture's RGBA bytes as last uploaded: of the view's whole make `picture_whole_`, its first
+	// `picture_rects_` patched rects converted into them (a patch converts its rects alone).
+	PackedByteArray picture_bytes_;
+	uint64_t picture_whole_ = UINT64_MAX;
+	size_t picture_rects_ = 0;
+	int picture_converted_ = 0; // texels converted, a test's measure
 	bool pass_visible_ = false;
 	int pass_terrain_tris_ = 0, pass_sprites_ = 0, pass_labels_ = 0;
 };

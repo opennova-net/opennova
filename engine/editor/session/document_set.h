@@ -139,7 +139,8 @@ public:
 	// Writes each open document at `paths` that has unsaved edits (`rewrite`: an explicit Save,
 	// which also writes one with none whose file holds other bytes than it would write), past a
 	// failure, then one refresh; false when one could not be written. `over`: as save's.
-	bool save_documents(const std::vector<std::string> &paths, bool rewrite, bool over = false, bool name_files = false);
+	bool save_documents(const std::vector<std::string> &paths, bool rewrite, const std::string &over = std::string(),
+	                    bool name_files = false);
 	// What a document's last save said beyond writing, an Output line each; how many lines.
 	size_t note_save(const DocumentBase &document);
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
@@ -301,6 +302,9 @@ private:
 		uint64_t identity = 0;
 	};
 	std::map<uint64_t, std::vector<LinkedDocument>> links_;
+	// The documents each link's undo took a step back in, together: its redo makes them again together, and is refused
+	// where one of them no longer holds the step (an edit after the undo dropped its redo).
+	std::map<uint64_t, std::vector<LinkedDocument>> undone_;
 	std::set<std::string> quiet_;
 };
 
