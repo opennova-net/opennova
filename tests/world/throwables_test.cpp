@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/replication/entity_wire_bridge.h>
 #include <formats/def/def.h>
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/world/collision.h>
@@ -814,6 +815,43 @@ void test_satchel_places_device() {
     CHECK(e->health == 5); // the class row hp
     CHECK(rig.w.throwables.events.spawns.size() == 1);
     CHECK(rig.w.throwables.events.spawns[0].item_enemy == 0); // foe id absent
+}
+
+// The conversion runs the model init on the placed entity: a NoTarget def
+// (items.def 101891 "Satchel Charge", `attrib: NoTool notarget`) leaves the
+// device carrying Flags 0x8000000; a def without the bit leaves none.
+// [orig: Entity_UpdateSatchelPhysics @0x448A3E -> Entity_ConvertRoundToPlacedEntity
+//  @0x5455B0, the Entity_InitFromModel call @0x5455D8 -> @0x40DC4F]
+void test_placed_device_takes_the_model_init_no_target_bit() {
+    Rig rig(0);
+    LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+    CHECK(rig.w.throwables.place_from_round(rig.w, round,
+                                            rig.w.tables.ammo.entries[kAmmoSatchel]));
+    CHECK(rig.w.throwables.devices.size() == 1);
+    if (rig.w.throwables.devices.empty()) return;
+    const Entity *plain = rig.w.registry.get(rig.w.throwables.devices[0].entity);
+    CHECK(plain != nullptr && (plain->engine_flags & kEntityFlagNoTarget) == 0);
+    ThrowableClassRow satchel = *rig.w.throwables.classes.get(kItemSatchel);
+    satchel.no_target = true;
+    rig.w.throwables.classes.set(satchel);
+    LiveRound second = make_satchel_round(rig, Vec3{24, 20, 2});
+    CHECK(rig.w.throwables.place_from_round(rig.w, second,
+                                            rig.w.tables.ammo.entries[kAmmoSatchel]));
+    CHECK(rig.w.throwables.devices.size() == 2);
+    if (rig.w.throwables.devices.size() < 2) return;
+    const Entity *marked = rig.w.registry.get(rig.w.throwables.devices[1].entity);
+    CHECK(marked != nullptr && (marked->engine_flags & kEntityFlagNoTarget) != 0);
+    // The pool-1 load stream carries the bit in the device's S2C 0x0D Flags
+    // dword. [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503AE1..0x503AED]
+    const opennova::PoolSpawnBatch batch = opennova::replication::build_pool1_spawn_batch(rig.w);
+    bool streamed = false;
+    for (const opennova::PoolSpawnRecord &rec : batch.records) {
+        if (rec.slot_id == rig.w.throwables.devices[1].entity.packed)
+            streamed = (rec.entity_flags & 0x8000000u) != 0;
+        if (rec.slot_id == rig.w.throwables.devices[0].entity.packed)
+            CHECK((rec.entity_flags & 0x8000000u) == 0);
+    }
+    CHECK(streamed);
 }
 
 void test_placed_device_pose_and_ballistic_damage() {
@@ -1655,6 +1693,7 @@ int main() {
     test_ballistic_expiry_is_silent();
     test_round_slot_reuse_clears_throwable_state();
     test_satchel_places_device();
+    test_placed_device_takes_the_model_init_no_target_bit();
     test_placed_device_pose_and_ballistic_damage();
     test_parented_device_follows_parent_yaw();
     test_parented_device_adopts_parent_pitch();

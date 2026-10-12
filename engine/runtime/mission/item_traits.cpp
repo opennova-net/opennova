@@ -306,6 +306,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
         e->heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
         if (hp != 0) e->health_max = hp;
+        // NoTarget item (attrib 0x100): the model init's first leg ORs Flags
+        // 0x8000000, ahead of the hp-0 leg below, and never clears it. The AI
+        // target walks and the pool ray walker skip the bit (the walker unless
+        // its caller passes the include arg), and the 0x10 / 0x0D load stream
+        // carries it in the Flags dword. Resolved defs only, as the hp-0 leg.
+        // [orig: Entity_InitFromModel @0x40DC30 - `test [def+54h], 100h`
+        //  @0x40DC3B, `or [esi+24h], 8000000h` @0x40DC4F]
+        if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_NOTARGET) != 0)
+            e->engine_flags |= world::kEntityFlagNoTarget;
         // Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
         // the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
         // (D-NET-147; every golden ASH_I5A building carries both) — Health = 1, and the
@@ -692,6 +701,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         row.health_max = world::retail_signed_i16(def->hp);
         row.armor_impact = world::retail_signed_i16(def->armor_impact);
         row.armor_kz = world::retail_signed_i16(def->armor_kz);
+        // The placed entity's model init reads the def's NoTarget bit
+        // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 -> the
+        //  Entity_InitFromModel call @0x5455D8].
+        row.no_target = (def->attrib & DEF_ITEM_ATTRIB_NOTARGET) != 0;
         world.throwables.classes.set(row);
     }
     // The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on

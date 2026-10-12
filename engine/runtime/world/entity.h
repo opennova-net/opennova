@@ -228,8 +228,8 @@ inline constexpr uint8_t kAdmSlotNone = 0xFF;
 // witnessed meaning; the consolidated per-bit table is
 // docs/world/world-wac-ai-re.md § "The entity Flags dword". Remaining
 // known-but-unnamed bits stay raw at use sites — do not name: 0x10000, 0x2000000,
-// 0x8000000, and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context
-// meanings unwitnessed).
+// and vehicle_motor's Flags-dword 0x8/0x20 writes (vehicle-context meanings
+// unwitnessed).
 inline constexpr uint32_t kEntityFlagCarried = 0x1;          // hidden while attached [orig: Entity_AttachCarriedObject @0x43C130]
 inline constexpr uint32_t kEntityFlagDead = 0x2;              // [orig: kill writes Flags |= 6 @0x43fbf6]
 inline constexpr uint32_t kEntityFlagHusk = 0x4;              // items/buildings: husk swap [orig: @0x43fbf6]
@@ -283,6 +283,12 @@ inline constexpr uint32_t kEntityFlagArmoryZone = 0x400000;   // type-6 volume t
 inline constexpr uint32_t kEntityFlagIndoors = 0x800000;      // [orig: accum bit 2 -> Flags @0x4b39xx; render gates §4]
 inline constexpr uint32_t kEntityFlagNoShadow = 0x1000000;    // BMS NoShadow(1<<24) [orig: @0x40e9f0]
 inline constexpr uint32_t kEntityFlagIndestructible = 0x4000000; // BMS Indestructible(1<<21) or hp==0
+inline constexpr uint32_t kEntityFlagNoTarget = 0x8000000;    // items.def attrib NoTarget (0x100), set by the
+                                                              // model init; the AI target walks and the pool ray
+                                                              // walker (unless its include arg) skip it
+                                                              // [orig: Entity_InitFromModel @0x40DC4F;
+                                                              //  AI_FindBestTargetB @0x467117;
+                                                              //  Physics_RaycastAgainstEntityPool @0x5387A4..0x5387B4]
 inline constexpr uint32_t kEntityFlagScriptDisabled = 0x10000000; // WAC disableSSN; the vehicle motors test it with
                                                                   // the dead bit (10000002h) as their driver-input
                                                                   // gate [orig: WacCmd_DisableSsn @0x4F76DD;

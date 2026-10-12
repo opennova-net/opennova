@@ -3511,6 +3511,12 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
     CHECK(provider.build_handles.size() == 1);
     for (const EntityHandle h : far_statics)
         CHECK(provider.calls_for(h) == 0);
+    // A NoTarget static (Flags 0x8000000) still blocks the sun ray: its callers
+    // pass the walker's include arg 1. [orig: Terrain_SectorComputeLighting
+    // `push 1` @0x5C7765 -> Physics_RaycastFindCollisionEntity `push ebp`
+    // @0x539BA4 -> Physics_RaycastAgainstEntityPool @0x5387A4..0x5387B4]
+    world.registry.get(near_static)->engine_flags |= kEntityFlagNoTarget;
+    CHECK(collision.candidate_segment_hits_solid(world, source, start, end, 0));
 }
 
 void test_sound_los_prefilters_candidates_before_section_matrices() {
