@@ -71,10 +71,47 @@ int test_raster() {
 	return 0;
 }
 
+int test_patch() {
+	// A raster patched over a rect equals the raster of the whole edited map, codes and masks.
+	IndexedImage8 image;
+	image.width = image.height = 64;
+	image.indices.assign(size_t(64) * 64, 0);
+	for (size_t i = 0; i < image.indices.size(); ++i) image.indices[i] = static_cast<uint8_t>(i % 3 == 0 ? 253 : 0);
+	std::vector<FoliageDef> defs(2);
+	defs[0].graphic = "grass.3di";
+	defs[0].match[0] = 253;
+	defs[1].graphic = "shrub.3di";
+	defs[1].match[0] = 254;
+	std::vector<uint8_t> pcx;
+	std::string why;
+	TEST_EXPECT(opennova::encode_pcx_indexed(image, pcx, why));
+	FoliageMaskRaster patched;
+	TEST_EXPECT(load_foliage_mask_raster(pcx, defs, patched));
+	// The edit: a 5 x 3 rect at (10, 20) of 254s and 0s.
+	std::vector<uint8_t> src(size_t(5) * 3);
+	for (size_t i = 0; i < src.size(); ++i) src[i] = static_cast<uint8_t>(i % 2 == 0 ? 254 : 0);
+	IndexedImage8 edited = image;
+	for (int row = 0; row < 3; ++row)
+		for (int col = 0; col < 5; ++col) edited.indices[size_t(20 + row) * 64 + 10 + col] = src[size_t(row) * 5 + col];
+	std::vector<uint8_t> edited_pcx;
+	TEST_EXPECT(opennova::encode_pcx_indexed(edited, edited_pcx, why));
+	FoliageMaskRaster whole;
+	TEST_EXPECT(load_foliage_mask_raster(edited_pcx, defs, whole));
+	TEST_EXPECT(patch_foliage_mask_raster(patched, CoordsRect{10, 20, 5, 3}, src.data(), 5, defs));
+	TEST_EXPECT(patched.codes.indices == whole.codes.indices && patched.masks == whole.masks);
+	// A rect past the map, and an empty raster: refused, nothing written.
+	TEST_EXPECT(!patch_foliage_mask_raster(patched, CoordsRect{62, 0, 5, 1}, src.data(), 5, defs));
+	TEST_EXPECT(patched.masks == whole.masks);
+	FoliageMaskRaster empty;
+	TEST_EXPECT(!patch_foliage_mask_raster(empty, CoordsRect{0, 0, 1, 1}, src.data(), 1, defs));
+	std::printf("patch: a rect's codes written and remapped equal the edited map's raster\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_raster();
+	const int failures = test_raster() + test_patch();
 	if (failures == 0) std::printf("foliage_mask_raster: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

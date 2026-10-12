@@ -38,6 +38,8 @@ struct FoliageMaskMap {
 	int32_t origin_y = 0;
 	bool wrap_x = false;
 	bool wrap_z = false;
+
+	TerrainAtlasRouting routing() const { return TerrainAtlasRouting{sector_grid, origin_x, origin_y, wrap_x, wrap_z}; }
 };
 
 // The definition-slot mask at a fixed-point (16.16) mission position: bit n
@@ -47,18 +49,12 @@ struct FoliageMaskMap {
 inline int32_t foliage_mask_at_fixed(const FoliageMaskMap &m, int32_t x_fixed, int32_t y_fixed) {
 	// No map loaded: nothing grows [orig: @ 0x606629..0x60662B].
 	if (m.data == nullptr || m.width <= 0 || m.height <= 0 || m.sector_grid == nullptr) return 0;
-	const int32_t col = detail::surface_clamp_grid((x_fixed >> 25) - m.origin_x, m.wrap_x);
-	const int32_t row = detail::surface_clamp_grid(((-y_fixed) >> 25) - m.origin_y, m.wrap_z);
-	const int32_t slot = m.sector_grid[16 * (row & 0xF) + (col & 0xF)] - 1;
-	// An empty sector grows nothing [orig: @ 0x60667F..0x606682].
-	if (slot < 0) return 0;
-	int32_t fine_x = (x_fixed >> 16) & 0x1FF;
-	int32_t fine_z = ((-y_fixed) >> 16) & 0x1FF;
-	if ((slot & 1) != 0) fine_z += 512;
-	if ((slot & 2) != 0) fine_x += 512;
+	// The char map's routing (atlas_routing.h); an empty sector grows nothing [orig: @ 0x60667F..0x606682].
+	const TerrainAtlasTexel texel = terrain_atlas_texel_at(m.routing(), x_fixed, y_fixed);
+	if (!texel.mapped) return 0;
 	const int32_t shift = detail::surface_sample_shift(m.width);
-	const int32_t sx = fine_x >> shift;
-	const int32_t sz = fine_z >> shift;
+	const int32_t sx = texel.x >> shift;
+	const int32_t sz = texel.z >> shift;
 	// The game reads past a map shorter than its width's power of two; the
 	// port reads nothing there.
 	if (sx < 0 || sx >= m.width || sz < 0 || sz >= m.height) return 0;

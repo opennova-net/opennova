@@ -3,6 +3,7 @@
 // The terrain's foliage map as the game's load keeps it, and the sampler (foliage_mask_map.h) over it and a
 // terrain's sector grid.
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -27,6 +28,13 @@ struct FoliageMaskRaster {
 // empty, for bytes that do not read or an empty image: a map that does not read grows nothing.
 bool load_foliage_mask_raster(const std::vector<uint8_t> &pcx, const std::vector<FoliageDef> &defs,
 		FoliageMaskRaster &out);
+
+// Writes `rect` (map texels: x, z the column and row, w, h the size) of the raster's codes from `src`, `stride`
+// bytes a row, and remaps those texels' masks under `defs` as the load does: the raster after equals the raster
+// of the whole edited map (an editor's brush stroke, no reload). False, nothing written, for an empty raster or
+// a rect not inside it.
+bool patch_foliage_mask_raster(FoliageMaskRaster &raster, const CoordsRect &rect, const uint8_t *src, size_t stride,
+		const std::vector<FoliageDef> &defs);
 
 // The sampler's grid over a terrain's height field (its sector grid, origin and wraps), no raster: what a foliage
 // map's sampler routes a position through.

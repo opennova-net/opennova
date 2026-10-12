@@ -77,6 +77,12 @@ public:
 	// world's, MissionKernel::wire_terrain's) carries the tiles too.
 	const SurfaceTypeMap &surface_map() const { return surface_map_; }
 
+	// Writes `rect` (char-map texels: x, z the column and row, w, h the size) of the char map the
+	// store holds from `src`, `stride` bytes a row, in place: the surface view keeps pointing at the
+	// same raster, so every copy of it reads the new classes (an editor's brush stroke, no rebuild).
+	// False, nothing written, with no char map or a rect not inside it.
+	bool patch_charmap(const CoordsRect &rect, const uint8_t *src, size_t stride);
+
 	// The .trn facts the mission boot reads beside the field, set by the
 	// format-typed entries (terrain_field_build.h): the map's water height in
 	// world units (the raw value * 0.5; 0 = the map has no water), the water
