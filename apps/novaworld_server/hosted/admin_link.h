@@ -30,7 +30,7 @@
 // timing out) from holding up another server's commands, which one shared
 // thread over blocking sockets would queue behind it.
 //
-// The thread logs in, reconnects with a backoff (1 s, doubling to 30 s) after a
+// The thread logs in, reconnects with a backoff (1 s, doubling to 4 s) after a
 // refused login or a lost session, polls the server every 15 s with GET
 // GAMESTATE (its status: the session answers, and the server's scene), and runs
 // the queued commands. A route waits at most its own budget (the routes' is
@@ -92,7 +92,9 @@ struct AdminLinkConfig {
 	int status_interval_ms = 15000;  // GET GAMESTATE
 	int idle_check_ms = 250;         // how often an idle session's socket is looked at
 	int reconnect_min_ms = 1000;
-	int reconnect_max_ms = 30000;
+	// The backoff stays short: a link lives only while its server is listed and running,
+	// and the health check counts a link that is not up (three misses, 20 s apart).
+	int reconnect_max_ms = 4000;
 	int quit_timeout_ms = 2000;      // how long QUIT waits for the server's close
 	size_t queue_max = 16;
 	size_t ring_max = 256;           // the in-memory reply ring (and its unwritten tail)
@@ -219,6 +221,9 @@ private:
 	std::deque<ConsoleLine> ring_;
 	std::vector<ConsoleLine> unwritten_;
 	std::string last_recorded_error_;
+	// Whether the last command run was a recorded one (the thread's alone): a stray
+	// packet after it goes to the console only then.
+	bool last_command_recorded_ = false;
 
 	std::atomic<bool> finished_{ false };
 	std::mutex join_mu_;

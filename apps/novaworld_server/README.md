@@ -371,14 +371,21 @@ An account an admin approved (`players.can_host`) can have the service run one
   for most verbs, the first reply deciding for `PLAYER BAN <#>` (a second after `OK -
   Banned Player`) and `GOTO MENUSTATE`, and a 200 ms quiet gap only where the line
   cannot tell (`PLAYER BAN ALL`, a `PLAYER` sub-verb the server does not know). Bytes
-  between commands are read off first, and the idle socket is looked at every 250 ms, so
-  a server that went away is noticed and its connection reset at once. The link polls
-  `GET GAMESTATE` every 15 s, reconnects with a backoff (1 s doubling to 30 s), runs the
-  queued commands (16 at most; a caller waits its own budget, and a command still queued
-  when it gives up is dropped), and ends with `QUIT` on a logged-in session (a reset
-  otherwise). The password is a log secret for the link's lifetime (`add_log_secret`,
-  masked by `main()`'s log sink too) and never reaches a log line, a console line or a
-  reply.
+  between commands are read off first (to the console only after a recorded command), and
+  the idle socket is looked at every 250 ms, so a server that went away is noticed and its
+  connection reset at once. The link polls `GET GAMESTATE` every 15 s, reconnects with a
+  backoff (1 s doubling to 4 s: a link lives only while its server runs, and the health
+  check counts it), runs the queued commands (16 at most; a caller waits its own budget,
+  and a command still queued when it gives up is dropped; `QUIT` is refused, the link's
+  own), and ends with `QUIT` on a logged-in session (a reset otherwise). The password is a
+  log secret for the link's lifetime (`add_log_secret`, masked by `main()`'s log sink too)
+  and never reaches a log line, a console line or a reply.
+- **The admin listener on a machine.** The apps' TCP listeners set `SO_REUSEADDR` on POSIX
+  (`apps/common/net_sockets.cpp`), so an `opennova-serve` restarted on its fixed admin port
+  listens at once rather than after the closed session's TIME_WAIT. A listen that still
+  fails leaves the server running without its console, as retail ignores its listen's
+  result (`opennova-serve` keeps that); the supervisor's health check, which counts the
+  admin link, then restarts the server.
 - **The console** is `hosted_server_console` (migration `0012_hosted_server_console.sql`),
   a capped ring of each server's newest 500 lines: the commands the routes ask a link to
   record (with their sender, `owner`, `admin` or `service`), each reply packet, and the

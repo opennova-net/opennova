@@ -180,6 +180,9 @@ private:
 	// Ends every machine the provider runs that no live row in `live` names
 	// (`when` labels the log line); the ids of the ones it keeps.
 	std::set<std::string> end_untracked(const std::vector<HostedServer> &live, const char *when);
+	// The provider's describe of the server's machine; an address the row lacks
+	// (none was known at the launch) is written from it.
+	MachineStatus describe(db::Database &db, const HostedServer &s);
 	// The admin links brought in step with the servers in running (their rows
 	// read again, after this pass's moves): each one's machine address and
 	// admin login.

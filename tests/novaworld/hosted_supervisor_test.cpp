@@ -1012,6 +1012,34 @@ int test_reconciliation() {
 	return 0;
 }
 
+// A provider that knows a machine's address only once it boots (a cloud
+// machine): the launch's describe names none, and the next describe writes it,
+// so the running server's admin link has its target.
+int test_address_after_launch() {
+	Rig rig("hosted_address_late");
+	rig.fake.hide_address_describes = 1;
+	hosted::AdminLinkConfig link_config;
+	link_config.io_timeout_ms = 200;
+	link_config.reconnect_min_ms = 50;
+	link_config.log = [](const std::string &) {};
+	hosted::AdminLinks links(nullptr, link_config);
+	rig.sup->set_admin_links(&links);
+	const int64_t id = rig.request("late_address");
+	TEST_EXPECT(id != 0);
+	rig.tick(); // requested -> provisioning
+	rig.tick(); // the launch: its describe names no address
+	TEST_EXPECT(rig.state(id) == State::Booting && rig.server(id)->machine_address.empty());
+	rig.fake.run(rig.fake.last_machine);
+	rig.tick(); // -> listing, the address written
+	TEST_EXPECT(rig.state(id) == State::Listing && rig.server(id)->machine_address == "10.0.0.2");
+	TEST_EXPECT(list_as(*rig.pool.acquire(), *rig.server(id)->service_user_id, 9301));
+	rig.tick(); // -> running
+	const auto link = links.find(id);
+	TEST_EXPECT(rig.state(id) == State::Running && link && link->target().host == "10.0.0.2");
+	links.stop_all();
+	return 0;
+}
+
 // The console ring (hosted_server_console, migration 0012): an append keeps a
 // server's newest `keep` lines and leaves another server's alone; the reads go
 // oldest first, past an id, the newest `limit`.
@@ -1384,6 +1412,7 @@ int main(int argc, char **argv) {
 		{ "reconcile_provisioning_gone", test_reconcile_provisioning_gone },
 		{ "console_ring", test_console_ring },
 		{ "admin_links_follow_running", test_admin_links_follow_running },
+		{ "address_after_launch", test_address_after_launch },
 		{ "orphan_sweep", test_orphan_sweep },
 		{ "local_provider", test_local_provider },
 		{ "children_outlive_the_supervisor_thread", test_children_outlive_the_supervisor_thread },
