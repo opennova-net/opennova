@@ -87,7 +87,7 @@ private:
 		// it.
 		bool open = false;
 		// A load in place keeps the instance and starts the revision again: the load too.
-		uint64_t identity = 0, load_generation = 0, revision = 0;
+		uint64_t identity = 0, load_generation = 0, revision = 0, companion = 0;
 		bool dirty = false, wrote_file = false;
 		uint64_t size = 0;
 		int64_t modified = 0;
