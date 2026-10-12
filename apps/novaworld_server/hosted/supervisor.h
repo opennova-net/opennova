@@ -51,6 +51,7 @@
 #include "machine_provider.h"
 
 #include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/gate_probe.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -71,7 +72,7 @@ struct SupervisorConfig {
 	// --master-host / --master-gate-port: where every server reaches NovaWorld
 	// (loopback for the local provider, ONNET_PUBLIC_HOST otherwise).
 	std::string master_host = "127.0.0.1";
-	uint16_t master_gate_port = 7597;
+	uint16_t master_gate_port = GATE_DEFAULT_PORT;
 	// The pass cadence. The rest is service policy.
 	uint64_t tick_interval_ms = 1000;
 	uint64_t boot_timeout_ms = 5 * 60 * 1000;
