@@ -3,7 +3,8 @@
 // seeded with the terrain's own tiles (the game reads the mission's in place of the terrain's), one step of the file
 // history; the .til opens quietly (the mission kept active) and each batch is a step of the mission view's Undo. The
 // view's planners (preview/tile_commands.cpp) plan a click's select, a stamp, the turn, flip, layer and delete
-// commands and a drag as those requests; the terrain query's tiles and tiles_at ops answer the view's tiles.
+// commands and a drag as those requests; the terrain query's tiles and tiles_at ops answer the view's tiles; the type's
+// project check notes tiles past their set's cells and an empty .til hiding the terrain's tiles.
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -18,6 +19,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/tga/tga.h>
 #include <formats/til/til_io.h>
 
 #include "common/file_io.h"
@@ -220,6 +222,31 @@ int test_tiles_in_a_mission() {
 	TEST_EXPECT(!document->unsaved());
 	const std::vector<uint8_t> saved = test_io::read_file(root + "/" + til);
 	TEST_EXPECT(load_til(saved.data(), saved.size(), made, error) && made.entries.size() == 3);
+
+	// The type's project check (S25 B5). A tile set of two cells (128 x 64): the mission's tiles 2 and 7 name cells
+	// past it, which the game draws from the set's last row.
+	std::vector<uint8_t> set_pixels(size_t(128) * 64 * 4, 90), set;
+	std::string why;
+	TEST_EXPECT(tga::tga_write_rgba32(set_pixels.data(), 128, 64, set, why) && editor_test::write_bytes(root + "/terrain/mnml_t.tga", set));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const auto finding = [&](const char *code, const std::string &asset) -> const Diagnostic * {
+		for (const Diagnostic &d : v.findings.diagnostics)
+			if (d.code() == code && d.asset == asset) return &d;
+		return nullptr;
+	};
+	const Diagnostic *past = finding("til.index_past_atlas", til);
+	TEST_EXPECT(past && past->severity == DiagnosticSeverity::Warning && contains(past->message, "2 tiles name cells past the 2"));
+	TEST_EXPECT(!finding("til.empty", til));
+	// Every tile removed and saved: the mission's .til hides the terrain's two tiles.
+	std::vector<NodeId> all;
+	for (const auto &row : document->rows()) all.push_back(row->id);
+	session.handle(request::tile_edit(m, til, plan_tile_delete(*document, all)));
+	session.handle(request::save(m));
+	editor_test::handle_to_end(session, request::rescan());
+	session.run_operations();
+	const Diagnostic *empty = finding("til.empty", til);
+	TEST_EXPECT(empty && contains(empty->message, "Tmap_t.til's 2 tiles") && !finding("til.index_past_atlas", til));
 	std::printf("tiles in a mission: made seeded, laid, selected, turned, flipped, layered, dragged, stamped, removed, saved\n");
 	return 0;
 }

@@ -134,6 +134,10 @@ constexpr FindingCodeEntry<TilFinding> kFindingEntries[] = {
 	// MapTileStore_Append @ 0x433B59; MapTileStore_RemoveAt @ 0x433BE0].
 	{ TilFinding::LayerOrder, listed_code("til.layer_order") },
 	{ TilFinding::MedCap, listed_code("til.med_cap") },
+	// S25 B5, the type's project check (documents/til_project_check.h): a mission's empty .til hiding its terrain's
+	// tiles, tiles naming cells past their set; the game draws both, nothing refused.
+	{ TilFinding::Empty, listed_code("til.empty") },
+	{ TilFinding::IndexPastAtlas, listed_code("til.index_past_atlas") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(TilFinding::kCount), "every TilFinding has exactly one row");
 static_assert(finding_entries_well_formed(kFindingEntries), "the tile placement's rows follow TilFinding's order, each token its own");

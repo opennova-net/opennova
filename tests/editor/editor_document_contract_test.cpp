@@ -1317,6 +1317,19 @@ void check_project_check(const DocumentType &type, const Fixture &fixture, TypeC
 		if (type.id == DocumentTypeId::Mission)
 			companion = companion && editor_test::write_bytes(root + "/files/" + std::filesystem::path(beside).filename().string(),
 					test_io::read_file(repo + "/fixtures/" + beside));
+	// The tile placement type's (documents/til_project_check.h, S25 B5) reads a mission's own .til against the tile set
+	// its terrain draws it from: a synth mission on Tmap under the fixture's name, Tmap and a tile set of one cell
+	// beside it, so the fixture's tiles name cells past the set.
+	if (type.id == DocumentTypeId::TilePlacement) {
+		const std::string base = std::filesystem::path(fixture.name).stem().string();
+		std::vector<uint8_t> one_cell(size_t(64) * 64 * 4, 128), set;
+		std::string why;
+		companion = editor_test::write_bytes(root + "/files/" + base + ".bms", test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")) &&
+		            editor_test::write_bytes(root + "/files/Tmap.trn", test_io::read_file(repo + "/fixtures/terrain/tmap/Tmap.trn")) &&
+		            editor_test::write_bytes(root + "/files/Tmap.cpt", test_io::read_file(repo + "/fixtures/terrain/tmap/Tmap.cpt")) &&
+		            opennova::tga::tga_write_rgba32(one_cell.data(), 64, 64, set, why) &&
+		            editor_test::write_bytes(root + "/files/mnml_t.tga", set);
+	}
 	const bool made = create_project(root, "Contract", "jo", project, error) &&
 	                  editor_test::write_bytes(root + "/files/" + fixture.name, fixture.bytes) && companion;
 	check(made, fixture.name + " (" + error.message + ")", "a project holding the file is made");

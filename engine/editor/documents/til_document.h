@@ -80,7 +80,7 @@ bool is_til_kind(AssetKind kind);
 // header words or bytes past the records a save writes as MED does).
 std::vector<Diagnostic> validate_til_file(const DocumentBase &document);
 
-enum class TilFinding { Unread, InvalidInput, IgnoredInput, LayerOrder, MedCap, kCount };
+enum class TilFinding { Unread, InvalidInput, IgnoredInput, LayerOrder, MedCap, Empty, IndexPastAtlas, kCount };
 const FindingCodeRow &finding_code(TilFinding code);
 FindingTable til_finding_codes();
 

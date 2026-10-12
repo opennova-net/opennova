@@ -37,6 +37,7 @@
 #include <editor/documents/texture_document.h>
 #include <editor/documents/terrain_heights_document.h>
 #include <editor/documents/til_document.h>
+#include <editor/documents/til_project_check.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
 #include <editor/preview/make_menu_render_check.h>
@@ -225,7 +226,7 @@ constexpr DocumentType kTypes[] = {
 	// The tile placement (S25): a .til's tiles in their order (the game's draw order), each its cell, corner and
 	// orientation, MED's layer carried.
 	{ DocumentTypeId::TilePlacement, "tile_placement", make_til, validate_til_file, TilDocument::schema,
-			til_finding_codes },
+			til_finding_codes, make_til_project_check },
 	// The terrain's heights (S25): a .cpt's CDEP atlas (or an imported terrain's heightmap) as the planes a brush
 	// sculpts, the rest of the .cpt its side state; it names nothing.
 	{ DocumentTypeId::TerrainHeights, "terrain_heights", make_terrain_heights, validate_terrain_heights_file,

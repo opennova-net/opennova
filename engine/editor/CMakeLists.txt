@@ -111,6 +111,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_raster.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/terrain_heights_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/til_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/til_project_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_image.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_budget.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/texture_compare.cpp
