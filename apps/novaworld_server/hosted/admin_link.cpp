@@ -417,6 +417,9 @@ void AdminLink::execute(Pending &pending, bool &session_ok, std::string &error) 
 	session_ok = exchange(pending.command, replies, error);
 	if (pending.options.record) {
 		for (const std::string &reply : replies) record("reply", "", reply);
+		// Written before the caller hears back, so a console read after the
+		// command's answer holds it.
+		flush_console();
 	}
 	complete(pending, session_ok ? AdminCommandOutcome::Answered : AdminCommandOutcome::LinkDown,
 			std::move(replies));
