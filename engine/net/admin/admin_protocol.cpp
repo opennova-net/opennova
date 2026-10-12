@@ -304,6 +304,16 @@ std::vector<AdminPlayer> admin_parse_player_list(std::string_view reply) {
 		player.name = std::string(trim_right(line.substr(0, tab1)));
 		player.team = std::string(strutil::trim_view(line.substr(tab2 + 1, tab3 - tab2 - 1)));
 		if (player.name.empty() || (player.slot == 0 && player.name == "Host")) continue;
+		// Class, Kills, Deaths, PING: the four "%d" columns after the team.
+		int *const columns[] = { &player.player_class, &player.kills, &player.deaths, &player.ping };
+		size_t start = tab3 + 1;
+		for (int *column : columns) {
+			if (start > line.size()) break;
+			const size_t end = std::min(line.find('\t', start), line.size());
+			if (const auto value = strutil::parse_int(std::string(strutil::trim_view(line.substr(start, end - start)))))
+				*column = *value;
+			start = end + 1;
+		}
 		out.push_back(std::move(player));
 	}
 	return out;
@@ -348,6 +358,83 @@ int admin_parse_time_left_minutes(std::string_view reply) {
 		return (*limit > 0 && *left > 0) ? *left : -1;
 	}
 	return -1;
+}
+
+// "%d. %s (%s)\n": the row index, the file, the title (+0x414). A file name can hold spaces and
+// a title parentheses, so the title starts at the first " (" after the file's extension, and
+// at the first " (" when no known extension shows. [orig: CAdminServer_HandleMissionCommand
+//  @0x406490..0x40654C]
+std::vector<AdminCatalogEntry> admin_parse_mission_available(std::string_view reply) {
+	std::vector<AdminCatalogEntry> out;
+	for (std::string_view line : split_lines(reply)) {
+		const size_t dot = line.find(". ");
+		if (dot == std::string_view::npos || line.empty() || line.back() != ')') continue;
+		const auto index = strutil::parse_int(std::string(line.substr(0, dot)));
+		if (!index || *index < 0) continue; // the row index counts from 0
+		const std::string_view rest = line.substr(dot + 2);
+		size_t open = std::string_view::npos;
+		for (const char *ext : { ".bms (", ".npj (", ".npz (" }) {
+			for (size_t at = 0; at + 6 <= rest.size(); ++at) {
+				if (strutil::starts_with_icase(rest.substr(at), ext)) {
+					open = std::min(open, at + 4);
+					break;
+				}
+			}
+		}
+		if (open == std::string_view::npos) open = rest.find(" (");
+		if (open == std::string_view::npos) continue;
+		AdminCatalogEntry entry;
+		entry.index = *index;
+		entry.file = std::string(rest.substr(0, open));
+		entry.title = std::string(rest.substr(open + 2, rest.size() - open - 3));
+		out.push_back(std::move(entry));
+	}
+	return out;
+}
+
+// The marks are found from the end, after the last " - (" (a file name can hold " - "); an
+// absent mark is "()" or "<>". [orig: CAdminServer_HandleMissionCommand @0x406338..0x406483]
+std::vector<AdminRotationEntry> admin_parse_mission_list(std::string_view reply) {
+	std::vector<AdminRotationEntry> out;
+	for (std::string_view line : split_lines(reply)) {
+		const size_t colon = line.find(": ");
+		const size_t tags = line.rfind(" - (");
+		if (colon == std::string_view::npos || tags == std::string_view::npos || tags <= colon + 2) continue;
+		const auto index = strutil::parse_int(std::string(line.substr(0, colon)));
+		if (!index || *index < 0) continue; // the entry index counts from 0
+		const std::string_view marks = line.substr(tags + 3);
+		AdminRotationEntry entry;
+		entry.index = *index;
+		entry.file = std::string(line.substr(colon + 2, tags - colon - 2));
+		entry.swap_sides = marks.find("(2x)") != std::string_view::npos;
+		entry.flipped = marks.find("(IS FLIPPED)") != std::string_view::npos;
+		entry.one_shot = marks.find("(ONE_SHOT)") != std::string_view::npos;
+		entry.current = marks.find("<CURRENT MISSION>") != std::string_view::npos;
+		entry.next = marks.find("<NEXT MISSION>") != std::string_view::npos;
+		out.push_back(std::move(entry));
+	}
+	return out;
+}
+
+std::vector<std::string> admin_parse_chat_window(std::string_view reply) {
+	std::vector<std::string> out;
+	for (std::string_view line : split_lines(reply)) {
+		if (!line.empty()) out.emplace_back(line);
+	}
+	return out;
+}
+
+// Each row is the key left-justified in 21 columns, "= ", the value.
+std::vector<std::pair<std::string, std::string>> admin_parse_game_settings(std::string_view reply) {
+	std::vector<std::pair<std::string, std::string>> out;
+	for (std::string_view line : split_lines(reply)) {
+		const size_t eq = line.find("= ");
+		if (eq == std::string_view::npos) continue;
+		const std::string_view key = strutil::trim_view(line.substr(0, eq));
+		if (key.empty()) continue;
+		out.emplace_back(std::string(key), std::string(line.substr(eq + 2)));
+	}
+	return out;
 }
 
 } // namespace opennova

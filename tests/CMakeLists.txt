@@ -3706,6 +3706,21 @@ add_dependencies(hosted_admin_link_test opennova_serve)
 add_test(NAME hosted_admin_link COMMAND hosted_admin_link_test $<TARGET_FILE:opennova_serve>)
 set_tests_properties(hosted_admin_link PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 
+# The console's curated commands (apps/novaworld_server/hosted/console_commands.h, service
+# policy): the owners' list and the admins' one wider read, every line composed from checked
+# arguments (slots, indexes, mission names, cp1252 chat text) and none off the list, and each
+# command's replies, in retail's strings, mapped to the routes' answers. Crow-free: compiles
+# the hosted sources it needs directly, so it runs on every build.
+add_executable(hosted_console_commands_test
+    novaworld/hosted_console_commands_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/console_commands.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp)
+target_link_libraries(hosted_console_commands_test PRIVATE opennova_net)
+target_include_directories(hosted_console_commands_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME hosted_console_commands COMMAND hosted_console_commands_test)
+
 # The credential routes' brake: token buckets on a hand-stepped clock and the
 # trusted-proxy client address. The server's rate_limiter.cpp compiled in
 # directly, so it runs on every build.

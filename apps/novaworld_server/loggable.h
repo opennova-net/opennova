@@ -27,6 +27,19 @@ inline bool has_control_byte(std::string_view s) {
 	});
 }
 
+// Whether UTF-8 `text` holds a C1 control (U+0080..U+009F: 0xC2 then
+// 0x80..0x9F), which a user's text may hold no more than a control byte: the
+// hosted settings' game name, a pushed ServerCommand arg and a console chat line.
+inline bool has_c1_control(std::string_view text) {
+	for (size_t i = 0; i + 1 < text.size(); ++i) {
+		const auto lead = static_cast<unsigned char>(text[i]);
+		const auto next = static_cast<unsigned char>(text[i + 1]);
+		if (lead == 0xC2 && next >= 0x80 && next <= 0x9F)
+			return true;
+	}
+	return false;
+}
+
 // `text` as a log line may carry it: each control byte (below 0x20, or 0x7F)
 // as \xNN, so no client input can forge a line, and cut after `max_bytes`
 // bytes (".." marks the cut). For usernames, handles, URLs, query and form

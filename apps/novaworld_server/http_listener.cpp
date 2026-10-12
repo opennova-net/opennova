@@ -3,6 +3,7 @@
 #include "auth.h"
 #include "catalog_repository.h"
 #include "host_routes.h"
+#include "hosted/console_routes.h"
 #include "hosted/hosted_routes.h"
 #include "http_cookies.h"
 #include "nw_udp_listener.h"
@@ -265,7 +266,7 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 
 struct HttpListener::Impl {
 	explicit Impl(db::ConnectionPool &pool) :
-			access(app, pool), hosts(access, pool), hosted_servers(access, pool) {}
+			access(app, pool), hosts(access, pool), hosted_servers(access, pool), console(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -284,6 +285,8 @@ struct HttpListener::Impl {
 	HostRoutes hosts;
 	// The hosted servers' routes (hosted/hosted_routes.h), over `access`.
 	hosted::HostedRoutes hosted_servers;
+	// Their console routes over the admin links (hosted/console_routes.h).
+	hosted::ConsoleRoutes console;
 };
 
 HttpListener::HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
@@ -327,6 +330,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->hosts.register_routes(impl_->app, nw_udp_);
 	impl_->hosted_servers.configure(config);
 	impl_->hosted_servers.register_routes(impl_->app);
+	impl_->console.set_handler_threads(handler_threads());
+	impl_->console.register_routes(impl_->app, admin_links_);
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a
@@ -353,7 +358,10 @@ bool HttpListener::start(const ServerConfig &config) {
 		impl.port = impl.app.port();
 		impl.run_cv.notify_all();
 	});
-	app.port(config.http_port).multithreaded();
+	// Crow v1.2.0 runs `concurrency` - 1 handler threads beside its acceptor
+	// (Server::run's worker_thread_count), so this asks for handler_threads()
+	// of them.
+	app.port(config.http_port).concurrency(static_cast<std::uint16_t>(handler_threads() + 1));
 	worker_ = std::thread([&impl] {
 		try {
 			impl.app.run();

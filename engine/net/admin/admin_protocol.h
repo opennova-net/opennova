@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace opennova {
@@ -111,14 +112,52 @@ AdminReplyPlan admin_reply_plan(std::string_view command);
 // QuietGap: never (the caller's quiet gap ends it).
 bool admin_replies_complete(const AdminReplyPlan &plan, const std::vector<std::string> &replies);
 
-// One PLAYER LIST row a listing carries.
+// One PLAYER LIST row: the name, the slot number, the team, then the Class, Kills, Deaths and
+// PING columns (CPlayerStats fields 4 and 6 for the kills and deaths).
 struct AdminPlayer {
 	int slot = 0;
 	std::string name;
 	std::string team;
+	int player_class = 0;
+	int kills = 0;
+	int deaths = 0;
+	int ping = 0;
 };
 // PLAYER LIST: the player rows. The header and the host's own slot-0 "Host" row are not players.
 std::vector<AdminPlayer> admin_parse_player_list(std::string_view reply);
+
+// One MISSION AVAILABLE row: the catalog index, the file and its title.
+struct AdminCatalogEntry {
+	int index = 0;
+	std::string file;
+	std::string title;
+};
+// MISSION AVAILABLE: one "%d. %s (%s)\n" line per catalog row; an empty catalog is an empty
+// reply. [orig: CAdminServer_HandleMissionCommand @0x406490..0x40654C]
+std::vector<AdminCatalogEntry> admin_parse_mission_available(std::string_view reply);
+
+// One MISSION LIST entry: its index in the rotation, the file and the five marks.
+struct AdminRotationEntry {
+	int index = 0;
+	std::string file;
+	bool swap_sides = false; // (2x): the catalog row's launch option
+	bool flipped = false;    // (IS FLIPPED): the current map's second half
+	bool one_shot = false;   // (ONE_SHOT)
+	bool current = false;    // <CURRENT MISSION>
+	bool next = false;       // <NEXT MISSION>
+};
+// MISSION LIST: one "%d: %s - %s %s %s %s %s\n" line per entry, an absent mark printed "()"
+// or "<>"; "No missions in queue." for none. [orig: CAdminServer_HandleMissionCommand
+//  @0x406338..0x406483, @0x40634F]
+std::vector<AdminRotationEntry> admin_parse_mission_list(std::string_view reply);
+
+// CHAT GET: the window's lines, oldest first, each non-empty one followed by "\r\n".
+// [orig: CAdminServer_HandleChatCommand @0x404B0F..0x404BB3]
+std::vector<std::string> admin_parse_chat_window(std::string_view reply);
+
+// GET GAMESETTINGS: its "<Key padded to 21> = <value>\n" rows as (key, value), in order.
+// [orig: CAdminServer_HandleGet @0x403434..0x403D42]
+std::vector<std::pair<std::string, std::string>> admin_parse_game_settings(std::string_view reply);
 // MISSION LIST: the <CURRENT MISSION> entry's file name without its .bms/.npj/.npz extension;
 // "" when no entry is current.
 std::string admin_parse_current_mission(std::string_view reply);

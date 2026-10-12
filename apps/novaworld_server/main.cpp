@@ -319,6 +319,9 @@ int main() {
 	// The admin host routes push ServerCommand / ServerStopHosting through the
 	// NW UDP listener, which outlives this one (stopped after it below).
 	http.set_nw_udp_listener(&nwudp);
+	// The console routes run their commands on the admin links (declared above,
+	// so they outlive the listener); none without a provider.
+	http.set_admin_links(admin_links.get());
 	if (!http.start(listening)) {
 		std::fprintf(stderr, "[boot] FATAL: HTTP listener start failed\n");
 		return 1;
