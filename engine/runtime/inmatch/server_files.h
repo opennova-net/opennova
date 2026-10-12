@@ -51,7 +51,7 @@ struct ServerLogs {
 void server_logs_punt(const ServerLogs &logs, const NapiNPConnection &conn, const char *reason);
 // The /PROFILE deploy marker of a player's deploy transaction, after its
 // frontier hint and ahead of its mobile-spawn seat re-pick (null = off)
-// [orig: Server_ProcessPlayerDeath @0x517a27..0x517a37 ->
+// [orig: Server_DeployPlayer @0x517a27..0x517a37 ->
 // CServerLog_WriteDeathMarker, between the 0x1E send @0x517a22 and @0x517A3E].
 // Defined in server_log_recorder.cpp.
 void server_logs_deploy(ServerLogRecorder *profile, const world::Entity &player);

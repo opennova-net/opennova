@@ -61,8 +61,8 @@ const char *const kBuiltinAmmoClasses[] = { "CLASS_MANA", "CLASS_HP", "CLASS_POW
 	"CLASS_POWER8" };
 constexpr uint32_t kAmmoClassLimit = 0x80;
 
-// `charfilter` / `classrounds` / `teamfilter` [orig: off_830EB0, off_830EE8,
-// off_830ED8].
+// `charfilter` / `classrounds` / `teamfilter` [orig: g_WeaponCharFilterTable, g_WeaponClassRoundsTable,
+// g_WeaponTeamFilterTable].
 struct NamedValue {
 	const char *name;
 	int32_t value;
@@ -156,7 +156,7 @@ public:
 		if (key_is(tokens, "ammoclass_max_carry")) {
 			// The carry caps sit outside the record; only the 118th new class
 			// (id 128) lands in it, on the "null" row's category dword, the
-			// table's first. [orig: @0x5437EC..0x543873, dword_24E7DE0[id]
+			// table's first. [orig: @0x5437EC..0x543873, g_AmmoClassMaxCarry[id]
 			// = g_AdmDefs - 0x200]
 			uint8_t id = class_id(token(tokens, 2));
 			if (id == 0) {
@@ -474,7 +474,7 @@ private:
 		} else if (key_is(tokens, "run_anim")) {
 			put32(c, 172, io::retail_atol(a));
 		} else if (key_is(tokens, "animadm") || key_is(tokens, "animcal")) {
-			animadm_ = a; // the global byte_252DB98, not the record [orig: @0x543D47 / @0x543D77]
+			animadm_ = a; // the global g_WeaponParseAnimAdmFile, not the record [orig: @0x543D47 / @0x543D77]
 		} else if (key_is(tokens, "flags")) {
 			// The first matching name ORs both masks [orig: @0x543DA7..0x543E00,
 			// the 44-row table @0x830BF0].
@@ -625,7 +625,7 @@ private:
 	int32_t current_ = -1; // g_WeaponParseCurWeaponDef
 	bool in_action_block_ = false; // g_WeaponParseInActionBlock
 	int32_t script_action_ = -1; // ActionDef_ParseScriptLine's g_CurrentActionDef
-	std::string animadm_; // byte_252DB98
+	std::string animadm_; // g_WeaponParseAnimAdmFile
 	std::vector<ActionDef> pool_;
 	std::array<std::array<int32_t, kActionCount>, kWeaponRecordCapacity> slot_actions_{};
 	std::array<bool, kWeaponRecordCapacity> anim_object_{}; // +372 non-null

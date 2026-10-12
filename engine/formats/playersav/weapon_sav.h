@@ -149,6 +149,11 @@ KitPage default_kit_page(SideId side, uint8_t player_class);
 // that holds that table fills them).
 File make_defaults();
 
+// The PLAYER_INFO dialog's class loop: the selected class into BOTH side blocks
+// of one profile slot [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EE6D].
+// Returns false for an out-of-range slot.
+bool update_player_class(File &file, size_t slot, uint8_t player_class);
+
 // Apply the PLAYER_INFO ACCEPT header edits to one profile slot. Retail writes
 // the selected class to BOTH side blocks, then writes nationality/division and
 // the packed character id only to the currently selected side

@@ -25,7 +25,7 @@ constexpr ReservedItem kRows[] = {
 	{185, kAny, R::Warn, "Parachute", "Parachute",
 	 "The engine draws a deployed parachute's canopy with this item's model."},
 	// The fragment a palm-class item's broken sections throw, cloned into pool 2 [orig:
-	// Projectile_SpawnFromTile @ 0x53c1c0, the lookup @0x53C1EE; Entity_PreloadPalmFragmentModel @
+	// Palm_SpawnFragment @ 0x53c1c0, the lookup @0x53C1EE; Entity_PreloadPalmFragmentModel @
 	// 0x53bd90, @0x53BD95]. Retail ships no row of it.
 	{900, kAny, R::Warn, "Palm fragment", "",
 	 "The engine throws this item as the fragment of a palm-class item's broken section."},

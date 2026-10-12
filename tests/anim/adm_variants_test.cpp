@@ -54,7 +54,7 @@ int main(void) {
     // The retail config reader: an unquoted "//" or ";" ends the line, a
     // token starting with '/' ends the row, and a row with no clip is empty
     // rather than fatal. JOTAC US01.adm keeps an older walk clip behind "//".
-    // [orig: Terrain_TokenizeConfigLine @0x53CC16..0x53CC31;
+    // [orig: Config_TokenizeLine @0x53CC16..0x53CC31;
     //  AnimMap_ParseConfigLine @0x40CBD0..0x40CBD2]
     const char *commented =
         "anim_walk_forward\t\t\"Dt1RunF.bad\"\t//\t\"D4WLK_F.bad\"\r\n"

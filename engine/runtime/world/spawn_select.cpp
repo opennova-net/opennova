@@ -435,6 +435,15 @@ int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle) 
     return -1;
 }
 
+uint8_t deploy_request_team(const World &world, uint8_t team, bool spectator,
+                            uint16_t pick, uint32_t game_type_value) {
+    if (!spectator) return team;                                          // [orig: @0x519B7A]
+    if (pick != kDeployPickNone && pick != kDeployPickAutoTeam) return team; // [orig: @0x519B9A]
+    if (game_type::is_objective(game_type_value)) return 1;               // [orig: @0x519BA8]
+    if (!game_type::is_team(game_type_value)) return team;                // [orig: @0x519BB2]
+    return static_cast<uint8_t>(2u - (world.logic_tick & 1u));           // [orig: @0x519BB4..0x519BC1]
+}
+
 bool ZoneSystem::team_has_available_spawn_zone(uint8_t team) const {
     const World &world = world_;
     // Despite the original helper's reverse-engineered name, its loop is over
@@ -516,17 +525,18 @@ bool SpawnWaveList::remove_player(EntityHandle player) {
     return removed;
 }
 
-bool SpawnWaveList::try_queue(const World &world, EntityHandle zone,
-                              EntityHandle player) {
-    const Entity *player_entity = world.registry.get(player);
-    if (player_entity == nullptr) return false;
+bool SpawnWaveList::try_queue(EntityHandle zone, EntityHandle player,
+                              uint8_t slot_team) {
     // The retail row walk visits EVERY row. A row for another zone evicts the
     // player unconditionally, whatever the picked row decides; the picked
     // row yields 0 on a team mismatch, 0 on a duplicate (the player STAYS in
     // that row), 0 when it already holds eight, and 1 on the append. So a
     // failed pick (a full row, an unnumbered zone of the other team) still
-    // dequeues the player everywhere and it must re-pick.
-    // [orig: SpawnWaveList_TryQueuePlayer @0x52A490 — team @0x52a4b6,
+    // dequeues the player everywhere and it must re-pick. The row's team is
+    // matched against `slot_team`, the requester's (+0x1A0), not its
+    // entity's (D-NET-581).
+    // [orig: SpawnWaveList_TryQueuePlayer @0x52A490 — the zone @0x52a4b6,
+    //  the slot team @0x52A4BF against the row's @0x52A4C5..0x52A4C8,
     //  duplicate @0x52a4ca, cap 8 @0x52a4e6, append @0x52a4ec..0x52a4f3,
     //  other-row CIntList_RemoveById @0x52a4f8, result @0x52a511]
     bool result = false;
@@ -537,7 +547,7 @@ bool SpawnWaveList::try_queue(const World &world, EntityHandle zone,
             entry.queued.erase(new_end, old_end);
             continue;
         }
-        if (entry.team != player_entity->team) {
+        if (entry.team != slot_team) {
             result = false;
             continue;
         }

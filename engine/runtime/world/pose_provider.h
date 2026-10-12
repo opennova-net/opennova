@@ -117,7 +117,7 @@ public:
 	virtual bool resolve_userpoint_pivot(World &, EntityHandle, int, int32_t[3]) { return false; }
 
 	// Unposed COBJ pivot through the entity placement, for door transition sound.
-	// [orig: Entity_ProcessSectionDamageTransition @0x43F496..0x43F501]
+	// [orig: DoorClass_HandleEvent @0x43F496..0x43F501]
 	virtual bool resolve_section_pivot(World &, EntityHandle, int, int32_t[3]) { return false; }
 
 	// --- collision sections --------------------------------------------------

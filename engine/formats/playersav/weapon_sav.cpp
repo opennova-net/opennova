@@ -340,21 +340,27 @@ File make_defaults()
     return f;
 }
 
+bool update_player_class(File &file, size_t slot, uint8_t player_class)
+{
+    if (slot >= file.slots.size())
+        return false;
+    // The dialog walks the two 0x8006-byte side blocks for PLAYERCLASS
+    // [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EE6D].
+    file.slots[slot].blue.player_class = player_class;
+    file.slots[slot].red.player_class = player_class;
+    return true;
+}
+
 bool update_avatar_selection(File &file, size_t slot, SideId selected_side,
         uint8_t player_class, uint8_t avatar_a, uint8_t avatar_b,
         uint16_t avatar_packed)
 {
-    if (slot >= file.slots.size())
+    if (!update_player_class(file, slot, player_class))
         return false;
 
-    Record &record = file.slots[slot];
-    // The dialog walks the two 0x8006-byte side blocks for PLAYERCLASS, then
-    // indexes only g_PlayerInfoTeamIndex (@0x25dc548) for the avatar fields.
-    // [orig: PlayerInfo_SaveFromDialog @0x55EE3F-0x55EE6D,
-    //  @0x55EE93-0x55EF38]
-    record.blue.player_class = player_class;
-    record.red.player_class = player_class;
-    Side &side = record.side(selected_side);
+    // Then it indexes only g_PlayerInfoTeamIndex (@0x25dc548) for the avatar
+    // fields [orig: PlayerInfo_SaveFromDialog @0x55EE93-0x55EF38].
+    Side &side = file.slots[slot].side(selected_side);
     side.avatar_a = avatar_a;
     side.avatar_b = avatar_b;
     side.avatar_packed = avatar_packed;

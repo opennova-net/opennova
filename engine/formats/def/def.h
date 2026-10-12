@@ -667,9 +667,9 @@ inline size_t def_weapon_name_chars(const DefWeaponDef &weapon) { return weapon.
    the absolute value of atol of the next token (both "" / 0 when the line
    lacks them). A table row wherever it stands in the file.
    [orig: WeaponDefs_ParseLineCallback @0x543680 — the key @0x5437F2, the class
-   lookup of tokens[2] @0x5437FE -> sub_540590 @0x540590 (registered when new
+   lookup of tokens[2] @0x5437FE -> AmmoClass_FindIdByName @0x540590 (registered when new
    @0x543811..0x54385B), the cap abs(atol(tokens[3])) @0x543862..0x543873 into
-   dword_24E7DE0] */
+   g_AmmoClassMaxCarry] */
 typedef struct DefAmmoClassCarry {
     char name[64];
     int max_carry;

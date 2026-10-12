@@ -73,6 +73,13 @@ struct Session {
 	std::string client_scrk, server_scrk;
 	DirState cstate, sstate;
 	int participant = 0; // dense 1-based index in first-seen order
+	// The client's connect state: whether the connection still waits for its
+	// 0x82, and the CI its 0x42 carried (its connection's). A 0x42 (re)opens it;
+	// a session whose 0x42 is not in the capture counts as connecting until its
+	// first 0x82.
+	bool client_auth_seen = false;
+	bool connecting = true;
+	uint32_t client_ci = 0;
 };
 
 // Identity = (client UDP port, client key). Neither half is sufficient alone,
@@ -240,7 +247,11 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 			// historical behaviour for captures without one.
 			const uint64_t id = a.ck ? auth_identity(session_key, a.ck)
 			                         : uint64_t(session_key);
-			session_at(sessions, id).client_scrk = a.scrk;
+			Session &s = session_at(sessions, id);
+			s.client_scrk = a.scrk;
+			s.client_auth_seen = true;
+			s.connecting = true;
+			s.client_ci = a.ci;
 		}
 		break;
 	}
@@ -251,13 +262,31 @@ void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
 	}
 	case SESSION_OPCODE_SERVER_AUTH: {
 		ServerAuth a;
-		result.decoded = parse_server_auth(body.data(), body.size(), a);
-		if (result.decoded) {
+		// Every 0x82 is decoded: the client reads every one. Like the 0x82s
+		// it drops at the CI / CK match or out of the connect state, one
+		// whose CUs overrun the walk's bounds binds nothing; the client
+		// drops it earlier, at the walk (parse_server_auth refuses it).
+		result.decoded = true;
+		if (parse_server_auth(body.data(), body.size(), a)) {
 			// ServerAuth echoes the client key and carries the server key, so
-			// this is where both directions' routing is bound.
+			// this is where both directions' routing is bound, as the client
+			// keeps its key: only from an 0x82 that reaches a connecting
+			// connection with its CI and CK (the CK is the identity), and only
+			// on a nonzero CR. That 0x82 ends the connect state whatever its CR,
+			// and the client drops every other. A session whose 0x42 is not in
+			// the capture has no CI to correlate: its first 0x82 binds on a
+			// nonzero CR alone, and later ones drop until a 0x42 reopens it.
+			// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the state-3
+			//  lookup @0x6298E0..0x629901, the CU bounds' socket-pass return
+			//  @0x629F0B..0x629F12, the CI / CK match @0x629CAC..0x629CBF,
+			//  the CR split @0x629CD2..0x629CD6, the key @0x629D53]
 			const uint64_t id = a.ck ? auth_identity(session_key, a.ck)
 			                         : uint64_t(session_key);
-			session_at(sessions, id).server_scrk = a.scrk;
+			Session &s = session_at(sessions, id);
+			if (!s.connecting || (s.client_auth_seen && a.ci != s.client_ci)) break;
+			s.connecting = false;
+			if (a.cr == 0) break;
+			s.server_scrk = a.scrk;
 			if (a.sk) sessions.id_by_server_key[{session_key, a.sk}] = id;
 		}
 		break;

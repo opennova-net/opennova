@@ -223,7 +223,7 @@ private:
 	opennova::NwuLobbySession::Environment make_lobby_environment();
 	void on_gate_response(const opennova::GateResponse &parsed);
 	std::vector<std::pair<std::string, std::string>> make_cookie_vars();
-	void trace_sent_datagram(const std::vector<uint8_t> &dg);
+	void trace_sent_datagram(const opennova::PeerAddr &to, const std::vector<uint8_t> &dg);
 	void on_session_datagram(const opennova::NwuLobbySession::RxInfo &rx);
 	opennova::NwuHostRole::Hooks make_host_hooks();
 	void sync_session_state(); // ClientSession::State -> our State + signals

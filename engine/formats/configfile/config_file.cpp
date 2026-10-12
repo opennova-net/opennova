@@ -271,6 +271,56 @@ bool read_current_config_value(ConfigSection &s, const char *key, int index, std
 	return true;
 }
 
+// [orig: ConfigFile_ReadBinaryEntry @ 0x75f060]
+bool read_binary_entry(ConfigSection &s, const char *key, int32_t *integer) {
+	if (integer != nullptr) *integer = 0; // [orig: @ 0x75f09b]
+	size_t at = s.next != SIZE_MAX ? s.next : s.current; // [orig: @ 0x75f0b1..0x75f0c7]
+	const size_t count = config_entry_count(s);
+	if (at >= count) return false; // a null name [orig: @ 0x75f0cd]
+	// Each name the walk compares through stricmp [orig: @ 0x75f0d1, @ 0x75f0fb]; a stray one faults.
+	const auto compared = [&s, key](size_t i) {
+		const ConfigEntry &e = config_entry(s, i);
+		if (e.key_faults) s.fault = true;
+		return s.fault || strutil::iequals(config_entry_key(s, e), key);
+	};
+	if (!compared(at)) {
+		do {
+			s.current = at; // [orig: @ 0x75f0e0]
+			const ConfigEntry &passed = config_entry(s, at);
+			if (passed.values.empty() && !passed.value_pointer_set) {
+				s.next = SIZE_MAX; // [orig: @ 0x75f0e3 -> @ 0x75f132..0x75f135]
+				return false;
+			}
+			s.next = ++at; // [orig: @ 0x75f0ec]
+			if (at >= count) return false; // [orig: @ 0x75f0f7]
+		} while (!compared(at));
+	}
+	if (s.fault) return false;
+	s.next = at + 1; // [orig: @ 0x75f27b]
+	// The value the entry's pointer meets, whatever its count [orig: @ 0x75f10b, the test @ 0x75f11b]: its own first,
+	// none for a text entry of no value, the next one laid out for a CBIN entry of none.
+	const ConfigEntry &entry = config_entry(s, at);
+	const ConfigValue *value = nullptr;
+	if (!entry.values.empty()) {
+		value = &entry.values.front();
+	} else if (entry.value_pointer_set) {
+		// Past the last value the pointer meets heap bytes the parse never wrote (the allocation's slack, or the
+		// next block's header): no value here.
+		if (entry.pointed_entry == SIZE_MAX) return false;
+		value = &s.block->entries[entry.pointed_entry].values.front();
+	}
+	if (integer != nullptr && value != nullptr) {
+		if (value->type == 1)
+			*integer = value->integer; // [orig: @ 0x75f164]
+		else if (value->type == 2)
+			// [orig: fld @ 0x75f157, the _ftol2_sse call @ 0x75f159]
+			*integer = io::retail_ftol_sse2(static_cast<double>(value->real));
+		else
+			*integer = 0; // [orig: @ 0x75f12a]
+	}
+	return true;
+}
+
 // ---- the data-strings pool (config_file.h DataStringsPool) ----
 
 namespace {

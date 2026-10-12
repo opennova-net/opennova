@@ -29,7 +29,8 @@ void Server_RecordPingSample(const GameConfig &config, NapiNPConnection &conn,
 uint32_t Server_PlayerAveragePingMs(const NapiNPConnection &conn);
 
 // C2S 0x4C: clamp the reported level to 0..4, store it, and dirty the slot
-// only when it changed. [orig: NapiNPServerMsg_0x04C @0x5111B0 -> sub_5006E0 @0x5006E0]
+// only when it changed. [orig: NapiNPServerMsg_0x04C @0x5111B0 ->
+//  PlayerSlot_SetClientQuality @0x5006E0]
 void Server_StoreClientQuality(NapiNPConnection &conn, uint8_t reported);
 
 // The 1 Hz S2C 0x46 quality resend: inside the periodic block, gated

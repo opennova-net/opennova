@@ -70,8 +70,22 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // scar cache's +0xAC. The render tag binds only the draw. (A model whose own
     // first RMDL tag is a section row binds it too, and a husked fragment takes
     // its husk model's callback: D-ITEMDEF-20.)
-    // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6; EntityDef_LoadModelsAndCallbacks
+    // [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6; EntityDef_LoadModelsAndCallbacks
     //  @0x43A03C..0x43A047; EntityDef_InitAllCallbacks @0x4A5AF5..0x4A5B03]
+    // A tower's section clone collides at its own placement: the husk pivot is
+    // the cveh / chel / tank / cpln rows' world callback, a draw the render tag
+    // binds (death_section_pivot, section_clone_position), while collision is
+    // the +0xA8 of the model picked above (the husk while Flags & 4 and it
+    // loaded, else the graphic model), bound from that model's own first tag
+    // through the table's third column, which pivots nothing: row 0's generic
+    // callback, those four rows' simple one (which also replaces a vehicle's or
+    // a one-section graphic model's).
+    // [orig: Entity_BuildDeathSectionTransforms @0x492AF0; EntityDef_LoadModelsAndCallbacks
+    //  -- the graphic model's +0xA8 @0x43A03C..0x43A047, BoneCallback_Simple
+    //  @0x43A072, a husk model's @0x43A10D..0x43A11B -- through
+    //  BoneCallbackTable_LookupByTag @0x4E3310; row 0 column 3 @0x82CF0C ->
+    //  BoneCallback_Generic @0x4E26D0, row 'cveh' @0x82CFE0 column 3 @0x82CFEC ->
+    //  BoneCallback_Simple @0x4E2600]
     const bool sector_callback = e->palm_fragment;
     if (sector_callback) {
         const Vec3 sector_pos = palm_sector_position(world, *e);
@@ -79,11 +93,6 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
                 int32_t(sector_pos.y * 65536), int32_t(sector_pos.z * 65536)};
         world_mat = collision_matrix_from_euler(heading,
                 bam_from_degrees_wrapped(e->pitch), bam_from_degrees_wrapped(e->roll), pos);
-    } else if (e->section_clone) {
-        const Vec3 clone_pos = section_clone_position(world, *e);
-        world_mat.m[3] = int32_t(clone_pos.x * 65536);
-        world_mat.m[7] = int32_t(clone_pos.y * 65536);
-        world_mat.m[11] = int32_t(clone_pos.z * 65536);
     }
     bool live_pose = !sector_callback && !e->item_section_piece &&
             instance->section_matrices.size() == m->sections.size();

@@ -76,7 +76,7 @@ void apply_death_screen_input(mission::MissionKernel &kernel, ClientRuntime &run
 			// The chase: the mouse onto the orbit (the axis pass runs ahead of
 			// the queued keys), then the keys onto the orbit/zoom actions in
 			// catalog row order [orig: Input_ProcessFrame @0x49d58b ahead of
-			// the dispatch @0x49d5d8; sub_52AD50 @0x52ada2..0x52ae99 — 0x98
+			// the dispatch @0x49d5d8; DeathScreen_FilterInputAction @0x52ada2..0x52ae99 — 0x98
 			// forward -> 409, 0x97 back -> 410, 0x9C / 0x9E strafe / turn left
 			// -> 405, 0x9D / 0x9F right -> 406, 0x9A look down -> 408, 0x9B
 			// look up -> 407].
@@ -92,13 +92,13 @@ void apply_death_screen_input(mission::MissionKernel &kernel, ClientRuntime &run
 			if (keys.turn_right) world::player_view_chase_action(lp.view, 406, bits);
 		}
 		// Both target sub-modes consume the movement and look rows
-		// [orig: sub_52AD50 @0x52aeb4 (first person)].
+		// [orig: DeathScreen_FilterInputAction @0x52aeb4 (first person)].
 		keys.forward = keys.back = keys.left = keys.right = false;
 		keys.look_up = keys.look_down = keys.turn_left = keys.turn_right = false;
 		look_x = look_y = 0.0f;
 	}
 	// A chase or first-person sub-mode without a target walks the target list
-	// in sub_52AD50 (@0x52ad75..0x52ad79), but every writer that leaves either
+	// in DeathScreen_FilterInputAction (@0x52ad75..0x52ad79), but every writer that leaves either
 	// sub-mode leaves a target (docs/interface/hud-re.md, the spectate state),
 	// so that leg is unreachable and the keys pass as in the free sub-mode.
 	lp.set_movement_keys(keys.forward, keys.back, keys.left, keys.right, keys.lean_left,

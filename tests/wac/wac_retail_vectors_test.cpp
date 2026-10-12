@@ -183,22 +183,17 @@ void test_vm_vectors() {
 		vm.load(program);
 		for (int step = 0; step < kVmSteps; ++step) {
 			vm.execute(*world);
-			const WacVm::RuntimeState state = vm.capture_runtime_state();
+			const world::ScriptVarStore::WacState &state = world->script.vars.wac;
 			std::vector<int32_t> got;
 			got.push_back(vm.accumulator());
 			for (int i = 0; i < 8; ++i) got.push_back(world->script.vars.get_mission(i));
 			for (int i = 0; i < 4; ++i) got.push_back(world->script.vars.get_global(i));
-			for (int i = 0; i < 4; ++i)
-				got.push_back(size_t(i) < state.loop_counters.size() ? state.loop_counters[size_t(i)] : 0);
-			for (int i = 0; i < 4; ++i)
-				got.push_back(size_t(i) < state.loop_choices.size() ? state.loop_choices[size_t(i)] : 0);
-			got.push_back(static_cast<int32_t>(state.rng_seed));
-			const auto event = [&](int i) -> const EventState * {
-				return i < program.event_count && size_t(i) < state.events.size() ? &state.events[size_t(i)] : nullptr;
-			};
-			for (int i = 0; i < 4; ++i) got.push_back(event(i) ? int32_t(event(i)->last_fired_tick) : 0);
-			for (int i = 0; i < 4; ++i) got.push_back(event(i) && event(i)->ever_fired ? 1 : 0);
-			for (int i = 0; i < 4; ++i) got.push_back(event(i) && event(i)->active ? 1 : 0);
+			for (int i = 0; i < 4; ++i) got.push_back(state.do_counter[size_t(i)]);
+			for (int i = 0; i < 4; ++i) got.push_back(state.do_choice[size_t(i)]);
+			got.push_back(static_cast<int32_t>(state.dornd_seed));
+			for (int i = 0; i < 4; ++i) got.push_back(static_cast<int32_t>(state.fired_tick[size_t(i)]));
+			for (int i = 0; i < 4; ++i) got.push_back(state.ever_fired[size_t(i)]);
+			for (int i = 0; i < 4; ++i) got.push_back(state.active[size_t(i)]);
 			const int32_t *expected = vector.values + step * kVmValuesPerStep;
 			for (int k = 0; k < kVmValuesPerStep; ++k) {
 				if (got[size_t(k)] == expected[k]) continue;

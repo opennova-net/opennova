@@ -23,6 +23,7 @@
 #include <net/novaworld/http_flow.h>
 #include <net/novaworld/lobby_vars.h>
 #include <net/novaworld/nwu_host_role.h>
+#include <net/npwire/flat_tlv.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/protocol_message.h>
@@ -36,11 +37,13 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace opennova;
@@ -456,6 +459,37 @@ void test_peer_disconnect_legs() {
 		       "0x46 after a punt echoes the latched record");
 	}
 	{
+		// The 0x86 record is latched with the PEER role 1 whatever DS the wire carried, its
+		// DSTR cut at 127 and its DDSTR at 31, and the 0x46 burst echoes that latched record.
+		// [orig: Nwu_HandleDisconnect @0x623CE0 - the role @0x624065, DSTR 128 @0x624079,
+		//  DDSTR 32 @0x624097]
+		MiniServer server;
+		ClientSession::Config cfg;
+		cfg.client_index = 0x00000034u;
+		cfg.client_key = 0x34343434u;
+		ClientSession client(cfg);
+		if (!expect(bring_up(server, client), "0x86 caps leg: session reaches Verified")) return;
+		DisconnectEvent wire;
+		wire.ds = 2;
+		wire.dc = 2;
+		wire.dstr = std::string(200, 'd');
+		wire.dpc = 5;
+		wire.ddstr = std::string(50, 't');
+		const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+				server_goodbye_to_bytes(cfg.client_key, wire));
+		const DisconnectEvent latched =
+				make_disconnect_event(1, 2, 0, 0, wire.dstr, 5, wire.ddstr);
+		std::vector<std::vector<uint8_t>> out;
+		expect(client.handle_datagram(goodbye.data(), goodbye.size(), out) &&
+		               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, latched)),
+		       "0x86 caps leg: the 0x46 burst echoes the latched record");
+		expect(client.disconnect_event().ds == 1 &&
+		               client.disconnect_event().dstr == std::string(127, 'd') &&
+		               client.disconnect_event().ddstr == std::string(31, 't') &&
+		               client.last_error() == std::string(31, 't'),
+		       "0x86 caps leg: role 1, DSTR 127 and DDSTR 31 are latched");
+	}
+	{
 		MiniServer server;
 		ClientSession::Config cfg;
 		cfg.client_index = 0x00000032u;
@@ -463,8 +497,19 @@ void test_peer_disconnect_legs() {
 		ClientSession client(cfg);
 		if (!expect(bring_up(server, client), "H:0x03 leg: session reaches Verified")) return;
 
-		const DisconnectEvent description =
-				make_disconnect_event(1, 2, 7, 0, "server shutting down", 4, "NP.S:PT:MSGCRE");
+		// The host's record (DS 1, a 140-character DSTR) is latched with the client
+		// connection's LOCAL role 2 and its DSTR cut at 127; the burst echoes that record.
+		// [orig: CNapiNPConnection_HandleDescriptionPacket @0x621AE0 - the role
+		//  @0x621CC4..0x621CDE, DSTR 128 @0x621D0C, DDSTR 32 @0x621D2E]
+		DisconnectEvent description;
+		description.ds = 1;
+		description.dc = 2;
+		description.dp1 = 7;
+		description.dstr = std::string(140, 's');
+		description.dpc = 4;
+		description.ddstr = "NP.S:PT:MSGCRE";
+		const DisconnectEvent latched =
+				make_disconnect_event(2, 2, 7, 0, description.dstr, 4, description.ddstr);
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(
 				hightag::DESCRIPTION_PACKET, connection_description_to_bytes(description),
@@ -472,13 +517,14 @@ void test_peer_disconnect_legs() {
 		const auto datagram = server.wrap(std::move(messages));
 		std::vector<std::vector<uint8_t>> out;
 		expect(client.handle_datagram(datagram.data(), datagram.size(), out) &&
-		               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, description)),
+		               is_goodbye_burst(out, client_goodbye_to_bytes(server.server_sk, latched)),
 		       "H:0x03 is terminal: the teardown's 0x46 burst and no ack follow it");
 		expect(client.state() == ClientSession::State::Closed && client.disconnected_by_peer(),
 		       "H:0x03 closes the session as a peer disconnect");
 		expect(client.last_error() == "NP.S:PT:MSGCRE" && client.disconnect_event().dpc == 4 &&
-		               client.disconnect_event().dstr == "server shutting down",
-		       "H:0x03: the description record is latched");
+		               client.disconnect_event().ds == 2 &&
+		               client.disconnect_event().dstr == std::string(127, 's'),
+		       "H:0x03: the description record is latched with role 2 and DSTR 127");
 		// Once closed, further 0x83s are dropped.
 		const auto late = server.push(make_server_stop_hosting(0));
 		out.clear();
@@ -783,6 +829,131 @@ void test_client_correlates_handshake_echoes() {
 	               client.state() == ClientSession::State::Auth &&
 	               client.server_key() == 0,
 	       "lobby ServerAuth with mismatched CK cannot install keys");
+
+	// D-NET-437: no field is required. An SCRK-less 0x82 with a foreign CI is dropped like any
+	// mismatch; one whose CR is 2 accepts, its empty SCRK kept; a CR 0 one without JFC, JFP or
+	// JFS rejects. [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
+	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
+	ServerAuth scrkless_foreign = build_server_auth(auth, 0x7F000001u, 5000, 0xAABBCCDDu, "");
+	scrkless_foreign.ci ^= 2u;
+	const std::vector<uint8_t> scrkless_foreign_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(scrkless_foreign));
+	out.clear();
+	expect(client.handle_datagram(
+			       scrkless_foreign_datagram.data(), scrkless_foreign_datagram.size(), out) &&
+	               client.state() == ClientSession::State::Auth && client.server_key() == 0,
+	       "lobby ServerAuth without SCRK and with a foreign CI is dropped, still connecting");
+	ServerAuth cr_two = build_server_auth(auth, 0x7F000001u, 5000, 0xAABBCCDDu, "");
+	cr_two.cr = 2;
+	const std::vector<uint8_t> cr_two_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(cr_two));
+	out.clear();
+	expect(client.handle_datagram(cr_two_datagram.data(), cr_two_datagram.size(), out) &&
+	               client.state() == ClientSession::State::Verifying &&
+	               client.server_key() == 0xAABBCCDDu && client.server_scrk().empty(),
+	       "lobby ServerAuth with CR 2 and no SCRK accepts");
+
+	ClientSession rejected(cfg);
+	const std::vector<uint8_t> rejected_hello = rejected.start();
+	ClientHello rejected_client_hello;
+	expect(server_decode_inbound(rejected_hello, opcode, body) &&
+	               parse_client_hello(body.data(), body.size(), rejected_client_hello),
+	       "reject leg parses lobby ClientHello");
+	const std::vector<uint8_t> rejected_server_hello = server_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO,
+			server_hello_to_bytes(build_server_hello(rejected_client_hello, 0x7F000001u, 5000)));
+	out.clear();
+	ClientAuth rejected_auth;
+	expect(rejected.handle_datagram(rejected_server_hello.data(), rejected_server_hello.size(), out) &&
+	               out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
+	               parse_client_auth(body.data(), body.size(), rejected_auth),
+	       "reject leg reaches Auth");
+	ServerAuth bare_reject = build_server_auth(rejected_auth, 0x7F000001u, 5000, 0, "");
+	bare_reject.cr = 0;
+	const std::vector<uint8_t> bare_reject_datagram = server_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(bare_reject));
+	out.clear();
+	expect(!rejected.handle_datagram(bare_reject_datagram.data(), bare_reject_datagram.size(), out) &&
+	               rejected.state() == ClientSession::State::Error &&
+	               rejected.last_error() == "ServerAuth rejected (cr=0)",
+	       "lobby ServerAuth with CR 0 and no JFC, JFP or JFS rejects");
+}
+
+// A flat-TLV body with every field named `unwanted` left out, the rest as written.
+std::vector<uint8_t> without_field(const std::vector<uint8_t> &body, std::string_view unwanted) {
+	std::vector<uint8_t> out;
+	size_t pos = 0;
+	while (pos < body.size()) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) break;
+		if (field.name != unwanted)
+			out.insert(out.end(), body.begin() + static_cast<std::ptrdiff_t>(pos),
+			           body.begin() + static_cast<std::ptrdiff_t>(next));
+		pos = next;
+	}
+	return out;
+}
+
+bool has_field(const std::vector<uint8_t> &body, std::string_view wanted) {
+	size_t pos = 0;
+	while (pos < body.size()) {
+		FlatTlvField field;
+		const size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) return false;
+		if (field.name == wanted) return true;
+		pos = next;
+	}
+	return false;
+}
+
+// D-NET-452: the lobby session reads any 0x81 with its CI; one whose PN, PG or PV1 is not the
+// session's protocol's is dropped, and one without HK joins with a 0x42 that carries none.
+// [orig: Nwu_HandleServerHello @0x626D20 - HK zeroed @0x626E97, the CI lookup @0x627533, PN
+//  @0x62758B, PG @0x627591..0x627624, PV1 @0x627643; CNapiNPConnection_SendClientJoin
+//  @0x61FE20 - the HK gate @0x6200F2]
+void test_client_reads_the_server_hello_as_retail() {
+	ClientSession::Config cfg;
+	cfg.client_index = 0x3D3D3D3Du;
+	cfg.client_key = 0x3E3E3E3Eu;
+	ClientSession client(cfg);
+	const std::vector<uint8_t> hello_datagram = client.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello hello;
+	if (!expect(server_decode_inbound(hello_datagram, opcode, body) &&
+	                    parse_client_hello(body.data(), body.size(), hello),
+	            "identity: the lobby ClientHello parses")) return;
+	std::vector<std::vector<uint8_t>> out;
+	const auto deliver = [&](const ServerHello &reply, bool keep_hk) {
+		std::vector<uint8_t> bytes = server_hello_to_bytes(reply);
+		if (!keep_hk) bytes = without_field(bytes, "HK");
+		const std::vector<uint8_t> datagram =
+				server_encode_outbound(SESSION_OPCODE_SERVER_HELLO, std::move(bytes));
+		out.clear();
+		return client.handle_datagram(datagram.data(), datagram.size(), out);
+	};
+	ServerHello foreign_pn = build_server_hello(hello, 0x7F000001u, 5000);
+	foreign_pn.pn = "JOINTOPERATIONS";
+	ServerHello foreign_pg = build_server_hello(hello, 0x7F000001u, 5000);
+	foreign_pg.pg[0] ^= 1u;
+	ServerHello foreign_pv1 = build_server_hello(hello, 0x7F000001u, 5000);
+	foreign_pv1.pv1 = "1.0.0";
+	for (const ServerHello *foreign : {&foreign_pn, &foreign_pg, &foreign_pv1}) {
+		expect(deliver(*foreign, false) && out.empty() &&
+		               client.state() == ClientSession::State::Hello,
+		       "identity: an HK-less 0x81 with its CI but a foreign PN, PG or PV1 is dropped");
+	}
+	ServerHello no_hk = build_server_hello(hello, 0x7F000001u, 5000);
+	no_hk.pn = "novaworldudp";
+	ClientAuth auth;
+	if (!expect(deliver(no_hk, false) && out.size() == 1 &&
+	                    client.state() == ClientSession::State::Auth &&
+	                    server_decode_inbound(out[0], opcode, body) &&
+	                    parse_client_auth(body.data(), body.size(), auth),
+	            "identity: an HK-less 0x81 whose PN differs only in case joins")) return;
+	expect(!has_field(body, "HK") && auth.hk == 0 && auth.ci == cfg.client_index,
+	       "identity: the 0x42 from an HK-less 0x81 carries no HK");
 }
 
 // The browser completes NWJoin after the UDP session has already verified.
@@ -1008,6 +1179,33 @@ void test_reconnect_schedule() {
 	expect(pump_until_probe(client, t0 + span + 1, 200000, out) == 0, "a disarmed session never re-probes");
 }
 
+// The re-join's CK is a session key: a zero draw is drawn again, so a generator yielding 0 and
+// then 1 re-joins with CK 1, on the client and on the 0x42.
+// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey @0x61EA70,
+//  jz @0x61EAC3]
+void test_reconnect_redraws_a_zero_client_key() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x0000003Cu;
+	cfg.client_key = 0x3C3C3C3Cu;
+	inject_reconnect_keys(cfg, 0);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "zero CK: session reaches Verified")) return;
+	client.set_clock_ms(240001);
+	std::vector<std::vector<uint8_t>> out;
+	client.pump(out);
+	if (!expect(client.reconnecting(), "zero CK: the reap starts the reconnect")) return;
+	if (!expect(pump_until_probe(client, 240002, 5000, out) != 0, "zero CK: the probe goes out")) return;
+	std::vector<std::vector<uint8_t>> joined;
+	exchange(server, client, out, joined);
+	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth,
+	            "zero CK: the ServerHello re-joins with one 0x42")) return;
+	expect(client.client_key() == 1u, "zero CK: the re-join draws past the zero to CK 1");
+	std::vector<std::vector<uint8_t>> up;
+	exchange(server, client, joined, up);
+	expect(server.last_dcnt == 1 && server.client_ck == 1u, "zero CK: the re-join's 0x42 carries CK 1");
+}
+
 // A joiner's reconnect: the word stays 3 across the drop, the re-join carries DCNT/RCNT with a
 // fresh CK and SCRK, the service's 0x82 echoes RCNT, and the re-verify replays the play request
 // (CurrentlyPlaying=1, the same PlaySetup). The GSID/NWUID/web domain the connection fed clear on
@@ -1213,6 +1411,90 @@ void test_reconnect_join_timeout() {
 	expect(closed_at == probe_at + 20001, "join timeout: the leg gives up past 20000 ms");
 	expect(reprobe_at == probe_at + 21002 && client.reconnecting(),
 	       "join timeout: probing resumes past hello + 1000 + 20000");
+}
+
+// A reconnect takes a 0x81 only while its enumerator probes: inside a probe window, never ahead
+// of the first window, in the re-join's 0x42 leg, in the gap after that leg gives up or after a
+// window runs out, or once the local reset destroyed the connection. A missed 0x81 is not
+// claimed (takes_server_hello), re-keys nothing and counts as no taken hello, so the lobby's
+// nw_peer() stays put. [orig: Nwu_HandleServerHello @0x626D20 - the enumerator's +0x2C
+//  @0x627559, the miss returning 0 @0x626DCB, the re-join's clear @0x627E72;
+//  CNapiNPConnection_PumpStateMachine @0x6292E0 - the window's set @0x62965B, its end's clear
+//  @0x629693; ResetToDisconnected - CNapiNPConnection_Destroy @0x4D08A7]
+void test_reconnect_takes_a_hello_only_while_probing() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x0000003Du;
+	cfg.client_key = 0x3D3D3D3Du;
+	inject_reconnect_keys(cfg, 0x56565600u);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "probe gate: session reaches Verified")) return;
+	// The service's 0x81 for this CI and identity, as any probe's reply carries it.
+	ClientSession twin(cfg);
+	const auto hello = server.respond(twin.start());
+	const DisconnectEvent stop = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(cfg.client_key, stop));
+	std::vector<std::vector<uint8_t>> out;
+	client.handle_datagram(goodbye.data(), goodbye.size(), out);
+	if (!expect(client.reconnecting(), "probe gate: the drop starts the reconnect")) return;
+	// `missed` holds when the 0x81 is neither claimed nor read: no 0x42, no re-key, no count.
+	const auto missed = [&](const char *what) {
+		const uint32_t taken = client.server_hellos_taken();
+		const uint32_t ck = client.client_key();
+		const ClientSession::State state = client.state();
+		std::vector<std::vector<uint8_t>> replies;
+		const bool claimed = client.takes_server_hello(hello.data(), hello.size());
+		client.handle_datagram(hello.data(), hello.size(), replies);
+		expect(!claimed && replies.empty() && client.server_hellos_taken() == taken &&
+		               client.client_key() == ck && client.state() == state,
+		       what);
+	};
+	client.set_clock_ms(1);
+	out.clear();
+	client.pump(out);
+	missed("probe gate: a 0x81 ahead of the first window is missed");
+
+	const uint32_t probe_at = pump_until_probe(client, 2, 5000, out);
+	if (!expect(probe_at != 0, "probe gate: the window's probe goes out")) return;
+	expect(client.takes_server_hello(hello.data(), hello.size()), "probe gate: the window claims it");
+	std::vector<std::vector<uint8_t>> joined;
+	client.handle_datagram(hello.data(), hello.size(), joined);
+	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth &&
+	                    client.client_key() == 0x56565600u,
+	            "probe gate: the window's 0x81 re-joins with one 0x42"))
+		return;
+	missed("probe gate: a 0x81 in the re-join's 0x42 leg is missed");
+
+	// The 0x42 leg gives up past 20000 ms; the next window opens past hello + 1000 + 20000.
+	uint32_t t = probe_at + 1;
+	for (; t <= probe_at + 20001; ++t) {
+		client.set_clock_ms(t);
+		out.clear();
+		client.pump(out);
+	}
+	if (!expect(client.state() == ClientSession::State::Closed, "probe gate: the 0x42 leg gave up"))
+		return;
+	missed("probe gate: a 0x81 in the gap after the 0x42 leg is missed");
+
+	// A window that runs out: claimed through its last pump, missed in the gap after it.
+	const uint32_t reprobe_at = pump_until_probe(client, t, 5000, out);
+	if (!expect(reprobe_at != 0, "probe gate: the next window opens")) return;
+	uint32_t last_claimed = 0;
+	for (t = reprobe_at; t <= reprobe_at + 10000; ++t) {
+		client.set_clock_ms(t);
+		out.clear();
+		client.pump(out);
+		if (client.takes_server_hello(hello.data(), hello.size())) last_claimed = t;
+	}
+	// The window opened one pump ahead of its first 0x41 and closes past open + 10000.
+	expect(last_claimed == reprobe_at + 9999, "probe gate: the window claims until it runs out");
+	missed("probe gate: a 0x81 in the gap after a window is missed");
+
+	// The local reset destroys the connection mid-window.
+	if (!expect(pump_until_probe(client, t, 5000, out) != 0, "probe gate: a third window opens")) return;
+	(void)client.build_goodbye();
+	missed("probe gate: a 0x81 after the local reset is missed");
 }
 
 // A verified lobby session (word 1) reconnects too, and its re-verify re-requests nothing.
@@ -1515,8 +1797,11 @@ int main() {
 	test_reconnect_wire();
 	test_reconnect_schedule();
 	test_reconnect_replay();
+	test_reconnect_redraws_a_zero_client_key();
+	test_client_reads_the_server_hello_as_retail();
 	test_reconnect_rehost();
 	test_reconnect_join_timeout();
+	test_reconnect_takes_a_hello_only_while_probing();
 	test_reconnect_verified_word();
 
 	MiniServer server;

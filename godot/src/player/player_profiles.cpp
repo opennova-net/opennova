@@ -1,12 +1,15 @@
 #include "player/player_profiles.h"
 
 #include "object/avatar_database.h"
+#include "object/weapon_database.h"
+#include "player/player_info_kit_restore.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/weapon_profile_summary.h"
 #include "util/string_convert.h"
 
 #include <formats/playersav/player_sav.h>
 #include <runtime/inmatch/character_registry.h>
+#include <runtime/menu/player_info_kit.h>
 #include <runtime/profile/profile_controls.h>
 
 #include <cstdio>
@@ -224,6 +227,10 @@ bool PlayerProfiles::is_nameless() const {
 	return (store_.current().flags & playersav::kRecordFlagNoName) != 0;
 }
 
+String PlayerProfiles::set_name_edit(const String &p_text) {
+	return opennova::to_gd(store_.set_name_edit(p_text.utf8().get_data()));
+}
+
 void PlayerProfiles::commit_name(const String &p_text) {
 	store_.commit_name(p_text.utf8().get_data());
 }
@@ -243,8 +250,11 @@ PackedStringArray PlayerProfiles::get_macros() const {
 }
 
 int PlayerProfiles::get_voice(int p_side) const {
-	if (p_side < 0 || p_side > 1) return 0;
-	return store_.current().voice[static_cast<size_t>(p_side)];
+	return opennova::profile::voice_override(store_.current(), p_side);
+}
+
+void PlayerProfiles::set_voice(int p_side, int p_value) {
+	opennova::profile::set_voice_override(store_.current(), p_side, p_value);
 }
 
 bool PlayerProfiles::is_auto_reload_checked() const {
@@ -282,43 +292,63 @@ Ref<WeaponProfileSummary> PlayerProfiles::character_summary() const {
 	return out;
 }
 
+Ref<PlayerInfoKitRestore> PlayerProfiles::restore_player_info_kit(int p_side,
+		const Ref<WeaponDatabase> &p_weapons) const {
+	Ref<PlayerInfoKitRestore> out;
+	out.instantiate();
+	if (p_side < 0 || p_side > 1) return out;
+	const playersav::Side &side =
+			store_.current_weapons().side(p_side == 0 ? playersav::SideId::Blue : playersav::SideId::Red);
+	const opennova::def::DefWeaponsFile empty{};
+	const playersav::KitPage *page = side.selected_page();
+	out->assign(opennova::menu::player_info_restore_kit(page != nullptr ? *page : playersav::KitPage{},
+						p_weapons.is_valid() ? p_weapons->native_file() : empty),
+			static_cast<int>(side.player_class));
+	return out;
+}
+
 Error PlayerProfiles::apply_character_selection(const Dictionary &p_profile) {
 	if (p_profile.is_empty()) return ERR_INVALID_PARAMETER;
-	// The ACCEPT snapshot (PlayerCharacterSelectionState.snapshot): the shared
-	// PLAYERCLASS value plus side_profiles[blue, red], each carrying the side's
-	// authored nationality/division ids and packed character id; the engine's
-	// update_avatar_selection is the dialog's write.
+	// The dialog's snapshot (PlayerCharacterSelectionState.snapshot): the shared
+	// PLAYERCLASS value, the shown side (`team`) and side_profiles[blue, red],
+	// each carrying the side's authored nationality/division ids and packed
+	// character id. The engine's update_player_class and update_avatar_selection
+	// are the dialog's write: the class to both sides, the character of the shown
+	// side alone; the side not shown keeps its bytes, as does a shown side with no
+	// selection (no character table), the class and the kit written all the same.
 	const int player_class = p_profile.get("player_class", -1);
 	if (player_class < playersav::kMinPlayerClass || player_class > playersav::kMaxPlayerClass)
 		return ERR_INVALID_PARAMETER;
+	const int team = p_profile.get("team", -1);
+	if (team < 0 || team > 1) return ERR_INVALID_PARAMETER;
+	const playersav::SideId shown = team == 0 ? playersav::SideId::Blue : playersav::SideId::Red;
 	const Array side_profiles = p_profile.get("side_profiles", Array());
 	playersav::File &file = store_.weapon_sav();
 	const size_t slot = static_cast<size_t>(store_.current_slot());
 	// Every input is checked before the record changes.
-	uint8_t avatar_a[2] = {};
-	uint8_t avatar_b[2] = {};
-	uint16_t avatar_packed[2] = {};
-	bool has_side[2] = {};
-	for (int side = 0; side < 2; ++side) {
-		Dictionary selected;
-		if (side < side_profiles.size() && side_profiles[side].get_type() == Variant::DICTIONARY)
-			selected = side_profiles[side];
-		if (selected.is_empty()) continue;
-		if (!avatar_selection_from_dictionary(selected, side, avatar_a[side], avatar_b[side],
-					avatar_packed[side]))
-			return ERR_INVALID_PARAMETER;
-		has_side[side] = true;
-	}
-	if (!has_side[0] && !has_side[1]) return ERR_INVALID_PARAMETER;
-	// The edited side's kit page as the PLAYER screen serializes it; an absent
-	// "kit" key (no weapon.def loaded) leaves the pages untouched.
+	uint8_t avatar_a = 0;
+	uint8_t avatar_b = 0;
+	uint16_t avatar_packed = 0;
+	Dictionary selected;
+	if (team < side_profiles.size() && side_profiles[team].get_type() == Variant::DICTIONARY)
+		selected = side_profiles[team];
+	const bool has_character = !selected.is_empty();
+	if (has_character &&
+			!avatar_selection_from_dictionary(selected, team, avatar_a, avatar_b, avatar_packed))
+		return ERR_INVALID_PARAMETER;
+	// The shown side's kit page as the PLAYER screen serializes it, into the page
+	// of the class the screen restored; an absent "kit" key (no weapon.def
+	// loaded) leaves the pages untouched. A side whose class byte picks no page
+	// (outside 5..9) had nothing restored, and its kit goes into the page of the
+	// class the dialog writes (D-PLAYERINFO-26).
 	bool has_kit = false;
-	int team = -1;
+	int kit_class = player_class;
 	playersav::KitPage page;
 	if (p_profile.has("kit")) {
-		team = p_profile.get("team", -1);
+		kit_class = p_profile.get("kit_class", player_class);
 		const Array kit = p_profile.get("kit", Array());
-		if (team < 0 || team > 1) return ERR_INVALID_PARAMETER;
+		if (kit_class < playersav::kMinPlayerClass || kit_class > playersav::kMaxPlayerClass)
+			kit_class = player_class;
 		for (int i = 0; i < kit.size(); ++i) {
 			if (kit[i].get_type() != Variant::DICTIONARY) return ERR_INVALID_PARAMETER;
 			const Dictionary entry = kit[i];
@@ -333,18 +363,13 @@ Error PlayerProfiles::apply_character_selection(const Dictionary &p_profile) {
 		}
 		has_kit = true;
 	}
-	for (int side = 0; side < 2; ++side) {
-		if (!has_side[side]) continue;
-		playersav::update_avatar_selection(file, slot,
-				side == 0 ? playersav::SideId::Blue : playersav::SideId::Red,
-				static_cast<uint8_t>(player_class), avatar_a[side], avatar_b[side],
-				avatar_packed[side]);
-	}
-	if (has_kit) {
-		playersav::Side &side = file.slots[slot].side(
-				team == 0 ? playersav::SideId::Blue : playersav::SideId::Red);
-		side.pages[static_cast<size_t>(player_class) - playersav::kMinPlayerClass] = std::move(page);
-	}
+	playersav::update_player_class(file, slot, static_cast<uint8_t>(player_class));
+	if (has_character)
+		playersav::update_avatar_selection(file, slot, shown, static_cast<uint8_t>(player_class),
+				avatar_a, avatar_b, avatar_packed);
+	if (has_kit)
+		file.slots[slot].side(shown).pages[static_cast<size_t>(kit_class) - playersav::kMinPlayerClass] =
+				std::move(page);
 	return OK;
 }
 
@@ -371,6 +396,7 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_nameless"), &PlayerProfiles::is_nameless);
 	ClassDB::bind_method(D_METHOD("is_first_run"), &PlayerProfiles::is_first_run);
 	ClassDB::bind_method(D_METHOD("rename", "text"), &PlayerProfiles::rename);
+	ClassDB::bind_method(D_METHOD("set_name_edit", "text"), &PlayerProfiles::set_name_edit);
 	ClassDB::bind_method(D_METHOD("commit_name", "text"), &PlayerProfiles::commit_name);
 	ClassDB::bind_method(D_METHOD("reset_current"), &PlayerProfiles::reset_current);
 	ClassDB::bind_static_method("PlayerProfiles", D_METHOD("word_names"), &PlayerProfiles::word_names);
@@ -379,6 +405,7 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_flags"), &PlayerProfiles::get_flags);
 	ClassDB::bind_method(D_METHOD("get_macros"), &PlayerProfiles::get_macros);
 	ClassDB::bind_method(D_METHOD("get_voice", "side"), &PlayerProfiles::get_voice);
+	ClassDB::bind_method(D_METHOD("set_voice", "side", "value"), &PlayerProfiles::set_voice);
 	ClassDB::bind_method(D_METHOD("get_binding_count"), &PlayerProfiles::get_binding_count);
 	ClassDB::bind_method(D_METHOD("is_auto_reload_checked"), &PlayerProfiles::is_auto_reload_checked);
 	ClassDB::bind_method(D_METHOD("is_auto_medic_checked"), &PlayerProfiles::is_auto_medic_checked);
@@ -387,6 +414,8 @@ void PlayerProfiles::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_auto_medic_checked", "checked"),
 			&PlayerProfiles::set_auto_medic_checked);
 	ClassDB::bind_method(D_METHOD("character_summary"), &PlayerProfiles::character_summary);
+	ClassDB::bind_method(D_METHOD("restore_player_info_kit", "side", "weapons"),
+			&PlayerProfiles::restore_player_info_kit);
 	ClassDB::bind_method(D_METHOD("apply_character_selection", "profile"),
 			&PlayerProfiles::apply_character_selection);
 	ClassDB::bind_method(D_METHOD("record_mission_start", "campaign"),

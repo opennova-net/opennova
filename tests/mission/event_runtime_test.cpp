@@ -1,6 +1,6 @@
 // BMS event runtime + cross-system tests. The headline assertion: the BMS event
 // evaluator and the WAC VM share ONE world and ONE variable store (the original's
-// dword_C6B240) -- they are two interfaces to the same thing.
+// g_WacMissionVars) -- they are two interfaces to the same thing.
 //
 // Cadence model under test (grilled 2026-06-10, docs/mission/bms-event-runtime-re.md):
 // normal events are processed in QUARTER-LIST slices every 16th tick
@@ -278,6 +278,130 @@ static void test_bms_increment_and_threshold() {
     tick_n(w, 224);
     CHECK(w.script.vars.get_mission(2) == 4); // A fired at ticks 16/80/144/208
     CHECK(w.script.vars.get_mission(3) == 1); // B saw V2==3 at tick 160, fired once
+}
+
+// The variable trigger and MisvarChange index the mission bank with no bound:
+// words 512..767 run on into the G bank that follows its 2048 bytes, and the
+// index scales by 4 in a 32-bit address, so only its low 30 bits select the
+// word. A word past both banks, or a small negative index, lands in neither:
+// 768 is IF 0's fired tick and -1 is RND (D-EVT-13), and the rest is read 0
+// and dropped here (D-EVT-12; the residual is D-EVT-14).
+// [orig: EventTrigger_EvaluateCondition @0x453620 - `mov ecx,
+//  g_WacMissionVars[eax*4]` @0x453AAC; EventAction_Dispatch @0x4542E0 case 5 - the
+//  Set @0x45439A, the Increment @0x4543EE; WacScript_ResolveParameter
+//  @0x4F2920 - G# = 0xC6BA40 + 4n @0x4F2B66]
+static void test_misvar_index_runs_into_the_global_bank() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+
+    // Event A (fire-once, unconditional): five writes. Event B: when the word
+    // at index 700 (G188) is 42, set V9 = 1.
+    bms::Event a = simple_event(bms::EventFlags::None, 0);
+    a.action_count = 5;
+    bms::Event b{};
+    b.flags = bms::EventFlags::None;
+    b.trigger_index = 0;
+    b.trigger_count = 1;
+    b.action_index = 5;
+    b.action_count = 1;
+    bms::Trigger t{};
+    t.main_type = bms::TriggerMainType::MissionVariable;
+    t.sub_type = static_cast<int32_t>(bms::MissionVariableTriggerType::MissionVariableIsEqual);
+    t.param1 = 700;
+    t.param2 = 42;
+
+    mission::BmsEventSystem sys;
+    sys.load({a, b}, {t},
+             {misvar(bms::MissionVariableActionSubType::Set, 512, 9),        // G0
+              misvar(bms::MissionVariableActionSubType::Increment, 767, 0),  // G255
+              misvar(bms::MissionVariableActionSubType::Set, 0x40000003, 4), // V3
+              misvar(bms::MissionVariableActionSubType::Set, 768, 11),       // past G255: IF 0's fired tick
+              misvar(bms::MissionVariableActionSubType::Set, -1, 13),        // before V0: RND
+              misvar(bms::MissionVariableActionSubType::Set, 9, 1)});
+    w.add_system(&sys);
+    w.load_systems();
+    w.script.vars.set_global(188, 42);
+
+    tick_n(w, kCycle); // A on the first pass, B on the second
+    CHECK(w.script.vars.get_global(0) == 9);
+    CHECK(w.script.vars.get_global(255) == 1);
+    CHECK(w.script.vars.get_mission(3) == 4);
+    CHECK(w.script.vars.get_mission(9) == 1); // B read G188 through index 700
+    int moved = 0;
+    for (int i = 0; i < world::ScriptVarStore::kMissionVars; ++i)
+        if (i != 3 && i != 9 && w.script.vars.get_mission(i) != 0) ++moved;
+    for (int g = 0; g < world::ScriptVarStore::kGlobalVars; ++g)
+        if (g != 0 && g != 188 && g != 255 && w.script.vars.get_global(g) != 0) ++moved;
+    CHECK(moved == 0); // 768 and -1 wrote neither bank
+    CHECK(w.script.vars.wac.fired_tick[0] == 11 && w.script.vars.get_bank_word(768) == 11);
+    CHECK(w.script.vars.wac.rnd == 13 && w.script.vars.get_bank_word(0x3FFFFFFF) == 13);
+    // The DORND seed is word 3584, the word past it no WAC state's.
+    CHECK(w.script.vars.get_bank_word(3584) == static_cast<int32_t>(world::ScriptVarStore::kDorndSeed));
+    w.script.vars.set_bank_word(3585, 99);
+    CHECK(w.script.vars.get_bank_word(3585) == 0);
+    // A byte array's word packs four entries, the lowest in the low byte.
+    w.script.vars.set_bank_word(3328 + 1, 0x04030201); // DO choices 4..7
+    CHECK(w.script.vars.wac.do_choice[4] == 1 && w.script.vars.wac.do_choice[7] == 4);
+    CHECK(w.script.vars.get_bank_word(3328 + 1) == 0x04030201);
+    // Only a small negative index leaves the banks: 0x80000003 and 0xC0000003
+    // select V3 as 0x40000003 does.
+    CHECK(w.script.vars.get_bank_word(static_cast<int32_t>(0x80000003u)) == 4);
+    CHECK(w.script.vars.get_bank_word(static_cast<int32_t>(0xC0000003u)) == 4);
+}
+
+// Past the G bank the bank words are WAC's own state: 768 + N is IF N's fired
+// tick and 1792 + N its ever-fired dword, so a BMS write there changes what
+// WAC's elapse() sees; 2816.. are the active bytes, four IFs to a word with
+// the lowest IF in the low byte, so a cat-4 read packs them (D-EVT-13).
+// [orig: EventAction_Dispatch @0x4542E0, the Set @0x45439A;
+//  EventTrigger_EvaluateCondition @0x453620, the read @0x453AAC; fired ticks
+//  0xC6BE40, ever-fired 0xC6CE40, active 0xC6DE40 (WacScript_ExecuteBytecode
+//  @0x4F5995 / @0x4F599F / @0x4F59AA); WacCmd_Elapse @0x4ECEF0]
+static void test_misvar_word_aliases_wac_state() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+
+    // Event A (unconditional, tick 16): IF 4 fired at tick 1000. Event B: when
+    // the word holding IFs 0..3's active bytes reads 1, 0, 1, 1, set V9 = 1.
+    bms::Event a = simple_event(bms::EventFlags::None, 0);
+    a.action_count = 2;
+    bms::Event b{};
+    b.flags = bms::EventFlags::None;
+    b.trigger_index = 0;
+    b.trigger_count = 1;
+    b.action_index = 2;
+    b.action_count = 1;
+    bms::Trigger t{};
+    t.main_type = bms::TriggerMainType::MissionVariable;
+    t.sub_type = static_cast<int32_t>(bms::MissionVariableTriggerType::MissionVariableIsEqual);
+    t.param1 = 2816;
+    t.param2 = 0x01010001;
+    mission::BmsEventSystem bms_sys;
+    bms_sys.load({a, b}, {t},
+                 {misvar(bms::MissionVariableActionSubType::Set, 768 + 4, 1000),
+                  misvar(bms::MissionVariableActionSubType::Set, 1792 + 4, 1),
+                  misvar(bms::MissionVariableActionSubType::Set, 9, 1)});
+
+    wac::WacSystem wac_sys;
+    wac::CompileEnv env;
+    wac_sys.set_program(wac::compile_source(
+            "if true(1) then set(v20,1) endif\n"
+            "if true(0) then set(v21,1) endif\n"
+            "if true(1) then set(v22,1) endif\n"
+            "if true(1) then set(v23,1) endif\n"
+            "if elapse(1) then set(v24,1) endif\n",
+            env));
+
+    w.add_system(&bms_sys);
+    w.add_system(&wac_sys);
+    w.load_systems();
+
+    tick_n(w, 2 * kCycle); // A at tick 16, WAC at 62 and 124, B at 96
+    CHECK(w.script.vars.get_mission(20) == 1 && w.script.vars.get_mission(21) == 0);
+    CHECK(w.script.vars.get_mission(24) == 0); // IF 4 "fired" at 1000: elapse(1) is false
+    CHECK(w.script.vars.get_mission(9) == 1);  // B read IFs 0..3's active bytes as one word
 }
 
 // Activation delay [orig: event +18 reload -> +16 countdown, -64 per processing pass].
@@ -2747,6 +2871,8 @@ int main() {
     test_wac_accuracyspread_drives_npc_aim();
 	test_wac_seatbelt_controls_local_use();
 	test_bms_increment_and_threshold();
+	test_misvar_index_runs_into_the_global_bank();
+	test_misvar_word_aliases_wac_state();
     test_activation_delay();
     test_live_logic_trace_and_fire();
     test_activation_delay_signed_wrap();

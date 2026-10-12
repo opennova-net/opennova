@@ -13,9 +13,10 @@ namespace godot {
 
 // The local player's staged PLAYER_INFO selection for the next mission spawn
 // (ADR 0043 slice G8; the former `_local_player_spawn_loadout` Dictionary):
-// the three kit slots with their clip counts, the profile class, and the two
+// the three kit slots with their clip counts, the profile class, the two
 // per-side character selections the join profile projects (nationality /
-// division / combo tree indices + class). Presence is part of the record --
+// division / combo tree indices + class) and the profile record's voice
+// override pair it reads beside them. Presence is part of the record --
 // a slot whose name was never set is absent (the historical fallback), a slot
 // set to "" explicitly requests NONE; the class likewise commits only when it
 // was set. The shell decodes the PLAYER_INFO snapshot once through
@@ -77,6 +78,13 @@ public:
 	void set_side_##m_name(int p_side, int p_value);
 	PLAYER_SPAWN_SIDE_FIELDS(PLAYER_SPAWN_SIDE_ACCESSORS)
 #undef PLAYER_SPAWN_SIDE_ACCESSORS
+	// The current profile record's voice override byte per side (the shell
+	// stages PlayerProfiles.get_voice; 0 = none). It is not a selection: setting
+	// it leaves the side's presence as it is.
+	int side_voice(int p_side) const { return valid_side(p_side) ? voices_[p_side] : 0; }
+	void set_side_voice(int p_side, int p_value) {
+		if (valid_side(p_side)) voices_[p_side] = p_value;
+	}
 
 	// The engine projections (C++ only): the kit slots for the spawn
 	// projection and the two join-side selections.
@@ -109,6 +117,7 @@ private:
 	bool has_player_class_ = false;
 	int player_class_ = 0;
 	SideSelection sides_[2];
+	int voices_[2] = { 0, 0 };
 };
 
 } // namespace godot

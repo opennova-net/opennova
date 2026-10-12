@@ -6,7 +6,7 @@
 // [orig: Entity_UpdateInfantryPlayerBody @0x4b40f8..0x4b411a;
 //  Camera_UpdateFreeFly @0x4b2980; Input_HandleActionBinding cases 405..410
 //  @0x49c10c..0x49c249; ThirdPersonCamera_Update @0x437c1b..0x437d02;
-//  Camera_SetTrackedEntity @0x4391d0; sub_52AD50 @0x52ae4f..0x52ae99]
+//  Camera_SetTrackedEntity @0x4391d0; DeathScreen_FilterInputAction @0x52ae4f..0x52ae99]
 
 #include <runtime/world/ai.h>
 #include <runtime/world/player_spawn.h>

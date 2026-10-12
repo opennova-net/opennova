@@ -177,9 +177,14 @@ inline constexpr std::size_t kHostKeysPerUser = 20;
 
 // Records a key /NWHost.dll minted for `user_id` (its hash), and trims the
 // account's keys to the newest kHostKeysPerUser and those a listed server
-// holds, in one transaction. A key that is no HOSTKEY records nothing. Throws
+// holds, in one transaction; true when it recorded. Only while the account is
+// active and still at `credentials_gen`, the credentials generation (the
+// server's players.credentials_gen) its retail login was made under, tested
+// by the insert itself, so a password reset or a ban committed since leaves
+// the key unrecorded. A key that is no HOSTKEY records nothing. Throws
 // db::SqliteError.
-void record_host_key(db::Database &db, std::string_view key, int64_t user_id);
+bool record_host_key(
+		db::Database &db, std::string_view key, int64_t user_id, int64_t credentials_gen);
 
 // A key a connection presents, claimed for the connection's RID: the account it
 // was minted for, or nullopt for a key that is no HOSTKEY, unknown, idle past
@@ -189,6 +194,14 @@ void record_host_key(db::Database &db, std::string_view key, int64_t user_id);
 // whose listing is gone can be claimed again). A claim moves last_used_at
 // forward. Throws db::SqliteError.
 std::optional<int64_t> claim_host_key(db::Database &db, std::string_view key, uint32_t rid);
+
+// Whether the listing under `rid` is `user_id`'s now: listed (its active_hosts
+// row), with one of the account's keys standing claimed for the RID. That is
+// the rule host_user_id's writes follow, read live rather than as of the row's
+// last write, so a reset, an inactive status or a delete (each takes the
+// account's keys) answers false at once. The owner's push routes ask it
+// (apps/novaworld_server/host_routes.h). Throws db::SqliteError.
+bool listing_owned_by(db::Database &db, uint32_t rid, int64_t user_id);
 
 // The main tick's sweep: every key a listed server holds counts as used (at
 // most once per kHostKeyTouchSeconds), then every key unused for

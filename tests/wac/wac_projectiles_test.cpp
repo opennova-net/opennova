@@ -129,7 +129,7 @@ static void test_area_draws_use_ai_stream_and_actual_surface_height() {
     CHECK(round.origin_z == 210 * 65536 + 50 * 33041);
     CHECK(round.dir_yaw == 0 && uint32_t(round.dir_pitch) == 0xC0000040u);
     CHECK(f.world.ai.prng_a == 1074823441u);
-    CHECK(vm.capture_runtime_state().rng_seed == 0x12333333u);
+    CHECK(f.world.script.vars.wac.dornd_seed == 0x12333333u);
     const auto saved_ai_seed = f.world.ai.prng_a;
     f.script("v2=0\nammoarea(v2,91) store(v3)\nammoarea(SCRIPT,92) store(v4)\n");
     CHECK(f.world.script.vars.get_mission(3) == 1 && f.world.script.vars.get_mission(4) == 1);
@@ -155,6 +155,7 @@ static void test_rain_rng_exact_pose_and_restore() {
     CHECK(p.ok());
     WacVm vm; vm.load(p);
     const auto baseline = vm.capture_runtime_state();
+    const auto wac_baseline = f.world.script.vars.wac; // the DORND seed is the world's
     vm.execute(f.world);
     CHECK(f.world.script.vars.get_mission(1) == 0);
     CHECK(f.world.out.rounds.count == 1);
@@ -163,17 +164,18 @@ static void test_rain_rng_exact_pose_and_restore() {
     CHECK(first.origin_y == 200 * 65536 + 9 + 1307400);
     CHECK(first.origin_z == 5 * 65536 + 11 + 1965056);
     CHECK(uint32_t(first.dir_pitch) == 0xC0000040u);
-    CHECK(vm.capture_runtime_state().rng_seed == 0x66666624u);
+    CHECK(f.world.script.vars.wac.dornd_seed == 0x66666624u);
     CHECK(f.world.ai.prng_a == 0);
     vm.restore_runtime_state(p, baseline);
+    f.world.script.vars.wac = wac_baseline;
     vm.execute(f.world);
     CHECK(f.world.out.rounds.records[1].origin_x == first.origin_x);
     CHECK(f.world.out.rounds.records[1].origin_y == first.origin_y);
     CHECK(f.world.out.rounds.records[1].origin_z == first.origin_z);
     const Program no_ammo = f.compile_script("v2=0\nammorain(v2) store(v3)\n");
-    vm.load(no_ammo); vm.execute(f.world);
+    vm.load(no_ammo); f.world.script.vars.reset_wac_load_state(); vm.execute(f.world);
     CHECK(f.world.script.vars.get_mission(3) == 1);
-    CHECK(vm.capture_runtime_state().rng_seed == 0x12333333u);
+    CHECK(f.world.script.vars.wac.dornd_seed == 0x12333333u);
 }
 
 static void test_entry_authority_and_ceasefire_presentation() {

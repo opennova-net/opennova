@@ -355,7 +355,7 @@ std::vector<uint8_t> encode_weapon_loadout(const WeaponLoadout &loadout);
 // (an empty/unbuilt slot table falls through raw — the golden slot-195 case). This
 // encoder deliberately takes the resolved value instead of modelling that walk.
 // [orig: NetPacket_SendLoadoutSubmit @ 0x42cdc0
-// (ex-NetPacket_SendWeaponRestrictionMask misnomer) — team = byte_A85B48, the
+// (ex-NetPacket_SendWeaponRestrictionMask misnomer) — team = g_LocalTeam, the
 // S2C 0x04 tail byte; playerClass = the profile's per-side class byte 5..9;
 // rows from the 2048-B {name\0 ammoPri\0 ammoSec\0 flags\0}* kit tuple buffer
 // via AvatarDef_FindIndexByName + atol, terminator @0x42d076.]

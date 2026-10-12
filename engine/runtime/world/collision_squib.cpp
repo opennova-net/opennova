@@ -45,13 +45,17 @@ ProjectileHit CollisionWorld::trace_squib(World &world, EntityHandle source,
         const int32_t wd=io::bam_sub(0, int32_t(int64_t(abs32(start.z-water))*65536/ray.dir[2]));
         if (wd<distance) { distance=wd; best.hit_class=ProjectileHitClass::Water; }
     }
+    // A NoTarget row (Flags 0x8000000) stays in: each pool call passes the
+    // walker's include arg 1 [orig: `push 1` @0x449112 / @0x44926B / @0x4493C0
+    // -> Physics_RaycastAgainstPoolByIndex @0x539530 ->
+    // Physics_RaycastAgainstEntityPool, the skip @0x5387A4..0x5387B4].
     for (const int pool : {0,2,1}) {
         ProjectileHit candidate;
         for (size_t i=0;i<world.registry.pool_capacity(pool);++i) {
             const auto handle=EntityHandle::make(pool,uint16_t(i));
             const Entity *e=world.registry.get(handle);
             if (!e || !e->has_item_def || !e->bound_radius || handle==source ||
-                    ((e->engine_flags|e->flags)&(1u|0x8000000u)) ||
+                    ((e->engine_flags|e->flags)&1u) ||
                     (e->ground_target.valid() && e->ground_target==source)) continue;
             const int32_t p[]={int32_t(e->position.x*65536),int32_t(e->position.y*65536),
                     int32_t(e->position.z*65536)};

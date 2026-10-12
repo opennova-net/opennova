@@ -7,7 +7,7 @@
 // (world/spectator_motor.h); this is its per-tick input stamp, the death
 // screen's action filter ahead of the body input, and the spectator actions
 // with the sub-mode wrap's pose placement.
-// [orig: Camera_UpdateFreeFly @0x4b2980; sub_52AD50 @0x52ad50;
+// [orig: Camera_UpdateFreeFly @0x4b2980; DeathScreen_FilterInputAction @0x52ad50;
 //  sub_52AFF0 @0x52aff0]
 
 #include <cstdint>
@@ -45,7 +45,7 @@ void stamp_spectator_motor(mission::MissionKernel &kernel, const ClientRuntime *
 // [orig: Input_IsBindingActiveForMode @0x497ea0 (row +8 bit 2 on the death
 //  screen); Input_HandleActionBinding @0x49ad6d..0x49ada0 (the dead gate),
 //  @0x49add7 (the deploy-screen gate),
-//  @0x49ae4c (sub_52AD50 first); sub_52AD50 @0x52ad50]
+//  @0x49ae4c (DeathScreen_FilterInputAction first); DeathScreen_FilterInputAction @0x52ad50]
 void apply_death_screen_input(mission::MissionKernel &kernel, ClientRuntime &runtime,
 		bool joiner, const InputPacket &input);
 

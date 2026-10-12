@@ -132,6 +132,7 @@ public:
 	bool remote_claimant(const world::Entity &carrier, world::Entity &out) const override;
 
 	bool send_medic_request() override { return runtime && runtime->queue_medic_request(); }
+	bool send_respawn_request() override { return runtime && runtime->queue_respawn_request(); }
 	void run_tick(const TickInput &input) override;
 	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;
@@ -341,7 +342,7 @@ private:
 	// remains separately gated by authoritative_spawn_released(), so C2S 0x0E
 	// cannot kill L and a stale positive tail cannot revive a genuinely dead L.
 	uint64_t deployment_release_revision_seen_ = 0;
-	// S2C 0x50 re-latched OUR OWN team (the second byte_A85B48 writer). The
+	// S2C 0x50 re-latched OUR OWN team (the second g_LocalTeam writer). The
 	// join-time team arrives through the spawn, so only later edges apply here.
 	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the latch @0x4319db]
 	uint64_t self_team_revision_seen_ = 0;

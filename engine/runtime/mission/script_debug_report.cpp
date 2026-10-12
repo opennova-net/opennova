@@ -28,11 +28,13 @@ ScriptDebugReport script_debug_report(const MissionKernel &kernel) {
 	out.time = state.vm.time;
 	out.divider = state.accumulator;
 	out.accumulator = state.vm.accumulator;
-	out.rng_seed = state.vm.rng_seed;
+	const world::ScriptVarStore::WacState &wac_state = kernel.world.script.vars.wac;
+	out.rng_seed = wac_state.dornd_seed;
 	out.dispatch_count = wac.vm().dispatch_count();
 	out.current_event = state.vm.current_event;
-	for (const wac::EventState &e : state.vm.events) {
-		out.wac_events.push_back({e.last_fired_tick, e.fired_count, e.ever_fired, e.active});
+	for (size_t i = 0; i < state.vm.fired_counts.size(); ++i) {
+		out.wac_events.push_back({wac_state.fired_tick[i], state.vm.fired_counts[i],
+				wac_state.ever_fired[i] != 0, wac_state.active[i] != 0});
 	}
 
 	out.mission = kernel.mission_basename;

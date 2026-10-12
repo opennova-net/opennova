@@ -2,7 +2,8 @@
 // parity audit (plan PR 9):
 //   - the C2S 0x2C return leg: the RTT ring with its aliasing cursor and the
 //     min/max-ping strike punts [orig: NapiNPServerMsg_HandlePingResponse @0x515070];
-//   - C2S 0x4C store + dirty-on-change [orig: NapiNPServerMsg_0x04C @0x5111B0 -> sub_5006E0];
+//   - C2S 0x4C store + dirty-on-change [orig: NapiNPServerMsg_0x04C @0x5111B0 ->
+//     PlayerSlot_SetClientQuality @0x5006E0];
 //   - the 1 Hz S2C 0x46 quality resend, eight per second with a persisting
 //     cursor [orig: Server_TickUpdate @0x51DE79..0x51DF4A];
 //   - the host CNetQuality send window behind S2C 0x79 [orig: CNetQuality_UpdateMetrics @0x4C52C0];
@@ -218,6 +219,30 @@ bool check_ping_dispatch_return_leg() {
 
 bool check_client_quality_store_and_resend() {
 	HostFixture f(10);
+	// A fresh slot holds level 0, clean: the joiner's first report of level 1 dirties it and
+	// the next walk broadcasts the 5-byte field-0x0400 0x46 carrying 1.
+	// [orig: Server_PlayerAdd @0x51CD06 / @0x51CD40 / @0x51CD46; Server_TickUpdate
+	//  @0x51DEC6..0x51DF10]
+	if (!expect(f.conn(2).reply.client_quality == 0 && !f.conn(2).reply.client_quality_dirty,
+			"a fresh slot's quality is 0 and clean"))
+		return false;
+	for (auto &t : f.transports) (void)drain(t);
+	(void)f.dispatch(2, c2s::CLIENT_QUALITY, {1});
+	if (!expect(f.conn(2).reply.client_quality == 1 && f.conn(2).reply.client_quality_dirty,
+			"the first level-1 report dirties a fresh slot"))
+		return false;
+	inmatch::Server_EmitQualityResends(f.ctx, f.world);
+	{
+		std::vector<ns::Datagram> resent = drain(f.transports[0]);
+		PlayerSync first;
+		if (!expect(count_tag(resent, s2c::PLAYER_SYNC) == 1 &&
+						resent[0].tag == s2c::PLAYER_SYNC && resent[0].body.size() == 5 &&
+						decode_player_sync(resent[0].body.data(), resent[0].body.size(), first) &&
+						first.field_bitmask == kPlayerSyncHasQuality && first.quality == 1,
+				"the walk resends the fresh slot's level as the 5-byte 0x46"))
+			return false;
+	}
+	f.ctx.quality_broadcast_slot_cursor = 0;
 	inmatch::Server_StoreClientQuality(f.conn(0), 9);
 	if (!expect(f.conn(0).reply.client_quality == 4 && f.conn(0).reply.client_quality_dirty,
 			"0x4C clamps to 4 and dirties on change"))
@@ -501,10 +526,13 @@ bool check_spectator_respawn_request() {
 // hidden and gets the deploy's 0x5A / 0x61 before the 0x32; the next 0x0A then
 // restamps the spectator's body to Health 1 and -1. Another handle is the
 // deploy's target, resolved with the cleared team 0, which takes the other
-// team's spawn point. [orig: Server_KillPlayerAndNotify @0x519E89, @0x519EBC..0x519ECE;
-//  Server_ProcessPlayerDeath @0x51782F, @0x517837..0x517863, @0x51787A,
-//  @0x517960; Input_HandleActionBinding @0x49B085; Server_ResolveSpawnTargetHandle
-//  @0x4FE175..0x4FE187; NetPacket_WritePlayerState @0x4FF71B..0x4FF728]
+// team's spawn point. The leg never writes the +360 respawn delay, and clears
+// the +364 target hold only for a handle other than 0xFFFF (D-NET-430).
+// [orig: Server_ConvertPlayerToSpectator @0x519E89, @0x519EBC..0x519ECE;
+//  Server_DeployPlayer @0x51782F, @0x517837..0x517863, @0x51786B..0x517872,
+//  @0x51787A, @0x517960; Input_HandleActionBinding @0x49B085;
+//  Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187; NetPacket_WritePlayerState
+//  @0x4FF71B..0x4FF728]
 bool check_spectator_convert_deploys() {
 	HostFixture f(2);
 	f.ctx.config.permanent_death = true;
@@ -518,6 +546,8 @@ bool check_spectator_convert_deploys() {
 	body->group_id = 4;
 	body->position = {40.0f, 50.0f, 6.0f};
 	f.conn(0).link.respawn_pending = true;
+	f.conn(0).link.respawn_delay_seconds = 5;
+	f.conn(0).link.spawn_target_hold_seconds = 4;
 	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
 	for (auto &t : f.transports) (void)drain(t);
 	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
@@ -534,6 +564,10 @@ bool check_spectator_convert_deploys() {
 	if (!expect(body->position.x == 40.0f && body->position.y == 50.0f && body->position.z == 6.0f &&
 					body->yaw == 90 && body->pitch == 0 && !f.conn(0).reply.convert_holds_pose,
 			"the hold arm places nothing, zeroes the angle words and clears its latch"))
+		return false;
+	if (!expect(f.conn(0).link.respawn_delay_seconds == 5 &&
+					f.conn(0).link.spawn_target_hold_seconds == 4,
+			"the 0xFFFF deploy leaves the +360 delay and the +364 hold"))
 		return false;
 	std::vector<ns::Datagram> own = drain(f.transports[0]);
 	if (!expect(own.size() >= 3 && own[0].tag == s2c::WEAPON_LOADOUT &&
@@ -555,12 +589,104 @@ bool check_spectator_convert_deploys() {
 	const w::EntityHandle point_handle = f.world.registry.spawn(1, point);
 	w::Entity *other = f.world.registry.get(f.players[1]);
 	if (!expect(other->team == 2, "the second player is on team 2")) return false;
+	f.conn(1).link.respawn_delay_seconds = 5;
+	f.conn(1).link.spawn_target_hold_seconds = 4;
 	(void)f.dispatch(1, c2s::SPECTATOR_RESPAWN,
 			{static_cast<uint8_t>(point_handle.packed), static_cast<uint8_t>(point_handle.packed >> 8)});
 	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
-	return expect(f.conn(1).link.spectator && other->position.x == 300.0f &&
+	if (!expect(f.conn(1).link.spectator && other->position.x == 300.0f &&
 					other->position.y == 400.0f && other->position.z == 21.0f,
-			"a named spawn point of any team places the converted body");
+			"a named spawn point of any team places the converted body"))
+		return false;
+	if (!expect(f.conn(1).link.respawn_delay_seconds == 5 &&
+					f.conn(1).link.spawn_target_hold_seconds == 0,
+			"a named handle's deploy clears the +364 hold and leaves the +360 delay"))
+		return false;
+
+	// The leg takes the request's raw handle: one that resolves to nothing
+	// (here the player's own body, no spawn point) places through the marker
+	// chain yet still clears the hold.
+	HostFixture crafted(1);
+	crafted.ctx.config.permanent_death = true;
+	crafted.ctx.config.spectator_slots = 1;
+	crafted.conn(0).link.respawn_delay_seconds = 5;
+	crafted.conn(0).link.spawn_target_hold_seconds = 4;
+	const uint16_t own_handle = crafted.players[0].packed;
+	(void)crafted.dispatch(0, c2s::SPECTATOR_RESPAWN,
+			{static_cast<uint8_t>(own_handle), static_cast<uint8_t>(own_handle >> 8)});
+	inmatch::Server_ProcessSpectatorRespawnRequests(crafted.ctx, crafted.world);
+	return expect(crafted.conn(0).link.spectator &&
+					crafted.conn(0).link.respawn_delay_seconds == 5 &&
+					crafted.conn(0).link.spawn_target_hold_seconds == 0,
+			"an unresolvable named handle's deploy still clears the +364 hold");
+}
+
+// D-NET-440: the C2S 0x51 convert runs inline in retail's receive pump, ahead
+// of Server_BuildEntitySlotLists, whose humans count skips a hidden player; so
+// the convert's own tick already counts the converted body out.
+// [orig: Server_TickUpdate, the pump call @0x51D895 and the count call @0x51D89A;
+//  Server_BuildEntitySlotLists `test bl,al` @0x4F9820; Server_ConvertPlayerToSpectator
+//  `or Flags,1` @0x519E92]
+bool check_spectator_convert_humans_count() {
+	HostFixture f(2);
+	f.ctx.config.permanent_death = true;
+	f.ctx.config.spectator_slots = 1;
+	inmatch::Server_TickUpdate(f.ctx);
+	if (!expect(f.world.cached.humans == 2, "both players count as humans")) return false;
+	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
+	inmatch::Server_TickUpdate(f.ctx);
+	return expect(f.conn(0).link.spectator && f.world.cached.humans == 1,
+			"the convert's own tick counts one human fewer");
+}
+
+// D-NET-584: the convert stores the slot team (+416) in the restore byte
+// (+100568), 0 included, and the deploy's no-pick arm positions a latched,
+// dead-flagged body in a team mode as that byte, else by the tick parity. A
+// script team write to a player body splits the slot and entity teams
+// (Entity_SetTeamByNetId stores the entity byte alone).
+// [orig: Server_ConvertPlayerToSpectator @0x519E55, the store @0x519E5B;
+//  Server_PositionPlayerForSpawn @0x50D1A6..0x50D1C3, the markers @0x50D266]
+bool check_spectator_convert_stores_the_slot_team() {
+	HostFixture f(2);
+	f.ctx.config.game_type = 0x10000u; // TDM
+	f.ctx.config.permanent_death = true;
+	f.ctx.config.spectator_slots = 2;
+	for (const int32_t item_id : {6096, 6097}) { // team 1's start marker, team 2's
+		w::Entity start;
+		start.kind = w::EntityKind::Marker;
+		start.item_id = item_id;
+		start.position = {item_id == 6096 ? 100.0f : 200.0f, 0.0f, 0.0f};
+		f.world.registry.spawn(3, start);
+	}
+	// Each request names the requester's own body, which resolves to nothing, so
+	// the convert's deploy positions through the no-pick arm.
+	auto convert = [&f](size_t i, uint8_t slot_team, uint8_t entity_team) {
+		f.conn(i).assigned_team = slot_team;
+		f.conn(i).assigned_team_valid = true;
+		w::Entity *body = f.world.registry.get(f.players[i]);
+		body->team = entity_team;
+		body->flags |= w::kEntityFlagDead;
+		body->health = 0;
+		body->alive = false;
+		const uint16_t own = f.players[i].packed;
+		(void)f.dispatch(i, c2s::SPECTATOR_RESPAWN,
+				{static_cast<uint8_t>(own), static_cast<uint8_t>(own >> 8)});
+		inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
+		return body;
+	};
+	f.world.logic_tick = 2; // an even tick: the parity names team 2
+	const w::Entity *split = convert(0, 1, 2);
+	if (!expect(f.conn(0).link.spectator && f.conn(0).spectator_restore_team == 1 &&
+					split->position.x == 100.0f,
+			"a split slot restores as its slot team and lands on that team's marker"))
+		return false;
+	// A team-0 slot stores 0 over a stale byte; the placement takes the parity.
+	f.conn(1).spectator_restore_team = 2;
+	f.world.logic_tick = 1; // an odd tick: the parity names team 1
+	const w::Entity *teamless = convert(1, 0, 0);
+	return expect(f.conn(1).link.spectator && f.conn(1).spectator_restore_team == 0 &&
+					teamless->position.x == 100.0f,
+			"a team-0 slot stores 0, so the placement takes the tick parity");
 }
 
 // The S2C 0x32 join and leave lines: [1][name][team] from the player add,
@@ -1608,6 +1734,8 @@ int main() {
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_spectator_respawn_request() && ok;
 	ok = check_spectator_convert_deploys() && ok;
+	ok = check_spectator_convert_humans_count() && ok;
+	ok = check_spectator_convert_stores_the_slot_team() && ok;
 	ok = check_join_leave_lines() && ok;
 	ok = check_medic_revive_transaction() && ok;
 	ok = check_medic_revive_gates() && ok;

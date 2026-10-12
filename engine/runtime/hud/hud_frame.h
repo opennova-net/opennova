@@ -845,7 +845,7 @@ struct HudSessionState {
 	// CaptureZone_FindMaxProximityCoverage(local) [orig: @0x5BF4D0].
 	int32_t zone_coverage = 0;
 	int team = 0;                        // byte_27234FE (hudInfo+0x176)
-	uint32_t attack_defend = 0;          // dword_B78FE8: 1 defending, 2 attacking
+	uint32_t attack_defend = 0;          // g_AttackDefendRole: 1 defending, 2 attacking
 	// The death screen's spectate arm (dword_A860F4 && dword_A860F0): the HUD
 	// info rebuilt for the target feeds the health bar and the TEAMID line —
 	// `team` above carries the target's team byte then — plus the target's

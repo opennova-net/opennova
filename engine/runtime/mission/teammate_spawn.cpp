@@ -180,17 +180,21 @@ world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
     piece.alive = seed.alive;
     piece.uniform_scale_q16 = seed.uniform_scale_q16;
     piece.death_motion = seed.death_motion;
-    // The retail template is a memset clone that pins its callbacks to the
-    // floating-physics pair; every other def-derived class selector stays
-    // zero, so the parent's door/squib/sway functions never reach a piece.
-    // [orig: Entity_SpawnSectionEntity @0x440322 memset; callbacks pinned
-    //  @0x440365 / @0x440370; Entity_CloneFromTemplateByType @0x4398A0 copies
-    //  the 0x2B4 bytes verbatim @0x43997D]
-    piece.door_event = false;
-    piece.door_motion = false;
-    piece.door_count = 0;
-    piece.squib.motor = false;
-    piece.render_sway = false;
+    // The retail template is a memset clone carrying the def, so what the
+    // def's render tag binds (def+0x140, the sway renderer among them) draws
+    // every piece. A section clone's template pins its event and update
+    // callbacks (the null event, the floating physics), so its def's door
+    // event, door, squib and ewep update rows never reach it; a palm
+    // fragment's template takes item 900's own pair. resolve_item_traits
+    // keys those selectors on the seed's section_clone, and keeps a piece out
+    // of the door rows (item_section_piece), on this resolve and every later
+    // sweep alike.
+    // [orig: Entity_SpawnSectionEntity @0x440322 memset, the def @0x440350,
+    //  callbacks pinned @0x440365 / @0x440370; Palm_SpawnFragment
+    //  @0x53C1C0 - the def @0x53C2CD, def+0x138 @0x53C35D, def+0x158
+    //  @0x53C36F; Entity_CloneFromTemplateByType @0x4398A0 copies the 0x2B4
+    //  bytes verbatim @0x43997D; the +0x1C4 update Entity_UpdatePool1Slot
+    //  calls @0x4B8E41..0x4B8E53; Render_SectorEntity @0x5C431B]
     ensure_collision_instance(world, handle);
     collision.refresh_after_registry_change(world);
     return handle;

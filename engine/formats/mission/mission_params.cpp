@@ -158,7 +158,7 @@ constexpr ParamRow kTriggerRows[] = {
 	{kSingle, 45, {K::Entity, K::Entity, K::DistanceM, U}, {nullptr, kOtherEntity}},
 	// Event: events[param1]'s latch window, whatever the sub-type.
 	{kEvent, kAnySubType, {K::Event, U, U, U}, {}},
-	// MissionVariable: dword_C6B240[param1] <op> param2; a sub-type past 1..5 reads false.
+	// MissionVariable: g_WacMissionVars[param1] <op> param2; a sub-type past 1..5 reads false.
 	{kVariable, kAnySubType, {U, U, U, U}, {}},
 	{kVariable, 1, {K::MissionVar, K::Raw, U, U}, {nullptr, kValue}},
 	{kVariable, 2, {K::MissionVar, K::Raw, U, U}, {nullptr, kValue}},

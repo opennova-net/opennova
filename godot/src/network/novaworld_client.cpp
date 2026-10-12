@@ -348,7 +348,8 @@ void NovaWorldClient::stop() {
 			}
 		} else if (!session->reconnecting() &&
 		           (state_ == STATE_SESSION_HELLO || state_ == STATE_SESSION_JOIN)) {
-			// A first connect still in its handshake says goodbye once; a connection a
+			// A first connect still in its handshake says goodbye once (to its server once a
+			// 0x81 named one; before that the driver has nowhere to send it); a connection a
 			// reconnect is still re-establishing has nothing to tear down.
 			lobby_.send(session->build_goodbye());
 		}
@@ -426,7 +427,9 @@ opennova::NwuLobbySession::Hooks NovaWorldClient::make_lobby_hooks() {
 		    + String::num_int64(static_cast<int64_t>(cookie_vars))
 		    + " Cookie vars");
 	};
-	hooks.on_sent = [this](const std::vector<uint8_t> &dg) { trace_sent_datagram(dg); };
+	hooks.on_sent = [this](const opennova::PeerAddr &to, const std::vector<uint8_t> &dg) {
+		trace_sent_datagram(to, dg);
+	};
 	hooks.on_received = [this](const opennova::NwuLobbySession::RxInfo &rx) { on_session_datagram(rx); };
 	hooks.on_session_state = [this]() { sync_session_state(); };
 	hooks.on_fatal = [this](const std::string &message) {
@@ -500,7 +503,7 @@ static const char *cs_state_name(int s) {
 	}
 }
 
-void NovaWorldClient::trace_sent_datagram(const std::vector<uint8_t> &dg) {
+void NovaWorldClient::trace_sent_datagram(const opennova::PeerAddr &to, const std::vector<uint8_t> &dg) {
 	// Peek the plaintext outbound opcode (envelope byte 0) so the log lines up
 	// 1:1 with retail's _connectlog "SENDING N BYTES ... [0xNN]" — lets the user
 	// diff our wire against the .204 capture (fixtures/novaworld/nw204_lobby).
@@ -520,8 +523,7 @@ void NovaWorldClient::trace_sent_datagram(const std::vector<uint8_t> &dg) {
 	const opennova::ClientSession *session = lobby_.session();
 	trace(String(">> sent ")
 	    + String::num_int64(static_cast<int64_t>(dg.size())) + "B op=" + String(op_buf)
-	    + " to " + opennova::cp1252_to_gd(lobby_.nw_udp_host()) + ":"
-	    + String::num_int64(static_cast<int64_t>(lobby_.nw_udp_port())) + " local_port="
+	    + " to " + opennova::to_gd(opennova::peer_addr_to_string(to)) + " local_port="
 	    + String::num_int64(static_cast<int64_t>(nw_pump_.is_valid() ? nw_pump_->local_port() : 0))
 	    + " state=" + cs_state_name(session ? static_cast<int>(session->state()) : -1));
 }

@@ -73,6 +73,7 @@ void PlayerSpawnLoadout::fill_join_sides(
 		opennova::inmatch::JoinSideSelection (&r_sides)[2]) const {
 	for (int side = 0; side < 2; ++side) {
 		r_sides[side] = opennova::inmatch::JoinSideSelection();
+		r_sides[side].voice_override = voices_[side];
 		if (!sides_[side].present) {
 			continue;
 		}
@@ -111,6 +112,9 @@ void PlayerSpawnLoadout::_bind_methods() {
 			&PlayerSpawnLoadout::set_side_##m_name);
 	PLAYER_SPAWN_SIDE_FIELDS(PLAYER_SPAWN_SIDE_BIND)
 #undef PLAYER_SPAWN_SIDE_BIND
+	ClassDB::bind_method(D_METHOD("side_voice", "side"), &PlayerSpawnLoadout::side_voice);
+	ClassDB::bind_method(D_METHOD("set_side_voice", "side", "value"),
+			&PlayerSpawnLoadout::set_side_voice);
 	BIND_ENUM_CONSTANT(SIDE_BLUE);
 	BIND_ENUM_CONSTANT(SIDE_RED);
 }

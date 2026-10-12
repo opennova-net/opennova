@@ -10,7 +10,7 @@ extends RefCounted
 #
 # The profile Dictionary shape (the ACCEPT snapshot, PlayerProfile's load, and
 # MainGame's set_local_player_profile all speak it):
-#   name, team (the side shown/committed), player_class (5..9), voice,
+#   name, team (the side shown/committed), player_class (5..9),
 #   nationality/division/combo (the active side's tree indices),
 #   side_profiles: [blue, red] -- each Selection.to_dict() or {} when unknown,
 #   plus the loadout keys the companion appends.
@@ -83,10 +83,6 @@ func initial_team(authored_team: int) -> int:
 	return clampi(int(_persisted_profile.get("team", authored_team)), 0, 1)
 
 
-func persisted_name() -> String:
-	return String(_persisted_profile.get("name", ""))
-
-
 func side_selection(side: int) -> Selection:
 	if side < 0 or side >= _side_profiles.size():
 		return null
@@ -144,7 +140,7 @@ func remember(selection: Selection) -> void:
 # side-block class loop followed by its selected-side avatar stores
 # [orig: PlayerInfo_SaveFromDialog @0x55EE3F..0x55EF38].
 func snapshot(team: int, nat_index: int, div_index: int, combo_index: int,
-		selected_class: int, player_name: String, voice_row: int) -> Dictionary:
+		selected_class: int, player_name: String) -> Dictionary:
 	var current := make_selection(
 			team, nat_index, div_index, combo_index, selected_class)
 	if current != null:
@@ -156,7 +152,6 @@ func snapshot(team: int, nat_index: int, div_index: int, combo_index: int,
 		"combo": combo_index,
 	}
 	profile["name"] = player_name
-	profile["voice"] = voice_row
 	profile["player_class"] = selected_class
 	var sides: Array[Dictionary] = [{}, {}]
 	for side in 2:
@@ -183,7 +178,9 @@ func _first_selection(side: int, selected_class: int) -> Selection:
 
 
 # A saved side that still resolves against the mounted Avatars.def is kept as
-# saved; a stale or absent one takes the retail per-side default.
+# saved; a stale or absent one takes the retail per-side default here. The
+# record keeps its bytes until that side is shown and saved: the dialog writes
+# the shown side's character alone (PlayerProfiles.apply_character_selection).
 func _normalize_side(side: int, saved: Selection) -> Selection:
 	var selected_class := (saved.player_class if saved != null
 			else int(_persisted_profile.get("player_class", 8)))

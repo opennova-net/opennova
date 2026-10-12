@@ -361,7 +361,7 @@ struct SessionSlotConfig {
 	uint8_t  max_players = 0;    // → g_MaxPlayerSlots = g_MaxPlayerSlots + PlayerSlotTable_Reallocate;
 	                             // the 0x46/0x22 roster walk terminates at this count
 	uint32_t skipped4 = 0;       // on the wire, not read
-	uint8_t  trailing = 0;       // → byte_A85B48
+	uint8_t  trailing = 0;       // → g_LocalTeam
 };
 bool decode_session_slot_config(const uint8_t *body, size_t len, SessionSlotConfig &out);
 
@@ -403,7 +403,7 @@ bool decode_join_padding_probe(const uint8_t *body, size_t len, JoinPaddingProbe
 // mask g_HostClassAllowMask @0x24D59FC (@0x5158e6) before the [5,9]-else-8 tail
 // @0x515913. Entries repeat until an 0xFF adm_index terminator — the same
 // {typeId, ammoP, ammoS, variant} slot vocabulary as the §5.30 S2C 0x5A downlink.
-// [orig: builder NetPacket_SendLoadoutSubmit @ 0x42cdc0 (team = byte_A85B48,
+// [orig: builder NetPacket_SendLoadoutSubmit @ 0x42cdc0 (team = g_LocalTeam,
 //  the S2C 0x04 tail byte; class = the profile's per-side class byte; slot =
 //  195 pre-Player_InitPlayer, g_CurrentWeaponSlot after);
 //  decoder NapiNPServerMsg_HandlePlayerLoadout @ 0x515790]
@@ -414,7 +414,7 @@ struct LoadoutSubmitEntry {
 	uint8_t variant = 0;        // → player+89688+admEntry[1]
 };
 struct LoadoutSubmit {
-	uint8_t  team = 0;              // wire byte 0; read SIGNED, accepted 1..4 [orig: byte_A85B48]
+	uint8_t  team = 0;              // wire byte 0; read SIGNED, accepted 1..4 [orig: g_LocalTeam]
 	uint8_t  player_class = 0;      // wire byte 1; 0 or 5..9 → entity+660 playerClass
 	uint32_t weapon_slot_index = 0; // selected weapon slot (entity+280 binding)
 	std::vector<LoadoutSubmitEntry> entries;

@@ -169,7 +169,7 @@ public:
     void build_from_mission(const World &world, int32_t base_interval,
                             int32_t numbered_zone_interval);
     bool has_entry(EntityHandle zone) const;
-    bool try_queue(const World &world, EntityHandle zone, EntityHandle player);
+    bool try_queue(EntityHandle zone, EntityHandle player, uint8_t slot_team);
     bool remove_player(EntityHandle player);
     std::vector<SpawnWaveRelease> tick(const World &world);
     void reset_on_zone_team_change(const World &world, EntityHandle zone);
@@ -186,6 +186,21 @@ private:
 // @0x519AF0, net-re paragraph 5.61].
 inline constexpr uint16_t kDeployPickNone = 0xFFFF;
 inline constexpr uint16_t kDeployPickAutoTeam = 0xFFFE;
+
+// The team the C2S 0x0E handler asks as: `team`, the slot's (+416), except that a
+// spectator slot's no-target or auto pick never asks as its team 0: the
+// objective bit (0x20000, Objective Co-op) substitutes 1, any other team
+// mode (0x10000, stock Co-op 0x10020 included) the tick parity (odd tick ->
+// 1, even -> 2), and a non-team mode keeps `team`. Unlike the no-pick
+// placement's substitution (Server_PositionPlayerForSpawn), no restore-team
+// arm. It feeds the auto pick's zone, `nodefaultspawnpoints` and the
+// numbered zone's team match.
+// [orig: Server_ProcessClientRequestRespawn @0x519AF0 - the spectator latch
+//  @0x519B7A, the 0xFFFF / 0xFFFE picks @0x519B90..0x519B9A, the objective
+//  bit's 1 @0x519BA0..0x519BA8, `and bl,1; neg bl; sbb bl,bl; add ebx,2` on
+//  g_CurrentTick @0x519BAC..0x519BC1]
+uint8_t deploy_request_team(const World &world, uint8_t team, bool spectator,
+                            uint16_t pick, uint32_t game_type_value);
 
 
 } // namespace opennova::world

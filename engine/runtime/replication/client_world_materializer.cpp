@@ -252,6 +252,14 @@ const world::Entity *ClientWorldMaterializer::owned(
 			handle, tracked->second.registry_spawn_id});
 }
 
+world::Entity *ClientWorldMaterializer::replica_world_entity(world::World &world,
+		world::EntityHandle handle, bool wire_header_world) const {
+	if (!handle.valid()) return nullptr;
+	if (wire_header_world) return owned(world, handle);
+	world::Entity *entity = world.registry.get(handle);
+	return entity != nullptr && entity->spawn_origin != world::kSpawnOriginNone ? entity : nullptr;
+}
+
 // [orig: Entity_LandmineThink @ 0x441A40] Pool 0 lives in decoded state on a
 // joiner; omit its predicted local body, which the native registry supplies.
 void ClientWorldMaterializer::fill_minefield_actors(const ClientState &state,

@@ -290,6 +290,9 @@ void bike_off_contact_planar_forward() {
 
 // Entity_RespawnVehicle re-seeds the +0x1B0 destroy timer from def+0x1A4
 // [orig: @0x46007C..0x460082]; the infantry/marker spawn reset does not.
+// It then stores Health and Armor back to the def's words, the Armor word
+// whatever a pickup or a script moved it to (D-PWR-14).
+// [orig: Entity_RespawnVehicle - Health @0x460091, Armor @0x4600A1]
 void vehicle_respawn_reseeds_destroy_timer() {
     Rig r;
     ItemDeathTraits traits;
@@ -297,16 +300,21 @@ void vehicle_respawn_reseeds_destroy_timer() {
     r.world.tables.item_death_traits.set(1291, traits);
     auto &v = r.entity();
     v.destroy_timer = 5;
-    v.destroy_timer_initialized = false;
+    v.item_init_done = false;
+    v.health = 0;
+    v.mana_max = 7;
+    v.mana = 2;
     r.world.vehicles.respawn(v);
     CHECK(v.destroy_timer == 777);
-    CHECK(v.destroy_timer_initialized);
+    CHECK(v.item_init_done);
+    CHECK(v.health == 3000);
+    CHECK(v.mana == 7);
     // Entity_ResetToSpawnState @0x4B9610 writes no +0x1B0: the organic reset
     // leaves the timer alone even when the def carries a timing word.
     auto &d = *r.world.registry.get(r.driver);
     d.item_id = 1291;
     d.destroy_timer = 5;
-    d.destroy_timer_initialized = true;
+    d.item_init_done = true;
     entity_reset_to_spawn_state(r.world, r.world.ai, d);
     CHECK(d.destroy_timer == 5);
 }

@@ -8,8 +8,10 @@
 // post-parse so this file pins only the FOLD's mapping.
 #include <formats/def/def.h>
 #include <runtime/mission/item_traits.h>
+#include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/item_sections.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
 #include <cstdio>
@@ -352,7 +354,13 @@ int main() {
     DefItemDef *tank = entry_for(file, 100500);
     DefItemDef *rifle = entry_for(file, 100510);
     DefItemDef *bunker = entry_for(file, 100520);
-    CHECK(player && tank && rifle && bunker);
+    DefItemDef *bush = entry_for(file, 100530);
+    CHECK(player && tank && rifle && bunker && bush);
+    bush->attrib |= DEF_ITEM_ATTRIB_NOTARGET; // as items.def 101435 "Metal 50gal Drum"
+    DefItemDef *mine_def = entry_for(file, 100601);
+    CHECK(mine_def != nullptr);
+    if (mine_def != nullptr) // as items.def 101891 "Satchel Charge"
+        mine_def->attrib |= DEF_ITEM_ATTRIB_NOTARGET;
     player->armor_impact = 3;
     player->armor_kz = 4;
     player->damage_reduc_pp = 0.25f;
@@ -569,6 +577,29 @@ int main() {
     CHECK((unknown_e->engine_flags & 0x4000000u) == 0);
     CHECK(unknown_e->sub_type != 0xFF);
 
+    // A NoTarget def (attrib 0x100) ORs Flags 0x8000000 at the model init,
+    // whatever its type or hp; no other def does, and neither does a missing
+    // one. The load stream carries the bit: the bush's S2C 0x10 record streams
+    // it in the Flags dword (the record sits at its pool-2 slot).
+    // [orig: Entity_InitFromModel @0x40DC3B / @0x40DC4F;
+    //  NetPacket_SerializePool2StaticToBuffer @0x5044E6]
+    const Entity *bush_e = w.registry.get(bush_h);
+    CHECK(bush_e != nullptr && (bush_e->engine_flags & kEntityFlagNoTarget) != 0);
+    CHECK((bunker_e->engine_flags & kEntityFlagNoTarget) == 0);
+    CHECK((tank_e->engine_flags & kEntityFlagNoTarget) == 0);
+    CHECK((unknown_e->engine_flags & kEntityFlagNoTarget) == 0);
+    {
+        const StaticEntityBatch batch = replication::build_pool2_static_batch(w);
+        const size_t bush_slot = static_cast<size_t>(bush_h.slot());
+        const size_t bunker_slot = static_cast<size_t>(bunker_h.slot());
+        CHECK(bush_slot < batch.records.size() && bunker_slot < batch.records.size());
+        if (bush_slot < batch.records.size() && bunker_slot < batch.records.size()) {
+            CHECK(batch.records[bush_slot].item_type_id == 530);
+            CHECK((batch.records[bush_slot].entity_flags & 0x8000000u) != 0);
+            CHECK((batch.records[bunker_slot].entity_flags & 0x8000000u) == 0);
+        }
+    }
+
     // ---- the death-trait table ----
     const ItemDeathTraits *bt = w.tables.item_death_traits.get(520);
     CHECK(bt != nullptr);
@@ -736,7 +767,6 @@ int main() {
 	(void)apc_h;
 	(void)helo_h;
 	(void)truck_h;
-	(void)bush_h;
 	(void)player_h;
 
 	// The sway renderer binds through the render_function's `tree` bone row;
@@ -776,7 +806,7 @@ int main() {
 	// sector builder into the model's collision and scar callbacks only, and
 	// that flag survives the resolve (D-ITEMDEF-20). A psec draw hides the
 	// sector builder's sections alone, never the section or piece masks.
-	// [orig: Projectile_SpawnFromTile @0x53c3b0 / @0x53c3c6; Render_SectorEntity
+	// [orig: Palm_SpawnFragment @0x53c3b0 / @0x53c3c6; Render_SectorEntity
 	//  @0x5c431b..0x5c4372; BoneCallback_psec_World @0x53c130]
 	{
 		DefItemDef *psec_def = entry_for(file, 100549);
@@ -812,6 +842,45 @@ int main() {
 		}
 	}
 
+	// The death-section draw binds through the render tag's cveh, chel, tank
+	// and cpln bone rows, each by its first four bytes with their case kept:
+	// `cvehX` is the cveh row, `CHel`, `psec` and `bldg` are none of them, and
+	// a def edited to `Cveh` or `TANK` loses the draw on the next resolve.
+	// [orig: rows 'cveh' @0x82cfe0 -> Entity_BuildDeathSectionTransforms
+	//  @0x492af0, 'chel' @0x82cfd0 -> Entity_BuildAndApplyBoneMatrices @0x48f210,
+	//  'tank' @0x82cff0 -> Render_DestroyedSections @0x449ef0, 'cpln' @0x82d000
+	//  -> BoneCallback_cpln_World @0x48fe90; BoneCallback_LookupByTag @0x4e32c6]
+	{
+		CHECK(w.registry.get(tank_h)->death_section_pivot);
+		CHECK(w.registry.get(prefix_tank_h)->death_section_pivot);
+		CHECK(!w.registry.get(helo_h)->death_section_pivot);
+		CHECK(!w.registry.get(psec_palm_h)->death_section_pivot);
+		DefItemDef *truck_def = entry_for(file, 100503);
+		CHECK(truck_def != nullptr);
+		if (truck_def != nullptr) {
+			// The bldg row's section offset binds the same way: `bldg` and
+			// `bldgX` are its row, `Bldg` and `BLDG` none.
+			// [orig: row 'bldg' @0x82cf10 -> BoneCallback_bldg_World @0x4e21a0]
+			const struct { const char *tag; bool pivots; bool bldg; } tags[] = {
+				{"chel", true, false}, {"tank", true, false}, {"cpln", true, false},
+				{"cplnX", true, false}, {"CHel", false, false}, {"Cveh", false, false},
+				{"TANK", false, false}, {"bldg", false, true}, {"bldgX", false, true},
+				{"Bldg", false, false}, {"BLDG", false, false},
+			};
+			for (const auto &tag : tags) {
+				std::snprintf(truck_def->render_function, sizeof(truck_def->render_function),
+						"%s", tag.tag);
+				mission::resolve_item_traits(w, file, wire_class);
+				CHECK(w.registry.get(truck_h)->death_section_pivot == tag.pivots);
+				CHECK(w.registry.get(truck_h)->bldg_section_pivot == tag.bldg);
+			}
+			std::snprintf(truck_def->render_function, sizeof(truck_def->render_function), "cveh");
+			mission::resolve_item_traits(w, file, wire_class);
+			CHECK(w.registry.get(truck_h)->death_section_pivot);
+			CHECK(!w.registry.get(truck_h)->bldg_section_pivot);
+		}
+	}
+
 	// ---- the throwable class scan ----
     const ThrowableClassRow *frag = w.throwables.classes.get(600);
     CHECK(frag != nullptr);
@@ -828,7 +897,12 @@ int main() {
     if (mine != nullptr) {
         CHECK(mine->think == ThrowClass::kAVMine);
         CHECK(mine->motor == ThrowClass::kSatchel);
+        // The placed entity's model init reads the def's NoTarget bit
+        // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0, the
+        //  Entity_InitFromModel call @0x5455D8].
+        CHECK(mine->no_target);
     }
+    CHECK(frag == nullptr || !frag->no_target);
     // vmne is an event row only: as a move_function it binds the physics
     // table's null row, so the device has its think and no motor.
     // [orig: EntityDef_LookupPhysicsCallback @0x4a9240 over @0x82abc8]
@@ -967,6 +1041,41 @@ int main() {
             CHECK(rifle_override != nullptr && !rifle_override->is_spawn_point);
             CHECK(rifle_override != nullptr && rifle_override->leave_corpse);
         }
+    }
+
+    // ---- the lift leaves a player body alone (D-PWR-9) ----
+    // Retail's lift is the mission start's reload over the loaded pools, ahead
+    // of the round init's player spawn; a player's health is its spawn's raises
+    // to the ceiling. A training start at the difficulty word 1 over a Player
+    // def hp of 200 spawns at exactly 100 and keeps it through the boot's later
+    // sweeps, while a non-player body of the same row at 100 still lifts.
+    // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830, called @0x52550E;
+    //  Server_InitAllPlayerEntitiesForRound called @0x525BAF;
+    //  Entity_SpawnFromAnimSlotProperty @0x43C557..0x43C56B]
+    {
+        player->hp = 200;
+        World sp;
+        sp.registry.configure_pool(0, 8);
+        sp.rules.mp_session = false;
+        sp.rules.difficulty = 1;
+        mission::resolve_item_traits(sp, file, wire_class); // the Player row's word
+        CHECK(sp.tables.player.item_hp == 200);
+        PlayerSpawn ps;
+        ps.net_id = 0xFFF0;
+        const EntityHandle body_h = spawn_player(sp, ps);
+        const EntityHandle npc_h = spawn(sp, 0, 5305, EntityKind::Organic);
+        const Entity *body = sp.registry.get(body_h);
+        CHECK(body != nullptr && sp.cached.local_player == body_h);
+        CHECK(body != nullptr && body->health == 100); // halved at the word 1
+        CHECK(body != nullptr && body->health_max == 200);
+        mission::resolve_item_traits(sp, file, wire_class); // the kernel's item_traits step
+        body = sp.registry.get(body_h);
+        CHECK(body != nullptr && body->health == 100);
+        CHECK(body != nullptr && body->health_max == 200);
+        const Entity *npc = sp.registry.get(npc_h);
+        CHECK(npc != nullptr && npc->health == 200);
+        CHECK(npc != nullptr && npc->health_max == 200);
+        player->hp = 100;
     }
 
     def_free_items(&file);

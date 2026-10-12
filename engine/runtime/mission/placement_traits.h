@@ -138,8 +138,8 @@ inline bool uses_submodel_renderer(std::string_view render_function) {
 // and the move_function's `psec` physics row, the last two by whole name
 // ignoring case; the pool serializer streams +0x270 exactly for the palm
 // event row and the psec physics row. (The per-entity +0x138 section mask
-// other world callbacks apply, the cveh row's and the generic one, is not
-// this predicate's.)
+// other world callbacks apply, the generic one's and the bldg, door, tree,
+// ewep, chel, cveh, tank and cpln rows', is not this predicate's.)
 // [orig: rows 'psec' @ 0x82D010 / 'cesp' @ 0x82D020 -> BoneCallback_psec_World
 //  @ 0x53C130; Entity_LookupRenderCallbacks stricmp @ 0x407DD8, rows 'palm'
 //  @ 0x813270 -> WeaponOverlay_HandleDamage @ 0x53C4C0, 'towr' @ 0x813240 ->
@@ -148,7 +148,10 @@ inline bool uses_submodel_renderer(std::string_view render_function) {
 //  @ 0x53BE10; NetPacket_SerializeEntityPoolToPacket_0's def+0x138 /
 //  def+0x158 tests @ 0x503F4F / @ 0x503F5B; the +0x138 mask readers
 //  Entity_BuildDeathSectionTransforms @ 0x492B07, BoneCallback_gnrc_World
-//  @ 0x4E2972]
+//  @ 0x4E2972, BoneCallback_bldg_World @ 0x4E22CF, BoneCallback_BuildBoneTransforms
+//  @ 0x4E3100, BoneCallback_Sway_World @ 0x4E2BB4, Entity_RenderVehicleModel
+//  @ 0x4408E2, Entity_BuildAndApplyBoneMatrices @ 0x48F243,
+//  Render_DestroyedSections @ 0x449F56, BoneCallback_cpln_World @ 0x48FEA7]
 inline bool uses_section_renderer(std::string_view ai_function,
         std::string_view move_function, std::string_view render_function) {
     const std::string_view tag = render_tag(render_function);

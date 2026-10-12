@@ -271,11 +271,11 @@ struct AmmoTableEntry {
 struct AmmoTable {
     std::vector<AmmoTableEntry> entries;
 
-    // Ammo def 0's effect bank: the static 448-byte `word_A2EB28` its block end fills
+    // Ammo def 0's effect bank: the static 448-byte `g_AmmoDefStaticEffects` its block end fills
     // instead of allocating, 28 rows of 16 bytes {tag id, effect, sound, 0}: row 0 the
     // always-copied null slot, then def 0's authored tags in ascending tag order, the
     // rest zero [orig: AmmoDef_InitEffectsTable @0x409F20 — `ammoDef == g_AmmoDefTable`
-    // -> word_A2EB28 @0x409f62, the `*srcEffect || entryIndex <= 0` copy gate
+    // -> g_AmmoDefStaticEffects @0x409f62, the `*srcEffect || entryIndex <= 0` copy gate
     // @0x409fe8]. The bank is COMPACTED: row r is def 0's r-th authored tag, the tag r
     // itself only where def 0 authors every tag below it (JO:CA's AT_NULL authors
     // 1..23). Two readers take a row of it by PLACE: the impact presenter for a tag the
@@ -334,7 +334,7 @@ struct ImpactRowPick {
 // @0x40a1bc..0x40a1c1); the ammo's own compacted rows are searched for the tag (`cmp [ecx],
 // ebx` over its +0x6C count @0x40a1d6..0x40a1f3, a hit taken @0x40a1f7..0x40a1fd); with
 // none, the row at the tag's PLACE in ammo def 0's static bank (`shl edi, 4; add edi,
-// offset word_A2EB28` @0x40a1cb..0x40a1d0), whatever tag def 0 put there. The bullet's
+// offset g_AmmoDefStaticEffects` @0x40a1cb..0x40a1d0), whatever tag def 0 put there. The bullet's
 // terrain, entity, person and water handlers, the throwable motors and the tracer zip all
 // present through it. The ammo's own rows are carried tag-addressed
 // (AmmoTableEntry::impact_effects), so the search is the row's `authored` flag.

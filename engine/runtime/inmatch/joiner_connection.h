@@ -196,9 +196,9 @@ public:
 		bool ammo_pools_set = false;
 		std::array<int32_t, kWorldStateAmmoPoolCount> ammo_pools{};
 		std::vector<ZoneTimerUpdate> zone_timer_updates;
-		// S2C 0x50 leg 1: this poll re-latched OUR OWN team (the same byte_A85B48
+		// S2C 0x50 leg 1: this poll re-latched OUR OWN team (the same g_LocalTeam
 		// latch the S2C 0x04 tail writes). The binding re-styles friend/foe from it.
-		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — byte_A85B48 store @0x4319db]
+		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — g_LocalTeam store @0x4319db]
 		bool self_team_changed = false;
 		uint8_t self_team = 0;
 		// Diagnostic summary of S2C 0x50; entity state is folded only from the
@@ -372,16 +372,18 @@ public:
 	// client_scrk = the captured client SCRK (its ClientAuth.scrk); next_seq/last_ack = the captured
 	// datagram's seq/ack; self_handle/self_type = its 0x0C sub-header. server_scrk lets the same
 	// runtime also decode the capture's S2C 0x83 stream. Skips the live handshake — replay/parity only.
+	// self_team = the self record's team byte (the spawn pose's team).
 	void seed_in_match(uint32_t session_id, uint32_t client_key, std::string client_scrk,
 	                   std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
-	                   uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0);
+	                   uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
+	                   uint8_t self_team = 0);
 
 	// The shell's kit for the retail loadout-submission pair the world-stream terminator (S2C 0x1A)
 	// releases. Retail sends the SAME per-side profile kit twice: first with the fixed Primary-key
 	// slot 195 (pre-Player_InitPlayer, the empty slot table leaves the argument unresolved), then
 	// with the live g_CurrentWeaponSlot (the equipped combo after the spawn fill). The wire team
 	// byte is NOT part of this seam — it is latched from the host's S2C 0x04 tail byte, exactly
-	// like retail's byte_A85B48. Unset keeps the capture-default kit, so headless callers (ctests,
+	// like retail's g_LocalTeam. Unset keeps the capture-default kit, so headless callers (ctests,
 	// seed_in_match) preserve today's auto behavior byte-for-byte.
 	// [orig: Game_StartMission @0x525836/@0x525c2e -> NetPacket_SendLoadoutSubmit @0x42cdc0]
 	// The optional blue/red side blocks below carry the profile content the two PROFILE-sourced
@@ -738,7 +740,7 @@ public:
 	bool has_self_handle() const { return has_self_handle_; }
 	uint16_t self_handle() const { return self_handle_; } // the wire handle H
 	// The server-assigned team latched from the S2C 0x04 tail byte, and re-latched by the
-	// S2C 0x50 team assign [orig: byte_A85B48 — @0x425499 then @0x4319db]. This is the
+	// S2C 0x50 team assign [orig: g_LocalTeam — @0x425499 then @0x4319db]. This is the
 	// side selector a kit build must use: teams 1 and 3 are the BLUE block, everything
 	// else the RED block. Before the 0x04 latch it reads 0 — exactly like retail's
 	// zero-initialized global — which selects the RED block; a real admission always
@@ -778,6 +780,8 @@ public:
 	// This connection's own numeric key (ClientAuth.CK; fresh per start()) — the
 	// receiver-local key a host's 0x84 resend request addresses us by.
 	uint32_t client_key() const { return client_key_; }
+	// The draw start() makes the CK from (unset, make_session_key's own); a test injects zeros.
+	void set_session_key_draw(std::function<uint32_t()> draw) { session_key_draw_ = std::move(draw); }
 	uint32_t monotonic_milliseconds32() const {
 		return static_cast<uint32_t>(monotonic_milliseconds_() & 0xFFFFFFFFu);
 	}
@@ -874,6 +878,7 @@ private:
 
 	uint32_t client_index_ = 1;
 	uint32_t client_key_ = 1;
+	std::function<uint32_t()> session_key_draw_;
 	std::string player_name_;
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;
@@ -925,7 +930,7 @@ private:
 	bool mission_known_ = false; // structurally valid authoritative S2C 0x7B received
 	// The joiner's server-assigned team, latched from the S2C 0x04 slot-assignment tail byte —
 	// the 0x2F loadout-submit header byte 0 source [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 ->
-	// byte_A85B48 @0x425499]. Zero-initialized like retail's global: 0x04 always precedes the
+	// g_LocalTeam @0x425499]. Zero-initialized like retail's global: 0x04 always precedes the
 	// 0x1A submission trigger in a real admission, so harnesses must feed the 0x04 they expect.
 	uint8_t assigned_team_ = 0;
 	uint16_t class_allow_mask_ = 0x03FFu;

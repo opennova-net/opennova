@@ -149,7 +149,7 @@ struct Program {
     std::vector<std::string> sound_names; // rebased nonzero SOUNDSET handles
     int event_count = 0;              // includes nested IF/event rules
     // The block depth each event was opened at: the IF/ELSEIF byte
-    // [orig: byte_C67E18]. previous/chain/reset walk it backward.
+    // [orig: g_WacEventDepths @0xC67E18]. previous/chain/reset walk it backward.
     std::vector<uint16_t> event_depths;
     uint32_t loop_count = 0;
     std::vector<std::string> source_names;

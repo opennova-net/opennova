@@ -10,6 +10,8 @@
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/client_state.h>
+#include <runtime/replication/client_world_materializer.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/present_rows.h>
@@ -516,6 +518,155 @@ bool test_joiner_vehicle_motion_controls_reach_present_rows() {
 					row[w::PF_VEHICLE_TRACK_LEFT] == float(0x1234) &&
 					row[w::PF_VEHICLE_TRACK_RIGHT] == float(0x5678),
 			"a joiner's tank row publishes its twin's track phases");
+}
+
+// The bldg row's world callback translates whatever it draws by the negated
+// origin of the section its byte +0x2C1 names, on every peer: a replica whose
+// S2C 0x13 death id stored 0x0100 draws its section-1 offset on the joiner as
+// the host's row does, keeping its decoded pose otherwise; id 0 draws in place.
+// [orig: BoneCallback_bldg_World @0x4E21A0 - the byte @0x4E2214, the translate
+//  @0x4E2247; NapiNPClientMsg_EntityDeath @0x42EBDF]
+bool test_joiner_bldg_section_offset_reaches_present_rows() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(2, 2);
+	im::ClientRuntime runtime("BldgRows");
+	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1115);
+	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
+	e->kind = w::EntityKind::Building;
+	e->position = {10.0f, 20.0f, 11.0f};
+	e->yaw = 90; e->pitch = 0; e->roll = 0;
+	e->bldg_section_pivot = true;
+	e->death_anim_state = 0x0100;
+	w::ItemDeathTraits traits;
+	traits.model_section_origins_q16 = {{{0, 0, 0}}, {{0, 0, 8 * 65536}}};
+	kernel.world.tables.item_death_traits.set(1115, traits);
+	opennova::replication::ClientEntityState decoded;
+	decoded.handle = e->handle.packed;
+	decoded.type_id = 1115;
+	decoded.cls = opennova::EntityClass::NoNetworkCallback;
+	decoded.x = 10 * 65536;
+	decoded.y = 20 * 65536;
+	decoded.z = 11 * 65536;
+	runtime.state().upsert(decoded.handle) = decoded;
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_world_present_rows({kernel, nullptr, false}, lifecycle, rows, doors);
+	bool ok = expect(rows.size() == w::PF_STRIDE && row_at(rows, 0)[w::PF_POS_Y] == 3.0f,
+			"the host's bldg row draws its section-1 offset");
+	const im::PresentRowsContext context{kernel, &runtime, true};
+	im::PoolPresentLifecycleMap joiner_lifecycle;
+	im::build_client_replica_present_rows(context, joiner_lifecycle, rows, doors);
+	if (!expect(rows.size() == w::PF_STRIDE, "one joiner bldg row")) return false;
+	ok = expect(row_at(rows, 0)[w::PF_POS_Y] == 3.0f && row_at(rows, 0)[w::PF_POS_X] == 10.0f &&
+					row_at(rows, 0)[w::PF_POS_Z] == -20.0f,
+			"the joiner's bldg row draws the same section-1 offset") && ok;
+	e->death_anim_state = 0;
+	im::build_client_replica_present_rows(context, joiner_lifecycle, rows, doors);
+	ok = expect(row_at(rows, 0)[w::PF_POS_Y] == 11.0f,
+			"a joiner's bldg row whose byte names section 0 draws in place") && ok;
+	return ok;
+}
+
+// The decoded row's own native row is the lifetime the joiner's materializer
+// owns: a later bldg of the same type at the same handle is not it, so the
+// retained replica row takes none of the newcomer's section offset (nor the
+// section/tower gate's pose).
+// [orig: BoneCallback_bldg_World @0x4E21A0 - the byte @0x4E2214]
+bool test_joiner_bldg_offset_reads_the_owned_lifetime() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(2, 2);
+	kernel.wire_header_world = true;
+	im::ClientRuntime runtime("BldgReuse");
+	w::ItemDeathTraits traits;
+	traits.model_section_origins_q16 = {{{0, 0, 0}}, {{0, 0, 8 * 65536}}};
+	kernel.world.tables.item_death_traits.set(1115, traits);
+	opennova::replication::ClientEntityState decoded;
+	decoded.handle = w::EntityHandle::make(2, 0).packed;
+	decoded.type_id = 1115;
+	decoded.spawn_revision = 1;
+	decoded.cls = opennova::EntityClass::NoNetworkCallback;
+	decoded.x = 10 * 65536;
+	decoded.y = 20 * 65536;
+	decoded.z = 11 * 65536;
+	runtime.state().upsert(decoded.handle) = decoded;
+	opennova::replication::ClientWorldMaterializer materializer;
+	materializer.sync(runtime.state(), kernel.world);
+	const w::EntityHandle h{decoded.handle};
+	w::Entity *mine = kernel.world.registry.get(h);
+	if (!expect(mine != nullptr && materializer.owned(kernel.world, h) == mine,
+			"the materializer owns the decoded bldg row's lifetime"))
+		return false;
+	mine->bldg_section_pivot = true;
+	mine->death_anim_state = 0x0100;
+	im::PresentRowsContext context{kernel, &runtime, true};
+	context.materializer = &materializer;
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	bool ok = expect(rows.size() == w::PF_STRIDE && row_at(rows, 0)[w::PF_POS_Y] == 3.0f,
+			"the owned bldg lifetime draws its section-1 offset");
+	kernel.world.registry.despawn(h);
+	w::Entity newcomer;
+	newcomer.item_id = 1115;
+	newcomer.alive = true;
+	newcomer.position = {10.0f, 120.0f, 11.0f};
+	newcomer.bldg_section_pivot = true;
+	newcomer.death_anim_state = 0x0100;
+	if (!expect(kernel.world.registry.spawn_at(h, newcomer) == h &&
+					materializer.owned(kernel.world, h) == nullptr,
+			"a same-type newcomer at the handle is not the owned lifetime"))
+		return false;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	ok = expect(rows.size() == w::PF_STRIDE && row_at(rows, 0)[w::PF_POS_Y] == 11.0f &&
+					row_at(rows, 0)[w::PF_POS_Z] == -20.0f,
+			"the retained replica row takes no offset from the slot's newcomer") && ok;
+	return ok;
+}
+
+// The callback turns the translation with the entity's one matrix: on a
+// joiner the row renders the decoded heading (here 90.45 degrees, where the
+// materialized row keeps a whole-degree 90), so the offset turns with it.
+// [orig: BoneCallback_bldg_World @0x4E21A0 - the translate @0x4E2247 onto the
+//  entity matrix]
+bool test_joiner_bldg_offset_turns_with_the_rendered_heading() {
+	opennova::mission::MissionKernel kernel;
+	kernel.world.registry.configure_pool(2, 2);
+	im::ClientRuntime runtime("BldgHeading");
+	w::Entity *e = spawn_pool_row(kernel, 2, 0, 1116);
+	if (!expect(e != nullptr, "joiner bldg row spawns")) return false;
+	e->position = {10.0f, 20.0f, 11.0f};
+	e->yaw = 90; e->pitch = 0; e->roll = 0;
+	e->bldg_section_pivot = true;
+	e->death_anim_state = 0x0100;
+	w::ItemDeathTraits traits;
+	traits.model_section_origins_q16 = {{{0, 0, 0}}, {{100 * 65536, 0, 0}}};
+	kernel.world.tables.item_death_traits.set(1116, traits);
+	opennova::replication::ClientEntityState decoded;
+	decoded.handle = e->handle.packed;
+	decoded.type_id = 1116;
+	decoded.cls = opennova::EntityClass::NoNetworkCallback;
+	decoded.x = 10 * 65536;
+	decoded.y = 20 * 65536;
+	decoded.z = 11 * 65536;
+	decoded.heading_bam = w::bam_heading_from_mission_yaw_deg(90.45);
+	runtime.state().upsert(decoded.handle) = decoded;
+	const im::PresentRowsContext context{kernel, &runtime, true};
+	im::PoolPresentLifecycleMap lifecycle;
+	std::vector<float> rows;
+	im::DoorPhaseTable doors;
+	im::build_client_replica_present_rows(context, lifecycle, rows, doors);
+	if (!expect(rows.size() == w::PF_STRIDE, "one joiner bldg row")) return false;
+	const int32_t zero[3] = {};
+	const int32_t negated[3] = {-100 * 65536, 0, 0};
+	int32_t offset[3];
+	w::collision_matrix_from_euler(decoded.heading_bam, 0, 0, zero).rotate_point(negated, offset);
+	const float *row = row_at(rows, 0);
+	return expect(std::fabs(row[w::PF_POS_X] - (10.0f + offset[0] / 65536.0f)) < 0.01f &&
+					std::fabs(row[w::PF_POS_Z] + (20.0f + offset[1] / 65536.0f)) < 0.01f &&
+					row[w::PF_POS_Y] == 11.0f,
+			"a joiner bldg row's offset turns with its decoded 90.45-degree heading");
 }
 
 bool test_joiner_palm_source_and_local_fragment() {
@@ -1163,6 +1314,9 @@ bool test_host_rows_draw_the_mounted_rider_weapon() {
 
 int main() {
     test_attached_rows_retain_subdegree_frame();
+    test_joiner_bldg_section_offset_reaches_present_rows();
+    test_joiner_bldg_offset_reads_the_owned_lifetime();
+    test_joiner_bldg_offset_turns_with_the_rendered_heading();
     test_joiner_palm_source_and_local_fragment();
     test_door_phases_reach_present_rows();
     test_joiner_door_phases_reach_present_rows();

@@ -910,6 +910,34 @@ static void test_bms_pool0_used_window_is_the_accepted_count() {
     CHECK(world->registry.by_net_id(304) == nullptr);
 }
 
+// Each pool's used count after the load: pools 1..3 take their record count, a
+// rejected last record included, and pool 0 the accepted count (D-NET-417).
+// [orig: Mission_LoadBMSFile @0x40F4E0 -- Pool_SetUsed @0x40F9DB (1), @0x40FA4A
+//  (2), @0x40FABA (3), @0x40FB34 (0, the spawn successes); Pool_SetUsed @0x441F60]
+static void test_bms_pool_used_counts_are_the_load_counts() {
+    bms::File file;
+    file.items.resize(2);
+    file.buildings.resize(3);
+    file.markers.resize(1);
+    file.organics.resize(2);
+    for (bms::Entity &e : file.items) e.type_id = 0x50;
+    for (bms::Entity &e : file.buildings) e.type_id = 0x60;
+    file.markers[0].type_id = 6002;
+    for (bms::Entity &e : file.organics) e.type_id = 5001;
+    file.items[1].bmsi_attributes = 0x80; // multiplayer only: rejected offline
+    file.buildings[2].bmsi_attributes = 0x80;
+    file.markers[0].bmsi_attributes = 0x80;
+    file.organics[0].bmsi_attributes = 0x80;
+    auto world = std::make_unique<World>();
+    mission::promote_mission(file, *world);
+    CHECK(world->registry.pool_used(1) == 2);
+    CHECK(world->registry.pool_used(2) == 3);
+    CHECK(world->registry.pool_used(3) == 1);
+    CHECK(world->registry.pool_used(0) == 1);
+    CHECK(world->registry.get(EntityHandle::make(2, 2)) == nullptr);
+    CHECK(world->registry.get(EntityHandle::make(0, 1)) == nullptr);
+}
+
 static void test_bms_admission_zeros_rejected_marker_projections() {
     bms::File file;
     file.markers.resize(2);
@@ -1069,6 +1097,7 @@ int main() {
     test_bms_range_slots_read_their_own_fields();
     test_bms_admission_preserves_holes_and_signed_thresholds();
     test_bms_pool0_used_window_is_the_accepted_count();
+    test_bms_pool_used_counts_are_the_load_counts();
     test_bms_admission_zeros_rejected_marker_projections();
     test_script_spatial_tables_are_promoted_and_replaced();
     // A synthetic mission: 3 markers forming a path, 1 looping waypoint record (channel 0),

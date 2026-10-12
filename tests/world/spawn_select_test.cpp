@@ -738,19 +738,19 @@ int main() {
             p.team = (i == 8) ? 2 : 1;
             players.push_back(w.registry.spawn(0, p));
         }
-        CHECK(w.zones.spawn_waves.try_queue(w, a, players[0]));
-        CHECK(!w.zones.spawn_waves.try_queue(w, a, players[0]));
-        CHECK(w.zones.spawn_waves.try_queue(w, b, players[0]));
+        CHECK(w.zones.spawn_waves.try_queue(a, players[0], 1));
+        CHECK(!w.zones.spawn_waves.try_queue(a, players[0], 1));
+        CHECK(w.zones.spawn_waves.try_queue(b, players[0], 1));
         CHECK(w.zones.spawn_waves.entries()[0].queued.empty());
         CHECK(w.zones.spawn_waves.entries()[1].queued.size() == 1);
-        CHECK(!w.zones.spawn_waves.try_queue(w, b, players[8]));
+        CHECK(!w.zones.spawn_waves.try_queue(b, players[8], 2));
         for (int i = 1; i < 8; ++i)
-            CHECK(w.zones.spawn_waves.try_queue(w, b, players[i]));
+            CHECK(w.zones.spawn_waves.try_queue(b, players[i], 1));
         Entity extra;
         extra.kind = EntityKind::Organic;
         extra.team = 1;
         const EntityHandle ninth = w.registry.spawn(0, extra);
-        CHECK(!w.zones.spawn_waves.try_queue(w, b, ninth));
+        CHECK(!w.zones.spawn_waves.try_queue(b, ninth, 1));
         CHECK(w.zones.spawn_waves.entries()[1].queued.size() == 8);
         CHECK(w.zones.spawn_waves.entries()[1].requester_countdown(players[0]) == 0);
         CHECK(w.zones.spawn_waves.entries()[1].requester_countdown(players[3]) == 30);
@@ -776,8 +776,8 @@ int main() {
         const EntityHandle h1 = w.registry.spawn(0, p1);
         const EntityHandle h2 = w.registry.spawn(0, p2);
         w.zones.spawn_waves.build_from_mission(w, 0, 2);
-        CHECK(w.zones.spawn_waves.try_queue(w, zone, h1));
-        CHECK(w.zones.spawn_waves.try_queue(w, zone, h2));
+        CHECK(w.zones.spawn_waves.try_queue(zone, h1, 1));
+        CHECK(w.zones.spawn_waves.try_queue(zone, h2, 1));
         auto released = w.zones.spawn_waves.tick(w);
         CHECK(released.size() == 1 && released[0].player == h1 &&
               released[0].zone == zone);
@@ -796,16 +796,16 @@ int main() {
         CHECK(released.size() == 1 && released[0].player == h2);
 
         w.zones.spawn_waves.build_from_mission(w, 0, 2);
-        CHECK(w.zones.spawn_waves.try_queue(w, zone, h1));
+        CHECK(w.zones.spawn_waves.try_queue(zone, h1, 1));
         CHECK(w.zones.spawn_waves.tick(w).size() == 1);
-        CHECK(w.zones.spawn_waves.try_queue(w, zone, h2));
+        CHECK(w.zones.spawn_waves.try_queue(zone, h2, 1));
         w.registry.get(zone)->zone_control = 0xFFFF;
         CHECK(w.zones.spawn_waves.tick(w).empty());
         CHECK(w.zones.spawn_waves.entries()[0].queued.empty());
         CHECK(w.zones.spawn_waves.entries()[0].countdown == 0);
 
         w.registry.get(zone)->zone_control = 0x10000;
-        CHECK(w.zones.spawn_waves.try_queue(w, zone, h1));
+        CHECK(w.zones.spawn_waves.try_queue(zone, h1, 1));
         w.registry.get(zone)->team = 2;
         w.zones.spawn_waves.reset_on_zone_team_change(w, zone);
         CHECK(w.zones.spawn_waves.entries()[0].queued.empty());

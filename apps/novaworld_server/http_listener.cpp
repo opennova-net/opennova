@@ -2,6 +2,7 @@
 
 #include "auth.h"
 #include "catalog_repository.h"
+#include "host_routes.h"
 #include "http_cookies.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
@@ -19,6 +20,7 @@
 #include <net/novaworld/relay_request.h>
 #include <net/novaworld/unknown_tracker.h>
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
@@ -214,24 +216,21 @@ const char *content_type_for(const std::filesystem::path &p) {
 }
 
 // One-line summary of inbound cookies for logging. Each entry is
-// `name=value` with the value truncated to ~20 chars. Tags showing up
-// here that we didn't issue this run = retail bridging state from a
-// prior process via its persistent cookie jar (PERSISTENTEXPRESSLOGINDATA
-// is the usual suspect — see G.4).
+// `name=value` with the value truncated to ~20 chars, both loggable(); a
+// bearer secret (a session tag or token, a persistent login: is_secret_cookie)
+// shows only as its loggable_secret() stand-in. Tags showing up here that we
+// didn't issue this run = retail bridging state from a prior process via its
+// persistent cookie jar (PERSISTENTEXPRESSLOGINDATA is the usual suspect — see
+// G.4).
 std::string cookie_summary(std::string_view header) {
 	std::string out;
 	const auto cookies = parse_cookie_header(header);
 	bool first = true;
 	for (const auto &[k, v] : cookies) {
 		if (!first) out += ',';
-		out += k;
+		out += loggable(k);
 		out += '=';
-		if (v.size() <= 20) {
-			out += v;
-		} else {
-			out += v.substr(0, 20);
-			out += "..";
-		}
+		out += is_secret_cookie(k) ? loggable_secret(v) : loggable(v, 20);
 		first = false;
 	}
 	return out;
@@ -244,28 +243,6 @@ const char *connection_state_name(ConnectionState s) {
 	case ConnectionState::Closing:     return "closing";
 	}
 	return "unknown";
-}
-
-// A listed server for its owner (GET /api/me/hosts) or an admin (GET
-// /api/admin/hosts): its browser columns, the endpoint joiners are sent to and
-// the address its session comes from, and the row's UTC times. The public
-// /api/lobbies and /api/hosts name no owner.
-crow::json::wvalue listed_host_json(const hostdb::HostRow &h) {
-	crow::json::wvalue e;
-	e["rid"]          = h.rid;
-	e["gsid"]         = h.gsid;
-	e["game"]         = h.game;
-	e["server_name"]  = h.server_name;
-	e["mission_name"] = h.mission_name;
-	e["game_type"]    = h.game_type;
-	e["players"]      = h.player_count;
-	e["max_players"]  = h.max_players;
-	e["host_ip"]      = h.host_ip;
-	e["host_port"]    = h.host_port;
-	e["peer_ip"]      = h.peer_ip;
-	e["created_at"]   = h.created_at;
-	e["updated_at"]   = h.updated_at;
-	return e;
 }
 
 // Serialize a user row to JSON (no password_hash). Shared by the
@@ -285,7 +262,7 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 } // namespace
 
 struct HttpListener::Impl {
-	explicit Impl(db::ConnectionPool &pool) : access(app, pool) {}
+	explicit Impl(db::ConnectionPool &pool) : access(app, pool), hosts(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -300,6 +277,8 @@ struct HttpListener::Impl {
 	// Who each /api request comes from (web_access.h); declared after `app`,
 	// which it registers its routes on.
 	WebAccess access;
+	// The listed servers' routes (host_routes.h), over `access`.
+	HostRoutes hosts;
 };
 
 HttpListener::HttpListener(ConnectionManager &manager, db::ConnectionPool &db_pool,
@@ -340,6 +319,7 @@ bool HttpListener::start(const ServerConfig &config) {
 
 	register_admin_api_routes(public_host);
 	register_public_api_routes();
+	impl_->hosts.register_routes(impl_->app, nw_udp_);
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a
@@ -403,38 +383,56 @@ bool HttpListener::start(const ServerConfig &config) {
 // The port is Crow's: its run() stores the port it bound (the OS's pick for
 // port 0) in the app before it accepts the first connection, so every handler
 // reads it settled, and with a nonzero port it is the configured one.
-void HttpListener::forget_persistent_pins(int64_t user_id) {
-	std::lock_guard<std::mutex> lock(persistent_user_mu_);
-	for (auto it = persistent_to_user_id_.begin(); it != persistent_to_user_id_.end();) {
-		it = it->second == user_id ? persistent_to_user_id_.erase(it) : std::next(it);
+void HttpListener::forget_revoked_account(int64_t user_id) {
+	{
+		std::lock_guard<std::mutex> lock(persistent_user_mu_);
+		for (auto it = persistent_pins_.begin(); it != persistent_pins_.end();) {
+			it = it->second.user_id == user_id ? persistent_pins_.erase(it) : std::next(it);
+		}
 	}
+	if (nw_udp_ != nullptr) nw_udp_->forget_owner(user_id);
 }
 
-std::optional<int64_t> HttpListener::retail_login_owner(
-		const std::map<std::string, std::string> &cookies, db::Database &db,
-		const char *&how) const {
-	auto active = [](const std::optional<UserRecord> &user) {
-		return user && (user->account_status.empty() || user->account_status == "active");
-	};
+std::optional<UserRecord> HttpListener::pinned_user(const std::string &cookie, db::Database &db) {
+	if (cookie.empty())
+		return std::nullopt;
+	RetailPin pin;
+	{
+		std::lock_guard<std::mutex> lk(persistent_user_mu_);
+		const auto it = persistent_pins_.find(cookie);
+		if (it == persistent_pins_.end())
+			return std::nullopt;
+		pin = it->second;
+	}
+	auto user = get_user_by_id(db, pin.user_id);
+	if (user && user->credentials_gen == pin.credentials_gen)
+		return user;
+	// A reset, a ban or a deletion since the pin's login: it resumes nothing.
+	std::lock_guard<std::mutex> lk(persistent_user_mu_);
+	const auto it = persistent_pins_.find(cookie);
+	if (it != persistent_pins_.end() && it->second.user_id == pin.user_id &&
+			it->second.credentials_gen == pin.credentials_gen) {
+		persistent_pins_.erase(it);
+	}
+	return std::nullopt;
+}
+
+std::optional<UserRecord> HttpListener::retail_login_user(
+		const std::map<std::string, std::string> &cookies, db::Database &db, const char *&how) {
 	if (const auto it = cookies.find("LOGINSESSIONTAG"); it != cookies.end()) {
-		const auto user = get_user_by_login_session_tag(db, it->second);
-		if (active(user)) {
+		if (auto user = get_user_by_login_session_tag(db, it->second)) {
+			// The login is in use: its row's idle clock restarts, so the 2 h
+			// sweep (evict_active_user_sessions_older_than) ends a login idle
+			// that long, not one in the lobby since its last GET /NWLogin.dll.
+			touch_active_user_session(db, user->id);
 			how = "login-session";
-			return user->id;
+			return user;
 		}
 	}
-	if (const auto it = cookies.find("PERSISTENTEXPRESSLOGINDATA");
-	    it != cookies.end() && !it->second.empty()) {
-		int64_t pinned_id = 0;
-		{
-			std::lock_guard<std::mutex> lk(persistent_user_mu_);
-			const auto pin_it = persistent_to_user_id_.find(it->second);
-			if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
-		}
-		const auto user = get_user_by_id(db, pinned_id);
-		if (active(user)) {
+	if (const auto it = cookies.find("PERSISTENTEXPRESSLOGINDATA"); it != cookies.end()) {
+		if (auto user = pinned_user(it->second, db)) {
 			how = "persist-pin";
-			return user->id;
+			return user;
 		}
 	}
 	return std::nullopt;
@@ -449,7 +447,8 @@ std::string HttpListener::gsb_url() const {
 }
 
 // Admin REST API: server status, dev host injection, connection dump, user
-// CRUD. Every handler opens with WebAccess::require_admin: the Bearer
+// CRUD (the listed servers and their pushes are host_routes.h's). Every
+// handler opens with WebAccess::require_admin: the Bearer
 // ADMIN_API_TOKEN, or an admin-role website session (with the CSRF header on a
 // state change).
 void HttpListener::register_admin_api_routes(const std::string &public_host) {
@@ -497,49 +496,6 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
-	});
-
-	// GET /api/admin/hosts — every listed server with its owner: listed_host_json
-	// plus "owner", {id, username} of the account whose HostKey listed it, or
-	// null for an anonymous listing (the HostKey named no account).
-	CROW_ROUTE(app, "/api/admin/hosts").methods("GET"_method)(
-	    [this](const crow::request &req) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		std::vector<crow::json::wvalue> entries;
-		try {
-			auto db_conn = db_pool_.acquire();
-			db::ReadSnapshot snapshot(*db_conn);
-			std::map<int64_t, std::optional<UserRecord>> owners;
-			for (const auto &h : hostdb::list_hosts(*db_conn)) {
-				crow::json::wvalue e = listed_host_json(h);
-				std::optional<UserRecord> owner;
-				if (h.host_user_id) {
-					auto it = owners.find(*h.host_user_id);
-					if (it == owners.end()) {
-						it = owners.emplace(*h.host_user_id,
-						                    get_user_by_id(*db_conn, *h.host_user_id)).first;
-					}
-					owner = it->second;
-				}
-				if (owner) {
-					crow::json::wvalue o;
-					o["id"] = owner->id;
-					o["username"] = owner->username;
-					e["owner"] = std::move(o);
-				} else {
-					e["owner"] = nullptr;
-				}
-				entries.push_back(std::move(e));
-			}
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[http] GET /api/admin/hosts failed: %s\n", e.what());
-			return json_error(500, "db_error");
-		}
-		crow::json::wvalue out;
-		out["count"] = entries.size();
-		out["hosts"] = std::move(entries);
-		return json_reply(200, out);
 	});
 
 	// Dev/test helper: inject an active_hosts row so the GSB browser shows a
@@ -600,8 +556,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 			return res;
 		}
 		std::printf("[http] POST /api/admin/hosts injected rid=%u host=%s:%d game=%s\n",
-		            static_cast<unsigned>(row.rid), row.host_ip.c_str(), row.host_port,
-		            row.game.c_str());
+				static_cast<unsigned>(row.rid), loggable(row.host_ip).c_str(), row.host_port,
+				loggable(row.game).c_str());
 		crow::json::wvalue out;
 		out["rid"] = static_cast<int>(row.rid);
 		out["host_ip"] = row.host_ip;
@@ -612,122 +568,6 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
-	});
-
-	// The service's statements to a listed server, pushed over that server's own
-	// NovaWorld UDP session (NwUdpListener::push_server_command / push_stop_hosting;
-	// docs/net/novaworld-net-re.md "the service side"). 202 once queued for the
-	// receive thread, 404 for a RID no live connection holds, 409 for one whose
-	// connection is not hosting, 503 when no NW UDP listener is wired. Admin-gated
-	// like every route here (require_admin: the Bearer token, or an admin session
-	// with the CSRF header).
-	auto push_reply = [](HostPushResult result, uint32_t rid, crow::json::wvalue out) {
-		switch (result) {
-		case HostPushResult::Queued:
-			out["rid"] = rid;
-			out["status"] = host_push_result_name(result);
-			return json_reply(202, out);
-		case HostPushResult::NotHosted:
-			return json_error(409, host_push_result_name(result),
-			                  "the connection holding this RID is not hosting");
-		case HostPushResult::UnknownRid:
-			break;
-		}
-		return json_error(404, host_push_result_name(HostPushResult::UnknownRid),
-		                  "no live NovaWorld connection holds this RID");
-	};
-
-	// POST /api/admin/hosts/<rid>/command — a ServerCommand. Body JSON:
-	//   {"verb": "SetServerName", "target": "None|ByIndex|ByIpAndPort|ByName|ByPCID",
-	//    "args": ["..."]}
-	// composed through server_command_text, so a line the host's reader would
-	// drop (a verb/target pairing, too few args, a quote or NUL, past 511
-	// characters) is a 400 with its reason; so is an arg with a control byte
-	// (has_control_byte, auth.h). That is the service's own input rule at its
-	// edge, not a reader rule: the stock reader carries such a byte faithfully
-	// inside quotes (String_TokenizeQuotedToArray copies a quoted run as it is),
-	// so server_command_text, the reader's exact inverse, composes it. The harm
-	// is on the host: SetServerName / SetServerMsg save the token into game.cfg
-	// unescaped (Game_SaveConfig @0x54C490, `game_name = "%s"\n`; ours
-	// engine/formats/gamecfg/game_cfg_write.cpp), so a CR or LF injects a line
-	// into a third party's config, and the chat verbs relay the byte to every
-	// player.
-	CROW_ROUTE(app, "/api/admin/hosts/<uint>/command").methods("POST"_method)(
-	    [this, push_reply](const crow::request &req, uint64_t rid) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = JsonBody::parse(req.body);
-		if (!body) return json_error(400, "invalid_json", "");
-		const auto verb_name = body->text("verb");
-		if (!verb_name) {
-			return json_error(400, "invalid_command", "\"verb\" (a string) is required");
-		}
-		ServerCommandVerb verb = ServerCommandVerb::None;
-		if (!server_command_verb_from_name(*verb_name, verb)) {
-			return json_error(400, "invalid_command", "\"verb\" names no ServerCommand verb");
-		}
-		ServerCommandTarget target = ServerCommandTarget::None;
-		const auto target_name = body->text("target");
-		if (body->wrong_type() ||
-		    (target_name && !server_command_target_from_name(*target_name, target))) {
-			return json_error(400, "invalid_command",
-			                  "\"target\" is None, ByIndex, ByIpAndPort, ByName or ByPCID");
-		}
-		const std::vector<std::string> args = body->text_list("args").value_or(
-				std::vector<std::string>{});
-		if (body->wrong_type()) {
-			return json_error(400, "invalid_command", "\"args\" is a list of strings");
-		}
-		for (const std::string &arg : args) {
-			if (has_control_byte(arg)) {
-				return json_error(400, "invalid_command",
-				                  "an arg holds a control byte (below 0x20, or 0x7F), which a "
-				                  "stock host would carry into its game.cfg or its chat");
-			}
-		}
-		const char *refusal = nullptr;
-		const std::string cmd = server_command_text(verb, target, args, &refusal);
-		if (cmd.empty()) {
-			return json_error(400, "invalid_command", refusal != nullptr ? refusal : "");
-		}
-		if (nw_udp_ == nullptr) {
-			return json_error(503, "no_session_listener", "the NovaWorld UDP listener is not wired");
-		}
-		const uint32_t rid32 = rid <= UINT32_MAX ? static_cast<uint32_t>(rid) : 0u;
-		const HostPushResult result = nw_udp_->push_server_command(rid32, cmd);
-		// The whole line (server_command_text caps it at 511), control bytes escaped.
-		std::printf("[http] POST /api/admin/hosts/%llu/command '%s' -> %s\n",
-		            static_cast<unsigned long long>(rid), loggable(cmd, cmd.size()).c_str(),
-		            host_push_result_name(result));
-		crow::json::wvalue out;
-		out["statement"] = "ServerCommand";
-		out["cmd"] = cmd;
-		return push_reply(result, rid32, std::move(out));
-	});
-
-	// POST /api/admin/hosts/<rid>/stop — a ServerStopHosting with MsgCode 7,
-	// NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT (SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
-	// which code the retail service sent is unwitnessed): the sysop punt. A stock
-	// host in a NovaWorld match ends that match for everyone within 62 frames,
-	// goes to the main menu and resets its NovaWorld session
-	// (NwUdpListener::push_stop_hosting; the record's "The exit"); the server
-	// leaves the browser as the statement goes out. No body.
-	CROW_ROUTE(app, "/api/admin/hosts/<uint>/stop").methods("POST"_method)(
-	    [this, push_reply](const crow::request &req, uint64_t rid) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		if (nw_udp_ == nullptr) {
-			return json_error(503, "no_session_listener", "the NovaWorld UDP listener is not wired");
-		}
-		const uint32_t rid32 = rid <= UINT32_MAX ? static_cast<uint32_t>(rid) : 0u;
-		const HostPushResult result =
-				nw_udp_->push_stop_hosting(rid32, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT);
-		std::printf("[http] POST /api/admin/hosts/%llu/stop -> %s\n",
-		            static_cast<unsigned long long>(rid), host_push_result_name(result));
-		crow::json::wvalue out;
-		out["statement"] = "ServerStopHosting";
-		out["msg_code"] = SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
-		return push_reply(result, rid32, std::move(out));
 	});
 
 	// Connection-registry debug dump.
@@ -816,7 +656,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		auto result = delete_user(*db_conn, id);
-		if (result.ok) forget_persistent_pins(id);
+		if (result.ok) forget_revoked_account(id);
 		crow::response res(result.ok ? 204 :
 		                   result.error_code == "not_found" ? 404 : 500);
 		if (!result.ok) {
@@ -849,7 +689,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = db_pool_.acquire();
 		auto result = update_user(*db_conn, id, p);
-		if (result.ok && update_revokes_sessions(p)) forget_persistent_pins(id);
+		if (result.ok && update_revokes_sessions(p)) forget_revoked_account(id);
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
@@ -907,7 +747,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 }
 
 // Public JSON API consumed by the web portal: lobbies, stats, self-signup,
-// games, hosts, health, unknowns, and the logged-in account's listed servers.
+// games, hosts, health, unknowns, and the website's session routes (the
+// logged-in account's listed servers are host_routes.h's).
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
@@ -931,15 +772,17 @@ void HttpListener::register_public_api_routes() {
 					// camelCase to match the web LobbyHost type (snake_case here rendered
 					// every host as "Unnamed Server 0/0" — the Vue card reads
 					// serverName/maxPlayers). hostIp/hostPort surface the join
-					// address so a host is identifiable, not just named.
+					// address so a host is identifiable, not just named. The host's own
+					// text comes in its code page (a stock host's cp1252) and goes out
+					// as UTF-8; the GSB keeps the host's bytes for stock clients.
 					crow::json::wvalue hj;
 					hj["id"]          = h.rid;
-					hj["serverName"]  = h.server_name;
-					hj["hostIp"]      = h.host_ip;
+					hj["serverName"]  = retail_text_to_utf8(h.server_name);
+					hj["hostIp"]      = retail_text_to_utf8(h.host_ip);
 					hj["hostPort"]    = h.host_port;
 					hj["players"]     = h.player_count;
 					hj["maxPlayers"]  = h.max_players;
-					hj["region"]      = h.region;
+					hj["region"]      = retail_text_to_utf8(h.region);
 					hosts.push_back(std::move(hj));
 				}
 				game["hosts"] = std::move(hosts);
@@ -969,6 +812,7 @@ void HttpListener::register_public_api_routes() {
 			stats["updatedAtMs"] = static_cast<int64_t>(now_ms);
 			out["stats"] = std::move(stats);
 		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[http] /api/stats failed: %s\n", e.what());
 			out["error"] = e.what();
 		}
 		return out;
@@ -977,33 +821,12 @@ void HttpListener::register_public_api_routes() {
 	// POST /api/login, POST /api/logout, GET /api/me (web_access.cpp).
 	impl_->access.register_routes();
 
-	// GET /api/me/hosts — the servers the logged-in account has listed now (each
-	// with a HostKey its client's /NWHost.dll fetch minted for it):
-	// {"hosts": [listed_host_json...]}, oldest first, or 401.
-	CROW_ROUTE(app, "/api/me/hosts")([this](const crow::request &req) {
-		auto access = impl_->access.require_user(req);
-		if (access.refusal) return std::move(*access.refusal);
-		std::vector<crow::json::wvalue> hosts;
-		try {
-			auto db_conn = db_pool_.acquire();
-			for (const auto &h : hostdb::list_hosts_by_owner(*db_conn, access.user->id)) {
-				hosts.push_back(listed_host_json(h));
-			}
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[http] GET /api/me/hosts failed: %s\n", e.what());
-			return json_error(500, "db_error");
-		}
-		crow::json::wvalue out;
-		out["hosts"] = std::move(hosts);
-		crow::response res = json_reply(200, out);
-		res.set_header("Cache-Control", "no-store");
-		return res;
-	});
-
 	// POST /api/register — public self-signup. No admin token needed.
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
-	// to username when omitted. Returns the new user's public record on
-	// success; 400 on conflict / missing fields, 500 on DB error.
+	// to username when omitted; either takes create_user's rules (a username
+	// of at most 64 bytes, a handle of at most 30, no control byte in either).
+	// Returns the new user's public record on success; 400 on conflict /
+	// missing or refused fields, 500 on DB error.
 	// The X-OpenNova-Request header is required, checked first: a cross-site
 	// text/plain form can carry a JSON body (the parse ignores Content-Type),
 	// so without it any page could make its visitors create accounts and drain
@@ -1014,7 +837,7 @@ void HttpListener::register_public_api_routes() {
 		if (!WebAccess::has_csrf_header(req)) return json_error(403, "csrf_header_required");
 		const std::string ip = impl_->access.client_ip(req);
 		if (const int64_t wait = impl_->access.take_register(ip)) {
-			std::printf("[http] /api/register rate-limited for %s\n", ip.c_str());
+			std::printf("[http] /api/register rate-limited for %s\n", loggable(ip).c_str());
 			return too_many_requests(wait);
 		}
 		auto body = JsonBody::parse(req.body);
@@ -1081,6 +904,7 @@ void HttpListener::register_public_api_routes() {
 			}
 			out["games"] = std::move(arr);
 		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[http] /api/games failed: %s\n", e.what());
 			out["error"] = e.what();
 		}
 		return out;
@@ -1096,30 +920,33 @@ void HttpListener::register_public_api_routes() {
 			db::ReadSnapshot snapshot(*db_conn);
 			auto rows = hostdb::list_hosts(*db_conn);
 			entries.reserve(rows.size());
+			// The host's own text comes in its code page (a stock host's cp1252)
+			// and goes out as UTF-8; the GSB keeps the host's bytes.
+			const auto text = [](const std::string &s) { return retail_text_to_utf8(s); };
 			for (const auto &h : rows) {
 				crow::json::wvalue e;
 				e["rid"]          = h.rid;
-				e["gsid"]         = h.gsid;
-				e["game"]         = h.game;
-				e["app_id"]       = h.app_id;
-				e["server_name"]  = h.server_name;
-				e["host_ip"]      = h.host_ip;
+				e["gsid"]         = text(h.gsid);
+				e["game"]         = text(h.game);
+				e["app_id"]       = text(h.app_id);
+				e["server_name"]  = text(h.server_name);
+				e["host_ip"]      = text(h.host_ip);
 				e["host_port"]    = h.host_port;
 				e["players"]      = h.player_count;
 				e["max_players"]  = h.max_players;
-				e["region"]       = h.region;
-				e["game_type"]    = h.game_type;
-				e["mission_name"] = h.mission_name;
-				e["country"]      = h.country;
-				e["exp"]          = h.exp;
-				e["exp_bits"]     = h.exp_bits;
-				e["ver1"]         = h.ver1;
-				e["time_left"]    = h.time_left;
-				e["time_of_day"]  = h.time_of_day;
-				e["msg"]          = h.msg;
-				e["mod"]          = h.mod;
-				e["age"]          = h.age;
-				e["pb_server"]    = h.pb_server;
+				e["region"]       = text(h.region);
+				e["game_type"]    = text(h.game_type);
+				e["mission_name"] = text(h.mission_name);
+				e["country"]      = text(h.country);
+				e["exp"]          = text(h.exp);
+				e["exp_bits"]     = text(h.exp_bits);
+				e["ver1"]         = text(h.ver1);
+				e["time_left"]    = text(h.time_left);
+				e["time_of_day"]  = text(h.time_of_day);
+				e["msg"]          = text(h.msg);
+				e["mod"]          = text(h.mod);
+				e["age"]          = text(h.age);
+				e["pb_server"]    = text(h.pb_server);
 				// The host-reported PlayerList (one entry per slot).
 				std::vector<crow::json::wvalue> roster_entries;
 				try {
@@ -1128,12 +955,15 @@ void HttpListener::register_public_api_routes() {
 					for (const auto &s : roster) {
 						crow::json::wvalue re;
 						re["slot"]        = s.slot;
-						re["player_name"] = s.player_name;
-						re["team"]        = s.team;
-						re["type"]        = s.type;
+						re["player_name"] = text(s.player_name);
+						re["team"]        = text(s.team);
+						re["type"]        = text(s.type);
 						roster_entries.push_back(std::move(re));
 					}
-				} catch (const db::SqliteError &) { /* ignore */ }
+				} catch (const db::SqliteError &ex) {
+					// The host goes out without its roster.
+					std::fprintf(stderr, "[http] /api/hosts roster failed: %s\n", ex.what());
+				}
 				e["roster"] = std::move(roster_entries);
 				std::vector<crow::json::wvalue> player_entries;
 				try {
@@ -1141,12 +971,15 @@ void HttpListener::register_public_api_routes() {
 					player_entries.reserve(players.size());
 					for (const auto &p : players) {
 						crow::json::wvalue pe;
-						pe["nwhandle"] = p.nwhandle;
+						pe["nwhandle"] = text(p.nwhandle);
 						if (p.user_id) pe["user_id"] = static_cast<int64_t>(*p.user_id);
-						pe["peer_ip"]  = p.peer_ip;
+						pe["peer_ip"]  = text(p.peer_ip);
 						player_entries.push_back(std::move(pe));
 					}
-				} catch (const db::SqliteError &) { /* ignore */ }
+				} catch (const db::SqliteError &ex) {
+					// The host goes out without its player list.
+					std::fprintf(stderr, "[http] /api/hosts player list failed: %s\n", ex.what());
+				}
 				e["player_list"] = std::move(player_entries);
 				entries.push_back(std::move(e));
 			}
@@ -1218,9 +1051,10 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string cc    = req.url_params.get("cc")   ? req.url_params.get("cc")   : "";
 
 		const std::string epask = opennova::epask_to_string(epask_params_);
-		std::printf("[http] GET %s url=%s gt=%s ver=%s/%s cookies=[%s]\n", req.url.c_str(),
-				loggable(url).c_str(), loggable(gt).c_str(), loggable(ver1).c_str(),
-				loggable(ver2).c_str(), cookie_summary(request_cookie_header(req)).c_str());
+		std::printf("[http] GET %s url=%s gt=%s ver=%s/%s cookies=[%s]\n",
+				loggable(req.url).c_str(), loggable(url).c_str(), loggable(gt).c_str(),
+				loggable(ver1).c_str(), loggable(ver2).c_str(),
+				cookie_summary(request_cookie_header(req)).c_str());
 
 		TemplateVars vars{
 			{"HOST_URL",     host_url()},
@@ -1250,9 +1084,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		const auto epask = cookies.count("EPASK") ? cookies.at("EPASK") : opennova::epask_to_string(epask_params_);
 
-		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n", req.url.c_str(),
-				loggable(in_p).c_str(), loggable(out_p).c_str(), loggable(msgbase).c_str(),
-				cookie_summary(request_cookie_header(req)).c_str());
+		std::printf("[http] GET %s IN=%s OUT=%s MSGBASE=%s cookies=[%s]\n",
+				loggable(req.url).c_str(), loggable(in_p).c_str(), loggable(out_p).c_str(),
+				loggable(msgbase).c_str(), cookie_summary(request_cookie_header(req)).c_str());
 
 		// Hardcoded version-OK; render OUT (the login page).
 		TemplateVars vars{
@@ -1318,7 +1152,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			if (opennova::epask_from_string(e_str, parsed, &why)) {
 				epask_in = parsed;
 			} else {
-				std::fprintf(stderr, "[http] WARN EPASK form field bad: %s\n", why.c_str());
+				std::fprintf(
+						stderr, "[http] WARN EPASK form field bad: %s\n", loggable(why).c_str());
 			}
 		}
 		auto epask_decode = [&](const std::string &name) -> std::string {
@@ -1327,8 +1162,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			std::string plain;
 			std::string why;
 			if (!opennova::epask_decrypt(v, *epask_in, plain, &why)) {
-				std::fprintf(stderr, "[http] WARN EPASK decrypt(%s) failed: %s\n",
-				             name.c_str(), why.c_str());
+				std::fprintf(stderr, "[http] WARN EPASK decrypt(%s) failed: %s\n", name.c_str(),
+						loggable(why).c_str());
 				return std::string();
 			}
 			return plain;
@@ -1403,14 +1238,14 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			    impl_->access.begin_password_check(LoginRoute::Retail, login_name, peer, ticket) !=
 			            0) {
 				std::fprintf(stderr,
-				             "[http] POST /NWLogin.dll rate-limited for user '%s' from %s\n",
-				             loggable(login_name).c_str(), peer.c_str());
+						"[http] POST /NWLogin.dll rate-limited for user '%s' from %s\n",
+						loggable(login_name).c_str(), loggable(peer).c_str());
 				return render_login_message(kLoginThrottledMessage);
 			}
 			user = authenticate_user(*db_conn, login_name, login_password);
 			if (user) {
 				resolution = "epask-auth";
-				impl_->access.password_accepted(ticket, user->id);
+				impl_->access.password_accepted(ticket, user->id, user->credentials_gen);
 			} else {
 				// Bad credentials → render the failure template (jop_2_main.htm
 				// per retail's form `failure` arg) with a "Invalid username or
@@ -1421,16 +1256,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			}
 		}
 		if (!user && !persist_cookie.empty()) {
-			int64_t pinned_id = 0;
-			{
-				std::lock_guard<std::mutex> lk(persistent_user_mu_);
-				auto pin_it = persistent_to_user_id_.find(persist_cookie);
-				if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
-			}
-			if (pinned_id != 0) {
-				user = get_user_by_id(*db_conn, pinned_id);
-				if (user) resolution = "persist-pin";
-			}
+			user = pinned_user(persist_cookie, *db_conn);
+			if (user)
+				resolution = "persist-pin";
 		}
 		if (!user) {
 			// No EPASK-authenticated user and no persist-pin match → reject.
@@ -1444,8 +1272,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 		std::string effective_exp_bits = (game_slug == "dfx2_consumer") ? "1" : "3";
 		if (user->id != 0) {
-			const std::string account_status =
-				user->account_status.empty() ? std::string("active") : user->account_status;
+			const std::string &account_status = user->account_status;
 			if (account_status == "banned") {
 				std::printf("[http] POST /NWLogin.dll rejected: user %lld banned\n",
 				            static_cast<long long>(user->id));
@@ -1453,7 +1280,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			}
 			if (account_status != "active") {
 				std::printf("[http] POST /NWLogin.dll rejected: user %lld status=%s\n",
-				            static_cast<long long>(user->id), account_status.c_str());
+						static_cast<long long>(user->id), loggable(account_status).c_str());
 				return render_login_message("This NovaWorld account is restricted. NWEC12");
 			}
 
@@ -1470,8 +1297,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			}
 			if (access->status != "active") {
 				std::printf("[http] POST /NWLogin.dll rejected: user %lld game=%s status=%s\n",
-				            static_cast<long long>(user->id), game_slug.c_str(),
-				            access->status.c_str());
+						static_cast<long long>(user->id), game_slug.c_str(),
+						loggable(access->status).c_str());
 				return render_login_message("This NovaWorld account is restricted for this game. NWEC12");
 			}
 			if (!access->exp_bits.empty()) {
@@ -1487,21 +1314,43 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			// is INSERT OR REPLACE on the user_id PK, so the stale row is simply
 			// overwritten by this fresh login.
 		}
+		// The login's session row and its pin are written only while the account
+		// is active and still at the credentials generation its password check
+		// (or pin) read, the row tested by its own insert, so a reset or a ban
+		// that committed meanwhile leaves this login neither, and the reply is a
+		// bad password's. A pin stored after such a commit still carries the old
+		// generation, which pinned_user refuses.
+		bool registered = false;
+		try {
+			registered = register_active_user_session(*db_conn, user->id, user->credentials_gen,
+					user->username, s.session_tag, persist_cookie, req.remote_ip_address,
+					req.get_header_value("User-Agent"));
+		} catch (const std::exception &e) {
+			std::fprintf(
+					stderr, "[http] WARN active_user_sessions register failed: %s\n", e.what());
+			return render_login_message("NovaWorld is temporarily unavailable.");
+		}
+		if (!registered) {
+			std::fprintf(stderr,
+					"[http] POST /NWLogin.dll rejected: user %lld changed during the check\n",
+					static_cast<long long>(user->id));
+			return render_login_message("Invalid username or password");
+		}
+		if (!persist_cookie.empty()) {
+			std::lock_guard<std::mutex> lk(persistent_user_mu_);
+			persistent_pins_[persist_cookie] = RetailPin{ user->id, user->credentials_gen };
+		}
 		s.user_id  = user->id;
 		s.username = user->username;
 		s.pcid     = user->pcid;
 		s.nwh      = user->nwh;
 		s.nwhandle = user->nwhandle;
 		s.exp_bits = effective_exp_bits;
-		if (!persist_cookie.empty() && user->id != 0) {
-			std::lock_guard<std::mutex> lk(persistent_user_mu_);
-			persistent_to_user_id_[persist_cookie] = user->id;
-		}
-		std::printf("[http]   user resolved (%s): id=%lld username=%s pcid=%s nwhandle=%s persist=%s\n",
-		            resolution ? resolution : "?",
-		            static_cast<long long>(s.user_id), loggable(s.username).c_str(),
-		            loggable(s.pcid).c_str(), loggable(s.nwhandle).c_str(),
-		            persist_cookie.empty() ? "(none)" : loggable(persist_cookie, 16).c_str());
+		std::printf(
+				"[http]   user resolved (%s): id=%lld username=%s pcid=%s nwhandle=%s persist=%s\n",
+				resolution ? resolution : "?", static_cast<long long>(s.user_id),
+				loggable(s.username).c_str(), loggable(s.pcid).c_str(),
+				loggable(s.nwhandle).c_str(), loggable_secret(persist_cookie).c_str());
 
 		// The relay template renders this response only; nothing reads it back
 		// from the stored session.
@@ -1513,27 +1362,16 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		// Capture everything we need from `s` BEFORE moving it into the
 		// session map — a use-after-move here once returned empty strings →
 		// empty response bodies → retail re-POST'd until GOODBYE.
-		const std::string tag            = s.session_tag;
-		const int64_t user_id_for_active = s.user_id;
-		const std::string username_for_active = s.username;
+		const std::string tag = s.session_tag;
 
 		sessions_.put_login(tag, std::move(s));
-		if (user_id_for_active != 0) {
-			try {
-				register_active_user_session(*db_conn, user_id_for_active, username_for_active, tag,
-				                             persist_cookie, req.remote_ip_address,
-				                             req.get_header_value("User-Agent"));
-			} catch (const std::exception &e) {
-				std::fprintf(stderr, "[http] WARN active_user_sessions register failed: %s\n",
-				             e.what());
-			}
-		}
 
 		std::printf("[http] POST %s body=%zuB user=%s relay->%s success->%s -> tag %s\n",
-				req.url.c_str(), req.body.size(),
+				loggable(req.url).c_str(), req.body.size(),
 				loggable(sessions_.get_login(tag).value().username).c_str(),
 				loggable(relay_template).c_str(),
-				loggable(sessions_.get_login(tag).value().success).c_str(), tag.c_str());
+				loggable(sessions_.get_login(tag).value().success).c_str(),
+				loggable_secret(tag).c_str());
 
 		// Relay refresh target is the BARE "NWLogin.dll" — matching onnet AND
 		// the genuine NovaLogic server (Wireshark capture, docs/net/
@@ -1582,7 +1420,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			if (tag_it != cookies.end()) tag = tag_it->second;
 		}
 		if (tag.empty()) {
-			std::printf("[http] GET %s -> 400 (no tag in query or cookie)\n", req.url.c_str());
+			std::printf("[http] GET %s -> 400 (no tag in query or cookie)\n",
+					loggable(req.url).c_str());
 			crow::response res(400);
 			res.body = "missing LOGINSESSIONTAG (cookie or ?tag= query)";
 			return res;
@@ -1595,7 +1434,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			// round-robin a dev user. Log it loudly so the cookie bridge
 			// is visible.
 			std::printf("[http] GET %s WARN stale/unknown tag '%s' — minting fresh login session\n",
-			            req.url.c_str(), tag.c_str());
+					loggable(req.url).c_str(), loggable_secret(tag).c_str());
 			// Mint a fresh, UNAUTHENTICATED session so retail doesn't hit a
 			// blank screen on a cross-restart tag — but it carries no user.
 			// The POST /NWLogin.dll path is the only auth gate; a stale tag
@@ -1613,8 +1452,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		}
 
 		std::printf("[http] GET %s tag=%s -> auth ok (user=%s pcid=%s)\n",
-		            req.url.c_str(), tag.c_str(),
-		            loggable(session->username).c_str(), loggable(session->pcid).c_str());
+				loggable(req.url).c_str(), loggable_secret(tag).c_str(),
+				loggable(session->username).c_str(), loggable(session->pcid).c_str());
 		if (session->user_id != 0) {
 			try { touch_active_user_session(*db_pool_.acquire(), session->user_id); }
 			catch (const std::exception &e) {
@@ -1692,9 +1531,10 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		if (persist_it != cookies.end() && !persist_it->second.empty()) {
 			int64_t pinned_id = 0;
 			std::lock_guard<std::mutex> lk(persistent_user_mu_);
-			auto pin_it = persistent_to_user_id_.find(persist_it->second);
-			if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
-			persistent_to_user_id_.erase(persist_it->second);
+			auto pin_it = persistent_pins_.find(persist_it->second);
+			if (pin_it != persistent_pins_.end())
+				pinned_id = pin_it->second.user_id;
+			persistent_pins_.erase(persist_it->second);
 			if (pinned_id != 0) {
 				try { clear_active_user_session(*db_pool_.acquire(), pinned_id); }
 				catch (const std::exception &e) {
@@ -1707,8 +1547,9 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const std::string success_tpl = req.url_params.get("success")
 		                                  ? req.url_params.get("success")
 		                                  : "jop_2_login.htm";
-		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n", loggable(tag).c_str(),
-				persist_it != cookies.end() ? 1 : 0, loggable(success_tpl).c_str());
+		std::printf("[http] /NWLogout.dll tag=%s persist_dropped=%d -> %s\n",
+				loggable_secret(tag).c_str(), persist_it != cookies.end() ? 1 : 0,
+				loggable(success_tpl).c_str());
 
 		TemplateVars vars{
 			{"HOST_URL",    host_url()},
@@ -1744,8 +1585,10 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 	// them to return a template populated with the current user's
 	// identity (so the in-game UI can show "Logged in as X").
 	//
-	// Identity resolution mirrors the auth path: NWHANDLE cookie → DB
-	// lookup, fall back to PERSISTENTEXPRESSLOGINDATA pin.
+	// Identity is the request's own retail login (retail_login_user: its
+	// LOGINSESSIONTAG, else its PERSISTENTEXPRESSLOGINDATA pin), an active
+	// account only; never the NWHANDLE cookie, which names an account but
+	// proves nothing.
 	auto handle_generic = [this, templates_dir](const crow::request &req) {
 		const std::string tpl = req.url_params.get("success")
 		                          ? req.url_params.get("success")
@@ -1758,21 +1601,15 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		const auto cookies = parse_cookie_header(request_cookie_header(req));
 		auto db_conn = db_pool_.acquire();
 		std::optional<UserRecord> user;
-		if (auto it = cookies.find("NWHANDLE"); it != cookies.end() && !it->second.empty()) {
-			user = get_user_by_username(*db_conn, it->second);
+		try {
+			const char *how = "";
+			user = retail_login_user(cookies, *db_conn, how);
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[http] WARN retail login lookup failed: %s\n", e.what());
 		}
-		if (!user) {
-			if (auto it = cookies.find("PERSISTENTEXPRESSLOGINDATA"); it != cookies.end()) {
-				int64_t pinned_id = 0;
-				{
-					std::lock_guard<std::mutex> lk(persistent_user_mu_);
-					auto pin_it = persistent_to_user_id_.find(it->second);
-					if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
-				}
-				if (pinned_id != 0) user = get_user_by_id(*db_conn, pinned_id);
-			}
-		}
-		std::printf("[http] %s -> %s%s user=%s\n", req.url.c_str(), loggable(tpl).c_str(),
+		if (user && user->account_status != "active")
+			user.reset();
+		std::printf("[http] %s -> %s%s user=%s\n", loggable(req.url).c_str(), loggable(tpl).c_str(),
 				exists ? "" : " (MISSING — 404)",
 				user ? loggable(user->username).c_str() : "(unknown)");
 		if (!exists) {
@@ -1908,7 +1745,8 @@ void HttpListener::register_legacy_host_join_routes(
 											  : "(none)",
 					req.url_params.get("success") ? loggable(req.url_params.get("success")).c_str()
 												  : "(default)",
-					tag.c_str(), cookie_summary(request_cookie_header(req)).c_str());
+					loggable_secret(tag).c_str(),
+					cookie_summary(request_cookie_header(req)).c_str());
 
 			// Bare "NWJoin.dll" refresh — matches onnet and the genuine server;
 			// the NWJOINSESSIONTAG cookie carries the tag (see the /NWLogin.dll
@@ -1932,16 +1770,16 @@ void HttpListener::register_legacy_host_join_routes(
 		// Second call — tag came either from ?tag= or NWJOINSESSIONTAG.
 		// Diagnostic (join-failure triage): show how the tag arrived (proves the
 		// NWJOINSESSIONTAG cookie round-trips on the bare refresh URL) and the
-		// full inbound cookie set — NWHANDLE / PERSISTENTEXPRESSLOGINDATA decide
-		// the joiner identity that PUBPCID is encoded from.
+		// full inbound cookie set — LOGINSESSIONTAG / PERSISTENTEXPRESSLOGINDATA
+		// decide the joiner identity that PUBPCID is encoded from.
 		std::printf("[http] /NWJoin.dll (second call) tag=%s (from %s) cookies=[%s]\n",
-		            tag_from_request.c_str(),
-		            req.url_params.get("tag") ? "query" : "cookie",
-		            cookie_summary(request_cookie_header(req)).c_str());
+				loggable_secret(tag_from_request).c_str(),
+				req.url_params.get("tag") ? "query" : "cookie",
+				cookie_summary(request_cookie_header(req)).c_str());
 		const auto session = sessions_.get_join(tag_from_request);
 		if (!session) {
-			std::printf("[http] /NWJoin.dll (second call) WARN unknown tag '%s'\n",
-			            tag_from_request.c_str());
+			std::printf("[http] /NWJoin.dll (second call) WARN unknown tag %s\n",
+					loggable_secret(tag_from_request).c_str());
 			crow::response res(400);
 			res.body = "unknown NWJOINSESSIONTAG";
 			return res;
@@ -1996,9 +1834,8 @@ void HttpListener::register_legacy_host_join_routes(
 		const std::string ck_token = encode_token(ck_plain, CK_KEY);
 
 		std::printf("[http] /NWJoin.dll (second call) rid=%u host=%s:%d nk=%s ck=%s\n",
-		            static_cast<unsigned>(rid_value),
-		            host.host_ip.c_str(), host.host_port,
-		            nk_token.c_str(), ck_token.c_str());
+				static_cast<unsigned>(rid_value), loggable(host.host_ip).c_str(), host.host_port,
+				loggable(nk_token).c_str(), loggable(ck_token).c_str());
 
 		TemplateVars vars{
 			{"NK",          nk_token},
@@ -2022,12 +1859,12 @@ void HttpListener::register_legacy_host_join_routes(
 		// PUBcrypto-encoded join cookies (Phase E.4). Retail host-side join
 		// reads CD/<localaddr>{PCID,NAMEINFO,SQUADINFO}; SQUADINFO supplies
 		// the remote player's display/short names before validation.
-		// Joiner identity comes from the inbound NWHANDLE cookie which
-		// retail set during their /NWLogin.dll completion. Look the user
-		// up in `players` to get their PCID.
-		// Resolve joiner identity. Try NWHANDLE cookie first; if IB3
-		// dropped it (HTTP/1.0 unreliability), fall back to the
-		// PERSISTENTEXPRESSLOGINDATA pin we set during /NWLogin.dll (G.8).
+		// The joiner is the request's own retail login (retail_login_user: its
+		// LOGINSESSIONTAG, else the PERSISTENTEXPRESSLOGINDATA pin its login
+		// made, G.8), never the NWHANDLE cookie, which any client can set to
+		// any account's handle. An account that is not active is refused with
+		// the failure page a missing expansion gets, carrying the game login's
+		// NWEC11 / NWEC12 message.
 		std::string pub_pcid;
 		std::string pub_nameinfo;
 		std::string pub_squadinfo;
@@ -2037,36 +1874,33 @@ void HttpListener::register_legacy_host_join_routes(
 		int64_t     joiner_user_id = 0;
 		std::string joiner_label;  // for logging
 		{
-			const auto nwhandle_it = cookies.find("NWHANDLE");
-			const std::string joiner_handle = nwhandle_it == cookies.end()
-			                                    ? std::string()
-			                                    : nwhandle_it->second;
-			if (!joiner_handle.empty()) {
-				if (auto u = get_user_by_username(*db_conn, joiner_handle)) {
-					joiner_user_id  = u->id;
-					joiner_pcid     = u->pcid;
-					joiner_nwhandle = u->nwhandle;
-					joiner_label    = "nwhandle=" + joiner_handle;
-				}
+			const std::string msg_tpl =
+					session->msgbase.empty() ? std::string("jop_2_msg.htm") : session->msgbase;
+			const std::string fail_tpl =
+					session->failure.empty() ? std::string("jop_2_main.htm") : session->failure;
+			std::optional<UserRecord> joiner;
+			const char *how = "";
+			try {
+				joiner = retail_login_user(cookies, *db_conn, how);
+			} catch (const db::SqliteError &e) {
+				std::fprintf(
+						stderr, "[http] /NWJoin.dll WARN joiner lookup failed: %s\n", e.what());
 			}
-			if (joiner_pcid.empty()) {
-				const auto persist_it = cookies.find("PERSISTENTEXPRESSLOGINDATA");
-				if (persist_it != cookies.end()) {
-					int64_t pinned_id = 0;
-					{
-						std::lock_guard<std::mutex> lk(persistent_user_mu_);
-						auto pin_it = persistent_to_user_id_.find(persist_it->second);
-						if (pin_it != persistent_to_user_id_.end()) pinned_id = pin_it->second;
-					}
-					if (pinned_id != 0) {
-						if (auto u = get_user_by_id(*db_conn, pinned_id)) {
-							joiner_user_id  = u->id;
-							joiner_pcid     = u->pcid;
-							joiner_nwhandle = u->nwhandle;
-							joiner_label    = "persist-pinned=" + u->nwhandle;
-						}
-					}
-				}
+			if (joiner && joiner->account_status != "active") {
+				std::printf("[http] /NWJoin.dll rejected: joiner=%lld status=%s\n",
+						static_cast<long long>(joiner->id),
+						loggable(joiner->account_status).c_str());
+				return render_legacy_message(templates_dir,
+						joiner->account_status == "banned"
+								? "This NovaWorld account has been banned. NWEC11"
+								: "This NovaWorld account is restricted. NWEC12",
+						fail_tpl, msg_tpl, req.remote_ip_address, host_url(), gsb_url());
+			}
+			if (joiner) {
+				joiner_user_id = joiner->id;
+				joiner_pcid = joiner->pcid;
+				joiner_nwhandle = joiner->nwhandle;
+				joiner_label = std::string(how) + "=" + joiner->nwhandle;
 			}
 			if (joiner_user_id != 0) {
 				const std::string host_game = host.game.empty()
@@ -2079,20 +1913,16 @@ void HttpListener::register_legacy_host_join_routes(
 				const bool access_ok = access && access->status == "active" &&
 					expansion_bits_compatible(access->exp_bits, required_exp_bits);
 				if (!access_ok) {
-					std::printf("[http] /NWJoin.dll rejected: joiner=%lld game=%s owned_exp=%s required_exp=%s status=%s\n",
-					            static_cast<long long>(joiner_user_id), host_game.c_str(),
-					            access ? access->exp_bits.c_str() : "(none)",
-					            required_exp_bits.c_str(),
-					            access ? access->status.c_str() : "(none)");
-					const std::string msg_tpl = session->msgbase.empty()
-						? std::string("jop_2_msg.htm")
-						: session->msgbase;
-					const std::string fail_tpl = session->needexpkey.empty()
-						? (session->failure.empty() ? std::string("jop_2_main.htm") : session->failure)
-						: session->needexpkey;
+					std::printf("[http] /NWJoin.dll rejected: joiner=%lld game=%s owned_exp=%s "
+								"required_exp=%s status=%s\n",
+							static_cast<long long>(joiner_user_id), loggable(host_game).c_str(),
+							access ? loggable(access->exp_bits).c_str() : "(none)",
+							loggable(required_exp_bits).c_str(),
+							access ? loggable(access->status).c_str() : "(none)");
 					return render_legacy_message(templates_dir,
-						"This NovaWorld account does not have the required expansion key.",
-						fail_tpl, msg_tpl, req.remote_ip_address, host_url(), gsb_url());
+							"This NovaWorld account does not have the required expansion key.",
+							session->needexpkey.empty() ? fail_tpl : session->needexpkey, msg_tpl,
+							req.remote_ip_address, host_url(), gsb_url());
 				}
 			}
 			if (host_pcid_key.empty()) {
@@ -2120,9 +1950,11 @@ void HttpListener::register_legacy_host_join_routes(
 					             host_pcid_key.size());
 				} else {
 					if (payloads.name_info.empty() || payloads.squad_info.empty()) {
-						std::fprintf(stderr, "[http] /NWJoin.dll WARN no joiner display handle - PUBNAMEINFO/PUBSQUADINFO will be empty (joiner=%s cookies=[%s])\n",
-						             joiner_label.c_str(),
-						             cookie_summary(request_cookie_header(req)).c_str());
+						std::fprintf(stderr,
+								"[http] /NWJoin.dll WARN no joiner display handle - "
+								"PUBNAMEINFO/PUBSQUADINFO will be empty (joiner=%s cookies=[%s])\n",
+								loggable(joiner_label).c_str(),
+								cookie_summary(request_cookie_header(req)).c_str());
 					}
 					std::printf("[http] /NWJoin.dll PUB* encoded for joiner=%s pcid=%s nwhandle=%s host_key=%zuB name=%zuB squad=%zuB\n",
 					            loggable(joiner_label).c_str(), loggable(joiner_pcid).c_str(),
@@ -2179,7 +2011,7 @@ void HttpListener::register_legacy_host_join_routes(
 	//   First call (no NWJOINSESSIONTAG cookie OR ?tag= query):
 	//     - generate session + 48-char A-P host_key (24 random bytes nibble-encoded)
 	//     - record the key's hash with the account the request's retail login
-	//       names (retail_login_owner -> hostdb::record_host_key), if any
+	//       names, an active account (retail_login_user -> hostdb::record_host_key), if any
 	//     - store HostSession with default templates (jop_2_host2.htm etc.)
 	//     - render relay template with REFRESH_ENDPOINT="NWHost.dll" (bare; the
 	//       NWJOINSESSIONTAG cookie carries the tag — matches onnet/genuine)
@@ -2244,9 +2076,14 @@ void HttpListener::register_legacy_host_join_routes(
 			try {
 				auto db_conn = db_pool_.acquire();
 				const char *how = "";
-				if (const auto owner = retail_login_owner(cookies, *db_conn, how)) {
-					hostdb::record_host_key(*db_conn, s.host_key, *owner);
-					owner_label = std::to_string(*owner) + " (" + how + ")";
+				const auto owner = retail_login_user(cookies, *db_conn, how);
+				// Recorded only while the account is still active and at the
+				// generation the login read, tested by the insert: a reset that
+				// commits after the lookup leaves the key unrecorded.
+				if (owner && owner->account_status == "active" &&
+						hostdb::record_host_key(
+								*db_conn, s.host_key, owner->id, owner->credentials_gen)) {
+					owner_label = std::to_string(owner->id) + " (" + how + ")";
 				}
 			} catch (const std::exception &e) {
 				owner_label = "none (db error)";
@@ -2258,7 +2095,7 @@ void HttpListener::register_legacy_host_join_routes(
 			sessions_.put_host(new_tag, std::move(s));
 
 			std::printf("[http] /NWHost.dll (first call) -> tag %s host_key=%s... owner=%s\n",
-			            new_tag.c_str(), key_head.c_str(), owner_label.c_str());
+					loggable_secret(new_tag).c_str(), key_head.c_str(), owner_label.c_str());
 
 			TemplateVars vars{
 				{"MESSAGE",          "Contacting NovaWorld...."},
@@ -2276,18 +2113,22 @@ void HttpListener::register_legacy_host_join_routes(
 			return res;
 		}
 
-		// Second call — look up session, render success with HOSTKEY.
-		const auto session = sessions_.get_host(tag);
+		// Second call — take the session (served once: a stock client follows
+		// the relay page's refresh once and reads the key from that page's
+		// TITLE, so the tag never serves the key again), render success with
+		// HOSTKEY.
+		const auto session = sessions_.take_host(tag);
 		if (!session) {
 			std::printf("[http] /NWHost.dll (second call) -> 400 (unknown tag %s)\n",
-			            tag.c_str());
+					loggable_secret(tag).c_str());
 			crow::response res(400);
 			res.body = "unknown NWJOINSESSIONTAG (host)";
 			return res;
 		}
 
 		std::printf("[http] /NWHost.dll (second call) tag=%s -> %s with HOSTKEY=%.6s...\n",
-				tag.c_str(), loggable(session->success).c_str(), session->host_key.c_str());
+				loggable_secret(tag).c_str(), loggable(session->success).c_str(),
+				session->host_key.c_str());
 
 		TemplateVars vars{
 			{"HOSTKEY",     session->host_key},

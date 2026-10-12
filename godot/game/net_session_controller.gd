@@ -33,7 +33,6 @@ var _join_role_prompt: Control
 var _join_role_password: LineEdit
 var _join_server_password: LineEdit
 var _join_password: LineEdit
-var _join_team_choice: OptionButton
 var _join_role_target: JoinTarget
 var _spectator_probe: LanSession
 var _spectator_probe_target: JoinTarget
@@ -306,7 +305,9 @@ func _cancel_spectator_probe() -> void:
 # set. The password control appears only with P2 bit 0x4000; Player never sends
 # JSPP. The witnessed BuildFlags bits live engine-side
 # (engine/runtime/inmatch/server_initial_state.cpp; docs/net/novaworld-net-re.md
-# section 5.0e).
+# section 5.0e). As retail's PRE.MNU, the prompt has no team control: the side
+# comes from the team password, and every join sends the automatic TR=-1
+# (D-NET-590).
 func _show_join_role_prompt(target: JoinTarget) -> void:
 	_dismiss_join_role_prompt()
 	_join_role_target = target
@@ -356,15 +357,6 @@ func _show_join_role_prompt(target: JoinTarget) -> void:
 		_join_server_password.secret = true
 		_join_server_password.text = target.server_password
 		box.add_child(_join_server_password)
-
-	if target.allows_team_choice():
-		_join_team_choice = OptionButton.new()
-		_join_team_choice.name = "TeamChoice"
-		_join_team_choice.add_item("Automatic")
-		_join_team_choice.add_item("Blue team")
-		_join_team_choice.add_item("Red team")
-		_join_team_choice.select(target.team_request + 1)
-		box.add_child(_join_team_choice)
 
 	if target.has_team_password():
 		_join_password = LineEdit.new()
@@ -420,8 +412,6 @@ func _choose_join_role(role: int) -> void:
 		target.server_password = _join_server_password.text
 	if _join_password != null:
 		target.join_password = _join_password.text
-	if _join_team_choice != null:
-		target.team_request = _join_team_choice.selected - 1
 	target.join_role = role
 	target.role_explicit = true
 	target.spectator_password = (
@@ -446,7 +436,6 @@ func _dismiss_join_role_prompt() -> void:
 	_join_role_password = null
 	_join_server_password = null
 	_join_password = null
-	_join_team_choice = null
 	_join_role_target = null
 
 

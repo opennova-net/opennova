@@ -195,6 +195,18 @@ bool name_char_allowed(char c) {
 			c == ' ' || c == '-' || c == '.';
 }
 
+int voice_override(const playersav::ProfileRecord &record, int side) {
+	if (side < 0 || side > 1) return 0;
+	return record.voice[static_cast<size_t>(side)];
+}
+
+void set_voice_override(playersav::ProfileRecord &record, int side, int value) {
+	if (side < 0 || side > 1) return;
+	// [orig: `mov cl, [eax+10h]` -> `mov [eax+edx+5FCh], cl` @0x56003e..0x56004c:
+	//  the low byte of the row's value into profile + 1532 + team]
+	record.voice[static_cast<size_t>(side)] = static_cast<uint8_t>(value);
+}
+
 PlayerProfiles::PlayerProfiles() = default;
 
 void PlayerProfiles::select_slot(int slot) {
@@ -282,6 +294,20 @@ bool PlayerProfiles::rename(const std::string &text) {
 	current().name = text.substr(0, playersav::kNameMaxChars);
 	current().flags &= ~playersav::kRecordFlagNoName;
 	return true;
+}
+
+std::string PlayerProfiles::set_name_edit(std::string text) {
+	if (rename(text)) return text;
+	// One character off the edit and nothing more: the cut's set finds the
+	// chain detached [orig: @0x55fc4d, the set @0x55fc6d; @0x6469a2]. Retail's
+	// edit holds one byte per character; ours holds the edit's UTF-8, so a
+	// complete multi-byte sequence at the end is that one character.
+	size_t lead = text.size() - 1;
+	while (lead > 0 && (static_cast<unsigned char>(text[lead]) & 0xC0) == 0x80) --lead;
+	const auto b = static_cast<unsigned char>(text[lead]);
+	const size_t seq = b >= 0xF0 && b < 0xF8 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
+	text.resize(seq == text.size() - lead ? lead : text.size() - 1);
+	return text;
 }
 
 void PlayerProfiles::commit_name(const std::string &text) {

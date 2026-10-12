@@ -211,7 +211,7 @@ TextureLoad file_texture_load(std::string_view name, bool white_alpha) {
 	return load;
 }
 
-// [orig: sub_591750 @ 0x591750 — the upper-cased name's ".FULL" @ 0x59179A and
+// [orig: HUD_LoadTextureWithInfo @ 0x591750 — the upper-cased name's ".FULL" @ 0x59179A and
 //  ".ALPHA" @ 0x5917B7..0x5917BD cut off and overriding the mode, the existence test
 //  @ 0x5917DF; HUD_LoadImageAsTexture @ 0x591550 — ".TGA" @ 0x5915AB, ".PCX"
 //  @ 0x5915CE, after either reader a name holding ".PCX" (@ 0x591615) turned white with
@@ -271,13 +271,13 @@ MaterialColorStage material_color_stage(uint32_t word) {
 	}
 }
 
-// [orig: sub_591750 @ 0x591750 — the material mode 0xA51 (2641) for an alpha-mode
+// [orig: HUD_LoadTextureWithInfo @ 0x591750 — the material mode 0xA51 (2641) for an alpha-mode
 //  texture, 0x651 (1617) for a colour one @ 0x59181a]
 uint32_t hud_loader_material_word(bool alpha_mode) {
 	return alpha_mode ? kHudAlphaMaterialWord : kHudColorMaterialWord;
 }
 
-// [orig: sub_591750 @ 0x591750 — an alpha-mode texture's material mode 0xA51 (2641),
+// [orig: HUD_LoadTextureWithInfo @ 0x591750 — an alpha-mode texture's material mode 0xA51 (2641),
 //  a colour one's 0x651 (1617); RenderState_DecodeModeColorStage @ 0x681080 — mode
 //  family 0xA00's stage 0: colour op 7 (ADD) over arguments 0 and 0 (DIFFUSE,
 //  DIFFUSE) @ 0x6812D7..0x6812E2, where 0x600 is MODULATE(2X)(TEXTURE = 2, DIFFUSE = 0)
@@ -291,7 +291,7 @@ uint32_t hud_alpha_material_argb(uint32_t argb) {
 	return (argb & 0xFF000000u) | doubled(16) | doubled(8) | doubled(0);
 }
 
-// [orig: sub_591750 @ 0x591750 — a colour-mode texture's material mode 0x651 (1617)
+// [orig: HUD_LoadTextureWithInfo @ 0x591750 — a colour-mode texture's material mode 0x651 (1617)
 //  @ 0x59181a; RenderState_DecodeModeColorStage @ 0x681080 — mode family 0x600's stage
 //  0: colour op tex_blend_op over TEXTURE (2) and DIFFUSE (0) @ 0x6814BE..0x6814CA,
 //  tex_blend_op = 4 + supportsModulate2X @ 0x6810FF, so 5, MODULATE2X, on every device

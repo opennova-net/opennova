@@ -97,7 +97,7 @@ void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &g
 // no carry-flag clear, no cooldown. A slot with no buffer, or a host with no weapon
 // table, keeps its state. (D-NET-378)
 // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550, called from
-//  Server_ProcessPlayerDeath @0x5178E1 on a deploy that is not a revive]
+//  Server_DeployPlayer @0x5178E1 on a deploy that is not a revive]
 void PlayerSlot_InitWeaponsFromLoadout(const GameConfig &config, NapiNPConnection &conn,
                                        const world::WeaponTable &table);
 

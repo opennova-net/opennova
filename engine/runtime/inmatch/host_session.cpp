@@ -4,7 +4,7 @@
 
 #include <runtime/inmatch/server_session.h> // set_connection_mode / set_transport_mode / create_session / ...
 #include <runtime/inmatch/server_spawn.h>   // Server_InitNewRoundState / Server_ProcessPendingPlayerSpawns
-#include <runtime/inmatch/server_tick.h>    // Server_TickUpdate
+#include <runtime/inmatch/server_tick.h>    // Server_TickUpdate, Server_RouteFrameTailEdges
 #include <runtime/inmatch/session_timeout_config.h> // load_session_timeout_config (_NSTMOUT.TXT)
 
 #include <runtime/replication/connection_fan.h> // set_entity_send_budget (the BANDWIDTH cap)
@@ -33,12 +33,6 @@ namespace opennova::inmatch {
 
 namespace {
 
-uint32_t mint_nonzero_session_value() {
-	uint32_t value = 0;
-	while (value == 0) value = make_random_session_u32();
-	return value;
-}
-
 uint32_t monotonic_milliseconds() {
 	const uint64_t value = static_cast<uint64_t>(
 			std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -49,15 +43,19 @@ uint32_t monotonic_milliseconds() {
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
-	startup.host_key = cfg.host_key != 0 ? cfg.host_key : mint_nonzero_session_value();
+	// [orig: NapiNPProtocol_StartServer @0x62B5F5 -> NapiNP_GenerateSessionKey]
+	startup.host_key = cfg.host_key != 0 ? cfg.host_key : make_session_key();
 	startup.host_start_tick =
 			cfg.host_start_tick != 0 ? cfg.host_start_tick : monotonic_milliseconds();
 	if (cfg.session_seed_id != 0) {
 		startup.session_seed_id = cfg.session_seed_id;
 	} else {
+		// The tick plus a draw standing in for the CRT rand, which may be 0.
+		// [orig: NapiNPProtocol_Create @0x6259B3..0x625A10 - (GetTickCount() + rand()) % 900000
+		//  + 100000, stored to +0x530]
 		const uint64_t mixed =
 				static_cast<uint64_t>(startup.host_start_tick) +
-				mint_nonzero_session_value();
+				make_random_session_u32();
 		startup.session_seed_id = static_cast<uint32_t>(mixed % 900000u) + 100000u;
 	}
 	return startup;
@@ -360,6 +358,11 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 
 	// (4) S2C flush — reframe each remote (type-1) transport's identity [tag][body] as a 0x83 + send.
 	flush_s2c_boundaries(owner, sock, now, /*force_open=*/false);
+	// (4b) The entity update's player-body edges on the tick's Health stores,
+	// after the send pump and ahead of the next receive pump (server_tick.h).
+	// [orig: Game_ProcessMainFrame -- Server_TickUpdate @0x5266B6, then
+	//  Entity_UpdateAllEntities @0x52674B]
+	Server_RouteFrameTailEdges(owner.ctx);
 
 	// (5) A dedicated host registers no type-2 local client. If its embedder nevertheless supplied a
 	// loopback channel, defensively drain it so that unused input cannot accumulate. A serve-and-play
