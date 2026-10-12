@@ -236,9 +236,9 @@ const DocumentBase *open_at(const SessionView &v, const std::string &path) {
 
 // The plan's acceptance ledger (ADR 0046 S25), with the mouse and the keys over the null-backend Ui: the toolbar's
 // Terrain (Raise, the default), a drag of it, Paint and its legend's Stone (12), a drag of it, Tiles and a cell of
-// the palette, a click laying the tile, Select and R turning it; four undos taking every file back to its bytes, four
-// redos and a save writing them; Play. 10 clicks (2 drags), no typed entry. Lane A's step (the tank's z following the
-// sculpted ground, its .bms the fourth file saved) is asserted where A5 lands.
+// the palette, a click laying the tile, Select, a click on the tile and R turning it; four undos taking every file back
+// to its bytes, four redos and a save writing them; Play. 11 clicks (2 drags), no typed entry. Lane A's step (the
+// tank's z following the sculpted ground, its .bms the fourth file saved) is asserted where A5 lands.
 void test_ledger() {
 	MissionRun run("opennova_editor_ui_terrain_ledger");
 	CHECK(open_on_terrain(run), "the mission open on its terrain");
@@ -347,8 +347,10 @@ void test_ledger() {
 	CHECK(placement && placement->rows().size() == 1 && tiles->dirty(), "6. a tile laid in the mission's .til");
 	if (!placement || placement->rows().size() != 1) return;
 
-	// 7. Select, then R: the selected tile turned. The plan's ledger has the stamp leave its tile selected; where it is
-	// not, the tile is clicked in the view (a click past the ledger's ten).
+	// 7. Select, the stamped tile, then R: the tile turned. A stamp leaves its tile unselected, as the original tools'
+	// insert does (Nile's appends the tile with its flags 0, the selection being their bit 3 [orig: gobj.dll
+	// sub_1000EA25; sub_10013364]; the original mission editor's drop appends the cursor's copy alike [orig: JOTACmed.exe
+	// sub_43C330]), so the tile is clicked in the view to select it.
 	body = tab_body();
 	const ImGuiID select = body ? item_id(body->ID, {"Select"}) : 0;
 	CHECK(body && wheel_to(run.ui, "/terrain_tab_body_", select), "7. Select in sight");
@@ -357,8 +359,8 @@ void test_ledger() {
 	run.settle();
 	run.take();
 	CHECK(v.workspace.terrain_brush.tool == TerrainTool::Tiles, "7. the Select tool");
-	bool tile_clicked = false;
-	if (v.workspace.document(run.path).tiles.empty()) {
+	CHECK(v.workspace.document(run.path).tiles.empty(), "7. the stamped tile not selected, as the original tools'");
+	{
 		const auto *laid = dynamic_cast<const TilDocument *>(open_at(v, til));
 		const auto *model = static_cast<const MissionViewport *>(run.session.viewports().find(run.path, ViewportKind::Mission));
 		float x = 0.0f, y = 0.0f;
@@ -369,11 +371,10 @@ void test_ledger() {
 		}
 		run.ui.click(ImVec2(device->origin.x + x, device->origin.y + y));
 		++clicks;
-		tile_clicked = true;
 		run.settle();
 		run.take();
 	}
-	CHECK(v.workspace.document(run.path).tiles.size() == 1, "7. the laid tile selected");
+	CHECK(v.workspace.document(run.path).tiles.size() == 1, "7. the stamped tile selected by its click");
 	// A click in the pane leaves the keys to the view (the pane is its palette): on its body, away from its controls.
 	body = tab_body();
 	if (body) {
@@ -431,8 +432,7 @@ void test_ledger() {
 	++clicks;
 	run.settle();
 	CHECK(!of_kind(run.take(), EditorRequestKind::Play).empty(), "10. Play raised");
-	std::printf("  ledger: %d clicks%s\n", clicks, tile_clicked ? " (the stamped tile clicked to select it)" : "");
-	CHECK(clicks == (tile_clicked ? 11 : 10), "the ledger: 10 clicks (2 drags), no typed entry");
+	CHECK(clicks == 11, "the ledger: 11 clicks (2 drags), no typed entry");
 	run.ui.pump = nullptr;
 }
 
