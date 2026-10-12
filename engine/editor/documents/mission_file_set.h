@@ -46,6 +46,9 @@ struct MissionFileSetMember {
 // its mission alone, so two missions of one name in two folders each have their own.
 std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan, const std::string &mission,
                                                            const std::string &new_mission, const std::string &folder);
+// The project's file named `name` in `folder` (project-relative, "" the top level), its case aside, and never one of
+// the name in another folder (AssetScan::named's fallback for a bare name): where a mission's .mis is. Null for none.
+const AssetEntry *file_in_folder(const AssetScan &scan, const std::string &folder, const std::string &name);
 // The role of the .mis among a mission's members, and what a member of a role is to the mission in words
 // ("its string table", "its names (the .mis)"; "a file" for a role no row has).
 inline constexpr const char *kMissionNamesRole = "names";

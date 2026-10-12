@@ -93,6 +93,9 @@ struct MissionNamesLeft {
 	bool outside = false;
 	// The writer's refusal, or the file system's (the file not read, or not written), a sentence.
 	std::string unwritten;
+	// Why the file it left as it is no longer matches the mission (names_file_stale), "" where it does: the next open
+	// of the mission takes none of its names (mission.names_unmatched, with Write it from the mission).
+	std::string stale;
 };
 
 // The file-wide values a mission document holds of its .mis (Edit::field, SetFileValue), each the fingerprint of
@@ -118,6 +121,11 @@ MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mis
                                  const std::vector<uint8_t> &bytes);
 // Read against the document's records as they stand.
 MissionNamesFile read_names_file(const MissionDocument &document, const std::vector<uint8_t> &bytes);
+
+// Why a matching .mis no longer matches the mission's records as they stand (its events by their index, each with
+// the same trigger and action lines, and every zone it describes one an area has; read_names_file's test), "" where
+// it still does and for one that never matched.
+std::string names_file_stale(const MissionDocument &document, const MissionNamesFile &file);
 
 // The names the mission's rows hold, as the .mis carries them (path 0, no path, none).
 mission::MisNames mission_names(const MissionDocument &document);

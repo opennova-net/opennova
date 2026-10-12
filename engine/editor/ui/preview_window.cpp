@@ -180,7 +180,7 @@ void PreviewWindow::header_(const SessionView &view, ViewportKind kind, const st
 	std::string text = basename_of(path);
 	const ViewportModel *model = view.documents.viewports ? view.documents.viewports->find(path, kind) : nullptr;
 	if (model) text += model->caption();
-	const bool dirty = document && document->dirty();
+	const bool dirty = document && document->unsaved();
 	const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
 	const float room = ImGui::GetContentRegionAvail().x - (dirty ? spacing + ui_kit::unsaved_dot_width() : 0.0f);
 	ImGui::TextUnformatted(ui_kit::fit(text, room).c_str());

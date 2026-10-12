@@ -62,6 +62,22 @@ std::string sentence(std::string words) {
 	return words;
 }
 
+// Why a .mis's events (`held`) and the zones it describes (`names`) are not a mission's (its events, its areas' zone
+// ids); "" where they are: its events the mission's by their index, each holding the same lines, and every zone it
+// describes one the mission has.
+std::string unmatched_why(const std::vector<mission::EventChain> &held, const mission::MisNames &names,
+                          const std::vector<mission::EventChain> &events, const std::set<int32_t> &zones) {
+	if (held.size() != events.size())
+		return "it holds " + counted(held.size(), "event", "events") + ", the mission " + counted(events.size(), "event", "events");
+	for (size_t i = 0; i < events.size(); ++i)
+		if (!same_lines(held[i], events[i]))
+			return "its event " + std::to_string(i + 1) + " holds other triggers or actions than the mission's";
+	for (size_t id = 1; id < names.areas.size(); ++id)
+		if (!names.areas[id].empty() && !zones.count(int32_t(id)))
+			return "it describes zone " + std::to_string(id) + ", which no area of the mission has";
+	return std::string();
+}
+
 uint64_t bytes_fingerprint(const std::vector<uint8_t> &bytes) {
 	return io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
 }
@@ -173,26 +189,13 @@ MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mis
 		std::string written, refused;
 		out.ours = mission::write_mis_text(again, written, refused, nullptr, &out.names) && written == text;
 	}
-	if (out.events.size() != events.size()) {
-		out.found = Found::Unmatched;
-		out.why = "it holds " + counted(out.events.size(), "event", "events") + ", the mission " +
-		          counted(events.size(), "event", "events");
-		return out;
-	}
-	for (size_t i = 0; i < events.size(); ++i)
-		if (!same_lines(out.events[i], events[i])) {
-			out.found = Found::Unmatched;
-			out.why = "its event " + std::to_string(i + 1) + " holds other triggers or actions than the mission's";
-			return out;
-		}
 	std::set<int32_t> zones;
 	for (const bms::AreaTrigger &area : mission.area_triggers) zones.insert(area.id);
-	for (size_t id = 1; id < out.names.areas.size(); ++id)
-		if (!out.names.areas[id].empty() && !zones.count(int32_t(id))) {
-			out.found = Found::Unmatched;
-			out.why = "it describes zone " + std::to_string(id) + ", which no area of the mission has";
-			return out;
-		}
+	out.why = unmatched_why(out.events, out.names, events, zones);
+	if (!out.why.empty()) {
+		out.found = Found::Unmatched;
+		return out;
+	}
 	out.found = Found::Matched;
 	take_kept(mission, events.size(), out);
 	return out;
@@ -210,6 +213,17 @@ MissionNamesFile read_names_file(const MissionDocument &document, const std::vec
 	std::vector<mission::EventChain> events;
 	for (const Node *row : document.rows_of(K::Event)) events.push_back(static_cast<const EventRow &>(*row).native);
 	return read_names_file(file, events, bytes);
+}
+
+std::string names_file_stale(const MissionDocument &document, const MissionNamesFile &file) {
+	if (file.found != Found::Matched) return std::string();
+	std::vector<mission::EventChain> events;
+	std::set<int32_t> zones;
+	for (const auto &row : document.rows()) {
+		if (row && row->kind == k(K::Event)) events.push_back(static_cast<const EventRow &>(*row).native);
+		if (row && row->kind == k(K::Area)) zones.insert(static_cast<const AreaRow &>(*row).native.id);
+	}
+	return unmatched_why(file.events, file.names, events, zones);
 }
 
 mission::MisNames mission_names(const MissionDocument &document) {
@@ -364,7 +378,7 @@ std::vector<Edit> read_again_edits(const MissionDocument &document, const Missio
 }
 
 // What Write it from the mission writes over, by whose the file there is.
-enum class Over { Original, Unmatched, Unreadable, Outside };
+enum class Over { Original, Unmatched, Unreadable, Outside, Own };
 
 std::string write_over_detail(const std::string &mis, Over over) {
 	std::string lost;
@@ -378,6 +392,7 @@ std::string write_over_detail(const std::string &mis, Over over) {
 	case Over::Unmatched: lost = ", whose names of the events that no longer match go with it"; break;
 	case Over::Unreadable: lost = ", which does not read as a mission's text"; break;
 	case Over::Outside: lost = ", which another program saved there"; break;
+	case Over::Own: break;
 	}
 	return "The next Save writes " + mis + " from the mission, its names as the mission holds them, over what the file "
 	       "holds now" + lost + ". An edit of the mission, which Undo takes back until then; once written, a later "
@@ -431,7 +446,10 @@ void names_file_findings(const MissionDocument &document, std::vector<Diagnostic
 			                     "). An edit of the mission, one step Undo takes back.",
 			                     std::move(edits)});
 		}
-		write_over(d, outside.fingerprint, Over::Outside);
+		write_over(d, outside.fingerprint,
+		           outside.found == Found::Unreadable ? Over::Unreadable
+		           : outside.ours || outside.found == Found::Unopened ? Over::Outside
+		                                                               : Over::Original);
 		out.push_back(std::move(d));
 	} else if ((file.found == Found::Unmatched || file.found == Found::Unreadable || file.found == Found::Unopened) &&
 	           (file.fingerprint == 0 || overwrite != file.fingerprint)) {
@@ -448,6 +466,15 @@ void names_file_findings(const MissionDocument &document, std::vector<Diagnostic
 		if (file.found != Found::Unopened)
 			write_over(d, file.fingerprint,
 			           file.found == Found::Unreadable ? Over::Unreadable : file.ours ? Over::Unmatched : Over::Original);
+		out.push_back(std::move(d));
+	} else if (!left.stale.empty() && overwrite != file.fingerprint) {
+		// The mission changed under the file a save left (an event's lines, an area's zone id): the next open takes
+		// none of its names.
+		Diagnostic d = make_finding(MissionFinding::NamesUnmatched, DiagnosticSeverity::Warning,
+		                            mis + " no longer matches the mission (" + left.stale + "): the last Save left it as "
+		                                  "it is, so the mission's next open takes none of its names." + kept,
+		                            document.path());
+		write_over(d, file.fingerprint, file.ours ? Over::Own : Over::Original);
 		out.push_back(std::move(d));
 	} else if (file.found == Found::Matched && !file.ours && unsaved && overwrite != file.fingerprint) {
 		Diagnostic d = make_finding(MissionFinding::NamesForeign, DiagnosticSeverity::Warning,

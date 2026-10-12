@@ -694,8 +694,13 @@ bool MissionDocument::names_file_due(const CompanionFile &now) {
 	if (known.found == MissionNamesFile::Found::Unread) return false; // read from bytes alone: nothing beside it known
 	switch (now.state) {
 	case CompanionFile::State::Absent:
-		// None there, or gone since: the editor's to make where the mission holds a name the .mis carries.
-		return mission_holds_names(*this);
+		// None there, or gone since: the editor's to make where the mission holds a name the .mis carries. Holding
+		// none, it has none to save: its names are saved as none (no .mis is no name), and nothing stays unsaved.
+		if (mission_holds_names(*this)) return true;
+		names_file_ = MissionNamesFile();
+		names_file_.found = MissionNamesFile::Found::None;
+		outside_names_ = MissionNamesFile();
+		return false;
 	case CompanionFile::State::Unreadable:
 		names_left_.unwritten = "the file system would not read it to see what it holds (" + now.error + ")";
 		return false;
@@ -714,7 +719,10 @@ bool MissionDocument::names_file_due(const CompanionFile &now) {
 		return false;
 	}
 	// The editor's own, matching the mission: written. The original editor's, one that does not match, one that does
-	// not read: left as they are (names_file_findings lists each).
+	// not read: left as they are (names_file_findings lists each), and where it matched when it was read or written
+	// and the mission's records moved since, why it no longer does (the next open takes none of its names). A write
+	// that fails says so too.
+	names_left_.stale = names_file_stale(*this, known);
 	return known.ours && known.found == MissionNamesFile::Found::Matched;
 }
 
@@ -746,6 +754,9 @@ void MissionDocument::names_file_written(bool ok, uint64_t fingerprint, const st
 	written.ours = true;
 	written.fingerprint = fingerprint;
 	written.kept = mission_names(*this);
+	// What it holds, as a read of it would hold it: the names and the events' lines it was written with.
+	written.names = written.kept;
+	for (const Node *row : rows_of(K::Event)) written.events.push_back(static_cast<const EventRow &>(*row).native);
 	names_file_ = std::move(written);
 	outside_names_ = MissionNamesFile();
 	names_left_ = MissionNamesLeft();

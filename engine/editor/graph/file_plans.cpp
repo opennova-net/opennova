@@ -72,7 +72,7 @@ bool copy_name_free(const ProjectPaths *paths, const AssetScan &scan, const Asse
 			// The copy's .mis lies beside it, in this folder: a .mis of its name elsewhere is another mission's.
 			if (member.role == kMissionNamesRole) {
 				const std::string beside = join_path(folder, member.new_name);
-				if (scan.named(beside) || (paths && on_disk(*paths, beside))) {
+				if (file_in_folder(scan, folder, member.new_name) || (paths && on_disk(*paths, beside))) {
 					if (why) *why = "The copy's companion " + member.new_name + " is a file of the project already.";
 					return false;
 				}

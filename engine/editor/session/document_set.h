@@ -18,7 +18,6 @@
 
 namespace opennova::editor {
 
-class MissionGround;
 class MissionItemCache;
 class SessionCore;
 struct ProjectPaths;
@@ -221,16 +220,16 @@ private:
 	void write_companion(DocumentBase &document, std::vector<std::string> &written);
 	// A mission's base heights for its .mis, handed to the document before the write (MissionDocument::
 	// set_base_heights): each entity's, in the writer's order, the terrain's height under it as the original editor
-	// samples it (mission::mis_terrain_height) over the .cpt's atlas read as the DI-28 ground check reads it
-	// (MissionGround) and the .trn's own sector grid, 0 where no sector lies under it or no terrain reads.
+	// samples it (mission::mis_terrain_height) over the terrain as it reads it (the .trn alone, the .cpt it names:
+	// base_terrain_, kept for the last mission's terrain), 0 where no sector lies under it or no terrain reads.
 	void hand_base_heights(DocumentBase &document);
 
 	SessionCore &core_;
 	SessionView &view_;
 	const ProjectPaths &paths_;
 	std::unique_ptr<MissionItemCache> rows_;
-	// The terrain the last mission's base heights were sampled over, read again where its mission's terrain moved.
-	std::unique_ptr<MissionGround> ground_;
+	struct BaseTerrain;
+	std::unique_ptr<BaseTerrain> base_terrain_;
 	std::vector<std::shared_ptr<DocumentBase>> documents_;
 	// Each open document's instance and whether it has unsaved edits, as the view last listed
 	// them: DocumentSet moves when they differ (update_view).

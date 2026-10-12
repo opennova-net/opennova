@@ -2,6 +2,7 @@
 // mission makes, and the members a scan has for a mission.
 #include "mission_file_set.h"
 
+#include <base/io/strutil.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
@@ -78,7 +79,7 @@ std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan
 	// The .mis of its name beside it (S24 Names), the editor's names in it: no sidecar, no reference, but the
 	// mission's own.
 	const std::string names = mission::mission_base_name(mission) + ".mis";
-	if (const AssetEntry *entry = scan.named(folder.empty() ? names : folder + "/" + names)) {
+	if (const AssetEntry *entry = file_in_folder(scan, folder, names)) {
 		MissionFileSetMember member;
 		member.role = kMissionNamesRole;
 		member.path = entry->relative_path;
@@ -88,6 +89,15 @@ std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan
 		out.push_back(std::move(member));
 	}
 	return out;
+}
+
+const AssetEntry *file_in_folder(const AssetScan &scan, const std::string &folder, const std::string &name) {
+	if (!folder.empty()) return scan.named(folder + "/" + name); // a path names its folder
+	// At the top level: that path in any case, never named()'s find() of the name in another folder.
+	if (const AssetEntry *entry = scan.at_path(name)) return entry;
+	for (const AssetEntry &entry : scan.entries)
+		if (entry.relative_path.find('/') == std::string::npos && strutil::iequals(entry.relative_path, name)) return &entry;
+	return nullptr;
 }
 
 std::string mission_member_words(const std::string &role) {

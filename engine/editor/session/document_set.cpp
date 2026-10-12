@@ -20,6 +20,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_file_set.h>
 #include <editor/documents/strings_document.h>
 #include <editor/documents/texture_document.h>
 #include <editor/documents/wave_document.h>
@@ -34,9 +35,6 @@
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/mission_items.h>
-#include <editor/preview/mission_source.h>
-#include <editor/preview/mission_scene.h>
-#include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_chores.h>
@@ -45,6 +43,9 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 #include <editor/session/workspace_parts.h>
+#include <formats/cpt/cpt.h>
+#include <formats/cpt/cpt_io.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/trn/trn_io.h>
@@ -53,6 +54,18 @@
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
+
+// The terrain the last mission's base heights were sampled over (hand_base_heights): as the original editor reads
+// it, the .trn alone and the .cpt it names, read again where their stamps or the mission's terrain moved.
+struct DocumentSet::BaseTerrain {
+	std::string terrain;
+	bool looked = false; // read once for `terrain`
+	bool read = false;   // the .trn and the .cpt read
+	uint64_t trn_stamp = 0, cpt_stamp = 0;
+	TrnConfig trn;
+	int32_t scale = 128;
+	std::vector<uint16_t> atlas;
+};
 
 DocumentSet::DocumentSet(SessionCore &core)
 	: core_(core), view_(core.view()), paths_(core.paths()), rows_(std::make_unique<MissionItemCache>()) {}
@@ -221,12 +234,13 @@ std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, Ass
 std::string DocumentSet::companion_path(AssetKind kind, const std::string &relative) const {
 	const DocumentType *type = document_type_for(kind);
 	if (!type || !type->companions) return std::string();
-	// Beside the document's own file: two documents of one name in two folders each have their own.
-	const std::string beside =
-	        join_path(folder_of_path(relative), mission::mission_base_name(basename_of(relative)) + type->companions->extension);
+	// Beside the document's own file: two documents of one name in two folders each have their own, a document at the
+	// top level too (file_in_folder: never the name's file in another folder).
+	const std::string folder = folder_of_path(relative);
+	const std::string name = mission::mission_base_name(basename_of(relative)) + type->companions->extension;
 	if (view_.project.scan)
-		if (const AssetEntry *entry = view_.project.scan->named(beside)) return entry->relative_path;
-	return beside;
+		if (const AssetEntry *entry = file_in_folder(*view_.project.scan, folder, name)) return entry->relative_path;
+	return join_path(folder, name);
 }
 
 void DocumentSet::read_companion(DocumentBase &document, AssetKind kind, const std::string &relative) const {
@@ -254,47 +268,76 @@ void DocumentSet::write_companion(DocumentBase &document, std::vector<std::strin
 	core_.note("Saved " + path + " beside " + document.path() + " (its names)");
 }
 
+namespace {
+
+// The original editor's read of a terrain for its base heights: the .trn alone (its own parser over the file, the
+// game's later passes over overcast.def and the mission's .env never run [orig: JOTACmed.exe sub_464DE0 @ 0x464de0
+// -> sub_463C90 @ 0x463c90]), its last polytrn_scale line by the CRT's atol (128 where it has none [orig: the arm
+// @ 0x464a38; the default, sub_464B60 @ 0x464bb6]), and the .cpt its polytrn_polydata names, its DPTH or CDEP depth
+// words into a cleared 1024 x 1024 grid, so a CDEP of fewer words leaves the rest 0 [orig: sub_44C2B0 @ 0x44c2b0, the
+// clear @ 0x44c2e0, the DPTH arm @ 0x44c64b, the CDEP arm @ 0x44c5e7]. The .trn is read through the game's parser
+// and admission gate (load_mission_trn with no later texts): a terrain the game refuses (no polydata, a sector count
+// or row count that is no power of two) samples no height, where the original editor would; and a .trn naming a
+// polytrn_sectorcount but no polytrn_sectors row, whose grid the original editor fills with the .trn's other words
+// (scale, wraps) and the game with no sector, samples none either. No shipped terrain is either.
+bool read_base_terrain(const FileSource &files, const std::string &terrain, int32_t &scale, TrnConfig &trn,
+                       std::vector<uint16_t> &atlas, uint64_t &cpt_stamp) {
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!files.read(terrain + ".trn", bytes)) return false;
+	const std::string text(bytes.begin(), bytes.end());
+	if (!load_mission_trn(text, TrnLaterTexts{}, trn, error)) return false;
+	for (const TrnKeyLine &line : read_trn_key_lines(text))
+		if (line.key == "polytrn_scale" && !line.values.empty()) scale = io::retail_atol(line.values.front().c_str());
+	std::vector<uint8_t> cpt_bytes;
+	CptFile cpt;
+	if (trn.polydata.empty() || !files.read(trn.polydata, cpt_bytes) ||
+	    !load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, error))
+		return false;
+	atlas = std::move(cpt.depth_buffer);
+	atlas.resize(size_t(1024) * 1024, 0);
+	cpt_stamp = files.stamp(trn.polydata);
+	return true;
+}
+
+} // namespace
+
 void DocumentSet::hand_base_heights(DocumentBase &document) {
 	auto *mission = dynamic_cast<MissionDocument *>(&document);
 	if (!mission) return;
 	bms::File file;
 	if (!mission->compose(file)) return;
-	// The terrain as the original editor reads it (mission::MisTerrain): the .cpt's height atlas the game loads, as
-	// the DI-28 ground check reads it (preview/mission_ground_check.cpp: the mission's header through its scene's
-	// source, the project's files as the game would read them), and the .trn's own sector grid, origin, wraps and
-	// polytrn_scale, read from the .trn alone as the original editor reads it (the game's load reads overcast.def
-	// and the mission's .env after it).
-	mission::MisTerrain terrain;
-	TrnConfig trn;
-	const std::unique_ptr<MissionSceneSource> source = mission_scene_source(*mission);
-	MissionSceneHeader header;
-	if (source && source->header(header) && view_.findings.assets) {
-		if (!ground_) ground_ = std::make_unique<MissionGround>();
-		ground_->follow(view_.findings.assets, view_.findings.assets->generation(), header,
-		                mission::mission_base_name(mission->path()));
-		const terrain::TerrainHeightField *field = ground_->height_field();
-		std::vector<uint8_t> bytes;
-		std::string error;
-		if (field && field->dim == 1024 && view_.findings.assets->read(header.terrain + ".trn", bytes)) {
-			const std::string text(bytes.begin(), bytes.end());
-			if (load_mission_trn(text, TrnLaterTexts{}, trn, error)) {
-				terrain.heights = field->heightmap;
-				terrain.sectors = &trn.sector_grid[0][0];
-				terrain.origin_x = trn.origin_x;
-				terrain.origin_y = trn.origin_y;
-				terrain.wrap_x = trn.wrap_x != 0;
-				terrain.wrap_y = trn.wrap_y != 0;
-				// Its last polytrn_scale line, by the CRT's atol, as the original editor's parser takes it [orig:
-				// JOTACmed.exe sub_463C90 @ 0x464a38].
-				for (const TrnKeyLine &line : read_trn_key_lines(text))
-					if (line.key == "polytrn_scale" && !line.values.empty())
-						terrain.scale = io::retail_atol(line.values.front().c_str());
-			}
+	// The terrain the mission names, as the original editor reads it (BaseTerrain), sampled by its own sampler
+	// (mission::mis_terrain_height); 0 for each entity where none reads.
+	const std::string terrain = mission::mission_info(file).terrain;
+	mission::MisTerrain sampled;
+	const std::shared_ptr<const ProjectAssetSource> &files = view_.findings.assets;
+	if (files && !terrain.empty()) {
+		if (!base_terrain_) base_terrain_ = std::make_unique<BaseTerrain>();
+		BaseTerrain &kept = *base_terrain_;
+		const uint64_t trn_stamp = files->stamp(terrain + ".trn");
+		const bool moved = !kept.looked || !strutil::iequals(kept.terrain, terrain) || kept.trn_stamp != trn_stamp ||
+		                   (kept.read && kept.cpt_stamp != files->stamp(kept.trn.polydata));
+		if (moved) {
+			kept = BaseTerrain();
+			kept.terrain = terrain;
+			kept.looked = true;
+			kept.trn_stamp = trn_stamp;
+			kept.read = read_base_terrain(*files, terrain, kept.scale, kept.trn, kept.atlas, kept.cpt_stamp);
+		}
+		if (kept.read) {
+			sampled.heights = kept.atlas.data();
+			sampled.sectors = &kept.trn.sector_grid[0][0];
+			sampled.origin_x = kept.trn.origin_x;
+			sampled.origin_y = kept.trn.origin_y;
+			sampled.wrap_x = kept.trn.wrap_x != 0;
+			sampled.wrap_y = kept.trn.wrap_y != 0;
+			sampled.scale = kept.scale;
 		}
 	}
 	std::vector<int32_t> heights;
 	for (const std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
-		for (const bms::Entity &entity : *pool) heights.push_back(mission::mis_terrain_height(terrain, entity.x, entity.y));
+		for (const bms::Entity &entity : *pool) heights.push_back(mission::mis_terrain_height(sampled, entity.x, entity.y));
 	mission->set_base_heights(std::move(heights));
 }
 
@@ -321,8 +364,9 @@ void DocumentSet::reload_changed() {
 		if (document->unsaved()) {
 			stale_.erase(path);
 			if (conflicts_.insert(path).second) {
-				core_.note(path + " changed outside the editor while it has unsaved edits: Problems offers to reload "
-				                  "it (the edits are lost) or to keep your edits and save over it.");
+				core_.note(path + (document->dirty() ? " changed outside the editor while it has unsaved edits"
+				                                     : " changed outside the editor while its names are unsaved") +
+				           ": Problems offers to reload it (the edits are lost) or to keep your edits and save over it.");
 				view_.activity.status = path + " changed outside the editor: see Problems.";
 				core_.touch(ViewConcern::Output);
 			}
@@ -411,12 +455,21 @@ std::vector<Diagnostic> DocumentSet::findings() const {
 		d.line = reason.line;
 		findings.push_back(std::move(d));
 	}
-	for (const std::string &path : conflicts_)
+	for (const std::string &path : conflicts_) {
+		// A mission whose names alone are unsaved (a save left them out of its .mis: companion_unsaved) says so.
+		const auto open = std::find_if(documents_.begin(), documents_.end(),
+		                               [&path](const auto &document) { return document->path() == path; });
+		const bool names = open != documents_.end() && !(*open)->dirty() && (*open)->companion_unsaved();
 		findings.push_back(make_finding(CoreFinding::DocumentConflict, DiagnosticSeverity::Warning,
-		                                "This file changed outside the editor while it has unsaved edits: Save is "
-		                                "refused until it is read again, which discards the edits, or you keep your "
-		                                "edits and save over what the other program saved.",
+		                                names ? "This file changed outside the editor while its names are unsaved (a save "
+		                                        "left them out of the .mis beside it): Save is refused until it is read "
+		                                        "again, which drops the names, or you keep them and save over what the "
+		                                        "other program saved."
+		                                      : "This file changed outside the editor while it has unsaved edits: Save is "
+		                                        "refused until it is read again, which discards the edits, or you keep your "
+		                                        "edits and save over what the other program saved.",
 		                                path));
+	}
 	return findings;
 }
 
