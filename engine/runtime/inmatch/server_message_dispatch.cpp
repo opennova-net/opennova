@@ -659,7 +659,7 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t pla
 // S2C 0x75 is the requesting player's live slot state, not a fixed
 // "spectator flags" fixture. Byte 0 is the spectator/death-screen bit and byte
 // 1 is playerSlot+416 (team), written straight into the retail client's
-// byte_A85B48 loadout selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890;
+// g_LocalTeam loadout selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890;
 // NapiNPClientMsg_SetSpectatorMode @0x4259E0]
 std::vector<uint8_t> build_tag75_player_state(
 		const NapiNPConnection &conn, const world::World *world) {
@@ -909,6 +909,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
 		ServerLogRecorder *server_log) {
 	std::vector<ProtocolMessage> replies;
+	// The hold (slot state) clears first, ahead of the body's def test, so a refused
+	// mobile spawn below leaves the slot unheld (D-NET-552) [orig: Server_ProcessPlayerDeath
+	//  @0x517791 `and byte ptr [esi+15F38h], 0EFh`, the def test @0x517798].
+	conn.link.respawn_pending = false;
+	world.match.set_player_respawn_pending(conn.link.owned_entity, false);
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (player == nullptr) return replies;
@@ -928,8 +933,12 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		if (((target->flags | target->engine_flags) & world::kEntityFlagDead) != 0 ||
 				!target->primary_occupant.valid() ||
 				!world::find_best_vehicle_seat(
-						world, target_zone, player->handle, selected))
+						world, target_zone, player->handle, selected)) {
+			// Each a bare return [orig: @0x517A7C]; the next 0x0A shows the unheld slot, as
+			// the deploy's below [orig: NetPacket_WritePlayerState @0x4FF6D7, the hold @0x4FF7AA].
+			if (!conn.link.spectator) player->flags &= ~1u;
 			return replies;
+		}
 	}
 	// The revive latch (+89932) skips the spawn protection and the kit rebuild below;
 	// the placement lands a revive on its saved position (server_spawn.h). [orig: the
@@ -987,9 +996,6 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		PlayerSlot_InitWeaponsFromLoadout(config, conn, world.tables.weapons);
 	}
 	conn.discard_pre_deploy_uplinks = true;
-	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
-	conn.link.respawn_pending = false;
-	world.match.set_player_respawn_pending(player->handle, false);
 	// No +360 store; the +364 hold clears only for a raw handle other than
 	// 0xFFFF, resolvable or not [orig: Server_ProcessPlayerDeath @0x51786B..0x517872].
 	if (requested_handle != world::EntityHandle::kInvalid)
@@ -1648,8 +1654,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						: 0;
 				const world::Entity *target = nullptr;
 				const bool revive_latch = conn.reply.revive_pose_valid; // +89932
-				const uint8_t request_team = world::deploy_request_team(*world, player->team,
-						conn.link.spectator, pick, config.game_type); // [orig: @0x519B7A..0x519BC1]
+				// The base is the slot team (+416), not the entity's (D-NET-464) [orig: @0x519B88;
+				//  the spectator legs @0x519B7A..0x519BC1].
+				const uint8_t request_team = world::deploy_request_team(*world, conn.assigned_team,
+						conn.link.spectator, pick, config.game_type);
+				uint16_t handle = pick;
 				if (pick == world::kDeployPickAutoTeam) {
 					// Conquer & Control rejects the auto pick outright, before the frontier
 					// resolve: no deploy, no wave queue, no reply.
@@ -1658,26 +1667,23 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// Auto-deploy: the team's frontier zone; null falls back to the marker chain
 					// [orig: Spawn_FindEntityForTeam @0x4fc810 -> requestedHandle -1 on miss],
 					// as a revived player always does [orig: the latch @0x519c3d..0x519c4b].
-					if (!revive_latch)
-						target = world->zones.find_spawn_zone_for_team(
-								request_team, config.game_type);
-				} else if (pick != world::kDeployPickNone) {
-					if (revive_latch) break; // a revived player's pick [orig: @0x519c5a]
-					// Only 0xFFFF is the no-target (Default Spawn) pick. Handle 0 — and the
-					// absent-body default above — resolves pool 0 index 0 through the ordinary
-					// spawn-point attrib/team test like any other handle, so it deploys only
-					// when that entity is a same-team spawn point (a player never is).
-					// [orig: @0x519c58..0x519c88 resolve then return on null;
+					const world::Entity *frontier = revive_latch ? nullptr
+							: world->zones.find_spawn_zone_for_team(request_team, config.game_type);
+					handle = frontier != nullptr ? frontier->handle.packed : world::kDeployPickNone;
+				}
+				if (handle != world::kDeployPickNone) {
+					// Every handle but 0xFFFF, the frontier's included: a revived player's pick,
+					// then +364, then the resolve against the requester entity's team, each
+					// refusing. Handle 0, and the absent-body default above, resolves pool 0
+					// index 0 like any other handle, so it deploys only when that entity is a
+					// same-team spawn point (a player never is). [orig: @0x519c5a; @0x519c67;
+					//  @0x519c58..0x519c88 resolve then return on null;
 					//  Server_ResolveSpawnTargetHandle @0x4FE110 — pool/index decode
 					//  @0x4fe13f..0x4fe159, attrib 0x40000 @0x4fe16f, team @0x4fe181]
-					target = world->zones.resolve_spawn_target(player->team, pick);
-					if (target == nullptr) break; // invalid pick: silent no-op [orig: @0x519c88]
+					if (revive_latch || conn.link.spawn_target_hold_seconds != 0) break;
+					target = world->zones.resolve_spawn_target(player->team, handle);
+					if (target == nullptr) break; // a silent no-op [orig: @0x519c88]
 				}
-				// +364 is tested only after the requested handle resolves to a
-				// real target. Default Spawn, and an auto pick with no frontier,
-				// bypass it. [orig: Server_ProcessClientRequestRespawn @0x519c67]
-				if (target != nullptr && conn.link.spawn_target_hold_seconds != 0)
-					break;
 				// Retail's `nodefaultspawnpoints` option is named after its UI,
 				// not its actual predicate. It applies only to a target-less pick
 				// and walks SpawnZoneList for an unnumbered or fully controlled

@@ -96,7 +96,7 @@ struct EntityHandle {
 // pool-0 slot is below the pool's 256 capacity), the -1 (0xFF) of an entity
 // outside pool 0 or of none. [orig: Pool_GetIndexFromPtr @0x441f90 — the
 // base and capacity tests return -1; its callers store the low byte, e.g.
-// Server_HandleEmoteRequest @0x501e87, the radio call @0x5143c5, the
+// NapiNPServerMsg_HandleEmoteRequest @0x501e87, the radio call @0x5143c5, the
 // waypoint share's owner @0x514897]
 constexpr uint8_t pool0_index_byte(EntityHandle h) {
     return h.valid() && h.pool() == 0 ? static_cast<uint8_t>(h.slot()) : uint8_t{0xFF};
@@ -804,7 +804,7 @@ struct Entity {
     bool item_section_piece = false; // locally allocated class fragment
     // A tower's section clone: the template pins its event (+0x1C8) and
     // update (+0x1C4) callbacks whatever its def, so damage runs the null
-    // row [orig: Entity_SpawnSectionEntity @0x440365 -> sub_406FF0,
+    // row [orig: Entity_SpawnSectionEntity @0x440365 -> NullClass_HandleEvent,
     //  @0x440370 -> Entity_InitFloatingPhysics]. A palm fragment is not one:
     // it takes item 900's own callbacks [orig: Projectile_SpawnFromTile
     //  @0x53C35D / @0x53C36F].
@@ -861,15 +861,18 @@ struct Entity {
     uint32_t last_state_sent_ms = 0; // entity+560; authority 0x26 send clock
     bool objective_death_scored = false;
     int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay
-    bool destroy_timer_initialized = false;
+    // The item init's once-per-body stores ran on this lifetime: the destroy
+    // timer, Health and Armor (mission::resolve_item_traits).
+    // [orig: Entity_InitFromItemDef @0x49E550]
+    bool item_init_done = false;
     // --- powerup row state (world/powerup.h) ---
     // The bound powerup.def row (-1 = none): retail's row pointer at
     // entity+0x2C0, the pickup/respawn ActionDefs at +0x2B8/+0x2BC beside it
-    // [orig: sub_442D00 @0x442D2A..0x442D3C]. Bound at mission start.
+    // [orig: PowerupEntity_InitFromDef @0x442D2A..0x442D3C]. Bound at mission start.
     int32_t powerup_def_index = -1;
     // The respawn countdown in ticks at entity+0x2B4: -1 idle, >0 counting,
     // 0 fires the respawn [orig: @0x442D65 (idle), the pickup arm
-    //  @0x442AE1, Entity_TickFireTimer @0x442850]
+    //  @0x442AE1, Powerup_TickRespawn @0x442850]
     int32_t powerup_respawn_timer = -1;
     // The remaining respawns at entity+0x2C8: max_respawns-1, or -1 unlimited;
     // 0 makes the next pickup destroy the row [orig: @0x442D51 / @0x442D59;

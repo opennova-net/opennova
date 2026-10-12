@@ -141,7 +141,7 @@ int PlayerInfoAvatars::update(MenuRuntime &menu, const avatars::AvatarsFile &fil
 			preview_changed = true;
 			break;
 		case Change::Voice:
-			// [orig: sub_560030 @0x560030 -- notification VALUE byte -> profile[team+1532]]
+			// [orig: PlayerInfo_HandlePlayerVoiceSelect @0x560030 -- notification VALUE byte -> profile[team+1532]]
 			fill.voice = value >= 0 && static_cast<size_t>(value) < voices.size() ? voices[value] : kDefaultVoiceValue;
 			break;
 	}

@@ -3,9 +3,10 @@
 // The profile-to-wire projection a joiner's ClientAuth uploads: retail does
 // not invent a network-only player id — it packs the two profile character
 // selections from Avatars.def (CI0/CI1), stamps the two class bytes
-// (CTA/CTB) and the two avatar bytes (VCA/VCB, each the selected combo's head
-// voice). A side that is absent or no longer resolves takes the retail
-// default: the first combo of its alignment, class 8 (rifleman).
+// (CTA/CTB) and the two avatar bytes (VCA/VCB, each the profile's voice
+// override for the side where nonzero, else the selected combo's head voice).
+// A side that is absent or no longer resolves takes the retail default: the
+// first combo of its alignment, class 8 (rifleman).
 // [orig: PlayerProfile_InitDefaults @0x54BB40 (the fresh profile),
 //  EntitySlot_LookupAndPackEntry @0x57AD40 (the per-side default),
 //  Avatars_ResolveSelectionIndex @0x57AE60,
@@ -34,6 +35,10 @@ struct JoinSideSelection {
 	int division_index = -1;
 	int combo_index = -1;
 	int player_class = kJoinDefaultPlayerClass;
+	// The current profile record's voice override byte for the side, +1532
+	// blue / +1533 red (profile::voice_override); 0 = none. It stands whether
+	// or not the side's character was saved.
+	int voice_override = 0;
 };
 
 struct JoinCharacterProfile {
@@ -67,18 +72,30 @@ inline JoinCharacterProfile join_character_profile(
 			profile.character_ids[side] = first->packed_id;
 			profile.avatars[side] = first->head_voice;
 		}
-		if (!saved[side].present) continue;
-		uint16_t packed = 0;
-		int avatar = 0;
-		if (join_side_character(registry, side, saved[side].nationality_index,
-					saved[side].division_index, saved[side].combo_index, packed,
-					avatar)) {
-			profile.character_ids[side] = packed;
-			profile.avatars[side] = avatar;
+		if (saved[side].present) {
+			uint16_t packed = 0;
+			int avatar = 0;
+			if (join_side_character(registry, side, saved[side].nationality_index,
+						saved[side].division_index, saved[side].combo_index, packed,
+						avatar)) {
+				profile.character_ids[side] = packed;
+				profile.avatars[side] = avatar;
+			}
+			if (saved[side].player_class >= kJoinPlayerClassMin &&
+					saved[side].player_class <= kJoinPlayerClassMax)
+				profile.player_classes[side] = saved[side].player_class;
 		}
-		if (saved[side].player_class >= kJoinPlayerClassMin &&
-				saved[side].player_class <= kJoinPlayerClassMax)
-			profile.player_classes[side] = saved[side].player_class;
+		// The session start's avatar byte: the record's voice override where
+		// nonzero, else the side's character's own voice. A join uploads the
+		// pair as VCA / VCB and the local player takes its team's as its
+		// entity +0x374 (Entity::anim_slot).
+		// [orig: Game_ApplySessionSettingsToGlobals @0x551500 - +1532
+		//  @0x551735..0x551769 -> g_AvatarTeam1, +1533 @0x55176e..0x5517a2 ->
+		//  g_AvatarTeam2, a zero byte Avatars_ResolveSelectionIndex @0x57ae60;
+		//  UI_JoinSelectedSession @0x569c2a / @0x569c46;
+		//  CNapiServerInfo_SerializeToSession @0x4c3bb4 / @0x4c3c04;
+		//  Player_InitPlayer @0x4e1838 / @0x4e1825, the store @0x4e1843]
+		if (saved[side].voice_override != 0) profile.avatars[side] = saved[side].voice_override;
 	}
 	return profile;
 }

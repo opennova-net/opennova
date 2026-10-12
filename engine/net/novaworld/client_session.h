@@ -394,11 +394,13 @@ public:
 	const DisconnectEvent &disconnect_event() const { return disconnect_event_; }
 	// Datagrams tossed at the envelope/NWU layer (retail's "NAPI TOSSED" log line).
 	uint32_t tossed_datagrams() const { return tossed_datagrams_; }
-	// Whether this connection takes the 0x81 datagram `data`, whoever sent it: it is probing (the
-	// first connect's Hello state or a reconnect), the reply's CI is its own and the identity
+	// Whether this connection takes the 0x81 datagram `data`, whoever sent it: it is probing (a
+	// reconnect's probe window, never the re-join's 0x42 leg or the gap between windows; the
+	// first connect's Hello state, D-NET-571), the reply's CI is its own and the identity
 	// block its protocol's. A reply it does not take is the next protocol's to read.
-	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533 (sub_6227F0 over the
-	//  protocol's connections, no address), the enumerator gates @0x627547..0x62755C and the
+	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533
+	//  (NapiNPProtocol_FindConnectionByIndex @0x6227F0 over the protocol's connections, no
+	//  address), the enumerator gates @0x627547..0x62755C and the
 	//  identity compares @0x62758B / @0x627624 / @0x627643 each returning 0 @0x626DCB, so
 	//  NapiNPManager_HandlePacket @0x622F10 offers it on (@0x622F9F)]
 	bool takes_server_hello(const uint8_t *data, size_t len) const;

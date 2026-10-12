@@ -90,7 +90,7 @@ struct ServerHello {
 	// The locale block: CN (country name), LNG (language) and TZB (time-zone
 	// bias) are written together, unconditionally, when the protocol object's
 	// enable at +0xD48 is set; the two strings ship their NUL even when empty.
-	// [orig: @0x6207e2 gate; CN @0x62081a, LNG (byte_7CA07C) @0x62084a, TZB @0x62086a]
+	// [orig: @0x6207e2 gate; CN @0x62081a, LNG (aLng) @0x62084a, TZB @0x62086a]
 	bool locale_block = false;
 	std::string cn;
 	std::string lng;
@@ -455,7 +455,7 @@ struct ServerAuth {
 	                       // NapiNP_GetLocalConnectionId @0x4c6d40) and the host stamps it into the
 	                       // joiner's 0x0C ownerConnectionId (+0x78) for Player_FindLocalPlayerEntity
 	                       // @0x4e0090. Host-assigned join-order on LAN [orig: ++protocol[947] @
-	                       // NapiNPConnection_Create 0x62acb0; emitted by SendSessionInit @0x620ef0];
+	                       // CNapiNPConnection_Create 0x62acb0; emitted by SendSessionInit @0x620ef0];
 	                       // the 0x113f default is a placeholder for callers that don't set it. Retail
 	                       // LAN capture frame 28 = 3 (= the 0x48 ack = the 0x0C eFlags).
 	uint32_t ck = 0;      // echo client.ck

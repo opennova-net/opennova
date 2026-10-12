@@ -647,7 +647,7 @@ void LocalPlayer::pack_input_word() {
 
 void LocalPlayer::reset_key_input() {
 	World &world = world_;
-	// [orig: sub_4B2B80 @0x4B2B80 -- the local entity @0x4B2B85 and its def
+	// [orig: Player_ResetLocalInput @0x4B2B80 -- the local entity @0x4B2B85 and its def
 	//  @0x4B2B89; Input_DisableScrollLock @0x4B2B91 and Input_ResetAllState
 	//  @0x4B2B99 are device legs this port does not model (D-NET-560)]
 	const w::Entity *local = player();
@@ -881,7 +881,7 @@ void LocalPlayer::reset_local_player_input(int32_t look_heading_bam) {
 
 
 void LocalPlayer::latch_attack_defend_role(uint32_t game_type) {
-	// [orig: sub_524110 @0x524110 — cleared first @0x52411A]
+	// [orig: Game_LatchAttackDefendRole @0x524110 — cleared first @0x52411A]
 	attack_defend_role = 0;
 	if (game_type != 0x10002u) return; // [orig: `cmp g_GameType, 10002h` @0x524110]
 	const w::Entity *local = player();

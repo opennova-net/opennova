@@ -215,7 +215,7 @@ bool run_in_match_spawn_edge() {
 					!h.weapon().reload_pressed,
 			"in-match frame: join-wait weapon latches cleared")) return false;
 	// The mission start's A&D latch ran with no L; the spawn edge latches
-	// against L's team: another team's target attacks (2) [orig: sub_524110,
+	// against L's team: another team's target attacks (2) [orig: Game_LatchAttackDefendRole,
 	// the joiner's call @0x5260C1 after Player_InitPlayer @0x525BBC].
 	if (!expect(h.kernel->local.attack_defend_role == 2,
 			"in-match frame: the A&D role latched at the spawn edge")) return false;
@@ -229,7 +229,7 @@ bool run_in_match_spawn_edge() {
 
 // The spawn edge's A&D latch reads L's team from its self record: a team-2
 // L against a team-2 target defends (1); the same target against the seeded
-// team-0 L of run_in_match_spawn_edge attacks (2) [orig: sub_524110 --
+// team-0 L of run_in_match_spawn_edge attacks (2) [orig: Game_LatchAttackDefendRole --
 // `cmp al, [edx+162h]; setnz; add ecx, 1` @0x5241A3..0x5241AC].
 bool run_spawn_edge_latch_reads_self_team() {
 	Harness h;
@@ -256,7 +256,7 @@ bool run_spawn_edge_latch_reads_self_team() {
 // the team the frame's mirror applied, as retail's mission start latches after
 // its wait loop pumped every message before it [orig: Game_StartMission --
 // NapiClient_WaitForGameStart (the call @0x524E29; its receive pump @0x42CC88),
-// then the sub_524110 call @0x5260C1; NapiNPClientMsg_TeamAssign's store
+// then the Game_LatchAttackDefendRole call @0x5260C1; NapiNPClientMsg_TeamAssign's store
 // @0x4319EE].
 bool run_spawn_edge_latch_reads_the_frames_target_team() {
 	Harness h;
@@ -287,6 +287,46 @@ bool run_spawn_edge_latch_reads_the_frames_target_team() {
 		return false;
 	return expect(h.kernel->local.attack_defend_role == 1,
 			"frame team: the latch reads the target's team after the frame's 0x50");
+}
+
+// A self S2C 0x50 folded before the spawn edge: retail's handler stores the team
+// on the joiner's own dcb whether or not its mission start has made it the local
+// entity, so Player_InitPlayer and the A&D latch read the new team; L spawns on
+// it (seeded team 0, moved to 2) and defends a team-2 target (1, where the seeded
+// team attacks it, 2) [orig: NapiNPClientMsg_TeamAssign @0x431910 - the Team
+// store @0x4319EE; Player_InitPlayer @0x4E15F0 - @0x4E1809; Game_StartMission -
+// the Game_LatchAttackDefendRole call @0x5260C1].
+bool run_spawn_edge_takes_a_self_team_assign() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u);
+	h.kernel->world.registry.configure_pool(1, 4);
+	w::Entity target;
+	target.has_item_def = true;
+	target.item_attrib = 0x8000u;
+	target.team = 2;
+	h.kernel->world.registry.spawn(1, target);
+	TeamAssign assign;
+	assign.entity_handle = 0x0005; // the joiner's own H
+	assign.team = 2;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input); // the net frame folds the 0x50 ahead of the spawn edge
+	const w::Entity *L = h.kernel->local.player();
+	if (!expect(h.role.local_spawned() && L != nullptr && L->team == 2,
+			"self team: L spawns on the team a pre-spawn self 0x50 assigned"))
+		return false;
+	if (!expect(h.kernel->world.round_sim.local_team == 2,
+			"self team: the round sim's team agrees"))
+		return false;
+	return expect(h.kernel->local.attack_defend_role == 1,
+			"self team: the spawn edge's latch reads the assigned team");
 }
 
 // L spawns on the in-match edge, after the boot's definition sweeps: the edge
@@ -1747,7 +1787,7 @@ bool run_proxy_rendezvous_pump() {
 // it, a moving state dropped to the idle 43) and, in a session, one bodiless
 // C2S 0x41 leaves at the frame's send block; a dead L sends nothing, and out
 // of a session the reset runs alone. [orig: Input_HandleActionBinding case 55
-// -- the dead bit @0x49AD7B, sub_4B2B80 @0x49B20B, is_in_session @0x49B210,
+// -- the dead bit @0x49AD7B, Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
 // is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A]
 bool run_respawn_key_resets_input_and_sends_0x41() {
 	std::vector<opennova::def::DefItemDef> rows(1);
@@ -1831,6 +1871,7 @@ int main() {
 	ok &= run_in_match_spawn_edge();
 	ok &= run_spawn_edge_latch_reads_self_team();
 	ok &= run_spawn_edge_latch_reads_the_frames_target_team();
+	ok &= run_spawn_edge_takes_a_self_team_assign();
 	ok &= run_in_match_spawn_binds_local_player_definition();
 	ok &= run_self_handle_lifecycle();
 	ok &= run_spawn_stamps_equipped_adm_from_midframe_grant();

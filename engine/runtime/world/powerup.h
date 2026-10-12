@@ -3,10 +3,10 @@
 // bind (docs/world/powerup-re.md).
 //
 // [orig: PowerUpDef_LoadFromFile @0x443350; the init walk
-//  Entity_ProcessAllExplosionPhysics @0x4432A0 (misnamed) -> sub_442D00
+//  Powerup_InitAllEntities @0x4432A0 -> PowerupEntity_InitFromDef
 //  @0x442D00; the resolver's Powerup branch @0x4B2FB2..0x4B2FE5 ->
 //  Entity_InvokeCollisionCallback @0x442350 -> PowerupAction_Pickup @0x4428A0;
-//  the countdown Entity_TickFireTimer @0x442850 -> Entity_InvokeFireCallback
+//  the countdown Powerup_TickRespawn @0x442850 -> Entity_InvokeFireCallback
 //  @0x442810 -> PowerupAction_Respawn @0x442B40]
 #pragma once
 
@@ -83,7 +83,7 @@ struct PowerupTable {
 // The row build: the parsed file plus the weapon table the `weapon` and `ammo`
 // names resolve against (retail resolves both at parse time, over the loaded
 // weapon.def) [orig: PowerUpDef_ParseProperty -- AvatarDef_FindByName @0x4431B7
-//  / AdmDef_GetIndexFromPtr @0x443211 for `weapon`, the class lookup sub_540590
+//  / AdmDef_GetIndexFromPtr @0x443211 for `weapon`, the class lookup AmmoClass_FindIdByName
 //  @0x443250 for `ammo`, an unknown class logging "ammo class error"].
 PowerupTable build_powerup_table(const def::DefPowerupFile &file, const WeaponTable &weapons);
 
@@ -91,8 +91,8 @@ PowerupTable build_powerup_table(const def::DefPowerupFile &file, const WeaponTa
 // Powerup attrib: the row's def by the item's `powerupdef` name, the respawn
 // countdown armed idle and the remaining-respawn count seeded; a row whose
 // name the table lacks is destroyed. [orig: Game_StartMission @0x525DE7 ->
-//  Entity_ProcessAllExplosionPhysics @0x4432A0 (pools 1 and 2, the ItemDef
-//  attrib&2 test @0x4432CC / @0x443318) -> sub_442D00 @0x442D00 (the
+//  Powerup_InitAllEntities @0x4432A0 (pools 1 and 2, the ItemDef
+//  attrib&2 test @0x4432CC / @0x443318) -> PowerupEntity_InitFromDef @0x442D00 (the
 //  PowerUpDef_FindByName miss -> Entity_Destroy @0x442E26)]
 void powerup_bind_entities(World &world, const def::DefItemsFile &items);
 
@@ -164,7 +164,7 @@ bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *
 
 // The respawn countdown over every bound row, authority only: a positive
 // countdown steps down, zero fires the respawn action, arms -1 and spends one
-// remaining respawn. [orig: Entity_TickFireTimer @0x442850 -- the
+// remaining respawn. [orig: Powerup_TickRespawn @0x442850 -- the
 //  is_authority and +0x2C8 gates @0x442862, the decrement @0x442878, the fire
 //  @0x442883..0x442895]
 void powerup_tick(World &world, const TickContext &ctx);

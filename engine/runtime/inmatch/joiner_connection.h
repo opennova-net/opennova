@@ -196,9 +196,9 @@ public:
 		bool ammo_pools_set = false;
 		std::array<int32_t, kWorldStateAmmoPoolCount> ammo_pools{};
 		std::vector<ZoneTimerUpdate> zone_timer_updates;
-		// S2C 0x50 leg 1: this poll re-latched OUR OWN team (the same byte_A85B48
+		// S2C 0x50 leg 1: this poll re-latched OUR OWN team (the same g_LocalTeam
 		// latch the S2C 0x04 tail writes). The binding re-styles friend/foe from it.
-		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — byte_A85B48 store @0x4319db]
+		// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — g_LocalTeam store @0x4319db]
 		bool self_team_changed = false;
 		uint8_t self_team = 0;
 		// Diagnostic summary of S2C 0x50; entity state is folded only from the
@@ -383,7 +383,7 @@ public:
 	// slot 195 (pre-Player_InitPlayer, the empty slot table leaves the argument unresolved), then
 	// with the live g_CurrentWeaponSlot (the equipped combo after the spawn fill). The wire team
 	// byte is NOT part of this seam — it is latched from the host's S2C 0x04 tail byte, exactly
-	// like retail's byte_A85B48. Unset keeps the capture-default kit, so headless callers (ctests,
+	// like retail's g_LocalTeam. Unset keeps the capture-default kit, so headless callers (ctests,
 	// seed_in_match) preserve today's auto behavior byte-for-byte.
 	// [orig: Game_StartMission @0x525836/@0x525c2e -> NetPacket_SendLoadoutSubmit @0x42cdc0]
 	// The optional blue/red side blocks below carry the profile content the two PROFILE-sourced
@@ -740,7 +740,7 @@ public:
 	bool has_self_handle() const { return has_self_handle_; }
 	uint16_t self_handle() const { return self_handle_; } // the wire handle H
 	// The server-assigned team latched from the S2C 0x04 tail byte, and re-latched by the
-	// S2C 0x50 team assign [orig: byte_A85B48 — @0x425499 then @0x4319db]. This is the
+	// S2C 0x50 team assign [orig: g_LocalTeam — @0x425499 then @0x4319db]. This is the
 	// side selector a kit build must use: teams 1 and 3 are the BLUE block, everything
 	// else the RED block. Before the 0x04 latch it reads 0 — exactly like retail's
 	// zero-initialized global — which selects the RED block; a real admission always
@@ -930,7 +930,7 @@ private:
 	bool mission_known_ = false; // structurally valid authoritative S2C 0x7B received
 	// The joiner's server-assigned team, latched from the S2C 0x04 slot-assignment tail byte —
 	// the 0x2F loadout-submit header byte 0 source [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 ->
-	// byte_A85B48 @0x425499]. Zero-initialized like retail's global: 0x04 always precedes the
+	// g_LocalTeam @0x425499]. Zero-initialized like retail's global: 0x04 always precedes the
 	// 0x1A submission trigger in a real admission, so harnesses must feed the 0x04 they expect.
 	uint8_t assigned_team_ = 0;
 	uint16_t class_allow_mask_ = 0x03FFu;

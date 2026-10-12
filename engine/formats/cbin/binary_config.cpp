@@ -246,7 +246,7 @@ bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::
 	// the cursor on [orig: @ 0x75eb1e; @ 0x75eb72]; the data loop walks the labels' entries in the element block's
 	// order (a label of no entry, or counted 0xFFFFFFFF, taking none [orig: @ 0x75eb09, @ 0x75eb11]). So an entry
 	// of no value points at the first value of the block's next entry that has one, or past the last value, at
-	// heap bytes the parse never wrote (sub_75E850 @ 0x75e850 sizes the allocation at the values alone; past it,
+	// heap bytes the parse never wrote (ConfigFile_CountValueBytes @ 0x75e850 sizes the allocation at the values alone; past it,
 	// FastMem_Alloc @ 0x7697b0's rounding slack or the next block's header), where it points at none here.
 	size_t next_valued = SIZE_MAX;
 	for (size_t at = block->entries.size(); at-- > 0;) {

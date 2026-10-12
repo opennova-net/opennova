@@ -55,7 +55,7 @@ struct ConfigTokens {
 	// whatever an earlier, longer one left at that offset (the current line's
 	// bytes up to its terminator, the older bytes past it)
 	// [orig: Terrain_TokenizeConfigLine @0x53CB71..0x53CB81; the static buffer
-	// byte_24E5DF0 and slots dword_24E61E4]. A slot no line has set is NULL
+	// g_TokenizeConfigLineBuffer and slots dword_24E61E4]. A slot no line has set is NULL
 	// (the zeroed static), and so is the one past the last: the dword after
 	// slot 29 has no writer. The state lives as long as its ConfigTokens: a
 	// reader that walks a file twice, as retail's ammo and power-up loads do,

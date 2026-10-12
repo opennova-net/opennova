@@ -1,6 +1,6 @@
 // Three witnessed net legs that had no coverage:
 //
-//  (A) S2C 0x50 TEAM ASSIGN — the SECOND writer of the byte_A85B48 team latch (the
+//  (A) S2C 0x50 TEAM ASSIGN — the SECOND writer of the g_LocalTeam team latch (the
 //      S2C 0x04 tail is the first). Self -> re-latch + ONE C2S 0x2F re-submission at
 //      slot 195 RAW; any valid handle -> the decoded row's team. The re-submission is a
 //      PER-SIDE PROFILE RESELECT: the NEW team byte picks the profile side block, that
@@ -83,7 +83,7 @@ std::vector<uint8_t> frame_server_session(SessionSequencing &seq,
 }
 
 // The witnessed 24-byte S2C 0x04 slot assignment; the tail byte is the team latch.
-// [orig: NetPacket_WriteSlotAssignment @0x502b30 -> byte_A85B48 @0x425499]
+// [orig: NetPacket_WriteSlotAssignment @0x502b30 -> g_LocalTeam @0x425499]
 std::vector<uint8_t> slot_assignment(uint8_t team) {
 	std::vector<uint8_t> body(24, 0);
 	body[17] = 0x01; // the joiner's roster slot

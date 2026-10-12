@@ -162,9 +162,9 @@ const std::vector<uint8_t> &retail_full_player_info() {
 }
 
 // The S2C 0x04 slot assignment in its witnessed 24-byte shape: the tail byte is the
-// joiner's server-assigned team — the client's byte_A85B48 latch, and therefore the
+// joiner's server-assigned team — the client's g_LocalTeam latch, and therefore the
 // 0x2F loadout-submit header byte 0. [orig: NetPacket_WriteSlotAssignment @0x502b30;
-// NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499]
+// NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> g_LocalTeam @0x425499]
 std::vector<uint8_t> retail_slot_assignment(uint8_t team = 0x02) {
 	std::vector<uint8_t> body(24, 0);
 	body[17] = 0x01; // the joiner's slot index
@@ -1983,8 +1983,13 @@ bool run_roundtrip() {
 	join_profile.team_request = 0xFF;
 	join_profile.char_class[0] = 6;
 	join_profile.char_class[1] = 6;
-	join_profile.avatar[0] = 1;
-	join_profile.avatar[1] = 10;
+	// Avatar bytes past 0x7F (a hand-edited player.sav voice pair, D-PLAYERINFO-28):
+	// retail prints VCA/VCB sign-extended, and the host's atol keeps the low byte, so
+	// whichever side the host assigns, the byte survives the round trip
+	// [orig: CNapiServerInfo_SerializeToSession movsx @0x4c3bbe / @0x4c3c0e;
+	//  NapiNetConfig_LoadFromConnTags @0x4c75b2 / @0x4c75db].
+	join_profile.avatar[0] = 0x81;
+	join_profile.avatar[1] = 0xC8;
 	client.set_character_join_vars(join_profile);
 
 	uint32_t tick = 1;
@@ -2026,6 +2031,7 @@ bool run_roundtrip() {
 				uint16_t char_id[2] = {0, 0};
 				uint8_t char_class[2] = {0, 0};
 				uint8_t avatar[2] = {0, 0};
+				std::string avatar_text[2];
 				bool saw_auto_team = false;
 				for (const std::vector<uint8_t> &blob : auth.cu) {
 					uint8_t type = 0;
@@ -2050,10 +2056,13 @@ bool run_roundtrip() {
 						char_class[0] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
 					else if (name == "CTB")
 						char_class[1] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
-					else if (name == "VCA")
+					else if (name == "VCA") {
 						avatar[0] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
-					else if (name == "VCB")
+						avatar_text[0] = value;
+					} else if (name == "VCB") {
 						avatar[1] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
+						avatar_text[1] = value;
+					}
 				}
 				client_auth_has_retail_environment =
 						auth.na == kName && saw_vn && saw_bn &&
@@ -2071,7 +2080,8 @@ bool run_roundtrip() {
 						char_class[0] == join_profile.char_class[0] &&
 						char_class[1] == join_profile.char_class[1] &&
 						avatar[0] == join_profile.avatar[0] &&
-						avatar[1] == join_profile.avatar[1];
+						avatar[1] == join_profile.avatar[1] &&
+						avatar_text[0] == "-127" && avatar_text[1] == "-56";
 			}
 		} else if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
 			for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -4386,7 +4396,7 @@ bool run_rtt_pong_fills_the_client_ring() {
 // NWU key): WR set answers with a 0x45 keyed by the server's SK carrying the
 // same MS and WR clear; WR clear lands the round trip; a foreign key is
 // dropped [orig: Nwu_HandlePing @0x623A70 -> CNapiNPConnection_SendPing
-// @0x61DF00].
+// @0x61F080].
 bool run_server_ping_answers_and_measures() {
 	const std::string client_scrk = "CLIENT-PING-SCRK";
 	const std::string server_scrk = "SERVER-PING-SCRK";
@@ -6264,12 +6274,12 @@ bool run_joiner_correlates_handshake_echoes() {
 
 // --- Round-5 hardening ---------------------------------------------------------------------
 
-// Both witnessed writers of byte_A85B48 must be falsifiable. S2C 0x04 installs
+// Both witnessed writers of g_LocalTeam must be falsifiable. S2C 0x04 installs
 // the admission team; S2C 0x75 byte 1 refreshes it when the server broadcasts
 // this player's live slot state. Read the result through frame_loadout_resubmit
 // — the same assigned_team_ source the 0x1A pair uses.
-// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499;
-// NapiNPClientMsg_SetSpectatorMode @0x4259E0 -> byte_A85B48 @0x425A32]
+// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> g_LocalTeam @0x425499;
+// NapiNPClientMsg_SetSpectatorMode @0x4259E0 -> g_LocalTeam @0x425A32]
 bool run_team_latch_is_falsifiable() {
 	const std::string client_scrk = "CLIENT-TEAM-LATCH-SCRK";
 	const std::string server_scrk = "SERVER-TEAM-LATCH-SCRK";
@@ -6291,7 +6301,7 @@ bool run_team_latch_is_falsifiable() {
 
 	uint8_t team = 0xEE;
 	if (!expect(resubmit_team(team) && team == 0x00,
-			"pre-0x04 the wire team byte is retail's zero-init (byte_A85B48)")) {
+			"pre-0x04 the wire team byte is retail's zero-init (g_LocalTeam)")) {
 		return false;
 	}
 

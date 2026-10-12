@@ -586,7 +586,7 @@ int test_piece_spawn_clears_class_selectors() {
 // render tag is the psec row (the clone draws the palm state through it,
 // palm_sections) takes no damage on its clones, where the tower row would
 // accumulate and spawn more sections.
-// [orig: Entity_SpawnSectionEntity @0x440365 -> sub_406FF0; the def's world
+// [orig: Entity_SpawnSectionEntity @0x440365 -> NullClass_HandleEvent; the def's world
 //  callback overriding the husk's Render_SectorEntity @0x5C431B]
 int test_psec_tower_section_clone_stays_inert() {
     const char definitions[] = "begin Tower\r\n id 105051\r\n type building\r\n ai_function towr\r\n"

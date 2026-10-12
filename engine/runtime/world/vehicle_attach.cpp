@@ -345,11 +345,14 @@ bool find_best_vehicle_seat(
     int32_t best_weight = 65536000; // [orig: bestWeight sentinel @0x43520A]
     const auto consider = [&](const Entity &candidate, bool is_root) {
         // An unmodeled model pointer manifests as an empty seat vector in the
-        // portable world. Each root/child entry has its own dead gate, and an
-        // entry with no ItemDef offers no seat (its seat table is the def's).
-        // [orig: Flags & 2 @0x4352c2..0x4352cd, the ItemDef @0x4352d3..0x4352d7]
-        if (!candidate.alive || candidate.health <= 0 ||
-            (candidate.flags & kEntityFlagDead) != 0 || !candidate.has_item_def)
+        // portable world. Each root/child entry has its own dead gate, the one
+        // Flags dword's bit in either view and nothing else (no Health read, so
+        // an entry at Health <= 0 before its class edge still offers its seats),
+        // and an entry with no ItemDef offers no seat (its seat table is the def's).
+        // [orig: Flags & 2 @0x4352c2..0x4352cd, the ItemDef @0x4352d3..0x4352d7,
+        //  the model @0x4352dd..0x4352ec]
+        if (((candidate.flags | candidate.engine_flags) & kEntityFlagDead) != 0 ||
+            !candidate.has_item_def)
             return;
         for (int i = 0; i < static_cast<int>(candidate.seats.size()); ++i) {
             const Seat &seat = candidate.seats[static_cast<size_t>(i)];
@@ -379,8 +382,10 @@ bool find_best_vehicle_seat(
 }
 
 bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &carrier) {
-	if (!carrier.has_item_def || (carrier.flags & kEntityFlagDead) != 0 || !carrier.alive ||
-			carrier.health <= 0)
+	// The dead bit in either view, then the def; no Health read (D-NET-580). The model
+	// test is not ported (D-NET-587) [orig: Entity_CanEnterVehicle @0x435485, @0x435492;
+	//  the model @0x435498..0x4354A3].
+	if (((carrier.flags | carrier.engine_flags) & kEntityFlagDead) != 0 || !carrier.has_item_def)
 		return false;
 	VehicleSeatSelection seat;
 	if (!find_best_vehicle_seat(
@@ -448,16 +453,17 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     Entity *veh = world.registry.get(selection.vehicle);
     // The process refuses every seat kind of a carrier with no ItemDef, and a
     // dead carrier or requester, before anything: the enemy and seat tests,
-    // the old seat's detach and the attach.
+    // the old seat's detach and the attach. The carrier's test is its dead bit
+    // alone, in either Flags view (D-NET-557); the requester's still folds in
+    // Health and `alive` (D-NET-586).
     // [orig: Entity_ProcessVehicleAttach @0x435ae5..0x435b01 (the ItemDef
-    //  @0x435aed..0x435af1), ahead of the detach @0x435bce]
+    //  @0x435aed..0x435af1, the carrier @0x435af9, the requester @0x435afe),
+    //  ahead of the detach @0x435bce]
     if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
     if (occ->health <= 0 || !occ->alive ||
         (occ->flags & kEntityFlagDead) != 0)
         return false;
-    if (veh->health <= 0 || !veh->alive ||
-        (veh->flags & kEntityFlagDead) != 0)
-        return false;
+    if (((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false;
     if (selection.seat_index < 0 ||
         selection.seat_index >= static_cast<int>(veh->seats.size()))
         return false;
@@ -527,11 +533,11 @@ bool VehicleSystem::process_attach(EntityHandle player, EntityHandle vehicle, ui
     Entity *occ = world.registry.get(player);
     Entity *veh = world.registry.get(vehicle);
     // 1. Resolve + dead gates [orig: @0x435b01 — null vehicle/itemDef/player or either
-    //    Flags & 2 reject]. Our authoritative dead store is health/alive; the flags bit-1
-    //    movement/spawn gate also rejects (a mid-spawn player cannot mount).
+    //    Flags & 2 reject]. The carrier's is the dead bit alone (D-NET-557); the
+    //    requester's still folds in health/alive (D-NET-586).
     if (occ == nullptr || veh == nullptr || !veh->has_item_def) return false;
     if (occ->health <= 0 || !occ->alive || (occ->flags & 2u) != 0) return false;
-    if (veh->health <= 0 || !veh->alive || (veh->flags & 2u) != 0) return false;
+    if (((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false; // @0x435af9
 
     // 2. Seat classification by the exact wire bone. The byte is a 1-based index into
     //    the model USRP table (48-byte rows, name at +32), which is exactly how production
@@ -568,11 +574,12 @@ bool VehicleSystem::apply_confirmed_mount(
     if (!vehicle.valid() || bone == 0) return detach(player);
     Entity *veh = world.registry.get(vehicle);
     // The process's gates, ahead of the previous holder's and the body's own
-    // detach [orig: Entity_ProcessVehicleAttach @0x435ae5..0x435b01, the ItemDef
-    // @0x435aed..0x435af1].
+    // detach; the carrier's is its dead bit alone (D-NET-557) [orig:
+    // Entity_TryAttachOrDetach @0x436610, the call @0x4366E8 -> Entity_ProcessVehicleAttach
+    // @0x435ae5..0x435b01, the ItemDef @0x435aed..0x435af1, the carrier @0x435AF9].
     if (veh == nullptr || !veh->has_item_def || !occ->alive || occ->health <= 0 ||
-        (occ->flags & kEntityFlagDead) != 0 || !veh->alive || veh->health <= 0 ||
-        (veh->flags & kEntityFlagDead) != 0) return false;
+        (occ->flags & kEntityFlagDead) != 0 ||
+        ((veh->flags | veh->engine_flags) & kEntityFlagDead) != 0) return false;
 
     int seat_idx = -1;
     for (int i = 0; i < static_cast<int>(veh->seats.size()); ++i) {

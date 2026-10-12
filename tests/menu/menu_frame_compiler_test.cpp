@@ -2379,7 +2379,7 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
 
 // The items as the game draws them (D-MNU-5): a list's row of TYPE IMAGE or COLOR is the text written
 // for it, drawn as the row's label [orig: CListWnd_ParseXMLDefinition @ 0x645b0f..0x645c6f]; a closed
-// combo with no selected row shows its first row [orig: sub_644590 @ 0x644590]; a spin list's image
+// combo with no selected row shows its first row [orig: UIList_GetSelectedRow @ 0x644590]; a spin list's image
 // moves the widget rect by its texture's height on both axes and stretches into it, and its colour fills
 // the rect forced opaque [orig: CSpinListWnd_Render @ 0x64b3b6..0x64b509]; a RADIOEDIT draws as the
 // radio its element makes [orig: sub_65D210 @ 0x65d210].

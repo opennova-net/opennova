@@ -20,7 +20,7 @@
 
 namespace opennova::inmatch {
 
-// The side selector: the host's S2C 0x04 tail byte is retail's byte_A85B48
+// The side selector: the host's S2C 0x04 tail byte is retail's g_LocalTeam
 // (teams 1/3 read the BLUE block, 2/4 the RED one [orig: @0x525788]). Before
 // that latch lands (assigned_team == 0) fall back to the local entity's own
 // team when L already exists.
@@ -37,7 +37,7 @@ uint8_t loadout_side_team(const world::World &world, uint8_t assigned_team);
 // covers a LISTEN HOST as well as a joiner), so single player and the editor
 // keep the mission's .bms kit. Returns false (and copies nothing) while the
 // side latch has not landed — an UNLATCHED team must not commit a page (the
-// selector is the S2C 0x04 tail byte [orig: byte_A85B48 @0x425499];
+// selector is the S2C 0x04 tail byte [orig: g_LocalTeam @0x425499];
 // anything-not-1-or-3 selects the RED block @0x525798, so seeding at team 0
 // would commit the wrong side's page and then have to flip it).
 bool seed_session_kit_from_profile(world::World &world,

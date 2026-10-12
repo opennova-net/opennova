@@ -1053,10 +1053,20 @@ func start_world_load(load_info: LoadingScreenInfo, operation: Callable,
 		_sp_restart_info = load_info
 		_sp_restart_loader = operation
 	_world_load_pending = true
-	_world.set_local_player_spawn_loadout(PlayerSpawnLoadout.from_profile(_chosen_avatar))
+	_world.set_local_player_spawn_loadout(_staged_spawn_loadout())
 	_begin_world_load()
 	if _world_load.start(self, _root, _world, load_info, operation, restart) == null:
 		_on_world_load_failed("mission load handoff could not start")
+
+
+## The next mission's spawn record: the PLAYER_INFO selection, with the current
+## profile record's voice override pair, which the session start reads for each
+## side's avatar byte (engine inmatch::join_character_profile).
+func _staged_spawn_loadout() -> PlayerSpawnLoadout:
+	var loadout := PlayerSpawnLoadout.from_profile(_chosen_avatar)
+	for side in 2:
+		loadout.set_side_voice(side, PlayerProfile.store().get_voice(side))
+	return loadout
 
 
 ## A join's mission start: the join runs on the join screen (pre.mnu
@@ -1073,7 +1083,7 @@ func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
 	if _lan_session != null:
 		_lan_session.stop()
 	_world_load_pending = true
-	_world.set_local_player_spawn_loadout(PlayerSpawnLoadout.from_profile(_chosen_avatar))
+	_world.set_local_player_spawn_loadout(_staged_spawn_loadout())
 	_begin_world_load()
 	_join_screen.follow(_world)
 	if _world_load.start(self, _root, _world, load_info, operation, true) == null:

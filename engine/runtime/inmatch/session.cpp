@@ -107,9 +107,9 @@ bool Role::request_respawn() {
 	// code 55 (the death screen's, the stub, the cine's, the troop class's
 	// default arm).
 	// [orig: Input_HandleActionBinding -- the dead bit @0x49AD76..0x49AD7E,
-	//  bit 0 @0x49AD95..0x49ADA0; 0x400 @0x49ADB3..0x49ADC2 (dword_A85B64);
+	//  bit 0 @0x49AD95..0x49ADA0; 0x400 @0x49ADB3..0x49ADC2 (g_ClientPreRoundTimer);
 	//  0x8000000 @0x49ADC8..0x49ADD7 (g_DeployScreenActive); the pause
-	//  @0x49ADDD..0x49ADE8; g_SpawnSuccessGate @0x49ADEE..0x49AE16; sub_52AD50
+	//  @0x49ADDD..0x49ADE8; g_SpawnSuccessGate @0x49ADEE..0x49AE16; DeathScreen_FilterInputAction
 	//  @0x49AE4C, sub_4A3E50 @0x49AE68, Cine_FilterInputAction @0x49AE84, the
 	//  def+0x170 callback @0x49AEB6 (Input_HandleActionBinding_0's default
 	//  @0x4E13F9)]
@@ -122,7 +122,7 @@ bool Role::request_respawn() {
 			(runtime != nullptr && runtime->state().deploy_overlay_active))
 		return false;
 	// The input reset, then in a session on a peer the bodiless 0x41
-	// [orig: case 55 -- sub_4B2B80 @0x49B20B, is_in_session @0x49B210,
+	// [orig: case 55 -- Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
 	//  is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A].
 	kernel.local.reset_key_input();
 	return kernel.world.rules.mp_session && send_respawn_request();

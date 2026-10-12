@@ -295,7 +295,7 @@ void HudFrameCompiler::element_team_id_line(const HudFrameState &state, float w,
 		emit_half_bright_text(label_font_bold_, label_scale_, s.spectated_name.c_str(),
 				static_cast<float>(x), static_cast<float>(y - text_h), color, t.align);
 	// Attack & Defend appends the side's role [orig: `cmp g_GameType, 10002h`
-	// @0x59AC76; dword_B78FE8 & 2 -> strcli20 @0x59AC86, & 1 -> strcli21
+	// @0x59AC76; g_AttackDefendRole & 2 -> strcli20 @0x59AC86, & 1 -> strcli21
 	// @0x59AC96; the strcat @0x59ACA0..0x59ACC9].
 	if (s.game_type == 0x10002u) {
 		if ((s.attack_defend & 2u) != 0u) text += s.text.attacking;

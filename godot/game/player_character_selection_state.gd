@@ -83,10 +83,6 @@ func initial_team(authored_team: int) -> int:
 	return clampi(int(_persisted_profile.get("team", authored_team)), 0, 1)
 
 
-func persisted_name() -> String:
-	return String(_persisted_profile.get("name", ""))
-
-
 func side_selection(side: int) -> Selection:
 	if side < 0 or side >= _side_profiles.size():
 		return null

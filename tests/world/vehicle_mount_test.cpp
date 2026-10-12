@@ -939,6 +939,60 @@ void test_best_seat_walks_vehicle_children() {
     CHECK(selected.seat_index == 0);
 }
 
+// D-NET-557 / D-NET-580: the walk's per-entry gate, the entry admission and the
+// attach's carrier gate read the one Flags dword's dead bit (either portable
+// view) and the def, never Health: an entry at Health <= 0 whose dead bit is
+// still clear (the window before its class edge) offers its seats and takes a
+// rider, and a dead bit held in engine_flags alone refuses them.
+// [orig: Entity_FindBestSeatSlot @0x4352C2..0x4352CD, @0x4352D3..0x4352D7;
+//  Entity_CanEnterVehicle @0x435485, @0x435492; Entity_ProcessVehicleAttach @0x435AF9]
+void test_seat_gates_read_the_dead_bit_alone() {
+    Rig r;
+    r.veh().spawn_position = r.veh().position; // the admission's spawn arm
+    VehicleSeatSelection selected;
+    r.veh().health = 0;
+    r.veh().alive = false;
+    CHECK(find_best_vehicle_seat(r.w, r.veh_h, r.player_h, selected));
+    CHECK(selected.vehicle == r.veh_h);
+    CHECK(vehicle_can_enter(r.w, nullptr, r.veh()));
+    // The attach's carrier gate is the same dead bit [orig: Entity_ProcessVehicleAttach @0x435AF9].
+    CHECK(r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+    CHECK(r.w.vehicles.detach(r.player_h));
+    // So is the 0x0A apply's confirmed mount [orig: Entity_TryAttachOrDetach @0x4366E8].
+    CHECK(r.w.vehicles.apply_confirmed_mount(r.player_h, r.veh_h, 2));
+    CHECK(r.player().mounted && r.player().mount_target == r.veh_h);
+    CHECK(r.w.vehicles.detach(r.player_h));
+    r.veh().health = 2000;
+    r.veh().alive = true;
+    r.veh().engine_flags |= kEntityFlagDead;
+    CHECK(!find_best_vehicle_seat(r.w, r.veh_h, r.player_h, selected));
+    CHECK(!vehicle_can_enter(r.w, nullptr, r.veh()));
+    CHECK(!r.w.vehicles.process_attach(r.player_h, r.veh_h, 2));
+    (void)r.w.vehicles.detach(r.player_h); // whatever the line above did
+    CHECK(!r.w.vehicles.apply_confirmed_mount(r.player_h, r.veh_h, 2));
+    CHECK(!r.player().mounted);
+    // A child carries its own gate: a zero-health child still offers its seat
+    // beside a root whose own seats are full.
+    r.veh().engine_flags &= ~kEntityFlagDead;
+    r.veh().seats[0].occupant = EntityHandle::make(0, 9);
+    r.veh().seats[1].occupant = EntityHandle::make(0, 10);
+    Entity child;
+    child.kind = EntityKind::Item;
+    child.has_item_def = true;
+    child.health = 0;
+    child.alive = false;
+    child.ground_target = r.veh_h;
+    Seat gunner;
+    gunner.type = SeatType::Gunner;
+    gunner.bone_index = 5;
+    child.seats.push_back(gunner);
+    const EntityHandle child_h = r.w.registry.spawn(1, child);
+    CHECK(find_best_vehicle_seat(r.w, r.veh_h, r.player_h, selected));
+    CHECK(selected.vehicle == child_h);
+    r.w.registry.get(child_h)->engine_flags |= kEntityFlagDead;
+    CHECK(!find_best_vehicle_seat(r.w, r.veh_h, r.player_h, selected));
+}
+
 // The portable whole-registry walk is only for a world that never built the
 // collision tables. Once a live table build has happened, the retail BSS-zero
 // cadence leaves the first 16 ticks deliberately sliceless.
@@ -4253,6 +4307,7 @@ int main() {
     test_unarmed_usegun_needs_the_session();
     test_script_mount_reads_the_boot_equipped_slot();
     test_best_seat_walks_vehicle_children();
+    test_seat_gates_read_the_dead_bit_alone();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
     test_post_epoch_player_spawn_discovers_nearby_seat_immediately();
     test_restore_refreshes_completed_candidate_epoch();

@@ -3198,6 +3198,8 @@ bool check_spawn_wave_queue_and_release_wire() {
 		conn.link.transport = i == 0 ? &first_transport : &second_transport;
 		conn.link.owned_entity = i == 0 ? first : second;
 		conn.link.respawn_pending = true;
+		conn.assigned_team = 1; // the slot team (+416) the 0x0E reads
+		conn.assigned_team_valid = true;
 	}
 	const std::vector<uint8_t> pick{
 			static_cast<uint8_t>(zone_handle.packed),
@@ -3328,6 +3330,8 @@ bool check_default_spawn_requires_no_team_zone() {
 	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
 	conn.link.owned_entity = player;
+	conn.assigned_team = 1; // the slot team (+416) the 0x0E reads
+	conn.assigned_team_valid = true;
 	conn.reply.player_slot = 0;
 
 	const std::vector<opennova::ProtocolMessage> default_pick{
@@ -3509,11 +3513,21 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	reset_player();
 	const std::vector<opennova::ProtocolMessage> deployed = dispatch();
 	const opennova::world::Entity *live = world.registry.get(player);
-	return expect(deployed.size() >= 2 && live->alive && live->health == 125 &&
+	if (!expect(deployed.size() >= 2 && live->alive && live->health == 125 &&
 				!conn.link.respawn_pending && live->mounted &&
 				live->mount_target == vehicle && live->mount_seat == 1 &&
 				world.registry.get(vehicle)->seats[1].occupant == player,
-			"mobile spawn resets then boards the best free vehicle seat");
+			"mobile spawn resets then boards the best free vehicle seat"))
+		return false;
+	// D-NET-557: a root at Health 0 whose dead bit is still clear stays a mobile
+	// spawn, and the deploy seats the player in it [orig: Entity_FindBestSeatSlot
+	//  @0x4352C2; Entity_ProcessVehicleAttach @0x435AF9].
+	world.registry.get(vehicle)->health = 0;
+	world.registry.get(vehicle)->alive = false;
+	reset_player();
+	(void)dispatch();
+	return expect(live->health == 125 && live->mounted && live->mount_target == vehicle,
+			"a Health-0 root with its dead bit clear takes the deploy into its seat");
 }
 
 // D-NET-480: both the 0x0E and the deploy refuse a vehicle target whose ROOT
@@ -3615,6 +3629,99 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 				!world.registry.get(player)->mounted,
 			"the deploy refuses a dead root ahead of its seat walk");
 	return request_refused && deploy_refused;
+}
+
+// D-NET-552: the deploy leg clears the slot's hold bit before its mobile-spawn
+// refusals, so a refused deploy leaves the slot unheld: the next 0x0A shows it
+// (no hide bit for a non-spectator) and the next 0x0E of the live, unheld body
+// is refused by the dead-or-pending gate. The byte's other bits wait for the
+// whole-byte write past the refusals.
+// [orig: Server_ProcessPlayerDeath @0x517791, the refusals @0x5177CF / @0x5177DB /
+//  @0x5177F4, the byte write @0x517803; NetPacket_WritePlayerState @0x4FF6D7,
+//  @0x4FF7A1, @0x4FF7AA..0x4FF7BC; Server_ProcessClientRequestRespawn @0x519CC7]
+bool check_refused_mobile_spawn_deploy_clears_hold() {
+	namespace w = opennova::world;
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	w::Entity vehicle_seed;
+	vehicle_seed.kind = w::EntityKind::Item;
+	vehicle_seed.has_item_def = true;
+	vehicle_seed.item_type = 1;
+	vehicle_seed.item_attrib = w::kItemAttribPlayerControl;
+	vehicle_seed.is_spawn_point = true;
+	vehicle_seed.team = 1;
+	vehicle_seed.alive = true;
+	vehicle_seed.health = 500;
+	w::Seat passenger;
+	passenger.type = w::SeatType::Passenger;
+	passenger.bone_index = 7;
+	vehicle_seed.seats.push_back(passenger);
+	const w::EntityHandle vehicle = world.registry.spawn(1, vehicle_seed);
+	w::Entity player_seed; // a joiner still on its deploy screen: live, held, hidden
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | 1u;
+	player_seed.engine_flags = w::kEntityFlagPlayer;
+	player_seed.team = 1;
+	player_seed.alive = true;
+	player_seed.health = 100;
+	player_seed.health_max = 125;
+	player_seed.position = {-10.0f, -20.0f, 0.0f};
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	world.match.upsert_player({player, 1, "Held", {}});
+	world.match.set_player_respawn_pending(player, true);
+	opennova::inmatch::GameConfig config;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	std::vector<opennova::inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.link.respawn_pending = true;
+	conn.reply.frontier_hint_pending = true;
+	conn.reply.player_slot = 1;
+	const std::vector<opennova::ProtocolMessage> pick{opennova::make_protocol_message(
+			opennova::c2s::RESPAWN_REQUEST,
+			{static_cast<uint8_t>(vehicle.packed), static_cast<uint8_t>(vehicle.packed >> 8)})};
+	auto dispatch = [&]() {
+		return opennova::inmatch::dispatch_session_replies(config, conn, pick, 100, roster, &world);
+	};
+	auto unmoved = [&]() {
+		const w::Entity *body = world.registry.get(player);
+		return body->health == 100 && body->position.x == -10.0f && !body->mounted;
+	};
+	auto held = [&]() {
+		const w::MatchPlayer *row = world.match.player(player);
+		return conn.link.respawn_pending || row == nullptr || row->respawn_pending;
+	};
+	// No primary occupant: the 0x0E's own gates pass, the deploy's +0x170 refuses.
+	bool ok = expect(dispatch().empty() && unmoved() && !held() &&
+	                         (world.registry.get(player)->flags & 1u) == 0 &&
+	                         conn.reply.frontier_hint_pending,
+	                 "a refused mobile-spawn deploy leaves the slot unheld and shown");
+	// A driver now powers the vehicle, but the live, unheld body's pick is refused.
+	w::Entity driver_seed;
+	driver_seed.kind = w::EntityKind::Organic;
+	driver_seed.team = 1;
+	driver_seed.alive = true;
+	driver_seed.health = 100;
+	const w::EntityHandle driver = world.registry.spawn(0, driver_seed);
+	world.registry.get(vehicle)->primary_occupant = driver;
+	ok = expect(dispatch().empty() && unmoved(),
+	            "the next 0x0E of the live, unheld body is refused in a session") && ok;
+	// A spectator refused at the dead root (the 0x51 convert's leg) is unheld but stays hidden.
+	world.registry.get(vehicle)->engine_flags |= w::kEntityFlagDead;
+	conn.link.spectator = true;
+	conn.link.respawn_pending = true;
+	world.match.set_player_respawn_pending(player, true);
+	world.registry.get(player)->flags |= 1u;
+	ok = expect(opennova::inmatch::Server_ReleasePlayerDeployment(
+	                    config, conn, world, vehicle, vehicle.packed).empty() &&
+	                    unmoved() && !held() && (world.registry.get(player)->flags & 1u) != 0,
+	            "a refused spectator deploy clears the hold and keeps the hide bit") && ok;
+	return ok;
 }
 
 // Retail answers the world-state-load burst's empty C2S 0x2D member with a
@@ -4904,6 +5011,7 @@ int main() {
 	ok = check_default_spawn_requires_no_team_zone() && ok;
 	ok = check_vehicle_spawn_target_deploys_into_best_seat() && ok;
 	ok = check_dead_vehicle_root_is_no_mobile_spawn() && ok;
+	ok = check_refused_mobile_spawn_deploy_clears_hold() && ok;
 	ok = check_session_status_reply_matches_retail_writer() && ok;
 	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;

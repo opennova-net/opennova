@@ -1413,6 +1413,90 @@ void test_reconnect_join_timeout() {
 	       "join timeout: probing resumes past hello + 1000 + 20000");
 }
 
+// A reconnect takes a 0x81 only while its enumerator probes: inside a probe window, never ahead
+// of the first window, in the re-join's 0x42 leg, in the gap after that leg gives up or after a
+// window runs out, or once the local reset destroyed the connection. A missed 0x81 is not
+// claimed (takes_server_hello), re-keys nothing and counts as no taken hello, so the lobby's
+// nw_peer() stays put. [orig: Nwu_HandleServerHello @0x626D20 - the enumerator's +0x2C
+//  @0x627559, the miss returning 0 @0x626DCB, the re-join's clear @0x627E72;
+//  CNapiNPConnection_PumpStateMachine @0x6292E0 - the window's set @0x62965B, its end's clear
+//  @0x629693; ResetToDisconnected - CNapiNPConnection_Destroy @0x4D08A7]
+void test_reconnect_takes_a_hello_only_while_probing() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x0000003Du;
+	cfg.client_key = 0x3D3D3D3Du;
+	inject_reconnect_keys(cfg, 0x56565600u);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "probe gate: session reaches Verified")) return;
+	// The service's 0x81 for this CI and identity, as any probe's reply carries it.
+	ClientSession twin(cfg);
+	const auto hello = server.respond(twin.start());
+	const DisconnectEvent stop = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	const auto goodbye = server_encode_outbound(SESSION_OPCODE_SERVER_GOODBYE,
+			server_goodbye_to_bytes(cfg.client_key, stop));
+	std::vector<std::vector<uint8_t>> out;
+	client.handle_datagram(goodbye.data(), goodbye.size(), out);
+	if (!expect(client.reconnecting(), "probe gate: the drop starts the reconnect")) return;
+	// `missed` holds when the 0x81 is neither claimed nor read: no 0x42, no re-key, no count.
+	const auto missed = [&](const char *what) {
+		const uint32_t taken = client.server_hellos_taken();
+		const uint32_t ck = client.client_key();
+		const ClientSession::State state = client.state();
+		std::vector<std::vector<uint8_t>> replies;
+		const bool claimed = client.takes_server_hello(hello.data(), hello.size());
+		client.handle_datagram(hello.data(), hello.size(), replies);
+		expect(!claimed && replies.empty() && client.server_hellos_taken() == taken &&
+		               client.client_key() == ck && client.state() == state,
+		       what);
+	};
+	client.set_clock_ms(1);
+	out.clear();
+	client.pump(out);
+	missed("probe gate: a 0x81 ahead of the first window is missed");
+
+	const uint32_t probe_at = pump_until_probe(client, 2, 5000, out);
+	if (!expect(probe_at != 0, "probe gate: the window's probe goes out")) return;
+	expect(client.takes_server_hello(hello.data(), hello.size()), "probe gate: the window claims it");
+	std::vector<std::vector<uint8_t>> joined;
+	client.handle_datagram(hello.data(), hello.size(), joined);
+	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth &&
+	                    client.client_key() == 0x56565600u,
+	            "probe gate: the window's 0x81 re-joins with one 0x42"))
+		return;
+	missed("probe gate: a 0x81 in the re-join's 0x42 leg is missed");
+
+	// The 0x42 leg gives up past 20000 ms; the next window opens past hello + 1000 + 20000.
+	uint32_t t = probe_at + 1;
+	for (; t <= probe_at + 20001; ++t) {
+		client.set_clock_ms(t);
+		out.clear();
+		client.pump(out);
+	}
+	if (!expect(client.state() == ClientSession::State::Closed, "probe gate: the 0x42 leg gave up"))
+		return;
+	missed("probe gate: a 0x81 in the gap after the 0x42 leg is missed");
+
+	// A window that runs out: claimed through its last pump, missed in the gap after it.
+	const uint32_t reprobe_at = pump_until_probe(client, t, 5000, out);
+	if (!expect(reprobe_at != 0, "probe gate: the next window opens")) return;
+	uint32_t last_claimed = 0;
+	for (t = reprobe_at; t <= reprobe_at + 10000; ++t) {
+		client.set_clock_ms(t);
+		out.clear();
+		client.pump(out);
+		if (client.takes_server_hello(hello.data(), hello.size())) last_claimed = t;
+	}
+	// The window opened one pump ahead of its first 0x41 and closes past open + 10000.
+	expect(last_claimed == reprobe_at + 9999, "probe gate: the window claims until it runs out");
+	missed("probe gate: a 0x81 in the gap after a window is missed");
+
+	// The local reset destroys the connection mid-window.
+	if (!expect(pump_until_probe(client, t, 5000, out) != 0, "probe gate: a third window opens")) return;
+	(void)client.build_goodbye();
+	missed("probe gate: a 0x81 after the local reset is missed");
+}
+
 // A verified lobby session (word 1) reconnects too, and its re-verify re-requests nothing.
 // [orig: HandleConnectVerifyResponse @0x4d5928..0x4d599e — a word of 1 takes neither branch]
 void test_reconnect_verified_word() {
@@ -1717,6 +1801,7 @@ int main() {
 	test_client_reads_the_server_hello_as_retail();
 	test_reconnect_rehost();
 	test_reconnect_join_timeout();
+	test_reconnect_takes_a_hello_only_while_probing();
 	test_reconnect_verified_word();
 
 	MiniServer server;

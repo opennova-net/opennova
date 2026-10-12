@@ -532,7 +532,7 @@ public:
 		return joiner_ && joiner_->initial_admission_complete();
 	}
 	// The joiner's server-assigned team (the S2C 0x04 latch) — the deploy screen's
-	// row filter and color source [orig: byte_A85B48].
+	// row filter and color source [orig: g_LocalTeam].
 	uint8_t assigned_team() const { return joiner_ ? joiner_->assigned_team() : 0; }
 	// Host policy learned from S2C 0x76. HostClient/offline views use the stock
 	// all-ten-classes default; Simulation exposes its configured host value.
@@ -544,7 +544,7 @@ public:
 	uint8_t local_player_slot() const { return joiner_ ? joiner_->local_player_slot() : 0; }
 	// Monotonic edge counter for the S2C 0x50 re-latch of OUR OWN team. The
 	// simulation re-styles friend/foe when it advances (the 0x04 latch at join is
-	// consumed through the spawn instead). [orig: byte_A85B48 store @0x4319db]
+	// consumed through the spawn instead). [orig: g_LocalTeam store @0x4319db]
 	uint64_t self_team_revision() const { return self_team_revision_; }
 	// Roster slots whose bookkeeping the host cleared via S2C 0x46 bit15. Draining
 	// keeps it a one-shot; the associated ENTITY row is deliberately untouched

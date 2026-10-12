@@ -248,7 +248,8 @@ struct WacNamedValues {
     // location() reads this cached player-body result, not a named-table row.
     // [orig: dword_B763E8, org2 @0x4B634B; WacCmd_Location @0x4ED190]
     int32_t local_location = 0;
-    int32_t random_result = 0; // RND @0xC6B23C, written by random and named-variable stores
+    // RND sits below the mission bank, so it lives in the variable store
+    // (ScriptVarStore::WacState::rnd).
 };
 
 // The def+0x196 unit-class split the SP score block keys on: 3 and 4 are

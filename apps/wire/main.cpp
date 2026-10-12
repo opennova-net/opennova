@@ -1407,7 +1407,7 @@ void print_tag_79(const std::vector<uint8_t> &body) {
 }
 
 // S2C 0x75 live player-slot state. The second byte is not another spectator
-// flag: retail copies it directly into the team/loadout selector byte_A85B48.
+// flag: retail copies it directly into the team/loadout selector g_LocalTeam.
 void print_tag_75(const std::vector<uint8_t> &body) {
 	if (body.size() < 2) {
 		std::printf("        [0x75] player-slot-state decode failed (need 2 B got %zu)\n",
