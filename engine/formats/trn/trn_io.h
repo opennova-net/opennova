@@ -119,7 +119,7 @@ struct TrnKeyLine {
 
 // The lines of `text` whose keyword an arm of the terrain's parser compares (trn_parser_key with a block's), in order,
 // each as the game's walk cuts it (io::for_each_config_line: CR LF lines, the comment cut, the 30-token cap)
-// [orig: File_ParseASCIIFile @0x53D810; Terrain_TokenizeConfigLine @0x53CB60]; `lines`, where given, their 1-based
+// [orig: File_ParseASCIIFile @0x53D810; Config_TokenizeLine @0x53CB60]; `lines`, where given, their 1-based
 // lines (every CR LF line counted, as load_mission_trn's TrnLaterLine counts them).
 std::vector<TrnKeyLine> read_trn_key_lines(const std::string &text, std::vector<int> *lines = nullptr);
 
@@ -131,12 +131,12 @@ std::vector<TrnKeyLine> read_trn_key_lines(const std::string &text, std::vector<
 std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys);
 
 // Whether a value can be written on a line for the tokenizer to read back whole: not empty, no '"' and no control
-// character (a quoted run holds any other) [orig: Terrain_TokenizeConfigLine @0x53CB60, the quote
+// character (a quoted run holds any other) [orig: Config_TokenizeLine @0x53CB60, the quote
 // @0x53CC4E..0x53CC70]. `error` says why not.
 bool trn_value_writable(const std::string &value, std::string &error);
 
 // Whether a value holds what the tokenizer ends a token or a line at outside quotes (a space, a comma, a tab, a ';',
-// "//"), so a line writes it quoted to read it back whole [orig: Terrain_TokenizeConfigLine @0x53CC16..0x53CC4C].
+// "//"), so a line writes it quoted to read it back whole [orig: Config_TokenizeLine @0x53CC16..0x53CC4C].
 bool trn_value_needs_quotes(const std::string &value);
 
 // The values from `from` on as a line writes them after its keyword: a space apart, each quoted where it holds a
@@ -151,7 +151,7 @@ bool trn_values_of_text(const std::string &text, std::vector<std::string> &value
 // One line written from scratch, CR LF ended: its keyword, then its values (trn_values_text), checked by reading it
 // back through the game's tokenizer. False with `error` (writing nothing) for a keyword no arm compares, a value
 // trn_value_writable refuses, or a line the tokenizer would read otherwise (past its 30 tokens or 1000 characters
-// [orig: Terrain_TokenizeConfigLine @0x53CBBB, @0x53CC8C..0x53CC93]).
+// [orig: Config_TokenizeLine @0x53CBBB, @0x53CC8C..0x53CC93]).
 bool write_trn_key_line(std::string &out, const TrnKeyLine &line, std::string &error);
 
 // The value a configuration holds for a keyword whose arm sets it whole (a map's name, a density, the grid's width, a

@@ -134,7 +134,7 @@ std::string launch_expansion_name(const std::string &token) {
 }
 
 bool launch_token_breaks_at(char c) {
-    // [orig: Terrain_TokenizeConfigLine @ 0x53cb60: ' ', '\t' and ',' split outside quotes
+    // [orig: Config_TokenizeLine @ 0x53cb60: ' ', '\t' and ',' split outside quotes
     //  @ 0x53cc44, '"' toggles quoting and is never kept @ 0x53cc51, ';' ends the line @ 0x53cc31]
     return c == ' ' || c == '\t' || c == ',' || c == '"' || c == ';';
 }

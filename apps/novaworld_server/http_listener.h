@@ -1,5 +1,7 @@
 #pragma once
 
+#include "auth.h"
+
 #include <net/novacrypto/epask.h>
 
 #include <atomic>
@@ -107,33 +109,45 @@ private:
 	std::thread worker_;
 	std::atomic<bool> running_{false};
 	uint16_t bound_port_ = 0;
-	// PERSISTENTEXPRESSLOGINDATA cookie → players.id. Retail's IB3 sets
-	// this cookie itself (we never set it) and ships it on every HTTP
-	// request from the same retail process. Acts as a stable per-process
-	// identifier even when our own NWHANDLE cookie is dropped (HTTP/1.0
-	// IB3 unreliability) — used by /NWJoin.dll PUB* encoding to recover
-	// the joiner's PCID when NWHANDLE doesn't arrive (G.8).
+	// PERSISTENTEXPRESSLOGINDATA cookie → the account a retail login with
+	// it was made for, with the credentials generation that login read. Retail's
+	// IB3 sets this cookie itself (we never set it) and ships it on every HTTP
+	// request from the same retail process, so it names that process's login
+	// to POST /NWLogin.dll (a resume with no password), /NWJoin.dll and
+	// /NWAccount.dll after the LOGINSESSIONTAG (G.8). A pin counts only while
+	// its account is still at its generation (pinned_user).
+	struct RetailPin {
+		int64_t user_id = 0;
+		int64_t credentials_gen = 0;
+	};
 	mutable std::mutex persistent_user_mu_;
-	std::unordered_map<std::string, int64_t> persistent_to_user_id_;
+	std::unordered_map<std::string, RetailPin> persistent_pins_;
 	// The in-memory half of an account's revocation (an admin password reset,
-	// a status other than 'active', a delete; the same update ends the
-	// account's website sessions and keys, update_revokes_sessions): drops
-	// every PERSISTENTEXPRESSLOGINDATA pin to `user_id`, which would resume a
-	// retail login with no password, and takes the account off its listings'
-	// in-memory owner (NwUdpListener::forget_owner), so an owner push already
-	// queued for one of them is dropped.
+	// a status other than 'active', a delete; the same update moves the
+	// account's credentials generation and ends its website sessions and keys,
+	// update_revokes_sessions): drops every PERSISTENTEXPRESSLOGINDATA pin to
+	// `user_id`, which would resume a retail login with no password (the
+	// generation check already refuses such a pin; this frees it), and takes
+	// the account off its listings' in-memory owner (NwUdpListener::forget_owner),
+	// so an owner push already queued for one of them is dropped.
 	void forget_revoked_account(int64_t user_id);
-	// The account a retail request's own login names, for the HOSTKEY
-	// /NWHost.dll mints (hostdb::record_host_key): the LOGINSESSIONTAG cookie
-	// of a live retail login (its active_user_sessions row), else the
-	// PERSISTENTEXPRESSLOGINDATA pin a password-checked login made (the pin
-	// /NWJoin.dll falls back to). The account must be active; `how` names the
-	// cookie that resolved it. The NWHANDLE cookie, /NWJoin.dll's first choice,
-	// never counts here: the service sets it in the clear to the account's
-	// handle, so any client can send any account's, and a key minted on it
-	// would list a server as anyone's. Throws db::SqliteError.
-	std::optional<int64_t> retail_login_owner(const std::map<std::string, std::string> &cookies,
-	                                          db::Database &db, const char *&how) const;
+	// The account the pin `cookie` names, while the account is still at the
+	// pin's credentials generation; a pin that lost it is dropped. nullopt for
+	// an empty or unknown cookie. The account's status is the caller's to check.
+	std::optional<UserRecord> pinned_user(const std::string &cookie, db::Database &db);
+	// The account a retail request's own login names, for /NWJoin.dll's
+	// joiner, /NWAccount.dll's identity and the HOSTKEY /NWHost.dll mints
+	// (hostdb::record_host_key): the LOGINSESSIONTAG cookie of a live retail
+	// login (its active_user_sessions row, get_user_by_login_session_tag), else
+	// the PERSISTENTEXPRESSLOGINDATA pin a login made (pinned_user); `how` names
+	// the cookie that resolved it. A row that resolves has its last_seen_at
+	// moved to now, so the 2 h sweep measures the login's real idleness. The
+	// account's status is the caller's to
+	// check. The NWHANDLE cookie never counts: the service sets it in the clear
+	// to the account's handle, so any client can send any account's (and a key
+	// minted on it would list a server as anyone's). Throws db::SqliteError.
+	std::optional<UserRecord> retail_login_user(
+			const std::map<std::string, std::string> &cookies, db::Database &db, const char *&how);
 	// Per-server-process EPASK params advertised via the EPASK cookie at
 	// /nwprepare.dll. Retail echoes the same params back as a form field
 	// at POST /NWLogin.dll, so we use these to decrypt the encrypted

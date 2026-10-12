@@ -148,9 +148,12 @@ int main() {
 			if (h.lobby.hosting && h.lobby.server_name == expected_name) return h.lobby;
 		return std::nullopt;
 	};
-	// The first full Host list lands right after the hosting.
+	// The first full Host list is the starting map's mission start's: the host result published
+	// nothing (D-NET-465), and the request's Host list (BuildHostVarLists' first run) carries no
+	// GameType [orig: Game_StartMission @0x5248c6..0x524903].
 	std::optional<LobbyState> lobby;
-	for (int f = 0; f < 300 && !(lobby && !lobby->last_host_update["Host"].empty()); ++f) {
+	for (int f = 0; f < 300 && !(lobby && var_has(lobby->last_host_update["Host"], "GameType"));
+			++f) {
 		CHECK(server.frame(kFrame));
 		std::this_thread::sleep_for(2ms);
 		lobby = row();

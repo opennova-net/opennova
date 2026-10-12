@@ -41,7 +41,7 @@ void CharacterRegistry::add_entry(int nationality_index, int division_index,
 	entries_.push_back(entry);
 }
 
-// [orig: MinimapSlot_FindByPackedId @0x57a270 — the decoder matches the
+// [orig: CAvatarDefs_FindComboByPackedId @0x57a270 — the decoder matches the
 // nationality/division/combo numbers and the alignment bit against the combo
 // entry (+0/+4/+8/+276)]
 const CharacterEntry *CharacterRegistry::find_by_packed_id(uint16_t packed_id,

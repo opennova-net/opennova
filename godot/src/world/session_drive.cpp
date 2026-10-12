@@ -113,11 +113,6 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->load_charattr(resource_root);
 	Ref<CharacterJoinProfile> join_profile = build_join_character_profile(
 			resource_root, world_->player_visuals_->spawn_loadout());
-	if (join_profile.is_valid()) {
-		auto profile = join_profile->value();
-		profile.team_request = p_target->get_team_request();
-		join_profile->assign(profile);
-	}
 	join_preload_sim_->set_join_character_profile(join_profile);
 	// The APPID join token (decoded .joi CK) a NovaWorld host validates in
 	// ClientAuth (reject code 9), and the CD identity cookie (packed PUB*
@@ -823,6 +818,12 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		self.type = "0";
 		host.set_player_slot(self);
 	}
+	// The mission start's update, at every mission start of a hosting session, map changes
+	// included (NwuHostRole::publish_mission_start, which carries Game_StartMission's cite):
+	// both lists whole. A fresh host's first full Host list, its HostKey included, is this one,
+	// since its host result publishes nothing (D-NET-465); the columns still hold the host
+	// request's (D-NET-373).
+	host.publish_mission_start();
 }
 
 void SessionDrive::unbind_nw_host() {

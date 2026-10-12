@@ -52,7 +52,7 @@ bool header(DefRecordWriter &writer, const char *key, const char *name, size_t c
 	const std::string text(name, end);
 	// A quote never survives (it would close the name); a delimiter or a comment start
 	// survives only inside quotes, where the line tokenizer keeps it [orig:
-	// Terrain_TokenizeConfigLine @ 0x53CB60, delimiters @0x53CC33..0x53CC4C]: the reader
+	// Config_TokenizeLine @ 0x53CB60, delimiters @0x53CC33..0x53CC4C]: the reader
 	// takes the name from token 1, quoted or not.
 	if (text.find_first_of("\r\n\"") != std::string::npos) {
 		writer.fail(text, key, "Name contains an unsupported character."); return false;
@@ -213,7 +213,7 @@ void put_items(DefRecordWriter &writer, const DefItemsFile &file, const WriteOrd
 			std::vector<std::string> ids;
 			for (int j = 0; j < file.vehicle_spawn_id_count; ++j) ids.push_back(std::to_string(file.vehicle_spawn_ids[j]));
 			// A line holds no more ids than the tokenizer keeps after the key (29, the last
-			// running on to the line's end [orig: Terrain_TokenizeConfigLine @0x53CB60, the
+			// running on to the line's end [orig: Config_TokenizeLine @0x53CB60, the
 			// 30-token cap @0x53CC8C..0x53CC93]); the next line registers the rest in order.
 			for (size_t from = 0; from < ids.size(); from += size_t(defscan::kMaxValueTokens))
 				writer.line("pcvehicle_spawnlist",

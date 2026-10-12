@@ -425,7 +425,7 @@ int main(int argc, char **argv) {
         // line is `end` + NUL with no CR LF, closes its last def (GRENADE_NOEXP).
         // An `ammo` line while a def is open ends the whole walk, and the def it
         // interrupted stays in the table [orig: File_ParseASCIIFile @0x53D810 ->
-        // Terrain_TokenizeConfigLine @0x53CB60; AmmoDef_ParseProperty @0x40A2D0
+        // Config_TokenizeLine @0x53CB60; AmmoDef_ParseProperty @0x40A2D0
         // (`ammo` @0x40A347..0x40A397, the return 1 @0x40A37D; File_ParseASCIIFile
         // @0x53D942)].
         static const char text[] =

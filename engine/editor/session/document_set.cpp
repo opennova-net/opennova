@@ -312,7 +312,8 @@ void DocumentSet::hand_base_heights(DocumentBase &document) {
 	bms::File file;
 	if (!mission->compose(file)) return;
 	// The terrain the mission names, as the original editor reads it (BaseTerrain), sampled by its own sampler
-	// (mission::mis_terrain_height); 0 for each entity where none reads.
+	// (mission::mis_terrain_height); no height where none reads, so the writer writes each entity locked, its z
+	// absolute, exact in the original editor over whatever terrain it loads (D-MIS-17).
 	const std::string terrain = mission::mission_info(file).terrain;
 	mission::MisTerrain sampled;
 	const std::shared_ptr<const ProjectAssetSource> &files = view_.findings.assets;
@@ -340,8 +341,9 @@ void DocumentSet::hand_base_heights(DocumentBase &document) {
 		}
 	}
 	std::vector<int32_t> heights;
-	for (const std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
-		for (const bms::Entity &entity : *pool) heights.push_back(mission::mis_terrain_height(sampled, entity.x, entity.y));
+	if (sampled.heights)
+		for (const std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
+			for (const bms::Entity &entity : *pool) heights.push_back(mission::mis_terrain_height(sampled, entity.x, entity.y));
 	mission->set_base_heights(std::move(heights));
 }
 

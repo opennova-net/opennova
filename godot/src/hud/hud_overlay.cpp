@@ -278,6 +278,10 @@ void HudOverlay::_bind_methods() {
 			DEFVAL(opennova::renderer::kTexCompressionLevelFreshProfile));
 	ClassDB::bind_method(D_METHOD("get_minimap_water_mask"),
 			&HudOverlay::get_minimap_water_mask);
+	ClassDB::bind_method(D_METHOD("set_minimap_terrain_picture", "picture"),
+			&HudOverlay::set_minimap_terrain_picture);
+	ClassDB::bind_method(D_METHOD("get_minimap_terrain_picture"),
+			&HudOverlay::get_minimap_terrain_picture);
 	ClassDB::bind_method(D_METHOD("set_minimap_state", "mission_position",
 			"altitude_wu", "heading_bam", "zoom_q16", "big_zoom_q16",
 			"map_mode", "flip_180", "snapshot"),
@@ -523,6 +527,9 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	root_ = p_root;
 	layout_ = HudLayout{};
 	textures_ = {};
+	// The colour map a terrain picture gives back goes with the slots, so a
+	// picture set null before the next set_minimap_terrain restores nothing.
+	minimap_colormap_.unref();
 	combat_texture_names_ = {};
 	combat_texture_loaders_ = {};
 	texture_material_words_.clear();
@@ -1581,6 +1588,7 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 	state_.minimap.terrain = opennova::hud::HudMinimapTerrain{};
 	textures_[opennova::hud::kHudTexMapTerrain].unref();
 	textures_[opennova::hud::kHudTexMapWater].unref();
+	minimap_colormap_.unref();
 	if (p_terrain.is_null()) {
 		queue_redraw();
 		return;
@@ -1622,9 +1630,19 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 		}
 	}
 	textures_[opennova::hud::kHudTexMapTerrain] = colormap;
+	minimap_colormap_ = colormap;
 	textures_[opennova::hud::kHudTexMapWater] = p_water_mask;
 	terrain.water_present = p_water_mask.is_valid();
 	queue_redraw();
+}
+
+void HudOverlay::set_minimap_terrain_picture(const Ref<Texture2D> &p_picture) {
+	textures_[opennova::hud::kHudTexMapTerrain] = p_picture.is_valid() ? p_picture : minimap_colormap_;
+	queue_redraw();
+}
+
+Ref<Texture2D> HudOverlay::get_minimap_terrain_picture() const {
+	return textures_[opennova::hud::kHudTexMapTerrain];
 }
 
 void HudOverlay::set_minimap_state(const Vector2 &p_mission_position,

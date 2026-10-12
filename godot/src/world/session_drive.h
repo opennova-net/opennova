@@ -186,8 +186,9 @@ private:
 	void fail_join_preload(const String &p_reason);
 	void cancel_join_preload();
 	// Bind a hosting session to the live hosted match: the GSID/AppId, the
-	// join-ticket arm and the host's own roster slot. unbind_nw_host undoes the
-	// in-match half (the GSID, the join-ticket hook, the roster mirror).
+	// join-ticket arm, the host's own roster slot and the mission start's
+	// update (both lists whole). unbind_nw_host undoes the in-match half (the
+	// GSID, the join-ticket hook, the roster mirror).
 	void bind_nw_host(const Ref<MissionSetupOptions> &p_opts);
 	void unbind_nw_host();
 	// Mirror the admitted joiners onto the hosting session's per-slot roster

@@ -14,7 +14,7 @@ namespace opennova::textlayout {
 namespace {
 
 bool blank(char c) { return c == ' ' || c == '\t'; }
-// What ends a word outside quotes [orig: Terrain_TokenizeConfigLine @ 0x53CB60, the delimiters @
+// What ends a word outside quotes [orig: Config_TokenizeLine @ 0x53CB60, the delimiters @
 // 0x53CC33..0x53CC4C].
 bool separator(char c) { return c == ' ' || c == '\t' || c == ','; }
 

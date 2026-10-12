@@ -38,7 +38,7 @@ using Cut = Line (*)(const char *text, size_t length);
 
 // The cut of the shared ASCII walk's tokenizer (Avatars.def, the AI profiles, the def families): words end at
 // a blank or a comma outside quotes, a quoted run is a word with its quotes, and `//` or `;` outside quotes
-// starts the comment [orig: Terrain_TokenizeConfigLine @ 0x53CB60, the delimiters @ 0x53CC33..0x53CC4C, the
+// starts the comment [orig: Config_TokenizeLine @ 0x53CB60, the delimiters @ 0x53CC33..0x53CC4C, the
 // quote @ 0x53CC4E..0x53CC70, the comment @ 0x53CC16..0x53CC31]. A CR or an LF inside the line is a byte of a
 // word (the walk splits at a CR LF pair alone).
 Line cut_ascii_walk(const char *text, size_t length);

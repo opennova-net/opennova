@@ -820,16 +820,37 @@ static int test_retail_strtol_radix_and_atoi64_range()
 }
 
 // The CRT ctype classes the ports pin to cp1252 (D-NET-382 for the spaces, D-NET-388
-// for the digits): every byte against the sets Windows' NLS gives code page 1252.
+// for the digits, D-NET-478 for the letters): every byte against the sets Windows' NLS
+// gives code page 1252.
 static int test_cp1252_ctype_classes()
 {
+    // The 73 high bytes MultiByteToWideChar(1252) + GetStringTypeW(CT_CTYPE1) class as
+    // C1_ALPHA (msvcrt's isalpha after setlocale(LC_ALL, ".ACP") gives the same rows).
+    static const uint8_t kHighLetters[] = {
+        0x83, 0x8A, 0x8C, 0x8E, 0x9A, 0x9C, 0x9E, 0x9F, 0xAA, 0xB5, 0xBA,
+        0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB,
+        0xCC, 0xCD, 0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6,
+        0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3,
+        0xE4, 0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF,
+        0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6,
+        0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF,
+    };
+    static_assert(sizeof(kHighLetters) == 73, "cp1252 has 73 high-byte letters");
+    int letters = 0;
     for (int byte = 0; byte < 256; ++byte) {
         const uint8_t b = static_cast<uint8_t>(byte);
         const bool space = byte == 0x20 || (byte >= 0x09 && byte <= 0x0D) || byte == 0xA0;
         const bool digit = (byte >= '0' && byte <= '9') || byte == 0xB2 || byte == 0xB3 || byte == 0xB9;
+        bool alpha = (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z');
+        for (const uint8_t high : kHighLetters) alpha = alpha || high == b;
         TEST_EXPECT(cp1252_isspace(b) == space);
         TEST_EXPECT(cp1252_isdigit(b) == digit);
+        TEST_EXPECT(cp1252_isalpha(b) == alpha);
+        // Sign-extended, every row is the byte's own but 0xFF's, the EOF row.
+        TEST_EXPECT(cp1252_isalpha_sign_extended(static_cast<char>(b)) == (alpha && byte != 0xFF));
+        letters += alpha ? 1 : 0;
     }
+    TEST_EXPECT(letters == 125);
     return 0;
 }
 

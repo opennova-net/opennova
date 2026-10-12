@@ -722,7 +722,7 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
 	if (target.kind == EntityKind::Organic || target.is_ai_capable) return;
     // A section clone's event callback is the null row whatever its def; a
     // palm fragment runs item 900's own row [orig: Entity_SpawnSectionEntity
-    //  @0x440365 -> NullClass_HandleEvent; Projectile_SpawnFromTile @0x53C35D].
+    //  @0x440365 -> NullClass_HandleEvent; Palm_SpawnFragment @0x53C35D].
     if (target.section_clone) {
         target.class_think_ticks = 0x1000000;
         return;

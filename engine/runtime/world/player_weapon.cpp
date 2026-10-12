@@ -226,8 +226,7 @@ void commit_local_usegun_weapon_switch(World &world, LocalPlayerWeapon &w) {
 	}
 }
 
-void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
-                                         PlayerViewState &view) {
+void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w) {
 	if (!world.cached.local_player.valid()) return;
 	Entity *player = world.registry.get(world.cached.local_player);
 	if (player == nullptr) return;
@@ -266,13 +265,15 @@ void sync_local_usegun_weapon_transition(World &world, LocalPlayerWeapon &w,
 				from->category == to->category;
 	};
 	const auto stage_parent = [&](Entity &p_mount, uint8_t target_adm) {
-        // The local UseGun attach resets before its mount; a detach does not take
-        // this leg. The reset includes the binocular clears, so a wire-echoed
-        // attach drops a raised toggle too. A control seat's reset ran at its
-        // attach, EWeap or not (vehicle_attach.cpp attach_apply).
-        // [orig: Entity_AttachToUseGunSlot @0x546B80 (the
-        //  Player_ResetCameraAndMovementState call @0x546ba4)]
-		if (player->mount_type == SeatType::Gunner) local_player_camera_reset(&world, w, view);
+		// No camera reset here: the UseGun attach's, like a control seat's, ran
+		// at the attach (vehicle_attach.cpp attach_apply), and a designated-G
+		// route switch, which stages here too, resets nothing (D-WPN-49). Retail's
+		// route leg stores the EquippedSlot alone and switches nothing, where this
+		// staging queues a switch action (D-WPN-52).
+		// [orig: Entity_AttachToUseGunSlot @0x546B80 (the
+		//  Player_ResetCameraAndMovementState call @0x546ba4); the route leg's
+		//  EquippedSlot stores NetPacket_SerializePlayerState @0x4c139d / @0x4c13f8,
+		//  NapiNPServerMsg_HandleWeaponToggle @0x511b08 / @0x511b38]
 		if (!w.usegun_slot_active)
 			w.usegun_saved_adm = player->pre_use_gun_equipped_adm_index;
 		w.usegun_pending_mount = p_mount.handle;
@@ -1131,7 +1132,7 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	io.reload = LocalWeaponReloadWire{};
 	if (io.view == nullptr || !world.cached.local_player.valid()) return;
 	PlayerViewState &view = *io.view;
-	sync_local_usegun_weapon_transition(world, w, view);
+	sync_local_usegun_weapon_transition(world, w);
 	if (!w.active) return;
 	WeaponSlotState &active_slot = *active_local_weapon_slot(world, w);
 	const Entity *player = world.registry.get(world.cached.local_player);

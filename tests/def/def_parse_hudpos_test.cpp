@@ -99,7 +99,7 @@ static int synthetic_legs(void) {
    token (`KEY,value` binds), a quoted value is one token without its quotes,
    and a HUD key inside a VEHICLE_HUD block is the HUD's as anywhere else (the
    block keys are matched ahead of the HUD chain, never instead of it)
-   [orig: File_ParseASCIIFile @0x53D810 -> Terrain_TokenizeConfigLine
+   [orig: File_ParseASCIIFile @0x53D810 -> Config_TokenizeLine
    @0x53CB60; HUD_ParseHudposToken @0x59F370 (VEHICLE_HUD @0x59F380, the
    block keys @0x59F5CE..0x59F74E, the HUD chain from @0x59F7CE)]. */
 static int tokenizer_legs() {
@@ -130,7 +130,7 @@ static int tokenizer_legs() {
 
 /* A line's values are the tokenizer's 29 past the key: an eight-seat VEHICLE_HUD
    row is 17 values, and its last seat is the 16th and 17th [orig:
-   Terrain_TokenizeConfigLine @0x53CB60, the 30-token cap @0x53CC8C..0x53CC93;
+   Config_TokenizeLine @0x53CB60, the 30-token cap @0x53CC8C..0x53CC93;
    HUD_ParseHudposToken's seats arm @0x59F74E, eight pairs at most]. */
 static int value_cap_legs() {
     const char *text =
