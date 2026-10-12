@@ -37,15 +37,6 @@ inline native_socket_t native_socket(intptr_t fd) {
 	return static_cast<native_socket_t>(fd);
 }
 
-inline int select_nfds(intptr_t fd) {
-#if defined(_WIN32)
-	(void)fd; // Winsock ignores nfds.
-	return 0;
-#else
-	return native_socket(fd) + 1;
-#endif
-}
-
 inline int close_fd(intptr_t fd) {
 #if defined(_WIN32)
 	return ::closesocket(native_socket(fd));
@@ -250,13 +241,7 @@ int udp_recv_from(Socket &s, uint8_t *buf, size_t buf_cap, Endpoint &from, int t
 	if (!s.is_valid() || !buf || buf_cap == 0) {
 		return -1;
 	}
-	fd_set rfds;
-	FD_ZERO(&rfds);
-	FD_SET(native_socket(s.fd), &rfds);
-	timeval tv{};
-	tv.tv_sec = timeout_ms / 1000;
-	tv.tv_usec = (timeout_ms % 1000) * 1000;
-	const int ready = ::select(select_nfds(s.fd), &rfds, nullptr, nullptr, &tv);
+	const int ready = wait_ready(s.fd, /*write=*/false, timeout_ms);
 	if (ready <= 0) {
 		return ready; // 0=timeout, <0=error
 	}

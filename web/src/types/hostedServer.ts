@@ -144,3 +144,92 @@ export interface StopAllReply {
   // How many live servers were asked to stop.
   stopping: number;
 }
+
+// The console routes (apps/novaworld_server/hosted/console_routes.cpp, README
+// "Hosted servers", the console routes' table): the owner's on
+// /api/me/server/..., the admin's on /api/admin/hosted/<id>/....
+
+// One PLAYER LIST row (the server's own slot-0 row left out). `team` and
+// `class` are the numbers the server prints.
+export interface ConsolePlayer {
+  // 1..255: what punt, ban, swap and kill name.
+  slot: number;
+  name: string;
+  team: number;
+  class: number;
+  kills: number;
+  deaths: number;
+  ping: number;
+}
+
+// One MISSION AVAILABLE row: a mission the server has, which an add names by
+// its `file`.
+export interface ConsoleMission {
+  index: number;
+  file: string;
+  title: string;
+}
+
+// One MISSION LIST entry, in play order. `index` is what remove and next name.
+export interface RotationEntry {
+  index: number;
+  file: string;
+  // Sides swapped at the half (the add's swap_sides).
+  swap_sides: boolean;
+  // The current map is in its second half.
+  flipped: boolean;
+  one_shot: boolean;
+  current: boolean;
+  next: boolean;
+}
+
+// The service's admin link to the server, as GET .../console reports it.
+export interface ConsoleLink {
+  state: 'connecting' | 'up' | 'down' | 'stopped';
+  // The link's last poll's scene: 'Game' (a match), 'Menus' (between
+  // matches) or 'Unknown'; '' before one.
+  game_state: string;
+  // UTC 'YYYY-MM-DD HH:MM:SS', '' before one.
+  last_poll_at: string;
+  // UTC, the session's login; '' while not up.
+  up_since: string;
+  // Why the last login or session failed; '' while up.
+  error: string;
+}
+
+// One line of the server's console ring (its newest 500): each command the
+// site sent that changes the server (with its sender), each reply, and the
+// link's own status lines. The reads the pages poll are not recorded.
+export interface ConsoleLine {
+  id: number;
+  kind: 'command' | 'reply' | 'status';
+  // A command's sender: 'owner', 'admin' or 'service'; '' for the rest.
+  actor: string;
+  text: string;
+  // UTC 'YYYY-MM-DD HH:MM:SS'.
+  at: string;
+}
+
+// GET .../console.
+export interface ConsoleLog {
+  server_id: number;
+  // Null while the server has no link (not running).
+  link: ConsoleLink | null;
+  // The lines past `after`, oldest first.
+  lines: ConsoleLine[];
+}
+
+// The player commands, by the route's last segment.
+export type PlayerAction = 'punt' | 'ban' | 'swap' | 'kill';
+
+// POST .../players/<slot>/<action>.
+export interface PlayerActionReply {
+  slot: number;
+  result: string;
+  // A ban: whether the server listed the player's PCID (a NovaWorld host's
+  // ban) before it punted them.
+  listed?: boolean;
+}
+
+// The rotation entry commands, by the route's last segment.
+export type RotationEntryAction = 'remove' | 'next';

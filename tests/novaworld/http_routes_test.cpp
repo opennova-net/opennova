@@ -27,6 +27,7 @@
 #include "admin_tcp_server.h"
 #include "auth.h"
 #include "hosted/admin_link.h"
+#include "hosted/console_commands.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/supervisor.h"
 #include "hosted_fake_provider.h"
@@ -3964,8 +3965,11 @@ bool curated_line(const std::string &line) {
 			return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
 		});
 	}
+	// An index below the maps a rotation holds: the composition's cap.
 	if (t.size() >= 2 && t[0] == "MISSION" && (t[1] == "REMOVE" || t[1] == "SETNEXT"))
-		return t.size() == 3 && digits(t[2], 2);
+		return t.size() == 3 && digits(t[2], 2) &&
+				static_cast<uint64_t>(std::atoi(t[2].c_str())) <=
+				opennova::novaworld_server::hosted::kConsoleIndexMax;
 	if (line.compare(0, 10, "CHAT SEND ") == 0) {
 		return line.size() <= 69 && std::none_of(line.begin(), line.end(), [](char c) {
 			const auto byte = static_cast<unsigned char>(c);

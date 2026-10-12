@@ -77,14 +77,18 @@ crow::json::wvalue link_json(const AdminLinkStatus &status) {
 	return out;
 }
 
-// A release run when the last holder of the returned pointer lets it go.
-std::shared_ptr<void> on_release(std::function<void()> fn) {
-	struct Release {
-		std::function<void()> fn;
-		~Release() {
-			if (fn) fn();
-		}
-	};
+// A release run when the last holder lets it go, once armed. It is built before
+// what it releases is taken (building one allocates), and armed once it is held.
+struct Release {
+	std::function<void()> fn;
+	bool armed = false;
+	~Release() {
+		if (armed && fn)
+			fn();
+	}
+};
+
+std::shared_ptr<Release> make_release(std::function<void()> fn) {
 	auto release = std::make_shared<Release>();
 	release->fn = std::move(fn);
 	return release;
@@ -122,7 +126,25 @@ std::optional<crow::response> ConsoleRoutes::check_server(const HostedServer &se
 	return std::nullopt;
 }
 
+// The release tokens are built first, before the lock: an allocation that threw
+// after the account went busy, the request was counted or the server's edit was
+// taken would leave it so until a restart. An insert that throws takes nothing,
+// and the tokens armed before it give back what was taken (the lock, declared
+// after them, is let go first).
 void ConsoleRoutes::admit(Caller &c, const std::string &account, bool rotation_edit) {
+	const int64_t id = c.server_id;
+	const std::shared_ptr<Release> admission = make_release([this, account] {
+		std::lock_guard<std::mutex> release_lock(admit_mu_);
+		busy_accounts_.erase(account);
+		--admitted_;
+	});
+	std::shared_ptr<Release> edit;
+	if (rotation_edit) {
+		edit = make_release([this, id] {
+			std::lock_guard<std::mutex> release_lock(admit_mu_);
+			rotation_edits_.erase(id);
+		});
+	}
 	std::lock_guard<std::mutex> lock(admit_mu_);
 	if (busy_accounts_.count(account) != 0) {
 		c.refusal = busy(429, "console_busy", "this account's previous console request is still running");
@@ -132,25 +154,19 @@ void ConsoleRoutes::admit(Caller &c, const std::string &account, bool rotation_e
 		c.refusal = busy(503, "console_full", "the service's console is busy; try again shortly");
 		return;
 	}
-	if (rotation_edit && rotation_edits_.count(c.server_id) != 0) {
+	if (edit && rotation_edits_.count(id) != 0) {
 		c.refusal = busy(409, "rotation_busy", "another edit of this server's rotation is running");
 		return;
 	}
 	busy_accounts_.insert(account);
 	++admitted_;
-	c.admission = on_release([this, account] {
-		std::lock_guard<std::mutex> release_lock(admit_mu_);
-		busy_accounts_.erase(account);
-		--admitted_;
-	});
-	if (rotation_edit) {
-		const int64_t id = c.server_id;
+	admission->armed = true;
+	if (edit) {
 		rotation_edits_.insert(id);
-		c.rotation_edit = on_release([this, id] {
-			std::lock_guard<std::mutex> release_lock(admit_mu_);
-			rotation_edits_.erase(id);
-		});
+		edit->armed = true;
 	}
+	c.admission = admission;
+	c.rotation_edit = edit;
 }
 
 void ConsoleRoutes::refund(const Caller &c) {

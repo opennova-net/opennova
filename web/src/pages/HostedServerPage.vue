@@ -66,6 +66,8 @@
             :now="now"
             @stopped="onStopped"
             @refused="onRefused"
+            @console-gone="onConsoleGone"
+            @session-ended="onSessionEnded"
           />
         </template>
 
@@ -118,12 +120,15 @@
 // Polling: every few seconds while the server moves between states on its own
 // (requested to running, and a stop), backing off to a minute while it runs,
 // none once it has ended; a hidden tab skips its polls and refreshes when it
-// is shown again.
+// is shown again. The running server's console (HostedServerConsole) makes
+// its admitted calls through this page's one console queue, so no two of them
+// overlap (the service runs one console request per account at once).
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import HostedServerStatus from '../components/HostedServerStatus.vue';
 import HostedSettingsForm from '../components/HostedSettingsForm.vue';
 import { fetchMyHostedServer, type HostedError } from '../api/hostedServer';
+import { provideConsoleQueue } from '../composables/useConsoleQueue';
 import { useSession } from '../composables/useSession';
 import type { HostedServer, MyHostedServerResponse } from '../types/hostedServer';
 import { isTransitioning } from '../utils/hostedState';
@@ -131,6 +136,7 @@ import { isTransitioning } from '../utils/hostedState';
 const { user, refresh: refreshSession } = useSession();
 const route = useRoute();
 const router = useRouter();
+provideConsoleQueue();
 
 // The polls' periods: while the server changes state on its own, while it
 // runs (doubling from the first to the last), and after a failed poll
@@ -317,6 +323,13 @@ function onRefused(error: HostedError) {
     dropInFlight();
     void load(true);
   }
+}
+
+// The console found the server no longer running (it is stopping, or it
+// crashed and is starting again): read it now rather than at the next poll.
+function onConsoleGone() {
+  dropInFlight();
+  void load(true);
 }
 
 function onVisibility() {
