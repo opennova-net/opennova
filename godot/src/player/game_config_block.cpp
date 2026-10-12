@@ -14,13 +14,18 @@ namespace {
 
 namespace inmatch = opennova::inmatch;
 
-// The mount as the main menu sees it: the root and its expansion name the
-// game, its index and the gametext table give the tables.
+// The mount's name: the root and its expansion name the game.
+std::string mount_id(const Ref<ResourceRoot> &p_root) {
+	return opennova::to_std(p_root->get_root_dir() + "|" + p_root->get_expansion().to_lower());
+}
+
+// The mount as the main menu sees it: its name, its index's weapon table and
+// the gametext table's default texts.
 inmatch::GameConfigBlock::MenuMount menu_mount(const Ref<ResourceRoot> &p_root,
 		const Ref<RtxtStringFile> &p_gametext, const Vector2i &p_desktop) {
 	inmatch::GameConfigBlock::MenuMount mount;
 	if (p_root.is_valid()) {
-		mount.id = opennova::to_std(p_root->get_root_dir() + "|" + p_root->get_expansion().to_lower());
+		mount.id = mount_id(p_root);
 		mount.weapons = inmatch::game_cfg_weapon_roster(p_root->native_index());
 	}
 	mount.texts = inmatch::game_cfg_default_texts(
@@ -46,6 +51,7 @@ void GameConfigBlock::_bind_methods() {
 			&GameConfigBlock::enter_main_menu);
 	ClassDB::bind_method(D_METHOD("reload_main_menu", "root", "gametext", "desktop"),
 			&GameConfigBlock::reload_main_menu);
+	ClassDB::bind_method(D_METHOD("switch_expansion", "root"), &GameConfigBlock::switch_expansion);
 	ClassDB::bind_method(D_METHOD("is_file_read"), &GameConfigBlock::is_file_read);
 	ClassDB::bind_method(D_METHOD("is_version_reset"), &GameConfigBlock::is_version_reset);
 	ClassDB::bind_method(D_METHOD("is_reset_exit"), &GameConfigBlock::is_reset_exit);
@@ -83,6 +89,12 @@ bool GameConfigBlock::reload_main_menu(const Ref<ResourceRoot> &p_root,
 	const bool kept = block_.reload_main_menu(menu_mount(p_root, p_gametext, p_desktop), error);
 	warn_save_error(error);
 	return kept;
+}
+
+void GameConfigBlock::switch_expansion(const Ref<ResourceRoot> &p_root) {
+	if (p_root.is_null()) return;
+	block_.switch_expansion(
+			mount_id(p_root), inmatch::game_cfg_weapon_roster(p_root->native_index()));
 }
 
 int GameConfigBlock::get_word(const String &p_key) const {

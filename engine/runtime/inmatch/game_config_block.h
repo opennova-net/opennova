@@ -26,6 +26,9 @@
 //    @0x55272A, Menu_InitShellResources called @0x55281A]. The weapon table is
 //    still the one the save wrote with: the reload clears it after the read
 //    (@0x55281F..0x55282B).
+// A join's expansion switch reads nothing: it hands the block the new weapon
+// table (switch_expansion), and the main-menu entry after the match is a
+// plain read.
 // Every read keeps player_index and hw3d_deviceno across its defaults
 // [orig: Config_SetDefaults @0x54D033, @0x54D0C4; hw3d_deviceno lives outside
 // the block]. A read whose file sets mpreset ends the process with exit code 0
@@ -107,14 +110,26 @@ public:
 	// read found no file or discarded it for its version, the video test and
 	// its save (D-GAMECFG-3: retail's trigger is the cfg's adapter name or GUID
 	// against the device's, which a missing file never matches); an entry over
-	// a mount other than the last one's is the reload (reload_main_menu); every
-	// entry reads the file. False when a read set mpreset: the process exits
-	// with code 0 there. `error` is any save's.
+	// a mount other than the block's (the last entry's, reload's or join
+	// switch's) is the reload (reload_main_menu); every entry reads the file.
+	// False when a read set mpreset: the process exits with code 0 there.
+	// `error` is any save's.
 	bool enter_main_menu(const MenuMount &mount, std::string &error);
 	// The expansion or mod reload: the save with the weapon table as it
 	// stands, the menu's read, then `mount`'s tables for the reads and saves
 	// after. False as load() is.
 	bool reload_main_menu(const MenuMount &mount, std::string &error);
+	// A join's switch to the host's expansion: the new mount's weapon table
+	// for the reads and saves after, with no read and no save, so the next
+	// main-menu entry over that mount is a plain read. The switch rebuilds the
+	// weapon table and reloads the profile, and it neither reads game.cfg nor
+	// raises the reload flag MainMenu's update tests, which only the front-end
+	// Options ACCEPT sets. The default texts stay: gametext.bin loads once.
+	// [orig: Expansion_SwitchTo @0x5688C0: the profile save @0x56891A,
+	//  WeaponDef_LoadAll @0x5689AF, the profile load @0x5689B4; the reload flag
+	//  dword_252DD90 written only @0x55AD4F, @0x55AD5B and @0x55291D;
+	//  gametext.bin's one store @0x4A6FED]
+	void switch_expansion(std::string id, gamecfg::WeaponRoster weapons);
 
 	// The last read: whether the file opened, whether its version discarded
 	// it for the defaults, and whether it set mpreset.
@@ -123,7 +138,8 @@ public:
 	bool reset_exit() const { return reset_exit_; }
 	// The first entry ran the video test (a fresh profile).
 	bool video_test_ran() const { return video_test_ran_; }
-	// The mount the last main-menu entry read over ("" before the first).
+	// The mount the block's tables are (the last main-menu entry's, reload's
+	// or join switch's; "" before the first).
 	const std::string &menu_mount() const { return menu_mount_; }
 
 private:

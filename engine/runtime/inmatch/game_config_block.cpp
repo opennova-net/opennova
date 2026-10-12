@@ -72,4 +72,10 @@ bool GameConfigBlock::reload_main_menu(const MenuMount &mount, std::string &erro
 	return kept;
 }
 
+void GameConfigBlock::switch_expansion(std::string id, gamecfg::WeaponRoster weapons) {
+	// [orig: Expansion_SwitchTo @0x5689AF rebuilds the weapon table; no read]
+	menu_mount_ = std::move(id);
+	roster_ = std::move(weapons);
+}
+
 } // namespace opennova::inmatch

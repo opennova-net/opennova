@@ -12,6 +12,9 @@ extends RefCounted
 #    mount's read and, on a fresh profile, the video test first; an entry
 #    over another game is the reload;
 #  - the Mods list's switch (reload_main_menu): the save, then the read.
+# A join's expansion switch reads nothing: GameWorld hands the block the new
+# mount's weapon table (GameConfigBlock.switch_expansion), so the entry after
+# the match is a plain read over it.
 # A read whose file sets mpreset ends the process with exit code 0
 # (MainGame.exit_process), writing nothing. The shell's save points write the
 # block (save()); the options, the HUD's colour and declutter words and the

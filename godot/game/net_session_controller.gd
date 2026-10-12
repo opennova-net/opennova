@@ -191,7 +191,9 @@ func _start_lan_join(target: JoinTarget) -> void:
 	# dials and re-reads the local profile from that expansion, so the character
 	# vars the join uploads and the spawn kit come from the host's data set. The
 	# post-auth reconcile on the session record stays the authoritative check; a
-	# failed switch here leaves it to fail the join there.
+	# failed switch here leaves it to fail the join there. The switch hands the
+	# process's cfg block the new mount's weapon table and reads no game.cfg
+	# (GameConfigBlock.switch_expansion).
 	if target.expansion_known and _world != null:
 		var switch_error := _world.mount_join_expansion(target.expansion)
 		if switch_error.is_empty():
@@ -558,6 +560,10 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 # through the SAME joiner entry the LAN browser + --lan-join launch use (the target already
 # carries host_ip/port/mission/player_name).
 func _on_novaworld_join_requested(target: JoinTarget) -> void:
+	# The NovaWorld page's launch saves the player profile before it dials, as
+	# its host leg does (the panel's Host); a join that switches
+	# expansions saves again at the switch (docs/playerinfo/player-sav-re.md).
+	PlayerProfile.save()
 	_joining_rid = _novaworld_panel.joining_rid()
 	_joining_novaworld_server = true
 	_hold_novaworld_client(_novaworld_panel.release_client())

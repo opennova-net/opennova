@@ -1,8 +1,9 @@
 // The process's cfg block (runtime/inmatch/game_config_block.h) and its
 // ServerCommand side (runtime/inmatch/host_config.h): the three reads over the
-// working directory's game.cfg (the start's, the mount's, the reload's), the
-// mpreset exit at a read, the save points' write, and a ServerCommand before
-// and after the match binds, its config change landing in the block.
+// working directory's game.cfg (the start's, the mount's, the reload's), a
+// join's expansion switch that reads nothing, the mpreset exit at a read, the
+// save points' write, and a ServerCommand before and after the match binds,
+// its config change landing in the block.
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/game_config_block.h>
@@ -197,6 +198,38 @@ int main() {
 		TEST_EXPECT(block.reset_exit());
 		TEST_EXPECT(
 				read_text(dir.file("game.cfg")).find("mpreset = \"1\"\r\n") != std::string::npos);
+	}
+
+	// --- A join's expansion switch reads and saves nothing and takes the new
+	//     mount's table, so the entry after the match is a plain read over it:
+	//     a word set in memory since is the file's again, the file untouched,
+	//     and the saves after write the new table's rows.
+	{
+		test_temp::TempDir dir("game_config_block_join_switch");
+		const std::string text = "version = 29\r\nmusic_volume = 33\r\navail_wpn_rifle = 2\r\n";
+		write_text(dir.file("game.cfg"), text);
+		GameConfigBlock block(dir.file("game.cfg"));
+		TEST_EXPECT(block.load());
+		GameConfigBlock::MenuMount base;
+		base.id = "game|";
+		base.weapons = rifle_roster();
+		std::string error;
+		TEST_EXPECT(block.enter_main_menu(base, error));
+		TEST_EXPECT(block.cfg().music_volume == 33 && *gamecfg::weapon_slot(block.cfg(), 2) == 2);
+		block.cfg().music_volume = 77; // an in-match word the next read discards
+		GameConfigBlock::MenuMount host = base;
+		host.id = "game|jox01";
+		host.weapons = {{"None", 0}, {"WPN_KNIFE", 1}, {"WPN_RIFLE", 1}};
+		block.switch_expansion(host.id, host.weapons);
+		TEST_EXPECT(block.menu_mount() == "game|jox01" && block.weapon_roster().size() == 3);
+		TEST_EXPECT(block.cfg().music_volume == 77); // the switch read nothing
+		TEST_EXPECT(read_text(dir.file("game.cfg")) == text); // and saved nothing
+		TEST_EXPECT(block.enter_main_menu(host, error));
+		TEST_EXPECT(block.cfg().music_volume == 33);
+		TEST_EXPECT(read_text(dir.file("game.cfg")) == text); // no save before the read
+		TEST_EXPECT(*gamecfg::weapon_slot(block.cfg(), 2) == 2); // the rifle's row here too
+		TEST_EXPECT(block.save(error));
+		TEST_EXPECT(read_text(dir.file("game.cfg")).find("avail_wpn_KNIFE ") != std::string::npos);
 	}
 
 	// --- The words by their keys, without case, as the reader finds them;

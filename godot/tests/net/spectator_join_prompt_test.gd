@@ -181,6 +181,29 @@ func test_abandoned_novaworld_join_frees_the_held_session() -> void:
 	assert_false(is_instance_valid(client), "an abandoned join frees the held session")
 
 
+# The NovaWorld page's join launch saves the player profile before it dials
+# (here before the join-role question).
+func test_novaworld_join_saves_the_profile_first() -> void:
+	var run_dir := OS.get_cache_dir().path_join("opennova_nw_join_run_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	controller.open_novaworld_panel()
+	var panel := layer.get_node_or_null("NovaWorldPanel") as NovaWorldPanel
+	assert_not_null(panel, "the NovaWorld panel opens")
+	if panel != null:
+		panel.join_in_match_requested.emit(_target(JoinTarget.FLAG_ALLOW_SPECTATORS))
+		assert_true(FileAccess.file_exists(run_dir.path_join("player.sav")),
+				"the join launch saved player.sav in the working directory")
+		var prompt := layer.get_node_or_null("JoinRolePrompt")
+		if prompt != null:
+			(prompt.find_child("CancelJoin", true, false) as Button).pressed.emit()
+		await wait_frames(2)
+	TestFs.remove_dir_recursive(run_dir)
+
+
 # The post-mission route's NovaWorld half: only a match entered from the
 # NovaWorld menu returns there with its session (the panel's adopt_client leg,
 # novaworld_panel_test); a stray session after any other match is left.

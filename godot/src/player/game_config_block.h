@@ -49,6 +49,10 @@ public:
 			const Vector2i &p_desktop);
 	bool reload_main_menu(const Ref<ResourceRoot> &p_root, const Ref<RtxtStringFile> &p_gametext,
 			const Vector2i &p_desktop);
+	// A join's switch of `p_root` to the host's expansion: its weapon.def table
+	// for the reads and saves after, reading and saving nothing (the engine's
+	// GameConfigBlock::switch_expansion).
+	void switch_expansion(const Ref<ResourceRoot> &p_root);
 
 	bool is_file_read() const { return block_.file_read(); }
 	bool is_version_reset() const { return block_.version_reset(); }

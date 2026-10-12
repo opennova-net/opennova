@@ -259,8 +259,9 @@ void SessionDrive::step_preload() {
 // connects [orig: UI_JoinSelectedSession @ 0x5699d0 (expansion copy
 // @ 0x569afa, switch @ 0x569b02, connect @ 0x569ded) -> Expansion_SwitchTo
 // @ 0x5688c0 -> PFF_CloseAllOpenArchives @ 0x4a4380 / PFF_OpenAllArchives
-// @ 0x4a4310]. There is no second mount object, and the switch is sticky: the
-// shell keeps running on the host's expansion after the session. The
+// @ 0x4a4310]. There is no second mount object. Retail takes back the
+// expansion the switch left at the return to the main menu; the shell keeps
+// running on the host's expansion after the session (D-NET-622). The
 // keep/remount/fail DECISION is native (inmatch::decide_join_expansion); this
 // executes it against the live mount.
 bool SessionDrive::reconcile_join_expansion() {
@@ -354,6 +355,13 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 		resource_root->mount_runtime(dir, previous, LaunchFlags::loose_override_enabled(), game_code);
 		return vformat("join: could not mount host expansion '%s' from %s: %s",
 				target_expansion, dir, mount_error);
+	}
+	// The process's cfg block takes the mount's weapon table and reads
+	// nothing, so the main-menu entry after the match is a plain read
+	// (engine: inmatch::GameConfigBlock::switch_expansion).
+	Ref<GameConfigBlock> block = world_->get_game_config();
+	if (block.is_valid()) {
+		block->switch_expansion(resource_root);
 	}
 	// mount_runtime succeeds even when the expansion never layered
 	// (opennova::Vfs::mount_game falls back to base game silently), so read

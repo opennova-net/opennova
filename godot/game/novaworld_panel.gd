@@ -861,6 +861,10 @@ func _on_host_pressed() -> void:
 	_pending_host_config = config
 	if _host_start_button != null:
 		_host_start_button.disabled = true
+	# The NovaWorld page's launch saves the player profile before it hosts or
+	# dials, whatever the hosting answers (docs/playerinfo/player-sav-re.md,
+	# the save points; engine: runtime/profile/player_profiles.h).
+	PlayerProfile.save()
 	if _client == null:
 		_on_host_failed("NWEC01")
 		return

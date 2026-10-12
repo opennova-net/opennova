@@ -271,7 +271,11 @@ int GameWorld::load_mission_as_joiner(const Ref<JoinTarget> &p_target) {
 }
 
 String GameWorld::mount_join_expansion(const String &p_expansion) {
-	return drive_.switch_join_expansion(resource_root_, p_expansion);
+	// The shell's live mount (the injected root every load resolves through),
+	// which exists before the process's first mission; the last load's root
+	// otherwise.
+	return drive_.switch_join_expansion(
+			injected_root_.is_valid() ? injected_root_ : resource_root_, p_expansion);
 }
 
 void GameWorld::adopt_novaworld_client(Node *p_client) {
