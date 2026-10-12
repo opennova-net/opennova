@@ -33,7 +33,8 @@ RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 # ---- runtime stage --------------------------------------------------------
 # Same distro/glibc as the build stage so the binary's GLIBC/GLIBCXX
 # requirements resolve. The binary needs nothing past the base image's C and
-# C++ runtimes: no TLS, no HTTP client (its NovaWorld login is plain HTTP).
+# C++ runtimes: no TLS and no HTTP client library (curl); its NovaWorld login
+# is plain HTTP over its own sockets (apps/common/net_http).
 FROM ubuntu:24.04 AS runtime
 
 # A fixed non-root user, so a host directory mounted at /srv/serve can be

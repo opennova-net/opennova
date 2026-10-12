@@ -239,15 +239,20 @@ These logs go to the working directory, in retail's names and formats:
 
 | Code | Meaning |
 |---|---|
-| 0 | `--help`, stopped by Ctrl+C, `game.cfg` sets `mpreset` (at its read, or at the session create when the word is set by then), the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
-| 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), or the mission did not boot. |
+| 0 | `--help`, stopped by Ctrl+C or SIGTERM (one that arrives during the start stops the server once the mission has booted, except on a listed server before its listing hosted: 1), `game.cfg` sets `mpreset` (at its read, or at the session create when the word is set by then), the map rotation ran out (the end of the list with `Replay 0`), or the remote admin's `GOTO MENUSTATE` quit the session. |
+| 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), the mission did not boot, or, on a listed server, a Ctrl+C or SIGTERM arrived before the NovaWorld listing hosted. |
 | 2 | A usage error, or the `--credentials` file did not open. |
-| 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting. |
+| 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting (its `ServerStopHosting`, an admin's or owner's stop from the site among them). |
+
+So a code alone does not tell a stop someone asked for from a fault: a stop through the
+service exits with 3, and a signal before a listed server's listing hosted with 1.
+Whatever runs the server and stops it on purpose should treat its own stop as the stop,
+and restart the server only on an exit it did not ask for (ADR 0053 d6).
 
 ## Container image
 
 `apps/serve/Dockerfile` builds `opennova-serve` into a Linux image (ubuntu 24.04), which
-`.github/workflows/novaworld-images.yml` publishes as `ghcr.io/<owner>/opennova-serve`
+`.github/workflows/serve-image.yml` publishes as `ghcr.io/<owner>/opennova-serve`
 (tagged `sha-<short>`, the branch, and `latest` on master). It is the server the hosted
 game servers run (ADR 0053); nothing deploys it yet.
 
@@ -281,8 +286,14 @@ docker run --rm --network host \
   port the hosted servers set as `remote_admin_port` (the stock 0 opens none). The
   declarations are documentation only. Run a listed server with `--network host`:
   NovaWorld takes the server's address and port from its session's own datagrams, so
-  they must be the machine's own, the ones joiners reach. For a LAN test on a bridge
-  network, publish the window instead (`-p 32768-32787:32768-32787/udp`).
+  they must be the machine's own, the ones joiners reach. On a bridge network, publish
+  the window (`-p 32768-32787:32768-32787/udp`) and join by the machine's address
+  directly: whether Docker's port forwarding carries the LAN browser's broadcast
+  datagrams is unverified, so the server may not show in the LAN list.
 - **Stopping.** `docker stop` sends SIGTERM, which stops the server as Ctrl+C does
   (Usage above), and it exits with the table's codes. The server installs its own
-  handlers, so it stops cleanly as the container's PID 1; `--init` works too.
+  handlers, so it stops cleanly as the container's PID 1; `--init` works too. A stop
+  that arrives during the mission's boot takes effect only when the boot ends, which on
+  a large map can outlast Docker's default 10 s grace, after which Docker kills the
+  server (exit 137) without its goodbyes. Give it longer: `docker run --stop-timeout 60`,
+  or `stop_grace_period: 60s` in a compose file.
