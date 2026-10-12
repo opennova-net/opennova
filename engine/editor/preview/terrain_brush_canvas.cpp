@@ -299,6 +299,9 @@ bool TerrainBrushHalf::input(CanvasGesture &gesture, const CanvasSubject &subjec
 	if (stroking_) {
 		if (gesture.pressed() && in.down) {
 			gesture.move(in.screen);
+			// A Fill is the press's alone (S25): the drag lays nothing more.
+			TerrainPlane plane = TerrainPlane::Heights;
+			if (brush_.fill && terrain_tool_plane(brush_.tool, plane) && plane != TerrainPlane::Heights) return true;
 			TerrainPoint at;
 			double height = 0.0;
 			std::vector<TerrainPoint> dabs;

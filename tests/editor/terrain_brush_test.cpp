@@ -80,6 +80,7 @@ int test_wire() {
 	TerrainBrush brush;
 	brush.tool = TerrainTool::Colour;
 	brush.colour = 0x12AB9F;
+	brush.fill = true;
 	brush.has_cursor = true;
 	brush.cursor[0] = 3.5;
 	brush.cursor[1] = -2.0;
@@ -89,7 +90,7 @@ int test_wire() {
 	TEST_EXPECT(read_terrain_brush(terrain_brush_to_json(brush), back, named, false, error) && back == brush);
 	TEST_EXPECT(named == (kBrushTool | kBrushRadius | kBrushStrength | kBrushFalloff | kBrushSpacing | kBrushHeight |
 	                      kBrushSurface | kBrushFoliage | kBrushColour | kBrushLayer | kBrushCell | kBrushRotation |
-	                      kBrushFlipH | kBrushFlipV | kBrushCursor));
+	                      kBrushFlipH | kBrushFlipV | kBrushCursor | kBrushFill));
 	JsonValue json;
 	TEST_EXPECT(opennova::io::json_parse(R"({"rotation":4})", json, error));
 	TEST_EXPECT(!read_terrain_brush(json, back, named, false, error) && back == brush);

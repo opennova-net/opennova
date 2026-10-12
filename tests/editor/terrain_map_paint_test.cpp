@@ -11,11 +11,13 @@
 #include <string>
 #include <vector>
 
+#include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_document.h>
 #include <editor/preview/terrain_map_target.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/terrain_stroke.h>
 #include <editor/session/view/session_view.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/png/png_encode.h>
@@ -30,6 +32,7 @@
 
 using namespace opennova;
 using namespace opennova::editor;
+using io::JsonValue;
 
 namespace {
 
@@ -240,6 +243,30 @@ int test_imported_source() {
 	for (int y = 0; y < kMap; ++y)
 		for (int x = 0; x < kMap; ++x) fives += painted->plane(0).u8(x, y) == 5 ? 1 : 0;
 	TEST_EXPECT(fives == 1);
+	// Fill (S25): the click's texel and every texel joined to it that holds its class take the brush's; the class 5
+	// texel, holding another, stays (the fill goes round it). A fill on that texel takes it alone. Undo takes each back.
+	ask.brush.surface = 7;
+	ask.brush.fill = true;
+	ask.brush_named = kBrushTool | kBrushSurface | kBrushRadius | kBrushFill;
+	ask.points = {{100.0, 100.0}, {120.0, 120.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done() && contains(v.activity.status, "Filled the surface map in isle_surface.png: 262143 texels"));
+	size_t sevens = 0;
+	for (int y = 0; y < kMap; ++y)
+		for (int x = 0; x < kMap; ++x) sevens += painted->plane(0).u8(x, y) == 7 ? 1 : 0;
+	TEST_EXPECT(sevens == size_t(kMap) * kMap - 1);
+	ask.brush.surface = 9;
+	ask.points = {{8.0, 8.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	const std::vector<TerrainStrokeRegion> &filled = session.outcome().stroke.changed;
+	TEST_EXPECT(session.outcome().done() && filled.size() == 1 && filled[0].x1 - filled[0].x0 == 1 && filled[0].y1 - filled[0].y0 == 1);
+	session.handle(request::undo(m));
+	session.handle(request::undo(m));
+	size_t twos = 0;
+	for (int y = 0; y < kMap; ++y)
+		for (int x = 0; x < kMap; ++x) twos += painted->plane(0).u8(x, y) == 2 ? 1 : 0;
+	TEST_EXPECT(twos == size_t(kMap) * kMap - 1);
+	ask.brush.fill = false;
 	// Written again in its form: a palette PNG whose indices the import reads as the classes.
 	const SerializeResult saved = painted->serialize();
 	TEST_EXPECT(saved.text.size() > 26 && uint8_t(saved.text[25]) == 3);
@@ -269,15 +296,126 @@ int test_imported_source() {
 			layered += texel[0] == 0 && texel[1] == 255 && texel[2] == 0 ? 1 : 0;
 		}
 	TEST_EXPECT(layered == 1);
+	// Add (S25 B4): the set names no foliagemap, so the terrain has none: Add makes isle_foliagemap.png beside the set
+	// (grey, every level 0), writes the key, and the import made again makes isle_f.pcx and names it in the .trn; a
+	// stroke then paints the source in its place.
+	TEST_EXPECT(v.project.scan->find("isle_f.pcx") == nullptr);
+	TerrainStrokeAsk add;
+	add.plane = TerrainPlane::Foliage;
+	add.add = true;
+	outcome = editor_test::handle_to_end(session, request::terrain_stroke(m, add));
+	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(!outcome.refused && v.project.scan->find("isle_foliagemap.png") != nullptr &&
+	            v.project.scan->find("isle_f.pcx") != nullptr);
+	ask.plane = TerrainPlane::Foliage;
+	ask.brush.tool = TerrainTool::Foliage;
+	ask.brush.foliage = 3;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushFoliage | kBrushRadius;
+	ask.points = {{8.0, 8.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && session.outcome().stroke.changed.size() == 1 &&
+	            contains(session.outcome().stroke.changed.front().path, "isle_foliagemap.png"));
 	std::printf("imported: the surface map's palette source painted with a class, written again as a palette PNG; the "
-	            "blendmap's source painted with a layer\n");
+	            "blendmap's source painted with a layer; a foliage map added to the set\n");
+	return 0;
+}
+
+// Add (S25 B4) on an authored terrain naming no surface map and no foliage map: each made beside the .trn in the game's
+// form (the char map 8-bit, every texel class 1; the foliage map every texel 0) and named by its field, an edit from
+// the mission's view that its Undo takes back; a stroke then paints it. A second Add, the colour map's and an empty
+// stroke refused.
+int test_add_maps() {
+	editor_test::TempProjectDir dir("opennova_editor_terrain_map_add");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Add"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const std::vector<uint8_t> trn_bytes = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+	std::string trn_text, line;
+	std::istringstream lines(std::string(trn_bytes.begin(), trn_bytes.end()));
+	while (std::getline(lines, line))
+		if (line.rfind("polytrn_charmap", 0) != 0 && line.rfind("polytrn_foliagemap", 0) != 0) trn_text += line + "\n";
+	TEST_EXPECT(editor_test::write_text(root + "/terrain/Tmap.trn", trn_text));
+	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt"))));
+	std::vector<uint8_t> grey(size_t(1024) * 1024 * 4, 128), colour_map;
+	for (size_t i = 3; i < grey.size(); i += 4) grey[i] = 255; // a 24-bit TGA holds no alpha
+	std::string why;
+	TEST_EXPECT(tga::tga_write_rgb24(grey.data(), 1024, 1024, colour_map, why));
+	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_c.tga", colour_map));
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
+	const std::string m = v.project.scan->find("m.bms")->relative_path;
+	session.handle(request::open_document(m));
+
+	// A stroke on a map the terrain names none of is refused, saying Add makes one.
+	TerrainStrokeAsk ask;
+	ask.plane = TerrainPlane::Surface;
+	ask.brush.tool = TerrainTool::Surface;
+	ask.brush.surface = 5;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushSurface | kBrushRadius;
+	ask.points = {{-256.0, 256.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(!session.outcome().done() && contains(session.outcome().findings.back().message, "names no surface map"));
+	TerrainStrokeAsk add;
+	add.plane = TerrainPlane::Surface;
+	add.add = true;
+	session.handle(request::terrain_stroke(m, add));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && v.documents.active == m);
+	const std::vector<uint8_t> made = test_io::read_file(root + "/terrain/Tmap_m.pcx");
+	IndexedImage8 image;
+	TEST_EXPECT(decode_pcx_indexed(made.data(), made.size(), image, why) && image.width == 512 && image.height == 512 &&
+	            std::all_of(image.indices.begin(), image.indices.end(), [](uint8_t i) { return i == 1; }) &&
+	            image.palette[2][1] == 210);
+	const auto *terrain = dynamic_cast<const TerrainDocument *>(session.document_base_for("terrain/Tmap.trn"));
+	TEST_EXPECT(terrain && terrain->dirty() && terrain->config() && terrain->config()->charmap == "Tmap_m.pcx");
+	// A second Add is refused: the terrain has one.
+	session.handle(request::terrain_stroke(m, add));
+	TEST_EXPECT(!session.outcome().done() && contains(session.outcome().findings.back().message, "already"));
+	// The stroke paints it now: the 512-texel map's texel (128, 128) under the atlas texel (256, 256).
+	session.handle(request::terrain_stroke(m, ask));
+	const auto *chars = dynamic_cast<const TextureDocument *>(session.document_base_for("terrain/Tmap_m.pcx"));
+	TEST_EXPECT(session.outcome().done() && chars && chars->plane(0).u8(128, 128) == 5);
+	// The foliage map: every texel 0, 256 square.
+	add.plane = TerrainPlane::Foliage;
+	session.handle(request::terrain_stroke(m, add));
+	TEST_EXPECT(session.outcome().done() && terrain->config()->foliagemap == "Tmap_f.pcx");
+	const std::vector<uint8_t> codes = test_io::read_file(root + "/terrain/Tmap_f.pcx");
+	TEST_EXPECT(decode_pcx_indexed(codes.data(), codes.size(), image, why) && image.width == 256 &&
+	            std::all_of(image.indices.begin(), image.indices.end(), [](uint8_t i) { return i == 0; }));
+	// The colour map is every terrain's own; an add names no points.
+	add.plane = TerrainPlane::Colour;
+	session.handle(request::terrain_stroke(m, add));
+	TEST_EXPECT(!session.outcome().done() && contains(session.outcome().findings.back().message, "Add makes a surface"));
+	TerrainStrokeAsk read;
+	std::string error;
+	io::JsonValue wire = terrain_stroke_to_json(add);
+	TEST_EXPECT(terrain_stroke_from_json(wire, read, error) && read == add);
+	JsonValue points = JsonValue::make_array();
+	JsonValue point = JsonValue::make_array();
+	point.push(io::json_number(0.0));
+	point.push(io::json_number(0.0));
+	points.push(point);
+	wire.set("points", points);
+	TEST_EXPECT(!terrain_stroke_from_json(wire, read, error) && contains(error, "add names no points"));
+	// The mission's Undo takes the foliage map's name back (its file stays, Undo file's to take).
+	session.handle(request::undo(m));
+	TEST_EXPECT(terrain->config()->foliagemap.empty() && terrain->config()->charmap == "Tmap_m.pcx");
+	std::printf("add: a surface map and a foliage map made beside an authored .trn and named in it; refusals\n");
 	return 0;
 }
 
 } // namespace
 
 int main() {
-	const int failures = test_routing() + test_strokes() + test_imported_source();
+	const int failures = test_routing() + test_strokes() + test_imported_source() + test_add_maps();
 	if (failures == 0) std::printf("editor_terrain_map_paint: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

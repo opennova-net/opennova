@@ -21,15 +21,16 @@ JsonValue terrain_stroke_to_json(const TerrainStrokeAsk &ask) {
 	out.set("gesture", io::json_number(double(ask.gesture)));
 	out.set("end", JsonValue::make_bool(ask.end));
 	out.set("cancel", JsonValue::make_bool(ask.cancel));
+	if (ask.add) out.set("add", JsonValue::make_bool(true));
 	return out;
 }
 
 bool terrain_stroke_from_json(const JsonValue &json, TerrainStrokeAsk &ask, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"stroke\" is an object {plane, brush?, points, gesture?, end?, cancel?}.";
+		error = "\"stroke\" is an object {plane, brush?, points, gesture?, end?, cancel?, add?}.";
 		return false;
 	}
-	if (!io::json_members_known(json, {"plane", "brush", "points", "gesture", "end", "cancel"}, "stroke", error))
+	if (!io::json_members_known(json, {"plane", "brush", "points", "gesture", "end", "cancel", "add"}, "stroke", error))
 		return false;
 	TerrainStrokeAsk read;
 	const JsonValue *plane = json.get("plane");
@@ -47,13 +48,13 @@ bool terrain_stroke_from_json(const JsonValue &json, TerrainStrokeAsk &ask, std:
 			error = "stroke.gesture is a gesture's token (0 begins one).";
 			return false;
 		}
-	for (const char *flag : {"end", "cancel"})
+	for (const char *flag : {"end", "cancel", "add"})
 		if (const JsonValue *value = json.get(flag)) {
 			if (!value->is_bool()) {
 				error = std::string("stroke.") + flag + " is true or false.";
 				return false;
 			}
-			(std::string(flag) == "end" ? read.end : read.cancel) = value->boolean;
+			(std::string(flag) == "end" ? read.end : std::string(flag) == "add" ? read.add : read.cancel) = value->boolean;
 		}
 	const JsonValue *points = json.get("points");
 	if (points && !points->is_array()) {
@@ -73,8 +74,12 @@ bool terrain_stroke_from_json(const JsonValue &json, TerrainStrokeAsk &ask, std:
 		error = "stroke.points holds at most " + std::to_string(kTerrainStrokePoints) + " points (send the rest as the gesture's next sample).";
 		return false;
 	}
-	if (read.points.empty() && !read.cancel) {
-		error = "stroke.points names at least one point (a cancel alone names none).";
+	if (read.add && !read.points.empty()) {
+		error = "stroke.add names no points (the map made, a stroke paints it next).";
+		return false;
+	}
+	if (read.points.empty() && !read.cancel && !read.add) {
+		error = "stroke.points names at least one point (a cancel or an add alone names none).";
 		return false;
 	}
 	ask = std::move(read);

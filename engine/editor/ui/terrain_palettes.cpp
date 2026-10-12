@@ -187,6 +187,21 @@ void draw_paint_part(TerrainPaneContext &context) {
 	TerrainPlane plane = TerrainPlane::Surface;
 	if (terrain_tool_plane(brush.tool, plane)) {
 		const TerrainFamilyFile &file = context.family.plane(plane);
+		if (file.addable) {
+			// Add (S25 B4): the map made and named, the brush painting it next.
+			ui_kit::WrapRow row;
+			const std::string label = std::string("Add a ") + (terrain_plane_words(plane) + 4);
+			if (ui_kit::tool(row, label.c_str(), true,
+			                 "Make " + std::string(terrain_plane_words(plane)) +
+			                         " the terrain has none of: beside an authored .trn in the game's form, named in it "
+			                         "(the view's Undo takes the name back); beside an imported terrain's set as a PNG, "
+			                         "named by its key and imported again.")) {
+				TerrainStrokeAsk ask;
+				ask.plane = plane;
+				ask.add = true;
+				workspace.request(request::terrain_stroke(context.document.path(), ask));
+			}
+		}
 		if (file.missing && !file.name.empty()) {
 			ui_kit::WrapRow row;
 			if (ui_kit::tool(row, ("Copy " + file.name + " into the project...").c_str(), true,
@@ -259,6 +274,12 @@ void draw_paint_part(TerrainPaneContext &context) {
 		break;
 	}
 	default: ImGui::TextDisabled("Pick a Paint tool: Surface, Foliage, Colour or Detail."); break;
+	}
+	if (terrain_tool_plane(brush.tool, plane) && plane != TerrainPlane::Heights) {
+		bool fill = brush.fill;
+		if (ImGui::Checkbox("Fill", &fill)) set("fill", io::JsonValue::make_bool(fill));
+		ui_kit::tooltip("A click fills the texels joined to the one under it that hold its value, wherever the terrain "
+		                "draws them (a drag fills where it was pressed).");
 	}
 }
 

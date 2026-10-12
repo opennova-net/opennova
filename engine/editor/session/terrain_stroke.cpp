@@ -4,6 +4,7 @@
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/session_core.h>
+#include <editor/session/terrain_add_map.h>
 #include <editor/session/terrain_family.h>
 #include <editor/session/terrain_stroke_planes.h>
 
@@ -39,6 +40,10 @@ void serve_terrain_stroke(SessionCore &core, const EditorRequest &request) {
 	}
 	TerrainFamily family;
 	if (!resolve_terrain_family(core.view(), *view, family)) return refuse(core, family.error, view->path());
+	if (ask.add) {
+		add_terrain_map(core, *view, family, ask.plane);
+		return;
+	}
 	const TerrainFamilyFile &file = family.plane(ask.plane);
 	if (!file.refusal.empty()) return refuse(core, file.refusal, view->path());
 	if (file.path.empty())

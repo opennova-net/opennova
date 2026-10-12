@@ -147,8 +147,45 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 	// The dabs in order over the texels as they stand, each dab seeing the ones before it.
 	std::unordered_map<uint32_t, std::vector<uint8_t>> painted;
 	std::vector<uint32_t> order;
+	bool filled = false;
+	if (context.brush.fill && !context.points.empty()) {
+		// Fill (S25 B4): the texels 4-connected to the one under the first point that hold its value exactly, each laid
+		// at full weight, over the map's own texels (a texel the terrain draws at several places changes at each).
+		int sx = 0, sy = 0;
+		if (!terrain_map_texel(target, context.points.front().first, context.points.front().second, sx, sy)) {
+			error = "No texel of " + file + " lies under that point: the terrain's grid maps no sector there.";
+			return false;
+		}
+		const int w = texels.width(), h = texels.height();
+		const uint8_t *seed = texels.texel(sx, sy);
+		const std::vector<uint8_t> value(seed, seed + bytes);
+		std::vector<uint8_t> seen(size_t(w) * size_t(h), 0);
+		std::vector<uint32_t> stack{uint32_t(sy) * uint32_t(w) + uint32_t(sx)};
+		seen[stack.back()] = 1;
+		while (!stack.empty()) {
+			const uint32_t index = stack.back();
+			stack.pop_back();
+			std::vector<uint8_t> laid = value;
+			lay(context.plane, context.brush, 1.0f, laid.data(), bytes);
+			painted.emplace(index, std::move(laid));
+			order.push_back(index);
+			const int x = int(index % uint32_t(w)), y = int(index / uint32_t(w));
+			const int next[4][2] = {{x - 1, y}, {x + 1, y}, {x, y - 1}, {x, y + 1}};
+			for (const auto &n : next) {
+				if (n[0] < 0 || n[1] < 0 || n[0] >= w || n[1] >= h) continue;
+				const uint32_t at = uint32_t(n[1]) * uint32_t(w) + uint32_t(n[0]);
+				if (seen[at] || std::memcmp(texels.texel(n[0], n[1]), value.data(), size_t(bytes)) != 0) continue;
+				seen[at] = 1;
+				stack.push_back(at);
+			}
+		}
+		std::sort(order.begin(), order.end());
+		filled = true;
+	}
 	for (const auto &point : context.points)
-		for (const TerrainMapTexel &texel : terrain_map_dab(target, point.first, point.second, context.brush, categorical)) {
+		for (const TerrainMapTexel &texel : filled ? std::vector<TerrainMapTexel>()
+		                                           : terrain_map_dab(target, point.first, point.second, context.brush,
+		                                                             categorical)) {
 			auto found = painted.find(texel.index);
 			if (found == painted.end()) {
 				const int x = int(texel.index % uint32_t(texels.width())), y = int(texel.index / uint32_t(texels.width()));
@@ -174,7 +211,17 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 		x1 = std::max(x1, x + 1);
 		y1 = std::max(y1, y + 1);
 	}
-	plan.words = "Painted " + std::string(terrain_plane_words(context.plane)) + " in " + file;
+	plan.words = std::string(filled ? "Filled " : "Painted ") + terrain_plane_words(context.plane) + " in " + file;
+	if (filled) {
+		// A map whose quadrants the grid draws at more than one place (or wraps) changes at each of them.
+		int places[5] = {0, 0, 0, 0, 0};
+		for (const int slot : target.grid)
+			if (slot >= 1 && slot <= 4) ++places[slot];
+		const bool repeats = target.wrap_x || target.wrap_z ||
+		                     std::any_of(std::begin(places) + 1, std::end(places), [](int n) { return n > 1; });
+		plan.words += ": " + std::to_string(order.size()) + " texel" + (order.size() == 1 ? "" : "s") +
+		              (repeats ? ", at every place the terrain repeats them" : "");
+	}
 	if (edit->at.empty()) return true; // nothing the dabs reach changes
 	plan.edits.push_back(RasterDocument::edit(edit, context.gesture));
 	TerrainStrokeRegion region;

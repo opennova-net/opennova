@@ -26,6 +26,9 @@ struct TerrainFamilyFile {
 	std::string words;
 	// The terrain names no file for it, or one the project lacks (the pane's Add action; a mission's .til not made yet).
 	bool missing = false;
+	// Add makes it (S25 B4, session/terrain_add_map.h): a surface, foliage or blend map an authored .trn of the project
+	// names none of, or an imported terrain's set names no image for.
+	bool addable = false;
 	bool resolved() const { return !path.empty() && refusal.empty(); }
 };
 

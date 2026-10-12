@@ -340,6 +340,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_paint.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_tiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_add_map.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_tools_parts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp

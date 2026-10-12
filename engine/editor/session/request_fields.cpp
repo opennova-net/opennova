@@ -308,7 +308,10 @@ constexpr RequestField kFields[] = {
 			"strokes with of its own (tool, radius, strength, falloff, spacing, height, surface, foliage, colour, layer; "
 			"the rest the workspace's terrain_brush); points: [[x, y], ...], 1 to 256, mission metres east and north "
 			"in the order the pointer went; gesture: 0 begins one (the outcome names its token), a token the stroke "
-			"goes on with; end: it ends with this sample (true when left out); cancel: it ends dropping what it did}." },
+			"goes on with; end: it ends with this sample (true when left out); cancel: it ends dropping what it did; "
+			"add: no points, the plane's map made where the terrain has none its brush paints (surface, foliage or "
+			"blend: beside an authored .trn in the game's form and named by its field, an edit of the view; beside an "
+			"imported terrain's set as a PNG named by its key, the set imported again)}." },
 	{ F::Gesture, "gesture", J::Integer,
 			"end_edit's gesture (S25): every open gesture carrying this token ends, in whatever document its batches "
 			"changed (a terrain stroke's file, the missions that followed it); 0 when left out (the document at path's)." },

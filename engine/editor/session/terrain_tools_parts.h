@@ -37,6 +37,9 @@ inline constexpr WorkspaceMember kTerrainBrushMembers[] = {
 	{"cursor", WorkspaceJson::Numbers,
 			"Where the brush's ring shows with no pointer over a view, [x, y] in mission metres (an MCP client's "
 			"screenshot); null for none."},
+	{"fill", WorkspaceJson::Boolean,
+			"The Paint tools fill: a click fills the texels joined to the one under it (left, right, up, down) that hold "
+			"its value, wherever the terrain draws them."},
 };
 // A set_workspace's terrain_brush: the members it names set in the session's brush, each checked first (nothing set
 // when one is refused, `error` why). True when the brush moved.

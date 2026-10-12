@@ -1,5 +1,6 @@
 #include <editor/session/terrain_family.h>
 
+#include <cstring>
 #include <iterator>
 #include <mutex>
 
@@ -61,9 +62,11 @@ TerrainFamilyFile family_file(const SessionView &view, const std::string &name, 
                               const char *key, const char *words) {
 	TerrainFamilyFile file;
 	file.name = name;
+	// The plane's words without their article ("the surface map": "surface map").
+	const char *what = std::strncmp(words, "the ", 4) == 0 ? words + 4 : words;
 	if (name.empty()) {
 		file.missing = true;
-		file.refusal = std::string("The terrain names no ") + words + ": add one first.";
+		file.refusal = std::string("The terrain names no ") + what + ": add one first.";
 		return file;
 	}
 	const AssetEntry *entry = view.project.scan ? view.project.scan->find(name) : nullptr;
@@ -87,8 +90,8 @@ TerrainFamilyFile family_file(const SessionView &view, const std::string &name, 
 			file.words = "painted into " + basename_of(image.file) + ", made into the terrain as you save";
 			return file;
 		}
-	file.refusal = name + " is made by the import of " + entry->imported_from + ", whose set names no " + words +
-	               " image to brush in its place: name one in the set first.";
+	file.refusal = name + " is made by the import of " + entry->imported_from + ", whose set names no " + what +
+	               " image to brush in its place: add one first.";
 	return file;
 }
 
@@ -181,6 +184,18 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 	for (size_t i = 0; i < kTerrainPlaneCount; ++i) {
 		const TerrainPlane plane = static_cast<TerrainPlane>(i);
 		out.planes[i] = family_file(view, plane_name(trn, plane), import, set_key(plane), terrain_plane_words(plane));
+	}
+	// What Add makes (S25 B4): an authored .trn of the project's map it names none of; an imported terrain's map its set
+	// names no image for (the import made none, or made one from no image). A .trn the game's own takes none.
+	for (const TerrainPlane plane : {TerrainPlane::Surface, TerrainPlane::Foliage, TerrainPlane::Blend}) {
+		TerrainFamilyFile &file = out.plane(plane);
+		if (!file.path.empty()) continue;
+		file.addable = import.imported ? file.name.empty() || !file.import_output.empty()
+		                               : file.name.empty() && !out.terrain.empty();
+		if (file.name.empty() && out.terrain.empty())
+			file.refusal = std::string("The terrain names no ") + (terrain_plane_words(plane) + 4) + ", and " +
+			               out.terrain_name + ".trn is the game's own: copy it into the project first (Import, from the "
+			               "game install), then add one.";
 	}
 	// A terrain under no mission: its own tiles (an import's output refused: its import makes them).
 	if (dynamic_cast<const TerrainDocument *>(&document)) {

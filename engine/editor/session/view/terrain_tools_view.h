@@ -76,21 +76,24 @@ struct TerrainBrush {
 	int rotation = 0;
 	bool flip_h = false;
 	bool flip_v = false;
+	// The Paint tools' Fill (S25 B4): a click fills the texels 4-connected to the one under it that hold its value.
+	bool fill = false;
 	bool has_cursor = false;
 	double cursor[2] = {0.0, 0.0};
 	bool operator==(const TerrainBrush &o) const {
 		return tool == o.tool && radius == o.radius && strength == o.strength && falloff == o.falloff &&
 		       spacing == o.spacing && height == o.height && surface == o.surface && foliage == o.foliage &&
 		       colour == o.colour && layer == o.layer && cell == o.cell && rotation == o.rotation &&
-		       flip_h == o.flip_h && flip_v == o.flip_v && has_cursor == o.has_cursor && cursor[0] == o.cursor[0] &&
+		       flip_h == o.flip_h && flip_v == o.flip_v && fill == o.fill && has_cursor == o.has_cursor &&
+		       cursor[0] == o.cursor[0] &&
 		       cursor[1] == o.cursor[1];
 	}
 	bool operator!=(const TerrainBrush &o) const { return !(*this == o); }
 };
 
 // The brush's members by their tokens (tool, radius, strength, falloff, spacing, height, surface, foliage, colour,
-// layer, cell, rotation, flip_h, flip_v, cursor), one bit each: what a stroke's brush names of its own (the rest
-// the workspace's).
+// layer, cell, rotation, flip_h, flip_v, cursor, fill), one bit each: what a stroke's brush names of its own (the
+// rest the workspace's).
 enum TerrainBrushMember : uint32_t {
 	kBrushTool = 1u << 0,
 	kBrushRadius = 1u << 1,
@@ -107,9 +110,10 @@ enum TerrainBrushMember : uint32_t {
 	kBrushFlipH = 1u << 12,
 	kBrushFlipV = 1u << 13,
 	kBrushCursor = 1u << 14,
+	kBrushFill = 1u << 15,
 };
 // The brush on the wire: {tool, radius, strength, falloff, spacing, height, surface, foliage, colour "#RRGGBB",
-// layer, cell, rotation, flip_h, flip_v, cursor [x, y] | null}; `only` (bits) writes those members alone.
+// layer, cell, rotation, flip_h, flip_v, cursor [x, y] | null, fill}; `only` (bits) writes those members alone.
 io::JsonValue terrain_brush_to_json(const TerrainBrush &brush, uint32_t only = ~0u);
 // The members `json` names set in `brush` (each checked first: nothing set when one is refused), `named` taking
 // their bits; false with why for a member it has not, a value of another type or past its bounds. `strokes`: a
@@ -130,12 +134,15 @@ struct TerrainStrokeAsk {
 	uint64_t gesture = 0;
 	bool end = true;
 	bool cancel = false;
+	// Add (S25 B4, session/terrain_add_map.h): the plane's map made where the terrain has none its brush paints,
+	// and named; no points.
+	bool add = false;
 	bool operator==(const TerrainStrokeAsk &o) const {
 		return plane == o.plane && brush_named == o.brush_named && (brush_named == 0 || brush == o.brush) &&
-		       points == o.points && gesture == o.gesture && end == o.end && cancel == o.cancel;
+		       points == o.points && gesture == o.gesture && end == o.end && cancel == o.cancel && add == o.add;
 	}
 	bool operator!=(const TerrainStrokeAsk &o) const { return !(*this == o); }
-	bool asked() const { return !points.empty() || cancel; }
+	bool asked() const { return !points.empty() || cancel || add; }
 };
 // The brush a stroke strokes with: `workspace`'s, the members the ask names taken from it. (Its wire form:
 // session/terrain_stroke.h.)
