@@ -731,6 +731,12 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 		overlay.group_title = [&group_names](int group) { return capitalized_words(group_names->group(group)); };
 	}
 	OverlayList shapes = mission_overlay_shapes(overlay);
+	// S25: the terrain brush over the marks (its ring on the ground, a stamp's square, the selected tiles).
+	if (brush_.live()) {
+		const MissionGround &ground = viewport.followed_ground(context.input.view);
+		const CameraBrushSpace space(context, viewport.camera(), &ground);
+		brush_.shapes(&space, in, shapes);
+	}
 	// The Listen's sources ringed at their reach (DI-36), under the marks drawn after them.
 	if (viewport.options().listen.on && viewport.listen().open()) {
 		OverlayList heard;
