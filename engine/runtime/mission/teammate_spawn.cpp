@@ -190,7 +190,7 @@ world::EntityHandle MissionKernel::spawn_item_piece(const world::Entity &seed) {
     // of the door rows (item_section_piece), on this resolve and every later
     // sweep alike.
     // [orig: Entity_SpawnSectionEntity @0x440322 memset, the def @0x440350,
-    //  callbacks pinned @0x440365 / @0x440370; Projectile_SpawnFromTile
+    //  callbacks pinned @0x440365 / @0x440370; Palm_SpawnFragment
     //  @0x53C1C0 - the def @0x53C2CD, def+0x138 @0x53C35D, def+0x158
     //  @0x53C36F; Entity_CloneFromTemplateByType @0x4398A0 copies the 0x2B4
     //  bytes verbatim @0x43997D; the +0x1C4 update Entity_UpdatePool1Slot

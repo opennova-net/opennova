@@ -458,7 +458,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // tag drops the draw. A palm fragment's draw is item 900's own too: its
         // spawn stores the sector builder into the model's collision and scar
         // callbacks, not the draw's (palm_fragment).
-        // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6; Render_SectorEntity
+        // [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6; Render_SectorEntity
         //  @0x5C431B..0x5C4372]
         const std::string_view render =
                 def != nullptr ? render_tag(def->render_function) : std::string_view();
@@ -493,7 +493,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // item 900's own pair.
         // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2;
         //  Entity_SpawnSectionEntity @0x440365 / @0x440370;
-        //  Projectile_SpawnFromTile @0x53C35D / @0x53C36F]
+        //  Palm_SpawnFragment @0x53C35D / @0x53C36F]
         e->door_event = !e->section_clone && def != nullptr &&
                 strutil::iequals(def->ai_function, "door");
         e->door_motion = !e->section_clone && move_row == world::PhysicsClass::Door;

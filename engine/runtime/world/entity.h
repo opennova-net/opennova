@@ -812,13 +812,13 @@ struct Entity {
     // update (+0x1C4) callbacks whatever its def, so damage runs the null
     // row [orig: Entity_SpawnSectionEntity @0x440365 -> NullClass_HandleEvent,
     //  @0x440370 -> Entity_InitFloatingPhysics]. A palm fragment is not one:
-    // it takes item 900's own callbacks [orig: Projectile_SpawnFromTile
+    // it takes item 900's own callbacks [orig: Palm_SpawnFragment
     //  @0x53C35D / @0x53C36F].
     bool section_clone = false;
     // The palm fragment (item 900) a palm transition seeds: its spawn stores
     // the sector builder into item 900's model +0xA8 / +0xAC, so it collides
     // and scars through its palm state, whatever its draw [orig:
-    // Projectile_SpawnFromTile @0x53C1C0, the stores @0x53C3B0 / @0x53C3C6].
+    // Palm_SpawnFragment @0x53C1C0, the stores @0x53C3B0 / @0x53C3C6].
     bool palm_fragment = false;
     // The palm-state (+0x270) section draw: the render tag's psec / cesp bone
     // row [orig: BoneCallback_psec_World @0x53C130 -> @0x53BF10], recomputed

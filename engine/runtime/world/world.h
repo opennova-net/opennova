@@ -102,7 +102,7 @@ struct SoundSlotEvent {
 // Packed player-character identity -> the Avatars.def head-sex bit used by
 // Entity_GetProfileSlotSound. The shell installs this immutable mission table;
 // sound selection remains portable and unknown ids deliberately read male.
-// [orig: MinimapSlot_FindByPackedId @0x57a270;
+// [orig: CAvatarDefs_FindComboByPackedId @0x57a270;
 //  Entity_GetProfileSlotSound female select @0x52831c]
 struct CharacterTraitsTable {
     struct Row {

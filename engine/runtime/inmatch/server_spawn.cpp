@@ -399,7 +399,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// open until a successful C2S 0x0E pick clears it [orig: Server_OnPlayerJoin @0x51a6f2
 	// stateByte |= 0x10 iff SpawnZoneList_GetCount() > 0 — UNCONDITIONAL on the spectator
 	// latch, so a join-time spectator holds the bit forever (nothing ever deploys it);
-	// the sole clear is the deploy leg of Server_ProcessPlayerDeath @0x517791]. The
+	// the sole clear is the deploy leg of Server_DeployPlayer @0x517791]. The
 	// pending entity is HIDDEN (state_flags bit0 — the golden pre-deploy record
 	// byte13 = 0x01) [orig: NetPacket_WritePlayerState @0x4ff7dd ORs entity+36 bit0
 	// each frame while pending]. The host's OWN loopback player is held too: its
@@ -660,15 +660,15 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	// runtime conversion @0x519e76 leaves slot+89912 alone — a deployed
 	// convert has it clear, an undeployed one keeps holding it); LEAVING runs
 	// the deploy below, which clears it like the witnessed deploy leg
-	// [orig: Server_ProcessPlayerDeath @0x517791 `and 0xEF`].
+	// [orig: Server_DeployPlayer @0x517791 `and 0xEF`].
 
 	if (spectator) {
 		// The restore byte (+100568) takes the slot team, 0 included, ahead of the
-		// latch and the slot team's clear (D-NET-584) [orig: Server_KillPlayerAndNotify
+		// latch and the slot team's clear (D-NET-584) [orig: Server_ConvertPlayerToSpectator
 		//  @0x519E55, the store @0x519E5B; the latch @0x519E61, the clear @0x519E6E]
 		conn.spectator_restore_team = conn.assigned_team;
 		conn.link.spectator = true;
-		// [orig: Server_KillPlayerAndNotify @0x519E76 — the runtime convert
+		// [orig: Server_ConvertPlayerToSpectator @0x519E76 — the runtime convert
 		//  writes the same slot latch the roster row mirrors]
 		world.match.set_player_spectator(conn.link.owned_entity, true);
 		conn.assigned_team = 0;
@@ -719,7 +719,7 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 	// whose revive latch (+89932) is clear; the reset itself never writes +292.
 	// Neither the bot slot nor the medic-revive deploy exists in our roster, so
 	// the two 0-stores are unreachable here.
-	// [orig: Server_ProcessPlayerDeath @0x517740 — 620 @0x517937/@0x517952/
+	// [orig: Server_DeployPlayer @0x517740 — 620 @0x517937/@0x517952/
 	//  @0x517960; 0 @0x51790a (bot) / @0x51791c (revive latch)]
 	player->damage_state = 620;
 	if (ai != nullptr) {
@@ -898,7 +898,7 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 	// (the mission yaw of heading word 0 is 90) and the latch clears. The
 	// warmup it runs first is D-NET-431's. A revive latch the placement would
 	// have consumed is only cleared, as the leg's tail clears it on every
-	// deploy. [orig: Server_ProcessPlayerDeath - the latch test @0x517837,
+	// deploy. [orig: Server_DeployPlayer - the latch test @0x517837,
 	//  Entity_WarmUpOrganicAnimation @0x517842, +0x10/+0x14/+0x18 = 0
 	//  @0x517849..0x517853, the clear @0x517859; +89932 = 0 @0x5179C7]
 	if (conn.reply.convert_holds_pose) {
@@ -917,7 +917,7 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 	// the entity's (D-NET-582), and reads the slot's spectator latch/restore team
 	// beside it. Retail's placement also takes the arm for a handle its own resolve
 	// refuses; the 0x0E and the convert resolve first, a wave release does not
-	// (D-NET-592). [orig: Server_ProcessPlayerDeath @0x517863 ->
+	// (D-NET-592). [orig: Server_DeployPlayer @0x517863 ->
 	//  Server_PositionPlayerForSpawn @0x50CF86..0x50CFB1, @0x50D17C..0x50D1C6
 	//  (the slot team @0x50D183); the Deaths gate @0x50D1DB, the markers
 	//  @0x50D266 / @0x50D320]
@@ -946,7 +946,7 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		// No authored marker: the deploy transaction restores the position
 		// recorded by the previous Entity_ResetToSpawnState. Keeping this in the
 		// shared release makes C2S, wave, and listen-host paths identical.
-		// [orig: Server_ProcessPlayerDeath @0x517740 ->
+		// [orig: Server_DeployPlayer @0x517740 ->
 		// Entity_ResetToSpawnState @0x4B9610; D-NET-66]
 		player.position = player.spawn_position;
 	}
@@ -980,7 +980,7 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 		const world::Entity *target = conn.reply.convert_holds_pose
 				? nullptr
 				: world.zones.resolve_spawn_target(player->team, request);
-		// Server_ProcessPlayerDeath(player, handle) @0x519ECE: the deploy leg, its
+		// Server_DeployPlayer(player, handle) @0x519ECE: the deploy leg, its
 		// raises, placement, reset and private replies, before the 0x32. The leg
 		// takes the request's raw handle, resolved or not.
 		std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(

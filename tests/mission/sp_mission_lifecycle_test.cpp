@@ -406,7 +406,7 @@ int main() {
 	// --- the round init's dialog reset -----------------------------------------
 	{
 		// The local player's (re)deploy runs round init, which clears the
-		// world's dialog table [orig: Server_ProcessPlayerDeath @0x5178aa ->
+		// world's dialog table [orig: Server_DeployPlayer @0x5178aa ->
 		// Game_InitNewRound @0x422741 / @0x4227ac -> Dialog_ResetAll @0x44dc90].
 		SpMission m;
 		CHECK(m.boot(files, false));

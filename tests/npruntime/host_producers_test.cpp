@@ -528,8 +528,8 @@ bool check_spectator_respawn_request() {
 // deploy's target, resolved with the cleared team 0, which takes the other
 // team's spawn point. The leg never writes the +360 respawn delay, and clears
 // the +364 target hold only for a handle other than 0xFFFF (D-NET-430).
-// [orig: Server_KillPlayerAndNotify @0x519E89, @0x519EBC..0x519ECE;
-//  Server_ProcessPlayerDeath @0x51782F, @0x517837..0x517863, @0x51786B..0x517872,
+// [orig: Server_ConvertPlayerToSpectator @0x519E89, @0x519EBC..0x519ECE;
+//  Server_DeployPlayer @0x51782F, @0x517837..0x517863, @0x51786B..0x517872,
 //  @0x51787A, @0x517960; Input_HandleActionBinding @0x49B085;
 //  Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187; NetPacket_WritePlayerState
 //  @0x4FF71B..0x4FF728]
@@ -625,7 +625,7 @@ bool check_spectator_convert_deploys() {
 // of Server_BuildEntitySlotLists, whose humans count skips a hidden player; so
 // the convert's own tick already counts the converted body out.
 // [orig: Server_TickUpdate, the pump call @0x51D895 and the count call @0x51D89A;
-//  Server_BuildEntitySlotLists `test bl,al` @0x4F9820; Server_KillPlayerAndNotify
+//  Server_BuildEntitySlotLists `test bl,al` @0x4F9820; Server_ConvertPlayerToSpectator
 //  `or Flags,1` @0x519E92]
 bool check_spectator_convert_humans_count() {
 	HostFixture f(2);
@@ -644,7 +644,7 @@ bool check_spectator_convert_humans_count() {
 // dead-flagged body in a team mode as that byte, else by the tick parity. A
 // script team write to a player body splits the slot and entity teams
 // (Entity_SetTeamByNetId stores the entity byte alone).
-// [orig: Server_KillPlayerAndNotify @0x519E55, the store @0x519E5B;
+// [orig: Server_ConvertPlayerToSpectator @0x519E55, the store @0x519E5B;
 //  Server_PositionPlayerForSpawn @0x50D1A6..0x50D1C3, the markers @0x50D266]
 bool check_spectator_convert_stores_the_slot_team() {
 	HostFixture f(2);

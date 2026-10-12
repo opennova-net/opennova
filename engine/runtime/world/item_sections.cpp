@@ -217,7 +217,7 @@ void palm_transition(World &world, Entity &entity, int section) {
         type = 17;
     }
     if (!type) return;
-    // [orig: Projectile_SpawnFromTile @ 0x53C1C0]
+    // [orig: Palm_SpawnFragment @ 0x53C1C0]
     const auto *traits = world.tables.item_death_traits.get(entity.item_id);
     const size_t pivot = type == 17 ? 1 : 0;
     if (traits && pivot < traits->model_pivots_q16.size()) {
@@ -239,7 +239,7 @@ void palm_transition(World &world, Entity &entity, int section) {
         // for collision (+0xA8) and the scar cache (+0xAC), not the draw:
         // the fragment draws by item 900's own render tag (palm_sections, the
         // def resolve's) and collides through its palm state.
-        // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6]
+        // [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6]
         seed.palm_fragment = true;
         seed.palm_state = type;
         seed.death_motion = DeathMotionMode::PalmPiece;

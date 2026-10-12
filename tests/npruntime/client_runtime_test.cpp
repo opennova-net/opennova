@@ -5132,7 +5132,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 // Game_InitNewRound clears the deploy hold. Another player's respawn edge
 // releases nothing, and the self row's first alive sample is no edge.
 // [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
-//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_ProcessPlayerDeath @0x5178C5]
+//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
 bool run_self_respawn_edge_releases_a_revive_deploy() {
 	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
 	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";

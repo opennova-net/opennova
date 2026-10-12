@@ -1687,7 +1687,7 @@ bool run_world_state_load_resnaps_local_pose() {
 // record's respawn edge, facing the record's heading byte, through the same
 // respawn reset as any deploy, with the kit it died with (no grant folded).
 // [orig: NetPacket_SerializePlayerState @0x4C1109..0x4C114C -> Game_InitNewRound;
-//  Server_ProcessPlayerDeath @0x5178C5]
+//  Server_DeployPlayer @0x5178C5]
 bool run_revive_deploy_respawns_l_on_its_record_edge() {
 	Harness h;
 	h.role.poll_preload();

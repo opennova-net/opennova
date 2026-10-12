@@ -568,7 +568,7 @@ static int test_retail_particlefx_rows(void) {
 
 /* A line carries 30 tokens at most: the key and 29 values, the 29th running on to
    the line's end because the tokenizer stops before cutting it, so its atol reads
-   its first number only [orig: Terrain_TokenizeConfigLine @0x53CB60, the cap
+   its first number only [orig: Config_TokenizeLine @0x53CB60, the cap
    @0x53CC93]. Forty authored ids on one line are 28 ids, then "200028 200029 ...",
    which reads as 200028. The 32-slot group table fills across lines. */
 static int test_vehicle_spawn_lists() {
@@ -680,7 +680,7 @@ static int test_scale_keeps_the_low_dword_of_the_fistp() {
    (a token already running there runs on to the end), and a trailing NUL is the
    end of the text. A record is allocated at its `begin`, so a nested `begin` and
    an unclosed block are both items. Repeated `attrib:` lines OR together.
-   [orig: File_ParseASCIIFile @0x53D810 -> Terrain_TokenizeConfigLine @0x53CB60;
+   [orig: File_ParseASCIIFile @0x53D810 -> Config_TokenizeLine @0x53CB60;
     ItemDef_ParseProperty @0x49EB00 (the begin arm @0x49EB88..0x49EBB3, the
     attrib loop @0x4A06A8..0x4A0F52)] */
 static int test_items_read_the_retail_tokens(void) {
@@ -753,7 +753,7 @@ static int test_items_read_the_retail_tokens(void) {
 
 /* A tab separates a key from its value as a space does: the key is the whole
    first token, so `hp`, `id`, `husk` and `score` read with tabs as with spaces.
-   [orig: Terrain_TokenizeConfigLine @0x53CB60, the separators space, comma and
+   [orig: Config_TokenizeLine @0x53CB60, the separators space, comma and
    tab @0x53CC33..0x53CC4C; ItemDef_ParseProperty @0x49EB00, _stricmp on
    tokens[1]] */
 static int test_tab_separated_keys(void) {
@@ -978,7 +978,7 @@ static int test_end_alias_default(void) {
 /* A line's values are the tokenizer's 29 past the key, not 16, and the 29th runs
    on to the line's end: 27 unknown attrib tokens then `Door Takeable` set both
    (tokens 28 and 29), 28 then `Door Takeable` set neither (token 29 is the run-on
-   "Door Takeable"). [orig: Terrain_TokenizeConfigLine @0x53CB60, the 30-token
+   "Door Takeable"). [orig: Config_TokenizeLine @0x53CB60, the 30-token
    cap @0x53CC8C..0x53CC93; ItemDef_ParseProperty's attrib loop to the count
    @0x4A0F42..0x4A0F52] */
 static int test_attrib_reads_the_29_values(void) {
@@ -1645,7 +1645,7 @@ int main(int argc, char **argv) {
        floats +0x11C..+0x128, read with no count check]. A missing width is
        token 2, which every line resets to "", so 0; a missing length and
        offsets are tokens 3..5, which keep what the last line that had them
-       left in the line buffer [orig: Terrain_TokenizeConfigLine @0x53CB71..
+       left in the line buffer [orig: Config_TokenizeLine @0x53CB71..
        0x53CB81]: Jeep's bare `shadow` reads Hind's 8.5, 0 and -1.25 (Hind's
        line is longer, so those bytes outlive the shorter lines between). */
     static const char shadow_def[] =

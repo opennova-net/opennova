@@ -3392,11 +3392,11 @@ bool check_default_spawn_requires_no_team_zone() {
 }
 
 // A spawnable type-1 item is a mobile deploy target. The request handler first
-// requires a live target and a free best seat; Server_ProcessPlayerDeath repeats
+// requires a live target and a free best seat; Server_DeployPlayer repeats
 // the search, requires the target's +0x170 primary-occupant latch, resets the
 // player, then requests the authoritative attach.
 // [orig: Server_ProcessClientRequestRespawn @0x519AF0;
-//  Server_ProcessPlayerDeath @0x517740;
+//  Server_DeployPlayer @0x517740;
 //  Entity_FindBestSeatSlot @0x4351F0]
 bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	opennova::world::World world;
@@ -3534,7 +3534,7 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 // carries the dead bit before their seat walks, so a live child of a dead root
 // (whose own seat the per-entry walk would still offer) is no mobile spawn.
 // [orig: Server_ProcessClientRequestRespawn @0x519D19 / @0x519D1D;
-//  Server_ProcessPlayerDeath @0x5177CB / @0x5177CF; Entity_FindBestSeatSlot's
+//  Server_DeployPlayer @0x5177CB / @0x5177CF; Entity_FindBestSeatSlot's
 //  per-entry gate @0x4352C2..0x4352CD]
 bool check_dead_vehicle_root_is_no_mobile_spawn() {
 	namespace w = opennova::world;
@@ -3636,7 +3636,7 @@ bool check_dead_vehicle_root_is_no_mobile_spawn() {
 // (no hide bit for a non-spectator) and the next 0x0E of the live, unheld body
 // is refused by the dead-or-pending gate. The byte's other bits wait for the
 // whole-byte write past the refusals.
-// [orig: Server_ProcessPlayerDeath @0x517791, the refusals @0x5177CF / @0x5177DB /
+// [orig: Server_DeployPlayer @0x517791, the refusals @0x5177CF / @0x5177DB /
 //  @0x5177F4, the byte write @0x517803; NetPacket_WritePlayerState @0x4FF6D7,
 //  @0x4FF7A1, @0x4FF7AA..0x4FF7BC; Server_ProcessClientRequestRespawn @0x519CC7]
 bool check_refused_mobile_spawn_deploy_clears_hold() {
@@ -4402,7 +4402,7 @@ bool check_capture_pass_runs_in_every_mode_and_after_the_round() {
 // mission offers deploy zones, the deploy leg and a spectator's return to play
 // clear it (entering spectator mode leaves it alone), so event 25's counter
 // skips the slot until the player deploys.
-// [orig: Server_OnPlayerJoin @0x51A6F2; Server_ProcessPlayerDeath @0x517791;
+// [orig: Server_OnPlayerJoin @0x51A6F2; Server_DeployPlayer @0x517791;
 //  Server_UpdateCaptureZoneProximity @0x5087A2]
 bool check_roster_mirrors_the_undeployed_bit() {
 	NapiNPServerCtx ctx;
@@ -4442,7 +4442,7 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	// The join sets the frontier-hint bit, clears the nag hold and zeroes the
 	// +100360 stamp; the deploy leg's whole-byte write clears both bits.
 	// [orig: Server_OnPlayerJoin @0x51A6CD, @0x51A6FD, @0x51A730..0x51A73A;
-	//  Server_ProcessPlayerDeath @0x517803]
+	//  Server_DeployPlayer @0x517803]
 	deployer.reply.capture_nag_held = true;
 	deployer.reply.chat_last_ms = 77;
 	const opennova::world::EntityHandle a =
@@ -4583,7 +4583,7 @@ bool check_frontier_hint_waits_for_the_play_ticks() {
 // not the entity's: the deploy leg's, and the play-tick walk's own and enemy
 // (team 1 -> 2, else 1) frontiers. A script team write to a player body splits
 // the two (Entity_SetTeamByNetId stores the entity byte alone).
-// [orig: Server_ProcessPlayerDeath @0x5179BA, the call @0x5179D9;
+// [orig: Server_DeployPlayer @0x5179BA, the call @0x5179D9;
 //  Server_UpdateAllActivePlayerSlots @0x518929, @0x51893B..0x51894A]
 bool check_frontier_hints_read_the_slot_team() {
 	FrontierHintFixture f(/*with_chain=*/true);

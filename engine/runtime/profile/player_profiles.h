@@ -106,7 +106,7 @@ bool name_char_allowed(char c);
 // PlayerInfo_PopulateAvatarComboList @0x5603b1 and @0x5608d8]; a nationality,
 // division or combo pick fills it at once against the new combo [orig:
 // PlayerInfo_HandleNationalitySelect @0x560600, PlayerInfo_HandleDivisionSelect
-// @0x560690 -> PlayerInfo_PopulateAvatarComboList; PlayerInfo_HandleVoiceSelect
+// @0x560690 -> PlayerInfo_PopulateAvatarComboList; PlayerInfo_HandleComboListSelect
 // @0x55ff59]. A side other than 0 or 1 reads 0 and writes nothing.
 int voice_override(const playersav::ProfileRecord &record, int side);
 void set_voice_override(playersav::ProfileRecord &record, int side, int value);

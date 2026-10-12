@@ -1131,7 +1131,7 @@ void ThrowableSim::update_device(World &world, PlacedDevice &d,
     // the visit itself never reads the owner, so a dead owner's devices stay
     // armed until that owner deploys again. [orig: Entity_UpdatePool1Slot
     //  @0x4B8DD0 reads no owner; the sweeps are Entity_RemovePlacedDevicesByOwner
-    //  @0x546E00, called from Server_ProcessPlayerDeath @0x5178D8 and
+    //  @0x546E00, called from Server_DeployPlayer @0x5178D8 and
     //  Server_RemoveEntityAndNotify @0x50A2BB]
     Entity *e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
     if (e == nullptr) {

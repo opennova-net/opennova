@@ -288,7 +288,7 @@ struct SessionReplyState {
 	// The convert's hold latch: set when its request named no target (0xFFFF),
 	// read and cleared by the deploy leg the convert runs, which then places
 	// nothing (Server_PositionDeployingPlayer). [orig: slot+0x188D9 -
-	//  Server_KillPlayerAndNotify @0x519EC8; Server_ProcessPlayerDeath @0x517837]
+	//  Server_ConvertPlayerToSpectator @0x519EC8; Server_DeployPlayer @0x517837]
 	bool convert_holds_pose = false;
 	// Host ms of this player's last accepted chat (the 1000 ms per-sender
 	// throttle; 0 = never). The same slot word is the refused-capture-touch
@@ -308,7 +308,7 @@ struct SessionReplyState {
 	// a refused touch sets both, the deploy leg's whole-byte write clears both.
 	// [orig: CNetPlayer_SetGameState @0x4C4213..0x4C421F; Server_OnPlayerJoin
 	//  @0x51A730..0x51A73A; Server_OnPlayerTouchCaptureZone @0x500C35;
-	//  GameEvent_FlagCapture @0x50F7A0; Server_ProcessPlayerDeath @0x517803;
+	//  GameEvent_FlagCapture @0x50F7A0; Server_DeployPlayer @0x517803;
 	//  Server_UpdateAllActivePlayerSlots @0x5189A6]
 	bool frontier_hint_pending = false; // bit 0x04
 	bool capture_nag_held = false;      // bit 0x08
@@ -322,7 +322,7 @@ struct SessionReplyState {
 	// The last GRANTED 0x5A loadout body, retained for the deploy-release re-send: the retail
 	// deploy leg re-sends the player's loadout, and the client's 0x5A handler is the deploy
 	// UN-LATCHER — it resets dword_81474C (set by the 0x0E pick) on completion, which is what
-	// resumes the client's per-frame C2S 0x0C uplink [orig: Server_ProcessPlayerDeath's tail
+	// resumes the client's per-frame C2S 0x0C uplink [orig: Server_DeployPlayer's tail
 	// calls Server_SendWeaponSlotListToPlayer @0x502550; client NapiNPClientMsg_
 	// HandleWeaponLoadoutSync @0x4290E0 resets 81474C, §5.30; golden deploy frame 240018 =
 	// 0x5A + 0x61 + 0x1E in one datagram; v32: without it both joiners' uplinks stopped

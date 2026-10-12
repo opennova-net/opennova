@@ -362,7 +362,7 @@ void HostRole::drain_host_client_gameplay_requests() {
 		//  Server_TickUpdate's receive pump @0x51d895]
 		// So does its Respawn key's bodiless 0x41, which the handler applies
 		// to the host's own slot and body [orig: NetPacket_SendRequestRespawn
-		//  @0x42DBA0, its queue call @0x42DBBC; NapiNPServerMsg_ResetPlayerAmmo
+		//  @0x42DBA0, its queue call @0x42DBBC; NapiNPServerMsg_DeathTimeoutReset
 		//  @0x510540].
 		// So does its 0x4C quality report: the 310-frame leg has no authority
 		// test, and the protocol keeps one server message table, installed at

@@ -377,14 +377,14 @@ int test_palm_sections() {
     auto &leaf = *w.registry.get(spawner.pieces[0]);
     CHECK(leaf.palm_state == 17 && leaf.item_id == 900);
     // A fragment, not a section clone: it runs item 900's own event row
-    // [orig: Projectile_SpawnFromTile @0x53C35D].
+    // [orig: Palm_SpawnFragment @0x53C35D].
     CHECK(leaf.item_section_piece && !leaf.section_clone);
     CHECK(leaf.position.z == 7 && leaf.engine_flags == kEntityFlagDead);
     CHECK(leaf.health == 20 && leaf.pitch == 0 && leaf.roll == 0);
     // The spawn stores the sector builder into item 900's collision and scar
     // callbacks, not its draw: the fragment draws by item 900's own render tag
     // (none here: every section at its own origin) and collides through the
-    // palm state (D-ITEMDEF-20) [orig: Projectile_SpawnFromTile @0x53C3B0 /
+    // palm state (D-ITEMDEF-20) [orig: Palm_SpawnFragment @0x53C3B0 /
     // @0x53C3C6].
     CHECK(leaf.palm_fragment && !leaf.palm_sections);
     CHECK(item_hidden_sections(leaf) == 0);
@@ -586,7 +586,7 @@ Entity palm_fragment_seed() {
 // the palm piece motion does not run beside it. Neither template sets a door
 // slot base, so no piece keeps door rows.
 // [orig: Entity_SpawnSectionEntity @0x440350 / @0x440365 / @0x440370;
-//  Projectile_SpawnFromTile @0x53C2CD / @0x53C35D / @0x53C36F;
+//  Palm_SpawnFragment @0x53C2CD / @0x53C35D / @0x53C36F;
 //  Render_SectorEntity @0x5C431B; Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
 int test_piece_spawn_class_selectors() {
     const char definitions[] = "begin Tower\r\n id 105050\r\n type building\r\n ai_function door\r\n"

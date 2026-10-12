@@ -6106,7 +6106,7 @@ void test_run_over_spares_a_protected_player() {
 // model, hiding the palm state's sections and pivoting on the CXLT translation
 // whatever item 900's render tag. The render tag binds only the draw: a
 // psec-drawn palm collides through every section, its section mask included
-// (D-ITEMDEF-20). [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6;
+// (D-ITEMDEF-20). [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6;
 // CTerrainMap_BuildSectorTransformMatrices @0x53BF10, the switches @0x53BF31 /
 // @0x53BFE0; EntityDef_InitAllCallbacks @0x4A5AF5..0x4A5B03]
 void test_palm_sector_collision_is_the_fragments() {

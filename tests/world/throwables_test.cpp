@@ -1528,7 +1528,7 @@ void test_avmine_ignores_a_moving_wreck() {
 // owner, and the removal waits for the owner's next deploy (the npruntime
 // placed_device_relay test drives that sweep).
 // [orig: Entity_UpdatePool1Slot @0x4B8DD0; Entity_RemovePlacedDevicesByOwner
-//  @0x546E00 from Server_ProcessPlayerDeath @0x5178D8]
+//  @0x546E00 from Server_DeployPlayer @0x5178D8]
 void test_owner_death_keeps_devices_armed() {
     Rig rig(0);
     rig.throw_ammo(kAmmoSatchel, Vec3{20, 20, 1.5f}, 0, 0);

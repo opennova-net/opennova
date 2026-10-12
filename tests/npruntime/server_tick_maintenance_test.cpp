@@ -4,7 +4,7 @@
 //     deploy, counted down per authority tick in a live MP session, frozen during
 //     pre-round and after round end, zeroed outside a session, held at -1 for a
 //     spectator, and cleared by the first validated fire
-//     [orig: Server_UpdateAllActivePlayerSlots @0x518820; Server_ProcessPlayerDeath
+//     [orig: Server_UpdateAllActivePlayerSlots @0x518820; Server_DeployPlayer
 //      @0x517740; Server_ClientFiredRound @0x50c736..0x50c75d];
 //   - the 1 Hz round-robin S2C 0x2F flag refresh [orig: sub_517B20 @0x517B20];
 //   - the violation sweep's flag carry limit [orig: Server_CheckPlayerViolations
@@ -15,7 +15,7 @@
 //   - the death consumer's live entity+44 cause read and reported-bit clear
 //     [orig: GameEvent_PlayerDeath @0x516DD0 — @0x516f4d, @0x517180..0x517206];
 //   - the roster row's spectator latch mirror [orig: Server_PlayerAdd @0x51CD83;
-//     Server_KillPlayerAndNotify @0x519E76];
+//     Server_ConvertPlayerToSpectator @0x519E76];
 //   - the armory-reuse cooldown and pre-round latch around C2S 0x2F
 //     [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790];
 //   - the 744-tick priority-target sweep [orig: EntityPool_ClearDirtyFlags @0x508E30];
@@ -691,7 +691,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 //  Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6;
 //  NapiNPServerMsg_0x04D_ChangeTeam @0x518F70 -- GameEvent_PlayerDeath
 //  @0x519059 / @0x5190C7, +360 @0x51906B / @0x5190D9;
-//  NapiNPServerMsg_ResetPlayerAmmo -- +360 @0x51057B, +364 @0x510587]
+//  NapiNPServerMsg_DeathTimeoutReset -- +360 @0x51057B, +364 @0x510587]
 bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool uplinked) {
 	w::World world;
 	world.rules.mp_session = true;
@@ -1122,7 +1122,7 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 
 // The runtime spectator convert and its reverse write the same roster latch
 // the end-round winner award reads, so a spectator-flagged top scorer is
-// skipped [orig: Server_KillPlayerAndNotify @0x519E76; Match::finish].
+// skipped [orig: Server_ConvertPlayerToSpectator @0x519E76; Match::finish].
 bool check_spectator_latch_mirrors_onto_the_roster_row() {
 	w::World world;
 	world.rules.mp_session = true;
@@ -1457,7 +1457,7 @@ bool check_kit_weight_recompute() {
 // Every deploy that is not a medic revive rebuilds the slot's weapon table, ammo
 // pools and clips from the last accepted 0x2F, then re-sends the 0x5A built from
 // the rebuilt table; a revive keeps the kit the player died with.
-// [orig: Server_ProcessPlayerDeath @0x5178C5 (the revive test), @0x5178E1
+// [orig: Server_DeployPlayer @0x5178C5 (the revive test), @0x5178E1
 //  (PlayerSlot_InitWeaponsFromLoadout @0x515550), @0x5178F2
 //  (Server_SendWeaponSlotListToPlayer); the buffer NapiNPServerMsg_HandlePlayerLoadout
 //  @0x515CBD..0x515D83]
@@ -1531,7 +1531,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 		return false;
 
 	// A medic revive's deploy keeps the spent kit (no rebuild) and sends no 0x5A,
-	// only the seed reroll (D-NET-379) [orig: Server_ProcessPlayerDeath @0x5178C5
+	// only the seed reroll (D-NET-379) [orig: Server_DeployPlayer @0x5178C5
 	// skips @0x5178E1 and @0x5178F2; the 0x61 @0x51796D].
 	client_tick = conn.tick_seed;
 	spend_clip();

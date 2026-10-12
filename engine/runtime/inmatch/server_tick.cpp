@@ -1420,7 +1420,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 				// healthy-LAN capture carries 0; D-NET-374).
 				// [orig: Server_SendEntityHandleAndInputState @0x507BF2..0x507C29 ->
 				//  CharAttr_PackDisabledProperties @0x412550 (IDB
-				//  Input_PackStateFlags until 2026-10-07)]
+				//  Input_PackStateFlags until 2026-10-12)]
 				const uint16_t latches = world.tables.charattr_disabled_word;
 				conn.link.transport->host_send(s2c::CHARATTR_DISABLED_PROPERTIES,
 						{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
@@ -1709,7 +1709,7 @@ static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world)
 	// entity update) ahead of this pump's 0x41 (Health 0); ours routes the heal
 	// only now, after the pump, so the 0x41's store goes back over it on each
 	// body whose edge is held, and its death keeps the 0x41's Health 0.
-	// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_ResetPlayerAmmo
+	// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_DeathTimeoutReset
 	//  @0x510568]
 	for (const world::RoundDeath &d : world.round_sim.deaths)
 		if (d.player_edge)
@@ -1803,8 +1803,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// after its converts: retail's edge runs in the entity update after the
 	// whole pump, and skips a body the convert hid (Flags |= 1, which the
 	// convert's deploy leg keeps; it clears only the dead bit).
-	// [orig: Server_KillPlayerAndNotify @0x519E92, Health 1 @0x519EA4, the deploy
-	//  @0x519ECE; Server_ProcessPlayerDeath @0x51787A; the edge's hidden bit
+	// [orig: Server_ConvertPlayerToSpectator @0x519E92, Health 1 @0x519EA4, the deploy
+	//  @0x519ECE; Server_DeployPlayer @0x51787A; the edge's hidden bit
 	//  Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127]
 	route_round_deaths(ctx, world, EdgeDrain::AfterConverts);
 
@@ -1971,7 +1971,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 						conn.link.owned_entity != release.player)
 					continue;
 				// The leg takes the zone's handle, placed unresolved (D-NET-592) [orig:
-				//  SpawnWaveList_TickEntry, the Server_ProcessPlayerDeath call @0x52A3C0].
+				//  SpawnWaveList_TickEntry, the Server_DeployPlayer call @0x52A3C0].
 				std::vector<ProtocolMessage> deployment =
 						Server_ReleasePlayerDeployment(ctx.config, conn, world,
 								release.zone, release.zone.packed, ctx.logs.profile);

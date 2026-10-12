@@ -82,7 +82,7 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 // for the owning connection; callers decide whether it is returned reactively
 // or staged on a transport.
 // `server_log` is the /PROFILE recorder (null = off), which marks the deploy.
-// [orig: Server_ProcessPlayerDeath deploy leg @0x517740, its handle argument
+// [orig: Server_DeployPlayer deploy leg @0x517740, its handle argument
 //  tested @0x51786B]
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,

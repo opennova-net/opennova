@@ -1614,7 +1614,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// authoritative 0x5A class; absent/inactive/mismatched rows return zero.
 			// [orig: NapiNPClientMsg_HandleChecksumChallenge @0x42E6D0 (reply tag 0x1C,
 			//  len 4 @0x42e723); CharAttr_GetClassChecksum @0x412aa0 (IDB
-			//  AnimMap_GetSlotChecksum until 2026-10-07) — the `return 0` arm
+			//  AnimMap_GetSlotChecksum until 2026-10-12) — the `return 0` arm
 			//  @0x412abf; the host's discard + counter reset
 			//  NapiNPServerMsg_AnimChecksumRequest @0x501D40 @0x501d71/@0x501d79]
 			uint32_t challenge_seed = 0;

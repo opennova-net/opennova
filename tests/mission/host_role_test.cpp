@@ -635,7 +635,7 @@ int main() {
 	// the server's handler for the host's own slot (its body's Health zeroed,
 	// the respawn holds stored). Out of a session the key queues nothing.
 	// [orig: Input_HandleActionBinding case 55 @0x49B20B..0x49B22A ->
-	//  NetPacket_SendRequestRespawn @0x42DBA0; NapiNPServerMsg_ResetPlayerAmmo
+	//  NetPacket_SendRequestRespawn @0x42DBA0; NapiNPServerMsg_DeathTimeoutReset
 	//  @0x510540]
 	for (const bool mp : {true, false}) {
 		ms::MissionKernel kernel;

@@ -218,7 +218,7 @@ struct GameEntitySnapshot {
 	// paired gate 96481) is read-but-never-set, and 97536 tracks the spectator
 	// latch (slot+100567) exactly — writers Server_PlayerAdd @0x51d0ce,
 	// Server_OnPlayerJoin @0x51a79c, the permadeath conversion in
-	// Server_KillPlayerAndNotify @0x519e76, the WritePlayerState restamp
+	// Server_ConvertPlayerToSpectator @0x519e76, the WritePlayerState restamp
 	// @0x4ff70f; both cleared at the leave-spectator block @0x519fb4 — so the
 	// builder-side stamp reduces to "owned by a spectator connection". Not a
 	// wire field; stamped by the host caller that knows the connection list.

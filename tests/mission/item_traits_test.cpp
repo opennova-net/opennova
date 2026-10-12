@@ -806,7 +806,7 @@ int main() {
 	// sector builder into the model's collision and scar callbacks only, and
 	// that flag survives the resolve (D-ITEMDEF-20). A psec draw hides the
 	// sector builder's sections alone, never the section or piece masks.
-	// [orig: Projectile_SpawnFromTile @0x53c3b0 / @0x53c3c6; Render_SectorEntity
+	// [orig: Palm_SpawnFragment @0x53c3b0 / @0x53c3c6; Render_SectorEntity
 	//  @0x5c431b..0x5c4372; BoneCallback_psec_World @0x53c130]
 	{
 		DefItemDef *psec_def = entry_for(file, 100549);
