@@ -3,6 +3,7 @@
 #include <runtime/mission/debug_oracles.h>
 
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/round_sim.h> // kOrganicStandInCenterZ / kOrganicStandInRadius
 
@@ -139,6 +140,10 @@ void debug_pick_entity(MissionKernel &kernel, const double from[3], const double
 	switch (hit.hit_class) {
 		case world::ProjectileHitClass::Terrain:
 			out.blocked = DebugPick::Blocked::Terrain;
+			// The surface class the game reads at a terrain hit, as a round's terrain impact reads it (the trace's
+			// terrain hit carries none) [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510, from the terrain leg of
+			// the hit switch @ 0x4ea6a7 in Projectile_UpdatePhysics @ 0x4e9d70; round_sim.cpp].
+			out.surface_type = terrain::surface_type_at_fixed(w.tables.surface_map, hit.position_q16.x, hit.position_q16.y);
 			return;
 		case world::ProjectileHitClass::Water:
 			out.blocked = DebugPick::Blocked::Water;

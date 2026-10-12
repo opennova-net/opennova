@@ -83,7 +83,7 @@ struct DebugPick {
 	int32_t face = -1;
 	int32_t bone = -1;
 	int32_t hit_zone = -1;
-	int32_t surface_type = -1;
+	int32_t surface_type = -1; // a terrain hit's: the surface class the game reads there (its char map, a placed tile)
 	uint32_t material_flags = 0;
 	uint32_t tick = 0;
 };

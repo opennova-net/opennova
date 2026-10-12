@@ -8,8 +8,10 @@ extends GameProbe
 ## there as the world's terrain data samples it; and the placed tiles whose 16-unit square holds the point, as the
 ## world loaded its tile info (each its cell, flags and layer). `x` east and `y` north, mission metres. Needs a mission.
 
-const ABOVE := 4000.0 # mission metres above the point the ray starts
-const RANGE := 8000.0
+# The ray starts this far above the point (mission metres) and reaches twice as far, within the pick's longest
+# trace (mission/debug_oracles.h kDebugPickMaxRangeUnits, 2000) and over the highest ground a terrain holds (256).
+const ABOVE := 1000.0
+const RANGE := 2000.0
 
 
 func run(ctx: ProbeContext) -> ProbeVerdict:
@@ -41,7 +43,14 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	# The placed tiles whose square holds the point: x in [corner, corner + 16), y in (corner, corner + 16] over the
 	# stored frame (the record's z the plane's y negated).
 	var tiles: Array = []
-	var info: TerrainTileInfo = terrain.get_tileinfo_resource() if terrain != null else null
+	# The mission's own tiles where it places any (the world's terrain node holds them in place of the terrain's,
+	# as the game's load reads them), else the terrain's.
+	var info: TerrainTileInfo = null
+	var node: Terrain = world.get_terrain_node() as Terrain
+	if node != null:
+		info = node.get_tile_info_override()
+	if info == null and terrain != null:
+		info = terrain.get_tileinfo_resource()
 	if info != null:
 		for entry: TerrainTileEntry in info.get_entries():
 			var x0 := float(entry.get_x_fixed()) / 65536.0
