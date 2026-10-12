@@ -67,8 +67,9 @@ public:
 		bool open = false;
 	};
 	// Follow the files (each its plane and project path) as the open documents of `view` hold them, the patches since
-	// added to `out`. A file first followed adds none (the picture drew it as it is); one whose document closed or opened
-	// since is no patch (false).
+	// added to `out`. A file first followed adds none (the picture drew it as it is); one whose document opened since
+	// adds its changes since its load (it loaded the file the picture read); one whose document closed or was read
+	// again since is no patch (false).
 	bool follow(const SessionView &view, const std::vector<std::pair<TerrainPlane, std::string>> &files, TerrainPatches &out);
 	const std::vector<Followed> &followed() const { return followed_; }
 	void clear() { followed_.clear(); }
@@ -82,7 +83,8 @@ private:
 // gesture_feeding_), patches its ground in place from the documents' changes (MissionGround::patch) and takes their new
 // stamps, never reading them again whole per dab; the frame's patches kept for its device. Where a change cannot be
 // patched (read again, a whole change, a plane the ground cannot patch) the caller reads the files again as before.
-// Out of a stroke it follows the documents' states alone, so a stroke's first patch is against the state drawn.
+// Out of a stroke it follows the documents' states, patching the heights alone (a bake's landing, an undo or redo of a
+// sculpt: the device patches its terrain, S25 A4), so a stroke's first patch is against the state drawn.
 class TerrainStrokeFollow {
 public:
 	// The family of `document` (its view: a mission or a terrain) followed; `stroking`: a gesture feeds the picture now.
@@ -93,7 +95,8 @@ public:
 	// The last follow's patches (each file once, its regions), and a serial that moves with each patch: the device takes
 	// a frame's once.
 	const TerrainPatches &patches() const { return patches_; }
-	// A patch went in since the picture was last made: the stroke's end makes it again where its device did not patch.
+	// A map's patch went in since the picture was last made: the stroke's end makes it again (the heights' the device
+	// patches).
 	bool patched() const { return patched_; }
 	void made() { patched_ = false; }
 	void clear() {

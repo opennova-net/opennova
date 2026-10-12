@@ -38,6 +38,7 @@
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/placement_traits.h>
 #include <godot_cpp/variant/packed_vector4_array.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 #include "env/mission_environment_overrides.h"
 #include "lights/effect_light_report.h"
@@ -405,6 +406,8 @@ void MissionViewportApplier::plan_(Build &build, const MissionViewport &mission,
 		// The .trn parsed as the load begins (its units planned then): one unit per file here, as many
 		// as the load will have; a terrain the project lacks is a note, the picture standing without.
 		layer_missing_[kTerrain].clear();
+		// The heights it reads hold every sculpt patch the viewport made so far (S25).
+		terrain_patches_.built(mission.heights_built_serial());
 		loading_.instantiate();
 		loading_->set_mission_tile_set(opennova::to_gd(header.tile_set));
 		loading_->set_mission_environment(opennova::to_gd(terrain_key.environment));
@@ -1024,6 +1027,12 @@ opennova::editor::OperationProgress MissionViewportApplier::progress() const {
 
 void MissionViewportApplier::update(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &) {
 	picture_moved_();
+	// S25 (the heights): a stroke's regions and a landing's tiles into the terrain built, never building it again;
+	// taken once the terrain is built where a build runs.
+	if (terrain_built_ && !build_ && terrain_data_.is_valid() && !terrain_->is_building() &&
+			!terrain_patches_.apply(mission_of(viewport).heights_patches(), **terrain_data_, *terrain_))
+		UtilityFunctions::push_warning("The mission view's terrain did not take a sculpt's patch: it shows the heights "
+				"as it last built them until it builds again.");
 	apply_state_(viewport);
 }
 
@@ -1268,6 +1277,7 @@ void MissionViewportApplier::apply(const opennova::editor::ViewportModel &viewpo
 				report.missing.push_back(name);
 	}
 	report.drawn = drawn_json_();
+	report.heights_taken = terrain_patches_.taken();
 	if (build_) return;
 	apply_state_(viewport);
 	// A moved entity's terrain shadow follows once its gesture ended (not each sample: the terrain

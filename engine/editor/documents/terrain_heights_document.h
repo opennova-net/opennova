@@ -99,6 +99,8 @@ public:
 	uint16_t live_height(int x, int y) const;
 	// The live atlas whole, row-major, the top row first.
 	std::vector<uint16_t> live_atlas() const;
+	// The live atlas over `rect` (inside the atlas), row-major, the top row first: a device's patch.
+	std::vector<uint16_t> live_heights(const HeightsRect &rect) const;
 	// The .cpt the document is (or, an image's, its import makes): its header, tiles and depth section's form, the
 	// live atlas its depth. False before an image's first bake.
 	bool compose_cpt(CptFile &out) const;

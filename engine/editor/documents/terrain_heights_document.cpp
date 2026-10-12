@@ -199,6 +199,24 @@ uint16_t TerrainHeightsDocument::live_height(int x, int y) const {
 	return unbaked_at(x, y) || !heights().baked ? input().u16(x, y) : atlas().u16(x, y);
 }
 
+std::vector<uint16_t> TerrainHeightsDocument::live_heights(const HeightsRect &rect) const {
+	std::vector<uint16_t> out(size_t(std::max(rect.w, 0)) * size_t(std::max(rect.h, 0)));
+	if (plane_count() < 2 || out.empty() || rect.x < 0 || rect.y < 0 || rect.x + rect.w > kHeightsSide ||
+			rect.y + rect.h > kHeightsSide)
+		return std::vector<uint16_t>();
+	const RasterPlane &from = heights().baked ? atlas() : input();
+	from.copy_rect(rect.x, rect.y, rect.w, rect.h, reinterpret_cast<uint8_t *>(out.data()));
+	if (!heights().baked) return out;
+	// The input where a bake is due.
+	for (const HeightsRect &due : heights().unbaked) {
+		const int x0 = std::max(rect.x, due.x), y0 = std::max(rect.y, due.y);
+		const int x1 = std::min(rect.x + rect.w, due.x + due.w), y1 = std::min(rect.y + rect.h, due.y + due.h);
+		for (int y = y0; y < y1; ++y)
+			for (int x = x0; x < x1; ++x) out[size_t(y - rect.y) * size_t(rect.w) + size_t(x - rect.x)] = input().u16(x, y);
+	}
+	return out;
+}
+
 std::vector<uint16_t> TerrainHeightsDocument::live_atlas() const {
 	std::vector<uint16_t> out(kTexels);
 	if (plane_count() < 2) return out;

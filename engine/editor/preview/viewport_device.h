@@ -64,6 +64,8 @@ struct ViewportDeviceReport {
 	// What the device drew this frame of the layers its kind reports (a mission's foliage and lights, DI-31),
 	// the kind's wire form as the device makes it; null for none.
 	io::JsonValue drawn;
+	// The last heights patch it took (a mission's terrain, S25: MissionViewport::heights_patches), 0 none.
+	uint64_t heights_taken = 0;
 };
 
 // Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas

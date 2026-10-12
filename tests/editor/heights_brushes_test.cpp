@@ -7,6 +7,9 @@
 // remade and the rest kept, and a save writing the baked .cpt.
 #include <editor/documents/terrain_heights_brush.h>
 #include <editor/documents/terrain_heights_document.h>
+#include <editor/preview/mission_viewport.h>
+#include <editor/preview/terrain_heights_patch.h>
+#include <editor/preview/viewports.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -27,6 +30,7 @@
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "editor/viewport_test_support.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -226,10 +230,106 @@ int test_session() {
 	return 0;
 }
 
+// A stroke in the mission's 3D view (S25 A4, the device hook's portable half): the view's picture patched in place,
+// never made again from the .cpt (its device takes an Update, its builds stand, its ground is not read again): the
+// stroke's regions as the live heights, the ground the game collides with patched under them; the bake's landing the
+// tiles it replaced; the undo the shipped heights and tiles back.
+int test_view() {
+	editor_test::TempProjectDir dir("opennova_editor_heights_view");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::FakeDevices devices;
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Heights"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	const std::vector<uint8_t> cpt_bytes = test_io::read_file(fixture("terrain/tmap/Tmap.cpt"));
+	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.cpt", cpt_bytes));
+	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn"))));
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
+	const std::string m = v.project.scan->find("m.bms")->relative_path;
+	const std::string cpt = v.project.scan->find("Tmap.cpt")->relative_path;
+	session.handle(request::open_document(m));
+	devices.sync(session);
+	const auto *mission = static_cast<const MissionViewport *>(session.viewports().find(m, ViewportKind::Mission));
+	TEST_EXPECT(mission && devices.last(m, ViewportKind::Mission) == ViewportAction::Rebuild);
+	if (!mission) return 1;
+	const uint64_t builds = mission->builds();
+	// The shipped height under the stroke, from the file (the view's ground is not read before the stroke: a stroke
+	// before anything asked the ground patches nothing, its first read the document's state).
+	CptFile shipped;
+	std::string why;
+	TEST_EXPECT(load_cpt(cpt_bytes.data(), cpt_bytes.size(), shipped, why));
+	const uint16_t before = shipped.depth_buffer[312 * 1024 + 312];
+	const MissionGround &ground = mission->ground_reader();
+	const auto at = [&](int x, int y) {
+		return ground.height_field() ? ground.height_field()->heightmap[size_t(y) * 1024 + size_t(x)] : uint16_t(0);
+	};
+
+	// A raise at mission (-200, 200), atlas (312, 312), its stroke open: an Update of the picture, its heights patched.
+	TerrainStrokeAsk ask;
+	ask.plane = TerrainPlane::Heights;
+	ask.brush.tool = TerrainTool::Raise;
+	ask.brush.radius = 8.0f;
+	ask.brush.strength = 1.0f;
+	ask.brush_named = kBrushTool | kBrushRadius | kBrushStrength;
+	ask.points = {{-200.0, 200.0}};
+	ask.gesture = 4242;
+	ask.end = false;
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done());
+	devices.sync(session);
+	TEST_EXPECT(devices.last(m, ViewportKind::Mission) == ViewportAction::Update && mission->builds() == builds);
+	TEST_EXPECT(!mission->heights_patches().empty());
+	if (!mission->heights_patches().empty()) {
+		const HeightsDevicePatch &patch = mission->heights_patches().back();
+		TEST_EXPECT(patch.path == cpt && !patch.regions.empty() && patch.tile_indices.empty() && patch.serial > 0);
+		bool covers = false;
+		for (const HeightsDevicePatch::Region &region : patch.regions)
+			covers = covers || (312 >= region.x && 312 < region.x + region.w && 312 >= region.y && 312 < region.y + region.h &&
+			                    region.heights[size_t(312 - region.y) * size_t(region.w) + size_t(312 - region.x)] == before + 256);
+		TEST_EXPECT(covers);
+	}
+	// The ground, first asked now, reads the document's state; read once, it is patched from here on.
+	TEST_EXPECT(mission->followed_ground(v).terrain() && at(312, 312) == before + 256);
+	const int reads = ground.reads();
+	const uint64_t revision = ground.revision();
+	ask.points = {{-200.0, 200.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	devices.sync(session);
+	TEST_EXPECT(devices.last(m, ViewportKind::Mission) == ViewportAction::Update && mission->builds() == builds);
+	TEST_EXPECT(mission->followed_ground(v).reads() == reads && ground.revision() > revision && at(312, 312) == before + 512);
+
+	// The stroke ends; its bake lands: the tiles it replaced, the picture still never made again.
+	ask.points = {{-196.0, 200.0}};
+	ask.end = true;
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(settled(session, cpt, 120.0));
+	devices.sync(session);
+	size_t tiles = 0;
+	for (const HeightsDevicePatch &patch : mission->heights_patches()) tiles += patch.tile_indices.size();
+	TEST_EXPECT(tiles >= 1 && tiles <= 8 && mission->builds() == builds && mission->followed_ground(v).reads() == reads);
+	const uint16_t baked = at(312, 312);
+	TEST_EXPECT(baked > before);
+
+	// One undo: the shipped heights and tiles back, patched.
+	session.handle(request::undo(m));
+	devices.sync(session);
+	TEST_EXPECT(at(312, 312) == before && mission->builds() == builds && mission->followed_ground(v).reads() == reads);
+	tiles = 0;
+	for (const HeightsDevicePatch &patch : mission->heights_patches()) tiles += patch.tile_indices.size();
+	TEST_EXPECT(tiles >= 2);
+	std::printf("view: a stroke patched into the mission's 3D view and its ground, its landing's tiles, its undo\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_operators() + test_dabs() + test_session();
+	const int failures = test_operators() + test_dabs() + test_session() + test_view();
 	if (failures == 0) std::printf("editor_heights_brushes: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

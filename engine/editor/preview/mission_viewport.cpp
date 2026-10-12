@@ -19,6 +19,7 @@
 #include <editor/preview/mission_ground_check.h>
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_items.h>
+#include <editor/session/terrain_family.h>
 #include <editor/preview/mission_link_shapes.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_palette.h>
@@ -526,6 +527,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 			state_moved();
 		}
 		options_moved_ = false;
+		heights_built_(view, *document);
 		return picture_.built(FileStamps());
 	}
 	MissionSceneDelta delta;
@@ -544,8 +546,12 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		stroke_.made();
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		options_moved_ = false;
+		heights_built_(view, *document);
 		return picture_.built(FileStamps());
 	}
+	// S25 (the heights): the heights the follow patched (a stroke's samples, a bake's landing, an undo or redo of
+	// them), queued for the device with the tiles a landing replaced: an Update, the device patching its terrain.
+	const bool sculpted = take_heights_(view);
 	bound_items_(view);
 	// The people posed again where a record they read, the graph or a file they read moved (DI-38): an
 	// Update poses them, the picture standing.
@@ -565,17 +571,19 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	// What the mission sounds like at the camera (DI-36): the device plays the channels as they stand each frame.
 	follow_listen_(view, document, clock);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
-	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
+	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files || (heights_stale_ && !stroking)) {
 		fog_reach_ = mission_fog_reach(files, scene_.header());
 		options_moved_ = false;
+		heights_built_(view, *document);
 		return picture_.built(FileStamps());
 	}
 	if (delta.header || delta.reshaped) {
 		if (delta.header) fog_reach_ = mission_fog_reach(files, scene_.header());
 		options_moved_ = false;
+		heights_built_(view, *document);
 		return ViewportAction::Rebuild;
 	}
-	if (!delta.moved && !options_moved_ && !posed && !overlaid) return ViewportAction::Keep;
+	if (!delta.moved && !options_moved_ && !posed && !overlaid && !sculpted) return ViewportAction::Keep;
 	options_moved_ = false;
 	return ViewportAction::Update;
 }
@@ -669,8 +677,44 @@ void MissionViewport::apply_(const io::JsonValue &json, PreviewClock &clock) {
 	}
 }
 
+bool MissionViewport::take_heights_(const SessionView &view) {
+	bool any = false;
+	for (const TerrainPatch &patch : stroke_.patches().patches) {
+		if (patch.plane != TerrainPlane::Heights) continue;
+		const DocumentBase *open = nullptr;
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == patch.path) open = each.get();
+		HeightsDevicePatch device;
+		if (!open || !heights_tiles_.take(patch, *open, device)) {
+			// A heights document the picture did not show as it is (read again): the picture made again from its file.
+			heights_stale_ = true;
+			continue;
+		}
+		device.serial = ++heights_serial_;
+		heights_patches_.push_back(std::move(device));
+		any = true;
+	}
+	return any;
+}
+
+void MissionViewport::heights_built_(const SessionView &view, const DocumentBase &document) {
+	const DocumentBase *open = nullptr;
+	TerrainFamily family;
+	if (resolve_terrain_family(view, document, family) && !family.plane(TerrainPlane::Heights).path.empty())
+		for (const auto &each : view.documents.open)
+			if (each && each->path() == family.plane(TerrainPlane::Heights).path) open = each.get();
+	heights_tiles_.shown(open);
+	heights_patches_.clear();
+	heights_built_serial_ = heights_serial_;
+	heights_stale_ = false;
+}
+
 bool MissionViewport::report_(const ViewportDeviceReport &report) {
 	picture_.read(report.files);
+	// The heights patches the device took.
+	heights_patches_.erase(std::remove_if(heights_patches_.begin(), heights_patches_.end(),
+			[&](const HeightsDevicePatch &patch) { return patch.serial <= report.heights_taken; }),
+			heights_patches_.end());
 	missing_ = report.missing;
 	ground_ = report.surface;
 	// What it drew this frame (the foliage, the lights): read on the wire, moving nothing.

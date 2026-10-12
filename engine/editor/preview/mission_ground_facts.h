@@ -124,8 +124,8 @@ public:
 	// patched in place), so the next follow does not read them again.
 	void restamp(const FileSource &files, const std::vector<std::string> &names);
 	// S25: what a stroke changed of a file it read, patched in place from the open document that holds it (a region of
-	// the heights, a map's texels), never reading the files again per dab; false where it cannot (the caller reads them
-	// again: follow). The planes' patches are the round's heights' and maps' to give; none patches yet.
+	// the heights: the live atlas there; a map's texels), never reading the files again per dab; false where it cannot
+	// (the caller reads them again: follow).
 	bool patch(const TerrainPatch &patch, const DocumentBase &document);
 
 	// The game's own samplers over what it read (DI-29): the char map's, with the placed tiles and their
@@ -181,6 +181,8 @@ private:
 	std::vector<FoliageDef> foliage_defs_;
 	int reads_ = 0;
 	uint64_t revision_ = 0;
+	// The heights read (the .trn's polytrn_polydata, a .cpt; "" none).
+	std::string heights_file_;
 };
 
 } // namespace opennova::editor

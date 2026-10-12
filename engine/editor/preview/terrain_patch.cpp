@@ -31,12 +31,16 @@ bool TerrainFamilyFollow::follow(const SessionView &view, const std::vector<std:
 		const Followed *was = nullptr;
 		for (const Followed &each : followed_)
 			if (each.path == path && each.plane == plane) was = &each;
-		if (was && (was->open != state.open || was->identity != state.identity || was->load != state.load)) {
+		// A document opened since (a stroke's file opened quietly) holds the file the picture read as it loaded: its
+		// changes since its load (revision 0 of it) are what the picture lacks.
+		const bool opened = was && !was->open && state.open;
+		if (was && !opened && (was->open != state.open || was->identity != state.identity || was->load != state.load)) {
 			told = false;
-		} else if (was && document && was->revision != state.revision) {
+		} else if (was && document && (opened || was->revision != state.revision)) {
 			ChangeSet changes;
 			const RasterChanges *raster = nullptr;
-			if (document->changes_since(was->load, was->revision, changes)) raster = std::get_if<RasterChanges>(&changes);
+			if (document->changes_since(opened ? state.load : was->load, opened ? 0 : was->revision, changes))
+				raster = std::get_if<RasterChanges>(&changes);
 			if (!raster) told = false;
 			else
 				for (const RasterRegion &region : raster->regions) out.add(plane, path, region);
@@ -59,21 +63,28 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 				planes.emplace_back(static_cast<TerrainPlane>(i), family.planes[i].path);
 	TerrainPatches now;
 	const bool told = follow_.follow(view, planes, now);
-	if (!stroking) return true;
-	if (!told) return false;
+	if (!told) return !stroking;
+	bool maps = false;
 	for (const TerrainPatch &patch : now.patches) {
+		// Out of a stroke only the heights are patched (a bake's landing, an undo or a redo of a sculpt: the device
+		// patches its terrain, S25 A4); a map's change there is read again as before.
+		const bool heights = patch.plane == TerrainPlane::Heights;
+		if (!stroking && !heights) continue;
 		const DocumentBase *open = nullptr;
 		for (const auto &each : view.documents.open)
 			if (each && each->path() == patch.path) open = each.get();
-		if (!open || !ground.patch(patch, *open)) return false;
+		if (!open || !ground.patch(patch, *open)) {
+			if (stroking) return false;
+			continue;
+		}
 		names.push_back(basename_of(patch.path));
+		maps = maps || !heights;
 		if (patch.whole) patches_.add(patch.plane, patch.path, RasterRegion(), true);
 		for (const RasterRegion &region : patch.regions) patches_.add(patch.plane, patch.path, region);
 	}
-	if (!names.empty()) {
-		ground.restamp(files, names);
-		patched_ = true;
-	}
+	if (!names.empty()) ground.restamp(files, names);
+	// The heights' patches are the device's (the mission's terrain): only a map's makes the picture again at the end.
+	if (maps) patched_ = true;
 	return true;
 }
 

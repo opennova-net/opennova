@@ -2,10 +2,12 @@
 
 #include <editor/preview/mission_ground_facts.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
 #include <base/io/strutil.h>
+#include <editor/documents/terrain_heights_document.h>
 #include <editor/model/raster_document.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/terrain_patch.h>
@@ -205,6 +207,7 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	foliage_map_.clear();
 	foliage_ = terrain::FoliageMaskRaster();
 	foliage_defs_.clear();
+	heights_file_.clear();
 	stamps_.clear();
 	if (!files) {
 		error_ = "The project's files are not read yet.";
@@ -217,6 +220,7 @@ void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const 
 	else loaded = terrain::terrain_field_store_load(store_, *stamped, header.terrain, header.tile_set, header.environment,
 	                                                 error_, &trn);
 	if (loaded) {
+		heights_file_ = trn.polydata;
 		if (store_.surface_map().data != nullptr) surface_map_ = trn.charmap;
 		// The mission's placed tiles as the game's load takes them: <mission>.til, else the terrain's own
 		// polytrn_tileinfo, a missing, short or bad-magic file sending it on (terrain::read_placed_tile_bytes),
@@ -282,16 +286,39 @@ terrain::FoliageMaskMap MissionGround::foliage_sampler(bool codes) const {
 }
 
 bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &document) {
+	const std::string name = patch.path.substr(patch.path.find_last_of('/') + 1);
 	// The colour and blend maps are no part of the ground the game reads (S25 B4): nothing to patch.
 	if (patch.plane == TerrainPlane::Colour || patch.plane == TerrainPlane::Blend) return true;
+	// The heights (S25 A4): the live atlas over each region (the input where a bake is due, else the baked atlas)
+	// written into the heights the game's collision reads, in place (TerrainFieldStore::patch_heights).
+	if (patch.plane == TerrainPlane::Heights) {
+		// A ground not read yet holds nothing to patch: its first follow reads the document's state.
+		if (!read_once_) return true;
+		const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(&document);
+		if (!heights || heights->plane_count() < 2 || !store_.valid() || store_.height_field().dim != kHeightsSide ||
+				!strutil::iequals(name, heights_file_))
+			return false;
+		std::vector<RasterRegion> regions = patch.regions;
+		if (patch.whole) regions.assign(1, RasterRegion{0, 0, kHeightsSide, kHeightsSide, 0});
+		for (const RasterRegion &region : regions) {
+			const int x0 = std::max(region.x, 0), y0 = std::max(region.y, 0);
+			const int x1 = std::min(region.x + region.width, kHeightsSide), y1 = std::min(region.y + region.height, kHeightsSide);
+			if (x0 >= x1 || y0 >= y1) continue;
+			const HeightsRect rect{x0, y0, x1 - x0, y1 - y0};
+			const std::vector<uint16_t> live = heights->live_heights(rect);
+			if (live.empty() || !store_.patch_heights(terrain::CoordsRect{rect.x, rect.y, rect.w, rect.h}, live.data(),
+			                                          size_t(rect.w)))
+				return false;
+		}
+		if (!regions.empty()) ++revision_;
+		return true;
+	}
 	// The surface and foliage maps (S25 B4): the regions written into what the game's load keeps of them, in place
-	// (TerrainFieldStore::patch_charmap, patch_foliage_mask_raster), never reading the files again per dab. The
-	// heights' patches are lane A's: none yet, so the caller reads again.
+	// (TerrainFieldStore::patch_charmap, patch_foliage_mask_raster), never reading the files again per dab.
 	if (patch.plane != TerrainPlane::Surface && patch.plane != TerrainPlane::Foliage) return false;
 	const RasterDocument *raster = document.as_raster();
 	if (patch.whole || !raster || raster->plane_count() != 1 || raster->plane(0).format() != RasterFormat::U8) return false;
 	const RasterPlane &plane = raster->plane(0);
-	const std::string name = patch.path.substr(patch.path.find_last_of('/') + 1);
 	const bool surface = patch.plane == TerrainPlane::Surface;
 	const std::string &read = surface ? surface_map_ : foliage_map_;
 	if (!strutil::iequals(name, read.substr(read.find_last_of('/') + 1))) return false;

@@ -21,6 +21,8 @@
 #include <editor/preview/mission_shots.h>
 #include <editor/preview/terrain_patch.h>
 #include <editor/preview/preview_clip_sounds.h>
+#include <editor/preview/terrain_heights_patch.h>
+#include <editor/preview/terrain_patch.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 
@@ -124,6 +126,12 @@ public:
 	// serial moves each time it is made again (what the device takes it again by).
 	const MissionOverlayImage &overlay() const { return overlay_; }
 	uint64_t overlay_serial() const { return overlay_serial_; }
+	// S25 (the heights): what a stroke or a bake's landing changed of the open heights document its terrain reads,
+	// since the picture was last made, as its device takes it (terrain_heights_patch.h), each with a serial; and
+	// the serial the picture was last made at (every patch up to it stands in a picture built from the files).
+	// The device says how far it took them (ViewportDeviceReport::heights_taken), and those are dropped.
+	const std::vector<HeightsDevicePatch> &heights_patches() const { return heights_patches_; }
+	uint64_t heights_built_serial() const { return heights_built_serial_; }
 
 	// The Shoot tool's shots (DI-23, preview/mission_shots): the run on the preview clock (its effects spawned in the
 	// items' effect scene, effects(), while that layer shows), its scars in the presentation frame (the device's),
@@ -269,6 +277,11 @@ private:
 	void follow_ground_(const SessionView &view) const;
 	// The overlay made again where the option's kind or the ground's reads moved (DI-29); true when it was.
 	bool follow_overlay_(const SessionView &view);
+	// S25 (the heights): the heights patches the stroke follow made this follow (stroke_.patches(): the ground already
+	// patched, the file restamped) queued for the device with the tiles each replaced; true when one was.
+	// heights_built_: the picture made again from the files, which hold every change so far.
+	bool take_heights_(const SessionView &view);
+	void heights_built_(const SessionView &view, const DocumentBase &document);
 	// The posed people stood on that ground (MissionPoses::stand) where a record, a pose (`posed`) or
 	// the terrain moved; true when a person's lift moved.
 	bool stand_people_(const SessionView &view, bool posed);
@@ -317,6 +330,11 @@ private:
 
 	MissionViewportOptions options_;
 	bool options_moved_ = false;
+	HeightsTilesFollow heights_tiles_;
+	bool heights_stale_ = false; // a heights patch the device could not take: the picture made again
+	std::vector<HeightsDevicePatch> heights_patches_;
+	uint64_t heights_serial_ = 0;
+	uint64_t heights_built_serial_ = 0;
 	OrbitCamera camera_;
 	bool framed_ = false; // the camera framed a document's entities once
 	// The ground box a SetViewport asked framed, framed as asked and again on the terrain's ground at the next follow.
