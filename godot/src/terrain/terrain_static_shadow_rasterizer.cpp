@@ -199,6 +199,10 @@ public:
 	std::unordered_map<uint64_t, CachedGeometry> geometry_cache;
 	uint64_t observed_source_revision = 0;
 	uint64_t observed_terrain_revision = 0;
+	// The heights patched in place (TerrainData::patch_heights: an editor's sculpt), which every caster's ground
+	// height reads (its ground_y below), and the snapshots rebuilt for it.
+	uint64_t observed_heights_serial = 0;
+	uint64_t heights_rebuilds = 0;
 	uint64_t observed_object_global_counter = 0;
 
 	std::shared_ptr<const opennova::terrain::TerrainStaticShadowResolvedGeometry>
@@ -252,6 +256,7 @@ public:
 		observed_terrain_revision = terrain_data.is_valid()
 				? terrain_data->get_change_revision()
 				: 0;
+		observed_heights_serial = terrain_data.is_valid() ? terrain_data->get_heights_serial() : 0;
 		std::vector<int32_t> suppressed;
 		suppressed.reserve(static_cast<std::size_t>(
 				suppressed_bms_ids.size()));
@@ -354,6 +359,14 @@ bool TerrainStaticShadowRasterizer::is_enabled() const noexcept {
 	return impl_->enabled;
 }
 
+bool TerrainStaticShadowRasterizer::reports_caster_changes() const {
+	return impl_->planner.reports_caster_changes();
+}
+
+std::size_t TerrainStaticShadowRasterizer::caster_count() const {
+	return impl_->planner.caster_count();
+}
+
 void TerrainStaticShadowRasterizer::set_reports_caster_changes(bool p_on) {
 	impl_->planner.set_reports_caster_changes(p_on);
 }
@@ -399,6 +412,8 @@ Dictionary TerrainStaticShadowRasterizer::get_diagnostics() const {
 			static_cast<int64_t>(impl_->observed_source_revision);
 	diagnostics["terrain_revision"] =
 			static_cast<int64_t>(impl_->observed_terrain_revision);
+	diagnostics["heights_serial"] = static_cast<int64_t>(impl_->observed_heights_serial);
+	diagnostics["heights_rebuilds"] = static_cast<int64_t>(impl_->heights_rebuilds);
 	diagnostics["candidate_count"] =
 			static_cast<int64_t>(impl_->planner.candidate_count());
 	diagnostics["admitted_count"] =
@@ -557,11 +572,16 @@ void TerrainStaticShadowRasterizer::begin_frame(
 			: 0;
 	const bool terrain_changed =
 			terrain_revision != impl_->observed_terrain_revision;
+	// The heights patched under the casters (a sculpt): each caster's ground height read again. The planner's
+	// revision takes ground_y, so a followed snapshot reports the reaches whose shadow moved.
+	const bool heights_changed = impl_->terrain_data.is_valid() &&
+			impl_->terrain_data->get_heights_serial() != impl_->observed_heights_serial;
+	if (heights_changed) ++impl_->heights_rebuilds;
 	// One global counter compare gates the geometry-revision concern: caster
 	// documents only change through ObjectData mutation, which bumps it.
 	const bool objects_changed = ObjectData::get_global_change_counter() !=
 			impl_->observed_object_global_counter;
-	if (terrain_changed || source_revision != impl_->observed_source_revision ||
+	if (terrain_changed || heights_changed || source_revision != impl_->observed_source_revision ||
 			objects_changed) {
 		impl_->observed_terrain_revision = terrain_revision;
 		impl_->rebuild_snapshot();

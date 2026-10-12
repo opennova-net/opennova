@@ -519,9 +519,12 @@ void SlotShadow::_draw_patch(int p_order, const opennova::renderer::SlotPatch &p
 		slot.built = false;
 		slot.visible = true;
 	}
+	// Also draped again where the heights under it were patched since (an editor's sculpt; the game's never
+	// change in a match).
+	const TerrainData *terrain = terrain_data_.is_valid() ? terrain_data_.ptr() : nullptr;
+	const uint64_t heights_serial = terrain != nullptr ? terrain->get_heights_serial() : 0;
 	if (!slot.built || slot.origin_x != p_patch.min_x ||
-			slot.origin_north != p_patch.max_north || slot.lod != p_lod) {
-		const TerrainData *terrain = terrain_data_.is_valid() ? terrain_data_.ptr() : nullptr;
+			slot.origin_north != p_patch.max_north || slot.lod != p_lod || slot.heights_serial != heights_serial) {
 		opennova::renderer::slot_patch_vertices(p_patch, p_lod,
 				[terrain](float x, float z) {
 					return terrain != nullptr ? terrain->get_height_world(Vector3(x, 0.0f, z))
@@ -554,6 +557,7 @@ void SlotShadow::_draw_patch(int p_order, const opennova::renderer::SlotPatch &p
 		slot.origin_x = p_patch.min_x;
 		slot.origin_north = p_patch.max_north;
 		slot.lod = p_lod;
+		slot.heights_serial = heights_serial;
 		slot.built = true;
 	}
 	if (!slot.visible) {

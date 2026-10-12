@@ -41,11 +41,14 @@ Rgba8Image build_heightfield_normal_map(
 // that rect changed (an editor's sculpt stroke). The kernel reads a texel's
 // four neighbours, never the texel itself, so the texels made again are those
 // of the rect's rows whose left or right tap meets its columns and those of
-// its columns whose upper or lower tap meets its rows. `quadrants_written`,
-// when given, says which of the map's four quadrants (top-left, top-right,
-// bottom-left, bottom-right) had a texel made again (the device textures cut
-// from them). The rect is the terrain's region contract (quadtree.h
-// refresh_mipchain's): inside the map, a change across its wrap arriving as
+// its columns whose upper or lower tap meets its rows. `written`, when given,
+// receives boxes holding every texel made again, each inside one of the map's
+// four quadrants and as tight as the texels allow: a tap that wraps (at a
+// locked quadrant's edge, at the atlas's) writes texels across the quadrant
+// from the rect, in a box of their own (the device textures cut from the
+// quadrants are made again over those boxes: update_terrain_tile_quadrants).
+// The rect is the terrain's region contract (quadtree.h refresh_mipchain's):
+// inside the map, a change across its wrap arriving as
 // several rects; one of no size writes nothing. False, nothing written, where
 // `normals` is not a map of the depth's shape or the rect is not inside it.
 bool refresh_heightfield_normal_map(
@@ -55,7 +58,7 @@ bool refresh_heightfield_normal_map(
 		uint32_t height,
 		const TerrainQuadrantLocks &locks,
 		const terrain::CoordsRect &rect,
-		std::array<bool, 4> *quadrants_written = nullptr);
+		std::vector<terrain::CoordsRect> *written = nullptr);
 
 // Normalize DBlend RGB with the retail integer path, preserving alpha and
 // mapping a zero RGB sum to pure red.

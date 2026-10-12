@@ -1144,6 +1144,53 @@ bool test_quadrant_update() {
 			"a map of another size, or a rect past the map, makes nothing");
 }
 
+// Several rects at once (an editor's sculpt: the boxes of the normals a region made again): the bytes a build of the
+// changed map holds, a change kept apart for each rect (two far apart in one quadrant never widen into the span
+// between them: a page sampling only that span is no page they reach), and nothing made where one rect is refused.
+bool test_quadrant_update_rects() {
+	using opennova::terrain::CoordsRect;
+	using opennova::terrain::Rgba8Image;
+	using opennova::terrain::TerrainTileQuadrantChange;
+	using opennova::terrain::TerrainTileQuadrantSource;
+	Rgba8Image atlas;
+	atlas.width = 1024;
+	atlas.height = 1024;
+	atlas.pixels.resize(size_t(1024) * 1024 * 4);
+	for (size_t i = 0; i < atlas.pixels.size(); ++i)
+		atlas.pixels[i] = static_cast<uint8_t>((i * 5 + (i / 4096) * 11 + 1) % 253);
+	TerrainTileQuadrantSource source = opennova::terrain::build_terrain_tile_quadrant_source(atlas);
+	const TerrainTileQuadrantSource before = source;
+	// Two columns of quadrant 0 at its two edges (a locked axis's wrapped tap), and one in quadrant 3.
+	const std::vector<CoordsRect> rects = {{0, 100, 2, 6}, {510, 100, 2, 6}, {700, 900, 4, 4}};
+	Rgba8Image changed = atlas;
+	for (const CoordsRect &rect : rects)
+		for (int y = rect.z; y < rect.z + rect.h; ++y)
+			for (int x = rect.x; x < rect.x + rect.w; ++x) changed.pixels[(size_t(y) * 1024 + size_t(x)) * 4] ^= 0x5A;
+	std::vector<TerrainTileQuadrantChange> changes;
+	const unsigned made = opennova::terrain::update_terrain_tile_quadrants(source, changed, rects, changes);
+	const TerrainTileQuadrantSource built = opennova::terrain::build_terrain_tile_quadrant_source(changed);
+	bool same = made == ((1u << 0) | (1u << 3)) && changes.size() == rects.size();
+	for (size_t q = 0; q < 4 && same; ++q) {
+		const auto &mine = source.levels(q), &theirs = built.levels(q);
+		same = mine.size() == theirs.size();
+		for (size_t level = 0; same && level < mine.size(); ++level) same = mine[level].pixels == theirs[level].pixels;
+	}
+	if (!expect(same, "several rects made again are the changed map's build, a change each")) return false;
+	if (!expect(source.quadrants[1] == before.quadrants[1] && source.quadrants[2] == before.quadrants[2],
+			"the quadrants no rect touches keep their chains")) return false;
+	// A level-1 page (64 units, its quadrant's level 0 over 512 x 512) whose origin routes to the middle of
+	// quadrant 0's x span, rows 100..106: neither column change reaches it.
+	const bool middle = opennova::terrain::terrain_tile_page_samples_any(changes, source, 4, 256, 96);
+	const bool edge = opennova::terrain::terrain_tile_page_samples_any(changes, source, 4, 0, 96);
+	if (!expect(!middle && edge, "a page samples the rects it reads, never the span between two of them")) return false;
+	TerrainTileQuadrantSource untouched = before;
+	std::vector<CoordsRect> refused = rects;
+	refused.push_back({1020, 0, 8, 2});
+	return expect(opennova::terrain::update_terrain_tile_quadrants(untouched, changed, refused, changes) == 0 &&
+			changes.empty() && untouched.quadrants[0] == before.quadrants[0],
+			"a rect past the map refuses them all, nothing made");
+}
+
 // Which resident pages a painted region reaches: by what each samples (the quadrant its source origin routes to, the
 // level its footprint picks, the texels its bilinear taps reach), wherever the frame drew it.
 bool test_page_samples() {
@@ -1175,6 +1222,7 @@ int main(int argc, char **argv) {
 	if (!test_map_split_rules()) return 1;
 	if (!test_overlay_changes()) return 1;
 	if (!test_quadrant_update()) return 1;
+	if (!test_quadrant_update_rects()) return 1;
 	if (!test_page_samples()) return 1;
 	if (!test_colormap_quadrants_follow_texcompression()) return 1;
 	if (!test_tile_set_levels_are_the_dxt5_decode()) return 1;

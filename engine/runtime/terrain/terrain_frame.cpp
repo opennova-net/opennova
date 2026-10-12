@@ -6,6 +6,7 @@
 
 #include <formats/cpt/cpt.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 #include <formats/trn/trn.h>
 
 #include <algorithm>
@@ -253,20 +254,24 @@ void snapshot_tile(const CptTile &tile, const std::vector<uint16_t> &depth,
 	attributes.source_page_z = tile.tile_y;
 }
 
-// Whether a texel of `rect` may lie under one of the tile's vertices: the
-// columns and rows its taps reach over its footprint and closing edge (a
-// superset of the texels its vertices read).
-bool snapshot_tile_reads(const CptTile &tile, const terrain::CoordsQuadrantLocks &quadrant_locks,
-		const terrain::CoordsRect &rect) {
+// Whether a texel of `rect` may lie under one of the tile's device vertices or
+// the normal taps around them: for each column and row of its footprint and
+// closing edge, its tap and the taps `around` either side of that tap.
+bool tile_vertices_read(const CptTile &tile, const terrain::CoordsQuadrantLocks &quadrant_locks,
+		const terrain::CoordsRect &rect, int around) {
 	const terrain::CoordsTaps taps = terrain::coords_taps_for_quadrant(
 			quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, kSnapshotAtlas);
 	const auto reaches = [&](bool x_axis) {
 		const int base = x_axis ? tile.tile_x : tile.tile_y;
 		const int lo = x_axis ? rect.x : rect.z;
 		const int n = x_axis ? rect.w : rect.h;
+		const auto tap = [&](int v) { return x_axis ? taps.x(v) : taps.z(v); };
 		for (int i = 0; i <= tile.tile_size; ++i) {
-			const int tap = x_axis ? taps.x(base + i) : taps.z(base + i);
-			if (tap >= lo && tap < lo + n) return true;
+			const int centre = tap(base + i);
+			for (int k = -around; k <= around; ++k) {
+				const int t = k == 0 ? centre : tap(centre + k);
+				if (t >= lo && t < lo + n) return true;
+			}
 		}
 		return false;
 	};
@@ -408,6 +413,59 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 	return scene;
 }
 
+std::vector<int> terrain_tiles_reading(const CptFile &cpt, const TrnConfig &trn,
+		const terrain::CoordsRect &rect) {
+	std::vector<int> out;
+	const terrain::CoordsQuadrantLocks quadrant_locks = locks_from_trn(trn);
+	for (size_t ti = 0; ti < cpt.tiles.size(); ++ti) {
+		const CptTile &tile = cpt.tiles[ti];
+		if (tile.tile_size >= kSnapshotAtlas) continue;
+		if (tile_vertices_read(tile, quadrant_locks, rect, 1)) out.push_back(static_cast<int>(ti));
+	}
+	return out;
+}
+
+bool plan_terrain_region_refresh(const CptFile &cpt, const TrnConfig &trn,
+		const std::vector<terrain::CoordsRect> &rects, const std::vector<int> &tiles,
+		TerrainRegionRefresh &out) {
+	out = TerrainRegionRefresh();
+	for (const int index : tiles)
+		if (index < 0 || index >= static_cast<int>(cpt.tiles.size())) return false;
+	for (const terrain::CoordsRect &rect : rects) {
+		if (rect.w <= 0 || rect.h <= 0) continue;
+		if (rect.x < 0 || rect.z < 0 || rect.x > kSnapshotAtlas - rect.w || rect.z > kSnapshotAtlas - rect.h) {
+			out = TerrainRegionRefresh();
+			return false;
+		}
+		out.rects.push_back(rect);
+	}
+	// 0 none, 1 the heights variant, 2 both.
+	std::vector<uint8_t> variants(cpt.tiles.size(), 0);
+	for (const int index : tiles) {
+		const CptTile &tile = cpt.tiles[static_cast<size_t>(index)];
+		if (tile.tile_size >= kSnapshotAtlas) continue;
+		variants[static_cast<size_t>(index)] = tile.tile_x < kSnapshotAtlas / 2 && tile.tile_y < kSnapshotAtlas / 2 ? 2 : 1;
+	}
+	for (const terrain::CoordsRect &rect : out.rects)
+		for (const int index : terrain_tiles_reading(cpt, trn, rect))
+			variants[static_cast<size_t>(index)] = std::max<uint8_t>(variants[static_cast<size_t>(index)], 1);
+	for (size_t index = 0; index < variants.size(); ++index)
+		if (variants[index]) out.remesh.push_back({static_cast<int>(index), variants[index] == 2});
+	if (out.rects.empty()) return true;
+	// The grid's sectors and the window past them.
+	constexpr int32_t kWindow = 5;
+	constexpr int32_t kSector = 512;
+	const terrain::TerrainHeightField field = terrain::height_field_from(cpt, trn);
+	const terrain::TerrainAtlasRouting routing = terrain::terrain_atlas_routing(field);
+	const terrain::TerrainWorldRect bounds{(trn.origin_x - kWindow) * kSector, (trn.origin_y - kWindow) * kSector,
+			(trn.origin_x + kTerrainGridSide + kWindow) * kSector, (trn.origin_y + kTerrainGridSide + kWindow) * kSector};
+	for (const terrain::CoordsRect &rect : out.rects)
+		for (const terrain::TerrainWorldRect &world :
+				terrain::terrain_atlas_world_rects(routing, rect, bounds, terrain::kTerrainHeightTaps, field.locks))
+			out.world.push_back(world);
+	return true;
+}
+
 bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
 		const TrnConfig &trn, const std::vector<int> &tiles, const terrain::CoordsRect &rect) {
 	if (rect.w > 0 && rect.h > 0 &&
@@ -448,7 +506,7 @@ bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &
 				scene.tile_meshes[index], scene.tile_attributes[index]);
 	}
 	for (size_t ti = 0; ti < cpt.tiles.size(); ++ti) {
-		if (!remade[ti] && snapshot_tile_reads(cpt.tiles[ti], quadrant_locks, rect)) {
+		if (!remade[ti] && tile_vertices_read(cpt.tiles[ti], quadrant_locks, rect, 0)) {
 			snapshot_tile_bounds(cpt.tiles[ti], cpt.depth_buffer, quadrant_locks, scene.tile_meshes[ti]);
 		}
 	}

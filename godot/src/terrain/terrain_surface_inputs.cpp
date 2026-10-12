@@ -306,6 +306,7 @@ bool TerrainSurfaceInputs::update_blendmap_region(const Ref<Image> &p_map, const
 
 bool TerrainSurfaceInputs::rebuild_heightfield() {
 	heightfield_normal_texture.unref();
+	heightfield_normal_image = opennova::terrain::Rgba8Image{};
 	if (terrain_data.is_null()) {
 		return false;
 	}
@@ -314,12 +315,53 @@ bool TerrainSurfaceInputs::rebuild_heightfield() {
 	uint32_t width = 0;
 	uint32_t height = 0;
 	if (live_depth_to_u16(terrain_data, depth, width, height)) {
-		heightfield_normal_texture = texture_from_rgba8(
-			opennova::terrain::build_heightfield_normal_map(
-				depth, width, height,
-				terrain_data->get_trn().get_quadrant_locks()), false);
+		heightfield_normal_image = opennova::terrain::build_heightfield_normal_map(
+				depth, width, height, terrain_data->get_trn().get_quadrant_locks());
+		heightfield_normal_texture = texture_from_rgba8(heightfield_normal_image, false);
 	}
 	return heightfield_normal_texture.is_valid();
+}
+
+bool TerrainSurfaceInputs::refresh_heightfield_region(const std::vector<opennova::terrain::CoordsRect> &p_rects,
+		std::vector<opennova::terrain::CoordsRect> &r_written) {
+	r_written.clear();
+	if (terrain_data.is_null() || heightfield_normal_texture.is_null() ||
+			terrain_data->get_heightmap_image().is_valid()) {
+		return false;
+	}
+	const std::vector<uint16_t> &depth = terrain_data->get_cpt().depth_buffer;
+	const uint32_t side = heightfield_normal_image.width;
+	if (side == 0 || heightfield_normal_image.height != side ||
+			depth.size() != static_cast<size_t>(side) * side) {
+		return false;
+	}
+	std::vector<opennova::terrain::CoordsRect> boxes;
+	for (const opennova::terrain::CoordsRect &rect : p_rects) {
+		if (!opennova::terrain::refresh_heightfield_normal_map(heightfield_normal_image, depth, side, side,
+					terrain_data->get_trn().get_quadrant_locks(), rect, &boxes)) {
+			return false;
+		}
+		r_written.insert(r_written.end(), boxes.begin(), boxes.end());
+	}
+	// The texture its readers sample updated from the atlas in place (no texture made, its RID kept: made without
+	// levels, as rebuild_heightfield makes it); one of another form made anew.
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(heightfield_normal_image.pixels.size()));
+	std::memcpy(bytes.ptrw(), heightfield_normal_image.pixels.data(), heightfield_normal_image.pixels.size());
+	Ref<Image> image = Image::create_from_data(static_cast<int>(side), static_cast<int>(side), false,
+			Image::FORMAT_RGBA8, bytes);
+	ImageTexture *held = Object::cast_to<ImageTexture>(heightfield_normal_texture.ptr());
+	if (image.is_valid() && held != nullptr && held->get_width() == static_cast<int>(side) &&
+			held->get_height() == static_cast<int>(side) && held->get_format() == Image::FORMAT_RGBA8) {
+		held->update(image);
+		return true;
+	}
+	const Ref<Texture2D> texture = texture_from_rgba8(heightfield_normal_image, false);
+	if (texture.is_null()) {
+		return false;
+	}
+	heightfield_normal_texture = texture;
+	return true;
 }
 
 bool TerrainSurfaceInputs::rebuild_detail_textures() {
@@ -386,6 +428,7 @@ void TerrainSurfaceInputs::clear_derived_textures() {
 	normalized_blend_texture.unref();
 	normalized_blend = opennova::terrain::Rgba8Image();
 	heightfield_normal_texture.unref();
+	heightfield_normal_image = opennova::terrain::Rgba8Image{};
 	for (auto &texture : detail_layer_textures) {
 		texture.unref();
 	}

@@ -75,6 +75,15 @@ void FoliageFrameCompiler::configure_slots(
 				&geometry) {
 	slots_ = slots;
 	geometry_ = geometry;
+	// Each slot's detail reach: the planar extent expand_detail_instance places its vertices at about an instance
+	// (rotation keeps the radius), whole, and the normal's taps one unit about each.
+	for (size_t slot = 0; slot < geometry_.size(); ++slot) {
+		float radius = 0.0f;
+		if (geometry_[slot].valid)
+			for (const FoliageSourceVertex &vertex : geometry_[slot].vertices)
+				radius = std::max(radius, std::hypot(vertex.x, vertex.z));
+		detail_reach_[slot] = geometry_[slot].valid ? static_cast<int32_t>(std::ceil(radius)) + 1 : 0;
+	}
 	// The MODEL tier's instanced VB source: retail maps the model's x/z over
 	// its bound square ((v - centre) * 0.5 / BoundRadius + 0.5, 0.5 when the
 	// radius is zero) and halves y; the 3DI import negated source x, so the
