@@ -41,8 +41,8 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client
 	// 0x41), so the CI filter drops nothing a retail browser would list.
 	// [orig: NapiNPProtocol_HandleClientHello @0x6213b0 ->
 	//  NapiNPProtocol_SendServerInfoPacket @0x6204b0 (the CI echo @0x620563);
-	//  Nwu_HandleServerHello @0x626d20 — sub_6227F0(connection, server_id)
-	//  @0x627533, `if (!entry) return` @0x627541;
+	//  Nwu_HandleServerHello @0x626d20 - NapiNPProtocol_FindConnectionByIndex(protocol,
+	//  server_id) @0x627533, `if (!entry) return` @0x627541;
 	//  NapiNPSession_SendAnnouncePacket @0x61fa00 @0x61fac4 (0x41)]
 	if (client_index == 0 || hello.ci != client_index) return false;
 

@@ -356,12 +356,17 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 	switch (opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
 		// The first connect's hello, or a reconnect's: a ServerHello re-joins while the
-		// connection is down and armed, probing or already in the 0x42 leg.
+		// connection is down and armed.
 		// [orig: Nwu_HandleServerHello @0x627e3e..0x627e5f — !conn_flag0 && is_client &&
 		//  conn_flag1 && +0x710]
-		// Retail reads it only while the enumerator probes, where ours reads it through the
-		// whole reconnect (D-NET-543, OPEN).
-		if (state_ == State::Hello || reconnecting()) on_server_hello(body, out);
+		// Either is read only while the enumerator probes: a reconnect's inside its probe
+		// window, so a 0x81 in the re-join's 0x42 leg or in the gap between windows is
+		// missed; the first connect's from its start to its 0x81, which Hello stands in
+		// for, though retail's give-ups also stop that probe (NapiTimer_Stop) and ours
+		// reads a 0x81 in Hello until the lobby's own deadline (D-NET-571, OPEN).
+		// [orig: Nwu_HandleServerHello - the enumerator's +0x2C @0x627559, the miss
+		//  returning 0 @0x626DCB; NapiTimer_Stop @0x61DF00 - +0x2C = 0 @0x61DF06]
+		if (state_ == State::Hello || reconnect_.probing) on_server_hello(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
 		if (state_ == State::Auth) on_server_auth(body);
@@ -396,9 +401,8 @@ bool ClientSession::takes_server_hello(const uint8_t *data, size_t len) const {
 	if (data == nullptr || !nw_decode_inbound(data, len, opcode, body) ||
 	    opcode != SESSION_OPCODE_SERVER_HELLO)
 		return false;
-	// The phase test is handle_datagram's: retail's is the enumerator probing (+0x2C @0x627559),
-	// which ours stands in for with the whole reconnect (D-NET-543, OPEN).
-	if (state_ != State::Hello && !reconnecting()) return false;
+	// The phase test is handle_datagram's: the enumerator probing (+0x2C @0x627559).
+	if (state_ != State::Hello && !reconnect_.probing) return false;
 	ServerHello sh;
 	return parse_server_hello(body.data(), body.size(), sh) && server_hello_is_ours(sh);
 }
@@ -1317,6 +1321,10 @@ std::vector<uint8_t> ClientSession::build_goodbye() {
 	session_role_ = kSessionRoleNone;
 	on_disconnected();
 	receive_clock_armed_ = false;
+	// The connection is destroyed and its enumerator with it, so a probe window open at the
+	// reset takes no later 0x81. [orig: ResetToDisconnected - CNapiNPConnection_Destroy
+	//  @0x4d08a7]
+	reconnect_.probing = false;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_GOODBYE, std::move(body));
 }
 
