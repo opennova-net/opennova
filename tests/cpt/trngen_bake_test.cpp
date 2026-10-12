@@ -239,12 +239,31 @@ void test_refusals() {
 	       "a bake runs on the caller's thread unless the embedder asks for more");
 }
 
+// Ground no map holds (every texel independently at random over the whole 16-bit range) merges, two
+// levels up, a face naming one point twice, which TrnGen's reduction cannot take (it frees the face at
+// one listing and reads it at the other); the bake refuses it in words instead (D-TERRAIN-21).
+void test_rough_ground_refused() {
+	TerrainBakeInput input;
+	input.depth16.resize(static_cast<size_t>(kDepthSide) * kDepthSide);
+	uint32_t seed = 0x2545F491u;
+	for (uint16_t &h : input.depth16) {
+		seed = seed * 1664525u + 1013904223u;
+		h = static_cast<uint16_t>(seed >> 16);
+	}
+	input.threads = TerrainBakeInput::for_hardware();
+	CptFile cpt;
+	std::string error;
+	expect(!bake_terrain(input, cpt, error) && error.find("too rough") != std::string::npos,
+	       "random full-range ground is refused in words: " + error);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
 	test_bake_reads_back();
 	test_bake_16bit();
 	test_refusals();
+	test_rough_ground_refused();
 	if (argc > 1) test_trngen_parity(argv[1]);
 	if (failures == 0) std::printf("cpt_trngen_bake: all passed\n");
 	return failures == 0 ? 0 : 1;

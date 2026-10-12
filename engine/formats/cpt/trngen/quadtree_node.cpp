@@ -101,6 +101,25 @@ static bool make_node_mesh(QuadtreeNode& node, const QuadtreeContext& ctx, std::
         error = node.mesh_data->failure;
         return false;
     }
+    // Port-only (D-TERRAIN-21): a merged face naming one vertex twice is refused before the reduction.
+    // The merge zero-fills a section's records past its mesh's count (LODMeshData_LoadSectionDedup), and
+    // the next merge dedups the zero records of different children into one vertex; TrnGen.exe reduces such
+    // faces as they are, its collapse listing the face twice under that vertex, removing and freeing it at
+    // the first listing and reading it at the second [orig: TrnGen.exe sub_4078B0 @ 0x407934..0x407956 (the
+    // MiscTools build)]: freed memory, a heap the bake corrupts. Only ground no map holds reaches it (every
+    // texel at random over the whole 16-bit range); sound ground never merges such a face.
+    if (!node.is_leaf) {
+        const auto* faces = reinterpret_cast<const uint16_t*>(node.mesh_data->face_data);
+        for (int i = 0; faces && i < node.mesh_data->face_count; ++i) {
+            const uint16_t a = faces[i * 3], b = faces[i * 3 + 1], c = faces[i * 3 + 2];
+            if (a == b || b == c || a == c) {
+                error = "the ground is too rough for the terrain bake: a merged node holds a face of one "
+                        "point twice, which TrnGen's simplifier cannot reduce";
+                return false;
+            }
+        }
+    }
+
 
     // Compute LOD parameters (ported from QuadtreeNode_Process lines 88-141)
     int tile_size = node.size;
