@@ -2,6 +2,7 @@
 
 #include "terrain/terrain.h"
 #include "terrain/terrain_surface_inputs.h"
+#include "terrain/terrain_image_convert.h"
 #include "terrain/terrain_tile_info.h"
 #include "env/water.h"
 #include "render/visual_layers.h"
@@ -76,6 +77,8 @@ void Terrain::_bind_methods() {
 		&Terrain::get_tile_cache_texture);
 	ClassDB::bind_method(D_METHOD("get_tile_cache_diagnostics"),
 		&Terrain::get_tile_cache_diagnostics);
+	ClassDB::bind_method(D_METHOD("update_colormap_region", "region", "at"), &Terrain::update_colormap_region);
+	ClassDB::bind_method(D_METHOD("update_blendmap_region", "region", "at"), &Terrain::update_blendmap_region);
 	ClassDB::bind_method(D_METHOD("invalidate_tile_cache_region", "minimum_x_q16",
 			"minimum_z_q16", "maximum_x_q16", "maximum_z_q16"),
 			&Terrain::invalidate_tile_cache_region);
@@ -322,6 +325,73 @@ int64_t Terrain::invalidate_tile_cache_region(int64_t p_minimum_x_q16,
 			static_cast<int32_t>(p_maximum_z_q16)));
 }
 
+namespace {
+
+// The live map `held` (RGBA8; `loaded`'s texels the first time) with `p_region` put in at `p_at`; the rect it took,
+// empty where it lies outside the map or nothing converts.
+Rect2i paint_live_map(Ref<Image> &held, const Ref<Texture2D> &loaded, const Ref<Image> &p_region, const Vector2i &p_at) {
+	if (p_region.is_null() || p_region->is_empty()) return Rect2i();
+	if (held.is_null() || held->is_empty()) {
+		opennova::terrain::Rgba8Image texels;
+		if (!texture_to_rgba8(loaded, texels)) return Rect2i();
+		PackedByteArray bytes;
+		bytes.resize(int64_t(texels.pixels.size()));
+		std::memcpy(bytes.ptrw(), texels.pixels.data(), texels.pixels.size());
+		held = Image::create_from_data(int(texels.width), int(texels.height), false, Image::FORMAT_RGBA8, bytes);
+	} else if (held->is_compressed() || held->has_mipmaps() || held->get_format() != Image::FORMAT_RGBA8) {
+		held = held->duplicate();
+		if (held->is_compressed()) held->decompress();
+		held->clear_mipmaps();
+		held->convert(Image::FORMAT_RGBA8);
+	}
+	if (held.is_null()) return Rect2i();
+	Ref<Image> region = p_region;
+	if (region->is_compressed() || region->get_format() != Image::FORMAT_RGBA8) {
+		region = p_region->duplicate();
+		if (region->is_compressed()) region->decompress();
+		region->convert(Image::FORMAT_RGBA8);
+	}
+	const Rect2i rect = Rect2i(p_at, region->get_size());
+	if (!Rect2i(Vector2i(), held->get_size()).encloses(rect)) return Rect2i();
+	held->blit_rect(region, Rect2i(Vector2i(), region->get_size()), p_at);
+	return rect;
+}
+
+} // namespace
+
+bool Terrain::update_colormap_region(const Ref<Image> &p_region, const Vector2i &p_at) {
+	if (!built || terrain_data.is_null() || terrain_material.is_null()) {
+		return false;
+	}
+	Ref<Image> map = terrain_data->get_colormap_image();
+	const Rect2i rect = paint_live_map(map, terrain_data->get_colormap(), p_region, p_at);
+	if (rect.size.x <= 0 || rect.size.y <= 0) {
+		return false;
+	}
+	// The data keeps the live map whatever the cache does with it: a build reads it next.
+	terrain_data->set_colormap_image(map);
+	const PackedByteArray texels = map->get_data();
+	return tile_cache_device.update_colormap_region(texels.ptr(), uint32_t(map->get_width()),
+			uint32_t(map->get_height()), rect.position.x, rect.position.y, rect.size.x, rect.size.y);
+}
+
+bool Terrain::update_blendmap_region(const Ref<Image> &p_region, const Vector2i &p_at) {
+	if (!built || terrain_data.is_null() || terrain_material.is_null()) {
+		return false;
+	}
+	Ref<Image> map = terrain_data->get_blendmap_image();
+	const Rect2i rect = paint_live_map(map, terrain_data->get_detailblendmap(), p_region, p_at);
+	if (rect.size.x <= 0 || rect.size.y <= 0) {
+		return false;
+	}
+	terrain_data->set_blendmap_image(map);
+	if (!surface_inputs->update_blendmap_region(map, rect)) {
+		return false;
+	}
+	surface_inputs->apply_to_material(terrain_material);
+	return true;
+}
+
 std::optional<opennova::TerrainTilePageBinding>
 Terrain::get_tile_cache_binding_for_world_point_native(
 		float p_world_x, float p_world_z) {
@@ -366,7 +436,7 @@ void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
 	}
 	surface_inputs->set_tile_info_override(p_info);
 	if (built) {
-		_rebuild_tile_overlay_pages();
+		_update_tile_overlay_pages();
 	}
 }
 
@@ -1127,9 +1197,29 @@ void Terrain::_on_terrain_changed() {
 	_load_textures();
 }
 
+void Terrain::_update_tile_overlay_pages() {
+	if (terrain_material.is_null()) {
+		return;
+	}
+	// The placement the pages draw: the override, else the terrain's own (TerrainTileCacheDevice::rebuild's choice);
+	// a declared file that does not resolve is the rebuild's to report.
+	Ref<TerrainTileInfo> tiles = tile_info_override;
+	if (tiles.is_null() && terrain_data.is_valid()) {
+		tiles = terrain_data->get_tileinfo_resource();
+		if (tiles.is_null() && !terrain_data->get_tileinfo_filename().strip_edges().is_empty()) {
+			_rebuild_tile_overlay_pages();
+			return;
+		}
+	}
+	if (tile_cache_device.set_tile_entries(tiles.is_valid() ? tiles->to_native() : opennova::TilFile())) {
+		return;
+	}
+	_rebuild_tile_overlay_pages();
+}
+
 void Terrain::_on_tile_info_changed() {
 	if (!built || terrain_data.is_null()) return;
-	_rebuild_tile_overlay_pages();
+	_update_tile_overlay_pages();
 }
 
 void Terrain::_hide_visible_patches() {
@@ -1520,14 +1610,12 @@ bool Terrain::refresh_region(const opennova::terrain::CoordsRect &p_rect, const 
 	opennova::refresh_terrain_scene_snapshot(scene_snapshot, cpt, trn, p_tiles, p_rect);
 
 	// The heightfield normals and the pages that show them.
-	std::array<bool, 4> quadrants{};
+	std::array<opennova::terrain::CoordsRect, 4> written{};
 	int64_t pages_retired = 0;
-	bool normals_in_place = surface_inputs->refresh_heightfield_region(p_rect, quadrants);
+	bool normals_in_place = surface_inputs->refresh_heightfield_region(p_rect, written);
 	if (normals_in_place) {
-		const opennova::terrain::TerrainHeightField field = opennova::terrain::height_field_from(cpt, trn);
-		const std::optional<std::size_t> retired = tile_cache_device.refresh_heightfield_normal(
-				surface_inputs->get_heightfield_normal_image(), quadrants,
-				opennova::terrain::terrain_atlas_routing(field), field.locks, p_rect);
+		const std::optional<std::size_t> retired = tile_cache_device.update_heightfield_normal_region(
+				surface_inputs->get_heightfield_normal_image(), written);
 		if (retired) {
 			pages_retired = static_cast<int64_t>(*retired);
 		} else {
@@ -1554,7 +1642,7 @@ bool Terrain::refresh_region(const opennova::terrain::CoordsRect &p_rect, const 
 	}
 	refresh_tiles_remeshed_ = tiles_remeshed;
 	refresh_normal_quadrants_ = 0;
-	for (const bool written : quadrants) refresh_normal_quadrants_ += written ? 1 : 0;
+	for (const opennova::terrain::CoordsRect &box : written) refresh_normal_quadrants_ += box.w > 0 && box.h > 0 ? 1 : 0;
 	refresh_normals_in_place_ = normals_in_place;
 	refresh_pages_retired_ = pages_retired;
 	return true;

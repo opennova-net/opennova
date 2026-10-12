@@ -1275,6 +1275,12 @@ target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
 
+# Every shipped char and foliage map read with its carried form and written again the same bytes.
+add_executable(pcx_retail_maps_test pcx/pcx_retail_maps_test.cpp)
+target_link_libraries(pcx_retail_maps_test PRIVATE opennova_formats)
+target_include_directories(pcx_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(pcx_retail_maps COMMAND pcx_retail_maps_test)
+
 # The 256-colour quantizer an 8-bit PCX is written through (formats/pcx/pcx_quantize.h).
 add_executable(pcx_quantize_test pcx/pcx_quantize_test.cpp)
 target_link_libraries(pcx_quantize_test PRIVATE opennova_formats)
@@ -1310,6 +1316,20 @@ add_executable(tga_write_test tga/tga_write_test.cpp)
 target_link_libraries(tga_write_test PRIVATE opennova_formats)
 target_include_directories(tga_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_write COMMAND tga_write_test)
+
+# A true-colour TGA's carried form (formats/tga TgaForm): the depth, the descriptor and the TGA 2.0 footer read
+# back and written again the same bytes; files the writer does not make read no form.
+add_executable(tga_roundtrip_test tga/tga_roundtrip_test.cpp)
+target_link_libraries(tga_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(tga_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_roundtrip COMMAND tga_roundtrip_test)
+
+# Every shipped terrain colour map, detail blend map and tile atlas read with its form and written again the
+# same bytes.
+add_executable(tga_retail_maps_test tga/tga_retail_maps_test.cpp)
+target_link_libraries(tga_retail_maps_test PRIVATE opennova_formats)
+target_include_directories(tga_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(tga_retail_maps COMMAND tga_retail_maps_test)
 
 add_executable(dds_write_test dds/dds_write_test.cpp)
 target_link_libraries(dds_write_test PRIVATE opennova_formats)
@@ -1425,6 +1445,32 @@ add_executable(cpt_trngen_heightmap_depth_test cpt/trngen_heightmap_depth_test.c
 target_link_libraries(cpt_trngen_heightmap_depth_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_heightmap_depth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cpt_trngen_heightmap_depth COMMAND cpt_trngen_heightmap_depth_test)
+# A sculpted heightmap written again: every height under its white read back exactly through a
+# 16-bit grey PNG (formats/cpt/trngen heightmap_depth.h encode_heightmap_depth16).
+add_executable(heightmap_depth_encode16_test cpt/trngen_heightmap_encode_test.cpp)
+target_link_libraries(heightmap_depth_encode16_test PRIVATE opennova_formats)
+target_include_directories(heightmap_depth_encode16_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME heightmap_depth_encode16 COMMAND heightmap_depth_encode16_test)
+
+# The TrnGen bake's region bake (formats/cpt/trngen terrain_region_bake.h): which leaves an edited
+# depth texel reaches (the taps, wraps and locks), and a region baked again landing the bytes and
+# the state a whole bake of the edited map makes.
+add_executable(cpt_trngen_leaf_taps_test cpt/trngen_leaf_taps_test.cpp)
+target_link_libraries(cpt_trngen_leaf_taps_test PRIVATE opennova_formats)
+target_include_directories(cpt_trngen_leaf_taps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_trngen_leaf_taps COMMAND cpt_trngen_leaf_taps_test)
+add_executable(cpt_trngen_region_bake_test cpt/trngen_region_bake_test.cpp)
+target_link_libraries(cpt_trngen_region_bake_test PRIVATE opennova_formats)
+target_include_directories(cpt_trngen_region_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_trngen_region_bake COMMAND cpt_trngen_region_bake_test)
+# Over the shipped .cpt files (a cold bake's state from the atlas; the W3 draw-back report).
+add_executable(cpt_region_bake_retail_test cpt/trngen_region_bake_retail_test.cpp)
+target_link_libraries(cpt_region_bake_retail_test PRIVATE opennova_formats)
+target_include_directories(cpt_region_bake_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(cpt_region_bake_retail COMMAND cpt_region_bake_retail_test)
+# By hand: the region bake's cost per node level (`trngen_region_bake_bench [threads]`).
+add_executable(trngen_region_bake_bench EXCLUDE_FROM_ALL cpt/trngen_region_bake_bench.cpp)
+target_link_libraries(trngen_region_bake_bench PRIVATE opennova_formats)
 
 # ENV environment/time-of-day format tests
 add_executable(env_unit_test env/env_unit_test.cpp)
@@ -4195,6 +4241,13 @@ add_executable(npruntime_host_config_test npruntime/host_config_test.cpp)
 target_link_libraries(npruntime_host_config_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_host_config_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_config COMMAND npruntime_host_config_test)
+# The process's cfg block (D-NET-335, inmatch/game_config_block.h): the start's,
+# the mount's and the reload's reads of game.cfg, the mpreset exit at a read,
+# the save, and a ServerCommand before and after the match binds (D-NET-383).
+add_executable(npruntime_game_config_block_test npruntime/game_config_block_test.cpp)
+target_link_libraries(npruntime_game_config_block_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_game_config_block_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_game_config_block COMMAND npruntime_game_config_block_test)
 # The host's map rotation (D-NET-331): the list ops and cursor rules, the
 # round-end advance and its REPLAY wrap, the host screen's seed, the round end's
 # exit reason under REPLAY / LASTGAME, and the map change's router over the

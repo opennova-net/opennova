@@ -1,6 +1,7 @@
 name: Net stack (Linux)
 
-# The Linux net leg the NovaWorld images workflow gates its image builds on:
+# The Linux net leg the NovaWorld images and serve image workflows gate their
+# image builds on:
 # the standalone novaworld server with the Crow HTTP layer ON plus the
 # net-scoped ctests, on the deploy target's OS and flag set, and a Linux
 # compile of the mission-kernel embedders (extract, wire, opennova-serve) with

@@ -320,26 +320,35 @@ void rasterize_terrain_depth(const QuadtreeNode& node,
     const auto& level0 = mesh->levels[0];
     if (!level0.face_index_data || level0.face_count <= 0) return;
 
-    const uint8_t* vdata = mesh->vertex_data; // 40 bytes per vertex
-    const uint16_t* fdata = level0.face_index_data;
-    int face_count = level0.face_count;
+    // 40 bytes (10 floats) per vertex: x at +0, the height at +4, z at +8.
+    rasterize_terrain_faces(reinterpret_cast<const float*>(mesh->vertex_data), 10, level0.face_index_data,
+                            level0.face_count, depth_out);
+}
+
+void rasterize_terrain_faces(const float* vertices, int stride, const uint16_t* faces, int face_count,
+                             std::vector<uint16_t>& depth_out) {
+    if (depth_out.size() != 1024 * 1024) depth_out.assign(1024 * 1024, 0);
+    if (!vertices || !faces) return;
+    const auto* vdata = reinterpret_cast<const uint8_t*>(vertices);
+    const size_t step = sizeof(float) * static_cast<size_t>(stride);
+    const uint16_t* fdata = faces;
 
     for (int fi = 0; fi < face_count; fi++) {
-        // Get 3 vertex positions (x at +0, y/height at +4, z at +8 in 40-byte record)
+        // Get 3 vertex positions (x, the height, z: a vertex's first three floats)
         int vi0 = fdata[fi * 3];
         int vi1 = fdata[fi * 3 + 1];
         int vi2 = fdata[fi * 3 + 2];
 
         float v0x, v0y, v0z, v1x, v1y, v1z, v2x, v2y, v2z;
-        std::memcpy(&v0x, vdata + 40 * vi0, 4);
-        std::memcpy(&v0y, vdata + 40 * vi0 + 4, 4);
-        std::memcpy(&v0z, vdata + 40 * vi0 + 8, 4);
-        std::memcpy(&v1x, vdata + 40 * vi1, 4);
-        std::memcpy(&v1y, vdata + 40 * vi1 + 4, 4);
-        std::memcpy(&v1z, vdata + 40 * vi1 + 8, 4);
-        std::memcpy(&v2x, vdata + 40 * vi2, 4);
-        std::memcpy(&v2y, vdata + 40 * vi2 + 4, 4);
-        std::memcpy(&v2z, vdata + 40 * vi2 + 8, 4);
+        std::memcpy(&v0x, vdata + step * vi0, 4);
+        std::memcpy(&v0y, vdata + step * vi0 + 4, 4);
+        std::memcpy(&v0z, vdata + step * vi0 + 8, 4);
+        std::memcpy(&v1x, vdata + step * vi1, 4);
+        std::memcpy(&v1y, vdata + step * vi1 + 4, 4);
+        std::memcpy(&v1z, vdata + step * vi1 + 8, 4);
+        std::memcpy(&v2x, vdata + step * vi2, 4);
+        std::memcpy(&v2y, vdata + step * vi2 + 4, 4);
+        std::memcpy(&v2z, vdata + step * vi2 + 8, 4);
 
         // Bounding box in x (column) and z (row), clamped to [0, 1023]
         int min_x = static_cast<int>(v0x);

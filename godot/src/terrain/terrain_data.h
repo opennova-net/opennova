@@ -256,6 +256,13 @@ public:
 	Ref<Image> get_heightmap_image() const;
 	Ref<Image> get_colormap_image() const;
 	Ref<Image> get_blendmap_image() const;
+	// The colour map and the detail blend map as an editor's paint left them (ADR 0046 S25): the live images every
+	// later build of the tile cache and the surface inputs reads in place of the loaded textures, until the data is
+	// loaded again (a load drops them). No change is published: the Terrain that draws them is told the region
+	// (Terrain::update_colormap_region, update_blendmap_region), never a rebuild. The loaded textures stand: what
+	// reads them (get_colormap: the foliage's tint, the minimap) keeps the map as loaded until the next load.
+	void set_colormap_image(const Ref<Image> &p_image) { colormap_image = p_image; }
+	void set_blendmap_image(const Ref<Image> &p_image) { blendmap_image = p_image; }
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;

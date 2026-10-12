@@ -229,6 +229,9 @@ private:
 	void _load_textures();
 	void _clear_derived_textures();
 	void _rebuild_tile_overlay_pages();
+	// The placed tiles changed (a new override, or its entries edited): the pages whose squares changed recompose in
+	// place (TerrainTileCacheDevice::set_tile_entries), else the overlay pages are built again.
+	void _update_tile_overlay_pages();
 	void _clear_terrain();
 	void _hide_visible_patches();
 	void _clear_patch_pool();
@@ -291,6 +294,19 @@ public:
 	int64_t invalidate_tile_cache_region(int64_t p_minimum_x_q16,
 			int64_t p_minimum_z_q16, int64_t p_maximum_x_q16,
 			int64_t p_maximum_z_q16);
+	// A region of the colour map painted (an editor's paint stroke, ADR 0046 S25): `p_region` the changed texels
+	// as they now stand, their top left at `p_at` in the map. They go into the data's live map
+	// (TerrainData::get_colormap_image, the loaded texture's texels the first time, every later build reading it),
+	// and the tile cache carries them through the colour quadrants in place and recomposes every page that samples
+	// one (TerrainTileCacheDevice::update_colormap_region): the bytes a build of the painted map composes. False,
+	// nothing changed, where the terrain is not built, the region lies outside the map, or the map is another size
+	// than the one the tile cache was built from (a build is the way).
+	bool update_colormap_region(const Ref<Image> &p_region, const Vector2i &p_at);
+	// A region of the detail blend map painted, the same way: the data's live map takes it and the surface inputs
+	// normalize it into their blend texture in place (TerrainSurfaceInputs::update_blendmap_region), which the
+	// material samples at its draw: no page holds the blend. False, nothing changed, where the terrain is not built
+	// or the region lies outside the map.
+	bool update_blendmap_region(const Ref<Image> &p_region, const Vector2i &p_at);
 	std::optional<opennova::TerrainTilePageBinding>
 	get_tile_cache_binding_for_world_point_native(
 			float p_world_x, float p_world_z);
@@ -303,6 +319,11 @@ public:
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;
 
+	// The placed tiles the terrain draws in place of its own (a mission's .til, as the game's load takes it). A new
+	// override, or an edit of its entries (its `changed`), recomposes the pages whose squares changed in place
+	// (_update_tile_overlay_pages). The terrain's own tiles (TerrainData's resource, cached by its path) are read at
+	// a build and never watched: an editor's tile edits go through an override it keeps (ADR 0046 S25), whatever
+	// file they edit.
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;
 

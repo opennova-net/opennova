@@ -177,8 +177,8 @@ bool refresh_heightfield_normal_map(
 		uint32_t height,
 		const TerrainQuadrantLocks &locks,
 		const terrain::CoordsRect &rect,
-		std::array<bool, 4> *quadrants_written) {
-	if (quadrants_written != nullptr) quadrants_written->fill(false);
+		std::array<terrain::CoordsRect, 4> *written) {
+	if (written != nullptr) written->fill(terrain::CoordsRect{0, 0, 0, 0});
 	if (!is_power_of_two(width) || !is_power_of_two(height) ||
 			width < 2 || height < 2 ||
 			depth.size() != static_cast<size_t>(width) * height ||
@@ -196,11 +196,16 @@ bool refresh_heightfield_normal_map(
 	const auto column_in = [&](uint32_t v) { return v >= x0 && v < x1; };
 	const auto row_in = [&](uint32_t v) { return v >= z0 && v < z1; };
 	const HeightfieldNormalKernel kernel{depth, width, height, locks};
+	// Each quadrant's box of the texels written: [x0, x1) x [z0, z1), x1 = 0 for none.
+	std::array<std::array<uint32_t, 4>, 4> boxes{};
 	const auto write = [&](uint32_t x, uint32_t y) {
 		kernel.write(x, y, normals.pixels.data());
-		if (quadrants_written != nullptr) {
-			(*quadrants_written)[(x >= (width >> 1) ? 1u : 0u) + (y >= (height >> 1) ? 2u : 0u)] = true;
+		std::array<uint32_t, 4> &box = boxes[(x >= (width >> 1) ? 1u : 0u) + (y >= (height >> 1) ? 2u : 0u)];
+		if (box[2] == 0) {
+			box = {x, y, x + 1, y + 1};
+			return;
 		}
+		box = {std::min(box[0], x), std::min(box[1], y), std::max(box[2], x + 1), std::max(box[3], y + 1)};
 	};
 	// The rect's rows: a texel whose left or right tap is one of its columns.
 	for (uint32_t y = static_cast<uint32_t>(z0); y < static_cast<uint32_t>(z1); ++y) {
@@ -216,6 +221,14 @@ bool refresh_heightfield_normal_map(
 			if (row_in(kernel.resolve_y(x, y, y - 1)) || row_in(kernel.resolve_y(x, y, y + 1))) {
 				write(x, y);
 			}
+		}
+	}
+	if (written != nullptr) {
+		for (size_t q = 0; q < 4; ++q) {
+			const std::array<uint32_t, 4> &box = boxes[q];
+			if (box[2] == 0) continue;
+			(*written)[q] = terrain::CoordsRect{static_cast<int32_t>(box[0]), static_cast<int32_t>(box[1]),
+					static_cast<int32_t>(box[2] - box[0]), static_cast<int32_t>(box[3] - box[1])};
 		}
 	}
 	return true;

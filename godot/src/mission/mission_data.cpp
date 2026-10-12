@@ -678,9 +678,11 @@ Error MissionData::save_as(const String &path) {
 	bool ok = false;
 	mission::sync_counts(file_);
 	if (ext == "mis") {
-		// The .mis writer takes the editor-sampled terrain heights (flat, write order) and emits
-		// them as each entity's extra_bheight next to the height_lock declaration; see
-		// mission_mis.h write_mis_text and docs/mission/mis-format-re.md (D-MIS-4).
+		// The .mis writer takes the terrain's heights under the entities (flat, write order) for a
+		// document in the .bms's frame: an unlocked entity's z is written relative to them, a locked
+		// one's base absolute over them, and with none an entity is written locked and absolute; a
+		// document read from a .mis writes its heights back as it stands. See mission_mis.h
+		// write_mis_text and docs/mission/mis-format-re.md (D-MIS-4, D-MIS-17).
 		std::vector<int32_t> base_heights;
 		base_heights.reserve(static_cast<size_t>(staged_heights.size()));
 		for (int i = 0; i < staged_heights.size(); ++i) {

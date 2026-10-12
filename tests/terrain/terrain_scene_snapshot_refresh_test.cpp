@@ -267,7 +267,7 @@ void test_normals() {
 				terrain::Rgba8Image normals = terrain::build_heightfield_normal_map(depth, dim, dim, lock_sets[l]);
 				const terrain::Rgba8Image before = normals;
 				sculpt(depth, static_cast<int>(dim), rect, 3u + static_cast<uint32_t>(rect.z));
-				std::array<bool, 4> written{};
+				std::array<terrain::CoordsRect, 4> written{};
 				const bool ok =
 						terrain::refresh_heightfield_normal_map(normals, depth, dim, dim, lock_sets[l], rect, &written);
 				const terrain::Rgba8Image fresh = terrain::build_heightfield_normal_map(depth, dim, dim, lock_sets[l]);
@@ -275,13 +275,24 @@ void test_normals() {
 						std::to_string(rect.x) + "," + std::to_string(rect.z) + " " + std::to_string(rect.w) + "x" +
 						std::to_string(rect.h) + ")";
 				check(ok && normals.pixels == fresh.pixels, "the refreshed normal map equals a fresh build " + where);
-				// A quadrant not reported written kept every byte.
+				// Each quadrant's box lies inside it, and every changed texel inside its quadrant's box.
+				for (size_t q = 0; q < 4; ++q) {
+					const terrain::CoordsRect &box = written[q];
+					if (box.w <= 0 && box.h <= 0) continue;
+					const int qx = (q & 1u) ? static_cast<int>(dim / 2) : 0, qz = (q & 2u) ? static_cast<int>(dim / 2) : 0;
+					check(box.w > 0 && box.h > 0 && box.x >= qx && box.z >= qz &&
+								  box.x + box.w <= qx + static_cast<int>(dim / 2) &&
+								  box.z + box.h <= qz + static_cast<int>(dim / 2),
+							"a written box lies inside its quadrant " + where);
+				}
 				for (uint32_t y = 0; y < dim; ++y) {
 					for (uint32_t x = 0; x < dim; ++x) {
-						const size_t q = (x >= dim / 2 ? 1u : 0u) + (y >= dim / 2 ? 2u : 0u);
+						const terrain::CoordsRect &box = written[(x >= dim / 2 ? 1u : 0u) + (y >= dim / 2 ? 2u : 0u)];
+						const bool inside = static_cast<int>(x) >= box.x && static_cast<int>(x) < box.x + box.w &&
+								static_cast<int>(y) >= box.z && static_cast<int>(y) < box.z + box.h;
 						const size_t at = (static_cast<size_t>(y) * dim + x) * 4;
-						if (!written[q] && std::memcmp(&before.pixels[at], &fresh.pixels[at], 4) != 0) {
-							check(false, "a changed texel lies in a quadrant not reported written " + where);
+						if (!inside && std::memcmp(&before.pixels[at], &fresh.pixels[at], 4) != 0) {
+							check(false, "a changed texel lies outside its quadrant's written box " + where);
 							y = dim;
 							break;
 						}

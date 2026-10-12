@@ -136,12 +136,18 @@ func test_the_composed_pages_over_the_changed_normals_retire() -> void:
 	camera.make_current()
 	var settled := await TestFs.settle_tile_cache(self, terrain)
 	assert_gt(int(settled.get("frame_requests", 0)), 0, "pages are composed")
+	# A small rect: only the pages that sample its changed normals retire.
+	assert_true(data.patch_heights_raw16(RECT, _raised(data, RECT)))
+	assert_true(terrain.refresh_region(RECT, PackedInt32Array()))
+	var some := terrain.get_refresh_pages_retired()
+	assert_gt(some, 0, "the pages over the rect's normals retired")
+	settled = await TestFs.settle_tile_cache(self, terrain)
 	# The whole atlas raised: every composed page shows a changed normal.
 	var whole := Rect2i(0, 0, TerrainData.ATLAS_SIZE, TerrainData.ATLAS_SIZE)
 	assert_true(data.patch_heights_raw16(whole, _raised(data, whole)))
 	assert_true(terrain.refresh_region(whole, PackedInt32Array()))
 	assert_eq(terrain.get_refresh_normal_quadrants(), 4)
-	assert_gt(terrain.get_refresh_pages_retired(), 0, "the composed pages retired")
+	assert_gt(terrain.get_refresh_pages_retired(), some, "every composed page retired, more than the rect's")
 	var again := await TestFs.settle_tile_cache(self, terrain)
 	assert_eq(int(again["pending_jobs"]), 0, "they compose again")
 

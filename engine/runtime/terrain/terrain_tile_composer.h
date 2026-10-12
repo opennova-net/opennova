@@ -12,6 +12,7 @@
 // overlay quads, DOT3 light pass; GDynamicVB_FillFullscreenQuadVertices @ 0x678DB0
 // copies the quad positions unbiased; the .cpp carries the per-pass witnesses.]
 
+#include <runtime/renderer/texture_dxt.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain/terrain_tile_light_epoch.h>
 #include <runtime/terrain/terrain_scorch.h>
@@ -19,6 +20,7 @@
 #include <formats/til/til.h>
 
 #include <array>
+#include <memory>
 #include <vector>
 
 namespace opennova::terrain {
@@ -48,8 +50,21 @@ inline constexpr bool terrain_map_split_overruns(uint32_t width, uint32_t height
 // GTexture_FindOrCreateFromData @ 0x676C40 -> GTexture_CreateFromPixelData_0
 // @ 0x676CC0; quadrant select (key >> 24 & 2) + (key >> 9 & 1)
 // @ 0x60DD1A..0x60DD28]
+// One quadrant texture: its levels as their texels read back, and, where its creation flags compress it (a DXT
+// format), each level's blocks, which the texels decode from (what an editor's paint encodes again block by block,
+// terrain_tile_quadrant_update.h). Its creation flags with them.
+struct TerrainTileQuadrantChain {
+	std::vector<Rgba8Image> levels;
+	std::vector<renderer::DxtSurface> dxt; // one a level, or none (A8R8G8B8, a halved or synthetic texture)
+	uint32_t creation_flags = 0;
+};
+
+// Each chain is shared between the sources that hold it, so a source made again over one changed quadrant (a paint
+// stroke's dab) copies that chain alone.
 struct TerrainTileQuadrantSource {
-	std::array<std::vector<Rgba8Image>, 4> quadrants;
+	std::array<std::shared_ptr<const TerrainTileQuadrantChain>, 4> quadrants;
+	// The quadrant's levels (none where it holds no chain).
+	const std::vector<Rgba8Image> &levels(size_t quadrant) const noexcept;
 	bool is_valid() const noexcept;
 };
 
@@ -71,17 +86,9 @@ uint32_t terrain_colormap_quadrant_flags(int32_t session_texcompression_level);
 // (a synthetic texture) keeps its single base level.
 TerrainTileQuadrantSource build_terrain_tile_quadrant_source(
 		const Rgba8Image &atlas, uint32_t creation_flags = kTerrainQuadrantCreationFlags);
-
-// The quadrants of `source` (build_terrain_tile_quadrant_source's of an atlas
-// of `atlas`'s shape) that `quadrants` names made again from `atlas`, every
-// other quadrant kept: equal to a fresh build when only those quadrants'
-// texels changed (an editor's sculpt stroke). `quadrants` names the atlas's
-// quadrants in the .trn lock order (top-left, top-right, bottom-left,
-// bottom-right: refresh_heightfield_normal_map's report). False, nothing
-// changed, for an atlas of another shape or an invalid source.
-bool refresh_terrain_tile_quadrant_source(TerrainTileQuadrantSource &source,
-		const Rgba8Image &atlas, const std::array<bool, 4> &quadrants,
-		uint32_t creation_flags = kTerrainQuadrantCreationFlags);
+// One quadrant of `atlas` (its index in the split's Z-order) as build_terrain_tile_quadrant_source makes it.
+TerrainTileQuadrantChain build_terrain_tile_quadrant_chain(
+		const Rgba8Image &atlas, int quadrant, uint32_t creation_flags = kTerrainQuadrantCreationFlags);
 
 // The colormap as the map's terrain pass samples it: the four quadrants'
 // first levels under the session's texcompression_level, put back together.
@@ -111,6 +118,10 @@ struct TerrainTilePageSourceView {
 	TerrainTileLightEpoch light_bytes = kDefaultTerrainTileLightEpoch;
 };
 
+// MIPFILTER POINT: the level nearest a footprint of `texels_per_pixel` level-0 texels a pixel (the log2 rounded),
+// clamped to `levels`; a magnified or zero footprint stays on level 0.
+std::size_t terrain_tile_nearest_level(float texels_per_pixel, std::size_t levels);
+
 // Returns an invalid image when the job or mandatory source atlases are
 // invalid. Output is one tightly packed RGBA8 cache layer. RGB carries the
 // base colormap and the ordered .til and scorch overlays; A is the additive,
@@ -122,5 +133,17 @@ Rgba8Image compose_terrain_tile_page(
 		const TerrainTileCompositionJob &job,
 		const TerrainTilePageSourceView &sources,
 		std::size_t threads = 1);
+
+// A placed tile's square on the page plane, Q16, inclusive: x as the record stores it, z the stored z
+// negated, 16 units each way, the rectangle the page pass tests a record against.
+struct TerrainTileSquareQ16 {
+	int64_t minimum_x = 0, minimum_z = 0, maximum_x = 0, maximum_z = 0;
+};
+// The squares whose drawn tiles differ between two placements of one terrain (an editor's tile edit): at each
+// index where the records differ in what the page pass reads of them (the corner, the tile, the flags), both
+// records' squares, and past the shorter list each extra record's. The pass draws the records in file order,
+// later over earlier, so a record moved in the order touches every index it moved past. Whatever page none of
+// them overlaps composes the same bytes from either placement.
+std::vector<TerrainTileSquareQ16> terrain_tile_overlay_changes(const TilFile &before, const TilFile &after);
 
 } // namespace opennova::terrain

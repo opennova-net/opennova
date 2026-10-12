@@ -61,6 +61,9 @@ public:
 	bool refresh(uint32_t now_ms, bool force) override;
 	HostRegistration registration() const override;
 	std::vector<HostPlayerSlot> wanted_roster(const std::map<int, HostPlayerSlot> &current) const override;
+	// The server publishes at each mission start (Server::bind_listing), so the host result
+	// publishes nothing (D-NET-465).
+	bool starts_missions() const override { return true; }
 	void on_command(const ServerCommand &command) override;
 	void on_player_enter_result(const ClientSession::PlayerEnterResult &result) override;
 

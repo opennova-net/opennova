@@ -238,14 +238,17 @@ public:
 	// ERR_INVALID_PARAMETER when there is no current path (shell then offers Save As).
 	Error save_file();
 	Error save_as(const String &path);
-	// Stage editor-sampled terrain base heights for the NEXT save that routes through the
+	// Stage the terrain's heights under the entities for the NEXT save that routes through the
 	// .mis writer: one 16.16 fixed-point height per entity, FLAT in WRITE ORDER (items,
-	// buildings, markers, organics). The .mis writer emits each as the entity's
-	// `extra_bheight` — the baked base height the original editor subtracts from the
-	// height-locked absolute z [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
-	// Consumed and cleared by the next save_as()/save_file() (any format); when absent,
-	// extra_bheight falls back to the entity's parsed value (0 for .bms-sourced documents —
-	// positions stay absolute-declared, offsets just lose the baked base).
+	// buildings, markers, organics), as mission::mis_terrain_height samples them. A document in
+	// the .bms's frame (opened from a .bms, or new) writes them as the original editor's save
+	// does: an unlocked entity's z less its height there, a locked one's base plus it
+	// (mission_mis.h write_mis_text, D-MIS-4). An entity past them, every one when none is
+	// staged, is written locked, its z absolute, exact in the original editor over whatever
+	// terrain it loads (D-MIS-17). A document opened from a .mis keeps the file's own frame (this
+	// binding has no terrain to take it to the .bms's) and writes every height back as it stands,
+	// the staged heights unused. Consumed and cleared by the next save_as()/save_file() (any
+	// format).
 	void set_mis_base_heights(const PackedInt32Array &flat_write_order);
 	// The same staging fed world-unit floats: each height is encoded to the
 	// 16.16 raw here (round-to-nearest, NaN -> 0) so callers never restate the

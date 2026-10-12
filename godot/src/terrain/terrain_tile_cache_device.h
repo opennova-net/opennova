@@ -17,7 +17,7 @@
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain/terrain_tile_composition_worker.h>
-#include <runtime/terrain_query/terrain_atlas_rects.h>
+#include <runtime/terrain_query/coords.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 
 #include <array>
@@ -82,20 +82,19 @@ public:
 	bool append_terrain_scorch(
 			const opennova::terrain::TerrainScorchEntry &p_entry);
 	// The heightfield normals changed over a region (an editor's sculpt, ADR
-	// 0046 S25): the composition sources' normal quadrants `p_quadrants` (lock
-	// order) cut again from `p_normals` (the surface inputs' kept atlas), and
-	// every composed page where a normal over the heights' atlas rect
-	// `p_atlas_rect` shows (a texel the normal kernel's taps read: the rect's
-	// mission rects through `p_routing` and `p_locks`, over the composed pages'
-	// own bounds) retired, to recompose when next visible. nullopt, nothing
-	// changed, where the sources cannot take it in place (none ready, or an
-	// atlas of another shape): the caller rebuilds them.
-	std::optional<std::size_t> refresh_heightfield_normal(
+	// 0046 S25): `p_normals` the surface inputs' kept atlas as it now stands,
+	// `p_written` each quadrant's box of the normals made again (lock order;
+	// refresh_heightfield_normal_map's report). The normal quadrants' levels the
+	// boxes reach are made again over those texels alone
+	// (update_terrain_tile_quadrants: the bytes a build of the map holds), and
+	// every resident page that samples one of them recomposes, wherever the
+	// frame drew it (terrain_tile_page_samples), as update_colormap_region does
+	// for the colour map. The pages retired; nullopt, nothing changed, where the
+	// sources cannot take it in place (none ready, or an atlas of another
+	// shape): the caller rebuilds them.
+	std::optional<std::size_t> update_heightfield_normal_region(
 			const opennova::terrain::Rgba8Image &p_normals,
-			const std::array<bool, 4> &p_quadrants,
-			const opennova::terrain::TerrainAtlasRouting &p_routing,
-			const opennova::terrain::CoordsQuadrantLocks &p_locks,
-			const opennova::terrain::CoordsRect &p_atlas_rect);
+			const std::array<opennova::terrain::CoordsRect, 4> &p_written);
 	// Retires the pages a destroyed entity's bounds touch (the same inclusive
 	// Q16 test); they recompose the next time they are visible.
 	std::size_t invalidate_region(int32_t p_minimum_x_q16, int32_t p_minimum_z_q16,
@@ -103,6 +102,25 @@ public:
 	// Mission/replay reset: remove the permanent list and make every resident
 	// page cold so no prior compiled scorch survives the lifecycle boundary.
 	void clear_terrain_scorches();
+	// The placed tiles replaced in place (an editor's tile edit, ADR 0046 S25):
+	// the composition sources take `p_file` and only the resident pages a
+	// changed record's square overlaps recompose
+	// (terrain_tile_overlay_changes); the pages retired. nullopt, nothing
+	// changed, where the sources cannot take it in place (none ready, or tiles
+	// over sources built with no tile set): the caller rebuilds them.
+	std::optional<std::size_t> set_tile_entries(const opennova::TilFile &p_file);
+	// The colour map painted in place (an editor's paint stroke, ADR 0046 S25):
+	// the map as it now stands, `p_width` x `p_height` RGBA8 texels at
+	// `p_rgba`, and (x, y, w, h) its changed texels. The colour quadrants'
+	// levels the rect reaches are made again over those texels alone
+	// (update_terrain_tile_quadrants: the bytes a build of the map holds), and
+	// every resident page that samples one of them recomposes, wherever the
+	// frame drew it (terrain_tile_page_samples: past the sector grid's repeats
+	// and the shared flat page included). False, nothing changed, where the
+	// sources are not ready or the map is another size than the one they were
+	// built from.
+	bool update_colormap_region(const uint8_t *p_rgba, uint32_t p_width, uint32_t p_height,
+			int x, int y, int w, int h);
 
 	// The frame's page sweep over its draw list, composed and uploaded before
 	// the terrain draws; one binding per patch, not ready where the patch
@@ -152,6 +170,10 @@ private:
 	uint64_t cache_hits_ = 0;
 	uint64_t cache_misses_ = 0;
 	uint64_t upload_failures_ = 0;
+	uint64_t tile_entry_updates_ = 0;
+	uint64_t tile_entry_pages_retired_ = 0;
+	uint64_t colormap_region_updates_ = 0;
+	uint64_t colormap_pages_retired_ = 0;
 	opennova::terrain::TerrainScorchRegistry scorch_registry_;
 	bool scorch_textures_ready_ = false;
 	uint64_t scorch_records_rejected_ = 0;
