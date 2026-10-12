@@ -2,6 +2,7 @@
 #include <formats/mission/bms.h>
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
+#include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
@@ -600,12 +601,14 @@ bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_
 bool loadout_has_fourth_field(const std::string& value) {
     if (value.empty()) return false;
     if (io::retail_atol(value.c_str()) != 0) return true;
-    // ASCII letters, where retail's isalpha @0x40d0b4 is the ".ACP" class (cp1252's
-    // high-byte letters too; docs/net/novaworld-net-re.md D-NET-391, open).
+    // After one sign, any letter by the CRT isalpha under the ".ACP" LC_CTYPE, pinned to
+    // cp1252 (D-NET-478), on the sign-extended byte: a cp1252 high-byte letter marks the
+    // field missing too, and 0xFF, the EOF row, does not (docs/net/novaworld-net-re.md
+    // D-NET-391). [orig: AIProfile_SanitizeConfigData @0x40cfe0 — the sign @0x40d098..0x40d0a3,
+    //  _isalpha @0x76b703 of the movsx'd byte, the call @0x40d0b4]
     size_t pos = (value[0] == '-' || value[0] == '+') ? 1 : 0;
     for (; pos < value.size(); ++pos) {
-        const unsigned char c = static_cast<unsigned char>(value[pos]);
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return false;
+        if (cp1252_isalpha_sign_extended(value[pos])) return false;
     }
     return true;
 }

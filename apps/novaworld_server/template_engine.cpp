@@ -23,6 +23,34 @@ std::string trim(std::string_view s) {
 
 } // namespace
 
+std::string html_escape(std::string_view text) {
+	std::string out;
+	out.reserve(text.size());
+	for (const char c : text) {
+		switch (c) {
+			case '&':
+				out += "&amp;";
+				break;
+			case '<':
+				out += "&lt;";
+				break;
+			case '>':
+				out += "&gt;";
+				break;
+			case '"':
+				out += "&quot;";
+				break;
+			case '\'':
+				out += "&#39;";
+				break;
+			default:
+				out.push_back(c);
+				break;
+		}
+	}
+	return out;
+}
+
 std::string render_template(std::string_view tmpl, const TemplateVars &vars) {
 	std::string out;
 	out.reserve(tmpl.size());
@@ -46,7 +74,7 @@ std::string render_template(std::string_view tmpl, const TemplateVars &vars) {
 		const auto key = trim(tmpl.substr(open + 2, close - open - 2));
 		auto it = vars.find(key);
 		if (it != vars.end()) {
-			out.append(it->second);
+			out.append(html_escape(it->second));
 		} else {
 			// Leave unset markers in place so dev can spot them.
 			out.append(tmpl.substr(open, close - open + 2));

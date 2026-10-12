@@ -5,6 +5,7 @@
 // This is our NovaWorld server, not an emulator (CONTEXT.md "NovaWorld").
 
 #include "gate_listener.h"
+#include "loggable.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
 #ifdef OPENNOVA_HTTP_ENABLED
@@ -105,10 +106,14 @@ namespace {
 // The engine/ diagnostic channel (io/log.h): libraries are silent until the host
 // installs a sink. Reproduce the historical stream split — lifecycle to stdout,
 // warnings and errors to stderr; per-tick kDebug tracing opts in via NW_LOG_DEBUG.
+// A message is one line: its control bytes go out escaped (loggable), so a
+// name a NovaWorld session carried into an engine log line cannot forge another.
 bool g_log_debug_enabled = false;
 void app_log_sink(opennova::io::LogLevel level, const char *msg) {
 	if (level == opennova::io::LogLevel::kDebug && !g_log_debug_enabled) return;
-	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n", msg);
+	const std::string_view text(msg);
+	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n",
+			opennova::novaworld_server::loggable(text, text.size()).c_str());
 }
 } // namespace
 
@@ -199,8 +204,8 @@ int main() {
 	// --- Connection manager (shared across listeners) ---------------------
 	ConnectionManager manager(config.heartbeat_timeout_ms);
 	manager.on_added([](const Connection &c) {
-		std::printf("[conn] added id=0x%08x addr=%s pn=%s\n",
-		            c.id, peer_addr_to_string(c.addr).c_str(), c.pn.c_str());
+		std::printf("[conn] added id=0x%08x addr=%s pn=%s\n", c.id,
+				peer_addr_to_string(c.addr).c_str(), loggable(c.pn).c_str());
 	});
 
 	// --- Unknown-message tracker (shared across listeners) ----------------
@@ -249,8 +254,8 @@ int main() {
 	// dropped Connection's PeerAddr — lobby_states_ is keyed by addr, not by
 	// ci (two retail processes both send ci=0x00000001) (G.7).
 	manager.on_lost([&nwudp](const Connection &c, DropReason r) {
-		std::printf("[conn] lost  id=0x%08x identity='%s' reason=%s\n",
-		            c.id, c.identity.c_str(), drop_reason_name(r));
+		std::printf("[conn] lost  id=0x%08x identity='%s' reason=%s\n", c.id,
+				loggable(c.identity).c_str(), drop_reason_name(r));
 		nwudp.erase_lobby_state(c.addr, drop_reason_name(r));
 	});
 
