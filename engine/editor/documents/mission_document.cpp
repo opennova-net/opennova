@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <editor/documents/mission_file_set.h>
 #include <editor/documents/mission_labels.h>
@@ -199,12 +200,12 @@ std::vector<std::pair<int, int32_t>> held_numbers(const std::vector<std::shared_
 
 template <> std::string MissionRow::name() const { return native.get_mission_name(); }
 template <> std::string EntityRow::name() const { return std::to_string(native.id); }
-template <> std::string PathRow::name() const {
+template <> std::string MissionRecordRow<MissionPath>::name() const {
 	if (native.number == 0) return "None";
 	if (const char *command = path_command_editor_name(native.number)) return command;
 	return std::to_string(native.number);
 }
-template <> std::string AreaRow::name() const { return "Zone " + std::to_string(native.id); }
+template <> std::string MissionRecordRow<bms::AreaTrigger>::name() const { return "Zone " + std::to_string(native.id); }
 template <> std::string MissionRecordRow<mission::EventChain>::name() const { return std::string(); }
 
 template <> size_t MissionRow::footprint() const {
@@ -218,13 +219,43 @@ template <> size_t MissionRow::footprint() const {
 	return bytes;
 }
 template <> size_t EntityRow::footprint() const { return sizeof(EntityRow) + ids_footprint(); }
-template <> size_t PathRow::footprint() const {
+template <> size_t MissionRecordRow<MissionPath>::footprint() const {
 	return sizeof(PathRow) + ids_footprint() + footprint_of(native.record.waypoint_numbers) +
 	       footprint_of(native.record.padding) + footprint_of(native.stops);
 }
-template <> size_t AreaRow::footprint() const { return sizeof(AreaRow) + ids_footprint(); }
+template <> size_t MissionRecordRow<bms::AreaTrigger>::footprint() const { return sizeof(AreaRow) + ids_footprint(); }
 template <> size_t MissionRecordRow<mission::EventChain>::footprint() const {
 	return sizeof(EventRow) + ids_footprint() + footprint_of(native.triggers) + footprint_of(native.actions);
+}
+
+const std::string *mission_row_name(const Node &row) {
+	switch (static_cast<K>(row.kind)) {
+	case K::Event: return &static_cast<const EventRow &>(row).name;
+	case K::Area: return &static_cast<const AreaRow &>(row).description;
+	case K::WaypointPath: return &static_cast<const PathRow &>(row).description;
+	default: return nullptr;
+	}
+}
+std::string *mission_row_name(Node &row) {
+	return const_cast<std::string *>(mission_row_name(static_cast<const Node &>(row)));
+}
+
+const char *mission_name_field(NodeKind kind) {
+	switch (static_cast<K>(kind)) {
+	case K::Event: return "name";
+	case K::Area:
+	case K::WaypointPath: return "description";
+	default: return nullptr;
+	}
+}
+
+size_t mission_name_width(NodeKind kind) {
+	switch (static_cast<K>(kind)) {
+	case K::Event: return mission::kMisEventNameChars;
+	case K::Area:
+	case K::WaypointPath: return mission::kMisDescriptionChars;
+	default: return 0;
+	}
 }
 
 bool is_mission_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Mission; }
@@ -536,6 +567,33 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 	}
 	issue_codes_ = std::move(codes);
 
+	// The .mis the session read before this read of the file (S24 Names): what it holds against the mission; where
+	// it matches, its names are the rows' and its group descriptions the names of the groups the .bms holds none
+	// of (the original editor's .bms writer writes them as zeros, bms.h GroupRecord). A read the session handed
+	// none to (a save's read back, one from bytes) leaves what the last one found.
+	const bool names_read = names_file_pending_;
+	MissionNamesFile names;
+	if (names_read) {
+		const CompanionFile *beside = pending_names_file_.get();
+		if (beside && beside->state == CompanionFile::State::Read) {
+			names = read_names_file(file, chains, beside->bytes);
+		} else if (beside && beside->state == CompanionFile::State::Unreadable) {
+			names.found = MissionNamesFile::Found::Unopened;
+			names.why = beside->error;
+		} else {
+			names.found = MissionNamesFile::Found::None;
+		}
+		names_file_pending_ = false;
+		pending_names_file_.reset();
+	}
+	// What the mission takes of a matching one (MissionNamesFile::kept: what the setters take; the rest listed).
+	const bool take = names.found == MissionNamesFile::Found::Matched;
+	if (take)
+		for (size_t g = 1; g < file.group_records.size() && g < names.kept_groups.size(); ++g) {
+			std::string refused;
+			if (!names.kept_groups[g].empty()) bms::set_group_name(file.group_records[g], names.kept_groups[g], refused);
+		}
+
 	auto mission = std::make_shared<MissionRow>(k(K::Mission));
 	mission->native = file;
 	mission->native.items.clear();
@@ -564,19 +622,163 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 		MissionPath path{file.waypoint_records[i], int(i), {}};
 		for (const int marker : mission::waypoint_path_markers(file, i)) path.stops.push_back(uint32_t(marker));
 		auto row = std::make_shared<PathRow>(k(K::WaypointPath), std::move(path));
+		if (take && i < names.kept.paths.size()) row->description = names.kept.paths[i];
 		shape(*row);
 		rows.push_back(row);
 	}
+	std::set<int32_t> described; // an area of a zone id the first of it the .mis's description goes to
 	for (const bms::AreaTrigger &area : file.area_triggers) {
 		auto row = std::make_shared<AreaRow>(k(K::Area), area);
+		if (take && area.id > 0 && size_t(area.id) < names.kept.areas.size() && described.insert(area.id).second)
+			row->description = names.kept.areas[size_t(area.id)];
 		shape(*row);
 		rows.push_back(row);
 	}
-	for (EventChain &chain : chains) {
-		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chain));
+	for (size_t i = 0; i < chains.size(); ++i) {
+		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chains[i]));
+		if (take && i < names.kept.events.size()) row->name = names.kept.events[i];
 		shape(*row);
 		rows.push_back(row);
 	}
+	if (names_read) {
+		names_file_ = std::move(names);
+		outside_names_ = MissionNamesFile();
+		names_left_ = MissionNamesLeft();
+		spent_overwrite_ = 0;
+	}
+	return true;
+}
+
+// --- the .mis beside it ------------------------------------------------------------------------------------
+
+namespace {
+
+uint64_t bytes_fingerprint(const std::vector<uint8_t> &bytes) {
+	return io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+}
+
+const MissionFileState *mission_file_state(const FileState *state) { return dynamic_cast<const MissionFileState *>(state); }
+
+} // namespace
+
+void MissionDocument::take_names_file(const CompanionFile &file) {
+	++names_state_;
+	names_file_pending_ = true;
+	pending_names_file_ = std::make_shared<const CompanionFile>(file);
+}
+
+const MissionNamesFile &MissionDocument::names_file() const {
+	// Read the names again named the bytes the last save found in its place: those are the mission's now.
+	const MissionFileState *state = mission_file_state(file_state());
+	if (state && state->mis_known != 0 && outside_names_.found != MissionNamesFile::Found::Unread &&
+	    state->mis_known == outside_names_.fingerprint)
+		return outside_names_;
+	return names_file_;
+}
+
+uint64_t MissionDocument::names_file_overwrite() const {
+	const MissionFileState *state = mission_file_state(file_state());
+	return state && state->mis_overwrite != spent_overwrite_ ? state->mis_overwrite : 0;
+}
+
+bool MissionDocument::companion_unsaved() const {
+	const MissionNamesFile &known = names_file();
+	return known.found != MissionNamesFile::Found::Unread && !same_names(mission_names(*this), known.kept);
+}
+
+bool MissionDocument::names_file_due(const CompanionFile &now) {
+	++names_state_;
+	names_left_ = MissionNamesLeft();
+	writing_over_ = 0;
+	const MissionNamesFile &known = names_file();
+	if (known.found == MissionNamesFile::Found::Unread) return false; // read from bytes alone: nothing beside it known
+	switch (now.state) {
+	case CompanionFile::State::Absent:
+		// None there, or gone since: the editor's to make where the mission holds a name the .mis carries. Holding
+		// none, it has none to save: its names are saved as none (no .mis is no name), and nothing stays unsaved.
+		if (mission_holds_names(*this)) return true;
+		names_file_ = MissionNamesFile();
+		names_file_.found = MissionNamesFile::Found::None;
+		outside_names_ = MissionNamesFile();
+		return false;
+	case CompanionFile::State::Unreadable:
+		names_left_.unwritten = "the file system would not read it to see what it holds (" + now.error + ")";
+		return false;
+	case CompanionFile::State::Read: break;
+	}
+	const uint64_t at = bytes_fingerprint(now.bytes);
+	const uint64_t overwrite = names_file_overwrite();
+	if (overwrite != 0 && overwrite == at) {
+		writing_over_ = at;
+		return true;
+	}
+	if (at != known.fingerprint) {
+		// Bytes other than those read or written: another program's, left as they are, read for what they hold.
+		names_left_.outside = true;
+		outside_names_ = read_names_file(*this, now.bytes);
+		return false;
+	}
+	// The editor's own, matching the mission: written. The original editor's, one that does not match, one that does
+	// not read: left as they are (names_file_findings lists each), and where it matched when it was read or written
+	// and the mission's records moved since, why it no longer does (the next open takes none of its names). A write
+	// that fails says so too.
+	names_left_.stale = names_file_stale(*this, known);
+	return known.ours && known.found == MissionNamesFile::Found::Matched;
+}
+
+bool MissionDocument::names_file_text(std::string &text) {
+	std::string error;
+	const bool made = mission_names_text(*this, &base_heights_, text, error);
+	base_heights_.clear();
+	++names_state_;
+	if (!made) {
+		names_left_.unwritten = error;
+		writing_over_ = 0;
+	}
+	return made;
+}
+
+void MissionDocument::names_file_written(bool ok, uint64_t fingerprint, const std::string &error) {
+	++names_state_;
+	if (!ok) {
+		names_left_.unwritten = "the file system would not write it (" + error + ")";
+		writing_over_ = 0;
+		return;
+	}
+	// Written from the mission: its names the mission's now. Write it from the mission is spent by the write it
+	// was for: a later change to the file is left as it is again.
+	if (writing_over_ != 0) spent_overwrite_ = writing_over_;
+	writing_over_ = 0;
+	MissionNamesFile written;
+	written.found = MissionNamesFile::Found::Matched;
+	written.ours = true;
+	written.fingerprint = fingerprint;
+	written.kept = mission_names(*this);
+	// What it holds, as a read of it would hold it: the names and the events' lines it was written with.
+	written.names = written.kept;
+	for (const Node *row : rows_of(K::Event)) written.events.push_back(static_cast<const EventRow &>(*row).native);
+	names_file_ = std::move(written);
+	outside_names_ = MissionNamesFile();
+	names_left_ = MissionNamesLeft();
+}
+
+bool MissionDocument::set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) {
+	const bool overwrite = edit.field == kMisOverwriteField, known = edit.field == kMisKnownField;
+	if (!overwrite && !known) {
+		error = make_finding(CoreFinding::DocumentValue, DiagnosticSeverity::Error, "A mission has no such file-wide value.", path());
+		return false;
+	}
+	const auto *text = std::get_if<std::string>(&edit.value);
+	uint64_t fingerprint = 0;
+	if (!text || !fingerprint_from_hex(*text, fingerprint)) {
+		error = make_finding(CoreFinding::DocumentValue, DiagnosticSeverity::Error,
+		                     std::string(edit.field) + " names a .mis by its bytes' fingerprint: 16 hex digits.", path());
+		return false;
+	}
+	auto made = std::make_shared<MissionFileState>();
+	if (const MissionFileState *was = mission_file_state(state.get())) *made = *was;
+	(overwrite ? made->mis_overwrite : made->mis_known) = fingerprint;
+	state = std::move(made);
 	return true;
 }
 

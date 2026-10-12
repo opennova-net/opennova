@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/mission_names_file.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_validation.h>
 #include <editor/graph/graph_edge.h>
@@ -69,13 +70,42 @@ template <> size_t MissionRecordRow<bms::AreaTrigger>::footprint() const;
 template <> size_t MissionRecordRow<mission::EventChain>::footprint() const;
 using MissionRow = MissionRecordRow<bms::File>;
 using EntityRow = MissionRecordRow<bms::Entity>;
-using PathRow = MissionRecordRow<MissionPath>;
-using AreaRow = MissionRecordRow<bms::AreaTrigger>;
 
+// A path, an area trigger and an event with the name the .bms has no room for (S24 Names): a path's and an
+// area's description, an event's name, which the .mis beside the mission carries (mission_names_file.h). The
+// row is its kind's record (record(): the table's fields reach the format's record inside it, its name field
+// the row's own, mission_table.h), so a name is a field as any other, one undo.
+struct PathRow : MissionRecordRow<MissionPath> {
+	using MissionRecordRow::MissionRecordRow;
+	std::string description;
+	std::shared_ptr<Node> clone() const override { return std::make_shared<PathRow>(*this); }
+	RecordHandle record() const override { return {kind, const_cast<PathRow *>(this)}; }
+	size_t footprint() const override { return MissionRecordRow::footprint() + description.capacity(); }
+};
+struct AreaRow : MissionRecordRow<bms::AreaTrigger> {
+	using MissionRecordRow::MissionRecordRow;
+	std::string description;
+	std::shared_ptr<Node> clone() const override { return std::make_shared<AreaRow>(*this); }
+	RecordHandle record() const override { return {kind, const_cast<AreaRow *>(this)}; }
+	size_t footprint() const override { return MissionRecordRow::footprint() + description.capacity(); }
+};
 struct EventRow : MissionRecordRow<mission::EventChain> {
 	using MissionRecordRow::MissionRecordRow;
+	std::string name;
 	std::shared_ptr<Node> clone() const override { return std::make_shared<EventRow>(*this); }
+	RecordHandle record() const override { return {kind, const_cast<EventRow *>(this)}; }
+	size_t footprint() const override { return MissionRecordRow::footprint() + name.capacity(); }
 };
+// The name a row of a path, an area trigger or an event has (its field's value), null for a row of
+// another kind.
+const std::string *mission_row_name(const Node &row);
+std::string *mission_row_name(Node &row);
+// The field a kind's name is ("name" an event's, "description" a path's and an area's), null for a kind
+// with none.
+const char *mission_name_field(NodeKind kind);
+// The most bytes a kind's name holds (kMisEventNameChars an event's, kMisDescriptionChars a path's and an
+// area's, formats/mission/mission_mis.h: the original editor's dialogs), 0 for a kind with none.
+size_t mission_name_width(NodeKind kind);
 
 // The AI class each item's records are written with, by item id (MissionDocument::set_item_classes).
 using MissionItemClasses = std::unordered_map<int64_t, std::string>;
@@ -174,7 +204,43 @@ public:
 	// waypoint_id and wp_number) are the path whose stops name it and its place there, 0 and 0 on none;
 	// a path's count is how many stops it has. Every other field as its row holds it.
 	bool get(const NodeAddress &address, const std::string &field, Value &out) const override;
+
+	// --- the .mis beside it (S24 Names, documents/mission_names_file.h) ---------------------------------
+	// The .mis the session found beside the mission before it read the file (DocumentType::companions): none, its
+	// bytes, or one the file system would not read. The next read of the file (the load) takes its names where it
+	// matches the mission (read_names_file), the group names the .bms holds none of among them; a read from bytes
+	// alone takes none.
+	void take_names_file(const CompanionFile &file);
+	// The .mis as the mission knows it: as read or last written, or as Read the names again read it since (the
+	// file-wide value kMisKnownField naming those bytes).
+	const MissionNamesFile &names_file() const;
+	// What the last save found there in its place (changed outside the editor), read against the mission; Found::
+	// Unread for none.
+	const MissionNamesFile &names_outside_file() const { return outside_names_; }
+	// What the last save made of it where it left it as it is.
+	const MissionNamesLeft &names_left() const { return names_left_; }
+	// Whether a save writes it after the file (`now` the file as it stands; mission_names_file.h says where the
+	// editor writes it): false where it leaves it as it is, which names_left() then says.
+	bool names_file_due(const CompanionFile &now);
+	// The text that save writes (the mission's names, each entity's base height as set_base_heights handed them):
+	// false where the writer refuses the mission, which names_left() then says.
+	bool names_file_text(std::string &text);
+	// What the session made of that text: written (`fingerprint` the bytes'), or not (`error`, the file system's).
+	void names_file_written(bool ok, uint64_t fingerprint, const std::string &error);
+	// Each entity's base height for the next write, 16.16, in the writer's order (items, buildings, markers,
+	// organics): the terrain's height under it as the session samples it at the save (mission_names_file.h).
+	void set_base_heights(std::vector<int32_t> heights) { base_heights_ = std::move(heights); }
+	// The .mis Write it from the mission said a save writes over (MissionFileState), 0 for none or one a write spent.
+	uint64_t names_file_overwrite() const;
+	// The names the rows hold differ from those the .mis holds (MissionNamesFile::kept), a save having left it.
+	bool companion_unsaved() const override;
+	// Moves with each read of the .mis, each save's look at it and each write of it.
+	uint64_t companion_state() const override { return names_state_; }
+
 protected:
+	// Write it from the mission's and Read the names again's file-wide values (kMisOverwriteField, kMisKnownField):
+	// the fingerprint of the .mis each names, 16 hex digits (fingerprint_hex).
+	bool set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) override;
 	// What the table's labelled field decides on its record (a parameter's reference and whether the
 	// game reads it, by its type), then the mission's own: the scope of what the file defines and
 	// names by id (the mission's file name), a parameter's label and its own choices, a sub-type's
@@ -253,6 +319,18 @@ private:
 	const Lookups &lookups() const;
 
 	std::vector<MissionFinding> issue_codes_;
+	// The .mis the session handed over for the next read of the file (names_file_pending_), and what was made of
+	// it; what the last save found there instead and made of it; the Write it from the mission the last write
+	// used up; the base heights handed for the next write.
+	std::shared_ptr<const CompanionFile> pending_names_file_;
+	bool names_file_pending_ = false;
+	MissionNamesFile names_file_;
+	MissionNamesFile outside_names_;
+	MissionNamesLeft names_left_;
+	uint64_t spent_overwrite_ = 0;
+	uint64_t writing_over_ = 0;
+	std::vector<int32_t> base_heights_;
+	uint64_t names_state_ = 0;
 	mutable Lookups lookups_;
 	std::shared_ptr<const MissionItemClasses> item_classes_;
 };
