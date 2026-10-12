@@ -446,8 +446,9 @@ void test_ledger() {
 		const auto *model = static_cast<const MissionViewport *>(run.session.viewports().find(run.path, ViewportKind::Mission));
 		float x = 0.0f, y = 0.0f;
 		if (laid && model && !laid->file().entries.empty()) {
+			// The middle of the square the game draws it over: 8 units east and south of its corner (preview/tile_tools.h).
 			const double middle[3] = {laid->file().entries[0].x_fixed / 65536.0 + 8.0,
-			                          -laid->file().entries[0].z_fixed / 65536.0 + 8.0, 0.0};
+			                          laid->file().entries[0].z_fixed / 65536.0 - 8.0, 0.0};
 			model->camera().project(mission_to_preview(middle), device->width, device->height, x, y);
 		}
 		run.ui.click(ImVec2(device->origin.x + x, device->origin.y + y));

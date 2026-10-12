@@ -15,10 +15,11 @@ namespace {
 constexpr NodeKind kTile = node_kind(TilKind::Tile);
 
 // The two quarter-turn tables over the low three bits, in the file's encoding [orig: gobj sub_1000EDDA @
-// 0x1000EE12..0x1000EE89: a3 set, the plane's counter-clockwise turn (MED's sub_433740); a3 clear, clockwise (MED's
-// sub_4336E0)].
-constexpr uint8_t kTurnCounterClockwise[8] = {7, 6, 5, 4, 0, 1, 2, 3};
-constexpr uint8_t kTurnClockwise[8] = {4, 5, 6, 7, 3, 2, 1, 0};
+// 0x1000EE12..0x1000EE89: a3 set, the plane's clockwise turn as the game draws the cell (MED's sub_433740); a3 clear,
+// counter-clockwise (MED's sub_4336E0)]. Through the game's drawing (til_transform_local_uv, the cell's first row along
+// the north edge), flags 4 shows the cell turned a quarter counter-clockwise, and 7 a quarter clockwise.
+constexpr uint8_t kTurnCounterClockwise[8] = {4, 5, 6, 7, 3, 2, 1, 0};
+constexpr uint8_t kTurnClockwise[8] = {7, 6, 5, 4, 0, 1, 2, 3};
 
 // The rows of `document` the identities name, in file order, each once (a row it lacks passed over).
 std::vector<const TilRow *> selected(const TilDocument &document, const std::vector<NodeId> &rows) {
@@ -46,7 +47,7 @@ void sets_to(const TilRow &row, const TilOverlayEntry &to, std::vector<Edit> &ou
 	const TilOverlayEntry &from = row.entry;
 	const NodeAddress at = address_of_row(row);
 	if (to.x_fixed != from.x_fixed) out.push_back(set_edit(at, "x", double(to.x_fixed) / 65536.0, gesture));
-	if (to.z_fixed != from.z_fixed) out.push_back(set_edit(at, "y", -double(to.z_fixed) / 65536.0, gesture));
+	if (to.z_fixed != from.z_fixed) out.push_back(set_edit(at, "y", double(to.z_fixed) / 65536.0, gesture));
 	if (to.flags != from.flags) out.push_back(set_edit(at, "orientation", int64_t(to.flags), gesture));
 	if (to.tile_index != from.tile_index) out.push_back(set_edit(at, "tile", int64_t(to.tile_index), gesture));
 }
@@ -66,8 +67,9 @@ TileSquare tile_square(const TilOverlayEntry &entry) {
 	TileSquare square;
 	square.x0 = entry.x_fixed;
 	square.x1 = int64_t(entry.x_fixed) + kTileSquareFixed;
-	square.y0 = -int64_t(entry.z_fixed);
-	square.y1 = square.y0 + kTileSquareFixed;
+	// The stored frame's [-z, -z + 16] (its second axis south) on the plane.
+	square.y1 = int64_t(entry.z_fixed);
+	square.y0 = square.y1 - kTileSquareFixed;
 	return square;
 }
 
@@ -75,8 +77,9 @@ size_t tile_at(const TilFile &file, double x, double y) {
 	const double px = x * 65536.0, py = y * 65536.0;
 	for (size_t i = file.entries.size(); i-- > 0;) {
 		const TileSquare s = tile_square(file.entries[i]);
-		// PtInRect over the stored frame: left <= x < right, top <= -y < bottom, so (y0, y1] on the plane.
-		if (double(s.x0) <= px && px < double(s.x1) && double(s.y0) < py && py <= double(s.y1)) return i;
+		// PtInRect over the plane's (x, y): left <= x < right, top <= y < bottom, the rectangle's top the square's
+		// south edge [orig: gobj sub_10013364 @ 0x100133C9..0x100133E8; the pick point (x, +y) @ 0x10013392..0x100133AB].
+		if (double(s.x0) <= px && px < double(s.x1) && double(s.y0) <= py && py < double(s.y1)) return i;
 	}
 	return size_t(-1);
 }
@@ -89,7 +92,7 @@ std::vector<size_t> tiles_in_box(const TilFile &file, double x0, double y0, doub
 	for (size_t i = 0; i < file.entries.size(); ++i) {
 		const TilOverlayEntry &e = file.entries[i];
 		const double tl = double(e.x_fixed), tr = tl + kTileSquareFixed;
-		const double tb = double(e.z_fixed), tt = tb - kTileSquareFixed;
+		const double tt = -double(e.z_fixed), tb = tt + kTileSquareFixed;
 		// IntersectRect: a crossing of positive area on both axes.
 		if (std::max(left, tl) < std::min(right, tr) && std::max(top, tt) < std::min(bottom, tb)) out.push_back(i);
 	}
@@ -115,20 +118,20 @@ uint8_t tile_flipped(uint8_t flags, bool across) {
 TilOverlayEntry tile_nudged(const TilOverlayEntry &entry, int dx, int dy, bool big) {
 	// MED's step: 0x100 or 0x10000 scaled by 16 [orig: JOTACmed sub_440FD0 @ 0x44162E..0x44166B; sub_43F0B0 @
 	// 0x43F0E2..0x43F0E4], so a press moves one whole unit (by the rounding) or sixteen. Its frame's second axis
-	// is the stored z (the plane's y negated): a step north is a negative step there.
+	// is the stored z, the plane's y: a step north is a positive step there.
 	const int32_t unit = big ? 0x100000 : 0x1000;
 	TilOverlayEntry out = entry;
 	if (dx) out.x_fixed = med_step(entry.x_fixed, (dx > 0 ? 1 : -1) * unit);
-	if (dy) out.z_fixed = med_step(entry.z_fixed, (dy > 0 ? -1 : 1) * unit);
+	if (dy) out.z_fixed = med_step(entry.z_fixed, (dy > 0 ? 1 : -1) * unit);
 	return out;
 }
 
 std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOverlayEntry> &entries, int direction) {
 	std::vector<TilOverlayEntry> out = entries;
 	if (entries.empty() || direction == 0) return out;
-	// MED keeps a tile by its centre, in its frame (x, the stored z less 8 units) [orig: JOTACmed
-	// MapTileStore_Serialize @ 0x433FA0..0x433FA6]; the centroid is the centres' integer mean, the sum over 64
-	// bits divided toward zero [orig: sub_43E910 @ 0x43E9C4..0x43EA12].
+	// MED keeps a tile by its centre, in its frame (x, the stored z less 8 units: the plane's x east and y north)
+	// [orig: JOTACmed MapTileStore_Serialize @ 0x433FA0..0x433FA6]; the centroid is the centres' integer mean, the sum
+	// over 64 bits divided toward zero [orig: sub_43E910 @ 0x43E9C4..0x43EA12].
 	int64_t sum_x = 0, sum_s = 0;
 	for (const TilOverlayEntry &e : entries) {
 		sum_x += int64_t(e.x_fixed) + 0x80000;
@@ -140,15 +143,15 @@ std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOv
 		const int64_t dx = int64_t(e.x_fixed) + 0x80000 - cx, ds = int64_t(e.z_fixed) - 0x80000 - cs;
 		int64_t x = 0, s = 0;
 		if (direction > 0) {
-			// The plane's counter-clockwise quarter: MED's sub_433740 and (cx + ds, cs - dx) [orig: @ 0x43EAC7..0x43EADE].
+			// The plane's counter-clockwise quarter: MED's sub_4336E0 and (cx - ds, cs + dx) [orig: @ 0x43EAFE..0x43EB15].
 			e.flags = tile_turned(e.flags, 1);
-			x = cx + ds;
-			s = cs - dx;
-		} else {
-			// Clockwise: sub_4336E0 and (cx - ds, cs + dx) [orig: @ 0x43EAFE..0x43EB15].
-			e.flags = tile_turned(e.flags, -1);
 			x = cx - ds;
 			s = dx + cs;
+		} else {
+			// Clockwise: sub_433740 and (cx + ds, cs - dx) [orig: @ 0x43EAC7..0x43EADE].
+			e.flags = tile_turned(e.flags, -1);
+			x = cx + ds;
+			s = cs - dx;
 		}
 		// Snapped down to whole units [orig: @ 0x43EB4A..0x43EB54], back to the record's corner.
 		const int32_t centre_x = int32_t(uint32_t(int32_t(x)) & 0xFFFF0000u);
@@ -161,15 +164,16 @@ std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOv
 
 void tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_fixed) {
 	if (grid) {
-		// The grid square the point lies in (its corner the multiple of 16 at or below it, east and north).
+		// The grid square the point lies in: its west edge the multiple of 16 at or below x, its north edge the
+		// multiple of 16 above y.
 		x_fixed = int32_t(std::floor(x / 16.0) * 16.0) * 65536;
-		z_fixed = -int32_t(std::floor(y / 16.0) * 16.0) * 65536;
+		z_fixed = int32_t(std::floor(y / 16.0) * 16.0 + 16.0) * 65536;
 		return;
 	}
 	// Nile's stamp: the point's 16.16 words, truncated, plus 0x7FFF, the fraction cleared [orig: gobj sub_1000B4A1 @
-	// 0x1000B4C8..0x1000B542], over the stored frame for the second.
+	// 0x1000B4C8..0x1000B542]; the stored z is the plane's y.
 	const int32_t px = int32_t(std::trunc(x * 65536.0));
-	const int32_t pz = int32_t(std::trunc(-y * 65536.0));
+	const int32_t pz = int32_t(std::trunc(y * 65536.0));
 	x_fixed = int32_t(uint32_t(int64_t(px) + 0x7FFF) & 0xFFFF0000u);
 	z_fixed = int32_t(uint32_t(int64_t(pz) + 0x7FFF) & 0xFFFF0000u);
 }
@@ -266,7 +270,7 @@ std::vector<Edit> plan_tile_move(const TilDocument &document, const std::vector<
 	for (const TilRow *row : selected(document, rows)) {
 		TilOverlayEntry to = row->entry;
 		const int64_t x = int64_t(to.x_fixed) + dx;
-		const int64_t z = int64_t(to.z_fixed) - dy;
+		const int64_t z = int64_t(to.z_fixed) + dy;
 		if (x < std::numeric_limits<int32_t>::min() || x > std::numeric_limits<int32_t>::max() ||
 		    z <= std::numeric_limits<int32_t>::min() || z > std::numeric_limits<int32_t>::max())
 			continue;
@@ -317,7 +321,7 @@ std::vector<Edit> plan_tile_duplicate(const TilDocument &document, const std::ve
 			const NodeAddress at{batch_made(made), kTile, 0};
 			const TilOverlayEntry &e = picked[i]->entry;
 			if (dx) out.push_back(set_edit(at, "x", double(int64_t(e.x_fixed) + int64_t(dx) * 65536) / 65536.0));
-			if (dy) out.push_back(set_edit(at, "y", -double(int64_t(e.z_fixed) - int64_t(dy) * 65536) / 65536.0));
+			if (dy) out.push_back(set_edit(at, "y", double(int64_t(e.z_fixed) + int64_t(dy) * 65536) / 65536.0));
 		}
 	}
 	return out;
@@ -336,7 +340,7 @@ std::vector<Edit> plan_tile_stamp(int cell, uint8_t flags, double x, double y, b
 	out.push_back(add);
 	const NodeAddress at{batch_made(0), kTile, 0};
 	out.push_back(set_edit(at, "x", double(x_fixed) / 65536.0));
-	out.push_back(set_edit(at, "y", -double(z_fixed) / 65536.0));
+	out.push_back(set_edit(at, "y", double(z_fixed) / 65536.0));
 	if (flags) out.push_back(set_edit(at, "orientation", int64_t(flags)));
 	return out;
 }

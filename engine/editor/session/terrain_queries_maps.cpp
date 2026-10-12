@@ -72,7 +72,7 @@ JsonValue tile_json(const ViewTiles &tiles, size_t i, const std::vector<NodeId> 
 	out.set("index", io::json_number(double(i)));
 	out.set("tile", io::json_number(entry.tile_index));
 	out.set("x", io::json_number(double(entry.x_fixed) / 65536.0));
-	out.set("y", io::json_number(-double(entry.z_fixed) / 65536.0));
+	out.set("y", io::json_number(double(entry.z_fixed) / 65536.0));
 	out.set("flags", io::json_number(entry.flags));
 	out.set("layer", io::json_number(entry.layer));
 	bool picked = false;

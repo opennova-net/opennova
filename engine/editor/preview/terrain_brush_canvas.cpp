@@ -43,9 +43,10 @@ std::string metres(double value) {
 	return buffer;
 }
 
-// A placed tile's corner on the mission's plane (x east, y north: the stored z negated).
+// A placed tile's square's south-west corner on the mission's plane (x east, y north): the record's corner is its
+// north-west (preview/tile_tools.h), the square spanning 16 units south of it.
 TerrainPoint tile_corner(const TilOverlayEntry &entry) {
-	return TerrainPoint{double(entry.x_fixed) / 65536.0, -double(entry.z_fixed) / 65536.0};
+	return TerrainPoint{double(entry.x_fixed) / 65536.0, double(entry.z_fixed) / 65536.0 - double(kTerrainTileUnits)};
 }
 
 // The quarter turns and the flip across a tile's orientation bits are, as a stamp makes them (tile_stamp_flags), for

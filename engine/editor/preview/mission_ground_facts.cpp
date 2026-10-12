@@ -349,11 +349,13 @@ void MissionGround::restamp(const FileSource &files, const std::vector<std::stri
 
 int MissionGround::foliage_kept_off(double x, double y, int mask) const {
 	if (mask == 0 || placed_.entries.empty()) return 0;
-	// The candidate's square, the generator's reach each way, against each tile's inclusive 16-unit square, the
-	// tile's z the mission y it starts at (til_world_z_from_fixed); a definition with forceon skips the test
-	// (formats/foliage kPlacedTileReach, placed_tiles_keep_off) [orig: Foliage_PathBlockedByPlacedTile @ 0x606490;
-	// Foliage_GenerateInstances_0 @ 0x5FFFB6].
-	if (!til_blocks_foliage(placed_, float(x), float(y), foliage::kPlacedTileReach)) return 0;
+	// The candidate's square, the generator's reach each way, against each tile's inclusive 16-unit square on the
+	// terrain's plane, whose second axis is the mission y negated (til_world_z_from_fixed: the stored z negated): both
+	// generators pass the candidate's -y, so the test keeps foliage off the square the tile is drawn over, never the
+	// surface sampler's mirror of it (D-TIL-9). A definition with forceon skips it (formats/foliage kPlacedTileReach,
+	// placed_tiles_keep_off) [orig: Foliage_PathBlockedByPlacedTile @ 0x606490; Foliage_GenerateModelTileInstances @
+	// 0x600B6F; Foliage_GenerateInstances_0 @ 0x5FFFB8..0x600008].
+	if (!til_blocks_foliage(placed_, float(x), float(-y), foliage::kPlacedTileReach)) return 0;
 	int kept = 0;
 	for (size_t slot = 0; slot < foliage_defs_.size() && slot < size_t(FOLIAGE_MAX_DEFS); ++slot)
 		if ((mask & (1 << slot)) && foliage::placed_tiles_keep_off(foliage_defs_[slot].attrib_flags)) kept |= 1 << slot;

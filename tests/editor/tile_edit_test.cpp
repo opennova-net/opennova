@@ -144,7 +144,8 @@ int test_tiles_in_a_mission() {
 	TEST_EXPECT(document && document->rows().size() == 3 && document->unsaved());
 	TEST_EXPECT(v.documents.active == m);
 	const TilOverlayEntry stamped = document->file().entries.back();
-	TEST_EXPECT(stamped.tile_index == 5 && stamped.x_fixed == (100 << 16) && stamped.z_fixed == -(51 << 16));
+	// Its corner the north-west of the square the game draws it over: (100, 51), the square 16 units east and south.
+	TEST_EXPECT(stamped.tile_index == 5 && stamped.x_fixed == (100 << 16) && stamped.z_fixed == (51 << 16));
 	TEST_EXPECT(contains(v.activity.status, "Laid tiles in m.til"));
 	// The mission view's Undo takes the stamp back; Redo lays it again.
 	session.handle(request::undo(m));
@@ -167,7 +168,7 @@ int test_tiles_in_a_mission() {
 	click.name = "click";
 	click.has_at = true;
 	click.at_x = 108.0f;
-	click.at_y = 59.0f;
+	click.at_y = 43.0f;
 	TEST_EXPECT(plan_tile_select(view, click, out, error) && serve(session, out));
 	const NodeId stamped_id = document->rows().back()->id;
 	TEST_EXPECT(v.workspace.document(m).tiles == std::vector<NodeId>{stamped_id});
@@ -177,12 +178,12 @@ int test_tiles_in_a_mission() {
 	turn.name = "tile_rotate";
 	turn.by = {1.0};
 	TEST_EXPECT(plan_tile_command(view, turn, out, error) && serve(session, out));
-	TEST_EXPECT(document->file().entries.back().flags == 4);
+	TEST_EXPECT(document->file().entries.back().flags == 7);
 	ViewportCommand flip;
 	flip.name = "tile_flip";
 	flip.value = "h";
 	TEST_EXPECT(plan_tile_command(view, flip, out, error) && serve(session, out));
-	TEST_EXPECT(document->file().entries.back().flags == tile_flipped(4, true));
+	TEST_EXPECT(document->file().entries.back().flags == tile_flipped(7, true));
 	ViewportCommand layer;
 	layer.name = "tile_layer";
 	layer.by = {-1.0};
@@ -196,9 +197,9 @@ int test_tiles_in_a_mission() {
 	drag.x = 200.0f;
 	drag.y = 300.0f;
 	TEST_EXPECT(plan_tile_drag(view, drag, out, error) && out.requests.size() == 2 && serve(session, out));
-	TEST_EXPECT(document->file().entries.front().x_fixed == (200 << 16) && document->file().entries.front().z_fixed == -(300 << 16));
+	TEST_EXPECT(document->file().entries.front().x_fixed == (200 << 16) && document->file().entries.front().z_fixed == (300 << 16));
 	TEST_EXPECT(v.documents.gestures.empty());
-	JsonValue at = ask(session, m, "tiles_at", error, 208.0, 308.0, true);
+	JsonValue at = ask(session, m, "tiles_at", error, 208.0, 292.0, true);
 	TEST_EXPECT(error.empty() && at.get("tiles")->array.size() == 1 && at.get("tiles")->array[0].get_bool("selected", false));
 	// A stamp on the grid where the brush's cell is dropped.
 	ViewportDrop drop;
@@ -209,7 +210,7 @@ int test_tiles_in_a_mission() {
 	drop.snap = 16.0f;
 	TEST_EXPECT(plan_tile_drop(view, drop, out, error) && serve(session, out));
 	TEST_EXPECT(document->file().entries.back().tile_index == 7 && document->file().entries.back().x_fixed == (16 << 16) &&
-	            document->file().entries.back().z_fixed == -(32 << 16));
+	            document->file().entries.back().z_fixed == (48 << 16));
 	// Delete: the selected tile removed, the selection emptied.
 	ViewportCommand remove;
 	remove.name = "tile_delete";

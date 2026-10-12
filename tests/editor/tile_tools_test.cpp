@@ -25,15 +25,16 @@ namespace {
 constexpr NodeKind kTile = node_kind(TilKind::Tile);
 
 // The drawn art of a tile of `flags` at its local point (x east, y north over its square, 0..1), as the game samples
-// its cell (til_transform_local_uv: the local x as U, the local y as V before the flags).
-TilUv drawn(uint8_t flags, double x, double y) { return til_transform_local_uv(TilUv{float(x), float(y)}, flags); }
+// its cell (til_transform_local_uv before the flags: the local x as U, V running south from the north edge, the page
+// pass drawing the record's V over its bake space's second axis, which runs south).
+TilUv drawn(uint8_t flags, double x, double y) { return til_transform_local_uv(TilUv{float(x), float(1.0 - y)}, flags); }
 
 bool same(TilUv a, TilUv b) { return std::fabs(a.u - b.u) < 1e-6f && std::fabs(a.v - b.v) < 1e-6f; }
 
 int test_turns_and_flips() {
-	// Nile's tables, the file's encoding: counter-clockwise on the plane 0>7 1>6 2>5 3>4 4>0 5>1 6>2 7>3, clockwise
-	// 0>4 1>5 2>6 3>7 4>3 5>2 6>1 7>0 [gobj sub_1000EDDA].
-	const uint8_t ccw[8] = {7, 6, 5, 4, 0, 1, 2, 3}, cw[8] = {4, 5, 6, 7, 3, 2, 1, 0};
+	// Nile's tables, the file's encoding: counter-clockwise on the plane 0>4 1>5 2>6 3>7 4>3 5>2 6>1 7>0, clockwise
+	// 0>7 1>6 2>5 3>4 4>0 5>1 6>2 7>3 [gobj sub_1000EDDA].
+	const uint8_t ccw[8] = {4, 5, 6, 7, 3, 2, 1, 0}, cw[8] = {7, 6, 5, 4, 0, 1, 2, 3};
 	for (uint8_t f = 0; f < 8; ++f) {
 		TEST_EXPECT(tile_turned(f, 1) == ccw[f] && tile_turned(f, -1) == cw[f]);
 		// The other bits kept: the selection mark, a bit no tool writes.
@@ -53,20 +54,20 @@ int test_turns_and_flips() {
 		TEST_EXPECT(tile_flipped(tile_flipped(f, true), true) == f);
 	}
 	// A stamp's flags: the brush's quarters (clockwise), then its flips.
-	TEST_EXPECT(tile_stamp_flags(0, false, false) == 0 && tile_stamp_flags(1, false, false) == 4 &&
-	            tile_stamp_flags(3, false, false) == 7 && tile_stamp_flags(0, true, false) == 1 &&
-	            tile_stamp_flags(1, true, false) == tile_flipped(4, true));
+	TEST_EXPECT(tile_stamp_flags(0, false, false) == 0 && tile_stamp_flags(1, false, false) == 7 &&
+	            tile_stamp_flags(3, false, false) == 4 && tile_stamp_flags(0, true, false) == 1 &&
+	            tile_stamp_flags(1, true, false) == tile_flipped(7, true));
 	std::printf("turns and flips: Nile's tables and flip rule, each the game's drawing turned or mirrored\n");
 	return 0;
 }
 
 int test_picking() {
 	TilFile file;
-	file.entries = {make_til_entry(0, 0, 1, 0, 0), make_til_entry(8 << 16, -(8 << 16), 2, 0, 0),
-	                make_til_entry(100 << 16, -(100 << 16), 3, 0, 0)};
-	// The square: [x, x + 16) east, (y, y + 16] north.
+	file.entries = {make_til_entry(0, 16 << 16, 1, 0, 0), make_til_entry(8 << 16, 24 << 16, 2, 0, 0),
+	                make_til_entry(100 << 16, 116 << 16, 3, 0, 0)};
+	// The square: [x, x + 16) east, [z - 16, z) north, as Nile's PtInRect takes it (its south edge in, its north out).
 	TEST_EXPECT(tile_at(file, 4.0, 4.0) == 0 && tile_at(file, 10.0, 10.0) == 1);
-	TEST_EXPECT(tile_at(file, 0.0, 0.0) == size_t(-1) && tile_at(file, 0.0, 0.001) == 0);
+	TEST_EXPECT(tile_at(file, 0.0, -0.001) == size_t(-1) && tile_at(file, 0.0, 0.0) == 0 && tile_at(file, 4.0, 16.0) == size_t(-1));
 	TEST_EXPECT(tile_at(file, 15.999, 16.0) == 1 && tile_at(file, 16.0, 16.0) == 1 && tile_at(file, 24.0, 8.5) == size_t(-1));
 	// The drag box: every square it crosses with area; an edge alone does not cross.
 	TEST_EXPECT(tiles_in_box(file, 2, 2, 12, 12) == std::vector<size_t>({0, 1}));
@@ -80,7 +81,7 @@ int test_nudge_turn_corner() {
 	const TilOverlayEntry whole = make_til_entry(5 << 16, -(10 << 16), 0, 0, 0);
 	TEST_EXPECT(tile_nudged(whole, 1, 0, false).x_fixed == (6 << 16) && tile_nudged(whole, -1, 0, false).x_fixed == (4 << 16));
 	TEST_EXPECT(tile_nudged(whole, 1, 0, true).x_fixed == (21 << 16) && tile_nudged(whole, -1, 0, true).x_fixed == -(11 << 16));
-	TEST_EXPECT(tile_nudged(whole, 0, 1, false).z_fixed == -(11 << 16) && tile_nudged(whole, 0, -1, false).z_fixed == -(9 << 16));
+	TEST_EXPECT(tile_nudged(whole, 0, 1, false).z_fixed == -(9 << 16) && tile_nudged(whole, 0, -1, false).z_fixed == -(11 << 16));
 	const TilOverlayEntry half = make_til_entry((5 << 16) + 0x8000, 0, 0, 0, 0);
 	TEST_EXPECT(tile_nudged(half, 1, 0, false).x_fixed == (6 << 16) && tile_nudged(half, -1, 0, false).x_fixed == (5 << 16));
 	TEST_EXPECT(tile_nudged(half, 1, 0, true).x_fixed == (22 << 16) && tile_nudged(half, -1, 0, true).x_fixed == -(11 << 16));
@@ -88,20 +89,21 @@ int test_nudge_turn_corner() {
 	// goes south, the east one north, each turned in place.
 	const std::vector<TilOverlayEntry> pair = {make_til_entry(0, 0, 4, 0, 0), make_til_entry(32 << 16, 0, 4, 0, 0)};
 	const std::vector<TilOverlayEntry> turned = tiles_turned_about_centroid(pair, 1);
-	TEST_EXPECT(turned[0].x_fixed == (16 << 16) && turned[0].z_fixed == (16 << 16) && turned[0].flags == 7);
-	TEST_EXPECT(turned[1].x_fixed == (16 << 16) && turned[1].z_fixed == -(16 << 16) && turned[1].flags == 7);
+	TEST_EXPECT(turned[0].x_fixed == (16 << 16) && turned[0].z_fixed == -(16 << 16) && turned[0].flags == 4);
+	TEST_EXPECT(turned[1].x_fixed == (16 << 16) && turned[1].z_fixed == (16 << 16) && turned[1].flags == 4);
 	const std::vector<TilOverlayEntry> back = tiles_turned_about_centroid(turned, -1);
 	TEST_EXPECT(back[0].x_fixed == 0 && back[0].z_fixed == 0 && back[1].x_fixed == (32 << 16) && back[0].flags == 0);
-	// Nile's stamp: the corner the nearest whole unit; the grid's the corner of the square the point lies in.
+	// Nile's stamp: the corner the nearest whole unit (the plane's y the stored z); the grid's the north-west corner of
+	// the square the point lies in.
 	int32_t x = 0, z = 0;
 	tile_corner_at(10.4, 5.6, false, x, z);
-	TEST_EXPECT(x == (10 << 16) && z == -(6 << 16));
+	TEST_EXPECT(x == (10 << 16) && z == (6 << 16));
 	tile_corner_at(10.6, -3.4, false, x, z);
-	TEST_EXPECT(x == (11 << 16) && z == (3 << 16));
+	TEST_EXPECT(x == (11 << 16) && z == -(3 << 16));
 	tile_corner_at(10.6, 23.0, true, x, z);
-	TEST_EXPECT(x == 0 && z == -(16 << 16));
+	TEST_EXPECT(x == 0 && z == (32 << 16));
 	tile_corner_at(-0.5, -16.5, true, x, z);
-	TEST_EXPECT(x == -(16 << 16) && z == (32 << 16));
+	TEST_EXPECT(x == -(16 << 16) && z == -(16 << 16));
 	std::printf("nudge, group turn, corner: MED's steps and centroid, Nile's rounding\n");
 	return 0;
 }
@@ -138,19 +140,19 @@ int test_planners() {
 	const uint64_t revision = document.revision();
 	// A turn of two tiles: one step; their flags turned, the selection mark kept.
 	TEST_EXPECT(apply(plan_tile_turn(document, {id(1), id(2)}, 1)));
-	TEST_EXPECT(document.file().entries[1].flags == (0x08 | 7) && document.file().entries[2].flags == 0);
+	TEST_EXPECT(document.file().entries[1].flags == (0x08 | 4) && document.file().entries[2].flags == 3);
 	document.undo();
 	TEST_EXPECT(document.serialize().text == std::string(bytes.begin(), bytes.end()) && document.revision() == revision);
 	// A flip across, a nudge north, a drag east: each a step.
 	TEST_EXPECT(apply(plan_tile_flip(document, {id(0)}, true)) && document.file().entries[0].flags == 1);
-	TEST_EXPECT(apply(plan_tile_nudge(document, {id(0)}, 0, 1, true)) && document.file().entries[0].z_fixed == -(16 << 16));
+	TEST_EXPECT(apply(plan_tile_nudge(document, {id(0)}, 0, 1, true)) && document.file().entries[0].z_fixed == (16 << 16));
 	const uint64_t gesture = next_edit_gesture();
 	TEST_EXPECT(apply(plan_tile_move(document, {id(0)}, 3 << 16, 0, gesture)) &&
 	            apply(plan_tile_move(document, {id(0)}, 2 << 16, 0, gesture)));
 	TEST_EXPECT(document.file().entries[0].x_fixed == (5 << 16));
 	document.end_edit_group();
 	document.undo();
-	TEST_EXPECT(document.file().entries[0].x_fixed == 0 && document.file().entries[0].z_fixed == -(16 << 16));
+	TEST_EXPECT(document.file().entries[0].x_fixed == 0 && document.file().entries[0].z_fixed == (16 << 16));
 	document.undo();
 	document.undo();
 	TEST_EXPECT(document.serialize().text == std::string(bytes.begin(), bytes.end()));
@@ -166,13 +168,13 @@ int test_planners() {
 	TEST_EXPECT(document.serialize().text == std::string(bytes.begin(), bytes.end()));
 	// A group turn: one step.
 	TEST_EXPECT(apply(plan_tile_group_turn(document, {id(0), id(1)}, 1)));
-	TEST_EXPECT(document.file().entries[0].x_fixed == (8 << 16) && document.file().entries[0].z_fixed == (8 << 16));
+	TEST_EXPECT(document.file().entries[0].x_fixed == (8 << 16) && document.file().entries[0].z_fixed == -(8 << 16));
 	document.undo();
 	// A stamp over the others: cell 9 at the corner Nile places it, after the last tile with its layer.
 	// (The brush's three quarters clockwise: one counter-clockwise.)
 	TEST_EXPECT(apply(plan_tile_stamp(9, tile_stamp_flags(3, false, false), 70.3, -4.6, false)));
 	const TilOverlayEntry stamped = document.file().entries.back();
-	TEST_EXPECT(stamped.tile_index == 9 && stamped.x_fixed == (70 << 16) && stamped.z_fixed == (5 << 16) && stamped.flags == 7 &&
+	TEST_EXPECT(stamped.tile_index == 9 && stamped.x_fixed == (70 << 16) && stamped.z_fixed == -(5 << 16) && stamped.flags == 4 &&
 	            stamped.layer == 3);
 	document.undo();
 	// A duplicate of two, offset 16 east: the copies after the last of them, in their order.

@@ -1,11 +1,11 @@
 // The tile placement document (ADR 0046 S25; editor/documents/til_document.h): a .til's tiles as rows over
 // formats/til in the file's order (the game's draw order), each its cell, its corner in mission units exact to
-// 1/65536 (y the stored +4 negated) and its orientation byte whole, MED's +10 layer carried and kept ascending
-// (a tile put in, copied or moved takes the layer of the row before it); a save writes MED's header from the
-// rows, an emptied placement the header alone; a header MED would not write and bytes past the records are
-// source notes a save leaves out; a file the game reads no tile of (no til0 mark, under 16 bytes) or whose count
-// runs past its bytes opens read only. The retail leg opens every JO:CA .til and saves it byte-identical with no
-// finding.
+// 1/65536 (y the stored +4, the drawn square's north edge) and its orientation byte whole, MED's +10 layer carried
+// and kept ascending (a tile put in, copied or moved takes the layer of the row before it); a save writes MED's
+// header from the rows, an emptied placement the header alone; a header MED would not write and bytes past the
+// records are source notes a save leaves out; a file the game reads no tile of (no til0 mark, under 16 bytes) or
+// whose count runs past its bytes opens read only. The retail leg opens every JO:CA .til and saves it
+// byte-identical with no finding.
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/til_document.h>
 #include <formats/til/til_io.h>
@@ -38,9 +38,9 @@ std::vector<uint8_t> minted(const TilFile &file) {
 // Three tiles: whole and fractional corners, a flags byte with Nile's selection mark, MED's layers 0, 0, 2.
 TilFile three() {
 	TilFile file;
-	file.entries = {make_til_entry(16 << 16, -(32 << 16), 7, 0x05, 0),
-	                make_til_entry((48 << 16) + 0x8000, -(8 << 16) - 3, 19, 0x0A, 0),
-	                make_til_entry(-(5 << 16), 7 << 16, 63, 0x03, 2)};
+	file.entries = {make_til_entry(16 << 16, 32 << 16, 7, 0x05, 0),
+	                make_til_entry((48 << 16) + 0x8000, (8 << 16) + 3, 19, 0x0A, 0),
+	                make_til_entry(-(5 << 16), -(7 << 16), 63, 0x03, 2)};
 	return file;
 }
 
@@ -79,14 +79,14 @@ int test_fields() {
 	TEST_EXPECT(document.get(at(document, 1), "y", value) && value == Value(8.0 + 3.0 / 65536.0));
 	TEST_EXPECT(document.get(at(document, 1), "orientation", value) && value == Value(int64_t(0x0A)));
 	TEST_EXPECT(document.record_title(at(document, 0)) == "Tile 7 at (16, 32)");
-	// A corner set exact to 1/65536, the y stored negated; the record's other bytes as they were.
+	// A corner set exact to 1/65536, the y the stored z; the record's other bytes as they were.
 	Edit set;
 	set.address = at(document, 1);
 	set.field = "y";
 	set.value = -100.25;
 	TEST_EXPECT(apply_one(document, set));
 	TilFile want = three();
-	want.entries[1].z_fixed = int32_t(100.25 * 65536);
+	want.entries[1].z_fixed = int32_t(-100.25 * 65536);
 	const std::vector<uint8_t> want_bytes = minted(want);
 	TEST_EXPECT(document.serialize().text == std::string(want_bytes.begin(), want_bytes.end()));
 	// The orientation byte whole: the selection mark kept beside a turn.

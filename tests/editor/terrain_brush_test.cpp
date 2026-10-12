@@ -219,10 +219,11 @@ int test_half() {
 	TEST_EXPECT(half.input(gesture, subject, &space, pointer(30.0f, 40.0f, true, true), out) && out.requests.size() == 1 &&
 	            out.requests[0].kind == EditorRequestKind::EditInViewport && out.requests[0].drop.reference == "tile" &&
 	            out.requests[0].drop.name == "12" && out.requests[0].drop.x == 30.0f);
-	// Its square where the click lays the tile: the corner Nile's stamp rounds the point to (30.4, 40.6 -> 30, 41).
+	// Its square where the click lays the tile: the corner Nile's stamp rounds the point to (30.4, 40.6 -> 30, 41), the
+	// square's north-west (the game draws the record 16 units east and south of it); its outline from the south-west.
 	OverlayList ghost;
 	half.shapes(&space, pointer(30.4f, 40.6f, false, false), ghost);
-	TEST_EXPECT(!ghost.shapes.empty() && ghost.shapes[0].points[0].x == 30.0f && ghost.shapes[0].points[0].y == 41.0f);
+	TEST_EXPECT(!ghost.shapes.empty() && ghost.shapes[0].points[0].x == 30.0f && ghost.shapes[0].points[0].y == 25.0f);
 	view.workspace.terrain_brush.tool = TerrainTool::Tiles;
 	half.follow(view, &mission);
 	out.requests.clear();

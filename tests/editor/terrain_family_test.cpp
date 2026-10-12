@@ -206,7 +206,8 @@ int test_tiles_scope() {
 	click.name = "click";
 	click.kind = ViewportKind::Map;
 	click.has_at = true;
-	map_view.project(placement->file().entries[0].x_fixed / 65536.0 + 8.0, -placement->file().entries[0].z_fixed / 65536.0 + 8.0,
+	// The middle of the square the game draws the tile over: 8 units east and south of its corner.
+	map_view.project(placement->file().entries[0].x_fixed / 65536.0 + 8.0, placement->file().entries[0].z_fixed / 65536.0 - 8.0,
 	                 click.at_x, click.at_y);
 	session.handle(request::edit_in_viewport(mission, click));
 	TEST_EXPECT(session.outcome().done() && v.workspace.document(mission).tiles.size() == 1);

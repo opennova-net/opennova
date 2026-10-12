@@ -96,16 +96,22 @@ Point point_of(const MissionOverlayImage &image, int i, int j) {
 	return p;
 }
 
-// The texels whose middles lie within `pad` units of a placed tile's 16-unit square (its z the negated mission y
-// it starts at): where a sampler that walks the tiles is asked; elsewhere the tiles decide nothing.
+// Which of a placed tile's two squares a pass reads (D-TIL-9): the one the game draws it over and keeps foliage off
+// (16 units south of its stored z), or the one the surface sampler tests (16 units north of the stored z negated).
+enum class TileSquareRead { Drawn, Sampled };
+
+// The texels whose middles lie within `pad` units of a placed tile's 16-unit square, as `read` takes it: where a
+// sampler that walks the tiles is asked; elsewhere the tiles decide nothing.
 std::vector<uint8_t> near_tiles(const MissionOverlayImage &image, const std::vector<terrain::SurfaceTileEntry> &tiles,
-		double pad) {
+		double pad, TileSquareRead read) {
 	std::vector<uint8_t> out;
 	if (tiles.empty()) return out;
 	out.assign(size_t(image.width) * size_t(image.height), 0);
 	for (const terrain::SurfaceTileEntry &tile : tiles) {
 		const double x0 = double(tile.x_fixed) / 65536.0 - pad, x1 = double(tile.x_fixed) / 65536.0 + 16.0 + pad;
-		const double y0 = -double(tile.z_fixed) / 65536.0 - pad, y1 = -double(tile.z_fixed) / 65536.0 + 16.0 + pad;
+		const double south = read == TileSquareRead::Drawn ? double(tile.z_fixed) / 65536.0 - 16.0
+		                                                   : -double(tile.z_fixed) / 65536.0;
+		const double y0 = south - pad, y1 = south + 16.0 + pad;
 		const int i0 = std::max(0, int(std::floor((x0 - image.west) / image.texel)) - 1);
 		const int i1 = std::min(image.width - 1, int(std::floor((x1 - image.west) / image.texel)) + 1);
 		const int j0 = std::max(0, int(std::floor((image.north - y1) / image.texel)) - 1);
@@ -180,7 +186,7 @@ void surfaces(MissionOverlayImage &image, const MissionGround &ground) {
 	terrain::SurfaceTypeMap bare = sampler;
 	bare.tiles = nullptr;
 	bare.tile_count = 0;
-	const std::vector<uint8_t> near = near_tiles(image, ground.placed_tiles(), 1.0);
+	const std::vector<uint8_t> near = near_tiles(image, ground.placed_tiles(), 1.0, TileSquareRead::Sampled);
 	size_t counts[256] = {};
 	for (int j = 0; j < image.height; ++j)
 		for (int i = 0; i < image.width; ++i) {
@@ -278,7 +284,7 @@ void foliage(MissionOverlayImage &image, const MissionGround &ground) {
 		image.words = "The terrain's sector grid maps no sector: nothing grows.";
 		return;
 	}
-	const std::vector<uint8_t> near = near_tiles(image, ground.placed_tiles(), 3.0);
+	const std::vector<uint8_t> near = near_tiles(image, ground.placed_tiles(), 3.0, TileSquareRead::Drawn);
 	size_t counts[16] = {};
 	size_t kept_texels = 0;
 	for (int j = 0; j < image.height; ++j)

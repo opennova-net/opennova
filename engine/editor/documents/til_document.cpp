@@ -80,18 +80,17 @@ RecordTable make_table() {
 		               return true;
 	               }}});
 	FieldSchema y = schema_of("y", FieldType::Real, "Y",
-			"The square's south edge in mission units, exact to 1/65536 (the record's +4, stored negated): the tile spans "
-			"16 units north of it [orig: PolyTrn_RenderTile @ 0x60DE20..0x60DE60; Terrain_GetSurfaceTypeAtPosition @ "
-			"0x6065CC..0x606601].");
+			"The square's north edge in mission units, exact to 1/65536 (the record's +4): the game draws the tile over "
+			"the 16 units south of it, its bake space's second axis running south from the stored z negated [orig: "
+			"PolyTrn_RenderTile @ 0x60DE20..0x60DE60]. (The game's surface sampler tests the square north of the stored "
+			"z negated instead [orig: Terrain_GetSurfaceTypeAtPosition @ 0x6065CC..0x606601], D-TIL-9.)");
 	y.group = "position";
 	tile.field(RF{y,
-	              {[](const RecordHandle &r, Value &out) { return out = -double(entry_of(r).z_fixed) / 65536.0, true; },
+	              {[](const RecordHandle &r, Value &out) { return out = double(entry_of(r).z_fixed) / 65536.0, true; },
 	               [](const RecordHandle &r, const Value &v, std::string &e) {
 		               int32_t fixed = 0;
 		               if (!fixed_of(v, fixed, e)) return false;
-		               if (fixed == std::numeric_limits<int32_t>::min())
-			               return e = "A tile's south edge is stored negated: this one is past what the word holds negated.", false;
-		               r.as<TilOverlayEntry>().z_fixed = -fixed;
+		               r.as<TilOverlayEntry>().z_fixed = fixed;
 		               return true;
 	               }}});
 	FieldSchema orientation = schema_of("orientation", FieldType::Byte, "Orientation",
@@ -165,7 +164,7 @@ std::string TilDocument::record_title(const NodeAddress &address) const {
 	const Node *node = row(address.row);
 	if (!node) return std::string();
 	const TilOverlayEntry &e = tile_row(*node).entry;
-	return "Tile " + std::to_string(e.tile_index) + " at (" + units(e.x_fixed) + ", " + units(-e.z_fixed) + ")";
+	return "Tile " + std::to_string(e.tile_index) + " at (" + units(e.x_fixed) + ", " + units(e.z_fixed) + ")";
 }
 
 bool TilDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
