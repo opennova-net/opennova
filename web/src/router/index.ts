@@ -3,6 +3,7 @@ import LandingPage from '../pages/LandingPage.vue';
 import LoginPage from '../pages/LoginPage.vue';
 import RegisterPage from '../pages/RegisterPage.vue';
 import LobbyPage from '../pages/LobbyPage.vue';
+import MyServersPage from '../pages/MyServersPage.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
@@ -18,6 +19,7 @@ const router = createRouter({
     { path: '/login', component: LoginPage },
     { path: '/register', component: RegisterPage },
     { path: '/lobby', component: LobbyPage },
+    { path: '/me/servers', component: MyServersPage, meta: { requiresUser: true } },
     {
       path: '/admin',
       component: AdminLayout,

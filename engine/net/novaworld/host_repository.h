@@ -190,6 +190,14 @@ void record_host_key(db::Database &db, std::string_view key, int64_t user_id);
 // forward. Throws db::SqliteError.
 std::optional<int64_t> claim_host_key(db::Database &db, std::string_view key, uint32_t rid);
 
+// Whether the listing under `rid` is `user_id`'s now: listed (its active_hosts
+// row), with one of the account's keys standing claimed for the RID. That is
+// the rule host_user_id's writes follow, read live rather than as of the row's
+// last write, so a reset, an inactive status or a delete (each takes the
+// account's keys) answers false at once. The owner's push routes ask it
+// (apps/novaworld_server/host_routes.h). Throws db::SqliteError.
+bool listing_owned_by(db::Database &db, uint32_t rid, int64_t user_id);
+
 // The main tick's sweep: every key a listed server holds counts as used (at
 // most once per kHostKeyTouchSeconds), then every key unused for
 // kHostKeyIdleSeconds goes. Returns how many went. Throws db::SqliteError.

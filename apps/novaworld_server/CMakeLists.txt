@@ -10,6 +10,7 @@ set(NOVAWORLD_SERVER_CORE_SOURCES
 if(BUILD_NOVAWORLD_HTTP)
     list(APPEND NOVAWORLD_SERVER_CORE_SOURCES
         http_listener.cpp
+        host_routes.cpp
         template_engine.cpp
         session_store.cpp
         auth.cpp
