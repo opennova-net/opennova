@@ -267,8 +267,9 @@ int test_web_sessions_and_roles() {
 
 // 0008 over a database that already holds accounts (every deployment before
 // it): the migrations up to 0007 and the seed, then the full set, which
-// applies 0008 (and 0009 and 0010 after it) and gives every existing account the
-// 'player' role.
+// applies 0008 (and 0009, 0010 and 0011 after it) and gives every existing
+// account the 'player' role, and (0011) the 'player' kind with no hosting
+// approval.
 int test_web_sessions_migration_over_existing_accounts() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
@@ -292,13 +293,17 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 3);
+	TEST_EXPECT(second.applied.size() == 4);
 	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
 	TEST_EXPECT(second.applied[1] == "0009_host_keys.sql");
 	TEST_EXPECT(second.applied[2] == "0010_credentials_generation.sql");
-	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player') FROM players;");
+	TEST_EXPECT(second.applied[3] == "0011_hosted_servers.sql");
+	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player'), SUM(kind = 'player'), "
+	                            "SUM(can_host) FROM players;");
 	TEST_EXPECT(roles[0].as_int(0).value() == 5);
 	TEST_EXPECT(roles[0].as_int(1).value() == 5);
+	TEST_EXPECT(roles[0].as_int(2).value() == 5);
+	TEST_EXPECT(roles[0].as_int(3).value() == 0);
 	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
 	return 0;
 }

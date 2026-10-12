@@ -11,7 +11,7 @@
 //   <ONNET_HOSTED_SERVE_BIN> --resource-dir <ONNET_HOSTED_RESOURCE_DIR>
 //       [--loose-root] <the spec's arguments>
 //
-// there through apps/common/process.h (an argv array, no shell; the child's
+// there through apps/common/child_process.h (an argv array, no shell; the child's
 // output appended to console.log beside the files). The ports are free ones
 // probed on loopback, admin.cfg admits 127.0.0.1, and the service reaches the
 // machine at 127.0.0.1. The children end with the service (and with this
@@ -20,7 +20,7 @@
 
 #include "machine_provider.h"
 
-#include "process.h"
+#include "child_process.h"
 
 #include <cstdint>
 #include <filesystem>

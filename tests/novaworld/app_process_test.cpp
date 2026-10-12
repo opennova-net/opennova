@@ -1,4 +1,4 @@
-// apps/common/process.h: a child started from an argv array with no shell, run
+// apps/common/child_process.h: a child started from an argv array with no shell, run
 // against this test binary itself (ctest passes its path; `--child <mode>` makes
 // it the child). Exit codes, every argument reaching the child as it was given
 // (spaces, quotes, backslashes, an empty one), the working directory, stdin at
@@ -7,7 +7,7 @@
 // directory, a second spawn while one runs) and, on POSIX, no descriptor of
 // this process reaching the child and the destructor killing a running one.
 
-#include "process.h"
+#include "child_process.h"
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"

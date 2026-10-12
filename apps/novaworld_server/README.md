@@ -386,7 +386,7 @@ An account an admin approved (`players.can_host`) can have the service run one
   with its secret files `0600` on POSIX, a DACL granting the service's account alone on
   Windows), `opennova-serve` (`ONNET_HOSTED_SERVE_BIN`) with `--resource-dir
   ONNET_HOSTED_RESOURCE_DIR` (and `--loose-root` with `ONNET_HOSTED_LOOSE_ROOT=1`),
-  started from an argv array with no shell (`apps/common/process.h`), its output in
+  started from an argv array with no shell (`apps/common/child_process.h`), its output in
   `console.log` there, listing on this service over loopback with free loopback ports.
   The children end with the service (a kill-on-close job on Windows, the parent-death
   signal on Linux) and at its orderly shutdown, so the next boot launches them again.

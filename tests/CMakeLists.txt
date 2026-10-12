@@ -3571,7 +3571,7 @@ target_include_directories(web_session_test PRIVATE
 target_compile_definitions(web_session_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME web_session COMMAND web_session_test)
 
-# apps/common/process.h: a child from an argv array with no shell, run against
+# apps/common/child_process.h: a child from an argv array with no shell, run against
 # the test binary itself (its path is the argument; `--child <mode>` makes it the
 # child): exit codes, every argument whole, the working directory, stdin and the
 # output file, terminate and kill, the refusals, and on POSIX no inherited
