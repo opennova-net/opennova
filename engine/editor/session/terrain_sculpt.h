@@ -24,7 +24,7 @@ class SessionCore;
 // ended); a new stroke on the file stops a bake running for it (its regions join the next one). Its result lands as
 // part of the stroke's own step (HeightsBakeLanding: one Ctrl+Z takes the stroke and its bake) when the document is
 // still in the state the bake started from; otherwise it is dropped and its regions stay due. The first bake of a file
-// makes its bake state: a cold in-memory bake of the input its tiles were made from (a .cpt's atlas: D-TERRAIN-22),
+// makes its bake state: a cold in-memory bake of the input its tiles were made from (a .cpt's atlas: D-TERRAIN-23),
 // kept for the file's next bakes. Save and Play wait (settle). Single-threaded on the session's side: poll, interrupt
 // and settle are the session thread's; only the bake runs on the worker.
 class TerrainSculpt {

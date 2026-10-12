@@ -23,7 +23,7 @@ namespace opennova::editor {
 //
 // - the input (kHeightsInput): TrnGen's depth input, what a brush changes. A .cpt keeps none (its CDEP atlas is the
 //   leaves drawn back over its tool's lost input [orig: TrnGen.exe sub_402A20 @ 0x402A20, its draw-back]), so a
-//   .cpt opens with its atlas as its input (docs/terrain/terrain-re.md, the region bake, D-TERRAIN-22);
+//   .cpt opens with its atlas as its input (docs/terrain/terrain-re.md, the region bake, D-TERRAIN-23);
 // - the baked atlas (kHeightsAtlas): the .cpt's CDEP atlas as the last bake drew it.
 //
 // The side state (HeightsState) holds the rest of the .cpt (its header, its depth section's form, its 341 tiles, each
@@ -68,7 +68,7 @@ struct HeightsState : RasterSideState {
 	std::vector<HeightsRect> unbaked;
 	// What a region bake starts from (formats/cpt/trngen terrain_region_bake.h): the bake state the tiles and the
 	// baked atlas were made with, null before the editor's first bake of the file (a .cpt's then comes from a cold
-	// in-memory bake of its atlas: D-TERRAIN-22), and the input they were made from (a .cpt's atlas as read). Shared:
+	// in-memory bake of its atlas: D-TERRAIN-23), and the input they were made from (a .cpt's atlas as read). Shared:
 	// a step keeps the nodes its landing remade.
 	std::shared_ptr<const trngen::TerrainBakeState> bake;
 	RasterPlane baked_input;

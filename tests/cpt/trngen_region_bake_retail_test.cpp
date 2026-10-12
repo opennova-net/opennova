@@ -1,7 +1,7 @@
 // The region bake over the shipped .cpt files (OPENNOVA_JO_ASSETS; Skipped without it). A shipped .cpt
 // keeps no depth input (its tool's map is lost; the CDEP atlas is the leaves drawn back over it), so the
 // editor sculpts it with input := atlas and a cold in-memory bake's state (docs/terrain/terrain-re.md, the
-// region bake, D-TERRAIN-22):
+// region bake, D-TERRAIN-23):
 //
 // - every file: each leaf in place, and each leaf drawn back from its own LOD 0 (the strips read as D3D
 //   draws them, odd triangles reversed [orig: Terrain_RenderSectorBatch @ 0x609b7e..0x609bd4]) at the atlas

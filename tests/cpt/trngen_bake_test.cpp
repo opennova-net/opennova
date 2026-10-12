@@ -241,7 +241,7 @@ void test_refusals() {
 
 // Ground no map holds (every texel independently at random over the whole 16-bit range) merges, two
 // levels up, a face naming one point twice, which TrnGen's reduction cannot take (it frees the face at
-// one listing and reads it at the other); the bake refuses it in words instead (D-TERRAIN-21).
+// one listing and reads it at the other); the bake refuses it in words instead (D-TERRAIN-22).
 void test_rough_ground_refused() {
 	TerrainBakeInput input;
 	input.depth16.resize(static_cast<size_t>(kDepthSide) * kDepthSide);

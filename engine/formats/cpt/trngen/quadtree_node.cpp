@@ -97,7 +97,7 @@ bool make_node_mesh(QuadtreeNode& node, const QuadtreeContext& ctx, std::string&
         error = node.mesh_data->failure;
         return false;
     }
-    // Port-only (D-TERRAIN-21): a merged face naming one vertex twice is refused before the reduction.
+    // Port-only (D-TERRAIN-22): a merged face naming one vertex twice is refused before the reduction.
     // The merge zero-fills a section's records past its mesh's count (LODMeshData_LoadSectionDedup), and
     // the next merge dedups the zero records of different children into one vertex; TrnGen.exe reduces such
     // faces as they are, its collapse listing the face twice under that vertex, removing and freeing it at
