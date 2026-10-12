@@ -31,6 +31,11 @@ bool local_death_screen_active(const RoleView &view) {
 	return view.runtime != nullptr && view.runtime->state().death_screen_active;
 }
 
+uint32_t session_rules_word(const RoleView &view) {
+	if (view.joiner && view.runtime != nullptr) return view.runtime->view().mp_attributes();
+	return view.kernel != nullptr ? view.kernel->world.rules.mpattrib : 0u;
+}
+
 bool local_player_dead(const RoleView &view) {
 	if (view.joiner) return view.runtime != nullptr && view.runtime->local_player_dead();
 	return view.kernel != nullptr && view.kernel->local.local_player_dead();
@@ -402,12 +407,11 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 	world::FriendlyTagPassContext ctx;
 	ctx.death_screen = local_death_screen_active(view);
 	ctx.game_type = view.runtime != nullptr ? view.runtime->game_type() : 0;
-	// The session's rules word: a joiner's S2C 0x64 fixed block (+44), the
-	// host's own mp_attributes. Bit 0x400 = the host option FriendlyTag 0.
-	const uint32_t rules_word = (view.joiner && view.runtime != nullptr)
-			? view.runtime->view().mp_attributes()
-			: view.staged_mp_attributes;
-	ctx.rules_no_friendly_tags = (rules_word & GameConfig::kMpAttribNoFriendlyTag) != 0;
+	// The session's rules word (session_rules_word): a joiner's S2C 0x64 fixed
+	// block (+44), the host's live World word. Bit 0x400 = the host option
+	// FriendlyTag 0 [orig: `test g_RulesFlags, 400h` @0x5A4480].
+	ctx.rules_no_friendly_tags =
+			(session_rules_word(view) & GameConfig::kMpAttribNoFriendlyTag) != 0;
 	// The player walk's slot owner: the listen client's own S2C 0x4C table,
 	// each entry's slot (retail's PlayerSlot +0x24 entity, +0x10 revive
 	// seconds, +0x2C medic request, the +0x14 / +0x20 label) as its loopback

@@ -183,8 +183,7 @@ Ref<HudMapOverlays> Simulation::get_hud_minimap_overlays(
 	in.client = runtime_ ? &runtime_->state() : nullptr;
 	in.world = &kernel_->world;
 	in.game_type = runtime_ ? static_cast<int32_t>(runtime_->game_type()) : 0;
-	in.rules_word = (view.joiner && runtime_) ? runtime_->view().mp_attributes()
-			: view.staged_mp_attributes;
+	in.rules_word = opennova::inmatch::session_rules_word(view);
 	in.authority_location_names =
 			view.host != nullptr ? &view.host->mission_location_names : nullptr;
 	in.gametext = game_text_lookup(p_gametext);
