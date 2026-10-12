@@ -118,6 +118,29 @@ int main() {
 		check(p.player_classes[1] == 9, "class 9 is kept");
 	}
 
+	// The record's voice override pair: a nonzero byte is the side's avatar
+	// byte over its character's head voice, on a side with no saved character
+	// too; a zero byte leaves the head voice
+	// [orig: Game_ApplySessionSettingsToGlobals @0x551735..0x5517a2].
+	{
+		JoinSideSelection saved[2];
+		saved[0].present = true;
+		saved[0].nationality_index = 0;
+		saved[0].division_index = 0;
+		saved[0].combo_index = 1;
+		saved[0].voice_override = 7;
+		JoinCharacterProfile p = join_character_profile(registry, saved);
+		check(p.character_ids[0] == 0x0400, "the override leaves the saved character");
+		check(p.avatars[0] == 7, "side A's nonzero override is its avatar byte");
+		check(p.avatars[1] == 10, "side B's zero override keeps the head voice");
+		saved[0].voice_override = 0;
+		saved[1].voice_override = 11;
+		p = join_character_profile(registry, saved);
+		check(p.avatars[0] == 3, "side A's zero override keeps the saved combo's head voice");
+		check(p.avatars[1] == 11, "an unsaved side's nonzero override is its avatar byte");
+		check(character_join_vars(p).avatar[1] == 11, "the override rides as VCB");
+	}
+
 	// The wire projection: ids and bytes narrowed, a side request outside
 	// {0, 1} is the absent 0xFF.
 	{
