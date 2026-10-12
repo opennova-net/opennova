@@ -125,6 +125,33 @@ public:
         if (word == 0) wac.dornd_seed = static_cast<uint32_t>(v);
     }
 
+    // The bank words where WAC's per-IF arrays start: the fired ticks at
+    // 0xC6BE40, the ever-fired dwords at 0xC6CE40, the active bytes at
+    // 0xC6DE40 (four to a word).
+    static constexpr uint32_t kWacFiredTickWord = kMissionVars + kGlobalVars;      // 768
+    static constexpr uint32_t kWacEverFiredWord = kWacFiredTickWord + kWacIfs;     // 1792
+    static constexpr uint32_t kWacActiveWord = kWacEverFiredWord + kWacIfs;        // 2816
+
+    // A byte store at a byte offset from the mission bank (0xC6B240, modulo
+    // 2^32), as retail's byte arrays address it: an entry of a byte array
+    // takes the byte alone, any other modelled word the byte in its lane.
+    void set_bank_byte(uint32_t offset, uint8_t v) {
+        const uint32_t word = offset >> 2;
+        const uint32_t lane = offset & 3u;
+        constexpr uint32_t kByteWords = uint32_t(kWacIfs + 2 * kWacDos) / 4;
+        if (word >= kWacActiveWord && word < kWacActiveWord + kByteWords) {
+            const uint32_t at = (word - kWacActiveWord) * 4 + lane;
+            if (at < uint32_t(kWacIfs)) wac.active[at] = v;
+            else if (at < uint32_t(kWacIfs + kWacDos)) wac.do_counter[at - kWacIfs] = v;
+            else wac.do_choice[at - kWacIfs - kWacDos] = v;
+            return;
+        }
+        const uint32_t shift = 8 * lane;
+        const uint32_t old = static_cast<uint32_t>(get_bank_word(static_cast<int32_t>(word)));
+        set_bank_word(static_cast<int32_t>(word),
+                static_cast<int32_t>((old & ~(0xFFu << shift)) | (uint32_t(v) << shift)));
+    }
+
     // WacScript_InitAndLoad's clears of WAC's state: the fired ticks, the
     // DO counters, the ever-fired dwords and the active bytes, then the DORND
     // seed. No load clears the DO choices or RND.
