@@ -67,6 +67,17 @@ int main() {
 	const std::vector<int> order = armory_slot_order({ "m4A1", "AK-47", "M16", "ak-74" });
 	CHECK(order == (std::vector<int>{ 1, 3, 2, 0 }));
 	CHECK(armory_slot_order({}).empty());
+	CHECK(armory_slot_order({ "M16" }) == (std::vector<int>{ 0 }));
+	// Tied labels stand where retail's quicksort leaves them: it pivots on the
+	// low row and swaps from both ends, so the last "Shotgun" leads the first,
+	// where a stable sort keeps them in table order (D-MNU-38).
+	// [orig: Utility_QuickSortDualArray @0x651AB0]
+	CHECK(armory_slot_order({ "Shotgun", "MK-23", "Shotgun" }) == (std::vector<int>{ 1, 2, 0 }));
+	// The reference weapon.def's red medic SECONDARY list in table order, its two
+	// shotguns sharing WEAP_SHORT_SHOTGUN's text: retail lists the SPAS12 (row 4)
+	// above the Remington (row 1).
+	CHECK(armory_slot_order({ "M1911A1", "Shotgun", ".357 Magnum", "Glock 17", "Shotgun" }) ==
+			(std::vector<int>{ 2, 3, 0, 4, 1 }));
 
 	// The weight readout with its band tokens and their fallbacks.
 	const opennova::hud::GameTextLookup menu = table_of({

@@ -450,7 +450,8 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 }
 
 void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
-	// Any 0x82 from the connecting peer is read; no field is required (parse_server_auth).
+	// Any 0x82 from the connecting peer is read; no field is required, and one whose CUs overrun
+	// the walk's bounds is dropped here, before the CI / CK match (parse_server_auth).
 	ServerAuth sa;
 	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerAuth echoes both correlation values chosen by this client. Do not

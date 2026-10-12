@@ -1199,7 +1199,7 @@ bool run_0a_priority_dead_recipient_social_score() {
 	// deploy-hold storage slot+89912 & 0x10, which a join-time spectator holds
 	// forever [orig: @0x50e68c; Server_OnPlayerJoin @0x51a6f2]. A
 	// runtime-converted spectator holds NEITHER: its convert's deploy leg clears
-	// both [orig: Server_KillPlayerAndNotify @0x519ECE; @0x51787A].
+	// both [orig: Server_ConvertPlayerToSpectator @0x519ECE; @0x51787A].
 	world.registry.get(host_h)->flags &= ~w::kEntityFlagDead;
 	conns[0].spectator = true;
 	conns[0].respawn_pending = true;

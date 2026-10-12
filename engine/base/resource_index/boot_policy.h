@@ -149,7 +149,7 @@ inline constexpr std::size_t kExpansionNameBytes = 32;
 inline constexpr std::size_t kExpansionNameMax = kExpansionNameBytes - 1;
 // Whether the command line's tokenizer ends an `/exp` token at `c`: a space,
 // a tab or a comma splits it outside quotes, a '"' toggles quoting and is
-// never kept, a ';' ends the line [orig: Terrain_TokenizeConfigLine @ 0x53cb60
+// never kept, a ';' ends the line [orig: Config_TokenizeLine @ 0x53cb60
 // over GetCommandLineA, @ 0x4a73b2; ' ', '\t' and ',' @ 0x53cc44, '"'
 // @ 0x53cc51, ';' @ 0x53cc31]. A name holding one mounts only quoted.
 bool launch_token_breaks_at(char c);

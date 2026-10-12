@@ -6,7 +6,7 @@
 // then the player body's death edge, which raises the player-death
 // transaction over those holds (the death's floor of 3, +364 cleared with no
 // spawn zones).
-// [orig: NapiNPServerMsg_ResetPlayerAmmo @0x510540; the edge
+// [orig: NapiNPServerMsg_DeathTimeoutReset @0x510540; the edge
 //  Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA; GameEvent_PlayerDeath
 //  @0x516EB6..0x516EEB]
 #include <runtime/inmatch/napi_np_connection.h>
@@ -215,8 +215,8 @@ void test_team_change_in_the_same_pump_dies_once() {
 // Health 1; its deploy leg raises the Health and clears only the dead bit), so
 // the edge after the pump skips it and no death is raised. Ours stages the
 // convert for the tick, which routes the 0x41's record after it.
-// [orig: Server_KillPlayerAndNotify -- Flags @0x519E92, Health @0x519EA4, the
-//  deploy @0x519ECE; Server_ProcessPlayerDeath's dead-bit clear @0x51787A; the
+// [orig: Server_ConvertPlayerToSpectator -- Flags @0x519E92, Health @0x519EA4, the
+//  deploy @0x519ECE; Server_DeployPlayer's dead-bit clear @0x51787A; the
 //  edge's hidden bit Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127]
 void test_spectator_convert_in_the_same_pump_raises_no_death() {
 	for (int order = 0; order < 2; ++order) {
@@ -250,7 +250,7 @@ void test_spectator_convert_in_the_same_pump_raises_no_death() {
 // heal, and the death still runs. [orig: Entity_UpdateAllEntities --
 // Projectile_ProcessExplosionQueue @0x4C223F -> GameEvent_HandleMedicInteraction,
 // the GameEvent_HealPlayer call @0x4E6805, Health = max @0x50DE7F;
-// NapiNPServerMsg_ResetPlayerAmmo @0x510568; the edge
+// NapiNPServerMsg_DeathTimeoutReset @0x510568; the edge
 // Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA]
 void test_previous_frame_heal_keeps_the_death() {
 	Fixture f;

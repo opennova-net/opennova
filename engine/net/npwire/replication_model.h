@@ -52,10 +52,10 @@ struct PlayerReplicationState {
 	uint8_t fireteam = 0;
 	// The player slot's connection-quality LEVEL (slot+418, 0..4): the C2S 0x4C
 	// report the host clamps and stores, serialized by field bit 0x0400. A fresh
-	// slot advertises 1 (the witnessed join-broadcast value) until the client's
-	// first report. [orig: sub_5006E0 @0x5006E0 store; NetPacket_SerializePlayerSync0x46
-	//  @0x506213 read]
-	uint8_t quality = 1;
+	// slot reads 0 until the client's first report. [orig:
+	//  PlayerSlot_SetClientQuality @0x5006E0 store; NetPacket_SerializePlayerSync0x46
+	//  @0x506213 read; Server_PlayerAdd @0x51CD06 / @0x51CD40 zero it]
+	uint8_t quality = 0;
 	// Field 0x1000: 1 for an active slot whose spectator latch (slot+100567) is
 	// set and whose loading byte (slot+100579) is clear, else 0; the client
 	// lands it as the roster slot's spectator byte.
@@ -218,7 +218,7 @@ struct GameEntitySnapshot {
 	// paired gate 96481) is read-but-never-set, and 97536 tracks the spectator
 	// latch (slot+100567) exactly — writers Server_PlayerAdd @0x51d0ce,
 	// Server_OnPlayerJoin @0x51a79c, the permadeath conversion in
-	// Server_KillPlayerAndNotify @0x519e76, the WritePlayerState restamp
+	// Server_ConvertPlayerToSpectator @0x519e76, the WritePlayerState restamp
 	// @0x4ff70f; both cleared at the leave-spectator block @0x519fb4 — so the
 	// builder-side stamp reduces to "owned by a spectator connection". Not a
 	// wire field; stamped by the host caller that knows the connection list.

@@ -74,14 +74,14 @@ int main() {
 	check(CharacterRegistry().first_character_id(AVATAR_ALIGN_GOOD) == 0, "empty registry packs 0");
 
 	// The fresh profile: first good / first evil, rifleman both sides, the
-	// selected combos' head voices, side unassigned.
+	// selected combos' head voices.
 	{
 		JoinSideSelection none[2];
 		const JoinCharacterProfile p = join_character_profile(registry, none);
 		check(p.character_ids[0] == 0x0200 && p.character_ids[1] == 0x8207, "fresh ids");
 		check(p.player_classes[0] == 8 && p.player_classes[1] == 8, "fresh classes 8/8");
 		check(p.avatars[0] == 1 && p.avatars[1] == 10, "fresh avatars = head voices");
-		check(p.team_request == -1, "fresh team request -1");
+		check(character_join_vars(p).team_request == 0xFF, "the fresh profile's TR is -1");
 	}
 	// A persisted side-A selection with class 6 on both blocks.
 	{
@@ -141,8 +141,9 @@ int main() {
 		check(character_join_vars(p).avatar[1] == 11, "the override rides as VCB");
 	}
 
-	// The wire projection: ids and bytes narrowed, a side request outside
-	// {0, 1} is the absent 0xFF.
+	// The wire projection: ids and bytes narrowed, and the TR byte the join's
+	// side requirement, 0xFF (-1) whatever the profile holds (D-NET-590)
+	// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23].
 	{
 		JoinCharacterProfile p;
 		p.character_ids[0] = 0x0400;
@@ -155,11 +156,9 @@ int main() {
 		check(vars.char_id[0] == 0x0400 && vars.char_id[1] == 0x8207, "packed ids ride as-is");
 		check(vars.char_class[0] == 6 && vars.char_class[1] == 0xFF, "class bytes clamp to a byte");
 		check(vars.avatar[0] == 3 && vars.avatar[1] == 0, "avatar bytes clamp to a byte");
-		check(vars.team_request == 0xFF, "team_request -1 is the absent 0xFF");
-		p.team_request = 1;
-		check(character_join_vars(p).team_request == 1, "a side request in {0, 1} rides");
-		p.team_request = 2;
-		check(character_join_vars(p).team_request == 0xFF, "a side request past 1 is absent");
+		check(vars.team_request == 0xFF, "the TR byte is the side requirement's 0xFF");
+		check(static_cast<int8_t>(vars.team_request) == kJoinSideRequirement,
+				"the side requirement is -1");
 	}
 
 	if (g_failures != 0) {

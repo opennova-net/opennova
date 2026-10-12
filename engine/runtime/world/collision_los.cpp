@@ -432,7 +432,8 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     ray.refresh();
 
     // Per candidate [orig: the @ 0x538720 walk]: in-use with a collision model,
-    // skip flags & 1 (@ 0x538792), skip engine_flags & 0x8000000 (@ 0x5387b4),
+    // skip flags & 1 (@ 0x538792), skip engine_flags & 0x8000000 (@ 0x5387b4;
+    // this caller's include arg is 0, `push esi` @0x539A21 / @0x539A4B),
     // skip the four excluded entities A, B, parentA, parentB and anything
     // standing on A or B (+0x28) [orig: @0x53882F..0x538877], bound-sphere broad
     // phase (the segment box + line-distance fold of @ 0x5387c4-0x5389a4), then
@@ -442,7 +443,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
     auto blocked_by_bound = [&](const Entity &e, const int32_t bp[3],
                                 int32_t br) -> bool {
         if ((e.flags & 1u) != 0) return false;
-        if ((e.engine_flags & 0x8000000u) != 0) return false;
+        if ((e.engine_flags & kEntityFlagNoTarget) != 0) return false;
         if (e.handle == exclude_a || e.handle == exclude_b) return false;
         if ((parent_a.valid() && e.handle == parent_a) ||
             (parent_b.valid() && e.handle == parent_b))
@@ -630,7 +631,7 @@ bool CollisionWorld::entity_los_clear_impl(World &world, EntityHandle listener,
 			if ((ce->flags & 1u) != 0) continue; // [orig: @ 0x538792]
 			// The 0x8000000 skip is sound-only: the walker's includeFlagged arg
 			// is the caller's allTypes [orig: push ebp @0x539ba4 -> @0x5387ac..0x5387b4].
-            if (!all_types && (ce->engine_flags & 0x8000000u) != 0) continue;
+            if (!all_types && (ce->engine_flags & kEntityFlagNoTarget) != 0) continue;
 			if (!all_types && ce->kind != EntityKind::Building)
 				continue; // [orig: itemDef+92 == 5]
 			// Candidates standing on the listener/source are excluded (one
@@ -663,16 +664,20 @@ bool CollisionWorld::candidate_segment_hits_solid(
     return hits;
 }
 
-// The candidate-walk skip gate shared by the sound and sun ray walkers:
-// the query entity itself, dead rows, flag-27 rows, and (because
+// The candidate-walk skip gate shared by the iris march's and the entity
+// sun-visibility ray walkers: the query entity itself, dead rows, and (because
 // Physics_RaycastFindCollisionEntity passes source as both exclusion entities) a
-// direct child standing on the source are never blockers.
+// direct child standing on the source are never blockers. A NoTarget row
+// (Flags 0x8000000) blocks: every caller passes allowAllTypes = 1, which the
+// walker takes as its include arg [orig: `push 1` @0x5C687A / @0x5C68A2 /
+// @0x5C68C3 (Entity_ComputeSunVisibility) and @0x5C7765 / @0x5C778D / @0x5C77AA
+// (Terrain_SectorComputeLighting) -> `push ebp` @0x539BA4 -> the skip
+// @0x5387A4..0x5387B4].
 static bool segment_candidate_skipped(World &world, EntityHandle candidate,
                                       EntityHandle source_registry_twin) {
     if (source_registry_twin.valid() && candidate == source_registry_twin) return true;
     const Entity *entity = world.registry.get(candidate);
     if (entity == nullptr || (entity->flags & 1u) != 0) return true;
-    if ((entity->engine_flags & 0x8000000u) != 0) return true;
     return source_registry_twin.valid() && entity->ground_target == source_registry_twin;
 }
 

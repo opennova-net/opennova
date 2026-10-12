@@ -304,7 +304,7 @@ bool records_of(const Profile &profile, textlayout::OutRecord &now, std::string 
 		if (row.unit == Unit::Weapon) {
 			const std::string &name = (profile.*(row.block)).*(row.name);
 			if (name.empty()) continue;
-			// A name is one token of the walk: no blank, comma, quote, `;` or `//` [orig: Terrain_TokenizeConfigLine
+			// A name is one token of the walk: no blank, comma, quote, `;` or `//` [orig: Config_TokenizeLine
 			// @ 0x53CB60].
 			if (name.find_first_of(" \t,\";\r\n") != std::string::npos || name.find("//") != std::string::npos) {
 				if (lenient) continue;

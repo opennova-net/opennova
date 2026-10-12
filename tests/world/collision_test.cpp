@@ -3511,6 +3511,12 @@ void test_iris_static_rays_prefilter_before_section_matrices() {
     CHECK(provider.build_handles.size() == 1);
     for (const EntityHandle h : far_statics)
         CHECK(provider.calls_for(h) == 0);
+    // A NoTarget static (Flags 0x8000000) still blocks the sun ray: its callers
+    // pass the walker's include arg 1. [orig: Terrain_SectorComputeLighting
+    // `push 1` @0x5C7765 -> Physics_RaycastFindCollisionEntity `push ebp`
+    // @0x539BA4 -> Physics_RaycastAgainstEntityPool @0x5387A4..0x5387B4]
+    world.registry.get(near_static)->engine_flags |= kEntityFlagNoTarget;
+    CHECK(collision.candidate_segment_hits_solid(world, source, start, end, 0));
 }
 
 void test_sound_los_prefilters_candidates_before_section_matrices() {
@@ -6100,7 +6106,7 @@ void test_run_over_spares_a_protected_player() {
 // model, hiding the palm state's sections and pivoting on the CXLT translation
 // whatever item 900's render tag. The render tag binds only the draw: a
 // psec-drawn palm collides through every section, its section mask included
-// (D-ITEMDEF-20). [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6;
+// (D-ITEMDEF-20). [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6;
 // CTerrainMap_BuildSectorTransformMatrices @0x53BF10, the switches @0x53BF31 /
 // @0x53BFE0; EntityDef_InitAllCallbacks @0x4A5AF5..0x4A5B03]
 void test_palm_sector_collision_is_the_fragments() {

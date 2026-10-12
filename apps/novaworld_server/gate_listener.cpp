@@ -1,5 +1,6 @@
 #include "gate_listener.h"
 
+#include "loggable.h"
 #include "server_config.h"
 
 #include <net_sockets.h>
@@ -213,7 +214,7 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		GateMetricsReport metrics;
 		if (gate_metrics_decode(plain.data(), plain.size(), metrics)) {
 			std::printf("[gate] metrics block=%s fields=%zu entries=%zu\n",
-				metrics.block.c_str(), metrics.fields.size(), metrics.entries.size());
+					loggable(metrics.block).c_str(), metrics.fields.size(), metrics.entries.size());
 			continue;
 		}
 
@@ -232,11 +233,12 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 						std::fprintf(stderr, "[gate] WARN status blob apply: %s\n", e.what());
 					}
 				}
-				std::printf("[gate] %s:%u status blob lobby=%s host_key=%zuB vars=%zu players=%zu -> %s\n",
-				            opennova::net::endpoint_to_string(from).c_str(), from.port,
-				            blob.lobby_name.c_str(), blob.host_key.size(),
-				            blob.host_vars.size(), blob.player_names.size(),
-				            applied ? "applied" : "no matching host");
+				std::printf("[gate] %s:%u status blob lobby=%s host_key=%zuB vars=%zu players=%zu "
+							"-> %s\n",
+						opennova::net::endpoint_to_string(from).c_str(), from.port,
+						loggable(blob.lobby_name).c_str(), blob.host_key.size(),
+						blob.host_vars.size(), blob.player_names.size(),
+						applied ? "applied" : "no matching host");
 				continue;
 			}
 		}
@@ -254,8 +256,8 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 
 		if (!is_known_tag(tag)) {
 			std::fprintf(stderr, "[gate] %s:%u — unknown tag '%s'; ignoring\n",
-			             opennova::net::endpoint_to_string(from).c_str(),
-			             from.port, tag.c_str());
+					opennova::net::endpoint_to_string(from).c_str(), from.port,
+					loggable(tag).c_str());
 			if (tracker_) {
 				using namespace std::chrono;
 				const auto gate_now = static_cast<uint64_t>(
@@ -309,8 +311,8 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		const int sent = opennova::net::udp_send_to(socket.get(), from,
 		                                            reply.data(), reply.size());
 		if (sent > 0) {
-			std::printf("[gate] %s:%u tag=%s -> %d bytes\n",
-			            client_ip.c_str(), from.port, tag.c_str(), sent);
+			std::printf("[gate] %s:%u tag=%s -> %d bytes\n", client_ip.c_str(), from.port,
+					loggable(tag).c_str(), sent);
 		} else {
 			std::fprintf(stderr, "[gate] %s:%u send failed\n",
 			             client_ip.c_str(), from.port);

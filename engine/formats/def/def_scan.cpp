@@ -313,7 +313,7 @@ void validate_header(const char *line, size_t length, size_t key_length, size_t 
                      size_t &issues, DefParseReport *report, size_t number, const char *record) {
     // The keyword and the name are the line's first two tokens as the retail
     // tokenizer cuts them, so a comma or a quote ends the keyword as a space
-    // does, and no token follows the name [orig: Terrain_TokenizeConfigLine
+    // does, and no token follows the name [orig: Config_TokenizeLine
     // @0x53CB60's tokens, the delimiters @0x53CC33..0x53CC70].
     const std::string copy(line, length);
     io::ConfigTokens tokens;
@@ -334,7 +334,7 @@ void validate_header(const char *line, size_t length, size_t key_length, size_t 
 // Every family reads its lines through the retail tokenizer
 // (defscan::for_each_def_line), and the line here is as the parser read it
 // (line_as_read), so its values split the same way: a quoted run is one token
-// [orig: Terrain_TokenizeConfigLine @0x53CB60, quote @0x53CC4E..0x53CC70].
+// [orig: Config_TokenizeLine @0x53CB60, quote @0x53CC4E..0x53CC70].
 void validate_property(opennova::def::DefRecordKind kind, const char *line, size_t length,
                        size_t &issues, opennova::def::DefParseReport *report,
                        size_t number, const char *record) {
@@ -484,7 +484,7 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
     // A particle slot takes its effect alone: the arm copies the line's second and third
     // tokens whatever the count, and the tokenizer resets the first three to "" for every
     // line, so a missing userpoint reads as none (jox01's `particlefx fx_Mosquitos_2m_L`)
-    // [orig: ItemDef_ParseProperty @ 0x4A13BF..0x4A13FC; Terrain_TokenizeConfigLine
+    // [orig: ItemDef_ParseProperty @ 0x4A13BF..0x4A13FC; Config_TokenizeLine
     // @ 0x53CB71..0x53CB81].
     const int minimum = kind == DefRecordKind::Effect ? 4 : kind == DefRecordKind::Carry ? 2 : encoding == DefEncoding::Pose ? 6 : encoding == DefEncoding::Sight ? 5 :
         encoding == DefEncoding::Attachment ? 2 : 1;
@@ -532,7 +532,7 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
     // read, so a trailing token (jox01's `<down angle> <up angle> ...` placeholders) is
     // ignored. One to three angles read the slots an earlier line left (the tokenizer
     // resets only the first three), a value no file states: invalid. [orig:
-    // ItemDef_ParseProperty @ 0x4A1B42..0x4A1C9F, count > 3 @ 0x4A1BB4; Terrain_TokenizeConfigLine
+    // ItemDef_ParseProperty @ 0x4A1B42..0x4A1C9F, count > 3 @ 0x4A1BB4; Config_TokenizeLine
     // @ 0x53CB71..0x53CB81]
     if (encoding == DefEncoding::Attachment) {
         if (count > 2 && count < 6) invalid();
