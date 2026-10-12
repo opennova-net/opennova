@@ -3075,7 +3075,8 @@ int test_api_proxy_only(Harness &h) {
 					{ "GET", "/api/admin/users" }, { "PUT", "/api/admin/server-status" },
 					{ "GET", "/api/me/hosts" }, { "POST", "/api/me/hosts/1/command" },
 					{ "POST", "/api/me/hosts/1/stop" }, { "GET", "/api/admin/hosts" },
-					{ "POST", "/api/admin/hosts/1/command" }, { "POST", "/api/admin/hosts/1/stop" } }) {
+					{ "POST", "/api/admin/hosts/1/command" },
+					{ "POST", "/api/admin/hosts/1/stop" } }) {
 		const auto reply = h.send_to(h.fresh_port, method, path, { kJson, kCsrf, kBearer }, "{}");
 		if (reply.code != 403)
 			std::fprintf(stderr, "  %s %s: %s\n", method, path, describe(reply).c_str());
