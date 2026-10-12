@@ -250,8 +250,10 @@ void ParityTraceBuilder::emit_handshake(
 			break;
 		}
 		case SESSION_OPCODE_SERVER_AUTH: {
-			ServerAuth value;
-			out.decoded = parse_server_auth(out.body.data(), out.body.size(), value);
+			// Every 0x82 is decoded, as the capture decoder marks it: the client
+			// reads every one, and one whose CUs overrun the walk's bounds, which
+			// parse_server_auth refuses, is dropped at that walk, not unread.
+			out.decoded = true;
 			break;
 		}
 	}

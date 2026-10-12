@@ -15,7 +15,7 @@
 //   every player add appends its PDEF [orig: Server_PlayerAdd @0x51d2fd..0x51d30f];
 //   every eighth logic tick (tick & 7 == 7) writes FBEG (tick >> 3) and one
 //     PDAT per pool-0 player [orig: Game_ProcessMainFrame @0x526879..0x5268e7];
-//   a player's deploy writes PBRK [orig: Server_ProcessPlayerDeath — the deploy
+//   a player's deploy writes PBRK [orig: Server_DeployPlayer — the deploy
 //     transaction — @0x517a27..0x517a37];
 //   a player's disconnect writes PREM [orig: Server_HandlePlayerDisconnect
 //     @0x51b80e..0x51b822];

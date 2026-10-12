@@ -2158,7 +2158,7 @@ func test_late_reload_echo_refills_payload_weapon_after_joiner_switches() -> voi
 # the host rebuilds the slot from its loadout buffer (the last accepted 0x2F)
 # and re-sends the 0x5A, and the joiner's kit is that 0x5A. Retail's client
 # reads no profile page and runs no Player_InitPlayer at a redeploy (D-NET-378).
-# [orig: Server_ProcessPlayerDeath @0x5178E1 (PlayerSlot_InitWeaponsFromLoadout
+# [orig: Server_DeployPlayer @0x5178E1 (PlayerSlot_InitWeaponsFromLoadout
 #  @0x515550), @0x5178F2 (Server_SendWeaponSlotListToPlayer);
 #  NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0]
 func test_joiner_deploy_release_keeps_the_last_granted_kit() -> void:

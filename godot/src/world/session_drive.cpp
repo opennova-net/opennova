@@ -113,11 +113,6 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->load_charattr(resource_root);
 	Ref<CharacterJoinProfile> join_profile = build_join_character_profile(
 			resource_root, world_->player_visuals_->spawn_loadout());
-	if (join_profile.is_valid()) {
-		auto profile = join_profile->value();
-		profile.team_request = p_target->get_team_request();
-		join_profile->assign(profile);
-	}
 	join_preload_sim_->set_join_character_profile(join_profile);
 	// The APPID join token (decoded .joi CK) a NovaWorld host validates in
 	// ClientAuth (reject code 9), and the CD identity cookie (packed PUB*

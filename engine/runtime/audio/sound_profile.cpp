@@ -221,7 +221,7 @@ bool write_sound_profiles(const std::vector<SoundProfile> &profiles, std::string
                 // the callback, so one just ahead, its slot-3 token past where
                 // the keyword line ends, carries the two values; shipped files
                 // hold such slots (JO's SP_FuelTruck enginehighrev)
-                // [orig: Terrain_TokenizeConfigLine @ 0x53cb71..0x53cb81;
+                // [orig: Config_TokenizeLine @ 0x53cb71..0x53cb81;
                 // File_ParseASCIIFile, the '/' test @ 0x53d91e].
                 if (profile.param2_q16[slot] != 0) {
                     error = named + " gives " + kSlotKeywords[slot] +

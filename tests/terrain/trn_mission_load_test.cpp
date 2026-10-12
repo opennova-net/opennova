@@ -211,7 +211,7 @@ int run_key_lines() {
 	const std::vector<TrnKeyLine> read = opennova::read_trn_key_lines(text, &lines);
 	const std::vector<TrnKeyLine> expected = { { "polytrn_colormap", { "red map.tga" } }, { "lock_topleft", { "3", "4" } },
 		{ "foliage", {} }, { "graphic", { "tree.3di" } }, { "match", { "1", "2", "3" } }, { "end", {} },
-		// The comment cut writes no terminator: the token runs on to the line's end [orig: Terrain_TokenizeConfigLine
+		// The comment cut writes no terminator: the token runs on to the line's end [orig: Config_TokenizeLine
 		// @0x53CC2A..0x53CC31].
 		{ "polytrn_colormap", { "map;x.tga" } } };
 	TEST_EXPECT(read == expected && lines == std::vector<int>({ 2, 3, 5, 6, 7, 8, 10 }));

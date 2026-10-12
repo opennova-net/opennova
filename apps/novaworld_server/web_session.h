@@ -57,12 +57,16 @@ bool is_web_session_token(std::string_view token);
 // The stored form of a token: its SHA-256 as 64 lower-case hex digits.
 std::string web_session_token_hash(std::string_view token);
 
-// Mints a session for `user_id` and returns its token (the cookie value).
+// Mints a session for `user_id` and returns its token (the cookie value), or
+// nullopt, with nothing written, when the account is no longer active or no
+// longer at `credentials_gen`, the generation its password check read
+// (authenticate_user): the insert itself tests both, so a password reset or a
+// ban that committed while the password was being checked mints nothing.
 // `ip` and `user_agent` are recorded for the account's session list. The
 // account's sessions beyond the newest kWebSessionsPerUser are deleted in the
 // same transaction. Throws db::SqliteError when the insert fails.
-std::string create_web_session(db::Database &db, int64_t user_id, const std::string &ip,
-                               const std::string &user_agent);
+std::optional<std::string> create_web_session(db::Database &db, int64_t user_id,
+		int64_t credentials_gen, const std::string &ip, const std::string &user_agent);
 
 // The user a token's live session belongs to, sliding its expiry when the last
 // recorded use is older than kWebSessionTouchSeconds. nullopt for a malformed,

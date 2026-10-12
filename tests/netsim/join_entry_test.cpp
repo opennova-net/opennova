@@ -24,10 +24,10 @@ int main() {
 	CHECK(server_flag::kSpectators == 0x2000u && server_flag::kSpectatorPassword == 0x4000u);
 
 	// An undiscovered word reads false everywhere.
-	CHECK(!server_flags_known(-1) && !server_allows_team_choice(-1) && !server_has_side_password(-1) &&
+	CHECK(!server_flags_known(-1) && !server_has_side_password(-1) &&
 			!server_password_required(-1) && !server_allows_spectators(-1) &&
 			!server_spectator_password_required(-1));
-	CHECK(server_flags_known(0x904) && server_allows_team_choice(0x904) && !server_password_required(0x904));
+	CHECK(server_flags_known(0x904) && !server_password_required(0x904));
 	CHECK(server_has_side_password(0x10) && server_has_side_password(0x20) && !server_has_side_password(0x8));
 	CHECK(server_allows_spectators(0x2000) && !server_spectator_password_required(0x2000));
 	CHECK(server_spectator_password_required(0x6000));
@@ -42,7 +42,7 @@ int main() {
 	// TeamChoose alone opens no join choice: retail tests the discovered word
 	// against 0x6038 (server password, side passwords, spectators, spectator
 	// password) and dials a plain team game (0x904) at once.
-	// [orig: UI_EnumerateAndJoinSession @0x56a296 `test dword_25E5898, 6038h`]
+	// [orig: UI_EnumerateAndJoinSession @0x56a296 `test g_PreGameServerFlags, 6038h`]
 	facts.server_flags = 0x904;
 	CHECK(join_entry_step(facts, false) == JoinEntryStep::Dial);
 	facts.server_flags = static_cast<int32_t>(server_flag::kTeamChoice);

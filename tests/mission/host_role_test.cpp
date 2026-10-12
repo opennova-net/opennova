@@ -635,7 +635,7 @@ int main() {
 	// the server's handler for the host's own slot (its body's Health zeroed,
 	// the respawn holds stored). Out of a session the key queues nothing.
 	// [orig: Input_HandleActionBinding case 55 @0x49B20B..0x49B22A ->
-	//  NetPacket_SendRequestRespawn @0x42DBA0; NapiNPServerMsg_ResetPlayerAmmo
+	//  NetPacket_SendRequestRespawn @0x42DBA0; NapiNPServerMsg_DeathTimeoutReset
 	//  @0x510540]
 	for (const bool mp : {true, false}) {
 		ms::MissionKernel kernel;
@@ -966,6 +966,71 @@ int main() {
 			CHECK(kernel.world.rules.difficulty == 0);
 			CHECK(local->health == (restart ? 100 : profile_word == -1 ? 200 : 50));
 			CHECK(w::local_player_max_health(kernel.world) == 100);
+		}
+	}
+
+	// --- the listen host's own 0x4C quality report reaches its own slot ------
+	// The host's client queues the report on its local connection on its 311th
+	// client frame; the next frame's head drain hands it to the server's
+	// handler, which stores the host's level on the host's own slot and dirties
+	// it, and the 1 Hz walk of a later frame resends that slot's 5-byte 0x46,
+	// which the host's own client folds into its roster the same frame. At 62
+	// frames a second with no joiner the host's level is 1.
+	// [orig: Client_ProcessNetworkFrame @0x42C23E..0x42C279; NapiNPServerMsg_0x04C
+	//  @0x5111B0 -> PlayerSlot_SetClientQuality @0x5006E0; Server_TickUpdate
+	//  @0x51DEC6..0x51DF10]
+	{
+		ms::MissionKernel kernel;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "quality_report", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.config.server_name = "quality_report";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		role.observe_frame_rate(62);
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		CHECK(own != nullptr && host.client_runtime != nullptr);
+		if (own != nullptr && host.client_runtime != nullptr) {
+			CHECK(own->reply.client_quality == 0 && !own->reply.client_quality_dirty);
+			const uint8_t slot = static_cast<uint8_t>(own->reply.player_slot);
+			int stored_at = -1;
+			int resent_at = -1;
+			bool dirty_seen = false;
+			bool roster_early = false;
+			for (int frame = 1; frame <= 500 && resent_at < 0; ++frame) {
+				role.run_tick(tick_input(0));
+				const uint8_t roster_quality = host.client_runtime->state().roster[slot].quality;
+				if (stored_at < 0 && own->reply.client_quality != 0) stored_at = frame;
+				if (stored_at > 0 && own->reply.client_quality_dirty) dirty_seen = true;
+				if (stored_at > 0 && !own->reply.client_quality_dirty) resent_at = frame;
+				if (roster_quality != 0 && resent_at < 0) roster_early = true;
+			}
+			std::printf("host_role: the host's 0x4C stored at frame %d, resent at frame %d\n",
+					stored_at, resent_at);
+			CHECK(stored_at == 312);
+			CHECK(resent_at > stored_at && resent_at - stored_at <= 62 && dirty_seen);
+			CHECK(!roster_early);
+			CHECK(host.host_owner.ctx.net_quality_level == 1);
+			CHECK(own->reply.client_quality == host.host_owner.ctx.net_quality_level);
+			CHECK(host.client_runtime->state().roster[slot].quality == 1);
 		}
 	}
 

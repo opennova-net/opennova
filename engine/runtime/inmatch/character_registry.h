@@ -45,7 +45,7 @@ public:
 	// nationality/division/combo numbers AND the alignment bit must all match
 	// the entry (a side-B id never matches a good entry and vice versa); when
 	// `expected_alignment` is 0/1 an id whose bit contradicts it resolves to
-	// nothing. [orig: MinimapSlot_FindByPackedId @0x57a270; packer
+	// nothing. [orig: CAvatarDefs_FindComboByPackedId @0x57a270; packer
 	// EntitySlot_LookupAndPackEntry @0x57ad40 (@0x57ae47)]
 	const CharacterEntry *find_by_packed_id(uint16_t packed_id,
 			int expected_alignment = -1) const;

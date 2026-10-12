@@ -1339,7 +1339,21 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	}
 
 	if (role_ == Role::HostClient) {
-		// host: no connect-drive, no housekeeping send, no 0x0C. Its send block
+		// The 0x4C report leg has no authority test: the listen host's own
+		// client reports its level over its local connection like any peer, so
+		// its server stores it on the host's slot, the value that slot's S2C
+		// 0x46 carries. The timer runs every client frame; the report is
+		// in-session only (the view's session word stands in for is_in_session;
+		// the listen client is a session peer).
+		// [orig: Client_ProcessNetworkFrame @0x42C180 - the timer
+		//  @0x42C22D..0x42C23E, is_in_session @0x42C240, is_mp_session_peer
+		//  @0x42C24E, the queue @0x42C279]
+		if (++net_quality_timer_ > kNetQualityInterval) {
+			net_quality_timer_ = 0;
+			if (view_.mp_session())
+				queue_host_message(c2s::CLIENT_QUALITY, {net_quality_level()});
+		}
+		// host: no connect-drive, no keepalive send, no 0x0C. Its send block
 		// opens every frame, so the held one-shots leave here, after the
 		// receive fold: the local connection has no peer address, and its own
 		// server dictates such a connection a one-tick holdoff in both

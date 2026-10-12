@@ -42,7 +42,7 @@ void apply_row(const char *key, const char *value, TilSurfaceTable &out) {
 
 void til_tsd_parse(const char *text, size_t len, TilSurfaceTable &out) {
 	// The shared retail line walk and tokenizer (io/ascii_config.h)
-	// [orig: File_ParseASCIIFile @ 0x53d8de-0x53d8ec; Terrain_TokenizeConfigLine
+	// [orig: File_ParseASCIIFile @ 0x53d8de-0x53d8ec; Config_TokenizeLine
 	//  @ 0x53cb60; the '/'-led first token skip @ 0x53d91e].
 	io::for_each_config_line(text, len, [&](const io::ConfigTokens &tokens) {
 		apply_row(tokens.token(0), tokens.token(1), out);

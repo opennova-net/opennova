@@ -609,18 +609,18 @@ void tick_spawn_protection(NapiNPServerCtx &ctx, world::World &world) {
 }
 
 // The frontier-hint arm of the same walk: a state-6 slot whose bit 0x04 is set
-// and which has played 1240 ticks gets S2C 0x1E event 58 [its team's frontier
-// zone][the enemy's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
-// frontier is 0; either way the bit clears.
-// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6]
+// and which has played 1240 ticks gets S2C 0x1E event 58 [its slot team's frontier
+// zone][the enemy team's, 0 when the same][0xFF] (mask 0xA0, itself) unless its own
+// frontier is 0; either way the bit clears. Both read the slot team (D-NET-583).
+// [orig: Server_UpdateAllActivePlayerSlots @0x518820 — @0x51890C..0x5189A6, @0x518929..0x51894A]
 void emit_frontier_hints(NapiNPServerCtx &ctx, world::World &world) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!is_in_match(conn) || !conn.reply.frontier_hint_pending) continue;
 		const world::Entity *player = world.registry.get(conn.link.owned_entity);
 		const world::MatchPlayer *slot = world.match.player(conn.link.owned_entity);
 		if (player == nullptr || slot == nullptr || slot->play_ticks < 1240u) continue;
-		const uint8_t own = world.zones.frontier_zone(player->team);
-		uint8_t enemy = world.zones.frontier_zone(player->team == 1 ? 2 : 1);
+		const uint8_t own = world.zones.frontier_zone(conn.assigned_team);
+		uint8_t enemy = world.zones.frontier_zone(conn.assigned_team == 1 ? 2 : 1);
 		if (enemy == own) enemy = 0;
 		if (own != 0 && conn.link.transport != nullptr)
 			conn.link.transport->host_send(s2c::GAME_EVENT,
@@ -1420,7 +1420,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 				// healthy-LAN capture carries 0; D-NET-374).
 				// [orig: Server_SendEntityHandleAndInputState @0x507BF2..0x507C29 ->
 				//  CharAttr_PackDisabledProperties @0x412550 (IDB
-				//  Input_PackStateFlags until 2026-10-07)]
+				//  Input_PackStateFlags until 2026-10-12)]
 				const uint16_t latches = world.tables.charattr_disabled_word;
 				conn.link.transport->host_send(s2c::CHARATTR_DISABLED_PROPERTIES,
 						{static_cast<uint8_t>(latches), static_cast<uint8_t>(latches >> 8)},
@@ -1709,7 +1709,7 @@ static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world)
 	// entity update) ahead of this pump's 0x41 (Health 0); ours routes the heal
 	// only now, after the pump, so the 0x41's store goes back over it on each
 	// body whose edge is held, and its death keeps the 0x41's Health 0.
-	// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_ResetPlayerAmmo
+	// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_DeathTimeoutReset
 	//  @0x510568]
 	for (const world::RoundDeath &d : world.round_sim.deaths)
 		if (d.player_edge)
@@ -1803,8 +1803,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	// after its converts: retail's edge runs in the entity update after the
 	// whole pump, and skips a body the convert hid (Flags |= 1, which the
 	// convert's deploy leg keeps; it clears only the dead bit).
-	// [orig: Server_KillPlayerAndNotify @0x519E92, Health 1 @0x519EA4, the deploy
-	//  @0x519ECE; Server_ProcessPlayerDeath @0x51787A; the edge's hidden bit
+	// [orig: Server_ConvertPlayerToSpectator @0x519E92, Health 1 @0x519EA4, the deploy
+	//  @0x519ECE; Server_DeployPlayer @0x51787A; the edge's hidden bit
 	//  Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127]
 	route_round_deaths(ctx, world, EdgeDrain::AfterConverts);
 
@@ -1970,8 +1970,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				if (!is_in_match(conn) || conn.link.transport == nullptr ||
 						conn.link.owned_entity != release.player)
 					continue;
-				// The leg takes the zone's handle [orig: SpawnWaveList_TickEntry,
-				//  the Server_ProcessPlayerDeath call @0x52A3C0].
+				// The leg takes the zone's handle, placed unresolved (D-NET-592) [orig:
+				//  SpawnWaveList_TickEntry, the Server_DeployPlayer call @0x52A3C0].
 				std::vector<ProtocolMessage> deployment =
 						Server_ReleasePlayerDeployment(ctx.config, conn, world,
 								release.zone, release.zone.packed, ctx.logs.profile);
@@ -2245,7 +2245,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				conn.link.transport->host_send(
 						s2c::SPAWN_WAVE_STATUS,
 						build_spawn_wave_status_body(
-								world, conn.link.owned_entity),
+								world, conn), // the slot's rows (D-NET-581)
 						/*reliable=*/false);
 		}
 	}

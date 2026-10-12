@@ -35,7 +35,7 @@ void entity_reset_to_spawn_state(Entity &e, int32_t health_ceiling) {
     // The +0x124 damage-disabled state is NOT touched here: the deploy leg that
     // calls this reset seeds its 620-tick spawn protection afterwards
     // [orig: no [esi+124h] store anywhere in @0x4B9610; the seed is
-    //  Server_ProcessPlayerDeath @0x517937/@0x517952/@0x517960].
+    //  Server_DeployPlayer @0x517937/@0x517952/@0x517960].
     // The reset's one raise [orig: Entity_ResetToSpawnState @0x4B97BC -> Entity_RaiseHealthToMax
     // @0x43C290: `if (Health < max) Health = max`, a signed word compare].
     if (retail_signed_i16(e.health) < health_ceiling) e.health = health_ceiling;

@@ -115,7 +115,7 @@ enum class ExpansionLoose { None, Folder, RootOnly };
 // to CR LF (the editor's line-ends rule). AsciiWalk: the shared ASCII walk, which ends a line only
 // where a CR is followed by an LF [orig: File_ParseASCIIFile @ 0x53D810, the test @ 0x53D8DE],
 // tokenizes the line's first 1000 characters and skips a line with no word or whose first word
-// starts with '/' [orig: @ 0x53D908..0x53D91E; Terrain_TokenizeConfigLine @ 0x53CB60, the clamp @
+// starts with '/' [orig: @ 0x53D908..0x53D91E; Config_TokenizeLine @ 0x53CB60, the clamp @
 // 0x53CBBB] (base/io/ascii_config.h). ConfigFile: the ConfigFile text reader, where CR LF ends a line
 // and a lone CR or LF does not [orig: ConfigFile_LoadFromFile @ 0x760a10 -> ConfigFile_ParseText @
 // 0x7608a0] (formats/configfile), whose pool of text values such a kind's files are held to

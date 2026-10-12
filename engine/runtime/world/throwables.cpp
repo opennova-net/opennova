@@ -768,6 +768,15 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
         }
         seed.armor_impact = row->armor_impact;
         seed.armor_kz = row->armor_kz;
+        // The conversion copies the round and runs the model init on the
+        // placed entity, whose first leg ORs Flags 0x8000000 for a NoTarget
+        // def (items.def 101891 "Satchel Charge"): the AI target walks and
+        // the LOS walk then skip the device, and the load stream carries it.
+        // [orig: Entity_UpdateSatchelPhysics @0x448A3E /
+        //  Entity_UpdateClaymorePhysics @0x4479C9 ->
+        //  Entity_ConvertRoundToPlacedEntity @0x5455B0, the memcpy @0x5455D6,
+        //  the Entity_InitFromModel call @0x5455D8 -> @0x40DC4F]
+        if (row->no_target) seed.engine_flags |= kEntityFlagNoTarget;
     }
     // Health/armor come from the item def via the host traits sweep
     // [orig: Entity_InitFromItemDef @ 0x49e550 Health = def healthMax]; the
@@ -1122,7 +1131,7 @@ void ThrowableSim::update_device(World &world, PlacedDevice &d,
     // the visit itself never reads the owner, so a dead owner's devices stay
     // armed until that owner deploys again. [orig: Entity_UpdatePool1Slot
     //  @0x4B8DD0 reads no owner; the sweeps are Entity_RemovePlacedDevicesByOwner
-    //  @0x546E00, called from Server_ProcessPlayerDeath @0x5178D8 and
+    //  @0x546E00, called from Server_DeployPlayer @0x5178D8 and
     //  Server_RemoveEntityAndNotify @0x50A2BB]
     Entity *e = entity_for_lifetime(world, d.entity, d.entity_spawn_id);
     if (e == nullptr) {

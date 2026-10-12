@@ -57,7 +57,7 @@ struct Line {
 // skipped when it has no token or its first starts with '/'. A token the
 // comment cut left unterminated runs on to the line's end; `cut` is where
 // the value really stops. [orig: File_ParseASCIIFile @ 0x53D8C7..0x53D8F5,
-//  @ 0x53D90D..0x53D91E; Terrain_TokenizeConfigLine @ 0x53CB60, the cut
+//  @ 0x53D90D..0x53D91E; Config_TokenizeLine @ 0x53CB60, the cut
 //  @ 0x53CC16..0x53CC31; io/ascii_config.h for_each_config_line_span]
 std::vector<Line> split_lines(const std::string &def) {
 	std::vector<Line> lines;

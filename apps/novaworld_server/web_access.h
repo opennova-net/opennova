@@ -27,18 +27,29 @@ namespace opennova::novaworld_server {
 
 struct ServerConfig;
 
-// The per-request work WebAccess leaves for after the handler: the renewed
-// session cookie of a request whose session the store slid forward
-// (WebSessionLookup::slid), whatever route answered it, and the admin
-// state change require_admin let through, logged with its actor once the
-// handler has answered (so the line carries the outcome).
+// The per-request work WebAccess does around every handler. Before it: with
+// ONNET_API_PROXY_ONLY, a request for /api/ (or /api) whose TCP peer is not a
+// trusted proxy (ONNET_TRUSTED_PROXIES) is answered 403
+// {"error":"proxy_required"} and reaches no route, so the website's API is
+// served only through the proxy that applies the edge checks (prod's nginx,
+// DEPLOY.md), while the retail routes a stock client reaches on this port
+// directly (the NW*.dll pages, the .gsb feeds, the templates and static
+// files) stay open. After it: the renewed session cookie of a request whose
+// session the store slid forward (WebSessionLookup::slid), whatever route
+// answered it, and the admin state change require_admin let through, logged
+// with its actor once the handler has answered (so the line carries the
+// outcome).
 struct AccessMiddleware {
 	struct context {
 		std::string set_cookie;
 		std::string admin_actor; // "token" or "session '<username>'"
 	};
-	void before_handle(crow::request &, crow::response &, context &) {}
+	void before_handle(crow::request &req, crow::response &res, context &ctx);
 	void after_handle(crow::request &req, crow::response &res, context &ctx);
+
+	// Set by WebAccess::configure before any route runs.
+	bool api_proxy_only = false;
+	std::vector<std::string> trusted_proxies;
 };
 
 // The HttpListener's Crow app.
@@ -110,7 +121,8 @@ public:
 	WebAccess &operator=(const WebAccess &) = delete;
 
 	// Takes the policy from the config (ADMIN_API_TOKEN, ONNET_COOKIE_SECURE,
-	// ONNET_TRUSTED_PROXIES) and logs it. Before any route runs.
+	// ONNET_TRUSTED_PROXIES, ONNET_API_PROXY_ONLY) and logs it. Before any
+	// route runs.
 	void configure(const ServerConfig &config);
 
 	// Registers POST /api/login, POST /api/logout and GET /api/me.
@@ -143,11 +155,13 @@ public:
 	// checked (so concurrent checks never pass a spent bucket): 0 with the
 	// ticket, or the Retry-After seconds with nothing drawn. password_accepted
 	// hands the ticket's tokens back and remembers the address for the
-	// account; a wrong password keeps them spent.
+	// account, unless the account has left `credentials_gen`, the generation
+	// the password check read, since (record_login_address); a wrong password
+	// keeps the tokens spent.
 	int64_t take_login_address(LoginRoute route, const std::string &ip);
 	int64_t begin_password_check(LoginRoute route, const std::string &username,
 	                             const std::string &ip, LoginTicket &ticket);
-	void password_accepted(const LoginTicket &ticket, int64_t user_id);
+	void password_accepted(const LoginTicket &ticket, int64_t user_id, int64_t credentials_gen);
 
 	// POST /api/register's per-address brake: 0, or the Retry-After seconds.
 	int64_t take_register(const std::string &ip);

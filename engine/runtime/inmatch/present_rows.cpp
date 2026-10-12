@@ -19,8 +19,10 @@
 #include <runtime/world/entity.h> // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/zone_chain.h> // zone_chain_zone_info_byte
 #include <runtime/world/collision.h> // entity_live_euler_bam, ResolvedCollisionShape
+#include <runtime/world/item_sections.h> // bldg_section_origin_q16
 #include <runtime/renderer/render_slot_shadow.h> // slot_march_start_offset
 #include <runtime/replication/client_state.h>
+#include <runtime/replication/client_world_materializer.h> // replica_world_entity
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of / player_wire_net_id (the host's own rows)
 #include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
 #include <formats/threedi/threedi_ctrl_catalog.h>
@@ -744,18 +746,54 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				//  HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
 				write_present_replica_vehicle_gun(r, kernel.world, *local, es);
 			}
-			const auto *item = local ? kernel.world.tables.item_death_traits.get(local->item_id) : nullptr;
-			if (local && static_cast<uint16_t>(local->item_id) == es.type_id &&
-					(local->palm_sections || local->item_section_piece ||
+			// The section and bldg draws below read the decoded row's own
+			// native row by the joiner's replica rule (a header-only world's
+			// owned lifetime, a full-BMS join's spawn-origin gated row), never
+			// a later occupant of the same handle; the reads above still take
+			// the handle and the type (D-NET-620).
+			const Entity *owned = context.materializer != nullptr
+					? context.materializer->replica_world_entity(
+							kernel.world, h, kernel.wire_header_world)
+					: local;
+			if (owned != nullptr && static_cast<uint16_t>(owned->item_id) != es.type_id)
+				owned = nullptr;
+			const auto *item = owned ? kernel.world.tables.item_death_traits.get(owned->item_id) : nullptr;
+			if (owned && (owned->palm_sections || owned->item_section_piece ||
 					 (item && item->death_class == ItemDeathClass::kTower) ||
-					 local->death_motion == DeathMotionMode::CraneFalling ||
-					 local->death_motion == DeathMotionMode::BuildingEffects)) {
-				const Vec3 pos = item_section_render_position(kernel.world, *local);
+					 owned->death_motion == DeathMotionMode::CraneFalling ||
+					 owned->death_motion == DeathMotionMode::BuildingEffects)) {
+				const Vec3 pos = item_section_render_position(kernel.world, *owned);
 				r[PF_POS_X] = pos.x; r[PF_POS_Y] = pos.z; r[PF_POS_Z] = -pos.y;
-				r[PF_YAW_DEG] = local->yaw;
-				r[PF_PITCH_DEG] = local->pitch; r[PF_ROLL_DEG] = local->roll;
-				r[PF_ALIVE] = local->alive ? 1.0f : 0.0f;
-				write_present_section_mask(r, item_hidden_sections(*local));
+				r[PF_YAW_DEG] = owned->yaw;
+				r[PF_PITCH_DEG] = owned->pitch; r[PF_ROLL_DEG] = owned->roll;
+				r[PF_ALIVE] = owned->alive ? 1.0f : 0.0f;
+				write_present_section_mask(r, item_hidden_sections(*owned));
+			} else if (const auto *origin = owned ? bldg_section_origin_q16(kernel.world, *owned)
+						: nullptr) {
+				// The bldg row's world callback runs on every peer and only
+				// multiplies the entity's one matrix by the translation, by the
+				// negated origin of the section the byte +0x2C1 names (on a
+				// joiner the S2C 0x13 death id stores it): the replica row keeps
+				// its decoded pose, liveness and section mask, and the offset
+				// turns with the attitude the row renders, scaled as the item.
+				// [orig: BoneCallback_bldg_World @0x4E21A0 - the scale select
+				//  @0x4E21BA..0x4E220C (Math_BuildFixedPointRotationMatrixFromEulerAnglesAndScale
+				//  @0x614210), the byte @0x4E2214, the translate @0x4E2247, the
+				//  multiply @0x4E2260 (Matrix_Multiply3x4_FixedPoint @0x613940);
+				//  NapiNPClientMsg_EntityDeath @0x42EBDF]
+				const int32_t zero[3] = {};
+				CollisionMatrix attitude = collision_matrix_from_euler(
+						bam_heading_from_mission_yaw_deg(r[PF_YAW_DEG]),
+						bam_from_degrees_wrapped(r[PF_PITCH_DEG]),
+						bam_from_degrees_wrapped(r[PF_ROLL_DEG]), zero);
+				collision_matrix_scale_rotation(attitude, owned->uniform_scale_q16);
+				const int32_t negated[3] = {io::bam_sub(0, (*origin)[0]),
+						io::bam_sub(0, (*origin)[1]), io::bam_sub(0, (*origin)[2])};
+				int32_t offset[3];
+				attitude.rotate_point(negated, offset);
+				r[PF_POS_X] += offset[0] / 65536.0f;
+				r[PF_POS_Y] += offset[2] / 65536.0f;
+				r[PF_POS_Z] -= offset[1] / 65536.0f;
 			}
 		}
 	}

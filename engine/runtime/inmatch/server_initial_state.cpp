@@ -553,6 +553,13 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			// session-key/seed, 0x3E terminator. The per-frame 0x0A the original interleaves here is
 			// covered by Server_TickUpdate's 0x0A fan (starts once spawned), so it is not re-emitted in the
 			// bundle. [§5.29 / §5.43 / D-NET-114]
+			// The join's state-6 entry zeroes the slot's quality level and its resend flag, so a
+			// level kept across a map change (or stored ahead of the join) is gone and the
+			// client's next C2S 0x4C above 0 dirties it again; the player-sync tail ahead of
+			// this bundle still carried the old level. [orig: Server_OnPlayerJoin @0x51A680 -
+			//  the state-6 test @0x51A707..0x51A70A, +418 = 0 @0x51A71F, +89860 = 0 @0x51A725]
+			conn.reply.client_quality = 0;
+			conn.reply.client_quality_dirty = false;
 			std::vector<uint8_t> wsl = serialize_world_state_load(ctx, conn, now_tick);
 			const std::size_t wsl_sz = wsl.size();
 			// Each set restriction word, one 0x41 of the property it disables, to this slot alone
