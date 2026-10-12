@@ -141,11 +141,13 @@ int main() {
 		const std::string saved = read_text(dir.file("game.cfg"));
 		TEST_EXPECT(saved.find("display_16x9         = 1\r\n") != std::string::npos);
 
-		// A later entry over the same mount reads the file again, and a set
-		// mpreset ends the process there.
+		// A later entry over the same mount reads the file again (no second
+		// video test: the seeded words stay as the file has them now), and a
+		// set mpreset ends the process there.
 		write_text(dir.file("game.cfg"), "version = 29\r\nmusic_volume = 33\r\n");
 		TEST_EXPECT(block.enter_main_menu(mount, error));
-		TEST_EXPECT(block.cfg().music_volume == 33 && !block.video_test_ran());
+		TEST_EXPECT(block.cfg().music_volume == 33);
+		TEST_EXPECT(block.cfg().display_16x9 == 0 && block.cfg().object_polydetail == 0);
 		write_text(dir.file("game.cfg"), "version = 29\r\nmpreset = 1\r\n");
 		TEST_EXPECT(!block.enter_main_menu(mount, error));
 		TEST_EXPECT(block.reset_exit());
