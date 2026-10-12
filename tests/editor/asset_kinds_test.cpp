@@ -34,11 +34,13 @@ static int test_the_table() {
 		TEST_EXPECT(row.kind == kind && asset_kind_from_token(row.token) == kind);
 		TEST_EXPECT(&row.facts() == &file_kind_facts(kind));
 		// A kind a document type edits is one the build packs, but the project's notes, which the text type
-		// opens and the game never reads.
+		// opens and the game never reads, and an import's inputs, which the texture type opens (S25 B3: the
+		// images a terrain set's import makes its maps from) and its outputs pack in their place.
 		if (row.document != DocumentTypeId::None) {
 			edited.insert(row.document);
 			const DocumentType *type = document_type(row.document);
-			TEST_EXPECT(type && document_type_for(kind) == type && asset_kind_packed(kind) == (kind != AssetKind::Notes));
+			TEST_EXPECT(type && document_type_for(kind) == type &&
+			            asset_kind_packed(kind) == (kind != AssetKind::Notes && kind != AssetKind::ImportInput));
 		} else {
 			TEST_EXPECT(document_type_for(kind) == nullptr);
 		}

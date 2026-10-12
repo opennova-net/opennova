@@ -296,7 +296,10 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	// The scan gives it to a file an import record lists among its inputs (S20: a terrain set's
 	// heightmap and images), whatever its name would make it. It never packs: its import's outputs do.
+	// S25 B3: an image of a terrain set opens as a texture, the terrain brush painting the maps it makes
+	// (a true-colour image's texels; a heightmap's grey is no plane a texture's brush paints).
 	Kind(AssetKind::ImportInput, "import_input", "Import input")
+	        .edited_by(DocumentTypeId::Texture)
 	        .row,
 };
 

@@ -12,6 +12,8 @@
 #include <editor/model/document_base.h>
 #include <editor/model/edit_history.h>
 #include <editor/model/finding_code_row.h>
+#include <editor/documents/texture_raster.h>
+#include <editor/model/raster_document.h>
 #include <editor/model/value.h>
 
 namespace opennova::editor {
@@ -26,60 +28,48 @@ struct TextureImageEdit final : EditPayload {
 };
 
 // A texture as a document (ADR 0046 S18; CONTEXT.md "Texture document"): a .tga, .mdt, .pcx, .dds or
-// .png file of the project, held as the file stores it and read as the game reads it (texture_image.h:
-// the texels the reader its name picks decodes, the palette of an indexed one, the levels a DDS holds,
-// and what it is in a modder's words). It takes whole images (an Apply edit of a TextureImageEdit, one
-// undo step each: a resize, an alpha, a stored form, its rows, its palette's indices), its history the
-// file's versions under the history's byte budget (HistoryBudget: past it the oldest given up, never the
-// one before the current), and Save writes the version it is at. Its picture is the texture viewport
-// (preview/texture_viewport.h), the Document tab's main view, which the Preview window shows too for a
-// texture Files selects.
-class TextureDocument final : public DocumentBase {
+// .png file of the project, read as the game reads it (texture_image.h: the texels the reader its name picks
+// decodes, the palette of an indexed one, the levels a DDS holds, and what it is in a modder's words). Since S25
+// (B3) it is a raster document (documents/texture_raster.h): one plane of its texels where a brush paints its form
+// (an 8-bit PCX's indices, an uncompressed TGA's colours, a true-colour PNG's), beside the form its file is written
+// in again; the file whole where none does. It takes whole images (an Apply edit of a TextureImageEdit, one undo
+// step each: a resize, an alpha, a stored form, its rows, its palette's indices: a whole change of the raster) and
+// texels painted (a TexturePaintEdit, S25 B4: tile regions, a stroke's batches one step), its history under the
+// history's byte budget, and Save writes the state it is at: the file as it was read while its texels are those it
+// read, else its form written again from them. Its picture is the texture viewport (preview/texture_viewport.h),
+// the Document tab's main view, which the Preview window shows too for a texture Files selects.
+class TextureDocument final : public RasterDocument {
 public:
-	explicit TextureDocument(HistoryBudget budget = {}) : budget_(budget) {}
+	explicit TextureDocument(HistoryBudget budget = {});
 	// The copy a snapshot is (DocumentBase::snapshot).
 	TextureDocument(const TextureDocument &other) = default;
 
 	// The texture as the game reads it (null before a load): decoded as it is first asked for, so a
 	// validation that reads only its header (validate_texture_file) never decodes its texels.
 	const std::shared_ptr<const TextureImage> &image() const;
-	// The file's bytes as the document holds them now (as read, decoded as a document's are: the base's;
-	// or as its last edit made them).
+	// The file's bytes as the document holds them now: as read (decoded as a document's are: the base's) while
+	// its texels and form are those it read, else its form written from its texels.
 	const std::vector<uint8_t> &bytes() const;
+	// Whether a brush paints it (one plane of its texels: texture_raster.h's paintable forms).
+	bool paintable() const { return texture_paintable(state()); }
 
-	void end_edit_group() override {}
-	bool dirty() const override;
-	bool can_undo() const override { return cursor_ > 0; }
-	bool can_redo() const override { return cursor_ + 1 < versions_.size(); }
-	uint64_t revision() const override;
-	size_t history_bytes() const override;
-	// The same state answers no change; any other cannot say (each is a whole image).
-	bool changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const override;
 	SerializeResult serialize() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override;
 	bool holds_bytes() const override { return true; }
 
 protected:
 	bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) override;
-	void undo_step() override;
-	void redo_step() override;
 	bool read_source(const std::vector<uint8_t> &decoded, bool adopt, std::vector<SourceIssue> &issues,
 	                 Diagnostic &error) override;
-	void on_saved() override;
 
 private:
-	// One version of the file: its bytes and the revision it is (never given twice within a load).
-	struct Version {
-		std::shared_ptr<const std::vector<uint8_t>> bytes;
-		uint64_t revision = 0;
-	};
-	void moved();
-
-	HistoryBudget budget_;
-	std::vector<Version> versions_;
-	size_t cursor_ = 0;
-	uint64_t next_revision_ = 1, saved_revision_ = 0;
+	// What the document read (the bytes and the state they made), and its bytes and image as they stand.
+	std::shared_ptr<const std::vector<uint8_t>> read_bytes_;
+	RasterState read_state_;
 	bool loaded_ = false;
+	mutable uint64_t bytes_revision_ = 0, bytes_generation_ = 0;
+	mutable std::shared_ptr<const std::vector<uint8_t>> bytes_;
+	mutable uint64_t image_revision_ = 0, image_generation_ = 0;
 	mutable std::shared_ptr<const TextureImage> image_;
 };
 

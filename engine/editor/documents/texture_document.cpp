@@ -69,32 +69,37 @@ const FindingCodeRow &finding_code(TextureFinding code) {
 	return kFindingRows[static_cast<size_t>(code)];
 }
 
+TextureDocument::TextureDocument(HistoryBudget budget) : RasterDocument(&pick_texture_codec, budget) {}
+
 const std::vector<uint8_t> &TextureDocument::bytes() const {
 	static const std::vector<uint8_t> none;
-	return versions_.empty() ? none : *versions_[cursor_].bytes;
+	if (!loaded_) return none;
+	if (bytes_ && bytes_revision_ == revision() && bytes_generation_ == load_generation()) return *bytes_;
+	bytes_revision_ = revision();
+	bytes_generation_ = load_generation();
+	// The texels and form it read (a stroke undone shares the tiles it read): the file as read.
+	const RasterState &now = state();
+	bool as_read = now.side == read_state_.side && now.planes.size() == read_state_.planes.size();
+	for (size_t i = 0; as_read && i < now.planes.size(); ++i) as_read = now.planes[i].shares_tiles_with(read_state_.planes[i]);
+	if (as_read) {
+		bytes_ = read_bytes_;
+		return *bytes_;
+	}
+	auto written = std::make_shared<std::vector<uint8_t>>();
+	std::string error;
+	if (!write_texture_state(now, *written, error)) written->clear();
+	bytes_ = std::move(written);
+	return *bytes_;
 }
 
 const std::shared_ptr<const TextureImage> &TextureDocument::image() const {
-	if (loaded_ && !image_) image_ = decode_texture(path(), bytes());
+	if (!loaded_) return image_;
+	if (!image_ || image_revision_ != revision() || image_generation_ != load_generation()) {
+		image_ = decode_texture(path(), bytes());
+		image_revision_ = revision();
+		image_generation_ = load_generation();
+	}
 	return image_;
-}
-
-bool TextureDocument::dirty() const { return revision() != saved_revision_; }
-
-uint64_t TextureDocument::revision() const { return versions_.empty() ? 0 : versions_[cursor_].revision; }
-
-size_t TextureDocument::history_bytes() const {
-	size_t total = 0;
-	for (const Version &version : versions_) total += version.bytes->size();
-	return total;
-}
-
-bool TextureDocument::changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const {
-	// The state a caller read is this one, or another whole image (its sides perhaps others): the caller
-	// takes everything as changed.
-	if (load_generation != this->load_generation() || revision != this->revision()) return false;
-	out = RasterChanges();
-	return true;
 }
 
 SerializeResult TextureDocument::serialize() const {
@@ -107,61 +112,35 @@ std::unique_ptr<DocumentBase> TextureDocument::snapshot() const {
 	return std::make_unique<TextureDocument>(*this);
 }
 
-void TextureDocument::moved() { image_.reset(); }
-
 bool TextureDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
-	// One batch, one step: its last image (each a whole file).
-	const TextureImageEdit *image = nullptr;
+	// A whole image (a texture operation's bytes) is read by the texture's reader into a whole change; texels
+	// painted go to the raster as they are.
+	std::vector<Edit> raster;
+	raster.reserve(edits.size());
 	for (const Edit &edit : edits) {
-		const auto *made = edit.operation == EditOperation::Apply ? dynamic_cast<const TextureImageEdit *>(edit.payload.get()) : nullptr;
-		if (!made) {
-			error = make_finding(CoreFinding::DocumentPayload, DiagnosticSeverity::Error,
-			                     "A texture takes a whole image (a texture operation), no other edit.", path());
-			return false;
+		const auto *image = edit.operation == EditOperation::Apply ? dynamic_cast<const TextureImageEdit *>(edit.payload.get()) : nullptr;
+		if (!image) {
+			raster.push_back(edit);
+			continue;
 		}
-		image = made;
+		auto whole = std::make_shared<TextureWholeEdit>();
+		whole->state = read_texture_state(path(), image->bytes);
+		Edit made = edit;
+		made.payload = std::move(whole);
+		raster.push_back(std::move(made));
 	}
-	if (!image) return true;
-	// The versions after the current go (a redo branch), the new one is the current, and past the budget the
-	// oldest go, never the one before the current.
-	versions_.resize(cursor_ + 1);
-	versions_.push_back({std::make_shared<const std::vector<uint8_t>>(image->bytes), next_revision_++});
-	cursor_ = versions_.size() - 1;
-	while (versions_.size() > budget_.min_steps + 1 && history_bytes() > budget_.bytes) {
-		versions_.erase(versions_.begin());
-		--cursor_;
-	}
-	moved();
-	return true;
+	return RasterDocument::apply_edits(raster, error);
 }
-
-void TextureDocument::undo_step() {
-	if (cursor_ == 0) return;
-	--cursor_;
-	moved();
-}
-
-void TextureDocument::redo_step() {
-	if (cursor_ + 1 >= versions_.size()) return;
-	++cursor_;
-	moved();
-}
-
-void TextureDocument::on_saved() { saved_revision_ = revision(); }
 
 bool TextureDocument::read_source(const std::vector<uint8_t> &decoded, bool adopt, std::vector<SourceIssue> &issues,
                                   Diagnostic &error) {
-	(void)issues;
-	(void)error;
-	// Every file reads: what the game cannot load is said by its image (why it does not load), never a
-	// document that does not open.
+	if (!RasterDocument::read_source(decoded, adopt, issues, error)) return false;
 	if (!adopt) return true;
-	versions_.assign(1, Version{std::make_shared<const std::vector<uint8_t>>(decoded), 0});
-	cursor_ = 0;
-	next_revision_ = 1;
-	saved_revision_ = 0;
+	read_bytes_ = std::make_shared<const std::vector<uint8_t>>(decoded);
+	read_state_ = state();
 	loaded_ = true;
-	moved();
+	bytes_.reset();
+	image_.reset();
 	return true;
 }
 
