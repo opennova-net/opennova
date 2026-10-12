@@ -621,8 +621,19 @@ std::string DocumentMissionNames::entity(int64_t ssn) const {
 std::string DocumentMissionNames::zone(int64_t id) const {
 	const NodeId holder = document_.zone_holder(id);
 	if (!holder) return "zone " + number(id) + " (no area has it)";
+	// By the description the mission gives its area (S24 Names, the .mis), else the area's title.
+	if (const Node *row = document_.row(holder))
+		if (const std::string *name = mission_row_name(*row); name && !name->empty()) return *name;
 	const std::string title = document_.record_title({holder, node_kind(MissionKind::Area), 0});
 	return title.empty() ? MissionNames::zone(id) : title;
+}
+
+std::string DocumentMissionNames::path(int64_t number_) const {
+	// A path by the description the mission gives it (S24 Names); a command and none as the base says them.
+	if (number_ > 0 && number_ < mission::kFirstPathCommand)
+		if (const Node *row = document_.row_of(MissionKind::WaypointPath, size_t(number_)))
+			if (const std::string *name = mission_row_name(*row); name && !name->empty()) return *name;
+	return MissionNames::path(number_);
 }
 
 std::string DocumentMissionNames::group(int64_t group) const {
@@ -645,6 +656,9 @@ std::string DocumentMissionNames::event(int64_t index) const {
 		for (const auto &row : document_.rows()) events_ += row && row->kind == node_kind(MissionKind::Event);
 	}
 	if (index < 0 || size_t(index) >= events_) return "event " + number(index + 1) + " (the mission has no such event)";
+	// By the name the mission gives it (S24 Names, the .mis).
+	if (const Node *row = document_.row_of(MissionKind::Event, size_t(index)))
+		if (const std::string *name = mission_row_name(*row); name && !name->empty()) return *name;
 	return MissionNames::event(index);
 }
 

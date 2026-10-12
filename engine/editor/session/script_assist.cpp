@@ -398,7 +398,7 @@ void paths(const SessionView &view, const TextDocument &script, const std::strin
 		const MissionPath &path = static_cast<const PathRow &>(*row).native;
 		if (path.number <= 0 || path.number >= mission::kFirstPathCommand || path.stops.empty()) continue;
 		const std::string insert = std::to_string(path.number);
-		const std::string words = mission_path_title(path);
+		const std::string words = mission_path_title(*row);
 		if (wanted(typed, insert)) add(out, insert + "  " + words, insert, "path", words);
 	}
 }
