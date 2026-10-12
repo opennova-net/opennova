@@ -222,6 +222,9 @@ private:
 
 	bool _build_terrain_begin();
 	bool _build_terrain_tile(size_t ti);
+	// One vertex variant of a tile's LOD meshes (0 the heights, 1 the flat fallback), made again in place
+	// (every LOD it had dropped first); the vertices and indices it uploaded added to the counts given.
+	bool _build_tile_variant(size_t ti, int variant, int *r_vertices, int *r_indices);
 	void _load_textures();
 	void _clear_derived_textures();
 	void _rebuild_tile_overlay_pages();
@@ -345,6 +348,28 @@ public:
 	bool build_begin();
 	BuildStep build_step();
 	bool is_built() const { return built; }
+	// The terrain shown again over a region of its heights (the OpenNova Editor's sculpt, ADR 0046 S25),
+	// after TerrainData::patch_heights wrote `p_rect` (atlas texels) and TerrainData::replace_tiles put
+	// `p_tiles` in place (a bake's landing; none in a stroke): the meshes of every tile whose vertices read
+	// the rect (opennova::terrain_tiles_reading: the heights variant) and of each replaced tile (both
+	// variants), the scene snapshot (opennova::refresh_terrain_scene_snapshot), the heightfield normals
+	// over the rect and the tile cache's normal quadrants, and the composed pages where the changed normals
+	// show (retired, to recompose when next visible). Static shadows read no heights; they recompose with
+	// their pages. False, nothing changed, where the terrain is not built or a tile index is not one; a
+	// heightfield that cannot take the region (a live heightmap image) has its derived textures made again
+	// whole. Equal to a fresh build of the patched data (terrain_region_patch_test).
+	bool refresh_region(const opennova::terrain::CoordsRect &p_rect, const std::vector<int> &p_tiles);
+	bool refresh_region_rect(const Rect2i &p_rect, const PackedInt32Array &p_tiles);
+	// What the last refresh_region did: the tiles whose meshes it made again, the normal quadrants it wrote,
+	// whether the normals took the region in place (else the derived textures were made again whole), and the
+	// composed pages it retired.
+	int get_refresh_tiles_remeshed() const { return refresh_tiles_remeshed_; }
+	int get_refresh_normal_quadrants() const { return refresh_normal_quadrants_; }
+	bool is_refresh_normals_in_place() const { return refresh_normals_in_place_; }
+	int64_t get_refresh_pages_retired() const { return refresh_pages_retired_; }
+	// One tile's LOD mesh as the last build or refresh made it (the flat fallback's where `p_flat`); null
+	// where it has none. The test seam that compares a refreshed terrain with a fresh build.
+	Ref<ArrayMesh> get_tile_lod_mesh(int p_tile, int p_lod, bool p_flat) const;
 	// A stepped build is in flight (begun, its last unit not run). C++ only.
 	bool is_building() const { return building_; }
 	// The units of the build in flight, how many ran, and what the next one makes ("" none).
@@ -425,6 +450,10 @@ private:
 	// The overlay as last set, pushed to the material as it is set and as a build makes the material.
 	void _apply_ground_overlay();
 	Ref<ImageTexture> ground_overlay_texture_;
+	int refresh_tiles_remeshed_ = 0;
+	int refresh_normal_quadrants_ = 0;
+	bool refresh_normals_in_place_ = false;
+	int64_t refresh_pages_retired_ = 0;
 	Vector4 ground_overlay_rect_;
 	Color ground_overlay_outside_;
 	bool ground_overlay_on_ = false;

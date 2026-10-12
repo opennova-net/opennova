@@ -22,6 +22,10 @@
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/vector4.hpp>
 
+#include <runtime/terrain_query/terrain_atlas_rects.h>
+#include <runtime/terrain_query/terrain_field_build.h>
+
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <utility>
@@ -95,6 +99,13 @@ void Terrain::_bind_methods() {
 		&Terrain::get_suppressed_static_shadow_bms_ids);
 
 	ClassDB::bind_method(D_METHOD("build"), &Terrain::build);
+	ClassDB::bind_method(D_METHOD("refresh_region", "rect", "tiles"), &Terrain::refresh_region_rect);
+	ClassDB::bind_method(D_METHOD("get_refresh_tiles_remeshed"), &Terrain::get_refresh_tiles_remeshed);
+	ClassDB::bind_method(D_METHOD("get_refresh_normal_quadrants"), &Terrain::get_refresh_normal_quadrants);
+	ClassDB::bind_method(D_METHOD("is_refresh_normals_in_place"), &Terrain::is_refresh_normals_in_place);
+	ClassDB::bind_method(D_METHOD("get_refresh_pages_retired"), &Terrain::get_refresh_pages_retired);
+	ClassDB::bind_method(D_METHOD("get_tile_lod_mesh", "tile", "lod", "flat"), &Terrain::get_tile_lod_mesh);
+	ClassDB::bind_method(D_METHOD("get_heightfield_normal_texture"), &Terrain::get_heightfield_normal_texture);
 	ClassDB::bind_method(D_METHOD("build_begin"), &Terrain::build_begin);
 	ClassDB::bind_method(D_METHOD("build_step"), &Terrain::build_step);
 	ClassDB::bind_method(D_METHOD("get_build_step_count"), &Terrain::get_build_step_count);
@@ -1379,74 +1390,169 @@ bool Terrain::_build_terrain_tile(size_t ti) {
 		return false;
 	}
 	const auto& tile = cpt.tiles[ti];
-	auto& info = tile_infos[ti];
-
 	// The engine produces both vertex variants; this only uploads
 	// the selected positions, normals and unchanged detail atlas UVs.
 	// Only quadrant 1 can be the empty-sector fallback topology.
 	const int variants = tile.tile_x < 512 && tile.tile_y < 512 ? 2 : 1;
 	for (int variant = 0; variant < variants; ++variant) {
-		const std::vector<opennova::TerrainTileVertex> vertices =
-				opennova::build_terrain_tile_vertices(cpt, terrain_data->get_trn(),
-						static_cast<int>(ti), variant != 0);
-		if (vertices.size() != tile.vertex_count) return false;
-		PackedVector3Array positions;
-		PackedVector3Array normals;
-		PackedVector2Array uvs;
-		positions.resize(tile.vertex_count);
-		normals.resize(tile.vertex_count);
-		uvs.resize(tile.vertex_count);
-		for (int vi = 0; vi < tile.vertex_count; ++vi) {
-			const opennova::TerrainTileVertex &vertex = vertices[vi];
-			positions.set(vi, Vector3(
-					vertex.position[0], vertex.position[1], vertex.position[2]));
-			normals.set(vi, Vector3(
-					vertex.normal[0], vertex.normal[1], vertex.normal[2]));
-			uvs.set(vi, Vector2(vertex.atlas_uv[0], vertex.atlas_uv[1]));
-		}
-
 		// Both variants share one vertex count; tally it once per tile.
-		if (variant == 0) build_total_verts_ += tile.vertex_count;
-
-		// Create one ArrayMesh per LOD level (single surface each)
-		for (int lod = 0; lod < 8; lod++) {
-			const auto& src_lod = tile.lods[lod];
-
-			PackedInt32Array indices;
-			if (src_lod.is_strip) {
-				_strip_to_list(src_lod.indices, indices);
-			} else {
-				// Swap first two indices per triangle (CW -> CCW for Godot)
-				for (size_t i = 0; i + 2 < src_lod.indices.size(); i += 3) {
-					indices.push_back(src_lod.indices[i + 1]);
-					indices.push_back(src_lod.indices[i]);
-					indices.push_back(src_lod.indices[i + 2]);
-				}
-			}
-
-			// The <3 gate matches the snapshot's per-LOD index counts, so the
-			// compiler's family fallback and this mesh set agree by
-			// construction (both derive from the same converted counts).
-			if (indices.size() < 3) continue;
-
-			build_total_indices_ += indices.size();
-
-			Array arrays;
-			arrays.resize(Mesh::ARRAY_MAX);
-			arrays[Mesh::ARRAY_VERTEX] = positions;
-			arrays[Mesh::ARRAY_NORMAL] = normals;
-			arrays[Mesh::ARRAY_TEX_UV] = uvs;
-			arrays[Mesh::ARRAY_INDEX] = indices;
-
-			Ref<ArrayMesh> lod_mesh;
-			lod_mesh.instantiate();
-			lod_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
-			lod_mesh->surface_set_material(0, terrain_material);
-			if (variant == 0) info.lod_meshes[lod] = lod_mesh;
-			else info.flat_lod_meshes[lod] = lod_mesh;
+		if (!_build_tile_variant(ti, variant, variant == 0 ? &build_total_verts_ : nullptr,
+					&build_total_indices_)) {
+			return false;
 		}
 	}
 	return true;
+}
+
+bool Terrain::_build_tile_variant(size_t ti, int variant, int *r_vertices, int *r_indices) {
+	const auto& cpt = terrain_data->get_cpt();
+	if (ti >= cpt.tiles.size() || ti >= tile_infos.size()) {
+		return false;
+	}
+	const auto& tile = cpt.tiles[ti];
+	auto& info = tile_infos[ti];
+	Ref<ArrayMesh> *meshes = variant == 0 ? info.lod_meshes : info.flat_lod_meshes;
+	for (int lod = 0; lod < 8; ++lod) {
+		meshes[lod].unref();
+	}
+
+	const std::vector<opennova::TerrainTileVertex> vertices =
+			opennova::build_terrain_tile_vertices(cpt, terrain_data->get_trn(),
+					static_cast<int>(ti), variant != 0);
+	if (vertices.size() != tile.vertex_count) return false;
+	PackedVector3Array positions;
+	PackedVector3Array normals;
+	PackedVector2Array uvs;
+	positions.resize(tile.vertex_count);
+	normals.resize(tile.vertex_count);
+	uvs.resize(tile.vertex_count);
+	for (int vi = 0; vi < tile.vertex_count; ++vi) {
+		const opennova::TerrainTileVertex &vertex = vertices[vi];
+		positions.set(vi, Vector3(
+				vertex.position[0], vertex.position[1], vertex.position[2]));
+		normals.set(vi, Vector3(
+				vertex.normal[0], vertex.normal[1], vertex.normal[2]));
+		uvs.set(vi, Vector2(vertex.atlas_uv[0], vertex.atlas_uv[1]));
+	}
+	if (r_vertices != nullptr) *r_vertices += tile.vertex_count;
+
+	// Create one ArrayMesh per LOD level (single surface each)
+	for (int lod = 0; lod < 8; lod++) {
+		const auto& src_lod = tile.lods[lod];
+
+		PackedInt32Array indices;
+		if (src_lod.is_strip) {
+			_strip_to_list(src_lod.indices, indices);
+		} else {
+			// Swap first two indices per triangle (CW -> CCW for Godot)
+			for (size_t i = 0; i + 2 < src_lod.indices.size(); i += 3) {
+				indices.push_back(src_lod.indices[i + 1]);
+				indices.push_back(src_lod.indices[i]);
+				indices.push_back(src_lod.indices[i + 2]);
+			}
+		}
+
+		// The <3 gate matches the snapshot's per-LOD index counts, so the
+		// compiler's family fallback and this mesh set agree by
+		// construction (both derive from the same converted counts).
+		if (indices.size() < 3) continue;
+
+		if (r_indices != nullptr) *r_indices += indices.size();
+
+		Array arrays;
+		arrays.resize(Mesh::ARRAY_MAX);
+		arrays[Mesh::ARRAY_VERTEX] = positions;
+		arrays[Mesh::ARRAY_NORMAL] = normals;
+		arrays[Mesh::ARRAY_TEX_UV] = uvs;
+		arrays[Mesh::ARRAY_INDEX] = indices;
+
+		Ref<ArrayMesh> lod_mesh;
+		lod_mesh.instantiate();
+		lod_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
+		lod_mesh->surface_set_material(0, terrain_material);
+		meshes[lod] = lod_mesh;
+	}
+	return true;
+}
+
+bool Terrain::refresh_region(const opennova::terrain::CoordsRect &p_rect, const std::vector<int> &p_tiles) {
+	if (!built || building_ || terrain_data.is_null() || terrain_material.is_null()) {
+		return false;
+	}
+	const opennova::CptFile &cpt = terrain_data->get_cpt();
+	const opennova::TrnConfig &trn = terrain_data->get_trn();
+	if (tile_infos.size() != cpt.tiles.size()) {
+		return false;
+	}
+	for (const int index : p_tiles) {
+		if (index < 0 || index >= static_cast<int>(cpt.tiles.size())) {
+			return false;
+		}
+	}
+	// The meshes: a replaced tile's both variants (the flat one only where it has one), and the heights
+	// variant of every tile whose vertices read the rect. The root tile's meshes are never drawn (the
+	// sector walk starts at its children), so they stay as built.
+	std::vector<uint8_t> remeshed(cpt.tiles.size(), 0);
+	int tiles_remeshed = 0;
+	for (const int index : p_tiles) {
+		const opennova::CptTile &tile = cpt.tiles[static_cast<size_t>(index)];
+		if (remeshed[static_cast<size_t>(index)] || tile.tile_size >= 1024) continue;
+		remeshed[static_cast<size_t>(index)] = 1;
+		const int variants = tile.tile_x < 512 && tile.tile_y < 512 ? 2 : 1;
+		for (int variant = 0; variant < variants; ++variant) {
+			if (!_build_tile_variant(static_cast<size_t>(index), variant, nullptr, nullptr)) return false;
+		}
+		++tiles_remeshed;
+	}
+	for (const int index : opennova::terrain_tiles_reading(cpt, trn, p_rect)) {
+		if (remeshed[static_cast<size_t>(index)]) continue;
+		remeshed[static_cast<size_t>(index)] = 1;
+		if (!_build_tile_variant(static_cast<size_t>(index), 0, nullptr, nullptr)) return false;
+		++tiles_remeshed;
+	}
+	opennova::refresh_terrain_scene_snapshot(scene_snapshot, cpt, trn, p_tiles, p_rect);
+
+	// The heightfield normals and the pages that show them.
+	std::array<bool, 4> quadrants{};
+	int64_t pages_retired = 0;
+	bool normals_in_place = surface_inputs->refresh_heightfield_region(p_rect, quadrants);
+	if (normals_in_place) {
+		const opennova::terrain::TerrainHeightField field = opennova::terrain::height_field_from(cpt, trn);
+		const std::optional<std::size_t> retired = tile_cache_device.refresh_heightfield_normal(
+				surface_inputs->get_heightfield_normal_image(), quadrants,
+				opennova::terrain::terrain_atlas_routing(field), field.locks, p_rect);
+		if (retired) {
+			pages_retired = static_cast<int64_t>(*retired);
+		} else {
+			normals_in_place = false;
+		}
+	}
+	if (!normals_in_place) {
+		// The heightfield and the pages built again whole.
+		_load_textures();
+	}
+	refresh_tiles_remeshed_ = tiles_remeshed;
+	refresh_normal_quadrants_ = 0;
+	for (const bool written : quadrants) refresh_normal_quadrants_ += written ? 1 : 0;
+	refresh_normals_in_place_ = normals_in_place;
+	refresh_pages_retired_ = pages_retired;
+	return true;
+}
+
+bool Terrain::refresh_region_rect(const Rect2i &p_rect, const PackedInt32Array &p_tiles) {
+	std::vector<int> tiles;
+	tiles.reserve(static_cast<size_t>(p_tiles.size()));
+	for (int64_t i = 0; i < p_tiles.size(); ++i) tiles.push_back(p_tiles[i]);
+	return refresh_region(opennova::terrain::CoordsRect{p_rect.position.x, p_rect.position.y, p_rect.size.x,
+			p_rect.size.y}, tiles);
+}
+
+Ref<ArrayMesh> Terrain::get_tile_lod_mesh(int p_tile, int p_lod, bool p_flat) const {
+	if (p_tile < 0 || p_tile >= static_cast<int>(tile_infos.size()) || p_lod < 0 || p_lod >= 8) {
+		return Ref<ArrayMesh>();
+	}
+	const TileInfo &info = tile_infos[static_cast<size_t>(p_tile)];
+	return p_flat ? info.flat_lod_meshes[p_lod] : info.lod_meshes[p_lod];
 }
 
 // ---------------------------------------------------------------------------

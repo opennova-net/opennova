@@ -9,6 +9,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -286,6 +287,26 @@ public:
 	// fixed-point core.
 	Vector3 raycast_terrain(const Vector3 &p_from, const Vector3 &p_to) const;
 	int get_tile_count() const;
+
+	// The heights of `p_rect` (atlas texels) written from `p_src` (raw16, `p_stride` samples a row) into
+	// the loaded .cpt's depth buffer in place (the OpenNova Editor's sculpt stroke, ADR 0046 S25): every
+	// height query reads the new ground at once; what the terrain built from the heights shows it after
+	// Terrain::refresh_region. No terrain_changed (that remakes every derived texture). False, nothing
+	// written, with no heights loaded or a rect not inside them. A live heightmap image, where one is
+	// set, is not patched (it stands for the heights the editor's sculpt does not use).
+	bool patch_heights(const opennova::terrain::CoordsRect &p_rect, const uint16_t *p_src, size_t p_stride);
+	// The same from GDScript: little-endian raw16, the rect's width a row.
+	bool patch_heights_raw16(const Rect2i &p_rect, const PackedByteArray &p_raw16);
+	// The tiles at `p_indices` replaced by `p_tiles` (a region bake's remade tiles, in the same order),
+	// each keeping its tile's place (x, y, size), in place, with no terrain_changed; the terrain shows them
+	// after Terrain::refresh_region. False, nothing replaced, where an index is not a tile, the counts
+	// differ or a replacement moves its tile.
+	bool replace_tiles(const std::vector<int> &p_indices, const std::vector<opennova::CptTile> &p_tiles);
+	// GDScript's view of a tile's LOD index lists (strips or lists as the tile stores them; empty for an
+	// index that is no tile), and replace_tiles from it: each tile at `p_indices` takes the eight lists of
+	// `p_lods` (an Array per tile of eight PackedInt32Array), its place, vertices and strip flags kept.
+	PackedInt32Array get_tile_lod_indices(int p_index, int p_lod) const;
+	bool replace_tile_lods(const PackedInt32Array &p_indices, const Array &p_lods);
 
 	// GDScript-facing accessors for foliage + sector grid
 	void set_sector_grid(const PackedInt32Array &p_grid);
