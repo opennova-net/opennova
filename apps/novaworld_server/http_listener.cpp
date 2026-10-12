@@ -256,6 +256,7 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 	e["nwhandle"] = u.nwhandle;
 	e["account_status"] = u.account_status;
 	e["role"]     = u.role;
+	e["can_host"] = u.can_host;
 	return e;
 }
 

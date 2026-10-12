@@ -158,6 +158,25 @@ struct ServerConfig {
 	uint16_t    client_reflect_gate_port = 0;       // ONNET_CLIENT_REFLECT_GATE_PORT
 	uint16_t    client_reflect_novaworld_port = 0;  // ONNET_CLIENT_REFLECT_NOVAWORLD_PORT
 
+	// Hosted servers (apps/novaworld_server/hosted, ADR 0053 proposed): where the
+	// supervisor runs them. "none" (the default) runs none and the start route
+	// answers that hosting is off; "local" runs each as an opennova-serve child
+	// process on this machine (LocalProcessProvider), for development and the
+	// tests. ONNET_HOSTED_PROVIDER; any other value is "none", with a warning.
+	std::string hosted_provider = "none";
+	// ONNET_HOSTED_CAP: the most hosted servers live at once, across every
+	// account (each account has one at most).
+	int hosted_cap = 5;
+	// The local provider's opennova-serve binary (ONNET_HOSTED_SERVE_BIN), the
+	// game data it serves (ONNET_HOSTED_RESOURCE_DIR, its --resource-dir;
+	// ONNET_HOSTED_LOOSE_ROOT=1 adds --loose-root for a directory with no
+	// archives) and the root of the servers' working directories
+	// (ONNET_HOSTED_WORK_DIR). The first two are required for "local".
+	std::string hosted_serve_bin;
+	std::string hosted_resource_dir;
+	bool hosted_loose_root = false;
+	std::string hosted_work_dir = "backend/data/hosted";
+
 	// Build a config by reading env vars, falling back to the defaults
 	// above for anything not set.
 	static ServerConfig from_env();

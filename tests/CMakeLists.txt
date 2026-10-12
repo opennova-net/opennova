@@ -3633,6 +3633,46 @@ target_include_directories(web_session_test PRIVATE
 target_compile_definitions(web_session_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME web_session COMMAND web_session_test)
 
+# apps/common/child_process.h: a child from an argv array with no shell, run against
+# the test binary itself (its path is the argument; `--child <mode>` makes it the
+# child): exit codes, every argument whole, the working directory, stdin and the
+# output file, terminate and kill, the refusals, and on POSIX no inherited
+# descriptor. Runs on every build.
+add_executable(app_process_test novaworld/app_process_test.cpp)
+target_link_libraries(app_process_test PRIVATE opennova_app_common)
+target_include_directories(app_process_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME app_process COMMAND app_process_test $<TARGET_FILE:app_process_test>)
+set_tests_properties(app_process PROPERTIES TIMEOUT 120)
+
+# The hosted servers' supervisor (apps/novaworld_server/hosted, migration 0011):
+# the settings and their renders, the service accounts, the start request's
+# checks, the whole lifecycle on a FakeProvider and a hand-stepped clock (the
+# stops, the crash restarts and their limit, the timeouts, the health checks,
+# the owners' changes, the reconciliation), and LocalProcessProvider against the
+# test binary itself as its opennova-serve. Compiles the server's auth.cpp,
+# web_session.cpp and the hosted sources directly, as web_session_test does, so
+# it runs on every build, not only under BUILD_NOVAWORLD_HTTP.
+add_executable(hosted_supervisor_test
+    novaworld/hosted_supervisor_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/web_session.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/local_process_provider.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/supervisor.cpp)
+target_link_libraries(hosted_supervisor_test
+    PRIVATE opennova_novaworld_service opennova_bcrypt opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(hosted_supervisor_test PRIVATE advapi32)
+endif()
+target_include_directories(hosted_supervisor_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(hosted_supervisor_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME hosted_supervisor
+    COMMAND hosted_supervisor_test $<TARGET_FILE:hosted_supervisor_test>)
+set_tests_properties(hosted_supervisor PROPERTIES TIMEOUT 300)
+
 # The credential routes' brake: token buckets on a hand-stepped clock and the
 # trusted-proxy client address. The server's rate_limiter.cpp compiled in
 # directly, so it runs on every build.

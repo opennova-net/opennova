@@ -97,6 +97,13 @@ ServerConfig ServerConfig::from_env() {
 	c.client_reflect_gate_port      = getenv_u16("ONNET_CLIENT_REFLECT_GATE_PORT",      c.client_reflect_gate_port);
 	c.client_reflect_novaworld_port = getenv_u16("ONNET_CLIENT_REFLECT_NOVAWORLD_PORT", c.client_reflect_novaworld_port);
 
+	if (auto v = getenv_safe("ONNET_HOSTED_PROVIDER")) c.hosted_provider = v;
+	c.hosted_cap = getenv_int("ONNET_HOSTED_CAP", c.hosted_cap);
+	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_BIN")) c.hosted_serve_bin = v;
+	if (auto v = getenv_safe("ONNET_HOSTED_RESOURCE_DIR")) c.hosted_resource_dir = v;
+	c.hosted_loose_root = getenv_bool("ONNET_HOSTED_LOOSE_ROOT", c.hosted_loose_root);
+	if (auto v = getenv_safe("ONNET_HOSTED_WORK_DIR")) c.hosted_work_dir = v;
+
 	return c;
 }
 
