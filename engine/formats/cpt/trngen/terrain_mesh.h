@@ -35,8 +35,13 @@ void build_mesh_lod_vertices(const MeshData* mesh_data_in, uint16_t tile_x, uint
 void build_leaf_mesh(QuadtreeNode& node, const QuadtreeContext& ctx);
 
 // [orig: TrnGen.exe sub_402A20 @ 0x402A20]
-// Rasterize terrain mesh triangles into a 1024x1024 depth buffer.
+// Rasterize terrain mesh triangles into a 1024x1024 depth buffer: the node's level-0 faces.
 void rasterize_terrain_depth(const QuadtreeNode& node,
                               std::vector<uint16_t>& depth_out);
+
+// The same draw over faces held apart from a mesh (a region bake's stored leaves): `vertices` holds
+// `stride` floats a vertex, its x, height and z first; `faces` three indices a face, drawn in order.
+void rasterize_terrain_faces(const float* vertices, int stride, const uint16_t* faces, int face_count,
+                             std::vector<uint16_t>& depth_out);
 
 } // namespace opennova::trngen

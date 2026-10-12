@@ -97,8 +97,9 @@ std::vector<uint8_t> MeshData::write_bytes() const {
         // The writer reads total_indices values whatever the buffer holds (a short buffer
         // reads as zeros here, where the original read past it).
         std::vector<uint16_t> indices(static_cast<size_t>(total_indices), 0);
-        std::memcpy(indices.data(), entry.index_data.data(),
-                    sizeof(uint16_t) * std::min(indices.size(), entry.index_data.size()));
+        if (!indices.empty() && !entry.index_data.empty())
+            std::memcpy(indices.data(), entry.index_data.data(),
+                        sizeof(uint16_t) * std::min(indices.size(), entry.index_data.size()));
         if (entry.max_index <= 256) {
             append(out, pack_words_to_bytes(indices.data(), total_indices));
         } else if (entry.max_index <= 1024) {

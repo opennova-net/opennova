@@ -1445,6 +1445,26 @@ target_link_libraries(heightmap_depth_encode16_test PRIVATE opennova_formats)
 target_include_directories(heightmap_depth_encode16_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME heightmap_depth_encode16 COMMAND heightmap_depth_encode16_test)
 
+# The TrnGen bake's region bake (formats/cpt/trngen terrain_region_bake.h): which leaves an edited
+# depth texel reaches (the taps, wraps and locks), and a region baked again landing the bytes and
+# the state a whole bake of the edited map makes.
+add_executable(cpt_trngen_leaf_taps_test cpt/trngen_leaf_taps_test.cpp)
+target_link_libraries(cpt_trngen_leaf_taps_test PRIVATE opennova_formats)
+target_include_directories(cpt_trngen_leaf_taps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_trngen_leaf_taps COMMAND cpt_trngen_leaf_taps_test)
+add_executable(cpt_trngen_region_bake_test cpt/trngen_region_bake_test.cpp)
+target_link_libraries(cpt_trngen_region_bake_test PRIVATE opennova_formats)
+target_include_directories(cpt_trngen_region_bake_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cpt_trngen_region_bake COMMAND cpt_trngen_region_bake_test)
+# Over the shipped .cpt files (a cold bake's state from the atlas; the W3 draw-back report).
+add_executable(cpt_region_bake_retail_test cpt/trngen_region_bake_retail_test.cpp)
+target_link_libraries(cpt_region_bake_retail_test PRIVATE opennova_formats)
+target_include_directories(cpt_region_bake_retail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(cpt_region_bake_retail COMMAND cpt_region_bake_retail_test)
+# By hand: the region bake's cost per node level (`trngen_region_bake_bench [threads]`).
+add_executable(trngen_region_bake_bench EXCLUDE_FROM_ALL cpt/trngen_region_bake_bench.cpp)
+target_link_libraries(trngen_region_bake_bench PRIVATE opennova_formats)
+
 # ENV environment/time-of-day format tests
 add_executable(env_unit_test env/env_unit_test.cpp)
 target_link_libraries(env_unit_test PRIVATE opennova_formats)
