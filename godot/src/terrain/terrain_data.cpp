@@ -619,6 +619,9 @@ Error TerrainData::load() {
 	cpt = opennova::CptFile();
 	trn = opennova::TrnConfig();
 	resource_root.unref();
+	// A paint's live maps belong to the map loaded before (set_colormap_image).
+	colormap_image.unref();
+	blendmap_image.unref();
 
 	if (trn_path.is_empty()) {
 		UtilityFunctions::push_warning("TerrainData: trn_path must be set before loading");
@@ -666,6 +669,8 @@ Error TerrainData::begin_load_from_resource_root(const Ref<ResourceRoot> &p_reso
 	cpt = opennova::CptFile();
 	trn = opennova::TrnConfig();
 	resource_root.unref();
+	colormap_image.unref();
+	blendmap_image.unref();
 	load_units_.clear();
 	load_next_ = 0;
 	load_error_ = OK;
@@ -1037,10 +1042,6 @@ Ref<Image> TerrainData::get_colormap_image() const {
 
 Ref<Image> TerrainData::get_blendmap_image() const {
 	return blendmap_image;
-}
-
-opennova::terrain::TerrainAtlasRouting TerrainData::atlas_routing() const {
-	return opennova::terrain::terrain_atlas_routing(height_field_from(cpt, trn));
 }
 
 // The three height queries now delegate to the shared engine/runtime/terrain sampler

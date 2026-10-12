@@ -218,6 +218,7 @@ add_library(opennova_runtime STATIC
 	${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_scorch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_quadrant_update.cpp # a painted colour region through the quadrants, and the pages that sample it
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_worker.cpp # the page-composition thread pool (demand / completion queues) and the rasters' shared lane pool
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     # terrain_query — the world->terrain seam leaf (ADR 0020): height query +
@@ -580,6 +581,7 @@ set(_opennova_terrain_fp_sources
 	${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_scorch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_composition_cache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_tile_quadrant_update.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/texture_preprocess.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_raycast.cpp

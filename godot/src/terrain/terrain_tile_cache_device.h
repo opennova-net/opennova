@@ -17,7 +17,6 @@
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain/terrain_tile_composition_worker.h>
-#include <runtime/terrain_query/terrain_atlas_rects.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 
 #include <array>
@@ -96,17 +95,17 @@ public:
 	// over sources built with no tile set): the caller rebuilds them.
 	std::optional<std::size_t> set_tile_entries(const opennova::TilFile &p_file);
 	// The colour map painted in place (an editor's paint stroke, ADR 0046 S25):
-	// `p_colormap` the whole map as it now stands, (x, y, w, h) its changed
-	// texels. The colour quadrants the rect touches are made again from it
-	// under `p_creation_flags` (rebuild_terrain_tile_quadrants: the bytes a
-	// build of the map holds) and the resident pages over `p_world` (the
-	// plane's rects that show the changed texels, whole units) recompose.
-	// False, nothing changed, where the sources are not ready or the map is
-	// another size than the one they were built from.
-	bool update_colormap_region(const opennova::terrain::Rgba8Image &p_colormap,
-			int x, int y, int w, int h,
-			const std::vector<opennova::terrain::TerrainWorldRect> &p_world,
-			uint32_t p_creation_flags);
+	// the map as it now stands, `p_width` x `p_height` RGBA8 texels at
+	// `p_rgba`, and (x, y, w, h) its changed texels. The colour quadrants'
+	// levels the rect reaches are made again over those texels alone
+	// (update_terrain_tile_quadrants: the bytes a build of the map holds), and
+	// every resident page that samples one of them recomposes, wherever the
+	// frame drew it (terrain_tile_page_samples: past the sector grid's repeats
+	// and the shared flat page included). False, nothing changed, where the
+	// sources are not ready or the map is another size than the one they were
+	// built from.
+	bool update_colormap_region(const uint8_t *p_rgba, uint32_t p_width, uint32_t p_height,
+			int x, int y, int w, int h);
 
 	// The frame's page sweep over its draw list, composed and uploaded before
 	// the terrain draws; one binding per patch, not ready where the patch

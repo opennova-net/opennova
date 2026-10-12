@@ -173,6 +173,8 @@ void TerrainSurfaceInputs::_bind_methods() {
 		&TerrainSurfaceInputs::get_detail_c1_texture);
 	ClassDB::bind_method(D_METHOD("get_normalized_blend_texture"),
 		&TerrainSurfaceInputs::get_normalized_blend_texture);
+	ClassDB::bind_method(D_METHOD("get_normalized_blend_image"),
+		&TerrainSurfaceInputs::get_normalized_blend_image);
 	ClassDB::bind_method(D_METHOD("get_detail_coefficient_texture"),
 		&TerrainSurfaceInputs::get_detail_coefficient_texture);
 	ClassDB::bind_method(D_METHOD("get_detail_layer_texture", "layer"),
@@ -233,6 +235,7 @@ bool TerrainSurfaceInputs::rebuild(const Ref<TerrainData> &p_data,
 
 bool TerrainSurfaceInputs::rebuild_blend() {
 	normalized_blend_texture.unref();
+	normalized_blend = opennova::terrain::Rgba8Image();
 	if (terrain_data.is_null()) {
 		return false;
 	}
@@ -247,30 +250,57 @@ bool TerrainSurfaceInputs::rebuild_blend() {
 		// mip-suppression bit, so they carry the full box-filtered auto chain.
 		// [orig: PolyTrn_InitTextures @ 0x60b2c9..0x60b2dd;
 		// GTexture_CreateFromPixelData_0 @ 0x6877c7..0x6878be, see docs/terrain/terrain-re.md]
-		normalized_blend_texture = texture_from_rgba8(
-			opennova::terrain::normalize_detail_blend_map(source), true);
+		normalized_blend = opennova::terrain::normalize_detail_blend_map(source);
+		normalized_blend_texture = texture_from_rgba8(normalized_blend, true);
 	}
 	return normalized_blend_texture.is_valid();
 }
 
-bool TerrainSurfaceInputs::update_blendmap(const Ref<Image> &p_image) {
-	opennova::terrain::Rgba8Image source;
-	if (p_image.is_null() || !image_to_rgba8(p_image, source)) {
+bool TerrainSurfaceInputs::update_blendmap_region(const Ref<Image> &p_map, const Rect2i &p_rect) {
+	if (p_map.is_null() || p_map->is_empty()) {
 		return false;
 	}
-	const Ref<Texture2D> made = texture_from_rgba8(opennova::terrain::normalize_detail_blend_map(source), true);
-	if (made.is_null()) {
-		return false;
-	}
-	// The same texture object updated where the sizes match: the material's sampler keeps its texture.
 	ImageTexture *held = Object::cast_to<ImageTexture>(normalized_blend_texture.ptr());
-	ImageTexture *fresh = Object::cast_to<ImageTexture>(made.ptr());
-	if (held != nullptr && fresh != nullptr && held->get_width() == fresh->get_width() &&
-			held->get_height() == fresh->get_height()) {
-		held->update(fresh->get_image());
-		return true;
+	const bool same_size = held != nullptr && normalized_blend.is_valid() &&
+			int(normalized_blend.width) == p_map->get_width() && int(normalized_blend.height) == p_map->get_height() &&
+			held->get_width() == p_map->get_width() && held->get_height() == p_map->get_height();
+	if (!same_size || p_map->get_format() != Image::FORMAT_RGBA8) {
+		// Another size (or form): normalized whole, a new texture.
+		opennova::terrain::Rgba8Image source;
+		if (!image_to_rgba8(p_map, source)) {
+			return false;
+		}
+		normalized_blend = opennova::terrain::normalize_detail_blend_map(source);
+		normalized_blend_texture = texture_from_rgba8(normalized_blend, true);
+		return normalized_blend_texture.is_valid();
 	}
-	normalized_blend_texture = made;
+	// The rect's texels normalized alone (the normalisation is a texel's own), into the map the texture holds.
+	const Rect2i rect = p_rect.intersection(Rect2i(Vector2i(), p_map->get_size()));
+	const PackedByteArray texels = p_map->get_data();
+	opennova::terrain::Rgba8Image region;
+	region.width = uint32_t(rect.size.x);
+	region.height = uint32_t(rect.size.y);
+	region.pixels.resize(size_t(region.width) * region.height * 4);
+	for (int y = 0; y < rect.size.y; ++y)
+		std::memcpy(&region.pixels[size_t(y) * region.width * 4],
+				texels.ptr() + (size_t(rect.position.y + y) * size_t(p_map->get_width()) + size_t(rect.position.x)) * 4,
+				size_t(region.width) * 4);
+	const opennova::terrain::Rgba8Image normalized = opennova::terrain::normalize_detail_blend_map(region);
+	for (int y = 0; y < rect.size.y; ++y)
+		std::memcpy(&normalized_blend.pixels[(size_t(rect.position.y + y) * normalized_blend.width +
+						size_t(rect.position.x)) * 4],
+				&normalized.pixels[size_t(y) * region.width * 4], size_t(region.width) * 4);
+	// Its levels as a build makes them (texture_from_rgba8), uploaded into the same texture: no texture made and
+	// thrown away, nothing read back.
+	PackedByteArray bytes;
+	bytes.resize(int64_t(normalized_blend.pixels.size()));
+	std::memcpy(bytes.ptrw(), normalized_blend.pixels.data(), normalized_blend.pixels.size());
+	Ref<Image> image = Image::create_from_data(int(normalized_blend.width), int(normalized_blend.height), false,
+			Image::FORMAT_RGBA8, bytes);
+	if (image.is_null() || image->generate_mipmaps() != OK) {
+		return false;
+	}
+	held->update(image);
 	return true;
 }
 
@@ -354,6 +384,7 @@ void TerrainSurfaceInputs::clear_derived_textures() {
 	detail_coefficient_texture.unref();
 	paired_detail2_texture.unref();
 	normalized_blend_texture.unref();
+	normalized_blend = opennova::terrain::Rgba8Image();
 	heightfield_normal_texture.unref();
 	for (auto &texture : detail_layer_textures) {
 		texture.unref();
@@ -421,6 +452,14 @@ Ref<Texture2D> TerrainSurfaceInputs::get_detail_c3_texture() const {
 	}
 	return terrain_data.is_valid()
 		? terrain_data->get_detailmap_c3() : Ref<Texture2D>();
+}
+
+Ref<Image> TerrainSurfaceInputs::get_normalized_blend_image() const {
+	if (!normalized_blend.is_valid()) {
+		return Ref<Image>();
+	}
+	return Image::create_from_data(int(normalized_blend.width), int(normalized_blend.height), false,
+			Image::FORMAT_RGBA8, to_packed_bytes(normalized_blend.pixels));
 }
 
 Ref<Texture2D> TerrainSurfaceInputs::get_normalized_blend_texture() const {

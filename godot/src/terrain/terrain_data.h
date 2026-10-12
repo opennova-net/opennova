@@ -15,7 +15,6 @@
 #include <formats/cpt/cpt_io.h>
 #include <runtime/renderer/texture_load_rules.h>
 #include <runtime/terrain_query/coords.h>
-#include <runtime/terrain_query/terrain_atlas_rects.h>
 #include <runtime/terrain_query/height_field.h>
 #include <formats/trn/trn_io.h>
 
@@ -257,14 +256,12 @@ public:
 	Ref<Image> get_colormap_image() const;
 	Ref<Image> get_blendmap_image() const;
 	// The colour map and the detail blend map as an editor's paint left them (ADR 0046 S25): the live images every
-	// later build of the surface inputs and the tile cache reads in place of the loaded textures. No change is
-	// published: the Terrain that draws them is told the region (Terrain::update_colormap_region,
-	// update_blendmap_region), never a rebuild.
+	// later build of the tile cache and the surface inputs reads in place of the loaded textures, until the data is
+	// loaded again (a load drops them). No change is published: the Terrain that draws them is told the region
+	// (Terrain::update_colormap_region, update_blendmap_region), never a rebuild. The loaded textures stand: what
+	// reads them (get_colormap: the foliage's tint, the minimap) keeps the map as loaded until the next load.
 	void set_colormap_image(const Ref<Image> &p_image) { colormap_image = p_image; }
 	void set_blendmap_image(const Ref<Image> &p_image) { blendmap_image = p_image; }
-	// The routing every atlas lookup takes over this terrain (its sector grid, origin and wraps:
-	// runtime/terrain_query/atlas_routing.h), valid while the data lives and is not loaded again.
-	opennova::terrain::TerrainAtlasRouting atlas_routing() const;
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;

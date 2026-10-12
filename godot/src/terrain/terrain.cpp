@@ -73,8 +73,8 @@ void Terrain::_bind_methods() {
 		&Terrain::get_tile_cache_texture);
 	ClassDB::bind_method(D_METHOD("get_tile_cache_diagnostics"),
 		&Terrain::get_tile_cache_diagnostics);
-	ClassDB::bind_method(D_METHOD("update_colormap_region", "image", "rect"), &Terrain::update_colormap_region);
-	ClassDB::bind_method(D_METHOD("update_blendmap_region", "image", "rect"), &Terrain::update_blendmap_region);
+	ClassDB::bind_method(D_METHOD("update_colormap_region", "region", "at"), &Terrain::update_colormap_region);
+	ClassDB::bind_method(D_METHOD("update_blendmap_region", "region", "at"), &Terrain::update_blendmap_region);
 	ClassDB::bind_method(D_METHOD("invalidate_tile_cache_region", "minimum_x_q16",
 			"minimum_z_q16", "maximum_x_q16", "maximum_z_q16"),
 			&Terrain::invalidate_tile_cache_region);
@@ -314,52 +314,67 @@ int64_t Terrain::invalidate_tile_cache_region(int64_t p_minimum_x_q16,
 			static_cast<int32_t>(p_maximum_z_q16)));
 }
 
-bool Terrain::update_colormap_region(const Ref<Image> &p_image, const Rect2i &p_rect) {
-	if (!built || terrain_data.is_null() || terrain_material.is_null() || p_image.is_null()) {
-		return false;
+namespace {
+
+// The live map `held` (RGBA8; `loaded`'s texels the first time) with `p_region` put in at `p_at`; the rect it took,
+// empty where it lies outside the map or nothing converts.
+Rect2i paint_live_map(Ref<Image> &held, const Ref<Texture2D> &loaded, const Ref<Image> &p_region, const Vector2i &p_at) {
+	if (p_region.is_null() || p_region->is_empty()) return Rect2i();
+	if (held.is_null() || held->is_empty()) {
+		opennova::terrain::Rgba8Image texels;
+		if (!texture_to_rgba8(loaded, texels)) return Rect2i();
+		PackedByteArray bytes;
+		bytes.resize(int64_t(texels.pixels.size()));
+		std::memcpy(bytes.ptrw(), texels.pixels.data(), texels.pixels.size());
+		held = Image::create_from_data(int(texels.width), int(texels.height), false, Image::FORMAT_RGBA8, bytes);
+	} else if (held->is_compressed() || held->has_mipmaps() || held->get_format() != Image::FORMAT_RGBA8) {
+		held = held->duplicate();
+		if (held->is_compressed()) held->decompress();
+		held->clear_mipmaps();
+		held->convert(Image::FORMAT_RGBA8);
 	}
-	opennova::terrain::Rgba8Image colormap;
-	if (!image_to_rgba8(p_image, colormap) || colormap.width == 0 || colormap.height == 0) {
-		return false;
+	if (held.is_null()) return Rect2i();
+	Ref<Image> region = p_region;
+	if (region->is_compressed() || region->get_format() != Image::FORMAT_RGBA8) {
+		region = p_region->duplicate();
+		if (region->is_compressed()) region->decompress();
+		region->convert(Image::FORMAT_RGBA8);
 	}
-	const Rect2i rect = p_rect.intersection(Rect2i(0, 0, int(colormap.width), int(colormap.height)));
-	if (rect.size.x <= 0 || rect.size.y <= 0) {
-		return true;
-	}
-	// The atlas texels the map's rect covers (the map lies over the 1024-unit atlas at its side's scale), then
-	// the plane's rects that show them: the bilinear taps around each, and a margin of the levels' reach
-	// (64 units: a level-6 texel), a page any of them touches recomposing.
-	const int64_t width = colormap.width, height = colormap.height;
-	const int32_t ax0 = int32_t(int64_t(rect.position.x) * 1024 / width);
-	const int32_t az0 = int32_t(int64_t(rect.position.y) * 1024 / height);
-	const int32_t ax1 = int32_t((int64_t(rect.position.x + rect.size.x) * 1024 + width - 1) / width);
-	const int32_t az1 = int32_t((int64_t(rect.position.y + rect.size.y) * 1024 + height - 1) / height);
-	std::vector<opennova::terrain::TerrainWorldRect> world = opennova::terrain::terrain_atlas_world_rects(
-			terrain_data->atlas_routing(), opennova::terrain::CoordsRect{ax0, az0, ax1 - ax0, az1 - az0},
-			opennova::terrain::kTerrainHeightTaps);
-	constexpr int32_t kLevelsReach = 64;
-	for (opennova::terrain::TerrainWorldRect &each : world) {
-		each.x0 -= kLevelsReach;
-		each.z0 -= kLevelsReach;
-		each.x1 += kLevelsReach;
-		each.z1 += kLevelsReach;
-	}
-	const uint32_t flags = opennova::terrain::terrain_colormap_quadrant_flags(surface_inputs->get_texcompression_level());
-	if (!tile_cache_device.update_colormap_region(colormap, rect.position.x, rect.position.y, rect.size.x, rect.size.y,
-				world, flags)) {
-		return false;
-	}
-	terrain_data->set_colormap_image(p_image);
-	return true;
+	const Rect2i rect = Rect2i(p_at, region->get_size());
+	if (!Rect2i(Vector2i(), held->get_size()).encloses(rect)) return Rect2i();
+	held->blit_rect(region, Rect2i(Vector2i(), region->get_size()), p_at);
+	return rect;
 }
 
-bool Terrain::update_blendmap_region(const Ref<Image> &p_image, const Rect2i &p_rect) {
-	(void)p_rect; // the blend texture is made again whole: the normalisation is per texel, the upload whole
-	if (!built || terrain_data.is_null() || terrain_material.is_null() || p_image.is_null()) {
+} // namespace
+
+bool Terrain::update_colormap_region(const Ref<Image> &p_region, const Vector2i &p_at) {
+	if (!built || terrain_data.is_null() || terrain_material.is_null()) {
 		return false;
 	}
-	terrain_data->set_blendmap_image(p_image);
-	if (!surface_inputs->update_blendmap(p_image)) {
+	Ref<Image> map = terrain_data->get_colormap_image();
+	const Rect2i rect = paint_live_map(map, terrain_data->get_colormap(), p_region, p_at);
+	if (rect.size.x <= 0 || rect.size.y <= 0) {
+		return false;
+	}
+	// The data keeps the live map whatever the cache does with it: a build reads it next.
+	terrain_data->set_colormap_image(map);
+	const PackedByteArray texels = map->get_data();
+	return tile_cache_device.update_colormap_region(texels.ptr(), uint32_t(map->get_width()),
+			uint32_t(map->get_height()), rect.position.x, rect.position.y, rect.size.x, rect.size.y);
+}
+
+bool Terrain::update_blendmap_region(const Ref<Image> &p_region, const Vector2i &p_at) {
+	if (!built || terrain_data.is_null() || terrain_material.is_null()) {
+		return false;
+	}
+	Ref<Image> map = terrain_data->get_blendmap_image();
+	const Rect2i rect = paint_live_map(map, terrain_data->get_detailblendmap(), p_region, p_at);
+	if (rect.size.x <= 0 || rect.size.y <= 0) {
+		return false;
+	}
+	terrain_data->set_blendmap_image(map);
+	if (!surface_inputs->update_blendmap_region(map, rect)) {
 		return false;
 	}
 	surface_inputs->apply_to_material(terrain_material);

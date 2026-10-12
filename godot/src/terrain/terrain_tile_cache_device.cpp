@@ -17,6 +17,7 @@
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/color.hpp>
 #include <base/io/hash.h>
+#include <runtime/terrain/terrain_tile_quadrant_update.h>
 
 #include <chrono>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -141,6 +142,7 @@ bool TerrainTileCacheDevice::rebuild(
 
 	opennova::terrain::Rgba8Image colormap;
 	opennova::terrain::Rgba8Image heightfield_normal;
+	// The live map an editor's paint left (TerrainData::get_colormap_image), else the loaded texture.
 	const Ref<Image> live_colormap = p_data->get_colormap_image();
 	const bool have_colormap = live_colormap.is_valid() && !live_colormap->is_empty()
 			? image_to_rgba8(live_colormap, colormap)
@@ -369,30 +371,30 @@ std::size_t TerrainTileCacheDevice::invalidate_region(
 			p_maximum_x_q16, p_maximum_z_q16);
 }
 
-bool TerrainTileCacheDevice::update_colormap_region(const opennova::terrain::Rgba8Image &p_colormap,
-		int x, int y, int w, int h, const std::vector<opennova::terrain::TerrainWorldRect> &p_world,
-		uint32_t p_creation_flags) {
+bool TerrainTileCacheDevice::update_colormap_region(const uint8_t *p_rgba, uint32_t p_width, uint32_t p_height,
+		int x, int y, int w, int h) {
 	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot> current =
 			sources_ready_ ? async_->sources() : nullptr;
-	if (!current) {
+	if (!current || !current->colormap) {
 		return false;
 	}
+	// The source's chains shared; the quadrants the rect reaches made again in new ones.
 	auto colormap = std::make_shared<opennova::terrain::TerrainTileQuadrantSource>(*current->colormap);
-	if (opennova::terrain::rebuild_terrain_tile_quadrants(*colormap, p_colormap, x, y, w, h, p_creation_flags) == 0) {
+	opennova::terrain::TerrainTileQuadrantChange change;
+	if (opennova::terrain::update_terrain_tile_quadrants(*colormap, p_rgba, p_width, p_height, x, y, w, h,
+				&change) == 0) {
 		return false;
 	}
 	auto next = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>(*current);
-	next->colormap = std::move(colormap);
+	next->colormap = colormap;
 	async_->install_sources(std::move(next));
-	// The plane's rects in whole units to the inclusive Q16 page test; a page composing from the old quadrants
-	// now holds a retired generation, its completion dropped.
-	const auto q16 = [](int64_t units) {
-		return static_cast<int32_t>(std::clamp<int64_t>(units * 65536, INT32_MIN, INT32_MAX));
-	};
-	std::size_t retired = 0;
-	for (const opennova::terrain::TerrainWorldRect &rect : p_world) {
-		retired += cache_.invalidate_overlapping_q16(q16(rect.x0), q16(rect.z0), q16(rect.x1), q16(rect.z1));
-	}
+	// Every page that samples a changed texel, by its key and the source origin it was claimed with; a page
+	// composing from the old quadrants now holds a retired generation, its completion dropped.
+	const std::size_t retired = cache_.invalidate_sampling(
+			[&](const opennova::TerrainTilePageKey &page, int32_t source_x, int32_t source_z) {
+				return opennova::terrain::terrain_tile_page_samples(change, *colormap, page.page_lod_level, source_x,
+						source_z);
+			});
 	++colormap_region_updates_;
 	colormap_pages_retired_ += retired;
 	return true;
