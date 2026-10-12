@@ -527,10 +527,13 @@ std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg);
 // @0x620cd0; reasons CNapiNetwork_ValidateJoinRequest @0x4c61b0]
 std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg);
 
-// The CU walk's bounds: each CU is copied into its own 2048-byte slot, 64 of
-// them, so a CU of 2048 bytes or more, or a 65th, ends the walk.
+// The CU walk's bounds, the 0x42's and the 0x82's: each CU is copied into its
+// own 2048-byte slot, 64 of them, so a CU of 2048 bytes or more, or a 65th,
+// ends the walk, and on the socket pass the packet is dropped unqueued.
 // [orig: NapiNP_HandleServerJoinResponse @0x629840 - `cmp esi, 800h`
-//  @0x629B97, `cmp edi, 40h` @0x629BA3, the slot step @0x629BC2]
+//  @0x629B97, `cmp edi, 40h` @0x629BA3, the slot step @0x629BC2;
+//  NapiNPProtocol_HandleClientJoin @0x62B750 - @0x62BBEB, @0x62BBF7, the slot
+//  step @0x62BC1D]
 inline constexpr size_t kCuSlotBytes = 2048;
 inline constexpr size_t kCuSlots = 64;
 

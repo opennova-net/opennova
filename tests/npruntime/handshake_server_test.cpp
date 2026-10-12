@@ -2013,12 +2013,26 @@ bool run_client_join_rejects_match_retail() {
 	ctx.np_protocol.reject_new_connections = true;
 	if (!rejected(bad, 5) || !rejected(auth, 6)) return false;
 	ctx.np_protocol.reject_new_connections = false;
+	// A CU of 2048 bytes or a 65th CU ends the walk, and the socket pass drops the 0x42
+	// unanswered, ahead of every gate after the walk: no JFC 9 / 10 rejection is sent.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - @0x62BBEB..0x62BBFA, the socket-pass
+	//  return @0x62C32A..0x62C331]
+	auto dropped = [&](const ClientAuth &request, const char *message) {
+		const auto result = send(request);
+		return expect(result.outbound.empty() && inmatch::connection_count(ctx) == 0, message);
+	};
 	bad = auth;
 	bad.cu = {std::vector<uint8_t>(2048)};
-	bad.pn.clear();
-	if (!rejected(bad, 9)) return false; // CU bounds precede identity.
+	if (!dropped(bad, "a 0x42 with a 2048-byte CU is dropped unanswered")) return false;
+	bad.hk ^= 1;
+	if (!dropped(bad, "the CU drop precedes the HK rejection")) return false;
+	bad = auth;
 	bad.cu.assign(65, std::vector<uint8_t>{1});
-	if (!rejected(bad, 10)) return false;
+	if (!dropped(bad, "a 0x42 with a 65th CU is dropped unanswered")) return false;
+	bad.cu.assign(63, std::vector<uint8_t>{1});
+	bad.cu.push_back(std::vector<uint8_t>(2047, 1));
+	bad.hk ^= 1;
+	if (!rejected(bad, 3)) return false; // 64 CUs, one of 2047 bytes, pass the walk.
 	ctx.join_locked = true;
 	ctx.bans.addresses.entries.push_back({peer.ip, "?"});
 	if (!rejected(auth, 14, 2)) return false;
