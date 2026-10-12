@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -72,7 +73,7 @@ struct RegionBakeLevelCost {
 struct RegionBakeResult {
 	std::vector<int> rebuilt;                  // the remade tiles' indices, ascending (0 when leaf (0, 0) is remade)
 	std::vector<CptTile> tiles;                // their tiles, in `rebuilt`'s order
-	std::vector<NodeBakeState> nodes;          // their state, in `rebuilt`'s order (the root's is never read)
+	std::vector<std::shared_ptr<const NodeBakeState>> nodes; // their state, in `rebuilt`'s order (the root's null)
 	std::vector<DepthRect> footprints;         // R: the remade leaves' footprints
 	std::vector<std::vector<uint16_t>> atlas;  // the atlas over each footprint, its rows top first
 	std::array<RegionBakeLevelCost, 5> cost{}; // by depth

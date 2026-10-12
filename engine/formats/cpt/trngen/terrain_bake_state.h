@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -54,13 +55,15 @@ struct NodeBakeState {
 };
 
 // A bake's state: the base meshes and the lock flags it was made with, and every node's section (and a
-// leaf's draw-back) by .cpt tile index.
+// leaf's draw-back) by .cpt tile index. Its parts are immutable and shared: a copy of the state shares them, and a
+// region bake's landing (apply_region_bake) replaces only the nodes it remade, so a history keeping a state per
+// step (the editor's sculpting) keeps each node once.
 struct TerrainBakeState {
-	BaseMeshSet base;
-	std::vector<NodeBakeState> nodes;
+	std::shared_ptr<const BaseMeshSet> base;
+	std::vector<std::shared_ptr<const NodeBakeState>> nodes;
 
 	bool empty() const noexcept {
-		return !base.generated || nodes.size() != static_cast<size_t>(kCptTileCount);
+		return !base || !base->generated || nodes.size() != static_cast<size_t>(kCptTileCount);
 	}
 };
 

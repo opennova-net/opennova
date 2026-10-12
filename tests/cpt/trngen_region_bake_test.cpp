@@ -72,9 +72,9 @@ int state_differences(const TerrainBakeState &a, const TerrainBakeState &b) {
 	if (a.nodes.size() != b.nodes.size()) return 1000;
 	int differ = 0;
 	for (size_t i = 1; i < a.nodes.size(); ++i)
-		if (!same_section(a.nodes[i].section, b.nodes[i].section) ||
-		    a.nodes[i].draw_back.positions != b.nodes[i].draw_back.positions ||
-		    a.nodes[i].draw_back.faces != b.nodes[i].draw_back.faces)
+		if (!same_section(a.nodes[i]->section, b.nodes[i]->section) ||
+		    a.nodes[i]->draw_back.positions != b.nodes[i]->draw_back.positions ||
+		    a.nodes[i]->draw_back.faces != b.nodes[i]->draw_back.faces)
 			++differ;
 	return differ;
 }
@@ -147,9 +147,9 @@ void test_regions() {
 	expect(bytes_of(baked.cpt) == plain, "bake_terrain_state makes bake_terrain's bytes");
 	expect(!baked.state.empty() && baked.state.nodes.size() == 341u, "the state holds the 341 nodes");
 	int leaves_drawn = 0;
-	for (int i = 85; i < 341; ++i) leaves_drawn += !baked.state.nodes[static_cast<size_t>(i)].draw_back.faces.empty();
+	for (int i = 85; i < 341; ++i) leaves_drawn += !baked.state.nodes[static_cast<size_t>(i)]->draw_back.faces.empty();
 	expect(leaves_drawn == 256, "every leaf keeps its draw-back faces");
-	expect(baked.state.nodes[1].draw_back.faces.empty(), "a branch keeps no draw-back");
+	expect(baked.state.nodes[1]->draw_back.faces.empty(), "a branch keeps no draw-back");
 
 	test_threads_cancel_refusals(baked);
 
