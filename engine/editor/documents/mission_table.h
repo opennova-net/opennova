@@ -59,8 +59,9 @@ struct MissionPath {
 
 // The native record behind each kind: the mission row a bms::File holding its header and its own
 // tables alone (its pools, paths, area triggers and events are rows of their own); an entity a
-// bms::Entity; a path a MissionPath; an area trigger a bms::AreaTrigger; an event a
-// mission::EventChain; a loadout entry a bms::WeaponLoadoutRecord, an availability rule a
+// bms::Entity; a path, an area trigger and an event its row (mission_document.h PathRow, AreaRow,
+// EventRow: a MissionPath, a bms::AreaTrigger and a mission::EventChain with the name the .bms has no
+// room for beside it, S24 Names, each kind's first field); a loadout entry a bms::WeaponLoadoutRecord, an availability rule a
 // bms::ItemAvailabilityEntry, a group a bms::GroupRecord, a layer a bms::LayerRecord, a bounding box a
 // bms::BoundingBox, a stop its marker's index (uint32_t), a trigger a bms::Trigger, an action a
 // bms::Action.

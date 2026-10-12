@@ -334,7 +334,7 @@ RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, 
 			if (const AssetEntry *entry = scan.at_path(path); entry && entry->imported_from.empty()) going.push_back(entry);
 	} else if (asset->kind == AssetKind::Mission && strutil::ends_with_icase(asset->logical_name, ".bms")) {
 		const std::string from = folder_of_path(asset->relative_path);
-		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, asset->logical_name)) {
+		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, asset->logical_name, from)) {
 			const AssetEntry *entry = find_asset(scan, member.path);
 			if (entry && entry->imported_from.empty() && strutil::iequals(folder_of_path(entry->relative_path), from))
 				going.push_back(entry);
@@ -353,6 +353,17 @@ RenamePlan plan_move(const ProjectPaths &paths, const ProjectDocument &project, 
 			plan.companions.push_back(std::move(companion));
 		}
 	}
+	// A .mis of its name where it goes, none going with it, would hold its names there (the editor reads the .mis
+	// beside a mission: documents/mission_names_file.h).
+	if (!companions && asset->kind == AssetKind::Mission && strutil::ends_with_icase(asset->logical_name, ".bms") &&
+	    std::none_of(going.begin(), going.end(),
+	                 [](const AssetEntry *entry) { return strutil::ends_with_icase(entry->logical_name, ".mis"); }))
+		for (const MissionFileSetMember &stale : mission_file_set_members(scan, asset->logical_name, asset->logical_name, to))
+			if (stale.role == kMissionNamesRole)
+				plan.refusals.push_back(refusal(CoreFinding::RenameExists,
+				                                "The project already has " + stale.path + ", which would hold " +
+				                                        asset->logical_name + "'s names there: rename or remove it first.",
+				                                stale.path));
 	// An import source takes its record, and its outputs are made again under its new place; one whose
 	// import reads files beside it (found from its folder) would no longer find them.
 	if (importer_for(asset->logical_name)) {
@@ -414,7 +425,8 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 	// next import pass makes it again under the old name). A file the game would find by the new name
 	// already (one of no mission, which the renamed mission would take as its own) refuses the rename.
 	if (asset->kind == AssetKind::Mission && strutil::ends_with_icase(asset->logical_name, ".bms")) {
-		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, new_name)) {
+		const std::string folder = folder_of_path(asset->relative_path);
+		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, new_name, folder)) {
 			const AssetEntry *entry = find_asset(scan, member.path);
 			if (!entry) continue;
 			if (!entry->imported_from.empty()) {
@@ -434,17 +446,19 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 			plan_sites(plan, scan, graph, *entry, member.new_name, asset->relative_path, nullptr);
 			plan.companions.push_back({entry->relative_path, entry->logical_name, member.new_name});
 		}
-		for (const MissionFileSetMember &stale : mission_file_set_members(scan, new_name, new_name)) {
+		for (const MissionFileSetMember &stale : mission_file_set_members(scan, new_name, new_name, folder)) {
 			// A name its case alone changes finds the mission's own files.
 			if (std::any_of(plan.companions.begin(), plan.companions.end(),
 			                [&](const RenameOutput &companion) { return companion.path == stale.path; }))
 				continue;
-			const MissionFileSetRow *row = mission_file_set_row(stale.role);
-			std::string what = row ? row->words : "file";
+			std::string what = mission_member_words(stale.role);
 			if (what.rfind("its ", 0) == 0) what.erase(0, 4);
+			if (what.rfind("a ", 0) == 0) what.erase(0, 2);
+			// The .mis is the editor's (and the original editor's), never the game's.
+			const std::string whose = stale.role == kMissionNamesRole ? ", which would hold " : ", which the game would take as ";
 			plan.refusals.push_back(refusal(CoreFinding::RenameExists,
-			                                "The project already has " + stale.old_name + ", which the game would take as " + new_name +
-			                                        "'s " + what + ": rename or remove it first.",
+			                                "The project already has " + stale.old_name + whose + new_name + "'s " + what +
+			                                        ": rename or remove it first.",
 			                                stale.path));
 		}
 	}

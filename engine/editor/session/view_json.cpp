@@ -187,7 +187,7 @@ JsonValue documents_section(const SessionView &view) {
 		JsonValue entry = JsonValue::make_object();
 		entry.set("path", json_string(document->path()));
 		entry.set("kind", json_string(asset_kind_token(document->kind())));
-		entry.set("dirty", boolean(document->dirty()));
+		entry.set("dirty", boolean(document->unsaved()));
 		entry.set("revision", json_number(double(document->revision())));
 		entry.set("can_undo", boolean(document->can_undo()));
 		entry.set("can_redo", boolean(document->can_redo()));
