@@ -251,6 +251,9 @@ private:
 		float origin_x = 0.0f;
 		float origin_north = 0.0f;
 		int lod = 0;
+		// The terrain's heights its vertices were draped over (TerrainData::get_heights_serial: an editor's
+		// sculpt patches them in place).
+		uint64_t heights_serial = 0;
 		bool visible = false;
 		std::vector<std::array<float, 3>> vertices;
 	};

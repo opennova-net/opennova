@@ -31,8 +31,10 @@ namespace opennova::terrain {
 
 // One placed-tile override entry: the mission .til overlay record reduced to
 // the three fields the surface walk reads [orig: the 12-B g_TerrainTileArray
-// rows @ 0x319f7a4 — +0 x_fixed, +4 z_fixed (the negated mission y), +8 the
-// tile palette index byte].
+// rows @ 0x319f7a4 — +0 x_fixed, +4 z_fixed, +8 the tile palette index byte].
+// z_fixed is the north edge, in mission y, of the square the game draws the
+// tile over (and keeps foliage off); this walk alone reads it negated, so it
+// tests that square's mirror across y = 0 (docs/tiles/til-re.md D-TIL-9).
 struct SurfaceTileEntry {
 	int32_t x_fixed = 0;
 	int32_t z_fixed = 0;
@@ -95,11 +97,13 @@ inline int32_t surface_type_at_fixed(const SurfaceTypeMap &m, int32_t x_fixed, i
 	const int32_t sz = texel.z >> shift;
 	if (sx < 0 || sx >= m.width || sz < 0 || sz >= m.height) return 1;
 	const int32_t sample = m.data[m.width * sz + sx];
-	// Placed-tile override: the first containing tile (inclusive 16-unit AABB,
-	// z stored negated) wins, replacing the charmap class with the tileset
-	// table's entry — 0 (TSD_NULL) included [orig: walk @ 0x6065ca-0x606601,
-	// read @ 0x60660c]. The retail early returns above (no charmap -> 1,
-	// unmapped cell -> 7) skip this pass exactly like the original.
+	// Placed-tile override: the first containing tile (inclusive 16-unit AABB
+	// from -z_fixed north: the drawn square's mirror across y = 0, as the
+	// original tests it, its callers passing the world y as it stands; D-TIL-9)
+	// wins, replacing the charmap class with the tileset table's entry — 0
+	// (TSD_NULL) included [orig: walk @ 0x6065ca-0x606601, read @ 0x60660c].
+	// The retail early returns above (no charmap -> 1, unmapped cell -> 7) skip
+	// this pass exactly like the original.
 	for (int32_t i = 0; m.tiles != nullptr && i < m.tile_count; ++i) {
 		const SurfaceTileEntry &e = m.tiles[i];
 		if (e.x_fixed <= x_fixed && x_fixed <= e.x_fixed + 0x100000 &&

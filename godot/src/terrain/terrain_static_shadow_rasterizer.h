@@ -46,6 +46,9 @@ public:
 	// set_reports_caster_changes): the reaches a snapshot's changes make stale,
 	// taken after each begin_frame by a terrain that composes them again.
 	void set_reports_caster_changes(bool p_on);
+	bool reports_caster_changes() const;
+	// The casters the last snapshot holds (none: no terrain shadow to recompose).
+	std::size_t caster_count() const;
 	std::vector<opennova::terrain::TerrainStaticShadowReach> take_changed_reaches();
 	void set_suppressed_bms_ids(const PackedInt32Array &p_bms_ids);
 	PackedInt32Array get_suppressed_bms_ids() const;

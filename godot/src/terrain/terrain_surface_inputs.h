@@ -10,6 +10,10 @@
 
 #include <runtime/terrain/texture_preprocess.h>
 
+#include <runtime/terrain_query/coords.h>
+
+#include <array>
+
 namespace godot {
 
 class TerrainData;
@@ -34,6 +38,9 @@ private:
 	Ref<Texture2D> detail_layer_textures[3];
 	Ref<Texture2D> paired_detail2_texture;
 	Ref<Texture2D> heightfield_normal_texture;
+	// The heightfield normal atlas the texture was made from, kept so a region of it is made again
+	// (refresh_heightfield_region) and the tile cache's quadrants are cut from it without a read-back.
+	opennova::terrain::Rgba8Image heightfield_normal_image;
 
 protected:
 	static void _bind_methods();
@@ -61,6 +68,14 @@ public:
 	// normalized whole into a new one. False where the map does not convert.
 	bool update_blendmap_region(const Ref<Image> &p_map, const Rect2i &p_rect);
 	bool rebuild_heightfield();
+	// The heightfield normals over the heights `p_rects` changed (the loaded .cpt's, patched in place: an
+	// editor's sculpt) made again (opennova::terrain::refresh_heightfield_normal_map) and the texture updated
+	// from them in place (its RID kept: the materials sampling it keep it); `r_written` the boxes of the normals
+	// written, each inside one quadrant. False where no heightfield was built from the .cpt's heights (a live
+	// heightmap image, none at all): the caller rebuilds.
+	bool refresh_heightfield_region(const std::vector<opennova::terrain::CoordsRect> &p_rects,
+			std::vector<opennova::terrain::CoordsRect> &r_written);
+	const opennova::terrain::Rgba8Image &get_heightfield_normal_image() const { return heightfield_normal_image; }
 	bool rebuild_detail_textures();
 
 	void clear_derived_textures();
