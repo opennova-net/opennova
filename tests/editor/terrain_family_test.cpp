@@ -98,6 +98,16 @@ int test_routes() {
 	TEST_EXPECT(contains(planes->get("heights")->get_string("words", ""), "Tmap.cpt, in place"));
 	TEST_EXPECT(planes->get("surface")->get_string("path", "") == "terrain/Tmap_m.pcx");
 	TEST_EXPECT(planes->get("foliage")->get_string("path", "") == "terrain/Tmap_f.pcx");
+	// The legend (the twenty classes, each its colour and its words) and the foliage map's codes with their census.
+	JsonValue legend = ask(session, m->relative_path, "legend", error);
+	TEST_EXPECT(error.empty() && legend.get("classes") && legend.get("classes")->array.size() == 20 &&
+	            legend.get("classes")->array[2].get_string("colour", "") == "#00D200" && legend.get_number("default", 0) == 1);
+	JsonValue foliage = ask(session, m->relative_path, "foliage", error);
+	TEST_EXPECT(error.empty() && foliage.get_string("map", "") == "terrain/Tmap_f.pcx" && foliage.get_number("texels", 0) > 0 &&
+	            foliage.get("codes") && !foliage.get("codes")->array.empty() && foliage.get("definitions"));
+	double shares = 0.0;
+	for (const JsonValue &code : foliage.get("codes")->array) shares += code.get_number("share", 0.0);
+	TEST_EXPECT(shares > 0.999 && shares < 1.001);
 	// The colour and blend maps the .trn names are no files of the project: refused with the fix.
 	TEST_EXPECT(planes->get("colour")->get_string("path", "x").empty() &&
 	            contains(planes->get("colour")->get_string("refusal", ""), "mnml_c.tga is not a file of the project"));

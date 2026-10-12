@@ -1,5 +1,6 @@
 #include <editor/session/terrain_queries.h>
 
+#include <cstdio>
 #include <memory>
 #include <vector>
 
@@ -7,7 +8,13 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/til_document.h>
 #include <editor/model/document_base.h>
+#include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/tile_tools.h>
+#include <editor/project/project_files.h>
+#include <formats/foliage/runtime.h>
+#include <formats/pcx/pcx.h>
+#include <formats/trn/charmap_legend.h>
+#include <runtime/terrain/terrain_map_source.h>
 #include <editor/session/session_core.h>
 #include <editor/session/terrain_family.h>
 #include <editor/session/view/session_view.h>
@@ -98,17 +105,99 @@ JsonValue tiles_head(const TerrainQueryView &query, const ViewTiles &tiles) {
 
 } // namespace
 
-// The maps' ops of the terrain query (S25 lane B): not answered yet in this build.
-io::JsonValue answer_terrain_legend(const TerrainQueryView &query, std::string &error) {
-	(void)query;
-	error = "terrain: legend is not answered yet in this build.";
-	return io::JsonValue();
+// legend: the surface classes the char map holds, as the game names them (the twenty the tile set tables name, each
+// its legend colour, its TSD name and its words), the default class (where a terrain names no char map) and what a
+// class past them is.
+io::JsonValue answer_terrain_legend(const TerrainQueryView &, std::string &) {
+	JsonValue out = JsonValue::make_object();
+	JsonValue classes = JsonValue::make_array();
+	for (int surface = 0; surface < kCharmapLegendCount; ++surface) {
+		const CharmapLegendColour &c = kCharmapLegend[surface];
+		char colour[8];
+		std::snprintf(colour, sizeof colour, "#%02X%02X%02X", c.r, c.g, c.b);
+		JsonValue row = JsonValue::make_object();
+		row.set("class", io::json_number(surface));
+		const char *name = mission_surface_name(surface);
+		row.set("name", io::json_string(name ? name : ""));
+		row.set("words", io::json_string(mission_surface_words(surface)));
+		row.set("colour", io::json_string(colour));
+		classes.push(std::move(row));
+	}
+	out.set("classes", std::move(classes));
+	// The game's class where a terrain names no char map [orig: sub_605A10].
+	out.set("default", io::json_number(1));
+	out.set("past", io::json_string("A class 20 to 255 the game reads as it stands: footsteps and weather treat it as no "
+	                                "class they name, and a round striking there takes an impact row no shipped table "
+	                                "authors (20 to 23) or the ammo's obj row (24 and past)."));
+	return out;
 }
 
+// foliage: the foliage map the view's terrain reads (or its import's source in its place) and the codes it holds, each
+// with how many texels hold it, its share and the definitions it grows (their slots and models); code 0 grows nothing.
+// Beside them the terrain's definitions, each its slot, model, codes and whether placed tiles keep it off.
 io::JsonValue answer_terrain_foliage(const TerrainQueryView &query, std::string &error) {
-	(void)query;
-	error = "terrain: foliage is not answered yet in this build.";
-	return io::JsonValue();
+	const SessionView &view = query.context.core.view();
+	TerrainFamily family;
+	if (!resolve_terrain_family(view, query.view, family)) {
+		error = "terrain: " + family.error;
+		return JsonValue();
+	}
+	JsonValue out = JsonValue::make_object();
+	const TerrainFamilyFile &file = family.plane(TerrainPlane::Foliage);
+	out.set("map", io::json_string(file.path.empty() ? file.name : file.path));
+	out.set("refusal", io::json_string(file.refusal));
+	std::vector<FoliageDef> defs;
+	if (family.trn) defs = family.trn->foliage_defs;
+	JsonValue definitions = JsonValue::make_array();
+	for (size_t slot = 0; slot < defs.size(); ++slot) {
+		JsonValue row = JsonValue::make_object();
+		row.set("slot", io::json_number(double(slot)));
+		row.set("graphic", io::json_string(defs[slot].graphic));
+		JsonValue codes = JsonValue::make_array();
+		for (const int code : defs[slot].match)
+			if (code != FOLIAGE_MATCH_UNSET) codes.push(io::json_number(code));
+		row.set("codes", std::move(codes));
+		row.set("kept_off_by_tiles", JsonValue::make_bool(foliage::placed_tiles_keep_off(defs[slot].attrib_flags)));
+		definitions.push(std::move(row));
+	}
+	out.set("definitions", std::move(definitions));
+	// The census: the map as it stands (an open document's texels through the project's files).
+	size_t counts[256] = {};
+	size_t texels = 0;
+	if (!file.path.empty() && view.findings.assets) {
+		std::vector<uint8_t> bytes;
+		IndexedImage8 map;
+		std::string why;
+		if (view.findings.assets->read(basename_of(file.path), bytes) &&
+		    terrain::decode_foliage_map_source(basename_of(file.path), bytes, map, why))
+			for (const uint8_t code : map.indices) {
+				++counts[code];
+				++texels;
+			}
+	}
+	out.set("texels", io::json_number(double(texels)));
+	JsonValue codes = JsonValue::make_array();
+	for (int code = 0; code < 256; ++code) {
+		if (!counts[code]) continue;
+		JsonValue row = JsonValue::make_object();
+		row.set("code", io::json_number(code));
+		row.set("texels", io::json_number(double(counts[code])));
+		row.set("share", io::json_number(double(counts[code]) / double(texels)));
+		JsonValue grows = JsonValue::make_array();
+		for (size_t slot = 0; code != 0 && slot < defs.size(); ++slot)
+			for (const int match : defs[slot].match)
+				if (match == code) {
+					JsonValue def = JsonValue::make_object();
+					def.set("slot", io::json_number(double(slot)));
+					def.set("graphic", io::json_string(defs[slot].graphic));
+					grows.push(std::move(def));
+					break;
+				}
+		row.set("grows", std::move(grows));
+		codes.push(std::move(row));
+	}
+	out.set("codes", std::move(codes));
+	return out;
 }
 
 // tiles: the view's tiles in draw order (the last over the others), each {id, index, tile, x, y (its corner, mission

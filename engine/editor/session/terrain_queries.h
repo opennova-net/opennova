@@ -42,7 +42,9 @@ inline constexpr const char *kTerrainDoc =
 		"terrain, planes {heights, surface, foliage, colour, blend: {path, name, import_output, refusal, words}}, tiles). "
 		"sample: the ground at (x, y) in each plane's words. bake: a heights file's bake (its state, the regions it "
 		"waits on, the bakes landed and started, why it refuses the heights). lock: the entities under a disc at (x, y) that follow the ground and those height-locked. legend: the "
-		"surface classes as the game names them. foliage: the foliage codes and what each grows. tiles: the view's tiles "
+		"surface classes as the game names them (classes [{class, name, words, colour}], default, past). foliage: the "
+		"foliage map and its codes (map, refusal, texels, codes [{code, texels, share, grows [{slot, graphic}]}], "
+		"definitions [{slot, graphic, codes, kept_off_by_tiles}]). tiles: the view's tiles "
 		"(its .til's rows in draw order). tiles_at: the tiles whose square meets a box. An op not answered yet in this "
 		"build is refused, saying so.";
 
