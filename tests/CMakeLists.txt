@@ -1639,6 +1639,14 @@ target_link_libraries(terrain_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(terrain_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_frame_compiler COMMAND terrain_frame_compiler_test)
 
+# The terrain's load-time derivations made again over a region (the scene
+# snapshot, the height mip chain, the heightfield normal atlas), each equal to
+# a fresh build over fixtures/terrain/tmap/Tmap.cpt and synthetic atlases.
+add_executable(terrain_scene_snapshot_refresh_test terrain/terrain_scene_snapshot_refresh_test.cpp)
+target_link_libraries(terrain_scene_snapshot_refresh_test PRIVATE opennova_runtime)
+target_include_directories(terrain_scene_snapshot_refresh_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_scene_snapshot_refresh COMMAND terrain_scene_snapshot_refresh_test)
+
 add_executable(terrain_tile_composition_cache_test terrain/terrain_tile_composition_cache_test.cpp)
 target_link_libraries(terrain_tile_composition_cache_test PRIVATE opennova_runtime)
 target_include_directories(terrain_tile_composition_cache_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -2128,6 +2136,14 @@ add_executable(terrain_field_store_test terrain_query/terrain_field_store_test.c
 target_link_libraries(terrain_field_store_test PRIVATE opennova_runtime)
 target_include_directories(terrain_field_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME terrain_field_store COMMAND terrain_field_store_test)
+
+# TerrainFieldStore::patch_heights: a rect of the store's heights written in
+# place, every copy of the height view reading the new ground (an editor's
+# sculpt stroke); refusals write nothing.
+add_executable(terrain_field_store_patch_test terrain_query/terrain_field_store_patch_test.cpp)
+target_link_libraries(terrain_field_store_patch_test PRIVATE opennova_runtime)
+target_include_directories(terrain_field_store_patch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME terrain_field_store_patch COMMAND terrain_field_store_patch_test)
 
 # The foliage map as the game's load keeps it (its codes and their slot masks)
 # and its sampler over a terrain's grid (terrain_query/foliage_mask_raster).
