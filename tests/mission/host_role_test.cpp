@@ -408,7 +408,7 @@ int main() {
         lp.player()->health = 0;
         lp.player()->flags |= w::kEntityFlagDead;
         const auto replies = inmatch::Server_ReleasePlayerDeployment(
-                owner.ctx.config, conn, kernel.world, {});
+                owner.ctx.config, conn, kernel.world, {}, 0xFFFF);
         CHECK(!replies.empty());
         CHECK(lp.player()->alive && lp.player()->health > 0);
         CHECK(lp.round_reset_revision == revision + 1);
@@ -441,7 +441,7 @@ int main() {
         remote.link.owned_entity = w::EntityHandle::make(0, 0);
         CHECK(remote.link.owned_entity != kernel.world.cached.local_player);
         lp.hud_map_control.mode = 2;
-        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {});
+        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {}, 0xFFFF);
         CHECK(lp.hud_map_control.mode == 2 && lp.round_reset_revision == revision + 1);
     }
 

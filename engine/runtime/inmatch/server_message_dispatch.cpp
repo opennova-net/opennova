@@ -244,19 +244,21 @@ uint32_t validate_join_request(
 	std::size_t pos = 0;
 	std::string expansion;
 	std::string version_crc;
-	// The TLV walk accepts unknown fields, uses the last matching value, and
-	// stops at its first short field or an empty name. String copies stop at
-	// the first NUL; tag names compare through Napi_StrCaseEqual @0x616e70.
-	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
+	// The TLV walk accepts unknown fields, uses the last matching value, and stops at its first
+	// short field or an empty name; tag names compare through Napi_StrCaseEqual @0x616e70. Each
+	// string copies from its value to the first NUL whatever its length (load_value_string).
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0 - EXP into 32 bytes @0x512BFF,
+	//  VERSIONCRCSTRING into 512 @0x512C31]
 	while (pos < payload.size()) {
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(payload.data(), payload.size(), pos, field);
 		if (next == kFlatTlvEnd || field.name.empty()) break;
 		pos = next;
-		const std::string value(field.value,
-				std::find(field.value, field.value + field.size, uint8_t{0}));
-		if (strutil::iequals(field.name, "EXP")) expansion = value.substr(0, 31);
-		else if (strutil::iequals(field.name, "VERSIONCRCSTRING")) version_crc = value.substr(0, 511);
+		const uint8_t *end = payload.data() + payload.size();
+		if (strutil::iequals(field.name, "EXP"))
+			expansion = load_value_string(field.value, end, 32);
+		else if (strutil::iequals(field.name, "VERSIONCRCSTRING"))
+			version_crc = load_value_string(field.value, end, 512);
 	}
 	// [orig: Server_ValidatePlayerJoinRequest @0x5122fc..0x512349]
 	if (expansion != config.expansion) return 47;
@@ -903,7 +905,8 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone, ServerLogRecorder *server_log) {
+		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
+		ServerLogRecorder *server_log) {
 	std::vector<ProtocolMessage> replies;
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
@@ -983,8 +986,10 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
 	conn.link.respawn_pending = false;
 	world.match.set_player_respawn_pending(player->handle, false);
-	conn.link.respawn_delay_seconds = 0;
-	conn.link.spawn_target_hold_seconds = 0;
+	// No +360 store; the +364 hold clears only for a raw handle other than
+	// 0xFFFF, resolvable or not [orig: Server_ProcessPlayerDeath @0x51786B..0x517872].
+	if (requested_handle != world::EntityHandle::kInvalid)
+		conn.link.spawn_target_hold_seconds = 0;
 	conn.link.downed_revive_seconds = 0;
 	conn.link.medic_request_active = false;
 	conn.link.death_cause_revivable = false;
@@ -1634,6 +1639,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						: 0;
 				const world::Entity *target = nullptr;
 				const bool revive_latch = conn.reply.revive_pose_valid; // +89932
+				const uint8_t request_team = world::deploy_request_team(*world, player->team,
+						conn.link.spectator, pick, config.game_type); // [orig: @0x519B7A..0x519BC1]
 				if (pick == world::kDeployPickAutoTeam) {
 					// Conquer & Control rejects the auto pick outright, before the frontier
 					// resolve: no deploy, no wave queue, no reply.
@@ -1644,7 +1651,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// as a revived player always does [orig: the latch @0x519c3d..0x519c4b].
 					if (!revive_latch)
 						target = world->zones.find_spawn_zone_for_team(
-								player->team, config.game_type);
+								request_team, config.game_type);
 				} else if (pick != world::kDeployPickNone) {
 					if (revive_latch) break; // a revived player's pick [orig: @0x519c5a]
 					// Only 0xFFFF is the no-target (Default Spawn) pick. Handle 0 — and the
@@ -1666,7 +1673,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
 					// control(+540) >= 0x10000].
 					if (target->zone_number != 0 &&
-					    (target->team != player->team || target->zone_control < 0x10000))
+					    (target->team != request_team || target->zone_control < 0x10000))
 						break;
 				}
 				// Retail's `nodefaultspawnpoints` option is named after its UI,
@@ -1677,7 +1684,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Entity_HasAliveEntityOfTeam @0x4FC7B0; the revive latch @0x519c97]
 				if (config.default_spawn_requires_no_team_zone != 0 &&
 						!revive_latch && target == nullptr &&
-						world->zones.team_has_available_spawn_zone(player->team))
+						world->zones.team_has_available_spawn_zone(request_team))
 					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
 				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
@@ -1697,7 +1704,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							*world, target->handle, player->handle, selected))
 						break;
 				}
-				if (target != nullptr) {
+				// A spectator skips the wave [orig: @0x519D65..0x519D7F].
+				if (target != nullptr && !conn.link.spectator) {
 					if (world->zones.spawn_waves.try_queue(
 							*world, target->handle, player->handle)) {
 						ProtocolMessage status = make_protocol_message(
@@ -1713,8 +1721,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				const world::EntityHandle target_handle = target != nullptr
 						? target->handle
 						: world::EntityHandle{};
+				// The leg takes the stored handle [orig: Server_ProcessClientRequestRespawn,
+				//  the Server_ProcessPlayerDeath calls @0x519CE3/@0x519D7F/@0x519DC8/@0x519DE8].
 				std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
-						config, conn, *world, target_handle,
+						config, conn, *world, target_handle, target_handle.packed,
 						inputs.server_ctx != nullptr ? inputs.server_ctx->logs.profile : nullptr);
 				replies.insert(replies.end(),
 				               std::make_move_iterator(deployment.begin()),

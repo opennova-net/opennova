@@ -501,10 +501,13 @@ bool check_spectator_respawn_request() {
 // hidden and gets the deploy's 0x5A / 0x61 before the 0x32; the next 0x0A then
 // restamps the spectator's body to Health 1 and -1. Another handle is the
 // deploy's target, resolved with the cleared team 0, which takes the other
-// team's spawn point. [orig: Server_KillPlayerAndNotify @0x519E89, @0x519EBC..0x519ECE;
-//  Server_ProcessPlayerDeath @0x51782F, @0x517837..0x517863, @0x51787A,
-//  @0x517960; Input_HandleActionBinding @0x49B085; Server_ResolveSpawnTargetHandle
-//  @0x4FE175..0x4FE187; NetPacket_WritePlayerState @0x4FF71B..0x4FF728]
+// team's spawn point. The leg never writes the +360 respawn delay, and clears
+// the +364 target hold only for a handle other than 0xFFFF (D-NET-430).
+// [orig: Server_KillPlayerAndNotify @0x519E89, @0x519EBC..0x519ECE;
+//  Server_ProcessPlayerDeath @0x51782F, @0x517837..0x517863, @0x51786B..0x517872,
+//  @0x51787A, @0x517960; Input_HandleActionBinding @0x49B085;
+//  Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187; NetPacket_WritePlayerState
+//  @0x4FF71B..0x4FF728]
 bool check_spectator_convert_deploys() {
 	HostFixture f(2);
 	f.ctx.config.permanent_death = true;
@@ -518,6 +521,8 @@ bool check_spectator_convert_deploys() {
 	body->group_id = 4;
 	body->position = {40.0f, 50.0f, 6.0f};
 	f.conn(0).link.respawn_pending = true;
+	f.conn(0).link.respawn_delay_seconds = 5;
+	f.conn(0).link.spawn_target_hold_seconds = 4;
 	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
 	for (auto &t : f.transports) (void)drain(t);
 	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
@@ -534,6 +539,10 @@ bool check_spectator_convert_deploys() {
 	if (!expect(body->position.x == 40.0f && body->position.y == 50.0f && body->position.z == 6.0f &&
 					body->yaw == 90 && body->pitch == 0 && !f.conn(0).reply.convert_holds_pose,
 			"the hold arm places nothing, zeroes the angle words and clears its latch"))
+		return false;
+	if (!expect(f.conn(0).link.respawn_delay_seconds == 5 &&
+					f.conn(0).link.spawn_target_hold_seconds == 4,
+			"the 0xFFFF deploy leaves the +360 delay and the +364 hold"))
 		return false;
 	std::vector<ns::Datagram> own = drain(f.transports[0]);
 	if (!expect(own.size() >= 3 && own[0].tag == s2c::WEAPON_LOADOUT &&
@@ -555,12 +564,54 @@ bool check_spectator_convert_deploys() {
 	const w::EntityHandle point_handle = f.world.registry.spawn(1, point);
 	w::Entity *other = f.world.registry.get(f.players[1]);
 	if (!expect(other->team == 2, "the second player is on team 2")) return false;
+	f.conn(1).link.respawn_delay_seconds = 5;
+	f.conn(1).link.spawn_target_hold_seconds = 4;
 	(void)f.dispatch(1, c2s::SPECTATOR_RESPAWN,
 			{static_cast<uint8_t>(point_handle.packed), static_cast<uint8_t>(point_handle.packed >> 8)});
 	inmatch::Server_ProcessSpectatorRespawnRequests(f.ctx, f.world);
-	return expect(f.conn(1).link.spectator && other->position.x == 300.0f &&
+	if (!expect(f.conn(1).link.spectator && other->position.x == 300.0f &&
 					other->position.y == 400.0f && other->position.z == 21.0f,
-			"a named spawn point of any team places the converted body");
+			"a named spawn point of any team places the converted body"))
+		return false;
+	if (!expect(f.conn(1).link.respawn_delay_seconds == 5 &&
+					f.conn(1).link.spawn_target_hold_seconds == 0,
+			"a named handle's deploy clears the +364 hold and leaves the +360 delay"))
+		return false;
+
+	// The leg takes the request's raw handle: one that resolves to nothing
+	// (here the player's own body, no spawn point) places through the marker
+	// chain yet still clears the hold.
+	HostFixture crafted(1);
+	crafted.ctx.config.permanent_death = true;
+	crafted.ctx.config.spectator_slots = 1;
+	crafted.conn(0).link.respawn_delay_seconds = 5;
+	crafted.conn(0).link.spawn_target_hold_seconds = 4;
+	const uint16_t own_handle = crafted.players[0].packed;
+	(void)crafted.dispatch(0, c2s::SPECTATOR_RESPAWN,
+			{static_cast<uint8_t>(own_handle), static_cast<uint8_t>(own_handle >> 8)});
+	inmatch::Server_ProcessSpectatorRespawnRequests(crafted.ctx, crafted.world);
+	return expect(crafted.conn(0).link.spectator &&
+					crafted.conn(0).link.respawn_delay_seconds == 5 &&
+					crafted.conn(0).link.spawn_target_hold_seconds == 0,
+			"an unresolvable named handle's deploy still clears the +364 hold");
+}
+
+// D-NET-440: the C2S 0x51 convert runs inline in retail's receive pump, ahead
+// of Server_BuildEntitySlotLists, whose humans count skips a hidden player; so
+// the convert's own tick already counts the converted body out.
+// [orig: Server_TickUpdate, the pump call @0x51D895 and the count call @0x51D89A;
+//  Server_BuildEntitySlotLists `test bl,al` @0x4F9820; Server_KillPlayerAndNotify
+//  `or Flags,1` @0x519E92]
+bool check_spectator_convert_humans_count() {
+	HostFixture f(2);
+	f.ctx.config.permanent_death = true;
+	f.ctx.config.spectator_slots = 1;
+	inmatch::Server_TickUpdate(f.ctx);
+	if (!expect(f.world.cached.humans == 2, "both players count as humans")) return false;
+	(void)f.dispatch(0, c2s::SPECTATOR_RESPAWN, {0xFF, 0xFF});
+	inmatch::Server_TickUpdate(f.ctx);
+	return expect(f.conn(0).link.spectator && f.world.cached.humans == 1,
+			"the convert's own tick counts one human fewer");
 }
 
 // The S2C 0x32 join and leave lines: [1][name][team] from the player add,
@@ -1608,6 +1659,7 @@ int main() {
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_spectator_respawn_request() && ok;
 	ok = check_spectator_convert_deploys() && ok;
+	ok = check_spectator_convert_humans_count() && ok;
 	ok = check_join_leave_lines() && ok;
 	ok = check_medic_revive_transaction() && ok;
 	ok = check_medic_revive_gates() && ok;

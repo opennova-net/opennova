@@ -668,7 +668,7 @@ int main() {
 		own.reply.revive_pos[1] = w::to_fixed(body->position.y);
 		own.reply.revive_pos[2] = w::to_fixed(body->position.z) + 0x4000;
 		inmatch::Server_ReleasePlayerDeployment(
-				cp01_ctx.config, own, *cp01_world, w::EntityHandle{});
+				cp01_ctx.config, own, *cp01_world, w::EntityHandle{}, 0xFFFF);
 		if (!expect(body->alive && !own.reply.revive_pose_valid &&
 		                    body->position.x == -504.9119f && body->position.z == 26.25f,
 		            "the revive deploy lands on the saved spot raised 0x4000")) return 1;
@@ -712,7 +712,7 @@ int main() {
 		own.reply.revive_pos[1] = 6 << 16;
 		own.reply.revive_pos[2] = (7 << 16) + 0x4000;
 		inmatch::Server_ReleasePlayerDeployment(
-				bare_ctx.config, own, *bare_world, w::EntityHandle{});
+				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
 		if (!expect(body->alive && body->position.x == 5.0f && body->position.z == 7.25f &&
 		                    static_cast<uint32_t>(body_motor->heading) == 0x12340000u,
 		            "with no placement the revived player keeps its body's heading word")) return 1;
@@ -732,7 +732,7 @@ int main() {
 			body->health = -1;
 			body->flags |= w::kEntityFlagDead;
 			inmatch::Server_ReleasePlayerDeployment(
-					bare_ctx.config, own, *bare_world, w::EntityHandle{});
+					bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
 		};
 		deploy_dead(100);
 		if (!expect(body->health == 200 && body->alive,
@@ -751,7 +751,7 @@ int main() {
 		body->health = 1;
 		body->alive = true;
 		inmatch::Server_ReleasePlayerDeployment(
-				bare_ctx.config, own, *bare_world, w::EntityHandle{});
+				bare_ctx.config, own, *bare_world, w::EntityHandle{}, 0xFFFF);
 		if (!expect(body->health == 1 && body->health_max == 100,
 		            "a row word of 0 deploys the hp-0 body at its 1")) return 1;
 	}

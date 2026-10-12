@@ -4251,7 +4251,7 @@ bool check_roster_mirrors_the_undeployed_bit() {
 	                 "the join mirrors the undeployed bit onto the roster row");
 	deployer.reply.capture_nag_held = true;
 	opennova::inmatch::Server_ReleasePlayerDeployment(
-			ctx.config, deployer, world, opennova::world::EntityHandle{});
+			ctx.config, deployer, world, opennova::world::EntityHandle{}, 0xFFFF);
 	ok = expect(!deployer.link.respawn_pending && !pending(a),
 	            "the deploy leg clears the roster row's undeployed bit") && ok;
 	ok = expect(!deployer.reply.frontier_hint_pending && !deployer.reply.capture_nag_held,

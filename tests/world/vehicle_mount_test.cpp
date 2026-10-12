@@ -334,28 +334,44 @@ void test_attach_yaw_snaps_at_the_request_alone() {
 		CHECK(npc.body->heading == kStart);
 	}
 	{
-		// (b) The C2S 0x26 process seats the body and turns nothing.
+		// (b) The C2S 0x26 process seats the body and turns nothing; another
+		// entity's success leaves the local player's look alone.
 		Rig r;
 		const Npc npc = stage(r);
+		LocalPlayer local(r.w);
+		r.w.local_player_state = &local;
+		local.input.look_heading = 0x0F000000;
 		CHECK(r.w.vehicles.process_attach(npc.handle, r.veh_h, 2));
 		CHECK(r.w.registry.get(npc.handle)->mount_target == r.veh_h);
 		CHECK(npc.body->heading == kStart);
+		CHECK(local.input.look_heading == 0x0F000000);
+		r.w.local_player_state = nullptr;
 	}
 	{
-		// (c) A client's decoded relation seats its own player and leaves the
-		// body heading and the look target where they were.
+		// (c) A client's decoded relation seats its own player and turns
+		// nothing, but the process's success copies the player's Yaw into its
+		// look: a look the Yaw does not carry is overwritten, in the input and
+		// the body's look target alike (D-NET-447).
+		// [orig: Entity_ProcessVehicleAttach -- the local gate @0x435c4c..0x435c52,
+		//  `mov ecx, [edi+10h]` @0x435c5e, g_LocalPlayerLookYaw @0x435c61]
+		constexpr int32_t kStale = 0x0F000000;
 		Rig r;
 		AiEntity &body = *r.sys.at(r.sys.attach(r.player_h));
 		body.inf.active = true;
 		body.inf.is_local_player = true;
 		body.health = 150;
 		body.heading = kStart;
-		body.inf.target_heading = kStart;
+		body.inf.target_heading = kStale;
+		LocalPlayer local(r.w);
+		r.w.local_player_state = &local;
+		local.input.look_heading = kStale;
 		r.veh().seats[1].yaw_offset = 30;
 		CHECK(r.w.vehicles.apply_confirmed_mount(r.player_h, r.veh_h, 2));
 		CHECK(r.player().mount_target == r.veh_h);
 		CHECK(body.heading == kStart);
 		CHECK(body.inf.target_heading == kStart);
+		CHECK(local.input.look_heading == kStart);
+		r.w.local_player_state = nullptr;
 	}
 }
 

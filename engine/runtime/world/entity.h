@@ -819,6 +819,14 @@ struct Entity {
     // on every def resolve. The draw alone: collision follows the model's
     // callback (palm_fragment).
     bool palm_sections = false;
+    // The death-section draw: the render tag's cveh, chel, tank or cpln bone
+    // row, whose world callback pivots a section clone around its first
+    // surviving husk section [orig: Entity_BuildDeathSectionTransforms
+    // @0x492AF0; Entity_BuildAndApplyBoneMatrices @0x48F210;
+    // Render_DestroyedSections @0x449EF0; BoneCallback_cpln_World @0x48FE90],
+    // recomputed on every def resolve. The draw alone: each row's collision
+    // column is BoneCallback_Simple @0x4E2600.
+    bool death_section_pivot = false;
     int32_t palm_state = 0; // entity+0x270
     // The def's damage callback is the palm row's (WeaponOverlay_HandleDamage)
     // or its update is psec's physics step (Entity_UpdatePhysicsStep): the load

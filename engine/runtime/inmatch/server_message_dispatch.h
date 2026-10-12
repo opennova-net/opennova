@@ -74,14 +74,17 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 
 // Execute the ONE deploy-release transaction shared by immediate C2S 0x0E
 // picks and SpawnWaveList_Tick releases. `target_zone` invalid selects the
-// team's marker chain. Returns the private 0x5A/0x61/frontier bundle for the
-// owning connection; callers decide whether it is returned reactively or
-// staged on a transport.
+// team's marker chain. `requested_handle` is the raw handle the leg is called
+// with (0xFFFF none), which the spawn-target hold's clear tests whether or not
+// it resolved to `target_zone`. Returns the private 0x5A/0x61/frontier bundle
+// for the owning connection; callers decide whether it is returned reactively
+// or staged on a transport.
 // `server_log` is the /PROFILE recorder (null = off), which marks the deploy.
-// [orig: Server_ProcessPlayerDeath deploy leg @0x517740]
+// [orig: Server_ProcessPlayerDeath deploy leg @0x517740, its handle argument
+//  tested @0x51786B]
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone,
+		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
 		ServerLogRecorder *server_log = nullptr);
 
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the

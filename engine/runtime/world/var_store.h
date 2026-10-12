@@ -38,6 +38,32 @@ public:
     int32_t get_global(int i) const { return in_range(i, kGlobalVars) ? global_[i] : 0; }
     void set_global(int i, int32_t v) { if (in_range(i, kGlobalVars)) global_[i] = v; }
 
+    // The BMS reads and writes of a mission variable (the cat-4 trigger,
+    // MisvarChange) index the mission bank with no bound. The index scales by
+    // 4 in a 32-bit address, so only its low 30 bits select the word, and the
+    // words past the bank's 512 run on into the G bank, which follows it
+    // directly (0xC6B240 + 4 * 512 = 0xC6BA40). A word past both banks, which
+    // a small negative index also selects, lands first in WAC's own state
+    // around them, kept elsewhere here (the per-IF arrays and the DORND seed
+    // above, RND below; D-EVT-13), and past that in other globals (D-EVT-14):
+    // read 0 and dropped here. WAC operands never get there: the compiler
+    // holds V# and G# under 256 and the declared slots to 256.
+    // [orig: EventTrigger_EvaluateCondition @0x453620 - `mov ecx,
+    //  dword_C6B240[eax*4]` @0x453AAC; EventAction_Dispatch @0x4542E0, case 5
+    //  - the Set @0x45439A; WacScript_ResolveParameter @0x4F2920 - G# =
+    //  0xC6BA40 + 4n @0x4F2B66, the V# and G# bounds @0x4F2AC0 / @0x4F2B27;
+    //  Script_Compile @0x4F31F0 - the declared-slot bound @0x4F3812]
+    int32_t get_bank_word(int32_t index) const {
+        const int word = bank_word(index);
+        if (word < kMissionVars) return mission_[word];
+        if (word < kMissionVars + kGlobalVars) return global_[word - kMissionVars];
+        return 0;
+    }
+    void set_bank_word(int32_t index, int32_t v) {
+        const int word = bank_word(index);
+        if (word < kMissionVars) mission_[word] = v;
+        else if (word < kMissionVars + kGlobalVars) global_[word - kMissionVars] = v;
+    }
 
     // The per-load clear: V0..V255 only. The declared half (256..511) and
     // the globals are untouched, as in the original's load.
@@ -61,6 +87,10 @@ public:
 
 private:
     static bool in_range(int i, int n) { return i >= 0 && i < n; }
+    // The index's low 30 bits, 0..0x3FFFFFFF.
+    static int bank_word(int32_t index) {
+        return static_cast<int>(static_cast<uint32_t>(index) & 0x3FFFFFFFu);
+    }
     std::array<int32_t, kMissionVars> mission_{};
     std::array<int32_t, kGlobalVars> global_{};
 };

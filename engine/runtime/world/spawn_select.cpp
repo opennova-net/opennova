@@ -435,6 +435,15 @@ int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle) 
     return -1;
 }
 
+uint8_t deploy_request_team(const World &world, uint8_t team, bool spectator,
+                            uint16_t pick, uint32_t game_type_value) {
+    if (!spectator) return team;                                          // [orig: @0x519B7A]
+    if (pick != kDeployPickNone && pick != kDeployPickAutoTeam) return team; // [orig: @0x519B9A]
+    if (game_type::is_objective(game_type_value)) return 1;               // [orig: @0x519BA8]
+    if (!game_type::is_team(game_type_value)) return team;                // [orig: @0x519BB2]
+    return static_cast<uint8_t>(2u - (world.logic_tick & 1u));           // [orig: @0x519BB4..0x519BC1]
+}
+
 bool ZoneSystem::team_has_available_spawn_zone(uint8_t team) const {
     const World &world = world_;
     // Despite the original helper's reverse-engineered name, its loop is over

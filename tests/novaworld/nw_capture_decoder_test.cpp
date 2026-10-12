@@ -234,6 +234,63 @@ std::vector<CaptureDatagram> craft_key_reuse_capture() {
 	return t.caps;
 }
 
+// One 0x82 of client `c` with the given CI, CR and SCRK over its genuine fields.
+void add_server_auth(TwoClientCapture &t, int c, uint32_t ci, uint32_t cr,
+                     const std::string &scrk) {
+	ServerAuth sa = t.sa[c];
+	sa.ci = ci;
+	sa.cr = cr;
+	sa.scrk = scrk;
+	t.add(32768, t.port[c],
+			nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(sa)));
+}
+
+// The 0x82 binds the S2C key only when the client would accept it: its CI and CK
+// are the connecting connection's and its CR is nonzero. A foreign-CI 0x82 with a
+// bogus key BEFORE the genuine accept is dropped and the genuine one binds; after
+// the accept, an SCRK-less 0x82 with a foreign CI and one with the connection's own
+// CI (the connection no longer waits for one) both leave the established key, so
+// the next 0x83 still decodes.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the state-3 lookup
+//  @0x6298E0..0x629901, the CI / CK match @0x629CAC..0x629CBF]
+std::vector<CaptureDatagram> craft_stray_server_auth_capture() {
+	TwoClientCapture t(32769, 32770, /*ck_a=*/2, /*ck_b=*/4);
+	t.client_auth(0);
+	add_server_auth(t, 0, t.ca[0].ci ^ 0x10u, 1, "BOGUS_FOREIGN_SCRK_X");
+	t.server_auth(0);
+	t.s2c(0, 0x0D, 0xC1, 20, 7, 5);
+	add_server_auth(t, 0, t.ca[0].ci ^ 0x10u, 1, "");
+	add_server_auth(t, 0, t.ca[0].ci, 1, "");
+	t.s2c(0, 0x0A, 0xC2, 30, 8, 6);
+	return t.caps;
+}
+
+// A matching CR 0 0x82 ends the connect state: the genuine accept that follows it is
+// dropped, so client B's 0x83 has no key, while client A's ordinary join decodes.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CR split
+//  @0x629CD2..0x629CD6, state 4 @0x629F95; the state-3 lookup @0x6298E0..0x629901]
+std::vector<CaptureDatagram> craft_rejected_connect_capture() {
+	TwoClientCapture t(32769, 32770, /*ck_a=*/2, /*ck_b=*/4);
+	t.client_auth(0); t.server_auth(0);
+	t.client_auth(1);
+	add_server_auth(t, 1, t.ca[1].ci, 0, "");
+	t.server_auth(1);
+	t.s2c(0, 0x0D, 0xD0, 10, 7, 5);
+	t.s2c(1, 0x0D, 0xD1, 16, 7, 5);
+	return t.caps;
+}
+
+// A session whose 0x42 is not in the capture binds from its first 0x82 alone; a
+// later SCRK-less 0x82 with the same CK is dropped, so the key stays.
+std::vector<CaptureDatagram> craft_fallback_latch_capture() {
+	TwoClientCapture t(32769, 32770, /*ck_a=*/2, /*ck_b=*/4);
+	t.server_auth(0);
+	t.s2c(0, 0x0D, 0xE1, 18, 7, 5);
+	add_server_auth(t, 0, t.ca[0].ci, 1, "");
+	t.s2c(0, 0x0A, 0xE2, 22, 8, 6);
+	return t.caps;
+}
+
 } // namespace
 
 int main() {
@@ -299,6 +356,34 @@ int main() {
 		}
 		EXPECT(port_a == 3 && port_b == 3);
 		EXPECT(streaming_equals_batch(reuse, "key-reuse-2-port"));
+	}
+
+	// --- only the 0x82 the client accepts binds the S2C key -------------------
+	{
+		const std::vector<CaptureDatagram> stray = craft_stray_server_auth_capture();
+		const std::vector<InGameMessage> stray_batch = decode_capture_to_messages(stray);
+		EXPECT(stray_batch.size() == 2);
+		if (stray_batch.size() == 2) {
+			EXPECT(stray_batch[0].payload == std::vector<uint8_t>(20, 0xC1));
+			EXPECT(stray_batch[1].payload == std::vector<uint8_t>(30, 0xC2));
+		}
+		EXPECT(streaming_equals_batch(stray, "stray-server-auth"));
+
+		const std::vector<CaptureDatagram> rejected = craft_rejected_connect_capture();
+		const std::vector<InGameMessage> rejected_batch = decode_capture_to_messages(rejected);
+		EXPECT(rejected_batch.size() == 1);
+		if (rejected_batch.size() == 1)
+			EXPECT(rejected_batch[0].payload == std::vector<uint8_t>(10, 0xD0));
+		EXPECT(streaming_equals_batch(rejected, "rejected-connect"));
+
+		const std::vector<CaptureDatagram> fallback = craft_fallback_latch_capture();
+		const std::vector<InGameMessage> fallback_batch = decode_capture_to_messages(fallback);
+		EXPECT(fallback_batch.size() == 2);
+		if (fallback_batch.size() == 2) {
+			EXPECT(fallback_batch[0].payload == std::vector<uint8_t>(18, 0xE1));
+			EXPECT(fallback_batch[1].payload == std::vector<uint8_t>(22, 0xE2));
+		}
+		EXPECT(streaming_equals_batch(fallback, "fallback-latch"));
 	}
 
 	// The detailed capture seam reports every decrypted 0x43/0x83 datagram,
