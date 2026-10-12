@@ -121,4 +121,16 @@ Rgba8Image compose_terrain_tile_page(
 		const TerrainTilePageSourceView &sources,
 		std::size_t threads = 1);
 
+// A placed tile's square on the page plane, Q16, inclusive: x as the record stores it, z the stored z
+// negated, 16 units each way, the rectangle the page pass tests a record against.
+struct TerrainTileSquareQ16 {
+	int64_t minimum_x = 0, minimum_z = 0, maximum_x = 0, maximum_z = 0;
+};
+// The squares whose drawn tiles differ between two placements of one terrain (an editor's tile edit): at each
+// index where the records differ in what the page pass reads of them (the corner, the tile, the flags), both
+// records' squares, and past the shorter list each extra record's. The pass draws the records in file order,
+// later over earlier, so a record moved in the order touches every index it moved past. Whatever page none of
+// them overlaps composes the same bytes from either placement.
+std::vector<TerrainTileSquareQ16> terrain_tile_overlay_changes(const TilFile &before, const TilFile &after);
+
 } // namespace opennova::terrain

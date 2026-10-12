@@ -225,6 +225,9 @@ private:
 	void _load_textures();
 	void _clear_derived_textures();
 	void _rebuild_tile_overlay_pages();
+	// The placed tiles changed (a new override, or its entries edited): the pages whose squares changed recompose in
+	// place (TerrainTileCacheDevice::set_tile_entries), else the overlay pages are built again.
+	void _update_tile_overlay_pages();
 	void _clear_terrain();
 	void _hide_visible_patches();
 	void _clear_patch_pool();
@@ -311,6 +314,11 @@ public:
 	void set_lod_quality(float p_quality);
 	float get_lod_quality() const;
 
+	// The placed tiles the terrain draws in place of its own (a mission's .til, as the game's load takes it). A new
+	// override, or an edit of its entries (its `changed`), recomposes the pages whose squares changed in place
+	// (_update_tile_overlay_pages). The terrain's own tiles (TerrainData's resource, cached by its path) are read at
+	// a build and never watched: an editor's tile edits go through an override it keeps (ADR 0046 S25), whatever
+	// file they edit.
 	void set_tile_info_override(const Ref<TerrainTileInfo> &p_info);
 	Ref<TerrainTileInfo> get_tile_info_override() const;
 

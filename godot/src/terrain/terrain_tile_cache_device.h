@@ -88,6 +88,13 @@ public:
 	// Mission/replay reset: remove the permanent list and make every resident
 	// page cold so no prior compiled scorch survives the lifecycle boundary.
 	void clear_terrain_scorches();
+	// The placed tiles replaced in place (an editor's tile edit, ADR 0046 S25):
+	// the composition sources take `p_file` and only the resident pages a
+	// changed record's square overlaps recompose
+	// (terrain_tile_overlay_changes); the pages retired. nullopt, nothing
+	// changed, where the sources cannot take it in place (none ready, or tiles
+	// over sources built with no tile set): the caller rebuilds them.
+	std::optional<std::size_t> set_tile_entries(const opennova::TilFile &p_file);
 	// The colour map painted in place (an editor's paint stroke, ADR 0046 S25):
 	// `p_colormap` the whole map as it now stands, (x, y, w, h) its changed
 	// texels. The colour quadrants the rect touches are made again from it
@@ -149,6 +156,8 @@ private:
 	uint64_t cache_hits_ = 0;
 	uint64_t cache_misses_ = 0;
 	uint64_t upload_failures_ = 0;
+	uint64_t tile_entry_updates_ = 0;
+	uint64_t tile_entry_pages_retired_ = 0;
 	uint64_t colormap_region_updates_ = 0;
 	uint64_t colormap_pages_retired_ = 0;
 	opennova::terrain::TerrainScorchRegistry scorch_registry_;
