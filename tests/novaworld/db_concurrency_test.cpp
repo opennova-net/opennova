@@ -75,10 +75,12 @@ constexpr int kUsersPerRegistrar = 5;
 constexpr int kHosts = 3;
 constexpr int kGenerationsPerWriter = 50;
 constexpr int kReaders = 3;
-// The pool's busy timeout, raised from the server's 5 s to 60 s: on a loaded
-// host (a CI runner, WSL2's virtual disk under a parallel build) one writer can
-// queue behind the other writers' commits for longer than 5 s, and how long a
-// write waits is not what this test asks.
+// The pool's busy timeout, raised from the server's 5 s to 60 s as a deliberate
+// stress margin: this test runs every writer flat out at once, and SQLite's
+// polling busy handler can starve one writer behind the others' back-to-back
+// commits for longer than 5 s on a loaded host (a CI runner, WSL2's virtual
+// disk under a parallel build). What it asks is that no write is lost or
+// mixed, not how long one waits; the route harness keeps the server's 5 s.
 constexpr int kBusyTimeoutMs = 60000;
 
 // Everything a worker thread reports, checked by main() after the join.

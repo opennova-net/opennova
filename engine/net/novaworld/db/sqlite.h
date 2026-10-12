@@ -131,7 +131,13 @@ public:
 	bool in_transaction() const;
 
 private:
+	friend class Transaction;
+	friend class ReadSnapshot;
+
 	sqlite3 *handle_ = nullptr;
+	// Set while a ReadSnapshot holds this connection's transaction open, so a
+	// Transaction opened inside it is refused.
+	bool in_read_snapshot_ = false;
 };
 
 // Scoped write transaction: BEGIN IMMEDIATE on construction, COMMIT on
@@ -143,6 +149,12 @@ private:
 // transaction or none of it. Opened inside another transaction on the same
 // connection it is a SAVEPOINT: commit() releases it into the outer
 // transaction, and destroying it uncommitted undoes only its own writes.
+// Never inside a ReadSnapshot: there the SAVEPOINT's first write would upgrade
+// the snapshot's read, and sqlite upgrades a read without calling the busy
+// handler, so it fails at once with SQLITE_BUSY (another connection holds the
+// write lock) or SQLITE_BUSY_SNAPSHOT (another connection committed since the
+// snapshot began). The constructor refuses it with SqliteError (SQLITE_MISUSE);
+// take the Transaction first, or end the snapshot before writing.
 class Transaction {
 public:
 	explicit Transaction(Database &db);
@@ -164,7 +176,9 @@ private:
 // write lock (a Transaction does), so it never waits on a writer. A read
 // that spans statements and must agree with itself (host rows and their
 // rosters) takes one. Inside an open transaction it does nothing: that
-// transaction already reads one snapshot.
+// transaction already reads one snapshot. It is for reads only: a write
+// inside it, a Transaction (refused, see above) or a bare exec(), upgrades
+// its read without waiting on the busy timeout.
 class ReadSnapshot {
 public:
 	explicit ReadSnapshot(Database &db);

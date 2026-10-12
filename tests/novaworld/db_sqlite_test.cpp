@@ -22,6 +22,8 @@ namespace {
 constexpr int kSqliteError = 1;
 constexpr int kSqliteBusy = 5;
 constexpr int kSqliteConstraint = 19;
+constexpr int kSqliteMisuse = 21;
+constexpr int kSqliteRange = 25;
 constexpr int kSqliteBusySnapshot = kSqliteBusy | (2 << 8); // 517
 constexpr int kSqliteConstraintUnique = kSqliteConstraint | (8 << 8); // 2067
 
@@ -193,7 +195,8 @@ int test_connection_pool() {
 		b->exec("INSERT INTO t VALUES (7);");
 		TEST_EXPECT(count_rows(*a) == 1);
 		// Every connection waits out a busy writer instead of failing.
-		TEST_EXPECT(b->query("PRAGMA busy_timeout;")[0].as_int(0).value() == 5000);
+		TEST_EXPECT(b->query("PRAGMA busy_timeout;")[0].as_int(0).value() ==
+				opennova::db::kDefaultBusyTimeoutMs);
 		// A transaction left open goes back rolled back.
 		b->begin();
 		b->exec("INSERT INTO t VALUES (8);");
@@ -261,6 +264,29 @@ int test_read_snapshot() {
 			tx.commit();
 		}
 		TEST_EXPECT(!reader.in_transaction());
+
+		// A Transaction inside it is refused before it writes, and the
+		// snapshot stays open until its guard ends it.
+		{
+			opennova::db::ReadSnapshot snapshot(reader);
+			TEST_EXPECT(count_rows(reader) == 2);
+			bool refused = false;
+			try {
+				Transaction tx(reader);
+			} catch (const SqliteError &e) {
+				refused = e.code() == kSqliteMisuse;
+			}
+			TEST_EXPECT(refused);
+			TEST_EXPECT(reader.in_transaction());
+		}
+		TEST_EXPECT(!reader.in_transaction());
+		// Once the snapshot ends, a Transaction opens as usual.
+		{
+			Transaction tx(reader);
+			reader.exec("INSERT INTO t VALUES (3);");
+			tx.commit();
+		}
+		TEST_EXPECT(count_rows(reader) == 3);
 	}
 	std::filesystem::remove_all(dir);
 	return 0;
@@ -311,6 +337,21 @@ int test_error_codes() {
 					std::string::npos);
 		}
 		TEST_EXPECT(caught);
+	}
+
+	// A bind past the statement's parameters fails before any step, and the
+	// statement is finalized on the way out (the connection goes on working).
+	{
+		Database db(":memory:");
+		bool caught = false;
+		try {
+			db.exec("SELECT ?;", { BindValue{ int64_t{ 1 } }, BindValue{ int64_t{ 2 } } });
+		} catch (const SqliteError &e) {
+			caught = true;
+			TEST_EXPECT(e.code() == kSqliteRange);
+		}
+		TEST_EXPECT(caught);
+		TEST_EXPECT(db.query("SELECT 1;").size() == 1);
 	}
 
 	// Two busy failures that share SQLITE_BUSY and its "database is locked",

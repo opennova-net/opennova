@@ -33,11 +33,15 @@ session handshake, the browser/host/play container services, and the legacy
   from the main thread's `on_lost`) leases one per call. The database is WAL, so
   connections read while one writes, and the 5 s busy timeout makes a second
   writer wait. Every connection runs `synchronous=NORMAL`: under WAL the WAL
-  syncs before each checkpoint, not at every commit, so no writer holds the
-  write lock across an fsync. The file stays consistent; a power loss or OS
-  crash can roll back the last commits before it, which the disposable service
-  database accepts. A `db::SqliteError` carries sqlite's extended code and, for
-  a busy or locked statement, how long its failing step ran, so a busy timeout
+  syncs before each checkpoint, not at every commit, so most commits hold the
+  write lock across no fsync (the exception is the first commit after each WAL
+  restart, which syncs the new WAL header). Back-to-back writers no longer pay
+  a loaded disk's fsync each, which at `FULL` could add up past a waiting
+  writer's busy timeout (SQLite's busy handler polls rather than queues). The
+  file stays consistent; a power loss or OS crash can roll back the last
+  commits before it, which the disposable service database accepts. A
+  `db::SqliteError` carries sqlite's extended code and, for a busy or locked
+  statement, how long its failing prepare or step ran, so a busy timeout
   that ran out (`[extended 5, after 5003 ms]`) reads apart from a lock sqlite
   refused at once (`[extended 517, after 0 ms]`, `SQLITE_BUSY_SNAPSHOT`). A
   write that spans statements (`clear_all`, `replace_roster`,

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <utility>
 
@@ -66,6 +67,21 @@ SqliteError sqlite_error(sqlite3 *handle, int rc, std::string_view ctx,
 
 [[noreturn]] void throw_sqlite(sqlite3 *handle, int rc, std::string_view ctx) {
 	throw sqlite_error(handle, rc, ctx);
+}
+
+// A prepared statement, finalized however its scope ends: a bind, step or row
+// copy that throws would otherwise leak it, and sqlite3_close_v2 leaves a
+// connection with an unfinalized statement open as a zombie. A throw reads the
+// failed call's error in its operand, before unwinding finalizes the statement.
+struct StatementFinalizer {
+	void operator()(sqlite3_stmt *stmt) const { sqlite3_finalize(stmt); }
+};
+using Statement = std::unique_ptr<sqlite3_stmt, StatementFinalizer>;
+
+Statement prepare(sqlite3 *handle, std::string_view sql, int &rc) {
+	sqlite3_stmt *stmt = nullptr;
+	rc = sqlite3_prepare_v2(handle, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
+	return Statement(stmt);
 }
 
 void bind_at(sqlite3_stmt *stmt, int i, const BindValue &v) {
@@ -160,11 +176,14 @@ Database::Database(const std::filesystem::path &path, int busy_timeout_ms) {
 	sqlite3_exec(handle_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
 	// Per connection (the file does not keep it). Under WAL, NORMAL syncs the
 	// WAL before each checkpoint rather than at every commit as FULL (the
-	// default) does, so a commit holds the write lock for no fsync, and one
-	// fsync stalled on a loaded disk cannot queue every other writer past its
-	// busy timeout. The file stays consistent; a power loss or OS crash (not a
-	// process crash) can roll back the last commits before it, which this
-	// service's disposable database accepts.
+	// default) does, so most commits hold the write lock for no fsync. The
+	// exception is the first commit after each WAL restart, which writes and
+	// syncs the new WAL header with the lock held. Writers that take the lock
+	// back to back (and the busy handler polls, so a waiter can starve behind
+	// them) then no longer pay a loaded disk's fsync each, which at FULL could
+	// add up past the busy timeout. The file stays consistent; a power loss or
+	// OS crash (not a process crash) can roll back the last commits before it,
+	// which this service's disposable database accepts.
 	sqlite3_exec(handle_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
 }
 
@@ -174,15 +193,19 @@ Database::~Database() {
 	}
 }
 
-Database::Database(Database &&other) noexcept : handle_(other.handle_) {
+Database::Database(Database &&other) noexcept :
+		handle_(other.handle_), in_read_snapshot_(other.in_read_snapshot_) {
 	other.handle_ = nullptr;
+	other.in_read_snapshot_ = false;
 }
 
 Database &Database::operator=(Database &&other) noexcept {
 	if (this != &other) {
 		if (handle_) sqlite3_close_v2(handle_);
 		handle_ = other.handle_;
+		in_read_snapshot_ = other.in_read_snapshot_;
 		other.handle_ = nullptr;
+		other.in_read_snapshot_ = false;
 	}
 	return *this;
 }
@@ -192,25 +215,21 @@ void Database::exec(std::string_view sql) {
 }
 
 void Database::exec(std::string_view sql, const std::vector<BindValue> &binds) {
-	sqlite3_stmt *stmt = nullptr;
 	const Clock::time_point prepare_started = Clock::now();
-	int rc = sqlite3_prepare_v2(handle_, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
+	int rc = SQLITE_OK;
+	const Statement stmt = prepare(handle_, sql, rc);
 	if (rc != SQLITE_OK) {
 		throw sqlite_error(
 				handle_, rc, std::string("prepare: ") + std::string(sql), prepare_started);
 	}
 	for (std::size_t i = 0; i < binds.size(); ++i) {
-		bind_at(stmt, static_cast<int>(i + 1), binds[i]);
+		bind_at(stmt.get(), static_cast<int>(i + 1), binds[i]);
 	}
 	const Clock::time_point step_started = Clock::now();
-	rc = sqlite3_step(stmt);
+	rc = sqlite3_step(stmt.get());
 	if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
-		SqliteError error =
-				sqlite_error(handle_, rc, std::string("exec: ") + std::string(sql), step_started);
-		sqlite3_finalize(stmt);
-		throw error;
+		throw sqlite_error(handle_, rc, std::string("exec: ") + std::string(sql), step_started);
 	}
-	sqlite3_finalize(stmt);
 }
 
 void Database::exec_script(std::string_view sql_script) {
@@ -226,44 +245,40 @@ std::vector<Row> Database::query(std::string_view sql) {
 }
 
 std::vector<Row> Database::query(std::string_view sql, const std::vector<BindValue> &binds) {
-	sqlite3_stmt *stmt = nullptr;
 	const Clock::time_point prepare_started = Clock::now();
-	int rc = sqlite3_prepare_v2(handle_, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
+	int rc = SQLITE_OK;
+	const Statement stmt = prepare(handle_, sql, rc);
 	if (rc != SQLITE_OK) {
 		throw sqlite_error(
 				handle_, rc, std::string("prepare: ") + std::string(sql), prepare_started);
 	}
 	for (std::size_t i = 0; i < binds.size(); ++i) {
-		bind_at(stmt, static_cast<int>(i + 1), binds[i]);
+		bind_at(stmt.get(), static_cast<int>(i + 1), binds[i]);
 	}
 
-	const int ncol = sqlite3_column_count(stmt);
+	const int ncol = sqlite3_column_count(stmt.get());
 	std::vector<std::string> columns;
 	columns.reserve(ncol);
 	for (int i = 0; i < ncol; ++i) {
-		const char *name = sqlite3_column_name(stmt, i);
+		const char *name = sqlite3_column_name(stmt.get(), i);
 		columns.emplace_back(name ? name : "");
 	}
 
 	std::vector<Row> out;
 	Clock::time_point step_started = Clock::now();
-	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+	while ((rc = sqlite3_step(stmt.get())) == SQLITE_ROW) {
 		Row row;
 		row.columns = columns;
 		row.values.reserve(ncol);
 		for (int i = 0; i < ncol; ++i) {
-			row.values.push_back(column_value(stmt, i));
+			row.values.push_back(column_value(stmt.get(), i));
 		}
 		out.push_back(std::move(row));
 		step_started = Clock::now();
 	}
 	if (rc != SQLITE_DONE) {
-		SqliteError error =
-				sqlite_error(handle_, rc, std::string("query: ") + std::string(sql), step_started);
-		sqlite3_finalize(stmt);
-		throw error;
+		throw sqlite_error(handle_, rc, std::string("query: ") + std::string(sql), step_started);
 	}
-	sqlite3_finalize(stmt);
 	return out;
 }
 
@@ -296,6 +311,11 @@ constexpr const char *kNestedTransaction = "opennova_tx";
 } // namespace
 
 Transaction::Transaction(Database &db) : db_(db), nested_(db.in_transaction()) {
+	if (db_.in_read_snapshot_) {
+		// Its writes would upgrade the snapshot's read, which never waits on
+		// the busy timeout (sqlite.h, Transaction).
+		throw SqliteError(SQLITE_MISUSE, "a Transaction inside a ReadSnapshot");
+	}
 	db_.exec(nested_ ? std::string("SAVEPOINT ") + kNestedTransaction + ";"
 	                 : std::string("BEGIN IMMEDIATE;"));
 }
@@ -329,11 +349,15 @@ void Transaction::commit() {
 // ----------------------------------------------------------------------------
 
 ReadSnapshot::ReadSnapshot(Database &db) : db_(db), open_(!db.in_transaction()) {
-	if (open_) db_.begin();
+	if (!open_)
+		return;
+	db_.begin();
+	db_.in_read_snapshot_ = true;
 }
 
 ReadSnapshot::~ReadSnapshot() {
 	if (!open_) return;
+	db_.in_read_snapshot_ = false;
 	try {
 		db_.commit();
 	} catch (const SqliteError &) {
