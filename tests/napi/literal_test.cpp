@@ -56,10 +56,38 @@ bool check_letter_class() {
 	return letters && non_letters;
 }
 
+// Every arm's digit test is the CRT isdigit under ".ACP", pinned to cp1252 (the ASCII ten and
+// the superscripts 0xB2, 0xB3, 0xB9), on the sign-extended byte (D-NET-388, D-NET-391):
+// - the decimal run takes a superscript and its value is the CRT atol of the run, which stops
+//   at the superscript and saturates at INT32_MAX;
+// - the hex run takes a superscript and folds it as its signed byte less '0' (0xB2 as -126,
+//   0xB9 as -119);
+// - after a leading zero the octal arm, and after a '%' the binary arm, fail on a digit past
+//   their run, so "07\xB2" falls through to the decimal arm and "%12" fails outright.
+// [orig: NapiScript_ParseHexValue @0x62d610 (@0x62d694, @0x62d73e, the fold @0x62d74a..
+//  0x62d754); NapiScript_ParseOctalInteger @0x62d7b0 (@0x62d84f); NapiScript_ParseBinaryLiteral
+//  @0x62d900 (@0x62d9a1, @0x62d9ab); NapiScript_ParseDecimalIntegerB @0x62da20 (@0x62da61,
+//  @0x62da87, _atol called @0x62dabc)]
+bool check_digit_class() {
+	const bool decimal = expect_literal("12\xB2", 12, 3) && expect_literal("\xB9", 0, 1) &&
+			expect_literal("1\xB3\x34", 1, 3) && expect_literal("2147483647", 0x7FFFFFFFu, 10) &&
+			expect_literal("2147483648", 0x7FFFFFFFu, 10) &&
+			expect_literal("4294967295", 0x7FFFFFFFu, 10) &&
+			expect_literal("99999999999d", 0x7FFFFFFFu, 12);
+	const bool hex = expect_literal("0x1\xB2", 0xFFFFFF92u, 4) &&
+			expect_literal("\xB2h", 0xFFFFFF82u, 2) && expect_literal("$\xB9\x30", 0xFFFFF890u, 3) &&
+			expect_literal("$FFFFFFFF", 0xFFFFFFFFu, 9);
+	const bool octal = expect_literal("07\xB2", 7, 3) && expect_literal("017\xB9", 17, 4);
+	const bool binary =
+			expect_rejected("%12") && expect_rejected("%1\xB3") && expect_literal("%10\xFF", 2, 3);
+	return decimal && hex && octal && binary;
+}
+
 } // namespace
 
 int main() {
 	if (!check_letter_class()) return 1;
+	if (!check_digit_class()) return 1;
 	if (!expect_literal("'x' tail", uint32_t('x'), 3)) return 1;
 	if (!expect_literal("$2A", 42, 3)) return 1;
 	if (!expect_literal("0x2Ah", 42, 4)) return 1;
@@ -73,7 +101,7 @@ int main() {
 	if (!expect_literal("42", 42, 2)) return 1;
 	if (!expect_literal("42d", 42, 3)) return 1;
 	if (!expect_literal("08", 8, 2)) return 1;
-	if (!expect_literal("4294967295", 0xFFFFFFFFu, 10)) return 1;
+	if (!expect_literal("4294967295", 0x7FFFFFFFu, 10)) return 1; // atol saturates
 	if (!expect_rejected("-1")) return 1;
 	if (!expect_rejected("+1")) return 1;
 	if (!expect_rejected("1.0")) return 1;
