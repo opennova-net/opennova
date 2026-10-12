@@ -376,6 +376,7 @@ void snapshot_routing(TerrainSceneSnapshot &scene, const TrnConfig &trn) {
 	scene.origin_y = trn.origin_y;
 	scene.wrap_x = trn.wrap_x != 0;
 	scene.wrap_y = trn.wrap_y != 0;
+	scene.locks = locks_from_trn(trn);
 }
 
 } // namespace
@@ -407,11 +408,17 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 	return scene;
 }
 
-void refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
+bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
 		const TrnConfig &trn, const std::vector<int> &tiles, const terrain::CoordsRect &rect) {
+	if (rect.w > 0 && rect.h > 0 &&
+			(rect.x < 0 || rect.z < 0 || rect.x > kSnapshotAtlas - rect.w || rect.z > kSnapshotAtlas - rect.h)) {
+		return false;
+	}
 	constexpr size_t expected_depth_samples =
 			static_cast<size_t>(kSnapshotAtlas) * static_cast<size_t>(kSnapshotAtlas);
+	const terrain::CoordsQuadrantLocks locks = locks_from_trn(trn);
 	bool same_layout = scene.valid() && !cpt.tiles.empty() &&
+			scene.locks.x == locks.x && scene.locks.z == locks.z &&
 			cpt.depth_buffer.size() == expected_depth_samples &&
 			scene.tile_meshes.size() == cpt.tiles.size() &&
 			scene.tile_attributes.size() == cpt.tiles.size();
@@ -427,7 +434,7 @@ void refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &
 	}
 	if (!same_layout) {
 		scene = build_terrain_scene_snapshot(cpt, trn);
-		return;
+		return true;
 	}
 
 	snapshot_routing(scene, trn);
@@ -448,6 +455,7 @@ void refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &
 
 	refresh_mipchain(scene.mipchain, cpt.depth_buffer, rect.x, rect.z, rect.w, rect.h);
 	build_snapshot_nodes(scene, cpt);
+	return true;
 }
 
 const TerrainDrawList &TerrainFrameCompiler::compile(

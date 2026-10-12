@@ -69,6 +69,8 @@ struct TerrainSceneSnapshot {
 	int origin_y = 0;
 	bool wrap_x = false;
 	bool wrap_y = false;
+	// The .trn's quadrant locks the tiles' bounds were tapped with.
+	terrain::CoordsQuadrantLocks locks;
 
 	bool valid() const { return root_node >= 0 && !quad_nodes.empty(); }
 };
@@ -85,9 +87,14 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 // bounds of every other tile whose vertices may read the rect, the mip chain
 // cells over the rect and the nodes; equal to a fresh
 // build_terrain_scene_snapshot(cpt, trn) (an editor's sculpt stroke and the
-// bake that lands it). A layout the snapshot was not built from (a tile moved
-// or resized, a count changed) is built whole.
-void refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
+// bake that lands it). The rect is the terrain's region contract (quadtree.h
+// refresh_mipchain's): inside the 1024 atlas, a change across its wrap arriving
+// as several rects, each refreshed in turn; one of no size (tiles alone
+// replaced) changes no height; one not inside is refused (false, nothing
+// changed). A layout the snapshot was not built from (a tile moved or resized,
+// a count changed) or `trn`'s quadrant locks moved since it was built: built
+// whole.
+bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
 		const TrnConfig &trn, const std::vector<int> &tiles, const terrain::CoordsRect &rect);
 
 // Orthonormal camera state in world space (column-major world-to-view, -Z

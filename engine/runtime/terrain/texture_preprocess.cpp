@@ -186,11 +186,13 @@ bool refresh_heightfield_normal_map(
 			normals.pixels.size() != static_cast<size_t>(width) * height * 4) {
 		return false;
 	}
-	const int64_t x0 = std::max<int64_t>(rect.x, 0);
-	const int64_t z0 = std::max<int64_t>(rect.z, 0);
-	const int64_t x1 = std::min<int64_t>(static_cast<int64_t>(rect.x) + rect.w, width);
-	const int64_t z1 = std::min<int64_t>(static_cast<int64_t>(rect.z) + rect.h, height);
-	if (x0 >= x1 || z0 >= z1) return true;
+	if (rect.w <= 0 || rect.h <= 0) return true;
+	if (rect.x < 0 || rect.z < 0 || static_cast<int64_t>(rect.x) + rect.w > width ||
+			static_cast<int64_t>(rect.z) + rect.h > height) {
+		return false;
+	}
+	const int64_t x0 = rect.x, z0 = rect.z;
+	const int64_t x1 = static_cast<int64_t>(rect.x) + rect.w, z1 = static_cast<int64_t>(rect.z) + rect.h;
 	const auto column_in = [&](uint32_t v) { return v >= x0 && v < x1; };
 	const auto row_in = [&](uint32_t v) { return v >= z0 && v < z1; };
 	const HeightfieldNormalKernel kernel{depth, width, height, locks};

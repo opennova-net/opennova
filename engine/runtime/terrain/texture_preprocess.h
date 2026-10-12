@@ -44,8 +44,10 @@ Rgba8Image build_heightfield_normal_map(
 // its columns whose upper or lower tap meets its rows. `quadrants_written`,
 // when given, says which of the map's four quadrants (top-left, top-right,
 // bottom-left, bottom-right) had a texel made again (the device textures cut
-// from them). False, nothing written, where `normals` is not a map of the
-// depth's shape.
+// from them). The rect is the terrain's region contract (quadtree.h
+// refresh_mipchain's): inside the map, a change across its wrap arriving as
+// several rects; one of no size writes nothing. False, nothing written, where
+// `normals` is not a map of the depth's shape or the rect is not inside it.
 bool refresh_heightfield_normal_map(
 		Rgba8Image &normals,
 		const std::vector<uint16_t> &depth,

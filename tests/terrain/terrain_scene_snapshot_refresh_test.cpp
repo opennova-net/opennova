@@ -18,6 +18,8 @@
 #include <runtime/terrain/terrain_frame.h>
 #include <runtime/terrain/texture_preprocess.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/terrain_field_store.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 #include "common/test_paths.h"
 
 #include <array>
@@ -298,6 +300,71 @@ void test_normals() {
 	check(small.pixels == before, "a refused refresh writes nothing");
 }
 
+// The region contract the four share: a change across the atlas's wrap arrives as two rects, each refreshed in turn,
+// and the result is a fresh build's; a rect past the edge is refused by each with nothing changed.
+void test_contract(const CptFile &source) {
+	const TrnConfig trn = make_trn(false);
+	CptFile cpt = source;
+	TerrainSceneSnapshot scene = build_terrain_scene_snapshot(cpt, trn);
+	terrain::Rgba8Image normals = terrain::build_heightfield_normal_map(cpt.depth_buffer, 1024, 1024, trn.get_quadrant_locks());
+	const terrain::CoordsRect east{1016, 300, 8, 20}, west{0, 300, 8, 20};
+	// Refused: one rect across the edge, nothing changed.
+	const terrain::CoordsRect across{1016, 300, 16, 20};
+	const TerrainSceneSnapshot kept = scene;
+	const terrain::Rgba8Image kept_normals = normals;
+	check(!refresh_terrain_scene_snapshot(scene, cpt, trn, {}, across), "the snapshot refuses a rect past the edge");
+	check(snapshot_difference(scene, kept).empty(), "and keeps itself");
+	check(!refresh_mipchain(scene.mipchain, cpt.depth_buffer, across.x, across.z, across.w, across.h),
+	      "the mip chain refuses it");
+	check(!terrain::refresh_heightfield_normal_map(normals, cpt.depth_buffer, 1024, 1024, trn.get_quadrant_locks(), across),
+	      "the normal map refuses it");
+	check(normals.pixels == kept_normals.pixels, "and keeps itself");
+	terrain::TerrainFieldStore store;
+	terrain::terrain_field_store_build(store, cpt, trn);
+	const std::vector<uint16_t> src(size_t(16) * 20, 7);
+	check(!store.patch_heights(across, src.data(), 16), "the field store refuses it");
+	// The wrapped brush as its two rects.
+	sculpt(cpt.depth_buffer, 1024, east, 31u);
+	sculpt(cpt.depth_buffer, 1024, west, 37u);
+	for (const terrain::CoordsRect &rect : {east, west}) {
+		check(refresh_terrain_scene_snapshot(scene, cpt, trn, {}, rect), "the snapshot takes each rect");
+		check(terrain::refresh_heightfield_normal_map(normals, cpt.depth_buffer, 1024, 1024, trn.get_quadrant_locks(), rect),
+		      "the normal map takes each rect");
+	}
+	check(snapshot_difference(scene, build_terrain_scene_snapshot(cpt, trn)).empty(),
+	      "a wrapped brush's two rects refresh the snapshot to a fresh build");
+	check(normals.pixels == terrain::build_heightfield_normal_map(cpt.depth_buffer, 1024, 1024, trn.get_quadrant_locks()).pixels,
+	      "and the normal map");
+	// A rect of no size: nothing to make again.
+	check(refresh_terrain_scene_snapshot(scene, cpt, trn, {}, terrain::CoordsRect{}), "a rect of no size changes nothing");
+}
+
+// The .trn's locks moved since the snapshot was built: built whole, a fresh build's.
+void test_lock_change(const CptFile &source) {
+	TerrainSceneSnapshot scene = build_terrain_scene_snapshot(source, make_trn(false));
+	const TrnConfig locked = make_trn(true);
+	check(refresh_terrain_scene_snapshot(scene, source, locked, {}, terrain::CoordsRect{}), "a lock change refreshes");
+	check(snapshot_difference(scene, build_terrain_scene_snapshot(source, locked)).empty(),
+	      "a lock change builds the snapshot whole");
+}
+
+// A copied mip chain reads its own bytes once its source is gone.
+void test_mipchain_copy(const CptFile &source) {
+	Mipchain copy;
+	{
+		const Mipchain built = build_mipchain(source.depth_buffer);
+		copy = built;
+		check(copy.levels[0] != built.levels[0], "the copy's levels are its own");
+	}
+	const Mipchain fresh = build_mipchain(source.depth_buffer);
+	bool same = copy.level_count == fresh.level_count;
+	for (int level = 0; same && level < fresh.level_count; ++level) {
+		const size_t side = size_t(1) << level;
+		same = std::memcmp(copy.levels[level], fresh.levels[level], side * side * 2) == 0;
+	}
+	check(same, "the copy's levels read what a fresh build holds");
+}
+
 } // namespace
 
 int main() {
@@ -317,6 +384,9 @@ int main() {
 	test_snapshot(source);
 	test_mipchain(source);
 	test_normals();
+	test_contract(source);
+	test_lock_change(source);
+	test_mipchain_copy(source);
 	if (g_fail == 0) std::printf("terrain_scene_snapshot_refresh: all tests passed\n");
 	return g_fail;
 }

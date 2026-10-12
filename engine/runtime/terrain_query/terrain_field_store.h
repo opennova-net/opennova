@@ -75,7 +75,9 @@ public:
 	// the same buffer, so every copy of it (the world's, the kernel's) reads the new ground with no
 	// rebuild (an editor's sculpt stroke; the game reads its heights once, at load). It writes under
 	// every live copy of the view, so a patch and the reads it serves share one thread, or the caller
-	// holds the views' owner. False, nothing written, with no heights or a rect not inside them.
+	// holds the views' owner. The rect is the terrain's region contract (runtime/terrain refresh_mipchain's):
+	// inside the atlas, a change across its wrap arriving as several rects, each patched. False, nothing
+	// written, with no heights, a rect of no size or one not inside them.
 	bool patch_heights(const CoordsRect &rect, const uint16_t *src, size_t stride);
 
 	// Views into the owned buffers; stable until the next build()/clear().
