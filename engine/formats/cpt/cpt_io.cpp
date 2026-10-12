@@ -400,6 +400,15 @@ void CptFile::write(const std::string &path) const {
 	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 }
 
+void cpt_clamp_steep_blocks(uint16_t *raw16, size_t count) {
+	for (size_t start = 0; start + 256 <= count; start += 256) {
+		uint16_t *block = raw16 + start;
+		const int low = *std::min_element(block, block + 256);
+		for (size_t i = 0; i < 256; ++i)
+			if (int(block[i]) - low > kCdepMaxRange) block[i] = static_cast<uint16_t>(low + kCdepMaxRange);
+	}
+}
+
 int cpt_steep_blocks(const std::vector<uint16_t> &raw16) {
 	int steep = 0;
 	for (size_t start = 0; start + 256 <= raw16.size(); start += 256) {

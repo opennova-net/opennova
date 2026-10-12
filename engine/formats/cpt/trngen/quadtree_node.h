@@ -72,6 +72,8 @@ struct QuadtreeContext {
     // Called for each node in the walk's order once it is made and its tile filed, while its mesh is
     // alive (its parent frees it): what a bake keeps for a later region bake (terrain_bake_state.h).
     std::function<void(const QuadtreeNode&)> node_made;
+    // Read between nodes: set, the walk stops and reports "cancelled" (the embedder's: an editor dropping a bake).
+    const std::atomic<bool>* cancel = nullptr;
 };
 
 // Frees a node's LOD mesh (its buffers, then the mesh).
