@@ -230,8 +230,9 @@ HostKey is unwitnessed.
   it. A stock host's fresh `ClientHostRequest` carries no `HostKey` (its `Host` list is
   rebuilt without one), so such a host is listed with no owner until the first
   `ClientHostUpdate` that carries the key (the full `Host` list a stock host sends at
-  its mission's start; opennova-nw-lister and `opennova-serve` send theirs right after
-  the host result, which a fresh stock host does not, D-NET-465). A key backs one
+  its mission's start, its host result publishing nothing, D-NET-465; `opennova-serve`
+  does the same, and opennova-nw-lister, which runs no mission, sends it right after
+  the host result, D-NET-488). A key backs one
   listed server at a time: another connection
   presenting it while that listing lives links to no account. A dropped connection
   parks its lobby state and RID (`kParkedLobbyTtlMs`, 240 s), and its re-host after the
