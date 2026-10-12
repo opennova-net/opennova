@@ -94,6 +94,18 @@ public:
 	// changed, where the sources cannot take it in place (none ready, or tiles
 	// over sources built with no tile set): the caller rebuilds them.
 	std::optional<std::size_t> set_tile_entries(const opennova::TilFile &p_file);
+	// The colour map painted in place (an editor's paint stroke, ADR 0046 S25):
+	// the map as it now stands, `p_width` x `p_height` RGBA8 texels at
+	// `p_rgba`, and (x, y, w, h) its changed texels. The colour quadrants'
+	// levels the rect reaches are made again over those texels alone
+	// (update_terrain_tile_quadrants: the bytes a build of the map holds), and
+	// every resident page that samples one of them recomposes, wherever the
+	// frame drew it (terrain_tile_page_samples: past the sector grid's repeats
+	// and the shared flat page included). False, nothing changed, where the
+	// sources are not ready or the map is another size than the one they were
+	// built from.
+	bool update_colormap_region(const uint8_t *p_rgba, uint32_t p_width, uint32_t p_height,
+			int x, int y, int w, int h);
 
 	// The frame's page sweep over its draw list, composed and uploaded before
 	// the terrain draws; one binding per patch, not ready where the patch
@@ -145,6 +157,8 @@ private:
 	uint64_t upload_failures_ = 0;
 	uint64_t tile_entry_updates_ = 0;
 	uint64_t tile_entry_pages_retired_ = 0;
+	uint64_t colormap_region_updates_ = 0;
+	uint64_t colormap_pages_retired_ = 0;
 	opennova::terrain::TerrainScorchRegistry scorch_registry_;
 	bool scorch_textures_ready_ = false;
 	uint64_t scorch_records_rejected_ = 0;

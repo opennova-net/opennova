@@ -13,6 +13,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <vector>
 
@@ -248,6 +249,12 @@ public:
 	std::size_t invalidate_overlapping_q16(
 			int32_t minimum_x_q16, int32_t minimum_z_q16,
 			int32_t maximum_x_q16, int32_t maximum_z_q16) noexcept;
+	// Retires every resident page `reads` says reads what changed, each by its key and the source-atlas origin it
+	// was claimed with: a painted region of the colour map (ADR 0046 S25), whose quadrants every page routed to
+	// them samples, wherever the frame drew it (terrain_tile_quadrant_update.h, terrain_tile_page_samples).
+	std::size_t invalidate_sampling(
+			const std::function<bool(const TerrainTilePageKey &page, int32_t source_origin_x,
+					int32_t source_origin_z)> &reads);
 	// Terrain_ResetTileCache: every record empties and becomes claimable; the
 	// frame counter keeps running (it is never reset). Per-layer generations
 	// advance so outstanding pre-reset jobs stay stale.

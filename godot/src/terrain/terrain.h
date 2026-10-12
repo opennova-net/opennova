@@ -290,6 +290,19 @@ public:
 	int64_t invalidate_tile_cache_region(int64_t p_minimum_x_q16,
 			int64_t p_minimum_z_q16, int64_t p_maximum_x_q16,
 			int64_t p_maximum_z_q16);
+	// A region of the colour map painted (an editor's paint stroke, ADR 0046 S25): `p_region` the changed texels
+	// as they now stand, their top left at `p_at` in the map. They go into the data's live map
+	// (TerrainData::get_colormap_image, the loaded texture's texels the first time, every later build reading it),
+	// and the tile cache carries them through the colour quadrants in place and recomposes every page that samples
+	// one (TerrainTileCacheDevice::update_colormap_region): the bytes a build of the painted map composes. False,
+	// nothing changed, where the terrain is not built, the region lies outside the map, or the map is another size
+	// than the one the tile cache was built from (a build is the way).
+	bool update_colormap_region(const Ref<Image> &p_region, const Vector2i &p_at);
+	// A region of the detail blend map painted, the same way: the data's live map takes it and the surface inputs
+	// normalize it into their blend texture in place (TerrainSurfaceInputs::update_blendmap_region), which the
+	// material samples at its draw: no page holds the blend. False, nothing changed, where the terrain is not built
+	// or the region lies outside the map.
+	bool update_blendmap_region(const Ref<Image> &p_region, const Vector2i &p_at);
 	std::optional<opennova::TerrainTilePageBinding>
 	get_tile_cache_binding_for_world_point_native(
 			float p_world_x, float p_world_z);
