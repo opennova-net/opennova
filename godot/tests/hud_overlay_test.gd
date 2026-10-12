@@ -1283,3 +1283,28 @@ func test_the_scoreboard_draws_over_a_simulation() -> void:
 	if unkeyed.size() == 5:
 		assert_eq(unkeyed[4], "!PgUp and PgDn to change pages", "no keyhelp table: the raw fallback")
 	hud.set_scoreboard(false, 0, null, null)
+
+
+# A terrain picture (the editor's map backgrounds) takes the colour map's texture slot, which null gives back; a new
+# terrain installs its own colour map over it.
+func test_minimap_terrain_picture_replaces_and_restores_the_colour_map() -> void:
+	var hud := _make_overlay()
+	var terrain := TerrainData.new()
+	terrain.set_sector_count(16)
+	terrain.set_sector_rows(16)
+	var sectors := PackedInt32Array()
+	sectors.resize(256)
+	sectors.fill(1)
+	terrain.set_sector_grid(sectors)
+	hud.set_minimap_terrain(terrain)
+	var colour: Texture2D = hud.get_minimap_terrain_picture()
+	var image := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0, 1, 0))
+	var picture := ImageTexture.create_from_image(image)
+	hud.set_minimap_terrain_picture(picture)
+	assert_eq(hud.get_minimap_terrain_picture(), picture, "the picture takes the colour map's slot")
+	hud.set_minimap_terrain_picture(null)
+	assert_eq(hud.get_minimap_terrain_picture(), colour, "null gives the colour map back")
+	hud.set_minimap_terrain_picture(picture)
+	hud.set_minimap_terrain(terrain)
+	assert_eq(hud.get_minimap_terrain_picture(), colour, "a terrain installed again brings its own colour map")
