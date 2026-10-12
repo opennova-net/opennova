@@ -1275,6 +1275,12 @@ target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
 
+# Every shipped char and foliage map read with its carried form and written again the same bytes.
+add_executable(pcx_retail_maps_test pcx/pcx_retail_maps_test.cpp)
+target_link_libraries(pcx_retail_maps_test PRIVATE opennova_formats)
+target_include_directories(pcx_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(pcx_retail_maps COMMAND pcx_retail_maps_test)
+
 # The 256-colour quantizer an 8-bit PCX is written through (formats/pcx/pcx_quantize.h).
 add_executable(pcx_quantize_test pcx/pcx_quantize_test.cpp)
 target_link_libraries(pcx_quantize_test PRIVATE opennova_formats)
@@ -1310,6 +1316,20 @@ add_executable(tga_write_test tga/tga_write_test.cpp)
 target_link_libraries(tga_write_test PRIVATE opennova_formats)
 target_include_directories(tga_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_write COMMAND tga_write_test)
+
+# A true-colour TGA's carried form (formats/tga TgaForm): the depth, the descriptor and the TGA 2.0 footer read
+# back and written again the same bytes; files the writer does not make read no form.
+add_executable(tga_roundtrip_test tga/tga_roundtrip_test.cpp)
+target_link_libraries(tga_roundtrip_test PRIVATE opennova_formats)
+target_include_directories(tga_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_roundtrip COMMAND tga_roundtrip_test)
+
+# Every shipped terrain colour map, detail blend map and tile atlas read with its form and written again the
+# same bytes.
+add_executable(tga_retail_maps_test tga/tga_retail_maps_test.cpp)
+target_link_libraries(tga_retail_maps_test PRIVATE opennova_formats)
+target_include_directories(tga_retail_maps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(tga_retail_maps COMMAND tga_retail_maps_test)
 
 add_executable(dds_write_test dds/dds_write_test.cpp)
 target_link_libraries(dds_write_test PRIVATE opennova_formats)

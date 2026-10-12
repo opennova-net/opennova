@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -160,7 +161,44 @@ int test_png_encode() {
 	std::string error;
 	TEST_EXPECT(decode_png(bytes, back, error) && back.width == 5 && back.height == 3 && back.pixels == image.pixels);
 	TEST_EXPECT(encode_png_rgba(image.pixels.data(), 0, 3).empty() && encode_png_rgba(nullptr, 5, 3).empty());
-	std::printf("encode: an RGBA image written and read back as it was\n");
+	// A palette image (colour type 3): its indices and its palette's entries read back as written.
+	const std::vector<uint8_t> indices = {0, 1, 2, 3, 19, 2, 1, 0, 7, 7};
+	std::vector<uint8_t> palette;
+	for (int i = 0; i < 20; ++i) palette.insert(palette.end(), {uint8_t(i * 10), uint8_t(200 - i), uint8_t(i * 3)});
+	const std::vector<uint8_t> indexed = encode_png_indexed(indices.data(), 5, 2, palette.data(), 20);
+	TEST_EXPECT(png_header_size(indexed, width, height) && width == 5 && height == 2 && indexed[25] == 3);
+	IndexedImage8 read;
+	TEST_EXPECT(decode_png(indexed, back, error, &read) && read.width == 5 && read.height == 2 && read.indices == indices);
+	TEST_EXPECT(read.palette[19][0] == 190 && read.palette[19][1] == 181 && read.palette[19][2] == 57);
+	// The PLTE chunk right after the 25-byte IHDR chunk: 20 entries, 60 bytes; no tRNS where none is given.
+	const auto chunk_at = [](const std::vector<uint8_t> &png, size_t at, const char *type, uint32_t &length) {
+		if (png.size() < at + 8) return false;
+		length = (uint32_t(png[at]) << 24) | (uint32_t(png[at + 1]) << 16) | (uint32_t(png[at + 2]) << 8) | png[at + 3];
+		return std::memcmp(&png[at + 4], type, 4) == 0;
+	};
+	uint32_t length = 0;
+	TEST_EXPECT(chunk_at(indexed, 33, "PLTE", length) && length == 60);
+	TEST_EXPECT(chunk_at(indexed, 33 + 12 + 60, "IDAT", length));
+	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 0).empty() &&
+	            encode_png_indexed(indices.data(), 5, 2, palette.data(), 257).empty());
+	// An index past the palette's entries writes nothing (decode_png refuses such a file).
+	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 19).empty());
+	// The transparency kept: a tRNS of 3 entries after the PLTE, read back as those entries' alpha (the rest opaque).
+	const uint8_t alpha[3] = {0, 128, 255};
+	const std::vector<uint8_t> clear = encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, alpha, 3);
+	TEST_EXPECT(chunk_at(clear, 33 + 12 + 60, "tRNS", length) && length == 3);
+	TEST_EXPECT(decode_png(clear, back, error) && back.pixels[3] == 0 && back.pixels[4 + 3] == 128 &&
+	            back.pixels[2 * 4 + 3] == 255 && back.pixels[8 * 4 + 3] == 255);
+	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, alpha, 21).empty() &&
+	            encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, nullptr, 3).empty());
+	// A grey image (colour type 0, 8 bits a sample): its levels read back as written.
+	const std::vector<uint8_t> grey = encode_png_gray(indices.data(), 5, 2);
+	GrayImage levels;
+	TEST_EXPECT(!grey.empty() && grey[24] == 8 && grey[25] == 0 && decode_png_gray(grey, levels, error) &&
+	            levels.width == 5 && levels.max_value == 255 && levels.samples[4] == 19 && levels.samples[8] == 7);
+	TEST_EXPECT(encode_png_gray(nullptr, 5, 2).empty() && encode_png_gray(indices.data(), 0, 2).empty());
+	std::printf("encode: an RGBA image, a palette image (its PLTE, its tRNS) and a grey image written and read back "
+	            "as they were\n");
 	return 0;
 }
 
