@@ -1983,8 +1983,13 @@ bool run_roundtrip() {
 	join_profile.team_request = 0xFF;
 	join_profile.char_class[0] = 6;
 	join_profile.char_class[1] = 6;
-	join_profile.avatar[0] = 1;
-	join_profile.avatar[1] = 10;
+	// Avatar bytes past 0x7F (a hand-edited player.sav voice pair, D-PLAYERINFO-28):
+	// retail prints VCA/VCB sign-extended, and the host's atol keeps the low byte, so
+	// whichever side the host assigns, the byte survives the round trip
+	// [orig: CNapiServerInfo_SerializeToSession movsx @0x4c3bbe / @0x4c3c0e;
+	//  NapiNetConfig_LoadFromConnTags @0x4c75b2 / @0x4c75db].
+	join_profile.avatar[0] = 0x81;
+	join_profile.avatar[1] = 0xC8;
 	client.set_character_join_vars(join_profile);
 
 	uint32_t tick = 1;
@@ -2026,6 +2031,7 @@ bool run_roundtrip() {
 				uint16_t char_id[2] = {0, 0};
 				uint8_t char_class[2] = {0, 0};
 				uint8_t avatar[2] = {0, 0};
+				std::string avatar_text[2];
 				bool saw_auto_team = false;
 				for (const std::vector<uint8_t> &blob : auth.cu) {
 					uint8_t type = 0;
@@ -2050,10 +2056,13 @@ bool run_roundtrip() {
 						char_class[0] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
 					else if (name == "CTB")
 						char_class[1] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
-					else if (name == "VCA")
+					else if (name == "VCA") {
 						avatar[0] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
-					else if (name == "VCB")
+						avatar_text[0] = value;
+					} else if (name == "VCB") {
 						avatar[1] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
+						avatar_text[1] = value;
+					}
 				}
 				client_auth_has_retail_environment =
 						auth.na == kName && saw_vn && saw_bn &&
@@ -2071,7 +2080,8 @@ bool run_roundtrip() {
 						char_class[0] == join_profile.char_class[0] &&
 						char_class[1] == join_profile.char_class[1] &&
 						avatar[0] == join_profile.avatar[0] &&
-						avatar[1] == join_profile.avatar[1];
+						avatar[1] == join_profile.avatar[1] &&
+						avatar_text[0] == "-127" && avatar_text[1] == "-56";
 			}
 		} else if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
 			for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) {

@@ -363,8 +363,11 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// Retail serializes the live profile's per-side character block between the
 	// environment strings and the trailing locale/packet scalars. A zero value is
 	// absent, matching CNapiServerInfo's per-field guards. TR uses signed decimal:
-	// 0xFF is the profile's -1/automatic-team sentinel.
-	// [orig: CNapiServerInfo_SerializeToSession @0x4c3a1b..0x4c3c4c]
+	// 0xFF is the profile's -1/automatic-team sentinel. CTA/CTB print their bytes
+	// zero-extended, VCA/VCB sign-extended, so an avatar byte past 0x7F goes up
+	// negative (0xC8 as -56).
+	// [orig: CNapiServerInfo_SerializeToSession @0x4c3a1b..0x4c3c4c - movzx
+	//  @0x4c3b1e / @0x4c3b6e, movsx @0x4c3bbe / @0x4c3c0e]
 	auto append_profile_value = [&](const char *name, int value, bool present) {
 		if (!present) return;
 		auth.cu.push_back(make_client_cu_chunk(
@@ -383,9 +386,9 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.char_class[0] != 0);
 	append_profile_value("CTB", character_join_vars_.char_class[1],
 			character_join_vars_.char_class[1] != 0);
-	append_profile_value("VCA", character_join_vars_.avatar[0],
+	append_profile_value("VCA", static_cast<int8_t>(character_join_vars_.avatar[0]),
 			character_join_vars_.avatar[0] != 0);
-	append_profile_value("VCB", character_join_vars_.avatar[1],
+	append_profile_value("VCB", static_cast<int8_t>(character_join_vars_.avatar[1]),
 			character_join_vars_.avatar[1] != 0);
 	// Spectator is opt-in. Keeping both fields absent for Player preserves the
 	// captured retail player-join bytes exactly.

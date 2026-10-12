@@ -90,7 +90,7 @@ struct ServerHello {
 	// The locale block: CN (country name), LNG (language) and TZB (time-zone
 	// bias) are written together, unconditionally, when the protocol object's
 	// enable at +0xD48 is set; the two strings ship their NUL even when empty.
-	// [orig: @0x6207e2 gate; CN @0x62081a, LNG (byte_7CA07C) @0x62084a, TZB @0x62086a]
+	// [orig: @0x6207e2 gate; CN @0x62081a, LNG (aLng) @0x62084a, TZB @0x62086a]
 	bool locale_block = false;
 	std::string cn;
 	std::string lng;
