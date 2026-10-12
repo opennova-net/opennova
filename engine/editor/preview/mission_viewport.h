@@ -19,6 +19,7 @@
 #include <editor/preview/mission_poses.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_shots.h>
+#include <editor/preview/terrain_patch.h>
 #include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
@@ -110,6 +111,9 @@ public:
 	// What that reads of the mission's files (its terrain, its char map, its tiles and its water plane), as
 	// last asked.
 	const MissionGround &ground_reader() const { return terrain_ground_; }
+	// S25: what the last follow patched in place of the terrain files its picture reads, during a stroke (each file's
+	// regions; a serial moving with each): the device patches them over its picture (TerrainStrokeFollow).
+	const TerrainPatches &terrain_patches() const { return stroke_.patches(); }
 	// The ground followed over the project's files first (S25: the terrain brush's space and hints).
 	const MissionGround &followed_ground(const SessionView &view) const {
 		follow_ground_(view);
@@ -248,8 +252,12 @@ public:
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
-	// S25: a gesture in its own document or in a file its picture read (a terrain stroke's) holds its Rebuild.
-	uint64_t gesture_held_(const ViewportInput &input) const override { return gesture_feeding_(input, picture_reads()); }
+	// S25: a gesture in its own document or in a file its picture or its ground read (a terrain stroke's) holds its
+	// Rebuild.
+	uint64_t gesture_held_(const ViewportInput &input) const override {
+		if (const uint64_t picture = gesture_feeding_(input, picture_reads())) return picture;
+		return gesture_feeding_(input, &terrain_ground_.stamps());
+	}
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
@@ -333,11 +341,12 @@ private:
 	MissionListen listen_;
 	io::JsonValue drawn_;
 	uint64_t stood_serial_ = 0; // the scene's serial the people were last stood over
-	int stood_reads_ = -1; // the ground's reads then
+	uint64_t stood_ground_ = UINT64_MAX; // the ground's revision then
 	std::vector<std::string> missing_;
 	bool ground_ = false;
 	// Mutable: the ground's facts read through it, its files read once while they stand (DI-07).
 	mutable MissionGround terrain_ground_;
+	TerrainStrokeFollow stroke_; // S25: the ground patched in place during a stroke
 	MissionOverlayImage overlay_;
 	uint64_t overlay_serial_ = 0;
 	// The Shoot tool's (DI-23).
@@ -347,7 +356,7 @@ private:
 	std::vector<ClipSoundFired> shot_fired_;
 	int32_t shot_cursor_ = -1;
 	uint64_t shot_seeks_ = 0;
-	int overlay_reads_ = -1; // the ground's reads it was made over
+	uint64_t overlay_ground_ = UINT64_MAX; // the ground's revision it was made over
 	bool gesture_open_ = false;
 };
 

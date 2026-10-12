@@ -14,6 +14,7 @@
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/mission_map_terrain_view.h>
+#include <editor/preview/terrain_patch.h>
 
 namespace opennova::editor {
 
@@ -217,6 +218,8 @@ public:
 	std::string message() const override;
 	const std::string &detail() const override { return detail_; }
 	const FileStamps *picture_reads() const override { return &picture_.files(); }
+	// S25: the map's last follow's patches of the terrain files it reads, during a stroke (TerrainStrokeFollow).
+	const TerrainPatches &terrain_patches() const { return stroke_.patches(); }
 	const char *units() const override { return "pixels"; }
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
@@ -249,6 +252,9 @@ public:
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
+	// S25: a gesture in its own document or in a file its picture or its ground read (a terrain stroke's) holds its
+	// Rebuild.
+	uint64_t gesture_held_(const ViewportInput &input) const override;
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
@@ -272,10 +278,11 @@ private:
 	MissionMapCamera camera_;
 	bool framed_ = false;
 	bool moved_ = false; // what the device draws moved since the last follow (an Update)
-	MissionGround reader_; // the terrain and water as the game reads them (DI-07)
 	MissionMapGround ground_;
+	// The terrain and water as the game reads them (DI-07), which the brush and the background read too.
 	mutable MissionGround terrain_;
 	MissionMapTerrainView terrain_view_;
+	TerrainStrokeFollow stroke_; // S25: the ground patched in place during a stroke
 	MissionOutlineCache outlines_;
 	std::vector<MissionMapFootprint> footprints_;
 	std::vector<float> lines_;

@@ -255,9 +255,9 @@ bool TerrainViewport::follow_overlay_(const SessionView &view) {
 		return true;
 	}
 	follow_ground_(view);
-	if (overlay_.kind == kind && overlay_reads_ == ground_.reads()) return false;
+	if (overlay_.kind == kind && overlay_ground_ == ground_.revision()) return false;
 	overlay_ = mission_ground_overlay(ground_, kind);
-	overlay_reads_ = ground_.reads();
+	overlay_ground_ = ground_.revision();
 	++overlay_serial_;
 	return true;
 }
@@ -351,6 +351,14 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	terrain_identity_ = terrain->identity();
 	terrain_load_ = terrain->load_generation();
 	terrain_revision_ = terrain->revision();
+	// S25: a stroke in a terrain file the picture or its ground reads: the ground patched in place and the files' new
+	// stamps taken (no read of them again whole per dab, no Rebuild), the device's patches kept; one that cannot be
+	// patched is read again below as before, its Rebuild held to the stroke's end. A stroke's end over a picture its
+	// device did not patch makes it again.
+	const bool stroking = gesture_held_(input) != 0;
+	std::vector<std::string> patched;
+	if (stroke_.follow(view, *terrain, stroking, ground_, *view.findings.assets, patched) && !patched.empty())
+		picture_.restamp(*view.findings.assets, patched);
 	follow_ground_(view);
 	const bool overlaid = follow_overlay_(view);
 	// Framed once the ground is read; framed again where the fog it was framed in moved (the project's references
@@ -369,6 +377,13 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	const uint64_t generation = view.findings.assets->generation();
 	const PreviewFollow::Key key{ 0, layout_serial_ };
 	const bool moved = input.change != ChangeClass::None || edited;
+	// The stroke ended over a picture its device did not patch: made again now.
+	if (!stroking && stroke_.patched()) {
+		stroke_.made();
+		options_moved_ = false;
+		missing_.clear();
+		return picture_.built(FileStamps());
+	}
 	switch (picture_.follow(key, moved, files, generation)) {
 	case PreviewFollow::Found::Same:
 		shown(*terrain);
@@ -380,11 +395,13 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	case PreviewFollow::Found::Files:
 		options_moved_ = false;
 		missing_.clear();
+		stroke_.made();
 		return picture_.built(FileStamps());
 	case PreviewFollow::Found::Anew: break;
 	}
 	picture_.show(key, generation);
 	shown(*terrain);
+	stroke_.made();
 	options_moved_ = false;
 	missing_.clear();
 	return picture_.built(FileStamps());

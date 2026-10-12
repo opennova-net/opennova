@@ -80,6 +80,7 @@ const ProjectAssetSource::Serialized *ProjectAssetSource::serialized_(const Open
 	if (!memo.made || memo.identity != identity || memo.load_generation != load ||
 			memo.revision != revision) {
 		memo.made = true;
+		++serializations_;
 		const SerializeResult result = open.document->serialize();
 		memo.identity = identity;
 		memo.load_generation = load;

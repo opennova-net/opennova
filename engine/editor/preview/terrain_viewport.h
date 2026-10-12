@@ -10,6 +10,7 @@
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/viewport_follow.h>
+#include <editor/preview/terrain_patch.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/terrain_uses.h>
 #include <editor/session/view/view_revisions.h>
@@ -138,7 +139,10 @@ public:
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
 	// S25: a gesture in its own document or in a file its picture read (a terrain stroke's) holds its Rebuild.
-	uint64_t gesture_held_(const ViewportInput &input) const override { return gesture_feeding_(input, picture_reads()); }
+	uint64_t gesture_held_(const ViewportInput &input) const override {
+		if (const uint64_t picture = gesture_feeding_(input, picture_reads())) return picture;
+		return gesture_feeding_(input, &ground_.stamps());
+	}
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;
@@ -173,8 +177,9 @@ private:
 	std::string mission_name_;
 	std::string mission_path_; // the use drawn ("" none)
 	mutable MissionGround ground_;
+	TerrainStrokeFollow stroke_; // S25: the ground patched in place during a stroke
 	MissionOverlayImage overlay_;
-	int overlay_reads_ = -1;
+	uint64_t overlay_ground_ = UINT64_MAX;
 	uint64_t overlay_serial_ = 0;
 	bool surface_ = false;
 	io::JsonValue drawn_;

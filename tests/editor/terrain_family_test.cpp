@@ -19,6 +19,9 @@
 #include <editor/preview/mission_map.h>
 #include <editor/preview/terrain_brush_canvas.h>
 #include <editor/preview/terrain_brush_spaces.h>
+#include <editor/assets/project_asset_source.h>
+#include <editor/preview/mission_viewport.h>
+#include <editor/session/session_core.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -273,9 +276,92 @@ int test_tiles_scope() {
 	return 0;
 }
 
+// The views' rule during a stroke (S25): a Paint stroke over the wire in the mission's surface map, its samples one
+// gesture. While it is open the mission's 3D view and its map patch their ground in place: no sample has the open map
+// serialized again, no Rebuild is held, and the 3D view's ground reads the painted class at once. The stroke's end
+// makes the pictures again (a Rebuild). A sample after ten seconds with none (a client gone) begins a gesture of its
+// own, a step of its own.
+int test_stroke_follows() {
+	editor_test::TempProjectDir dir("opennova_editor_terrain_stroke_follows");
+	editor_test::FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Follows"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
+		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
+	const std::string mission = v.project.scan->find("m.bms")->relative_path;
+	session.handle(request::open_document(mission));
+	session.handle(request::set_workspace(R"({"document":{"terrain":true,"map":true},"terrain_brush":{"tool":"surface","surface":12,"radius":4}})"));
+	TEST_EXPECT(session.outcome().done());
+	Viewports &viewports = session.viewports();
+	for (const ViewportKind kind : {ViewportKind::Mission, ViewportKind::Map}) viewports.attach(mission, kind);
+	// A frame of the Shell's: the viewports followed, their devices' actions taken, then the 3D view's canvas reading
+	// its ground (the brush's hint and ring do each frame while it is live).
+	const auto frame = [&]() {
+		ViewportAction actions[2];
+		viewports.follow(v);
+		actions[0] = viewports.take_action(mission, ViewportKind::Mission);
+		actions[1] = viewports.take_action(mission, ViewportKind::Map);
+		if (const auto *drawn = static_cast<const MissionViewport *>(viewports.find(mission, ViewportKind::Mission)))
+			drawn->followed_ground(v);
+		return std::make_pair(actions[0], actions[1]);
+	};
+	frame();
+	const auto *assets = v.findings.assets.get();
+	TEST_EXPECT(assets != nullptr);
+	if (!assets) return 1;
+	// A sample's point on the island.
+	const auto sample = [&](uint64_t gesture, double x, bool end) {
+		TerrainStrokeAsk ask;
+		ask.plane = TerrainPlane::Surface;
+		ask.points.emplace_back(x, 0.0);
+		ask.gesture = gesture;
+		ask.end = end;
+		session.handle(request::terrain_stroke(mission, ask));
+		return session.outcome().done() ? session.outcome().gesture : 0;
+	};
+	const uint64_t gesture = sample(0, 0.0, false);
+	TEST_EXPECT(gesture != 0);
+	frame(); // the map opened quietly for the stroke: read once, as it now stands
+	const uint64_t serialized = assets->serializations();
+	const auto *view3d = static_cast<const MissionViewport *>(viewports.follow_one(v, mission, ViewportKind::Mission));
+	TEST_EXPECT(view3d != nullptr);
+	if (!view3d) return 1;
+	const int reads = view3d->ground_reader().reads();
+	bool rebuilt = false;
+	for (int i = 1; i <= 4; ++i) {
+		TEST_EXPECT(sample(gesture, 2.0 * i, false) == gesture);
+		const auto actions = frame();
+		rebuilt = rebuilt || actions.first == ViewportAction::Rebuild || actions.second == ViewportAction::Rebuild;
+	}
+	TEST_EXPECT(assets->serializations() == serialized && !rebuilt && view3d->ground_reader().reads() == reads);
+	TEST_EXPECT(!view3d->terrain_patches().empty());
+	TEST_EXPECT(view3d->ground_reader().terrain_at(8.0, 0.0, 0.0).surface == 12);
+	// The stroke's end: the pictures made again.
+	session.handle(request::end_edit(mission, gesture));
+	const auto ended = frame();
+	TEST_EXPECT(ended.first == ViewportAction::Rebuild && ended.second == ViewportAction::Rebuild);
+	// A client gone: ten seconds with no sample end its gesture; its token's next sample begins one of its own.
+	const uint64_t second = sample(0, 20.0, false);
+	TEST_EXPECT(second != 0 && second != gesture);
+	platform.clock += kWireGestureLapseMs;
+	session.poll();
+	TEST_EXPECT(!v.documents.gesture_in(v.documents.edited_from.at(mission).front()).open());
+	TEST_EXPECT(sample(second, 22.0, true) == second);
+	std::printf("stroke follows: no serialization per sample, no Rebuild, the ground patched; the end's Rebuild; a lapse\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_routes() != 0) return 1;
+	if (test_stroke_follows() != 0) return 1;
 	return test_tiles_scope();
 }

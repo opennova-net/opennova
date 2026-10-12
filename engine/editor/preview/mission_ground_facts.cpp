@@ -192,6 +192,7 @@ void MissionGround::follow(const std::shared_ptr<const FileSource> &files, uint6
 
 void MissionGround::read_(const std::shared_ptr<const FileSource> &files, const MissionSceneHeader &header) {
 	++reads_;
+	++revision_;
 	store_.clear();
 	error_.clear();
 	surface_map_.clear();
@@ -303,7 +304,18 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 		                             : terrain::patch_foliage_mask_raster(foliage_, rect, texels.data(), size_t(region.width));
 		if (!written) return false;
 	}
+	if (!patch.regions.empty()) ++revision_;
 	return true;
+}
+
+void MissionGround::restamp(const FileSource &files, const std::vector<std::string> &names) {
+	FileStamps kept;
+	for (const FileStamp &file : stamps_.files()) {
+		bool named = false;
+		for (const std::string &name : names) named = named || strutil::iequals(name, file.name);
+		kept.note(file.name, named ? files.stamp(file.name) : file.stamp);
+	}
+	stamps_ = std::move(kept);
 }
 
 int MissionGround::foliage_kept_off(double x, double y, int mask) const {

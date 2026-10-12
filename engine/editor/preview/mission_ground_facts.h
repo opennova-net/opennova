@@ -116,6 +116,13 @@ public:
 	double water_height() const;
 	// How often it read its files (a test's count).
 	int reads() const { return reads_; }
+	// Moves with each read of its files and each patch written in place (S25): what a reader of the ground keys on.
+	uint64_t revision() const { return revision_; }
+	// The files it read, each at the stamp it read it at (S25: a stroke's file among them feeds a view's ground).
+	const FileStamps &stamps() const { return stamps_; }
+	// The files `names` names (as it read them, in any case) take the stamps `files` gives them now (S25: a stroke's file
+	// patched in place), so the next follow does not read them again.
+	void restamp(const FileSource &files, const std::vector<std::string> &names);
 	// S25: what a stroke changed of a file it read, patched in place from the open document that holds it (a region of
 	// the heights, a map's texels), never reading the files again per dab; false where it cannot (the caller reads them
 	// again: follow). The planes' patches are the round's heights' and maps' to give; none patches yet.
@@ -173,6 +180,7 @@ private:
 	terrain::FoliageMaskRaster foliage_;
 	std::vector<FoliageDef> foliage_defs_;
 	int reads_ = 0;
+	uint64_t revision_ = 0;
 };
 
 } // namespace opennova::editor

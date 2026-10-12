@@ -8,8 +8,14 @@
 #include <editor/documents/terrain_planes.h>
 #include <editor/model/change_set.h>
 
+namespace opennova {
+class FileSource;
+}
+
 namespace opennova::editor {
 
+class DocumentBase;
+class MissionGround;
 struct SessionView;
 
 // What changed of one terrain file a view's picture reads, since the view last drew it (ADR 0046 S25, the shared
@@ -69,6 +75,37 @@ public:
 
 private:
 	std::vector<Followed> followed_;
+};
+
+// The views' rule during a stroke (ADR 0046 S25, the shared seams): a view whose picture reads a terrain family's files
+// (the mission's 3D view, its map, the terrain's own), while a gesture is open in one of them (ViewportModel::
+// gesture_feeding_), patches its ground in place from the documents' changes (MissionGround::patch) and takes their new
+// stamps, never reading them again whole per dab; the frame's patches kept for its device. Where a change cannot be
+// patched (read again, a whole change, a plane the ground cannot patch) the caller reads the files again as before.
+// Out of a stroke it follows the documents' states alone, so a stroke's first patch is against the state drawn.
+class TerrainStrokeFollow {
+public:
+	// The family of `document` (its view: a mission or a terrain) followed; `stroking`: a gesture feeds the picture now.
+	// True when the ground holds every change since (each patched, or none), the patched files' names in `names` (for
+	// the picture's own stamps: PreviewFollow::restamp). False: the caller reads again.
+	bool follow(const SessionView &view, const DocumentBase &document, bool stroking, MissionGround &ground,
+	            const FileSource &files, std::vector<std::string> &names);
+	// The last follow's patches (each file once, its regions), and a serial that moves with each patch: the device takes
+	// a frame's once.
+	const TerrainPatches &patches() const { return patches_; }
+	// A patch went in since the picture was last made: the stroke's end makes it again where its device did not patch.
+	bool patched() const { return patched_; }
+	void made() { patched_ = false; }
+	void clear() {
+		follow_.clear();
+		patches_.clear();
+		patched_ = false;
+	}
+
+private:
+	TerrainFamilyFollow follow_;
+	TerrainPatches patches_;
+	bool patched_ = false;
 };
 
 } // namespace opennova::editor

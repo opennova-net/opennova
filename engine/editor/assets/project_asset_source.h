@@ -39,6 +39,9 @@ public:
 	uint64_t generation() const { return generation_; }
 	// The project-relative path a name resolves to ("" when none).
 	std::string path_of(const std::string &name) const;
+	// How many times it serialized an open document to read it (S25: a terrain stroke reads none per dab; a test's
+	// count).
+	uint64_t serializations() const { return serializations_; }
 
 private:
 	struct Entry {
@@ -68,6 +71,7 @@ private:
 	std::map<std::string, Entry> files_; // normalized logical name
 	std::map<std::string, Open> open_;   // project-relative path
 	mutable std::map<std::string, Serialized> serialized_by_path_;
+	mutable uint64_t serializations_ = 0;
 	uint64_t generation_ = 0;
 };
 

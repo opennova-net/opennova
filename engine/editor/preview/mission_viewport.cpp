@@ -341,9 +341,9 @@ bool MissionViewport::follow_overlay_(const SessionView &view) {
 		return true;
 	}
 	follow_ground_(view);
-	if (overlay_.kind == kind && overlay_reads_ == terrain_ground_.reads()) return false;
+	if (overlay_.kind == kind && overlay_ground_ == terrain_ground_.revision()) return false;
 	overlay_ = mission_ground_overlay(terrain_ground_, kind);
-	overlay_reads_ = terrain_ground_.reads();
+	overlay_ground_ = terrain_ground_.revision();
 	++overlay_serial_;
 	return true;
 }
@@ -353,9 +353,9 @@ bool MissionViewport::stand_people_(const SessionView &view, bool posed) {
 	// The people stand on the mission's terrain as the game reads it (DI-38): again where a record, a pose
 	// or the terrain moved.
 	follow_ground_(view);
-	if (!posed && stood_serial_ == scene_.serial() && stood_reads_ == terrain_ground_.reads()) return false;
+	if (!posed && stood_serial_ == scene_.serial() && stood_ground_ == terrain_ground_.revision()) return false;
 	stood_serial_ = scene_.serial();
-	stood_reads_ = terrain_ground_.reads();
+	stood_ground_ = terrain_ground_.revision();
 	return poses_.stand(scene_, terrain_ground_.height_field());
 }
 
@@ -508,6 +508,10 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		follow_overlay_(view);
 		picture_.show(key, generation);
 		shown(*document);
+		// S25: the terrain files' states as drawn (a stroke's first patch is against them).
+		std::vector<std::string> drawn;
+		stroke_.follow(view, *document, false, terrain_ground_, files, drawn);
+		stroke_.made();
 		follow_shots_(input, *document, clock);
 		follow_effects_(view, clock);
 		follow_listen_(view, document, clock);
@@ -528,6 +532,19 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	if (rows) {
 		delta = scene_.patch(*rows, *source);
 		shown(*document);
+	}
+	// S25: a stroke in a terrain file the picture reads: the ground patched in place and the files' new stamps taken (no
+	// read of them again whole per dab, no Rebuild), the device's patches kept; one that cannot be patched is read again
+	// below as before, its Rebuild held to the stroke's end. A stroke's end over a picture its device did not patch
+	// makes it again.
+	const bool stroking = gesture_held_(input) != 0;
+	std::vector<std::string> patched;
+	if (stroke_.follow(view, *document, stroking, terrain_ground_, files, patched) && !patched.empty()) picture_.restamp(files, patched);
+	if (!stroking && stroke_.patched()) {
+		stroke_.made();
+		fog_reach_ = mission_fog_reach(files, scene_.header());
+		options_moved_ = false;
+		return picture_.built(FileStamps());
 	}
 	bound_items_(view);
 	// The people posed again where a record they read, the graph or a file they read moved (DI-38): an

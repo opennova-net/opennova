@@ -579,14 +579,13 @@ std::string MissionMapViewport::camera_change(const MissionMapCamera &camera) co
 }
 
 void MissionMapViewport::follow_ground_(const SessionView &view) {
-	reader_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, scene_.header(),
-			mission::mission_base_name(path()));
+	followed_terrain(view);
 	MissionMapGround ground;
 	ground.terrain = scene_.header().terrain;
 	// The header's RotateMap180: the CMAP turned half a turn (MissionMapView::flip_180).
 	ground.flip_180 = (scene_.header().attrib_flags & 0x20u) != 0;
-	ground.water = reader_.water();
-	ground.water_height = ground.water ? reader_.water_height() : 0.0;
+	ground.water = terrain_.water();
+	ground.water_height = ground.water ? terrain_.water_height() : 0.0;
 	// The grid's origin: the first marker whose record's type is 2043 (the Map Centerpoint, items.def 102043), as
 	// the game's HUD init scans its pool-3 entities [orig: HUD_InitOverlaySystem @0x5a4999, entity+80 == 2043; the
 	// runtime's promote, mission::kItemIdOffset]. Every record stands in the editor: the game's scan is over the ones
@@ -725,6 +724,11 @@ ViewportAction MissionMapViewport::stop_(Reason reason) {
 	return picture_.stop();
 }
 
+uint64_t MissionMapViewport::gesture_held_(const ViewportInput &input) const {
+	if (const uint64_t picture = gesture_feeding_(input, picture_reads())) return picture;
+	return gesture_feeding_(input, &terrain_.stamps());
+}
+
 const MissionGround &MissionMapViewport::followed_terrain(const SessionView &view) const {
 	terrain_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, scene_.header(),
 	                mission::mission_base_name(path()));
@@ -743,7 +747,7 @@ bool MissionMapViewport::follow_terrain_view_(const SessionView &view) {
 		const terrain::TerrainHeightField *field = ground.height_field();
 		if (field && field->dim == 1024) {
 			atlas = field->heightmap;
-			revision = uint64_t(ground.reads());
+			revision = ground.revision();
 		}
 		if (ground.water()) water = int32_t(ground.water_height() * 65536.0);
 	}
@@ -771,6 +775,10 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 		follow_terrain_view_(view);
 		picture_.show(key, generation);
 		shown(*document);
+		// S25: the terrain files' states as drawn (a stroke's first patch is against them).
+		std::vector<std::string> drawn;
+		stroke_.follow(view, *document, false, terrain_, files, drawn);
+		stroke_.made();
 		if (!framed_) {
 			// The one change its follow derives: the map over every entity and area.
 			framed_ = true;
@@ -787,6 +795,31 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 	if (rows) {
 		delta = scene_.patch(*rows, *source);
 		shown(*document);
+	}
+	// S25: a stroke in a terrain file the picture or its ground reads: the ground patched in place and the files' new
+	// stamps taken (no read of them again whole per dab, no Rebuild), the device's patches kept; one that cannot be
+	// patched is read again below as before, its Rebuild held to the stroke's end. A stroke's end over a picture its
+	// device did not patch makes it again.
+	const bool stroking = gesture_held_(input) != 0;
+	std::vector<std::string> patched;
+	if (stroke_.follow(view, *document, stroking, terrain_, *view.findings.assets, patched) && !patched.empty())
+		picture_.restamp(*view.findings.assets, patched);
+	// The heights' patches made again in the background where it shows them (its revision the ground's after them).
+	std::vector<MissionMapAtlasRect> heights;
+	for (const TerrainPatch &patch : stroke_.patches().patches)
+		if (patch.plane == TerrainPlane::Heights)
+			for (const RasterRegion &region : patch.regions)
+				heights.push_back({region.x, region.y, region.x + region.width, region.y + region.height});
+	if (!heights.empty())
+		if (const terrain::TerrainHeightField *field = terrain_.height_field()) {
+			const uint64_t serial = terrain_view_.serial();
+			terrain_view_.patch(field->heightmap, heights, terrain_.revision());
+			if (terrain_view_.serial() != serial) moved_ = true;
+		}
+	if (!stroking && stroke_.patched()) {
+		stroke_.made();
+		moved_ = false;
+		return picture_.built(FileStamps());
 	}
 	follow_ground_(view);
 	if (follow_outlines_(view, kOutlinesFrameUs)) moved_ = true;
