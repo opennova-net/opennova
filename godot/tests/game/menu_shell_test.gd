@@ -31,6 +31,9 @@ func before_each() -> void:
 	DirAccess.make_dir_recursive_absolute(_run_dir)
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", _run_dir]))
 	PlayerProfile.load_for(null)
+	# The options' words live in the process's cfg block: a fresh one per case,
+	# its game.cfg in the run directory.
+	GameCfgStore.reset()
 
 
 func after_each() -> void:
@@ -40,6 +43,7 @@ func after_each() -> void:
 	# The live binding model is a static shared with the whole run: restore the
 	# catalog defaults even when a remap test fails early.
 	ControlsBindings.model().restore_defaults()
+	GameCfgStore.reset()
 	LaunchFlags.clear_args_override()
 	TestFs.remove_dir_recursive(_run_dir)
 
@@ -568,7 +572,6 @@ func test_companion_released_when_document_changes_hands() -> void:
 # controller: the in-document jump, the front ACCEPT's pop and the BACK's
 # pop_screen row each change the screen in place.
 func test_front_options_baseline_is_taken_per_visit() -> void:
-	var saved_config := TestFs.snapshot(PlayerOptions.CONFIG_PATH)
 	var options := PlayerOptions.new()
 	var entry := options.current()
 	entry.music_volume = 50
@@ -588,7 +591,6 @@ func test_front_options_baseline_is_taken_per_visit() -> void:
 		pending("temp resource root unavailable")
 		DirAccess.remove_absolute(dir.path_join("settings.mnu"))
 		_cleanup(dir)
-		saved_config.restore()
 		return
 	assert_true(shell.open_menu("settings.mnu", "PARENT"), "the two-screen document opens")
 	var driver: MenuDriver = shell.get_driver()
@@ -607,14 +609,13 @@ func test_front_options_baseline_is_taken_per_visit() -> void:
 	driver.activate(driver.widget_id("BACK"))
 	assert_eq(driver.get_current_screen(), "PARENT", "the BACK's pop_screen pops in place")
 	assert_eq(options.current().music_volume, 25, "BACK keeps the earlier visit's ACCEPT")
-	assert_eq(PlayerOptions.new().current().music_volume, 25, "and so does the config")
+	assert_eq(PlayerOptions.new().current().music_volume, 25, "and so does the cfg block")
 	# The third visit shows the kept word, not the discarded one.
 	driver.activate(go)
 	assert_eq(driver.get_widget_scroll_range(music).value, 25,
 			"the visit seeds the slider from the kept word")
 	DirAccess.remove_absolute(dir.path_join("settings.mnu"))
 	_cleanup(dir)
-	saved_config.restore()
 
 
 # A slider edit as the player makes it: the control moves and reports its value.

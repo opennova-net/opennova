@@ -36,6 +36,7 @@
 #include <runtime/assets/asset_store.h>
 #include <runtime/inmatch/admin_console.h>
 #include <runtime/inmatch/character_registry.h>
+#include <runtime/inmatch/game_config_block.h>
 #include <runtime/inmatch/host_boot.h>
 #include <runtime/inmatch/host_file.h>
 #include <runtime/inmatch/host_role.h>
@@ -159,8 +160,8 @@ public:
 	int missions_played() const { return missions_played_; }
 	// The cfg block (game.cfg, the host file over it; remote_admin_port is
 	// the admin server's) and the weapon table its avail_wpn rows address.
-	const gamecfg::GameCfg &game_cfg() const { return cfg_; }
-	const gamecfg::WeaponRoster &weapon_roster() const { return roster_; }
+	const gamecfg::GameCfg &game_cfg() const { return config_.cfg(); }
+	const gamecfg::WeaponRoster &weapon_roster() const { return config_.weapon_roster(); }
 	const inmatch::HostScreenState &host_screen() const { return host_; }
 	const inmatch::HostRotation &rotation() const { return rotation_; }
 	const inmatch::HostFileReport &host_file_report() const { return report_; }
@@ -223,8 +224,9 @@ private:
 	ResourceIndex index_;
 	std::unique_ptr<assets::AssetStore> assets_;
 	std::vector<mission_catalog::Row> catalog_;
-	gamecfg::GameCfg cfg_;
-	gamecfg::WeaponRoster roster_;
+	// The process's cfg block: game.cfg in the working directory and the
+	// weapon table its avail_wpn rows address (inmatch/game_config_block.h).
+	inmatch::GameConfigBlock config_;
 	inmatch::HostScreenState host_;
 	inmatch::HostRotation rotation_;
 	inmatch::HostFileReport report_;

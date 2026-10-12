@@ -1050,16 +1050,13 @@ public:
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
 	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
-	// A NovaWorld ServerCommand (the hosting session's `server_command` verb, target and args)
-	// run against the in-match host through inmatch::Server_ExecuteServerCommand. The caller
-	// owns `stop_hosting` (leave the hosting) and `config_changed` (republish the name/message
-	// columns); a config change also stays on the host session record. Unhandled without a host.
+	// A NovaWorld ServerCommand (the hosting session's `server_command` verb, target and args) at
+	// the host (inmatch::run_host_server_command): on its hosting context, else a session-less one
+	// where SetMPReset alone passes. A config change lands in the cfg block (use_game_config) and
+	// the host session record; the caller saves it, republishes, and owns `stop_hosting`.
 	struct ServerCommandResult {
-		bool handled = false;
-		bool stop_hosting = false;
-		bool config_changed = false;
-		String server_name;    // the live config after the verb ran
-		String server_message;
+		bool handled = false, stop_hosting = false, config_changed = false, has_config = false;
+		String server_name, server_message; // the live config after the verb ran (has_config)
 	};
 	ServerCommandResult execute_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
@@ -1732,15 +1729,18 @@ public:
 	bool apply_local_player_loadout(const TypedArray<WeaponKitEntry> &p_kit, int p_player_class);
 	// Commit the profile class without replacing a mission-authored weapon kit.
 	bool set_local_player_class(int p_player_class);
-	// Take the player profile's current records (the shell's in-memory
-	// PlayerProfiles, loaded at the menu's start): the weapon.sav record, its
-	// class bytes clamped to [5,9] as a session start does, becomes the active
-	// one, and the player.sav record supplies single player's session words
-	// (runtime/profile/player_profiles.h, inmatch singleplayer_game_config),
-	// and the session copy of its input words and auto-medic word
-	// (runtime/profile/profile_controls.h). ERR_INVALID_PARAMETER with no
-	// profile; the defaults then stand.
+	// Take the player profile's current records (the shell's in-memory PlayerProfiles, loaded at
+	// the menu's start): the weapon.sav record, its class bytes clamped to [5,9] as a session start
+	// does, becomes the active one; the player.sav record supplies single player's session words
+	// (inmatch singleplayer_game_config) and the session copy of its input and auto-medic words
+	// (runtime/profile/profile_controls.h). ERR_INVALID_PARAMETER with no profile (defaults stand).
 	Error use_player_profile(const Ref<PlayerProfiles> &p_profiles);
+	// The process's cfg block (player/game_config_block.h): every session create reads its
+	// mpreset word, and a ServerCommand's config change writes it (execute_server_command).
+	void use_game_config(const Ref<GameConfigBlock> &p_block) { net_.game_config = p_block; }
+	// The last load's session create ended the process on a nonzero mpreset (inmatch
+	// CreateSessionResult::ProcessExit): the embedder exits with code 0, saving nothing.
+	bool session_create_ended_process() const;
 	// The in-game options Accept over the record it wrote
 	// (profile::ingame_accept_input: the look's two words at once).
 	Error apply_ingame_options(const Ref<PlayerProfiles> &p_profiles);

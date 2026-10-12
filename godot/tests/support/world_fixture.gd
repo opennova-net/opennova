@@ -332,9 +332,15 @@ static func stage_shell_archives(test: GutTest, dir: String,
 ## The packed runtime shell booted into its main menu under the test (one
 ## process frame), or null when the scene did not instantiate. The explicit CLI
 ## resource dir and selected game are pointed at the staged archives (the
-## caller saves and restores the settings file around the test). The shell is
-## a plain child: pair with release_shell() in after_each.
-static func boot_shell(test: GutTest) -> MainGame:
+## caller saves and restores the settings file around the test), and the
+## working directory, where game.cfg and player.sav live, at `working_dir`, or
+## when empty at a run directory inside the staged tree, so no shell test reads
+## or writes the source tree's files. The shell is a plain child: pair with
+## release_shell() in after_each.
+static func boot_shell(test: GutTest, working_dir := "") -> MainGame:
+	# A fresh process cfg block: one an earlier test left (an mpreset read
+	# among them) must not end this shell's boot.
+	GameCfgStore.reset()
 	_last_shell_dir = OS.get_cache_dir().path_join(
 			"opennova_main_game_lifecycle_%d" % Time.get_ticks_usec())
 	test.assert_eq(DirAccess.make_dir_recursive_absolute(_last_shell_dir), OK)
@@ -342,8 +348,13 @@ static func boot_shell(test: GutTest) -> MainGame:
 			+ SHELL_RESOURCE_FILES.size(), 31,
 			"the retail-shaped archives contain every minimal fixture resource")
 	stage_shell_archives(test, _last_shell_dir, true)
+	var run_dir := working_dir
+	if run_dir.is_empty():
+		run_dir = _last_shell_dir.path_join("run")
+	test.assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
 
-	LaunchFlags.set_args_override(PackedStringArray(["--resource-dir", _last_shell_dir]))
+	LaunchFlags.set_args_override(
+			PackedStringArray(["--resource-dir", _last_shell_dir, "--working-dir", run_dir]))
 	ResourceDirSettings.set_game("jo")
 	var packed := load(MAIN_GAME_SCENE_PATH) as PackedScene
 	var shell := packed.instantiate() as MainGame

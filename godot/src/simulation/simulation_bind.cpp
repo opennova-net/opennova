@@ -460,6 +460,9 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_local_player_class);
 	ClassDB::bind_method(D_METHOD("use_player_profile", "profiles"),
 	                     &Simulation::use_player_profile);
+	ClassDB::bind_method(D_METHOD("use_game_config", "block"), &Simulation::use_game_config);
+	ClassDB::bind_method(
+			D_METHOD("session_create_ended_process"), &Simulation::session_create_ended_process);
 	ClassDB::bind_method(D_METHOD("apply_ingame_options", "profiles"),
 	                     &Simulation::apply_ingame_options);
 	ClassDB::bind_method(D_METHOD("get_session_mouse_sensitivity"),
