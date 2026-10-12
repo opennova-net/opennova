@@ -254,8 +254,9 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 // Serialize a ClientAuth to flat-TLV bytes (inverse of parse_client_auth).
 // Field order mirrors retail's 0x42 builder CNapiNPConnection_SendClientJoin
 // @ 0x61fe20: the identity block NVS/CO/AP/BDAT/PN/PG/PV1/PV2 FIRST, then
-// CI/HK/CK/NA/PW, SIP/SPN (each omitted when 0, as retail does), the CU blobs,
-// and SCRK last. The identity block is MANDATORY: the real NovaWorld server
+// CI/HK/CK/NA/PW, SIP/SPN (each omitted when 0, as retail does), the CU blobs
+// (one of kCuSlotBytes or more left out, as retail's writer does), and SCRK
+// last. The identity block is MANDATORY: the real NovaWorld server
 // validates it in HandleClientJoin @ 0x62B750 and drops the join without it
 // (the original "real NW never sends ServerAuth" bug — RE doc NW-S2).
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);
@@ -517,7 +518,8 @@ ServerAuth build_server_auth(const ClientAuth &client,
                              bool include_novaworld_cu = true);
 
 // Serialize a ServerAuth to flat-TLV bytes (ready to opcode-prefix +
-// NWU-encrypt + CRC-envelope).
+// NWU-encrypt + CRC-envelope). A CU entry of kCuSlotBytes or more is left out,
+// as retail's writer does [orig: CNapiNPConnection_SendSessionInit @0x62112A].
 std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg);
 
 // The 0x42-time join-REJECTION form of the 0x82: exactly CI, CK, CR(=0), JFC

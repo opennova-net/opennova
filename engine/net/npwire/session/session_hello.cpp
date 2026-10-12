@@ -343,7 +343,12 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 	if (!msg.pw.empty()) append_string_field(buf, "PW", msg.pw);
 	if (msg.sip) append_u32_field(buf, "SIP", msg.sip);
 	if (msg.spn) append_u32_field(buf, "SPN", msg.spn);
+	// A CU entry of kCuSlotBytes or more is left out, the rest written; there
+	// is no count bound. [orig: CNapiNPConnection_SendClientJoin @0x61fe20 -
+	//  the entry length @0x62023E, `cmp ebp, 800h` / `jge` @0x620242..0x620248,
+	//  the write @0x6202B0]
 	for (const auto &blob : msg.cu) {
+		if (blob.size() >= kCuSlotBytes) continue;
 		append_bytes_field(buf, "CU", blob.data(), blob.size());
 	}
 	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
@@ -591,6 +596,10 @@ void append_cu_field(std::vector<uint8_t> &buf, const std::string &name, const s
 	io::append_u16_le(inner, static_cast<uint16_t>(value.size() + 1));
 	inner.insert(inner.end(), value.begin(), value.end());
 	inner.push_back(0);
+	// An entry of kCuSlotBytes or more is left out; there is no count bound.
+	// [orig: CNapiNPConnection_SendSessionInit @0x620ef0 - the entry length
+	//  @0x621120, `cmp ebx, 800h` / `jge` @0x621124..0x62112A, the write @0x621193]
+	if (inner.size() >= kCuSlotBytes) return;
 	append_flat_tlv(buf, "CU", inner.data(), static_cast<uint16_t>(inner.size()));
 }
 

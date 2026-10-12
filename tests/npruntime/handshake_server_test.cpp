@@ -38,6 +38,7 @@
 #include <runtime/inmatch/loopback_channel.h> // LoopbackChannel (run_listen_host_lifecycle's host loopback)
 #include <runtime/inmatch/udp_session_transport.h>
 
+#include <net/npwire/flat_tlv.h> // append_flat_tlv (a raw CU field)
 #include <net/npwire/ingame_decode.h> // WeaponLoadout / decode_weapon_loadout (the 0x5A reply check)
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/nw_session_framing.h>
@@ -2017,18 +2018,25 @@ bool run_client_join_rejects_match_retail() {
 	// unanswered, ahead of every gate after the walk: no JFC 9 / 10 rejection is sent.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - @0x62BBEB..0x62BBFA, the socket-pass
 	//  return @0x62C32A..0x62C331]
-	auto dropped = [&](const ClientAuth &request, const char *message) {
-		const auto result = send(request);
+	// A stock writer leaves a CU of 2048 bytes out (D-NET-603), so that one rides as a raw
+	// field appended to the written 0x42.
+	auto dropped = [&](const ClientAuth &request, const std::vector<uint8_t> &raw_cu,
+			const char *message) {
+		std::vector<uint8_t> body = client_auth_to_bytes(request);
+		if (!raw_cu.empty())
+			append_flat_tlv(body, "CU", raw_cu.data(), static_cast<uint16_t>(raw_cu.size()));
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, body);
+		const auto result = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
 		return expect(result.outbound.empty() && inmatch::connection_count(ctx) == 0, message);
 	};
 	bad = auth;
-	bad.cu = {std::vector<uint8_t>(2048)};
-	if (!dropped(bad, "a 0x42 with a 2048-byte CU is dropped unanswered")) return false;
+	const std::vector<uint8_t> long_cu(2048);
+	if (!dropped(bad, long_cu, "a 0x42 with a 2048-byte CU is dropped unanswered")) return false;
 	bad.hk ^= 1;
-	if (!dropped(bad, "the CU drop precedes the HK rejection")) return false;
+	if (!dropped(bad, long_cu, "the CU drop precedes the HK rejection")) return false;
 	bad = auth;
 	bad.cu.assign(65, std::vector<uint8_t>{1});
-	if (!dropped(bad, "a 0x42 with a 65th CU is dropped unanswered")) return false;
+	if (!dropped(bad, {}, "a 0x42 with a 65th CU is dropped unanswered")) return false;
 	bad.cu.assign(63, std::vector<uint8_t>{1});
 	bad.cu.push_back(std::vector<uint8_t>(2047, 1));
 	bad.hk ^= 1;

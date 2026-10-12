@@ -872,6 +872,44 @@ int test_server_auth_cu_walk_bounds() {
 	return 0;
 }
 
+// The 0x42 and 0x82 writers leave out a CU entry of 2048 bytes or more and write the rest, so
+// the reader's walk never meets it; an entry of 2047 bytes is written. Neither writer bounds the
+// count.
+// [orig: CNapiNPConnection_SendClientJoin @0x61FE20 - @0x620242..0x620248;
+//  CNapiNPConnection_SendSessionInit @0x620EF0 - @0x621124..0x62112A]
+int test_cu_writers_leave_out_an_entry_of_2048_bytes() {
+	// A chunk is [type][name\0][u16 len][value\0]: 5 bytes around a one-letter name.
+	ClientAuth join =
+			opennova::make_jointoperations_client_auth(7, 0x1234ABCDu, 0, "Writer", "SCRK");
+	join.cu.clear();
+	join.cu.push_back(opennova::make_client_cu_chunk(2, "A", std::string(2041, 'a')));
+	join.cu.push_back(opennova::make_client_cu_chunk(2, "B", std::string(2042, 'b')));
+	join.cu.push_back(opennova::make_client_cu_chunk(2, "C", "c"));
+	TEST_EXPECT(join.cu[0].size() == 2047 && join.cu[1].size() == 2048);
+	const auto join_bytes = client_auth_to_bytes(join);
+	ClientAuth join_read;
+	TEST_EXPECT(parse_client_auth(join_bytes.data(), join_bytes.size(), join_read));
+	TEST_EXPECT(join_read.cu.size() == 2 && join_read.cu[0] == join.cu[0] &&
+			join_read.cu[1] == join.cu[2]);
+
+	ServerAuth accept;
+	accept.cu.emplace_back("A", std::string(2041, 'a'));
+	accept.cu.emplace_back("B", std::string(2042, 'b'));
+	accept.cu.emplace_back("C", "c");
+	const auto accept_bytes = server_auth_to_bytes(accept);
+	ServerAuth accept_read;
+	TEST_EXPECT(parse_server_auth(accept_bytes.data(), accept_bytes.size(), accept_read));
+	TEST_EXPECT(accept_read.cu.size() == 2 && accept_read.cu[0].first == "A" &&
+			accept_read.cu[0].second.size() == 2041 && accept_read.cu[1].first == "C");
+
+	// 65 short entries are all written: the count bound is the reader's.
+	ServerAuth many;
+	many.cu.assign(65, {"N", "v"});
+	const auto many_bytes = server_auth_to_bytes(many);
+	TEST_EXPECT(!parse_server_auth(many_bytes.data(), many_bytes.size(), accept_read));
+	return 0;
+}
+
 // No field of the 0x81 is required: one without HK parses with HK 0 (an empty body too), and
 // the 0x42 built from it carries no HK, as retail's join omits a zero one. The client then
 // tests the reply's identity block against its own protocol's: PN and PV1 case-insensitively,
@@ -1089,6 +1127,7 @@ int main() {
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	if (test_server_auth_requires_no_field() != 0) return 1;
 	if (test_server_auth_cu_walk_bounds() != 0) return 1;
+	if (test_cu_writers_leave_out_an_entry_of_2048_bytes() != 0) return 1;
 	if (test_server_hello_requires_no_hk() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
 	if (test_server_hello_omitted_metadata_parses_empty() != 0) return 1;
