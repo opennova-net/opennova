@@ -171,7 +171,12 @@ int test_png_encode() {
 	TEST_EXPECT(read.palette[19][0] == 190 && read.palette[19][1] == 181 && read.palette[19][2] == 57);
 	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 0).empty() &&
 	            encode_png_indexed(indices.data(), 5, 2, palette.data(), 257).empty());
-	std::printf("encode: an RGBA image and a palette image written and read back as they were\n");
+	// A grey image (colour type 0): its levels read back as written.
+	const std::vector<uint8_t> grey = encode_png_grey(indices.data(), 5, 2);
+	GrayImage levels;
+	TEST_EXPECT(!grey.empty() && grey[25] == 0 && decode_png_gray(grey, levels, error) && levels.width == 5 &&
+	            levels.max_value == 255 && levels.samples[4] == 19 && levels.samples[8] == 7);
+	std::printf("encode: an RGBA image, a palette image and a grey image written and read back as they were\n");
 	return 0;
 }
 
