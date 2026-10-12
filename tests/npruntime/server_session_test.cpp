@@ -196,10 +196,16 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 // The host's 0x16 rows, status words and trailer counts: no fallback row (an
 // empty pair list sends zero rows), every status word 0 (the recipient gate
 // slot+96481 is never set), the spectator bit and count off the latch, and
-// the in-game count as its own slot walk.
-// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 -- the row loop
+// the in-game count as its own slot walk. The rows need slot state 6
+// exactly: a punted slot keeps its row (a punt writes no slot byte), and the
+// round end's 6 -> 7 store leaves none (D-NET-635).
+// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 -- the row gate
+//  @0x50d9f0..0x50da0d (state 6 @0x50d9f6), the row loop
 //  @0x50da54..0x50db21, the in-game walk @0x50dd5b..0x50dda9;
-//  NetPacket_SerializeScoreboard0x16 @0x504bd6 / @0x504c30]
+//  NetPacket_SerializeScoreboard0x16 @0x504bd6 / @0x504c30;
+//  Server_LogCRCMismatchPunt @0x517ED0 -> CNapiNPConnection_SendChatMessage
+//  @0x4C7EF0, the connection's disconnect event alone; Server_ProcessRoundEnd
+//  @0x51685E]
 bool check_host_scoreboard_status_and_counts() {
 	opennova::inmatch::GameConfig config;
 	opennova::PlayerList empty;
@@ -244,9 +250,14 @@ bool check_host_scoreboard_status_and_counts() {
 	roster[4].phase = opennova::inmatch::ConnectionPhase::PendingSpawn;
 	roster[4].reply.player_slot = 4;
 	roster[4].reply.player_slot_reserved = true;
+	// A punted spectator in its flush window: the punt staged the connection's
+	// disconnect record and wrote no slot byte, so its row, and the spectator
+	// count it carries, stay until the teardown (D-NET-635).
 	roster[5].phase = opennova::inmatch::ConnectionPhase::InMatch;
 	roster[5].burst.spawned = true;
 	roster[5].reply.player_slot = 5;
+	roster[5].link.owned_entity = spawn_player(0);
+	roster[5].link.spectator = true;
 	roster[5].host_disconnect_sent = true;
 	const opennova::ProtocolMessage message =
 			opennova::inmatch::build_player_list_message(config, roster, &world);
@@ -255,9 +266,14 @@ bool check_host_scoreboard_status_and_counts() {
 	                    message.payload.data(), message.payload.size(), list),
 	            "host 0x16 decodes"))
 		return false;
-	if (!expect(list.players.size() == 2 && list.in_game_count == 5 &&
-	                    list.spectator_count == 1,
+	if (!expect(list.players.size() == 3 && list.in_game_count == 5 &&
+	                    list.spectator_count == 2,
 	            "the in-game count walks the active slots; the spectator count rides the rows"))
+		return false;
+	bool punted_row = false;
+	for (const opennova::PlayerListRow &row : list.players)
+		punted_row = punted_row || row.slot_id == 5;
+	if (!expect(punted_row, "a punted slot keeps its 0x16 row until its teardown"))
 		return false;
 	bool status_zero = true;
 	uint8_t spectator_flags = 0xFF;
@@ -265,9 +281,21 @@ bool check_host_scoreboard_status_and_counts() {
 		status_zero = status_zero && row.status_flags == 0;
 		if (row.slot_id == 1) spectator_flags = row.flags;
 	}
-	return expect(status_zero, "every host-sent status word is 0") &&
-	       expect(spectator_flags == 0x01,
-	              "the spectator row carries bit 0 over its zeroed team");
+	if (!expect(status_zero, "every host-sent status word is 0") ||
+			!expect(spectator_flags == 0x01,
+					"the spectator row carries bit 0 over its zeroed team"))
+		return false;
+	// The round end moves every slot to state 7 (Match's outcome latch stands
+	// for the store): no rows and no spectator count, the in-game walk as before.
+	world.match.latch_round_over();
+	const opennova::ProtocolMessage ended =
+			opennova::inmatch::build_player_list_message(config, roster, &world);
+	opennova::PlayerList after;
+	return expect(opennova::decode_player_list(
+	                      ended.payload.data(), ended.payload.size(), after) &&
+	                      after.players.empty() && after.spectator_count == 0 &&
+	                      after.in_game_count == 5,
+	              "past the round end (state 7) the 0x16 lists no rows");
 }
 
 void add_retail_game_environment(opennova::ClientAuth &auth) {
