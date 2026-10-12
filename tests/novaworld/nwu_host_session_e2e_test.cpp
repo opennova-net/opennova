@@ -233,11 +233,19 @@ int main() {
 		std::this_thread::sleep_for(2ms);
 	};
 	// The session's own reap (240 s without a receive): its 0x46 burst drops the listener's
-	// connection, which parks the lobby state and its RID. A datagram landing in the same pass
-	// re-arms the receive clock, so the jump repeats.
+	// connection, which parks the lobby state and its RID. The pass receives before it pumps, so
+	// a service answer still in flight would re-arm the receive clock: short passes first send
+	// the rest of the mission start's fragmented updates and take every answer in, until the
+	// connection is quiet, then the clock jumps; a jump that still received one (and so sent the
+	// idle keepalive) is retried after another quiet spell.
 	auto torn_down = [&] { return lobby.session() != nullptr && lobby.session()->reconnecting(); };
-	for (int i = 0; i < 3 && !torn_down(); ++i)
+	for (int i = 0; i < 5 && !torn_down(); ++i) {
+		for (int quiet = 0; quiet < 40; ++quiet) {
+			std::this_thread::sleep_for(5ms);
+			tick_lobby();
+		}
 		tick_lobby(240001);
+	}
 	expect(torn_down(), "the reap tears the connection down for a reconnect");
 	bool dropped = false;
 	for (int i = 0; i < 100 && !dropped; ++i) {
