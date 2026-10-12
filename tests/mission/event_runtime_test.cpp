@@ -1,6 +1,6 @@
 // BMS event runtime + cross-system tests. The headline assertion: the BMS event
 // evaluator and the WAC VM share ONE world and ONE variable store (the original's
-// dword_C6B240) -- they are two interfaces to the same thing.
+// g_WacMissionVars) -- they are two interfaces to the same thing.
 //
 // Cadence model under test (grilled 2026-06-10, docs/mission/bms-event-runtime-re.md):
 // normal events are processed in QUARTER-LIST slices every 16th tick
@@ -286,7 +286,7 @@ static void test_bms_increment_and_threshold() {
 // word. A word past both banks, or a small negative index, lands in neither:
 // read 0 and dropped here (D-EVT-12; the residual is D-EVT-13 and D-EVT-14).
 // [orig: EventTrigger_EvaluateCondition @0x453620 - `mov ecx,
-//  dword_C6B240[eax*4]` @0x453AAC; EventAction_Dispatch @0x4542E0 case 5 - the
+//  g_WacMissionVars[eax*4]` @0x453AAC; EventAction_Dispatch @0x4542E0 case 5 - the
 //  Set @0x45439A, the Increment @0x4543EE; WacScript_ResolveParameter
 //  @0x4F2920 - G# = 0xC6BA40 + 4n @0x4F2B66]
 static void test_misvar_index_runs_into_the_global_bank() {

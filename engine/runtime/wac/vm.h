@@ -22,7 +22,7 @@ class World;
 
 namespace opennova::wac {
 
-// Per-event temporal record. [orig: dword_C6BE40 (fired tick) / byte_C6DE40
+// Per-event temporal record. [orig: g_WacEventFiredTick (fired tick) / g_WacEventActive
 // (active flag) / event-fired bookkeeping.]
 struct EventState {
     uint32_t last_fired_tick = 0;
@@ -82,7 +82,7 @@ private:
     std::vector<EventState> events_;
     std::vector<uint8_t> loop_counters_;
     std::vector<uint8_t> loop_choices_;
-    uint32_t rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b — mov dword_C6EA40, 0x12333333]
+    uint32_t rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b — mov g_WacRngSeed, 0x12333333]
     int32_t acc_ = 0;
     int cur_event_ = 0;
     uint32_t time_ = 0; // [orig: g_WacVarTicks]

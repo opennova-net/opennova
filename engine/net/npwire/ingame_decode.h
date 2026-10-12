@@ -946,7 +946,7 @@ struct FrameEnv {
 // @0x4ff81b (writer) / NapiNPClientMsg_0x00A @ 0x430054..0x430136 (reader)]
 struct FrameWeaponBlock {
 	bool     present = false;
-	uint8_t  preround_timer = 0; // [orig: g_PreRoundDelayTimer @0xC8D824] → dword_A85B64 [0x430064]
+	uint8_t  preround_timer = 0; // [orig: g_PreRoundDelayTimer @0xC8D824] → g_ClientPreRoundTimer [0x430064]
 	uint8_t  slot_state360 = 0;  // playerSlot+360 (0 unless entity+36 bit 1) → dword_A85B5C [0x430084]
 	uint8_t  slot_state368 = 0;  // revive seconds, playerSlot+368 (0 unless dead) → dword_A85B60 [0x43009F]
 	uint8_t  slot_state364 = 0;  // playerSlot+364 → dword_A85B68  [0x4300C3]
@@ -1143,7 +1143,7 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
 // there and leaves the rest zero). Gates: handle != 0xFFFF,
 // `(handle & 0xF000) < 0x5000`, slot < that pool's capacity.
 // Legs, in the witnessed order:
-//   (1) entity == local player -> `byte_A85B48 = team` @0x4319db — the SAME latch
+//   (1) entity == local player -> `g_LocalTeam = team` @0x4319db — the SAME latch
 //       the S2C 0x04 tail byte writes (our JoinerConnection::assigned_team_);
 //   (2) !is_authority -> `entity->Team = team` @0x4319ee for ANY pool 0..4 entity;
 //   (3) the player-slot team byte mirrors it (slot+14, @0x431a0b);

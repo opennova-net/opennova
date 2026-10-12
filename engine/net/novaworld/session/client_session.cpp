@@ -178,7 +178,7 @@ std::vector<uint8_t> ClientSession::start() {
 	sent_client_connected_ = false;
 	reassembly_ = ProtocolReassemblyState{};
 	// A fresh connection: no counted disconnects and no reconnect pending
-	// [orig: InitNPConnection @0x4d408f (+0x710 = 0); NapiNPConnection_Create @0x62acb0].
+	// [orig: InitNPConnection @0x4d408f (+0x710 = 0); CNapiNPConnection_Create @0x62acb0].
 	reconnect_ = Reconnect{};
 	dcnt_ = 0;
 	rcnt_ = 0;

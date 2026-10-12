@@ -904,7 +904,7 @@ bool MissionKernel::complete_mission_start() {
 	// init and Player_InitPlayer (a map change's host player exists only from
 	// there), the initial WAC run and the weather settle. A joiner has no L
 	// here; it latches again at its spawn edge (joiner_role.cpp).
-	// [orig: Game_StartMission @0x524360 -- the sub_524110 call @0x5260C1]
+	// [orig: Game_StartMission @0x524360 -- the Game_LatchAttackDefendRole call @0x5260C1]
 	local.latch_attack_defend_role(mission_game_type_);
 	capture_baseline();
 	mission_start_pending = false;

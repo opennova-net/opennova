@@ -7,7 +7,7 @@
 // (UpdateAllWithFlag2 @0x454dc0), post-mission (UpdateAllWithFlag4 @0x454e00) and
 // the normal quarter-list round-robin (@0x454d50, gated to every 16th tick in
 // Server_TickUpdate @0x51d7e0). It is an ISystem that ticks on the shared World
-// and drives the SAME entities + variable store the WAC VM uses (the dword_C6B240
+// and drives the SAME entities + variable store the WAC VM uses (the g_WacMissionVars
 // mission-variable array is literally shared: BMS MisvarChange and WAC set(V#)
 // mutate one store).
 #pragma once

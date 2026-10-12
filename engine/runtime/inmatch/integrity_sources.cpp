@@ -56,7 +56,7 @@ IntegritySources compute_integrity_sources(
 	}
 	// One tokenizer state from ammo.def's count pass through weapon.def, as
 	// the load's static buffer carries it [orig: Terrain_TokenizeConfigLine
-	// @0x53CB60, byte_24E5DF0].
+	// @0x53CB60, g_TokenizeConfigLineBuffer].
 	io::ConfigTokens tokens;
 	const AmmoRecordTable ammo =
 			build_ammo_record_table(ammo_def.data(), ammo_def.size(), items, &sounds, tokens);

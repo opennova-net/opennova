@@ -455,7 +455,7 @@ struct ServerAuth {
 	                       // NapiNP_GetLocalConnectionId @0x4c6d40) and the host stamps it into the
 	                       // joiner's 0x0C ownerConnectionId (+0x78) for Player_FindLocalPlayerEntity
 	                       // @0x4e0090. Host-assigned join-order on LAN [orig: ++protocol[947] @
-	                       // NapiNPConnection_Create 0x62acb0; emitted by SendSessionInit @0x620ef0];
+	                       // CNapiNPConnection_Create 0x62acb0; emitted by SendSessionInit @0x620ef0];
 	                       // the 0x113f default is a placeholder for callers that don't set it. Retail
 	                       // LAN capture frame 28 = 3 (= the 0x48 ack = the 0x0C eFlags).
 	uint32_t ck = 0;      // echo client.ck

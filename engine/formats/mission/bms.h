@@ -274,7 +274,7 @@ enum class SingleTriggerType : int32_t {
 };
 
 // Mission variable trigger subtypes.
-// [orig: EventTrigger_EvaluateCondition cat 4 @0x453620 — dword_C6B240[param1] <op> param2]
+// [orig: EventTrigger_EvaluateCondition cat 4 @0x453620 — g_WacMissionVars[param1] <op> param2]
 // Engine compares: 1:==, 2:<, 3:>, 4:<=, 5:>=. Values 3/4 were previously swapped (inherited from the C#
 // reference); corrected here so the name matches what the engine evaluates. See docs/mission/bms-event-runtime-re.md (the absorbed param-semantics notes, R6).
 enum class MissionVariableTriggerType : int32_t {
@@ -826,7 +826,7 @@ struct Trigger {
 
 // [orig: EventAction_Dispatch @0x4542e0 — switch(action_type) reads param1..4 as actionEntry[3..6]]
 // Per-type param meaning in docs/mission/bms-event-runtime-re.md §7. MisvarChange (5): action_sub_type
-// 1=Set/2=Add/3=Sub/4=Inc/5=Dec on dword_C6B240[param1] with param2. ResetEvent (34): clears events[param1]
+// 1=Set/2=Add/3=Sub/4=Inc/5=Dec on g_WacMissionVars[param1] with param2. ResetEvent (34): clears events[param1]
 // active flag. AreaAiRed / AreaAiBlue (12, 13): param1 = the area trigger's ID in the file, remapped at
 // mission start [orig: EventTrigger_ResolveZoneActionRefs @0x453100]. reserved0/reserved1 unused by the
 // dispatcher.

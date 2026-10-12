@@ -74,10 +74,10 @@ public:
     LocalWeaponReloadWire last_reload;
     // The Attack & Defend side word the TEAMID line reads — 1 defending, 2
     // attacking, 0 outside game type 0x10002 or with no target — latched once
-    // per mission start [orig: dword_B78FE8, written only by sub_524110,
+    // per mission start [orig: g_AttackDefendRole, written only by Game_LatchAttackDefendRole,
     // called once from Game_StartMission @0x5260C1].
     uint32_t attack_defend_role = 0;
-    // The latch [orig: sub_524110 @0x524110]: the first def-bearing entity
+    // The latch [orig: Game_LatchAttackDefendRole @0x524110]: the first def-bearing entity
     // whose items.def attrib carries the TARGET bit 0x8000 — pool 2 first,
     // then pool 1 — against the local player's team: the same team defends
     // (1), any other attacks (2) [orig: `test [eax+54h], 8000h` @0x524160 /
@@ -161,7 +161,7 @@ public:
     // Mouse pixels onto the look angles (the center-lock accumulator).
     void look(float dx_px, float dy_px);
     // The same pixels onto the chase orbit instead, as the death screen's
-    // chase sub-mode takes them [orig: sub_52AD50 @0x52ae4f..0x52ae99].
+    // chase sub-mode takes them [orig: DeathScreen_FilterInputAction @0x52ae4f..0x52ae99].
     void look_chase_orbit(float dx_px, float dy_px);
     // The sub-mode cycle's wrap back to the free sub-mode: one camera compose,
     // then the local entity takes its view pose — the position less the
@@ -266,7 +266,7 @@ public:
     // modelled, so a key held through the press folds back in at the next
     // pack; retail's Escape key runs the same reset, ours's does not
     // (D-NET-560).
-    // [orig: sub_4B2B80 @0x4B2B80, called by Input_HandleActionBinding case 55
+    // [orig: Player_ResetLocalInput @0x4B2B80, called by Input_HandleActionBinding case 55
     //  @0x49B20B and case 18 @0x49B234]
     void reset_key_input();
     // The pack's stamp of the body's view and weapon facts, its last step: the weapon switch stamp, the

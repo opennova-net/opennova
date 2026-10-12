@@ -1,9 +1,9 @@
 // Shared script variable store.
 //
 // THE key shared-state seam between the two scripting systems: the original's
-// mission-variable array dword_C6B240 is written by BOTH WAC (`set(V#)`,
+// mission-variable array g_WacMissionVars is written by BOTH WAC (`set(V#)`,
 // WacScript_ResolveParameter resolves V# -> 4*idx+0xC6B240) AND the BMS event
-// system (EventAction_Dispatch MisvarChange writes dword_C6B240[idx];
+// system (EventAction_Dispatch MisvarChange writes g_WacMissionVars[idx];
 // EventTrigger_EvaluateCondition cat 4 compares it). They are literally the same
 // storage, so a single ScriptVarStore backs both evaluators.
 //
@@ -49,7 +49,7 @@ public:
     // read 0 and dropped here. WAC operands never get there: the compiler
     // holds V# and G# under 256 and the declared slots to 256.
     // [orig: EventTrigger_EvaluateCondition @0x453620 - `mov ecx,
-    //  dword_C6B240[eax*4]` @0x453AAC; EventAction_Dispatch @0x4542E0, case 5
+    //  g_WacMissionVars[eax*4]` @0x453AAC; EventAction_Dispatch @0x4542E0, case 5
     //  - the Set @0x45439A; WacScript_ResolveParameter @0x4F2920 - G# =
     //  0xC6BA40 + 4n @0x4F2B66, the V# and G# bounds @0x4F2AC0 / @0x4F2B27;
     //  Script_Compile @0x4F31F0 - the declared-slot bound @0x4F3812]
@@ -67,7 +67,7 @@ public:
 
     // The per-load clear: V0..V255 only. The declared half (256..511) and
     // the globals are untouched, as in the original's load.
-    // [orig: WacScript_InitAndLoad memset(dword_C6B240, 0, 0x400) @0x4f95ee]
+    // [orig: WacScript_InitAndLoad memset(g_WacMissionVars, 0, 0x400) @0x4f95ee]
     void clear_numbered_mission_vars() {
         for (int i = 0; i < kNumberedMissionVars; ++i) mission_[i] = 0;
     }

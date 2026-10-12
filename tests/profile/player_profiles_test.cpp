@@ -298,7 +298,7 @@ int test_voice_override() {
     p.load(in, defaults());
     playersav::ProfileRecord &r = p.current();
     TEST_EXPECT(profile::voice_override(r, 0) == 0 && profile::voice_override(r, 1) == 0);
-    // [orig: sub_560030 @0x56004c]: the shown side's byte alone, +1533 for red.
+    // [orig: PlayerInfo_HandlePlayerVoiceSelect @0x56004c]: the shown side's byte alone, +1533 for red.
     profile::set_voice_override(r, 1, 7);
     TEST_EXPECT(r.voice[1] == 7 && r.voice[0] == 0);
     TEST_EXPECT(profile::voice_override(r, 1) == 7 && profile::voice_override(r, 0) == 0);

@@ -64,7 +64,7 @@ struct EndRoundOverlayInput {
 	uint32_t game_type = 0;
 	bool draw = false;            // g_EndRoundDrawFlag
 	int winner_team = 0;          // g_EndRoundWinnerTeam
-	uint8_t local_team = 0;       // byte_A85B48
+	uint8_t local_team = 0;       // g_LocalTeam
 	bool death_screen = false;    // g_DeathScreenActive
 	int32_t team_scores[2] = {0, 0}; // g_ScoreTeamScore0/1
 	// The non-team form's three named players (byte_24C1A98/B7C/C60 + the

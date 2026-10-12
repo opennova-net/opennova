@@ -196,7 +196,7 @@ int32_t BmsEventSystem::evaluate_trigger(World &w, const bms::Trigger &t) {
     auto &cmds = w.commands;
     switch (t.main_type) {
         case bms::TriggerMainType::MissionVariable: {
-            // [orig: EventTrigger_EvaluateCondition cat 4 — dword_C6B240[param1] <op> param2.]
+            // [orig: EventTrigger_EvaluateCondition cat 4 — g_WacMissionVars[param1] <op> param2.]
             // THE shared variable store (same array WAC V# uses), indexed with
             // no bound: 512..767 read the G bank (D-EVT-12).
             // [orig: the reads @0x453AAC / @0x453AC3 / @0x453ADC / @0x453AF5 / @0x453B0E]
@@ -607,7 +607,7 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
                                         a.param2);
             break;
         case bms::ActionType::MisvarChange: {
-            // [orig: case 5 — writes dword_C6B240[param1]; the shared var store.]
+            // [orig: case 5 — writes g_WacMissionVars[param1]; the shared var store.]
             // The arithmetic is the dword add/sub, so it wraps at the 32-bit
             // edge [orig: EventAction_Dispatch case 5 @0x45437e, subs 1..5
             //  @0x454394..0x454406]. The index has no bound: 512..767 write

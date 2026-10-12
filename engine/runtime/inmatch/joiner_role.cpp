@@ -768,7 +768,7 @@ void JoinerRole::pump() {
 	// Player_InitPlayer [orig: Game_StartMission @0x524360 -- the
 	//  NapiClient_WaitForGameStart call @0x524E29, the Player_InitPlayer call
 	//  @0x525BBC, the receive drain @0x525BD9 (gated @0x525BC4 / @0x525BCC),
-	//  the non-authority jz @0x525E29 / @0x525E58 to @0x52609A, the sub_524110
+	//  the non-authority jz @0x525E29 / @0x525E58 to @0x52609A, the Game_LatchAttackDefendRole
 	//  call @0x5260C1].
 	if (!had_local && local_spawned_) lp.latch_attack_defend_role(rt.game_type());
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
@@ -1242,7 +1242,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
 	// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
 	// entity's Team and the round sim's presenting-client team, or friend/foe styling
-	// keeps rendering the old side. Retail does the same two writes: byte_A85B48 for
+	// keeps rendering the old side. Retail does the same two writes: g_LocalTeam for
 	// the latch and entity->Team for the entity itself.
 	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — @0x4319db / @0x4319ee; the round-spawn
 	//  style select reads the local player's Team @0x4ec740]

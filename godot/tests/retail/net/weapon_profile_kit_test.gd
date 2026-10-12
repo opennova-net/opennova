@@ -81,7 +81,7 @@ func test_an_unlatched_team_commits_no_page() -> void:
 	if RetailData.def_root().is_empty():
 		pending(RetailData.fixture_pending_text("def/weapon.def"))
 		return
-	# The side selector is the S2C 0x04 tail byte [orig: byte_A85B48 @0x425499], and
+	# The side selector is the S2C 0x04 tail byte [orig: g_LocalTeam @0x425499], and
 	# side_for_team maps anything that is not 1 or 3 to the RED block [orig: @0x525798].
 	# Retail cannot reach the page copy before that byte is latched — admission delivers
 	# 0x04 long before Game_StartMission runs — but our catalog can land first. Copying at

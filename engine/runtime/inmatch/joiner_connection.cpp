@@ -237,7 +237,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	spawn_ = SelfSpawn{};
 	assigned_team_ = 0; // re-latched from the fresh session's S2C 0x04 (the kit seam persists);
 	spectator_mode_ = false;
-	                    // zero like retail's byte_A85B48 until the assignment arrives
+	                    // zero like retail's g_LocalTeam until the assignment arrives
 	class_allow_mask_ = 0x03FFu; // replaced by the fresh session's S2C 0x76
 	current_player_class_ = 0;
 	mission_known_ = false;
@@ -1340,10 +1340,10 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			out.inbound_world.emplace_back(m.tag, m.payload);
 		} else if (m.tag == s2c::SESSION_SLOT_CONFIG) {
 			// S2C 0x04 slot assignment: the tail byte is this joiner's server-assigned team —
-			// retail's byte_A85B48, the 0x2F loadout-submit header byte 0. A retail host always
+			// retail's g_LocalTeam, the 0x2F loadout-submit header byte 0. A retail host always
 			// writes the full 24-byte body [orig: NetPacket_WriteSlotAssignment @0x502b30];
 			// latch only that witnessed shape and keep the golden default otherwise.
-			// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499]
+			// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> g_LocalTeam @0x425499]
 			// Byte 17 is this joiner's OWN roster slot id — retail's
 			// g_LocalPlayerSlotId, and the same value the host keeps at its
 			// per-player record slot+20 [orig: the write side
@@ -1358,18 +1358,18 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			}
 		} else if (m.tag == s2c::SPECTATOR_FLAGS) {
 			// Despite the historical catalog name, byte 1 is the live player-slot
-			// team. Retail overwrites the same byte_A85B48 latch installed by
+			// team. Retail overwrites the same g_LocalTeam latch installed by
 			// 0x04, and its subsequent 0x2F copies this value verbatim.
 			// [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890 writes playerSlot+416;
 			// NapiNPClientMsg_SetSpectatorMode @0x425A32]
 			if (!m.payload.empty()) spectator_mode_ = (m.payload[0] & 1u) != 0;
 			if (m.payload.size() >= 2) assigned_team_ = m.payload[1];
 		} else if (m.tag == s2c::TEAM_ASSIGN) {
-			// S2C 0x50 TEAM ASSIGN — the SECOND witnessed writer of the byte_A85B48
+			// S2C 0x50 TEAM ASSIGN — the SECOND witnessed writer of the g_LocalTeam
 			// team latch (the S2C 0x04 tail is the first). The host emits it for any
 			// entity retargeted by Server_ChangeEntityTeam @0x518D70, capture zones
 			// included. Witnessed legs, in order:
-			//   (1) entity == local player -> byte_A85B48 = team @0x4319db;
+			//   (1) entity == local player -> g_LocalTeam = team @0x4319db;
 			//   (2) !is_authority -> entity->Team = team @0x4319ee (any pool 0..4);
 			//   (3) the player-slot team byte mirrors it @0x431a0b;
 			//   (4) player (Flags & 0x100) + self -> per-side profile reselect and ONE

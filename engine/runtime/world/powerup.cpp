@@ -394,7 +394,7 @@ void powerup_bind_entities(World &world, const def::DefItemsFile &items) {
                         static_cast<size_t>(e->item_type_index) < items.count
                 ? items.entries[e->item_type_index].powerup_def
                 : "";
-        // [orig: sub_442D00 @0x442D00 -- PowerUpDef_FindByName(itemDef+0x890)
+        // [orig: PowerupEntity_InitFromDef @0x442D00 -- PowerUpDef_FindByName(itemDef+0x890)
         //  @0x442D10; the miss destroys the row @0x442E26]
         const int32_t index = world.tables.powerups.index_of(name);
         if (index < 0) {

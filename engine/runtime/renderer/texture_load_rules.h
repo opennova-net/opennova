@@ -92,9 +92,9 @@ enum class TextureLoader : uint8_t {
 	Tga,
 	// The PCX reader on the name alone: the loading screen, the map overview.
 	Pcx,
-	// The HUD loader in colour mode (sub_591750 mode 0).
+	// The HUD loader in colour mode (HUD_LoadTextureWithInfo mode 0).
 	HudColor,
-	// The HUD loader in alpha mode (sub_591750 mode 1): stance, parachute and armor
+	// The HUD loader in alpha mode (HUD_LoadTextureWithInfo mode 1): stance, parachute and armor
 	// icons, scope art, every weapon and item def HUD image.
 	HudAlpha,
 	// CTextureManager_LoadOrFindTexture: menu images, the credits roll's images.
@@ -173,7 +173,7 @@ TextureLoad archive_texture_load(std::string_view name, bool self_alpha, bool lo
 // PCX white with its blue as alpha.
 TextureLoad file_texture_load(std::string_view name, bool white_alpha);
 
-// The HUD loader (sub_591750 -> HUD_LoadImageAsTexture): a ".FULL" suffix cut off
+// The HUD loader (HUD_LoadTextureWithInfo -> HUD_LoadImageAsTexture): a ".FULL" suffix cut off
 // makes it colour, an ".ALPHA" suffix cut off makes it alpha-only, else the caller's
 // `alpha_mode`; ".TGA" through the TGA reader, else ".PCX" through the PCX reader,
 // anything else nothing; a name holding ".PCX" turns white with its blue as alpha

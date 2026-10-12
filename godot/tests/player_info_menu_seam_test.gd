@@ -772,7 +772,7 @@ func test_voice_override_persists_and_resets_when_the_avatar_drops_it() -> void:
 
 # Each side keeps its own byte: the pick on the shown side writes that side's
 # (+1532 blue, +1533 red) and leaves the other's, and a side shown again selects
-# its own value [orig: sub_560030 @0x56004c; PlayerInfo_PopulatePlayerVoiceCombo
+# its own value [orig: PlayerInfo_HandlePlayerVoiceSelect @0x56004c; PlayerInfo_PopulatePlayerVoiceCombo
 # @0x55de3c].
 func test_voice_pick_writes_the_shown_sides_profile_byte() -> void:
 	var companion := PlayerInfoMenuCompanion.new()

@@ -215,7 +215,7 @@ bool run_in_match_spawn_edge() {
 					!h.weapon().reload_pressed,
 			"in-match frame: join-wait weapon latches cleared")) return false;
 	// The mission start's A&D latch ran with no L; the spawn edge latches
-	// against L's team: another team's target attacks (2) [orig: sub_524110,
+	// against L's team: another team's target attacks (2) [orig: Game_LatchAttackDefendRole,
 	// the joiner's call @0x5260C1 after Player_InitPlayer @0x525BBC].
 	if (!expect(h.kernel->local.attack_defend_role == 2,
 			"in-match frame: the A&D role latched at the spawn edge")) return false;
@@ -229,7 +229,7 @@ bool run_in_match_spawn_edge() {
 
 // The spawn edge's A&D latch reads L's team from its self record: a team-2
 // L against a team-2 target defends (1); the same target against the seeded
-// team-0 L of run_in_match_spawn_edge attacks (2) [orig: sub_524110 --
+// team-0 L of run_in_match_spawn_edge attacks (2) [orig: Game_LatchAttackDefendRole --
 // `cmp al, [edx+162h]; setnz; add ecx, 1` @0x5241A3..0x5241AC].
 bool run_spawn_edge_latch_reads_self_team() {
 	Harness h;
@@ -256,7 +256,7 @@ bool run_spawn_edge_latch_reads_self_team() {
 // the team the frame's mirror applied, as retail's mission start latches after
 // its wait loop pumped every message before it [orig: Game_StartMission --
 // NapiClient_WaitForGameStart (the call @0x524E29; its receive pump @0x42CC88),
-// then the sub_524110 call @0x5260C1; NapiNPClientMsg_TeamAssign's store
+// then the Game_LatchAttackDefendRole call @0x5260C1; NapiNPClientMsg_TeamAssign's store
 // @0x4319EE].
 bool run_spawn_edge_latch_reads_the_frames_target_team() {
 	Harness h;
@@ -1787,7 +1787,7 @@ bool run_proxy_rendezvous_pump() {
 // it, a moving state dropped to the idle 43) and, in a session, one bodiless
 // C2S 0x41 leaves at the frame's send block; a dead L sends nothing, and out
 // of a session the reset runs alone. [orig: Input_HandleActionBinding case 55
-// -- the dead bit @0x49AD7B, sub_4B2B80 @0x49B20B, is_in_session @0x49B210,
+// -- the dead bit @0x49AD7B, Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
 // is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A]
 bool run_respawn_key_resets_input_and_sends_0x41() {
 	std::vector<opennova::def::DefItemDef> rows(1);

@@ -94,7 +94,7 @@ bool name_char_allowed(char c);
 // the picked row's value, as a byte, into the shown side's byte at once: no
 // ACCEPT is needed and nothing puts it back (the ACCEPT's dialog read leaves
 // both bytes, and player.mnu authors no other way off the screen)
-// [orig: sub_560030 @0x560030, the store @0x56004c; PlayerInfo_SaveFromDialog
+// [orig: PlayerInfo_HandlePlayerVoiceSelect @0x560030, the store @0x56004c; PlayerInfo_SaveFromDialog
 // @0x55ee10]. The list's fill writes 0 there when its rows do not carry the
 // value [orig: PlayerInfo_PopulatePlayerVoiceCombo @0x55de21], and the fill
 // and the voice preview read it [orig: @0x55ddea; PlayerInfo_PreviewVoice

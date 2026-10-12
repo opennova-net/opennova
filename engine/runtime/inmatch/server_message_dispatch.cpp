@@ -659,7 +659,7 @@ std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t pla
 // S2C 0x75 is the requesting player's live slot state, not a fixed
 // "spectator flags" fixture. Byte 0 is the spectator/death-screen bit and byte
 // 1 is playerSlot+416 (team), written straight into the retail client's
-// byte_A85B48 loadout selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890;
+// g_LocalTeam loadout selector. [orig: NetPacket_SerializeHostEntityState (ex sub_510890) @0x510890;
 // NapiNPClientMsg_SetSpectatorMode @0x4259E0]
 std::vector<uint8_t> build_tag75_player_state(
 		const NapiNPConnection &conn, const world::World *world) {
