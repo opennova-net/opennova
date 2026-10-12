@@ -7,6 +7,7 @@
 // (terrain_tile_composer.h, build_terrain_tile_quadrant_source) and the sampling is compose_terrain_tile_page's.
 
 #include <runtime/terrain/terrain_tile_composer.h>
+#include <runtime/terrain_query/coords.h>
 
 #include <array>
 #include <cstdint>
@@ -38,6 +39,12 @@ unsigned update_terrain_tile_quadrants(TerrainTileQuadrantSource &source, const 
 // change reaches are read).
 unsigned update_terrain_tile_quadrants(TerrainTileQuadrantSource &source, const uint8_t *rgba, uint32_t width,
 		uint32_t height, int x, int y, int w, int h, TerrainTileQuadrantChange *changed = nullptr);
+// Several changed rects of `atlas` at once (an editor's sculpt: the boxes of the normals a region made again,
+// refresh_heightfield_normal_map's), each made again as the single rect's form makes it, its change kept apart in
+// `changed` (one a rect, so a page tests each: terrain_tile_page_samples_any; two far apart in one quadrant never
+// widen into the span between them). The quadrants made, a bit each; 0, nothing made, where any rect is refused.
+unsigned update_terrain_tile_quadrants(TerrainTileQuadrantSource &source, const Rgba8Image &atlas,
+		const std::vector<CoordsRect> &rects, std::vector<TerrainTileQuadrantChange> &changed);
 
 // Whether a page samples a texel `change` made again: the quadrant its source origin routes to (bit 9 of each half),
 // the level its footprint picks (page_world_span(page_lod_level) units over `dimension` pixels, as
@@ -47,5 +54,9 @@ unsigned update_terrain_tile_quadrants(TerrainTileQuadrantSource &source, const 
 bool terrain_tile_page_samples(const TerrainTileQuadrantChange &change, const TerrainTileQuadrantSource &source,
 		uint8_t page_lod_level, int32_t source_origin_x, int32_t source_origin_z,
 		int dimension = TerrainTileCompositionCache::kDimension);
+// Whether a page samples a texel any of `changes` made again (terrain_tile_page_samples over each).
+bool terrain_tile_page_samples_any(const std::vector<TerrainTileQuadrantChange> &changes,
+		const TerrainTileQuadrantSource &source, uint8_t page_lod_level, int32_t source_origin_x,
+		int32_t source_origin_z, int dimension = TerrainTileCompositionCache::kDimension);
 
 } // namespace opennova::terrain

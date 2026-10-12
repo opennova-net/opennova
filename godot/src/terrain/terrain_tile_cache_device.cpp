@@ -364,6 +364,36 @@ bool TerrainTileCacheDevice::append_terrain_scorch(
 	return true;
 }
 
+std::optional<std::size_t> TerrainTileCacheDevice::update_heightfield_normal_region(
+		const opennova::terrain::Rgba8Image &p_normals,
+		const std::vector<opennova::terrain::CoordsRect> &p_written) {
+	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot> current =
+			sources_ready_ ? async_->sources() : nullptr;
+	if (!current || !current->heightfield_normal || !p_normals.is_valid()) {
+		return std::nullopt;
+	}
+	if (p_written.empty()) {
+		return std::size_t{0};
+	}
+	// The source's chains shared; the quadrants a box reaches made again in new ones, over its texels alone, a
+	// change kept for each box.
+	auto normals = std::make_shared<opennova::terrain::TerrainTileQuadrantSource>(*current->heightfield_normal);
+	std::vector<opennova::terrain::TerrainTileQuadrantChange> changes;
+	if (opennova::terrain::update_terrain_tile_quadrants(*normals, p_normals, p_written, changes) == 0) {
+		return std::nullopt;
+	}
+	auto next = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>(*current);
+	next->heightfield_normal = normals;
+	async_->install_sources(std::move(next));
+	// Every page that samples a changed normal, by its key and the source origin it was claimed with; a page
+	// composing from the old quadrants now holds a retired generation, its completion dropped.
+	return cache_.invalidate_sampling(
+			[&](const opennova::TerrainTilePageKey &page, int32_t source_x, int32_t source_z) {
+				return opennova::terrain::terrain_tile_page_samples_any(changes, *normals, page.page_lod_level,
+						source_x, source_z);
+			});
+}
+
 std::size_t TerrainTileCacheDevice::invalidate_region(
 		int32_t p_minimum_x_q16, int32_t p_minimum_z_q16,
 		int32_t p_maximum_x_q16, int32_t p_maximum_z_q16) {

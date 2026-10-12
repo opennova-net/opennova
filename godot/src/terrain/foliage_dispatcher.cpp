@@ -231,6 +231,7 @@ void FoliageDispatcher::_bind_methods() {
   ClassDB::bind_method(D_METHOD("is_inset_frame_live"),
                        &FoliageDispatcher::is_inset_frame_live);
   ClassDB::bind_method(D_METHOD("reset"), &FoliageDispatcher::reset);
+  ClassDB::bind_method(D_METHOD("invalidate_cells", "rect"), &FoliageDispatcher::invalidate_cells);
   ClassDB::bind_method(D_METHOD("get_total_instances"),
                        &FoliageDispatcher::get_total_instances);
   ClassDB::bind_method(D_METHOD("get_frame_stats"),
@@ -389,6 +390,8 @@ void FoliageDispatcher::configure_slots(const Array &p_defs,
 
 void FoliageDispatcher::set_terrain(Terrain *p_terrain) {
   terrain_ = p_terrain;
+  // A terrain's refreshes from now on (its serial counts its own).
+  terrain_refresh_taken_ = p_terrain != nullptr ? p_terrain->get_refresh_serial() : 0;
 }
 
 void FoliageDispatcher::set_weather(Weather *p_weather) {
@@ -1656,10 +1659,35 @@ Array FoliageDispatcher::get_slot_diagnostics() const {
   return slot_diagnostics_.duplicate(true);
 }
 
+int64_t FoliageDispatcher::invalidate_cells(const Rect2i &p_rect) {
+  // The far corner in 64 bits, kept within the plane's 32-bit units.
+  const auto clamp32 = [](int64_t value) {
+    return static_cast<int32_t>(std::clamp<int64_t>(value, INT32_MIN, INT32_MAX));
+  };
+  return static_cast<int64_t>(compiler_.invalidate_cells(
+      p_rect.position.x, p_rect.position.y, clamp32(int64_t(p_rect.position.x) + p_rect.size.x),
+      clamp32(int64_t(p_rect.position.y) + p_rect.size.y)));
+}
+
 void FoliageDispatcher::render_frame(const Transform3D &p_camera_xform, int64_t p_time_ms) {
   frame_stats_ = FrameStats{};
   frame_stats_.frame_calls = ++total_frame_calls_;
   frame_stats_.native_detail_source = terrain_ != nullptr;
+  // The regions the terrain showed again since (a sculpt): the cells over them grown again.
+  if (terrain_ != nullptr && terrain_->get_refresh_serial() != terrain_refresh_taken_) {
+    const std::vector<Terrain::RefreshedRect> &kept = terrain_->get_refreshed_world_rects();
+    // A refresh some of whose rects the terrain no longer keeps (more than it keeps since this dispatcher's last
+    // frame): every cell grown again, none left on the old ground.
+    if (terrain_->get_refreshed_dropped_serial() > terrain_refresh_taken_) {
+      compiler_.invalidate_cells(INT32_MIN, INT32_MIN, INT32_MAX, INT32_MAX);
+    } else {
+      for (const Terrain::RefreshedRect &region : kept) {
+        if (region.serial <= terrain_refresh_taken_) continue;
+        compiler_.invalidate_cells(region.rect.x0, region.rect.z0, region.rect.x1, region.rect.z1);
+      }
+    }
+    terrain_refresh_taken_ = terrain_->get_refresh_serial();
+  }
 
   opennova::renderer::FoliageViewInput view = _view_input(p_camera_xform, p_time_ms);
   if (terrain_ != nullptr) {

@@ -489,12 +489,52 @@ void Runtime::reset() {
 	slot_configured_ = {};
 	terrain_scene_counter_ = 0u;
 	stats_ = RuntimeStats{};
+	dropped_detail_.clear();
+	dropped_model_.clear();
+}
+
+size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1,
+                                 const std::array<int32_t, FOLIAGE_MAX_DEFS> &detail_reach) {
+	if (x1 <= x0 || z1 <= z0) return 0;
+	// A cell's span on the Godot plane, widened by `reach` each way, against the rect (half-open both).
+	const auto meets = [&](int64_t cx0, int64_t cz0, int64_t reach) {
+		return cx0 - reach < x1 && cx0 + 16 + reach > x0 && cz0 - reach < z1 && cz0 + 16 + reach > z0;
+	};
+	size_t dropped = 0;
+	for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
+		// A detail cell keys its X-min and Godot-plane Z-min; its candidates sample the ground bilinearly (one
+		// texel on), and the geometry expanded over them reaches the slot's detail reach past each.
+		const int64_t cell_reach = 1 + std::max<int64_t>(0, detail_reach[static_cast<size_t>(slot_index)]);
+		for (DetailCacheEntry &entry : detail_cache_[slot_index]) {
+			if (!entry.valid || !meets(sign_extend_15(entry.key >> 16u), sign_extend_15(entry.key), cell_reach))
+				continue;
+			dropped_detail_.push_back(CacheIdentity{static_cast<uint8_t>(slot_index), entry.key, entry.revision});
+			entry = DetailCacheEntry{};
+			++dropped;
+		}
+		// A model tile keys its X-min and its mission-y top (the Godot plane's z from -top); its corners reach the
+		// rotated footprint past the tile.
+		const int64_t reach =
+		    static_cast<int64_t>(std::ceil(cached_slots_[slot_index].model_radius * 0.75f * 1.4143f)) + 1;
+		for (ModelCacheEntry &entry : model_cache_[slot_index]) {
+			if (!entry.valid || !meets(sign_extend_15(entry.key >> 16u), -int64_t(sign_extend_15(entry.key)), reach))
+				continue;
+			dropped_model_.push_back(CacheIdentity{static_cast<uint8_t>(slot_index), entry.key, entry.revision});
+			model_cache_index_[slot_index].erase(entry.key);
+			entry = ModelCacheEntry{};
+			++dropped;
+		}
+	}
+	return dropped;
 }
 
 FrameOutput Runtime::render_frame(const FrameRequest &request,
                                   const WorldSamplers &world) {
 	FrameOutput output;
 	stats_ = RuntimeStats{};
+	// The cells invalidate_cells dropped since the last frame.
+	output.detail_evicted.swap(dropped_detail_);
+	output.model_evicted.swap(dropped_model_);
 	// Slot changes invalidate only that definition. Runtime::reset remains the
 	// explicit invalidation boundary for terrain/map/sampler changes.
 	for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {

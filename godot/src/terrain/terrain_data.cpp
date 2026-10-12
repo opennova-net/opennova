@@ -304,6 +304,11 @@ void TerrainData::_bind_methods() {
 	                     &TerrainData::world_to_runtime_source_coords);
 	ClassDB::bind_method(D_METHOD("raycast_terrain", "from", "to"), &TerrainData::raycast_terrain);
 	ClassDB::bind_method(D_METHOD("get_tile_count"), &TerrainData::get_tile_count);
+	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &TerrainData::get_depth_raw16);
+	ClassDB::bind_method(D_METHOD("patch_heights_raw16", "rect", "raw16"), &TerrainData::patch_heights_raw16);
+	ClassDB::bind_method(D_METHOD("get_heights_serial"), &TerrainData::get_heights_serial);
+	ClassDB::bind_method(D_METHOD("get_tile_lod_indices", "index", "lod"), &TerrainData::get_tile_lod_indices);
+	ClassDB::bind_method(D_METHOD("replace_tile_lods", "indices", "lods"), &TerrainData::replace_tile_lods);
 	ClassDB::bind_method(D_METHOD("set_sector_grid", "value"), &TerrainData::set_sector_grid);
 	ClassDB::bind_method(D_METHOD("get_sector_grid"), &TerrainData::get_sector_grid);
 	ClassDB::bind_method(D_METHOD("get_foliage_map"), &TerrainData::get_foliage_map);
@@ -1241,6 +1246,110 @@ Vector3 TerrainData::raycast_terrain(const Vector3 &p_from, const Vector3 &p_to)
 
 int TerrainData::get_tile_count() const {
 	return static_cast<int>(cpt.tiles.size());
+}
+
+bool TerrainData::patch_heights(const opennova::terrain::CoordsRect &p_rect, const uint16_t *p_src,
+		size_t p_stride) {
+	constexpr int dim = opennova::terrain::COORDS_ATLAS_SIZE;
+	if (!loaded || cpt.depth_buffer.size() != static_cast<size_t>(dim) * dim || p_src == nullptr ||
+			p_rect.w <= 0 || p_rect.h <= 0 || p_rect.x < 0 || p_rect.z < 0 || p_rect.x > dim - p_rect.w ||
+			p_rect.z > dim - p_rect.h || p_stride < static_cast<size_t>(p_rect.w)) {
+		return false;
+	}
+	for (int row = 0; row < p_rect.h; ++row) {
+		const uint16_t *from = p_src + static_cast<size_t>(row) * p_stride;
+		std::copy(from, from + p_rect.w,
+				cpt.depth_buffer.begin() + static_cast<ptrdiff_t>(p_rect.z + row) * dim + p_rect.x);
+	}
+	++heights_serial_;
+	return true;
+}
+
+bool TerrainData::patch_heights_raw16(const Rect2i &p_rect, const PackedByteArray &p_raw16) {
+	const int64_t count = static_cast<int64_t>(p_rect.size.x) * p_rect.size.y;
+	if (count <= 0 || p_raw16.size() != count * 2) {
+		return false;
+	}
+	std::vector<uint16_t> samples(static_cast<size_t>(count));
+	const uint8_t *bytes = p_raw16.ptr();
+	for (int64_t i = 0; i < count; ++i) {
+		samples[static_cast<size_t>(i)] = static_cast<uint16_t>(bytes[i * 2] | (bytes[i * 2 + 1] << 8));
+	}
+	return patch_heights(opennova::terrain::CoordsRect{p_rect.position.x, p_rect.position.y, p_rect.size.x,
+			p_rect.size.y}, samples.data(), static_cast<size_t>(p_rect.size.x));
+}
+
+bool TerrainData::replace_tiles(const std::vector<int> &p_indices, const std::vector<opennova::CptTile> &p_tiles) {
+	if (!loaded || p_indices.size() != p_tiles.size()) {
+		return false;
+	}
+	for (size_t i = 0; i < p_indices.size(); ++i) {
+		const int index = p_indices[i];
+		if (index < 0 || index >= static_cast<int>(cpt.tiles.size())) {
+			return false;
+		}
+		const opennova::CptTile &have = cpt.tiles[static_cast<size_t>(index)];
+		const opennova::CptTile &next = p_tiles[i];
+		if (next.tile_x != have.tile_x || next.tile_y != have.tile_y || next.tile_size != have.tile_size ||
+				next.vertex_indices.size() < static_cast<size_t>(next.vertex_count) * 2u) {
+			return false;
+		}
+		// Every list names the tile's own vertices (the device reads no index past them).
+		for (const opennova::CptTileLOD &lod : next.lods) {
+			for (const uint16_t vertex : lod.indices) {
+				if (vertex >= next.vertex_count) {
+					return false;
+				}
+			}
+		}
+	}
+	for (size_t i = 0; i < p_indices.size(); ++i) {
+		cpt.tiles[static_cast<size_t>(p_indices[i])] = p_tiles[i];
+	}
+	return true;
+}
+
+PackedInt32Array TerrainData::get_tile_lod_indices(int p_index, int p_lod) const {
+	PackedInt32Array out;
+	if (p_index < 0 || p_index >= static_cast<int>(cpt.tiles.size()) || p_lod < 0 || p_lod >= 8) {
+		return out;
+	}
+	for (const uint16_t index : cpt.tiles[static_cast<size_t>(p_index)].lods[p_lod].indices) {
+		out.push_back(index);
+	}
+	return out;
+}
+
+bool TerrainData::replace_tile_lods(const PackedInt32Array &p_indices, const Array &p_lods) {
+	if (p_indices.size() != p_lods.size()) {
+		return false;
+	}
+	std::vector<int> indices;
+	std::vector<opennova::CptTile> tiles;
+	for (int64_t i = 0; i < p_indices.size(); ++i) {
+		const int index = p_indices[i];
+		const Array lods = p_lods[i];
+		if (index < 0 || index >= static_cast<int>(cpt.tiles.size()) || lods.size() != 8) {
+			return false;
+		}
+		opennova::CptTile tile = cpt.tiles[static_cast<size_t>(index)];
+		for (int lod = 0; lod < 8; ++lod) {
+			const PackedInt32Array lod_indices = lods[lod];
+			tile.lods[lod].indices.clear();
+			tile.lods[lod].max_index = 0;
+			for (int64_t k = 0; k < lod_indices.size(); ++k) {
+				const int32_t value = lod_indices[k];
+				if (value < 0 || value >= tile.vertex_count) {
+					return false;
+				}
+				tile.lods[lod].indices.push_back(static_cast<uint16_t>(value));
+				tile.lods[lod].max_index = std::max<uint16_t>(tile.lods[lod].max_index, static_cast<uint16_t>(value));
+			}
+		}
+		indices.push_back(index);
+		tiles.push_back(std::move(tile));
+	}
+	return replace_tiles(indices, tiles);
 }
 
 int TerrainData::get_detail_foliage_index_fixed(int32_t atlas_x_fixed,
