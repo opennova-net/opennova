@@ -187,7 +187,8 @@ struct PreSpawnJoinerPose {
 // The joiner's character/profile join vars, uploaded as CU chunks in its game-session 0x42
 // ClientAuth: the per-SIDE character selection (side A = teams 1/3, side B = teams 2/4).
 //   CI0/CI1 = per-side minimap/character-slot ids (u16 truncation of retail's atol),
-//   TR      = requested side (0 = A, 1 = B; anything else clamps to 0xFF = auto),
+//   TR      = requested side (0 = A, 1 = B; anything else clamps to 0xFF = auto; a stock
+//             joiner always sends -1, its side requirement, D-NET-590),
 //   CTA/CTB = per-side soldier class, VCA/VCB = per-side avatar byte (-> entity+0x374 animSlot).
 // 0 everywhere = "tag absent" (retail's zero-initialized NapiNetConfig). The player add picks the
 // side by the ASSIGNED team and stamps the entity. [orig: client emit

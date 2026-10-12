@@ -362,12 +362,14 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	}
 	// Retail serializes the live profile's per-side character block between the
 	// environment strings and the trailing locale/packet scalars. A zero value is
-	// absent, matching CNapiServerInfo's per-field guards. TR uses signed decimal:
-	// 0xFF is the profile's -1/automatic-team sentinel. CTA/CTB print their bytes
+	// absent, matching CNapiServerInfo's per-field guards. TR prints its byte
+	// sign-extended, the join's side requirement 0xFF going up as -1 on every
+	// join (kJoinSideRequirement, D-NET-590). CTA/CTB print their bytes
 	// zero-extended, VCA/VCB sign-extended, so an avatar byte past 0x7F goes up
 	// negative (0xC8 as -56).
-	// [orig: CNapiServerInfo_SerializeToSession @0x4c3a1b..0x4c3c4c - movzx
-	//  @0x4c3b1e / @0x4c3b6e, movsx @0x4c3bbe / @0x4c3c0e]
+	// [orig: CNapiServerInfo_SerializeToSession @0x4c3a1b..0x4c3c4c - TR
+	//  @0x4c3ac7..0x4c3b0c (movsx @0x4c3ad1), movzx @0x4c3b1e / @0x4c3b6e, movsx
+	//  @0x4c3bbe / @0x4c3c0e]
 	auto append_profile_value = [&](const char *name, int value, bool present) {
 		if (!present) return;
 		auth.cu.push_back(make_client_cu_chunk(
@@ -377,10 +379,7 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			character_join_vars_.char_id[0] != 0);
 	append_profile_value("CI1", character_join_vars_.char_id[1],
 			character_join_vars_.char_id[1] != 0);
-	append_profile_value("TR",
-			character_join_vars_.team_request == 0xFF
-					? -1
-					: character_join_vars_.team_request,
+	append_profile_value("TR", static_cast<int8_t>(character_join_vars_.team_request),
 			character_join_vars_.team_request != 0);
 	append_profile_value("CTA", character_join_vars_.char_class[0],
 			character_join_vars_.char_class[0] != 0);

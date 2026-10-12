@@ -28,6 +28,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/novaworld_link.h>
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/join_character_profile.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -249,9 +250,13 @@ bool matches_client_header(const ProtocolPacketHeader &header,
 
 bool build_joiner_client_auth(inmatch::JoinRole role,
 		std::string password, ClientAuth &out,
-		std::string server_password = {}, bool password_required = false) {
+		std::string server_password = {}, bool password_required = false,
+		std::string side_password = {}, uint32_t server_flags = 0,
+		const inmatch::CharacterJoinVars *installed_vars = nullptr) {
 	inmatch::JoinerConnection joiner("SpectatorWire");
-	joiner.set_join_request(role, std::move(password), std::move(server_password));
+	joiner.set_join_request(role, std::move(password), std::move(server_password),
+			std::move(side_password));
+	if (installed_vars != nullptr) joiner.set_character_join_vars(*installed_vars);
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -266,6 +271,7 @@ bool build_joiner_client_auth(inmatch::JoinRole role,
 			build_server_hello(hello, 0x7F000001u, 32768);
 	server_hello.hk = 0xAABBCCDDu;
 	server_hello.sf = password_required ? 1u : 0u;
+	server_hello.p2 = server_flags;
 	const std::vector<uint8_t> reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
@@ -292,6 +298,47 @@ bool auth_has_cu(const ClientAuth &auth,
 		}
 	}
 	return false;
+}
+
+// A joiner's ClientAuth TR is the join's side requirement, which only -1 is
+// ever stored to: every join sends one TR=-1, whatever the server's flag word
+// offers (TeamChoose, the side passwords, spectators) and whichever role it
+// takes, from the fresh profile or the installed projection; PRE.MNU has no
+// team control, the side coming from the side password (D-NET-590).
+// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23; Config_SetDefaults
+//  @0x54d1fa; UI_PreGameMenuStateMachine @0x568c55;
+//  CNapiServerInfo_SerializeToSession @0x4c3ac7..0x4c3b0c]
+bool run_every_join_sends_the_automatic_tr() {
+	const inmatch::CharacterJoinVars projection =
+			inmatch::character_join_vars(inmatch::JoinCharacterProfile{});
+	for (const uint32_t flags : {0x0u, 0x4u, 0x904u, 0x934u, 0x693Cu}) {
+		for (const auto role : {inmatch::JoinRole::Player, inmatch::JoinRole::Spectator}) {
+			for (const inmatch::CharacterJoinVars *installed :
+					{static_cast<const inmatch::CharacterJoinVars *>(nullptr), &projection}) {
+				ClientAuth auth;
+				if (!expect(build_joiner_client_auth(role, "", auth, "", false, "redSECRET",
+									flags, installed),
+							"the join's ClientAuth builds")) {
+					return false;
+				}
+				int tr_count = 0;
+				for (const std::vector<uint8_t> &blob : auth.cu) {
+					uint8_t type = 0;
+					std::string name, value;
+					if (parse_client_cu_chunk(blob.data(), blob.size(), type, name, value) &&
+							name == "TR")
+						++tr_count;
+				}
+				if (!expect(tr_count == 1 && auth_has_cu(auth, "TR", "-1"),
+							"every join sends one TR=-1 whatever the server's flags")) {
+					std::fprintf(stderr, "  flags 0x%X role %d %s\n", flags,
+							static_cast<int>(role), installed ? "projection" : "fresh");
+					return false;
+				}
+			}
+		}
+	}
+	return true;
 }
 
 bool run_spectator_clientauth_and_state_latch() {
@@ -891,9 +938,9 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	inmatch::JoinerConnection joiner("JoinTokens");
 	joiner.set_expansion_version_root(cc_root.string());
 	joiner.set_join_request(inmatch::JoinRole::Player, "", "", "SideSecret");
-	inmatch::CharacterJoinVars side_profile;
+	inmatch::CharacterJoinVars side_profile =
+			inmatch::character_join_vars(inmatch::JoinCharacterProfile{});
 	side_profile.char_id[0] = 0x2101;
-	side_profile.team_request = 1;
 	joiner.set_character_join_vars(side_profile);
 	joiner.set_app_id("3225");
 	joiner.set_cd_cookie(cookie);
@@ -1980,7 +2027,7 @@ bool run_roundtrip() {
 	inmatch::CharacterJoinVars join_profile;
 	join_profile.char_id[0] = 0x0400; // nat 0, div 0, combo 2, good
 	join_profile.char_id[1] = 0x8407; // nat 7, div 0, combo 2, evil
-	join_profile.team_request = 0xFF;
+	join_profile.team_request = 0xFF; // the join's side requirement, TR=-1 (D-NET-590)
 	join_profile.char_class[0] = 6;
 	join_profile.char_class[1] = 6;
 	// Avatar bytes past 0x7F (a hand-edited player.sav voice pair, D-PLAYERINFO-28):
@@ -7629,6 +7676,7 @@ int main() {
                     run_charattr_challenge_table_matches_retail() &&
                     run_charattr_latches_follow_retail() &&
 	                run_spectator_clientauth_and_state_latch() &&
+	                run_every_join_sends_the_automatic_tr() &&
 	                run_seeded_objective_layout_hint() &&
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&

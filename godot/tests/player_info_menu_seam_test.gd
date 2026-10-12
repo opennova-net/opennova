@@ -129,8 +129,8 @@ func test_join_auth_profile_uses_retail_avatar_packing_and_defaults() -> void:
 	# SYN_HEAD_11, voice 3 (tests/fixtures/minimal_avatars_gen.cpp).
 	assert_eq([profile.get_avatar(0), profile.get_avatar(1)], [1, 3],
 			"zero voice overrides resolve through each selected combo's head voice")
-	assert_eq(profile.team_request, -1,
-			"fresh profile asks the companion to assign a side")
+	assert_false("team_request" in profile,
+			"the profile carries no side request: every join sends TR=-1 (D-NET-590)")
 
 
 func test_join_auth_profile_packs_the_selected_character_for_its_side() -> void:
