@@ -444,14 +444,14 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	kernel.refresh_collision_instances();
 }
 
-// The authoritative mount relation changed: the binocular latch dies, the
-// view effects refresh, and the mounted input heading follows the relation.
+// The authoritative mount relation changed: the view effects refresh and the
+// mounted input heading follows the relation. The binoculars toggle and its
+// sway ride through; the attach's own camera reset clears the toggle where
+// retail's does (attach_apply) [orig: Player_ResetCameraAndMovementState
+// @0x4DE2B3; the sway's writer Binoculars_RandomizeSwayOffsets @0x4dd830].
 void JoinerRole::on_mount_changed() {
 	mission::MissionKernel &kernel = *kernel_;
 	world::LocalPlayer &lp = kernel.local;
-	lp.view.binoculars_requested = false;
-	lp.view_tracker.binocular_yaw_offset_deg = 0.0f;
-	lp.view_tracker.binocular_pitch_offset_deg = 0.0f;
 	world::local_player_view_refresh(&kernel.world, lp.view);
 	lp.sync_local_mounted_input_heading();
 }
@@ -1332,14 +1332,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 
 world::Entity *JoinerRole::replica_world_entity(
 		world::World &world, world::EntityHandle handle) {
-	if (!handle.valid()) return nullptr;
-	if (kernel_->wire_header_world)
-		return materializer_.owned(world, handle);
-	world::Entity *entity = world.registry.get(handle);
-	return entity != nullptr &&
-			entity->spawn_origin != world::kSpawnOriginNone
-			? entity
-			: nullptr;
+	return materializer_.replica_world_entity(world, handle, kernel_->wire_header_world);
 }
 
 void JoinerRole::materialize_replica_world() {
@@ -1767,11 +1760,11 @@ void JoinerRole::sync_authoritative_mount() {
 	}
 	if (!changed && !route_changed) return;
 	if (changed) {
-		// The embedder refreshes its view effects (binocular latch) and the
-		// mounted input heading for the new relation.
+		// The embedder refreshes its view effects and the mounted input
+		// heading for the new relation.
 		on_mount_changed();
 	}
-	world::sync_local_usegun_weapon_transition(world, lp.weapon, lp.view);
+	world::sync_local_usegun_weapon_transition(world, lp.weapon);
 }
 
 // Fold the latest complete phase-8 mounted-ammo sample into the exact

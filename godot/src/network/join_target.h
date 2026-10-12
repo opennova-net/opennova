@@ -131,11 +131,6 @@ public:
 	int get_lobby_number() const { return lobby_number_; }
 	void set_lobby_number(int p_value) { lobby_number_ = p_value; }
 
-	int get_team_request() const { return team_request_; }
-	void set_team_request(int p_value) { team_request_ = p_value == 0 || p_value == 1 ? p_value : -1; }
-	bool allows_team_choice() const {
-		return opennova::inmatch::server_allows_team_choice(server_flags_);
-	}
 	bool has_team_password() const {
 		return opennova::inmatch::server_has_side_password(server_flags_);
 	}
@@ -195,7 +190,6 @@ private:
 	bool discovered_session_ = false;
 	int64_t session_host_key_ = 0;
 	bool session_password_required_ = false;
-	int team_request_ = -1; // -1 automatic, 0 blue, 1 red
 	bool role_explicit_ = false;
 	String proxy_node_;
 	String proxy_relay_;

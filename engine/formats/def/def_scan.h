@@ -94,7 +94,7 @@ int death_piece_type_lookup(const char *name, size_t len);
 // tokenizer keeps past the key, 29 of its 30. The tokenizer stops at its 30th
 // token without cutting it, so the 29th value runs on to the line's end,
 // separators, quotes and comment included, and nothing past it is a token of
-// its own. [orig: Terrain_TokenizeConfigLine @0x53CB60, the compare
+// its own. [orig: Config_TokenizeLine @0x53CB60, the compare
 // @0x53CC8C and the exit @0x53CC93 that leaves the token unterminated]
 inline constexpr int kMaxValueTokens = io::kConfigMaxTokens - 1;
 
@@ -104,7 +104,7 @@ inline constexpr int kMaxValueTokens = io::kConfigMaxTokens - 1;
 // token and its quotes are not kept; `""` is no token at all; space, tab and
 // comma separate; `//` or `;` outside quotes ends the line). A line with no
 // token, or whose first token starts with '/', never reaches the callback.
-// [orig: File_ParseASCIIFile @0x53D810 hands Terrain_TokenizeConfigLine
+// [orig: File_ParseASCIIFile @0x53D810 hands Config_TokenizeLine
 //  @0x53CB60's tokens to the callback (@0x53D908), skipping a line with no
 //  token or whose first starts with '/' (@0x53D915 / @0x53D91E); the
 //  tokenizer's cuts are io::tokenize_config_line's]

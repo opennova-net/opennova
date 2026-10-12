@@ -343,17 +343,25 @@ func _select_slot_weapon(control: String, weapon_row: int) -> void:
 	_driver.select_row(combo, found, false)
 
 
+# The rows take the engine's order, the WEAPON screen's too: case-insensitive
+# ascending by label, each row keeping its weapon, then NONE goes in at row 0
+# (loadout_labels.h armory_slot_order carries the witness; D-PLAYERINFO-21). The
+# grenade fill sorts nothing.
 func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: int) -> void:
 	var combo := _id(control)
 	if combo < 0:
 		return
+	var weapons := _weapons.get_slot_weapons(slot, class_mask, team_mask)
+	var labels := PackedStringArray()
+	for w: WeaponDef in weapons:
+		labels.append(_weapons.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT)))
 	var rows := PackedStringArray()
 	var defs: Array[WeaponDef] = []
 	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
 	defs.append(null)
-	for w: WeaponDef in _weapons.get_slot_weapons(slot, class_mask, team_mask):
-		rows.append(_weapons.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT)))
-		defs.append(w)
+	for i in WeaponDatabase.armory_slot_order(labels):
+		rows.append(labels[i])
+		defs.append(weapons[i])
 	_slot_rows[control] = defs
 	_set_combo_items(combo, rows)
 

@@ -66,11 +66,13 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const HostRotation *rotation);
 
 // Project the world-owned wave list into the requester-specific S2C 0x6E
-// body. Public because both the reactive 0x0E queue-join reply and the 1 Hz
-// host producer must use the exact same writer.
-// [orig: NetPacket_WriteSpawnWaveStatus @0x507490]
+// body: the rows of the requester's slot team (+416), each with its ETA for
+// the requester's player. Public because both the reactive 0x0E queue-join
+// reply and the 1 Hz host producer must use the exact same writer.
+// [orig: NetPacket_WriteSpawnWaveStatus @0x507490 - the slot team @0x5074CF,
+//  the row filter @0x507539]
 std::vector<uint8_t> build_spawn_wave_status_body(
-		const world::World &world, world::EntityHandle requester);
+		const world::World &world, const NapiNPConnection &conn);
 
 // Execute the ONE deploy-release transaction shared by immediate C2S 0x0E
 // picks and SpawnWaveList_Tick releases. `target_zone` invalid selects the
@@ -80,7 +82,7 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 // for the owning connection; callers decide whether it is returned reactively
 // or staged on a transport.
 // `server_log` is the /PROFILE recorder (null = off), which marks the deploy.
-// [orig: Server_ProcessPlayerDeath deploy leg @0x517740, its handle argument
+// [orig: Server_DeployPlayer deploy leg @0x517740, its handle argument
 //  tested @0x51786B]
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,

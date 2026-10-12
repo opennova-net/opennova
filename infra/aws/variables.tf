@@ -131,10 +131,15 @@ variable "cloudflare_domain" {
 }
 
 variable "edge_auth_secret" {
-  description = "Edge authentication for the portal's /api/ (DEPLOY.md): when set, a Cloudflare Transform Rule adds X-OpenNova-Edge: <secret> to every request on the web hostnames, and the web container (EDGE_AUTH_SECRET, the same value) answers /api/ only to requests carrying it. Letters and digits only. Empty (the default) creates no rule. Sourced from the vault as TF_VAR_edge_auth_secret once enabled; the API token then needs Zone / Transform Rules / Edit."
+  description = "Edge authentication for the portal's /api/ (DEPLOY.md): when set, and while the web records are proxied (cloudflare_web_proxied), a Cloudflare Transform Rule adds X-OpenNova-Edge: <secret> to every request on the web hostnames, and the web container (EDGE_AUTH_SECRET, the same value) answers /api/ only to requests carrying it. Letters and digits, at least 32 (web/docker-entrypoint.sh's rule); lowercase hex in practice (openssl rand -hex 32), since nginx compares it without regard to case. Empty (the default) creates no rule. Sourced from the vault as TF_VAR_edge_auth_secret once enabled; the API token then needs Zone / Transform Rules / Edit. The state holds it in plain text."
   type        = string
   default     = ""
   sensitive   = true
+
+  validation {
+    condition     = var.edge_auth_secret == "" || can(regex("^[A-Za-z0-9]{32,}$", var.edge_auth_secret))
+    error_message = "edge_auth_secret must be empty or at least 32 letters and digits (the rule web/docker-entrypoint.sh applies to EDGE_AUTH_SECRET)."
+  }
 }
 
 variable "cloudflare_web_proxied" {

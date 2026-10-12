@@ -607,6 +607,10 @@ int main_impl() {
 		ctx3.config.no_char_abilities = 1;
 		ctx3.config.no_scope_drift = 1;
 		w3.tables.charattr_disabled_word = 0x0012u;
+		// The join's state-6 entry zeroes a level stored ahead of it, and its resend flag
+		// [orig: Server_OnPlayerJoin @0x51A71F / @0x51A725].
+		jconn.reply.client_quality = 3;
+		jconn.reply.client_quality_dirty = true;
 		bool saw_0f = false, saw_42 = false, saw_3e = false;
 		bool saw_transient_42 = false;
 		std::vector<std::vector<uint8_t>> clears;
@@ -631,6 +635,8 @@ int main_impl() {
 		if (!expect(latches == std::vector<uint8_t>({0x12, 0x00}), "the join's 0x42 carries the authority's latches"))
 			return 1;
 		if (!expect(reached, "joiner burst reached game-state 9 after loadout gate opened")) return 1;
+		if (!expect(jconn.reply.client_quality == 0 && !jconn.reply.client_quality_dirty,
+		            "the join zeroes the slot's quality level and its resend flag")) return 1;
 		if (!expect(jconn.burst.spawned, "joiner burst spawned after loadout gate opened")) return 1;
 		if (!expect(saw_42 && saw_0f && saw_3e, "phase 8 emits the game-start bundle (0x42/0x0F/0x3E)")) return 1;
 		if (!expect(saw_transient_42,

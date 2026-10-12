@@ -893,7 +893,7 @@ void infantry_respawn_snap(AiEntity &e, const int32_t pos[3], int32_t heading,
     inf.stance = InfantryState::Stance::kStand;
     // `airborne` stays with the registry word, which no retail respawn writer
     // touches (see InfantryState::reset_for_spawn) [orig: Entity_ResetToSpawnState
-    // @0x4b97b0 `Flags &= ~2`; Server_ProcessPlayerDeath @0x51787a].
+    // @0x4b97b0 `Flags &= ~2`; Server_DeployPlayer @0x51787a].
     inf.jump_requested = false;
     inf.jump_cooldown = 0;
     // A restore armed by a pre-death ladder exit must not chase the fresh
@@ -2302,7 +2302,7 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                 // The landing on the word's OWN bit: retail re-tests the Flags
                 // read @0x4b7d9f, so a 0x2000 the deploy left behind (the death
                 // and reset writers touch bits 0/1 only: the deploy leg
-                // @0x519fdb, Server_ProcessPlayerDeath @0x51787a,
+                // @0x519fdb, Server_DeployPlayer @0x51787a,
                 // Entity_ResetToSpawnState @0x4b97b0; the spawn placer only ORs
                 // 0x20/0x200 @0x50d42a/@0x50d44d) lands here on the first
                 // grounded tick with the same thump, one tick of refused jump

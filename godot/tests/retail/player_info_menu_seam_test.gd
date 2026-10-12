@@ -184,19 +184,28 @@ func _weight_text() -> String:
 
 # Select the named weapon in a parent slot combo and fire the selection relay the
 # way a user pick would (select_row emits the "combo" value change). The row model
-# is public: row = position in the filtered slot list + 1 (row 0 is NONE)
-# [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430].
+# is public: row 0 is NONE, then the filtered slot list sorted by label
+# [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430] (D-PLAYERINFO-21).
 func _select_weapon(wdb: WeaponDatabase, control: String, slot: int,
 		class_mask: int, weapon_name: String) -> WeaponDef:
 	var combo := _ammo_id(control)
-	var defs := wdb.get_slot_weapons(slot, class_mask, 2)  # blue
-	for i in defs.size():
-		var w := defs[i] as WeaponDef
+	for w: WeaponDef in wdb.get_slot_weapons(slot, class_mask, 2):  # blue
 		if w.name.nocasecmp_to(weapon_name) == 0:
-			_ammo_driver.select_row(combo, i + 1)  # emits -> the witnessed refill
-			return w
+			var row := _weapon_row(wdb, combo, w)
+			if row > 0:
+				_ammo_driver.select_row(combo, row)  # emits -> the witnessed refill
+				return w
 	assert_true(false, "%s offers %s" % [control, weapon_name])
 	return null
+
+
+# The row showing a weapon: the list sorts by label after NONE (D-PLAYERINFO-21).
+func _weapon_row(wdb: WeaponDatabase, combo: int, w: WeaponDef) -> int:
+	var label := wdb.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT))
+	for row in range(1, _ammo_driver.item_count(combo)):
+		if _ammo_driver.item_text(combo, row) == label:
+			return row
+	return -1
 
 
 # The expected *_AMMO2 sub-weapon, computed from the public table walk the companion
@@ -257,11 +266,10 @@ func test_snapshot_carries_the_selected_loadout_weapon_ids() -> void:
 			WeaponDatabase.SLOT_PRIMARY, 1, 2)
 	var selected_primary := ""
 	var selected_row := -1
-	for i in primary_defs.size():
-		var weapon: WeaponDef = primary_defs[i]
+	for weapon: WeaponDef in primary_defs:
 		if weapon.name.nocasecmp_to("WPN_M4AUTO") == 0:
 			selected_primary = weapon.name
-			selected_row = i + 1 # row 0 is NONE
+			selected_row = _weapon_row(wdb, _ammo_id("PRIMARY"), weapon)
 			break
 	assert_false(selected_primary == null, "the fixture offers M4AUTO for medic/blue")
 	_ammo_driver.select_row(_ammo_id("PRIMARY"), selected_row, false)  # silent reselect

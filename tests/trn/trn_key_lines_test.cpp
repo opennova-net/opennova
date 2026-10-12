@@ -2,7 +2,7 @@
 // file alone (trn_key_readings) [orig: Terrain_ParseConfigCallback @ 0x60F330] -- a grid row adds a row after the
 // terrain's, a block's key with no block open, a line inside a block the file opens, and from a fifth block on no
 // arm reads a line -- and the values a line writes quoted (trn_value_needs_quotes) [orig:
-// Terrain_TokenizeConfigLine @0x53CC16..0x53CC4C].
+// Config_TokenizeLine @0x53CC16..0x53CC4C].
 #include <formats/trn/trn_io.h>
 
 #include <cstdio>

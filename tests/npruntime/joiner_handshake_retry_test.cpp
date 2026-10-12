@@ -461,6 +461,30 @@ bool run_server_auth_acceptance_follows_retail() {
 	inmatch::JoinerConnection accepted("AuthAccepted", [&now_ms] { return now_ms; });
 	if (!expect(connect(accepted, auth), "the second joiner is connecting with its 0x42"))
 		return false;
+	// An accept whose CU walk overruns its bounds (a 65th CU, or one of 2048 bytes) is dropped
+	// before the CI / CK match: the socket pass returns without queuing it.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629B97..0x629BA6, @0x629F0B..0x629F12]
+	const auto overrun_accept = [&](size_t cus, size_t cu_bytes) {
+		std::vector<uint8_t> body;
+		for (const auto &field : std::vector<std::pair<const char *, uint32_t>>{
+					 {"CI", auth.ci}, {"CK", auth.ck}, {"CR", 1u}, {"SK", 0x12345678u}}) {
+			uint8_t le[4];
+			io::write_u32_le(le, field.second);
+			append_flat_tlv(body, field.first, le, 4);
+		}
+		const std::vector<uint8_t> cu(cu_bytes, 0x01);
+		for (size_t i = 0; i < cus; ++i)
+			append_flat_tlv(body, "CU", cu.data(), static_cast<uint16_t>(cu.size()));
+		return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, std::move(body));
+	};
+	const std::vector<uint8_t> sixty_five = overrun_accept(65, 1);
+	const std::vector<uint8_t> long_cu = overrun_accept(1, 2048);
+	accepted.handle_datagram(sixty_five.data(), sixty_five.size());
+	accepted.handle_datagram(long_cu.data(), long_cu.size());
+	if (!expect(accepted.phase() == inmatch::JoinerConnection::Phase::Auth &&
+				accepted.last_error().empty() && !accepted.last_join_reject().set,
+			"an accept with a 65th CU or a 2048-byte CU is dropped; the join stays connecting"))
+		return false;
 	const std::vector<uint8_t> accept = server_auth(
 			{{"CI", auth.ci}, {"CK", auth.ck}, {"CR", 2u}, {"SK", 0x12345678u}});
 	accepted.handle_datagram(accept.data(), accept.size());
