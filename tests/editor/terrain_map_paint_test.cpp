@@ -13,7 +13,10 @@
 
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_document.h>
+#include <editor/preview/preview_clock.h>
+#include <editor/preview/terrain_brush.h>
 #include <editor/preview/terrain_map_target.h>
+#include <editor/preview/terrain_view_commands.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -37,6 +40,27 @@ using io::JsonValue;
 namespace {
 
 std::string fixture(const std::string &name) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + name; }
+
+// A picture one pixel a metre over flat ground (a view's planners' space).
+struct FlatSpace final : TerrainBrushSpace {
+	bool pointer_ground(float x, float y, TerrainPoint &at, double &height) const override {
+		at = TerrainPoint{double(x), double(y)};
+		height = 0.0;
+		return true;
+	}
+	bool to_picture(TerrainPoint at, double, float &x, float &y) const override {
+		x = float(at.x);
+		y = float(at.y);
+		return true;
+	}
+	double height(TerrainPoint) const override { return 0.0; }
+};
+
+struct Recorder final : CanvasRequests {
+	std::vector<EditorRequest> requests;
+	void request(EditorRequest each) override { requests.push_back(std::move(each)); }
+	void served(std::string, int64_t) override {}
+};
 
 bool contains(const std::string &text, const std::string &part) {
 	if (text.find(part) != std::string::npos) return true;
@@ -185,6 +209,25 @@ int test_strokes() {
 	TEST_EXPECT(session.outcome().done() && colours && colours->plane(0).format() == RasterFormat::Rgb8);
 	const uint8_t *painted = colours->plane(0).texel(256, 256);
 	TEST_EXPECT(painted[0] == 255 && painted[1] == 32 && painted[2] == 0 && colours->plane(0).texel(257, 256)[0] == 128);
+	// The Colour tool's eyedropper (Ctrl+click): the colour there as the open map holds it, into the brush.
+	{
+		session.handle(request::set_workspace(R"({"terrain_brush":{"tool":"colour"}})"));
+		PreviewClock clock;
+		FlatSpace space;
+		ViewportContext context{ViewportInput{v, clock, session.document_base_for(m)}};
+		TerrainViewContext view{context, space, m};
+		Recorder out;
+		ViewportCommand pick;
+		pick.name = "eyedropper";
+		pick.has_at = true;
+		pick.at_x = -255.5f;
+		pick.at_y = 255.5f;
+		std::string error;
+		bool handled = false;
+		TEST_EXPECT(terrain_view_command(view, pick, out, error, handled) && handled && out.requests.size() == 1);
+		for (const EditorRequest &each : out.requests) session.handle(each);
+		TEST_EXPECT(v.workspace.terrain_brush.colour == 0xFF2000);
+	}
 	// A layer the blend map does not hold, and a map no brush paints: refused, saying why.
 	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/mnml_d1.tga", colour_map));
 	editor_test::handle_to_end(session, request::rescan());

@@ -1,8 +1,17 @@
 #include <editor/preview/terrain_view_commands.h>
 
+#include <algorithm>
+#include <cstdio>
+
 #include <base/io/json.h>
+#include <editor/assets/project_asset_source.h>
+#include <editor/documents/texture_document.h>
+#include <editor/documents/texture_raster.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/mission_ground_facts.h>
+#include <editor/preview/terrain_map_target.h>
+#include <editor/project/project_files.h>
+#include <editor/session/terrain_family.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/terrain_tools_parts.h>
 #include <editor/session/view/session_view.h>
@@ -31,6 +40,51 @@ void stroke_at(const TerrainViewContext &view, TerrainPoint at, uint64_t gesture
 	out.request(request::terrain_stroke(view.view, ask));
 }
 
+// The texel of a colour or blend map under a mission point as R, G, B, A: the open document's texels where one holds
+// the map (a paint shows at once), else the file's; through the game's routing (preview/terrain_map_target). False,
+// with why, where the map does not resolve or no texel lies there.
+bool map_texel_at(const SessionView &view, const DocumentBase &document, TerrainPlane plane, TerrainPoint at, uint8_t rgba[4],
+                  std::string &why) {
+	TerrainFamily family;
+	if (!resolve_terrain_family(view, document, family) || !family.trn) {
+		why = family.error.empty() ? "the terrain does not resolve" : family.error;
+		return false;
+	}
+	const TerrainFamilyFile &file = family.plane(plane);
+	if (file.path.empty()) {
+		why = file.refusal.empty() ? std::string("the terrain names no ") + (terrain_plane_words(plane) + 4) : file.refusal;
+		return false;
+	}
+	RasterState read;
+	const RasterState *state = nullptr;
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == file.path)
+			if (const auto *texture = dynamic_cast<const TextureDocument *>(open.get())) state = &texture->state();
+	if (!state) {
+		std::vector<uint8_t> bytes;
+		if (!view.findings.assets || !view.findings.assets->read(basename_of(file.path), bytes)) {
+			why = file.path + " does not read";
+			return false;
+		}
+		read = read_texture_state(file.path, bytes);
+		state = &read;
+	}
+	if (!texture_paintable(*state)) {
+		why = file.path + " is no map the editor reads texels of";
+		return false;
+	}
+	const RasterPlane &texels = state->planes.front();
+	const TerrainMapTarget target = terrain_map_target(*family.trn, plane, texels.width(), texels.height());
+	int tx = 0, ty = 0;
+	std::vector<uint8_t> one;
+	if (!terrain_map_texel(target, at.x, at.y, tx, ty) || !texture_rgba_rect(*state, tx, ty, 1, 1, one)) {
+		why = "no texel of " + basename_of(file.path) + " lies there";
+		return false;
+	}
+	std::copy_n(one.data(), 4, rgba);
+	return true;
+}
+
 // The eyedropper: the value under the point taken into the brush.
 bool eyedropper(const TerrainViewContext &view, const ViewportCommand &command, CanvasRequests &out, std::string &error) {
 	if (!command.has_at) {
@@ -55,6 +109,22 @@ bool eyedropper(const TerrainViewContext &view, const ViewportCommand &command, 
 			members.set("surface", io::json_number(facts.surface));
 		} else if (brush.tool == TerrainTool::Foliage && facts.foliage_code >= 0) {
 			members.set("foliage", io::json_number(facts.foliage_code));
+		} else if ((brush.tool == TerrainTool::Colour || brush.tool == TerrainTool::Detail) && view.context.input.document) {
+			// The colour map's colour there; the blend map's heaviest of its three layers (its red, green, blue).
+			uint8_t rgba[4] = {0, 0, 0, 0};
+			std::string why;
+			const TerrainPlane plane = brush.tool == TerrainTool::Colour ? TerrainPlane::Colour : TerrainPlane::Blend;
+			if (!map_texel_at(view.context.input.view, *view.context.input.document, plane, at, rgba, why)) {
+				error = "The eyedropper reads nothing there: " + why + ".";
+				return false;
+			}
+			if (plane == TerrainPlane::Colour) {
+				char hex[8];
+				std::snprintf(hex, sizeof hex, "#%02X%02X%02X", rgba[0], rgba[1], rgba[2]);
+				members.set("colour", io::json_string(hex));
+			} else {
+				members.set("layer", io::json_number(rgba[1] > rgba[0] && rgba[1] >= rgba[2] ? 1 : rgba[2] > rgba[0] ? 2 : 0));
+			}
 		} else {
 			error = std::string("The eyedropper takes no ") + terrain_tool_label(brush.tool) + " value there yet.";
 			return false;
