@@ -3509,11 +3509,21 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	reset_player();
 	const std::vector<opennova::ProtocolMessage> deployed = dispatch();
 	const opennova::world::Entity *live = world.registry.get(player);
-	return expect(deployed.size() >= 2 && live->alive && live->health == 125 &&
+	if (!expect(deployed.size() >= 2 && live->alive && live->health == 125 &&
 				!conn.link.respawn_pending && live->mounted &&
 				live->mount_target == vehicle && live->mount_seat == 1 &&
 				world.registry.get(vehicle)->seats[1].occupant == player,
-			"mobile spawn resets then boards the best free vehicle seat");
+			"mobile spawn resets then boards the best free vehicle seat"))
+		return false;
+	// D-NET-557: a root at Health 0 whose dead bit is still clear stays a mobile
+	// spawn, and the deploy seats the player in it [orig: Entity_FindBestSeatSlot
+	//  @0x4352C2; Entity_ProcessVehicleAttach @0x435AF9].
+	world.registry.get(vehicle)->health = 0;
+	world.registry.get(vehicle)->alive = false;
+	reset_player();
+	(void)dispatch();
+	return expect(live->health == 125 && live->mounted && live->mount_target == vehicle,
+			"a Health-0 root with its dead bit clear takes the deploy into its seat");
 }
 
 // D-NET-480: both the 0x0E and the deploy refuse a vehicle target whose ROOT
