@@ -861,7 +861,10 @@ struct Entity {
     uint32_t last_state_sent_ms = 0; // entity+560; authority 0x26 send clock
     bool objective_death_scored = false;
     int32_t destroy_timer = 0; // entity+0x1B0 initial fade delay
-    bool destroy_timer_initialized = false;
+    // The item init's once-per-body stores ran on this lifetime: the destroy
+    // timer, Health and Armor (mission::resolve_item_traits).
+    // [orig: Entity_InitFromItemDef @0x49E550]
+    bool item_init_done = false;
     // --- powerup row state (world/powerup.h) ---
     // The bound powerup.def row (-1 = none): retail's row pointer at
     // entity+0x2C0, the pickup/respawn ActionDefs at +0x2B8/+0x2BC beside it

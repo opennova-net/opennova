@@ -148,7 +148,8 @@ world::ItemDeathTraits item_death_traits_from_def(const DefItemDef &def) {
 //   desyncs the retail client mid-frame (retail-join v13, 2026-07-02).
 // - Entity::health_max (+ health lift) from items.def hp (itemDef+0x17C healthMax): the original
 //   spawns Health = healthMax [orig: Entity_InitFromItemDef @0x49e550]; entities still at the
-//   promotion default (100) are lifted to full health, a player body excepted (D-PWR-9). Feeds
+//   promotion default (100) are lifted to full health once, at the sweep that first resolves
+//   their def (D-PWR-12), a player body excepted (D-PWR-9). Feeds
 //   the §5.13 vehicle health word (a too-small value renders every vehicle burning) and the
 //   §5.10 field-17 tier denominator.
 //
@@ -285,12 +286,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // the decoded-client record width. A missing or unresolved definition
         // fails closed as Unknown (0).
         e->net_class_code = wire_class ? wire_class(def_id) : 0;
-        // items.def hp -> healthMax; lift spawn-default health to full [orig: @0x49e550].
+        // items.def hp -> healthMax; the item init below lifts spawn-default
+        // health to full [orig: @0x49e550].
         const int hp = world::retail_signed_i16(def != nullptr ? def->hp : 0);
         e->health = world::retail_signed_i16(e->health);
         e->health_max = world::retail_signed_i16(e->health_max);
         e->critical_hp = world::retail_signed_i16(def != nullptr ? def->critical_hp : 0);
-        e->mana_max = e->mana = world::retail_signed_i16(def != nullptr ? def->mana : 0);
+        e->mana_max = world::retail_signed_i16(def != nullptr ? def->mana : 0);
         e->music_location = world::retail_signed_i16(def != nullptr ? def->music_location : 0);
         e->armor_impact = world::retail_signed_i16(
                 def != nullptr ? def->armor_impact : 0);
@@ -303,26 +305,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // radarSig (primary-FOV cap), entity+420 = def+378 heatSig (secondary)].
         e->radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
         e->heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
-        // The lift is the mission start's reload over the loaded pools, which
-        // runs ahead of the round init's player spawn, so no player body takes
-        // it on any path ported here: a player's health is its spawn's raises
-        // to the ceiling, which a difficulty word can halve or double to
-        // exactly 100 (D-PWR-9), and which every sweep after its spawn would
-        // otherwise meet (the boot's, bind_spawned_body's, a joiner's on each
-        // streamed topology change). Retail's save-game restore, unported,
-        // stores a restored body's ceiling instead.
-        // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 - Health =
-        //  healthMax @0x522A07 / @0x522B65, pool 0's ceiling store called
-        //  @0x522CE9 - called @0x52550E, ahead of the
-        //  Server_InitAllPlayerEntitiesForRound call @0x525BAF;
-        //  SaveFile_ReadOrWriteEntityRecord @0x4AC0C0 ->
-        //  Entity_ReloadItemDefAndReinit, called @0x4AC157, the ceiling store
-        //  called @0x4A9F3A]
-        if (hp != 0) {
-            e->health_max = hp;
-            if (e->health == 100 && ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
-                e->health = hp; // still at the promotion default
-        }
+        if (hp != 0) e->health_max = hp;
         // Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
         // the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
         // (D-NET-147; every golden ASH_I5A building carries both) — Health = 1, and the
@@ -381,10 +364,40 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // above. [orig: ItemDef_ParseProperty @0x49fa6c; consumer
         // Entity_UpdateInfantryAI @0x4b9c97; world-wac-ai-re §19]
         e->deathtime_ticks = def != nullptr ? def->deathtime_ticks : 0;
-        if (def != nullptr && !e->destroy_timer_initialized) {
-            // [orig: Entity_InitFromItemDef @0x49E550]
+        // The item init's destroy timer, Health and Armor stores, once per
+        // body: retail runs them at a body's creation (the 0x0C and slot-packet
+        // spawns) and at the mission start's reload over the loaded pools (a
+        // vehicle's respawn stores Health and Armor itself, D-PWR-14), and
+        // no later sweep re-runs them, so a joiner's resweep on each streamed
+        // topology change leaves an existing body's words alone, its own body's
+        // included (D-PWR-12). The reload walks pools 1, 2 and 0 only; a
+        // loaded pool-3 body's stores here are D-PWR-13.
+        // [orig: Entity_InitFromItemDef @0x49E550 - Health @0x49E5C0, Armor
+        //  @0x49E5CE - called @0x42E84D / @0x546A15;
+        //  Game_ReloadEntityModelsAndCallbacks @0x522830 - Armor @0x522A1A /
+        //  @0x522B78 / @0x522D00]
+        if (def != nullptr && !e->item_init_done) {
             e->destroy_timer = def->destroy_timing_ticks[0];
-            e->destroy_timer_initialized = true;
+            e->item_init_done = true;
+            // The lift is the mission start's reload over the loaded pools,
+            // which runs ahead of the round init's player spawn, so no player
+            // body takes it on any path ported here: a player's health is its
+            // spawn's raises to the ceiling, which a difficulty word can halve
+            // or double to exactly 100 (D-PWR-9), and which the first sweep
+            // after its spawn would otherwise meet (the boot's,
+            // bind_spawned_body's). Retail's save-game restore, unported,
+            // stores a restored body's ceiling instead.
+            // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830 - Health =
+            //  healthMax @0x522A07 / @0x522B65, pool 0's ceiling store called
+            //  @0x522CE9 - called @0x52550E, ahead of the
+            //  Server_InitAllPlayerEntitiesForRound call @0x525BAF;
+            //  SaveFile_ReadOrWriteEntityRecord @0x4AC0C0 ->
+            //  Entity_ReloadItemDefAndReinit, called @0x4AC157, the ceiling store
+            //  called @0x4A9F3A]
+            if (hp != 0 && e->health == 100 &&
+                    ((e->flags | e->engine_flags) & world::kEntityFlagPlayer) == 0)
+                e->health = hp; // still at the promotion default
+            e->mana = e->mana_max;
             // The move-function row selects only the update callback, the
             // squib motor [orig: the "squib" row @0x82AC88 of the 12-byte move
             // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50].
