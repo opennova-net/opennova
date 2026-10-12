@@ -96,7 +96,9 @@ static void truck_glass(testrig::RetailMissionRig &rig) {
                 shot.dir_pitch_bam = io::bam_from_radians(std::atan2(-sign * normal[2], std::hypot(normal[0], normal[1])));
                 auto &rounds = rig.world.round_sim;
                 rounds.reset();
-                rounds.weapon_spread_enabled = false;
+                // The SP rules word's spread bit (0x4000) off, so the shot
+                // flies down the pane's normal [orig: @0x4EC442].
+                rig.world.rules.mpattrib &= ~0x4000u;
                 const int index = rounds.spawn(rig.world, shot);
                 CHECK(index >= 0);
                 if (index < 0) return;

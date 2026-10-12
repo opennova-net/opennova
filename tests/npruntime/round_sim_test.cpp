@@ -672,6 +672,7 @@ bool test_retail_random_spread_vectors() {
 bool test_spawn_spread_then_recoil() {
 	w::World world;
 	world.registry.configure_pool(0, 4);
+	world.rules.mpattrib = 0x4204u; // the out-of-session rules word: spread on
 	w::AiSystem &ai = world.ai;
 	w::PlayerSpawn seed;
 	seed.net_id = 41;
@@ -733,7 +734,7 @@ bool test_spawn_spread_then_recoil() {
 	body->inf.recoil_pitch = 0;
 	body->inf.scope_raised = false;
 	world.registry.get(shooter)->flags &= ~w::kEntityFlagScopeRaised;
-	world.round_sim.weapon_spread_enabled = false;
+	world.rules.mpattrib = 0x0204u; // the spread bit clear
 	const int gated = world.round_sim.spawn(world, params);
 	if (!expect(gated >= 0 &&
 	                    world.round_sim.rounds[static_cast<size_t>(gated)].yaw_bam == 0 &&
@@ -744,7 +745,7 @@ bool test_spawn_spread_then_recoil() {
 
 	world.round_sim.reset();
 	body->inf.recoil_pitch = 0;
-	world.round_sim.weapon_spread_enabled = true;
+	world.rules.mpattrib = 0x4204u;
 	ammo.flags = w::kAmmoFlagShotgun;
 	ammo.spread_count = 1;
 	ammo.kz_pieslice_bam = 0x01000000;
@@ -798,6 +799,67 @@ bool test_spawn_spread_then_recoil() {
 	            "a below-water eye keeps the underwater shift"))
 		return false;
 
+	return true;
+}
+
+// The weapon-spread rule is the live rules word's: 0x2000 in a session, 0x4000
+// out of one, each bit alone in its own leg; a clear bit adds no offset.
+// [orig: RoundData_SpawnRound - `cmp g_NapiNPCtx.is_in_session` @0x4EC417,
+//  `test g_RulesFlags, 2000h` @0x4EC41F, `test g_RulesFlags, 4000h`
+//  @0x4EC442, the zero offsets @0x4EC42B..0x4EC43D]
+bool test_spawn_spread_reads_the_rules_word() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::PlayerSpawn seed;
+	seed.net_id = 43;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	if (!expect(shooter.valid(), "spread-rule player spawned")) return false;
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	world.tables.weapons.entries.resize(2);
+	w::WeaponTableEntry &weapon = world.tables.weapons.entries[1];
+	weapon.valid = true;
+	weapon.error_fp16[2] = 0x10000;
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.ammo_index = 0;
+	params.adm_index = 1;
+	params.shot_seq = 9;
+	const w::RandomSpreadOffset spread =
+			w::weapon_calc_random_spread_offset(0x10000, 9, 0, false);
+	if (!expect(spread.yaw_bam != 0 || spread.pitch_bam != 0, "the shot's draw is non-zero"))
+		return false;
+	struct Case {
+		bool session;
+		uint32_t word;
+		bool spreads;
+		const char *what;
+	};
+	static constexpr Case cases[] = {
+		{true, 0x1A06u, false, "a session word without 0x2000 adds no offset"},
+		{true, 0x3A06u, true, "a session word with 0x2000 spreads"},
+		{true, 0x4000u, false, "0x4000 alone does not spread in a session"},
+		{false, 0x4204u, true, "the out-of-session word 0x4204 spreads"},
+		{false, 0x2000u, false, "0x2000 alone does not spread out of a session"},
+		{false, 0u, false, "a bare world's zero word adds no offset"},
+	};
+	for (const Case &c : cases) {
+		world.round_sim.reset();
+		world.rules.mp_session = c.session;
+		world.rules.mpattrib = c.word;
+		const int slot = world.round_sim.spawn(world, params);
+		if (!expect(slot >= 0, "spread-rule round spawned")) return false;
+		const w::LiveRound &r = world.round_sim.rounds[static_cast<size_t>(slot)];
+		const bool spread_applied =
+				r.yaw_bam == spread.yaw_bam && r.pitch_bam == spread.pitch_bam;
+		const bool unspread = r.yaw_bam == 0 && r.pitch_bam == 0;
+		if (!expect(c.spreads ? spread_applied : unspread, c.what)) return false;
+	}
 	return true;
 }
 
@@ -1016,6 +1078,7 @@ bool test_spawn_aimed_row_and_zero_elevation() {
 
 	w::World world;
 	world.registry.configure_pool(0, 4);
+	world.rules.mpattrib = 0x4204u; // the out-of-session rules word: spread on
 	w::PlayerSpawn seed;
 	seed.net_id = 42;
 	seed.equipped_adm_index = 1;
@@ -1054,7 +1117,7 @@ bool test_spawn_aimed_row_and_zero_elevation() {
 
 	world.round_sim.reset();
 	body->inf.recoil_pitch = 0;
-	world.round_sim.weapon_spread_enabled = false;
+	world.rules.mpattrib = 0; // the spread bit clear
 	params.subtype = 0x85;
 	const int zeroed = world.round_sim.spawn(world, params);
 	if (!expect(zeroed >= 0 &&
@@ -1312,6 +1375,7 @@ int main() {
 	if (!test_respawned_vehicle_takes_projectile_damage()) return 1;
 	if (!test_retail_random_spread_vectors()) return 1;
 	if (!test_spawn_spread_then_recoil()) return 1;
+	if (!test_spawn_spread_reads_the_rules_word()) return 1;
 	if (!test_unauthored_recoil_kicks_a_flying_round_only()) return 1;
 	if (!test_spawn_aimed_row_and_zero_elevation()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;

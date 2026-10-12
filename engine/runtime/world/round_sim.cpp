@@ -815,6 +815,15 @@ int32_t round_zero_elevation(const World &world, const RoundSpawnParams &params)
             : 0;
 }
 
+// The weapon-spread rule: the live rules word's 0x2000 in a session, 0x4000 out of one
+// (0x4204 carries it); a clear bit adds no offset, and recoil, the shotgun fan and the
+// ammo-def ERROR never read it. [orig: RoundData_SpawnRound - `cmp is_in_session` @0x4EC417,
+// `test g_RulesFlags, 2000h` @0x4EC41F / `4000h` @0x4EC442, the zero offsets
+// @0x4EC42B..0x4EC43D, the Weapon_CalcRandomSpreadOffset call @0x4EC4A7]
+bool weapon_spread_rule(const World &world) {
+    return (world.rules.mpattrib & (world.rules.mp_session ? 0x2000u : 0x4000u)) != 0;
+}
+
 // The shooter's Flags 0x800000 (its last BB state) at the spawn, the bit
 // every spawn leg stamps into its round; no source entity stamps nothing.
 // A decoded remote shooter reads its replica's Flags mirror.
@@ -1127,8 +1136,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         // Weapon ERROR is player-only and rule-gated. The current shot consumes
         // the PREVIOUS recoil accumulator; its own recoil is added after spawn.
         // Projectile row = verticalSpread ? 3 : stance category.
-        // [orig: RoundData_SpawnRound @0x4EC0D0]
-        if (source.player && weapon_spread_enabled) {
+        // [orig: RoundData_SpawnRound @0x4EC0D0 - the player and weapon tests
+        //  @0x4EC3A5 / @0x4EC3B6]
+        if (source.player && weapon_spread_rule(world)) {
             const bool vertical_spread = (params.subtype & 0x80u) != 0;
             const int category = std::min<int>(source.stance_category, 2);
             const int row = vertical_spread ? 3 : category;

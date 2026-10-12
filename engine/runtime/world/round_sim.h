@@ -655,11 +655,6 @@ public:
     // The MP NoTracers rules bit [orig: dword_24D1E34 & 1] — kills the tracer visual
     // unless FORCETRACER. SP hosts leave it false; the net seam wires it later.
     bool no_tracers_rule = false;
-    // Raw retail weapon-dispersion rules seam. Session rules bit 0x2000 and
-    // offline rules bit 0x4000 select this same helper gate; recoil, shotgun
-    // fans, and ammo-def fallback ERROR do not read it.
-    // [orig: RoundData_SpawnRound @0x4EC0D0]
-    bool weapon_spread_enabled = true;
 
     // Spawn one round at fire time [orig: RoundData_SpawnRound @ 0x4EC0D0 default path].
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
