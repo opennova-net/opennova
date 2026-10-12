@@ -224,6 +224,12 @@ int main() {
 		               rotation[1].flipped && rotation[1].one_shot && !rotation[1].current && rotation[1].next,
 		       "the marks, the file found before them from the end");
 		expect(admin_parse_mission_list("No missions in queue.").empty(), "no rotation");
+		const auto hostile = admin_parse_mission_list("abc\n: - (\n-1: x - ()\n0: A.BMS - () () () <> <>\n");
+		expect(hostile.size() == 1 && hostile[0].index == 0 && hostile[0].file == "A.BMS",
+		       "lines that are no entry (a negative index among them) are dropped");
+		const auto hostile_catalog = admin_parse_mission_available("abc\n. (\n-2. X.BMS (X)\n7. Y.BMS (Y)\n");
+		expect(hostile_catalog.size() == 1 && hostile_catalog[0].index == 7,
+		       "catalog lines that are no row (a negative index among them) are dropped");
 
 		const auto chat = admin_parse_chat_window("Server: hello \r\n  continued\r\nAnn: hi\r\n");
 		expect(chat == std::vector<std::string>({"Server: hello ", "  continued", "Ann: hi"}),

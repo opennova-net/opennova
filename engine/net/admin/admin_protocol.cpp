@@ -370,7 +370,7 @@ std::vector<AdminCatalogEntry> admin_parse_mission_available(std::string_view re
 		const size_t dot = line.find(". ");
 		if (dot == std::string_view::npos || line.empty() || line.back() != ')') continue;
 		const auto index = strutil::parse_int(std::string(line.substr(0, dot)));
-		if (!index) continue;
+		if (!index || *index < 0) continue; // the row index counts from 0
 		const std::string_view rest = line.substr(dot + 2);
 		size_t open = std::string_view::npos;
 		for (const char *ext : { ".bms (", ".npj (", ".npz (" }) {
@@ -401,7 +401,7 @@ std::vector<AdminRotationEntry> admin_parse_mission_list(std::string_view reply)
 		const size_t tags = line.rfind(" - (");
 		if (colon == std::string_view::npos || tags == std::string_view::npos || tags <= colon + 2) continue;
 		const auto index = strutil::parse_int(std::string(line.substr(0, colon)));
-		if (!index) continue;
+		if (!index || *index < 0) continue; // the entry index counts from 0
 		const std::string_view marks = line.substr(tags + 3);
 		AdminRotationEntry entry;
 		entry.index = *index;
