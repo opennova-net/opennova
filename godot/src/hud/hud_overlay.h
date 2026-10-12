@@ -374,6 +374,26 @@ public:
 	// The water mask the last set_minimap_terrain installed (a read seam the
 	// GUT presenter pins use; nothing else reads it).
 	Ref<Texture2D> get_minimap_water_mask() const;
+	// A picture the map draws under its marks in place of the terrain's colour
+	// map, laid over the sector grid as the colour map is (the commander map's
+	// compile samples the same texture slot): the OpenNova Editor's map
+	// backgrounds (ADR 0046 S25: a height, delta or flatness view of the
+	// terrain). Null restores the colour map the last set_minimap_terrain
+	// installed; the next set_minimap_terrain installs its own colour map.
+	// The picture's contract is the colour map's, which the slot assumes:
+	// - a 2x2 quadrant atlas laid as the colour map is, about 1024 pixels a
+	//   side: the compile maps each sector's id to a fixed 512-pixel quadrant
+	//   of a 1024-pixel atlas with a half-texel inset of 0.5 / 1024
+	//   (HudMinimapTerrain::atlas_px, cell_px), so a smaller picture samples
+	//   across its quadrants' edges;
+	// - its alpha is drawn as it is (the colour map is converted to RGB8 so
+	//   authored alpha cannot ghost the backing; a picture is not);
+	// - it takes the map's terrain tint, and the water cutout of the mask
+	//   set_minimap_terrain installed is drawn over it (install the terrain
+	//   with a null mask for none).
+	void set_minimap_terrain_picture(const Ref<Texture2D> &p_picture);
+	// What the map draws under its marks now (the picture, else the colour map).
+	Ref<Texture2D> get_minimap_terrain_picture() const;
 	void set_minimap_state(const Vector2 &p_mission_position,
 			float p_altitude_wu, int64_t p_heading_bam, int p_zoom_q16,
 			int p_big_zoom_q16, int p_map_mode, bool p_flip_180,
@@ -509,6 +529,9 @@ private:
 	opennova::hud::HudItemFlash item_flash_;
 	Ref<ResourceRoot> root_;
 	std::array<Ref<Texture2D>, kTextureSlots> textures_;
+	// The colour map the last set_minimap_terrain installed, which a terrain
+	// picture set aside (set_minimap_terrain_picture) gives back.
+	Ref<Texture2D> minimap_colormap_;
 	// Font glyph pages, one namespace per compiler font slot
 	// (opennova::hud::kHudFontSlot*): slot * FNT_MAX_PAGES + page.
 	std::array<Ref<Texture2D>, opennova::hud::kHudFontSlotCount * opennova::fnt::FNT_MAX_PAGES>

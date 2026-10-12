@@ -32,19 +32,25 @@ std::string web_session_token_hash(std::string_view token) {
 	return io::sha256_hex(io::sha256(token));
 }
 
-std::string create_web_session(db::Database &db, int64_t user_id, const std::string &ip,
-                               const std::string &user_agent) {
+std::optional<std::string> create_web_session(db::Database &db, int64_t user_id,
+		int64_t credentials_gen, const std::string &ip, const std::string &user_agent) {
 	std::array<uint8_t, kWebSessionTokenBytes> raw{};
 	os_random_bytes(raw.data(), raw.size());
 	const std::string token = strutil::bytes_to_hex(raw.data(), raw.size());
 	db::Transaction tx(db);
-	db.exec(
-		"INSERT INTO web_sessions "
-		"(token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent) "
-		"VALUES (?, ?, datetime('now'), datetime('now', ?), datetime('now'), ?, ?);",
-		{db::BindValue(web_session_token_hash(token)), db::BindValue(user_id),
-		 db::BindValue(seconds_modifier(kWebSessionLifetimeSeconds)), db::BindValue(ip),
-		 db::BindValue(user_agent)});
+	// One statement: the generation and status it tests are the ones the
+	// session is written against (update_user moves the generation and deletes
+	// the sessions in one transaction, before or after this one).
+	db.exec("INSERT INTO web_sessions "
+			"(token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent) "
+			"SELECT ?, id, datetime('now'), datetime('now', ?), datetime('now'), ?, ? "
+			"FROM players WHERE id = ? AND credentials_gen = ? AND account_status = 'active';",
+			{ db::BindValue(web_session_token_hash(token)),
+					db::BindValue(seconds_modifier(kWebSessionLifetimeSeconds)), db::BindValue(ip),
+					db::BindValue(user_agent), db::BindValue(user_id),
+					db::BindValue(credentials_gen) });
+	if (db.changes() == 0)
+		return std::nullopt;
 	// The account's newest kWebSessionsPerUser stay; the oldest beyond them go.
 	// rowid orders sessions minted within one second.
 	db.exec(
@@ -69,10 +75,10 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 	if (rows.empty()) return std::nullopt;
 	const auto &row = rows.front();
 	// A banned or restricted account keeps no session: the game login refuses
-	// every status but 'active', and so does the site. An empty status reads as
-	// 'active', as row_to_user (auth.cpp) and the game login read it.
+	// every status but 'active', and so does the site. (The schema refuses an
+	// empty status, so 'active' alone is active.)
 	const std::string status = row.as_text(3).value_or("");
-	if (!status.empty() && status != "active") {
+	if (status != "active") {
 		db.exec("DELETE FROM web_sessions WHERE token_hash = ?;", {db::BindValue(hash)});
 		return std::nullopt;
 	}

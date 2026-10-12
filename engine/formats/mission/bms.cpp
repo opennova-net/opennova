@@ -2,6 +2,7 @@
 #include <formats/mission/bms.h>
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
+#include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
@@ -251,13 +252,14 @@ bool parse_entity(io::ByteReader& r, Entity& e, std::string& error) {
     }
 
     // .mis-interchange defaults for a BMS-sourced entity (transient; NOT part of the 172-byte
-    // record read above). BMS entity z is always absolute (engine spawn extractor,
-    // docs/mission/bms-event-runtime-re.md §6.6), so a .mis export of this entity must declare
-    // height_lock, else the original editor treats z as terrain-relative and the object floats
-    // by the local terrain height [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll —
-    // scene Y = z/65536 - (height_lock ? extra_bheight/65536 : 0)].
+    // record read above): unlocked, its base 0. The original editor reads no .bms; this is the
+    // editor's reading of its frames (D-MIS-4): its .bms export's undo takes every item's z back
+    // to the document's frame, the terrain's height off [orig: JOTACmed.exe sub_44E5F0 @
+    // 0x44e5f0, from @ 0x450cf2], and an item it did not lock is unlocked, as its new item is
+    // (the record zeroed, MissionItem_AppendByTypeId @ 0x455954). Its new item's base is its
+    // placement height (@ 0x455a16), which a .bms does not hold: 0 here.
     e.mis_extra_bheight = 0;
-    e.mis_height_lock = 1;
+    e.mis_height_lock = 0;
 
     return true;
 }
@@ -599,12 +601,14 @@ bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_
 bool loadout_has_fourth_field(const std::string& value) {
     if (value.empty()) return false;
     if (io::retail_atol(value.c_str()) != 0) return true;
-    // ASCII letters, where retail's isalpha @0x40d0b4 is the ".ACP" class (cp1252's
-    // high-byte letters too; docs/net/novaworld-net-re.md D-NET-391, open).
+    // After one sign, any letter by the CRT isalpha under the ".ACP" LC_CTYPE, pinned to
+    // cp1252 (D-NET-478), on the sign-extended byte: a cp1252 high-byte letter marks the
+    // field missing too, and 0xFF, the EOF row, does not (docs/net/novaworld-net-re.md
+    // D-NET-391). [orig: AIProfile_SanitizeConfigData @0x40cfe0 — the sign @0x40d098..0x40d0a3,
+    //  _isalpha @0x76b703 of the movsx'd byte, the call @0x40d0b4]
     size_t pos = (value[0] == '-' || value[0] == '+') ? 1 : 0;
     for (; pos < value.size(); ++pos) {
-        const unsigned char c = static_cast<unsigned char>(value[pos]);
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) return false;
+        if (cp1252_isalpha_sign_extended(value[pos])) return false;
     }
     return true;
 }
@@ -882,6 +886,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     // A failed attempt to reuse a File must not leave the previous source
     // header eligible for later network emission.
     out.has_loaded_header_blob_ = false;
+    out.mis_frame = MisFrame::Bms;
     if (!is_bms(data, size)) {
         error = "Not a BMS file (invalid magic)";
         return false;
@@ -1332,6 +1337,9 @@ bool item_availability_equal(const std::vector<ItemAvailabilityEntry>& a,
 } // namespace
 
 bool equal(const File& a, const File& b) {
+    if (a.mis_frame != b.mis_frame) {
+        return false;
+    }
     // Header is packed (static_assert sizeof == 616); a byte compare is exact and includes the
     // count fields. The body comparisons below are over the actual vectors, so they detect a
     // change even when a header count is momentarily out of sync with its vector (sync_counts runs

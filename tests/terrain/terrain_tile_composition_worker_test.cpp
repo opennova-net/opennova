@@ -68,10 +68,10 @@ bool settle(const TerrainTileCompositionWorker &worker, std::size_t expected_com
 
 std::shared_ptr<TerrainTileCompositionWorker::SourceSnapshot> solid_sources() {
 	auto snapshot = std::make_shared<TerrainTileCompositionWorker::SourceSnapshot>();
-	snapshot->colormap = opennova::terrain::build_terrain_tile_quadrant_source(
-			solid_image(2, 2, { 0, 0, 0, 255 }));
-	snapshot->heightfield_normal = opennova::terrain::build_terrain_tile_quadrant_source(
-			solid_image(2, 2, { 128, 128, 255, 128 }));
+	snapshot->colormap = std::make_shared<const opennova::terrain::TerrainTileQuadrantSource>(
+			opennova::terrain::build_terrain_tile_quadrant_source(solid_image(2, 2, { 0, 0, 0, 255 })));
+	snapshot->heightfield_normal = std::make_shared<const opennova::terrain::TerrainTileQuadrantSource>(
+			opennova::terrain::build_terrain_tile_quadrant_source(solid_image(2, 2, { 128, 128, 255, 128 })));
 	return snapshot;
 }
 

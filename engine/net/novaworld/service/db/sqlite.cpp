@@ -3,8 +3,10 @@
 #include <sqlite3.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <utility>
 
@@ -14,12 +16,37 @@ namespace opennova::db {
 // SqliteError
 // ----------------------------------------------------------------------------
 
-SqliteError::SqliteError(int code, std::string message)
-	: std::runtime_error(std::move(message)), code_(code) {}
+SqliteError::SqliteError(int code, std::string message) :
+		SqliteError(code, code, std::nullopt, std::move(message)) {}
+
+SqliteError::SqliteError(
+		int code, int extended_code, std::optional<int64_t> elapsed_ms, std::string message) :
+		std::runtime_error(std::move(message)),
+		code_(code),
+		extended_code_(extended_code),
+		elapsed_ms_(elapsed_ms) {}
 
 namespace {
 
-[[noreturn]] void throw_sqlite(sqlite3 *handle, int rc, std::string_view ctx) {
+using Clock = std::chrono::steady_clock;
+
+// The error the failed call that returned `rc` left on `handle`: its message
+// and extended code, read before anything else runs on the connection, and
+// for a busy or locked failure the time since `started` (when the failing
+// prepare or step began) when the caller timed it. A busy timeout that ran out
+// shows about the whole timeout, a lock sqlite refused without waiting about
+// none.
+SqliteError sqlite_error(sqlite3 *handle, int rc, std::string_view ctx,
+		std::optional<Clock::time_point> started = std::nullopt) {
+	int extended = handle ? sqlite3_extended_errcode(handle) : rc;
+	if ((extended & 0xff) != (rc & 0xff))
+		extended = rc; // not this call's error
+	std::optional<int64_t> elapsed_ms;
+	const int primary = rc & 0xff;
+	if (started && (primary == SQLITE_BUSY || primary == SQLITE_LOCKED)) {
+		const auto elapsed = Clock::now() - *started;
+		elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+	}
 	std::ostringstream os;
 	os << "sqlite error " << rc;
 	if (handle) {
@@ -28,10 +55,33 @@ namespace {
 			os << " (" << msg << ")";
 		}
 	}
+	os << " [extended " << extended;
+	if (elapsed_ms)
+		os << ", after " << *elapsed_ms << " ms";
+	os << "]";
 	if (!ctx.empty()) {
 		os << " — " << ctx;
 	}
-	throw SqliteError(rc, os.str());
+	return SqliteError(rc, extended, elapsed_ms, os.str());
+}
+
+[[noreturn]] void throw_sqlite(sqlite3 *handle, int rc, std::string_view ctx) {
+	throw sqlite_error(handle, rc, ctx);
+}
+
+// A prepared statement, finalized however its scope ends: a bind, step or row
+// copy that throws would otherwise leak it, and sqlite3_close_v2 leaves a
+// connection with an unfinalized statement open as a zombie. A throw reads the
+// failed call's error in its operand, before unwinding finalizes the statement.
+struct StatementFinalizer {
+	void operator()(sqlite3_stmt *stmt) const { sqlite3_finalize(stmt); }
+};
+using Statement = std::unique_ptr<sqlite3_stmt, StatementFinalizer>;
+
+Statement prepare(sqlite3 *handle, std::string_view sql, int &rc) {
+	sqlite3_stmt *stmt = nullptr;
+	rc = sqlite3_prepare_v2(handle, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
+	return Statement(stmt);
 }
 
 void bind_at(sqlite3_stmt *stmt, int i, const BindValue &v) {
@@ -106,27 +156,35 @@ bool Row::is_null(std::size_t i) const {
 // Database
 // ----------------------------------------------------------------------------
 
-Database::Database(const std::filesystem::path &path) {
+Database::Database(const std::filesystem::path &path, int busy_timeout_ms) {
 	const std::string utf8 = path.string();
 	const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_URI;
 	int rc = sqlite3_open_v2(utf8.c_str(), &handle_, flags, nullptr);
 	if (rc != SQLITE_OK) {
 		// `handle_` may be non-null even on open failure — sqlite3_close_v2
-		// is the documented cleanup.
+		// is the documented cleanup, after the error is read off it.
 		sqlite3 *bad = handle_;
 		handle_ = nullptr;
-		std::string ctx = "open " + utf8;
-		if (bad) {
-			std::string msg = std::string("sqlite open failed: ") + sqlite3_errmsg(bad);
+		SqliteError error = sqlite_error(bad, rc, "open " + utf8);
+		if (bad)
 			sqlite3_close_v2(bad);
-			throw SqliteError(rc, msg + " — " + ctx);
-		}
-		throw SqliteError(rc, "sqlite open failed — " + ctx);
+		throw error;
 	}
 	// Useful pragmas for an embedded server.
-	sqlite3_busy_timeout(handle_, /*ms*/ 5000);
+	sqlite3_busy_timeout(handle_, busy_timeout_ms);
 	sqlite3_exec(handle_, "PRAGMA foreign_keys=ON;", nullptr, nullptr, nullptr);
 	sqlite3_exec(handle_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+	// Per connection (the file does not keep it). Under WAL, NORMAL syncs the
+	// WAL before each checkpoint rather than at every commit as FULL (the
+	// default) does, so most commits hold the write lock for no fsync. The
+	// exception is the first commit after each WAL restart, which writes and
+	// syncs the new WAL header with the lock held. Writers that take the lock
+	// back to back (and the busy handler polls, so a waiter can starve behind
+	// them) then no longer pay a loaded disk's fsync each, which at FULL could
+	// add up past the busy timeout. The file stays consistent; a power loss or
+	// OS crash (not a process crash) can roll back the last commits before it,
+	// which this service's disposable database accepts.
+	sqlite3_exec(handle_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
 }
 
 Database::~Database() {
@@ -135,15 +193,19 @@ Database::~Database() {
 	}
 }
 
-Database::Database(Database &&other) noexcept : handle_(other.handle_) {
+Database::Database(Database &&other) noexcept :
+		handle_(other.handle_), in_read_snapshot_(other.in_read_snapshot_) {
 	other.handle_ = nullptr;
+	other.in_read_snapshot_ = false;
 }
 
 Database &Database::operator=(Database &&other) noexcept {
 	if (this != &other) {
 		if (handle_) sqlite3_close_v2(handle_);
 		handle_ = other.handle_;
+		in_read_snapshot_ = other.in_read_snapshot_;
 		other.handle_ = nullptr;
+		other.in_read_snapshot_ = false;
 	}
 	return *this;
 }
@@ -153,29 +215,28 @@ void Database::exec(std::string_view sql) {
 }
 
 void Database::exec(std::string_view sql, const std::vector<BindValue> &binds) {
-	sqlite3_stmt *stmt = nullptr;
-	int rc = sqlite3_prepare_v2(handle_, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
+	const Clock::time_point prepare_started = Clock::now();
+	int rc = SQLITE_OK;
+	const Statement stmt = prepare(handle_, sql, rc);
 	if (rc != SQLITE_OK) {
-		throw_sqlite(handle_, rc, std::string("prepare: ") + std::string(sql));
+		throw sqlite_error(
+				handle_, rc, std::string("prepare: ") + std::string(sql), prepare_started);
 	}
 	for (std::size_t i = 0; i < binds.size(); ++i) {
-		bind_at(stmt, static_cast<int>(i + 1), binds[i]);
+		bind_at(stmt.get(), static_cast<int>(i + 1), binds[i]);
 	}
-	rc = sqlite3_step(stmt);
-	sqlite3_finalize(stmt);
+	const Clock::time_point step_started = Clock::now();
+	rc = sqlite3_step(stmt.get());
 	if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
-		throw_sqlite(handle_, rc, std::string("exec: ") + std::string(sql));
+		throw sqlite_error(handle_, rc, std::string("exec: ") + std::string(sql), step_started);
 	}
 }
 
 void Database::exec_script(std::string_view sql_script) {
-	char *err = nullptr;
 	const std::string copy(sql_script); // sqlite3_exec needs NUL-terminated
-	int rc = sqlite3_exec(handle_, copy.c_str(), nullptr, nullptr, &err);
+	int rc = sqlite3_exec(handle_, copy.c_str(), nullptr, nullptr, nullptr);
 	if (rc != SQLITE_OK) {
-		std::string msg = err ? err : "(no message)";
-		sqlite3_free(err);
-		throw SqliteError(rc, "exec_script: " + msg);
+		throw_sqlite(handle_, rc, "exec_script");
 	}
 }
 
@@ -184,36 +245,39 @@ std::vector<Row> Database::query(std::string_view sql) {
 }
 
 std::vector<Row> Database::query(std::string_view sql, const std::vector<BindValue> &binds) {
-	sqlite3_stmt *stmt = nullptr;
-	int rc = sqlite3_prepare_v2(handle_, sql.data(), static_cast<int>(sql.size()), &stmt, nullptr);
+	const Clock::time_point prepare_started = Clock::now();
+	int rc = SQLITE_OK;
+	const Statement stmt = prepare(handle_, sql, rc);
 	if (rc != SQLITE_OK) {
-		throw_sqlite(handle_, rc, std::string("prepare: ") + std::string(sql));
+		throw sqlite_error(
+				handle_, rc, std::string("prepare: ") + std::string(sql), prepare_started);
 	}
 	for (std::size_t i = 0; i < binds.size(); ++i) {
-		bind_at(stmt, static_cast<int>(i + 1), binds[i]);
+		bind_at(stmt.get(), static_cast<int>(i + 1), binds[i]);
 	}
 
-	const int ncol = sqlite3_column_count(stmt);
+	const int ncol = sqlite3_column_count(stmt.get());
 	std::vector<std::string> columns;
 	columns.reserve(ncol);
 	for (int i = 0; i < ncol; ++i) {
-		const char *name = sqlite3_column_name(stmt, i);
+		const char *name = sqlite3_column_name(stmt.get(), i);
 		columns.emplace_back(name ? name : "");
 	}
 
 	std::vector<Row> out;
-	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+	Clock::time_point step_started = Clock::now();
+	while ((rc = sqlite3_step(stmt.get())) == SQLITE_ROW) {
 		Row row;
 		row.columns = columns;
 		row.values.reserve(ncol);
 		for (int i = 0; i < ncol; ++i) {
-			row.values.push_back(column_value(stmt, i));
+			row.values.push_back(column_value(stmt.get(), i));
 		}
 		out.push_back(std::move(row));
+		step_started = Clock::now();
 	}
-	sqlite3_finalize(stmt);
 	if (rc != SQLITE_DONE) {
-		throw_sqlite(handle_, rc, std::string("query: ") + std::string(sql));
+		throw sqlite_error(handle_, rc, std::string("query: ") + std::string(sql), step_started);
 	}
 	return out;
 }
@@ -247,6 +311,11 @@ constexpr const char *kNestedTransaction = "opennova_tx";
 } // namespace
 
 Transaction::Transaction(Database &db) : db_(db), nested_(db.in_transaction()) {
+	if (db_.in_read_snapshot_) {
+		// Its writes would upgrade the snapshot's read, which never waits on
+		// the busy timeout (sqlite.h, Transaction).
+		throw SqliteError(SQLITE_MISUSE, "a Transaction inside a ReadSnapshot");
+	}
 	db_.exec(nested_ ? std::string("SAVEPOINT ") + kNestedTransaction + ";"
 	                 : std::string("BEGIN IMMEDIATE;"));
 }
@@ -280,11 +349,15 @@ void Transaction::commit() {
 // ----------------------------------------------------------------------------
 
 ReadSnapshot::ReadSnapshot(Database &db) : db_(db), open_(!db.in_transaction()) {
-	if (open_) db_.begin();
+	if (!open_)
+		return;
+	db_.begin();
+	db_.in_read_snapshot_ = true;
 }
 
 ReadSnapshot::~ReadSnapshot() {
 	if (!open_) return;
+	db_.in_read_snapshot_ = false;
 	try {
 		db_.commit();
 	} catch (const SqliteError &) {
@@ -344,7 +417,8 @@ ConnectionPool::Lease::~Lease() {
 	if (db_) pool_->release(std::move(db_));
 }
 
-ConnectionPool::ConnectionPool(std::filesystem::path path) : path_(std::move(path)) {
+ConnectionPool::ConnectionPool(std::filesystem::path path, int busy_timeout_ms) :
+		path_(std::move(path)), busy_timeout_ms_(busy_timeout_ms) {
 	if (opens_private_database(path_.string())) {
 		throw SqliteError(SQLITE_MISUSE,
 		                  "connection pool over a private database '" + path_.string() +
@@ -363,7 +437,7 @@ ConnectionPool::Lease ConnectionPool::acquire() {
 	}
 	// Open outside the lock so a slow open does not stall other threads'
 	// acquire().
-	return Lease(*this, std::make_unique<Database>(path_));
+	return Lease(*this, std::make_unique<Database>(path_, busy_timeout_ms_));
 }
 
 void ConnectionPool::release(std::unique_ptr<Database> db) {
