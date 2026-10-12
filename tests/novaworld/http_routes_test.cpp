@@ -1242,6 +1242,13 @@ int test_untrusted_proxy_header_ignored(Harness &h) {
 // generation.
 constexpr uint32_t kConcurrentRid = 2000;
 constexpr int kConcurrentRegistrations = 16;
+// The host writes run back to back, each re-taking the write lock moments after
+// the last COMMIT, and SQLite's busy handler polls (1 ms sleeps growing to
+// 100 ms) rather than queueing, so a registration's BEGIN IMMEDIATE can starve
+// behind the whole run. The pool keeps the server's busy timeout, so that run
+// must fit inside it: at synchronous=FULL every commit fsynced the WAL, and on
+// a loaded disk (WSL2's, under a parallel build) the run once outlasted 5 s
+// and 13 of the 16 registrations failed "database is locked".
 constexpr int kHostGenerations = 40;
 // The case checks that the replies are each request's own and consistent, not
 // how fast they come: the bcrypt registrations queue behind Crow's few workers
@@ -3293,6 +3300,49 @@ int test_host_tag_serves_once(Harness &h) {
 	return 0;
 }
 
+// A database failure's reply is its error code and nothing else: the
+// SqliteError's text names the failing statement ("exec: INSERT INTO players
+// ..."), its extended code and its wait, and goes to the server log alone. A
+// trigger fails each route's write the way any SqliteError does: POST
+// /api/register (the public route, create_user's db_error), PUT
+// /api/admin/server-status and POST /api/admin/hosts (its upsert_failed).
+// Nothing lands.
+int test_db_failure_reply_carries_code_alone(Harness &h) {
+	const char *const triggers[][2] = {
+		{ "harness_fail_players", "players" },
+		{ "harness_fail_server_status", "server_status" },
+		{ "harness_fail_active_hosts", "active_hosts" },
+	};
+	for (const auto &t : triggers) {
+		h.pool.acquire()->exec(std::string("CREATE TRIGGER ") + t[0] + " BEFORE INSERT ON " + t[1] +
+				" BEGIN SELECT RAISE(ABORT, 'harness forced failure'); END;");
+	}
+	auto refused = [](const net::HttpReply &reply, const char *want) {
+		if (reply.transport_ok && reply.code == 500 && body_text(reply) == want)
+			return true;
+		std::fprintf(stderr, "  %s, want HTTP 500 %s\n", describe(reply).c_str(), want);
+		return false;
+	};
+	const auto users_before = nws::list_users(*h.pool.acquire()).size();
+	const auto status_before = nws::get_server_status(*h.pool.acquire());
+
+	TEST_EXPECT(refused(h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.43.0.1") },
+								credentials("db_failure", "pw-db-failure")),
+			"{\"error\":\"db_error\"}"));
+	TEST_EXPECT(refused(h.send("PUT", "/api/admin/server-status", { kBearer, kJson },
+								"{\"maintenance_enabled\":false,\"message\":\"never\"}"),
+			"{\"error\":\"db_error\"}"));
+	TEST_EXPECT(refused(h.send("POST", "/api/admin/hosts", { kBearer, kJson }, "{\"rid\":4343}"),
+			"{\"error\":\"upsert_failed\"}"));
+
+	for (const auto &t : triggers)
+		h.pool.acquire()->exec(std::string("DROP TRIGGER ") + t[0] + ";");
+	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == users_before);
+	TEST_EXPECT(nws::get_server_status(*h.pool.acquire()).message == status_before.message);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM active_hosts WHERE rid = 4343;").empty());
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
@@ -3339,6 +3389,7 @@ int run(Harness &h) {
 		{ "register_handle_rule", test_register_handle_rule },
 		{ "login_row_kept_alive", test_login_row_kept_alive },
 		{ "host_tag_serves_once", test_host_tag_serves_once },
+		{ "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
 		{ "concurrent_requests", test_concurrent_requests },
 	};
 	for (const Case &c : cases) {
@@ -3361,6 +3412,9 @@ int main() {
 		// Declared first, so it outlives the pool and the listener: the database
 		// file and its WAL siblings go only once every connection is closed.
 		test_temp::TempDir temp("http_routes");
+		// The server's own busy timeout (kDefaultBusyTimeoutMs), unlike
+		// db_concurrency_test's stress margin: a write that holds the lock past
+		// it fails here as it would in production.
 		ConnectionPool pool(temp.path / "novaworld.db");
 		{
 			auto boot = pool.acquire();
