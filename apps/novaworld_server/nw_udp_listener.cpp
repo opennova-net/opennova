@@ -77,7 +77,7 @@ std::string hex_sig(uint32_t value, int min_width = 2) {
 // the value goes onto the wire as plain LE — what matters is how the
 // receiver interprets the four payload bytes as octets.
 
-// make_dev_scrk / make_dev_nwuid / make_random_session_u32 and the NW-UDP
+// make_dev_scrk / make_dev_nwuid / make_session_key and the NW-UDP
 // envelope transform (nw_decode_inbound / nw_encode_outbound) moved to
 // engine/net/novaworld nw_session_framing.h so the standalone server's lobby path and
 // the consolidated HostSessionAccept share exactly one definition.
@@ -263,7 +263,12 @@ void NwUdpListener::initialize_jo_host() {
 
 	// A loaded mission normally supplies this marker. The standalone gate has
 	// no mission path, so its minimal authoritative world uses the spawn
-	// pipeline's ordinary start-marker input at the origin.
+	// pipeline's ordinary start-marker input at the origin. It loads no
+	// items.def either, so the start has no ItemTypeIndex and the 0x20 page
+	// streams its slot as an empty one, as a host whose items.def lacked the
+	// row would (D-NET-416). Nothing reads that copy: the start's reader is the
+	// spawn resolve (world::resolve_player_spawn_pose), which runs on the host's
+	// own registry, never on a streamed row.
 	world::Entity start;
 	start.kind = world::EntityKind::Marker;
 	start.item_id = 6002;
@@ -881,8 +886,10 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			//
 			// Keyed by PeerAddr (G.7): two retail processes both send
 			// ci=0x00000001, so keying by ci would have the second AUTH
-			// overwrite the first's per-connection state.
-			const uint32_t server_sk = make_random_session_u32();
+			// overwrite the first's per-connection state. The SK is drawn
+			// until nonzero. [orig: NapiNPProtocol_HandleClientJoin @0x62BF5E
+			//  -> NapiNP_GenerateSessionKey]
+			const uint32_t server_sk = make_session_key();
 			ServerAuth reply = build_server_auth(auth, client_ip_net,
 			                                     client_port, server_sk,
 			                                     server_scrk,

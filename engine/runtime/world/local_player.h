@@ -40,6 +40,19 @@ public:
     LocalPlayerLoadout loadout;
     WeaponInventory inventory;
     bool inventory_valid = false;
+    // Whether the local player holds an EquippedSlot (entity+0x118): the
+    // personal slot its selects store, the spawn's at the boot's
+    // Player_InitPlayer leg ahead of the mission start's WAC pass, or a
+    // carrier slot it borrowed, which a seat-2/3 detach keeps until the
+    // queued switch back commits. [orig: Player_SelectWeaponSlot @0x4DD704 /
+    //  @0x4DD7D2 (Player_InitPlayer's call @0x4E1995); the borrow
+    //  Entity_AttachToVehicleSlot @0x494875 / Entity_AttachToUseGunSlot
+    //  @0x546C4E; the switch commits WeaponAction_SwitchFrom @0x543475 /
+    //  WeaponAction_SwitchRank @0x543539; the detach's queued restore
+    //  Entity_DetachFromVehicle @0x43565F]
+    bool equipped_slot_held() const {
+        return (inventory_valid && inventory.equipped_combo >= 0) || weapon.usegun_slot_active;
+    }
     PlayerViewState view;
     // The radar contact table, edge timers, sector rings and missile list the
     // damage/whiz/missile legs fill and the spinmap's bit-10 legs draw

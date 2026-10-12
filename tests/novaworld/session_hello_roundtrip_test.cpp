@@ -8,12 +8,15 @@
 // Godot client and the standalone server stay byte-compatible without us
 // having to launch retail every iteration.
 
+#include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_ping.h>
 
 #include "../common/test_expect.h"
 
 #include <array>
+#include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -64,6 +67,27 @@ bool has_tlv_field(const std::vector<uint8_t> &bytes, const std::string &wanted)
 		pos = next;
 	}
 	return false;
+}
+
+// `bytes` with every field named `unwanted` left out, the rest as written.
+std::vector<uint8_t> without_tlv_field(const std::vector<uint8_t> &bytes, const std::string &unwanted) {
+	std::vector<uint8_t> out;
+	size_t pos = 0;
+	while (pos < bytes.size()) {
+		size_t name_end = pos;
+		while (name_end < bytes.size() && bytes[name_end] != 0) ++name_end;
+		if (name_end + 2 >= bytes.size()) break;
+		const uint16_t value_size = static_cast<uint16_t>(bytes[name_end + 1]) |
+		                            (static_cast<uint16_t>(bytes[name_end + 2]) << 8);
+		const size_t next = name_end + 3 + value_size;
+		if (next > bytes.size()) break;
+		const std::string name(reinterpret_cast<const char *>(bytes.data() + pos), name_end - pos);
+		if (name != unwanted)
+			out.insert(out.end(), bytes.begin() + static_cast<std::ptrdiff_t>(pos),
+			           bytes.begin() + static_cast<std::ptrdiff_t>(next));
+		pos = next;
+	}
+	return out;
 }
 
 std::vector<std::string> tlv_field_names(const std::vector<uint8_t> &bytes) {
@@ -721,6 +745,20 @@ int test_client_auth_zero_ck_parses() {
 	return 0;
 }
 
+// A session key is drawn until it is nonzero: a draw of {0, 0, 9} keys 9 on the third draw,
+// and a nonzero first draw is kept as drawn.
+// [orig: NapiNP_GenerateSessionKey @0x61EA70 - jz @0x61EAC3]
+int test_session_key_draws_until_nonzero() {
+	const std::array<uint32_t, 3> draws{0u, 0u, 9u};
+	size_t next = 0;
+	TEST_EXPECT(opennova::make_session_key([&]() { return draws[next++]; }) == 9u);
+	TEST_EXPECT(next == 3);
+	next = 2;
+	TEST_EXPECT(opennova::make_session_key([&]() { return draws[next++]; }) == 9u && next == 3);
+	TEST_EXPECT(opennova::make_session_key() != 0);
+	return 0;
+}
+
 int test_server_auth_rejection_roundtrip() {
 	ServerAuth src;
 	src.ci = 7;
@@ -786,6 +824,48 @@ int test_server_auth_requires_no_field() {
 	TEST_EXPECT(!has_tlv_field(bytes, "JFC"));
 	TEST_EXPECT(parse_server_auth(bytes.data(), bytes.size(), auth));
 	TEST_EXPECT(auth.cr == 1u && auth.jfc == 1u);
+	return 0;
+}
+
+// No field of the 0x81 is required: one without HK parses with HK 0 (an empty body too), and
+// the 0x42 built from it carries no HK, as retail's join omits a zero one. The client then
+// tests the reply's identity block against its own protocol's: PN and PV1 case-insensitively,
+// PG bytewise.
+// [orig: Nwu_HandleServerHello @0x626D20 - HK zeroed @0x626E97, PN @0x62758B, PG
+//  @0x627591..0x627624, PV1 @0x627643; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK
+//  gate @0x6200F2]
+int test_server_hello_requires_no_hk() {
+	const ClientHello local = opennova::make_jointoperations_client_hello(7);
+	ServerHello written = opennova::build_server_hello(local, 0x7F000001u, 32768);
+	written.hk = 0x0FE0E115u;
+	written.sn = "NoKeyHost";
+	const auto full = server_hello_to_bytes(written);
+	const auto hk_less = without_tlv_field(full, "HK");
+	TEST_EXPECT(has_tlv_field(full, "HK") && !has_tlv_field(hk_less, "HK"));
+	ServerHello parsed;
+	parsed.hk = 0xFFFFFFFFu;
+	TEST_EXPECT(parse_server_hello(hk_less.data(), hk_less.size(), parsed));
+	TEST_EXPECT(parsed.hk == 0 && parsed.ci == 7 && parsed.sn == "NoKeyHost");
+	TEST_EXPECT(opennova::server_hello_matches_identity(parsed, local));
+	const ClientAuth join = opennova::make_jointoperations_client_auth(
+			7, 0x1234ABCDu, parsed.hk, "NoKeyJoiner", "SCRK");
+	TEST_EXPECT(!has_tlv_field(client_auth_to_bytes(join), "HK"));
+	TEST_EXPECT(parse_server_hello(nullptr, 0, parsed) && parsed.hk == 0 && parsed.ci == 0);
+	TEST_EXPECT(!parse_server_hello(nullptr, 4, parsed));
+
+	ServerHello other = written;
+	other.pn = "jointoperations";
+	other.pv1 = local.pv1;
+	for (char &c : other.pv1) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	TEST_EXPECT(opennova::server_hello_matches_identity(other, local));
+	other.pn = "NOVAWORLDUDP";
+	TEST_EXPECT(!opennova::server_hello_matches_identity(other, local));
+	other = written;
+	other.pg[15] ^= 1u;
+	TEST_EXPECT(!opennova::server_hello_matches_identity(other, local));
+	other = written;
+	other.pv1 += "x";
+	TEST_EXPECT(!opennova::server_hello_matches_identity(other, local));
 	return 0;
 }
 
@@ -958,10 +1038,12 @@ int main() {
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_client_auth_zero_ck_parses() != 0) return 1;
+	if (test_session_key_draws_until_nonzero() != 0) return 1;
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	if (test_server_auth_requires_no_field() != 0) return 1;
+	if (test_server_hello_requires_no_hk() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
 	if (test_server_hello_omitted_metadata_parses_empty() != 0) return 1;
 	if (test_server_hello_game_metadata_has_retail_order() != 0) return 1;

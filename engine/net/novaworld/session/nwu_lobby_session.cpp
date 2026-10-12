@@ -4,7 +4,7 @@
 #include <net/napi/session.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/lobby_vars.h> // parse_host_port
-#include <net/npwire/nw_session_framing.h> // make_random_session_u32
+#include <net/npwire/nw_session_framing.h> // make_random_session_u32 / make_session_key
 #include <net/npwire/session_keys.h>      // the server-direction opcodes
 
 #include <cstdlib>
@@ -59,7 +59,9 @@ void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	gate_socket_ = &gate;
 	session_socket_ = &session;
 	client_index_ = random_u32();
-	client_key_ = random_u32();
+	// The CK is a session key, drawn until nonzero.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey]
+	client_key_ = make_session_key([this]() { return random_u32(); });
 	session_.reset();
 	gate_resolved_ = false;
 	probe_sent_ = false;
@@ -260,7 +262,7 @@ void NwuLobbySession::begin_session() {
 	cfg.glsvss_agrms_ms = gate_response_.glsvss_agrms;
 	// The "Cookie" var-list every Cookie-bearing statement re-serializes.
 	cfg.cookie_vars = hooks_.cookie_vars;
-	// A reconnect's re-join mints a fresh client key (the client index stays).
+	// A reconnect's re-join mints a fresh client key (the client index stays) from this draw.
 	cfg.next_client_key = [this]() { return random_u32(); };
 
 	session_ = std::make_unique<ClientSession>(cfg);

@@ -2250,6 +2250,29 @@ int main() {
 			if (!expect(m.tag != 0x5A && m.tag != 0x61,
 			            "alive deployed 0x0E draws no release bundle"))
 				return 1;
+		// Out of a session the same alive, unheld request deploys at once, the
+		// +360 delay untested and left as it stood (D-NET-460); the deploy sends
+		// its 0x61 and, out of a session, no 0x5A.
+		// [orig: Server_ProcessClientRequestRespawn @0x519CD0..0x519CE3;
+		//  Server_ProcessPlayerDeath -- is_in_session @0x5178E9 / @0x5178EF ahead
+		//  of the 0x5A @0x5178F2, the Server_SendRandomSeedToPlayer call @0x51796D]
+		world.rules.mp_session = false;
+		conn.link.respawn_delay_seconds = 5;
+		je = world.registry.get(jb);
+		je->position = {40.0f, 40.0f, 0.0f};
+		const std::vector<ProtocolMessage> out_of_session = inmatch::dispatch_session_replies(
+				inmatch::GameConfig{}, conn, msgs, 102, roster, &world);
+		world.rules.mp_session = true;
+		bool seeded = false, loadout = false;
+		for (const ProtocolMessage &m : out_of_session) {
+			seeded = seeded || m.tag == 0x61;
+			loadout = loadout || m.tag == 0x5A;
+		}
+		je = world.registry.get(jb);
+		if (!expect(seeded && !loadout && je->position.x != 40.0f &&
+		                    conn.link.respawn_delay_seconds == 5,
+		            "out of a session an alive, unheld 0x0E deploys at once over +360, no 0x5A"))
+			return 1;
 	}
 
 	// --- 6. The tracer decision [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5]:

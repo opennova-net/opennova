@@ -134,6 +134,27 @@ public:
         return (pool >= 0 && pool < kPoolCount) ? pools_[pool].slots.size() : 0;
     }
 
+    // The pool's used count, its allocation high-water mark: the bound the
+    // original's pool walks stop at, freed rows below it included [orig:
+    // Pool_GetUsedCount @0x441F80]. configure_pool clears it [orig: Pool_Clear
+    // @0x442060] and the mission load sets it per pool [orig: Pool_SetUsed
+    // @0x441F60]. A spawn raises it past its slot. spawn / spawn_from stand for
+    // an includeInUse-1 allocation, which takes the lowest free row (its
+    // ItemTypeIndex 0) below the count, else the row at the count, raising it
+    // [orig: Pool_AllocEntry @0x442230 -- the +0x1C test @0x44225C, the raise
+    // @0x44228B; the player body's push 1 @0x43C3DF, the class callbacks'
+    // clones (sections, dismemberment) in Entity_CloneFromTemplateByType
+    // @0x4398BD / @0x439939 / @0x439962, the deployable's
+    // Entity_CloneFromTemplateToPool1 @0x439840].
+    // An includeInUse-0 caller also passes over a destroyed row and grows the
+    // count, where ours reuses the row (D-NET-485). spawn_at stands for a
+    // slotted load [orig: Pool_UpdateMaxUsed @0x441F40,
+    // Pool_UpdateMaxUsedFromSlotId @0x442100]. A despawn never lowers it.
+    size_t pool_used(int pool) const {
+        return (pool >= 0 && pool < kPoolCount) ? pools_[pool].used_count : 0;
+    }
+    void set_pool_used(int pool, size_t count);
+
     template <class F>
     void for_each(F &&fn) const {
         for (const Pool &p : pools_) {
@@ -162,6 +183,7 @@ private:
         std::vector<Entity> slots;
         std::vector<char> used; // char (not bool) for stable addressing
         size_t live = 0;
+        size_t used_count = 0; // g_PoolList[pool].used, the high-water mark (pool_used)
     };
     std::array<Pool, kPoolCount> pools_{};
     uint64_t next_spawn_id_ = 1; // zero means "identity not recorded"

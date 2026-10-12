@@ -384,24 +384,29 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 
 void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
                                     std::vector<std::vector<uint8_t>> &out) {
+	// Any 0x81 from the peer is read; no field is required (parse_server_hello).
 	ServerHello sh;
-	if (!parse_server_hello(body.data(), body.size(), sh)) {
-		fail("bad ServerHello");
-		return;
-	}
+	if (!parse_server_hello(body.data(), body.size(), sh)) return;
 	// CI is the client's correlation token. A shared UDP receive path can
 	// observe a valid reply for another in-flight hello; ignore it without
-	// advancing this connection's handshake.
+	// advancing this connection's handshake. Then the peer's identity block must
+	// be this protocol's (the 0x41's), else the reply is dropped. An absent HK
+	// reads 0, and the 0x42 then omits it.
+	// [orig: Nwu_HandleServerHello @0x626D20 - HK @0x626E97, the CI lookup @0x627533,
+	//  the identity compares @0x62758B / @0x627624 / @0x627643; the 0x42's HK gate
+	//  @0x6200F2]
 	if (sh.ci != cfg_.client_index) return;
+	if (!server_hello_matches_identity(sh, make_client_hello(cfg_, cfg_.co))) return;
 	if (reconnecting()) {
 		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
-		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join.
+		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join. The CK is
+		// drawn until nonzero (NapiNP_GenerateSessionKey's jz @0x61EAC3).
 		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3; CNapiNPConnection_InitFromSession
 		//  @0x626320 — the keys @0x6263fb/@0x626401, the cs_dir copies @0x626449/@0x62645c,
 		//  state 3 @0x626496]
 		reconnect_.probing = false;
-		cfg_.client_key = cfg_.next_client_key ? cfg_.next_client_key() : make_random_session_u32();
+		cfg_.client_key = make_session_key(cfg_.next_client_key);
 		client_scrk_ = cfg_.next_scrk ? cfg_.next_scrk() : make_dev_scrk();
 		server_hk_ = sh.hk;
 		server_sk_ = 0;

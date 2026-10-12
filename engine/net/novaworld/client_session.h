@@ -164,9 +164,10 @@ public:
 		// [orig: CNapiGameSession_InitNPConnection @0x4d3df4..0x4d3eb8]
 		int32_t max_packet_size = 0;
 
-		// The fresh CK and SCRK a reconnect's re-join mints. Unset, the engine's own random
-		// draws (make_random_session_u32 / make_dev_scrk) stand; the owner injects its
-		// generator, a test a deterministic one.
+		// The fresh CK and SCRK a reconnect's re-join mints, the CK drawn from next_client_key
+		// until nonzero (make_session_key). Unset, the engine's own random draws
+		// (make_random_session_u32 / make_dev_scrk) stand; the owner injects its generator, a
+		// test a deterministic one.
 		// [orig: CNapiNPConnection_InitFromSession @0x626320 — NapiNP_GenerateSessionKey
 		//  @0x6263fb (CK), CNapiNPConnection_GenerateTxKey @0x626401 (SCRK)]
 		std::function<uint32_t()> next_client_key;

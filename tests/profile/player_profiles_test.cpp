@@ -292,6 +292,36 @@ int test_name_rules() {
     return 0;
 }
 
+int test_voice_override() {
+    PlayerProfiles p;
+    PlayerProfiles::LoadInput in;
+    p.load(in, defaults());
+    playersav::ProfileRecord &r = p.current();
+    TEST_EXPECT(profile::voice_override(r, 0) == 0 && profile::voice_override(r, 1) == 0);
+    // [orig: sub_560030 @0x56004c]: the shown side's byte alone, +1533 for red.
+    profile::set_voice_override(r, 1, 7);
+    TEST_EXPECT(r.voice[1] == 7 && r.voice[0] == 0);
+    TEST_EXPECT(profile::voice_override(r, 1) == 7 && profile::voice_override(r, 0) == 0);
+    profile::set_voice_override(r, 0, 2);
+    TEST_EXPECT(r.voice[0] == 2 && r.voice[1] == 7);
+    // The value's low byte (`mov cl, [eax+10h]` @0x56003e).
+    profile::set_voice_override(r, 0, 0x10A);
+    TEST_EXPECT(r.voice[0] == 0x0A);
+    // No third side.
+    profile::set_voice_override(r, 2, 5);
+    profile::set_voice_override(r, -1, 5);
+    TEST_EXPECT(r.voice[0] == 0x0A && r.voice[1] == 7 && profile::voice_override(r, 2) == 0);
+    // The pair rides player.sav at +1532 / +1533.
+    const std::vector<uint8_t> bytes = p.player_sav_bytes();
+    PlayerProfiles reread;
+    PlayerProfiles::LoadInput again;
+    again.player_sav = &bytes;
+    reread.load(again, defaults());
+    TEST_EXPECT(profile::voice_override(reread.current(), 0) == 0x0A);
+    TEST_EXPECT(profile::voice_override(reread.current(), 1) == 7);
+    return 0;
+}
+
 int test_session_steps() {
     PlayerProfiles p;
     PlayerProfiles::LoadInput in;
@@ -645,6 +675,7 @@ int main(int argc, char **argv) {
         {"load_without_files", test_load_without_files},
         {"load_with_files", test_load_with_files},
         {"name_rules", test_name_rules},
+        {"voice_override", test_voice_override},
         {"session_steps", test_session_steps},
         {"controls_words", test_controls_words},
         {"retail_program", test_retail_program},

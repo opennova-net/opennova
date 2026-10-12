@@ -172,10 +172,24 @@ std::vector<uint8_t> server_hello_to_bytes(const ServerHello &msg);
 // load at the field's value pointer whatever its length, so a short value takes
 // the bytes that follow it (zero past the buffer's end), and every string copies
 // from it up to the first NUL, at most its buffer less one (CN, LNG and
-// SUS1..SUS4 511, the rest 63). Returns true when HK was seen (the value the
-// client echoes in ClientAuth).
-// [orig: Nwu_HandleServerHello @0x626d20]
+// SUS1..SUS4 511, the rest 63). No field is required: an absent HK reads 0,
+// the value the client then carries into a 0x42 that omits it. The caller
+// drops a 0x81 whose CI is not its connection's, or whose PN, PG or PV1 is not
+// its protocol's. Returns false only for a null buffer with a nonzero length.
+// [orig: Nwu_HandleServerHello @0x626d20 - HK zeroed @0x626E97, the CI lookup
+//  @0x627533, the identity compares @0x62758B / @0x627624 / @0x627643]
 bool parse_server_hello(const uint8_t *data, size_t len, ServerHello &out);
+
+// The 0x81's identity test on the client, after its CI resolved the connection:
+// PN and PV1 compared case-insensitively and PG bytewise against the receiving
+// protocol's own, the identity block of the 0x41 it sends (`local`); a mismatch
+// drops the reply. Retail skips the three when the connection's enumerator has
+// its +0x24 byte set and its +0x25 byte clear (@0x627562..0x62756C); JO writes
+// that byte only as 0 (NapiNPEnumerator_Create @0x625FB8, the two enumerator
+// setups @0x4C9F64 / @0x4D4251), so the compare always runs.
+// [orig: Nwu_HandleServerHello @0x626D20 - PN @0x627581 (the drop @0x62758B),
+//  PG @0x627591..0x627624, PV1 @0x627639 (the drop @0x627643)]
+bool server_hello_matches_identity(const ServerHello &hello, const ClientHello &local);
 
 // ---- ClientAuth / ServerAuth (NP connection admission) -----------------
 //

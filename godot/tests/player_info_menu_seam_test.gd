@@ -13,10 +13,24 @@ extends GutTest
 const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
+# The process's profile record the screen's voice picks write (PlayerProfile.store()),
+# its two voice bytes as each test found them.
+var _saved_voices: Array[int] = []
+
+
 # Strings is a shared autoload; keep the registry clean so the raw-key tests below see
-# no gametext table and the resolved-names test starts from a known state.
+# no gametext table and the resolved-names test starts from a known state. The
+# profile's voice pair starts each test on DEFAULT_VOICE and goes back after it.
 func before_each() -> void:
 	Strings.clear()
+	_saved_voices = [PlayerProfile.store().get_voice(0), PlayerProfile.store().get_voice(1)]
+	PlayerProfile.store().set_voice(0, 0)
+	PlayerProfile.store().set_voice(1, 0)
+
+
+func after_each() -> void:
+	PlayerProfile.store().set_voice(0, _saved_voices[0])
+	PlayerProfile.store().set_voice(1, _saved_voices[1])
 
 
 func after_all() -> void:
@@ -710,9 +724,9 @@ func test_voice_list_carries_every_row_matching_the_avatar_sex() -> void:
 	assert_eq(driver.item_text(voices, 3), "Voice 11")
 
 
-# The picked row's VALUE is the persisted override, and a populate whose rows no
-# longer offer that value resets it to DEFAULT_VOICE before selecting by value
-# (retail's "if (!found) profile[team + 1532] = 0").
+# The picked row's VALUE is the override, written into the profile record at the
+# pick, and a populate whose rows no longer offer that value writes DEFAULT_VOICE
+# there before selecting by value (retail's "if (!found) profile[team + 1532] = 0").
 func test_voice_override_persists_and_resets_when_the_avatar_drops_it() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
@@ -723,15 +737,129 @@ func test_voice_override_persists_and_resets_when_the_avatar_drops_it() -> void:
 	assert_eq(companion.selected_voice(), 0, "a fresh profile starts on DEFAULT_VOICE")
 	driver.select_row(voices, 3)  # row 0 is DEFAULT_VOICE, so row 3 is "Voice 3"
 	assert_eq(companion.selected_voice(), 3, "the pick stores the row VALUE, not the row")
-	assert_eq(int(companion.snapshot().get("voice", -1)), 3,
-		"ACCEPT persists the voice value")
+	assert_eq(PlayerProfile.store().get_voice(0), 3,
+		"the pick writes the profile's byte at once, before any ACCEPT")
+	assert_false(companion.snapshot().has("voice"), "the ACCEPT snapshot carries no voice")
 
 	# Voice 3 is a male row; moving to the female head drops it from the list.
 	driver.select_row(driver.widget_id("DIVISION"), 3)
 	driver.select_row(driver.widget_id("COMBO_LIST"), 1)
 	assert_eq(companion.selected_voice(), 0,
 		"an override the new avatar cannot offer resets to DEFAULT_VOICE")
+	assert_eq(PlayerProfile.store().get_voice(0), 0, "the reset is written into the profile")
 	assert_eq(driver.selected_row(voices), 0, "and the list selects that value's row")
+
+
+# Each side keeps its own byte: the pick on the shown side writes that side's
+# (+1532 blue, +1533 red) and leaves the other's, and a side shown again selects
+# its own value [orig: sub_560030 @0x56004c; PlayerInfo_PopulatePlayerVoiceCombo
+# @0x55de3c].
+func test_voice_pick_writes_the_shown_sides_profile_byte() -> void:
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var voices := driver.widget_id("PLAYERVOICE")
+	var blue_radio := driver.widget_id("SIDE_BLUE")
+	var red_radio := driver.widget_id("SIDE_RED")
+
+	driver.set_widget_checked(red_radio, true)
+	driver.set_widget_checked(blue_radio, false)
+	driver.widget_activated.emit(red_radio, "SIDE_RED")
+	assert_eq(companion.team(), 1, "the red side is shown")
+	assert_eq(driver.item_text(voices, 1), "Voice 7", "red's first head is female")
+	driver.select_row(voices, 1)
+	assert_eq(PlayerProfile.store().get_voice(1), 7, "red's pick lands in +1533")
+	assert_eq(PlayerProfile.store().get_voice(0), 0, "blue's +1532 is untouched")
+
+	driver.set_widget_checked(blue_radio, true)
+	driver.set_widget_checked(red_radio, false)
+	driver.widget_activated.emit(blue_radio, "SIDE_BLUE")
+	assert_eq(companion.selected_voice(), 0, "blue shows its own byte")
+	driver.select_row(voices, 2)  # "Voice 2", a male row
+	assert_eq(PlayerProfile.store().get_voice(0), 2, "blue's pick lands in +1532")
+	assert_eq(PlayerProfile.store().get_voice(1), 7, "red's +1533 stands")
+
+	driver.set_widget_checked(red_radio, true)
+	driver.set_widget_checked(blue_radio, false)
+	driver.widget_activated.emit(red_radio, "SIDE_RED")
+	assert_eq(driver.item_text(voices, driver.selected_row(voices)), "Voice 7",
+		"red's list selects red's own value again")
+
+
+# Press a side radio the way a click does: the driver checks it (and clears its
+# group) before the activation reaches the companion.
+func _press_side(driver: MenuDriver, team: int) -> void:
+	var pressed := driver.widget_id("SIDE_RED" if team == 1 else "SIDE_BLUE")
+	driver.set_widget_checked(pressed, true)
+	driver.set_widget_checked(driver.widget_id("SIDE_BLUE" if team == 1 else "SIDE_RED"), false)
+	driver.widget_activated.emit(pressed, "SIDE_RED" if team == 1 else "SIDE_BLUE")
+
+
+# A build and a side switch fill the voice list once, against the side's restored
+# selection, so a female head's voice survives them even though the side's first
+# combo is male: the cascade's earlier legs, on the first rows, write nothing
+# (engine profile::set_voice_override, retail's PopulateAllControls).
+func test_restored_female_voice_survives_side_switches_and_rebuilds() -> void:
+	var db := _load_db()
+	assert_eq(db.get_combo(0, 0, 0).get_head().sex, 0, "blue's first head is male")
+	assert_eq(db.get_combo(0, 3, 1).get_head().sex, 1, "N00/D03 combo 1 is a female head")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(db)
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var voices := driver.widget_id("PLAYERVOICE")
+	driver.select_row(driver.widget_id("DIVISION"), 3)
+	driver.select_row(driver.widget_id("COMBO_LIST"), 1)
+	assert_eq(driver.item_text(voices, 1), "Voice 7", "the female list's first id")
+	driver.select_row(voices, 1)
+	assert_eq(PlayerProfile.store().get_voice(0), 7, "the pick lands in +1532")
+
+	_press_side(driver, 1)
+	_press_side(driver, 0)
+	assert_eq(PlayerProfile.store().get_voice(0), 7, "a side round trip keeps blue's female voice")
+	assert_eq(driver.item_text(voices, driver.selected_row(voices)), "Voice 7",
+		"and the restored list selects it")
+
+	var rebuilt := _make_avatar_driver()
+	companion.on_menu_built(rebuilt, "player.mnu", "PLAYER_INFO", null)
+	var rebuilt_voices := rebuilt.widget_id("PLAYERVOICE")
+	assert_eq(rebuilt.selected_row(rebuilt.widget_id("COMBO_LIST")), 1, "the build restores blue's combo")
+	assert_eq(PlayerProfile.store().get_voice(0), 7, "a fresh build keeps it too")
+	assert_eq(rebuilt.item_text(rebuilt_voices, rebuilt.selected_row(rebuilt_voices)), "Voice 7")
+
+
+# The mirror on red: red's first head is female, so a male voice on red's second
+# combo survives the side switch and a fresh build only when the fills against
+# the first rows write nothing.
+func test_restored_male_voice_survives_on_red() -> void:
+	var db := _load_db()
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(db)
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	var voices := driver.widget_id("PLAYERVOICE")
+	_press_side(driver, 1)
+	var red_first: int = companion.nationality_rows()[0]
+	assert_eq(db.get_combo(red_first, 0, 0).get_head().sex, 1, "red's first head is female")
+	assert_eq(db.get_combo(red_first, 0, 1).get_head().sex, 0, "red's second combo is a male head")
+	driver.select_row(driver.widget_id("COMBO_LIST"), 1)
+	assert_eq(driver.item_text(voices, 2), "Voice 2", "the male list's second id")
+	driver.select_row(voices, 2)
+	assert_eq(PlayerProfile.store().get_voice(1), 2, "the pick lands in +1533")
+
+	_press_side(driver, 0)
+	_press_side(driver, 1)
+	assert_eq(PlayerProfile.store().get_voice(1), 2, "a side round trip keeps red's male voice")
+	assert_eq(driver.item_text(voices, driver.selected_row(voices)), "Voice 2")
+
+	var rebuilt := _make_avatar_driver()
+	companion.on_menu_built(rebuilt, "player.mnu", "PLAYER_INFO", null)
+	_press_side(rebuilt, 1)
+	var rebuilt_voices := rebuilt.widget_id("PLAYERVOICE")
+	assert_eq(rebuilt.selected_row(rebuilt.widget_id("COMBO_LIST")), 1, "red's combo is restored")
+	assert_eq(PlayerProfile.store().get_voice(1), 2, "a fresh build and a switch to red keep it")
+	assert_eq(rebuilt.item_text(rebuilt_voices, rebuilt.selected_row(rebuilt_voices)), "Voice 2")
 
 
 # A persisted override the avatar still offers survives the build and selects its
@@ -740,7 +868,7 @@ func test_voice_override_persists_and_resets_when_the_avatar_drops_it() -> void:
 func test_persisted_voice_selects_its_row_by_value() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
-	companion.set_persisted_profile({"voice": 10})
+	PlayerProfile.store().set_voice(0, 10)
 	var driver := _make_avatar_driver()
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
 
@@ -755,7 +883,7 @@ func test_persisted_voice_selects_its_row_by_value() -> void:
 func test_voice_preview_prefers_the_persisted_override() -> void:
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
-	companion.set_persisted_profile({"voice": 6})
+	PlayerProfile.store().set_voice(0, 6)
 	var driver := _make_avatar_driver()
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
 	watch_signals(driver)

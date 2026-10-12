@@ -875,6 +875,29 @@ bool run_host_answers_the_sweep_request() {
 			return false;
 	}
 
+	// Free the LAST slot too: it stays below pool 0's used count, the
+	// allocation high-water mark the walk covers, so both freed indices are
+	// listed (D-NET-417). [orig: Server_CollectEmptyPool0Slots @0x5160F0 --
+	// `used` @0x5160FF]
+	world.registry.despawn(c);
+	{
+		std::vector<uint16_t> listed;
+		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
+					inmatch::GameConfig{}, roster[1], request, 101, roster, &world)) {
+			if (m.tag != 0x5D) continue;
+			DestroyEntityList decoded;
+			if (!expect(decode_destroy_entity_list(
+						m.payload.data(), m.payload.size(), decoded),
+					"sweep-host: the reply body decodes after the last despawn"))
+				return false;
+			listed = decoded.pool0_indices;
+		}
+		if (!expect(listed == std::vector<uint16_t>{static_cast<uint16_t>(b.slot()),
+		                                            static_cast<uint16_t>(c.slot())},
+				"sweep-host: a freed last slot stays below the used count"))
+			return false;
+	}
+
 	// REQUESTER ONLY: the reply rides the direct reply list, so no other in-match
 	// connection's transport was staged. [orig: send_mask 32, target = requester slot]
 	{

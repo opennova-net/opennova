@@ -73,8 +73,9 @@ std::vector<GameEntitySnapshot> snapshot_world(const world::World &w);
 OrganicSpawnBatch build_pool0_organic_batch(const world::World &w);
 // pool-1 destructibles / items / vehicles -> S2C 0x0D [orig: NetPacket_SerializeEntityPoolToPacket_0 @0x503940].
 PoolSpawnBatch build_pool1_spawn_batch(const world::World &w);
-// pool-2 static structures -> S2C 0x10 [orig: NetPacket_SerializePool2StaticToBuffer @0x5042f0]. Slot-aligned (start_index 0, empty-slot
-// sentinels for holes) because the 0x10 record carries no slot id — the client's slot = start+index.
+// pool-2 static structures -> S2C 0x10 [orig: NetPacket_SerializePool2StaticToBuffer @0x5042f0]. Slot-aligned (start_index 0, an
+// empty-slot sentinel for each free slot below the pool's used count, EntityRegistry::pool_used) because the 0x10 record
+// carries no slot id: the client's slot = start+index.
 // Its zone blocks are the whole pool's as one serializer call's (stream_pool2_zone_blocks).
 StaticEntityBatch build_pool2_static_batch(const world::World &w);
 // The zone blocks of one serializer call, its page: each record's static asks the zone chain
@@ -91,6 +92,8 @@ void stream_pool2_zone_blocks(const world::World &w, StaticEntityBatch &page);
 // the call @0x51bcba per page]
 void stream_pool1_zone_bytes(const world::World &w, PoolSpawnBatch &page);
 // pool-3 markers / waypoints / nav-nodes -> S2C 0x20 [orig: NetPacket_SerializeEntityPoolToPacket @0x503460].
+// Slot-aligned like 0x10 (start_index 0, a zero word for each free slot below the pool's used count): the joiner's
+// slot = start+index.
 Pool3SyncBatch build_pool3_marker_batch(const world::World &w);
 
 // One S2C 0x18 FULL-ENTITY-SPAWN record (§5.46) for a live World entity — the host's

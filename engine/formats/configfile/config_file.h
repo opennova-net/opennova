@@ -49,6 +49,13 @@ struct ConfigEntry {
 	// [orig: ConfigFile_ParseBinary @ 0x75eb1e; ConfigFile_ParseValues @ 0x760754..0x760765; the walk's test
 	//  Effect_GetParamValue_0 @ 0x75faa3]
 	bool value_pointer_set = false;
+	// A CBIN entry of no value points its value pointer at the next value the parse laid out, the first value of the
+	// block's next entry that has one: the parse stores its value cursor into each entry and moves it on by the
+	// entry's own count alone [orig: ConfigFile_ParseBinary @ 0x75eb1e, @ 0x75eb72]. That entry's index in the
+	// block; SIZE_MAX where no value follows, the pointer one past the last value, at indeterminate heap bytes
+	// (the allocation's slack, or the next block's header; D-CBIN-7). Unused for an entry with values (its
+	// pointer its own first) and for the text form (no value, no pointer). read_binary_entry reads it.
+	size_t pointed_entry = SIZE_MAX;
 	// Its name is a CBIN string past the table: the walk's stricmp takes a stray pointer there, a fault in the
 	// game, the stand-in fault here when a walk reaches it.
 	bool key_faults = false;
@@ -139,6 +146,22 @@ bool read_config_value(ConfigSection &section, const char *key, int index, std::
 // after read_config_value found it.
 bool read_current_config_value(ConfigSection &section, const char *key, int index, std::string *text,
 		float *real, int32_t *integer);
+
+// A read the way ConfigFile_ReadString reads a parsed file, either form: both parses set the flag it tests, so it
+// takes the binary entry read [orig: ConfigFile_ReadString @ 0x75f2b0, the +0x1C test @ 0x75f2da, the call
+// @ 0x75f2fc; +0x1C set by ConfigFile_ParseBinary @ 0x75e8db and ConfigFile_ParseText @ 0x7609f6 ->
+// ConfigFile_ReadBinaryEntry @ 0x75f060]. A marquee's CENTER_X and VERTICAL_SPACE read through it
+// (ConfigFile_ReadFromSectionGlobal @ 0x75f540). The integer is set to 0 first; the walk goes from the next entry
+// (else the current one) to the first whose key matches without case, a passed entry with no value pointer
+// clearing the next cursor and ending it, and a match moves the next cursor past it, the current one left
+// [orig: @ 0x75f0e0..0x75f135, @ 0x75f27b]. The integer is the value the matched entry's pointer meets, with no
+// count check [orig: @ 0x75f10b..0x75f164]: an integer as it is, a float truncated (_ftol2_sse), any other type 0.
+// A text entry of no value points at none, so the integer stays 0; a CBIN one points at the next value laid out
+// (ConfigEntry::pointed_entry), and past the last value at indeterminate heap bytes (the allocation's slack, or
+// the next block's header), which ours reads as no value, the read false (the stand-in D-CBIN-7 records). True for a matched key otherwise; false for none, and for the
+// stand-in faults of read_config_value's walk. The text leg (every value printed and joined with ", " into the
+// caller's buffer) is not ported: no caller of ours asks for it.
+bool read_binary_entry(ConfigSection &section, const char *key, int32_t *integer);
 
 // The text reader's "data strings" pool and the clear that runs past it (docs/mnu/menu-re.md, the ConfigFile
 // text reader). The parse counts, allocates, then fills [orig: ConfigFile_ParseText @ 0x7608a0]:

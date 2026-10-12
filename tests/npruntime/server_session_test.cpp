@@ -3177,6 +3177,7 @@ bool check_spawn_wave_queue_and_release_wire() {
 	opennova::inmatch::NapiNPServerCtx ctx;
 	ctx.is_authority = 1;
 	ctx.is_in_session = 1;
+	world.rules.mp_session = true; // the deploy's 0x5A rides the session
 	ctx.world = &world;
 	ctx.config.game_type = opennova::game_type::kTeamDeathmatch;
 	opennova::world::MatchRules rules;
@@ -3394,6 +3395,7 @@ bool check_default_spawn_requires_no_team_zone() {
 //  Entity_FindBestSeatSlot @0x4351F0]
 bool check_vehicle_spawn_target_deploys_into_best_seat() {
 	opennova::world::World world;
+	world.rules.mp_session = true; // a joiner's 0x0E; its deploy's 0x5A rides the session
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(1, 4);
 

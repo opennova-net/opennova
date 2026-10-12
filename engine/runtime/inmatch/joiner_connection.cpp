@@ -194,13 +194,12 @@ JoinerConnection::JoinerConnection(std::string player_name,
 std::vector<uint8_t> JoinerConnection::start() {
 	conn_.client_scrk = make_dev_scrk();
 	// Fresh per-connection numeric key, like the per-connection key material
-	// retail regenerates on connect [orig: CNapiNPConnection_GenerateTxKey
-	// @ 0x61dfe0 charset-PRNG pattern]: a CONSTANT ck would alias a quick
+	// retail regenerates on connect: a CONSTANT ck would alias a quick
 	// reconnect from the same endpoint to the host's same-(CI,CK) retransmit
 	// echo (stale auth material) instead of a fresh node. CI stays 1 — the
-	// first connection node's index. 0 is reserved (absent-key sentinel).
-	client_key_ = make_random_session_u32();
-	if (client_key_ == 0) client_key_ = 1;
+	// first connection node's index. A zero draw is drawn again, zero being no key.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey]
+	client_key_ = make_session_key(session_key_draw_);
 	server_hk_ = 0;
 	server_password_required_ = false;
 	conn_.server_sk = 0;
@@ -518,14 +517,18 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 }
 
 void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollResult &out) {
+	// Any 0x81 from the host is read; no field is required (parse_server_hello).
 	ServerHello sh;
-	if (!parse_server_hello(body.data(), body.size(), sh)) {
-		fail("bad ServerHello");
-		return;
-	}
+	if (!parse_server_hello(body.data(), body.size(), sh)) return;
 	// Correlate the reply with the outstanding ClientHello before accepting host material. A
 	// phase-correct stale/spoofed 0x81 from another handshake must not advance this connection.
+	// Then the host's identity block must be the JO protocol's, else the reply is dropped.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533, the identity compares
+	//  @0x62758B / @0x627624 / @0x627643]
 	if (sh.ci != client_index_) return;
+	if (!server_hello_matches_identity(sh, make_jointoperations_client_hello(client_index_))) return;
+	// An absent HK reads 0, and the 0x42 then omits it. [orig: Nwu_HandleServerHello @0x626D20 -
+	//  HK @0x626E97; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK gate @0x6200F2]
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk
 	server_password_required_ = (sh.sf & 1u) != 0;
 	// The host's ADVERTISED expansion: learned here and echoed in the C2S JOIN EXP TLV below,
