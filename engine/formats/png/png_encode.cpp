@@ -26,9 +26,9 @@ void put_chunk(std::vector<uint8_t> &out, const char type[4], const uint8_t *dat
 }
 
 // The image's rows of `row` bytes each behind filter 0, deflated, between the signature and IEND: IHDR of `colour`
-// at 8 bits a sample, then `palette`'s PLTE where it has one.
+// at `bits` bits a sample (8, or 16 big-endian), then `palette`'s PLTE where it has one.
 std::vector<uint8_t> encode(const uint8_t *texels, uint32_t width, uint32_t height, size_t row, uint8_t colour,
-                            const uint8_t *palette, uint32_t entries) {
+                            const uint8_t *palette, uint32_t entries, uint8_t bits = 8) {
 	std::vector<uint8_t> raw;
 	raw.reserve((row + 1) * height);
 	for (uint32_t y = 0; y < height; ++y) {
@@ -44,7 +44,7 @@ std::vector<uint8_t> encode(const uint8_t *texels, uint32_t width, uint32_t heig
 	std::vector<uint8_t> header;
 	put_u32_be(header, width);
 	put_u32_be(header, height);
-	header.push_back(8);      // bits a sample
+	header.push_back(bits);   // bits a sample
 	header.push_back(colour); // 6 RGBA, 3 palette, 0 grey
 	header.push_back(0);      // deflate
 	header.push_back(0);      // filters of method 0
@@ -72,6 +72,17 @@ std::vector<uint8_t> encode_png_indexed(const uint8_t *indices, uint32_t width, 
 std::vector<uint8_t> encode_png_grey(const uint8_t *levels, uint32_t width, uint32_t height) {
 	if (!levels || width == 0 || height == 0) return {};
 	return encode(levels, width, height, size_t(width), 0, nullptr, 0);
+}
+
+std::vector<uint8_t> encode_png_gray16(const uint16_t *samples, uint32_t width, uint32_t height) {
+	if (!samples || width == 0 || height == 0) return {};
+	// Each sample big-endian, as PNG keeps a 16-bit one.
+	std::vector<uint8_t> bytes(size_t(width) * height * 2);
+	for (size_t i = 0; i < size_t(width) * height; ++i) {
+		bytes[i * 2] = uint8_t(samples[i] >> 8);
+		bytes[i * 2 + 1] = uint8_t(samples[i]);
+	}
+	return encode(bytes.data(), width, height, size_t(width) * 2, 0, nullptr, 0, 16);
 }
 
 } // namespace opennova::png

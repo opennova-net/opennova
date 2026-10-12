@@ -21,4 +21,9 @@ std::vector<uint8_t> encode_png_indexed(const uint8_t *indices, uint32_t width, 
 // grey levels are its codes). Empty as encode_png_rgba's is.
 std::vector<uint8_t> encode_png_grey(const uint8_t *levels, uint32_t width, uint32_t height);
 
+// A 16-bit grey image (a terrain's heightmap, ADR 0046 S25), rows top first, as a PNG of colour type 0 at 16 bits
+// a sample, each sample big-endian as the format stores it; otherwise as encode_png_rgba. Empty for an empty
+// image.
+std::vector<uint8_t> encode_png_gray16(const uint16_t *samples, uint32_t width, uint32_t height);
+
 } // namespace opennova::png
