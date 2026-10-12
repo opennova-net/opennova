@@ -72,10 +72,12 @@ int test_raster() {
 }
 
 int test_patch() {
-	// A raster patched over a rect equals the raster of the whole edited map, codes and masks.
+	// A raster patched over a rect equals the raster of the whole edited map, codes and masks: an 8 x 4 map, a
+	// 3 x 2 rect below row 0 from rows of 5 bytes, the 2 past each row's 3 poison.
 	IndexedImage8 image;
-	image.width = image.height = 64;
-	image.indices.assign(size_t(64) * 64, 0);
+	image.width = 8;
+	image.height = 4;
+	image.indices.assign(size_t(8) * 4, 0);
 	for (size_t i = 0; i < image.indices.size(); ++i) image.indices[i] = static_cast<uint8_t>(i % 3 == 0 ? 253 : 0);
 	std::vector<FoliageDef> defs(2);
 	defs[0].graphic = "grass.3di";
@@ -87,23 +89,26 @@ int test_patch() {
 	TEST_EXPECT(opennova::encode_pcx_indexed(image, pcx, why));
 	FoliageMaskRaster patched;
 	TEST_EXPECT(load_foliage_mask_raster(pcx, defs, patched));
-	// The edit: a 5 x 3 rect at (10, 20) of 254s and 0s.
-	std::vector<uint8_t> src(size_t(5) * 3);
-	for (size_t i = 0; i < src.size(); ++i) src[i] = static_cast<uint8_t>(i % 2 == 0 ? 254 : 0);
+	// The edit: a 3 x 2 rect at (2, 1) of 254s and 0s.
+	const std::vector<uint8_t> src = {254, 0, 254, 0xEE, 0xEE, 0, 254, 253, 0xEE, 0xEE};
 	IndexedImage8 edited = image;
-	for (int row = 0; row < 3; ++row)
-		for (int col = 0; col < 5; ++col) edited.indices[size_t(20 + row) * 64 + 10 + col] = src[size_t(row) * 5 + col];
+	for (int row = 0; row < 2; ++row)
+		for (int col = 0; col < 3; ++col) edited.indices[size_t(1 + row) * 8 + 2 + col] = src[size_t(row) * 5 + col];
 	std::vector<uint8_t> edited_pcx;
 	TEST_EXPECT(opennova::encode_pcx_indexed(edited, edited_pcx, why));
 	FoliageMaskRaster whole;
 	TEST_EXPECT(load_foliage_mask_raster(edited_pcx, defs, whole));
-	TEST_EXPECT(patch_foliage_mask_raster(patched, CoordsRect{10, 20, 5, 3}, src.data(), 5, defs));
+	TEST_EXPECT(patch_foliage_mask_raster(patched, CoordsRect{2, 1, 3, 2}, src.data(), 5));
 	TEST_EXPECT(patched.codes.indices == whole.codes.indices && patched.masks == whole.masks);
-	// A rect past the map, and an empty raster: refused, nothing written.
-	TEST_EXPECT(!patch_foliage_mask_raster(patched, CoordsRect{62, 0, 5, 1}, src.data(), 5, defs));
-	TEST_EXPECT(patched.masks == whole.masks);
+	// The raster keeps the load's remap: a code the shrub alone matches is the shrub's mask.
+	TEST_EXPECT(patched.remap[254] == 2 && patched.remap[253] == 1 && patched.masks[size_t(1) * 8 + 2] == 2);
+	// A rect past the map, a short stride and an empty raster: refused, nothing written.
+	TEST_EXPECT(!patch_foliage_mask_raster(patched, CoordsRect{6, 0, 3, 1}, src.data(), 5));
+	TEST_EXPECT(!patch_foliage_mask_raster(patched, CoordsRect{0, 3, 1, 2}, src.data(), 5));
+	TEST_EXPECT(!patch_foliage_mask_raster(patched, CoordsRect{2, 1, 3, 2}, src.data(), 2));
+	TEST_EXPECT(patched.codes.indices == whole.codes.indices && patched.masks == whole.masks);
 	FoliageMaskRaster empty;
-	TEST_EXPECT(!patch_foliage_mask_raster(empty, CoordsRect{0, 0, 1, 1}, src.data(), 1, defs));
+	TEST_EXPECT(!patch_foliage_mask_raster(empty, CoordsRect{0, 0, 1, 1}, src.data(), 1));
 	std::printf("patch: a rect's codes written and remapped equal the edited map's raster\n");
 	return 0;
 }

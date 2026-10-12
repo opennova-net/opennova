@@ -78,9 +78,12 @@ public:
 	const SurfaceTypeMap &surface_map() const { return surface_map_; }
 
 	// Writes `rect` (char-map texels: x, z the column and row, w, h the size) of the char map the
-	// store holds from `src`, `stride` bytes a row, in place: the surface view keeps pointing at the
-	// same raster, so every copy of it reads the new classes (an editor's brush stroke, no rebuild).
-	// False, nothing written, with no char map or a rect not inside it.
+	// store holds from `src`, `stride` bytes a row (stride >= w), in place, as JO's mission editor
+	// paints a class into its char map a texel at a time [orig: JOTACmed sub_41D6B0 @ 0x41D7D4 ->
+	// sub_45E3B0]: the surface view keeps pointing at the same raster, so every copy of it reads the
+	// new classes (an editor's brush stroke, no rebuild). It writes under every live copy of the view
+	// (the world's, the kernel's), so a patch and the reads it serves share one thread, or the caller
+	// holds the views' owner. False, nothing written, with no char map or a rect not inside it.
 	bool patch_charmap(const CoordsRect &rect, const uint8_t *src, size_t stride);
 
 	// The .trn facts the mission boot reads beside the field, set by the
