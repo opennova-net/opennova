@@ -296,10 +296,10 @@ int main() {
 	// order) are never zeroed by any load path: WacScript_InitAndLoad clears
 	// V0..V255 only (memset 0x400 @0x4f95ee) and Script_Compile's declaration
 	// arm stores name/address/type without writing the slot (@0x4f3812..
-	// 0x4f3964). A rebuilt kernel carries that half (the embedder's
-	// reset_world seam: ScriptVarStore::carry_declared_from) so a restart or
-	// the next mission reads slot n at the previous run's value while V#
-	// restart at zero.
+	// 0x4f3964). A rebuilt kernel carries the store (the embedder's
+	// reset_world seam: ScriptVarStore::carry_from) so a restart or the next
+	// mission reads slot n at the previous run's value while V# restart at
+	// zero once the start's load clears them.
 	{
 		std::map<std::string, std::string> files;
 		files["synth.wac"] = "var a\ninc(a)\nv1 = a\n";
@@ -315,9 +315,9 @@ int main() {
 
 		auto second_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &second = *second_box;
-		second.world.script.vars.carry_declared_from(first.world.script.vars);
+		second.world.script.vars.carry_from(first.world.script.vars);
 		CHECK(second.world.script.vars.get_mission(256) == 1);
-		CHECK(second.world.script.vars.get_mission(1) == 0); // V# start at zero
+		CHECK(second.world.script.vars.get_mission(1) == 1); // until the start clears V#
 		second.open_document(two_entity_mission(), "synth", source_over(&files));
 		CHECK(second.boot(options, error));
 		CHECK(second.world.script.vars.get_mission(1) == 2);   // inc over the carried slot
@@ -329,7 +329,7 @@ int main() {
 		other["synth.wac"] = "var b\nv2 = b\n";
 		auto third_box = std::make_unique<ms::MissionKernel>();
 		ms::MissionKernel &third = *third_box;
-		third.world.script.vars.carry_declared_from(second.world.script.vars);
+		third.world.script.vars.carry_from(second.world.script.vars);
 		third.open_document(two_entity_mission(), "synth", source_over(&other));
 		CHECK(third.boot(options, error));
 		CHECK(third.world.script.vars.get_mission(2) == 2);
@@ -369,6 +369,84 @@ int main() {
 		CHECK(second.world.script.vars.get_mission(3) == first_rnd); // read before any write
 		// A cat-4 read of word 3328 packs choices 0..3.
 		CHECK(second.world.script.vars.get_bank_word(3328) == 0x0302);
+	}
+
+	// --- the PreMission pass reads the previous run's cleared words --------------
+	// The mission start runs its PreMission pass ahead of the WAC load, whose
+	// clears zero V0..V255, the G bank, the IF state and the DO counters and
+	// seed DORND; every word lies in a process global, so a rebuilt kernel's
+	// pass reads each at the previous run's value, and the start zeroes them
+	// after it (D-EVT-17). A fresh kernel's pass reads them at zero, as a
+	// process's first mission does (BSS), but for the seed (its 0x12333333).
+	// [orig: Game_StartMission - the EventTrigger_UpdateAllWithFlag2 call
+	//  @0x525B86 ahead of the WacScript_InitAndLoad call @0x525CB3;
+	//  WacScript_InitAndLoad - the memsets called @0x4F95EE (V0..V255) /
+	//  @0x4F95FE (the fired ticks) / @0x4F961E (the ever-fired dwords) /
+	//  @0x4F964A (G), the seed @0x4F966B; EventTrigger_EvaluateCondition
+	//  @0x453620 - the cat-4 read @0x453AAC]
+	{
+		// A PreMission event per carried word: its cat-4 trigger tests the word
+		// against the previous run's value and its action marks a declared slot,
+		// which no load clears.
+		const auto premission_probe = [] {
+			bms::File m{};
+			const std::array<std::pair<int32_t, int32_t>, 5> probes = { {
+					{ 5, 7 },             // V5
+					{ 512 + 3, 9 },       // G3
+					{ 768 + 2, 11 },      // IF 2's fired tick
+					{ 1792 + 4, 13 },     // IF 4's ever-fired dword
+					{ 3584, 0x55 },       // the DORND seed
+			} };
+			for (size_t i = 0; i < probes.size(); ++i) {
+				bms::Event event{};
+				event.flags = bms::EventFlags::PreMission;
+				event.trigger_index = static_cast<int32_t>(i);
+				event.trigger_count = 1;
+				event.action_index = static_cast<int32_t>(i);
+				event.action_count = 1;
+				bms::Trigger t{};
+				t.main_type = bms::TriggerMainType::MissionVariable;
+				t.sub_type = static_cast<int32_t>(bms::MissionVariableTriggerType::MissionVariableIsEqual);
+				t.param1 = probes[i].first;
+				t.param2 = probes[i].second;
+				bms::Action a{};
+				a.action_type = bms::ActionType::MisvarChange;
+				a.action_sub_type = static_cast<int32_t>(bms::MissionVariableActionSubType::Set);
+				a.param1 = 300 + static_cast<int32_t>(i);
+				a.param2 = 1;
+				m.events.push_back(event);
+				m.triggers.push_back(t);
+				m.actions.push_back(a);
+			}
+			return m;
+		};
+		std::map<std::string, std::string> files;
+		ms::KernelBootOptions options;
+		options.playable = false;
+		std::string error;
+		auto first = std::make_unique<ms::MissionKernel>();
+		first->open_document(premission_probe(), "synth", source_over(&files));
+		CHECK(first->boot(options, error));
+		w::ScriptVarStore &left = first->world.script.vars;
+		for (int32_t slot = 300; slot < 305; ++slot) CHECK(left.get_mission(slot) == 0);
+		// What the first mission's play leaves.
+		left.set_mission(5, 7);
+		left.set_global(3, 9);
+		left.set_bank_word(768 + 2, 11);
+		left.set_bank_word(1792 + 4, 13);
+		left.set_bank_word(3584, 0x55);
+
+		auto second = std::make_unique<ms::MissionKernel>();
+		second->carry_across_load_from(*first);
+		second->open_document(premission_probe(), "synth", source_over(&files));
+		CHECK(second->boot(options, error));
+		const w::ScriptVarStore &vars = second->world.script.vars;
+		for (int32_t slot = 300; slot < 305; ++slot) CHECK(vars.get_mission(slot) == 1);
+		CHECK(vars.get_mission(5) == 0);
+		CHECK(vars.get_global(3) == 0);
+		CHECK(vars.get_bank_word(768 + 2) == 0);
+		CHECK(vars.get_bank_word(1792 + 4) == 0);
+		CHECK(vars.get_bank_word(3584) == static_cast<int32_t>(w::ScriptVarStore::kDorndSeed));
 	}
 
 	// --- the precipitation drawer's memory across kernels -------------------------
