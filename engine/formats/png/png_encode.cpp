@@ -85,4 +85,16 @@ std::vector<uint8_t> encode_png_gray16(const uint16_t *samples, uint32_t width, 
 	return encode(bytes.data(), width, height, size_t(width) * 2, 0, nullptr, 0, 16);
 }
 
+std::vector<uint8_t> encode_png_gray8(const uint8_t *samples, uint32_t width, uint32_t height) {
+	if (!samples || width == 0 || height == 0) return {};
+	// Each row behind its filter byte (0: none).
+	std::vector<uint8_t> raw;
+	raw.reserve((size_t(width) + 1) * height);
+	for (uint32_t y = 0; y < height; ++y) {
+		raw.push_back(0);
+		raw.insert(raw.end(), samples + size_t(y) * width, samples + size_t(y + 1) * width);
+	}
+	return write_png(raw, width, height, 8, 0);
+}
+
 } // namespace opennova::png
