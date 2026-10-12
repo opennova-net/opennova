@@ -95,6 +95,59 @@ Rgba8Image build_detail_coefficient_map(const Rgba8Image &detailmap) {
 	return result;
 }
 
+namespace {
+
+// One texel of the heightfield normal atlas: its four taps resolved by its
+// quadrant's locks (a locked component wraps within the quadrant, an unlocked
+// one across the whole atlas), the slope encoded {slope-x, slope-y, up} with
+// the constant alpha.
+struct HeightfieldNormalKernel {
+	const std::vector<uint16_t> &depth;
+	uint32_t width;
+	uint32_t height;
+	const TerrainQuadrantLocks &locks;
+
+	const TerrainLockCoord &lock_at(uint32_t x, uint32_t y) const {
+		const uint32_t quadrant_x = x >= (width >> 1) ? 1u : 0u;
+		const uint32_t quadrant_y = y >= (height >> 1) ? 1u : 0u;
+		return locks[quadrant_x + quadrant_y * 2u];
+	}
+	uint32_t resolve_x(uint32_t x, uint32_t y, uint32_t sample_x) const {
+		const uint32_t quadrant_width = width >> 1;
+		const uint32_t x_offset = (x >= quadrant_width ? 1u : 0u) * quadrant_width;
+		return lock_at(x, y).x != 0
+			? x_offset + (sample_x & (quadrant_width - 1))
+			: sample_x & (width - 1);
+	}
+	uint32_t resolve_y(uint32_t x, uint32_t y, uint32_t sample_y) const {
+		const uint32_t quadrant_height = height >> 1;
+		const uint32_t y_offset = (y >= quadrant_height ? 1u : 0u) * quadrant_height;
+		return lock_at(x, y).y != 0
+			? y_offset + (sample_y & (quadrant_height - 1))
+			: sample_y & (height - 1);
+	}
+	void write(uint32_t x, uint32_t y, uint8_t *pixels) const {
+		// One recovered kernel now serves both this texture atlas and the
+		// WAC runtime surface-normal lookup, preventing either copy from
+		// drifting in scale, axis order, or normalization.
+		// [orig: Terrain_GenerateNormalMap @ 0x603210; diff scale 1/256
+		// @ 0x7C6950; encode 127.5 @ 0x7D8B48; alpha 0x80 @ 0x6034eb]
+		const TerrainSurfaceNormal normal = height_field_normal_from_raw16(
+				depth[static_cast<size_t>(y) * width + resolve_x(x, y, x - 1)],
+				depth[static_cast<size_t>(y) * width + resolve_x(x, y, x + 1)],
+				depth[static_cast<size_t>(resolve_y(x, y, y - 1)) * width + x],
+				depth[static_cast<size_t>(resolve_y(x, y, y + 1)) * width + x]);
+
+		const size_t dst = (static_cast<size_t>(y) * width + x) * 4;
+		pixels[dst] = encode_coefficient(normal.x);
+		pixels[dst + 1] = encode_coefficient(normal.z);
+		pixels[dst + 2] = encode_coefficient(normal.up);
+		pixels[dst + 3] = 128;
+	}
+};
+
+} // namespace
+
 Rgba8Image build_heightfield_normal_map(
 		const std::vector<uint16_t> &depth,
 		uint32_t width,
@@ -108,50 +161,62 @@ Rgba8Image build_heightfield_normal_map(
 
 	Rgba8Image result{width, height, {}};
 	result.pixels.resize(static_cast<size_t>(width) * height * 4);
-	const uint32_t x_mask = width - 1;
-	const uint32_t y_mask = height - 1;
-	const uint32_t quadrant_width = width >> 1;
-	const uint32_t quadrant_height = height >> 1;
-	const uint32_t quadrant_x_mask = quadrant_width - 1;
-	const uint32_t quadrant_y_mask = quadrant_height - 1;
-
+	const HeightfieldNormalKernel kernel{depth, width, height, locks};
 	for (uint32_t y = 0; y < height; ++y) {
 		for (uint32_t x = 0; x < width; ++x) {
-			const uint32_t quadrant_x = x >= quadrant_width ? 1u : 0u;
-			const uint32_t quadrant_y = y >= quadrant_height ? 1u : 0u;
-			const TerrainLockCoord &lock = locks[quadrant_x + quadrant_y * 2u];
-			const uint32_t x_offset = quadrant_x * quadrant_width;
-			const uint32_t y_offset = quadrant_y * quadrant_height;
-
-			const auto resolve_x = [&](uint32_t sample_x) {
-				return lock.x != 0
-					? x_offset + (sample_x & quadrant_x_mask)
-					: sample_x & x_mask;
-			};
-			const auto resolve_y = [&](uint32_t sample_y) {
-				return lock.y != 0
-					? y_offset + (sample_y & quadrant_y_mask)
-					: sample_y & y_mask;
-			};
-			// One recovered kernel now serves both this texture atlas and the
-			// WAC runtime surface-normal lookup, preventing either copy from
-			// drifting in scale, axis order, or normalization.
-			// [orig: Terrain_GenerateNormalMap @ 0x603210; diff scale 1/256
-			// @ 0x7C6950; encode 127.5 @ 0x7D8B48; alpha 0x80 @ 0x6034eb]
-			const TerrainSurfaceNormal normal = height_field_normal_from_raw16(
-					depth[static_cast<size_t>(y) * width + resolve_x(x - 1)],
-					depth[static_cast<size_t>(y) * width + resolve_x(x + 1)],
-					depth[static_cast<size_t>(resolve_y(y - 1)) * width + x],
-					depth[static_cast<size_t>(resolve_y(y + 1)) * width + x]);
-
-			const size_t dst = (static_cast<size_t>(y) * width + x) * 4;
-			result.pixels[dst] = encode_coefficient(normal.x);
-			result.pixels[dst + 1] = encode_coefficient(normal.z);
-			result.pixels[dst + 2] = encode_coefficient(normal.up);
-			result.pixels[dst + 3] = 128;
+			kernel.write(x, y, result.pixels.data());
 		}
 	}
 	return result;
+}
+
+bool refresh_heightfield_normal_map(
+		Rgba8Image &normals,
+		const std::vector<uint16_t> &depth,
+		uint32_t width,
+		uint32_t height,
+		const TerrainQuadrantLocks &locks,
+		const terrain::CoordsRect &rect,
+		std::array<bool, 4> *quadrants_written) {
+	if (quadrants_written != nullptr) quadrants_written->fill(false);
+	if (!is_power_of_two(width) || !is_power_of_two(height) ||
+			width < 2 || height < 2 ||
+			depth.size() != static_cast<size_t>(width) * height ||
+			normals.width != width || normals.height != height ||
+			normals.pixels.size() != static_cast<size_t>(width) * height * 4) {
+		return false;
+	}
+	const int64_t x0 = std::max<int64_t>(rect.x, 0);
+	const int64_t z0 = std::max<int64_t>(rect.z, 0);
+	const int64_t x1 = std::min<int64_t>(static_cast<int64_t>(rect.x) + rect.w, width);
+	const int64_t z1 = std::min<int64_t>(static_cast<int64_t>(rect.z) + rect.h, height);
+	if (x0 >= x1 || z0 >= z1) return true;
+	const auto column_in = [&](uint32_t v) { return v >= x0 && v < x1; };
+	const auto row_in = [&](uint32_t v) { return v >= z0 && v < z1; };
+	const HeightfieldNormalKernel kernel{depth, width, height, locks};
+	const auto write = [&](uint32_t x, uint32_t y) {
+		kernel.write(x, y, normals.pixels.data());
+		if (quadrants_written != nullptr) {
+			(*quadrants_written)[(x >= (width >> 1) ? 1u : 0u) + (y >= (height >> 1) ? 2u : 0u)] = true;
+		}
+	};
+	// The rect's rows: a texel whose left or right tap is one of its columns.
+	for (uint32_t y = static_cast<uint32_t>(z0); y < static_cast<uint32_t>(z1); ++y) {
+		for (uint32_t x = 0; x < width; ++x) {
+			if (column_in(kernel.resolve_x(x, y, x - 1)) || column_in(kernel.resolve_x(x, y, x + 1))) {
+				write(x, y);
+			}
+		}
+	}
+	// The rect's columns: a texel whose upper or lower tap is one of its rows.
+	for (uint32_t x = static_cast<uint32_t>(x0); x < static_cast<uint32_t>(x1); ++x) {
+		for (uint32_t y = 0; y < height; ++y) {
+			if (row_in(kernel.resolve_y(x, y, y - 1)) || row_in(kernel.resolve_y(x, y, y + 1))) {
+				write(x, y);
+			}
+		}
+	}
+	return true;
 }
 
 Rgba8Image normalize_detail_blend_map(const Rgba8Image &blendmap) {

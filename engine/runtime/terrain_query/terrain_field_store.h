@@ -70,6 +70,14 @@ public:
 		field_.has_water = water_y_q16 != 0;
 	}
 
+	// Writes `rect` (atlas texels: x, z the column and row, w, h the size) of the heights the store holds
+	// from `src` (raw16, `stride` samples a row, stride >= w), in place: the height view keeps pointing at
+	// the same buffer, so every copy of it (the world's, the kernel's) reads the new ground with no
+	// rebuild (an editor's sculpt stroke; the game reads its heights once, at load). It writes under
+	// every live copy of the view, so a patch and the reads it serves share one thread, or the caller
+	// holds the views' owner. False, nothing written, with no heights or a rect not inside them.
+	bool patch_heights(const CoordsRect &rect, const uint16_t *src, size_t stride);
+
 	// Views into the owned buffers; stable until the next build()/clear().
 	const TerrainHeightField &height_field() const { return field_; }
 	// Zero-initialized (charmap members) when no charmap was supplied. It
