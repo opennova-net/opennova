@@ -65,7 +65,7 @@ public:
 	// marked lists, then in state 6 the lists forced out once more (two ClientHostUpdates, each
 	// with the whole Host list and PlayerList); the cookie-key ring is left alone. A fresh host's
 	// first full Host list, its HostKey included, goes out here: its host result publishes
-	// nothing (handle_notice, D-NET-465). The embedder runs it at every mission start.
+	// nothing (handle_host_result, D-NET-465). The embedder runs it at every mission start.
 	// [orig: Game_StartMission @0x5248c6..0x524903 — the marks @0x5248e4 / @0x5248ef,
 	//  Lobby_UpdateServerInfo @0x5248f5, CPlayerManager_RebuildLists(1) @0x524903]
 	void publish_mission_start();

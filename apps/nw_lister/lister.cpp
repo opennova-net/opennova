@@ -110,8 +110,8 @@ Lister::Lister(ListerOptions options, std::unique_ptr<ListingSource> owned, List
           }()),
       role_(lobby_, [this]() {
 	      NwuHostRole::Hooks hooks;
-		  hooks.on_hosting = [this]() { on_listed(); };
-		  hooks.on_failed = [this](const std::string &tag) {
+	      hooks.on_hosting = [this]() { on_listed(); };
+	      hooks.on_failed = [this](const std::string &tag) {
 		      io::logf(LogLevel::kError, "[host] the host request failed: %s", tag.c_str());
 		      source_->on_host_result(false, tag);
 		      end(kExitFailed);
@@ -188,7 +188,13 @@ bool Lister::tick(uint32_t now_ms) {
 	if (!ending_ && http_.valid() && http_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
 		on_http_reply(http_.get());
 	}
-	if (!ending_) refresh_listing(false);
+	// A source without missions stands in for each mission start with the mission change it
+	// observes (the listing file's map, or the admin port's): the mission start's update goes out
+	// at once, as a stock host's goes at each of its own (D-NET-488).
+	// [orig: Game_StartMission @0x5248c6..0x524903]
+	if (!ending_ && refresh_listing(false) && phase_ == Phase::Hosting &&
+			!source_->starts_missions())
+		role_.publish_mission_start();
 	if (ending_) teardown(/*stop_hosting=*/true);
 	return phase_ != Phase::Done;
 }
@@ -215,8 +221,9 @@ void Lister::disconnect() {
 
 // ServerHostResult success: the listing is up. A fresh host's result publishes nothing (its first
 // full Host list, HostKey included, goes with its mission start's update, D-NET-465), so an
-// embedder whose source starts missions publishes at each one; a source with no mission behind
-// it never has that start, and its listing starts here instead (D-NET-488, PERMANENT).
+// embedder whose source starts missions publishes at each one; a source that only reports a
+// server's mission sees no mission start, and its listing starts here instead (D-NET-488,
+// PERMANENT; each mission change it reports publishes again, Lister::tick).
 // [orig: CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c58; Game_StartMission
 //  @0x5248c6..0x524903]
 void Lister::on_listed() {
@@ -365,11 +372,18 @@ std::vector<std::pair<std::string, std::string>> Lister::cookie_vars() {
 }
 
 // The source's changes: the columns ride the host role's next refresh, the roster goes out at once.
-void Lister::refresh_listing(bool force) {
-	if (phase_ != Phase::Requesting && phase_ != Phase::Hosting) return;
-	if (!source_->refresh(now_ms_, force)) return;
-	role_.set_columns(registration());
+// True when the listed mission changed.
+bool Lister::refresh_listing(bool force) {
+	if (phase_ != Phase::Requesting && phase_ != Phase::Hosting)
+		return false;
+	if (!source_->refresh(now_ms_, force))
+		return false;
+	const HostRegistration columns = registration();
+	role_.set_columns(columns);
 	sync_roster();
+	const bool mission_changed = columns.mission_name != listed_mission_;
+	listed_mission_ = columns.mission_name;
+	return mission_changed;
 }
 
 // The source's columns plus what the session owns: the gate's LobbyName, the HOSTKEY, the leg's

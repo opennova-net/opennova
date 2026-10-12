@@ -43,11 +43,13 @@ public:
 	virtual HostRegistration registration() const = 0;
 	// The PlayerList roster, given the slots the session lists now (`current`, by slot).
 	virtual std::vector<HostPlayerSlot> wanted_roster(const std::map<int, HostPlayerSlot> &current) const = 0;
-	// Whether the server behind the source starts missions. Such an embedder (opennova-serve)
-	// runs Lister::publish_server_info at each mission start, as Game_StartMission does, and its
-	// host result publishes nothing: a fresh host's first full Host list is its mission start's.
-	// A source without missions (the listing file, the admin port) has no such start, so the
-	// lister publishes that update at its host result instead (D-NET-488, PERMANENT).
+	// Whether the server behind the source starts missions in this process. Such an embedder
+	// (opennova-serve) runs Lister::publish_server_info at each mission start, as
+	// Game_StartMission does, and its host result publishes nothing: a fresh host's first full
+	// Host list is its mission start's. A source that only reports a server's mission (the
+	// listing file's map, the admin port's) sees no mission start, so the lister publishes that
+	// update at its host result and again at each mission change the source reports
+	// (D-NET-488, PERMANENT).
 	virtual bool starts_missions() const { return false; }
 
 	// The host request's outcome: hosting (ServerHostResult success), or the NWEC tag it failed

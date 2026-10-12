@@ -2,7 +2,8 @@
 // the real apps/novaworld_server NwUdpListener and an in-test gate. The row appears with the
 // listing's players and, the listing having no mission start, the whole Host list its host result
 // publishes in that start's stead (D-NET-488); a listing edit removes one player while the other
-// keeps its slot; a renamed column rides the next 1860-tick refresh; the stop removes the row. Then
+// keeps its slot; a renamed column rides the next 1860-tick refresh; a reported mission change
+// publishes the whole list at once (D-NET-488); the stop removes the row. Then
 // an embedder's source whose server starts missions (opennova-serve's shape): its host result
 // publishes nothing (D-NET-465) and the mission start's update publishes the whole Host list.
 
@@ -194,12 +195,23 @@ int main() {
 	expect(tick_until([&] { return row("Lister E2E Renamed").has_value(); }, 300),
 	       "the 1860-tick refresh carries the renamed column");
 
+	// A mission change the listing reports stands in for the mission start the lister cannot
+	// see: the whole Host list goes out at once, the renamed column with it, well before the
+	// next refresh (D-NET-488). [orig: Game_StartMission @0x5248c6..0x524903]
+	write_listing(listing,
+			R"({"server_name": "Lister E2E Moved", "mission": "ASH_G12A", "players": ["Bravo", "Charlie"]})",
+			10);
+	tick(2100); // past the listing check
+	const bool moved = tick_until(
+			[&] { return host_var("Lister E2E Moved", "MissionName") == "ASH_G12A"; }, 300);
+	expect(moved, "a reported mission change publishes the mission start's update at once");
+
 	lister.stop();
 	expect(lister.exit_code() == opennova::nw_lister::kExitStopped, "a stop exits 0");
 	bool gone = false;
 	for (int i = 0; i < 100 && !gone; ++i) {
 		std::this_thread::sleep_for(20ms);
-		gone = !row("Lister E2E Renamed");
+		gone = !row("Lister E2E Moved");
 	}
 	expect(gone, "the stop removes the row");
 

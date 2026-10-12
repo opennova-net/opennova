@@ -100,9 +100,8 @@ void NwuHostRole::republish_lists() {
 	last_sent_host_.clear();
 	last_sent_players_.clear();
 	update_server_info();
-	ClientSession *session = lobby_.session();
-	if (session != nullptr && session->host_state() == ClientSession::HostState::Established)
-		send_host_update(/*full=*/true);
+	// The state-6 test is send_host_update's, as it is for every send.
+	send_host_update(/*full=*/true);
 }
 
 // The host-direction notices (ServerHostResult, ServerStopHosting, ServerCommand,
@@ -185,7 +184,8 @@ void NwuHostRole::handle_host_result(const ClientSession::Notice &notice) {
 void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 	players_[slot.slot] = slot;
 	cfg_.player_count = static_cast<int>(players_.size());
-	// ClientHostPlayerAdded fires immediately while hosting is established (state 6).
+	// ClientHostPlayerAdded fires immediately while hosting is established (state 6). Retail then
+	// sends the PlayerList delta at once as well, ours at the next refresh (D-NET-490).
 	// [orig: Server_PlayerAdd @0x51d3f0 @0x51d421..0x51d4b5]
 	ClientSession *session = lobby_.session();
 	if (phase_ == Phase::Hosting && session != nullptr) session->send_host_player_added(slot);
@@ -275,12 +275,19 @@ void NwuHostRole::send_host_request(uint32_t currently_hosting) {
 	phase_ = Phase::Requested;
 }
 
+// Every update goes in state 6 alone: CPlayerManager_RebuildLists tests it ahead of its send (the
+// refresh's, the mission start's, the server-info update's tail) and the host result's includeAll
+// send has its own test, so with a re-host's request out (state 5) no update leaves until its
+// result. includeAll at a mission start and a re-host's result, else only the vars whose value
+// changed (dirty_client_vars), and nothing at all when none did.
+// [orig: CPlayerManager_RebuildLists @0x4d4590 — `cmp [esi+0x11c], 6` @0x4d4593;
+//  CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the test @0x4d5c80..0x4d5c87);
+//  CNapiGameSession_SendHostUpdate @0x4d3860]
 void NwuHostRole::send_host_update(bool full) {
 	ClientSession *session = lobby_.session();
-	if (session == nullptr || !session->is_verified()) return;
-	// includeAll right after registration, else only the vars whose value changed
-	// (dirty_client_vars), and nothing at all when none did.
-	// [orig: CNapiGameSession_SendHostUpdate @0x4d3860]
+	if (session == nullptr || !session->is_verified() ||
+			session->host_state() != ClientSession::HostState::Established)
+		return;
 	const std::vector<ClientVar> host = make_host_var_list(host_cfg(), lobby_text_, /*full=*/true);
 	const std::vector<ClientVar> players = player_list_vars();
 	const std::vector<ClientVar> dirty_host = full ? host : dirty_client_vars(last_sent_host_, host);

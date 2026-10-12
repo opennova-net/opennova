@@ -233,36 +233,76 @@ int main() {
 		std::this_thread::sleep_for(2ms);
 	};
 	// The session's own reap (240 s without a receive): its 0x46 burst drops the listener's
-	// connection, which parks the lobby state and its RID. The pass receives before it pumps, so
-	// a service answer still in flight would re-arm the receive clock: short passes first send
-	// the rest of the mission start's fragmented updates and take every answer in, until the
-	// connection is quiet, then the clock jumps; a jump that still received one (and so sent the
-	// idle keepalive) is retried after another quiet spell.
-	auto torn_down = [&] { return lobby.session() != nullptr && lobby.session()->reconnecting(); };
-	for (int i = 0; i < 5 && !torn_down(); ++i) {
-		for (int quiet = 0; quiet < 40; ++quiet) {
-			std::this_thread::sleep_for(5ms);
-			tick_lobby();
-		}
-		tick_lobby(240001);
+	// connection, which parks the lobby state and its RID. A lobby pass receives before it pumps,
+	// so a service answer still in flight would re-arm the receive clock ahead of the reap check;
+	// the jump's pass therefore pumps the session alone, with no receive between the jump and
+	// the check (as nw_host_register_e2e's reconnect does), and the reap fires on that one pass.
+	opennova::ClientSession *reaped = lobby.session();
+	if (reaped != nullptr) {
+		now += 240001;
+		reaped->set_clock_ms(now);
+		std::vector<std::vector<uint8_t>> burst;
+		reaped->pump(burst);
+		for (const auto &dg : burst)
+			lobby.send(dg);
 	}
-	expect(torn_down(), "the reap tears the connection down for a reconnect");
+	expect(reaped != nullptr && reaped->reconnecting(),
+			"the reap tears the connection down for a reconnect");
 	bool dropped = false;
 	for (int i = 0; i < 100 && !dropped; ++i) {
 		std::this_thread::sleep_for(20ms);
 		dropped = !row("Engine Driver Started");
 	}
 	expect(dropped, "the listener drops the row on the burst");
-	// The re-probe past its first delay, the re-join, the re-verify and the re-host's result.
-	bool rehosted = false;
-	for (int i = 0; i < 3000 && !rehosted; ++i) {
+	// The re-probe past its first delay, the re-join, and the re-verify, which counts
+	// ReconnectCounter up and sends the re-host's request (state 5). The request leaves in its
+	// pass's pump, after that pass's receive, so the pass that first sees state 5 has not
+	// received the result.
+	bool requested = false;
+	for (int i = 0; i < 3000 && !requested; ++i) {
 		tick_lobby();
 		const opennova::ClientSession *session = lobby.session();
-		rehosted = session != nullptr && session->host_reconnect_counter() == 1 &&
-				session->host_state() == opennova::ClientSession::HostState::Established &&
-				role.is_hosting();
+		requested = session != nullptr && session->host_reconnect_counter() == 1 &&
+				session->host_state() == opennova::ClientSession::HostState::Requested;
 	}
-	expect(rehosted, "the session re-joins and re-hosts with ReconnectCounter 1");
+	expect(requested, "the re-verify counts ReconnectCounter 1 and re-sends the request");
+	// State 5: a mission start's update sends nothing until the result. The lobby runs on with
+	// its notices held, so the role sees no result until they are handed over.
+	// [orig: CPlayerManager_RebuildLists @0x4d4590 (the state-6 test @0x4d4593)]
+	role.publish_mission_start();
+	std::vector<opennova::ClientSession::Notice> held;
+	auto tick_holding = [&]() {
+		now += 10;
+		lobby.tick(now);
+		if (opennova::ClientSession *session = lobby.session()) {
+			for (auto &notice : session->take_notices())
+				held.push_back(std::move(notice));
+		}
+		std::this_thread::sleep_for(2ms);
+	};
+	auto listed = [&]() {
+		for (const auto &h : hosted()) {
+			if (h.lobby.hosting)
+				return true;
+		}
+		return false;
+	};
+	bool answered = false;
+	for (int i = 0; i < 300 && !answered; ++i) {
+		tick_holding();
+		const opennova::ClientSession *session = lobby.session();
+		answered = session != nullptr &&
+				session->host_state() == opennova::ClientSession::HostState::Established &&
+				listed();
+	}
+	expect(answered, "the service re-lists the row and answers the re-host");
+	for (int i = 0; i < 20; ++i)
+		tick_holding();
+	expect(!row("Engine Driver Rehosted"), "a mission start in state 5 sends no ClientHostUpdate");
+	// The result reaches the role: ReconnectCounter 1, so it republishes.
+	for (const auto &notice : held)
+		role.handle_notice(notice);
+	expect(role.is_hosting(), "the re-host's result keeps the hosting");
 	bool republished = false;
 	for (int i = 0; i < 300 && !republished; ++i) {
 		tick_lobby();
