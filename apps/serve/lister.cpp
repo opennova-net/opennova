@@ -205,7 +205,13 @@ bool Lister::tick(uint32_t now_ms) {
 	if (!ending_ && http_.valid() && http_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
 		on_http_reply(http_.get());
 	}
-	if (!ending_) refresh_listing(false);
+	// A source without missions stands in for each mission start with the mission change it
+	// observes (the listing file's map, or the admin port's): the mission start's update goes out
+	// at once, as a stock host's goes at each of its own (D-NET-488).
+	// [orig: Game_StartMission @0x5248c6..0x524903]
+	if (!ending_ && refresh_listing(false) && phase_ == Phase::Hosting &&
+			!source_->starts_missions())
+		role_.publish_mission_start();
 	if (ending_) teardown(/*stop_hosting=*/true);
 	return phase_ != Phase::Done;
 }
