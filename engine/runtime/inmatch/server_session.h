@@ -60,7 +60,7 @@ enum class CreateSessionResult : uint8_t {
 // is_in_session, and (when is_authority) calls start_server. When the mode is HostClient and
 // `local_client` is supplied, registers the host's own local client connection (type 2,
 // TransportMode::Loopback) on the connection_list — the in-process listen-server's own client
-// (§5.0: "creates a local client connection with NapiNPConnection_Create"). The transport is
+// (§5.0: "creates a local client connection with CNapiNPConnection_Create"). The transport is
 // NON-OWNING (the binding/test owns the LoopbackChannel).
 CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &config,
                                    const SessionStartup &startup,
