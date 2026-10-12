@@ -75,7 +75,8 @@ bool check_digit_class() {
 			expect_literal("4294967295", 0x7FFFFFFFu, 10) &&
 			expect_literal("99999999999d", 0x7FFFFFFFu, 12);
 	const bool hex = expect_literal("0x1\xB2", 0xFFFFFF92u, 4) &&
-			expect_literal("\xB2h", 0xFFFFFF82u, 2) && expect_literal("$\xB9\x30", 0xFFFFF890u, 3) &&
+			expect_literal("\xB2h", 0xFFFFFF82u, 2) &&
+			expect_literal("$\xB9\x30", 0xFFFFF890u, 3) &&
 			expect_literal("$FFFFFFFF", 0xFFFFFFFFu, 9);
 	const bool octal = expect_literal("07\xB2", 7, 3) && expect_literal("017\xB9", 17, 4);
 	const bool binary =
