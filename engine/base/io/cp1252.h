@@ -84,6 +84,36 @@ inline constexpr bool cp1252_isdigit(std::uint8_t p_byte) noexcept {
 	return (p_byte >= '0' && p_byte <= '9') || p_byte == 0xB2 || p_byte == 0xB3 || p_byte == 0xB9;
 }
 
+// The CRT `isalpha` under the same ".ACP" LC_CTYPE: the bytes whose pctype row has a bit of
+// _ALPHA (C1_ALPHA | C1_UPPER | C1_LOWER) on code page 1252, 125 of them: the 52 ASCII letters
+// plus 0x83 (f-hook), 0x8A, 0x8C, 0x8E, 0x9A, 0x9C, 0x9E, 0x9F (S/OE/Z caron, s/oe/z caron,
+// Y diaeresis), 0xAA and 0xBA (the ordinal indicators), 0xB5 (micro), 0xC0..0xD6, 0xD8..0xF6 and
+// 0xF8..0xFF (the Latin-1 letters, the multiplication and division signs 0xD7 / 0xF7 left out).
+// Probed 2026-10-11 with MultiByteToWideChar(1252) + GetStringTypeW(CT_CTYPE1), and msvcrt's
+// isalpha after setlocale(LC_ALL, ".ACP") on a cp1252 host gives the same 256 rows. The letter set
+// differs between single-byte pages far more than the digit set: no other page has cp1252's
+// (1254 lacks 0x8E / 0x9E, 1258 ten more, 1250 and 1257 trade bytes, 1251 / 1253 / 1255 / 1256 /
+// 874 are other alphabets); the pin to cp1252 is D-NET-478's.
+// [orig: _isalpha @0x76b703 -> _isalpha_l @0x76b6af (the locale's pctype & 0x103, @0x76b6ef);
+//  CRT_init_ctype @0x784a07 (the rows from __crtGetStringTypeA CT_CTYPE1, the call @0x784b5b)]
+inline constexpr bool cp1252_isalpha(std::uint8_t p_byte) noexcept {
+	const bool ascii = (p_byte >= 'A' && p_byte <= 'Z') || (p_byte >= 'a' && p_byte <= 'z');
+	const bool latin1 = p_byte >= 0xC0 && p_byte != 0xD7 && p_byte != 0xF7;
+	const bool windows = p_byte == 0x83 || p_byte == 0x8A || p_byte == 0x8C || p_byte == 0x8E ||
+			p_byte == 0x9A || p_byte == 0x9C || p_byte == 0x9E || p_byte == 0x9F;
+	const bool other = p_byte == 0xAA || p_byte == 0xB5 || p_byte == 0xBA;
+	return ascii || latin1 || windows || other;
+}
+
+// The CRT `isalpha` of a `char` a call site hands over sign-extended (movsx): CRT_init_ctype's
+// mirror gives each byte 0x80..0xFE its own row at -128..-2, but 0xFF's -1 is the EOF row, which
+// has no class, so 0xFF (y diaeresis, a letter by its row) is no letter there.
+// [orig: CRT_init_ctype @0x784a07 — the mirror memcpy @0x784c59, the EOF word @0x784bde]
+inline constexpr bool cp1252_isalpha_sign_extended(char p_char) noexcept {
+	return static_cast<std::uint8_t>(p_char) != 0xFF &&
+			cp1252_isalpha(static_cast<std::uint8_t>(p_char));
+}
+
 // Strict UTF-8 well-formedness (no overlong forms, no surrogates, at most U+10FFFF).
 inline bool is_valid_utf8(std::string_view s) noexcept {
 	size_t i = 0;

@@ -1,5 +1,6 @@
 #include <runtime/terrain_query/height_field.h>
 #include <base/io/bam.h>
+#include <runtime/terrain_query/atlas_routing.h>
 
 #include <cstddef>
 #include <cmath>
@@ -131,24 +132,19 @@ TerrainSurfaceNormal height_field_surface_normal_world(
 TerrainHeightGradient height_field_gradient_fixed(
 		const TerrainHeightField &f, int32_t mission_x, int32_t mission_y) {
 	if (!f.valid() || !f.layout.sector_grid) return {};
-	// Retail NEG/SAR before sector lookup, including negative fractions and
-	// INT32_MIN. A non-wrapping axis clamps to the padded 16-cell grid edges,
-	// NOT the authored sector_count/rows. [orig: Terrain_GetHeightGradient
+	// The routing every lookup shares (atlas_routing.h): retail's NEG/SAR before
+	// the sector lookup, including negative fractions and INT32_MIN; a
+	// non-wrapping axis clamps to the padded 16-cell grid edges, NOT the
+	// authored sector_count/rows. [orig: Terrain_GetHeightGradient
 	// @0x606330..0x606385; mask producer PolyTrn_LoadTerrainConfig @0x60E4B1]
-	const int32_t atlas_y = io::bam_sub(0, mission_y);
-	const int32_t grid_x = io::bam_sub(io::bam_sar(mission_x, 25), f.layout.origin_x);
-	const int32_t grid_y = io::bam_sub(io::bam_sar(atlas_y, 25), f.layout.origin_y);
-	const auto grid_cell = [](int32_t cell, bool wrap) {
-		if (!wrap && (cell & ~15) != 0) return cell < 0 ? 0 : 15;
-		return cell & 15;
-	};
-	const int child = io::bam_sub(f.layout.sector_grid[
-			16 * grid_cell(grid_y, f.wrap_z) + grid_cell(grid_x, f.wrap_x)], 1);
-	if (child < 0) return {};
-	const int quadrant_x = (child & 2) != 0 ? 512 : 0;
-	const int quadrant_y = (child & 1) != 0 ? 512 : 0;
-	const int x = (io::bam_sar(mission_x, 16) & 511) + quadrant_x;
-	const int y = (io::bam_sar(atlas_y, 16) & 511) + quadrant_y;
+	const TerrainAtlasTexel texel = terrain_atlas_texel_at(
+			TerrainAtlasRouting{f.layout.sector_grid, f.layout.origin_x, f.layout.origin_y, f.wrap_x, f.wrap_z},
+			mission_x, mission_y);
+	if (!texel.mapped) return {};
+	const int quadrant_x = (texel.slot & 2) != 0 ? 512 : 0;
+	const int quadrant_y = (texel.slot & 1) != 0 ? 512 : 0;
+	const int x = texel.x;
+	const int y = texel.z;
 	const CoordsTaps taps = coords_taps_for_quadrant(
 			f.locks, quadrant_x, quadrant_y, f.dim);
 	const auto raw_at = [&](int tx, int ty) {
