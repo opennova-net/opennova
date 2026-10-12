@@ -1941,6 +1941,7 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	opennova::world::World sparse_world;
 	sparse_world.registry.configure_pool(0, 1024);
 	opennova::world::Entity seed;
+	seed.item_type_index = 1; // a typed row: the sweep lists only index-0 rows
 	const auto low = sparse_world.registry.spawn(0, seed);
 	const auto high = sparse_world.registry.spawn_from(0, 1023, seed);
 	if (!expect(low.valid() && low.slot() == 0 && high.valid() && high.slot() == 1023,
@@ -3515,6 +3516,107 @@ bool check_vehicle_spawn_target_deploys_into_best_seat() {
 			"mobile spawn resets then boards the best free vehicle seat");
 }
 
+// D-NET-480: both the 0x0E and the deploy refuse a vehicle target whose ROOT
+// carries the dead bit before their seat walks, so a live child of a dead root
+// (whose own seat the per-entry walk would still offer) is no mobile spawn.
+// [orig: Server_ProcessClientRequestRespawn @0x519D19 / @0x519D1D;
+//  Server_ProcessPlayerDeath @0x5177CB / @0x5177CF; Entity_FindBestSeatSlot's
+//  per-entry gate @0x4352C2..0x4352CD]
+bool check_dead_vehicle_root_is_no_mobile_spawn() {
+	namespace w = opennova::world;
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	w::Entity root_seed;
+	root_seed.kind = w::EntityKind::Item;
+	root_seed.has_item_def = true;
+	root_seed.item_type = 1;
+	root_seed.item_attrib = w::kItemAttribPlayerControl;
+	root_seed.is_spawn_point = true;
+	root_seed.team = 1;
+	root_seed.alive = true;
+	root_seed.health = 500;
+	w::Seat controller;
+	controller.type = w::SeatType::Controller;
+	controller.bone_index = 4;
+	root_seed.seats.push_back(controller);
+	const w::EntityHandle root = world.registry.spawn(1, root_seed);
+	w::Entity child_seed; // a live, ground-attached emplacement with a free seat
+	child_seed.kind = w::EntityKind::Item;
+	child_seed.has_item_def = true;
+	child_seed.team = 1;
+	child_seed.alive = true;
+	child_seed.health = 100;
+	child_seed.ground_target = root;
+	w::Seat passenger;
+	passenger.type = w::SeatType::Passenger;
+	passenger.bone_index = 7;
+	child_seed.seats.push_back(passenger);
+	const w::EntityHandle child = world.registry.spawn(1, child_seed);
+	w::Entity driver_seed;
+	driver_seed.kind = w::EntityKind::Organic;
+	driver_seed.team = 1;
+	driver_seed.alive = true;
+	driver_seed.health = 100;
+	const w::EntityHandle driver = world.registry.spawn(0, driver_seed);
+	if (!expect(world.vehicles.process_attach(driver, root, 4),
+			"fixture driver claims the mobile spawn vehicle"))
+		return false;
+	// The root dies as the vehicle class marks it (Flags |= 2); its child lives on.
+	world.registry.get(root)->engine_flags |= w::kEntityFlagDead;
+	world.registry.get(root)->alive = false;
+	world.registry.get(root)->health = 0;
+	w::VehicleSeatSelection walked;
+	if (!expect(w::find_best_vehicle_seat(world, root, driver, walked) &&
+				walked.vehicle == child,
+			"fixture: the per-entry walk still offers the live child's seat"))
+		return false;
+
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.team = 1;
+	player_seed.health = 0;
+	player_seed.health_max = 125;
+	player_seed.position = {-10.0f, -20.0f, 0.0f};
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	opennova::inmatch::GameConfig config;
+	config.game_type = opennova::game_type::kTeamDeathmatch;
+	std::vector<opennova::inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.link.respawn_pending = true;
+	conn.reply.player_slot = 1;
+	const std::vector<opennova::ProtocolMessage> pick{opennova::make_protocol_message(
+			opennova::c2s::RESPAWN_REQUEST,
+			{static_cast<uint8_t>(root.packed), static_cast<uint8_t>(root.packed >> 8)})};
+	const bool request_refused = expect(opennova::inmatch::dispatch_session_replies(
+						config, conn, pick, 100, roster, &world).empty() &&
+				world.registry.get(player)->health == 0 &&
+				!world.registry.get(player)->mounted,
+			"the 0x0E refuses a dead root ahead of its seat walk");
+	w::Entity *body = world.registry.get(player); // undo an accepted pick's deploy
+	if (body->mounted) world.vehicles.detach(player);
+	body->health = 0;
+	body->flags |= w::kEntityFlagDead;
+	body->engine_flags |= w::kEntityFlagDead;
+	body->position = {-10.0f, -20.0f, 0.0f};
+	conn.link.respawn_pending = true;
+	// The wave release and the 0x51 convert reach the deploy without the 0x0E's gate.
+	const bool deploy_refused = expect(opennova::inmatch::Server_ReleasePlayerDeployment(
+						config, conn, world, root, root.packed).empty() &&
+				world.registry.get(player)->health == 0 &&
+				world.registry.get(player)->position.x == -10.0f &&
+				!world.registry.get(player)->mounted,
+			"the deploy refuses a dead root ahead of its seat walk");
+	return request_refused && deploy_refused;
+}
+
 // Retail answers the world-state-load burst's empty C2S 0x2D member with a
 // requester-only S2C 0x58. Its body is built from the live session report, not
 // a captured blob: game/mission names, game type, player cap, session uptime,
@@ -4801,6 +4903,7 @@ int main() {
 	ok = check_spawn_wave_queue_and_release_wire() && ok;
 	ok = check_default_spawn_requires_no_team_zone() && ok;
 	ok = check_vehicle_spawn_target_deploys_into_best_seat() && ok;
+	ok = check_dead_vehicle_root_is_no_mobile_spawn() && ok;
 	ok = check_session_status_reply_matches_retail_writer() && ok;
 	ok = check_objective_mode_session_status_options() && ok;
 	ok = check_score_ini_drives_session_status_values() && ok;

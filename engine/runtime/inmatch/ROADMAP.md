@@ -144,7 +144,7 @@ suite unaffected.
 > and logs the deferred builder gap rather than inventing values (faithful-port rule). Measured vs a
 > LAN host: 0x81: retail `ServerHello.CI` = 2 (read then as the host node index; since corrected
 > below: it is the joiner's own CI echoed), the
-> game-server field block (`is_game_server`: SF/P1/P2/NP/MP) is present, identity strings are the
+> game-server field block (SF/P1/P2/NP/MP) is present, identity strings are the
 > retail build's; 0x82 — `MI` is host-specific (retail 3 vs our 0x113f default), the CS control-field
 > *values* are the retail set (ours are onnet's `[UNVERIFIED]` values), and a LAN host emits **no CU**
 > block (we append novaworld name/url/nwuid). **Follow-up (done: Wave 3 below; the residue closed 2026-10-10):** the session-builder grill

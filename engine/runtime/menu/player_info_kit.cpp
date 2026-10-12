@@ -1,6 +1,10 @@
 #include <runtime/menu/player_info_kit.h>
 
+#include <base/io/crt_ftol.h>
+#include <base/io/strutil.h>
+
 #include <algorithm>
+#include <array>
 
 namespace opennova::menu {
 
@@ -64,6 +68,90 @@ std::vector<playersav::KitEntry> player_info_kit_entries(const PlayerInfoKitSele
 	out.push_back(slot_entry(sel.accessory, weapon_name));
 	// The three grenade slots are a FIXED array [orig: @0x55e7e0].
 	for (const KitSlotPick &g : sel.grenades) out.push_back(slot_entry(g, weapon_name));
+	return out;
+}
+
+namespace {
+
+// The catalog row a name names: the first match, case-insensitive, over the
+// seeded "None" (row 0) and then weapon.def's rows; -1 for none
+// [orig: EntityDef_FindIndexByName @ 0x563020]. An entry no `end` closed is no row.
+int32_t catalog_row_by_name(const def::DefWeaponsFile &weapons, const char *name) {
+	if (strutil::iequals(kCatalogNoneName, name)) return 0;
+	for (size_t i = 0; i < weapons.count; ++i) {
+		const def::DefWeaponDef &w = weapons.entries[i];
+		if (w.unclosed == 0 && strutil::iequals(w.weapon_name, name))
+			return catalog_index_of_row(static_cast<int32_t>(i));
+	}
+	return -1;
+}
+
+} // namespace
+
+PlayerInfoKitRestore player_info_restore_kit(const playersav::KitPage &page,
+		const def::DefWeaponsFile &weapons) {
+	PlayerInfoKitRestore out;
+	// The page as the record holds it: NUL-separated strings closed by an empty one.
+	std::array<uint8_t, playersav::kKitPageBytes> bytes{};
+	playersav::encode_kit_page(page, bytes.data(), bytes.size());
+	const auto at = [&bytes](size_t offset) {
+		return offset < bytes.size() ? reinterpret_cast<const char *>(bytes.data() + offset) : "";
+	};
+	const auto past = [&bytes](size_t offset) {
+		while (offset < bytes.size() && bytes[offset] != 0) ++offset;
+		return offset + 1;
+	};
+	// The CRT's atol as the game links it [orig: j__atol @0x76AB1B].
+	const auto value = [&at](size_t offset) { return io::retail_atol(at(offset)); };
+	// The three grenade slots and the interleaved count pairs are one block: the
+	// slots zeroed, every pair -1 [orig: @0x55e8d0..0x55e8da, @0x55e8e0..0x55e8f5].
+	const size_t rows = std::max(kPlayerInfoCatalogRows, weapons.count + 1);
+	std::vector<int32_t> block(3 + 2 * rows, -1);
+	block[0] = block[1] = block[2] = 0;
+	size_t slot = 0;
+	for (size_t cursor = 0; cursor < bytes.size() && bytes[cursor] != 0;) {
+		const int32_t row = catalog_row_by_name(weapons, at(cursor));
+		if (row <= 0) {
+			cursor = past(cursor); // one string on [orig: @0x55eadb]
+			continue;
+		}
+		const def::DefWeaponDef &w = weapons.entries[row - 1];
+		const size_t primary = past(cursor);
+		block[3 + 2 * row] = value(primary); // [orig: @0x55e945]
+		const size_t secondary = past(primary);
+		// Stored when a row within loadout_subclasses carries another round type
+		// [orig: @0x55e963..0x55e9bf, the store @0x55e9a4].
+		if (def::def_subclass_weapon_index(weapons.entries, weapons.count, row - 1) >= 0)
+			block[4 + 2 * row] = value(secondary);
+		const size_t flags_at = past(secondary);
+		const int8_t flags = static_cast<int8_t>(value(flags_at)); // [orig: @0x55e9db]
+		cursor = past(flags_at);
+		if (w.loadout_selectable == 0) continue; // [orig: @0x55e9f0]
+		switch (w.weapon_class_slot) {
+			case 0: out.select[2] = row; break;
+			case 1:
+				out.select[0] = row;
+				out.has_type[0] = true;
+				out.type[0] = flags;
+				break;
+			case 2:
+				out.select[1] = row;
+				out.has_type[1] = true;
+				out.type[1] = flags;
+				break;
+			case 3:
+				if (slot < block.size()) block[slot++] = row; // [orig: @0x55eac1]
+				break;
+			default: break;
+		}
+	}
+	for (size_t i = 0; i < 3; ++i) out.grenade_slots[i] = block[i];
+	out.ammo_primary.resize(rows);
+	out.ammo_secondary.resize(rows);
+	for (size_t r = 0; r < rows; ++r) {
+		out.ammo_primary[r] = block[3 + 2 * r];
+		out.ammo_secondary[r] = block[4 + 2 * r];
+	}
 	return out;
 }
 

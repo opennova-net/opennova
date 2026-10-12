@@ -595,6 +595,16 @@ bool ClientRuntime::queue_medic_request() {
 	return true;
 }
 
+bool ClientRuntime::queue_respawn_request() {
+	// No authority test: the listen host's own client queues it on its local
+	// connection like a joiner [orig: Input_HandleActionBinding case 55, the
+	// call @0x49B22A behind is_in_session / is_mp_session_peer alone].
+	if (queue_host_message(c2s::DEATH_TIMEOUT_RESET, {})) return true;
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	send_queue_.push_back(make_protocol_message(c2s::DEATH_TIMEOUT_RESET, {}));
+	return true;
+}
+
 // The stance key SELECT QUEUES the change like every other input-side producer:
 // [i16 action id] (0xA9 crouch / 0xAA prone / 0xAC stand) as one reliable C2S
 // 0x1D, user param 0 = retained until ACK. It is framed only inside the next open
@@ -892,7 +902,7 @@ void ClientRuntime::seed_session(uint32_t session_id, uint32_t client_key,
                                  uint32_t next_seq, uint32_t last_ack,
                                  uint16_t self_handle, uint16_t self_type,
                                   uint32_t game_type, uint32_t tick_seed,
-                                  bool replay_mode) {
+                                  bool replay_mode, uint8_t self_team) {
 	if (role_ != Role::Joiner) return;
 	// A replayed client is mid-session: its network-role clock was already seeded by the
 	// capture's S2C 0x61, so seed it here too or the tick stays parked at zero and every
@@ -901,7 +911,7 @@ void ClientRuntime::seed_session(uint32_t session_id, uint32_t client_key,
 	last_keepalive_tick_ = tick_seed;
 	joiner_->seed_in_match(session_id, client_key, std::move(client_scrk),
 	                       std::move(server_scrk), next_seq, last_ack, self_handle, self_type,
-	                       game_type);
+	                       game_type, self_team);
 	view_.set_game_type(game_type);
 	view_.set_mp_session(true);
 	deployed_ = true;     // a seeded replay is post-deploy (the captured client was uplinking)

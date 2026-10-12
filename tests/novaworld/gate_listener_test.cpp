@@ -78,7 +78,7 @@ int main() {
 	if (probe_gate(port, reply) != 0) return 1;
 	TEST_EXPECT((reply.post_ip == std::array<uint8_t, 4>{127, 0, 0, 1}));
 	TEST_EXPECT(reply.post_port == port);
-	TEST_EXPECT(reply.udp_novaworld == "127.0.0.1:40123");
+	TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{"127.0.0.1:40123"});
 	const std::string startup = "http://127.0.0.1:40456/nwprepare.dll?";
 	TEST_EXPECT(reply.startup_url.compare(0, startup.size(), startup) == 0);
 

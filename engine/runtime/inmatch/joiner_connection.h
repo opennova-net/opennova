@@ -372,9 +372,11 @@ public:
 	// client_scrk = the captured client SCRK (its ClientAuth.scrk); next_seq/last_ack = the captured
 	// datagram's seq/ack; self_handle/self_type = its 0x0C sub-header. server_scrk lets the same
 	// runtime also decode the capture's S2C 0x83 stream. Skips the live handshake — replay/parity only.
+	// self_team = the self record's team byte (the spawn pose's team).
 	void seed_in_match(uint32_t session_id, uint32_t client_key, std::string client_scrk,
 	                   std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
-	                   uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0);
+	                   uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
+	                   uint8_t self_team = 0);
 
 	// The shell's kit for the retail loadout-submission pair the world-stream terminator (S2C 0x1A)
 	// releases. Retail sends the SAME per-side profile kit twice: first with the fixed Primary-key

@@ -45,6 +45,7 @@ func test_the_accept_names_the_record_and_the_name_is_the_callsign() -> void:
 	PlayerProfile.load_for(null)
 	var profile := {
 		"name": "Sandman",
+		"team": 0,
 		"player_class": 8,
 		"side_profiles": [{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200}, {}],
 	}
@@ -57,7 +58,7 @@ func test_the_accept_names_the_record_and_the_name_is_the_callsign() -> void:
 	assert_eq(PlayerProfile.load_callsign(), "Sandman", "the name reads back from player.sav")
 	assert_false(PlayerProfile.store().is_first_run())
 	# A name that starts with white space empties the name and flags the record.
-	PlayerProfile.accept_player_info({"name": " Sandman", "player_class": 8,
+	PlayerProfile.accept_player_info({"name": " Sandman", "team": 0, "player_class": 8,
 			"side_profiles": [{"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200}, {}]})
 	assert_eq(PlayerProfile.store().get_player_name(), "")
 	assert_true(PlayerProfile.store().is_nameless())

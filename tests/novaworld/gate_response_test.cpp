@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -24,7 +25,8 @@ bool check_minimal_response() {
 	if (!expect((r.post_ip == std::array<uint8_t, 4>{10, 0, 0, 1}),
 			"POSTIPADDRESS -> 10.0.0.1")) return false;
 	if (!expect(r.post_port == 8080, "POSTIPPORT -> 8080")) return false;
-	if (!expect(r.udp_novaworld == "1.2.3.4:64206", "UDPNOVAWORLD preserved whole")) return false;
+	if (!expect(r.udp_novaworld == std::vector<std::string>{"1.2.3.4:64206"},
+			"UDPNOVAWORLD preserved whole")) return false;
 	return true;
 }
 
@@ -117,7 +119,8 @@ bool check_quoted_response() {
 	if (!expect((r.post_ip == std::array<uint8_t, 4>{127, 0, 0, 1}),
 			"quoted POSTIPADDRESS -> 127.0.0.1")) return false;
 	if (!expect(r.post_port == 7597, "quoted POSTIPPORT -> 7597")) return false;
-	if (!expect(r.udp_novaworld == "127.0.0.1:64206", "quoted UDPNOVAWORLD stripped")) return false;
+	if (!expect(r.udp_novaworld == std::vector<std::string>{"127.0.0.1:64206"},
+			"quoted UDPNOVAWORLD stripped")) return false;
 	if (!expect(r.startup_url == "http://127.0.0.1:8080", "quoted STARTUPURL stripped")) return false;
 	if (!expect(r.lobby_name == "jop 2 consumer", "quoted value keeps its internal space")) return false;
 	return true;
@@ -283,6 +286,44 @@ bool check_numeric_keys_skip_the_nbsp() {
 	return true;
 }
 
+// D-NET-469: every UDPNOVAWORLD line is kept, in order: CMissionInfo_AddVariable copies each into
+// the next of 16 64-byte entries (to the value's first NUL, at most 63 characters) and drops a 17th,
+// which the response still counts. [orig: CNapiGateManager_ProcessResponse @0x4CED20 - the call
+// @0x4CF315, the count @0x4CF4BB; CMissionInfo_AddVariable @0x4CD9D0 - @0x4CD9DC, @0x4CD9F7]
+bool check_every_udpnovaworld_line_is_kept() {
+	std::string body = "VAR UDPNOVAWORLD 1.2.3.4:64206\r\n"
+	                   "VAR LOBBYNAME jop_2_consumer\r\n"
+	                   "VAR UDPNOVAWORLD \"nw2.example:$7D00\"\r\n"
+	                   "VAR UDPNOVAWORLD 1.2.3.4:64206\r\n";
+	opennova::GateResponse r;
+	if (!expect(opennova::gate_response_parse(body, r), "three UDPNOVAWORLD lines parse")) return false;
+	if (!expect((r.udp_novaworld == std::vector<std::string>{"1.2.3.4:64206", "nw2.example:$7D00",
+	                                                        "1.2.3.4:64206"}),
+			"every UDPNOVAWORLD line kept in order, a repeat too")) return false;
+	if (!expect(r.var_count == 4, "each UDPNOVAWORLD line counts")) return false;
+
+	body.clear();
+	for (int i = 1; i <= 17; ++i) body += "VAR UDPNOVAWORLD 10.0.0." + std::to_string(i) + ":1\r\n";
+	if (!expect(opennova::gate_response_parse(body, r), "17 UDPNOVAWORLD lines parse")) return false;
+	if (!expect(r.udp_novaworld.size() == 16 && r.udp_novaworld.front() == "10.0.0.1:1" &&
+	                    r.udp_novaworld.back() == "10.0.0.16:1",
+			"the first 16 kept, the 17th dropped")) return false;
+	if (!expect(r.var_count == 17, "the dropped 17th still counts")) return false;
+
+	body = "VAR UDPNOVAWORLD " + std::string(70, 'h') + ":1\r\n";
+	if (!expect(opennova::gate_response_parse(body, r), "a long UDPNOVAWORLD parses")) return false;
+	if (!expect(r.udp_novaworld == std::vector<std::string>{std::string(63, 'h')},
+			"a UDPNOVAWORLD entry keeps 63 characters")) return false;
+	body = std::string("VAR UDPNOVAWORLD \"5.6.7.8:9") + std::string(1, '\0') + "9\"\r\n";
+	if (!expect(opennova::gate_response_parse(body, r), "a UDPNOVAWORLD with a NUL parses")) return false;
+	if (!expect(r.udp_novaworld == std::vector<std::string>{"5.6.7.8:9"},
+			"a UDPNOVAWORLD entry ends at its first NUL")) return false;
+
+	if (!expect(opennova::gate_response_parse("VAR LOBBYNAME x\r\n", r) && r.udp_novaworld.empty(),
+			"no UDPNOVAWORLD line leaves the list empty")) return false;
+	return true;
+}
+
 bool check_empty_returns_false() {
 	opennova::GateResponse r;
 	if (!expect(!opennova::gate_response_parse("", r), "empty response returns false")) return false;
@@ -304,6 +345,7 @@ int main() {
 	if (!check_ipv4_witnessed_rules()) return 1;
 	if (!check_numeric_keys_skip_the_nbsp()) return 1;
 	if (!check_ignores_unknown_and_malformed()) return 1;
+	if (!check_every_udpnovaworld_line_is_kept()) return 1;
 	if (!check_empty_returns_false()) return 1;
 	std::printf("OK: gate response KV parser (quoted + unquoted; 19 retail VARs + CUS/PVT)\n");
 	return 0;

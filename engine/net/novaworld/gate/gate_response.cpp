@@ -129,7 +129,16 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		} else if (ieq(key, "STARTUPURL")) {
 			out.startup_url = std::string(value);
 		} else if (ieq(key, "UDPNOVAWORLD")) {
-			out.udp_novaworld = std::string(value);
+			// Each line is kept, in order: Napi_CopyString into the next 64-byte entry (to the
+			// value's first NUL, at most 63 characters) while fewer than 16 are kept; a 17th
+			// is not kept (the table stays at 16), though the line still counts toward
+			// var_count below.
+			// [orig: CMissionInfo_AddVariable @0x4CD9D0 (called @0x4CF315) - the full table
+			//  returns @0x4CD9DE, the copy @0x4CD9F7, the count @0x4CD9FC]
+			if (out.udp_novaworld.size() < kGateUdpNovaWorldMax) {
+				const std::string entry = value.substr(0, value.find('\0'));
+				out.udp_novaworld.push_back(entry.substr(0, kGateUdpNovaWorldChars));
+			}
 		} else if (ieq(key, "UDPCODE1")) {
 			out.udp_code1 = std::string(value);
 		} else if (ieq(key, "UDPCODE2")) {

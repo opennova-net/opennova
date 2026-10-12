@@ -218,7 +218,8 @@ ClientHello make_client_hello(const ClientSession::Config &cfg, std::string_view
 	// explicit cfg.pg when use_default_pg is false. CO/AP/BDAT are read but never validated.
 	hello.pg = cfg.use_default_pg ? pg_for_pn(cfg.pn) : cfg.pg;
 	hello.pg_present = true;
-	// eip/epn stay 0 (retail zeroes them).
+	// EIP / EPN stay 0, where retail's enumerator writes each target's address and port into the
+	// 0x41 it sends that target (D-NET-520 for the game protocol, D-NET-541 for the NWU lobby).
 	return hello;
 }
 
@@ -358,6 +359,8 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 		// connection is down and armed, probing or already in the 0x42 leg.
 		// [orig: Nwu_HandleServerHello @0x627e3e..0x627e5f — !conn_flag0 && is_client &&
 		//  conn_flag1 && +0x710]
+		// Retail reads it only while the enumerator probes, where ours reads it through the
+		// whole reconnect (D-NET-543, OPEN).
 		if (state_ == State::Hello || reconnecting()) on_server_hello(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
@@ -382,6 +385,24 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 	return state_ != State::Error;
 }
 
+bool ClientSession::server_hello_is_ours(const ServerHello &sh) const {
+	return sh.ci == cfg_.client_index &&
+			server_hello_matches_identity(sh, make_client_hello(cfg_, cfg_.co));
+}
+
+bool ClientSession::takes_server_hello(const uint8_t *data, size_t len) const {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (data == nullptr || !nw_decode_inbound(data, len, opcode, body) ||
+	    opcode != SESSION_OPCODE_SERVER_HELLO)
+		return false;
+	// The phase test is handle_datagram's: retail's is the enumerator probing (+0x2C @0x627559),
+	// which ours stands in for with the whole reconnect (D-NET-543, OPEN).
+	if (state_ != State::Hello && !reconnecting()) return false;
+	ServerHello sh;
+	return parse_server_hello(body.data(), body.size(), sh) && server_hello_is_ours(sh);
+}
+
 void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
                                     std::vector<std::vector<uint8_t>> &out) {
 	// Any 0x81 from the peer is read; no field is required (parse_server_hello).
@@ -395,8 +416,8 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 	// [orig: Nwu_HandleServerHello @0x626D20 - HK @0x626E97, the CI lookup @0x627533,
 	//  the identity compares @0x62758B / @0x627624 / @0x627643; the 0x42's HK gate
 	//  @0x6200F2]
-	if (sh.ci != cfg_.client_index) return;
-	if (!server_hello_matches_identity(sh, make_client_hello(cfg_, cfg_.co))) return;
+	if (!server_hello_is_ours(sh)) return;
+	++server_hellos_taken_;
 	if (reconnecting()) {
 		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42

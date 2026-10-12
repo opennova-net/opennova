@@ -253,6 +253,11 @@ struct NapiNPServerCtx {
 	//  NapiNPServerMsg_0x029 @0x514F7C]
 	std::vector<world::EntityHandle> team_change_entities;
 
+	// Whether this frame's entity update ran (Server_TickUpdate's step 4, behind
+	// its admission gate), which the frame tail's player-body edges need.
+	// [orig: Game_ProcessMainFrame @0x526703..0x526742]
+	bool entity_update_ran = false;
+
 	// The designation table the radio calls fill and the per-player S2C 0x6B
 	// batch reads, cleared at the new-round init
 	// (inmatch/server_designations.h). [orig: g_ServerDesignations @0xC84810;

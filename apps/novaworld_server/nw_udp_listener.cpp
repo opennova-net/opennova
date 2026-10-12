@@ -260,6 +260,16 @@ void NwUdpListener::initialize_jo_host() {
 	jo_world_ = std::make_unique<world::World>();
 	jo_world_->registry.configure_pool(0, 64);
 	jo_world_->registry.configure_pool(3, 4);
+	// No items.def means no trait sweep, so nothing stamps the Player row's
+	// ordinal (tables.player.item_type_index, 0 unswept) on the bodies this
+	// world spawns. Retail's player spawn stores the class item's items.def
+	// ordinal (Entity_SpawnFromAnimSlotProperty: the lookup @0x43C3C3, the
+	// +0x1C store @0x43C426), which a host with its items.def never leaves 0.
+	// Stand in a nonzero one, as the template's has_item_def default already
+	// claims the row: the C2S 0x32 sweep lists every pool-0 row at index 0
+	// (D-NET-486), and a joiner destroys what it lists, its own body included.
+	// Every reader of a player body's index tests it against 0 alone.
+	jo_world_->tables.player.item_type_index = 1;
 
 	// A loaded mission normally supplies this marker. The standalone gate has
 	// no mission path, so its minimal authoritative world uses the spawn

@@ -10,10 +10,14 @@
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/nwu_lobby_session.h>
+#include <net/napi/session.h>
 #include <net/npwire/datagram_demux.h>
+#include <net/npwire/nw_session_framing.h>
+#include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -59,6 +63,37 @@ std::vector<uint8_t> enveloped(std::vector<uint8_t> payload) {
 	napi_envelope_encode(payload.data(), payload.size(), out.data(), out.size(), &n);
 	out.resize(n);
 	return out;
+}
+
+// The gate's reply naming `body`'s VARs, as the gate socket receives it.
+std::vector<uint8_t> gate_reply(const std::string &body) {
+	std::vector<uint8_t> inner(body.begin(), body.end());
+	nwu_decrypt(inner.data(), inner.size(), GATE_NWU_KEY);
+	return enveloped(inner);
+}
+
+uint8_t opcode_of(const std::vector<uint8_t> &dg) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	return nw_decode_inbound(dg.data(), dg.size(), opcode, body) ? opcode : 0;
+}
+
+// The server's 0x81 to the session's 0x41 `hello_dg`: its CI and identity echoed, the CI
+// changed by `ci_xor`.
+std::vector<uint8_t> server_hello_to(const std::vector<uint8_t> &hello_dg, uint32_t ci_xor = 0) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello hello;
+	if (!nw_decode_inbound(hello_dg.data(), hello_dg.size(), opcode, body) ||
+	    opcode != SESSION_OPCODE_CLIENT_HELLO || !parse_client_hello(body.data(), body.size(), hello))
+		return {};
+	ServerHello reply = build_server_hello(hello, 0x7F000001u, 40000);
+	reply.ci ^= ci_xor;
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply));
+}
+
+PeerAddr at(uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint16_t port) {
+	return peer_addr_from_octets({a, b, c, d}, port);
 }
 
 int drain(IDatagramSocket &socket, std::vector<PeerAddr> *from = nullptr) {
@@ -128,7 +163,33 @@ int main() {
 		CHECK(lobby.session() != nullptr);
 		CHECK(!raw.sent.empty() && raw.sent.back().first == server);
 
-		for (const uint8_t opcode : {SESSION_OPCODE_SERVER_HELLO, SESSION_OPCODE_SERVER_AUTH,
+		// D-NET-469: a 0x81 finds the connection by its CI, whoever sends it; one with another CI
+		// (or none) is the next protocol's, even from the server.
+		// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533, the misses return 0
+		//  @0x626DCB]
+		const std::vector<uint8_t> hello = server_hello_to(raw.sent.back().second);
+		CHECK(!hello.empty());
+		CHECK(lobby.claims(server, hello.data(), hello.size()));
+		CHECK(lobby.claims(joiner, hello.data(), hello.size()));
+		const std::vector<uint8_t> foreign = server_hello_to(raw.sent.back().second, 1);
+		CHECK(!lobby.claims(server, foreign.data(), foreign.size()));
+		const std::vector<uint8_t> bare = enveloped({SESSION_OPCODE_SERVER_HELLO, 0x00, 0x00, 0x00, 0x00});
+		CHECK(!lobby.claims(server, bare.data(), bare.size()));
+		// Until it takes a 0x81 the connection has no server, so no other server-direction opcode
+		// is its; the taken 0x81's sender is its server from then on.
+		// [orig: CNapiNPConnection_InitFromSession @0x626320 - @0x6263B4 / @0x6263B7]
+		const std::vector<uint8_t> early = enveloped({SESSION_OPCODE_SERVER_AUTH, 0x00, 0x00, 0x00, 0x00});
+		CHECK(!lobby.claims(server, early.data(), early.size()));
+		demux.set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
+			return lobby.claims(from, data, len);
+		});
+		raw.inbound.push_back({server, hello});
+		lobby.tick(20);
+		CHECK(lobby.nw_peer() == server);
+		CHECK(lobby.session()->state() == ClientSession::State::Auth);
+		CHECK(!lobby.claims(server, hello.data(), hello.size())); // no longer probing
+
+		for (const uint8_t opcode : {SESSION_OPCODE_SERVER_AUTH,
 					 SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, SESSION_OPCODE_SERVER_RESEND_LIST,
 					 SESSION_OPCODE_SERVER_PING, SESSION_OPCODE_SERVER_GOODBYE, kNwuServerOpcodeLast}) {
 			const std::vector<uint8_t> dg = enveloped({opcode, 0x00, 0x00, 0x00, 0x00});
@@ -149,9 +210,6 @@ int main() {
 		CHECK(!lobby.claims(server, garbage.data(), garbage.size()));
 
 		// Through the demux: the server's 0x83 reaches the session, a joiner's 0x41 the game.
-		demux.set_session_claim([&lobby](const PeerAddr &from, const uint8_t *data, std::size_t len) {
-			return lobby.claims(from, data, len);
-		});
 		raw.inbound.push_back({server, enveloped({SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0, 0, 0, 0})});
 		raw.inbound.push_back({joiner, enveloped({SESSION_OPCODE_CLIENT_HELLO, 0, 0, 0, 0})});
 		raw.inbound.push_back({server, enveloped({SESSION_OPCODE_CLIENT_HELLO, 0, 0, 0, 0})});
@@ -159,6 +217,122 @@ int main() {
 		CHECK(drain(demux.game(), &game_from) == 2);
 		CHECK(drain(demux.session()) == 1);
 		lobby.close();
+	}
+
+	// --- D-NET-469: every gate UDPNOVAWORLD entry is a probe target. Each is split at its first
+	// colon, its port the napi literal (0 without one, then 64206), its host resolved with DNS on;
+	// a zero address makes none and a repeat is kept once. The 0x41 goes to every target, and the
+	// 0x81 the connection takes, from whichever target, names its server for the 0x42 on.
+	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - @0x4D4AB8 / @0x4D4AC0;
+	//  CNapiGameSession_SendToAddress @0x4D0970 - @0x4D09A0, @0x4D09B0..0x4D09B2,
+	//  @0x4D09C1..0x4D09C8, @0x4D09CF; NapiNPEnumerator_CreateTarget @0x624C30;
+	//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the target walk @0x629183..0x6291B4;
+	//  CNapiNPConnection_InitFromSession @0x626320 - @0x6263B4 / @0x6263B7]
+	{
+		MemorySocket gate;
+		MemorySocket session;
+		NwuLobbySession::Environment env;
+		env.resolve_ipv4 = [](const std::string &host, PeerAddr &out) {
+			if (host == "nw.example") {
+				out = peer_addr_from_octets({10, 0, 0, 9}, out.port);
+				return true;
+			}
+			std::array<uint8_t, 4> octets{};
+			unsigned a = 0, b = 0, c = 0, d = 0;
+			char tail = 0;
+			if (std::sscanf(host.c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &tail) != 4) return false;
+			octets = {static_cast<uint8_t>(a), static_cast<uint8_t>(b), static_cast<uint8_t>(c),
+			          static_cast<uint8_t>(d)};
+			out = peer_addr_from_octets(octets, out.port);
+			return true;
+		};
+		std::vector<std::string> fatals;
+		NwuLobbySession::Hooks hooks;
+		hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
+		NwuLobbySession lobby(hooks, env);
+		lobby.open(gate, session);
+		lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+		gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT},
+		                        gate_reply("VAR \"UDPNOVAWORLD\" \"127.0.0.1:$7D00\"\r\n"
+		                                   "VAR \"UDPNOVAWORLD\" \"nw.example\"\r\n"
+		                                   "VAR \"UDPNOVAWORLD\" \"0.0.0.0:5\"\r\n"
+		                                   "VAR \"UDPNOVAWORLD\" \"unresolved.example:7\"\r\n"
+		                                   "VAR \"UDPNOVAWORLD\" \"127.0.0.1:32000\"\r\n"
+		                                   "VAR \"UDPNOVAWORLD\" \"127.0.0.2:0\"\r\n"
+		                                   "VAR \"UDPNOVAWORLD\" \"255.255.255.255:9\"\r\n"
+		                                   "VAR \"UDPNOVAWORLD\" \"127.0.0.3:65537\"\r\n")});
+		lobby.tick(10);
+		CHECK(fatals.empty());
+		CHECK(lobby.session() != nullptr);
+		const std::vector<std::pair<uint32_t, uint32_t>> want = {
+				{at(127, 0, 0, 1, 0).ip, 32000}, {at(10, 0, 0, 9, 0).ip, 64206},
+				{at(127, 0, 0, 2, 0).ip, 64206}, {0xFFFFFFFFu, 9}, {at(127, 0, 0, 3, 0).ip, 65537}};
+		CHECK(lobby.targets().size() == want.size());
+		for (std::size_t i = 0; i < want.size() && i < lobby.targets().size(); ++i) {
+			CHECK(lobby.targets()[i].ip == want[i].first && lobby.targets()[i].port == want[i].second);
+		}
+		// One 0x41 per target, in order, the port narrowed to 16 bits at the send.
+		const std::vector<PeerAddr> sent_to = {at(127, 0, 0, 1, 32000), at(10, 0, 0, 9, 64206),
+		                                       at(127, 0, 0, 2, 64206), PeerAddr{0xFFFFFFFFu, 9},
+		                                       at(127, 0, 0, 3, 1)};
+		CHECK(session.sent.size() == sent_to.size());
+		for (std::size_t i = 0; i < sent_to.size() && i < session.sent.size(); ++i) {
+			CHECK(session.sent[i].first == sent_to[i]);
+			CHECK(opcode_of(session.sent[i].second) == SESSION_OPCODE_CLIENT_HELLO);
+			CHECK(session.sent[i].second == session.sent[0].second);
+		}
+		// The re-announce goes to every target again.
+		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 1);
+		CHECK(session.sent.size() == 2 * sent_to.size());
+		CHECK(session.sent.back().first == sent_to.back());
+		CHECK(lobby.nw_peer() == PeerAddr{});
+		// Until then the connection has no server, so its own packets (all but the 0x41) go
+		// nowhere. [orig: CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59]
+		const std::size_t sent_before = session.sent.size();
+		lobby.send(enveloped({SESSION_OPCODE_CLIENT_PING, 0x00, 0x00, 0x00, 0x00}));
+		CHECK(session.sent.size() == sent_before);
+
+		// The second target answers: the connection takes its 0x81, and its 0x42 goes there.
+		const PeerAddr second = sent_to[1];
+		const std::vector<uint8_t> reply = server_hello_to(session.sent[0].second);
+		CHECK(lobby.claims(second, reply.data(), reply.size()));
+		session.inbound.push_back({second, reply});
+		session.sent.clear();
+		lobby.tick(10 + SESSION_CONNECT_RETRANSMIT_MS + 2);
+		CHECK(lobby.session()->state() == ClientSession::State::Auth);
+		CHECK(lobby.nw_peer() == second);
+		CHECK(session.sent.size() == 1);
+		CHECK(!session.sent.empty() && session.sent[0].first == second &&
+		      opcode_of(session.sent[0].second) == SESSION_OPCODE_CLIENT_AUTH);
+		// The connection's packets are its server's alone now; a late 0x81 is not taken.
+		const std::vector<uint8_t> msg = enveloped({SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, 0, 0, 0, 0});
+		CHECK(lobby.claims(second, msg.data(), msg.size()));
+		CHECK(!lobby.claims(sent_to[0], msg.data(), msg.size()));
+		CHECK(!lobby.claims(sent_to[0], reply.data(), reply.size()));
+		lobby.close();
+	}
+	// A gate naming only addresses that resolve to none still starts the connection, which probes
+	// nothing; one naming no UDPNOVAWORLD at all ends ours (retail's sessionless path, D-NET-540).
+	{
+		for (const char *body : {"VAR \"UDPNOVAWORLD\" \"0.0.0.0:5\"\r\n",
+		                         "VAR \"LOBBYNAME\" \"jop_2_consumer\"\r\n"}) {
+			MemorySocket gate;
+			MemorySocket session;
+			std::vector<std::string> fatals;
+			NwuLobbySession::Hooks hooks;
+			hooks.on_fatal = [&fatals](const std::string &message) { fatals.push_back(message); };
+			NwuLobbySession lobby(hooks, NwuLobbySession::Environment{});
+			lobby.open(gate, session);
+			lobby.probe("127.0.0.1", GATE_DEFAULT_PORT);
+			gate.inbound.push_back({PeerAddr{0x0100007Fu, GATE_DEFAULT_PORT}, gate_reply(body)});
+			lobby.tick(10);
+			const bool named = std::string(body).find("UDPNOVAWORLD") != std::string::npos;
+			CHECK(lobby.targets().empty());
+			CHECK(session.sent.empty());
+			CHECK(named ? (fatals.empty() && lobby.session() != nullptr)
+			            : (fatals == std::vector<std::string>{"no UDPNOVAWORLD"} && lobby.session() == nullptr));
+			lobby.close();
+		}
 	}
 
 	if (failures != 0) {

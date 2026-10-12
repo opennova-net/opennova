@@ -29,6 +29,7 @@ public:
 		// Input_HandleActionBinding case 217 @0x49b4b4).
 		PRESSED_MEDIC_REQUEST = opennova::inmatch::PRESSED_MEDIC_REQUEST,
 		PRESSED_TO_SPECIAL = opennova::inmatch::PRESSED_TO_SPECIAL,
+		PRESSED_RESPAWN = opennova::inmatch::PRESSED_RESPAWN,
 	};
 
 private:
@@ -58,6 +59,9 @@ public:
 	// The ToSpecial row after set_weapon_input: its keys' live state and a
 	// dispatch on this frame's press or release edge.
 	void set_to_special_input(bool p_held, bool p_dispatched);
+	// The Respawn row's press edge, after set_weapon_input
+	// (opennova::inmatch::PRESSED_RESPAWN).
+	void set_respawn_input(bool p_dispatched);
 	void set_sequence(int64_t p_sequence);
 	int64_t get_sequence() const;
 

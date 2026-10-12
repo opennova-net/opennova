@@ -65,7 +65,7 @@ bool check_gate_response_roundtrip() {
 	if (!expect((r.post_ip == std::array<uint8_t, 4>{10, 0, 0, 1}),
 			"POSTIPADDRESS")) return false;
 	if (!expect(r.post_port == 8080, "POSTIPPORT")) return false;
-	if (!expect(r.udp_novaworld == "10.0.0.2:64206", "UDPNOVAWORLD")) return false;
+	if (!expect(r.udp_novaworld == std::vector<std::string>{"10.0.0.2:64206"}, "UDPNOVAWORLD")) return false;
 	if (!expect((r.reflected_ip == std::array<uint8_t, 4>{203, 0, 113, 7}),
 			"REFLECTEDIPADDRESS")) return false;
 	if (!expect(r.reflected_port == 12345, "REFLECTEDPORTNUMBER")) return false;

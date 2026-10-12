@@ -1961,6 +1961,10 @@ bool run_roundtrip() {
 	// Server_ProcessPendingPlayerSpawns spawns the joiner's pool-0 entity (binding conn.link.owned_entity).
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	// The player row's items.def ordinal: the joiner's C2S 0x32 sweep lists a
+	// pool-0 row whose ItemTypeIndex is 0 (D-NET-486), so a typeless body would
+	// be destroyed on the joiner.
+	world.tables.player.item_type_index = 7;
 	w::AiSystem &ai = world.ai;
 	world.script.subgoals.won = 0x12u;
 	world.script.subgoals.lost = 0x24u;
@@ -3212,6 +3216,51 @@ bool run_medic_request_queues_one_reliable_0x2e() {
 	inmatch::ClientRuntime host_view(host_loop);
 	return expect(!host_view.queue_medic_request(),
 	              "medic request: the host's own view never uplinks");
+}
+
+// The Respawn key's request: an in-session joiner queues one bodiless C2S
+// 0x41, reliable until acknowledged, and an unconnected one nothing; the
+// listen host's own view queues the same 0x41 on its loopback, leaving at its
+// client frame [orig: NetPacket_SendRequestRespawn @0x42DBA0 --
+// CNapiNetwork_QueueReliableMessage(0x41, 1, 0, payload, 0) @0x42DBBC].
+bool run_respawn_request_queues_one_reliable_0x41() {
+	const std::string client_scrk = "CLIENT-RESPAWN-SCRK";
+	const std::string server_scrk = "SERVER-RESPAWN-SCRK";
+	inmatch::ClientRuntime client("RespawnJoiner", [] { return uint64_t{0x10203040}; });
+	if (!expect(!client.queue_respawn_request(),
+	            "respawn request: an unconnected joiner cannot queue"))
+		return false;
+	client.seed_session(
+			0x55667799u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0007, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.queue_respawn_request(),
+	            "respawn request: an in-session joiner queues it"))
+		return false;
+	const std::vector<std::vector<uint8_t>> frame =
+			client.Client_ProcessNetworkFrame(1);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	bool found = false;
+	if (frame.size() == 1 &&
+			decode_client_session(frame[0], client_scrk, header, messages))
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::DEATH_TIMEOUT_RESET) found = m.payload.empty();
+	if (!expect(found, "respawn request: one bodiless C2S 0x41 in the frame"))
+		return false;
+	if (!expect(client.retained_outbound_depth() == 1,
+	            "respawn request: the 0x41 is reliable"))
+		return false;
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	if (!expect(host_view.queue_respawn_request() && host_loop.c2s_pending() == 0,
+	            "respawn request: the host's own view queues it for its client frame"))
+		return false;
+	host_view.Client_ProcessNetworkFrame();
+	ns::Datagram dg;
+	return expect(host_loop.host_recv(dg) && dg.tag == c2s::DEATH_TIMEOUT_RESET &&
+	              dg.body.empty(),
+	              "respawn request: the host's 0x41 lands on its loopback");
 }
 
 // The server-info VarList walk lands EXP_FANFARE as the u16 the 0x81 tone
@@ -7558,6 +7607,7 @@ int main() {
 	                run_zone_presence_updates_only_a_tracked_window() &&
 	                run_roster_revive_countdown_ticks_once_per_63_frames() &&
 	                run_medic_request_queues_one_reliable_0x2e() &&
+	                run_respawn_request_queues_one_reliable_0x41() &&
 	                run_session_vars_exp_fanfare_walk() &&
 	                run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() &&
 	                run_joiner_zone_timer_preserves_mixed_wire_order() &&

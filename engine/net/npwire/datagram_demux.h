@@ -18,16 +18,19 @@
 // handler takes it wins; a datagram no protocol takes is dropped through the
 // error callback. The handlers' own tests keep the two protocols apart: the
 // server-direction opcodes (0x81..0x87) are handled only by a client-side
-// connection found at the datagram's source address and port, the
+// connection, a 0x81 by the one whose CI it carries whoever sends it, the
+// others by the one found at the datagram's source address and port; the
 // client-direction ones (0x41..0x47) only by a listening protocol or a
-// server-side connection, so the lobby session takes exactly what its server
-// sends it and the game protocol everything else.
+// server-side connection. So the lobby session takes what its server sends
+// it and a 0x81 its connection takes, and the game protocol everything else.
 // [orig: NapiNPManager_HandlePacket @0x622f10 — the protocol walk
 //  @0x622f6c..0x622fac, cb_on_error(4) @0x622fdc..0x622ff9;
 //  NapiNPProtocol_DispatchOpcode @0x622b40 over g_NPOpcodeHandlers @0x849d90;
 //  NapiNPProtocol_HandleSessionPacket @0x626a00 — FindConnection(proto, 2,
 //  addr, port) @0x626ac5, the local-key test @0x626b72;
 //  NapiNPProtocol_HandleClientHello @0x6213b0 — the listening gate @0x621479]
+// [orig: Nwu_HandleServerHello @0x626d20: the CI lookup @0x627533, a miss returning
+//  0 @0x626dcb]
 //
 // This class is that dispatch over one embedder socket: it drains the socket
 // and queues each datagram for the session (when the session's claim takes it)

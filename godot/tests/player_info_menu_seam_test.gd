@@ -13,28 +13,41 @@ extends GutTest
 const AVATARS_FIXTURE := "res://../fixtures/avatars/synth_avatars.def"
 
 
-# The process's profile record the screen's voice picks write (PlayerProfile.store()),
-# its two voice bytes as each test found them.
-var _saved_voices: Array[int] = []
-
-
 # Strings is a shared autoload; keep the registry clean so the raw-key tests below see
 # no gametext table and the resolved-names test starts from a known state. The
-# profile's voice pair starts each test on DEFAULT_VOICE and goes back after it.
+# process's profile (PlayerProfile.store(), which the screen reads and writes) starts
+# each test as a fresh record (_reset_profile) and is left as the test leaves it.
 func before_each() -> void:
 	Strings.clear()
-	_saved_voices = [PlayerProfile.store().get_voice(0), PlayerProfile.store().get_voice(1)]
-	PlayerProfile.store().set_voice(0, 0)
-	PlayerProfile.store().set_voice(1, 0)
-
-
-func after_each() -> void:
-	PlayerProfile.store().set_voice(0, _saved_voices[0])
-	PlayerProfile.store().set_voice(1, _saved_voices[1])
+	_reset_profile()
 
 
 func after_all() -> void:
 	Strings.clear()
+
+
+# Each side's first character in the minted table (N00/D00 and N04/D00, combo id 1).
+const BLUE_CHARACTER := {"avatar_a": 0, "avatar_b": 0, "avatar_packed": 0x0200}
+const RED_CHARACTER := {"avatar_a": 4, "avatar_b": 0, "avatar_packed": 0x8204}
+
+
+# The process's profile as a fresh record, both sides on the medic class with
+# each side's first character, the voice pair on DEFAULT_VOICE and the two medic
+# pages the given kits: the screen reads its class and restores its loadout from
+# the record (engine menu::player_info_restore_kit), so every test opens on the
+# medic with empty pages unless it seeds them.
+func _reset_profile(blue_kit: Array = [], red_kit: Array = []) -> void:
+	var store := PlayerProfile.store()
+	store.load_bytes(PackedByteArray(), false, PackedByteArray(), false, "")
+	for side in 2:
+		assert_eq(store.apply_character_selection({
+			"team": side,
+			"player_class": 5,
+			"side_profiles": [BLUE_CHARACTER, RED_CHARACTER],
+			"kit": blue_kit if side == 0 else red_kit,
+		}), OK, "the side's medic page is seeded")
+	store.set_voice(0, 0)
+	store.set_voice(1, 0)
 
 
 func _load_db() -> AvatarDatabase:
@@ -69,6 +82,10 @@ func _staged_avatars_root() -> ResourceRoot:
 # ships CHECKED, both share the authored GROUP), the name edit and ACCEPT --
 # exactly the control names player.mnu authors.
 func _avatar_screen_xml(include_preview := false) -> String:
+	return MenuDriverFixture.screen_xml("PLAYER_INFO", _avatar_body(include_preview))
+
+
+func _avatar_body(include_preview := false) -> String:
 	var body := ""
 	var y := 10
 	for n in ["NATIONALITY", "DIVISION", "COMBO_LIST", "PLAYERVOICE"]:
@@ -83,7 +100,7 @@ func _avatar_screen_xml(include_preview := false) -> String:
 		body += ('<WINDOW type="window" name="PLAYER_PREVIEW">'
 				+ '<POSITION><LEFT>500</LEFT><TOP>100</TOP><RIGHT>700</RIGHT>'
 				+ '<BOTTOM>400</BOTTOM></POSITION></WINDOW>')
-	return MenuDriverFixture.screen_xml("PLAYER_INFO", body)
+	return body
 
 
 func _make_avatar_driver(include_preview := false) -> MenuDriver:
@@ -491,17 +508,16 @@ func test_accept_saves_beside_the_game_never_in_the_root() -> void:
 	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
 	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
 	var before := _tree_digest(String(root.get_root_dir()))
+	PlayerProfile.load_for(root)
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())
 	watch_signals(companion)
 	var driver := _make_avatar_driver()
 	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	# The ACCEPT saves the dialog into the record (the companion's own write), then a save point.
 	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
 	assert_signal_emitted(companion, "avatar_chosen")
 	var profile: Dictionary = get_signal_parameters(companion, "avatar_chosen")[0]
-	# What MainGame does with an ACCEPT (main_game.gd _on_avatar_chosen), then a save point.
-	PlayerProfile.load_for(root)
-	assert_eq(PlayerProfile.accept_player_info(profile), OK)
 	assert_false(FileAccess.file_exists(run_dir.path_join("weapon.sav")),
 			"the ACCEPT writes the record in memory, as the original's dialog does")
 	assert_eq(PlayerProfile.save(), OK)
@@ -548,10 +564,14 @@ func _tree_digest(dir: String) -> String:
 # static items do), the ammo/type/grenade combos, STATIC_TOTAL_WEIGHT, and the
 # bare *_ICON windows.
 func _loadout_screen_xml() -> String:
+	return MenuDriverFixture.screen_xml("PLAYER_INFO", _loadout_body())
+
+
+func _loadout_body(top := 10) -> String:
 	var type_items := ('<ITEMS><ITEM value="0">FMJ</ITEM><ITEM value="1">AP</ITEM>'
 			+ '<ITEM value="2">SP</ITEM></ITEMS>')
 	var body := ""
-	var y := 10
+	var y := top
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
 		body += MenuDriverFixture.wnd("combobox", n, y)
 		body += MenuDriverFixture.wnd("combobox", n + "_AMMO1", y + 24)
@@ -571,7 +591,7 @@ func _loadout_screen_xml() -> String:
 	for v in range(5, 10):  # Medic..Engineer = values 5..9
 		class_items += '<ITEM value="%d">class %d</ITEM>' % [v, v]
 	body += MenuDriverFixture.wnd("combobox", "PLAYERCLASS", y + 24, "<ITEMS>%s</ITEMS>" % class_items)
-	return MenuDriverFixture.screen_xml("PLAYER_INFO", body)
+	return body
 
 
 var _ammo_driver: MenuDriver = null  # the driver behind the current _make_ammo_companion
@@ -981,3 +1001,375 @@ end
 	assert_eq(_ammo_driver.selected_row(type_combo), 0, "the lock resets the type to 0 (FMJ)")
 	assert_eq(companion.selected_ammo_type("PRIMARY"), 0, "the stored byte resets too")
 	DirAccess.remove_absolute(path)
+
+
+# --- The saved kit page (D-PLAYERINFO-19) --------------------------------------
+
+# The screen's populate restores the shown side's class page from the current
+# record into the lists and the picks, and the dialog's save (the ACCEPT, a side
+# radio, a class pick) writes the page it restored back: an ACCEPT with no re-picks
+# keeps the saved kit (engine menu::player_info_restore_kit;
+# docs/playerinfo/avatars-re.md "Saved-kit consumption").
+
+# Weapon.def rows 0..7: two primaries, two secondaries, an accessory and three
+# grenades, each for both sides and the medic and rifleman classes.
+const KIT_WEAPON_DEF := """
+weapon "WPN_P1"
+	loadout_selectable	1
+	teamfilter	blue
+	teamfilter	red
+	charfilter	medic
+	charfilter	rifleman
+	weapon_class	primary
+	round_type	"AMMO_P1"
+	clipsize	30
+	maxclips	5
+	clipweight	1
+	weaponweight	5
+end
+
+weapon "WPN_P2"
+	loadout_selectable	1
+	teamfilter	blue
+	teamfilter	red
+	charfilter	medic
+	charfilter	rifleman
+	weapon_class	primary
+	round_type	"AMMO_P2"
+	clipsize	20
+	maxclips	4
+	clipweight	1
+	weaponweight	6
+end
+
+weapon "WPN_S1"
+	loadout_selectable	1
+	teamfilter	blue
+	teamfilter	red
+	charfilter	medic
+	charfilter	rifleman
+	weapon_class	secondary
+	round_type	"AMMO_S1"
+	clipsize	7
+	maxclips	3
+	clipweight	1
+	weaponweight	2
+end
+
+weapon "WPN_S2"
+	loadout_selectable	1
+	teamfilter	blue
+	teamfilter	red
+	charfilter	medic
+	charfilter	rifleman
+	weapon_class	secondary
+	round_type	"AMMO_S2"
+	clipsize	8
+	maxclips	3
+	clipweight	1
+	weaponweight	2
+end
+
+weapon "WPN_A1"
+	loadout_selectable	1
+	teamfilter	blue
+	teamfilter	red
+	charfilter	medic
+	charfilter	rifleman
+	weapon_class	accessory
+	round_type	"AMMO_A1"
+	clipsize	1
+	maxclips	2
+	clipweight	1
+	weaponweight	3
+end
+
+weapon "WPN_G1"
+	loadout_selectable	1
+	teamfilter	blue
+	teamfilter	red
+	charfilter	medic
+	charfilter	rifleman
+	weapon_class	grenade
+	round_type	"G1"
+	clipsize	1
+	maxclips	2
+	clipweight	1
+	weaponweight	1
+end
+
+weapon "WPN_G2"
+	loadout_selectable	1
+	teamfilter	blue
+	teamfilter	red
+	charfilter	medic
+	charfilter	rifleman
+	weapon_class	grenade
+	round_type	"G2"
+	clipsize	1
+	maxclips	2
+	clipweight	1
+	weaponweight	1
+end
+
+weapon "WPN_G3"
+	loadout_selectable	1
+	teamfilter	blue
+	teamfilter	red
+	charfilter	medic
+	charfilter	rifleman
+	weapon_class	grenade
+	round_type	"G3"
+	clipsize	1
+	maxclips	2
+	clipweight	1
+	weaponweight	1
+end
+"""
+
+const HEADER_BYTES := 16
+const SIDE_BYTES := 0x8006
+const FIRST_PAGE_OFFSET := 6
+const PAGE_BYTES := 2048
+
+func _kit_entry(name: String, primary := -1, secondary := -1, flags := -1) -> Dictionary:
+	return {"name": name, "ammo_primary": primary, "ammo_secondary": secondary, "flags": flags}
+
+
+# The blue medic's page as the screen serializes it: knife, medpack, the three
+# categories with their counts and type bytes, the three grenade slots.
+func _blue_kit() -> Array:
+	return [_kit_entry("WPN_KNIFE"), _kit_entry("WPN_MEDPACK"),
+		_kit_entry("WPN_P1", 3, -1, 1), _kit_entry("WPN_S1", 2, -1, 2),
+		_kit_entry("WPN_A1", 1), _kit_entry("WPN_G1", 0), _kit_entry("WPN_G2", 1),
+		_kit_entry("WPN_G3")]
+
+
+func _red_kit() -> Array:
+	return [_kit_entry("WPN_KNIFE2"), _kit_entry("WPN_MEDPACK"),
+		_kit_entry("WPN_P2", 2, -1, 0), _kit_entry("WPN_S2", 1, -1, 0),
+		_kit_entry("None"), _kit_entry("WPN_G1"), _kit_entry("WPN_G2"), _kit_entry("WPN_G3")]
+
+
+func _kit_weapons() -> WeaponDatabase:
+	var path := TestFs.cache_dir(self, "player_info_kit_def").path_join("weapon.def")
+	TestFs.write_text(self, path, KIT_WEAPON_DEF)
+	var wdb := WeaponDatabase.new()
+	assert_eq(wdb.load(path), OK, "the kit weapon.def loads")
+	return wdb
+
+
+# The strings of one side's class page in the current record, up to its empty one.
+func _page_tokens(side: int, player_class: int) -> PackedStringArray:
+	var bytes := PlayerProfile.store().weapon_sav_bytes()
+	var at := HEADER_BYTES + SIDE_BYTES * side + FIRST_PAGE_OFFSET + PAGE_BYTES * (player_class - 5)
+	var tokens := PackedStringArray()
+	var start := at
+	for i in range(at, at + PAGE_BYTES):
+		if bytes[i] != 0:
+			continue
+		if i == start:
+			break
+		tokens.append(bytes.slice(start, i).get_string_from_ascii())
+		start = i + 1
+	return tokens
+
+
+func _tokens_of(kit: Array) -> PackedStringArray:
+	var tokens := PackedStringArray()
+	for entry: Dictionary in kit:
+		for key in ["name", "ammo_primary", "ammo_secondary", "flags"]:
+			tokens.append(str(entry[key]))
+	return tokens
+
+
+# The full PLAYER_INFO screen (the character controls, the side radios, the name,
+# ACCEPT and the loadout) over the minted avatar table and the kit weapon.def,
+# opened as the shell opens it, on the profile the record gives.
+func _open_kit_screen(root: ResourceRoot, wdb: WeaponDatabase) -> PlayerInfoMenuCompanion:
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_weapon_database(wdb)
+	companion.set_persisted_profile(PlayerProfile.load_character_profile(root))
+	var xml := MenuDriverFixture.screen_xml("PLAYER_INFO", _avatar_body() + _loadout_body(260))
+	_ammo_driver = MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, xml), "player.mnu")
+	companion.on_menu_built(_ammo_driver, "player.mnu", "PLAYER_INFO", root)
+	return companion
+
+
+func _selected_text(control: String) -> String:
+	var id := _ammo_id(control)
+	var row := _ammo_driver.selected_row(id)
+	return _ammo_driver.item_text(id, row) if row >= 0 else ""
+
+
+# Opening PLAYER and pressing ACCEPT with no re-picks writes back the saved page:
+# the lists, the clip counts, the ammo-type bytes and the grenade counts all come
+# from it, and the ACCEPT's save is the companion's own.
+func test_accept_without_repicks_keeps_the_saved_kit() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root)
+	if root == null:
+		return
+	var wdb := _kit_weapons()
+	_reset_profile(_blue_kit(), _red_kit())
+	var saved := _page_tokens(0, 5)
+	assert_eq(saved, _tokens_of(_blue_kit()), "the blue medic page is seeded")
+	var companion := _open_kit_screen(root, wdb)
+	watch_signals(companion)
+
+	assert_eq(_selected_text("PRIMARY"), "WPN_P1", "the page's primary is selected")
+	assert_eq(_selected_text("SECONDARY"), "WPN_S1")
+	assert_eq(_selected_text("ACCESSORY"), "WPN_A1")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("PRIMARY_AMMO1")), 2, "three clips: the third row")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("SECONDARY_AMMO1")), 1, "two clips")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("ACCESSORY_AMMO1")), 0, "one clip")
+	assert_eq(companion.selected_ammo_type("PRIMARY"), 1, "the page's PRIMARY type byte")
+	assert_eq(companion.selected_ammo_type("SECONDARY"), 2, "the page's SECONDARY type byte")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("GRENADE_AMMO1")), 0, "a saved zero grenade count")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("GRENADE_AMMO2")), 1)
+	assert_eq(_ammo_driver.selected_row(_ammo_id("GRENADE_AMMO3")), 2, "an untouched count: the full row")
+
+	_ammo_driver.set_widget_text(_ammo_id("PLAYERNAME"), "Ghost")
+	_ammo_driver.widget_activated.emit(_ammo_id("ACCEPT"), "ACCEPT")
+	assert_signal_emitted(companion, "avatar_chosen")
+	var profile: Dictionary = get_signal_parameters(companion, "avatar_chosen")[0]
+	assert_eq(_tokens_of(profile["kit"]), saved, "the ACCEPT's page is the saved one")
+	assert_eq(PlayerProfile.store().get_player_name(), "Ghost", "the ACCEPT saved the dialog itself")
+	assert_eq(_page_tokens(0, 5), saved, "and the record's page is unchanged")
+
+
+# A side radio saves the dialog first, the page of the side it leaves included,
+# then restores the clicked side's page; a click on the shown side saves too.
+func test_side_switch_saves_the_side_it_leaves() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root)
+	if root == null:
+		return
+	var wdb := _kit_weapons()
+	_reset_profile(_blue_kit(), _red_kit())
+	var companion := _open_kit_screen(root, wdb)
+	_ammo_driver.select_row(_ammo_id("SECONDARY"), 2)  # WPN_S2
+	_ammo_driver.select_row(_ammo_id("SECONDARY_AMMO1"), 0)  # one clip
+	assert_eq(_selected_text("SECONDARY"), "WPN_S2")
+
+	_press_side(_ammo_driver, 0)  # the shown side
+	assert_eq(_page_tokens(0, 5).slice(12, 16), PackedStringArray(["WPN_S2", "1", "-1", "2"]),
+		"a click on the shown side saves its page")
+	assert_eq(_selected_text("SECONDARY"), "WPN_S2", "and restores it")
+
+	_press_side(_ammo_driver, 1)
+	assert_eq(companion.team(), 1)
+	assert_eq(_selected_text("PRIMARY"), "WPN_P2", "red shows its own page")
+	assert_eq(_selected_text("SECONDARY"), "WPN_S2")
+	assert_eq(_selected_text("ACCESSORY"), "None")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("PRIMARY_AMMO1")), 1, "red's two clips")
+	_ammo_driver.select_row(_ammo_id("PRIMARY"), 1)  # WPN_P1 on red
+
+	_press_side(_ammo_driver, 0)
+	assert_eq(_page_tokens(1, 5).slice(8, 12), PackedStringArray(["WPN_P1", "-1", "-1", "0"]),
+		"red's edit is saved when blue is clicked")
+	assert_eq(_selected_text("SECONDARY"), "WPN_S2", "blue's saved edit is restored")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("SECONDARY_AMMO1")), 0)
+	assert_eq(_selected_text("PRIMARY"), "WPN_P1")
+
+
+# A record whose class byte picks no page (outside 5..9, which retail's populate
+# turns into a page pointer outside the side's pages): nothing is restored, and the
+# dialog's save still writes the class the screen shows, the character and the kit,
+# the kit into that class's page (D-PLAYERINFO-26).
+func test_a_class_byte_with_no_page_still_saves() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root)
+	if root == null:
+		return
+	var wdb := _kit_weapons()
+	var store := PlayerProfile.store()
+	var bytes := store.weapon_sav_bytes()
+	bytes[HEADER_BYTES] = 3
+	bytes[HEADER_BYTES + SIDE_BYTES] = 3
+	store.load_bytes(store.player_sav_bytes(), true, bytes, true, "")
+	assert_eq(store.character_summary().blue.player_class, 3, "the record's class byte picks no page")
+	var _companion := _open_kit_screen(root, wdb)
+	assert_eq(_selected_text("PLAYERCLASS"), "class 5", "PLAYERCLASS keeps its authored row")
+	assert_eq(_selected_text("PRIMARY"), "None", "no page is restored")
+	_ammo_driver.select_row(_ammo_id("PRIMARY"), 1)  # WPN_P1
+
+	_ammo_driver.widget_activated.emit(_ammo_id("ACCEPT"), "ACCEPT")
+	var summary := store.character_summary()
+	assert_eq([summary.blue.player_class, summary.red.player_class], [5, 5],
+		"the class the screen shows is written to both sides")
+	assert_eq(_page_tokens(0, 5).slice(0, 12), PackedStringArray(["WPN_KNIFE", "-1", "-1", "-1",
+		"WPN_MEDPACK", "-1", "-1", "-1", "WPN_P1", "-1", "-1", "0"]),
+		"and the kit lands in that class's page")
+
+
+# A class pick saves the dialog under the class it leaves (that page's medpack
+# entry follows the class the pick wrote, so it drops), then restores the picked
+# class's page; picking the class back restores the edit.
+func test_class_pick_saves_the_class_it_leaves() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root)
+	if root == null:
+		return
+	var wdb := _kit_weapons()
+	_reset_profile(_blue_kit(), _red_kit())
+	var _companion := _open_kit_screen(root, wdb)
+	_ammo_driver.select_row(_ammo_id("PRIMARY"), 2)  # WPN_P2
+	assert_eq(_selected_text("PRIMARY"), "WPN_P2")
+
+	_ammo_driver.select_row(_ammo_id("PLAYERCLASS"), 3)  # class 8
+	assert_eq(_page_tokens(0, 5).slice(0, 8), PackedStringArray(["WPN_KNIFE", "-1", "-1", "-1",
+		"WPN_P2", "-1", "-1", "1"]),
+		"the medic page holds the edit, without the medpack the new class byte drops")
+	assert_eq(_selected_text("PRIMARY"), "None",
+		"the rifleman's default page names no weapon this table carries")
+
+	_ammo_driver.select_row(_ammo_id("PLAYERCLASS"), 0)  # back to class 5
+	assert_eq(_selected_text("PRIMARY"), "WPN_P2", "the medic page's edit is restored")
+	assert_eq(_selected_text("SECONDARY"), "WPN_S1")
+
+
+# --- The dialog's write of the side not shown (D-PLAYERINFO-20) ----------------
+
+# The dialog's save writes the class to both sides and the character of the shown
+# side alone [orig: PlayerInfo_SaveFromDialog @0x55EE3F..0x55EE6D; the shown side's
+# stores @0x55EEAB / @0x55EEEE / @0x55EF31, each indexed by g_PlayerInfoTeamIndex]:
+# a red character the table no longer resolves stays as saved through a blue
+# ACCEPT, though the screen holds red's first combo for it.
+func test_accept_leaves_the_side_not_shown() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root)
+	if root == null:
+		return
+	var store := PlayerProfile.store()
+	var stale_packed := 0x8000 | (63 << 9) | (15 << 5) | 30
+	assert_eq(store.apply_character_selection({"team": 1, "player_class": 5,
+			"side_profiles": [{}, {"avatar_a": 30, "avatar_b": 15, "avatar_packed": stale_packed}]}), OK)
+	assert_null(_load_db().resolve_character_id(stale_packed, 1), "the table has no such character")
+	# Blue's nationality and division bytes and red's class byte unlike what the
+	# ACCEPT writes, so each write below shows.
+	var bytes := store.weapon_sav_bytes()
+	bytes[HEADER_BYTES + 1] = 7
+	bytes[HEADER_BYTES + 2] = 3
+	bytes[HEADER_BYTES + SIDE_BYTES] = 9
+	store.load_bytes(store.player_sav_bytes(), true, bytes, true, "")
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_persisted_profile(PlayerProfile.load_character_profile(root))
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", root)
+	var sides: Array = companion.snapshot()["side_profiles"]
+	var blue: Dictionary = sides[0]
+	var shown := [int(blue.get("avatar_a", -1)), int(blue.get("avatar_b", -1)),
+			int(blue.get("avatar_packed", -1))]
+	assert_ne(shown, [7, 3, 0x0200], "the screen's blue character differs from the record's bytes")
+	assert_eq(int((sides[1] as Dictionary).get("avatar_packed", -1)), 0x8204,
+			"the screen holds red's first combo for it")
+
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	var summary := store.character_summary()
+	assert_eq([summary.red.avatar_a, summary.red.avatar_b, summary.red.avatar_packed],
+			[30, 15, stale_packed], "the ACCEPT on blue leaves red's bytes")
+	assert_eq([summary.blue.avatar_a, summary.blue.avatar_b, summary.blue.avatar_packed], shown,
+			"and writes blue's")
+	assert_eq([summary.blue.player_class, summary.red.player_class], [5, 5],
+			"the class goes to both sides, red's 9 included")

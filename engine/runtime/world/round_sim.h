@@ -389,6 +389,13 @@ struct RoundDeath {
     // Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
     // Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE]
     bool player_edge = false;
+    // Queued for a player body's death edge in the same frame's entity update
+    // (the flag reset's Health -1): every tick drain holds it, and the host
+    // routes it after that frame's S2C flush, where retail's entity update
+    // follows the tick's send pump, ahead of the next receive pump
+    // (Server_RouteFrameTailEdges). [orig: Game_ProcessMainFrame -- the
+    // Server_TickUpdate call @0x5266B6, Entity_UpdateAllEntities @0x52674B]
+    bool frame_tail_edge = false;
 };
 
 // A medic-kit hit on a same-team person the kill-zone pass admitted this tick,

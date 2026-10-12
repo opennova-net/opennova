@@ -103,8 +103,8 @@ struct ServerHello {
 	uint32_t et = 0;  // external type (echo of ClientHello.et), nonzero-gated @0x620bf6
 
 	// Game-server fields. The flat retail builder emits SF unconditionally and
-	// gates the remaining numeric/string fields individually; `is_game_server`
-	// is therefore a parse-side marker rather than an encoder switch. The
+	// gates the remaining numeric/string fields individually; the reader
+	// requires none of them (an absent one reads 0, D-NET-468). The
 	// SF/P1..P8/NP/MP/NPW fields appear between SN and NC, and SUS1..SUS4
 	// appear between RPN and EIP. Witnessed in the retail capture
 	// (docs/net/novaworld-net-re.md §5.9) — the host's
@@ -113,7 +113,6 @@ struct ServerHello {
 	// and game-session id. Without them the client receives a generic
 	// matchmaking-shaped Hello and never enters the gametype-specific
 	// game UI (e.g. cmap.mnu spawn-selection).
-	bool is_game_server = false;
 	uint32_t sf = 0;          // server flags; retail observed = 0
 	uint32_t p1 = 0;          // gametype; supplied by the live host configuration
 	uint32_t p2 = 0;          // game-config; live CNapiServerConfig_BuildFlags snapshot

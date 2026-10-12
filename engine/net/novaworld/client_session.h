@@ -394,6 +394,20 @@ public:
 	const DisconnectEvent &disconnect_event() const { return disconnect_event_; }
 	// Datagrams tossed at the envelope/NWU layer (retail's "NAPI TOSSED" log line).
 	uint32_t tossed_datagrams() const { return tossed_datagrams_; }
+	// Whether this connection takes the 0x81 datagram `data`, whoever sent it: it is probing (the
+	// first connect's Hello state or a reconnect), the reply's CI is its own and the identity
+	// block its protocol's. A reply it does not take is the next protocol's to read.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533 (sub_6227F0 over the
+	//  protocol's connections, no address), the enumerator gates @0x627547..0x62755C and the
+	//  identity compares @0x62758B / @0x627624 / @0x627643 each returning 0 @0x626DCB, so
+	//  NapiNPManager_HandlePacket @0x622F10 offers it on (@0x622F9F)]
+	bool takes_server_hello(const uint8_t *data, size_t len) const;
+	// The 0x81s this connection has taken (the first connect's and each re-join's). The connect
+	// leg points the connection at the reply's sender. [orig: Nwu_HandleServerHello - the
+	//  session record's address and port @0x62769D / @0x6276A1, the connect legs @0x627E8C /
+	//  @0x627EE5 -> CNapiNPConnection_InitFromSession @0x626320 (the connection's address
+	//  @0x6263B4 / @0x6263B7)]
+	uint32_t server_hellos_taken() const { return server_hellos_taken_; }
 
 	State state() const { return state_; }
 	bool is_verified() const { return state_ == State::Verified; }
@@ -443,6 +457,8 @@ private:
 	// pool bounds from cs_ (fields 10/11).
 	void reset_sequencing();
 
+	// The 0x81's CI is this connection's and its identity block this protocol's.
+	bool server_hello_is_ours(const ServerHello &sh) const;
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
 	void on_server_auth(const std::vector<uint8_t> &body);
@@ -499,6 +515,7 @@ private:
 	bool disconnect_latched_ = false;
 	bool disconnected_by_peer_ = false;
 	uint32_t tossed_datagrams_ = 0;
+	uint32_t server_hellos_taken_ = 0;
 
 	// The clocks (all in the owner's ms clock).
 	uint32_t clock_ms_ = 0;

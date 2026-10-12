@@ -132,6 +132,7 @@ public:
 	bool remote_claimant(const world::Entity &carrier, world::Entity &out) const override;
 
 	bool send_medic_request() override { return runtime && runtime->queue_medic_request(); }
+	bool send_respawn_request() override { return runtime && runtime->queue_respawn_request(); }
 	void run_tick(const TickInput &input) override;
 	bool session_lost(SessionError &error) const override;
 	bool reset_to_baseline(SessionError &error) override;

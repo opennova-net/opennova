@@ -734,6 +734,7 @@ void JoinerRole::pump() {
 			rt.state().preround_delay_seconds;
 	lap.restart(); // the wire leg has its own rows
 	materialize_replica_world();
+	const bool had_local = local_spawned_;
 	spawn_and_arm_local_player();
 	apply_world_state_load();
 	apply_replica_track(world, rt.state(), rt.view().game_type(), true, track_seen_);
@@ -761,6 +762,15 @@ void JoinerRole::pump() {
 	apply_mounted_ammo_update();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 	mirror_mission_entities();
+	// The Attack & Defend latch the boot ran with no L, on L's spawn frame
+	// once the mirror applied the frame's teams, as retail's joiner latches
+	// after its mission start pumped every message, the last drain after
+	// Player_InitPlayer [orig: Game_StartMission @0x524360 -- the
+	//  NapiClient_WaitForGameStart call @0x524E29, the Player_InitPlayer call
+	//  @0x525BBC, the receive drain @0x525BD9 (gated @0x525BC4 / @0x525BCC),
+	//  the non-authority jz @0x525E29 / @0x525E58 to @0x52609A, the sub_524110
+	//  call @0x5260C1].
+	if (!had_local && local_spawned_) lp.latch_attack_defend_role(rt.game_type());
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
 
 	// Received projectile/reload gameplay and the decoded remote collision

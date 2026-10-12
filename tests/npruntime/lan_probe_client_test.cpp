@@ -53,7 +53,6 @@ int main() {
 		}
 
 		ServerHello hello = build_server_hello(client_hello, 0x7F000001u, client.port);
-		hello.is_game_server = true;
 		hello.sn = "Expected Host";
 		hello.p1 = 0x00010020u;
 		hello.np = 1;

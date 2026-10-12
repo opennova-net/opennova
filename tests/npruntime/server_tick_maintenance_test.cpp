@@ -586,7 +586,7 @@ bool check_flag_refresh_round_robin() {
 // --------------------------------------------------------------------------
 
 bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
-		bool expect_kill) {
+		bool expect_kill, bool uplinked = false) {
 	w::World world;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 4);
@@ -598,6 +598,9 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 	const w::EntityHandle carrier = w::spawn_remote_player(world,
 			player_spawn(carrier_position.x, carrier_position.y, carrier_position.z));
 	world.match.upsert_player({carrier, 3, "Carrier"});
+	// A carrier that has uplinked runs the remote motor leg, which latches no
+	// dead bit [orig: the org2 edge's latch @0x4B4CB5 is the local leg's alone].
+	if (uplinked) world.ai.for_handle(carrier)->net_is_remote_peer = true;
 	w::Entity flag_seed;
 	flag_seed.kind = w::EntityKind::Item;
 	flag_seed.item_id = 4091;
@@ -654,6 +657,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 	if (!expect(objective_states(limit_second).size() == 1 && !saw_flag_return_feed(limit_second),
 			"the limit second carries the refresh 0x2F and no 0x1E return event"))
 		return false;
+	inmatch::Server_RouteFrameTailEdges(ctx); // host_session_pump's post-flush leg
 	inmatch::Server_TickUpdate(ctx);
 	const std::vector<ns::Datagram> next_tick = drain(remote);
 	const std::vector<ObjectiveEntityState> pair = objective_states(next_tick);
@@ -673,6 +677,229 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 			saw_death = true;
 	return expect(saw_death && !body->alive && (body->flags & w::kEntityFlagDead) != 0,
 			"the carrier dies through the ordinary death transaction");
+}
+
+// The flag reset's death is the player body's edge on its Health -1, raised in
+// the same frame's entity update, after the tick's send pump and ahead of the
+// next receive pump (D-NET-550). A C2S 0x4D in that next pump therefore kills
+// the already dead body a second time (the team change has no dead gate) and
+// its penalty holds stand last; a C2S 0x41 there stores its unfloored timeout
+// over the death's floored holds and raises nothing (the body is dead).
+// [orig: Server_CheckPlayerViolations -- Health -1 @0x51AC94; the edge
+//  Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA, run by
+//  Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6;
+//  NapiNPServerMsg_0x04D_ChangeTeam @0x518F70 -- GameEvent_PlayerDeath
+//  @0x519059 / @0x5190C7, +360 @0x51906B / @0x5190D9;
+//  NapiNPServerMsg_ResetPlayerAmmo -- +360 @0x51057B, +364 @0x510587]
+bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool uplinked) {
+	w::World world;
+	world.rules.mp_session = true;
+	world.rules.logic_authority = true;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kCaptureTheFlag;
+	world.match.configure(rules);
+	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
+	world.match.upsert_player({carrier, 3, "Carrier"});
+	if (uplinked) world.ai.for_handle(carrier)->net_is_remote_peer = true; // the remote motor leg
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4091;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position = {5.0f, 6.0f, 2.0f};
+	flag_seed.position = {30.0f, 40.0f, 2.0f};
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	world.registry.get(carrier)->mounted_child = flag;
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kCaptureTheFlag;
+	ctx.config.flag_reset_seconds = 1;
+	ctx.config.permanent_death = true; // keep the dead slot past the t7 punt
+	ctx.config.respawn_timeout = 1;
+	ctx.config.change_team_penalty_seconds = 60;
+	ctx.config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	int deaths = 0;
+	const auto count_deaths = [&]() {
+		for (const ns::Datagram &d : drain(remote))
+			if (d.tag == s2c::ENTITY_DEATH && d.body.size() == 4 &&
+					(d.body[0] | (d.body[1] << 8)) == carrier.packed)
+				++deaths;
+	};
+
+	tick_to_periodic_second(ctx); // the limit second: Health -1
+	count_deaths();
+	if (!expect(world.registry.get(carrier)->health == -1 && deaths == 0,
+			"flag-reset: the limit second stores Health -1 and raises nothing yet"))
+		return false;
+	inmatch::Server_RouteFrameTailEdges(ctx); // the frame's entity update
+	count_deaths();
+	const bool tail_death = expect(
+			deaths == 1 && (world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0,
+			"flag-reset: the frame tail's edge raises the death ahead of the next pump");
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	(void)inmatch::dispatch_session_replies(ctx.config, conn,
+			{make_protocol_message(next_pump_tag, {})}, 100,
+			ctx.np_protocol.connection_list, &world, inputs);
+	inmatch::Server_TickUpdate(ctx);
+	inmatch::Server_RouteFrameTailEdges(ctx);
+	count_deaths();
+	if (next_pump_tag == c2s::TEAM_CHANGE_REQUEST)
+		return expect(deaths == 2 && world.registry.get(carrier)->team == 2 &&
+						conn.link.respawn_delay_seconds >= 59,
+				"flag-reset: the next pump's team change kills again and its penalty stands") &&
+				tail_death;
+	return expect(deaths == 1 && conn.link.respawn_delay_seconds == 1 &&
+					conn.link.spawn_target_hold_seconds == 1,
+			"flag-reset: the next pump's 0x41 stores its unfloored timeout over the death's holds") &&
+			tail_death;
+}
+
+// The flag reset's death credits the carrier's +0x178 as the edge leaves it:
+// the edge clears it unless a non-lethal hit staged the death selection
+// (+0x2C0), so a carrier an enemy wounded first scores that enemy a kill.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B4C72..0x4B4C8D; GameEvent_PlayerDeath
+//  reads +0x178 @0x516F47, the scoring @0x516FB0]
+bool check_flag_reset_credits_a_staged_attacker(bool staged) {
+	w::World world;
+	world.rules.mp_session = true;
+	world.rules.logic_authority = true;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kCaptureTheFlag;
+	world.match.configure(rules);
+	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
+	const w::EntityHandle shooter =
+			w::spawn_remote_player(world, player_spawn(60.0f, 40.0f, 2.0f, /*team=*/2));
+	world.match.upsert_player({carrier, 3, "Carrier"});
+	world.match.upsert_player({shooter, 4, "Shooter"});
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4091;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position = {5.0f, 6.0f, 2.0f};
+	flag_seed.position = {30.0f, 40.0f, 2.0f};
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	w::Entity *body = world.registry.get(carrier);
+	body->mounted_child = flag;
+	// The earlier non-lethal hit: its shooter and, if staged, its death clip.
+	body->last_attacker = shooter;
+	body->death_anim_state = staged
+			? w::compute_death_anim_state(0, 0, w::death_cause::kGeneric)
+			: 0;
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kCaptureTheFlag;
+	ctx.config.flag_reset_seconds = 1;
+	ctx.config.permanent_death = true;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+	tick_to_periodic_second(ctx);
+	inmatch::Server_RouteFrameTailEdges(ctx);
+	const w::MatchPlayer *stats = world.match.player(shooter);
+	const int32_t kills = stats != nullptr ? stats->stats[w::MatchStats::kEnemyKills] : -1;
+	return expect((world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0 &&
+					kills == (staged ? 1 : 0),
+			staged ? "flag-reset: a staged hit's shooter is credited with the kill"
+			       : "flag-reset: an unstaged edge clears the attacker, so no kill is credited");
+}
+
+// A flag reset in a frame whose entity update does not run (the pre-round
+// phase) leaves its edge waiting; a C2S 0x4D before the next entity update
+// kills the body and latches its dead bit, so the waiting edge, which skips a
+// dead body, raises no second death. [orig: Entity_UpdateInfantryPlayerBody
+// -- the dead bit @0x4B4BFE; NapiNPServerMsg_0x04D_ChangeTeam -- Flags |= 2
+// @0x519061 / @0x5190CF]
+bool check_flag_reset_waiting_edge_skips_a_dead_body() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.rules.logic_authority = true;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kCaptureTheFlag;
+	world.match.configure(rules);
+	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
+	world.match.upsert_player({carrier, 3, "Carrier"});
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4091;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position = {5.0f, 6.0f, 2.0f};
+	flag_seed.position = {30.0f, 40.0f, 2.0f};
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	world.registry.get(carrier)->mounted_child = flag;
+	world.preround_delay_seconds = 2; // the limit second's entity update holds
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kCaptureTheFlag;
+	ctx.config.flag_reset_seconds = 1;
+	ctx.config.permanent_death = true;
+	ctx.config.change_team_penalty_seconds = 60;
+	ctx.config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	int deaths = 0;
+	const auto count_deaths = [&]() {
+		for (const ns::Datagram &d : drain(remote))
+			if (d.tag == s2c::ENTITY_DEATH && d.body.size() == 4 &&
+					(d.body[0] | (d.body[1] << 8)) == carrier.packed)
+				++deaths;
+	};
+
+	tick_to_periodic_second(ctx); // the limit second, in the pre-round
+	inmatch::Server_RouteFrameTailEdges(ctx);
+	count_deaths();
+	if (!expect(world.registry.get(carrier)->health == -1 && deaths == 0 &&
+					!ctx.entity_update_ran,
+			"waiting-edge: the pre-round limit second stores Health -1 and its edge waits"))
+		return false;
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	(void)inmatch::dispatch_session_replies(ctx.config, conn,
+			{make_protocol_message(c2s::TEAM_CHANGE_REQUEST, {})}, 100,
+			ctx.np_protocol.connection_list, &world, inputs);
+	count_deaths();
+	if (!expect(deaths == 1, "waiting-edge: the team change kills the waiting body"))
+		return false;
+	// Run until an entity update has run and its tail has drained.
+	for (int frame = 0; frame < 400 && !ctx.entity_update_ran; ++frame) {
+		inmatch::Server_TickUpdate(ctx);
+		inmatch::Server_RouteFrameTailEdges(ctx);
+	}
+	inmatch::Server_TickUpdate(ctx);
+	inmatch::Server_RouteFrameTailEdges(ctx);
+	count_deaths();
+	return expect(ctx.entity_update_ran && deaths == 1 &&
+					conn.link.respawn_delay_seconds >= 55,
+			"waiting-edge: the first entity update after it skips the dead body");
 }
 
 // --------------------------------------------------------------------------
@@ -1883,6 +2110,15 @@ int main() {
 	ok = check_server_tick_leaves_the_pending_sounds() && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true) && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kTeamDeathmatch, false) && ok;
+	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true,
+			/*uplinked=*/true) && ok;
+	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::TEAM_CHANGE_REQUEST, false) && ok;
+	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::DEATH_TIMEOUT_RESET, false) && ok;
+	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::TEAM_CHANGE_REQUEST, true) && ok;
+	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::DEATH_TIMEOUT_RESET, true) && ok;
+	ok = check_flag_reset_waiting_edge_skips_a_dead_body() && ok;
+	ok = check_flag_reset_credits_a_staged_attacker(true) && ok;
+	ok = check_flag_reset_credits_a_staged_attacker(false) && ok;
 	ok = check_team_downed_resend() && ok;
 	ok = check_death_consumer_reads_and_clears_the_reported_cause_bit() && ok;
 	ok = check_spectator_latch_mirrors_onto_the_roster_row() && ok;
