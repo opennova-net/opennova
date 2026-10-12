@@ -14,7 +14,7 @@
           {{ server.settings.game_name || 'Unnamed server' }}
         </h2>
         <p class="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-          <span :class="stateBadgeClass(server.state)">{{ STATE_LABELS[server.state] }}</span>
+          <span :class="stateBadgeClass(server.state)">{{ stateLabel(server.state) }}</span>
           <span>{{ expansionLabel }}</span>
         </p>
       </div>
@@ -59,7 +59,7 @@
             :class="stepBarClass(index)"
           ></span>
           <span class="text-xs" :class="index === stepIndex ? 'font-semibold text-ink' : 'text-ink-muted'">
-            {{ STATE_LABELS[step] }}<span class="sr-only">{{ stepSuffix(index) }}</span>
+            {{ stateLabel(step) }}<span class="sr-only">{{ stepSuffix(index) }}</span>
           </span>
         </li>
       </ol>
@@ -67,8 +67,8 @@
         class="rounded-panel border p-3 text-sm"
         :class="stateNoteClass"
       >
-        <span class="font-semibold">{{ STATE_LABELS[server.state] }}.</span>
-        {{ STATE_DESCRIPTIONS[server.state] }}
+        <span class="font-semibold">{{ stateLabel(server.state) }}.</span>
+        {{ stateDescription(server.state) }}
         <template v-if="server.state === 'failed' && server.failure_reason">
           The service's note: {{ server.failure_reason }}.
         </template>
@@ -146,7 +146,7 @@
         <dt class="text-ink-muted">{{ FIELD_LABELS.missions }}</dt>
         <dd class="min-w-0 text-ink">
           <ol class="list-inside list-decimal space-y-0.5 font-mono text-xs">
-            <li v-for="mission in server.settings.missions" :key="mission" class="break-all">{{ mission }}</li>
+            <li v-for="(mission, index) in server.settings.missions" :key="index" class="break-all">{{ mission }}</li>
           </ol>
         </dd>
       </dl>
@@ -242,9 +242,8 @@ import type { HostedEvent, HostedServer } from '../types/hostedServer';
 import { FIELD_LABELS } from '../utils/hostedSettings';
 import {
   START_STEPS,
-  STATE_DESCRIPTIONS,
-  STATE_LABELS,
   stateBadgeClass,
+  stateDescription,
   stateLabel,
 } from '../utils/hostedState';
 import { ago, isoOf, localOf } from '../utils/utcTime';

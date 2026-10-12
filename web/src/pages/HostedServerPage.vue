@@ -248,7 +248,9 @@ async function load(background: boolean) {
     data.value = result.value;
     loadedAt.value = now.value;
     pollTrouble.value = false;
-    if (!background) pageError.value = '';
+    // Any answer clears a failure the page showed (a background retry
+    // included); a silent poll failure only ever set pollTrouble.
+    pageError.value = '';
     noteState(result.value.server);
     schedule(false);
     return;
@@ -262,6 +264,15 @@ async function load(background: boolean) {
   schedule(true);
 }
 
+// A read that started before the page's own change answers with the state
+// from before it: drop it, so the read that follows the change is the one in
+// charge.
+function dropInFlight() {
+  inFlight?.abort();
+  inFlight = null;
+  loading.value = false;
+}
+
 // The start went in: the server shows at once as the service answered it,
 // the keyboard goes to its heading, and the page follows it from there.
 async function onStarted(server: HostedServer | null) {
@@ -271,6 +282,7 @@ async function onStarted(server: HostedServer | null) {
     data.value = { ...data.value, server };
     lastState = server.state;
   }
+  dropInFlight();
   void load(true);
   await nextTick();
   if (statusCard.value) statusCard.value.focusHeading();
@@ -286,6 +298,7 @@ function onStopped(server: HostedServer | null) {
     data.value = { ...data.value, server: { ...server, events } };
     noteState(server);
   }
+  dropInFlight();
   void load(true);
 }
 
@@ -301,6 +314,7 @@ function onRefused(error: HostedError) {
     error.code === 'hosting_disabled' ||
     error.code === 'no_live_server'
   ) {
+    dropInFlight();
     void load(true);
   }
 }

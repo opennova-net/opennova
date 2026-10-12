@@ -33,6 +33,9 @@
     <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
       {{ error }}
     </div>
+    <p v-if="pollTrouble" class="text-xs text-warn">
+      The last refresh did not get through; this page keeps trying.
+    </p>
 
     <dl v-if="fleet" class="grid gap-4 sm:grid-cols-3">
       <div class="rounded-panel border border-border bg-panel p-4">
@@ -209,6 +212,8 @@ import { durationSince, isoOf, localOf } from '../../utils/utcTime';
 const STOP_ALL_PHRASE = 'STOP ALL';
 const TRANSITION_POLL_MS = 5_000;
 const IDLE_POLL_MS = 30_000;
+const RETRY_POLL_FIRST_MS = 5_000;
+const RETRY_POLL_MAX_MS = 60_000;
 
 const fleet = ref<FleetResponse | null>(null);
 const loading = ref(false);
@@ -222,9 +227,14 @@ const typedPhrase = ref('');
 const stopAllButton = ref<HTMLButtonElement | null>(null);
 const stopAllWarning = ref<HTMLElement | null>(null);
 
+const pollTrouble = ref(false);
+
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 let inFlight: AbortController | null = null;
 let unmounted = false;
+let retryDelay = RETRY_POLL_FIRST_MS;
+// The error banner shows a failed read (not a stop's refusal).
+let errorFromLoad = false;
 
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
 
@@ -250,16 +260,37 @@ function flash(text: string) {
 function fail(text: string) {
   error.value = text;
   message.value = null;
+  errorFromLoad = false;
 }
 
-function schedule() {
+// The next poll: faster while a server changes state, and after a failed poll
+// from 5 s, doubling to a minute. A hidden tab skips its polls and reads the
+// fleet again when it is shown (onVisibility).
+function schedule(failed: boolean) {
   if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = undefined;
   if (unmounted) return;
-  const moving = fleet.value?.servers.some((s) => isTransitioning(s.state)) ?? false;
-  pollTimer = setTimeout(() => void load(true), moving ? TRANSITION_POLL_MS : IDLE_POLL_MS);
+  let delay: number;
+  if (failed) {
+    delay = retryDelay;
+    retryDelay = Math.min(retryDelay * 2, RETRY_POLL_MAX_MS);
+  } else {
+    retryDelay = RETRY_POLL_FIRST_MS;
+    const moving = fleet.value?.servers.some((s) => isTransitioning(s.state)) ?? false;
+    delay = moving ? TRANSITION_POLL_MS : IDLE_POLL_MS;
+  }
+  pollTimer = setTimeout(() => {
+    pollTimer = undefined;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    void load(true);
+  }, delay);
 }
 
-// `background` keeps the list (and says nothing) on a failed poll.
+function onVisibility() {
+  if (!document.hidden && !pollTimer) void load(true);
+}
+
+// `background` keeps the list (and only notes the trouble) on a failed poll.
 async function load(background: boolean) {
   if (inFlight) {
     if (background) return;
@@ -276,10 +307,22 @@ async function load(background: boolean) {
   if (result.ok) {
     fleet.value = result.value;
     loadedAt.value = now.value;
-  } else if (!background || fleet.value === null) {
-    fail(result.error.message);
+    pollTrouble.value = false;
+    // A failed read's banner goes with the next good one (a stop's stays).
+    if (errorFromLoad) {
+      error.value = null;
+      errorFromLoad = false;
+    }
+    schedule(false);
+    return;
   }
-  schedule();
+  if (background && fleet.value !== null) {
+    pollTrouble.value = true;
+  } else {
+    fail(result.error.message);
+    errorFromLoad = true;
+  }
+  schedule(true);
 }
 
 async function stopOne(s: FleetServer) {
@@ -329,11 +372,13 @@ async function confirmStopAll() {
 
 onMounted(() => {
   void load(false);
+  document.addEventListener('visibilitychange', onVisibility);
 });
 
 onUnmounted(() => {
   unmounted = true;
   if (pollTimer) clearTimeout(pollTimer);
+  document.removeEventListener('visibilitychange', onVisibility);
   inFlight?.abort();
   inFlight = null;
 });

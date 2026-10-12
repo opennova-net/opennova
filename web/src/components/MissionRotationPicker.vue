@@ -12,8 +12,8 @@
     </legend>
     <p :id="`${baseId}-hint`" class="text-xs text-ink-muted">
       The server plays these maps in order and then starts over; the first is the map it starts on.
-      <template v-if="available.length > 0">
-        Choose from the {{ available.length }} mission{{ available.length === 1 ? '' : 's' }} this service
+      <template v-if="offered.length > 0">
+        Choose from the {{ offered.length }} mission{{ offered.length === 1 ? '' : 's' }} this service
         offers, up to {{ MISSIONS_MAX }}.
       </template>
       <template v-else>
@@ -77,7 +77,7 @@
       </div>
 
       <div class="min-w-0 space-y-2">
-        <template v-if="available.length > 0">
+        <template v-if="offered.length > 0">
           <h3 :id="`${baseId}-available`" class="text-sm font-medium text-ink">Add a mission</h3>
           <p v-if="notChosen.length === 0" class="text-sm text-ink-muted">Every mission is in the rotation.</p>
           <ul v-else :aria-labelledby="`${baseId}-available`" class="divide-y divide-border rounded-panel border border-border">
@@ -141,9 +141,10 @@
 // The rotation editor of the hosted server form: an ordered list of mission
 // file names (the first the starting map), picked from the service's own list
 // (GET /api/me/server default_missions) or, when it names none, typed by file
-// name. Each mission is in the rotation at most once.
+// name. Each mission is in the rotation at most once (the form dedupes the
+// rotation it starts from), so a mission's name keys its row and its ids.
 import { computed, nextTick, ref } from 'vue';
-import { isMissionName, MISSION_STEM_MAX, MISSIONS_MAX } from '../utils/hostedSettings';
+import { isMissionName, MISSION_STEM_MAX, MISSIONS_MAX, uniqueMissions } from '../utils/hostedSettings';
 
 const props = defineProps<{
   modelValue: string[];
@@ -168,13 +169,15 @@ const announcement = ref('');
 const custom = ref('');
 const customError = ref('');
 
+// The service's missions, each once: rows and their ids are keyed by name.
+const offered = computed(() => uniqueMissions(props.available));
 const chosen = computed(() => new Set(props.modelValue.map((m) => m.toLowerCase())));
-const notChosen = computed(() => props.available.filter((m) => !chosen.value.has(m.toLowerCase())));
+const notChosen = computed(() => offered.value.filter((m) => !chosen.value.has(m.toLowerCase())));
 const full = computed(() => props.modelValue.length >= MISSIONS_MAX);
 const sameAsDefault = computed(
   () =>
-    props.modelValue.length === props.available.length &&
-    props.modelValue.every((m, i) => m === props.available[i]),
+    props.modelValue.length === offered.value.length &&
+    props.modelValue.every((m, i) => m === offered.value[i]),
 );
 
 function buttonId(kind: 'up' | 'down' | 'remove' | 'add', mission: string): string {
@@ -254,7 +257,7 @@ function addCustom() {
 }
 
 function useDefault() {
-  update([...props.available], "The rotation is the service's own again.");
+  update([...offered.value], "The rotation is the service's own again.");
 }
 
 // The form's first-error focus lands on the legend.

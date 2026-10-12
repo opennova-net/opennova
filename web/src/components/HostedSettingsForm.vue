@@ -50,19 +50,30 @@
       <!-- MPHostGamePassword -->
       <div class="min-w-0 space-y-1 sm:col-span-2">
         <label :for="fieldId('game_password')" :class="labelClass">{{ FIELD_LABELS.game_password }} (optional)</label>
-        <input
-          :id="fieldId('game_password')"
-          v-model="form.game_password"
-          type="text"
-          autocomplete="off"
-          autocapitalize="none"
-          spellcheck="false"
-          :disabled="busy"
-          :maxlength="GAME_PASSWORD_MAX * 2"
-          :aria-invalid="errors.game_password ? 'true' : undefined"
-          :aria-describedby="describedBy('game_password')"
-          :class="[inputClass, 'font-mono']"
-        />
+        <div class="flex gap-2">
+          <input
+            :id="fieldId('game_password')"
+            v-model="form.game_password"
+            :type="showPassword ? 'text' : 'password'"
+            autocomplete="off"
+            autocapitalize="none"
+            spellcheck="false"
+            :disabled="busy"
+            :maxlength="GAME_PASSWORD_MAX * 2"
+            :aria-invalid="errors.game_password ? 'true' : undefined"
+            :aria-describedby="describedBy('game_password')"
+            :class="[inputBase, 'min-w-0 flex-1 font-mono']"
+          />
+          <button
+            type="button"
+            class="shrink-0 rounded-control border border-border bg-raised px-3 py-2 text-xs text-ink transition hover:bg-hover"
+            :aria-pressed="showPassword ? 'true' : 'false'"
+            :aria-controls="fieldId('game_password')"
+            @click="showPassword = !showPassword"
+          >
+            {{ showPassword ? 'Hide' : 'Show' }}<span class="sr-only"> the game password</span>
+          </button>
+        </div>
         <p :id="hintId('game_password')" class="text-xs text-ink-muted">
           Leave it empty for a public server. Players type it to join. Up to {{ GAME_PASSWORD_MAX }} letters,
           digits and ASCII punctuation, with no space or double quote.
@@ -143,6 +154,16 @@
       <p v-if="errors.expansion" :id="errorId('expansion')" class="text-xs text-danger">{{ errors.expansion }}</p>
     </fieldset>
 
+    <p
+      v-if="droppedMissions.length > 0"
+      class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn"
+    >
+      Your last server's rotation had
+      {{ droppedMissions.length === 1 ? 'a mission' : `${droppedMissions.length} missions` }} this service no
+      longer offers, so {{ droppedMissions.length === 1 ? 'it was' : 'they were' }} left out:
+      <span class="break-all font-mono text-xs">{{ droppedMissions.join(', ') }}</span>.
+    </p>
+
     <MissionRotationPicker
       ref="rotation"
       v-model="form.missions"
@@ -186,6 +207,7 @@ import {
   GAME_PASSWORD_MAX,
   INT_RULES,
   isMissionName,
+  uniqueMissions,
   type IntField,
   type SettingsErrors,
   type SettingsField,
@@ -242,23 +264,35 @@ const FIELD_ORDER: SettingsField[] = [
   'missions',
 ];
 
-// The rotation to begin with: the last server's (kept to the service's list
-// when it has one), else the service's own.
-function initialMissions(): string[] {
-  const offered = props.defaultMissions;
-  const previous = props.previous?.missions ?? [];
-  if (offered.length === 0) return previous.filter(isMissionName);
+// The rotation to begin with: the last server's, each mission once (the
+// picker holds each at most once) and kept to the service's list when it has
+// one, else the service's own. `dropped` names the last server's missions the
+// service no longer offers (or names no .bms file), which the form says it left
+// out.
+function initialMissions(): { missions: string[]; dropped: string[] } {
+  const offered = uniqueMissions(props.defaultMissions);
+  const previous = uniqueMissions(props.previous?.missions ?? []);
+  if (offered.length === 0) {
+    return { missions: previous.filter(isMissionName), dropped: previous.filter((m) => !isMissionName(m)) };
+  }
   const known = new Map(offered.map((m) => [m.toLowerCase(), m] as const));
   const kept: string[] = [];
+  const dropped: string[] = [];
   for (const m of previous) {
     const name = known.get(m.toLowerCase());
-    if (name && !kept.includes(name)) kept.push(name);
+    if (name) kept.push(name);
+    else dropped.push(m);
   }
-  return kept.length > 0 ? kept : [...offered];
+  return { missions: kept.length > 0 ? kept : [...offered], dropped };
 }
 
-const form = reactive(formFrom(props.previous, initialMissions()));
+const initial = initialMissions();
+// The last server's missions the rotation left out, said once above the picker.
+const droppedMissions = initial.dropped;
+const form = reactive(formFrom(props.previous, initial.missions));
 const busy = ref(false);
+// The game password is masked (it may come from the last server) until shown.
+const showPassword = ref(false);
 const alertText = ref('');
 // The form's own check, once a start was tried (then again on every change).
 const checked = ref<SettingsErrors>({});

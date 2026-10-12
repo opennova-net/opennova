@@ -85,6 +85,20 @@ export function isMissionName(name: string): boolean {
   return MISSION_NAME.test(name);
 }
 
+// Each mission once, in order, the first spelling kept (file names match
+// without regard to case): the rotation picker holds each at most once.
+export function uniqueMissions(missions: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of missions) {
+    const key = m.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(m);
+  }
+  return out;
+}
+
 // The form as typed. A number input bound with v-model.number holds '' when
 // empty (or text it could not read), so the whole-number fields take either.
 export interface SettingsForm {

@@ -31,6 +31,11 @@ export function stateLabel(state: string): string {
   return (STATE_LABELS as Record<string, string>)[state] ?? state;
 }
 
+// What a state means to the owner; empty for a state this site does not know.
+export function stateDescription(state: string): string {
+  return (STATE_DESCRIPTIONS as Record<string, string>)[state] ?? '';
+}
+
 // The steps a start goes through, in order, up to running.
 export const START_STEPS: readonly HostedState[] = ['requested', 'provisioning', 'booting', 'listing', 'running'];
 
@@ -45,7 +50,8 @@ export function isTransitioning(state: HostedState): boolean {
   return isLive(state) && state !== 'running';
 }
 
-export function stateBadgeClass(state: HostedState): string {
+// A state this site does not know gets the ended look.
+export function stateBadgeClass(state: string): string {
   const base = 'inline-flex items-center rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
   switch (state) {
     case 'running':
@@ -58,7 +64,7 @@ export function stateBadgeClass(state: HostedState): string {
     case 'booting':
     case 'listing':
       return `${base} bg-warn/15 text-warn`;
-    case 'stopped':
+    default:
       return `${base} bg-hover text-ink-muted`;
   }
 }
