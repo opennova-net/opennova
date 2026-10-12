@@ -332,8 +332,9 @@ struct NapiNPServerCtx {
 	std::string mission_briefing3;
 	std::string mission_briefing2;
 	// MissionText [Locations]/LOCATION%03i labels for each BMS type-2044
-	// marker, in marker spawn order. The S2C 0x0F writer copies these onto
-	// the joining client's deploy map.
+	// marker the spawn admitted, in spawn order, each keyed by its record's
+	// name_index (install_mission_location_names). The S2C 0x0F writer copies
+	// these onto the joining client's deploy map.
 	std::vector<std::string> mission_location_names;
 
 	// The 180-byte mission/session block streamed by S2C 0x64. Retail builds it

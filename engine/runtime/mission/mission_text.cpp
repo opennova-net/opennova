@@ -3,7 +3,6 @@
 #include <runtime/mission/mission_text.h>
 
 #include <base/io/strutil.h>
-#include <formats/def/reserved_items.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h>
 
@@ -14,6 +13,11 @@ namespace opennova::mission {
 std::string MissionText::people_name(int32_t index) const {
 	const auto it = people_names.find(index);
 	return it != people_names.end() ? it->second : std::string();
+}
+
+std::string MissionText::location_name(int32_t name_index) const {
+	const auto it = location_texts.find(name_index);
+	return it != location_texts.end() ? it->second : hud::text_key(hud::kLocationKey, name_index);
 }
 
 namespace {
@@ -66,7 +70,7 @@ bool parse_mission_text(const uint8_t *bytes, std::size_t size, MissionText &out
 		if (const rtxt::Entry *e = table.find_in_section("info", "briefing")) out.briefing2 = e->text;
 	}
 
-	// [Locations] LOCATION%03i (type-2044 markers by one-based spawn order, the
+	// [Locations] LOCATION%03i (each type-2044 marker's by its name_index, the
 	// S2C 0x0F deploy-map labels) and [PeopleNames] STRNAME%03i (the D-HUD-20
 	// authored entity display names promote resolves from each record's
 	// name_index — the witnessed resolve is cited at the promote.cpp port site).
@@ -74,14 +78,6 @@ bool parse_mission_text(const uint8_t *bytes, std::size_t size, MissionText &out
 	harvest_indexed(table, hud::kPeopleNameKey, out.people_names);
 	out.loaded = true;
 	return true;
-}
-
-std::vector<int32_t> location_numbers(const std::vector<bms::Entity> &markers) {
-	std::vector<int32_t> out(markers.size(), 0);
-	int32_t location = 0;
-	for (std::size_t i = 0; i < markers.size(); ++i)
-		if (markers[i].type_id == def::DEF_TYPE_NAMED_LOCATION) out[i] = ++location;
-	return out;
 }
 
 } // namespace opennova::mission
