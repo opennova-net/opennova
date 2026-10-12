@@ -10,6 +10,9 @@
 //   5. The store OWNS its copies: wiping the source documents changes nothing.
 //   6. No charmap -> the zeroed map (the sampler's "no charmap -> surface 1"
 //      leg); clear() invalidates.
+//   7. patch_charmap writes a rect of the held char map in place: the view
+//      reads the new class, a rect outside the map or a store without one is
+//      refused.
 
 #include <formats/cpt/cpt.h>
 #include <formats/trn/trn.h>
@@ -173,6 +176,22 @@ int main() {
 			19.0, 1e-4, "height sample survives the source documents being freed");
 	check(terrain::surface_type_at_fixed(store.surface_map(), 300 << 16, -(200 << 16)) == 3,
 			"surface sample survives the source charmap being freed");
+
+	// --- patch_charmap: a rect written in place ------------------------------
+	{
+		const uint8_t *before = store.surface_map().data;
+		const uint8_t stone[2] = {12, 13};
+		check(store.patch_charmap(terrain::CoordsRect{1, 0, 2, 1}, stone, 2), "a rect inside the char map is written");
+		check(store.surface_map().data == before, "the patch keeps the view's raster");
+		check(terrain::surface_type_at_fixed(store.surface_map(), 300 << 16, -(200 << 16)) == 12,
+				"the view reads the patched class");
+		check(!store.patch_charmap(terrain::CoordsRect{3, 0, 2, 1}, stone, 2), "a rect past the char map is refused");
+		check(!store.patch_charmap(terrain::CoordsRect{0, 0, 2, 1}, stone, 1), "a stride under the rect's width is refused");
+		check(terrain::surface_type_at_fixed(store.surface_map(), 300 << 16, -(200 << 16)) == 12,
+				"a refused patch writes nothing");
+		const uint8_t back = 3;
+		check(store.patch_charmap(terrain::CoordsRect{1, 0, 1, 1}, &back, 1), "a one-texel rect is written");
+	}
 
 	// --- the cell masks (D-TERRAIN-16): a wrapped axis takes a cell's low four
 	// bits, one that does not wrap clamps an off-grid cell to the edge [orig:
