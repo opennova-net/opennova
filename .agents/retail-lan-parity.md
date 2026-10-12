@@ -65,8 +65,10 @@ recorded with it.
 
 `scripts/net/run_parity_topology.ps1` is the repository adapter around the
 onHook MCP executable and the OpenNova launchers. It runs one explicit
-topology; there is intentionally no second matrix definition or generated
-manifest.
+topology. `scripts/net/run_parity_suite.ps1` runs it for every cell of the
+tracked case table (`scripts/net/parity-cases.json`: RR, an A/A RR, RO, OR,
+OO per case, resumable) and judges each case with `opennova-parity`
+(`scripts/net/README.md`, "Parity verdict"); there is no generated manifest.
 
 ```powershell
 pwsh -File scripts/net/run_parity_topology.ps1 `
@@ -98,8 +100,10 @@ and `... --out <corpus> items.def` (from git-bash, set `MSYS_NO_PATHCONV=1` or
 the name a retail host advertises (JO:CA ships `Untitled`).
 
 Run the command once for each of `RR`, `RO`, `OR`, and `OO`, changing `RunId`
-for every cell while holding all other case inputs fixed. Ports supported by
-the current retail automation are 32786 through 32789. Numeric game type zero
+for every cell while holding all other case inputs fixed. A retail LAN host
+binds only inside its `game.cfg` `mplanserverportmin`..`mplanserverportmax`
+(stock JO:CA: 32768 through 32787); the runner refuses a port outside the
+SERVER copy's range. Numeric game type zero
 is valid Deathmatch; `auto` is discovery-only and is not a verdict-bearing
 input. Run the command from a real terminal: the Godot console wrapper stalls
 from a shell without a console, and a verdict-bearing run needs the wrapper's
@@ -156,6 +160,9 @@ artifact layout to each cell.
   endpoint reports its role through `game_state` and its readiness witness
   through the parity probes.
 - Captures decode with the native `opennova-wire` application.
+- The case verdict is `opennova-parity`'s `PARITY_STATUS=PASS` over RR,
+  RR-aa and all three subject topologies; a widened A/A floor is reported,
+  not hidden.
 - Mismatches are recorded in `docs/net/novaworld-net-re.md`; absence of a
   decoder warning is not itself a parity verdict.
 - Only sanitized conclusions and structural fixtures enter Git. Raw local
