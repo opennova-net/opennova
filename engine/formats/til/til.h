@@ -15,15 +15,15 @@ constexpr uint32_t TIL_MAGIC = 0x74696C30u;
 constexpr uint8_t TIL_FLAG_FLIP_X = 0x01u;
 constexpr uint8_t TIL_FLAG_FLIP_Y = 0x02u;
 constexpr uint8_t TIL_FLAG_ROTATE_90 = 0x04u;
-// Bit 0x08 - a perimeter-outline flag. jodemo.exe emits a secondary LINELIST pass
-// for it (Terrain_DrawTileOverlays2D@0x5C79C0), but RETAIL JO does NOT: its tile
-// overlay render (PolyTrn_DrawTileOverlayQuad@0x604700, via PolyTrn_RenderTile@0x60df0d)
-// handles only flip/rotate (bits 0/1/2) and draws a single TRIANGLESTRIP - no
-// outline pass. We preserve the flag for round-trip fidelity but, like retail JO,
-// render no outline (faithful; the LINELIST outline is jodemo-only). See
-// docs/tiles/til-re.md (D-TIL-1).
+// Bit 0x08 - the original editors' selection mark. Nile toggles it on the tile a click hits and sets
+// or clears it on every tile a drag box crosses [orig: gobj.dll sub_10013364 @ 0x1001340C (xor 8),
+// sub_10013416 @ 0x100134F7 / 0x100134FC], and jodemo.exe draws a LINELIST outline around a marked
+// tile (Terrain_DrawTileOverlays2D@0x5C79C0). RETAIL JO does NOT: its tile overlay render
+// (PolyTrn_DrawTileOverlayQuad@0x604700, via PolyTrn_RenderTile@0x60df0d) tests only bits 0/1/2 and
+// draws a single TRIANGLESTRIP - no outline. No shipped .til marks a tile. The flags byte is carried
+// whole (every bit a file holds is written back); like retail JO the port renders no outline. See
+// docs/tiles/til-re.md (D-TIL-1, D-TIL-6).
 constexpr uint8_t TIL_FLAG_OUTLINE = 0x08u;
-constexpr uint8_t TIL_FLAG_AUTHORED_MASK = TIL_FLAG_FLIP_X | TIL_FLAG_FLIP_Y | TIL_FLAG_ROTATE_90 | TIL_FLAG_OUTLINE;
 
 constexpr int TIL_ATLAS_TILE_PIXELS = 64;
 constexpr int TIL_CELL_WORLD_UNITS = 16;
@@ -53,40 +53,26 @@ struct TilAtlasLayout {
 	float step_v = 0.0f;
 };
 
+// One 12-byte tile record. The game reads +0 x, +4 z (stored negated), +8 the atlas cell and +9 the
+// flags [orig: PolyTrn_RenderTile @ 0x60DE20..0x60DF09; Terrain_GetSurfaceTypeAtPosition @ 0x6065CC..
+// 0x60660C]; +10 is MED's u16 layer (its sort order), written by the editor and never read by the
+// game [orig: JOTACmed MapTileStore_Append @ 0x433BBF; MapTileStore_Serialize @ 0x433F88 writes the
+// records grouped by ascending layer]. Every byte is a field, so a record writes back as it was read.
 struct TilOverlayEntry {
 	int32_t x_fixed = 0;
 	int32_t z_fixed = 0;
 	uint8_t tile_index = 0;
 	uint8_t flags = 0;
-	uint16_t reserved = 0;
+	uint16_t layer = 0;
 };
 
+// A .til: the records in file order, which is the game's draw order. The header is computed on save
+// (til_io.h), never carried.
 struct TilFile {
-	uint32_t reserved0 = 0;
-	uint32_t reserved1 = 0;
 	std::vector<TilOverlayEntry> entries;
 
 	bool empty() const { return entries.empty(); }
 };
-
-inline uint8_t til_normalize_authored_flags(uint8_t flags) {
-	return static_cast<uint8_t>(flags & TIL_FLAG_AUTHORED_MASK);
-}
-
-inline TilOverlayEntry til_normalize_overlay_entry(TilOverlayEntry entry) {
-	entry.flags = til_normalize_authored_flags(entry.flags);
-	entry.reserved = 0;
-	return entry;
-}
-
-inline TilFile til_normalize_file(TilFile file) {
-	file.reserved0 = 0;
-	file.reserved1 = 0;
-	for (TilOverlayEntry &entry : file.entries) {
-		entry = til_normalize_overlay_entry(entry);
-	}
-	return file;
-}
 
 inline int til_cell_from_world(double world_units) {
 	return static_cast<int>(std::floor(world_units / static_cast<double>(TIL_CELL_WORLD_UNITS)));
@@ -158,12 +144,13 @@ inline TilUvQuad til_build_entry_uv_quad(uint8_t tile_index,
 		return quad;
 	}
 
-	int tile_col = tile_index % layout.tiles_x;
-	int tile_row = tile_index / layout.tiles_x;
-	if (tile_row < 0 || tile_row >= layout.tiles_y) {
-		tile_col = 0;
-		tile_row = 0;
-	}
+	// The cell is the index's column and row with no bound on the row: an index past the atlas's
+	// cells lies below it, and the atlas's CLAMP addressing draws that quad from the atlas's last
+	// texel row [orig: PolyTrn_RenderTile @ 0x60DEBF..0x60DF05 (idiv by g_TerrainTileSetTilesX, the
+	// row times flt_319F7C4); Terrain_LoadTileSetAtlas @ 0x604B4E (flags 0x100203: CLAMP) and
+	// @ 0x604B8A..0x604BC2 (tiles = width / 64, height / 64)]. docs/tiles/til-re.md D-TIL-7.
+	const int tile_col = tile_index % layout.tiles_x;
+	const int tile_row = tile_index / layout.tiles_x;
 
 	const float origin_u = static_cast<float>(tile_col) * layout.step_u;
 	const float origin_v = static_cast<float>(tile_row) * layout.step_v;
@@ -273,16 +260,28 @@ inline bool til_entry_matches_cell(const TilOverlayEntry &entry, int cell_x, int
 // Terrain_LoadTileInfoFile @ 0x60a740]
 bool til_blocks_foliage(const TilFile &file, float world_x, float world_z, float radius);
 
+// A record at a 16.16 position, whole units or not (no snap: a tile goes where it is put, MED's and
+// Nile's tools moving it by whole units), with its flags byte and layer as given.
+inline TilOverlayEntry make_til_entry(int32_t x_fixed,
+                                      int32_t z_fixed,
+                                      uint8_t tile_index,
+                                      uint8_t flags,
+                                      uint16_t layer) {
+	TilOverlayEntry entry;
+	entry.x_fixed = x_fixed;
+	entry.z_fixed = z_fixed;
+	entry.tile_index = tile_index;
+	entry.flags = flags;
+	entry.layer = layer;
+	return entry;
+}
+
+// A record on the 16-unit grid (the cell's corner), layer 0.
 inline TilOverlayEntry make_til_overlay_entry(int cell_x,
 	                                          int cell_z,
 	                                          uint8_t tile_index,
 	                                          uint8_t flags) {
-	TilOverlayEntry entry;
-	entry.x_fixed = til_x_fixed_from_cell(cell_x);
-	entry.z_fixed = til_z_fixed_from_cell(cell_z);
-	entry.tile_index = tile_index;
-	entry.flags = flags;
-	return til_normalize_overlay_entry(entry);
+	return make_til_entry(til_x_fixed_from_cell(cell_x), til_z_fixed_from_cell(cell_z), tile_index, flags, 0);
 }
 
 } // namespace opennova

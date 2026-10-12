@@ -50,16 +50,19 @@ int main() {
 	if (!expect_close(rotated.corners[3].u, 0.75f, "BR U should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
 	if (!expect_close(rotated.corners[3].v, 0.5f, "BR V should honor FLIP_X -> FLIP_Y -> ROTATE_90 ordering")) return 1;
 
-	const opennova::TilUvQuad clamped =
+	// An index past the atlas's cells: its column and row with no bound on the row, a quad below the
+	// atlas that its CLAMP addressing draws from the last texel row [orig: PolyTrn_RenderTile @
+	// 0x60DEBF..0x60DF05] (D-TIL-7). 255 on a 2 x 1 atlas: column 1, row 127.
+	const opennova::TilUvQuad past =
 	    opennova::til_build_entry_uv_quad(255, opennova::TIL_FLAG_FLIP_X, 128, 64);
-	if (!expect(clamped.valid, "out-of-range tile indices should still return a fallback UV quad")) return 1;
-	if (!expect_close(clamped.corners[0].u, 0.5f, "out-of-range tile indices should fall back to atlas tile 0")) return 1;
-	if (!expect_close(clamped.corners[0].v, 0.0f, "fallback tile should start at atlas origin row")) return 1;
+	if (!expect(past.valid, "an index past the atlas should still build its quad")) return 1;
+	if (!expect_close(past.corners[0].u, 1.0f, "an index past the atlas keeps its column (flipped: the cell's right edge)")) return 1;
+	if (!expect_close(past.corners[0].v, 127.0f, "an index past the atlas keeps its row below the atlas")) return 1;
 
 	const opennova::TilUvQuad invalid =
 	    opennova::til_build_entry_uv_quad(0, 0, 63, 64);
 	if (!expect(!invalid.valid, "atlas dimensions smaller than one tile should be rejected")) return 1;
 
-	std::printf("OK: shared tile atlas helper matches engine UV ordering and fallback rules\n");
+	std::printf("OK: shared tile atlas helper matches engine UV ordering and the unbounded row\n");
 	return 0;
 }

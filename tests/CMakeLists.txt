@@ -1354,6 +1354,11 @@ target_link_libraries(til_render_uv_test PRIVATE opennova_formats)
 target_include_directories(til_render_uv_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME til_render_uv COMMAND til_render_uv_test)
 
+add_executable(til_retail_sweep_test til/til_retail_sweep_test.cpp)
+target_link_libraries(til_retail_sweep_test PRIVATE opennova_formats)
+target_include_directories(til_retail_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(til_retail_sweep COMMAND til_retail_sweep_test)
+
 add_executable(foliage_map_test foliage/foliage_map_test.cpp)
 target_link_libraries(foliage_map_test PRIVATE opennova_formats)
 target_include_directories(foliage_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

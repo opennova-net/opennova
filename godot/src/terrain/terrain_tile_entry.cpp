@@ -14,6 +14,8 @@ void TerrainTileEntry::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_tile_index", "value"), &TerrainTileEntry::set_tile_index);
 	ClassDB::bind_method(D_METHOD("set_flags", "value"), &TerrainTileEntry::set_flags);
 	ClassDB::bind_method(D_METHOD("get_flags"), &TerrainTileEntry::get_flags);
+	ClassDB::bind_method(D_METHOD("set_layer", "value"), &TerrainTileEntry::set_layer);
+	ClassDB::bind_method(D_METHOD("get_layer"), &TerrainTileEntry::get_layer);
 	ClassDB::bind_method(D_METHOD("set_cell_x", "value"), &TerrainTileEntry::set_cell_x);
 	ClassDB::bind_method(D_METHOD("get_cell_x"), &TerrainTileEntry::get_cell_x);
 	ClassDB::bind_method(D_METHOD("set_cell_z", "value"), &TerrainTileEntry::set_cell_z);
@@ -23,6 +25,7 @@ void TerrainTileEntry::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "x_fixed"), "set_x_fixed", "get_x_fixed");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "z_fixed"), "set_z_fixed", "get_z_fixed");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "flags"), "set_flags", "get_flags");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "layer"), "set_layer", "get_layer");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cell_x"), "set_cell_x", "get_cell_x");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cell_z"), "set_cell_z", "get_cell_z");
 }
@@ -48,11 +51,19 @@ void TerrainTileEntry::set_tile_index(int value) {
 }
 
 void TerrainTileEntry::set_flags(int value) {
-	flags = clamp_int<int>(opennova::til_normalize_authored_flags(static_cast<uint8_t>(std::clamp(value, 0, 255))), 0, 255);
+	flags = clamp_int<int>(value, 0, 255);
 }
 
 int TerrainTileEntry::get_flags() const {
 	return flags;
+}
+
+void TerrainTileEntry::set_layer(int value) {
+	layer = clamp_int<int>(value, 0, 65535);
+}
+
+int TerrainTileEntry::get_layer() const {
+	return layer;
 }
 
 void TerrainTileEntry::set_cell_x(int value) {
@@ -77,11 +88,11 @@ void TerrainTileEntry::set_cell(int cell_x, int cell_z) {
 }
 
 void TerrainTileEntry::copy_from_native(const opennova::TilOverlayEntry &entry) {
-	const opennova::TilOverlayEntry normalized = opennova::til_normalize_overlay_entry(entry);
-	x_fixed = normalized.x_fixed;
-	z_fixed = normalized.z_fixed;
-	tile_index = clamp_int<int>(normalized.tile_index, 0, 255);
-	flags = clamp_int<int>(normalized.flags, 0, 255);
+	x_fixed = entry.x_fixed;
+	z_fixed = entry.z_fixed;
+	tile_index = entry.tile_index;
+	flags = entry.flags;
+	layer = entry.layer;
 }
 
 opennova::TilOverlayEntry TerrainTileEntry::to_native() const {
@@ -90,5 +101,6 @@ opennova::TilOverlayEntry TerrainTileEntry::to_native() const {
 	entry.z_fixed = z_fixed;
 	entry.tile_index = clamp_int<uint8_t>(tile_index, 0, 255);
 	entry.flags = clamp_int<uint8_t>(flags, 0, 255);
-	return opennova::til_normalize_overlay_entry(entry);
+	entry.layer = clamp_int<uint16_t>(layer, 0, 65535);
+	return entry;
 }
