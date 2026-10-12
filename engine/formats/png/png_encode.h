@@ -25,8 +25,5 @@ std::vector<uint8_t> encode_png_grey(const uint8_t *levels, uint32_t width, uint
 // a sample, each sample big-endian as the format stores it; otherwise as encode_png_rgba. Empty for an empty
 // image.
 std::vector<uint8_t> encode_png_gray16(const uint16_t *samples, uint32_t width, uint32_t height);
-// An 8-bit grey image (an 8-bit heightmap written again as it was), rows top first, as a PNG of colour type 0 at 8
-// bits a sample. Empty for an empty image.
-std::vector<uint8_t> encode_png_gray8(const uint8_t *samples, uint32_t width, uint32_t height);
 
 } // namespace opennova::png

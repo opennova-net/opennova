@@ -202,12 +202,12 @@ int test_png_encode_gray16() {
 	// And 8 bits: colour type 0 at 8 bits, read back as it was.
 	std::vector<uint8_t> grey8;
 	for (int i = 0; i < 6 * 4; ++i) grey8.push_back(uint8_t(i * 11));
-	const std::vector<uint8_t> bytes8 = encode_png_gray8(grey8.data(), 6, 4);
+	const std::vector<uint8_t> bytes8 = encode_png_grey(grey8.data(), 6, 4);
 	TEST_EXPECT(png_header_size(bytes8, width, height) && width == 6 && bytes8[24] == 8 && bytes8[25] == 0);
 	GrayImage back8;
 	TEST_EXPECT(decode_png_gray(bytes8, back8, error) && back8.max_value == 255 && back8.samples.size() == grey8.size());
 	for (size_t i = 0; i < grey8.size(); ++i) TEST_EXPECT(back8.samples[i] == grey8[i]);
-	TEST_EXPECT(encode_png_gray8(nullptr, 6, 4).empty());
+	TEST_EXPECT(encode_png_grey(nullptr, 6, 4).empty());
 	std::printf("encode: a 16-bit and an 8-bit grey image written and read back as they were\n");
 	return 0;
 }
