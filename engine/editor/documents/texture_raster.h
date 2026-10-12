@@ -27,7 +27,7 @@ namespace opennova::editor {
 //   Png   an 8-bit PNG (an import's source image): a true-colour one an Rgba8 plane, written again as an RGBA PNG;
 //         a palette one (a terrain set's surface or foliage map, its indices the classes or codes) a U8 plane of its
 //         indices and its palette, written again as a palette PNG; a grey one (a foliage map's levels) a U8 plane,
-//         written again as a grey PNG (formats/png encode_png_indexed, encode_png_grey).
+//         written again as a grey PNG (formats/png encode_png_indexed, encode_png_gray).
 // Every other form (a DDS, an MDT, a run-length or colour-mapped TGA, a 24-bit or misfit PCX, a PNG of another depth,
 // a file the game cannot load) is held whole: the texture operations still change it, no brush paints it.
 struct TextureSide final : RasterSideState {

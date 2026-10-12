@@ -11,33 +11,21 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 		Terrain &terrain) {
 	regions_ = 0;
 	tiles_ = 0;
-	bool any = false;
-	int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+	std::vector<opennova::terrain::CoordsRect> rects;
 	std::vector<int> replaced;
 	uint64_t last = taken_;
 	for (const opennova::editor::HeightsDevicePatch &patch : patches) {
 		if (patch.serial <= taken_) continue;
 		last = std::max(last, patch.serial);
 		for (const opennova::editor::HeightsDevicePatch::Region &region : patch.regions) {
+			const opennova::terrain::CoordsRect rect{region.x, region.y, region.w, region.h};
 			if (region.heights.size() != size_t(region.w) * size_t(region.h) ||
-					!data.patch_heights(opennova::terrain::CoordsRect{region.x, region.y, region.w, region.h},
-							region.heights.data(), size_t(region.w))) {
+					!data.patch_heights(rect, region.heights.data(), size_t(region.w))) {
 				taken_ = last;
 				return false;
 			}
-			// The frame's regions as one rect: the terrain shows it again once.
-			if (!any) {
-				x0 = region.x;
-				y0 = region.y;
-				x1 = region.x + region.w;
-				y1 = region.y + region.h;
-			} else {
-				x0 = std::min(x0, region.x);
-				y0 = std::min(y0, region.y);
-				x1 = std::max(x1, region.x + region.w);
-				y1 = std::max(y1, region.y + region.h);
-			}
-			any = true;
+			// Each region its own rect (a change across the atlas's wrap arrives as two): one refresh shows them all.
+			rects.push_back(rect);
 			++regions_;
 		}
 		if (!patch.tile_indices.empty()) {
@@ -50,12 +38,11 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 		}
 	}
 	taken_ = last;
-	if (!any && replaced.empty()) return true;
+	if (rects.empty() && replaced.empty()) return true;
 	std::sort(replaced.begin(), replaced.end());
 	replaced.erase(std::unique(replaced.begin(), replaced.end()), replaced.end());
-	const opennova::terrain::CoordsRect rect =
-			any ? opennova::terrain::CoordsRect{x0, y0, x1 - x0, y1 - y0} : opennova::terrain::CoordsRect{};
-	return terrain.refresh_region(rect, replaced);
+	// The foliage grows again with a landing (its tiles: the stroke's end, an undo, a redo), not every sample.
+	return terrain.refresh_region(rects, replaced, !replaced.empty());
 }
 
 } // namespace godot

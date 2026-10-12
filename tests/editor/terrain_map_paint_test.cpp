@@ -100,6 +100,7 @@ int test_strokes() {
 		TEST_EXPECT(editor_test::write_bytes(root + "/terrain/" + name, test_io::read_file(fixture(std::string("terrain/tmap/") + name))));
 	// The colour map the .trn names, 1024 square, 24-bit with the TGA 2.0 footer as the shipped ones are.
 	std::vector<uint8_t> grey(size_t(1024) * 1024 * 4, 128), colour_map;
+	for (size_t i = 3; i < grey.size(); i += 4) grey[i] = 255; // opaque: the 24-bit form holds no alpha
 	std::string why;
 	tga::TgaForm form;
 	form.bits = 24;
@@ -199,7 +200,7 @@ int test_imported_source() {
 			heights[size_t(y) * kSide + x] = uint8_t(std::max(0.0, 200.0 * (1.0 - std::hypot(x - 512.0, y - 512.0) / 400.0)));
 	std::vector<uint8_t> ramp;
 	for (int i = 0; i < 256; ++i) ramp.insert(ramp.end(), 3, uint8_t(i));
-	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_grey(heights.data(), kSide, kSide)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_gray(heights.data(), kSide, kSide)));
 	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)));
 	TEST_EXPECT(editor_test::write_bytes(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)));
 	// A detail blend map's weights (the .tset's blendmap key, S25 B4): the first layer full everywhere.

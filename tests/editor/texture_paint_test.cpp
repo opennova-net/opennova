@@ -98,7 +98,10 @@ int test_forms() {
 	footer.bits = 24;
 	footer.descriptor = 0;
 	footer.footer = true;
-	TEST_EXPECT(tga::tga_write(rgba(5, 3).data(), 5, 3, footer, tga24, why));
+	// The 24-bit form holds no alpha: its pixels opaque (tga_write refuses a weight it would lose).
+	std::vector<uint8_t> opaque = rgba(5, 3);
+	for (size_t i = 3; i < opaque.size(); i += 4) opaque[i] = 255;
+	TEST_EXPECT(tga::tga_write(opaque.data(), 5, 3, footer, tga24, why));
 	TEST_EXPECT(tga::tga_write_rgba32(rgba(5, 3).data(), 5, 3, tga32, why));
 	TEST_EXPECT(written_again("a_c.tga", tga24) && written_again("a_d1.tga", tga32));
 	const auto pcx = open("a_m.pcx", shipped), colour = open("a_c.tga", tga24), blend = open("a_d1.tga", tga32);
@@ -120,7 +123,7 @@ int test_forms() {
 	std::vector<uint8_t> small = classes.indices;
 	for (uint8_t &index : small) index = uint8_t(index % 20);
 	const std::vector<uint8_t> palette_png = png::encode_png_indexed(small.data(), 6, 4, entries.data(), 20);
-	const std::vector<uint8_t> grey_png = png::encode_png_grey(small.data(), 6, 4);
+	const std::vector<uint8_t> grey_png = png::encode_png_gray(small.data(), 6, 4);
 	const auto surface = open("art/isle_surface.png", palette_png), levels = open("art/isle_foliage.png", grey_png);
 	TEST_EXPECT(surface && surface->paintable() && surface->plane(0).format() == RasterFormat::U8 &&
 	            surface->plane(0).u8(5, 3) == small[23]);

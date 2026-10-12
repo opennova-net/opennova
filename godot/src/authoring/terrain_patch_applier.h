@@ -13,9 +13,10 @@ class TerrainData;
 // The device half of a sculpted terrain's live picture (ADR 0046 S25, the heights lane), shared by the mission's and
 // the terrain's 3D views: the heights patches their viewport made since this device last took them, applied to the
 // terrain it built (TerrainData::patch_heights over each region, TerrainData::replace_tiles for a landing's tiles,
-// then one Terrain::refresh_region over the union of the frame's regions with the replaced tiles: the terrain shown
-// as a fresh build of the patched data, never built again). In a stroke the regions draw under the old tiles (what
-// the game draws for that atlas); the landing's tiles take their place.
+// then one Terrain::refresh_region over the frame's regions, each its own rect, with the replaced tiles: the terrain
+// shown as a fresh build of the patched data, never built again). In a stroke the regions draw under the old tiles
+// (what the game draws for that atlas), the foliage over them kept back; the landing's tiles take their place and
+// the foliage over every region since grows again then (Terrain::refresh_region's foliage).
 class TerrainPatchApplier {
 public:
 	// The patches `patches` holds past the last serial this device took, applied to `terrain` over `data` (the one it

@@ -224,7 +224,7 @@ bool write_texture_state(const RasterState &state, std::vector<uint8_t> &out, st
 	case TextureSide::Form::Png:
 		out = side->png_colour == 3 ? png::encode_png_indexed(texels.data(), uint32_t(width), uint32_t(height),
 		                                                      side->palette.data(), side->png_entries)
-		      : side->png_colour == 0 ? png::encode_png_grey(texels.data(), uint32_t(width), uint32_t(height))
+		      : side->png_colour == 0 ? png::encode_png_gray(texels.data(), uint32_t(width), uint32_t(height))
 		                              : png::encode_png_rgba(texels.data(), uint32_t(width), uint32_t(height));
 		if (out.empty()) error = "The PNG writer made nothing of it.";
 		return !out.empty();
