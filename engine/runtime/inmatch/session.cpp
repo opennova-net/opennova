@@ -58,6 +58,7 @@ void Role::apply_input(const TickInput &input) {
 	// cooldown live in request_medic).
 	if ((input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
 		request_medic();
+	if ((input.player.pressed_action_bits & PRESSED_RESPAWN) != 0) request_respawn();
 	// The ToSpecial dispatches, with the deferred ones, once per outer frame
 	// on its first tick, as retail's input frame precedes the logic tick
 	// [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
@@ -92,6 +93,39 @@ bool Role::request_medic() {
 	if (!send_medic_request()) return false;
 	kernel.local.stamp_medic_request();
 	return true;
+}
+
+bool Role::request_respawn() {
+	mission::MissionKernel &kernel = *kernel_;
+	ClientRuntime *runtime = client_runtime();
+	const bool joiner = kind() == RoleKind::Joiner;
+	// The row's head gates, its flags 0x0C000C01 (a dedicated host has no
+	// player to press it; the menu pause, bit 0's third gate, holds a session
+	// that then takes no input): bit 0 drops it for a dead local player and
+	// under the round-over gate, 0x400 while the pre-round timer runs,
+	// 0x8000000 under the deploy overlay. None of the head's filters takes
+	// code 55 (the death screen's, the stub, the cine's, the troop class's
+	// default arm).
+	// [orig: Input_HandleActionBinding -- the dead bit @0x49AD76..0x49AD7E,
+	//  bit 0 @0x49AD95..0x49ADA0; 0x400 @0x49ADB3..0x49ADC2 (g_ClientPreRoundTimer);
+	//  0x8000000 @0x49ADC8..0x49ADD7 (g_DeployScreenActive); the pause
+	//  @0x49ADDD..0x49ADE8; g_SpawnSuccessGate @0x49ADEE..0x49AE16; DeathScreen_FilterInputAction
+	//  @0x49AE4C, sub_4A3E50 @0x49AE68, Cine_FilterInputAction @0x49AE84, the
+	//  def+0x170 callback @0x49AEB6 (Input_HandleActionBinding_0's default
+	//  @0x4E13F9)]
+	if (!kernel.world.cached.local_player.valid()) return false;
+	const bool local_dead = joiner ? runtime != nullptr && runtime->local_player_dead()
+			: kernel.local.local_player_dead();
+	const bool round_over = joiner ? runtime != nullptr && runtime->state().spawn_success_gate
+			: kernel.world.match.outcome().ended;
+	if (local_dead || round_over || kernel.world.preround_delay_seconds != 0 ||
+			(runtime != nullptr && runtime->state().deploy_overlay_active))
+		return false;
+	// The input reset, then in a session on a peer the bodiless 0x41
+	// [orig: case 55 -- Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
+	//  is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A].
+	kernel.local.reset_key_input();
+	return kernel.world.rules.mp_session && send_respawn_request();
 }
 
 world::LocalViewSessionInputs Role::view_session_inputs_for(

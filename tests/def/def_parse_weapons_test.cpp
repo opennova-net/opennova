@@ -1175,7 +1175,7 @@ int main(int argc, char **argv) {
     /* A block's name is the line's second token, quotes optional: the shipped
        AT4 and RPG entries open their scopeup rows with a bare `ACTION SCOPEUP`
        [orig: WeaponDefs_ParseLineCallback @0x543680 over the tokens
-       Terrain_TokenizeConfigLine @0x53CB60 cuts]. */
+       Config_TokenizeLine @0x53CB60 cuts]. */
     {
         static const char bare[] =
             "weapon WPN_BARE // a comment\r\n"

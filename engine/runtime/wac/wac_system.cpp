@@ -16,6 +16,12 @@ void WacSystem::on_load(opennova::world::World &world) {
     world.script.forced_animation = 0; // [orig: WacScript_InitAndLoad @0x4F9659]
 }
 
+void WacSystem::set_program(Program program, opennova::world::World &world) {
+    set_program(std::move(program));
+    world.script.vars.reset_wac_load_state();
+    prepare_tick(world);
+}
+
 void WacSystem::prepare_tick(opennova::world::World &world) {
     // This is a projection, not another clock: only vm_.time() is serialized.
     // [orig: mutable g_WacVarTicks @0xC6EAD8; shared gate @0x51D8BD]

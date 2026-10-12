@@ -624,7 +624,7 @@ struct InfantryState {
         // 0x2000, and retail's respawn writers never touch that bit -- the
         // reset zeroes the velocities and clears bit 1 only [orig:
         // Entity_ResetToSpawnState @0x4b9668..0x4b9674 / @0x4b97b0, the
-        // +0x334 copy @0x4b9662 is `flags & ~2`; Server_ProcessPlayerDeath
+        // +0x334 copy @0x4b9662 is `flags & ~2`; Server_DeployPlayer
         // @0x51787a; the deploy leg @0x519fdb; Server_PositionPlayerForSpawn
         // ORs 0x20/0x200 only @0x50d42a/@0x50d44d]. A body that died in the
         // air deploys with the bit and lands on the first grounded tick

@@ -10,14 +10,10 @@ namespace opennova::inmatch {
 
 namespace {
 
-// Pool_GetUsedCount: the pool's live high-water slot + 1.
+// Pool_GetUsedCount: the pool's used count, its allocation high-water mark,
+// freed rows below it included (D-NET-417). [orig: Pool_GetUsedCount @0x441F80]
 uint32_t pool_used_count(const world::World &world, uint32_t pool) {
-	uint32_t used = 0;
-	world.registry.for_each([&](const world::Entity &e) {
-		if (e.handle.pool() == pool && e.handle.slot() + 1u > used)
-			used = e.handle.slot() + 1u;
-	});
-	return used;
+	return static_cast<uint32_t>(world.registry.pool_used(static_cast<int>(pool)));
 }
 
 // The 16-byte iterator the two walkers share: the current handle, its pool,

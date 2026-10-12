@@ -24,6 +24,7 @@
 #include <deque>
 #include <utility>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -303,6 +304,106 @@ bool run_discovered_row_join_skips_the_hello() {
 	              "a bare dial (no row record) still sends the 0x41 first");
 }
 
+// A flat-TLV body with every field named `unwanted` left out, the rest as written.
+std::vector<uint8_t> without_field(const std::vector<uint8_t> &body, std::string_view unwanted) {
+	std::vector<uint8_t> out;
+	std::size_t pos = 0;
+	while (pos < body.size()) {
+		FlatTlvField field;
+		const std::size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) break;
+		if (field.name != unwanted)
+			out.insert(out.end(), body.begin() + static_cast<std::ptrdiff_t>(pos),
+			           body.begin() + static_cast<std::ptrdiff_t>(next));
+		pos = next;
+	}
+	return out;
+}
+
+// D-NET-452: the joiner reads any 0x81 with its CI; one whose PN, PG or PV1 is not the JO
+// protocol's is dropped, and one without HK joins with a 0x42 that carries none. The LAN
+// browser lists such a reply with host key 0.
+// [orig: Nwu_HandleServerHello @0x626D20 - HK zeroed @0x626E97, the CI lookup @0x627533, PN
+//  @0x62758B, PG @0x627591..0x627624, PV1 @0x627643; CNapiNPConnection_SendClientJoin
+//  @0x61FE20 - the HK gate @0x6200F2]
+bool run_server_hello_needs_no_hk() {
+	uint64_t now_ms = 0;
+	inmatch::JoinerConnection joiner("NoKeyJoiner", [&now_ms] { return now_ms; });
+	const std::vector<uint8_t> first = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello hello;
+	if (!expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_HELLO &&
+				parse_client_hello(body.data(), body.size(), hello),
+			"the joiner's 0x41 parses"))
+		return false;
+	ServerHello reply = build_server_hello(hello, 0x7F000001u, 32768);
+	reply.sn = "NoKeyHost";
+	ServerHello foreign = reply;
+	foreign.pn = "NOVAWORLDUDP";
+	const std::vector<uint8_t> foreign_datagram =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
+	const inmatch::JoinerConnection::PollResult dropped =
+			joiner.handle_datagram(foreign_datagram.data(), foreign_datagram.size());
+	if (!expect(dropped.outbound.empty() && joiner.phase() == inmatch::JoinerConnection::Phase::Hello &&
+				joiner.last_error().empty(),
+			"a 0x81 with the joiner's CI but a foreign PN is dropped"))
+		return false;
+	const std::vector<uint8_t> hk_less = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, without_field(server_hello_to_bytes(reply), "HK"));
+	const inmatch::JoinerConnection::PollResult joined =
+			joiner.handle_datagram(hk_less.data(), hk_less.size());
+	ClientAuth auth;
+	FlatTlvField field;
+	bool carries_hk = false;
+	if (!expect(joined.outbound.size() == 1 &&
+				joiner.phase() == inmatch::JoinerConnection::Phase::Auth &&
+				nw_decode_inbound(joined.outbound[0].data(), joined.outbound[0].size(), opcode,
+						body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth),
+			"an HK-less 0x81 with the joiner's CI and the JO identity joins"))
+		return false;
+	for (std::size_t pos = 0; pos < body.size();) {
+		const std::size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) break;
+		if (field.name == "HK") carries_hk = true;
+		pos = next;
+	}
+	if (!expect(!carries_hk && auth.hk == 0, "the 0x42 from an HK-less 0x81 carries no HK"))
+		return false;
+	LanDiscoveryServer row;
+	return expect(parse_lan_discovery_reply(hk_less.data(), hk_less.size(), hello.ci, row) &&
+				row.host_key == 0 && row.server_name == "NoKeyHost",
+			"the LAN browser lists an HK-less 0x81 with host key 0");
+}
+
+// D-NET-438: the joiner's CK is a session key, drawn until nonzero: a draw of {0, 0, 9} joins
+// with CK 9 (a zero was once mapped to 1).
+// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey @0x61EA70,
+//  jz @0x61EAC3]
+bool run_zero_client_key_is_drawn_again() {
+	uint64_t now_ms = 0;
+	inmatch::JoinerConnection joiner("ZeroKeyJoiner", [&now_ms] { return now_ms; });
+	const uint32_t draws[] = {0u, 0u, 9u};
+	std::size_t next = 0;
+	joiner.set_session_key_draw([&]() { return draws[next++]; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E115u;
+	joiner.set_discovered_session(session);
+	const std::vector<uint8_t> first = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	return expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth) && next == 3 &&
+				joiner.client_key() == 9u && auth.ck == 9u,
+			"a zero CK draw is drawn again: the 0x42 carries the third draw's 9");
+}
+
 // D-NET-437: the joiner reads any 0x82 from its host, no field required. One whose CI or CK is
 // not its connection's is dropped and the connection stays in the connect state; then CR's truth
 // splits it: any nonzero CR accepts (an SCRK-less one too), and zero rejects with failure code 1
@@ -359,6 +460,30 @@ bool run_server_auth_acceptance_follows_retail() {
 
 	inmatch::JoinerConnection accepted("AuthAccepted", [&now_ms] { return now_ms; });
 	if (!expect(connect(accepted, auth), "the second joiner is connecting with its 0x42"))
+		return false;
+	// An accept whose CU walk overruns its bounds (a 65th CU, or one of 2048 bytes) is dropped
+	// before the CI / CK match: the socket pass returns without queuing it.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629B97..0x629BA6, @0x629F0B..0x629F12]
+	const auto overrun_accept = [&](size_t cus, size_t cu_bytes) {
+		std::vector<uint8_t> body;
+		for (const auto &field : std::vector<std::pair<const char *, uint32_t>>{
+					 {"CI", auth.ci}, {"CK", auth.ck}, {"CR", 1u}, {"SK", 0x12345678u}}) {
+			uint8_t le[4];
+			io::write_u32_le(le, field.second);
+			append_flat_tlv(body, field.first, le, 4);
+		}
+		const std::vector<uint8_t> cu(cu_bytes, 0x01);
+		for (size_t i = 0; i < cus; ++i)
+			append_flat_tlv(body, "CU", cu.data(), static_cast<uint16_t>(cu.size()));
+		return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, std::move(body));
+	};
+	const std::vector<uint8_t> sixty_five = overrun_accept(65, 1);
+	const std::vector<uint8_t> long_cu = overrun_accept(1, 2048);
+	accepted.handle_datagram(sixty_five.data(), sixty_five.size());
+	accepted.handle_datagram(long_cu.data(), long_cu.size());
+	if (!expect(accepted.phase() == inmatch::JoinerConnection::Phase::Auth &&
+				accepted.last_error().empty() && !accepted.last_join_reject().set,
+			"an accept with a 65th CU or a 2048-byte CU is dropped; the join stays connecting"))
 		return false;
 	const std::vector<uint8_t> accept = server_auth(
 			{{"CI", auth.ci}, {"CK", auth.ck}, {"CR", 2u}, {"SK", 0x12345678u}});
@@ -822,6 +947,8 @@ int main() {
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
 	if (!run_discovered_row_join_skips_the_hello()) return 1;
+	if (!run_zero_client_key_is_drawn_again()) return 1;
+	if (!run_server_hello_needs_no_hk()) return 1;
 	if (!run_server_auth_acceptance_follows_retail()) return 1;
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;
 	if (!run_client_active_probe_recovers_join()) return 1;

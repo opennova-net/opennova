@@ -3,15 +3,35 @@
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>
 #include <net/novaworld/gate_probe.h>
-#include <net/novaworld/lobby_vars.h> // parse_host_port
-#include <net/npwire/nw_session_framing.h> // make_random_session_u32
+#include <net/novaworld/lobby_vars.h> // parse_host_and_port
+#include <net/npwire/nw_session_framing.h> // make_random_session_u32 / make_session_key
 #include <net/npwire/session_keys.h>      // the server-direction opcodes
+
+#include <base/io/strutil.h>
 
 #include <cstdlib>
 
 namespace opennova {
 
 namespace {
+
+// The port a probe target takes when its address string gives none (or a zero one).
+// [orig: CNapiGameSession_SendToAddress @0x4D0970 - mov eax, 0FACEh @0x4D09C3]
+constexpr uint32_t kNwuTargetDefaultPort = 0xFACEu; // 64206
+
+// Byte 0 of an enveloped NWU datagram (the opcode, in the clear); false when the envelope
+// rejects it. [orig: NapiNPManager_PumpReceive @0x623010 decodes into recv_buffer before
+//  HandlePacket]
+bool stripped_opcode(const uint8_t *data, std::size_t len, uint8_t &opcode) {
+	if (data == nullptr || len == 0) return false;
+	std::vector<uint8_t> stripped(len);
+	std::size_t out_size = 0;
+	if (napi_envelope_decode(data, len, stripped.data(), stripped.size(), &out_size) != 0 ||
+	    out_size == 0)
+		return false;
+	opcode = stripped[0];
+	return true;
+}
 
 // "a.b.c.d" into a PeerAddr's IP (octet 0 in the low byte); false for anything else.
 bool parse_dotted_quad(const std::string &host, PeerAddr &out) {
@@ -55,18 +75,51 @@ bool NwuLobbySession::resolve(const std::string &host, uint16_t port, PeerAddr &
 	return true;
 }
 
+// "255.255.255.255" reads as itself (inet_addr answers it INADDR_NONE), anything else through the
+// environment's inet_addr and name lookup, and 0 when neither reads it.
+// [orig: Napi_ResolveAddress @0x62DF90 - Napi_StrCaseEqual(host, "255.255.255.255")
+//  @0x62DF9B..0x62DFA7, inet_addr @0x62DFAD, gethostbyname with DNS on @0x62DFCA, else 0
+//  @0x62DFD8]
+uint32_t NwuLobbySession::resolve_address(const std::string &host) const {
+	if (strutil::iequals(host, "255.255.255.255")) return 0xFFFFFFFFu;
+	PeerAddr addr;
+	return resolve(host, 0, addr) ? addr.ip : 0u;
+}
+
+// One address string into a probe target: split and resolved with DNS on, refused when the
+// address is 0, a zero port taken as 64206, and kept once per address and port in the order made.
+// [orig: CNapiGameSession_SendToAddress @0x4D0970 - Network_ParseHostAndPort @0x62E200 (the call
+//  @0x4D09A0, every caller pushing DNS on: @0x4D4A62, @0x4D4A88, @0x4D4AB0), the zero-address
+//  fail @0x4D09B0..0x4D09B2, port 0 @0x4D09C1..0x4D09C8; NapiNPEnumerator_CreateTarget @0x624C30
+//  (the call @0x4D09CF): an existing pair returned @0x624C49..0x624C53, else appended to the
+//  list's tail @0x624CFF..0x624D30]
+bool NwuLobbySession::add_target(const std::string &address) {
+	std::string host;
+	uint32_t port = 0;
+	if (!parse_host_and_port(address, host, port)) return false;
+	const uint32_t ip = resolve_address(host);
+	if (ip == 0) return false;
+	if (port == 0) port = kNwuTargetDefaultPort;
+	for (const Target &target : targets_) {
+		if (target.ip == ip && target.port == port) return true;
+	}
+	targets_.push_back(Target{ip, port});
+	return true;
+}
+
 void NwuLobbySession::open(IDatagramSocket &gate, IDatagramSocket &session) {
 	gate_socket_ = &gate;
 	session_socket_ = &session;
 	client_index_ = random_u32();
-	client_key_ = random_u32();
+	// The CK is a session key, drawn until nonzero.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey]
+	client_key_ = make_session_key([this]() { return random_u32(); });
 	session_.reset();
 	gate_resolved_ = false;
 	probe_sent_ = false;
 	gate_answered_ = false;
 	gate_probe_datagram_.clear();
-	nw_udp_host_.clear();
-	nw_udp_port_ = 0;
+	targets_.clear();
 	nw_peer_ = PeerAddr{};
 	gate_response_ = GateResponse{};
 	clock_ms_ = 0;
@@ -115,16 +168,15 @@ void NwuLobbySession::close() {
 }
 
 bool NwuLobbySession::claims(const PeerAddr &from, const uint8_t *data, std::size_t len) const {
-	if (!session_ || data == nullptr || len == 0 || !(from == nw_peer_)) return false;
 	// The manager hands the handlers the envelope-stripped packet; byte 0 is the opcode.
-	// [orig: NapiNPManager_PumpReceive @0x623010 decodes into recv_buffer before HandlePacket]
-	std::vector<uint8_t> stripped(len);
-	std::size_t out_size = 0;
-	if (napi_envelope_decode(data, len, stripped.data(), stripped.size(), &out_size) != 0 ||
-	    out_size == 0)
-		return false;
-	const uint8_t opcode = stripped[0];
-	return opcode >= SESSION_OPCODE_SERVER_HELLO && opcode <= kNwuServerOpcodeLast;
+	uint8_t opcode = 0;
+	if (!session_ || !stripped_opcode(data, len, opcode)) return false;
+	if (opcode < SESSION_OPCODE_SERVER_HELLO || opcode > kNwuServerOpcodeLast) return false;
+	// A 0x81 finds the connection by its CI from any sender (one probe target among several,
+	// say), and one the connection does not take goes on to the next protocol.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the misses return 0 @0x626DCB]
+	if (opcode == SESSION_OPCODE_SERVER_HELLO) return session_->takes_server_hello(data, len);
+	return from == nw_peer_;
 }
 
 NwuLobbySession::MatchFacts NwuLobbySession::match_facts() const {
@@ -224,15 +276,23 @@ void NwuLobbySession::poll_gate() {
 		gate_response_ = parsed;
 		if (hooks_.on_gate_response) hooks_.on_gate_response(parsed);
 
-		std::string udp_host;
-		uint16_t udp_port = 0;
-		if (!parse_host_port(parsed.udp_novaworld, udp_host, udp_port) ||
-		    !resolve(udp_host, udp_port, nw_peer_)) {
-			if (hooks_.on_fatal) hooks_.on_fatal("UDPNOVAWORLD malformed");
+		// Retail goes on without an NWU session when a response naming no UDPNOVAWORLD holds
+		// POSTIPADDRESS and POSTIPPORT, and fails the gate without them (D-NET-540, OPEN).
+		if (parsed.udp_novaworld.empty()) {
+			if (hooks_.on_fatal) hooks_.on_fatal("no UDPNOVAWORLD");
 			return;
 		}
-		nw_udp_host_ = udp_host;
-		nw_udp_port_ = udp_port;
+		// The old targets go, then each gate entry is made a probe target; one that names no
+		// address makes none and is passed over, so with none the connect probes nothing until
+		// its deadline. Retail's first two sources, the JUNCTIONCODE form field and the
+		// /UDPNOVAWORLD command line, have none here (D-NET-542, OPEN).
+		// [orig: CNapiGameSession_ConnectToNovaWorld @0x4D4640 - the old targets
+		//  freed @0x4D4A22 (NapiNPEnumerator_DestroyAllTimers @0x6220C0 over the list
+		//  CreateTarget fills); the gate variables @0x4D4AA2..0x4D4ACE (CMissionInfo_GetVariable
+		//  @0x4D4AB8, CNapiGameSession_SendToAddress @0x4D4AC0, its result unread), then
+		//  CNapiGameSession_InitPlayerConnection @0x4D4B16]
+		targets_.clear();
+		for (const std::string &address : parsed.udp_novaworld) add_target(address);
 		begin_session();
 		return;
 	}
@@ -260,7 +320,7 @@ void NwuLobbySession::begin_session() {
 	cfg.glsvss_agrms_ms = gate_response_.glsvss_agrms;
 	// The "Cookie" var-list every Cookie-bearing statement re-serializes.
 	cfg.cookie_vars = hooks_.cookie_vars;
-	// A reconnect's re-join mints a fresh client key (the client index stays).
+	// A reconnect's re-join mints a fresh client key (the client index stays) from this draw.
 	cfg.next_client_key = [this]() { return random_u32(); };
 
 	session_ = std::make_unique<ClientSession>(cfg);
@@ -274,10 +334,32 @@ void NwuLobbySession::begin_session() {
 	send(session_->start());
 }
 
+// The announce (the 0x41) is the enumerator's and goes to every target in list order, one
+// datagram each, at the target's port narrowed to 16 bits; everything else is the connection's.
+// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0 - the target walk @0x629183..0x6291B4
+//  (the NWU enumerator's +0x26 set @0x4D4261), NapiNPSession_SendAnnouncePacket @0x61FA00 per
+//  target (the call @0x62919D) -> CNapiNPManager_SendTo @0x61FDE4; NapiSocket_SendTo's htons
+//  @0x62D040]
 void NwuLobbySession::send(const std::vector<uint8_t> &dg) {
 	if (session_socket_ == nullptr || dg.empty()) return;
-	session_socket_->send_to(nw_peer_, dg.data(), dg.size());
-	if (hooks_.on_sent) hooks_.on_sent(dg);
+	uint8_t opcode = 0;
+	if (stripped_opcode(dg.data(), dg.size(), opcode) && opcode == SESSION_OPCODE_CLIENT_HELLO) {
+		for (const Target &target : targets_)
+			send_one(PeerAddr{target.ip, static_cast<uint16_t>(target.port)}, dg);
+		return;
+	}
+	send_one(nw_peer_, dg);
+}
+
+// A connection with no server yet (no 0x81 taken) has address 0, which never reaches the socket:
+// retail queues such a send to the manager's loopback FIFO instead, which offers it to the local
+// protocols and tosses it when none takes it (a _connectlog line); ours drops it here.
+// [orig: CNapiNPManager_SendTo @0x61EC20 - the address test @0x61EC59, the FIFO write (+0xBC)
+//  @0x61EC9F..0x61ECC6]
+void NwuLobbySession::send_one(const PeerAddr &to, const std::vector<uint8_t> &dg) {
+	if (to.ip == 0) return;
+	session_socket_->send_to(to, dg.data(), dg.size());
+	if (hooks_.on_sent) hooks_.on_sent(to, dg);
 }
 
 void NwuLobbySession::send_to(const PeerAddr &to, const std::vector<uint8_t> &dg) {
@@ -310,7 +392,12 @@ void NwuLobbySession::poll_session() {
 		rx.from = from;
 		rx.state_before = static_cast<int>(session_->state());
 		std::vector<std::vector<uint8_t>> replies;
+		const uint32_t hellos_taken = session_->server_hellos_taken();
 		rx.ok = session_->handle_datagram(rx.bytes.data(), rx.bytes.size(), replies);
+		// A 0x81 the connection took points it at the reply's sender, where its 0x42 goes.
+		// [orig: CNapiNPConnection_InitFromSession @0x626320 - the session record's address
+		//  and port into the connection @0x6263B4 / @0x6263B7]
+		if (session_->server_hellos_taken() != hellos_taken) nw_peer_ = from;
 		rx.state_after = static_cast<int>(session_->state());
 		rx.replies = replies.size();
 		if (hooks_.on_received) hooks_.on_received(rx);

@@ -280,6 +280,25 @@ std::vector<CaptureDatagram> craft_rejected_connect_capture() {
 	return t.caps;
 }
 
+// An 0x82 whose CU walk overruns its bounds (here a 65th CU) is dropped before the CI / CK
+// match, so a matching accept with a bogus key ahead of the genuine one neither binds nor ends
+// the connect state, and the genuine accept that follows binds. Both are decoded, as every
+// 0x82 is.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629BA3..0x629BA6, the socket-pass
+//  return @0x629F0B..0x629F12]
+std::vector<CaptureDatagram> craft_overrun_server_auth_capture() {
+	TwoClientCapture t(32769, 32770, /*ck_a=*/2, /*ck_b=*/4);
+	t.client_auth(0);
+	ServerAuth overrun = t.sa[0];
+	overrun.scrk = "BOGUS_OVERRUN_SCRK_X";
+	overrun.cu.assign(65, {"N", "v"});
+	t.add(32768, t.port[0],
+			nwu_outer_encode(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(overrun)));
+	t.server_auth(0);
+	t.s2c(0, 0x0D, 0xF1, 26, 7, 5);
+	return t.caps;
+}
+
 // A session whose 0x42 is not in the capture binds from its first 0x82 alone; a
 // later SCRK-less 0x82 with the same CK is dropped, so the key stays.
 std::vector<CaptureDatagram> craft_fallback_latch_capture() {
@@ -384,6 +403,19 @@ int main() {
 			EXPECT(fallback_batch[1].payload == std::vector<uint8_t>(22, 0xE2));
 		}
 		EXPECT(streaming_equals_batch(fallback, "fallback-latch"));
+
+		const std::vector<CaptureDatagram> overrun = craft_overrun_server_auth_capture();
+		const std::vector<InGameMessage> overrun_batch = decode_capture_to_messages(overrun);
+		EXPECT(overrun_batch.size() == 1);
+		if (overrun_batch.size() == 1)
+			EXPECT(overrun_batch[0].payload == std::vector<uint8_t>(26, 0xF1));
+		const CaptureDecodeResult overrun_detail = decode_capture(overrun);
+		EXPECT(overrun_detail.datagrams.size() == 4);
+		if (overrun_detail.datagrams.size() == 4)
+			EXPECT(overrun_detail.datagrams[1].outer_decoded &&
+					overrun_detail.datagrams[1].decoded &&
+					overrun_detail.datagrams[2].decoded);
+		EXPECT(streaming_equals_batch(overrun, "overrun-server-auth"));
 	}
 
 	// The detailed capture seam reports every decrypted 0x43/0x83 datagram,
@@ -486,6 +518,15 @@ int main() {
 
 		const CaptureDecodeResult auth = decoder.push_detailed(crafted[1]);
 		EXPECT(auth.datagrams.size() == 1 && auth.datagrams[0].decoded);
+		// D-NET-452: the client reads an 0x81 with no field required, so one carrying
+		// its CI alone, no HK, decodes. [orig: Nwu_HandleServerHello @0x626D20 - HK zeroed
+		//  @0x626E97]
+		const std::vector<uint8_t> ci_only = {'C', 'I', 0x00, 0x04, 0x00, 0x07, 0x00, 0x00, 0x00};
+		const CaptureDecodeResult hk_less = decoder.push_detailed(
+				{54, 32768, 32769, nwu_outer_encode(SESSION_OPCODE_SERVER_HELLO, ci_only)});
+		EXPECT(hk_less.datagrams.size() == 1 && hk_less.datagrams[0].outer_decoded &&
+		       hk_less.datagrams[0].opcode == SESSION_OPCODE_SERVER_HELLO &&
+		       hk_less.datagrams[0].decoded);
 		const CaptureDecodeResult invalid_protocol = decoder.push_detailed(
 				{53, 32769, 32768,
 				 nwu_outer_encode(SESSION_OPCODE_PROTOCOL_MESSAGE, {0x01, 0x02})});

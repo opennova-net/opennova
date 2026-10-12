@@ -192,7 +192,7 @@ int powerup_table() {
 // @ 0x4A06A8 -> 0x4A1CA6], and an addeweap's tokens past the sixth are never read [orig:
 // @ 0x4A1B42..0x4A1C9F]: reported as ignored, never blocking, absent from the output. A particle
 // slot with its effect alone stores no userpoint, the tokenizer having reset the token [orig:
-// @ 0x4A13BF..0x4A13FC; Terrain_TokenizeConfigLine @ 0x53CB71..0x53CB81]: no finding, written back
+// @ 0x4A13BF..0x4A13FC; Config_TokenizeLine @ 0x53CB71..0x53CB81]: no finding, written back
 // as the one token; and a later such line clears the userpoint an earlier one set, as the game's
 // copy does.
 int expansion_catalog_lines() {
@@ -1321,7 +1321,7 @@ int main(int argc, char **argv) {
 	}
 	// weapon.def reads its lines through the retail tokenizer, where a quoted run is one
 	// token (spaces, commas and a ';' included) and a space, comma or tab ends an unquoted
-	// one [orig: Terrain_TokenizeConfigLine @0x53CB60, delimiters @0x53CC33..0x53CC4C,
+	// one [orig: Config_TokenizeLine @0x53CB60, delimiters @0x53CC33..0x53CC4C,
 	// ';' @0x53CC2A..0x53CC31, quote @0x53CC4E..0x53CC70]: such a text is written quoted,
 	// on a weapon's, an action's and a sight's lines alike, and reads back whole.
 	{

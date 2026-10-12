@@ -183,7 +183,7 @@ bool local_player_mount_slot_select(World &world, const LocalPlayerWeapon &w,
 }
 
 void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
-                                          const MountSlotSelectRequest &req, PlayerViewState &v) {
+                                          const MountSlotSelectRequest &req) {
     Entity *player = world.registry.get(world.cached.local_player);
     Entity *mount = world.registry.get(req.mount);
     Entity *parent = req.use_parent_slot ? world.registry.get(req.parent) : nullptr;
@@ -192,7 +192,7 @@ void local_player_apply_mount_slot_select(World &world, LocalPlayerWeapon &w,
     mount->primary_weapon_slot.redirect_to_parent_slot = req.use_parent_slot;
     player->equipped_adm_index =
         req.use_parent_slot ? parent->primary_weapon_slot_adm : mount->primary_weapon_slot_adm;
-    sync_local_usegun_weapon_transition(world, w, v);
+    sync_local_usegun_weapon_transition(world, w);
 }
 
 int32_t local_player_scope_zoom(const LocalPlayerWeapon &w, WeaponSlotState &slot) {

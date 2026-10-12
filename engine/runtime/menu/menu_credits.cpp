@@ -86,12 +86,16 @@ bool marquee_load_credits(const uint8_t *data, size_t size, MarqueeCredits &io,
 	if (ConfigSection *env = find_section(sections, "ENV")) {
 		// A missing key reads 0 (the accessor writes 0 first).
 		read_value(*env, "SCROLL_RATE", 1, nullptr, &io.scroll_rate, nullptr);
+		// CENTER_X and VERTICAL_SPACE go through the global reader's string read, each after the section's lookup,
+		// which takes a parsed file of either form to its binary entry read: an entry's first value through its
+		// value pointer, whatever its count [orig: ConfigFile_ReadFromSectionGlobal @ 0x75f540, the calls
+		// @ 0x65c67e / @ 0x65c696 -> ConfigFile_ReadString @ 0x75f2b0 -> ConfigFile_ReadBinaryEntry @ 0x75f060].
 		find_section(sections, "ENV");
 		int32_t value = 0;
-		read_value(*env, "CENTER_X", 1, nullptr, nullptr, &value);
+		configfile::read_binary_entry(*env, "CENTER_X", &value);
 		io.center_x = value;
 		find_section(sections, "ENV");
-		read_value(*env, "VERTICAL_SPACE", 1, nullptr, nullptr, &value);
+		configfile::read_binary_entry(*env, "VERTICAL_SPACE", &value);
 		io.vertical_space = value;
 	}
 	ConfigSection *text = find_section(sections, "TEXT");

@@ -40,6 +40,19 @@ public:
     LocalPlayerLoadout loadout;
     WeaponInventory inventory;
     bool inventory_valid = false;
+    // Whether the local player holds an EquippedSlot (entity+0x118): the
+    // personal slot its selects store, the spawn's at the boot's
+    // Player_InitPlayer leg ahead of the mission start's WAC pass, or a
+    // carrier slot it borrowed, which a seat-2/3 detach keeps until the
+    // queued switch back commits. [orig: Player_SelectWeaponSlot @0x4DD704 /
+    //  @0x4DD7D2 (Player_InitPlayer's call @0x4E1995); the borrow
+    //  Entity_AttachToVehicleSlot @0x494875 / Entity_AttachToUseGunSlot
+    //  @0x546C4E; the switch commits WeaponAction_SwitchFrom @0x543475 /
+    //  WeaponAction_SwitchRank @0x543539; the detach's queued restore
+    //  Entity_DetachFromVehicle @0x43565F]
+    bool equipped_slot_held() const {
+        return (inventory_valid && inventory.equipped_combo >= 0) || weapon.usegun_slot_active;
+    }
     PlayerViewState view;
     // The radar contact table, edge timers, sector rings and missile list the
     // damage/whiz/missile legs fill and the spinmap's bit-10 legs draw
@@ -61,16 +74,18 @@ public:
     LocalWeaponReloadWire last_reload;
     // The Attack & Defend side word the TEAMID line reads — 1 defending, 2
     // attacking, 0 outside game type 0x10002 or with no target — latched once
-    // per mission start [orig: dword_B78FE8, written only by sub_524110,
+    // per mission start [orig: g_AttackDefendRole, written only by Game_LatchAttackDefendRole,
     // called once from Game_StartMission @0x5260C1].
     uint32_t attack_defend_role = 0;
-    // The latch [orig: sub_524110 @0x524110]: the first def-bearing entity
+    // The latch [orig: Game_LatchAttackDefendRole @0x524110]: the first def-bearing entity
     // whose items.def attrib carries the TARGET bit 0x8000 — pool 2 first,
     // then pool 1 — against the local player's team: the same team defends
     // (1), any other attacks (2) [orig: `test [eax+54h], 8000h` @0x524160 /
     // @0x524190; `cmp al, [edx+162h]; setnz; add ecx, 1` @0x5241A3..0x5241AC].
     // Retail dereferences g_LocalPlayerEntity unguarded; with no local player
-    // yet (a joiner's pre-spawn start) the word stays 0.
+    // yet (a joiner's pre-spawn start) the word stays 0, and the joiner
+    // latches on its spawn frame, after that frame's team mirror
+    // (JoinerRole::pump).
     void latch_attack_defend_role(uint32_t game_type);
 
     bool has_local_player() const;
@@ -146,7 +161,7 @@ public:
     // Mouse pixels onto the look angles (the center-lock accumulator).
     void look(float dx_px, float dy_px);
     // The same pixels onto the chase orbit instead, as the death screen's
-    // chase sub-mode takes them [orig: sub_52AD50 @0x52ae4f..0x52ae99].
+    // chase sub-mode takes them [orig: DeathScreen_FilterInputAction @0x52ae4f..0x52ae99].
     void look_chase_orbit(float dx_px, float dy_px);
     // The sub-mode cycle's wrap back to the free sub-mode: one camera compose,
     // then the local entity takes its view pose — the position less the
@@ -243,6 +258,17 @@ public:
     // [orig: Input_ProcessFrame @0x49d541; Client_ProcessNetworkFrame
     //  @0x42c3dd gate -> Player_PackInputStateToEntity @0x42c3e9]
     void apply_player_input_pre_tick(bool pack_input);
+    // The Respawn key's input reset: with the local player and its def, the
+    // input-flag word clears, the pack runs over the empty word (MoveOrder's
+    // movement bits clear, the word is saved and cleared) and a moving anim
+    // state (flags bit 0) drops to the idle 43. The key-state clear and the
+    // Scroll Lock release it runs first are the embedder's devices, not
+    // modelled, so a key held through the press folds back in at the next
+    // pack; retail's Escape key runs the same reset, ours's does not
+    // (D-NET-560).
+    // [orig: Player_ResetLocalInput @0x4B2B80, called by Input_HandleActionBinding case 55
+    //  @0x49B20B and case 18 @0x49B234]
+    void reset_key_input();
     // The pack's stamp of the body's view and weapon facts, its last step: the weapon switch stamp, the
     // scope raised (settled), the binoculars, the weapon's run anim and forced crouch, the kit weight, the
     // aimed shot (local_player_can_fire: the crosshair gate and the spread row read it) and the Flags word's
@@ -330,6 +356,10 @@ private:
     // The pack's analog legs onto the local player's entity+0x130..+0x133.
     // [orig: Player_PackInputStateToEntity @0x4df793..0x4df8f8]
     void pack_analog_axes(Entity &entity, bool moving);
+    // The pack itself: the input-flag word onto MoveOrder, its movement legs
+    // and analog axes, then the word saved and cleared
+    // [orig: Player_PackInputStateToEntity @0x4df450].
+    void pack_input_word();
 };
 
 } // namespace opennova::world

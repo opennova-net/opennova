@@ -251,7 +251,7 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
     }
 
     // The per-class table, classes 11..count-1 [orig: @0x442A48..0x442A8E --
-    //  -1 fills, 0 skips, else adds; g_WeaponClassCount @0x830B8C]
+    //  -1 fills, 0 skips, else adds; g_AmmoClassCount @0x830B8C]
     const int32_t class_count = static_cast<int32_t>(table.ammo_class_names.size());
     for (int32_t cls = kFirstGrantedClass; cls < class_count && cls < 128; ++cls) {
         const int32_t row = def.ammo[static_cast<size_t>(cls)];
@@ -394,7 +394,7 @@ void powerup_bind_entities(World &world, const def::DefItemsFile &items) {
                         static_cast<size_t>(e->item_type_index) < items.count
                 ? items.entries[e->item_type_index].powerup_def
                 : "";
-        // [orig: sub_442D00 @0x442D00 -- PowerUpDef_FindByName(itemDef+0x890)
+        // [orig: PowerupEntity_InitFromDef @0x442D00 -- PowerUpDef_FindByName(itemDef+0x890)
         //  @0x442D10; the miss destroys the row @0x442E26]
         const int32_t index = world.tables.powerups.index_of(name);
         if (index < 0) {

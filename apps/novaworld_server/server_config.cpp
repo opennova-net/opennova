@@ -78,6 +78,7 @@ ServerConfig ServerConfig::from_env() {
 			pos = end + 1;
 		}
 	}
+	c.api_proxy_only = getenv_bool("ONNET_API_PROXY_ONLY", c.api_proxy_only);
 	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
 	c.require_host_key = getenv_bool("ONNET_REQUIRE_HOST_KEY", c.require_host_key);
 

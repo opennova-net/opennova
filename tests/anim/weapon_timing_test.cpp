@@ -273,7 +273,7 @@ int main(int argc, char **argv) {
 	// `action reload` in lower case and carries no pos at all. WPN_OTHER's
 	// RELOAD block writes its key with a comma and closes on `END // x`: the
 	// retail tokenizer cuts both, so the parser binds the value and closes the
-	// block [orig: Terrain_TokenizeConfigLine @ 0x53CB60; the whole-token
+	// block [orig: Config_TokenizeLine @ 0x53CB60; the whole-token
 	// stricmp on "end" in ActionDef_ParseScriptLine @ 0x40251B].
 	const std::string def =
 		"// merge fixture\r\n"

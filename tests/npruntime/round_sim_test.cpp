@@ -2161,7 +2161,7 @@ int main() {
 	// --- 5. The 0x0E deploy of a RESPAWN-PENDING joiner emits the DEPLOY-RELEASE bundle
 	// (0x5A + 0x61 + optional 0x1E) and clears the pending/hidden pair — the client's 0x5A
 	// apply resets its dword_81474C wait-gate (set by the pick) and resumes the C2S 0x0C
-	// uplink [orig: Server_ProcessPlayerDeath deploy tail: Server_SendWeaponSlotListToPlayer
+	// uplink [orig: Server_DeployPlayer deploy tail: Server_SendWeaponSlotListToPlayer
 	// @0x502550 + Server_SendRandomSeedToPlayer @0x5101a0; client un-latch §5.30
 	// @0x4290E0; golden deploy frame 240018 = 0x5A + 0x61 + 0x1E one datagram; the v32
 	// rubber-band]. (D-NET-156 tail) ---
@@ -2179,7 +2179,7 @@ int main() {
 		// Spawn pick bypasses it, and its release (handle 0xFFFF) leaves the
 		// hold running (D-NET-430).
 		// [orig: Server_ProcessClientRequestRespawn @0x519c67/@0x519cf2;
-		//  Server_ProcessPlayerDeath @0x51786B..0x517872]
+		//  Server_DeployPlayer @0x51786B..0x517872]
 		world.registry.configure_pool(2, 8);
 		w::Entity spawn_zone;
 		spawn_zone.kind = w::EntityKind::Item;
@@ -2250,6 +2250,29 @@ int main() {
 			if (!expect(m.tag != 0x5A && m.tag != 0x61,
 			            "alive deployed 0x0E draws no release bundle"))
 				return 1;
+		// Out of a session the same alive, unheld request deploys at once, the
+		// +360 delay untested and left as it stood (D-NET-460); the deploy sends
+		// its 0x61 and, out of a session, no 0x5A.
+		// [orig: Server_ProcessClientRequestRespawn @0x519CD0..0x519CE3;
+		//  Server_DeployPlayer -- is_in_session @0x5178E9 / @0x5178EF ahead
+		//  of the 0x5A @0x5178F2, the Server_SendRandomSeedToPlayer call @0x51796D]
+		world.rules.mp_session = false;
+		conn.link.respawn_delay_seconds = 5;
+		je = world.registry.get(jb);
+		je->position = {40.0f, 40.0f, 0.0f};
+		const std::vector<ProtocolMessage> out_of_session = inmatch::dispatch_session_replies(
+				inmatch::GameConfig{}, conn, msgs, 102, roster, &world);
+		world.rules.mp_session = true;
+		bool seeded = false, loadout = false;
+		for (const ProtocolMessage &m : out_of_session) {
+			seeded = seeded || m.tag == 0x61;
+			loadout = loadout || m.tag == 0x5A;
+		}
+		je = world.registry.get(jb);
+		if (!expect(seeded && !loadout && je->position.x != 40.0f &&
+		                    conn.link.respawn_delay_seconds == 5,
+		            "out of a session an alive, unheld 0x0E deploys at once over +360, no 0x5A"))
+			return 1;
 	}
 
 	// --- 6. The tracer decision [orig: RoundData_SpawnRound @0x4ec184-0x4ec1e5]:

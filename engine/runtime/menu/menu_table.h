@@ -71,7 +71,9 @@ void table_push_sort_key(std::vector<int> &keys, int column, int column_count);
 // digit (or '-' and a digit) and 0x7FFFFFFF for any other; else the cells compare
 // by stricmp; a cell a row does not have sorts as described there]. Returns the
 // permutation (new row r is old row order[r]); a stable sort keeps rows that
-// compare equal in order (retail's Utility_QuickSortDualArray is not ported).
+// compare equal in order, where retail's sort leaves them as its quicksort's
+// swaps do [orig: CTableWnd_SortByColumn -> Utility_SortDualArray @0x640991 ->
+// Utility_QuickSortDualArray @0x651AB0] (D-MNU-40).
 std::vector<int> table_sort_order(const std::vector<MenuTableRow> &rows,
 		const std::vector<MenuTableColumn> &columns, const std::vector<int> &keys);
 

@@ -465,11 +465,21 @@ std::string host_key_hash(std::string_view key) {
 	return io::sha256_hex(io::sha256(key));
 }
 
-void record_host_key(opennova::db::Database &db, std::string_view key, int64_t user_id) {
-	if (!is_host_key(key)) return;
+bool record_host_key(opennova::db::Database &db, std::string_view key, int64_t user_id,
+		int64_t credentials_gen) {
+	if (!is_host_key(key))
+		return false;
 	opennova::db::Transaction tx(db);
-	db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES (?, ?);",
-	        {str(host_key_hash(key)), i64(user_id)});
+	// One statement: the account's status and generation it tests are the ones
+	// the key is written against (a password reset or a ban moves the
+	// generation and deletes the account's keys in one transaction, before or
+	// after this one).
+	db.exec("INSERT INTO host_keys (key_hash, user_id) "
+			"SELECT ?, id FROM players "
+			"WHERE id = ? AND credentials_gen = ? AND account_status = 'active';",
+			{ str(host_key_hash(key)), i64(user_id), i64(credentials_gen) });
+	if (db.changes() == 0)
+		return false;
 	// The account's newest kHostKeysPerUser stay, and so does any key a listed
 	// server holds; rowid orders keys minted within one second.
 	db.exec(
@@ -479,6 +489,7 @@ void record_host_key(opennova::db::Database &db, std::string_view key, int64_t u
 		"AND (claimed_rid IS NULL OR claimed_rid NOT IN (SELECT rid FROM active_hosts));",
 		{i64(user_id), i64(user_id), i64(static_cast<int64_t>(kHostKeysPerUser))});
 	tx.commit();
+	return true;
 }
 
 std::optional<int64_t> claim_host_key(opennova::db::Database &db, std::string_view key,
@@ -486,16 +497,15 @@ std::optional<int64_t> claim_host_key(opennova::db::Database &db, std::string_vi
 	if (!is_host_key(key)) return std::nullopt;
 	const std::string hash = host_key_hash(key);
 	opennova::db::Transaction tx(db);
-	// One statement decides the claim: the key is live, its account active
-	// (an empty status reads as 'active', as the logins read it), and no other
-	// listed RID holds it.
-	db.exec(
-		"UPDATE host_keys SET claimed_rid = ?, last_used_at = CURRENT_TIMESTAMP "
-		"WHERE key_hash = ? AND last_used_at > datetime('now', ?) "
-		"AND (claimed_rid IS NULL OR claimed_rid = ? "
-		"     OR claimed_rid NOT IN (SELECT rid FROM active_hosts)) "
-		"AND user_id IN (SELECT id FROM players WHERE account_status IN ('', 'active'));",
-		{i64(rid), str(hash), str(seconds_ago(kHostKeyIdleSeconds)), i64(rid)});
+	// One statement decides the claim: the key is live, its account active,
+	// and no other listed RID holds it. (A password reset or a ban deletes the
+	// account's keys, and record_host_key writes none at a stale generation.)
+	db.exec("UPDATE host_keys SET claimed_rid = ?, last_used_at = CURRENT_TIMESTAMP "
+			"WHERE key_hash = ? AND last_used_at > datetime('now', ?) "
+			"AND (claimed_rid IS NULL OR claimed_rid = ? "
+			"     OR claimed_rid NOT IN (SELECT rid FROM active_hosts)) "
+			"AND user_id IN (SELECT id FROM players WHERE account_status = 'active');",
+			{ i64(rid), str(hash), str(seconds_ago(kHostKeyIdleSeconds)), i64(rid) });
 	std::optional<int64_t> owner;
 	if (db.changes() > 0) {
 		const auto rows = db.query("SELECT user_id FROM host_keys WHERE key_hash = ?;", {str(hash)});

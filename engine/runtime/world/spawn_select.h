@@ -169,7 +169,7 @@ public:
     void build_from_mission(const World &world, int32_t base_interval,
                             int32_t numbered_zone_interval);
     bool has_entry(EntityHandle zone) const;
-    bool try_queue(const World &world, EntityHandle zone, EntityHandle player);
+    bool try_queue(EntityHandle zone, EntityHandle player, uint8_t slot_team);
     bool remove_player(EntityHandle player);
     std::vector<SpawnWaveRelease> tick(const World &world);
     void reset_on_zone_team_change(const World &world, EntityHandle zone);
@@ -187,7 +187,7 @@ private:
 inline constexpr uint16_t kDeployPickNone = 0xFFFF;
 inline constexpr uint16_t kDeployPickAutoTeam = 0xFFFE;
 
-// The team the C2S 0x0E handler asks as: `team` itself, except that a
+// The team the C2S 0x0E handler asks as: `team`, the slot's (+416), except that a
 // spectator slot's no-target or auto pick never asks as its team 0: the
 // objective bit (0x20000, Objective Co-op) substitutes 1, any other team
 // mode (0x10000, stock Co-op 0x10020 included) the tick parity (odd tick ->

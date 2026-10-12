@@ -265,6 +265,13 @@ public:
 	// dword_B76804 == 0; NetPacket_WriteEntityIndex32 -> QueueReliableMessage
 	// (0x2E, param 0x136)].
 	bool queue_medic_request();
+	// The Respawn key's request: one bodiless reliable C2S 0x41, retained
+	// until acknowledged, on an in-session joiner's connection or the listen
+	// host's own (its server's 0x41 handler then names the host's own slot).
+	// The live-player and round gates are the role's (Role::request_respawn)
+	// [orig: NetPacket_SendRequestRespawn @0x42DBA0 --
+	//  CNapiNetwork_QueueReliableMessage(0x41, 1, 0, payload, 0) @0x42DBBC].
+	bool queue_respawn_request();
 	// The listen host's own client queues a C2S on its local connection, as
 	// every input-side sender does: its client frame sends it and the next
 	// frame's server tick dispatches it (the queue_stance_change path). False
@@ -441,10 +448,11 @@ public:
 	// frame_c2s_uplink reproduces a captured C2S 0x0C datagram byte-for-byte. [ROADMAP "Determinism"]
 	// `tick_seed` is the capture's live network-role tick (the value its S2C 0x61 seeded);
 	// without it a replayed client's clock stays parked at zero and stamps 0 into every 0x06.
+	// `self_team` is the captured self record's team byte, the team L spawns with.
 	void seed_session(uint32_t session_id, uint32_t client_key, std::string client_scrk,
 	                  std::string server_scrk, uint32_t next_seq, uint32_t last_ack,
 	                  uint16_t self_handle, uint16_t self_type, uint32_t game_type = 0,
-	                  uint32_t tick_seed = 0, bool replay_mode = true);
+	                  uint32_t tick_seed = 0, bool replay_mode = true, uint8_t self_team = 0);
 
 	// The shell's kit for the 0x1A-released loadout-submission pair (Joiner only; see
 	// JoinerConnection::set_loadout_kit). HostClient has no 0x2F leg — its player fills
@@ -524,7 +532,7 @@ public:
 		return joiner_ && joiner_->initial_admission_complete();
 	}
 	// The joiner's server-assigned team (the S2C 0x04 latch) — the deploy screen's
-	// row filter and color source [orig: byte_A85B48].
+	// row filter and color source [orig: g_LocalTeam].
 	uint8_t assigned_team() const { return joiner_ ? joiner_->assigned_team() : 0; }
 	// Host policy learned from S2C 0x76. HostClient/offline views use the stock
 	// all-ten-classes default; Simulation exposes its configured host value.
@@ -536,7 +544,7 @@ public:
 	uint8_t local_player_slot() const { return joiner_ ? joiner_->local_player_slot() : 0; }
 	// Monotonic edge counter for the S2C 0x50 re-latch of OUR OWN team. The
 	// simulation re-styles friend/foe when it advances (the 0x04 latch at join is
-	// consumed through the spawn instead). [orig: byte_A85B48 store @0x4319db]
+	// consumed through the spawn instead). [orig: g_LocalTeam store @0x4319db]
 	uint64_t self_team_revision() const { return self_team_revision_; }
 	// Roster slots whose bookkeeping the host cleared via S2C 0x46 bit15. Draining
 	// keeps it a one-shot; the associated ENTITY row is deliberately untouched

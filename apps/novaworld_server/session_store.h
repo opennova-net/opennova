@@ -68,6 +68,9 @@ public:
 
 	void put_host(const std::string &tag, HostSession session);
 	std::optional<HostSession> get_host(const std::string &tag) const;
+	// The tag's session, removed in the same step: /NWHost.dll's second leg
+	// serves a HOSTKEY once, so a tag seen in a log or a jar serves nothing.
+	std::optional<HostSession> take_host(const std::string &tag);
 
 	// Drop entries older than `max_age_ms`. Phase I.8 — keeps the maps
 	// bounded under server uptime + occasional bot probes that POST

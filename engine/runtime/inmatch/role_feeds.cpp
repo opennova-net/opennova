@@ -115,7 +115,7 @@ int32_t round_ticks_remaining(const RoleView &view) {
 }
 
 // The local player's team the end-round overlay compares the winner against
-// [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0 reads byte_A85B48 @0x5b7f56].
+// [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0 reads g_LocalTeam @0x5b7f56].
 // A joiner latches it from S2C 0x04 (ClientRuntime::assigned_team); the
 // listen host's HostClient runtime never receives that record (the latch
 // stays 0), so the authority reads its own player entity — retail's host
@@ -336,7 +336,7 @@ HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
 			}
 		}
 	}
-	s.attack_defend = view.kernel->local.attack_defend_role; // dword_B78FE8
+	s.attack_defend = view.kernel->local.attack_defend_role; // g_AttackDefendRole
 	// The HUDLS scan over the local slot table and each category's first
 	// def's slot-bar icon [orig: HUD_DrawWeaponSlotBar @0x599D0A..0x599D69;
 	// def+0x1B8 <- hud_loadout_select, WeaponDefs_ParseLineCallback @0x544A44].

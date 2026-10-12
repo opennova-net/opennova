@@ -686,11 +686,9 @@ ItemAttachmentSpawns spawn_mission_item_attachments(World &world,
     // free row, so it is walked only if it filled a hole below that count.
     // [orig: Mission_LoadBMSFile — `mov edi, g_PoolList.used+10h` @0x40FD4F and
     //  the pool-1 walk @0x40FD60..0x40FD71; pool 2 @0x40FD79..0x40FD96]
+    // The count is the pool's used count, the load's record count (D-NET-417).
     for (const int pool : {1, 2}) {
-        int used = 0;
-        world.registry.for_each_in_pool(pool, [&](const Entity &e) {
-            used = std::max(used, e.handle.slot() + 1);
-        });
+        const int used = static_cast<int>(world.registry.pool_used(pool));
         for (int slot = 0; slot < used; ++slot) {
             const EntityHandle handle = EntityHandle::make(pool, slot);
             if (world.registry.get(handle) == nullptr) continue;
@@ -1096,6 +1094,12 @@ PromoteResult promote_mission(const bms::File &m, World &world,
                 ++r.brains;
             }
         }
+        // The pool's used count after its records: the record count for
+        // pools 1..3, the accepted count for pool 0, a store over whatever the
+        // spawns raised it to (D-NET-417).
+        // [orig: Mission_LoadBMSFile -- Pool_SetUsed @0x40F9DB / @0x40FA4A /
+        //  @0x40FABA / @0x40FB34; Pool_SetUsed @0x441F60]
+        world.registry.set_pool_used(pool_for_kind(kind), used_window);
     };
     promote_vec(m.items, EntityKind::Item, /*ai_capable=*/false);
     promote_vec(m.buildings, EntityKind::Building, /*ai_capable=*/false);

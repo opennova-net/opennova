@@ -144,7 +144,7 @@ public:
 			const PackedInt32Array &p_grenade_ammo_secondary) const;
 	// The loadout screens' shared text compositions (one impl in
 	// engine/runtime/menu loadout_labels.h): the WepDes weapon label with its
-	// raw-id fallback, the WEAPON screen's
+	// raw-id fallback, the WEAPON and PLAYER screens'
 	// case-insensitive row order over display labels, and the weight readout
 	// with its encumbrance band token (the Menu-section fold: menutxt first,
 	// then gameui, then the fallback).

@@ -209,7 +209,7 @@ void player_view_chase_action(PlayerViewState &v, int action, uint32_t *input_ac
 }
 
 void player_view_chase_orbit_look(PlayerViewState &v, int32_t yaw_delta, int32_t pitch_delta) {
-    // [orig: sub_52AD50 — the pitch @0x52ae4f..0x52ae86, the yaw @0x52ae93]
+    // [orig: DeathScreen_FilterInputAction — the pitch @0x52ae4f..0x52ae86, the yaw @0x52ae93]
     int32_t pitch = io::bam_add(v.chase_orbit_pitch, pitch_delta);
     if (pitch > kLookPitchMax) pitch = kLookPitchMax;
     else if (pitch < kLookPitchMin) pitch = kLookPitchMin;

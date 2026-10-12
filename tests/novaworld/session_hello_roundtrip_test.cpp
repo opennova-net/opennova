@@ -8,12 +8,15 @@
 // Godot client and the standalone server stay byte-compatible without us
 // having to launch retail every iteration.
 
+#include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_ping.h>
 
 #include "../common/test_expect.h"
 
 #include <array>
+#include <cctype>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -64,6 +67,27 @@ bool has_tlv_field(const std::vector<uint8_t> &bytes, const std::string &wanted)
 		pos = next;
 	}
 	return false;
+}
+
+// `bytes` with every field named `unwanted` left out, the rest as written.
+std::vector<uint8_t> without_tlv_field(const std::vector<uint8_t> &bytes, const std::string &unwanted) {
+	std::vector<uint8_t> out;
+	size_t pos = 0;
+	while (pos < bytes.size()) {
+		size_t name_end = pos;
+		while (name_end < bytes.size() && bytes[name_end] != 0) ++name_end;
+		if (name_end + 2 >= bytes.size()) break;
+		const uint16_t value_size = static_cast<uint16_t>(bytes[name_end + 1]) |
+		                            (static_cast<uint16_t>(bytes[name_end + 2]) << 8);
+		const size_t next = name_end + 3 + value_size;
+		if (next > bytes.size()) break;
+		const std::string name(reinterpret_cast<const char *>(bytes.data() + pos), name_end - pos);
+		if (name != unwanted)
+			out.insert(out.end(), bytes.begin() + static_cast<std::ptrdiff_t>(pos),
+			           bytes.begin() + static_cast<std::ptrdiff_t>(next));
+		pos = next;
+	}
+	return out;
 }
 
 std::vector<std::string> tlv_field_names(const std::vector<uint8_t> &bytes) {
@@ -721,6 +745,20 @@ int test_client_auth_zero_ck_parses() {
 	return 0;
 }
 
+// A session key is drawn until it is nonzero: a draw of {0, 0, 9} keys 9 on the third draw,
+// and a nonzero first draw is kept as drawn.
+// [orig: NapiNP_GenerateSessionKey @0x61EA70 - jz @0x61EAC3]
+int test_session_key_draws_until_nonzero() {
+	const std::array<uint32_t, 3> draws{0u, 0u, 9u};
+	size_t next = 0;
+	TEST_EXPECT(opennova::make_session_key([&]() { return draws[next++]; }) == 9u);
+	TEST_EXPECT(next == 3);
+	next = 2;
+	TEST_EXPECT(opennova::make_session_key([&]() { return draws[next++]; }) == 9u && next == 3);
+	TEST_EXPECT(opennova::make_session_key() != 0);
+	return 0;
+}
+
 int test_server_auth_rejection_roundtrip() {
 	ServerAuth src;
 	src.ci = 7;
@@ -786,6 +824,131 @@ int test_server_auth_requires_no_field() {
 	TEST_EXPECT(!has_tlv_field(bytes, "JFC"));
 	TEST_EXPECT(parse_server_auth(bytes.data(), bytes.size(), auth));
 	TEST_EXPECT(auth.cr == 1u && auth.jfc == 1u);
+	return 0;
+}
+
+// The 0x82's CU walk: every CU tag counts, whatever its inner shape and its name's case, and
+// a CU of 2048 bytes or more, or a 65th, refuses the whole 0x82 wherever it sits (the client's
+// socket pass returns without queuing it, before the CI / CK match). Below either bound the
+// walk keeps only the type-3 CUs it can read.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629B97..0x629BA6, the socket-pass
+//  return @0x629F0B..0x629F12]
+int test_server_auth_cu_walk_bounds() {
+	std::vector<uint8_t> accept;
+	append_field(accept, "CI", {0x04, 0x00, 0x00, 0x00});
+	append_field(accept, "CK", {0xEF, 0xBE, 0xAD, 0xDE});
+	append_field(accept, "CR", {0x01, 0x00, 0x00, 0x00});
+	append_field(accept, "SK", {0x78, 0x56, 0x34, 0x12});
+	const std::vector<uint8_t> nwuid = {0x03, 'N', 'W', 'U', 'I', 'D', 0x00, 0x02, 0x00, 'x', 0x00};
+
+	// 64 CUs: 62 the inner reader cannot read, one in lower case, one NWUID.
+	std::vector<uint8_t> sixty_four = accept;
+	for (int i = 0; i < 62; ++i) append_field(sixty_four, "CU", {0x01});
+	append_field(sixty_four, "cu", {0x02, 'A', 0x00});
+	append_field(sixty_four, "CU", nwuid);
+	ServerAuth auth;
+	TEST_EXPECT(parse_server_auth(sixty_four.data(), sixty_four.size(), auth));
+	TEST_EXPECT(auth.cr == 1u && auth.cu.size() == 1 && auth.cu[0].first == "NWUID");
+
+	// A 65th CU, readable or not, before or after the other fields.
+	std::vector<uint8_t> sixty_five = sixty_four;
+	append_field(sixty_five, "CU", {0x01});
+	TEST_EXPECT(!parse_server_auth(sixty_five.data(), sixty_five.size(), auth));
+	sixty_five = sixty_four;
+	append_field(sixty_five, "CU", nwuid);
+	TEST_EXPECT(!parse_server_auth(sixty_five.data(), sixty_five.size(), auth));
+	std::vector<uint8_t> cus_first;
+	for (int i = 0; i < 65; ++i) append_field(cus_first, "CU", {0x01});
+	cus_first.insert(cus_first.end(), accept.begin(), accept.end());
+	TEST_EXPECT(!parse_server_auth(cus_first.data(), cus_first.size(), auth));
+
+	// One CU of 2047 bytes passes; one of 2048 refuses the 0x82, whatever its shape.
+	std::vector<uint8_t> long_cu = accept;
+	append_field(long_cu, "CU", std::vector<uint8_t>(2047, 0x01));
+	TEST_EXPECT(parse_server_auth(long_cu.data(), long_cu.size(), auth) && auth.cr == 1u);
+	long_cu = accept;
+	append_field(long_cu, "CU", std::vector<uint8_t>(2048, 0x01));
+	TEST_EXPECT(!parse_server_auth(long_cu.data(), long_cu.size(), auth));
+	return 0;
+}
+
+// The 0x42 and 0x82 writers leave out a CU entry of 2048 bytes or more and write the rest, so
+// the reader's walk never meets it; an entry of 2047 bytes is written. Neither writer bounds the
+// count.
+// [orig: CNapiNPConnection_SendClientJoin @0x61FE20 - @0x620242..0x620248;
+//  CNapiNPConnection_SendSessionInit @0x620EF0 - @0x621124..0x62112A]
+int test_cu_writers_leave_out_an_entry_of_2048_bytes() {
+	// A chunk is [type][name\0][u16 len][value\0]: 5 bytes around a one-letter name.
+	ClientAuth join =
+			opennova::make_jointoperations_client_auth(7, 0x1234ABCDu, 0, "Writer", "SCRK");
+	join.cu.clear();
+	join.cu.push_back(opennova::make_client_cu_chunk(2, "A", std::string(2041, 'a')));
+	join.cu.push_back(opennova::make_client_cu_chunk(2, "B", std::string(2042, 'b')));
+	join.cu.push_back(opennova::make_client_cu_chunk(2, "C", "c"));
+	TEST_EXPECT(join.cu[0].size() == 2047 && join.cu[1].size() == 2048);
+	const auto join_bytes = client_auth_to_bytes(join);
+	ClientAuth join_read;
+	TEST_EXPECT(parse_client_auth(join_bytes.data(), join_bytes.size(), join_read));
+	TEST_EXPECT(join_read.cu.size() == 2 && join_read.cu[0] == join.cu[0] &&
+			join_read.cu[1] == join.cu[2]);
+
+	ServerAuth accept;
+	accept.cu.emplace_back("A", std::string(2041, 'a'));
+	accept.cu.emplace_back("B", std::string(2042, 'b'));
+	accept.cu.emplace_back("C", "c");
+	const auto accept_bytes = server_auth_to_bytes(accept);
+	ServerAuth accept_read;
+	TEST_EXPECT(parse_server_auth(accept_bytes.data(), accept_bytes.size(), accept_read));
+	TEST_EXPECT(accept_read.cu.size() == 2 && accept_read.cu[0].first == "A" &&
+			accept_read.cu[0].second.size() == 2041 && accept_read.cu[1].first == "C");
+
+	// 65 short entries are all written: the count bound is the reader's.
+	ServerAuth many;
+	many.cu.assign(65, {"N", "v"});
+	const auto many_bytes = server_auth_to_bytes(many);
+	TEST_EXPECT(!parse_server_auth(many_bytes.data(), many_bytes.size(), accept_read));
+	return 0;
+}
+
+// No field of the 0x81 is required: one without HK parses with HK 0 (an empty body too), and
+// the 0x42 built from it carries no HK, as retail's join omits a zero one. The client then
+// tests the reply's identity block against its own protocol's: PN and PV1 case-insensitively,
+// PG bytewise.
+// [orig: Nwu_HandleServerHello @0x626D20 - HK zeroed @0x626E97, PN @0x62758B, PG
+//  @0x627591..0x627624, PV1 @0x627643; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK
+//  gate @0x6200F2]
+int test_server_hello_requires_no_hk() {
+	const ClientHello local = opennova::make_jointoperations_client_hello(7);
+	ServerHello written = opennova::build_server_hello(local, 0x7F000001u, 32768);
+	written.hk = 0x0FE0E115u;
+	written.sn = "NoKeyHost";
+	const auto full = server_hello_to_bytes(written);
+	const auto hk_less = without_tlv_field(full, "HK");
+	TEST_EXPECT(has_tlv_field(full, "HK") && !has_tlv_field(hk_less, "HK"));
+	ServerHello parsed;
+	parsed.hk = 0xFFFFFFFFu;
+	TEST_EXPECT(parse_server_hello(hk_less.data(), hk_less.size(), parsed));
+	TEST_EXPECT(parsed.hk == 0 && parsed.ci == 7 && parsed.sn == "NoKeyHost");
+	TEST_EXPECT(opennova::server_hello_matches_identity(parsed, local));
+	const ClientAuth join = opennova::make_jointoperations_client_auth(
+			7, 0x1234ABCDu, parsed.hk, "NoKeyJoiner", "SCRK");
+	TEST_EXPECT(!has_tlv_field(client_auth_to_bytes(join), "HK"));
+	TEST_EXPECT(parse_server_hello(nullptr, 0, parsed) && parsed.hk == 0 && parsed.ci == 0);
+	TEST_EXPECT(!parse_server_hello(nullptr, 4, parsed));
+
+	ServerHello other = written;
+	other.pn = "jointoperations";
+	other.pv1 = local.pv1;
+	for (char &c : other.pv1) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	TEST_EXPECT(opennova::server_hello_matches_identity(other, local));
+	other.pn = "NOVAWORLDUDP";
+	TEST_EXPECT(!opennova::server_hello_matches_identity(other, local));
+	other = written;
+	other.pg[15] ^= 1u;
+	TEST_EXPECT(!opennova::server_hello_matches_identity(other, local));
+	other = written;
+	other.pv1 += "x";
+	TEST_EXPECT(!opennova::server_hello_matches_identity(other, local));
 	return 0;
 }
 
@@ -958,10 +1121,14 @@ int main() {
 	if (test_client_auth_roundtrip() != 0) return 1;
 	if (test_client_auth_minimum_for_acceptance() != 0) return 1;
 	if (test_client_auth_zero_ck_parses() != 0) return 1;
+	if (test_session_key_draws_until_nonzero() != 0) return 1;
 	if (test_client_and_server_auth_tag_names_are_case_insensitive() != 0) return 1;
 	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	if (test_server_auth_requires_no_field() != 0) return 1;
+	if (test_server_auth_cu_walk_bounds() != 0) return 1;
+	if (test_cu_writers_leave_out_an_entry_of_2048_bytes() != 0) return 1;
+	if (test_server_hello_requires_no_hk() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
 	if (test_server_hello_omitted_metadata_parses_empty() != 0) return 1;
 	if (test_server_hello_game_metadata_has_retail_order() != 0) return 1;

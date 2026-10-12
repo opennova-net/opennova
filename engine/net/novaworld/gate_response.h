@@ -1,9 +1,11 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace opennova {
 
@@ -24,7 +26,7 @@ namespace opennova {
 //   METPING              -> met_ping (decimal int)
 //   METEXT               -> met_ext (decimal int)
 //   STARTUPURL           -> startup_url (string)
-//   UDPNOVAWORLD         -> udp_novaworld (string, IP:port form)
+//   UDPNOVAWORLD         -> udp_novaworld (every line, in order: the address strings)
 //   UDPCODE1             -> udp_code1 (string, int as text)
 //   UDPCODE2             -> udp_code2 (string, int as text)
 //   REFLECTEDIPADDRESS   -> reflected_ip (dotted-quad -> 4 bytes)
@@ -51,6 +53,11 @@ namespace opennova {
 // matching the original's `readResult >= 3 && Napi_StrCaseEqual(.., "VAR")`
 // gate.
 
+// The UDPNOVAWORLD table's bounds: 16 entries, each a 64-byte Napi_CopyString buffer.
+// [orig: CMissionInfo_AddVariable @0x4CD9D0 - the count test @0x4CD9DC, the copy @0x4CD9F7]
+inline constexpr std::size_t kGateUdpNovaWorldMax = 16;
+inline constexpr std::size_t kGateUdpNovaWorldChars = 63;
+
 struct GateResponse {
 	// IPv4 addresses in NETWORK byte order (0xXXYYZZWW where X.Y.Z.W).
 	std::array<uint8_t, 4> post_ip{0, 0, 0, 0};
@@ -65,7 +72,15 @@ struct GateResponse {
 	int met_ext = 0;
 
 	std::string startup_url;
-	std::string udp_novaworld;
+	// Every UDPNOVAWORLD line's value in order, at most kGateUdpNovaWorldMax of them, each cut
+	// to kGateUdpNovaWorldChars characters (a 17th line is not kept, the table staying at 16,
+	// though it still counts toward var_count, the parsed-field count @0x4CF4BB); the NovaWorld
+	// connect makes a probe target of each (NwuLobbySession). A response naming none leaves the
+	// NWU session unused. [orig: CNapiGateManager_ProcessResponse @0x4CED20 -
+	//  CMissionInfo_AddVariable @0x4CD9D0 called @0x4CF315 (16 entries of 64 bytes at
+	//  mission info +0x4DC, the count +0x4D8 = dword_B5F928); the in-use word dword_B5FD2C
+	//  @0x4CF525..0x4CF541]
+	std::vector<std::string> udp_novaworld;
 	std::string udp_code1;
 	std::string udp_code2;
 

@@ -169,7 +169,7 @@ void order_targets(const CommandMapOrders::Order &order, const CommandMapRoster 
 	}
 }
 
-// sub_644590: a list's first selected row, 0 when none.
+// UIList_GetSelectedRow (@0x644590): a list's first selected row, 0 when none.
 int first_selected(const MenuRuntime &menu, int id) {
 	const int row = menu.selected_row(id);
 	return row >= 0 ? row : 0;

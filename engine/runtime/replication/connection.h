@@ -125,7 +125,7 @@ struct Connection {
 	// (slot+89912 & 0x10). Set at join iff the mission offers deploy-selectable spawn zones,
 	// UNCONDITIONAL on the spectator latch — a join-time spectator holds the bit forever
 	// [orig: Server_OnPlayerJoin @0x51a6f2 `|= 0x10 iff SpawnZoneList_GetCount() > 0`];
-	// cleared only by the deploy leg [orig: Server_ProcessPlayerDeath @0x517791
+	// cleared only by the deploy leg [orig: Server_DeployPlayer @0x517791
 	// `and 0xEF`]. While set: the connection's 0x0A header flags1 carries bit1 EVERY frame
 	// (the client's deploy screen is held open by it — one flags1 bit1=0 frame closes it
 	// [orig: NetPacket_WritePlayerState @0x4ff7bd; client g_DeployScreenActive = (flags1 & 2) != 0
@@ -226,7 +226,7 @@ struct Connection {
 	// original counter's wrap behavior. A death within 620 ticks forces the
 	// +360/+364 hold to three seconds even when the configured timeout is larger.
 	// [orig: playerSlot+96456 read @0x516edc; deployment stamp in the
-	// Server_ProcessPlayerDeath path @0x517740]
+	// Server_DeployPlayer path @0x517740]
 	uint32_t last_deploy_tick = 0;
 	bool last_deploy_tick_valid = false;
 };

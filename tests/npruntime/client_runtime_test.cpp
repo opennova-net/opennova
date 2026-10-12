@@ -28,6 +28,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/novaworld_link.h>
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/join_character_profile.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -162,9 +163,9 @@ const std::vector<uint8_t> &retail_full_player_info() {
 }
 
 // The S2C 0x04 slot assignment in its witnessed 24-byte shape: the tail byte is the
-// joiner's server-assigned team — the client's byte_A85B48 latch, and therefore the
+// joiner's server-assigned team — the client's g_LocalTeam latch, and therefore the
 // 0x2F loadout-submit header byte 0. [orig: NetPacket_WriteSlotAssignment @0x502b30;
-// NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499]
+// NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> g_LocalTeam @0x425499]
 std::vector<uint8_t> retail_slot_assignment(uint8_t team = 0x02) {
 	std::vector<uint8_t> body(24, 0);
 	body[17] = 0x01; // the joiner's slot index
@@ -249,9 +250,13 @@ bool matches_client_header(const ProtocolPacketHeader &header,
 
 bool build_joiner_client_auth(inmatch::JoinRole role,
 		std::string password, ClientAuth &out,
-		std::string server_password = {}, bool password_required = false) {
+		std::string server_password = {}, bool password_required = false,
+		std::string side_password = {}, uint32_t server_flags = 0,
+		const inmatch::CharacterJoinVars *installed_vars = nullptr) {
 	inmatch::JoinerConnection joiner("SpectatorWire");
-	joiner.set_join_request(role, std::move(password), std::move(server_password));
+	joiner.set_join_request(role, std::move(password), std::move(server_password),
+			std::move(side_password));
+	if (installed_vars != nullptr) joiner.set_character_join_vars(*installed_vars);
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -266,6 +271,7 @@ bool build_joiner_client_auth(inmatch::JoinRole role,
 			build_server_hello(hello, 0x7F000001u, 32768);
 	server_hello.hk = 0xAABBCCDDu;
 	server_hello.sf = password_required ? 1u : 0u;
+	server_hello.p2 = server_flags;
 	const std::vector<uint8_t> reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
@@ -292,6 +298,47 @@ bool auth_has_cu(const ClientAuth &auth,
 		}
 	}
 	return false;
+}
+
+// A joiner's ClientAuth TR is the join's side requirement, which only -1 is
+// ever stored to: every join sends one TR=-1, whatever the server's flag word
+// offers (TeamChoose, the side passwords, spectators) and whichever role it
+// takes, from the fresh profile or the installed projection; PRE.MNU has no
+// team control, the side coming from the side password (D-NET-590).
+// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23; Config_SetDefaults
+//  @0x54d1fa; UI_PreGameMenuStateMachine @0x568c55;
+//  CNapiServerInfo_SerializeToSession @0x4c3ac7..0x4c3b0c]
+bool run_every_join_sends_the_automatic_tr() {
+	const inmatch::CharacterJoinVars projection =
+			inmatch::character_join_vars(inmatch::JoinCharacterProfile{});
+	for (const uint32_t flags : {0x0u, 0x4u, 0x904u, 0x934u, 0x693Cu}) {
+		for (const auto role : {inmatch::JoinRole::Player, inmatch::JoinRole::Spectator}) {
+			for (const inmatch::CharacterJoinVars *installed :
+					{static_cast<const inmatch::CharacterJoinVars *>(nullptr), &projection}) {
+				ClientAuth auth;
+				if (!expect(build_joiner_client_auth(role, "", auth, "", false, "redSECRET",
+									flags, installed),
+							"the join's ClientAuth builds")) {
+					return false;
+				}
+				int tr_count = 0;
+				for (const std::vector<uint8_t> &blob : auth.cu) {
+					uint8_t type = 0;
+					std::string name, value;
+					if (parse_client_cu_chunk(blob.data(), blob.size(), type, name, value) &&
+							name == "TR")
+						++tr_count;
+				}
+				if (!expect(tr_count == 1 && auth_has_cu(auth, "TR", "-1"),
+							"every join sends one TR=-1 whatever the server's flags")) {
+					std::fprintf(stderr, "  flags 0x%X role %d %s\n", flags,
+							static_cast<int>(role), installed ? "projection" : "fresh");
+					return false;
+				}
+			}
+		}
+	}
+	return true;
 }
 
 bool run_spectator_clientauth_and_state_latch() {
@@ -891,9 +938,9 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	inmatch::JoinerConnection joiner("JoinTokens");
 	joiner.set_expansion_version_root(cc_root.string());
 	joiner.set_join_request(inmatch::JoinRole::Player, "", "", "SideSecret");
-	inmatch::CharacterJoinVars side_profile;
+	inmatch::CharacterJoinVars side_profile =
+			inmatch::character_join_vars(inmatch::JoinCharacterProfile{});
 	side_profile.char_id[0] = 0x2101;
-	side_profile.team_request = 1;
 	joiner.set_character_join_vars(side_profile);
 	joiner.set_app_id("3225");
 	joiner.set_cd_cookie(cookie);
@@ -1961,6 +2008,10 @@ bool run_roundtrip() {
 	// Server_ProcessPendingPlayerSpawns spawns the joiner's pool-0 entity (binding conn.link.owned_entity).
 	w::World world;
 	world.registry.configure_pool(0, 16);
+	// The player row's items.def ordinal: the joiner's C2S 0x32 sweep lists a
+	// pool-0 row whose ItemTypeIndex is 0 (D-NET-486), so a typeless body would
+	// be destroyed on the joiner.
+	world.tables.player.item_type_index = 7;
 	w::AiSystem &ai = world.ai;
 	world.script.subgoals.won = 0x12u;
 	world.script.subgoals.lost = 0x24u;
@@ -1976,11 +2027,16 @@ bool run_roundtrip() {
 	inmatch::CharacterJoinVars join_profile;
 	join_profile.char_id[0] = 0x0400; // nat 0, div 0, combo 2, good
 	join_profile.char_id[1] = 0x8407; // nat 7, div 0, combo 2, evil
-	join_profile.team_request = 0xFF;
+	join_profile.team_request = 0xFF; // the join's side requirement, TR=-1 (D-NET-590)
 	join_profile.char_class[0] = 6;
 	join_profile.char_class[1] = 6;
-	join_profile.avatar[0] = 1;
-	join_profile.avatar[1] = 10;
+	// Avatar bytes past 0x7F (a hand-edited player.sav voice pair, D-PLAYERINFO-28):
+	// retail prints VCA/VCB sign-extended, and the host's atol keeps the low byte, so
+	// whichever side the host assigns, the byte survives the round trip
+	// [orig: CNapiServerInfo_SerializeToSession movsx @0x4c3bbe / @0x4c3c0e;
+	//  NapiNetConfig_LoadFromConnTags @0x4c75b2 / @0x4c75db].
+	join_profile.avatar[0] = 0x81;
+	join_profile.avatar[1] = 0xC8;
 	client.set_character_join_vars(join_profile);
 
 	uint32_t tick = 1;
@@ -2022,6 +2078,7 @@ bool run_roundtrip() {
 				uint16_t char_id[2] = {0, 0};
 				uint8_t char_class[2] = {0, 0};
 				uint8_t avatar[2] = {0, 0};
+				std::string avatar_text[2];
 				bool saw_auto_team = false;
 				for (const std::vector<uint8_t> &blob : auth.cu) {
 					uint8_t type = 0;
@@ -2046,10 +2103,13 @@ bool run_roundtrip() {
 						char_class[0] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
 					else if (name == "CTB")
 						char_class[1] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
-					else if (name == "VCA")
+					else if (name == "VCA") {
 						avatar[0] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
-					else if (name == "VCB")
+						avatar_text[0] = value;
+					} else if (name == "VCB") {
 						avatar[1] = static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
+						avatar_text[1] = value;
+					}
 				}
 				client_auth_has_retail_environment =
 						auth.na == kName && saw_vn && saw_bn &&
@@ -2067,7 +2127,8 @@ bool run_roundtrip() {
 						char_class[0] == join_profile.char_class[0] &&
 						char_class[1] == join_profile.char_class[1] &&
 						avatar[0] == join_profile.avatar[0] &&
-						avatar[1] == join_profile.avatar[1];
+						avatar[1] == join_profile.avatar[1] &&
+						avatar_text[0] == "-127" && avatar_text[1] == "-56";
 			}
 		} else if (opcode == SESSION_OPCODE_PROTOCOL_MESSAGE) {
 			for (const inmatch::NapiNPConnection &conn : ctx.np_protocol.connection_list) {
@@ -2523,6 +2584,8 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	world.registry.configure_pool(0, 16);
 	world.registry.configure_pool(2, 16);
 	world.registry.configure_pool(3, 16);
+	// A joiner's host is in a session, where the deploy sends its 0x5A.
+	world.rules.mp_session = true;
 	w::AiSystem &ai = world.ai;
 	ctx.world = &world;
 	{
@@ -2917,6 +2980,37 @@ bool run_host_client_discards_authority_owned_reload_echoes() {
 	              "host client does not retain authority-owned reload notifications");
 }
 
+// The listen host's own client reports its connection-quality level over its loopback as a
+// joiner does: one C2S 0x4C [u8 level] on the 311th client frame and every 311th after it, in a
+// session; out of a session (single player) the timer runs and nothing is sent.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the timer @0x42C22D..0x42C23E, is_in_session
+//  @0x42C240, is_mp_session_peer @0x42C24E, the queue @0x42C279 (no authority test)]
+bool run_host_client_reports_its_quality_over_the_loopback() {
+	for (const bool session : {true, false}) {
+		ns::LoopbackChannel host_loop;
+		inmatch::ClientRuntime host_view(host_loop);
+		host_view.view().set_mp_session(session);
+		host_view.set_net_quality_level(2);
+		std::vector<uint32_t> report_frames;
+		for (uint32_t frame = 1; frame <= 2 * 311; ++frame) {
+			host_view.Client_ProcessNetworkFrame(frame);
+			ns::Datagram datagram;
+			while (host_loop.host_recv(datagram)) {
+				if (datagram.tag != c2s::CLIENT_QUALITY) continue;
+				if (!expect(datagram.body == std::vector<uint8_t>{0x02},
+						"the host's 0x4C carries its level"))
+					return false;
+				report_frames.push_back(frame);
+			}
+		}
+		if (!expect(report_frames == (session ? std::vector<uint32_t>{311, 622}
+		                                      : std::vector<uint32_t>{}),
+				"the listen client reports on its 311th frames, in a session only"))
+			return false;
+	}
+	return true;
+}
+
 bool run_host_zone_timer_value_matches_retail_entry() {
 	ns::LoopbackChannel host_loop;
 	inmatch::ClientRuntime host_view(host_loop);
@@ -3210,6 +3304,51 @@ bool run_medic_request_queues_one_reliable_0x2e() {
 	inmatch::ClientRuntime host_view(host_loop);
 	return expect(!host_view.queue_medic_request(),
 	              "medic request: the host's own view never uplinks");
+}
+
+// The Respawn key's request: an in-session joiner queues one bodiless C2S
+// 0x41, reliable until acknowledged, and an unconnected one nothing; the
+// listen host's own view queues the same 0x41 on its loopback, leaving at its
+// client frame [orig: NetPacket_SendRequestRespawn @0x42DBA0 --
+// CNapiNetwork_QueueReliableMessage(0x41, 1, 0, payload, 0) @0x42DBBC].
+bool run_respawn_request_queues_one_reliable_0x41() {
+	const std::string client_scrk = "CLIENT-RESPAWN-SCRK";
+	const std::string server_scrk = "SERVER-RESPAWN-SCRK";
+	inmatch::ClientRuntime client("RespawnJoiner", [] { return uint64_t{0x10203040}; });
+	if (!expect(!client.queue_respawn_request(),
+	            "respawn request: an unconnected joiner cannot queue"))
+		return false;
+	client.seed_session(
+			0x55667799u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0007, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.queue_respawn_request(),
+	            "respawn request: an in-session joiner queues it"))
+		return false;
+	const std::vector<std::vector<uint8_t>> frame =
+			client.Client_ProcessNetworkFrame(1);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	bool found = false;
+	if (frame.size() == 1 &&
+			decode_client_session(frame[0], client_scrk, header, messages))
+		for (const ProtocolMessage &m : messages)
+			if (m.tag == c2s::DEATH_TIMEOUT_RESET) found = m.payload.empty();
+	if (!expect(found, "respawn request: one bodiless C2S 0x41 in the frame"))
+		return false;
+	if (!expect(client.retained_outbound_depth() == 1,
+	            "respawn request: the 0x41 is reliable"))
+		return false;
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	if (!expect(host_view.queue_respawn_request() && host_loop.c2s_pending() == 0,
+	            "respawn request: the host's own view queues it for its client frame"))
+		return false;
+	host_view.Client_ProcessNetworkFrame();
+	ns::Datagram dg;
+	return expect(host_loop.host_recv(dg) && dg.tag == c2s::DEATH_TIMEOUT_RESET &&
+	              dg.body.empty(),
+	              "respawn request: the host's 0x41 lands on its loopback");
 }
 
 // The server-info VarList walk lands EXP_FANFARE as the u16 the 0x81 tone
@@ -4335,7 +4474,7 @@ bool run_rtt_pong_fills_the_client_ring() {
 // NWU key): WR set answers with a 0x45 keyed by the server's SK carrying the
 // same MS and WR clear; WR clear lands the round trip; a foreign key is
 // dropped [orig: Nwu_HandlePing @0x623A70 -> CNapiNPConnection_SendPing
-// @0x61DF00].
+// @0x61F080].
 bool run_server_ping_answers_and_measures() {
 	const std::string client_scrk = "CLIENT-PING-SCRK";
 	const std::string server_scrk = "SERVER-PING-SCRK";
@@ -4993,7 +5132,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 // Game_InitNewRound clears the deploy hold. Another player's respawn edge
 // releases nothing, and the self row's first alive sample is no edge.
 // [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
-//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_ProcessPlayerDeath @0x5178C5]
+//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
 bool run_self_respawn_edge_releases_a_revive_deploy() {
 	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
 	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";
@@ -6213,12 +6352,12 @@ bool run_joiner_correlates_handshake_echoes() {
 
 // --- Round-5 hardening ---------------------------------------------------------------------
 
-// Both witnessed writers of byte_A85B48 must be falsifiable. S2C 0x04 installs
+// Both witnessed writers of g_LocalTeam must be falsifiable. S2C 0x04 installs
 // the admission team; S2C 0x75 byte 1 refreshes it when the server broadcasts
 // this player's live slot state. Read the result through frame_loadout_resubmit
 // — the same assigned_team_ source the 0x1A pair uses.
-// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> byte_A85B48 @0x425499;
-// NapiNPClientMsg_SetSpectatorMode @0x4259E0 -> byte_A85B48 @0x425A32]
+// [orig: NapiNPClientMsg_SessionSlotConfig (0x04) @0x425410 -> g_LocalTeam @0x425499;
+// NapiNPClientMsg_SetSpectatorMode @0x4259E0 -> g_LocalTeam @0x425A32]
 bool run_team_latch_is_falsifiable() {
 	const std::string client_scrk = "CLIENT-TEAM-LATCH-SCRK";
 	const std::string server_scrk = "SERVER-TEAM-LATCH-SCRK";
@@ -6240,7 +6379,7 @@ bool run_team_latch_is_falsifiable() {
 
 	uint8_t team = 0xEE;
 	if (!expect(resubmit_team(team) && team == 0x00,
-			"pre-0x04 the wire team byte is retail's zero-init (byte_A85B48)")) {
+			"pre-0x04 the wire team byte is retail's zero-init (g_LocalTeam)")) {
 		return false;
 	}
 
@@ -7537,6 +7676,7 @@ int main() {
                     run_charattr_challenge_table_matches_retail() &&
                     run_charattr_latches_follow_retail() &&
 	                run_spectator_clientauth_and_state_latch() &&
+	                run_every_join_sends_the_automatic_tr() &&
 	                run_seeded_objective_layout_hint() &&
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&
@@ -7550,12 +7690,14 @@ int main() {
 	                run_roundtrip_with_spawn_zones(/*under_send_holdoff=*/true) &&
 	                run_joiner_remote_reload_stamps_before_same_frame_body_tick() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
+	                run_host_client_reports_its_quality_over_the_loopback() &&
 	                run_joiner_weapon_pickup_reaches_the_pipeline() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&
 	                run_zone_presence_updates_only_a_tracked_window() &&
 	                run_roster_revive_countdown_ticks_once_per_63_frames() &&
 	                run_medic_request_queues_one_reliable_0x2e() &&
+	                run_respawn_request_queues_one_reliable_0x41() &&
 	                run_session_vars_exp_fanfare_walk() &&
 	                run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() &&
 	                run_joiner_zone_timer_preserves_mixed_wire_order() &&

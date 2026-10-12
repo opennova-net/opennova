@@ -16,7 +16,7 @@ namespace opennova::def {
 // tokens[2]..]: a number as a whole number (ALPHAFADE's as the shortest decimal that reads back the
 // same double), an alignment as its word ("left", "right", "center": HUD_ParseTextAlignment @
 // 0x59D6B0), a name as written (quoted where a separator or a comment start would cut it, as the
-// tokenizer keeps it [orig: Terrain_TokenizeConfigLine @ 0x53CB60, the delimiters @
+// tokenizer keeps it [orig: Config_TokenizeLine @ 0x53CB60, the delimiters @
 // 0x53CC33..0x53CC4C]), the values after the key's tab separated by commas. The writer's own order: the
 // fonts, the rects, the colours, the map, the positioned texts, the weapon slot bar, the anchors, the
 // single values, the stances, the declutter rows, the graphics, then the vehicle blocks. A key whose
@@ -67,7 +67,7 @@ std::string hudpos_number(double value);
 const char *hudpos_align_word(int align);
 // A name as the writer writes it, one token: quoted where a separator (a blank, a tab, a comma, ';')
 // or a comment start ("//") would cut it, as the tokenizer keeps a quoted token whole [orig:
-// Terrain_TokenizeConfigLine @ 0x53CB60, the delimiters @ 0x53CC33..0x53CC4C], as it is otherwise. A
+// Config_TokenizeLine @ 0x53CB60, the delimiters @ 0x53CC33..0x53CC4C], as it is otherwise. A
 // name holding a quote or a line end is one no token carries.
 std::string hudpos_name_token(std::string_view name);
 // The channels a colour key's values are, in its arm's order (the key compared without case, as the

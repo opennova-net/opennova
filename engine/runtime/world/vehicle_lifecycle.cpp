@@ -275,7 +275,7 @@ void VehicleSystem::respawn(Entity &e) {
 	//  [edx+1A4h]; mov [esi+1B0h], eax` @0x46007C..0x460082].
 	if (const auto *traits = world_.tables.item_death_traits.get(e.item_id)) {
 		e.destroy_timer = traits->destroy_timing_ticks[0];
-		e.destroy_timer_initialized = true;
+		e.item_init_done = true;
 	}
 	if ((e.item_attrib & kItemAttribPlayerControl) != 0) {
 		e.primary_occupant = {};
@@ -293,7 +293,11 @@ void VehicleSystem::respawn(Entity &e) {
 	const uint32_t kept = (e.engine_flags | e.flags) & kEntityFlagReflective;
 	e.engine_flags = kept | kEntityFlagMatrixBuilt;
 	e.flags = kept | kEntityFlagInAir;
+	// Health and then Armor back to the def's words (D-PWR-14).
+	// [orig: Entity_RespawnVehicle - Health = def+0x17C @0x460091, Armor =
+	//  def+0x17E @0x4600A1]
 	e.health = e.health_max;
+	e.mana = e.mana_max;
 	e.alive = e.health > 0;
 	e.death_motion = DeathMotionMode::None;
 	e.motor_suspended = false;

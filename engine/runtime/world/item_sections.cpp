@@ -206,7 +206,7 @@ CollisionMatrix palm_matrix(const Entity &entity) {
 void palm_transition(World &world, Entity &entity, int section) {
     // Read the PUSH operands, not the decompiler's phantom ECX argument:
     // 0->1 spawns 16, 2->1 spawns 32, 0->2 spawns 17.
-    // [orig: sub_53C3E0 @ 0x53C3E0]
+    // [orig: Palm_ApplyTransition @ 0x53C3E0]
     int type = 0;
     if (section == 0 || section == 1 || section == 3 || section == 4) {
         if (entity.palm_state == 0) type = 16;
@@ -217,7 +217,7 @@ void palm_transition(World &world, Entity &entity, int section) {
         type = 17;
     }
     if (!type) return;
-    // [orig: Projectile_SpawnFromTile @ 0x53C1C0]
+    // [orig: Palm_SpawnFragment @ 0x53C1C0]
     const auto *traits = world.tables.item_death_traits.get(entity.item_id);
     const size_t pivot = type == 17 ? 1 : 0;
     if (traits && pivot < traits->model_pivots_q16.size()) {
@@ -239,7 +239,7 @@ void palm_transition(World &world, Entity &entity, int section) {
         // for collision (+0xA8) and the scar cache (+0xAC), not the draw:
         // the fragment draws by item 900's own render tag (palm_sections, the
         // def resolve's) and collides through its palm state.
-        // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6]
+        // [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6]
         seed.palm_fragment = true;
         seed.palm_state = type;
         seed.death_motion = DeathMotionMode::PalmPiece;
@@ -377,15 +377,41 @@ uint32_t item_hidden_sections(const Entity &entity) {
         mask |= entity.spawned_piece_mask;
     return mask;
 }
+const std::array<int32_t, 3> *bldg_section_origin_q16(const World &world, const Entity &entity) {
+    // The bldg row's world callback reads the byte +0x2C1 of whatever it
+    // draws (a section clone's own section, the second byte of
+    // death_anim_state) and, when it is non-zero, translates the draw by that
+    // section's negated origin in the GRAPHIC model's COBJ (+0x30, never the
+    // husk's), so a clone's section draws where it stood. Retail bounds no
+    // index; one past the model's sections draws in place here (D-ITEMDEF-29).
+    // [orig: BoneCallback_bldg_World @ 0x4E21A0 - the byte @ 0x4E2214, the
+    //  test @ 0x4E221C, the model's COBJ section @ 0x4E221E..0x4E222D, the
+    //  negated origin @ 0x4E2230..0x4E2241, the translate @ 0x4E2247]
+    if (!entity.bldg_section_pivot) return nullptr;
+    const uint32_t section = (static_cast<uint32_t>(entity.death_anim_state) >> 8) & 255;
+    const auto *traits = world.tables.item_death_traits.get(entity.item_id);
+    if (section == 0 || traits == nullptr || section >= traits->model_section_origins_q16.size())
+        return nullptr;
+    return &traits->model_section_origins_q16[section];
+}
 Vec3 section_clone_position(const World &world, const Entity &entity) {
+    if (entity.bldg_section_pivot) {
+        // The callback multiplies the entity's own matrix by the translation.
+        if (const auto *origin = bldg_section_origin_q16(world, entity)) {
+            int32_t offset[3], position[3];
+            for (int i = 0; i < 3; ++i) offset[i] = io::bam_sub(0, (*origin)[i]);
+            entity_placement_matrix(entity).transform_point(offset, position);
+            return {position[0] / 65536.0f, position[1] / 65536.0f, position[2] / 65536.0f};
+        }
+        return entity.position;
+    }
     if (entity.section_clone && entity.death_section_pivot && entity.spawned_piece_mask) {
         // The death render callback pivots around the first surviving HUSK
         // section, not the intact-model pivot used by the spawn. It is the
         // world callback of the cveh, chel, tank and cpln rows alike, which a
         // clone reaches through its def's render tag (or its model's LOD tag,
         // D-ITEMDEF-18); a tag naming no row takes row 0's generic callback,
-        // which draws at the entity position (the bldg row's pivot is
-        // another: D-ITEMDEF-23).
+        // which draws at the entity position (the bldg row's offset is above).
         // [orig: Entity_BuildDeathSectionTransforms @ 0x492AF0, row 'cveh'
         //  @ 0x82CFE0; Entity_BuildAndApplyBoneMatrices @ 0x48F210 ('chel'
         //  @ 0x82CFD0); Render_DestroyedSections @ 0x449EF0 ('tank' @ 0x82CFF0);

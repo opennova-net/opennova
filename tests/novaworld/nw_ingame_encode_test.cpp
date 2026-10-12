@@ -1020,7 +1020,7 @@ int test_player_sync_roundtrip() {
 	EXPECT(out.name == rep.player_name);
 	EXPECT(out.clan == rep.clan_tag);
 	EXPECT(out.team == rep.team);
-	EXPECT(out.quality == 1);
+	EXPECT(out.quality == 0); // a fresh slot reads 0 [orig: Server_PlayerAdd @0x51CD40]
 	std::printf("PASS player_sync_roundtrip\n");
 	return 0;
 }

@@ -6,11 +6,14 @@
 // the 32 cap @0x5593b5, the key hit @0x5593c4); Nwu_HandleServerHello @0x626d20
 // (the CI resolve @0x627533, PN @0x62758b, PG @0x627591, PV1 @0x627639);
 // CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0; NapiNPSession_SendAnnouncePacket @0x61fa00]
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <net/npwire/flat_tlv.h>
 #include <net/npwire/lan_discovery.h>
 #include <net/npwire/net_ports.h>
 #include <net/npwire/nw_session_framing.h>
@@ -35,7 +38,6 @@ std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
                                   uint32_t ci = kBrowseCi, uint32_t flags = 0x904u) {
     const ClientHello retail = make_jointoperations_client_hello(0);
     ServerHello hello;
-    hello.is_game_server = true;
     hello.ci = ci;
     hello.pn = retail.pn;
     hello.pg = retail.pg;
@@ -49,6 +51,25 @@ std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
     hello.np = players;
     hello.mp = max_players;
     return nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(hello));
+}
+
+// The datagram re-framed with every flat-TLV field named `unwanted` left out of its body.
+std::vector<uint8_t> without_field(const std::vector<uint8_t> &datagram, std::string_view unwanted) {
+    uint8_t opcode = 0;
+    std::vector<uint8_t> body;
+    if (!nw_decode_inbound(datagram.data(), datagram.size(), opcode, body)) return {};
+    std::vector<uint8_t> kept;
+    std::size_t pos = 0;
+    while (pos < body.size()) {
+        FlatTlvField field;
+        const std::size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+        if (next == kFlatTlvEnd) break;
+        if (field.name != unwanted)
+            kept.insert(kept.end(), body.begin() + static_cast<std::ptrdiff_t>(pos),
+                        body.begin() + static_cast<std::ptrdiff_t>(next));
+        pos = next;
+    }
+    return nw_encode_outbound(opcode, kept);
 }
 
 void test_begin_validates_the_range_and_fixes_one_identity() {
@@ -131,7 +152,6 @@ void test_reply_filter_matches_retail_admission() {
     {
         const ClientHello retail = make_jointoperations_client_hello(0);
         ServerHello hello;
-        hello.is_game_server = true;
         hello.ci = kBrowseCi;
         hello.pn = "jointoperations";
         hello.pg = retail.pg;
@@ -242,6 +262,31 @@ void test_browse_admits_only_its_network_type() {
     CHECK(capped.servers().size() == 1);
 }
 
+// D-NET-468: the browse lists a JO 0x81 whatever fields it carries. An SF-less reply reads SF
+// as 0, so its row carries no password flag; only P2's channel type gates the session.
+// [orig: Nwu_HandleServerHello @0x626d20 - SF zeroed @0x626eb7, loaded @0x62721a, kept in the
+//  session record @0x6277c2; CNapiNetwork_OnSessionDiscovered @0x4c8470 - the P2 gate
+//  @0x4c84a3..0x4c84ba, SF bit 0 the row's password flag @0x4c84f1;
+//  UI_ProcessLANSessionStateMachine @0x558de0 lists every session node]
+void test_reply_without_sf_is_listed() {
+    const std::vector<uint8_t> sf_less = without_field(server_reply("NoFlags", 2, 16), "SF");
+    CHECK(!sf_less.empty());
+    LanDiscoveryServer out;
+    CHECK(parse_lan_discovery_reply(sf_less.data(), sf_less.size(), kBrowseCi, out));
+    CHECK(out.server_name == "NoFlags");
+    CHECK(out.current_players == 2 && out.max_players == 16);
+    CHECK(!out.password_required);
+    opennova::LanDiscoveryBrowser b;
+    CHECK(b.begin(kBrowseCi, 32768, 32775, kLanConnectTypeLan));
+    CHECK(b.accept_reply(sf_less.data(), sf_less.size(), "192.168.1.20", 32768) == LanRowChange::kAdded);
+    CHECK(b.servers().size() == 1);
+    // P2 still gates it: an SF-less NovaWorld-transport host is not listed on the LAN screen.
+    const std::vector<uint8_t> nw_sf_less =
+            without_field(server_reply("NwNoFlags", 1, 8, 2, kBrowseCi, 0x404u), "SF");
+    CHECK(b.accept_reply(nw_sf_less.data(), nw_sf_less.size(), "192.168.1.21", 32768) == LanRowChange::kNone);
+    CHECK(b.servers().size() == 1);
+}
+
 } // namespace
 
 int main() {
@@ -253,6 +298,7 @@ int main() {
     test_replies_are_filtered_and_listed_at_first_sighting();
     test_window_lists_at_most_thirty_two_hosts();
     test_browse_admits_only_its_network_type();
+    test_reply_without_sf_is_listed();
     if (failures == 0) std::printf("lan_discovery_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }

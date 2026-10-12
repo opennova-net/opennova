@@ -455,7 +455,7 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "animadm") || key_is(key, "animcal")) {
                 /* Both keys copy the first value token into the one buffer the weapon's
                    `end` loads its anim map from and clears [orig: 'animadm' @ 0x543D47 and
-                   'animcal' @ 0x543D77, each strcpy into byte_252DB98 @ 0x543D5C /
+                   'animcal' @ 0x543D77, each strcpy into g_WeaponParseAnimAdmFile @ 0x543D5C /
                    0x543D8C; Anim_InitActions @ 0x541FA0 loads it, WeaponDefs_ResetParseState
                    @ 0x53FF90 clears it, both from the `end` arm @ 0x5437D0 / 0x5437DC]:
                    `animcal` is `animadm` by another name, the later line winning. */

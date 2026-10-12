@@ -151,6 +151,7 @@ public:
 	bool local_fire_admitted() const;
 
 	bool send_medic_request() override;
+	bool send_respawn_request() override;
 	// A stance key on the authority: the key's own refusals, then the C2S 0x1D
 	// on its own client connection -- every press sends, the selected stance
 	// included, and nothing latches until its own server handles the 0x1D on

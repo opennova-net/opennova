@@ -283,11 +283,12 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		// are dead code there because entitySlotPtr is null). Retail relies on the
 		// client asking for a sweep (C2S 0x32 -> S2C 0x5D) to retire the entity, so
 		// on retail a leaver's body lingers until the next sweep.
-		// NOT WITNESSED (D-NET-176): pushing that same sweep at teardown instead of
+		// NOT WITNESSED (D-NET-176 delta (a)): pushing a sweep at teardown instead of
 		// waiting to be asked. The probe3 capture shows 0x5D coinciding with
 		// disconnects, which is consistent with a sweep, but the only witnessed
-		// TRIGGER is the 0x32 request — this is a trigger relocation, and the BYTES
-		// are the witnessed builder's (@0x5160f0) exactly.
+		// TRIGGER is the 0x32 request. The body is not the witnessed builder's
+		// either: it lists the leaver's slot alone, where Server_CollectEmptyPool0Slots
+		// (@0x5160f0) lists every empty pool-0 slot below the used count.
 		DestroyEntityList leave_sweep;
 		if (freed_pool0_entity) leave_sweep.pool0_indices.push_back(freed_pool0_slot);
 		for (NapiNPConnection &other : list) {
@@ -668,13 +669,15 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	ClientAuth auth;
 	if (!parse_client_auth(body.data(), body.size(), auth)) return;
 	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
-	// CU bounds are checked during the retail TLV walk, before its envelope.
-	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750]
+	// The CU bounds end the retail TLV walk, before its envelope: a CU of 2048 bytes or more, or
+	// a 65th (every CU counts), and on the socket pass that leg returns without queuing the 0x42,
+	// so it is dropped unanswered. The JFC 9 / 10 rejections behind the test run only on the
+	// queued pass, which never sees it.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - the length bound @0x62BBEB..0x62BBF1,
+	//  the count bound @0x62BBF7..0x62BBFA, the socket-pass return @0x62C32A..0x62C331, the
+	//  queued-pass rejections @0x62C344 / @0x62C359]
 	for (size_t i = 0; i < auth.cu.size(); ++i) {
-		if (auth.cu[i].size() >= 2048 || i >= 64) {
-			reject_client_join(auth, peer, auth.cu[i].size() >= 2048 ? 9u : 10u, 0, out);
-			return;
-		}
+		if (auth.cu[i].size() >= kCuSlotBytes || i >= kCuSlots) return;
 	}
 	// Only the NVS/PN/PG/PV1 envelope is silent. The subsequent server-side
 	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
@@ -864,13 +867,14 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	conn.admission_padding_x = 0;
 	conn.admission_padding_y = 0;
 	// R2: mint the server SCRK / SK randomly (retail) unless a deterministic source is forced
-	// (golden byte-parity). [orig: make_dev_scrk / make_random_session_u32]
+	// (golden byte-parity); the SK is drawn until nonzero. [orig: make_dev_scrk /
+	//  NapiNPProtocol_HandleClientJoin @0x62BF5E -> NapiNP_GenerateSessionKey]
 	if (ctx.server_key_mint.forced) {
 		conn.server_scrk = ctx.server_key_mint.server_scrk;
 		conn.server_sk = ctx.server_key_mint.server_sk;
 	} else {
 		conn.server_scrk = make_dev_scrk();
-		conn.server_sk = make_random_session_u32();
+		conn.server_sk = make_session_key();
 	}
 	conn.phase = ConnectionPhase::Joined;
 	// The connection is up: the new-connection callback counts a login

@@ -4,7 +4,7 @@
 //     deploy, counted down per authority tick in a live MP session, frozen during
 //     pre-round and after round end, zeroed outside a session, held at -1 for a
 //     spectator, and cleared by the first validated fire
-//     [orig: Server_UpdateAllActivePlayerSlots @0x518820; Server_ProcessPlayerDeath
+//     [orig: Server_UpdateAllActivePlayerSlots @0x518820; Server_DeployPlayer
 //      @0x517740; Server_ClientFiredRound @0x50c736..0x50c75d];
 //   - the 1 Hz round-robin S2C 0x2F flag refresh [orig: sub_517B20 @0x517B20];
 //   - the violation sweep's flag carry limit [orig: Server_CheckPlayerViolations
@@ -15,7 +15,7 @@
 //   - the death consumer's live entity+44 cause read and reported-bit clear
 //     [orig: GameEvent_PlayerDeath @0x516DD0 — @0x516f4d, @0x517180..0x517206];
 //   - the roster row's spectator latch mirror [orig: Server_PlayerAdd @0x51CD83;
-//     Server_KillPlayerAndNotify @0x519E76];
+//     Server_ConvertPlayerToSpectator @0x519E76];
 //   - the armory-reuse cooldown and pre-round latch around C2S 0x2F
 //     [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790];
 //   - the 744-tick priority-target sweep [orig: EntityPool_ClearDirtyFlags @0x508E30];
@@ -52,6 +52,7 @@
 #include <runtime/world/weapon_inventory.h>
 #include <runtime/world/world.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -586,7 +587,7 @@ bool check_flag_refresh_round_robin() {
 // --------------------------------------------------------------------------
 
 bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
-		bool expect_kill) {
+		bool expect_kill, bool uplinked = false) {
 	w::World world;
 	world.rules.mp_session = true;
 	world.registry.configure_pool(0, 4);
@@ -598,6 +599,9 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 	const w::EntityHandle carrier = w::spawn_remote_player(world,
 			player_spawn(carrier_position.x, carrier_position.y, carrier_position.z));
 	world.match.upsert_player({carrier, 3, "Carrier"});
+	// A carrier that has uplinked runs the remote motor leg, which latches no
+	// dead bit [orig: the org2 edge's latch @0x4B4CB5 is the local leg's alone].
+	if (uplinked) world.ai.for_handle(carrier)->net_is_remote_peer = true;
 	w::Entity flag_seed;
 	flag_seed.kind = w::EntityKind::Item;
 	flag_seed.item_id = 4091;
@@ -654,6 +658,7 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 	if (!expect(objective_states(limit_second).size() == 1 && !saw_flag_return_feed(limit_second),
 			"the limit second carries the refresh 0x2F and no 0x1E return event"))
 		return false;
+	inmatch::Server_RouteFrameTailEdges(ctx); // host_session_pump's post-flush leg
 	inmatch::Server_TickUpdate(ctx);
 	const std::vector<ns::Datagram> next_tick = drain(remote);
 	const std::vector<ObjectiveEntityState> pair = objective_states(next_tick);
@@ -673,6 +678,229 @@ bool check_flag_carry_limit_breaks_the_carry_and_kills(uint32_t game_type_value,
 			saw_death = true;
 	return expect(saw_death && !body->alive && (body->flags & w::kEntityFlagDead) != 0,
 			"the carrier dies through the ordinary death transaction");
+}
+
+// The flag reset's death is the player body's edge on its Health -1, raised in
+// the same frame's entity update, after the tick's send pump and ahead of the
+// next receive pump (D-NET-550). A C2S 0x4D in that next pump therefore kills
+// the already dead body a second time (the team change has no dead gate) and
+// its penalty holds stand last; a C2S 0x41 there stores its unfloored timeout
+// over the death's floored holds and raises nothing (the body is dead).
+// [orig: Server_CheckPlayerViolations -- Health -1 @0x51AC94; the edge
+//  Entity_UpdateInfantryPlayerBody @0x4B4BF1..0x4B4CEA, run by
+//  Entity_UpdateAllEntities @0x52674B after Server_TickUpdate @0x5266B6;
+//  NapiNPServerMsg_0x04D_ChangeTeam @0x518F70 -- GameEvent_PlayerDeath
+//  @0x519059 / @0x5190C7, +360 @0x51906B / @0x5190D9;
+//  NapiNPServerMsg_DeathTimeoutReset -- +360 @0x51057B, +364 @0x510587]
+bool check_flag_reset_dies_ahead_of_the_next_pump(uint8_t next_pump_tag, bool uplinked) {
+	w::World world;
+	world.rules.mp_session = true;
+	world.rules.logic_authority = true;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kCaptureTheFlag;
+	world.match.configure(rules);
+	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
+	world.match.upsert_player({carrier, 3, "Carrier"});
+	if (uplinked) world.ai.for_handle(carrier)->net_is_remote_peer = true; // the remote motor leg
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4091;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position = {5.0f, 6.0f, 2.0f};
+	flag_seed.position = {30.0f, 40.0f, 2.0f};
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	world.registry.get(carrier)->mounted_child = flag;
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kCaptureTheFlag;
+	ctx.config.flag_reset_seconds = 1;
+	ctx.config.permanent_death = true; // keep the dead slot past the t7 punt
+	ctx.config.respawn_timeout = 1;
+	ctx.config.change_team_penalty_seconds = 60;
+	ctx.config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	int deaths = 0;
+	const auto count_deaths = [&]() {
+		for (const ns::Datagram &d : drain(remote))
+			if (d.tag == s2c::ENTITY_DEATH && d.body.size() == 4 &&
+					(d.body[0] | (d.body[1] << 8)) == carrier.packed)
+				++deaths;
+	};
+
+	tick_to_periodic_second(ctx); // the limit second: Health -1
+	count_deaths();
+	if (!expect(world.registry.get(carrier)->health == -1 && deaths == 0,
+			"flag-reset: the limit second stores Health -1 and raises nothing yet"))
+		return false;
+	inmatch::Server_RouteFrameTailEdges(ctx); // the frame's entity update
+	count_deaths();
+	const bool tail_death = expect(
+			deaths == 1 && (world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0,
+			"flag-reset: the frame tail's edge raises the death ahead of the next pump");
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	(void)inmatch::dispatch_session_replies(ctx.config, conn,
+			{make_protocol_message(next_pump_tag, {})}, 100,
+			ctx.np_protocol.connection_list, &world, inputs);
+	inmatch::Server_TickUpdate(ctx);
+	inmatch::Server_RouteFrameTailEdges(ctx);
+	count_deaths();
+	if (next_pump_tag == c2s::TEAM_CHANGE_REQUEST)
+		return expect(deaths == 2 && world.registry.get(carrier)->team == 2 &&
+						conn.link.respawn_delay_seconds >= 59,
+				"flag-reset: the next pump's team change kills again and its penalty stands") &&
+				tail_death;
+	return expect(deaths == 1 && conn.link.respawn_delay_seconds == 1 &&
+					conn.link.spawn_target_hold_seconds == 1,
+			"flag-reset: the next pump's 0x41 stores its unfloored timeout over the death's holds") &&
+			tail_death;
+}
+
+// The flag reset's death credits the carrier's +0x178 as the edge leaves it:
+// the edge clears it unless a non-lethal hit staged the death selection
+// (+0x2C0), so a carrier an enemy wounded first scores that enemy a kill.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B4C72..0x4B4C8D; GameEvent_PlayerDeath
+//  reads +0x178 @0x516F47, the scoring @0x516FB0]
+bool check_flag_reset_credits_a_staged_attacker(bool staged) {
+	w::World world;
+	world.rules.mp_session = true;
+	world.rules.logic_authority = true;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kCaptureTheFlag;
+	world.match.configure(rules);
+	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
+	const w::EntityHandle shooter =
+			w::spawn_remote_player(world, player_spawn(60.0f, 40.0f, 2.0f, /*team=*/2));
+	world.match.upsert_player({carrier, 3, "Carrier"});
+	world.match.upsert_player({shooter, 4, "Shooter"});
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4091;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position = {5.0f, 6.0f, 2.0f};
+	flag_seed.position = {30.0f, 40.0f, 2.0f};
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	w::Entity *body = world.registry.get(carrier);
+	body->mounted_child = flag;
+	// The earlier non-lethal hit: its shooter and, if staged, its death clip.
+	body->last_attacker = shooter;
+	body->death_anim_state = staged
+			? w::compute_death_anim_state(0, 0, w::death_cause::kGeneric)
+			: 0;
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kCaptureTheFlag;
+	ctx.config.flag_reset_seconds = 1;
+	ctx.config.permanent_death = true;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+	tick_to_periodic_second(ctx);
+	inmatch::Server_RouteFrameTailEdges(ctx);
+	const w::MatchPlayer *stats = world.match.player(shooter);
+	const int32_t kills = stats != nullptr ? stats->stats[w::MatchStats::kEnemyKills] : -1;
+	return expect((world.registry.get(carrier)->flags & w::kEntityFlagDead) != 0 &&
+					kills == (staged ? 1 : 0),
+			staged ? "flag-reset: a staged hit's shooter is credited with the kill"
+			       : "flag-reset: an unstaged edge clears the attacker, so no kill is credited");
+}
+
+// A flag reset in a frame whose entity update does not run (the pre-round
+// phase) leaves its edge waiting; a C2S 0x4D before the next entity update
+// kills the body and latches its dead bit, so the waiting edge, which skips a
+// dead body, raises no second death. [orig: Entity_UpdateInfantryPlayerBody
+// -- the dead bit @0x4B4BFE; NapiNPServerMsg_0x04D_ChangeTeam -- Flags |= 2
+// @0x519061 / @0x5190CF]
+bool check_flag_reset_waiting_edge_skips_a_dead_body() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.rules.logic_authority = true;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::MatchRules rules;
+	rules.game_type = game_type::kCaptureTheFlag;
+	world.match.configure(rules);
+	const w::EntityHandle carrier = w::spawn_remote_player(world, player_spawn(30.0f, 40.0f, 2.0f));
+	world.match.upsert_player({carrier, 3, "Carrier"});
+	w::Entity flag_seed;
+	flag_seed.kind = w::EntityKind::Item;
+	flag_seed.item_id = 4091;
+	flag_seed.has_item_def = true;
+	flag_seed.alive = true;
+	flag_seed.spawn_position = {5.0f, 6.0f, 2.0f};
+	flag_seed.position = {30.0f, 40.0f, 2.0f};
+	flag_seed.primary_occupant = carrier;
+	flag_seed.flags = w::kEntityFlagCarried;
+	const w::EntityHandle flag = world.registry.spawn(1, flag_seed);
+	world.registry.get(carrier)->mounted_child = flag;
+	world.preround_delay_seconds = 2; // the limit second's entity update holds
+
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kCaptureTheFlag;
+	ctx.config.flag_reset_seconds = 1;
+	ctx.config.permanent_death = true;
+	ctx.config.change_team_penalty_seconds = 60;
+	ctx.config.mp_attributes |= inmatch::GameConfig::kMpAttribTeamChoose;
+	ns::UdpSessionTransport remote(ns::UdpSessionTransport::Role::Host);
+	ctx.np_protocol.connection_list.push_back(
+			make_seeded_conn(3, 1, &remote, ns::TransportMode::Client, carrier, true));
+	inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+	int deaths = 0;
+	const auto count_deaths = [&]() {
+		for (const ns::Datagram &d : drain(remote))
+			if (d.tag == s2c::ENTITY_DEATH && d.body.size() == 4 &&
+					(d.body[0] | (d.body[1] << 8)) == carrier.packed)
+				++deaths;
+	};
+
+	tick_to_periodic_second(ctx); // the limit second, in the pre-round
+	inmatch::Server_RouteFrameTailEdges(ctx);
+	count_deaths();
+	if (!expect(world.registry.get(carrier)->health == -1 && deaths == 0 &&
+					!ctx.entity_update_ran,
+			"waiting-edge: the pre-round limit second stores Health -1 and its edge waits"))
+		return false;
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	(void)inmatch::dispatch_session_replies(ctx.config, conn,
+			{make_protocol_message(c2s::TEAM_CHANGE_REQUEST, {})}, 100,
+			ctx.np_protocol.connection_list, &world, inputs);
+	count_deaths();
+	if (!expect(deaths == 1, "waiting-edge: the team change kills the waiting body"))
+		return false;
+	// Run until an entity update has run and its tail has drained.
+	for (int frame = 0; frame < 400 && !ctx.entity_update_ran; ++frame) {
+		inmatch::Server_TickUpdate(ctx);
+		inmatch::Server_RouteFrameTailEdges(ctx);
+	}
+	inmatch::Server_TickUpdate(ctx);
+	inmatch::Server_RouteFrameTailEdges(ctx);
+	count_deaths();
+	return expect(ctx.entity_update_ran && deaths == 1 &&
+					conn.link.respawn_delay_seconds >= 55,
+			"waiting-edge: the first entity update after it skips the dead body");
 }
 
 // --------------------------------------------------------------------------
@@ -894,7 +1122,7 @@ bool check_death_consumer_reads_and_clears_the_reported_cause_bit() {
 
 // The runtime spectator convert and its reverse write the same roster latch
 // the end-round winner award reads, so a spectator-flagged top scorer is
-// skipped [orig: Server_KillPlayerAndNotify @0x519E76; Match::finish].
+// skipped [orig: Server_ConvertPlayerToSpectator @0x519E76; Match::finish].
 bool check_spectator_latch_mirrors_onto_the_roster_row() {
 	w::World world;
 	world.rules.mp_session = true;
@@ -1229,7 +1457,7 @@ bool check_kit_weight_recompute() {
 // Every deploy that is not a medic revive rebuilds the slot's weapon table, ammo
 // pools and clips from the last accepted 0x2F, then re-sends the 0x5A built from
 // the rebuilt table; a revive keeps the kit the player died with.
-// [orig: Server_ProcessPlayerDeath @0x5178C5 (the revive test), @0x5178E1
+// [orig: Server_DeployPlayer @0x5178C5 (the revive test), @0x5178E1
 //  (PlayerSlot_InitWeaponsFromLoadout @0x515550), @0x5178F2
 //  (Server_SendWeaponSlotListToPlayer); the buffer NapiNPServerMsg_HandlePlayerLoadout
 //  @0x515CBD..0x515D83]
@@ -1303,7 +1531,7 @@ bool check_deploy_rebuilds_the_kit_from_the_loadout_buffer() {
 		return false;
 
 	// A medic revive's deploy keeps the spent kit (no rebuild) and sends no 0x5A,
-	// only the seed reroll (D-NET-379) [orig: Server_ProcessPlayerDeath @0x5178C5
+	// only the seed reroll (D-NET-379) [orig: Server_DeployPlayer @0x5178C5
 	// skips @0x5178E1 and @0x5178F2; the 0x61 @0x51796D].
 	client_tick = conn.tick_seed;
 	spend_clip();
@@ -1361,23 +1589,23 @@ bool check_try_queue_evicts_on_failed_pick() {
 		return false;
 	};
 	const w::EntityHandle p0 = make_player(1);
-	if (!expect(waves.try_queue(world, zone_a, p0) && holds(zone_a, p0),
+	if (!expect(waves.try_queue(zone_a, p0, 1) && holds(zone_a, p0),
 			"the first pick queues at zone A"))
 		return false;
 	for (int i = 0; i < 8; ++i) {
-		if (!expect(waves.try_queue(world, zone_b, make_player(1)), "zone B fills to eight"))
+		if (!expect(waves.try_queue(zone_b, make_player(1), 1), "zone B fills to eight"))
 			return false;
 	}
-	if (!expect(!waves.try_queue(world, zone_b, p0) && !holds(zone_a, p0) && !holds(zone_b, p0),
+	if (!expect(!waves.try_queue(zone_b, p0, 1) && !holds(zone_a, p0) && !holds(zone_b, p0),
 			"a full-row pick fails AND evicts the player from its previous zone"))
 		return false;
-	if (!expect(waves.try_queue(world, zone_a, p0) && holds(zone_a, p0),
+	if (!expect(waves.try_queue(zone_a, p0, 1) && holds(zone_a, p0),
 			"the player re-queues at zone A"))
 		return false;
-	if (!expect(!waves.try_queue(world, zone_c, p0) && !holds(zone_a, p0) && !holds(zone_c, p0),
+	if (!expect(!waves.try_queue(zone_c, p0, 1) && !holds(zone_a, p0) && !holds(zone_c, p0),
 			"an other-team zone pick fails AND evicts the player everywhere"))
 		return false;
-	if (!expect(waves.try_queue(world, zone_a, p0) && !waves.try_queue(world, zone_a, p0) &&
+	if (!expect(waves.try_queue(zone_a, p0, 1) && !waves.try_queue(zone_a, p0, 1) &&
 			holds(zone_a, p0) && row(zone_a)->queued.size() == 1,
 			"a duplicate pick fails but keeps the player in that row"))
 		return false;
@@ -1415,6 +1643,8 @@ bool check_respawn_pick_admission() {
 	conn.burst.spawned = true;
 	conn.link.owned_entity = player;
 	conn.link.respawn_pending = true;
+	conn.assigned_team = 1; // the slot team (+416) the handler reads
+	conn.assigned_team_valid = true;
 	conn.reply.player_slot = 0;
 	auto reset_player = [&]() {
 		w::Entity *entity = world.registry.get(player);
@@ -1507,6 +1737,8 @@ bool check_revived_pick_takes_no_target() {
 	conn.phase = inmatch::ConnectionPhase::InMatch;
 	conn.burst.spawned = true;
 	conn.link.owned_entity = player;
+	conn.assigned_team = 1; // the slot team (+416) the handler reads
+	conn.assigned_team_valid = true;
 	conn.reply.player_slot = 0;
 	auto reset_player = [&](bool revived) {
 		w::Entity *entity = world.registry.get(player);
@@ -1618,6 +1850,8 @@ bool check_spectator_pick_legs() {
 	conn.burst.spawned = true;
 	conn.link.owned_entity = player;
 	conn.link.spectator = true;
+	conn.assigned_team = 0; // a spectator slot's +416
+	conn.assigned_team_valid = true;
 	conn.reply.player_slot = 0;
 	auto reset_player = [&]() {
 		w::Entity *entity = world.registry.get(player);
@@ -1683,6 +1917,211 @@ bool check_spectator_pick_legs() {
 	(void)dispatch(w::kDeployPickNone);
 	return expect(world.registry.get(player)->health > 0,
 			"on an odd tick it asks as team 1, which holds none");
+}
+
+// D-NET-464: the C2S 0x0E's team base is the slot team (+416), not the entity's,
+// and the auto pick's frontier runs through the pick's resolve against the
+// requester entity's team like any handle, a miss refusing. A script team write
+// to a player body splits the two (Entity_SetTeamByNetId stores the entity byte
+// alone). [orig: Server_ProcessClientRequestRespawn @0x519B88, the auto pick's
+//  zone @0x519BDE, the frontier's handle @0x519C3D..0x519C54, the resolve
+//  @0x519C7C and its miss @0x519C88, Entity_HasAliveEntityOfTeam @0x519CA8, the
+//  zone team @0x519D4A; Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
+bool check_split_slot_team_pick_legs() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(2, 4);
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	auto make_zone = [&](uint8_t team, uint8_t number, float x) {
+		w::Entity z;
+		z.kind = w::EntityKind::Item;
+		z.team = team;
+		z.alive = true;
+		z.is_spawn_point = true;
+		z.zone_number = number;
+		z.zone_control = 0x10000;
+		z.position = {x, 60.0f, 0.0f};
+		return world.registry.spawn(2, z);
+	};
+	make_zone(1, 0, 50.0f); // the slot team's unnumbered zone (no wave rows)
+	const w::EntityHandle other = make_zone(2, 0, 70.0f);
+	const w::EntityHandle numbered = make_zone(1, 3, 90.0f);
+	inmatch::GameConfig config;
+	config.game_type = game_type::kObjectiveCoop; // the auto pick takes the unnumbered zone
+	std::vector<inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.assigned_team = 1;
+	conn.assigned_team_valid = true;
+	auto reset_player = [&](uint8_t entity_team) {
+		w::Entity *entity = world.registry.get(player);
+		entity->alive = false;
+		entity->health = 0;
+		entity->team = entity_team;
+		entity->position = {0.0f, 0.0f, 0.0f};
+		entity->flags |= w::kEntityFlagDead;
+		entity->engine_flags |= w::kEntityFlagDead;
+		conn.link.respawn_pending = true;
+		conn.link.respawn_delay_seconds = 0;
+		conn.link.spawn_target_hold_seconds = 0;
+	};
+	auto dispatch = [&](uint16_t pick) {
+		return inmatch::dispatch_session_replies(config, conn,
+				{make_protocol_message(c2s::RESPAWN_REQUEST,
+						{static_cast<uint8_t>(pick), static_cast<uint8_t>(pick >> 8)})},
+				100, roster, &world);
+	};
+	const w::Entity *body = world.registry.get(player);
+	// Slot team 1, entity team 2: the frontier is team 1's zone, which the resolve refuses.
+	reset_player(2);
+	if (!expect(dispatch(w::kDeployPickAutoTeam).empty() && body->health == 0,
+			"the auto pick looks up the slot team's zone and the entity team refuses it"))
+		return false;
+	// A teamless entity passes the resolve: the slot team's zone deploys.
+	reset_player(0);
+	(void)dispatch(w::kDeployPickAutoTeam);
+	if (!expect(body->health > 0 && body->position.x == 50.0f,
+			"a teamless entity's auto pick deploys at the slot team's zone"))
+		return false;
+	// The numbered zone's team match reads the slot team.
+	reset_player(0);
+	(void)dispatch(numbered.packed);
+	if (!expect(body->health > 0, "a picked numbered zone matches the slot team"))
+		return false;
+	// `nodefaultspawnpoints` asks for the slot team's zones, not the entity team's.
+	config.default_spawn_requires_no_team_zone = 1;
+	world.registry.get(other)->zone_number = 2;
+	world.registry.get(other)->zone_control = 0;
+	reset_player(2);
+	return expect(dispatch(w::kDeployPickNone).empty() && body->health == 0,
+			"Default Spawn is refused while the slot team holds a zone");
+}
+
+// D-NET-581: the spawn-wave list's rows hold player slots and read the slot
+// team (+416): the picked row's team is matched against it, a miss refusing a
+// pick whose zone has a row, and the S2C 0x6E counts and lists only its rows.
+// [orig: SpawnWaveList_TryQueuePlayer @0x52A4BF, the compare @0x52A4C5..0x52A4C8,
+//  the call @0x519D8F, SpawnWaveList_HasEntryForZone @0x519DAE;
+//  NetPacket_WriteSpawnWaveStatus @0x5074CF, the row filter @0x507539]
+bool check_split_slot_team_wave_rows() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(2, 4);
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	auto make_zone = [&](uint8_t team) { // an unnumbered zone, which the wave list rows
+		w::Entity z;
+		z.kind = w::EntityKind::Item;
+		z.team = team;
+		z.alive = true;
+		z.is_spawn_point = true;
+		z.zone_control = 0x10000;
+		return world.registry.spawn(2, z);
+	};
+	const w::EntityHandle blue = make_zone(1);
+	const w::EntityHandle red = make_zone(2);
+	world.zones.spawn_waves.build_from_mission(world, 5, 5);
+	inmatch::GameConfig config;
+	config.game_type = game_type::kTeamDeathmatch;
+	std::vector<inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.assigned_team = 1;
+	conn.assigned_team_valid = true;
+	auto pick = [&](uint8_t entity_team, w::EntityHandle zone) {
+		w::Entity *entity = world.registry.get(player);
+		entity->team = entity_team;
+		conn.link.respawn_pending = true;
+		return inmatch::dispatch_session_replies(config, conn,
+				{make_protocol_message(c2s::RESPAWN_REQUEST,
+						{static_cast<uint8_t>(zone.packed), static_cast<uint8_t>(zone.packed >> 8)})},
+				100, roster, &world);
+	};
+	auto queued_at = [&](w::EntityHandle zone) {
+		for (const w::SpawnWaveEntry &entry : world.zones.spawn_waves.entries())
+			if (entry.zone == zone)
+				return std::find(entry.queued.begin(), entry.queued.end(), player) !=
+						entry.queued.end();
+		return false;
+	};
+	// A teamless entity resolves the slot team's zone; its row matches the slot team.
+	const std::vector<ProtocolMessage> queued = pick(0, blue);
+	if (!expect(queued.size() == 1 && queued[0].tag == s2c::SPAWN_WAVE_STATUS &&
+					queued_at(blue) && queued[0].payload.size() >= 3 &&
+					queued[0].payload[0] == 1 &&
+					queued[0].payload[1] == static_cast<uint8_t>(blue.packed) &&
+					queued[0].payload[2] == static_cast<uint8_t>(blue.packed >> 8),
+			"a teamless entity queues at the slot team's row and the 0x6E lists that row"))
+		return false;
+	// Entity team 2 resolves its own team's zone, whose row misses the slot team: refused.
+	if (!expect(pick(2, red).empty() && !queued_at(red) && !queued_at(blue),
+			"the other team's row refuses the slot and evicts it everywhere"))
+		return false;
+	// The 0x6E lists the slot team's rows whatever the entity's team.
+	const std::vector<uint8_t> status = inmatch::build_spawn_wave_status_body(world, conn);
+	return expect(status.size() >= 3 && status[0] == 1 &&
+					status[1] == static_cast<uint8_t>(blue.packed) &&
+					status[2] == static_cast<uint8_t>(blue.packed >> 8),
+			"the 0x6E counts and lists the slot team's rows");
+}
+
+// D-NET-582: the deploy placement's no-pick arm positions as the slot team
+// (+416), not the entity's, so a split slot's Default Spawn takes the slot
+// team's Deaths gate and start marker. [orig: Server_PositionPlayerForSpawn
+//  @0x50CF86..0x50CF92, the slot team @0x50D183, the Deaths gate @0x50D1DB,
+//  the team markers @0x50D266]
+bool check_split_slot_team_default_spawn_pose() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(3, 4);
+	for (const int32_t item_id : {6096, 6097}) { // team 1's start marker, team 2's
+		w::Entity start;
+		start.kind = w::EntityKind::Marker;
+		start.item_id = item_id;
+		start.position = {item_id == 6096 ? 100.0f : 200.0f, 0.0f, 0.0f};
+		world.registry.spawn(3, start);
+	}
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.team = 2; // a script team write split the body from its slot
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	inmatch::GameConfig config;
+	config.game_type = game_type::kTeamDeathmatch;
+	std::vector<inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.link.respawn_pending = true;
+	conn.assigned_team = 1;
+	conn.assigned_team_valid = true;
+	(void)inmatch::dispatch_session_replies(config, conn,
+			{make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF})}, 100, roster, &world);
+	const w::Entity *body = world.registry.get(player);
+	return expect(body->health > 0 && body->position.x == 100.0f,
+			"a split slot's Default Spawn lands on the slot team's start marker");
 }
 
 bool check_shared_loaded_ammo_fire_and_reload() {
@@ -1883,6 +2322,15 @@ int main() {
 	ok = check_server_tick_leaves_the_pending_sounds() && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true) && ok;
 	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kTeamDeathmatch, false) && ok;
+	ok = check_flag_carry_limit_breaks_the_carry_and_kills(game_type::kCaptureTheFlag, true,
+			/*uplinked=*/true) && ok;
+	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::TEAM_CHANGE_REQUEST, false) && ok;
+	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::DEATH_TIMEOUT_RESET, false) && ok;
+	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::TEAM_CHANGE_REQUEST, true) && ok;
+	ok = check_flag_reset_dies_ahead_of_the_next_pump(c2s::DEATH_TIMEOUT_RESET, true) && ok;
+	ok = check_flag_reset_waiting_edge_skips_a_dead_body() && ok;
+	ok = check_flag_reset_credits_a_staged_attacker(true) && ok;
+	ok = check_flag_reset_credits_a_staged_attacker(false) && ok;
 	ok = check_team_downed_resend() && ok;
 	ok = check_death_consumer_reads_and_clears_the_reported_cause_bit() && ok;
 	ok = check_spectator_latch_mirrors_onto_the_roster_row() && ok;
@@ -1894,6 +2342,9 @@ int main() {
 	ok = check_respawn_pick_admission() && ok;
 	ok = check_revived_pick_takes_no_target() && ok;
 	ok = check_spectator_pick_legs() && ok;
+	ok = check_split_slot_team_pick_legs() && ok;
+	ok = check_split_slot_team_default_spawn_pose() && ok;
+	ok = check_split_slot_team_wave_rows() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }

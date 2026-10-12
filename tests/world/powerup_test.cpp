@@ -2,10 +2,10 @@
 // weapon / health / class-1 / per-class / allammo arms and its consume
 // outcomes, the authority's refusal walks, the authority-only respawn
 // countdown, the remote-player grants and the S2C 0x35 weapon fan and receive.
-// [orig: sub_442D00 @0x442D00; PowerupAction_Pickup @0x4428A0;
+// [orig: PowerupEntity_InitFromDef @0x442D00; PowerupAction_Pickup @0x4428A0;
 //  WeaponSlot_RecalculateScore @0x542450; WeaponSlot_InitFromAvatarDef
 //  @0x542730; Server_BroadcastWeaponOverlayUpdate @0x509FC0; sub_4E03D0
-//  @0x4E03D0; Entity_TickFireTimer @0x442850; PowerupAction_Respawn @0x442B40]
+//  @0x4E03D0; Powerup_TickRespawn @0x442850; PowerupAction_Respawn @0x442B40]
 #include <runtime/world/powerup.h>
 
 #include <formats/def/def.h>

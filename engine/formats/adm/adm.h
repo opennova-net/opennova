@@ -21,7 +21,7 @@ inline constexpr int ADM_MAX_VARIANTS = 8;
 // g_AnimStateNameTable @0x8135F0]. A key of five characters or fewer names no
 // slot here. That is our rule: retail's lookup reads on past such a key's end
 // into the rest of its line, which the tokenizer cuts in place
-// (Terrain_TokenizeConfigLine @0x53CB60), and no table carries one.
+// (Config_TokenizeLine @0x53CB60), and no table carries one.
 inline std::string_view adm_slot_name(std::string_view key) {
     return key.size() > 5 ? key.substr(5) : std::string_view();
 }

@@ -43,7 +43,7 @@ struct BinaryConfig {
 		Entry terminator;
 		// Its count word is 0xFFFFFFFF: the reader takes no block of entries for it and points its section
 		// at the next label's block [orig: @ 0x75ea73, the element loop skipped and the pointer set
-		// @ 0x75ea6f; @ 0x75eb11; sub_75E850 @ 0x75e874]. Its entries are none.
+		// @ 0x75ea6f; @ 0x75eb11; ConfigFile_CountValueBytes @ 0x75e874]. Its entries are none.
 		bool count_minus_one = false;
 	};
 
@@ -91,9 +91,10 @@ bool encode_binary_config(const BinaryConfig &config, std::vector<uint8_t> &out,
 // the walk going on into the next label's block (a label counted 0xFFFFFFFF starts there); past the last
 // block, the allocation's slack the parse never wrote, the entries end. As the reader's, the block is one
 // that every section shares (ConfigSection::block), each section a run of it, so the storage stays linear
-// however far the walks run. Every entry's value pointer is
-// set, so the walk goes past an entry of no value [orig: @ 0x75eb1e]. A label's name is lowercased in the
-// string table itself [orig: strlwr @ 0x75e9d4], so an entry's name or a string value of the same string
+// however far the walks run. Every entry's value pointer is set, so the walk goes past an entry of no value
+// [orig: @ 0x75eb1e], and the pointer of an entry of no value meets the next value laid out
+// (ConfigEntry::pointed_entry), which configfile::read_binary_entry reads. A label's name is lowercased in
+// the string table itself [orig: strlwr @ 0x75e9d4], so an entry's name or a string value of the same string
 // reads lowercased too. A value keeps its flags as the type the accessors test: 1 an integer, 2 a float's
 // bits, any other read as text and as the number 0 [orig: @ 0x75eb40; Effect_GetParamValue_0 @ 0x75fb2e /
 // @ 0x75fb37, @ 0x75fb39..0x75fb58]; of a set holding 4 and a word in the table the text is the string

@@ -144,7 +144,7 @@ int main() {
 	w::Entity *restored = world.registry.get(joiner_handle);
 	// Leaving spectator mode is a deploy: the reset never touches entity+292 and
 	// the deploy leg re-seeds the 620-tick spawn protection
-	// [orig: Server_ProcessPlayerDeath @0x517937].
+	// [orig: Server_DeployPlayer @0x517937].
 	if (!expect(
 			!joiner_conn.link.spectator && restored != nullptr &&
 			restored->team == 1 && (restored->flags & 1u) == 0 &&
@@ -721,7 +721,7 @@ int main() {
 		// ceiling, never a store. Out of a session at the word -1 the local player's
 		// ceiling is twice the def hp as a 16-bit sum: 100 deploys at 200, but 20000
 		// wraps to -25536, so a dead player's -1 stays put (the dead bit still clears).
-		// [orig: Server_ProcessPlayerDeath -> Entity_RaiseHealthToMax @0x51782F;
+		// [orig: Server_DeployPlayer -> Entity_RaiseHealthToMax @0x51782F;
 		//  Entity_ResetToSpawnState @0x4B97BC; Entity_RaiseHealthToMax @0x43C290 (the
 		//  signed jge @0x43C2A8); Entity_GetMaxHealthWithDifficulty @0x43B8D3..0x43B8D8]
 		bare_world->rules.difficulty = -1;
@@ -745,7 +745,7 @@ int main() {
 
 		// D-PWR-10: a swept Player row word of 0 is the deploy's ceiling, so the raises
 		// leave the hp-0 body's 1, whatever the body's health_max (here the unswept
-		// spawn's 100). [orig: Server_ProcessPlayerDeath -> Entity_RaiseHealthToMax
+		// spawn's 100). [orig: Server_DeployPlayer -> Entity_RaiseHealthToMax
 		//  @0x51782F; Entity_ResetToSpawnState @0x4B97BC; Entity_InitFromModel @0x40DCA6]
 		bare_world->tables.player.item_hp = 0;
 		body->health = 1;

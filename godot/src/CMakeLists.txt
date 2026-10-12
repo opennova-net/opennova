@@ -304,6 +304,7 @@ add_library(${TARGET_NAME} SHARED
     player/local_player_visuals.cpp
     player/player_input_router.cpp
     player/player_move_intent.cpp
+    player/player_info_kit_restore.cpp
     player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp

@@ -186,9 +186,18 @@ bool run_in_match_spawn_edge() {
 	h.role.poll_preload();
 	if (!expect(h.role.started() && h.socket.sends == 1,
 			"in-match: the preload hello armed the latch")) return false;
+	// An Attack & Defend session (g_GameType 0x10002) whose one TARGET-attrib
+	// item belongs to team 2, against L's seeded team 0.
 	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
-	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u);
 	if (!expect(h.role.runtime->in_match(), "in-match: seeded runtime is InMatch")) return false;
+	h.kernel->world.registry.configure_pool(1, 4);
+	w::Entity target;
+	target.has_item_def = true;
+	target.item_attrib = 0x8000u;
+	target.team = 2;
+	h.kernel->world.registry.spawn(1, target);
 	h.weapon().fire_held = true;
 	h.weapon().fire_pressed = true;
 	h.weapon().reload_pressed = true;
@@ -205,12 +214,119 @@ bool run_in_match_spawn_edge() {
 	if (!expect(!h.weapon().fire_held && !h.weapon().fire_pressed &&
 					!h.weapon().reload_pressed,
 			"in-match frame: join-wait weapon latches cleared")) return false;
+	// The mission start's A&D latch ran with no L; the spawn edge latches
+	// against L's team: another team's target attacks (2) [orig: Game_LatchAttackDefendRole,
+	// the joiner's call @0x5260C1 after Player_InitPlayer @0x525BBC].
+	if (!expect(h.kernel->local.attack_defend_role == 2,
+			"in-match frame: the A&D role latched at the spawn edge")) return false;
 
 	// Frame 2: the edge is a one-shot.
 	const w::EntityHandle L = h.kernel->world.cached.local_player;
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "frame 2: still spawned")) return false;
 	return expect(h.kernel->world.cached.local_player == L, "frame 2: no re-spawn");
+}
+
+// The spawn edge's A&D latch reads L's team from its self record: a team-2
+// L against a team-2 target defends (1); the same target against the seeded
+// team-0 L of run_in_match_spawn_edge attacks (2) [orig: Game_LatchAttackDefendRole --
+// `cmp al, [edx+162h]; setnz; add ecx, 1` @0x5241A3..0x5241AC].
+bool run_spawn_edge_latch_reads_self_team() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u, /*tick_seed=*/0, /*replay_mode=*/true,
+	                             /*self_team=*/2);
+	h.kernel->world.registry.configure_pool(1, 4);
+	w::Entity target;
+	target.has_item_def = true;
+	target.item_attrib = 0x8000u;
+	target.team = 2;
+	h.kernel->world.registry.spawn(1, target);
+	h.role.run_tick(h.input);
+	const w::Entity *L = h.kernel->local.player();
+	if (!expect(h.role.local_spawned() && L != nullptr && L->team == 2,
+			"own team: L spawned with its self record's team")) return false;
+	return expect(h.kernel->local.attack_defend_role == 1,
+			"own team: the latch defends against its own team's target");
+}
+
+// A TARGET whose team an S2C 0x50 moves in the spawn frame: the latch reads
+// the team the frame's mirror applied, as retail's mission start latches after
+// its wait loop pumped every message before it [orig: Game_StartMission --
+// NapiClient_WaitForGameStart (the call @0x524E29; its receive pump @0x42CC88),
+// then the Game_LatchAttackDefendRole call @0x5260C1; NapiNPClientMsg_TeamAssign's store
+// @0x4319EE].
+bool run_spawn_edge_latch_reads_the_frames_target_team() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u);
+	h.kernel->world.registry.configure_pool(1, 4);
+	w::Entity target;
+	target.has_item_def = true;
+	target.item_attrib = 0x8000u;
+	target.team = 2;
+	target.spawn_origin = 0; // a placed row the mirror follows
+	const w::EntityHandle target_h = h.kernel->world.registry.spawn(1, target);
+	TeamAssign assign;
+	assign.entity_handle = target_h.packed;
+	assign.team = 0; // L's own seeded team
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input); // the spawn frame folds the 0x50 too
+	const w::Entity *t = h.kernel->world.registry.get(target_h);
+	if (!expect(h.role.local_spawned() && t != nullptr && t->team == 0,
+			"frame team: L spawned and the frame's mirror moved the target to team 0"))
+		return false;
+	return expect(h.kernel->local.attack_defend_role == 1,
+			"frame team: the latch reads the target's team after the frame's 0x50");
+}
+
+// A self S2C 0x50 folded before the spawn edge: retail's handler stores the team
+// on the joiner's own dcb whether or not its mission start has made it the local
+// entity, so Player_InitPlayer and the A&D latch read the new team; L spawns on
+// it (seeded team 0, moved to 2) and defends a team-2 target (1, where the seeded
+// team attacks it, 2) [orig: NapiNPClientMsg_TeamAssign @0x431910 - the Team
+// store @0x4319EE; Player_InitPlayer @0x4E15F0 - @0x4E1809; Game_StartMission -
+// the Game_LatchAttackDefendRole call @0x5260C1].
+bool run_spawn_edge_takes_a_self_team_assign() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u);
+	h.kernel->world.registry.configure_pool(1, 4);
+	w::Entity target;
+	target.has_item_def = true;
+	target.item_attrib = 0x8000u;
+	target.team = 2;
+	h.kernel->world.registry.spawn(1, target);
+	TeamAssign assign;
+	assign.entity_handle = 0x0005; // the joiner's own H
+	assign.team = 2;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input); // the net frame folds the 0x50 ahead of the spawn edge
+	const w::Entity *L = h.kernel->local.player();
+	if (!expect(h.role.local_spawned() && L != nullptr && L->team == 2,
+			"self team: L spawns on the team a pre-spawn self 0x50 assigned"))
+		return false;
+	if (!expect(h.kernel->world.round_sim.local_team == 2,
+			"self team: the round sim's team agrees"))
+		return false;
+	return expect(h.kernel->local.attack_defend_role == 1,
+			"self team: the spawn edge's latch reads the assigned team");
 }
 
 // L spawns on the in-match edge, after the boot's definition sweeps: the edge
@@ -721,6 +837,11 @@ bool run_request_turns_l_before_the_0x26() {
 	//  @0x435c5e..0x435c61]
 	constexpr int32_t moved = 0x0F000000;
 	h.kernel->local.input.look_heading = moved;
+	// A sitex attach runs no camera reset, so the echo keeps raised binoculars;
+	// neither does the detach (D-WPN-49). [orig: Entity_AttachToVehicleSlot
+	//  type 1 @0x4946e3..0x494746 (the resets @0x4947ae / @0x4948b4 are types 2 /
+	//  5); Entity_DetachFromVehicle @0x4355F0 writes no g_BinocularsToggle]
+	h.kernel->local.view.binoculars_requested = true;
 	auto &self = h.role.runtime->state().upsert(self_handle);
 	self.cls = EntityClass::Player;
 	self.type_id = w::kPlayerInfantryTypeId;
@@ -729,9 +850,19 @@ bool run_request_turns_l_before_the_0x26() {
 	self.state_flags = w::kEntityFlagMounted;
 	self.state_flags_known = true;
 	h.role.run_tick(h.input);
-	return expect(h.kernel->local.player()->mount_target == vh &&
-			body->heading == moved && h.kernel->local.input.look_heading == moved,
-			"the host's echo seats L and writes no yaw");
+	if (!expect(h.kernel->local.player()->mount_target == vh &&
+			body->heading == moved && h.kernel->local.input.look_heading == moved &&
+			h.kernel->local.view.binoculars_requested,
+			"the host's echo seats L, writes no yaw and keeps the binoculars"))
+		return false;
+	auto &detached = h.role.runtime->state().upsert(self_handle);
+	detached.carrier_handle = w::EntityHandle::kInvalid;
+	detached.mount_bone = 0;
+	detached.state_flags = 0;
+	h.role.run_tick(h.input);
+	return expect(!h.kernel->local.player()->mounted &&
+			h.kernel->local.view.binoculars_requested,
+			"the host's detach echo keeps the binoculars");
 }
 
 // A remote player has only a decoded pool-0 row on a joiner. Its current
@@ -1556,7 +1687,7 @@ bool run_world_state_load_resnaps_local_pose() {
 // record's respawn edge, facing the record's heading byte, through the same
 // respawn reset as any deploy, with the kit it died with (no grant folded).
 // [orig: NetPacket_SerializePlayerState @0x4C1109..0x4C114C -> Game_InitNewRound;
-//  Server_ProcessPlayerDeath @0x5178C5]
+//  Server_DeployPlayer @0x5178C5]
 bool run_revive_deploy_respawns_l_on_its_record_edge() {
 	Harness h;
 	h.role.poll_preload();
@@ -1666,6 +1797,83 @@ bool run_proxy_rendezvous_pump() {
 	return expect(quiet.sent.size() == 1, "proxy: no rendezvous without all six fields");
 }
 
+// The Respawn key on a joiner (dispatch 55): past the live-player gate the
+// input reset runs (with L's def bound: the input word cleared, the pack over
+// it, a moving state dropped to the idle 43) and, in a session, one bodiless
+// C2S 0x41 leaves at the frame's send block; a dead L sends nothing, and out
+// of a session the reset runs alone. [orig: Input_HandleActionBinding case 55
+// -- the dead bit @0x49AD7B, Player_ResetLocalInput @0x49B20B, is_in_session @0x49B210,
+// is_mp_session_peer @0x49B21D, NetPacket_SendRequestRespawn @0x49B22A]
+bool run_respawn_key_resets_input_and_sends_0x41() {
+	std::vector<opennova::def::DefItemDef> rows(1);
+	rows[0].id = static_cast<int>(w::kPlayerInfantryTypeId) +
+			static_cast<int>(opennova::mission::kItemIdOffset);
+	rows[0].hp = 100;
+	opennova::def::DefItemsFile items{};
+	items.entries = rows.data();
+	items.count = rows.size();
+	const auto respawn_sent = [](const CountingSocket &socket) {
+		ProtocolMessage m;
+		return socket.last_message(c2s::DEATH_TIMEOUT_RESET, m) && m.payload.empty();
+	};
+	bool ok = true;
+	for (const bool in_session : {true, false}) {
+		Harness h;
+		h.kernel->world.load_systems();
+		h.kernel->set_items_table(&items);
+		h.role.poll_preload();
+		h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+		h.role.run_tick(h.input); // the spawn frame
+		w::LocalPlayer &lp = h.kernel->local;
+		w::AiEntity *body = lp.player_ai();
+		if (!expect(h.role.local_spawned() && body != nullptr && lp.player()->has_item_def,
+				"respawn key: L spawned with its def")) {
+			h.kernel->set_items_table(nullptr);
+			return false;
+		}
+		h.kernel->world.rules.mp_session = in_session; // the joiner boot's session word
+		inmatch::TickInput press = h.input;
+		press.player.pressed_action_bits = inmatch::PRESSED_RESPAWN;
+		// A live health tail; the self record's dead bit decides below.
+		h.role.runtime->state().local_health = 100;
+		if (in_session) {
+			// The self record carries the dead bit (byte13 0x02 -> Flags & 2):
+			// the row's bit-0 gate drops the key.
+			{
+				replication::ClientEntityState &self = h.role.runtime->state().upsert(0x0005);
+				self.state_flags_known = true;
+				self.state_flags |= 0x02u;
+			}
+			ok &= expect(h.role.runtime->local_player_dead(),
+					"respawn key: the self record's dead bit reads dead");
+			body->inf.anim_state = w::anim_state::kWalkForward;
+			h.role.apply_input(press);
+			ok &= expect(body->inf.anim_state == w::anim_state::kWalkForward,
+					"respawn key: a dead L takes no reset");
+			for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+			ok &= expect(!respawn_sent(h.socket), "respawn key: a dead L sends nothing");
+			if (replication::ClientEntityState *self = h.role.runtime->state().find(0x0005))
+				self->state_flags &= ~0x02u;
+			ok &= expect(!h.role.runtime->local_player_dead(), "respawn key: L lives again");
+		}
+		body->inf.anim_state = w::anim_state::kWalkForward;
+		lp.input_flags.flags = w::kInputFlagForward;
+		lp.move_order = w::pack_player_body_input(lp.input_flags.flags, lp.input);
+		h.role.apply_input(press);
+		ok &= expect(body->inf.anim_state == w::anim_state::kIdle &&
+				lp.input_flags.flags == 0 && lp.input_flags.prev == 0 &&
+				lp.move_order.direction_bits == 0 && !lp.move_order.moving,
+				"respawn key: the input reset (word, pack, idle 43)");
+		for (int i = 0; i < 3; ++i) h.role.run_tick(h.input);
+		ok &= expect(respawn_sent(h.socket) == in_session,
+				in_session ? "respawn key: in a session one bodiless 0x41 leaves"
+				           : "respawn key: out of a session nothing is sent");
+		h.kernel->set_items_table(nullptr);
+	}
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -1676,6 +1884,9 @@ int main() {
 	ok &= run_pre_match_frame();
 	ok &= run_preload_frame();
 	ok &= run_in_match_spawn_edge();
+	ok &= run_spawn_edge_latch_reads_self_team();
+	ok &= run_spawn_edge_latch_reads_the_frames_target_team();
+	ok &= run_spawn_edge_takes_a_self_team_assign();
 	ok &= run_in_match_spawn_binds_local_player_definition();
 	ok &= run_self_handle_lifecycle();
 	ok &= run_spawn_stamps_equipped_adm_from_midframe_grant();
@@ -1701,6 +1912,7 @@ int main() {
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
 	ok &= run_proxy_rendezvous_pump();
+	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

@@ -555,7 +555,7 @@ static void emit_value(std::string &s, const char *v) {
 
 /* Whether a line's fields hold an empty one ahead of a filled one: the `""`
  * the writer spells it with is no token to the game's tokenizer, so every later
- * field would read back one token early [orig: Terrain_TokenizeConfigLine
+ * field would read back one token early [orig: Config_TokenizeLine
  * @0x53CB60, the quote arm @0x53CC4E..0x53CC70]. */
 static bool fields_shift(std::initializer_list<const char *> fields) {
     bool empty_seen = false;

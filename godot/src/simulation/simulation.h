@@ -723,7 +723,7 @@ private:
 	}
 	void sync_local_usegun_weapon_transition() {
 		opennova::world::sync_local_usegun_weapon_transition(
-				kernel_->world, kernel_->local.weapon, kernel_->local.view);
+				kernel_->world, kernel_->local.weapon);
 	}
 	void commit_local_usegun_weapon_switch() {
 		opennova::world::commit_local_usegun_weapon_switch(
@@ -1352,7 +1352,7 @@ public:
 	// invalid pick and the screen stays). [orig: Input_HandleActionBinding case 12]
 	bool send_deployment_pick(int p_param);
 	// The joiner's server-assigned team — the S2C 0x04 tail-byte latch the deploy
-	// screen colors/filters by [orig: byte_A85B48]. 0 when not joining.
+	// screen colors/filters by [orig: g_LocalTeam]. 0 when not joining.
 	int get_join_assigned_team() const;
 	// The class-availability policy for the active session. A joiner reads the
 	// retail host's S2C 0x76; an authority exposes its configured writer source.
@@ -1941,7 +1941,7 @@ public:
 	// item_death_traits_resolve ctest). False for an unknown id.
 	bool has_collision_instance(int p_bms_id) const;
 
-	// Mission scripting state on the shared world (the dword_C6B240 var store + event gates).
+	// Mission scripting state on the shared world (the g_WacMissionVars var store + event gates).
 	void set_mission_variable(int index, int value);
 	int get_mission_variable(int index) const;
 	bool has_event_fired(int index) const;
@@ -1961,7 +1961,7 @@ public:
 	// resolved graphics per type): the count the seat-install pins read.
 	int get_mounted_graphic_source_count() const;
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
-	// M0..M15 [orig: dword_C6B240 / dword_C6BA40 / music bank]): ONE packed call
+	// M0..M15 [orig: g_WacMissionVars / dword_C6BA40 / music bank]): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.
 	// Always bank-sized; all zeros when no mission is loaded.
 	PackedInt32Array get_mission_variables_snapshot() const;

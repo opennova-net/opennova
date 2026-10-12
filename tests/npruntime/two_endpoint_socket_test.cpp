@@ -113,6 +113,8 @@ int main() {
 		start.item_id = 6002;
 		start.position = {50.0f, 60.0f, 1.0f};
 		start.yaw = 0;
+		start.item_type_index = 1; // the trait sweep's row: not an empty slot (D-NET-416)
+		start.has_item_def = true;
 		world.registry.spawn(3, start);
 	}
 	bms::File mission;

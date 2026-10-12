@@ -43,7 +43,7 @@ bool seed_session_kit_from_profile(world::World &world,
 	if (world.tables.weapons.empty()) return false;
 	const uint8_t team = loadout_side_team(world, assigned_team);
 	// An UNLATCHED team must not commit a page. The side selector is the S2C 0x04 tail
-	// byte [orig: byte_A85B48 @0x425499], and retail cannot reach this copy before it is
+	// byte [orig: g_LocalTeam @0x425499], and retail cannot reach this copy before it is
 	// latched — admission delivers 0x04 long before Game_StartMission runs, so
 	// @0x525798's `team == 1 || team == 3` always sees a real value. Our catalog can land
 	// first, and since anything-not-1-or-3 selects the RED block, seeding at team 0 would
@@ -85,7 +85,7 @@ int32_t resolve_loadout_submit_combo(const world::WeaponTable &weapons,
 			requested_combo >= world::weapon_combo::kSlotCount)
 		return requested_combo;
 
-	// byte_A85B48 teams 1/3 use BLUE (2), 2/4 use RED (1), and every
+	// g_LocalTeam teams 1/3 use BLUE (2), 2/4 use RED (1), and every
 	// other latch value accepts either side (3) [orig: @0x42ce2d..0x42ce58].
 	const uint8_t side_mask =
 			(team == 1 || team == 3) ? 2u : ((team == 2 || team == 4) ? 1u : 3u);
@@ -114,7 +114,7 @@ void build_joiner_loadout_kit(const world::World &world,
 		const world::LocalPlayerLoadout &loadout, int equipped_combo,
 		const world::WeaponInventory *inventory,
 		JoinerConnection::LoadoutKit &out) {
-	// The side selector. The host's S2C 0x04 tail byte is retail's byte_A85B48, and
+	// The side selector. The host's S2C 0x04 tail byte is retail's g_LocalTeam, and
 	// teams 1/3 read the BLUE block, 2/4 the RED one [orig: @0x525788]. Before that
 	// latch lands (assigned_team() == 0) fall back to the local entity's own team when
 	// L already exists. With neither, side_for_team(0) resolves to RED — anything that

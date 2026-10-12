@@ -69,7 +69,7 @@ world::AmmoTable build_ammo_table(const DefAmmoFile &ammo) {
 			if (!opennova::strutil::iequals(src.hit_effect, "none")) dst.effect = src.hit_effect;
 			if (!opennova::strutil::iequals(src.impact_sound, "none")) dst.sound = src.impact_sound;
 		}
-		// Ammo def 0's bank is the static word_A2EB28: slot 0 is always copied, then
+		// Ammo def 0's bank is the static g_AmmoDefStaticEffects: slot 0 is always copied, then
 		// the authored tags in ascending order, so bank row r is def 0's r-th authored
 		// tag; the impact presenter's fallback and the explosion sound's (row 5, the
 		// dword_A2EB80 seed) read it by place.
