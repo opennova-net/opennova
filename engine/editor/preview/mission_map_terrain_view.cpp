@@ -1,5 +1,6 @@
 #include <editor/preview/mission_map_terrain_view.h>
 
+#include <algorithm>
 #include <cstddef>
 
 namespace opennova::editor {
@@ -55,6 +56,59 @@ Range range_of(const std::vector<uint32_t> &words) {
 uint32_t brightness(uint32_t word, const Range &range) {
 	const uint32_t above = word - range.lowest;
 	return uint32_t(uint64_t(double(above) * double(range.scale)));
+}
+
+// The same range over the atlas itself (the words alike, in another order).
+Range range_of_atlas(const uint16_t *atlas, size_t count) {
+	uint32_t highest = 0, lowest = 0x7FFF;
+	for (size_t i = 0; i < count; ++i) {
+		const uint32_t word = atlas[i];
+		if (highest <= word) highest = word;
+		if (lowest >= word) lowest = word;
+	}
+	Range out;
+	out.lowest = lowest;
+	out.scale = highest == lowest ? 1.0f : float(1.0 / (double(highest - lowest) * 0.0039215689));
+	return out;
+}
+
+// Where the atlas word `index` stands in the quadrant-major copy (the inverse of atlas_index).
+size_t quadrant_index(size_t index, int width) {
+	const size_t half = size_t(width >> 1), side = half * half;
+	if (side == 0) return index;
+	const size_t row = index / size_t(width), column = index % size_t(width);
+	const size_t q = (row >= half ? 1u : 0u) | (column >= half ? 2u : 0u);
+	return q * side + (row % half) * half + column % half;
+}
+
+// One Delta pixel: the quadrant-major word `k` against Nile's four neighbours of it (nile_delta_map's walk).
+uint32_t delta_pixel(const uint16_t *atlas, int width, int height, size_t k, const Range &range) {
+	const uint32_t rows = (uint32_t(height) << 10) - 1024u, columns = uint32_t(width) - 1u;
+	const size_t count = size_t(width) * size_t(height);
+	const auto word_at = [&](uint32_t index) { return index < count ? uint32_t(atlas[atlas_index(index, width)]) : 0u; };
+	const uint32_t y = uint32_t(k) >> 10, x = uint32_t(k) & 1023u;
+	const uint32_t here = rows & (y << 10), south = rows & ((y + 1u) << 10), north = rows & ((y - 1u) << 10);
+	const uint32_t column = x & columns;
+	const uint32_t word = word_at(column + here);
+	const bool flat = word == word_at(column + south) && word == word_at(column + north) &&
+	                  word == word_at(here + (columns & (x + 1u))) && word == word_at(here + (columns & (x - 1u)));
+	const uint32_t lit = brightness(word, range);
+	return (flat ? lit << 8 : lit << 16) | kOpaque;
+}
+
+// One flatness pixel at atlas (x, y) (med_flatness_map's).
+uint32_t flatness_pixel(const uint16_t *atlas, uint32_t x, uint32_t y) {
+	constexpr uint32_t kSide = 1024;
+	const uint16_t word = atlas[y * kSide + x];
+	const bool flat = word == atlas[((y + 1u) & 0x3FFu) * kSide + x] && word == atlas[((y - 1u) & 0x3FFu) * kSide + x] &&
+	                  word == atlas[y * kSide + ((x + 1u) & 0x3FFu)] && word == atlas[y * kSide + ((x - 1u) & 0x3FFu)];
+	return (flat ? 0u : 0x404040u) | kOpaque;
+}
+
+// The water's tint over one pixel (med_water_overlay's).
+uint32_t watered(uint16_t word, uint32_t water, uint32_t pixel) {
+	const uint32_t byte = ((uint32_t(word) * 2u) >> 8) & 0xFFu;
+	return byte >= water ? pixel : ((((pixel >> 1) & 0x7F7F7F7Fu) + 128u) & 0x00FFFFFFu) | kOpaque;
 }
 
 } // namespace
@@ -124,20 +178,89 @@ void MissionMapTerrainView::follow(MissionMapBackground background, bool water, 
 	atlas_ = atlas;
 	revision_ = revision;
 	water_1616_ = water_1616;
+	make_();
+}
+
+void MissionMapTerrainView::make_() {
 	picture_.clear();
-	if (atlas) {
-		switch (background) {
-		case MissionMapBackground::Height: nile_height_map(atlas, 1024, 1024, picture_); break;
-		case MissionMapBackground::Delta: nile_delta_map(atlas, 1024, 1024, picture_); break;
-		case MissionMapBackground::Flatness: med_flatness_map(atlas, picture_); break;
+	if (atlas_) {
+		switch (background_) {
+		case MissionMapBackground::Height: nile_height_map(atlas_, 1024, 1024, picture_); break;
+		case MissionMapBackground::Delta: nile_delta_map(atlas_, 1024, 1024, picture_); break;
+		case MissionMapBackground::Flatness: med_flatness_map(atlas_, picture_); break;
 		case MissionMapBackground::Colour:
 		case MissionMapBackground::None:
 		case MissionMapBackground::kCount: break;
 		}
-		if (water && water_1616 != 0 && !picture_.empty()) med_water_overlay(atlas, water_1616, picture_);
+		if (water_ && water_1616_ != 0 && !picture_.empty()) med_water_overlay(atlas_, water_1616_, picture_);
+		if (background_ == MissionMapBackground::Height || background_ == MissionMapBackground::Delta) {
+			const Range range = range_of_atlas(atlas_, size_t(1024) * 1024);
+			lowest_ = range.lowest;
+			scale_ = range.scale;
+		}
 	}
 	++serial_;
 	++made_;
+}
+
+void MissionMapTerrainView::patch(const uint16_t *atlas, const std::vector<MissionMapAtlasRect> &regions, uint64_t revision) {
+	if (!followed_ || atlas != atlas_) return;
+	revision_ = revision;
+	if (!atlas || picture_.size() != size_t(1024) * 1024 || regions.empty()) return;
+	constexpr int kSide = 1024;
+	// Height and Delta scale by the heights' lowest and highest: where either moved, the whole picture.
+	Range range;
+	if (background_ == MissionMapBackground::Height || background_ == MissionMapBackground::Delta) {
+		range = range_of_atlas(atlas, size_t(kSide) * kSide);
+		if (range.lowest != lowest_ || range.scale != scale_) {
+			make_();
+			return;
+		}
+	}
+	const uint32_t water = water_ && water_1616_ != 0 ? uint32_t(water_1616_ >> 15) : 0u;
+	const auto set = [&](size_t index, uint32_t pixel) {
+		picture_[index] = water ? watered(atlas[index], water, pixel) : pixel;
+	};
+	for (const MissionMapAtlasRect &rect : regions) {
+		const int x0 = std::max(rect.x0, 0), y0 = std::max(rect.y0, 0), x1 = std::min(rect.x1, kSide), y1 = std::min(rect.y1, kSide);
+		if (x0 >= x1 || y0 >= y1) continue;
+		switch (background_) {
+		case MissionMapBackground::Height:
+			for (int y = y0; y < y1; ++y)
+				for (int x = x0; x < x1; ++x) {
+					const size_t index = size_t(y) * kSide + size_t(x);
+					set(index, (brightness(atlas[index], range) << 8) | kOpaque);
+				}
+			break;
+		case MissionMapBackground::Delta:
+			// Each changed texel's word and the four whose neighbour it is, over the quadrant-major copy.
+			for (int y = y0; y < y1; ++y)
+				for (int x = x0; x < x1; ++x) {
+					const size_t k = quadrant_index(size_t(y) * kSide + size_t(x), kSide);
+					const uint32_t ky = uint32_t(k) >> 10, kx = uint32_t(k) & 1023u;
+					const uint32_t around[5][2] = {{kx, ky}, {(kx + 1u) & 1023u, ky}, {(kx - 1u) & 1023u, ky},
+					                               {kx, (ky + 1u) & 1023u}, {kx, (ky - 1u) & 1023u}};
+					for (const auto &at : around) {
+						const size_t each = size_t(at[1]) * kSide + at[0];
+						set(atlas_index(each, kSide), delta_pixel(atlas, kSide, kSide, each, range));
+					}
+				}
+			break;
+		case MissionMapBackground::Flatness:
+			// The region and a texel around it, wrapped (each texel reads its four neighbours).
+			for (int y = y0 - 1; y <= y1; ++y)
+				for (int x = x0 - 1; x <= x1; ++x) {
+					const uint32_t wx = uint32_t(x) & 0x3FFu, wy = uint32_t(y) & 0x3FFu;
+					set(size_t(wy) * kSide + wx, flatness_pixel(atlas, wx, wy));
+				}
+			break;
+		case MissionMapBackground::Colour:
+		case MissionMapBackground::None:
+		case MissionMapBackground::kCount: return;
+		}
+	}
+	++serial_;
+	++patched_;
 }
 
 } // namespace opennova::editor

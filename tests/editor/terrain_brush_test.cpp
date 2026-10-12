@@ -114,6 +114,21 @@ struct FlatSpace final : TerrainBrushSpace {
 	double height(TerrainPoint) const override { return 10.0; }
 };
 
+// A slope: the ground's height its x, drawn that much further down the picture (a 3D view's ring rides it).
+struct SlopeSpace final : TerrainBrushSpace {
+	bool pointer_ground(float x, float y, TerrainPoint &at, double &height) const override {
+		at = TerrainPoint{double(x), double(y)};
+		height = double(x);
+		return true;
+	}
+	bool to_picture(TerrainPoint at, double height, float &x, float &y) const override {
+		x = float(at.x);
+		y = float(at.y + height);
+		return true;
+	}
+	double height(TerrainPoint at) const override { return at.x; }
+};
+
 struct Recorder final : CanvasRequests {
 	std::vector<EditorRequest> requests;
 	void request(EditorRequest each) override { requests.push_back(std::move(each)); }
@@ -216,7 +231,23 @@ int test_half() {
 	turn.keyboard.rotate = true;
 	TEST_EXPECT(half.input(gesture, subject, &space, turn, out) && out.requests.size() == 1 &&
 	            out.requests[0].command.name == "tile_rotate" && out.requests[0].command.by == std::vector<double>{1.0});
-	std::printf("half: the press, the path's dabs, the release and the cancel by token, Shift, the keys, a stamp\n");
+	// Flatten's ring, while it strokes, flat at the height under its press (its target), not riding the slope.
+	view.workspace.terrain_brush.tool = TerrainTool::Flatten;
+	view.workspace.terrain_brush.radius = 4.0f;
+	half.follow(view, &mission);
+	const SlopeSpace slope;
+	out.requests.clear();
+	CanvasGesture flatten;
+	TEST_EXPECT(half.input(flatten, subject, &slope, pointer(10.0f, 20.0f, true, true), out) && half.stroking());
+	OverlayList ring;
+	half.shapes(&slope, pointer(30.0f, 20.0f, false, true), ring);
+	TEST_EXPECT(!ring.shapes.empty());
+	if (!ring.shapes.empty()) {
+		// The rim's first point: on the circle of the radius about the centre, 10 (the press's height) down.
+		const CanvasPoint p = ring.shapes[0].points[0];
+		TEST_EXPECT(std::fabs(std::hypot(double(p.x) - 30.0, double(p.y) - 30.0) - 4.0) < 1e-3);
+	}
+	std::printf("half: the press, the path's dabs, the release and the cancel by token, Shift, the keys, a stamp, Flatten's ring\n");
 	return 0;
 }
 

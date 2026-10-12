@@ -332,6 +332,7 @@ bool TerrainBrushHalf::input(CanvasGesture &gesture, const CanvasSubject &subjec
 		stroking_ = true;
 		std::vector<TerrainPoint> dabs;
 		dabs_.begin(at, dabs);
+		press_height_ = height;
 		send_(gesture, dabs, in.keys.shift, out);
 		return true;
 	}
@@ -386,8 +387,9 @@ void TerrainBrushHalf::shapes(const TerrainBrushSpace *space, const CanvasInput 
 		terrain_brush_circle(*space, brush_, at, out);
 		return;
 	}
-	const bool flat = brush_.tool == TerrainTool::Set;
-	terrain_brush_ring(*space, brush_, at, flat, flat ? double(brush_.height) : 0.0, out);
+	// Set's ring flat at its height; Flatten's, while it strokes, at the height under its press (its target).
+	const bool set = brush_.tool == TerrainTool::Set, flatten = brush_.tool == TerrainTool::Flatten && stroking_;
+	terrain_brush_ring(*space, brush_, at, set || flatten, set ? double(brush_.height) : flatten ? press_height_ : 0.0, out);
 }
 
 std::string terrain_brush_hint(const TerrainBrush &brush, bool on_ground, TerrainPoint at, double height,

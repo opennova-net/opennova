@@ -39,20 +39,34 @@ void med_flatness_map(const uint16_t *atlas, std::vector<uint32_t> &out);
 // the water's (its 16.16 height >> 15), the pixel's channels halved and 128 added to its low byte.
 void med_water_overlay(const uint16_t *atlas, int32_t water_1616, std::vector<uint32_t> &pixels);
 
+// A region of the atlas, its texels [x0, x1) x [y0, y1) in the atlas's own rows.
+struct MissionMapAtlasRect {
+	int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+};
+
 // The map's background as the options ask it, made again when the atlas, the background or the water moved: the
 // picture (empty for the colour map and for none, which the device draws its own way) and a serial that moves with
-// each one made (the device's one upload).
+// each one made or patched (the device's one upload).
 class MissionMapTerrainView {
 public:
 	// `atlas` 1024 x 1024 depth words (null: no terrain); `revision` what moves whenever the atlas does (the ground's
 	// reads, a stroke's patches); `water_1616` the mission's water height (0: none drawn).
 	void follow(MissionMapBackground background, bool water, const uint16_t *atlas, uint64_t revision, int32_t water_1616);
+	// The same atlas changed in place within `regions` (a stroke's patch), its revision now `revision`: the picture made
+	// again there alone, each pixel whose background reads a changed texel (Height the texel's own; Delta the texel and
+	// Nile's four neighbours of it, over his quadrant-major copy; flatness the region and a texel around it, wrapped;
+	// the water over each), or whole where the heights' lowest or highest moved (Height and Delta scale by them). A
+	// follow with that revision then keeps it. Nothing for an atlas it does not show.
+	void patch(const uint16_t *atlas, const std::vector<MissionMapAtlasRect> &regions, uint64_t revision);
 	const std::vector<uint32_t> &picture() const { return picture_; }
 	uint64_t serial() const { return serial_; }
-	// How many times it made the picture (a test's count).
+	// How many times it made the picture whole, and patched it (a test's counts).
 	int made() const { return made_; }
+	int patched() const { return patched_; }
 
 private:
+	void make_();
+
 	MissionMapBackground background_ = MissionMapBackground::Colour;
 	bool water_ = false;
 	const uint16_t *atlas_ = nullptr;
@@ -62,6 +76,10 @@ private:
 	std::vector<uint32_t> picture_;
 	uint64_t serial_ = 0;
 	int made_ = 0;
+	int patched_ = 0;
+	// The heights' lowest and scale the picture was made over (Height, Delta).
+	uint32_t lowest_ = 0;
+	float scale_ = 1.0f;
 };
 
 } // namespace opennova::editor

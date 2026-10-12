@@ -4,7 +4,8 @@
 // sub_100307BA]; the original mission editor's flatness (0x404040 where a texel differs from its four wrapped
 // neighbours) [orig: JOTACmed.exe sub_44C2B0 @ 0x44c7e9..0x44c8ac] and its water overlay (the channels halved and 128
 // added to the low byte where the height byte is below the water's) [orig: sub_4222A0 @ 0x422508..0x422525]; and
-// the view made again only when what it reads moves.
+// the view made again only when what it reads moves, and patched where a stroke changed the atlas in place (the same
+// picture a whole make gives; whole where the heights' range moved).
 #include <cstdio>
 #include <vector>
 
@@ -102,11 +103,65 @@ int test_follow() {
 	return 0;
 }
 
+// A patch of the atlas in place: the picture made again where the changed texels read, the same as a whole make;
+// whole where the lowest or the highest moved.
+int test_patch() {
+	struct Case {
+		MissionMapBackground background;
+		bool water;
+	};
+	const Case cases[] = {{MissionMapBackground::Height, false}, {MissionMapBackground::Delta, false},
+	                      {MissionMapBackground::Flatness, false}, {MissionMapBackground::Delta, true},
+	                      {MissionMapBackground::Flatness, true}};
+	for (const Case &each : cases) {
+		std::vector<uint16_t> atlas(size_t(kSide) * kSide, 5120);
+		atlas[0] = 0;      // the lowest
+		atlas[1] = 0x7000; // the highest
+		// A region by a quadrant's edge and across the atlas's middle, so Nile's neighbours cross his copy's rows.
+		for (int y = 3; y < 9; ++y)
+			for (int x = 509; x < 515; ++x) atlas[size_t(y) * kSide + size_t(x)] = uint16_t(5120 + 37 * (x + y));
+		MissionMapTerrainView view;
+		view.follow(each.background, each.water, atlas.data(), 1, 25 << 16);
+		const int made = view.made();
+		const uint64_t serial = view.serial();
+		// A stroke: a dent inside the range, and a bump by a wrapped edge.
+		for (int y = 500; y < 530; ++y)
+			for (int x = 500; x < 530; ++x) atlas[size_t(y) * kSide + size_t(x)] = uint16_t(4000 + 13 * ((x * 7 + y) % 50));
+		for (int y = 1020; y < 1024; ++y)
+			for (int x = 0; x < 3; ++x) atlas[size_t(y) * kSide + size_t(x)] = 6000;
+		view.patch(atlas.data(), {{500, 500, 530, 530}, {0, 1020, 3, 1024}}, 2);
+		TEST_EXPECT(view.made() == made && view.patched() == 1 && view.serial() != serial);
+		MissionMapTerrainView whole;
+		whole.follow(each.background, each.water, atlas.data(), 2, 25 << 16);
+		TEST_EXPECT(view.picture() == whole.picture());
+		// The follow at the patched revision keeps it.
+		view.follow(each.background, each.water, atlas.data(), 2, 25 << 16);
+		TEST_EXPECT(view.made() == made);
+		// The highest moved: Height and Delta made whole, the others patched.
+		atlas[size_t(600) * kSide + 600] = 0x7800;
+		view.patch(atlas.data(), {{600, 600, 601, 601}}, 3);
+		const bool scaled = each.background != MissionMapBackground::Flatness;
+		TEST_EXPECT(view.made() == made + (scaled ? 1 : 0) && view.patched() == (scaled ? 1 : 2));
+		whole.follow(each.background, each.water, atlas.data(), 3, 25 << 16);
+		TEST_EXPECT(view.picture() == whole.picture());
+	}
+	// A view of the colour map has nothing to patch, and takes the revision.
+	std::vector<uint16_t> atlas(size_t(kSide) * kSide, 10);
+	MissionMapTerrainView colour;
+	colour.follow(MissionMapBackground::Colour, false, atlas.data(), 1, 0);
+	colour.patch(atlas.data(), {{0, 0, 4, 4}}, 2);
+	colour.follow(MissionMapBackground::Colour, false, atlas.data(), 2, 0);
+	TEST_EXPECT(colour.made() == 1 && colour.patched() == 0);
+	std::printf("patch: the texels a stroke changed made again as a whole make makes them; whole where the range moved\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	if (test_height() != 0) return 1;
 	if (test_delta() != 0) return 1;
 	if (test_flatness_and_water() != 0) return 1;
+	if (test_patch() != 0) return 1;
 	return test_follow();
 }

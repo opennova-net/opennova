@@ -84,6 +84,8 @@ private:
 	std::string view_path_;
 	TerrainBrush brush_;
 	TerrainDabPath dabs_;
+	// The ground's height under a stroke's press (Flatten's target, its flat ring's height while it strokes).
+	double press_height_ = 0.0;
 	// The Tiles tool's: the placed tiles of the .til the view's tiles go to (its open document's, in draw order), their
 	// rows and which the view selected; a press's grabbed tile, the pointer's offset on the picture from its corner,
 	// whether a drag sample went out, and whether its select waits for a click (a press on a selected tile).
