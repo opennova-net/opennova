@@ -59,6 +59,11 @@
           without <code class="rounded-control bg-raised px-1 font-mono text-xs text-ink">--credentials</code>)
           is never linked to an account.
         </p>
+        <p class="text-sm text-ink-muted">
+          An account approved for hosting can also have NovaWorld run a server for it: its listing
+          shows here once it is up. See
+          <RouterLink to="/me/server" class="text-accent hover:text-ink-bright">your hosted server</RouterLink>.
+        </p>
         <p class="text-sm text-ink-muted">This page refreshes itself every {{ POLL_SECONDS }} seconds.</p>
       </div>
 
@@ -79,7 +84,7 @@
 
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 import MyServerCard from '../components/MyServerCard.vue';
 import { listMyServers } from '../api/myServers';
 import { useSession } from '../composables/useSession';

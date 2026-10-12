@@ -10,7 +10,13 @@
 import { isAxiosError } from 'axios';
 import { apiClient } from './client';
 import { formatRetryAfter, parseRetryAfter } from './session';
-import type { MyServer, MyServersResponse, PushQueued, ServerCommandBody } from '../types/myServers';
+import type {
+  HostedStopQueued,
+  MyServer,
+  MyServersResponse,
+  PushQueued,
+  ServerCommandBody,
+} from '../types/myServers';
 
 // The server's `error` codes these routes answer with, plus `network` (no
 // reply at all) and `unknown` (a reply this client does not recognise).
@@ -23,6 +29,7 @@ export type HostErrorCode =
   | 'verb_not_allowed'
   | 'unknown_rid'
   | 'not_hosting'
+  | 'server_stopping'
   | 'no_session_listener'
   | 'db_error'
   | 'network'
@@ -49,6 +56,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<HostErrorCode>([
   'verb_not_allowed',
   'unknown_rid',
   'not_hosting',
+  'server_stopping',
   'no_session_listener',
   'db_error',
 ]);
@@ -75,6 +83,8 @@ function messageFor(code: HostErrorCode, serverMessage: string, retryAfterSecond
       return 'This server is no longer listed under your account. Refresh the list.';
     case 'not_hosting':
       return 'This server is not hosting right now. Refresh the list.';
+    case 'server_stopping':
+      return 'This hosted server is being stopped, so it takes no more commands.';
     case 'no_session_listener':
       return 'NovaWorld cannot reach game servers right now. Try again shortly.';
     case 'db_error':
@@ -153,9 +163,11 @@ export async function sendServerCommand(
 // POST /api/me/hosts/<rid>/stop: the sysop punt (ServerStopHosting, MsgCode
 // 7). A stock host ends its running match for everyone on the server, goes to
 // its main menu and leaves NovaWorld.
-export async function stopHosting(rid: number): Promise<HostResult<PushQueued>> {
+// On a hosted server's listing it is the hosted server's own stop instead
+// (HostedStopQueued): its supervisor ends the match and the machine.
+export async function stopHosting(rid: number): Promise<HostResult<PushQueued | HostedStopQueued>> {
   try {
-    const res = await apiClient.post<PushQueued>(`/me/hosts/${rid}/stop`);
+    const res = await apiClient.post<PushQueued | HostedStopQueued>(`/me/hosts/${rid}/stop`);
     return { ok: true, value: res.data };
   } catch (err) {
     return { ok: false, error: describeHostError(err) };

@@ -3419,6 +3419,9 @@ int test_hosted_server_routes(Harness &h) {
 	auto json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["can_host"].b());
 	TEST_EXPECT(json["server"].t() == crow::json::type::Null);
+	// The configured rotation, the missions the site's rotation picker offers.
+	TEST_EXPECT(json["default_missions"].size() == 1 &&
+			str(json["default_missions"][0]) == "default.bms");
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 	reply = start(ana_s, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_approved");
