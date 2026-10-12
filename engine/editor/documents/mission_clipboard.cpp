@@ -17,6 +17,7 @@
 #include <base/io/strutil.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <formats/mission/mission_mis.h>
 #include <formats/mission/mission_params.h>
 
 namespace opennova::editor {
@@ -30,12 +31,46 @@ constexpr NodeKind k(K kind) { return node_kind(kind); }
 
 constexpr const char *kClipHeader = "opennova-mission-clip";
 
-// The payload's lines: the header, what it holds ("rows", or a nested kind's token), then the
-// fragment's bytes in hex (strutil::bytes_to_hex, read back by strutil::hex_to_bytes).
+// The payload's lines: the header, what it holds ("rows", or a nested kind's token), the fragment's bytes in hex
+// (strutil::bytes_to_hex, read back by strutil::hex_to_bytes), and for rows the names the .bms has no room for (S24
+// Names: the events' and the areas', in the fragment's order, each in hex: `names <event>,<event>|<area>,<area>`).
 struct Clip {
 	std::string holds;
 	bms::File fragment;
+	std::vector<std::string> event_names, area_names;
 };
+
+std::string names_line(const std::vector<std::string> &events, const std::vector<std::string> &areas) {
+	const auto list = [](const std::vector<std::string> &names) {
+		std::string out;
+		for (size_t i = 0; i < names.size(); ++i)
+			out += (i ? "," : "") + strutil::bytes_to_hex(reinterpret_cast<const uint8_t *>(names[i].data()), names[i].size());
+		return out;
+	};
+	return "names " + list(events) + "|" + list(areas);
+}
+
+bool read_names_line(std::string_view line, Clip &clip) {
+	if (line.substr(0, 6) != "names ") return false;
+	line.remove_prefix(6);
+	const size_t bar = line.find('|');
+	if (bar == std::string_view::npos) return false;
+	const auto list = [](std::string_view text, std::vector<std::string> &out) {
+		out.clear();
+		if (text.empty()) return true;
+		size_t at = 0;
+		while (true) {
+			const size_t comma = text.find(',', at);
+			std::vector<uint8_t> bytes;
+			if (!strutil::hex_to_bytes(text.substr(at, comma == std::string_view::npos ? std::string_view::npos : comma - at), bytes))
+				return false;
+			out.emplace_back(bytes.begin(), bytes.end());
+			if (comma == std::string_view::npos) return true;
+			at = comma + 1;
+		}
+	};
+	return list(line.substr(0, bar), clip.event_names) && list(line.substr(bar + 1), clip.area_names);
+}
 
 bool read_clip(const std::string &payload, Clip &clip) {
 	size_t at = 0;
@@ -47,14 +82,16 @@ bool read_clip(const std::string &payload, Clip &clip) {
 		return true;
 	};
 	std::string header;
-	if (!line(header) || header != kClipHeader || !line(clip.holds)) return false;
+	if (!line(header) || header != kClipHeader || !line(clip.holds) || at > payload.size()) return false;
+	const size_t end = payload.find('\n', at);
+	const std::string_view hex = std::string_view(payload).substr(at, end == std::string::npos ? std::string::npos : end - at);
+	if (end != std::string::npos && !read_names_line(std::string_view(payload).substr(end + 1), clip)) return false;
 	std::vector<uint8_t> bytes;
 	std::string error;
-	return at <= payload.size() && strutil::hex_to_bytes(std::string_view(payload).substr(at), bytes) &&
-	       bms::parse(bytes.data(), bytes.size(), clip.fragment, error);
+	return strutil::hex_to_bytes(hex, bytes) && bms::parse(bytes.data(), bytes.size(), clip.fragment, error);
 }
 
-std::string write_clip(const std::string &holds, bms::File &fragment) {
+std::string write_clip(const std::string &holds, bms::File &fragment, const Clip *names = nullptr) {
 	sync_counts(fragment);
 	std::vector<uint8_t> bytes;
 	std::string error;
@@ -65,7 +102,10 @@ std::string write_clip(const std::string &holds, bms::File &fragment) {
 	std::vector<uint8_t> again;
 	if (!bms::parse(bytes.data(), bytes.size(), back, error) || !bms::write(back, again, error) || again != bytes)
 		return std::string();
-	return std::string(kClipHeader) + "\n" + holds + "\n" + strutil::bytes_to_hex(bytes);
+	std::string out = std::string(kClipHeader) + "\n" + holds + "\n" + strutil::bytes_to_hex(bytes);
+	if (names && (!names->event_names.empty() || !names->area_names.empty()))
+		out += "\n" + names_line(names->event_names, names->area_names);
+	return out;
 }
 
 const char *holds_of(NodeKind kind) {
@@ -129,6 +169,8 @@ std::string MissionDocument::copy(const std::vector<NodeAddress> &records) const
 			wanted.insert(record.row);
 		}
 		std::vector<EventChain> chains;
+		// The events' names and the areas' descriptions go with them (S24 Names: the rows', not the .bms's).
+		Clip names;
 		for (const auto &node : rows()) {
 			if (!wanted.count(node->id)) continue;
 			switch (static_cast<K>(node->kind)) {
@@ -136,13 +178,21 @@ std::string MissionDocument::copy(const std::vector<NodeAddress> &records) const
 			case K::Building: fragment.buildings.push_back(static_cast<const EntityRow &>(*node).native); break;
 			case K::Marker: fragment.markers.push_back(static_cast<const EntityRow &>(*node).native); break;
 			case K::Organic: fragment.organics.push_back(static_cast<const EntityRow &>(*node).native); break;
-			case K::Area: fragment.area_triggers.push_back(static_cast<const AreaRow &>(*node).native); break;
-			case K::Event: chains.push_back(static_cast<const EventRow &>(*node).native); break;
+			case K::Area:
+				fragment.area_triggers.push_back(static_cast<const AreaRow &>(*node).native);
+				names.area_names.push_back(static_cast<const AreaRow &>(*node).description);
+				break;
+			case K::Event:
+				chains.push_back(static_cast<const EventRow &>(*node).native);
+				names.event_names.push_back(static_cast<const EventRow &>(*node).name);
+				break;
 			default: break;
 			}
 		}
 		join_event_chains(chains, fragment);
-		return write_clip("rows", fragment);
+		const bool named = std::any_of(names.event_names.begin(), names.event_names.end(), [](const std::string &n) { return !n.empty(); }) ||
+		                   std::any_of(names.area_names.begin(), names.area_names.end(), [](const std::string &n) { return !n.empty(); });
+		return write_clip("rows", fragment, named ? &names : nullptr);
 	}
 	// Nested records: of one kind, from one owner, in their list's order.
 	const Node *node = row(records.front().row);
@@ -251,7 +301,7 @@ std::string mission_clip_moved(const std::string &payload, double east, double n
 		area.y_min = y_min;
 		area.y_max = y_max;
 	}
-	return write_clip(clip.holds, fragment);
+	return write_clip(clip.holds, fragment, &clip);
 }
 
 bool MissionDocument::pastes_rows(const std::string &payload) const {
@@ -331,13 +381,32 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 	entities(K::Building, fragment.buildings);
 	entities(K::Marker, fragment.markers);
 	entities(K::Organic, fragment.organics);
-	for (const bms::AreaTrigger &area : fragment.area_triggers) {
-		auto row = std::make_shared<AreaRow>(k(K::Area), area);
+	// The names the clip carries (S24 Names), as the name fields' setters take them (mission::mis_name_allowed): one
+	// they would refuse refuses the paste, never cut.
+	if (clip.area_names.size() > fragment.area_triggers.size() || clip.event_names.size() > chains.size()) {
+		error = "The clipboard's names are not its records'.";
+		return false;
+	}
+	std::string refused;
+	for (const std::string &name : clip.area_names)
+		if (!mis_name_allowed(name, kMisDescriptionChars, refused)) {
+			error = "The clipboard holds an area description the .mis cannot carry: " + refused + ".";
+			return false;
+		}
+	for (const std::string &name : clip.event_names)
+		if (!mis_name_allowed(name, kMisEventNameChars, refused)) {
+			error = "The clipboard holds an event name the .mis cannot carry: " + refused + ".";
+			return false;
+		}
+	for (size_t i = 0; i < fragment.area_triggers.size(); ++i) {
+		auto row = std::make_shared<AreaRow>(k(K::Area), fragment.area_triggers[i]);
+		if (i < clip.area_names.size()) row->description = clip.area_names[i];
 		shape(*row);
 		out.push_back(row);
 	}
-	for (EventChain &chain : chains) {
-		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chain));
+	for (size_t i = 0; i < chains.size(); ++i) {
+		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chains[i]));
+		if (i < clip.event_names.size()) row->name = clip.event_names[i];
 		shape(*row);
 		out.push_back(row);
 	}

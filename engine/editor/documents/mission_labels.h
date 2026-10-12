@@ -51,9 +51,9 @@ void mission_game_choices(const Document &document, const NodeAddress &address, 
 
 // An entity row's title ("Ranger #12", "Organic #12" without names), with its shown name where it has one.
 std::string mission_entity_title(const MissionDocument &document, const Node &entity, const NameSource *names);
-// A path row's title: "Path 5 (4 stops)", "Path 7 (no stops)"; path 0 "No path", 123..127 by the
-// command's name.
-std::string mission_path_title(const MissionPath &path);
+// A path row's title: "Path 5 (4 stops)", "Path 7 (no stops)", "Path 3: Patrol north (5 stops)" with the
+// description the mission gives it (S24 Names); path 0 "No path", 123..127 by the command's name.
+std::string mission_path_title(const Node &path);
 
 // An event, a trigger and an action in words: the events lane's sentences (event_sentence,
 // trigger_words, action_words) with what their parameters name worded here (an entity by its title with
