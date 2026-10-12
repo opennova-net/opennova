@@ -188,7 +188,8 @@ bool bake(const TerrainBakeInput &input, CptFile &out, TerrainBakeState *state, 
 	}
 	const auto fail = [&](const std::string &why) {
 		MeshSimp_FreeAll();
-		error = "the terrain bake failed: " + why;
+		// A cancel is no failure of the bake's: said as the region bake says it (terrain_region_bake.h).
+		error = why == "cancelled" ? why : "the terrain bake failed: " + why;
 		return false;
 	};
 	std::vector<uint16_t> smoothed = has8 ? smooth_depthmap(input.depth8) : input.depth16;
