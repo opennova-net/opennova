@@ -139,11 +139,12 @@ namespace {
 // installs a sink. Reproduce the historical stream split — lifecycle to stdout,
 // warnings and errors to stderr; per-tick kDebug tracing opts in via NW_LOG_DEBUG.
 // A message is one line: its control bytes go out escaped (loggable), so a
-// name a NovaWorld session carried into an engine log line cannot forge another.
+// name a NovaWorld session carried into an engine log line cannot forge another,
+// and every registered log secret masked (a hosted server's admin password).
 bool g_log_debug_enabled = false;
 void app_log_sink(opennova::io::LogLevel level, const char *msg) {
 	if (level == opennova::io::LogLevel::kDebug && !g_log_debug_enabled) return;
-	const std::string_view text(msg);
+	const std::string text = opennova::novaworld_server::mask_log_secrets(msg);
 	std::fprintf(level >= opennova::io::LogLevel::kWarn ? stderr : stdout, "%s\n",
 			opennova::novaworld_server::loggable(text, text.size()).c_str());
 }
@@ -305,6 +306,11 @@ int main() {
 	// that hosting is off without one); its supervisor starts once the gate has
 	// its port. Declared before the supervisor, which uses it.
 	std::unique_ptr<hosted::MachineProvider> hosted_provider = make_hosted_provider(config);
+	// The admin links to the running hosted servers (hosted/admin_link.h): the
+	// supervisor keeps them in step with its rows; declared before the HTTP
+	// listener, whose routes run commands on them, so they outlive it.
+	std::unique_ptr<hosted::AdminLinks> admin_links;
+	if (hosted_provider) admin_links = std::make_unique<hosted::AdminLinks>(db_pool.get());
 	std::unique_ptr<hosted::Supervisor> supervisor;
 	listening.hosted_provider = hosted_provider ? hosted_provider->name() : "none";
 	SessionStore sessions;
@@ -351,6 +357,7 @@ int main() {
 			return nwudp.push_stop_hosting(rid, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0, 0, account) ==
 			       HostPushResult::Queued;
 		});
+		supervisor->set_admin_links(admin_links.get());
 		supervisor->start();
 	}
 #endif
@@ -429,6 +436,9 @@ int main() {
 		std::printf("[shutdown] stopping the hosted servers' supervisor\n");
 		supervisor.reset();
 	}
+	// The admin links next, while their servers still run: each logged-in
+	// session ends with QUIT.
+	if (admin_links) admin_links->stop_all();
 	hosted_provider.reset();
 #endif
 	std::printf("[shutdown] stopping listeners\n");

@@ -171,6 +171,118 @@ bool admin_reply_is_error(std::string_view reply) {
 	return strutil::starts_with_icase(reply, "ERROR - ") || strutil::starts_with_icase(reply, "USAGE - ");
 }
 
+namespace {
+
+// DispatchCommand's split: ' ' and '\t'..'\r' separate (the C locale's isspace over a
+// sign-extended char, which reads 0 for every byte >= 0x80), at most 25 tokens, the 25th
+// running to the line's end. [orig: CAdminServer_DispatchCommand @0x4067A0..0x4067EB]
+std::vector<std::string_view> split_command(std::string_view line) {
+	const auto is_space = [](char c) { return c == ' ' || (c >= '\t' && c <= '\r'); };
+	std::vector<std::string_view> tokens;
+	size_t i = 0;
+	while (i < line.size() && tokens.size() < 25) {
+		while (i < line.size() && is_space(line[i])) ++i;
+		if (i == line.size()) break;
+		size_t end = i;
+		while (end < line.size() && !is_space(line[end])) ++end;
+		if (tokens.size() == 24) end = line.size();
+		tokens.push_back(line.substr(i, end - i));
+		i = end;
+	}
+	return tokens;
+}
+
+bool ieq(std::string_view a, std::string_view b) {
+	return strutil::iequals(a, b);
+}
+
+// The keys SET writes; any other key with a value draws the usage and then
+// `ERROR - Setting Not Found.`. [orig: CAdminServer_HandleSetCommand @0x405A60 — the compares
+//  @0x405B93..0x406185, the not-found tail]
+constexpr const char *kSetKeys[] = {
+	"AutoBalanceOnRecycle", "PuntVote", "VotePercent", "VoteNumPlayersReq", "ChangeTeam",
+	"ChangeTeamInterval", "ChangeTeamPenalty", "ChangeTeamDelay", "StartDelay", "DoMinPingCheck",
+	"MinPing", "DoMaxPingCheck", "MaxPing", "MaxFriendlyKills", "GameTime", "FriendlyFire",
+	"FriendlyTags", "TeamTriggerClaymore", "Tracers", "KOTHLimit", "KillLimit", "MaxScore",
+	"FatBullets", "OneShotKill", "ArmoryTimer", "ServerName", "ServerPassword", "SideAPassword",
+	"SideBPassword",
+};
+
+AdminReplyPlan exact(int count) {
+	return AdminReplyPlan{ AdminReplyFraming::Exact, count };
+}
+
+} // namespace
+
+// Each row is §6.9's: a handler sends one packet per arm unless noted.
+AdminReplyPlan admin_reply_plan(std::string_view command) {
+	const std::vector<std::string_view> t = split_command(command);
+	if (t.empty()) return exact(1); // the usage
+	const std::string_view verb = t[0];
+	// QUIT returns 0 and the slot closes, with no reply. [orig: @0x406811]
+	if (ieq(verb, "QUIT")) return exact(0);
+	// SET: no argument, or a key alone (a password cleared, else the usage): one; a key and a
+	// value: one, or the usage and `ERROR - Setting Not Found.` for a key it does not know.
+	if (ieq(verb, "SET")) {
+		if (t.size() < 3) return exact(1);
+		for (const char *key : kSetKeys) {
+			if (ieq(t[1], key)) return exact(1);
+		}
+		return exact(2);
+	}
+	// PLAYER: LIST, no argument, or a sub-verb without a target: one. A target the server does
+	// not find answers `ERROR - Player Not Found.` before the sub-verb is read; PUNT, SWAPTEAM,
+	// KILL, ZEROSCORE and CEASEFIRE answer one either way; BAN <#> one or two; BAN ALL one or
+	// more per qualifying slot, or none; any other sub-verb none for a found target.
+	// [orig: CAdminServer_HandlePlayer @0x403EF0 — LIST @0x403F7C, the target @0x40407E..0x404136,
+	//  BAN ALL @0x404298..0x40444B, BAN <#> @0x40445D..0x404539, CEASEFIRE @0x404543..0x404573]
+	if (ieq(verb, "PLAYER")) {
+		if (t.size() < 2 || ieq(t[1], "LIST") || t.size() < 3) return exact(1);
+		const std::string_view sub = t[1];
+		if (ieq(sub, "PUNT") || ieq(sub, "SWAPTEAM") || ieq(sub, "KILL") || ieq(sub, "ZEROSCORE") ||
+				ieq(sub, "CEASEFIRE"))
+			return exact(1);
+		if (ieq(sub, "BAN")) {
+			if (ieq(t[2], "ALL")) return AdminReplyPlan{ AdminReplyFraming::QuietGap, 0 };
+			return AdminReplyPlan{ AdminReplyFraming::BanTarget, 0 };
+		}
+		return AdminReplyPlan{ AdminReplyFraming::QuietGap, 0 };
+	}
+	// GOTO: no argument, the usage alone; MENUSTATE the tail (and the main menu's ERROR before
+	// it); GAMESTATE and any other target a reply of their own and then the tail.
+	// [orig: CAdminServer_HandleGotoCommand @0x4049D0 — the usage @0x4049E4, the arms' reply
+	//  @0x404A6F, the tail @0x404A88 / @0x404AAF]
+	if (ieq(verb, "GOTO")) {
+		if (t.size() < 2) return exact(1);
+		if (ieq(t[1], "MENUSTATE")) return AdminReplyPlan{ AdminReplyFraming::MenuState, 0 };
+		return exact(2);
+	}
+	// GET, MISSION (every sub-verb, ADD's `OK - Entry Added` in any state, AVAILABLE's empty
+	// catalog an empty reply), WEAPON, CMD, CHAT (GET's empty window an empty reply), ADMINUSER,
+	// BANLIST, PETERRABBIT and the usage: one.
+	// [orig: CAdminServer_HandleGet @0x403390; CAdminServer_HandleMissionCommand @0x4062E0;
+	//  CAdminServer_HandleWeaponCommand @0x4045A0; CAdminServer_HandleCmdCommand @0x4048D0;
+	//  CAdminServer_HandleChatCommand @0x404AC0; CAdminServer_HandleAdminUserCommand @0x404CB0;
+	//  CAdminServer_HandleBanCommand @0x404D70; CAdminServer_HandleFunCommand @0x404E30]
+	return exact(1);
+}
+
+bool admin_replies_complete(const AdminReplyPlan &plan, const std::vector<std::string> &replies) {
+	switch (plan.framing) {
+		case AdminReplyFraming::Exact:
+			return replies.size() >= static_cast<size_t>(plan.count);
+		case AdminReplyFraming::BanTarget:
+			if (replies.empty()) return false;
+			return replies.size() >= 2 || !strutil::starts_with_icase(replies[0], "OK - Banned Player #");
+		case AdminReplyFraming::MenuState:
+			if (replies.empty()) return false;
+			return replies.size() >= 2 || replies[0] != "ERROR - Already in 'Menu' State";
+		case AdminReplyFraming::QuietGap:
+			return false;
+	}
+	return false;
+}
+
 // The header "NAME            \t #\tTEAM\tClass\tKills\tDeaths\tPING\n", then one
 // "%-16s\t%2d\t%2d\t%d\t%d\t%d\t%d\n" row per active slot: the name padded (never cut) to 16,
 // the slot number, the team. The host's own slot 0 is named by GameText Server/STRSRV19, "Host"

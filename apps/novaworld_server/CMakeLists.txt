@@ -19,7 +19,8 @@ if(BUILD_NOVAWORLD_HTTP)
         web_access.cpp
         web_session.cpp
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
-        # renders, and the local MachineProvider.
+        # renders, the local MachineProvider, and the admin link.
+        hosted/admin_link.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_routes.cpp
         hosted/hosted_settings.cpp

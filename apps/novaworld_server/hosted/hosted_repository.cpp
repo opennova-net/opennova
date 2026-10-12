@@ -290,6 +290,40 @@ void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::st
 					BindValue(id) });
 }
 
+void append_console(db::Database &db, int64_t server_id, const std::vector<ConsoleLine> &lines, size_t keep) {
+	if (lines.empty()) return;
+	db::Transaction tx(db);
+	for (const ConsoleLine &line : lines) {
+		db.exec("INSERT INTO hosted_server_console (server_id, kind, actor, text, at) VALUES (?, ?, ?, ?, ?);",
+				{ BindValue(server_id), BindValue(line.kind), BindValue(line.actor), BindValue(line.text),
+						BindValue(line.at) });
+	}
+	// The ring: everything older than the newest `keep` goes.
+	db.exec("DELETE FROM hosted_server_console WHERE server_id = ? AND id <= ("
+			"SELECT id FROM hosted_server_console WHERE server_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?);",
+			{ BindValue(server_id), BindValue(server_id), BindValue(static_cast<int64_t>(keep)) });
+	tx.commit();
+}
+
+std::vector<ConsoleLine> list_console(db::Database &db, int64_t server_id, int64_t after_id, size_t limit) {
+	std::vector<ConsoleLine> out;
+	const auto rows = db.query("SELECT id, kind, actor, text, at FROM ("
+							   "SELECT * FROM hosted_server_console WHERE server_id = ? AND id > ? "
+							   "ORDER BY id DESC LIMIT ?) ORDER BY id;",
+			{ BindValue(server_id), BindValue(after_id), BindValue(static_cast<int64_t>(limit)) });
+	out.reserve(rows.size());
+	for (const auto &r : rows) {
+		ConsoleLine line;
+		line.id = r.as_int(0).value_or(0);
+		line.kind = r.as_text(1).value_or("");
+		line.actor = r.as_text(2).value_or("");
+		line.text = r.as_text(3).value_or("");
+		line.at = r.as_text(4).value_or("");
+		out.push_back(std::move(line));
+	}
+	return out;
+}
+
 std::optional<uint32_t> listing_rid_of(db::Database &db, int64_t account_user_id) {
 	const auto rows = db.query("SELECT h.rid FROM active_hosts h JOIN host_keys k "
 							   "ON k.claimed_rid = h.rid WHERE k.user_id = ? "

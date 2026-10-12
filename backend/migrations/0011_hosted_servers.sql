@@ -34,8 +34,7 @@
 --
 -- hosted_server_events keeps one row per state transition, with what caused it.
 --
--- The remote-admin console's ring (hosted_server_console) comes with the admin
--- link that fills it.
+-- The remote-admin console's ring (hosted_server_console) is 0012's.
 --
 -- Forward-only, like 0005..0010: applies exactly once on fresh and existing DBs.
 

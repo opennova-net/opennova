@@ -158,6 +158,29 @@ void Supervisor::tick(uint64_t now_ms) {
 	for (auto it = runtimes_.begin(); it != runtimes_.end();) {
 		it = seen.count(it->first) == 0 ? runtimes_.erase(it) : std::next(it);
 	}
+	if (admin_links_ != nullptr) {
+		try {
+			sync_admin_links(db);
+		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[hosted] WARN admin links: %s\n", e.what());
+		}
+	}
+}
+
+void Supervisor::sync_admin_links(db::Database &db) {
+	std::map<int64_t, AdminLinkTarget> wanted;
+	for (const HostedServer &s : list_live(db)) {
+		if (s.state != State::Running || s.machine_address.empty()) continue;
+		const auto login = admin_login_of(db, s.id);
+		if (!login || login->port <= 0 || login->port > 65535) continue;
+		AdminLinkTarget target;
+		target.host = s.machine_address;
+		target.port = static_cast<uint16_t>(login->port);
+		target.user = login->user;
+		target.password = login->password;
+		wanted.emplace(s.id, std::move(target));
+	}
+	admin_links_->sync(wanted);
 }
 
 bool Supervisor::owner_active(db::Database &db, const HostedServer &s, std::string &why) {
@@ -299,8 +322,21 @@ void Supervisor::on_machine_down(db::Database &db, const HostedServer &s, Runtim
 					: std::string("its machine is gone"));
 }
 
+MachineStatus Supervisor::describe(db::Database &db, const HostedServer &s) {
+	MachineStatus status = provider_.describe(s.machine_id);
+	// A machine may have no address yet right after its launch (a cloud machine
+	// is given one as it boots): the first describe that names one writes it, so
+	// the admin link and the views have it from then on.
+	if (s.machine_address.empty() && !status.address.empty() && status.state != MachineState::Gone) {
+		set_machine(db, s.id, s.provider, s.machine_id, status.address);
+		std::printf("[hosted] server %lld: machine %s at %s\n", static_cast<long long>(s.id),
+				loggable(s.machine_id).c_str(), loggable(status.address).c_str());
+	}
+	return status;
+}
+
 void Supervisor::on_booting(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = provider_.describe(s.machine_id);
+	const MachineStatus status = describe(db, s);
 	switch (status.state) {
 		case MachineState::Running:
 			move(db, s, rt, now_ms, State::Listing, "opennova-serve runs");
@@ -319,7 +355,7 @@ void Supervisor::on_booting(db::Database &db, const HostedServer &s, Runtime &rt
 }
 
 void Supervisor::on_listing(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = provider_.describe(s.machine_id);
+	const MachineStatus status = describe(db, s);
 	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
 		on_machine_down(db, s, rt, now_ms, status);
 		return;
@@ -335,7 +371,7 @@ void Supervisor::on_listing(db::Database &db, const HostedServer &s, Runtime &rt
 }
 
 void Supervisor::on_running(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = provider_.describe(s.machine_id);
+	const MachineStatus status = describe(db, s);
 	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
 		on_machine_down(db, s, rt, now_ms, status);
 		return;
@@ -349,16 +385,21 @@ void Supervisor::on_running(db::Database &db, const HostedServer &s, Runtime &rt
 	}
 	if (now_ms < rt.grace_until_ms || now_ms - rt.last_check_ms < config_.health_interval_ms) return;
 	rt.last_check_ms = now_ms;
-	if (s.service_user_id && listing_rid_of(db, *s.service_user_id)) {
+	// Healthy: listed, and (with admin links) its admin link's session answering
+	// its status polls (ADR 0053 d6).
+	const bool listed = s.service_user_id && listing_rid_of(db, *s.service_user_id);
+	const bool answers = admin_links_ == nullptr || admin_links_->answering(s.id);
+	if (listed && answers) {
 		rt.misses = 0;
 		return;
 	}
 	++rt.misses;
-	std::printf("[hosted] server %lld: health check %d of %d found no listing\n",
-			static_cast<long long>(s.id), rt.misses, config_.health_misses);
+	const std::string found = listed ? "no answer on its admin link" : "no listing";
+	std::printf("[hosted] server %lld: health check %d of %d found %s\n", static_cast<long long>(s.id),
+			rt.misses, config_.health_misses, found.c_str());
 	if (rt.misses >= config_.health_misses) {
 		finish(db, s, State::Failed,
-				"no listing at " + std::to_string(config_.health_misses) + " health checks in a row");
+				found + " at " + std::to_string(config_.health_misses) + " health checks in a row");
 	}
 }
 

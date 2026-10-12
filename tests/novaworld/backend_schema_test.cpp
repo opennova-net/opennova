@@ -42,7 +42,7 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
 		"active_hosts", "active_user_sessions",
-		"games", "host_keys", "host_players", "host_roster", "hosted_server_events",
+		"games", "host_keys", "host_players", "host_roster", "hosted_server_console", "hosted_server_events",
 		"hosted_servers", "hosts", "login_addresses",
 		"player_game_access",
 		"players", "server_status", "unknown_messages", "web_sessions"
@@ -267,7 +267,7 @@ int test_web_sessions_and_roles() {
 
 // 0008 over a database that already holds accounts (every deployment before
 // it): the migrations up to 0007 and the seed, then the full set, which
-// applies 0008 (and 0009, 0010 and 0011 after it) and gives every existing
+// applies 0008 (and 0009 to 0012 after it) and gives every existing
 // account the 'player' role, and (0011) the 'player' kind with no hosting
 // approval.
 int test_web_sessions_migration_over_existing_accounts() {
@@ -293,11 +293,12 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 4);
+	TEST_EXPECT(second.applied.size() == 5);
 	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
 	TEST_EXPECT(second.applied[1] == "0009_host_keys.sql");
 	TEST_EXPECT(second.applied[2] == "0010_credentials_generation.sql");
 	TEST_EXPECT(second.applied[3] == "0011_hosted_servers.sql");
+	TEST_EXPECT(second.applied[4] == "0012_hosted_server_console.sql");
 	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player'), SUM(kind = 'player'), "
 	                            "SUM(can_host) FROM players;");
 	TEST_EXPECT(roles[0].as_int(0).value() == 5);

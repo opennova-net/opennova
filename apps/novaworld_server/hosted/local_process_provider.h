@@ -91,8 +91,10 @@ private:
 		std::vector<std::filesystem::path> secret_files; // deleted at terminate()
 	};
 
-	// Runs `task` on the spawner thread and returns once it ran.
-	void on_spawner(const std::function<void()> &task);
+	// Runs `task` on the spawner thread and returns once it ran: false with
+	// `error` when it threw (caught there, so the thread lives on) or when the
+	// provider is shutting down (the spawner ends; nothing is queued then).
+	bool on_spawner(const std::function<void()> &task, std::string &error);
 	void spawner_loop();
 
 	LocalProcessConfig config_;

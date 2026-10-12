@@ -16,6 +16,7 @@ using native_socket_t = SOCKET;
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -81,6 +82,47 @@ void set_io_timeout(intptr_t fd, int timeout_ms) {
 			sizeof(value));
 	::setsockopt(native_socket(fd), SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&value),
 			sizeof(value));
+}
+
+// Waits up to `timeout_ms` for `fd` to read (or, with `write`, to write: a connect's end): 1
+// when it can (or has an error or a hang-up the next call reports), 0 on the timeout, -1 on an
+// error (or, for a connect on Windows, its failure). POSIX polls: select's fd_set takes only a
+// descriptor below FD_SETSIZE, and a service holding many connections can hand out one past
+// it. Winsock's fd_set is a list of handles, with no such bound.
+int wait_ready(intptr_t fd, bool write, int timeout_ms) {
+#if defined(_WIN32)
+	fd_set ready;
+	fd_set failed;
+	FD_ZERO(&ready);
+	FD_ZERO(&failed);
+	FD_SET(native_socket(fd), &ready);
+	FD_SET(native_socket(fd), &failed);
+	timeval tv{};
+	tv.tv_sec = timeout_ms / 1000;
+	tv.tv_usec = (timeout_ms % 1000) * 1000;
+	// A failed connect shows in the except set alone.
+	const int n = ::select(0, write ? nullptr : &ready, write ? &ready : nullptr,
+			write ? &failed : nullptr, &tv);
+	if (n < 0) {
+		return -1;
+	}
+	if (n == 0) {
+		return 0;
+	}
+	return FD_ISSET(native_socket(fd), &ready) ? 1 : -1;
+#else
+	pollfd p{};
+	p.fd = native_socket(fd);
+	p.events = write ? POLLOUT : POLLIN;
+	int n = 0;
+	do {
+		n = ::poll(&p, 1, timeout_ms);
+	} while (n < 0 && errno == EINTR);
+	if (n < 0 || (n > 0 && (p.revents & POLLNVAL) != 0)) {
+		return -1;
+	}
+	return n > 0 ? 1 : 0;
+#endif
 }
 
 sockaddr_in to_sockaddr(const Endpoint &ep) {
@@ -254,19 +296,9 @@ Socket tcp_connect(const Endpoint &to, int timeout_ms) {
 			close_fd(fd);
 			return s;
 		}
-		fd_set writable;
-		fd_set failed;
-		FD_ZERO(&writable);
-		FD_ZERO(&failed);
-		FD_SET(native_socket(fd), &writable);
-		FD_SET(native_socket(fd), &failed);
-		timeval tv{};
-		tv.tv_sec = timeout_ms / 1000;
-		tv.tv_usec = (timeout_ms % 1000) * 1000;
 		int error = 0;
 		socklen_t_compat len = sizeof(error);
-		if (::select(select_nfds(fd), nullptr, &writable, &failed, &tv) <= 0 ||
-				!FD_ISSET(native_socket(fd), &writable) ||
+		if (wait_ready(fd, /*write=*/true, timeout_ms) != 1 ||
 				::getsockopt(native_socket(fd), SOL_SOCKET, SO_ERROR,
 						reinterpret_cast<char *>(&error), &len) != 0 ||
 				error != 0) {
@@ -315,6 +347,13 @@ bool tcp_recv_exact(Socket &s, uint8_t *buf, size_t len) {
 	return true;
 }
 
+int tcp_wait_readable(Socket &s, int timeout_ms) {
+	if (!s.is_valid()) {
+		return -1;
+	}
+	return wait_ready(s.fd, /*write=*/false, timeout_ms);
+}
+
 Socket tcp_listen(uint16_t port, int backlog, uint16_t *out_bound, bool loopback_only) {
 	Socket s{};
 	const native_socket_t native_fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -326,6 +365,18 @@ Socket tcp_listen(uint16_t port, int backlog, uint16_t *out_bound, bool loopback
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(loopback_only ? INADDR_LOOPBACK : INADDR_ANY);
 	addr.sin_port = htons(port);
+#if !defined(_WIN32)
+	// Linux refuses a listener's bind while a connection on the port, closed by this side
+	// first, waits out its TIME_WAIT, so a server restarted on a fixed port (opennova-serve's
+	// remote_admin_port on a machine) could not listen for a minute. SO_REUSEADDR lifts that
+	// alone: two listeners still cannot share the port. Windows needs none (there it would let
+	// another socket take the port). Platform plumbing, no parity concern: retail's listen sets
+	// no option [orig: CAdminServer_Listen @0x406E00 — socket, htons, ioctlsocket, bind and
+	// listen alone (WS2_32 ordinals 23, 9, 10, 2, 13 through the IAT @0x7C0490..0x7C04A0)].
+	const int reuse = 1;
+	::setsockopt(native_socket(fd), SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&reuse),
+			sizeof(reuse));
+#endif
 	if (::bind(native_socket(fd), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == SOCKET_ERROR ||
 			::listen(native_socket(fd), backlog) == SOCKET_ERROR) {
 		close_fd(fd);

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <exception>
 #include <system_error>
 #include <utility>
 
@@ -164,18 +165,34 @@ void LocalProcessProvider::spawner_loop() {
 			task = std::move(spawner_tasks_.front());
 			spawner_tasks_.pop_front();
 		}
+		// on_spawner's wrapper catches whatever the task throws; nothing may end
+		// this thread but the stop (an escaping throw would end the service).
 		task();
 	}
 }
 
-void LocalProcessProvider::on_spawner(const std::function<void()> &task) {
+bool LocalProcessProvider::on_spawner(const std::function<void()> &task, std::string &error) {
 	std::mutex done_mu;
 	std::condition_variable done_cv;
 	bool done = false;
+	std::string thrown;
 	{
 		std::lock_guard<std::mutex> lock(spawner_mu_);
+		// The destructor has asked the spawner to end: a task queued now could
+		// find it gone and would wait for good.
+		if (spawner_stopping_) {
+			error = "the local provider is shutting down";
+			return false;
+		}
 		spawner_tasks_.push_back([&] {
-			task();
+			try {
+				task();
+			} catch (const std::exception &e) {
+				thrown = e.what();
+				if (thrown.empty()) thrown = "an exception";
+			} catch (...) {
+				thrown = "an exception";
+			}
 			std::lock_guard<std::mutex> done_lock(done_mu);
 			done = true;
 			done_cv.notify_all();
@@ -184,6 +201,11 @@ void LocalProcessProvider::on_spawner(const std::function<void()> &task) {
 	spawner_cv_.notify_all();
 	std::unique_lock<std::mutex> lock(done_mu);
 	done_cv.wait(lock, [&] { return done; });
+	if (!thrown.empty()) {
+		error = "the spawn failed: " + thrown;
+		return false;
+	}
+	return true;
 }
 
 fs::path LocalProcessProvider::server_dir(int64_t server_id) const {
@@ -253,8 +275,8 @@ std::optional<std::string> LocalProcessProvider::launch(const LaunchSpec &spec, 
 	options.environment = proc::filter_environment(kServeEnvironment);
 	options.end_with_parent = true;
 	bool spawned = false;
-	on_spawner([&] { spawned = machine.process.spawn(options, error); });
-	if (!spawned) return std::nullopt;
+	if (!on_spawner([&] { spawned = machine.process.spawn(options, error); }, error) || !spawned)
+		return std::nullopt;
 
 	std::lock_guard<std::mutex> lock(mu_);
 	const std::string id =

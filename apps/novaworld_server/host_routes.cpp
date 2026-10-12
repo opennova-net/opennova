@@ -267,10 +267,10 @@ void HostRoutes::register_routes(WebApp &app, NwUdpListener *nw_udp) {
 
 // GET /api/admin/hosts — every listed server with its owner: listed_host_json
 // plus "owner", {id, username} of the account whose HostKey listed it (for a
-// hosted server's listing, held by its service account, the hosted server's
-// owner: hosted::hosted_server_of_account), or null for an anonymous listing
-// (the HostKey named no account) and a hosted one whose owner is gone, and
-// "hosted_server_id", the hosted server a listing is, else null.
+// live hosted server's listing, held by its service account, the hosted
+// server's owner: hosted::hosted_server_of_account), or null for an anonymous
+// listing (the HostKey named no account) and a hosted one whose owner is gone,
+// and "hosted_server_id", the live hosted server a listing is, else null.
 crow::response HostRoutes::admin_hosts(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -286,7 +286,12 @@ crow::response HostRoutes::admin_hosts(const crow::request &req) {
 			std::optional<hosted::HostedAccount> hosted_server;
 			std::optional<int64_t> owner_id;
 			if (h.host_user_id) {
+				// A service account stands for its hosted server's owner only while
+				// the server is live (the one rule, hosted_repository.h); an ended
+				// server's lingering listing is its account's own.
 				hosted_server = hosted::hosted_server_of_account(*db_conn, *h.host_user_id);
+				if (hosted_server && !hosted::is_live(hosted_server->state))
+					hosted_server.reset();
 				owner_id = hosted_server ? hosted_server->owner_user_id : h.host_user_id;
 			}
 			if (owner_id) {

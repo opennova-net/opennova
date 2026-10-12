@@ -54,7 +54,10 @@ session handshake, the browser/host/play container services, and the legacy
 - **The hosted servers' supervisor runs on a thread of its own** (with
   `ONNET_HOSTED_PROVIDER` set; "Hosted servers" below), started once the gate has its
   port and stopped before the listeners, so the local provider's servers deregister
-  while the service still serves. Each pass leases a pooled connection.
+  while the service still serves. Each pass leases a pooled connection. Each running
+  hosted server's admin link is a thread of its own too (at most `ONNET_HOSTED_CAP`),
+  ended after the supervisor and before the provider, so its session ends with `QUIT`
+  while its server still runs; a link leases a pooled connection to write its console.
 - **The `UnknownTracker` records from listener threads** into an in-memory,
   mutex-guarded accumulator and is flushed to the DB only on the main tick — never
   per packet.
@@ -344,13 +347,54 @@ An account an admin approved (`players.can_host`) can have the service run one
 - **A crash** is any exit while the server should run (any code), its machine gone, a
   launch that fails, a machine not running `opennova-serve` within 5 min, or no listing
   within 3 min. The machine is ended and the row goes back to `provisioning`, 15 s
-  later, while it has restarts left: 3 within the restart window, since an hour of
-  `running` in one go sets the count back to 0 (an always-on server that crashes now and
-  then over weeks is never failed for it); then `failed`. The launch's own error text
+  later, while it has restarts left: 3 of them, and an hour of continuous `running`
+  resets the count (so an always-on server that crashes now and then over weeks is never
+  failed for it); then `failed`. The launch's own error text
   (a path, a system error) goes to the server log; the event the owner reads says "the
   launch failed".
+- **The admin link** (`hosted/admin_link.*`; ADR 0053 d5). A running server opens
+  retail's remote admin on its `game.cfg`'s `remote_admin_port`, its `admin.cfg` granting
+  the user `svc` (a 31-character random password, new at every start, rights `7F`) to the
+  service's address alone (`ip_restrict`; on a cloud machine its security group too). The
+  service is that console's only client: owners never get the port or the login, and
+  reach the console only through the site's routes. The supervisor keeps one
+  `AdminLink` per server in `running` (every pass syncs them: a link comes up once the
+  server runs, is replaced when a restart rendered a new login, and goes down as the
+  server leaves `running`, at `stopping` or a crash). Each link is a thread of its own
+  (at most `ONNET_HOSTED_CAP` of them; the apps' sockets are blocking with timeouts, and a
+  thread per link keeps one dead machine from holding up another server's commands) that
+  keeps one logged-in session open, speaking the protocol as `RAT.exe` does through the
+  engine's client codec (`engine/net/admin/admin_protocol.h`): the challenge, the login
+  encrypted under it, one command packet at a time. The server marks no reply's end, so
+  each command's replies are read by the dispatcher's per-verb count
+  (`admin_reply_plan`, witnessed in `docs/net/novaworld-net-re.md` §6.9): an exact count
+  for most verbs, the first reply deciding for `PLAYER BAN <#>` (a second after `OK -
+  Banned Player`) and `GOTO MENUSTATE`, and a 200 ms quiet gap only where the line
+  cannot tell (`PLAYER BAN ALL`, a `PLAYER` sub-verb the server does not know). Bytes
+  between commands are read off first (to the console only after a recorded command), and
+  the idle socket is looked at every 250 ms, so a server that went away is noticed and its
+  connection reset at once. The link polls `GET GAMESTATE` every 15 s, reconnects with a
+  backoff (1 s doubling to 4 s: a link lives only while its server runs, and the health
+  check counts it), runs the queued commands (16 at most; a caller waits its own budget,
+  and a command still queued when it gives up is dropped; `QUIT` is refused, the link's
+  own), and ends with `QUIT` on a logged-in session (a reset otherwise). The password is a
+  log secret for the link's lifetime (`add_log_secret`, masked by `main()`'s log sink too)
+  and never reaches a log line, a console line or a reply.
+- **The admin listener on a machine.** The apps' TCP listeners set `SO_REUSEADDR` on POSIX
+  (`apps/common/net_sockets.cpp`), so an `opennova-serve` restarted on its fixed admin port
+  listens at once rather than after the closed session's TIME_WAIT. A listen that still
+  fails leaves the server running without its console, as retail ignores its listen's
+  result (`opennova-serve` keeps that); the supervisor's health check, which counts the
+  admin link, then restarts the server.
+- **The console** is `hosted_server_console` (migration `0012_hosted_server_console.sql`),
+  a capped ring of each server's newest 500 lines: the commands the routes ask a link to
+  record (with their sender, `owner`, `admin` or `service`), each reply packet, and the
+  link's own status lines (the session up, lost or refused, closed, and the server's scene
+  when it changes), in UTF-8 with UTC times. The reads the site polls (the player list,
+  the rotation, the chat window) are not recorded.
 - **Health.** While `running`, every pass checks the process and every 20 s the
-  listing; three missing listings in a row end the machine and fail the server. Always
+  listing and the admin link (its session up: its last status poll or command answered);
+  three failed checks in a row end the machine and fail the server. Always
   on: nothing reaps an idle server or ends one for its age.
 - **Reconciliation** at the supervisor's start: a machine the provider runs that no live
   row names is ended; a live row whose machine runs resumes where it was (a running one
@@ -694,8 +738,10 @@ every build; it compiles `auth`, `web_session` and `hosted/` straight in) drives
 settings' rules and renders, the service accounts, the request's checks and every
 transition on a fake provider and a hand-stepped clock (the stops, any exit while
 stopping, the crash restarts, their limit and the restart window, the timeouts, the
-health checks, the owners' changes including a withdrawn approval, the reconciliation and
-the periodic sweep), then `LocalProcessProvider` against the test binary itself as its
+health checks, the owners' changes including a withdrawn approval, the reconciliation (a
+`provisioning` row whose machine is gone among it) and the periodic sweep, the console
+ring's cap, and the admin links following the running servers), then
+`LocalProcessProvider` against the test binary itself as its
 server (the files, the environment allowlist against a planted secret, the secrets
 deleted at terminate, and its children outliving the supervisor's thread to get an
 orderly stop); `app_process`
@@ -708,4 +754,14 @@ and `hosted_local_e2e`
 `BUILD_NOVAWORLD_HTTP` only) a real `opennova-serve` child run by the supervisor through
 `LocalProcessProvider` over a synthetic loose game directory: started from the site,
 listed as its service account and shown as the owner's, renamed by the owner's
-`SetServerName` (its `game.cfg` saved), and stopped from the site.
+`SetServerName` (its `game.cfg` saved), administered over the supervisor's admin link
+(`PLAYER LIST`, a recorded `CHAT SEND` in the console ring, no password in a log or console
+line), and stopped from the site, the link going down with it. `hosted_admin_link`
+([`tests/novaworld/hosted_admin_link_test.cpp`](../../tests/novaworld/hosted_admin_link_test.cpp),
+every build) runs the admin link against a real `opennova-serve` child on the LAN network
+type with the hosted renders' `admin.cfg`: the login, `PLAYER LIST`, `CHAT SEND` read back
+by `CHAT GET`, the reply framing (two packets, one, the quiet gap, each followed by a
+command in step), the status poll, the reconnect after the child is killed and started
+again on the same port, `QUIT` at the end, and the password in no log or console line;
+`admin_protocol` and `admin_server` pin the reply-count table itself, against the
+engine's own console.

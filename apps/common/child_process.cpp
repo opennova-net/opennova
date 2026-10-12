@@ -31,6 +31,11 @@
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #endif
+
+// The process environment. POSIX defines `environ` but no header has to
+// declare it (glibc's unistd.h does only under _GNU_SOURCE, macOS's never), so
+// it is declared here, at global scope where it lives.
+extern char **environ;
 #endif
 
 namespace opennova::proc {
