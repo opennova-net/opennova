@@ -1006,14 +1006,23 @@ func _ammo_id(name: String) -> int:
 func _select_weapon(wdb: WeaponDatabase, control: String, slot: int,
 		class_mask: int, weapon_name: String) -> WeaponDef:
 	var combo := _ammo_id(control)
-	var defs := wdb.get_slot_weapons(slot, class_mask, 2)  # blue
-	for i in defs.size():
-		var w := defs[i] as WeaponDef
+	for w: WeaponDef in wdb.get_slot_weapons(slot, class_mask, 2):  # blue
 		if w.name.nocasecmp_to(weapon_name) == 0:
-			_ammo_driver.select_row(combo, i + 1)  # emits -> the witnessed refill
-			return w
+			var row := _weapon_row(wdb, combo, w)
+			if row > 0:
+				_ammo_driver.select_row(combo, row)  # emits -> the witnessed refill
+				return w
 	assert_true(false, "%s offers %s" % [control, weapon_name])
 	return null
+
+
+# The row showing a weapon: the list sorts by label after NONE (D-PLAYERINFO-21).
+func _weapon_row(wdb: WeaponDatabase, combo: int, w: WeaponDef) -> int:
+	var label := wdb.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT))
+	for row in range(1, _ammo_driver.item_count(combo)):
+		if _ammo_driver.item_text(combo, row) == label:
+			return row
+	return -1
 
 
 # The expected *_AMMO2 sub-weapon, computed from the public table walk the companion
@@ -1392,6 +1401,116 @@ func test_class_pick_saves_the_class_it_leaves() -> void:
 	_ammo_driver.select_row(_ammo_id("PLAYERCLASS"), 0)  # back to class 5
 	assert_eq(_selected_text("PRIMARY"), "WPN_P2", "the medic page's edit is restored")
 	assert_eq(_selected_text("SECONDARY"), "WPN_S1")
+
+
+# --- The slot lists' sort (D-PLAYERINFO-21) -----------------------------------
+
+# Three primaries whose table order is neither their byte order nor their
+# case-insensitive one, and two grenades out of label order.
+const SORT_WEAPON_DEF := """
+weapon "WPN_ZULU"
+	loadout_selectable	1
+	teamfilter	blue
+	charfilter	medic
+	weapon_class	primary
+	round_type	"AMMO_Z"
+	clipsize	30
+	maxclips	5
+	clipweight	1
+	weaponweight	5
+end
+
+weapon "wpn_alpha"
+	loadout_selectable	1
+	teamfilter	blue
+	charfilter	medic
+	weapon_class	primary
+	round_type	"AMMO_A"
+	clipsize	30
+	maxclips	5
+	clipweight	1
+	weaponweight	5
+end
+
+weapon "WPN_Mike"
+	loadout_selectable	1
+	teamfilter	blue
+	charfilter	medic
+	weapon_class	primary
+	round_type	"AMMO_M"
+	clipsize	30
+	maxclips	5
+	clipweight	1
+	weaponweight	5
+end
+
+weapon "WPN_GZ"
+	loadout_selectable	1
+	teamfilter	blue
+	charfilter	medic
+	weapon_class	grenade
+	round_type	"GZ"
+	clipsize	1
+	maxclips	2
+	clipweight	1
+	weaponweight	1
+end
+
+weapon "WPN_GA"
+	loadout_selectable	1
+	teamfilter	blue
+	charfilter	medic
+	weapon_class	grenade
+	round_type	"GA"
+	clipsize	1
+	maxclips	2
+	clipweight	1
+	weaponweight	1
+end
+"""
+
+
+# The populate sorts each slot list's rows by their text, case-insensitively and
+# ascending, before it inserts NONE at row 0, as the WEAPON screen's populate
+# does; each row keeps its weapon, so the kit restore still selects the page's
+# weapon by value and a pick names the weapon its row shows. The grenade fill
+# sorts nothing: its slots take the table's order.
+# [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430 -- ListWidget_SortRows(list,
+#  0, 1) @0x56054c / @0x560557 / @0x560566 over cmp @0x6448a0 (stricmp,
+#  ascending), the NONE inserts @0x56058f / @0x56059d / @0x5605ab;
+#  PlayerInfo_PopulateAmmoComboBoxes @0x55def0 calls no sort]
+func test_slot_lists_sort_by_their_labels() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root)
+	if root == null:
+		return
+	var path := TestFs.cache_dir(self, "player_info_sort_def").path_join("weapon.def")
+	TestFs.write_text(self, path, SORT_WEAPON_DEF)
+	var wdb := WeaponDatabase.new()
+	assert_eq(wdb.load(path), OK, "the sort weapon.def loads")
+	_reset_profile([_kit_entry("WPN_KNIFE"), _kit_entry("WPN_MEDPACK"),
+		_kit_entry("WPN_Mike", 2, -1, 0), _kit_entry("None"), _kit_entry("None"),
+		_kit_entry("WPN_GZ", 0), _kit_entry("WPN_GA", 1), _kit_entry("None")])
+	var companion := _open_kit_screen(root, wdb)
+
+	assert_eq(_items("PRIMARY"), ["None", "wpn_alpha", "WPN_Mike", "WPN_ZULU"],
+		"NONE, then the rows by their text, case-insensitively")
+	assert_eq(_selected_text("PRIMARY"), "WPN_Mike", "the restore selects the page's weapon by value")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("PRIMARY")), 2, "its sorted row")
+	assert_eq(_ammo_driver.selected_row(_ammo_id("PRIMARY_AMMO1")), 1, "with the page's two clips")
+	assert_eq(_ammo_driver.item_text(_ammo_id("GRENADE_AMMO1"), 0), "0 - GZ",
+		"the first grenade slot is the table's first grenade")
+	assert_eq(_ammo_driver.item_text(_ammo_id("GRENADE_AMMO2"), 0), "0 - GA")
+
+	_ammo_driver.select_row(_ammo_id("PRIMARY"), 3)
+	assert_eq(String(companion.snapshot().get("primary", "")), "WPN_ZULU",
+		"a pick names the weapon its row shows")
+	_ammo_driver.select_row(_ammo_id("PRIMARY"), 1)
+	assert_eq(String(companion.snapshot().get("primary", "")), "wpn_alpha")
+
+
+func _items(name: String) -> Array:
+	return Array(_ammo_driver.get_widget_items(_ammo_id(name)))
 
 
 # --- The dialog's write of the side not shown (D-PLAYERINFO-20) ----------------
