@@ -77,7 +77,7 @@ std::string hex_sig(uint32_t value, int min_width = 2) {
 // the value goes onto the wire as plain LE — what matters is how the
 // receiver interprets the four payload bytes as octets.
 
-// make_dev_scrk / make_dev_nwuid / make_random_session_u32 and the NW-UDP
+// make_dev_scrk / make_dev_nwuid / make_session_key and the NW-UDP
 // envelope transform (nw_decode_inbound / nw_encode_outbound) moved to
 // engine/net/novaworld nw_session_framing.h so the standalone server's lobby path and
 // the consolidated HostSessionAccept share exactly one definition.
@@ -263,7 +263,12 @@ void NwUdpListener::initialize_jo_host() {
 
 	// A loaded mission normally supplies this marker. The standalone gate has
 	// no mission path, so its minimal authoritative world uses the spawn
-	// pipeline's ordinary start-marker input at the origin.
+	// pipeline's ordinary start-marker input at the origin. It loads no
+	// items.def either, so the start has no ItemTypeIndex and the 0x20 page
+	// streams its slot as an empty one, as a host whose items.def lacked the
+	// row would (D-NET-416). Nothing reads that copy: the start's reader is the
+	// spawn resolve (world::resolve_player_spawn_pose), which runs on the host's
+	// own registry, never on a streamed row.
 	world::Entity start;
 	start.kind = world::EntityKind::Marker;
 	start.item_id = 6002;
@@ -467,39 +472,59 @@ std::vector<NwUdpListener::HostedSnapshot> NwUdpListener::snapshot_hosted() cons
 	return out;
 }
 
-HostPushResult NwUdpListener::push_server_command(uint32_t rid, const std::string &cmd) {
-	return queue_host_push(rid, make_server_command(cmd), /*ends_hosting=*/false);
+HostPushResult NwUdpListener::push_server_command(uint32_t rid, const std::string &cmd,
+                                                  std::optional<int64_t> owner) {
+	return queue_host_push(rid, make_server_command(cmd), /*ends_hosting=*/false, owner);
 }
 
 HostPushResult NwUdpListener::push_stop_hosting(uint32_t rid, int msg_code, int msg_param1,
-                                                int msg_param2) {
+                                                int msg_param2, std::optional<int64_t> owner) {
 	return queue_host_push(rid, make_server_stop_hosting(msg_code, msg_param1, msg_param2),
-	                       /*ends_hosting=*/true);
+	                       /*ends_hosting=*/true, owner);
 }
 
 // The RID is the service's own (LobbySession::mint_rid), kept by a connection after its hosting
-// ends and carried across a reconnect; a hosting connection holds it at most once.
+// ends and carried across a reconnect; a hosting connection holds it at most once. An owner's
+// push sees only the connections whose listing that account owns.
 HostPushResult NwUdpListener::queue_host_push(uint32_t rid, NapiMessage statement,
-                                              bool ends_hosting) {
+                                              bool ends_hosting, std::optional<int64_t> owner) {
 	if (rid == 0) return HostPushResult::UnknownRid;
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);
 	bool known = false;
 	for (const auto &[peer, state] : lobby_states_) {
 		if (state.lobby.rid != rid) continue;
+		if (owner && state.lobby.host_user_id != owner) continue;
 		known = true;
 		if (!state.lobby.hosting) continue;
-		std::printf("[nwudp] PUSH %s queued for rid=%u addr=%s\n", statement.name.c_str(), rid,
-		            peer_addr_to_string(peer).c_str());
-		host_pushes_.push_back(HostPush{peer, state.server_sk, std::move(statement), ends_hosting});
+		std::printf("[nwudp] PUSH %s queued for rid=%u addr=%s%s\n", statement.name.c_str(), rid,
+		            peer_addr_to_string(peer).c_str(), owner ? " (the owner's)" : "");
+		host_pushes_.push_back(
+				HostPush{peer, state.server_sk, std::move(statement), ends_hosting, owner});
 		return HostPushResult::Queued;
 	}
 	return known ? HostPushResult::NotHosted : HostPushResult::UnknownRid;
 }
 
+void NwUdpListener::forget_owner(int64_t user_id) {
+	std::lock_guard<std::mutex> lk(lobby_states_mu_);
+	for (auto &[peer, state] : lobby_states_) {
+		if (state.lobby.host_user_id != user_id) continue;
+		state.lobby.host_user_id.reset();
+		std::printf("[nwudp] rid=%u addr=%s no longer names account %lld as its owner\n",
+		            state.lobby.rid, peer_addr_to_string(peer).c_str(),
+		            static_cast<long long>(user_id));
+	}
+	for (auto &[peer, parked] : parked_lobby_states_) {
+		if (parked.lobby.host_user_id == user_id) parked.lobby.host_user_id.reset();
+	}
+}
+
 // Each push goes out as its own send build, in queue order, on the connection the RID resolved
 // to; one replaced (a fresh 0x42 mints a new SK) or dropped since is skipped, and so is one that
-// stopped hosting since, as the queue would have refused it (NotHosted).
+// stopped hosting since, as the queue would have refused it (NotHosted), and an owner's push to a
+// listing no longer that account's (a re-host's key, or forget_owner).
 void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
+	if (push_drain_paused_.load()) return;
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);
 	if (host_pushes_.empty()) return;
 	std::vector<HostPush> pushes;
@@ -517,6 +542,11 @@ void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
 		if (!state.lobby.hosting) {
 			std::printf("[nwudp] PUSH %s to %s dropped: the connection no longer hosts\n",
 			            name.c_str(), addr.c_str());
+			continue;
+		}
+		if (push.owner && state.lobby.host_user_id != push.owner) {
+			std::printf("[nwudp] PUSH %s to %s dropped: the listing's owner changed\n", name.c_str(),
+			            addr.c_str());
 			continue;
 		}
 		std::optional<ProtocolMessage> record = lobby_record(std::move(push.statement));
@@ -856,8 +886,10 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			//
 			// Keyed by PeerAddr (G.7): two retail processes both send
 			// ci=0x00000001, so keying by ci would have the second AUTH
-			// overwrite the first's per-connection state.
-			const uint32_t server_sk = make_random_session_u32();
+			// overwrite the first's per-connection state. The SK is drawn
+			// until nonzero. [orig: NapiNPProtocol_HandleClientJoin @0x62BF5E
+			//  -> NapiNP_GenerateSessionKey]
+			const uint32_t server_sk = make_session_key();
 			ServerAuth reply = build_server_auth(auth, client_ip_net,
 			                                     client_port, server_sk,
 			                                     server_scrk,

@@ -242,6 +242,20 @@ bool binary_config_sections(const BinaryConfig &config, std::vector<configfile::
 		for (const BinaryConfig::Entry &entry : label.entries) lay(entry);
 		lay(label.terminator);
 	}
+	// An entry's value pointer is the value cursor as the data loop reaches it, and only an entry's own values move
+	// the cursor on [orig: @ 0x75eb1e; @ 0x75eb72]; the data loop walks the labels' entries in the element block's
+	// order (a label of no entry, or counted 0xFFFFFFFF, taking none [orig: @ 0x75eb09, @ 0x75eb11]). So an entry
+	// of no value points at the first value of the block's next entry that has one, or past the last value, at
+	// heap bytes the parse never wrote (sub_75E850 @ 0x75e850 sizes the allocation at the values alone; past it,
+	// FastMem_Alloc @ 0x7697b0's rounding slack or the next block's header), where it points at none here.
+	size_t next_valued = SIZE_MAX;
+	for (size_t at = block->entries.size(); at-- > 0;) {
+		configfile::ConfigEntry &entry = block->entries[at];
+		if (entry.values.empty())
+			entry.pointed_entry = next_valued;
+		else
+			next_valued = at;
+	}
 	// The walk from an entry runs to the first null name at or after it [orig: Effect_GetParamValue_0
 	// @ 0x75fa00, the tests @ 0x75fa87 / @ 0x75faaf]; past the last block it would read the allocation's
 	// slack (FastMem's rounding), bytes the parse never wrote: the entries end there, a read that walks on

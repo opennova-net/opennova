@@ -89,6 +89,28 @@ std::vector<playersav::BindingEntry> merge_bindings(
 // @0x55fbf9..0x55fc29].
 bool name_char_allowed(char c);
 
+// A side's PLAYERVOICE override in a record: +1532 for side 0 (blue), +1533
+// for side 1 (red), 0 the character's own voice. The list's selection writes
+// the picked row's value, as a byte, into the shown side's byte at once: no
+// ACCEPT is needed and nothing puts it back (the ACCEPT's dialog read leaves
+// both bytes, and player.mnu authors no other way off the screen)
+// [orig: sub_560030 @0x560030, the store @0x56004c; PlayerInfo_SaveFromDialog
+// @0x55ee10]. The list's fill writes 0 there when its rows do not carry the
+// value [orig: PlayerInfo_PopulatePlayerVoiceCombo @0x55de21], and the fill
+// and the voice preview read it [orig: @0x55ddea; PlayerInfo_PreviewVoice
+// @0x55ff97]. The screen's build and a side switch fill the list only against
+// the side's saved selection, its nationality, division and combo selected
+// first, so only that fill can reset the byte [orig: PlayerInfo_InitProfileSelector
+// @0x5613a6 and PlayerInfo_SaveAndRepopulate @0x5608fa -> PlayerInfo_PopulateAllControls
+// @0x5606f0, the selects @0x5607de / @0x560840 / @0x5608a3, the fills in
+// PlayerInfo_PopulateAvatarComboList @0x5603b1 and @0x5608d8]; a nationality,
+// division or combo pick fills it at once against the new combo [orig:
+// PlayerInfo_HandleNationalitySelect @0x560600, PlayerInfo_HandleDivisionSelect
+// @0x560690 -> PlayerInfo_PopulateAvatarComboList; PlayerInfo_HandleVoiceSelect
+// @0x55ff59]. A side other than 0 or 1 reads 0 and writes nothing.
+int voice_override(const playersav::ProfileRecord &record, int side);
+void set_voice_override(playersav::ProfileRecord &record, int side, int value);
+
 class PlayerProfiles {
 public:
 	PlayerProfiles();

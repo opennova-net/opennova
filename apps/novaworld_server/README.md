@@ -115,15 +115,92 @@ every packet the client sends).
 is running a NovaWorld match, ends that match for everyone within 62 frames, goes to
 the main menu and resets its NovaWorld session (the RE record's "The exit"); the
 service also takes the server out of the browser as the statement goes out, since the
-host answers it with no `ClientStopHosting`. The admin routes (the Bearer
-`ADMIN_API_TOKEN`, or an admin-role website session with the CSRF header; see
-"Website sessions and roles"), each push logged with its actor and the composed
-line (control bytes escaped):
+host answers it with no `ClientStopHosting`.
+
+The routes live in `host_routes.*` (`HostRoutes`, which the HTTP listener owns beside
+its `WebAccess`). Both families compose a command through one helper,
+`compose_server_command`: the body `{"verb", "target", "args"}` (`target` one of
+`None`, `ByIndex`, `ByIpAndPort`, `ByName`, `ByPCID`, or absent) goes through
+`server_command_text`, so a line the host's reader would drop is a 400 with the
+composer's reason, and so is an arg holding a control byte (below 0x20, 0x7F, or a C1
+control U+0080 to U+009F, which a host would save into its `game.cfg` or relay in chat).
+
+The body is UTF-8 (JSON) and a stock host reads its `Cmd` in its own code page, cp1252
+for JO's audience (D-NET-382), so the composer converts each arg to cp1252 first
+(`utf8_to_cp1252`, `base/io/cp1252.h`): "café" reaches the host as `caf` and 0xE9. An
+arg holding a character cp1252 has none for (an emoji, CJK) is a 400 naming its
+codepoints (`U+1F600`), never substituted, and bytes that are not UTF-8 are a 400 too.
+Crow's JSON reader decodes each `\uXXXX` escape on its own, so an escaped surrogate pair
+arrives as two halves; the composer joins them into the character first, so an escaped
+emoji is named like a raw one, and an unpaired half is refused as not UTF-8.
+`SetServerName` and `SetServerMsg` texts are counted in the host's bytes: a stock host
+keeps 31 and 127 of them (`SERVER_COMMAND_NAME_CAP` / `SERVER_COMMAND_MSG_CAP`,
+`Napi_CopyString`'s 32 and 128), so a longer one is a 400 rather than clipped there. A
+reply's `cmd` and the log show the composed line back in UTF-8. A host reports its text
+back the same way (a name set to "café" comes back with 0xE9), so every JSON list of
+listed servers (`/api/lobbies`, `/api/hosts`, `GET /api/me/hosts`, `GET /api/admin/hosts`)
+sends a host's text as UTF-8 (`retail_text_to_utf8`: valid UTF-8 as it is, anything else
+read as cp1252). The GSB browser blobs and every other retail wire output keep the host's
+bytes, which stock clients read as cp1252.
+
+**The admin's pushes** (the Bearer `ADMIN_API_TOKEN`, or an admin-role website session
+with the CSRF header; see "Website sessions and roles"), each logged with its actor and
+the composed line (control bytes escaped):
 
 | Route | Body | Replies |
 | --- | --- | --- |
-| `POST /api/admin/hosts/<rid>/command` | `{"verb": "SetServerName", "target": "None", "args": ["New Name"]}` (`target` one of `None`, `ByIndex`, `ByIpAndPort`, `ByName`, `ByPCID`) | 202 queued (with the composed `cmd`); 400 when `server_command_text` refuses the line or an arg holds a control byte (below 0x20, or 0x7F, which a host would save into its `game.cfg` or relay in chat), with the reason; 404 unknown RID; 409 not hosting |
+| `POST /api/admin/hosts/<rid>/command` | `{"verb": "SetServerName", "target": "None", "args": ["New Name"]}`, any of the eighteen verbs | 202 queued (with the composed `cmd`); 400 with the composer's reason; 404 unknown RID; 409 not hosting |
 | `POST /api/admin/hosts/<rid>/stop` | none | 202 queued (MsgCode 7, `NWUSERVERMSGCODE_NOVAWORLDSYSOPPUNT`): ends a stock host's running NovaWorld match for everyone and drops the host from NovaWorld (the browser row at once, its session reset with the match's exit); 404; 409 |
+
+**The owner's pushes** (service policy): the account that listed a server ("Listed
+servers and owners" below) administers that server, and only it, from the website's
+"My servers" page (`/me/servers`).
+
+| Route | Body | Replies |
+| --- | --- | --- |
+| `POST /api/me/hosts/<rid>/command` | as the admin's, any verb but `SetMPReset` | 202 queued (with the composed `cmd`); 400 with the composer's reason; 403 `verb_not_allowed` for `SetMPReset`; 404 unless the server is the caller's; 409 the caller's server is not hosting; 429 |
+| `POST /api/me/hosts/<rid>/stop` | none | 202 queued (the admin stop's MsgCode 7); 404 unless the server is the caller's; 409; 429 |
+
+- **Who.** `require_user`: a live website session of an active account (401 otherwise,
+  and a session whose account went inactive is deleted as it is used), with the CSRF
+  header (403 `csrf_header_required`). The listing must be the caller's now
+  (`hostdb::listing_owned_by`): the RID is listed and one of the caller's keys stands
+  claimed for it, the live claim `active_hosts.host_user_id` follows, read at the
+  request rather than as of the row's last write (so a reset, a ban or a delete, each
+  taking the account's keys, closes the routes at once). A RID no listing holds and
+  another account's listing get the same 404 body (`unknown_rid`, "no server of yours
+  is listed under this RID"), so the routes never tell one from the other. Ownership is
+  checked again at push time: the push carries the caller's account to
+  `NwUdpListener`, which resolves the RID only to a connection whose
+  `LobbyState::host_user_id` is that account, under its lobby lock, and the receive
+  thread drops the statement if the connection's owner changed before it went out (a
+  re-host whose key names another account or none). That miss is the same 404. An
+  admin password reset, an inactive status or a delete also takes the account off its
+  listings' in-memory owner (`NwUdpListener::forget_owner`, beside the retail login
+  pins), so a push the account queued just before is dropped there too, not sent.
+- **The rate limit.** Each owner push, command or stop, takes one token from the
+  account's bucket (`HostRoutes::kOwnerPushPerUser`, in memory): 8 at once, then one
+  every 2 s. Past it: 429 `rate_limited` with `Retry-After` in seconds. The token is
+  taken after the session and CSRF checks and before the body is read, so a refused
+  body or another account's RID spends it too: a player can flood neither their
+  server's chat nor the service.
+- **The verbs.** Every `ServerCommand` verb acts only on the server it is sent to, so
+  an owner may send all of them but `SetMPReset`, which stays an admin's: it stores the
+  host's `mpreset` word in its `game.cfg`, and a nonzero word ends the host process at
+  its next session create (D-NET-385), a change saved past the run that the owner's page
+  could neither show nor undo once the server left the list. The stop is the owner's
+  way to end the hosting.
+- **What reaches everyone.** The stop, and `Cycle`, `EndMission` and `GameOver` (each
+  ends the running round with the winner its arg names, a team name or number, none
+  for no winner, and the server moves on through its rotation), act on every player on
+  the server, not only the owner. The page confirms each one first, the stop with an
+  explicit "ends the match for everyone" acknowledgement. `PuntPlayer` aimed at a listen
+  host's own slot (slot 0) ends its hosting too.
+- **The log.** Every owner push past the session check is logged once with the
+  account's username (through `loggable()`) and id, the RID, the composed line and the
+  outcome: `queued`, `not_hosting`, `unknown_rid` (the listener's push-time miss),
+  `no_listing_of_theirs` (the route's own look-up), `invalid_command`,
+  `verb_not_allowed` or `rate_limited`.
 
 ## Listed servers and owners
 
@@ -172,9 +249,14 @@ HostKey is unwitnessed.
     (refused under strict mode), and a banned account's key claims nothing.
   - A deleted account takes its keys (`ON DELETE CASCADE`), and its listings' owner and
     its rows in servers' player lists are set NULL (`ON DELETE SET NULL`). The listing
-    stays listed with no owner, and its later writes store none though the lobby still
-    holds the id. `players.id` is `AUTOINCREMENT`, so no later account gets that id.
-  - In each case `POST /api/admin/hosts/<rid>/stop` ends the listing at once.
+    stays listed with no owner, and its later writes store none. `players.id` is
+    `AUTOINCREMENT`, so no later account gets that id.
+  - In each case `POST /api/admin/hosts/<rid>/stop` ends the listing at once, and the
+    account's own `GET /api/me/hosts` and push routes drop it at once: they read the
+    live claim (`hostdb::listing_owned_by`), not the row. A reset, a status change or a
+    delete made through `PUT` / `DELETE /api/admin/users/<id>` also takes the account
+    off its listings' in-memory owner (`NwUdpListener::forget_owner`), so an owner push
+    it queued just before is dropped by the receive thread rather than sent.
 - **Strict mode.** `ONNET_REQUIRE_HOST_KEY=1` lists no server whose `HostKey` claims no
   account (empty, unknown, expired, revoked, or held by another listing). The code is
   200, the retail table's `NWUSERVERMSGCODE_NEEDTOLOGIN`.
@@ -197,10 +279,12 @@ HostKey is unwitnessed.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/hosts` | a website session (`require_user`) | `{"hosts": [...]}`, the caller's listed servers, oldest first: `rid`, `gsid`, `game`, `server_name`, `mission_name`, `game_type`, `players`, `max_players`, `host_ip`, `host_port` (the endpoint joiners are sent to), `peer_ip` (the address its session comes from), `created_at`, `updated_at` (UTC); 401 with no live session |
+| `GET /api/me/hosts` | a website session (`require_user`) | `{"hosts": [...]}`, the caller's listed servers, oldest first: `rid`, `gsid`, `game`, `server_name`, `mission_name`, `game_type`, `players`, `max_players`, `host_ip`, `host_port` (the endpoint joiners are sent to), `peer_ip` (the address its session comes from), `created_at`, `updated_at` (UTC), `msg` (the server's message) and `roster`, the host's PlayerList as of its last update (`slot`, `player_name`, `team`, `type`; the slot is what a player verb's `ByIndex` target names); 401 with no live session; `Cache-Control: no-store` |
 | `GET /api/admin/hosts` | admin (the Bearer token or an admin session) | `{"count", "hosts": [...]}`, every listed server with the same fields plus `owner`, `{id, username}` or `null` |
 
-The public `/api/lobbies`, `/api/hosts` and the GSB name no owner.
+The public `/api/lobbies`, `/api/hosts` and the GSB name no owner. The owner pushes to
+its own servers through `POST /api/me/hosts/<rid>/command` and `/stop` ("Pushing
+statements to a listed server" above).
 
 ## Configuration
 
@@ -338,9 +422,9 @@ shares only the login brake's per-username cap and known addresses below.
 
 Every source but `main.cpp` builds as the static library
 `opennova_novaworld_server_core` (mirroring `opennova_serve_core`); the exe is
-`main.cpp` over it. The HTTP sources (`http_listener`, `web_access`, `web_session`,
-`rate_limiter`, `template_engine`, `session_store`, `auth`, `catalog_repository`) join
-the core only under
+`main.cpp` over it. The HTTP sources (`http_listener`, `host_routes`, `web_access`,
+`web_session`, `rate_limiter`, `template_engine`, `session_store`, `auth`,
+`catalog_repository`) join the core only under
 `BUILD_NOVAWORLD_HTTP`, which also defines `OPENNOVA_HTTP_ENABLED` PUBLIC so
 `main.cpp` starts the listener. The route harness, ctest
 `opennova_novaworld_server_http_routes`
@@ -381,4 +465,20 @@ unchanged bytes), `GET /api/me/hosts` and `GET /api/admin/hosts`; and
 ([`tests/novaworld/nw_host_ownership_e2e_test.cpp`](../../tests/novaworld/nw_host_ownership_e2e_test.cpp),
 `BUILD_NOVAWORLD_HTTP` only) runs two in-process services, one strict, against
 opennova-nw-lister's `Lister` with and without an account and hand-driven host
-sessions (the NWU reconnect, a second connection presenting a listed key).
+sessions (the NWU reconnect, a second connection presenting a listed key). Both e2e
+tests build their service from
+[`tests/novaworld/nw_service_harness.h`](../../tests/novaworld/nw_service_harness.h).
+The owner's pushes: the route harness's `owner_host_push` case (its NW UDP listener
+writes the pool, so a host's key links its row) drives the 401 / 403 / 404 / 400 /
+429 answers, the same 404 for another account's RID and a free one, the push-time
+re-check, the drain's re-check after a ban (the drain held with
+`NwUdpListener::pause_push_drain`), the 409, "café" arriving as cp1252, the roster and
+the stop against hand-driven hosts (the admin case adds the encoding refusals, an escaped
+surrogate pair named, "€ ™" arriving as 0x80 and 0x99, and the byte caps at and past them);
+`host_text_utf8`, a host-reported cp1252 name coming back as UTF-8 in `/api/lobbies` and
+`/api/hosts` and as the host's byte in the GSB; and `nw_owner_admin_e2e`
+([`tests/novaworld/nw_owner_admin_e2e_test.cpp`](../../tests/novaworld/nw_owner_admin_e2e_test.cpp),
+`BUILD_NOVAWORLD_HTTP` only) lists an in-process `opennova-serve` with an account and
+administers it from the website's routes: its match takes the owner's
+`SetServerName` (and saves `game.cfg`) and runs its `TextChatServer`, another
+account's push is a 404, and the owner's stop ends the listing.

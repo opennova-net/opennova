@@ -350,21 +350,14 @@ bool LocalPlayer::toggle_mount() {
 	if (active_slot != nullptr &&
 			!w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next))
 		return false;
-	// The null-EquippedSlot rejection belongs to UseGun itself, not the
-	// top-level USE action: an unarmed local player still enters an ordinary
-	// passenger/control seat, and it is an out-of-session-only player gate
-	// (force/script and NAPI authority paths bypass it); single player is
-	// outside the session [orig: Entity_AttachToUseGunSlot @0x546b80, reject
-	// `!is_in_session && Flags&0x100 && !EquippedSlot` -- `cmp
+	// An unarmed player's UseGun refusal out of a session is the attach's,
+	// after the request turned the body and the process left any seat it held
+	// (VehicleSystem::attach_to_seat) [orig: Entity_AttachToUseGunSlot @0x546b80,
+	// reject `!is_in_session && Flags&0x100 && !EquippedSlot` -- `cmp
 	// g_NapiNPCtx.is_in_session` @0x546BF6, the slot test @0x546c07].
-	if (!world.rules.mp_session && !weapon.active) {
-		w::VehicleSeatSelection hit;
-		if (world.vehicles.find_mount_toggle_candidate(*toggle_player, hit) && hit.type == w::SeatType::Gunner)
-			return false;
-	}
 	const bool changed = world.vehicles.player_toggle_mount(world.cached.local_player);
 	if (changed) {
-		view.binoculars_requested = false;
+		view.binoculars_requested = false; // on any relation change, ours alone (D-WPN-49)
 		w::local_player_view_refresh(&world, view);
 		sync_local_mounted_input_heading();
 		w::sync_local_usegun_weapon_transition(world, weapon, view);
@@ -390,13 +383,11 @@ bool LocalPlayer::find_numbered_seat(int index, VehicleSeatSelection &out,
 bool LocalPlayer::select_numbered_seat(int index) {
 	w::VehicleSeatSelection selected;
 	if (!find_numbered_seat(index, selected)) return false;
-	// The same out-of-session unarmed UseGun rejection toggle_mount carries
-	// [orig: Entity_AttachToUseGunSlot @0x546c07].
-	if (!world_.rules.mp_session && !weapon.active && selected.type == w::SeatType::Gunner)
-		return false;
+	// An unarmed UseGun pick out of a session is refused inside the attach, as
+	// the USE toggle's is [orig: Entity_AttachToUseGunSlot @0x546c07].
 	const bool changed = world_.vehicles.request_attach(world_.cached.local_player, selected);
 	if (changed) {
-		view.binoculars_requested = false;
+		view.binoculars_requested = false; // on any relation change, ours alone (D-WPN-49)
 		w::local_player_view_refresh(&world_, view);
 		sync_local_mounted_input_heading();
 		w::sync_local_usegun_weapon_transition(world_, weapon, view);

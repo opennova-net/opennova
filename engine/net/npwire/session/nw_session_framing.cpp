@@ -60,6 +60,14 @@ uint32_t make_random_session_u32() {
 	return os_random_u32();
 }
 
+uint32_t make_session_key(const std::function<uint32_t()> &draw) {
+	uint32_t key = 0;
+	do {
+		key = draw ? draw() : make_random_session_u32();
+	} while (key == 0); // [orig: NapiNP_GenerateSessionKey @0x61EA70 - jz @0x61EAC3]
+	return key;
+}
+
 bool nw_decode_inbound(const uint8_t *raw, size_t raw_len,
                        uint8_t &opcode_out, std::vector<uint8_t> &body_out) {
 	std::vector<uint8_t> stripped(raw_len);

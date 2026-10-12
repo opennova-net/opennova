@@ -9,6 +9,8 @@
 
 #include "host_test_setup.h"
 
+#include <base/io/le.h>
+#include <net/npwire/flat_tlv.h>
 #include <net/npwire/lan_discovery.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
@@ -22,6 +24,7 @@
 #include <deque>
 #include <utility>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -299,6 +302,177 @@ bool run_discovered_row_join_skips_the_hello() {
 	inmatch::ClientRuntime bare("BareJoiner", [&now_ms] { return now_ms; });
 	return expect(is_opcode(bare.start(), SESSION_OPCODE_CLIENT_HELLO),
 	              "a bare dial (no row record) still sends the 0x41 first");
+}
+
+// A flat-TLV body with every field named `unwanted` left out, the rest as written.
+std::vector<uint8_t> without_field(const std::vector<uint8_t> &body, std::string_view unwanted) {
+	std::vector<uint8_t> out;
+	std::size_t pos = 0;
+	while (pos < body.size()) {
+		FlatTlvField field;
+		const std::size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) break;
+		if (field.name != unwanted)
+			out.insert(out.end(), body.begin() + static_cast<std::ptrdiff_t>(pos),
+			           body.begin() + static_cast<std::ptrdiff_t>(next));
+		pos = next;
+	}
+	return out;
+}
+
+// D-NET-452: the joiner reads any 0x81 with its CI; one whose PN, PG or PV1 is not the JO
+// protocol's is dropped, and one without HK joins with a 0x42 that carries none. The LAN
+// browser lists such a reply with host key 0.
+// [orig: Nwu_HandleServerHello @0x626D20 - HK zeroed @0x626E97, the CI lookup @0x627533, PN
+//  @0x62758B, PG @0x627591..0x627624, PV1 @0x627643; CNapiNPConnection_SendClientJoin
+//  @0x61FE20 - the HK gate @0x6200F2]
+bool run_server_hello_needs_no_hk() {
+	uint64_t now_ms = 0;
+	inmatch::JoinerConnection joiner("NoKeyJoiner", [&now_ms] { return now_ms; });
+	const std::vector<uint8_t> first = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientHello hello;
+	if (!expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_HELLO &&
+				parse_client_hello(body.data(), body.size(), hello),
+			"the joiner's 0x41 parses"))
+		return false;
+	ServerHello reply = build_server_hello(hello, 0x7F000001u, 32768);
+	reply.sn = "NoKeyHost";
+	ServerHello foreign = reply;
+	foreign.pn = "NOVAWORLDUDP";
+	const std::vector<uint8_t> foreign_datagram =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(foreign));
+	const inmatch::JoinerConnection::PollResult dropped =
+			joiner.handle_datagram(foreign_datagram.data(), foreign_datagram.size());
+	if (!expect(dropped.outbound.empty() && joiner.phase() == inmatch::JoinerConnection::Phase::Hello &&
+				joiner.last_error().empty(),
+			"a 0x81 with the joiner's CI but a foreign PN is dropped"))
+		return false;
+	const std::vector<uint8_t> hk_less = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO, without_field(server_hello_to_bytes(reply), "HK"));
+	const inmatch::JoinerConnection::PollResult joined =
+			joiner.handle_datagram(hk_less.data(), hk_less.size());
+	ClientAuth auth;
+	FlatTlvField field;
+	bool carries_hk = false;
+	if (!expect(joined.outbound.size() == 1 &&
+				joiner.phase() == inmatch::JoinerConnection::Phase::Auth &&
+				nw_decode_inbound(joined.outbound[0].data(), joined.outbound[0].size(), opcode,
+						body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth),
+			"an HK-less 0x81 with the joiner's CI and the JO identity joins"))
+		return false;
+	for (std::size_t pos = 0; pos < body.size();) {
+		const std::size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) break;
+		if (field.name == "HK") carries_hk = true;
+		pos = next;
+	}
+	if (!expect(!carries_hk && auth.hk == 0, "the 0x42 from an HK-less 0x81 carries no HK"))
+		return false;
+	LanDiscoveryServer row;
+	return expect(parse_lan_discovery_reply(hk_less.data(), hk_less.size(), hello.ci, row) &&
+				row.host_key == 0 && row.server_name == "NoKeyHost",
+			"the LAN browser lists an HK-less 0x81 with host key 0");
+}
+
+// D-NET-438: the joiner's CK is a session key, drawn until nonzero: a draw of {0, 0, 9} joins
+// with CK 9 (a zero was once mapped to 1).
+// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey @0x61EA70,
+//  jz @0x61EAC3]
+bool run_zero_client_key_is_drawn_again() {
+	uint64_t now_ms = 0;
+	inmatch::JoinerConnection joiner("ZeroKeyJoiner", [&now_ms] { return now_ms; });
+	const uint32_t draws[] = {0u, 0u, 9u};
+	std::size_t next = 0;
+	joiner.set_session_key_draw([&]() { return draws[next++]; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E115u;
+	joiner.set_discovered_session(session);
+	const std::vector<uint8_t> first = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	return expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth) && next == 3 &&
+				joiner.client_key() == 9u && auth.ck == 9u,
+			"a zero CK draw is drawn again: the 0x42 carries the third draw's 9");
+}
+
+// D-NET-437: the joiner reads any 0x82 from its host, no field required. One whose CI or CK is
+// not its connection's is dropped and the connection stays in the connect state; then CR's truth
+// splits it: any nonzero CR accepts (an SCRK-less one too), and zero rejects with failure code 1
+// when the 0x82 carries no JFC.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - JFC = 1 @0x629977, the CI / CK match
+//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6, the reject's JFC store @0x629CF0]
+bool run_server_auth_acceptance_follows_retail() {
+	uint64_t now_ms = 9000;
+	const auto connect = [](inmatch::JoinerConnection &joiner, ClientAuth &auth) {
+		inmatch::JoinerConnection::DiscoveredSession session;
+		session.present = true;
+		session.host_key = 0x0FE0E115u;
+		joiner.set_discovered_session(session);
+		const std::vector<uint8_t> first = joiner.start();
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		return nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth) &&
+				joiner.phase() == inmatch::JoinerConnection::Phase::Auth;
+	};
+	// A 0x82 of dword fields only: no SCRK, and no JFC, JFP or JFS.
+	const auto server_auth = [](std::vector<std::pair<const char *, uint32_t>> dwords) {
+		std::vector<uint8_t> body;
+		for (const auto &field : dwords) {
+			uint8_t le[4];
+			io::write_u32_le(le, field.second);
+			append_flat_tlv(body, field.first, le, 4);
+		}
+		return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, std::move(body));
+	};
+
+	inmatch::JoinerConnection rejected("AuthRejected", [&now_ms] { return now_ms; });
+	ClientAuth auth;
+	if (!expect(connect(rejected, auth), "the joiner is connecting with its 0x42")) return false;
+	const std::vector<uint8_t> foreign_ci =
+			server_auth({{"CI", auth.ci ^ 0x10u}, {"CK", auth.ck}, {"CR", 1u}});
+	const std::vector<uint8_t> foreign_ck =
+			server_auth({{"CI", auth.ci}, {"CK", auth.ck ^ 0x01u}, {"CR", 0u}});
+	rejected.handle_datagram(foreign_ci.data(), foreign_ci.size());
+	rejected.handle_datagram(foreign_ck.data(), foreign_ck.size());
+	if (!expect(rejected.phase() == inmatch::JoinerConnection::Phase::Auth &&
+				rejected.last_error().empty() && !rejected.last_join_reject().set,
+			"an SCRK-less 0x82 with a foreign CI or CK is dropped; the join stays connecting"))
+		return false;
+	const std::vector<uint8_t> bare_reject =
+			server_auth({{"CI", auth.ci}, {"CK", auth.ck}, {"CR", 0u}});
+	rejected.handle_datagram(bare_reject.data(), bare_reject.size());
+	if (!expect(rejected.phase() == inmatch::JoinerConnection::Phase::Error &&
+				rejected.last_join_reject().set && rejected.last_join_reject().jfc == 1u &&
+				rejected.last_join_reject().jfp == 0u,
+			"a CR 0 0x82 without JFC rejects the join with failure code 1"))
+		return false;
+
+	inmatch::JoinerConnection accepted("AuthAccepted", [&now_ms] { return now_ms; });
+	if (!expect(connect(accepted, auth), "the second joiner is connecting with its 0x42"))
+		return false;
+	const std::vector<uint8_t> accept = server_auth(
+			{{"CI", auth.ci}, {"CK", auth.ck}, {"CR", 2u}, {"SK", 0x12345678u}});
+	accepted.handle_datagram(accept.data(), accept.size());
+	if (!expect(accepted.phase() == inmatch::JoinerConnection::Phase::Driving &&
+				!accepted.last_join_reject().set,
+			"a CR 2 0x82 without SCRK accepts the join"))
+		return false;
+	// The accepted session reloads into the host's next mission whatever its key: retail's
+	// reload legs test the session alone [orig: Game_StartMission @0x524360 -
+	// @0x5243E2..0x524400, @0x524532..0x524538, @0x5247F9..0x5247FF].
+	return expect(!accepted.begin_mission_reload().empty() && accepted.reloading(),
+			"the SCRK-less session's mission reload sends its first legs");
 }
 
 // D-NET-232: the joiner runs on its cs_dir0 block, overlaid by the host's 0x82 CS TLVs and by
@@ -704,6 +878,43 @@ bool run_idle_keepalive_survives_a_quiet_session() {
 			"idle: two keepalive intervals still fit inside the retail connection timeout");
 }
 
+// A rejecting 0x82's JFS lands in the connection's 64-byte failure string, so the join-reject
+// record (and the reason text built over it) keeps 63 characters of a 600-character JFS.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - JFS into 512 @0x629B29, then
+//  CNapiSessionConfig_SetServerPassword @0x4CACE0 (Napi_CopyString(this + 0x5F8, jfs, 64)
+//  @0x4CACEE), the call @0x629CF6]
+bool run_join_reject_text_keeps_sixty_three() {
+	uint64_t now_ms = 11000;
+	inmatch::JoinerConnection joiner("RejectText", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E116u;
+	joiner.set_discovered_session(session);
+	const std::vector<uint8_t> first = joiner.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	if (!expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_CLIENT_AUTH &&
+				parse_client_auth(body.data(), body.size(), auth),
+			"reject text: the joiner is connecting with its 0x42"))
+		return false;
+	ServerAuth reject;
+	reject.ci = auth.ci;
+	reject.ck = auth.ck;
+	reject.cr = 0;
+	reject.jfc = 4;
+	reject.jfs = std::string(600, 'j');
+	const std::vector<uint8_t> datagram = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_AUTH, server_auth_rejection_to_bytes(reject));
+	joiner.handle_datagram(datagram.data(), datagram.size());
+	return expect(joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
+				joiner.last_join_reject().set && joiner.last_join_reject().jfc == 4u &&
+				joiner.last_join_reject().jfs == std::string(63, 'j') &&
+				joiner.connection_error_record().connect_text == std::string(63, 'j'),
+			"reject text: a 600-character JFS keeps 63 in the join-reject record");
+}
+
 } // namespace
 
 int main() {
@@ -712,9 +923,13 @@ int main() {
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
 	if (!run_discovered_row_join_skips_the_hello()) return 1;
+	if (!run_zero_client_key_is_drawn_again()) return 1;
+	if (!run_server_hello_needs_no_hk()) return 1;
+	if (!run_server_auth_acceptance_follows_retail()) return 1;
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;
 	if (!run_client_active_probe_recovers_join()) return 1;
 	if (!run_server_active_probe_recovers_settings()) return 1;
+	if (!run_join_reject_text_keeps_sixty_three()) return 1;
 	std::printf("OK\n");
 	return 0;
 }

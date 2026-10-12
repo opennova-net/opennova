@@ -73,7 +73,32 @@ int main() {
 	if (!expect_literal("42", 42, 2)) return 1;
 	if (!expect_literal("42d", 42, 3)) return 1;
 	if (!expect_literal("08", 8, 2)) return 1;
-	if (!expect_literal("4294967295", 0xFFFFFFFFu, 10)) return 1;
+	// D-NET-391: the decimal value is the CRT atol of the run, saturating at INT32_MAX.
+	// [orig: NapiScript_ParseDecimalIntegerB @0x62da20 - _atol called @0x62dabc]
+	if (!expect_literal("2147483647", 0x7FFFFFFFu, 10)) return 1;
+	if (!expect_literal("2147483648", 0x7FFFFFFFu, 10)) return 1;
+	if (!expect_literal("4294967295", 0x7FFFFFFFu, 10)) return 1;
+	if (!expect_literal("4294967296d", 0x7FFFFFFFu, 11)) return 1;
+	// D-NET-391: every arm's digit test is the CRT isdigit under the ".ACP" locale, pinned
+	// to cp1252 (D-NET-388), so the superscripts 0xB2 / 0xB3 / 0xB9 are digits. The decimal
+	// run takes them and atol stops at them; the hex run folds one as a negative digit
+	// (16 * value + the sign-extended byte less '0'); a leading-zero octal or a '%' binary
+	// run followed by one fails its arm, as a '%' run followed by any digit does.
+	// [orig: _isdigit @0x76b86d - NapiScript_ParseHexValue @0x62d694 / @0x62d73e, the fold
+	//  @0x62d74a..0x62d754; NapiScript_ParseOctalInteger @0x62d84f;
+	//  NapiScript_ParseBinaryLiteral @0x62d9a1; NapiScript_ParseDecimalIntegerB @0x62da61 /
+	//  @0x62da87]
+	if (!expect_literal("12\xB2", 12, 3)) return 1;
+	if (!expect_literal("\xB9", 0, 1)) return 1;
+	if (!expect_literal("4\xB3" "5d", 4, 4)) return 1;
+	if (!expect_literal("0x1\xB2", 0xFFFFFF92u, 4)) return 1;
+	if (!expect_literal("\xB2h", 0xFFFFFF82u, 2)) return 1;
+	if (!expect_literal("$\xB9" "0", 0xFFFFF890u, 3)) return 1;
+	if (!expect_literal("07\xB2", 7, 3)) return 1;
+	if (!expect_literal("%1b", 1, 3)) return 1;
+	if (!expect_literal("%10 ", 2, 3)) return 1;
+	if (!expect_rejected("%12")) return 1;
+	if (!expect_rejected("%1\xB3")) return 1;
 	if (!expect_rejected("-1")) return 1;
 	if (!expect_rejected("+1")) return 1;
 	if (!expect_rejected("1.0")) return 1;

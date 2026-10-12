@@ -103,6 +103,25 @@ void test_page_cap() {
 	CHECK(next.size() == 8 && next[0] == 0xFFFF && next[1] == 0x1021 && next[7] == 0x1027);
 }
 
+// Each pool ends at its used count, the allocation high-water mark: a freed
+// row past the 33rd handle is still below it, so the leading word stops on
+// that row instead of handing over (D-NET-417).
+// [orig: WeaponLoadout_IteratorBegin @0x501680 / ItemPoolIterator_Advance
+//  @0x501740 -- Pool_GetUsedCount @0x5016B3 / @0x50177A; Pool_AllocEntry
+//  @0x442230 raises `used` only @0x44228B]
+void test_walk_ends_at_the_used_count() {
+	auto heap = make_world();
+	w::World &world = *heap;
+	for (int i = 0; i < 34; ++i) spawn_row(world, 1, 0x2u, 100, 500);
+	world.registry.despawn(w::EntityHandle::make(1, 33));
+	const std::vector<uint16_t> page =
+			words(inmatch::Server_CollectKillPage(world, false, 0, 1000, 0));
+	CHECK(page.size() == 34);
+	if (page.size() == 34) CHECK(page[0] == 0x1021 && page[33] == 0x1020);
+	CHECK(words(inmatch::Server_CollectKillPage(world, false, 0, 1000, 0x1021)) ==
+			std::vector<uint16_t>({0xFFFF}));
+}
+
 // The host stamps entity+560 and its S2C 0x19 in the same GetTickCount, and
 // answers C2S 0x28 with the page to an in-match sender only.
 void test_host_request() {
@@ -167,6 +186,7 @@ void test_host_request() {
 int main() {
 	test_eligibility_and_walk();
 	test_page_cap();
+	test_walk_ends_at_the_used_count();
 	test_host_request();
 	std::printf("npruntime_kill_page: %d failures\n", failures);
 	return failures ? 1 : 0;

@@ -384,24 +384,29 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 
 void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
                                     std::vector<std::vector<uint8_t>> &out) {
+	// Any 0x81 from the peer is read; no field is required (parse_server_hello).
 	ServerHello sh;
-	if (!parse_server_hello(body.data(), body.size(), sh)) {
-		fail("bad ServerHello");
-		return;
-	}
+	if (!parse_server_hello(body.data(), body.size(), sh)) return;
 	// CI is the client's correlation token. A shared UDP receive path can
 	// observe a valid reply for another in-flight hello; ignore it without
-	// advancing this connection's handshake.
+	// advancing this connection's handshake. Then the peer's identity block must
+	// be this protocol's (the 0x41's), else the reply is dropped. An absent HK
+	// reads 0, and the 0x42 then omits it.
+	// [orig: Nwu_HandleServerHello @0x626D20 - HK @0x626E97, the CI lookup @0x627533,
+	//  the identity compares @0x62758B / @0x627624 / @0x627643; the 0x42's HK gate
+	//  @0x6200F2]
 	if (sh.ci != cfg_.client_index) return;
+	if (!server_hello_matches_identity(sh, make_client_hello(cfg_, cfg_.co))) return;
 	if (reconnecting()) {
 		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
 		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
-		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join.
+		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join. The CK is
+		// drawn until nonzero (NapiNP_GenerateSessionKey's jz @0x61EAC3).
 		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3; CNapiNPConnection_InitFromSession
 		//  @0x626320 — the keys @0x6263fb/@0x626401, the cs_dir copies @0x626449/@0x62645c,
 		//  state 3 @0x626496]
 		reconnect_.probing = false;
-		cfg_.client_key = cfg_.next_client_key ? cfg_.next_client_key() : make_random_session_u32();
+		cfg_.client_key = make_session_key(cfg_.next_client_key);
 		client_scrk_ = cfg_.next_scrk ? cfg_.next_scrk() : make_dev_scrk();
 		server_hk_ = sh.hk;
 		server_sk_ = 0;
@@ -420,18 +425,20 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 }
 
 void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
+	// Any 0x82 from the connecting peer is read; no field is required (parse_server_auth).
 	ServerAuth sa;
-	if (!parse_server_auth(body.data(), body.size(), sa)) {
-		fail("bad ServerAuth");
-		return;
-	}
+	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerAuth echoes both correlation values chosen by this client. Do not
-	// install a foreign connection's session/SCRK material.
+	// install a foreign connection's session/SCRK material: a mismatched 0x82 is
+	// dropped and the connection stays in the connect state. Then CR's truth
+	// splits it: any nonzero CR accepts, zero rejects.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
+	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
 	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
 	// The 0x82's reconnect count is kept (0 when absent) and rides the next re-join.
 	// [orig: NapiNP_HandleServerJoinResponse @0x629e2e]
 	rcnt_ = sa.rcnt;
-	if (sa.cr != 1) {
+	if (sa.cr == 0) {
 		fail("ServerAuth rejected (cr=" + std::to_string(sa.cr) + ")");
 		return;
 	}
@@ -491,7 +498,11 @@ void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body,
 	DisconnectEvent event;
 	if (!parse_disconnect_event(body.data() + 4, body.size() - 4, event)) return;
 	last_receive_ms_ = clock_ms_;
-	latch_disconnect(event);
+	// The record is latched with the PEER role 1 and retail's 128 / 32 string buffers.
+	// [orig: Nwu_HandleDisconnect @0x623CE0 - the role @0x624065, DSTR @0x624079, DDSTR
+	//  @0x624097, the latch @0x6240A8..0x6240BA]
+	latch_disconnect(make_disconnect_event(1, event.dc, event.dp1, event.dp2, event.dstr,
+			event.dpc, event.ddstr));
 	disconnected_by_peer_ = true;
 	teardown_connection(out);
 }
@@ -878,7 +889,12 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 			if (pm.flags.settings_update && pm.full_tag == PROTOCOL_TAG_CONNECTION_DESCRIPTION) {
 				DisconnectEvent event;
 				parse_disconnect_event(pm.payload.data(), pm.payload.size(), event);
-				latch_disconnect(event);
+				// Latched with the LOCAL role, a client connection's 2, and the 128 / 32
+				// string buffers. [orig: HandleDescriptionPacket @0x621ae0 - the role
+				//  @0x621CC4..0x621CDE (is_client, set on a type-2 connection by
+				//  CNapiNPConnection_Create @0x62AE95), DSTR @0x621D0C, DDSTR @0x621D2E]
+				latch_disconnect(make_disconnect_event(2, event.dc, event.dp1, event.dp2,
+						event.dstr, event.dpc, event.ddstr));
 				disconnected_by_peer_ = true;
 				teardown_connection(out);
 				return;

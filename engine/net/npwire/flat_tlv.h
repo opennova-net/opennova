@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -70,6 +71,22 @@ inline uint32_t load_value_dword(const uint8_t *value, const uint8_t *end) {
 	uint8_t le[4];
 	load_value_bytes(value, end, le, sizeof(le));
 	return io::read_u32_le(le);
+}
+
+// A string field: every reader of the grammar (the 0x41 / 0x42 handlers, the
+// 0x81 / 0x82 readers, the description and goodbye walks, the C2S 0x00 JOIN
+// handler) copies from the value pointer up to the first NUL and at most
+// `buffer` less one characters, whatever the field's length, so an inner NUL
+// ends the string and a value without its NUL runs on into the bytes that
+// follow it (the next field's name, up to that name's NUL). Past the body's
+// `end` ours reads zero, which ends the copy (D-NET-410).
+// [orig: Napi_CopyString @0x617E10 - the NUL test @0x617E32, the `buffer - 1`
+//  bound @0x617E41..0x617E44]
+inline std::string load_value_string(const uint8_t *value, const uint8_t *end, size_t buffer) {
+	std::string out;
+	for (const uint8_t *p = value; p < end && *p != 0 && out.size() + 1 < buffer; ++p)
+		out.push_back(static_cast<char>(*p));
+	return out;
 }
 
 // Append one field. `size` is the raw value length: a string value carries its

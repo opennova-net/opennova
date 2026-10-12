@@ -16,6 +16,7 @@
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/local_player_view.h>
+#include <runtime/world/player_loadout.h> // local_loadout_rebuild
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <base/gameprofile/game_type.h>
@@ -282,6 +283,26 @@ int main() {
 		const auto gun_handle = world.registry.spawn(1, gun);
 		CHECK(gun_handle.valid());
 		if (!gun_handle.valid()) return 1;
+		// Single player is out of a session, where the UseGun attach refuses a
+		// player holding no EquippedSlot (D-NET-446): the gunner's spawn select
+		// equips its rifle, as the boot's Player_InitPlayer leg does.
+		// [orig: Entity_AttachToUseGunSlot @0x546BF6..0x546C0D;
+		//  Player_InitPlayer -> Player_SelectWeaponSlot @0x4E1995]
+		{
+			w::WeaponTableEntry rifle;
+			rifle.name = "WPN_M4AUTO";
+			rifle.valid = true;
+			rifle.category = 3;
+			rifle.clipsize = 30;
+			rifle.startrounds = 210;
+			world.tables.weapons.entries.push_back(rifle);
+			kernel.local.loadout.spawn_kit = {w::WeaponKitEntry{"WPN_M4AUTO", -1, -1, -1}};
+			kernel.local.loadout.spawn_kit_set = true;
+			w::local_loadout_rebuild(world, kernel.local.loadout, kernel.local.weapon,
+					kernel.local.inventory, kernel.local.inventory_valid,
+					/*select_spawn_default=*/true);
+			CHECK(kernel.local.equipped_slot_held());
+		}
 		CHECK(world.vehicles.process_attach(world.cached.local_player, gun_handle, 1));
 		auto &live_gun = *world.registry.get(gun_handle);
 		auto &live_hull = *world.registry.get(hull_handle);
@@ -408,7 +429,7 @@ int main() {
         lp.player()->health = 0;
         lp.player()->flags |= w::kEntityFlagDead;
         const auto replies = inmatch::Server_ReleasePlayerDeployment(
-                owner.ctx.config, conn, kernel.world, {});
+                owner.ctx.config, conn, kernel.world, {}, 0xFFFF);
         CHECK(!replies.empty());
         CHECK(lp.player()->alive && lp.player()->health > 0);
         CHECK(lp.round_reset_revision == revision + 1);
@@ -441,7 +462,7 @@ int main() {
         remote.link.owned_entity = w::EntityHandle::make(0, 0);
         CHECK(remote.link.owned_entity != kernel.world.cached.local_player);
         lp.hud_map_control.mode = 2;
-        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {});
+        inmatch::Server_ReleasePlayerDeployment(owner.ctx.config, remote, kernel.world, {}, 0xFFFF);
         CHECK(lp.hud_map_control.mode == 2 && lp.round_reset_revision == revision + 1);
     }
 

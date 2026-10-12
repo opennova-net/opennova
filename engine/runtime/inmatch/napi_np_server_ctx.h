@@ -348,7 +348,7 @@ struct NapiNPServerCtx {
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
 	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
-	// SCRK / SK randomly at the 0x42 join (make_dev_scrk / make_random_session_u32). For golden
+	// SCRK / SK randomly at the 0x42 join (make_dev_scrk / make_session_key). For golden
 	// 0x82 byte-parity these must be reproducible, so the default leaves `forced` false (random,
 	// exactly as retail) and a golden test seed-injects the captured values — mirroring the P1
 	// SessionStartup "pass in, don't sample" determinism approach.

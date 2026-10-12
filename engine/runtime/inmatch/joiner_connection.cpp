@@ -194,13 +194,12 @@ JoinerConnection::JoinerConnection(std::string player_name,
 std::vector<uint8_t> JoinerConnection::start() {
 	conn_.client_scrk = make_dev_scrk();
 	// Fresh per-connection numeric key, like the per-connection key material
-	// retail regenerates on connect [orig: CNapiNPConnection_GenerateTxKey
-	// @ 0x61dfe0 charset-PRNG pattern]: a CONSTANT ck would alias a quick
+	// retail regenerates on connect: a CONSTANT ck would alias a quick
 	// reconnect from the same endpoint to the host's same-(CI,CK) retransmit
 	// echo (stale auth material) instead of a fresh node. CI stays 1 — the
-	// first connection node's index. 0 is reserved (absent-key sentinel).
-	client_key_ = make_random_session_u32();
-	if (client_key_ == 0) client_key_ = 1;
+	// first connection node's index. A zero draw is drawn again, zero being no key.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey]
+	client_key_ = make_session_key(session_key_draw_);
 	server_hk_ = 0;
 	server_password_required_ = false;
 	conn_.server_sk = 0;
@@ -518,14 +517,18 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 }
 
 void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollResult &out) {
+	// Any 0x81 from the host is read; no field is required (parse_server_hello).
 	ServerHello sh;
-	if (!parse_server_hello(body.data(), body.size(), sh)) {
-		fail("bad ServerHello");
-		return;
-	}
+	if (!parse_server_hello(body.data(), body.size(), sh)) return;
 	// Correlate the reply with the outstanding ClientHello before accepting host material. A
 	// phase-correct stale/spoofed 0x81 from another handshake must not advance this connection.
+	// Then the host's identity block must be the JO protocol's, else the reply is dropped.
+	// [orig: Nwu_HandleServerHello @0x626D20 - the CI lookup @0x627533, the identity compares
+	//  @0x62758B / @0x627624 / @0x627643]
 	if (sh.ci != client_index_) return;
+	if (!server_hello_matches_identity(sh, make_jointoperations_client_hello(client_index_))) return;
+	// An absent HK reads 0, and the 0x42 then omits it. [orig: Nwu_HandleServerHello @0x626D20 -
+	//  HK @0x626E97; CNapiNPConnection_SendClientJoin @0x61FE20 - the HK gate @0x6200F2]
 	server_hk_ = sh.hk;          // echo this in ClientAuth.hk
 	server_password_required_ = (sh.sf & 1u) != 0;
 	// The host's ADVERTISED expansion: learned here and echoed in the C2S JOIN EXP TLV below,
@@ -576,17 +579,18 @@ ConnectionErrorRecord JoinerConnection::connection_error_record() const {
 
 void JoinerConnection::on_server_auth(
 		const std::vector<uint8_t> &body, PollResult & /*out*/) {
+	// Any 0x82 from the connecting host is read; no field is required (parse_server_auth).
 	ServerAuth sa;
-	if (!parse_server_auth(body.data(), body.size(), sa)) {
-		fail("bad ServerAuth");
-		return;
-	}
+	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerSessionInit echoes both client identifiers. Correlate before even
-	// accepting its result code: a rejection addressed to another in-flight
-	// handshake is not this connection's failure.
+	// accepting its result code: a 0x82 addressed to another in-flight handshake
+	// is dropped and the connection stays in the connect state. Then CR's truth
+	// splits it: any nonzero CR accepts, zero rejects.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - the CI / CK match
+	//  @0x629CAC..0x629CBF, the CR split @0x629CD2..0x629CD6]
 	if (sa.ci != client_index_ || sa.ck != client_key_) return;
-	if (sa.cr != 1) {
-		// A CR=0 0x82 carries the NP-layer failure family in JFC and, for the
+	if (sa.cr == 0) {
+		// A CR=0 0x82 carries the NP-layer failure family in JFC (1 when absent) and, for the
 		// validate-callback family (JFC=14), the sub-reason in JFP. Spectator
 		// failures are NOT this packet — they arrive post-admission as DPC
 		// 14/15/16 description punts (on_host_disconnect below).
@@ -599,7 +603,10 @@ void JoinerConnection::on_server_auth(
 		last_join_reject_.set = true;
 		last_join_reject_.jfc = sa.jfc;
 		last_join_reject_.jfp = sa.jfp;
-		last_join_reject_.jfs = sa.jfs;
+		// JFS lands in the connection's 64-byte failure string, the text the reason builder
+		// reads. [orig: CNapiSessionConfig_SetServerPassword @0x4CACE0 - Napi_CopyString(this +
+		//  0x5F8, jfs, 64) @0x4CACEE; the call @0x629CF6]
+		last_join_reject_.jfs = sa.jfs.substr(0, 63);
 		io::logf(io::LogLevel::kWarn,
 				"np joiner: join rejected: jfc=%u jfp=%u jfs='%s'",
 				static_cast<unsigned>(sa.jfc), static_cast<unsigned>(sa.jfp),
@@ -612,7 +619,8 @@ void JoinerConnection::on_server_auth(
 		return;
 	}
 	conn_.server_sk = sa.sk;      // session_id for our outbound 0x43s
-	conn_.server_scrk = sa.scrk;  // decrypts inbound 0x83 inner streams
+	conn_.server_scrk = sa.scrk;  // decrypts inbound 0x83 inner streams, kept even when empty
+	                              // [orig: @0x629D53] (an empty key's crypt: D-NET-450)
 	conn_.connection_id = sa.mi;  // [orig: 0x82 MI TLV = the host-assigned dcb/ConnectionId; the
 	                              // client stores it on its own NapiNPConnection (+0x18,
 	                              // NapiNP_GetLocalConnectionId @0x4c6d40) and echoes it in the 0x48
@@ -2062,8 +2070,14 @@ void JoinerConnection::seed_in_match(uint32_t session_id, uint32_t client_key,
 	silence_timeout_latched_ = false;
 }
 
+// The reload's legs ride the session alone: retail tests no key, only the session peer flag
+// and the non-authority role, so an accepted connection whose SCRK is empty reloads too.
+// [orig: Game_StartMission @0x524360 - is_mp_session_peer @0x5243E2..0x524400 (0x48),
+//  is_authority @0x52448C..0x524492 and is_mp_session_peer @0x524532..0x524538 (0x47),
+//  is_mp_session_peer @0x5247F9..0x5247FF (0x33, SaveFile_SendAndWaitForServerAck, the
+//  call @0x524801)]
 std::vector<uint8_t> JoinerConnection::begin_mission_reload() {
-	if (!in_session() || conn_.server_scrk.empty()) return {};
+	if (!in_session()) return {};
 	phase_ = Phase::Driving;
 	post_auth_stage_ = PostAuthStage::AwaitServerInfo;
 	reloading_ = true;

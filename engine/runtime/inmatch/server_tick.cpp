@@ -407,11 +407,58 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 	}
 }
 
-// Drain the queued deaths in order, each through Server_ProcessPlayerDeath.
-void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
-	for (const world::RoundDeath &d : world.round_sim.deaths)
+// A player body's death edge as it runs: an unhidden body, still alive in
+// ours, at Health <= 0 with its dead bit clear. [orig:
+// Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
+// Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE]
+bool player_edge_open(const world::World &world, world::EntityHandle victim) {
+	const world::Entity *e = world.registry.get(victim);
+	if (e == nullptr) return false;
+	const uint32_t flags = e->flags | e->engine_flags;
+	return e->alive && e->health <= 0 && (flags & world::kEntityFlagCarried) == 0u &&
+			(flags & world::kEntityFlagDead) == 0u;
+}
+
+// How a drain treats the receive pump's player-body edges (the C2S 0x41's
+// queued deaths, RoundDeath::player_edge).
+enum class EdgeDrain {
+	Route,         // re-test the edge, route the record if it still runs
+	HoldAtHead,    // re-test the edge, drop the record if it no longer runs, hold it otherwise
+	AfterConverts, // route a held record unless its body is hidden or dead by now
+};
+
+// Drain the queued deaths in order, each through Server_ProcessPlayerDeath,
+// treating a player-body edge's record as `edges` says. The head tests the
+// whole edge before the previous frame's medic heals route, which retail's
+// entity update stored ahead of this frame's pump. After the converts it
+// re-reads the flag bits alone: a convert hides the body, and a death the
+// head routed for a record queued behind a held one (or for an earlier record
+// on the same body) latched the dead bit; Health is not re-read, since ours
+// routes the previous frame's heals after the pump. [orig:
+// Entity_UpdateAllEntities -- Projectile_ProcessExplosionQueue @0x4C223F ->
+// GameEvent_HandleMedicInteraction, the GameEvent_HealPlayer call @0x4E6805,
+// Health = max @0x50DE7F]
+void route_round_deaths(NapiNPServerCtx &ctx, world::World &world,
+		EdgeDrain edges = EdgeDrain::Route) {
+	std::vector<world::RoundDeath> held;
+	for (const world::RoundDeath &d : world.round_sim.deaths) {
+		if (d.player_edge && edges == EdgeDrain::AfterConverts) {
+			// The edge's hidden bit and dead bit [orig: @0x4B411E..0x4B4127,
+			// @0x4B4BFE].
+			const world::Entity *e = world.registry.get(d.victim);
+			if (e == nullptr || ((e->flags | e->engine_flags) &
+					(world::kEntityFlagCarried | world::kEntityFlagDead)) != 0u)
+				continue;
+		} else if (d.player_edge) {
+			if (!player_edge_open(world, d.victim)) continue;
+			if (edges == EdgeDrain::HoldAtHead) {
+				held.push_back(d);
+				continue;
+			}
+		}
 		Server_ProcessPlayerDeath(ctx, world, d);
-	world.round_sim.deaths.clear();
+	}
+	world.round_sim.deaths = std::move(held);
 }
 
 // The server win-condition check, on the original's 1 Hz periodic cadence [orig:
@@ -1624,8 +1671,20 @@ void Server_RecalculateAllPlayerKitWeights(
 static void route_entity_pass_records(NapiNPServerCtx &ctx, world::World &world) {
 	Server_FanEntityEvents(ctx, world);
 	route_throwable_events(ctx, world);
-	route_round_deaths(ctx, world);
+	// The receive pump's player-body edges (the C2S 0x41's) are tested here,
+	// ahead of the medic heals below, and wait for the drain after the
+	// spectator converts.
+	route_round_deaths(ctx, world, EdgeDrain::HoldAtHead);
 	Server_RouteMedicInteractions(ctx, world);
+	// Retail stored the previous frame's heal (Health = max, in that frame's
+	// entity update) ahead of this pump's 0x41 (Health 0); ours routes the heal
+	// only now, after the pump, so the 0x41's store goes back over it on each
+	// body whose edge is held, and its death keeps the 0x41's Health 0.
+	// [orig: GameEvent_HealPlayer @0x50DE7F; NapiNPServerMsg_ResetPlayerAmmo
+	//  @0x510568]
+	for (const world::RoundDeath &d : world.round_sim.deaths)
+		if (d.player_edge)
+			if (world::Entity *body = world.registry.get(d.victim)) body->health = 0;
 	Server_ApplyPowerupGrants(ctx.np_protocol.connection_list, world);
 	Server_BroadcastWeaponOverlayUpdates(ctx, world);
 	route_match_gameplay_events(ctx, world);
@@ -1706,16 +1765,27 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 		replication::drain_connection_c2s(world, conn.link);
 	}
 
-	// (1b) The WAC 'humans' count, rebuilt each server tick just before the script
-	// pass. The original also uses it as the empty-server world-run gate
-	// (entities/WAC advance while humans > 0 || ticks == 0).
+	// The C2S 0x51 spectator converts the dispatcher admitted this frame run
+	// inline in retail's receive dispatch, so ahead of the humans count below
+	// and the state fan: a converted body is hidden before it is counted.
+	// [orig: Server_TickUpdate, the receive pump call @0x51D895]
+	Server_ProcessSpectatorRespawnRequests(ctx, world);
+	// The receive pump's player-body edges (the C2S 0x41's Health 0) route
+	// after its converts: retail's edge runs in the entity update after the
+	// whole pump, and skips a body the convert hid (Flags |= 1, which the
+	// convert's deploy leg keeps; it clears only the dead bit).
+	// [orig: Server_KillPlayerAndNotify @0x519E92, Health 1 @0x519EA4, the deploy
+	//  @0x519ECE; Server_ProcessPlayerDeath @0x51787A; the edge's hidden bit
+	//  Entity_UpdateInfantryPlayerBody @0x4B411E..0x4B4127]
+	route_round_deaths(ctx, world, EdgeDrain::AfterConverts);
+
+	// (1b) The WAC 'humans' count, rebuilt each server tick right after the
+	// receive pump, just before the script pass. The original also uses it as
+	// the empty-server world-run gate (entities/WAC advance while humans > 0 ||
+	// ticks == 0).
 	// [orig: Server_BuildEntitySlotLists @0x4f97a0, called from Server_TickUpdate
 	//  @0x51d89a before the WAC pre-pass]
 	world.cached.humans = world.registry.count_humans();
-
-	// The C2S 0x51 spectator converts the dispatcher admitted this frame run
-	// inline in retail's receive dispatch, ahead of the state fan.
-	Server_ProcessSpectatorRespawnRequests(ctx, world);
 	lap.mark(devtools::Slot::SIM_SERVER_INPUT);
 
 
@@ -1871,9 +1941,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				if (!is_in_match(conn) || conn.link.transport == nullptr ||
 						conn.link.owned_entity != release.player)
 					continue;
+				// The leg takes the zone's handle [orig: SpawnWaveList_TickEntry,
+				//  the Server_ProcessPlayerDeath call @0x52A3C0].
 				std::vector<ProtocolMessage> deployment =
-						Server_ReleasePlayerDeployment(
-								ctx.config, conn, world, release.zone, ctx.logs.profile);
+						Server_ReleasePlayerDeployment(ctx.config, conn, world,
+								release.zone, release.zone.packed, ctx.logs.profile);
 				for (ProtocolMessage &message : deployment)
 					conn.link.transport->host_send(
 							message.tag, std::move(message.payload),

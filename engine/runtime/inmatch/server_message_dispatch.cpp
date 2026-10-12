@@ -3,6 +3,7 @@
 #include <runtime/inmatch/server_visible_players.h>
 #include <runtime/inmatch/server_doors.h>
 #include <runtime/inmatch/server_team_change.h>
+#include <runtime/inmatch/server_death_timeout_reset.h>
 #include <runtime/inmatch/server_kill_page.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
@@ -244,19 +245,21 @@ uint32_t validate_join_request(
 	std::size_t pos = 0;
 	std::string expansion;
 	std::string version_crc;
-	// The TLV walk accepts unknown fields, uses the last matching value, and
-	// stops at its first short field or an empty name. String copies stop at
-	// the first NUL; tag names compare through Napi_StrCaseEqual @0x616e70.
-	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0]
+	// The TLV walk accepts unknown fields, uses the last matching value, and stops at its first
+	// short field or an empty name; tag names compare through Napi_StrCaseEqual @0x616e70. Each
+	// string copies from its value to the first NUL whatever its length (load_value_string).
+	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0 - EXP into 32 bytes @0x512BFF,
+	//  VERSIONCRCSTRING into 512 @0x512C31]
 	while (pos < payload.size()) {
 		FlatTlvField field;
 		const size_t next = read_flat_tlv(payload.data(), payload.size(), pos, field);
 		if (next == kFlatTlvEnd || field.name.empty()) break;
 		pos = next;
-		const std::string value(field.value,
-				std::find(field.value, field.value + field.size, uint8_t{0}));
-		if (strutil::iequals(field.name, "EXP")) expansion = value.substr(0, 31);
-		else if (strutil::iequals(field.name, "VERSIONCRCSTRING")) version_crc = value.substr(0, 511);
+		const uint8_t *end = payload.data() + payload.size();
+		if (strutil::iequals(field.name, "EXP"))
+			expansion = load_value_string(field.value, end, 32);
+		else if (strutil::iequals(field.name, "VERSIONCRCSTRING"))
+			version_crc = load_value_string(field.value, end, 512);
 	}
 	// [orig: Server_ValidatePlayerJoinRequest @0x5122fc..0x512349]
 	if (expansion != config.expansion) return 47;
@@ -903,7 +906,8 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
-		world::World &world, world::EntityHandle target_zone, ServerLogRecorder *server_log) {
+		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
+		ServerLogRecorder *server_log) {
 	std::vector<ProtocolMessage> replies;
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
@@ -983,8 +987,10 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
 	conn.link.respawn_pending = false;
 	world.match.set_player_respawn_pending(player->handle, false);
-	conn.link.respawn_delay_seconds = 0;
-	conn.link.spawn_target_hold_seconds = 0;
+	// No +360 store; the +364 hold clears only for a raw handle other than
+	// 0xFFFF, resolvable or not [orig: Server_ProcessPlayerDeath @0x51786B..0x517872].
+	if (requested_handle != world::EntityHandle::kInvalid)
+		conn.link.spawn_target_hold_seconds = 0;
 	conn.link.downed_revive_seconds = 0;
 	conn.link.medic_request_active = false;
 	conn.link.death_cause_revivable = false;
@@ -1012,8 +1018,9 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 			world.vehicles.request_attach(player->handle, selected);
 	}
 	// Never on a revive deploy, whose client leaves the deploy wait on its record's
-	// respawn edge (D-NET-379) [orig: @0x5178F2, under the @0x5178C5 test].
-	if (!revive_deploy)
+	// respawn edge (D-NET-379), nor out of a session (world.rules.mp_session)
+	// [orig: @0x5178F2, under the @0x5178C5 test and is_in_session @0x5178E9 / @0x5178EF].
+	if (!revive_deploy && world.rules.mp_session)
 		replies.push_back(make_protocol_message(
 				0x5A, build_current_loadout_reply(
 						conn.reply.last_loadout_reply, player->player_class)));
@@ -1206,6 +1213,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (world != nullptr && inputs.server_ctx != nullptr)
 					Server_HandleTeamChangeRequest(*inputs.server_ctx, conn, *world,
 							io::host_milliseconds_for_logic_tick(now_tick));
+				break;
+			case c2s::DEATH_TIMEOUT_RESET: // [orig: NapiNPServerMsg_ResetPlayerAmmo @0x510540]
+				if (world != nullptr && inputs.server_ctx != nullptr)
+					Server_HandleDeathTimeoutReset(*inputs.server_ctx, conn, *world);
 				break;
 			case c2s::RADIO_CALL_REQUEST: { // [orig: NapiNPServerMsg_HandleRadioCall @0x514330]
 				if (world == nullptr) break;
@@ -1634,6 +1645,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						: 0;
 				const world::Entity *target = nullptr;
 				const bool revive_latch = conn.reply.revive_pose_valid; // +89932
+				const uint8_t request_team = world::deploy_request_team(*world, player->team,
+						conn.link.spectator, pick, config.game_type); // [orig: @0x519B7A..0x519BC1]
 				if (pick == world::kDeployPickAutoTeam) {
 					// Conquer & Control rejects the auto pick outright, before the frontier
 					// resolve: no deploy, no wave queue, no reply.
@@ -1644,7 +1657,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					// as a revived player always does [orig: the latch @0x519c3d..0x519c4b].
 					if (!revive_latch)
 						target = world->zones.find_spawn_zone_for_team(
-								player->team, config.game_type);
+								request_team, config.game_type);
 				} else if (pick != world::kDeployPickNone) {
 					if (revive_latch) break; // a revived player's pick [orig: @0x519c5a]
 					// Only 0xFFFF is the no-target (Default Spawn) pick. Handle 0 — and the
@@ -1662,13 +1675,6 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// bypass it. [orig: Server_ProcessClientRequestRespawn @0x519c67]
 				if (target != nullptr && conn.link.spawn_target_hold_seconds != 0)
 					break;
-				if (target != nullptr) {
-					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
-					// control(+540) >= 0x10000].
-					if (target->zone_number != 0 &&
-					    (target->team != player->team || target->zone_control < 0x10000))
-						break;
-				}
 				// Retail's `nodefaultspawnpoints` option is named after its UI,
 				// not its actual predicate. It applies only to a target-less pick
 				// and walks SpawnZoneList for an unnumbered or fully controlled
@@ -1677,44 +1683,57 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// Entity_HasAliveEntityOfTeam @0x4FC7B0; the revive latch @0x519c97]
 				if (config.default_spawn_requires_no_team_zone != 0 &&
 						!revive_latch && target == nullptr &&
-						world->zones.team_has_available_spawn_zone(player->team))
+						world->zones.team_has_available_spawn_zone(request_team))
 					break;
 				// The dead-or-pending gate [orig: @0x519cc7 — requester must be dead
-				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive DEPLOYED
-				// player's request is a no-op; an alive-but-undeployed joiner deploys now.
-				if (!conn.link.respawn_pending && player->health > 0) break;
-				// +360 follows the dead-or-pending test and silently rejects every
-				// pick, including Default Spawn. [orig: @0x519cf2]
-				if (conn.link.respawn_delay_seconds != 0) break;
-				if (target != nullptr && target->item_type == 1 &&
-						target->is_spawn_point) {
-					// A vehicle target is selectable only while alive and while its
-					// weighted root/child seat walk finds a free slot. The separate
-					// +0x170 primary-occupant gate belongs to release, below.
-					// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34]
-					world::VehicleSeatSelection selected;
-					if (!world::find_best_vehicle_seat(
-							*world, target->handle, player->handle, selected))
-						break;
-				}
-				if (target != nullptr) {
-					if (world->zones.spawn_waves.try_queue(
-							*world, target->handle, player->handle)) {
-						ProtocolMessage status = make_protocol_message(
-								s2c::SPAWN_WAVE_STATUS,
-								build_spawn_wave_status_body(*world, player->handle));
-						status.reliable = false;
-						replies.push_back(std::move(status));
-						break;
+				// (entity+36 & 2) OR respawn-flagged (slot+89912 & 0x10)]: an alive, unheld
+				// player's request is refused in a session; out of one (world.rules.mp_session)
+				// it deploys at once, ahead of +360, the seat, the zone and the wave
+				// [orig: is_in_session @0x519cd0 / @0x519cd7, the deploy @0x519cdd..0x519ce3].
+				const bool deploy_now = !conn.link.respawn_pending && player->health > 0;
+				if (deploy_now && world->rules.mp_session) break;
+				if (!deploy_now) {
+					// +360 follows the dead-or-pending test and silently rejects every
+					// pick, including Default Spawn. [orig: @0x519cf2]
+					if (conn.link.respawn_delay_seconds != 0) break;
+					if (target != nullptr && target->item_type == 1 &&
+							target->is_spawn_point) {
+						// A vehicle target is selectable only while alive (ours tests each
+						// walked entry, not the root first: D-NET-480) and while its weighted
+						// root/child seat walk finds a free slot. The +0x170 gate is release's.
+						// [orig: Server_ProcessClientRequestRespawn @0x519D07..0x519D34]
+						world::VehicleSeatSelection selected;
+						if (!world::find_best_vehicle_seat(
+								*world, target->handle, player->handle, selected))
+							break;
 					}
-					if (world->zones.spawn_waves.has_entry(target->handle)) break;
+					// The zone-ownership gate [orig: @0x519d5f: entity+538 -> team match AND
+					// control(+540) >= 0x10000].
+					if (target != nullptr && target->zone_number != 0 &&
+					    (target->team != request_team || target->zone_control < 0x10000))
+						break;
+					// A spectator skips the wave [orig: @0x519D65..0x519D7F].
+					if (target != nullptr && !conn.link.spectator) {
+						if (world->zones.spawn_waves.try_queue(
+								*world, target->handle, player->handle)) {
+							ProtocolMessage status = make_protocol_message(
+									s2c::SPAWN_WAVE_STATUS,
+									build_spawn_wave_status_body(*world, player->handle));
+							status.reliable = false;
+							replies.push_back(std::move(status));
+							break;
+						}
+						if (world->zones.spawn_waves.has_entry(target->handle)) break;
+					}
+					world->zones.spawn_waves.remove_player(player->handle);
 				}
-				world->zones.spawn_waves.remove_player(player->handle);
 				const world::EntityHandle target_handle = target != nullptr
 						? target->handle
 						: world::EntityHandle{};
+				// The leg takes the stored handle [orig: Server_ProcessClientRequestRespawn,
+				//  the Server_ProcessPlayerDeath calls @0x519CE3/@0x519D7F/@0x519DC8/@0x519DE8].
 				std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
-						config, conn, *world, target_handle,
+						config, conn, *world, target_handle, target_handle.packed,
 						inputs.server_ctx != nullptr ? inputs.server_ctx->logs.profile : nullptr);
 				replies.insert(replies.end(),
 				               std::make_move_iterator(deployment.begin()),
@@ -2352,14 +2371,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// @0x429730). The handler reads NO fields from the request, is
 				// authority-gated, and is SKIPPED while g_NetSpawnSuspended or
 				// g_SpawnSuccessGate (round over) is set — our reachable analog of the
-				// latter is world->match.outcome().ended.
-				// Documented delta (D-NET-176, FIXED — entry (b) of its ledger row): retail
-				// walks the pool's fixed entry count. Our
-				// pool-0 capacity is an OpenNova sizing choice (1024 by default), so the
-				// walk stops at the highest OCCUPIED slot: a slot above that high-water
-				// mark was never streamed to any client, so listing it is a no-op that
-				// would only inflate the datagram.
-				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0]
+				// latter is world->match.outcome().ended. The walk covers pool 0's used
+				// count, its allocation high-water mark (D-NET-417); its empty test is the
+				// ItemTypeIndex (+0x1C) alone, ours a free slot (D-NET-486).
+				// [orig: NapiNPServerMsg_SendEmptySlots @0x51a600; body builder Server_CollectEmptyPool0Slots @0x5160f0,
+				//  the used read @0x5160FF, the +0x1C test @0x516123]
 				std::size_t consumed = 0;
 				if (world == nullptr ||
 				    !decode_empty_slots_request(
@@ -2367,14 +2383,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				    world->match.outcome().ended) {
 					break;
 				}
-				const std::size_t capacity = world->registry.pool_capacity(0);
-				std::size_t high_water = 0;
-				for (std::size_t slot = 0; slot < capacity; ++slot) {
-					const world::EntityHandle h{static_cast<uint16_t>(slot)};
-					if (world->registry.get(h) != nullptr) high_water = slot + 1;
-				}
+				const std::size_t used = world->registry.pool_used(0);
 				DestroyEntityList sweep;
-				for (std::size_t slot = 0; slot < high_water; ++slot) {
+				for (std::size_t slot = 0; slot < used; ++slot) {
 					const world::EntityHandle h{static_cast<uint16_t>(slot)};
 					if (world->registry.get(h) == nullptr)
 						sweep.pool0_indices.push_back(static_cast<uint16_t>(slot));

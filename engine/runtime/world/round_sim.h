@@ -381,6 +381,14 @@ struct RoundDeath {
     // Entity_CheckAndProcessDeath @0x51B550; the tally Score_ProcessKillEvent
     // @0x4FD400 is called only from the damage paths]
     bool motor_edge = false;
+    // Queued for a player body's death edge ahead of the entity pass that runs
+    // it (the C2S 0x41's Health 0): the tick tests the edge's predicate at its
+    // head, so a body another transaction killed meanwhile (the team change's
+    // inline death) dies once, and routes the record after the receive pump's
+    // spectator converts unless the body is hidden or dead by then. [orig:
+    // Entity_UpdateInfantryPlayerBody -- the hidden bit @0x4B411E..0x4B4127,
+    // Health <= 0 @0x4B4BF1, the dead bit @0x4B4BFE]
+    bool player_edge = false;
 };
 
 // A medic-kit hit on a same-team person the kill-zone pass admitted this tick,

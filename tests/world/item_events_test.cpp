@@ -1,5 +1,6 @@
 #include <runtime/world/world.h>
 #include <runtime/world/destruction.h>
+#include <runtime/world/collision.h>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -464,7 +465,32 @@ int test_tower_sections() {
     CHECK(piece.position.z == 11 && piece.spawned_piece_mask == 3);
     CHECK(piece.section_pitch_rate == 0x16C16C0 && piece.engine_flags == 6);
     CHECK((piece.death_anim_state >> 8) == 2 && piece.health == 20);
+    // The husk pivot is the world callback of the cveh, chel, tank and cpln
+    // rows, which the clone reaches through its def's render tag: with none
+    // (and a model tag naming no row) it draws at its own placement, under one
+    // of those tags around its first surviving husk section. Collision never
+    // pivots: the model's +0xA8 is the bone table's third column for the
+    // model's own tag (row 0's generic callback here; those rows' is
+    // BoneCallback_Simple).
+    // [orig: Render_SectorEntity @0x5C431B; row 'cveh' @0x82CFE0 ->
+    //  Entity_BuildDeathSectionTransforms @0x492AF0, column 3 @0x82CFEC ->
+    //  BoneCallback_Simple @0x4E2600; Entity_BuildAndApplyBoneMatrices
+    //  @0x48F210; Render_DestroyedSections @0x449EF0; BoneCallback_cpln_World
+    //  @0x48FE90; the lookup's miss @0x4E32D4; row 0 column 3 @0x82CF0C ->
+    //  BoneCallback_Generic @0x4E26D0]
+    CHECK(!piece.death_section_pivot);
+    const Vec3 drawn = item_section_render_position(w, piece);
+    CHECK(drawn.x == piece.position.x && drawn.y == piece.position.y && drawn.z == 11);
+    CollisionWorld cw;
+    CollisionModel husk;
+    husk.sections.resize(4);
+    cw.assign_entity(spawner.pieces[0], cw.add_model(std::move(husk)));
+    CollisionMatrix placed;
+    CHECK(cw.entity_section_matrix(w, spawner.pieces[0], 0, placed) && placed.m[11] == 11 * 65536);
+    piece.death_section_pivot = true; // the render tag's cveh / chel / tank / cpln row
     CHECK(item_section_render_position(w, piece).z == 3);
+    CHECK(cw.entity_section_matrix(w, spawner.pieces[0], 0, placed) && placed.m[11] == 11 * 65536);
+    piece.death_section_pivot = false;
     CHECK(e.health == 100 && (e.engine_flags & 6) == 4);
     CHECK(item_hidden_sections(e) == 12);
     destruction_notify_item_damage(w, e, 1, {1,1});

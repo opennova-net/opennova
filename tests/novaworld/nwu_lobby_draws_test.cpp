@@ -2,11 +2,13 @@
 // opennova-nw-lister runs on): 32 sessions opened on 32 threads at once each draw a client index
 // and key no other session shares. A per-thread generator seeded from std::random_device fails
 // this where libstdc++ serves random_device from RDSEED on a CPU with AMD's RDSEED erratum: the
-// threads whose seed came back 0 open with the same index and key.
+// threads whose seed came back 0 open with the same index and key. First, with an injected
+// Environment::random_u32, the client key is drawn again past a zero (D-NET-438).
 
 #include <net/novaworld/nwu_lobby_session.h>
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <set>
@@ -26,6 +28,27 @@ public:
 } // namespace
 
 int main() {
+	// D-NET-438: the CK is a session key, drawn until nonzero, through the environment's draw:
+	// draws {ci, 0, k} open with CI ci and CK k.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey @0x61EA70,
+	//  jz @0x61EAC3]
+	{
+		const uint32_t draws[] = {0x00001234u, 0u, 0x00005678u};
+		std::size_t next = 0;
+		NwuLobbySession::Environment env;
+		env.random_u32 = [&]() { return draws[next++ % 3]; };
+		NullSocket gate;
+		NullSocket session;
+		NwuLobbySession lobby(NwuLobbySession::Hooks{}, env);
+		lobby.open(gate, session);
+		if (lobby.client_index() != 0x00001234u || lobby.client_key() != 0x00005678u || next != 3) {
+			std::fprintf(stderr, "FAIL: draws {ci, 0, k} open with CI %08x CK %08x after %zu draws\n",
+			             static_cast<unsigned>(lobby.client_index()),
+			             static_cast<unsigned>(lobby.client_key()), next);
+			return 1;
+		}
+	}
+
 	constexpr int kThreads = 32;
 	struct Draw {
 		uint32_t index = 0;

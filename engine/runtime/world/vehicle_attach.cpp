@@ -176,12 +176,29 @@ bool attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
             (occ.mount_type == SeatType::Controller &&
              (veh.item_attrib & kItemAttribEweap) != 0))
         world.vehicles.bind_use_gun_slot(occ, veh);
+    // The entity's degree mirror as the entity carried it in, before the seat
+    // pose rewrites it (the look copy's fallback below, for an entity with no body).
+    const int16_t entry_yaw = occ.yaw;
     world.vehicles.pose_mounted_occupant(occ, veh, veh.seats[seat_idx]);
-    // Success clears the movement stance bits [orig: MoveOrder &= ~0x300 @0x435c42 + the
-    // prone/crouch latch clears @0x435c54/@0x435c59].
+    // Success clears the movement stance bits and, for the local player, the
+    // prone/crouch latches, and copies its Yaw into the look yaw. Neither attach
+    // writes Yaw, so the look takes the heading the body carried in (a request's
+    // snap, where a request ran). Ours keeps the Yaw in the body's BAM heading and
+    // the look in the input and the body's look target, which the snap writes alike.
+    // [orig: Entity_ProcessVehicleAttach -- MoveOrder &= ~0x300 @0x435c42; the
+    //  local gate @0x435c4c..0x435c52; the latch clears @0x435c54/@0x435c59;
+    //  `mov ecx, [edi+10h]` @0x435c5e into g_LocalPlayerLookYaw @0x435c61]
     occ.net_stance_bits = 0;
-    if (occ.handle == world.cached.local_player && world.local_player_state != nullptr)
-        world.local_player_state->clear_stance_latches();
+    if (occ.handle == world.cached.local_player) {
+        AiEntity *body = world.ai.for_handle(occ.handle);
+        const int32_t yaw = body != nullptr ? body->heading
+                                            : bam_heading_from_mission_yaw_deg(entry_yaw);
+        if (world.local_player_state != nullptr) {
+            world.local_player_state->clear_stance_latches();
+            world.local_player_state->input.look_heading = yaw;
+        }
+        if (body != nullptr && body->inf.is_local_player) body->inf.target_heading = yaw;
+    }
     // The UseGun claim (the control seats claimed above).
     // [orig: Entity_AttachToUseGunSlot +368 @0x546c6d]
     if (!control_seat)
@@ -451,6 +468,21 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
     const bool was_mounted = occ->mounted;
     if (occ->mounted)
         world.vehicles.detach(player); // [orig: @0x435BCE]
+    // The UseGun attach, which the authority's process calls with forceAttach 0,
+    // refuses a player holding no weapon out of a session, after the detach above
+    // and ahead of its camera reset, so a body that rode elsewhere stays off. Out
+    // of a session the one player body is the local player, whose EquippedSlot
+    // is LocalPlayer::equipped_slot_held (D-WPN-50 for where it differs).
+    // [orig: Entity_ProcessVehicleAttach -- forceAttach 0 on the
+    //  authority @0x435C9C, the call @0x435caa; Entity_AttachToUseGunSlot @0x546B80
+    //  -- is_in_session @0x546bf6..0x546bfc, Flags & 0x100 @0x546bfe..0x546c05,
+    //  EquippedSlot @0x546c07..0x546c0d, the 0 return @0x546c0f..0x546c14, ahead
+    //  of the camera reset @0x546ba4]
+    if (seat.type == SeatType::Gunner && !world.rules.mp_session &&
+            ((occ->flags | occ->engine_flags) & kEntityFlagPlayer) != 0 &&
+            player == world.cached.local_player && world.local_player_state != nullptr &&
+            !world.local_player_state->equipped_slot_held())
+        return was_mounted;
     // A refused control seat attaches nothing [orig: @0x435c09 / @0x435c40];
     // as apply_confirmed_mount reports, the relation changed only if the body
     // left a seat first.
@@ -464,7 +496,8 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
 // The request snaps the requester's yaw to the seat whenever the carrier's bone
 // lookup answers, before the authority's process or a client's C2S 0x26, so a
 // request the process then refuses has turned the body all the same. The process
-// itself (attach_to_seat, process_attach, apply_confirmed_mount) writes no yaw.
+// itself (attach_to_seat, process_attach, apply_confirmed_mount) writes no yaw; a
+// local success copies the Yaw into the look (attach_apply).
 // [orig: Entity_RequestVehicleAttach @0x4364A0 -- the
 //  Entity_GetBoneTransformAndOrientation call @0x436540, its test @0x436548..0x43654a;
 //  the UseGun yaw @0x43656E and local look yaw @0x436579, any other seat's @0x4365C3 /

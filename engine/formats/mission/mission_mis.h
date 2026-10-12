@@ -126,4 +126,32 @@ inline bool parse_mis_text(const std::string &text, const MisItemTypeResolver &r
 	return detail::parse_mis_text_to_bms(text, resolve_item_type, out, error, issues);
 }
 
+// The terrain the original editor measures an item's base height over: its save adds the terrain's height under a
+// height-locked item to the item's z and to its base (extra_bheight), its read takes it off again [orig: JOTACmed.exe
+// sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5; sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @
+// 0x45460e], so an entity of a .bms, which stands on no base of its own, has the terrain's height there as its
+// extra_bheight (write_mis_text's `base_heights`). `heights`: the .cpt's height atlas, 1024 x 1024 depth words in the
+// file's order, the grid the game loads (CptFile::depth_buffer, the .cpt the .trn's polytrn_polydata names), which
+// the original editor holds as twice each word [orig: JOTACmed.exe sub_44C2B0 @ 0x44c2b0, its DPTH arm @ 0x44c64b
+// and CDEP arm @ 0x44c5e7]. The rest is the .trn's own (the original editor reads the .trn alone): `sectors` its
+// 16 x 16 sector grid, row by row, extended past the rows and the width read as trn_extend_sector_grid extends it
+// [orig: sub_464BD0 @ 0x464bd0]; `origin_x`/`origin_y` polytrn_origin; the wraps polytrn_wrapx and polytrn_wrapy;
+// `scale` polytrn_scale, the original editor's height factor (scale / 128, 128 where the .trn names none: no shipped
+// one does; the game reads the key for its file check alone) [orig: sub_463C90 @ 0x463c90, its polytrn_scale arm @
+// 0x464a38; the default, sub_464B60 @ 0x464bb6].
+struct MisTerrain {
+	const uint16_t *heights = nullptr;
+	const int *sectors = nullptr;
+	int32_t origin_x = 0;
+	int32_t origin_y = 0;
+	bool wrap_x = false;
+	bool wrap_y = false;
+	int32_t scale = 128;
+};
+// The terrain's height at mission (x, y), 16.16, as the original editor samples it for an item's base: the sector
+// under the point (its grid cell, the cell past the grid's edge clamped to the edge's where the axis does not wrap,
+// else wrapped) picks a 512-unit quadrant of the atlas, and the four texels about the point blend bilinearly in
+// 16-bit fractions, the height times scale / 128 truncated. 0 where the cell names no sector, and for no terrain.
+int32_t mis_terrain_height(const MisTerrain &terrain, int32_t x, int32_t y);
+
 } // namespace opennova::mission

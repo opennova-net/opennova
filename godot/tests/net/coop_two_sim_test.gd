@@ -32,6 +32,20 @@ const AI_TYPE := 0x14BF       # Generic Soldier (items.def id 105311, org1 Perso
 const BUILDING_TYPE := 0x0123 # a static structure
 const MARKER_TYPE := 0x1773   # a start marker
 const SPAWN_ZONE_TYPE := 1359 # pool-1 fixture; ItemDef supplies SpawnPoint (0x40000)
+# BUILDING_TYPE's and MARKER_TYPE's items.def rows (a building with no model,
+# and retail's own type-6003 marker row, "start, Blue Team" at id 106003), so
+# the host's trait sweep gives them the type index the 0x10 and 0x20 streams
+# test (D-NET-417, D-NET-416).
+const STREAMED_STATIC_ROWS := """begin "Coop Static Fixture"
+  id 100291
+  type building
+end
+
+begin "start, Blue Team"
+  id 106003
+  type marker
+end
+"""
 # Objective Co-op's no-pick primary. Retail indexes the authored 6094 rows by
 # player slot; it does not fall through to DM's 6002 family.
 # [orig: Server_PositionPlayerForSpawn @0x50D1A7..0x50D201]
@@ -237,9 +251,14 @@ end
 
 func _net_spawn_zone_item_db() -> ItemDatabase:
 	# Keep the normal compact table intact, then add one deploy-selectable pool-1
-	# row (ItemDbFixture.SPAWN_ZONE_ROW, ItemDef 101359).
+	# row (ItemDbFixture.SPAWN_ZONE_ROW, ItemDef 101359) and the rows of the
+	# world's pool-2 building and pool-3 marker: the 0x10 and 0x20 streams write a
+	# zero word for a row whose ItemTypeIndex is 0, as a type items.def lacks
+	# resolves [orig: NetPacket_SerializePool2StaticToBuffer @0x504369..0x504378;
+	# NetPacket_SerializeEntityPoolToPacket @0x503505..0x503514] (D-NET-417,
+	# D-NET-416).
 	return ItemDbFixture.with_rows(self, "net_spawn_zone_items.def",
-			ItemDbFixture.SPAWN_ZONE_ROW)
+			ItemDbFixture.SPAWN_ZONE_ROW + "\n" + STREAMED_STATIC_ROWS)
 
 
 func _install_combat_tables(sim: Simulation) -> void:

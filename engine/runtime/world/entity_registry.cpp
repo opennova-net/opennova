@@ -19,6 +19,13 @@ void EntityRegistry::configure_pool(int pool, size_t capacity) {
     p.slots.assign(capacity, Entity{});
     p.used.assign(capacity, 0);
     p.live = 0;
+    p.used_count = 0; // [orig: Pool_Clear @0x442060 -- used = 0 @0x4420DE..0x4420F6]
+}
+
+void EntityRegistry::set_pool_used(int pool, size_t count) {
+    // [orig: Pool_SetUsed @0x441F60 -- a plain store, not a raise]
+    if (pool < 0 || pool >= kPoolCount) return;
+    pools_[pool].used_count = count;
 }
 
 EntityHandle EntityRegistry::spawn(int pool, const Entity &seed) {
@@ -39,6 +46,13 @@ EntityHandle EntityRegistry::spawn_from(int pool, size_t first_slot, const Entit
             if (next_spawn_id_ == 0) next_spawn_id_ = 1;
             p.used[s] = 1;
             ++p.live;
+            // An includeInUse-1 allocation takes the first free row below the
+            // used count when there is one, so the count moves only when the
+            // walk ran past it; an includeInUse-0 caller also passes over a
+            // destroyed row (+0x219) and grows the count instead (D-NET-485).
+            // [orig: Pool_AllocEntry @0x442230 -- the walk @0x442253..0x442274,
+            //  the +0x219 test @0x442266, used + 1 @0x44228B]
+            if (s + 1 > p.used_count) p.used_count = s + 1;
             return h;
         }
     }
@@ -61,6 +75,11 @@ EntityHandle EntityRegistry::spawn_at(EntityHandle h, const Entity &seed) {
     if (next_spawn_id_ == 0) next_spawn_id_ = 1;
     p.used[slot] = 1;
     ++p.live;
+    // A slotted load raises the count to the slot + 1, never lowers it.
+    // [orig: Pool_UpdateMaxUsedFromSlotId @0x442100 -- @0x442115..0x442123;
+    //  Pool_UpdateMaxUsed @0x441F40]
+    if (static_cast<size_t>(slot) + 1 > p.used_count)
+        p.used_count = static_cast<size_t>(slot) + 1;
     return h;
 }
 

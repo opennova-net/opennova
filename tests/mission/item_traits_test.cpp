@@ -10,6 +10,7 @@
 #include <runtime/mission/item_traits.h>
 #include <runtime/world/item_sections.h>
 #include <runtime/world/ai.h>
+#include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
 
 #include <cstdio>
@@ -812,6 +813,38 @@ int main() {
 		}
 	}
 
+	// The death-section draw binds through the render tag's cveh, chel, tank
+	// and cpln bone rows, each by its first four bytes with their case kept:
+	// `cvehX` is the cveh row, `CHel`, `psec` and `bldg` are none of them, and
+	// a def edited to `Cveh` or `TANK` loses the draw on the next resolve.
+	// [orig: rows 'cveh' @0x82cfe0 -> Entity_BuildDeathSectionTransforms
+	//  @0x492af0, 'chel' @0x82cfd0 -> Entity_BuildAndApplyBoneMatrices @0x48f210,
+	//  'tank' @0x82cff0 -> Render_DestroyedSections @0x449ef0, 'cpln' @0x82d000
+	//  -> BoneCallback_cpln_World @0x48fe90; BoneCallback_LookupByTag @0x4e32c6]
+	{
+		CHECK(w.registry.get(tank_h)->death_section_pivot);
+		CHECK(w.registry.get(prefix_tank_h)->death_section_pivot);
+		CHECK(!w.registry.get(helo_h)->death_section_pivot);
+		CHECK(!w.registry.get(psec_palm_h)->death_section_pivot);
+		DefItemDef *truck_def = entry_for(file, 100503);
+		CHECK(truck_def != nullptr);
+		if (truck_def != nullptr) {
+			const struct { const char *tag; bool pivots; } tags[] = {
+				{"chel", true}, {"tank", true}, {"cpln", true}, {"cplnX", true},
+				{"CHel", false}, {"Cveh", false}, {"TANK", false}, {"bldg", false},
+			};
+			for (const auto &tag : tags) {
+				std::snprintf(truck_def->render_function, sizeof(truck_def->render_function),
+						"%s", tag.tag);
+				mission::resolve_item_traits(w, file, wire_class);
+				CHECK(w.registry.get(truck_h)->death_section_pivot == tag.pivots);
+			}
+			std::snprintf(truck_def->render_function, sizeof(truck_def->render_function), "cveh");
+			mission::resolve_item_traits(w, file, wire_class);
+			CHECK(w.registry.get(truck_h)->death_section_pivot);
+		}
+	}
+
 	// ---- the throwable class scan ----
     const ThrowableClassRow *frag = w.throwables.classes.get(600);
     CHECK(frag != nullptr);
@@ -967,6 +1000,41 @@ int main() {
             CHECK(rifle_override != nullptr && !rifle_override->is_spawn_point);
             CHECK(rifle_override != nullptr && rifle_override->leave_corpse);
         }
+    }
+
+    // ---- the lift leaves a player body alone (D-PWR-9) ----
+    // Retail's lift is the mission start's reload over the loaded pools, ahead
+    // of the round init's player spawn; a player's health is its spawn's raises
+    // to the ceiling. A training start at the difficulty word 1 over a Player
+    // def hp of 200 spawns at exactly 100 and keeps it through the boot's later
+    // sweeps, while a non-player body of the same row at 100 still lifts.
+    // [orig: Game_ReloadEntityModelsAndCallbacks @0x522830, called @0x52550E;
+    //  Server_InitAllPlayerEntitiesForRound called @0x525BAF;
+    //  Entity_SpawnFromAnimSlotProperty @0x43C557..0x43C56B]
+    {
+        player->hp = 200;
+        World sp;
+        sp.registry.configure_pool(0, 8);
+        sp.rules.mp_session = false;
+        sp.rules.difficulty = 1;
+        mission::resolve_item_traits(sp, file, wire_class); // the Player row's word
+        CHECK(sp.tables.player.item_hp == 200);
+        PlayerSpawn ps;
+        ps.net_id = 0xFFF0;
+        const EntityHandle body_h = spawn_player(sp, ps);
+        const EntityHandle npc_h = spawn(sp, 0, 5305, EntityKind::Organic);
+        const Entity *body = sp.registry.get(body_h);
+        CHECK(body != nullptr && sp.cached.local_player == body_h);
+        CHECK(body != nullptr && body->health == 100); // halved at the word 1
+        CHECK(body != nullptr && body->health_max == 200);
+        mission::resolve_item_traits(sp, file, wire_class); // the kernel's item_traits step
+        body = sp.registry.get(body_h);
+        CHECK(body != nullptr && body->health == 100);
+        CHECK(body != nullptr && body->health_max == 200);
+        const Entity *npc = sp.registry.get(npc_h);
+        CHECK(npc != nullptr && npc->health == 200);
+        CHECK(npc != nullptr && npc->health_max == 200);
+        player->hp = 100;
     }
 
     def_free_items(&file);
