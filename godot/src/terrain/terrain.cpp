@@ -355,7 +355,7 @@ void Terrain::set_tile_info_override(const Ref<TerrainTileInfo> &p_info) {
 	}
 	surface_inputs->set_tile_info_override(p_info);
 	if (built) {
-		_rebuild_tile_overlay_pages();
+		_update_tile_overlay_pages();
 	}
 }
 
@@ -1116,9 +1116,29 @@ void Terrain::_on_terrain_changed() {
 	_load_textures();
 }
 
+void Terrain::_update_tile_overlay_pages() {
+	if (terrain_material.is_null()) {
+		return;
+	}
+	// The placement the pages draw: the override, else the terrain's own (TerrainTileCacheDevice::rebuild's choice);
+	// a declared file that does not resolve is the rebuild's to report.
+	Ref<TerrainTileInfo> tiles = tile_info_override;
+	if (tiles.is_null() && terrain_data.is_valid()) {
+		tiles = terrain_data->get_tileinfo_resource();
+		if (tiles.is_null() && !terrain_data->get_tileinfo_filename().strip_edges().is_empty()) {
+			_rebuild_tile_overlay_pages();
+			return;
+		}
+	}
+	if (tile_cache_device.set_tile_entries(tiles.is_valid() ? tiles->to_native() : opennova::TilFile())) {
+		return;
+	}
+	_rebuild_tile_overlay_pages();
+}
+
 void Terrain::_on_tile_info_changed() {
 	if (!built || terrain_data.is_null()) return;
-	_rebuild_tile_overlay_pages();
+	_update_tile_overlay_pages();
 }
 
 void Terrain::_hide_visible_patches() {
