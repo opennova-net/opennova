@@ -112,12 +112,12 @@ behind=()
 if [[ "$windowed" == "1" ]]; then
   behind=(python "$root/scripts/mcp/game_mcp.py" run --)
 fi
-# The game's own files (the player profile's player.sav and weapon.sav) live in
-# the directory it runs in (LaunchFlags.working_dir), for a GUT run the project
-# (Godot's --path makes it the process's working directory; GUT refuses a
-# --working-dir after its own options). A run starts without them and leaves
-# none behind (git ignores them for a direct single-file run).
-profile_files=("$root/godot/player.sav" "$root/godot/weapon.sav")
+# The game's own files (the player profile's player.sav and weapon.sav, and
+# game.cfg) live in the directory it runs in (LaunchFlags.working_dir), for a
+# GUT run the project (Godot's --path makes it the process's working directory;
+# GUT refuses a --working-dir after its own options). A run starts without them
+# and leaves none behind (git ignores them for a direct single-file run).
+profile_files=("$root/godot/player.sav" "$root/godot/weapon.sav" "$root/godot/game.cfg")
 rm -f "${profile_files[@]}"
 rm -f "$root"/godot/expansion/*/weapon.sav 2>/dev/null || true
 set +e

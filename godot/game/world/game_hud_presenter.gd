@@ -105,10 +105,9 @@ class PendingHudMessage:
 # MISSION FAILED screen can compose it. [orig: g_BannerText @0x28E3DA0, written by
 # GameMsg_SetBannerText @0x5ba200, cleared by the round-start HUD reset @0x5b71b0]
 var _endround_banner := ""
-# The HUD color-scheme index is persisted like retail's config token (read at
-# boot, written back on cycle); the cfg store is this presenter's device work.
-const HUD_COLOR_CONFIG_PATH := "user://settings.cfg"
-const HUD_COLOR_SECTION := "hud"
+# The HUD color-scheme index is retail's game.cfg word in the process's cfg
+# block (GameCfgStore): read at boot, written back on cycle, and saved with the
+# block at its next save point.
 const HUD_COLOR_CONFIG_KEY := "hud_color_index"
 var _score_fanfare := ScoreFanfarePresenter.new()  # the S2C 0x81 hit-confirm lane
 # The HUD declutter level is TWO states in retail (hud-re.md, "HUD declutter"):
@@ -120,8 +119,7 @@ const HUD_DETAIL_CONFIG_KEY := "hud_detail"
 # Stored verbatim: retail atol()s the token and applies it raw, so an
 # out-of-range level blanks every gated element until the huddetail cycle
 # wraps it (docs/interface/hud-re.md, the declutter section).
-var _hud_detail_config: int = int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-		HUD_DETAIL_CONFIG_KEY, HudOverlay.hud_detail_level_default()))
+var _hud_detail_config: int = GameCfgStore.block().get_word(HUD_DETAIL_CONFIG_KEY)
 # The key-driven HUD toggles and cycles (HudToggles over the engine's
 # hud/hud_toggles.h): the color index, the LIVE declutter level, the showhud
 # flags, the friendly-tags mode, the objectives panel and the three overlay
@@ -130,9 +128,8 @@ var _hud_detail_config: int = int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_CO
 # at boot; this presenter samples the keys and applies the device side effects
 # the poll's events name.
 var _toggles: HudToggles = _seed_toggles(
-		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-				HUD_COLOR_CONFIG_KEY, HudOverlay.hud_color_index_default())),
-		_hud_detail_config)
+	GameCfgStore.block().get_word(HUD_COLOR_CONFIG_KEY), _hud_detail_config
+)
 # The talk keys and the captured chat line (engine hud_chat_entry: the
 # dispatch gates, the capture, the line editor) -- process-lifetime like the
 # toggles; this presenter samples the talk rows, routes key events to it
@@ -1251,8 +1248,7 @@ func _apply_toggle_events(events: int) -> void:
 	if events & HudToggles.EVENT_HUD_DETAIL_CYCLED:
 		_push_hud_detail_level()
 	if events & HudToggles.EVENT_HUD_COLOR_CYCLED:
-		ConfigStore.write(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
-				HUD_COLOR_CONFIG_KEY, _toggles.get_hud_color_index())
+		GameCfgStore.block().set_word(HUD_COLOR_CONFIG_KEY, _toggles.get_hud_color_index())
 		if _game_hud != null:
 			_game_hud.set_hud_color_index(_toggles.get_hud_color_index())
 	if events & (HudToggles.EVENT_SHOWHUD_CYCLED | HudToggles.EVENT_GUN_BIT_CHANGED):

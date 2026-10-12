@@ -253,6 +253,8 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 			case RequestOutcome::Created:
 				log_owner(user, "start", "server " + std::to_string(result.id) + " requested");
 				return server_reply(202, *db_conn, result.id, false);
+			case RequestOutcome::InvalidSettings: // check_settings refused them above already
+				return json_error(400, "invalid_settings");
 			case RequestOutcome::NoSuchUser:
 			case RequestOutcome::NotApproved:
 				log_owner(user, "start", "not_approved");

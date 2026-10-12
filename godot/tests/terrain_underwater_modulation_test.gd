@@ -187,18 +187,28 @@ func test_live_tile_info_mutation_invalidates_resident_page_sources() -> void:
 	var before_reset := terrain.get_tile_cache_diagnostics()
 	assert_gt(int(before_reset["ready_pages"]), 0)
 
+	# The first tiles over a terrain drawn with none: the tile set loads, the page sources built again.
 	var tile_info := TerrainTileInfo.new()
+	var entry := TerrainTileEntry.new()
+	entry.set_cell(3, 2)
+	entry.set_tile_index(0)
+	tile_info.add_entry(entry)
 	terrain.set_tile_info_override(tile_info)
 	var assigned: Dictionary = terrain.get_tile_cache_diagnostics()
 	assert_eq(int(assigned["pending_jobs"]), 0,
 			"source reset must retire queued and completed prior-source jobs")
 	assert_eq(int(assigned["ready_pages"]), 0)
+	assert_gt(int(assigned["source_revision"]), int(before_reset["source_revision"]))
+	var settled := await TestFs.settle_tile_cache(self, terrain)
+	assert_gt(int(settled["ready_pages"]), 0)
+
+	# An in-place .til edit: the pages its squares show retire at once, the sources kept.
 	tile_info.clear_entries()
 	var mutated: Dictionary = terrain.get_tile_cache_diagnostics()
-	assert_eq(int(mutated["pending_jobs"]), 0)
-
-	assert_gt(int(mutated["source_revision"]), int(assigned["source_revision"]),
-		"An in-place .til edit must invalidate the device page source immediately.")
+	assert_eq(int(mutated["source_revision"]), int(settled["source_revision"]))
+	assert_gt(int(mutated["tile_entry_pages_retired"]), 0,
+		"An in-place .til edit must invalidate the pages it changes immediately.")
+	assert_lt(int(mutated["ready_pages"]), int(settled["ready_pages"]))
 
 
 func test_reflected_pass_clips_terrain_below_the_plane_less_0_05() -> void:

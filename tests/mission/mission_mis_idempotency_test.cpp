@@ -124,9 +124,12 @@ int check(const std::string &path) {
 	std::string gen1;
 	TEST_EXPECT(write_mis_text(doc, gen1, error));
 	TEST_EXPECT(!gen1.empty());
-	// Every BMS-sourced item block declares its z absolute (D-MIS-4)
-	// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
-	TEST_EXPECT(gen1.find("  height_lock 1\r\n") != std::string::npos);
+	// A BMS-sourced item is unlocked (D-MIS-4); with no terrain height known (none given here) each is written
+	// locked, its z absolute as it stands, exact in the original editor over whatever terrain it loads (D-MIS-17).
+	size_t locks = 0;
+	for (size_t at = gen1.find("  height_lock 1\r\n"); at != std::string::npos; at = gen1.find("  height_lock 1\r\n", at + 1))
+		++locks;
+	TEST_EXPECT(locks == total);
 
 	bms::File reparsed;
 	TEST_EXPECT(parse_mis_text(gen1, resolver, reparsed, error));

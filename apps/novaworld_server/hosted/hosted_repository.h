@@ -40,6 +40,9 @@ std::optional<State> state_from_name(std::string_view name);
 // machine, counts against the cap and is its owner's one live server.
 bool is_live(State state);
 
+// A hosted server's row. It carries no admin credential: that is AdminLogin's,
+// read by admin_login_of alone, so nothing that serializes a HostedServer can
+// emit one.
 struct HostedServer {
 	int64_t id = 0;
 	std::optional<int64_t> owner_user_id;
@@ -50,8 +53,6 @@ struct HostedServer {
 	std::string machine_id;
 	std::string machine_address;
 	int admin_port = 0;
-	std::string admin_user;
-	std::string admin_password;
 	int restarts = 0;
 	std::string failure_reason;
 	// UTC 'YYYY-MM-DD HH:MM:SS'; running_at / ended_at empty until set.
@@ -69,9 +70,20 @@ struct HostedEvent {
 	std::string at;
 };
 
+// The remote-admin login the rendered admin.cfg grants the service (K's admin
+// link logs in with it). Never part of a reply.
+struct AdminLogin {
+	int port = 0;
+	std::string user;
+	std::string password;
+};
+// The server's admin login; nullopt for no such server or one not yet rendered.
+std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id);
+
 // What a start request came to.
 enum class RequestOutcome : uint8_t {
 	Created,
+	InvalidSettings, // check_settings refused them (the routes check first)
 	NoSuchUser,  // no player account by that id
 	NotApproved, // the account is not approved (can_host) or not active
 	AlreadyLive, // the account has a live server (`id` names it)
@@ -82,9 +94,10 @@ struct RequestResult {
 	int64_t id = 0;
 };
 
-// A start the owner asks for, with settings check_settings accepted: in one
-// transaction the account's approval, its one live server and the global cap
-// are checked and the row is written (state requested, its event beside it).
+// A start the owner asks for: the settings checked again (check_settings, as
+// the routes do first), then in one transaction the account's approval, its one
+// live server and the global cap, and the row written (state requested, its
+// event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id,
 		const HostedSettings &settings, int cap);
 
@@ -103,10 +116,13 @@ std::vector<HostedEvent> list_events(db::Database &db, int64_t id, size_t limit)
 // otherwise. Running sets running_at; Stopped and Failed set ended_at, and
 // Failed the failure reason (`detail`). `count_restart` adds one to restarts.
 // `clear_machine` empties the machine's id and address (a crash restart's
-// relaunch, an end).
+// relaunch, an end). `end_service_account` deletes the server's service
+// account in the same transaction (an end: its sessions and keys cascade, and
+// the row's service_user_id goes NULL), so no ended row keeps an account.
 struct TransitionOptions {
 	bool count_restart = false;
 	bool clear_machine = false;
+	bool end_service_account = false;
 };
 bool transition(db::Database &db, int64_t id, State from, State to, const std::string &detail,
 		TransitionOptions options = {});
@@ -115,6 +131,9 @@ bool transition(db::Database &db, int64_t id, State from, State to, const std::s
 bool request_stop(db::Database &db, int64_t id, const std::string &detail);
 // Every live server's stop (the admin's kill switch); how many it asked.
 size_t request_stop_all(db::Database &db, const std::string &detail);
+// A running server's restarts back to 0 (its healthy run outlasted the
+// supervisor's restart window); false when it was not running or had none.
+bool reset_restarts(db::Database &db, int64_t id);
 
 // The fields a start writes beside the state.
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id);
@@ -132,29 +151,28 @@ std::optional<uint32_t> listing_rid_of(db::Database &db, int64_t account_user_id
 //
 // A listing belongs to the account whose HostKey it holds now
 // (hostdb::listing_owned_by), except that a hosted server's service account
-// stands for that hosted server's owner. Every owner-facing view and push
-// resolves a listing through the four functions below (host_routes.cpp: GET
-// /api/me/hosts, POST /api/me/hosts/<rid>/command and /stop, GET
-// /api/admin/hosts and its stop), so the rule lives here alone. Service
-// policy, like the HostKey claim it extends. Reads only: safe inside a
+// stands for that hosted server's owner while the server is live. Every
+// owner-facing view and push resolves a listing through the three functions
+// below (host_routes.cpp: GET /api/me/hosts, POST /api/me/hosts/<rid>/command
+// and /stop, GET /api/admin/hosts and its stop), so the rule lives here alone.
+// Service policy, like the HostKey claim it extends. Reads only: safe inside a
 // db::ReadSnapshot.
 
-// The hosted server whose service account `account_user_id` is.
+// The hosted server whose service account `account_user_id` is, in any state
+// (a stopped or failed server's account is deleted with the transition that
+// ends it, so an ended one shows only on a database written by hand).
 struct HostedAccount {
 	int64_t server_id = 0;
 	std::optional<int64_t> owner_user_id; // unset once the owner's account is gone
+	State state = State::Requested;
 };
 std::optional<HostedAccount> hosted_server_of_account(db::Database &db, int64_t account_user_id);
-// The site account that owns what `account_user_id` lists: a hosted server's
-// owner for its service account (nullopt once that owner is gone), else the
-// account itself.
-std::optional<int64_t> listing_owner_of(db::Database &db, int64_t account_user_id);
 // The accounts whose listings are `user_id`'s: itself first, then the service
-// accounts of its hosted servers.
+// accounts of its live hosted servers (is_live; a stopping one included).
 std::vector<int64_t> listing_accounts_of(db::Database &db, int64_t user_id);
 // The account through which `user_id` owns the listing under `rid` now: itself
-// or one of its hosted servers' service accounts, whichever holds the listing's
-// claim; nullopt when the listing is not `user_id`'s (or not listed).
+// or one of its live hosted servers' service accounts, whichever holds the
+// listing's claim; nullopt when the listing is not `user_id`'s (or not listed).
 std::optional<int64_t> owned_listing_account(db::Database &db, uint32_t rid, int64_t user_id);
 
 } // namespace opennova::novaworld_server::hosted

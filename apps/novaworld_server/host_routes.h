@@ -101,10 +101,12 @@ private:
 	// account's keys claimed for the RID, or one of its hosted servers' service
 	// accounts' keys), then the push scoped to the account holding the claim,
 	// which the listener checks against the connection (NwUdpListener's `owner`).
-	// A hosted server's listing's "stop" is that hosted server's stop instead.
+	// On a live hosted server's listing a Stop is that hosted server's stop
+	// instead, and a Command to one that is stopping is refused.
 	// `push(rid32, account)` is the statement's push; `line` names it in the log.
+	enum class OwnerPush { Command, Stop };
 	template <typename Push>
-	crow::response push_as_owner(const WebSessionUser &user, uint64_t rid, const char *what,
+	crow::response push_as_owner(const WebSessionUser &user, uint64_t rid, OwnerPush kind,
 			const std::string &line, Push push, crow::json::wvalue out);
 
 	WebAccess &access_;

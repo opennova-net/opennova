@@ -252,13 +252,14 @@ bool parse_entity(io::ByteReader& r, Entity& e, std::string& error) {
     }
 
     // .mis-interchange defaults for a BMS-sourced entity (transient; NOT part of the 172-byte
-    // record read above). BMS entity z is always absolute (engine spawn extractor,
-    // docs/mission/bms-event-runtime-re.md §6.6), so a .mis export of this entity must declare
-    // height_lock, else the original editor treats z as terrain-relative and the object floats
-    // by the local terrain height [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll —
-    // scene Y = z/65536 - (height_lock ? extra_bheight/65536 : 0)].
+    // record read above): unlocked, its base 0. The original editor reads no .bms; this is the
+    // editor's reading of its frames (D-MIS-4): its .bms export's undo takes every item's z back
+    // to the document's frame, the terrain's height off [orig: JOTACmed.exe sub_44E5F0 @
+    // 0x44e5f0, from @ 0x450cf2], and an item it did not lock is unlocked, as its new item is
+    // (the record zeroed, MissionItem_AppendByTypeId @ 0x455954). Its new item's base is its
+    // placement height (@ 0x455a16), which a .bms does not hold: 0 here.
     e.mis_extra_bheight = 0;
-    e.mis_height_lock = 1;
+    e.mis_height_lock = 0;
 
     return true;
 }
@@ -885,6 +886,7 @@ bool parse(const uint8_t* data, size_t size, File& out, std::string& error) {
     // A failed attempt to reuse a File must not leave the previous source
     // header eligible for later network emission.
     out.has_loaded_header_blob_ = false;
+    out.mis_frame = MisFrame::Bms;
     if (!is_bms(data, size)) {
         error = "Not a BMS file (invalid magic)";
         return false;
@@ -1335,6 +1337,9 @@ bool item_availability_equal(const std::vector<ItemAvailabilityEntry>& a,
 } // namespace
 
 bool equal(const File& a, const File& b) {
+    if (a.mis_frame != b.mis_frame) {
+        return false;
+    }
     // Header is packed (static_assert sizeof == 616); a byte compare is exact and includes the
     // count fields. The body comparisons below are over the actual vectors, so they detect a
     // change even when a header count is momentarily out of sync with its vector (sync_counts runs

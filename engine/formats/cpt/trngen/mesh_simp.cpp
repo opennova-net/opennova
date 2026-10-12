@@ -12,6 +12,14 @@ thread_local MeshSimpGlobals g_simp = {};
 // Global mutable curvature weight (flt_42A460 — set by callers)
 thread_local float g_curvature_weight = 0.01f;
 
+// The vertices a null-target collapse retired: off the vertex array but alive for the faces that still
+// name them (MeshSimp_CollapseVertex), freed with the rest by MeshSimp_FreeAll. TrnGen.exe frees such a
+// vertex at once [orig: TrnGen.exe sub_4078B0 @ 0x4078C8 (sub_407050), @ 0x4078CE (FreeMemory) (the
+// MiscTools build)] and its face extraction later reads the freed vertex's id; the port keeps it until
+// FreeAll so that read stays defined (and frees it, which a tool that bakes again and again needs). No
+// behaviour follows from the list.
+static thread_local std::vector<MeshVertex*> g_retired_vertices;
+
 // Match sub_406F30 exactly: z² stored as float, (y²+z²) stored as float, x²+sum stays double, sqrt
 // Original x87 uses fstp dword (float) for intermediate sums between sub_406F20 calls.
 static inline double vec3_length_original(float x, float y, float z) {
@@ -792,6 +800,7 @@ void MeshSimp_CollapseVertex(MeshVertex* v, MeshVertex* target) {
         // Face extraction later reads face->v[i]->id — we keep v alive (don't free)
         // so the id field remains readable.
         MeshVertex_Destroy(v);
+        g_retired_vertices.push_back(v);
     }
 }
 
@@ -862,7 +871,7 @@ void MeshEdge_Collapse(MeshFace* f, MeshVertex* v_old, MeshVertex* v_new) {
 // The vertices and faces a reduction left (TrnGen.exe drops the arrays and never frees what they
 // point at, a leak a tool that bakes again and again cannot keep): freed, the arrays emptied.
 // A vertex a null-target collapse destroyed is no longer listed and stays alive for the faces that
-// still name it (MeshSimp_CollapseVertex). No behaviour follows from what is freed here.
+// still name it (MeshSimp_CollapseVertex) until here. No behaviour follows from what is freed here.
 void MeshSimp_FreeAll() {
     for (int i = 0; i < g_simp.face_count; i++) std::free(g_simp.faces[i]);
     for (int i = 0; i < g_simp.vertex_count; i++) {
@@ -875,6 +884,8 @@ void MeshSimp_FreeAll() {
     std::free(g_simp.vertices);
     std::free(g_simp.temp_faces);
     g_simp = MeshSimpGlobals{};
+    for (MeshVertex* v : g_retired_vertices) std::free(v);
+    g_retired_vertices.clear();
 }
 
 // ===== MeshSimp_Init [orig: TrnGen.exe sub_409080 @ 0x409080] =====

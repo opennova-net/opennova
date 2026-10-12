@@ -21,6 +21,7 @@
 #include <runtime/world/spawn_select.h>           // SpawnZoneRegistry
 
 #include "network/udp_pump.h"
+#include "player/game_config_block.h"
 
 #include <cstdint>
 #include <memory>
@@ -51,6 +52,11 @@ struct SimulationNetState {
 	// session options (the record getter + the §5.1 reactive-reply config
 	// consumed by create_session).
 	opennova::inmatch::GameConfig host_session_config;
+	// The process's cfg block the shell keeps (game.cfg): every session create
+	// takes its mpreset word, single player's and a host's alike, and a
+	// ServerCommand's config change lands in it. Null in tools and tests that
+	// install none: the session config's own word stands.
+	Ref<GameConfigBlock> game_config;
 	uint16_t host_bind_port = 64220; // the lobby-advertised bind port (UI only)
 	// UI server-type: serve-and-play (default true) spawns + renders the host's
 	// own player and folds the host loopback into the live runtime; a DEDICATED

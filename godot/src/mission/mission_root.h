@@ -96,6 +96,10 @@ public:
 	int setup(const Ref<MissionData> &p_mission, Node *p_container,
 			const Ref<MissionSetupOptions> &p_options = Ref<MissionSetupOptions>());
 	int get_setup_error() const { return setup_error_; }
+	// The failed setup's session create ended the process on the cfg block's
+	// mpreset word (Simulation.session_create_ended_process): the embedder
+	// exits with code 0 instead of reporting a load failure.
+	bool is_process_exit() const { return process_exit_; }
 
 	// Full attached-effect transform for fx2ssn. Simulation owns the LIVE
 	// registry lookup and frame data; presentation applies the single
@@ -334,6 +338,7 @@ private:
 	String mission_file_;
 	String mission_name_;
 	int setup_error_ = OK;
+	bool process_exit_ = false;
 	// The current authoritative present tick (-1 = none yet). Attachment-pose
 	// lookups are Simulation's generation-bound native index — the one path;
 	// test sims implement the same compact API.

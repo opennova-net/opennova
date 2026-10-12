@@ -18,6 +18,7 @@
 #include <runtime/terrain/foliage_detail_collector.h>
 #include <runtime/terrain/quadtree.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
+#include <runtime/terrain_query/coords.h>
 
 #include <array>
 #include <cstdint>
@@ -68,6 +69,8 @@ struct TerrainSceneSnapshot {
 	int origin_y = 0;
 	bool wrap_x = false;
 	bool wrap_y = false;
+	// The .trn's quadrant locks the tiles' bounds were tapped with.
+	terrain::CoordsQuadrantLocks locks;
 
 	bool valid() const { return root_node >= 0 && !quad_nodes.empty(); }
 };
@@ -77,6 +80,22 @@ struct TerrainSceneSnapshot {
 // that is not the 1024x1024 atlas.
 TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
                                                   const TrnConfig &trn);
+
+// The snapshot of a terrain whose heights changed in the atlas rect `rect` and
+// whose tiles `tiles` (indices into cpt.tiles) were replaced, made again from
+// `cpt` (its new heights and tiles) in place: the replaced tiles whole, the
+// bounds of every other tile whose vertices may read the rect, the mip chain
+// cells over the rect and the nodes; equal to a fresh
+// build_terrain_scene_snapshot(cpt, trn) (an editor's sculpt stroke and the
+// bake that lands it). The rect is the terrain's region contract (quadtree.h
+// refresh_mipchain's): inside the 1024 atlas, a change across its wrap arriving
+// as several rects, each refreshed in turn; one of no size (tiles alone
+// replaced) changes no height; one not inside is refused (false, nothing
+// changed). A layout the snapshot was not built from (a tile moved or resized,
+// a count changed) or `trn`'s quadrant locks moved since it was built: built
+// whole.
+bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
+		const TrnConfig &trn, const std::vector<int> &tiles, const terrain::CoordsRect &rect);
 
 // Orthonormal camera state in world space (column-major world-to-view, -Z
 // forward) plus the scalars retail's terrain context carries: the horizontal

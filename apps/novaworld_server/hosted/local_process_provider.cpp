@@ -122,19 +122,68 @@ bool write_file(const fs::path &path, const std::string &content, bool secret, s
 
 } // namespace
 
+const std::vector<std::string> LocalProcessProvider::kServeEnvironment = {
+#ifdef _WIN32
+	"PATH", "SystemRoot", "SystemDrive", "windir", "TEMP", "TMP",
+#else
+	"PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR",
+#endif
+};
+
 LocalProcessProvider::LocalProcessProvider(LocalProcessConfig config) : config_(std::move(config)) {
 	config_.serve_binary = absolute_path(config_.serve_binary);
 	config_.resource_dir = absolute_path(config_.resource_dir);
 	config_.work_dir = absolute_path(config_.work_dir);
+	spawner_ = std::thread([this] { spawner_loop(); });
 }
 
 LocalProcessProvider::~LocalProcessProvider() {
+	// Every child asked to stop and reaped first, then the spawner thread joined:
+	// its exit is what the children's parent-death signal follows.
 	std::vector<std::string> ids;
 	{
 		std::lock_guard<std::mutex> lock(mu_);
 		for (const auto &entry : machines_) ids.push_back(entry.first);
 	}
 	for (const std::string &id : ids) terminate(id);
+	{
+		std::lock_guard<std::mutex> lock(spawner_mu_);
+		spawner_stopping_ = true;
+	}
+	spawner_cv_.notify_all();
+	if (spawner_.joinable()) spawner_.join();
+}
+
+void LocalProcessProvider::spawner_loop() {
+	for (;;) {
+		std::function<void()> task;
+		{
+			std::unique_lock<std::mutex> lock(spawner_mu_);
+			spawner_cv_.wait(lock, [this] { return spawner_stopping_ || !spawner_tasks_.empty(); });
+			if (spawner_tasks_.empty()) return;
+			task = std::move(spawner_tasks_.front());
+			spawner_tasks_.pop_front();
+		}
+		task();
+	}
+}
+
+void LocalProcessProvider::on_spawner(const std::function<void()> &task) {
+	std::mutex done_mu;
+	std::condition_variable done_cv;
+	bool done = false;
+	{
+		std::lock_guard<std::mutex> lock(spawner_mu_);
+		spawner_tasks_.push_back([&] {
+			task();
+			std::lock_guard<std::mutex> done_lock(done_mu);
+			done = true;
+			done_cv.notify_all();
+		});
+	}
+	spawner_cv_.notify_all();
+	std::unique_lock<std::mutex> lock(done_mu);
+	done_cv.wait(lock, [&] { return done; });
 }
 
 fs::path LocalProcessProvider::server_dir(int64_t server_id) const {
@@ -182,13 +231,17 @@ std::optional<std::string> LocalProcessProvider::launch(const LaunchSpec &spec, 
 		return std::nullopt;
 	}
 #endif
+	Machine machine;
+	machine.server_id = spec.server_id;
 	for (const LaunchFile &file : spec.files) {
 		if (file.name.empty() || file.name.find_first_of("/\\") != std::string::npos ||
 				file.name == "." || file.name == "..") {
 			error = "a launch file's name is no bare file name";
 			return std::nullopt;
 		}
-		if (!write_file(dir / fs::u8path(file.name), file.content, file.secret, error)) return std::nullopt;
+		const fs::path path = dir / fs::u8path(file.name);
+		if (!write_file(path, file.content, file.secret, error)) return std::nullopt;
+		if (file.secret) machine.secret_files.push_back(path);
 	}
 
 	proc::SpawnOptions options;
@@ -197,10 +250,11 @@ std::optional<std::string> LocalProcessProvider::launch(const LaunchSpec &spec, 
 	options.argv.insert(options.argv.end(), spec.serve_args.begin(), spec.serve_args.end());
 	options.working_dir = dir.u8string();
 	options.output_path = (dir / kConsoleLogName).u8string();
+	options.environment = proc::filter_environment(kServeEnvironment);
 	options.end_with_parent = true;
-	Machine machine;
-	machine.server_id = spec.server_id;
-	if (!machine.process.spawn(options, error)) return std::nullopt;
+	bool spawned = false;
+	on_spawner([&] { spawned = machine.process.spawn(options, error); });
+	if (!spawned) return std::nullopt;
 
 	std::lock_guard<std::mutex> lock(mu_);
 	const std::string id =
@@ -242,6 +296,11 @@ void LocalProcessProvider::terminate(const std::string &machine_id) {
 	if (!machine.process.wait(kTerminateGraceMs)) {
 		machine.process.kill();
 		machine.process.wait(kTerminateGraceMs);
+	}
+	// Its credentials outlive it nowhere; console.log stays for the record.
+	for (const fs::path &path : machine.secret_files) {
+		std::error_code ec;
+		fs::remove(path, ec);
 	}
 }
 

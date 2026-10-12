@@ -1,0 +1,140 @@
+name: Serve image
+
+# Builds and publishes the headless game server's container image to GHCR:
+# ghcr.io/<owner>/opennova-serve (apps/serve/Dockerfile), the server the hosted
+# game servers run (ADR 0053). It holds no retail byte: the game data is
+# mounted at /opt/jo (apps/serve/README.md, "Container image"). Nothing deploys
+# it yet. Tags, permissions and the PR behaviour (build, never push) follow the
+# NovaWorld images (novaworld-images.yml).
+
+on:
+  push:
+    branches: [master]
+    # Everything opennova-serve links: every engine group (base, formats,
+    # runtime, net), the lister's core, apps/common and the third-party libs
+    # those groups link, plus the CMake root and the build context's ignore
+    # list. Master's image so follows every engine change a hosted server runs.
+    paths:
+      - 'engine/**'
+      - 'apps/serve/**'
+      - 'apps/common/**'
+      - 'apps/nw_lister/**'
+      - 'third_party/bcrypt/**'
+      - 'third_party/miniz/**'
+      - 'third_party/rgbcx/**'
+      - 'third_party/imgui/**'
+      - 'CMakeLists.txt'
+      - '.dockerignore'
+      - '.github/workflows/net-linux.yml'
+      - '.github/workflows/serve-image.yml'
+  # Every pull request, whatever its base (stacked PRs included), that touches
+  # the image's own sources or its packaging. A PR into the rest of the engine
+  # reaches Linux through ci.yml's test-linux, which builds opennova_serve and
+  # runs its tests.
+  pull_request:
+    paths:
+      - 'apps/serve/**'
+      - 'apps/common/**'
+      - 'apps/nw_lister/**'
+      - 'CMakeLists.txt'
+      - '.dockerignore'
+      - '.github/workflows/net-linux.yml'
+      - '.github/workflows/serve-image.yml'
+  workflow_dispatch:
+
+# A PR's newer push cancels its older run. Master's pushes queue instead of
+# cancelling, so a master run is never cut off mid-publish and the runs finish
+# in push order, `latest` last at the newest commit.
+concurrency:
+  group: serve-image-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The Linux net leg the NovaWorld images gate on (net-linux.yml): it also
+  # builds opennova_serve and runs its tests on Linux, so a green here means
+  # the image's target builds.
+  http-tests:
+    uses: ./.github/workflows/net-linux.yml
+
+  # Built into the runner's docker and smoke-run first; then the same build,
+  # from the builder's cache, is pushed, on push events only.
+  serve-image:
+    needs: http-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only log in + push on push events (PRs from forks can't push to GHCR).
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/opennova-serve
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      # Only pushes export the layer cache, mode=min, in a scope of its own, as
+      # the NovaWorld images do (novaworld-images.yml says why).
+      - name: Build serve image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/serve/Dockerfile
+          load: true
+          tags: opennova-serve:ci
+          cache-from: type=gha,scope=opennova-serve
+
+      # The run contract, with no game data: the usage exits 0; a start with
+      # no install mounted runs as the image's user (10001) in /srv/serve,
+      # whose first act empties admin_log.txt there (a fresh named volume
+      # takes the image's ownership), then fails the mount with exit 1.
+      - name: Smoke-run serve image
+        run: |
+          set -euo pipefail
+          image=opennova-serve:ci
+          docker run --rm "$image" --help
+          docker volume create serve-smoke >/dev/null
+          code=0
+          docker run --rm -v serve-smoke:/srv/serve "$image" || code=$?
+          if [ "$code" -ne 1 ]; then
+            echo "::error::a start with no game data exited $code, expected 1"
+            exit 1
+          fi
+          owner="$(docker run --rm -v serve-smoke:/srv/serve --entrypoint stat "$image" -c '%u:%g' /srv/serve/admin_log.txt)"
+          if [ "$owner" != "10001:10001" ]; then
+            echo "::error::admin_log.txt is owned by $owner, expected 10001:10001"
+            exit 1
+          fi
+          docker volume rm serve-smoke >/dev/null
+
+      - name: Push serve image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/serve/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=opennova-serve
+          cache-to: type=gha,scope=opennova-serve,mode=min

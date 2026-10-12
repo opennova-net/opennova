@@ -12,9 +12,22 @@
 
 namespace opennova::trngen {
 
+namespace {
+
+// A 16-bit sample's height: 0 to 65535 over 0 to `top` world units, 256 raw a unit, rounded, kept within 16 bits.
+uint16_t height_of_sample16(uint16_t sample, double top) {
+	return static_cast<uint16_t>(std::min(65535.0, std::floor(sample * (top * 256.0 / 65535.0) + 0.5)));
+}
+
+} // namespace
+
 bool decode_heightmap_depth(const std::string &name, const std::vector<uint8_t> &bytes, double top,
                             HeightmapDepth &out, std::string &why) {
 	out = HeightmapDepth();
+	if (!(top > 0.0)) {
+		why = name + ": a heightmap's white must stand above 0 units";
+		return false;
+	}
 	const size_t texels = size_t(kDepthSide) * kDepthSide;
 	const auto scaled16 = [&](const std::vector<uint16_t> &raw16) {
 		// A raw16 height scaled by top / 127.5, rounded, kept within the format's 16 bits.
@@ -61,9 +74,47 @@ bool decode_heightmap_depth(const std::string &name, const std::vector<uint8_t> 
 	}
 	// 16 bits: 0 to 65535 over 0 to top world units, 256 raw a unit.
 	out.depth16.resize(texels);
-	const double scale = top * 256.0 / 65535.0;
-	for (size_t i = 0; i < texels; ++i)
-		out.depth16[i] = static_cast<uint16_t>(std::min(65535.0, std::floor(grey.samples[i] * scale + 0.5)));
+	for (size_t i = 0; i < texels; ++i) out.depth16[i] = height_of_sample16(grey.samples[i], top);
+	return true;
+}
+
+bool encode_heightmap_depth16(const std::vector<uint16_t> &raw16, double top, std::vector<uint16_t> &samples,
+                              std::string &why) {
+	samples.assign(raw16.size(), 0);
+	if (!(top > 0.0)) {
+		why = "a heightmap's white must stand above 0 units";
+		return false;
+	}
+	// Each height's sample, found once (-1: none reads back as it).
+	std::vector<int32_t> sample_of(65536, -2);
+	const double per_sample = top * 256.0 / 65535.0;
+	size_t missed = 0;
+	uint16_t first_missed = 0;
+	for (size_t i = 0; i < raw16.size(); ++i) {
+		const uint16_t height = raw16[i];
+		int32_t &found = sample_of[height];
+		if (found == -2) {
+			found = -1;
+			const double guess = per_sample > 0.0 ? std::floor(height / per_sample + 0.5) : 0.0;
+			const int32_t centre = static_cast<int32_t>(std::clamp(guess, 0.0, 65535.0));
+			for (int32_t sample : {centre, centre - 1, centre + 1})
+				if (sample >= 0 && sample <= 65535 && height_of_sample16(static_cast<uint16_t>(sample), top) == height) {
+					found = sample;
+					break;
+				}
+		}
+		if (found < 0) {
+			if (!missed++) first_missed = height;
+			continue;
+		}
+		samples[i] = static_cast<uint16_t>(found);
+	}
+	if (missed) {
+		why = std::to_string(missed) + " heights (the first " + std::to_string(first_missed / 256.0) +
+		      " units) have no 16-bit sample under a white of " + std::to_string(top) +
+		      " units: raise the heightmap's top";
+		return false;
+	}
 	return true;
 }
 

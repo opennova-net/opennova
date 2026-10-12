@@ -26,6 +26,8 @@
 
 #include "auth.h"
 #include "hosted/hosted_repository.h"
+#include "hosted/supervisor.h"
+#include "hosted_fake_provider.h"
 #include "http_cookies.h"
 #include "http_listener.h"
 #include "net_http.h"
@@ -3377,6 +3379,11 @@ int test_hosted_server_routes(Harness &h) {
 	const std::string cy_s = login_token(h, "10.51.0.3", "hosted_cy", "pw-hosted-cy");
 	const std::string dee_s = login_token(h, "10.51.0.4", "hosted_dee", "pw-hosted-dee");
 	TEST_EXPECT(!ana_s.empty() && !ben_s.empty() && !cy_s.empty() && !dee_s.empty());
+	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
+	// then one every 20 s, and a request refused before it (logged out, no CSRF
+	// header) draws nothing. Ana draws exactly six below (not approved, the
+	// start, already_live, three stops), Dee five (the refused settings), Ben and
+	// Cy one or two: add a draw to one of them and it must move to a new account.
 
 	auto start = [&h](const std::string &session, const std::string &body, bool csrf = true) {
 		std::vector<std::string> headers = { kJson, with_session(session) };
@@ -3571,13 +3578,17 @@ int test_hosted_server_routes(Harness &h) {
 // hosted::owned_listing_account): the hosted server's service account lists
 // it (a key /NWHost.dll recorded for that account, presented by a hand-driven
 // host), and its owner's GET /api/me/hosts carries it with its hosted server,
-// the owner's ServerCommand reaches it while another account's is a 404, the
-// admin view names the owner, and the owner's and the admin's stop on the
-// listing are the hosted server's stop (the row to stopping; no
-// ServerStopHosting reaches the host, the supervisor's to send). The service
-// account itself cannot use the site: its right password gets a wrong
+// the owner's ServerCommand reaches it while another account's is a 404, and
+// the admin view names the owner. An admin withdraws the owner's approval
+// through the route and one supervisor pass (a fake provider) moves the server
+// to stopping; a stopping server takes no command (409 server_stopping), and
+// the owner's and the admin's stop on the listing are the hosted server's stop
+// (no ServerStopHosting reaches the host, the supervisor's to send). The
+// service account itself cannot use the site: its right password gets a wrong
 // password's 401, the admin users routes do not know it, and registration
-// refuses the srv- prefix.
+// refuses the srv- prefix. Last, a stale row (ended, its account still holding
+// the listing) is no longer the owner's, and the admin's stop on its listing
+// takes the plain push, which reaches the host.
 int test_hosted_listing_owner(Harness &h) {
 	namespace hosted = opennova::novaworld_server::hosted;
 	using Notice = PushHost::Notice;
@@ -3654,18 +3665,40 @@ int test_hosted_listing_owner(Harness &h) {
 	}
 	TEST_EXPECT(seen);
 
-	// The stops on the listing are the hosted server's: no ServerStopHosting goes out.
+	// An admin withdraws the owner's approval (the route), and the supervisor's
+	// next pass (here one hand-driven pass over a fake provider) stops the server.
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(owner) + "/can-host", { kBearer, kJson },
+			"{\"can_host\":false}");
+	TEST_EXPECT(reply.code == 200 && !crow::json::load(body_text(reply))["user"]["can_host"].b());
+	{
+		hosted_test::FakeProvider fake;
+		hosted::Supervisor supervisor(h.pool, fake, hosted::SupervisorConfig{});
+		supervisor.tick(1000);
+		TEST_EXPECT(fake.launches == 0);
+	}
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), server_id)->state == hosted::State::Stopping);
+	json = crow::json::load(body_text(h.send("GET", "/api/me/server", { with_session(owner_s) })));
+	TEST_EXPECT(json && str(json["server"]["state"]) == "stopping");
+	const auto &events = json["server"]["events"];
+	TEST_EXPECT(events.size() >= 2 &&
+			str(events[events.size() - 1]["detail"]).find("approval to host was withdrawn") != std::string::npos);
+
+	// A stopping server takes no more commands; the stops on its listing are the
+	// hosted server's: no ServerStopHosting goes out (the supervisor's to send).
+	host.clear_notices();
+	reply = command(owner_s, chat);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
+	TEST_EXPECT(host.wait_notice(Notice::Kind::Command, 300) == nullptr);
 	reply = h.send("POST", "/api/me/hosts/" + rid_text + "/stop", { kCsrf, with_session(other_s) });
 	TEST_EXPECT(reply.code == 404);
 	reply = h.send("POST", "/api/me/hosts/" + rid_text + "/stop", { kCsrf, with_session(owner_s) });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json && json["hosted_server_id"].i() == server_id);
-	TEST_EXPECT(str(json["state"]) == "stopping");
+	TEST_EXPECT(str(json["state"]) == "stopping" && str(json["status"]) == "hosted_stop");
 	reply = h.send("POST", "/api/admin/hosts/" + rid_text + "/stop", { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json && json["hosted_server_id"].i() == server_id);
 	TEST_EXPECT(host.wait_notice(Notice::Kind::StopHosting, 500) == nullptr);
-	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), server_id)->state == hosted::State::Stopping);
 	TEST_EXPECT(row_named(h, "Hosted Listing Host").has_value());
 
 	// The service account and the site.
@@ -3684,10 +3717,23 @@ int test_hosted_listing_owner(Harness &h) {
 			"{\"username\":\"srv-777\",\"password\":\"pw-x\"}");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 
-	// The host leaves; the row ends; the service account goes, as the supervisor would.
-	host.goodbye();
+	// A stale row: the hosted server ended while its service account still holds
+	// the listing (the supervisor ends both in one transaction, so only a
+	// database written by hand gets here). It is no longer the owner's, and the
+	// admin's stop takes the plain push, which reaches the host.
+	TEST_EXPECT(hosted::transition(*h.pool.acquire(), server_id, hosted::State::Stopping,
+			hosted::State::Stopped, "ended by the test"));
+	reply = h.send("GET", "/api/me/hosts", { with_session(owner_s) });
+	TEST_EXPECT(crow::json::load(body_text(reply))["hosts"].size() == 0);
+	reply = command(owner_s, chat);
+	TEST_EXPECT(reply.code == 404);
+	reply = h.send("POST", "/api/admin/hosts/" + rid_text + "/stop", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["statement"]) == "ServerStopHosting");
+	TEST_EXPECT(host.wait_notice(Notice::Kind::StopHosting, 3000) != nullptr);
 	TEST_EXPECT(wait_until([&] { return !row_named(h, "Hosted Listing Host").has_value(); }));
-	end_stopping_servers(h);
+
+	host.goodbye();
 	TEST_EXPECT(nws::delete_service_account(*h.pool.acquire(), service.id).ok);
 	return 0;
 }

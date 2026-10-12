@@ -113,6 +113,20 @@ void TerrainFieldStore::build(const uint16_t *heightmap, size_t heightmap_count,
 	attach_placed_tiles();
 }
 
+bool TerrainFieldStore::patch_heights(const CoordsRect &rect, const uint16_t *src, size_t stride) {
+	const int32_t dim = field_.dim;
+	if (heightmap_.empty() || src == nullptr || rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.z < 0 ||
+			rect.x > dim - rect.w || rect.z > dim - rect.h || stride < static_cast<size_t>(rect.w))
+		return false;
+	for (int32_t row = 0; row < rect.h; ++row) {
+		const uint16_t *from = src + static_cast<size_t>(row) * stride;
+		uint16_t *to = heightmap_.data() + static_cast<size_t>(rect.z + row) * static_cast<size_t>(dim) +
+				static_cast<size_t>(rect.x);
+		for (int32_t col = 0; col < rect.w; ++col) to[col] = from[col];
+	}
+	return true;
+}
+
 CoordsQuadrantLocks coords_locks_from(const TrnConfig &trn) {
 	const TerrainQuadrantLocks source = trn.get_quadrant_locks();
 	CoordsQuadrantLocks locks{};

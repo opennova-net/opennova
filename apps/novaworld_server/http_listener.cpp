@@ -720,10 +720,10 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	// approval for a hosted server (players.can_host, migration 0011), answered
 	// with the account. 400 invalid_json / invalid_field / missing_field, 404 for
 	// an unknown id and for a hosted server's service account. Withdrawing it
-	// stops nothing that runs (POST /api/admin/hosted/<id>/stop does); a start
-	// not yet picked up fails.
+	// stops the account's hosted server, as a ban does (the supervisor's next
+	// pass; hosted/supervisor.h).
 	CROW_ROUTE(app, "/api/admin/users/<int>/can-host").methods("PUT"_method)(
-	    [this](const crow::request &req, int id) {
+	    [this](const crow::request &req, int64_t id) {
 		auto caller = impl_->access.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = JsonBody::parse(req.body);

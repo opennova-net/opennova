@@ -10,15 +10,21 @@
 // any machine, a stop landing mid-launch, the kill switch), the crash restart
 // and its limit (any exit while the server should run, code 0 and the
 // ServerStopHosting push's 3 included: a stop is never read from an exit code),
-// the boot and listing timeouts, the health checks, an owner's account banned
-// or deleted, and the reconciliation at the service's start. Then
-// LocalProcessProvider against this test binary itself as the opennova-serve it
-// runs (`--resource-dir ...` makes it the fake server): the working directory
-// rendered from scratch with its secret files owner-only, the argv, the exit
-// code, terminate and the tags. Compiles the server's auth.cpp, web_session.cpp
-// and the hosted sources directly, so it runs on every build.
+// the restart window (an hour of running forgives the crashes before it), the
+// boot and listing timeouts, the health checks, an owner's account banned or
+// deleted or its approval withdrawn (also during a crash restart's backoff),
+// the reconciliation at the service's start and the periodic orphan sweep.
+// Then LocalProcessProvider against this test binary itself as the
+// opennova-serve it runs (`--resource-dir ...` makes it the fake server): the
+// working directory rendered from scratch with its secret files owner-only and
+// deleted at terminate, an environment that keeps a planted secret out, the
+// argv, the exit code, terminate and the tags; and its children outliving the
+// supervisor's thread to get an orderly stop from the provider. Compiles the
+// server's auth.cpp, web_session.cpp and the hosted sources directly, so it
+// runs on every build.
 
 #include "auth.h"
+#include "child_process.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_settings.h"
 #include "hosted/local_process_provider.h"
@@ -38,6 +44,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -214,6 +221,21 @@ struct Rig {
 		tick(); // -> running
 		return state(id) == State::Running ? machine : std::string();
 	}
+	// A crashed server (provisioning, its backoff pending) relaunched and walked
+	// back to running, listed under `rid` with a key of its new credentials: its
+	// machine's id.
+	std::string back_to_running(int64_t id, uint32_t rid) {
+		advance(config.restart_backoff_ms);
+		tick(); // the relaunch: -> booting
+		const auto s = server(id);
+		if (!s || s->state != State::Booting) return {};
+		const std::string machine = s->machine_id;
+		fake.run(machine);
+		tick(); // -> listing
+		if (!list_as(*pool.acquire(), *server(id)->service_user_id, rid)) return {};
+		tick(); // -> running
+		return state(id) == State::Running ? machine : std::string();
+	}
 };
 
 // --- the settings and the renders ---------------------------------------------
@@ -339,7 +361,7 @@ int test_renders() {
 	const hosted::LaunchSpec spec = hosted::render_launch(s, in);
 	TEST_EXPECT(spec.server_id == 12 && spec.files.size() == 4);
 	for (const auto &f : spec.files) {
-		const bool secret = f.name == "credentials.txt" || f.name == "admin.cfg";
+		const bool secret = f.name != "game.cfg"; // the host file carries the game password
 		TEST_EXPECT(f.secret == secret);
 	}
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials", "credentials.txt",
@@ -447,6 +469,9 @@ int test_requests() {
 
 	// One live server per account.
 	const int64_t a = make_player(db, "req_a", true);
+	hosted::HostedSettings unchecked = settings;
+	unchecked.missions.clear();
+	TEST_EXPECT(hosted::request_server(db, a, unchecked, 3).outcome == hosted::RequestOutcome::InvalidSettings);
 	const auto first = hosted::request_server(db, a, settings, 3);
 	TEST_EXPECT(first.outcome == hosted::RequestOutcome::Created && first.id > 0);
 	const auto second = hosted::request_server(db, a, settings, 3);
@@ -510,8 +535,9 @@ int test_lifecycle_and_stop() {
 	const std::string machine = row->machine_id;
 	TEST_EXPECT(machine == rig.fake.last_machine && row->provider == "fake");
 	TEST_EXPECT(row->machine_address == "10.0.0.2");
-	TEST_EXPECT(row->admin_port == 41000 + id && row->admin_user == "svc");
-	TEST_EXPECT(row->admin_password.size() == hosted::kAdminPasswordChars);
+	const auto login = hosted::admin_login_of(*rig.pool.acquire(), id);
+	TEST_EXPECT(login && login->user == "svc" && login->port == 41000 + id && row->admin_port == login->port);
+	TEST_EXPECT(login->password.size() == hosted::kAdminPasswordChars);
 	TEST_EXPECT(row->service_user_id.has_value());
 	const int64_t service = *row->service_user_id;
 	{
@@ -526,10 +552,10 @@ int test_lifecycle_and_stop() {
 		TEST_EXPECT(password.size() == hosted::kServicePasswordChars);
 		TEST_EXPECT(nws::authenticate_user(*db, account->username, password));
 		const auto *admin = rig.fake.file(machine, "admin.cfg");
-		TEST_EXPECT(admin && admin->secret && contains(admin->content, row->admin_password));
+		TEST_EXPECT(admin && admin->secret && contains(admin->content, login->password));
 		TEST_EXPECT(contains(admin->content, "ip_restrict = 10.0.0.1"));
 		const auto *host = rig.fake.file(machine, "server.host");
-		TEST_EXPECT(host && !host->secret && contains(host->content, "GameName \"Hosted Test\""));
+		TEST_EXPECT(host && host->secret && contains(host->content, "GameName \"Hosted Test\""));
 		const auto *cfg = rig.fake.file(machine, "game.cfg");
 		TEST_EXPECT(cfg && contains(cfg->content, std::to_string(40000 + id)));
 		const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
@@ -663,7 +689,7 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(!m1.empty());
 	const int64_t service = *rig.server(id)->service_user_id;
 	const std::string first_password = credential(rig.fake.file(m1, "credentials.txt")->content, "NOVAWORLD_PASS");
-	const std::string first_admin = rig.server(id)->admin_password;
+	const std::string first_admin = hosted::admin_login_of(*rig.pool.acquire(), id)->password;
 	rig.fake.exit_with(m1, 3);
 	rig.tick();
 	auto row = rig.server(id);
@@ -680,7 +706,8 @@ int test_exits_and_crash_restarts() {
 	const std::string m2 = row->machine_id;
 	TEST_EXPECT(m2 != m1 && row->service_user_id == service);
 	const std::string second_password = credential(rig.fake.file(m2, "credentials.txt")->content, "NOVAWORLD_PASS");
-	TEST_EXPECT(second_password != first_password && row->admin_password != first_admin);
+	TEST_EXPECT(second_password != first_password);
+	TEST_EXPECT(hosted::admin_login_of(*rig.pool.acquire(), id)->password != first_admin);
 	{
 		auto db = rig.pool.acquire();
 		const std::string name = "srv-" + std::to_string(id);
@@ -708,14 +735,77 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(!row->service_user_id && !nws::get_user_by_id(*rig.pool.acquire(), service));
 	TEST_EXPECT(rig.fake.was_terminated(m3));
 
-	// A launch that fails counts as an attempt.
+	// A launch that fails counts as an attempt; the provider's own text goes to the
+	// log, not to the event the owner reads.
 	const int64_t refused = rig.request("exit_refused");
 	rig.tick();
 	rig.fake.fail_next_launch = true;
 	rig.tick();
 	row = rig.server(refused);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), refused), "the launch failed: the fake refused"));
+	const std::string detail = last_detail(*rig.pool.acquire(), refused);
+	TEST_EXPECT(contains(detail, "the launch failed; restart 1 of 2") && !contains(detail, "fake"));
+	return 0;
+}
+
+// The restart window: restart_limit crash restarts at most, but a run of
+// restart_reset_ms in running forgives the ones before it, so an always-on
+// server that crashes now and then is restarted every time; crashes in quick
+// succession still use the limit up.
+int test_restart_window() {
+	Rig rig("hosted_restart_window");
+	const int64_t id = rig.request("window_owner");
+	std::string machine = rig.to_running(id, 7101);
+	TEST_EXPECT(!machine.empty());
+	for (int crash = 1; crash <= 2; ++crash) {
+		rig.fake.exit_with(machine, 3);
+		rig.tick();
+		TEST_EXPECT(rig.state(id) == State::Provisioning && rig.server(id)->restarts == crash);
+		machine = rig.back_to_running(id, 7101 + static_cast<uint32_t>(crash));
+		TEST_EXPECT(!machine.empty());
+	}
+	rig.advance(rig.config.restart_reset_ms - 1);
+	rig.tick();
+	TEST_EXPECT(rig.state(id) == State::Running && rig.server(id)->restarts == 2);
+	rig.advance(1);
+	rig.tick();
+	TEST_EXPECT(rig.state(id) == State::Running && rig.server(id)->restarts == 0);
+	// So the next crash is restarted, not the end.
+	rig.fake.exit_with(machine, 3);
+	rig.tick();
+	auto row = rig.server(id);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1);
+	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), id), "restart 1 of 2"));
+	// Within the window the limit holds.
+	machine = rig.back_to_running(id, 7110);
+	TEST_EXPECT(!machine.empty());
+	rig.fake.exit_with(machine, 3);
+	rig.tick();
+	TEST_EXPECT(rig.server(id)->restarts == 2);
+	machine = rig.back_to_running(id, 7111);
+	TEST_EXPECT(!machine.empty());
+	rig.fake.exit_with(machine, 3);
+	rig.tick();
+	row = rig.server(id);
+	TEST_EXPECT(row->state == State::Failed && contains(row->failure_reason, "no restart left"));
+	return 0;
+}
+
+// The periodic sweep: a machine the provider runs that no live row names (a
+// launch whose row write failed) is ended between the boots too, every
+// orphan_sweep_interval_ms; the server's own machine is kept.
+int test_orphan_sweep() {
+	Rig rig("hosted_sweep");
+	const int64_t id = rig.request("sweep_owner");
+	const std::string machine = rig.to_running(id, 9201);
+	TEST_EXPECT(!machine.empty());
+	const std::string stray = rig.fake.adopt(id);
+	rig.tick();
+	TEST_EXPECT(!rig.fake.was_terminated(stray));
+	rig.advance(rig.config.orphan_sweep_interval_ms);
+	rig.tick();
+	TEST_EXPECT(rig.fake.was_terminated(stray) && !rig.fake.was_terminated(machine));
+	TEST_EXPECT(rig.state(id) == State::Running);
 	return 0;
 }
 
@@ -820,11 +910,42 @@ int test_owner_changes() {
 	TEST_EXPECT(rig.state(deleted) == State::Stopping);
 	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), deleted), "owner's account was deleted"));
 
-	// A request whose owner's approval was withdrawn before the pickup fails.
+	// The approval (can_host) is the brake: withdrawn, the server stops, as for a
+	// ban. Before the pickup nothing launches.
 	const int64_t withdrawn = rig.request("owner_withdrawn");
 	TEST_EXPECT(nws::set_can_host(*rig.pool.acquire(), *rig.server(withdrawn)->owner_user_id, false).ok);
 	rig.tick();
-	TEST_EXPECT(rig.state(withdrawn) == State::Failed && rig.fake.launches == 2);
+	TEST_EXPECT(rig.state(withdrawn) == State::Stopping);
+	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), withdrawn), "approval to host was withdrawn"));
+	rig.tick();
+	TEST_EXPECT(rig.state(withdrawn) == State::Stopped && rig.fake.launches == 2);
+
+	// While it runs.
+	const int64_t revoked = rig.request("owner_revoked");
+	const std::string m3 = rig.to_running(revoked, 9003);
+	TEST_EXPECT(!m3.empty());
+	TEST_EXPECT(nws::set_can_host(*rig.pool.acquire(), *rig.server(revoked)->owner_user_id, false).ok);
+	rig.tick();
+	TEST_EXPECT(rig.state(revoked) == State::Stopping);
+	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), revoked), "approval to host was withdrawn"));
+
+	// During a crash restart's backoff: no new credentials, no relaunch.
+	const int64_t crashed = rig.request("owner_crashed");
+	const std::string m4 = rig.to_running(crashed, 9004);
+	TEST_EXPECT(!m4.empty());
+	rig.fake.exit_with(m4, 3);
+	rig.tick();
+	TEST_EXPECT(rig.state(crashed) == State::Provisioning);
+	const int launches = rig.fake.launches;
+	const int64_t service = *rig.server(crashed)->service_user_id;
+	const int64_t generation = nws::get_user_by_id(*rig.pool.acquire(), service)->credentials_gen;
+	TEST_EXPECT(nws::set_can_host(*rig.pool.acquire(), *rig.server(crashed)->owner_user_id, false).ok);
+	rig.advance(rig.config.restart_backoff_ms);
+	rig.tick();
+	TEST_EXPECT(rig.state(crashed) == State::Stopping && rig.fake.launches == launches);
+	TEST_EXPECT(nws::get_user_by_id(*rig.pool.acquire(), service)->credentials_gen == generation);
+	rig.tick();
+	TEST_EXPECT(rig.state(crashed) == State::Stopped);
 	return 0;
 }
 
@@ -882,21 +1003,54 @@ int test_reconciliation() {
 
 // --- LocalProcessProvider over this binary as the server ----------------------
 
-// The fake opennova-serve: prints its arguments and the files it found, then
-// waits for exit.txt (its code) or a stop.
+// The variable the test plants in its own environment, which no server may see.
+constexpr const char *kPlantedSecret = "OPENNOVA_HOSTED_PLANTED_SECRET";
+
+volatile std::sig_atomic_t g_fake_serve_terminated = 0;
+void on_fake_serve_term(int) { g_fake_serve_terminated = 1; }
+
+// The fake opennova-serve: prints its arguments, the files it found and the
+// names in its environment, then waits for exit.txt (its code) or a stop. On
+// POSIX a SIGTERM (opennova-serve's orderly stop) writes terminated.txt first.
 int fake_serve_main(int argc, char **argv) {
+#ifndef _WIN32
+	std::signal(SIGTERM, on_fake_serve_term);
+#endif
 	for (int i = 1; i < argc; ++i) std::printf("arg %s\n", argv[i]);
 	for (const char *name : { "server.host", "credentials.txt" }) {
 		std::printf("file %s %s\n", name, fs::exists(name) ? "present" : "missing");
 	}
+	for (const std::string &entry : opennova::proc::current_environment())
+		std::printf("env %s\n", entry.substr(0, entry.find('=')).c_str());
 	std::fflush(stdout);
 	for (int i = 0; i < 6000; ++i) {
+		if (g_fake_serve_terminated) {
+			std::ofstream marker("terminated.txt");
+			marker << "SIGTERM";
+			return 0;
+		}
 		std::ifstream code_file("exit.txt");
 		int code = 0;
 		if (code_file >> code) return code;
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
 	return 99;
+}
+
+// Plants kPlantedSecret in this process's environment.
+void plant_secret() {
+#ifdef _WIN32
+	_putenv_s(kPlantedSecret, "hunter2");
+#else
+	setenv(kPlantedSecret, "hunter2", 1);
+#endif
+}
+
+std::string upper_ascii(std::string text) {
+	for (char &c : text) {
+		if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+	}
+	return text;
 }
 
 bool wait_state(hosted::MachineProvider &p, const std::string &id, hosted::MachineState want) {
@@ -969,9 +1123,16 @@ int test_local_provider() {
 		if (!contains(normalized, line)) std::fprintf(stderr, "  console.log lacks %s", line.c_str());
 		TEST_EXPECT(contains(normalized, line));
 	}
+	// Its environment is the allowlist's: the service's own variables (here a
+	// planted one) never reach it; PATH does.
+	TEST_EXPECT(!contains(normalized, std::string("env ") + kPlantedSecret));
+	TEST_EXPECT(contains(upper_ascii(normalized), "ENV PATH\n"));
 	provider.terminate(*id);
 	TEST_EXPECT(provider.describe(*id).state == hosted::MachineState::Gone);
 	TEST_EXPECT(provider.list_tagged().empty());
+	// Its secret files went with it; the console log and the rest stay.
+	TEST_EXPECT(!fs::exists(dir / "credentials.txt"));
+	TEST_EXPECT(fs::exists(dir / "console.log") && fs::exists(dir / "server.host"));
 	provider.terminate(*id); // gone already: no error
 
 	// A running one ends at terminate, and the destructor ends the rest.
@@ -994,6 +1155,56 @@ int test_local_provider() {
 	return 0;
 }
 
+// The local provider's children outlive the supervisor's thread: on Linux their
+// parent-death signal follows the thread that started them, which is the
+// provider's own spawner, so joining the supervisor (stop()) ends none of them,
+// and the provider's end then stops each in order (SIGTERM, which the fake
+// server answers by writing terminated.txt; TerminateProcess on Windows).
+int test_children_outlive_the_supervisor_thread() {
+	test_temp::TempDir temp("hosted_thread");
+	ConnectionPool pool(temp.path / "thread.db");
+	opennova::db::run_migrations(*pool.acquire(), fs::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations");
+	const int64_t owner = make_player(*pool.acquire(), "thread_owner", true);
+	TEST_EXPECT(owner > 0);
+	const auto request = hosted::request_server(*pool.acquire(), owner, valid_settings(), 5);
+	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
+	const fs::path data = temp.path / "data";
+	fs::create_directories(data);
+	hosted::LocalProcessConfig config;
+	config.serve_binary = g_self;
+	config.resource_dir = data.u8string();
+	config.loose_root = true;
+	config.work_dir = (temp.path / "work").u8string();
+	fs::path marker;
+	{
+		hosted::LocalProcessProvider provider(config);
+		hosted::SupervisorConfig supervision;
+		supervision.tick_interval_ms = 20;
+		supervision.listing_timeout_ms = 10 * 60 * 1000;
+		{
+			hosted::Supervisor supervisor(pool, provider, supervision);
+			supervisor.start();
+			bool launched = false;
+			for (int i = 0; i < 1500 && !launched; ++i) {
+				const auto row = hosted::find_server(*pool.acquire(), request.id);
+				launched = row && row->state == State::Listing;
+				if (!launched) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			}
+			TEST_EXPECT(launched);
+			supervisor.stop();
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		const auto tagged = provider.list_tagged();
+		TEST_EXPECT(tagged.size() == 1);
+		TEST_EXPECT(provider.describe(tagged[0].machine_id).state == hosted::MachineState::Running);
+		marker = provider.server_dir(request.id) / "terminated.txt";
+	}
+#ifndef _WIN32
+	TEST_EXPECT(fs::exists(marker));
+#endif
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1003,6 +1214,7 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 	g_self = argv[1];
+	plant_secret();
 	struct Case {
 		const char *name;
 		int (*fn)();
@@ -1015,10 +1227,13 @@ int main(int argc, char **argv) {
 		{ "lifecycle_and_stop", test_lifecycle_and_stop },
 		{ "stop_paths", test_stop_paths },
 		{ "exits_and_crash_restarts", test_exits_and_crash_restarts },
+		{ "restart_window", test_restart_window },
 		{ "timeouts_and_health", test_timeouts_and_health },
 		{ "owner_changes", test_owner_changes },
 		{ "reconciliation", test_reconciliation },
+		{ "orphan_sweep", test_orphan_sweep },
 		{ "local_provider", test_local_provider },
+		{ "children_outlive_the_supervisor_thread", test_children_outlive_the_supervisor_thread },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

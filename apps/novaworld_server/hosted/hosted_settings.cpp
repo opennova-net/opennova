@@ -176,7 +176,7 @@ std::string render_credentials(const std::string &username, const std::string &p
 LaunchSpec render_launch(const HostedSettings &settings, const RenderInputs &in) {
 	LaunchSpec spec;
 	spec.server_id = in.server_id;
-	spec.files.push_back({ kHostFileName, render_host_file(settings, in.server_id), false });
+	spec.files.push_back({ kHostFileName, render_host_file(settings, in.server_id), true });
 	spec.files.push_back({ kGameCfgFileName, render_game_cfg(in.plan), false });
 	spec.files.push_back({ kAdminCfgFileName, render_admin_cfg(in.plan, in.admin_password), true });
 	spec.files.push_back({ kCredentialsFileName,

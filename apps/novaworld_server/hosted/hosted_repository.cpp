@@ -21,7 +21,7 @@ constexpr const char *kLiveSql = "state NOT IN ('stopped', 'failed')";
 constexpr const char *kServerColumns =
 		"id, owner_user_id, service_user_id, state, game_name, max_players, game_password, "
 		"time_limit, kill_limit, max_score, respawn, start_delay, team_ff, expansion, missions, "
-		"provider, machine_id, machine_address, admin_port, admin_user, admin_password, restarts, "
+		"provider, machine_id, machine_address, admin_port, restarts, "
 		"failure_reason, created_at, updated_at, running_at, ended_at";
 
 BindValue optional_id(std::optional<int64_t> id) {
@@ -51,14 +51,12 @@ HostedServer row_to_server(const db::Row &r) {
 	s.machine_id = r.as_text(16).value_or("");
 	s.machine_address = r.as_text(17).value_or("");
 	s.admin_port = static_cast<int>(r.as_int(18).value_or(0));
-	s.admin_user = r.as_text(19).value_or("");
-	s.admin_password = r.as_text(20).value_or("");
-	s.restarts = static_cast<int>(r.as_int(21).value_or(0));
-	s.failure_reason = r.as_text(22).value_or("");
-	s.created_at = r.as_text(23).value_or("");
-	s.updated_at = r.as_text(24).value_or("");
-	s.running_at = r.as_text(25).value_or("");
-	s.ended_at = r.as_text(26).value_or("");
+	s.restarts = static_cast<int>(r.as_int(19).value_or(0));
+	s.failure_reason = r.as_text(20).value_or("");
+	s.created_at = r.as_text(21).value_or("");
+	s.updated_at = r.as_text(22).value_or("");
+	s.running_at = r.as_text(23).value_or("");
+	s.ended_at = r.as_text(24).value_or("");
 	return s;
 }
 
@@ -96,6 +94,10 @@ bool is_live(State state) { return state != State::Stopped && state != State::Fa
 RequestResult request_server(db::Database &db, int64_t owner_user_id,
 		const HostedSettings &settings, int cap) {
 	RequestResult out;
+	if (check_settings(settings)) {
+		out.outcome = RequestOutcome::InvalidSettings;
+		return out;
+	}
 	db::Transaction tx(db);
 	const auto user = db.query("SELECT can_host, account_status FROM players "
 							   "WHERE id = ? AND kind = 'player';",
@@ -138,6 +140,18 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id,
 	tx.commit();
 	out.outcome = RequestOutcome::Created;
 	return out;
+}
+
+std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id) {
+	const auto rows = db.query("SELECT admin_port, admin_user, admin_password FROM hosted_servers "
+							   "WHERE id = ? AND admin_user <> '';",
+			{ BindValue(id) });
+	if (rows.empty()) return std::nullopt;
+	AdminLogin login;
+	login.port = static_cast<int>(rows.front().as_int(0).value_or(0));
+	login.user = rows.front().as_text(1).value_or("");
+	login.password = rows.front().as_text(2).value_or("");
+	return login;
 }
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id) {
@@ -206,8 +220,20 @@ bool transition(db::Database &db, int64_t id, State from, State to, const std::s
 					BindValue(id), BindValue(std::string(state_name(from))) });
 	if (db.changes() == 0) return false;
 	insert_event(db, id, state_name(from), to_name, detail);
+	if (options.end_service_account) {
+		db.exec("DELETE FROM players WHERE kind = 'service' AND id = "
+				"(SELECT service_user_id FROM hosted_servers WHERE id = ?);",
+				{ BindValue(id) });
+	}
 	tx.commit();
 	return true;
+}
+
+bool reset_restarts(db::Database &db, int64_t id) {
+	db.exec("UPDATE hosted_servers SET restarts = 0, updated_at = CURRENT_TIMESTAMP "
+			"WHERE id = ? AND state = 'running' AND restarts > 0;",
+			{ BindValue(id) });
+	return db.changes() > 0;
 }
 
 bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
@@ -274,25 +300,22 @@ std::optional<uint32_t> listing_rid_of(db::Database &db, int64_t account_user_id
 }
 
 std::optional<HostedAccount> hosted_server_of_account(db::Database &db, int64_t account_user_id) {
-	const auto rows = db.query("SELECT id, owner_user_id FROM hosted_servers "
+	const auto rows = db.query("SELECT id, owner_user_id, state FROM hosted_servers "
 							   "WHERE service_user_id = ? ORDER BY id DESC LIMIT 1;",
 			{ BindValue(account_user_id) });
 	if (rows.empty()) return std::nullopt;
 	HostedAccount out;
 	out.server_id = rows.front().as_int(0).value_or(0);
 	out.owner_user_id = rows.front().as_int(1);
+	out.state = state_from_name(rows.front().as_text(2).value_or("")).value_or(State::Failed);
 	return out;
-}
-
-std::optional<int64_t> listing_owner_of(db::Database &db, int64_t account_user_id) {
-	if (const auto hosted = hosted_server_of_account(db, account_user_id)) return hosted->owner_user_id;
-	return account_user_id;
 }
 
 std::vector<int64_t> listing_accounts_of(db::Database &db, int64_t user_id) {
 	std::vector<int64_t> out{ user_id };
-	for (const auto &r : db.query("SELECT service_user_id FROM hosted_servers "
-								  "WHERE owner_user_id = ? AND service_user_id IS NOT NULL ORDER BY id;",
+	for (const auto &r : db.query(std::string("SELECT service_user_id FROM hosted_servers "
+											  "WHERE owner_user_id = ? AND service_user_id IS NOT NULL AND ") +
+						 kLiveSql + " ORDER BY id;",
 				 { BindValue(user_id) })) {
 		if (const auto account = r.as_int(0)) out.push_back(*account);
 	}

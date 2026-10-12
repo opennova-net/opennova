@@ -47,13 +47,16 @@ add_library(opennova_formats STATIC
     # cpt/trngen — TrnGen.exe's terrain bake ported (a depth map to the .cpt's depth atlas and its
     # ground mesh: the quadtree, the mesh simplifier, the strips, the TPM1 tile files kept in
     # memory); a quadtree level's nodes run on the embedder's thread count (Threads, below)
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/bake_tiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/heightmap_depth.cpp # a heightmap image made into the bake's depth
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/lod_mesh_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/mesh_data.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/mesh_simp.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/quadtree_node.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/terrain_bake.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/terrain_bake_state.cpp # what a bake keeps for a region bake
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/terrain_mesh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/terrain_region_bake.cpp # a region of the depth map baked again
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/trngen/tristrip.cpp
     # dbf — dialog bank
     ${CMAKE_CURRENT_SOURCE_DIR}/dbf/dbf.cpp

@@ -4,10 +4,14 @@
 // (spaces, quotes, backslashes, an empty one), the working directory, stdin at
 // end of file, stdout and stderr appended to the output file, poll while it
 // runs, terminate and kill, the refusals (a missing program, a missing working
-// directory, a second spawn while one runs) and, on POSIX, no descriptor of
-// this process reaching the child and the destructor killing a running one.
+// directory, a second spawn while one runs), the environment (inherited by
+// default, else exactly what the options name: a planted variable stays here)
+// and, on POSIX, no descriptor of this process reaching the child and the
+// destructor killing a running one.
 
 #include "child_process.h"
+
+#include <algorithm>
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
@@ -67,6 +71,10 @@ int child_main(int argc, char **argv) {
 	if (mode == "sleep") {
 		std::this_thread::sleep_for(std::chrono::seconds(60));
 		return 9;
+	}
+	if (mode == "env") {
+		for (const std::string &entry : opennova::proc::current_environment()) std::printf("%s\n", entry.c_str());
+		return 0;
 	}
 #ifndef _WIN32
 	if (mode == "fds") {
@@ -251,6 +259,55 @@ int test_refusals(const fs::path &dir) {
 	return 0;
 }
 
+void plant(const char *name, const char *value) {
+#ifdef _WIN32
+	_putenv_s(name, value);
+#else
+	setenv(name, value, 1);
+#endif
+}
+
+bool has_line(const std::vector<std::string> &lines, const std::string &want) {
+	return std::find(lines.begin(), lines.end(), want) != lines.end();
+}
+
+bool has_name(const std::vector<std::string> &lines, const std::string &name) {
+	return std::any_of(lines.begin(), lines.end(),
+			[&name](const std::string &l) { return l.compare(0, name.size() + 1, name + "=") == 0; });
+}
+
+// The environment: inherited whole by default; with `environment` set, exactly
+// what it names (a planted variable stays here), and filter_environment's exact
+// names and '*' prefixes.
+int test_environment(const fs::path &dir) {
+	plant("OPENNOVA_PROCESS_PLANTED", "hunter2");
+	plant("KEEP_PREFIX_A", "1");
+	{
+		ChildProcess p;
+		std::string error;
+		TEST_EXPECT(p.spawn(child({ "env" }, (dir / "env_inherited.txt").u8string()), error));
+		TEST_EXPECT(p.wait(20000) == 0);
+		TEST_EXPECT(has_line(read_lines(dir / "env_inherited.txt"), "OPENNOVA_PROCESS_PLANTED=hunter2"));
+	}
+	{
+		ChildProcess p;
+		std::string error;
+		SpawnOptions options = child({ "env" }, (dir / "env_own.txt").u8string());
+		options.environment = opennova::proc::filter_environment({ "PATH", "SystemRoot", "KEEP_*" });
+		options.environment->push_back("KEEP_ME=kept");
+		TEST_EXPECT(p.spawn(options, error));
+		TEST_EXPECT(p.wait(20000) == 0);
+		const auto lines = read_lines(dir / "env_own.txt");
+		TEST_EXPECT(has_line(lines, "KEEP_ME=kept") && has_line(lines, "KEEP_PREFIX_A=1"));
+		TEST_EXPECT(!has_name(lines, "OPENNOVA_PROCESS_PLANTED"));
+	}
+	const auto prefixed = opennova::proc::filter_environment({ "KEEP_*" });
+	TEST_EXPECT(has_line(prefixed, "KEEP_PREFIX_A=1") && !has_name(prefixed, "OPENNOVA_PROCESS_PLANTED"));
+	TEST_EXPECT(!has_line(opennova::proc::filter_environment({ "KEEP_PREFIX" }), "KEEP_PREFIX_A=1"));
+	TEST_EXPECT(has_line(opennova::proc::current_environment(), "OPENNOVA_PROCESS_PLANTED=hunter2"));
+	return 0;
+}
+
 #ifndef _WIN32
 int test_posix_descriptors_and_destructor(const fs::path &dir) {
 	// A descriptor this process holds without close-on-exec stays here.
@@ -294,6 +351,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_working_dir_stdin_and_output(temp.path) == 0);
 	TEST_EXPECT(test_terminate_and_kill() == 0);
 	TEST_EXPECT(test_refusals(temp.path) == 0);
+	TEST_EXPECT(test_environment(temp.path) == 0);
 #ifndef _WIN32
 	TEST_EXPECT(test_posix_descriptors_and_destructor(temp.path) == 0);
 #endif

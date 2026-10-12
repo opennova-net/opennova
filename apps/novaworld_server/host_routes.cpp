@@ -268,8 +268,8 @@ void HostRoutes::register_routes(WebApp &app, NwUdpListener *nw_udp) {
 // GET /api/admin/hosts — every listed server with its owner: listed_host_json
 // plus "owner", {id, username} of the account whose HostKey listed it (for a
 // hosted server's listing, held by its service account, the hosted server's
-// owner: hosted::listing_owner_of), or null for an anonymous listing (the
-// HostKey named no account) and a hosted one whose owner is gone, and
+// owner: hosted::hosted_server_of_account), or null for an anonymous listing
+// (the HostKey named no account) and a hosted one whose owner is gone, and
 // "hosted_server_id", the hosted server a listing is, else null.
 crow::response HostRoutes::admin_hosts(const crow::request &req) {
 	auto caller = access_.require_admin(req);
@@ -372,7 +372,10 @@ crow::response HostRoutes::admin_stop(const crow::request &req, uint64_t rid) {
 		auto db_conn = pool_.acquire();
 		const auto row = hostdb::find_host_by_rid(*db_conn, rid32);
 		if (row && row->host_user_id) {
-			if (const auto hosted_server = hosted::hosted_server_of_account(*db_conn, *row->host_user_id))
+			// A live hosted server's listing stops as the hosted server; any other
+			// (an ended one's lingering listing included) takes the plain push.
+			const auto hosted_server = hosted::hosted_server_of_account(*db_conn, *row->host_user_id);
+			if (hosted_server && hosted::is_live(hosted_server->state))
 				return stop_hosted(*db_conn, rid32, hosted_server->server_id, "stopped by an admin from its listing");
 		}
 	} catch (const db::SqliteError &e) {
@@ -474,23 +477,33 @@ crow::response HostRoutes::owner_hosts(const crow::request &req) {
 // same reply for a free RID and another account's; then the push, scoped to
 // that account, which the listener checks against the connection's own owner
 // under its lobby lock and again as the statement goes out (a changed owner is
-// 404 too); 409 for the caller's listing whose connection is not hosting. The
-// stop of a hosted server's listing is the hosted server's stop instead
-// (stop_hosted). Every request past require_user is logged with the account,
-// the RID and the outcome.
+// 404 too); 409 for the caller's listing whose connection is not hosting. On a
+// live hosted server's listing the stop is the hosted server's stop instead
+// (stop_hosted), and a command to one that is stopping is refused (409
+// server_stopping: it is being ended, and a stop is the supervisor's). Every
+// request past require_user is logged with the account, the RID and the
+// outcome.
 template <typename Push>
-crow::response HostRoutes::push_as_owner(const WebSessionUser &user, uint64_t rid, const char *what,
+crow::response HostRoutes::push_as_owner(const WebSessionUser &user, uint64_t rid, OwnerPush kind,
 		const std::string &line, Push push, crow::json::wvalue out) {
+	const char *what = kind == OwnerPush::Stop ? "stop" : "command";
 	const uint32_t rid32 = rid_of(rid);
 	std::optional<int64_t> account;
 	try {
 		auto db_conn = pool_.acquire();
 		account = hosted::owned_listing_account(*db_conn, rid32, user.id);
-		if (account && *account != user.id && std::string(what) == "stop") {
-			if (const auto hosted_server = hosted::hosted_server_of_account(*db_conn, *account)) {
+		const auto hosted_server = account && *account != user.id
+				? hosted::hosted_server_of_account(*db_conn, *account)
+				: std::nullopt;
+		if (hosted_server && hosted::is_live(hosted_server->state)) {
+			if (kind == OwnerPush::Stop) {
 				log_owner_push(user, rid, what, line, "hosted_stop");
 				return stop_hosted(*db_conn, rid32, hosted_server->server_id,
 						"stopped by its owner from its listing");
+			}
+			if (hosted_server->state == hosted::State::Stopping) {
+				log_owner_push(user, rid, what, line, "server_stopping");
+				return json_error(409, "server_stopping", "this hosted server is being stopped");
 			}
 		}
 	} catch (const db::SqliteError &e) {
@@ -537,7 +550,7 @@ crow::response HostRoutes::owner_command(const crow::request &req, uint64_t rid)
 	out["statement"] = "ServerCommand";
 	out["cmd"] = line_text(command.cmd);
 	return push_as_owner(
-			user, rid, "command", command.cmd,
+			user, rid, OwnerPush::Command, command.cmd,
 			[this, &command](uint32_t rid32, int64_t account) {
 				return nw_udp_->push_server_command(rid32, command.cmd, account);
 			},
@@ -562,7 +575,7 @@ crow::response HostRoutes::owner_stop(const crow::request &req, uint64_t rid) {
 	out["statement"] = "ServerStopHosting";
 	out["msg_code"] = SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
 	return push_as_owner(
-			user, rid, "stop", "",
+			user, rid, OwnerPush::Stop, "",
 			[this](uint32_t rid32, int64_t account) {
 				return nw_udp_->push_stop_hosting(
 						rid32, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0, 0, account);

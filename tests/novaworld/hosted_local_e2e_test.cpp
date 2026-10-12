@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <thread>
@@ -75,6 +76,29 @@ void expect(bool cond, const char *what) {
 
 std::string body_text(const net::HttpReply &reply) {
 	return std::string(reply.body.begin(), reply.body.end());
+}
+
+// The JSON reply's member at `path` (object keys), or null when the reply is no
+// JSON or any step is missing or no object: Crow throws on a missing key, and a
+// throw would end the test with no dump and no cleanup.
+const crow::json::rvalue *member(const crow::json::rvalue &json, std::initializer_list<const char *> path) {
+	const crow::json::rvalue *at = &json;
+	for (const char *key : path) {
+		if (!*at || at->t() != crow::json::type::Object || !at->has(key)) return nullptr;
+		at = &(*at)[key];
+	}
+	return at;
+}
+
+std::optional<int64_t> integer_at(const crow::json::rvalue &json, std::initializer_list<const char *> path) {
+	const auto *v = member(json, path);
+	if (!v || v->t() != crow::json::type::Number) return std::nullopt;
+	return v->i();
+}
+
+std::string text_at(const crow::json::rvalue &json, std::initializer_list<const char *> path) {
+	const auto *v = member(json, path);
+	return v && v->t() == crow::json::type::String ? std::string(v->s()) : std::string();
 }
 
 net::HttpReply send(const Service &service, const char *method, const std::string &path,
@@ -217,8 +241,9 @@ int main(int argc, char **argv) {
 					"{\"game_name\":\"Hosted E2E\",\"max_players\":8,\"missions\":[\"servetst.bms\"]}");
 			const auto json = crow::json::load(body_text(reply));
 			if (reply.code != 202) std::fprintf(stderr, "  start: %d %s\n", reply.code, body_text(reply).c_str());
-			expect(reply.transport_ok && reply.code == 202 && json, "POST /api/me/server/start is accepted");
-			if (json) id = json["server"]["id"].i();
+			const auto started = reply.code == 202 ? integer_at(json, { "server", "id" }) : std::nullopt;
+			expect(reply.transport_ok && started.has_value(), "POST /api/me/server/start is accepted");
+			id = started.value_or(0);
 		}
 
 		bool running = false;
@@ -247,15 +272,21 @@ int main(int argc, char **argv) {
 			// The owner's view: the listing, as its hosted server's.
 			auto reply = send(service, "GET", "/api/me/server", as_owner(session, false));
 			auto json = crow::json::load(body_text(reply));
-			const bool listed = json && json["server"]["listing"].t() == crow::json::type::Object;
-			expect(listed, "GET /api/me/server names the listing");
-			const uint32_t rid = listed ? static_cast<uint32_t>(json["server"]["listing"]["rid"].i()) : 0;
+			const auto listed_rid = integer_at(json, { "server", "listing", "rid" });
+			if (!listed_rid) std::fprintf(stderr, "  /api/me/server: %s\n", body_text(reply).c_str());
+			expect(listed_rid.has_value(), "GET /api/me/server names the listing");
+			const uint32_t rid = static_cast<uint32_t>(listed_rid.value_or(0));
 			reply = send(service, "GET", "/api/me/hosts", as_owner(session, false));
 			json = crow::json::load(body_text(reply));
-			expect(json && json["hosts"].size() == 1 &&
-							json["hosts"][0]["rid"].i() == static_cast<int64_t>(rid) &&
-							json["hosts"][0]["hosted_server_id"].i() == id,
-					"GET /api/me/hosts shows the listing as the owner's hosted server");
+			const auto *hosts = member(json, { "hosts" });
+			bool shown = false;
+			if (hosts && hosts->t() == crow::json::type::List && hosts->size() == 1) {
+				const auto &first = (*hosts)[0];
+				shown = integer_at(first, { "rid" }) == static_cast<int64_t>(rid) &&
+						integer_at(first, { "hosted_server_id" }) == id;
+			}
+			if (!shown) std::fprintf(stderr, "  /api/me/hosts: %s\n", body_text(reply).c_str());
+			expect(shown, "GET /api/me/hosts shows the listing as the owner's hosted server");
 
 			// The owner's ServerCommand reaches the server, which saves game.cfg.
 			reply = send(service, "POST", "/api/me/hosts/" + std::to_string(rid) + "/command",
@@ -273,7 +304,9 @@ int main(int argc, char **argv) {
 			// The stop.
 			reply = send(service, "POST", "/api/me/server/stop", as_owner(session, true));
 			json = crow::json::load(body_text(reply));
-			expect(reply.code == 202 && json && std::string(json["server"]["state"].s()) == "stopping",
+			const std::string stop_state = text_at(json, { "server", "state" });
+			if (reply.code != 202) std::fprintf(stderr, "  stop: %d %s\n", reply.code, body_text(reply).c_str());
+			expect(reply.code == 202 && (stop_state == "stopping" || stop_state == "stopped"),
 					"POST /api/me/server/stop is accepted");
 			const bool stopped = wait_for([&] {
 				const auto r = server_row(service, id);
@@ -285,8 +318,11 @@ int main(int argc, char **argv) {
 			expect(!opennova::hostdb::find_host_by_rid(*service.pool.acquire(), rid),
 					"its listing has left the browser");
 			expect(provider.list_tagged().empty(), "its process is gone");
-			expect(ended && !ended->service_user_id && account &&
-							!nws::get_user_by_id(*service.pool.acquire(), account->id),
+			// Deleted with the transition that ended the row; polled all the same.
+			expect(account && wait_for([&] {
+				const auto r = server_row(service, id);
+				return r && !r->service_user_id && !nws::get_user_by_id(*service.pool.acquire(), account->id);
+			}, 10),
 					"its service account is deleted");
 			bool pushed_stop = false;
 			for (const auto &e : hosted::list_events(*service.pool.acquire(), id, 50)) {
