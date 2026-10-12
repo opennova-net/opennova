@@ -288,6 +288,9 @@ constexpr FileKindFacts kRows[] = {
 	// heightmap and images), whatever its name would make it. The game never reads it: its import's
 	// outputs it does.
 	Kind(FileKind::ImportInput, ArchiveSlot::None).row,
+	// No name gives it either: it is the input a terrain set's import record lists under `heightmap`
+	// (ADR 0046 S25), whatever its name would make it. The game never reads it: its import's .cpt it does.
+	Kind(FileKind::HeightmapInput, ArchiveSlot::None).row,
 };
 
 constexpr bool same_text(const char *a, const char *b) {
@@ -315,22 +318,23 @@ constexpr bool share_a_name(const FileKindFacts &a, const FileKindFacts &b) {
 }
 
 // One row per kind, at the kind's own index; no two rows share a catalog token, a whole name or an
-// extension (a name gives one kind); an archive, an import source and an import's input, the
-// original mission editor's text, a project's notes and a file of no kind the game knows are read
-// from nowhere, every other kind from somewhere; a loose kind, and no other, says where an
-// expansion's game reads it; no name gives an import source, an import's input or a material chunk
-// (a record beside the file does, or its bytes).
+// extension (a name gives one kind); an archive, an import source, an import's input and a terrain
+// set's heightmap input, the original mission editor's text, a project's notes and a file of no kind
+// the game knows are read from nowhere, every other kind from somewhere; a loose kind, and no other,
+// says where an expansion's game reads it; no name gives an import source, an import's input, a
+// heightmap input or a material chunk (a record beside the file does, or its bytes).
 constexpr bool rows_well_formed() {
 	for (size_t i = 0; i < kFileKindCount; ++i) {
 		const FileKindFacts &row = kRows[i];
 		if (static_cast<size_t>(row.kind) != i || !row.resource_kind) return false;
 		const bool read_from_nowhere = row.kind == FileKind::Archive || row.kind == FileKind::ImportSource ||
-		                               row.kind == FileKind::ImportInput || row.kind == FileKind::Unknown ||
+		                               row.kind == FileKind::ImportInput || row.kind == FileKind::HeightmapInput ||
+		                               row.kind == FileKind::Unknown ||
 		                               row.kind == FileKind::MissionText || row.kind == FileKind::Notes;
 		if ((row.archive_slot == ArchiveSlot::None) != read_from_nowhere) return false;
 		if ((row.archive_slot == ArchiveSlot::Loose) != (row.expansion_loose != ExpansionLoose::None)) return false;
 		const bool by_content = row.kind == FileKind::ImportSource || row.kind == FileKind::ImportInput ||
-		                        row.kind == FileKind::MaterialChunk;
+		                        row.kind == FileKind::HeightmapInput || row.kind == FileKind::MaterialChunk;
 		if (by_content && (*row.resource_kind || row.file_name || row.file_names || row.extensions)) return false;
 		for (size_t j = 0; j < i; ++j) {
 			const FileKindFacts &other = kRows[j];

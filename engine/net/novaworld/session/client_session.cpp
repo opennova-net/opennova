@@ -186,7 +186,8 @@ std::vector<uint8_t> ClientSession::start() {
 	host_list_.clear();
 	player_list_.clear();
 	play_setup_.clear();
-	reconnect_counter_ = 0;
+	// ReconnectCounter (session+0x500) is not a connection's: its only writers are the host
+	// request's zero and the re-verify's count (request_hosting, dispatch_server_container).
 	return build_client_hello();
 }
 
