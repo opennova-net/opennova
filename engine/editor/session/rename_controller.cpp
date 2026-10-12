@@ -435,8 +435,9 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 	switch (request.kind) {
 	case EditorRequestKind::RenameBack: {
 		// The documents with unsaved edits among the files the way back rewrites (saved, a file it wrote is
-		// no longer as it left it: the plan then says so); none when there is no way back.
-		if (!view_.project.open || !done_ || !documents.documents_dirty()) return;
+		// no longer as it left it: the plan then says so), or closes and opens again (a mission's names a save left
+		// out of its .mis among them: DocumentBase::unsaved); none when there is no way back.
+		if (!view_.project.open || !done_ || !documents.documents_unsaved()) return;
 		if (unsaved_while_due(files)) return;
 		std::vector<std::string> rewrites;
 		if (done_->symbol)
@@ -449,7 +450,7 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 			for (const RenameOutput &companion : plan.companions) rewrites.push_back(companion.path);
 		}
 		for (const auto &document : documents.documents())
-			if (document->dirty() && std::find(rewrites.begin(), rewrites.end(), document->path()) != rewrites.end())
+			if (document->unsaved() && std::find(rewrites.begin(), rewrites.end(), document->path()) != rewrites.end())
 				files.push_back(document->path());
 		return;
 	}
@@ -457,28 +458,29 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 	case EditorRequestKind::MoveAsset: {
 		// The moved file's own document with unsaved edits (it closes and opens again at its new path); none
 		// when the move is refused anyway (it then says why, with nothing to save first).
-		if (!view_.project.open || !documents.documents_dirty()) return;
+		if (!view_.project.open || !documents.documents_unsaved()) return;
 		const RenamePlan plan = plan_move(paths_, *view_.project.document, *view_.project.scan, request.path,
 		                                  request.folder, view_.project.imports.get());
 		if (!plan.ok()) return;
-		if (const DocumentBase *open = documents.document_for(plan.path); open && open->dirty()) files.push_back(plan.path);
+		// Its names a save left out of the .mis beside it too (companion_unsaved): the reopen reads the .mis.
+		if (const DocumentBase *open = documents.document_for(plan.path); open && open->unsaved()) files.push_back(plan.path);
 		// A mission's companions beside it move with it.
 		for (const RenameOutput &companion : plan.companions)
-			if (const DocumentBase *open = documents.document_for(companion.path); open && open->dirty())
+			if (const DocumentBase *open = documents.document_for(companion.path); open && open->unsaved())
 				files.push_back(companion.path);
 		return;
 	}
 	case EditorRequestKind::SplitTexture: {
-		// The documents with unsaved edits among the files the split rewrites.
-		if (!view_.project.open || !documents.documents_dirty()) return;
+		// The documents with unsaved edits among the files the split rewrites (and reads again).
+		if (!view_.project.open || !documents.documents_unsaved()) return;
 		if (unsaved_while_due(files)) return;
 		const BaseNames base{&view_.project.base_files};
 		const RenamePlan plan = plan_split(paths_, *view_.project.scan, core_.problems().graph(), request.path, request.new_name,
 		                                   request.paths, &base);
 		if (!plan.ok()) return;
 		for (const auto &document : documents.documents())
-			if (document->dirty() && std::any_of(plan.sites.begin(), plan.sites.end(),
-			                                     [&](const RenameSite &site) { return site.file == document->path(); }))
+			if (document->unsaved() && std::any_of(plan.sites.begin(), plan.sites.end(),
+			                                       [&](const RenameSite &site) { return site.file == document->path(); }))
 				files.push_back(document->path());
 		return;
 	}
@@ -488,12 +490,12 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 		// stopped naming it would leave the saved use behind); none when the plan is refused
 		// anyway (the rename then says why, with nothing to save first). Saved, the rename is
 		// planned again. While a validation is due or under way every one is (unsaved_while_due).
-		if (view_.project.open && documents.documents_dirty()) {
+		if (view_.project.open && documents.documents_unsaved()) {
 			if (unsaved_while_due(files)) return;
 			const SymbolRenamePlan plan = plan_symbol(request);
 			if (!plan.ok()) return;
 			for (const auto &document : documents.documents()) {
-				if (!document->dirty()) continue;
+				if (!document->unsaved()) continue;
 				const bool site = std::any_of(plan.sites.begin(), plan.sites.end(),
 				                              [&](const RenameSite &each) { return each.file == document->path(); });
 				if (site || saved_file_uses(document->path(), plan)) files.push_back(document->path());
@@ -514,11 +516,12 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 // While a validation is due or under way (S13 A3: the polls step it, and no request runs it), the
 // graph may not hold the edits the documents have not been validated with, so the plan cannot say
 // which of them a rename rewrites: every document with unsaved edits is listed (the prompt saves
-// them all, and the rename plans again once the validation it joins has ended). True then.
+// them all, and the rename plans again once the validation it joins has ended), a mission's names a
+// save left out of its .mis among them (DocumentBase::unsaved). True then.
 bool RenameController::unsaved_while_due(std::vector<std::string> &files) {
 	if (!core_.problems().validating()) return false;
 	for (const auto &document : core_.documents().documents())
-		if (document->dirty()) files.push_back(document->path());
+		if (document->unsaved()) files.push_back(document->path());
 	return true;
 }
 
@@ -529,13 +532,15 @@ bool RenameController::unsaved_while_due(std::vector<std::string> &files) {
 // validation is due (else unsaved_while_due).
 void RenameController::rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
-	if (!view_.project.open || !documents.documents_dirty()) return;
+	if (!view_.project.open || !documents.documents_unsaved()) return;
 	if (unsaved_while_due(files)) return;
 	const RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), file, new_name);
 	if (!plan.ok()) return;
 	for (const auto &document : documents.documents()) {
-		if (!document->dirty()) continue;
 		const std::string &path = document->path();
+		// Each closes and opens again at its new path, or (a site) is read again, a mission's .mis with it: names a
+		// save left out of it (companion_unsaved) would be lost with it.
+		if (!document->unsaved()) continue;
 		if (path == plan.path ||
 		    std::any_of(plan.sites.begin(), plan.sites.end(), [&path](const RenameSite &site) { return site.file == path; }) ||
 		    std::any_of(plan.companions.begin(), plan.companions.end(),

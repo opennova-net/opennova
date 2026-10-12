@@ -1510,7 +1510,7 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(base.path()));
 	out.set("kind", json_string(asset_kind_token(base.kind())));
-	out.set("dirty", boolean(base.dirty()));
+	out.set("dirty", boolean(base.unsaved()));
 	if (records) out.set("file_state_changed", boolean(records->file_state_changed()));
 	out.set("blocked", boolean(base.blocked()));
 	out.set("revision", json_number(double(base.revision())));

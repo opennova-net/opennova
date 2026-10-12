@@ -104,12 +104,10 @@ NodeId event_menu(const MissionDocument &mission, const ViewNames &names, NodeId
 	ui_kit::filter_box("##events_filter", g_events_filter, sizeof(g_events_filter), "Find an event", em * 26.0f);
 	NodeId chosen = 0;
 	if (ImGui::BeginChild("events", ImVec2(em * 26.0f, em * 18.0f))) {
-		size_t index = 0;
 		for (const Node *row : mission.rows_of(MissionKind::Event)) {
-			++index;
 			if (row->id == except) continue;
-			const std::string words =
-			        "Event " + std::to_string(index) + ": " + mission_record_label(mission, {row->id, row->kind, 0}, names.source());
+			// Its label says its number (and its name, S24 Names) before its sentence.
+			const std::string words = mission_record_label(mission, {row->id, row->kind, 0}, names.source());
 			if (g_events_filter[0] && !window_requests::matches(words, g_events_filter)) continue;
 			ImGui::PushID(static_cast<int>(row->id));
 			if (ImGui::Selectable(ui_kit::fit(words, ImGui::GetContentRegionAvail().x).c_str())) chosen = row->id;

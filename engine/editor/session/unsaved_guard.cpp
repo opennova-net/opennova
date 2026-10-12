@@ -23,10 +23,13 @@ bool UnsavedGuard::files(const EditorRequest &request, std::vector<std::string> 
 	switch (request_kind_row(request.kind).guard) {
 	case GuardScope::None: return false;
 	case GuardScope::Document:
-		if (const DocumentBase *document = documents.document_for(request.path); document && document->dirty())
+		// What drops the document (a Close, a Reload: they can discard) waits on names its .mis does not hold too
+		// (companion_unsaved); what reads its file alone (Build, Play) never does.
+		if (const DocumentBase *document = documents.document_for(request.path);
+		    document && (document->dirty() || (request_kind_row(request.kind).can_discard && document->companion_unsaved())))
 			out.push_back(document->path());
 		return true;
-	case GuardScope::AllDirty: out = documents.dirty_files(); return true;
+	case GuardScope::AllDirty: out = documents.dirty_files(request_kind_row(request.kind).can_discard); return true;
 	case GuardScope::PlannedWrites:
 		// What the request's own plan writes over or rewrites, its planner asked.
 		if (request.kind == EditorRequestKind::ImportFiles) core_.imports().unsaved_files(request, out);
