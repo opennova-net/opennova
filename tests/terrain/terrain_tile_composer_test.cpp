@@ -963,9 +963,41 @@ bool test_map_split_rules() {
 			"a map shorter than its even width overruns the split");
 }
 
+// An editor's paint of the colour map makes again only the quadrants its rect touches, each the bytes a build of the
+// painted map holds; an atlas of another size makes none.
+bool test_quadrant_rebuild() {
+	using opennova::terrain::Rgba8Image;
+	Rgba8Image atlas;
+	atlas.width = 64;
+	atlas.height = 64;
+	atlas.pixels.resize(64 * 64 * 4);
+	for (size_t i = 0; i < atlas.pixels.size(); ++i) atlas.pixels[i] = static_cast<uint8_t>(i * 7 + 3);
+	opennova::terrain::TerrainTileQuadrantSource source = opennova::terrain::build_terrain_tile_quadrant_source(atlas);
+	Rgba8Image painted = atlas;
+	for (int y = 40; y < 44; ++y)
+		for (int x = 10; x < 14; ++x) painted.pixels[4 * (static_cast<size_t>(y) * 64 + x)] = 255;
+	// Texels x 10..13, y 40..43: the quadrant 1 (x's first half, y's second).
+	const unsigned made = opennova::terrain::rebuild_terrain_tile_quadrants(source, painted, 10, 40, 4, 4);
+	const opennova::terrain::TerrainTileQuadrantSource built = opennova::terrain::build_terrain_tile_quadrant_source(painted);
+	bool same = made == 2u;
+	for (size_t q = 0; q < 4 && same; ++q) {
+		same = source.quadrants[q].size() == built.quadrants[q].size();
+		for (size_t level = 0; same && level < built.quadrants[q].size(); ++level)
+			same = source.quadrants[q][level].pixels == built.quadrants[q][level].pixels;
+	}
+	if (!expect(same, "a painted rect remakes its quadrant alone, as a build of the painted map makes it")) return false;
+	Rgba8Image other;
+	other.width = 32;
+	other.height = 32;
+	other.pixels.assign(32 * 32 * 4, 0);
+	return expect(opennova::terrain::rebuild_terrain_tile_quadrants(source, other, 0, 0, 4, 4) == 0,
+			"an atlas of another size remakes nothing");
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	if (!test_map_split_rules()) return 1;
+	if (!test_quadrant_rebuild()) return 1;
 	if (!test_colormap_quadrants_follow_texcompression()) return 1;
 	if (!test_tile_set_levels_are_the_dxt5_decode()) return 1;
 	if (!test_level_density()) return 1;

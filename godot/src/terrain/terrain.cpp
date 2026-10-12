@@ -2,6 +2,7 @@
 
 #include "terrain/terrain.h"
 #include "terrain/terrain_surface_inputs.h"
+#include "terrain/terrain_image_convert.h"
 #include "terrain/terrain_tile_info.h"
 #include "env/water.h"
 #include "render/visual_layers.h"
@@ -72,6 +73,8 @@ void Terrain::_bind_methods() {
 		&Terrain::get_tile_cache_texture);
 	ClassDB::bind_method(D_METHOD("get_tile_cache_diagnostics"),
 		&Terrain::get_tile_cache_diagnostics);
+	ClassDB::bind_method(D_METHOD("update_colormap_region", "image", "rect"), &Terrain::update_colormap_region);
+	ClassDB::bind_method(D_METHOD("update_blendmap_region", "image", "rect"), &Terrain::update_blendmap_region);
 	ClassDB::bind_method(D_METHOD("invalidate_tile_cache_region", "minimum_x_q16",
 			"minimum_z_q16", "maximum_x_q16", "maximum_z_q16"),
 			&Terrain::invalidate_tile_cache_region);
@@ -309,6 +312,58 @@ int64_t Terrain::invalidate_tile_cache_region(int64_t p_minimum_x_q16,
 			static_cast<int32_t>(p_minimum_z_q16),
 			static_cast<int32_t>(p_maximum_x_q16),
 			static_cast<int32_t>(p_maximum_z_q16)));
+}
+
+bool Terrain::update_colormap_region(const Ref<Image> &p_image, const Rect2i &p_rect) {
+	if (!built || terrain_data.is_null() || terrain_material.is_null() || p_image.is_null()) {
+		return false;
+	}
+	opennova::terrain::Rgba8Image colormap;
+	if (!image_to_rgba8(p_image, colormap) || colormap.width == 0 || colormap.height == 0) {
+		return false;
+	}
+	const Rect2i rect = p_rect.intersection(Rect2i(0, 0, int(colormap.width), int(colormap.height)));
+	if (rect.size.x <= 0 || rect.size.y <= 0) {
+		return true;
+	}
+	// The atlas texels the map's rect covers (the map lies over the 1024-unit atlas at its side's scale), then
+	// the plane's rects that show them: the bilinear taps around each, and a margin of the levels' reach
+	// (64 units: a level-6 texel), a page any of them touches recomposing.
+	const int64_t width = colormap.width, height = colormap.height;
+	const int32_t ax0 = int32_t(int64_t(rect.position.x) * 1024 / width);
+	const int32_t az0 = int32_t(int64_t(rect.position.y) * 1024 / height);
+	const int32_t ax1 = int32_t((int64_t(rect.position.x + rect.size.x) * 1024 + width - 1) / width);
+	const int32_t az1 = int32_t((int64_t(rect.position.y + rect.size.y) * 1024 + height - 1) / height);
+	std::vector<opennova::terrain::TerrainWorldRect> world = opennova::terrain::terrain_atlas_world_rects(
+			terrain_data->atlas_routing(), opennova::terrain::CoordsRect{ax0, az0, ax1 - ax0, az1 - az0},
+			opennova::terrain::kTerrainHeightTaps);
+	constexpr int32_t kLevelsReach = 64;
+	for (opennova::terrain::TerrainWorldRect &each : world) {
+		each.x0 -= kLevelsReach;
+		each.z0 -= kLevelsReach;
+		each.x1 += kLevelsReach;
+		each.z1 += kLevelsReach;
+	}
+	const uint32_t flags = opennova::terrain::terrain_colormap_quadrant_flags(surface_inputs->get_texcompression_level());
+	if (!tile_cache_device.update_colormap_region(colormap, rect.position.x, rect.position.y, rect.size.x, rect.size.y,
+				world, flags)) {
+		return false;
+	}
+	terrain_data->set_colormap_image(p_image);
+	return true;
+}
+
+bool Terrain::update_blendmap_region(const Ref<Image> &p_image, const Rect2i &p_rect) {
+	(void)p_rect; // the blend texture is made again whole: the normalisation is per texel, the upload whole
+	if (!built || terrain_data.is_null() || terrain_material.is_null() || p_image.is_null()) {
+		return false;
+	}
+	terrain_data->set_blendmap_image(p_image);
+	if (!surface_inputs->update_blendmap(p_image)) {
+		return false;
+	}
+	surface_inputs->apply_to_material(terrain_material);
+	return true;
 }
 
 std::optional<opennova::TerrainTilePageBinding>

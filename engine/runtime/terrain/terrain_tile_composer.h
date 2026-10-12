@@ -72,6 +72,15 @@ uint32_t terrain_colormap_quadrant_flags(int32_t session_texcompression_level);
 TerrainTileQuadrantSource build_terrain_tile_quadrant_source(
 		const Rgba8Image &atlas, uint32_t creation_flags = kTerrainQuadrantCreationFlags);
 
+// The quadrants of `source` a changed rect of `atlas` touches (atlas texels x, y, w, h)
+// made again from `atlas` as build_terrain_tile_quadrant_source makes them: an editor's
+// paint of the colour map (ADR 0046 S25), whose quadrants then hold the bytes a build of
+// the painted map holds. The quadrants made, a bit each (bit = the quadrant's index);
+// 0, nothing made, for an atlas of another size than the source's base levels.
+unsigned rebuild_terrain_tile_quadrants(TerrainTileQuadrantSource &source,
+		const Rgba8Image &atlas, int x, int y, int w, int h,
+		uint32_t creation_flags = kTerrainQuadrantCreationFlags);
+
 // The colormap as the map's terrain pass samples it: the four quadrants'
 // first levels under the session's texcompression_level, put back together.
 // [orig: render_terrain_decal @ 0x6071C0 (the passes over Colormap0..3,

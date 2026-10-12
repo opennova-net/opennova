@@ -48,6 +48,10 @@ public:
 	bool rebuild(const Ref<TerrainData> &p_data,
 			const Ref<TerrainTileInfo> &p_tile_info = Ref<TerrainTileInfo>());
 	bool rebuild_blend();
+	// The detail blend map painted (ADR 0046 S25): `p_image` normalized as a load normalizes it
+	// (normalize_detail_blend_map) into the blend texture, in place where it is the same size (the material keeps
+	// sampling the same texture), else made anew. False where the image does not convert.
+	bool update_blendmap(const Ref<Image> &p_image);
 	bool rebuild_heightfield();
 	bool rebuild_detail_textures();
 

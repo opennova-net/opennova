@@ -281,6 +281,11 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_mission_environment", "file"), &TerrainData::set_mission_environment);
 
 	ClassDB::bind_method(D_METHOD("load"), &TerrainData::load);
+	// The live images an editor's paint leaves (ADR 0046 S25): the next build of the terrain reads them.
+	ClassDB::bind_method(D_METHOD("set_colormap_image", "image"), &TerrainData::set_colormap_image);
+	ClassDB::bind_method(D_METHOD("get_colormap_image"), &TerrainData::get_colormap_image);
+	ClassDB::bind_method(D_METHOD("set_blendmap_image", "image"), &TerrainData::set_blendmap_image);
+	ClassDB::bind_method(D_METHOD("get_blendmap_image"), &TerrainData::get_blendmap_image);
 	ClassDB::bind_method(D_METHOD("load_from_resource_root", "resource_root", "name"), &TerrainData::load_from_resource_root);
 	ClassDB::bind_method(D_METHOD("begin_load_from_resource_root", "resource_root", "name"),
 			&TerrainData::begin_load_from_resource_root);
@@ -1032,6 +1037,10 @@ Ref<Image> TerrainData::get_colormap_image() const {
 
 Ref<Image> TerrainData::get_blendmap_image() const {
 	return blendmap_image;
+}
+
+opennova::terrain::TerrainAtlasRouting TerrainData::atlas_routing() const {
+	return opennova::terrain::terrain_atlas_routing(height_field_from(cpt, trn));
 }
 
 // The three height queries now delegate to the shared engine/runtime/terrain sampler

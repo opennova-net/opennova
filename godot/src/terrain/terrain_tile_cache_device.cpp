@@ -253,6 +253,8 @@ void TerrainTileCacheDevice::clear() {
 	cache_hits_ = 0;
 	cache_misses_ = 0;
 	upload_failures_ = 0;
+	colormap_region_updates_ = 0;
+	colormap_pages_retired_ = 0;
 	scorch_registry_.clear();
 	scorch_textures_ready_ = false;
 	scorch_records_rejected_ = 0;
@@ -359,6 +361,33 @@ std::size_t TerrainTileCacheDevice::invalidate_region(
 		int32_t p_maximum_x_q16, int32_t p_maximum_z_q16) {
 	return cache_.invalidate_overlapping_q16(p_minimum_x_q16, p_minimum_z_q16,
 			p_maximum_x_q16, p_maximum_z_q16);
+}
+
+bool TerrainTileCacheDevice::update_colormap_region(const opennova::terrain::Rgba8Image &p_colormap,
+		int x, int y, int w, int h, const std::vector<opennova::terrain::TerrainWorldRect> &p_world,
+		uint32_t p_creation_flags) {
+	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot> current =
+			sources_ready_ ? async_->sources() : nullptr;
+	if (!current) {
+		return false;
+	}
+	auto next = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>(*current);
+	if (opennova::terrain::rebuild_terrain_tile_quadrants(next->colormap, p_colormap, x, y, w, h, p_creation_flags) == 0) {
+		return false;
+	}
+	async_->install_sources(std::move(next));
+	// The plane's rects in whole units to the inclusive Q16 page test; a page composing from the old quadrants
+	// now holds a retired generation, its completion dropped.
+	const auto q16 = [](int64_t units) {
+		return static_cast<int32_t>(std::clamp<int64_t>(units * 65536, INT32_MIN, INT32_MAX));
+	};
+	std::size_t retired = 0;
+	for (const opennova::terrain::TerrainWorldRect &rect : p_world) {
+		retired += cache_.invalidate_overlapping_q16(q16(rect.x0), q16(rect.z0), q16(rect.x1), q16(rect.z1));
+	}
+	++colormap_region_updates_;
+	colormap_pages_retired_ += retired;
+	return true;
 }
 
 void TerrainTileCacheDevice::clear_terrain_scorches() {
@@ -731,6 +760,8 @@ Dictionary TerrainTileCacheDevice::get_diagnostics() const {
 	diagnostics["frame_output_hash"] =
 			static_cast<int64_t>(frame_output_hash_);
 	diagnostics["source_revision"] = static_cast<int64_t>(source_revision_);
+	diagnostics["colormap_region_updates"] = static_cast<int64_t>(colormap_region_updates_);
+	diagnostics["colormap_pages_retired"] = static_cast<int64_t>(colormap_pages_retired_);
 	diagnostics["tile_overlay_required"] = tile_overlay_required_;
 	diagnostics["tile_overlay_available"] = tile_overlay_ready_;
 	return diagnostics;

@@ -253,6 +253,27 @@ bool TerrainSurfaceInputs::rebuild_blend() {
 	return normalized_blend_texture.is_valid();
 }
 
+bool TerrainSurfaceInputs::update_blendmap(const Ref<Image> &p_image) {
+	opennova::terrain::Rgba8Image source;
+	if (p_image.is_null() || !image_to_rgba8(p_image, source)) {
+		return false;
+	}
+	const Ref<Texture2D> made = texture_from_rgba8(opennova::terrain::normalize_detail_blend_map(source), true);
+	if (made.is_null()) {
+		return false;
+	}
+	// The same texture object updated where the sizes match: the material's sampler keeps its texture.
+	ImageTexture *held = Object::cast_to<ImageTexture>(normalized_blend_texture.ptr());
+	ImageTexture *fresh = Object::cast_to<ImageTexture>(made.ptr());
+	if (held != nullptr && fresh != nullptr && held->get_width() == fresh->get_width() &&
+			held->get_height() == fresh->get_height()) {
+		held->update(fresh->get_image());
+		return true;
+	}
+	normalized_blend_texture = made;
+	return true;
+}
+
 bool TerrainSurfaceInputs::rebuild_heightfield() {
 	heightfield_normal_texture.unref();
 	if (terrain_data.is_null()) {

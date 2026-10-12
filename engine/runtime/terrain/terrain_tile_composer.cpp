@@ -223,6 +223,24 @@ TerrainTileQuadrantSource build_terrain_tile_quadrant_source(
 	return result;
 }
 
+unsigned rebuild_terrain_tile_quadrants(TerrainTileQuadrantSource &source,
+		const Rgba8Image &atlas, int x, int y, int w, int h, uint32_t creation_flags) {
+	if (!atlas.is_valid() || atlas.width < 2 || atlas.height < 2 || w <= 0 || h <= 0) return 0;
+	const uint32_t half_width = atlas.width / 2, half_height = atlas.height / 2;
+	for (const std::vector<Rgba8Image> &levels : source.quadrants)
+		if (levels.empty() || levels.front().width != half_width || levels.front().height != half_height) return 0;
+	unsigned made = 0;
+	for (int quadrant = 0; quadrant < 4; ++quadrant) {
+		const int64_t qx = int64_t(quadrant >> 1) * half_width, qy = int64_t(quadrant & 1) * half_height;
+		if (int64_t(x) >= qx + half_width || int64_t(x) + w <= qx || int64_t(y) >= qy + half_height || int64_t(y) + h <= qy)
+			continue;
+		source.quadrants[static_cast<size_t>(quadrant)] =
+				quadrant_device_levels(quadrant_block(atlas, quadrant), creation_flags);
+		made |= 1u << quadrant;
+	}
+	return made;
+}
+
 Rgba8Image terrain_colormap_device_image(const Rgba8Image &atlas,
 		int32_t session_texcompression_level) {
 	if (!atlas.is_valid() || atlas.width < 2 || atlas.height < 2) return atlas;
