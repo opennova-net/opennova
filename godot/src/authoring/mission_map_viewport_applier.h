@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/image_texture.hpp>
 #include <godot_cpp/classes/sub_viewport.hpp>
 #include <godot_cpp/variant/rid.hpp>
 
@@ -68,6 +69,9 @@ public:
 	// own chunks alone).
 	int outline_edges() const { return outline_edges_; }
 	int outline_chunks_uploaded() const { return chunks_uploaded_; }
+	// S25: the map's background picture the overlay holds (null: the colour map), and how many it has uploaded.
+	Ref<ImageTexture> background_picture() const { return picture_; }
+	int background_uploads() const { return picture_uploads_; }
 
 private:
 	// The terrain and its water mask given the overlay; the grid's origin.
@@ -76,6 +80,8 @@ private:
 	void draw_(const opennova::editor::MissionMapViewport &map);
 	// The wireframes drawn again where they moved; their transform the camera's.
 	void draw_outlines_(const opennova::editor::MissionMapViewport &map);
+	// S25: the map's background (MissionMapTerrainView) given the overlay, once a serial.
+	void apply_picture_(const opennova::editor::MissionMapViewport &map);
 
 	uint64_t overlay_id_ = 0;
 	uint64_t canvas_id_ = 0;
@@ -98,6 +104,11 @@ private:
 	bool drawn_grid_ = true, drawn_text_ = true;
 	int drawn_width_ = 0, drawn_height_ = 0;
 	bool dirty_ = true;
+	// S25: the background picture uploaded, and the view's serial it was made at (UINT64_MAX: none yet, or the overlay's
+	// slot given back to a colour map since).
+	Ref<ImageTexture> picture_;
+	uint64_t picture_serial_ = UINT64_MAX;
+	int picture_uploads_ = 0;
 	bool pass_visible_ = false;
 	int pass_terrain_tris_ = 0, pass_sprites_ = 0, pass_labels_ = 0;
 };

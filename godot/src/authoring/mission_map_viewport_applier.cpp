@@ -1,9 +1,11 @@
 #include "authoring/mission_map_viewport_applier.h"
 
 #include <godot_cpp/classes/color_rect.hpp>
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/color.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
@@ -153,6 +155,8 @@ void MissionMapViewportApplier::install_terrain_() {
 		water = terrain_data_->build_minimap_water_mask(plane.y);
 	}
 	hud->set_minimap_terrain(terrain_data_, water);
+	// The colour map installed takes the slot back: the background given again at the next draw.
+	picture_serial_ = UINT64_MAX;
 	hud->set_minimap_grid_origin(Vector2(float(ground_.grid_x), float(ground_.grid_y)), ground_.grid_origin);
 	// The mission's RotateMap180 as the game's presenter hands its HUD the map state (the CMAP's render sets the rest
 	// of it from the view: its mode, its centre, its zoom); no markers of the HUD's own (the map draws the records).
@@ -180,6 +184,8 @@ void MissionMapViewportApplier::clear() {
 		hud->configure(Ref<HudPos>(), Ref<ResourceRoot>());
 	}
 	renderer_.clear();
+	picture_.unref();
+	picture_serial_ = UINT64_MAX;
 	for (const RID &chunk : chunk_items_) RenderingServer::get_singleton()->free_rid(chunk);
 	chunk_items_.clear();
 	chunk_drawn_.clear();
@@ -189,6 +195,40 @@ void MissionMapViewportApplier::clear() {
 	pass_visible_ = false;
 	pass_terrain_tris_ = pass_sprites_ = pass_labels_ = 0;
 	dirty_ = true;
+}
+
+void MissionMapViewportApplier::apply_picture_(const opennova::editor::MissionMapViewport &map) {
+	HudOverlay *hud = overlay();
+	if (!hud) return;
+	const opennova::editor::MissionMapTerrainView &view = map.terrain_view();
+	if (view.serial() == picture_serial_) return;
+	picture_serial_ = view.serial();
+	dirty_ = true;
+	// The colour map, or nothing: the slot given back to the colour map the terrain installed.
+	const std::vector<uint32_t> &pixels = view.picture();
+	constexpr int kSide = 1024;
+	if (pixels.size() != size_t(kSide) * kSide) {
+		if (picture_.is_valid()) hud->set_minimap_terrain_picture(Ref<Texture2D>());
+		picture_.unref();
+		return;
+	}
+	// The picture's 0xAARRGGBB words as RGBA bytes, in the atlas's own rows (the colour map's layout: the CMAP's
+	// compile lays both over the sector grid alike).
+	PackedByteArray bytes;
+	bytes.resize(int64_t(pixels.size()) * 4);
+	uint8_t *out = bytes.ptrw();
+	for (size_t i = 0; i < pixels.size(); ++i) {
+		const uint32_t p = pixels[i];
+		out[4 * i] = uint8_t(p >> 16);
+		out[4 * i + 1] = uint8_t(p >> 8);
+		out[4 * i + 2] = uint8_t(p);
+		out[4 * i + 3] = uint8_t(p >> 24);
+	}
+	const Ref<Image> image = Image::create_from_data(kSide, kSide, false, Image::FORMAT_RGBA8, bytes);
+	if (picture_.is_valid()) picture_->update(image);
+	else picture_ = ImageTexture::create_from_image(image);
+	++picture_uploads_;
+	hud->set_minimap_terrain_picture(picture_);
 }
 
 void MissionMapViewportApplier::draw_(const opennova::editor::MissionMapViewport &map) {
@@ -298,6 +338,7 @@ void MissionMapViewportApplier::apply(const opennova::editor::ViewportModel &mod
 	if (stamped_) report.files = stamped_->stamps();
 	if (loading_.is_valid()) return;
 	report.surface = terrain_data_.is_valid();
+	apply_picture_(map_of(model));
 	draw_(map_of(model));
 	draw_outlines_(map_of(model));
 	opennova::io::JsonValue drawn = opennova::io::JsonValue::make_object();
@@ -307,11 +348,13 @@ void MissionMapViewportApplier::apply(const opennova::editor::ViewportModel &mod
 	drawn.set("labels", opennova::io::json_number(pass_labels_));
 	drawn.set("terrain", opennova::io::JsonValue::make_bool(terrain_data_.is_valid()));
 	drawn.set("outline_edges", opennova::io::json_number(outline_edges_));
+	drawn.set("background", opennova::io::JsonValue::make_bool(picture_.is_valid()));
 	report.drawn = std::move(drawn);
 }
 
 void MissionMapViewportApplier::tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) {
 	if (loading_.is_null()) {
+		apply_picture_(map_of(model));
 		draw_(map_of(model));
 		draw_outlines_(map_of(model));
 	}

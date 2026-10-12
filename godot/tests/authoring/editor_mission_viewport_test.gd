@@ -1923,6 +1923,56 @@ func test_the_map_draws_the_commander_map() -> void:
 	assert_gt(int(state.get("body", {}).get("drawn", {}).get("terrain_tris", 0)), 0, "drawn again (%d before)" % tris)
 
 
+## S25: the map's backgrounds: the original tools' Height view of the terrain's heights in the colour map's place (the
+## slot the commander map's compile samples, HudOverlay::set_minimap_terrain_picture), a 1024-texel picture uploaded
+## once, the pass drawn again over it; asked away, the terrain's colour map back.
+func test_the_map_draws_a_background_of_the_heights() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_map()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device := _device(state)
+	var overlay := device.find_child("MapState", true, false) as HudOverlay if device != null else null
+	assert_not_null(overlay, "the HUD overlay holding the map's state")
+	if overlay == null:
+		return
+	var colour: Texture2D = overlay.get_minimap_terrain_picture()
+	assert_not_null(colour, "the terrain's colour map under the marks")
+	assert_false(bool(state.get("body", {}).get("drawn", {}).get("background", true)), "no background asked")
+	assert_true(_change({"kind": "map", "options": {"background": "height"}}))
+	for _frame in 5:
+		_app.pump()
+		await get_tree().process_frame
+	state = _map_state()
+	assert_true(bool(state.get("body", {}).get("drawn", {}).get("background", false)), str(state.get("body", {}).get("drawn")))
+	var picture: Texture2D = overlay.get_minimap_terrain_picture()
+	assert_not_null(picture)
+	if picture == null:
+		return
+	assert_ne(picture, colour, "the background in the colour map's place")
+	assert_eq(picture.get_width(), 1024)
+	assert_eq(picture.get_height(), 1024)
+	assert_gt(int(state.get("body", {}).get("drawn", {}).get("terrain_tris", 0)), 0, "the pass drawn over it")
+	# Nile's Height: green, the rest dark.
+	var image := picture.get_image()
+	var lit := 0
+	for y in range(0, 1024, 64):
+		for x in range(0, 1024, 64):
+			var texel := image.get_pixel(x, y)
+			assert_almost_eq(texel.r, 0.0, 0.001)
+			assert_almost_eq(texel.b, 0.0, 0.001)
+			lit += 1 if texel.g > 0.0 else 0
+	assert_gt(lit, 0, "the heights drawn in green")
+	assert_true(_change({"kind": "map", "options": {"background": "colour"}}))
+	for _frame in 5:
+		_app.pump()
+		await get_tree().process_frame
+	state = _map_state()
+	assert_false(bool(state.get("body", {}).get("drawn", {}).get("background", true)))
+	assert_eq(overlay.get_minimap_terrain_picture(), colour, "the colour map back")
+
+
 ## S23 C: the map and the 3D view are one document's: a pin hit on the map, selected, is the selection both ring; a
 ## drag of a pin over the wire is the 3D view's move to the point under the pointer (stick: its height over the map
 ## device's ground kept), one undo step, the 3D view's mark moved with it.
