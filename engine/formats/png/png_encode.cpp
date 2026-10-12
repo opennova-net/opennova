@@ -45,7 +45,7 @@ std::vector<uint8_t> encode(const uint8_t *texels, uint32_t width, uint32_t heig
 	put_u32_be(header, width);
 	put_u32_be(header, height);
 	header.push_back(8);      // bits a sample
-	header.push_back(colour); // 6 RGBA, 3 palette
+	header.push_back(colour); // 6 RGBA, 3 palette, 0 grey
 	header.push_back(0);      // deflate
 	header.push_back(0);      // filters of method 0
 	header.push_back(0);      // not interlaced
@@ -67,6 +67,11 @@ std::vector<uint8_t> encode_png_indexed(const uint8_t *indices, uint32_t width, 
                                         uint32_t entries) {
 	if (!indices || !palette || width == 0 || height == 0 || entries == 0 || entries > 256) return {};
 	return encode(indices, width, height, size_t(width), 3, palette, entries);
+}
+
+std::vector<uint8_t> encode_png_grey(const uint8_t *levels, uint32_t width, uint32_t height) {
+	if (!levels || width == 0 || height == 0) return {};
+	return encode(levels, width, height, size_t(width), 0, nullptr, 0);
 }
 
 } // namespace opennova::png

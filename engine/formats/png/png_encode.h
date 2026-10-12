@@ -17,5 +17,8 @@ std::vector<uint8_t> encode_png_rgba(const uint8_t *rgba, uint32_t width, uint32
 // palette of no entry or past 256.
 std::vector<uint8_t> encode_png_indexed(const uint8_t *indices, uint32_t width, uint32_t height, const uint8_t *palette,
                                         uint32_t entries);
+// And for an 8-bit grey image (colour type 0): `levels` width x height, the top row first (a foliage map's source whose
+// grey levels are its codes). Empty as encode_png_rgba's is.
+std::vector<uint8_t> encode_png_grey(const uint8_t *levels, uint32_t width, uint32_t height);
 
 } // namespace opennova::png
