@@ -13,8 +13,11 @@ thread_local MeshSimpGlobals g_simp = {};
 thread_local float g_curvature_weight = 0.01f;
 
 // The vertices a null-target collapse retired: off the vertex array but alive for the faces that still
-// name them (MeshSimp_CollapseVertex), freed with the rest by MeshSimp_FreeAll (TrnGen.exe never frees
-// them; a tool that bakes again and again cannot keep them). No behaviour follows from the list.
+// name them (MeshSimp_CollapseVertex), freed with the rest by MeshSimp_FreeAll. TrnGen.exe frees such a
+// vertex at once [orig: TrnGen.exe sub_4078B0 @ 0x4078C8 (sub_407050), @ 0x4078CE (FreeMemory) (the
+// MiscTools build)] and its face extraction later reads the freed vertex's id; the port keeps it until
+// FreeAll so that read stays defined (and frees it, which a tool that bakes again and again needs). No
+// behaviour follows from the list.
 static thread_local std::vector<MeshVertex*> g_retired_vertices;
 
 // Match sub_406F30 exactly: z² stored as float, (y²+z²) stored as float, x²+sum stays double, sqrt

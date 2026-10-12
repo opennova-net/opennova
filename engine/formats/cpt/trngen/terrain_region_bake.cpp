@@ -100,11 +100,25 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 		error = "the terrain's bake state is not made";
 		return false;
 	}
+	if (!state.rasterize_depth) {
+		error = "the terrain's bake state was made without the draw-back, which a region bake makes";
+		return false;
+	}
 	const size_t texels = static_cast<size_t>(kDepthSide) * kDepthSide;
 	if (!input.depth16 || input.depth16->size() != texels) {
 		error = "the depth map is not 1024 x 1024";
 		return false;
 	}
+	for (const DepthRect &rect : input.dirty)
+		if (!rect.empty() && (rect.x < 0 || rect.y < 0 || rect.x > kDepthSide - rect.w || rect.y > kDepthSide - rect.h)) {
+			error = "a changed rect is not inside the depth map (an edit across its wrap is several rects)";
+			return false;
+		}
+	const auto cancelled = [&] {
+		if (!input.cancel || !input.cancel->load()) return false;
+		error = "cancelled";
+		return true;
+	};
 	const std::vector<int> leaves = leaves_tapping(input.dirty, state.base->locks);
 	if (leaves.empty()) return true;
 
@@ -169,11 +183,30 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 			if (index == kLeafTile) tmls.push_back({0, kRootSize, tmls.back().tml});
 		}
 	}
-	MeshSimp_FreeAll();
-	if (input.cancel && input.cancel->load()) {
-		error = "cancelled";
-		return false;
+	// The root is not remade (its tile is leaf (0, 0)'s), but its merge of the four quadrants is checked as the
+	// whole bake checks every merge (D-TERRAIN-22), so a map the whole bake refuses is refused here; the
+	// quadrants' meshes freed with it.
+	{
+		LODMeshData merged;
+		LODMeshData_Init(&merged);
+		for (QuadtreeNode *child : {root->child_nw.get(), root->child_ne.get(), root->child_sw.get(), root->child_se.get()}) {
+			if (!child->mesh_data) {
+				child->mesh_data = std::make_unique<LODMeshData>();
+				load_section_mesh(state.nodes[static_cast<size_t>(tile_of(*child))]->section, *child->mesh_data);
+			}
+			LODMeshData_LoadSectionDedup(&merged, child->mesh_data.get(), 14);
+			free_node_mesh(child->mesh_data);
+		}
+		const bool sound = merged.failure.empty() ? merged_faces_sound(merged, why) : (why = merged.failure, false);
+		LODMeshData_Free(&merged);
+		if (!sound) {
+			MeshSimp_FreeAll();
+			error = "the terrain bake failed: " + why;
+			return false;
+		}
 	}
+	MeshSimp_FreeAll();
+	if (cancelled()) return false;
 
 	// The tiles, each independent of the others, on the bake's threads.
 	const auto tiles_from = std::chrono::steady_clock::now();
@@ -196,6 +229,7 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 			return false;
 		}
 	out.tile_seconds = seconds_since(tiles_from);
+	if (cancelled()) return false;
 
 	// The draw-back over R: the new map there, then every leaf meeting R in the walk's order.
 	const auto draw_from = std::chrono::steady_clock::now();
@@ -231,21 +265,28 @@ bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &i
 	return true;
 }
 
-void apply_region_bake(const RegionBakeResult &result, TerrainBakeState &state, CptFile &cpt) {
-	if (cpt.tiles.size() == static_cast<size_t>(kCptTileCount))
-		for (size_t i = 0; i < result.rebuilt.size(); ++i)
-			cpt.tiles[static_cast<size_t>(result.rebuilt[i])] = result.tiles[i];
-	if (state.nodes.size() == static_cast<size_t>(kCptTileCount))
-		for (size_t i = 0; i < result.rebuilt.size(); ++i)
-			if (result.rebuilt[i] != 0) state.nodes[static_cast<size_t>(result.rebuilt[i])] = result.nodes[i];
+void apply_region_bake_state(const RegionBakeResult &result, TerrainBakeState &state) {
+	if (state.nodes.size() != static_cast<size_t>(kCptTileCount)) return;
+	for (size_t i = 0; i < result.rebuilt.size() && i < result.nodes.size(); ++i)
+		if (result.rebuilt[i] != 0) state.nodes[static_cast<size_t>(result.rebuilt[i])] = result.nodes[i];
+}
+
+bool apply_region_bake_cpt(const RegionBakeResult &result, CptFile &cpt, std::string &error) {
 	const size_t texels = static_cast<size_t>(kDepthSide) * kDepthSide;
-	if (cpt.depth_buffer.size() != texels) return;
+	if (cpt.tiles.size() != static_cast<size_t>(kCptTileCount) || cpt.depth_buffer.size() != texels) {
+		error = "the .cpt is not the bake's: " + std::to_string(cpt.tiles.size()) + " tiles and " +
+		        std::to_string(cpt.depth_buffer.size()) + " heights, not 341 and 1024 x 1024";
+		return false;
+	}
+	for (size_t i = 0; i < result.rebuilt.size() && i < result.tiles.size(); ++i)
+		cpt.tiles[static_cast<size_t>(result.rebuilt[i])] = result.tiles[i];
 	for (size_t i = 0; i < result.footprints.size() && i < result.atlas.size(); ++i) {
 		const DepthRect &r = result.footprints[i];
 		for (int row = 0; row < r.h; ++row)
 			std::copy_n(result.atlas[i].begin() + static_cast<std::ptrdiff_t>(row * r.w), r.w,
 			            cpt.depth_buffer.begin() + static_cast<std::ptrdiff_t>((r.y + row) * kDepthSide + r.x));
 	}
+	return true;
 }
 
 } // namespace opennova::trngen

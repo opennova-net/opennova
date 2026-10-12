@@ -19,16 +19,19 @@ namespace opennova::trngen {
 //
 // - the leaves whose height taps read an edited texel (a leaf's 65 x 65 vertices read the map at its
 //   corner plus 0 to 64 on each axis, wrapping at 1024, a locked axis of its quadrant within its 512
-//   [orig: TrnGen.exe build_mesh_lod_vertices @ 0x4042B0]), made from the new map;
+//   [orig: TrnGen.exe build_mesh_lod_vertices @ 0x4042B0 (the port's build)]), made from the new map;
 // - their ancestors up to the 512 quadrants, level by level, each merging its four children's LOD 14
 //   sections (a remade child's own, an untouched child's kept one) [orig: TrnGen.exe
-//   QuadtreeNode_Process @ 0x403470, the merge of sub_409FA0]; the root is never remade, its tile being
-//   leaf (0, 0)'s (the export reads the leaves' level for it);
+//   QuadtreeNode_Process @ 0x403470, the merge of sub_409FA0 (the port's build)]; the root is never remade,
+//   its tile being leaf (0, 0)'s (the export reads the leaves' level for it), but its merge is checked as the
+//   whole bake checks it (merged_faces_sound, D-TERRAIN-22), so a map the whole bake refuses is refused here;
 // - the remade nodes' tiles, each through the TPM1 codec and the strip pass as the bake makes them;
 // - the draw-back over R, the remade leaves' footprints: the new map there, then every leaf whose footprint
 //   meets R drawn back in the walk's order (nw, ne, sw, se), its writes outside R dropped [orig: TrnGen.exe
-//   sub_402A20 @ 0x402A20, called for each leaf in the walk]. A leaf writes only inside its footprint and a
-//   texel outside R keeps what the leaves there wrote before, so the atlas is the whole bake's.
+//   sub_402A20 @ 0x402A20, called for each leaf in the walk (the port's build)]. A leaf writes only inside its
+//   footprint and a texel outside R keeps what the leaves there wrote before, so the atlas is the whole bake's.
+// The cites marked "the port's build" follow the TrnGen.exe the port was made from; those marked "the
+// MiscTools build" the one served beside it (terrain-re.md, the TrnGen provenance item).
 
 // A rectangle of depth-map texels: x in [x, x + w), y in [y, y + h).
 struct DepthRect {
@@ -56,11 +59,14 @@ struct RegionBakeInput {
 	// The whole new depth map, raw16, kDepthSide x kDepthSide, the top row first (an 8-bit map smoothed
 	// first: smooth_depthmap).
 	const std::vector<uint16_t> *depth16 = nullptr;
-	// The texels changed since the state's bake (any overlap; a texel twice is the same edit).
+	// The texels of `depth16` changed since the state's bake (any overlap; a texel twice is the same edit), each
+	// rect inside the map: an edit across its wrap arrives as several rects. An edit of an 8-bit map at (x, y)
+	// changes the smoothed texels (x - 1 .. x, y - 1 .. y), wrapping (smooth_depthmap's 2 x 2 box). A rect not
+	// inside the map is refused.
 	std::vector<DepthRect> dirty;
 	// The threads a level's nodes are made on, the embedder's count (0 is taken as 1).
 	unsigned threads = 1;
-	// Read between nodes: set, the bake stops and reports "cancelled".
+	// Read between nodes and before the tile and draw-back passes: set, the bake stops and reports "cancelled".
 	const std::atomic<bool> *cancel = nullptr;
 };
 
@@ -83,13 +89,18 @@ struct RegionBakeResult {
 };
 
 // The region bake over `state` (bake_terrain_state's, or an earlier region bake's applied over it). The state
-// is only read: a failure or a cancel leaves it as it was. False, with `error`, for a state not made, a map of
-// the wrong size, a buffer the port refused, or "cancelled".
+// is only read: a failure or a cancel leaves it as it was. False, with `error`, for a state not made or made
+// without the draw-back (TerrainBakeInput::rasterize_depth), a map of the wrong size, a dirty rect not inside it,
+// ground the whole bake refuses (D-TERRAIN-22), a buffer the port refused, or "cancelled".
 bool bake_terrain_region(const TerrainBakeState &state, const RegionBakeInput &input, RegionBakeResult &out,
                          std::string &error);
 
-// Lands a region bake: the remade tiles into `cpt`, its atlas over the footprints, the remade nodes' state into
-// `state`. `cpt` is the .cpt the state's bake made (341 tiles), as earlier region bakes left it.
-void apply_region_bake(const RegionBakeResult &result, TerrainBakeState &state, CptFile &cpt);
+// Lands a region bake in the state it was made over (or that state as earlier region bakes left it): the remade
+// nodes' parts replace theirs (a state not made is left as it is).
+void apply_region_bake_state(const RegionBakeResult &result, TerrainBakeState &state);
+// Lands a region bake in the .cpt the state's bake made, as earlier region bakes left it: the remade tiles in
+// their places and the atlas over the footprints. False, nothing changed, with `error`, for a file not of the
+// bake's 341 tiles and 1024 x 1024 atlas.
+bool apply_region_bake_cpt(const RegionBakeResult &result, CptFile &cpt, std::string &error);
 
 } // namespace opennova::trngen
