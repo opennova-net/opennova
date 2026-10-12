@@ -7,11 +7,7 @@
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
-#include <runtime/inmatch/server_admin_command.h>
-#include <runtime/inmatch/server_session.h> // set_connection_mode
 #include <runtime/inmatch/server_tick.h>
-
-#include <memory>
 
 namespace opennova::serve {
 
@@ -153,34 +149,19 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 //  wait @0x4A6725..0x4A6735]
 void ServeListing::on_command(const ServerCommand &command) {
 	const bool bound = role_ != nullptr && kernel_ != nullptr;
-	std::unique_ptr<inmatch::NapiNPServerCtx> pre_session;
-	if (!bound) {
-		pre_session = std::make_unique<inmatch::NapiNPServerCtx>();
-		inmatch::set_connection_mode(*pre_session, inmatch::ConnectionMode::HostOnly);
-	}
-	inmatch::NapiNPServerCtx &ctx = bound ? role_->state.host_owner.ctx : *pre_session;
-	const inmatch::ServerCommandOutcome outcome = inmatch::Server_ExecuteServerCommand(
-			ctx, bound ? &kernel_->world : nullptr, server_command_verb_name(command.verb),
-			server_command_target_name(command.target), command.args);
+	const inmatch::ServerCommandOutcome outcome =
+			inmatch::run_host_server_command(bound ? &role_->state.host_owner.ctx : nullptr,
+					bound ? &kernel_->world : nullptr, inmatch::host_connection_mode(false),
+					seams_.config_block, server_command_verb_name(command.verb),
+					server_command_target_name(command.target), command.args);
 	if (!outcome.handled) {
 		io::logf(LogLevel::kInfo, "[host] ServerCommand %s was not executed%s", command.command.c_str(),
 		         bound ? "" : " (no session yet)");
 		return;
 	}
 	io::logf(LogLevel::kInfo, "[host] ServerCommand %s", command.command.c_str());
-	if (outcome.config_changed) {
-		const inmatch::GameConfig &config = ctx.config;
-		if (seams_.config_block != nullptr) {
-			gamecfg::GameCfg &block = *seams_.config_block;
-			switch (command.verb) {
-			case ServerCommandVerb::SetServerName: block.game_name = config.server_name; break;
-			case ServerCommandVerb::SetServerMsg: block.servermsg = config.custom_text; break;
-			case ServerCommandVerb::SetMPReset: block.mp_reset = config.multiplayer_reset; break;
-			default: break;
-			}
-		}
-		if (seams_.save_config) seams_.save_config();
-	}
+	if (outcome.config_changed && seams_.save_config)
+		seams_.save_config();
 	if (outcome.stop_hosting && lister_ != nullptr) lister_->host_role().stop();
 }
 
