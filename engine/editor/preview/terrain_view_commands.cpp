@@ -13,7 +13,7 @@ namespace {
 
 bool is_tile_command(const std::string &name) {
 	return name == "tile_rotate" || name == "tile_flip" || name == "tile_layer" || name == "tile_delete" ||
-	       name == "tile_group_rotate";
+	       name == "tile_group_rotate" || name == "tile_nudge" || name == "tile_duplicate";
 }
 
 bool brush_live(const TerrainViewContext &view) {

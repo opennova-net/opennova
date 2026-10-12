@@ -146,6 +146,22 @@ bool plan_tile_command(const TerrainViewContext &view, const ViewportCommand &co
 	} else if (command.name == "tile_delete") {
 		edits = plan_tile_delete(*tiles, rows);
 		words = "Removed " + tiles_words(edits.size());
+	} else if (command.name == "tile_nudge") {
+		// MED's arrows: each press a whole unit, 16 with the modifier, a positive move rounding up [orig: JOTACmed
+		// sub_43F0B0 @ 0x43F0DE..0x43F1A7] (tile_tools tile_nudged).
+		if (command.by.size() != 2 || (command.by[0] == 0.0 && command.by[1] == 0.0)) {
+			error = "tile_nudge's \"by\" is [east, north]: whole steps (16 units each with \"value\": \"16\").";
+			return false;
+		}
+		const int dx = command.by[0] > 0.0 ? 1 : command.by[0] < 0.0 ? -1 : 0;
+		const int dy = command.by[1] > 0.0 ? 1 : command.by[1] < 0.0 ? -1 : 0;
+		edits = plan_tile_nudge(*tiles, rows, dx, dy, command.value == "16");
+		words = "Nudged " + tiles_words(rows.size());
+	} else if (command.name == "tile_duplicate") {
+		const int32_t dx = command.by.size() == 2 ? int32_t(std::lround(command.by[0])) : 16;
+		const int32_t dy = command.by.size() == 2 ? int32_t(std::lround(command.by[1])) : 0;
+		edits = plan_tile_duplicate(*tiles, rows, dx, dy);
+		words = "Duplicated " + tiles_words(rows.size());
 	} else {
 		error = "No tile command \"" + command.name + "\".";
 		return false;

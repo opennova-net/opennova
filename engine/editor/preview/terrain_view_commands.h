@@ -28,7 +28,8 @@ struct TerrainViewContext {
 //   laid there, the Tiles tool's select;
 // - eyedropper {at}: the value under the point taken into the brush (Set's and Flatten's height, Surface's class,
 //   Foliage's code: a set_workspace of terrain_brush);
-// - the tile commands (tile_rotate {by}, tile_flip {value h|v}, tile_layer {by}, tile_delete, tile_group_rotate {by})
+// - the tile commands (tile_rotate {by}, tile_flip {value h|v}, tile_layer {by}, tile_delete, tile_group_rotate {by},
+//   tile_nudge {by [x, y], value "16"}, tile_duplicate {by [x, y]})
 //   and the tile drop {reference "tile", name <cell>} and drag {id <.til row>, handle "tile"}: the tile tools'
 //   (the planners below).
 // `handled` false: no terrain tool's (the viewport's own planning goes on). True with a refusal in `error`.
@@ -46,7 +47,10 @@ bool terrain_view_drop(const TerrainViewContext &view, const ViewportDrop &drop,
 // The commands are the original tools' (Rotate CW/CCW, Flip H/V, Tile Layer Up/Down, Delete, a group's rotation about
 // its centroid) over the command's ids, none the view's selected tiles: tile_rotate's and tile_group_rotate's `by`
 // quarter turns clockwise on the plane as the views show it north up (negative the other way; a group's one quarter
-// a press), tile_flip's value h (across) or v, tile_layer's `by` 1 over the others or -1 under them. A drag takes the
+// a press), tile_flip's value h (across) or v, tile_layer's `by` 1 over the others or -1 under them, tile_nudge's `by`
+// [east, north] whole steps as MED's arrows take them (a unit each, 16 with value "16"), tile_duplicate's `by` the
+// copies' offset [east, north] in whole units (16 east where none is given), the copies drawn over the others. A drag
+// takes the
 // dragged tile's corner to the ground under the point (`by`: from where the picture shows the corner), the selection
 // with it where the tile is among the selected; a stamp lays the brush's cell, turns and flips with its corner under
 // the point; each corner to whole units as Nile's stamp rounds it (`snap`: the 16-unit grid square the point lies in).

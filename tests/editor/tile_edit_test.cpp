@@ -190,6 +190,23 @@ int test_tiles_in_a_mission() {
 	flip.value = "h";
 	TEST_EXPECT(plan_tile_command(view, flip, out, error) && serve(session, out));
 	TEST_EXPECT(document->file().entries.back().flags == tile_flipped(7, true));
+	// MED's arrows (16 units with the modifier) and a duplicate a square east: each a step, undone.
+	ViewportCommand nudge;
+	nudge.name = "tile_nudge";
+	nudge.by = {1.0, 1.0};
+	nudge.value = "16";
+	TEST_EXPECT(plan_tile_command(view, nudge, out, error) && serve(session, out));
+	TEST_EXPECT(document->file().entries.back().x_fixed == (116 << 16) && document->file().entries.back().z_fixed == (67 << 16));
+	ViewportCommand copy;
+	copy.name = "tile_duplicate";
+	copy.by = {16.0, 0.0};
+	const size_t before_copy = document->rows().size();
+	TEST_EXPECT(plan_tile_command(view, copy, out, error) && serve(session, out));
+	TEST_EXPECT(document->rows().size() == before_copy + 1 && document->file().entries.back().x_fixed == (132 << 16) &&
+	            document->file().entries.back().tile_index == 5);
+	session.handle(request::undo(m));
+	session.handle(request::undo(m));
+	TEST_EXPECT(document->rows().size() == before_copy && document->file().entries.back().x_fixed == (100 << 16));
 	ViewportCommand layer;
 	layer.name = "tile_layer";
 	layer.by = {-1.0};

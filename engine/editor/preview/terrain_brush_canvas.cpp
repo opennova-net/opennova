@@ -285,6 +285,15 @@ void TerrainBrushHalf::keys_(CanvasGesture &gesture, const CanvasInput &in, Canv
 			took = true;
 			command_("tile_delete", {}, std::string(), out);
 		}
+		// MED's arrows (Shift: 16 units), north up; Ctrl+D a copy a square east.
+		if (keys.arrow_x != 0 || keys.arrow_y != 0) {
+			took = true;
+			command_("tile_nudge", {double(keys.arrow_x), double(-keys.arrow_y)}, in.keys.shift ? "16" : std::string(), out);
+		}
+		if (keys.duplicate) {
+			took = true;
+			command_("tile_duplicate", {16.0, 0.0}, std::string(), out);
+		}
 	}
 }
 

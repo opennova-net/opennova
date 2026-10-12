@@ -159,6 +159,9 @@ void draw_selected(TerrainPaneContext &context, const TilDocument *placement) {
 		tile_command(workspace, at, "tile_layer", {-1.0});
 	if (ui_kit::tool(order, "Delete", any, tip("Remove the selected tiles (Delete).")))
 		tile_command(workspace, at, "tile_delete", {});
+	if (ui_kit::tool(order, "Duplicate", any, tip("Copy the selected tiles a square east, over the others (Ctrl+D).")))
+		tile_command(workspace, at, "tile_duplicate", {16.0, 0.0});
+	ImGui::TextDisabled("Arrows nudge the selection a unit (Shift: 16), as JO's mission editor does.");
 	const bool group = selected > 1;
 	const std::string alone = "Select two tiles or more: the group turns about their middle.";
 	ui_kit::WrapRow turn;
