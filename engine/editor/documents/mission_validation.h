@@ -57,6 +57,7 @@ enum class MissionFinding {
 	NamesUnwritten, // the .mis a save would write, refused by its writer or the file system (listed)
 	NamesForeign,   // the .mis is the original editor's: a save leaves it, the mission's names unsaved (listed)
 	NamesRefused,   // names the .mis gives that the editor's setters refuse, left out of the mission (listed)
+	NamesLocked,    // entities the .mis was written with height locked, no terrain height known (D-MIS-17; listed)
 	kCount
 };
 const FindingCodeRow &finding_code(MissionFinding code);
