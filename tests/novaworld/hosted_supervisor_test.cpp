@@ -929,6 +929,14 @@ int test_owner_changes() {
 	TEST_EXPECT(rig.state(revoked) == State::Stopping);
 	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), revoked), "approval to host was withdrawn"));
 
+	// The three stopping servers still count against the rig's cap (3): their
+	// listings end (as the stop's push takes them down), the stops finish, and
+	// their places are free again.
+	for (const uint32_t rid : { 9001u, 9002u, 9003u }) hostdb::remove_host_by_rid(*rig.pool.acquire(), rid);
+	rig.tick(); // the revoked server's first stopping pass (the push; nothing is listed)
+	rig.tick(); // no listing left: each stop finishes
+	for (const int64_t ended : { banned, deleted, revoked }) TEST_EXPECT(rig.state(ended) == State::Stopped);
+
 	// During a crash restart's backoff: no new credentials, no relaunch.
 	const int64_t crashed = rig.request("owner_crashed");
 	const std::string m4 = rig.to_running(crashed, 9004);
