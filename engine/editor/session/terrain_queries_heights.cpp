@@ -73,16 +73,7 @@ JsonValue answer_terrain_lock(const TerrainQueryView &query, std::string &error)
 	}
 	const double x = query.args.number("x"), y = query.args.number("y");
 	const double radius = query.args.has("radius") ? query.args.number("radius") : view.workspace.terrain_brush.radius;
-	std::vector<const MissionDocument *> missions;
-	if (const auto *mission = dynamic_cast<const MissionDocument *>(&query.view)) {
-		missions.push_back(mission);
-	} else if (view.findings.graph && !family.terrain.empty()) {
-		for (const GraphEdge *edge : view.findings.graph->referrers_of_file(family.terrain)) {
-			if (edge->kind != ReferenceKind::Terrain) continue;
-			const auto *mission = dynamic_cast<const MissionDocument *>(query.context.core.documents().document_for(edge->source));
-			if (mission && std::find(missions.begin(), missions.end(), mission) == missions.end()) missions.push_back(mission);
-		}
-	}
+	const std::vector<const MissionDocument *> missions = missions_under_view(view, query.view, family);
 	JsonValue out = JsonValue::make_object();
 	out.set("path", io::json_string(query.view.path()));
 	JsonValue at = JsonValue::make_array();

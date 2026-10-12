@@ -567,6 +567,17 @@ CanvasCursor MissionMapCanvas::cursor(const ViewportContext &context, const Canv
 	                                                                                        : CanvasCursor::Default;
 }
 
+bool MissionMapCanvas::brush_ground(const ViewportContext &context, const CanvasInput &in, double &x, double &y) const {
+	if (!brush_.live() || !viewport_) return false;
+	const MissionGround &ground = viewport_->followed_terrain(context.input.view);
+	const MapBrushSpace space(viewport_->view(in.width, in.height), &ground);
+	TerrainPoint at;
+	if (!brush_.ground(&space, in, at)) return false;
+	x = at.x;
+	y = at.y;
+	return true;
+}
+
 std::string MissionMapCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	if (!viewport_ || gesture_.dragging() || !in.hovered) return std::string();
 	// S25: while the brush is live, its own line over the mission's ground.

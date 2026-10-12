@@ -3,8 +3,11 @@
 // Logic pane as it shows), draws its tool tabs with nothing raised by drawing and nothing past its room, and a tool
 // pressed there is one set_workspace of the brush. A tab pressed picks its family's first tool where the brush has
 // another family's (Paint: Surface, its legend then shown); the tab of the brush's own family picks nothing.
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <base/io/json.h>
@@ -234,11 +237,58 @@ const DocumentBase *open_at(const SessionView &v, const std::string &path) {
 	return nullptr;
 }
 
+// The mission's first item set down where the live brush meets the ground under the picture's middle (the plan's
+// tank: unlocked, framed), the mission saved with it there: its id; (x, y) where it stands.
+NodeId place_tank(MissionRun &run, const DrawnDevice &device, double &x, double &y) {
+	run.ui.mouse(device.origin.x + float(device.width) * 0.5f, device.origin.y + float(device.height) * 0.5f);
+	const MissionDocument *mission = run.mission();
+	if (!run.ui.windows.brush_ground(run.path, x, y) || !mission || mission->rows_of(MissionKind::Item).empty()) {
+		std::printf("  no tank placed: the brush meets no ground under the picture's middle\n");
+		return 0;
+	}
+	const Node *tank = mission->rows_of(MissionKind::Item)[0];
+	std::vector<Edit> edits;
+	for (const char *field : {"x", "y"}) {
+		Edit edit;
+		edit.address = {tank->id, tank->kind, 0};
+		edit.field = field;
+		edit.value = field[0] == 'x' ? x : y;
+		edits.push_back(edit);
+	}
+	run.session.handle(request::edit_record(run.path, edits));
+	run.session.handle(request::save(run.path));
+	run.session.run_operations();
+	run.settle();
+	run.take();
+	return tank->id;
+}
+
+// The z of the mission's item `id` (NaN: none).
+double item_z(MissionRun &run, NodeId id) {
+	if (const MissionDocument *mission = run.mission())
+		for (const Node *row : mission->rows_of(MissionKind::Item))
+			if (row->id == id) return static_cast<const EntityRow &>(*row).native.get_z();
+	return std::nan("");
+}
+
+// The Terrain pane's lock line as last drawn ("" none).
+std::string lock_line(MissionRun &run) {
+	const std::string text = logged_frame(run.ui);
+	const size_t at = text.find("Under the brush");
+	const size_t point = text.find("Point the brush at the ground");
+	const size_t from = at != std::string::npos ? at : point;
+	if (from == std::string::npos) return std::string();
+	std::string line = text.substr(from, text.find('\n', from) - from);
+	while (!line.empty() && (line.back() == ' ' || line.back() == '\r')) line.pop_back();
+	return line;
+}
+
 // The plan's acceptance ledger (ADR 0046 S25), with the mouse and the keys over the null-backend Ui: the toolbar's
 // Terrain (Raise, the default), a drag of it, Paint and its legend's Stone (12), a drag of it, Tiles and a cell of
 // the palette, a click laying the tile, Select, a click on the tile and R turning it; four undos taking every file back
-// to its bytes, four redos and a save writing them; Play. 11 clicks (2 drags), no typed entry. Lane A's step (the
-// tank's z following the sculpted ground, its .bms the fourth file saved) is asserted where A5 lands.
+// to its bytes, four redos and a save writing them; Play. 11 clicks (2 drags), no typed entry. The tank (the
+// mission's first item, unlocked, set under the picture's middle) follows the sculpted ground as the stroke's bake
+// lands (the follow pass), the mission the fourth file the save writes.
 void test_ledger() {
 	MissionRun run("opennova_editor_ui_terrain_ledger");
 	CHECK(open_on_terrain(run), "the mission open on its terrain");
@@ -261,11 +311,10 @@ void test_ledger() {
 		run.pump();
 		run.session.poll();
 	};
-	const float w = float(device->width), h = float(device->height);
+	float w = float(device->width), h = float(device->height);
 	const std::string cpt = "terrain/Tmap.cpt", pcx = "terrain/Tmap_m.pcx";
 	const std::string cpt_loaded = test_io::read_file_text(root + "/" + cpt);
 	const std::string pcx_loaded = test_io::read_file_text(root + "/" + pcx);
-	const std::string bms_loaded = test_io::read_file_text(root + "/" + run.path);
 	int clicks = 0;
 
 	// 1. The toolbar's Terrain: the pane, Raise the brush's tool.
@@ -279,6 +328,17 @@ void test_ledger() {
 	CHECK(workspace_sets(raised, "document", "terrain").size() == 1 && v.workspace.document(run.path).terrain &&
 	              v.workspace.terrain_brush.tool == TerrainTool::Raise,
 	      "1. one set_workspace: the Terrain pane, Raise");
+	// The picture shares its column with the pane now; the tank, unlocked, set where the brush meets the ground under
+	// its middle (the plan's scenario: framed), the mission saved with it there.
+	w = float(device->width);
+	h = float(device->height);
+	double tank_x = 0.0, tank_y = 0.0;
+	const NodeId tank = place_tank(run, *device, tank_x, tank_y);
+	CHECK(tank != 0, "the tank under the picture's middle");
+	const double tank_z = item_z(run, tank);
+	const std::string bms_loaded = test_io::read_file_text(root + "/" + run.path);
+	const std::string under = lock_line(run);
+	CHECK(under == "Under the brush: 1 entity follows the ground, 0 are height locked.", ("1. the lock line: " + under).c_str());
 
 	// 2. A drag across the middle: one gesture of the heights' strokes, the heights opened beside the mission.
 	picture_drag(run, *device, ImVec2(w * 0.42f, h * 0.5f), ImVec2(w * 0.58f, h * 0.5f), 8);
@@ -287,6 +347,27 @@ void test_ledger() {
 	CHECK(one_stroke(raised, TerrainPlane::Heights), "2. the drag: the heights' strokes under one gesture, ended");
 	const DocumentBase *heights = open_at(v, cpt);
 	CHECK(heights && heights->dirty() && v.documents.active == run.path, "2. Tmap.cpt opened beside the mission, sculpted");
+	// The stroke's bake lands in the background; the tank follows the ground with it (the follow pass), one step with
+	// the stroke.
+	// (The bake runs on a worker: a minute of the wall clock at most, polled each frame as the Shell polls it.)
+	bool landed = false;
+	for (int round = 0; round < 3000 && !landed; ++round) {
+		opennova::io::JsonValue args = opennova::io::JsonValue::make_object();
+		args.set("path", opennova::io::json_string(run.path));
+		args.set("op", opennova::io::json_string("bake"));
+		std::string error;
+		const opennova::io::JsonValue bake = run.session.query("terrain", args, error);
+		landed = !bake.get_bool("due", true) && bake.get("landed") && bake.get("landed")->number >= 1.0;
+		if (landed) break;
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		run.settle(1);
+	}
+	CHECK(landed, "2. the stroke's bake landed");
+	run.take();
+	const double tank_followed = item_z(run, tank);
+	CHECK(tank_followed != tank_z && run.mission() && run.mission()->dirty(),
+	      "2. the tank followed the raised ground as the bake landed");
+	std::printf("  the tank: z %.3f -> %.3f\n", tank_z, tank_followed);
 
 	// 3. Paint, then Stone (12) in its legend.
 	const ImGuiWindow *pane = MissionRun::drawn_window("/terrain_pane_");
@@ -422,6 +503,9 @@ void test_ledger() {
 	surface = open_at(v, pcx);
 	tiles = open_at(v, til);
 	CHECK(heights && !heights->dirty() && surface && !surface->dirty() && tiles && !tiles->dirty(), "9. all saved");
+	CHECK(test_io::read_file_text(root + "/" + run.path) != bms_loaded && run.mission() && !run.mission()->dirty() &&
+	              item_z(run, tank) == tank_followed,
+	      "9. the mission written, the fourth file, its tank where it followed the ground");
 	CHECK(!v.activity.status.empty() && v.activity.status.find('\n') == std::string::npos, "9. one status line");
 
 	// 10. Play mission, on the toolbar over the picture (the column split beside the pane).
@@ -436,6 +520,64 @@ void test_ledger() {
 	run.ui.pump = nullptr;
 }
 
+
+// The Terrain pane's lock line (S25 C1, the terrain query's lock op): under the brush where it meets the ground, the
+// entities a sculpt moves and those height locked; the tank's lock moving it from one to the other; with the pointer
+// off the picture, the cursor an MCP client placed.
+void test_lock_line() {
+	MissionRun run("opennova_editor_ui_terrain_lock_line");
+	CHECK(open_on_terrain(run), "the mission open on its terrain");
+	ViewportCommand top;
+	top.name = "top";
+	top.kind = ViewportKind::Mission;
+	run.session.handle(request::edit_in_viewport(run.path, top));
+	run.settle();
+	run.take();
+	DrawnDevice *device = run.devices.held(run.path, ViewportKind::Mission);
+	CHECK(device != nullptr && device->width > 0, "the 3D view's picture drawn");
+	if (!device || device->width <= 0) return;
+	device->ground = [](double, double) { return 0.0; };
+	run.session.handle(request::set_workspace(R"({"document": {"terrain": true}, "terrain_brush": {"tool": "raise", "radius": 16}})"));
+	run.settle();
+	run.take();
+	const float w = float(device->width), h = float(device->height);
+	double x = 0.0, y = 0.0;
+	const NodeId tank = place_tank(run, *device, x, y);
+	CHECK(tank != 0, "the tank under the picture's middle");
+	run.ui.mouse(device->origin.x + w * 0.5f, device->origin.y + h * 0.5f);
+	std::string line = lock_line(run);
+	CHECK(line == "Under the brush: 1 entity follows the ground, 0 are height locked.", ("the tank follows: " + line).c_str());
+	// Locked: kept where it stands.
+	const MissionDocument *mission = run.mission();
+	const Node *row = nullptr;
+	if (mission)
+		for (const Node *each : mission->rows_of(MissionKind::Item))
+			if (each->id == tank) row = each;
+	CHECK(row != nullptr, "the tank's row");
+	if (!row) return;
+	Edit lock;
+	lock.address = {row->id, row->kind, 0};
+	lock.field = "height_lock";
+	lock.value = int64_t(1);
+	run.session.handle(request::edit_record(run.path, lock));
+	run.settle();
+	run.take();
+	run.ui.mouse(device->origin.x + w * 0.5f, device->origin.y + h * 0.5f);
+	line = lock_line(run);
+	CHECK(line == "Under the brush: 0 entities follow the ground, 1 is height locked.", ("the tank locked: " + line).c_str());
+	// Off the picture: nothing to count, until an MCP client places the brush's cursor.
+	run.ui.away();
+	line = lock_line(run);
+	CHECK(line.find("Point the brush at the ground") == 0, ("off the picture: " + line).c_str());
+	run.session.handle(request::set_workspace("{\"terrain_brush\": {\"cursor\": [" + std::to_string(x) + ", " +
+	                                          std::to_string(y) + "]}}"));
+	run.settle();
+	run.take();
+	run.ui.away();
+	line = lock_line(run);
+	CHECK(line == "Under the brush: 0 entities follow the ground, 1 is height locked.", ("at the cursor: " + line).c_str());
+}
+
 } // namespace
 
 void run_terrain_tests() {
@@ -443,6 +585,7 @@ void run_terrain_tests() {
 	test_sculpt_parts();
 	test_wire_brush_drag();
 	test_ledger();
+	test_lock_line();
 }
 
 } // namespace editor_ui_test

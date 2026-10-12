@@ -232,11 +232,27 @@ void EditorWindows::canvas_mouse(const ViewportMouse &mouse) {
 	canvas_mice_.push_back(mouse);
 }
 
+void EditorWindows::note_brush_ground(const std::string &path, double x, double y) {
+	brush_ground_ = BrushGround{path, x, y};
+}
+
+bool EditorWindows::brush_ground(const std::string &path, double &x, double &y) const {
+	for (const BrushGround *at : {&brush_ground_, &brush_ground_before_})
+		if (!at->path.empty() && at->path == path) {
+			x = at->x;
+			y = at->y;
+			return true;
+		}
+	return false;
+}
+
 void EditorWindows::float_window(const std::string &title, float x, float y) {
 	floating_ = Floating{ title, x, y };
 }
 
 void EditorWindows::begin_frame() {
+	brush_ground_before_ = brush_ground_;
+	brush_ground_ = BrushGround();
 	// A test's undock: off its dock (Dear ImGui's queued undock, served at the next frame's start), then placed.
 	if (!floating_.title.empty()) {
 		if (ImGuiWindow *window = ImGui::FindWindowByName(floating_.title.c_str())) {

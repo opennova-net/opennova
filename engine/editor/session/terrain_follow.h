@@ -12,8 +12,11 @@
 
 namespace opennova::editor {
 
+class DocumentBase;
 class MissionDocument;
 class SessionCore;
+struct SessionView;
+struct TerrainFamily;
 
 // Whether the entity at `address` of `mission` is height-locked (its height_lock field set; a mission whose entities
 // carry none: each follows the ground).
@@ -25,6 +28,11 @@ struct GroundFollowers {
 	size_t follow = 0, locked = 0;
 };
 GroundFollowers ground_followers(const MissionDocument &mission, double x, double y, double radius);
+// The open missions a heights stroke in the view of `document` moves the entities of (the lock op's and the Terrain
+// pane's): the view's own where it is a mission, else the open missions on the terrain `family` resolves for it (the
+// graph's terrain references to its .trn).
+std::vector<const MissionDocument *> missions_under_view(const SessionView &view, const DocumentBase &document,
+		const TerrainFamily &family);
 
 // A heights bake landed on the .cpt at `cpt` (project-relative): its baked atlas went from `before` to `after` (1024 x
 // 1024 depth words each, the game's height atlas). Every mission of the project whose terrain (a .trn naming the .cpt

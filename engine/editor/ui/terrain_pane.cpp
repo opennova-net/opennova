@@ -3,9 +3,11 @@
 #include <iterator>
 #include <string>
 
+#include <editor/documents/mission_document.h>
 #include <editor/model/document_base.h>
 #include <editor/project/project_files.h>
 #include <editor/session/terrain_family.h>
+#include <editor/session/terrain_follow.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/terrain_pane_parts.h>
@@ -40,6 +42,44 @@ void draw_tools(Workspace &workspace, const TerrainBrush &brush, const TerrainTo
 		if (active) ImGui::PopStyleColor();
 		if (pressed) set_tool(workspace, active ? TerrainTool::None : tool);
 	}
+}
+
+// What a stroke of the heights moves under the brush (S25, D2; the terrain query's lock op): the entities within its
+// radius of where it meets the ground under the pointer (else of the cursor an MCP client placed) in the view's
+// mission, or in the open missions on the view's terrain: those that follow the ground and those height locked.
+void draw_lock_line(TerrainPaneContext &context) {
+	const SessionView &view = context.workspace.view();
+	const std::vector<const MissionDocument *> missions = missions_under_view(view, context.document, context.family);
+	if (missions.empty()) {
+		ImGui::TextDisabled("No open mission stands on this terrain: a sculpt moves no entity open here.");
+		return;
+	}
+	double x = 0.0, y = 0.0;
+	bool at = context.workspace.brush_ground(context.document.path(), x, y);
+	if (!at && context.brush.has_cursor) {
+		x = context.brush.cursor[0];
+		y = context.brush.cursor[1];
+		at = true;
+	}
+	if (!at) {
+		ImGui::TextDisabled("Point the brush at the ground: what a sculpt there moves shows here.");
+		return;
+	}
+	size_t follow = 0, locked = 0;
+	for (const MissionDocument *mission : missions) {
+		const GroundFollowers under = ground_followers(*mission, x, y, double(context.brush.radius));
+		follow += under.follow;
+		locked += under.locked;
+	}
+	if (follow + locked == 0) {
+		ImGui::TextDisabled("Under the brush: no entity.");
+	} else {
+		const std::string follows = std::to_string(follow) + (follow == 1 ? " entity follows" : " entities follow");
+		const std::string held = std::to_string(locked) + (locked == 1 ? " is" : " are");
+		ImGui::TextWrapped("Under the brush: %s the ground, %s height locked.", follows.c_str(), held.c_str());
+	}
+	ui_kit::tooltip("A sculpt moves an entity that follows the ground with the ground under it; a height-locked one keeps "
+	                "its height (its Height lock, beside its z).");
 }
 
 // One of the brush's numbers as a slider, set once as the drag lets go.
@@ -110,6 +150,7 @@ public:
 				draw_tools(workspace, brush, kSculpt);
 				draw_brush_part(context);
 				draw_sculpt_part(context);
+				draw_lock_line(context);
 				draw_bake_part(context);
 			});
 			tab(TerrainToolFamily::Paint, TerrainTool::Surface, [&] {

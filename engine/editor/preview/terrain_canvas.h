@@ -25,6 +25,7 @@ public:
 	OverlayList shapes(const ViewportContext &context, const CanvasInput &in) const override;
 	CanvasCursor cursor(const ViewportContext &context, const CanvasInput &in) const override;
 	std::string hover_tip(const ViewportContext &context, const CanvasInput &in) const override;
+	bool brush_ground(const ViewportContext &context, const CanvasInput &in, double &x, double &y) const override;
 	// The line under the picture while the brush is live (its hint), "" otherwise.
 	std::string hint(const ViewportContext &context, const CanvasInput &in) const;
 

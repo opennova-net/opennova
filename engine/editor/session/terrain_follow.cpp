@@ -12,6 +12,7 @@
 #include <editor/session/document_set.h>
 #include <editor/session/mission_base_terrain.h>
 #include <editor/session/session_core.h>
+#include <editor/session/terrain_family.h>
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
 
@@ -70,6 +71,24 @@ bool height_locked(const MissionDocument &mission, const NodeAddress &address) {
 	if (const auto *number = std::get_if<int64_t>(&lock)) return *number != 0;
 	if (const auto *real = std::get_if<double>(&lock)) return *real != 0.0;
 	return false;
+}
+
+std::vector<const MissionDocument *> missions_under_view(const SessionView &view, const DocumentBase &document,
+		const TerrainFamily &family) {
+	std::vector<const MissionDocument *> out;
+	if (const auto *mission = dynamic_cast<const MissionDocument *>(&document)) {
+		out.push_back(mission);
+		return out;
+	}
+	if (!view.findings.graph || family.terrain.empty()) return out;
+	for (const GraphEdge *edge : view.findings.graph->referrers_of_file(family.terrain)) {
+		if (edge->kind != ReferenceKind::Terrain) continue;
+		for (const auto &open : view.documents.open)
+			if (open->path() == edge->source)
+				if (const auto *mission = dynamic_cast<const MissionDocument *>(open.get()))
+					if (std::find(out.begin(), out.end(), mission) == out.end()) out.push_back(mission);
+	}
+	return out;
 }
 
 GroundFollowers ground_followers(const MissionDocument &mission, double x, double y, double radius) {

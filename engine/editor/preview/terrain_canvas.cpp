@@ -59,6 +59,17 @@ std::string TerrainCanvas::hint(const ViewportContext &context, const CanvasInpu
 	return brush_.hint(&space, in, &ground);
 }
 
+bool TerrainCanvas::brush_ground(const ViewportContext &context, const CanvasInput &in, double &x, double &y) const {
+	if (!brush_.live() || !viewport_) return false;
+	const auto &terrain = static_cast<const TerrainViewport &>(*viewport_);
+	const CameraBrushSpace space(context, terrain.camera(), &terrain.followed_ground(context.input.view));
+	TerrainPoint at;
+	if (!brush_.ground(&space, in, at)) return false;
+	x = at.x;
+	y = at.y;
+	return true;
+}
+
 std::string TerrainCanvas::hover_tip(const ViewportContext &context, const CanvasInput &in) const {
 	return orbit_.hover_tip(context, in);
 }

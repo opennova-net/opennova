@@ -118,6 +118,7 @@ public:
 	OverlayList shapes(const ViewportContext &context, const CanvasInput &in) const override;
 	CanvasCursor cursor(const ViewportContext &context, const CanvasInput &in) const override;
 	std::string hover_tip(const ViewportContext &context, const CanvasInput &in) const override;
+	bool brush_ground(const ViewportContext &context, const CanvasInput &in, double &x, double &y) const override;
 	// What the line under the picture says now (mission_hint.h): what the tool does, what a click or a
 	// drag would do where the pointer is.
 	std::string hint(const ViewportContext &context, const CanvasInput &in) const;

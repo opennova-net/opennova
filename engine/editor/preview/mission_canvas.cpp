@@ -819,6 +819,17 @@ const MissionGroundFacts &MissionCanvas::ground(const ViewportContext &context, 
 	return asked.facts;
 }
 
+bool MissionCanvas::brush_ground(const ViewportContext &context, const CanvasInput &in, double &x, double &y) const {
+	if (!brush_.live() || !frame_.viewport) return false;
+	const MissionGround &ground = frame_.viewport->followed_ground(context.input.view);
+	const CameraBrushSpace space(context, frame_.viewport->camera(), &ground);
+	TerrainPoint at;
+	if (!brush_.ground(&space, in, at)) return false;
+	x = at.x;
+	y = at.y;
+	return true;
+}
+
 std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInput &in) const {
 	// S25: while the brush is live, its own line.
 	if (brush_.live() && frame_.viewport) {

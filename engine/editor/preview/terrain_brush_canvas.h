@@ -65,6 +65,8 @@ public:
 	// reads it, for the hint's words (null: none).
 	void shapes(const TerrainBrushSpace *space, const CanvasInput &in, OverlayList &out) const;
 	std::string hint(const TerrainBrushSpace *space, const CanvasInput &in, const MissionGround *ground) const;
+	// Where it meets the ground under the pointer, while it is live and the pointer is over the picture.
+	bool ground(const TerrainBrushSpace *space, const CanvasInput &in, TerrainPoint &at) const;
 	// The brush the next dab strokes with as the keys held change it (Shift inverts), as a stroke's brush names it.
 	static TerrainStrokeAsk stroke_ask(const TerrainBrush &brush, bool invert);
 

@@ -457,4 +457,9 @@ std::string TerrainBrushHalf::hint(const TerrainBrushSpace *space, const CanvasI
 	return terrain_brush_hint(brush_, on_ground, at, height, ground);
 }
 
+bool TerrainBrushHalf::ground(const TerrainBrushSpace *space, const CanvasInput &in, TerrainPoint &at) const {
+	double height = 0.0;
+	return live_ && space && in.hovered && space->pointer_ground(in.mouse.x, in.mouse.y, at, height);
+}
+
 } // namespace opennova::editor
