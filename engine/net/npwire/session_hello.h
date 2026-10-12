@@ -527,6 +527,13 @@ std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg);
 // @0x620cd0; reasons CNapiNetwork_ValidateJoinRequest @0x4c61b0]
 std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg);
 
+// The CU walk's bounds: each CU is copied into its own 2048-byte slot, 64 of
+// them, so a CU of 2048 bytes or more, or a 65th, ends the walk.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - `cmp esi, 800h`
+//  @0x629B97, `cmp edi, 40h` @0x629BA3, the slot step @0x629BC2]
+inline constexpr size_t kCuSlotBytes = 2048;
+inline constexpr size_t kCuSlots = 64;
+
 // Parse a ServerAuth TLV payload (the bytes AFTER the 0x82 opcode and
 // AFTER NWU-decryption). The client uses this to recover the connection
 // result `cr` (1 = accepted), the server key `sk` (which becomes the
@@ -540,11 +547,15 @@ std::vector<uint8_t> server_auth_rejection_to_bytes(const ServerAuth &msg);
 // from the value pointer up to the first NUL, at most 511 / 63 / 63 characters.
 // An absent field reads zero, but JFC reads 1. No field is required: the caller
 // drops a 0x82 whose CI or CK is not its connection's, then accepts on any
-// nonzero CR and rejects on zero. Returns false only for a null buffer with a
-// nonzero length.
+// nonzero CR and rejects on zero. Returns false for a null buffer with a
+// nonzero length, and for a 0x82 whose walk meets a CU of kCuSlotBytes or more
+// or a CU past kCuSlots (every CU tag counts, whatever its inner shape): the
+// client's socket pass returns without queuing that 0x82, so it is dropped
+// before the CI / CK match.
 // [orig: NapiNP_HandleServerJoinResponse @0x629840 - the defaults
-//  @0x629963..0x62997F, the CI / CK match @0x629CAC..0x629CBF, the CR split
-//  @0x629CD2..0x629CD6]
+//  @0x629963..0x62997F, the CU bounds @0x629B97..0x629BA6 and their socket-pass
+//  return @0x629F0B..0x629F12, the CI / CK match @0x629CAC..0x629CBF, the CR
+//  split @0x629CD2..0x629CD6]
 bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out);
 
 } // namespace opennova

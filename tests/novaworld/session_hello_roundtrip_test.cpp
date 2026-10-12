@@ -827,6 +827,51 @@ int test_server_auth_requires_no_field() {
 	return 0;
 }
 
+// The 0x82's CU walk: every CU tag counts, whatever its inner shape and its name's case, and
+// a CU of 2048 bytes or more, or a 65th, refuses the whole 0x82 wherever it sits (the client's
+// socket pass returns without queuing it, before the CI / CK match). Below either bound the
+// walk keeps only the type-3 CUs it can read.
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629B97..0x629BA6, the socket-pass
+//  return @0x629F0B..0x629F12]
+int test_server_auth_cu_walk_bounds() {
+	std::vector<uint8_t> accept;
+	append_field(accept, "CI", {0x04, 0x00, 0x00, 0x00});
+	append_field(accept, "CK", {0xEF, 0xBE, 0xAD, 0xDE});
+	append_field(accept, "CR", {0x01, 0x00, 0x00, 0x00});
+	append_field(accept, "SK", {0x78, 0x56, 0x34, 0x12});
+	const std::vector<uint8_t> nwuid = {0x03, 'N', 'W', 'U', 'I', 'D', 0x00, 0x02, 0x00, 'x', 0x00};
+
+	// 64 CUs: 62 the inner reader cannot read, one in lower case, one NWUID.
+	std::vector<uint8_t> sixty_four = accept;
+	for (int i = 0; i < 62; ++i) append_field(sixty_four, "CU", {0x01});
+	append_field(sixty_four, "cu", {0x02, 'A', 0x00});
+	append_field(sixty_four, "CU", nwuid);
+	ServerAuth auth;
+	TEST_EXPECT(parse_server_auth(sixty_four.data(), sixty_four.size(), auth));
+	TEST_EXPECT(auth.cr == 1u && auth.cu.size() == 1 && auth.cu[0].first == "NWUID");
+
+	// A 65th CU, readable or not, before or after the other fields.
+	std::vector<uint8_t> sixty_five = sixty_four;
+	append_field(sixty_five, "CU", {0x01});
+	TEST_EXPECT(!parse_server_auth(sixty_five.data(), sixty_five.size(), auth));
+	sixty_five = sixty_four;
+	append_field(sixty_five, "CU", nwuid);
+	TEST_EXPECT(!parse_server_auth(sixty_five.data(), sixty_five.size(), auth));
+	std::vector<uint8_t> cus_first;
+	for (int i = 0; i < 65; ++i) append_field(cus_first, "CU", {0x01});
+	cus_first.insert(cus_first.end(), accept.begin(), accept.end());
+	TEST_EXPECT(!parse_server_auth(cus_first.data(), cus_first.size(), auth));
+
+	// One CU of 2047 bytes passes; one of 2048 refuses the 0x82, whatever its shape.
+	std::vector<uint8_t> long_cu = accept;
+	append_field(long_cu, "CU", std::vector<uint8_t>(2047, 0x01));
+	TEST_EXPECT(parse_server_auth(long_cu.data(), long_cu.size(), auth) && auth.cr == 1u);
+	long_cu = accept;
+	append_field(long_cu, "CU", std::vector<uint8_t>(2048, 0x01));
+	TEST_EXPECT(!parse_server_auth(long_cu.data(), long_cu.size(), auth));
+	return 0;
+}
+
 // No field of the 0x81 is required: one without HK parses with HK 0 (an empty body too), and
 // the 0x42 built from it carries no HK, as retail's join omits a zero one. The client then
 // tests the reply's identity block against its own protocol's: PN and PV1 case-insensitively,
@@ -1043,6 +1088,7 @@ int main() {
 	if (test_cs_field13_follows_the_mpmaxpacketsize_clamp() != 0) return 1;
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	if (test_server_auth_requires_no_field() != 0) return 1;
+	if (test_server_auth_cu_walk_bounds() != 0) return 1;
 	if (test_server_hello_requires_no_hk() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;
 	if (test_server_hello_omitted_metadata_parses_empty() != 0) return 1;

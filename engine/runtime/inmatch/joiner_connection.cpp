@@ -582,7 +582,8 @@ ConnectionErrorRecord JoinerConnection::connection_error_record() const {
 
 void JoinerConnection::on_server_auth(
 		const std::vector<uint8_t> &body, PollResult & /*out*/) {
-	// Any 0x82 from the connecting host is read; no field is required (parse_server_auth).
+	// Any 0x82 from the connecting host is read; no field is required, and one whose CUs overrun
+	// the walk's bounds is dropped here, before the CI / CK match (parse_server_auth).
 	ServerAuth sa;
 	if (!parse_server_auth(body.data(), body.size(), sa)) return;
 	// ServerSessionInit echoes both client identifiers. Correlate before even
