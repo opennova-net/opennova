@@ -243,6 +243,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_patch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_tile_stubs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_view_commands.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/tile_tools.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_collision.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp

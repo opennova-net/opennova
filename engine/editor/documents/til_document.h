@@ -65,8 +65,9 @@ protected:
 	// A new tile: cell 0 at the corner (0, 0), unturned (its layer settled where it goes).
 	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &rows,
 	                                std::string &error) override;
-	// Every tile a batch put in place (added, duplicated, pasted or moved) takes the layer of the row before it
-	// (the first row, the one after it), so the rows stay ascending by MED's layer.
+	// Every tile a batch put in place (added, duplicated, pasted or moved) takes the layer of the row before it (a
+	// run at the very start, the first row after it the batch did not place), so the rows stay ascending by MED's
+	// layer.
 	void settle_placed_rows(StagedRows &rows, const std::vector<NodeId> &placed) override;
 
 private:

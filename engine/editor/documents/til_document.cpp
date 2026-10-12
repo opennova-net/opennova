@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <iterator>
 #include <limits>
+#include <set>
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/model/staged_rows.h>
@@ -36,7 +37,7 @@ bool fixed_of(const Value &value, int32_t &out, std::string &error) {
 	const double scaled = std::nearbyint(number * 65536.0);
 	if (!std::isfinite(scaled) || scaled < double(std::numeric_limits<int32_t>::min()) ||
 	    scaled > double(std::numeric_limits<int32_t>::max()))
-		return error = "A tile's corner is -32768 to 32767.99998 mission units (a 16.16 word).", false;
+		return error = "A tile's corner is a 16.16 word of mission units: this one is past what the word holds.", false;
 	out = int32_t(scaled);
 	return true;
 }
@@ -89,7 +90,7 @@ RecordTable make_table() {
 		               int32_t fixed = 0;
 		               if (!fixed_of(v, fixed, e)) return false;
 		               if (fixed == std::numeric_limits<int32_t>::min())
-			               return e = "A tile's south edge is above -32768 mission units (stored negated).", false;
+			               return e = "A tile's south edge is stored negated: this one is past what the word holds negated.", false;
 		               r.as<TilOverlayEntry>().z_fixed = -fixed;
 		               return true;
 	               }}});
@@ -248,12 +249,16 @@ std::shared_ptr<Node> TilDocument::make_node(NodeKind kind, NodeId, const std::v
 }
 
 void TilDocument::settle_placed_rows(StagedRows &rows, const std::vector<NodeId> &placed) {
-	// Each in its order among the rows, so a run of tiles put in together each takes the one before it.
+	// Each in its order among the rows, so a run of tiles put in together each takes the one before it; a run at the
+	// very start takes the first row after it that the batch did not place (none: each keeps its own).
+	const std::set<NodeId> moving(placed.begin(), placed.end());
 	for (const NodeId id : placed) {
 		const size_t at = rows.index_of(id);
 		const auto &all = rows.rows();
 		if (at >= all.size()) continue;
-		const Node *neighbour = at > 0 ? all[at - 1].get() : at + 1 < all.size() ? all[at + 1].get() : nullptr;
+		const Node *neighbour = at > 0 ? all[at - 1].get() : nullptr;
+		for (size_t next = at + 1; !neighbour && next < all.size(); ++next)
+			if (!moving.count(all[next]->id)) neighbour = all[next].get();
 		if (!neighbour || neighbour->kind != kTile || all[at]->kind != kTile) continue;
 		const uint16_t layer = tile_row(*neighbour).entry.layer;
 		if (tile_row(*all[at]).entry.layer == layer) continue;
