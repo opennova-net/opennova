@@ -3964,8 +3964,9 @@ bool curated_line(const std::string &line) {
 			return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
 		});
 	}
+	// An index below the 32 maps a rotation holds (kConsoleIndexMax, the composition's cap).
 	if (t.size() >= 2 && t[0] == "MISSION" && (t[1] == "REMOVE" || t[1] == "SETNEXT"))
-		return t.size() == 3 && digits(t[2], 2);
+		return t.size() == 3 && digits(t[2], 2) && std::atoi(t[2].c_str()) <= 31;
 	if (line.compare(0, 10, "CHAT SEND ") == 0) {
 		return line.size() <= 69 && std::none_of(line.begin(), line.end(), [](char c) {
 			const auto byte = static_cast<unsigned char>(c);
