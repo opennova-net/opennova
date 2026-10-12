@@ -460,7 +460,7 @@ std::vector<uint8_t> encode_team_assign(const TeamAssign &assign);
 // positions shifted down 16). Retail's writer copies the name from the referenced
 // def's +4 field and appends the position triple only for type 1.
 // [orig: NetPacket_WriteOverlayAction @0x505d50; fanned by
-//  Server_SendOverlayActionToAlive @0x50a1b0 with send_mask 128 (alive players)]
+//  Server_SendOverlayActionToAlive @0x50a1b0 with send_mask 128 (in-match slots)]
 std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd);
 
 // S2C 0x6D, the inverse of decode_tracked_player_voice: [u8 event][u8 the

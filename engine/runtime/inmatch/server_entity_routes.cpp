@@ -82,9 +82,10 @@ void Server_FanEntityEvents(NapiNPServerCtx &ctx, world::World &world) {
 
 // The water-surface crossings the motor recorded, one S2C 0x34 each.
 void Server_RouteWaterCrossings(NapiNPServerCtx &ctx, world::World &world) {
-	// (2d) Water-surface crossings: S2C 0x34 to every ALIVE in-match player, one
-	// message per crossing the motor recorded this tick. Retail fans the splash
-	// with send_mask 128 (alive players) the moment a body or a hull crosses the
+	// (2d) Water-surface crossings: S2C 0x34 to every in-match slot (state 6/7,
+	// no entity or health read, so a dead player hears it too), one message per
+	// crossing the motor recorded this tick. Retail fans the splash with
+	// send_mask 128 (slot state 6/7) the moment a body or a hull crosses the
 	// plane, under the authority alone (single player included), so every
 	// client plays the same set at the same spot. The authority's own player
 	// is one of those connections: its copy rides the loopback as the slot
@@ -94,18 +95,15 @@ void Server_RouteWaterCrossings(NapiNPServerCtx &ctx, world::World &world) {
 	// crossing is presentation, never simulation state.
 	// [orig: Server_SendOverlayActionToAlive @0x50a1b0 — the is_authority gate
 	//  @0x50a1bf, send_mask 128 @0x50a1d3, NapiNPServer_SendFiltered over every
-	//  connection @0x50a1fb; the handler NapiNPClientMsg_PlaySoundByName
+	//  connection @0x50a1fb, its 0x80 leg @0x4C893E..0x4C8953; the handler
+	//  NapiNPClientMsg_PlaySoundByName
 	//  @0x4283A0 -> Entity_PlaySound3D_FullVolume @0x428499 over a zeroed
 	//  entity]
 	if (!world.out.water_crossings.events.empty()) {
 		const std::vector<std::vector<uint8_t>> splashes =
 				replication::build_water_cross_messages(world);
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-			if (!is_in_match(conn) || conn.link.transport == nullptr ||
-					!conn.link.owned_entity.valid())
-				continue;
-			const world::Entity *listener = world.registry.get(conn.link.owned_entity);
-			if (listener == nullptr || listener->health <= 0) continue; // the mask-128 alive filter
+			if (!active_player_recipient(conn)) continue;
 			if (conn.link.mode == replication::TransportMode::Loopback) {
 				for (const world::WaterCrossEvent &ev : world.out.water_crossings.events) {
 					world::SoundSlotEvent local;

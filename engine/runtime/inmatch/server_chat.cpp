@@ -151,10 +151,13 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	replies.push_back(std::move(own_chat));
 	conn.link.medic_request_active = true;
 	// The help call: the requester's body-model composite "<prefix>_MEDIC_REQUEST",
-	// positioned at the requester, to every alive player (mask 128). The listen
-	// host's own copy rides the local slot-sound route the death scream uses.
+	// positioned at the requester, to every slot in state 6/7 (mask 128, which
+	// reads no entity or health: the dead Medics it is for hear it, and so does
+	// the downed requester). The listen host's own copy rides the local
+	// slot-sound route the death scream uses.
 	// [orig: SoundProfile_FindByEntityAndType(entity, 1) @0x515526 ->
-	//  Server_SendOverlayActionToAlive @0x50A1B0]
+	//  Server_SendOverlayActionToAlive @0x50A1B0 (mask 0x80 @0x50A1D3);
+	//  NapiNPServer_SendFiltered @0x4C893E..0x4C8953]
 	char set_name[24] = {};
 	audio::compose_entity_sound_set(requester->anim_slot, audio::kEntitySoundMedicRequest,
 			set_name, sizeof(set_name));
@@ -167,11 +170,7 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	cmd.pos_z = static_cast<int16_t>(world::to_fixed(requester->position.z) >> 16);
 	const std::vector<uint8_t> sound_body = encode_play_sound(cmd);
 	for (NapiNPConnection &candidate : roster) {
-		if (!is_in_match(candidate) || candidate.link.transport == nullptr ||
-				!candidate.link.owned_entity.valid())
-			continue;
-		const world::Entity *listener = world->registry.get(candidate.link.owned_entity);
-		if (listener == nullptr || listener->health <= 0) continue; // the mask-128 alive filter
+		if (!active_player_recipient(candidate)) continue;
 		if (candidate.link.mode == replication::TransportMode::Loopback) {
 			world::SoundSlotEvent local;
 			local.source_handle = conn.link.owned_entity.packed;

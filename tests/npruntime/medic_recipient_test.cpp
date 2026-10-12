@@ -8,7 +8,10 @@
 // the ordinary death path never rewrites slot+0x20, so a dead or
 // respawn-pending same-team Medic still receives the downed record on a
 // teammate's death and the 0x54 + 0x14 pair on a medic request. The 0x34 help
-// call keeps its separate mask-128 alive filter.
+// call's mask 128 reads the slot state alone, so the dead Medic it is for, and
+// the downed requester, hear it too (D-NET-637) [orig:
+// Server_SendOverlayActionToAlive @0x50A1B0, mask 0x80 @0x50A1D3;
+// NapiNPServer_SendFiltered @0x4C893E..0x4C8953].
 // [orig: GameEvent_PlayerDeath @0x51739C (mask 0x580) / @0x5173AF (team
 //  filter, the victim entity's byte @0x5173A8); NapiNPServer_SendFiltered
 //  @0x4C87E0 - roster gate @0x4C889F, 0x80 @0x4C8948..0x4C8953, 0x100
@@ -216,13 +219,14 @@ int main() {
 	}
 
 	// --- The medic request (C2S 0x2E) from the downed victim in manual mode:
-	// the dead Medic receives the live window (0x54) and the STRSRV_MEDREQ
-	// chat line (0x14) but not the mask-128 help call (0x34), which the alive
-	// non-Medic still gets.
+	// the dead Medic receives the live window (0x54), the STRSRV_MEDREQ chat
+	// line (0x14) and the mask-128 help call (0x34), which every in-match slot
+	// gets, dead or alive.
 	// The requester is split too: a script moves its body to team 2 while it
 	// lies downed, and its request still reaches its slot team's Medics.
 	{
 		world.registry.get(victim)->team = 2;
+		world.registry.get(victim)->health = 0; // the downed body, as the round sim leaves it
 		roster[0].link.auto_medic_enabled = false;
 		roster[0].link.medic_request_active = false;
 		const std::string format = "%s needs a medic!";
@@ -247,8 +251,10 @@ int main() {
 				"request: the dead Medic receives the live 120-second window without bit 7");
 		expect(bodies_of(medic_rows, s2c::CHAT_BROADCAST).size() == 1,
 				"request: the dead Medic receives the STRSRV_MEDREQ chat line");
-		expect(bodies_of(medic_rows, 0x34).empty(),
-				"request: the help call keeps its own alive filter (no 0x34 to a dead Medic)");
+		expect(bodies_of(medic_rows, 0x34).size() == 1,
+				"request: the dead Medic hears the mask-128 help call (0x34)");
+		expect(bodies_of(drain(victim_wire), 0x34).size() == 1,
+				"request: the downed requester hears its own help call (0x34)");
 		const auto rifleman_rows = drain(rifleman_wire);
 		expect(bodies_of(rifleman_rows, s2c::PLAYER_DOWNED_STATE).empty() &&
 						bodies_of(rifleman_rows, s2c::CHAT_BROADCAST).empty(),

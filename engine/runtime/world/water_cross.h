@@ -1,16 +1,16 @@
 // Water-surface crossing events: the host-side queue behind the S2C 0x34 fan.
 //
 // Retail emits a positioned effect/sound the moment a body or a hull crosses the
-// water plane — once per crossing, not per frame — and fans it to every alive
-// player so their clients spawn the same splash. The motor detects the edge and
-// records it here; the network layer drains the queue and encodes 0x34. Keeping
-// the detection in the motor and the encoding in net/ preserves the engine's
-// no-Godot, no-wire-knowledge boundary and lets the edge logic be unit-tested
-// without a socket.
+// water plane, once per crossing and not per frame, and fans it to every
+// in-match player, dead or alive, so their clients spawn the same splash. The
+// motor detects the edge and records it here; the network layer drains the
+// queue and encodes 0x34. Keeping the detection in the motor and the encoding
+// in net/ preserves the engine's no-Godot, no-wire-knowledge boundary and lets
+// the edge logic be unit-tested without a socket.
 //
 // [orig: the water block of Entity_ProcessWheeledVehiclePhysics and its
 //  light/tracked twins -> CEffectWorld_SpawnEmitterAtPosition +
-//  Server_SendOverlayActionToAlive @0x50a1b0 (send_mask 128 = alive players)]
+//  Server_SendOverlayActionToAlive @0x50a1b0 (send_mask 128 = slot state 6/7)]
 #pragma once
 
 #include <cstdint>

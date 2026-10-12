@@ -1952,7 +1952,7 @@ int main() {
 	// --- 3a. The manual-mode victim calls a medic (C2S 0x2E). The medic gets
 	// the live window (0x54, no bit 7) + the chat line; the requester gets the
 	// chat line back; a same-team non-medic (the host) gets neither; the
-	// help call fans to alive players (the host's copy rides the local slot
+	// help call fans to every in-match slot (the host's copy rides the local slot
 	// route); the once-only latch then hides the 0x54 on a repeat while the
 	// chat + sound repeat; later 0x46 folds bit 7; an alive requester and an
 	// absent STRSRV_MEDREQ both no-op.
@@ -2000,7 +2000,7 @@ int main() {
 		                    medic.tag(0x34)[0][0] == 1 &&
 		                    std::string(reinterpret_cast<const char *>(
 		                            medic.tag(0x34)[0].data()) + 1) == "BM1_MEDIC_REQUEST",
-		            "alive players receive the positioned MEDIC_REQUEST composite (0x34)"))
+		            "in-match players receive the positioned MEDIC_REQUEST composite (0x34)"))
 			return 1;
 		if (!expect(host_side.tag(0x34).empty() && world.out.slot_sounds.size() == 1 &&
 		                    std::string(world.out.slot_sounds[0].set_name) == "BM1_MEDIC_REQUEST" &&
@@ -2140,8 +2140,8 @@ int main() {
 	// --- 4a. The loopback host's own downed player runs the same 0x2E handler:
 	// automatic preference, so no 0x54, but the chat line reaches the host's
 	// same-team medic (hb) and comes back to the host, and the help call fans
-	// to alive players (the host is dead: the mask-128 alive filter drops its
-	// own local copy).
+	// to every in-match slot (the host is dead, and mask 128 reads the slot
+	// state alone, so its own local copy plays too, D-NET-637).
 	// [orig: Server_BroadcastMedicRequest @0x515390 — no loopback early-out]
 	{
 		inmatch::ServerDispatchInputs inputs;
@@ -2167,8 +2167,10 @@ int main() {
 		                    medic_side.tag(0x34).size() == 1,
 		            "the host's call reaches its medic as chat + help call, with no 0x54 in automatic mode"))
 			return 1;
-		if (!expect(world.out.slot_sounds.empty() && roster[0].link.medic_request_active,
-		            "a dead host gets no local copy (mask 128) and latches its request"))
+		if (!expect(world.out.slot_sounds.size() == 1 &&
+		                    std::string(world.out.slot_sounds[0].set_name) == "BM1_MEDIC_REQUEST" &&
+		                    roster[0].link.medic_request_active,
+		            "a dead host gets its local copy (mask 128) and latches its request"))
 			return 1;
 	}
 	{
