@@ -24,6 +24,8 @@
 #include <runtime/mission/mission_kernel.h>
 
 #include <runtime/world/vehicle_motor.h>
+#include <runtime/world/collision.h>
+#include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading
@@ -40,6 +42,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <deque>
 #include <memory>
 #include <string>
@@ -1876,6 +1879,132 @@ bool run_respawn_key_resets_input_and_sends_0x41() {
 
 } // namespace
 
+// A pool-1 shooter's round takes the Indoors bit retail's client keeps for the
+// entity, which its BB walk rebuilds on each think visit (the def type picks
+// the walk: the candidate slice for type 1, none for type 5, the static
+// building prefix otherwise). Each shooter's 0x0D carries 0x800000, and the
+// rounds come 20 ticks after it, past the 17-tick candidate-slice edge:
+// - the cveh vehicle: a row a 0x0D lands after the mission start's class-init
+//   pass has no brain (+0x64; only that init builds one), so its state machine
+//   returns before re-arming +0x2AC and the think gate passes on every visit;
+//   its first visits walk the slice the 0x0D memset emptied, and once the edge
+//   fills it the walk finds the box;
+// - the type-5 row: no walk on any visit, so the bit stays clear;
+// - the type-6 object, Null class: its first visit, in the 0x0D frame's pass,
+//   walks the static prefix, which already holds the box, and NullClass then
+//   freezes its clock, so the bit stays set.
+// [orig: NapiNPClientMsg_0x00D - the memset @0x432D1B..0x432D23, the Flags
+//  store @0x432D7D, the callbacks @0x433301 / @0x43331A; Entity_UpdatePool1Slot
+//  - the gate @0x4B8E1B..0x4B8E22, the walk @0x4B8E25, the class call @0x4B8E3C;
+//  EntityAI_ProcessGroundStateMachine - the brain test @0x4583CA..0x4583D1;
+//  NullClass_HandleEvent @0x406FF4; Entity_BuildProximityList - the type-5 test
+//  @0x4B3E4A..0x4B3E4D, the empty-slice exit @0x4B3F46; the slice rebuild call
+//  @0x4C2418; RoundData_SpawnRound @0x4EC830]
+bool run_pool1_shooter_round_takes_its_indoors_state() {
+	Harness h;
+	auto &world = h.kernel->world;
+	world.registry.configure_pool(1, 16);
+	world.registry.configure_pool(2, 4);
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	// The items table: the player, a cveh vehicle (type 1), a building-type
+	// item (type 5) and an object (type 6), the last two Null class, none
+	// naming a graphic.
+	def::DefItemDef defs[4]{};
+	defs[0].id = w::kPlayerInfantryTypeId + mission::kItemIdOffset;
+	defs[0].type = 3;
+	defs[0].hp = 100;
+	defs[1].id = 1291 + mission::kItemIdOffset;
+	defs[1].type = 1;
+	std::strcpy(defs[1].ai_function, "cveh"); // the shipped vehicle class
+	defs[2].id = 1292 + mission::kItemIdOffset;
+	defs[2].type = 5;
+	defs[3].id = 1293 + mission::kItemIdOffset;
+	defs[3].type = 6;
+	def::DefItemsFile items{defs, 4};
+	h.kernel->set_items_table(&items);
+	h.kernel->resolve_collision_instances();
+	// A static building whose blink box spans (10, -20, 0) +- 5 u.
+	w::Entity building;
+	building.kind = w::EntityKind::Building;
+	building.item_type = 5;
+	building.position = {10.0f, -20.0f, 0.0f};
+	building.bound_radius = 30.0f;
+	const w::EntityHandle bh = world.registry.spawn(2, building);
+	w::CollisionModel model;
+	w::CollisionVolume bb;
+	bb.type = 8;
+	bb.flags = 0; // flags ^ 6 includes the indoor bit
+	bb.min_x = bb.min_y = bb.min_z = -5 * 65536;
+	bb.max_x = bb.max_y = bb.max_z = 5 * 65536;
+	model.volumes.push_back(bb);
+	w::CollisionSection sec;
+	sec.volume_count = 1;
+	model.sections.push_back(sec);
+	h.kernel->collision.assign_entity(bh, h.kernel->collision.add_model(std::move(model)));
+	h.kernel->collision.build_initial_tables(world);
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	world.tables.weapons.entries.resize(2);
+	world.tables.weapons.entries[1].valid = true;
+	world.tables.weapons.entries[1].ammo_index = 0;
+	struct Case {
+		uint16_t handle;
+		uint16_t type_id;
+		int32_t x;
+		bool indoors;
+		const char *what;
+	};
+	const Case cases[] = {
+		{0x1003, 1291, 10, true, "a cveh vehicle inside a BB: its candidate walk finds the box"},
+		{0x1004, 1291, 60, false, "a cveh vehicle outside any BB: the walk clears the bit"},
+		{0x1005, 1292, 10, false, "a type-5 row runs no walk: the bit stays clear"},
+		{0x1006, 1293, 10, true, "a Null-class object inside a BB: its first walk set the bit"},
+	};
+	PoolSpawnBatch batch;
+	for (const Case &c : cases) {
+		PoolSpawnRecord rec;
+		rec.spawn_flags = 0x0020; // the Flags dword rides
+		rec.slot_id = c.handle;
+		rec.item_type_id = c.type_id;
+		rec.pos_x = c.x << 16;
+		rec.pos_y = -20 << 16;
+		rec.pos_z = 2 << 16;
+		rec.entity_flags = w::kEntityFlagIndoors;
+		batch.records.push_back(rec);
+	}
+	h.role.runtime->view().apply(s2c::POOL_SPAWN, encode_pool_spawn_batch(batch));
+	// Ticks after the 0x0D: past the 17-tick candidate-slice edge, so the
+	// vehicle's slice holds the building.
+	for (int t = 0; t < 20; ++t) h.role.run_tick(h.input);
+	bool ok = true;
+	for (const Case &c : cases) {
+		ok &= expect(h.role.runtime->state().find(c.handle) != nullptr, "the 0x0D row landed");
+		world.round_sim.reset();
+		FrameUpdate frame;
+		frame.carried_handle = 0xFFFF;
+		frame.health = 100;
+		RoundEventRecord ev;
+		ev.flags = kRoundEventFlagAdmIndexed;
+		ev.adm_index = 1;
+		ev.shooter_handle = c.handle;
+		frame.round_events.push_back(ev);
+		h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
+		const w::LiveRound *round = nullptr;
+		for (const w::LiveRound &r : world.round_sim.rounds)
+			if (r.active) round = &r;
+		ok &= expect(round != nullptr, "the round event spawned its round");
+		if (round == nullptr) continue;
+		ok &= expect(round->indoors_word == c.indoors && round->indoors_flags == c.indoors, c.what);
+	}
+	return ok;
+}
+
 int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
@@ -1913,6 +2042,7 @@ int main() {
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
 	ok &= run_proxy_rendezvous_pump();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
+	ok &= run_pool1_shooter_round_takes_its_indoors_state();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;

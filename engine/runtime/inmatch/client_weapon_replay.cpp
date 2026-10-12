@@ -1,6 +1,7 @@
 #include "client_weapon_replay.h"
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/joiner_role.h>
+#include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/world/world.h>
 #include <runtime/world/local_player.h>
@@ -87,6 +88,39 @@ void replica_weapon_action_source(const replication::ClientEntityState &shooter,
     source.action_slot = &selected->primary_weapon_slot;
     source.action_slot_def = &def->action_fsm;
     source.action_allowed = true;
+}
+
+// A person row's mirror is its 0x0C word, which the replica resolver re-derives
+// every motion tick, as retail's person update does. A pool-1 row's bit is
+// recomputed here, at the round event, by the BB walk retail's client runs on
+// the entity on each think visit (+0x2AC nonpositive), which the def's class
+// callback re-arms (the lighting feed's walk, role_feeds.cpp): none for a def
+// of type 5, the candidate slice (+0x1BC / +0x1C0) for type 1 or 3, the static
+// building prefix (which never holds a pool-1 source, so the self-skip is
+// moot) otherwise. For a brainless row of the vehicle classes (cveh, chel,
+// cbot, cpln, ctrn), one a 0x0D lands after the mission start's class-init
+// pass, and for a class with no handler, the visit runs every tick and the
+// walk matches it; a vehicle the load stream brought (brained at the mission
+// start) and any other class differ (D-COL-13). Another row keeps its received
+// word, where retail's staggered pool-2 loop rebuilds the bit (D-COL-13).
+// [orig: NapiNPClientMsg_0x00D @0x432D7D; Entity_UpdateAllEntities @0x4C2100,
+// the pool-1 walk @0x4C21B9..0x4C21E9 -> Entity_UpdatePool1Slot - the +0x2AC
+// test @0x4B8E1B, the call @0x4B8E25; Entity_BuildProximityList @0x4B3DC0 -
+// the type-5 test @0x4B3E4A..0x4B3E4D, the candidate walk @0x4B3F3E..0x4B3F93,
+// the static prefix @0x4B3E65..0x4B3F39; the pool-2 call @0x4C229C]
+bool replica_shooter_indoors(mission::MissionKernel &kernel,
+        const replication::ClientEntityState &row) {
+    const world::EntityHandle h{row.handle};
+    if (h.pool() == 0) return (row.rm_entity_flags & world::kEntityFlagIndoors) != 0;
+    if (h.pool() != 1)
+        return ((row.spawn_entity_flags | row.rm_entity_flags) & world::kEntityFlagIndoors) != 0;
+    const uint8_t def_type = kernel.wire_collision_shape_for_type(row.type_id).item_type;
+    if (def_type == 5) return false; // no walk: the cleared bit stays clear
+    const int32_t at[3] = {row.x, row.y, row.z};
+    world::BlinkAccum blink;
+    kernel.collision.query_wire_blink_boxes_at_point(
+            kernel.world, row.handle, at, def_type == 1 || def_type == 3, blink);
+    return (blink.flags & world::kBlinkIndoorsBit) != 0;
 }
 
 // One pump per selected slot: occupied guns via their pool-0 borrower, then

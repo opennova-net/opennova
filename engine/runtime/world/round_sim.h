@@ -162,6 +162,7 @@ struct RoundSourceState {
     uint8_t stance_category = 2; // 0 prone, 1 crouch/mounted, 2 standing/air/water
     bool scope_raised = false;
     bool underwater = false;
+    bool indoors = false; // entity+0x24 & 0x800000, the bit the spawn stamps into its round
     int32_t *recoil_pitch = nullptr;              // entity+0x380
     const int32_t *weapon_weight_spread = nullptr; // entity+0x384
     uint8_t equipped_adm_index = 0; // entity+0x2B0, the zero-elevation row's AdmDef
@@ -337,6 +338,15 @@ struct LiveRound {
     // @0x4eaa15]. The zip row's ClipWaterFx gate reads it
     // [orig: AmmoDef_ProcessImpactEffect @0x40a18d..0x40a1b1].
     int32_t prev_z_q16 = 0;
+    // The round's Indoors bits, stamped at the spawn from the shooter's Flags
+    // 0x800000 and never re-derived by a ballistic tick: bit 0x80 of the
+    // +0x114 ammo-flags copy (every spawn leg) and the round's own Flags
+    // 0x800000 (the single-round leg alone; the pellet fans set only the
+    // word bit). [orig: RoundData_SpawnRound @0x4EC830..0x4EC83F;
+    // Weapon_SpawnProjectileBurst @0x4EBB05..0x4EBB13;
+    // Weapon_SpawnProjectileBurstWithSpread @0x4EBDCE..0x4EBDDC]
+    bool indoors_word = false;
+    bool indoors_flags = false;
 };
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer

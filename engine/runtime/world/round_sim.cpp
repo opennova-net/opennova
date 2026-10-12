@@ -815,6 +815,18 @@ int32_t round_zero_elevation(const World &world, const RoundSpawnParams &params)
             : 0;
 }
 
+// The shooter's Flags 0x800000 (its last BB state) at the spawn, the bit
+// every spawn leg stamps into its round; no source entity stamps nothing.
+// A decoded remote shooter reads its replica's Flags mirror.
+// [orig: RoundData_SpawnRound @0x4EC827..0x4EC833; the pellet fans
+//  @0x4EBB01..0x4EBB0C / @0x4EBDBC..0x4EBDD5]
+bool round_source_indoors(const World &world, const RoundSpawnParams &params) {
+    if (params.source_state != nullptr) return params.source_state->indoors;
+    const Entity *shooter = world.registry.get(params.owner);
+    return shooter != nullptr &&
+           ((shooter->flags | shooter->engine_flags) & kEntityFlagIndoors) != 0;
+}
+
 // A spawned round that is not SILENCED (ammo flag 8) marks its shooter with
 // Flags 0x4000, the SM scan's x6 priority weight until a perception scan
 // clears it; both Flags views carry the bit.
@@ -1280,6 +1292,11 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     // @0x53f440 runs its presentation right after Entity_FireWeaponAndSendPacket].
     record_round_fire(world, *this, descriptor);
     ++active_count;
+    // A round an indoors body fires takes both Indoors bits, the +0x114 word's
+    // 0x80 and its own Flags 0x800000 [orig: RoundData_SpawnRound - the
+    // shooter's Flags test @0x4EC830, the +0x114 OR @0x4EC835, the Flags OR
+    // @0x4EC83F].
+    if (round_source_indoors(world, params)) r.indoors_word = r.indoors_flags = true;
     // The shooter's fired mark precedes the recoil in the spawn tail [orig:
     // RoundData_SpawnRound `test byte ptr [edi],8; jnz; or dword ptr
     // [ebp+24h],4000h` @0x4EC842..0x4EC847].
@@ -1303,6 +1320,10 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
     if (count > 32) count = 32;
     if (count <= 0) count = 1;
     Entity *owner_ent = world.registry.get(params.owner);
+    // Each pellet of an indoors body's fan takes the +0x114 word's 0x80 alone,
+    // never the Flags bit [orig: Weapon_SpawnProjectileBurst @0x4EBB05..0x4EBB13;
+    // Weapon_SpawnProjectileBurstWithSpread @0x4EBDCE..0x4EBDDC].
+    const bool source_indoors = round_source_indoors(world, params);
     const uint32_t base_yaw = static_cast<uint32_t>(params.dir_yaw_bam) & 0xFFFF0000u;
     const uint32_t base_pitch = static_cast<uint32_t>(params.dir_pitch_bam) & 0xFFFF0000u;
     int first_slot = -1;
@@ -1363,6 +1384,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.trail_slot = -1;
         r.yaw_bam = yaw;
         r.pitch_bam = pitch;
+        r.indoors_word = source_indoors;
         if (first_slot < 0) first_slot = slot;
         ++active_count;
     }
@@ -1757,6 +1779,21 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         // `ignore` rounds skip the stock sweep after their class motor.
         if ((ammo_flags & kAmmoFlagIgnore) != 0) continue;
 
+        // The ballistic leg's Z -1.0 floor: a round below it releases silently,
+        // ahead of the sweep, unless bit 0x80 of its +0x114 word is set (the
+        // ammo's NoCollide or the spawn's Indoors stamp); the Flags bit is not
+        // read here [orig: Projectile_UpdatePhysics - the word's sign test
+        // @0x4EA0C5, the Z compare @0x4EA0C9..0x4EA0D0, jl to the release call
+        // @0x4E9E6D; the useownmove leg returns @0x4EA069 before it].
+        if ((ammo_flags & kAmmoFlagUseOwnMove) == 0 &&
+            (ammo_flags & def::DEF_AMMO_FLAG_NOCOLLIDE) == 0 && !r.indoors_word &&
+            to_fixed(r.pos.z) < -io::kFp16OneInt) {
+            if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
+            r.active = false;
+            --active_count;
+            continue;
+        }
+
         // The `move`-row emitter's lifecycle, tested BEFORE the move — every
         // test reads the pre-move position, since the function's only
         // Position.Z store sits after them [orig: Projectile_UpdatePhysics
@@ -1856,23 +1893,36 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             position_q16.z + velocity_q16.z,
         };
 
+        // The deep floor: a round whose ray end lies below Z -16000.0 releases
+        // silently ahead of the sweep, whatever its bits, the floor an
+        // indoors-stamped round flying under the terrain meets.
+        // [orig: Projectile_UpdatePhysics - the end Z = Z + vz @0x4EA232..0x4EA235,
+        //  `cmp esi, 0C1800000h` @0x4EA301, the jl @0x4EA315 to the release call
+        //  @0x4E9E6D (Projectile_ReleaseEffects @0x4E8280)]
+        if (end_q16.z < static_cast<int32_t>(0xC1800000u)) {
+            if (r.trail_slot >= 0) trails.request_kill(r.trail_slot);
+            r.active = false;
+            --active_count;
+            continue;
+        }
+
         ProjectileTrace trace;
         trace.start = position_q16;
         trace.end = end_q16;
         trace.owner = r.owner;
         trace.radius_q16 = ammo != nullptr ? ammo->bullet_radius_fp16 : 0;
         trace.ammo_flags = ammo_flags;
-        // Non-building projectiles refresh their own BB membership; the
-        // shooter can be in a different room [orig: Entity_BuildProximityList
-        // @0x4B3DC0; Projectile_UpdatePhysics terrain gate @0x4EA2F0]. Retail's
-        // ballistic leg has no such refresh: its round keeps its spawn's
-        // indoors bits, whose gate skips the terrain (D-COL-12).
-        // [orig: the refresh runs on the useownmove leg alone, @0x4E9F21;
-        //  the gate's tests @0x4EA375 / @0x4EA38A]
-        const int32_t blink_position[3] = {position_q16.x, position_q16.y, position_q16.z};
-        BlinkAccum blink;
-        queries->query_blink_boxes_at_point(world, blink_position, blink);
-        trace.walk_terrain = (blink.flags & kBlinkIndoorsBit) == 0;
+        // The terrain gate skips the raycast on either of the round's Indoors
+        // bits, which its spawn stamped and no ballistic tick re-derives: the
+        // BB refresh (Entity_BuildProximityList @0x4B3DC0) runs on a live round
+        // only inside the useownmove leg, so a round fired indoors crosses the
+        // terrain it meets outside the BB and one fired outdoors stops at the
+        // terrain inside one. The +0x114 word's 0x80 also carries the ammo's
+        // NoCollide, which the trace tests itself. [orig: Projectile_UpdatePhysics
+        // terrain gate @0x4EA2F0 - the +0x114 test @0x4EA375, the Flags test
+        // @0x4EA38A, ahead of the Terrain_RaycastHeightmapHiRes_Thunk call
+        // @0x4EA3A9; the refresh call @0x4E9F21]
+        trace.walk_terrain = !r.indoors_word && !r.indoors_flags;
         // Only decoded remote presentation rounds may trace the client-state
         // proxy projections (person + dynamic). A default Authoritative round
         // in a non-authority MP world is consequence-gated above, but it must
