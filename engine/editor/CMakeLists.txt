@@ -47,6 +47,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/model/edit_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/finding_code_row.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/raster_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/raster_history.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/raster_plane.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/staged_rows.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/table_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/text_document.cpp

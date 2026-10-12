@@ -16,6 +16,7 @@
 namespace opennova::editor {
 
 class Document;
+class RasterDocument;
 class TextDocument;
 
 // A file beside a document as the session found it (DocumentType::companions): none there, its bytes, or there
@@ -59,8 +60,8 @@ bool is_line_ends_restore(const Edit &edit);
 // What a document holds is its kind's. The record document (Document, model/document.h) holds
 // rows of records that every edit addresses by identity and field (as_records() is it; null for
 // any other kind of document); the text document (TextDocument, model/text_document.h, S13 D9)
-// holds a text whose spans its edits replace (as_text()); a raster (a terrain's depth map) will
-// hold its own content. A document of another kind than records takes its changes as Apply edits
+// holds a text whose spans its edits replace (as_text()); the raster document (RasterDocument,
+// model/raster_document.h, S25) holds planes of texels its edits write (as_raster()). A document of another kind than records takes its changes as Apply edits
 // whose payload its type made (EditPayload), implementing apply_edits, the history, serialize and
 // read_source. The base keeps the rules every kind obeys: a snapshot and a blocked document take
 // no edit, undo or redo, and a blocked one no save.
@@ -221,6 +222,10 @@ public:
 	// caller that reads lines and spans asks first (text_of).
 	virtual const TextDocument *as_text() const { return nullptr; }
 	virtual TextDocument *as_text() { return nullptr; }
+	// The raster document this is (model/raster_document.h, S25: a terrain's heights, a painted map), null
+	// for another kind of document.
+	virtual const RasterDocument *as_raster() const { return nullptr; }
+	virtual RasterDocument *as_raster() { return nullptr; }
 	// Whether it holds its file's bytes whole, edited a whole file at a time (ADR 0046 S18: a texture's
 	// texels; round S23: a wave's samples), which its type's own hooks read (documents/document_types.h,
 	// DocumentContent::Bytes).

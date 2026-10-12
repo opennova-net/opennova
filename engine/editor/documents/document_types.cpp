@@ -263,6 +263,7 @@ DocumentContent content_made(const DocumentType &type) {
 	const std::unique_ptr<DocumentBase> made = type.make();
 	if (records_of(*made)) return DocumentContent::Records;
 	if (text_of(*made)) return DocumentContent::Text;
+	if (made->as_raster()) return DocumentContent::Raster;
 	return made->holds_bytes() ? DocumentContent::Bytes : DocumentContent::Other;
 }
 
