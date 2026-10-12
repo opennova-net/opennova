@@ -180,9 +180,9 @@ MissionNamesFile read_names_file(const bms::File &mission, const std::vector<mis
 		return out;
 	}
 	// The editor's own: what it reads, written again, is the bytes read (a file the original editor wrote says when
-	// it saved it in its first line, and writes keys the editor's writer does not). Each entity's base height is the
-	// one read (the writer writes an entity's own where it is given none), so a file the editor wrote over the
-	// terrain it sampled reads as its own whatever the terrain.
+	// it saved it in its first line, and writes keys the editor's writer does not). The file read holds the .mis's
+	// own frame (mission_mis.h), which the writer writes as it stands, so a file the editor wrote over the terrain it
+	// sampled reads as its own whatever the terrain.
 	{
 		bms::File again = read;
 		mission::sync_counts(again);
