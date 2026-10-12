@@ -1242,6 +1242,13 @@ int test_untrusted_proxy_header_ignored(Harness &h) {
 // generation.
 constexpr uint32_t kConcurrentRid = 2000;
 constexpr int kConcurrentRegistrations = 16;
+// The host writes run back to back, each re-taking the write lock moments after
+// the last COMMIT, and SQLite's busy handler polls (1 ms sleeps growing to
+// 100 ms) rather than queueing, so a registration's BEGIN IMMEDIATE can starve
+// behind the whole run. The pool keeps the server's busy timeout, so that run
+// must fit inside it: at synchronous=FULL every commit fsynced the WAL, and on
+// a loaded disk (WSL2's, under a parallel build) the run once outlasted 5 s
+// and 13 of the 16 registrations failed "database is locked".
 constexpr int kHostGenerations = 40;
 // The case checks that the replies are each request's own and consistent, not
 // how fast they come: the bcrypt registrations queue behind Crow's few workers
@@ -3361,6 +3368,9 @@ int main() {
 		// Declared first, so it outlives the pool and the listener: the database
 		// file and its WAL siblings go only once every connection is closed.
 		test_temp::TempDir temp("http_routes");
+		// The server's own busy timeout (kDefaultBusyTimeoutMs), unlike
+		// db_concurrency_test's stress margin: a write that holds the lock past
+		// it fails here as it would in production.
 		ConnectionPool pool(temp.path / "novaworld.db");
 		{
 			auto boot = pool.acquire();

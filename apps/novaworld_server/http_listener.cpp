@@ -812,6 +812,7 @@ void HttpListener::register_public_api_routes() {
 			stats["updatedAtMs"] = static_cast<int64_t>(now_ms);
 			out["stats"] = std::move(stats);
 		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[http] /api/stats failed: %s\n", e.what());
 			out["error"] = e.what();
 		}
 		return out;
@@ -903,6 +904,7 @@ void HttpListener::register_public_api_routes() {
 			}
 			out["games"] = std::move(arr);
 		} catch (const db::SqliteError &e) {
+			std::fprintf(stderr, "[http] /api/games failed: %s\n", e.what());
 			out["error"] = e.what();
 		}
 		return out;
@@ -958,7 +960,10 @@ void HttpListener::register_public_api_routes() {
 						re["type"]        = text(s.type);
 						roster_entries.push_back(std::move(re));
 					}
-				} catch (const db::SqliteError &) { /* ignore */ }
+				} catch (const db::SqliteError &ex) {
+					// The host goes out without its roster.
+					std::fprintf(stderr, "[http] /api/hosts roster failed: %s\n", ex.what());
+				}
 				e["roster"] = std::move(roster_entries);
 				std::vector<crow::json::wvalue> player_entries;
 				try {
@@ -971,7 +976,10 @@ void HttpListener::register_public_api_routes() {
 						pe["peer_ip"]  = text(p.peer_ip);
 						player_entries.push_back(std::move(pe));
 					}
-				} catch (const db::SqliteError &) { /* ignore */ }
+				} catch (const db::SqliteError &ex) {
+					// The host goes out without its player list.
+					std::fprintf(stderr, "[http] /api/hosts player list failed: %s\n", ex.what());
+				}
 				e["player_list"] = std::move(player_entries);
 				entries.push_back(std::move(e));
 			}

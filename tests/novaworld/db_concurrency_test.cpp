@@ -75,6 +75,13 @@ constexpr int kUsersPerRegistrar = 5;
 constexpr int kHosts = 3;
 constexpr int kGenerationsPerWriter = 50;
 constexpr int kReaders = 3;
+// The pool's busy timeout, raised from the server's 5 s to 60 s as a deliberate
+// stress margin: this test runs every writer flat out at once, and SQLite's
+// polling busy handler can starve one writer behind the others' back-to-back
+// commits for longer than 5 s on a loaded host (a CI runner, WSL2's virtual
+// disk under a parallel build). What it asks is that no write is lost or
+// mixed, not how long one waits; the route harness keeps the server's 5 s.
+constexpr int kBusyTimeoutMs = 60000;
 
 // Everything a worker thread reports, checked by main() after the join.
 struct Failures {
@@ -161,20 +168,11 @@ void wait_for(const std::atomic<bool> &go) {
 	while (!go.load()) std::this_thread::yield();
 }
 
-// A worker's lease, its busy timeout raised from the server's 5 s to 60 s: on
-// a loaded CI runner one writer can queue behind every other writer's WAL fsync
-// for longer than 5 s, and how long a write waits is not what this test asks.
-ConnectionPool::Lease lease(ConnectionPool &pool) {
-	auto conn = pool.acquire();
-	conn->exec("PRAGMA busy_timeout = 60000;");
-	return conn;
-}
-
 // The NW UDP side of one host: re-sends ClientHostRequest (upsert_host and the
 // roster in one transaction), each generation with a higher MissionName.
 void write_host_udp(ConnectionPool &pool, uint32_t rid, const std::atomic<bool> &go) {
 	try {
-		auto conn = lease(pool);
+		auto conn = pool.acquire();
 		opennova::LobbySession session;
 		session.set_database(conn.get());
 		session.set_rid_generator([rid] { return rid; });
@@ -199,7 +197,7 @@ void write_host_udp(ConnectionPool &pool, uint32_t rid, const std::atomic<bool> 
 // blob's columns, write it and the roster back), never carrying MissionName.
 void write_host_gate(ConnectionPool &pool, uint32_t rid, const std::atomic<bool> &go) {
 	try {
-		auto conn = lease(pool);
+		auto conn = pool.acquire();
 		wait_for(go);
 		for (int generation = 1; generation <= kGenerationsPerWriter; ++generation) {
 			const std::string tag = tag_of('g', generation);
@@ -224,7 +222,7 @@ void write_host_gate(ConnectionPool &pool, uint32_t rid, const std::atomic<bool>
 void read_hosts(ConnectionPool &pool, const std::vector<uint32_t> &rids,
                 const std::atomic<bool> &writing, std::atomic<int> &reads) {
 	try {
-		auto conn = lease(pool);
+		auto conn = pool.acquire();
 		Database &db = *conn;
 		std::map<uint32_t, int> last_mission;
 		while (writing.load()) {
@@ -308,7 +306,7 @@ void register_users(ConnectionPool &pool, int registrar, const std::atomic<bool>
 			p.password = "pw";
 			p.pcid     = pcid(0xffff);
 			p.nwhandle = "contested";
-			const auto result = create_user(*lease(pool), p);
+			const auto result = create_user(*pool.acquire(), p);
 			if (result.ok) {
 				contested_ok.fetch_add(1);
 			} else if (result.error_code == "username_exists") {
@@ -324,7 +322,7 @@ void register_users(ConnectionPool &pool, int registrar, const std::atomic<bool>
 			p.password = "pw";
 			p.pcid     = pcid(n);
 			p.nwhandle = p.username;
-			auto conn = lease(pool);
+			auto conn = pool.acquire();
 			const auto result = create_user(*conn, p);
 			if (!result.ok) {
 				g_failures.add(who + p.username + ": " + result.error_code + " " +
@@ -345,7 +343,7 @@ void register_users(ConnectionPool &pool, int registrar, const std::atomic<bool>
 }
 
 int run(const std::filesystem::path &db_path) {
-	ConnectionPool pool(db_path);
+	ConnectionPool pool(db_path, kBusyTimeoutMs);
 	std::vector<uint32_t> rids;
 	{
 		auto boot = pool.acquire();

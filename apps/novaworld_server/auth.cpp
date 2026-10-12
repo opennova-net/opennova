@@ -114,6 +114,14 @@ MutationResult err(const char *code, const char *msg) {
 	return m;
 }
 
+// A "db_error" result, logged here with the operation that failed: the
+// routes hand the result to the caller, so without this the failure (a
+// SqliteError's extended code and wait among it) never reaches the log.
+MutationResult db_err(const char *op, const std::exception &e) {
+	std::fprintf(stderr, "[auth] WARN %s failed: %s\n", op, e.what());
+	return err("db_error", e.what());
+}
+
 } // namespace
 
 uint64_t password_verifications() {
@@ -161,7 +169,9 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 		try {
 			db.exec("UPDATE players SET last_login = CURRENT_TIMESTAMP WHERE id = ?;",
 			        {opennova::db::BindValue(user->id)});
-		} catch (const opennova::db::SqliteError &) { /* ignore */ }
+		} catch (const opennova::db::SqliteError &e) {
+			std::fprintf(stderr, "[auth] WARN last_login update failed: %s\n", e.what());
+		}
 		std::function<void(int64_t)> hook;
 		{
 			std::lock_guard<std::mutex> lock(g_password_accepted_hook_mu);
@@ -182,7 +192,8 @@ std::optional<UserRecord> get_user_by_username(opennova::db::Database &db,
 				{ opennova::db::BindValue(username), opennova::db::BindValue(username) });
 		if (rows.empty()) return std::nullopt;
 		return row_to_user(rows.front());
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::SqliteError &e) {
+		std::fprintf(stderr, "[auth] WARN user lookup by name failed: %s\n", e.what());
 		return std::nullopt;
 	}
 }
@@ -195,7 +206,8 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 				{ opennova::db::BindValue(id) });
 		if (rows.empty()) return std::nullopt;
 		return row_to_user(rows.front());
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::SqliteError &e) {
+		std::fprintf(stderr, "[auth] WARN user lookup by id failed: %s\n", e.what());
 		return std::nullopt;
 	}
 }
@@ -300,7 +312,7 @@ MutationResult update_server_status(opennova::db::Database &db,
 		m.id = 1;
 		return m;
 	} catch (const opennova::db::SqliteError &e) {
-		return err("db_error", e.what());
+		return db_err("update_server_status", e);
 	}
 }
 
@@ -440,7 +452,7 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 	try {
 		if (auto taken = duplicate()) return *taken;
 	} catch (const opennova::db::SqliteError &e) {
-		return err("db_error", e.what());
+		return db_err("create_user", e);
 	}
 
 	// Hash before the transaction below: bcrypt is slow, and the write lock
@@ -449,7 +461,7 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 	try {
 		hashed = hash_password(p.password);
 	} catch (const std::exception &e) {
-		return err("db_error", e.what());
+		return db_err("create_user password hash", e);
 	}
 
 	// Checked again inside one transaction with the insert and the id read:
@@ -473,7 +485,7 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 		tx.commit();
 		return m;
 	} catch (const opennova::db::SqliteError &e) {
-		return err("db_error", e.what());
+		return db_err("create_user", e);
 	}
 }
 
@@ -484,7 +496,7 @@ MutationResult delete_user(opennova::db::Database &db, int64_t id) {
 		        {opennova::db::BindValue(id)});
 		if (db.changes() == 0) return err("not_found", "no such user");
 	} catch (const opennova::db::SqliteError &e) {
-		return err("db_error", e.what());
+		return db_err("delete_user", e);
 	}
 	MutationResult m;
 	m.ok = true;
@@ -546,7 +558,7 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 		try {
 			add_set("password_hash", hash_password(*p.password_plaintext));
 		} catch (const std::exception &e) {
-			return err("db_error", e.what());
+			return db_err("update_user password hash", e);
 		}
 	}
 	// A revoking update also moves the account's credentials generation, in
@@ -578,7 +590,7 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 		}
 		tx.commit();
 	} catch (const opennova::db::SqliteError &e) {
-		return err("db_error", e.what());
+		return db_err("update_user", e);
 	}
 	MutationResult m;
 	m.ok = true;
@@ -673,7 +685,7 @@ MutationResult update_game_access(opennova::db::Database &db, int64_t user_id,
 		m.id = user_id;
 		return m;
 	} catch (const opennova::db::SqliteError &e) {
-		return err("db_error", e.what());
+		return db_err("update_game_access", e);
 	}
 }
 
