@@ -22,6 +22,7 @@
 #include "terrain/terrain_static_shadow_rasterizer.h"
 #include "terrain/terrain_tile_cache_device.h"
 #include <runtime/terrain/terrain_frame.h>
+#include <runtime/terrain_query/terrain_atlas_rects.h>
 
 #include <cstdint>
 #include <optional>
@@ -367,6 +368,16 @@ public:
 	int get_refresh_normal_quadrants() const { return refresh_normal_quadrants_; }
 	bool is_refresh_normals_in_place() const { return refresh_normals_in_place_; }
 	int64_t get_refresh_pages_retired() const { return refresh_pages_retired_; }
+	// The plane's rects each refresh_region showed again (where a lookup reads a changed height: the rect's
+	// mission rects over the grid's sectors), each with the refresh's serial, the last kRefreshedKept kept: what
+	// the foliage over this terrain grows again (FoliageDispatcher takes those past the serial it last took).
+	struct RefreshedRect {
+		uint64_t serial = 0;
+		opennova::terrain::TerrainWorldRect rect;
+	};
+	static constexpr size_t kRefreshedKept = 512;
+	uint64_t get_refresh_serial() const { return refresh_serial_; }
+	const std::vector<RefreshedRect> &get_refreshed_world_rects() const { return refreshed_rects_; }
 	// One tile's LOD mesh as the last build or refresh made it (the flat fallback's where `p_flat`); null
 	// where it has none. The test seam that compares a refreshed terrain with a fresh build.
 	Ref<ArrayMesh> get_tile_lod_mesh(int p_tile, int p_lod, bool p_flat) const;
@@ -454,6 +465,8 @@ private:
 	int refresh_normal_quadrants_ = 0;
 	bool refresh_normals_in_place_ = false;
 	int64_t refresh_pages_retired_ = 0;
+	uint64_t refresh_serial_ = 0;
+	std::vector<RefreshedRect> refreshed_rects_;
 	Vector4 ground_overlay_rect_;
 	Color ground_overlay_outside_;
 	bool ground_overlay_on_ = false;

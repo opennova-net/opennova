@@ -1531,6 +1531,20 @@ bool Terrain::refresh_region(const opennova::terrain::CoordsRect &p_rect, const 
 		// The heightfield and the pages built again whole.
 		_load_textures();
 	}
+	// Where the changed heights show, for the foliage over them (its cells grow again).
+	if (p_rect.w > 0 && p_rect.h > 0) {
+		const opennova::terrain::TerrainHeightField field = opennova::terrain::height_field_from(cpt, trn);
+		++refresh_serial_;
+		for (const opennova::terrain::TerrainWorldRect &rect : opennova::terrain::terrain_atlas_world_rects(
+					 opennova::terrain::terrain_atlas_routing(field), p_rect, opennova::terrain::kTerrainHeightTaps,
+					 field.locks)) {
+			refreshed_rects_.push_back(RefreshedRect{refresh_serial_, rect});
+		}
+		if (refreshed_rects_.size() > kRefreshedKept) {
+			refreshed_rects_.erase(refreshed_rects_.begin(),
+					refreshed_rects_.begin() + std::ptrdiff_t(refreshed_rects_.size() - kRefreshedKept));
+		}
+	}
 	refresh_tiles_remeshed_ = tiles_remeshed;
 	refresh_normal_quadrants_ = 0;
 	for (const bool written : quadrants) refresh_normal_quadrants_ += written ? 1 : 0;

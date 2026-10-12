@@ -319,6 +319,13 @@ public:
 	// Clears the placement runtime, the resident-identity mirror, and both
 	// wind clocks (the embedder clears its mesh cache alongside).
 	void reset();
+	// The cells whose instances read a ground or map texel a region changed
+	// (foliage::Runtime::invalidate_cells: an editor's sculpt or paint), on the
+	// Godot plane [x0, x1) x [z0, z1): dropped, released through the next draw
+	// list's detail_evicted and generated again when next visible.
+	size_t invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1) {
+		return runtime_.invalidate_cells(x0, z0, x1, z1);
+	}
 
 	const FoliageDrawList &last_draw_list() const { return draw_list_; }
 	// The slot's normalized MODEL mesh (rebuilt by configure_slots; the

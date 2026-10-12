@@ -4,8 +4,9 @@ extends GutTest
 # TerrainData.patch_heights_raw16 writes a rect of the loaded heights in place and Terrain.refresh_region shows
 # them, and the terrain then equals a fresh build of the patched data: every drawn tile's meshes (the root's are
 # never drawn) and the heightfield normal texture. Neither raises terrain_changed (which remakes every derived
-# texture), the build is kept, and the composed pages over the changed normals retire. A rect not inside the
-# heights, a refresh before a build and an index that is no tile are refused with nothing changed.
+# texture), the build is kept, the composed pages over the changed normals retire and the foliage over them grows
+# again. A rect not inside the heights, a refresh before a build and an index that is no tile are refused with
+# nothing changed.
 
 const RECT := Rect2i(300, 300, 24, 20)
 const RAISE := 768  # three world units, raw16
@@ -160,3 +161,55 @@ func test_refusals_change_nothing() -> void:
 	assert_eq(_first_byte_difference(data.get_depth_raw16(), depth), -1, "a refused patch writes nothing")
 	assert_false(terrain.refresh_region(RECT, PackedInt32Array([data.get_tile_count()])),
 			"an index that is no tile is refused")
+
+
+func _sample_height(_world_x: float, _world_z: float) -> float:
+	return 10.0
+
+
+func _sample_foliage(_world_x: float, _world_z: float) -> int:
+	return 1
+
+
+## The foliage over a refreshed region grows again (FoliageDispatcher takes the terrain's refreshed rects): its cells
+## dropped and generated again on the dispatcher's next frame, none in a frame with no refresh; the dispatcher's
+## invalidate_cells drops the cells over a rect by itself.
+func test_the_foliage_over_a_refreshed_region_grows_again() -> void:
+	var data := _data()
+	var terrain := _terrain(data)
+	terrain.build()
+	terrain.set_debug_no_frustum(true)
+	var camera := Camera3D.new()
+	terrain.get_parent().add_child(camera)
+	camera.global_position = Vector3(64.0, 27.0, 64.0)
+	camera.make_current()
+	var dispatcher := FoliageDispatcher.new()
+	terrain.get_parent().add_child(dispatcher)
+	var definition := TerrainFoliageDef.new()
+	definition.graphic = "region_patch"
+	definition.match = PackedInt32Array([1])
+	dispatcher.configure_slots([definition], [BoxMesh.new()], [])
+	dispatcher.height_sampler = Callable(self, "_sample_height")
+	dispatcher.foliage_sampler = Callable(self, "_sample_foliage")
+	dispatcher.set_terrain(terrain)
+	for _frame in 3:
+		terrain.render_frame()
+		dispatcher.render_frame(camera.global_transform, 0)
+	var steady := dispatcher.get_frame_stats()
+	assert_gt(int(steady.detail_cache_residents), 0, "detail cells resident")
+	assert_eq(int(steady.detail_cache_regenerations), 0, "a steady frame generates nothing")
+
+	var whole := Rect2i(0, 0, TerrainData.ATLAS_SIZE, TerrainData.ATLAS_SIZE)
+	assert_true(data.patch_heights_raw16(whole, _raised(data, whole)))
+	assert_true(terrain.refresh_region(whole, PackedInt32Array()))
+	terrain.render_frame()
+	dispatcher.render_frame(camera.global_transform, 0)
+	var after := dispatcher.get_frame_stats()
+	assert_gt(int(after.detail_cache_regenerations), 0, "the cells over the refreshed region grown again")
+	terrain.render_frame()
+	dispatcher.render_frame(camera.global_transform, 0)
+	assert_eq(int(dispatcher.get_frame_stats().detail_cache_regenerations), 0, "once")
+
+	# By the dispatcher alone: every cell on the plane dropped.
+	assert_gt(dispatcher.invalidate_cells(Rect2i(-32768, -32768, 65535, 65535)), 0, "the cells dropped")
+	assert_eq(dispatcher.invalidate_cells(Rect2i(0, 0, 0, 0)), 0, "an empty rect drops nothing")

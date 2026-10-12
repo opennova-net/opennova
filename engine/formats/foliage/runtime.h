@@ -245,6 +245,14 @@ public:
 
 	// Clears both persistent tier caches and restarts the retail scene phase.
 	void reset();
+	// The cached cells whose instances may read a ground or map texel a region changed (an editor's sculpt or
+	// paint, ADR 0046 S25; the game changes neither in a match): every slot's detail cell and model tile whose
+	// area, widened by what its instances read around it (a detail cell's bilinear tap, a model's footprint),
+	// meets the Godot-plane rect [x0, x1) x [z0, z1) (whole units), dropped. Each is reported evicted with the next
+	// frame (FrameOutput::detail_evicted / model_evicted, so a binding releases its geometry) and generated again
+	// when next visible. Returns how many were dropped. Editor tooling, not a port: retail regenerates a cell only
+	// as its pool slot is reused.
+	size_t invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1);
 	const RuntimeStats &get_stats() const { return stats_; }
 
 	// [orig: TerrainTile_InitBuffers @ 0x5ff920]
@@ -289,6 +297,9 @@ private:
 	std::array<bool, FOLIAGE_MAX_DEFS> slot_configured_{};
 	uint32_t terrain_scene_counter_ = 0;
 	uint64_t next_cache_revision_ = 0;
+	// What invalidate_cells dropped since the last frame, reported evicted with the next.
+	std::vector<CacheIdentity> dropped_detail_;
+	std::vector<CacheIdentity> dropped_model_;
 	uint64_t next_submission_id_ = 0;
 	RuntimeStats stats_{};
 };

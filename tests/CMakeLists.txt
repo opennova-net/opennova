@@ -1370,6 +1370,13 @@ target_include_directories(foliage_runtime_vectors_test PRIVATE ${CMAKE_CURRENT_
 target_compile_features(foliage_runtime_vectors_test PRIVATE cxx_std_17)
 add_test(NAME foliage_runtime_vectors COMMAND foliage_runtime_vectors_test)
 
+# foliage::Runtime::invalidate_cells (ADR 0046 S25): the cached cells over a changed region dropped, reported
+# evicted and generated again; the rest kept.
+add_executable(foliage_runtime_invalidate_test foliage/foliage_runtime_invalidate_test.cpp)
+target_link_libraries(foliage_runtime_invalidate_test PRIVATE opennova_formats)
+target_include_directories(foliage_runtime_invalidate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME foliage_runtime_invalidate COMMAND foliage_runtime_invalidate_test)
+
 add_executable(trn_roundtrip_test trn/trn_roundtrip_test.cpp)
 target_link_libraries(trn_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(trn_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
