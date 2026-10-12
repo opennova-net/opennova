@@ -39,6 +39,7 @@
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>
 #include <editor/session/file_chores.h>
+#include <editor/session/mission_base_terrain.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
@@ -272,40 +273,6 @@ void DocumentSet::write_companion(DocumentBase &document, std::vector<std::strin
 	core_.note("Saved " + path + " beside " + document.path() + " (its names)");
 }
 
-namespace {
-
-// The original editor's read of a terrain for its base heights: the .trn alone (its own parser over the file, the
-// game's later passes over overcast.def and the mission's .env never run [orig: JOTACmed.exe sub_464DE0 @ 0x464de0
-// -> sub_463C90 @ 0x463c90]), its last polytrn_scale line by the CRT's atol (128 where it has none [orig: the arm
-// @ 0x464a38; the default, sub_464B60 @ 0x464bb6]), and the .cpt its polytrn_polydata names, its DPTH or CDEP depth
-// words into a cleared 1024 x 1024 grid, so a CDEP of fewer words leaves the rest 0 [orig: sub_44C2B0 @ 0x44c2b0, the
-// clear @ 0x44c2e0, the DPTH arm @ 0x44c64b, the CDEP arm @ 0x44c5e7]. The .trn is read through the game's parser
-// and admission gate (load_mission_trn with no later texts): a terrain the game refuses (no polydata, a sector count
-// or row count that is no power of two) samples no height, where the original editor would; and a .trn naming a
-// polytrn_sectorcount but no polytrn_sectors row, whose grid the original editor fills with the .trn's other words
-// (scale, wraps) and the game with no sector, samples none either. No shipped terrain is either.
-bool read_base_terrain(const FileSource &files, const std::string &terrain, int32_t &scale, TrnConfig &trn,
-                       std::vector<uint16_t> &atlas, uint64_t &cpt_stamp) {
-	std::vector<uint8_t> bytes;
-	std::string error;
-	if (!files.read(terrain + ".trn", bytes)) return false;
-	const std::string text(bytes.begin(), bytes.end());
-	if (!load_mission_trn(text, TrnLaterTexts{}, trn, error)) return false;
-	for (const TrnKeyLine &line : read_trn_key_lines(text))
-		if (line.key == "polytrn_scale" && !line.values.empty()) scale = io::retail_atol(line.values.front().c_str());
-	std::vector<uint8_t> cpt_bytes;
-	CptFile cpt;
-	if (trn.polydata.empty() || !files.read(trn.polydata, cpt_bytes) ||
-	    !load_cpt(cpt_bytes.data(), cpt_bytes.size(), cpt, error))
-		return false;
-	atlas = std::move(cpt.depth_buffer);
-	atlas.resize(size_t(1024) * 1024, 0);
-	cpt_stamp = files.stamp(trn.polydata);
-	return true;
-}
-
-} // namespace
-
 void DocumentSet::hand_base_heights(DocumentBase &document) {
 	auto *mission = dynamic_cast<MissionDocument *>(&document);
 	if (!mission) return;
@@ -330,15 +297,7 @@ void DocumentSet::hand_base_heights(DocumentBase &document) {
 			kept.trn_stamp = trn_stamp;
 			kept.read = read_base_terrain(*files, terrain, kept.scale, kept.trn, kept.atlas, kept.cpt_stamp);
 		}
-		if (kept.read) {
-			sampled.heights = kept.atlas.data();
-			sampled.sectors = &kept.trn.sector_grid[0][0];
-			sampled.origin_x = kept.trn.origin_x;
-			sampled.origin_y = kept.trn.origin_y;
-			sampled.wrap_x = kept.trn.wrap_x != 0;
-			sampled.wrap_y = kept.trn.wrap_y != 0;
-			sampled.scale = kept.scale;
-		}
+		if (kept.read) sampled = base_terrain_sampler(kept.trn, kept.scale, kept.atlas.data());
 	}
 	std::vector<int32_t> heights;
 	if (sampled.heights)

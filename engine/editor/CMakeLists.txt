@@ -332,6 +332,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_queries_heights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_queries_maps.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_sculpt.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_follow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_base_terrain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_heights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_json.cpp

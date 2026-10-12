@@ -14,6 +14,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/cpt/cpt_io.h>
 #include <editor/session/terrain_family.h>
+#include <editor/session/terrain_follow.h>
 #include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/trn/trn_io.h>
 
@@ -317,8 +318,11 @@ bool TerrainSculpt::land(Job &job) {
 	landing->bake = job.after;
 	landing->input = job.input;
 	landing->settled = job.rects;
+	// The ground the missions on the file read, before and after (the follow pass).
+	const std::vector<uint16_t> before = depth_of(document->atlas());
 	if (!documents.apply_bake_landing(*document, {RasterDocument::edit(landing)})) return false;
 	++landed_;
+	follow_the_ground(core_, document->path(), before, depth_of(document->atlas()), document->undo_mark().link);
 	return true;
 }
 
