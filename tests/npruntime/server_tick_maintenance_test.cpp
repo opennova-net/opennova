@@ -2005,6 +2005,48 @@ bool check_split_slot_team_pick_legs() {
 			"Default Spawn is refused while the slot team holds a zone");
 }
 
+// D-NET-582: the deploy placement's no-pick arm positions as the slot team
+// (+416), not the entity's, so a split slot's Default Spawn takes the slot
+// team's Deaths gate and start marker. [orig: Server_PositionPlayerForSpawn
+//  @0x50CF86..0x50CF92, the slot team @0x50D183, the Deaths gate @0x50D1DB,
+//  the team markers @0x50D266]
+bool check_split_slot_team_default_spawn_pose() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(3, 4);
+	for (const int32_t item_id : {6096, 6097}) { // team 1's start marker, team 2's
+		w::Entity start;
+		start.kind = w::EntityKind::Marker;
+		start.item_id = item_id;
+		start.position = {item_id == 6096 ? 100.0f : 200.0f, 0.0f, 0.0f};
+		world.registry.spawn(3, start);
+	}
+	w::Entity player_seed;
+	player_seed.kind = w::EntityKind::Organic;
+	player_seed.flags = w::kEntityFlagPlayer | w::kEntityFlagDead;
+	player_seed.engine_flags = player_seed.flags;
+	player_seed.team = 2; // a script team write split the body from its slot
+	player_seed.health = 0;
+	player_seed.health_max = 100;
+	const w::EntityHandle player = world.registry.spawn(0, player_seed);
+	inmatch::GameConfig config;
+	config.game_type = game_type::kTeamDeathmatch;
+	std::vector<inmatch::NapiNPConnection> roster(1);
+	auto &conn = roster.front();
+	conn.type = 1;
+	conn.phase = inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.owned_entity = player;
+	conn.link.respawn_pending = true;
+	conn.assigned_team = 1;
+	conn.assigned_team_valid = true;
+	(void)inmatch::dispatch_session_replies(config, conn,
+			{make_protocol_message(c2s::RESPAWN_REQUEST, {0xFF, 0xFF})}, 100, roster, &world);
+	const w::Entity *body = world.registry.get(player);
+	return expect(body->health > 0 && body->position.x == 100.0f,
+			"a split slot's Default Spawn lands on the slot team's start marker");
+}
+
 bool check_shared_loaded_ammo_fire_and_reload() {
     w::World world;
     world.rules.mp_session = true;
@@ -2224,6 +2266,7 @@ int main() {
 	ok = check_revived_pick_takes_no_target() && ok;
 	ok = check_spectator_pick_legs() && ok;
 	ok = check_split_slot_team_pick_legs() && ok;
+	ok = check_split_slot_team_default_spawn_pose() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }

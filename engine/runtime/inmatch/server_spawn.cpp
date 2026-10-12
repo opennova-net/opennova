@@ -913,14 +913,19 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		player.roll = 0;
 		return held;
 	}
-	// The no-pick arm reads the slot's spectator latch/restore team beside the
-	// team byte [orig: Server_ProcessPlayerDeath @0x517863 ->
-	// Server_PositionPlayerForSpawn @0x50D17C..0x50D1C6].
+	// The no-pick arm (no target handed in) positions as the slot team (+416), not
+	// the entity's (D-NET-582), and reads the slot's spectator latch/restore team
+	// beside it. Retail's placement also takes the arm for a handle its own resolve
+	// refuses; the 0x0E and the convert resolve first, a wave release does not
+	// (D-NET-592). [orig: Server_ProcessPlayerDeath @0x517863 ->
+	//  Server_PositionPlayerForSpawn @0x50CF86..0x50CFB1, @0x50D17C..0x50D1C6
+	//  (the slot team @0x50D183); the Deaths gate @0x50D1DB, the markers
+	//  @0x50D266 / @0x50D320]
 	const world::SpawnSlotState slot_state{
 			conn.link.spectator, conn.spectator_restore_team};
 	const world::SpawnPointResult pose = world::resolve_player_spawn_pose(
 			world, player.handle, target_zone, conn.reply.player_slot,
-			player.team, config.game_type, slot_state);
+			conn.assigned_team, config.game_type, slot_state);
 	if (pose.found) {
 		player.position = pose.position;
 		player.yaw = pose.yaw;

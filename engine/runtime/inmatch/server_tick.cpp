@@ -1970,8 +1970,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				if (!is_in_match(conn) || conn.link.transport == nullptr ||
 						conn.link.owned_entity != release.player)
 					continue;
-				// The leg takes the zone's handle [orig: SpawnWaveList_TickEntry,
-				//  the Server_ProcessPlayerDeath call @0x52A3C0].
+				// The leg takes the zone's handle, placed unresolved (D-NET-592) [orig:
+				//  SpawnWaveList_TickEntry, the Server_ProcessPlayerDeath call @0x52A3C0].
 				std::vector<ProtocolMessage> deployment =
 						Server_ReleasePlayerDeployment(ctx.config, conn, world,
 								release.zone, release.zone.packed, ctx.logs.profile);
