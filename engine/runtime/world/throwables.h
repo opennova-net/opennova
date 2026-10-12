@@ -117,6 +117,14 @@ struct ThrowableClassRow {
     // Entity_ConvertRoundToPlacedEntity @0x5455B0, the Entity_InitFromModel
     // call @0x5455D8 -> @0x40DC3B / @0x40DC4F].
     bool no_target = false;
+    // The def's type (def+0x5C): the same init's matrix-built leg ORs Flags
+    // 0x20000 for a decoration, building or object def (2, 5, 6) [orig:
+    // Entity_InitFromModel @0x40E0D4..0x40E105].
+    int32_t def_type = 0;
+    // The def's radarsig / heatsig, which the same init copies into the
+    // entity's +0x1A6 / +0x1A4 [orig: Entity_InitFromModel @0x40E136..0x40E156].
+    int32_t radar_sig = 0;
+    int32_t heat_sig = 0;
 };
 
 struct ThrowableClassTable {

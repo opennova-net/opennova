@@ -251,7 +251,9 @@ bool encode_protocol_messages(const std::vector<ProtocolMessage> &messages,
 
 // Encode/decode a ProtocolMessage body when the caller has already handled
 // the outer SESSION_NWU_KEY transform around the 0x43/0x83 opcode payload.
-// These helpers only touch the SCRK-encrypted inner-message region.
+// These helpers only touch the SCRK-encrypted inner-message region, which they
+// crypt whenever it is nonempty: an empty SCRK keys the chain like any other
+// (seed 50), so it never means plaintext (D-NET-450).
 bool decode_protocol_packet_plaintext(const uint8_t *body, size_t body_len,
                                       std::string_view scrk,
                                       ProtocolPacketHeader &hdr_out,

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -70,7 +71,12 @@ struct DirState {
 // back to the historical port key otherwise (hexcaps / port-less crafted caps /
 // traffic whose auth is not in the cut) - that path behaves exactly as before.
 struct Session {
-	std::string client_scrk, server_scrk;
+	// Each direction's key once the auth that carries it is seen: the client's from its 0x42,
+	// the server's from the 0x82 the client accepts. Absent is unknown; a present empty key is
+	// a key like any other, which the peer decrypts with (D-NET-450).
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - SCRK @0x62BC4B, into +0x10C @0x62BFAF;
+	//  NapiNP_HandleServerJoinResponse @0x629840 - the key @0x629D53]
+	std::optional<std::string> client_scrk, server_scrk;
 	DirState cstate, sstate;
 	int participant = 0; // dense 1-based index in first-seen order
 	// The client's connect state: whether the connection still waits for its
@@ -122,13 +128,13 @@ Session &session_at(SessionTable &table, uint64_t id) {
 void process_datagram(const CaptureDatagram &d, SessionTable &sessions,
                       CaptureDecodeResult &out);
 
-bool process(const std::vector<uint8_t> &body, const std::string &scrk, char dir,
-             DirState &st, int frame, int session, int participant,
+bool process(const std::vector<uint8_t> &body, const std::optional<std::string> &scrk,
+             char dir, DirState &st, int frame, int session, int participant,
              CaptureDecodeResult &out) {
-	if (scrk.empty()) return false;
+	if (!scrk) return false;
 	ProtocolPacketHeader hdr;
 	std::vector<ProtocolMessage> msgs;
-	if (!decode_protocol_packet_plaintext(body.data(), body.size(), scrk, hdr, msgs))
+	if (!decode_protocol_packet_plaintext(body.data(), body.size(), *scrk, hdr, msgs))
 		return false;
 	CapturedSessionPacket packet;
 	packet.frame_index = frame;

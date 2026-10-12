@@ -115,7 +115,8 @@ void test_roster_and_facts() {
 			s2.entity_dead && s2.idle_seconds == 3 && s2.points == 9 && s2.flag_captures == 2 &&
 			s2.objective_seconds == 44 && !s2.bot && s2.status_word == 0);
 	const hud::ServerStatusSlot &s3 = page.slots[3];
-	CHECK(s3.active && !s3.in_game && s3.loading && s3.spectator && s3.team == 1 &&
+	// +0x188E3 is never set in JO: a loading spectator's row is not "loading".
+	CHECK(s3.active && !s3.in_game && !s3.loading && s3.spectator && s3.team == 1 &&
 			s3.class_word == 0 && s3.name == "Lo");
 	CHECK(page.novaworld && page.session_key == 4321 && page.server_name == "srv" &&
 			page.game_type == 0x10000u);

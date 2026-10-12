@@ -47,6 +47,11 @@ struct FrameHeaderState {
 	// copied from g_StatsAvgFps at the head of every Server_TickUpdate).
 	// [orig: NetPacket_WritePlayerState `mov cl, byte ptr g_ServerFps` @0x4FFA5C]
 	uint8_t server_fps = 0;
+	// The host's CPU share, capped as Server_TickUpdate copies it
+	// (g_ServerCpuPct: g_StatsCpuPercent, 0xFF from 0xFF up, unsigned).
+	// [orig: NetPacket_WritePlayerState `mov cl, byte ptr g_ServerCpuPct`
+	//  @0x4FFA76]
+	uint8_t server_cpu = 0;
 	// Tail state byte bits 0-1 = the recipient's OWN [prone, crouch] echo — the client
 	// re-latches its stance from this EVERY frame [orig: tail read @0x4303e5 (byte << 8 ->
 	// MoveOrder bits 8-9) -> latches @0x430562/@0x430570]; a hardcoded 0 force-stands a
@@ -154,9 +159,9 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		fu.timer.state1 = hdr.fallmps; // g_WacVarFallMps = fallmps, the fall-damage tolerance (0 => constant fall dmg)
 		// g_ServerFps / g_ServerCpuPct are the host's measured frame statistics
 		// [orig: @0x4FFA62/@0x4FFA7C]: the fps byte is the main loop's FR
-		// counter; the port carries no CPU measurement, so that byte stays 0.
+		// counter, the CPU byte its window's CPU share.
 		fu.timer.state2 = hdr.server_fps;
-		fu.timer.state3 = 0;
+		fu.timer.state3 = hdr.server_cpu;
 		// The round clock's wire projection: whole seconds (ticks / 62) only
 		// while no pre-round countdown runs and time remains; else -1.
 		// [orig: NetPacket_WritePlayerState @0x4ffa81..0x4ffaca —
@@ -1070,10 +1075,11 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          const std::vector<GameEntitySnapshot> &ents,
                          uint32_t game_type,
                          std::size_t max_frame_body_bytes,
-                         int32_t server_fps) {
+                         int32_t server_fps,
+                         int32_t server_cpu_percent) {
 	std::vector<uint8_t> frame;
 	if (!build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes,
-	                          server_fps))
+	                          server_fps, server_cpu_percent))
 		return false;
 	devtools::ProfileLap lap(w.profile);
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
@@ -1087,7 +1093,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           std::vector<uint8_t> &frame_out,
                           uint32_t game_type,
                           std::size_t max_frame_body_bytes,
-                          int32_t server_fps) {
+                          int32_t server_fps,
+                          int32_t server_cpu_percent) {
 	devtools::ProfileLap lap(w.profile);
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
@@ -1141,6 +1148,11 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			: static_cast<uint8_t>(w.script.wac_values.breathtime);
 	hs.round_time_remaining_ticks = w.match.remaining_ticks();
 	hs.server_fps = static_cast<uint8_t>(server_fps);
+	// [orig: Server_TickUpdate @0x51D7EA..0x51D7FB - `cmp eax, 0FFh; jb`,
+	//  else 0xFF: a negative share is 0xFF too]
+	hs.server_cpu = static_cast<uint32_t>(server_cpu_percent) < 0xFFu
+			? static_cast<uint8_t>(server_cpu_percent)
+			: uint8_t{0xFF};
 	// The weather home's native globals narrowed exactly once here
 	// [orig: NetPacket_WritePlayerState @0x4ff6b0 — g_EnvFogDistTarget hi word,
 	// (g_EnvFogDistAccelClamp capped 0xFF0000 + 0xFF) >> 8, (g_EnvCurTimeFixed24

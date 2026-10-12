@@ -37,7 +37,7 @@ struct ServerStatusSlot {
 	// carried for the idle column's gate.
 	bool bot = false;
 	bool in_game = false;     // +0x20 == 6, the slot's in-game state
-	bool loading = false;     // +0x188E3 (100579), not yet in game
+	bool loading = false;     // +0x188E3 (100579): never set in JO, reads clear
 	bool spectator = false;   // +0x188D7 (100567), the spectator latch
 	bool entity_dead = false; // the slot's entity (+0) with health (+286) <= 0
 	uint8_t team = 0;         // +0x1A0

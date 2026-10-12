@@ -255,8 +255,9 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
 // Field order mirrors retail's 0x42 builder CNapiNPConnection_SendClientJoin
 // @ 0x61fe20: the identity block NVS/CO/AP/BDAT/PN/PG/PV1/PV2 FIRST, then
 // CI/HK/CK/NA/PW, SIP/SPN (each omitted when 0, as retail does), the CU blobs
-// (one of kCuSlotBytes or more left out, as retail's writer does), and SCRK
-// last. The identity block is MANDATORY: the real NovaWorld server
+// (only those whose type byte, the first, is 1 or 2, and of those one of
+// kCuSlotBytes or more left out, as retail's writer does), and SCRK last.
+// The identity block is MANDATORY: the real NovaWorld server
 // validates it in HandleClientJoin @ 0x62B750 and drops the join without it
 // (the original "real NW never sends ServerAuth" bug — RE doc NW-S2).
 std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg);

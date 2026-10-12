@@ -909,9 +909,16 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
                            const std::vector<uint8_t> &body, uint32_t now_tick, HandleResult &out,
                            bool defer_in_match_replies) {
+	// The 0x43 needs the host's node for its address whose 0x42 was accepted (conn_flag0, set at
+	// the state-1 entry the accept runs, our phase >= Joined); the key it carries is not tested,
+	// an empty SCRK keying the crypt like any other (D-NET-450).
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - FindConnection(proto, 1, ...)
+	//  @0x626AC5, conn_flag0 +0x28 on the queued pass @0x626AD7..0x626AE4, no key test before
+	//  the local-key match @0x626B72; CNapiNPConnection_OnStateChange @0x626172 sets it]
 	NapiNPConnection *connp = find_connection(ctx, peer);
-	if (connp == nullptr || connp->client_scrk.empty()) {
-		return; // SESSION before AUTH completed — drop
+	if (connp == nullptr || connp->type != NapiNPConnection::kTypeServerSide ||
+			connp->phase < ConnectionPhase::Joined) {
+		return; // a SESSION before the 0x42 accept is dropped
 	}
 	NapiNPConnection &conn = *connp;
 

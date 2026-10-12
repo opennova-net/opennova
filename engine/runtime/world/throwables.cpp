@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include <base/io/strutil.h>
+#include <formats/def/def.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/ammo_table.h>
@@ -777,6 +778,32 @@ bool ThrowableSim::place_from_round(World &world, const LiveRound &round,
         //  Entity_ConvertRoundToPlacedEntity @0x5455B0, the memcpy @0x5455D6,
         //  the Entity_InitFromModel call @0x5455D8 -> @0x40DC4F]
         if (row->no_target) seed.engine_flags |= kEntityFlagNoTarget;
+        // The init's hp-0 leg: an indestructible def's entity takes Flags
+        // 0x4000000, Health 1 and subType 0xFF, and the def's two armor
+        // words turn 0xFFFF, as resolve_item_traits's leg does.
+        // [orig: Entity_InitFromModel @0x40DC85 - Flags @0x40DC8E, def+0x190 /
+        //  def+0x192 @0x40DC95 / @0x40DC9F, Health @0x40DCA6, subType @0x40DCAF]
+        if (row->health_max == 0) {
+            seed.engine_flags |= kEntityFlagIndestructible;
+            seed.health = 1;
+            seed.sub_type = 0xFF;
+            seed.armor_impact = -1;
+            seed.armor_kz = -1;
+        }
+        // Its matrix-built leg reads the copied round's update callback
+        // (+0x1C4), which the rest leg nulled for an unparented round and set
+        // to the parent follow for a parented one, so an unparented device
+        // takes the bit whatever its def type.
+        // [orig: Entity_InitFromModel @0x40E0D4..0x40E105 - the +0x1C4 test
+        //  @0x40E0DC, the OR @0x40E105; the rest legs' +0x1C4 stores: satchel
+        //  @0x4489FB / @0x448A10, claymore @0x447986 / @0x44799B]
+        if (!round.parent.valid() || row->def_type == def::DEF_ITEM_TYPE_DECORATION ||
+                row->def_type == def::DEF_ITEM_TYPE_BUILDING ||
+                row->def_type == def::DEF_ITEM_TYPE_OBJECT)
+            seed.engine_flags |= kEntityFlagMatrixBuilt;
+        // ...and the signatures [orig: @0x40E136..0x40E156].
+        seed.radar_sig = row->radar_sig;
+        seed.heat_sig = row->heat_sig;
     }
     // Health/armor come from the item def via the host traits sweep
     // [orig: Entity_InitFromItemDef @ 0x49e550 Health = def healthMax]; the

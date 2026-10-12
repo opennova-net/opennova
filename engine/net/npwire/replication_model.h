@@ -57,7 +57,7 @@ struct PlayerReplicationState {
 	//  @0x506213 read; Server_PlayerAdd @0x51CD06 / @0x51CD40 zero it]
 	uint8_t quality = 0;
 	// Field 0x1000: 1 for an active slot whose spectator latch (slot+100567) is
-	// set and whose loading byte (slot+100579) is clear, else 0; the client
+	// set and whose +100579 byte is clear (never set in JO), else 0; the client
 	// lands it as the roster slot's spectator byte.
 	// [orig: NetPacket_SerializePlayerSync0x46 @0x506197..0x5061cc;
 	//  NapiNPClientMsg_PlayerSync @0x431370 (slot +46)]

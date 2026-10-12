@@ -232,10 +232,12 @@ public:
 	// process-global and no load path zeroes the compiler-declared slots, so a
 	// restart or the next mission reads slot n at the previous run's value;
 	// V# and G# start at zero per load, ScriptVarStore::carry_declared_from),
-	// and the entity-update counter (process-global and never reset: the next
-	// mission's staggers continue its phase [orig: g_EntityUpdateCounter,
-	// whose one writer is Entity_UpdateAllEntities @0x4C2639]), and the
-	// precipitation drawer's memory (precipitation_draw).
+	// WAC's DO choices and RND (no mission load clears them,
+	// ScriptVarStore::carry_wac_kept_from), and the entity-update counter
+	// (process-global and never reset: the next mission's staggers continue
+	// its phase [orig: g_EntityUpdateCounter, whose one writer is
+	// Entity_UpdateAllEntities @0x4C2639]), and the precipitation drawer's
+	// memory (precipitation_draw).
 	void carry_across_load_from(MissionKernel &previous);
 
 

@@ -123,6 +123,10 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	// copies into the entity's Name (+0xF4). [orig: Server_BroadcastMedicRequest
 	//  `lea eax,[esi+28h]` @0x515417 -> sprintf @0x515421]
 	const std::string message = format_medic_request(*format, conn.reply.player_name);
+	// Both Medic sends filter on the requester's slot team, zero-extended
+	// [orig: `movzx edx, [esi+1A0h]` @0x515445 -> send_filter_416 @0x51544C
+	//  (the 0x54); `movzx ecx, [esi+1A0h]` @0x5154C1 -> @0x5154CF (the 0x14)].
+	const int32_t team_filter = conn.assigned_team;
 	if (!conn.link.auto_medic_enabled && !conn.link.medic_request_active) {
 		PlayerDownedState state;
 		state.entity_handle = conn.link.owned_entity.packed;
@@ -130,13 +134,13 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 		state.medic_request_active = false; // the raw slot+368 byte
 		const std::vector<uint8_t> downed = encode_player_downed_state(state);
 		for (NapiNPConnection &candidate : roster) {
-			if (!is_medic_recipient(candidate, *world, requester->team)) continue;
+			if (!is_medic_recipient(candidate, *world, team_filter)) continue;
 			candidate.link.transport->host_send(s2c::PLAYER_DOWNED_STATE, downed);
 		}
 	}
 	const std::vector<uint8_t> body = chat_body(conn.reply.player_slot, 2, message);
 	for (NapiNPConnection &candidate : roster) {
-		if (&candidate == &conn || !is_medic_recipient(candidate, *world, requester->team))
+		if (&candidate == &conn || !is_medic_recipient(candidate, *world, team_filter))
 			continue;
 		candidate.link.transport->host_send(
 				s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);

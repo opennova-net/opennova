@@ -286,10 +286,20 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
 
     // [orig: WacCmd_Reset @0x4ED300] Reset this event and its descendants;
     // adjacent events at the same depth retain their history. The named
-    // event's three words clear for any index in the IF space, past the
-    // program's events too; retail bounds it by nothing, so an index outside
-    // 0..1023 clears other words of the arrays' contiguous run (D-EVT-16). The
-    // walk stops at the program's event count.
+    // event's three stores take no bound: the ever-fired and fired-tick
+    // dwords at 0xC6CE40 / 0xC6BE40 + 4i and the active byte at 0xC6DE40 + i,
+    // so an index outside 0..1023 clears whatever word or byte of the arrays'
+    // contiguous run, or of the banks around it, lies there, through the
+    // bank model; a store past its words (RND to the DORND seed) drops here
+    // where retail's zeroes another global (D-EVT-19).
+    // [orig: @0x4ED30C, @0x4ED313, @0x4ED322]
+    // The walk reads the depth bytes from the index on and stops at the
+    // event count (g_WacEventCount @0x4ED304, the signed tests @0x4ED32B /
+    // @0x4ED352): an index at or past the count walks nothing, and index -1
+    // walks every IF (below). A lower index's depth bytes lie in the IF name
+    // table before g_WacEventDepths (0xC67E18): its walk stops at once where
+    // they lie in unnamed rows, all zero, as here, and a named row's bytes or
+    // those below the table are D-EVT-19.
     if (ieq(n, "reset")) {
         const int event = A(0);
         const auto clear = [&](size_t i) {
@@ -298,12 +308,30 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
             wac.active[i] = 0;
             if (i < fired_counts_.size()) fired_counts_[i] = 0;
         };
-        if (event >= 0 && event < world::ScriptVarStore::kWacIfs) {
-            clear(size_t(event));
+        using Vars = world::ScriptVarStore;
+        const uint32_t index = static_cast<uint32_t>(event);
+        w.script.vars.set_bank_word(static_cast<int32_t>(Vars::kWacEverFiredWord + index), 0);
+        w.script.vars.set_bank_word(static_cast<int32_t>(Vars::kWacFiredTickWord + index), 0);
+        w.script.vars.set_bank_byte(Vars::kWacActiveWord * 4u + index, 0);
+        if (event >= 0 && event < Vars::kWacIfs) {
+            if (size_t(event) < fired_counts_.size()) fired_counts_[size_t(event)] = 0;
             const uint16_t depth = size_t(event) < prog_->event_depths.size()
                     ? prog_->event_depths[event] : uint16_t(0);
             for (size_t i = size_t(event) + 1; i < size_t(prog_->event_count) &&
                     i < prog_->event_depths.size() && prog_->event_depths[i] > depth; ++i)
+                clear(i);
+        } else if (event == -1) {
+            // Index -1's depth byte (0xC67E17) is the top byte of the name
+            // table's last row's ever-fired pointer, 0 whether IF 1023 is
+            // named (the pointer is 0x00C6DE3C) or not (the load zeroes the
+            // table), and every IF's depth is at least 1, so the walk clears
+            // every IF up to the count.
+            // [orig: WacScript_InitAndLoad - memset(g_WacEventNames, 0, 0x6000), the
+            //  push @0x4F940C, the call @0x4F942F; Script_Compile - the row's
+            //  ever-fired pointer @0x4F37F1 / @0x4F37F8, the depth (nesting + 1)
+            //  @0x4F49AF..0x4F49EF]
+            for (size_t i = 0; i < size_t(prog_->event_count) &&
+                    i < prog_->event_depths.size() && prog_->event_depths[i] > 0; ++i)
                 clear(i);
         }
         return 1;

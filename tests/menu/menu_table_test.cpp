@@ -10,6 +10,7 @@
 // Witness record: docs/mnu/menu-re.md "Table render".
 
 #include <runtime/menu/menu_frame.h>
+#include <runtime/menu/menu_table.h>
 #include <formats/mnu/mnu.h>
 
 #include <cstdio>
@@ -436,6 +437,49 @@ void test_custom_draw_slot(const fnt_font_t *font) {
 			"no slot widget, no slot");
 }
 
+// The row sort runs the list widgets' quicksort, so rows that compare equal
+// stand where its swaps leave them: three rows equal on the key come out
+// third, first, second (lo 0, hi 2: the pivot sorts before nothing, so 2 and 0
+// swap; it sorts after nothing, so 2 and 1 swap; both parts are single rows),
+// where a stable sort keeps them in order. One missing cell answers the
+// column's direction whichever row lacks it, so a pair's order comes from the
+// quicksort's swap, the row with the cell first from [missing, cell] and last
+// from [cell, missing].
+// [orig: CTableWnd_SortByColumn @0x640900 -> Utility_SortDualArray (the call
+//  @0x640991) -> Utility_QuickSortDualArray @0x651AB0; CTableWnd_CompareRows
+//  @0x63e9c0 - the answers @0x63eaa1 / @0x63eab1 -> @0x63ec1b]
+void test_sort_order_is_the_quicksorts() {
+	std::vector<MenuTableColumn> columns(2);
+	columns[0].label = "Name";
+	columns[1].label = "Kills";
+	columns[1].numeric_sort = true;
+	const std::vector<int> by_kills = { 1, -1 };
+	const std::vector<MenuTableRow> tied = { row_of({ "ann", "5" }), row_of({ "bob", "5" }),
+		row_of({ "cat", "5" }) };
+	CHECK(table_sort_order(tied, columns, by_kills) == (std::vector<int>{ 2, 0, 1 }),
+			"three tied rows stand third, first, second");
+	columns[1].ascending = false;
+	CHECK(table_sort_order(tied, columns, by_kills) == (std::vector<int>{ 2, 0, 1 }),
+			"the direction does not reorder a tie");
+	// Rows that differ come out in their order: 12, 5, 5 descending, the tie
+	// as the swaps leave it.
+	const std::vector<MenuTableRow> mixed = { row_of({ "ann", "5" }), row_of({ "bob", "12" }),
+		row_of({ "cat", "5" }) };
+	CHECK(table_sort_order(mixed, columns, by_kills) == (std::vector<int>{ 1, 2, 0 }),
+			"a descending sort with a tie");
+	const std::vector<int> by_name = { 0, -1 };
+	MenuTableRow missing;
+	missing.values.push_back(0);
+	CHECK(table_sort_order({ missing, row_of({ "x" }) }, columns, by_name) ==
+					(std::vector<int>{ 1, 0 }),
+			"a missing cell first in the input goes last");
+	CHECK(table_sort_order({ row_of({ "x" }), missing }, columns, by_name) ==
+					(std::vector<int>{ 1, 0 }),
+			"a missing cell last in the input goes first");
+	CHECK(table_sort_order({ missing, missing }, columns, by_name) == (std::vector<int>{ 1, 0 }),
+			"two missing cells pass to the next key, a tie");
+}
+
 } // namespace
 
 int main() {
@@ -447,6 +491,7 @@ int main() {
 	test_hit_test(&font);
 	test_clip_viewport(&font);
 	test_custom_draw_slot(&font);
+	test_sort_order_is_the_quicksorts();
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
