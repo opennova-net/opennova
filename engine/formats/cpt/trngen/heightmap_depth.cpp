@@ -24,6 +24,10 @@ uint16_t height_of_sample16(uint16_t sample, double top) {
 bool decode_heightmap_depth(const std::string &name, const std::vector<uint8_t> &bytes, double top,
                             HeightmapDepth &out, std::string &why) {
 	out = HeightmapDepth();
+	if (!(top > 0.0)) {
+		why = name + ": a heightmap's white must stand above 0 units";
+		return false;
+	}
 	const size_t texels = size_t(kDepthSide) * kDepthSide;
 	const auto scaled16 = [&](const std::vector<uint16_t> &raw16) {
 		// A raw16 height scaled by top / 127.5, rounded, kept within the format's 16 bits.
@@ -77,6 +81,10 @@ bool decode_heightmap_depth(const std::string &name, const std::vector<uint8_t> 
 bool encode_heightmap_depth16(const std::vector<uint16_t> &raw16, double top, std::vector<uint16_t> &samples,
                               std::string &why) {
 	samples.assign(raw16.size(), 0);
+	if (!(top > 0.0)) {
+		why = "a heightmap's white must stand above 0 units";
+		return false;
+	}
 	// Each height's sample, found once (-1: none reads back as it).
 	std::vector<int32_t> sample_of(65536, -2);
 	const double per_sample = top * 256.0 / 65535.0;

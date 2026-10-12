@@ -203,8 +203,8 @@ static int test_boot_files() {
 	return 0;
 }
 
-// What the static_asserts cannot say: no name gives an import source, an import's input or a
-// material chunk, and none is a catalog kind; a material chunk packs with the art; Unknown names
+// What the static_asserts cannot say: no name gives an import source, an import's input, a heightmap
+// input or a material chunk, and none is a catalog kind; a material chunk packs with the art; Unknown names
 // nothing and is read from nowhere; each whole name and extension a row lists types to the row by
 // its name alone, in any case; a PNG is a texture by its name; a value past the last kind reads
 // Unknown's row.
