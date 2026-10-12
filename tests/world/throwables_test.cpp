@@ -936,6 +936,56 @@ void test_placed_device_takes_the_model_init_matrix_and_hp0_legs() {
     CHECK((streamed_flags(hard) & 0x20000u) != 0);
 }
 
+// The conversion's copy of the round carries its def pointer and graphic
+// model (+0x20, +0x30) into the device, so the device reads its def's type
+// and attrib words: the S2C 0x18 answer to a C2S 0x0F query carries the
+// def's type (6 for a satchel), where a zero would leave a self-healing
+// joiner without the device. A non-tracer shot's spawn cleared the round's
+// model, which the copy then carries.
+// [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 - the memcpy @0x5455D6;
+//  RoundData_SpawnRound's +0x30 clear @0x4EC900;
+//  NetPacket_SerializeObjectToBuffer @0x504DB9; NapiNPClientMsg_FullEntitySpawn
+//  - the type gate @0x433B5A]
+void test_placed_device_reads_its_def_type_and_attrib_words() {
+    Rig rig(0);
+    const AmmoTableEntry &ammo = rig.w.tables.ammo.entries[kAmmoSatchel];
+    // As items.def 101891 "Satchel Charge": `type object`, NoTool notarget,
+    // graphic stch_3ad.
+    ThrowableClassRow satchel = *rig.w.throwables.classes.get(kItemSatchel);
+    satchel.def_type = opennova::def::DEF_ITEM_TYPE_OBJECT;
+    satchel.attrib = opennova::def::DEF_ITEM_ATTRIB_NOTOOL | opennova::def::DEF_ITEM_ATTRIB_NOTARGET;
+    satchel.has_graphic_model = true;
+    satchel.attrib2 = 0x10u; // not the satchel's: a second word to see carried
+    rig.w.throwables.classes.set(satchel);
+    LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
+    round.tracer = true; // the satchel ammo is forcetracer
+    CHECK(rig.w.throwables.place_from_round(rig.w, round, ammo));
+    CHECK(rig.w.throwables.devices.size() == 1);
+    if (rig.w.throwables.devices.empty()) return;
+    const Entity *device = rig.w.registry.get(rig.w.throwables.devices.back().entity);
+    CHECK(device != nullptr);
+    if (device == nullptr) return;
+    CHECK(device->item_type == opennova::def::DEF_ITEM_TYPE_OBJECT);
+    CHECK(device->item_attrib == satchel.attrib);
+    CHECK(device->item_attrib2 == 0x10u);
+    CHECK(device->has_graphic_model);
+    const opennova::FullEntitySpawnRecord rec =
+            opennova::replication::build_full_entity_spawn(*device);
+    CHECK(rec.item_type == 6);
+    CHECK(rec.item_type_id == kItemSatchel);
+    // An object def's device is no vehicle: no REFLECTABLE bit in its
+    // record's flags word [orig: Entity_InitFromModel @0x40E201..0x40E20A].
+    CHECK((rec.minimap_flags & kEntityFlagReflective) == 0);
+    rig.w.throwables.devices.clear();
+    LiveRound plain = make_satchel_round(rig, Vec3{24, 20, 2});
+    plain.tracer = false;
+    CHECK(rig.w.throwables.place_from_round(rig.w, plain, ammo));
+    const Entity *bare = rig.w.throwables.devices.empty()
+            ? nullptr
+            : rig.w.registry.get(rig.w.throwables.devices.back().entity);
+    CHECK(bare != nullptr && !bare->has_graphic_model && bare->item_type == 6);
+}
+
 void test_placed_device_pose_and_ballistic_damage() {
     Rig rig(0);
     LiveRound round = make_satchel_round(rig, Vec3{20, 20, 2});
@@ -1777,6 +1827,7 @@ int main() {
     test_satchel_places_device();
     test_placed_device_takes_the_model_init_no_target_bit();
     test_placed_device_takes_the_model_init_matrix_and_hp0_legs();
+    test_placed_device_reads_its_def_type_and_attrib_words();
     test_placed_device_pose_and_ballistic_damage();
     test_parented_device_follows_parent_yaw();
     test_parented_device_adopts_parent_pitch();
