@@ -909,6 +909,11 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
 		ServerLogRecorder *server_log) {
 	std::vector<ProtocolMessage> replies;
+	// The hold (slot state) clears first, ahead of the body's def test, so a refused
+	// mobile spawn below leaves the slot unheld (D-NET-552) [orig: Server_ProcessPlayerDeath
+	//  @0x517791 `and byte ptr [esi+15F38h], 0EFh`, the def test @0x517798].
+	conn.link.respawn_pending = false;
+	world.match.set_player_respawn_pending(conn.link.owned_entity, false);
 	if (!conn.link.owned_entity.valid()) return replies;
 	world::Entity *player = world.registry.get(conn.link.owned_entity);
 	if (player == nullptr) return replies;
@@ -928,8 +933,12 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		if (((target->flags | target->engine_flags) & world::kEntityFlagDead) != 0 ||
 				!target->primary_occupant.valid() ||
 				!world::find_best_vehicle_seat(
-						world, target_zone, player->handle, selected))
+						world, target_zone, player->handle, selected)) {
+			// Each a bare return [orig: @0x517A7C]; the next 0x0A shows the unheld slot, as
+			// the deploy's below [orig: NetPacket_WritePlayerState @0x4FF6D7, the hold @0x4FF7AA].
+			if (!conn.link.spectator) player->flags &= ~1u;
 			return replies;
+		}
 	}
 	// The revive latch (+89932) skips the spawn protection and the kit rebuild below;
 	// the placement lands a revive on its saved position (server_spawn.h). [orig: the
@@ -987,9 +996,6 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		PlayerSlot_InitWeaponsFromLoadout(config, conn, world.tables.weapons);
 	}
 	conn.discard_pre_deploy_uplinks = true;
-	// [orig: Server_ProcessPlayerDeath @0x517791 `and byte ptr [esi+15F38h], 0EFh`]
-	conn.link.respawn_pending = false;
-	world.match.set_player_respawn_pending(player->handle, false);
 	// No +360 store; the +364 hold clears only for a raw handle other than
 	// 0xFFFF, resolvable or not [orig: Server_ProcessPlayerDeath @0x51786B..0x517872].
 	if (requested_handle != world::EntityHandle::kInvalid)
