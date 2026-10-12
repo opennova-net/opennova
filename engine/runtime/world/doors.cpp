@@ -141,7 +141,7 @@ void DoorSystem::tick(World &world) {
     }
 }
 
-// [orig: Entity_ProcessSectionDamageTransition @0x43F370]
+// [orig: DoorClass_HandleEvent @0x43F370]
 void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch_mask) {
     if (!entity.door_event) return;
     if (event == 6) entity.door_touch_mask = touch_mask;

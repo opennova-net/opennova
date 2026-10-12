@@ -169,7 +169,7 @@ public:
     void build_from_mission(const World &world, int32_t base_interval,
                             int32_t numbered_zone_interval);
     bool has_entry(EntityHandle zone) const;
-    bool try_queue(const World &world, EntityHandle zone, EntityHandle player);
+    bool try_queue(EntityHandle zone, EntityHandle player, uint8_t slot_team);
     bool remove_player(EntityHandle player);
     std::vector<SpawnWaveRelease> tick(const World &world);
     void reset_on_zone_team_change(const World &world, EntityHandle zone);

@@ -116,7 +116,7 @@ static int test_writer() {
 
     // Every slot line carries its five columns, so what an earlier line left in
     // the tokenizer's slots 3 and 4 is never read for it [orig:
-    // Terrain_TokenizeConfigLine @0x53CB71..0x53CB81 resets 0..2 only; the
+    // Config_TokenizeLine @0x53CB71..0x53CB81 resets 0..2 only; the
     // callback reads tokens[4]/[5] @0x52714b/@0x52718b]: after a long line the
     // written slot still reads 0 and 0.
     SoundProfile r;
@@ -245,7 +245,7 @@ int main(int argc, char **argv) {
 
     // A short line reads the slots a longer one left: tokens 0..2 reset each line,
     // 3..29 keep their pointers into the reused line buffer [orig:
-    // Terrain_TokenizeConfigLine @0x53CB71..0x53CB81], and the callback reads
+    // Config_TokenizeLine @0x53CB71..0x53CB81], and the callback reads
     // tokens[4] and tokens[5] with no count check (@0x52714b, @0x52718b). So a
     // bare `soundloop_3 V_B` after `soundloop_2 V_A .8 1.2 3` keeps param2 0
     // (token 2, reset) but takes 1.2 and 3, which outlive the shorter line.
@@ -380,7 +380,7 @@ int main(int argc, char **argv) {
     // reads the slots an earlier, longer line left, so the Chinook's bare
     // soundloop_3 takes a param3 of 1.2 (78643) and the Mil26's soundloop_2
     // the gear count 2 from slot 4 [orig: SoundProfile_ParseLineCallback
-    // @0x526fc0, the column reads @0x5270f0..0x52718b; Terrain_TokenizeConfigLine
+    // @0x526fc0, the column reads @0x5270f0..0x52718b; Config_TokenizeLine
     // @0x53CB71..0x53CB81].
     const std::string install = retail::install();
     if (!install.empty()) {

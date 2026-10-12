@@ -257,9 +257,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		//  MapOverlay_RenderAllByLayer @0x5BE6C4]
 		e->has_graphic_model = def != nullptr && def->graphic[0] != '\0' &&
 				e->kind != world::EntityKind::Marker;
-		// The physics callback table's ewep row selects the gun update.
-		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0]
-		e->emplaced_update = move_row == world::PhysicsClass::Ewep;
+		// The physics callback table's ewep row selects the gun update. A
+		// section clone's template pins its update callback (the floating
+		// physics) whatever its def, on every resolve.
+		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0;
+		//  Entity_SpawnSectionEntity @0x440370]
+		e->emplaced_update = !e->section_clone && move_row == world::PhysicsClass::Ewep;
 		// The render tag picks the def+0x144 CTRL callback; the ewep row's
 		// publishes the gun words (world/mount_controls.h).
 		// [orig: EntityDef_InitAllCallbacks @0x4A5AEA..0x4A5B03 ->
@@ -306,6 +309,15 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->radar_sig = def != nullptr ? (def->radar_sig & 0xFFFF) : 0;
         e->heat_sig = def != nullptr ? (def->heat_sig & 0xFFFF) : 0;
         if (hp != 0) e->health_max = hp;
+        // NoTarget item (attrib 0x100): the model init's first leg ORs Flags
+        // 0x8000000, ahead of the hp-0 leg below, and never clears it. The AI
+        // target walks and the pool ray walker skip the bit (the walker unless
+        // its caller passes the include arg), and the 0x10 / 0x0D load stream
+        // carries it in the Flags dword. Resolved defs only, as the hp-0 leg.
+        // [orig: Entity_InitFromModel @0x40DC30 - `test [def+54h], 100h`
+        //  @0x40DC3B, `or [esi+24h], 8000000h` @0x40DC4F]
+        if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_NOTARGET) != 0)
+            e->engine_flags |= world::kEntityFlagNoTarget;
         // Indestructible item (def hp == 0): entity Flags |= 0x4000000 and subType = 0xFF —
         // the def-sourced half of the 0x10 static record's flag dword / flag-0x80 byte
         // (D-NET-147; every golden ASH_I5A building carries both) — Health = 1, and the
@@ -400,8 +412,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             e->mana = e->mana_max;
             // The move-function row selects only the update callback, the
             // squib motor [orig: the "squib" row @0x82AC88 of the 12-byte move
-            // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50].
-            if (move_row == world::PhysicsClass::Squib) e->squib.motor = true;
+            // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50],
+            // never a section clone's pinned one [orig: @0x440370].
+            if (move_row == world::PhysicsClass::Squib && !e->section_clone)
+                e->squib.motor = true;
             // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
             // row's second slot, run through def+0x148 whatever the move
             // function [orig: sub_448CE0 @0x448CE0, row @0x813120 +12;
@@ -444,7 +458,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // tag drops the draw. A palm fragment's draw is item 900's own too: its
         // spawn stores the sector builder into the model's collision and scar
         // callbacks, not the draw's (palm_fragment).
-        // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6; Render_SectorEntity
+        // [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6; Render_SectorEntity
         //  @0x5C431B..0x5C4372]
         const std::string_view render =
                 def != nullptr ? render_tag(def->render_function) : std::string_view();
@@ -462,9 +476,17 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         //  third columns BoneCallback_Simple @0x4E2600 (cveh's @0x82CFEC);
         //  Render_SectorEntity @0x5C431B]
         // A model whose own LOD tag is one of these rows binds it too
-        // (D-ITEMDEF-18); the `bldg` row pivots by another rule (D-ITEMDEF-23).
+        // (D-ITEMDEF-18); the `bldg` row pivots by its own rule, below.
         e->death_section_pivot =
                 render == "cveh" || render == "chel" || render == "tank" || render == "cpln";
+        // The `bldg` row's world callback translates the draw of whatever it
+        // draws by the negated origin, in the graphic model's COBJ, of the
+        // section the byte +0x2C1 names; section 0 draws in place. A section
+        // clone carries its own section there.
+        // [orig: row 'bldg' @0x82CF10 -> BoneCallback_bldg_World @0x4E21A0,
+        //  the byte @0x4E2214, the translate @0x4E221E..0x4E2247;
+        //  Entity_SpawnSectionEntity's store @0x4404C1]
+        e->bldg_section_pivot = render == "bldg";
         // The ai_function palm row's callback is WeaponOverlay_HandleDamage and
         // the move_function psec row's update is Entity_UpdatePhysicsStep: the two
         // callbacks the load serializers test before streaming entity+0x270.
@@ -473,10 +495,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->palm_state_streamed = def != nullptr &&
                 (strutil::iequals(def->ai_function, "palm") ||
                  move_row == world::PhysicsClass::Psec);
-        // The ai_function binds its event row by whole name, ignoring case.
-        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2]
-        e->door_event = def != nullptr && strutil::iequals(def->ai_function, "door");
-        e->door_motion = move_row == world::PhysicsClass::Door;
+        // The ai_function binds its event row by whole name, ignoring case. A
+        // section clone's template pins its event and update callbacks, so
+        // neither door row reaches it on any resolve; a palm fragment takes
+        // item 900's own pair.
+        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2;
+        //  Entity_SpawnSectionEntity @0x440365 / @0x440370;
+        //  Palm_SpawnFragment @0x53C35D / @0x53C36F]
+        e->door_event = !e->section_clone && def != nullptr &&
+                strutil::iequals(def->ai_function, "door");
+        e->door_motion = !e->section_clone && move_row == world::PhysicsClass::Door;
         // Every def carries its two +0x6F3/+0x70B sound names; the door
         // commands play them, and so does the drop of a carried object off
         // its carrier (world::drop_object_from_carrier).
@@ -491,8 +519,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // door def, its open sections from the record's section word.
         // [orig: Entity_SpawnFromBMSRecord @0x40F25D..0x40F2DA (types 5/2, attrib
         //  0x80); NapiNPClientMsg_0x010 @0x4336B5..0x433745 (attrib 0x80 alone)]
+        // A piece (a section clone or a palm fragment) comes from neither: its
+        // clone copies 0x2B4 bytes, short of the door slot base +0x2B8, and
+        // nothing allocates it rows (a door item 900's: D-ITEMDEF-27).
+        // [orig: Entity_CloneFromTemplateByType @0x4398A0, the copy @0x43997D]
         const bool wire_doors = !world.rules.logic_authority && e->handle.pool() == 2;
-        if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
+        if (def != nullptr && !e->item_section_piece &&
+                (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
                 (wire_doors || def->type == DEF_ITEM_TYPE_BUILDING ||
                  def->type == DEF_ITEM_TYPE_DECORATION)) {
             e->door_count = static_cast<int8_t>(def->deathtime_ticks);
@@ -692,6 +725,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         row.health_max = world::retail_signed_i16(def->hp);
         row.armor_impact = world::retail_signed_i16(def->armor_impact);
         row.armor_kz = world::retail_signed_i16(def->armor_kz);
+        // The placed entity's model init reads the def's NoTarget bit
+        // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0 -> the
+        //  Entity_InitFromModel call @0x5455D8].
+        row.no_target = (def->attrib & DEF_ITEM_ATTRIB_NOTARGET) != 0;
         world.throwables.classes.set(row);
     }
     // The AS zone-slot chain — built AFTER the trait stamp (zone registration keys on

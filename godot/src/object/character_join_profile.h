@@ -9,8 +9,8 @@ namespace godot {
 
 // The joiner's profile-to-wire projection (runtime/inmatch/join_character_profile.h):
 // per side the packed Avatars.def character id (CI0/CI1), the class byte
-// (CTA/CTB) and the avatar byte (VCA/VCB, the selected combo's head voice),
-// plus the side request the companion fills (-1 = assign me). Produced by
+// (CTA/CTB) and the avatar byte (VCA/VCB, the selected combo's head voice);
+// the join's TR is always the automatic -1 (kJoinSideRequirement). Produced by
 // AvatarDatabase.character_join_profile, consumed by the Simulation's join and
 // local-player installs.
 class CharacterJoinProfile : public RefCounted {
@@ -29,7 +29,6 @@ public:
 	int get_character_id(int p_side) const;
 	int get_player_class(int p_side) const;
 	int get_avatar(int p_side) const;
-	int get_team_request() const { return value_.team_request; }
 };
 
 } // namespace godot

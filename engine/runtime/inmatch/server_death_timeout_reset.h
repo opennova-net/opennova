@@ -26,7 +26,7 @@ namespace opennova::inmatch {
 // (D-NET-477). The edge's anim-slot and death-screen
 // gates are not mirrored: every player body ours spawns carries its infantry
 // body, and the listen host's own never sends this request (D-NET-475).
-// [orig: NapiNPServerMsg_ResetPlayerAmmo @0x510540 (the C2S table's 0x41 row
+// [orig: NapiNPServerMsg_DeathTimeoutReset @0x510540 (the C2S table's 0x41 row
 //  @0x82B948) -- the authority @0x510542, the connection @0x51054E, its slot
 //  @0x510558, the entity @0x510562, +0x11E @0x510568, +0x178 @0x51056F,
 //  g_RespawnTimeout into +360 @0x51057B and +364 @0x510587, +368 @0x51058D;

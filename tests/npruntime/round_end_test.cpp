@@ -1727,7 +1727,7 @@ int main() {
 	expect(!world.registry.get(player)->alive, "the expired hold deploys nothing by itself");
 	// The deploy raises the local player to its ceiling with the difficulty
 	// term: the objective Co-op word -1 doubles the def hp out of a session
-	// [orig: Server_ProcessPlayerDeath @0x51782F -> Entity_RaiseHealthToMax ->
+	// [orig: Server_DeployPlayer @0x51782F -> Entity_RaiseHealthToMax ->
 	//  Entity_GetMaxHealthWithDifficulty @0x43B8A0]. (D-PWR-2)
 	world.rules.difficulty = -1;
 	pick_default_spawn();

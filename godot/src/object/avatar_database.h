@@ -153,7 +153,7 @@ public:
 	// all carry. Returns the resolved combo row, or null when no combo matches
 	// (or the alignment bit contradicts `expected_alignment` when that is
 	// ALIGN_GOOD/ALIGN_EVIL)
-	// [orig: MinimapSlot_FindByPackedId @0x57a270, see docs/playerinfo/avatars-re.md].
+	// [orig: CAvatarDefs_FindComboByPackedId @0x57a270, see docs/playerinfo/avatars-re.md].
 	Ref<AvatarComboRow> resolve_character_id(int character_id,
 			int expected_alignment = -1) const;
 	// Retail's per-side default character: the packed id of the first combo (file
