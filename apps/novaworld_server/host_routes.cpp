@@ -1,12 +1,14 @@
 #include "host_routes.h"
 
 #include "auth.h"
+#include "hosted/hosted_repository.h"
 #include "http_json.h"
 #include "nw_udp_listener.h"
 
 #include <base/io/cp1252.h>
 #include <net/novaworld/host_repository.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -150,6 +152,23 @@ ComposedServerCommand refused(const char *error, const std::string &message) {
 	return out;
 }
 
+// A hosted server's listing (ADR 0053, proposed): its stop is the hosted
+// server's, the supervisor's own act (the row to stopping, then the
+// supervisor's ServerStopHosting push and the machine's end), never a bare push
+// here: that would end the server's session, and the supervisor would read the
+// exit as a crash and restart it. 202 {"rid", "hosted_server_id", "state"}, the
+// hosted server's state after the request (also when it was stopping already).
+crow::response stop_hosted(db::Database &db, uint32_t rid, int64_t server_id, const char *detail) {
+	hosted::request_stop(db, server_id, detail);
+	const auto server = hosted::find_server(db, server_id);
+	crow::json::wvalue out;
+	out["rid"] = rid;
+	out["hosted_server_id"] = server_id;
+	out["state"] = server ? hosted::state_name(server->state) : hosted::state_name(hosted::State::Stopping);
+	out["status"] = "hosted_stop";
+	return json_reply(202, out);
+}
+
 } // namespace
 
 ComposedServerCommand compose_server_command(const std::string &text) {
@@ -247,8 +266,11 @@ void HostRoutes::register_routes(WebApp &app, NwUdpListener *nw_udp) {
 }
 
 // GET /api/admin/hosts — every listed server with its owner: listed_host_json
-// plus "owner", {id, username} of the account whose HostKey listed it, or
-// null for an anonymous listing (the HostKey named no account).
+// plus "owner", {id, username} of the account whose HostKey listed it (for a
+// hosted server's listing, held by its service account, the hosted server's
+// owner: hosted::listing_owner_of), or null for an anonymous listing (the
+// HostKey named no account) and a hosted one whose owner is gone, and
+// "hosted_server_id", the hosted server a listing is, else null.
 crow::response HostRoutes::admin_hosts(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -261,14 +283,22 @@ crow::response HostRoutes::admin_hosts(const crow::request &req) {
 		for (const auto &h : hostdb::list_hosts(*db_conn)) {
 			crow::json::wvalue e = listed_host_json(h);
 			std::optional<UserRecord> owner;
+			std::optional<hosted::HostedAccount> hosted_server;
+			std::optional<int64_t> owner_id;
 			if (h.host_user_id) {
-				auto it = owners.find(*h.host_user_id);
-				if (it == owners.end()) {
-					it = owners.emplace(*h.host_user_id, get_user_by_id(*db_conn, *h.host_user_id))
-								 .first;
-				}
+				hosted_server = hosted::hosted_server_of_account(*db_conn, *h.host_user_id);
+				owner_id = hosted_server ? hosted_server->owner_user_id : h.host_user_id;
+			}
+			if (owner_id) {
+				auto it = owners.find(*owner_id);
+				if (it == owners.end())
+					it = owners.emplace(*owner_id, get_user_by_id(*db_conn, *owner_id)).first;
 				owner = it->second;
 			}
+			if (hosted_server)
+				e["hosted_server_id"] = hosted_server->server_id;
+			else
+				e["hosted_server_id"] = nullptr;
 			if (owner) {
 				crow::json::wvalue o;
 				o["id"] = owner->id;
@@ -330,14 +360,28 @@ crow::response HostRoutes::admin_command(const crow::request &req, uint64_t rid)
 // host in a NovaWorld match ends that match for everyone within 62 frames,
 // goes to the main menu and resets its NovaWorld session
 // (NwUdpListener::push_stop_hosting; the record's "The exit"); the server
-// leaves the browser as the statement goes out. No body.
+// leaves the browser as the statement goes out. No body. On a hosted server's
+// listing (its service account's) it is that hosted server's stop instead
+// (stop_hosted).
 crow::response HostRoutes::admin_stop(const crow::request &req, uint64_t rid) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
 		return std::move(*caller.refusal);
+	const uint32_t rid32 = rid_of(rid);
+	try {
+		auto db_conn = pool_.acquire();
+		const auto row = hostdb::find_host_by_rid(*db_conn, rid32);
+		if (row && row->host_user_id) {
+			if (const auto hosted_server = hosted::hosted_server_of_account(*db_conn, *row->host_user_id))
+				return stop_hosted(*db_conn, rid32, hosted_server->server_id, "stopped by an admin from its listing");
+		}
+	} catch (const db::SqliteError &e) {
+		std::fprintf(stderr, "[http] POST /api/admin/hosts/%llu/stop lookup failed: %s\n",
+				static_cast<unsigned long long>(rid), e.what());
+		return json_error(500, "db_error");
+	}
 	if (nw_udp_ == nullptr)
 		return no_listener();
-	const uint32_t rid32 = rid_of(rid);
 	const HostPushResult result =
 			nw_udp_->push_stop_hosting(rid32, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT);
 	std::printf("[http] POST /api/admin/hosts/%llu/stop -> %s\n",
@@ -355,19 +399,45 @@ crow::response HostRoutes::admin_stop(const crow::request &req, uint64_t rid) {
 // type}, the slot being what a player verb's ByIndex target names), read in one
 // snapshot so no roster goes out beside another commit's row. A listing whose
 // row still names the account but whose claim is gone (a reset, a ban or a
-// delete since its last write) is left out, as the push routes refuse it.
+// delete since its last write) is left out, as the push routes refuse it. The
+// account's hosted servers' listings, held by their service accounts, are its
+// too (hosted::listing_accounts_of, the one rule), each with
+// "hosted_server_id" (null on a listing of the account's own).
 crow::response HostRoutes::owner_hosts(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal)
 		return std::move(*access.refusal);
+	struct Owned {
+		hostdb::HostRow row;
+		std::optional<int64_t> hosted_server_id;
+	};
+	std::vector<Owned> owned;
 	std::vector<crow::json::wvalue> hosts;
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		for (const auto &h : hostdb::list_hosts_by_owner(*db_conn, access.user->id)) {
-			if (!hostdb::listing_owned_by(*db_conn, h.rid, access.user->id))
-				continue;
+		for (const int64_t account : hosted::listing_accounts_of(*db_conn, access.user->id)) {
+			std::optional<int64_t> hosted_server_id;
+			if (account != access.user->id) {
+				if (const auto hosted_server = hosted::hosted_server_of_account(*db_conn, account))
+					hosted_server_id = hosted_server->server_id;
+			}
+			for (auto &h : hostdb::list_hosts_by_owner(*db_conn, account)) {
+				if (hostdb::listing_owned_by(*db_conn, h.rid, account))
+					owned.push_back({ std::move(h), hosted_server_id });
+			}
+		}
+		std::sort(owned.begin(), owned.end(), [](const Owned &a, const Owned &b) {
+			return a.row.created_at != b.row.created_at ? a.row.created_at < b.row.created_at
+														: a.row.rid < b.row.rid;
+		});
+		for (const Owned &o : owned) {
+			const hostdb::HostRow &h = o.row;
 			crow::json::wvalue e = listed_host_json(h);
+			if (o.hosted_server_id)
+				e["hosted_server_id"] = *o.hosted_server_id;
+			else
+				e["hosted_server_id"] = nullptr;
 			e["msg"] = retail_text_to_utf8(h.msg);
 			std::vector<crow::json::wvalue> roster;
 			for (const auto &s : hostdb::list_roster(*db_conn, h.rid)) {
@@ -399,25 +469,35 @@ crow::response HostRoutes::owner_hosts(const crow::request &req) {
 // kOwnerPushPerUser bucket (429 with Retry-After), then the body (400,
 // compose_server_command), then the verb (403 verb_not_allowed:
 // owner_may_send), then the listing: 404 unless the RID is listed with one of
-// the caller's keys claimed for it (hostdb::listing_owned_by), the same reply
-// for a free RID and another account's; then the push, scoped to the caller,
-// which the listener checks against the connection's own owner under its
-// lobby lock and again as the statement goes out (a changed owner is 404
-// too); 409 for the caller's listing whose connection is not hosting. Every
-// request past require_user is logged with the account, the RID and the
-// outcome.
+// the caller's keys claimed for it, or one of the caller's hosted servers'
+// service accounts' keys (hosted::owned_listing_account, the one rule), the
+// same reply for a free RID and another account's; then the push, scoped to
+// that account, which the listener checks against the connection's own owner
+// under its lobby lock and again as the statement goes out (a changed owner is
+// 404 too); 409 for the caller's listing whose connection is not hosting. The
+// stop of a hosted server's listing is the hosted server's stop instead
+// (stop_hosted). Every request past require_user is logged with the account,
+// the RID and the outcome.
 template <typename Push>
 crow::response HostRoutes::push_as_owner(const WebSessionUser &user, uint64_t rid, const char *what,
 		const std::string &line, Push push, crow::json::wvalue out) {
 	const uint32_t rid32 = rid_of(rid);
-	bool owned = false;
+	std::optional<int64_t> account;
 	try {
-		owned = hostdb::listing_owned_by(*pool_.acquire(), rid32, user.id);
+		auto db_conn = pool_.acquire();
+		account = hosted::owned_listing_account(*db_conn, rid32, user.id);
+		if (account && *account != user.id && std::string(what) == "stop") {
+			if (const auto hosted_server = hosted::hosted_server_of_account(*db_conn, *account)) {
+				log_owner_push(user, rid, what, line, "hosted_stop");
+				return stop_hosted(*db_conn, rid32, hosted_server->server_id,
+						"stopped by its owner from its listing");
+			}
+		}
 	} catch (const db::SqliteError &e) {
 		std::fprintf(stderr, "[http] owner %s lookup failed: %s\n", what, e.what());
 		return json_error(500, "db_error");
 	}
-	if (!owned) {
+	if (!account) {
 		// Logged apart from the listener's own unknown_rid (a connection the caller does not own,
 		// or none, at push time); the reply is the same.
 		log_owner_push(user, rid, what, line, "no_listing_of_theirs");
@@ -425,7 +505,7 @@ crow::response HostRoutes::push_as_owner(const WebSessionUser &user, uint64_t ri
 	}
 	if (nw_udp_ == nullptr)
 		return no_listener();
-	const HostPushResult result = push(rid32);
+	const HostPushResult result = push(rid32, *account);
 	log_owner_push(user, rid, what, line, host_push_result_name(result));
 	return push_reply(result, rid32, std::move(out), kNotYours);
 }
@@ -458,15 +538,16 @@ crow::response HostRoutes::owner_command(const crow::request &req, uint64_t rid)
 	out["cmd"] = line_text(command.cmd);
 	return push_as_owner(
 			user, rid, "command", command.cmd,
-			[this, &command, &user](uint32_t rid32) {
-				return nw_udp_->push_server_command(rid32, command.cmd, user.id);
+			[this, &command](uint32_t rid32, int64_t account) {
+				return nw_udp_->push_server_command(rid32, command.cmd, account);
 			},
 			std::move(out));
 }
 
 // POST /api/me/hosts/<rid>/stop — the admin stop's sysop punt (MsgCode 7): a
 // stock host ends its running match for everyone on the server and leaves
-// NovaWorld. No body.
+// NovaWorld. No body. On a hosted server's listing it is the hosted server's
+// stop (stop_hosted: 202 with its "hosted_server_id" and "state").
 crow::response HostRoutes::owner_stop(const crow::request &req, uint64_t rid) {
 	auto access = access_.require_user(req);
 	if (access.refusal)
@@ -482,9 +563,9 @@ crow::response HostRoutes::owner_stop(const crow::request &req, uint64_t rid) {
 	out["msg_code"] = SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT;
 	return push_as_owner(
 			user, rid, "stop", "",
-			[this, &user](uint32_t rid32) {
+			[this](uint32_t rid32, int64_t account) {
 				return nw_udp_->push_stop_hosting(
-						rid32, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0, 0, user.id);
+						rid32, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0, 0, account);
 			},
 			std::move(out));
 }

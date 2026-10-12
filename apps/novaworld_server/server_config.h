@@ -176,6 +176,10 @@ struct ServerConfig {
 	std::string hosted_resource_dir;
 	bool hosted_loose_root = false;
 	std::string hosted_work_dir = "backend/data/hosted";
+	// ONNET_HOSTED_MISSIONS: the rotation a start takes when its request names
+	// none (comma-separated .bms names, the first the starting map). Empty: a
+	// start must name its missions.
+	std::vector<std::string> hosted_missions;
 
 	// Build a config by reading env vars, falling back to the defaults
 	// above for anything not set.

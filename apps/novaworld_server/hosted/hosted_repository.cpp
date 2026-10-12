@@ -1,5 +1,7 @@
 #include "hosted_repository.h"
 
+#include <net/novaworld/host_repository.h>
+
 #include <array>
 #include <utility>
 
@@ -269,6 +271,39 @@ std::optional<uint32_t> listing_rid_of(db::Database &db, int64_t account_user_id
 			{ BindValue(account_user_id) });
 	if (rows.empty()) return std::nullopt;
 	return static_cast<uint32_t>(rows.front().as_int(0).value_or(0));
+}
+
+std::optional<HostedAccount> hosted_server_of_account(db::Database &db, int64_t account_user_id) {
+	const auto rows = db.query("SELECT id, owner_user_id FROM hosted_servers "
+							   "WHERE service_user_id = ? ORDER BY id DESC LIMIT 1;",
+			{ BindValue(account_user_id) });
+	if (rows.empty()) return std::nullopt;
+	HostedAccount out;
+	out.server_id = rows.front().as_int(0).value_or(0);
+	out.owner_user_id = rows.front().as_int(1);
+	return out;
+}
+
+std::optional<int64_t> listing_owner_of(db::Database &db, int64_t account_user_id) {
+	if (const auto hosted = hosted_server_of_account(db, account_user_id)) return hosted->owner_user_id;
+	return account_user_id;
+}
+
+std::vector<int64_t> listing_accounts_of(db::Database &db, int64_t user_id) {
+	std::vector<int64_t> out{ user_id };
+	for (const auto &r : db.query("SELECT service_user_id FROM hosted_servers "
+								  "WHERE owner_user_id = ? AND service_user_id IS NOT NULL ORDER BY id;",
+				 { BindValue(user_id) })) {
+		if (const auto account = r.as_int(0)) out.push_back(*account);
+	}
+	return out;
+}
+
+std::optional<int64_t> owned_listing_account(db::Database &db, uint32_t rid, int64_t user_id) {
+	for (const int64_t account : listing_accounts_of(db, user_id)) {
+		if (hostdb::listing_owned_by(db, rid, account)) return account;
+	}
+	return std::nullopt;
 }
 
 } // namespace opennova::novaworld_server::hosted

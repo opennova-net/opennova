@@ -4001,6 +4001,21 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(nw_owner_admin_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME nw_owner_admin_e2e COMMAND nw_owner_admin_e2e_test)
     set_tests_properties(nw_owner_admin_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
+
+    # A hosted server end to end (apps/novaworld_server/hosted): an in-process service with
+    # hosted servers on (the same nw_service_harness.h, under ONNET_REQUIRE_HOST_KEY) and its
+    # supervisor running a real opennova-serve child through LocalProcessProvider over a
+    # synthetic loose game directory: started from POST /api/me/server/start, listed as its
+    # service account and shown as the owner's, renamed by the owner's SetServerName (game.cfg
+    # saved), and stopped from POST /api/me/server/stop. ctest passes the opennova-serve binary.
+    add_executable(hosted_local_e2e_test novaworld/hosted_local_e2e_test.cpp)
+    target_link_libraries(hosted_local_e2e_test PRIVATE
+        opennova_novaworld_server_core opennova_novaworld_service)
+    target_include_directories(hosted_local_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(hosted_local_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_dependencies(hosted_local_e2e_test opennova_serve)
+    add_test(NAME hosted_local_e2e COMMAND hosted_local_e2e_test $<TARGET_FILE:opennova_serve>)
+    set_tests_properties(hosted_local_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s

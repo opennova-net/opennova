@@ -128,4 +128,33 @@ void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::st
 // The newest when it holds several; nullopt for none.
 std::optional<uint32_t> listing_rid_of(db::Database &db, int64_t account_user_id);
 
+// --- A hosted listing's owner: the one rule (ADR 0053 d4, proposed) ---
+//
+// A listing belongs to the account whose HostKey it holds now
+// (hostdb::listing_owned_by), except that a hosted server's service account
+// stands for that hosted server's owner. Every owner-facing view and push
+// resolves a listing through the four functions below (host_routes.cpp: GET
+// /api/me/hosts, POST /api/me/hosts/<rid>/command and /stop, GET
+// /api/admin/hosts and its stop), so the rule lives here alone. Service
+// policy, like the HostKey claim it extends. Reads only: safe inside a
+// db::ReadSnapshot.
+
+// The hosted server whose service account `account_user_id` is.
+struct HostedAccount {
+	int64_t server_id = 0;
+	std::optional<int64_t> owner_user_id; // unset once the owner's account is gone
+};
+std::optional<HostedAccount> hosted_server_of_account(db::Database &db, int64_t account_user_id);
+// The site account that owns what `account_user_id` lists: a hosted server's
+// owner for its service account (nullopt once that owner is gone), else the
+// account itself.
+std::optional<int64_t> listing_owner_of(db::Database &db, int64_t account_user_id);
+// The accounts whose listings are `user_id`'s: itself first, then the service
+// accounts of its hosted servers.
+std::vector<int64_t> listing_accounts_of(db::Database &db, int64_t user_id);
+// The account through which `user_id` owns the listing under `rid` now: itself
+// or one of its hosted servers' service accounts, whichever holds the listing's
+// claim; nullopt when the listing is not `user_id`'s (or not listed).
+std::optional<int64_t> owned_listing_account(db::Database &db, uint32_t rid, int64_t user_id);
+
 } // namespace opennova::novaworld_server::hosted
