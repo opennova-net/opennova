@@ -16,6 +16,7 @@
 #include <editor/session/terrain_heights_plan.h>
 #include <editor/session/view/session_view.h>
 #include <formats/cpt/cpt_io.h>
+#include <formats/png/png_encode.h>
 
 #include <chrono>
 #include <cmath>
@@ -400,10 +401,92 @@ int test_seed() {
 	return 0;
 }
 
+// An imported terrain sculpted (S25 A2b): a stroke in a mission on it routes to the terrain set's heightmap, opened as
+// the heights under the import's white; its first bake lays its seed's whole bake (the .cpt the import makes of the
+// image) under the stroke's regions, and the image then stands in for the import's .cpt in the project's files (what
+// the views and the ground read); its save writes the heightmap, and the project's refresh imports it again, the
+// .cpt it makes the bytes the image stood in for it with (DI-26's save-first then the build's refresh carry it).
+int test_imported() {
+	editor_test::TempProjectDir dir("opennova_editor_heights_imported");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Isle"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	constexpr int kSide = 1024;
+	std::vector<uint16_t> samples(size_t(kSide) * kSide);
+	for (int y = 0; y < kSide; ++y)
+		for (int x = 0; x < kSide; ++x) {
+			const double r = std::hypot(x - 512.0, y - 512.0) / 400.0;
+			samples[size_t(y) * kSide + size_t(x)] = uint16_t(30000.0 * std::max(0.0, 1.0 - r));
+		}
+	std::vector<uint8_t> rgba(size_t(kSide) * kSide * 4, 200);
+	const std::string images = dir.file("images");
+	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_gray16(samples.data(), kSide, kSide)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(rgba.data(), kSide, kSide)));
+	const ActionOutcome made = editor_test::handle_to_end(session, request::new_terrain("isle",
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"top", "100"}}));
+	TEST_EXPECT(!made.refused);
+	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "isle.trn"}, {"environment", "day.env"}}));
+	const AssetEntry *mission = v.project.scan->find("m.bms");
+	const AssetEntry *cpt_entry = v.project.scan->find("isle.cpt");
+	const AssetEntry *image_entry = v.project.scan->find("isle_heightmap.png");
+	TEST_EXPECT(mission && cpt_entry && image_entry && image_entry->kind == AssetKind::HeightmapInput);
+	if (!mission || !cpt_entry || !image_entry) return 1;
+	const std::string m = mission->relative_path, cpt = cpt_entry->relative_path, image = image_entry->relative_path;
+	const std::vector<uint8_t> imported = test_io::read_file(root + "/" + cpt);
+	session.handle(request::open_document(m));
+
+	// A raise at the island's middle, ended: the stroke lands in the heightmap, the import's .cpt untouched.
+	TerrainStrokeAsk ask;
+	ask.plane = TerrainPlane::Heights;
+	ask.brush.tool = TerrainTool::Raise;
+	ask.brush.radius = 8.0f;
+	ask.brush.strength = 1.0f;
+	ask.brush_named = kBrushTool | kBrushRadius | kBrushStrength;
+	ask.points = {{-4.0, 0.0}, {4.0, 0.0}};
+	ask.gesture = 5151;
+	ask.end = true;
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done());
+	const auto heights_doc = [&]() -> const TerrainHeightsDocument * {
+		for (const auto &document : v.documents.open)
+			if (document->path() == image) return dynamic_cast<const TerrainHeightsDocument *>(document.get());
+		return nullptr;
+	};
+	TEST_EXPECT(heights_doc() && heights_doc()->image() && heights_doc()->cpt_path() == cpt &&
+	            heights_doc()->import_top() == 100.0 && heights_doc()->dirty());
+	TEST_EXPECT(settled(session, image, 180.0));
+	const TerrainHeightsDocument *heights = heights_doc();
+	TEST_EXPECT(heights && heights->heights().baked && heights->stand_in_paths() == std::vector<std::string>{cpt});
+	if (!heights) return 1;
+	TEST_EXPECT(test_io::read_file(root + "/" + cpt) == imported);
+	// The project's files read the sculpted ground for the .cpt.
+	std::vector<uint8_t> standing;
+	TEST_EXPECT(v.findings.assets && v.findings.assets->read("isle.cpt", standing) && standing != imported);
+	CptFile stood, was;
+	std::string why;
+	TEST_EXPECT(load_cpt(standing.data(), standing.size(), stood, why) && load_cpt(imported.data(), imported.size(), was, why));
+	TEST_EXPECT(stood.depth_buffer[512 * 1024 + 512] > was.depth_buffer[512 * 1024 + 512] &&
+	            stood.depth_buffer[100 * 1024 + 100] == was.depth_buffer[100 * 1024 + 100]);
+
+	// Saved: the heightmap written; the refresh imports it again, its .cpt the bytes that stood in for it.
+	session.handle(request::save(image));
+	TEST_EXPECT(heights_doc() && !heights_doc()->dirty());
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(test_io::read_file(root + "/" + cpt) == standing);
+	std::printf("imported: a stroke sculpts the heightmap, its bake stands in for the import's .cpt, the reimport makes those bytes\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_operators() + test_dabs() + test_session() + test_view() + test_seed();
+	const int failures = test_operators() + test_dabs() + test_session() + test_view() + test_seed() + test_imported();
 	if (failures == 0) std::printf("editor_heights_brushes: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

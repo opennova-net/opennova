@@ -13,8 +13,11 @@
 #include <editor/session/session_core.h>
 #include <editor/session/view/session_view.h>
 #include <formats/cpt/cpt_io.h>
+#include <base/io/file_io.h>
 #include <editor/session/terrain_family.h>
 #include <editor/session/terrain_follow.h>
+#include <editor/session/terrain_uses.h>
+#include <formats/cpt/trngen/heightmap_depth.h>
 #include <formats/cpt/trngen/terrain_bake.h>
 #include <formats/trn/trn_io.h>
 
@@ -40,6 +43,13 @@ struct TerrainSculpt::Job {
 	std::shared_ptr<const trngen::TerrainBakeState> seeded; // made here from seed_input
 	trngen::RegionBakeResult result;
 	std::shared_ptr<const trngen::TerrainBakeState> after;
+	// A heightmap image's (S25 A2b). Its seed: the .cpt its import makes, whose header the whole bake takes, and the
+	// whole bake made (seeded_cpt). Its first region bake: that whole bake, laid under the regions (base).
+	std::string cpt;
+	CptFile::Header names;
+	DepthFormat depth_format = DepthFormat::CDEP;
+	std::shared_ptr<const CptFile> seeded_cpt;
+	std::shared_ptr<const CptFile> base;
 };
 
 namespace {
@@ -71,6 +81,29 @@ bool same_locks(const std::array<trngen::CornerLockFlags, 4> &a, const std::arra
 	for (size_t i = 0; i < 4; ++i)
 		if (a[i].x != b[i].x || a[i].y != b[i].y) return false;
 	return true;
+}
+
+// A header's text field as a string (up to its NUL).
+std::string header_text(const char *field, size_t size) { return std::string(field, strnlen(field, size)); }
+
+// The header a heightmap image's import writes its .cpt with, read from that .cpt (the file itself: the image's
+// document stands in for it through the project's files once the editor bakes); the import's own where it does not
+// read (terrain_import.cpp's: the stem, "OpenNova", "opennova", CDEP).
+void import_header(const SessionView &view, const std::string &cpt, CptFile::Header &out, DepthFormat &format) {
+	out = CptFile::Header();
+	format = DepthFormat::CDEP;
+	std::vector<uint8_t> bytes;
+	std::string why;
+	CptFile read;
+	if (io::read_file_bytes(join_path(view.project.root, cpt), bytes, why) && load_cpt(bytes.data(), bytes.size(), read, why)) {
+		out = read.header;
+		format = read.depth_format;
+		return;
+	}
+	const std::string stem = basename_of(cpt).substr(0, basename_of(cpt).rfind('.'));
+	std::strncpy(out.terrain_name, stem.c_str(), sizeof(out.terrain_name) - 1);
+	std::strncpy(out.creator, "OpenNova", sizeof(out.creator) - 1);
+	std::strncpy(out.version, "opennova", sizeof(out.version) - 1);
 }
 
 bool sculpting(TerrainTool tool) {
@@ -127,19 +160,19 @@ TerrainSculpt::~TerrainSculpt() {
 	if (worker_.joinable()) worker_.join();
 }
 
-std::shared_ptr<const trngen::TerrainBakeState> TerrainSculpt::seed_for_(const TerrainHeightsDocument &document,
+const TerrainSculpt::Seed *TerrainSculpt::seed_for_(const TerrainHeightsDocument &document,
 		const std::array<trngen::CornerLockFlags, 4> &locks) const {
 	const RasterPlane &input = document.heights().baked_input;
 	uint64_t content = 0;
 	bool hashed = false;
 	for (const Seed &seed : seeds_) {
-		if (seed.path != document.path() || !same_locks(seed.locks, locks)) continue;
-		if (seed.input.shares_tiles_with(input)) return seed.state;
+		if (seed.path != document.path() || !same_locks(seed.locks, locks) || (document.image() && !seed.cpt)) continue;
+		if (seed.input.shares_tiles_with(input)) return &seed;
 		if (!hashed) {
 			content = heights_content(input);
 			hashed = true;
 		}
-		if (seed.content == content) return seed.state;
+		if (seed.content == content) return &seed;
 	}
 	return nullptr;
 }
@@ -147,8 +180,8 @@ std::shared_ptr<const trngen::TerrainBakeState> TerrainSculpt::seed_for_(const T
 std::unique_ptr<TerrainSculpt::Job> TerrainSculpt::make_job(const TerrainHeightsDocument &document) const {
 	if (document.blocked() || document.is_snapshot() || document.plane_count() < 2) return nullptr;
 	const HeightsState &state = document.heights();
-	// An image's first bake (its import's .cpt standing until then) is the image form's (A2's heightmap codec).
-	if (state.unbaked.empty() || !state.baked) return nullptr;
+	// A .cpt holds its bake as read; an image's first bake (its import's .cpt standing until then) lays its seed's.
+	if (state.unbaked.empty() || (!state.baked && !document.image())) return nullptr;
 	auto job = std::make_unique<Job>();
 	job->path = document.path();
 	job->identity = document.identity();
@@ -156,17 +189,22 @@ std::unique_ptr<TerrainSculpt::Job> TerrainSculpt::make_job(const TerrainHeights
 	job->revision = document.revision();
 	job->input = document.input();
 	job->rects = state.unbaked;
-	job->locks = terrain_bake_locks(core_, document.path());
+	job->locks = terrain_bake_locks(core_, document.cpt_path());
 	job->state = state.bake;
-	// The state the file's first bake starts from: its seed, made in the background (a region bake waits for it).
-	if (!job->state) job->state = seed_for_(document, job->locks);
-	if (!job->state) return nullptr;
+	// The state the file's first bake starts from: its seed, made in the background (a region bake waits for it); an
+	// image's whole bake laid under the regions.
+	if (!job->state) {
+		const Seed *seed = seed_for_(document, job->locks);
+		if (!seed) return nullptr;
+		job->state = seed->state;
+		if (!state.baked) job->base = seed->cpt;
+	}
 	job->threads = bake_threads();
 	return job;
 }
 
 std::unique_ptr<TerrainSculpt::Job> TerrainSculpt::seed_job_(const std::string &path, const RasterPlane &input,
-		const std::array<trngen::CornerLockFlags, 4> &locks) const {
+		const std::array<trngen::CornerLockFlags, 4> &locks, const std::string &cpt) const {
 	auto job = std::make_unique<Job>();
 	job->seed_only = true;
 	job->path = path;
@@ -174,8 +212,11 @@ std::unique_ptr<TerrainSculpt::Job> TerrainSculpt::seed_job_(const std::string &
 	job->content = heights_content(input);
 	job->locks = locks;
 	job->threads = bake_threads();
+	job->cpt = cpt;
 	for (const Seed &seed : seeds_)
-		if (seed.path == path && seed.content == job->content && same_locks(seed.locks, locks)) return nullptr;
+		if (seed.path == path && seed.content == job->content && same_locks(seed.locks, locks) && (cpt.empty() || seed.cpt))
+			return nullptr;
+	if (!cpt.empty()) import_header(core_.view(), cpt, job->names, job->depth_format);
 	return job;
 }
 
@@ -186,10 +227,12 @@ std::unique_ptr<TerrainSculpt::Job> TerrainSculpt::next_seed_() {
 		const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(each.get());
 		if (!heights || heights->blocked() || heights->is_snapshot() || heights->plane_count() < 2) continue;
 		const HeightsState &state = heights->heights();
-		if (!state.baked || state.bake) continue;
-		const auto locks = terrain_bake_locks(core_, heights->path());
+		if (state.bake || (!state.baked && !heights->image())) continue;
+		const auto locks = terrain_bake_locks(core_, heights->cpt_path());
 		if (seed_for_(*heights, locks)) continue;
-		if (std::unique_ptr<Job> job = seed_job_(heights->path(), state.baked_input, locks)) return job;
+		if (std::unique_ptr<Job> job =
+		            seed_job_(heights->path(), state.baked_input, locks, heights->image() ? heights->import_cpt() : std::string()))
+			return job;
 	}
 	// Sculpt picked over the active view's terrain, its heights file not open yet: seeded from the file's atlas
 	// (what the document will open with), so the first stroke's bake does not wait for it.
@@ -200,17 +243,31 @@ std::unique_ptr<TerrainSculpt::Job> TerrainSculpt::next_seed_() {
 	TerrainFamily family;
 	if (!resolve_terrain_family(view, *active, family)) return nullptr;
 	const TerrainFamilyFile &file = family.plane(TerrainPlane::Heights);
-	if (!file.resolved() || !strutil::ends_with_icase(file.path, ".cpt") || core_.documents().document_for(file.path))
-		return nullptr;
-	const uint64_t stamp = view.findings.assets->stamp(file.name);
+	if (!file.resolved() || core_.documents().document_for(file.path)) return nullptr;
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(file.path) : nullptr;
+	if (!entry) return nullptr;
+	const uint64_t stamp = io::splitmix64(entry->size_bytes ^ io::splitmix64(uint64_t(entry->modified_ticks))) | 1;
 	for (const auto &[path, tried] : tried_)
 		if (path == file.path && tried == stamp) return nullptr;
 	tried_.emplace_back(file.path, stamp);
 	if (tried_.size() > 8) tried_.erase(tried_.begin());
 	std::vector<uint8_t> bytes;
-	CptFile cpt;
 	std::string why;
-	if (!view.findings.assets->read(file.name, bytes) || !load_cpt(bytes.data(), bytes.size(), cpt, why) ||
+	if (!io::read_file_bytes(join_path(view.project.root, file.path), bytes, why)) return nullptr;
+	// An imported terrain's heightmap (A2b): decoded under its import's white, as its document will read it.
+	if (entry->kind == AssetKind::HeightmapInput) {
+		HeightmapImport import;
+		trngen::HeightmapDepth depth;
+		if (!heightmap_import_of(view, file.path, import) || import.cpt.empty() ||
+		    !trngen::decode_heightmap_depth(file.path, bytes, import.top, depth, why))
+			return nullptr;
+		const std::vector<uint16_t> raw16 = depth.depth16.empty() ? trngen::smooth_depthmap(depth.depth8) : depth.depth16;
+		const RasterPlane input = RasterPlane::from_bytes(RasterFormat::U16, kHeightsSide, kHeightsSide,
+		                                                  reinterpret_cast<const uint8_t *>(raw16.data()));
+		return seed_job_(file.path, input, terrain_bake_locks(core_, import.cpt), import.cpt);
+	}
+	CptFile cpt;
+	if (!strutil::ends_with_icase(file.path, ".cpt") || !load_cpt(bytes.data(), bytes.size(), cpt, why) ||
 	    cpt.depth_buffer.size() != size_t(kHeightsSide) * kHeightsSide)
 		return nullptr;
 	const RasterPlane atlas = RasterPlane::from_bytes(RasterFormat::U16, kHeightsSide, kHeightsSide,
@@ -227,6 +284,13 @@ void TerrainSculpt::run(Job &job) {
 		input.depth16 = depth_of(job.seed_input);
 		input.locks = job.locks;
 		input.threads = job.threads;
+		// An image's: its import's header, so the whole bake is the .cpt the import makes of the image.
+		if (!job.cpt.empty()) {
+			input.terrain_name = header_text(job.names.terrain_name, sizeof(job.names.terrain_name));
+			input.creator = header_text(job.names.creator, sizeof(job.names.creator));
+			input.version = header_text(job.names.version, sizeof(job.names.version));
+			input.depth_format = job.depth_format;
+		}
 		CptFile cold;
 		trngen::TerrainBakeState made;
 		if (!trngen::bake_terrain_state(input, cold, made, why)) {
@@ -234,6 +298,7 @@ void TerrainSculpt::run(Job &job) {
 			return;
 		}
 		job.seeded = std::make_shared<const trngen::TerrainBakeState>(std::move(made));
+		if (!job.cpt.empty()) job.seeded_cpt = std::make_shared<const CptFile>(std::move(cold));
 		job.ok = true;
 		return;
 	}
@@ -295,10 +360,20 @@ bool TerrainSculpt::land(Job &job) {
 			if (!job.error.empty()) core_.note("Preparing " + basename_of(job.path) + " for sculpting failed: " + job.error);
 			return false;
 		}
+		// An image's whole bake against the .cpt its import made: a difference is an import not run since the image
+		// (or the importer) changed, which the first landing's bake replaces with what the import would make.
+		if (job.seeded_cpt) {
+			std::vector<uint8_t> made, file;
+			std::string why;
+			if (save_cpt(*job.seeded_cpt, made, why) &&
+			    io::read_file_bytes(join_path(core_.view().project.root, job.cpt), file, why) && made != file)
+				core_.note(basename_of(job.cpt) + " is not what its import makes of " + basename_of(job.path) +
+				           " now: import it again, or sculpt on and its bake shows the terrain the import would make.");
+		}
 		// The file's seed, kept for its bakes (the last few files').
 		seeds_.erase(std::remove_if(seeds_.begin(), seeds_.end(), [&](const Seed &seed) { return seed.path == job.path; }),
 		             seeds_.end());
-		seeds_.push_back({job.path, job.content, job.locks, job.seed_input, job.seeded});
+		seeds_.push_back({job.path, job.content, job.locks, job.seed_input, job.seeded, job.seeded_cpt});
 		if (seeds_.size() > 4) seeds_.erase(seeds_.begin());
 		return true;
 	}
@@ -318,11 +393,17 @@ bool TerrainSculpt::land(Job &job) {
 	landing->bake = job.after;
 	landing->input = job.input;
 	landing->settled = job.rects;
-	// The ground the missions on the file read, before and after (the follow pass).
-	const std::vector<uint16_t> before = depth_of(document->atlas());
+	// An image's first landing lays the whole bake its regions were baked over.
+	if (!document->heights().baked) {
+		if (!job.base) return false;
+		landing->base = job.base;
+	}
+	// The ground the missions on the file read, before and after (the follow pass): an image's first, the .cpt its
+	// import made.
+	const std::vector<uint16_t> before = landing->base ? landing->base->depth_buffer : depth_of(document->atlas());
 	if (!documents.apply_bake_landing(*document, {RasterDocument::edit(landing)})) return false;
 	++landed_;
-	follow_the_ground(core_, document->path(), before, depth_of(document->atlas()), document->undo_mark().link);
+	follow_the_ground(core_, document->cpt_path(), before, depth_of(document->atlas()), document->undo_mark().link);
 	return true;
 }
 
@@ -385,10 +466,11 @@ bool TerrainSculpt::settle(const std::string &path, std::string &error) {
 	auto *document = dynamic_cast<TerrainHeightsDocument *>(core_.documents().document_for(path));
 	if (!document || document->heights().unbaked.empty()) return true;
 	std::unique_ptr<Job> job = make_job(*document);
-	if (!job && document->heights().baked && !document->heights().bake) {
+	if (!job && (document->heights().baked || document->image()) && !document->heights().bake) {
 		// No seed yet: made here, the caller waiting.
-		if (std::unique_ptr<Job> seed =
-		            seed_job_(path, document->heights().baked_input, terrain_bake_locks(core_, path))) {
+		if (std::unique_ptr<Job> seed = seed_job_(path, document->heights().baked_input,
+		                                          terrain_bake_locks(core_, document->cpt_path()),
+		                                          document->image() ? document->import_cpt() : std::string())) {
 			core_.note("Preparing " + basename_of(path) + " for sculpting before writing it");
 			run(*seed);
 			land(*seed);

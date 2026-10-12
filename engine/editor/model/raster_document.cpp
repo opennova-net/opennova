@@ -189,7 +189,7 @@ std::unique_ptr<DocumentBase> RasterDocument::snapshot() const { return std::uni
 
 bool RasterDocument::read_source(const std::vector<uint8_t> &decoded, bool adopt, std::vector<SourceIssue> &issues,
                                  Diagnostic &error) {
-	std::shared_ptr<const RasterCodec> codec = pick_ ? pick_(path(), decoded) : nullptr;
+	std::shared_ptr<const RasterCodec> codec = pick_codec(path(), decoded);
 	if (!codec) return refuse(error, path(), CoreFinding::DocumentDecode, "No raster form reads " + path() + ".");
 	RasterState read;
 	if (!codec->read(decoded, read, issues, error)) {

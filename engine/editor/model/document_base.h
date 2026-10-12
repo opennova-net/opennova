@@ -133,6 +133,17 @@ public:
 	// serial and link); {} for none, and by default (a kind whose history keeps no marks).
 	virtual StepMark undo_mark() const { return StepMark(); }
 	virtual StepMark redo_mark() const { return StepMark(); }
+	// The files the document stands in for besides its own (S25: a heightmap image's document for the .cpt its
+	// import bakes, once the editor baked it): what reads the project's files (ProjectAssetSource) reads each from
+	// the document, serialize_stand_in's bytes, not from its file. None by default.
+	virtual std::vector<std::string> stand_in_paths() const { return {}; }
+	// The bytes the document stands in for the file at `path` with (one of stand_in_paths()); false, the file read
+	// as it is, where it cannot make them.
+	virtual bool serialize_stand_in(const std::string &path, std::vector<uint8_t> &out) const {
+		(void)path;
+		(void)out;
+		return false;
+	}
 	// Whether a step the history keeps, to undo or to redo, carries the link `link` (a document a gesture opened in
 	// but changed nothing of holds none).
 	virtual bool holds_link(uint64_t link) const {

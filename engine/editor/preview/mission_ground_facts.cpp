@@ -8,6 +8,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/terrain_heights_document.h>
+#include <editor/project/project_files.h>
 #include <editor/model/raster_document.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/terrain_patch.h>
@@ -295,8 +296,9 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 		// A ground not read yet holds nothing to patch: its first follow reads the document's state.
 		if (!read_once_) return true;
 		const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(&document);
+		// The .cpt the ground read: the document's own, or a heightmap image's import's (S25 A2b).
 		if (!heights || heights->plane_count() < 2 || !store_.valid() || store_.height_field().dim != kHeightsSide ||
-				!strutil::iequals(name, heights_file_))
+				!strutil::iequals(basename_of(heights->cpt_path()), heights_file_))
 			return false;
 		std::vector<RasterRegion> regions = patch.regions;
 		if (patch.whole) regions.assign(1, RasterRegion{0, 0, kHeightsSide, kHeightsSide, 0});

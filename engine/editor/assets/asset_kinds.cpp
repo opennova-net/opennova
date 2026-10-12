@@ -303,8 +303,10 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	// The scan gives it to the input a terrain set's import record reads as the set's `heightmap` (S25), whatever
 	// its name would make it: the terrain's heights before its import bakes them. It never packs: its import's
-	// .cpt does.
+	// .cpt does. S25 A2b: it opens as the terrain's heights, the brushes sculpting it and the editor's bake standing
+	// in for the .cpt until the import runs again.
 	Kind(AssetKind::HeightmapInput, "heightmap_input", "Heightmap input")
+	        .edited_by(DocumentTypeId::TerrainHeights)
 	        .row,
 };
 

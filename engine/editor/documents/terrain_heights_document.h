@@ -72,6 +72,10 @@ struct HeightsState : RasterSideState {
 	// a step keeps the nodes its landing remade.
 	std::shared_ptr<const trngen::TerrainBakeState> bake;
 	RasterPlane baked_input;
+	// An image's input as read and its file's bytes: an image whose input is as it was read writes those bytes again
+	// (an 8-bit heightmap stays 8-bit until a stroke changes it).
+	RasterPlane source_input;
+	std::shared_ptr<const std::vector<uint8_t>> source;
 
 	size_t footprint() const override;
 	uint32_t parts_changed(const RasterSideState &before) const override;
@@ -105,6 +109,24 @@ public:
 	// live atlas its depth. False before an image's first bake.
 	bool compose_cpt(CptFile &out) const;
 	HeightsFacts facts() const;
+	// An imported terrain's heightmap image (S25, the heights lane's A2b): its white, world units (the import record's
+	// `top`, the 127.5 TrnGen's 8-bit scale where it holds none), which its read decodes the image by, and the .cpt its
+	// import bakes from it (project-relative), which the document stands in for once the editor has baked it. Handed
+	// by the session before the read (DocumentSet: the import whose set names the image as its heightmap). Not an
+	// edit: no step, no revision.
+	void set_import(double top, const std::string &cpt) {
+		top_ = top;
+		import_cpt_ = cpt;
+	}
+	double import_top() const { return top_; }
+	const std::string &import_cpt() const { return import_cpt_; }
+	// Whether the document is a heightmap image (its form not a .cpt).
+	bool image() const { return heights().form != HeightsForm::Cpt; }
+	// The .cpt the game reads for these heights: the document's own file, or an image's import's.
+	std::string cpt_path() const { return image() ? import_cpt_ : path(); }
+	// The highest raw16 height a brush reaches: a PNG heightmap's white (top x 256, its 16-bit samples spanning 0 to
+	// it), else the word's 65535.
+	int32_t height_cap() const;
 	// The quadrant lock flags the bake takes (the .trn's lock_* pairs, top-left, top-right, bottom-left,
 	// bottom-right: a locked axis keeps a leaf's height taps inside its 512 quadrant), handed by the session from
 	// the first .trn naming the file; none by default. Not an edit: no step, no revision.
@@ -112,16 +134,28 @@ public:
 	void set_bake_locks(const std::array<trngen::CornerLockFlags, 4> &locks) { locks_ = locks; }
 
 	std::unique_ptr<DocumentBase> snapshot() const override;
+	// An image's document stands in for its import's .cpt once the editor baked it (its live atlas, tiles and header):
+	// the views, the ground and the follow pass read the sculpted ground before the import runs again.
+	std::vector<std::string> stand_in_paths() const override;
+	bool serialize_stand_in(const std::string &path, std::vector<uint8_t> &out) const override;
+
+protected:
+	std::shared_ptr<const RasterCodec> pick_codec(const std::string &path, const std::vector<uint8_t> &decoded) const override;
 
 private:
 	TerrainHeightsDocument(const TerrainHeightsDocument &other) = default;
 	std::array<trngen::CornerLockFlags, 4> locks_{};
+	double top_ = 127.5;
+	std::string import_cpt_;
 };
 
 // A bake's landing (the session's terrain sculpt, ADR 0046 S25): the remade leaves' footprints and the atlas over
 // them, the remade tiles, the bake state after and the input it baked, and the regions it settles. It joins the
 // step of the stroke it bakes (amends; refused, document.stale, once that step is undone or edited after).
 struct HeightsBakeLanding : RasterEditPayload {
+	// An image's first landing: the whole bake its region bake started from (the cold bake of the input as read:
+	// its atlas, tiles, header and depth section's form), laid first.
+	std::shared_ptr<const CptFile> base;
 	std::vector<HeightsRect> footprints;
 	std::vector<std::vector<uint16_t>> atlas; // each footprint's texels, its rows top first
 	std::vector<std::pair<int, CptTile>> tiles;

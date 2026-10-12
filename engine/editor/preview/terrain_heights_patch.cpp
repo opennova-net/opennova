@@ -41,11 +41,13 @@ bool HeightsTilesFollow::take(const TerrainPatch &patch, const DocumentBase &doc
 		taken.heights = heights->live_heights(HeightsRect{taken.x, taken.y, taken.w, taken.h});
 		made.regions.push_back(std::move(taken));
 	}
-	// The tiles a landing (or its undo, or its redo) replaced: those whose shared tile is another one now.
+	// The tiles a landing (or its undo, or its redo) replaced: those whose shared tile is another one now. A
+	// heightmap image's first landing (S25 A2b) lays a whole bake where the picture showed its import's .cpt: every
+	// tile replaced; its undo leaves none, the import's .cpt read again.
 	const std::vector<std::shared_ptr<const CptTile>> &now = heights->heights().tiles;
-	if (now.size() != tiles_.size()) return false;
+	if (now.size() != tiles_.size() && !(tiles_.empty() && heights->image())) return false;
 	for (size_t i = 0; i < now.size(); ++i) {
-		if (now[i] == tiles_[i] || !now[i]) continue;
+		if ((i < tiles_.size() && now[i] == tiles_[i]) || !now[i]) continue;
 		made.tile_indices.push_back(int(i));
 		made.tiles.push_back(*now[i]);
 	}

@@ -44,11 +44,17 @@ void ProjectAssetSource::set_open(const std::vector<std::shared_ptr<const Docume
 		if (document)
 			next[document->path()] =
 					Open{document, document->identity(), document->load_generation(), document->revision()};
+	// The files a document stands in for besides its own, over the file and over its own document if it is open.
+	for (const auto &document : open)
+		if (document)
+			for (const std::string &path : document->stand_in_paths())
+				next[path] = Open{document, document->identity(), document->load_generation(), document->revision(), true};
 	bool moved = next.size() != open_.size();
 	for (auto a = next.begin(), b = open_.begin(); !moved && a != next.end(); ++a, ++b)
 		moved = a->first != b->first || a->second.identity != b->second.identity ||
 				a->second.load_generation != b->second.load_generation ||
-				a->second.revision != b->second.revision;
+				a->second.revision != b->second.revision || a->second.stand_in != b->second.stand_in ||
+				a->second.document != b->second.document;
 	open_ = std::move(next);
 	for (auto it = serialized_by_path_.begin(); it != serialized_by_path_.end();) {
 		if (open_.count(it->first)) ++it;
@@ -81,12 +87,16 @@ const ProjectAssetSource::Serialized *ProjectAssetSource::serialized_(const Open
 			memo.revision != revision) {
 		memo.made = true;
 		++serializations_;
-		const SerializeResult result = open.document->serialize();
 		memo.identity = identity;
 		memo.load_generation = load;
 		memo.revision = revision;
-		memo.ok = result.ok();
-		memo.bytes.assign(result.text.begin(), result.text.end());
+		if (open.stand_in) {
+			memo.ok = open.document->serialize_stand_in(relative, memo.bytes);
+		} else {
+			const SerializeResult result = open.document->serialize();
+			memo.ok = result.ok();
+			memo.bytes.assign(result.text.begin(), result.text.end());
+		}
 	}
 	return memo.ok ? &memo : nullptr;
 }

@@ -8,6 +8,9 @@
 #include <base/io/strutil.h>
 #include <editor/project/project_files.h>
 #include <formats/cpt/cpt_io.h>
+#include <formats/cpt/trngen/heightmap_depth.h>
+#include <formats/cpt/trngen/terrain_bake.h>
+#include <formats/png/png_encode.h>
 
 namespace opennova::editor {
 
@@ -106,6 +109,100 @@ public:
 	}
 };
 
+// An imported terrain's heightmap (S25 A2b): a PNG (grey at any depth, a colour image read as its grey) or a .raw
+// (TrnGen's 1 MiB of 8-bit heights, the game's 2 MiB of 16-bit), decoded as the terrain import decodes it under the
+// import's white (trngen::decode_heightmap_depth): the input plane holds the raw16 heights the bake takes (an 8-bit
+// map smoothed as TrnGen smooths it [orig: TrnGen.exe build_terrain_thread @ 0x4013A0], so a bake of the plane is
+// the bake of the map), its atlas plane the same until the editor bakes it (the import's own .cpt stands till
+// then). Written back as its bytes while the input is as read; once a stroke changed it, as a 16-bit grey PNG
+// whose samples the import decodes back to the input exactly (trngen::encode_heightmap_depth16), or a .raw as the
+// game's 16-bit heights: an 8-bit map becomes 16-bit, and the terrain the import makes from it is the one the
+// editor shows.
+class HeightmapImageCodec final : public RasterCodec {
+public:
+	HeightmapImageCodec(double top, bool raw) : top_(top), raw_(raw) {}
+
+	bool read(const std::vector<uint8_t> &decoded, RasterState &out, std::vector<SourceIssue> &issues,
+	          Diagnostic &error) const override {
+		(void)error;
+		trngen::HeightmapDepth depth;
+		std::string why;
+		if (!trngen::decode_heightmap_depth(raw_ ? "the heightmap.raw" : "the heightmap.png", decoded, top_, depth, why)) {
+			SourceIssue unread;
+			unread.blocks = true;
+			unread.message = "The editor reads no heights in this image: " + why + ".";
+			issues.push_back(std::move(unread));
+			out.planes.clear();
+			out.side = std::make_shared<HeightsState>();
+			return true;
+		}
+		const std::vector<uint16_t> raw16 = depth.depth16.empty() ? trngen::smooth_depthmap(depth.depth8) : depth.depth16;
+		const RasterPlane input = RasterPlane::from_bytes(RasterFormat::U16, kHeightsSide, kHeightsSide,
+		                                                  reinterpret_cast<const uint8_t *>(raw16.data()));
+		out.planes = {input, input}; // the atlas plane holds nothing of its own until the editor bakes
+		auto state = std::make_shared<HeightsState>();
+		if (raw_) state->form = decoded.size() == kTexels ? HeightsForm::Raw8 : HeightsForm::Raw16;
+		else state->form = decoded.size() > 24 && decoded[24] == 16 ? HeightsForm::Png16 : HeightsForm::Png8; // IHDR's bit depth
+		state->top = top_;
+		state->baked = false;
+		state->baked_input = input;
+		state->source_input = input;
+		state->source = std::make_shared<const std::vector<uint8_t>>(decoded);
+		out.side = std::move(state);
+		return true;
+	}
+
+	SerializeResult write(const RasterState &state) const override {
+		SerializeResult out;
+		const auto *heights = dynamic_cast<const HeightsState *>(state.side.get());
+		if (!heights || state.planes.empty()) {
+			out.issues.push_back({});
+			out.issues.back().message = "The heightmap holds no heights to write.";
+			return out;
+		}
+		const RasterPlane &input = state.planes[kHeightsInput];
+		if (heights->source && input.same_texels(heights->source_input)) {
+			out.text.assign(heights->source->begin(), heights->source->end());
+			return out;
+		}
+		std::vector<uint16_t> raw16(kTexels);
+		input.copy_rect(0, 0, kHeightsSide, kHeightsSide, reinterpret_cast<uint8_t *>(raw16.data()));
+		if (raw_) {
+			out.text.resize(kTexels * 2);
+			for (size_t i = 0; i < kTexels; ++i) {
+				out.text[i * 2] = char(raw16[i] & 0xFF);
+				out.text[i * 2 + 1] = char(raw16[i] >> 8);
+			}
+			return out;
+		}
+		std::vector<uint16_t> samples;
+		std::string why;
+		if (!trngen::encode_heightmap_depth16(raw16, heights->top, samples, why)) {
+			out.issues.push_back({});
+			out.issues.back().message = "The heightmap cannot be written: " + why + ".";
+			return out;
+		}
+		const std::vector<uint8_t> png = png::encode_png_gray16(samples.data(), kHeightsSide, kHeightsSide);
+		out.text.assign(png.begin(), png.end());
+		return out;
+	}
+
+	std::string save_words(const RasterState &state) const override {
+		const auto *heights = dynamic_cast<const HeightsState *>(state.side.get());
+		if (!heights || state.planes.empty() || (heights->source && state.planes[kHeightsInput].same_texels(heights->source_input)))
+			return std::string();
+		if (heights->form == HeightsForm::Png8)
+			return "Writes the heightmap as 16-bit grey (it was 8-bit); the terrain the import makes is unchanged.";
+		if (heights->form == HeightsForm::Raw8)
+			return "Writes the heightmap as the game's 16-bit .raw (it was 8-bit); the terrain the import makes is unchanged.";
+		return std::string();
+	}
+
+private:
+	double top_ = trngen::kDepth8Top;
+	bool raw_ = false;
+};
+
 std::shared_ptr<const RasterCodec> pick_heights_codec(const std::string &path, const std::vector<uint8_t> &decoded) {
 	static const auto cpt = std::make_shared<CptHeightsCodec>();
 	if (strutil::ends_with_icase(path, ".cpt") || (decoded.size() >= 4 && std::memcmp(decoded.data(), "CPT1", 4) == 0))
@@ -161,14 +258,26 @@ bool HeightsBakeLanding::apply(RasterCanvas &canvas, Diagnostic &error) const {
 		error = make_finding(CoreFinding::DocumentPayload, DiagnosticSeverity::Error, "A bake lands only in the heights.");
 		return false;
 	}
+	auto state = std::make_shared<HeightsState>(*now);
 	RasterWriter &atlas = canvas.write(kHeightsAtlas);
+	if (base && !now->baked) {
+		if (base->depth_buffer.size() != kTexels) {
+			error = make_finding(CoreFinding::DocumentPayload, DiagnosticSeverity::Error, "A bake's base is no 1024 x 1024 atlas.");
+			return false;
+		}
+		for (int y = 0; y < kHeightsSide; ++y)
+			for (int x = 0; x < kHeightsSide; ++x) atlas.set_u16(x, y, base->depth_buffer[size_t(y) * kHeightsSide + size_t(x)]);
+		state->header = base->header;
+		state->depth_format = base->depth_format;
+		state->tiles.clear();
+		for (const CptTile &tile : base->tiles) state->tiles.push_back(std::make_shared<const CptTile>(tile));
+	}
 	for (size_t i = 0; i < footprints.size() && i < this->atlas.size(); ++i) {
 		const HeightsRect &r = footprints[i];
 		for (int row = 0; row < r.h; ++row)
 			for (int col = 0; col < r.w; ++col)
 				atlas.set_u16(r.x + col, r.y + row, this->atlas[i][size_t(row) * size_t(r.w) + size_t(col)]);
 	}
-	auto state = std::make_shared<HeightsState>(*now);
 	for (const auto &[index, tile] : tiles)
 		if (index >= 0 && size_t(index) < state->tiles.size()) state->tiles[size_t(index)] = std::make_shared<const CptTile>(tile);
 	state->bake = bake;
@@ -267,6 +376,31 @@ HeightsFacts TerrainHeightsDocument::facts() const {
 
 std::unique_ptr<DocumentBase> TerrainHeightsDocument::snapshot() const {
 	return std::unique_ptr<DocumentBase>(new TerrainHeightsDocument(*this));
+}
+
+int32_t TerrainHeightsDocument::height_cap() const {
+	const HeightsForm form = heights().form;
+	if (form != HeightsForm::Png8 && form != HeightsForm::Png16) return 65535;
+	return int32_t(std::clamp(std::lround(heights().top * 256.0), 0L, 65535L));
+}
+
+std::vector<std::string> TerrainHeightsDocument::stand_in_paths() const {
+	if (!image() || !heights().baked || import_cpt_.empty()) return {};
+	return {import_cpt_};
+}
+
+bool TerrainHeightsDocument::serialize_stand_in(const std::string &path, std::vector<uint8_t> &out) const {
+	CptFile cpt;
+	std::string why;
+	return path == import_cpt_ && compose_cpt(cpt) && save_cpt(cpt, out, why);
+}
+
+std::shared_ptr<const RasterCodec> TerrainHeightsDocument::pick_codec(const std::string &path,
+		const std::vector<uint8_t> &decoded) const {
+	if (std::shared_ptr<const RasterCodec> cpt = pick_heights_codec(path, decoded)) return cpt;
+	const bool raw = strutil::ends_with_icase(path, ".raw");
+	if (raw || strutil::ends_with_icase(path, ".png")) return std::make_shared<HeightmapImageCodec>(top_, raw);
+	return nullptr;
 }
 
 const FindingCodeRow &finding_code(TerrainHeightsFinding code) { return kFindingRows[static_cast<size_t>(code)]; }

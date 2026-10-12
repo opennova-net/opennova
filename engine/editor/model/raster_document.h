@@ -122,6 +122,11 @@ protected:
 	bool read_source(const std::vector<uint8_t> &decoded, bool adopt, std::vector<SourceIssue> &issues,
 	                 Diagnostic &error) override;
 	void on_saved() override;
+	// The codec that reads the file (the picker's, by default): a type whose read takes a setting the session
+	// hands it (a heightmap's white) picks its own.
+	virtual std::shared_ptr<const RasterCodec> pick_codec(const std::string &path, const std::vector<uint8_t> &decoded) const {
+		return pick_ ? pick_(path, decoded) : nullptr;
+	}
 
 private:
 	RasterCodecPicker pick_ = nullptr;

@@ -21,7 +21,9 @@ namespace opennova::editor {
 // the duplicate). A payload
 // decodes the way a document's does (the target game's SCR policy). An open document
 // stands in for its file, with the bytes its Save would write (serialized once per state: its
-// identity, load and revision); one that cannot serialize leaves the file in place.
+// identity, load and revision); one that cannot serialize leaves the file in place. A document
+// that stands in for another file too (DocumentBase::stand_in_paths, S25: a heightmap image's for
+// the .cpt its import bakes) is read for it the same way, with serialize_stand_in's bytes.
 class ProjectAssetSource : public FileSource {
 public:
 	void set_scan(const std::string &root, const AssetScan &scan, const std::string &target_game);
@@ -54,6 +56,7 @@ private:
 		uint64_t identity = 0;
 		uint64_t load_generation = 0;
 		uint64_t revision = 0;
+		bool stand_in = false; // read for a file not its own (serialize_stand_in)
 	};
 	struct Serialized {
 		bool made = false;

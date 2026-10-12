@@ -7,9 +7,13 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/terrain_heights_document.h>
 #include <formats/cpt/cpt_io.h>
+#include <formats/cpt/trngen/heightmap_depth.h>
+#include <formats/cpt/trngen/terrain_bake.h>
+#include <formats/png/png_encode.h>
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
@@ -134,9 +138,82 @@ int test_retail() {
 
 } // namespace
 
+// An imported terrain's heightmap (S25 A2b): a PNG or a .raw read under its import's white into the raw16 heights the
+// bake takes; written back as its own bytes while its heights are as read; once changed, a 16-bit grey PNG (or the
+// game's 16-bit .raw) whose decode under the same white gives the heights exactly, an 8-bit map saying it becomes
+// 16-bit; the brush's cap its white.
+int test_image() {
+	constexpr int kSide = 1024;
+	// A 16-bit grey cone, white 100 units.
+	std::vector<uint16_t> samples(size_t(kSide) * kSide);
+	for (int y = 0; y < kSide; ++y)
+		for (int x = 0; x < kSide; ++x) {
+			const double r = std::hypot(x - 512.0, y - 512.0) / 400.0;
+			samples[size_t(y) * kSide + size_t(x)] = uint16_t(30000.0 * std::max(0.0, 1.0 - r));
+		}
+	const std::vector<uint8_t> png16 = png::encode_png_gray16(samples.data(), kSide, kSide);
+	TerrainHeightsDocument doc;
+	doc.set_import(100.0, "terrain/isle.cpt");
+	Diagnostic error;
+	TEST_EXPECT(doc.load_bytes(png16, "art/terrain/isle_heightmap.png", AssetKind::HeightmapInput, "jo", error));
+	TEST_EXPECT(doc.image() && doc.heights().form == HeightsForm::Png16 && !doc.heights().baked && doc.plane_count() == 2);
+	trngen::HeightmapDepth depth;
+	std::string why;
+	TEST_EXPECT(trngen::decode_heightmap_depth("isle_heightmap.png", png16, 100.0, depth, why) &&
+	            doc.live_atlas() == depth.depth16);
+	TEST_EXPECT(doc.height_cap() == 25600 && doc.cpt_path() == "terrain/isle.cpt");
+	TEST_EXPECT(doc.serialize().text == text_of(png16) && doc.save_words().empty());
+	TEST_EXPECT(doc.stand_in_paths().empty()); // not baked by the editor: its import's .cpt stands
+	TEST_EXPECT(document_type_for(AssetKind::HeightmapInput) == document_type(DocumentTypeId::TerrainHeights));
+	const HeightsRect rect{500, 500, 20, 20};
+	TEST_EXPECT(doc.apply(RasterDocument::edit(std::make_shared<RaiseInput>(rect, 256)), error));
+	const std::string written = doc.serialize().text;
+	const std::vector<uint8_t> written_bytes(written.begin(), written.end());
+	TEST_EXPECT(!written.empty() && written_bytes != png16);
+	TEST_EXPECT(trngen::decode_heightmap_depth("isle_heightmap.png", written_bytes, 100.0, depth, why) &&
+	            depth.depth16 == doc.live_atlas());
+	doc.undo();
+	TEST_EXPECT(doc.serialize().text == text_of(png16));
+
+	// An 8-bit map at TrnGen's scale: its heights the smoothing TrnGen bakes; once changed, 16-bit grey.
+	std::vector<uint8_t> rgba(size_t(kSide) * kSide * 4, 255);
+	std::vector<uint8_t> levels(size_t(kSide) * kSide);
+	for (size_t i = 0; i < levels.size(); ++i) {
+		levels[i] = uint8_t((i % kSide) / 8);
+		rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = levels[i];
+	}
+	const std::vector<uint8_t> png8 = png::encode_png_rgba(rgba.data(), kSide, kSide);
+	TerrainHeightsDocument grey;
+	grey.set_import(trngen::kDepth8Top, "terrain/isle.cpt");
+	TEST_EXPECT(grey.load_bytes(png8, "art/terrain/isle_heightmap.png", AssetKind::HeightmapInput, "jo", error));
+	TEST_EXPECT(grey.heights().form == HeightsForm::Png8 && grey.live_atlas() == trngen::smooth_depthmap(levels));
+	TEST_EXPECT(grey.serialize().text == text_of(png8));
+	TEST_EXPECT(grey.apply(RasterDocument::edit(std::make_shared<RaiseInput>(HeightsRect{8, 8, 4, 4}, 64)), error));
+	const std::string grey_written = grey.serialize().text;
+	const std::vector<uint8_t> grey_bytes(grey_written.begin(), grey_written.end());
+	TEST_EXPECT(trngen::decode_heightmap_depth("isle_heightmap.png", grey_bytes, trngen::kDepth8Top, depth, why) &&
+	            depth.depth16 == grey.live_atlas());
+	TEST_EXPECT(grey.save_words().find("16-bit grey (it was 8-bit)") != std::string::npos);
+
+	// TrnGen's 8-bit .raw: once changed, the game's 16-bit .raw.
+	TerrainHeightsDocument raw;
+	raw.set_import(trngen::kDepth8Top, "terrain/isle.cpt");
+	TEST_EXPECT(raw.load_bytes(levels, "art/terrain/isle.raw", AssetKind::HeightmapInput, "jo", error));
+	TEST_EXPECT(raw.heights().form == HeightsForm::Raw8 && raw.height_cap() == 65535 && raw.serialize().text == text_of(levels));
+	TEST_EXPECT(raw.apply(RasterDocument::edit(std::make_shared<RaiseInput>(HeightsRect{8, 8, 4, 4}, 64)), error));
+	const std::string raw_written = raw.serialize().text;
+	TEST_EXPECT(raw_written.size() == size_t(kSide) * kSide * 2);
+	const std::vector<uint16_t> live = raw.live_atlas();
+	TEST_EXPECT(uint16_t(uint8_t(raw_written[(9 * kSide + 9) * 2]) | (uint8_t(raw_written[(9 * kSide + 9) * 2 + 1]) << 8)) ==
+	            live[9 * kSide + 9]);
+	TEST_EXPECT(raw.save_words().find("16-bit .raw (it was 8-bit)") != std::string::npos);
+	std::printf("image: a heightmap read under its white, written back as read, as 16-bit once changed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	const int failures = test_cpt() + test_retail();
+	const int failures = test_cpt() + test_image() + test_retail();
 	if (failures == 0) std::printf("editor_terrain_heights_document: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -3,6 +3,7 @@
 #include <variant>
 
 #include <base/io/strutil.h>
+#include <editor/documents/terrain_heights_document.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/project/project_files.h>
@@ -78,6 +79,10 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 			continue;
 		}
 		names.push_back(basename_of(patch.path));
+		// A heightmap image's stroke moves the .cpt it stands in for (S25 A2b): that file's stamp is the picture's.
+		if (heights)
+			if (const auto *document = dynamic_cast<const TerrainHeightsDocument *>(open); document && document->image())
+				names.push_back(basename_of(document->cpt_path()));
 		maps = maps || !heights;
 		if (patch.whole) patches_.add(patch.plane, patch.path, RasterRegion(), true);
 		for (const RasterRegion &region : patch.regions) patches_.add(patch.plane, patch.path, region);

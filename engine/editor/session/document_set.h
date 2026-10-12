@@ -261,6 +261,9 @@ private:
 	// document says to, `written` taking its path (write_companion: never failing the document's save).
 	std::string companion_path(AssetKind kind, const std::string &relative) const;
 	void read_companion(DocumentBase &document, AssetKind kind, const std::string &relative) const;
+	// A terrain's heightmap image (S25 A2b) handed its import before it reads: the white its record's top holds, which
+	// it decodes the image by, and the .cpt the import makes, which it stands in for once the editor baked it.
+	void hand_heights_import(DocumentBase &document, AssetKind kind, const std::string &relative) const;
 	void write_companion(DocumentBase &document, std::vector<std::string> &written);
 	// A mission's base heights for its .mis, handed to the document before the write (MissionDocument::
 	// set_base_heights): each entity's, in the writer's order, the terrain's height under it as the original editor

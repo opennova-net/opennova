@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <set>
@@ -101,10 +102,6 @@ bool plan_heights_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan,
 		        (heights->issues().empty() ? std::string("its heights do not read") : heights->issues().front().message);
 		return false;
 	}
-	if (!heights->heights().baked) {
-		error = "Sculpting an imported terrain's heightmap is not ready yet in this build.";
-		return false;
-	}
 	if (!context.family.trn) {
 		error = "The terrain's configuration does not read: " + basename_of(heights->path()) + " has no routing to sculpt by.";
 		return false;
@@ -119,10 +116,11 @@ bool plan_heights_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan,
 	if (context.first) sculpt.interrupt(heights->path());
 	const terrain::TerrainAtlasRouting routing = routing_of(*context.family.trn);
 	stroke->strength = std::clamp(context.brush.strength, 0.0f, 1.0f);
-	stroke->top = 65535;
+	// A PNG heightmap's white holds its heights (its 16-bit samples span 0 to it); else the word's top.
+	stroke->top = heights->height_cap();
 	for (const auto &[x, y] : context.points) stroke->dabs.push_back(heights_dab_texels(*context.family.trn, context.brush, {x, y}));
 	if (stroke->op == HeightsOperator::Set) {
-		stroke->target = int32_t(std::clamp(std::lround(double(context.brush.height) * 256.0), 0L, 65535L));
+		stroke->target = int32_t(std::clamp(std::lround(double(context.brush.height) * 256.0), 0L, long(stroke->top)));
 	} else if (stroke->op == HeightsOperator::Flatten) {
 		// Towards the live height under the stroke's first sample, kept for the gesture.
 		int32_t target = 0;
@@ -153,6 +151,22 @@ bool plan_heights_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan,
 	}
 	plan.words = std::string(operator_words(stroke->op)) + " the ground in " + basename_of(heights->path()) +
 	             (repeats > 1 ? " (this ground repeats in " + std::to_string(repeats) + " sectors)" : std::string());
+	// Ground the heightmap's white holds down: said so, with the way up.
+	bool capped = false;
+	if (stroke->top < 65535) {
+		if (stroke->op == HeightsOperator::Set) {
+			capped = std::lround(double(context.brush.height) * 256.0) > stroke->top;
+		} else if (stroke->op == HeightsOperator::Raise) {
+			for (const HeightsDabTexel &t : touched)
+				capped = capped || double(heights->live_height(t.x, t.z)) + double(stroke->strength) * 256.0 * t.weight >
+				                           double(stroke->top);
+		}
+	}
+	if (capped) {
+		char top[32];
+		std::snprintf(top, sizeof(top), "%g", stroke->top / 256.0);
+		plan.words += std::string(" (held at the heightmap's white, ") + top + " units: raise the import's top first)";
+	}
 	plan.bake = "Baking " + basename_of(heights->path()) + " as the stroke ends";
 	plan.edits.push_back(RasterDocument::edit(stroke, context.gesture));
 	return true;

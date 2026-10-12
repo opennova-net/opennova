@@ -46,6 +46,7 @@
 #include <editor/session/session_core.h>
 #include <editor/session/workspace_parts.h>
 #include <editor/session/terrain_sculpt.h>
+#include <editor/session/terrain_uses.h>
 #include <formats/cpt/cpt.h>
 #include <formats/cpt/cpt_io.h>
 #include <formats/mission/bms_edit.h>
@@ -230,10 +231,19 @@ std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, Ass
 	}
 	std::shared_ptr<DocumentBase> document = type->make();
 	read_companion(*document, kind, relative);
+	hand_heights_import(*document, kind, relative);
 	if (!document->load(join_path(paths_.root, relative), relative, kind, view_.project.document->target_game,
 	                    error))
 		return nullptr;
 	return document;
+}
+
+void DocumentSet::hand_heights_import(DocumentBase &document, AssetKind kind, const std::string &relative) const {
+	auto *heights = dynamic_cast<TerrainHeightsDocument *>(&document);
+	if (!heights || kind != AssetKind::HeightmapInput) return;
+	HeightmapImport import;
+	heightmap_import_of(view_, relative, import);
+	heights->set_import(import.top, import.cpt);
 }
 
 std::string DocumentSet::companion_path(AssetKind kind, const std::string &relative) const {
@@ -738,6 +748,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		}
 		std::shared_ptr<DocumentBase> document = type->make(); Diagnostic error;
 		read_companion(*document, asset.kind, asset.relative_path);
+		hand_heights_import(*document, asset.kind, asset.relative_path);
 		if (!document->load(join_path(paths_.root, asset.relative_path),
 					asset.relative_path, asset.kind, view_.project.document->target_game, error)) {
 			refuse(error);
@@ -1271,8 +1282,9 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	std::vector<std::string> written;
 	// S25: the heights' bakes due land first (the regions a stroke sculpted, baked again by TrnGen's bake), the
 	// caller waiting; one that cannot bake leaves its regions written with the sculpted heights over its old tiles.
+	// A heightmap image writes its input, which its import bakes as the project refreshes: none waits.
 	for (DocumentBase *document : writes)
-		if (dynamic_cast<const TerrainHeightsDocument *>(document)) {
+		if (const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(document); heights && !heights->image()) {
 			std::string why;
 			if (!core_.sculpt().settle(document->path(), why)) core_.note("Saving " + document->path() + " unbaked: " + why);
 		}
