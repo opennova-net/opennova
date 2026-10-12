@@ -1864,7 +1864,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         trace.ammo_flags = ammo_flags;
         // Non-building projectiles refresh their own BB membership; the
         // shooter can be in a different room [orig: Entity_BuildProximityList
-        // @0x4B3DC0; Projectile_UpdatePhysics terrain gate @0x4EA2F0].
+        // @0x4B3DC0; Projectile_UpdatePhysics terrain gate @0x4EA2F0]. Retail's
+        // ballistic leg has no such refresh: its round keeps its spawn's
+        // indoors bits, whose gate skips the terrain (D-COL-12).
+        // [orig: the refresh runs on the useownmove leg alone, @0x4E9F21;
+        //  the gate's tests @0x4EA375 / @0x4EA38A]
         const int32_t blink_position[3] = {position_q16.x, position_q16.y, position_q16.z};
         BlinkAccum blink;
         queries->query_blink_boxes_at_point(world, blink_position, blink);

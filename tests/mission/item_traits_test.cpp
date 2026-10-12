@@ -359,8 +359,11 @@ int main() {
     bush->attrib |= DEF_ITEM_ATTRIB_NOTARGET; // as items.def 101435 "Metal 50gal Drum"
     DefItemDef *mine_def = entry_for(file, 100601);
     CHECK(mine_def != nullptr);
-    if (mine_def != nullptr) // as items.def 101891 "Satchel Charge"
+    if (mine_def != nullptr) { // as items.def 101891 "Satchel Charge"
         mine_def->attrib |= DEF_ITEM_ATTRIB_NOTARGET;
+        mine_def->radar_sig = 40;
+        mine_def->heat_sig = 30;
+    }
     player->armor_impact = 3;
     player->armor_kz = 4;
     player->damage_reduc_pp = 0.25f;
@@ -901,6 +904,11 @@ int main() {
         // [orig: Entity_ConvertRoundToPlacedEntity @0x5455B0, the
         //  Entity_InitFromModel call @0x5455D8].
         CHECK(mine->no_target);
+        // ...and its type and signatures (the matrix-built leg, the sig
+        // copy) [orig: Entity_InitFromModel @0x40E0D7, @0x40E136..0x40E156].
+        CHECK(mine->def_type == DEF_ITEM_TYPE_OBJECT); // `type powerup`, the same 6
+        CHECK(mine->radar_sig == 40);
+        CHECK(mine->heat_sig == 30);
     }
     CHECK(frag == nullptr || !frag->no_target);
     // vmne is an event row only: as a move_function it binds the physics
