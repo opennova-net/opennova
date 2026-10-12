@@ -229,6 +229,33 @@ bool check_steep_blocks() {
 	return true;
 }
 
+// cpt_clamp_steep_blocks is what a CDEP write reads back: a steep block clamped over its lowest, the others as
+// they stand (the heights an editor's device and ground take where the written .cpt clamps).
+bool check_clamp_steep_blocks() {
+	opennova::CptFile cpt;
+	cpt.depth_format = opennova::DepthFormat::CDEP;
+	cpt.depth_buffer.assign(1024u * 1024u, 1000);
+	cpt.depth_buffer[300] = 40000;  // a block past the range (its lowest 1000)
+	cpt.depth_buffer[301] = 33766;  // within it (1000 + 32,766)
+	cpt.depth_buffer[700] = 30000;  // a block within the range
+	cpt.depth_buffer[5000] = 65535; // a later row's
+	cpt.depth_buffer[5001] = 0;
+	std::vector<uint8_t> bytes;
+	std::string error;
+	opennova::CptFile read;
+	if (!expect(opennova::save_cpt(cpt, bytes, error) && opennova::load_cpt(bytes.data(), bytes.size(), read, error),
+	            "the steep atlas writes and reads"))
+		return false;
+	std::vector<uint16_t> clamped = cpt.depth_buffer;
+	opennova::cpt_clamp_steep_blocks(clamped.data(), clamped.size());
+	if (!expect(clamped == read.depth_buffer, "the clamp is what the write reads back")) return false;
+	if (!expect(clamped[300] == 1000 + opennova::kCdepMaxRange && clamped[301] == 33766 && clamped[700] == 30000 &&
+	                    clamped[5000] == opennova::kCdepMaxRange && clamped[5001] == 0,
+	            "a steep block clamped over its lowest, the rest as they stand"))
+		return false;
+	return true;
+}
+
 // save_cpt is write_bytes without the throw: the same bytes for a file it encodes, and false with the
 // writer's words, `out` untouched, for one it cannot (a CDEP buffer not 4096 whole blocks, a tile of no size).
 bool check_save_cpt() {
@@ -261,6 +288,7 @@ int main() {
 
 	if (!check_malformed_guards()) return 1;
 	if (!check_steep_blocks()) return 1;
+	if (!check_clamp_steep_blocks()) return 1;
 	if (!check_save_cpt()) return 1;
 	if (!check_poly_roundtrip(out_path)) return 1;
 
