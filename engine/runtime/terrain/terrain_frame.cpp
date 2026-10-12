@@ -6,6 +6,7 @@
 
 #include <formats/cpt/cpt.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 #include <formats/trn/trn.h>
 
 #include <algorithm>
@@ -422,6 +423,47 @@ std::vector<int> terrain_tiles_reading(const CptFile &cpt, const TrnConfig &trn,
 		if (tile_vertices_read(tile, quadrant_locks, rect, 1)) out.push_back(static_cast<int>(ti));
 	}
 	return out;
+}
+
+bool plan_terrain_region_refresh(const CptFile &cpt, const TrnConfig &trn,
+		const std::vector<terrain::CoordsRect> &rects, const std::vector<int> &tiles,
+		TerrainRegionRefresh &out) {
+	out = TerrainRegionRefresh();
+	for (const int index : tiles)
+		if (index < 0 || index >= static_cast<int>(cpt.tiles.size())) return false;
+	for (const terrain::CoordsRect &rect : rects) {
+		if (rect.w <= 0 || rect.h <= 0) continue;
+		if (rect.x < 0 || rect.z < 0 || rect.x > kSnapshotAtlas - rect.w || rect.z > kSnapshotAtlas - rect.h) {
+			out = TerrainRegionRefresh();
+			return false;
+		}
+		out.rects.push_back(rect);
+	}
+	// 0 none, 1 the heights variant, 2 both.
+	std::vector<uint8_t> variants(cpt.tiles.size(), 0);
+	for (const int index : tiles) {
+		const CptTile &tile = cpt.tiles[static_cast<size_t>(index)];
+		if (tile.tile_size >= kSnapshotAtlas) continue;
+		variants[static_cast<size_t>(index)] = tile.tile_x < kSnapshotAtlas / 2 && tile.tile_y < kSnapshotAtlas / 2 ? 2 : 1;
+	}
+	for (const terrain::CoordsRect &rect : out.rects)
+		for (const int index : terrain_tiles_reading(cpt, trn, rect))
+			variants[static_cast<size_t>(index)] = std::max<uint8_t>(variants[static_cast<size_t>(index)], 1);
+	for (size_t index = 0; index < variants.size(); ++index)
+		if (variants[index]) out.remesh.push_back({static_cast<int>(index), variants[index] == 2});
+	if (out.rects.empty()) return true;
+	// The grid's sectors and the window past them.
+	constexpr int32_t kWindow = 5;
+	constexpr int32_t kSector = 512;
+	const terrain::TerrainHeightField field = terrain::height_field_from(cpt, trn);
+	const terrain::TerrainAtlasRouting routing = terrain::terrain_atlas_routing(field);
+	const terrain::TerrainWorldRect bounds{(trn.origin_x - kWindow) * kSector, (trn.origin_y - kWindow) * kSector,
+			(trn.origin_x + kTerrainGridSide + kWindow) * kSector, (trn.origin_y + kTerrainGridSide + kWindow) * kSector};
+	for (const terrain::CoordsRect &rect : out.rects)
+		for (const terrain::TerrainWorldRect &world :
+				terrain::terrain_atlas_world_rects(routing, rect, bounds, terrain::kTerrainHeightTaps, field.locks))
+			out.world.push_back(world);
+	return true;
 }
 
 bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,

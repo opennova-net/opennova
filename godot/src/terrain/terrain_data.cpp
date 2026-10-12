@@ -306,6 +306,7 @@ void TerrainData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tile_count"), &TerrainData::get_tile_count);
 	ClassDB::bind_method(D_METHOD("get_depth_raw16"), &TerrainData::get_depth_raw16);
 	ClassDB::bind_method(D_METHOD("patch_heights_raw16", "rect", "raw16"), &TerrainData::patch_heights_raw16);
+	ClassDB::bind_method(D_METHOD("get_heights_serial"), &TerrainData::get_heights_serial);
 	ClassDB::bind_method(D_METHOD("get_tile_lod_indices", "index", "lod"), &TerrainData::get_tile_lod_indices);
 	ClassDB::bind_method(D_METHOD("replace_tile_lods", "indices", "lods"), &TerrainData::replace_tile_lods);
 	ClassDB::bind_method(D_METHOD("set_sector_grid", "value"), &TerrainData::set_sector_grid);
@@ -1260,6 +1261,7 @@ bool TerrainData::patch_heights(const opennova::terrain::CoordsRect &p_rect, con
 		std::copy(from, from + p_rect.w,
 				cpt.depth_buffer.begin() + static_cast<ptrdiff_t>(p_rect.z + row) * dim + p_rect.x);
 	}
+	++heights_serial_;
 	return true;
 }
 
@@ -1291,6 +1293,14 @@ bool TerrainData::replace_tiles(const std::vector<int> &p_indices, const std::ve
 		if (next.tile_x != have.tile_x || next.tile_y != have.tile_y || next.tile_size != have.tile_size ||
 				next.vertex_indices.size() < static_cast<size_t>(next.vertex_count) * 2u) {
 			return false;
+		}
+		// Every list names the tile's own vertices (the device reads no index past them).
+		for (const opennova::CptTileLOD &lod : next.lods) {
+			for (const uint16_t vertex : lod.indices) {
+				if (vertex >= next.vertex_count) {
+					return false;
+				}
+			}
 		}
 	}
 	for (size_t i = 0; i < p_indices.size(); ++i) {
@@ -1326,12 +1336,14 @@ bool TerrainData::replace_tile_lods(const PackedInt32Array &p_indices, const Arr
 		for (int lod = 0; lod < 8; ++lod) {
 			const PackedInt32Array lod_indices = lods[lod];
 			tile.lods[lod].indices.clear();
+			tile.lods[lod].max_index = 0;
 			for (int64_t k = 0; k < lod_indices.size(); ++k) {
 				const int32_t value = lod_indices[k];
-				if (value < 0 || value > 0xFFFF) {
+				if (value < 0 || value >= tile.vertex_count) {
 					return false;
 				}
 				tile.lods[lod].indices.push_back(static_cast<uint16_t>(value));
+				tile.lods[lod].max_index = std::max<uint16_t>(tile.lods[lod].max_index, static_cast<uint16_t>(value));
 			}
 		}
 		indices.push_back(index);

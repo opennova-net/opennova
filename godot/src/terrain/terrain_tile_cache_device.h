@@ -81,20 +81,20 @@ public:
 	// occupied cache pages its inclusive Q16 bounds touch.
 	bool append_terrain_scorch(
 			const opennova::terrain::TerrainScorchEntry &p_entry);
-	// The heightfield normals changed over a region (an editor's sculpt, ADR
+	// The heightfield normals changed over regions (an editor's sculpt, ADR
 	// 0046 S25): `p_normals` the surface inputs' kept atlas as it now stands,
-	// `p_written` each quadrant's box of the normals made again (lock order;
-	// refresh_heightfield_normal_map's report). The normal quadrants' levels the
-	// boxes reach are made again over those texels alone
+	// `p_written` the boxes of the normals made again (each inside one
+	// quadrant: refresh_heightfield_normal_map's). The normal quadrants' levels
+	// the boxes reach are made again over those texels alone
 	// (update_terrain_tile_quadrants: the bytes a build of the map holds), and
 	// every resident page that samples one of them recomposes, wherever the
-	// frame drew it (terrain_tile_page_samples), as update_colormap_region does
-	// for the colour map. The pages retired; nullopt, nothing changed, where the
-	// sources cannot take it in place (none ready, or an atlas of another
-	// shape): the caller rebuilds them.
+	// frame drew it (terrain_tile_page_samples_any), as update_colormap_region
+	// does for the colour map. The pages retired; nullopt, nothing changed,
+	// where the sources cannot take them in place (none ready, or an atlas of
+	// another shape): the caller rebuilds them.
 	std::optional<std::size_t> update_heightfield_normal_region(
 			const opennova::terrain::Rgba8Image &p_normals,
-			const std::array<opennova::terrain::CoordsRect, 4> &p_written);
+			const std::vector<opennova::terrain::CoordsRect> &p_written);
 	// Retires the pages a destroyed entity's bounds touch (the same inclusive
 	// Q16 test); they recompose the next time they are visible.
 	std::size_t invalidate_region(int32_t p_minimum_x_q16, int32_t p_minimum_z_q16,

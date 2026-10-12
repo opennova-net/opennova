@@ -322,9 +322,18 @@ public:
 	// The cells whose instances read a ground or map texel a region changed
 	// (foliage::Runtime::invalidate_cells: an editor's sculpt or paint), on the
 	// Godot plane [x0, x1) x [z0, z1): dropped, released through the next draw
-	// list's detail_evicted and generated again when next visible.
+	// list's detail_evicted and generated again when next visible. A detail
+	// cell reaches each slot's detail reach past it: expand_detail_instance
+	// samples the ground at every source vertex's planar offset from its
+	// instance and one unit about it (the vertex normal), and bakes it into the
+	// cell's cached mesh.
 	size_t invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1) {
-		return runtime_.invalidate_cells(x0, z0, x1, z1);
+		return runtime_.invalidate_cells(x0, z0, x1, z1, detail_reach_);
+	}
+	// The units a slot's expanded detail geometry reads past an instance: its
+	// source vertices' largest planar radius, whole, and the normal's tap.
+	int32_t detail_reach(int slot) const {
+		return slot >= 0 && slot < opennova::FOLIAGE_MAX_DEFS ? detail_reach_[static_cast<size_t>(slot)] : 0;
 	}
 
 	const FoliageDrawList &last_draw_list() const { return draw_list_; }
@@ -374,6 +383,7 @@ private:
 	std::array<opennova::foliage::RuntimeSlot, opennova::FOLIAGE_MAX_DEFS>
 			slots_{};
 	std::array<FoliageSlotGeometry, opennova::FOLIAGE_MAX_DEFS> geometry_{};
+	std::array<int32_t, opennova::FOLIAGE_MAX_DEFS> detail_reach_{};
 	std::array<FoliageSlotModelMesh, opennova::FOLIAGE_MAX_DEFS> model_meshes_{};
 	uint64_t model_mesh_generation_ = 0;
 	std::unordered_map<MeshKey, ResidentMesh, MeshKeyHash> resident_;

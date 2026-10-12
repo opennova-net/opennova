@@ -14,6 +14,7 @@
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 
 #include "env/mission_environment.h"
 #include "env/weather.h"
@@ -370,39 +371,50 @@ public:
 	bool build_begin();
 	BuildStep build_step();
 	bool is_built() const { return built; }
-	// The terrain shown again over a region of its heights (the OpenNova Editor's sculpt, ADR 0046 S25),
-	// after TerrainData::patch_heights wrote `p_rect` (atlas texels) and TerrainData::replace_tiles put
-	// `p_tiles` in place (a bake's landing; none in a stroke): the meshes of every tile whose vertices read
-	// the rect (opennova::terrain_tiles_reading: the heights variant) and of each replaced tile (both
-	// variants), the scene snapshot (opennova::refresh_terrain_scene_snapshot), the heightfield normals
-	// over the rect and the tile cache's normal quadrants, and the composed pages where the changed normals
-	// show (retired, to recompose when next visible). Static shadows read no heights; they recompose with
-	// their pages. The rect is the region contract the refreshes share (refresh_mipchain's): inside the atlas, a
-	// change across its wrap arriving as several rects, each refreshed. False, nothing changed, where the terrain
-	// is not built, a tile index is not one or the rect is not inside the atlas; a
-	// heightfield that cannot take the region (a live heightmap image) has its derived textures made again
-	// whole. Equal to a fresh build of the patched data (terrain_region_patch_test).
-	bool refresh_region(const opennova::terrain::CoordsRect &p_rect, const std::vector<int> &p_tiles);
-	bool refresh_region_rect(const Rect2i &p_rect, const PackedInt32Array &p_tiles);
-	// What the last refresh_region did: the tiles whose meshes it made again, the normal quadrants it wrote,
-	// whether the normals took the region in place (else the derived textures were made again whole), and the
-	// composed pages it retired.
+	// The terrain shown again over regions of its heights (the OpenNova Editor's sculpt, ADR 0046 S25), after
+	// TerrainData::patch_heights wrote `p_rects` (atlas texels) and TerrainData::replace_tiles put `p_tiles` in
+	// place (a bake's landing; none in a stroke), as opennova::plan_terrain_region_refresh names it: the meshes of
+	// every tile whose vertices read a rect (the heights variant) and of each replaced tile (both variants), the
+	// scene snapshot (opennova::refresh_terrain_scene_snapshot), the heightfield normals over the rects (their
+	// texture updated in place) and the tile cache's normal quadrants over the boxes the normals changed in, and
+	// the composed pages that sample one of them (retired, to recompose when next visible). The static terrain
+	// shadows read the heights under their casters (TerrainData::get_heights_serial: their rasterizer takes the
+	// casters again; where it reports no caster changes, every shadow page recomposes). `p_foliage`: the foliage
+	// over the rects grows again (get_refreshed_world_rects); false keeps them for a later refresh that grows it
+	// (a stroke's samples, the stroke's end or its bake's landing growing it once). The rects are the region
+	// contract the refreshes share (refresh_mipchain's): each inside the atlas, a change across its wrap arriving
+	// as several. False, nothing changed, where the terrain is not built, a tile index is not one or a rect is not
+	// inside the atlas; a heightfield that cannot take a region (a live heightmap image) has its derived textures
+	// made again whole. Equal to a fresh build of the patched data (terrain_region_patch_test).
+	bool refresh_region(const std::vector<opennova::terrain::CoordsRect> &p_rects, const std::vector<int> &p_tiles,
+			bool p_foliage = true);
+	bool refresh_region_rects(const TypedArray<Rect2i> &p_rects, const PackedInt32Array &p_tiles, bool p_foliage);
+	// What the last refresh_region did: the tiles whose meshes it made again, the normal boxes it wrote, whether
+	// the normals took the regions in place (else the derived textures were made again whole), the composed pages
+	// it retired, and how long it took (microseconds).
 	int get_refresh_tiles_remeshed() const { return refresh_tiles_remeshed_; }
 	int get_refresh_normal_quadrants() const { return refresh_normal_quadrants_; }
 	bool is_refresh_normals_in_place() const { return refresh_normals_in_place_; }
 	int64_t get_refresh_pages_retired() const { return refresh_pages_retired_; }
-	// The plane's rects each refresh_region showed again (where a lookup reads a changed height: the rect's
-	// mission rects over the grid's sectors), each with the refresh's serial, the last kRefreshedKept kept: what
-	// the foliage over this terrain grows again (FoliageDispatcher takes those past the serial it last took).
+	int64_t get_refresh_us() const { return refresh_us_; }
+	// The plane's rects each refresh_region grew the foliage over (where a lookup reads a changed height: the
+	// rects' plane rects over the grid's sectors and the window past them), each with the refresh's serial, the
+	// last kRefreshedKept kept, and the newest serial some of whose rects are no longer kept: what the foliage over
+	// this terrain grows again (FoliageDispatcher takes those past the serial it last took, and grows every cell
+	// where it missed some).
 	struct RefreshedRect {
 		uint64_t serial = 0;
 		opennova::terrain::TerrainWorldRect rect;
 	};
-	static constexpr size_t kRefreshedKept = 512;
+	static constexpr size_t kRefreshedKept = 4096;
 	uint64_t get_refresh_serial() const { return refresh_serial_; }
 	const std::vector<RefreshedRect> &get_refreshed_world_rects() const { return refreshed_rects_; }
+	uint64_t get_refreshed_dropped_serial() const { return refreshed_dropped_serial_; }
+	// The heightfield normal atlas as the terrain keeps it (RGBA8, the top row first): what its texture holds.
+	PackedByteArray get_heightfield_normal_bytes() const;
 	// One tile's LOD mesh as the last build or refresh made it (the flat fallback's where `p_flat`); null
-	// where it has none. The test seam that compares a refreshed terrain with a fresh build.
+	// where it has none. The test seam that compares a refreshed terrain with a fresh build. The root's (tile
+	// 0) are the build's alone: the sector walk never draws them, so a refresh leaves them as built.
 	Ref<ArrayMesh> get_tile_lod_mesh(int p_tile, int p_lod, bool p_flat) const;
 	// A stepped build is in flight (begun, its last unit not run). C++ only.
 	bool is_building() const { return building_; }
@@ -488,8 +500,15 @@ private:
 	int refresh_normal_quadrants_ = 0;
 	bool refresh_normals_in_place_ = false;
 	int64_t refresh_pages_retired_ = 0;
+	int64_t refresh_us_ = 0;
 	uint64_t refresh_serial_ = 0;
+	uint64_t refreshed_dropped_serial_ = 0;
 	std::vector<RefreshedRect> refreshed_rects_;
+	// The plane rects refreshes kept back from the foliage (p_foliage false), grown with the next that grows it.
+	std::vector<opennova::terrain::TerrainWorldRect> foliage_pending_;
+	// The meshes a refresh replaced, kept until the next frame binds the new ones (a pool slot drawing one this
+	// frame keeps drawing it rather than nothing).
+	std::vector<Ref<ArrayMesh>> retired_meshes_;
 	Vector4 ground_overlay_rect_;
 	Color ground_overlay_outside_;
 	bool ground_overlay_on_ = false;

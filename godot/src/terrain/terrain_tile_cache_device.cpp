@@ -366,34 +366,21 @@ bool TerrainTileCacheDevice::append_terrain_scorch(
 
 std::optional<std::size_t> TerrainTileCacheDevice::update_heightfield_normal_region(
 		const opennova::terrain::Rgba8Image &p_normals,
-		const std::array<opennova::terrain::CoordsRect, 4> &p_written) {
+		const std::vector<opennova::terrain::CoordsRect> &p_written) {
 	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot> current =
 			sources_ready_ ? async_->sources() : nullptr;
 	if (!current || !current->heightfield_normal || !p_normals.is_valid()) {
 		return std::nullopt;
 	}
-	// The source's chains shared; the quadrants a written box reaches made again in new ones, over its texels
-	// alone. Each box lies inside its own quadrant, so each quadrant's change comes from one box.
-	auto normals = std::make_shared<opennova::terrain::TerrainTileQuadrantSource>(*current->heightfield_normal);
-	opennova::terrain::TerrainTileQuadrantChange change;
-	for (const opennova::terrain::CoordsRect &box : p_written) {
-		if (box.w <= 0 || box.h <= 0) {
-			continue;
-		}
-		opennova::terrain::TerrainTileQuadrantChange made;
-		if (opennova::terrain::update_terrain_tile_quadrants(*normals, p_normals, box.x, box.z, box.w, box.h,
-					&made) == 0) {
-			return std::nullopt;
-		}
-		for (size_t quadrant = 0; quadrant < 4; ++quadrant) {
-			if ((made.quadrants >> quadrant) & 1u) {
-				change.levels[quadrant] = std::move(made.levels[quadrant]);
-			}
-		}
-		change.quadrants |= made.quadrants;
-	}
-	if (change.quadrants == 0) {
+	if (p_written.empty()) {
 		return std::size_t{0};
+	}
+	// The source's chains shared; the quadrants a box reaches made again in new ones, over its texels alone, a
+	// change kept for each box.
+	auto normals = std::make_shared<opennova::terrain::TerrainTileQuadrantSource>(*current->heightfield_normal);
+	std::vector<opennova::terrain::TerrainTileQuadrantChange> changes;
+	if (opennova::terrain::update_terrain_tile_quadrants(*normals, p_normals, p_written, changes) == 0) {
+		return std::nullopt;
 	}
 	auto next = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>(*current);
 	next->heightfield_normal = normals;
@@ -402,8 +389,8 @@ std::optional<std::size_t> TerrainTileCacheDevice::update_heightfield_normal_reg
 	// composing from the old quadrants now holds a retired generation, its completion dropped.
 	return cache_.invalidate_sampling(
 			[&](const opennova::TerrainTilePageKey &page, int32_t source_x, int32_t source_z) {
-				return opennova::terrain::terrain_tile_page_samples(change, *normals, page.page_lod_level, source_x,
-						source_z);
+				return opennova::terrain::terrain_tile_page_samples_any(changes, *normals, page.page_lod_level,
+						source_x, source_z);
 			});
 }
 

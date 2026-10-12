@@ -4,6 +4,7 @@
 // reset forgets what was dropped.
 #include <formats/foliage/runtime.h>
 
+#include <array>
 #include <cstdio>
 #include <cstdint>
 #include <vector>
@@ -73,10 +74,18 @@ void test_detail_cells() {
 	check(regenerated != 0 && regenerated != near_revision, "the dropped cell generated again, a new revision");
 	check(revision_of(second.detail_generated, far_key) == 0 && runtime.get_stats().detail.hits == 1,
 	      "the far cell a hit");
-	// A rect just past the near cell's reach drops nothing.
+	// A rect just past the near cell's bilinear reach drops nothing where its geometry reaches no further.
 	check(runtime.invalidate_cells(66, 16, 70, 32) == 0, "a rect past the cell's reach drops nothing");
 	FrameOutput third = runtime.render_frame(request, world);
 	check(third.detail_evicted.empty() && third.detail_generated.empty(), "nothing generated again");
+	// The same rect where the slot's expanded geometry reaches 2 units past an instance (the embedder's detail
+	// reach: its vertices' planar extent): the cell's reach is 3 and the rect meets it.
+	std::array<int32_t, FOLIAGE_MAX_DEFS> reach{};
+	reach[0] = 2;
+	check(runtime.invalidate_cells(66, 16, 70, 32, reach) == 1, "the geometry's reach drops the cell");
+	check(runtime.invalidate_cells(68, 16, 70, 32, reach) == 0, "a rect past the geometry's reach drops nothing");
+	FrameOutput regrown = runtime.render_frame(request, world);
+	check(revision_of(regrown.detail_evicted, near_key) != 0, "reported evicted");
 	// Dropped then reset: nothing reported after the reset.
 	check(runtime.invalidate_cells(0, 0, 1024, 1024) == 2, "the whole plane drops both");
 	runtime.reset();

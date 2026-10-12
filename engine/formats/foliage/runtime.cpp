@@ -493,7 +493,8 @@ void Runtime::reset() {
 	dropped_model_.clear();
 }
 
-size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1) {
+size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1,
+                                 const std::array<int32_t, FOLIAGE_MAX_DEFS> &detail_reach) {
 	if (x1 <= x0 || z1 <= z0) return 0;
 	// A cell's span on the Godot plane, widened by `reach` each way, against the rect (half-open both).
 	const auto meets = [&](int64_t cx0, int64_t cz0, int64_t reach) {
@@ -502,9 +503,11 @@ size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1)
 	size_t dropped = 0;
 	for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
 		// A detail cell keys its X-min and Godot-plane Z-min; its candidates sample the ground bilinearly (one
-		// texel on).
+		// texel on), and the geometry expanded over them reaches the slot's detail reach past each.
+		const int64_t cell_reach = 1 + std::max<int64_t>(0, detail_reach[static_cast<size_t>(slot_index)]);
 		for (DetailCacheEntry &entry : detail_cache_[slot_index]) {
-			if (!entry.valid || !meets(sign_extend_15(entry.key >> 16u), sign_extend_15(entry.key), 1)) continue;
+			if (!entry.valid || !meets(sign_extend_15(entry.key >> 16u), sign_extend_15(entry.key), cell_reach))
+				continue;
 			dropped_detail_.push_back(CacheIdentity{static_cast<uint8_t>(slot_index), entry.key, entry.revision});
 			entry = DetailCacheEntry{};
 			++dropped;
