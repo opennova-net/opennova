@@ -66,8 +66,15 @@ void serve_terrain_stroke(SessionCore &core, const EditorRequest &request) {
 	core.outcome().stroke.bake = std::move(plan.bake);
 	if (!was_open) core.outcome().stroke.opened.push_back(target->path());
 	// The gesture ends with this sample, or stays open for the next (the wire's: its time kept, 10 s with none ends it).
-	if (ask.end) documents.end_edit(std::string(), token, false);
-	else documents.open_gesture(target->path(), token, core.platform().now_ms());
+	// The view holds it too, so that another request on the view ends it (SessionCore::request_arrives) and its lapse
+	// ends it by its token in every file it changed.
+	if (ask.end) {
+		documents.end_edit(std::string(), token, false);
+	} else {
+		const int64_t now = core.platform().now_ms();
+		documents.open_gesture(target->path(), token, now);
+		documents.open_gesture(view_path, token, now);
+	}
 }
 
 } // namespace opennova::editor

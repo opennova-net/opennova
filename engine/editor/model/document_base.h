@@ -133,6 +133,12 @@ public:
 	// serial and link); {} for none, and by default (a kind whose history keeps no marks).
 	virtual StepMark undo_mark() const { return StepMark(); }
 	virtual StepMark redo_mark() const { return StepMark(); }
+	// Whether a step the history keeps, to undo or to redo, carries the link `link` (a document a gesture opened in
+	// but changed nothing of holds none).
+	virtual bool holds_link(uint64_t link) const {
+		(void)link;
+		return false;
+	}
 	// What each step did, in words (the UX round's problems lane): the session names the step an edit
 	// made with the status line's words for it ("Set hp of Drivable Dune Buggy to 120"), a fold of the
 	// same group renaming it; what Undo and Redo then say they did, and what the Edit menu's items name.

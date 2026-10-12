@@ -114,6 +114,12 @@ public:
 	// The group open now carries the gesture `link` (its last step's batches carried it): what a cancel of
 	// that gesture drops (reopen, drop).
 	bool open_link(uint64_t link) const { return link && link_ == link && open(key_); }
+	// Whether a step it keeps (to undo or to redo) carries the link `link`.
+	bool holds_link(uint64_t link) const {
+		for (const Entry &entry : steps_)
+			if (link && entry.mark.link == link) return true;
+		return false;
+	}
 	void end_edit_group() {
 		key_.clear();
 		link_ = 0;

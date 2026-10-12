@@ -198,8 +198,11 @@ void DocumentSet::undo_redo(const EditorRequest &request) {
 	std::vector<std::string> kept, closed;
 	if (link) {
 		std::vector<std::string> gone;
-		for (const std::string &path : linked(link, &gone))
-			if (std::find(taken.begin(), taken.end(), path) == taken.end()) kept.push_back(basename_of(path));
+		for (const std::string &path : linked(link, &gone)) {
+			const DocumentBase *other = open_at(path);
+			if (other && other->holds_link(link) && std::find(taken.begin(), taken.end(), path) == taken.end())
+				kept.push_back(basename_of(path));
+		}
 		for (const std::string &path : gone) closed.push_back(basename_of(path));
 	}
 	if (view_.documents.selection.serial != serial) core_.touch(ViewConcern::Selection);

@@ -725,6 +725,32 @@ ViewportAction MissionMapViewport::stop_(Reason reason) {
 	return picture_.stop();
 }
 
+const MissionGround &MissionMapViewport::followed_terrain(const SessionView &view) const {
+	terrain_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, scene_.header(),
+	                mission::mission_base_name(path()));
+	return terrain_;
+}
+
+bool MissionMapViewport::follow_terrain_view_(const SessionView &view) {
+	const uint64_t before = terrain_view_.serial();
+	const MissionMapBackground background = options_.background;
+	const uint16_t *atlas = nullptr;
+	uint64_t revision = 0;
+	int32_t water = 0;
+	if (background == MissionMapBackground::Height || background == MissionMapBackground::Delta ||
+	    background == MissionMapBackground::Flatness) {
+		const MissionGround &ground = followed_terrain(view);
+		const terrain::TerrainHeightField *field = ground.height_field();
+		if (field && field->dim == 1024) {
+			atlas = field->heightmap;
+			revision = uint64_t(ground.reads());
+		}
+		if (ground.water()) water = int32_t(ground.water_height() * 65536.0);
+	}
+	terrain_view_.follow(background, options_.water, atlas, revision, water);
+	return terrain_view_.serial() != before;
+}
+
 ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewClock &) {
 	const SessionView &view = input.view;
 	if (!view.project.open || !view.findings.assets) return stop_(Reason::NoProject);
@@ -742,6 +768,7 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 		scene_.read(*source);
 		follow_ground_(view);
 		follow_outlines_(view, kOutlinesFirstUs);
+		follow_terrain_view_(view);
 		picture_.show(key, generation);
 		shown(*document);
 		if (!framed_) {
@@ -763,6 +790,7 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 	}
 	follow_ground_(view);
 	if (follow_outlines_(view, kOutlinesFrameUs)) moved_ = true;
+	if (follow_terrain_view_(view)) moved_ = true; // S25: the background in place of the colour map
 	// A file the device read moved (the terrain, the HUD's layout and art): the picture made again from the files.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
 		moved_ = false;
@@ -898,8 +926,9 @@ bool MissionMapViewport::handle_point(const ViewportContext &context, NodeId id,
 bool MissionMapViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 		std::string &error) const {
 	// S25: the terrain tools' (terrain_view_commands.h).
-	const MapBrushSpace terrain_space(view(context.width, context.height), nullptr);
-	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, nullptr};
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
 	bool terrain_handled = false;
 	const bool terrain_done = terrain_view_drag(terrain, drag, out, error, terrain_handled);
 	if (terrain_handled) return terrain_done;
@@ -1009,8 +1038,9 @@ bool MissionMapViewport::command(const ViewportContext &context, const std::stri
 bool MissionMapViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
 		std::string &error) const {
 	// S25: the terrain tools' (terrain_view_commands.h).
-	const MapBrushSpace terrain_space(view(context.width, context.height), nullptr);
-	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, nullptr};
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
 	bool terrain_handled = false;
 	const bool terrain_done = terrain_view_drop(terrain, drop, out, error, terrain_handled);
 	if (terrain_handled) return terrain_done;
@@ -1020,8 +1050,9 @@ bool MissionMapViewport::drop(const ViewportContext &context, const ViewportDrop
 bool MissionMapViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
 		std::string &error) const {
 	// S25: the terrain tools' (terrain_view_commands.h).
-	const MapBrushSpace terrain_space(view(context.width, context.height), nullptr);
-	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, nullptr};
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
 	bool terrain_handled = false;
 	const bool terrain_done = terrain_view_command(terrain, command, out, error, terrain_handled);
 	if (terrain_handled) return terrain_done;

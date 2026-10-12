@@ -62,6 +62,12 @@ public:
 	// past the saved checkpoint), that step undone through `apply` and forgotten, no redo left of it;
 	// false, nothing done, when it is not open.
 	bool drop_open(uint64_t link, const Apply &apply);
+	// Whether a step it keeps (to undo or to redo) carries the link `link`.
+	bool holds_link(uint64_t link) const {
+		for (const Step &step : steps_)
+			if (link && step.mark.link == link) return true;
+		return false;
+	}
 	void mark_saved() { saved_revision_ = revision_; }
 
 	bool can_undo() const { return cursor_ != 0; }

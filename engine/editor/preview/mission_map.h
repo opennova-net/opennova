@@ -13,6 +13,7 @@
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_model.h>
+#include <editor/preview/mission_map_terrain_view.h>
 
 namespace opennova::editor {
 
@@ -79,13 +80,6 @@ float mission_map_zoom_for(double metres, int width);
 // commander map's GRID and TEXT, which the device's compile draws), stick (a moved entity keeps its height over the
 // ground) and the grid a drag snaps to (metres; 0 free). S24: the selected event's links, the reaches and the
 // badges (the 3D view's links).
-// What the map draws under its marks (S25, preview/mission_map_terrain_view): the terrain's colour map as the game's
-// commander map draws it, the original tools' Height map and Delta map (Nile [orig: gobj sub_10010720]), MED's
-// flatness view, or nothing; `water` lays MED's water overlay over it.
-enum class MissionMapBackground : uint8_t { Colour, Height, Delta, Flatness, None, kCount };
-// "colour", "height", "delta", "flatness", "none".
-const char *mission_map_background_token(MissionMapBackground background);
-bool mission_map_background_from_token(const std::string &token, MissionMapBackground &out);
 
 struct MissionMapOptions {
 	bool items = true, buildings = true, markers = true, organics = true;
@@ -173,6 +167,11 @@ public:
 	const MissionMapCamera &camera() const { return camera_; }
 	const MissionScene &scene() const { return scene_; }
 	const MissionMapGround &ground() const { return ground_; }
+	// S25: the background its options ask in place of the colour map (MissionMapTerrainView: Nile's Height and Delta
+	// maps, the original editor's flatness and water), made from the mission's ground as the game reads it; and that
+	// ground followed over the project's files (the terrain brush's hints and eyedropper).
+	const MissionMapTerrainView &terrain_view() const { return terrain_view_; }
+	const MissionGround &followed_terrain(const SessionView &view) const;
 	// The entities' models placed seen from above, by the scene's entities' order (an entity with no model, or one not
 	// read yet, has an empty footprint); and their wireframes as the device draws them: the edges of every shown
 	// entity's footprint, four mission metres (x0, y0, x1, y1) an edge, each edge's colour (0xRRGGBB, mission_map_rgb),
@@ -259,6 +258,8 @@ private:
 	enum class Reason : uint8_t { NoProject, NoMission, Ready };
 	ViewportAction stop_(Reason reason);
 	void follow_ground_(const SessionView &view);
+	// The background made again where its option, the ground or the water moved; true when it was.
+	bool follow_terrain_view_(const SessionView &view);
 	// The items' outlines read within `budget_us`, and the footprints and wireframes placed again where the outlines,
 	// the scene or the kinds shown moved; true when the wireframes moved.
 	bool follow_outlines_(const SessionView &view, int64_t budget_us);
@@ -273,6 +274,8 @@ private:
 	bool moved_ = false; // what the device draws moved since the last follow (an Update)
 	MissionGround reader_; // the terrain and water as the game reads them (DI-07)
 	MissionMapGround ground_;
+	mutable MissionGround terrain_;
+	MissionMapTerrainView terrain_view_;
 	MissionOutlineCache outlines_;
 	std::vector<MissionMapFootprint> footprints_;
 	std::vector<float> lines_;

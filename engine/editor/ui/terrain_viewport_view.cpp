@@ -11,6 +11,7 @@
 #include <base/io/json.h>
 #include <base/io/os_path.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/terrain_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -150,6 +151,9 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - under),
 	       [&](const CanvasInput &in) {
 		       if (options.overlay != MissionGroundOverlay::None) legend(canvas_ui(), model);
+		       // S25: the terrain brush's own line while it is live.
+		       const auto *brush = dynamic_cast<const TerrainCanvas *>(half());
+		       brush_hint_ = brush ? brush->hint(context, in) : std::string();
 		       if (!in.hovered) {
 			       asked_.valid = false;
 			       ground_.clear();
@@ -175,7 +179,9 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		       ground_ = mission_ground_line(facts);
 		       ground_surface_ = facts.on == MissionGroundOn::Terrain && !facts.under_water ? facts.surface : -1;
 	       });
-	if (ground_.empty()) {
+	if (!brush_hint_.empty()) {
+		ui_kit::clipped_text(brush_hint_);
+	} else if (ground_.empty()) {
 		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
 		ui_kit::clipped_text("Ground: point at the terrain to read its surface class, the footsteps a body plays there, the "
 		                     "row a round plays and the foliage it grows.");

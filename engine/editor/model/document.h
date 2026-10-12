@@ -125,6 +125,7 @@ public:
 	uint64_t revision() const override { return history_.revision(); }
 	StepMark undo_mark() const override { return history_.undo_mark(); }
 	StepMark redo_mark() const override { return history_.redo_mark(); }
+	bool holds_link(uint64_t link) const override { return history_.holds_link(link); }
 	// What the history holds: its steps' rows' and file-wide states' footprints (Node::footprint,
 	// FileState::footprint) and the revisions each step took (EditHistory::bytes), under the
 	// history's budget (HistoryBudget: past it the oldest steps are given up, never the last one).

@@ -172,6 +172,7 @@ public:
 	size_t history_bytes() const override { return history_.bytes(); }
 	StepMark undo_mark() const override { return history_.undo_mark(); }
 	StepMark redo_mark() const override { return history_.redo_mark(); }
+	bool holds_link(uint64_t link) const override { return history_.holds_link(link); }
 	bool changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const override;
 	// The text as the file stores it: the text itself, or through the encoding its type's decode
 	// made (a refusal says why the text does not go in the stored form).

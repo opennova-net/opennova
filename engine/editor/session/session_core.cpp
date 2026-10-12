@@ -1161,7 +1161,8 @@ SessionCore::WireDrag *SessionCore::wire_drag(const std::string &path) {
 
 void SessionCore::end_wire_gesture(const std::string &path) {
 	wire_drags_.erase(path);
-	documents().end_edit(path);
+	// By its token (S25): a terrain stroke's gesture ends in every document its samples changed.
+	documents().end_edit(path, open_gesture(path).token);
 }
 
 void SessionCore::edit_in_viewport(const EditorRequest &request) {
@@ -1308,8 +1309,9 @@ void SessionCore::request_arrives(const EditorRequest &request) {
 			: request_kind_row(request.kind).names_active ? view_.documents.active
 			: std::string();
 	if (on.empty() || !open_gesture(on).wire()) return;
-	const bool goes_on = request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag() &&
-			request.drag.gesture == open_gesture(on).token;
+	const bool goes_on = (request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag() &&
+			request.drag.gesture == open_gesture(on).token) ||
+			(request.kind == EditorRequestKind::TerrainStroke && request.stroke.gesture == open_gesture(on).token);
 	if (!goes_on) end_wire_gesture(on);
 }
 
