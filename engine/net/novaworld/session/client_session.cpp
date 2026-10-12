@@ -72,22 +72,31 @@ int atol_field(const NapiField &f) {
 }
 
 // CNapiVarList_SetOrCreate keyed on (VarFNum, name): update the match in place, else append.
-// [orig: CNapiVarList_SetOrCreate @0x6318c0 -> NapiLinkedList_FindByTypeAndName @0x6304f0]
-void set_or_create_var(std::vector<ClientVar> &list, const ClientVar &var) {
+// True when it changed the list, the edit that raises the list's changed flag (+0x44): a
+// different value (String_ExactMatch) or a new entry.
+// [orig: CNapiVarList_SetOrCreate @0x6318c0 -> NapiLinkedList_FindByTypeAndName @0x6304f0;
+//  CNapiVarEntry_SetValue @0x630590 (the flag @0x6305ce); CNapiVarList_CreateEntry @0x6317c0
+//  (the flag @0x6318a7)]
+bool set_or_create_var(std::vector<ClientVar> &list, const ClientVar &var) {
 	for (ClientVar &v : list) {
 		if (v.fnum == var.fnum && strutil::iequals(v.name, var.name)) {
+			if (v.value == var.value) return false;
 			v.value = var.value;
-			return;
+			return true;
 		}
 	}
 	list.push_back(var);
+	return true;
 }
 
-// NapiLinkedList_RemoveByUserData: drop every var a slot owns. [orig: @0x630810]
-void remove_slot_vars(std::vector<ClientVar> &list, int slot) {
-	list.erase(std::remove_if(list.begin(), list.end(),
-	                          [slot](const ClientVar &v) { return v.fnum == slot; }),
-	           list.end());
+// NapiLinkedList_RemoveByUserData: drop every var a slot owns. True when it removed one, each
+// removal raising the list's changed flag. [orig: @0x630810 (the flag @0x63086d)]
+bool remove_slot_vars(std::vector<ClientVar> &list, int slot) {
+	const auto kept = std::remove_if(list.begin(), list.end(),
+	                                 [slot](const ClientVar &v) { return v.fnum == slot; });
+	const bool removed = kept != list.end();
+	list.erase(kept, list.end());
+	return removed;
 }
 
 } // namespace
@@ -186,6 +195,8 @@ std::vector<uint8_t> ClientSession::start() {
 	host_list_.clear();
 	player_list_.clear();
 	play_setup_.clear();
+	host_list_changed_ = false;
+	player_list_changed_ = false;
 	// ReconnectCounter (session+0x500) is not a connection's: its only writers are the host
 	// request's zero and the re-verify's count (request_hosting, dispatch_server_container).
 	return build_client_hello();
@@ -1006,6 +1017,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 				session_role_ = kSessionRoleVerified;
 			} else if (session_role_ == kSessionRoleHosting) {
 				++reconnect_counter_;
+				mark_host_lists();
 				set_or_create_var(host_setup_, {0, "ReconnectCounter", std::to_string(reconnect_counter_)});
 				send_host_request(1);
 				Notice notice;
@@ -1189,7 +1201,17 @@ bool ClientSession::request_hosting(const HostRegistration &cfg, int currently_h
 	host_setup_ = make_host_setup_var_list(setup);
 	host_list_ = make_host_var_list(setup, HostLobbyText{}, /*full=*/false);
 	player_list_.clear();
+	mark_host_lists();
 	return send_host_request(currently_hosting);
+}
+
+// Both lists' changed flags raised: the flags the next update reads.
+// [orig: CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce300 (the Host mark @0x4ce32f, the
+//  PlayerList's @0x4ce33c; HostSetup's @0x4ce322); NapiMemHeap_SetAllocId @0x630890 (the flag
+//  @0x6308a4)]
+void ClientSession::mark_host_lists() {
+	host_list_changed_ = true;
+	player_list_changed_ = true;
 }
 
 // [orig: CNapiGameSession_StartHostingSession @0x4d4540 — state 4 -> 5 @0x4d4561, then
@@ -1211,14 +1233,24 @@ bool ClientSession::send_host_request(int currently_hosting) {
 	return false;
 }
 
-// The Host and PlayerList vars land in the session's lists (SetOrCreate) and the update
-// carries them. [orig: Lobby_UpdateServerInfo @0x4fe8c0 (the SetOrCreates) ->
-//  CNapiGameSession_SendHostUpdate @0x4d3860]
+// The Host and PlayerList vars land in the session's lists (SetOrCreate). The update goes
+// only when it includes both lists whole or either list's changed flag is set; it writes a
+// list whole under includeAll and otherwise only a flagged one, then clears both flags.
+// [orig: Lobby_UpdateServerInfo @0x4fe8c0 (the SetOrCreates) -> CPlayerManager_RebuildLists
+//  @0x4d4590 (the test @0x4d45ac, the clears @0x4d45c2 / @0x4d45cf; the host result's
+//  @0x4d5c95 / @0x4d5c9e) -> CNapiGameSession_SendHostUpdate @0x4d3860]
 bool ClientSession::send_host_update(const std::vector<ClientVar> &host,
-                                     const std::vector<ClientVar> &player_list) {
-	for (const ClientVar &v : host) set_or_create_var(host_list_, v);
-	for (const ClientVar &v : player_list) set_or_create_var(player_list_, v);
-	return queue_statement(make_client_host_update(host, player_list));
+                                     const std::vector<ClientVar> &player_list, bool include_all) {
+	for (const ClientVar &v : host)
+		if (set_or_create_var(host_list_, v)) host_list_changed_ = true;
+	for (const ClientVar &v : player_list)
+		if (set_or_create_var(player_list_, v)) player_list_changed_ = true;
+	if (!include_all && !host_list_changed_ && !player_list_changed_) return false;
+	const NapiMessage update = make_client_host_update(host, include_all || host_list_changed_,
+	                                                   player_list, include_all || player_list_changed_);
+	host_list_changed_ = false;
+	player_list_changed_ = false;
+	return queue_statement(update);
 }
 
 // The slot's five vars replace whatever it held, then the statement goes only in state 6.
@@ -1227,6 +1259,7 @@ bool ClientSession::send_host_update(const std::vector<ClientVar> &host,
 bool ClientSession::send_host_player_added(const HostPlayerSlot &player) {
 	remove_slot_vars(player_list_, player.slot);
 	for (const ClientVar &v : make_player_list({player})) player_list_.push_back(v);
+	player_list_changed_ = true; // the created entries [orig: CNapiVarList_CreateEntry @0x6318a7]
 	if (host_state_ != HostState::Established) return false;
 	return queue_statement(make_client_host_player_added(
 			player.slot, player.player_name, player.ip_and_port, player.pcid, player.team,
@@ -1236,7 +1269,7 @@ bool ClientSession::send_host_player_added(const HostPlayerSlot &player) {
 // [orig: the slot's vars dropped (NapiLinkedList_RemoveByUserData @0x630810), then the
 //  state-6 wrapper @0x4d0e40]
 bool ClientSession::send_host_player_removed(int player_number) {
-	remove_slot_vars(player_list_, player_number);
+	if (remove_slot_vars(player_list_, player_number)) player_list_changed_ = true;
 	if (host_state_ != HostState::Established) return false;
 	return queue_statement(make_client_host_player_removed(player_number));
 }

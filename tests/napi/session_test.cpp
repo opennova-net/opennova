@@ -554,14 +554,23 @@ bool check_handshake_names() {
 			"Host first ClientVar ServerName")) return false;
 
 	auto hu = make_client_host_update(
-		{{0, "Players", "2"}},                                 // Host
-		{{0, "Slot0", "Taylor"}, {0, "Slot1", "Joiner"}});     // PlayerList
+		{{0, "Players", "2"}}, true,                                 // Host
+		{{0, "Slot0", "Taylor"}, {0, "Slot1", "Joiner"}}, true);     // PlayerList
 	if (!expect(hu.name == "ClientHostUpdate", "ClientHostUpdate name")) return false;
 	if (!expect(hu.children.size() == 2, "2 var-lists")) return false;
 	if (!expect(hu.children[0].name == "ClientVarList" &&
 			field_str(hu.children[0], "VarList") == "Host", "update child 0 ClientVarList(Host)")) return false;
 	if (!expect(hu.children[1].name == "ClientVarList" &&
 			field_str(hu.children[1], "VarList") == "PlayerList", "update child 1 ClientVarList(PlayerList)")) return false;
+	// A list the update does not write has no container; a written list with no var keeps its
+	// container (a removal's). [orig: NapiStatement_SerializeVarList @0x4d06b6] (D-NET-489)
+	auto host_only = make_client_host_update({{0, "Players", "3"}}, true, {}, false);
+	if (!expect(host_only.children.size() == 1 && field_str(host_only.children[0], "VarList") == "Host",
+			"an unchanged PlayerList writes no container")) return false;
+	auto removal = make_client_host_update({}, false, {}, true);
+	if (!expect(removal.children.size() == 1 && field_str(removal.children[0], "VarList") == "PlayerList" &&
+			removal.children[0].children.empty(),
+			"a removal's PlayerList is an empty container")) return false;
 
 	// ClientPlayRequest = a top-level CurrentlyPlaying field, then the Cookie and
 	// PlaySetup var-lists (each a ClientVarList carrying a VarList field + ClientVar
@@ -598,8 +607,8 @@ bool check_handshake_names() {
 bool check_handshake_wire_roundtrip() {
 	using opennova::ClientVar;
 	auto req = opennova::make_client_host_update(
-		{{0, "ServerIP", "127.0.0.1"}, {0, "ServerPortNumber", "4444"}},  // Host
-		{{0, "Slot0", "player"}});                                        // PlayerList
+		{{0, "ServerIP", "127.0.0.1"}, {0, "ServerPortNumber", "4444"}}, true,  // Host
+		{{0, "Slot0", "player"}}, true);                                        // PlayerList
 	std::vector<opennova::NapiMessage> stream = {req};
 	std::vector<uint8_t> buf(opennova::napi_stream_size(stream) + 16, 0);
 	size_t enc_size = 0;

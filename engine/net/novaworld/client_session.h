@@ -297,9 +297,19 @@ public:
 	// when the session is not in state 4 or the request could not be queued (state back to 4).
 	// [orig: CNapiGameSession_StartHostingSession @0x4d4540 -> SendHostRequest @0x4d3700]
 	bool request_hosting(const HostRegistration &cfg, int currently_hosting);
-	// ClientHostUpdate with the given Host and PlayerList vars (full lists or dirty deltas).
+	// ClientHostUpdate with the given Host and PlayerList vars (full lists or dirty deltas),
+	// once they land in the session's lists: under `include_all` both lists go whole,
+	// otherwise only a list whose changed flag is set (a changed value, a new entry or a
+	// removal since the last update, or a mark), and nothing goes when neither is. Every
+	// update clears both flags. False when nothing was queued.
+	// [orig: CPlayerManager_RebuildLists @0x4d4590 -> CNapiGameSession_SendHostUpdate @0x4d3860]
 	bool send_host_update(const std::vector<ClientVar> &host,
-	                      const std::vector<ClientVar> &player_list);
+	                      const std::vector<ClientVar> &player_list, bool include_all = false);
+	// Raises the Host and PlayerList lists' changed flags, the list half of retail's marks
+	// (which also mark every var dirty: ours' callers carry that half as their dirty-delta
+	// baselines, NwuHostRole::republish_lists). [orig: Game_StartMission @0x5248e4 / @0x5248ef;
+	// CNapiGameSession_HandleHostVerifyResponse @0x4d5c63 / @0x4d5c71]
+	void mark_host_lists();
 	// ClientHostPlayerAdded / ClientHostPlayerRemoved — queued only while Established (state 6).
 	// [orig: the state-6 wrappers @0x4d0e20 / @0x4d0e40]
 	bool send_host_player_added(const HostPlayerSlot &player);
@@ -542,6 +552,16 @@ private:
 	std::vector<ClientVar> host_list_;
 	std::vector<ClientVar> player_list_;
 	std::vector<ClientVar> play_setup_;
+	// The Host and PlayerList lists' changed flags (list+0x44): raised by a changed value, a
+	// new entry, a removal or a mark, cleared by each ClientHostUpdate. The marks: the host
+	// request's list build, the re-verify's re-request, the mission start and a re-host's
+	// result (mark_host_lists), and retail's NovaWorld connect, which ours' start() clears
+	// instead (every way to state 6 runs the request's marks first).
+	// [orig: CNapiVarEntry_SetValue @0x6305ce; CNapiVarList_CreateEntry @0x6318a7;
+	//  NapiLinkedList_RemoveByUserData @0x63086d; NapiMemHeap_SetAllocId @0x6308a4;
+	//  CNapiGameSession_OnNovaWorldConnected @0x4d1570 (Host @0x4d17c2, PlayerList @0x4d17ce)]
+	bool host_list_changed_ = false;
+	bool player_list_changed_ = false;
 	int reconnect_counter_ = 0;          // session+0x500
 
 	// The NP connection's reconnect state. [orig: NapiNPConnection — conn_flag1 +0x29, the
