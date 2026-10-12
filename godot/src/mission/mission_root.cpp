@@ -131,6 +131,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	}
 	clear_present_effect_poses();
 	setup_error_ = OK;
+	process_exit_ = false;
 	mission_ = p_mission;
 	// A remote join may already own the live socket + NP session while it waits
 	// for S2C 0x7B to identify the mission. Keep that exact connection across the
@@ -168,6 +169,9 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 	if (options->get_player_profiles().is_valid()) {
 		sim_->use_player_profile(options->get_player_profiles());
 	}
+	// The process's cfg block, whose mpreset word every session create reads.
+	if (options->get_game_config().is_valid())
+		sim_->use_game_config(options->get_game_config());
 	// P7 / ADR 0011: every authoritative live mission is an in-process listen server, stood up BEFORE
 	// load; the host player auto-spawns at bring-up (faithful §5.0 mode-3). MainGame/GameWorld is the
 	// sole live runtime owner (ADR 0025). Isolated tests may instantiate this same
@@ -298,6 +302,7 @@ int MissionRoot::setup(const Ref<MissionData> &p_mission, Node *p_container,
 			playable);
 	if (boot_err != OK) {
 		setup_error_ = ERR_CANT_OPEN;
+		process_exit_ = sim_->session_create_ended_process();
 		sim_.unref(); // the RefCounted sim drops with its last reference
 		has_trace_stats_sampling_ = false;
 		return 0;

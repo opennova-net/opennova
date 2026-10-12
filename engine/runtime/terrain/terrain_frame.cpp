@@ -180,99 +180,103 @@ TerrainTileCompositionRequest terrain_tile_composition_request(
 	return request;
 }
 
-TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
-                                                  const TrnConfig &trn) {
-	TerrainSceneSnapshot scene;
+namespace {
 
-	constexpr int hm_size = 1024;
-	constexpr size_t expected_depth_samples =
-			static_cast<size_t>(hm_size) * static_cast<size_t>(hm_size);
-	if (cpt.tiles.empty() || cpt.depth_buffer.size() != expected_depth_samples) {
-		return scene;
-	}
+constexpr int kSnapshotAtlas = 1024;
 
-	// Sector routing straight from the .trn document.
-	for (int r = 0; r < 16; ++r) {
-		for (int c = 0; c < 16; ++c) {
-			scene.sector_grid[r][c] = trn.sector_grid[r][c];
-		}
-	}
-	scene.origin_x = trn.origin_x;
-	scene.origin_y = trn.origin_y;
-	scene.wrap_x = trn.wrap_x != 0;
-	scene.wrap_y = trn.wrap_y != 0;
-
+// A tile's traversal bounds over the heights its vertices read (the taps of its
+// own quadrant's locks): AABB, center, radius.
+void snapshot_tile_bounds(const CptTile &tile, const std::vector<uint16_t> &depth,
+		const terrain::CoordsQuadrantLocks &quadrant_locks, TileMesh &meta) {
 	const float height_scale = 1.0f / 256.0f;
-	const terrain::CoordsQuadrantLocks quadrant_locks = locks_from_trn(trn);
+	meta.aabb_min[0] = meta.aabb_min[1] = meta.aabb_min[2] = 1e9f;
+	meta.aabb_max[0] = meta.aabb_max[1] = meta.aabb_max[2] = -1e9f;
 
-	scene.tile_meshes.resize(cpt.tiles.size());
-	scene.tile_attributes.resize(cpt.tiles.size());
+	const int local_base_x = tile.tile_x & 0x1FF;
+	const int local_base_z = tile.tile_y & 0x1FF;
 
-	std::vector<uint32_t> index_scratch;
-	for (size_t ti = 0; ti < cpt.tiles.size(); ++ti) {
-		const CptTile &tile = cpt.tiles[ti];
-		TileMesh &meta = scene.tile_meshes[ti];
+	// The tile's own quadrant decides the lock policy for every one of its
+	// vertices; a tile whose last row/column lands on the quadrant boundary
+	// is exactly the case the .trn locks exist for.
+	// [orig: sub_402D20 @0x402D20 (jodemo.exe) — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200).]
+	const terrain::CoordsTaps taps = terrain::coords_taps_for_quadrant(
+			quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, kSnapshotAtlas);
 
-		meta.vertex_count = tile.vertex_count;
-		meta.tile_size = tile.tile_size;
-		meta.aabb_min[0] = meta.aabb_min[1] = meta.aabb_min[2] = 1e9f;
-		meta.aabb_max[0] = meta.aabb_max[1] = meta.aabb_max[2] = -1e9f;
+	for (int vi = 0; vi < tile.vertex_count; ++vi) {
+		const uint16_t rel_x = tile.vertex_indices[vi * 2 + 0];
+		const uint16_t rel_y = tile.vertex_indices[vi * 2 + 1];
 
-		const int local_base_x = tile.tile_x & 0x1FF;
-		const int local_base_z = tile.tile_y & 0x1FF;
+		const int wx = tile.tile_x + rel_x;
+		const int wz = tile.tile_y + rel_y;
+		const int hx = taps.x(wx);
+		const int hz = taps.z(wz);
+		const float hy = depth[hz * kSnapshotAtlas + hx] * height_scale;
 
-		// The tile's own quadrant decides the lock policy for every one of its
-		// vertices; a tile whose last row/column lands on the quadrant boundary
-		// is exactly the case the .trn locks exist for.
-		// [orig: sub_402D20 @0x402D20 (jodemo.exe) — quadrant = (tile_x >= 0x200) + 2 * (tile_y >= 0x200).]
-		const terrain::CoordsTaps taps = terrain::coords_taps_for_quadrant(
-				quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, hm_size);
+		const float lx = static_cast<float>(local_base_x + rel_x);
+		const float lz = static_cast<float>(local_base_z + rel_y);
 
-		for (int vi = 0; vi < tile.vertex_count; ++vi) {
-			const uint16_t rel_x = tile.vertex_indices[vi * 2 + 0];
-			const uint16_t rel_y = tile.vertex_indices[vi * 2 + 1];
-
-			const int wx = tile.tile_x + rel_x;
-			const int wz = tile.tile_y + rel_y;
-			const int hx = taps.x(wx);
-			const int hz = taps.z(wz);
-			const float hy = cpt.depth_buffer[hz * hm_size + hx] * height_scale;
-
-			const float lx = static_cast<float>(local_base_x + rel_x);
-			const float lz = static_cast<float>(local_base_z + rel_y);
-
-			if (lx < meta.aabb_min[0]) meta.aabb_min[0] = lx;
-			if (hy < meta.aabb_min[1]) meta.aabb_min[1] = hy;
-			if (lz < meta.aabb_min[2]) meta.aabb_min[2] = lz;
-			if (lx > meta.aabb_max[0]) meta.aabb_max[0] = lx;
-			if (hy > meta.aabb_max[1]) meta.aabb_max[1] = hy;
-			if (lz > meta.aabb_max[2]) meta.aabb_max[2] = lz;
-		}
-
-		for (int i = 0; i < 3; ++i) {
-			meta.center[i] = (meta.aabb_min[i] + meta.aabb_max[i]) * 0.5f;
-		}
-		const float dx = meta.aabb_max[0] - meta.center[0];
-		const float dy = meta.aabb_max[1] - meta.center[1];
-		const float dz = meta.aabb_max[2] - meta.center[2];
-		meta.radius = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-		for (int lod = 0; lod < 8; ++lod) {
-			meta.lods[lod].index_count = converted_index_count(tile.lods[lod], index_scratch);
-		}
-
-		scene.tile_attributes[ti].quadrant_x =
-				static_cast<uint8_t>((tile.tile_x >> 9) & 1);
-		scene.tile_attributes[ti].quadrant_z =
-				static_cast<uint8_t>((tile.tile_y >> 9) & 1);
-		scene.tile_attributes[ti].local_page_x =
-				static_cast<uint16_t>(tile.tile_x & 0x1ff);
-		scene.tile_attributes[ti].local_page_z =
-				static_cast<uint16_t>(tile.tile_y & 0x1ff);
-		scene.tile_attributes[ti].source_page_x = tile.tile_x;
-		scene.tile_attributes[ti].source_page_z = tile.tile_y;
+		if (lx < meta.aabb_min[0]) meta.aabb_min[0] = lx;
+		if (hy < meta.aabb_min[1]) meta.aabb_min[1] = hy;
+		if (lz < meta.aabb_min[2]) meta.aabb_min[2] = lz;
+		if (lx > meta.aabb_max[0]) meta.aabb_max[0] = lx;
+		if (hy > meta.aabb_max[1]) meta.aabb_max[1] = hy;
+		if (lz > meta.aabb_max[2]) meta.aabb_max[2] = lz;
 	}
 
+	for (int i = 0; i < 3; ++i) {
+		meta.center[i] = (meta.aabb_min[i] + meta.aabb_max[i]) * 0.5f;
+	}
+	const float dx = meta.aabb_max[0] - meta.center[0];
+	const float dy = meta.aabb_max[1] - meta.center[1];
+	const float dz = meta.aabb_max[2] - meta.center[2];
+	meta.radius = std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+// Everything the snapshot keeps of one tile: its mesh's counts, its bounds and
+// its draw constants.
+void snapshot_tile(const CptTile &tile, const std::vector<uint16_t> &depth,
+		const terrain::CoordsQuadrantLocks &quadrant_locks, std::vector<uint32_t> &index_scratch,
+		TileMesh &meta, TerrainTileDrawAttributes &attributes) {
+	meta.vertex_count = tile.vertex_count;
+	meta.tile_size = tile.tile_size;
+	snapshot_tile_bounds(tile, depth, quadrant_locks, meta);
+
+	for (int lod = 0; lod < 8; ++lod) {
+		meta.lods[lod].index_count = converted_index_count(tile.lods[lod], index_scratch);
+	}
+
+	attributes.quadrant_x = static_cast<uint8_t>((tile.tile_x >> 9) & 1);
+	attributes.quadrant_z = static_cast<uint8_t>((tile.tile_y >> 9) & 1);
+	attributes.local_page_x = static_cast<uint16_t>(tile.tile_x & 0x1ff);
+	attributes.local_page_z = static_cast<uint16_t>(tile.tile_y & 0x1ff);
+	attributes.source_page_x = tile.tile_x;
+	attributes.source_page_z = tile.tile_y;
+}
+
+// Whether a texel of `rect` may lie under one of the tile's vertices: the
+// columns and rows its taps reach over its footprint and closing edge (a
+// superset of the texels its vertices read).
+bool snapshot_tile_reads(const CptTile &tile, const terrain::CoordsQuadrantLocks &quadrant_locks,
+		const terrain::CoordsRect &rect) {
+	const terrain::CoordsTaps taps = terrain::coords_taps_for_quadrant(
+			quadrant_locks, tile.tile_x & 0x200, tile.tile_y & 0x200, kSnapshotAtlas);
+	const auto reaches = [&](bool x_axis) {
+		const int base = x_axis ? tile.tile_x : tile.tile_y;
+		const int lo = x_axis ? rect.x : rect.z;
+		const int n = x_axis ? rect.w : rect.h;
+		for (int i = 0; i <= tile.tile_size; ++i) {
+			const int tap = x_axis ? taps.x(base + i) : taps.z(base + i);
+			if (tap >= lo && tap < lo + n) return true;
+		}
+		return false;
+	};
+	return rect.w > 0 && rect.h > 0 && reaches(true) && reaches(false);
+}
+
+// The 1024 -> leaf subdivision the traversal walks, its nodes bounded by the
+// mip chain and resolved to the tiles by (x, z, size)
+// [orig: Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe)].
+void build_snapshot_nodes(TerrainSceneSnapshot &scene, const CptFile &cpt) {
 	// Tile lookup by (x, z, size) for quadtree node -> tile resolution.
 	struct TileKey {
 		uint16_t x, z, size;
@@ -293,10 +297,6 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 		if (t.tile_size < leaf_size) leaf_size = t.tile_size;
 	}
 
-	scene.mipchain = build_mipchain(cpt.depth_buffer);
-
-	// The 1024 -> leaf subdivision the traversal walks
-	// [orig: Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe)].
 	struct Builder {
 		std::vector<QuadNode> &nodes;
 		const std::map<TileKey, int> &lut;
@@ -352,16 +352,110 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 		}
 	};
 
+	scene.quad_nodes.clear();
 	scene.quad_nodes.reserve(512);
-	Builder builder{scene.quad_nodes, tile_lookup, scene.mipchain, leaf_size, hm_size};
+	Builder builder{scene.quad_nodes, tile_lookup, scene.mipchain, leaf_size, kSnapshotAtlas};
 	scene.root_node = builder.build(1024, 0, 0, 0);
 
+	for (int i = 0; i < 4; ++i) scene.l1_children[i] = -1;
 	if (scene.root_node >= 0) {
 		for (int i = 0; i < 4; ++i) {
 			scene.l1_children[i] = scene.quad_nodes[scene.root_node].children[i];
 		}
 	}
+}
+
+// Sector routing straight from the .trn document.
+void snapshot_routing(TerrainSceneSnapshot &scene, const TrnConfig &trn) {
+	for (int r = 0; r < 16; ++r) {
+		for (int c = 0; c < 16; ++c) {
+			scene.sector_grid[r][c] = trn.sector_grid[r][c];
+		}
+	}
+	scene.origin_x = trn.origin_x;
+	scene.origin_y = trn.origin_y;
+	scene.wrap_x = trn.wrap_x != 0;
+	scene.wrap_y = trn.wrap_y != 0;
+	scene.locks = locks_from_trn(trn);
+}
+
+} // namespace
+
+TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
+                                                  const TrnConfig &trn) {
+	TerrainSceneSnapshot scene;
+
+	constexpr size_t expected_depth_samples =
+			static_cast<size_t>(kSnapshotAtlas) * static_cast<size_t>(kSnapshotAtlas);
+	if (cpt.tiles.empty() || cpt.depth_buffer.size() != expected_depth_samples) {
+		return scene;
+	}
+
+	snapshot_routing(scene, trn);
+	const terrain::CoordsQuadrantLocks quadrant_locks = locks_from_trn(trn);
+
+	scene.tile_meshes.resize(cpt.tiles.size());
+	scene.tile_attributes.resize(cpt.tiles.size());
+
+	std::vector<uint32_t> index_scratch;
+	for (size_t ti = 0; ti < cpt.tiles.size(); ++ti) {
+		snapshot_tile(cpt.tiles[ti], cpt.depth_buffer, quadrant_locks, index_scratch,
+				scene.tile_meshes[ti], scene.tile_attributes[ti]);
+	}
+
+	scene.mipchain = build_mipchain(cpt.depth_buffer);
+	build_snapshot_nodes(scene, cpt);
 	return scene;
+}
+
+bool refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
+		const TrnConfig &trn, const std::vector<int> &tiles, const terrain::CoordsRect &rect) {
+	if (rect.w > 0 && rect.h > 0 &&
+			(rect.x < 0 || rect.z < 0 || rect.x > kSnapshotAtlas - rect.w || rect.z > kSnapshotAtlas - rect.h)) {
+		return false;
+	}
+	constexpr size_t expected_depth_samples =
+			static_cast<size_t>(kSnapshotAtlas) * static_cast<size_t>(kSnapshotAtlas);
+	const terrain::CoordsQuadrantLocks locks = locks_from_trn(trn);
+	bool same_layout = scene.valid() && !cpt.tiles.empty() &&
+			scene.locks.x == locks.x && scene.locks.z == locks.z &&
+			cpt.depth_buffer.size() == expected_depth_samples &&
+			scene.tile_meshes.size() == cpt.tiles.size() &&
+			scene.tile_attributes.size() == cpt.tiles.size();
+	for (size_t i = 0; same_layout && i < cpt.tiles.size(); ++i) {
+		// A tile moved or resized changes the nodes' tile lookup: built whole.
+		const TerrainTileDrawAttributes &have = scene.tile_attributes[i];
+		same_layout = have.source_page_x == cpt.tiles[i].tile_x &&
+				have.source_page_z == cpt.tiles[i].tile_y &&
+				scene.tile_meshes[i].tile_size == cpt.tiles[i].tile_size;
+	}
+	for (int index : tiles) {
+		same_layout = same_layout && index >= 0 && index < static_cast<int>(cpt.tiles.size());
+	}
+	if (!same_layout) {
+		scene = build_terrain_scene_snapshot(cpt, trn);
+		return true;
+	}
+
+	snapshot_routing(scene, trn);
+	const terrain::CoordsQuadrantLocks quadrant_locks = locks_from_trn(trn);
+	std::vector<uint8_t> remade(cpt.tiles.size(), 0);
+	std::vector<uint32_t> index_scratch;
+	for (int index : tiles) {
+		if (remade[index]) continue;
+		remade[index] = 1;
+		snapshot_tile(cpt.tiles[index], cpt.depth_buffer, quadrant_locks, index_scratch,
+				scene.tile_meshes[index], scene.tile_attributes[index]);
+	}
+	for (size_t ti = 0; ti < cpt.tiles.size(); ++ti) {
+		if (!remade[ti] && snapshot_tile_reads(cpt.tiles[ti], quadrant_locks, rect)) {
+			snapshot_tile_bounds(cpt.tiles[ti], cpt.depth_buffer, quadrant_locks, scene.tile_meshes[ti]);
+		}
+	}
+
+	refresh_mipchain(scene.mipchain, cpt.depth_buffer, rect.x, rect.z, rect.w, rect.h);
+	build_snapshot_nodes(scene, cpt);
+	return true;
 }
 
 const TerrainDrawList &TerrainFrameCompiler::compile(

@@ -14,6 +14,7 @@
 #include "network/join_target.h"
 #include "object/character_join_profile.h"
 #include "object/item_database.h"
+#include "player/game_config_block.h"
 #include "player/player_profiles.h"
 #include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
@@ -82,6 +83,10 @@ public:
 	// (Simulation.use_player_profile). Null = a fresh profile's defaults.
 	Ref<PlayerProfiles> get_player_profiles() const { return player_profiles_; }
 	void set_player_profiles(const Ref<PlayerProfiles> &p_value) { player_profiles_ = p_value; }
+	// The process's cfg block the session create reads (Simulation.use_game_config).
+	// Null = none: the session config's own mpreset word stands.
+	Ref<GameConfigBlock> get_game_config() const { return game_config_; }
+	void set_game_config(const Ref<GameConfigBlock> &p_value) { game_config_ = p_value; }
 	// The joiner's profile-to-wire projection (Simulation.set_join_character_profile).
 	// Null = none staged.
 	Ref<CharacterJoinProfile> get_join_character_profile() const {
@@ -157,6 +162,7 @@ private:
 	Ref<JoinTarget> join_target_;
 	Ref<CharacterJoinProfile> local_character_profile_;
 	Ref<PlayerProfiles> player_profiles_;
+	Ref<GameConfigBlock> game_config_;
 	Ref<CharacterJoinProfile> join_character_profile_;
 	PackedStringArray spawn_names_;
 	Ref<ResourceRoot> resource_root_;

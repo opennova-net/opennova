@@ -202,6 +202,29 @@ int test_png_encode() {
 	return 0;
 }
 
+// The 16-bit grey writer (a heightmap): colour type 0 at 16 bits, every sample read back as written, the extremes
+// and a byte-order witness included; nothing for an empty image.
+int test_png_encode_gray16() {
+	std::vector<uint16_t> samples;
+	for (int y = 0; y < 4; ++y)
+		for (int x = 0; x < 6; ++x) samples.push_back(uint16_t(x * 13107 + y * 257));
+	samples[0] = 0;
+	samples[1] = 65535;
+	samples[2] = 0x0102;
+	const std::vector<uint8_t> bytes = encode_png_gray16(samples.data(), 6, 4);
+	uint32_t width = 0, height = 0;
+	TEST_EXPECT(png_header_size(bytes, width, height) && width == 6 && height == 4 && bytes[24] == 16 && bytes[25] == 0);
+	GrayImage back;
+	std::string error;
+	TEST_EXPECT(decode_png_gray(bytes, back, error) && back.width == 6 && back.height == 4 && back.max_value == 65535);
+	bool same = back.samples.size() == samples.size();
+	for (size_t i = 0; same && i < samples.size(); ++i) same = back.samples[i] == samples[i];
+	TEST_EXPECT(same);
+	TEST_EXPECT(encode_png_gray16(samples.data(), 0, 4).empty() && encode_png_gray16(nullptr, 6, 4).empty());
+	std::printf("encode: a 16-bit grey image written and read back as it was\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -209,6 +232,7 @@ int main() {
 	failures += test_png_decode();
 	failures += test_png_indexed_gray_header();
 	failures += test_png_encode();
+	failures += test_png_encode_gray16();
 	if (failures == 0) std::printf("png_codec: all passed\n");
 	return failures == 0 ? 0 : 1;
 }

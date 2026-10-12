@@ -9,6 +9,7 @@
 #include "mission/mission_root.h"
 #include "network/novaworld_client.h"
 #include <net/npwire/peer_addr.h>
+#include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/mission_exit.h> // the post-mission router
 #include "object/avatar_database.h"
 #include "resource_index/launch_flags.h"
@@ -258,8 +259,9 @@ void SessionDrive::step_preload() {
 // connects [orig: UI_JoinSelectedSession @ 0x5699d0 (expansion copy
 // @ 0x569afa, switch @ 0x569b02, connect @ 0x569ded) -> Expansion_SwitchTo
 // @ 0x5688c0 -> PFF_CloseAllOpenArchives @ 0x4a4380 / PFF_OpenAllArchives
-// @ 0x4a4310]. There is no second mount object, and the switch is sticky: the
-// shell keeps running on the host's expansion after the session. The
+// @ 0x4a4310]. There is no second mount object. Retail takes back the
+// expansion the switch left at the return to the main menu; the shell keeps
+// running on the host's expansion after the session (D-NET-622). The
 // keep/remount/fail DECISION is native (inmatch::decide_join_expansion); this
 // executes it against the live mount.
 bool SessionDrive::reconcile_join_expansion() {
@@ -353,6 +355,13 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 		resource_root->mount_runtime(dir, previous, LaunchFlags::loose_override_enabled(), game_code);
 		return vformat("join: could not mount host expansion '%s' from %s: %s",
 				target_expansion, dir, mount_error);
+	}
+	// The process's cfg block takes the mount's weapon table and reads
+	// nothing, so the main-menu entry after the match is a plain read
+	// (engine: inmatch::GameConfigBlock::switch_expansion).
+	Ref<GameConfigBlock> block = world_->get_game_config();
+	if (block.is_valid()) {
+		block->switch_expansion(resource_root);
 	}
 	// mount_runtime succeeds even when the expansion never layered
 	// (opennova::Vfs::mount_game falls back to base game silently), so read
@@ -841,18 +850,40 @@ void SessionDrive::unbind_nw_host() {
 	}
 }
 
+// A ServerCommand the hosting NovaWorld session received. Before the match
+// has a host context (the hosting wait: the load before the session create)
+// it runs on a session-less one, where SetMPReset alone passes; a config
+// change lands in the process's cfg block, which is saved at once
+// (engine: inmatch/host_config.h run_host_server_command,
+// docs/net/novaworld-net-re.md D-NET-383).
 void SessionDrive::on_nw_host_server_command(const String &p_verb, const String &p_target,
 		const PackedStringArray &p_args) {
 	Ref<Simulation> sim = world_->get_sim();
-	if (sim.is_null()) {
-		return;
+	Ref<GameConfigBlock> block = world_->get_game_config();
+	Simulation::ServerCommandResult result;
+	if (sim.is_valid()) {
+		result = sim->execute_server_command(p_verb, p_target, p_args);
+	} else {
+		std::vector<std::string> args;
+		for (int i = 0; i < p_args.size(); ++i)
+			args.push_back(opennova::to_std(p_args[i]));
+		const bool serve_and_play = pending_host_.is_null() || pending_host_->get_serve_and_play();
+		const opennova::inmatch::ServerCommandOutcome outcome =
+				opennova::inmatch::run_host_server_command(nullptr, nullptr,
+						opennova::inmatch::host_connection_mode(serve_and_play),
+						block.is_valid() ? &block->native().cfg() : nullptr,
+						opennova::to_std(p_verb), opennova::to_std(p_target), args);
+		result.handled = outcome.handled;
+		result.stop_hosting = outcome.stop_hosting;
+		result.config_changed = outcome.config_changed;
 	}
-	const Simulation::ServerCommandResult result =
-			sim->execute_server_command(p_verb, p_target, p_args);
 	if (!result.handled) {
 		UtilityFunctions::print_verbose(vformat(
 				"SessionDrive: NovaWorld ServerCommand '%s%s' was not executed", p_verb, p_target));
 		return;
+	}
+	if (result.config_changed && block.is_valid()) {
+		block->save();
 	}
 	NovaWorldClient *client = nw_client();
 	if (result.stop_hosting) {
@@ -864,7 +895,7 @@ void SessionDrive::on_nw_host_server_command(const String &p_verb, const String 
 		}
 		return;
 	}
-	if (result.config_changed && client != nullptr) {
+	if (result.config_changed && client != nullptr && result.has_config) {
 		// The changed columns ride the session's next refresh as its dirty delta.
 		client->host_role().set_server_name(opennova::to_std(result.server_name));
 		client->host_role().set_server_message(opennova::to_std(result.server_message));
