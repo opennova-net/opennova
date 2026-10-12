@@ -183,6 +183,8 @@ void TerrainSculpt::work() {
 }
 
 void TerrainSculpt::start(std::unique_ptr<Job> job) {
+	core_.view().documents.baking = job->path;
+	core_.touch(ViewConcern::Documents);
 	{
 		std::lock_guard<std::mutex> hold(mutex_);
 		cancel_ = false;
@@ -234,6 +236,10 @@ void TerrainSculpt::poll() {
 		busy = queued_ || running_;
 	}
 	if (done) land(*done);
+	if (!busy && !core_.view().documents.baking.empty()) {
+		core_.view().documents.baking.clear();
+		core_.touch(ViewConcern::Documents);
+	}
 	if (busy || !core_.view().project.open) return;
 	for (const std::shared_ptr<DocumentBase> &each : core_.documents().documents()) {
 		const auto *heights = dynamic_cast<const TerrainHeightsDocument *>(each.get());
@@ -267,6 +273,10 @@ bool TerrainSculpt::settle(const std::string &path, std::string &error) {
 		if (finished_ && finished_->path == path) done = std::move(finished_);
 	}
 	if (done) land(*done);
+	if (core_.view().documents.baking == path) {
+		core_.view().documents.baking.clear();
+		core_.touch(ViewConcern::Documents);
+	}
 	auto *document = dynamic_cast<TerrainHeightsDocument *>(core_.documents().document_for(path));
 	if (!document || document->heights().unbaked.empty()) return true;
 	std::unique_ptr<Job> job = make_job(*document);

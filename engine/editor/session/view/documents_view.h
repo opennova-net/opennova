@@ -100,6 +100,9 @@ struct DocumentsView {
 	// batches and its end are served (no concern moves with them: the viewports read them as they
 	// follow, S13 V8, the Shell's pump each frame).
 	std::vector<OpenGesture> gestures;
+	// The heights file whose bake runs now (S25: the session's terrain sculpt, on its own thread), "" none: the
+	// Terrain pane's bake line.
+	std::string baking;
 	// The gesture open in the document at `path` (one whose token is 0 for none).
 	const OpenGesture &gesture_in(const std::string &path) const {
 		static const OpenGesture kNone;
