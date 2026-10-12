@@ -639,6 +639,39 @@ bool run_0a_subblock_phase_cycle() {
 			return false;
 	}
 
+	// The CPU byte is the host's CPU share, capped as Server_TickUpdate copies
+	// it: below 0xFF it crosses as is, from 0xFF up as 0xFF, and the compare is
+	// unsigned, so a negative share is 0xFF too (-256 tells it from a signed
+	// compare, whose low byte would be 0); the fps byte rides beside it.
+	// [orig: Server_TickUpdate @0x51D7EA..0x51D7FB - `cmp eax, 0FFh; jb`;
+	//  NetPacket_WritePlayerState @0x4FFA5C, @0x4FFA76..0x4FFA7C]
+	{
+		const struct {
+			int32_t share;
+			uint8_t wire;
+		} cpu_cases[] = {{37, 37}, {300, 0xFF}, {-1, 0xFF}, {-256, 0xFF}};
+		for (const auto &cpu : cpu_cases) {
+			nw::FrameUpdate cpu_fu;
+			bool saw_status = false;
+			for (int i = 0; i < 4 && !saw_status; ++i) {
+				ns::emit_connection_s2c(world, conns[0], ns::snapshot_world(world), 0, 0, 62,
+						cpu.share);
+				ns::Datagram dg;
+				if (!expect(ch.client_recv(dg), "cpu 0x0A frame dequeued")) return false;
+				if (!nw::decode_frame_update(dg.body.data(), dg.body.size(),
+						ns::class_for_type_id, cpu_fu))
+					return false;
+				saw_status = cpu_fu.timer.present;
+			}
+			if (!expect(saw_status, "a phase-1 frame arrived within one sub-block cycle"))
+				return false;
+			if (!expect(cpu_fu.timer.state3 == cpu.wire,
+			            "phase 1 carries the host's CPU share, capped at 0xFF")) return false;
+			if (!expect(cpu_fu.timer.state2 == 62, "phase 1 carries the fps byte beside it"))
+				return false;
+		}
+	}
+
 	// The retail byte wraps naturally: 0xFF pre-increments to 0 and selects phase 0.
 	conns[0].s2c_phase = 0xFFu;
 	ns::test::emit_all(world, conns);

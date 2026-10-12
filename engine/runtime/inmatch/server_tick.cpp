@@ -2357,12 +2357,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			conn.link.receive_silence_ms = conn.receive_inactive_ms;
 			// Built here and queued just below: the frame's CONTENT is the world
 			// after the script pass and the maintenance, before the motor step.
-			// The server-fps byte is this tick's copy of the main loop's FR
-			// counter [orig: Server_TickUpdate @0x51D7E0..0x51D7E5].
+			// The server-fps and CPU bytes are this tick's copies of the main
+			// loop's FR counter and CPU share [orig: Server_TickUpdate
+			// @0x51D7E0..0x51D7E5, @0x51D7EA..0x51D7FB].
 			conn.frame_update_staged = replication::build_connection_s2c(
 					world, conn.link, ents, conn.staged_frame_update, ctx.config.game_type,
 					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0,
-					ctx.stats_avg_fps);
+					ctx.stats_avg_fps, ctx.stats_cpu_percent);
 		}
 	}
 	// Queue the frames just built, retail's per-slot send.

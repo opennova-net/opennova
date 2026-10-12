@@ -231,8 +231,11 @@ struct NapiNPServerCtx {
 	// The main loop's frames drawn in the last 62 logic updates and the frame
 	// window's CPU share (Session::frame_statistics), handed over after every
 	// frame (HostRole::observe_frame_statistics): the status page's bottom row.
+	// The share also arrives before the drain (HostRole::observe_cpu_share),
+	// where every Server_TickUpdate copies it, capped, into the 0x0A
+	// server-status CPU byte.
 	// [orig: dword_24C193C; g_StatsCpuPercent — Server_DrawStatusScreen
-	//  @0x50afaf / @0x50b024]
+	//  @0x50afaf / @0x50b024; Server_TickUpdate @0x51D7EA..0x51D7FB]
 	int32_t stats_frames_last_second = 0;
 	int32_t stats_cpu_percent = 0;
 	// The persistent slot cursor of the 1 Hz S2C 0x46 quality resend walk.

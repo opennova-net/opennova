@@ -593,6 +593,13 @@ void HostRole::observe_frame_rate(int32_t fps) {
 	state.host_owner.ctx.stats_avg_fps = fps;
 }
 
+void HostRole::observe_cpu_share(int32_t cpu_percent) {
+	// Published before the drain, so every Server_TickUpdate of the frame
+	// copies this window's share [orig: Game_MainLoop @0x52B948, the drain
+	// @0x52BA08; Server_TickUpdate @0x51D7EA].
+	state.host_owner.ctx.stats_cpu_percent = cpu_percent;
+}
+
 void HostRole::observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) {
 	state.host_owner.ctx.stats_frames_last_second = frames_last_second;
 	state.host_owner.ctx.stats_cpu_percent = cpu_percent;

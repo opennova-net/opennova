@@ -1034,6 +1034,18 @@ int main() {
 		}
 	}
 
+	// The window's CPU share reaches the server context before the drain, where
+	// every tick's 0x0A server-status block copies it (capped in the fan)
+	// [orig: Game_MainLoop @0x52B948, the drain @0x52BA08; Server_TickUpdate
+	//  @0x51D7EA..0x51D7FB].
+	{
+		inmatch::HostRole role;
+		role.observe_cpu_share(37);
+		CHECK(role.state.host_owner.ctx.stats_cpu_percent == 37);
+		role.observe_cpu_share(300);
+		CHECK(role.state.host_owner.ctx.stats_cpu_percent == 300);
+	}
+
 	if (failures == 0) std::printf("host_role: all checks passed\n");
 	return failures == 0 ? 0 : 1;
 }
