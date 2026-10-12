@@ -14,18 +14,27 @@
 #include <editor/documents/texture_document.h>
 #include <editor/preview/terrain_map_target.h>
 #include <editor/project/project_files.h>
+#include <formats/trn/charmap_legend.h>
 
 namespace opennova::editor {
 
 namespace {
 
-// The texture form a plane's map is read in, in a modder's words, where its plane's texels are not that form.
-bool form_fits(TerrainPlane plane, const RasterPlane &texels, int layer, std::string &why) {
+// The texture form a plane's map is read in, in a modder's words, where its plane's texels are not that form. An
+// import's source (`source`) is read as the import reads it: a surface map's indices are its classes, a colour
+// picture's colours the legend's; a foliage map's indices or grey levels are its codes [S20: runtime/terrain
+// decode_charmap_source, decode_foliage_map_source].
+bool form_fits(TerrainPlane plane, const RasterPlane &texels, int layer, bool source, std::string &why) {
 	switch (plane) {
 	case TerrainPlane::Surface:
+		if (texels.format() == RasterFormat::U8) return true;
+		if (source) return true; // the legend's colours
+		why = "the game reads the surface map as an 8-bit PCX of indices";
+		return false;
 	case TerrainPlane::Foliage:
 		if (texels.format() == RasterFormat::U8) return true;
-		why = std::string("the game reads ") + terrain_plane_words(plane) + " as an 8-bit PCX of indices";
+		why = source ? "its import reads a foliage map's picture by its indices or its grey levels, never colours"
+		             : "the game reads the foliage map as an 8-bit PCX of indices";
 		return false;
 	case TerrainPlane::Colour:
 		if (texels.format() == RasterFormat::Rgb8 || texels.format() == RasterFormat::Rgba8) return true;
@@ -52,7 +61,17 @@ bool form_fits(TerrainPlane plane, const RasterPlane &texels, int layer, std::st
 // The value a dab of weight `weight` leaves on a texel holding `texel` (bytes of the plane's format).
 void lay(TerrainPlane plane, const TerrainBrush &brush, float weight, uint8_t *texel, int bytes) {
 	switch (plane) {
-	case TerrainPlane::Surface: texel[0] = uint8_t(std::clamp(brush.surface, 0, 255)); return;
+	case TerrainPlane::Surface:
+		if (bytes == 1) {
+			texel[0] = uint8_t(std::clamp(brush.surface, 0, 255));
+		} else {
+			// A colour source: the class's legend colour, its alpha kept (the import reads the colours alone).
+			const CharmapLegendColour &c = kCharmapLegend[std::clamp(brush.surface, 0, kCharmapLegendCount - 1)];
+			texel[0] = c.r;
+			texel[1] = c.g;
+			texel[2] = c.b;
+		}
+		return;
 	case TerrainPlane::Foliage: texel[0] = uint8_t(std::clamp(brush.foliage, 0, 255)); return;
 	case TerrainPlane::Colour:
 	case TerrainPlane::Blend: {
@@ -98,9 +117,16 @@ bool plan_paint_stroke(TerrainStrokeContext &context, TerrainStrokePlan &plan, s
 		return false;
 	}
 	const RasterPlane &texels = texture->plane(0);
+	const bool source = !context.file.import_output.empty();
 	std::string why;
-	if (!form_fits(context.plane, texels, context.brush.layer, why)) {
+	if (!form_fits(context.plane, texels, context.brush.layer, source, why)) {
 		error = file + " cannot take this paint: " + why + ".";
+		return false;
+	}
+	if (context.plane == TerrainPlane::Surface && texels.format() != RasterFormat::U8 &&
+	    (context.brush.surface < 0 || context.brush.surface >= kCharmapLegendCount)) {
+		error = file + " holds the legend's colours, its twenty classes: class " + std::to_string(context.brush.surface) +
+		        " has no colour there (paint it into an indexed picture).";
 		return false;
 	}
 	const TerrainMapTarget target = terrain_map_target(*context.family.trn, context.plane, texels.width(), texels.height());

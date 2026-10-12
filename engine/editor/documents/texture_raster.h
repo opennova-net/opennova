@@ -24,16 +24,21 @@ namespace opennova::editor {
 //   Tga   an uncompressed true-colour TGA with no ID or colour map (every colour and blend map JO ships): an Rgb8
 //         or Rgba8 plane, the top row first as the game's reader takes it, and its depth, descriptor and TGA 2.0
 //         footer (TgaForm, formats/tga);
-//   Png   a true-colour PNG (an import's source image): an Rgba8 plane, written again as an 8-bit RGBA PNG.
-// Every other form (a DDS, an MDT, a run-length or colour-mapped TGA, a 24-bit or misfit PCX, a palette or grey PNG,
+//   Png   an 8-bit PNG (an import's source image): a true-colour one an Rgba8 plane, written again as an RGBA PNG;
+//         a palette one (a terrain set's surface or foliage map, its indices the classes or codes) a U8 plane of its
+//         indices and its palette, written again as a palette PNG; a grey one (a foliage map's levels) a U8 plane,
+//         written again as a grey PNG (formats/png encode_png_indexed, encode_png_grey).
+// Every other form (a DDS, an MDT, a run-length or colour-mapped TGA, a 24-bit or misfit PCX, a PNG of another depth,
 // a file the game cannot load) is held whole: the texture operations still change it, no brush paints it.
 struct TextureSide final : RasterSideState {
 	enum class Form : uint8_t { Whole, Pcx8, Tga, Png };
 	Form form = Form::Whole;
 	std::shared_ptr<const std::vector<uint8_t>> bytes; // Whole: the file
 	PcxIndexedForm pcx;                                 // Pcx8
-	std::array<uint8_t, 768> palette{};                 // Pcx8: the 256 entries, R, G, B
+	std::array<uint8_t, 768> palette{};                 // Pcx8: the 256 entries; Png palette: its entries; R, G, B
 	tga::TgaForm tga;                                   // Tga
+	uint8_t png_colour = 6;                             // Png: 6 true colour (2 read as it), 3 palette, 0 grey
+	uint32_t png_entries = 0;                           // Png palette: its PLTE's entries
 	size_t footprint() const override;
 };
 

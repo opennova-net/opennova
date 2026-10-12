@@ -5,6 +5,7 @@
 // opened quietly with the mission kept active, the changed region the stroke's answer, the mission's Undo taking it
 // back and its Save writing the maps in their form; a map no brush paints refused, saying why.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <sstream>
 #include <string>
@@ -17,6 +18,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/pcx/pcx_io.h>
+#include <formats/png/png_encode.h>
 #include <formats/trn/trn_io.h>
 #include <formats/tga/tga.h>
 
@@ -179,10 +181,70 @@ int test_strokes() {
 	return 0;
 }
 
+// An imported terrain (S20): its surface map's source, a palette PNG whose indices are the classes, takes the stroke
+// in the output's place as an index (the import reads it so), opened quietly and written again as a palette PNG.
+int test_imported_source() {
+	editor_test::TempProjectDir dir("opennova_editor_terrain_map_paint_import");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Isle"));
+	const SessionView &v = session.view();
+	const std::string images = dir.file("images");
+	// An island of 8-bit grey heights, a colour map, and a surface map of grass (class 2) as a palette PNG.
+	constexpr int kSide = 1024, kMap = 512;
+	std::vector<uint8_t> heights(size_t(kSide) * kSide), colours(size_t(kSide) * kSide * 4, 120), classes(size_t(kMap) * kMap, 2);
+	for (int y = 0; y < kSide; ++y)
+		for (int x = 0; x < kSide; ++x)
+			heights[size_t(y) * kSide + x] = uint8_t(std::max(0.0, 200.0 * (1.0 - std::hypot(x - 512.0, y - 512.0) / 400.0)));
+	std::vector<uint8_t> ramp;
+	for (int i = 0; i < 256; ++i) ramp.insert(ramp.end(), 3, uint8_t(i));
+	TEST_EXPECT(editor_test::write_bytes(images + "/height.png", png::encode_png_grey(heights.data(), kSide, kSide)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/colour.png", png::encode_png_rgba(colours.data(), kSide, kSide)));
+	TEST_EXPECT(editor_test::write_bytes(images + "/surface.png", png::encode_png_indexed(classes.data(), kMap, kMap, ramp.data(), 256)));
+	ActionOutcome outcome = editor_test::handle_to_end(session, request::new_terrain("isle",
+	        {{"heightmap", images + "/height.png"}, {"colormap", images + "/colour.png"}, {"surface", images + "/surface.png"}}));
+	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(!outcome.refused);
+	editor_test::handle_to_end(session, request::create_file("isle.env", "environment"));
+	editor_test::set_missions(session, true);
+	outcome = editor_test::handle_to_end(session,
+	        request::create_file("isle1.bms", "mission", {{"terrain", "isle.trn"}, {"environment", "isle.env"}}));
+	for (const Diagnostic &d : outcome.findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	const AssetEntry *entry = v.project.scan->find("isle1.bms");
+	TEST_EXPECT(entry != nullptr);
+	if (!entry) return 1;
+	const std::string m = entry->relative_path;
+	session.handle(request::open_document(m));
+	TerrainStrokeAsk ask;
+	ask.plane = TerrainPlane::Surface;
+	ask.brush.tool = TerrainTool::Surface;
+	ask.brush.surface = 5;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushSurface | kBrushRadius;
+	ask.points = {{8.0, 8.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && session.outcome().stroke.changed.size() == 1);
+	const std::string source = session.outcome().stroke.changed.front().path;
+	TEST_EXPECT(contains(source, "isle_surface.png"));
+	const auto *painted = dynamic_cast<const TextureDocument *>(session.document_base_for(source));
+	TEST_EXPECT(painted && painted->plane(0).format() == RasterFormat::U8);
+	size_t fives = 0;
+	for (int y = 0; y < kMap; ++y)
+		for (int x = 0; x < kMap; ++x) fives += painted->plane(0).u8(x, y) == 5 ? 1 : 0;
+	TEST_EXPECT(fives == 1);
+	// Written again in its form: a palette PNG whose indices the import reads as the classes.
+	const SerializeResult saved = painted->serialize();
+	TEST_EXPECT(saved.text.size() > 26 && uint8_t(saved.text[25]) == 3);
+	std::printf("imported: the surface map's palette source painted with a class, written again as a palette PNG\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_routing() + test_strokes();
+	const int failures = test_routing() + test_strokes() + test_imported_source();
 	if (failures == 0) std::printf("editor_terrain_map_paint: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

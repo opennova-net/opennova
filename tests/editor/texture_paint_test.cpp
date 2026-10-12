@@ -112,6 +112,20 @@ int test_forms() {
 	const std::vector<uint8_t> png = png::encode_png_rgba(rgba(4, 4).data(), 4, 4);
 	const auto source = open("art/src.png", png);
 	TEST_EXPECT(source && source->paintable() && source->plane(0).format() == RasterFormat::Rgba8);
+	// A palette PNG (a terrain set's surface or foliage map: its indices the classes or codes) and a grey one (a
+	// foliage map's levels): a U8 plane each, written again in their form.
+	const IndexedImage8 classes = indexed(6, 4);
+	std::vector<uint8_t> entries;
+	for (int i = 0; i < 20; ++i) entries.insert(entries.end(), {classes.palette[i][0], classes.palette[i][1], classes.palette[i][2]});
+	std::vector<uint8_t> small = classes.indices;
+	for (uint8_t &index : small) index = uint8_t(index % 20);
+	const std::vector<uint8_t> palette_png = png::encode_png_indexed(small.data(), 6, 4, entries.data(), 20);
+	const std::vector<uint8_t> grey_png = png::encode_png_grey(small.data(), 6, 4);
+	const auto surface = open("art/isle_surface.png", palette_png), levels = open("art/isle_foliage.png", grey_png);
+	TEST_EXPECT(surface && surface->paintable() && surface->plane(0).format() == RasterFormat::U8 &&
+	            surface->plane(0).u8(5, 3) == small[23]);
+	TEST_EXPECT(levels && levels->paintable() && levels->plane(0).format() == RasterFormat::U8 && levels->plane(0).u8(1, 0) == small[1]);
+	TEST_EXPECT(written_again("art/isle_surface.png", palette_png) && written_again("art/isle_foliage.png", grey_png));
 	std::vector<uint8_t> dds_bytes;
 	TEST_EXPECT(dds::dds_write_a8r8g8b8(rgba(4, 4).data(), 4, 4, dds_bytes, why));
 	const auto dds = open("a.dds", dds_bytes);
@@ -121,7 +135,7 @@ int test_forms() {
 	TEST_EXPECT(dds && !dds->paintable() && dds->plane_count() == 0 && bytes_of(*dds) == dds_bytes);
 	TEST_EXPECT(packed && !packed->paintable() && bytes_of(*packed) == rle);
 	TEST_EXPECT(!texture_unpaintable_words("a.dds", dds->state()).empty());
-	std::printf("forms: PCX (both coders), TGA (24 and 32, the footer), PNG painted; DDS and RLE TGA whole\n");
+	std::printf("forms: PCX (both coders), TGA (24 and 32, the footer), PNG (colour, palette, grey) painted; DDS and RLE TGA whole\n");
 	return 0;
 }
 

@@ -1,5 +1,6 @@
 #include <editor/documents/texture_raster.h>
 
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
@@ -67,17 +68,48 @@ bool read_tga(const std::vector<uint8_t> &bytes, RasterState &out) {
 	return true;
 }
 
-// A true-colour PNG of 8-bit samples (an import's source image; IHDR's bit depth at byte 24, its colour type, 2 or
-// 6, at byte 25): its texels as RGBA. A grey (a heightmap's 16-bit samples) or palette PNG is no plane of colours.
+// The entries a PNG's PLTE chunk holds (its length over 3), 0 for none: the chunks walked from the signature.
+uint32_t png_palette_entries(const std::vector<uint8_t> &bytes) {
+	for (size_t at = 8; at + 12 <= bytes.size();) {
+		const uint32_t length = uint32_t(bytes[at]) << 24 | uint32_t(bytes[at + 1]) << 16 | uint32_t(bytes[at + 2]) << 8 | bytes[at + 3];
+		if (std::memcmp(bytes.data() + at + 4, "PLTE", 4) == 0) return std::min<uint32_t>(length / 3, 256);
+		if (length > bytes.size()) return 0;
+		at += size_t(length) + 12;
+	}
+	return 0;
+}
+
+// A PNG of 8-bit samples (an import's source image; IHDR's bit depth at byte 24, its colour type at 25): a true-colour
+// one (2, 6) its texels as RGBA; a palette one (3) its indices and its palette; a grey one (0) its levels. A PNG of
+// another depth (a heightmap's 16-bit grey, lane A's) is no plane a texture's brush paints.
 bool read_png(const std::vector<uint8_t> &bytes, RasterState &out) {
-	if (bytes.size() < 26 || !png::is_png(bytes) || bytes[24] != 8 || (bytes[25] != 2 && bytes[25] != 6)) return false;
-	RgbaImage image;
-	IndexedImage8 indexed;
-	std::string error;
-	if (!png::decode_png(bytes, image, error, &indexed) || image.empty() || !indexed.indices.empty()) return false;
+	if (bytes.size() < 26 || !png::is_png(bytes) || bytes[24] != 8) return false;
+	const uint8_t colour = bytes[25];
 	auto side = std::make_shared<TextureSide>();
 	side->form = TextureSide::Form::Png;
-	out.planes.push_back(RasterPlane::from_bytes(RasterFormat::Rgba8, image.width, image.height, image.pixels.data()));
+	side->png_colour = colour;
+	std::string error;
+	if (colour == 2 || colour == 6) {
+		RgbaImage image;
+		IndexedImage8 indexed;
+		if (!png::decode_png(bytes, image, error, &indexed) || image.empty() || !indexed.indices.empty()) return false;
+		side->png_colour = 6;
+		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::Rgba8, image.width, image.height, image.pixels.data()));
+	} else if (colour == 3) {
+		RgbaImage image;
+		IndexedImage8 indexed;
+		side->png_entries = png_palette_entries(bytes);
+		if (!png::decode_png(bytes, image, error, &indexed) || indexed.empty() || side->png_entries == 0) return false;
+		std::memcpy(side->palette.data(), indexed.palette, side->palette.size());
+		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::U8, indexed.width, indexed.height, indexed.indices.data()));
+	} else if (colour == 0) {
+		png::GrayImage grey;
+		if (!png::decode_png_gray(bytes, grey, error) || grey.width <= 0 || grey.height <= 0 || grey.max_value != 255) return false;
+		std::vector<uint8_t> levels(grey.samples.begin(), grey.samples.end());
+		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::U8, grey.width, grey.height, levels.data()));
+	} else {
+		return false;
+	}
 	out.side = std::move(side);
 	return true;
 }
@@ -113,7 +145,10 @@ public:
 		const TextureSide *side = texture_side(state);
 		if (side && side->form == TextureSide::Form::Pcx8 && side->pcx.coding == PcxCoding::Other)
 			return "Writes its rows in the coding the shipped maps have (the file's own coding is no tool's)";
-		if (side && side->form == TextureSide::Form::Png) return "Writes it as an 8-bit RGBA PNG";
+		if (side && side->form == TextureSide::Form::Png)
+			return side->png_colour == 3 ? "Writes it as an 8-bit palette PNG"
+			       : side->png_colour == 0 ? "Writes it as an 8-bit grey PNG"
+			                               : "Writes it as an 8-bit RGBA PNG";
 		return std::string();
 	}
 
@@ -137,7 +172,7 @@ std::string texture_unpaintable_words(const std::string &path, const RasterState
 	switch (texture_reader_for(path)) {
 	case TextureReader::Pcx: return "a PCX other than 8-bit indices in one plane with rows of its width";
 	case TextureReader::Tga: return "a TGA other than uncompressed true colour (24 or 32 bits, no colour map)";
-	case TextureReader::Png: return "a palette or grey PNG";
+	case TextureReader::Png: return "a PNG of other than 8-bit samples";
 	case TextureReader::Dds: return "a DDS";
 	case TextureReader::None: break;
 	}
@@ -187,7 +222,10 @@ bool write_texture_state(const RasterState &state, std::vector<uint8_t> &out, st
 		return tga::tga_write(rgba.data(), uint32_t(width), uint32_t(height), side->tga, out, error);
 	}
 	case TextureSide::Form::Png:
-		out = png::encode_png_rgba(texels.data(), uint32_t(width), uint32_t(height));
+		out = side->png_colour == 3 ? png::encode_png_indexed(texels.data(), uint32_t(width), uint32_t(height),
+		                                                      side->palette.data(), side->png_entries)
+		      : side->png_colour == 0 ? png::encode_png_grey(texels.data(), uint32_t(width), uint32_t(height))
+		                              : png::encode_png_rgba(texels.data(), uint32_t(width), uint32_t(height));
 		if (out.empty()) error = "The PNG writer made nothing of it.";
 		return !out.empty();
 	case TextureSide::Form::Whole: break;
