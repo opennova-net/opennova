@@ -40,11 +40,13 @@ std::optional<std::string> create_web_session(db::Database &db, int64_t user_id,
 	db::Transaction tx(db);
 	// One statement: the generation and status it tests are the ones the
 	// session is written against (update_user moves the generation and deletes
-	// the sessions in one transaction, before or after this one).
+	// the sessions in one transaction, before or after this one). A hosted
+	// server's service account gets none (players.kind, migration 0011).
 	db.exec("INSERT INTO web_sessions "
 			"(token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent) "
 			"SELECT ?, id, datetime('now'), datetime('now', ?), datetime('now'), ?, ? "
-			"FROM players WHERE id = ? AND credentials_gen = ? AND account_status = 'active';",
+			"FROM players WHERE id = ? AND credentials_gen = ? AND account_status = 'active' "
+			"AND kind = 'player';",
 			{ db::BindValue(web_session_token_hash(token)),
 					db::BindValue(seconds_modifier(kWebSessionLifetimeSeconds)), db::BindValue(ip),
 					db::BindValue(user_agent), db::BindValue(user_id),
@@ -68,7 +70,7 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 	const std::string hash = web_session_token_hash(token);
 	const auto rows = db.query(
 		"SELECT p.id, p.username, p.role, p.account_status, "
-		"       s.last_seen_at <= datetime('now', ?) "
+		"       s.last_seen_at <= datetime('now', ?), p.kind "
 		"FROM web_sessions s JOIN players p ON p.id = s.user_id "
 		"WHERE s.token_hash = ? AND s.expires_at > datetime('now') LIMIT 1;",
 		{db::BindValue(seconds_modifier(-kWebSessionTouchSeconds)), db::BindValue(hash)});
@@ -76,9 +78,10 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 	const auto &row = rows.front();
 	// A banned or restricted account keeps no session: the game login refuses
 	// every status but 'active', and so does the site. (The schema refuses an
-	// empty status, so 'active' alone is active.)
+	// empty status, so 'active' alone is active.) Nor does a hosted server's
+	// service account, which never gets one (create_web_session).
 	const std::string status = row.as_text(3).value_or("");
-	if (status != "active") {
+	if (status != "active" || row.as_text(5).value_or("") != "player") {
 		db.exec("DELETE FROM web_sessions WHERE token_hash = ?;", {db::BindValue(hash)});
 		return std::nullopt;
 	}

@@ -10,9 +10,13 @@
 #include "server_config.h"
 #ifdef OPENNOVA_HTTP_ENABLED
 #include "auth.h"
+#include "hosted/local_process_provider.h"
+#include "hosted/supervisor.h"
 #include "http_listener.h"
 #include "session_store.h"
 #include "web_session.h"
+
+#include <net/napi/session.h>
 #endif
 
 #include <net/novaworld/connection/manager.h>
@@ -27,6 +31,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <utility>
 #include <optional>
 #include <sstream>
 #include <thread>
@@ -98,6 +103,33 @@ void apply_seed(opennova::db::Database &db,
 		}
 	}
 }
+
+#ifdef OPENNOVA_HTTP_ENABLED
+// The hosted servers' MachineProvider ONNET_HOSTED_PROVIDER names, or null when
+// hosting is off ("none", an unknown name, or "local" missing what it needs;
+// each but "none" logged as a warning).
+std::unique_ptr<opennova::novaworld_server::hosted::MachineProvider> make_hosted_provider(
+		const opennova::novaworld_server::ServerConfig &config) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	if (config.hosted_provider == "none") return nullptr;
+	if (config.hosted_provider != "local") {
+		std::fprintf(stderr, "[boot] WARN hosted servers: unknown ONNET_HOSTED_PROVIDER '%s'; hosting off\n",
+		             opennova::novaworld_server::loggable(config.hosted_provider).c_str());
+		return nullptr;
+	}
+	if (config.hosted_serve_bin.empty() || config.hosted_resource_dir.empty()) {
+		std::fprintf(stderr, "[boot] WARN hosted servers: the local provider needs "
+		                     "ONNET_HOSTED_SERVE_BIN and ONNET_HOSTED_RESOURCE_DIR; hosting off\n");
+		return nullptr;
+	}
+	hosted::LocalProcessConfig local;
+	local.serve_binary = config.hosted_serve_bin;
+	local.resource_dir = config.hosted_resource_dir;
+	local.loose_root = config.hosted_loose_root;
+	local.work_dir = config.hosted_work_dir;
+	return std::make_unique<hosted::LocalProcessProvider>(std::move(local));
+}
+#endif
 
 } // namespace
 
@@ -269,6 +301,12 @@ int main() {
 	// first contact, answers only once what it names serves.
 	ServerConfig listening = config;
 #ifdef OPENNOVA_HTTP_ENABLED
+	// The hosted servers' provider, decided before the routes start (they answer
+	// that hosting is off without one); its supervisor starts once the gate has
+	// its port. Declared before the supervisor, which uses it.
+	std::unique_ptr<hosted::MachineProvider> hosted_provider = make_hosted_provider(config);
+	std::unique_ptr<hosted::Supervisor> supervisor;
+	listening.hosted_provider = hosted_provider ? hosted_provider->name() : "none";
 	SessionStore sessions;
 	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
@@ -297,6 +335,25 @@ int main() {
 		nwudp.stop();
 		return 1;
 	}
+
+#ifdef OPENNOVA_HTTP_ENABLED
+	if (hosted_provider) {
+		hosted::SupervisorConfig hosted_config;
+		hosted_config.cap = config.hosted_cap;
+		// The local provider's servers run on this machine, so they reach the
+		// gate on loopback.
+		hosted_config.master_host = "127.0.0.1";
+		hosted_config.master_gate_port = gate.bound_port();
+		supervisor = std::make_unique<hosted::Supervisor>(*db_pool, *hosted_provider, hosted_config);
+		// A stop's ServerStopHosting, scoped to the service account that holds
+		// the listing (the sysop punt's code, as the admin stop route's).
+		supervisor->set_stop_listing([&nwudp](uint32_t rid, int64_t account) {
+			return nwudp.push_stop_hosting(rid, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0, 0, account) ==
+			       HostPushResult::Queued;
+		});
+		supervisor->start();
+	}
+#endif
 
 	install_signal_handlers();
 	std::printf("[boot] ready. Ctrl+C to stop.\n");
@@ -363,6 +420,17 @@ int main() {
 	// as it exits), then the connections. As main() returns, its locals are
 	// destroyed in reverse declaration order, so main_lease and then the pool
 	// (declared first) go last; the last close checkpoints the WAL.
+#ifdef OPENNOVA_HTTP_ENABLED
+	// The supervisor's thread first, then the provider, which ends the local
+	// provider's servers while the listeners still serve their deregistration.
+	// Their rows keep their states: the next boot's reconciliation launches them
+	// again.
+	if (supervisor) {
+		std::printf("[shutdown] stopping the hosted servers' supervisor\n");
+		supervisor.reset();
+	}
+	hosted_provider.reset();
+#endif
 	std::printf("[shutdown] stopping listeners\n");
 #ifdef OPENNOVA_HTTP_ENABLED
 	http.stop();

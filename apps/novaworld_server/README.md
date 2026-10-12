@@ -51,6 +51,10 @@ session handshake, the browser/host/play container services, and the legacy
   checks and insert) is one `db::Transaction`, and a read that spans them
   (`/api/hosts` and the `.gsb` feeds: the rows, then each roster) is one
   `db::ReadSnapshot`, so a host never goes out beside another write's roster.
+- **The hosted servers' supervisor runs on a thread of its own** (with
+  `ONNET_HOSTED_PROVIDER` set; "Hosted servers" below), started once the gate has its
+  port and stopped before the listeners, so the local provider's servers deregister
+  while the service still serves. Each pass leases a pooled connection.
 - **The `UnknownTracker` records from listener threads** into an in-memory,
   mutex-guarded accumulator and is flushed to the DB only on the main tick — never
   per packet.
@@ -302,6 +306,101 @@ The public `/api/lobbies`, `/api/hosts` and the GSB name no owner. The owner pus
 its own servers through `POST /api/me/hosts/<rid>/command` and `/stop` ("Pushing
 statements to a listed server" above).
 
+## Hosted servers
+
+An account an admin approved (`players.can_host`) can have the service run one
+`opennova-serve` for it, on a machine of its own, until it stops it (ADR 0053, proposed;
+`hosted/`, migration `0011_hosted_servers.sql`). Everything here is service policy.
+
+- **The rows.** `hosted_servers` holds one row per start: its owner, its service account,
+  its state, the owner's settings (range-checked columns, never a file), the machine
+  (`provider`, `machine_id`, `machine_address`), the remote-admin login rendered for the
+  service, the restarts used and why it failed. `hosted_server_events` keeps every
+  transition with what caused it. An owner has at most one live server (any state but
+  `stopped` and `failed`, a partial unique index), and at most `ONNET_HOSTED_CAP` servers
+  are live at once; a request checks the account's approval, its live server and the
+  cap in the transaction that writes it (`hosted::request_server`).
+- **The supervisor** (`hosted/supervisor.*`) is a thread of its own, started once the gate
+  has its port; each pass (every second) leases a pooled connection and walks every live
+  row: `requested` → `provisioning` (the service account, a new admin password, the
+  provider's plan, the files rendered, the machine launched) → `booting` (until the
+  machine runs `opennova-serve`) → `listing` (until a listed RID holds one of the
+  service account's HostKeys) → `running` → `stopping` → `stopped`, or `failed`. Every
+  move past a request or a stop is the supervisor's, a compare-and-set on the row's
+  state, so a stop that lands while a pass launches wins and the machine is ended on the
+  next pass.
+- **A stop** is the supervisor's own act: the row goes to `stopping` (asked by the owner
+  or an admin, or by the supervisor when the owner's account is deleted or no longer
+  active), the supervisor pushes `ServerStopHosting` to the listing (the sysop punt's
+  MsgCode 7, scoped to the service account), and ends the machine itself once the
+  listing has left the browser, or 60 s after the push. `opennova-serve` exiting while
+  the row is `stopping`, whatever its code, finishes the stop and is never restarted.
+  A stop is never read from an exit code: `opennova-serve` exits 0 for its rotation's
+  end or the admin's `GOTO MENUSTATE`, 3 when the service ends its hosting and 1 for a
+  SIGTERM while it waits to be listed.
+- **A crash** is any exit while the server should run (any code), its machine gone, a
+  launch that fails, a machine not running `opennova-serve` within 5 min, or no listing
+  within 3 min. The machine is ended and the row goes back to `provisioning`, 15 s
+  later, while it has restarts left (3); then `failed`.
+- **Health.** While `running`, every pass checks the process and every 20 s the
+  listing; three missing listings in a row end the machine and fail the server. Always
+  on: nothing reaps an idle server or ends one for its age.
+- **Reconciliation** at the supervisor's start: a machine the provider runs that no live
+  row names is ended; a live row whose machine runs resumes where it was (a running one
+  gets the listing timeout for its lister to re-host before the health checks count,
+  since the boot cleared the previous run's listings); a live row whose machine is gone
+  is launched again without counting a restart (a `stopping` one is stopped).
+- **Service accounts.** Each hosted server lists itself with an account of its own,
+  `srv-<id>` (`players.kind = 'service'`), minted at its first start with a 32-character
+  password from the OS CSPRNG (bcrypt, as every account), whose password is set again at
+  every start (the credentials generation moves, its retail login and its keys go), and
+  deleted once the server has stopped or failed. Its lister logs in through the
+  unchanged `/NWLogin.dll` and `/NWHost.dll`, so the listing's HostKey is the service
+  account's. The website's login answers a service account the wrong password's 401, no
+  website session is ever minted or resolved for one, the admin users list hides them,
+  `PUT` / `DELETE /api/admin/users/<id>` answer 404 for one, and no person may register,
+  or rename to, a username or handle starting with `srv-` (400 `invalid_field`).
+- **The working directory** is rendered from scratch at every start
+  (`hosted/hosted_settings.*`), in retail's formats: the host file (`server.host`:
+  `GameName`, `MaxPlayers`, `MPHostGamePassword`, `Time_Limit`, `KillLimit`, `MaxScore`,
+  `Respawn`, `Delay`, `TeamFF`, `Replay 1` so the rotation never ends the session, and
+  one `Mission` line per map, the owner's first map last since the last line is the
+  starting map; cp1252, CR LF), `game.cfg` (the defaults through the format's own writer,
+  the NovaWorld network type, `mpnovaworldportmin` = `max` = the provider's port and
+  `remote_admin_port`), `admin.cfg` (user `svc`, a 31-character random password, rights
+  `7F`, `ip_restrict` the service's address as the machine sees it) and the
+  `--credentials` file (`NOVAWORLD_USER` / `NOVAWORLD_PASS`). The last two are secret:
+  written owner-only and never logged. `opennova-serve` runs with `/HOST server.host
+  --credentials credentials.txt --master-host <host> --master-gate-port <port>` and
+  `/exp jox01` for Escalation. The settings' ranges: a name of 1..31 cp1252 bytes with
+  no control character or double quote, a password of up to 16 printable ASCII
+  characters with no space or quote, 2..64 players, a time limit of 1..300, kill and
+  score limits of 1..500, respawn and delay of 0..300, base Joint Operations or
+  `jox01`, and 1..32 `.bms` names of letters, digits, `_` and `-`.
+- **Providers** (`hosted/machine_provider.h`): the supervisor hands a provider a
+  provider-neutral `LaunchSpec` (the files and the arguments) and asks it to launch,
+  describe, terminate and list its tagged machines. `ONNET_HOSTED_PROVIDER=local`
+  (`hosted/local_process_provider.*`) runs each server as a child process of the service
+  on its own machine, for development and the tests: under
+  `ONNET_HOSTED_WORK_DIR/server-<id>` (deleted and written again at every start, `0700`
+  with its secret files `0600` on POSIX, a DACL granting the service's account alone on
+  Windows), `opennova-serve` (`ONNET_HOSTED_SERVE_BIN`) with `--resource-dir
+  ONNET_HOSTED_RESOURCE_DIR` (and `--loose-root` with `ONNET_HOSTED_LOOSE_ROOT=1`),
+  started from an argv array with no shell (`apps/common/process.h`), its output in
+  `console.log` there, listing on this service over loopback with free loopback ports.
+  The children end with the service (a kill-on-close job on Windows, the parent-death
+  signal on Linux) and at its orderly shutdown, so the next boot launches them again.
+  The cloud provider comes with the infrastructure.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ONNET_HOSTED_PROVIDER` | `none` | `local` runs hosted servers as child processes (above); `none` runs none. Any other value, or `local` without `ONNET_HOSTED_SERVE_BIN` and `ONNET_HOSTED_RESOURCE_DIR`, is `none` with a boot warning. |
+| `ONNET_HOSTED_CAP` | 5 | The most hosted servers live at once, across every account. |
+| `ONNET_HOSTED_SERVE_BIN` | none | The local provider's `opennova-serve` binary. |
+| `ONNET_HOSTED_RESOURCE_DIR` | none | The game data the local provider's servers serve (their `--resource-dir`). Never licensed data in a repository: a Joint Operations install, or a synthetic loose directory. |
+| `ONNET_HOSTED_LOOSE_ROOT` | off | `1` adds `--loose-root` (a directory with no game archives, mounted as loose files). |
+| `ONNET_HOSTED_WORK_DIR` | `backend/data/hosted` | The root of the local provider's working directories. |
+
 ## Configuration
 
 All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
@@ -480,7 +579,7 @@ Every source but `main.cpp` builds as the static library
 `opennova_novaworld_server_core` (mirroring `opennova_serve_core`); the exe is
 `main.cpp` over it. The HTTP sources (`http_listener`, `host_routes`, `web_access`,
 `web_session`, `rate_limiter`, `template_engine`, `session_store`, `auth`,
-`catalog_repository`) join the core only under
+`catalog_repository`, and the hosted servers' `hosted/`) join the core only under
 `BUILD_NOVAWORLD_HTTP`, which also defines `OPENNOVA_HTTP_ENABLED` PUBLIC so
 `main.cpp` starts the listener; the header-only `loggable.h` serves every listener
 either way. The route harness, ctest
@@ -538,4 +637,14 @@ surrogate pair named, "€ ™" arriving as 0x80 and 0x99, and the byte caps at 
 `BUILD_NOVAWORLD_HTTP` only) lists an in-process `opennova-serve` with an account and
 administers it from the website's routes: its match takes the owner's
 `SetServerName` (and saves `game.cfg`) and runs its `TextChatServer`, another
-account's push is a 404, and the owner's stop ends the listing.
+account's push is a 404, and the owner's stop ends the listing. The hosted servers:
+`hosted_supervisor`
+([`tests/novaworld/hosted_supervisor_test.cpp`](../../tests/novaworld/hosted_supervisor_test.cpp),
+every build; it compiles `auth`, `web_session` and `hosted/` straight in) drives the
+settings' rules and renders, the service accounts, the request's checks and every
+transition on a fake provider and a hand-stepped clock (the stops, any exit while
+stopping, the crash restarts and their limit, the timeouts, the health checks, the
+owners' changes, the reconciliation), then `LocalProcessProvider` against the test
+binary itself as its server; and `app_process`
+([`tests/novaworld/app_process_test.cpp`](../../tests/novaworld/app_process_test.cpp),
+every build) the child-process helper against itself.

@@ -18,6 +18,12 @@ if(BUILD_NOVAWORLD_HTTP)
         rate_limiter.cpp
         web_access.cpp
         web_session.cpp
+        # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
+        # renders, and the local MachineProvider.
+        hosted/hosted_repository.cpp
+        hosted/hosted_settings.cpp
+        hosted/local_process_provider.cpp
+        hosted/supervisor.cpp
     )
 endif()
 
@@ -54,7 +60,8 @@ endif()
 target_compile_features(opennova_novaworld_server_core PUBLIC cxx_std_17)
 
 if(WIN32)
-    target_link_libraries(opennova_novaworld_server_core PUBLIC ws2_32)
+    # advapi32: the local provider's owner-only file DACLs (SetSecurityInfo).
+    target_link_libraries(opennova_novaworld_server_core PUBLIC ws2_32 advapi32)
 endif()
 
 add_executable(opennova_novaworld_server main.cpp)

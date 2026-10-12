@@ -42,7 +42,8 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
 		"active_hosts", "active_user_sessions",
-		"games", "host_keys", "host_players", "host_roster", "hosts", "login_addresses",
+		"games", "host_keys", "host_players", "host_roster", "hosted_server_events",
+		"hosted_servers", "hosts", "login_addresses",
 		"player_game_access",
 		"players", "server_status", "unknown_messages", "web_sessions"
 	};
