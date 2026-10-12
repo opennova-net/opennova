@@ -351,7 +351,8 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 	if (!source && !strutil::iequals(name, read_name)) return false;
 	// The texels as the map holds them: its own 8-bit indices, or a source's through the import's translation (an
 	// index or grey level as it stands; a surface source's legend colour its class).
-	const bool colours = source && surface && (plane.format() == RasterFormat::Rgb8 || plane.format() == RasterFormat::Rgba8);
+	// A true-colour source: a surface source's legend colours, a foliage source's grey levels (its red).
+	const bool colours = source && (plane.format() == RasterFormat::Rgb8 || plane.format() == RasterFormat::Rgba8);
 	if (plane.format() != RasterFormat::U8 && !colours) return false;
 	for (const RasterRegion &region : patch.regions) {
 		if (region.width <= 0 || region.height <= 0) continue;
@@ -360,7 +361,7 @@ bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &documen
 			for (int y = 0; y < region.height; ++y)
 				for (int x = 0; x < region.width; ++x) {
 					const uint8_t *c = plane.texel(region.x + x, region.y + y);
-					const int cls = charmap_legend_class(c[0], c[1], c[2]);
+					const int cls = surface ? charmap_legend_class(c[0], c[1], c[2]) : int(c[0]);
 					texels[size_t(y) * size_t(region.width) + size_t(x)] = uint8_t(cls < 0 ? 0 : cls);
 				}
 		} else {

@@ -449,8 +449,34 @@ int test_imported_source() {
 	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(session.outcome().done() && session.outcome().stroke.changed.size() == 1 &&
 	            contains(session.outcome().stroke.changed.front().path, "isle_foliagemap.png"));
+	// A true-colour source whose texels are grey (its import reads their levels): a code painted as its grey.
+	{
+		const std::string grey_path = v.project.root + "/" + v.project.scan->find("isle_foliagemap.png")->relative_path;
+		session.handle(request::undo(m)); // the stroke above taken back, so the source closes with no edit
+		session.handle(request::close_document(v.project.scan->find("isle_foliagemap.png")->relative_path));
+		std::vector<uint8_t> greys(size_t(256) * 256 * 4, 0);
+		for (size_t i = 3; i < greys.size(); i += 4) greys[i] = 255;
+		TEST_EXPECT(editor_test::write_bytes(grey_path, png::encode_png_rgba(greys.data(), 256, 256)));
+		editor_test::handle_to_end(session, request::rescan());
+		session.run_operations();
+		ask.brush.foliage = 6;
+		session.handle(request::terrain_stroke(m, ask));
+		for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+		TEST_EXPECT(session.outcome().done() && session.outcome().stroke.changed.size() == 1);
+		const auto *grey = session.outcome().stroke.changed.empty()
+		                           ? nullptr
+		                           : dynamic_cast<const TextureDocument *>(
+		                                     session.document_base_for(session.outcome().stroke.changed.front().path));
+		size_t sixes = 0;
+		for (int y = 0; grey && y < 256; ++y)
+			for (int x = 0; x < 256; ++x) {
+				const uint8_t *texel = grey->plane(0).texel(x, y);
+				sixes += texel[0] == 6 && texel[1] == 6 && texel[2] == 6 && texel[3] == 255 ? 1 : 0;
+			}
+		TEST_EXPECT(grey && grey->plane(0).format() == RasterFormat::Rgba8 && sixes == 1);
+	}
 	std::printf("imported: the surface map's palette source painted with a class, written again as a palette PNG; the "
-	            "blendmap's source painted with a layer; a foliage map added to the set\n");
+	            "blendmap's source painted with a layer; a foliage map added to the set, a grey true-colour one painted\n");
 	return 0;
 }
 

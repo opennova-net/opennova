@@ -33,8 +33,10 @@ bool form_fits(TerrainPlane plane, const RasterPlane &texels, int layer, bool so
 		return false;
 	case TerrainPlane::Foliage:
 		if (texels.format() == RasterFormat::U8) return true;
-		why = source ? "its import reads a foliage map's picture by its indices or its grey levels, never colours"
-		             : "the game reads the foliage map as an 8-bit PCX of indices";
+		// A true-colour source whose texels are grey: its import reads their levels as the codes
+		// (decode_foliage_map_source), so a code is painted as its grey.
+		if (source && (texels.format() == RasterFormat::Rgb8 || texels.format() == RasterFormat::Rgba8)) return true;
+		why = "the game reads the foliage map as an 8-bit PCX of indices";
 		return false;
 	case TerrainPlane::Colour:
 		if (texels.format() == RasterFormat::Rgb8 || texels.format() == RasterFormat::Rgba8) return true;
@@ -82,7 +84,12 @@ void lay(TerrainPlane plane, const TerrainBrush &brush, float weight, uint8_t *t
 		}
 		return;
 	}
-	case TerrainPlane::Foliage: texel[0] = uint8_t(brush.erase ? 0 : std::clamp(brush.foliage, 0, 255)); return;
+	case TerrainPlane::Foliage: {
+		// A code, or a grey source's level (its red, green and blue alike, its alpha kept).
+		const uint8_t code = uint8_t(brush.erase ? 0 : std::clamp(brush.foliage, 0, 255));
+		for (int c = 0; c < std::min(bytes, 3); ++c) texel[c] = code;
+		return;
+	}
 	case TerrainPlane::Colour:
 	case TerrainPlane::Blend: {
 		// Toward the target by the dab's weight and the brush's strength: the colour (its alpha kept), or the layer's

@@ -99,7 +99,9 @@ bool TerrainMapsFollow::take(const SessionView &view, const DocumentBase &docume
 			// the codes, the side kept: decode_foliage_map_source).
 			const bool own = file.import_output.empty() && strutil::iequals(name, basename_of(file.name));
 			const bool source = !file.import_output.empty() && file.path == patch.path;
-			if (!raster || raster->plane_count() != 1 || raster->plane(0).format() != RasterFormat::U8 || !resolved ||
+			const RasterFormat format = raster && raster->plane_count() == 1 ? raster->plane(0).format() : RasterFormat::U8;
+			const bool grey = source && (format == RasterFormat::Rgb8 || format == RasterFormat::Rgba8);
+			if (!raster || raster->plane_count() != 1 || (format != RasterFormat::U8 && !grey) || !resolved ||
 			    !(own || source) || !map_rect(patch, raster->plane(0), made.x, made.y, made.w, made.h)) {
 				stale_ = true;
 				names.push_back(name);
@@ -109,7 +111,14 @@ bool TerrainMapsFollow::take(const SessionView &view, const DocumentBase &docume
 			made.width = plane.width();
 			made.height = plane.height();
 			made.indices.resize(size_t(made.w) * size_t(made.h));
-			plane.copy_rect(made.x, made.y, made.w, made.h, made.indices.data());
+			if (grey) {
+				// A grey source's levels (its red) are the codes.
+				for (int y = 0; y < made.h; ++y)
+					for (int x = 0; x < made.w; ++x)
+						made.indices[size_t(y) * size_t(made.w) + size_t(x)] = plane.texel(made.x + x, made.y + y)[0];
+			} else {
+				plane.copy_rect(made.x, made.y, made.w, made.h, made.indices.data());
+			}
 			const TerrainMapTarget target = terrain_map_target(*family.trn, TerrainPlane::Foliage, made.width, made.height);
 			const terrain::TerrainAtlasRouting routing{target.grid.data(), target.origin_x, target.origin_y, target.wrap_x,
 			                                           target.wrap_z};
