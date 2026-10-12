@@ -480,7 +480,24 @@ void TerrainData::set_colormap(const Ref<Texture2D> &p_tex) {
 	_notify_terrain_changed();
 }
 
-Ref<Texture2D> TerrainData::get_colormap() const { return colormap; }
+Ref<Texture2D> TerrainData::get_colormap() const {
+	return colormap_live_texture.is_valid() ? Ref<Texture2D>(colormap_live_texture) : colormap;
+}
+
+void TerrainData::refresh_colormap_texture() {
+	if (colormap_image.is_null() || colormap_image->is_empty()) return;
+	Ref<Image> image = colormap_image->duplicate();
+	if (colormap.is_valid()) {
+		const Ref<Image> loaded = colormap->get_image();
+		if (loaded.is_valid() && loaded->has_mipmaps()) image->generate_mipmaps();
+	}
+	if (colormap_live_texture.is_valid() && colormap_live_texture->get_width() == image->get_width() &&
+			colormap_live_texture->get_height() == image->get_height() &&
+			colormap_live_texture->get_format() == image->get_format())
+		colormap_live_texture->update(image);
+	else
+		colormap_live_texture = ImageTexture::create_from_image(image);
+}
 
 IMPL_TEX_PROP(detailmap, set_detailmap, get_detailmap)
 IMPL_TEX_PROP(detailmap_c1, set_detailmap_c1, get_detailmap_c1)
@@ -626,6 +643,7 @@ Error TerrainData::load() {
 	resource_root.unref();
 	// A paint's live maps belong to the map loaded before (set_colormap_image).
 	colormap_image.unref();
+	colormap_live_texture.unref();
 	blendmap_image.unref();
 
 	if (trn_path.is_empty()) {
@@ -675,6 +693,7 @@ Error TerrainData::begin_load_from_resource_root(const Ref<ResourceRoot> &p_reso
 	trn = opennova::TrnConfig();
 	resource_root.unref();
 	colormap_image.unref();
+	colormap_live_texture.unref();
 	blendmap_image.unref();
 	load_units_.clear();
 	load_next_ = 0;

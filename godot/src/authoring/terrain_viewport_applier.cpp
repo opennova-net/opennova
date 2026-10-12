@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/basis.hpp>
@@ -590,6 +591,8 @@ opennova::io::JsonValue TerrainViewportApplier::drawn_json_() const {
 
 void TerrainViewportApplier::tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &clock) {
 	clock_ms_ = int64_t(clock.ms());
+	// A paint's colour map, once its strokes pause, into the texture the foliage's tint reads (S25).
+	if (terrain_built_ && terrain_ != nullptr) terrain_patches_.settle_colour(*terrain_, Time::get_singleton()->get_ticks_msec());
 	// No mirror pass unless this frame presents the picture.
 	water_->set_mirror_enabled(false);
 	// The weather's wave on the preview clock (the foliage's sway): the oscillator alone (env::WeatherOscillator,

@@ -6,6 +6,7 @@
 #include "terrain/terrain_tile_info.h"
 
 #include <godot_cpp/classes/image.hpp>
+#include <godot_cpp/classes/time.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -54,6 +55,14 @@ bool TerrainPatchApplier::apply(const std::vector<opennova::editor::HeightsDevic
 	return false;
 }
 
+void TerrainPatchApplier::settle_colour(Terrain &terrain, uint64_t now_ms) {
+	constexpr uint64_t kSettleMs = 250;
+	if (!colour_due_ || now_ms < colour_at_ms_ + kSettleMs) return;
+	colour_due_ = false;
+	const Ref<TerrainData> data = terrain.get_terrain_data();
+	if (data.is_valid()) data->refresh_colormap_texture();
+}
+
 bool TerrainPatchApplier::apply_maps(const std::vector<opennova::editor::MapsDevicePatch> &patches, Terrain &terrain,
 		FoliageDispatcher *foliage, const std::function<void(const std::string &name, uint64_t stamp)> &took) {
 	using Kind = opennova::editor::MapsDevicePatch::Kind;
@@ -74,6 +83,10 @@ bool TerrainPatchApplier::apply_maps(const std::vector<opennova::editor::MapsDev
 			done = region.is_valid() &&
 					(patch.kind == Kind::Colour ? terrain.update_colormap_region(region, Vector2i(patch.x, patch.y))
 												: terrain.update_blendmap_region(region, Vector2i(patch.x, patch.y)));
+			if (done && patch.kind == Kind::Colour) {
+				colour_due_ = true;
+				colour_at_ms_ = Time::get_singleton()->get_ticks_msec();
+			}
 		} else if (patch.kind == Kind::Foliage) {
 			// The codes into the foliage map the terrain's foliage reads, then the cells over the ground that reads them
 			// grown again (every sector drawing the quadrant: the patch's world rects, the Godot plane's).

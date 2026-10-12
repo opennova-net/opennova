@@ -1377,6 +1377,8 @@ opennova::io::JsonValue MissionViewportApplier::drawn_json_() const {
 void MissionViewportApplier::tick(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &clock) {
 	// The models' part animations on the preview clock.
 	clock_->sample(int64_t(clock.ms()), ++frame_);
+	// A paint's colour map, once its strokes pause, into the texture the foliage's tint reads (S25).
+	if (terrain_built_ && terrain_ != nullptr) terrain_patches_.settle_colour(*terrain_, Time::get_singleton()->get_ticks_msec());
 	clock_ms_ = int64_t(clock.ms());
 	// The frame's start (the Shell ticks before it arbitrates): no mirror pass unless this frame
 	// presents the picture.

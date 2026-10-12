@@ -55,9 +55,17 @@ public:
 	// region outside it, a terrain not built): maps_refused says so once, and the caller's picture is made again.
 	bool apply_maps(const std::vector<opennova::editor::MapsDevicePatch> &patches, Terrain &terrain,
 			FoliageDispatcher *foliage, const std::function<void(const std::string &name, uint64_t stamp)> &took);
+	// The colour map's live texture written again (TerrainData::refresh_colormap_texture: the foliage's tint and the
+	// other readers of get_colormap) once colour patches stop arriving for a moment (`now_ms`, the caller's frame clock),
+	// so a stroke uploads the map once it pauses, not per sample.
+	void settle_colour(Terrain &terrain, uint64_t now_ms);
 	// The terrain built again (or none): the maps' patches up to `serial` stand in it.
-	void maps_built(uint64_t serial) { maps_taken_ = serial; }
+	void maps_built(uint64_t serial) {
+		maps_taken_ = serial;
+		colour_due_ = false;
+	}
 	uint64_t maps_taken() const { return maps_taken_; }
+	bool colour_due() const { return colour_due_; }
 	// Whether a patch could not be taken since this was last asked (the report's maps_refused).
 	bool take_maps_refused() {
 		const bool refused = maps_refused_;
@@ -74,6 +82,8 @@ private:
 	int tiles_ = 0;
 	uint64_t maps_taken_ = 0;
 	bool maps_refused_ = false;
+	bool colour_due_ = false;   // a colour patch taken since the live texture was last written
+	uint64_t colour_at_ms_ = 0; // when the last one was taken
 	int maps_applied_ = 0;
 };
 

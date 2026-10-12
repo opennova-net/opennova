@@ -12,6 +12,7 @@
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
+#include <editor/preview/mission_map.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/terrain_maps_patch.h>
 #include <editor/preview/tile_tools.h>
@@ -172,6 +173,11 @@ int test_view() {
 	// The ground read once before the stamp (a hover's), so the stamp's tiles go into it in place.
 	TEST_EXPECT(mission->followed_ground(v).terrain() && mission->ground_reader().tiles() == 0);
 	const int reads = mission->ground_reader().reads();
+	// The 2D map's ground too: a tile edit retiles it, never a read of the whole terrain.
+	session.viewports().attach(m, ViewportKind::Map);
+	const auto *map = static_cast<const MissionMapViewport *>(session.viewports().follow_one(v, m, ViewportKind::Map));
+	TEST_EXPECT(map && map->followed_terrain(v).terrain());
+	const int map_reads = map ? map->followed_terrain(v).reads() : 0;
 	mark = device->taken.size();
 	session.handle(request::tile_edit(m, til, plan_tile_stamp(5, 0, -200.0, 200.0, false)));
 	TEST_EXPECT(session.outcome().done());
@@ -180,8 +186,9 @@ int test_view() {
 	const MapsDevicePatch *placed = last_of(*mission, MapsDevicePatch::Kind::Tiles);
 	TEST_EXPECT(placed && placed->tiles.entries.size() == 1 && accounts_for(*placed, "m.til"));
 	if (placed && placed->tiles.entries.size() == 1) TEST_EXPECT(placed->tiles.entries[0].tile_index == 5);
-	// The ground holds the stamped tile at once (in place, not the terrain read again).
+	// The ground holds the stamped tile at once (in place, not the terrain read again), the 2D map's alike.
 	TEST_EXPECT(mission->followed_ground(v).tiles() == 1 && mission->ground_reader().reads() == reads);
+	TEST_EXPECT(map && map->followed_terrain(v).tiles() == 1 && map->followed_terrain(v).reads() == map_reads);
 	// The stamp undone: an Update whose placement holds none.
 	mark = device->taken.size();
 	session.handle(request::undo(m));

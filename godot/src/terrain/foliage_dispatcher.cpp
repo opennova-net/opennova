@@ -42,6 +42,9 @@
 #include <godot_cpp/variant/vector4.hpp>
 
 #include <algorithm>
+#include <iterator>
+#include <set>
+#include <tuple>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -465,8 +468,10 @@ void FoliageDispatcher::set_tile_info(
     tile_info_->disconnect("changed", changed);
   }
   tile_info_ = p_info;
+  tile_entries_.clear();
   if (tile_info_.is_valid()) {
     tile_info_->connect("changed", changed);
+    tile_entries_ = tile_info_->to_native().entries;
   }
   reset();
 }
@@ -476,7 +481,33 @@ Ref<TerrainTileInfo> FoliageDispatcher::get_tile_info() const {
 }
 
 void FoliageDispatcher::_on_tile_info_changed() {
-  reset();
+  // A placed tile keeps foliage off its square and the blocker's reach round it [orig:
+  // Foliage_PathBlockedByPlacedTile @ 0x606490; formats/foliage kPlacedTileReach]: an editor's tile edit (ADR 0046
+  // S25, the game never changes them in a match) grows again the cells over the squares of the tiles that came or
+  // went, on the Godot plane (x, z = -y: the square [-z, -z + 16], til_world_z_from_fixed), never every cell. Past
+  // kMaxTileRects squares, every cell.
+  constexpr size_t kMaxTileRects = 256;
+  std::vector<opennova::TilOverlayEntry> now;
+  if (tile_info_.is_valid()) now = tile_info_->to_native().entries;
+  const auto key = [](const opennova::TilOverlayEntry &e) {
+    return std::make_tuple(e.x_fixed, e.z_fixed, e.tile_index, e.flags);
+  };
+  std::multiset<std::tuple<int32_t, int32_t, uint8_t, uint8_t>> was, is;
+  for (const opennova::TilOverlayEntry &e : tile_entries_) was.insert(key(e));
+  for (const opennova::TilOverlayEntry &e : now) is.insert(key(e));
+  std::vector<std::tuple<int32_t, int32_t, uint8_t, uint8_t>> changed;
+  std::set_symmetric_difference(was.begin(), was.end(), is.begin(), is.end(), std::back_inserter(changed));
+  tile_entries_ = std::move(now);
+  if (changed.size() > kMaxTileRects) {
+    reset();
+    return;
+  }
+  const int32_t reach = int32_t(std::ceil(opennova::foliage::kPlacedTileReach)) + 1;
+  for (const auto &entry : changed) {
+    const int32_t x0 = int32_t(std::floor(opennova::til_world_x_from_fixed(std::get<0>(entry))));
+    const int32_t z0 = int32_t(std::floor(opennova::til_world_z_from_fixed(std::get<1>(entry))));
+    compiler_.invalidate_cells(x0 - reach, z0 - reach, x0 + 16 + reach, z0 + 16 + reach);
+  }
 }
 
 void FoliageDispatcher::set_colormap_source(

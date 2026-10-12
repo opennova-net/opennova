@@ -188,6 +188,23 @@ void MissionGround::follow(const std::shared_ptr<const FileSource> &files, uint6
 	const bool moved = generation != generation_ && files && stamps_.moved(*files);
 	generation_ = generation;
 	if (read_once_ && key == key_ && !moved) return;
+	// S25: the placed tiles alone moved (a tile tool's edit, the mission's .til made or read again): read again in
+	// place, the terrain read standing (retile), never the whole terrain per drag sample.
+	if (read_once_ && key == key_ && store_.valid() && tiles_alone_moved_(*files)) {
+		const auto stamped = std::make_shared<StampedFiles>(files);
+		const terrain::TerrainFileReader read = [stamped](const std::string &name, std::vector<uint8_t> &out) {
+			return stamped->read(name, out);
+		};
+		std::vector<uint8_t> bytes;
+		const std::string mission_til = key_.mission.empty() ? std::string() : key_.mission + ".til";
+		const std::string took =
+		        terrain::read_placed_tile_bytes(read, read, mission_til, header.terrain, header.environment, bytes);
+		std::vector<std::string> names;
+		for (const FileStamp &file : stamped->stamps().files())
+			if (strutil::ends_with_icase(file.name, ".til")) names.push_back(file.name);
+		retile(*files, took, bytes, names);
+		return;
+	}
 	read_once_ = true;
 	key_ = std::move(key);
 	read_(files, header);
@@ -372,6 +389,16 @@ void MissionGround::retile(const FileSource &files, const std::string &took, con
 	}
 	restamp(files, names);
 	++revision_;
+}
+
+bool MissionGround::tiles_alone_moved_(const FileSource &files) const {
+	bool any = false;
+	for (const FileStamp &file : stamps_.files()) {
+		if (files.stamp(file.name) == file.stamp) continue;
+		if (!strutil::ends_with_icase(file.name, ".til")) return false;
+		any = true;
+	}
+	return any;
 }
 
 void MissionGround::restamp(const FileSource &files, const std::vector<std::string> &names) {

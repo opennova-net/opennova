@@ -165,6 +165,8 @@ public:
 	MissionGroundFacts record_at(NodeId row, const std::string &title, double x, double y, double z) const;
 
 private:
+	// Whether every file it read that moved since is a tile placement (a .til): the placed tiles alone moved.
+	bool tiles_alone_moved_(const FileSource &files) const;
 	struct Key {
 		std::string terrain, tile_set, environment, mission;
 		uint32_t water_attrib = 0;
