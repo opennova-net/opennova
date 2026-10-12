@@ -67,6 +67,8 @@ std::shared_ptr<const RasterCodec> pick_texture_codec(const std::string &path, c
 // A whole new state (a texture operation's bytes, ADR 0046 S18, read by the texture's reader): a whole change.
 struct TextureWholeEdit final : RasterEditPayload {
 	RasterState state;
+	// The bytes the state was read from (a texture operation's output), which a save of that state writes as they are.
+	std::shared_ptr<const std::vector<uint8_t>> bytes;
 	const char *token() const override { return "texture.whole"; }
 	bool apply(RasterCanvas &canvas, Diagnostic &error) const override;
 };

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <editor/documents/texture_document.h>
+#include <editor/documents/texture_image.h>
 #include <editor/documents/texture_operations.h>
 #include <editor/documents/texture_raster.h>
 #include <formats/dds/dds.h>
@@ -200,8 +201,13 @@ int test_paint_undo_save() {
 	const uint64_t before = document->revision();
 	TEST_EXPECT(document->apply({whole}, error) && document->plane(0).width() == 64 && document->paintable());
 	TEST_EXPECT(!document->changes_since(document->load_generation(), before, changes));
+	// A save of the operation's state writes the operation's bytes as they are, never a re-encode of them.
+	TEST_EXPECT(bytes_of(*document) == resized->bytes);
 	document->undo();
 	TEST_EXPECT(document->plane(0).width() == 128 && bytes_of(*document) == file);
+	document->redo();
+	TEST_EXPECT(bytes_of(*document) == resized->bytes);
+	document->undo();
 	// A brush on a texture held whole is refused.
 	std::vector<uint8_t> dds_bytes;
 	TEST_EXPECT(dds::dds_write_a8r8g8b8(rgba(4, 4).data(), 4, 4, dds_bytes, why));
@@ -270,9 +276,94 @@ int test_retail_maps() {
 
 } // namespace
 
+// Whether two images say the same of a texture (what the picture, the info panel and the wire read).
+bool same_image(const TextureImage &a, const TextureImage &b) {
+	if (a.loads != b.loads || a.decoded != b.decoded || a.levels.size() != b.levels.size() || a.alpha != b.alpha ||
+	    a.indices != b.indices || a.luminance != b.luminance || a.palette != b.palette || a.game_levels != b.game_levels ||
+	    a.upside_down != b.upside_down || a.facts.size() != b.facts.size())
+		return false;
+	for (size_t i = 0; i < a.levels.size(); ++i)
+		if (a.levels[i].width != b.levels[i].width || a.levels[i].height != b.levels[i].height ||
+		    a.levels[i].rgba != b.levels[i].rgba)
+			return false;
+	// Each fact alike, but the file's size (the bytes a save writes are not made to show a paint).
+	for (size_t i = 0; i < a.facts.size(); ++i)
+		if (a.facts[i].key != b.facts[i].key || a.facts[i].label != b.facts[i].label ||
+		    (a.facts[i].key != "file_size" && a.facts[i].words != b.facts[i].words))
+			return false;
+	return true;
+}
+
+// A painted texture's image is made from its plane, never through its codec (S25, the review's m9), and says exactly
+// what decoding the bytes a Save writes says, for every paintable form; undone, the image read.
+int test_painted_image() {
+	std::string why;
+	std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
+	std::vector<uint8_t> pcx;
+	TEST_EXPECT(encode_pcx_indexed(indexed(64, 32), pcx, why));
+	files.emplace_back("a_m.pcx", pcx);
+	std::vector<uint8_t> opaque = rgba(16, 8);
+	for (size_t i = 3; i < opaque.size(); i += 4) opaque[i] = 255;
+	for (const uint8_t descriptor : {uint8_t(0), uint8_t(0x20)}) {
+		tga::TgaForm form;
+		form.bits = 24;
+		form.descriptor = descriptor;
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(tga::tga_write(opaque.data(), 16, 8, form, bytes, why));
+		files.emplace_back(descriptor ? "b_c.tga" : "c_c.tga", bytes);
+	}
+	std::vector<uint8_t> tga32;
+	TEST_EXPECT(tga::tga_write_rgba32(rgba(16, 8).data(), 16, 8, tga32, why));
+	files.emplace_back("d_d1.tga", tga32);
+	files.emplace_back("e_colour.png", png::encode_png_rgba(rgba(16, 8).data(), 16, 8));
+	std::vector<uint8_t> palette, alpha, levels;
+	for (int i = 0; i < 16; ++i) palette.insert(palette.end(), {uint8_t(i * 16), uint8_t(255 - i * 16), uint8_t(i * 7)});
+	for (int i = 0; i < 8; ++i) alpha.push_back(uint8_t(i * 30));
+	std::vector<uint8_t> indices;
+	for (int i = 0; i < 16 * 8; ++i) indices.push_back(uint8_t(i % 16));
+	files.emplace_back("f_surface.png", png::encode_png_indexed(indices.data(), 16, 8, palette.data(), 16, alpha.data(), 8));
+	for (int i = 0; i < 16 * 8; ++i) levels.push_back(uint8_t(i));
+	files.emplace_back("g_foliage.png", png::encode_png_gray(levels.data(), 16, 8));
+	Diagnostic error;
+	for (const auto &[name, bytes] : files) {
+		auto document = open(name, bytes);
+		TEST_EXPECT(document && document->paintable());
+		if (!document || !document->paintable()) {
+			std::fprintf(stderr, "  %s does not open paintable\n", name.c_str());
+			continue;
+		}
+		const int texel = document->plane(0).texel_bytes();
+		std::vector<uint8_t> value(size_t(texel), 0);
+		value[0] = 5;
+		if (texel == 4) value[3] = 77; // a 32-bit texel's alpha moves the alpha's class
+		TEST_EXPECT(document->apply({paint(*document, 3, 2, value)}, error) && document->apply({paint(*document, 9, 5, value)}, error));
+		const std::shared_ptr<const TextureImage> decoded = decode_texture(name, bytes_of(*document));
+		const bool same = document->image() && decoded && same_image(*document->image(), *decoded);
+		if (!same) {
+			std::fprintf(stderr, "  %s: the painted image differs from the decoded bytes\n", name.c_str());
+			const TextureImage &p = *document->image(), &d = *decoded;
+			std::fprintf(stderr, "   loads %d/%d alpha %d/%d idx %zu/%zu lum %zu/%zu pal %zu/%zu gl %u/%u ud %d/%d facts %zu/%zu rgba %d\n",
+			             p.loads, d.loads, int(p.alpha), int(d.alpha), p.indices.size(), d.indices.size(), p.luminance.size(),
+			             d.luminance.size(), p.palette.size(), d.palette.size(), p.game_levels, d.game_levels, p.upside_down,
+			             d.upside_down, p.facts.size(), d.facts.size(), int(p.levels[0].rgba == d.levels[0].rgba));
+			for (size_t i = 0; i < std::min(p.facts.size(), d.facts.size()); ++i)
+				if (p.facts[i].words != d.facts[i].words || p.facts[i].key != d.facts[i].key)
+					std::fprintf(stderr, "   fact %s '%s' / %s '%s'\n", p.facts[i].key.c_str(), p.facts[i].words.c_str(),
+					             d.facts[i].key.c_str(), d.facts[i].words.c_str());
+		}
+		TEST_EXPECT(same);
+		document->undo();
+		document->undo();
+		const std::shared_ptr<const TextureImage> read = decode_texture(name, bytes);
+		TEST_EXPECT(document->image() && read && same_image(*document->image(), *read));
+	}
+	std::printf("painted image: every paintable form's image made from its plane, as its bytes decode\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	const int failures = test_forms() + test_paint_undo_save() + test_retail_maps();
+	const int failures = test_forms() + test_paint_undo_save() + test_painted_image() + test_retail_maps();
 	if (failures == 0) std::printf("editor_texture_paint: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

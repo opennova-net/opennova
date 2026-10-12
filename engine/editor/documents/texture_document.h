@@ -71,6 +71,16 @@ private:
 	mutable std::shared_ptr<const std::vector<uint8_t>> bytes_;
 	mutable uint64_t image_revision_ = 0, image_generation_ = 0;
 	mutable std::shared_ptr<const TextureImage> image_;
+	// The states whole steps made (texture operations) and the bytes each was read from: a save of that state writes
+	// those bytes, never a re-encode of them (the last kWholeKept).
+	std::vector<std::pair<RasterState, std::shared_ptr<const std::vector<uint8_t>>>> whole_bytes_;
+	// The image of the bytes read, decoded once a load; a painted state's image is made from it and the plane.
+	mutable uint64_t read_image_generation_ = UINT64_MAX;
+	mutable std::shared_ptr<const TextureImage> read_image_;
+	// The image of a paintable state built from its plane and side over the image read (no codec round trip: a paint
+	// shows per dab); null where it cannot be (not paintable, the read image not one decoded level of the plane's
+	// sides): image() decodes the bytes then.
+	std::shared_ptr<const TextureImage> painted_image_() const;
 };
 
 // The texture type's findings (ADR 0046 S18), each on a texture file: its own, what the reader its name

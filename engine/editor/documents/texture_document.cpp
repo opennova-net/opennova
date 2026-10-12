@@ -85,6 +85,15 @@ const std::vector<uint8_t> &TextureDocument::bytes() const {
 		bytes_ = read_bytes_;
 		return *bytes_;
 	}
+	// A whole step's state (a texture operation's): the operation's bytes as it wrote them.
+	for (const auto &[whole, written] : whole_bytes_) {
+		bool same = written && now.side == whole.side && now.planes.size() == whole.planes.size();
+		for (size_t i = 0; same && i < now.planes.size(); ++i) same = now.planes[i].shares_tiles_with(whole.planes[i]);
+		if (same) {
+			bytes_ = written;
+			return *bytes_;
+		}
+	}
 	auto written = std::make_shared<std::vector<uint8_t>>();
 	std::string error;
 	if (!write_texture_state(now, *written, error)) written->clear();
@@ -95,11 +104,53 @@ const std::vector<uint8_t> &TextureDocument::bytes() const {
 const std::shared_ptr<const TextureImage> &TextureDocument::image() const {
 	if (!loaded_) return image_;
 	if (!image_ || image_revision_ != revision() || image_generation_ != load_generation()) {
-		image_ = decode_texture(path(), bytes());
+		image_ = painted_image_();
+		if (!image_) image_ = decode_texture(path(), bytes());
 		image_revision_ = revision();
 		image_generation_ = load_generation();
 	}
 	return image_;
+}
+
+std::shared_ptr<const TextureImage> TextureDocument::painted_image_() const {
+	const RasterState &now = state();
+	// A paint keeps the form it read (its side); a whole step (a texture operation) makes another, decoded from its bytes.
+	if (!read_bytes_ || !texture_paintable(now) || now.side != read_state_.side) return nullptr;
+	if (!read_image_ || read_image_generation_ != load_generation()) {
+		read_image_ = decode_texture(path(), *read_bytes_);
+		read_image_generation_ = load_generation();
+	}
+	if (!read_image_ || !read_image_->decoded || read_image_->levels.size() != 1) return nullptr;
+	// The texels and form it read (a stroke undone shares the tiles it read): the image read.
+	bool as_read = now.side == read_state_.side && now.planes.size() == read_state_.planes.size();
+	for (size_t i = 0; as_read && i < now.planes.size(); ++i) as_read = now.planes[i].shares_tiles_with(read_state_.planes[i]);
+	if (as_read) return read_image_;
+	const RasterPlane &plane = now.planes.front();
+	const int w = plane.width(), h = plane.height();
+	if (uint32_t(w) != read_image_->width() || uint32_t(h) != read_image_->height()) return nullptr;
+	const TextureSide &side = *texture_side(now);
+	std::vector<uint8_t> rgba, indices, luminance;
+	if (!texture_rgba_rect(now, 0, 0, w, h, rgba)) return nullptr;
+	if (plane.format() == RasterFormat::U8) {
+		indices.resize(size_t(w) * size_t(h));
+		plane.copy_rect(0, 0, w, h, indices.data());
+		// A palette PNG's transparency, as its reader expands it.
+		if (side.form == TextureSide::Form::Png && side.png_colour == 3)
+			for (size_t i = 0; i < indices.size(); ++i)
+				rgba[i * 4 + 3] = indices[i] < side.png_alpha.size() ? side.png_alpha[indices[i]] : 255;
+		// An 8-bit PCX's archive alpha: each palette entry's luminance, (85 * (r + g + b)) >> 8 in 16 bits
+		// (formats/pcx decode_pcx_luminance_alpha), its rows of its width (a paintable form's).
+		if (side.form == TextureSide::Form::Pcx8) {
+			uint8_t lum[256];
+			for (size_t e = 0; e < 256; ++e) {
+				const uint16_t sum = uint16_t(side.palette[e * 3] + side.palette[e * 3 + 1] + side.palette[e * 3 + 2]);
+				lum[e] = uint8_t(uint16_t(85u * sum) >> 8);
+			}
+			luminance.resize(indices.size());
+			for (size_t i = 0; i < indices.size(); ++i) luminance[i] = lum[indices[i]];
+		}
+	}
+	return retexel_texture(*read_image_, std::move(rgba), std::move(indices), std::move(luminance));
 }
 
 SerializeResult TextureDocument::serialize() const {
@@ -117,6 +168,7 @@ bool TextureDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &er
 	// painted go to the raster as they are.
 	std::vector<Edit> raster;
 	raster.reserve(edits.size());
+	std::vector<std::shared_ptr<TextureWholeEdit>> wholes;
 	for (const Edit &edit : edits) {
 		const auto *image = edit.operation == EditOperation::Apply ? dynamic_cast<const TextureImageEdit *>(edit.payload.get()) : nullptr;
 		if (!image) {
@@ -125,11 +177,20 @@ bool TextureDocument::apply_edits(const std::vector<Edit> &edits, Diagnostic &er
 		}
 		auto whole = std::make_shared<TextureWholeEdit>();
 		whole->state = read_texture_state(path(), image->bytes);
+		whole->bytes = std::make_shared<const std::vector<uint8_t>>(image->bytes);
+		wholes.push_back(whole);
 		Edit made = edit;
 		made.payload = std::move(whole);
 		raster.push_back(std::move(made));
 	}
-	return RasterDocument::apply_edits(raster, error);
+	if (!RasterDocument::apply_edits(raster, error)) return false;
+	// The states the whole steps made, each with the bytes it was read from (bytes(): a save writes them as they are).
+	constexpr size_t kWholeKept = 16;
+	for (const auto &whole : wholes) {
+		whole_bytes_.emplace_back(whole->state, whole->bytes);
+		if (whole_bytes_.size() > kWholeKept) whole_bytes_.erase(whole_bytes_.begin());
+	}
+	return true;
 }
 
 bool TextureDocument::read_source(const std::vector<uint8_t> &decoded, bool adopt, std::vector<SourceIssue> &issues,
@@ -138,6 +199,7 @@ bool TextureDocument::read_source(const std::vector<uint8_t> &decoded, bool adop
 	if (!adopt) return true;
 	read_bytes_ = std::make_shared<const std::vector<uint8_t>>(decoded);
 	read_state_ = state();
+	whole_bytes_.clear();
 	loaded_ = true;
 	bytes_.reset();
 	image_.reset();

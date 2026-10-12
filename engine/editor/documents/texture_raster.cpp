@@ -121,7 +121,9 @@ bool read_png(const std::vector<uint8_t> &bytes, RasterState &out) {
 	} else if (colour == 0) {
 		png::GrayImage grey;
 		if (!png::decode_png_gray(bytes, grey, error) || grey.width <= 0 || grey.height <= 0 || grey.max_value != 255) return false;
-		std::vector<uint8_t> levels(grey.samples.begin(), grey.samples.end());
+		// Each level as its byte (max_value 255: an 8-bit grey PNG's samples).
+		std::vector<uint8_t> levels(grey.samples.size());
+		for (size_t i = 0; i < levels.size(); ++i) levels[i] = static_cast<uint8_t>(grey.samples[i]);
 		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::U8, grey.width, grey.height, levels.data()));
 	} else {
 		return false;
