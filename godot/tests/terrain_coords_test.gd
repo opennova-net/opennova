@@ -32,7 +32,9 @@ func _make_data() -> TerrainData:
 func test_runtime_coords_wrap_and_keep_raw_sector_ids() -> void:
 	var data := _make_data()
 	assert_eq(data.world_to_runtime_source_coords(-5000.0, -2000.0), Vector2(120.0, 48.0))
-	assert_eq(data.world_to_runtime_source_coords(-300.0, -2000.0), Vector2(212.0, 48.0))
+	# A raw id 7 is slot 6: bit 1 takes the right half (+512 x), bit 0 clear keeps z, as every lookup
+	# of the game picks the quadrant (D-TERRAIN-21) [orig: Terrain_SampleHeightBilinear @ 0x6068B7..0x6068C4].
+	assert_eq(data.world_to_runtime_source_coords(-300.0, -2000.0), Vector2(724.0, 48.0))
 	assert_lt(data.world_to_runtime_source_coords(-800.0, -2000.0).x, 0.0)
 
 
