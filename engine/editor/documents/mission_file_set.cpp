@@ -2,6 +2,7 @@
 // mission makes, and the members a scan has for a mission.
 #include "mission_file_set.h"
 
+#include <base/io/strutil.h>
 #include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
@@ -49,7 +50,7 @@ const MissionFileSetRow *mission_file_set_row(const std::string &role) {
 }
 
 std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan, const std::string &mission,
-                                                           const std::string &new_mission) {
+                                                           const std::string &new_mission, const std::string &folder) {
 	std::vector<MissionFileSetMember> out;
 	for (const MissionFileSetRow &row : mission_file_set()) {
 		const mission::Sidecar *sidecar = mission::sidecar_for_role(row.role);
@@ -75,7 +76,34 @@ std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan
 			break;
 		}
 	}
+	// The .mis of its name beside it (S24 Names), the editor's names in it: no sidecar, no reference, but the
+	// mission's own.
+	const std::string names = mission::mission_base_name(mission) + ".mis";
+	if (const AssetEntry *entry = file_in_folder(scan, folder, names)) {
+		MissionFileSetMember member;
+		member.role = kMissionNamesRole;
+		member.path = entry->relative_path;
+		member.old_name = entry->logical_name;
+		const std::string extension = entry->logical_name.substr(mission::mission_base_name(entry->logical_name).size());
+		member.new_name = mission::mission_base_name(new_mission) + extension;
+		out.push_back(std::move(member));
+	}
 	return out;
+}
+
+const AssetEntry *file_in_folder(const AssetScan &scan, const std::string &folder, const std::string &name) {
+	if (!folder.empty()) return scan.named(folder + "/" + name); // a path names its folder
+	// At the top level: that path in any case, never named()'s find() of the name in another folder.
+	if (const AssetEntry *entry = scan.at_path(name)) return entry;
+	for (const AssetEntry &entry : scan.entries)
+		if (entry.relative_path.find('/') == std::string::npos && strutil::iequals(entry.relative_path, name)) return &entry;
+	return nullptr;
+}
+
+std::string mission_member_words(const std::string &role) {
+	if (role == kMissionNamesRole) return "its names (the .mis)";
+	const MissionFileSetRow *row = mission_file_set_row(role);
+	return row ? row->words : "a file";
 }
 
 } // namespace opennova::editor
