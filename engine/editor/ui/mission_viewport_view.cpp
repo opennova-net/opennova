@@ -517,6 +517,16 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 					  : std::string("Show the mission's events beside the picture, each a card that reads as its sentence "
 									"(Ctrl+L).")))
 		window_requests::show_logic(workspace, mission.path(), !logic);
+	// The Terrain pane (S25): sculpt the ground, paint its maps and lay its tiles beside the picture (Ctrl+E; the
+	// Windows menu's tick), the button naming the brush's tool while it brushes.
+	const bool terrain = view.workspace.document(mission.path()).terrain;
+	const TerrainTool brushing = view.workspace.terrain_brush.tool;
+	const std::string terrain_label =
+			terrain && brushing != TerrainTool::None ? std::string("Terrain: ") + terrain_tool_label(brushing) : std::string("Terrain");
+	if (tool_button(row, terrain_label.c_str(), terrain, true,
+				terrain ? std::string("Hide the Terrain pane (Ctrl+E): the picture's own tools again.")
+						: std::string("Sculpt the ground, paint its maps and lay its tiles here and on the map (Ctrl+E).")))
+		window_requests::show_terrain(workspace, mission.path(), !terrain);
 	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
 	// 0x4F91F0], opened, or made beside the mission where the project has none.
 	const MissionScript script = mission_script(view, mission.path());

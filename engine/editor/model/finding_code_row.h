@@ -512,6 +512,7 @@ enum class CoreFinding {
 	ViewportRefused,
 	WorkspaceRefused,
 	WaveOperation, // round S23 lane A, appended
+	TerrainStroke, // S25, appended
 	kCount
 };
 inline constexpr size_t kCoreFindingCount = static_cast<size_t>(CoreFinding::kCount);

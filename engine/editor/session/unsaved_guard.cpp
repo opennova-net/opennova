@@ -25,9 +25,14 @@ bool UnsavedGuard::files(const EditorRequest &request, std::vector<std::string> 
 	case GuardScope::Document:
 		// What drops the document (a Close, a Reload: they can discard) waits on names its .mis does not hold too
 		// (companion_unsaved); what reads its file alone (Build, Play) never does.
-		if (const DocumentBase *document = documents.document_for(request.path);
-		    document && (document->dirty() || (request_kind_row(request.kind).can_discard && document->companion_unsaved())))
-			out.push_back(document->path());
+		if (const DocumentBase *document = documents.document_for(request.path)) {
+			if (document->dirty() || (request_kind_row(request.kind).can_discard && document->companion_unsaved()))
+				out.push_back(document->path());
+			// S25: a Close lists the files its view's terrain tools edited that keep unsaved edits (never dropped
+			// silently: its Save writes them, its Discard drops the document alone and leaves them open).
+			if (request.kind == EditorRequestKind::CloseDocument)
+				for (const std::string &path : documents.scope_unsaved(document->path())) out.push_back(path);
+		}
 		return true;
 	case GuardScope::AllDirty: out = documents.dirty_files(request_kind_row(request.kind).can_discard); return true;
 	case GuardScope::PlannedWrites:
@@ -66,7 +71,10 @@ bool UnsavedGuard::holds(const EditorRequest &request) {
 	DialogsView::UnsavedPrompt prompt;
 	prompt.open = true;
 	prompt.action = request.kind;
-	prompt.target = row.guard == GuardScope::Document ? unsaved.front()
+	// A Close's or a Reload's is its document's own, whatever else the prompt lists (S25: its view's terrain files).
+	const DocumentBase *named = row.guard == GuardScope::Document ? core_.documents().document_for(request.path) : nullptr;
+	prompt.target = named                              ? named->path()
+	                : row.guard == GuardScope::Document ? unsaved.front()
 	                : !request.dir.empty()            ? request.dir
 	                                                  : request.path;
 	prompt.files = std::move(unsaved);

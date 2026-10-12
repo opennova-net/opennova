@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <editor/model/change_set.h>
+#include <editor/model/edit.h>
 #include <editor/model/node.h>
 #include <editor/model/source_state.h>
 
@@ -88,8 +89,9 @@ public:
 	void reset();
 	// The step done forward and recorded, the redo branch discarded. It folds into the last step
 	// while the group `key` is open and neither changes rows; a step that changes rows ends the
-	// group.
-	void commit(EditStep step, const std::string &key);
+	// group. Each step made, and each fold, takes a fresh serial (next_step_serial); `link` is the
+	// gesture token its batches carry (0 none), which the step keeps (StepMark, S25).
+	void commit(EditStep step, const std::string &key, uint64_t link = 0);
 	// While the group `key` is open (its step is the last one and not the saved checkpoint), undo
 	// that step and keep it as the redo branch, the group still open: the next commit replaces it
 	// (a coalesced batch starting again from what its group found; the revisions it took are the
@@ -105,7 +107,17 @@ public:
 	// The step undo() would take back, and the one redo() would make again; null for none.
 	const EditStep *next_undo() const { return cursor_ ? &steps_[cursor_ - 1].step : nullptr; }
 	const EditStep *next_redo() const { return cursor_ < steps_.size() ? &steps_[cursor_].step : nullptr; }
-	void end_edit_group() { key_.clear(); }
+	// Their marks (S25, the undo across documents): the serial and the link of the step undo() would take
+	// back and of the one redo() would make again; {} for none.
+	StepMark undo_mark() const { return cursor_ ? steps_[cursor_ - 1].mark : StepMark(); }
+	StepMark redo_mark() const { return cursor_ < steps_.size() ? steps_[cursor_].mark : StepMark(); }
+	// The group open now carries the gesture `link` (its last step's batches carried it): what a cancel of
+	// that gesture drops (reopen, drop).
+	bool open_link(uint64_t link) const { return link && link_ == link && open(key_); }
+	void end_edit_group() {
+		key_.clear();
+		link_ = 0;
+	}
 	void mark_saved() { saved_revision_ = revision_; }
 
 	bool can_undo() const { return cursor_ != 0; }
@@ -142,6 +154,7 @@ private:
 		std::vector<Mark> marks; // ascending; the last is after_revision
 		size_t bytes = 0;
 		bool changes_rows = false;
+		StepMark mark; // its serial (taken anew by each fold) and its link
 	};
 
 	// The group `key` is open: its step is the last.
@@ -165,6 +178,7 @@ private:
 	size_t cursor_ = 0;
 	uint64_t revision_ = 0, saved_revision_ = 0, next_revision_ = 1;
 	std::string key_;
+	uint64_t link_ = 0; // the open group's gesture (0 none)
 	size_t bytes_ = 0;
 	bool reopened_ = false; // the step at the cursor is the one reopen() undid
 };

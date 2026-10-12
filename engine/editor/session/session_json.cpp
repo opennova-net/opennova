@@ -29,6 +29,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/terrain_stroke.h>
 #include <base/io/strutil.h>
 
 namespace opennova::editor {
@@ -1063,6 +1064,12 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		if (io::json_exact_whole_in(json, -2147483648.0, 2147483647.0, request.value)) return true;
 		error = std::string("\"") + token + "\" must be a 32-bit whole number.";
 		return false;
+	case F::Stroke: return terrain_stroke_from_json(json, request.stroke, error); // S25: session/terrain_stroke_json.cpp
+	case F::Gesture:
+		if (io::json_exact_whole(json, request.gesture)) return true;
+		error = std::string("\"") + token + "\" must be a gesture's token, a whole number.";
+		return false;
+	case F::Cancel: return flag_of(json, token, request.cancel, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1190,6 +1197,9 @@ bool field_to_json(
 	case F::Event: out = json_number(double(request.event)); return request.event >= 0;
 	case F::Variable: out = json_number(double(request.variable)); return request.variable >= 0;
 	case F::Value: out = json_number(double(request.value)); return request.value != 0;
+	case F::Stroke: out = terrain_stroke_to_json(request.stroke); return request.stroke.asked();
+	case F::Gesture: out = json_number(double(request.gesture)); return request.gesture != 0;
+	case F::Cancel: out = boolean(request.cancel); return request.cancel;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

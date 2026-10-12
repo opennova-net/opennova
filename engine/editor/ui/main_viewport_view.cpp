@@ -15,9 +15,10 @@
 
 namespace opennova::editor {
 
-MainViewportView::MainViewportView(const OutlineSpec &outline, ViewportKind kind, std::unique_ptr<DocumentPane> pane) :
+MainViewportView::MainViewportView(const OutlineSpec &outline, ViewportKind kind, std::unique_ptr<DocumentPane> pane,
+                                   std::unique_ptr<DocumentPane> terrain) :
 		outline_(std::make_unique<OutlineView>(outline)), viewport_(make_viewport_view(kind)), pane_(std::move(pane)),
-		kind_(kind) {}
+		terrain_(std::move(terrain)), kind_(kind) {}
 
 MainViewportView::~MainViewportView() = default;
 
@@ -28,6 +29,7 @@ void MainViewportView::draw(Workspace &workspace, const DocumentBase &document) 
 		if (event.kind == ViewEventKind::RevealRecord) {
 			if (viewport_) viewport_->reveal(event);
 			if (pane_) pane_->reveal(event);
+			if (terrain_) terrain_->reveal(event);
 		}
 		outline_->receive(event);
 	}
@@ -68,15 +70,17 @@ void MainViewportView::draw(Workspace &workspace, const DocumentBase &document) 
 	column_avail_ = avail;
 	ImGui::SameLine();
 	pane_drawn_ = false;
+	terrain_drawn_ = false;
 	if (ImGui::BeginChild("viewport_column", ImVec2(0.0f, 0.0f))) {
 		const WorkspaceView::DocumentView &shown = workspace.view().workspace.document(document.path());
-		if (pane_ && shown.logic) draw_split(workspace, document, shown.logic_split);
+		if (terrain_ && shown.terrain) draw_split(workspace, document, *terrain_, shown.logic_split);
+		else if (pane_ && shown.logic) draw_split(workspace, document, *pane_, shown.logic_split);
 		else main_viewport(workspace, document);
 	}
 	ImGui::EndChild();
 }
 
-void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &document, float share) {
+void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &document, DocumentPane &pane, float share) {
 	const ImVec2 room = ImGui::GetContentRegionAvail();
 	const float em = ImGui::GetFontSize();
 	// Side by side where the column holds both at a readable width, else the canvas above the pane.
@@ -106,9 +110,10 @@ void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &docu
 		dragged_share_ = -1.0f;
 	}
 	if (!stacked) ImGui::SameLine(0.0f, 0.0f);
-	if (ImGui::BeginChild("logic_pane", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
-		pane_->draw(workspace, document);
-		pane_drawn_ = true;
+	const bool terrain = &pane == terrain_.get();
+	if (ImGui::BeginChild(terrain ? "terrain_pane" : "logic_pane", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
+		pane.draw(workspace, document);
+		(terrain ? terrain_drawn_ : pane_drawn_) = true;
 	}
 	ImGui::EndChild();
 }
@@ -116,6 +121,7 @@ void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &docu
 void MainViewportView::rebind(const DocumentBase &document) {
 	outline_->rebind(document);
 	if (pane_) pane_->rebind(document);
+	if (terrain_) terrain_->rebind(document);
 }
 
 bool MainViewportView::main_viewport(Workspace &workspace, const DocumentBase &document) {

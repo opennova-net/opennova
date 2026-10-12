@@ -11,6 +11,7 @@
 #include <editor/model/edit.h>
 #include <editor/project/play_mode.h>
 #include <editor/session/preview_background.h>
+#include <editor/session/view/terrain_tools_view.h>
 #include <editor/run/play_start.h>
 #include <editor/session/view/viewport_kind.h>
 
@@ -116,6 +117,8 @@ enum class EditorRequestKind {
 	NewFont,
 	// A wave edited whole (round S23 lane A): a trim or a normalise, written as the game takes it
 	WaveOperation,
+	// A stroke of the terrain brush (S25): its dabs laid on the plane's file as the game resolves it for the view
+	TerrainStroke,
 	kCount,
 };
 
@@ -428,6 +431,12 @@ struct EditorRequest {
 	int64_t event = -1;
 	int64_t variable = -1;
 	int64_t value = 0;
+	// A terrain stroke (TerrainStroke, S25: session/view/terrain_tools_view.h's TerrainStrokeAsk).
+	TerrainStrokeAsk stroke;
+	// An EndEdit's gesture (S25): every open gesture carrying the token ends, whatever document it changed (0: the
+	// document at path's); `cancel` ends it dropping its steps.
+	uint64_t gesture = 0;
+	bool cancel = false;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -453,7 +462,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.play_mode == b.play_mode && a.save_before_play == b.save_before_play && a.alone == b.alone &&
 			a.define == b.define && a.preview_background == b.preview_background &&
 			a.keep_selection == b.keep_selection && a.create == b.create && a.event == b.event &&
-			a.variable == b.variable && a.value == b.value;
+			a.variable == b.variable && a.value == b.value && a.stroke == b.stroke && a.gesture == b.gesture &&
+			a.cancel == b.cancel;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);
@@ -483,6 +493,11 @@ struct ActionOutcome {
 	// the session handed it), which the gesture's next sample names to fold into the same undo step; 0
 	// for none (a first sample that planned nothing and ended its gesture with it).
 	uint64_t gesture = 0;
+	// What a terrain stroke came to (S25: the regions it changed, the missions that followed, what it opened, its
+	// bake), and the documents an Undo or a Redo took a step in (S25, the undo across documents: the view's
+	// document, the files its terrain edits went to and those a linked step changed), in the order it took them.
+	TerrainStrokeAnswer stroke;
+	std::vector<std::string> stepped;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
 

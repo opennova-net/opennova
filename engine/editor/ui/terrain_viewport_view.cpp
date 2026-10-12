@@ -14,6 +14,7 @@
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
 #include <editor/ui/workspace.h>
@@ -121,6 +122,17 @@ void TerrainViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 		        "each definition's model.");
 		ImGui::EndPopup();
 	}
+	// The Terrain pane (S25): sculpt, paint and lay tiles in the picture (Ctrl+E), the button naming the brush's tool.
+	const bool terrain = workspace.view().workspace.document(model.path()).terrain;
+	const TerrainTool brushing = workspace.view().workspace.terrain_brush.tool;
+	const std::string terrain_label =
+			terrain && brushing != TerrainTool::None ? std::string("Terrain: ") + terrain_tool_label(brushing) : std::string("Terrain");
+	if (terrain) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+	const bool terrain_pressed = ui_kit::tool(row, terrain_label.c_str(), true,
+			terrain ? std::string("Hide the Terrain pane (Ctrl+E).")
+					: std::string("Sculpt the ground, paint its maps and lay its tiles in the picture (Ctrl+E)."));
+	if (terrain) ImGui::PopStyleColor();
+	if (terrain_pressed) window_requests::show_terrain(workspace, model.path(), !terrain);
 	if (ui_kit::tool(row, "Frame", true, "The camera on the terrain's sectors (F, or a double click)."))
 		workspace.request(request::set_viewport(model.path(), terrain_camera_change(model.framed(context.width, context.height))));
 	if (ui_kit::tool(row, "Top", true, "Straight down over the camera's target, north up.")) {

@@ -141,6 +141,16 @@ struct DocumentsView {
 	// What uses each texture (session/texture_use_index.h, ADR 0046 S18), kept while the graph, the files
 	// and the open documents stand: the texture view's Used as and the texture_uses query read it.
 	std::shared_ptr<const TextureUseIndex> texture_uses;
+	// What Undo and Redo in the active document's view take next (S25, the undo across documents: the Edit menu's
+	// words, its toolbar's and Ctrl+Z's): the document whose step it is ("" none), its words ("" none given), and the
+	// other documents whose top step carries its link, taken with it.
+	struct StepNext {
+		std::string path;
+		std::string words;
+		std::vector<std::string> linked;
+		bool any() const { return !path.empty(); }
+	};
+	StepNext undo_next, redo_next;
 };
 
 } // namespace opennova::editor

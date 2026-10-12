@@ -5,7 +5,10 @@
 #include <memory>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <editor/model/document_base.h>
+#include <editor/project/project_files.h>
+#include <base/vfs/file_stamps.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewports.h>
@@ -307,11 +310,27 @@ void ViewportModel::shown_none() {
 	shown_identity_ = shown_load_ = shown_revision_ = 0;
 }
 
+uint64_t ViewportModel::gesture_held_(const ViewportInput &input) const {
+	return row().holds_for_gesture ? input.view.documents.gesture_in(path_).token : 0;
+}
+
+uint64_t ViewportModel::gesture_feeding_(const ViewportInput &input, const FileStamps *reads) const {
+	for (const OpenGesture &gesture : input.view.documents.gestures) {
+		if (!gesture.open()) continue;
+		if (gesture.path == path_) return gesture.token;
+		if (!reads) continue;
+		const std::string file = basename_of(gesture.path);
+		for (const FileStamp &read : reads->files())
+			if (strutil::iequals(read.name, file)) return gesture.token;
+	}
+	return 0;
+}
+
 ViewportAction ViewportModel::follow(const ViewportInput &input, PreviewClock &clock) {
 	followed_change_ = input.change;
 	// The token of the gesture open in its document (0: none), where its kind's picture made again
 	// waits for one.
-	const uint64_t gesture = row().holds_for_gesture ? input.view.documents.gesture_in(path_).token : 0;
+	const uint64_t gesture = gesture_held_(input);
 	// A Rebuild held for a gesture that ended since (or gave way to another) is due now.
 	if (held_ && gesture != held_for_) {
 		held_ = false;

@@ -95,6 +95,9 @@ io::JsonValue mission_ground_to_json(const MissionGroundFacts &facts);
 // game resolves (env::resolve_water_height: the mission's override, the environment's, the terrain's).
 // Read when first asked, and again where the header's terrain, tile set, environment or water override or
 // the mission's name moved, or (the files' generation having moved) a file it read moved its stamp.
+struct TerrainPatch;
+class DocumentBase;
+
 class MissionGround {
 public:
 	void follow(const std::shared_ptr<const FileSource> &files, uint64_t generation, const MissionSceneHeader &header,
@@ -113,6 +116,10 @@ public:
 	double water_height() const;
 	// How often it read its files (a test's count).
 	int reads() const { return reads_; }
+	// S25: what a stroke changed of a file it read, patched in place from the open document that holds it (a region of
+	// the heights, a map's texels), never reading the files again per dab; false where it cannot (the caller reads them
+	// again: follow). The planes' patches are the round's heights' and maps' to give; none patches yet.
+	bool patch(const TerrainPatch &patch, const DocumentBase &document);
 
 	// The game's own samplers over what it read (DI-29): the char map's, with the placed tiles and their
 	// table (terrain::surface_type_at_fixed), and the foliage map's, its codes (`codes` true) or its texels

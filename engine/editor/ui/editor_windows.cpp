@@ -584,12 +584,17 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 		ui_kit::tooltip(words);
 		ImGui::Unindent();
 	};
-	if (menu_item("Undo", "Ctrl+Z", document && document->can_undo() && v.allows(EditorRequestKind::Undo)))
+	// S25: in the view of the active document, its own step or one its terrain tools made in another file (a view no
+	// session made holds no next step: the document's own then).
+	const DocumentsView::StepNext &undo = v.documents.undo_next, &redo = v.documents.redo_next;
+	const bool undoes = document && (undo.any() || document->can_undo());
+	const bool redoes = document && (redo.any() || document->can_redo());
+	if (menu_item("Undo", "Ctrl+Z", undoes && v.allows(EditorRequestKind::Undo)))
 		request(request::undo());
-	if (document) step_words(document->undo_words());
-	if (menu_item("Redo", "Ctrl+Y", document && document->can_redo() && v.allows(EditorRequestKind::Redo)))
+	if (document) step_words(undo.any() ? undo.words : document->undo_words());
+	if (menu_item("Redo", "Ctrl+Y", redoes && v.allows(EditorRequestKind::Redo)))
 		request(request::redo());
-	if (document) step_words(document->redo_words());
+	if (document) step_words(redo.any() ? redo.words : document->redo_words());
 	// A rename is no step of a document's history: it rewrites files. Its way back is its true inverse (only
 	// the sites it rewrote), shown before it commits, offered while its name is still where it put it.
 	if (v.activity.last_rename.made && rename_back_offered(v)) {
@@ -690,6 +695,14 @@ void EditorWindows::draw_windows_items(const SessionView &v, const DocumentBase 
 	ui_kit::tooltip(mission ? std::string("The mission's Logic pane beside its 3D view: its events as cards that read as their "
 	                                      "sentences.")
 	                        : std::string("Make a mission the active document: its Logic pane shows beside its 3D view."));
+	// S25: the Terrain pane, a mission's or a terrain's.
+	const bool terrain = document && (document->kind() == AssetKind::Mission || document->kind() == AssetKind::Terrain);
+	bool brushing = terrain && v.workspace.document(document->path()).terrain;
+	if (ImGui::MenuItem("Terrain", "Ctrl+E", &brushing, terrain)) window_requests::show_terrain(*this, document->path(), brushing);
+	ui_kit::tooltip(terrain ? std::string("The Terrain pane beside the 3D view: sculpt the ground, paint its maps and lay its "
+	                                      "tiles there and on the map.")
+	                        : std::string("Make a mission or a terrain the active document: its Terrain pane shows beside its 3D "
+	                                      "view."));
 	ImGui::Separator();
 	ImGui::EndMenu();
 }
@@ -917,7 +930,7 @@ void EditorWindows::draw_new_project() {
 // request()); Undo and Redo, and Alt+Left and Alt+Right, are the field's own then. Ctrl+Shift+Z is
 // Redo, as Ctrl+Y is. None of them while the unsaved prompt is open: an Undo behind it would make a
 // file it does not list unsaved. No two share keys: Ctrl+S, Ctrl+Shift+S, Ctrl+W, Ctrl+B, Ctrl+P, Ctrl+T,
-// Ctrl+L, Ctrl+Shift+F, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, F5, Ctrl+F5, Alt+F5, Shift+F5, F12, Shift+F12, Alt+Left and
+// Ctrl+L, Ctrl+E, Ctrl+Shift+F, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, F5, Ctrl+F5, Alt+F5, Shift+F5, F12, Shift+F12, Alt+Left and
 // Alt+Right here; Ctrl+F, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+D, F2, Delete, F and the arrows the windows' own, and the Event
 // board's Space, Enter, Alt+Up, Alt+Down, Ctrl+Shift+T and Ctrl+Shift+A (S24) while it has the keyboard.
 void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document) {
@@ -946,6 +959,10 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_L, false) && document && document->kind() == AssetKind::Mission &&
 	    modal == HeldModal::None)
 		window_requests::show_logic(*this, document->path(), !v.workspace.document(document->path()).logic);
+	// The active mission's or terrain's Terrain pane (S25) shown or hidden.
+	if (plain_ctrl && ImGui::IsKeyPressed(ImGuiKey_E, false) && document &&
+	    (document->kind() == AssetKind::Mission || document->kind() == AssetKind::Terrain) && modal == HeldModal::None)
+		window_requests::show_terrain(*this, document->path(), !v.workspace.document(document->path()).terrain);
 	if (ImGui::IsKeyPressed(ImGuiKey_F12, false) && !io.KeyCtrl && !io.KeyAlt && modal == HeldModal::None) {
 		if (io.KeyShift) find_usages(v, jump_subject());
 		else go_to_definition(jump_subject());

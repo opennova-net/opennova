@@ -20,6 +20,11 @@ uint64_t next_edit_gesture() {
 	return ++next;
 }
 
+uint64_t next_step_serial() {
+	static std::atomic<uint64_t> next{0};
+	return ++next;
+}
+
 Document::Document(const Document &other)
 		: DocumentBase(other), rows_(other.rows_), file_state_(other.file_state_),
 		  next_id_(other.next_id_), last_added_(other.last_added_), added_(other.added_),
@@ -622,6 +627,13 @@ void Document::undo_step() {
 	if (source && history_.revision() != before) adopt_source(std::move(source));
 }
 
+bool Document::cancel_gesture_step(uint64_t gesture) {
+	if (!history_.open_link(gesture)) return false;
+	if (!history_.reopen("g" + std::to_string(gesture))) return false;
+	history_.drop();
+	return true;
+}
+
 void Document::redo_step() {
 	const EditStep *step = history_.next_redo();
 	std::shared_ptr<const SourceState> source =
@@ -734,7 +746,7 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 		error.record_kind = refusal.record.kind;
 		return refused();
 	}
-	history_.commit(std::move(step), key);
+	history_.commit(std::move(step), key, builds ? edits.front().gesture : 0);
 	if (read_again) adopt_source(std::move(read_again));
 	if (!added.empty()) {
 		// What the batch made and kept: a row or a record a later edit of it removed is gone (so is

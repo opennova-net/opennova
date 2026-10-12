@@ -303,6 +303,18 @@ constexpr RequestField kFields[] = {
 			"(game_debug's set_mission_variable)." },
 	{ F::Value, "value", J::Integer,
 			"play_debug's value for variable: a 32-bit whole number, negative too (0 when left out)." },
+	{ F::Stroke, "stroke", J::Object,
+			"terrain_stroke's stroke (S25): {plane: heights, surface, foliage, colour or blend; brush: the members it "
+			"strokes with of its own (tool, radius, strength, falloff, spacing, height, surface, foliage, colour, layer; "
+			"the rest the workspace's terrain_brush); points: [[x, y], ...], 1 to 256, mission metres east and north "
+			"in the order the pointer went; gesture: 0 begins one (the outcome names its token), a token the stroke "
+			"goes on with; end: it ends with this sample (true when left out); cancel: it ends dropping what it did}." },
+	{ F::Gesture, "gesture", J::Integer,
+			"end_edit's gesture (S25): every open gesture carrying this token ends, in whatever document its batches "
+			"changed (a terrain stroke's file, the missions that followed it); 0 when left out (the document at path's)." },
+	{ F::Cancel, "cancel", J::Boolean,
+			"end_edit's cancel (S25: Esc mid-stroke): the gesture ends dropping its step in each document, the documents "
+			"as it found them, no redo left of it." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

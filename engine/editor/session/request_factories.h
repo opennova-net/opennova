@@ -548,9 +548,18 @@ inline EditorRequest set_string_text(std::string path, NodeAddress address, std:
 	request.values = {{"text", std::move(text)}};
 	return request;
 }
-inline EditorRequest end_edit(std::string path = std::string()) {
+inline EditorRequest end_edit(std::string path = std::string(), uint64_t gesture = 0, bool cancel = false) {
 	EditorRequest request = of(EditorRequestKind::EndEdit);
 	request.path = std::move(path);
+	request.gesture = gesture;
+	request.cancel = cancel;
+	return request;
+}
+// A stroke of the terrain brush in the view of the document at `path` ("" the active one), S25.
+inline EditorRequest terrain_stroke(std::string path, TerrainStrokeAsk stroke) {
+	EditorRequest request = of(EditorRequestKind::TerrainStroke);
+	request.path = std::move(path);
+	request.stroke = std::move(stroke);
 	return request;
 }
 // The viewport over the document at `path` ("" the active one) changed as `viewport` says: the JSON

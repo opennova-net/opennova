@@ -40,6 +40,7 @@ void TextHistory::reset() {
 	revision_ = saved_revision_ = 0;
 	next_revision_ = 1;
 	key_.clear();
+	link_ = 0;
 	bytes_ = 0;
 }
 
@@ -79,7 +80,7 @@ void TextHistory::trim() {
 	}
 }
 
-void TextHistory::commit(std::vector<TextReplacement> batch, const std::string &key) {
+void TextHistory::commit(std::vector<TextReplacement> batch, const std::string &key, uint64_t link) {
 	const bool fold = folds(key);
 	forget_redo();
 	const uint64_t before = revision_;
@@ -90,18 +91,33 @@ void TextHistory::commit(std::vector<TextReplacement> batch, const std::string &
 		Step &last = steps_.back();
 		last.batches.push_back({std::move(batch), revision_});
 		last.bytes += added;
+		last.mark.serial = next_step_serial();
 		bytes_ += added;
 	} else {
 		Step step;
 		step.before_revision = before;
 		step.batches.push_back({std::move(batch), revision_});
 		step.bytes = sizeof(Step) + added;
+		step.mark = StepMark{next_step_serial(), link};
 		bytes_ += step.bytes;
 		steps_.push_back(std::move(step));
 		++cursor_;
 	}
 	key_ = key;
+	link_ = link;
 	trim();
+}
+
+bool TextHistory::drop_open(uint64_t link, const Apply &apply) {
+	if (!link || link != link_ || !folds(key_)) return false;
+	const Step &step = steps_[--cursor_];
+	for (auto it = step.batches.rbegin(); it != step.batches.rend(); ++it)
+		backward(*it, apply);
+	revision_ = step.before_revision;
+	forget_redo();
+	key_.clear();
+	link_ = 0;
+	return true;
 }
 
 void TextHistory::forward(const Batch &batch, const Apply &apply) {
@@ -121,6 +137,7 @@ void TextHistory::undo(const Apply &apply) {
 		backward(*it, apply);
 	revision_ = step.before_revision;
 	key_.clear();
+	link_ = 0;
 }
 
 void TextHistory::redo(const Apply &apply) {
@@ -130,6 +147,7 @@ void TextHistory::redo(const Apply &apply) {
 		forward(batch, apply);
 	revision_ = step.after_revision();
 	key_.clear();
+	link_ = 0;
 }
 
 bool TextHistory::changes_since(uint64_t revision, std::vector<TextRange> &out) const {

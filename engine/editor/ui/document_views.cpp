@@ -31,6 +31,7 @@
 #include <editor/ui/texture_view.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/workspace.h>
+#include <editor/ui/terrain_pane.h>
 #include <formats/def/reserved_items.h>
 
 #include <imgui.h>
@@ -160,7 +161,7 @@ constexpr DocumentViewRow kViews[] = {
 	// what names a record closes it (S15, ui/mission_logic_view); its Logic pane, the Event board, shares
 	// the viewport's column (S24, ui/mission_board_view).
 	{DocumentTypeId::Mission, DocumentViewRole::MainViewport, &kMissionOutline, nullptr, draw_mission_inspector,
-	 draw_mission_uses, mission_logic_by_name, nullptr, make_mission_board_pane},
+	 draw_mission_uses, mission_logic_by_name, nullptr, make_mission_board_pane, make_terrain_pane},
 	{DocumentTypeId::Script, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::MusicScript, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::Credits, DocumentViewRole::MainViewport, nullptr, make_script_view},
@@ -188,7 +189,8 @@ constexpr DocumentViewRow kViews[] = {
 	// A terrain's row, its grid rows and its foliage definitions as a tree (DI-30a) beside its picture (DI-30b: the
 	// Main role, ui/main_viewport_view over the Terrain viewport kind); the import that makes it and the missions
 	// that run on it head the Inspector (ui/terrain_inspector).
-	{DocumentTypeId::Terrain, DocumentViewRole::MainViewport, &kTreeOutline, nullptr, draw_terrain_inspector},
+	{DocumentTypeId::Terrain, DocumentViewRole::MainViewport, &kTreeOutline, nullptr, draw_terrain_inspector, nullptr,
+	 nullptr, nullptr, nullptr, make_terrain_pane},
 	// A dialog bank's dialogs as a tree, each holding its lines; a dialog or a line heads the Inspector with a Play
 	// of it as the game plays it and what the last play said (DI-32, ui/sound_inspector).
 	{DocumentTypeId::DialogBank, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_dialog_bank_inspector},
@@ -247,7 +249,8 @@ std::unique_ptr<DocumentView> make_view(const DocumentBase &document) {
 	// view of its own that draws it (a text's script view).
 	const ViewportKind main = main_viewport_kind(type);
 	if (row->role == DocumentViewRole::MainViewport && row->outline && main != ViewportKind::kCount)
-		return std::make_unique<MainViewportView>(*row->outline, main, row->make_pane ? row->make_pane() : nullptr);
+		return std::make_unique<MainViewportView>(*row->outline, main, row->make_pane ? row->make_pane() : nullptr,
+		                                          row->make_terrain_pane ? row->make_terrain_pane() : nullptr);
 	if (row->outline) return std::make_unique<OutlineView>(*row->outline);
 	return row->make();
 }

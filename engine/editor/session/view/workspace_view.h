@@ -12,6 +12,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/model/value.h>
 #include <editor/project/play_mode.h>
+#include <editor/session/view/terrain_tools_view.h>
 
 namespace opennova::editor {
 
@@ -265,8 +266,10 @@ struct WorkspaceView {
 	// whether it shows, the share of the tab its canvas keeps (kLogicSplitLeast to kLogicSplitMost; the pane the
 	// rest), the board's filter, the events it shows folded (by identity), whether it shows only the cards that
 	// need attention; and the pick a chip asked of the views (S24 pick mode): the record whose slot takes what is
-	// clicked in the 3D view or the map, and the slot (0 to 3), none while its record's row is 0. Closed with the
-	// document.
+	// clicked in the 3D view or the map, and the slot (0 to 3), none while its record's row is 0. A mission's or a
+	// terrain's Terrain pane (S25: beside its 3D view, exclusive with the Logic pane, whose split it shares as the
+	// pane's split) and the tiles its tile tools have selected, by identity, rows of the .til its tiles go to (kept
+	// apart from the session's selection). Closed with the document.
 	struct Pick {
 		NodeAddress record;
 		int slot = -1;
@@ -292,8 +295,15 @@ struct WorkspaceView {
 		std::vector<NodeId> logic_folded;
 		bool logic_attention = false;
 		Pick pick;
+		bool terrain = false;
+		std::vector<NodeId> tiles;
 	};
 	std::map<std::string, DocumentView> documents;
+
+	// The terrain brush every view strokes with (S25, session/view/terrain_tools_view.h): its tool, its shape and
+	// the values it lays. The mission's 3D view, its map and the terrain viewport brush while their document's
+	// Terrain pane shows and its tool is not None.
+	TerrainBrush terrain_brush;
 
 	// Moves with each dialog the workspace opens (a part opened, or opened on another target: a file, a kind, a
 	// screen, a confirmation): a window that closed its own dialog and asked the session to close it tells a

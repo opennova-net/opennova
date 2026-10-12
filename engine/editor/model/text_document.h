@@ -170,6 +170,8 @@ public:
 	bool can_redo() const override { return history_.can_redo(); }
 	uint64_t revision() const override { return history_.revision(); }
 	size_t history_bytes() const override { return history_.bytes(); }
+	StepMark undo_mark() const override { return history_.undo_mark(); }
+	StepMark redo_mark() const override { return history_.redo_mark(); }
 	bool changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const override;
 	// The text as the file stores it: the text itself, or through the encoding its type's decode
 	// made (a refusal says why the text does not go in the stored form).
@@ -186,6 +188,7 @@ protected:
 	bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) override;
 	void undo_step() override;
 	void redo_step() override;
+	bool cancel_gesture_step(uint64_t gesture) override;
 	bool read_source(const std::vector<uint8_t> &decoded, bool adopt,
 			std::vector<SourceIssue> &issues, Diagnostic &error) override;
 	void on_saved() override;

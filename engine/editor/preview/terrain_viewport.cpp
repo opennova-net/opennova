@@ -11,6 +11,7 @@
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/orbit_canvas.h>
+#include <editor/preview/terrain_canvas.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -436,7 +437,7 @@ std::unique_ptr<CanvasHalf> TerrainViewport::make_canvas() const {
 		return static_cast<const TerrainViewport &>(viewport).framed(width, height);
 	};
 	hooks.change = terrain_camera_change;
-	return std::make_unique<OrbitCanvas>(hooks);
+	return std::make_unique<TerrainCanvas>(hooks); // S25: the orbit camera, and the terrain brush while it is live
 }
 
 MissionGroundFacts TerrainViewport::ground_under(const ViewportContext &context, float x, float y) const {

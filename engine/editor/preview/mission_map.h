@@ -79,6 +79,14 @@ float mission_map_zoom_for(double metres, int width);
 // commander map's GRID and TEXT, which the device's compile draws), stick (a moved entity keeps its height over the
 // ground) and the grid a drag snaps to (metres; 0 free). S24: the selected event's links, the reaches and the
 // badges (the 3D view's links).
+// What the map draws under its marks (S25, preview/mission_map_terrain_view): the terrain's colour map as the game's
+// commander map draws it, the original tools' Height map and Delta map (Nile [orig: gobj sub_10010720]), MED's
+// flatness view, or nothing; `water` lays MED's water overlay over it.
+enum class MissionMapBackground : uint8_t { Colour, Height, Delta, Flatness, None, kCount };
+// "colour", "height", "delta", "flatness", "none".
+const char *mission_map_background_token(MissionMapBackground background);
+bool mission_map_background_from_token(const std::string &token, MissionMapBackground &out);
+
 struct MissionMapOptions {
 	bool items = true, buildings = true, markers = true, organics = true;
 	bool areas = true, paths = true, labels = false, links = true;
@@ -86,11 +94,13 @@ struct MissionMapOptions {
 	bool grid = true, text = true;
 	bool stick = true;
 	float snap = 1.0f;
+	MissionMapBackground background = MissionMapBackground::Colour;
+	bool water = false;
 	bool operator==(const MissionMapOptions &o) const;
 	bool operator!=(const MissionMapOptions &o) const { return !(*this == o); }
 };
 // {marks: {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), grid, text,
-// stick, snap}.
+// stick, snap, background (colour, height, delta, flatness or none), water}.
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options);
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
 

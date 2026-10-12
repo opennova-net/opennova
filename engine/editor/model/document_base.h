@@ -123,6 +123,15 @@ public:
 	// The open edit group (a coalesced burst of typing, a gesture) ends: the next edit is a step
 	// of its own.
 	virtual void end_edit_group() = 0;
+	// The gesture `gesture` cancelled (S25: Esc mid-stroke, an EndEdit's cancel): while its group is
+	// open, the step it made dropped, the document as the gesture found it and no redo left of it;
+	// false, nothing changed, when no group of it is open (a snapshot's, a blocked document's, a
+	// kind whose history keeps no gestures).
+	bool cancel_gesture(uint64_t gesture);
+	// The marks of the steps undo() and redo() would take (S25, the undo across documents: StepMark's
+	// serial and link); {} for none, and by default (a kind whose history keeps no marks).
+	virtual StepMark undo_mark() const { return StepMark(); }
+	virtual StepMark redo_mark() const { return StepMark(); }
 	// What each step did, in words (the UX round's problems lane): the session names the step an edit
 	// made with the status line's words for it ("Set hp of Drivable Dune Buggy to 120"), a fold of the
 	// same group renaming it; what Undo and Redo then say they did, and what the Edit menu's items name.
@@ -229,6 +238,11 @@ protected:
 	virtual bool apply_edits(const std::vector<Edit> &edits, Diagnostic &error) = 0;
 	virtual void undo_step() = 0;
 	virtual void redo_step() = 0;
+	// The kind's part of cancel_gesture: false where no group of the gesture is open (the default).
+	virtual bool cancel_gesture_step(uint64_t gesture) {
+		(void)gesture;
+		return false;
+	}
 	// What a blocked document takes all the same: a batch that reads its source again, whose content
 	// keeps nothing of the one it replaces (a record document's LineEndsRestore), and the redo of
 	// such a step. None by default.

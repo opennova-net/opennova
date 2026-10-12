@@ -845,6 +845,16 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Event: out.event = 3; break;
 		case F::Variable: out.variable = 12; break;
 		case F::Value: out.value = -5; break;
+		case F::Stroke:
+			out.stroke.plane = TerrainPlane::Foliage;
+			out.stroke.brush.foliage = 253;
+			out.stroke.brush_named = kBrushFoliage;
+			out.stroke.points = {{12.5, -40.0}, {13.0, -41.5}};
+			out.stroke.gesture = 4;
+			out.stroke.end = false;
+			break;
+		case F::Gesture: out.gesture = 6; break;
+		case F::Cancel: out.cancel = true; break;
 		case F::kCount: break;
 		}
 	}

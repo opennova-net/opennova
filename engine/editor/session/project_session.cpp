@@ -32,6 +32,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
+#include <editor/session/terrain_stroke.h>
 
 namespace opennova::editor {
 
@@ -188,6 +189,13 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 		// A drag in a viewport names its gesture, which the gesture's next drag passes back (S13 V7).
 		if (request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag())
 			came.set("gesture", io::json_number(double(outcome.gesture)));
+		// S25: a terrain stroke names its gesture and what it came to; an undo or a redo the documents it took a step in.
+		if (request.kind == EditorRequestKind::TerrainStroke) {
+			came.set("gesture", io::json_number(double(outcome.gesture)));
+			came.set("stroke", terrain_stroke_answer_to_json(outcome.stroke));
+		}
+		if (request.kind == EditorRequestKind::Undo || request.kind == EditorRequestKind::Redo)
+			came.set("documents", io::json_string_array(outcome.stepped));
 		answer.set("outcome", std::move(came));
 	}
 	answer.set("status", io::json_string(view().activity.status));

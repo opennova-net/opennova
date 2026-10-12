@@ -46,10 +46,22 @@ public:
 	TextHistory frozen() const;
 	// A batch the document did (its replacements in the order it did them) recorded, the redo
 	// branch discarded; it folds into the last step while the group `key` is open ("" is none).
-	void commit(std::vector<TextReplacement> batch, const std::string &key);
+	// Each step made, and each fold, takes a fresh serial (next_step_serial); `link` is the gesture
+	// token its batch carries (0 none), which the step keeps (StepMark, S25).
+	void commit(std::vector<TextReplacement> batch, const std::string &key, uint64_t link = 0);
 	void undo(const Apply &apply);
 	void redo(const Apply &apply);
-	void end_edit_group() { key_.clear(); }
+	void end_edit_group() {
+		key_.clear();
+		link_ = 0;
+	}
+	// The marks of the step undo() would take back and of the one redo() would make again ({} none).
+	StepMark undo_mark() const { return cursor_ ? steps_[cursor_ - 1].mark : StepMark(); }
+	StepMark redo_mark() const { return cursor_ < steps_.size() ? steps_[cursor_].mark : StepMark(); }
+	// A cancel of the gesture `link` (S25: Esc mid-stroke): while its group is open (the last step,
+	// past the saved checkpoint), that step undone through `apply` and forgotten, no redo left of it;
+	// false, nothing done, when it is not open.
+	bool drop_open(uint64_t link, const Apply &apply);
 	void mark_saved() { saved_revision_ = revision_; }
 
 	bool can_undo() const { return cursor_ != 0; }
@@ -76,6 +88,7 @@ private:
 		std::vector<Batch> batches;
 		uint64_t before_revision = 0;
 		size_t bytes = 0;
+		StepMark mark;
 		uint64_t after_revision() const { return batches.back().revision; }
 	};
 
@@ -94,6 +107,7 @@ private:
 	size_t cursor_ = 0;
 	uint64_t revision_ = 0, saved_revision_ = 0, next_revision_ = 1;
 	std::string key_;
+	uint64_t link_ = 0;
 	size_t bytes_ = 0;
 };
 

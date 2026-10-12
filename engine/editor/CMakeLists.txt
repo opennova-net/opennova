@@ -234,6 +234,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/effect_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/environment_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush_shapes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_patch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_collision.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
@@ -300,12 +305,22 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/catalog_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/disk_watch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/particle_keys_query.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/environment_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_uses.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_family.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_queries.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_queries_heights.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_queries_maps.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_heights.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_paint.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_tools_parts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
@@ -364,6 +379,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/viewport_kind.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/workspace_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/terrain_tools_view.cpp
     # round S23 lane A: the binary formats' documents and the font's viewport
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/face_animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/font_document.cpp
@@ -396,6 +412,9 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/environment_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_inspector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_palettes.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_pane.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/terrain_sculpt_parts.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/expansion_fields.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/files_window.cpp

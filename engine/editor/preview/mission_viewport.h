@@ -243,6 +243,8 @@ public:
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;
+	// S25: a gesture in its own document or in a file its picture read (a terrain stroke's) holds its Rebuild.
+	uint64_t gesture_held_(const ViewportInput &input) const override { return gesture_feeding_(input, picture_reads()); }
 	bool takes_(const std::string &member) const override;
 	bool check_(const io::JsonValue &json, std::string &error) const override;
 	void apply_(const io::JsonValue &json, PreviewClock &clock) override;

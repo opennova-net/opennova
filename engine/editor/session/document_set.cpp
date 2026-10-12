@@ -137,6 +137,7 @@ void DocumentSet::update_view() {
 		document_set_ = std::move(set);
 		core_.touch(ViewConcern::DocumentSet);
 	}
+	update_step_next(); // S25: what Undo and Redo take next in the active document's view
 }
 
 const DocumentBase *DocumentSet::open_at(const std::string &path) const {
@@ -151,6 +152,7 @@ const DocumentBase *DocumentSet::open_at(const std::string &path) const {
 // records as they are now. A caller with a record to show selects it after.
 void DocumentSet::activate(const std::string &path) {
 	if (path == view_.documents.active) return;
+	quiet_.erase(path); // a document opened quietly is shown now (S25): it no longer closes with the view it was opened for
 	Selection &selection = view_.documents.selection;
 	if (open_at(view_.documents.active)) remembered_[view_.documents.active] = selection;
 	view_.documents.active = path;
@@ -873,6 +875,7 @@ void DocumentSet::close_document(const std::string &requested) {
 	end_gesture_in(path, true);
 	// What its views showed of it (its outline's filter, ...) goes with it.
 	if (forget_document_workspace(view_.workspace, path)) core_.touch(ViewConcern::Workspace);
+	release_scope(path); // S25: the clean files opened quietly for its view close with it
 	if (view_.documents.active == path) {
 		activate(documents_.empty() ? "" : documents_.back()->path());
 		core_.touch(ViewConcern::Selection);
@@ -1096,12 +1099,7 @@ void DocumentSet::set_string_text(const EditorRequest &request) {
 		              document->path());
 	// The table opened where it is not, the active document kept as it was.
 	const std::string table_path = symbol->file, locator = symbol->locator;
-	if (!document_for(table_path)) {
-		const std::string was = view_.documents.active;
-		open_document(request::open_document(table_path));
-		if (!was.empty() && document_for(was)) activate(was);
-		core_.touch(ViewConcern::Selection);
-	}
+	open_quietly(table_path, std::string());
 	Document *table = records_for(table_path);
 	const NodeAddress row = table ? table->address_at(locator) : NodeAddress();
 	if (!row.row) return refuse("The string " + name + " is no longer where the table had it: validate again.", table_path);
@@ -1268,44 +1266,11 @@ void DocumentSet::duplicate(const EditorRequest &request) {
 	duplicate_records(*document);
 }
 
-void DocumentSet::undo_redo(const EditorRequest &request) {
-	auto *document = document_for(request.path);
-	if (!document) {
-		if (view_.project.open) core_.refuse_request(CoreFinding::DocumentNotOpen, "Open the file before undoing or redoing in it.", request.path);
-		return;
-	}
-	const uint64_t before = document->revision(), generation = document->load_generation();
-	const uint64_t serial = view_.documents.selection.serial;
-	const bool undo = request.kind == EditorRequestKind::Undo;
-	// What the step did, said as it is taken back or made again (the UX round's problems lane).
-	const std::string words = undo ? document->undo_words() : document->redo_words();
-	if (undo) document->undo(); else document->redo();
-	if (document->revision() != before)
-		repair_selection(*document, generation, before, NodeAddress());
-	if (view_.documents.selection.serial != serial) core_.touch(ViewConcern::Selection);
-	const std::string file = basename_of(document->path());
-	view_.activity.status = document->revision() == before
-	                                ? std::string(undo ? "Nothing to undo in " : "Nothing to redo in ") + file + "."
-	                                : std::string(undo ? "Undid: " : "Redid: ") + (words.empty() ? "an edit of " + file : words) + ".";
-	core_.touch(ViewConcern::Output);
-	update_view();
-	// An undo or a redo ends the document's gesture: the validation its edits left waiting runs now.
-	if (document->revision() != before) core_.problems().validate_later();
-	end_gesture_in(document->path(), true);
-}
-
-// The coalesced group, or the gesture, of the document at `path` ends; a gesture open in another
-// document stays open (its canvas ends it as it lets go, the wire's as its last sample comes).
-void DocumentSet::end_edit(const std::string &path) {
-	DocumentBase *document = document_for(path);
-	if (!document) return;
-	document->end_edit_group();
-	end_gesture_in(document->path(), true);
-}
-
 void DocumentSet::save(const std::string &path, bool over) {
 	if (DocumentBase *document = document_for(path)) {
-		save_documents({document->path()}, true, over);
+		// S25: the view's scope with it (the terrain files its tools edited, the missions that followed them).
+		const std::vector<std::string> scope = save_scope(document->path());
+		save_documents(scope, true, over, scope.size() > 1);
 	} else if (view_.project.open) {
 		// A file that is not open (a Rewrite fix names one) is rewritten closed.
 		if (path.empty()) core_.refuse_request(CoreFinding::DocumentNotOpen, "Open a file before saving it.");
@@ -1325,7 +1290,7 @@ void DocumentSet::save_all() {
 // when one could not be. (A save while a build packs never reaches here: the busy gate refused
 // it.) `over`: written over a file changed outside the editor (DocumentBase::save's), what the other
 // program saved there lost (DI-01: a conflict's Keep my edits).
-bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rewrite, bool over) {
+bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rewrite, bool over, bool name_files) {
 	std::vector<DocumentBase *> writes;
 	for (const std::string &path : paths)
 		for (const auto &document : documents_)
@@ -1370,7 +1335,11 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	// Reported after the scan's update, which leaves the validation that rebuilds the rows due.
 	for (const Diagnostic &d : failures) core_.report(d);
 	// A file whose companion the save left (a mission's .mis: DocumentBase::companion_unsaved) keeps what it holds unsaved.
-	view_.activity.status = "Saved " + counted(saved, "file") + (noted ? " (" + counted(noted, "note") + ": see Output)" : std::string()) +
+	// A Save of a view's scope names the files it wrote (S25: "Saved 3 files: 00TRa.bms, dvxi5.cpt, 00TRa.til").
+	std::string names;
+	if (name_files && saved > 1)
+		for (const std::string &path : written) names += (names.empty() ? ": " : ", ") + basename_of(path);
+	view_.activity.status = "Saved " + counted(saved, "file") + names + (noted ? " (" + counted(noted, "note") + ": see Output)" : std::string()) +
 	               (left ? "; " + counted(left, "file") + (left == 1 ? " keeps its" : " keep their") + " names unsaved: see Problems" : std::string()) +
 	               (failures.empty() ? "." : "; " + std::to_string(failures.size()) + " could not be saved: see Problems.");
 	core_.touch(ViewConcern::Output);
@@ -1447,6 +1416,15 @@ void DocumentSet::open_gesture(const std::string &path, uint64_t token, int64_t 
 		break;
 	}
 	gestures.push_back(OpenGesture{ path, token, sampled_ms });
+	// S25: the documents a gesture changed, its link's (a stroke, its bake, the entities that followed it), the
+	// oldest let go past a bound (a long session's drags).
+	std::vector<LinkedDocument> &linked = links_[token];
+	const DocumentBase *changed = open_at(path);
+	const uint64_t identity = changed ? changed->identity() : 0;
+	if (std::none_of(linked.begin(), linked.end(), [&](const LinkedDocument &each) { return each.path == path && each.identity == identity; }))
+		linked.push_back(LinkedDocument{ path, identity });
+	constexpr size_t kLinksKept = 4096;
+	while (links_.size() > kLinksKept) links_.erase(links_.begin());
 }
 
 void DocumentSet::end_gesture_in(const std::string &path, bool validate) {
@@ -1470,6 +1448,7 @@ void DocumentSet::discard(const std::string &path) {
 	remembered_.erase(path);
 	forget_file_state(path);
 	end_gesture_in(path, true);
+	release_scope(path); // S25: the terrain files its view edited stay open with their edits; clean quiet ones close
 	update_view();
 }
 
@@ -1483,6 +1462,9 @@ void DocumentSet::close_all() {
 	remembered_.clear();
 	stale_.clear();
 	conflicts_.clear();
+	edited_from_.clear();
+	links_.clear();
+	quiet_.clear();
 	end_gestures(false);
 	// No file of a project closed is selected in Files any more, and no document's views hold anything.
 	view_.documents.file_selected = FileSelection();

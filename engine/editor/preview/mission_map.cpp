@@ -184,7 +184,29 @@ float mission_map_zoom_for(double metres, int width) {
 bool MissionMapOptions::operator==(const MissionMapOptions &o) const {
 	return items == o.items && buildings == o.buildings && markers == o.markers && organics == o.organics &&
 	       areas == o.areas && paths == o.paths && labels == o.labels && links == o.links && grid == o.grid &&
-	       text == o.text && stick == o.stick && snap == o.snap && color_by == o.color_by;
+	       text == o.text && stick == o.stick && snap == o.snap && color_by == o.color_by && background == o.background &&
+	       water == o.water;
+}
+
+const char *mission_map_background_token(MissionMapBackground background) {
+	switch (background) {
+	case MissionMapBackground::Colour: return "colour";
+	case MissionMapBackground::Height: return "height";
+	case MissionMapBackground::Delta: return "delta";
+	case MissionMapBackground::Flatness: return "flatness";
+	case MissionMapBackground::None: return "none";
+	case MissionMapBackground::kCount: break;
+	}
+	return "colour";
+}
+
+bool mission_map_background_from_token(const std::string &token, MissionMapBackground &out) {
+	for (size_t i = 0; i < size_t(MissionMapBackground::kCount); ++i)
+		if (token == mission_map_background_token(MissionMapBackground(i))) {
+			out = MissionMapBackground(i);
+			return true;
+		}
+	return false;
 }
 
 io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
@@ -204,12 +226,14 @@ io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
 	out.set("text", JsonValue::make_bool(options.text));
 	out.set("stick", JsonValue::make_bool(options.stick));
 	out.set("snap", json_number(options.snap));
+	out.set("background", JsonValue::make_string(mission_map_background_token(options.background)));
+	out.set("water", JsonValue::make_bool(options.water));
 	return out;
 }
 
 bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error) {
 	if (!json.is_object()) {
-		error = "options is an object: {marks?, color_by?, grid?, text?, stick?, snap?}.";
+		error = "options is an object: {marks?, color_by?, grid?, text?, stick?, snap?, background?, water?}.";
 		return false;
 	}
 	MissionMapOptions out = held;
@@ -241,8 +265,13 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 				error = "options.color_by is team or group.";
 				return false;
 			}
-		} else if (name == "grid" || name == "text" || name == "stick") {
-			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : out.stick;
+		} else if (name == "background") {
+			if (!member.value.is_string() || !mission_map_background_from_token(member.value.string, out.background)) {
+				error = "options.background is colour, height, delta, flatness or none.";
+				return false;
+			}
+		} else if (name == "grid" || name == "text" || name == "stick" || name == "water") {
+			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : name == "stick" ? out.stick : out.water;
 			if (!read_bool(json, name.c_str(), into, error)) return false;
 		} else if (name == "snap") {
 			if (!member.value.is_number() || !(member.value.number >= 0.0) || !(member.value.number <= 1000.0)) {
@@ -251,7 +280,7 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 			}
 			out.snap = float(member.value.number);
 		} else {
-			error = "options takes marks, color_by, grid, text, stick and snap, not " + name + ".";
+			error = "options takes marks, color_by, grid, text, stick, snap, background and water, not " + name + ".";
 			return false;
 		}
 	}

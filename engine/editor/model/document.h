@@ -123,6 +123,8 @@ public:
 	bool can_undo() const override { return history_.can_undo(); }
 	bool can_redo() const override { return history_.can_redo(); }
 	uint64_t revision() const override { return history_.revision(); }
+	StepMark undo_mark() const override { return history_.undo_mark(); }
+	StepMark redo_mark() const override { return history_.redo_mark(); }
 	// What the history holds: its steps' rows' and file-wide states' footprints (Node::footprint,
 	// FileState::footprint) and the revisions each step took (EditHistory::bytes), under the
 	// history's budget (HistoryBudget: past it the oldest steps are given up, never the last one).
@@ -431,6 +433,8 @@ protected:
 	// A step that read the source again takes its source state back (or forward) with it.
 	void undo_step() override;
 	void redo_step() override;
+	// The gesture's open group reopened and dropped (EditHistory::reopen, drop): its rows as it found them.
+	bool cancel_gesture_step(uint64_t gesture) override;
 	// A LineEndsRestore batch, and its step's redo (DocumentBase::takes_while_blocked).
 	bool takes_while_blocked(const std::vector<Edit> &edits) const override;
 	bool redoes_while_blocked() const override;

@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/terrain_patch.h>
 #include <formats/env/env.h>
 #include <formats/foliage/runtime.h>
 #include <formats/mission/bms.h>
@@ -275,6 +276,13 @@ terrain::SurfaceTypeMap MissionGround::surface_sampler() const {
 terrain::FoliageMaskMap MissionGround::foliage_sampler(bool codes) const {
 	if (!terrain()) return terrain::FoliageMaskMap();
 	return terrain::foliage_mask_map(foliage_, store_.height_field(), codes);
+}
+
+bool MissionGround::patch(const TerrainPatch &patch, const DocumentBase &document) {
+	// The heights' and the maps' patches are the round's to give (S25 lanes A and B): none yet, so the caller reads again.
+	(void)patch;
+	(void)document;
+	return false;
 }
 
 int MissionGround::foliage_kept_off(double x, double y, int mask) const {

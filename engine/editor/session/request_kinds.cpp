@@ -18,6 +18,7 @@
 #include <editor/session/rename_controller.h>
 #include <editor/session/session_core.h>
 #include <editor/session/sound_play.h>
+#include <editor/session/terrain_stroke.h>
 #include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
@@ -144,7 +145,7 @@ void serve_revert_to_saved(SessionCore &core, const EditorRequest &request) {
 	core.documents().revert_to_saved(request);
 }
 void serve_end_edit(SessionCore &core, const EditorRequest &request) {
-	core.documents().end_edit(request.path);
+	core.documents().end_edit(request.path, request.gesture, request.cancel);
 }
 // Copy and Cut.
 void serve_copy(SessionCore &core, const EditorRequest &request) {
@@ -716,8 +717,10 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::EndEdit, "end_edit", serve_end_edit,
 			"The coalesced edit group, or the gesture, of the document at path (left out, the active "
-			"document) ends; a gesture open in another document stays open.")
-			.takes(request_params({}, { F::Path }))
+			"document) ends; a gesture open in another document stays open. gesture (S25): every open gesture "
+			"carrying that token ends too, in whatever document its batches changed (a terrain stroke's file and the "
+			"missions that followed it); cancel: it ends dropping its step in each, the documents as it found them.")
+			.takes(request_params({}, { F::Path, F::Gesture, F::Cancel }))
 			.names_active()
 			.row,
 	// It reads the documents as they stand, which an operation writes only as it finishes (in one
@@ -1326,6 +1329,22 @@ constexpr RequestKindRow kRows[] = {
 			"changed (wave.operation): a file an import makes (its import's options make it), an operation it does not "
 			"take, a wave of no sample, a trim that keeps none, a silent wave normalised.")
 			.takes(request_params({ F::Operation }, { F::Path, F::Values, F::OpenFirst }))
+			.holds(kFiles, kDocuments)
+			.names_active()
+			.row,
+	// S25 (session/terrain_stroke.h).
+	Request(K::TerrainStroke, "terrain_stroke", serve_terrain_stroke,
+			"A stroke of the terrain brush in the view of the mission or the terrain at path (left out, the active "
+			"one): the stroke's dabs laid on its plane's file as the game resolves it for that view (the heights' "
+			".cpt, or an imported terrain's heightmap image; the char, foliage, colour or blend map, or an import's "
+			"source image in its output's place), the file opened quietly where it is not (a tab with its dirty dot), "
+			"one undo step a gesture (its samples, consecutive strokes naming its token, fold into it; a token not open "
+			"begins its gesture; end ends it, cancel drops it), which Undo in the view takes with what it linked. The outcome names the gesture and "
+			"what the stroke came to (stroke {changed [{path, plane, region}], followed [{path, entities}], opened, "
+			"bake}). Refused, nothing changed (terrain.stroke): a view with no terrain, a plane whose file does not "
+			"resolve or is refused (a base layer's file: copy it into the project first), a stroke its plane's planner "
+			"refuses.")
+			.takes(request_params({ F::Stroke }, { F::Path }))
 			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,

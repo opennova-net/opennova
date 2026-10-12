@@ -386,6 +386,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::WorkspaceRefused, code("workspace.refused", G::Workspace) },
 	// A wave_operation the wave cannot take (round S23 lane A): no sample, a trim that keeps none, a silent normalise.
 	{ C::WaveOperation, code("wave.operation", G::Waves) },
+	// A terrain_stroke the session cannot take (S25): a view with no terrain, a plane whose file is refused (a base
+	// layer's, an import's output with no source to paint), a gesture not open, a plane not edited yet.
+	{ C::TerrainStroke, code("terrain.stroke", G::Terrains) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");
