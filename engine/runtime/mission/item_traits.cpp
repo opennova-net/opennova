@@ -257,9 +257,12 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
 		//  MapOverlay_RenderAllByLayer @0x5BE6C4]
 		e->has_graphic_model = def != nullptr && def->graphic[0] != '\0' &&
 				e->kind != world::EntityKind::Marker;
-		// The physics callback table's ewep row selects the gun update.
-		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0]
-		e->emplaced_update = move_row == world::PhysicsClass::Ewep;
+		// The physics callback table's ewep row selects the gun update. A
+		// section clone's template pins its update callback (the floating
+		// physics) whatever its def, on every resolve.
+		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0;
+		//  Entity_SpawnSectionEntity @0x440370]
+		e->emplaced_update = !e->section_clone && move_row == world::PhysicsClass::Ewep;
 		// The render tag picks the def+0x144 CTRL callback; the ewep row's
 		// publishes the gun words (world/mount_controls.h).
 		// [orig: EntityDef_InitAllCallbacks @0x4A5AEA..0x4A5B03 ->
@@ -409,8 +412,10 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             e->mana = e->mana_max;
             // The move-function row selects only the update callback, the
             // squib motor [orig: the "squib" row @0x82AC88 of the 12-byte move
-            // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50].
-            if (move_row == world::PhysicsClass::Squib) e->squib.motor = true;
+            // table @0x82abc8 -> Entity_ProcessProjectileTravel @0x448D50],
+            // never a section clone's pinned one [orig: @0x440370].
+            if (move_row == world::PhysicsClass::Squib && !e->section_clone)
+                e->squib.motor = true;
             // The +0x160/+0x26C/+0x2B0/+0x2C8 init is the ai_function class
             // row's second slot, run through def+0x148 whatever the move
             // function [orig: sub_448CE0 @0x448CE0, row @0x813120 +12;
@@ -482,10 +487,16 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         e->palm_state_streamed = def != nullptr &&
                 (strutil::iequals(def->ai_function, "palm") ||
                  move_row == world::PhysicsClass::Psec);
-        // The ai_function binds its event row by whole name, ignoring case.
-        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2]
-        e->door_event = def != nullptr && strutil::iequals(def->ai_function, "door");
-        e->door_motion = move_row == world::PhysicsClass::Door;
+        // The ai_function binds its event row by whole name, ignoring case. A
+        // section clone's template pins its event and update callbacks, so
+        // neither door row reaches it on any resolve; a palm fragment takes
+        // item 900's own pair.
+        // [orig: Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2;
+        //  Entity_SpawnSectionEntity @0x440365 / @0x440370;
+        //  Projectile_SpawnFromTile @0x53C35D / @0x53C36F]
+        e->door_event = !e->section_clone && def != nullptr &&
+                strutil::iequals(def->ai_function, "door");
+        e->door_motion = !e->section_clone && move_row == world::PhysicsClass::Door;
         // Every def carries its two +0x6F3/+0x70B sound names; the door
         // commands play them, and so does the drop of a carried object off
         // its carrier (world::drop_object_from_carrier).
@@ -500,8 +511,13 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
         // door def, its open sections from the record's section word.
         // [orig: Entity_SpawnFromBMSRecord @0x40F25D..0x40F2DA (types 5/2, attrib
         //  0x80); NapiNPClientMsg_0x010 @0x4336B5..0x433745 (attrib 0x80 alone)]
+        // A piece (a section clone or a palm fragment) comes from neither: its
+        // clone copies 0x2B4 bytes, short of the door slot base +0x2B8, and
+        // nothing allocates it rows (a door item 900's: D-ITEMDEF-27).
+        // [orig: Entity_CloneFromTemplateByType @0x4398A0, the copy @0x43997D]
         const bool wire_doors = !world.rules.logic_authority && e->handle.pool() == 2;
-        if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
+        if (def != nullptr && !e->item_section_piece &&
+                (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
                 (wire_doors || def->type == DEF_ITEM_TYPE_BUILDING ||
                  def->type == DEF_ITEM_TYPE_DECORATION)) {
             e->door_count = static_cast<int8_t>(def->deathtime_ticks);

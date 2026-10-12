@@ -545,16 +545,12 @@ int test_tower_sections() {
     return 0;
 }
 
-// A section piece is the memset template clone: the parent def's door, squib
-// and sway selectors never reach it, only the piece's own callbacks and models.
-int test_piece_spawn_clears_class_selectors() {
-    const char definitions[] = "begin Tower\r\n id 105050\r\n type building\r\n ai_function door\r\n"
-            " move_function squib\r\n render_function tree\r\n num_doors 2\r\n first_door 1\r\n"
-            " open_rate 2\r\n max_angle 90\r\n hp 100\r\n end\r\n";
-    opennova::def::DefItemsFile items{};
-    CHECK(opennova::def::def_parse_items_memory(
-            reinterpret_cast<const unsigned char *>(definitions), sizeof(definitions)-1, &items) == 0);
-    opennova::mission::MissionKernel kernel;
+// Boots a kernel over an items.def text for the piece spawns below.
+bool boot_piece_kernel(opennova::mission::MissionKernel &kernel,
+        opennova::def::DefItemsFile &items, const char *text, size_t size) {
+    if (opennova::def::def_parse_items_memory(
+                reinterpret_cast<const unsigned char *>(text), size, &items) != 0)
+        return false;
     kernel.open_document(opennova::bms::File{}, "piece", {});
     kernel.set_items_table(&items);
     opennova::mission::KernelBootOptions options;
@@ -564,11 +560,50 @@ int test_piece_spawn_clears_class_selectors() {
     options.seat_specs = false;
     options.terrain = false;
     std::string error;
-    CHECK(kernel.boot(options, error));
+    return kernel.boot(options, error);
+}
+
+// A palm fragment's spawn seed (palm_transition's): item 900, falling.
+Entity palm_fragment_seed() {
+    Entity fragment;
+    fragment.kind = EntityKind::Building; fragment.item_id = 900;
+    fragment.position = {0, 0, 10}; fragment.spawn_position = fragment.position;
+    fragment.uniform_scale_q16 = 65536;
+    fragment.engine_flags = kEntityFlagDead; fragment.alive = false; fragment.health = 20;
+    fragment.item_section_piece = true;
+    fragment.palm_fragment = true;
+    fragment.palm_state = 16;
+    fragment.death_motion = DeathMotionMode::PalmPiece;
+    fragment.veh.vel_x = 4096; fragment.veh.slide_z = 4096;
+    return fragment;
+}
+
+// A piece is the memset template clone carrying its def, so the def's render
+// tag (the `tree` row's sway renderer) draws it. A section clone's template
+// pins its event and update callbacks, so the def's door event, door, squib
+// and ewep rows never reach it; a palm fragment takes item 900's own pair, so
+// they stand as its def resolves them, and its squib motor is its one update:
+// the palm piece motion does not run beside it. Neither template sets a door
+// slot base, so no piece keeps door rows.
+// [orig: Entity_SpawnSectionEntity @0x440350 / @0x440365 / @0x440370;
+//  Projectile_SpawnFromTile @0x53C2CD / @0x53C35D / @0x53C36F;
+//  Render_SectorEntity @0x5C431B; Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53]
+int test_piece_spawn_class_selectors() {
+    const char definitions[] = "begin Tower\r\n id 105050\r\n type building\r\n ai_function door\r\n"
+            " move_function squib\r\n render_function tree\r\n attrib: Door\r\n num_doors 2\r\n"
+            " first_door 1\r\n open_rate 2\r\n max_angle 90\r\n hp 100\r\n end\r\n"
+            "begin GunTower\r\n id 105052\r\n type building\r\n move_function ewep\r\n hp 100\r\n end\r\n"
+            "begin DoorTower\r\n id 105053\r\n type building\r\n move_function door\r\n hp 100\r\n end\r\n"
+            "begin Fragment\r\n id 100900\r\n type object\r\n ai_function door\r\n"
+            " move_function squib\r\n render_function tree\r\n hp 100\r\n end\r\n";
+    opennova::def::DefItemsFile items{};
+    opennova::mission::MissionKernel kernel;
+    CHECK(boot_piece_kernel(kernel, items, definitions, sizeof(definitions) - 1));
     Entity seed;
     seed.kind = EntityKind::Building; seed.item_id = 5050; seed.item_type = 5;
     seed.health = 20; seed.engine_flags = 6; seed.alive = false;
     seed.item_section_piece = true;
+    seed.section_clone = true;
     seed.death_motion = DeathMotionMode::SectionFalling;
     const auto handle = kernel.spawn_item_piece(seed);
     CHECK(handle.valid());
@@ -576,9 +611,51 @@ int test_piece_spawn_clears_class_selectors() {
     CHECK(piece.has_item_def && piece.item_type == 5 && piece.health == 20);
     CHECK(piece.engine_flags == 6 && !piece.alive);
     CHECK(piece.death_motion == DeathMotionMode::SectionFalling);
-    CHECK(!piece.door_event && !piece.door_motion && piece.door_count == 0);
-    CHECK(!piece.squib.motor && !piece.render_sway);
+    CHECK(!piece.door_event && piece.door_count == 0 && !piece.squib.motor);
+    CHECK(piece.render_sway);
+    seed.item_id = 5052;
+    const auto gun_handle = kernel.spawn_item_piece(seed);
+    CHECK(gun_handle.valid() && !kernel.world.registry.get(gun_handle)->emplaced_update);
+    seed.item_id = 5053;
+    const auto door_handle = kernel.spawn_item_piece(seed);
+    CHECK(door_handle.valid() && !kernel.world.registry.get(door_handle)->door_motion);
+
+    const auto fragment_handle = kernel.spawn_item_piece(palm_fragment_seed());
+    CHECK(fragment_handle.valid() && fragment_handle.pool() == 1);
+    const Entity &leaf = *kernel.world.registry.get(fragment_handle);
+    CHECK(leaf.door_event && leaf.squib.motor && leaf.render_sway && !leaf.door_motion);
+    CHECK(leaf.door_count == 0 && leaf.death_motion == DeathMotionMode::PalmPiece);
+    kernel.world.logic_tick = 1;
+    step_item_pool(kernel.world, 1);
+    CHECK(leaf.position.x == 0.0f && leaf.position.z == 10.0f && !leaf.saved_live_valid);
+    // A later full sweep (a joiner's on each streamed topology change, the
+    // embedder's, the baseline restore's) keeps them: the selectors key on
+    // the seed's section_clone, and no piece takes door rows, from the host's
+    // sweep or a joiner's (whose pool-2 rows take the 0x10 record's).
+    const auto no_class = [](int32_t) -> uint8_t { return 0; };
+    for (const bool authority : {true, false}) {
+        kernel.world.rules.logic_authority = authority;
+        opennova::mission::resolve_item_traits(kernel.world, items, no_class);
+        const Entity &swept = *kernel.world.registry.get(handle);
+        CHECK(!swept.door_event && !swept.door_motion && swept.door_count == 0);
+        CHECK(!swept.squib.motor && swept.render_sway);
+        CHECK(!kernel.world.registry.get(gun_handle)->emplaced_update);
+        CHECK(!kernel.world.registry.get(door_handle)->door_motion);
+        const Entity &swept_leaf = *kernel.world.registry.get(fragment_handle);
+        CHECK(swept_leaf.door_event && swept_leaf.squib.motor && swept_leaf.door_count == 0);
+    }
+    kernel.world.rules.logic_authority = true;
     opennova::def::def_free_items(&items);
+
+    // An item 900 whose move_function is the door row: its fragment keeps it.
+    const char door_fragment[] = "begin Fragment\r\n id 100900\r\n type object\r\n"
+            " move_function door\r\n hp 100\r\n end\r\n";
+    opennova::def::DefItemsFile door_items{};
+    opennova::mission::MissionKernel door_kernel;
+    CHECK(boot_piece_kernel(door_kernel, door_items, door_fragment, sizeof(door_fragment) - 1));
+    const auto door_leaf = door_kernel.spawn_item_piece(palm_fragment_seed());
+    CHECK(door_leaf.valid() && door_kernel.world.registry.get(door_leaf)->door_motion);
+    opennova::def::def_free_items(&door_items);
     return 0;
 }
 
@@ -738,7 +815,7 @@ int main() {
     if (test_destroy_fade_phases() || test_destroy_phases_and_ambient() ||
             test_class_scoring_and_explosion_draws()) return 1;
     if (test_tower_sections() != 0) return 1;
-    if (test_piece_spawn_clears_class_selectors() != 0) return 1;
+    if (test_piece_spawn_class_selectors() != 0) return 1;
     if (test_palm_sections() != 0) return 1;
     if (test_psec_tower_section_clone_stays_inert() != 0) return 1;
     if (test_emitter_lifetime() != 0) return 1;

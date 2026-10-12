@@ -206,7 +206,7 @@ CollisionMatrix palm_matrix(const Entity &entity) {
 void palm_transition(World &world, Entity &entity, int section) {
     // Read the PUSH operands, not the decompiler's phantom ECX argument:
     // 0->1 spawns 16, 2->1 spawns 32, 0->2 spawns 17.
-    // [orig: sub_53C3E0 @ 0x53C3E0]
+    // [orig: Palm_ApplyTransition @ 0x53C3E0]
     int type = 0;
     if (section == 0 || section == 1 || section == 3 || section == 4) {
         if (entity.palm_state == 0) type = 16;
