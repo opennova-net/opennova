@@ -32,6 +32,7 @@
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
 
+#include <cmath>
 #include <cstdio>
 #include <algorithm>
 #include <deque>
@@ -3162,13 +3163,19 @@ bool check_spawned_peer_gets_periodic_retail_maintenance() {
 // Numbered spawn points are wave-backed by default. Queue joins receive an
 // exact requester-specific transient 0x6E immediately; the 1 Hz owner tick
 // releases the head through the shared deploy transaction and publishes the
-// remaining member's positional countdown.
+// remaining member's positional countdown. The release's placement resolves
+// the zone again against the player entity's team: a queued player whose body
+// a script moved to the other team lands through the no-pick arm, on its slot
+// team's start marker (D-NET-592).
 // [orig: SpawnWaveList_TryQueuePlayer @0x52A490;
-// SpawnWaveList_TickEntry @0x52A330; NetPacket_WriteSpawnWaveStatus @0x507490]
+// SpawnWaveList_TickEntry @0x52A330; NetPacket_WriteSpawnWaveStatus @0x507490;
+// Server_PositionPlayerForSpawn @0x50CFA1 / @0x50CFB1; Server_ResolveSpawnTargetHandle
+// @0x4FE175..0x4FE187]
 bool check_spawn_wave_queue_and_release_wire() {
 	opennova::world::World world;
 	world.registry.configure_pool(0, 8);
 	world.registry.configure_pool(2, 8);
+	world.registry.configure_pool(3, 8);
 	auto make_player = [&]() {
 		opennova::world::Entity entity;
 		entity.kind = opennova::world::EntityKind::Organic;
@@ -3189,6 +3196,13 @@ bool check_spawn_wave_queue_and_release_wire() {
 	zone.zone_control = 0x10000;
 	const opennova::world::EntityHandle zone_handle =
 			world.registry.spawn(2, zone);
+	// Team 1's primary start marker in a team game, far from the zone.
+	opennova::world::Entity marker;
+	marker.kind = opennova::world::EntityKind::Marker;
+	marker.item_id = 6096;
+	marker.has_item_def = true;
+	marker.position = {500.0f, 0.0f, 0.0f};
+	(void)world.registry.spawn(3, marker);
 	world.zones.spawn_waves.build_from_mission(world, 0, 2);
 
 	opennova::inmatch::NapiNPServerCtx ctx;
@@ -3287,15 +3301,34 @@ bool check_spawn_wave_queue_and_release_wire() {
 	            "wave release stages the shared deploy bundle and periodic 0x6E"))
 		return false;
 	opennova::SpawnWaveStatus remaining_status;
-	return expect(opennova::decode_spawn_wave_status(
-	                      remaining->body.data(), remaining->body.size(),
-	                      remaining_status) &&
-	                      remaining_status.groups.size() == 1 &&
-	                      remaining_status.groups[0].queued_count == 1 &&
-	                      remaining_status.groups[0].wave_countdown == 2 &&
-	                      remaining_status.groups[0].members ==
-	                              std::vector<uint16_t>{second.packed},
-	              "post-release 0x6E carries the remaining member at interval ETA");
+	if (!expect(opennova::decode_spawn_wave_status(
+	                    remaining->body.data(), remaining->body.size(),
+	                    remaining_status) &&
+	                    remaining_status.groups.size() == 1 &&
+	                    remaining_status.groups[0].queued_count == 1 &&
+	                    remaining_status.groups[0].wave_countdown == 2 &&
+	                    remaining_status.groups[0].members ==
+	                            std::vector<uint16_t>{second.packed},
+	            "post-release 0x6E carries the remaining member at interval ETA"))
+		return false;
+	if (!expect(std::fabs(world.registry.get(first)->position.x) < 0.01f &&
+	                    std::fabs(world.registry.get(first)->position.z - 1.0f) < 0.01f,
+	            "the head, on the zone's team, lands on the zone"))
+		return false;
+	// A script moves the queued body to team 2 (the entity byte alone; the slot
+	// team stays 1) before its release [orig: Entity_SetTeamByNetId @0x43C680].
+	world.registry.get(second)->team = 2;
+	for (int second_count = 0; second_count < 4 &&
+			ctx.np_protocol.connection_list[1].link.respawn_pending; ++second_count) {
+		do {
+			opennova::inmatch::Server_TickUpdate(ctx);
+		} while (!world.match.periodic_second());
+	}
+	return expect(!ctx.np_protocol.connection_list[1].link.respawn_pending &&
+	                      world.registry.get(second)->health == 100 &&
+	                      std::fabs(world.registry.get(second)->position.x - 500.0f) < 0.01f,
+	              "a release whose zone the entity's new team refuses lands on the "
+	              "slot team's start marker");
 }
 
 // Retail's cfg key `nodefaultspawnpoints` is backed by a misleadingly named

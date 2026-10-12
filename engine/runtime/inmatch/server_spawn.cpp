@@ -913,19 +913,24 @@ world::SpawnPointResult Server_PositionDeployingPlayer(const GameConfig &config,
 		player.roll = 0;
 		return held;
 	}
-	// The no-pick arm (no target handed in) positions as the slot team (+416), not
-	// the entity's (D-NET-582), and reads the slot's spectator latch/restore team
-	// beside it. Retail's placement also takes the arm for a handle its own resolve
-	// refuses; the 0x0E and the convert resolve first, a wave release does not
-	// (D-NET-592). [orig: Server_DeployPlayer @0x517863 ->
-	//  Server_PositionPlayerForSpawn @0x50CF86..0x50CFB1, @0x50D17C..0x50D1C6
-	//  (the slot team @0x50D183); the Deaths gate @0x50D1DB, the markers
-	//  @0x50D266 / @0x50D320]
+	// The placement resolves the handle it is handed again, against the player
+	// entity's team, whoever resolved it before: a wave release's zone, queued
+	// under the team its 0x0E saw, misses once the entity's team has changed.
+	// A miss, like no target, takes the no-pick arm, which positions as the slot
+	// team (+416), not the entity's (D-NET-582), and reads the slot's spectator
+	// latch/restore team beside it (D-NET-592). [orig: Server_DeployPlayer
+	//  @0x517863 -> Server_PositionPlayerForSpawn @0x50CF86..0x50CFB1 (the slot
+	//  entity pushed @0x50CFA0, the resolve @0x50CFA1, the miss @0x50CFB1),
+	//  @0x50D17C..0x50D1C6 (the slot team @0x50D183); the Deaths gate @0x50D1DB,
+	//  the markers @0x50D266 / @0x50D320; Server_ResolveSpawnTargetHandle
+	//  @0x4FE110, the team test @0x4FE175..0x4FE187]
+	const world::Entity *pick =
+			world.zones.resolve_spawn_target(player.team, target_zone.packed);
 	const world::SpawnSlotState slot_state{
 			conn.link.spectator, conn.spectator_restore_team};
 	const world::SpawnPointResult pose = world::resolve_player_spawn_pose(
-			world, player.handle, target_zone, conn.reply.player_slot,
-			conn.assigned_team, config.game_type, slot_state);
+			world, player.handle, pick != nullptr ? pick->handle : world::EntityHandle{},
+			conn.reply.player_slot, conn.assigned_team, config.game_type, slot_state);
 	if (pose.found) {
 		player.position = pose.position;
 		player.yaw = pose.yaw;
@@ -971,21 +976,17 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 		player->health = 1;                                       // entity+286 = 1 @0x519EA4
 		world.zones.spawn_waves.remove_player(conn.link.owned_entity); // @0x519EB3
 		// A request naming no target (the stock client's 0xFFFF) holds the body
-		// in place; any other handle is the deploy's target, resolved with the
-		// cleared team 0, which admits every team's spawn point. [orig:
-		//  @0x519EBC..0x519EC8; Input_HandleActionBinding @0x49B085 sends 0xFFFF;
-		//  Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
+		// in place; any other handle is the deploy's target, which the convert
+		// hands on unresolved: the placement resolves it with the cleared team
+		// 0, which admits every team's spawn point. [orig: @0x519EBC..0x519EC8,
+		//  the raw handle pushed @0x519EC3; Input_HandleActionBinding @0x49B085
+		//  sends 0xFFFF; Server_ResolveSpawnTargetHandle @0x4FE175..0x4FE187]
 		const uint16_t request = static_cast<uint16_t>(conn.reply.spectator_convert_killer);
 		conn.reply.convert_holds_pose = request == 0xFFFFu;
-		const world::Entity *target = conn.reply.convert_holds_pose
-				? nullptr
-				: world.zones.resolve_spawn_target(player->team, request);
 		// Server_DeployPlayer(player, handle) @0x519ECE: the deploy leg, its
-		// raises, placement, reset and private replies, before the 0x32. The leg
-		// takes the request's raw handle, resolved or not.
+		// raises, placement, reset and private replies, before the 0x32.
 		std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
-				ctx.config, conn, world,
-				target != nullptr ? target->handle : world::EntityHandle{}, request,
+				ctx.config, conn, world, world::EntityHandle{request}, request,
 				ctx.logs.profile);
 		if (conn.link.transport != nullptr) {
 			for (ProtocolMessage &message : deployment)
