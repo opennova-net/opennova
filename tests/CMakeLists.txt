@@ -1413,6 +1413,12 @@ add_executable(cpt_trngen_heightmap_depth_test cpt/trngen_heightmap_depth_test.c
 target_link_libraries(cpt_trngen_heightmap_depth_test PRIVATE opennova_formats)
 target_include_directories(cpt_trngen_heightmap_depth_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME cpt_trngen_heightmap_depth COMMAND cpt_trngen_heightmap_depth_test)
+# A sculpted heightmap written again: every height under its white read back exactly through a
+# 16-bit grey PNG (formats/cpt/trngen heightmap_depth.h encode_heightmap_depth16).
+add_executable(heightmap_depth_encode16_test cpt/trngen_heightmap_encode_test.cpp)
+target_link_libraries(heightmap_depth_encode16_test PRIVATE opennova_formats)
+target_include_directories(heightmap_depth_encode16_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME heightmap_depth_encode16 COMMAND heightmap_depth_encode16_test)
 
 # ENV environment/time-of-day format tests
 add_executable(env_unit_test env/env_unit_test.cpp)

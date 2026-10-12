@@ -73,6 +73,10 @@ enum class FileKind {
 	// A file an import reads besides its source (a terrain set's images), whatever its name, while a
 	// record lists it among its inputs: the game never reads it, its import's outputs are.
 	ImportInput,
+	// The one input of an import a terrain set names its heightmap (ADR 0046 S25), whatever its name: the
+	// game never reads it, its import's .cpt it does. Apart from ImportInput so that it opens as the
+	// terrain's heights (the editor's sculpting) where the set's other images open as pictures.
+	HeightmapInput,
 	kCount,         // the number of kinds, not a kind
 };
 

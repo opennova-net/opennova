@@ -288,6 +288,9 @@ constexpr FileKindFacts kRows[] = {
 	// heightmap and images), whatever its name would make it. The game never reads it: its import's
 	// outputs it does.
 	Kind(FileKind::ImportInput, ArchiveSlot::None).row,
+	// No name gives it either: it is the input a terrain set's import record lists under `heightmap`
+	// (ADR 0046 S25), whatever its name would make it. The game never reads it: its import's .cpt it does.
+	Kind(FileKind::HeightmapInput, ArchiveSlot::None).row,
 };
 
 constexpr bool same_text(const char *a, const char *b) {
@@ -325,12 +328,13 @@ constexpr bool rows_well_formed() {
 		const FileKindFacts &row = kRows[i];
 		if (static_cast<size_t>(row.kind) != i || !row.resource_kind) return false;
 		const bool read_from_nowhere = row.kind == FileKind::Archive || row.kind == FileKind::ImportSource ||
-		                               row.kind == FileKind::ImportInput || row.kind == FileKind::Unknown ||
+		                               row.kind == FileKind::ImportInput || row.kind == FileKind::HeightmapInput ||
+		                               row.kind == FileKind::Unknown ||
 		                               row.kind == FileKind::MissionText || row.kind == FileKind::Notes;
 		if ((row.archive_slot == ArchiveSlot::None) != read_from_nowhere) return false;
 		if ((row.archive_slot == ArchiveSlot::Loose) != (row.expansion_loose != ExpansionLoose::None)) return false;
 		const bool by_content = row.kind == FileKind::ImportSource || row.kind == FileKind::ImportInput ||
-		                        row.kind == FileKind::MaterialChunk;
+		                        row.kind == FileKind::HeightmapInput || row.kind == FileKind::MaterialChunk;
 		if (by_content && (*row.resource_kind || row.file_name || row.file_names || row.extensions)) return false;
 		for (size_t j = 0; j < i; ++j) {
 			const FileKindFacts &other = kRows[j];

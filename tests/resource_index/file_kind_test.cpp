@@ -209,7 +209,8 @@ static int test_boot_files() {
 // its name alone, in any case; a PNG is a texture by its name; a value past the last kind reads
 // Unknown's row.
 static int test_the_table() {
-	for (const FileKind kind : {FileKind::ImportSource, FileKind::ImportInput, FileKind::MaterialChunk}) {
+	for (const FileKind kind :
+	     {FileKind::ImportSource, FileKind::ImportInput, FileKind::HeightmapInput, FileKind::MaterialChunk}) {
 		const FileKindFacts &row = file_kind_facts(kind);
 		TEST_EXPECT(!*row.resource_kind && !row.file_name && !row.file_names && !row.extensions);
 	}

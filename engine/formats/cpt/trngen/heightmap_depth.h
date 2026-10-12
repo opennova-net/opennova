@@ -22,4 +22,11 @@ struct HeightmapDepth {
 bool decode_heightmap_depth(const std::string &name, const std::vector<uint8_t> &bytes, double top,
                             HeightmapDepth &out, std::string &why);
 
+// The samples of a 16-bit grey PNG heightmap of white `top` that decode_heightmap_depth reads back as `raw16`
+// exactly (a sculpted heightmap written again, ADR 0046 S25): each round(r x 65535 / (top x 256)), stepped to its
+// neighbour where that rounding misses r. False, with `why`, where a height has no such sample: one past the
+// white, or, under a white past 256 units (the samples then coarser than a raw step), one between two samples.
+bool encode_heightmap_depth16(const std::vector<uint16_t> &raw16, double top, std::vector<uint16_t> &samples,
+                              std::string &why);
+
 } // namespace opennova::trngen
