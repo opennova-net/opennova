@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
 				"the game text");
 
 		Service service(temp.path / "hosted.db");
-		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/true,
+		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/false,
 				[](nws::ServerConfig &config) {
 					config.hosted_provider = "local";
 					config.hosted_cap = 5;

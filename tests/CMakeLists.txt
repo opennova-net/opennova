@@ -4003,7 +4003,7 @@ if(BUILD_NOVAWORLD_HTTP)
     set_tests_properties(nw_owner_admin_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 
     # A hosted server end to end (apps/novaworld_server/hosted): an in-process service with
-    # hosted servers on (the same nw_service_harness.h, under ONNET_REQUIRE_HOST_KEY) and its
+    # hosted servers on (the same nw_service_harness.h) and its
     # supervisor running a real opennova-serve child through LocalProcessProvider over a
     # synthetic loose game directory: started from POST /api/me/server/start, listed as its
     # service account and shown as the owner's, renamed by the owner's SetServerName (game.cfg
