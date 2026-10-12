@@ -90,6 +90,8 @@ void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &docu
 	const float least = WorkspaceView::kLogicSplitLeast, most = WorkspaceView::kLogicSplitMost;
 	const float kept = std::clamp(dragged_share_ >= 0.0f ? dragged_share_ : share, least, most);
 	const float canvas = std::floor(length * kept);
+	if (keys_to_canvas_) ImGui::SetNextWindowFocus();
+	keys_to_canvas_ = false;
 	if (ImGui::BeginChild("canvas_column", stacked ? ImVec2(0.0f, canvas) : ImVec2(canvas, 0.0f)))
 		main_viewport(workspace, document);
 	ImGui::EndChild();
@@ -114,6 +116,11 @@ void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &docu
 	if (ImGui::BeginChild(terrain ? "terrain_pane" : "logic_pane", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
 		pane.draw(workspace, document);
 		(terrain ? terrain_drawn_ : pane_drawn_) = true;
+		// The Terrain pane is the picture's palette: once a click in it is over, with no field taking text, the keys
+		// go back to the picture, so a tool picked there and the view's keys (R, H, V, [ and ]) follow one another.
+		if (terrain && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+		    !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput)
+			keys_to_canvas_ = true;
 	}
 	ImGui::EndChild();
 }

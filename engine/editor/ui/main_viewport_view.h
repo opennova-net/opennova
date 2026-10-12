@@ -58,6 +58,8 @@ private:
 	bool terrain_drawn_ = false;
 	// The share the bar is dragged to while the drag lasts (negative: none).
 	float dragged_share_ = -1.0f;
+	// A click in the Terrain pane is over: the next frame gives the keys back to the picture (S25).
+	bool keys_to_canvas_ = false;
 	// The outline column's width as last drawn, the room the tab had then, and whether the author
 	// dragged it (S15: until then it follows the tab).
 	float column_width_ = 0.0f;

@@ -93,13 +93,16 @@ public:
 		const bool moved = shown != last_ && shown != TerrainToolFamily::None;
 		last_ = shown;
 		if (ImGui::BeginTabBar("terrain_tools")) {
+			// A tab's body scrolls under its tab bar, which stays in sight (a legend or a palette taller than the pane
+			// is reached with the wheel, its tabs still a click away).
 			const auto tab = [&](TerrainToolFamily each, TerrainTool first, auto draw) {
 				const ImGuiTabItemFlags flags = moved && shown == each ? ImGuiTabItemFlags_SetSelected : 0;
 				if (ImGui::BeginTabItem(terrain_tool_family_label(each), nullptr, flags)) {
 					if (selected_ != TerrainToolFamily::None && selected_ != each && !moved && shown != each)
 						set_tool(workspace, first);
 					selected_ = each;
-					draw();
+					if (ImGui::BeginChild("terrain_tab_body")) draw();
+					ImGui::EndChild();
 					ImGui::EndTabItem();
 				}
 			};
