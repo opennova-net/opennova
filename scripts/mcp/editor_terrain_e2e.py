@@ -276,7 +276,8 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
             command={"name": "tile_rotate", "ids": [stamped], "by": [1], "kind": "map"})
     turned = fields_of(query(client, "record", path=files["tiles"], id=stamped))
     expect(int(turned.get("orientation", 0)) != orientation, f"the tile did not turn: {turned}")
-    tile_at = (float(fields["x"]) + 8.0, float(fields["y"]) + 8.0)
+    # The middle of the square the game draws it over: the record's corner its north-west (the .til's y the north edge).
+    tile_at = (float(fields["x"]) + 8.0, float(fields["y"]) - 8.0)
     shoot(args, client, path, tank, tile_at, "2_tiles", map_background="colour")
 
     say("7. four Undos in the mission: the four files as loaded")

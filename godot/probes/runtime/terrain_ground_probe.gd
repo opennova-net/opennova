@@ -5,8 +5,9 @@ extends GameProbe
 ## debug_pick_entity) dropped straight down onto the point from high above, and what it meets: the terrain (its height
 ## in mission metres, and the surface class the hit reads there: the char map's, a placed tile's where one lies there),
 ## the water, or an entity standing there (named, the ground under it unread: ask beside it); the terrain's height
-## there as the world's terrain data samples it; and the placed tiles whose 16-unit square holds the point, as the
-## world loaded its tile info (each its cell, flags and layer). `x` east and `y` north, mission metres. Needs a mission.
+## there as the world's terrain data samples it; and the placed tiles whose 16-unit square, the one the game draws
+## them over, holds the point, as the world loaded its tile info (each its cell, flags and layer). `x` east and `y`
+## north, mission metres. Needs a mission.
 
 # The ray starts this far above the point (mission metres) and reaches twice as far, within the pick's longest
 # trace (mission/debug_oracles.h kDebugPickMaxRangeUnits, 2000) and over the highest ground a terrain holds (256).
@@ -40,8 +41,10 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	if terrain != null:
 		var sampled := terrain.get_height_world_bilinear(MissionObjectPlacer.bms_to_godot_position(Vector3(x, y, 0.0)))
 		data["terrain_height"] = MissionObjectPlacer.godot_to_bms_position(Vector3(from.x, sampled, from.z)).z
-	# The placed tiles whose square holds the point: x in [corner, corner + 16), y in (corner, corner + 16] over the
-	# stored frame (the record's z the plane's y negated).
+	# The placed tiles whose drawn square holds the point: the record's corner (x, z) is the square's north-west, the
+	# square 16 units east and south of it, x in [x, x + 16) and y in [z - 16, z) as the original editors' click takes
+	# it (docs/tiles/til-re.md "Where a record lies on the mission's plane"; the surface the hit reads follows the
+	# game's sampler, which tests the square's mirror across y = 0: D-TIL-9).
 	var tiles: Array = []
 	# The mission's own tiles where it places any (the world's terrain node holds them in place of the terrain's,
 	# as the game's load reads them), else the terrain's.
@@ -54,10 +57,10 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	if info != null:
 		for entry: TerrainTileEntry in info.get_entries():
 			var x0 := float(entry.get_x_fixed()) / 65536.0
-			var y0 := -float(entry.get_z_fixed()) / 65536.0
-			if x >= x0 and x < x0 + 16.0 and y > y0 and y <= y0 + 16.0:
+			var north := float(entry.get_z_fixed()) / 65536.0
+			if x >= x0 and x < x0 + 16.0 and y >= north - 16.0 and y < north:
 				tiles.append({"tile": entry.get_tile_index(), "flags": entry.get_flags(), "layer": entry.get_layer(),
-						"corner": [x0, y0]})
+						"corner": [x0, north]})
 	data["tiles"] = tiles
 	ctx.log("at %s: %s, surface %d, height %s, %d tile(s)" % [str([x, y]),
 			pick.blocked if not pick.hit else "entity " + pick.name, int(data["surface"]), str(data["height"]), tiles.size()])

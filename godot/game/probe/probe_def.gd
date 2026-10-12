@@ -584,8 +584,8 @@ static func _build_definitions() -> Array[ProbeDef]:
 				"The ground the game reads at a mission point (x east, y north, metres) on the live "
 				+ "process: the engine's pick ray dropped straight down there meets the terrain (its "
 				+ "height, the surface class the hit reads: the char map's or a placed tile's), the "
-				+ "terrain data's own height there, and the placed tiles whose square holds the point "
-				+ "(cell, flags, layer); the OpenNova Editor's terrain end to end reads it (ADR 0046 S25).",
+				+ "terrain data's own height there, and the placed tiles whose drawn square holds the "
+				+ "point (cell, flags, layer); the OpenNova Editor's terrain end to end reads it (ADR 0046 S25).",
 				RUNTIME + "terrain_ground_probe.gd", {
 					"x": { "type": "number", "default": 0.0 },
 					"y": { "type": "number", "default": 0.0 },
