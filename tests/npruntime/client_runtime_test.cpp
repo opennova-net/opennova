@@ -28,6 +28,7 @@
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/novaworld_link.h>
 #include <runtime/inmatch/host_session.h>
+#include <runtime/inmatch/join_character_profile.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -249,9 +250,13 @@ bool matches_client_header(const ProtocolPacketHeader &header,
 
 bool build_joiner_client_auth(inmatch::JoinRole role,
 		std::string password, ClientAuth &out,
-		std::string server_password = {}, bool password_required = false) {
+		std::string server_password = {}, bool password_required = false,
+		std::string side_password = {}, uint32_t server_flags = 0,
+		const inmatch::CharacterJoinVars *installed_vars = nullptr) {
 	inmatch::JoinerConnection joiner("SpectatorWire");
-	joiner.set_join_request(role, std::move(password), std::move(server_password));
+	joiner.set_join_request(role, std::move(password), std::move(server_password),
+			std::move(side_password));
+	if (installed_vars != nullptr) joiner.set_character_join_vars(*installed_vars);
 	const std::vector<uint8_t> hello_datagram = joiner.start();
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
@@ -266,6 +271,7 @@ bool build_joiner_client_auth(inmatch::JoinRole role,
 			build_server_hello(hello, 0x7F000001u, 32768);
 	server_hello.hk = 0xAABBCCDDu;
 	server_hello.sf = password_required ? 1u : 0u;
+	server_hello.p2 = server_flags;
 	const std::vector<uint8_t> reply = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_HELLO,
 			server_hello_to_bytes(server_hello));
@@ -292,6 +298,47 @@ bool auth_has_cu(const ClientAuth &auth,
 		}
 	}
 	return false;
+}
+
+// A joiner's ClientAuth TR is the join's side requirement, which only -1 is
+// ever stored to: every join sends one TR=-1, whatever the server's flag word
+// offers (TeamChoose, the side passwords, spectators) and whichever role it
+// takes, from the fresh profile or the installed projection; PRE.MNU has no
+// team control, the side coming from the side password (D-NET-590).
+// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23; Config_SetDefaults
+//  @0x54d1fa; UI_PreGameMenuStateMachine @0x568c55;
+//  CNapiServerInfo_SerializeToSession @0x4c3ac7..0x4c3b0c]
+bool run_every_join_sends_the_automatic_tr() {
+	const inmatch::CharacterJoinVars projection =
+			inmatch::character_join_vars(inmatch::JoinCharacterProfile{});
+	for (const uint32_t flags : {0x0u, 0x4u, 0x904u, 0x934u, 0x693Cu}) {
+		for (const auto role : {inmatch::JoinRole::Player, inmatch::JoinRole::Spectator}) {
+			for (const inmatch::CharacterJoinVars *installed :
+					{static_cast<const inmatch::CharacterJoinVars *>(nullptr), &projection}) {
+				ClientAuth auth;
+				if (!expect(build_joiner_client_auth(role, "", auth, "", false, "redSECRET",
+									flags, installed),
+							"the join's ClientAuth builds")) {
+					return false;
+				}
+				int tr_count = 0;
+				for (const std::vector<uint8_t> &blob : auth.cu) {
+					uint8_t type = 0;
+					std::string name, value;
+					if (parse_client_cu_chunk(blob.data(), blob.size(), type, name, value) &&
+							name == "TR")
+						++tr_count;
+				}
+				if (!expect(tr_count == 1 && auth_has_cu(auth, "TR", "-1"),
+							"every join sends one TR=-1 whatever the server's flags")) {
+					std::fprintf(stderr, "  flags 0x%X role %d %s\n", flags,
+							static_cast<int>(role), installed ? "projection" : "fresh");
+					return false;
+				}
+			}
+		}
+	}
+	return true;
 }
 
 bool run_spectator_clientauth_and_state_latch() {
@@ -891,9 +938,9 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	inmatch::JoinerConnection joiner("JoinTokens");
 	joiner.set_expansion_version_root(cc_root.string());
 	joiner.set_join_request(inmatch::JoinRole::Player, "", "", "SideSecret");
-	inmatch::CharacterJoinVars side_profile;
+	inmatch::CharacterJoinVars side_profile =
+			inmatch::character_join_vars(inmatch::JoinCharacterProfile{});
 	side_profile.char_id[0] = 0x2101;
-	side_profile.team_request = 1;
 	joiner.set_character_join_vars(side_profile);
 	joiner.set_app_id("3225");
 	joiner.set_cd_cookie(cookie);
@@ -1980,7 +2027,7 @@ bool run_roundtrip() {
 	inmatch::CharacterJoinVars join_profile;
 	join_profile.char_id[0] = 0x0400; // nat 0, div 0, combo 2, good
 	join_profile.char_id[1] = 0x8407; // nat 7, div 0, combo 2, evil
-	join_profile.team_request = 0xFF;
+	join_profile.team_request = 0xFF; // the join's side requirement, TR=-1 (D-NET-590)
 	join_profile.char_class[0] = 6;
 	join_profile.char_class[1] = 6;
 	// Avatar bytes past 0x7F (a hand-edited player.sav voice pair, D-PLAYERINFO-28):
@@ -2931,6 +2978,37 @@ bool run_host_client_discards_authority_owned_reload_echoes() {
 		return false;
 	return expect(host_view.drain_reload_notifications().empty(),
 	              "host client does not retain authority-owned reload notifications");
+}
+
+// The listen host's own client reports its connection-quality level over its loopback as a
+// joiner does: one C2S 0x4C [u8 level] on the 311th client frame and every 311th after it, in a
+// session; out of a session (single player) the timer runs and nothing is sent.
+// [orig: Client_ProcessNetworkFrame @0x42C180 - the timer @0x42C22D..0x42C23E, is_in_session
+//  @0x42C240, is_mp_session_peer @0x42C24E, the queue @0x42C279 (no authority test)]
+bool run_host_client_reports_its_quality_over_the_loopback() {
+	for (const bool session : {true, false}) {
+		ns::LoopbackChannel host_loop;
+		inmatch::ClientRuntime host_view(host_loop);
+		host_view.view().set_mp_session(session);
+		host_view.set_net_quality_level(2);
+		std::vector<uint32_t> report_frames;
+		for (uint32_t frame = 1; frame <= 2 * 311; ++frame) {
+			host_view.Client_ProcessNetworkFrame(frame);
+			ns::Datagram datagram;
+			while (host_loop.host_recv(datagram)) {
+				if (datagram.tag != c2s::CLIENT_QUALITY) continue;
+				if (!expect(datagram.body == std::vector<uint8_t>{0x02},
+						"the host's 0x4C carries its level"))
+					return false;
+				report_frames.push_back(frame);
+			}
+		}
+		if (!expect(report_frames == (session ? std::vector<uint32_t>{311, 622}
+		                                      : std::vector<uint32_t>{}),
+				"the listen client reports on its 311th frames, in a session only"))
+			return false;
+	}
+	return true;
 }
 
 bool run_host_zone_timer_value_matches_retail_entry() {
@@ -5054,7 +5132,7 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 // Game_InitNewRound clears the deploy hold. Another player's respawn edge
 // releases nothing, and the self row's first alive sample is no edge.
 // [orig: NetPacket_SerializePlayerState @0x4C1109 -> Game_InitNewRound
-//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_ProcessPlayerDeath @0x5178C5]
+//  @0x4C114C, dword_81474C = 0 @0x4227CE; Server_DeployPlayer @0x5178C5]
 bool run_self_respawn_edge_releases_a_revive_deploy() {
 	const std::string client_scrk = "CLIENT-REVIVE-EDGE-SCRK";
 	const std::string server_scrk = "SERVER-REVIVE-EDGE-SCRK";
@@ -7598,6 +7676,7 @@ int main() {
                     run_charattr_challenge_table_matches_retail() &&
                     run_charattr_latches_follow_retail() &&
 	                run_spectator_clientauth_and_state_latch() &&
+	                run_every_join_sends_the_automatic_tr() &&
 	                run_seeded_objective_layout_hint() &&
 	                run_challenge_diagnostics_pass_through_the_runtime() &&
 	                run_fire_queue_stamps_runtime_tick() &&
@@ -7611,6 +7690,7 @@ int main() {
 	                run_roundtrip_with_spawn_zones(/*under_send_holdoff=*/true) &&
 	                run_joiner_remote_reload_stamps_before_same_frame_body_tick() &&
 	                run_host_client_discards_authority_owned_reload_echoes() &&
+	                run_host_client_reports_its_quality_over_the_loopback() &&
 	                run_joiner_weapon_pickup_reaches_the_pipeline() &&
 	                run_host_zone_timer_value_matches_retail_entry() &&
 	                run_zone_timer_channels_share_one_retail_entry() &&

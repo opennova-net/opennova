@@ -300,7 +300,7 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 		// good one, any other's side-B word (+444) the evil one, then its entity's team byte
 		// cleared and Server_ChangeEntityTeam back to the slot's team, which re-stamps the
 		// NetId from those words. [orig: sub_57AEC0 @0x57AEC0, sub_57AE90 @0x57AE90 ->
-		//  MinimapSlot_FindByPackedId @0x57A270, MinimapSlot_GetFieldByIndex @0x579E70 (the
+		//  CAvatarDefs_FindComboByPackedId @0x57A270, CAvatarDefs_GetNationalityAlignment @0x579E70 (the
 		//  nationality's alignment)]
 		uint16_t evil_model = 0xFFFF;
 		uint16_t good_model = 0xFFFF;

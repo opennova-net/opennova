@@ -443,7 +443,7 @@ std::vector<std::string> trn_key_readings(const std::vector<TrnKeyLine> &keys) {
 }
 
 bool trn_value_needs_quotes(const std::string &value) {
-	// What the tokenizer ends a token or a line at outside quotes [orig: Terrain_TokenizeConfigLine @0x53CC16..0x53CC4C].
+	// What the tokenizer ends a token or a line at outside quotes [orig: Config_TokenizeLine @0x53CC16..0x53CC4C].
 	return value.find_first_of(" ,\t;") != std::string::npos || value.find("//") != std::string::npos;
 }
 
@@ -495,7 +495,7 @@ bool trn_values_of_text(const std::string &text, std::vector<std::string> &value
 			return false;
 		}
 		if (c == '"') {
-			// A quote toggles quoting and ends a token either way [orig: Terrain_TokenizeConfigLine @0x53CC4E..0x53CC70].
+			// A quote toggles quoting and ends a token either way [orig: Config_TokenizeLine @0x53CC4E..0x53CC70].
 			quoted = !quoted;
 			end_token();
 		} else if (!quoted && (c == ' ' || c == ',')) {

@@ -249,11 +249,14 @@ bool Server::start_session(std::string &error) {
 }
 
 // The listing meets the mission that just started: the live source reads the
-// new kernel and the kept server context, takes the map's columns, and the
-// Host list goes out at once, as every mission start on a NovaWorld authority
-// in session runs the server-info update outside its 1860-tick timer
-// [orig: Game_StartMission @0x5248c6..0x5248f5 -> Lobby_UpdateServerInfo ->
-//  CPlayerManager_RebuildLists @0x4d45b5 -> CNapiGameSession_SendHostUpdate].
+// new kernel and the kept server context, takes the map's columns, and both
+// lists go out in full at once, as every mission start on a NovaWorld authority
+// in session runs the server-info update outside its 1860-tick timer. The
+// starting map's is the fresh host's first full Host list: its host result
+// published nothing (D-NET-465)
+// [orig: Game_StartMission @0x5248c6..0x524903 -> Lobby_UpdateServerInfo
+//  @0x5248f5, CPlayerManager_RebuildLists(1) @0x524903 ->
+//  CNapiGameSession_SendHostUpdate @0x4d45b5].
 void Server::bind_listing() {
 	listing_->set_base(listing_columns());
 	listing_->bind(*role_, *kernel_, *lister_);

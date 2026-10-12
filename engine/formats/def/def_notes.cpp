@@ -8,7 +8,7 @@ namespace opennova::def {
 namespace {
 
 bool blank(char c) { return c == ' ' || c == '\t'; }
-// What ends a word outside quotes: a blank or a comma [orig: Terrain_TokenizeConfigLine @ 0x53CB60, the
+// What ends a word outside quotes: a blank or a comma [orig: Config_TokenizeLine @ 0x53CB60, the
 // delimiters @ 0x53CC33..0x53CC4C]. A CR or an LF inside a line (the walk splits at a CR LF pair alone,
 // defscan::for_each_def_line) is a byte of the word, as it is of the tokenizer's token.
 bool separator(char c) { return c == ' ' || c == '\t' || c == ','; }
@@ -36,7 +36,7 @@ DefNotedLine def_noted_line(const char *text, size_t length) {
 	while (at < end && blank(text[at])) ++at;
 	out.indent.assign(text, at);
 	// Words up to the comment: a `//` or a `;` outside quotes (the tokenizer's cut [orig:
-	// Terrain_TokenizeConfigLine @ 0x53CB60, the break on `//` / `;` gated on !inQuote]).
+	// Config_TokenizeLine @ 0x53CB60, the break on `//` / `;` gated on !inQuote]).
 	bool quoted = false;
 	size_t word = SIZE_MAX, comment = end;
 	std::string gap;

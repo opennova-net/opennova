@@ -70,7 +70,7 @@ const CollisionTargetView *CollisionWorld::target_view(const World &world, Entit
     // scar cache's +0xAC. The render tag binds only the draw. (A model whose own
     // first RMDL tag is a section row binds it too, and a husked fragment takes
     // its husk model's callback: D-ITEMDEF-20.)
-    // [orig: Projectile_SpawnFromTile @0x53C3B0 / @0x53C3C6; EntityDef_LoadModelsAndCallbacks
+    // [orig: Palm_SpawnFragment @0x53C3B0 / @0x53C3C6; EntityDef_LoadModelsAndCallbacks
     //  @0x43A03C..0x43A047; EntityDef_InitAllCallbacks @0x4A5AF5..0x4A5B03]
     // A tower's section clone collides at its own placement: the husk pivot is
     // the cveh / chel / tank / cpln rows' world callback, a draw the render tag

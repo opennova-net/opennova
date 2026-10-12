@@ -1359,7 +1359,7 @@ void test_local_player_landing_tick_defers_a_held_jump() {
 
 // A deploy after a mid-air death keeps the word's 0x2000: none of retail's
 // death/reset writers touch it (the deploy leg `and [eax+24h],0FFFFFFFEh`
-// @0x519fdb; Server_ProcessPlayerDeath `&= ~2` @0x51787a;
+// @0x519fdb; Server_DeployPlayer `&= ~2` @0x51787a;
 // Entity_ResetToSpawnState `&= ~2` @0x4b97b0; Server_PositionPlayerForSpawn
 // only ORs 0x20 / 0x200 @0x50d42a / @0x50d44d), and the deploy's motor reset
 // keeps the mirror with it. The first grounded tick then lands on the word's

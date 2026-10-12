@@ -1843,7 +1843,7 @@ bool decode_loadout_crc_request(const uint8_t *body, size_t len,
 
 // S2C 0x42 — the authority's charattr disable latches `[u16]` (2 B), eight of the fourteen packed
 // (inmatch/charattr_table.h charattr_pack_disabled); the joiner unpacks them over its own (a body short
-// of two bytes unpacks 0). The IDB's Input_*StateFlags names were misnomers (renamed 2026-10-07).
+// of two bytes unpacks 0). The IDB's Input_*StateFlags names were misnomers (renamed 2026-10-12).
 // [orig: NapiNPClientMsg_CharAttrDisabledProperties @ 0x4281A0 -> CharAttr_UnpackDisabledProperties
 //  @ 0x4124D0; the host's CharAttr_PackDisabledProperties @ 0x412550]
 bool decode_charattr_disabled_properties(const uint8_t *body, size_t len,
@@ -2045,7 +2045,7 @@ bool decode_terrain_load_batch(const uint8_t *body, size_t len, TerrainLoadBatch
 //     0x50f9ce; unguarded for n == 0), called with the 1-based row number on
 //     each completion (FadeEffect_UpdateAll @0x44e978..0x44e982) and with the
 //     0-based section index for EVERY selected section of a door command,
-//     transition or not (Entity_ProcessSectionDamageTransition @0x43f462).
+//     transition or not (DoorClass_HandleEvent @0x43f462).
 //   C2S 0x1A (non-authority -> host): the same command sites queue it reliable
 //     with the row's CURRENT state when row > -1 && idx != 0 && idx <= count
 //     [orig: NetPacket_SendWeaponSwitch @0x42D0C0 — gate @0x42d0f9, payload

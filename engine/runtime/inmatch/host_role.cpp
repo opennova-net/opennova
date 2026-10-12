@@ -362,8 +362,17 @@ void HostRole::drain_host_client_gameplay_requests() {
 		//  Server_TickUpdate's receive pump @0x51d895]
 		// So does its Respawn key's bodiless 0x41, which the handler applies
 		// to the host's own slot and body [orig: NetPacket_SendRequestRespawn
-		//  @0x42DBA0, its queue call @0x42DBBC; NapiNPServerMsg_ResetPlayerAmmo
+		//  @0x42DBA0, its queue call @0x42DBBC; NapiNPServerMsg_DeathTimeoutReset
 		//  @0x510540].
+		// So does its 0x4C quality report: the 310-frame leg has no authority
+		// test, and the protocol keeps one server message table, installed at
+		// init, for every connection's messages, the local one's included, so
+		// the handler stores the host's level on its own slot (its gates: the
+		// authority, the slot pointer, a short read of 0, then the clamp to 4).
+		// [orig: Client_ProcessNetworkFrame @0x42C279 ->
+		//  CNapiNetwork_QueueReliableMessage @0x4c4fa0; CNapiNetwork_Init
+		//  @0x4CA8E7 (g_NPMsgInfoServer @0x82B5D8, its 0x4C row @0x82B9E8) ->
+		//  NapiNPServerMsg_0x04C @0x5111B0]
 		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
 		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
 		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
@@ -383,7 +392,8 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
 				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
 				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE &&
-				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET) {
+				dg.tag != c2s::RESPAWN_REQUEST && dg.tag != c2s::DEATH_TIMEOUT_RESET &&
+				dg.tag != c2s::CLIENT_QUALITY) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}

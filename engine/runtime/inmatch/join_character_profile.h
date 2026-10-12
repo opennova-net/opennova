@@ -45,8 +45,18 @@ struct JoinCharacterProfile {
 	uint16_t character_ids[2] = { 0, 0 }; // CI0 / CI1
 	int player_classes[2] = { kJoinDefaultPlayerClass, kJoinDefaultPlayerClass };
 	int avatars[2] = { kJoinDefaultAvatar, kJoinDefaultAvatar };
-	int team_request = -1; // the companion assigns the side
 };
+
+// The join's side requirement, the TR byte: the join copies the low byte of
+// the config block's +0x424 (GameCfg::side_req) into the session info +0xF4,
+// and only -1 is ever stored there (the defaults, every pre-game pass; the
+// game.cfg `side_req` key is never read back, and PRE.MNU has no team
+// control: the side comes from the side password, JSP). Every join sends
+// the automatic TR=-1 (D-NET-590).
+// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23;
+//  CNapiGameSession_BuildAndCreateSession @0x56979f / @0x5697c3;
+//  Config_SetDefaults @0x54d1fa; UI_PreGameMenuStateMachine @0x568c55]
+inline constexpr int8_t kJoinSideRequirement = -1;
 
 // The selected side character when the saved tree indices still resolve to a
 // combo of the side's alignment: its packed id and head voice.
@@ -102,7 +112,7 @@ inline JoinCharacterProfile join_character_profile(
 
 // The profile as the ClientAuth tag block carries it (CharacterJoinVars): the
 // two packed ids, the two class bytes and the two avatar bytes narrowed to
-// their wire widths; a side request outside {0, 1} is the absent 0xFF.
+// their wire widths, and the side requirement's byte (0xFF, TR=-1).
 inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile &profile) {
 	inmatch::CharacterJoinVars vars{};
 	for (int side = 0; side < 2; ++side) {
@@ -111,9 +121,8 @@ inline inmatch::CharacterJoinVars character_join_vars(const JoinCharacterProfile
 				std::clamp(profile.player_classes[side], 0, 0xFF));
 		vars.avatar[side] = static_cast<uint8_t>(std::clamp(profile.avatars[side], 0, 0xFF));
 	}
-	vars.team_request = (profile.team_request == 0 || profile.team_request == 1)
-			? static_cast<uint8_t>(profile.team_request)
-			: 0xFF;
+	// [orig: UI_JoinSelectedSession @0x569bff / @0x569c23]
+	vars.team_request = static_cast<uint8_t>(kJoinSideRequirement);
 	return vars;
 }
 

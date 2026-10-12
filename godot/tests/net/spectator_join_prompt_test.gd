@@ -108,37 +108,37 @@ func test_both_passwords_have_distinct_controls() -> void:
 		assert_not_null(prompt.find_child("SpectatorPassword", true, false))
 
 
-func test_team_password_and_team_choice_prompt_before_admission() -> void:
+# A TeamChoose host with protected sides prompts for the side password and
+# offers no team control: retail's PRE.MNU holds GAME_PASSWORD, the SPECTATE /
+# PLAY radios and TEAM_PASSWORD, and every join sends the automatic TR=-1, the
+# side coming from the side password (D-NET-590, D-NET-167; the wire is pinned
+# by ctest npruntime_client_runtime).
+func test_team_choose_host_prompts_for_the_side_password_with_no_team_control() -> void:
 	var layer := Control.new()
 	add_child_autofree(layer)
 	var controller := _controller(layer)
 	var target := _target(JoinTarget.FLAG_TEAM_CHOICE | JoinTarget.FLAG_BLUE_PASSWORD
 			| JoinTarget.FLAG_RED_PASSWORD | JoinTarget.FLAG_SERVER_PASSWORD)
 	target.join_password = "prefilled"
-	target.team_request = 1
 	controller.join_lan_server(target)
 	var prompt := layer.get_node_or_null("JoinRolePrompt")
 	assert_not_null(prompt, "protected sides prompt even without spectator access")
 	if prompt == null:
 		return
+	assert_null(prompt.find_child("TeamChoice", true, false),
+			"the prompt offers no team control")
+	assert_false("team_request" in target, "a join target carries no side request")
 	var password := prompt.find_child("JoinPassword", true, false) as LineEdit
-	var choice := prompt.find_child("TeamChoice", true, false) as OptionButton
 	assert_not_null(password)
-	assert_not_null(choice)
 	assert_not_null(prompt.find_child("ServerPassword", true, false))
 	if password != null:
 		assert_true(password.secret)
 		assert_eq(password.text, "prefilled")
 		assert_eq(password.max_length, 63)
 		password.text = "unsubmitted"
-	if choice != null:
-		assert_eq(choice.item_count, 3)
-		assert_eq(choice.selected, 2, "red is the second explicit side")
-		choice.select(0)
 	var cancel := prompt.find_child("CancelJoin", true, false) as Button
 	cancel.pressed.emit()
 	assert_eq(target.join_password, "prefilled", "cancel does not commit credentials")
-	assert_eq(target.team_request, 1, "cancel does not change team preference")
 	assert_false(target.role_explicit)
 
 
@@ -152,7 +152,6 @@ func test_team_choice_alone_dials_without_a_prompt() -> void:
 			"a plain team game opens no join choice")
 	assert_eq(_target(0x904).entry_step(true), JoinTarget.ENTRY_DIAL,
 			"a stock LAN team game (P2 0x904) dials")
-	assert_eq(target.team_request, -1, "automatic is the default")
 	assert_eq(target.join_password, "", "no credential is invented")
 
 

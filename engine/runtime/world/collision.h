@@ -1161,7 +1161,8 @@ public:
     // [orig: Physics_RaycastEntityPoolsAndUpdate @0x539580]
     ProjectileHit trace_aim(const World &world, const ProjectileTrace &trace) const;
     // Squib uses the general TYPE-1 solid / whole-person sphere query.
-    // [orig: Entity_ProcessProjectileTravel @0x448D50 -> sub_539530 @0x539530]
+    // [orig: Entity_ProcessProjectileTravel @0x448D50 ->
+    //  Physics_RaycastAgainstPoolByIndex @0x539530]
     ProjectileHit trace_squib(World &world, EntityHandle source,
             const FixedVec3 &start, const FixedVec3 &end);
 

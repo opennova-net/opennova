@@ -361,7 +361,7 @@ uint16_t record_flags_word(const world::Entity &e) {
 // MinimapSlot_HasEntity @0x57b140 and reallocated via EntitySlot_LookupAndPackEntry
 // @0x57ad40 when stale; serialized at NetPacket_SerializeEntityStatesToBuffer @0x5030a0 name+21 =
 // *(u16)(entity+348)]. The REAL packing (witnessed in the packer @0x57ae47 and its decoder
-// MinimapSlot_FindByPackedId @0x57a270) is type(bits 0-4) | subtype(5-8) | index(9-14) |
+// CAvatarDefs_FindComboByPackedId @0x57a270) is type(bits 0-4) | subtype(5-8) | index(9-14) |
 // side(15) over the 288-byte minimap slot array — bit 15 is the nationality ALIGNMENT, not a
 // liveness bit (net-re §5.59; the join packer writes it from the selected
 // nationality's alignment): golden 0x0200 = index 1 on side A, 0x8207 = type 7 + index 1 on

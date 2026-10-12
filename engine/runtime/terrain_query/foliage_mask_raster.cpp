@@ -19,9 +19,27 @@ bool load_foliage_mask_raster(const std::vector<uint8_t> &pcx, const std::vector
 		out = FoliageMaskRaster();
 		return false;
 	}
-	const std::array<uint8_t, 256> remap = foliage_pixel_masks(defs);
+	out.remap = foliage_pixel_masks(defs);
 	out.masks.resize(out.codes.indices.size());
-	for (size_t i = 0; i < out.masks.size(); ++i) out.masks[i] = remap[out.codes.indices[i]];
+	for (size_t i = 0; i < out.masks.size(); ++i) out.masks[i] = out.remap[out.codes.indices[i]];
+	return true;
+}
+
+bool patch_foliage_mask_raster(FoliageMaskRaster &raster, const CoordsRect &rect, const uint8_t *src, size_t stride) {
+	const int32_t width = raster.codes.width, height = raster.codes.height;
+	if (raster.empty() || src == nullptr || rect.w <= 0 || rect.h <= 0 || rect.x < 0 || rect.z < 0 ||
+			rect.x > width - rect.w || rect.z > height - rect.h || stride < static_cast<size_t>(rect.w))
+		return false;
+	// The load's remap over the patched texels alone [orig: Foliage_LoadFoliageMapPCX @ 0x605B73..0x605B8A].
+	const std::array<uint8_t, 256> &remap = raster.remap;
+	for (int32_t row = 0; row < rect.h; ++row) {
+		const uint8_t *from = src + static_cast<size_t>(row) * stride;
+		const size_t at = static_cast<size_t>(rect.z + row) * static_cast<size_t>(width) + static_cast<size_t>(rect.x);
+		for (int32_t col = 0; col < rect.w; ++col) {
+			raster.codes.indices[at + col] = from[col];
+			raster.masks[at + col] = remap[from[col]];
+		}
+	}
 	return true;
 }
 

@@ -112,6 +112,11 @@ struct ThrowableClassRow {
     // [orig: Entity_CloneFromTemplateByType @ 0x4398a0 — the template's +0x1C
     //  gate @0x4398A5, then the block copy].
     int32_t item_type_index = 0;
+    // The def's attrib NoTarget (0x100): the model init the conversion runs
+    // on the placed entity ORs its Flags 0x8000000 [orig:
+    // Entity_ConvertRoundToPlacedEntity @0x5455B0, the Entity_InitFromModel
+    // call @0x5455D8 -> @0x40DC3B / @0x40DC4F].
+    bool no_target = false;
 };
 
 struct ThrowableClassTable {

@@ -832,6 +832,109 @@ void test_script_mount_reads_the_boot_equipped_slot() {
     }
 }
 
+// The binoculars toggle survives a mount change: only the camera reset clears
+// it, which the local player's ctrlx / drvrx attach and its UseGun attach run,
+// the UseGun's at the attach whatever the gun's slot. A sitex attach, a detach
+// and a designated-G route switch keep the toggle raised (D-WPN-49).
+// [orig: g_BinocularsToggle's writers -- the reset's @0x4DE2B3, whose only
+//  callers are Entity_AttachToVehicleSlot @0x4947ae / @0x4948b4 / @0x494959,
+//  Player_SwitchToWeaponByHandle @0x4e01fc and Entity_AttachToUseGunSlot
+//  @0x546ba4; none in Entity_DetachFromVehicle @0x4355F0 or
+//  Entity_ProcessVehicleAttach @0x435AA0; the route leg stores EquippedSlot
+//  alone, NetPacket_SerializePlayerState @0x4c139d / @0x4c13f8]
+void test_binoculars_survive_all_but_the_camera_reset() {
+    {
+        // A sitex attach, then a detach: the toggle stays raised.
+        Rig r(-2.5f);
+        LocalPlayer local(r.w);
+        r.w.local_player_state = &local;
+        look_at(r.w, r.player_h, entity_local_point_world(r.veh(), r.veh().seats[1].seat_local));
+        local.view.binoculars_requested = true;
+        CHECK(local.toggle_mount());
+        CHECK(r.player().mounted && r.player().mount_type == SeatType::Passenger);
+        CHECK(local.view.binoculars_requested);
+        // Seated, looking away from the ctrlx seat: no candidate, so the USE detaches.
+        const Vec3 at = r.player().position;
+        const Vec3 ctrl = entity_local_point_world(r.veh(), r.veh().seats[0].seat_local);
+        look_at(r.w, r.player_h, {2 * at.x - ctrl.x, 2 * at.y - ctrl.y, at.z});
+        CHECK(local.toggle_mount());
+        CHECK(!r.player().mounted);
+        CHECK(local.view.binoculars_requested);
+        r.w.local_player_state = nullptr;
+    }
+    {
+        // A ctrlx attach resets the camera, the toggle with it.
+        Rig r(2.0f);
+        LocalPlayer local(r.w);
+        r.w.local_player_state = &local;
+        local.view.binoculars_requested = true;
+        CHECK(local.toggle_mount());
+        CHECK(r.player().mount_type == SeatType::Controller);
+        CHECK(!local.view.binoculars_requested);
+        r.w.local_player_state = nullptr;
+    }
+    {
+        // A UseGun attach resets the camera at the attach, even on a gun whose
+        // slot the weapon staging cannot resolve (a carrier without EWeap).
+        Rig r(2.0f);
+        arm_usegun_seat(r);
+        r.w.rules.mp_session = true; // an unarmed player boards in a session
+        LocalPlayer local(r.w);
+        r.w.local_player_state = &local;
+        local.view.binoculars_requested = true;
+        local.weapon.nvg_scope_restore = true;
+        r.w.weather.core.scalar_channels.camera_fov_target_fp = 20 << 16;
+        CHECK(local.toggle_mount());
+        CHECK(r.player().mount_type == SeatType::Gunner);
+        CHECK(!local.view.binoculars_requested && !local.weapon.nvg_scope_restore);
+        CHECK(r.w.weather.core.scalar_channels.camera_fov_target_fp == (80 << 16));
+        r.w.local_player_state = nullptr;
+    }
+    {
+        // On a designated-G gun, a route switch to the carrier's slot resets nothing.
+        Rig r(2.0f);
+        arm_usegun_seat(r);
+        r.w.rules.mp_session = true;
+        WeaponTableEntry hull;
+        hull.name = "WPN_HULL";
+        hull.valid = true;
+        r.w.tables.weapons.entries.push_back(hull);
+        Entity carrier;
+        carrier.kind = EntityKind::Item;
+        carrier.has_item_def = true;
+        carrier.item_type = 1;
+        carrier.item_attrib = kItemAttribEweap;
+        carrier.primary_weapon = "WPN_HULL";
+        carrier.position = {200.0f, 200.0f, 10.0f};
+        const EntityHandle carrier_h = r.w.registry.spawn(1, carrier);
+        CHECK(r.w.vehicles.prepare_weapon_slot(*r.w.registry.get(carrier_h)));
+        r.veh().item_type = 2;
+        r.veh().item_attrib |= kItemAttribEweap;
+        r.veh().emplacement_attachment_flags = 0x02;
+        r.veh().emplacement_parent = carrier_h;
+        r.veh().emplacement_parent_spawn_id = r.w.registry.get(carrier_h)->registry_spawn_id;
+        r.veh().ground_target = carrier_h;
+        LocalPlayer local(r.w);
+        r.w.local_player_state = &local;
+        CHECK(local.toggle_mount());
+        CHECK(r.player().mount_type == SeatType::Gunner && r.player().use_gun_slot_swapped);
+        local.view.binoculars_requested = true;
+        local.weapon.nvg_scope_restore = true;
+        r.w.weather.core.scalar_channels.camera_fov_target_fp = 20 << 16;
+        MountSlotSelectRequest req;
+        req.applies = true;
+        req.use_parent_slot = true;
+        req.mount = r.veh_h;
+        req.parent = carrier_h;
+        local_player_apply_mount_slot_select(r.w, local.weapon, req);
+        CHECK(r.veh().primary_weapon_slot.redirect_to_parent_slot);
+        CHECK(r.player().equipped_adm_index == r.w.registry.get(carrier_h)->primary_weapon_slot_adm);
+        CHECK(local.view.binoculars_requested && local.weapon.nvg_scope_restore);
+        CHECK(r.w.weather.core.scalar_channels.camera_fov_target_fp == (20 << 16));
+        r.w.local_player_state = nullptr;
+    }
+}
+
 // The nearest-seat toggle: a free seat within the 4.0 u horizontal gate attaches; out of
 // range does nothing. [orig: @0x435d50 gate @0x436123; @0x436950]
 void test_toggle_nearest_seat() {
@@ -4306,6 +4409,7 @@ int main() {
     test_toggle_nearest_seat();
     test_unarmed_usegun_needs_the_session();
     test_script_mount_reads_the_boot_equipped_slot();
+    test_binoculars_survive_all_but_the_camera_reset();
     test_best_seat_walks_vehicle_children();
     test_seat_gates_read_the_dead_bit_alone();
     test_attach_scan_never_built_fallback_and_initial_empty_slice();
