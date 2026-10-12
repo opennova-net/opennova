@@ -165,9 +165,11 @@ public:
 	// edit.
 	bool rename(const std::string &text);
 
-	// The PLAYERNAME edit's text set, which posts the edit's change notice to
-	// the name rule above once [orig: CEditWnd_SetText @0x661900, _EditWnd
-	// vtable 0x7E2614 slot +76 - the notice 0x7000001 @0x66197f..0x661986;
+	// The PLAYERNAME edit's text set, which strips the text's first {hot}
+	// marker as a label set does (rtxt::strip_hotkey) and posts the edit's
+	// change notice to the name rule above once [orig: CEditWnd_SetText
+	// @0x661900 -> CButtonWnd_SetLabel @0x661912, _EditWnd vtable 0x7E2614
+	// slot +76 - the notice 0x7000001 @0x66197f..0x661986;
 	// PlayerInfo_HandlePlayerNameChange @0x55fbb0, registered for PLAYERNAME
 	// with mask 0x80 @0x561511]: an accepted last character, or no text,
 	// renames the record (rename); a refused one is cut and the edit set again

@@ -953,8 +953,13 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 		}
 
 		case SESSION_OPCODE_PROTOCOL_MESSAGE: {
+			// The 0x43 needs a connection whose 0x42 was accepted (the Active row the AUTH
+			// arm marks), whatever key that 0x42 carried: an empty SCRK keys the crypt like
+			// any other (D-NET-450).
+			// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - conn_flag0
+			//  @0x626AD7..0x626AE4, no key test before the local-key match @0x626B72]
 			auto conn_opt = manager_.registry().find_by_addr(peer);
-			if (!conn_opt || conn_opt->client_scrk.empty()) {
+			if (!conn_opt || conn_opt->state != ConnectionState::Active) {
 				// SESSION before AUTH completed — drop quietly.
 				std::printf("[nwudp] SESSION before AUTH from %s; dropped\n",
 				            client_label.c_str());

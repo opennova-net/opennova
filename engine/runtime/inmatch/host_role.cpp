@@ -66,6 +66,21 @@ void HostRole::set_item_catalog(
 // The rules word out of a session [orig: `mov [esi+2Ch], 4204h` @0x51E957].
 constexpr uint32_t kSpRulesWord = 0x4204u;
 
+// The is_in_session fact the mission-data block's rules word tests: a socket
+// session (a LAN or NovaWorld host, a serve host) is in session, and the
+// shell's socketless single player is not, as retail's single player creates
+// its session with the network type 0, which leaves is_in_session clear;
+// start_host_session's rules.mp_session reads the same fact (D-NET-405).
+// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E944 - `cmp
+//  g_NapiNPCtx.is_in_session, 0` / `jz` @0x51E944..0x51E94B;
+//  SinglePlayer_StartMission @0x561AF0 - CNapiNetwork_SetNetworkType(0)
+//  @0x561BD4, CNapiGameSession_CreateSession @0x561E65; CNapiNetwork_SetNetworkType
+//  @0x4C4A50 - is_in_session = (type in 1..3) @0x4C4A85;
+//  CNapiGameSession_CreateSession @0x4C97C0 keeps it clear @0x4C9817]
+static bool rules_in_session(const inmatch::HostConfig &host_cfg) {
+	return host_cfg.socket_mode != inmatch::SocketMode::Socketless;
+}
+
 // The shared bring-up preamble: a fresh loopback + owner over the kernel's
 // world and mission, the rule words the world reads at tick time, and the
 // is_in_session fact.
@@ -207,7 +222,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 void HostRole::bring_up(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
-	reset_state(host_cfg.config, host_cfg.serve_and_play, /*in_session=*/true);
+	reset_state(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg));
 	state.host_owner.host_loopback = &state.host_loop;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	inmatch::set_server_text(ctx, bringup.server_text);
@@ -251,7 +266,7 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.mission = &kernel.mission;
 	ctx.rotation = rotation_;
 	ctx.host_client = nullptr;
-	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, /*in_session=*/true);
+	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg));
 	kernel.world.crt_rand = map_change.crt_rand;
 	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data;
@@ -591,6 +606,13 @@ void HostRole::run_tick(const TickInput &input) {
 void HostRole::observe_frame_rate(int32_t fps) {
 	Role::observe_frame_rate(fps);
 	state.host_owner.ctx.stats_avg_fps = fps;
+}
+
+void HostRole::observe_cpu_share(int32_t cpu_percent) {
+	// Published before the drain, so every Server_TickUpdate of the frame
+	// copies this window's share [orig: Game_MainLoop @0x52B948, the drain
+	// @0x52BA08; Server_TickUpdate @0x51D7EA].
+	state.host_owner.ctx.stats_cpu_percent = cpu_percent;
 }
 
 void HostRole::observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) {

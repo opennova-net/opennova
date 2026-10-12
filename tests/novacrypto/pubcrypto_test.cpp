@@ -1,6 +1,9 @@
 #include <net/novacrypto/ap_alphabet.h>
+#include <net/novacrypto/crc32.h>
+#include <net/novacrypto/nwu.h>
 #include <net/novacrypto/pubcrypto.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -165,6 +168,47 @@ bool key_chain_layers() {
 	return true;
 }
 
+// A key chain's empty segment is a key like any other: the original crypts each segment's layer
+// (the buffer's CRC appended, then the ADD chain, our nwu_decrypt) with no emptiness test, so an
+// empty one runs the seed-50 chain. The chain "jop:" is two layers, "jop" then the empty key, and
+// "" one empty layer; both read back.
+// [orig: NapiNP_EncryptAndEncodeToHexAlpha @0x618FD0 - the key count @0x619029..0x619034, the
+//  CRC @0x6190A5..0x6190AE, NapiNP_EncryptBuffer @0x6190B7; NapiNP_DecodeEncryptedString
+//  @0x619130 - NapiNP_DecryptBuffer @0x6192E1]
+bool key_chain_empty_segment_is_a_key() {
+	const std::vector<uint8_t> hello = {'h', 'e', 'l', 'l', 'o'};
+	const auto layer = [](std::vector<uint8_t> buffer, const char *key) {
+		const uint32_t crc = opennova::crc32_napi(buffer.data(), buffer.size());
+		for (int shift = 0; shift < 32; shift += 8)
+			buffer.push_back(static_cast<uint8_t>((crc >> shift) & 0xFFu));
+		opennova::nwu_decrypt(buffer.data(), buffer.size(), key);
+		return buffer;
+	};
+	const std::string two = opennova::encode_key_chain(hello, "jop:");
+	if (!expect_eq(two, opennova::encode_ap(layer(layer(hello, "jop"), "")),
+	               "an empty segment layers the seed-50 chain"))
+		return false;
+	const std::string one = opennova::encode_key_chain(hello, "");
+	if (!expect_eq(one, opennova::encode_ap(layer(hello, "")), "the empty chain is one empty key"))
+		return false;
+	// The empty layer is crypted, not only the CRC appended.
+	std::vector<uint8_t> crc_only = hello;
+	const uint32_t hello_crc = opennova::crc32_napi(hello.data(), hello.size());
+	for (int shift = 0; shift < 32; shift += 8)
+		crc_only.push_back(static_cast<uint8_t>((hello_crc >> shift) & 0xFFu));
+	if (one == opennova::encode_ap(crc_only)) {
+		std::fprintf(stderr, "FAIL: the empty layer is not the identity\n");
+		return false;
+	}
+	std::vector<uint8_t> back;
+	if (!opennova::decode_key_chain(two, "jop:", back) || back != hello ||
+	    !opennova::decode_key_chain(one, "", back) || back != hello) {
+		std::fprintf(stderr, "FAIL: a chain with an empty segment reads back\n");
+		return false;
+	}
+	return true;
+}
+
 // An empty key is refused as a result, never a throw (ADR 0049 d5): false, the
 // output emptied, for either plaintext form.
 bool empty_key_is_refused() {
@@ -189,6 +233,7 @@ int main() {
 	ok = empty_key_is_refused() && ok;
 	ok = bad_values_are_rejected() && ok;
 	ok = key_chain_layers() && ok;
+	ok = key_chain_empty_segment_is_a_key() && ok;
 	if (!ok) {
 		std::fprintf(stderr, "pubcrypto_test failed\n");
 		return 1;

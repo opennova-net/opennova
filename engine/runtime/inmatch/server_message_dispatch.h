@@ -131,16 +131,19 @@ struct ServerDispatchInputs {
 	NapiNPServerCtx *server_ctx = nullptr;
 };
 
-// The 0x580 send set shared by the player-death 0x54 split and the C2S 0x2E
-// medic call: an in-match connection (slot state 6/7), on `team`, whose
-// player class carries the charattr Medic bit. The filter reads no entity
-// health or dead bit, and the death path never rewrites the slot state, so a
-// dead medic stays a recipient.
+// The 0x580 send set shared by the player-death 0x54 split, the revive's 0x54
+// and the C2S 0x2E medic call: an in-match connection (slot state 6/7) whose
+// slot team, zero-extended, equals `team_filter`, and whose player class
+// carries the charattr Medic bit. The caller sets the filter as retail does:
+// the requester's slot team (zero-extended) for the medic call, the victim
+// entity's team byte (sign-extended) for the death and the revive. The
+// filter reads no entity health or dead bit, and the death path never
+// rewrites the slot state, so a dead medic stays a recipient.
 // [orig: NapiNPServer_SendFiltered @0x4C87E0 — bit 0x80 slot+0x20 in {6,7}
 //  @0x4c8948..0x4c8953, bit 0x100 slot+0x1A0 == filter @0x4c896a..0x4c8977,
 //  bit 0x400 CharAttr_ClassHasAttribute(class, Medic) @0x4c8990..0x4c89a8]
 bool is_medic_recipient(const NapiNPConnection &candidate,
-		const world::World &world, uint8_t team);
+		const world::World &world, int32_t team_filter);
 
 std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       NapiNPConnection &conn,

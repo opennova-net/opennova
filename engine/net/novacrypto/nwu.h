@@ -54,8 +54,12 @@ inline constexpr uint32_t NWU_LCG_MAGIC = 78665521u; // 0x04B05731
 uint32_t nwu_compute_seed(std::string_view key);
 
 // Encrypt / decrypt in place. Returns the number of bytes processed (== len
-// on success, 0 on invalid input). Calling `nwu_decrypt` after `nwu_encrypt`
-// with the same key restores the original bytes.
+// on success, 0 for a null or empty buffer). Calling `nwu_decrypt` after
+// `nwu_encrypt` with the same key restores the original bytes. An empty key
+// runs the chain like any other, seeded 50 with only the key-byte pass
+// skipped, so it is not the identity (D-NET-450).
+// [orig: NapiNP_DecryptBuffer @0x618880 - @0x618898; NapiNP_EncryptBuffer
+//  @0x6187B0 - @0x6187C8]
 size_t nwu_encrypt(uint8_t *buf, size_t len, std::string_view key);
 size_t nwu_decrypt(uint8_t *buf, size_t len, std::string_view key);
 

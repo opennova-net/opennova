@@ -76,6 +76,53 @@ inmatch::TickInput tick_input(int32_t viewport_height) {
 	return in;
 }
 
+// The shell's single player takes the out-of-session rules word (D-NET-405).
+// The game shell's SP comes up through the staged record (the SP config,
+// mpattrib 0x3A06, socketless): out of a session the mission-data block's
+// rules word is the literal 0x4204, never the config word; a LAN host with
+// the same config is in a session and takes the config word. The derived
+// bits follow the word: NoFriendlyFire 0x200 set, AutoScopeZero 0x10000
+// clear, in both.
+// [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E944..0x51E957]
+// Its own frame: main's is near the stack limit with every block's locals.
+void check_shell_single_player_rules_word(std::map<std::string, std::string> &files) {
+	for (const inmatch::SocketMode mode :
+			{inmatch::SocketMode::Socketless, inmatch::SocketMode::Lan}) {
+		auto kernel_storage = std::make_unique<ms::MissionKernel>();
+		auto &kernel = *kernel_storage;
+		auto role_storage = std::make_unique<inmatch::HostRole>();
+		inmatch::HostRole &role = *role_storage;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "synth", source_over(&files));
+		ms::KernelBootOptions options;
+		options.game_type = mission_game_type(kernel.mission);
+		options.mp_session = mode != inmatch::SocketMode::Socketless;
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.config = inmatch::singleplayer_game_config(options.game_type, nullptr);
+			cfg.socket_mode = mode;
+			cfg.serve_and_play = true;
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(error.empty());
+		CHECK(host.host_owner.ctx.config.mp_attributes == 0x3A06u);
+		if (mode == inmatch::SocketMode::Socketless) {
+			CHECK(kernel.world.rules.mpattrib == 0x4204u);
+			CHECK(!kernel.world.rules.mp_session);
+		} else {
+			CHECK(kernel.world.rules.mpattrib == 0x3A06u);
+			CHECK(kernel.world.rules.mp_session);
+		}
+		CHECK(kernel.world.rules.no_friendly_fire);
+		CHECK(!kernel.world.rules.auto_scope_zero);
+	}
+}
+
 } // namespace
 
 int main() {
@@ -327,6 +374,9 @@ int main() {
 			CHECK(live_hull.primary_weapon_slot.clip == 123 && live_hull.primary_weapon_slot.reserve == 321);
 		}
 	}
+
+	// --- the shell's single player takes the out-of-session rules word ------
+	check_shell_single_player_rules_word(files);
 
 	// --- the dedicated (HostOnly) bring-up -----------------------------------
 	{
@@ -1032,6 +1082,18 @@ int main() {
 			CHECK(own->reply.client_quality == host.host_owner.ctx.net_quality_level);
 			CHECK(host.client_runtime->state().roster[slot].quality == 1);
 		}
+	}
+
+	// The window's CPU share reaches the server context before the drain, where
+	// every tick's 0x0A server-status block copies it (capped in the fan)
+	// [orig: Game_MainLoop @0x52B948, the drain @0x52BA08; Server_TickUpdate
+	//  @0x51D7EA..0x51D7FB].
+	{
+		inmatch::HostRole role;
+		role.observe_cpu_share(37);
+		CHECK(role.state.host_owner.ctx.stats_cpu_percent == 37);
+		role.observe_cpu_share(300);
+		CHECK(role.state.host_owner.ctx.stats_cpu_percent == 300);
 	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");

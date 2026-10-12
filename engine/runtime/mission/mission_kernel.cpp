@@ -825,6 +825,8 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	local.look_settings = previous.local.look_settings;
 	local.carry_process_globals_from(previous.local);
 	world.script.vars.carry_declared_from(previous.world.script.vars);
+	// ...and WAC's DO choices and RND, which no mission load clears (D-EVT-15).
+	world.script.vars.carry_wac_kept_from(previous.world.script.vars);
 	// [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]
 	world.entity_update_counter = previous.world.entity_update_counter;

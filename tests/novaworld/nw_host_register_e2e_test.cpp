@@ -252,6 +252,93 @@ int main() {
 		opennova::net::close_socket(reordered_client);
 	}
 
+	// D-NET-450: an Auth without SCRK keys the session with the empty key. The 0x43 gate is the
+	// connection whose 0x42 was accepted (its Active row), never its key, so an SCRK-less
+	// client's 0x43, its record region crypted under the empty key, is admitted and answered.
+	// [orig: NapiNPProtocol_HandleSessionPacket @0x626A00 - conn_flag0 @0x626AD7..0x626AE4;
+	//  CNapiNPConnection_ParseMessages @0x625BC0 - @0x625DDF]
+	{
+		uint16_t keyless_port = 0;
+		auto keyless_client = opennova::net::udp_bind(0, &keyless_port);
+		expect(keyless_client.is_valid(), "SCRK-less lobby UDP socket bound");
+		auto send_keyless = [&](const std::vector<uint8_t> &dg) {
+			if (keyless_client.is_valid() && !dg.empty()) {
+				opennova::net::udp_send_to(
+						keyless_client, server_ep, dg.data(), dg.size());
+			}
+		};
+		auto receive_keyless = [&](uint8_t opcode, std::vector<uint8_t> &body, int timeout_ms) {
+			const auto deadline = std::chrono::steady_clock::now() +
+					std::chrono::milliseconds(timeout_ms);
+			uint8_t keyless_rx[4096];
+			while (keyless_client.is_valid() && std::chrono::steady_clock::now() < deadline) {
+				opennova::net::Endpoint from;
+				const int n = opennova::net::udp_recv_from(
+						keyless_client, keyless_rx, sizeof keyless_rx, from, 50);
+				if (n <= 0) continue;
+				uint8_t op = 0;
+				std::vector<uint8_t> inner;
+				if (opennova::nw_decode_inbound(
+						    keyless_rx, static_cast<size_t>(n), op, inner) &&
+				    op == opcode) {
+					body = std::move(inner);
+					return true;
+				}
+			}
+			return false;
+		};
+
+		opennova::ClientSession::Config keyless_cfg;
+		keyless_cfg.client_index = 0x4B4C4553u;
+		keyless_cfg.client_key = 0x4B4C454Bu;
+		keyless_cfg.na = "keyless:lobby";
+		send_keyless(opennova::nw_encode_outbound(
+				opennova::SESSION_OPCODE_CLIENT_HELLO,
+				opennova::client_hello_to_bytes(
+						opennova::make_client_hello(keyless_cfg, keyless_cfg.co))));
+		std::vector<uint8_t> keyless_body;
+		opennova::ServerHello keyless_hello;
+		expect(receive_keyless(opennova::SESSION_OPCODE_SERVER_HELLO, keyless_body, 1000) &&
+		               opennova::parse_server_hello(
+				               keyless_body.data(), keyless_body.size(), keyless_hello),
+		       "SCRK-less lobby Hello receives ServerHello");
+		const opennova::ClientAuth keyless_auth = opennova::make_client_auth(
+				keyless_cfg, keyless_cfg.co, keyless_hello.hk, /*client_scrk=*/"");
+		send_keyless(opennova::nw_encode_outbound(
+				opennova::SESSION_OPCODE_CLIENT_AUTH,
+				opennova::client_auth_to_bytes(keyless_auth)));
+		opennova::ServerAuth keyless_server_auth;
+		expect(receive_keyless(opennova::SESSION_OPCODE_SERVER_AUTH, keyless_body, 1000) &&
+		               opennova::parse_server_auth(
+				               keyless_body.data(), keyless_body.size(), keyless_server_auth) &&
+		               keyless_server_auth.cr != 0,
+		       "SCRK-less lobby ClientAuth receives an accepting ServerAuth");
+		const auto keyless_row = manager.registry().find_by_addr(
+				opennova::PeerAddr{0x0100007Fu, keyless_port});
+		expect(keyless_row && keyless_row->state == opennova::ConnectionState::Active &&
+		               keyless_row->client_scrk.empty(),
+		       "the SCRK-less connection is Active with an empty client key");
+
+		opennova::ProtocolPacketHeader keyless_hdr;
+		keyless_hdr.session_id = keyless_server_auth.sk;
+		keyless_hdr.seq_num = 1;
+		std::vector<uint8_t> keyless_session;
+		opennova::encode_protocol_packet_plaintext(keyless_hdr,
+				{opennova::make_protocol_message(0x00, {})}, /*scrk=*/"", keyless_session);
+		send_keyless(opennova::nw_encode_outbound(
+				opennova::SESSION_OPCODE_PROTOCOL_MESSAGE, std::move(keyless_session)));
+		opennova::ProtocolPacketHeader keyless_reply_hdr;
+		std::vector<opennova::ProtocolMessage> keyless_reply;
+		expect(receive_keyless(opennova::SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+		               keyless_body, 1000) &&
+		               opennova::decode_protocol_packet_plaintext(keyless_body.data(),
+				               keyless_body.size(), keyless_server_auth.scrk,
+				               keyless_reply_hdr, keyless_reply) &&
+		               keyless_reply_hdr.ack_count == 1,
+		       "the SCRK-less connection's empty-key 0x43 is admitted and answered");
+		opennova::net::close_socket(keyless_client);
+	}
+
 	auto send = [&](const std::vector<uint8_t> &dg) {
 		if (!dg.empty())
 			opennova::net::udp_send_to(client, server_ep, dg.data(), dg.size());

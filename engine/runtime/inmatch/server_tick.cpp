@@ -1122,7 +1122,8 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 		// alone; automatic mode sends the window directly to the Medic
 		// group. Mask 0x580 does include the host.
 		// [orig: GameEvent_PlayerDeath @0x516DD0 (mask @0x51739C, team
-		//  filter @0x5173AF); NapiNPServer_SendFiltered @0x4C87E0]
+		//  filter @0x5173AF from the victim entity's byte, movsx @0x5173A8);
+		//  NapiNPServer_SendFiltered @0x4C87E0]
 		if (victim_connection != nullptr && victim_entity != nullptr &&
 				victim_connection->link.downed_revive_seconds != 0u) {
 			auto send_downed = [&](NapiNPConnection &recipient,
@@ -1135,7 +1136,8 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 						encode_player_downed_state(state));
 			};
 			for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
-				if (!is_medic_recipient(candidate, world, victim_entity->team))
+				if (!is_medic_recipient(candidate, world,
+						static_cast<int8_t>(victim_entity->team)))
 					continue;
 				send_downed(candidate,
 						victim_connection->link.auto_medic_enabled
@@ -1970,8 +1972,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				if (!is_in_match(conn) || conn.link.transport == nullptr ||
 						conn.link.owned_entity != release.player)
 					continue;
-				// The leg takes the zone's handle, placed unresolved (D-NET-592) [orig:
-				//  SpawnWaveList_TickEntry, the Server_DeployPlayer call @0x52A3C0].
+				// The leg takes the zone's handle; its placement resolves it (D-NET-592)
+				// [orig: SpawnWaveList_TickEntry, the Server_DeployPlayer call @0x52A3C0].
 				std::vector<ProtocolMessage> deployment =
 						Server_ReleasePlayerDeployment(ctx.config, conn, world,
 								release.zone, release.zone.packed, ctx.logs.profile);
@@ -2357,12 +2359,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			conn.link.receive_silence_ms = conn.receive_inactive_ms;
 			// Built here and queued just below: the frame's CONTENT is the world
 			// after the script pass and the maintenance, before the motor step.
-			// The server-fps byte is this tick's copy of the main loop's FR
-			// counter [orig: Server_TickUpdate @0x51D7E0..0x51D7E5].
+			// The server-fps and CPU bytes are this tick's copies of the main
+			// loop's FR counter and CPU share [orig: Server_TickUpdate
+			// @0x51D7E0..0x51D7E5, @0x51D7EA..0x51D7FB].
 			conn.frame_update_staged = replication::build_connection_s2c(
 					world, conn.link, ents, conn.staged_frame_update, ctx.config.game_type,
 					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0,
-					ctx.stats_avg_fps);
+					ctx.stats_avg_fps, ctx.stats_cpu_percent);
 		}
 	}
 	// Queue the frames just built, retail's per-slot send.

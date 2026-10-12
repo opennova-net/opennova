@@ -125,6 +125,33 @@ public:
         if (word == 0) wac.dornd_seed = static_cast<uint32_t>(v);
     }
 
+    // The bank words where WAC's per-IF arrays start: the fired ticks at
+    // 0xC6BE40, the ever-fired dwords at 0xC6CE40, the active bytes at
+    // 0xC6DE40 (four to a word).
+    static constexpr uint32_t kWacFiredTickWord = kMissionVars + kGlobalVars;      // 768
+    static constexpr uint32_t kWacEverFiredWord = kWacFiredTickWord + kWacIfs;     // 1792
+    static constexpr uint32_t kWacActiveWord = kWacEverFiredWord + kWacIfs;        // 2816
+
+    // A byte store at a byte offset from the mission bank (0xC6B240, modulo
+    // 2^32), as retail's byte arrays address it: an entry of a byte array
+    // takes the byte alone, any other modelled word the byte in its lane.
+    void set_bank_byte(uint32_t offset, uint8_t v) {
+        const uint32_t word = offset >> 2;
+        const uint32_t lane = offset & 3u;
+        constexpr uint32_t kByteWords = uint32_t(kWacIfs + 2 * kWacDos) / 4;
+        if (word >= kWacActiveWord && word < kWacActiveWord + kByteWords) {
+            const uint32_t at = (word - kWacActiveWord) * 4 + lane;
+            if (at < uint32_t(kWacIfs)) wac.active[at] = v;
+            else if (at < uint32_t(kWacIfs + kWacDos)) wac.do_counter[at - kWacIfs] = v;
+            else wac.do_choice[at - kWacIfs - kWacDos] = v;
+            return;
+        }
+        const uint32_t shift = 8 * lane;
+        const uint32_t old = static_cast<uint32_t>(get_bank_word(static_cast<int32_t>(word)));
+        set_bank_word(static_cast<int32_t>(word),
+                static_cast<int32_t>((old & ~(0xFFu << shift)) | (uint32_t(v) << shift)));
+    }
+
     // WacScript_InitAndLoad's clears of WAC's state: the fired ticks, the
     // DO counters, the ever-fired dwords and the active bytes, then the DORND
     // seed. No load clears the DO choices or RND.
@@ -156,6 +183,23 @@ public:
     //  = 0xC6B640 + 4n, slot never initialised; no zeroing writer in the image]
     void carry_declared_from(const ScriptVarStore &prev) {
         for (int i = kNumberedMissionVars; i < kMissionVars; ++i) mission_[i] = prev.mission_[i];
+    }
+
+    // Carry the previous mission's DO choices and RND: no mission load stores to
+    // either (the mission start's WAC load clears the IF state and the DO
+    // counters and seeds DORND, reset_wac_load_state), so the next mission
+    // reads both at the previous run's values until it writes them. A
+    // save-game load copies the choices from its file but not RND, which lies
+    // below the copied run (unported). The restart's rewind restores the
+    // sealed start instead (D-EVT-15).
+    // [orig: g_WacLoopChoices @0xC6E640, written by WacScript_ExecuteBytecode
+    //  alone (@0x4F5A48 / @0x4F5AD0 / @0x4F5AF0) and the bank words;
+    //  g_WacVarRND @0xC6B23C, stored by WacCmd_Random @0x4ED2C8;
+    //  WacScript_LoadVarState @0x4EE520, the 0x38AC-byte copy to 0xC6B240
+    //  called @0x4EE52F]
+    void carry_wac_kept_from(const ScriptVarStore &prev) {
+        wac.do_choice = prev.wac.do_choice;
+        wac.rnd = prev.wac.rnd;
     }
 
 private:

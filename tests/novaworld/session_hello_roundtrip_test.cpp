@@ -683,8 +683,15 @@ int test_client_auth_roundtrip() {
 	src.sip  = 0x7F000001u;
 	src.spn  = 32768;
 	src.scrk = "abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXY";
+	// The writer keeps a var of type 1 or 2 alone (the blob's first byte): types 0, 3 and 0xFF,
+	// and a blob with no type byte, take no CU, and the next var is written as usual.
+	// [orig: CNapiNPConnection_SendClientJoin @0x61FE20 - @0x620210..0x62021B, @0x6202B8]
 	src.cu.push_back(std::vector<uint8_t>{0x01, 0x02, 0x03, 0x04});
 	src.cu.push_back(std::vector<uint8_t>{0xFF, 0xEE});
+	src.cu.push_back(std::vector<uint8_t>{0x03, 'N', 0x00, 0x01, 0x00, 0x00});
+	src.cu.push_back(std::vector<uint8_t>{0x00, 0x00, 0x00, 0x00});
+	src.cu.push_back(std::vector<uint8_t>{});
+	src.cu.push_back(std::vector<uint8_t>{0x02, 'M', 0x00, 0x00, 0x00});
 
 	auto bytes = client_auth_to_bytes(src);
 	TEST_EXPECT(!bytes.empty());
@@ -701,7 +708,7 @@ int test_client_auth_roundtrip() {
 	TEST_EXPECT(round.scrk == src.scrk);
 	TEST_EXPECT(round.cu.size() == 2);
 	TEST_EXPECT(round.cu[0] == src.cu[0]);
-	TEST_EXPECT(round.cu[1] == src.cu[1]);
+	TEST_EXPECT(round.cu[1] == src.cu[5]);
 	return 0;
 }
 
