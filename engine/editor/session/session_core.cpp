@@ -1260,11 +1260,6 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	// end, which ends the gesture all the same.
 	for (EditorRequest &each : planned.requests) {
 		if (outcome_.refused && each.kind != EditorRequestKind::EndEdit) continue;
-		// S25: a batch the tile tools planned on the view's .til opens it quietly (the view stays active) and notes it
-		// edited from the view: its undo, save and close scope.
-		const bool tiles = each.kind == EditorRequestKind::EditRecord && !each.path.empty() && each.path != at &&
-		                   project_file(each.path) && project_file(each.path)->kind == AssetKind::TileInfo;
-		if (tiles) documents().open_quietly(each.path, "the tile tools in " + basename_of(at) + " edit it");
 		if (each.kind == EditorRequestKind::Play) {
 			each.behind = request.behind;
 			each.fresh = request.fresh;
@@ -1272,7 +1267,6 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 			each.save_before_play = request.save_before_play;
 		}
 		serve_request(*this, each);
-		if (tiles && !outcome_.refused) documents().note_edited_from(at, documents().document_for(each.path) ? documents().document_for(each.path)->path() : each.path);
 	}
 	// What the requests came to, in the planner's words (DI-12: an item made and placed, in two files).
 	if (!outcome_.refused && !planned.words.empty()) {

@@ -246,7 +246,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_brush_spaces.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_patch.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_tile_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/tile_commands.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/terrain_view_commands.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/tile_tools.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
@@ -330,6 +330,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_heights.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_stroke_paint.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_tiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/terrain_tools_parts.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp

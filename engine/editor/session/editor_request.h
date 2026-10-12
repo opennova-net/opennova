@@ -437,6 +437,9 @@ struct EditorRequest {
 	// document at path's); `cancel` ends it dropping its steps.
 	uint64_t gesture = 0;
 	bool cancel = false;
+	// An edit_record of the Tiles tools (S25 B2, session/terrain_tiles.h): the view (a mission or a terrain) whose
+	// tile placement its edits go to; "" an ordinary edit_record.
+	std::string terrain_view;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -463,7 +466,7 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.define == b.define && a.preview_background == b.preview_background &&
 			a.keep_selection == b.keep_selection && a.create == b.create && a.event == b.event &&
 			a.variable == b.variable && a.value == b.value && a.stroke == b.stroke && a.gesture == b.gesture &&
-			a.cancel == b.cancel;
+			a.cancel == b.cancel && a.terrain_view == b.terrain_view;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

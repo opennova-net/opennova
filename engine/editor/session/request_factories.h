@@ -562,6 +562,15 @@ inline EditorRequest terrain_stroke(std::string path, TerrainStrokeAsk stroke) {
 	request.stroke = std::move(stroke);
 	return request;
 }
+// A batch of the Tiles tools from the view of the document at `view` (S25 B2: edit_record's terrain_view): to the tile
+// placement its tiles go to (`tiles`, session/terrain_family's), made first where the mission has none, the
+// selection as it was; no edits opens it alone.
+inline EditorRequest tile_edit(std::string view, std::string tiles, std::vector<Edit> edits = {}) {
+	EditorRequest request = edit_record(std::move(tiles), std::move(edits));
+	request.terrain_view = std::move(view);
+	request.keep_selection = true;
+	return request;
+}
 // The viewport over the document at `path` ("" the active one) changed as `viewport` says: the JSON
 // text of an object {kind?, device?, clock?, and the kind's options and camera} (S13 V5,
 // preview/viewports.h).

@@ -107,7 +107,7 @@ size_t g_cache_next = 0;
 bool resolve_uncached(const SessionView &view, const DocumentBase &document, TerrainFamily &out) {
 	out = TerrainFamily();
 	out.view = document.path();
-	std::string environment;
+	std::string environment, tile_set;
 	TrnConfig trn;
 	bool read = false;
 	if (const auto *mission = dynamic_cast<const MissionDocument *>(&document)) {
@@ -115,6 +115,7 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 			const mission::MissionInfo info = mission::mission_info(row->native);
 			out.terrain_name = info.terrain;
 			environment = info.environment;
+			tile_set = info.tile_set;
 		}
 		// The mission's own tiles, which the game reads in place of the terrain's [orig: Terrain_Init @ 0x60FCFD;
 		// runtime/mission/mission_sidecars.h's tiles row].
@@ -173,6 +174,8 @@ bool resolve_uncached(const SessionView &view, const DocumentBase &document, Ter
 		out.error = "The project has no terrain " + out.terrain_name + ".trn to brush.";
 		return false;
 	}
+	// [orig: Terrain_LoadEnvironmentConfig @ 0x6109C8..0x6109EE; formats/trn trn_mission_tilestrip]
+	out.tile_set = trn_mission_tilestrip(trn, tile_set);
 	const TerrainImport import = out.terrain.empty() ? TerrainImport() : terrain_uses(view, out.terrain).import;
 	for (size_t i = 0; i < kTerrainPlaneCount; ++i) {
 		const TerrainPlane plane = static_cast<TerrainPlane>(i);

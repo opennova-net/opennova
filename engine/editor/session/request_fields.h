@@ -75,6 +75,7 @@ enum class RequestFieldId : uint8_t {
 	Stroke,
 	Gesture,
 	Cancel,
+	TerrainView,
 	kCount,
 };
 

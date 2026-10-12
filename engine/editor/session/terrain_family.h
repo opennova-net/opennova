@@ -38,6 +38,9 @@ struct TerrainFamily {
 	std::array<TerrainFamilyFile, kTerrainPlaneCount> planes;
 	TerrainFamilyFile tiles;
 	std::string error;
+	// S25 B2: the tile set the view's tiles draw from, by the name the game reads it by (trn_mission_tilestrip: the
+	// mission's tile set where its header names one, else the .trn's polytrn_tilestrip, as a .TGA; "" none).
+	std::string tile_set;
 	const TerrainFamilyFile &plane(TerrainPlane p) const { return planes[static_cast<size_t>(p)]; }
 	TerrainFamilyFile &plane(TerrainPlane p) { return planes[static_cast<size_t>(p)]; }
 };

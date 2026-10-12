@@ -6065,6 +6065,13 @@ target_link_libraries(editor_tile_tools_test PRIVATE opennova_editor)
 target_include_directories(editor_tile_tools_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_tile_tools COMMAND editor_tile_tools_test)
 
+# The tile tools through the session (S25 B2): edit_record's terrain_view, the mission's .til made seeded with the
+# terrain's own tiles, the view's Undo and Save, the view's tile planners, the terrain query's tiles ops.
+add_executable(editor_tile_edit_test editor/tile_edit_test.cpp)
+target_link_libraries(editor_tile_edit_test PRIVATE opennova_editor)
+target_include_directories(editor_tile_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_tile_edit COMMAND editor_tile_edit_test)
+
 # Painting a texture used as a terrain map (S25); the retail twin paints every shipped map, undoes it and saves it
 # identical.
 add_executable(editor_texture_paint_test editor/texture_paint_test.cpp)

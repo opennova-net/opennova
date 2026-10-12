@@ -39,10 +39,17 @@ bool terrain_view_drag(const TerrainViewContext &view, const ViewportDrag &drag,
 bool terrain_view_drop(const TerrainViewContext &view, const ViewportDrop &drop, CanvasRequests &out, std::string &error,
                        bool &handled);
 
-// The tile tools' planners over preview/tile_tools (preview/terrain_tile_view.cpp): what a view's tile command, its
-// tile drop (a Stamp) and its tile drag plan as requests over the .til its tiles go to (session/terrain_family's
-// tiles), and a click's select of the tile under the point (the document view's `tiles`). False, nothing planned, with why. The commands are the original tools' (Rotate CW/CCW, Flip H/V,
-// Tile Layer Up/Down, Delete, a group's rotation about its centroid).
+// The tile tools' planners (preview/tile_commands.cpp over preview/tile_tools): what a view's tile command, its tile
+// drop (a Stamp) and its tile drag plan as requests over the .til its tiles go to (session/terrain_family's tiles: an
+// edit_record of the view's terrain_view, session/terrain_tiles.h, which makes a mission's .til on its first tile),
+// and a click's select of the tile under the point (the document view's `tiles`). False, nothing planned, with why.
+// The commands are the original tools' (Rotate CW/CCW, Flip H/V, Tile Layer Up/Down, Delete, a group's rotation about
+// its centroid) over the command's ids, none the view's selected tiles: tile_rotate's and tile_group_rotate's `by`
+// quarter turns clockwise on the plane as the views show it north up (negative the other way; a group's one quarter
+// a press), tile_flip's value h (across) or v, tile_layer's `by` 1 over the others or -1 under them. A drag takes the
+// dragged tile's corner to the ground under the point (`by`: from where the picture shows the corner), the selection
+// with it where the tile is among the selected; a stamp lays the brush's cell, turns and flips with its corner under
+// the point; each corner to whole units as Nile's stamp rounds it (`snap`: the 16-unit grid square the point lies in).
 bool plan_tile_command(const TerrainViewContext &view, const ViewportCommand &command, CanvasRequests &out,
                        std::string &error);
 bool plan_tile_drop(const TerrainViewContext &view, const ViewportDrop &drop, CanvasRequests &out, std::string &error);

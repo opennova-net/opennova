@@ -315,6 +315,12 @@ constexpr RequestField kFields[] = {
 	{ F::Cancel, "cancel", J::Boolean,
 			"end_edit's cancel (S25: Esc mid-stroke): the gesture ends dropping its step in each document, the documents "
 			"as it found them, no redo left of it." },
+	{ F::TerrainView, "terrain_view", J::String,
+			"edit_record's terrain_view (S25 B2: a batch of the Tiles tools): the mission or terrain whose view made it. "
+			"Its edits go to the tile placement that view's tiles go to (a mission's <mission>.til, made first where the "
+			"project has none, seeded with the terrain's own tiles, which the game reads only where the mission has no "
+			".til; a terrain's own under no mission), opened quietly; path, when given, must name that file. The batch "
+			"is a step of the view's undo, save and close scope; an empty batch opens the file alone." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

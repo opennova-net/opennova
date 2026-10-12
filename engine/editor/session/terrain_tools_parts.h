@@ -31,7 +31,7 @@ inline constexpr WorkspaceMember kTerrainBrushMembers[] = {
 	{"colour", WorkspaceJson::String, "The colour Colour paints, \"#RRGGBB\"."},
 	{"layer", WorkspaceJson::Integer, "The detail layer Detail paints, 0 to 3."},
 	{"cell", WorkspaceJson::Integer, "The tile set's cell Stamp places, 0 to 255."},
-	{"rotation", WorkspaceJson::Integer, "The stamped tile's quarter turns, 0 to 3."},
+	{"rotation", WorkspaceJson::Integer, "The stamped tile's quarter turns clockwise (north up), 0 to 3."},
 	{"flip_h", WorkspaceJson::Boolean, "The stamped tile flipped across."},
 	{"flip_v", WorkspaceJson::Boolean, "The stamped tile flipped up and down."},
 	{"cursor", WorkspaceJson::Numbers,

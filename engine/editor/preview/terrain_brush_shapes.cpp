@@ -69,8 +69,9 @@ void terrain_tile_square(const TerrainBrushSpace &space, TerrainPoint corner, in
 			last = p;
 		}
 	}
-	// The tick: the corner the tile's first texel lands on, turned and flipped as the tile is.
-	int at = ((rotation % 4) + 4) % 4;
+	// The tick: the corner the tile's first texel lands on (an unturned tile's south-west), turned and flipped as the
+	// tile is (preview/tile_tools tile_stamp_flags: the brush's quarters clockwise, so the corner goes west, then north).
+	int at = (4 - ((rotation % 4) + 4) % 4) % 4;
 	if (flip_h) at = (at == 0 ? 1 : at == 1 ? 0 : at == 2 ? 3 : 2);
 	if (flip_v) at = 3 - at;
 	const TerrainPoint tick = corners[at];

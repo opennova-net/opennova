@@ -1070,6 +1070,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		error = std::string("\"") + token + "\" must be a gesture's token, a whole number.";
 		return false;
 	case F::Cancel: return flag_of(json, token, request.cancel, error);
+	case F::TerrainView: return text_of(json, token, request.terrain_view, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -1200,6 +1201,7 @@ bool field_to_json(
 	case F::Stroke: out = terrain_stroke_to_json(request.stroke); return request.stroke.asked();
 	case F::Gesture: out = json_number(double(request.gesture)); return request.gesture != 0;
 	case F::Cancel: out = boolean(request.cancel); return request.cancel;
+	case F::TerrainView: out = json_string(request.terrain_view); return !request.terrain_view.empty();
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

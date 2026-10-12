@@ -19,6 +19,7 @@
 #include <editor/session/session_core.h>
 #include <editor/session/sound_play.h>
 #include <editor/session/terrain_stroke.h>
+#include <editor/session/terrain_tiles.h>
 #include <editor/session/texture_show_use.h>
 #include <editor/session/unsaved_guard.h>
 #include <editor/session/workspace_parts.h>
@@ -135,6 +136,8 @@ void serve_navigate_forward(SessionCore &core, const EditorRequest &request) {
 	core.navigation().go(false, request.steps);
 }
 void serve_edit_record(SessionCore &core, const EditorRequest &request) {
+	// A batch of the Tiles tools goes to the view's tile placement (S25 B2).
+	if (!request.terrain_view.empty()) return serve_terrain_tiles_edit(core, request);
 	core.documents().edit_record(request);
 }
 void serve_set_string_text(SessionCore &core, const EditorRequest &request) {
@@ -687,8 +690,9 @@ constexpr RequestKindRow kRows[] = {
 			"The edits, a batch over any rows (records, rows and file-wide values), applied to the "
 			"document at path as one undo step (batches sharing a nonzero gesture fold into one "
 			"until end_edit); open_first: the document opened first when it is not (a fix's "
-			"edit); keep_selection: what it adds left unselected, the selection as it was (S24).")
-			.takes(request_params({ F::Edits }, { F::Path, F::OpenFirst, F::KeepSelection }))
+			"edit); keep_selection: what it adds left unselected, the selection as it was (S24); "
+			"terrain_view: a batch of the Tiles tools, to the tile placement of that view (S25).")
+			.takes(request_params({ F::Edits }, { F::Path, F::OpenFirst, F::KeepSelection, F::TerrainView }))
 			.holds(kFiles, kDocuments)
 			.names_active()
 			.row,

@@ -855,6 +855,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			break;
 		case F::Gesture: out.gesture = 6; break;
 		case F::Cancel: out.cancel = true; break;
+		case F::TerrainView: out.terrain_view = "missions/m01.mis"; break;
 		case F::kCount: break;
 		}
 	}

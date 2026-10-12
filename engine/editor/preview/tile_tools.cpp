@@ -161,8 +161,9 @@ std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOv
 
 void tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_fixed) {
 	if (grid) {
-		x_fixed = int32_t(std::floor(x / 16.0 + 0.5) * 16.0) * 65536;
-		z_fixed = -int32_t(std::floor(y / 16.0 + 0.5) * 16.0) * 65536;
+		// The grid square the point lies in (its corner the multiple of 16 at or below it, east and north).
+		x_fixed = int32_t(std::floor(x / 16.0) * 16.0) * 65536;
+		z_fixed = -int32_t(std::floor(y / 16.0) * 16.0) * 65536;
 		return;
 	}
 	// Nile's stamp: the point's 16.16 words, truncated, plus 0x7FFF, the fraction cleared [orig: gobj sub_1000B4A1 @
@@ -174,7 +175,7 @@ void tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_
 }
 
 uint8_t tile_stamp_flags(int rotation, bool flip_h, bool flip_v) {
-	uint8_t flags = tile_turned(0, rotation);
+	uint8_t flags = tile_turned(0, -rotation);
 	if (flip_h) flags = tile_flipped(flags, true);
 	if (flip_v) flags = tile_flipped(flags, false);
 	return flags;
@@ -258,14 +259,14 @@ std::vector<Edit> plan_tile_nudge(const TilDocument &document, const std::vector
 	return out;
 }
 
-std::vector<Edit> plan_tile_move(const TilDocument &document, const std::vector<NodeId> &rows, int32_t dx, int32_t dy,
+std::vector<Edit> plan_tile_move(const TilDocument &document, const std::vector<NodeId> &rows, int64_t dx, int64_t dy,
                                  uint64_t gesture) {
 	std::vector<Edit> out;
 	if (dx == 0 && dy == 0) return out;
 	for (const TilRow *row : selected(document, rows)) {
 		TilOverlayEntry to = row->entry;
-		const int64_t x = int64_t(to.x_fixed) + int64_t(dx) * 65536;
-		const int64_t z = int64_t(to.z_fixed) - int64_t(dy) * 65536;
+		const int64_t x = int64_t(to.x_fixed) + dx;
+		const int64_t z = int64_t(to.z_fixed) - dy;
 		if (x < std::numeric_limits<int32_t>::min() || x > std::numeric_limits<int32_t>::max() ||
 		    z <= std::numeric_limits<int32_t>::min() || z > std::numeric_limits<int32_t>::max())
 			continue;

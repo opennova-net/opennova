@@ -12,9 +12,6 @@ namespace opennova::editor {
 
 class TilDocument;
 
-// STAGED, NOT WIRED: its owners are the views' tile commands (the edit_in_viewport tile_* commands and the stamp
-// drop, S25 C1) and the Terrain pane's Tiles part (ui/terrain_palettes.cpp draw_tiles_part, S25 B2).
-//
 // The tile tools (ADR 0046 S25 B2; CONTEXT.md "Terrain brush"): what the Tiles tools do to a tile placement's
 // tiles, each a batch of edits on its .til document (one undo step), ported from the original editors' own tools
 // (docs/tiles/til-re.md "The file as the editors write it"): Nile's picking, turns, flips and layer order (gobj.dll)
@@ -60,7 +57,8 @@ TilOverlayEntry tile_nudged(const TilOverlayEntry &entry, int dx, int dy, bool b
 // positions snapped down to whole units [orig: JOTACmed sub_43E910 @ 0x43E977..0x43EB54].
 std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOverlayEntry> &entries, int direction);
 // The corner a stamp at (x, y) (mission units) places: Nile's, the point to the nearest whole unit [orig: gobj
-// sub_1000B4A1 @ 0x1000B4C8..0x1000B542]; `grid` puts it on the 16-unit grid instead (the editor's own snap).
+// sub_1000B4A1 @ 0x1000B4C8..0x1000B542]; `grid` takes the corner of the 16-unit grid square the point lies in
+// instead (the editor's own snap).
 void tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_fixed);
 
 // The tile set's palette: its cells as the game cuts them (the width over 64 columns, one at least; the height over
@@ -87,8 +85,9 @@ std::vector<Edit> plan_tile_flip(const TilDocument &document, const std::vector<
 std::vector<Edit> plan_tile_layer(const TilDocument &document, const std::vector<NodeId> &rows, bool to_front);
 // The selected tiles nudged (dx, dy) steps (MED's arrows).
 std::vector<Edit> plan_tile_nudge(const TilDocument &document, const std::vector<NodeId> &rows, int dx, int dy, bool big);
-// The selected tiles moved by (dx, dy) whole units (a drag's step), `gesture` folding a drag's batches into one step.
-std::vector<Edit> plan_tile_move(const TilDocument &document, const std::vector<NodeId> &rows, int32_t dx, int32_t dy,
+// The selected tiles moved by (dx, dy), 16.16 units east and north (a drag's step), `gesture` folding a drag's
+// batches into one step; a tile the move would carry past the stored 16.16 range stays.
+std::vector<Edit> plan_tile_move(const TilDocument &document, const std::vector<NodeId> &rows, int64_t dx, int64_t dy,
                                  uint64_t gesture = 0);
 // The selected tiles turned a quarter together about their centroid (MED's group turn), `direction` its sign.
 std::vector<Edit> plan_tile_group_turn(const TilDocument &document, const std::vector<NodeId> &rows, int direction);
@@ -100,7 +99,8 @@ std::vector<Edit> plan_tile_duplicate(const TilDocument &document, const std::ve
 // A tile of `cell` stamped with its corner at (x, y) (tile_corner_at), its flags `flags`, after the last tile (drawn
 // over the others).
 std::vector<Edit> plan_tile_stamp(int cell, uint8_t flags, double x, double y, bool grid);
-// The flags byte a stamp lays: the brush's quarter turns and flips, from an unturned tile.
+// The flags byte a stamp lays: the brush's quarter turns (clockwise on the plane, as the views show it north up)
+// and flips, from an unturned tile.
 uint8_t tile_stamp_flags(int rotation, bool flip_h, bool flip_v);
 
 } // namespace opennova::editor
