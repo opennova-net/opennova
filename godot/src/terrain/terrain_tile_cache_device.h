@@ -17,6 +17,7 @@
 #include <runtime/terrain/terrain_tile_composer.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain/terrain_tile_composition_worker.h>
+#include <runtime/terrain_query/terrain_atlas_rects.h>
 #include <runtime/terrain_query/terrain_field_store.h>
 
 #include <array>
@@ -80,6 +81,21 @@ public:
 	// occupied cache pages its inclusive Q16 bounds touch.
 	bool append_terrain_scorch(
 			const opennova::terrain::TerrainScorchEntry &p_entry);
+	// The heightfield normals changed over a region (an editor's sculpt, ADR
+	// 0046 S25): the composition sources' normal quadrants `p_quadrants` (lock
+	// order) cut again from `p_normals` (the surface inputs' kept atlas), and
+	// every composed page where a normal over the heights' atlas rect
+	// `p_atlas_rect` shows (a texel the normal kernel's taps read: the rect's
+	// mission rects through `p_routing` and `p_locks`, over the composed pages'
+	// own bounds) retired, to recompose when next visible. nullopt, nothing
+	// changed, where the sources cannot take it in place (none ready, or an
+	// atlas of another shape): the caller rebuilds them.
+	std::optional<std::size_t> refresh_heightfield_normal(
+			const opennova::terrain::Rgba8Image &p_normals,
+			const std::array<bool, 4> &p_quadrants,
+			const opennova::terrain::TerrainAtlasRouting &p_routing,
+			const opennova::terrain::CoordsQuadrantLocks &p_locks,
+			const opennova::terrain::CoordsRect &p_atlas_rect);
 	// Retires the pages a destroyed entity's bounds touch (the same inclusive
 	// Q16 test); they recompose the next time they are visible.
 	std::size_t invalidate_region(int32_t p_minimum_x_q16, int32_t p_minimum_z_q16,

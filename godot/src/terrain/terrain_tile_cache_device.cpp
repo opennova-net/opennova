@@ -354,6 +354,61 @@ bool TerrainTileCacheDevice::append_terrain_scorch(
 	return true;
 }
 
+std::optional<std::size_t> TerrainTileCacheDevice::refresh_heightfield_normal(
+		const opennova::terrain::Rgba8Image &p_normals,
+		const std::array<bool, 4> &p_quadrants,
+		const opennova::terrain::TerrainAtlasRouting &p_routing,
+		const opennova::terrain::CoordsQuadrantLocks &p_locks,
+		const opennova::terrain::CoordsRect &p_atlas_rect) {
+	const std::shared_ptr<const opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot> current =
+			sources_ready_ ? async_->sources() : nullptr;
+	if (!current) {
+		return std::nullopt;
+	}
+	if (std::any_of(p_quadrants.begin(), p_quadrants.end(), [](bool on) { return on; })) {
+		auto next = std::make_shared<opennova::terrain::TerrainTileCompositionWorker::SourceSnapshot>(*current);
+		if (!opennova::terrain::refresh_terrain_tile_quadrant_source(
+					next->heightfield_normal, p_normals, p_quadrants)) {
+			return std::nullopt;
+		}
+		// A page composing from the old normals now holds a retired generation: its completion is dropped.
+		async_->install_sources(std::move(next));
+	}
+	// The composed pages' own bounds on the plane (the flat page, level 0, shows no heights), so every page
+	// a lookup of the changed normals reaches is found wherever the views left it.
+	bool any = false;
+	opennova::terrain::TerrainWorldRect bounds;
+	for (uint16_t layer = 0; layer < opennova::TerrainTileCompositionCache::kCapacity; ++layer) {
+		const std::optional<opennova::TerrainTilePageBinding> resident = cache_.resident_layer(layer);
+		if (!resident || resident->page.page_lod_level == 0) continue;
+		const opennova::TerrainTilePageKey &page = resident->page;
+		const int32_t span = opennova::TerrainTileCompositionCache::page_world_span(page.page_lod_level);
+		const int32_t x0 = page.sector_origin_x + page.page_local_x;
+		const int32_t z0 = page.sector_origin_z + page.page_local_z;
+		if (!any) {
+			bounds = opennova::terrain::TerrainWorldRect{x0, z0, x0 + span, z0 + span};
+			any = true;
+			continue;
+		}
+		bounds.x0 = std::min(bounds.x0, x0);
+		bounds.z0 = std::min(bounds.z0, z0);
+		bounds.x1 = std::max(bounds.x1, x0 + span);
+		bounds.z1 = std::max(bounds.z1, z0 + span);
+	}
+	if (!any) {
+		return std::size_t{0};
+	}
+	const auto q16 = [](int32_t units) {
+		return static_cast<int32_t>(std::clamp<int64_t>(static_cast<int64_t>(units) * 65536, INT32_MIN, INT32_MAX));
+	};
+	std::size_t retired = 0;
+	for (const opennova::terrain::TerrainWorldRect &rect : opennova::terrain::terrain_atlas_world_rects(
+				 p_routing, p_atlas_rect, bounds, opennova::terrain::kTerrainHeightTaps, p_locks)) {
+		retired += cache_.invalidate_overlapping_q16(q16(rect.x0), q16(rect.z0), q16(rect.x1), q16(rect.z1));
+	}
+	return retired;
+}
+
 std::size_t TerrainTileCacheDevice::invalidate_region(
 		int32_t p_minimum_x_q16, int32_t p_minimum_z_q16,
 		int32_t p_maximum_x_q16, int32_t p_maximum_z_q16) {

@@ -90,6 +90,15 @@ TerrainSceneSnapshot build_terrain_scene_snapshot(const CptFile &cpt,
 void refresh_terrain_scene_snapshot(TerrainSceneSnapshot &scene, const CptFile &cpt,
 		const TrnConfig &trn, const std::vector<int> &tiles, const terrain::CoordsRect &rect);
 
+// The tiles of `cpt` whose device vertices (build_terrain_tile_vertices: the
+// height under each vertex and the four the vertex normal takes around it,
+// each through the tile's own quadrant's taps) may read a texel of the atlas
+// rect `rect`, in index order; the root tile (the 1024 one, which the sector
+// walk never draws: it starts at the level-1 children) left out. A superset
+// of the tiles whose vertices change when only that rect's heights do.
+std::vector<int> terrain_tiles_reading(const CptFile &cpt, const TrnConfig &trn,
+		const terrain::CoordsRect &rect);
+
 // Orthonormal camera state in world space (column-major world-to-view, -Z
 // forward) plus the scalars retail's terrain context carries: the horizontal
 // FOV the clip cone is rebuilt from, the frame's view distance, and the
