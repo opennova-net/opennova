@@ -29,6 +29,7 @@ public:
 	int get_z_fixed() const;
 
 	void set_tile_index(int value);
+	int get_tile_index() const;
 
 	// The whole flags byte (bits 0-2 the flips and rotate the game draws, the rest carried).
 	void set_flags(int value);
