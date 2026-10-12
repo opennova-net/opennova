@@ -289,6 +289,46 @@ bool run_spawn_edge_latch_reads_the_frames_target_team() {
 			"frame team: the latch reads the target's team after the frame's 0x50");
 }
 
+// A self S2C 0x50 folded before the spawn edge: retail's handler stores the team
+// on the joiner's own dcb whether or not its mission start has made it the local
+// entity, so Player_InitPlayer and the A&D latch read the new team; L spawns on
+// it (seeded team 0, moved to 2) and defends a team-2 target (1, where the seeded
+// team attacks it, 2) [orig: NapiNPClientMsg_TeamAssign @0x431910 - the Team
+// store @0x4319EE; Player_InitPlayer @0x4E15F0 - @0x4E1809; Game_StartMission -
+// the Game_LatchAttackDefendRole call @0x5260C1].
+bool run_spawn_edge_takes_a_self_team_assign() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId,
+	                             /*game_type=*/0x10002u);
+	h.kernel->world.registry.configure_pool(1, 4);
+	w::Entity target;
+	target.has_item_def = true;
+	target.item_attrib = 0x8000u;
+	target.team = 2;
+	h.kernel->world.registry.spawn(1, target);
+	TeamAssign assign;
+	assign.entity_handle = 0x0005; // the joiner's own H
+	assign.team = 2;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packet;
+	frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+			{make_protocol_message(s2c::TEAM_ASSIGN, encode_team_assign(assign))}, packet);
+	auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+	h.role.runtime->receive(datagram.data(), datagram.size());
+	h.role.run_tick(h.input); // the net frame folds the 0x50 ahead of the spawn edge
+	const w::Entity *L = h.kernel->local.player();
+	if (!expect(h.role.local_spawned() && L != nullptr && L->team == 2,
+			"self team: L spawns on the team a pre-spawn self 0x50 assigned"))
+		return false;
+	if (!expect(h.kernel->world.round_sim.local_team == 2,
+			"self team: the round sim's team agrees"))
+		return false;
+	return expect(h.kernel->local.attack_defend_role == 1,
+			"self team: the spawn edge's latch reads the assigned team");
+}
+
 // L spawns on the in-match edge, after the boot's definition sweeps: the edge
 // binds its items.def row like the host's boot did, so L's body sounds resolve
 // through its own profile instead of the slotless "default" (silent footsteps
@@ -1831,6 +1871,7 @@ int main() {
 	ok &= run_in_match_spawn_edge();
 	ok &= run_spawn_edge_latch_reads_self_team();
 	ok &= run_spawn_edge_latch_reads_the_frames_target_team();
+	ok &= run_spawn_edge_takes_a_self_team_assign();
 	ok &= run_in_match_spawn_binds_local_player_definition();
 	ok &= run_self_handle_lifecycle();
 	ok &= run_spawn_stamps_equipped_adm_from_midframe_grant();

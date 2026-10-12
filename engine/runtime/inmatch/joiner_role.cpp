@@ -667,9 +667,9 @@ world::PlayerSpawn spawn_from_self(const JoinerConnection::SelfSpawn &s) {
 	spawn.heading_bam = s.orientation;
 	spawn.team = s.team;
 	// The named player record carries the host-stamped character selector and
-	// packed minimap/character id. Preserve both on local L just as retail's
-	// Player_InitPlayer does; dropping animSlot recreated the D-NET-146
-	// DBuggy-shadow association on the joiner's own presentation.
+	// packed minimap/character id; L keeps both (a zero animSlot recreated D-NET-146's
+	// DBuggy shadow), where retail's Player_InitPlayer keeps the NetId but restamps animSlot
+	// by Team (D-NET-570) [orig: Player_InitPlayer @0x4E15F0 - @0x4E1817..0x4E1843].
 	spawn.anim_slot = s.anim_slot;
 	spawn.minimap_net_id = s.net_id;
 	// [D-NET-112] The packed id belongs to the wire NetId ONLY. A player carries no SSN, so L
@@ -1240,7 +1240,7 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 	if (kit_seams.reseed_on_side_change && kit_seams.reseed_on_side_change())
 		if (kit_seams.push) kit_seams.push();
 	// S2C 0x50 re-latched OUR OWN team. L's team is seeded once by spawn_from_self
-	// (the join-time 0x0C record's team byte); a later assignment must move both the
+	// (the self record's team byte, or a pre-spawn 0x50's); a later one must move both the
 	// entity's Team and the round sim's presenting-client team, or friend/foe styling
 	// keeps rendering the old side. Retail does the same two writes: byte_A85B48 for
 	// the latch and entity->Team for the entity itself.

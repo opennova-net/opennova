@@ -1389,6 +1389,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 						assign.entity_handle, assign.team);
 				if (has_self_handle_ && assign.entity_handle == self_handle_) {
 					assigned_team_ = assign.team; // [orig: @0x4319db]
+					// Leg (2) lands on the joiner's own dcb whether or not its
+					// mission start has made it the local entity yet, so L spawns
+					// on it: Player_InitPlayer reads that Team.
+					// [orig: @0x4319ee; Player_InitPlayer @0x4E15F0 - @0x4E1809]
+					spawn_.team = assign.team;
 					out.self_team_changed = true;
 					out.self_team = assign.team;
 					// The re-submission exists only after the 0x1A-released
@@ -1400,9 +1405,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					// joiner pushed across the line submits a kit the new side's
 					// class can legally hold. The C2S 0x22/0x23 pair that
 					// follows (@0x431acb..0x431b05) is the replica fold's
-					// (ClientReplicaPipeline, S2C 0x50). Still deferred with
-					// witnesses in D-NET-168: Player_InitPlayer(1) @0x431b14
-					// and the minimap NetId maintenance @0x431b3a..0x431b91.
+					// (ClientReplicaPipeline, S2C 0x50), as is the identity
+					// pair @0x431b3a..0x431b91 on the replica row (D-NET-253);
+					// L's pair and the Player_InitPlayer(1) re-run @0x431b14
+					// are D-NET-570, and this leg's latch and re-submission
+					// ahead of the mission start's Player_InitPlayer, D-NET-572.
 					if (post_auth_stage_ == PostAuthStage::AwaitDeployment ||
 					    post_auth_stage_ == PostAuthStage::AwaitDeployPick ||
 					    post_auth_stage_ == PostAuthStage::AwaitDeployRelease ||
