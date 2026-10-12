@@ -233,6 +233,12 @@ the target can pull them without credentials. Then:
 from the vault into a tmpfs, and drives the remote docker engine over
 `DOCKER_HOST=ssh://`. The host never needs anything but docker and sshd.
 
+The same workflow publishes a third image, `ghcr.io/<owner>/opennova-serve`
+(`apps/serve/Dockerfile`): the headless game server the hosted game servers will run
+(ADR 0053), with no retail byte in it (`apps/serve/README.md`, "Container image").
+`app deploy` does not pull it, and nothing deploys it yet. Make the package public once,
+like the server and web images.
+
 ### The web build (game.<domain>)
 
 The browser build of the game (ADR 0049) is a third image,

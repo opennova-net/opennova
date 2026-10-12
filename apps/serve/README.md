@@ -243,3 +243,46 @@ These logs go to the working directory, in retail's names and formats:
 | 1 | The server did not start: the install did not mount, the host file did not open or named no listed mission, no port of the bind scan was free, the NovaWorld listing did not host (no gate answered, the gate was refused, the login or the host request failed; `networkconnecttype = 2` or no `--master-host` serves LAN only), or the mission did not boot. |
 | 2 | A usage error, or the `--credentials` file did not open. |
 | 3 | The session ended otherwise: a later map that did not boot, a mission exit that is not a round end, or the NovaWorld service ending the hosting. |
+
+## Container image
+
+`apps/serve/Dockerfile` builds `opennova-serve` into a Linux image (ubuntu 24.04), which
+`.github/workflows/novaworld-images.yml` publishes as `ghcr.io/<owner>/opennova-serve`
+(tagged `sha-<short>`, the branch, and `latest` on master). It is the server the hosted
+game servers run (ADR 0053); nothing deploys it yet.
+
+The image holds the binary and no game data. No retail byte goes into it, ever: the game
+data is a licensed Joint Operations install you mount yourself.
+
+| Path | What | Mount |
+|---|---|---|
+| `/opt/jo` | The install, as `--resource-dir` takes it (`resource.pff`, `localres.pff`, `language.pff`, the loose files the server reads, `expansion/jox01/` for `/exp jox01`). The entrypoint names it. | read-only (`:ro`) |
+| `/srv/serve` | The working directory (above): `game.cfg`, `activesrvr.txt`, `admin.cfg`, `admin_log.txt`, `banned.txt`, `banlist.txt` and the logs, and by convention the host file and the `--credentials` file. | a writable volume |
+
+```bash
+docker build -f apps/serve/Dockerfile -t opennova-serve .     # from the repo root
+docker run --rm --network host \
+  -v "<JO install>:/opt/jo:ro" -v "<state dir>:/srv/serve" \
+  ghcr.io/<owner>/opennova-serve /HOST /srv/serve/server.host \
+  /exp jox01 --master-host <gate> --credentials /srv/serve/credentials.txt
+```
+
+- **Arguments.** The entrypoint is `opennova-serve --resource-dir /opt/jo`, and the
+  arguments after the image name are the rest of the command line (Usage above). With
+  none, they are `/HOST /srv/serve/server.host`; arguments you give replace that default,
+  so they name `/HOST` too. A later `--resource-dir` overrides the entrypoint's, and
+  `--loose-root` serves a directory of loose files mounted at `/opt/jo`. `--help` prints
+  the usage.
+- **User.** The server runs as UID and GID 10001, never as root. A fresh named volume at
+  `/srv/serve` takes that ownership from the image; a host directory needs it first
+  (`chown 10001:10001 <state dir>`). The install needs only to be readable.
+- **Ports.** The image declares UDP 32768-32787, `game.cfg`'s stock LAN server window
+  (whose first port also heads the NovaWorld window), and TCP 32800, the remote-admin
+  port the hosted servers set as `remote_admin_port` (the stock 0 opens none). The
+  declarations are documentation only. Run a listed server with `--network host`:
+  NovaWorld takes the server's address and port from its session's own datagrams, so
+  they must be the machine's own, the ones joiners reach. For a LAN test on a bridge
+  network, publish the window instead (`-p 32768-32787:32768-32787/udp`).
+- **Stopping.** `docker stop` sends SIGTERM, which stops the server as Ctrl+C does
+  (Usage above), and it exits with the table's codes. The server installs its own
+  handlers, so it stops cleanly as the container's PID 1; `--init` works too.
