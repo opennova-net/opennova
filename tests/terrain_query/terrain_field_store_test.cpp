@@ -10,6 +10,11 @@
 //   5. The store OWNS its copies: wiping the source documents changes nothing.
 //   6. No charmap -> the zeroed map (the sampler's "no charmap -> surface 1"
 //      leg); clear() invalidates.
+//   7. patch_charmap writes a rect of the held char map in place: on an 8 x 4
+//      map, a 3 x 2 rect below row 0 from rows of 5 bytes (poison past each
+//      row's 3), every texel then the edited map's and a fresh build's over
+//      it; the view keeps its raster; a rect past the map, a short stride and
+//      a store without a char map are refused.
 
 #include <formats/cpt/cpt.h>
 #include <formats/trn/trn.h>
@@ -173,6 +178,37 @@ int main() {
 			19.0, 1e-4, "height sample survives the source documents being freed");
 	check(terrain::surface_type_at_fixed(store.surface_map(), 300 << 16, -(200 << 16)) == 3,
 			"surface sample survives the source charmap being freed");
+
+	// --- patch_charmap: a rect written in place ------------------------------
+	{
+		std::vector<uint16_t> hm(static_cast<size_t>(kDim) * kDim, 7 * 256);
+		std::vector<int> grid(256, 1);
+		// An 8 x 4 char map, each texel its own class.
+		std::vector<uint8_t> map(8 * 4);
+		for (size_t i = 0; i < map.size(); ++i) map[i] = static_cast<uint8_t>(i + 1);
+		terrain::TerrainFieldStore patched;
+		patched.build(hm.data(), hm.size(), grid.data(), 0, 0, 1, 1, false, false, {}, map.data(), 8, 4);
+		const uint8_t *before = patched.surface_map().data;
+		// A 3 x 2 rect at (2, 1), its rows 5 bytes apart, the 2 past each row's 3 poison.
+		const uint8_t src[10] = {100, 101, 102, 0xEE, 0xEE, 103, 104, 105, 0xEE, 0xEE};
+		check(patched.patch_charmap(terrain::CoordsRect{2, 1, 3, 2}, src, 5), "a rect inside the char map is written");
+		std::vector<uint8_t> edited = map;
+		for (int row = 0; row < 2; ++row)
+			for (int col = 0; col < 3; ++col) edited[static_cast<size_t>(1 + row) * 8 + 2 + col] = src[row * 5 + col];
+		check(patched.surface_map().data == before, "the patch keeps the view's raster");
+		check(std::vector<uint8_t>(before, before + 32) == edited, "every texel is the edited map's, the poison nowhere");
+		terrain::TerrainFieldStore fresh;
+		fresh.build(hm.data(), hm.size(), grid.data(), 0, 0, 1, 1, false, false, {}, edited.data(), 8, 4);
+		check(std::vector<uint8_t>(fresh.surface_map().data, fresh.surface_map().data + 32) == edited,
+				"a fresh build over the edited map holds the same texels");
+		check(!patched.patch_charmap(terrain::CoordsRect{6, 1, 3, 2}, src, 5), "a rect past the map's width is refused");
+		check(!patched.patch_charmap(terrain::CoordsRect{2, 3, 3, 2}, src, 5), "a rect past the map's height is refused");
+		check(!patched.patch_charmap(terrain::CoordsRect{2, 1, 3, 2}, src, 2), "a stride under the rect's width is refused");
+		check(std::vector<uint8_t>(before, before + 32) == edited, "a refused patch writes nothing");
+		terrain::TerrainFieldStore bare;
+		bare.build(hm.data(), hm.size(), grid.data(), 0, 0, 1, 1, false, false, {});
+		check(!bare.patch_charmap(terrain::CoordsRect{0, 0, 1, 1}, src, 1), "a store without a char map is refused");
+	}
 
 	// --- the cell masks (D-TERRAIN-16): a wrapped axis takes a cell's low four
 	// bits, one that does not wrap clamps an off-grid cell to the edge [orig:

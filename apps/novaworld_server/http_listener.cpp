@@ -483,7 +483,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"] = result.error_code;
-			out["message"] = result.error_message;
+			if (!result.error_message.empty())
+				out["message"] = result.error_message;
 			crow::response res(500);
 			res.body = out.dump();
 			res.set_header("Content-Type", "application/json");
@@ -547,13 +548,9 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 			auto db_conn = db_pool_.acquire();
 			hostdb::upsert_host(*db_conn, row);
 		} catch (const std::exception &e) {
-			crow::response res(500);
-			crow::json::wvalue out;
-			out["error"] = "upsert_failed";
-			out["message"] = e.what();
-			res.body = out.dump();
-			res.set_header("Content-Type", "application/json");
-			return res;
+			// The reply names the code alone: what() names the failing statement.
+			std::fprintf(stderr, "[http] POST /api/admin/hosts upsert failed: %s\n", e.what());
+			return json_error(500, "upsert_failed");
 		}
 		std::printf("[http] POST /api/admin/hosts injected rid=%u host=%s:%d game=%s\n",
 				static_cast<unsigned>(row.rid), loggable(row.host_ip).c_str(), row.host_port,
@@ -635,7 +632,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
-			out["message"] = result.error_message;
+			if (!result.error_message.empty())
+				out["message"] = result.error_message;
 			crow::response res(result.error_code == "db_error" ? 500 : 400);
 			res.body = out.dump();
 			res.set_header("Content-Type", "application/json");
@@ -662,7 +660,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (!result.ok) {
 			crow::json::wvalue err;
 			err["error"]   = result.error_code;
-			err["message"] = result.error_message;
+			if (!result.error_message.empty())
+				err["message"] = result.error_message;
 			res.body = err.dump();
 			res.set_header("Content-Type", "application/json");
 		}
@@ -693,7 +692,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
-			out["message"] = result.error_message;
+			if (!result.error_message.empty())
+				out["message"] = result.error_message;
 			crow::response res(
 				result.error_code == "not_found" ? 404 :
 				result.error_code == "db_error"  ? 500 : 400);
@@ -726,7 +726,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"] = result.error_code;
-			out["message"] = result.error_message;
+			if (!result.error_message.empty())
+				out["message"] = result.error_message;
 			crow::response res(result.error_code == "not_found" ? 404 :
 			                   result.error_code == "db_error"  ? 500 : 400);
 			res.body = out.dump();
@@ -813,7 +814,7 @@ void HttpListener::register_public_api_routes() {
 			out["stats"] = std::move(stats);
 		} catch (const db::SqliteError &e) {
 			std::fprintf(stderr, "[http] /api/stats failed: %s\n", e.what());
-			out["error"] = e.what();
+			out["error"] = "db_error";
 		}
 		return out;
 	});
@@ -870,7 +871,8 @@ void HttpListener::register_public_api_routes() {
 		crow::json::wvalue out;
 		if (!result.ok) {
 			out["error"]   = result.error_code;
-			out["message"] = result.error_message;
+			if (!result.error_message.empty())
+				out["message"] = result.error_message;
 			crow::response res(result.error_code == "db_error" ? 500 : 400);
 			res.body = out.dump();
 			res.set_header("Content-Type", "application/json");
@@ -905,7 +907,7 @@ void HttpListener::register_public_api_routes() {
 			out["games"] = std::move(arr);
 		} catch (const db::SqliteError &e) {
 			std::fprintf(stderr, "[http] /api/games failed: %s\n", e.what());
-			out["error"] = e.what();
+			out["error"] = "db_error";
 		}
 		return out;
 	});
