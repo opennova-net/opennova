@@ -572,12 +572,29 @@ func test_save_as_mis_writes_staged_base_heights() -> void:
 	assert_string_contains(text, "extra_bheight 0", "its base as it stands")
 	var relative := _mis_position_z(text)
 
-	# Staged heights are consumed by the save: a second save without re-staging stands the entity
-	# on no terrain (its z as it stands).
+	# Staged heights are consumed by the save: a second save without re-staging knows no terrain
+	# height, so it writes the entity locked, its z absolute as it stands, exact in the original
+	# editor over whatever terrain it loads (D-MIS-17).
 	assert_eq(m.save_as(path), OK, "a re-save without staging succeeds")
 	text = FileAccess.get_file_as_string(path)
+	assert_eq(_mis_position_z(text), 40 * 65536, "with no terrain height its z as it stands, absolute")
 	assert_eq(_mis_position_z(text) - relative, 25 * 65536, "the first save wrote z less the terrain's height")
+	assert_string_contains(text, "  height_lock 1\r\n", "with no terrain height it is written locked")
 	assert_string_contains(text, "extra_bheight 0", "no stale heights leak into the next save")
+
+	# A .mis reopened keeps the file's own frame (no terrain here to take it to the .bms's): staged
+	# heights do not apply to it, so a re-save writes every height back as it stands, never adding
+	# the terrain's height to a locked item twice.
+	var reopened := MissionData.new()
+	assert_eq(reopened.open_file(path), OK)
+	reopened.set_mis_base_heights(PackedInt32Array([25 * 65536]))
+	var again := _temp_mis_path()
+	assert_eq(reopened.save_as(again), OK)
+	var back := FileAccess.get_file_as_string(again)
+	assert_eq(_mis_position_z(back), 40 * 65536, "the reopened .mis's z written as read")
+	assert_string_contains(back, "  extra_bheight 0\r\n", "its base written as read, no height added")
+	assert_string_contains(back, "  height_lock 1\r\n", "its lock written as read")
+	DirAccess.remove_absolute(again)
 	DirAccess.remove_absolute(path)
 
 

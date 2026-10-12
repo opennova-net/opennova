@@ -376,7 +376,9 @@ bms::Entity new_entity(EntityKind kind, int item_id, int id) {
 	copy_fixed_field(entity.gen_string, sizeof(entity.gen_string), "null");
 	// No height lock, as the original editor's new item has none [orig: JOTACmed.exe
 	// MissionItem_AppendByTypeId @ 0x455954, the record zeroed]: the .mis writer writes its z
-	// relative to the terrain under it (mission_mis.h's frames, D-MIS-4).
+	// relative to the terrain under it (mission_mis.h's frames, D-MIS-4). Its base stays 0 where
+	// the original's is the placement height (@ 0x455a16): a divergence of the base alone, which
+	// reaches no .bms byte and moves only Nile's height of a locked item (D-MIS-4).
 	entity.mis_height_lock = 0;
 	return entity;
 }

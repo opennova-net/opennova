@@ -793,13 +793,14 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			// .mis-interchange transient fields (never serialized to .bms): the item's base and its
 			// lock, read as written [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292,
 			// height_lock->rec+356), misldr.dll]: an unlocked item's z and base relative to the
-			// terrain, a locked one's absolute; an absent height_lock stays 0, as the original
-			// editor writes none for an unlocked item. mis_items_to_relative / _absolute take the
-			// file to the .bms's frame (mission_mis.h).
+			// terrain, a locked one's absolute (the file's frame, bms::MisFrame::Mis); an absent
+			// height_lock stays 0, as the original editor writes none for an unlocked item.
+			// mis_items_to_bms_frame takes the file to the .bms's frame (mission_mis.h).
 			if (!token_i32(line, 1, entity.mis_extra_bheight, error)) return false;
 		} else if (key == "height_lock") {
-			if (!token_i32(line, 1, v, error)) return false;
-			entity.mis_height_lock = static_cast<uint8_t>(std::clamp<int32_t>(v, 0, 255));
+			// Raw, as the original editor reads it into an int and tests it nonzero (-1 is a lock)
+			// [orig: JOTACmed.exe MIS_ParseToken @ 0x4536c9 (atol); sub_44E640 @ 0x44e657].
+			if (!token_i32(line, 1, entity.mis_height_lock, error)) return false;
 		} else if (key == "gen_string") {
 			if (t.size() > 1 && t[1] != "null") {
 				copy_fixed_field(entity.gen_string, sizeof(entity.gen_string), t[1]);
@@ -816,6 +817,9 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &resolve_item_type,
                            bms::File &out, std::string &error, std::vector<MisIssue> *issues) {
 	initialize_mis_file(out);
+	// The heights as the file holds them (bms::MisFrame::Mis): mis_items_to_bms_frame takes them
+	// to the .bms's over the terrain.
+	out.mis_frame = bms::MisFrame::Mis;
 	const std::vector<MisLine> lines = tokenize_mis_text(text);
 	for (size_t pos = 0; pos < lines.size();) {
 		const std::vector<std::string> &t = lines[pos].tokens;

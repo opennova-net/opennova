@@ -124,9 +124,12 @@ int check(const std::string &path) {
 	std::string gen1;
 	TEST_EXPECT(write_mis_text(doc, gen1, error));
 	TEST_EXPECT(!gen1.empty());
-	// A BMS-sourced item is unlocked, as the original editor's new item: no height_lock line, its z relative to the
-	// terrain (none given here: as it stands) [orig: JOTACmed.exe MIS_SaveDocument @ 0x455889] (D-MIS-4).
-	TEST_EXPECT(gen1.find("height_lock") == std::string::npos);
+	// A BMS-sourced item is unlocked (D-MIS-4); with no terrain height known (none given here) each is written
+	// locked, its z absolute as it stands, exact in the original editor over whatever terrain it loads (D-MIS-17).
+	size_t locks = 0;
+	for (size_t at = gen1.find("  height_lock 1\r\n"); at != std::string::npos; at = gen1.find("  height_lock 1\r\n", at + 1))
+		++locks;
+	TEST_EXPECT(locks == total);
 
 	bms::File reparsed;
 	TEST_EXPECT(parse_mis_text(gen1, resolver, reparsed, error));
@@ -146,7 +149,7 @@ int check(const std::string &path) {
 		TEST_EXPECT(entity->y == spot.y);
 		TEST_EXPECT(entity->z == spot.z);
 		TEST_EXPECT(entity->team == spot.team);
-		TEST_EXPECT(entity->mis_height_lock == 0);
+		TEST_EXPECT(entity->mis_height_lock == 1);
 	}
 
 	std::string gen2;
