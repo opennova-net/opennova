@@ -182,6 +182,19 @@ void draw_paint_part(TerrainPaneContext &context) {
 	const auto set = [&](const char *member, io::JsonValue value) {
 		window_requests::set_workspace(workspace, "terrain_brush", member, std::move(value));
 	};
+	// A map the game reads from its own files (a shipped terrain's): copied into the project first, through the
+	// import dialog on the game install's files, then painted.
+	TerrainPlane plane = TerrainPlane::Surface;
+	if (terrain_tool_plane(brush.tool, plane)) {
+		const TerrainFamilyFile &file = context.family.plane(plane);
+		if (file.missing && !file.name.empty()) {
+			ui_kit::WrapRow row;
+			if (ui_kit::tool(row, ("Copy " + file.name + " into the project...").c_str(), true,
+			                 "Open the import dialog on the game install's " + file.name +
+			                         ": once the project holds it, the brush paints it in place."))
+				workspace.request(request::preview_install_import({file.name}));
+		}
+	}
 	switch (brush.tool) {
 	case TerrainTool::Surface: {
 		ImGui::TextUnformatted("Surface class");
