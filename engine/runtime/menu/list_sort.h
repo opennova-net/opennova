@@ -2,13 +2,13 @@
 
 // The list widgets' row sort: the quicksort the table sort and the list sort
 // both run, and the list sort's row compare in string mode. Witness record:
-// docs/mnu/menu-re.md (D-MNU-38, D-MNU-40).
+// docs/mnu/menu-re.md (D-MNU-38, D-MNU-39, D-MNU-40).
 // [orig: Utility_SortDualArray @0x651D00 -> Utility_QuickSortDualArray
 //  @0x651AB0; its callers CTableWnd_SortByColumn @0x640900 (40-byte rows, the
 //  call @0x640991, CTableWnd_CompareRows @0x63e9c0) and ListWidget_SortRows
 //  @0x644990 (32-byte rows, the call @0x6449c0, cmp @0x6448a0)]
 
-#include <base/io/strutil.h>
+#include <base/io/cp1252.h>
 
 #include <string>
 #include <utility>
@@ -73,22 +73,19 @@ void sort_dual_array(std::vector<T> &items, const Compare &compare) {
 	quick_sort_dual_array(items, 0, static_cast<int>(items.size()) - 1, compare);
 }
 
-// The list sort's row compare in string mode, ascending: the sign of stricmp
-// over the two rows' texts. A row with no text sorts last (the null tests
+// The list sort's row compare in string mode, ascending: stricmp over the
+// two rows' texts. A row with no text sorts last (the null tests
 // @0x6448a6..0x6448c8, both null 0 @0x6448b6); our rows always carry one.
 // Mode 1 (strtol over both texts, the end pointers read @0x64490d /
 // @0x644915) is no caller's here. The game's stricmp folds through the
-// ".ACP" locale WinMain sets (setlocale having run, it takes _stricmp_l);
-// ours folds ASCII (D-MNU-39). [orig: cmp @0x6448a0 -- string mode
-// @0x6448db, the ascending stricmp @0x64495e..0x644968 -> _stricmp
+// ".ACP" locale WinMain sets (setlocale having run, it takes _stricmp_l),
+// over the texts' bytes in that page: ours runs it over each text's cp1252
+// bytes (utf8_to_retail_text), so "é" and "É" tie and "Œ" (0x8C, lowered
+// 0x9C) sorts before "é" (0xE9) (D-MNU-39). [orig: cmp @0x6448a0 -- string
+// mode @0x6448db, the ascending stricmp @0x64495e..0x644968 -> _stricmp
 // @0x76fdf6, its locale test @0x76fdfc -> _stricmp_l @0x76fd23]
 inline int list_text_compare(const std::string &a, const std::string &b) {
-	for (size_t i = 0;; ++i) {
-		const int ca = i < a.size() ? static_cast<unsigned char>(strutil::ascii_tolower(a[i])) : 0;
-		const int cb = i < b.size() ? static_cast<unsigned char>(strutil::ascii_tolower(b[i])) : 0;
-		if (ca != cb || ca == 0)
-			return ca - cb;
-	}
+	return cp1252_stricmp(utf8_to_retail_text(a), utf8_to_retail_text(b));
 }
 
 } // namespace opennova::menu

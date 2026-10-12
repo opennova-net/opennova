@@ -114,6 +114,50 @@ inline constexpr bool cp1252_isalpha_sign_extended(char p_char) noexcept {
 			cp1252_isalpha(static_cast<std::uint8_t>(p_char));
 }
 
+// The CRT `tolower` of a byte under the same ".ACP" LC_CTYPE: a byte whose pctype row has _UPPER
+// (C1_UPPER) reads the locale's lower map, which CRT_init_ctype fills through the CRT's
+// __crtLCMapStringA wrapper with LCMAP_LOWERCASE over the page's bytes 1..255; any other byte is
+// itself. On code page 1252 that
+// lowers 60 bytes: A..Z, 0x8A / 0x8C / 0x8E (S caron, OE, Z caron) to 0x9A / 0x9C / 0x9E, 0x9F
+// (Y diaeresis) to 0xFF, and 0xC0..0xDE but 0xD7 (the Latin-1 capitals, the multiplication sign
+// left out) to the byte + 0x20. Probed 2026-10-12 with MultiByteToWideChar(1252) +
+// GetStringTypeW(CT_CTYPE1) and LCMapStringA(0x409, LCMAP_LOWERCASE); msvcrt's and ucrtbase's
+// tolower after setlocale(LC_ALL, ".ACP") on a cp1252 host give the same 256 rows. The other
+// single-byte pages lower other bytes; the pin to cp1252 is D-MNU-39's.
+// [orig: _tolower_l @0x76d2b4 (a byte below 0x100: the pctype & _UPPER read @0x76d2fd, the
+//  lower map read @0x76d30a); CRT_init_ctype @0x784a07 (the rows from __crtGetStringTypeA
+//  CT_CTYPE1, the call @0x784b5b; the map from __crtLCMapStringA LCMAP_LOWERCASE, the call
+//  @0x784b8e)]
+inline constexpr std::uint8_t cp1252_tolower(std::uint8_t p_byte) noexcept {
+	if ((p_byte >= 'A' && p_byte <= 'Z') || (p_byte >= 0xC0 && p_byte <= 0xDE && p_byte != 0xD7)) {
+		return static_cast<std::uint8_t>(p_byte + 0x20);
+	}
+	switch (p_byte) {
+		case 0x8A: return 0x9A;
+		case 0x8C: return 0x9C;
+		case 0x8E: return 0x9E;
+		case 0x9F: return 0xFF;
+		default: return p_byte;
+	}
+}
+
+// The CRT `stricmp` under the same ".ACP" LC_CTYPE, over two texts in the page's bytes: setlocale
+// having run, `_stricmp` takes `_stricmp_l`, which lowers each pair of bytes through `tolower`
+// (cp1252_tolower) until the first's is NUL or the two differ, and answers the first's minus the
+// second's, so its sign orders the texts and its size is the bytes' distance. The end of a text is
+// its NUL, as a byte past `size()` reads here.
+// [orig: _stricmp @0x76fdf6 - the locale test @0x76fdfc -> _stricmp_l @0x76fd23 (the C-locale
+//  test @0x76fda0, the loop @0x76fdb3..0x76fddf, f - l @0x76fde1)]
+inline int cp1252_stricmp(std::string_view p_a, std::string_view p_b) noexcept {
+	for (size_t i = 0;; ++i) {
+		const int f = cp1252_tolower(i < p_a.size() ? static_cast<std::uint8_t>(p_a[i]) : 0);
+		const int l = cp1252_tolower(i < p_b.size() ? static_cast<std::uint8_t>(p_b[i]) : 0);
+		if (f == 0 || f != l) {
+			return f - l;
+		}
+	}
+}
+
 // Strict UTF-8 well-formedness (no overlong forms, no surrogates, at most U+10FFFF).
 inline bool is_valid_utf8(std::string_view s) noexcept {
 	size_t i = 0;

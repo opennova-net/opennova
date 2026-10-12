@@ -339,6 +339,22 @@ int main() {
 		TEST_EXPECT(catalog::game_type_of(own[0]) == opennova::game_type::for_mission_mode(0));
 	}
 
+	// The order's stricmp folds through the ".ACP" locale over the names' cp1252
+	// bytes (D-MNU-39): an archive's "\xC9a.bms" (0xC9, lowered to 0xE9) ties its
+	// first byte with a loose "\xC3\xA9b.bms" (UTF-8, cp1252 0xE9), so the second
+	// byte orders them, where the raw bytes put the loose name first; "\x8Cz.bms"
+	// (0x8C, lowered to 0x9C) sorts before both.
+	// [orig: Mission_CompareMapNames @0x5628e0 - the tail jump to _stricmp @0x5628f8]
+	{
+		std::vector<catalog::Row> folded(3);
+		folded[0].file = "\xC3\xA9" "b.bms";
+		folded[1].file = "\xC9" "a.bms";
+		folded[2].file = "\x8C" "z.bms";
+		catalog::sort_rows(folded);
+		TEST_EXPECT(folded[0].file == "\x8C" "z.bms" && folded[1].file == "\xC9" "a.bms" &&
+				folded[2].file == "\xC3\xA9" "b.bms");
+	}
+
 	// What the archive walk lists, from the FIRST '.' as File_HasExtension compares
 	// [orig: Mission_BuildMapListFromPFF @ 0x5629a0 / @ 0x5629bc / @ 0x5629d8]; the
 	// table's section and keys [orig: @ 0x563489..0x56354f].

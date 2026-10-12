@@ -854,6 +854,47 @@ static int test_cp1252_ctype_classes()
     return 0;
 }
 
+// The CRT's tolower and stricmp under the ".ACP" locale (D-MNU-39): every byte against the
+// lower map Windows' NLS gives code page 1252 (MultiByteToWideChar(1252) +
+// GetStringTypeW(CT_CTYPE1)'s C1_UPPER rows, lowered by LCMapStringA(LCMAP_LOWERCASE); msvcrt's
+// tolower after setlocale(LC_ALL, ".ACP") gives the same rows), and stricmp's answer, the
+// bytes' distance at the first difference.
+static int test_cp1252_case_fold()
+{
+    // The 34 high bytes C1_UPPER marks, each with its lower byte.
+    static const uint8_t kHighUpper[][2] = {
+        {0x8A, 0x9A}, {0x8C, 0x9C}, {0x8E, 0x9E}, {0x9F, 0xFF},
+        {0xC0, 0xE0}, {0xC1, 0xE1}, {0xC2, 0xE2}, {0xC3, 0xE3}, {0xC4, 0xE4}, {0xC5, 0xE5},
+        {0xC6, 0xE6}, {0xC7, 0xE7}, {0xC8, 0xE8}, {0xC9, 0xE9}, {0xCA, 0xEA}, {0xCB, 0xEB},
+        {0xCC, 0xEC}, {0xCD, 0xED}, {0xCE, 0xEE}, {0xCF, 0xEF}, {0xD0, 0xF0}, {0xD1, 0xF1},
+        {0xD2, 0xF2}, {0xD3, 0xF3}, {0xD4, 0xF4}, {0xD5, 0xF5}, {0xD6, 0xF6},
+        {0xD8, 0xF8}, {0xD9, 0xF9}, {0xDA, 0xFA}, {0xDB, 0xFB}, {0xDC, 0xFC}, {0xDD, 0xFD},
+        {0xDE, 0xFE},
+    };
+    static_assert(sizeof(kHighUpper) / sizeof(kHighUpper[0]) == 34, "cp1252 has 34 high-byte capitals");
+    int lowered = 0;
+    for (int byte = 0; byte < 256; ++byte) {
+        const uint8_t b = static_cast<uint8_t>(byte);
+        uint8_t lower = (byte >= 'A' && byte <= 'Z') ? static_cast<uint8_t>(byte + 0x20) : b;
+        for (const auto &pair : kHighUpper)
+            if (pair[0] == b) lower = pair[1];
+        TEST_EXPECT(cp1252_tolower(b) == lower);
+        lowered += lower != b ? 1 : 0;
+    }
+    TEST_EXPECT(lowered == 60);
+    TEST_EXPECT(cp1252_stricmp("Caf\xC9", "cAF\xE9") == 0);
+    TEST_EXPECT(cp1252_stricmp("\x8C", "\xE9") == 0x9C - 0xE9);
+    TEST_EXPECT(cp1252_stricmp("ab", "a") == 'b');
+    TEST_EXPECT(cp1252_stricmp("", "") == 0);
+    // Our text in the page's bytes: UTF-8 through the codec, '?' for a character it has no
+    // byte for, a text that is not UTF-8 as it is.
+    TEST_EXPECT(utf8_to_retail_text("Caf\xC3\xA9 \xE2\x82\xAC \xC2\x81") == "Caf\xE9 \x80 \x81");
+    TEST_EXPECT(utf8_to_retail_text("\xE2\x9C\x93 \xE4\xB8\xAD") == "? ?");
+    TEST_EXPECT(utf8_to_retail_text("Caf\xE9") == "Caf\xE9");
+    TEST_EXPECT(utf8_to_retail_text("\xC3\x89quipe") == "\xC9quipe");
+    return 0;
+}
+
 // The CRT's atof reads no locale: the game pins LC_NUMERIC to "C" [orig:
 // System_InitTimerAndLocale @0x762A6E, the setlocale @0x762A7A], so `1.5` is
 // 1.5 whatever decimal point the embedder's locale uses; a comma is no point.
@@ -968,6 +1009,7 @@ int main()
     if (test_retail_atof_skips_the_cp1252_spaces()) return 1;
     if (test_retail_strtol_radix_and_atoi64_range()) return 1;
     if (test_cp1252_ctype_classes()) return 1;
+    if (test_cp1252_case_fold()) return 1;
     if (test_retail_atof_ignores_the_locale()) return 1;
     if (test_le_primitives()) return 1;
     if (test_file_stamp_settled()) return 1;

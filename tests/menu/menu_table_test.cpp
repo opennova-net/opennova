@@ -480,6 +480,24 @@ void test_sort_order_is_the_quicksorts() {
 			"two missing cells pass to the next key, a tie");
 }
 
+// The text arm is stricmp under the ".ACP" locale, over the cells' cp1252
+// bytes (D-MNU-39): "É" (0xC9, lowered to 0xE9) and "é" (0xE9) tie and pass
+// to the next key; "Œ" (0x8C, lowered to 0x9C) sorts before both.
+// [orig: CTableWnd_CompareRows @0x63e9c0 - the stricmp @0x63eaf2 ->
+//  _stricmp_l @0x76fd23]
+void test_text_arm_folds_through_cp1252() {
+	std::vector<MenuTableColumn> columns(2);
+	columns[1].numeric_sort = true;
+	const std::vector<int> by_name_then_kills = { 0, 1 };
+	CHECK(table_sort_order({ row_of({ "\xC3\x89", "2" }), row_of({ "\xC3\xA9", "1" }) }, columns,
+				  by_name_then_kills) == (std::vector<int>{ 1, 0 }),
+			"E-acute and e-acute tie, so the second key orders them");
+	const std::vector<int> by_name = { 0, -1 };
+	CHECK(table_sort_order({ row_of({ "\xC3\x89" "b" }), row_of({ "\xC3\xA9" "a" }), row_of({ "\xC5\x92" }) },
+				  columns, by_name) == (std::vector<int>{ 2, 1, 0 }),
+			"OE sorts before e-acute a, which sorts before E-acute b");
+}
+
 } // namespace
 
 int main() {
@@ -492,6 +510,7 @@ int main() {
 	test_clip_viewport(&font);
 	test_custom_draw_slot(&font);
 	test_sort_order_is_the_quicksorts();
+	test_text_arm_folds_through_cp1252();
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

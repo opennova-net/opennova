@@ -3,8 +3,8 @@
 
 #include <runtime/menu/menu_table.h>
 
+#include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
-#include <base/io/strutil.h>
 #include <runtime/menu/list_sort.h>
 
 #include <algorithm>
@@ -29,11 +29,16 @@ int32_t numeric_cell(const std::string *cell) {
 	return 0x7FFFFFFF;
 }
 
+// The text arm: stricmp over the two cells, a missing one read as
+// g_EmptyStr, under the ".ACP" locale's fold, over each cell's cp1252 bytes
+// (utf8_to_retail_text); the answer is stricmp's own, the bytes' distance
+// [orig: CTableWnd_CompareRows @ 0x63e9c0 - the g_EmptyStr reads @0x63ead8 /
+// @0x63eaeb, the stricmp @0x63eaf2 -> _stricmp @0x76fdf6 -> _stricmp_l
+// @0x76fd23] (D-MNU-39).
 int text_compare(const std::string *a, const std::string *b) {
 	const std::string empty;
-	const std::string la = strutil::to_lower(a != nullptr ? *a : empty);
-	const std::string lb = strutil::to_lower(b != nullptr ? *b : empty);
-	return la < lb ? -1 : la > lb ? 1 : 0;
+	return cp1252_stricmp(utf8_to_retail_text(a != nullptr ? *a : empty),
+			utf8_to_retail_text(b != nullptr ? *b : empty));
 }
 
 } // namespace
