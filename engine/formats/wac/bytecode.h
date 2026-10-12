@@ -95,7 +95,7 @@ enum class OperandKind : uint8_t {
     GlobalVar = 2,  // G# -> ScriptVarStore.global
     MusicVar = 3,   // M# -> Program.music_globals (compile-time audio context)
     Builtin = 4,    // engine value (ticks/health/humans/...)
-    EventFired = 5, // named IF's fired flag [orig: g_WacEventEverFired]
+    EventFired = 5, // named IF's raw ever-fired dword [orig: g_WacEventEverFired @0xC6CE40]
     EntitySsn = 6,  // authored net ID, bound to a packed handle at program startup
     // A Text/Filename slot's string: the index is the byte offset into
     // Program::string_pool, the pointer the resolver's string leg returns

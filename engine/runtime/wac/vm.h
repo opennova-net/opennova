@@ -3,8 +3,8 @@
 // Faithful port of WacScript_ExecuteBytecode @0x4f58b0: a central accumulator,
 // 4-byte instruction stream, opcode-driven control flow + ALU folds, and command
 // dispatch by table index. Re-runs the whole program each logic tick against the
-// shared World. Holds the per-event temporal state (fired-tick / active flag) and
-// the DORND LCG seed across ticks.
+// shared World, whose variable store holds the per-event temporal state (fired
+// tick, ever-fired, active), the DO loop bytes and the DORND LCG seed across ticks.
 #pragma once
 
 #include <cstdint>
@@ -22,25 +22,16 @@ class World;
 
 namespace opennova::wac {
 
-// Per-event temporal record. [orig: g_WacEventFiredTick (fired tick) / g_WacEventActive
-// (active flag) / event-fired bookkeeping.]
-struct EventState {
-    uint32_t last_fired_tick = 0;
-    bool ever_fired = false;
-    bool active = false;
-    uint32_t fired_count = 0;
-};
-
 class WacVm {
 public:
 	// Copyable execution state used by the mission-start restore baseline. The
 	// compiled Program remains owned by WacSystem; restore_runtime_state binds
 	// this state back to that owner's current program.
+	// The per-IF fired ticks, ever-fired dwords and active bytes, the DO
+	// counters and choices and the DORND seed are the world's
+	// (world::ScriptVarStore::WacState), where the BMS bank words reach them.
 	struct RuntimeState {
-		std::vector<EventState> events;
-        std::vector<uint8_t> loop_counters;
-        std::vector<uint8_t> loop_choices;
-		uint32_t rng_seed = 0x12333333u;
+		std::vector<uint32_t> fired_counts; // per event, a diagnostic count
 		int32_t accumulator = 0;
 		int current_event = 0;
 		uint32_t time = 0;
@@ -56,7 +47,6 @@ public:
     void execute(opennova::world::World &world);
 
     bool loaded() const { return prog_ != nullptr; }
-    const std::vector<EventState> &events() const { return events_; }
     int32_t accumulator() const { return acc_; }
 
     // The mutable WAC time word. The callers of an execution increment it
@@ -79,10 +69,7 @@ public:
 
 private:
     const Program *prog_ = nullptr;
-    std::vector<EventState> events_;
-    std::vector<uint8_t> loop_counters_;
-    std::vector<uint8_t> loop_choices_;
-    uint32_t rng_seed_ = 0x12333333u; // [orig: WacScript_InitAndLoad @ 0x4f966b — mov g_WacRngSeed, 0x12333333]
+    std::vector<uint32_t> fired_counts_; // per event; no retail counterpart
     int32_t acc_ = 0;
     int cur_event_ = 0;
     uint32_t time_ = 0; // [orig: g_WacVarTicks]
@@ -103,7 +90,7 @@ private:
     int32_t read(opennova::world::World &w, uint32_t ref) const;
     void write(opennova::world::World &w, uint32_t ref, int32_t v);
     std::string operand_string(opennova::world::World &w, uint32_t ref, ParamType type) const;
-    uint32_t next_rand();
+    uint32_t next_rand(opennova::world::World &w);
 
     void record_gap(opennova::world::World &w, int cmd, uint32_t instruction, const int32_t *arguments = nullptr);
 

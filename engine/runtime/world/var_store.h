@@ -19,8 +19,11 @@
 // M# binds the active audio context at compilation, outside this store.
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace opennova::world {
 
@@ -38,31 +41,101 @@ public:
     int32_t get_global(int i) const { return in_range(i, kGlobalVars) ? global_[i] : 0; }
     void set_global(int i, int32_t v) { if (in_range(i, kGlobalVars)) global_[i] = v; }
 
+    // WAC's own state, which retail keeps in the globals around the two banks
+    // and the VM reads and writes here: per IF (the compiler's 1024-entry IF
+    // space) its fired tick, ever-fired dword and active byte, per DO loop
+    // (the 1024-entry DO space) its counter and choice bytes, the DORND seed
+    // after them, and RND just below the mission bank.
+    // [orig: g_WacEventFiredTick @0xC6BE40, g_WacEventEverFired @0xC6CE40,
+    //  g_WacEventActive @0xC6DE40 - WacScript_ExecuteBytecode THEN @0x4F5995 /
+    //  @0x4F599F / @0x4F59AA; g_WacLoopCounters @0xC6E240, g_WacLoopChoices
+    //  @0xC6E640 - DO @0x4F5A20 / @0x4F5A48; g_WacRngSeed @0xC6EA40 - DORND
+    //  @0x4F5A7E; g_WacVarRND @0xC6B23C - WacCmd_Random @0x4ED2C8; the IF and DO
+    //  bounds Script_Compile @0x4F4A06 / @0x4F417E]
+    static constexpr int kWacIfs = 1024;
+    static constexpr int kWacDos = 1024;
+    static constexpr uint32_t kDorndSeed = 0x12333333u; // [orig: WacScript_InitAndLoad @0x4F966B]
+    // The arrays sit on the heap: a World is often a stack local, and 11 KB
+    // more per World overflowed the 1 MB Windows stack of nested fixtures.
+    struct WacState {
+        std::vector<uint32_t> fired_tick = std::vector<uint32_t>(kWacIfs);
+        std::vector<int32_t> ever_fired = std::vector<int32_t>(kWacIfs);
+        std::vector<uint8_t> active = std::vector<uint8_t>(kWacIfs);
+        std::vector<uint8_t> do_counter = std::vector<uint8_t>(kWacDos);
+        std::vector<uint8_t> do_choice = std::vector<uint8_t>(kWacDos);
+        uint32_t dornd_seed = kDorndSeed;
+        int32_t rnd = 0;
+    };
+    WacState wac;
+
     // The BMS reads and writes of a mission variable (the cat-4 trigger,
     // MisvarChange) index the mission bank with no bound. The index scales by
     // 4 in a 32-bit address, so only its low 30 bits select the word, and the
     // words past the bank's 512 run on into the G bank, which follows it
-    // directly (0xC6B240 + 4 * 512 = 0xC6BA40). A word past both banks, which
-    // a small negative index also selects, lands first in WAC's own state
-    // around them, kept elsewhere here (the per-IF arrays and the DORND seed
-    // above, RND below; D-EVT-13), and past that in other globals (D-EVT-14):
-    // read 0 and dropped here. WAC operands never get there: the compiler
-    // holds V# and G# under 256 and the declared slots to 256.
+    // directly (0xC6B240 + 4 * 512 = 0xC6BA40), then into WAC's state: words
+    // 768..1791 the fired ticks, 1792..2815 the ever-fired dwords, 2816..3071
+    // the active bytes, 3072..3327 the DO counters, 3328..3583 the DO choices
+    // (each byte array four entries to a word, the lowest in the low byte),
+    // 3584 the DORND seed, and word 0x3FFFFFFF (index -1) RND. Every other
+    // word, which a small negative index also selects, lands in other globals
+    // (D-EVT-14): read 0 and dropped here. WAC operands never get there: the
+    // compiler holds V# and G# under 256 and the declared slots to 256.
     // [orig: EventTrigger_EvaluateCondition @0x453620 - `mov ecx,
     //  g_WacMissionVars[eax*4]` @0x453AAC; EventAction_Dispatch @0x4542E0, case 5
     //  - the Set @0x45439A; WacScript_ResolveParameter @0x4F2920 - G# =
     //  0xC6BA40 + 4n @0x4F2B66, the V# and G# bounds @0x4F2AC0 / @0x4F2B27;
     //  Script_Compile @0x4F31F0 - the declared-slot bound @0x4F3812]
     int32_t get_bank_word(int32_t index) const {
-        const int word = bank_word(index);
-        if (word < kMissionVars) return mission_[word];
-        if (word < kMissionVars + kGlobalVars) return global_[word - kMissionVars];
+        uint32_t word = bank_word(index);
+        if (word == kRndWord) return wac.rnd;
+        if (word < uint32_t(kMissionVars)) return mission_[word];
+        word -= kMissionVars;
+        if (word < uint32_t(kGlobalVars)) return global_[word];
+        word -= kGlobalVars;
+        if (word < uint32_t(kWacIfs)) return static_cast<int32_t>(wac.fired_tick[word]);
+        word -= kWacIfs;
+        if (word < uint32_t(kWacIfs)) return wac.ever_fired[word];
+        word -= kWacIfs;
+        if (word < uint32_t(kWacIfs / 4)) return packed_word(wac.active, word);
+        word -= kWacIfs / 4;
+        if (word < uint32_t(kWacDos / 4)) return packed_word(wac.do_counter, word);
+        word -= kWacDos / 4;
+        if (word < uint32_t(kWacDos / 4)) return packed_word(wac.do_choice, word);
+        word -= kWacDos / 4;
+        if (word == 0) return static_cast<int32_t>(wac.dornd_seed);
         return 0;
     }
     void set_bank_word(int32_t index, int32_t v) {
-        const int word = bank_word(index);
-        if (word < kMissionVars) mission_[word] = v;
-        else if (word < kMissionVars + kGlobalVars) global_[word - kMissionVars] = v;
+        uint32_t word = bank_word(index);
+        if (word == kRndWord) { wac.rnd = v; return; }
+        if (word < uint32_t(kMissionVars)) { mission_[word] = v; return; }
+        word -= kMissionVars;
+        if (word < uint32_t(kGlobalVars)) { global_[word] = v; return; }
+        word -= kGlobalVars;
+        if (word < uint32_t(kWacIfs)) { wac.fired_tick[word] = static_cast<uint32_t>(v); return; }
+        word -= kWacIfs;
+        if (word < uint32_t(kWacIfs)) { wac.ever_fired[word] = v; return; }
+        word -= kWacIfs;
+        if (word < uint32_t(kWacIfs / 4)) { set_packed_word(wac.active, word, v); return; }
+        word -= kWacIfs / 4;
+        if (word < uint32_t(kWacDos / 4)) { set_packed_word(wac.do_counter, word, v); return; }
+        word -= kWacDos / 4;
+        if (word < uint32_t(kWacDos / 4)) { set_packed_word(wac.do_choice, word, v); return; }
+        word -= kWacDos / 4;
+        if (word == 0) wac.dornd_seed = static_cast<uint32_t>(v);
+    }
+
+    // WacScript_InitAndLoad's clears of WAC's state: the fired ticks, the
+    // DO counters, the ever-fired dwords and the active bytes, then the DORND
+    // seed. No load clears the DO choices or RND.
+    // [orig: WacScript_InitAndLoad @0x4F91F0 - the memsets @0x4F95F9 /
+    //  @0x4F9609 / @0x4F9619 / @0x4F9629, the seed @0x4F966B]
+    void reset_wac_load_state() {
+        std::fill(wac.fired_tick.begin(), wac.fired_tick.end(), 0u);
+        std::fill(wac.do_counter.begin(), wac.do_counter.end(), uint8_t(0));
+        std::fill(wac.ever_fired.begin(), wac.ever_fired.end(), 0);
+        std::fill(wac.active.begin(), wac.active.end(), uint8_t(0));
+        wac.dornd_seed = kDorndSeed;
     }
 
     // The per-load clear: V0..V255 only. The declared half (256..511) and
@@ -88,8 +161,20 @@ public:
 private:
     static bool in_range(int i, int n) { return i >= 0 && i < n; }
     // The index's low 30 bits, 0..0x3FFFFFFF.
-    static int bank_word(int32_t index) {
-        return static_cast<int>(static_cast<uint32_t>(index) & 0x3FFFFFFFu);
+    static uint32_t bank_word(int32_t index) {
+        return static_cast<uint32_t>(index) & 0x3FFFFFFFu;
+    }
+    static constexpr uint32_t kRndWord = 0x3FFFFFFFu; // 0xC6B240 - 4
+    // A byte array read as dwords: four entries to a word, little-endian.
+    static int32_t packed_word(const std::vector<uint8_t> &bytes, uint32_t word) {
+        const size_t at = size_t(word) * 4;
+        return static_cast<int32_t>(uint32_t(bytes[at]) | uint32_t(bytes[at + 1]) << 8 |
+                uint32_t(bytes[at + 2]) << 16 | uint32_t(bytes[at + 3]) << 24);
+    }
+    static void set_packed_word(std::vector<uint8_t> &bytes, uint32_t word, int32_t v) {
+        const size_t at = size_t(word) * 4;
+        for (size_t i = 0; i < 4; ++i)
+            bytes[at + i] = static_cast<uint8_t>(static_cast<uint32_t>(v) >> (8 * i));
     }
     std::array<int32_t, kMissionVars> mission_{};
     std::array<int32_t, kGlobalVars> global_{};

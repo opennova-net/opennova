@@ -867,6 +867,11 @@ bool MissionKernel::complete_mission_start() {
 	// WacScript_InitAndLoad call); WacScript_InitAndLoad @0x4F95EE (V0..V255
 	// memset), @0x4F976B (initial execute), @0x4F9770 (++g_WacVarTicks)]
 	world.script.vars.clear_numbered_mission_vars();
+	// The same load clears WAC's per-IF state and DO counters and seeds DORND,
+	// over whatever a PreMission action wrote there through a bank word.
+	// [orig: WacScript_InitAndLoad @0x4F95F9 / @0x4F9609 / @0x4F9619 /
+	//  @0x4F9629, @0x4F966B]
+	world.script.vars.reset_wac_load_state();
 	// The environment has been seeded before this boundary. Initial WAC can
 	// change its targets and entity poses before the 255-tick settle and the
 	// first vehicle callback captures the respawn pose.

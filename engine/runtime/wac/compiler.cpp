@@ -255,7 +255,7 @@ private:
 	Program prog_;
 	std::vector<std::string> event_names_;   // [orig: byte_C61E18, 24-byte rows]
 	std::vector<bool> event_named_;          // the row's fired-dword pointer is set
-	int event_count_ = 0;                    // [orig: dword_C60E04]
+	int event_count_ = 0;                    // [orig: g_WacEventCount @0xC60E04]
 	std::vector<Declaration> declarations_;  // [orig: byte_C68218, count dword_C60E14]
 	uint32_t do_counter_ = 0;                // [orig: dword_C60DFC]
 	int run_depth_ = 0;                      // [orig: dword_C6EB20]
