@@ -258,7 +258,7 @@ bool Server::start_session(std::string &error) {
 		error = "the server has not begun, or its session already stands";
 		return false;
 	}
-	host_ = inmatch::host_session_settings(cfg_);
+	host_ = inmatch::host_session_settings(config_.cfg());
 	if (!boot_mission(/*next_mission=*/false, error)) {
 		stop();
 		return false;

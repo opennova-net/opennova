@@ -379,10 +379,12 @@ func _ready() -> void:
 		# No --resource-dir: OpenNova's own game (ADR 0048), whose build is game
 		# data as an install is, so the launch shortcuts below follow it too.
 		if not _enter_bundled_menu():
-			get_tree().quit(1)
+			_quit_failed_boot()
 			return
 	elif not _enter_menu(dir):
-		get_tree().quit(1)
+		_quit_failed_boot()
+		return
+	if _process_exit_pending:
 		return
 	# F6 is still the real standalone game and normal loading presentation; it
 	# only selects the exact saved top-level loose BMS instead of an archive row.
@@ -698,11 +700,22 @@ func _enter_menu(dir: String) -> bool:
 	# does not parse (every binding label then renders its literal fallback).
 	Strings.register_table(Strings.TABLE_KEYHELP, Strings.load_rtxt(_root, "keyhelp.bin"))
 	if not _menu_shell.setup(_root):
-		push_warning("MainGame: no menu found in resource dir (looked for %s)"
-				% _menu_shell.main_menu_file)
-	# The player profile loads after the menu's text tables, as the original's
-	# menu start loads game.bin before it (engine: runtime/profile/player_profiles.h).
-	refresh_local_profile_for_mount()
+		push_warning(
+			"MainGame: no menu found in resource dir (looked for %s)" % _menu_shell.main_menu_file
+		)
+	# Every main-menu entry reads game.cfg (GameCfgStore.enter_main_menu): the
+	# first one over the mount's tables, with the first launch's video test on a
+	# fresh profile; an entry over another game is the reload. A read that sets
+	# mpreset ends the process with exit code 0 (docs/gamecfg/game-cfg-re.md,
+	# "The process's block").
+	if not GameCfgStore.enter_main_menu(_root):
+		exit_process(0)
+		return true
+	_player_options.reload()
+	# The player profile loads after the menu's text tables and game.cfg, at
+	# every main-menu entry, as the original's menu init loads it
+	# (engine: runtime/profile/player_profiles.h).
+	refresh_local_profile_for_mount(true)
 	_run_intro_tail()
 	_menu_shell.show_menu()
 	return true
@@ -732,6 +745,8 @@ func _enter_bundled_menu() -> bool:
 	_root = root
 	if not _enter_menu(root.get_root_dir()):
 		return false
+	if _process_exit_pending:
+		return true
 	var built := root.is_runtime_mount()
 	if not built and not OS.has_feature("template") and not OS.has_feature("web"):
 		push_warning(("OpenNova: the base game in %s is not exported: its project folder boots the menu, "
@@ -870,7 +885,13 @@ func _wire_shell() -> void:
 # took (the expansion's weapon.sav), the one the menu shows and the next spawn
 # uses (refresh_local_profile_for_mount hands it to PLAYER_INFO).
 func _on_game_reloaded() -> void:
-	refresh_local_profile_for_mount()
+	# game.cfg is saved and read again over the switch, as the original's
+	# expansion reload does; a read that sets mpreset ends the process.
+	if not GameCfgStore.reload_main_menu(_root):
+		exit_process(0)
+		return
+	_player_options.reload()
+	refresh_local_profile_for_mount(true)
 
 
 # The in-game options Accept wrote the dialog into the current profile record:
@@ -884,6 +905,7 @@ func _on_ingame_controls_accepted() -> void:
 	if sim != null:
 		sim.apply_ingame_options(PlayerProfile.store())
 	PlayerProfile.save()
+	GameCfgStore.save()
 
 
 # PLAYER_INFO's ACCEPT: the companion has saved the dialog into the current
@@ -895,17 +917,17 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 
 
 ## Load the player profile (player.sav, and the mounted expansion's weapon.sav)
-## again when the mounted root or its expansion changed, as the original's menu
-## start loads it; the menu entry and a join's pre-dial switch to the host's
-## expansion both land here, so the next spawn kit and the join's character vars
-## come from the mounted expansion's profile. The menu's text tables must be
-## registered first: a fresh record's macros are the menu table's.
-func refresh_local_profile_for_mount() -> void:
+## again: at every main-menu entry (`force`), as the original's menu init loads
+## it, and at a join's pre-dial switch to the host's expansion when the mounted
+## root or its expansion changed, so the next spawn kit and the join's
+## character vars come from the mounted expansion's profile. The menu's text
+## tables must be registered first: a fresh record's macros are the menu table's.
+func refresh_local_profile_for_mount(force := false) -> void:
 	if _root == null:
 		return
 	var profile_root_key := "%s|%s|%s" % [String(_root.get_root_dir()),
 			String(_root.get_expansion()).to_lower(), String(LaunchFlags.working_dir())]
-	if profile_root_key != _profile_root_key:
+	if force or profile_root_key != _profile_root_key:
 		var load_error := PlayerProfile.load_for(_root)
 		if load_error != OK:
 			push_warning("MainGame: the player profile could not be read (error %d); defaults stand"
@@ -957,10 +979,13 @@ func _on_start_requested(bms_name: String) -> void:
 
 # The single-player start's profile legs: the started mission's campaign index
 # into the current record (the catalog's, -1 on every row), then the profile
-# saved ahead of the session (engine: PlayerProfiles.record_mission_start).
+# and game.cfg saved ahead of the session, whose create reads the cfg block's
+# mpreset word (engine: PlayerProfiles.record_mission_start;
+# docs/gamecfg/game-cfg-re.md, the save points).
 func _save_profile_for_single_player() -> void:
 	PlayerProfile.store().record_mission_start(-1)
 	PlayerProfile.save()
+	GameCfgStore.save()
 
 
 ## Boot an exact loose mission through the same loading
@@ -1694,9 +1719,11 @@ static func post_mission_error_text(route: PostMissionRoute) -> String:
 # leave a frozen canvas, so the web build ignores EXIT (ADR 0049).
 func _on_exit_to_desktop() -> void:
 	if not OS.has_feature("web"):
-		# The main menu's EXIT saves the player profile before the game quits
-		# (engine: runtime/profile/player_profiles.h, the save points).
+		# The main menu's EXIT saves the player profile and game.cfg before the
+		# game quits (engine: runtime/profile/player_profiles.h, the save
+		# points; docs/gamecfg/game-cfg-re.md).
 		PlayerProfile.save()
+		GameCfgStore.save()
 		request_quit()
 
 
