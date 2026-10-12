@@ -36,9 +36,12 @@ on:
       - '.github/workflows/novaworld-images.yml'
   workflow_dispatch:
 
+# A PR's newer push cancels its older run. Master's pushes queue instead of
+# cancelling, so no run is cut off between its two pushes (one image's `latest`
+# and sha tag at the new commit, the other's still at the old).
 concurrency:
   group: nw-images-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Gate the image builds on the net scope passing with the HTTP layer ON,
