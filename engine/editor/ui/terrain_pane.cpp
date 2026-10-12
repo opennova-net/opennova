@@ -86,30 +86,35 @@ public:
 		} else if (!family.tiles.words.empty()) {
 			ImGui::TextWrapped("Tiles go to %s.", family.tiles.words.c_str());
 		}
-		// The tab of the brush's tool comes forward as the tool moves to another family (a tab looked at stays).
+		// The tab of the brush's tool comes forward as the tool moves to another family (a tab looked at stays). A tab
+		// pressed picks its family's first tool where the brush has another family's, or none (Paint: Surface, its
+		// legend shown), so a family and its value are two clicks.
 		const TerrainToolFamily shown = terrain_tool_family(brush.tool);
 		const bool moved = shown != last_ && shown != TerrainToolFamily::None;
 		last_ = shown;
 		if (ImGui::BeginTabBar("terrain_tools")) {
-			const auto tab = [&](TerrainToolFamily each, auto draw) {
+			const auto tab = [&](TerrainToolFamily each, TerrainTool first, auto draw) {
 				const ImGuiTabItemFlags flags = moved && shown == each ? ImGuiTabItemFlags_SetSelected : 0;
 				if (ImGui::BeginTabItem(terrain_tool_family_label(each), nullptr, flags)) {
+					if (selected_ != TerrainToolFamily::None && selected_ != each && !moved && shown != each)
+						set_tool(workspace, first);
+					selected_ = each;
 					draw();
 					ImGui::EndTabItem();
 				}
 			};
-			tab(TerrainToolFamily::Sculpt, [&] {
+			tab(TerrainToolFamily::Sculpt, TerrainTool::Raise, [&] {
 				draw_tools(workspace, brush, kSculpt);
 				draw_brush_part(context);
 				draw_sculpt_part(context);
 				draw_bake_part(context);
 			});
-			tab(TerrainToolFamily::Paint, [&] {
+			tab(TerrainToolFamily::Paint, TerrainTool::Surface, [&] {
 				draw_tools(workspace, brush, kPaint);
 				draw_brush_part(context);
 				draw_paint_part(context);
 			});
-			tab(TerrainToolFamily::Tiles, [&] {
+			tab(TerrainToolFamily::Tiles, TerrainTool::Stamp, [&] {
 				draw_tools(workspace, brush, kTiles);
 				draw_tiles_part(context);
 			});
@@ -119,6 +124,7 @@ public:
 
 private:
 	TerrainToolFamily last_ = TerrainToolFamily::None;
+	TerrainToolFamily selected_ = TerrainToolFamily::None; // the tab drawn selected last
 };
 
 } // namespace

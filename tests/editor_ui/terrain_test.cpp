@@ -1,7 +1,8 @@
 // The terrain tools in the views over a real session (ADR 0046 S25). S0: the mission's Terrain pane, shown by one
 // set_workspace (Ctrl+E's, the toolbar's), takes the Logic pane's place beside the 3D view (the session hides the
 // Logic pane as it shows), draws its tool tabs with nothing raised by drawing and nothing past its room, and a tool
-// pressed there is one set_workspace of the brush.
+// pressed there is one set_workspace of the brush. A tab pressed picks its family's first tool where the brush has
+// another family's (Paint: Surface, its legend then shown); the tab of the brush's own family picks nothing.
 #include <string>
 #include <vector>
 
@@ -30,6 +31,21 @@ void test_terrain_pane() {
 	      "the Terrain pane drawn in the Logic pane's place");
 	run.ui.frames(2);
 	CHECK(run.ui.windows.pending_requests() == 0, "drawing the pane raises nothing");
+	// A tab pressed: its family's first tool (the brush's default is Raise, a Sculpt tool).
+	const ImGuiWindow *pane = MissionRun::drawn_window("/terrain_pane_");
+	CHECK(pane != nullptr, "the Terrain pane's window");
+	if (pane) {
+		const ImGuiID tabs = item_id(pane->ID, {"terrain_tools"});
+		CHECK(run.ui.click_item(item_id(tabs, {"Paint"})), "the Paint tab clicked");
+		run.settle();
+		raised = run.take();
+		const std::vector<opennova::io::JsonValue> tools = workspace_sets(raised, "terrain_brush", "tool");
+		CHECK(tools.size() == 1 && tools[0].string == "surface" && v.workspace.terrain_brush.tool == TerrainTool::Surface,
+		      "Paint: the Surface tool picked");
+		CHECK(run.ui.click_item(item_id(tabs, {"Paint"})), "the Paint tab again");
+		run.settle();
+		CHECK(workspace_sets(run.take(), "terrain_brush", "tool").empty(), "its own family's tab picks nothing");
+	}
 	// The Logic pane shown again hides the Terrain pane.
 	window_requests::show_logic(run.ui.windows, run.path, true);
 	run.settle();
