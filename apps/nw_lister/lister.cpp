@@ -332,6 +332,8 @@ void Lister::request_host() {
 	}
 	phase_ = Phase::Requesting;
 	refresh_listing(true);
+	// The mission the request lists: a later report of another is a mission change (D-NET-488).
+	listed_mission_ = registration().mission_name;
 	if (!role_.request(registration())) return; // on_failed finished it
 	sync_roster();
 	io::logf(LogLevel::kInfo, "[host] ClientHostRequest for '%s' on %s", registration().server_name.c_str(),
