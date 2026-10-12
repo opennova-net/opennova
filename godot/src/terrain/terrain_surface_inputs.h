@@ -1,10 +1,14 @@
 #pragma once
 
+#include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
+
+#include <runtime/terrain/texture_preprocess.h>
 
 namespace godot {
 
@@ -25,6 +29,8 @@ private:
 
 	Ref<Texture2D> detail_coefficient_texture;
 	Ref<Texture2D> normalized_blend_texture;
+	// The normalized blend map the texture was last made from, its level 0 (what a painted region updates).
+	opennova::terrain::Rgba8Image normalized_blend;
 	Ref<Texture2D> detail_layer_textures[3];
 	Ref<Texture2D> paired_detail2_texture;
 	Ref<Texture2D> heightfield_normal_texture;
@@ -48,6 +54,12 @@ public:
 	bool rebuild(const Ref<TerrainData> &p_data,
 			const Ref<TerrainTileInfo> &p_tile_info = Ref<TerrainTileInfo>());
 	bool rebuild_blend();
+	// The detail blend map painted (ADR 0046 S25): `p_rect` of `p_map` (the whole map as it now stands)
+	// normalized as a load normalizes it (normalize_detail_blend_map, a texel at a time) into the normalized map
+	// the blend texture was made from, and the texture updated from it in place (its levels generated as a build
+	// generates them; the material keeps sampling the same texture). A map of another size than the texture's is
+	// normalized whole into a new one. False where the map does not convert.
+	bool update_blendmap_region(const Ref<Image> &p_map, const Rect2i &p_rect);
 	bool rebuild_heightfield();
 	bool rebuild_detail_textures();
 
@@ -61,6 +73,9 @@ public:
 	Ref<Texture2D> get_detail_c2_texture() const;
 	Ref<Texture2D> get_detail_c3_texture() const;
 	Ref<Texture2D> get_normalized_blend_texture() const;
+	// The normalized blend map the texture was last made or updated from, its level 0 (a read seam: a headless
+	// run's texture reads back as it was first made); null for none.
+	Ref<Image> get_normalized_blend_image() const;
 	Ref<Texture2D> get_detail_coefficient_texture() const;
 	Ref<Texture2D> get_detail_layer_texture(int p_layer) const;
 	Ref<Texture2D> get_detail2_texture() const;

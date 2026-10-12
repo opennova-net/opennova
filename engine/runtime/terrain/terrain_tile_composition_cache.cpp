@@ -417,6 +417,19 @@ std::size_t TerrainTileCompositionCache::invalidate_overlapping_q16(
 	return invalidated;
 }
 
+std::size_t TerrainTileCompositionCache::invalidate_sampling(
+		const std::function<bool(const TerrainTilePageKey &, int32_t, int32_t)> &reads) {
+	// As invalidate_overlapping_q16 retires a page: the page recomposes the next time it is visible.
+	std::size_t invalidated = 0;
+	for (Slot &slot : slots_) {
+		if (!slot.resident || !reads(slot.page, slot.source_origin_x, slot.source_origin_z)) continue;
+		retire(slot);
+		slot.last_use = 0;
+		++invalidated;
+	}
+	return invalidated;
+}
+
 void TerrainTileCompositionCache::invalidate_all() noexcept {
 	// [orig: lod = coordinate = -1, last use = 0 @ 0x605FC0..0x605FC5]
 	for (Slot &slot : slots_) {
