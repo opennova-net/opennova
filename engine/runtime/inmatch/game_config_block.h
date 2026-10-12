@@ -39,9 +39,12 @@
 // its call sites are the embedder's save points: the main loop's return
 // (Game_Run @0x4A7FFF), the main menu's EXIT (@0x555776, beside the player
 // profile's save @0x555771), the first launch's video test (@0x53EDB6), the
-// reload (@0x55272A), the in-game options' Accept (@0x555310), a host start
-// (HostDialog_StartSession @0x558769 after the host screen's read, the LAN
-// screen's UI_HandleHostSessionStart @0x556E72), every multiplayer mission
+// reload (@0x55272A), the in-game options' Accept (@0x555310), the LAN host
+// screen's start (UI_HandleHostSessionStart @0x556E72, after its
+// HostDialog_ReadSettings @0x556E36), the NovaWorld page's launch, a host's
+// or a join's (HostDialog_StartSession @0x558769, after its read @0x558764;
+// its one caller, screen event 7 @0x54F321, saves the profile first
+// @0x54F317), every multiplayer mission
 // start (PreMenu_Init @0x5693E0, the save @0x5693F4), single player's mission
 // start (SinglePlayer_StartMission @0x561BB2, ahead of its session create
 // @0x561E65), the NovaWorld ServerCommand (@0x4D2DDF, @0x4D2E2D), the remote

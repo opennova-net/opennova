@@ -181,8 +181,8 @@ func test_abandoned_novaworld_join_frees_the_held_session() -> void:
 	assert_false(is_instance_valid(client), "an abandoned join frees the held session")
 
 
-# The NovaWorld page's join launch saves the player profile before it dials
-# (here before the join-role question).
+# The NovaWorld page's join launch saves the player profile, then game.cfg,
+# before it dials (here before the join-role question).
 func test_novaworld_join_saves_the_profile_first() -> void:
 	var run_dir := OS.get_cache_dir().path_join("opennova_nw_join_run_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
@@ -197,6 +197,8 @@ func test_novaworld_join_saves_the_profile_first() -> void:
 		panel.join_in_match_requested.emit(_target(JoinTarget.FLAG_ALLOW_SPECTATORS))
 		assert_true(FileAccess.file_exists(run_dir.path_join("player.sav")),
 				"the join launch saved player.sav in the working directory")
+		assert_true(FileAccess.file_exists(run_dir.path_join(GameCfgStore.FILE_NAME)),
+				"and game.cfg beside it")
 		var prompt := layer.get_node_or_null("JoinRolePrompt")
 		if prompt != null:
 			(prompt.find_child("CancelJoin", true, false) as Button).pressed.emit()
