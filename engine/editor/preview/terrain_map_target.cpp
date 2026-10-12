@@ -1,6 +1,8 @@
 #include <editor/preview/terrain_map_target.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <unordered_map>
 
 #include <formats/trn/trn_io.h>
@@ -27,9 +29,9 @@ int32_t fixed_of(double metres) {
 
 } // namespace
 
-int TerrainMapTarget::step() const {
-	if (shifted) return shift < 0 || shift > 10 ? 1 : 1 << shift;
-	return width > 0 && width <= 1024 && 1024 % width == 0 ? 1024 / width : 1;
+double TerrainMapTarget::step() const {
+	if (shifted) return shift < 0 || shift > 10 ? 1.0 : double(1 << shift);
+	return width > 0 ? 1024.0 / double(width) : 1.0;
 }
 
 TerrainMapTarget terrain_map_target(const TrnConfig &trn, TerrainPlane plane, int width, int height) {
@@ -61,8 +63,11 @@ bool terrain_map_texel(const TerrainMapTarget &target, double x, double y, int &
 		tx = int(uint32_t(atlas.x) >> uint32_t(target.shift & 31));
 		ty = int(uint32_t(atlas.z) >> uint32_t(target.shift & 31));
 	} else {
-		tx = int(int64_t(atlas.x) * target.width / 1024);
-		ty = int(int64_t(atlas.z) * target.height / 1024);
+		// The atlas position to the unit's fraction (its x east, its z south: the mission y negated), scaled by the
+		// map's side over 1024.
+		const double fx = x - std::floor(x), fz = -y - std::floor(-y);
+		tx = int(std::floor((double(atlas.x) + fx) * double(target.width) / 1024.0));
+		ty = int(std::floor((double(atlas.z) + fz) * double(target.height) / 1024.0));
 	}
 	return tx >= 0 && ty >= 0 && tx < target.width && ty < target.height;
 }
@@ -71,27 +76,37 @@ std::vector<TerrainMapTexel> terrain_map_dab(const TerrainMapTarget &target, dou
                                              const TerrainBrush &brush, bool categorical) {
 	std::vector<TerrainMapTexel> out;
 	if (!target.valid()) return out;
+	const double radius = brush.radius;
+	// The texels' cells on the plane, each a step aligned to the step, sampled at its centre.
+	const double step = target.step();
+	const double half = step * 0.5;
+	// What each texel reached holds in `out`: a hash for a small dab, a flat index for a large one (a wide brush on a
+	// fine map reaches up to a million cells).
+	const double across = 2.0 * std::max(radius, 0.0) / step + 2.0;
+	const bool flat = across * across > 65536.0;
 	std::unordered_map<uint32_t, size_t> seen;
+	std::vector<int32_t> slots;
+	if (flat) slots.assign(size_t(target.width) * size_t(target.height), -1);
 	const auto reach = [&](double px, double py, float weight) {
 		int tx = 0, ty = 0;
 		if (weight <= 0.0f || !terrain_map_texel(target, px, py, tx, ty)) return;
 		const uint32_t index = uint32_t(ty) * uint32_t(target.width) + uint32_t(tx);
-		const auto found = seen.find(index);
-		if (found == seen.end()) {
+		size_t at = SIZE_MAX;
+		if (flat) {
+			if (slots[index] >= 0) at = size_t(slots[index]);
+			else slots[index] = int32_t(out.size());
+		} else if (const auto found = seen.find(index); found != seen.end()) {
+			at = found->second;
+		} else {
 			seen.emplace(index, out.size());
-			out.push_back({index, weight});
-		} else if (out[found->second].weight < weight) {
-			out[found->second].weight = weight;
 		}
+		if (at == SIZE_MAX) out.push_back({index, weight});
+		else if (out[at].weight < weight) out[at].weight = weight;
 	};
-	const double radius = brush.radius;
 	if (radius <= 0.0) {
 		reach(x, y, 1.0f);
 		return out;
 	}
-	// The texels' cells on the plane, each a step of whole units aligned to the step, sampled at its centre.
-	const int step = target.step();
-	const double half = step * 0.5;
 	const int64_t x0 = int64_t(std::floor((x - radius) / step)), x1 = int64_t(std::floor((x + radius) / step));
 	const int64_t y0 = int64_t(std::floor((y - radius) / step)), y1 = int64_t(std::floor((y + radius) / step));
 	for (int64_t j = y0; j <= y1; ++j)

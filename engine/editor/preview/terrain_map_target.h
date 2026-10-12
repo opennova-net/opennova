@@ -25,14 +25,15 @@ struct TerrainMapTarget {
 	bool shifted = true;       // the char and foliage maps' sample shift; else scaled over the atlas
 	int32_t shift = 0;         // the sample shift (shifted)
 	bool valid() const { return width > 0 && height > 0; }
-	// The world units a texel spans on each axis (the step a dab walks): 2^shift, or 1024 over the side where it
-	// divides it, else 1.
-	int step() const;
+	// The world units a texel spans on each axis (the step a dab walks): 2^shift, or 1024 over the side (a fraction
+	// of a unit for a map wider than 1024, whose texels a unit of the atlas spans several of).
+	double step() const;
 };
 TerrainMapTarget terrain_map_target(const TrnConfig &trn, TerrainPlane plane, int width, int height);
 
 // The map texel under a mission point (metres east and north); false off the terrain (an empty sector, a texel past
-// the map).
+// the map). A map scaled over the atlas takes the point's place within its atlas unit too, so each texel of a map
+// wider than 1024 is reached.
 bool terrain_map_texel(const TerrainMapTarget &target, double x, double y, int &tx, int &ty);
 
 // One texel a dab reaches: its index in the map (y x width + x) and the dab's weight there.

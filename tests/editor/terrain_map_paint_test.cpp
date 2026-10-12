@@ -59,7 +59,7 @@ int test_routing() {
 	const TrnConfig trn = tmap();
 	TEST_EXPECT(trn.origin_x == -4 && trn.sector_grid[3][3] == 1 && trn.sector_grid[3][4] == 3);
 	const TerrainMapTarget surface = terrain_map_target(trn, TerrainPlane::Surface, 256, 256);
-	TEST_EXPECT(surface.shifted && surface.shift == 2 && surface.step() == 4);
+	TEST_EXPECT(surface.shifted && surface.shift == 2 && surface.step() == 4.0);
 	int x = 0, y = 0;
 	// (-256, 256): the cell (3, 3), quadrant slot 0, the atlas texel (256, 256), the map texel (64, 64).
 	TEST_EXPECT(terrain_map_texel(surface, -256.0, 256.0, x, y) && x == 64 && y == 64);
@@ -68,7 +68,28 @@ int test_routing() {
 	// An empty sector reads no texel.
 	TEST_EXPECT(!terrain_map_texel(surface, 2000.0, 2000.0, x, y));
 	const TerrainMapTarget colour = terrain_map_target(trn, TerrainPlane::Colour, 1024, 1024);
-	TEST_EXPECT(!colour.shifted && colour.step() == 1 && terrain_map_texel(colour, 100.0, 100.0, x, y) && x == 612 && y == 412);
+	TEST_EXPECT(!colour.shifted && colour.step() == 1.0 && terrain_map_texel(colour, 100.0, 100.0, x, y) && x == 612 && y == 412);
+	// A blend map wider than 1024 (S25, the review's m7): a unit of the atlas spans two of its texels, each reached; a
+	// disc of 2 m reaches every texel under it, none skipped.
+	const TerrainMapTarget fine = terrain_map_target(trn, TerrainPlane::Blend, 2048, 2048);
+	TEST_EXPECT(fine.step() == 0.5 && terrain_map_texel(fine, 100.25, 100.0, x, y) && x == 1224 &&
+	            terrain_map_texel(fine, 100.75, 100.0, x, y) && x == 1225);
+	TerrainBrush wide;
+	wide.radius = 2.0f;
+	const std::vector<TerrainMapTexel> fines = terrain_map_dab(fine, 100.0, 100.0, wide, false);
+	std::vector<uint32_t> columns;
+	for (const TerrainMapTexel &texel : fines)
+		if (texel.index / 2048u == fines.front().index / 2048u) columns.push_back(texel.index % 2048u);
+	std::sort(columns.begin(), columns.end());
+	TEST_EXPECT(fines.size() > 40 && !columns.empty() && columns.back() - columns.front() + 1 == columns.size());
+	// A 512 m disc on the 1024 colour map: the flat index, every texel once.
+	TerrainBrush huge;
+	huge.radius = 512.0f;
+	const std::vector<TerrainMapTexel> all = terrain_map_dab(colour, 0.0, 0.0, huge, false);
+	std::vector<uint32_t> indices;
+	for (const TerrainMapTexel &texel : all) indices.push_back(texel.index);
+	std::sort(indices.begin(), indices.end());
+	TEST_EXPECT(!all.empty() && std::adjacent_find(indices.begin(), indices.end()) == indices.end());
 	// A one-texel click; a disc of 8 m on the char map (4-unit texels) and on the colour map (1-unit), hard-edged and
 	// soft.
 	TerrainBrush brush;
