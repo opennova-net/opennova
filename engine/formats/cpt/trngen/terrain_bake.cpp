@@ -9,7 +9,9 @@
 
 #include <formats/cpt/cpt_io.h>
 
+#include "bake_tiles.h"
 #include "mesh_simp.h"
+#include "terrain_bake_state.h"
 #include "terrain_mesh.h"
 #include "tristrip.h"
 
@@ -41,32 +43,6 @@ void set_header_text(char *buffer, size_t size, const std::string &value) {
 const std::vector<uint8_t> *find_file(const TileFiles &files, const std::string &name) {
 	const auto at = files.find(name);
 	return at == files.end() ? nullptr : &at->second;
-}
-
-CptTile build_tile_from_mesh(const MeshData &mesh, int current_size, bool is_single_tile) {
-	CptTile tile;
-	tile.tile_x = mesh.tile_x;
-	tile.tile_y = mesh.tile_y;
-	tile.vertex_count = static_cast<uint16_t>(mesh.vertex_data.size());
-	tile.tile_size = static_cast<uint16_t>(current_size);
-	tile.is_single = is_single_tile;
-	tile.vertex_indices.resize(mesh.vertex_data.size() * 2u);
-
-	for (size_t i = 0; i < mesh.vertex_data.size(); ++i) {
-		const uint32_t packed = mesh.vertex_data[i];
-		tile.vertex_indices[i * 2u + 0u] = static_cast<uint16_t>(packed & 0xFFFFu);
-		tile.vertex_indices[i * 2u + 1u] = static_cast<uint16_t>(packed >> 16);
-	}
-
-	for (int lod = 0; lod < 8; ++lod) {
-		const auto &entry = mesh.entries[lod * 2];
-		auto &target = tile.lods[lod];
-		target.indices = entry.index_data;
-		target.max_index = entry.max_index;
-		target.is_strip = entry.is_strip();
-	}
-
-	return tile;
 }
 
 // The .tms pass over the .tml files: each node's mesh read back, its faces made strips and its
@@ -195,7 +171,10 @@ std::vector<uint16_t> smooth_depthmap(const std::vector<uint8_t> &raw) {
 // Pipeline: depth map (smoothed) -> base meshes -> quadtree (meshes, LODs, .tml files, the leaves
 // rasterized) -> .tms files -> CPT export. TrnGen also exports a CPT from the .tml files before the
 // .tms pass, which the .tms export then overwrites; that first export is not made here.
-bool bake_terrain(const TerrainBakeInput &input, CptFile &out, std::string &error) {
+namespace {
+
+// The bake, keeping its state in `state` where one is given.
+bool bake(const TerrainBakeInput &input, CptFile &out, TerrainBakeState *state, std::string &error) {
 	const size_t texels = static_cast<size_t>(kDepthSide) * kDepthSide;
 	const bool has8 = !input.depth8.empty();
 	const bool has16 = !input.depth16.empty();
@@ -231,12 +210,37 @@ bool bake_terrain(const TerrainBakeInput &input, CptFile &out, std::string &erro
 		ctx.output_prefix = kPrefix;
 		ctx.base = &base;
 		ctx.files = &files;
+		std::vector<NodeBakeState> nodes;
+		if (state) {
+			nodes.resize(kCptTileCount);
+			ctx.node_made = [&nodes](const QuadtreeNode &node) {
+				capture_node_state(node, nodes[static_cast<size_t>(cpt_tile_index(node.depth, node.x, node.y))]);
+			};
+		}
 		if (!process_quadtree(root.get(), ctx, input.threads, why)) return fail(why);
+		if (state) {
+			state->nodes = std::move(nodes);
+			state->base = base;
+		}
 	}
 	MeshSimp_FreeAll();
 
 	if (!write_tms_tiles(files, why)) return fail(why);
 	export_terrain_cpt(files, input, input.rasterize_depth ? std::move(rasterized_depth) : std::move(smoothed), out);
+	return true;
+}
+
+} // namespace
+
+bool bake_terrain(const TerrainBakeInput &input, CptFile &out, std::string &error) {
+	return bake(input, out, nullptr, error);
+}
+
+bool bake_terrain_state(const TerrainBakeInput &input, CptFile &out, TerrainBakeState &state,
+                        std::string &error) {
+	TerrainBakeState made;
+	if (!bake(input, out, &made, error)) return false;
+	state = std::move(made);
 	return true;
 }
 

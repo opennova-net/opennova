@@ -1,7 +1,9 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -67,10 +69,26 @@ struct QuadtreeContext {
     std::string output_prefix;               // the tile files' name prefix
     BaseMeshSet* base = nullptr;
     TileFiles* files = nullptr;
+    // Called for each node in the walk's order once it is made and its tile filed, while its mesh is
+    // alive (its parent frees it): what a bake keeps for a later region bake (terrain_bake_state.h).
+    std::function<void(const QuadtreeNode&)> node_made;
 };
 
 // Frees a node's LOD mesh (its buffers, then the mesh).
 void free_node_mesh(std::unique_ptr<LODMeshData>& mesh);
+
+// One node made (QuadtreeNode_Process's work once its children are done): a leaf's mesh from its
+// base mesh and the depth map, a branch's from its children's LOD 14 sections, simplified into its
+// LOD levels, its tile file made (`tile_name`, `tile_bytes`) and its children's meshes freed. False,
+// with `error`, when a buffer of the node's mesh was refused (LODMeshData::failure).
+// [orig: TrnGen.exe QuadtreeNode_Process @ 0x403470]
+bool make_node_mesh(QuadtreeNode& node, const QuadtreeContext& ctx, std::string& error);
+
+// The nodes of one level made on up to `threads` threads (each thread's simplifier state its own).
+// False, with the first failure's words, once all stop; false with `error` "cancelled" when `cancel`
+// was set between two nodes (the nodes not yet started are left unmade).
+bool make_nodes(const std::vector<QuadtreeNode*>& nodes, const QuadtreeContext& ctx, unsigned threads,
+                std::string& error, const std::atomic<bool>* cancel = nullptr);
 
 // Build a quadtree from tile_size down to min_tile_size
 std::unique_ptr<QuadtreeNode> build_quadtree(int tile_size, int min_tile_size);

@@ -66,12 +66,8 @@ std::unique_ptr<QuadtreeNode> build_quadtree(int tile_size, int min_tile_size) {
     return root;
 }
 
-// What QuadtreeNode_Process does for one node once its children are done: the node's mesh (a
-// leaf's from its base mesh and the depth map, a branch's from its children's LOD 14 sections),
-// simplified into its LOD levels, its tile file made and its children's meshes freed. False, with
-// `error`, when a buffer of the node's mesh was refused (LODMeshData::failure).
 // [orig: TrnGen.exe QuadtreeNode_Process @ 0x403470]
-static bool make_node_mesh(QuadtreeNode& node, const QuadtreeContext& ctx, std::string& error) {
+bool make_node_mesh(QuadtreeNode& node, const QuadtreeContext& ctx, std::string& error) {
     // Allocate LOD mesh data for this node
     node.mesh_data = std::make_unique<LODMeshData>();
     LODMeshData_Init(node.mesh_data.get());
@@ -119,7 +115,6 @@ static bool make_node_mesh(QuadtreeNode& node, const QuadtreeContext& ctx, std::
             }
         }
     }
-
 
     // Compute LOD parameters (ported from QuadtreeNode_Process lines 88-141)
     int tile_size = node.size;
@@ -210,16 +205,20 @@ static void collect_nodes(QuadtreeNode& node, std::vector<std::vector<QuadtreeNo
     by_depth[node.depth].push_back(&node);
 }
 
-// The nodes of one level made on up to `threads` threads; false, with the first failure's words,
-// once all stop.
-static bool make_level(const std::vector<QuadtreeNode*>& nodes, const QuadtreeContext& ctx, unsigned threads,
-                       std::string& error) {
+bool make_nodes(const std::vector<QuadtreeNode*>& nodes, const QuadtreeContext& ctx, unsigned threads,
+                std::string& error, const std::atomic<bool>* cancel) {
     std::atomic<size_t> next{0};
     bool failed = false;
+    bool cancelled = false;
     std::string failure;
     std::mutex failure_lock;
     const auto work = [&] {
         for (size_t i = next++; i < nodes.size(); i = next++) {
+            if (cancel && cancel->load()) {
+                std::lock_guard<std::mutex> hold(failure_lock);
+                cancelled = true;
+                break;
+            }
             std::string why;
             if (!make_node_mesh(*nodes[i], ctx, why)) {
                 std::lock_guard<std::mutex> hold(failure_lock);
@@ -237,7 +236,8 @@ static bool make_level(const std::vector<QuadtreeNode*>& nodes, const QuadtreeCo
     work();
     for (std::thread& each : pool) each.join();
     if (failed) error = failure;
-    return !failed;
+    else if (cancelled) error = "cancelled";
+    return !failed && !cancelled;
 }
 
 bool process_quadtree(QuadtreeNode* root, QuadtreeContext& ctx, unsigned threads, std::string& error) {
@@ -249,8 +249,9 @@ bool process_quadtree(QuadtreeNode* root, QuadtreeContext& ctx, unsigned threads
 
     for (size_t depth = by_depth.size(); depth-- > 0;) {
         const std::vector<QuadtreeNode*>& nodes = by_depth[depth];
-        if (!make_level(nodes, ctx, threads, error)) return false;
+        if (!make_nodes(nodes, ctx, threads, error)) return false;
         for (QuadtreeNode* node : nodes) {
+            if (ctx.node_made) ctx.node_made(*node);
             (*ctx.files)[node->tile_name] = std::move(node->tile_bytes);
             node->tile_bytes.clear();
             // Rasterize depth for leaf nodes (IDA line 165-166: if is_leaf, call sub_402A20)
