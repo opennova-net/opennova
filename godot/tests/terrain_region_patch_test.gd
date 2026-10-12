@@ -156,6 +156,7 @@ func test_refusals_change_nothing() -> void:
 	bytes.resize(4 * 4 * 2)
 	for rect in [Rect2i(-1, 0, 4, 4), Rect2i(1022, 0, 4, 4), Rect2i(0, 1021, 4, 4)]:
 		assert_false(data.patch_heights_raw16(rect, bytes), "a rect not inside the heights is refused")
+		assert_false(terrain.refresh_region(rect, PackedInt32Array()), "and by the refresh")
 	assert_false(data.patch_heights_raw16(Rect2i(0, 0, 4, 4), PackedByteArray([1, 2, 3])),
 			"a short source is refused")
 	assert_eq(_first_byte_difference(data.get_depth_raw16(), depth), -1, "a refused patch writes nothing")

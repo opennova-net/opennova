@@ -1489,6 +1489,13 @@ bool Terrain::refresh_region(const opennova::terrain::CoordsRect &p_rect, const 
 			return false;
 		}
 	}
+	// The region contract the refreshes share (refresh_mipchain's): a rect inside the atlas, a change across its
+	// wrap arriving as several rects, each refreshed; one past the atlas refused.
+	constexpr int atlas = opennova::terrain::COORDS_ATLAS_SIZE;
+	if (p_rect.w > 0 && p_rect.h > 0 &&
+			(p_rect.x < 0 || p_rect.z < 0 || p_rect.x > atlas - p_rect.w || p_rect.z > atlas - p_rect.h)) {
+		return false;
+	}
 	// The meshes: a replaced tile's both variants (the flat one only where it has one), and the heights
 	// variant of every tile whose vertices read the rect. The root tile's meshes are never drawn (the
 	// sector walk starts at its children), so they stay as built.

@@ -356,7 +356,9 @@ public:
 	// variants), the scene snapshot (opennova::refresh_terrain_scene_snapshot), the heightfield normals
 	// over the rect and the tile cache's normal quadrants, and the composed pages where the changed normals
 	// show (retired, to recompose when next visible). Static shadows read no heights; they recompose with
-	// their pages. False, nothing changed, where the terrain is not built or a tile index is not one; a
+	// their pages. The rect is the region contract the refreshes share (refresh_mipchain's): inside the atlas, a
+	// change across its wrap arriving as several rects, each refreshed. False, nothing changed, where the terrain
+	// is not built, a tile index is not one or the rect is not inside the atlas; a
 	// heightfield that cannot take the region (a live heightmap image) has its derived textures made again
 	// whole. Equal to a fresh build of the patched data (terrain_region_patch_test).
 	bool refresh_region(const opennova::terrain::CoordsRect &p_rect, const std::vector<int> &p_tiles);
