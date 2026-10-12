@@ -615,23 +615,23 @@ struct Entity {
     // text-authoring concepts that exist only in the .mis metafile. parse_entity/write_entity
     // (bms.cpp) serialize the record field-by-field and never touch these; equal() compares
     // them (they change write_mis_text output, so a difference is a real document change).
-    // Semantics: a plain .mis item z is the editor-frame (terrain-relative) height;
-    // height_lock nonzero declares z ABSOLUTE with extra_bheight carrying the baked base
-    // height under the item, so the original editor recovers the relative offset as
-    //   scene Y = z/65536 - (height_lock ? extra_bheight/65536 : 0)
-    // [orig: MisLdr_ParseMisLine @ 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356);
-    //  MisLdr_WriteNileProjectXml @ 0x10004930 (<ABSOLUTE>TRUE</ABSOLUTE> iff height_lock);
-    //  both misldr.dll]. BMS entity z is always absolute (bms-event-runtime-re.md §6.6), so
-    // the .bms parse path and freshly authored entities mark height_lock = 1; .mis-parsed
-    // entities round-trip their own values. See docs/mission/mis-format-re.md (D-MIS-4).
+    // Semantics (mission_mis.h's frames, D-MIS-4): the original editor keeps an item's z and
+    // its base (extra_bheight) relative to the terrain under it and writes a height-locked
+    // item's both absolute [orig: JOTACmed.exe sub_44E640 @ 0x44e640; MisLdr_ParseMisLine @
+    // 0x100017b0 (extra_bheight->rec+292, height_lock->rec+356), misldr.dll]. The File's
+    // mis_frame says which frame its entities are in. A .bms entity and a new one are unlocked
+    // (0): the original editor reads no .bms, so this is the editor's reading of its frames (its
+    // .bms export's undo takes every item back to the document's frame, sub_44E5F0 @ 0x44e5f0,
+    // and its new item is unlocked, @ 0x455954), recorded in D-MIS-4.
     // Layout invariant: Entity stays TRIVIAL -- no NSDMIs; every construction site value-initializes,
-    // which zeroes all bytes including padding -- and carries no implicit tail padding (the explicit
-    // mis_pad_ tail), because bms::equal byte-compares whole records; static_asserts below enforce both.
-    int32_t mis_extra_bheight;         // .mis extra_bheight: baked base height, 16.16 fixed
-    uint8_t mis_height_lock;           // .mis height_lock: nonzero => z ABSOLUTE + bheight baked
-    uint8_t mis_pad_[3];               // explicit tail pad: keeps sizeof(Entity) free of implicit
-                                       // padding so bms::equal's memcmp is deterministic (always
-                                       // zero via value-init; never serialized)
+    // which zeroes all bytes including padding -- and carries no implicit tail padding (it ends in
+    // two 4-byte words), because bms::equal byte-compares whole records; static_asserts below
+    // enforce both.
+    int32_t mis_extra_bheight;         // .mis extra_bheight: the item's base, 16.16 fixed
+    int32_t mis_height_lock;           // .mis height_lock as read (the original's atol into an
+                                       // int, tested nonzero, written back raw: MIS_ParseToken
+                                       // @ 0x4536c9, sub_44E640 @ 0x44e657, MIS_SaveDocument @
+                                       // 0x45589a); nonzero => kept at its height
 
     // Accessors for float positions (fixed-point 16.16 conversion)
     float get_x() const { return x / 65536.0f; }
@@ -648,9 +648,9 @@ static_assert(std::is_trivial<Entity>::value,
               "and relies on value-init zeroing + trivial copies preserving all bytes");
 static_assert(std::is_trivially_copyable<Entity>::value,
               "bms::Entity must stay trivially copyable for bms::equal's byte compare");
-static_assert(offsetof(Entity, mis_pad_) + sizeof(Entity::mis_pad_) == sizeof(Entity),
-              "no implicit tail padding after the explicit .mis pad -- extend mis_pad_ (or re-lay the "
-              "tail) when appending fields, or bms::equal's memcmp reads indeterminate bytes");
+static_assert(offsetof(Entity, mis_height_lock) + sizeof(Entity::mis_height_lock) == sizeof(Entity),
+              "no implicit tail padding after the .mis words -- re-lay the tail (or pad it explicitly) "
+              "when appending fields, or bms::equal's memcmp reads indeterminate bytes");
 
 struct WaypointRecord {
     WaypointFlags flags;
@@ -910,6 +910,18 @@ struct ItemAvailabilityEntry {
 // Mission File
 // ============================================================================
 
+// The frame a File's entity heights are in (mission_mis.h's frames, D-MIS-4). Transient: no .bms
+// byte holds it; write_mis_text reads it.
+enum class MisFrame : uint8_t {
+    // The .bms's: each entity's z absolute (the game's), its mis_extra_bheight the base in the
+    // original editor's (relative) frame. A parsed .bms, a new File, and one
+    // mission::mis_items_to_bms_frame took here.
+    Bms,
+    // The .mis's as written: an unlocked entity's z and base relative to the terrain under it, a
+    // locked one's absolute. parse_mis_text's, until mis_items_to_bms_frame takes it over a terrain.
+    Mis,
+};
+
 struct File {
     Header header;
     WeaponLoadout loadout;
@@ -937,6 +949,9 @@ struct File {
     int32_t trigger_count;
     int32_t action_count;
     int32_t bounding_box_count;
+
+    // The frame the entities' heights are in (MisFrame).
+    MisFrame mis_frame = MisFrame::Bms;
 
     // Get mission name as string
     std::string get_mission_name() const;
@@ -1015,13 +1030,14 @@ std::string first_differing_section(const File& file, const std::vector<uint8_t>
 // bytes. The editor's undo / dirty tracking uses this to decide whether an edit changed anything,
 // without round-tripping through the byte serializer. The fixed record structs are TRIVIAL, are
 // value-initialized at every construction site (zeroing every byte, padding included), and carry
-// no implicit tail padding (Entity ends in the explicit mis_pad_), so the byte-wise compare is
+// no implicit tail padding (Entity ends in two 4-byte words), so the byte-wise compare is
 // exact and platform-deterministic -- and because the types are trivial, snapshots/copies
 // preserve all bytes, padding included. WaypointRecord (inner vectors) compares
 // field-wise. NOTE: if you add a field that write() serializes, add it to equal() too.
 // The Entity byte-compare also covers the .mis-interchange transient fields (mis_extra_bheight /
-// mis_height_lock): they never reach .bms bytes, but they do change write_mis_text output, so a
-// difference between them is a real document change for undo/dirty purposes.
+// mis_height_lock), and the File's mis_frame is compared too: they never reach .bms bytes, but
+// they do change write_mis_text output, so a difference between them is a real document change
+// for undo/dirty purposes.
 bool equal(const File& a, const File& b);
 
 } // namespace opennova::bms

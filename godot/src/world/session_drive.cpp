@@ -827,6 +827,12 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		self.type = "0";
 		host.set_player_slot(self);
 	}
+	// The mission start's update, at every mission start of a hosting session, map changes
+	// included (NwuHostRole::publish_mission_start, which carries Game_StartMission's cite):
+	// both lists whole. A fresh host's first full Host list, its HostKey included, is this one,
+	// since its host result publishes nothing (D-NET-465); the columns still hold the host
+	// request's (D-NET-373).
+	host.publish_mission_start();
 }
 
 void SessionDrive::unbind_nw_host() {
